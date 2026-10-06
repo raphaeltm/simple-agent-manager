@@ -18,14 +18,6 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// McpServer represents a persisted MCP server config for an ACP session.
-// It mirrors acp.McpServerEntry and is stored independently to avoid an
-// import cycle between the persistence and acp packages.
-type McpServer struct {
-	URL   string `json:"url"`
-	Token string `json:"token"`
-}
-
 // WorkspaceMetadata represents persisted workspace metadata that survives
 // agent restarts. This ensures the correct container working directory,
 // repository name, and other runtime state can be recovered without
@@ -34,11 +26,21 @@ type WorkspaceMetadata struct {
 	WorkspaceID            string `json:"workspaceId"`
 	Repository             string `json:"repository"`
 	Branch                 string `json:"branch"`
+	BaseBranch             string `json:"baseBranch,omitempty"`
+	DefaultBranch          string `json:"defaultBranch,omitempty"`
 	ContainerWorkDir       string `json:"containerWorkDir"`
 	ContainerUser          string `json:"containerUser"`
 	ContainerLabelVal      string `json:"containerLabelValue"`
 	WorkspaceDir           string `json:"workspaceDir"`
 	CallbackToken          string `json:"callbackToken,omitempty"`
+	RepoProvider           string `json:"repoProvider,omitempty"`
+	CloneURL               string `json:"cloneUrl,omitempty"`
+	RepositoryHost         string `json:"repositoryHost,omitempty"`
+	RepositoryPath         string `json:"repositoryPath,omitempty"`
+	ProjectID              string `json:"projectId,omitempty"`
+	ChatSessionID          string `json:"chatSessionId,omitempty"`
+	EvictionGeneration     string `json:"evictionGeneration,omitempty"`
+	Evicted                bool   `json:"evicted,omitempty"`
 	Lightweight            bool   `json:"lightweight"`
 	DevcontainerConfigName string `json:"devcontainerConfigName,omitempty"`
 	UpdatedAt              string `json:"updatedAt"`
@@ -143,6 +145,17 @@ func (s *Store) migrate() error {
 		migrateV5,
 		migrateV6,
 		migrateV7,
+		migrateV8,
+		migrateV9,
+		migrateV10,
+		migrateV11,
+		migrateV12,
+		migrateV13,
+		migrateV14,
+		migrateV15,
+		migrateV16,
+		migrateV17,
+		migrateV18,
 	}
 
 	for i := version; i < len(migrations); i++ {
@@ -156,6 +169,70 @@ func (s *Store) migrate() error {
 	}
 
 	return nil
+}
+
+// migrateV11 adds durable VM-side execution protocol state. Prompt text is
+// deliberately excluded: receipts retain only a request fingerprint and
+// lifecycle metadata needed for idempotency and reconciliation.
+func migrateV11(db *sql.DB) error {
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS prompt_delivery_receipts (
+			workspace_id TEXT NOT NULL,
+			session_id TEXT NOT NULL,
+			delivery_id TEXT NOT NULL,
+			protocol_version INTEGER NOT NULL,
+			request_hash TEXT NOT NULL,
+			state TEXT NOT NULL,
+			runtime_id TEXT NOT NULL DEFAULT '',
+			stop_reason TEXT NOT NULL DEFAULT '',
+			error_code TEXT NOT NULL DEFAULT '',
+			accepted_at INTEGER NOT NULL,
+			completed_at INTEGER,
+			updated_at INTEGER NOT NULL,
+			PRIMARY KEY (workspace_id, session_id, delivery_id)
+		);
+		CREATE INDEX IF NOT EXISTS idx_prompt_receipts_state
+			ON prompt_delivery_receipts(state, updated_at);
+		CREATE TABLE IF NOT EXISTS checkpoint_rollover_operations (
+			workspace_id TEXT NOT NULL,
+			session_id TEXT NOT NULL,
+			operation_id TEXT NOT NULL,
+			protocol_version INTEGER NOT NULL,
+			request_hash TEXT NOT NULL,
+			state TEXT NOT NULL,
+			runtime_id TEXT NOT NULL DEFAULT '',
+			forced INTEGER NOT NULL DEFAULT 0,
+			acp_session_id TEXT NOT NULL DEFAULT '',
+			error_code TEXT NOT NULL DEFAULT '',
+			error_message TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY (workspace_id, session_id, operation_id)
+		);
+		CREATE INDEX IF NOT EXISTS idx_rollover_operations_state
+			ON checkpoint_rollover_operations(state, updated_at);
+	`)
+	return err
+}
+
+// migrateV13 adds the ProjectData chat session ID to workspace metadata so
+// VM-agent-local snapshot triggers can survive process restarts.
+func migrateV13(db *sql.DB) error {
+	_, err := db.Exec(`ALTER TABLE workspace_metadata ADD COLUMN chat_session_id TEXT NOT NULL DEFAULT ''`)
+	return err
+}
+
+// migrateV14 preserves the workspace run fence across VM-agent restarts.
+func migrateV14(db *sql.DB) error {
+	_, err := db.Exec(`ALTER TABLE workspace_metadata ADD COLUMN eviction_generation TEXT NOT NULL DEFAULT '';
+		ALTER TABLE workspace_metadata ADD COLUMN evicted INTEGER NOT NULL DEFAULT 0;`)
+	return err
+}
+
+// migrateV16 retains the authorized project identity of dynamic workspaces.
+func migrateV16(db *sql.DB) error {
+	_, err := db.Exec(`ALTER TABLE workspace_metadata ADD COLUMN project_id TEXT NOT NULL DEFAULT ''`)
+	return err
 }
 
 // migrateV1 creates the initial tabs table.
@@ -208,6 +285,8 @@ func migrateV4(db *sql.DB) error {
 // UpsertWorkspaceMetadata persists workspace metadata to SQLite.
 // Called when a workspace is created or its runtime state is updated with
 // meaningful values (non-empty repository, container work dir, etc.).
+// Existing eviction generations are intentionally preserved: only the explicit
+// restart CAS may advance them, never a delayed metadata snapshot.
 func (s *Store) UpsertWorkspaceMetadata(meta WorkspaceMetadata) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -222,16 +301,44 @@ func (s *Store) UpsertWorkspaceMetadata(meta WorkspaceMetadata) error {
 	}
 
 	_, err = s.db.Exec(
-		`INSERT OR REPLACE INTO workspace_metadata
-			(workspace_id, repository, branch, container_work_dir, container_user, container_label_value, workspace_dir, callback_token, lightweight, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		meta.WorkspaceID, meta.Repository, meta.Branch, meta.ContainerWorkDir,
-		meta.ContainerUser, meta.ContainerLabelVal, meta.WorkspaceDir, callbackToken, meta.Lightweight, meta.UpdatedAt,
+		`INSERT INTO workspace_metadata
+			(workspace_id, repository, branch, base_branch, default_branch, container_work_dir, container_user, container_label_value, workspace_dir, callback_token, repo_provider, clone_url, repository_host, repository_path, project_id, chat_session_id, eviction_generation, evicted, lightweight, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(workspace_id) DO UPDATE SET
+			repository = excluded.repository, branch = excluded.branch,
+			base_branch = excluded.base_branch, default_branch = excluded.default_branch,
+			container_work_dir = excluded.container_work_dir, container_user = excluded.container_user,
+			container_label_value = excluded.container_label_value, workspace_dir = excluded.workspace_dir,
+			callback_token = excluded.callback_token, repo_provider = excluded.repo_provider,
+			clone_url = excluded.clone_url, repository_host = excluded.repository_host,
+			repository_path = excluded.repository_path, chat_session_id = excluded.chat_session_id,
+			project_id = CASE WHEN workspace_metadata.project_id = '' THEN excluded.project_id ELSE workspace_metadata.project_id END,
+			lightweight = excluded.lightweight, updated_at = excluded.updated_at`,
+		meta.WorkspaceID, meta.Repository, meta.Branch, meta.BaseBranch, meta.DefaultBranch, meta.ContainerWorkDir,
+		meta.ContainerUser, meta.ContainerLabelVal, meta.WorkspaceDir, callbackToken,
+		meta.RepoProvider, meta.CloneURL, meta.RepositoryHost, meta.RepositoryPath, meta.ProjectID, meta.ChatSessionID, meta.EvictionGeneration, meta.Evicted,
+		meta.Lightweight, meta.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("upsert workspace metadata: %w", err)
 	}
 	return nil
+}
+
+// CompareAndSwapWorkspaceEvictionGeneration advances an existing workspace run
+// fence only when it matches the run claimed by the control plane.
+func (s *Store) CompareAndSwapWorkspaceEvictionGeneration(workspaceID, expected, next string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result, err := s.db.Exec(`UPDATE workspace_metadata SET eviction_generation = ?, evicted = 0 WHERE workspace_id = ? AND eviction_generation = ?`, next, workspaceID, expected)
+	if err != nil {
+		return false, fmt.Errorf("update workspace eviction generation: %w", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("read workspace eviction generation update: %w", err)
+	}
+	return count == 1, nil
 }
 
 // GetWorkspaceMetadata retrieves persisted workspace metadata.
@@ -242,11 +349,13 @@ func (s *Store) GetWorkspaceMetadata(workspaceID string) (*WorkspaceMetadata, er
 
 	var m WorkspaceMetadata
 	err := s.db.QueryRow(
-		`SELECT workspace_id, repository, branch, container_work_dir, container_user, container_label_value, workspace_dir, callback_token, lightweight, updated_at
+		`SELECT workspace_id, repository, branch, base_branch, default_branch, container_work_dir, container_user, container_label_value, workspace_dir, callback_token, repo_provider, clone_url, repository_host, repository_path, project_id, chat_session_id, eviction_generation, evicted, lightweight, updated_at
 		FROM workspace_metadata WHERE workspace_id = ?`,
 		workspaceID,
-	).Scan(&m.WorkspaceID, &m.Repository, &m.Branch, &m.ContainerWorkDir,
-		&m.ContainerUser, &m.ContainerLabelVal, &m.WorkspaceDir, &m.CallbackToken, &m.Lightweight, &m.UpdatedAt)
+	).Scan(&m.WorkspaceID, &m.Repository, &m.Branch, &m.BaseBranch, &m.DefaultBranch, &m.ContainerWorkDir,
+		&m.ContainerUser, &m.ContainerLabelVal, &m.WorkspaceDir, &m.CallbackToken,
+		&m.RepoProvider, &m.CloneURL, &m.RepositoryHost, &m.RepositoryPath, &m.ProjectID, &m.ChatSessionID, &m.EvictionGeneration, &m.Evicted,
+		&m.Lightweight, &m.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -453,23 +562,6 @@ func (s *Store) TabCount(workspaceID string) (int, error) {
 	return count, nil
 }
 
-// migrateV5 creates the session_mcp_servers table for persisting MCP server
-// configs registered per ACP session so they survive VM agent restarts.
-func migrateV5(db *sql.DB) error {
-	_, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS session_mcp_servers (
-			workspace_id TEXT NOT NULL,
-			session_id   TEXT NOT NULL,
-			sort_order   INTEGER NOT NULL DEFAULT 0,
-			url          TEXT NOT NULL,
-			token        TEXT NOT NULL DEFAULT '',
-			PRIMARY KEY (workspace_id, session_id, sort_order)
-		);
-		CREATE INDEX IF NOT EXISTS idx_session_mcp_workspace ON session_mcp_servers(workspace_id);
-	`)
-	return err
-}
-
 // migrateV6 adds lightweight column to workspace_metadata for persisting
 // the workspace profile (lightweight vs full) across agent restarts.
 func migrateV6(db *sql.DB) error {
@@ -484,99 +576,23 @@ func migrateV7(db *sql.DB) error {
 	return err
 }
 
-// UpsertSessionMcpServers replaces all MCP server entries for a session.
-// Passing an empty slice removes all servers for the session without error.
-// This is intentionally a full replace (delete + insert) so that the
-// persisted list always exactly mirrors the in-memory sessionMcpServers map.
-func (s *Store) UpsertSessionMcpServers(workspaceID, sessionID string, servers []McpServer) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return fmt.Errorf("upsert session mcp servers: begin tx: %w", err)
-	}
-	defer tx.Rollback() //nolint:errcheck
-
-	if _, err := tx.Exec(
-		"DELETE FROM session_mcp_servers WHERE workspace_id = ? AND session_id = ?",
-		workspaceID, sessionID,
-	); err != nil {
-		return fmt.Errorf("upsert session mcp servers: delete old rows: %w", err)
-	}
-
-	for i, srv := range servers {
-		if _, err := tx.Exec(
-			"INSERT INTO session_mcp_servers (workspace_id, session_id, sort_order, url, token) VALUES (?, ?, ?, ?, ?)",
-			workspaceID, sessionID, i, srv.URL, srv.Token,
-		); err != nil {
-			return fmt.Errorf("upsert session mcp servers: insert row %d: %w", i, err)
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("upsert session mcp servers: commit: %w", err)
-	}
-	return nil
+// migrateV9 adds provider-aware git source metadata for non-GitHub repositories.
+func migrateV9(db *sql.DB) error {
+	_, err := db.Exec(`
+		ALTER TABLE workspace_metadata ADD COLUMN repo_provider TEXT NOT NULL DEFAULT '';
+		ALTER TABLE workspace_metadata ADD COLUMN clone_url TEXT NOT NULL DEFAULT '';
+		ALTER TABLE workspace_metadata ADD COLUMN repository_host TEXT NOT NULL DEFAULT '';
+		ALTER TABLE workspace_metadata ADD COLUMN repository_path TEXT NOT NULL DEFAULT '';
+	`)
+	return err
 }
 
-// GetSessionMcpServers returns the persisted MCP servers for a session,
-// ordered by sort_order. Returns an empty (non-nil) slice when none exist.
-func (s *Store) GetSessionMcpServers(workspaceID, sessionID string) ([]McpServer, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	rows, err := s.db.Query(
-		"SELECT url, token FROM session_mcp_servers WHERE workspace_id = ? AND session_id = ? ORDER BY sort_order ASC",
-		workspaceID, sessionID,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("get session mcp servers: %w", err)
-	}
-	defer rows.Close()
-
-	servers := []McpServer{}
-	for rows.Next() {
-		var srv McpServer
-		if err := rows.Scan(&srv.URL, &srv.Token); err != nil {
-			return nil, fmt.Errorf("get session mcp servers: scan: %w", err)
-		}
-		servers = append(servers, srv)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("get session mcp servers: iterate: %w", err)
-	}
-	return servers, nil
-}
-
-// DeleteSessionMcpServers removes all MCP server entries for a specific
-// session. It is a no-op when no entries exist.
-func (s *Store) DeleteSessionMcpServers(workspaceID, sessionID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	_, err := s.db.Exec(
-		"DELETE FROM session_mcp_servers WHERE workspace_id = ? AND session_id = ?",
-		workspaceID, sessionID,
-	)
-	if err != nil {
-		return fmt.Errorf("delete session mcp servers: %w", err)
-	}
-	return nil
-}
-
-// DeleteWorkspaceMcpServers removes all MCP server entries for every session
-// belonging to the given workspace. Called during workspace cleanup.
-func (s *Store) DeleteWorkspaceMcpServers(workspaceID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	_, err := s.db.Exec(
-		"DELETE FROM session_mcp_servers WHERE workspace_id = ?",
-		workspaceID,
-	)
-	if err != nil {
-		return fmt.Errorf("delete workspace mcp servers: %w", err)
-	}
-	return nil
+// migrateV10 persists clone-base and project-default branch metadata so
+// workspace recovery preserves checkout creation and completion-push safety.
+func migrateV10(db *sql.DB) error {
+	_, err := db.Exec(`
+		ALTER TABLE workspace_metadata ADD COLUMN base_branch TEXT NOT NULL DEFAULT '';
+		ALTER TABLE workspace_metadata ADD COLUMN default_branch TEXT NOT NULL DEFAULT '';
+	`)
+	return err
 }

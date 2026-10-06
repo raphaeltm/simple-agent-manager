@@ -1,4 +1,4 @@
-import { expect, type Page, type Route,test } from '@playwright/test';
+import { expect, type Page, type Route, test } from '@playwright/test';
 
 // ---------------------------------------------------------------------------
 // Mock Data Factories
@@ -84,7 +84,9 @@ function makeTask(overrides: TaskOverrides) {
   };
 }
 
-function makeDetailTask(overrides: TaskOverrides & { dependencies?: Array<{ id: string; title: string; status: string }> }) {
+function makeDetailTask(
+  overrides: TaskOverrides & { dependencies?: Array<{ id: string; title: string; status: string }> }
+) {
   return {
     ...makeTask(overrides),
     dependencies: overrides.dependencies ?? [],
@@ -93,31 +95,57 @@ function makeDetailTask(overrides: TaskOverrides & { dependencies?: Array<{ id: 
 
 // Sample data sets
 const NORMAL_TASKS = [
-  makeTask({ id: 't1', title: 'Implement user authentication', status: 'draft', description: 'Add OAuth2 login flow with GitHub' }),
-  makeTask({ id: 't2', title: 'Fix database migration', status: 'ready', description: 'Migration 015 fails on fresh install', priority: 5 }),
-  makeTask({ id: 't3', title: 'Add dark mode toggle', status: 'in_progress', description: 'User preference for light/dark theme', startedAt: '2026-03-20T09:00:00Z' }),
-  makeTask({ id: 't4', title: 'Refactor API error handling', status: 'completed', completedAt: '2026-03-19T15:00:00Z' }),
-  makeTask({ id: 't5', title: 'Update dependencies', status: 'cancelled' }),
+  makeTask({
+    id: 't1',
+    title: 'Implement user authentication',
+    status: 'draft',
+    description: 'Add OAuth2 login flow with GitHub',
+  }),
+  makeTask({
+    id: 't2',
+    title: 'Fix database migration',
+    status: 'draft',
+    description: 'Migration 015 fails on fresh install',
+    priority: 5,
+  }),
+  makeTask({
+    id: 't3',
+    title: 'Add dark mode toggle',
+    status: 'draft',
+    description: 'User preference for light/dark theme',
+    startedAt: '2026-03-20T09:00:00Z',
+  }),
+  makeTask({
+    id: 't4',
+    title: 'Refactor API error handling',
+    status: 'draft',
+    completedAt: '2026-03-19T15:00:00Z',
+  }),
+  makeTask({ id: 't5', title: 'Update dependencies', status: 'draft' }),
 ];
 
 const LONG_TEXT_TASKS = [
   makeTask({
     id: 'lt1',
-    title: 'This is an extremely long task title that should definitely be truncated on mobile screens because it contains way too many words and characters to fit in a single line without breaking the layout or causing horizontal scroll issues on smaller viewports',
+    title:
+      'This is an extremely long task title that should definitely be truncated on mobile screens because it contains way too many words and characters to fit in a single line without breaking the layout or causing horizontal scroll issues on smaller viewports',
     status: 'draft',
-    description: 'This task has a very long description that goes into great detail about what needs to be done. It includes multiple sentences explaining the requirements, the technical approach, the expected outcomes, and various edge cases that need to be handled. The description should wrap properly on mobile without any overflow issues. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris.',
+    description:
+      'This task has a very long description that goes into great detail about what needs to be done. It includes multiple sentences explaining the requirements, the technical approach, the expected outcomes, and various edge cases that need to be handled. The description should wrap properly on mobile without any overflow issues. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris.',
   }),
   makeTask({
     id: 'lt2',
     title: 'A',
-    status: 'ready',
+    status: 'draft',
     description: null,
   }),
   makeTask({
     id: 'lt3',
-    title: 'Fix: handling of special characters like <script>alert("xss")</script> & "quotes" and 日本語テスト',
-    status: 'in_progress',
-    description: 'Test with unicode: 🚀🎉💻 and HTML entities: &amp; &lt; &gt; and very long URLs: https://example.com/very/long/path/that/should/not/break/layout/even/when/it/contains/many/segments',
+    title:
+      'Fix: handling of special characters like <script>alert("xss")</script> & "quotes" and 日本語テスト',
+    status: 'draft',
+    description:
+      'Test with unicode: 🚀🎉💻 and HTML entities: &amp; &lt; &gt; and very long URLs: https://example.com/very/long/path/that/should/not/break/layout/even/when/it/contains/many/segments',
   }),
 ];
 
@@ -131,144 +159,158 @@ const UNBROKEN_STRING_TASKS = [
   }),
   makeTask({
     id: 'ub2',
-    title: 'https://example.com/this-is-an-extremely-long-url-that-should-not-cause-horizontal-overflow-even-on-mobile-devices-with-narrow-viewports?param1=value1&param2=value2&param3=value3',
-    status: 'ready',
-    description: 'Description with a long URL: https://example.com/another/very/long/path/that/keeps/going/and/going/without/any/natural/break/points/at/all/whatsoever/even/though/it/really/should/wrap/properly',
+    title:
+      'https://example.com/this-is-an-extremely-long-url-that-should-not-cause-horizontal-overflow-even-on-mobile-devices-with-narrow-viewports?param1=value1&param2=value2&param3=value3',
+    status: 'draft',
+    description:
+      'Description with a long URL: https://example.com/another/very/long/path/that/keeps/going/and/going/without/any/natural/break/points/at/all/whatsoever/even/though/it/really/should/wrap/properly',
   }),
   makeTask({
     id: 'ub3',
     title: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.repeat(20),
-    status: 'in_progress',
+    status: 'draft',
     description: '0123456789'.repeat(60),
   }),
   makeTask({
     id: 'ub4',
     title: 'Title with mixed content and ' + 'verylongword'.repeat(30) + ' in the middle',
-    status: 'completed',
+    status: 'draft',
     description: 'Description with ' + 'anotherverylongword'.repeat(25) + ' embedded',
   }),
 ];
 
 const MANY_TASKS = Array.from({ length: 30 }, (_, i) => {
-  const statuses = ['draft', 'ready', 'queued', 'delegated', 'in_progress', 'completed', 'failed', 'cancelled'];
   return makeTask({
     id: `many-${i}`,
-    title: `Task ${i + 1}: ${['Implement feature', 'Fix bug', 'Refactor module', 'Add tests', 'Update docs'][i % 5]} #${i + 1}`,
-    status: statuses[i % statuses.length],
+    title: `Idea ${i + 1}: ${['Implement feature', 'Fix bug', 'Refactor module', 'Add tests', 'Update docs'][i % 5]} #${i + 1}`,
+    status: 'draft',
     description: i % 3 === 0 ? `Description for task ${i + 1}` : null,
     priority: i % 4 === 0 ? 10 : i % 3 === 0 ? 5 : 0,
     blocked: i % 7 === 0,
   });
 });
 
-const ERROR_TASK = makeDetailTask({
-  id: 'err-1',
-  title: 'Failed deployment task',
-  status: 'failed',
-  description: 'Deploy the staging environment with new configuration',
-  errorMessage: 'Error: ETIMEOUT: Connection to cloud provider timed out after 30000ms. The server at api.hetzner.cloud did not respond within the configured timeout. This may be caused by network issues, firewall rules, or the provider being temporarily unavailable. Please check your network connectivity and try again. If the problem persists, check the Hetzner status page at https://status.hetzner.com for any ongoing incidents.',
-  priority: 10,
-  blocked: true,
-  startedAt: '2026-03-20T08:00:00Z',
-});
-
-const COMPLETED_TASK_WITH_OUTPUT = makeDetailTask({
-  id: 'out-1',
-  title: 'Implement notification system',
-  status: 'completed',
-  description: 'Add push notifications for task status changes, agent completions, and system alerts.',
-  outputSummary: 'Successfully implemented the notification system with the following changes:\n\n1. Added NotificationCenter component with grouped notifications by project\n2. Implemented request_human_input MCP tool for agent-initiated notifications\n3. Added progress notification batching (5-minute window per task)\n4. Created notification preferences page in Settings\n5. Added session_ended notification on conversation completion\n\nAll tests passing. 94% code coverage achieved.',
-  outputBranch: 'sam/notification-system-phase2',
-  outputPrUrl: 'https://github.com/raphaeltm/simple-agent-manager/pull/450',
-  completedAt: '2026-03-19T16:30:00Z',
-  startedAt: '2026-03-19T10:00:00Z',
-});
-
-const MOCK_EVENTS = [
-  { id: 'ev1', taskId: 'err-1', fromStatus: null, toStatus: 'draft', actorType: 'user', reason: 'Created', createdAt: '2026-03-20T07:00:00Z' },
-  { id: 'ev2', taskId: 'err-1', fromStatus: 'draft', toStatus: 'ready', actorType: 'user', reason: null, createdAt: '2026-03-20T07:30:00Z' },
-  { id: 'ev3', taskId: 'err-1', fromStatus: 'ready', toStatus: 'queued', actorType: 'system', reason: 'Auto-queued by task runner', createdAt: '2026-03-20T07:45:00Z' },
-  { id: 'ev4', taskId: 'err-1', fromStatus: 'queued', toStatus: 'in_progress', actorType: 'system', reason: 'Workspace provisioned', createdAt: '2026-03-20T08:00:00Z' },
-  { id: 'ev5', taskId: 'err-1', fromStatus: 'in_progress', toStatus: 'failed', actorType: 'system', reason: 'Connection timeout', createdAt: '2026-03-20T08:05:00Z' },
-];
-
 const MOCK_SESSIONS = [
-  { id: 's1', taskId: 't1', topic: 'Auth implementation', status: 'stopped', messageCount: 42, startedAt: Date.now() - 3600000, endedAt: Date.now() - 1800000, createdAt: Date.now() - 3600000, workspaceId: 'ws-1' },
-  { id: 's2', taskId: 't1', topic: 'Auth debugging', status: 'active', messageCount: 15, startedAt: Date.now() - 600000, endedAt: null, createdAt: Date.now() - 600000, workspaceId: 'ws-2' },
-  { id: 's3', taskId: 't3', topic: 'Dark mode work', status: 'active', messageCount: 8, startedAt: Date.now() - 300000, endedAt: null, createdAt: Date.now() - 300000, workspaceId: 'ws-1' },
+  {
+    id: 's1',
+    taskId: 't1',
+    topic: 'Auth implementation',
+    status: 'stopped',
+    messageCount: 42,
+    startedAt: Date.now() - 3600000,
+    endedAt: Date.now() - 1800000,
+    createdAt: Date.now() - 3600000,
+    workspaceId: 'ws-1',
+  },
+  {
+    id: 's2',
+    taskId: 't1',
+    topic: 'Auth debugging',
+    status: 'active',
+    messageCount: 15,
+    startedAt: Date.now() - 600000,
+    endedAt: null,
+    createdAt: Date.now() - 600000,
+    workspaceId: 'ws-2',
+  },
+  {
+    id: 's3',
+    taskId: 't3',
+    topic: 'Dark mode work',
+    status: 'active',
+    messageCount: 8,
+    startedAt: Date.now() - 300000,
+    endedAt: null,
+    createdAt: Date.now() - 300000,
+    workspaceId: 'ws-1',
+  },
 ];
 
 const MOCK_DASHBOARD_TASKS = [
   {
-    id: 'dt1', projectId: 'proj-test-1', projectName: 'Test Project', title: 'Running deployment pipeline', status: 'in_progress',
-    executionStep: 'running', isActive: true, sessionId: 's1', createdAt: '2026-03-20T10:00:00Z', lastMessageAt: Date.now() - 30000,
+    id: 'dt1',
+    projectId: 'proj-test-1',
+    projectName: 'Test Project',
+    title: 'Running deployment pipeline',
+    status: 'in_progress',
+    executionStep: 'running',
+    isActive: true,
+    agentActivityState: 'working',
+    sessionId: 's1',
+    createdAt: '2026-03-20T10:00:00Z',
+    lastMessageAt: Date.now() - 30000,
+    messageCount: 4,
   },
   {
-    id: 'dt2', projectId: 'proj-test-1', projectName: 'Test Project', title: 'Waiting for agent to start processing the request', status: 'queued',
-    executionStep: 'provisioning_node', isActive: false, sessionId: null, createdAt: '2026-03-20T09:00:00Z', lastMessageAt: null,
+    id: 'dt2',
+    projectId: 'proj-test-1',
+    projectName: 'Test Project',
+    title: 'Sleeping conversation checkpoint',
+    status: 'in_progress',
+    executionStep: 'awaiting_followup',
+    isActive: false,
+    agentActivityState: 'sleeping',
+    sessionId: null,
+    createdAt: '2026-03-20T09:00:00Z',
+    lastMessageAt: null,
+    messageCount: 0,
   },
   {
-    id: 'dt3', projectId: 'proj-test-1', projectName: 'Another Project With A Very Long Name That Should Truncate', title: 'This is a task with an extremely long title that needs to be properly truncated on mobile devices without breaking the card layout', status: 'in_progress',
-    executionStep: 'running', isActive: true, sessionId: 's3', createdAt: '2026-03-20T08:00:00Z', lastMessageAt: Date.now() - 120000,
+    id: 'dt3',
+    projectId: 'proj-test-1',
+    projectName: 'Another Project With A Very Long Name That Should Truncate',
+    title:
+      'This is a task with an extremely long title that needs to be properly truncated on mobile devices without breaking the card layout',
+    status: 'in_progress',
+    executionStep: 'running',
+    isActive: true,
+    agentActivityState: 'working',
+    sessionId: 's3',
+    createdAt: '2026-03-20T08:00:00Z',
+    lastMessageAt: Date.now() - 120000,
+    messageCount: 9,
   },
 ];
 
 const MOCK_PROJECTS = [
-  { id: 'proj-test-1', name: 'Test Project', repository: 'testuser/test-repo', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-03-20T00:00:00Z', taskCounts: { active: 2, total: 15 }, lastActivityAt: '2026-03-20T10:00:00Z' },
-  { id: 'proj-test-2', name: 'Another Project', repository: 'testuser/another-repo', createdAt: '2026-02-01T00:00:00Z', updatedAt: '2026-03-18T00:00:00Z', taskCounts: { active: 0, total: 5 }, lastActivityAt: '2026-03-18T15:00:00Z' },
-];
-
-function makeWorkspace(overrides: { id: string; name?: string; displayName?: string; status?: string; branch?: string }) {
-  return {
-    id: overrides.id,
-    name: overrides.name ?? `ws-${overrides.id}`,
-    displayName: overrides.displayName ?? null,
-    status: overrides.status ?? 'running',
-    branch: overrides.branch ?? 'main',
-    nodeId: 'node-1',
-    projectId: 'proj-test-1',
-    userId: 'user-test-1',
+  {
+    id: 'proj-test-1',
+    name: 'Test Project',
     repository: 'testuser/test-repo',
-    vmSize: 'cx22',
-    vmLocation: 'nbg1',
-    vmIp: '10.0.0.1',
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-03-20T00:00:00Z',
+    taskCounts: { active: 2, total: 15 },
     lastActivityAt: '2026-03-20T10:00:00Z',
-    errorMessage: null,
-    createdAt: '2026-03-20T10:00:00Z',
-    updatedAt: '2026-03-20T10:00:00Z',
-  };
-}
-
-const MOCK_WORKSPACES_NORMAL = [
-  makeWorkspace({ id: 'ws-1', displayName: 'Auth Feature', status: 'running', branch: 'sam/auth-feature' }),
-  makeWorkspace({ id: 'ws-2', displayName: 'Bug Fix', status: 'stopped', branch: 'sam/fix-login-bug' }),
-];
-
-const MOCK_WORKSPACES_MANY = [
-  makeWorkspace({ id: 'ws-m1', displayName: 'This is a workspace with a very long name that should be truncated on mobile', status: 'running', branch: 'sam/very-long-branch-name-that-exceeds-panel-width' }),
-  makeWorkspace({ id: 'ws-m2', displayName: 'Deployer', status: 'running', branch: 'main' }),
-  makeWorkspace({ id: 'ws-m3', displayName: 'Test Runner', status: 'creating', branch: 'sam/test-runner' }),
-  makeWorkspace({ id: 'ws-m4', status: 'stopped', branch: 'sam/old-feature' }),
-  makeWorkspace({ id: 'ws-m5', displayName: 'Refactor', status: 'stopped', branch: 'sam/refactor-auth' }),
-  makeWorkspace({ id: 'ws-m6', displayName: 'Extra workspace', status: 'stopped', branch: 'sam/extra' }),
-  makeWorkspace({ id: 'ws-m7', displayName: 'Another extra workspace', status: 'stopped', branch: 'sam/another' }),
+  },
+  {
+    id: 'proj-test-2',
+    name: 'Another Project',
+    repository: 'testuser/another-repo',
+    createdAt: '2026-02-01T00:00:00Z',
+    updatedAt: '2026-03-18T00:00:00Z',
+    taskCounts: { active: 0, total: 5 },
+    lastActivityAt: '2026-03-18T15:00:00Z',
+  },
 ];
 
 // ---------------------------------------------------------------------------
 // API Mock Setup
 // ---------------------------------------------------------------------------
 
-async function setupApiMocks(page: Page, options: {
-  tasks?: ReturnType<typeof makeTask>[];
-  sessions?: typeof MOCK_SESSIONS;
-  dashboardTasks?: typeof MOCK_DASHBOARD_TASKS;
-  taskDetail?: ReturnType<typeof makeDetailTask> | null;
-  events?: typeof MOCK_EVENTS;
-  projects?: typeof MOCK_PROJECTS;
-  workspaces?: Array<Record<string, unknown>>;
-  projectError?: boolean;
-  tasksError?: boolean;
-} = {}) {
+async function setupApiMocks(
+  page: Page,
+  options: {
+    tasks?: ReturnType<typeof makeTask>[];
+    sessions?: typeof MOCK_SESSIONS;
+    dashboardTasks?: typeof MOCK_DASHBOARD_TASKS;
+    taskDetail?: ReturnType<typeof makeDetailTask> | null;
+    events?: Array<Record<string, unknown>>;
+    projects?: typeof MOCK_PROJECTS;
+    workspaces?: Array<Record<string, unknown>>;
+    projectError?: boolean;
+    tasksError?: boolean;
+  } = {}
+) {
   const {
     tasks = NORMAL_TASKS,
     sessions = MOCK_SESSIONS,
@@ -280,6 +322,10 @@ async function setupApiMocks(page: Page, options: {
     projectError = false,
     tasksError = false,
   } = options;
+
+  await page.addInitScript((userId) => {
+    window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
+  }, MOCK_USER.user.id);
 
   // Single route handler for all API calls — uses URL path matching internally
   // to avoid Playwright's route priority ordering issues
@@ -312,13 +358,12 @@ async function setupApiMocks(page: Page, options: {
 
     // Agents
     if (path === '/api/agents') {
-      return respond(200, []);
+      return respond(200, { agents: [] });
     }
 
     // Credentials
-    if (path.startsWith('/api/credentials')) {
-      return respond(200, { credentials: [] });
-    }
+    if (path === '/api/credentials/agent') return respond(200, { credentials: [] });
+    if (path === '/api/credentials') return respond(200, []);
 
     // Workspaces
     if (path.startsWith('/api/workspaces')) {
@@ -400,15 +445,23 @@ async function assertNoOverflow(page: Page) {
     bodyWidth: document.body.scrollWidth,
     viewportWidth: window.innerWidth,
   }));
-  expect(overflow.docOverflow, `Document scrollWidth (${overflow.docWidth}) exceeds viewport (${overflow.viewportWidth})`).toBe(false);
-  expect(overflow.bodyOverflow, `Body scrollWidth (${overflow.bodyWidth}) exceeds viewport (${overflow.viewportWidth})`).toBe(false);
+  expect(
+    overflow.docOverflow,
+    `Document scrollWidth (${overflow.docWidth}) exceeds viewport (${overflow.viewportWidth})`
+  ).toBe(false);
+  expect(
+    overflow.bodyOverflow,
+    `Body scrollWidth (${overflow.bodyWidth}) exceeds viewport (${overflow.viewportWidth})`
+  ).toBe(false);
 }
 
 async function takeScreenshot(page: Page, name: string) {
   // Wait for any loading spinners to disappear
   await page.waitForTimeout(500);
+  const viewport = page.viewportSize();
+  const suffix = viewport ? `-${viewport.width}x${viewport.height}` : '';
   await page.screenshot({
-    path: `../../.codex/tmp/playwright-screenshots/${name}.png`,
+    path: `../../.codex/tmp/playwright-screenshots/${name}${suffix}.png`,
     fullPage: true,
   });
 }
@@ -429,17 +482,17 @@ test.describe('IdeasPage - Mobile Audit', () => {
     await assertNoOverflow(page);
   });
 
-  test('normal data with mixed statuses', async ({ page }) => {
+  test('normal draft ideas', async ({ page }) => {
     await setupApiMocks(page, { tasks: NORMAL_TASKS, sessions: MOCK_SESSIONS });
     await page.goto('/projects/proj-test-1/ideas');
     await page.waitForSelector('text=Ideas');
     await page.waitForSelector('text=Implement user authentication');
     await takeScreenshot(page, 'ideas-normal-data');
 
-    // Verify status groups are visible (use role to avoid matching <option> elements)
-    await expect(page.getByRole('button', { name: /Exploring/i })).toBeVisible();
+    await expect(page.getByRole('list', { name: 'Ideas being refined' })).toBeVisible();
+    await expect(page.getByText('5 ideas being refined')).toBeVisible();
     await assertNoOverflow(page);
-    await expect(page.getByRole('button', { name: /Executing/i })).toBeVisible();
+    await expect(page.getByLabel('Filter by status')).toHaveCount(0);
   });
 
   test('long text content', async ({ page }) => {
@@ -465,12 +518,13 @@ test.describe('IdeasPage - Mobile Audit', () => {
     await assertNoOverflow(page);
   });
 
-  test('many items (30 tasks)', async ({ page }) => {
+  test('many items (30 ideas)', async ({ page }) => {
     await setupApiMocks(page, { tasks: MANY_TASKS, sessions: [] });
     await page.goto('/projects/proj-test-1/ideas');
     await page.waitForSelector('text=Ideas');
     await page.waitForTimeout(500);
     await takeScreenshot(page, 'ideas-many-items');
+    await assertNoOverflow(page);
   });
 
   test('search filter active', async ({ page }) => {
@@ -495,171 +549,11 @@ test.describe('IdeasPage - Mobile Audit', () => {
     await expect(page.getByText('No ideas match your search.')).toBeVisible();
   });
 
-  test('status filter active', async ({ page }) => {
-    await setupApiMocks(page, { tasks: NORMAL_TASKS, sessions: MOCK_SESSIONS });
-    await page.goto('/projects/proj-test-1/ideas');
-    await page.waitForSelector('text=Implement user authentication');
-
-    await page.getByLabel('Filter by status').selectOption('executing');
-    await page.waitForTimeout(300);
-    await takeScreenshot(page, 'ideas-status-filter');
-  });
-
-  test('collapsed groups expanded', async ({ page }) => {
-    // Include completed and cancelled tasks (in done/parked which are collapsed by default)
-    await setupApiMocks(page, { tasks: NORMAL_TASKS, sessions: MOCK_SESSIONS });
-    await page.goto('/projects/proj-test-1/ideas');
-    await page.waitForSelector('text=Implement user authentication');
-
-    // Expand Done group
-    const doneButton = page.getByRole('button', { name: /Done/i });
-    if (await doneButton.isVisible()) {
-      await doneButton.click();
-    }
-    // Expand Parked group
-    const parkedButton = page.getByRole('button', { name: /Parked/i });
-    if (await parkedButton.isVisible()) {
-      await parkedButton.click();
-    }
-
-    await page.waitForTimeout(300);
-    await takeScreenshot(page, 'ideas-all-groups-expanded');
-  });
-
   test('API error state', async ({ page }) => {
     await setupApiMocks(page, { tasksError: true });
     await page.goto('/projects/proj-test-1/ideas');
     await page.waitForTimeout(1000);
     await takeScreenshot(page, 'ideas-api-error');
-  });
-});
-
-// ===========================================================================
-// TASK DETAIL PAGE TESTS (accessed via /tasks/:taskId route)
-// ===========================================================================
-
-test.describe('TaskDetail - Mobile Audit', () => {
-  test('normal task detail', async ({ page }) => {
-    const task = makeDetailTask({
-      id: 'detail-1',
-      title: 'Implement user authentication',
-      status: 'in_progress',
-      description: 'Add OAuth2 login flow with GitHub provider. Include session management and token refresh.',
-      priority: 5,
-      startedAt: '2026-03-20T09:00:00Z',
-    });
-    await setupApiMocks(page, { taskDetail: task, events: MOCK_EVENTS, tasks: NORMAL_TASKS });
-    await page.goto('/projects/proj-test-1/tasks/detail-1');
-    await page.waitForSelector('text=Implement user authentication');
-    await takeScreenshot(page, 'task-detail-normal');
-  });
-
-  test('failed task with long error message', async ({ page }) => {
-    await setupApiMocks(page, { taskDetail: ERROR_TASK, events: MOCK_EVENTS, tasks: NORMAL_TASKS });
-    await page.goto('/projects/proj-test-1/tasks/err-1');
-    await page.waitForSelector('text=Failed deployment task');
-    await takeScreenshot(page, 'task-detail-error');
-
-    // Verify error section is visible
-    await expect(page.getByRole('heading', { name: 'Error' })).toBeVisible();
-    await expect(page.getByText('ETIMEOUT')).toBeVisible();
-  });
-
-  test('completed task with output', async ({ page }) => {
-    await setupApiMocks(page, { taskDetail: COMPLETED_TASK_WITH_OUTPUT, events: MOCK_EVENTS, tasks: NORMAL_TASKS });
-    await page.goto('/projects/proj-test-1/tasks/out-1');
-    await page.waitForSelector('text=Implement notification system');
-    await takeScreenshot(page, 'task-detail-with-output');
-
-    // Verify output section is visible
-    await expect(page.getByText('Output')).toBeVisible();
-    await expect(page.getByText('sam/notification-system-phase2')).toBeVisible();
-  });
-
-  test('task with long title', async ({ page }) => {
-    const longTitleTask = makeDetailTask({
-      id: 'long-title-1',
-      title: 'This is an extremely long task title that should wrap properly on mobile without breaking the layout or causing overflow issues on the detail page view',
-      status: 'draft',
-      description: 'Short description.',
-      priority: 0,
-    });
-    await setupApiMocks(page, { taskDetail: longTitleTask, events: [], tasks: NORMAL_TASKS });
-    await page.goto('/projects/proj-test-1/tasks/long-title-1');
-    await page.waitForSelector('text=This is an extremely long task title');
-    await takeScreenshot(page, 'task-detail-long-title');
-  });
-
-  test('task with no description', async ({ page }) => {
-    const noDescTask = makeDetailTask({
-      id: 'no-desc-1',
-      title: 'Task without description',
-      status: 'ready',
-      description: null,
-    });
-    await setupApiMocks(page, { taskDetail: noDescTask, events: [], tasks: NORMAL_TASKS });
-    await page.goto('/projects/proj-test-1/tasks/no-desc-1');
-    await page.waitForSelector('text=Task without description');
-    await takeScreenshot(page, 'task-detail-no-description');
-
-    await expect(page.getByText('No description.')).toBeVisible();
-  });
-
-  test('blocked task', async ({ page }) => {
-    const blockedTask = makeDetailTask({
-      id: 'blocked-1',
-      title: 'Blocked task waiting on dependency',
-      status: 'ready',
-      description: 'This task is blocked by another task.',
-      blocked: true,
-      priority: 10,
-    });
-    await setupApiMocks(page, { taskDetail: blockedTask, events: [], tasks: NORMAL_TASKS });
-    await page.goto('/projects/proj-test-1/tasks/blocked-1');
-    await page.waitForSelector('text=Blocked task waiting on dependency');
-    await takeScreenshot(page, 'task-detail-blocked');
-
-    await expect(page.getByText('Blocked', { exact: true })).toBeVisible();
-  });
-
-  test('task with many activity events', async ({ page }) => {
-    const manyEvents = Array.from({ length: 15 }, (_, i) => ({
-      id: `ev-${i}`,
-      taskId: 'detail-many-ev',
-      fromStatus: i === 0 ? null : ['draft', 'ready', 'queued', 'in_progress'][i % 4],
-      toStatus: ['draft', 'ready', 'queued', 'in_progress', 'failed'][i % 5],
-      actorType: i % 2 === 0 ? 'user' : 'system',
-      reason: i % 3 === 0 ? `Reason for transition ${i}` : null,
-      createdAt: new Date(Date.now() - (15 - i) * 3600000).toISOString(),
-    }));
-    const task = makeDetailTask({
-      id: 'detail-many-ev',
-      title: 'Task with extensive activity',
-      status: 'in_progress',
-      description: 'This task has many status transitions.',
-    });
-    await setupApiMocks(page, { taskDetail: task, events: manyEvents, tasks: NORMAL_TASKS });
-    await page.goto('/projects/proj-test-1/tasks/detail-many-ev');
-    await page.waitForSelector('text=Task with extensive activity');
-    await takeScreenshot(page, 'task-detail-many-events');
-  });
-
-  test('task with dependencies', async ({ page }) => {
-    const task = makeDetailTask({
-      id: 'detail-deps',
-      title: 'Build notification UI',
-      status: 'ready',
-      description: 'Create the notification center component.',
-      dependencies: [
-        { id: 't-dep-1', title: 'Implement notification API endpoints', status: 'completed' },
-        { id: 't-dep-2', title: 'Design notification data model and migration', status: 'in_progress' },
-        { id: 't-dep-3', title: 'Set up WebSocket push channel for real-time delivery', status: 'draft' },
-      ],
-    });
-    await setupApiMocks(page, { taskDetail: task, tasks: NORMAL_TASKS });
-    await page.goto('/projects/proj-test-1/tasks/detail-deps');
-    await page.waitForSelector('text=Build notification UI');
-    await takeScreenshot(page, 'task-detail-with-dependencies');
   });
 });
 
@@ -682,6 +576,8 @@ test.describe('Dashboard ActiveTaskCards - Mobile Audit', () => {
     await page.goto('/dashboard');
     await page.waitForSelector('text=Active Tasks');
     await page.waitForSelector('text=Running deployment pipeline');
+    await expect(page.getByText('Sleeping', { exact: true })).toBeVisible();
+    await assertNoOverflow(page);
     await takeScreenshot(page, 'dashboard-active-tasks');
   });
 
@@ -692,16 +588,20 @@ test.describe('Dashboard ActiveTaskCards - Mobile Audit', () => {
       projectName: i % 2 === 0 ? 'Test Project' : 'Another Project With Long Name',
       title: `Task ${i + 1}: ${['Running tests', 'Deploying', 'Building', 'Processing', 'Analyzing'][i % 5]}`,
       status: i % 2 === 0 ? 'in_progress' : 'queued',
-      executionStep: i % 3 === 0 ? 'provisioning_node' : 'running',
+      executionStep: i % 3 === 0 ? 'awaiting_followup' : 'running',
       isActive: i % 2 === 0,
+      agentActivityState: i % 3 === 0 ? 'sleeping' : i % 2 === 0 ? 'working' : 'awake-idle',
       sessionId: i % 2 === 0 ? `s-${i}` : null,
       createdAt: new Date(Date.now() - i * 3600000).toISOString(),
       lastMessageAt: i % 2 === 0 ? Date.now() - i * 60000 : null,
+      messageCount: i % 2 === 0 ? i + 1 : 0,
     }));
     await setupApiMocks(page, { dashboardTasks: manyDashboardTasks, projects: MOCK_PROJECTS });
     await page.goto('/dashboard');
     await page.waitForSelector('text=Active Tasks');
     await page.waitForTimeout(500);
+    await expect(page.getByText('Sleeping', { exact: true })).toHaveCount(3);
+    await assertNoOverflow(page);
     await takeScreenshot(page, 'dashboard-many-active-tasks');
   });
 
@@ -711,13 +611,16 @@ test.describe('Dashboard ActiveTaskCards - Mobile Audit', () => {
         id: 'dt-long-1',
         projectId: 'proj-test-1',
         projectName: 'This Is A Very Long Project Name That Should Be Truncated Properly On Mobile',
-        title: 'Implementing a complex feature that requires multiple steps across several services and should be truncated in the card',
+        title:
+          'Implementing a complex feature that requires multiple steps across several services and should be truncated in the card',
         status: 'in_progress',
         executionStep: 'running',
         isActive: true,
+        agentActivityState: 'working',
         sessionId: 's1',
         createdAt: '2026-03-20T10:00:00Z',
         lastMessageAt: Date.now() - 5000,
+        messageCount: 13,
       },
     ];
     await setupApiMocks(page, { dashboardTasks: longNameTasks, projects: MOCK_PROJECTS });
@@ -763,7 +666,9 @@ test.describe('TaskSubmitForm - Mobile Audit', () => {
     // Type a long task description
     const input = page.getByPlaceholder('Describe what you want the agent to do...');
     if (await input.isVisible()) {
-      await input.fill('This is a very long task description that the user is typing to test how the input field handles long text on mobile screens without breaking or overflowing the layout');
+      await input.fill(
+        'This is a very long task description that the user is typing to test how the input field handles long text on mobile screens without breaking or overflowing the layout'
+      );
       await page.waitForTimeout(300);
     }
     await takeScreenshot(page, 'chat-task-submit-long-input');
@@ -774,99 +679,6 @@ test.describe('TaskSubmitForm - Mobile Audit', () => {
     await page.goto('/projects/proj-test-1/chat');
     await page.waitForTimeout(1500);
     await takeScreenshot(page, 'chat-project-error');
-  });
-});
-
-// ===========================================================================
-// PROJECT INFO PANEL TESTS
-// ===========================================================================
-
-test.describe('ProjectInfoPanel - Mobile Audit', () => {
-  async function openInfoPanel(page: Page) {
-    // Navigate to a non-chat project route where the info button is in the header
-    await page.goto('/projects/proj-test-1/ideas');
-    await page.waitForSelector('text=Ideas');
-    // Click the "Project status" button to open the panel
-    await page.getByLabel('Project status').click();
-    await page.waitForTimeout(500);
-  }
-
-  test('empty state', async ({ page }) => {
-    await setupApiMocks(page, { tasks: [], sessions: [], workspaces: [] });
-    await openInfoPanel(page);
-    await takeScreenshot(page, 'info-panel-empty');
-
-    // Verify panel is open with expected headings
-    await expect(page.getByRole('dialog')).toBeVisible();
-    await expect(page.getByText('Project Status')).toBeVisible();
-    await expect(page.getByText('No workspaces for this project.')).toBeVisible();
-    await expect(page.getByText('No tasks yet.')).toBeVisible();
-  });
-
-  test('normal data with workspaces and tasks', async ({ page }) => {
-    await setupApiMocks(page, {
-      tasks: NORMAL_TASKS,
-      sessions: MOCK_SESSIONS,
-      workspaces: MOCK_WORKSPACES_NORMAL,
-    });
-    await openInfoPanel(page);
-    await takeScreenshot(page, 'info-panel-normal');
-
-    await expect(page.getByRole('dialog')).toBeVisible();
-    // Verify workspace items render
-    await expect(page.getByText('Auth Feature')).toBeVisible();
-    await expect(page.getByText('Bug Fix')).toBeVisible();
-    // Verify "Open" button renders for running workspaces
-    await expect(page.getByRole('link', { name: 'Open' })).toBeVisible();
-    // Verify task items render
-    await expect(page.getByText('Recent Tasks')).toBeVisible();
-  });
-
-  test('close via button', async ({ page }) => {
-    await setupApiMocks(page, { tasks: [], sessions: [], workspaces: [] });
-    await openInfoPanel(page);
-    await expect(page.getByRole('dialog')).toBeVisible();
-
-    // Click the close button
-    await page.getByLabel('Close project status').click();
-    await page.waitForTimeout(300);
-
-    // Dialog should be removed from DOM
-    await expect(page.getByRole('dialog')).not.toBeVisible();
-  });
-
-  test('close via Escape key', async ({ page }) => {
-    await setupApiMocks(page, { tasks: [], sessions: [], workspaces: [] });
-    await openInfoPanel(page);
-    await expect(page.getByRole('dialog')).toBeVisible();
-
-    // Press Escape
-    await page.keyboard.press('Escape');
-    await page.waitForTimeout(300);
-
-    // Dialog should be removed from DOM
-    await expect(page.getByRole('dialog')).not.toBeVisible();
-  });
-
-  test('many items with long titles', async ({ page }) => {
-    const manyTasks = Array.from({ length: 7 }, (_, i) =>
-      makeTask({
-        id: `panel-t${i}`,
-        title: `Task ${i + 1}: ${i === 0 ? 'This is an extremely long task title that should be truncated inside the info panel without causing layout overflow on narrow mobile screens' : `Normal task ${i + 1}`}`,
-        status: ['draft', 'in_progress', 'completed', 'failed'][i % 4],
-      }),
-    );
-    await setupApiMocks(page, {
-      tasks: manyTasks,
-      sessions: [],
-      workspaces: MOCK_WORKSPACES_MANY,
-    });
-    await openInfoPanel(page);
-    await takeScreenshot(page, 'info-panel-many-items');
-
-    await expect(page.getByRole('dialog')).toBeVisible();
-    // Verify overflow indicator for workspaces (7 workspaces, max 5 shown)
-    await expect(page.getByText('+2 more workspaces')).toBeVisible();
   });
 });
 
@@ -889,32 +701,15 @@ test.describe('Touch Target Size - Bounding Box', () => {
     expect(box!.height).toBeGreaterThanOrEqual(44);
   });
 
-  test('group headers meet 44px minimum touch target height', async ({ page }) => {
+  test('idea search input meets 44px minimum touch target height', async ({ page }) => {
     await setupApiMocks(page, { tasks: NORMAL_TASKS, sessions: MOCK_SESSIONS });
     await page.goto('/projects/proj-test-1/ideas');
     await page.waitForSelector('text=Implement user authentication');
 
-    // Group headers (e.g., "Exploring") have min-h-[44px]
-    const groupHeader = page.getByRole('button', { name: /Exploring/i });
-    await expect(groupHeader).toBeVisible();
-    const box = await groupHeader.boundingBox();
+    const searchInput = page.getByPlaceholder('Search ideas...');
+    await expect(searchInput).toBeVisible();
+    const box = await searchInput.boundingBox();
     expect(box).not.toBeNull();
     expect(box!.height).toBeGreaterThanOrEqual(44);
-  });
-
-  test('info panel close button meets 44px minimum touch target', async ({ page }) => {
-    await setupApiMocks(page, { tasks: [], sessions: [], workspaces: [] });
-    await page.goto('/projects/proj-test-1/ideas');
-    await page.waitForSelector('text=Ideas');
-    await page.getByLabel('Project status').click();
-    await page.waitForTimeout(500);
-
-    const closeButton = page.getByLabel('Close project status');
-    await expect(closeButton).toBeVisible();
-    const box = await closeButton.boundingBox();
-    expect(box).not.toBeNull();
-    // Close button uses min-h-11 min-w-11 (44px each) for touch target compliance
-    expect(box!.height).toBeGreaterThanOrEqual(44);
-    expect(box!.width).toBeGreaterThanOrEqual(44);
   });
 });

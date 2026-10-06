@@ -1,4 +1,9 @@
-import type { CreateCredentialRequest, CredentialResponse, SaveAgentCredentialRequest } from '@simple-agent-manager/shared';
+import type {
+  CreateCredentialRequest,
+  CredentialResponse,
+  SaveAgentCredentialRequest,
+  SaveGcpServiceAccountCredentialRequest,
+} from '@simple-agent-manager/shared';
 
 import { request } from './client';
 
@@ -44,6 +49,15 @@ export async function deleteCredential(provider: string): Promise<void> {
 // =============================================================================
 // GCP OIDC
 // =============================================================================
+
+export async function saveGcpServiceAccountCredential(
+  data: SaveGcpServiceAccountCredentialRequest,
+): Promise<{ success: true; credential: CredentialResponse }> {
+  return request('/api/gcp/service-account', {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
 
 export interface GcpProject {
   projectId: string;

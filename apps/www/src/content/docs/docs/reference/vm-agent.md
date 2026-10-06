@@ -13,42 +13,122 @@ The VM Agent is a Go binary (`packages/vm-agent/`) that runs on each provisioned
 GET /health
 ```
 
-Returns agent health status, version, uptime, and system information.
-
-### Authentication
-
-```
-POST /auth/token
-```
-
-Exchange credentials for a session cookie. Used by the browser after obtaining a workspace JWT from the API.
+Unauthenticated liveness check. Returns only `{ "status": "healthy" }` — no workspace IDs or other sensitive data are exposed. Richer diagnostics are available via the authenticated `/system-info`, `/metrics/export`, and `/debug-package` endpoints.
 
 ### Shell Sessions
 
 ```
-WebSocket /workspaces/:id/shell
+WebSocket /terminal/ws
+WebSocket /terminal/ws/multi
 ```
 
 Opens a PTY terminal session inside the workspace container. Supports:
+
 - Binary and text frames
 - Terminal resize events
 - Ring buffer replay on reconnect (catches up missed output)
+- Multi-session terminal tabs
 
 ### Agent Sessions
 
 ```
-WebSocket /workspaces/:id/agent
+WebSocket /agent/ws
 ```
 
-Opens an AI coding agent session using the Agent Communication Protocol (ACP). Messages are JSON-encoded with types:
-- `session/prompt` — send a user prompt
-- `session/update` — streaming agent output
-- `session/complete` — agent finished
+Opens an AI coding agent session using the Agent Communication Protocol (ACP). The full session lifecycle is also exposed through control-plane-authenticated HTTP endpoints:
+
+```
+GET    /workspaces/{workspaceId}/agent-sessions
+POST   /workspaces/{workspaceId}/agent-sessions
+POST   /workspaces/{workspaceId}/agent-sessions/{sessionId}/start
+POST   /workspaces/{workspaceId}/agent-sessions/{sessionId}/prompt
+GET    /workspaces/{workspaceId}/agent-sessions/{sessionId}/prompt-receipts/{deliveryId}
+POST   /workspaces/{workspaceId}/agent-sessions/{sessionId}/checkpoint-rollovers
+GET    /workspaces/{workspaceId}/agent-sessions/{sessionId}/checkpoint-rollovers/{operationId}
+GET    /workspaces/{workspaceId}/agent-capabilities
+POST   /workspaces/{workspaceId}/agent-sessions/{sessionId}/cancel
+POST   /workspaces/{workspaceId}/agent-sessions/{sessionId}/stop
+POST   /workspaces/{workspaceId}/agent-sessions/{sessionId}/suspend
+POST   /workspaces/{workspaceId}/agent-sessions/{sessionId}/resume
+POST   /workspaces/{workspaceId}/agent-sessions/{sessionId}/hibernate
+POST   /workspaces/{workspaceId}/agent-sessions/{sessionId}/restore
+```
+
+#### Durable prompt delivery protocol
+
+Protocol version 1 adds an optional exact-once delivery envelope to both the session `start` request (for its `initialPrompt`) and the existing `prompt` endpoint. Existing callers may omit `deliveryId` and preserve the legacy behavior. A versioned follow-up caller sends:
+
+```json
+{
+  "protocolVersion": 1,
+  "deliveryId": "stable-control-plane-delivery-id",
+  "messageId": "chat-message-id",
+  "prompt": "Prompt text"
+}
+```
+
+For `start`, place the same `protocolVersion`, `deliveryId`, and optional `messageId` alongside the existing `agentType` and `initialPrompt` fields. The VM persists the receipt before invocation. Repeating the same delivery ID and identical request never invokes the agent twice. After a lost HTTP response, read the receipt endpoint before deciding what to do. An `in_flight` receipt discovered after the VM Agent runtime has restarted becomes `ambiguous`; it is deliberately never replayed because the prior agent invocation may have occurred. Receipts store a request hash and lifecycle metadata, not prompt text.
+
+Capabilities are VM-authoritative. Version 1 uses the following nested shape; callers must retain the returned `runtimeIdentity` when reconciling a lost response:
+
+```json
+{
+  "protocolVersion": 1,
+  "runtimeIdentity": "vm-runtime-id",
+  "promptReceipts": {
+    "supported": true,
+    "lookup": true,
+    "states": ["accepted", "in_flight", "completed", "ambiguous"]
+  },
+  "checkpointRollover": {
+    "supported": true,
+    "automatic": false,
+    "states": ["accepted", "in_progress", "completed", "superseded", "failed"],
+    "defaultGraceMs": 30000,
+    "maxGraceMs": 120000,
+    "operationTimeoutMs": 120000
+  }
+}
+```
+
+A newly accepted versioned prompt returns HTTP 202; an identical duplicate returns HTTP 200. Both use the same response envelope:
+
+```json
+{
+  "status": "accepted",
+  "sessionId": "acp-session-id",
+  "receipt": {
+    "deliveryId": "stable-control-plane-delivery-id",
+    "state": "in_flight",
+    "runtimeIdentity": "vm-runtime-id",
+    "acceptedAt": 1786312800123,
+    "completedAt": null
+  }
+}
+```
+
+`acceptedAt` and `completedAt` are Unix epoch milliseconds. HTTP 409 with envelope status `not_ready` proves non-acceptance for the current attempt; HTTP 409 with status `conflict` means the delivery ID belongs to different prompt intent. Receipt lookup returns HTTP 404 with a `not_found` receipt carrying the current VM runtime identity. Automatic replay is allowed only for that positive same-runtime `not_found` result. A changed runtime identity, an unstructured 404, or an unavailable capability/receipt probe is terminally ambiguous and must not be replayed.
+
+#### Checkpoint rollover protocol
+
+Checkpoint rollover is opt-in and inert until the control plane calls it. Discover support and configured bounds from `GET /workspaces/{workspaceId}/agent-capabilities`, then submit:
+
+```json
+{
+  "protocolVersion": 1,
+  "operationId": "stable-rollover-operation-id",
+  "graceMs": 30000
+}
+```
+
+The operation moves through `accepted`, `in_progress`, then `completed`, `superseded`, or `failed`. The VM sends ACP `session/cancel` and `session/close`, waits the bounded grace, force-stops the harness if necessary, restarts it, and requires `LoadSession` of the exact previous ACP session ID. Failure to load that session is explicit; the VM never creates a fresh session as fallback. Natural completion and explicit user cancellation supersede checkpoint preemption. Repeat the same operation ID to reconcile a lost response; a different request with the same ID returns `operation_id_conflict`.
+
+Activity reports use one immutable `promptStartedAt` epoch for the accepted prompt. Periodic re-reports reuse it, and only a newly accepted prompt gets a new epoch. Hard deadlines report terminal `error`, not `idle`, so an errored host cannot appear available with stale work.
 
 ### Tab Management
 
 ```
-GET /workspaces/:id/tabs
+GET /workspaces/{workspaceId}/tabs
 ```
 
 Returns the list of open tabs (shell and agent sessions) for a workspace. Used to restore tabs on page refresh.
@@ -56,22 +136,76 @@ Returns the list of open tabs (shell and agent sessions) for a workspace. Used t
 ### Container Management
 
 ```
-POST /workspaces
+GET    /workspaces
+POST   /workspaces
+POST   /workspaces/{workspaceId}/stop
+POST   /workspaces/{workspaceId}/restart
+POST   /workspaces/{workspaceId}/rebuild
+DELETE /workspaces/{workspaceId}
+GET    /workspaces/{workspaceId}/events
 ```
 
-Create a new workspace container. Called by the API Worker during workspace provisioning.
+Create, list, and manage workspace containers. Called by the API Worker during workspace provisioning and lifecycle operations.
+
+### Git
 
 ```
-DELETE /workspaces/:id
+GET /workspaces/{workspaceId}/git/status
+GET /workspaces/{workspaceId}/git/diff
+GET /workspaces/{workspaceId}/git/file
+GET /workspaces/{workspaceId}/git/branches
 ```
 
-Delete a workspace container and clean up resources.
+Read git state for the workspace repository. Used by the project chat "Changes" view.
+
+### Files & Worktrees
+
+```
+GET    /workspaces/{workspaceId}/files/list
+GET    /workspaces/{workspaceId}/files/find
+GET    /workspaces/{workspaceId}/files/raw
+GET    /workspaces/{workspaceId}/files/download
+POST   /workspaces/{workspaceId}/files/upload
+GET    /workspaces/{workspaceId}/worktrees
+POST   /workspaces/{workspaceId}/worktrees
+DELETE /workspaces/{workspaceId}/worktrees
+```
+
+Browse, stream, upload, and download files inside the workspace container, and manage git worktrees.
+
+### Ports
+
+```
+GET /workspaces/{workspaceId}/ports
+    /workspaces/{workspaceId}/ports/{port}/{path...}
+    /workspaces/{workspaceId}/local-forward/{port}/{path...}
+```
+
+List detected listening ports and proxy HTTP traffic to a service running inside the container (powers exposed-port preview URLs).
+
+### Diagnostics & Observability
+
+```
+GET /debug-package
+GET /system-info
+GET /events
+GET /events/export
+GET /metrics/export
+GET /logs
+GET /logs/stream
+GET /containers
+```
+
+The `/debug-package` endpoint bundles cloud-init logs, journald, Docker logs, system info, events/metrics databases, provisioning timings, and network config into a single downloadable archive — the fastest way to diagnose a node without SSH.
+
+Node-wide diagnostics require a node-scoped management token issued by the control plane. Workspace browser sessions and workspace-scoped management tokens are not accepted for these routes because a single node can host multiple workspaces. User-facing node observability should go through the control-plane `/api/nodes/{nodeId}/...` proxy routes, which verify node ownership and sign the node-scoped token for the VM Agent.
 
 ## Subsystems
 
 ### PTY Manager
 
 Manages terminal sessions with:
+
 - **Session multiplexing** — multiple terminals per workspace
 - **Ring buffer** — stores recent output for replay on reconnect
 - **Lifecycle management** — automatic cleanup on disconnect
@@ -79,14 +213,30 @@ Manages terminal sessions with:
 ### Container Manager
 
 Handles Docker operations:
+
 - `devcontainer up` — build and start devcontainer from repo config
 - `docker exec` — execute commands inside containers
 - Git credential injection — injects GitHub tokens for push access
 - Named volume management — persistent storage across container restarts
 
+### Resource monitoring and eviction
+
+The agent samples Linux memory pressure (PSI) and bounded Docker statistics, and watches Docker OOM events. Heartbeats include per-container memory use, memory limit, CPU use, and process count. These measurements describe observed consumption; admission still uses the configured workspace reservations and effective host reserve.
+
+ResourceGuard chooses a running workspace under critical pressure and rechecks ownership and pressure before stopping its container. An OOM event must match the workspace's current container and container start time. Warning pressure is observable without triggering an eviction. Sustained critical pressure can trigger another attempt after the configured cooldown, using fresh metrics.
+
+Before stopping a running container, the agent requires a bounded session snapshot. A snapshot failure leaves that container running and does not mark or report an eviction. Docker reports an OOM exit after the victim has already stopped, so that path creates a short-lived isolated helper from the exact stopped container and its volumes, captures the snapshot without running the original entrypoint, and removes the helper image and container. If that capture fails, the eviction remains fail-closed instead of silently resuming from stale state. A successful stop or already-stopped OOM capture transitions the workspace to `evicted`; the control plane closes its compute-usage interval and active sessions. Failed stops do not report a completed eviction.
+
+PSI thresholds must be finite percentages greater than zero and at most 100, with warning no higher than critical.
+
+The agent persists the eviction fence before stopping, then retries a token-free callback record across transient failures and agent restarts. Retry eligibility is bounded below by the complete operation lease (60 seconds with default settings), even if the configured backoff cap is smaller; the heartbeat cadence determines when an eligible row is attempted. Ordinary browser reconnects, automatic recovery, legacy bootstrap, and replayed create requests cannot clear that fence. An admitted restart rotates the generation and clears it. Older local metadata without a proven project identity is ineligible for automatic eviction until an authenticated workspace/session metadata update supplies that identity; monitoring and existing host cgroup limits remain active.
+
+An evicted workspace exposes **Start** and **Restart** in the workspace list. Resource and OOM eviction callbacks also start a fenced, idempotent recovery through ordinary placement, excluding the unhealthy source node. Duplicate callbacks converge on the same recovery task, while stale generations are rejected. Explicit restart checks current membership, credentials, quota, and node capacity before allocating a new reservation and runtime generation. Delayed callbacks from an earlier generation cannot evict the restarted workspace. If restart fails before the VM request is dispatched, only that attempt’s compute interval is closed and the original evicted generation is restored; retry checks admission again. A failed response after dispatch leaves the new generation, reservation, and metering active until the runtime outcome is known, because the VM may already have started.
+
 ### ACP Gateway
 
 Implements the Agent Communication Protocol for AI coding agents:
+
 1. **Initialize** — establish protocol version and capabilities
 2. **NewSession** — create a session with working directory and MCP servers
 3. **Prompt** — send user prompts, receive streaming responses
@@ -95,34 +245,85 @@ Responses are serialized via `orderedPipe` to prevent token reordering from conc
 
 ### JWT Validator
 
-Validates workspace JWTs using the API's JWKS endpoint:
+Validates workspace and node-management JWTs using the API's JWKS endpoint:
+
 - Fetches public keys from `/.well-known/jwks.json`
 - Caches keys with periodic refresh
-- Extracts workspace ID and user ID from claims
+- Enforces workspace claims on workspace-scoped routes
+- Enforces node-scoped management tokens on node-wide diagnostic routes
 
 ## Configuration
 
-Environment variables set by the cloud-init template:
+The agent reads the following environment variables. Cloud-init supplies node identity and callback configuration; monitoring values use these defaults unless overridden in the agent service environment:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `NODE_ID` | — | Unique node identifier |
-| `CONTROL_PLANE_URL` | — | API Worker URL for callbacks |
-| `CALLBACK_TOKEN` | — | JWT for authenticating callbacks |
-| `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
-| `LOG_FORMAT` | `json` | Output format: `json` or `text` |
-| `ACP_NOTIF_SERIALIZE_TIMEOUT` | `5s` | Timeout for ACP notification serialization |
+| Variable                                         | Default                                       | Description                                                                                                                                                                                                                                                                                                                                             |
+| ------------------------------------------------ | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NODE_ID`                                        | —                                             | Unique node identifier                                                                                                                                                                                                                                                                                                                                  |
+| `CONTROL_PLANE_URL`                              | —                                             | API Worker URL for callbacks                                                                                                                                                                                                                                                                                                                            |
+| `CALLBACK_TOKEN_FILE`                            | `/etc/sam/callback-token` on cloud-init nodes | Root-only file containing the callback JWT for authenticating callbacks. `CALLBACK_TOKEN` remains a legacy fallback for already-provisioned nodes/manual runs.                                                                                                                                                                                          |
+| `LOG_LEVEL`                                      | `info`                                        | Log level: `debug`, `info`, `warn`, `error`                                                                                                                                                                                                                                                                                                             |
+| `LOG_FORMAT`                                     | `json`                                        | Output format: `json` or `text`                                                                                                                                                                                                                                                                                                                         |
+| `ACP_PROMPT_RETRY_MAX_RETRIES`                   | `2`                                           | Max transient provider prompt retries after the initial attempt                                                                                                                                                                                                                                                                                         |
+| `ACP_PROMPT_RETRY_INITIAL_BACKOFF`               | `15s`                                         | Initial backoff before retrying transient provider prompt errors                                                                                                                                                                                                                                                                                        |
+| `ACP_PROMPT_RETRY_MAX_BACKOFF`                   | `2m`                                          | Max exponential backoff for transient provider prompt retries                                                                                                                                                                                                                                                                                           |
+| `ACP_CHECKPOINT_PREEMPT_GRACE`                   | `30s`                                         | Grace after ACP cancel/close before force-stopping the harness                                                                                                                                                                                                                                                                                          |
+| `ACP_CHECKPOINT_PREEMPT_MAX_GRACE`               | `2m`                                          | Maximum `graceMs` accepted by the rollover endpoint                                                                                                                                                                                                                                                                                                     |
+| `ACP_CHECKPOINT_ROLLOVER_TIMEOUT`                | `2m`                                          | Deadline for the complete stop, restart, and strict LoadSession operation                                                                                                                                                                                                                                                                               |
+| `ACP_NOTIF_SERIALIZE_TIMEOUT`                    | `5s`                                          | Timeout for ACP notification serialization                                                                                                                                                                                                                                                                                                              |
+| `ACP_HARNESS_ACTIVITY_REPORT_DEBOUNCE`           | `750ms`                                       | Debounce window for coalescing ACP harness/tool-call activity reports before POSTing activity callbacks                                                                                                                                                                                                                                                 |
+| `STANDALONE_CLONE_FILTER`                        | `blob:none`                                   | Git partial-clone filter for standalone (Cloudflare Container) workspace clones, which run synchronously inside the control plane's create-workspace request (`cloneStandaloneRepository` in `internal/server/standalone_workspace.go`). Set `off` to force full clones. The control plane forwards `CF_CONTAINER_CLONE_FILTER` here.                   |
+| `GRACEFUL_SHUTDOWN_TIMEOUT`                      | `30s`                                         | Max time to wait for VM-agent HTTP server shutdown after SIGTERM                                                                                                                                                                                                                                                                                        |
+| `SYSTEM_PROVISIONING_TIMEOUT`                    | `15m`                                         | Max time for workspace host provisioning before bootstrap                                                                                                                                                                                                                                                                                               |
+| `CF_IP_FETCH_TIMEOUT`                            | `10s`                                         | Timeout for fetching Cloudflare IP ranges during firewall provisioning                                                                                                                                                                                                                                                                                  |
+| `BOOT_LOG_HTTP_TIMEOUT`                          | `10s`                                         | Timeout for boot-log callbacks to the control plane                                                                                                                                                                                                                                                                                                     |
+| `MCP_SHORT_COMMAND_TIMEOUT`                      | `10s`                                         | Timeout for short MCP workspace probes such as branch and credential checks                                                                                                                                                                                                                                                                             |
+| `MCP_DIFF_COMMAND_TIMEOUT`                       | `30s`                                         | Timeout for MCP diff-summary git commands                                                                                                                                                                                                                                                                                                               |
+| `MCP_BUILD_PREPARE_TIMEOUT`                      | `30s`                                         | Timeout for MCP build/publish preparation probes                                                                                                                                                                                                                                                                                                        |
+| `JWKS_FETCH_TIMEOUT`                             | `10s`                                         | Timeout for VM-agent startup JWKS fetches                                                                                                                                                                                                                                                                                                               |
+| `ACP_CREDENTIAL_SYNC_TIMEOUT`                    | `10s`                                         | Timeout for ACP auth-file sync-back during shutdown                                                                                                                                                                                                                                                                                                     |
+| `ACP_RESTART_ATTEMPT_TIMEOUT`                    | `5m`                                          | Bounds one automatic agent restart attempt by the ACP process monitor                                                                                                                                                                                                                                                                                   |
+| `ACP_ACTIVITY_REPORT_TIMEOUT`                    | `10s`                                         | Timeout for each ACP activity callback attempt                                                                                                                                                                                                                                                                                                          |
+| `ACP_USAGE_PROBE_TIMEOUT`                        | `10s`                                         | Bounds one post-turn provider usage probe (Codex rollout read or OpenCode Go usage request) that feeds the credential usage-limit windows                                                                                                                                                                                                               |
+| `OPENCODE_GO_USAGE_URL`                          | `https://opencode.ai/zen/go/v1/usage`         | OpenCode Go usage endpoint probed with the session's `OPENCODE_API_KEY` after each completed turn of an `opencode-go` session. OpenCode Zen has no balance API and is never probed Must be `https` unless the host is loopback (`localhost`, `127.0.0.1`, `::1`), because the probe sends the key as a bearer token; the probe never follows redirects. |
+| `DEVCONTAINER_CACHE_PUSH_TIMEOUT`                | `10m`                                         | Timeout for best-effort devcontainer cache image pushes                                                                                                                                                                                                                                                                                                 |
+| `WORKSPACE_BUILD_QUEUE_DEPTH`                    | `1`                                           | Concurrent devcontainer build slots on each workspace VM. Supported values are `1` through `16`; invalid values do not enable additional build slots and fall back to the default one-slot behavior. New cloud-init nodes receive this from the Worker env; older agents that do not know it keep their built-in one-slot queue.                        |
+| `DEPLOY_PREFLIGHT_COMMAND_TIMEOUT`               | `15s`                                         | Timeout for deployment preflight diagnostic commands                                                                                                                                                                                                                                                                                                    |
+| `LOG_STREAM_PING_WRITE_TIMEOUT`                  | `10s`                                         | Write deadline for log-stream WebSocket ping frames                                                                                                                                                                                                                                                                                                     |
+| `DEFAULT_RESOURCE_EVENT_BUFFER_SIZE`             | `64`                                          | Capacity of each bounded pressure/Docker event queue; positive integer                                                                                                                                                                                                                                                                                  |
+| `DEFAULT_PSI_POLL_INTERVAL_SECONDS`              | `10`                                          | Linux memory PSI sampling interval, in seconds                                                                                                                                                                                                                                                                                                          |
+| `DEFAULT_CONTAINER_STATS_INTERVAL_SECONDS`       | `30`                                          | Docker resource statistics sampling interval, in seconds                                                                                                                                                                                                                                                                                                |
+| `DEFAULT_PSI_MEMORY_SOME_WARNING_THRESHOLD`      | `25`                                          | Warning threshold for the maximum PSI some-memory avg10/avg60 percentage                                                                                                                                                                                                                                                                                |
+| `DEFAULT_PSI_MEMORY_SOME_CRITICAL_THRESHOLD`     | `50`                                          | Critical threshold for the maximum PSI some-memory avg10/avg60 percentage                                                                                                                                                                                                                                                                               |
+| `DEFAULT_PSI_MEMORY_FULL_WARNING_THRESHOLD`      | `10`                                          | Warning threshold for the maximum PSI full-memory avg10/avg60 percentage                                                                                                                                                                                                                                                                                |
+| `DEFAULT_PSI_MEMORY_FULL_CRITICAL_THRESHOLD`     | `25`                                          | Critical threshold for the maximum PSI full-memory avg10/avg60 percentage                                                                                                                                                                                                                                                                               |
+| `DEFAULT_EVICTION_DEBOUNCE_SECONDS`              | `30`                                          | Minimum cooldown between ResourceGuard eviction attempts, in seconds                                                                                                                                                                                                                                                                                    |
+| `DEFAULT_EVICTION_SNAPSHOT_TIMEOUT_SECONDS`      | `120`                                         | Deadline for pre-stop ResourceGuard eviction snapshot capture, in seconds                                                                                                                                                                                                                                                                               |
+| `DEFAULT_EVICTION_DOCKER_STOP_TIMEOUT_SECONDS`   | `10`                                          | Grace period passed to `docker stop --time` during ResourceGuard eviction, in seconds                                                                                                                                                                                                                                                                   |
+| `DEFAULT_EVICTION_CALLBACK_RETRY_MAX_SECONDS`    | `300`                                         | Backoff cap for durable eviction callback retries, in seconds; the operation lease is a lower bound and can exceed this cap. Delivery starts on a later heartbeat                                                                                                                                                                                       |
+| `DEFAULT_EVICTION_RESOLVE_TIMEOUT_SECONDS`       | `5`                                           | Deadline for resolving a pressured Docker container to a workspace before eviction, in seconds                                                                                                                                                                                                                                                          |
+| `COMPOSE_OUTPUT_RETENTION_BYTES`                 | `65536`                                       | Retained tail of a deployment compose command's combined output, in bytes (valid range 1024–1048576)                                                                                                                                                                                                                                                    |
+| `RESOURCE_HISTORY_SAMPLE_INTERVAL`               | `5s`                                          | Retained resource-history cgroup sampling cadence                                                                                                                                                                                                                                                                                                       |
+| `RESOURCE_HISTORY_CHUNK_INTERVAL`                | `15m`                                         | Retained resource-history chunk duration before upload                                                                                                                                                                                                                                                                                                  |
+| `RESOURCE_HISTORY_SPOOL_DIR`                     | `/var/lib/vm-agent/resource-history`          | Node-local retry spool for resource-history chunks                                                                                                                                                                                                                                                                                                      |
+| `RESOURCE_HISTORY_SPOOL_MAX_BYTES`               | `20971520`                                    | Max node-local resource-history retry spool bytes                                                                                                                                                                                                                                                                                                       |
+| `RESOURCE_HISTORY_UPLOAD_TIMEOUT`                | `10s`                                         | Deadline for one resource-history upload callback                                                                                                                                                                                                                                                                                                       |
+| `RESOURCE_HISTORY_MAX_SAMPLES`                   | `4096`                                        | Max resource samples packed into one uploaded chunk                                                                                                                                                                                                                                                                                                     |
+| `WORKSPACE_CALLBACK_TOKEN_REFRESH_RATIO`         | `0.5`                                         | Fraction of a workspace callback token's lifetime after which the agent renews it (clamped to 0.1–0.9)                                                                                                                                                                                                                                                  |
+| `WORKSPACE_CALLBACK_TOKEN_RENEWAL_TIMEOUT`       | `15s`                                         | Timeout for one workspace callback token renewal request                                                                                                                                                                                                                                                                                                |
+| `WORKSPACE_CALLBACK_TOKEN_RENEWAL_RETRY_INITIAL` | `1m`                                          | First backoff after a transient renewal failure                                                                                                                                                                                                                                                                                                         |
+| `WORKSPACE_CALLBACK_TOKEN_RENEWAL_RETRY_MAX`     | `30m`                                         | Renewal backoff ceiling; also the wait after the control plane answers "not yet due"                                                                                                                                                                                                                                                                    |
+| `MSG_AUTH_RENEWAL_WAIT`                          | `15m`                                         | How long chat-message delivery may stay paused on a rejected workspace token before the pause is reported as an error; held messages are kept                                                                                                                                                                                                           |
 
 ### Log Retrieval Settings
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `LOG_RETRIEVAL_DEFAULT_LIMIT` | `200` | Default entries per log page |
-| `LOG_RETRIEVAL_MAX_LIMIT` | `1000` | Max entries per log page |
-| `LOG_STREAM_BUFFER_SIZE` | `100` | Catch-up entries on stream connect |
-| `LOG_READER_TIMEOUT` | `30s` | Timeout for journalctl reads |
-| `LOG_STREAM_PING_INTERVAL` | `30s` | WebSocket ping interval |
-| `LOG_STREAM_PONG_TIMEOUT` | `90s` | WebSocket pong deadline |
+| Variable                      | Default | Description                        |
+| ----------------------------- | ------- | ---------------------------------- |
+| `LOG_RETRIEVAL_DEFAULT_LIMIT` | `200`   | Default entries per log page       |
+| `LOG_RETRIEVAL_MAX_LIMIT`     | `1000`  | Max entries per log page           |
+| `LOG_STREAM_BUFFER_SIZE`      | `100`   | Catch-up entries on stream connect |
+| `LOG_READER_TIMEOUT`          | `30s`   | Timeout for journalctl reads       |
+| `LOG_STREAM_PING_INTERVAL`    | `30s`   | WebSocket ping interval            |
+| `LOG_STREAM_PONG_TIMEOUT`     | `90s`   | WebSocket pong deadline            |
 
 ## Building
 
@@ -137,6 +338,7 @@ GOOS=linux GOARCH=amd64 go build -o bin/vm-agent-linux-amd64 .
 ```
 
 Output binaries:
+
 - `vm-agent-linux-amd64` — production (x86)
 - `vm-agent-linux-arm64` — production (ARM)
 - `vm-agent-darwin-amd64` — local testing (Intel Mac)

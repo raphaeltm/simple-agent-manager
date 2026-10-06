@@ -4,7 +4,7 @@ import type { Env } from '../../env';
 import { claimRoutes } from './claim';
 import { createRoutes } from './create';
 import { eventsRoutes } from './events';
-import { statusRoutes } from './status';
+import { publicTrialStatusRoutes } from './status';
 import { waitlistRoutes } from './waitlist';
 
 /**
@@ -24,6 +24,6 @@ trialOnboardingRoutes.route('/', createRoutes);
 trialOnboardingRoutes.route('/', eventsRoutes);
 trialOnboardingRoutes.route('/', claimRoutes);
 trialOnboardingRoutes.route('/', waitlistRoutes);
-trialOnboardingRoutes.route('/', statusRoutes);
+trialOnboardingRoutes.route('/', publicTrialStatusRoutes);
 
 export { trialOnboardingRoutes };

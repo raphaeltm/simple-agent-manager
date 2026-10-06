@@ -1,10 +1,28 @@
 import type {
+  AddProjectRepositoryRequest,
+  AgentActivityState,
+  AvailableRepositoriesResponse,
+  CreatedProjectInviteLinkResponse,
+  CreateProjectInviteRequest,
   CreateProjectRequest,
   DashboardActiveTasksResponse,
+  DecideProjectAccessRequest,
   ListProjectsResponse,
   Project,
+  ProjectAccessRequestResponse,
+  ProjectCredentialAttributionHealthSummary,
   ProjectDetailResponse,
+  ProjectInviteLinkResponse,
+  ProjectInvitePreviewResponse,
+  ProjectMemberOffboardingApplyRequest,
+  ProjectMemberOffboardingApplyResponse,
+  ProjectMemberOffboardingPreviewResponse,
+  ProjectMembersResponse,
+  ProjectOwnershipTransferRequest,
+  ProjectOwnershipTransferResponse,
+  ProjectRepositoryAccessResponse,
   ProjectRuntimeConfigResponse,
+  SubmoduleDiscoveryResponse,
   UpdateProjectRequest,
   UpsertProjectRuntimeEnvVarRequest,
   UpsertProjectRuntimeFileRequest,
@@ -64,6 +82,7 @@ export interface AccountMapResponse {
     status: string;
     executionStep: string | null;
     priority: number | null;
+    agentActivityState: AgentActivityState;
   }>;
   relationships: Array<{
     source: string;
@@ -73,7 +92,9 @@ export interface AccountMapResponse {
   }>;
 }
 
-export async function getAccountMap(options?: { activeOnly?: boolean }): Promise<AccountMapResponse> {
+export async function getAccountMap(options?: {
+  activeOnly?: boolean;
+}): Promise<AccountMapResponse> {
   const params = new URLSearchParams();
   if (options?.activeOnly === false) {
     params.set('activeOnly', 'false');
@@ -114,8 +135,29 @@ export async function createProject(data: CreateProjectRequest): Promise<Project
   });
 }
 
+/**
+ * Whether the SAM-hosted (Cloudflare Artifacts) repo provider is enabled on this
+ * deployment. Used to decide whether to offer it during project onboarding.
+ */
+export async function getArtifactsEnabled(): Promise<boolean> {
+  try {
+    const result = await request<{ enabled: boolean }>('/api/config/artifacts-enabled');
+    return !!result.enabled;
+  } catch {
+    return false;
+  }
+}
+
 export async function getProject(id: string): Promise<ProjectDetailResponse> {
   return request<ProjectDetailResponse>(`/api/projects/${id}`);
+}
+
+export async function getProjectCredentialAttributionHealth(
+  projectId: string
+): Promise<ProjectCredentialAttributionHealthSummary> {
+  return request<ProjectCredentialAttributionHealthSummary>(
+    `/api/projects/${projectId}/credential-attribution-health`
+  );
 }
 
 export async function updateProject(id: string, data: UpdateProjectRequest): Promise<Project> {
@@ -178,6 +220,168 @@ export async function deleteProjectRuntimeFile(
     `/api/projects/${projectId}/runtime/files?${params.toString()}`,
     {
       method: 'DELETE',
+    }
+  );
+}
+
+// =============================================================================
+// Repository Access (additional same-installation repos for workspace tokens)
+// =============================================================================
+
+export async function listProjectRepositories(
+  projectId: string
+): Promise<ProjectRepositoryAccessResponse> {
+  return request<ProjectRepositoryAccessResponse>(`/api/projects/${projectId}/repository-access`);
+}
+
+export async function addProjectRepository(
+  projectId: string,
+  data: AddProjectRepositoryRequest
+): Promise<ProjectRepositoryAccessResponse> {
+  return request<ProjectRepositoryAccessResponse>(`/api/projects/${projectId}/repository-access`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function removeProjectRepository(
+  projectId: string,
+  repoRowId: string
+): Promise<ProjectRepositoryAccessResponse> {
+  return request<ProjectRepositoryAccessResponse>(
+    `/api/projects/${projectId}/repository-access/${encodeURIComponent(repoRowId)}`,
+    {
+      method: 'DELETE',
+    }
+  );
+}
+
+export async function discoverSubmoduleRepos(
+  projectId: string
+): Promise<SubmoduleDiscoveryResponse> {
+  return request<SubmoduleDiscoveryResponse>(
+    `/api/projects/${projectId}/repository-access/discover`
+  );
+}
+
+export async function listAvailableRepositories(
+  projectId: string
+): Promise<AvailableRepositoriesResponse> {
+  return request<AvailableRepositoriesResponse>(
+    `/api/projects/${projectId}/repository-access/available`
+  );
+}
+
+// =============================================================================
+// Project Members and Invite Links
+// =============================================================================
+
+export async function getProjectMembers(projectId: string): Promise<ProjectMembersResponse> {
+  return request<ProjectMembersResponse>(`/api/projects/${projectId}/members`);
+}
+
+export async function transferProjectOwnership(
+  projectId: string,
+  data: ProjectOwnershipTransferRequest
+): Promise<ProjectOwnershipTransferResponse> {
+  return request<ProjectOwnershipTransferResponse>(
+    `/api/projects/${projectId}/ownership-transfer`,
+    {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }
+  );
+}
+
+export async function previewProjectMemberOffboarding(
+  projectId: string,
+  userId: string
+): Promise<ProjectMemberOffboardingPreviewResponse> {
+  return request<ProjectMemberOffboardingPreviewResponse>(
+    `/api/projects/${projectId}/members/${encodeURIComponent(userId)}/offboarding-preview`,
+    {
+      method: 'POST',
+    }
+  );
+}
+
+export async function applyProjectMemberOffboarding(
+  projectId: string,
+  userId: string,
+  data: ProjectMemberOffboardingApplyRequest
+): Promise<ProjectMemberOffboardingApplyResponse> {
+  return request<ProjectMemberOffboardingApplyResponse>(
+    `/api/projects/${projectId}/members/${encodeURIComponent(userId)}/offboarding-apply`,
+    {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }
+  );
+}
+
+export async function createProjectInviteLink(
+  projectId: string,
+  data: CreateProjectInviteRequest = {}
+): Promise<CreatedProjectInviteLinkResponse> {
+  return request<CreatedProjectInviteLinkResponse>(`/api/projects/${projectId}/invite-links`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function revokeProjectInviteLink(
+  projectId: string,
+  linkId: string
+): Promise<ProjectInviteLinkResponse> {
+  return request<ProjectInviteLinkResponse>(
+    `/api/projects/${projectId}/invite-links/${encodeURIComponent(linkId)}/revoke`,
+    {
+      method: 'POST',
+    }
+  );
+}
+
+export async function getProjectInvitePreview(
+  token: string
+): Promise<ProjectInvitePreviewResponse> {
+  return request<ProjectInvitePreviewResponse>(
+    `/api/projects/invite-links/${encodeURIComponent(token)}`
+  );
+}
+
+export async function requestProjectAccess(token: string): Promise<ProjectAccessRequestResponse> {
+  return request<ProjectAccessRequestResponse>(
+    `/api/projects/invite-links/${encodeURIComponent(token)}/request`,
+    {
+      method: 'POST',
+    }
+  );
+}
+
+export async function approveProjectAccessRequest(
+  projectId: string,
+  requestId: string,
+  data: DecideProjectAccessRequest = {}
+): Promise<ProjectAccessRequestResponse> {
+  return request<ProjectAccessRequestResponse>(
+    `/api/projects/${projectId}/access-requests/${encodeURIComponent(requestId)}/approve`,
+    {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }
+  );
+}
+
+export async function denyProjectAccessRequest(
+  projectId: string,
+  requestId: string,
+  data: DecideProjectAccessRequest = {}
+): Promise<ProjectAccessRequestResponse> {
+  return request<ProjectAccessRequestResponse>(
+    `/api/projects/${projectId}/access-requests/${encodeURIComponent(requestId)}/deny`,
+    {
+      method: 'POST',
+      body: JSON.stringify(data),
     }
   );
 }

@@ -24,7 +24,17 @@ describe('ws proxy source contract', () => {
   });
 
   it('allows recovery workspaces to proxy traffic', () => {
-    expect(file).toContain("workspace.status !== 'running' && workspace.status !== 'recovery'");
+    expect(file).toContain("workspaceStatus !== 'running' && workspaceStatus !== 'recovery'");
+  });
+
+  it('constructs the backend VM URL from trusted routing config instead of cloning request origin', () => {
+    expect(file).toContain('new URL(`${vmAgentProtocol}://${backendHostname}:${vmAgentPort}`)');
+    expect(file).not.toContain('const vmUrl = new URL(c.req.url)');
+  });
+
+  it('constructs the container proxy URL from trusted localhost config instead of cloning request origin', () => {
+    expect(file).toContain('new URL(`http://localhost:${vmAgentPort}`)');
+    expect(file).not.toContain('const containerUrl = new URL(c.req.url)');
   });
 
   it('strips client-supplied X-Forwarded-Host and sets trusted value', () => {

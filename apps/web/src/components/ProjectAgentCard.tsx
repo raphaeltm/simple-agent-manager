@@ -14,6 +14,7 @@ import type {
 } from '@simple-agent-manager/shared';
 import {
   AGENT_PERMISSION_MODE_LABELS,
+  DEFAULT_OPENCODE_ZEN_MODEL,
   VALID_PERMISSION_MODES,
 } from '@simple-agent-manager/shared';
 import { Alert, Button, Card, StatusBadge } from '@simple-agent-manager/ui';
@@ -33,13 +34,13 @@ const FORM_CONTROL =
 function modelPlaceholderFor(agentId: string): string {
   switch (agentId) {
     case 'claude-code':
-      return 'e.g. claude-opus-4-6, claude-sonnet-4-5-20250929';
+      return 'e.g. claude-opus-5, claude-sonnet-5';
     case 'openai-codex':
       return 'e.g. gpt-5-codex, o3';
     case 'google-gemini':
       return 'e.g. gemini-2.5-pro';
     case 'opencode':
-      return 'e.g. scaleway/qwen3-coder-30b-a3b-instruct';
+      return `e.g. ${DEFAULT_OPENCODE_ZEN_MODEL}`;
     default:
       return 'Model identifier (leave empty to inherit)';
   }
@@ -50,13 +51,15 @@ export interface ProjectAgentCardProps {
   projectCredentials: AgentCredentialInfo[] | null;
   userCredentials: AgentCredentialInfo[];
   defaultValue: { model?: string | null; permissionMode?: AgentPermissionMode | null } | undefined;
-  onSaveCredential: (req: SaveAgentCredentialRequest) => Promise<void>;
+  onSaveCredential: (req: SaveAgentCredentialRequest) => Promise<AgentCredentialInfo>;
   onDeleteCredential: (agentType: AgentType, credentialKind: CredentialKind) => Promise<void>;
   onSaveDefault: (
     agentType: AgentType,
     entry: { model: string | null; permissionMode: AgentPermissionMode | null },
   ) => Promise<void>;
   onClearDefault: (agentType: AgentType) => Promise<void>;
+  /** Refresh credentials after the guided "Connect with Codex" flow succeeds. */
+  onCredentialConnected?: () => void;
 }
 
 export function ProjectAgentCard({
@@ -68,6 +71,7 @@ export function ProjectAgentCard({
   onDeleteCredential,
   onSaveDefault,
   onClearDefault,
+  onCredentialConnected,
 }: ProjectAgentCardProps) {
   const [model, setModel] = useState(defaultValue?.model ?? '');
   const [permissionMode, setPermissionMode] = useState<AgentPermissionMode | ''>(
@@ -168,6 +172,7 @@ export function ProjectAgentCard({
           onDelete={onDeleteCredential}
           scope="project"
           embedded
+          onCredentialConnected={onCredentialConnected}
         />
         {!hasCredentialOverride && hasUserCredential && (
           <p className="text-xs text-fg-muted">

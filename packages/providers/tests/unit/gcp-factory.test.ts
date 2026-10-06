@@ -1,6 +1,13 @@
 import { describe, expect,it } from 'vitest';
 
-import { createProvider, DEFAULT_GCP_AGENT_PORTS, DEFAULT_GCP_FIREWALL_SOURCE_RANGES, GcpProvider } from '../../src/index';
+import {
+  createProvider,
+  DEFAULT_GCP_AGENT_PORTS,
+  DEFAULT_GCP_APP_ROUTE_PORTS,
+  DEFAULT_GCP_APP_ROUTE_SOURCE_RANGES,
+  DEFAULT_GCP_FIREWALL_SOURCE_RANGES,
+  GcpProvider,
+} from '../../src/index';
 import { testCidr } from './test-helpers';
 
 describe('createProvider with GCP', () => {
@@ -32,6 +39,8 @@ describe('createProvider with GCP', () => {
       tokenProvider: async () => 'test-token',
       firewallSourceRanges: [testCidr(10, 0, 0, 0, 8)],
       agentPorts: ['9443'],
+      appRouteSourceRanges: [testCidr(0, 0, 0, 0, 0)],
+      appRoutePorts: ['80', '443'],
     });
 
     expect(provider).toBeInstanceOf(GcpProvider);
@@ -41,5 +50,7 @@ describe('createProvider with GCP', () => {
     expect(DEFAULT_GCP_FIREWALL_SOURCE_RANGES).toContain(testCidr(173, 245, 48, 0, 20));
     expect(DEFAULT_GCP_FIREWALL_SOURCE_RANGES).not.toContain(testCidr(0, 0, 0, 0, 0));
     expect(DEFAULT_GCP_AGENT_PORTS).toEqual(['8080', '8443']);
+    expect(DEFAULT_GCP_APP_ROUTE_SOURCE_RANGES).toEqual([testCidr(0, 0, 0, 0, 0)]);
+    expect(DEFAULT_GCP_APP_ROUTE_PORTS).toEqual(['80', '443']);
   });
 });

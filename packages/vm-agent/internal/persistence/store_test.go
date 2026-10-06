@@ -133,6 +133,116 @@ func TestInsertAndListTabs(t *testing.T) {
 	}
 }
 
+func TestVMJobsPersistAcrossReopen(t *testing.T) {
+	dbPath := tempDBPath(t)
+	store, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := store.UpsertJob(JobRecord{
+		ID:          "publish-job-1",
+		Kind:        "deployment-publish",
+		ScopeID:     "ws-1",
+		Status:      "running",
+		CurrentStep: "build",
+	}); err != nil {
+		t.Fatalf("UpsertJob: %v", err)
+	}
+	if err := store.AddJobEvent("publish-job-1", JobEventRecord{
+		Level:       "info",
+		EventType:   "publish.build.started",
+		CurrentStep: "build",
+		Message:     "build started",
+	}); err != nil {
+		t.Fatalf("AddJobEvent: %v", err)
+	}
+	if err := store.CompleteJob("publish-job-1", "succeeded", "succeeded", "", `{"releaseId":"rel-1"}`); err != nil {
+		t.Fatalf("CompleteJob: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	reopened, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer reopened.Close()
+
+	job, err := reopened.GetJob("publish-job-1")
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	if job == nil {
+		t.Fatal("expected persisted job after reopen")
+	}
+	if job.Status != "succeeded" || job.CurrentStep != "succeeded" || !strings.Contains(job.ResultJSON, "rel-1") {
+		t.Fatalf("unexpected persisted job: %+v", job)
+	}
+	events, err := reopened.ListJobEvents("publish-job-1")
+	if err != nil {
+		t.Fatalf("ListJobEvents: %v", err)
+	}
+	if len(events) != 1 || events[0].EventType != "publish.build.started" {
+		t.Fatalf("unexpected persisted events: %+v", events)
+	}
+}
+
+func TestVMJobsMarkActiveInterruptedAndRedactSecrets(t *testing.T) {
+	store, err := Open(tempDBPath(t))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+
+	if err := store.UpsertJob(JobRecord{
+		ID:          "apply-env-1-2",
+		Kind:        "deployment-apply",
+		ScopeID:     "env-1",
+		Status:      "running",
+		CurrentStep: "load_artifacts",
+	}); err != nil {
+		t.Fatalf("UpsertJob: %v", err)
+	}
+	if err := store.AddJobEvent("apply-env-1-2", JobEventRecord{
+		Level:        "error",
+		EventType:    "deployment.apply.failed",
+		CurrentStep:  "load_artifacts",
+		Message:      "download failed https://bucket.example/object?X-Amz-Signature=abc123&ok=1",
+		ErrorMessage: "Authorization Bearer secret-token callbackToken=abc jwt=def password=hunter2",
+		DetailJSON:   `{"downloadUrl":"https://bucket.example/object?X-Amz-Credential=cred&X-Amz-Security-Token=session","secret":"value"}`,
+	}); err != nil {
+		t.Fatalf("AddJobEvent: %v", err)
+	}
+	if err := store.MarkActiveJobsInterrupted(); err != nil {
+		t.Fatalf("MarkActiveJobsInterrupted: %v", err)
+	}
+
+	job, err := store.GetJob("apply-env-1-2")
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	if job == nil || job.Status != "interrupted" || job.CompletedAt == "" {
+		t.Fatalf("expected interrupted completed job, got %+v", job)
+	}
+	events, err := store.ListJobEvents("apply-env-1-2")
+	if err != nil {
+		t.Fatalf("ListJobEvents: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected one event, got %d", len(events))
+	}
+	combined := events[0].Message + events[0].ErrorMessage + events[0].DetailJSON
+	for _, secret := range []string{"abc123", "secret-token", "hunter2", "session", "value"} {
+		if strings.Contains(combined, secret) {
+			t.Fatalf("persisted event leaked %q: %+v", secret, events[0])
+		}
+	}
+	if !strings.Contains(combined, "[REDACTED]") {
+		t.Fatalf("expected redaction marker in persisted event: %+v", events[0])
+	}
+}
+
 func TestDeleteTab(t *testing.T) {
 	store, err := Open(tempDBPath(t))
 	if err != nil {
@@ -474,6 +584,7 @@ func TestUpsertAndGetWorkspaceMetadata(t *testing.T) {
 		ContainerLabelVal: "/workspace/ws-1",
 		WorkspaceDir:      "/workspace/ws-1",
 		CallbackToken:     "workspace-callback-token",
+		ChatSessionID:     "chat-session-1",
 	})
 	if err != nil {
 		t.Fatalf("UpsertWorkspaceMetadata: %v", err)
@@ -487,26 +598,19 @@ func TestUpsertAndGetWorkspaceMetadata(t *testing.T) {
 	if meta == nil {
 		t.Fatal("expected non-nil metadata")
 	}
-	if meta.Repository != "octo/my-repo" {
-		t.Errorf("expected repository 'octo/my-repo', got %q", meta.Repository)
-	}
-	if meta.Branch != "main" {
-		t.Errorf("expected branch 'main', got %q", meta.Branch)
-	}
-	if meta.ContainerWorkDir != "/workspaces/my-repo" {
-		t.Errorf("expected ContainerWorkDir '/workspaces/my-repo', got %q", meta.ContainerWorkDir)
-	}
-	if meta.ContainerUser != "vscode" {
-		t.Errorf("expected ContainerUser 'vscode', got %q", meta.ContainerUser)
-	}
-	if meta.ContainerLabelVal != "/workspace/ws-1" {
-		t.Errorf("expected ContainerLabelVal '/workspace/ws-1', got %q", meta.ContainerLabelVal)
-	}
-	if meta.WorkspaceDir != "/workspace/ws-1" {
-		t.Errorf("expected WorkspaceDir '/workspace/ws-1', got %q", meta.WorkspaceDir)
-	}
-	if meta.CallbackToken != "workspace-callback-token" {
-		t.Errorf("expected CallbackToken to round-trip, got %q", meta.CallbackToken)
+	for _, field := range []struct{ name, got, want string }{
+		{"Repository", meta.Repository, "octo/my-repo"},
+		{"Branch", meta.Branch, "main"},
+		{"ContainerWorkDir", meta.ContainerWorkDir, "/workspaces/my-repo"},
+		{"ContainerUser", meta.ContainerUser, "vscode"},
+		{"ContainerLabelVal", meta.ContainerLabelVal, "/workspace/ws-1"},
+		{"WorkspaceDir", meta.WorkspaceDir, "/workspace/ws-1"},
+		{"CallbackToken", meta.CallbackToken, "workspace-callback-token"},
+		{"ChatSessionID", meta.ChatSessionID, "chat-session-1"},
+	} {
+		if field.got != field.want {
+			t.Errorf("%s = %q, want %q", field.name, field.got, field.want)
+		}
 	}
 	var rawCallbackToken string
 	if err := store.db.QueryRow("SELECT callback_token FROM workspace_metadata WHERE workspace_id = ?", "ws-1").Scan(&rawCallbackToken); err != nil {
@@ -529,6 +633,7 @@ func TestUpsertAndGetWorkspaceMetadata(t *testing.T) {
 		ContainerLabelVal: "/workspace/ws-1",
 		WorkspaceDir:      "/workspace/ws-1",
 		CallbackToken:     "updated-callback-token",
+		ChatSessionID:     "chat-session-2",
 	})
 	if err != nil {
 		t.Fatalf("UpsertWorkspaceMetadata overwrite: %v", err)
@@ -546,6 +651,9 @@ func TestUpsertAndGetWorkspaceMetadata(t *testing.T) {
 	}
 	if meta.CallbackToken != "updated-callback-token" {
 		t.Errorf("expected updated CallbackToken after overwrite, got %q", meta.CallbackToken)
+	}
+	if meta.ChatSessionID != "chat-session-2" {
+		t.Errorf("expected updated ChatSessionID after overwrite, got %q", meta.ChatSessionID)
 	}
 }
 
@@ -591,6 +699,7 @@ func TestWorkspaceMetadataPersistedAcrossReopen(t *testing.T) {
 		Branch:           "develop",
 		ContainerWorkDir: "/workspaces/repo-name",
 		WorkspaceDir:     "/workspace/ws-persist",
+		ChatSessionID:    "chat-persist",
 	})
 	store1.Close()
 
@@ -612,6 +721,9 @@ func TestWorkspaceMetadataPersistedAcrossReopen(t *testing.T) {
 	}
 	if meta.ContainerWorkDir != "/workspaces/repo-name" {
 		t.Errorf("expected ContainerWorkDir '/workspaces/repo-name', got %q", meta.ContainerWorkDir)
+	}
+	if meta.ChatSessionID != "chat-persist" {
+		t.Errorf("expected ChatSessionID 'chat-persist', got %q", meta.ChatSessionID)
 	}
 }
 

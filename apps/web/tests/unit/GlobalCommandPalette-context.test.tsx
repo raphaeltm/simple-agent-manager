@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 import { GlobalCommandPalette } from '../../src/components/GlobalCommandPalette';
+import { renderWithQuery } from '../test-utils/query-test-utils';
 
 // ── Location mock — allows changing pathname per test ──
 
@@ -18,8 +19,32 @@ vi.mock('react-router', async () => {
   };
 });
 
+// ── Auth / theme / signOut mocks — mutable so tests can vary them ──
+
+let mockIsSuperadmin = false;
+const mockSetTheme = vi.fn();
+let mockIsDark = true;
+const mockSignOut = vi.fn();
+
 vi.mock('../../src/components/AuthProvider', () => ({
-  useAuth: () => ({ isSuperadmin: false }),
+  useAuth: () => ({ isSuperadmin: mockIsSuperadmin }),
+}));
+
+vi.mock('../../src/contexts/ThemeContext', () => ({
+  useTheme: () => ({
+    theme: mockIsDark ? 'dark' : 'light',
+    resolvedTheme: mockIsDark ? 'dark' : 'light',
+    isDark: mockIsDark,
+    setTheme: mockSetTheme,
+  }),
+}));
+
+vi.mock('../../src/hooks/useQueryScope', () => ({
+  useQueryScope: () => 'user-1',
+}));
+
+vi.mock('../../src/lib/auth', () => ({
+  signOut: () => mockSignOut(),
 }));
 
 vi.mock('../../src/lib/api', async (importOriginal) => ({
@@ -89,7 +114,7 @@ vi.mock('../../src/lib/api', async (importOriginal) => ({
 function renderPalette(onClose = vi.fn()) {
   return {
     onClose,
-    ...render(
+    ...renderWithQuery(
       <MemoryRouter>
         <GlobalCommandPalette onClose={onClose} />
       </MemoryRouter>,
@@ -97,10 +122,38 @@ function renderPalette(onClose = vi.fn()) {
   };
 }
 
+// Waits for the palette to finish its async fetches (Navigation always renders),
+// then types `query` into the combobox. Returns the input for further interaction.
+async function openAndFilter(query: string) {
+  const input = screen.getByRole('combobox');
+  await waitFor(() => {
+    expect(screen.getByText('Navigation')).toBeInTheDocument();
+  });
+  fireEvent.change(input, { target: { value: query } });
+  return input;
+}
+
+// Filters to `query`, waits for at least one matching option, then presses Enter
+// to execute the top result.
+async function filterAndExecute(query: string) {
+  const input = await openAndFilter(query);
+  await waitFor(() => {
+    expect(screen.getAllByRole('option').length).toBeGreaterThan(0);
+  });
+  fireEvent.keyDown(input, { key: 'Enter' });
+}
+
+const optionLabels = () =>
+  screen.getAllByRole('option').map((o) => o.textContent);
+
 describe('GlobalCommandPalette — Context Awareness', () => {
   beforeEach(() => {
     mockNavigate.mockClear();
+    mockSetTheme.mockClear();
+    mockSignOut.mockClear();
     mockPathname = '/dashboard';
+    mockIsSuperadmin = false;
+    mockIsDark = true;
   });
 
   // ── No context on dashboard ──
@@ -131,7 +184,8 @@ describe('GlobalCommandPalette — Context Awareness', () => {
     const labels = options.map((o) => o.textContent);
     expect(labels.some((l) => l?.includes('Go to Chat'))).toBe(true);
     expect(labels.some((l) => l?.includes('Go to Ideas'))).toBe(true);
-    expect(labels.some((l) => l?.includes('Go to Activity'))).toBe(true);
+    expect(labels.some((l) => l?.includes('Go to Deployments'))).toBe(true);
+    expect(labels.some((l) => l?.includes('Go to Activity'))).toBe(false);
     expect(labels.some((l) => l?.includes('Go to Settings'))).toBe(true);
   });
 
@@ -168,7 +222,9 @@ describe('GlobalCommandPalette — Context Awareness', () => {
     const contextOptions = options.filter((o) => o.textContent?.includes('Go to Ideas'));
     expect(contextOptions.length).toBeGreaterThanOrEqual(1);
 
-    // "Go to Activity" should be filtered out since "ideas" doesn't match
+    // Unrelated project destinations should be filtered out since "ideas" doesn't match
+    const deploymentsOptions = options.filter((o) => o.textContent?.includes('Go to Deployments'));
+    expect(deploymentsOptions).toHaveLength(0);
     const activityOptions = options.filter((o) => o.textContent?.includes('Go to Activity'));
     expect(activityOptions).toHaveLength(0);
   });
@@ -180,7 +236,8 @@ describe('GlobalCommandPalette — Context Awareness', () => {
     renderPalette();
 
     await waitFor(() => {
-      expect(screen.getByText('Context')).toBeInTheDocument();
+      const labels = screen.getAllByRole('option').map((o) => o.textContent);
+      expect(labels.some((l) => l?.includes('Go to Workspace'))).toBe(true);
     });
 
     const options = screen.getAllByRole('option');
@@ -193,7 +250,8 @@ describe('GlobalCommandPalette — Context Awareness', () => {
     renderPalette();
 
     await waitFor(() => {
-      expect(screen.getByText('Context')).toBeInTheDocument();
+      const labels = screen.getAllByRole('option').map((o) => o.textContent);
+      expect(labels.some((l) => l?.includes('View Task'))).toBe(true);
     });
 
     const options = screen.getAllByRole('option');
@@ -206,7 +264,8 @@ describe('GlobalCommandPalette — Context Awareness', () => {
     renderPalette();
 
     await waitFor(() => {
-      expect(screen.getByText('Context')).toBeInTheDocument();
+      const labels = screen.getAllByRole('option').map((o) => o.textContent);
+      expect(labels.some((l) => l?.includes('View Task'))).toBe(true);
     });
 
     const options = screen.getAllByRole('option');
@@ -220,7 +279,8 @@ describe('GlobalCommandPalette — Context Awareness', () => {
     renderPalette();
 
     await waitFor(() => {
-      expect(screen.getByText('Context')).toBeInTheDocument();
+      const labels = screen.getAllByRole('option').map((o) => o.textContent);
+      expect(labels.some((l) => l?.includes('Code review'))).toBe(true);
     });
 
     const options = screen.getAllByRole('option');
@@ -237,7 +297,8 @@ describe('GlobalCommandPalette — Context Awareness', () => {
     renderPalette();
 
     await waitFor(() => {
-      expect(screen.getByText('Context')).toBeInTheDocument();
+      const labels = screen.getAllByRole('option').map((o) => o.textContent);
+      expect(labels.some((l) => l?.includes('Go to Linked Chat'))).toBe(true);
     });
 
     const options = screen.getAllByRole('option');
@@ -252,7 +313,9 @@ describe('GlobalCommandPalette — Context Awareness', () => {
     renderPalette();
 
     await waitFor(() => {
-      expect(screen.getByText('Chats')).toBeInTheDocument();
+      expect(screen.getByText('Fix auth bug')).toBeInTheDocument();
+      expect(screen.getByText('Code review')).toBeInTheDocument();
+      expect(screen.getByText('Refactor layout')).toBeInTheDocument();
     });
 
     const options = screen.getAllByRole('option');
@@ -343,5 +406,78 @@ describe('GlobalCommandPalette — Context Awareness', () => {
 
     // All existing categories should still be present
     expect(screen.getByText('Navigation')).toBeInTheDocument();
+  });
+
+  // ── Settings deep-links (always available) ──
+
+  it('shows Settings deep-links for all users', async () => {
+    mockPathname = '/dashboard';
+    renderPalette();
+    await openAndFilter('settings');
+
+    const labels = optionLabels();
+    expect(labels.some((l) => l?.includes('Settings: Cloud Provider'))).toBe(true);
+    expect(labels.some((l) => l?.includes('Settings: GitHub'))).toBe(true);
+    expect(labels.some((l) => l?.includes('Settings: API Tokens'))).toBe(true);
+  });
+
+  // ── Admin deep-links (superadmin-gated) ──
+
+  it('hides Admin deep-links for non-superadmins', async () => {
+    mockIsSuperadmin = false;
+    mockPathname = '/dashboard';
+    renderPalette();
+    await openAndFilter('admin');
+
+    const labels = screen.queryAllByRole('option').map((o) => o.textContent);
+    expect(labels.some((l) => l?.includes('Admin'))).toBe(false);
+  });
+
+  it('shows Admin deep-links for superadmins', async () => {
+    mockIsSuperadmin = true;
+    mockPathname = '/dashboard';
+    renderPalette();
+    await openAndFilter('admin');
+
+    const labels = optionLabels();
+    expect(labels.some((l) => l?.includes('Admin: Users'))).toBe(true);
+    expect(labels.some((l) => l?.includes('Admin: Logs'))).toBe(true);
+    expect(labels.some((l) => l?.includes('Admin: Costs'))).toBe(true);
+  });
+
+  // ── Quick actions: Toggle Theme ──
+
+  it.each([
+    [true, 'light'],
+    [false, 'dark'],
+  ])('Toggle Theme switches theme when currently dark=%s', async (isDark, expected) => {
+    mockIsDark = isDark;
+    mockPathname = '/dashboard';
+    renderPalette();
+    await filterAndExecute('toggle theme');
+
+    expect(mockSetTheme).toHaveBeenCalledWith(expected);
+  });
+
+  it('Sign Out invokes signOut', async () => {
+    mockPathname = '/dashboard';
+    renderPalette();
+    await filterAndExecute('sign out');
+
+    expect(mockSignOut).toHaveBeenCalled();
+  });
+
+  // ── Navigation targets (Go to Nodes, Map, Tools) ──
+
+  it.each([
+    ['go to nodes', '/nodes'],
+    ['map', '/account-map'],
+    ['tools', '/tools'],
+  ])('"%s" navigates to %s', async (query, expectedPath) => {
+    mockPathname = '/dashboard';
+    renderPalette();
+    await filterAndExecute(query);
+
+    expect(mockNavigate).toHaveBeenCalledWith(expectedPath);
   });
 });

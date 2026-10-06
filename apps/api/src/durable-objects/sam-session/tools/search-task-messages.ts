@@ -7,6 +7,7 @@
  */
 import type { Env } from '../../../env';
 import * as projectDataService from '../../../services/project-data';
+import { describeRootSearchCoverage } from '../../../services/project-data-search-coverage';
 import type { AnthropicToolDef, ToolContext } from '../types';
 import { resolveProjectWithOwnership } from './helpers';
 
@@ -20,9 +21,10 @@ const VALID_ROLES = ['user', 'assistant', 'system', 'tool', 'thinking', 'plan'];
 export const searchTaskMessagesDef: AnthropicToolDef = {
   name: 'search_task_messages',
   description:
-    'Search through chat messages in a project\'s task sessions. ' +
+    "Search through chat messages in a project's task sessions. " +
     'Use this to find specific discussions, decisions, or outputs from past or current tasks. ' +
-    'Supports filtering by task ID, session ID, and message roles.',
+    'Supports filtering by task ID, session ID, and message roles. ' +
+    'Over-limit queries are truncated and disclosed in the response.',
   input_schema: {
     type: 'object',
     properties: {
@@ -32,11 +34,12 @@ export const searchTaskMessagesDef: AnthropicToolDef = {
       },
       query: {
         type: 'string',
-        description: 'Search query — keywords or phrases to find in messages.',
+        description:
+          'Search query — keywords or phrases to find in messages. Over-limit input is truncated.',
       },
       taskId: {
         type: 'string',
-        description: 'Optional: filter results to messages from a specific task\'s session.',
+        description: "Optional: filter results to messages from a specific task's session.",
       },
       sessionId: {
         type: 'string',
@@ -51,6 +54,11 @@ export const searchTaskMessagesDef: AnthropicToolDef = {
         type: 'number',
         description: `Max results to return. Defaults to ${DEFAULT_LIMIT}, max ${DEFAULT_MAX_LIMIT}.`,
       },
+      continuation: {
+        type: 'string',
+        description:
+          'Project-wide signed continuation returned by archiveSearch.continuation. Repeat the same query, roles, and limit until archiveSearch.complete is true. Cannot be combined with sessionId or taskId.',
+      },
     },
     required: ['projectId', 'query'],
   },
@@ -64,8 +72,9 @@ export async function searchTaskMessages(
     sessionId?: string;
     roles?: string[];
     limit?: number;
+    continuation?: string;
   },
-  ctx: ToolContext,
+  ctx: ToolContext
 ): Promise<unknown> {
   if (!input.projectId?.trim()) {
     return { error: 'projectId is required.' };
@@ -75,6 +84,9 @@ export async function searchTaskMessages(
   }
   if (input.query.trim().length < 2) {
     return { error: 'query must be at least 2 characters.' };
+  }
+  if (input.continuation?.trim() && (input.sessionId?.trim() || input.taskId?.trim())) {
+    return { error: 'continuation cannot be combined with sessionId or taskId.' };
   }
 
   const env = ctx.env as unknown as Env;
@@ -95,7 +107,7 @@ export async function searchTaskMessages(
       null, // any status
       1,
       0,
-      input.taskId.trim(),
+      input.taskId.trim()
     );
     const firstSession = sessions.sessions[0];
     if (firstSession) {
@@ -113,17 +125,18 @@ export async function searchTaskMessages(
   const defaultLimit = Number(env.SAM_TASK_MESSAGE_SEARCH_LIMIT) || DEFAULT_LIMIT;
   const limit = Math.min(Math.max(1, Math.round(input.limit || defaultLimit)), maxLimit);
 
-  const results = await projectDataService.searchMessages(
+  const search = await projectDataService.searchMessagesWithArchiveMetadata(
     env,
     project.id,
     input.query.trim(),
     sessionId,
     roles,
     limit,
+    input.continuation?.trim() || null
   );
 
   return {
-    results: results.map((r) => ({
+    results: search.results.map((r) => ({
       messageId: r.id,
       sessionId: r.sessionId,
       sessionTopic: r.sessionTopic,
@@ -132,8 +145,11 @@ export async function searchTaskMessages(
       snippet: r.snippet,
       createdAt: r.createdAt,
     })),
-    count: results.length,
-    query: input.query.trim(),
+    count: search.results.length,
+    ...search.query,
     projectId: project.id,
+    archiveSearch: search.archiveSearch,
+    rootSearch: search.rootSearch,
+    coverageNotes: describeRootSearchCoverage(search.rootSearch),
   };
 }

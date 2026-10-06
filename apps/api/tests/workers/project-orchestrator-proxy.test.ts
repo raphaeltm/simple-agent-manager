@@ -7,8 +7,11 @@
  *
  * Uses Miniflare with real DOs (embedded SQLite) — no vi.mock().
  */
-import type { TaskEventNotification } from '@simple-agent-manager/shared';
-import { env } from 'cloudflare:test';
+import {
+  DEFAULT_ORCHESTRATOR_ZERO_TASK_GRACE_MS,
+  type TaskEventNotification,
+} from '@simple-agent-manager/shared';
+import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 import type { ProjectOrchestrator } from '../../src/durable-objects/project-orchestrator';
@@ -39,7 +42,7 @@ function getStub(projectId: string): DurableObjectStub<ProjectOrchestrator> {
 
 async function seedTestProject(
   projectId: string = TEST_PROJECT_ID,
-  userId: string = TEST_USER_ID,
+  userId: string = TEST_USER_ID
 ): Promise<void> {
   await seedUser(userId);
   await seedInstallation(TEST_INSTALL_ID, userId);
@@ -81,6 +84,30 @@ describe('project-orchestrator proxy — Worker→DO contract', () => {
     expect(status.activeMissions).toHaveLength(1);
   });
 
+  it('terminalizes a zero-task mission after its grace period', async () => {
+    const projectId = 'proj-po-zero-task-001';
+    const missionId = 'mission-zero-task-001';
+    await seedTestProject(projectId);
+    await seedMission(missionId, projectId, TEST_USER_ID);
+    await startOrchestration(env, projectId, missionId);
+
+    await runInDurableObject(getStub(projectId), async (instance) => {
+      instance.ctx.storage.sql.exec(
+        'UPDATE orchestrator_missions SET registered_at = ? WHERE mission_id = ?',
+        Date.now() - DEFAULT_ORCHESTRATOR_ZERO_TASK_GRACE_MS - 1,
+        missionId
+      );
+      await instance.alarm();
+    });
+
+    expect(
+      await env.DATABASE.prepare('SELECT status FROM missions WHERE id = ?')
+        .bind(missionId)
+        .first<{ status: string }>()
+    ).toEqual({ status: 'completed' });
+    expect((await getOrchestratorStatus(env, projectId)).activeMissions).toHaveLength(0);
+  });
+
   it('pauseMission transitions active → paused', async () => {
     const projectId = 'proj-po-pause-001';
     const missionId = 'mission-pause-001';
@@ -97,9 +124,9 @@ describe('project-orchestrator proxy — Worker→DO contract', () => {
     expect(status.activeMissions[0]!.status).toBe('paused');
 
     // Verify D1 was updated
-    const dbMission = await env.DATABASE.prepare(
-      'SELECT status FROM missions WHERE id = ?',
-    ).bind(missionId).first<{ status: string }>();
+    const dbMission = await env.DATABASE.prepare('SELECT status FROM missions WHERE id = ?')
+      .bind(missionId)
+      .first<{ status: string }>();
     expect(dbMission!.status).toBe('paused');
   });
 
@@ -130,9 +157,9 @@ describe('project-orchestrator proxy — Worker→DO contract', () => {
     expect(status.activeMissions[0]!.status).toBe('active');
 
     // Verify D1 was updated
-    const dbMission = await env.DATABASE.prepare(
-      'SELECT status FROM missions WHERE id = ?',
-    ).bind(missionId).first<{ status: string }>();
+    const dbMission = await env.DATABASE.prepare('SELECT status FROM missions WHERE id = ?')
+      .bind(missionId)
+      .first<{ status: string }>();
     expect(dbMission!.status).toBe('active');
   });
 
@@ -157,9 +184,9 @@ describe('project-orchestrator proxy — Worker→DO contract', () => {
     await seedTask(taskId, projectId, TEST_USER_ID, { status: 'delegated' });
 
     // Link task to mission in D1
-    await env.DATABASE.prepare(
-      'UPDATE tasks SET mission_id = ?, scheduler_state = ? WHERE id = ?',
-    ).bind(missionId, 'pending', taskId).run();
+    await env.DATABASE.prepare('UPDATE tasks SET mission_id = ?, scheduler_state = ? WHERE id = ?')
+      .bind(missionId, 'pending', taskId)
+      .run();
 
     await startOrchestration(env, projectId, missionId);
     const result = await cancelMission(env, projectId, missionId);
@@ -171,15 +198,17 @@ describe('project-orchestrator proxy — Worker→DO contract', () => {
     expect(status.activeMissions).toHaveLength(0);
 
     // Verify D1 mission is cancelled
-    const dbMission = await env.DATABASE.prepare(
-      'SELECT status FROM missions WHERE id = ?',
-    ).bind(missionId).first<{ status: string }>();
+    const dbMission = await env.DATABASE.prepare('SELECT status FROM missions WHERE id = ?')
+      .bind(missionId)
+      .first<{ status: string }>();
     expect(dbMission!.status).toBe('cancelled');
 
     // Verify D1 task is cancelled
     const dbTask = await env.DATABASE.prepare(
-      'SELECT status, scheduler_state FROM tasks WHERE id = ?',
-    ).bind(taskId).first<{ status: string; scheduler_state: string }>();
+      'SELECT status, scheduler_state FROM tasks WHERE id = ?'
+    )
+      .bind(taskId)
+      .first<{ status: string; scheduler_state: string }>();
     expect(dbTask!.status).toBe('cancelled');
     expect(dbTask!.scheduler_state).toBe('cancelled');
   });
@@ -201,19 +230,66 @@ describe('project-orchestrator proxy — Worker→DO contract', () => {
     await seedTask(taskId, projectId, TEST_USER_ID);
 
     // Link task to mission
-    await env.DATABASE.prepare(
-      'UPDATE tasks SET mission_id = ? WHERE id = ?',
-    ).bind(missionId, taskId).run();
+    await env.DATABASE.prepare('UPDATE tasks SET mission_id = ? WHERE id = ?')
+      .bind(missionId, taskId)
+      .run();
 
     await startOrchestration(env, projectId, missionId);
-    const result = await overrideTaskState(env, projectId, missionId, taskId, 'blocked', 'Waiting for dependency');
+    const result = await overrideTaskState(
+      env,
+      projectId,
+      missionId,
+      taskId,
+      'blocked_human',
+      'Waiting for dependency'
+    );
 
     expect(result).toBe(true);
 
+    const dbTask = await env.DATABASE.prepare('SELECT scheduler_state FROM tasks WHERE id = ?')
+      .bind(taskId)
+      .first<{ scheduler_state: string }>();
+    expect(dbTask!.scheduler_state).toBe('blocked_human');
+  });
+
+  it('overrideTaskState rejects a task that belongs to another project and leaves it unchanged', async () => {
+    const callerProjectId = 'proj-po-override-caller-001';
+    const targetProjectId = 'proj-po-override-target-001';
+    const missionId = 'mission-override-target-001';
+    const taskId = 'task-override-target-001';
+
+    await seedTestProject(callerProjectId);
+    await seedTestProject(targetProjectId);
+    await seedMission(missionId, targetProjectId, TEST_USER_ID);
+    await seedTask(taskId, targetProjectId, TEST_USER_ID, { status: 'delegated' });
+
+    await env.DATABASE.prepare('UPDATE tasks SET mission_id = ?, scheduler_state = ? WHERE id = ?')
+      .bind(missionId, 'schedulable', taskId)
+      .run();
+
+    // Defence-in-depth: even if the caller project's orchestrator is somehow
+    // tracking the target mission, the task row ownership must still reject.
+    await startOrchestration(env, callerProjectId, missionId);
+    const result = await overrideTaskState(
+      env,
+      callerProjectId,
+      missionId,
+      taskId,
+      'blocked_human',
+      'Cross-project attempt'
+    );
+
+    expect(result).toBe(false);
+
     const dbTask = await env.DATABASE.prepare(
-      'SELECT scheduler_state FROM tasks WHERE id = ?',
-    ).bind(taskId).first<{ scheduler_state: string }>();
-    expect(dbTask!.scheduler_state).toBe('blocked');
+      'SELECT project_id, scheduler_state FROM tasks WHERE id = ?'
+    )
+      .bind(taskId)
+      .first<{ project_id: string; scheduler_state: string | null }>();
+    expect(dbTask).toEqual({
+      project_id: targetProjectId,
+      scheduler_state: 'schedulable',
+    });
   });
 
   it('overrideTaskState returns false for invalid state', async () => {
@@ -223,15 +299,19 @@ describe('project-orchestrator proxy — Worker→DO contract', () => {
     await seedTestProject(projectId);
     await seedMission(missionId, projectId, TEST_USER_ID);
     await seedTask(taskId, projectId, TEST_USER_ID);
-    await env.DATABASE.prepare(
-      'UPDATE tasks SET mission_id = ? WHERE id = ?',
-    ).bind(missionId, taskId).run();
+    await env.DATABASE.prepare('UPDATE tasks SET mission_id = ? WHERE id = ?')
+      .bind(missionId, taskId)
+      .run();
 
     await startOrchestration(env, projectId, missionId);
     // 'completed' is not an overridable state
     const result = await overrideTaskState(
-      env, projectId, missionId, taskId,
-      'completed' as never, 'Should fail',
+      env,
+      projectId,
+      missionId,
+      taskId,
+      'completed' as never,
+      'Should fail'
     );
     expect(result).toBe(false);
   });
@@ -249,52 +329,86 @@ describe('project-orchestrator proxy — Worker→DO contract', () => {
     await seedTask(taskB, projectId, TEST_USER_ID);
 
     // Link each task to its own mission
-    await env.DATABASE.prepare(
-      'UPDATE tasks SET mission_id = ? WHERE id = ?',
-    ).bind(missionA, taskA).run();
-    await env.DATABASE.prepare(
-      'UPDATE tasks SET mission_id = ? WHERE id = ?',
-    ).bind(missionB, taskB).run();
+    await env.DATABASE.prepare('UPDATE tasks SET mission_id = ? WHERE id = ?')
+      .bind(missionA, taskA)
+      .run();
+    await env.DATABASE.prepare('UPDATE tasks SET mission_id = ? WHERE id = ?')
+      .bind(missionB, taskB)
+      .run();
 
     await startOrchestration(env, projectId, missionA);
     await startOrchestration(env, projectId, missionB);
 
     // Attempt to override taskB via missionA — should fail
-    const result = await overrideTaskState(env, projectId, missionA, taskB, 'blocked', 'Cross-mission attempt');
+    const result = await overrideTaskState(
+      env,
+      projectId,
+      missionA,
+      taskB,
+      'blocked_human',
+      'Cross-mission attempt'
+    );
     expect(result).toBe(false);
 
     // Verify taskB's scheduler_state was not changed
-    const dbTask = await env.DATABASE.prepare(
-      'SELECT scheduler_state FROM tasks WHERE id = ?',
-    ).bind(taskB).first<{ scheduler_state: string | null }>();
-    expect(dbTask!.scheduler_state).not.toBe('blocked');
+    const dbTask = await env.DATABASE.prepare('SELECT scheduler_state FROM tasks WHERE id = ?')
+      .bind(taskB)
+      .first<{ scheduler_state: string | null }>();
+    expect(dbTask!.scheduler_state).not.toBe('blocked_human');
   });
 
-  it('notifyTaskEvent triggers scheduling for active mission', async () => {
+  it('notifyTaskEvent schedules and fully terminalizes an active mission', async () => {
     const projectId = 'proj-po-notify-001';
     const missionId = 'mission-notify-001';
+    const taskId = 'task-notify-001';
     await seedTestProject(projectId);
     await seedMission(missionId, projectId, TEST_USER_ID);
+    await seedTask(taskId, projectId, TEST_USER_ID, { status: 'in_progress' });
+    await env.DATABASE.prepare('UPDATE tasks SET mission_id = ? WHERE id = ?')
+      .bind(missionId, taskId)
+      .run();
 
     await startOrchestration(env, projectId, missionId);
 
+    const futureAlarm = Date.now() + 60_000;
+    await runInDurableObject(getStub(projectId), async (instance) => {
+      await instance.ctx.storage.setAlarm(futureAlarm);
+    });
+
     const notification: TaskEventNotification = {
       missionId,
-      taskId: 'task-notify-001',
+      taskId,
       event: 'completed',
     };
 
-    // Capture decision count before notification
+    // Move the task to terminal state after the initial orchestration cycle.
+    await env.DATABASE.prepare(
+      "UPDATE tasks SET status = 'completed', updated_at = datetime('now') WHERE id = ?"
+    )
+      .bind(taskId)
+      .run();
+
     const statusBefore = await getOrchestratorStatus(env, projectId);
+    expect(statusBefore.nextAlarmAt).toBe(futureAlarm);
     const decisionsBefore = statusBefore.recentDecisions.length;
 
-    // Should not throw — just forwards to DO
+    // The service forwards the event and the alarm completes the mission.
     await notifyTaskEvent(env, projectId, notification);
 
-    // The DO should have processed the event and triggered a scheduling cycle
+    let missionStatus: string | null = null;
+    for (let attempt = 0; attempt < 20 && missionStatus !== 'completed'; attempt++) {
+      missionStatus =
+        (
+          await env.DATABASE.prepare('SELECT status FROM missions WHERE id = ?')
+            .bind(missionId)
+            .first<{ status: string }>()
+        )?.status ?? null;
+      if (missionStatus !== 'completed') await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    expect(missionStatus).toBe('completed');
     const status = await getOrchestratorStatus(env, projectId);
-    expect(status.activeMissions).toHaveLength(1);
-    // Scheduling cycle should have added at least one new decision log entry
+    expect(status.activeMissions).toHaveLength(0);
     expect(status.recentDecisions.length).toBeGreaterThan(decisionsBefore);
   });
 
@@ -332,6 +446,79 @@ describe('project-orchestrator proxy — Worker→DO contract', () => {
     expect(queue).toHaveLength(0);
   });
 
+  // REGRESSION (rule 50): `orchestrator_missions` rows were narrowed with a
+  // blind `as unknown as Array<{...}>` cast in getStatus(). A single malformed
+  // row must not 500 the whole status read — it is skipped while sibling rows
+  // still return. `startOrchestration` always writes a well-formed row, so the
+  // malformed row is injected directly via real embedded SQLite (bypassing the
+  // app layer) to simulate a legacy/corrupted row; `last_checked_at` has
+  // INTEGER affinity but no STRICT typing, so SQLite accepts and stores a
+  // non-numeric TEXT value as-is.
+  it('getOrchestratorStatus skips a malformed orchestrator_missions row and still returns the good one', async () => {
+    const projectId = 'proj-po-malformed-missions-001';
+    const goodMissionId = 'mission-malformed-good-001';
+    const badMissionId = 'mission-malformed-bad-001';
+    await seedTestProject(projectId);
+    await seedMission(goodMissionId, projectId, TEST_USER_ID);
+    await startOrchestration(env, projectId, goodMissionId);
+
+    await runInDurableObject(getStub(projectId), async (instance) => {
+      instance.ctx.storage.sql.exec(
+        `INSERT INTO orchestrator_missions (mission_id, status, last_checked_at, last_dispatch_at, registered_at)
+         VALUES (?, 'active', ?, NULL, ?)`,
+        badMissionId,
+        'not-a-timestamp',
+        Date.now()
+      );
+    });
+
+    const status = await getOrchestratorStatus(env, projectId);
+
+    const missionIds = status.activeMissions.map((m) => m.missionId);
+    expect(missionIds).toContain(goodMissionId);
+    expect(missionIds).not.toContain(badMissionId);
+  });
+
+  // REGRESSION (rule 50): same class of bug as above, for the `scheduling_queue`
+  // read shared by getStatus() and getSchedulingQueue(). `scheduled_at` has
+  // INTEGER affinity; a non-numeric value is accepted by SQLite and must be
+  // skipped rather than crashing the read.
+  it('getSchedulingQueue skips a malformed scheduling_queue row and still returns the good one', async () => {
+    const projectId = 'proj-po-malformed-queue-001';
+    const missionId = 'mission-malformed-queue-001';
+    await seedTestProject(projectId);
+    await seedMission(missionId, projectId, TEST_USER_ID);
+    await startOrchestration(env, projectId, missionId);
+
+    await runInDurableObject(getStub(projectId), async (instance) => {
+      instance.ctx.storage.sql.exec(
+        `INSERT INTO scheduling_queue (id, mission_id, task_id, scheduled_at, dispatched_at, reason)
+         VALUES (?, ?, 'task-good', ?, NULL, 'good entry')`,
+        'queue-good-001',
+        missionId,
+        Date.now()
+      );
+      instance.ctx.storage.sql.exec(
+        `INSERT INTO scheduling_queue (id, mission_id, task_id, scheduled_at, dispatched_at, reason)
+         VALUES (?, ?, 'task-bad', ?, NULL, 'bad entry')`,
+        'queue-bad-001',
+        missionId,
+        'not-a-timestamp'
+      );
+    });
+
+    const queue = await getSchedulingQueue(env, projectId);
+    const queueIds = queue.map((q) => q.id);
+    expect(queueIds).toContain('queue-good-001');
+    expect(queueIds).not.toContain('queue-bad-001');
+
+    // getStatus() shares the same query/schema — verify it degrades identically.
+    const status = await getOrchestratorStatus(env, projectId);
+    const statusQueueIds = status.schedulingQueue.map((q) => q.id);
+    expect(statusQueueIds).toContain('queue-good-001');
+    expect(statusQueueIds).not.toContain('queue-bad-001');
+  });
+
   it('proxy uses idFromName for deterministic DO resolution', async () => {
     const projectId = 'proj-po-deterministic-001';
     const missionId = 'mission-deterministic-001';
@@ -345,7 +532,9 @@ describe('project-orchestrator proxy — Worker→DO contract', () => {
     const directStatus = await getStub(projectId).getStatus(projectId);
 
     expect(proxyStatus.activeMissions).toHaveLength(directStatus.activeMissions.length);
-    expect(proxyStatus.activeMissions[0]!.missionId).toBe(directStatus.activeMissions[0]!.missionId);
+    expect(proxyStatus.activeMissions[0]!.missionId).toBe(
+      directStatus.activeMissions[0]!.missionId
+    );
   });
 
   it('full lifecycle: start → pause → resume → cancel', async () => {

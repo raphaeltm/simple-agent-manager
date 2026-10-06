@@ -19,7 +19,7 @@ func TestEffectivePromptTimeout(t *testing.T) {
 			name:     "workspace session uses ACPPromptTimeout (0 = no limit)",
 			taskID:   "",
 			prompt:   0,
-			task:     6 * time.Hour,
+			task:     8 * time.Hour,
 			expected: 0,
 		},
 		{
@@ -33,8 +33,8 @@ func TestEffectivePromptTimeout(t *testing.T) {
 			name:     "task session uses ACPTaskPromptTimeout",
 			taskID:   "task-123",
 			prompt:   0,
-			task:     6 * time.Hour,
-			expected: 6 * time.Hour,
+			task:     8 * time.Hour,
+			expected: 8 * time.Hour,
 		},
 		{
 			name:     "task session with custom task timeout",

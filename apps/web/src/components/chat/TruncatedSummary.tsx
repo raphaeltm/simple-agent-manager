@@ -3,6 +3,7 @@ import { type FC, useCallback, useEffect, useRef, useState } from 'react';
 
 import { useGlobalAudio } from '../../contexts/GlobalAudioContext';
 import { getTtsApiUrl } from '../../lib/api';
+import { RenderedMarkdown } from '../MarkdownRenderer';
 
 /** Lazily computed TTS API URL — avoids module-scope errors in test environments. */
 let _cachedTtsApiUrl: string | undefined;
@@ -62,13 +63,20 @@ export const TruncatedSummary: FC<TruncatedSummaryProps> = ({ summary, taskId })
   return (
     <>
       <div
-        className="glass-surface glass-composited mx-3 mt-2 px-4 py-2 rounded-xl border"
+        className="glass-surface glass-composited relative mx-3 mt-2 px-4 py-2 rounded-xl border"
         style={{
           borderColor: 'rgba(34, 197, 94, 0.12)',
-          background: 'linear-gradient(135deg, rgba(22, 163, 74, 0.08), rgba(8, 15, 12, 0.65))',
+          background: 'linear-gradient(135deg, rgba(22, 163, 74, 0.08), var(--sam-glass-bg-surface))',
           boxShadow: '0 4px 16px rgba(0, 0, 0, 0.25), 0 6px 12px -2px rgba(34, 197, 94, 0.15)',
         }}
       >
+        {/* Same opacity scrim as SessionHeader/ErrorBanner: this card floats
+            over the message scroller, where backdrop blur never applies. */}
+        <div
+          aria-hidden="true"
+          className="absolute inset-0 rounded-[inherit] -z-10 pointer-events-none"
+          style={{ backgroundColor: 'color-mix(in srgb, var(--sam-color-bg-canvas) 78%, transparent)' }}
+        />
         <span className="sam-type-caption text-success font-medium">
           Summary:
         </span>{' '}
@@ -92,9 +100,9 @@ export const TruncatedSummary: FC<TruncatedSummaryProps> = ({ summary, taskId })
       <Dialog isOpen={isModalOpen} onClose={handleClose} maxWidth="lg">
         <div className="space-y-3">
           <div className="flex items-center gap-2">
-            <h2 id="dialog-title" className="text-lg font-semibold text-fg-primary">
+            <h3 id="dialog-title" className="text-lg font-semibold text-fg-primary">
               Task Summary
-            </h2>
+            </h3>
             {showSpeaker && (
               <button
                 type="button"
@@ -113,9 +121,7 @@ export const TruncatedSummary: FC<TruncatedSummaryProps> = ({ summary, taskId })
             )}
           </div>
 
-          <p className="text-fg-primary whitespace-pre-wrap break-words">
-            {summary}
-          </p>
+          <RenderedMarkdown content={summary} inline />
           <div className="flex justify-end">
             <button
               type="button"

@@ -52,4 +52,4 @@ MCP server configurations for ACP sessions are stored only in an in-memory map (
 ## References
 
 - `docs/notes/2026-03-08-mcp-token-revocation-postmortem.md` — related MCP token lifecycle issue
-- `tasks/active/2026-03-08-mcp-token-revocation-breaks-session.md` — active related task
+- `tasks/archive/2026-03-08-mcp-token-revocation-breaks-session.md` — active related task

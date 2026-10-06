@@ -5,86 +5,41 @@
  * cleanup on failure, and D1 execution step updates.
  */
 import { log } from '../../lib/logger';
+import { persistError, redactSensitiveData } from '../../services/observability';
+import { recordTaskLifecycleEventBestEffort } from '../../services/project-lifecycle-events';
+import {
+  isSessionRecoveryAttemptCurrent,
+  restoreSessionRecoveryHandoff,
+} from '../../services/session-recovery-authority';
+import { taskStatusIsNonTerminalSql, TERMINAL_STATUS_VALUES } from '../../services/task-status';
+import {
+  createProjectEventTaskTerminalTransitionHook,
+  createTaskWaitTerminalTransitionHook,
+  runTaskTerminalTransitionHooks,
+} from '../../services/task-terminal-transition-hooks';
 import { syncTriggerExecutionStatus } from '../../services/trigger-execution-sync';
+import { cancelVmTaskAdmission, wakeVmAdmissionWaiters } from '../../services/vm-admission-control';
+import { finalizeWorkspaceLifecycleClosure } from '../../services/workspace-lifecycle-finalizer';
+import { releaseClaimedWarmNode } from './node-selection';
+import {
+  canMutateProjectDataFailureSession,
+  projectDataGuardForReservedSubmission,
+} from './reserved-project-data-guard';
+import { ensureSessionLinked as ensureSessionLinkedImpl } from './session-linking';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
+import { notifyWakeSettled } from './wake-progress-notifier';
+import { recoverReservedWorkspaceAllocationForCleanup } from './workspace-reserved-allocation';
 
 // =========================================================================
 // Session linking
 // =========================================================================
 
-/**
- * TDF-6: Ensure the chat session is linked to the workspace in both D1 and the
- * ProjectData DO. This is idempotent — safe to call on every retry/recovery.
- *
- * D1 update is done FIRST and separately because:
- * - D1 chat_session_id on workspace is used by idle cleanup and task completion hooks
- * - Even if the DO call fails, D1 must have the link for downstream correctness
- */
 export async function ensureSessionLinked(
   state: TaskRunnerState,
   workspaceId: string,
-  rc: TaskRunnerContext,
+  rc: TaskRunnerContext
 ): Promise<void> {
-  if (!state.stepResults.chatSessionId) return;
-
-  const now = new Date().toISOString();
-
-  // Step 1: Update D1 workspace record (critical — used by idle cleanup, task hooks)
-  // This is idempotent: setting chat_session_id to the same value is fine.
-  try {
-    await rc.env.DATABASE.prepare(
-      `UPDATE workspaces SET chat_session_id = ?, updated_at = ? WHERE id = ?`
-    ).bind(state.stepResults.chatSessionId, now, workspaceId).run();
-
-    log.info('task_runner_do.session_d1_linked', {
-      taskId: state.taskId,
-      sessionId: state.stepResults.chatSessionId,
-      workspaceId,
-    });
-  } catch (err) {
-    // D1 link failure is blocking — without chatSessionId in D1, the message
-    // ingestion endpoint will reject all messages for this workspace.
-    log.error('task_runner_do.session_d1_link_failed', {
-      taskId: state.taskId,
-      sessionId: state.stepResults.chatSessionId,
-      workspaceId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    // Mark as permanent so the task runner fails immediately rather than
-    // burning all retry budget on a non-retryable D1 constraint violation.
-    const permanentError = new Error(
-      `Failed to link chatSessionId to workspace ${workspaceId} in D1: ${err instanceof Error ? err.message : String(err)}`
-    );
-    (permanentError as Error & { permanent: boolean }).permanent = true;
-    throw permanentError;
-  }
-
-  // Step 2: Update ProjectData DO session record (best-effort — enriches session data)
-  // linkSessionToWorkspace in the DO is also idempotent (updates workspace_id).
-  try {
-    const projectDataService = await import('../../services/project-data');
-    await projectDataService.linkSessionToWorkspace(
-      rc.env,
-      state.projectId,
-      state.stepResults.chatSessionId,
-      workspaceId,
-    );
-
-    log.info('task_runner_do.session_linked_to_workspace', {
-      taskId: state.taskId,
-      sessionId: state.stepResults.chatSessionId,
-      workspaceId,
-    });
-  } catch (err) {
-    // DO link failure is best-effort — session still works without workspace_id
-    // in the DO's SQLite. The D1 link above handles downstream needs.
-    log.error('task_runner_do.session_do_link_failed', {
-      taskId: state.taskId,
-      sessionId: state.stepResults.chatSessionId,
-      workspaceId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
+  await ensureSessionLinkedImpl(state, workspaceId, rc);
 }
 
 // =========================================================================
@@ -96,22 +51,109 @@ export async function ensureSessionLinked(
  */
 export async function transitionToInProgress(
   state: TaskRunnerState,
-  rc: TaskRunnerContext,
+  rc: TaskRunnerContext
 ): Promise<void> {
   const now = new Date().toISOString();
+  const recoverySourceTaskId = state.config.recoverySourceTaskId ?? null;
+  const recoveryChatSessionId = state.config.resumeSnapshotChatSessionId ?? null;
 
-  // Optimistic lock: only transition if still delegated
+  // Optimistic lock: only transition if still delegated. Guarded snapshot
+  // recovery also proves the exact source and snapshot claim are live in the
+  // same D1 statement that commits the replacement to in_progress.
   const result = await rc.env.DATABASE.prepare(
-    `UPDATE tasks SET status = 'in_progress', started_at = ?, execution_step = 'running', updated_at = ? WHERE id = ? AND status = 'delegated'`
-  ).bind(now, now, state.taskId).run();
+    `UPDATE tasks
+        SET status = 'in_progress', started_at = ?, execution_step = 'running', updated_at = ?
+      WHERE id = ? AND status = 'delegated'
+        AND (
+          ? IS NULL
+          OR EXISTS (
+            SELECT 1
+              FROM tasks recovery
+              JOIN tasks source
+                ON source.id = ?
+               AND (source.id = recovery.id OR source.id = recovery.recovery_source_task_id)
+               AND source.project_id = recovery.project_id
+              JOIN session_snapshots snapshot
+                ON snapshot.chat_session_id = recovery.chat_session_id
+               AND snapshot.project_id = recovery.project_id
+               AND snapshot.recovery_task_id = recovery.id
+             WHERE recovery.id = ?
+               AND recovery.project_id = ?
+               AND recovery.chat_session_id = ?
+               AND (source.id = recovery.id OR recovery.triggered_by = 'session-recovery')
+               AND source.status NOT IN ('completed', 'failed', 'cancelled')
+               AND snapshot.recovery_status IN ('waking', 'restored')
+          )
+        )
+        AND (? IS NULL OR EXISTS (
+          SELECT 1 FROM session_snapshots snapshot
+           WHERE snapshot.chat_session_id = ? AND snapshot.project_id = ?
+             AND snapshot.recovery_task_id = tasks.id AND snapshot.recovery_attempt_id = ?
+        ))`
+  )
+    .bind(
+      now,
+      now,
+      state.taskId,
+      recoverySourceTaskId,
+      recoverySourceTaskId,
+      state.taskId,
+      state.projectId,
+      recoveryChatSessionId,
+      state.config.recoveryAttemptId ?? null,
+      recoveryChatSessionId,
+      state.projectId,
+      state.config.recoveryAttemptId ?? null
+    )
+    .run();
 
   if (!result.meta.changes || result.meta.changes === 0) {
+    const authoritative = await rc.env.DATABASE.prepare(`SELECT status FROM tasks WHERE id = ?`)
+      .bind(state.taskId)
+      .first<{ status: string }>();
     log.warn('task_runner_do.aborted_by_recovery', {
       taskId: state.taskId,
       step: 'in_progress_transition',
+      authoritativeStatus: authoritative?.status ?? null,
     });
-    state.completed = true;
-    await rc.ctx.storage.put('state', state);
+    if (authoritative?.status === 'in_progress') {
+      // Another runner already committed the handoff. The wake is still over from
+      // the watcher's point of view, so clear the banner here too.
+      rc.ctx.waitUntil(
+        notifyWakeSettled({
+          env: rc.env,
+          projectId: state.projectId,
+          chatSessionId: recoveryChatSessionId,
+          status: 'restored',
+        })
+      );
+      state.currentStep = 'running';
+      state.completed = true;
+      await rc.ctx.storage.put('state', state);
+      return;
+    }
+    if (!authoritative || ['completed', 'failed', 'cancelled'].includes(authoritative.status)) {
+      if (recoveryChatSessionId) {
+        await failRecoveryLifecycle(
+          state,
+          'Session recovery authority was revoked before agent handoff committed.',
+          rc
+        );
+        // A wake that will never finish must not leave a spinner running.
+        rc.ctx.waitUntil(
+          notifyWakeSettled({
+            env: rc.env,
+            projectId: state.projectId,
+            chatSessionId: recoveryChatSessionId,
+            status: 'failed',
+          })
+        );
+      }
+      state.completed = true;
+      await rc.ctx.storage.put('state', state);
+      return;
+    }
+    await failTask(state, 'Task orchestration was superseded before agent handoff completed.', rc);
     return;
   }
 
@@ -120,12 +162,29 @@ export async function transitionToInProgress(
   await rc.env.DATABASE.prepare(
     `INSERT INTO task_status_events (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)
      VALUES (?, ?, 'delegated', 'in_progress', 'system', NULL, ?, ?)`
-  ).bind(
-    ulid(),
-    state.taskId,
-    `Agent session ${state.stepResults.agentSessionId} created. Task execution started.`,
-    now,
-  ).run();
+  )
+    .bind(
+      ulid(),
+      state.taskId,
+      `Agent session ${state.stepResults.agentSessionId} created. Task execution started.`,
+      now
+    )
+    .run();
+
+  rc.ctx.waitUntil(
+    recordTaskLifecycleEventBestEffort(rc.env, {
+      projectId: state.projectId,
+      taskId: state.taskId,
+      status: 'in_progress',
+      fromStatus: 'delegated',
+      workspaceId: state.stepResults.workspaceId,
+      sessionId: state.stepResults.chatSessionId,
+      nodeId: state.stepResults.nodeId,
+      agentSessionId: state.stepResults.agentSessionId,
+      source: 'task_runner.transition_to_in_progress',
+      occurredAt: now,
+    })
+  );
 
   log.info('task_runner_do.step.in_progress', {
     taskId: state.taskId,
@@ -157,6 +216,19 @@ export async function transitionToInProgress(
     }
   }
 
+  // The agent session is live, so the wake is over. This is the ONLY terminal
+  // emit on the happy path: the raw guarded UPDATE above bypasses
+  // `updateD1ExecutionStep`, and the alarm dispatcher treats `running` as a
+  // terminal no-op step, so the intermediate-phase choke point never fires here.
+  rc.ctx.waitUntil(
+    notifyWakeSettled({
+      env: rc.env,
+      projectId: state.projectId,
+      chatSessionId: recoveryChatSessionId,
+      status: 'restored',
+    })
+  );
+
   state.currentStep = 'running';
   state.completed = true;
   await rc.ctx.storage.put('state', state);
@@ -165,11 +237,34 @@ export async function transitionToInProgress(
 /**
  * Fail the task, clean up resources, record error, mark DO as complete.
  */
+async function ownsRecoveryAttempt(
+  state: TaskRunnerState,
+  rc: TaskRunnerContext
+): Promise<boolean> {
+  const persisted = await rc.ctx.storage.get?.<TaskRunnerState>('state');
+  if (
+    persisted &&
+    (persisted.config.recoveryAttemptId ?? null) !== (state.config.recoveryAttemptId ?? null)
+  )
+    return false;
+  return (
+    !state.config.recoveryAttemptId ||
+    isSessionRecoveryAttemptCurrent(rc.env.DATABASE, {
+      taskId: state.taskId,
+      projectId: state.projectId,
+      chatSessionId: state.config.resumeSnapshotChatSessionId ?? state.config.chatSessionId ?? '',
+      recoveryAttemptId: state.config.recoveryAttemptId,
+    })
+  );
+}
+
 export async function failTask(
   state: TaskRunnerState,
   errorMessage: string,
-  rc: TaskRunnerContext,
+  rc: TaskRunnerContext
 ): Promise<void> {
+  const ownsClaim = () => ownsRecoveryAttempt(state, rc);
+  if (!(await ownsClaim())) return;
   const now = new Date().toISOString();
 
   log.error('task_runner_do.task_failed', {
@@ -181,31 +276,94 @@ export async function failTask(
 
   // Check current status before failing (idempotent)
   const task = await rc.env.DATABASE.prepare(
-    `SELECT status, mission_id FROM tasks WHERE id = ?`
-  ).bind(state.taskId).first<{ status: string; mission_id: string | null }>();
+    `SELECT status, mission_id, parent_task_id FROM tasks WHERE id = ?`
+  )
+    .bind(state.taskId)
+    .first<{ status: string; mission_id: string | null; parent_task_id: string | null }>();
 
   const currentStatus = task?.status;
-  if (currentStatus === 'failed' || currentStatus === 'completed' || currentStatus === 'cancelled') {
-    // Already terminal — skip
+  if (
+    currentStatus === 'failed' ||
+    currentStatus === 'completed' ||
+    currentStatus === 'cancelled'
+  ) {
+    await recoverReservedWorkspaceAllocationForCleanup(state, rc);
+    if (state.config.resumeSnapshotChatSessionId) {
+      await failRecoveryLifecycle(state, errorMessage, rc);
+    }
+    await cleanupOnFailure(state, rc, currentStatus === 'cancelled' ? 'cancelled' : 'task_failed');
+    // Already terminal — preserve the winning terminal task status.
     state.completed = true;
     await rc.ctx.storage.put('state', state);
     return;
   }
 
-  // Fail the task
-  await rc.env.DATABASE.prepare(
-    `UPDATE tasks SET status = 'failed', execution_step = NULL, error_message = ?, completed_at = ?, updated_at = ? WHERE id = ?`
-  ).bind(errorMessage, now, now, state.taskId).run();
+  // Fail the task. The status predicate makes this idempotent against a
+  // concurrent terminal transition that lands between the check above and this
+  // write — never clobber an already-terminal row (completed/failed/cancelled).
+  const failureTransition = await rc.env.DATABASE.prepare(
+    `UPDATE tasks SET status = 'failed', execution_step = NULL, error_message = ?, completed_at = ?, updated_at = ?
+     WHERE id = ? AND ${taskStatusIsNonTerminalSql()}
+       AND (? IS NULL OR EXISTS (
+         SELECT 1 FROM session_snapshots snapshot
+          WHERE snapshot.chat_session_id = ? AND snapshot.project_id = ?
+            AND snapshot.recovery_task_id = tasks.id AND snapshot.recovery_attempt_id = ?
+       ))`
+  )
+    .bind(
+      errorMessage,
+      now,
+      now,
+      state.taskId,
+      ...TERMINAL_STATUS_VALUES,
+      state.config.recoveryAttemptId ?? null,
+      state.config.resumeSnapshotChatSessionId ?? null,
+      state.projectId,
+      state.config.recoveryAttemptId ?? null
+    )
+    .run();
+
+  if (!failureTransition.meta.changes) {
+    if (!(await ownsClaim())) return;
+    await recoverReservedWorkspaceAllocationForCleanup(state, rc);
+    if (state.config.resumeSnapshotChatSessionId) {
+      await failRecoveryLifecycle(state, errorMessage, rc);
+    }
+    await cleanupOnFailure(state, rc);
+    state.completed = true;
+    await rc.ctx.storage.put('state', state);
+    return;
+  }
 
   // Sync trigger execution status (best-effort) — without this, cron triggers
   // with skipIfRunning=true permanently stop firing because the execution stays 'running'.
   await syncTriggerExecutionStatus(rc.env.DATABASE, state.taskId, 'failed', errorMessage);
 
   const { ulid } = await import('../../lib/ulid');
+  const failureEventId = ulid();
   await rc.env.DATABASE.prepare(
     `INSERT INTO task_status_events (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)
      VALUES (?, ?, ?, 'failed', 'system', NULL, ?, ?)`
-  ).bind(ulid(), state.taskId, currentStatus || 'queued', errorMessage, now).run();
+  )
+    .bind(failureEventId, state.taskId, currentStatus || 'queued', errorMessage, now)
+    .run();
+
+  await runTaskTerminalTransitionHooks(
+    {
+      transitionId: failureEventId,
+      taskId: state.taskId,
+      projectId: state.projectId,
+      parentTaskId: task?.parent_task_id ?? null,
+      status: 'failed',
+      reason: errorMessage,
+      occurredAt: now,
+      source: 'task_runner.fail_task',
+    },
+    [
+      createTaskWaitTerminalTransitionHook(rc.env),
+      createProjectEventTaskTerminalTransitionHook(rc.env, { captureAtHook: true }),
+    ]
+  );
 
   // Notify orchestrator of task failure (best-effort) — triggers scheduling cycle
   // so dependent tasks can react to the failure (e.g., unblock blocked_dependency tasks)
@@ -227,62 +385,69 @@ export async function failTask(
     }
   }
 
-  // Write to observability database
-  try {
-    await rc.env.OBSERVABILITY_DATABASE.prepare(
-      `INSERT INTO errors (id, source, level, message, stack, context, user_id, node_id, workspace_id, ip_address, user_agent, timestamp)
-       VALUES (?, 'api', 'error', ?, NULL, ?, ?, ?, ?, NULL, NULL, ?)`
-    ).bind(
-      ulid(),
-      `Task ${state.taskId} failed at step ${state.currentStep}: ${errorMessage}`,
-      JSON.stringify({
-        taskId: state.taskId,
-        projectId: state.projectId,
-        step: state.currentStep,
-        retryCount: state.retryCount,
-      }),
-      state.userId,
-      state.stepResults.nodeId,
-      state.stepResults.workspaceId,
-      now,
-    ).run();
-  } catch (err) {
-    log.error('task_runner_do.observability_write_failed', {
+  // Write bounded, redacted diagnostics without allowing observability to affect task failure.
+  const safeError = redactSensitiveData({
+    message: `Task ${state.taskId} failed at step ${state.currentStep}: ${errorMessage}`,
+    context: {
       taskId: state.taskId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
+      projectId: state.projectId,
+      step: state.currentStep,
+      retryCount: state.retryCount,
+    },
+  });
+  await persistError(
+    rc.env.OBSERVABILITY_DATABASE,
+    {
+      source: 'api',
+      level: 'error',
+      message: safeError.message,
+      context: safeError.context,
+      userId: state.userId,
+      nodeId: state.stepResults.nodeId,
+      workspaceId: state.stepResults.workspaceId,
+      taskId: state.taskId,
+      sessionId: state.stepResults.chatSessionId,
+    },
+    rc.env
+  );
 
-  // Inject error into chat session and mark it as failed. The UI also
-  // cross-references task.status so even if this RPC fails the session will
-  // appear terminated, but we still attempt it for data consistency.
-  if (state.stepResults.chatSessionId && state.projectId) {
+  const recoverySessionId = state.config.resumeSnapshotChatSessionId ?? null;
+  if (recoverySessionId) {
+    await failRecoveryLifecycle(state, errorMessage, rc);
+  } else if (state.stepResults.chatSessionId && state.projectId) {
+    // Ordinary task failures are terminal for their chat. The UI also
+    // cross-references task.status, but update ProjectData for consistency.
     const sessionId = state.stepResults.chatSessionId;
     const projectId = state.projectId;
-    const maxAttempts = 2;
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      try {
-        const { persistMessage, failSession } = await import('../../services/project-data');
-        await persistMessage(
-          rc.env,
-          projectId,
-          sessionId,
-          'system',
-          `Task failed at step "${state.currentStep}": ${errorMessage}`,
-          null
-        );
-        await failSession(rc.env, projectId, sessionId, errorMessage);
-        break; // success
-      } catch (chatErr) {
-        log.error('task_runner_do.chat_session_fail_attempt', {
-          taskId: state.taskId,
-          sessionId,
-          attempt,
-          maxAttempts,
-          error: chatErr instanceof Error ? chatErr.message : String(chatErr),
-        });
-        if (attempt < maxAttempts) {
-          await new Promise((r) => setTimeout(r, 100));
+    if (await canMutateProjectDataFailureSession(state, rc, sessionId)) {
+      const maxAttempts = 2;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          const { persistMessage, failSession } = await import('../../services/project-data');
+          const sessionGuard = projectDataGuardForReservedSubmission(state);
+          await persistMessage(
+            rc.env,
+            projectId,
+            sessionId,
+            'system',
+            `Task failed at step "${state.currentStep}": ${errorMessage}`,
+            null,
+            undefined,
+            sessionGuard
+          );
+          await failSession(rc.env, projectId, sessionId, errorMessage, sessionGuard);
+          break; // success
+        } catch (chatErr) {
+          log.error('task_runner_do.chat_session_fail_attempt', {
+            taskId: state.taskId,
+            sessionId,
+            attempt,
+            maxAttempts,
+            error: chatErr instanceof Error ? chatErr.message : String(chatErr),
+          });
+          if (attempt < maxAttempts) {
+            await new Promise((r) => setTimeout(r, 100));
+          }
         }
       }
     }
@@ -302,11 +467,55 @@ export async function failTask(
     state.stepResults.mcpToken = null;
   }
 
+  await recoverReservedWorkspaceAllocationForCleanup(state, rc);
+
   // Best-effort cleanup
   await cleanupOnFailure(state, rc);
 
   state.completed = true;
   await rc.ctx.storage.put('state', state);
+}
+
+async function failRecoveryLifecycle(
+  state: TaskRunnerState,
+  errorMessage: string,
+  rc: TaskRunnerContext
+): Promise<void> {
+  const recoverySessionId = state.config.resumeSnapshotChatSessionId;
+  if (!recoverySessionId || !(await ownsRecoveryAttempt(state, rc))) return;
+
+  // Ownership restoration is a correctness boundary, not best-effort cleanup:
+  // if D1 is temporarily unavailable, let the DO alarm retry instead of
+  // completing with a terminal replacement still owning the durable chat.
+  if (!state.config.recoveryAttemptId) {
+    await restoreSessionRecoveryHandoff(rc.env.DATABASE, state.taskId, recoverySessionId);
+  }
+  const { drizzle } = await import('drizzle-orm/d1');
+  const schema = await import('../../db/schema');
+  const { failSessionSnapshotRecovery } = await import('../../services/session-snapshots');
+  await failSessionSnapshotRecovery(
+    drizzle(rc.env.DATABASE, { schema }),
+    rc.env,
+    recoverySessionId,
+    state.taskId,
+    errorMessage,
+    state.config.recoveryAttemptId ?? undefined
+  );
+
+  // The failed task owns only the replacement runtime. Preserve the original
+  // conversation as sleeping so another bounded wake attempt can reuse the
+  // verified snapshot. This also compensates if ProjectData accepted the wake
+  // immediately before a later D1 recovery-commit failure.
+  try {
+    const { sleepSession } = await import('../../services/project-data');
+    await sleepSession(rc.env, state.projectId, recoverySessionId);
+  } catch (chatErr) {
+    log.warn('task_runner_do.session_recovery_resleep_failed', {
+      taskId: state.taskId,
+      sessionId: recoverySessionId,
+      error: chatErr instanceof Error ? chatErr.message : String(chatErr),
+    });
+  }
 }
 
 // =========================================================================
@@ -319,18 +528,101 @@ export async function failTask(
 export async function cleanupOnFailure(
   state: TaskRunnerState,
   rc: TaskRunnerContext,
+  admissionCancelReason: 'task_failed' | 'cancelled' = 'task_failed'
 ): Promise<void> {
+  if (!(await ownsRecoveryAttempt(state, rc))) return;
   const now = new Date().toISOString();
 
-  // Stop workspace if one was created
+  await cancelVmTaskAdmission(
+    rc.env,
+    state.taskId,
+    admissionCancelReason,
+    state.config.recoveryAttemptId ?? null
+  ).catch((err) => {
+    log.warn('task_runner_do.cleanup.admission_cancel_failed', {
+      taskId: state.taskId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
+  state.admissionScopeKey = null;
+  state.admissionLeaseToken = null;
+
+  if (!(await ownsRecoveryAttempt(state, rc))) return;
+  const persistedWarmClaim = state.config.recoveryAttemptId
+    ? null
+    : await rc.env.DATABASE.prepare(`SELECT claimed_warm_node_id FROM tasks WHERE id = ?`)
+        .bind(state.taskId)
+        .first<{ claimed_warm_node_id: string | null }>()
+        .catch(() => null);
+  const claimedWarmNodeId =
+    state.stepResults.claimedWarmNodeId ?? persistedWarmClaim?.claimed_warm_node_id ?? null;
+  if (claimedWarmNodeId) {
+    if (!(await ownsRecoveryAttempt(state, rc))) return;
+    await releaseClaimedWarmNode(state, rc, claimedWarmNodeId).catch((error) => {
+      log.error('task_runner_do.cleanup.warm_claim_release_failed', {
+        taskId: state.taskId,
+        nodeId: claimedWarmNodeId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }
+
+  let workspaceNeedsRuntimeStop = Boolean(
+    state.stepResults.workspaceId && state.stepResults.nodeId
+  );
   if (state.stepResults.workspaceId && state.stepResults.nodeId) {
+    const workspace = await rc.env.DATABASE.prepare(
+      `SELECT status, dispatched_at AS dispatchedAt FROM workspaces WHERE id = ?`
+    )
+      .bind(state.stepResults.workspaceId)
+      .first<{ status: string; dispatchedAt: string | null }>();
+
+    if (workspace?.status === 'creating' && !workspace.dispatchedAt) {
+      await rc.env.DATABASE.prepare(
+        `UPDATE workspaces SET status = 'stopped', error_message = ?, updated_at = ? WHERE id = ?`
+      )
+        .bind(
+          `Task ended before workspace dispatch during ${state.currentStep}`,
+          now,
+          state.stepResults.workspaceId
+        )
+        .run();
+      workspaceNeedsRuntimeStop = false;
+    }
+  }
+
+  if (workspaceNeedsRuntimeStop && state.stepResults.workspaceId && state.stepResults.nodeId) {
+    const node = await rc.env.DATABASE.prepare(
+      `SELECT runtime FROM nodes WHERE id = ? AND user_id = ?`
+    )
+      .bind(state.stepResults.nodeId, state.userId)
+      .first<{ runtime: string | null }>();
+
+    if (node?.runtime === 'cf-container') {
+      try {
+        const { cleanupTaskRun } = await import('../../services/task-runner');
+        await cleanupTaskRun(state.taskId, rc.env, state.config.projectScaling?.warmNodeTimeoutMs);
+      } catch (err) {
+        log.error('task_runner_do.cleanup.cf_container_cleanup_failed', {
+          taskId: state.taskId,
+          nodeId: state.stepResults.nodeId,
+          workspaceId: state.stepResults.workspaceId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+      return;
+    }
+  }
+
+  // Stop workspace if one was created
+  if (workspaceNeedsRuntimeStop && state.stepResults.workspaceId && state.stepResults.nodeId) {
     try {
       const { stopWorkspaceOnNode } = await import('../../services/node-agent');
       await stopWorkspaceOnNode(
         state.stepResults.nodeId,
         state.stepResults.workspaceId,
         rc.env,
-        state.userId,
+        state.userId
       );
     } catch (err) {
       log.error('task_runner_do.cleanup.workspace_stop_failed', {
@@ -341,17 +633,22 @@ export async function cleanupOnFailure(
 
     await rc.env.DATABASE.prepare(
       `UPDATE workspaces SET status = 'stopped', updated_at = ? WHERE id = ?`
-    ).bind(now, state.stepResults.workspaceId).run();
+    )
+      .bind(now, state.stepResults.workspaceId)
+      .run();
 
-    // Stop compute usage metering (best-effort)
     try {
-      const { drizzle } = await import('drizzle-orm/d1');
-      const dbSchema = await import('../../db/schema');
-      const { stopComputeTracking } = await import('../../services/compute-usage');
-      const db = drizzle(rc.env.DATABASE, { schema: dbSchema });
-      await stopComputeTracking(db, state.stepResults.workspaceId);
+      await finalizeWorkspaceLifecycleClosure(rc.env, {
+        workspaceIds: [state.stepResults.workspaceId],
+        userId: state.userId,
+        agentSessionStatus: 'failed',
+        errorMessage:
+          state.workspaceErrorMessage ?? `Task failed during ${state.currentStep} cleanup`,
+        nowIso: now,
+        reason: 'task_runner_do_cleanup_on_failure',
+      });
     } catch (err) {
-      log.error('task_runner_do.cleanup.compute_tracking_stop_failed', {
+      log.error('task_runner_do.cleanup.lifecycle_finalizer_failed', {
         taskId: state.taskId,
         workspaceId: state.stepResults.workspaceId,
         error: err instanceof Error ? err.message : String(err),
@@ -362,8 +659,13 @@ export async function cleanupOnFailure(
     try {
       const doId = rc.env.NODE_LIFECYCLE.idFromName(state.stepResults.nodeId);
       const stub = rc.env.NODE_LIFECYCLE.get(doId);
-      await (stub as unknown as import('../node-lifecycle').NodeLifecycle)
-        .scheduleWorkspaceDeletion(state.stepResults.workspaceId, state.userId);
+      await (
+        stub as unknown as import('../node-lifecycle').NodeLifecycle
+      ).scheduleWorkspaceDeletion(
+        state.stepResults.nodeId,
+        state.stepResults.workspaceId,
+        state.userId
+      );
     } catch (err) {
       log.warn('task_runner_do.cleanup.schedule_deletion_failed', {
         taskId: state.taskId,
@@ -378,6 +680,23 @@ export async function cleanupOnFailure(
   // If no workspace was created (failure during provisioning), we still need
   // to mark the auto-provisioned node as warm directly via NodeLifecycle DO.
   if (state.stepResults.autoProvisioned && state.stepResults.nodeId) {
+    if (state.config.resumeSnapshotChatSessionId && !state.stepResults.workspaceId) {
+      try {
+        const { deleteNodeResourcesStrict } = await import('../../services/nodes');
+        await deleteNodeResourcesStrict(state.stepResults.nodeId, state.userId, rc.env);
+        log.info('task_runner_do.cleanup.revoked_recovery_node_destroyed', {
+          taskId: state.taskId,
+          nodeId: state.stepResults.nodeId,
+        });
+      } catch (err) {
+        log.error('task_runner_do.cleanup.revoked_recovery_node_destroy_failed', {
+          taskId: state.taskId,
+          nodeId: state.stepResults.nodeId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+      return;
+    }
     if (state.stepResults.workspaceId) {
       try {
         const { cleanupTaskRun } = await import('../../services/task-runner');
@@ -397,12 +716,22 @@ export async function cleanupOnFailure(
         const { NodeLifecycle } = await import('../node-lifecycle');
         void NodeLifecycle; // imported for type only; DO stub is from env binding
         const doId = rc.env.NODE_LIFECYCLE.idFromName(state.stepResults.nodeId);
-        const stub = rc.env.NODE_LIFECYCLE.get(doId) as DurableObjectStub<import('../node-lifecycle').NodeLifecycle>;
-        await stub.markIdle(state.stepResults.nodeId, state.userId, state.config.projectScaling?.warmNodeTimeoutMs);
+        const stub = rc.env.NODE_LIFECYCLE.get(doId) as DurableObjectStub<
+          import('../node-lifecycle').NodeLifecycle
+        >;
+        await stub.markIdle(
+          state.stepResults.nodeId,
+          state.userId,
+          state.config.projectScaling?.warmNodeTimeoutMs
+        );
 
         log.info('task_runner_do.cleanup.node_marked_warm_direct', {
           taskId: state.taskId,
           nodeId: state.stepResults.nodeId,
+        });
+        await wakeVmAdmissionWaiters(rc.env, {
+          userId: state.userId,
+          reason: 'node_marked_warm_direct',
         });
       } catch (err) {
         log.error('task_runner_do.cleanup.node_warm_failed', {

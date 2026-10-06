@@ -3,13 +3,13 @@ package server
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"mime"
 	"mime/multipart"
 	"net/http"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -80,6 +80,15 @@ func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), s.config.FileUploadTimeout)
 	defer cancel()
+	// A context deadline does not interrupt reads from the HTTP request body.
+	// Give this authenticated upload its configured transfer window instead of
+	// the server's shorter API read timeout, while retaining any earlier caller
+	// deadline. net/http resets the connection deadline for the next request.
+	deadline, _ := ctx.Deadline()
+	if err := http.NewResponseController(w).SetReadDeadline(deadline); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		writeError(w, http.StatusInternalServerError, "failed to configure upload deadline")
+		return
+	}
 
 	for {
 		part, err := reader.NextPart()
@@ -168,16 +177,11 @@ func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request) {
 		destDir := filepath.Dir(destPath)
 
 		// Step 1: Create destination directory (no shell interpolation of user paths)
-		mkdirArgs := []string{"exec"}
-		if user != "" {
-			mkdirArgs = append(mkdirArgs, "-u", user)
+		mkdirCmd, cmdErr := s.workspaceExecCommand(ctx, containerID, user, workDir, "mkdir", "-p", destDir)
+		if cmdErr != nil {
+			writeError(w, http.StatusInternalServerError, "failed to create destination command")
+			return
 		}
-		if workDir != "" {
-			mkdirArgs = append(mkdirArgs, "-w", workDir)
-		}
-		mkdirArgs = append(mkdirArgs, containerID, "mkdir", "-p", destDir)
-
-		mkdirCmd := exec.CommandContext(ctx, "docker", mkdirArgs...)
 		var mkdirStderr bytes.Buffer
 		mkdirCmd.Stderr = &mkdirStderr
 		if err := mkdirCmd.Run(); err != nil {
@@ -191,17 +195,12 @@ func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Step 2: Write file via docker exec with stdin (no shell interpolation)
-		writeArgs := []string{"exec", "-i"}
-		if user != "" {
-			writeArgs = append(writeArgs, "-u", user)
+		// Step 2: Write file via workspace exec with stdin (no shell interpolation)
+		writeCmd, cmdErr := s.workspaceExecCommand(ctx, containerID, user, workDir, "tee", "--", destPath)
+		if cmdErr != nil {
+			writeError(w, http.StatusInternalServerError, "failed to create write command")
+			return
 		}
-		if workDir != "" {
-			writeArgs = append(writeArgs, "-w", workDir)
-		}
-		writeArgs = append(writeArgs, containerID, "tee", "--", destPath)
-
-		writeCmd := exec.CommandContext(ctx, "docker", writeArgs...)
 		writeCmd.Stdin = bytes.NewReader(fileData)
 		// Discard tee's stdout (it copies stdin to both file and stdout)
 		writeCmd.Stdout = io.Discard
@@ -300,17 +299,12 @@ func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Read file content via docker exec cat (no shell interpolation)
-	dockerArgs := []string{"exec", "-i"}
-	if user != "" {
-		dockerArgs = append(dockerArgs, "-u", user)
+	// Read file content via workspace exec cat (no shell interpolation)
+	cmd, cmdErr := s.workspaceExecCommand(ctx, containerID, user, workDir, "cat", "--", filePath)
+	if cmdErr != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create read command")
+		return
 	}
-	if workDir != "" {
-		dockerArgs = append(dockerArgs, "-w", workDir)
-	}
-	dockerArgs = append(dockerArgs, containerID, "cat", "--", filePath)
-
-	cmd := exec.CommandContext(ctx, "docker", dockerArgs...)
 	var stdoutBuf bytes.Buffer
 	var stderrBuf bytes.Buffer
 	cmd.Stdout = &stdoutBuf
@@ -328,14 +322,14 @@ func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Determine content type from file extension
+	// Determine content type from file extension. Uses resolveContentType so
+	// text/doc extensions (.md/.txt/.yaml/...) resolve correctly even on hosts
+	// without /etc/mime.types (e.g. the minimal cf-container image) — otherwise
+	// they fall back to octet-stream and break library preview.
 	fileName := filepath.Base(filePath)
 	// Strip CRLF from filename to prevent header injection
 	fileName = strings.NewReplacer("\r", "", "\n", "").Replace(fileName)
-	contentType := mime.TypeByExtension(filepath.Ext(fileName))
-	if contentType == "" {
-		contentType = "application/octet-stream"
-	}
+	contentType := resolveContentType(fileName)
 
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", fileName))

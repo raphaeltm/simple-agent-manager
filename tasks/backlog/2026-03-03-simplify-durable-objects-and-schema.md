@@ -1,5 +1,24 @@
 # Simplify Durable Objects and Database Schema
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:**
+>   - Indexes `idx_tasks_workspace_id` (`apps/api/src/db/schema.ts:1028`) and
+>     `idx_agent_sessions_ws_user_status` (`schema.ts:1729`, which covers agent-session status).
+>   - Data residency documented (CLAUDE.md principle 5 links it):
+>     `apps/www/src/content/docs/docs/architecture/overview.md:121-188`; the same doc has
+>     diagrams for NodeLifecycle, TaskRunner steps and ACP sessions (lines 424, 458, 494).
+>   - ProjectData `alarm()` runs named sections delegated to modules
+>     (`apps/api/src/durable-objects/project-data/index.ts:2445+`, `alarm-sections.ts`).
+>   - Central mappers in `apps/api/src/lib/mappers.ts:71,216` (PR #321).
+> - **Still open:**
+>   - Timestamp strategy doc; indexes on nodes `(user_id, status)`, nodes `status` and tasks
+>     `parent_task_id` (nine query sites filter on it, with no index).
+>   - Mermaid diagrams for task status transitions and the workspace lifecycle; DO-to-D1 recovery
+>     paths; JSDoc on state-machine types (`packages/shared/src/types/task.ts`, `workspace.ts`).
+>   - Decide on the 8 UI-governance tables (`schema.ts:2244-2413`), still routed at
+>     `/api/ui-governance` (`apps/api/src/index.ts:801`) and `/ui-standards`.
+
 **Status:** backlog
 **Priority:** medium
 **Estimated Effort:** 4 days

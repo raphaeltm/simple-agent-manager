@@ -1,4 +1,5 @@
 #!/usr/bin/env tsx
+// FILE SIZE EXCEPTION: Deploy-critical Pulumi output -> wrangler.toml config generator; splitting deferred to tasks/backlog/2026-04-03-split-oversized-files.md to avoid coupling a structural refactor to this staging-gated PR. See .claude/rules/18-file-size-limits.md
 /**
  * Sync Pulumi outputs to wrangler.toml
  *
@@ -6,49 +7,186 @@
  * at deploy time. The checked-in wrangler.toml files contain only top-level
  * config for local dev — all environment sections are generated here.
  *
- * Static bindings (Durable Objects, AI, migrations) are copied from the
- * top-level config. Dynamic bindings (D1 IDs, KV IDs, R2 names) come from
- * Pulumi stack outputs. Worker names are derived from DEPLOYMENT_CONFIG.
+ * Static bindings (Durable Objects and AI) are copied from the top-level
+ * config. Durable Object migrations are resolved against deployed Worker
+ * state. Dynamic bindings (D1 IDs, KV IDs, R2 names) come from Pulumi stack
+ * outputs. Worker names are derived from DEPLOYMENT_CONFIG.
  *
  * Usage:
  *   PULUMI_STACK=prod pnpm tsx scripts/deploy/sync-wrangler-config.ts
  */
 
 import { execSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+
 import * as TOML from '@iarna/toml';
+import * as v from 'valibot';
+
+import { DEPLOYMENT_CONFIG } from './config.js';
+import {
+  getDeployedWorkerMigrationTag,
+  resolveDurableObjectMigrations,
+} from './durable-object-migrations.js';
 import type {
-  PulumiOutputs,
-  WranglerToml,
-  WranglerEnvConfig,
-  DurableObjectsConfig,
   AIBinding,
   AnalyticsEngineDatasetBinding,
   ContainerBinding,
+  DurableObjectsConfig,
   MigrationEntry,
-  TailWorkerWranglerToml,
+  PulumiOutputs,
+  WorkerLimitsConfig,
+  WranglerEnvConfig,
+  WranglerToml,
 } from './types.js';
-import { DEPLOYMENT_CONFIG } from './config.js';
 
 const INFRA_DIR = resolve(import.meta.dirname, '../../infra');
 const WRANGLER_TOML_PATH = resolve(import.meta.dirname, '../../apps/api/wrangler.toml');
+const CONFIGURE_SECRETS_PATH = resolve(import.meta.dirname, './configure-secrets.sh');
 const TAIL_WORKER_WRANGLER_TOML_PATH = resolve(
   import.meta.dirname,
   '../../apps/tail-worker/wrangler.toml'
 );
 const DEPLOY_STATE_DIR = resolve(import.meta.dirname, '../../.wrangler');
-const FIRST_DEPLOY_MARKER = resolve(DEPLOY_STATE_DIR, 'tail-worker-first-deploy');
+const SETUP_TOKEN_BYTES = 24;
+const DEFAULT_SANDBOX_CONTAINER_MAX_INSTANCES = 6;
+const DEFAULT_VM_AGENT_CONTAINER_MAX_INSTANCES = 3;
+const CLOUDFLARE_WORKER_TEXT_BINDING_MAX = 350;
+const CLOUDFLARE_WORKER_TEXT_BINDING_HEADROOM = 10;
+export const CLOUDFLARE_WORKER_TEXT_BINDING_GUARD_LIMIT =
+  CLOUDFLARE_WORKER_TEXT_BINDING_MAX - CLOUDFLARE_WORKER_TEXT_BINDING_HEADROOM;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+const EVENTING_OPTIONAL_PROCESS_ENV_VARS = [
+  'PROJECT_EVENT_MAX_ACTIVE_SUBSCRIPTIONS_PER_PROJECT',
+  'PROJECT_EVENT_FILTER_MAX_VALUES_PER_FIELD',
+  'PROJECT_EVENT_FILTER_MAX_MATCH_KEYS',
+  'PROJECT_EVENT_FILTER_MAX_STRING_BYTES',
+  'PROJECT_EVENT_METADATA_MAX_BYTES',
+  'PROJECT_EVENT_METADATA_MAX_DEPTH',
+  'PROJECT_EVENT_METADATA_MAX_KEYS',
+  'PROJECT_EVENT_METADATA_MAX_ARRAY_ITEMS',
+  'PROJECT_EVENT_DISPLAY_MAX_BYTES',
+  'PROJECT_EVENT_DISPLAY_MAX_LABELS',
+  'PROJECT_EVENT_RAW_PAYLOAD_REF_MAX_BYTES',
+  'PROJECT_EVENT_REASON_MAX_BYTES',
+  'PROJECT_EVENT_MAX_MATCHES_PER_EVENT',
+  'PROJECT_EVENT_DELIVERY_BATCH_MAX_EVENTS',
+  'PROJECT_EVENT_DELIVERY_ATTEMPT_MAX_PER_BATCH',
+  'PROJECT_EVENT_SCHEDULE_MAX_SCHEDULES',
+  'PROJECT_EVENT_SCHEDULE_MAX_WATCHES',
+  'PROJECT_EVENT_SCHEDULE_MAX_RETAINED_SCHEDULES',
+  'PROJECT_EVENT_SCHEDULE_MAX_RETAINED_WATCHES',
+  'PROJECT_EVENT_SCHEDULE_PROMPT_MAX_BYTES',
+  'PROJECT_EVENT_SCHEDULE_MAX_HORIZON_MS',
+  'PROJECT_EVENT_SCHEDULE_LATE_GRACE_MS',
+  'PROJECT_EVENT_SCHEDULE_DELIVERY_TTL_MS',
+  'PROJECT_EVENT_SCHEDULE_SWEEP_BATCH_SIZE',
+  'PROJECT_EVENT_SCHEDULE_CLAIM_LEASE_MS',
+  'PROJECT_EVENT_SCHEDULE_RETRY_BASE_MS',
+  'PROJECT_EVENT_SCHEDULE_MAX_ATTEMPTS',
+  'PROJECT_EVENT_SCHEDULE_MAX_DEFERRAL_MS',
+  'PROJECT_EVENT_WATCH_COOLDOWN_MIN_MS',
+  'PROJECT_EVENT_WATCH_MAX_EXECUTIONS',
+  'PROJECT_EVENT_WATCH_MAX_CONCURRENT',
+  'PROJECT_EVENT_CHANNEL_MAX_CHANNELS',
+  'PROJECT_EVENT_CHANNEL_MESSAGE_MAX_BYTES',
+  'PROJECT_EVENT_CHANNEL_NAME_MAX_BYTES',
+  'PROJECT_EVENT_CHANNEL_PUBLISH_WINDOW_MS',
+  'PROJECT_EVENT_CHANNEL_PUBLISH_MAX_PER_WINDOW',
+  'PROJECT_EVENT_CHANNEL_CURSOR_TTL_MS',
+  'PROJECT_EVENT_CHANNEL_CATALOG_IDLE_TTL_MS',
+  'PROJECT_EVENT_LIST_LIMIT',
+  'PROJECT_EVENT_LIST_MAX',
+  'PROJECT_EVENT_RECENT_STATUS_LIMIT',
+  'PROJECT_EVENT_RETENTION_DAYS',
+  'PROJECT_EVENT_RETENTION_BATCH_ROWS',
+  'PROJECT_EVENT_SOURCE_OUTBOX_BATCH_ROWS',
+  'PROJECT_EVENT_SOURCE_OUTBOX_MAX_ATTEMPTS',
+  'PROJECT_EVENT_SOURCE_OUTBOX_TTL_MS',
+  'PROJECT_EVENT_SOURCE_OUTBOX_RETRY_BASE_MS',
+  'PROJECT_EVENT_SOURCE_OUTBOX_RETRY_MAX_MS',
+  'PROJECT_EVENT_SOURCE_OUTBOX_PROCESSING_LEASE_MS',
+  'PROJECT_EVENT_RETENTION_INTERVAL_MS',
+  'PROJECT_EVENT_RETENTION_MIN_ALARM_DELAY_MS',
+  'PROJECT_EVENT_WAKE_ENABLED',
+  'PROJECT_EVENT_WAKE_MATERIALIZATION_MIN_ALARM_DELAY_MS',
+  'PROJECT_EVENT_WAKE_MATERIALIZATION_BACKOFF_BASE_MS',
+  'PROJECT_EVENT_WAKE_MATERIALIZATION_BACKOFF_MAX_MS',
+  'PROJECT_EVENT_WAKE_PROMPT_TTL_MS',
+  'PROJECT_EVENT_WAKE_READ_GRACE_MS',
+  'PROJECT_EVENT_WAKE_TARGET_COOLDOWN_MS',
+  'PROJECT_EVENT_WAKE_SUBSCRIPTION_COOLDOWN_MS',
+  'PROJECT_EVENT_WAKE_SUBSCRIPTION_LIFETIME_MS',
+  'PROJECT_EVENT_WAKE_MAX_PER_SUBSCRIPTION',
+  'CREDENTIAL_LIMIT_WARNING_PERCENT',
+  'CREDENTIAL_LIMIT_CRITICAL_PERCENT',
+  'CREDENTIAL_LIMIT_MAX_OBSERVATIONS_PER_REPORT',
+  'CREDENTIAL_LIMIT_TRANSITION_RECOMPUTE_ATTEMPTS',
+  'CREDENTIAL_LIMIT_USAGE_CALLBACK_MAX_BODY_BYTES',
+  'CREDENTIAL_LIMIT_USAGE_CALLBACK_RATE_LIMIT_RPM',
+  'CREDENTIAL_LIMIT_USAGE_CALLBACK_RATE_LIMIT_WINDOW_SECONDS',
+  'CREDENTIAL_LIMIT_OBSERVATION_MAX_AGE_MS',
+  'CREDENTIAL_LIMIT_OBSERVATION_FUTURE_SKEW_MS',
+  'CREDENTIAL_LIMIT_RESET_MAX_FUTURE_MS',
+  'CREDENTIAL_LIMIT_SUPPORTED_PROVIDERS',
+  'CREDENTIAL_LIMIT_SUPPORTED_SOURCES',
+  'CREDENTIAL_LIMIT_SUPPORTED_WINDOW_TYPES',
+  'CREDENTIAL_LIMIT_READ_MAX_ROWS',
+  'PROJECT_EVENT_SOURCE_OUTBOX_SWEEP_WALL_MS',
+  'PROJECT_EVENT_SOURCE_OUTBOX_ADMISSION_TIMEOUT_MS',
+  'PROJECT_EVENT_SOURCE_OUTBOX_TERMINAL_RETENTION_MS',
+] as const;
+
+/** API bootstrap and Tail binding repair have independent deployment requirements. */
+export function writeDeploymentMarkers(
+  deployedMigrationTag: string | null,
+  hasTailWorker: boolean,
+  stateDirectory = DEPLOY_STATE_DIR
+): void {
+  mkdirSync(stateDirectory, { recursive: true });
+  for (const [filename, needed] of [
+    ['api-worker-first-deploy', deployedMigrationTag === null],
+    ['tail-worker-first-deploy', !hasTailWorker],
+  ] as const) {
+    const path = resolve(stateDirectory, filename);
+    if (needed) writeFileSync(path, 'true', 'utf-8');
+    else rmSync(path, { force: true });
+  }
 }
 
+const CONTAINER_MAX_INSTANCE_CONFIG = {
+  SandboxDO: {
+    envVar: 'SANDBOX_CONTAINER_MAX_INSTANCES',
+    defaultValue: DEFAULT_SANDBOX_CONTAINER_MAX_INSTANCES,
+  },
+  VmAgentContainer: {
+    envVar: 'VM_AGENT_CONTAINER_MAX_INSTANCES',
+    defaultValue: DEFAULT_VM_AGENT_CONTAINER_MAX_INSTANCES,
+  },
+} as const satisfies Record<string, { envVar: string; defaultValue: number }>;
+
+// Re-exported so tests and callers keep a single import site while the
+// migration-state logic lives in its own module (file size rule 18).
+export { getDeployedWorkerMigrationTag, resolveDurableObjectMigrations };
+
+const recordSchema = v.custom<Record<string, unknown>>(
+  (value) => typeof value === 'object' && value !== null && !Array.isArray(value),
+  'Expected an object'
+);
+const positiveSafeIntegerSchema = v.pipe(
+  v.number(),
+  v.integer('must be an integer'),
+  v.minValue(1, 'must be greater than or equal to 1'),
+  v.safeInteger('must be a safe integer')
+);
+
 function requireRecord(value: unknown, path: string): Record<string, unknown> {
-  if (!isRecord(value)) {
+  const result = v.safeParse(recordSchema, value);
+  if (!result.success) {
     throw new Error(`${path} must be an object`);
   }
-  return value;
+  return result.output;
 }
 
 function requireString(value: unknown, path: string): string {
@@ -58,11 +196,88 @@ function requireString(value: unknown, path: string): string {
   return value;
 }
 
-function ensureTomlMap(value: unknown, path: string): TOML.JsonMap {
-  if (!isRecord(value)) {
+const SENSITIVE_PULUMI_SUMMARY_KEY_PATTERN =
+  /(secret|token|password|passwd|credential|authorization|cookie|api[_-]?key|private[_-]?key|access[_-]?token|refresh[_-]?token)/i;
+
+function assertNoSensitivePulumiSummary(value: unknown, path: string): void {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => assertNoSensitivePulumiSummary(item, `${path}[${index}]`));
+    return;
+  }
+
+  if (!value || typeof value !== 'object') {
+    return;
+  }
+
+  for (const [key, child] of Object.entries(value)) {
+    if (SENSITIVE_PULUMI_SUMMARY_KEY_PATTERN.test(key)) {
+      throw new Error(`${path}.${key} is not allowed in Pulumi stackSummary`);
+    }
+    assertNoSensitivePulumiSummary(child, `${path}.${key}`);
+  }
+}
+
+export function ensureTomlMap(value: unknown, path: string): TOML.JsonMap {
+  const result = v.safeParse(recordSchema, value);
+  if (!result.success) {
     throw new Error(`${path} must be a TOML table`);
   }
   return value as TOML.JsonMap;
+}
+
+function generateSetupToken(): string {
+  return randomBytes(SETUP_TOKEN_BYTES).toString('base64url');
+}
+
+function cloudflareWorkerVariablesUrl(
+  accountId: string,
+  workerName: string,
+  environment: string
+): string {
+  return `https://dash.cloudflare.com/${accountId}/workers/services/view/${workerName}/${environment}/settings/variables`;
+}
+
+function parseContainerMaxInstances(envVar: string, fallback: number): number {
+  const rawValue = process.env[envVar];
+  if (!rawValue) {
+    return fallback;
+  }
+
+  const trimmed = rawValue.trim();
+  if (!/^\d+$/.test(trimmed)) {
+    throw new Error(`${envVar} must be a positive safe integer`);
+  }
+
+  const parsed = Number(trimmed);
+  const result = v.safeParse(positiveSafeIntegerSchema, parsed);
+  if (!result.success) {
+    throw new Error(`${envVar} ${result.issues[0]?.message ?? 'must be a positive safe integer'}`);
+  }
+  return result.output;
+}
+
+function getConfiguredContainerMaxInstances(
+  className: string,
+  currentValue: number | undefined
+): number | undefined {
+  const config =
+    CONTAINER_MAX_INSTANCE_CONFIG[className as keyof typeof CONTAINER_MAX_INSTANCE_CONFIG];
+  if (!config) {
+    return currentValue;
+  }
+  return parseContainerMaxInstances(config.envVar, config.defaultValue);
+}
+
+function generateContainerBindings(
+  containers: ContainerBinding[] | undefined
+): ContainerBinding[] | undefined {
+  return containers?.map((container) => ({
+    ...container,
+    max_instances: getConfiguredContainerMaxInstances(
+      container.class_name,
+      container.max_instances
+    ),
+  }));
 }
 
 // ============================================================================
@@ -97,12 +312,19 @@ export function validatePulumiOutputs(outputs: unknown): asserts outputs is Pulu
     { key: 'observabilityD1DatabaseName', label: 'Observability D1 Database Name' },
     { key: 'kvId', label: 'KV Namespace ID' },
     { key: 'r2Name', label: 'R2 Bucket Name' },
+    { key: 'sessionSnapshotTtlDays', label: 'Session Snapshot TTL Days' },
+    { key: 'diagnosticIncidentPrefix', label: 'Diagnostic Incident R2 Prefix' },
+    { key: 'diagnosticIncidentTtlDays', label: 'Diagnostic Incident TTL Days' },
     { key: 'cloudflareAccountId', label: 'Cloudflare Account ID' },
     { key: 'pagesName', label: 'Pages Project Name' },
+    { key: 'installationId', label: 'Installation ID' },
   ];
 
   const missing = required.filter(({ key }) => {
     const value = record[key];
+    if (key === 'sessionSnapshotTtlDays' || key === 'diagnosticIncidentTtlDays') {
+      return typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0;
+    }
     return typeof value !== 'string' || value.length === 0;
   });
 
@@ -111,7 +333,14 @@ export function validatePulumiOutputs(outputs: unknown): asserts outputs is Pulu
     throw new Error(`Pulumi outputs missing required fields:\n${labels}`);
   }
 
+  if (!/^[0-9a-f]{32}$/.test(String(record.installationId))) {
+    throw new Error(
+      'Pulumi output Installation ID (installationId) must be exactly 32 lowercase hex characters'
+    );
+  }
+
   const stackSummary = requireRecord(record.stackSummary, 'Pulumi outputs.stackSummary');
+  assertNoSensitivePulumiSummary(stackSummary, 'Pulumi outputs.stackSummary');
   requireString(stackSummary.baseDomain, 'Pulumi outputs.stackSummary.baseDomain');
   requireRecord(stackSummary.resources, 'Pulumi outputs.stackSummary.resources');
   requireRecord(record.dnsIds, 'Pulumi outputs.dnsIds');
@@ -126,11 +355,13 @@ export function validatePulumiOutputs(outputs: unknown): asserts outputs is Pulu
 // Tail Worker Existence Check
 // ============================================================================
 
-async function checkTailWorkerExists(accountId: string, tailWorkerName: string): Promise<boolean> {
+export async function checkTailWorkerExists(
+  accountId: string,
+  tailWorkerName: string
+): Promise<boolean> {
   const apiToken = process.env.CF_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN;
   if (!apiToken) {
-    console.log('  No CF API token available, assuming tail worker does not exist');
-    return false;
+    throw new Error('CF_API_TOKEN or CLOUDFLARE_API_TOKEN is required to check tail worker status');
   }
 
   try {
@@ -138,10 +369,25 @@ async function checkTailWorkerExists(accountId: string, tailWorkerName: string):
       `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/scripts/${tailWorkerName}`,
       { headers: { Authorization: `Bearer ${apiToken}` } }
     );
-    return response.ok;
-  } catch {
-    console.log('  Failed to check tail worker existence, assuming it does not exist');
-    return false;
+
+    if (response.ok) {
+      return true;
+    }
+
+    if (response.status === 404) {
+      return false;
+    }
+
+    const body = await response.text().catch(() => '');
+    throw new Error(
+      `Failed to check tail worker "${tailWorkerName}" (HTTP ${response.status})${body ? `: ${body}` : ''}`
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.startsWith('Failed to check tail worker')) {
+      throw error;
+    }
+    throw new Error(`Failed to check tail worker "${tailWorkerName}": ${message}`);
   }
 }
 
@@ -156,16 +402,17 @@ function extractStaticBindings(topLevel: WranglerToml): {
   containers: ContainerBinding[] | undefined;
   migrations: MigrationEntry[] | undefined;
   artifacts: unknown[] | undefined;
+  limits: WorkerLimitsConfig | undefined;
 } {
   return {
     durable_objects: topLevel.durable_objects as DurableObjectsConfig | undefined,
     ai: topLevel.ai as AIBinding | undefined,
     analytics_engine_datasets: topLevel.analytics_engine_datasets as
-      | AnalyticsEngineDatasetBinding[]
-      | undefined,
+      AnalyticsEngineDatasetBinding[] | undefined,
     containers: topLevel.containers as ContainerBinding[] | undefined,
     migrations: topLevel.migrations as MigrationEntry[] | undefined,
     artifacts: topLevel.artifacts as unknown[] | undefined,
+    limits: topLevel.limits as WorkerLimitsConfig | undefined,
   };
 }
 
@@ -185,18 +432,825 @@ function saveWranglerToml(config: WranglerToml): void {
   writeFileSync(WRANGLER_TOML_PATH, content, 'utf-8');
 }
 
-function generateApiWorkerEnv(
+/**
+ * Read-only probe of the Cloudflare Artifacts control-plane REST API to detect
+ * whether this deployment's account+token can actually use Artifacts. Returns
+ * true only on a 200 from the list-repos endpoint. Fail-closed (returns false)
+ * on any auth/permission error, missing token, or network failure — a broken or
+ * under-scoped probe must never silently deploy an [[artifacts]] binding the
+ * account can't support.
+ *
+ * Requires the deploy token to carry the "Artifacts > Read" permission.
+ */
+export async function detectArtifactsAvailable(
+  accountId: string,
+  namespace: string
+): Promise<boolean> {
+  const apiToken = process.env.CF_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN;
+  if (!apiToken) {
+    console.warn(
+      '  Artifacts auto-detect: CF_API_TOKEN/CLOUDFLARE_API_TOKEN not set — treating Artifacts as unavailable'
+    );
+    return false;
+  }
+  const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/artifacts/namespaces/${namespace}/repos?limit=1`;
+  try {
+    const response = await fetch(url, { headers: { Authorization: `Bearer ${apiToken}` } });
+    if (response.ok) {
+      return true;
+    }
+    const hint =
+      response.status === 401 || response.status === 403
+        ? ' — the deploy token is missing the "Artifacts > Read" permission (or the account has no Artifacts access)'
+        : '';
+    console.warn(
+      `  Artifacts auto-detect: probe returned HTTP ${response.status}${hint}. Treating Artifacts as unavailable.`
+    );
+    return false;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(
+      `  Artifacts auto-detect: probe failed (${message}). Treating Artifacts as unavailable.`
+    );
+    return false;
+  }
+}
+
+/**
+ * Resolves whether the Artifacts binding should be included for this deploy.
+ *
+ * `ARTIFACTS_BINDING_ENABLED` is an optional explicit override: set it to
+ * "true"/"false" to force a value (escape hatch). When unset/"auto", the value
+ * is auto-detected from the live Artifacts REST probe. The probe always runs so
+ * the deploy log records real availability even when an override is in effect.
+ */
+export async function resolveArtifactsBindingEnabled(
+  accountId: string,
+  namespace: string
+): Promise<boolean> {
+  const override = process.env.ARTIFACTS_BINDING_ENABLED?.trim().toLowerCase();
+  const probeAvailable = await detectArtifactsAvailable(accountId, namespace);
+
+  if (override === 'true' || override === 'false') {
+    const enabled = override === 'true';
+    console.log(
+      `  Artifacts: ARTIFACTS_BINDING_ENABLED=${override} override in effect (auto-detect probe returned ${probeAvailable})`
+    );
+    return enabled;
+  }
+  console.log(
+    `  Artifacts: auto-detected availability = ${probeAvailable} (namespace "${namespace}")`
+  );
+  return probeAvailable;
+}
+
+type StaticBindings = ReturnType<typeof extractStaticBindings>;
+
+function getApiWorkerRoutes(baseDomain: string): NonNullable<WranglerEnvConfig['routes']> {
+  return [
+    {
+      pattern: `preview.${baseDomain}/*`,
+      zone_name: baseDomain,
+    },
+    {
+      pattern: `api.${baseDomain}/*`,
+      zone_name: baseDomain,
+    },
+    {
+      pattern: `*.${baseDomain}/*`,
+      zone_name: baseDomain,
+    },
+  ];
+}
+
+export type EnvironmentVarOverride = {
+  name: string;
+  /** Value checked into the top-level `[vars]` section of wrangler.toml. */
+  checkedIn: string;
+  /** Value the GitHub Environment (process env) supplied instead. */
+  override: string;
+};
+
+/**
+ * Optional process-env vars silently replace the checked-in top-level `[vars]` value. PR #2023
+ * flipped `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED` to "true" in wrangler.toml while the
+ * production GitHub Environment still pinned "false"; the deployed Worker kept the override and
+ * the archive sweep never ran, with nothing in the deploy log saying so. List every override whose
+ * value differs from wrangler.toml so the log records what actually shipped. `[vars]` are
+ * non-secret by construction (secrets go through `wrangler secret`), so printing values is safe.
+ * See `.claude/rules/70-flag-flips-must-verify-the-deployed-value.md`.
+ */
+export function listEnvironmentVarOverrides(
+  checkedIn: Record<string, unknown> | undefined,
+  overrides: Record<string, string>
+): EnvironmentVarOverride[] {
+  const listed: EnvironmentVarOverride[] = [];
+  for (const [name, override] of Object.entries(overrides)) {
+    if (!checkedIn || !Object.prototype.hasOwnProperty.call(checkedIn, name)) continue;
+    const checkedInValue = String(checkedIn[name]);
+    if (checkedInValue === override) continue;
+    listed.push({ name, checkedIn: checkedInValue, override });
+  }
+  return listed;
+}
+
+/**
+ * Emit the override report where a human will actually see it.
+ *
+ * A `console.log` line is buried in thousands of lines of deploy output, which is how
+ * `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED` stayed pinned `false` in production for eleven days
+ * after `684f99d60` set it `true` here. A GitHub Actions `::warning::` annotation surfaces on the
+ * run page and in the PR checks list, and the step summary keeps a durable table of what actually
+ * shipped. Both are no-ops outside Actions, so local runs keep the plain log line.
+ *
+ * `[vars]` are non-secret by construction — secrets go through `wrangler secret` — so printing
+ * values is safe. See `.claude/rules/70-flag-flips-must-verify-the-deployed-value.md`.
+ */
+/**
+ * Escape the data segment of a GitHub Actions workflow command.
+ *
+ * `%`, CR and LF are structural in the `::warning::<data>` form: an unescaped newline ends the
+ * command and drops everything after it, so a var value containing one would silently truncate
+ * the very warning that exists to stop a silent override. Not attacker-controlled today — these
+ * are `[vars]` values from a repository-owned Environment — but the whole point of this report
+ * is that it must survive contact with a value nobody anticipated.
+ *
+ * https://docs.github.com/actions/reference/workflow-commands-for-github-actions
+ */
+export function encodeWorkflowCommandData(value: string): string {
+  return value.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A');
+}
+
+/**
+ * Environment overrides this repository already knows about, each with the reason it exists.
+ *
+ * Without this list every deploy would annotate all 19 overrides the SAM production Environment
+ * currently applies, and a genuinely accidental one would have to be spotted among them — the
+ * same "signal buried in volume" failure this report exists to fix, moved up one layer.
+ *
+ * Two deliberate design choices:
+ *
+ * - **Exact names, never prefixes.** A prefix rule such as `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_*`
+ *   would have matched `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED` — the exact variable whose
+ *   silent override hid a disabled production feature for eleven days. The rule that suppresses
+ *   the warning must not be able to grow over the case that needed it.
+ * - **No `*_ENABLED` flag belongs here.** A feature flag diverging from the repository is always
+ *   worth re-reading on a deploy, even when the divergence is intended, because the intent can
+ *   expire while the override does not. `PROJECT_DATA_ARCHIVE_COMPACT_ENABLED` and
+ *   `PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED` are deliberately absent and will keep annotating.
+ *
+ * An entry whose reason has expired should be DELETED, not left to suppress a warning forever.
+ * Expected overrides are still printed in the job summary with their reason, so a stale entry is
+ * visible on every deploy rather than silently swallowing a signal.
+ */
+export const EXPECTED_ENVIRONMENT_VAR_OVERRIDES: Readonly<Record<string, string>> = {
+  // The one-shot P0 ProjectData storage-relief measurement plan
+  // (prod-p0-projectdata-01khrjganbbwgdy1nz0kvf0d4j-20260904). It completed 2026-09-04 and its
+  // D1 row is terminal, so these size a run that will not happen again; they are per-installation
+  // operator state and deliberately absent from wrangler.toml.
+  PROJECT_DATA_STORAGE_RELIEF_MEASURE_MAX_BATCH_ROWS: 'P0 storage-relief plan sizing',
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_BATCH_ROWS: 'P0 storage-relief plan sizing',
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_CUTOFF_CREATED_AT: 'P0 storage-relief plan identity',
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_INTERVAL_MS: 'P0 storage-relief plan sizing',
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_BATCHES: 'P0 storage-relief plan sizing',
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_BYTES: 'P0 storage-relief plan sizing',
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_ROWS: 'P0 storage-relief plan sizing',
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_PLAN_ID: 'P0 storage-relief plan identity',
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_PROJECT_ID: 'P0 storage-relief plan identity',
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_RUN_WALL_TIME_MS: 'P0 storage-relief plan sizing',
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_SLICES_PER_RUN: 'P0 storage-relief plan sizing',
+  // The approved tool-payload cleanup plan's identity and hard cumulative ceilings. Also
+  // per-installation operator state: a manifest key and its caps describe one specific audited
+  // plan, so wrangler.toml ships them empty on purpose.
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_MANIFEST_MAX_BYTES: 'approved cleanup plan sizing',
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_CUTOFF_CREATED_AT: 'approved cleanup plan identity',
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_KEY: 'approved cleanup plan identity',
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_SHA256: 'approved cleanup plan identity',
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_BYTES: 'approved cleanup plan ceiling',
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_R2_OPERATIONS: 'approved cleanup plan ceiling',
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_ROWS: 'approved cleanup plan ceiling',
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_WALL_TIME_MS: 'approved cleanup plan ceiling',
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PLAN_ID: 'approved cleanup plan identity',
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PROJECT_IDS: 'approved cleanup plan scope',
+};
+
+/** Append to a GitHub Actions file output, matching `validate-production-dispatch.ts`. */
+function append(path: string | undefined, content: string): void {
+  if (!path) return;
+  try {
+    appendFileSync(path, content);
+  } catch (error) {
+    // A summary write must never fail a deploy; the annotation already carried the signal.
+    console.log(`  (could not append to GITHUB_STEP_SUMMARY: ${String(error)})`);
+  }
+}
+
+function overrideSummaryTable(heading: string, note: string, rows: readonly string[]): string {
+  return [
+    `### ${heading}`,
+    '',
+    note,
+    '',
+    '| Variable | wrangler.toml | deployed | note |',
+    '| --- | --- | --- | --- |',
+    ...rows,
+    '',
+  ].join('\n');
+}
+
+/**
+ * Emit the override report where a human will actually see it.
+ *
+ * A `console.log` line is buried in thousands of lines of deploy output, which is how
+ * `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED` stayed pinned `false` in production for eleven days
+ * after `684f99d60` set it `true` here. An UNEXPECTED override now raises a GitHub Actions
+ * `::warning::`, which surfaces on the run page and in the PR checks list; an expected one
+ * (`EXPECTED_ENVIRONMENT_VAR_OVERRIDES`) is recorded in the job summary only, so the annotations
+ * stay rare enough to mean something.
+ *
+ * `[vars]` are non-secret by construction — secrets go through `wrangler secret` — so printing
+ * values is safe. See `.claude/rules/70-flag-flips-must-verify-the-deployed-value.md`.
+ */
+export function reportEnvironmentVarOverrides(
+  overrides: readonly EnvironmentVarOverride[],
+  env: { githubActions?: string; githubStepSummary?: string } = {
+    githubActions: process.env.GITHUB_ACTIONS,
+    githubStepSummary: process.env.GITHUB_STEP_SUMMARY,
+  }
+): void {
+  if (overrides.length === 0) return;
+  const inActions = env.githubActions === 'true';
+  const expectedRows: string[] = [];
+  const unexpectedRows: string[] = [];
+
+  for (const entry of overrides) {
+    const reason = EXPECTED_ENVIRONMENT_VAR_OVERRIDES[entry.name];
+    const message = `Environment override: ${entry.name}="${entry.override}" replaces wrangler.toml "${entry.checkedIn}"`;
+    console.log(`  ${message}${reason ? ` (expected: ${reason})` : ''}`);
+    const row = `| \`${entry.name}\` | \`${entry.checkedIn}\` | \`${entry.override}\` | ${reason ?? '**not in EXPECTED_ENVIRONMENT_VAR_OVERRIDES**'} |`;
+    if (reason) {
+      expectedRows.push(row);
+      continue;
+    }
+    unexpectedRows.push(row);
+    if (inActions) {
+      console.log(
+        `::warning title=Unexpected environment override::${encodeWorkflowCommandData(message)}`
+      );
+    }
+  }
+
+  if (!inActions) return;
+  if (unexpectedRows.length > 0) {
+    append(
+      env.githubStepSummary,
+      overrideSummaryTable(
+        'Unexpected GitHub Environment overrides',
+        'These deployed values come from the GitHub Environment, NOT from the repository, and this repository does not record a reason for them. Reconcile or delete the override, or add it to `EXPECTED_ENVIRONMENT_VAR_OVERRIDES` in `scripts/deploy/sync-wrangler-config.ts` with the reason.',
+        unexpectedRows
+      )
+    );
+  }
+  if (expectedRows.length > 0) {
+    append(
+      env.githubStepSummary,
+      overrideSummaryTable(
+        'Expected GitHub Environment overrides',
+        'Known per-installation operator state. An entry whose reason has expired should be deleted from `EXPECTED_ENVIRONMENT_VAR_OVERRIDES` rather than left to suppress a warning.',
+        expectedRows
+      )
+    );
+  }
+}
+
+function getOptionalProcessEnvVars(
+  checkedIn: Record<string, unknown> | undefined,
+  names: readonly string[]
+): Record<string, string> {
+  const vars: Record<string, string> = {};
+  for (const name of names) {
+    const value = process.env[name];
+    if (value) {
+      vars[name] = value;
+    }
+  }
+  reportEnvironmentVarOverrides(listEnvironmentVarOverrides(checkedIn, vars));
+  return vars;
+}
+
+export function countWorkerTextBindings(envConfig: Pick<WranglerEnvConfig, 'vars'>): number {
+  const variableCount = Object.keys(envConfig.vars ?? {}).length;
+  const configuredSecrets = Array.from(
+    new Set(
+      Array.from(
+        readFileSync(CONFIGURE_SECRETS_PATH, 'utf-8').matchAll(
+          /set_worker_secret\s+"([A-Z0-9_]+)"/g
+        ),
+        (match) => match[1]
+      )
+    )
+  );
+  return variableCount + configuredSecrets.length;
+}
+
+export function assertWorkerTextBindingLimit(envConfig: Pick<WranglerEnvConfig, 'vars'>): void {
+  const count = countWorkerTextBindings(envConfig);
+  if (count <= CLOUDFLARE_WORKER_TEXT_BINDING_GUARD_LIMIT) return;
+
+  throw new Error(
+    `Generated Cloudflare Worker text bindings (${count}) exceed the ` +
+      `${CLOUDFLARE_WORKER_TEXT_BINDING_GUARD_LIMIT} guard limit ` +
+      `(${CLOUDFLARE_WORKER_TEXT_BINDING_MAX} Cloudflare max with ` +
+      `${CLOUDFLARE_WORKER_TEXT_BINDING_HEADROOM} headroom). Remove redundant ` +
+      `checked-in [vars] defaults or unused Worker secrets before deploying.`
+  );
+}
+
+function getApiWorkerVars(
   topLevel: WranglerToml,
   outputs: PulumiOutputs,
   stack: string,
-  includeTailConsumers: boolean
+  analyticsDataset: string,
+  includeArtifactsBinding: boolean
+): Record<string, string> {
+  return {
+    CF_CONTAINER_ENABLED: 'true',
+    ...(topLevel.vars || {}),
+    BASE_DOMAIN: outputs.stackSummary.baseDomain,
+    PREVIEW_BASE_DOMAIN:
+      process.env.PREVIEW_BASE_DOMAIN || `preview.${outputs.stackSummary.baseDomain}`,
+    ...(process.env.PREVIEW_URL_TTL_SECONDS
+      ? { PREVIEW_URL_TTL_SECONDS: process.env.PREVIEW_URL_TTL_SECONDS }
+      : {}),
+    VERSION: DEPLOYMENT_CONFIG.version,
+    PAGES_PROJECT_NAME: outputs.pagesName,
+    SAM_INSTALLATION_ID: outputs.installationId,
+    R2_BUCKET_NAME: outputs.r2Name,
+    SESSION_SNAPSHOT_TTL_DAYS: String(outputs.sessionSnapshotTtlDays),
+    VM_INCIDENT_R2_PREFIX: outputs.diagnosticIncidentPrefix,
+    VM_INCIDENT_RETENTION_DAYS: String(outputs.diagnosticIncidentTtlDays),
+    ...getOptionalProcessEnvVars(topLevel.vars, [
+      'D1_SESSION_MODE',
+      'REQUIRE_APPROVAL',
+      'CRON_SWEEPS_ENABLED_KV_KEY',
+      'DO_ALARMS_ENABLED_KV_KEY',
+      'CONTROL_LOOP_KILL_SWITCH_CACHE_MS',
+      'CONTROL_LOOP_DISABLED_ALARM_RETRY_MS',
+      'CRON_FAILURE_NOTIFICATION_THROTTLE_MS',
+      'CRON_FAILURE_NOTIFICATION_KV_PREFIX',
+      'WEB_PUSH_TTL_SECONDS',
+      'WEB_PUSH_VAPID_TTL_SECONDS',
+      'WEB_PUSH_DELIVERY_TIMEOUT_MS',
+      'WEB_PUSH_DELIVERY_BUDGET_MS',
+      'WEB_PUSH_FANOUT_CONCURRENCY',
+      'WEB_PUSH_MAX_ATTEMPTS',
+      'WEB_PUSH_MAX_RETRY_AFTER_SECONDS',
+      'WEB_PUSH_MAX_PAYLOAD_BYTES',
+      'WEB_PUSH_FAILURE_THRESHOLD',
+      'WEB_PUSH_MAX_SUBSCRIPTIONS_PER_USER',
+      'WEB_PUSH_USER_AGENT_MAX_LENGTH',
+      'RATE_LIMIT_PUSH_SUBSCRIPTION',
+      'HUMAN_INPUT_TIMEOUT_MS',
+      'HUMAN_INPUT_ESCALATION_FRACTIONS',
+      'HUMAN_INPUT_UNDELIVERED_GRACE_MS',
+      'HUMAN_INPUT_MAX_WAIT_MS',
+      'DURABLE_PROMPT_DELIVERY_ENABLED',
+      'PROMPT_DELIVERY_LEGACY_VM_COMPAT_ENABLED',
+      'PROMPT_DELIVERY_MAX_CANDIDATES_PER_ALARM',
+      'PROMPT_DELIVERY_MAX_ATTEMPTS',
+      'PROMPT_DELIVERY_RETRY_BASE_MS',
+      'PROMPT_DELIVERY_RETRY_MAX_MS',
+      'PROMPT_DELIVERY_TTL_MS',
+      'PROMPT_DELIVERY_RECEIPT_TIMEOUT_MS',
+      'PROMPT_DELIVERY_BACKGROUND_TIMEOUT_MS',
+      'PROMPT_DELIVERY_MIN_ALARM_DELAY_MS',
+      'ACP_LONG_TURN_SUPERVISOR_ENABLED',
+      'ACP_LONG_TURN_CHECKPOINT_MS',
+      'ACP_CHECKPOINT_PREEMPT_GRACE_MS',
+      'NODE_LIFECYCLE_MAX_DESTROYING_AGE_MS',
+      'NODE_WORKSPACE_IDLE_TIMEOUT_MS',
+      'NODE_CLEANUP_FAILURE_BACKOFF_MS',
+      'NODE_UNHEALTHY_DRAIN_AFTER_MS',
+      'NODE_UNHEALTHY_RELEASE_AFTER_MS',
+      'NODE_UNHEALTHY_FLEET_MAX_FRACTION',
+      'NODE_UNHEALTHY_FLEET_MIN_NODES',
+      'NODE_UNHEALTHY_RETRY_MS',
+      'NODE_UNHEALTHY_PRESERVATION_TIMEOUT_MS',
+      'NODE_AGENT_REQUEST_TIMEOUT_MS',
+      'NODE_AGENT_BACKGROUND_REQUEST_TIMEOUT_MS',
+      'WORKSPACE_DELETION_RETRY_BASE_MS',
+      'WORKSPACE_DELETION_RETRY_MAX_MS',
+      'WORKSPACE_DELETION_MAX_RESIDENCE_MS',
+      'WORKSPACE_DELETION_ALARM_BATCH_SIZE',
+      'WORKSPACE_DELETION_CALLBACK_SIGNAL_TTL_SECONDS',
+      'WORKSPACE_DELETION_CALLBACK_SIGNAL_CLEANUP_LIMIT',
+      'WORKSPACE_DELETION_DIAGNOSTIC_MAX_LENGTH',
+      'DIAGNOSIS_COMPLETED_STEP_MIN_DELAY_MS',
+      'ORCHESTRATOR_ZERO_TASK_GRACE_MS',
+      'ORCHESTRATOR_MAX_MISSION_LIFETIME_MS',
+      'ORCHESTRATOR_WAIT_RECONCILE_INTERVAL_MS',
+      'ORCHESTRATOR_WAIT_MAX_CHILDREN',
+      'ORCHESTRATOR_WAIT_MAX_ACTIVE_PER_PROJECT',
+      'ORCHESTRATOR_WAIT_MAX_DURATION_MS',
+      'ORCHESTRATOR_WAIT_MAX_CANDIDATES_PER_ALARM',
+      'HETZNER_BASE_IMAGE',
+      'DEPLOYMENT_DEFAULT_CPU_LIMIT_MILLIS',
+      'DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB',
+      'DEPLOYMENT_DEFAULT_ROOT_DISK_MB',
+      'DEPLOYMENT_RELEASE_RETENTION_ENABLED',
+      'DEPLOYMENT_RELEASE_RETENTION_COUNT',
+      'DEPLOYMENT_RELEASE_RETENTION_BATCH_SIZE',
+      'DEPLOYMENT_RELEASE_RETENTION_INTERVAL_HOURS',
+      'DEPLOYMENT_RELEASE_RETENTION_LAST_RUN_KV_KEY',
+      'DEPLOYMENT_RELEASE_RECONCILIATION_ENABLED',
+      'DEPLOYMENT_RELEASE_RECONCILIATION_BATCH_SIZE',
+      'DEPLOYMENT_RELEASE_RECONCILIATION_STALE_HOURS',
+      'DEPLOYMENT_RELEASE_RECONCILIATION_ACTIVITY_GRACE_HOURS',
+      'DEPLOYMENT_IMAGE_RESOLVE_REQUEST_TIMEOUT_MS',
+      'DEPLOYMENT_IMAGE_RESOLVE_TOTAL_TIMEOUT_MS',
+      'DEPLOYMENT_IMAGE_RESOLVE_MAX_FETCH_ATTEMPTS',
+      'DEPLOYMENT_IMAGE_RESOLVE_MAX_REDIRECTS',
+      'DEPLOYMENT_IMAGE_RESOLVE_TOKEN_RESPONSE_MAX_BYTES',
+      'DEPLOYMENT_IMAGE_RESOLVE_MAX_CONCURRENT_FETCHES',
+      'DEPLOYMENT_IMAGE_RESOLVE_MAX_SERVICES',
+      'SESSION_SNAPSHOT_PURGE_ENABLED',
+      'SESSION_SNAPSHOT_PURGE_BATCH_SIZE',
+      'SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS',
+      'SESSION_SNAPSHOT_R2_PREFIX',
+      'SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES',
+      'SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES',
+      'SESSION_SNAPSHOT_TRANSFER_IDLE_TIMEOUT_MS',
+      'SESSION_SNAPSHOT_REQUEST_TIMEOUT_MS',
+      'SESSION_SNAPSHOT_POLL_INTERVAL_MS',
+      'SESSION_SNAPSHOT_OPERATION_TIMEOUT',
+      'SESSION_SNAPSHOT_JSON_BODY_MAX_BYTES',
+      'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED',
+      'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PLAN_ID',
+      'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_KEY',
+      'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_SHA256',
+      'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_MANIFEST_MAX_BYTES',
+      'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ROOT_MANIFEST_MAX_BYTES',
+      'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_ROWS',
+      'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_BYTES',
+      'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_R2_OPERATIONS',
+      'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_WALL_TIME_MS',
+      'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PROJECT_IDS',
+      'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_CUTOFF_CREATED_AT',
+      'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TRIGGER_RATIO',
+      'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TARGET_RATIO',
+      'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS',
+      'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES',
+      'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_ROW_BYTES',
+      'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MIN_SESSION_AGE_DAYS',
+      'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS',
+      'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_SESSIONS_PER_ALARM',
+      'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_WALL_TIME_MS',
+      'PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_MAX_BATCH_ROWS',
+      'PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_MAX_BATCH_BYTES',
+      'PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_MAX_WALL_TIME_MS',
+      'PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_RECHECK_MS',
+      'PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS',
+      'PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_INTERVAL_MS',
+      'PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX',
+      'PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_WRITE_TIMEOUT_MS',
+      'PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_OPERATIONS',
+      'PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETRY_DELAY_MS',
+      'PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_CHUNK_BYTES',
+      'PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_METADATA_BYTES',
+      'PROJECT_DATA_STORAGE_RELIEF_MEASURE_BATCH_ROWS',
+      'PROJECT_DATA_STORAGE_RELIEF_MEASURE_MAX_BATCH_ROWS',
+      'PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_ENABLED',
+      'PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_PLAN_ID',
+      'PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_PROJECT_ID',
+      'PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_CUTOFF_CREATED_AT',
+      'PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_BATCH_ROWS',
+      'PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_INTERVAL_MS',
+      'PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_BATCHES',
+      'PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_ROWS',
+      'PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_BYTES',
+      'PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_LEASE_MS',
+      'PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_WALL_TIME_MS',
+      'PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_SLICES_PER_RUN',
+      'PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_RUN_WALL_TIME_MS',
+      'PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_LEASE_MARGIN_MS',
+      'PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_RETURN_MARGIN_MS',
+      'PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MEASUREMENT_WALL_TIME_MS',
+      'PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_STATE_BYTES',
+      'PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_ERROR_MAX_LENGTH',
+      'PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED',
+      'PROJECT_DATA_GROUPED_FTS_CLEANUP_TRIGGER_RATIO',
+      'PROJECT_DATA_GROUPED_FTS_CLEANUP_TARGET_RATIO',
+      'PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_SESSIONS',
+      'PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_ROWS',
+      'PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_BYTES',
+      'PROJECT_DATA_GROUPED_FTS_CLEANUP_MIN_SESSION_AGE_DAYS',
+      'PROJECT_DATA_GROUPED_FTS_CLEANUP_RECHECK_MS',
+      'PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_TIME_MS',
+      'PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_UNSAFE_RATIO',
+      'PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES',
+      'PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_MAX_ROWS',
+      'PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_MAX_BYTES',
+      'PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_MAX_SESSIONS',
+      'PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_TRANSACTION_ROWS',
+      'PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_TRANSACTION_BYTES',
+      'PROJECT_DATA_ARCHIVE_SHARDING_ENABLED',
+      'PROJECT_DATA_ARCHIVE_COMPACT_ENABLED',
+      'PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET',
+      'PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR',
+      'PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS',
+      'PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_RETENTION_MS',
+      'PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_CLEANUP_LIMIT',
+      'PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED',
+      'PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS',
+      'PROJECT_DATA_ARCHIVE_SHARD_COUNT',
+      'PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS',
+      'PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS',
+      'PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET',
+      'PROJECT_DATA_ARCHIVE_SWEEP_UNIT_OVERHEAD_PERCENT',
+      'PROJECT_DATA_ARCHIVE_SWEEP_FALLTHROUGH_DEPTH',
+      'PROJECT_DATA_ARCHIVE_BUDGET_STALL_ALERT_SWEEPS',
+      'PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS',
+      'PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS',
+      'PROJECT_DATA_ARCHIVE_FAILED_RETRY_DELAY_MS',
+      'PROJECT_DATA_ARCHIVE_CHUNK_ROWS',
+      'PROJECT_DATA_ARCHIVE_CHUNK_BYTES',
+      'PROJECT_DATA_ARCHIVE_HASH_PAGE_ROWS',
+      'PROJECT_DATA_ARCHIVE_LEASE_MS',
+      'PROJECT_DATA_ARCHIVE_WALL_TIME_MS',
+      'PROJECT_DATA_ARCHIVE_ROLLOUT_LIST_LIMIT_DEFAULT',
+      'PROJECT_DATA_ARCHIVE_ROLLOUT_LIST_LIMIT_MAX',
+      'PROJECT_DATA_ARCHIVE_FROZEN_INTENT_INSPECTION_LIMIT_DEFAULT',
+      'PROJECT_DATA_ARCHIVE_FROZEN_INTENT_INSPECTION_LIMIT_MAX',
+      'PROJECT_DATA_ARCHIVE_MANUAL_CANARY_MAX_SESSIONS',
+      'PROJECT_DATA_ARCHIVE_MANUAL_CANARY_MAX_WALL_TIME_MS',
+      'PROJECT_DATA_ARCHIVE_ROLLOUT_WARNING_EXAMPLES_MAX',
+      'PROJECT_DATA_ARCHIVE_ROLLOUT_WARNING_REASON_MAX_LENGTH',
+      'PROJECT_DATA_ARCHIVE_POISON_AFTER_ATTEMPTS',
+      'PROJECT_DATA_ARCHIVE_R2_PREFIX',
+      'PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS',
+      'PROJECT_DATA_ARCHIVE_SEARCH_CONCURRENCY',
+      'PROJECT_DATA_ARCHIVE_SEARCH_REPAIR_SESSIONS',
+      'PROJECT_DATA_ARCHIVE_SEARCH_REPAIR_CHUNKS',
+      'PROJECT_DATA_ARCHIVE_SEARCH_CONTINUATION_TTL_MS',
+      'PROJECT_DATA_ARCHIVE_SEARCH_CURSOR_MAX_BYTES',
+      'PROJECT_DATA_ARCHIVE_SEARCH_ERROR_LIMIT',
+      'PROJECT_DATA_SEARCH_FTS_CANDIDATE_LIMIT',
+      'PROJECT_DATA_SEARCH_FTS_SCAN_LIMIT',
+      'PROJECT_DATA_SEARCH_KEYWORD_SCAN_ROW_LIMIT',
+      'SEARCH_QUERY_MAX_LENGTH',
+      'SEARCH_QUERY_MAX_TERM_LENGTH',
+      'SEARCH_QUERY_MAX_TERMS',
+      'PROJECT_DATA_ALARM_SECTION_GATING_ENABLED',
+      'PROJECT_DATA_ALARM_FULL_RUN_INTERVAL_MS',
+      'PROJECT_DATA_ALARM_DUE_TOLERANCE_MS',
+      'PROJECT_DATA_ALARM_SLOW_SECTION_MS',
+      'PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED',
+      'PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS',
+      'PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS',
+      'PROJECT_DATA_EVENT_LOG_CLEANUP_RECHECK_MS',
+      'SESSION_SLEEP_AFTER_MS',
+      'SESSION_SLEEP_SWEEP_BATCH_SIZE',
+      'SESSION_SLEEP_SWEEP_WALL_BUDGET_MS',
+      'SESSION_SLEEP_RETRY_DELAY_MS',
+      'SESSION_SLEEP_MAX_ATTEMPTS',
+      'SESSION_SLEEP_FAILURE_MAX_ATTEMPTS',
+      'SESSION_SLEEP_FAILURE_MAX_ELAPSED_MS',
+      'SESSION_SLEEP_CLAIM_LEASE_MS',
+      'FAILED_TASK_PRESERVATION_MAX_WAIT_MS',
+      'HARNESS_BACKGROUND_WORK_LEASE_MS',
+      'HARNESS_BACKGROUND_WORK_MAX_DURATION_MS',
+      'ACP_ACTIVITY_ADMISSION_ENABLED',
+      'ACP_ACTIVITY_COALESCE_WINDOW_MS',
+      'ACP_ACTIVITY_COALESCE_TTL_MS',
+      'ACP_ACTIVITY_COALESCE_MAX_PENDING',
+      'ACP_ACTIVITY_BINDING_CACHE_TTL_MS',
+      'ACP_ACTIVITY_BINDING_CACHE_MAX_ENTRIES',
+      'ACP_INTERACTIONS_ENABLED',
+      'ACP_INTERACTION_FORMS_ENABLED',
+      'ACP_INTERACTION_URLS_ENABLED',
+      'ACP_INTERACTION_URL_DEADLINE_MS',
+      'ACP_INTERACTION_URL_MAX_CHARS',
+      'ACP_INTERACTION_URL_ELICITATION_ID_MAX_CHARS',
+      'ACP_INTERACTION_URL_REDIRECT_DEPTH',
+      'ACP_INTERACTION_PERMISSION_TASK_DEADLINE_MS',
+      'ACP_INTERACTION_PERMISSION_CONVERSATION_DEADLINE_MS',
+      'ACP_INTERACTION_MAX_DEADLINE_MS',
+      'ACP_INTERACTION_DEADLINE_MARGIN_MS',
+      'ACP_INTERACTION_MAX_PENDING_PER_SESSION',
+      'ACP_INTERACTION_REQUEST_MAX_BYTES',
+      'ACP_INTERACTION_OPTIONS_MAX_COUNT',
+      'ACP_INTERACTION_OPTION_ID_MAX_CHARS',
+      'ACP_INTERACTION_OPTION_NAME_MAX_CHARS',
+      'ACP_INTERACTION_RUNTIME_RECEIPT_LIMIT',
+      'ACP_INTERACTION_RUNTIME_RESPONSE_MAX_BYTES',
+      'ACP_INTERACTION_FORM_SCHEMA_MAX_BYTES',
+      'ACP_INTERACTION_FORM_SCHEMA_MAX_PROPERTIES',
+      'ACP_INTERACTION_FORM_SCHEMA_MAX_ENUM',
+      'ACP_INTERACTION_ANSWER_MAX_BYTES',
+      'ACP_INTERACTION_ANSWER_STRING_MAX_BYTES',
+      'ACP_INTERACTION_RETRY_DELAYS_MS',
+      'ACP_INTERACTION_RETRY_STEADY_MS',
+      'ACP_INTERACTION_DELIVERY_WINDOW_MS',
+      'ACP_INTERACTION_SENSITIVE_PURGE_MS',
+      'ACP_INTERACTION_SUMMARY_RETENTION_MS',
+      'ACP_INTERACTION_SUMMARY_LAST_SETTLED',
+      'ACP_INTERACTION_SNAPSHOT_LAST_SETTLED',
+      'ACP_INTERACTION_EXPIRY_BATCH_SIZE',
+      'ACP_INTERACTION_OUTBOX_BATCH_SIZE',
+      'ACP_INTERACTION_DELIVERY_BATCH_SIZE',
+      'ACP_INTERACTION_ALARM_WALL_TIME_MS',
+      'ACP_INTERACTION_ALARM_REARM_DELAY_MS',
+      'SESSION_SNAPSHOT_RECOVERY_CLAIM_LEASE_MS',
+      'SESSION_LIFECYCLE_ERROR_MAX_LENGTH',
+      'LIBRARY_PROJECT_DELETE_CLEANUP_BATCH_SIZE',
+      'MAX_VM_AGENT_ERROR_BODY_BYTES',
+      'MAX_VM_AGENT_ERROR_BATCH_SIZE',
+      'MAX_VM_AGENT_ERROR_SOURCE_LENGTH',
+      'OBSERVABILITY_ERROR_MESSAGE_MAX_LENGTH',
+      'OBSERVABILITY_ERROR_STACK_MAX_LENGTH',
+      'OBSERVABILITY_ERROR_USER_AGENT_MAX_LENGTH',
+      'DEBUG_AGENT_MODEL',
+      'DEBUG_AGENT_MAX_TURNS',
+      'DEBUG_AGENT_RUN_TOKEN_LIMIT',
+      'DEBUG_AGENT_MODEL_OUTPUT_TOKENS',
+      'DEBUG_AGENT_DAILY_TOKEN_LIMIT',
+      'DEBUG_AGENT_TOOL_RESULT_LIMIT',
+      'DEBUG_AGENT_TOOL_RESULT_BYTES',
+      'DEBUG_AGENT_MAX_WINDOW_HOURS',
+      'DEBUG_AGENT_TIMEOUT_MS',
+      'DEBUG_AGENT_HARD_DEADLINE_MS',
+      'DEBUG_AGENT_STALE_HEARTBEAT_MS',
+      'DEBUG_AGENT_RETRY_BASE_DELAY_MS',
+      'DEBUG_AGENT_RETRY_MAX_DELAY_MS',
+      'DEBUG_AGENT_STEP_MAX_RETRIES',
+      'VM_INCIDENT_ARTIFACT_MAX_BYTES',
+      'VM_INCIDENT_REGISTRATION_MAX_BYTES',
+      'VM_INCIDENT_MANIFEST_MAX_BYTES',
+      'VM_INCIDENT_PREVIEW_MAX_BYTES',
+      'VM_INCIDENT_MAX_ARTIFACTS_PER_NODE',
+      'VM_INCIDENT_MAX_BYTES_PER_NODE',
+      'VM_INCIDENT_METADATA_RETENTION_DAYS',
+      'VM_INCIDENT_PENDING_TIMEOUT_MINUTES',
+      'VM_INCIDENT_RECONCILE_BATCH_SIZE',
+      'ERROR_REPORT_FLUSH_INTERVAL',
+      'ERROR_REPORT_MAX_BATCH_SIZE',
+      'ERROR_REPORT_MAX_BATCH_BYTES',
+      'ERROR_REPORT_MAX_QUEUE_SIZE',
+      'ERROR_REPORT_HTTP_TIMEOUT',
+      'ERROR_REPORT_RETRY_INITIAL',
+      'ERROR_REPORT_RETRY_MAX',
+      'ERROR_REPORT_MAX_ATTEMPTS',
+      'ERROR_REPORT_DB_PATH',
+      'ERROR_REPORT_DB_BUSY_TIMEOUT',
+      'ERROR_REPORT_SPOOL_DIR',
+      'ERROR_REPORT_ARTIFACT_MAX_BYTES',
+      'ERROR_REPORT_SPOOL_MAX_BYTES',
+      'ERROR_REPORT_RETENTION',
+      'ERROR_REPORT_COLLECTOR_TIMEOUT',
+      'ERROR_REPORT_MAX_COLLECTOR_DOCS',
+      'ERROR_REPORT_MAX_DOCUMENT_BYTES',
+      'ERROR_REPORT_MAX_VALUE_DEPTH',
+      'ERROR_REPORT_MAX_VALUE_ITEMS',
+      'ERROR_REPORT_MAX_STRING_BYTES',
+      'ERROR_REPORT_EVENT_LIMIT',
+      'ERROR_REPORT_RESPONSE_MAX_BYTES',
+      'ERROR_REPORT_STORED_ERROR_MAX_BYTES',
+      'ERROR_REPORT_COLLECTOR_CONCURRENCY',
+      'PLATFORM_FEEDBACK_PROJECT_ID',
+      'REPORT_ISSUE_TITLE_MAX_LENGTH',
+      'REPORT_ISSUE_DESCRIPTION_MAX_LENGTH',
+      'REPORT_ISSUE_CONTENT_MAX_LENGTH',
+      'RATE_LIMIT_REPORT_ISSUE_POST',
+      'CF_CONTAINER_ENABLED',
+      'PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES',
+      'PLATFORM_FEEDBACK_TRIAGE_ERROR_LIMIT',
+      'PLATFORM_FEEDBACK_TRIAGE_GROUP_LIMIT',
+      'PLATFORM_FEEDBACK_TRIAGE_EVIDENCE_LIMIT',
+      'PLATFORM_FEEDBACK_TRIAGE_CLAIM_TTL_MS',
+      'PLATFORM_FEEDBACK_TRIAGE_MAX_FAILURES',
+      'PLATFORM_FEEDBACK_TRIAGE_FAILURE_REASON_MAX_LENGTH',
+      'PLATFORM_FEEDBACK_TRIAGE_BUDGET_DEFER_MS',
+      'PLATFORM_FEEDBACK_INCIDENT_DISPATCH_LEASE_TTL_MS',
+      'PLATFORM_FEEDBACK_INCIDENT_AGENT_LEASE_TTL_MS',
+      'PLATFORM_FEEDBACK_INCIDENT_MAX_DISPATCH_ATTEMPTS',
+      'PLATFORM_FEEDBACK_INCIDENT_REOPEN_COOLDOWN_MS',
+      'PLATFORM_FEEDBACK_INCIDENT_RECLAIM_LIMIT',
+      'PLATFORM_FEEDBACK_INCIDENT_MAX_AGE_MS',
+      'PLATFORM_FEEDBACK_INCIDENT_STALE_SINGLETON_MAX_AGE_MS',
+      'PLATFORM_FEEDBACK_INCIDENT_STALE_SINGLETON_EXPIRY_BATCH_SIZE',
+      'PLATFORM_FEEDBACK_INCIDENT_MIN_DISPATCH_SEVERITY',
+      'PLATFORM_FEEDBACK_INCIDENT_MIN_DISPATCH_BATCH_SIZE',
+      'PLATFORM_FEEDBACK_INCIDENT_MIN_PENDING_AGE_MS',
+      'PLATFORM_FEEDBACK_INCIDENT_DISPATCH_RATE_WINDOW_MS',
+      'PLATFORM_FEEDBACK_INCIDENT_MAX_DISPATCHES_PER_TRIGGER_WINDOW',
+      'PLATFORM_FEEDBACK_INCIDENT_TRIGGER_LIMIT',
+      'PLATFORM_FEEDBACK_INCIDENT_SUMMARY_LIMIT',
+      'PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_REF_LIMIT',
+      'PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_MAX_BYTES',
+      'PLATFORM_FEEDBACK_INCIDENT_RESOLUTION_NOTE_MAX_LENGTH',
+      'PLATFORM_FEEDBACK_INCIDENT_AUTO_TRIGGER_ENABLED',
+      'PLATFORM_FEEDBACK_INCIDENT_TRIGGER_NAME',
+      'PLATFORM_FEEDBACK_INCIDENT_TRIGGER_TEMPLATE',
+      'CF_CONTAINER_SLEEP_AFTER',
+      'CF_CONTAINER_ACTIVE_WORK_MAX_MS',
+      'CF_CONTAINER_KEEPALIVE_RENEW_INTERVAL_MS',
+      'CF_CONTAINER_PORT_READY_TIMEOUT_MS',
+      'CF_CONTAINER_WAKE_TIMEOUT_MS',
+      'CF_CONTAINER_RECOVERY_MAX_ATTEMPTS',
+      'CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS',
+      'CF_CONTAINER_CLONE_FILTER',
+      'CF_CONTAINER_VM_AGENT_PORT',
+      'SANDBOX_ENABLED',
+      'SANDBOX_EXEC_TIMEOUT_MS',
+      'SANDBOX_VM_AGENT_PORT',
+      ...EVENTING_OPTIONAL_PROCESS_ENV_VARS,
+      // Guided Codex credential-setup tuning.
+      'MAX_CONCURRENT_SETUP_SESSIONS',
+      'SETUP_SESSION_TTL_MS',
+      'SETUP_SESSION_CAPTURE_POLL_MS',
+      'CODEX_DEVICE_AUTH_REQUEST_TIMEOUT_MS',
+      'SETUP_SESSION_SWEEP_MAX_CANDIDATES',
+      'POOL_LEASE_BUFFER_MS',
+      'VM_AGENT_REQUIRED_VERSION',
+    ]),
+    // AI Gateway ID matches the resource prefix (created by configure-ai-gateway.sh)
+    AI_GATEWAY_ID: DEPLOYMENT_CONFIG.prefix,
+    // Analytics Engine dataset — derived from prefix so forks don't co-mingle data
+    ANALYTICS_DATASET: analyticsDataset,
+    // Marketing Pages project — used when the wildcard Worker route intercepts www.*
+    WWW_PAGES_PROJECT_NAME: `${DEPLOYMENT_CONFIG.prefix}-www`,
+    // Deployment environment — used by trial runner to choose agent type + model
+    ENVIRONMENT: DEPLOYMENT_CONFIG.getEnvironmentFromStack(stack),
+    // Artifacts is disabled by default and enabled only with the generated binding.
+    ARTIFACTS_ENABLED: includeArtifactsBinding ? 'true' : 'false',
+    // Plaintext by design: first-run admins read this once from the CF dashboard.
+    // Do not print the value in workflow logs; setup.completed gates it after use.
+    SETUP_TOKEN: generateSetupToken(),
+    ...(process.env.SETUP_FORCE === 'true' ? { SETUP_FORCE: 'true' } : {}),
+  };
+}
+
+function getAnalyticsEngineDatasets(
+  staticBindings: StaticBindings,
+  analyticsDataset: string
+): AnalyticsEngineDatasetBinding[] | undefined {
+  return staticBindings.analytics_engine_datasets?.map((dataset) =>
+    dataset.binding === 'ANALYTICS' ? { ...dataset, dataset: analyticsDataset } : dataset
+  );
+}
+
+function getStaticApiWorkerBindings(
+  staticBindings: StaticBindings,
+  analyticsEngineDatasets: AnalyticsEngineDatasetBinding[] | undefined,
+  includeArtifactsBinding: boolean,
+  durableObjectMigrations: MigrationEntry[] | undefined
+): Partial<WranglerEnvConfig> {
+  const containers = generateContainerBindings(staticBindings.containers);
+  return {
+    ...(staticBindings.durable_objects ? { durable_objects: staticBindings.durable_objects } : {}),
+    ...(staticBindings.ai ? { ai: staticBindings.ai } : {}),
+    ...(analyticsEngineDatasets ? { analytics_engine_datasets: analyticsEngineDatasets } : {}),
+    ...(durableObjectMigrations ? { migrations: durableObjectMigrations } : {}),
+    ...(containers ? { containers } : {}),
+    ...(includeArtifactsBinding ? { artifacts: staticBindings.artifacts } : {}),
+    ...(staticBindings.limits ? { limits: staticBindings.limits } : {}),
+  };
+}
+
+function getTailConsumers(
+  includeTailConsumers: boolean,
+  tailWorkerName: string
+): Partial<WranglerEnvConfig> {
+  return includeTailConsumers ? { tail_consumers: [{ service: tailWorkerName }] } : {};
+}
+
+export function generateApiWorkerEnv(
+  topLevel: WranglerToml,
+  outputs: PulumiOutputs,
+  stack: string,
+  includeTailConsumers: boolean,
+  artifactsBindingEnabled: boolean,
+  deployedMigrationTag: string | null
 ): WranglerEnvConfig {
   const staticBindings = extractStaticBindings(topLevel);
+  const durableObjectMigrations = resolveDurableObjectMigrations(
+    staticBindings.migrations,
+    deployedMigrationTag
+  );
+  if (artifactsBindingEnabled && !staticBindings.artifacts) {
+    throw new Error(
+      'Artifacts is enabled but no top-level [[artifacts]] binding exists in wrangler.toml'
+    );
+  }
+  const includeArtifactsBinding = artifactsBindingEnabled && !!staticBindings.artifacts;
+  const workerName = DEPLOYMENT_CONFIG.resources.workerName(stack);
   const tailWorkerName = DEPLOYMENT_CONFIG.resources.tailWorkerName(stack);
+  const analyticsDataset = `${DEPLOYMENT_CONFIG.prefix}_analytics`;
+  const analyticsEngineDatasets = getAnalyticsEngineDatasets(staticBindings, analyticsDataset);
 
   const envConfig: WranglerEnvConfig = {
     // Worker name derived from config
-    name: DEPLOYMENT_CONFIG.resources.workerName(stack),
+    name: workerName,
 
     // Account ID for authentication
     account_id: outputs.cloudflareAccountId,
@@ -217,44 +1271,19 @@ function generateApiWorkerEnv(
     //
     // Health checks additionally use D1 heartbeat queries as defense-in-depth
     // (see task-runner.ts handleNodeAgentReady and verifyNodeAgentHealthy).
-    routes: [
-      {
-        pattern: `api.${outputs.stackSummary.baseDomain}/*`,
-        zone_name: outputs.stackSummary.baseDomain,
-      },
-      {
-        pattern: `*.${outputs.stackSummary.baseDomain}/*`,
-        zone_name: outputs.stackSummary.baseDomain,
-      },
-    ],
+    routes: getApiWorkerRoutes(outputs.stackSummary.baseDomain),
 
     // Workers Observability
     observability: {
       enabled: true,
       logs: {
         invocation_logs: true,
-        head_sampling_rate: 0.01,
+        head_sampling_rate: 1,
       },
     },
 
     // Vars: merge top-level defaults with dynamic overrides
-    vars: {
-      ...(topLevel.vars || {}),
-      BASE_DOMAIN: outputs.stackSummary.baseDomain,
-      VERSION: DEPLOYMENT_CONFIG.version,
-      PAGES_PROJECT_NAME: outputs.pagesName,
-      R2_BUCKET_NAME: outputs.r2Name,
-      ...(process.env.REQUIRE_APPROVAL ? { REQUIRE_APPROVAL: process.env.REQUIRE_APPROVAL } : {}),
-      ...(process.env.HETZNER_BASE_IMAGE
-        ? { HETZNER_BASE_IMAGE: process.env.HETZNER_BASE_IMAGE }
-        : {}),
-      // AI Gateway ID matches the resource prefix (created by configure-ai-gateway.sh)
-      AI_GATEWAY_ID: DEPLOYMENT_CONFIG.prefix,
-      // Analytics Engine dataset — derived from prefix so forks don't co-mingle data
-      ANALYTICS_DATASET: `${DEPLOYMENT_CONFIG.prefix}_analytics`,
-      // Deployment environment — used by trial runner to choose agent type + model
-      ENVIRONMENT: DEPLOYMENT_CONFIG.getEnvironmentFromStack(stack),
-    },
+    vars: getApiWorkerVars(topLevel, outputs, stack, analyticsDataset, includeArtifactsBinding),
 
     // Dynamic bindings from Pulumi outputs
     d1_databases: [
@@ -272,21 +1301,24 @@ function generateApiWorkerEnv(
       },
     ],
     kv_namespaces: [{ binding: 'KV', id: outputs.kvId }],
-    r2_buckets: [{ binding: 'R2', bucket_name: outputs.r2Name }],
+    r2_buckets: [
+      { binding: 'R2', bucket_name: outputs.r2Name },
+      { binding: 'PROJECT_DATA_ARCHIVE_R2', bucket_name: outputs.r2Name },
+    ],
 
     // Static bindings copied from top-level config
-    ...(staticBindings.durable_objects ? { durable_objects: staticBindings.durable_objects } : {}),
-    ...(staticBindings.ai ? { ai: staticBindings.ai } : {}),
-    ...(staticBindings.analytics_engine_datasets
-      ? { analytics_engine_datasets: staticBindings.analytics_engine_datasets }
-      : {}),
-    ...(staticBindings.migrations ? { migrations: staticBindings.migrations } : {}),
-    ...(staticBindings.containers ? { containers: staticBindings.containers } : {}),
-    ...(staticBindings.artifacts ? { artifacts: staticBindings.artifacts } : {}),
+    ...getStaticApiWorkerBindings(
+      staticBindings,
+      analyticsEngineDatasets,
+      includeArtifactsBinding,
+      durableObjectMigrations
+    ),
 
     // Tail consumers (conditional — omitted on first deploy when tail worker doesn't exist)
-    ...(includeTailConsumers ? { tail_consumers: [{ service: tailWorkerName }] } : {}),
+    ...getTailConsumers(includeTailConsumers, tailWorkerName),
   };
+
+  assertWorkerTextBindingLimit(envConfig);
 
   return envConfig;
 }
@@ -306,11 +1338,19 @@ function syncTailWorkerConfig(stack: string, accountId: string, envKey: string):
 
   if (!config.env) config.env = {};
 
+  // Propagate top-level [vars] (e.g. TAIL_SUBSCRIBER_CACHE_MS) into the
+  // generated env section — wrangler does not inherit them automatically.
+  const topLevelVars =
+    config.vars && typeof config.vars === 'object' && !Array.isArray(config.vars)
+      ? (config.vars as TOML.JsonMap)
+      : {};
+
   const envConfig = ensureTomlMap(config.env, 'tail worker env config');
   envConfig[envKey] = {
     name: tailWorkerName,
     account_id: accountId,
     services: [{ binding: 'API_WORKER', service: apiWorkerName }],
+    ...(Object.keys(topLevelVars).length > 0 ? { vars: { ...topLevelVars } } : {}),
   };
 
   const output = TOML.stringify(config);
@@ -351,34 +1391,65 @@ async function main(): Promise<void> {
   const config = loadWranglerToml();
   const envKey = DEPLOYMENT_CONFIG.getEnvironmentFromStack(stack);
 
+  const apiWorkerName = DEPLOYMENT_CONFIG.resources.workerName(stack);
+  const deployedMigrationTag = await getDeployedWorkerMigrationTag(
+    outputs.cloudflareAccountId,
+    apiWorkerName
+  );
+  console.log(
+    `  API worker "${apiWorkerName}" migration state: ${deployedMigrationTag ?? 'clean install'}`
+  );
+
   // Check if tail worker already exists (for conditional tail_consumers)
   const tailWorkerName = DEPLOYMENT_CONFIG.resources.tailWorkerName(stack);
   const hasTailWorker = await checkTailWorkerExists(outputs.cloudflareAccountId, tailWorkerName);
   console.log(`  Tail worker "${tailWorkerName}" exists: ${hasTailWorker}`);
   if (!hasTailWorker) {
-    console.log(
-      `  tail_consumers will be OMITTED (first deploy — will re-add after tail worker is deployed)`
-    );
+    console.log(`  tail_consumers will be OMITTED until the tail worker is deployed`);
   }
+
+  // Auto-detect whether this deployment can use Cloudflare Artifacts (probes the
+  // Artifacts REST API with the deploy token). ARTIFACTS_BINDING_ENABLED forces a
+  // value when set explicitly. The probe namespace is derived from the actual
+  // [[artifacts]] binding so the probe and the runtime binding can never diverge.
+  const artifactsBindingConfig = (
+    config.artifacts as Array<{ namespace?: string }> | undefined
+  )?.[0];
+  const artifactsNamespace = artifactsBindingConfig?.namespace || 'default';
+  const artifactsBindingEnabled = await resolveArtifactsBindingEnabled(
+    outputs.cloudflareAccountId,
+    artifactsNamespace
+  );
 
   // Generate complete env section for API worker
   if (!config.env) {
     config.env = {};
   }
-  config.env[envKey] = generateApiWorkerEnv(config, outputs, stack, hasTailWorker);
+  config.env[envKey] = generateApiWorkerEnv(
+    config,
+    outputs,
+    stack,
+    hasTailWorker,
+    artifactsBindingEnabled,
+    deployedMigrationTag
+  );
   saveWranglerToml(config);
   console.log(`Updated wrangler.toml [env.${envKey}]`);
+  console.log(
+    `Setup token is available in Cloudflare dashboard variables: ${cloudflareWorkerVariablesUrl(
+      outputs.cloudflareAccountId,
+      DEPLOYMENT_CONFIG.resources.workerName(stack),
+      envKey
+    )}`
+  );
+  console.log('Setup token value was intentionally not printed.');
 
   // Generate env section for tail worker
   syncTailWorkerConfig(stack, outputs.cloudflareAccountId, envKey);
 
-  // Write first-deploy marker for the workflow to detect
-  if (!hasTailWorker) {
-    mkdirSync(DEPLOY_STATE_DIR, { recursive: true });
-    writeFileSync(FIRST_DEPLOY_MARKER, 'true', 'utf-8');
-    console.log(`\nFirst-deploy marker written to ${FIRST_DEPLOY_MARKER}`);
-    console.log('The deploy workflow will re-sync and re-deploy after the tail worker is created.');
-  }
+  // The migration probe returns null only for a confirmed absent API Worker.
+  // A missing Tail Worker must never trigger extra code revisions on a live API.
+  writeDeploymentMarkers(deployedMigrationTag, hasTailWorker);
 
   console.log('\nSync complete.');
 }

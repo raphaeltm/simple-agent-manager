@@ -19,12 +19,16 @@ import (
 // sessionHostClient implements the acp-go-sdk Client interface.
 // Instead of writing to a single WebSocket, it broadcasts to all viewers.
 type sessionHostClient struct {
-	host        *SessionHost
-	processedCh chan struct{} // Signaled after each notification handler completes (used by orderedPipe).
+	host                  *SessionHost
+	processedCh           chan struct{} // Signaled only after session/update completes (used by orderedPipe).
+	usageAttribution      credentialAttribution
+	hasUsageAttribution   bool
+	interactionGeneration string
 }
 
-// signalProcessed signals the orderedPipe that this notification handler has
-// completed, allowing the next notification to be delivered to the SDK.
+// signalProcessed signals that a session/update handler completed, allowing
+// the next session/update notification to be delivered to the SDK. Extension
+// methods must not issue this credit.
 func (c *sessionHostClient) signalProcessed() {
 	if c.processedCh != nil {
 		select {
@@ -39,6 +43,21 @@ func (c *sessionHostClient) signalProcessed() {
 
 func (c *sessionHostClient) SessionUpdate(_ context.Context, params acpsdk.SessionNotification) error {
 	defer c.signalProcessed()
+
+	// Suppress transcript replay emitted during an ACP LoadSession. LoadSession
+	// (triggered by cancel/crash restart) replays the whole conversation as
+	// session/update notifications; broadcasting or re-persisting them causes the
+	// browser to visibly replay the conversation and the control plane to store
+	// duplicate messages with fresh UUIDs. The early return is placed after the
+	// signalProcessed defer so orderedPipe's serialization ordering is preserved.
+	if c.host.replaySuppressed.Load() {
+		return nil
+	}
+
+	if c.host.applyACPToolCallLifecycle(params) {
+		c.host.nudgeHarnessActivityReport()
+	}
+	c.host.captureSessionUsageUpdate(params, c.usageAttribution, c.hasUsageAttribution)
 
 	data, err := json.Marshal(map[string]interface{}{
 		"jsonrpc": "2.0",
@@ -71,31 +90,8 @@ func (c *sessionHostClient) SessionUpdate(_ context.Context, params acpsdk.Sessi
 	return nil
 }
 
-func (c *sessionHostClient) RequestPermission(_ context.Context, params acpsdk.RequestPermissionRequest) (acpsdk.RequestPermissionResponse, error) {
-	data, err := json.Marshal(map[string]interface{}{
-		"jsonrpc": "2.0",
-		"method":  "permission/request",
-		"params":  params,
-	})
-	if err != nil {
-		return acpsdk.RequestPermissionResponse{}, fmt.Errorf("failed to marshal permission request: %w", err)
-	}
-	c.host.broadcastMessage(data)
-
-	mode := c.host.permissionMode
-	if mode == "" {
-		mode = "default"
-	}
-	slog.Info("Permission request", "mode", mode, "optionsCount", len(params.Options))
-
-	if len(params.Options) > 0 {
-		return acpsdk.RequestPermissionResponse{
-			Outcome: acpsdk.NewRequestPermissionOutcomeSelected(params.Options[0].OptionId),
-		}, nil
-	}
-	return acpsdk.RequestPermissionResponse{
-		Outcome: acpsdk.NewRequestPermissionOutcomeCancelled(),
-	}, nil
+func (c *sessionHostClient) RequestPermission(ctx context.Context, params acpsdk.RequestPermissionRequest) (acpsdk.RequestPermissionResponse, error) {
+	return c.host.requestPermission(ctx, c.interactionGeneration, params)
 }
 
 func (c *sessionHostClient) ReadTextFile(ctx context.Context, params acpsdk.ReadTextFileRequest) (acpsdk.ReadTextFileResponse, error) {

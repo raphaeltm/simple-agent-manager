@@ -7,8 +7,8 @@
  *
  * Replaces source-contract tests that only checked string presence in source code.
  */
-import { env, SELF } from 'cloudflare:test';
-import { beforeAll,describe, expect, it } from 'vitest';
+import { env, runInDurableObject, SELF } from 'cloudflare:test';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 import { signCallbackToken } from '../../src/services/jwt';
 
@@ -17,14 +17,18 @@ const TEST_PREFIX = `msg-test-${Date.now()}`;
 const WORKSPACE_ID = `${TEST_PREFIX}-ws`;
 const WORKSPACE_NO_SESSION = `${TEST_PREFIX}-ws-nosess`;
 const WORKSPACE_NO_PROJECT = `${TEST_PREFIX}-ws-noproj`;
+const WORKSPACE_STOPPED = `${TEST_PREFIX}-ws-stopped`;
+const WORKSPACE_STOPPING = `${TEST_PREFIX}-ws-stopping`;
 const PROJECT_ID = `${TEST_PREFIX}-proj`;
+const NODE_ID = `${TEST_PREFIX}-node`;
 const SESSION_ID = `${TEST_PREFIX}-sess`;
+const STOPPED_SESSION_ID = `${TEST_PREFIX}-stopped-sess`;
 const USER_ID = `${TEST_PREFIX}-user`;
 
 async function postMessages(
   workspaceId: string,
   messages: Record<string, unknown>[],
-  token: string,
+  token: string
 ) {
   return SELF.fetch(`https://api.test.example.com/api/workspaces/${workspaceId}/messages`, {
     method: 'POST',
@@ -34,6 +38,15 @@ async function postMessages(
     },
     body: JSON.stringify({ messages }),
   });
+}
+
+async function countPlatformErrorsForWorkspace(workspaceId: string): Promise<number> {
+  const row = await env.OBSERVABILITY_DATABASE.prepare(
+    'SELECT COUNT(*) AS count FROM platform_errors WHERE workspace_id = ?'
+  )
+    .bind(workspaceId)
+    .first<{ count: number }>();
+  return row?.count ?? 0;
 }
 
 function makeMessage(overrides: Partial<Record<string, unknown>> = {}) {
@@ -50,51 +63,160 @@ function makeMessage(overrides: Partial<Record<string, unknown>> = {}) {
 describe('POST /workspaces/:id/messages — behavioral tests', () => {
   let validToken: string;
   let noSessionToken: string;
+  let stoppedToken: string;
+  let stoppingToken: string;
 
   beforeAll(async () => {
     // Create test user
     await env.DATABASE.prepare(
-      `INSERT OR IGNORE INTO users (id, github_id, github_username, display_name, avatar_url, role, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 'user', 'approved', datetime('now'), datetime('now'))`,
+      `INSERT OR IGNORE INTO users (id, email, github_id, name, avatar_url, role, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 'user', 'active', cast(unixepoch() * 1000 as integer), cast(unixepoch() * 1000 as integer))`
     )
-      .bind(USER_ID, 999999, 'test-user', 'Test User', 'https://example.com/avatar.png')
+      .bind(
+        USER_ID,
+        'test-user' + '@example.test',
+        999999,
+        'Test User',
+        'https://example.com/avatar.png'
+      )
       .run();
 
     // Create test project
     await env.DATABASE.prepare(
-      `INSERT OR IGNORE INTO projects (id, user_id, name, github_repo, github_owner, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+      `INSERT OR IGNORE INTO github_installation_accounts
+       (installation_id, account_type, account_name, normalized_account_name, created_at, updated_at)
+     VALUES (?, 'personal', ?, lower(?), datetime('now'), datetime('now'))`
     )
-      .bind(PROJECT_ID, USER_ID, 'test-project', 'test-repo', 'test-owner')
+      .bind(PROJECT_ID + '-inst', 'test-owner', 'test-owner')
+      .run();
+
+    await env.DATABASE.prepare(
+      `INSERT OR IGNORE INTO github_installations
+       (id, user_id, installation_id, external_installation_id, account_type, account_name, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'user', ?, datetime('now'), datetime('now'))`
+    )
+      .bind(PROJECT_ID + '-inst', USER_ID, PROJECT_ID + '-inst', PROJECT_ID + '-inst', 'test-owner')
+      .run();
+
+    await env.DATABASE.prepare(
+      `INSERT OR IGNORE INTO projects
+       (id, user_id, name, normalized_name, installation_id, repository, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, lower(?), ?, ?, ?, datetime('now'), datetime('now'))`
+    )
+      .bind(
+        PROJECT_ID,
+        USER_ID,
+        'test-project',
+        'test-project',
+        PROJECT_ID + '-inst',
+        'test-owner/test-repo',
+        USER_ID
+      )
+      .run();
+
+    await env.DATABASE.prepare(
+      `INSERT OR IGNORE INTO nodes (id, user_id, name, status, cloud_provider, vm_location, vm_size, created_at, updated_at)
+       VALUES (?, ?, ?, 'running', 'hetzner', 'fsn1', 'cx22', datetime('now'), datetime('now'))`
+    )
+      .bind(NODE_ID, USER_ID, 'test-node')
+      .run();
+
+    // Workspace whose runtime deletion has not yet been confirmed.
+    await env.DATABASE.prepare(
+      `INSERT OR IGNORE INTO workspaces (id, user_id, node_id, project_id, chat_session_id, name, repository, branch, status, vm_size, vm_location, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'stopping', 'cx22', 'fsn1', datetime('now'), datetime('now'))`
+    )
+      .bind(
+        WORKSPACE_STOPPING,
+        USER_ID,
+        NODE_ID,
+        PROJECT_ID,
+        `${STOPPED_SESSION_ID}-stopping`,
+        'test-ws-stopping',
+        'test-repo',
+        'main'
+      )
       .run();
 
     // Workspace with linked chatSessionId
     await env.DATABASE.prepare(
-      `INSERT OR IGNORE INTO workspaces (id, user_id, project_id, chat_session_id, name, repository, branch, status, vm_size, vm_location, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'running', 'cx22', 'fsn1', datetime('now'), datetime('now'))`,
+      `INSERT OR IGNORE INTO workspaces (id, user_id, node_id, project_id, chat_session_id, name, repository, branch, status, vm_size, vm_location, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running', 'cx22', 'fsn1', datetime('now'), datetime('now'))`
     )
-      .bind(WORKSPACE_ID, USER_ID, PROJECT_ID, SESSION_ID, 'test-ws', 'test-repo', 'main')
+      .bind(WORKSPACE_ID, USER_ID, NODE_ID, PROJECT_ID, SESSION_ID, 'test-ws', 'test-repo', 'main')
       .run();
 
     // Workspace WITHOUT chatSessionId (simulates linking window)
     await env.DATABASE.prepare(
-      `INSERT OR IGNORE INTO workspaces (id, user_id, project_id, chat_session_id, name, repository, branch, status, vm_size, vm_location, created_at, updated_at)
-       VALUES (?, ?, ?, NULL, ?, ?, ?, 'running', 'cx22', 'fsn1', datetime('now'), datetime('now'))`,
+      `INSERT OR IGNORE INTO workspaces (id, user_id, node_id, project_id, chat_session_id, name, repository, branch, status, vm_size, vm_location, created_at, updated_at)
+       VALUES (?, ?, ?, ?, NULL, ?, ?, ?, 'running', 'cx22', 'fsn1', datetime('now'), datetime('now'))`
     )
-      .bind(WORKSPACE_NO_SESSION, USER_ID, PROJECT_ID, 'test-ws-nosess', 'test-repo', 'main')
+      .bind(
+        WORKSPACE_NO_SESSION,
+        USER_ID,
+        NODE_ID,
+        PROJECT_ID,
+        'test-ws-nosess',
+        'test-repo',
+        'main'
+      )
       .run();
 
     // Workspace without project (edge case)
     await env.DATABASE.prepare(
-      `INSERT OR IGNORE INTO workspaces (id, user_id, project_id, chat_session_id, name, repository, branch, status, vm_size, vm_location, created_at, updated_at)
-       VALUES (?, ?, NULL, NULL, ?, ?, ?, 'running', 'cx22', 'fsn1', datetime('now'), datetime('now'))`,
+      `INSERT OR IGNORE INTO workspaces (id, user_id, node_id, project_id, chat_session_id, name, repository, branch, status, vm_size, vm_location, created_at, updated_at)
+       VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, 'running', 'cx22', 'fsn1', datetime('now'), datetime('now'))`
     )
-      .bind(WORKSPACE_NO_PROJECT, USER_ID, 'test-ws-noproj', 'test-repo', 'main')
+      .bind(WORKSPACE_NO_PROJECT, USER_ID, NODE_ID, 'test-ws-noproj', 'test-repo', 'main')
       .run();
+
+    // Stopped workspace with a still-linked session
+    await env.DATABASE.prepare(
+      `INSERT OR IGNORE INTO workspaces (id, user_id, node_id, project_id, chat_session_id, name, repository, branch, status, vm_size, vm_location, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'stopped', 'cx22', 'fsn1', datetime('now'), datetime('now'))`
+    )
+      .bind(
+        WORKSPACE_STOPPED,
+        USER_ID,
+        NODE_ID,
+        PROJECT_ID,
+        STOPPED_SESSION_ID,
+        'test-ws-stopped',
+        'test-repo',
+        'main'
+      )
+      .run();
+
+    const projectData = env.PROJECT_DATA.get(env.PROJECT_DATA.idFromName(PROJECT_ID));
+    await runInDurableObject(projectData, async (instance) => {
+      const now = Date.now();
+      instance.ctx.storage.sql.exec(
+        `INSERT OR IGNORE INTO chat_sessions
+           (id, workspace_id, topic, status, message_count, started_at, created_at, updated_at)
+         VALUES (?, ?, 'Workspace message test', 'active', 0, ?, ?, ?)`,
+        SESSION_ID,
+        WORKSPACE_ID,
+        now,
+        now,
+        now
+      );
+      instance.ctx.storage.sql.exec(
+        `INSERT OR IGNORE INTO chat_sessions
+           (id, workspace_id, topic, status, message_count, started_at, created_at, updated_at)
+         VALUES (?, ?, 'Stopped workspace message test', 'active', 0, ?, ?, ?)`,
+        STOPPED_SESSION_ID,
+        WORKSPACE_STOPPED,
+        now,
+        now,
+        now
+      );
+    });
 
     // Sign callback tokens for each workspace
     validToken = await signCallbackToken(WORKSPACE_ID, env as any);
     noSessionToken = await signCallbackToken(WORKSPACE_NO_SESSION, env as any);
+    stoppedToken = await signCallbackToken(WORKSPACE_STOPPED, env as any);
+    stoppingToken = await signCallbackToken(WORKSPACE_STOPPING, env as any);
   });
 
   describe('session validation (Bug 3 fix)', () => {
@@ -106,11 +228,7 @@ describe('POST /workspaces/:id/messages — behavioral tests', () => {
     });
 
     it('returns 409 when workspace has no linked chatSessionId (transient window)', async () => {
-      const response = await postMessages(
-        WORKSPACE_NO_SESSION,
-        [makeMessage()],
-        noSessionToken,
-      );
+      const response = await postMessages(WORKSPACE_NO_SESSION, [makeMessage()], noSessionToken);
       // 409 Conflict — VM agent will retry (not 400 which would discard the batch)
       expect(response.status).toBe(409);
       const body = await response.json<{ error: string; message: string }>();
@@ -127,6 +245,20 @@ describe('POST /workspaces/:id/messages — behavioral tests', () => {
   });
 
   describe('input validation', () => {
+    it('rejects oversized payloads before message schema validation', async () => {
+      const messages = Array.from({ length: 100 }, (_, index) =>
+        makeMessage({
+          messageId: `${TEST_PREFIX}-large-${index}`,
+          content: 'x'.repeat(3000),
+        })
+      );
+
+      const response = await postMessages(WORKSPACE_ID, messages, validToken);
+      expect(response.status).toBe(400);
+      const body = await response.json<{ error: string; message: string }>();
+      expect(body.message).toContain('Payload exceeds');
+    });
+
     it('returns 400 for empty messages array', async () => {
       const response = await postMessages(WORKSPACE_ID, [], validToken);
       expect(response.status).toBe(400);
@@ -136,7 +268,7 @@ describe('POST /workspaces/:id/messages — behavioral tests', () => {
       const response = await postMessages(
         WORKSPACE_ID,
         [makeMessage({ role: 'invalid-role' })],
-        validToken,
+        validToken
       );
       expect(response.status).toBe(400);
     });
@@ -145,7 +277,7 @@ describe('POST /workspaces/:id/messages — behavioral tests', () => {
       const response = await postMessages(
         WORKSPACE_ID,
         [makeMessage(), makeMessage({ sessionId: 'different-session' })],
-        validToken,
+        validToken
       );
       expect(response.status).toBe(400);
       const body = await response.json<{ error: string; message: string }>();
@@ -154,6 +286,27 @@ describe('POST /workspaces/:id/messages — behavioral tests', () => {
   });
 
   describe('safeParseJson (Bug 2 fix)', () => {
+    it('preserves fixed loopback prompt attribution through the authenticated callback', async () => {
+      const promptId = `${TEST_PREFIX}-prompt-a`;
+      const diagnosticId = `${TEST_PREFIX}-loopback-diagnostic`;
+      const message = makeMessage({
+        messageId: diagnosticId,
+        role: 'system',
+        content: 'This sign-in flow requires a local callback that this session cannot complete.',
+        toolMetadata: JSON.stringify({ promptMessageId: promptId }),
+      });
+      const response = await postMessages(WORKSPACE_ID, [message], validToken);
+      expect(response.status).toBe(200);
+      const projectData = env.PROJECT_DATA.get(env.PROJECT_DATA.idFromName(PROJECT_ID));
+      const storedMetadata = await runInDurableObject(projectData, async (instance) => {
+        const row = instance.ctx.storage.sql.exec(
+          'SELECT tool_metadata FROM chat_messages WHERE id = ?', diagnosticId
+        ).toArray()[0] as { tool_metadata: string } | undefined;
+        return row?.tool_metadata;
+      });
+      expect(storedMetadata && JSON.parse(storedMetadata)).toEqual({ promptMessageId: promptId });
+    });
+
     it('preserves tool metadata when toolMetadata is valid JSON', async () => {
       const toolMeta = JSON.stringify({
         toolCallId: 'tc-123',
@@ -175,6 +328,18 @@ describe('POST /workspaces/:id/messages — behavioral tests', () => {
   });
 
   describe('auth', () => {
+    it('authenticates before parsing invalid JSON payloads', async () => {
+      const response = await SELF.fetch(
+        `https://api.test.example.com/api/workspaces/${WORKSPACE_ID}/messages`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{not valid json',
+        }
+      );
+      expect(response.status).toBe(401);
+    });
+
     it('returns 401 without auth header', async () => {
       const response = await SELF.fetch(
         `https://api.test.example.com/api/workspaces/${WORKSPACE_ID}/messages`,
@@ -182,7 +347,7 @@ describe('POST /workspaces/:id/messages — behavioral tests', () => {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ messages: [makeMessage()] }),
-        },
+        }
       );
       expect(response.status).toBe(401);
     });
@@ -197,10 +362,62 @@ describe('POST /workspaces/:id/messages — behavioral tests', () => {
   });
 
   describe('workspace resolution', () => {
-    it('returns 404 for non-existent workspace', async () => {
+    it('returns 204 for non-existent workspace to stop old-agent outbox retries', async () => {
       const fakeToken = await signCallbackToken('nonexistent-ws', env as any);
       const response = await postMessages('nonexistent-ws', [makeMessage()], fakeToken);
-      expect(response.status).toBe(404);
+      expect(response.status).toBe(204);
+    });
+
+    it('drops messages for stopped workspaces before persistence', async () => {
+      const beforeErrors = await countPlatformErrorsForWorkspace(WORKSPACE_STOPPED);
+      const response = await postMessages(
+        WORKSPACE_STOPPED,
+        [makeMessage({ sessionId: STOPPED_SESSION_ID })],
+        stoppedToken
+      );
+      expect(response.status).toBe(204);
+      expect(await countPlatformErrorsForWorkspace(WORKSPACE_STOPPED)).toBe(beforeErrors);
+    });
+
+    it('rejects a late stopping-workspace callback before parsing payloads and emits bounded telemetry', async () => {
+      const postLateCallback = () =>
+        SELF.fetch(`https://api.test.example.com/api/workspaces/${WORKSPACE_STOPPING}/messages`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${stoppingToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: '{"prompt":"do-not-ingest","token":"super-secret"',
+        });
+      const responses = await Promise.all(Array.from({ length: 8 }, () => postLateCallback()));
+      expect(responses.every((response) => response.status === 204)).toBe(true);
+
+      const projectData = env.PROJECT_DATA.get(
+        env.PROJECT_DATA.idFromName(PROJECT_ID)
+      ) as unknown as {
+        listActivityEvents(
+          eventType: string | null
+        ): Promise<{ events: Array<Record<string, unknown>> }>;
+      };
+      const { events } = await projectData.listActivityEvents(
+        'workspace.deletion_unconfirmed_callback'
+      );
+      const workspaceSignals = events.filter((event) => event.workspaceId === WORKSPACE_STOPPING);
+      expect(workspaceSignals).toHaveLength(1);
+      const signal = workspaceSignals[0];
+      expect(signal).toMatchObject({
+        eventType: 'workspace.deletion_unconfirmed_callback',
+        actorType: 'workspace_callback',
+        actorId: WORKSPACE_STOPPING,
+        workspaceId: WORKSPACE_STOPPING,
+        payload: expect.objectContaining({
+          callback: 'messages',
+          workspaceStatus: 'stopping',
+          action: 'rejected',
+        }),
+      });
+      expect(JSON.stringify(signal)).not.toContain('do-not-ingest');
+      expect(JSON.stringify(signal)).not.toContain('super-secret');
     });
   });
 });

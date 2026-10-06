@@ -7,7 +7,8 @@
  * 3. Admin routes are mounted and handle CRUD
  * 4. User route returns quota status
  * 5. Task submission checks quota based on credential SOURCE (not existence)
- * 6. Node provisioning re-checks quota using resolveCredentialSource (hard gate)
+ * 6. Task entry points centralize placement/credential attribution; node provisioning re-checks
+ *    quota using resolveCredentialSource (hard gate)
  * 7. Manual node creation enforces quota for platform credentials
  * 8. BYOC users are exempt only when using their own credential for the target provider
  */
@@ -18,17 +19,44 @@ import { describe, expect, it } from 'vitest';
 
 describe('compute quota pipeline', () => {
   const schemaFile = readFileSync(resolve(process.cwd(), 'src/db/schema.ts'), 'utf8');
-  const serviceFile = readFileSync(resolve(process.cwd(), 'src/services/compute-quotas.ts'), 'utf8');
-  const providerCredsFile = readFileSync(resolve(process.cwd(), 'src/services/provider-credentials.ts'), 'utf8');
+  const serviceFile = readFileSync(
+    resolve(process.cwd(), 'src/services/compute-quotas.ts'),
+    'utf8'
+  );
+  const providerCredsFile = readFileSync(
+    resolve(process.cwd(), 'src/services/provider-credentials.ts'),
+    'utf8'
+  );
   const indexFile = readFileSync(resolve(process.cwd(), 'src/index.ts'), 'utf8');
   const envFile = readFileSync(resolve(process.cwd(), 'src/env.ts'), 'utf8');
-  const adminQuotaRoute = readFileSync(resolve(process.cwd(), 'src/routes/admin-quotas.ts'), 'utf8');
+  const adminQuotaRoute = readFileSync(
+    resolve(process.cwd(), 'src/routes/admin-quotas.ts'),
+    'utf8'
+  );
   const usageRoute = readFileSync(resolve(process.cwd(), 'src/routes/usage.ts'), 'utf8');
   const submitRoute = readFileSync(resolve(process.cwd(), 'src/routes/tasks/submit.ts'), 'utf8');
-  const nodeStepsFile = readFileSync(resolve(process.cwd(), 'src/durable-objects/task-runner/node-steps.ts'), 'utf8');
+  const placementResolver = readFileSync(
+    resolve(process.cwd(), 'src/services/placement-resolver.ts'),
+    'utf8'
+  );
+  // Per-field resolvers (credential lookup policy included) split out of placement-resolver.ts.
+  const placementFieldResolution = readFileSync(
+    resolve(process.cwd(), 'src/services/placement-field-resolution.ts'),
+    'utf8'
+  );
+  const nodeStepsFile = readFileSync(
+    resolve(process.cwd(), 'src/durable-objects/task-runner/node-provisioning-gates.ts'),
+    'utf8'
+  );
   const nodesRoute = readFileSync(resolve(process.cwd(), 'src/routes/nodes.ts'), 'utf8');
-  const migrationFile = readFileSync(resolve(process.cwd(), 'src/db/migrations/0039_compute_quotas.sql'), 'utf8');
-  const dispatchToolFile = readFileSync(resolve(process.cwd(), 'src/routes/mcp/dispatch-tool.ts'), 'utf8');
+  const migrationFile = readFileSync(
+    resolve(process.cwd(), 'src/db/migrations/0039_compute_quotas.sql'),
+    'utf8'
+  );
+  const dispatchToolFile = readFileSync(
+    resolve(process.cwd(), 'src/routes/mcp/dispatch-tool.ts'),
+    'utf8'
+  );
 
   // ===========================================================================
   // Migration
@@ -47,7 +75,9 @@ describe('compute quota pipeline', () => {
     });
 
     it('creates index on user_quotas', () => {
-      expect(migrationFile).toContain('CREATE INDEX idx_user_quotas_user_id ON user_quotas(user_id)');
+      expect(migrationFile).toContain(
+        'CREATE INDEX idx_user_quotas_user_id ON user_quotas(user_id)'
+      );
     });
   });
 
@@ -139,13 +169,17 @@ describe('compute quota pipeline', () => {
     });
 
     it('checks user credentials for the target provider first', () => {
-      expect(providerCredsFile).toContain("eq(schema.credentials.credentialType, 'cloud-provider')");
+      expect(providerCredsFile).toContain(
+        "eq(schema.credentials.credentialType, 'cloud-provider')"
+      );
       // When targetProvider is passed, it filters by provider
       expect(providerCredsFile).toContain('eq(schema.credentials.provider, targetProvider)');
     });
 
     it('falls back to platform credentials', () => {
-      expect(providerCredsFile).toContain("eq(schema.platformCredentials.credentialType, 'cloud-provider')");
+      expect(providerCredsFile).toContain(
+        "eq(schema.platformCredentials.credentialType, 'cloud-provider')"
+      );
       expect(providerCredsFile).toContain('eq(schema.platformCredentials.isEnabled, true)');
     });
 
@@ -168,7 +202,7 @@ describe('compute quota pipeline', () => {
   // ===========================================================================
   describe('admin quota routes', () => {
     it('routes are mounted at /api/admin/quotas', () => {
-      expect(indexFile).toContain("adminQuotaRoutes");
+      expect(indexFile).toContain('adminQuotaRoutes');
       expect(indexFile).toContain("'/api/admin/quotas'");
     });
 
@@ -244,17 +278,24 @@ describe('compute quota pipeline', () => {
   // Quota Enforcement: Task Submission (credential SOURCE, not existence)
   // ===========================================================================
   describe('quota enforcement at task submission', () => {
-    it('uses resolveCredentialSource for credential resolution', () => {
-      expect(submitRoute).toContain('resolveCredentialSource');
+    it('uses centralized task-start placement credential resolution', () => {
+      expect(submitRoute).toContain('resolveTaskStartPlacementCredentialAttributionFromPlacement');
+      expect(submitRoute).not.toContain('resolveCredentialSource');
     });
 
-    it('passes resolved provider to credential source check', () => {
-      // The provider is resolved earlier in the function, then passed to resolveCredentialSource
-      expect(submitRoute).toContain('resolveCredentialSource(db, userId, provider');
+    it('passes resolved provider and attribution scope to credential source check', () => {
+      expect(submitRoute).toContain('inheritedAttributionUserId');
+      expect(submitRoute).toContain('inheritedAttributionProjectId');
+      expect(placementResolver).toContain('resolveCapacityAwareCredentialLookup');
+      expect(placementResolver).toContain('credentialLookup.userId');
+      expect(placementResolver).toContain('credentialLookup.provider');
+      expect(placementResolver).toContain('credentialLookup.projectId');
+      expect(placementFieldResolution).toContain("'current-project-unless-inherited'");
     });
 
     it('enforces quota only when credential source is platform', () => {
-      expect(submitRoute).toContain("credResult.credentialSource === 'platform'");
+      expect(placementResolver).toContain('resolveCapacityAwareQuotaCredentialSource');
+      expect(submitRoute).toContain("quotaCredentialSource === 'platform'");
     });
 
     it('checks quota for platform users', () => {
@@ -288,7 +329,8 @@ describe('compute quota pipeline', () => {
     });
 
     it('enforces quota only when credential source is platform', () => {
-      expect(nodeStepsFile).toContain("credResult.credentialSource === 'platform'");
+      expect(nodeStepsFile).toContain('resolveCapacityAwareQuotaCredentialSource');
+      expect(nodeStepsFile).toContain("quotaCredentialSource === 'platform'");
     });
 
     it('re-checks quota before provisioning', () => {
@@ -309,17 +351,17 @@ describe('compute quota pipeline', () => {
   // Quota Enforcement: Manual Node Creation
   // ===========================================================================
   describe('quota enforcement at manual node creation', () => {
-    it('uses resolveCredentialSource for credential resolution', () => {
-      expect(nodesRoute).toContain('resolveCredentialSource');
+    it('uses canonical allocation credential attribution', () => {
+      expect(nodesRoute).toContain('resolveCanonicalVmAllocationPlan');
     });
 
     it('enforces quota when credential source is platform', () => {
-      expect(nodesRoute).toContain("credResult.credentialSource === 'platform'");
+      expect(nodesRoute).toContain("allocation.quotaCredentialSource === 'platform'");
     });
 
     it('checks quota before creating node record', () => {
       // resolveCredentialSource and checkQuotaForUser appear before createNodeRecord
-      const resolveIdx = nodesRoute.indexOf('resolveCredentialSource');
+      const resolveIdx = nodesRoute.indexOf('await resolveCanonicalVmAllocationPlan');
       const quotaIdx = nodesRoute.indexOf('checkQuotaForUser');
       const createIdx = nodesRoute.indexOf('createNodeRecord(c.env');
       expect(resolveIdx).toBeLessThan(createIdx);
@@ -339,20 +381,30 @@ describe('compute quota pipeline', () => {
   // Quota Enforcement: MCP Dispatch Task
   // ===========================================================================
   describe('quota enforcement at MCP dispatch', () => {
-    it('uses resolveCredentialSource for credential resolution', () => {
-      expect(dispatchToolFile).toContain('resolveCredentialSource');
+    it('uses centralized task-start placement credential resolution', () => {
+      expect(dispatchToolFile).toContain(
+        'resolveTaskStartPlacementCredentialAttributionFromPlacement'
+      );
+      expect(dispatchToolFile).not.toContain('resolveCredentialSource');
     });
 
-    it('passes resolvedProvider to credential source check', () => {
-      expect(dispatchToolFile).toContain('resolveCredentialSource(db, tokenData.userId, resolvedProvider');
+    it('passes resolvedProvider and inherited attribution scope to credential source check', () => {
+      expect(dispatchToolFile).toContain('inheritedAttributionUserId');
+      expect(dispatchToolFile).toContain('inheritedAttributionProjectId');
+      expect(placementResolver).toContain('resolveCapacityAwareCredentialLookup');
+      expect(placementResolver).toContain('credentialLookup.provider');
     });
 
     it('enforces quota when credential source is platform', () => {
-      expect(dispatchToolFile).toContain("credResult.credentialSource === 'platform'");
+      expect(placementResolver).toContain('resolveCapacityAwareQuotaCredentialSource');
+      expect(dispatchToolFile).toContain('placementResolution.quotaCredentialSource');
+      expect(dispatchToolFile).toContain("quotaCredentialSource === 'platform'");
     });
 
     it('checks quota before task INSERT', () => {
-      const quotaIdx = dispatchToolFile.indexOf('resolveCredentialSource');
+      const quotaIdx = dispatchToolFile.indexOf(
+        'resolveTaskStartPlacementCredentialAttributionFromPlacement'
+      );
       const insertIdx = dispatchToolFile.indexOf('INSERT INTO tasks');
       expect(quotaIdx).toBeLessThan(insertIdx);
     });
@@ -395,14 +447,19 @@ describe('compute quota pipeline', () => {
     });
 
     it('MCP dispatch does NOT use raw credential existence check in Promise.all', () => {
-      expect(dispatchToolFile).not.toContain("eq(schema.credentials.credentialType, 'cloud-provider')");
+      expect(dispatchToolFile).not.toContain(
+        "eq(schema.credentials.credentialType, 'cloud-provider')"
+      );
     });
 
-    it('all four enforcement points use resolveCredentialSource', () => {
-      expect(submitRoute).toContain('resolveCredentialSource');
+    it('entry points centralize credential resolution while provisioning remains a hard gate', () => {
+      expect(submitRoute).toContain('resolveTaskStartPlacementCredentialAttributionFromPlacement');
+      expect(placementResolver).toContain('resolveCredentialSource');
       expect(nodeStepsFile).toContain('resolveCredentialSource');
-      expect(nodesRoute).toContain('resolveCredentialSource');
-      expect(dispatchToolFile).toContain('resolveCredentialSource');
+      expect(nodesRoute).toContain('resolveCanonicalVmAllocationPlan');
+      expect(dispatchToolFile).toContain(
+        'resolveTaskStartPlacementCredentialAttributionFromPlacement'
+      );
     });
   });
 });

@@ -1,9 +1,9 @@
 ---
-title: "Agents Managing Agents"
+title: 'Agents Managing Agents'
 date: 2026-04-08
 author: Raphaël Titsworth-Morin
 category: devlog
-tags: ["ai-agents", "open-source", "architecture", "mcp", "orchestration"]
+tags: ['ai-agents', 'open-source', 'architecture', 'mcp', 'orchestration']
 excerpt: "We built agent-to-agent orchestration into SAM. Here's what we learned about the surprisingly hard problems hiding inside 'just let agents coordinate.'"
 ---
 
@@ -31,7 +31,7 @@ We built six MCP tools that give parent agents real control over their children.
 
 **`send_message_to_subtask`** injects a user-role message into a running child agent's session. The parent can course-correct a child mid-execution without stopping it. This goes directly to the child's agent session over HTTP. No polling, no queue. The child sees it as if a human typed something.
 
-**`stop_subtask`** shuts down a child agent. But not abruptly. It sends an optional warning message first ("wrap up, you're about to be stopped"), waits a configurable grace period (default 5 seconds), then hard-stops the session. The child gets a chance to commit its work. The task status gets updated to failed with the reason.
+**`stop_subtask`** shuts down a child agent. But not abruptly. It sends an optional warning message first ("wrap up, you're about to be stopped"), waits a configurable grace period (default 5 seconds), then hard-stops the session. The child gets a chance to commit its work. The task status gets updated to cancelled with the reason.
 
 **`retry_subtask`** stops a failed child and dispatches a fresh replacement. The new task description automatically includes what went wrong last time, so the retry agent has context about the failure. Retries count against the parent's child limit to prevent infinite loops.
 

@@ -18,6 +18,20 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+const localShellPath = "/bin/sh"
+const geminiInstallPackage = "@google/gemini-cli@0.61.0"
+const opencodeInstallPackage = "opencode-ai@1.18.32"
+const vibeInstallPackage = "mistral-vibe==2.25.8"
+const ampCLIInstallPackage = "@ampcode/cli@0.0.1790261352-g2ab14a"
+
+const claudeACPInstallPackage = "@agentclientprotocol/claude-agent-acp@0.81.2"
+const claudeCodeMinVersion = "2.1.280"
+const claudeCodeInstallPackage = "@anthropic-ai/claude-code@2.1.281"
+const claudeCodeInstallCommand = "npm install -g " + claudeACPInstallPackage + " " + claudeCodeInstallPackage
+const codexACPInstallPackage = "@agentclientprotocol/codex-acp@2.1.1"
+const codexCLIInstallPackage = "@openai/codex@0.160.0"
+const codexACPInstallCommand = "npm install -g " + codexACPInstallPackage + " " + codexCLIInstallPackage
+
 // BootLogReporter sends structured log entries to the control plane.
 // It must be non-nil and have a valid token for logging to work.
 type BootLogReporter interface {
@@ -81,6 +95,13 @@ type MessageReporter interface {
 	Enqueue(msg MessageReportEntry) error
 }
 
+// ToolLifecycleObserver observes sanitized ACP tool-call lifecycle edges.
+// Implementations must not persist raw prompts, arguments, outputs, commands, paths, or env.
+type ToolLifecycleObserver interface {
+	RecordACPToolCall(toolCallID string, status string, kind string, toolName string, at time.Time)
+	ReconcileACPToolCalls(at time.Time)
+}
+
 // MessageReportEntry is the data needed to enqueue a chat message.
 // It mirrors messagereport.Message but lives in the acp package to avoid
 // circular imports.
@@ -91,13 +112,21 @@ type MessageReportEntry struct {
 	Content      string
 	ToolMetadata string
 	Timestamp    string
+	Origin       string
 }
 
 // GatewayConfig holds configuration for the ACP gateway and SessionHost.
 type GatewayConfig struct {
+	// Now supplies wall-clock time for prompt epochs and lifecycle timestamps.
+	// Nil uses time.Now. It is injectable so deadline and epoch tests do not
+	// depend on wall-clock sleeps.
+	Now func() time.Time
 	// InitTimeoutMs is the fallback ACP initialization timeout in milliseconds.
 	// Used when per-phase timeouts below are not set (0).
 	InitTimeoutMs int
+	// CodexRuntimeInstallTimeout bounds opted-in VM installation; zero uses the config default.
+	CodexRuntimeInstallTimeout   time.Duration
+	CodexRuntimeInstallKillGrace time.Duration
 	// InitializeTimeoutMs is the timeout for the Initialize RPC in milliseconds.
 	// When 0, falls back to InitTimeoutMs.
 	InitializeTimeoutMs int
@@ -119,6 +148,8 @@ type GatewayConfig struct {
 	WorkspaceID string
 	// SessionID is the agent session identifier (used for persistence).
 	SessionID string
+	// RuntimeIdentity identifies this vm-agent process for delivery fencing.
+	RuntimeIdentity string
 	// CallbackToken is the JWT for authenticating with the control plane.
 	CallbackToken string
 	// ContainerResolver returns the devcontainer's Docker container ID.
@@ -127,6 +158,9 @@ type GatewayConfig struct {
 	ContainerUser string
 	// ContainerWorkDir is the working directory inside the container.
 	ContainerWorkDir string
+	// ProcessLauncher starts ACP subprocesses. Nil uses Docker exec, preserving
+	// the traditional VM/devcontainer path.
+	ProcessLauncher ProcessLauncher
 	// GitTokenFetcher returns a fresh GitHub installation token for the
 	// workspace. It is called at ACP session start to inject GH_TOKEN into
 	// the agent process. If nil or returns error, GH_TOKEN is omitted.
@@ -161,8 +195,55 @@ type GatewayConfig struct {
 	PongTimeout time.Duration
 	// PromptTimeout bounds how long a prompt can run before force-stop fallback.
 	PromptTimeout time.Duration
-	// PromptCancelGracePeriod waits after cancel before force-stopping unresponsive prompt.
+	// PromptCancelGracePeriod waits after cancel for the cancelled prompt to
+	// settle before finishing it as cancelled and restarting the agent.
 	PromptCancelGracePeriod time.Duration
+	// PromptRetryMaxRetries bounds transient provider prompt retries after the initial attempt.
+	PromptRetryMaxRetries int
+	// PromptRetryInitialDelay is the first backoff before retrying a transient provider prompt error.
+	PromptRetryInitialDelay time.Duration
+	// PromptRetryMaxDelay caps exponential backoff for transient provider prompt retries.
+	PromptRetryMaxDelay time.Duration
+	// PromptRetrySleeper is injectable for tests. Nil uses time.Sleep with context cancellation.
+	PromptRetrySleeper func(context.Context, time.Duration) error
+	// ActivityRereportInterval refreshes prompt activity while a prompt is active.
+	// Zero disables the periodic re-report loop.
+	ActivityRereportInterval time.Duration
+	// HarnessActivityReportDebounce coalesces high-frequency harness lifecycle
+	// edges before making activity callbacks. Zero uses the package default.
+	HarnessActivityReportDebounce time.Duration
+
+	// Bounds on a single Claude harness lifecycle notification. Zero falls back
+	// to the package defaults so existing constructions stay safe.
+	ClaudeHarnessLifecycleMaxBytes   int
+	ClaudeHarnessLifecycleMaxTasks   int
+	ClaudeHarnessLifecycleMaxIDBytes int
+	// TerminalActivityReportAttempts is the retry budget for terminal/error
+	// activity reports. Zero uses the legacy cheap retry policy.
+	TerminalActivityReportAttempts int
+	// TerminalActivityReportBackoff is the delay between terminal/error retries.
+	TerminalActivityReportBackoff time.Duration
+	// ActivityReportTimeout bounds each activity callback request.
+	ActivityReportTimeout time.Duration
+	// UsageProbeTimeout bounds one post-turn provider usage probe (Codex rollout
+	// read or OpenCode Go usage request). Zero selects the package default.
+	UsageProbeTimeout time.Duration
+	// OpenCodeGoUsageURL is the OpenCode Go usage endpoint probed after each
+	// turn of an OpenCode session that uses the opencode-go provider. Empty
+	// selects the package default.
+	OpenCodeGoUsageURL string
+	// CredentialSyncTimeout bounds auth-file sync-back during shutdown.
+	CredentialSyncTimeout time.Duration
+
+	// RestartAttemptTimeout bounds a single agent restart attempt performed by
+	// the process monitor. Zero uses DefaultACPRestartAttemptTimeout.
+	RestartAttemptTimeout time.Duration
+	// RecoveryWatchdogTimeout bounds crash recovery after a prompt disconnect.
+	// Zero uses DefaultRecoveryWatchdogTimeout.
+	RecoveryWatchdogTimeout time.Duration
+	// RestartDecayWindow resets restartCount after this quiet period. Zero uses
+	// DefaultRestartDecayWindow.
+	RestartDecayWindow time.Duration
 	// TabLastPromptStore persists the last user prompt to SQLite for session discoverability.
 	TabLastPromptStore TabLastPromptUpdater
 	// SessionLastPromptManager persists the last user prompt in the in-memory session manager.
@@ -176,6 +257,8 @@ type GatewayConfig struct {
 	// MessageReporter enqueues chat messages for batched delivery to the
 	// control plane. When nil, message persistence is a no-op.
 	MessageReporter MessageReporter
+	// ToolLifecycleObserver records sanitized tool-call overlap windows for resource history.
+	ToolLifecycleObserver ToolLifecycleObserver
 	// OnPromptComplete is called after a prompt finishes (success or failure).
 	// Used by task-driven workspaces to report completion back to the control plane.
 	// When nil, no callback fires. The string arg is the stop reason (e.g. "end_turn", "error").
@@ -197,23 +280,18 @@ type GatewayConfig struct {
 	// PermissionModeOverride, if non-empty, overrides the permission mode fetched from
 	// user agent settings. Set by the control plane when an agent profile specifies a permission mode.
 	PermissionModeOverride string
+	// EffortOverride, if non-empty, overrides the reasoning effort fetched from user agent settings.
+	// Values are provider-neutral: "auto", "low", "medium", "high", "xhigh", "max".
+	EffortOverride string
 	// OpencodeProviderOverride, if non-empty, overrides the OpenCode inference provider.
-	// Values: "platform", "scaleway", "google-vertex", "openai-compatible", "anthropic", "custom".
+	// Values: "opencode-zen", "opencode-go", "custom".
 	OpencodeProviderOverride string
 	// OpencodeBaseURLOverride, if non-empty, overrides the OpenCode base URL
-	// (used for "custom" and "openai-compatible" providers).
+	// (used for the "custom" provider).
 	OpencodeBaseURLOverride string
 	// HTTPClient is the HTTP client used for outbound control-plane calls
 	// (credential fetches, settings fetches). Must have an explicit timeout.
 	HTTPClient *http.Client
-}
-
-// McpServerEntry is a lightweight MCP server config passed from the control
-// plane for injection into ACP sessions. It represents an HTTP MCP server
-// with bearer token authentication.
-type McpServerEntry struct {
-	URL   string `json:"url"`
-	Token string `json:"token"`
 }
 
 // Gateway is a thin per-WebSocket relay between a browser and a SessionHost.
@@ -403,7 +481,7 @@ func (g *Gateway) handleMessage(ctx context.Context, data []byte) {
 
 	switch rpcMsg.Method {
 	case "session/prompt":
-		go g.host.HandlePrompt(ctx, rpcMsg.ID, rpcMsg.Params, g.viewerID)
+		go g.host.HandlePrompt(ctx, rpcMsg.ID, rpcMsg.Params, g.viewerID, false)
 	case "session/cancel":
 		// Cancel the in-flight prompt context. Also forward to agent stdin
 		// so the agent process itself can react to the cancellation signal.
@@ -412,7 +490,14 @@ func (g *Gateway) handleMessage(ctx context.Context, data []byte) {
 			g.host.StopProcessForPromptCancel()
 		} else {
 			g.host.CancelPrompt()
-			g.host.ForwardToAgent(data)
+			// Construct a well-formed cancel message with sessionId rather than
+			// forwarding raw browser data which may omit required params.
+			cancelMessage, err := g.host.cancelNotification()
+			if err != nil {
+				slog.Warn("Gateway: could not build session/cancel notification", "error", err)
+				return
+			}
+			g.host.ForwardToAgent(cancelMessage)
 		}
 	default:
 		g.host.ForwardToAgent(data)
@@ -423,9 +508,16 @@ func (g *Gateway) handleMessage(ctx context.Context, data []byte) {
 
 // agentCredential holds the credential and its type returned from the control plane.
 type agentCredential struct {
-	credential     string
-	credentialKind string // "api-key" or "oauth-token"
-	// Platform inference proxy fields (set when credentialSource == "platform" for opencode)
+	credential           string
+	credentialKind       string // "api-key" or "oauth-token"
+	credentialSource     string
+	credentialReference  string
+	credentialGeneration int64
+	credentialProvider   string
+	providerMode         string
+	// AI proxy fields (set for claude-code/openai-codex when the AI proxy is
+	// enabled and the user has no dedicated agent key). OpenCode is always
+	// bring-your-own-key and never uses these.
 	inferenceConfig *inferenceConfig
 }
 
@@ -435,7 +527,7 @@ type inferenceConfig struct {
 	Provider     string `json:"provider"`     // e.g. "openai-compatible"
 	BaseURL      string `json:"baseURL"`      // e.g. "https://api.example.com/ai/v1"
 	Model        string `json:"model"`        // e.g. "@cf/qwen/qwen3-30b-a3b-fp8"
-	APIKeySource string `json:"apiKeySource"` // "callback-token" means use workspace callback token
+	APIKeySource string `json:"apiKeySource"` // "callback-token" means use workspace callback token and replace {wstoken}
 }
 
 func byteReader(data []byte) io.ReadCloser {
@@ -446,6 +538,7 @@ func byteReader(data []byte) io.ReadCloser {
 type agentSettingsPayload struct {
 	Model            string `json:"model"`
 	PermissionMode   string `json:"permissionMode"`
+	Effort           string `json:"effort"`
 	OpencodeProvider string `json:"opencodeProvider"`
 	OpencodeBaseURL  string `json:"opencodeBaseUrl"`
 }
@@ -697,38 +790,54 @@ func readAuthFileFromContainer(ctx context.Context, containerID, user, authFileP
 	return buf.String(), nil
 }
 
-// agentInstallMu serializes concurrent agent binary installs to prevent
-// npm ENOTEMPTY errors when two SelectAgent calls race.
-var agentInstallMu sync.Mutex
+// agentInstallGate serializes installs while letting cancelled/deadline-bound
+// selections leave the queue without waiting for another install to finish.
+var agentInstallGate = make(chan struct{}, 1)
+
+func acquireAgentInstall(ctx context.Context) (func(), error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case agentInstallGate <- struct{}{}:
+		return func() { <-agentInstallGate }, nil
+	}
+}
 
 // installAgentBinary checks if the agent command exists in the given container
 // and installs it via the provided installCmd if missing. The install runs as
 // root to ensure permissions for system-level package installs. Returns nil if
 // the binary was already present or was installed successfully.
 //
-// A package-level mutex serializes installs so that concurrent SelectAgent
+// A package-level gate serializes installs so that concurrent SelectAgent
 // calls do not race on npm global installs (which causes ENOTEMPTY errors).
-// The fast-path `which` check runs without the mutex; only the slow install
+// The fast-path `which` check runs without the gate; only the slow install
 // path acquires it, with a double-check after acquisition.
 func installAgentBinary(ctx context.Context, containerID string, info agentCommandInfo) error {
-	// Fast path: check without mutex — avoids contention when already installed.
-	checkArgs := []string{"exec", containerID, "which", info.command}
+	// Fast path: check without gate — avoids contention when already installed.
+	checkScript := agentInstalledCheckScript(info)
+	checkArgs := []string{"exec", containerID, "sh", "-c", checkScript}
 	checkCmd := exec.CommandContext(ctx, "docker", checkArgs...)
 	if err := checkCmd.Run(); err == nil {
 		slog.Info("Agent binary is already installed", "command", info.command)
 		return nil
 	}
 
-	// Slow path: acquire mutex to serialize installs.
-	agentInstallMu.Lock()
-	defer agentInstallMu.Unlock()
+	// Slow path: acquire gate to serialize installs.
+	releaseInstall, err := acquireAgentInstall(ctx)
+	if err != nil {
+		return err
+	}
+	defer releaseInstall()
 
-	// Bail out if context was cancelled while waiting for the mutex.
+	// Bail out if context was cancelled while waiting for the gate.
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
 
-	// Double-check after acquiring mutex — another goroutine may have installed it.
+	// Double-check after acquiring gate — another goroutine may have installed it.
 	recheckCmd := exec.CommandContext(ctx, "docker", checkArgs...)
 	if err := recheckCmd.Run(); err == nil {
 		slog.Info("Agent binary was installed by another goroutine", "command", info.command)
@@ -743,8 +852,8 @@ func installAgentBinary(ctx context.Context, containerID string, info agentComma
 	// directories can block subsequent installs with ENOTEMPTY.
 	if info.isNpmBased {
 		cleanupScript := fmt.Sprintf(
-			`rm -rf /usr/local/lib/node_modules/@zed-industries/.%s-* /usr/local/share/nvm/versions/node/*/lib/node_modules/@zed-industries/.%s-* 2>/dev/null; true`,
-			info.command, info.command,
+			`rm -rf /usr/local/lib/node_modules/.%s-* /usr/local/lib/node_modules/*/.%s-* /usr/local/share/nvm/versions/node/*/lib/node_modules/.%s-* /usr/local/share/nvm/versions/node/*/lib/node_modules/*/.%s-* 2>/dev/null; true`,
+			info.command, info.command, info.command, info.command,
 		)
 		cleanupArgs := []string{"exec", "-u", "root", containerID, "sh", "-c", cleanupScript}
 		cleanupCmd := exec.CommandContext(ctx, "docker", cleanupArgs...)
@@ -766,14 +875,113 @@ func installAgentBinary(ctx context.Context, containerID string, info agentComma
 	return nil
 }
 
+// installAgentBinaryLocal installs the ACP adapter binary in the LOCAL process
+// namespace (standalone / cf-container mode), mirroring installAgentBinary but
+// without docker exec. In standalone mode the vm-agent runs INSIDE the container,
+// so agents are installed and spawned in the same filesystem/PID namespace and
+// resolved via the vm-agent's own $PATH (see startLocalProcess). The install
+// script is the same hardcoded literal from getAgentCommandInfo — never derived
+// from external input.
+func installAgentBinaryLocal(ctx context.Context, info agentCommandInfo) error {
+	// Fast path: check without gate. exec.LookPath matches how startLocalProcess
+	// resolves the command, so this is the correct "already installed" check.
+	if err := exec.CommandContext(ctx, localShellPath, "-c", agentInstalledCheckScript(info)).Run(); err == nil {
+		slog.Info("Agent binary is already installed (local)", "command", info.command)
+		return nil
+	}
+
+	// Slow path: acquire gate to serialize installs (shared with docker path).
+	releaseInstall, err := acquireAgentInstall(ctx)
+	if err != nil {
+		return err
+	}
+	defer releaseInstall()
+
+	// Bail out if context was cancelled while waiting for the gate.
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
+	// Double-check after acquiring gate — another goroutine may have installed it.
+	if err := exec.CommandContext(ctx, localShellPath, "-c", agentInstalledCheckScript(info)).Run(); err == nil {
+		slog.Info("Agent binary was installed by another goroutine (local)", "command", info.command)
+		return nil
+	}
+
+	slog.Info("Agent binary not found locally, installing", "command", info.command)
+
+	// For npm-based installs, clean up stale partial install directories left
+	// by previous failed npm installs (same rationale as the docker path).
+	if info.isNpmBased {
+		cleanupScript := fmt.Sprintf(
+			`rm -rf /usr/local/lib/node_modules/.%s-* /usr/local/lib/node_modules/*/.%s-* /usr/local/share/nvm/versions/node/*/lib/node_modules/.%s-* /usr/local/share/nvm/versions/node/*/lib/node_modules/*/.%s-* 2>/dev/null; true`,
+			info.command, info.command, info.command, info.command,
+		)
+		cleanupCmd := exec.CommandContext(ctx, localShellPath, "-c", cleanupScript)
+		_ = cleanupCmd.Run() // best-effort cleanup
+	}
+
+	installScript := agentInstallScript(info)
+	installCmd := exec.CommandContext(ctx, localShellPath, "-c", installScript)
+	output, err := installCmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("local install command failed: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+
+	slog.Info("Agent binary installed successfully (local)", "command", info.command)
+	return nil
+}
+
 func agentInstallScript(info agentCommandInfo) string {
 	if !info.isNpmBased {
 		return info.installCmd
 	}
 	return fmt.Sprintf(
-		`node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"; { which npm >/dev/null 2>&1 && [ "$node_major" -ge 20 ]; } || { rm -f /etc/apt/sources.list.d/github-cli.list /etc/apt/keyrings/githubcli-archive-keyring.gpg; apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nodejs npm && npm install -g n && n 22 && hash -r; }; %s`,
+		`node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"; { which npm >/dev/null 2>&1 && [ "$node_major" -ge 22 ]; } || { rm -f /etc/apt/sources.list.d/github-cli.list /etc/apt/keyrings/githubcli-archive-keyring.gpg; apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nodejs npm && npm install -g n && n 22 && hash -r; }; %s`,
 		info.installCmd,
 	)
+}
+
+// The ACP adapter bundles its own Claude SDK. Checking only the companion CLI
+// accepts obsolete SDKs even after `claude update`; validate both install surfaces.
+func claudeCodeVersionCheckCommand() string {
+	minParts := strings.Split(claudeCodeMinVersion, ".")
+	if len(minParts) != 3 {
+		panic("claudeCodeMinVersion must use major.minor.patch")
+	}
+	return fmt.Sprintf(
+		`[ "$(claude-agent-acp --version 2>/dev/null)" = "%s" ] && command -v claude >/dev/null 2>&1 && version="$(claude --version 2>/dev/null | sed -n 's/.*\([0-9][0-9]*\)\.\([0-9][0-9]*\)\.\([0-9][0-9]*\).*/\1 \2 \3/p' | head -n 1)" && set -- $version && [ "$#" -eq 3 ] && { [ "$1" -gt %s ] || { [ "$1" -eq %s ] && { [ "$2" -gt %s ] || { [ "$2" -eq %s ] && [ "$3" -ge %s ]; }; }; }; }`,
+		strings.TrimPrefix(claudeACPInstallPackage, "@agentclientprotocol/claude-agent-acp@"),
+		minParts[0],
+		minParts[0],
+		minParts[1],
+		minParts[1],
+		minParts[2],
+	)
+}
+
+func codexVersionCheckCommand() string {
+	adapterVersion := strings.TrimPrefix(codexACPInstallPackage, "@agentclientprotocol/codex-acp@")
+	cliVersion := strings.TrimPrefix(codexCLIInstallPackage, "@openai/codex@")
+	return fmt.Sprintf(
+		`[ "$(codex-acp --version 2>/dev/null)" = "@agentclientprotocol/codex-acp %s" ] && [ "$(codex --version 2>/dev/null)" = "codex-cli %s" ]`,
+		adapterVersion,
+		cliVersion,
+	)
+}
+
+// versionCheckCommand compares the complete version token, allowing a CLI's
+// human-readable suffix (Amp includes release time). Inputs are trusted pins.
+func versionCheckCommand(command, version string) string {
+	return fmt.Sprintf(`case "$(%s --version 2>/dev/null)" in "%s"|"%s "*) true ;; *) false ;; esac`, command, version, version)
+}
+
+func agentInstalledCheckScript(info agentCommandInfo) string {
+	checkScript := "command -v " + info.command + " >/dev/null 2>&1"
+	if info.validationCmd != "" {
+		checkScript += " && { " + info.validationCmd + "; }"
+	}
+	return checkScript
 }
 
 // agentCommandInfo holds the command, args, env var, and install command for an agent.
@@ -785,6 +993,8 @@ type agentCommandInfo struct {
 	envVarName    string
 	installCmd    string // shell command to run if binary is missing (npm, pip, etc.)
 	isNpmBased    bool   // true for agents installed via npm; controls prerequisite injection and cleanup
+	validationCmd string // optional shell check for underlying companion CLI/version requirements
+	verifyOnly    bool   // explicit staged release: fail closed instead of installing stock packages
 	injectionMode string // "env" (default) or "auth-file" — how the credential is injected
 	authFilePath  string // relative to home dir, e.g. ".codex/auth.json" (only when injectionMode == "auth-file")
 }
@@ -796,32 +1006,68 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 	switch agentType {
 	case "claude-code":
 		if credentialKind == "oauth-token" {
-			return agentCommandInfo{"claude-agent-acp", nil, "CLAUDE_CODE_OAUTH_TOKEN", "npm install -g @zed-industries/claude-agent-acp", true, "", ""}
+			return agentCommandInfo{
+				command:       "claude-agent-acp",
+				envVarName:    "CLAUDE_CODE_OAUTH_TOKEN",
+				installCmd:    claudeCodeInstallCommand,
+				isNpmBased:    true,
+				validationCmd: claudeCodeVersionCheckCommand(),
+			}
 		}
-		return agentCommandInfo{"claude-agent-acp", nil, "ANTHROPIC_API_KEY", "npm install -g @zed-industries/claude-agent-acp", true, "", ""}
+		return agentCommandInfo{
+			command:       "claude-agent-acp",
+			envVarName:    "ANTHROPIC_API_KEY",
+			installCmd:    claudeCodeInstallCommand,
+			isNpmBased:    true,
+			validationCmd: claudeCodeVersionCheckCommand(),
+		}
 	case "openai-codex":
+		// Sandbox and approval overrides are injected through CODEX_CONFIG by
+		// writeCodexStartupConfig. codex-acp (verified through 2.1.1) does not parse Codex CLI -c
+		// arguments; its supported config channel is CODEX_CONFIG JSON, which it
+		// forwards to every app-server thread (including spawned subagents).
 		if credentialKind == "oauth-token" {
 			return agentCommandInfo{
 				command:       "codex-acp",
 				args:          nil,
 				envVarName:    "",
-				installCmd:    "npm install -g @zed-industries/codex-acp",
+				installCmd:    codexACPInstallCommand,
 				isNpmBased:    true,
+				validationCmd: codexVersionCheckCommand(),
 				injectionMode: "auth-file",
 				authFilePath:  ".codex/auth.json",
 			}
 		}
-		return agentCommandInfo{"codex-acp", nil, "OPENAI_API_KEY", "npm install -g @zed-industries/codex-acp", true, "", ""}
+		return agentCommandInfo{
+			command:       "codex-acp",
+			envVarName:    "OPENAI_API_KEY",
+			installCmd:    codexACPInstallCommand,
+			isNpmBased:    true,
+			validationCmd: codexVersionCheckCommand(),
+		}
 	case "google-gemini":
-		return agentCommandInfo{"gemini", []string{"--acp"}, "GEMINI_API_KEY", "npm install -g @google/gemini-cli", true, "", ""}
+		return agentCommandInfo{
+			command:       "gemini",
+			args:          []string{"--acp"},
+			envVarName:    "GEMINI_API_KEY",
+			installCmd:    "npm install -g " + geminiInstallPackage,
+			validationCmd: versionCheckCommand("gemini", strings.TrimPrefix(geminiInstallPackage, "@google/gemini-cli@")),
+			isNpmBased:    true,
+		}
 	case "mistral-vibe":
-		return agentCommandInfo{"vibe-acp", nil, "MISTRAL_API_KEY", `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe==2.7.0 --python 3.12 --quiet`, false, "", ""}
+		return agentCommandInfo{
+			command:       "vibe-acp",
+			envVarName:    "MISTRAL_API_KEY",
+			validationCmd: versionCheckCommand("vibe-acp", "vibe-acp "+strings.TrimPrefix(vibeInstallPackage, "mistral-vibe==")),
+			installCmd:    `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe==2.25.8 --python 3.12 --quiet`,
+		}
 	case "opencode":
 		return agentCommandInfo{
 			command:       "opencode",
 			args:          []string{"acp"},
-			envVarName:    "SCW_SECRET_KEY",
-			installCmd:    "npm install -g opencode-ai@1.4.3",
+			envVarName:    "OPENCODE_API_KEY",
+			installCmd:    "npm install -g " + opencodeInstallPackage,
+			validationCmd: versionCheckCommand("opencode", strings.TrimPrefix(opencodeInstallPackage, "opencode-ai@")),
 			isNpmBased:    true,
 			injectionMode: "",
 			authFilePath:  "",
@@ -831,16 +1077,61 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 			command:       "acp-amp",
 			args:          []string{"run"},
 			envVarName:    "AMP_API_KEY",
-			installCmd:    `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install acp-amp==0.1.3 --with agent-client-protocol==0.7.1 --with amp-sdk==0.1.2 --with pydantic==2.12.5 --with pydantic-core==2.41.5 --with annotated-types==0.7.0 --with typing-inspection==0.4.2 --with typing-extensions==4.15.0 --python 3.12 --quiet && npm install -g @sourcegraph/amp`,
-			// isNpmBased must be true because installCmd chains `npm install -g @sourcegraph/amp`
+			validationCmd: versionCheckCommand("amp", strings.TrimPrefix(ampCLIInstallPackage, "@ampcode/cli@")),
+			installCmd: `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install acp-amp==0.1.3 --with agent-client-protocol==0.7.1 --with amp-sdk==0.1.2 --with pydantic==2.12.5 --with pydantic-core==2.41.5 --with annotated-types==0.7.0 --with typing-inspection==0.4.2 --with typing-extensions==4.15.0 --python 3.12 --quiet && npm install -g @ampcode/cli@0.0.1790261352-g2ab14a && UV_PYTHON_INSTALL_DIR=/opt/uv-python uv run --python 3.12 python -c "
+PYTHON_SDK_PATH = "/opt/uv-tools/acp-amp/lib/python3.12/site-packages/acp_amp/driver/python_sdk.py"
+AMP_TYPES_PATH = "/opt/uv-tools/acp-amp/lib/python3.12/site-packages/amp_sdk/types.py"
+
+# Patch 1: acp-amp error handling — include ProcessError.stderr in error messages
+with open(PYTHON_SDK_PATH, encoding="utf-8") as handle:
+    t = handle.read()
+t = t.replace('\"message\": str(exc)', '\"message\": str(exc) + (" stderr: " + exc.stderr if hasattr(exc, "stderr") and exc.stderr else "")')
+
+# Patch 2: acp-amp MCP config — wrap raw dict in MCPConfig to fix pydantic Union
+# validation silently producing empty servers when dict keys are server names.
+# Also handle env:None which causes MCPServer validation to reject the entry.
+old_mcp = '''        if mcp_config:
+            base["mcp_config"] = mcp_config
+            base["mcpConfig"] = mcp_config'''
+new_mcp = '''        if mcp_config:
+            from amp_sdk.types import MCPConfig
+            cleaned = {}
+            for _n, _c in mcp_config.items():
+                if isinstance(_c, dict):
+                    _cc = dict(_c)
+                    if _cc.get("env") is None:
+                        _cc["env"] = {}
+                    cleaned[_n] = _cc
+                else:
+                    cleaned[_n] = _c
+            _wrapped = MCPConfig(servers=cleaned)
+            base["mcp_config"] = _wrapped
+            base["mcpConfig"] = _wrapped'''
+t = t.replace(old_mcp, new_mcp)
+with open(PYTHON_SDK_PATH, "w", encoding="utf-8") as handle:
+    handle.write(t)
+print('Patched acp-amp: error handling + MCP config wrapping')
+
+# Patch 3: amp_sdk visibility default — change from workspace to private
+with open(AMP_TYPES_PATH, encoding="utf-8") as handle:
+    vt = handle.read()
+vt = vt.replace('visibility: Optional[Literal["private", "public", "workspace", "group"]] = "workspace"', 'visibility: Optional[Literal["private", "public", "workspace", "group"]] = "private"')
+with open(AMP_TYPES_PATH, "w", encoding="utf-8") as handle:
+    handle.write(vt)
+print('Patched amp_sdk: visibility default to private')
+"`,
+			// isNpmBased must be true because installCmd chains `npm install -g @ampcode/cli@0.0.1790261352-g2ab14a`
 			// after the uv install. The Node.js bootstrap preamble ensures npm is available
 			// inside devcontainers that don't ship with Node.js pre-installed.
-			isNpmBased: true,
+			isNpmBased:    true,
 			injectionMode: "",
 			authFilePath:  "",
 		}
 	default:
-		return agentCommandInfo{agentType, nil, "API_KEY", "", false, "", ""}
+		return agentCommandInfo{
+			command:    agentType,
+			envVarName: "API_KEY",
+		}
 	}
 }
 
@@ -882,6 +1173,13 @@ func getAgentExtraEnvVars(agentType string) []string {
 			"VIBE_CLIENT_VERSION=1.0.1",
 			"PYTHONUNBUFFERED=1",
 		}
+	case "amp":
+		// AMP_DEBUG makes amp_sdk print the full CLI command to stderr (core.py),
+		// which monitorStderr captures. PYTHONUNBUFFERED ensures immediate output.
+		return []string{
+			"AMP_DEBUG=1",
+			"PYTHONUNBUFFERED=1",
+		}
 	default:
 		return nil
 	}
@@ -895,280 +1193,22 @@ func tomlEscapeBasicString(s string) string {
 	return s
 }
 
-const (
-	codexManagedMcpStartMarker = "# BEGIN SAM MANAGED MCP"
-	codexManagedMcpEndMarker   = "# END SAM MANAGED MCP"
-	codexProxyProviderID       = "sam-openai"
-	codexProxyProviderEnvKey   = "OPENAI_API_KEY"
-)
-
-type codexProxyProviderConfig struct {
-	baseURL string
-	model   string
-}
-
-func codexMcpServerName(index, total int) string {
-	if total <= 1 {
-		return "sam-mcp"
-	}
-	return fmt.Sprintf("sam-mcp-%d", index)
-}
-
-func codexMcpTokenEnvVar(index, total int) string {
-	if total <= 1 {
-		return "SAM_MCP_TOKEN"
-	}
-	return fmt.Sprintf("SAM_MCP_TOKEN_%d", index)
-}
-
-func removeManagedCodexMcpBlock(existing string) string {
-	for {
-		start := strings.Index(existing, codexManagedMcpStartMarker)
-		if start == -1 {
-			return existing
-		}
-		endRel := strings.Index(existing[start:], codexManagedMcpEndMarker)
-		if endRel == -1 {
-			return existing[:start]
-		}
-		end := start + endRel + len(codexManagedMcpEndMarker)
-		if end < len(existing) && existing[end] == '\n' {
-			end++
-		}
-		existing = existing[:start] + existing[end:]
-	}
-}
-
-func mergeManagedCodexMcpConfig(existing, managed string) string {
-	cleaned := strings.TrimRight(removeManagedCodexMcpBlock(existing), "\n")
-	managed = strings.TrimSpace(managed)
-
-	switch {
-	case cleaned == "" && managed == "":
-		return ""
-	case cleaned == "":
-		return managed + "\n"
-	case managed == "":
-		return cleaned + "\n"
+func normalizeAgentEffort(effort string) string {
+	trimmed := strings.TrimSpace(effort)
+	switch trimmed {
+	case "low", "medium", "high", "xhigh", "max":
+		return trimmed
 	default:
-		return cleaned + "\n\n" + managed + "\n"
-	}
-}
-
-func codexProxyProviderConfigFromCredential(cred *agentCredential, callbackToken string) *codexProxyProviderConfig {
-	if cred == nil || cred.inferenceConfig == nil {
-		return nil
-	}
-	// Auth-file credentials (OAuth tokens) use auth.json injection, not env-var-based
-	// proxy providers. Generating a proxy provider config here would produce a
-	// config.toml entry with env_key = "OPENAI_API_KEY" that is never set,
-	// causing Codex to crash immediately.
-	if cred.credentialKind == "oauth-token" {
-		return nil
-	}
-	if cred.inferenceConfig.Provider != "openai-proxy" && cred.inferenceConfig.Provider != "openai-passthrough" {
-		return nil
-	}
-	baseURL := strings.ReplaceAll(cred.inferenceConfig.BaseURL, "{wstoken}", callbackToken)
-	if baseURL == "" || strings.ContainsAny(baseURL, "\n\r") {
-		return nil
-	}
-	model := cred.inferenceConfig.Model
-	if strings.ContainsAny(model, "\n\r") {
-		model = ""
-	}
-	return &codexProxyProviderConfig{baseURL: baseURL, model: model}
-}
-
-func generateCodexProxyProviderConfig(config *codexProxyProviderConfig) string {
-	if config == nil {
 		return ""
 	}
-
-	var b strings.Builder
-	b.WriteString("# SAM-managed Codex provider for proxy-backed sessions.\n")
-	if config.model != "" {
-		b.WriteString(fmt.Sprintf("model = \"%s\"\n", tomlEscapeBasicString(config.model)))
-	}
-	b.WriteString(fmt.Sprintf("model_provider = \"%s\"\n\n", codexProxyProviderID))
-	b.WriteString(fmt.Sprintf("[model_providers.%s]\n", codexProxyProviderID))
-	b.WriteString("name = \"SAM OpenAI Proxy\"\n")
-	b.WriteString(fmt.Sprintf("base_url = \"%s\"\n", tomlEscapeBasicString(config.baseURL)))
-	b.WriteString(fmt.Sprintf("env_key = \"%s\"\n", codexProxyProviderEnvKey))
-	b.WriteString("wire_api = \"responses\"\n\n")
-	return b.String()
-}
-
-// generateCodexMcpConfig produces a managed TOML block for Codex MCP server
-// configuration plus the environment variables referenced by
-// bearer_token_env_var. Codex natively supports streamable HTTP MCP servers
-// via ~/.codex/config.toml.
-func generateCodexMcpConfig(mcpServers []McpServerEntry, proxyProvider *codexProxyProviderConfig) (string, []string) {
-	providerConfig := generateCodexProxyProviderConfig(proxyProvider)
-	if len(mcpServers) == 0 && providerConfig == "" {
-		return "", nil
-	}
-
-	validServers := make([]McpServerEntry, 0, len(mcpServers))
-	for i, server := range mcpServers {
-		if strings.ContainsAny(server.URL, "\n\r") || strings.ContainsAny(server.Token, "\n\r") {
-			slog.Warn("Skipping Codex MCP server with control characters in URL or token",
-				"index", i, "url_length", len(server.URL))
-			continue
-		}
-		validServers = append(validServers, server)
-	}
-	if len(validServers) == 0 && providerConfig == "" {
-		return "", nil
-	}
-
-	var config strings.Builder
-	envVars := make([]string, 0, len(validServers))
-
-	config.WriteString(codexManagedMcpStartMarker)
-	config.WriteString("\n# Added by SAM vm-agent for Codex ACP sessions.\n")
-	config.WriteString(providerConfig)
-
-	for i, server := range validServers {
-		name := codexMcpServerName(i, len(validServers))
-		config.WriteString(fmt.Sprintf("[mcp_servers.%s]\n", name))
-		config.WriteString(fmt.Sprintf("url = \"%s\"\n", tomlEscapeBasicString(server.URL)))
-		if server.Token != "" {
-			tokenEnvVar := codexMcpTokenEnvVar(i, len(validServers))
-			config.WriteString(fmt.Sprintf("bearer_token_env_var = \"%s\"\n", tokenEnvVar))
-			envVars = append(envVars, fmt.Sprintf("%s=%s", tokenEnvVar, server.Token))
-		}
-		config.WriteString("\n")
-	}
-
-	config.WriteString(codexManagedMcpEndMarker)
-	config.WriteString("\n")
-	return config.String(), envVars
-}
-
-// vibeDefaultActiveModel is the model alias used when no user model override
-// is configured. Defaults to Mistral Large (their most capable model).
-// Override at deployment via VIBE_DEFAULT_ACTIVE_MODEL env var.
-var vibeDefaultActiveModel = func() string {
-	if v := os.Getenv("VIBE_DEFAULT_ACTIVE_MODEL"); v != "" {
-		return v
-	}
-	return "mistral-large"
-}()
-
-// sanitizeVibeModelAlias validates and sanitizes a model alias string to
-// prevent TOML injection. Aliases must be alphanumeric with hyphens only.
-// Returns the sanitized alias, or the default if the input is invalid.
-func sanitizeVibeModelAlias(alias string) string {
-	if alias == "" {
-		return vibeDefaultActiveModel
-	}
-	for _, c := range alias {
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.') {
-			slog.Warn("Invalid Vibe model alias, falling back to default",
-				"requested", alias, "default", vibeDefaultActiveModel)
-			return vibeDefaultActiveModel
-		}
-	}
-	return alias
-}
-
-// vibeBuiltinAliases lists the aliases that are always defined in the
-// generated config. If the user selects one of these, no extra entry is needed.
-var vibeBuiltinAliases = map[string]bool{
-	"mistral-large": true,
-	"devstral-2":    true,
-	"codestral":     true,
-}
-
-// generateVibeConfig produces a TOML config for ~/.vibe/config.toml that
-// defines model aliases so users can select models beyond the built-in
-// defaults. The activeModel parameter sets which alias is active.
-// If activeModel doesn't match a built-in alias, a dynamic [[models]] entry
-// is generated using the value as both the alias and the Mistral API model name.
-// This allows the UI model catalog to use raw Mistral API IDs without needing
-// vm-agent changes when new models are released.
-// If mcpServers is provided, it includes MCP server configurations for tool discovery.
-func generateVibeConfig(activeModel string, mcpServers []McpServerEntry) string {
-	activeModel = sanitizeVibeModelAlias(activeModel)
-
-	config := fmt.Sprintf(`# Generated by SAM vm-agent — do not edit manually.
-# This config defines model aliases and MCP servers for Mistral Vibe ACP sessions.
-
-active_model = "%s"
-
-# Mistral Large — most capable model
-[[models]]
-name = "mistral-large-latest"
-provider = "mistral"
-alias = "mistral-large"
-temperature = 0.2
-
-# Devstral 2 — default coding model
-[[models]]
-name = "mistral-vibe-cli-latest"
-provider = "mistral"
-alias = "devstral-2"
-temperature = 0.2
-
-# Codestral — code-specialized model
-[[models]]
-name = "codestral-latest"
-provider = "mistral"
-alias = "codestral"
-temperature = 0.2
-`, activeModel)
-
-	// If the active model isn't a built-in alias, generate a dynamic entry
-	// using the model ID as both alias and API name. This lets the UI catalog
-	// list raw Mistral API model IDs (e.g. "mistral-medium-3-5-2604") without
-	// requiring vm-agent updates for each new model.
-	if activeModel != vibeDefaultActiveModel && !vibeBuiltinAliases[activeModel] {
-		config += fmt.Sprintf(`
-# Dynamic model entry (from SAM user settings)
-[[models]]
-name = "%s"
-provider = "mistral"
-alias = "%s"
-temperature = 0.2
-`, activeModel, activeModel)
-	}
-
-	// Append MCP server configurations if provided
-	for i, server := range mcpServers {
-		// Skip entries with control characters that would corrupt TOML
-		if strings.ContainsAny(server.URL, "\n\r") || strings.ContainsAny(server.Token, "\n\r") {
-			slog.Warn("Skipping MCP server with control characters in URL or token",
-				"index", i, "url_length", len(server.URL))
-			continue
-		}
-		safeURL := tomlEscapeBasicString(server.URL)
-		config += fmt.Sprintf("\n[[mcp_servers]]\nname = \"sam-mcp-%d\"\ntransport = \"http\"\nurl = \"%s\"\n", i, safeURL)
-		if server.Token != "" {
-			safeToken := tomlEscapeBasicString(server.Token)
-			config += fmt.Sprintf("headers = { Authorization = \"Bearer %s\" }\n", safeToken)
-		}
-	}
-
-	return config
-}
-
-// resolveVibeActiveModel determines which model alias to use for a Mistral
-// Vibe session. Returns the user's model override if set, otherwise the
-// platform default (Mistral Large).
-func resolveVibeActiveModel(settings *agentSettingsPayload) string {
-	if settings != nil && settings.Model != "" {
-		return settings.Model
-	}
-	return vibeDefaultActiveModel
 }
 
 // Default values for OpenCode provider configuration.
 // Each has an env-var override so operators can change them without rebuilding the binary.
 const (
-	DefaultOpencodeModel             = "scaleway/qwen3-coder-30b-a3b-instruct"
-	DefaultScalewayBaseURL           = "https://api.scaleway.ai/v1"
-	DefaultGoogleVertexBaseURL       = "https://generativelanguage.googleapis.com/v1beta/openai"
+	DefaultOpencodeProvider          = "opencode-zen"
+	DefaultOpencodeModel             = "opencode/claude-sonnet-4-6"
+	DefaultOpencodeGoModel           = "opencode-go/glm-5.2"
 	DefaultCompatibleFallbackBaseURL = "http://localhost:11434/v1"
 )
 
@@ -1186,6 +1226,31 @@ func getOpencodeDefault(envKey, fallback string) string {
 	return fallback
 }
 
+func normalizeOpencodeProvider(provider string) string {
+	switch provider {
+	case "opencode-zen", "opencode-go", "custom":
+		return provider
+	default:
+		return DefaultOpencodeProvider
+	}
+}
+
+func resolveOpencodeDefaultModel(provider string) string {
+	switch provider {
+	case "opencode-go":
+		return getOpencodeDefault("OPENCODE_GO_DEFAULT_MODEL", DefaultOpencodeGoModel)
+	default:
+		return getOpencodeDefault("OPENCODE_DEFAULT_MODEL", DefaultOpencodeModel)
+	}
+}
+
+func resolveOpencodeModel(provider string, settings *agentSettingsPayload) string {
+	if settings != nil && settings.Model != "" {
+		return settings.Model
+	}
+	return resolveOpencodeDefaultModel(provider)
+}
+
 // buildOpencodeConfig creates the OPENCODE_CONFIG_CONTENT JSON structure
 // based on the provider selected in agent settings.
 //
@@ -1194,35 +1259,24 @@ func getOpencodeDefault(envKey, fallback string) string {
 //   - "models": a map registering model aliases so OpenCode recognises them
 //   - model field: formatted as "providerID/modelAlias"
 //
-// Built-in providers (scaleway, anthropic) have pre-registered models and
-// don't need the npm/models keys.
+// Built-in providers (OpenCode Zen, OpenCode Go) have pre-registered models
+// reached purely by model namespace and need only OPENCODE_API_KEY — no
+// provider block. Only "custom" (bring-your-own OpenAI-compatible endpoint)
+// needs the npm/models keys plus a baseURL.
+func buildOpencodeConfig(settings *agentSettingsPayload) map[string]interface{} {
+	provider := DefaultOpencodeProvider
 
-// opencodeConfigOverrides holds optional direct values to embed in the config
-// instead of using {env:...} references.
-type opencodeConfigOverrides struct {
-	PlatformBaseURL string // if non-empty, embedded directly instead of {env:OPENCODE_PLATFORM_BASE_URL}
-	PlatformAPIKey  string // if non-empty, embedded directly instead of {env:OPENCODE_PLATFORM_API_KEY}
-}
-
-func buildOpencodeConfig(settings *agentSettingsPayload, overrides *opencodeConfigOverrides) map[string]interface{} {
-	provider := "scaleway" // default provider
-	model := getOpencodeDefault("OPENCODE_DEFAULT_MODEL", DefaultOpencodeModel)
-
-	if settings != nil {
-		if settings.OpencodeProvider != "" {
-			provider = settings.OpencodeProvider
-		}
-		if settings.Model != "" {
-			model = settings.Model
-		}
+	if settings != nil && settings.OpencodeProvider != "" {
+		provider = settings.OpencodeProvider
 	}
+	provider = normalizeOpencodeProvider(provider)
+	model := resolveOpencodeModel(provider, settings)
 
 	slog.Debug("buildOpencodeConfig: input",
 		"provider", provider,
-		"rawModel", model,
-		"hasOverrides", overrides != nil)
+		"rawModel", model)
 
-	// Strip @cf/ prefix from Workers AI model IDs for openai-compatible providers.
+	// Strip @cf/ prefix from Workers AI model IDs for custom providers.
 	model = stripCFPrefix(model)
 
 	slog.Debug("buildOpencodeConfig: after stripCFPrefix",
@@ -1231,95 +1285,10 @@ func buildOpencodeConfig(settings *agentSettingsPayload, overrides *opencodeConf
 
 	config := map[string]interface{}{}
 
-	scalewayBaseURL := getOpencodeDefault("OPENCODE_SCALEWAY_BASE_URL", DefaultScalewayBaseURL)
-
 	switch provider {
-	case "platform":
-		// SAM Platform (Workers AI) — uses a custom "sam-platform" provider ID.
-		// OpenCode requires npm + models keys for non-built-in providers.
-		// Embed actual values directly rather than {env:} references because
-		// OPENCODE_CONFIG_CONTENT may not support variable interpolation.
-		baseURL := "{env:OPENCODE_PLATFORM_BASE_URL}"
-		apiKey := "{env:OPENCODE_PLATFORM_API_KEY}"
-		if overrides != nil {
-			if overrides.PlatformBaseURL != "" {
-				baseURL = overrides.PlatformBaseURL
-			}
-			if overrides.PlatformAPIKey != "" {
-				apiKey = overrides.PlatformAPIKey
-			}
-		}
-		// For platform provider, preserve the vendor prefix in the model alias
-		// (e.g. "meta/llama-4-scout-17b-16e-instruct") so the AI proxy can
-		// reconstruct the full Workers AI model ID (@cf/meta/...).
-		// sanitizeModelAlias would strip "meta/" leaving just the model name,
-		// causing the proxy to resolve @cf/llama-4-... instead of @cf/meta/llama-4-...
-		// OpenCode splits "sam-platform/meta/llama-4-..." on the first "/" to get
-		// provider "sam-platform" and model "meta/llama-4-...", which is correct.
-		modelAlias := model // preserve vendor prefix (e.g. "meta/llama-4-scout-17b-16e-instruct")
-		config["model"] = "sam-platform/" + modelAlias
-		config["provider"] = map[string]interface{}{
-			"sam-platform": map[string]interface{}{
-				"npm":  "@ai-sdk/openai-compatible",
-				"name": "SAM Platform",
-				"options": map[string]interface{}{
-					"baseURL": baseURL,
-					"apiKey":  apiKey,
-				},
-				"models": map[string]interface{}{
-					modelAlias: map[string]interface{}{
-						"name": model,
-					},
-				},
-			},
-		}
-		slog.Info("buildOpencodeConfig: platform provider configured",
-			"modelAlias", modelAlias,
-			"fullModelKey", "sam-platform/"+modelAlias,
-			"baseURL", baseURL,
-			"apiKeyLen", len(apiKey))
-	case "scaleway":
-		// Scaleway is a built-in OpenCode provider with pre-registered models.
+	case "opencode-zen", "opencode-go":
 		config["model"] = model
-		config["provider"] = map[string]interface{}{
-			"scaleway": map[string]interface{}{
-				"options": map[string]interface{}{
-					"baseURL": scalewayBaseURL,
-					"apiKey":  "{env:SCW_SECRET_KEY}",
-				},
-			},
-		}
-	case "google-vertex":
-		// Uses Google's Gemini API via its OpenAI-compatible endpoint.
-		// Named "google-vertex" in the UI; uses custom provider with npm + models.
-		modelAlias := sanitizeModelAlias(model)
-		config["model"] = "google-vertex/" + modelAlias
-		config["provider"] = map[string]interface{}{
-			"google-vertex": map[string]interface{}{
-				"npm":  "@ai-sdk/openai-compatible",
-				"name": "Google Gemini",
-				"options": map[string]interface{}{
-					"baseURL": getOpencodeDefault("OPENCODE_GOOGLE_VERTEX_BASE_URL", DefaultGoogleVertexBaseURL),
-					"apiKey":  "{env:GOOGLE_API_KEY}",
-				},
-				"models": map[string]interface{}{
-					modelAlias: map[string]interface{}{
-						"name": model,
-					},
-				},
-			},
-		}
-	case "anthropic":
-		// Anthropic is a built-in OpenCode provider.
-		config["model"] = model
-		config["provider"] = map[string]interface{}{
-			"anthropic": map[string]interface{}{
-				"options": map[string]interface{}{
-					"apiKey": "{env:ANTHROPIC_API_KEY}",
-				},
-			},
-		}
-	case "openai-compatible", "custom":
+	case "custom":
 		baseURL := getOpencodeDefault("OPENCODE_COMPATIBLE_DEFAULT_BASE_URL", DefaultCompatibleFallbackBaseURL)
 		if settings != nil && settings.OpencodeBaseURL != "" {
 			baseURL = settings.OpencodeBaseURL
@@ -1342,16 +1311,8 @@ func buildOpencodeConfig(settings *agentSettingsPayload, overrides *opencodeConf
 			},
 		}
 	default:
-		// Unknown provider — fallback to scaleway (built-in).
+		// Unknown provider — fail closed to the Zen default (model-only config).
 		config["model"] = model
-		config["provider"] = map[string]interface{}{
-			"scaleway": map[string]interface{}{
-				"options": map[string]interface{}{
-					"baseURL": scalewayBaseURL,
-					"apiKey":  "{env:SCW_SECRET_KEY}",
-				},
-			},
-		}
 	}
 
 	return config
@@ -1364,7 +1325,7 @@ func buildOpencodeConfig(settings *agentSettingsPayload, overrides *opencodeConf
 // silently fails and OpenCode returns end_turn with no content.
 func opencodeProviderNeedsNpmPackage(provider string) string {
 	switch provider {
-	case "platform", "google-vertex", "openai-compatible", "custom":
+	case "custom":
 		return "@ai-sdk/openai-compatible"
 	default:
 		return ""
@@ -1375,7 +1336,7 @@ func opencodeProviderNeedsNpmPackage(provider string) string {
 // OpenCode provider into ~/.cache/opencode/node_modules/ — the exact location
 // where OpenCode resolves provider packages at runtime.
 //
-// OpenCode v1.4.3 embeds Bun and uses it internally for provider package loading.
+// OpenCode embeds Bun and uses it internally for provider package loading.
 // Pre-installing via npm is sufficient — the node_modules structure is compatible
 // with Bun's module resolver. Without pre-installation, OpenCode's embedded Bun
 // would auto-install the package, but this can fail in network-restricted environments.
@@ -1428,16 +1389,6 @@ func sanitizeModelAlias(model string) string {
 	return model
 }
 
-// writeVibeConfigToContainer writes a .vibe/config.toml into the container
-// for the Mistral Vibe agent. This is necessary because VIBE_ACTIVE_MODEL
-// expects a config alias (not a raw API model name), and only "devstral-2"
-// is defined by default. If mcpServers is provided, it includes MCP server
-// configurations for tool discovery.
-func writeVibeConfigToContainer(ctx context.Context, containerID, user, activeModel string, mcpServers []McpServerEntry) error {
-	config := generateVibeConfig(activeModel, mcpServers)
-	return writeAuthFileToContainer(ctx, containerID, user, ".vibe/config.toml", config)
-}
-
 // readOptionalFileFromContainer reads a file inside a container if it exists,
 // returning an empty string when the file is absent.
 func readOptionalFileFromContainer(ctx context.Context, containerID, user, filePath string) (string, error) {
@@ -1485,23 +1436,4 @@ func readOptionalFileFromContainer(ctx context.Context, containerID, user, fileP
 		return "", fmt.Errorf("docker exec failed: %w", err)
 	}
 	return buf.String(), nil
-}
-
-// writeCodexConfigToContainer updates ~/.codex/config.toml with a SAM-managed
-// MCP block. Existing non-SAM config is preserved, and prior SAM-managed blocks
-// are replaced so resumed or restarted sessions do not accumulate stale tokens.
-func writeCodexConfigToContainer(ctx context.Context, containerID, user string, mcpServers []McpServerEntry, proxyProvider *codexProxyProviderConfig) ([]string, error) {
-	managedConfig, envVars := generateCodexMcpConfig(mcpServers, proxyProvider)
-	existingConfig, err := readOptionalFileFromContainer(ctx, containerID, user, ".codex/config.toml")
-	if err != nil {
-		return nil, err
-	}
-	mergedConfig := mergeManagedCodexMcpConfig(existingConfig, managedConfig)
-	if mergedConfig == "" {
-		return nil, nil
-	}
-	if err := writeAuthFileToContainer(ctx, containerID, user, ".codex/config.toml", mergedConfig); err != nil {
-		return nil, err
-	}
-	return envVars, nil
 }

@@ -16,6 +16,7 @@ vi.mock('../../../src/services/project-data', () => ({
   stopSession: (...args: unknown[]) => stopSessionSpy(...args),
   recordActivityEvent: vi.fn().mockResolvedValue(undefined),
   markAgentCompleted: vi.fn().mockResolvedValue(undefined),
+  reconcileTaskWaits: vi.fn().mockResolvedValue(undefined),
   scheduleIdleCleanup: vi.fn().mockResolvedValue({ cleanupAt: Date.now() + 60000 }),
 }));
 
@@ -25,6 +26,11 @@ vi.mock('../../../src/services/task-runner', () => ({
   cleanupTaskRun: (...args: unknown[]) => cleanupTaskRunSpy(...args),
 }));
 
+const terminalCleanupSpy = vi.fn().mockResolvedValue(undefined);
+vi.mock('../../../src/services/task-terminal-cleanup', () => ({
+  cleanupTerminalTaskResources: (...args: unknown[]) => terminalCleanupSpy(...args),
+}));
+
 // Track calls to syncTriggerExecutionStatus
 const syncTriggerSpy = vi.fn().mockResolvedValue(undefined);
 vi.mock('../../../src/services/trigger-execution-sync', () => ({
@@ -32,8 +38,9 @@ vi.mock('../../../src/services/trigger-execution-sync', () => ({
 }));
 
 // Mock orchestrator + scheduler
+const notifyTaskEventSpy = vi.fn().mockResolvedValue(undefined);
 vi.mock('../../../src/services/project-orchestrator', () => ({
-  notifyTaskEvent: vi.fn().mockResolvedValue(undefined),
+  notifyTaskEvent: (...args: unknown[]) => notifyTaskEventSpy(...args),
 }));
 vi.mock('../../../src/services/scheduler-state-sync', () => ({
   recomputeMissionSchedulerStates: vi.fn().mockResolvedValue(undefined),
@@ -48,7 +55,8 @@ vi.mock('../../../src/services/notification', () => ({
 }));
 
 // Mock logger
-vi.mock('../../../src/lib/logger', () => ({
+vi.mock('../../../src/lib/logger', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/logger')>()),
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
@@ -142,11 +150,13 @@ describe('complete_task cleanup behavior', () => {
     // Wait for background work to complete
     await Promise.allSettled(ctx._promises);
 
-    // Verify session stop was called
-    expect(stopSessionSpy).toHaveBeenCalledWith(env, 'proj-456', 'session-xyz');
+    expect(terminalCleanupSpy).toHaveBeenCalledWith(env, 'task-123', {
+      status: 'completed',
+      logContext: { source: 'mcp.complete_task', workspaceId: 'ws-abc' },
+    });
 
-    // Verify workspace cleanup was triggered
-    expect(cleanupTaskRunSpy).toHaveBeenCalledWith('task-123', env);
+    // Non-mission tasks must not wake ProjectOrchestrator.
+    expect(notifyTaskEventSpy).not.toHaveBeenCalled();
   });
 
   it('conversation-mode complete_task does NOT trigger session stop or cleanup', async () => {
@@ -176,6 +186,7 @@ describe('complete_task cleanup behavior', () => {
     // Session stop and cleanup should NOT be called
     expect(stopSessionSpy).not.toHaveBeenCalled();
     expect(cleanupTaskRunSpy).not.toHaveBeenCalled();
+    expect(terminalCleanupSpy).not.toHaveBeenCalled();
   });
 
   it('task-mode complete_task syncs trigger execution status', async () => {
@@ -228,7 +239,7 @@ describe('complete_task cleanup behavior', () => {
     expect(cleanupTaskRunSpy).not.toHaveBeenCalled();
   });
 
-  it('task-mode complete_task skips stopSession when workspace has no chatSessionId', async () => {
+  it('task-mode complete_task delegates terminal cleanup to the shared cleanup helper', async () => {
     mockD1._stmt.first.mockResolvedValueOnce({
       task_mode: 'task',
       user_id: 'user-789',
@@ -238,23 +249,19 @@ describe('complete_task cleanup behavior', () => {
       mission_id: null,
     });
     mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
-    // Workspace exists but has no linked chat session
-    mockD1._stmt.raw.mockResolvedValueOnce([[null]]);
-
     const env = createMockEnv(mockD1);
     const ctx = createMockExecutionCtx();
 
     await handleCompleteTask(1, { summary: 'Done' }, tokenData, env, ctx);
     await Promise.allSettled(ctx._promises);
 
-    // stopSession should NOT be called when chatSessionId is null
-    expect(stopSessionSpy).not.toHaveBeenCalled();
-
-    // cleanupTaskRun should still run
-    expect(cleanupTaskRunSpy).toHaveBeenCalledWith('task-123', env);
+    expect(terminalCleanupSpy).toHaveBeenCalledWith(env, 'task-123', {
+      status: 'completed',
+      logContext: { source: 'mcp.complete_task', workspaceId: 'ws-abc' },
+    });
   });
 
-  it('task-mode complete_task still runs cleanupTaskRun when stopSession fails', async () => {
+  it('task-mode complete_task fails instead of reporting success when terminal cleanup fails', async () => {
     mockD1._stmt.first.mockResolvedValueOnce({
       task_mode: 'task',
       user_id: 'user-789',
@@ -264,23 +271,18 @@ describe('complete_task cleanup behavior', () => {
       mission_id: null,
     });
     mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
-    mockD1._stmt.raw.mockResolvedValueOnce([['session-xyz']]);
-
-    // Make stopSession throw
-    stopSessionSpy.mockRejectedValueOnce(new Error('DO unavailable'));
+    terminalCleanupSpy.mockRejectedValueOnce(new Error('container unavailable'));
 
     const env = createMockEnv(mockD1);
     const ctx = createMockExecutionCtx();
 
-    const result = await handleCompleteTask(1, { summary: 'Done' }, tokenData, env, ctx);
-    expect(result.result).toBeDefined();
+    await expect(handleCompleteTask(1, { summary: 'Done' }, tokenData, env, ctx)).rejects.toThrow(
+      'container unavailable'
+    );
 
-    await Promise.allSettled(ctx._promises);
-
-    // stopSession was attempted and failed
-    expect(stopSessionSpy).toHaveBeenCalled();
-
-    // cleanupTaskRun still ran despite stopSession failure — prevents VM leaks
-    expect(cleanupTaskRunSpy).toHaveBeenCalledWith('task-123', env);
+    expect(terminalCleanupSpy).toHaveBeenCalledWith(env, 'task-123', {
+      status: 'completed',
+      logContext: { source: 'mcp.complete_task', workspaceId: 'ws-abc' },
+    });
   });
 });

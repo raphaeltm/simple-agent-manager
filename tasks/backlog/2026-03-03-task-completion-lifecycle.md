@@ -1,5 +1,24 @@
 # Task Completion Lifecycle
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:**
+>   - Phase 1: chat "Complete" action with a confirm dialog
+>     (`apps/web/src/components/project-message-view/session-tool-actions.ts:278-292`,
+>     `useSessionTools.ts:141`); the status route runs terminal cleanup
+>     (`apps/api/src/routes/tasks/crud.ts:502`).
+>   - Phase 3: status and step badges plus a PR link in the chat header
+>     (`SessionHeader.tsx:444-479,519-521`), output summary (`FloatingHeader.tsx:117`), dashboard
+>     polling (`apps/web/src/hooks/useActiveTasks.ts:30-35`), `task_complete` notification
+>     (`apps/api/src/services/notification.ts:144`).
+>   - Agents can self-complete with the SAM MCP `complete_task` tool (with `evidence.prUrl`).
+> - **Still open:**
+>   - Phase 2, auto-complete on PR merge. `apps/api/src/routes/github-webhook.ts:55-59` handles
+>     only `installation` and `repository`; PR events only feed project-event subscriptions.
+>   - The "appears complete" suggestion banner, a "Mark Cancelled" option, and capability tests
+>     for every completion path.
+>   - Phase 4 (LLM completion assessment) remains optional future work.
+
 ## Problem Statement
 
 Tasks submitted through the project chat page remain in `in_progress` status with `executionStep: 'awaiting_followup'` indefinitely after the agent finishes work. There is no mechanism — manual or automatic — to reliably transition tasks to `completed` status.

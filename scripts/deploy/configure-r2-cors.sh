@@ -8,7 +8,7 @@
 # Required environment variables:
 #   CF_API_TOKEN    — Cloudflare API token (same one used for wrangler)
 #   CF_ACCOUNT_ID   — Cloudflare account ID
-#   R2_BUCKET_NAME  — R2 bucket name (e.g., sam-staging-assets)
+#   R2_BUCKET_NAME  — R2 bucket name (e.g., sa379a6-staging-assets)
 #   BASE_DOMAIN     — App domain (e.g., sammy.party or simple-agent-manager.org)
 #
 # Usage: bash scripts/deploy/configure-r2-cors.sh

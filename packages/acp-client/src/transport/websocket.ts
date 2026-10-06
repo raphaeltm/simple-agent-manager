@@ -1,4 +1,5 @@
 import type {
+  AgentCrashReportMessage,
   AgentStatusMessage,
   LifecycleEventCallback,
   SessionStateMessage,
@@ -14,6 +15,11 @@ const DEFAULT_HEARTBEAT_TIMEOUT_MS = 10_000;
  * Callback for receiving agent status control messages from the VM Agent.
  */
 export type AgentStatusCallback = (msg: AgentStatusMessage) => void;
+
+/**
+ * Callback for receiving agent crash reports from the VM Agent.
+ */
+export type AgentCrashReportCallback = (msg: AgentCrashReportMessage) => void;
 
 /**
  * Callback for receiving session state on viewer attach.
@@ -62,6 +68,8 @@ export interface AcpTransportOptions {
   onAgentStatus: AgentStatusCallback;
   /** Callback for ACP JSON-RPC messages from the agent */
   onAcpMessage: AcpMessageCallback;
+  /** Callback for agent_crash_report control messages */
+  onAgentCrashReport?: AgentCrashReportCallback;
   /** Callback when the WebSocket closes. Receives the close code and reason for smarter reconnection. */
   onClose?: (code?: number, reason?: string) => void;
   /** Callback when a WebSocket error occurs */
@@ -98,11 +106,19 @@ export function createAcpWebSocketTransport(
   // Duck-type check: if wsOrOptions has addEventListener it's a WebSocket
   // (positional args form), otherwise it's an options object.
   let opts: AcpTransportOptions;
-  if ('addEventListener' in wsOrOptions && typeof (wsOrOptions as WebSocket).addEventListener === 'function') {
+  if (
+    'addEventListener' in wsOrOptions &&
+    typeof (wsOrOptions as WebSocket).addEventListener === 'function'
+  ) {
+    if (!onAgentStatus || !onAcpMessage) {
+      throw new Error(
+        'createAcpWebSocketTransport: onAgentStatus and onAcpMessage callbacks are required when calling with the positional-argument form'
+      );
+    }
     opts = {
       ws: wsOrOptions as WebSocket,
-      onAgentStatus: onAgentStatus!,
-      onAcpMessage: onAcpMessage!,
+      onAgentStatus,
+      onAcpMessage,
       onClose,
       onError,
       onLifecycleEvent,
@@ -146,14 +162,23 @@ export function createAcpWebSocketTransport(
   }
 
   function stopHeartbeat() {
-    if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
-    if (pongTimer) { clearTimeout(pongTimer); pongTimer = null; }
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    }
+    if (pongTimer) {
+      clearTimeout(pongTimer);
+      pongTimer = null;
+    }
     waitingForPong = false;
   }
 
   function handlePong() {
     waitingForPong = false;
-    if (pongTimer) { clearTimeout(pongTimer); pongTimer = null; }
+    if (pongTimer) {
+      clearTimeout(pongTimer);
+      pongTimer = null;
+    }
   }
 
   ws.addEventListener('message', (event) => {
@@ -163,6 +188,13 @@ export function createAcpWebSocketTransport(
         switch (data.type) {
           case 'agent_status':
             opts.onAgentStatus(data);
+            break;
+          case 'agent_crash_report':
+            if (opts.onAgentCrashReport) {
+              opts.onAgentCrashReport(data);
+            } else {
+              opts.onAcpMessage(data);
+            }
             break;
           case 'session_state':
             opts.onSessionState?.(data);

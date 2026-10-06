@@ -1,42 +1,162 @@
 const statusConfig: Record<string, { label: string; bg: string; fg: string }> = {
   // Workspace / node statuses
-  pending: { label: 'Pending', bg: 'rgba(159, 183, 174, 0.15)', fg: '#9fb7ae' },
-  creating: { label: 'Creating', bg: 'rgba(59, 130, 246, 0.15)', fg: '#60a5fa' },
-  running: { label: 'Running', bg: 'rgba(34, 197, 94, 0.15)', fg: '#4ade80' },
-  recovery: { label: 'Recovery', bg: 'rgba(245, 158, 11, 0.15)', fg: '#fbbf24' },
-  stopping: { label: 'Stopping', bg: 'rgba(245, 158, 11, 0.15)', fg: '#fbbf24' },
-  stopped: { label: 'Stopped', bg: 'rgba(159, 183, 174, 0.15)', fg: '#9fb7ae' },
-  deleted: { label: 'Deleted', bg: 'rgba(127, 127, 127, 0.15)', fg: '#9ca3af' },
-  error: { label: 'Error', bg: 'rgba(239, 68, 68, 0.15)', fg: '#f87171' },
-  healthy: { label: 'Healthy', bg: 'rgba(34, 197, 94, 0.15)', fg: '#4ade80' },
-  stale: { label: 'Stale', bg: 'rgba(245, 158, 11, 0.15)', fg: '#fbbf24' },
-  unhealthy: { label: 'Unhealthy', bg: 'rgba(239, 68, 68, 0.15)', fg: '#f87171' },
-  connected: { label: 'Connected', bg: 'rgba(34, 197, 94, 0.15)', fg: '#4ade80' },
-  disconnected: { label: 'Disconnected', bg: 'rgba(239, 68, 68, 0.15)', fg: '#f87171' },
+  pending: { label: 'Pending', bg: 'var(--sam-status-muted-bg)', fg: 'var(--sam-status-muted-fg)' },
+  creating: { label: 'Creating', bg: 'var(--sam-status-info-bg)', fg: 'var(--sam-status-info-fg)' },
+  running: {
+    label: 'Running',
+    bg: 'var(--sam-status-success-bg)',
+    fg: 'var(--sam-status-success-fg)',
+  },
+  recovery: {
+    label: 'Recovery',
+    bg: 'var(--sam-status-warning-bg)',
+    fg: 'var(--sam-status-warning-fg)',
+  },
+  stopping: {
+    label: 'Stopping',
+    bg: 'var(--sam-status-warning-bg)',
+    fg: 'var(--sam-status-warning-fg)',
+  },
+  evicted: {
+    label: 'Evicted',
+    bg: 'var(--sam-status-warning-bg)',
+    fg: 'var(--sam-status-warning-fg)',
+  },
+  stopped: { label: 'Stopped', bg: 'var(--sam-status-muted-bg)', fg: 'var(--sam-status-muted-fg)' },
+  deleted: {
+    label: 'Deleted',
+    bg: 'var(--sam-status-neutral-bg)',
+    fg: 'var(--sam-status-neutral-fg)',
+  },
+  error: { label: 'Error', bg: 'var(--sam-status-danger-bg)', fg: 'var(--sam-status-danger-fg)' },
+  healthy: {
+    label: 'Healthy',
+    bg: 'var(--sam-status-success-bg)',
+    fg: 'var(--sam-status-success-fg)',
+  },
+  stale: { label: 'Stale', bg: 'var(--sam-status-warning-bg)', fg: 'var(--sam-status-warning-fg)' },
+  unhealthy: {
+    label: 'Unhealthy',
+    bg: 'var(--sam-status-danger-bg)',
+    fg: 'var(--sam-status-danger-fg)',
+  },
+  connected: {
+    label: 'Connected',
+    bg: 'var(--sam-status-success-bg)',
+    fg: 'var(--sam-status-success-fg)',
+  },
+  disconnected: {
+    label: 'Disconnected',
+    bg: 'var(--sam-status-danger-bg)',
+    fg: 'var(--sam-status-danger-fg)',
+  },
+  attached: {
+    label: 'Attached',
+    bg: 'var(--sam-status-success-bg)',
+    fg: 'var(--sam-status-success-fg)',
+  },
   // Task statuses
-  draft: { label: 'Draft', bg: 'rgba(159, 183, 174, 0.15)', fg: '#9fb7ae' },
-  ready: { label: 'Ready', bg: 'rgba(59, 130, 246, 0.15)', fg: '#60a5fa' },
-  queued: { label: 'Queued', bg: 'rgba(99, 102, 241, 0.15)', fg: '#a5b4fc' },
-  delegated: { label: 'Delegated', bg: 'rgba(139, 92, 246, 0.15)', fg: '#c4b5fd' },
-  in_progress: { label: 'In Progress', bg: 'rgba(34, 197, 94, 0.15)', fg: '#4ade80' },
-  completed: { label: 'Completed', bg: 'rgba(34, 197, 94, 0.2)', fg: '#22c55e' },
-  failed: { label: 'Failed', bg: 'rgba(239, 68, 68, 0.15)', fg: '#f87171' },
-  cancelled: { label: 'Cancelled', bg: 'rgba(159, 183, 174, 0.15)', fg: '#9fb7ae' },
+  draft: { label: 'Draft', bg: 'var(--sam-status-muted-bg)', fg: 'var(--sam-status-muted-fg)' },
+  ready: { label: 'Ready', bg: 'var(--sam-status-info-bg)', fg: 'var(--sam-status-info-fg)' },
+  queued: { label: 'Queued', bg: 'var(--sam-status-indigo-bg)', fg: 'var(--sam-status-indigo-fg)' },
+  delegated: {
+    label: 'Delegated',
+    bg: 'var(--sam-status-purple-bg)',
+    fg: 'var(--sam-status-purple-fg)',
+  },
+  in_progress: {
+    label: 'In Progress',
+    bg: 'var(--sam-status-success-bg)',
+    fg: 'var(--sam-status-success-fg)',
+  },
+  sleeping: {
+    label: 'Sleeping',
+    bg: 'var(--sam-status-muted-bg)',
+    fg: 'var(--sam-status-muted-fg)',
+  },
+  completed: {
+    label: 'Completed',
+    bg: 'var(--sam-status-success-strong-bg)',
+    fg: 'var(--sam-status-success-strong-fg)',
+  },
+  failed: { label: 'Failed', bg: 'var(--sam-status-danger-bg)', fg: 'var(--sam-status-danger-fg)' },
+  cancelled: {
+    label: 'Cancelled',
+    bg: 'var(--sam-status-muted-bg)',
+    fg: 'var(--sam-status-muted-fg)',
+  },
   // ACP session statuses (spec 027)
-  assigned: { label: 'Assigned', bg: 'rgba(99, 102, 241, 0.15)', fg: '#a5b4fc' },
-  interrupted: { label: 'Interrupted', bg: 'rgba(245, 158, 11, 0.15)', fg: '#fbbf24' },
+  assigned: {
+    label: 'Assigned',
+    bg: 'var(--sam-status-indigo-bg)',
+    fg: 'var(--sam-status-indigo-fg)',
+  },
+  interrupted: {
+    label: 'Interrupted',
+    bg: 'var(--sam-status-warning-bg)',
+    fg: 'var(--sam-status-warning-fg)',
+  },
+  // Trigger statuses. Without these, `<StatusBadge status="active"/>` rendered
+  // "Unknown" — and still pulsed, because the pulse keys off the raw status
+  // string rather than off a resolved config entry.
+  active: {
+    label: 'Active',
+    bg: 'var(--sam-status-success-bg)',
+    fg: 'var(--sam-status-success-fg)',
+  },
+  paused: {
+    label: 'Paused',
+    bg: 'var(--sam-status-warning-bg)',
+    fg: 'var(--sam-status-warning-fg)',
+  },
+  disabled: {
+    label: 'Disabled',
+    bg: 'var(--sam-status-muted-bg)',
+    fg: 'var(--sam-status-muted-fg)',
+  },
+  // Credential usage-limit levels (credential_limit_windows.last_event_level).
+  // Four distinct tiers: ok (green), warning (amber), critical (orange),
+  // rejected (red) — critical must not share danger's hue, or "nearly out"
+  // and "blocked" become indistinguishable at a glance.
+  ok: { label: 'OK', bg: 'var(--sam-status-success-bg)', fg: 'var(--sam-status-success-fg)' },
+  warning: {
+    label: 'Warning',
+    bg: 'var(--sam-status-warning-bg)',
+    fg: 'var(--sam-status-warning-fg)',
+  },
+  critical: {
+    label: 'Critical',
+    bg: 'var(--sam-status-critical-bg)',
+    fg: 'var(--sam-status-critical-fg)',
+  },
+  rejected: {
+    label: 'Rejected',
+    bg: 'var(--sam-status-danger-bg)',
+    fg: 'var(--sam-status-danger-fg)',
+  },
 };
 
 interface StatusBadgeProps {
   status: string;
   label?: string;
+  /**
+   * Overrides the default pulse for this status. Trigger lists opt out: an
+   * armed trigger is steady-state configuration, not live activity, and a page
+   * of glowing badges reads as noise rather than signal.
+   */
+  pulse?: boolean;
 }
 
 const pulsingStatuses = new Set(['active', 'connected', 'healthy', 'in_progress', 'running']);
 
-export function StatusBadge({ status, label }: StatusBadgeProps) {
-  const config = statusConfig[status] ?? { label: 'Unknown', bg: '#e5e7eb', fg: '#1f2937' };
-  const pulseClass = pulsingStatuses.has(status) ? ' sam-status-pulse' : '';
+export function StatusBadge({ status, label, pulse }: StatusBadgeProps) {
+  const config = statusConfig[status] ?? {
+    label: 'Unknown',
+    bg: 'var(--sam-status-unknown-bg)',
+    fg: 'var(--sam-status-unknown-fg)',
+  };
+  const shouldPulse = pulse ?? pulsingStatuses.has(status);
+  const pulseClass = shouldPulse ? ' sam-status-pulse' : '';
 
   return (
     <span

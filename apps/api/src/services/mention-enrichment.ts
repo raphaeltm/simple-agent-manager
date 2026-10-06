@@ -14,7 +14,7 @@ import type { Env } from '../env';
 import { resolveAgentProfile } from './agent-profiles';
 
 type Db = ReturnType<typeof drizzle<typeof dbSchema>>;
-type ProfileEnv = Pick<Env, 'DEFAULT_TASK_AGENT_TYPE' | 'BUILTIN_PROFILE_SONNET_MODEL' | 'BUILTIN_PROFILE_OPUS_MODEL'>;
+type ProfileEnv = Pick<Env, 'DEFAULT_TASK_AGENT_TYPE'>;
 
 export interface MentionMatch {
   /** The full raw match text (e.g., `@reviewer` or `@"Code Reviewer"`) */

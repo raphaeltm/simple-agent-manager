@@ -11,6 +11,14 @@ import (
 	"time"
 )
 
+const DefaultResponseMaxBytes = 2048
+
+// DefaultAuthRenewalWait is the default for Config.AuthRenewalWait. A healthy agent
+// renews its workspace token halfway through the token's lifetime, so a rejected
+// token that no renewal or control-plane delivery replaces within this window is
+// worth surfacing. Override via MSG_AUTH_RENEWAL_WAIT.
+const DefaultAuthRenewalWait = 15 * time.Minute
+
 // Config holds tunable parameters for the message reporter.
 // All values have sensible defaults; override via MSG_* environment variables.
 type Config struct {
@@ -20,9 +28,13 @@ type Config struct {
 	// BatchMaxSize is the maximum number of messages per HTTP POST.
 	BatchMaxSize int
 
-	// BatchMaxBytes is the approximate max payload size per batch (bytes).
-	// Messages are measured by their JSON-serialized content length.
+	// BatchMaxBytes is the maximum marshaled JSON payload size per batch.
 	BatchMaxBytes int
+
+	// MaxMessageContentBytes is the maximum message content size before
+	// truncation. This should stay below the Worker request body limit so an
+	// oversized single message does not make the batch permanently fail.
+	MaxMessageContentBytes int
 
 	// OutboxMaxSize is the maximum number of messages retained in the SQLite
 	// outbox. When exceeded, Enqueue returns an error.
@@ -39,6 +51,20 @@ type Config struct {
 
 	// HTTPTimeout is the per-request timeout for batch POST calls.
 	HTTPTimeout time.Duration
+
+	// ResponseMaxBytes bounds the amount of response body retained for retry
+	// diagnostics when the control plane rejects a batch.
+	ResponseMaxBytes int
+
+	// AuthRenewalWait is how long delivery may stay paused on a rejected (401)
+	// callback token before the pause is surfaced through OnAuthRenewalWaitExceeded.
+	// Queued rows are kept either way; see credential.go.
+	AuthRenewalWait time.Duration
+
+	// OnAuthRenewalWaitExceeded, when set, is called once per pause that outlasts
+	// AuthRenewalWait, so the owner can report it on a channel that does not depend
+	// on the rejected workspace token.
+	OnAuthRenewalWaitExceeded func(AuthRenewalWaitExceeded)
 
 	// Endpoint is the control plane URL (without trailing slash).
 	// The batch endpoint will be: {Endpoint}/api/workspaces/{workspaceId}/messages
@@ -60,14 +86,17 @@ type Config struct {
 // Override individual fields or call LoadConfigFromEnv for env-var–based loading.
 func DefaultConfig() Config {
 	return Config{
-		BatchMaxWait:    2 * time.Second,
-		BatchMaxSize:    50,
-		BatchMaxBytes:   65536, // 64 KB
-		OutboxMaxSize:   10000,
-		RetryInitial:    1 * time.Second,
-		RetryMax:        30 * time.Second,
-		RetryMaxElapsed: 5 * time.Minute,
-		HTTPTimeout:     10 * time.Second,
+		BatchMaxWait:           2 * time.Second,
+		BatchMaxSize:           50,
+		BatchMaxBytes:          256 * 1024, // API MAX_MESSAGES_PAYLOAD_BYTES default
+		MaxMessageContentBytes: 100 * 1024, // API MESSAGE_SIZE_THRESHOLD default
+		OutboxMaxSize:          10000,
+		RetryInitial:           1 * time.Second,
+		RetryMax:               30 * time.Second,
+		RetryMaxElapsed:        5 * time.Minute,
+		HTTPTimeout:            10 * time.Second,
+		ResponseMaxBytes:       DefaultResponseMaxBytes,
+		AuthRenewalWait:        DefaultAuthRenewalWait,
 	}
 }
 
@@ -79,11 +108,14 @@ func LoadConfigFromEnv() Config {
 	cfg.BatchMaxWait = envDuration("MSG_BATCH_MAX_WAIT", cfg.BatchMaxWait)
 	cfg.BatchMaxSize = envInt("MSG_BATCH_MAX_SIZE", cfg.BatchMaxSize)
 	cfg.BatchMaxBytes = envInt("MSG_BATCH_MAX_BYTES", cfg.BatchMaxBytes)
+	cfg.MaxMessageContentBytes = envInt("MSG_MAX_MESSAGE_CONTENT_BYTES", cfg.MaxMessageContentBytes)
 	cfg.OutboxMaxSize = envInt("MSG_OUTBOX_MAX_SIZE", cfg.OutboxMaxSize)
 	cfg.RetryInitial = envDuration("MSG_RETRY_INITIAL", cfg.RetryInitial)
 	cfg.RetryMax = envDuration("MSG_RETRY_MAX", cfg.RetryMax)
 	cfg.RetryMaxElapsed = envDuration("MSG_RETRY_MAX_ELAPSED", cfg.RetryMaxElapsed)
 	cfg.HTTPTimeout = envDuration("MSG_HTTP_TIMEOUT", cfg.HTTPTimeout)
+	cfg.ResponseMaxBytes = envInt("MSG_RESPONSE_MAX_BYTES", cfg.ResponseMaxBytes)
+	cfg.AuthRenewalWait = envDuration("MSG_AUTH_RENEWAL_WAIT", cfg.AuthRenewalWait)
 
 	cfg.Endpoint = os.Getenv("CONTROL_PLANE_URL")
 	cfg.WorkspaceID = os.Getenv("WORKSPACE_ID")

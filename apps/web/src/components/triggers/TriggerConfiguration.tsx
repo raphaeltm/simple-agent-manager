@@ -1,0 +1,72 @@
+import type { TriggerResponse } from '@simple-agent-manager/shared';
+
+import { formatDateFull } from './trigger-presentation';
+
+interface TriggerConfigurationProps {
+  trigger: TriggerResponse;
+}
+
+function sourceRows(trigger: TriggerResponse): Array<[string, string]> {
+  if (trigger.sourceType === 'github') {
+    const commandPrefix =
+      trigger.githubConfig?.eventType === 'issue_comment'
+        ? trigger.githubConfig.filters.commandPrefix
+        : undefined;
+    return [
+      ['GitHub Event', trigger.githubConfig?.eventType?.replace(/_/g, ' ') ?? '—'],
+      ['Actions', trigger.githubConfig?.filters.actions?.join(', ') ?? 'Any'],
+      ['Required Labels', trigger.githubConfig?.filters.labels?.join(', ') ?? 'None'],
+      ['Command Prefix', commandPrefix ?? 'None'],
+      ['Branches', trigger.githubConfig?.filters.branches?.join(', ') ?? 'Any'],
+      ['Ignored Actors', trigger.githubConfig?.filters.ignoreActors?.join(', ') ?? 'None'],
+    ];
+  }
+  if (trigger.sourceType === 'webhook') {
+    return [
+      ['Source Label', trigger.webhookConfig?.sourceLabel ?? 'None'],
+      ['Token', `••••${trigger.webhookConfig?.tokenLastFour ?? '—'}`],
+      ['Filter Mode', trigger.webhookConfig?.filterMode ?? 'all'],
+      ['Filters', String(trigger.webhookConfig?.filters.length ?? 0)],
+      ['Included Headers', trigger.webhookConfig?.includedHeaders.join(', ') || 'None'],
+    ];
+  }
+  if (trigger.sourceType === 'incident') {
+    return [
+      ['Backlog', 'Private platform feedback incidents'],
+      ['Dispatch Policy', 'Scheduled grouped backlog sweep'],
+    ];
+  }
+  return [
+    ['Schedule', trigger.cronHumanReadable ?? trigger.cronExpression ?? '—'],
+    ['Timezone', trigger.cronTimezone],
+  ];
+}
+
+export function TriggerConfiguration({ trigger }: TriggerConfigurationProps) {
+  const rows: Array<[string, string]> = [
+    ['Source Type', trigger.sourceType],
+    ...sourceRows(trigger),
+    ['Task Mode', trigger.taskMode],
+    ['Skip if Running', trigger.skipIfRunning ? 'Yes' : 'No'],
+    ['Max Concurrent', String(trigger.maxConcurrent)],
+    ['VM Size', trigger.vmSizeOverride ?? 'Project default'],
+    ['Total Runs', String(trigger.triggerCount)],
+    ['Created', formatDateFull(trigger.createdAt)],
+  ];
+
+  return (
+    <section className="mt-8">
+      <h2 className="sam-type-section-heading mb-4">Configuration</h2>
+      <div className="border border-border-default rounded-lg divide-y divide-border-default">
+        {rows.map(([label, value]) => (
+          <div key={label} className="flex items-center justify-between px-4 py-3 gap-4">
+            <span className="text-sm text-fg-muted">{label}</span>
+            <span className="text-sm text-fg-primary font-medium min-w-0 max-w-[60%] text-right [overflow-wrap:anywhere]">
+              {value}
+            </span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}

@@ -232,7 +232,7 @@ export function AdminComputeQuotas() {
                   placeholder="Unlimited"
                   value={defaultLimit}
                   onChange={(e) => setDefaultLimit(e.target.value)}
-                  className="w-full rounded-md border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)] px-3 py-2 sam-type-body text-fg-primary placeholder:text-fg-muted focus:outline-none focus:ring-2 focus:ring-accent-primary"
+                  className="w-full rounded-md border border-border-default bg-surface-secondary px-3 py-2 sam-type-body text-fg-primary placeholder:text-fg-muted focus:outline-none focus:ring-2 focus:ring-focus-ring"
                 />
               </div>
               <button
@@ -279,7 +279,7 @@ export function AdminComputeQuotas() {
 
       {/* Edit User Quota Modal */}
       {editUserId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+        <div className="fixed inset-0 z-50 flex items-center justify-center glass-backdrop-dim">
           <Card className="w-full max-w-md mx-4">
             <div className="p-6">
               <CardTitle>Edit User Quota</CardTitle>
@@ -299,7 +299,7 @@ export function AdminComputeQuotas() {
                   placeholder="Use default"
                   value={editLimit}
                   onChange={(e) => setEditLimit(e.target.value)}
-                  className="w-full rounded-md border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)] px-3 py-2 sam-type-body text-fg-primary placeholder:text-fg-muted focus:outline-none focus:ring-2 focus:ring-accent-primary"
+                  className="w-full rounded-md border border-border-default bg-surface-secondary px-3 py-2 sam-type-body text-fg-primary placeholder:text-fg-muted focus:outline-none focus:ring-2 focus:ring-focus-ring"
                 />
               </div>
               <div className="flex justify-end gap-3">

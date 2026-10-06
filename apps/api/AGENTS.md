@@ -1,6 +1,6 @@
 # API Technical Patterns
 
-Full rules: `.claude/rules/06-api-patterns.md`
+Full scoped rules: `apps/api/.claude/rules/`
 
 ## Error Handling
 
@@ -28,7 +28,11 @@ app.onError((err, c) => {
 
 // WRONG — subrouter errors silently bypass this
 app.use('*', async (c, next) => {
-  try { await next(); } catch (err) { /* NEVER REACHED for subrouter errors */ }
+  try {
+    await next();
+  } catch (err) {
+    /* NEVER REACHED for subrouter errors */
+  }
 });
 ```
 

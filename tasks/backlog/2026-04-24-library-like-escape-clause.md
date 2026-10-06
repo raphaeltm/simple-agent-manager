@@ -1,5 +1,11 @@
 # Fix LIKE ESCAPE clause in library search queries
 
+> **Reconciliation 2026-09-30:** still open, and more serious than worded. Without an `ESCAPE`
+> clause SQLite treats `\` as a literal, so library searches for names containing `_` or `%` find
+> nothing. Affected: `apps/api/src/services/file-library.ts:446,464,469,554,566,570` and
+> `file-library-directories.ts:155`. Working pattern:
+> `apps/api/src/durable-objects/sam-session/tools/search-tasks.ts:104`.
+
 ## Problem
 
 The file library's search queries use Drizzle ORM's `like()` function with manually escaped `%` and `_` characters (backslash-escaping), but Drizzle's `like()` does not emit an `ESCAPE` clause in the SQL. This means the backslash escaping is ineffective — a search for `%` or `_` would match as SQL wildcards.

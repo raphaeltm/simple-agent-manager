@@ -5,10 +5,7 @@
  * agents about the SAM platform and instructs them to prepare the repository
  * for SAM-aware agent workflows.
  */
-import {
-  type JsonRpcResponse,
-  jsonRpcSuccess,
-} from './_helpers';
+import { type JsonRpcResponse, jsonRpcSuccess } from './_helpers';
 
 // ─── SAM Environment Briefing content ────────────────────────────────────────
 
@@ -60,9 +57,9 @@ This connects to the SAM control plane. It's how you interact with tasks, projec
 **Task Lifecycle:**
 - \`get_instructions\` — **Call this first, always.** Returns your task details, project info, output branch, and mode-specific instructions (task mode vs. conversation mode). Nothing else makes sense until you've called this.
 - \`update_task_status\` — Report progress at significant milestones. The human sees these in the SAM dashboard in real time. Use them liberally — a human monitoring a long-running task has no other visibility into what you're doing.
-- \`complete_task\` — Call when ALL work is done and pushed. Include a clear summary. Only used in task mode — in conversation mode, the human ends the session.
+- \`complete_task\` — Call when ALL work is done and pushed. Include a clear summary and, when a pull request exists, pass its URL as \`evidence.prUrl\`. Only used in task mode — in conversation mode, the human ends the session.
 - \`dispatch_task\` — Spawn a new task for another agent. Use this when you discover work that's adjacent but outside your current scope. Describe the task clearly — the receiving agent gets only what you write here.
-- \`request_human_input\` — When you're genuinely blocked and need a human decision. Provide rich context and, when possible, a set of options to choose from. The human gets a push notification.
+- \`request_human_input\` — When you're genuinely blocked and need a human decision. Provide rich context and, when possible, a set of options to choose from. SAM records the request so the human can answer it.
 
 **Knowledge & History:**
 - \`search_tasks\` / \`get_task_details\` — Find and inspect other tasks in the project. Useful for understanding what work has been done or is in progress.
@@ -74,6 +71,7 @@ This connects to the SAM control plane. It's how you interact with tasks, projec
 **Identity & Orientation:**
 - \`get_workspace_info\` — Your workspace metadata: ID, node, project, branch, mode (task vs conversation), VM size, URL, uptime.
 - \`get_credential_status\` — Which credentials are available and their status.
+- \`get_credential_limits\` — Remaining provider usage for your credential (Claude/Codex 5h and weekly windows, OpenCode Go windows). Check before heavy work; when a window is critical, pause dispatching and schedule a wake after it resets.
 
 **Network & Ports:**
 - \`get_network_info\` — Your workspace URL, base domain, and discovered ports.
@@ -88,8 +86,7 @@ This connects to the SAM control plane. It's how you interact with tasks, projec
 - \`get_task_dependencies\` — Upstream/downstream task dependency graph. Know where your work fits in the bigger picture.
 
 **CI/CD:**
-- \`get_ci_status\` — GitHub Actions workflow status for your branch. Check this after pushing.
-- \`get_deployment_status\` — Staging and production deployment state.
+- Use the GitHub CLI (\`gh run list\`, \`gh run view\`) to check GitHub Actions workflow and deployment status after pushing.
 
 **Observability:**
 - \`get_workspace_diff_summary\` — Everything you've changed since workspace creation. Useful for self-review before completing.
@@ -110,16 +107,16 @@ These are patterns that work well across different types of tasks:
 **During work:**
 - \`update_task_status\` after each significant milestone
 - \`list_project_agents\` before touching heavily-shared files
-- \`get_ci_status\` after pushing to verify CI passes
+- \`gh run list\` after pushing to verify CI passes
 - \`create_idea\` when you notice something worth tracking but out of scope
 - \`request_human_input\` when genuinely blocked — don't guess at ambiguous requirements
 - Commit and push frequently — treat every push as a checkpoint
 
 **Wrapping up:**
 - \`get_workspace_diff_summary\` to review everything you've done
-- \`get_ci_status\` to confirm CI is green
+- \`gh run list\` to confirm CI is green
 - Push all changes to the output branch
-- \`complete_task\` with a clear summary of what was accomplished
+- \`complete_task\` with a clear summary of what was accomplished and the pull request URL in \`evidence.prUrl\` when one exists
 
 **Resource awareness:**
 - Don't leave long-running processes idle
@@ -147,9 +144,9 @@ Thoroughly analyze this repository:
 
 Think about how SAM's capabilities map to this specific project's workflows. Consider:
 
-- **Does this project have a CI pipeline?** If so, agents should check \`get_ci_status\` after pushing and know what checks to expect.
+- **Does this project have a CI pipeline?** If so, agents should check CI status (e.g. \`gh run list\`) after pushing and know what checks to expect.
 - **Is this a monorepo?** If so, agents should know build order, which packages to test after changes, and how to scope their work.
-- **Does it have a deployment process?** Agents should know about \`get_deployment_status\` and any staging/production verification steps.
+- **Does it have a deployment process?** Agents should know how to check deployment status (e.g. \`gh run list\`) and any staging/production verification steps.
 - **Are there dev servers to run?** Agents should know to \`expose_port\` when running preview servers so humans can see their work.
 - **Are there shared files that multiple agents might touch?** Identify hotspots where \`list_project_agents\` is especially important for conflict avoidance.
 - **What kind of tasks are typical?** Bug fixes, features, refactors, docs? Tailor the push/commit frequency guidance to the project's rhythm.
@@ -163,7 +160,7 @@ Guidelines for what to write:
 
 1. **Lead with detection.** Tell agents to check for \`SAM_WORKSPACE_ID\` and explain that SAM-specific behavior should activate only when present.
 
-2. **Integrate with existing workflows.** If the project's instructions say "run tests before committing," augment that with "and after pushing, check \`get_ci_status\` to verify CI agrees." Don't create a separate "SAM section" that feels bolted on — weave it in.
+2. **Integrate with existing workflows.** If the project's instructions say "run tests before committing," augment that with "and after pushing, check CI (e.g. \`gh run list\`) to verify CI agrees." Don't create a separate "SAM section" that feels bolted on — weave it in.
 
 3. **Be specific to this project.** Don't just say "push frequently." Say "after updating schema files in \`src/db/\`, push immediately — these are high-conflict files. Check \`list_project_agents\` before modifying them." Tailor the guidance to what you learned about the project.
 
@@ -188,14 +185,13 @@ After making all changes:
 
 List all files you created or modified for the human to review.`;
 
-export function handleGetRepoSetupGuide(
-  requestId: string | number | null,
-): JsonRpcResponse {
+export function handleGetRepoSetupGuide(requestId: string | number | null): JsonRpcResponse {
   return jsonRpcSuccess(requestId, {
     content: [
       {
         type: 'text',
-        text: 'Follow the instructions below to prepare this repository for SAM-aware agent workflows.\n\n' +
+        text:
+          'Follow the instructions below to prepare this repository for SAM-aware agent workflows.\n\n' +
           SAM_ENVIRONMENT_BRIEFING,
       },
     ],

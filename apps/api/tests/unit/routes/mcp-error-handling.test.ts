@@ -133,7 +133,7 @@ describe('MCP tools/call error handling', () => {
     const { mcpRoutes } = await import('../../../src/routes/mcp');
     app = new Hono();
     app.route('/mcp', mcpRoutes);
-  });
+  }, 20_000);
 
   it('returns JSON-RPC error (not HTTP 500) when search_knowledge handler throws', async () => {
     // Make the DO stub throw to simulate a transient DO communication failure

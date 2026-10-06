@@ -11,6 +11,7 @@ import (
 	"github.com/workspace/vm-agent/internal/acp"
 	"github.com/workspace/vm-agent/internal/agentsessions"
 	"github.com/workspace/vm-agent/internal/config"
+	"github.com/workspace/vm-agent/internal/gitrepo"
 )
 
 // serverEventAppender adapts the Server's appendNodeEvent method to the
@@ -21,6 +22,28 @@ type serverEventAppender struct {
 
 func (a *serverEventAppender) AppendEvent(workspaceID, level, eventType, message string, detail map[string]interface{}) {
 	a.server.appendNodeEvent(workspaceID, level, eventType, message, detail)
+}
+
+func (s *Server) gitHubTokenFetcherForWorkspace(workspaceID string) func(context.Context) (string, error) {
+	repository := ""
+	if strings.TrimSpace(workspaceID) == strings.TrimSpace(s.config.WorkspaceID) {
+		repository = s.config.Repository
+	} else if runtime, ok := s.getWorkspaceRuntime(workspaceID); ok {
+		repository = runtime.Repository
+	}
+	if !gitrepo.IsGitHubRepo(repository) {
+		return nil
+	}
+
+	// Override GitTokenFetcher per-session so it targets the correct workspace's
+	// git-token endpoint. The callback token is resolved at call time via
+	// callbackTokenForWorkspace(), so token rotations are automatically picked up.
+	// Without this override, the server-level default (nil) would leave GH_TOKEN
+	// unset; the previous bug had a server-level s.fetchGitToken that silently
+	// used s.config.WorkspaceID (the node-level ID) instead.
+	return func(ctx context.Context) (string, error) {
+		return s.fetchGitTokenForWorkspace(ctx, workspaceID, "")
+	}
 }
 
 func writeSessionError(w http.ResponseWriter, statusCode int, code, message string) {
@@ -47,6 +70,9 @@ func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	runtime := s.upsertWorkspaceRuntime(workspaceID, "", "", "running", "")
+	if !s.requireWorkspaceReconnectState(w, r, runtime) {
+		return
+	}
 
 	requestedSessionID := strings.TrimSpace(r.URL.Query().Get("sessionId"))
 	idempotencyKey := strings.TrimSpace(r.URL.Query().Get("idempotencyKey"))
@@ -127,6 +153,10 @@ func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 	hostKey := workspaceID + ":" + requestedSessionID
 	requestedWorktree := strings.TrimSpace(r.URL.Query().Get("worktree"))
 	host := s.getOrCreateSessionHost(hostKey, workspaceID, requestedSessionID, session, runtime, requestedWorktree)
+	if host == nil {
+		writeSessionError(w, http.StatusConflict, "session_initializing", "Workspace session bootstrap is in progress")
+		return
+	}
 
 	upgrader := s.createUpgrader()
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -192,8 +222,16 @@ func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 
 // getOrCreateSessionHost returns an existing SessionHost or creates a new one.
 func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, session agentsessions.Session, runtime *WorkspaceRuntime, requestedWorktree string) *acp.SessionHost {
+	return s.getOrCreateSessionHostForRestore(hostKey, workspaceID, sessionID, session, runtime, requestedWorktree, false)
+}
+
+func (s *Server) getOrCreateSessionHostForRestore(hostKey, workspaceID, sessionID string, session agentsessions.Session, runtime *WorkspaceRuntime, requestedWorktree string, restoreOwner bool) *acp.SessionHost {
 	// Fast path: check if host already exists.
 	s.sessionHostMu.Lock()
+	if !restoreOwner && (s.workspaceRestorePendingLocked(workspaceID) || s.workspaceCreationPendingLocked(workspaceID)) {
+		s.sessionHostMu.Unlock()
+		return nil
+	}
 	if host, ok := s.sessionHosts[hostKey]; ok {
 		s.sessionHostMu.Unlock()
 		return host
@@ -205,10 +243,7 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 	var prefetchedMcpServers []acp.McpServerEntry
 	if s.store != nil {
 		if persisted, err := s.store.GetSessionMcpServers(workspaceID, sessionID); err == nil && len(persisted) > 0 {
-			prefetchedMcpServers = make([]acp.McpServerEntry, len(persisted))
-			for i, p := range persisted {
-				prefetchedMcpServers[i] = acp.McpServerEntry{URL: p.URL, Token: p.Token}
-			}
+			prefetchedMcpServers = fromPersistedMcpServers(persisted)
 		} else if err != nil {
 			slog.Warn("Failed to read MCP servers from SQLite",
 				"workspace", workspaceID, "sessionId", sessionID, "error", err)
@@ -217,6 +252,9 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 
 	s.sessionHostMu.Lock()
 	defer s.sessionHostMu.Unlock()
+	if !restoreOwner && (s.workspaceRestorePendingLocked(workspaceID) || s.workspaceCreationPendingLocked(workspaceID)) {
+		return nil
+	}
 
 	// Re-check after re-acquiring lock (double-checked locking).
 	if host, ok := s.sessionHosts[hostKey]; ok {
@@ -226,37 +264,46 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 	cfg := s.acpConfig
 	cfg.WorkspaceID = workspaceID
 	cfg.SessionID = sessionID
+	// Activity is project-scoped. Never inherit the boot workspace's project on
+	// a shared node; bind every SessionHost to its owning workspace runtime.
+	cfg.ProjectID = ""
+	if runtime != nil {
+		cfg.ProjectID = strings.TrimSpace(runtime.ProjectID)
+	}
 	cfg.OnPromptComplete = nil
 
-	// Override GitTokenFetcher per-session so it targets the correct workspace's
-	// git-token endpoint. The callback token is resolved at call time via
-	// callbackTokenForWorkspace(), so token rotations are automatically picked up.
-	// Without this override, the server-level default (nil) would leave GH_TOKEN
-	// unset; the previous bug had a server-level s.fetchGitToken that silently
-	// used s.config.WorkspaceID (the node-level ID) instead.
-	cfg.GitTokenFetcher = func(ctx context.Context) (string, error) {
-		return s.fetchGitTokenForWorkspace(ctx, workspaceID, "")
-	}
+	cfg.GitTokenFetcher = s.gitHubTokenFetcherForWorkspace(workspaceID)
+	var runtimeAssetsProvider acp.RuntimeAssetsProvider
 
 	// Use per-workspace message reporter to prevent cross-workspace contamination.
 	// Lock ordering: sessionHostMu → messageReportersMu → Reporter.mu
 	// and: callbackTokenMu → messageReportersMu → Reporter.mu
 	// Never acquire sessionHostMu while holding messageReportersMu.
-	s.messageReportersMu.Lock()
-	if r, ok := s.messageReporters[workspaceID]; ok {
-		cfg.MessageReporter = &messageReporterAdapter{r: r}
+	if !s.controlPlaneCallbacksStopped() {
+		s.messageReportersMu.Lock()
+		if r, ok := s.messageReporters[workspaceID]; ok {
+			cfg.MessageReporter = &messageReporterAdapter{r: r}
+		}
+		s.messageReportersMu.Unlock()
+	} else {
+		s.messageReportersMu.RLock()
+		r, ok := s.messageReporters[workspaceID]
+		s.messageReportersMu.RUnlock()
+		if ok {
+			r.MarkTerminal(terminalControlPlaneCallbackReason)
+		}
 	}
-	s.messageReportersMu.Unlock()
 	cfg.SessionManager = s.agentSessions
 	cfg.TabStore = s.store
 	cfg.TabLastPromptStore = s.store
 	cfg.SessionLastPromptManager = s.agentSessions
 	cfg.EventAppender = &serverEventAppender{server: s}
 	cfg.CredentialSyncer = s
+	cfg.ToolLifecycleObserver = s.resourceHistoryObserverForWorkspace(workspaceID)
 	// Disable auto-suspend for both conversation and task mode. Viewer presence
 	// is not the right lifecycle signal — the correct shutdown mechanisms are:
 	// 1. 15-min DO alarm after last agent activity (control-plane side)
-	// 2. 6-hour prompt timeout
+	// 2. 8-hour prompt timeout
 	// 3. 2-hour workspace idle timeout
 	// 4. Orphan workspace cron sweep
 	// 5. 4-hour max node lifetime
@@ -290,6 +337,12 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 		}
 		hasTaskCtx = true
 	}
+	if cfg.ProjectID == "" && hasTaskCtx {
+		cfg.ProjectID = strings.TrimSpace(taskCtx.ProjectID)
+	}
+	if cfg.ProjectID == "" && s.config != nil && workspaceID == strings.TrimSpace(s.config.WorkspaceID) {
+		cfg.ProjectID = strings.TrimSpace(s.config.ProjectID)
+	}
 	if hasTaskCtx && s.config != nil && taskCtx.ProjectID != "" && taskCtx.TaskID != "" && taskCtx.WorkspaceID != "" {
 		cfg.OnPromptComplete = s.makeTaskCompletionCallback(
 			s.config.ControlPlaneURL,
@@ -307,7 +360,7 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 	}
 	if runtime != nil {
 		if resolver := s.ptyManagerContainerResolverForLabel(runtime.ContainerLabelValue); resolver != nil {
-			if _, resolveErr := resolver(); isContainerUnavailableError(resolveErr) {
+			if _, resolveErr := resolver(); !restoreOwner && isContainerUnavailableError(resolveErr) {
 				slog.Warn("SessionHost detected unavailable container, attempting recovery", "workspace", workspaceID, "error", resolveErr)
 				if recoverErr := s.recoverWorkspaceRuntime(context.Background(), runtime); recoverErr != nil {
 					slog.Error("SessionHost recovery failed", "workspace", workspaceID, "error", recoverErr)
@@ -331,6 +384,12 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 		if resolver := s.ptyManagerContainerResolverForLabel(runtime.ContainerLabelValue); resolver != nil {
 			cfg.ContainerResolver = resolver
 		}
+		// Standalone sessions apply all runtime assets. VM devcontainers still get
+		// their normal assets at bootstrap; they fetch only the per-session Codex
+		// candidate selector from this provider, bound to sessionID above.
+		if s.config != nil {
+			runtimeAssetsProvider = s.runtimeAssetsProviderForWorkspaceSession(workspaceID, sessionID)
+		}
 	}
 
 	// Inject per-session MCP servers. Check in-memory map first (fast path),
@@ -349,6 +408,7 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 	if ovr, ok := s.sessionProfileOvr[hostKey]; ok {
 		cfg.ModelOverride = ovr.Model
 		cfg.PermissionModeOverride = ovr.PermissionMode
+		cfg.EffortOverride = ovr.Effort
 		cfg.OpencodeProviderOverride = ovr.OpencodeProvider
 		cfg.OpencodeBaseURLOverride = ovr.OpencodeBaseURL
 	}
@@ -357,13 +417,18 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 		GatewayConfig:         cfg,
 		MessageBufferSize:     s.config.ACPMessageBufferSize,
 		ViewerSendBuffer:      s.config.ACPViewerSendBuffer,
+		StderrBufferBytes:     s.config.ACPStderrBufferBytes,
 		NotifSerializeTimeout: s.config.ACPNotifSerializeTimeout,
+		RuntimeAssetsProvider: runtimeAssetsProvider,
 	}
 	host := acp.NewSessionHost(hostCfg)
+	if interactionConfig, ok := s.sessionManualInteractionConfig[hostKey]; ok {
+		host.ConfigureAcpInteractions(interactionConfig)
+	}
 	s.sessionHosts[hostKey] = host
 
 	slog.Info("SessionHost created", "workspace", workspaceID, "sessionId", sessionID,
 		"mcpServers", len(cfg.McpServers),
-		"modelOverride", cfg.ModelOverride, "permissionModeOverride", cfg.PermissionModeOverride)
+		"modelOverride", cfg.ModelOverride, "permissionModeOverride", cfg.PermissionModeOverride, "effortOverride", cfg.EffortOverride)
 	return host
 }

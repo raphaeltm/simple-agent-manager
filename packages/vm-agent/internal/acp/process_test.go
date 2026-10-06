@@ -1,7 +1,9 @@
 package acp
 
 import (
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -21,6 +23,7 @@ func TestIsSecretEnvVar(t *testing.T) {
 		{"GH_TOKEN=ghp_abc123", true},
 		{"GEMINI_API_KEY=gemini-key", true},
 		{"MISTRAL_API_KEY=mistral-key", true},
+		{"OPENCODE_API_KEY=opencode-key", true},
 
 		// Substring matches
 		{"CUSTOM_API_KEY=some-key", true},
@@ -121,6 +124,7 @@ func TestEnvFileOperations(t *testing.T) {
 			EnvVars: []string{
 				"SAM_WORKSPACE_ID=ws-123",
 				"ANTHROPIC_API_KEY=sk-ant-super-secret",
+				"OPENCODE_API_KEY=sk-opencode-super-secret",
 				"GH_TOKEN=ghp_also_secret",
 				"VIBE_CLIENT_NAME=sam",
 			},
@@ -136,8 +140,8 @@ func TestEnvFileOperations(t *testing.T) {
 			}
 		}
 
-		if len(secrets) != 2 {
-			t.Fatalf("expected 2 secrets, got %d: %v", len(secrets), secrets)
+		if len(secrets) != 3 {
+			t.Fatalf("expected 3 secrets, got %d: %v", len(secrets), secrets)
 		}
 		if len(nonSecrets) != 2 {
 			t.Fatalf("expected 2 non-secrets, got %d: %v", len(nonSecrets), nonSecrets)
@@ -166,6 +170,9 @@ func TestEnvFileOperations(t *testing.T) {
 		if strings.Contains(argsStr, "ghp_also_secret") {
 			t.Error("secret GH_TOKEN value found in command args")
 		}
+		if strings.Contains(argsStr, "sk-opencode-super-secret") {
+			t.Error("secret OPENCODE_API_KEY value found in command args")
+		}
 
 		// Verify non-secret values DO appear in args
 		if !strings.Contains(argsStr, "SAM_WORKSPACE_ID=ws-123") {
@@ -178,6 +185,41 @@ func TestEnvFileOperations(t *testing.T) {
 		// Verify --env-file flag is present
 		if !strings.Contains(argsStr, "--env-file") {
 			t.Error("--env-file flag not found in command args")
+		}
+	})
+
+	t.Run("ExplicitSecretEnvKeysUseEnvFile", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir := envFileDir
+		envFileDir = tmpDir
+		defer func() { envFileDir = origDir }()
+
+		cfg := ProcessConfig{
+			ContainerID: "test-container",
+			AcpCommand:  "test-agent",
+			EnvVars: []string{
+				"CUSTOM_VALUE=super-secret",
+				"SAM_WORKSPACE_ID=ws-123",
+			},
+			SecretEnvKeys: map[string]bool{"CUSTOM_VALUE": true},
+		}
+
+		args, envFilePath, err := buildDockerExecArgs(cfg)
+		if err != nil {
+			t.Fatalf("buildDockerExecArgs returned error: %v", err)
+		}
+		defer os.Remove(envFilePath)
+
+		argsStr := strings.Join(args, " ")
+		if strings.Contains(argsStr, "super-secret") {
+			t.Fatalf("explicit secret value leaked into docker args: %s", argsStr)
+		}
+		content, err := os.ReadFile(envFilePath)
+		if err != nil {
+			t.Fatalf("read env file: %v", err)
+		}
+		if string(content) != "CUSTOM_VALUE=super-secret\n" {
+			t.Fatalf("env file content = %q", string(content))
 		}
 	})
 
@@ -271,5 +313,180 @@ func TestStartProcess_NoSecretsNoEnvFile(t *testing.T) {
 
 	if len(secrets) != 0 {
 		t.Errorf("expected no secrets in non-secret env vars, got %d: %v", len(secrets), secrets)
+	}
+}
+
+func TestStartLocalProcessRunsWithoutDockerExec(t *testing.T) {
+	t.Parallel()
+
+	proc, err := StartLocalProcess(ProcessConfig{
+		AcpCommand: "/bin/sh",
+		AcpArgs:    []string{"-c", "printf '%s' \"$SAM_TEST_VALUE\""},
+		EnvVars:    []string{"SAM_TEST_VALUE=local-ok"},
+	})
+	if err != nil {
+		t.Fatalf("StartLocalProcess returned error: %v", err)
+	}
+
+	output, err := io.ReadAll(proc.Stdout())
+	if err != nil {
+		t.Fatalf("failed to read stdout: %v", err)
+	}
+	if err := proc.Wait(); err != nil {
+		t.Fatalf("process wait returned error: %v", err)
+	}
+	if string(output) != "local-ok" {
+		t.Fatalf("stdout=%q, want local-ok", string(output))
+	}
+	if proc.containerID != "" {
+		t.Fatalf("local process containerID=%q, want empty", proc.containerID)
+	}
+}
+
+func TestStartLocalProcessResolvesCommandFromRuntimePath(t *testing.T) {
+	t.Parallel()
+
+	workDir := t.TempDir()
+	binDir := filepath.Join(workDir, "fixture-bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatalf("create fixture bin: %v", err)
+	}
+	const command = "sam-acp-path-fixture"
+	if err := os.WriteFile(
+		filepath.Join(binDir, command),
+		[]byte("#!/bin/sh\nprintf '%s' \"$SAM_TEST_VALUE\"\n"),
+		0o755,
+	); err != nil {
+		t.Fatalf("write fixture command: %v", err)
+	}
+
+	proc, err := StartLocalProcess(ProcessConfig{
+		AcpCommand: command,
+		EnvVars: []string{
+			"PATH=" + binDir + ":/usr/bin:/bin",
+			"SAM_TEST_VALUE=runtime-path-ok",
+		},
+		WorkDir: workDir,
+	})
+	if err != nil {
+		t.Fatalf("StartLocalProcess returned error: %v", err)
+	}
+	output, err := io.ReadAll(proc.Stdout())
+	if err != nil {
+		t.Fatalf("read stdout: %v", err)
+	}
+	if err := proc.Wait(); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	if string(output) != "runtime-path-ok" {
+		t.Fatalf("stdout=%q, want runtime-path-ok", output)
+	}
+}
+
+func TestStartLocalProcessDoesNotResolveCommandFromRelativeRuntimePath(t *testing.T) {
+	t.Parallel()
+
+	workDir := t.TempDir()
+	command := "sam-acp-relative-path-fixture"
+	if err := os.WriteFile(filepath.Join(workDir, command), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write fixture command: %v", err)
+	}
+
+	_, err := StartLocalProcess(ProcessConfig{
+		AcpCommand: command,
+		EnvVars:    []string{"PATH=.:/usr/bin:/bin"},
+		WorkDir:    workDir,
+	})
+	if err == nil {
+		t.Fatal("StartLocalProcess unexpectedly resolved command from relative PATH")
+	}
+}
+
+// TestStartLocalProcessCreatesMissingWorkDir is the regression test for the
+// standalone cf-container chdir bug: the ACP process work dir is derived as
+// /workspaces/<repo>, which does not exist in standalone mode. Before the fix,
+// Go's forkExec chdir failed with ENOENT (misreported as a missing binary).
+// startLocalProcess must create the work dir and run the process in it.
+func TestStartLocalProcessCreatesMissingWorkDir(t *testing.T) {
+	t.Parallel()
+
+	// A nested, not-yet-created dir mimicking /workspaces/<repo>.
+	workDir := filepath.Join(t.TempDir(), "workspaces", "some-repo")
+	if _, err := os.Stat(workDir); !os.IsNotExist(err) {
+		t.Fatalf("precondition: work dir should not exist yet")
+	}
+
+	proc, err := StartLocalProcess(ProcessConfig{
+		AcpCommand: "/bin/sh",
+		AcpArgs:    []string{"-c", "pwd"},
+		WorkDir:    workDir,
+	})
+	if err != nil {
+		t.Fatalf("StartLocalProcess with missing work dir: %v", err)
+	}
+	output, err := io.ReadAll(proc.Stdout())
+	if err != nil {
+		t.Fatalf("read stdout: %v", err)
+	}
+	if err := proc.Wait(); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	if info, statErr := os.Stat(workDir); statErr != nil || !info.IsDir() {
+		t.Fatalf("work dir was not created: stat err=%v", statErr)
+	}
+	if got := strings.TrimSpace(string(output)); got != workDir {
+		t.Fatalf("process cwd=%q, want %q", got, workDir)
+	}
+}
+
+func TestStartLocalProcessManagedEnvOverridesAmbientExactlyOnce(t *testing.T) {
+	envCommand, err := exec.LookPath("env")
+	if err != nil {
+		t.Fatalf("find env command: %v", err)
+	}
+	t.Setenv("CODEX_CONFIG", "stale-codex-config")
+	t.Setenv("SAM_MCP_TOKEN", "stale-token")
+	t.Setenv("SAM_MCP_TOKEN_0", "stale-numbered-token")
+	t.Setenv("SAM_UNRELATED_AMBIENT", "preserved")
+
+	proc, err := StartLocalProcess(ProcessConfig{
+		AcpCommand: envCommand,
+		EnvVars: []string{
+			"CODEX_CONFIG=managed-codex-config",
+			"SAM_MCP_TOKEN=managed-token",
+			"SAM_MCP_TOKEN_0=managed-numbered-token",
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartLocalProcess returned error: %v", err)
+	}
+	output, err := io.ReadAll(proc.Stdout())
+	if err != nil {
+		t.Fatalf("read child environment: %v", err)
+	}
+	if err := proc.Wait(); err != nil {
+		t.Fatalf("wait for env process: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	for key, value := range map[string]string{
+		"CODEX_CONFIG":          "managed-codex-config",
+		"SAM_MCP_TOKEN":         "managed-token",
+		"SAM_MCP_TOKEN_0":       "managed-numbered-token",
+		"SAM_UNRELATED_AMBIENT": "preserved",
+	} {
+		want := key + "=" + value
+		count := 0
+		for _, line := range lines {
+			if strings.HasPrefix(line, key+"=") {
+				count++
+				if line != want {
+					t.Fatalf("child environment contains stale value %q, want %q", line, want)
+				}
+			}
+		}
+		if count != 1 {
+			t.Fatalf("child environment contains %q %d times, want exactly once:\n%s", want, count, output)
+		}
 	}
 }

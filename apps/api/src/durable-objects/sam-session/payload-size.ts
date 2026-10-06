@@ -24,8 +24,10 @@ export interface OpenAIMessage {
 /** Truncate a tool result string if it exceeds maxBytes, preserving a notice. */
 export function truncateToolResult(content: string, maxBytes: number): string {
   if (content.length <= maxBytes) return content;
-  return content.slice(0, maxBytes) +
-    `\n\n[truncated — original was ${content.length} bytes, showing first ${maxBytes} bytes]`;
+  return (
+    content.slice(0, maxBytes) +
+    `\n\n[truncated — original was ${content.length} bytes, showing first ${maxBytes} bytes]`
+  );
 }
 
 /** Estimate the byte size of the messages array for payload budgeting. */
@@ -54,7 +56,7 @@ export function estimateMessagesBytes(messages: OpenAIMessage[]): number {
 export function trimMessagesToFit(
   messages: OpenAIMessage[],
   maxBytes: number,
-  fixedOverheadBytes: number,
+  fixedOverheadBytes: number
 ): OpenAIMessage[] {
   const budget = maxBytes - fixedOverheadBytes;
   if (estimateMessagesBytes(messages) <= budget) return messages;
@@ -65,7 +67,13 @@ export function trimMessagesToFit(
   const protectedTail = 6;
   const truncateLimit = Math.max(0, trimmed.length - protectedTail);
   for (let i = 0; i < truncateLimit; i++) {
-    const m = trimmed[i]!;
+    const m = trimmed[i];
+    if (!m) {
+      // truncateLimit is clamped to trimmed.length above — this should never happen.
+      throw new Error(
+        `payload-size.trimMessagesToFit: message at index ${i} missing from trimmed array (length ${trimmed.length})`
+      );
+    }
     if (m.role === 'tool' && m.content && m.content.length > 500) {
       m.content = m.content.slice(0, 500) + '\n\n[trimmed for context budget]';
     }
@@ -84,7 +92,10 @@ export function trimMessagesToFit(
     // Skip first message (should be user)
     end++;
     // Skip following assistant and tool messages that belong to this turn
-    while (end < trimmed.length && (trimmed[end]?.role === 'assistant' || trimmed[end]?.role === 'tool')) {
+    while (
+      end < trimmed.length &&
+      (trimmed[end]?.role === 'assistant' || trimmed[end]?.role === 'tool')
+    ) {
       end++;
     }
 

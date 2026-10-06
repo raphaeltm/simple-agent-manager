@@ -20,6 +20,7 @@ export const WorkspaceStatusSchema = z.enum([
   'running',
   'recovery',
   'stopped',
+  'evicted',
   'error',
 ]);
 
@@ -59,7 +60,13 @@ export const CreateWorkspaceAgentRequestSchema = z.object({
   workspaceId: z.string().min(1),
   repository: z.string(),
   branch: z.string(),
+  repoProvider: z.enum(['github', 'artifacts', 'gitlab']).optional(),
+  cloneUrl: z.string().optional(),
+  repositoryHost: z.string().optional(),
+  repositoryPath: z.string().optional(),
   callbackToken: z.string().optional(),
+  projectId: z.string().optional(),
+  taskId: z.string().optional(),
   gitUserName: z.string().nullish(),
   gitUserEmail: z.string().nullish(),
   githubId: z.string().nullish(),
@@ -89,9 +96,43 @@ export type DeleteWorkspaceAgentResponse = z.infer<typeof DeleteWorkspaceAgentRe
 // Control Plane -> VM Agent: POST /workspaces/:id/agent-sessions
 // =============================================================================
 
+/**
+ * One MCP server injected into an ACP session.
+ *
+ * `name` is additive and optional on purpose (rule 54): a vm-agent built before this field
+ * existed ignores unknown JSON keys and falls back to its legacy positional naming, so a new
+ * control plane still works against an old agent. `token` stays a required string — an empty
+ * value means "no auth", which every harness already handles by omitting the auth header.
+ */
+export const McpServerEntrySchema = z.object({
+  url: z.string().url(),
+  token: z.string(),
+  /** Agent-visible server name. Tools are namespaced by it. */
+  name: z.string().optional(),
+  /**
+   * Custom HTTP headers sent alongside the bearer token. Additive for the same reason as
+   * `name`: the control plane sends it only when non-empty, and an older vm-agent ignores it.
+   */
+  headers: z.array(z.object({ name: z.string(), value: z.string() })).optional(),
+});
+
+export type McpServerEntry = z.infer<typeof McpServerEntrySchema>;
+
 export const CreateAgentSessionAgentRequestSchema = z.object({
   sessionId: z.string().min(1),
   label: z.string().nullable(),
+  chatSessionId: z.string().optional(),
+  projectId: z.string().optional(),
+  mcpServers: z.array(McpServerEntrySchema).optional(),
+  acpInteractions: z
+    .object({
+      protocolVersion: z.number(),
+      enabled: z.boolean(),
+      formsEnabled: z.boolean(),
+      urlsEnabled: z.boolean(),
+    })
+    .passthrough()
+    .optional(),
 });
 
 export type CreateAgentSessionAgentRequest = z.infer<typeof CreateAgentSessionAgentRequestSchema>;
@@ -241,7 +282,9 @@ export const AcpSessionReconciliationResponseSchema = z.object({
   sessions: z.array(AcpSessionReconciliationItemSchema),
 });
 
-export type AcpSessionReconciliationResponse = z.infer<typeof AcpSessionReconciliationResponseSchema>;
+export type AcpSessionReconciliationResponse = z.infer<
+  typeof AcpSessionReconciliationResponseSchema
+>;
 
 // =============================================================================
 // Contract Constants
@@ -255,6 +298,9 @@ export const DEFAULT_CALLBACK_TOKEN_EXPIRY_MS = 24 * 60 * 60 * 1000;
 
 /** Default node management token expiry in milliseconds (1 hour) */
 export const DEFAULT_NODE_MANAGEMENT_TOKEN_EXPIRY_MS = 60 * 60 * 1000;
+
+/** Default browser/workspace terminal token expiry in milliseconds (1 hour) */
+export const DEFAULT_TERMINAL_TOKEN_EXPIRY_MS = 60 * 60 * 1000;
 
 /** JWT algorithm used for all tokens */
 export const JWT_ALGORITHM = 'RS256' as const;

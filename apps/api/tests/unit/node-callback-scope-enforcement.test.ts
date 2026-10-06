@@ -6,7 +6,7 @@
  * - Node endpoints accept node-scoped and legacy tokens
  */
 import { Hono } from 'hono';
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppError } from '../../src/middleware/error';
 import type { CallbackTokenPayload } from '../../src/services/jwt';
@@ -24,33 +24,49 @@ vi.mock('drizzle-orm/d1', () => ({
     select: () => ({
       from: () => ({
         where: () => ({
-          limit: () => Promise.resolve([{
-            id: 'node-test',
-            status: 'running',
-            healthStatus: 'healthy',
-            lastHeartbeatAt: new Date().toISOString(),
-            heartbeatStaleAfterSeconds: 180,
-          }]),
+          limit: () =>
+            Promise.resolve([
+              {
+                id: 'node-test',
+                status: 'running',
+                healthStatus: 'healthy',
+                lastHeartbeatAt: new Date().toISOString(),
+                heartbeatStaleAfterSeconds: 180,
+              },
+            ]),
           orderBy: () => Promise.resolve([]),
+          // Origin-CA ownership gate loads the node row via .get() — a managed public-DNS node
+          // is eligible for wildcard issuance (user-owned/tunnel nodes are denied, tested separately).
+          get: () => Promise.resolve({ nodeClass: 'managed', transport: null }),
         }),
       }),
     }),
     update: () => ({
       set: () => ({
-        where: () => Promise.resolve(),
+        where: () => ({
+          returning: () => Promise.resolve([{ status: 'running' }]),
+        }),
       }),
     }),
   }),
 }));
 
 // Mock JWT with controllable scope
-const mockVerifyCallbackToken = vi.fn<(token: string, env: unknown) => Promise<CallbackTokenPayload>>();
+const mockVerifyCallbackToken =
+  vi.fn<(token: string, env: unknown) => Promise<CallbackTokenPayload>>();
 vi.mock('../../src/services/jwt', () => ({
   verifyCallbackToken: (...args: [string, unknown]) => mockVerifyCallbackToken(...args),
   signCallbackToken: vi.fn().mockResolvedValue('mock-ws-token'),
   signNodeCallbackToken: vi.fn().mockResolvedValue('mock-node-token'),
-  signNodeManagementToken: vi.fn().mockResolvedValue({ token: 'mgmt-token', expiresAt: '2030-01-01' }),
+  signNodeManagementToken: vi
+    .fn()
+    .mockResolvedValue({ token: 'mgmt-token', expiresAt: '2030-01-01' }),
   shouldRefreshCallbackToken: vi.fn().mockReturnValue(false),
+}));
+
+const mockIssueNodeOriginCertificate = vi.fn();
+vi.mock('../../src/services/origin-ca-certificates', () => ({
+  issueNodeOriginCertificate: (...args: unknown[]) => mockIssueNodeOriginCertificate(...args),
 }));
 
 // Mock other dependencies
@@ -84,7 +100,9 @@ vi.mock('../../src/services/observability', () => ({
 }));
 
 vi.mock('../../src/services/limits', () => ({
-  getRuntimeLimits: vi.fn().mockReturnValue({ maxNodesPerUser: 10, nodeHeartbeatStaleSeconds: 180 }),
+  getRuntimeLimits: vi
+    .fn()
+    .mockReturnValue({ maxNodesPerUser: 10, nodeHeartbeatStaleSeconds: 180 }),
 }));
 
 vi.mock('../../src/services/project-data', () => ({
@@ -108,7 +126,7 @@ async function createTestApp() {
   app.route('/api/nodes', nodeLifecycleRoutes);
   app.onError((err, c) => {
     if (err instanceof AppError) {
-      return c.json(err.toJSON(), err.statusCode as 401 | 403 | 404 | 500);
+      return c.json(err.toJSON(), err.statusCode as 401 | 403 | 404 | 410 | 500);
     }
     return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
   });
@@ -120,6 +138,13 @@ describe('node callback auth — scope enforcement', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    mockIssueNodeOriginCertificate.mockResolvedValue({
+      certificate: '-----BEGIN CERTIFICATE-----\nabc\n-----END CERTIFICATE-----\n',
+      certificateId: 'cert-123',
+      expiresOn: '2026-07-02T00:00:00Z',
+      hostnames: ['*.example.com', '*.vm.example.com', 'example.com'],
+      requestedValidity: 7,
+    });
     app = await createTestApp();
   });
 
@@ -133,7 +158,7 @@ describe('node callback auth — scope enforcement', () => {
     const res = await app.request('/api/nodes/node-test/heartbeat', {
       method: 'POST',
       headers: {
-        'Authorization': 'Bearer workspace-scoped-token',
+        Authorization: 'Bearer workspace-scoped-token',
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({}),
@@ -154,7 +179,7 @@ describe('node callback auth — scope enforcement', () => {
     const res = await app.request('/api/nodes/node-test/heartbeat', {
       method: 'POST',
       headers: {
-        'Authorization': 'Bearer node-scoped-token',
+        Authorization: 'Bearer node-scoped-token',
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({}),
@@ -174,7 +199,7 @@ describe('node callback auth — scope enforcement', () => {
     const res = await app.request('/api/nodes/node-test/heartbeat', {
       method: 'POST',
       headers: {
-        'Authorization': 'Bearer legacy-node-token',
+        Authorization: 'Bearer legacy-node-token',
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({}),
@@ -193,7 +218,7 @@ describe('node callback auth — scope enforcement', () => {
     const res = await app.request('/api/nodes/node-test/ready', {
       method: 'POST',
       headers: {
-        'Authorization': 'Bearer workspace-scoped-token',
+        Authorization: 'Bearer workspace-scoped-token',
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({}),
@@ -214,7 +239,7 @@ describe('node callback auth — scope enforcement', () => {
     const res = await app.request('/api/nodes/node-test/errors', {
       method: 'POST',
       headers: {
-        'Authorization': 'Bearer workspace-scoped-token',
+        Authorization: 'Bearer workspace-scoped-token',
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ errors: [] }),
@@ -223,5 +248,72 @@ describe('node callback auth — scope enforcement', () => {
     expect(res.status).toBe(403);
     const body = await res.json();
     expect(body.message).toBe('Insufficient token scope');
+  });
+
+  it('REJECTS different-node tokens on origin certificate endpoint', async () => {
+    mockVerifyCallbackToken.mockResolvedValue({
+      workspace: 'node-other',
+      type: 'callback',
+      scope: 'node',
+    });
+
+    const res = await app.request('/api/nodes/node-test/origin-ca-certificate', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer other-node-token',
+        'Content-Type': 'text/plain',
+      },
+      body: [
+        '-----BEGIN CERTIFICATE REQUEST-----',
+        'MIIBUzCB/QIBADAWMRQwEgYDVQQDEwtub2RlLXRlc3QwXDANBgkqhkiG9w0BAQEF',
+        'AANLADBIAkEA0HP1uR9jfnFvD6h9P5gQ2fVw0tZNNqYiT7WL4S2c5tqR0CkW3Jj3',
+        'o9C5zU3n+J8z9kA2q7dLa8YyMPpH6wIDAQABoAAwDQYJKoZIhvcNAQELBQADQQAF',
+        'y8QvVrrqzXK6yH9E8pFzj0yJrUiXjZk5GmQxG1c5M4n0Qv7YqgC6h8jYwKpR2sU',
+        '-----END CERTIFICATE REQUEST-----',
+      ].join('\n'),
+    });
+
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.message).toBe('Callback token does not match node');
+  });
+
+  it('ACCEPTS same-node tokens on origin certificate endpoint and returns the signed certificate', async () => {
+    mockVerifyCallbackToken.mockResolvedValue({
+      workspace: 'node-test',
+      type: 'callback',
+      scope: 'node',
+    });
+
+    const csr = [
+      '-----BEGIN CERTIFICATE REQUEST-----',
+      'MIIBUzCB/QIBADAWMRQwEgYDVQQDEwtub2RlLXRlc3QwXDANBgkqhkiG9w0BAQEF',
+      'AANLADBIAkEA0HP1uR9jfnFvD6h9P5gQ2fVw0tZNNqYiT7WL4S2c5tqR0CkW3Jj3',
+      'o9C5zU3n+J8z9kA2q7dLa8YyMPpH6wIDAQABoAAwDQYJKoZIhvcNAQELBQADQQAF',
+      'y8QvVrrqzXK6yH9E8pFzj0yJrUiXjZk5GmQxG1c5M4n0Qv7YqgC6h8jYwKpR2sU',
+      '-----END CERTIFICATE REQUEST-----',
+    ].join('\n');
+
+    const env = { BASE_DOMAIN: 'example.com' };
+    const res = await app.request(
+      '/api/nodes/node-test/origin-ca-certificate',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer node-token',
+          'Content-Type': 'text/plain',
+        },
+        body: csr,
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toContain('text/plain');
+    expect(res.headers.get('Cache-Control')).toBe('no-store');
+    await expect(res.text()).resolves.toBe(
+      '-----BEGIN CERTIFICATE-----\nabc\n-----END CERTIFICATE-----\n'
+    );
+    expect(mockIssueNodeOriginCertificate).toHaveBeenCalledWith(env, csr);
   });
 });

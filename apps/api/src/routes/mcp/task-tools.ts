@@ -4,19 +4,32 @@
  *
  * dispatch_task lives in dispatch-tool.ts due to its size.
  */
-import { DEFAULT_NOTIFICATION_FULL_BODY_LENGTH,MAX_NOTIFICATION_BODY_LENGTH } from '@simple-agent-manager/shared';
-import type { SQL } from 'drizzle-orm';
-import { and, desc,eq, like, or } from 'drizzle-orm';
+import {
+  DEFAULT_NOTIFICATION_FULL_BODY_LENGTH,
+  MAX_NOTIFICATION_BODY_LENGTH,
+  parseCompletionEvidenceJson,
+  type TaskTerminalTransitionEvent,
+  validateCompletionEvidence,
+} from '@simple-agent-manager/shared';
+import { and, desc, eq, type SQL, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { getSearchQueryLikePatterns, normalizeSearchQuery } from '../../lib/search-query-limits';
+import { ulid } from '../../lib/ulid';
 import * as notificationService from '../../services/notification';
 import * as projectDataService from '../../services/project-data';
 import * as orchestratorService from '../../services/project-orchestrator';
 import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-sync';
-import { cleanupTaskRun } from '../../services/task-runner';
+import { getLatestAssistantMessageForTask } from '../../services/task-final-assistant-message';
+import { cleanupTerminalTaskResources } from '../../services/task-terminal-cleanup';
+import {
+  createProjectEventTaskTerminalTransitionHook,
+  createTaskWaitTerminalTransitionHook,
+  runTaskTerminalTransitionHooks,
+} from '../../services/task-terminal-transition-hooks';
 import { syncTriggerExecutionStatus } from '../../services/trigger-execution-sync';
 import {
   ACTIVE_STATUSES,
@@ -29,18 +42,149 @@ import {
   type McpTokenData,
 } from './_helpers';
 
+type TaskSearchRow = {
+  id: string;
+  title: string;
+  status: string;
+  priority: number;
+  description: string | null;
+  outputBranch: string | null;
+  outputPrUrl: string | null;
+  outputSummary: string | null;
+  updatedAt: string;
+};
+
+const TASK_DETAIL_RECENT_ASSISTANT_MESSAGE_LIMIT = 5;
+const TASK_DETAIL_MESSAGE_SNIPPET_LENGTH = 2000;
+function truncateSnippet(value: string | null, maxLength: number): string | null {
+  if (!value) return null;
+  return value.slice(0, maxLength) + (value.length > maxLength ? '...' : '');
+}
+
+export type TaskDetailAssistantMessage = {
+  id: string;
+  role: 'assistant';
+  content: string;
+  createdAt: number | string | null;
+};
+
+export async function getRecentAssistantMessagesForTaskDetail(
+  env: Env,
+  projectId: string,
+  sessionId: string | null
+): Promise<TaskDetailAssistantMessage[]> {
+  if (!sessionId) return [];
+
+  try {
+    const { messages } = await projectDataService.getMessages(
+      env,
+      projectId,
+      sessionId,
+      TASK_DETAIL_RECENT_ASSISTANT_MESSAGE_LIMIT,
+      null,
+      null,
+      ['assistant'],
+      false,
+      'desc'
+    );
+
+    return messages
+      .filter((message) => message.role === 'assistant' && typeof message.content === 'string')
+      .map((message) => ({
+        id: String(message.id),
+        role: 'assistant' as const,
+        content:
+          truncateSnippet(message.content as string, TASK_DETAIL_MESSAGE_SNIPPET_LENGTH) ?? '',
+        createdAt:
+          typeof message.createdAt === 'number' || typeof message.createdAt === 'string'
+            ? message.createdAt
+            : null,
+      }));
+  } catch (error) {
+    log.warn('mcp.get_task_details.recent_assistant_messages_failed', {
+      projectId,
+      sessionId,
+      error: String(error),
+    });
+    return [];
+  }
+}
+
+function toTaskSearchResult(task: TaskSearchRow, snippetLength: number) {
+  return {
+    id: task.id,
+    title: task.title,
+    status: task.status,
+    priority: task.priority,
+    descriptionSnippet: truncateSnippet(task.description, snippetLength),
+    outputBranch: task.outputBranch,
+    outputPrUrl: task.outputPrUrl,
+    outputSummary: truncateSnippet(task.outputSummary, snippetLength),
+    updatedAt: task.updatedAt,
+  };
+}
+
 export async function handleUpdateTaskStatus(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const message = params.message;
   if (typeof message !== 'string' || !message.trim()) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'message is required and must be a non-empty string');
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'message is required and must be a non-empty string'
+    );
   }
 
   const db = drizzle(env.DATABASE, { schema });
+  const trimmedMessage = message.trim();
+
+  if (
+    !tokenData.taskId ||
+    tokenData.contextType === 'conversation' ||
+    tokenData.contextType === 'direct-workspace' ||
+    tokenData.contextType === 'trial'
+  ) {
+    try {
+      await projectDataService.recordActivityEvent(
+        env,
+        tokenData.projectId,
+        `${tokenData.contextType ?? 'session'}.progress`,
+        'agent',
+        tokenData.agentSessionId ?? tokenData.workspaceId,
+        tokenData.workspaceId,
+        tokenData.chatSessionId ?? null,
+        null,
+        {
+          message: trimmedMessage.slice(0, getMcpLimits(env).activityMessageMaxLength),
+          contextType: tokenData.contextType ?? 'conversation',
+        }
+      );
+    } catch (err) {
+      log.warn('mcp.update_task_status.taskless_activity_event_failed', {
+        projectId: tokenData.projectId,
+        workspaceId: tokenData.workspaceId,
+        chatSessionId: tokenData.chatSessionId,
+        contextType: tokenData.contextType,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    log.info('mcp.update_task_status.taskless', {
+      projectId: tokenData.projectId,
+      workspaceId: tokenData.workspaceId,
+      chatSessionId: tokenData.chatSessionId,
+      contextType: tokenData.contextType,
+      message: trimmedMessage.slice(0, getMcpLimits(env).logMessageMaxLength),
+    });
+
+    return jsonRpcSuccess(requestId, {
+      content: [{ type: 'text', text: 'Progress update recorded.' }],
+    });
+  }
 
   // Verify task exists, belongs to this project, and is in an active state
   const taskRows = await db
@@ -52,10 +196,7 @@ export async function handleUpdateTaskStatus(
     })
     .from(schema.tasks)
     .where(
-      and(
-        eq(schema.tasks.id, tokenData.taskId),
-        eq(schema.tasks.projectId, tokenData.projectId),
-      ),
+      and(eq(schema.tasks.id, tokenData.taskId), eq(schema.tasks.projectId, tokenData.projectId))
     )
     .limit(1);
 
@@ -69,7 +210,7 @@ export async function handleUpdateTaskStatus(
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
-      `Task status updates cannot be made after task reaches status '${task.status}'`,
+      `Task status updates cannot be made after task reaches status '${task.status}'`
     );
   }
 
@@ -77,19 +218,21 @@ export async function handleUpdateTaskStatus(
   try {
     const doId = env.PROJECT_DATA.idFromName(tokenData.projectId);
     const doStub = env.PROJECT_DATA.get(doId);
-    await doStub.fetch(new Request('https://do/activity', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        type: 'task.progress',
-        actorType: 'agent',
-        actorId: tokenData.workspaceId,
-        metadata: {
-          taskId: tokenData.taskId,
-          message: message.trim().slice(0, getMcpLimits(env).activityMessageMaxLength),
-        },
-      }),
-    }));
+    await doStub.fetch(
+      new Request('https://do/activity', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'task.progress',
+          actorType: 'agent',
+          actorId: tokenData.workspaceId,
+          metadata: {
+            taskId: tokenData.taskId,
+            message: trimmedMessage.slice(0, getMcpLimits(env).activityMessageMaxLength),
+          },
+        }),
+      })
+    );
   } catch (err) {
     log.warn('mcp.update_task_status.activity_event_failed', {
       taskId: tokenData.taskId,
@@ -104,17 +247,19 @@ export async function handleUpdateTaskStatus(
         notificationService.getProjectName(env, tokenData.projectId),
         notificationService.getChatSessionId(env, tokenData.workspaceId),
       ]);
-      const trimmedMessage = message.trim();
-      const maxFullBodyLength = parseInt(env.NOTIFICATION_FULL_BODY_LENGTH || '') || DEFAULT_NOTIFICATION_FULL_BODY_LENGTH;
+      const maxFullBodyLength =
+        Number.parseInt(env.NOTIFICATION_FULL_BODY_LENGTH || '', 10) ||
+        DEFAULT_NOTIFICATION_FULL_BODY_LENGTH;
       await notificationService.notifyProgress(env, tokenData.userId, {
         projectId: tokenData.projectId,
         projectName,
         taskId: tokenData.taskId,
         taskTitle: task.title,
         message: trimmedMessage.slice(0, MAX_NOTIFICATION_BODY_LENGTH),
-        fullMessage: trimmedMessage.length > MAX_NOTIFICATION_BODY_LENGTH
-          ? trimmedMessage.slice(0, maxFullBodyLength)
-          : undefined,
+        fullMessage:
+          trimmedMessage.length > MAX_NOTIFICATION_BODY_LENGTH
+            ? trimmedMessage.slice(0, maxFullBodyLength)
+            : undefined,
         sessionId,
       });
     } catch (err) {
@@ -128,7 +273,7 @@ export async function handleUpdateTaskStatus(
   log.info('mcp.update_task_status', {
     taskId: tokenData.taskId,
     projectId: tokenData.projectId,
-    message: message.trim().slice(0, getMcpLimits(env).logMessageMaxLength),
+    message: trimmedMessage.slice(0, getMcpLimits(env).logMessageMaxLength),
   });
 
   return jsonRpcSuccess(requestId, {
@@ -141,9 +286,21 @@ export async function handleCompleteTask(
   params: Record<string, unknown>,
   tokenData: McpTokenData,
   env: Env,
-  executionCtx?: ExecutionContext,
+  _executionCtx?: { waitUntil(p: Promise<unknown>): void }
 ): Promise<JsonRpcResponse> {
   const summary = typeof params.summary === 'string' ? params.summary.trim() : null;
+  const evidenceValidation =
+    params.evidence === undefined ? null : validateCompletionEvidence(params.evidence);
+  if (evidenceValidation && !evidenceValidation.ok) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      `Invalid evidence: ${evidenceValidation.error}`,
+      { httpStatus: 400 }
+    );
+  }
+  const evidenceJson = evidenceValidation?.ok ? JSON.stringify(evidenceValidation.value) : null;
+  const completionPrUrl = evidenceValidation?.ok ? (evidenceValidation.value.prUrl ?? null) : null;
 
   const now = new Date().toISOString();
 
@@ -151,35 +308,47 @@ export async function handleCompleteTask(
   // instead of completing the task. This prevents agents that ignore conversation-mode instructions
   // from prematurely ending the conversation.
   const taskRow = await env.DATABASE.prepare(
-    `SELECT task_mode, user_id, title, output_pr_url, output_branch, mission_id FROM tasks WHERE id = ? AND project_id = ?`,
-  ).bind(tokenData.taskId, tokenData.projectId).first<{
-    task_mode: string;
-    user_id: string;
-    title: string;
-    output_pr_url: string | null;
-    output_branch: string | null;
-    mission_id: string | null;
-  }>();
+    `SELECT task_mode, user_id, title, output_pr_url, output_branch, mission_id, parent_task_id FROM tasks WHERE id = ? AND project_id = ?`
+  )
+    .bind(tokenData.taskId, tokenData.projectId)
+    .first<{
+      task_mode: string;
+      user_id: string;
+      title: string;
+      output_pr_url: string | null;
+      output_branch: string | null;
+      mission_id: string | null;
+      parent_task_id: string | null;
+    }>();
 
   const isConversation = taskRow?.task_mode === 'conversation';
 
   if (isConversation) {
     // In conversation mode, remap complete_task to awaiting_followup — keep the task active.
     const result = await env.DATABASE.prepare(
-      `UPDATE tasks SET execution_step = 'awaiting_followup', output_summary = COALESCE(?, output_summary), updated_at = ?
-       WHERE id = ? AND project_id = ? AND status IN ('in_progress', 'delegated', 'awaiting_followup')`,
-    ).bind(
-      summary ? summary.slice(0, getMcpLimits(env).outputSummaryMaxLength) : null,
-      now,
-      tokenData.taskId,
-      tokenData.projectId,
-    ).run();
+      `UPDATE tasks
+       SET execution_step = 'awaiting_followup',
+           output_summary = COALESCE(?, output_summary),
+           output_pr_url = COALESCE(?, output_pr_url),
+           completion_evidence = COALESCE(?, completion_evidence),
+           updated_at = ?
+       WHERE id = ? AND project_id = ? AND status IN ('in_progress', 'delegated', 'awaiting_followup')`
+    )
+      .bind(
+        summary ? summary.slice(0, getMcpLimits(env).outputSummaryMaxLength) : null,
+        completionPrUrl,
+        evidenceJson,
+        now,
+        tokenData.taskId,
+        tokenData.projectId
+      )
+      .run();
 
     if (!result.meta.changes || result.meta.changes === 0) {
       return jsonRpcError(
         requestId,
         INVALID_PARAMS,
-        'Task cannot be updated — it may not exist or is not in an active status',
+        'Task cannot be updated — it may not exist or is not in an active status'
       );
     }
 
@@ -193,19 +362,21 @@ export async function handleCompleteTask(
     try {
       const doId = env.PROJECT_DATA.idFromName(tokenData.projectId);
       const doStub = env.PROJECT_DATA.get(doId);
-      await doStub.fetch(new Request('https://do/activity', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'task.awaiting_followup',
-          actorType: 'agent',
-          actorId: tokenData.workspaceId,
-          metadata: {
-            taskId: tokenData.taskId,
-            summary: summary?.slice(0, getMcpLimits(env).activityMessageMaxLength) ?? null,
-          },
-        }),
-      }));
+      await doStub.fetch(
+        new Request('https://do/activity', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'task.awaiting_followup',
+            actorType: 'agent',
+            actorId: tokenData.workspaceId,
+            metadata: {
+              taskId: tokenData.taskId,
+              summary: summary?.slice(0, getMcpLimits(env).activityMessageMaxLength) ?? null,
+            },
+          }),
+        })
+      );
     } catch (err) {
       log.warn('mcp.complete_task.conversation_activity_event_failed', {
         taskId: tokenData.taskId,
@@ -245,24 +416,50 @@ export async function handleCompleteTask(
   // Atomic conditional UPDATE — only transitions from completable statuses.
   // This prevents the TOCTOU race of a separate SELECT + UPDATE.
   const result = await env.DATABASE.prepare(
-    `UPDATE tasks SET status = 'completed', completed_at = ?, output_summary = COALESCE(?, output_summary), updated_at = ?
-     WHERE id = ? AND project_id = ? AND status IN ('in_progress', 'delegated', 'awaiting_followup')`,
-  ).bind(
-    now,
-    summary ? summary.slice(0, getMcpLimits(env).outputSummaryMaxLength) : null,
-    now,
-    tokenData.taskId,
-    tokenData.projectId,
-  ).run();
+    `UPDATE tasks
+     SET status = 'completed',
+         completed_at = ?,
+         output_summary = COALESCE(?, output_summary),
+         output_pr_url = COALESCE(?, output_pr_url),
+         completion_evidence = COALESCE(?, completion_evidence),
+         updated_at = ?
+     WHERE id = ? AND project_id = ? AND status IN ('in_progress', 'delegated', 'awaiting_followup')`
+  )
+    .bind(
+      now,
+      summary ? summary.slice(0, getMcpLimits(env).outputSummaryMaxLength) : null,
+      completionPrUrl,
+      evidenceJson,
+      now,
+      tokenData.taskId,
+      tokenData.projectId
+    )
+    .run();
 
   if (!result.meta.changes || result.meta.changes === 0) {
     // Either task doesn't exist, wrong project, or not in a completable state
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
-      'Task cannot be completed — it may not exist or is not in a completable status',
+      'Task cannot be completed — it may not exist or is not in a completable status'
     );
   }
+
+  const completedEvent: TaskTerminalTransitionEvent = {
+    transitionId: ulid(),
+    taskId: tokenData.taskId,
+    projectId: tokenData.projectId,
+    parentTaskId: taskRow?.parent_task_id ?? null,
+    status: 'completed',
+    reason: summary,
+    occurredAt: now,
+    source: 'mcp.complete_task',
+  };
+  // Capture before cleanup or other downstream work can fail after the winning CAS.
+  // This remains hook-bound capture, not an atomic task/outbox write.
+  await runTaskTerminalTransitionHooks(completedEvent, [
+    createProjectEventTaskTerminalTransitionHook(env, { captureAtHook: true }),
+  ]);
 
   // Sync trigger execution status (best-effort) — without this, cron triggers
   // with skipIfRunning=true permanently stop firing because the execution stays 'running'.
@@ -302,19 +499,21 @@ export async function handleCompleteTask(
   try {
     const doId = env.PROJECT_DATA.idFromName(tokenData.projectId);
     const doStub = env.PROJECT_DATA.get(doId);
-    await doStub.fetch(new Request('https://do/activity', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        type: 'task.completed',
-        actorType: 'agent',
-        actorId: tokenData.workspaceId,
-        metadata: {
-          taskId: tokenData.taskId,
-          summary: summary?.slice(0, getMcpLimits(env).activityMessageMaxLength) ?? null,
-        },
-      }),
-    }));
+    await doStub.fetch(
+      new Request('https://do/activity', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'task.completed',
+          actorType: 'agent',
+          actorId: tokenData.workspaceId,
+          metadata: {
+            taskId: tokenData.taskId,
+            summary: summary?.slice(0, getMcpLimits(env).activityMessageMaxLength) ?? null,
+          },
+        }),
+      })
+    );
   } catch (err) {
     log.warn('mcp.complete_task.activity_event_failed', {
       taskId: tokenData.taskId,
@@ -341,7 +540,7 @@ export async function handleCompleteTask(
         projectName,
         taskId: tokenData.taskId,
         taskTitle: taskRow.title,
-        outputPrUrl: taskRow.output_pr_url,
+        outputPrUrl: completionPrUrl ?? taskRow.output_pr_url,
         outputBranch: taskRow.output_branch,
         sessionId,
       });
@@ -353,18 +552,23 @@ export async function handleCompleteTask(
     }
   }
 
-  // Stop the ProjectData chat session and trigger workspace cleanup in the background.
-  // This mirrors the terminal-callback cleanup path in callback.ts.
-  if (executionCtx) {
-    executionCtx.waitUntil(
-      stopSessionAndCleanup(env, tokenData).catch((err) => {
-        log.error('mcp.complete_task.cleanup_failed', {
-          taskId: tokenData.taskId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      })
-    );
+  // Stop/fail ProjectData session state and tear down runtime resources before
+  // reporting terminal success, so cf-container billing cannot depend on
+  // best-effort waitUntil completion.
+  try {
+    await cleanupTerminalTaskResources(env, tokenData.taskId, {
+      status: 'completed',
+      logContext: { source: 'mcp.complete_task', workspaceId: tokenData.workspaceId },
+    });
+  } catch (err) {
+    log.error('mcp.complete_task.cleanup_failed', {
+      taskId: tokenData.taskId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
   }
+
+  await runTaskTerminalTransitionHooks(completedEvent, [createTaskWaitTerminalTransitionHook(env)]);
 
   log.info('mcp.complete_task', {
     taskId: tokenData.taskId,
@@ -377,40 +581,11 @@ export async function handleCompleteTask(
   });
 }
 
-/**
- * Stop the chat session in ProjectData and trigger workspace cleanup.
- * Runs in waitUntil — non-blocking for the MCP response.
- */
-async function stopSessionAndCleanup(env: Env, tokenData: McpTokenData): Promise<void> {
-  const db = drizzle(env.DATABASE, { schema });
-
-  // Look up the chat session linked to this workspace
-  const [ws] = await db
-    .select({ chatSessionId: schema.workspaces.chatSessionId })
-    .from(schema.workspaces)
-    .where(eq(schema.workspaces.id, tokenData.workspaceId))
-    .limit(1);
-
-  if (ws?.chatSessionId) {
-    try {
-      await projectDataService.stopSession(env, tokenData.projectId, ws.chatSessionId);
-    } catch (err) {
-      log.warn('mcp.complete_task.session_stop_failed', {
-        taskId: tokenData.taskId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
-  // cleanupTaskRun must always run regardless of session-stop outcome — it prevents VM leaks.
-  await cleanupTaskRun(tokenData.taskId, env);
-}
-
 export async function handleListTasks(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const limits = getMcpLimits(env);
   const status = typeof params.status === 'string' ? params.status : undefined;
@@ -451,28 +626,18 @@ export async function handleListTasks(
     .orderBy(desc(schema.tasks.updatedAt))
     .limit(fetchLimit);
 
-  let tasks = includeOwn
-    ? rows
-    : rows.filter((t) => t.id !== tokenData.taskId);
+  let tasks = includeOwn ? rows : rows.filter((t) => t.id !== tokenData.taskId);
 
   // Trim to requested limit after filtering
   tasks = tasks.slice(0, limit);
 
   const snippetLen = limits.taskDescriptionSnippetLength;
-  const result = tasks.map((t) => ({
-    id: t.id,
-    title: t.title,
-    status: t.status,
-    priority: t.priority,
-    descriptionSnippet: t.description ? t.description.slice(0, snippetLen) + (t.description.length > snippetLen ? '...' : '') : null,
-    outputBranch: t.outputBranch,
-    outputPrUrl: t.outputPrUrl,
-    outputSummary: t.outputSummary ? t.outputSummary.slice(0, snippetLen) + (t.outputSummary.length > snippetLen ? '...' : '') : null,
-    updatedAt: t.updatedAt,
-  }));
+  const result = tasks.map((task) => toTaskSearchResult(task, snippetLen));
 
   return jsonRpcSuccess(requestId, {
-    content: [{ type: 'text', text: JSON.stringify({ tasks: result, count: result.length }, null, 2) }],
+    content: [
+      { type: 'text', text: JSON.stringify({ tasks: result, count: result.length }, null, 2) },
+    ],
   });
 }
 
@@ -480,7 +645,7 @@ export async function handleGetTaskDetails(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const taskId = typeof params.taskId === 'string' ? params.taskId.trim() : '';
   if (!taskId) {
@@ -499,25 +664,34 @@ export async function handleGetTaskDetails(
       outputBranch: schema.tasks.outputBranch,
       outputPrUrl: schema.tasks.outputPrUrl,
       outputSummary: schema.tasks.outputSummary,
+      completionEvidence: schema.tasks.completionEvidence,
       errorMessage: schema.tasks.errorMessage,
+      chatSessionId: schema.tasks.chatSessionId,
       createdAt: schema.tasks.createdAt,
       updatedAt: schema.tasks.updatedAt,
       startedAt: schema.tasks.startedAt,
       completedAt: schema.tasks.completedAt,
     })
     .from(schema.tasks)
-    .where(
-      and(
-        eq(schema.tasks.id, taskId),
-        eq(schema.tasks.projectId, tokenData.projectId),
-      ),
-    )
+    .where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.projectId, tokenData.projectId)))
     .limit(1);
 
   const task = rows[0];
   if (!task) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'Task not found in this project');
   }
+
+  const recentAssistantMessages = await getRecentAssistantMessagesForTaskDetail(
+    env,
+    tokenData.projectId,
+    task.chatSessionId
+  );
+
+  const finalAssistantMessage = await getLatestAssistantMessageForTask(
+    env,
+    tokenData.projectId,
+    task.chatSessionId
+  );
 
   const taskResult = {
     id: task.id,
@@ -528,7 +702,14 @@ export async function handleGetTaskDetails(
     outputBranch: task.outputBranch,
     outputPrUrl: task.outputPrUrl,
     outputSummary: task.outputSummary,
+    completionEvidence: parseCompletionEvidenceJson(task.completionEvidence ?? null),
+    finalAssistantMessage,
     errorMessage: task.errorMessage,
+    // Instant (cf-container) dispatches create the chat session asynchronously;
+    // dispatch_task points callers here to obtain the sessionId after launch.
+    sessionId: task.chatSessionId,
+    // Additive diagnostic fallback for completed tasks whose summary/evidence is sparse.
+    recentAssistantMessages,
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
     startedAt: task.startedAt,
@@ -544,30 +725,34 @@ export async function handleSearchTasks(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
-  const query = typeof params.query === 'string' ? params.query.trim() : '';
-  if (!query) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'query is required and must be a non-empty string');
+  const inputQuery = typeof params.query === 'string' ? params.query.trim() : '';
+  if (!inputQuery) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'query is required and must be a non-empty string'
+    );
   }
-  if (query.length < 2) {
+  if (inputQuery.length < 2) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'query must be at least 2 characters');
   }
 
   const limits = getMcpLimits(env);
+  const normalizedQuery = normalizeSearchQuery(inputQuery, env);
+  const query = normalizedQuery.query;
   const status = typeof params.status === 'string' ? params.status : undefined;
   const requestedLimit = typeof params.limit === 'number' ? params.limit : 10;
   const searchLimit = Math.min(Math.max(1, Math.round(requestedLimit)), limits.taskSearchMax);
 
   const db = drizzle(env.DATABASE, { schema });
-  const searchPattern = `%${query}%`;
-
   const conditions: SQL[] = [
     eq(schema.tasks.projectId, tokenData.projectId),
-    or(
-      like(schema.tasks.title, searchPattern),
-      like(schema.tasks.description, searchPattern),
-    )!,
+    ...getSearchQueryLikePatterns(query).map(
+      (pattern) =>
+        sql<boolean>`(${schema.tasks.title} LIKE ${pattern} ESCAPE '\\' OR ${schema.tasks.description} LIKE ${pattern} ESCAPE '\\')`
+    ),
   ];
 
   if (status) {
@@ -592,19 +777,14 @@ export async function handleSearchTasks(
     .limit(searchLimit);
 
   const snippetLen = limits.taskDescriptionSnippetLength;
-  const result = rows.map((t) => ({
-    id: t.id,
-    title: t.title,
-    status: t.status,
-    priority: t.priority,
-    descriptionSnippet: t.description ? t.description.slice(0, snippetLen) + (t.description.length > snippetLen ? '...' : '') : null,
-    outputBranch: t.outputBranch,
-    outputPrUrl: t.outputPrUrl,
-    outputSummary: t.outputSummary ? t.outputSummary.slice(0, snippetLen) + (t.outputSummary.length > snippetLen ? '...' : '') : null,
-    updatedAt: t.updatedAt,
-  }));
+  const result = rows.map((task) => toTaskSearchResult(task, snippetLen));
 
   return jsonRpcSuccess(requestId, {
-    content: [{ type: 'text', text: JSON.stringify({ tasks: result, count: result.length, query }, null, 2) }],
+    content: [
+      {
+        type: 'text',
+        text: JSON.stringify({ tasks: result, count: result.length, ...normalizedQuery }, null, 2),
+      },
+    ],
   });
 }

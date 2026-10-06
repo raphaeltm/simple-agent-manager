@@ -1,6 +1,6 @@
 import type { ErrorTrendResponse } from '@simple-agent-manager/shared';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ErrorTrends } from '../../../../src/components/admin/ErrorTrends';
 
@@ -234,5 +234,40 @@ describe('ErrorTrends', () => {
 
     // Chart should still be visible (old data)
     expect(screen.getByTestId('trend-chart')).toBeInTheDocument();
+  });
+
+  // REGRESSION: the time-axis-labels row was gated with
+  // `firstBucketTimestamp && lastBucketTimestamp` (truthiness), which
+  // suppresses the row whenever a bucket's `timestamp` is a "falsy but
+  // present" value like an empty string — not just when it's genuinely
+  // absent (undefined, from `.at(0)` on an empty array, which is already
+  // covered by the `data.buckets.length > 0` check). The fix uses explicit
+  // `!= null` checks so the row still renders for any present-but-falsy
+  // timestamp value.
+  it('renders time axis labels even when a bucket timestamp is an empty string', async () => {
+    mockFetchAdminErrorTrends.mockResolvedValue({
+      range: '24h',
+      interval: '1h',
+      buckets: [
+        { timestamp: '', total: 0, bySource: { client: 0, 'vm-agent': 0, api: 0 } },
+        {
+          timestamp: new Date().toISOString(),
+          total: 2,
+          bySource: { client: 2, 'vm-agent': 0, api: 0 },
+        },
+      ],
+    });
+
+    render(<ErrorTrends />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('trend-chart')).toBeInTheDocument();
+    });
+
+    // formatTimestamp('') -> new Date('').toLocaleTimeString(...) -> "Invalid
+    // Date" (JS Date's documented behavior for an unparseable string) — its
+    // presence proves the label row rendered rather than being suppressed by
+    // the old truthiness gate.
+    expect(screen.getAllByText('Invalid Date').length).toBeGreaterThan(0);
   });
 });

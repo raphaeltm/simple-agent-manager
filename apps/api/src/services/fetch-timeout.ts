@@ -30,9 +30,13 @@ export function getTimeoutMs(envValue: string | undefined, defaultMs: number = D
 export async function fetchWithTimeout(
   url: string | URL,
   init?: RequestInit,
-  timeoutMs: number = DEFAULT_API_TIMEOUT_MS
+  timeoutMs: number = DEFAULT_API_TIMEOUT_MS,
+  callerSignal?: AbortSignal
 ): Promise<Response> {
+  if (callerSignal?.aborted) throw callerSignal.reason;
   const controller = new AbortController();
+  const onCallerAbort = () => controller.abort(callerSignal?.reason);
+  callerSignal?.addEventListener('abort', onCallerAbort, { once: true });
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
@@ -42,11 +46,13 @@ export async function fetchWithTimeout(
     });
     return response;
   } catch (err) {
+    if (callerSignal?.aborted) throw callerSignal.reason;
     if (err instanceof Error && err.name === 'AbortError') {
       throw new Error(`Request timed out after ${timeoutMs}ms: ${url}`);
     }
     throw err;
   } finally {
     clearTimeout(timeoutId);
+    callerSignal?.removeEventListener('abort', onCallerAbort);
   }
 }

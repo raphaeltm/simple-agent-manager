@@ -62,6 +62,11 @@ func (h *SessionHost) broadcastAgentStatus(status AgentStatus, agentType, errMsg
 	h.broadcastMessageWithPriority(data, true)
 }
 
+func (h *SessionHost) broadcastAgentCrashReport(report AgentCrashReportMessage) {
+	data, _ := json.Marshal(report)
+	h.broadcastMessageWithPriority(data, true)
+}
+
 // broadcastControl broadcasts a control message to all viewers and buffers it.
 func (h *SessionHost) broadcastControl(msgType ControlMessageType, extra map[string]interface{}) {
 	data := h.marshalControl(msgType, extra)
@@ -168,7 +173,7 @@ func (h *SessionHost) viewerWritePump(viewer *Viewer) {
 			}
 		case <-viewer.done:
 			return
-		case <-h.ctx.Done():
+		case <-h.lifecycleContext().Done():
 			return
 		}
 	}

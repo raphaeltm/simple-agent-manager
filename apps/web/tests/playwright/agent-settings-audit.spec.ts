@@ -52,15 +52,16 @@ const MOCK_AGENT_AMP = {
 
 type AgentMock = typeof MOCK_AGENT_OPENCODE;
 
-function makeSettings(overrides: {
-  agentType?: string;
-  model?: string | null;
-  permissionMode?: string | null;
-  opencodeProvider?: string | null;
-  opencodeBaseUrl?: string | null;
-  opencodeProviderName?: string | null;
-  providerMode?: string | null;
-} = {}) {
+function makeSettings(
+  overrides: {
+    agentType?: string;
+    model?: string | null;
+    permissionMode?: string | null;
+    opencodeProvider?: string | null;
+    opencodeBaseUrl?: string | null;
+    providerMode?: string | null;
+  } = {}
+) {
   return {
     agentType: overrides.agentType ?? 'opencode',
     model: overrides.model ?? null,
@@ -70,10 +71,39 @@ function makeSettings(overrides: {
     additionalEnv: null,
     opencodeProvider: overrides.opencodeProvider ?? null,
     opencodeBaseUrl: overrides.opencodeBaseUrl ?? null,
-    opencodeProviderName: overrides.opencodeProviderName ?? null,
     providerMode: overrides.providerMode ?? null,
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-01T00:00:00Z',
+  };
+}
+
+function makeOpenCodeModelCatalog() {
+  return {
+    agentType: 'opencode',
+    source: 'dynamic',
+    updatedAt: '2026-06-27T00:00:00.000Z',
+    groups: [
+      {
+        label: 'OpenCode Zen',
+        models: [
+          {
+            id: 'opencode/claude-sonnet-4-6',
+            name: 'Claude Sonnet 4.6',
+            group: 'OpenCode Zen',
+          },
+        ],
+      },
+      {
+        label: 'OpenCode Go',
+        models: [
+          {
+            id: 'opencode-go/glm-5.2',
+            name: 'GLM-5.2',
+            group: 'OpenCode Go',
+          },
+        ],
+      },
+    ],
   };
 }
 
@@ -120,6 +150,10 @@ async function setupApiMocks(
       return respond(200, { agents });
     }
 
+    if (path === '/api/model-catalog/opencode') {
+      return respond(200, makeOpenCodeModelCatalog());
+    }
+
     // Agent settings by type
     const settingsMatch = path.match(/^\/api\/agent-settings\/([^/]+)$/);
     if (settingsMatch) {
@@ -135,7 +169,6 @@ async function setupApiMocks(
           additionalEnv: null,
           opencodeProvider: body.opencodeProvider ?? null,
           opencodeBaseUrl: body.opencodeBaseUrl ?? null,
-          opencodeProviderName: body.opencodeProviderName ?? null,
           providerMode: body.providerMode ?? null,
           createdAt: '2026-01-01T00:00:00Z',
           updatedAt: new Date().toISOString(),
@@ -225,13 +258,18 @@ async function assertNoOverflow(page: Page) {
 
 async function takeScreenshot(page: Page, name: string) {
   await page.waitForTimeout(600);
+  const viewport = page.viewportSize();
+  const suffix = viewport ? `${viewport.width}x${viewport.height}` : 'unknown-viewport';
   await page.screenshot({
-    path: `../../.codex/tmp/playwright-screenshots/${name}.png`,
+    path: `../../.codex/tmp/playwright-screenshots/${name}-${suffix}.png`,
     fullPage: true,
   });
 }
 
 async function navigateToAgentConfig(page: Page) {
+  await page.addInitScript((userId) => {
+    window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
+  }, MOCK_USER.user.id);
   await page.goto('/settings/agents');
   await page.waitForTimeout(1000);
 }
@@ -274,96 +312,20 @@ test.describe('Unified Agent Cards — Mobile', () => {
     await takeScreenshot(page, 'agent-settings-mobile-opencode-default');
     await assertNoOverflow(page);
 
-    // Provider select renders with default option
+    // Provider select renders defaulting to OpenCode Zen
     const providerSelect = page.getByTestId('opencode-provider-select');
     await expect(providerSelect).toBeVisible();
-    await expect(providerSelect).toHaveValue('');
+    await expect(providerSelect).toHaveValue('opencode-zen');
+    const providerOptions = await providerSelect.evaluate((el) =>
+      Array.from((el as HTMLSelectElement).options).map((option) => option.value)
+    );
+    expect(providerOptions).toEqual(['opencode-zen', 'opencode-go', 'custom']);
 
-    // Model is a text input when no platform provider is selected
+    // Model is always a text input (no platform <select> dropdown anymore)
     const modelInput = page.getByTestId('model-input-opencode');
     await expect(modelInput).toBeVisible();
     const tagName = await modelInput.evaluate((el) => el.tagName.toLowerCase());
     expect(tagName).toBe('input');
-  });
-
-  test('platform provider: model dropdown renders instead of text input', async ({ page }) => {
-    await setupApiMocks(page, {
-      agents: [MOCK_AGENT_OPENCODE],
-      settingsMap: {
-        opencode: makeSettings({ opencodeProvider: 'platform', model: '@cf/meta/llama-4-scout-17b-16e-instruct' }),
-      },
-    });
-    await navigateToAgentConfig(page);
-    await page.waitForSelector('[data-testid="agent-card-opencode"]');
-    await takeScreenshot(page, 'agent-settings-mobile-platform-provider');
-    await assertNoOverflow(page);
-
-    // Model control must be a <select> (dropdown), NOT a text input
-    const modelSelect = page.getByTestId('model-input-opencode');
-    await expect(modelSelect).toBeVisible();
-    const tagName = await modelSelect.evaluate((el) => el.tagName.toLowerCase());
-    expect(tagName).toBe('select');
-
-    // Selected value matches saved model
-    await expect(modelSelect).toHaveValue('@cf/meta/llama-4-scout-17b-16e-instruct');
-  });
-
-  test('platform provider: switching from text input to dropdown clears model', async ({ page }) => {
-    await setupApiMocks(page, {
-      agents: [MOCK_AGENT_OPENCODE],
-      settingsMap: {
-        opencode: makeSettings({ opencodeProvider: 'scaleway', model: 'scaleway/qwen3-coder' }),
-      },
-    });
-    await navigateToAgentConfig(page);
-    await page.waitForSelector('[data-testid="agent-card-opencode"]');
-
-    // Start: scaleway provider, text input with value
-    const modelBefore = page.getByTestId('model-input-opencode');
-    const tagBefore = await modelBefore.evaluate((el) => el.tagName.toLowerCase());
-    expect(tagBefore).toBe('input');
-    await expect(modelBefore).toHaveValue('scaleway/qwen3-coder');
-
-    // Switch to platform provider
-    await page.getByTestId('opencode-provider-select').selectOption('platform');
-    await page.waitForTimeout(300);
-    await takeScreenshot(page, 'agent-settings-mobile-switch-to-platform');
-    await assertNoOverflow(page);
-
-    // After switch: model control must be select with empty value
-    const modelAfter = page.getByTestId('model-input-opencode');
-    const tagAfter = await modelAfter.evaluate((el) => el.tagName.toLowerCase());
-    expect(tagAfter).toBe('select');
-    await expect(modelAfter).toHaveValue('');
-  });
-
-  test('platform provider: switching away from platform clears model', async ({ page }) => {
-    await setupApiMocks(page, {
-      agents: [MOCK_AGENT_OPENCODE],
-      settingsMap: {
-        opencode: makeSettings({ opencodeProvider: 'platform', model: '@cf/qwen/qwen3-30b-a3b-fp8' }),
-      },
-    });
-    await navigateToAgentConfig(page);
-    await page.waitForSelector('[data-testid="agent-card-opencode"]');
-
-    // Start: platform provider, select with a value
-    const modelBefore = page.getByTestId('model-input-opencode');
-    const tagBefore = await modelBefore.evaluate((el) => el.tagName.toLowerCase());
-    expect(tagBefore).toBe('select');
-    await expect(modelBefore).toHaveValue('@cf/qwen/qwen3-30b-a3b-fp8');
-
-    // Switch to scaleway
-    await page.getByTestId('opencode-provider-select').selectOption('scaleway');
-    await page.waitForTimeout(300);
-    await takeScreenshot(page, 'agent-settings-mobile-switch-from-platform');
-    await assertNoOverflow(page);
-
-    // After switch: model input is text and empty (cleared)
-    const modelAfter = page.getByTestId('model-input-opencode');
-    const tagAfter = await modelAfter.evaluate((el) => el.tagName.toLowerCase());
-    expect(tagAfter).toBe('input');
-    await expect(modelAfter).toHaveValue('');
   });
 
   test('Claude Code: shows explicit SAM provider selector with OAuth option', async ({ page }) => {
@@ -407,7 +369,9 @@ test.describe('Unified Agent Cards — Mobile', () => {
     await assertNoOverflow(page);
 
     await expect(page.getByTestId('provider-mode-claude-code')).toHaveValue('sam');
-    await expect(page.getByText('Usage counts against your daily token budget and monthly cost cap.')).toBeVisible();
+    await expect(
+      page.getByText('Usage counts against your daily token budget and monthly cost cap.')
+    ).toBeVisible();
   });
 
   test('Codex: shows SAM provider selector without OAuth option', async ({ page }) => {
@@ -436,7 +400,7 @@ test.describe('Unified Agent Cards — Mobile', () => {
     await setupApiMocks(page, {
       agents: [MOCK_AGENT_OPENCODE, MOCK_AGENT_CLAUDE, MOCK_AGENT_CODEX, MOCK_AGENT_AMP],
       settingsMap: {
-        opencode: makeSettings({ opencodeProvider: 'platform' }),
+        opencode: makeSettings({ opencodeProvider: 'opencode-go' }),
       },
     });
     await navigateToAgentConfig(page);
@@ -452,14 +416,13 @@ test.describe('Unified Agent Cards — Mobile', () => {
     await expect(ampCard.getByText('ChatGPT Subscription')).not.toBeVisible();
   });
 
-  test('custom provider: shows base URL and provider name fields', async ({ page }) => {
+  test('custom provider: shows base URL field', async ({ page }) => {
     await setupApiMocks(page, {
       agents: [MOCK_AGENT_OPENCODE],
       settingsMap: {
         opencode: makeSettings({
           opencodeProvider: 'custom',
           opencodeBaseUrl: 'https://api.my-custom-llm.com/v1',
-          opencodeProviderName: 'My Custom LLM',
           model: 'custom-model-v1',
         }),
       },
@@ -470,7 +433,6 @@ test.describe('Unified Agent Cards — Mobile', () => {
     await assertNoOverflow(page);
 
     await expect(page.getByTestId('opencode-base-url-input')).toBeVisible();
-    await expect(page.getByTestId('opencode-provider-name-input')).toBeVisible();
 
     // Model is a text input (not select) for custom provider
     const modelInput = page.getByTestId('model-input-opencode');
@@ -486,39 +448,11 @@ test.describe('Unified Agent Cards — Mobile', () => {
     await assertNoOverflow(page);
   });
 
-  test('platform provider: model select has all expected options', async ({ page }) => {
-    await setupApiMocks(page, {
-      agents: [MOCK_AGENT_OPENCODE],
-      settingsMap: {
-        opencode: makeSettings({ opencodeProvider: 'platform' }),
-      },
-    });
-    await navigateToAgentConfig(page);
-    await page.waitForSelector('[data-testid="agent-card-opencode"]');
-
-    const modelSelect = page.getByTestId('model-input-opencode');
-    await expect(modelSelect).toBeVisible();
-
-    const optionValues = await modelSelect.evaluate((el) => {
-      const select = el as HTMLSelectElement;
-      return Array.from(select.options).map((o) => o.value);
-    });
-    // Empty string value for the default option
-    expect(optionValues).toContain('');
-    // All three platform models must be present
-    expect(optionValues).toContain('@cf/meta/llama-4-scout-17b-16e-instruct');
-    expect(optionValues).toContain('@cf/qwen/qwen3-30b-a3b-fp8');
-    expect(optionValues).toContain('@cf/google/gemma-3-12b-it');
-
-    await takeScreenshot(page, 'agent-settings-mobile-platform-model-select-options');
-    await assertNoOverflow(page);
-  });
-
   test('label association: model label htmlFor links to model control id', async ({ page }) => {
     await setupApiMocks(page, {
       agents: [MOCK_AGENT_OPENCODE],
       settingsMap: {
-        opencode: makeSettings({ opencodeProvider: 'platform' }),
+        opencode: makeSettings({ opencodeProvider: 'opencode-go' }),
       },
     });
     await navigateToAgentConfig(page);
@@ -553,11 +487,13 @@ test.describe('Unified Agent Cards — Mobile', () => {
     expect(labelFor).toBe(selectId);
   });
 
-  test('focus ring: focus-visible:outline classes are applied to model select', async ({ page }) => {
+  test('focus ring: focus-visible:outline classes are applied to model select', async ({
+    page,
+  }) => {
     await setupApiMocks(page, {
       agents: [MOCK_AGENT_OPENCODE],
       settingsMap: {
-        opencode: makeSettings({ opencodeProvider: 'platform' }),
+        opencode: makeSettings({ opencodeProvider: 'opencode-go' }),
       },
     });
     await navigateToAgentConfig(page);
@@ -573,7 +509,9 @@ test.describe('Unified Agent Cards — Mobile', () => {
     expect(modelSelectClass).toContain('focus-visible:outline-focus-ring');
 
     // Same check on the provider select
-    const providerSelectClass = await page.getByTestId('opencode-provider-select').getAttribute('class');
+    const providerSelectClass = await page
+      .getByTestId('opencode-provider-select')
+      .getAttribute('class');
     expect(providerSelectClass).toContain('focus-visible:outline');
     expect(providerSelectClass).toContain('focus-visible:outline-focus-ring');
 
@@ -585,7 +523,7 @@ test.describe('Unified Agent Cards — Mobile', () => {
     await setupApiMocks(page, {
       agents: [MOCK_AGENT_OPENCODE],
       settingsMap: {
-        opencode: makeSettings({ opencodeProvider: 'platform' }),
+        opencode: makeSettings({ opencodeProvider: 'opencode-go' }),
       },
     });
     await navigateToAgentConfig(page);
@@ -603,7 +541,7 @@ test.describe('Unified Agent Cards — Mobile', () => {
     await setupApiMocks(page, {
       agents: [MOCK_AGENT_OPENCODE],
       settingsMap: {
-        opencode: makeSettings({ opencodeProvider: 'platform' }),
+        opencode: makeSettings({ opencodeProvider: 'opencode-go' }),
       },
     });
     await navigateToAgentConfig(page);
@@ -638,46 +576,82 @@ test.describe('Unified Agent Cards — Mobile', () => {
     expect(warningText).toContain('Warning');
   });
 
-  test('platform provider: default option label shows default model name', async ({ page }) => {
+  test('permission mode: agents with no saved mode default to Bypass Permissions', async ({
+    page,
+  }) => {
     await setupApiMocks(page, {
-      agents: [MOCK_AGENT_OPENCODE],
-      settingsMap: {
-        opencode: makeSettings({ opencodeProvider: 'platform', model: '' }),
-      },
+      agents: [MOCK_AGENT_CLAUDE, MOCK_AGENT_OPENCODE],
+      settingsMap: {},
     });
     await navigateToAgentConfig(page);
-    await page.waitForSelector('[data-testid="agent-card-opencode"]');
+    await page.waitForSelector('[data-testid="agent-card-claude-code"]');
 
-    const defaultOptionText = await page.getByTestId('model-input-opencode').evaluate((el) => {
-      const select = el as HTMLSelectElement;
-      const firstOption = select.options[0];
-      return firstOption ? firstOption.textContent : null;
-    });
-    // Default option should name the default model (Llama 4 Scout 17B)
-    expect(defaultOptionText).toContain('Llama 4 Scout 17B');
-    await takeScreenshot(page, 'agent-settings-mobile-platform-default-option');
+    for (const agentId of ['claude-code', 'opencode']) {
+      await expect(page.getByTestId(`permission-mode-${agentId}-bypassPermissions`)).toBeChecked();
+      await expect(page.getByTestId(`permission-mode-${agentId}-default`)).not.toBeChecked();
+    }
+    const claudeCard = page.getByTestId('agent-card-claude-code');
+    await expect(claudeCard.getByText('Manual', { exact: true })).toBeVisible();
+    await expect(
+      claudeCard.getByRole('alert').filter({ hasText: 'disables all safety prompts' })
+    ).toBeVisible();
+    await expect(page.getByTestId('save-settings-claude-code')).toBeDisabled();
+
+    await page.getByTestId('permission-mode-claude-code-bypassPermissions').scrollIntoViewIfNeeded();
+    await takeScreenshot(page, 'agent-settings-mobile-permission-default-bypass');
+    await assertNoOverflow(page);
   });
 
-  test('openai-compatible provider: shows base URL but no provider name field', async ({ page }) => {
+  test('permission mode: a saved Manual choice stays selected', async ({ page }) => {
+    await setupApiMocks(page, {
+      agents: [MOCK_AGENT_CLAUDE],
+      settingsMap: {
+        'claude-code': makeSettings({ agentType: 'claude-code', permissionMode: 'default' }),
+      },
+    });
+    await navigateToAgentConfig(page);
+    await page.waitForSelector('[data-testid="agent-card-claude-code"]');
+
+    await expect(page.getByTestId('permission-mode-claude-code-default')).toBeChecked();
+    await expect(page.getByTestId('permission-mode-claude-code-bypassPermissions')).not.toBeChecked();
+    await expect(
+      page
+        .getByTestId('agent-card-claude-code')
+        .getByRole('alert')
+        .filter({ hasText: 'disables all safety prompts' })
+    ).toHaveCount(0);
+
+    await page.getByTestId('permission-mode-claude-code-default').scrollIntoViewIfNeeded();
+    await takeScreenshot(page, 'agent-settings-mobile-permission-saved-manual');
+    await assertNoOverflow(page);
+  });
+
+  test('OpenCode Go provider: uses API-backed model select with Go-only options', async ({
+    page,
+  }) => {
     await setupApiMocks(page, {
       agents: [MOCK_AGENT_OPENCODE],
       settingsMap: {
-        opencode: makeSettings({
-          opencodeProvider: 'openai-compatible',
-          opencodeBaseUrl: 'https://api.mistral.ai/v1',
-        }),
+        opencode: makeSettings({ opencodeProvider: 'opencode-go' }),
       },
     });
     await navigateToAgentConfig(page);
     await page.waitForSelector('[data-testid="agent-card-opencode"]');
-    await takeScreenshot(page, 'agent-settings-mobile-openai-compatible');
     await assertNoOverflow(page);
 
-    // Base URL shown
-    await expect(page.getByTestId('opencode-base-url-input')).toBeVisible();
-
-    // Provider name NOT shown (only for 'custom')
-    await expect(page.getByTestId('opencode-provider-name-input')).not.toBeVisible();
+    await expect(page.getByTestId('opencode-provider-select')).toHaveValue('opencode-go');
+    const modelInput = page.getByTestId('model-input-opencode');
+    await expect(modelInput).toBeVisible();
+    await expect(modelInput).toHaveAttribute('placeholder', 'e.g. opencode-go/glm-5.2');
+    const tagName = await modelInput.evaluate((el) => el.tagName.toLowerCase());
+    expect(tagName).toBe('input');
+    await modelInput.scrollIntoViewIfNeeded();
+    await modelInput.click();
+    await expect(page.getByRole('option', { name: /GLM 5\.2|GLM-5\.2/ })).toBeVisible();
+    await expect(page.getByRole('option', { name: /opencode-go\/glm-5\.2/ })).toBeVisible();
+    await expect(page.getByRole('option', { name: /Claude Sonnet 4\.6/ })).not.toBeVisible();
+    await takeScreenshot(page, 'agent-settings-mobile-opencode-go-provider-dropdown');
+    await assertNoOverflow(page);
   });
 });
 
@@ -688,25 +662,8 @@ test.describe('Unified Agent Cards — Mobile', () => {
 test.describe('Unified Agent Cards — Desktop', () => {
   test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
 
-  test('platform provider renders correctly on desktop', async ({ page }) => {
-    await setupApiMocks(page, {
-      agents: [MOCK_AGENT_OPENCODE],
-      settingsMap: {
-        opencode: makeSettings({ opencodeProvider: 'platform', model: '@cf/meta/llama-4-scout-17b-16e-instruct' }),
-      },
-    });
-    await navigateToAgentConfig(page);
-    await page.waitForSelector('[data-testid="agent-card-opencode"]');
-    await takeScreenshot(page, 'agent-settings-desktop-platform-provider');
-    await assertNoOverflow(page);
-
-    const modelSelect = page.getByTestId('model-input-opencode');
-    await expect(modelSelect).toBeVisible();
-    await expect(modelSelect).toHaveValue('@cf/meta/llama-4-scout-17b-16e-instruct');
-  });
-
   test('all providers: layout holds on desktop for each provider', async ({ page }) => {
-    const providers = ['platform', 'scaleway', 'google-vertex', 'anthropic', 'custom', 'openai-compatible'];
+    const providers = ['opencode-zen', 'opencode-go', 'custom'];
     for (const provider of providers) {
       await setupApiMocks(page, {
         agents: [MOCK_AGENT_OPENCODE],
@@ -725,7 +682,7 @@ test.describe('Unified Agent Cards — Desktop', () => {
     await setupApiMocks(page, {
       agents: [MOCK_AGENT_OPENCODE, MOCK_AGENT_CLAUDE, MOCK_AGENT_CODEX, MOCK_AGENT_AMP],
       settingsMap: {
-        opencode: makeSettings({ opencodeProvider: 'platform' }),
+        opencode: makeSettings({ opencodeProvider: 'opencode-go' }),
         'claude-code': makeSettings({ agentType: 'claude-code', providerMode: 'sam' }),
         'openai-codex': makeSettings({ agentType: 'openai-codex', providerMode: 'sam' }),
       },
@@ -744,7 +701,7 @@ test.describe('Unified Agent Cards — Desktop', () => {
     await setupApiMocks(page, {
       agents: [MOCK_AGENT_OPENCODE],
       settingsMap: {
-        opencode: makeSettings({ opencodeProvider: 'platform' }),
+        opencode: makeSettings({ opencodeProvider: 'opencode-go' }),
       },
     });
     await navigateToAgentConfig(page);
@@ -760,11 +717,11 @@ test.describe('Unified Agent Cards — Desktop', () => {
     expect(selectId).toBeTruthy();
   });
 
-  test('model label links to model control on desktop (platform mode)', async ({ page }) => {
+  test('model label links to model control on desktop', async ({ page }) => {
     await setupApiMocks(page, {
       agents: [MOCK_AGENT_OPENCODE],
       settingsMap: {
-        opencode: makeSettings({ opencodeProvider: 'platform' }),
+        opencode: makeSettings({ opencodeProvider: 'opencode-go' }),
       },
     });
     await navigateToAgentConfig(page);
@@ -777,6 +734,28 @@ test.describe('Unified Agent Cards — Desktop', () => {
     });
     const controlId = await page.getByTestId('model-input-opencode').getAttribute('id');
     expect(labelFor).toBe(controlId);
+  });
+
+  test('permission mode: agents with no saved mode default to Bypass Permissions on desktop', async ({
+    page,
+  }) => {
+    await setupApiMocks(page, {
+      agents: [MOCK_AGENT_CLAUDE, MOCK_AGENT_CODEX, MOCK_AGENT_OPENCODE],
+      settingsMap: {
+        opencode: makeSettings({ permissionMode: 'plan' }),
+      },
+    });
+    await navigateToAgentConfig(page);
+    await page.waitForSelector('[data-testid="agent-card-claude-code"]');
+
+    await expect(page.getByTestId('permission-mode-claude-code-bypassPermissions')).toBeChecked();
+    await expect(page.getByTestId('permission-mode-openai-codex-bypassPermissions')).toBeChecked();
+    await expect(page.getByTestId('permission-mode-opencode-plan')).toBeChecked();
+    await expect(page.getByTestId('permission-mode-opencode-bypassPermissions')).not.toBeChecked();
+
+    await page.getByTestId('permission-mode-claude-code-bypassPermissions').scrollIntoViewIfNeeded();
+    await takeScreenshot(page, 'agent-settings-desktop-permission-default-bypass');
+    await assertNoOverflow(page);
   });
 
   test('error state: agents API error renders without overflow', async ({ page }) => {

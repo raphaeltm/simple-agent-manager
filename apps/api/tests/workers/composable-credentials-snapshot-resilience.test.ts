@@ -1,0 +1,381 @@
+/**
+ * Regression tests for snapshot resilience.
+ *
+ * Root cause of the CC-merge production outage (PR #1315): an enabled
+ * `platform_credentials` cloud-provider row stores a RAW token (hetzner), not
+ * JSON. `parseSecret('cloud-provider')` called `JSON.parse` on it and threw a
+ * SyntaxError. `buildPlatformDefaults` runs on EVERY snapshot build, so the
+ * throw rejected the whole snapshot — which has no try/catch upstream in
+ * getDecryptedAgentKey — and the agent-key endpoint returned 500. The VM agent
+ * saw "control plane returned status 500", SelectAgent failed, and every agent
+ * for every user reported "agent status is error".
+ *
+ * These tests assert:
+ * 1. A raw (non-JSON) cloud-provider platform default does NOT crash the
+ *    snapshot, and agent resolution for an unrelated agent still succeeds.
+ * 2. A JSON cloud-provider platform default ({provider, token}) still parses.
+ * 3. A single undecryptable user credential is skipped, not fatal.
+ */
+import { env } from 'cloudflare:test';
+import { drizzle } from 'drizzle-orm/d1';
+import { beforeAll, describe, expect, it } from 'vitest';
+
+import * as schema from '../../src/db/schema';
+import { encrypt } from '../../src/services/encryption';
+
+const TEST_PREFIX = `cc-snap-${Date.now()}`;
+const USER = `${TEST_PREFIX}-user`;
+const USER_RAW_HETZNER = `${TEST_PREFIX}-user-raw-hetzner`;
+const ADMIN = `${TEST_PREFIX}-admin`;
+const ENCRYPTION_KEY = 'SK4ihJazAK3GIWUQcM6nZ1odR6KQHrqRAVSp6HdPxrg=';
+const AGENT_SECRET = 'sk-test-anthropic-key-resilience';
+
+let db: ReturnType<typeof drizzle>;
+
+beforeAll(async () => {
+  db = drizzle(env.DATABASE, { schema });
+
+  for (const userId of [USER, USER_RAW_HETZNER, ADMIN]) {
+    await env.DATABASE.prepare(
+      `INSERT OR IGNORE INTO users (id, github_id, email, name, created_at, updated_at)
+       VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`
+    )
+      .bind(userId, `gh-${userId}`, `${userId}@test.com`, `Test ${userId}`)
+      .run();
+  }
+
+  // Seed a legacy agent API key and backfill so the user has cc_* data.
+  const { ciphertext, iv } = await encrypt(AGENT_SECRET, ENCRYPTION_KEY);
+  await env.DATABASE.prepare(
+    `INSERT OR IGNORE INTO credentials
+     (id, user_id, project_id, credential_type, credential_kind, agent_type, provider, encrypted_token, iv, is_active, created_at, updated_at)
+     VALUES (?, ?, NULL, 'agent-api-key', 'api-key', 'claude-code', 'anthropic', ?, ?, 1, datetime('now'), datetime('now'))`
+  )
+    .bind(`${TEST_PREFIX}-cred-agent`, USER, ciphertext, iv)
+    .run();
+
+  const { runBackfill } =
+    await import('../../src/services/composable-credentials/backfill-service');
+  await runBackfill(db, { userId: USER });
+});
+
+async function seedPlatformCloudProvider(opts: { id: string; provider: string; secret: string }) {
+  const { ciphertext, iv } = await encrypt(opts.secret, ENCRYPTION_KEY);
+  await env.DATABASE.prepare(
+    `INSERT OR IGNORE INTO platform_credentials
+     (id, credential_type, provider, agent_type, credential_kind, label, encrypted_token, iv, is_enabled, created_by, created_at, updated_at)
+     VALUES (?, 'cloud-provider', ?, NULL, 'api-key', ?, ?, ?, 1, ?, datetime('now'), datetime('now'))`
+  )
+    .bind(opts.id, opts.provider, `platform ${opts.provider}`, ciphertext, iv, ADMIN)
+    .run();
+}
+
+async function seedLegacyCloudProvider(opts: {
+  id: string;
+  userId: string;
+  provider: string;
+  secret: string;
+}) {
+  const { ciphertext, iv } = await encrypt(opts.secret, ENCRYPTION_KEY);
+  await env.DATABASE.prepare(
+    `INSERT OR IGNORE INTO credentials
+     (id, user_id, project_id, credential_type, credential_kind, agent_type, provider, encrypted_token, iv, is_active, created_at, updated_at)
+     VALUES (?, ?, NULL, 'cloud-provider', 'api-key', NULL, ?, ?, ?, 1, datetime('now'), datetime('now'))`
+  )
+    .bind(opts.id, opts.userId, opts.provider, ciphertext, iv)
+    .run();
+}
+
+async function seedConfiguration(opts: {
+  id: string;
+  userId: string;
+  consumerKind: 'agent' | 'compute';
+  consumerTarget: string;
+  settingsJson: string | null;
+}) {
+  await env.DATABASE.prepare(
+    `INSERT OR IGNORE INTO cc_configurations
+     (id, owner_id, name, consumer_kind, consumer_target, credential_id, settings_json, is_active, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, NULL, ?, 1, datetime('now'), datetime('now'))`
+  )
+    .bind(
+      opts.id,
+      opts.userId,
+      `config ${opts.id}`,
+      opts.consumerKind,
+      opts.consumerTarget,
+      opts.settingsJson
+    )
+    .run();
+}
+
+describe('snapshot resilience to raw cloud-provider platform defaults', () => {
+  it('raw (non-JSON) hetzner platform token does not crash the snapshot', async () => {
+    // Hetzner tokens are stored raw — not JSON. This is the exact row that
+    // crashed production.
+    await seedPlatformCloudProvider({
+      id: `${TEST_PREFIX}-plat-hetzner`,
+      provider: 'hetzner',
+      secret: 'raw-hetzner-token-not-json-1234567890abcdef',
+    });
+
+    const { buildSnapshot } = await import('../../src/services/composable-credentials/snapshot');
+    // Must not throw.
+    const snapshot = await buildSnapshot(db, USER, ENCRYPTION_KEY);
+
+    const hetznerDefault = snapshot.platform['compute:hetzner'];
+    expect(hetznerDefault).toBeDefined();
+    expect(hetznerDefault.mode).toBe('credential');
+    expect(hetznerDefault.credential?.secret.kind).toBe('cloud-provider');
+    if (hetznerDefault.credential?.secret.kind === 'cloud-provider') {
+      expect(hetznerDefault.credential.secret.token).toBe(
+        'raw-hetzner-token-not-json-1234567890abcdef'
+      );
+      // Raw hetzner tokens have no embedded provider; the snapshot must
+      // backfill it from the platform_credentials.provider column so an empty
+      // provider never reaches the compute assembler (which throws on '').
+      expect(hetznerDefault.credential.secret.provider).toBe('hetzner');
+    }
+  });
+
+  it('raw migrated user Hetzner token hydrates provider from its compute configuration', async () => {
+    await seedLegacyCloudProvider({
+      id: `${TEST_PREFIX}-cred-user-raw-hetzner`,
+      userId: USER_RAW_HETZNER,
+      provider: 'hetzner',
+      secret: 'raw-user-hetzner-token-not-json-1234567890abcdef',
+    });
+
+    const { runBackfill } =
+      await import('../../src/services/composable-credentials/backfill-service');
+    await runBackfill(db, { userId: USER_RAW_HETZNER });
+
+    const { buildSnapshot } = await import('../../src/services/composable-credentials/snapshot');
+    const snapshot = await buildSnapshot(db, USER_RAW_HETZNER, ENCRYPTION_KEY);
+    const computeConfig = snapshot.configurations.find(
+      (configuration) =>
+        configuration.consumer.kind === 'compute' && configuration.consumer.provider === 'hetzner'
+    );
+    expect(computeConfig).toBeDefined();
+
+    const credential = snapshot.credentials.find(
+      (candidate) => candidate.id === computeConfig?.credentialId
+    );
+    expect(credential?.secret.kind).toBe('cloud-provider');
+    if (credential?.secret.kind === 'cloud-provider') {
+      expect(credential.secret.provider).toBe('hetzner');
+      expect(credential.secret.token).toBe('raw-user-hetzner-token-not-json-1234567890abcdef');
+    }
+
+    const { resolveComputeConfig } =
+      await import('../../src/services/composable-credentials/resolve');
+    await expect(
+      resolveComputeConfig(db, USER_RAW_HETZNER, ENCRYPTION_KEY, 'hetzner')
+    ).resolves.toMatchObject({
+      provider: 'hetzner',
+      token: 'raw-user-hetzner-token-not-json-1234567890abcdef',
+      isPlatform: false,
+    });
+  });
+
+  it('agent resolution still succeeds despite the raw cloud-provider default', async () => {
+    const { resolveForConsumer } =
+      await import('../../src/services/composable-credentials/resolve');
+    const resolved = await resolveForConsumer(db, USER, ENCRYPTION_KEY, {
+      kind: 'agent',
+      agentType: 'claude-code',
+    });
+
+    expect(resolved).not.toBeNull();
+    expect(resolved!.credential?.secret.kind).toBe('api-key');
+    if (resolved!.credential?.secret.kind === 'api-key') {
+      expect(resolved!.credential.secret.apiKey).toBe(AGENT_SECRET);
+    }
+  });
+
+  it('getDecryptedAgentKey returns the agent key (no 500) with the raw default present', async () => {
+    const { getDecryptedAgentKey } = await import('../../src/routes/credentials');
+    const result = await getDecryptedAgentKey(db, USER, 'claude-code', ENCRYPTION_KEY);
+
+    expect(result).not.toBeNull();
+    expect(result!.credential).toBe(AGENT_SECRET);
+    expect(result!.credentialKind).toBe('api-key');
+  });
+
+  it('JSON cloud-provider platform token ({provider, token}) still parses', async () => {
+    await seedPlatformCloudProvider({
+      id: `${TEST_PREFIX}-plat-scaleway`,
+      provider: 'scaleway',
+      secret: JSON.stringify({ provider: 'scaleway', token: 'scw-secret-token' }),
+    });
+
+    const { buildSnapshot } = await import('../../src/services/composable-credentials/snapshot');
+    const snapshot = await buildSnapshot(db, USER, ENCRYPTION_KEY);
+
+    const scwDefault = snapshot.platform['compute:scaleway'];
+    expect(scwDefault?.credential?.secret.kind).toBe('cloud-provider');
+    if (scwDefault?.credential?.secret.kind === 'cloud-provider') {
+      expect(scwDefault.credential.secret.provider).toBe('scaleway');
+      expect(scwDefault.credential.secret.token).toBe('scw-secret-token');
+    }
+  });
+
+  it('an undecryptable user credential is skipped, not fatal', async () => {
+    // Insert a cc_credentials row with a bogus iv so decrypt throws.
+    await env.DATABASE.prepare(
+      `INSERT OR IGNORE INTO cc_credentials
+       (id, owner_id, name, kind, encrypted_token, iv, is_active, created_at, updated_at)
+       VALUES (?, ?, 'broken', 'api-key', 'not-real-ciphertext', 'bad-iv', 1, datetime('now'), datetime('now'))`
+    )
+      .bind(`${TEST_PREFIX}-cred-broken`, USER)
+      .run();
+
+    const { buildSnapshot } = await import('../../src/services/composable-credentials/snapshot');
+    // Must not throw — the broken row is skipped.
+    const snapshot = await buildSnapshot(db, USER, ENCRYPTION_KEY);
+
+    // The broken credential is absent, but the good agent credential remains.
+    const ids = snapshot.credentials.map((c) => c.id);
+    expect(ids).not.toContain(`${TEST_PREFIX}-cred-broken`);
+    expect(snapshot.credentials.length).toBeGreaterThan(0);
+  });
+
+  it('an undecryptable platform_credentials row is skipped, not fatal', async () => {
+    // buildPlatformDefaults has its own per-row try/catch separate from the
+    // user-credential loop. Seed a platform row with a bogus iv so decrypt
+    // throws, and assert the snapshot still builds and other defaults survive.
+    await env.DATABASE.prepare(
+      `INSERT OR IGNORE INTO platform_credentials
+       (id, credential_type, provider, agent_type, credential_kind, label, encrypted_token, iv, is_enabled, created_by, created_at, updated_at)
+       VALUES (?, 'cloud-provider', 'aws', NULL, 'api-key', 'broken aws', 'not-real-ciphertext', 'bad-iv', 1, ?, datetime('now'), datetime('now'))`
+    )
+      .bind(`${TEST_PREFIX}-plat-broken`, ADMIN)
+      .run();
+
+    const { buildSnapshot } = await import('../../src/services/composable-credentials/snapshot');
+    // Must not throw — the broken platform row is skipped.
+    const snapshot = await buildSnapshot(db, USER, ENCRYPTION_KEY);
+
+    // The broken platform default is absent, but the good hetzner default
+    // (seeded earlier in this describe block) remains.
+    expect(snapshot.platform['compute:aws']).toBeUndefined();
+    expect(snapshot.platform['compute:hetzner']).toBeDefined();
+  });
+
+  it('a raw (non-JSON) openai-compatible user credential does not crash the snapshot', async () => {
+    // openai-compatible secrets are normally JSON ({apiKey, baseUrl}), but the
+    // same JSON.parse-on-raw bug class applies to this kind too. Seed a raw
+    // token cc_credentials row and assert the snapshot builds without throwing
+    // and the secret degrades to apiKey=raw, baseUrl='' rather than crashing.
+    const { ciphertext, iv } = await encrypt('raw-openai-key-not-json', ENCRYPTION_KEY);
+    await env.DATABASE.prepare(
+      `INSERT OR IGNORE INTO cc_credentials
+       (id, owner_id, name, kind, encrypted_token, iv, is_active, created_at, updated_at)
+       VALUES (?, ?, 'raw-openai', 'openai-compatible', ?, ?, 1, datetime('now'), datetime('now'))`
+    )
+      .bind(`${TEST_PREFIX}-cred-openai`, USER, ciphertext, iv)
+      .run();
+
+    const { buildSnapshot } = await import('../../src/services/composable-credentials/snapshot');
+    // Must not throw.
+    const snapshot = await buildSnapshot(db, USER, ENCRYPTION_KEY);
+
+    const cred = snapshot.credentials.find((c) => c.id === `${TEST_PREFIX}-cred-openai`);
+    expect(cred).toBeDefined();
+    expect(cred?.secret.kind).toBe('openai-compatible');
+    if (cred?.secret.kind === 'openai-compatible') {
+      expect(cred.secret.apiKey).toBe('raw-openai-key-not-json');
+      expect(cred.secret.baseUrl).toBe('');
+    }
+  });
+});
+
+describe('snapshot resilience to malformed configuration settings_json', () => {
+  it('a JSON-syntax-invalid settings_json degrades that configuration to empty settings, not fatal', async () => {
+    await seedConfiguration({
+      id: `${TEST_PREFIX}-cfg-badjson`,
+      userId: USER,
+      consumerKind: 'agent',
+      consumerTarget: 'claude-code',
+      settingsJson: '{not valid json',
+    });
+
+    const { buildSnapshot } = await import('../../src/services/composable-credentials/snapshot');
+    // Must not throw.
+    const snapshot = await buildSnapshot(db, USER, ENCRYPTION_KEY);
+
+    const config = snapshot.configurations.find(
+      (candidate) => candidate.id === `${TEST_PREFIX}-cfg-badjson`
+    );
+    expect(config).toBeDefined();
+    expect(config?.settings).toEqual({});
+  });
+
+  it('a settings_json that decodes to a non-object degrades to empty settings, not fatal', async () => {
+    // Valid JSON, but not a record — the previous blind cast
+    // (`JSON.parse(json) as CCConfigurationSettings`) would have handed the
+    // raw string through unchanged instead of the documented `{}` fallback.
+    await seedConfiguration({
+      id: `${TEST_PREFIX}-cfg-nonobject`,
+      userId: USER,
+      consumerKind: 'agent',
+      consumerTarget: 'claude-code',
+      settingsJson: JSON.stringify('just a string'),
+    });
+
+    const { buildSnapshot } = await import('../../src/services/composable-credentials/snapshot');
+    const snapshot = await buildSnapshot(db, USER, ENCRYPTION_KEY);
+
+    const config = snapshot.configurations.find(
+      (candidate) => candidate.id === `${TEST_PREFIX}-cfg-nonobject`
+    );
+    expect(config?.settings).toEqual({});
+  });
+
+  it('a null-valued named field normalizes to absent instead of discarding sibling fields', async () => {
+    // routes/composable-credentials.ts's write-time validator only rejects a
+    // non-HTTPS baseUrl — it does not block `{ model: null }`. A settings
+    // blob with one nulled-out named field is well-formed, not malformed;
+    // it must not degrade the whole blob to {} and lose providerId alongside it.
+    await seedConfiguration({
+      id: `${TEST_PREFIX}-cfg-nullfield`,
+      userId: USER,
+      consumerKind: 'agent',
+      consumerTarget: 'claude-code',
+      settingsJson: JSON.stringify({ model: null, providerId: 'anthropic' }),
+    });
+
+    const { buildSnapshot } = await import('../../src/services/composable-credentials/snapshot');
+    const snapshot = await buildSnapshot(db, USER, ENCRYPTION_KEY);
+
+    const config = snapshot.configurations.find(
+      (candidate) => candidate.id === `${TEST_PREFIX}-cfg-nullfield`
+    );
+    expect(config?.settings.model).toBeUndefined();
+    expect(config?.settings.providerId).toBe('anthropic');
+  });
+
+  it('a well-formed settings_json still parses, preserving passthrough keys outside the named fields', async () => {
+    // ConfigurationSettings is intentionally "kept open" ([key: string]:
+    // unknown) — assemblers.ts reads settings.samProxyBaseUrl, which isn't
+    // one of the named fields the schema types explicitly.
+    await seedConfiguration({
+      id: `${TEST_PREFIX}-cfg-good`,
+      userId: USER,
+      consumerKind: 'agent',
+      consumerTarget: 'openai-codex',
+      settingsJson: JSON.stringify({ model: 'glm-4.6', samProxyBaseUrl: '/ai/proxy/custom' }),
+    });
+
+    const { buildSnapshot } = await import('../../src/services/composable-credentials/snapshot');
+    const snapshot = await buildSnapshot(db, USER, ENCRYPTION_KEY);
+
+    const config = snapshot.configurations.find(
+      (candidate) => candidate.id === `${TEST_PREFIX}-cfg-good`
+    );
+    expect(config?.settings).toEqual({
+      model: 'glm-4.6',
+      samProxyBaseUrl: '/ai/proxy/custom',
+    });
+  });
+});

@@ -69,6 +69,7 @@ describe('resolvePolicyLimits', () => {
     expect(limits.listPageSize).toBe(50);
     expect(limits.listMaxPageSize).toBe(200);
     expect(limits.defaultConfidence).toBe(0.8);
+    expect(limits.maxExpiryMs).toBe(365 * 24 * 60 * 60 * 1000);
   });
 
   it('overrides from env vars', () => {
@@ -79,6 +80,7 @@ describe('resolvePolicyLimits', () => {
       POLICY_LIST_PAGE_SIZE: '25',
       POLICY_LIST_MAX_PAGE_SIZE: '100',
       POLICY_DEFAULT_CONFIDENCE: '0.9',
+      POLICY_MAX_EXPIRY_MS: '86400000',
     });
     expect(limits.maxPerProject).toBe(50);
     expect(limits.titleMaxLength).toBe(100);
@@ -86,15 +88,18 @@ describe('resolvePolicyLimits', () => {
     expect(limits.listPageSize).toBe(25);
     expect(limits.listMaxPageSize).toBe(100);
     expect(limits.defaultConfidence).toBe(0.9);
+    expect(limits.maxExpiryMs).toBe(86_400_000);
   });
 
   it('falls back to defaults for invalid env values', () => {
     const limits = resolvePolicyLimits({
       POLICY_MAX_PER_PROJECT: 'not-a-number',
       POLICY_DEFAULT_CONFIDENCE: 'abc',
+      POLICY_MAX_EXPIRY_MS: 'soon',
     });
     expect(limits.maxPerProject).toBe(100);
     expect(limits.defaultConfidence).toBe(0.8);
+    expect(limits.maxExpiryMs).toBe(365 * 24 * 60 * 60 * 1000);
   });
 });
 

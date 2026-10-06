@@ -4,6 +4,7 @@
  * Centralizes user/project/installation seeding to avoid duplication
  * across DO test suites.
  */
+import { makeSignature } from 'better-auth/crypto';
 import { env } from 'cloudflare:test';
 
 /**
@@ -11,7 +12,7 @@ import { env } from 'cloudflare:test';
  */
 export async function seedUser(
   userId: string,
-  opts?: { githubId?: string; email?: string; name?: string },
+  opts?: { githubId?: string; email?: string; name?: string }
 ): Promise<void> {
   const githubId = opts?.githubId ?? `gh-${userId}`;
   const email = opts?.email ?? `${userId}@test.com`;
@@ -19,10 +20,28 @@ export async function seedUser(
 
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO users (id, github_id, email, name, created_at, updated_at)
-     VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`,
+     VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`
   )
     .bind(userId, githubId, email, name)
     .run();
+}
+
+/**
+ * Approve a seeded user, sign them in, and return the Cookie header their browser
+ * would send, so a test can reach session-authenticated routes through the real
+ * worker.
+ */
+export async function seedSignedInUser(userId: string): Promise<string> {
+  await env.DATABASE.prepare("UPDATE users SET status = 'active' WHERE id = ?").bind(userId).run();
+  const token = `browser-session-${crypto.randomUUID()}`;
+  await env.DATABASE.prepare(
+    `INSERT INTO sessions (id, expires_at, token, created_at, updated_at, user_id)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  )
+    .bind(`session-${token}`, Date.now() + 3_600_000, token, Date.now(), Date.now(), userId)
+    .run();
+  const signature = await makeSignature(token, env.BETTER_AUTH_SECRET || env.ENCRYPTION_KEY);
+  return `__Secure-better-auth.session_token=${token}.${signature}`;
 }
 
 /**
@@ -31,24 +50,28 @@ export async function seedUser(
 export async function seedInstallation(
   installationId: string,
   userId: string,
-  opts?: { installationIdValue?: string; accountName?: string },
+  opts?: { installationIdValue?: string; accountName?: string }
 ): Promise<void> {
-  const externalInstallationId = opts?.installationIdValue ?? 'inst-12345';
+  // Derived per installation, not a shared literal: github_installations is unique
+  // on external_installation_id, so a shared default made every installation after
+  // the first a silent INSERT OR IGNORE no-op and the next seedProject failed its
+  // installation_id foreign key.
+  const externalInstallationId = opts?.installationIdValue ?? `inst-${installationId}`;
   const accountName = opts?.accountName ?? 'test-user';
 
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO github_installation_accounts
        (installation_id, account_type, account_name, normalized_account_name, created_at, updated_at)
-     VALUES (?, 'personal', ?, lower(?), datetime('now'), datetime('now'))`,
+     VALUES (?, 'personal', ?, lower(?), datetime('now'), datetime('now'))`
   )
     .bind(externalInstallationId, accountName, accountName)
     .run();
 
   await env.DATABASE.prepare(
-    `INSERT OR IGNORE INTO github_installations (id, user_id, installation_id, account_type, account_name, created_at, updated_at)
-     VALUES (?, ?, ?, 'user', ?, datetime('now'), datetime('now'))`,
+    `INSERT OR IGNORE INTO github_installations (id, user_id, installation_id, external_installation_id, account_type, account_name, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'user', ?, datetime('now'), datetime('now'))`
   )
-    .bind(installationId, userId, externalInstallationId, accountName)
+    .bind(installationId, userId, externalInstallationId, externalInstallationId, accountName)
     .run();
 }
 
@@ -59,17 +82,25 @@ export async function seedProject(
   projectId: string,
   userId: string,
   installationId: string,
-  opts?: { name?: string; repository?: string },
+  opts?: { name?: string; repository?: string }
 ): Promise<void> {
-  const name = opts?.name ?? 'Test Project';
+  const name = opts?.name ?? `Test Project ${projectId}`;
   const normalizedName = name.toLowerCase().replaceAll(/\s+/g, '-');
-  const repository = opts?.repository ?? 'test-org/test-repo';
+  const repository = opts?.repository ?? `test-org/${projectId}`;
 
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO projects (id, user_id, name, normalized_name, installation_id, repository, created_by, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
   )
     .bind(projectId, userId, name, normalizedName, installationId, repository, userId)
+    .run();
+
+  await env.DATABASE.prepare(
+    `INSERT OR IGNORE INTO project_members
+       (project_id, user_id, role, status, invited_by, created_at, updated_at)
+     VALUES (?, ?, 'owner', 'active', ?, datetime('now'), datetime('now'))`
+  )
+    .bind(projectId, userId, userId)
     .run();
 }
 
@@ -88,11 +119,12 @@ export async function seedNode(
     createdAt?: string;
     updatedAt?: string;
     lastHeartbeatAt?: string | null;
-  },
+    nodeClass?: 'managed' | 'user-owned';
+  }
 ): Promise<void> {
   await env.DATABASE.prepare(
-    `INSERT OR IGNORE INTO nodes (id, user_id, name, status, vm_size, vm_location, health_status, warm_since, last_heartbeat_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR IGNORE INTO nodes (id, user_id, name, status, vm_size, vm_location, health_status, warm_since, last_heartbeat_at, node_class, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       nodeId,
@@ -104,9 +136,50 @@ export async function seedNode(
       opts?.healthStatus ?? 'healthy',
       opts?.warmSince ?? null,
       opts?.lastHeartbeatAt ?? null,
+      opts?.nodeClass ?? 'managed',
       opts?.createdAt ?? new Date().toISOString(),
-      opts?.updatedAt ?? new Date().toISOString(),
+      opts?.updatedAt ?? new Date().toISOString()
     )
+    .run();
+}
+
+/** Seed a providerless managed VM with exact placement and durable absence proof. */
+export async function seedManagedVmAbsenceProof(nodeId: string, userId: string): Promise<void> {
+  const poolId = `${nodeId}-proof-pool`;
+  const sourceId = `${nodeId}-proof-source`;
+  const credentialId = `${nodeId}-proof-credential`;
+  await env.DATABASE.prepare(
+    `INSERT INTO platform_credentials
+     (id, credential_type, provider, label, encrypted_token, iv, created_by)
+     VALUES (?, 'cloud-provider', 'hetzner', 'proof-credential', 'unused', 'unused', ?)`
+  )
+    .bind(credentialId, userId)
+    .run();
+  await env.DATABASE.prepare(
+    "INSERT INTO capacity_pools (id, scope, owner_user_id, name) VALUES (?, 'user', ?, 'proof-pool')"
+  )
+    .bind(poolId, userId)
+    .run();
+  await env.DATABASE.prepare(
+    `INSERT INTO capacity_sources
+     (id, scope, owner_user_id, source_kind, provider, credential_source,
+      platform_credential_id, credential_reference, credential_version)
+     VALUES (?, 'user', ?, 'cloud-provider-credential', 'hetzner', 'platform', ?, ?, 1)`
+  )
+    .bind(sourceId, userId, credentialId, credentialId)
+    .run();
+  await env.DATABASE.prepare(
+    `UPDATE nodes SET runtime = 'vm', runtime_incarnation_id = 'original',
+    runtime_termination_confirmed_at = datetime('now'), cloud_provider = 'hetzner',
+    node_role = 'workspace', workload_role = 'workspace', provider_instance_type = 'cx23',
+    provider_instance_vcpu_count = 2, provider_instance_memory_mb = 4096,
+    capacity_pool_id = ?, capacity_pool_scope = 'user', capacity_pool_revision = 1,
+    capacity_source_id = ?, capacity_source_generation = 1,
+    capacity_pool_candidate_id = 'proof-candidate', placement_credential_source = 'platform',
+    placement_credential_reference = ?, placement_credential_version = 1,
+    placement_credential_fingerprint = 'proof-fingerprint' WHERE id = ?`
+  )
+    .bind(poolId, sourceId, credentialId, nodeId)
     .run();
 }
 
@@ -117,13 +190,19 @@ export async function seedMission(
   missionId: string,
   projectId: string,
   userId: string,
-  opts?: { title?: string; status?: string },
+  opts?: { title?: string; status?: string }
 ): Promise<void> {
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO missions (id, project_id, user_id, title, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+     VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
   )
-    .bind(missionId, projectId, userId, opts?.title ?? `Test mission ${missionId}`, opts?.status ?? 'planning')
+    .bind(
+      missionId,
+      projectId,
+      userId,
+      opts?.title ?? `Test mission ${missionId}`,
+      opts?.status ?? 'planning'
+    )
     .run();
 }
 
@@ -137,30 +216,45 @@ export async function seedTask(
   opts?: {
     title?: string;
     status?: string;
+    chatSessionId?: string | null;
+    recoverySourceTaskId?: string | null;
     workspaceId?: string;
     autoProvisionedNodeId?: string;
     executionStep?: string;
+    taskMode?: string;
     startedAt?: string;
+    completedAt?: string | null;
+    errorMessage?: string | null;
+    triggeredBy?: string;
     updatedAt?: string;
-  },
+  }
 ): Promise<void> {
   const updatedAt = opts?.updatedAt ?? new Date().toISOString();
   await env.DATABASE.prepare(
-    `INSERT OR IGNORE INTO tasks (id, project_id, user_id, title, status, workspace_id, auto_provisioned_node_id, execution_step, started_at, created_by, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)`,
+    `INSERT OR IGNORE INTO tasks
+       (id, project_id, user_id, chat_session_id, recovery_source_task_id, title, status,
+        workspace_id, auto_provisioned_node_id, execution_step, task_mode, started_at,
+        completed_at, error_message, triggered_by, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)`
   )
     .bind(
       taskId,
       projectId,
       userId,
+      opts?.chatSessionId ?? null,
+      opts?.recoverySourceTaskId ?? null,
       opts?.title ?? `Test task ${taskId}`,
       opts?.status ?? 'delegated',
       opts?.workspaceId ?? null,
       opts?.autoProvisionedNodeId ?? null,
       opts?.executionStep ?? null,
+      opts?.taskMode ?? 'task',
       opts?.startedAt ?? null,
+      opts?.completedAt ?? null,
+      opts?.errorMessage ?? null,
+      opts?.triggeredBy ?? 'user',
       userId,
-      updatedAt,
+      updatedAt
     )
     .run();
 }
@@ -176,13 +270,28 @@ export async function seedWorkspace(
     projectId?: string;
     status?: string;
     chatSessionId?: string;
+    resolvedReservationJson?: string | null;
     createdAt?: string;
     updatedAt?: string;
-  },
+  }
 ): Promise<void> {
+  const resolvedReservationJson =
+    opts?.resolvedReservationJson === undefined
+      ? JSON.stringify({
+          cpuMillis: 1000,
+          memoryMb: 1024,
+          diskMb: 1024,
+          exclusiveNode: false,
+          source: 'platform',
+          sourceId: 'platform',
+          version: 1,
+        })
+      : opts.resolvedReservationJson;
   await env.DATABASE.prepare(
-    `INSERT OR IGNORE INTO workspaces (id, node_id, user_id, project_id, name, repository, branch, status, vm_size, vm_location, chat_session_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, 'main', ?, 'medium', 'nbg1', ?, ?, ?)`,
+    `INSERT OR IGNORE INTO workspaces
+       (id, node_id, user_id, project_id, name, repository, branch, status, vm_size, vm_location,
+        chat_session_id, resolved_reservation_json, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, 'main', ?, 'medium', 'nbg1', ?, ?, ?, ?)`
   )
     .bind(
       workspaceId,
@@ -193,8 +302,44 @@ export async function seedWorkspace(
       'test-org/test-repo',
       opts?.status ?? 'running',
       opts?.chatSessionId ?? null,
+      resolvedReservationJson,
       opts?.createdAt ?? new Date().toISOString(),
-      opts?.updatedAt ?? new Date().toISOString(),
+      opts?.updatedAt ?? new Date().toISOString()
+    )
+    .run();
+}
+
+/**
+ * Seed an agent session into D1. Idempotent. Requires user + workspace to exist.
+ */
+export async function seedAgentSession(
+  agentSessionId: string,
+  workspaceId: string,
+  userId: string,
+  opts?: {
+    status?: string;
+    agentType?: string;
+    stoppedAt?: string | null;
+    errorMessage?: string | null;
+    createdAt?: string;
+    updatedAt?: string;
+  }
+): Promise<void> {
+  await env.DATABASE.prepare(
+    `INSERT OR IGNORE INTO agent_sessions
+       (id, workspace_id, user_id, status, agent_type, stopped_at, error_message, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  )
+    .bind(
+      agentSessionId,
+      workspaceId,
+      userId,
+      opts?.status ?? 'running',
+      opts?.agentType ?? 'codex',
+      opts?.stoppedAt ?? null,
+      opts?.errorMessage ?? null,
+      opts?.createdAt ?? new Date().toISOString(),
+      opts?.updatedAt ?? new Date().toISOString()
     )
     .run();
 }
@@ -207,11 +352,11 @@ export async function seedComputeUsage(
   userId: string,
   workspaceId: string,
   nodeId: string,
-  opts?: { startedAt?: string; endedAt?: string | null },
+  opts?: { startedAt?: string; endedAt?: string | null }
 ): Promise<void> {
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO compute_usage (id, user_id, workspace_id, node_id, server_type, vcpu_count, credential_source, started_at, ended_at, created_at)
-     VALUES (?, ?, ?, ?, 'cx22', 2, 'user', ?, ?, datetime('now'))`,
+     VALUES (?, ?, ?, ?, 'cx22', 2, 'user', ?, ?, datetime('now'))`
   )
     .bind(
       id,
@@ -219,7 +364,7 @@ export async function seedComputeUsage(
       workspaceId,
       nodeId,
       opts?.startedAt ?? new Date().toISOString(),
-      opts?.endedAt ?? null,
+      opts?.endedAt ?? null
     )
     .run();
 }
@@ -244,14 +389,14 @@ export async function seedTrigger(
     nextFireAt?: string | null;
     lastTriggeredAt?: string | null;
     taskMode?: string;
-  },
+  }
 ): Promise<void> {
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO triggers
       (id, project_id, user_id, name, status, source_type, cron_expression, cron_timezone,
        skip_if_running, prompt_template, max_concurrent, trigger_count, next_fire_at,
        last_triggered_at, task_mode, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
   )
     .bind(
       triggerId,
@@ -268,7 +413,7 @@ export async function seedTrigger(
       opts?.triggerCount ?? 0,
       opts?.nextFireAt ?? new Date(Date.now() - 60_000).toISOString(),
       opts?.lastTriggeredAt ?? null,
-      opts?.taskMode ?? 'task',
+      opts?.taskMode ?? 'task'
     )
     .run();
 }
@@ -292,14 +437,14 @@ export async function seedTriggerExecution(
     completedAt?: string | null;
     sequenceNumber?: number;
     createdAt?: string;
-  },
+  }
 ): Promise<void> {
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO trigger_executions
       (id, trigger_id, project_id, status, task_id, event_type, skip_reason,
        error_message, rendered_prompt, scheduled_at, started_at, completed_at,
        sequence_number, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       executionId,
@@ -315,7 +460,7 @@ export async function seedTriggerExecution(
       opts?.startedAt ?? opts?.createdAt ?? new Date().toISOString(),
       opts?.completedAt ?? null,
       opts?.sequenceNumber ?? 1,
-      opts?.createdAt ?? new Date().toISOString(),
+      opts?.createdAt ?? new Date().toISOString()
     )
     .run();
 }

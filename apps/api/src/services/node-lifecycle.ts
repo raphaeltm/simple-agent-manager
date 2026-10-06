@@ -69,3 +69,16 @@ export async function getStatus(
   const stub = getStub(env, nodeId);
   return stub.getStatus();
 }
+
+/**
+ * Clear lifecycle state after an explicit API deletion. The DO reconciles the
+ * deleted/terminal D1 row through its bounded destroying handler.
+ */
+export async function finalizeDeletion(
+  env: Env,
+  nodeId: string,
+  userId: string
+): Promise<void> {
+  const stub = getStub(env, nodeId);
+  await stub.finalizeDeletion(nodeId, userId);
+}

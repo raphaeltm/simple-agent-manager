@@ -1,9 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  getAuthenticatedGitHubUser,
   getAuthenticatedUserOrganizations,
   getUserAccessibleInstallations,
+  getUserInstallationRepositories,
+  parseGitmodules,
   verifyUserInstallationAccess,
+  verifyWebhookSignature,
 } from '../../../src/services/github-app';
 
 const mocks = vi.hoisted(() => ({
@@ -30,11 +34,10 @@ describe('getUserAccessibleInstallations', () => {
       id: index + 1,
       account: { login: `org-${index + 1}`, type: 'Organization' },
     }));
-    const secondPage = [
-      { id: 101, account: { login: 'personal-user', type: 'User' } },
-    ];
+    const secondPage = [{ id: 101, account: { login: 'personal-user', type: 'User' } }];
 
-    const fetchMock = vi.fn()
+    const fetchMock = vi
+      .fn()
       .mockResolvedValueOnce(Response.json({ installations: firstPage }))
       .mockResolvedValueOnce(Response.json({ installations: secondPage }));
     vi.stubGlobal('fetch', fetchMock);
@@ -91,11 +94,13 @@ describe('getUserAccessibleInstallations', () => {
       vi.fn().mockResolvedValue(Response.json({ message: 'Bad credentials' }, { status: 401 }))
     );
 
-    await expect(getUserAccessibleInstallations('expired-token', {
-      flow: 'callback',
-      userId: 'user-1',
-      installationId: '123',
-    })).rejects.toThrow('Bad credentials');
+    await expect(
+      getUserAccessibleInstallations('expired-token', {
+        flow: 'callback',
+        userId: 'user-1',
+        installationId: '123',
+      })
+    ).rejects.toThrow('Bad credentials');
     expect(mocks.log.warn).toHaveBeenCalledWith('github.user_accessible_installations.response', {
       flow: 'callback',
       userId: 'user-1',
@@ -104,6 +109,207 @@ describe('getUserAccessibleInstallations', () => {
       status: 401,
       ok: false,
       installationCount: 0,
+    });
+    expect(JSON.stringify(mocks.log.warn.mock.calls)).not.toContain('expired-token');
+  });
+});
+
+describe('getAuthenticatedGitHubUser', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.clearAllMocks();
+  });
+
+  it('fetches the OAuth token owner without logging the token', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({
+        id: 591860,
+        login: 'lionello',
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await getAuthenticatedGitHubUser('github-user-token', {
+      flow: 'sync',
+      userId: 'user-1',
+    });
+
+    expect(result).toEqual({ id: 591860, login: 'lionello' });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.github.com/user',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer github-user-token',
+          Accept: 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+        }),
+      })
+    );
+    expect(mocks.log.info).toHaveBeenCalledWith('github.authenticated_user.response', {
+      flow: 'sync',
+      userId: 'user-1',
+      status: 200,
+      ok: true,
+    });
+    expect(JSON.stringify(mocks.log.info.mock.calls)).not.toContain('github-user-token');
+  });
+
+  it('throws the GitHub error message when authenticated user lookup fails', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(Response.json({ message: 'Bad credentials' }, { status: 401 }))
+    );
+
+    await expect(
+      getAuthenticatedGitHubUser('expired-token', {
+        flow: 'sync',
+        userId: 'user-1',
+      })
+    ).rejects.toThrow('Bad credentials');
+    expect(mocks.log.warn).toHaveBeenCalledWith('github.authenticated_user.response', {
+      flow: 'sync',
+      userId: 'user-1',
+      status: 401,
+      ok: false,
+    });
+    expect(JSON.stringify(mocks.log.warn.mock.calls)).not.toContain('expired-token');
+  });
+});
+
+describe('getUserInstallationRepositories', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.clearAllMocks();
+  });
+
+  it('lists user-accessible repositories for one installation across pages', async () => {
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({
+      id: index + 1,
+      full_name: `acme/repo-${index + 1}`,
+      private: true,
+      default_branch: 'main',
+    }));
+    const secondPage = [
+      {
+        id: 101,
+        full_name: 'acme/final-repo',
+        private: false,
+        default_branch: 'trunk',
+      },
+    ];
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ total_count: 101, repositories: firstPage }))
+      .mockResolvedValueOnce(Response.json({ total_count: 101, repositories: secondPage }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await getUserInstallationRepositories('github-user-token', '120081765', {
+      flow: 'repositories',
+      userId: 'user-1',
+      installationId: '120081765',
+    });
+
+    expect(result).toHaveLength(101);
+    expect(result[0]).toEqual({
+      id: 1,
+      nodeId: null,
+      fullName: 'acme/repo-1',
+      private: true,
+      defaultBranch: 'main',
+    });
+    expect(result[100]).toEqual({
+      id: 101,
+      nodeId: null,
+      fullName: 'acme/final-repo',
+      private: false,
+      defaultBranch: 'trunk',
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      'https://api.github.com/user/installations/120081765/repositories?per_page=100&page=1',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer github-user-token',
+          Accept: 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+        }),
+      })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'https://api.github.com/user/installations/120081765/repositories?per_page=100&page=2',
+      expect.any(Object)
+    );
+    expect(mocks.log.info).toHaveBeenCalledWith('github.user_installation_repositories.response', {
+      flow: 'repositories',
+      userId: 'user-1',
+      installationId: '120081765',
+      repository: undefined,
+      page: 1,
+      status: 200,
+      ok: true,
+    });
+    expect(JSON.stringify(mocks.log.info.mock.calls)).not.toContain('github-user-token');
+  });
+
+  it('maps GitHub 401 to a typed reauth error without logging the user token', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(Response.json({ message: 'Bad credentials' }, { status: 401 }))
+    );
+
+    await expect(
+      getUserInstallationRepositories('expired-token', '120081765', {
+        flow: 'project-access',
+        userId: 'user-1',
+        installationId: '120081765',
+        repository: 'acme/private',
+      })
+    ).rejects.toMatchObject({
+      statusCode: 401,
+      error: 'GITHUB_REAUTH_REQUIRED',
+      message: 'Your GitHub authorization has expired — please sign out and back in',
+    });
+    expect(mocks.log.warn).toHaveBeenCalledWith('github.user_installation_repositories.response', {
+      flow: 'project-access',
+      userId: 'user-1',
+      installationId: '120081765',
+      repository: 'acme/private',
+      page: 1,
+      status: 401,
+      ok: false,
+    });
+    expect(JSON.stringify(mocks.log.warn.mock.calls)).not.toContain('expired-token');
+  });
+
+  it('maps GitHub 403 to a typed forbidden error without logging the user token', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(Response.json({ message: 'Resource not accessible' }, { status: 403 }))
+    );
+
+    await expect(
+      getUserInstallationRepositories('expired-token', '120081765', {
+        flow: 'project-access',
+        userId: 'user-1',
+        installationId: '120081765',
+        repository: 'acme/private',
+      })
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      error: 'GITHUB_FORBIDDEN',
+      message: 'Resource not accessible',
+    });
+    expect(mocks.log.warn).toHaveBeenCalledWith('github.user_installation_repositories.response', {
+      flow: 'project-access',
+      userId: 'user-1',
+      installationId: '120081765',
+      repository: 'acme/private',
+      page: 1,
+      status: 403,
+      ok: false,
     });
     expect(JSON.stringify(mocks.log.warn.mock.calls)).not.toContain('expired-token');
   });
@@ -121,7 +327,8 @@ describe('getAuthenticatedUserOrganizations', () => {
     }));
     const secondPage = [{ login: 'effprop' }];
 
-    const fetchMock = vi.fn()
+    const fetchMock = vi
+      .fn()
       .mockResolvedValueOnce(Response.json(firstPage))
       .mockResolvedValueOnce(Response.json(secondPage));
     vi.stubGlobal('fetch', fetchMock);
@@ -160,10 +367,12 @@ describe('getAuthenticatedUserOrganizations', () => {
       vi.fn().mockResolvedValue(Response.json({ message: 'Requires read:org' }, { status: 403 }))
     );
 
-    await expect(getAuthenticatedUserOrganizations('expired-token', {
-      flow: 'shared-org-discovery',
-      userId: 'user-1',
-    })).rejects.toThrow('Requires read:org');
+    await expect(
+      getAuthenticatedUserOrganizations('expired-token', {
+        flow: 'shared-org-discovery',
+        userId: 'user-1',
+      })
+    ).rejects.toThrow('Requires read:org');
     expect(mocks.log.warn).toHaveBeenCalledWith('github.user_organizations.response', {
       flow: 'shared-org-discovery',
       userId: 'user-1',
@@ -174,6 +383,64 @@ describe('getAuthenticatedUserOrganizations', () => {
     });
     expect(JSON.stringify(mocks.log.warn.mock.calls)).not.toContain('expired-token');
   });
+
+  it('throws a clear error when the GitHub error probe body is non-JSON', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response('<html>rate limited</html>', {
+          status: 429,
+          headers: { 'Content-Type': 'text/html' },
+        })
+      )
+    );
+
+    await expect(
+      getAuthenticatedUserOrganizations('expired-token', {
+        flow: 'shared-org-discovery',
+        userId: 'user-1',
+      })
+    ).rejects.toThrow('Failed to get user organizations: 429');
+  });
+
+  it('skips malformed org entries (null, missing login) without crashing and keeps valid ones', async () => {
+    // Regression: `null` entries previously threw `Cannot read properties of
+    // null (reading 'login')` uncaught; non-null malformed entries (missing
+    // `login`) silently produced `{ login: undefined }`. Both degrade to a
+    // logged skip instead.
+    const page = [
+      { login: 'org-good-1' },
+      null,
+      { notLogin: 'wrong-shape' },
+      { login: 42 },
+      { login: 'org-good-2' },
+    ];
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json(page)));
+
+    const result = await getAuthenticatedUserOrganizations('github-user-token', {
+      flow: 'shared-org-discovery',
+      userId: 'user-1',
+    });
+
+    expect(result).toEqual([{ login: 'org-good-1' }, { login: 'org-good-2' }]);
+    expect(mocks.log.warn).toHaveBeenCalledWith('github.user_organizations.invalid_entry', {
+      flow: 'shared-org-discovery',
+      userId: 'user-1',
+      page: 1,
+    });
+    expect(mocks.log.warn).toHaveBeenCalledTimes(3);
+  });
+
+  it('throws a clear error when the organizations response is not a JSON array', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ not: 'an array' })));
+
+    await expect(
+      getAuthenticatedUserOrganizations('github-user-token', {
+        flow: 'shared-org-discovery',
+        userId: 'user-1',
+      })
+    ).rejects.toThrow('Failed to get user organizations: response was not a JSON array');
+  });
 });
 
 describe('verifyUserInstallationAccess', () => {
@@ -183,7 +450,9 @@ describe('verifyUserInstallationAccess', () => {
   });
 
   it('returns true when GitHub confirms user access to the installation repositories endpoint', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(Response.json({ total_count: 1, repositories: [] }));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(Response.json({ total_count: 1, repositories: [] }));
     vi.stubGlobal('fetch', fetchMock);
 
     const result = await verifyUserInstallationAccess('github-user-token', '120081765', {
@@ -245,11 +514,165 @@ describe('verifyUserInstallationAccess', () => {
       vi.fn().mockResolvedValue(Response.json({ message: 'Server unavailable' }, { status: 503 }))
     );
 
-    await expect(verifyUserInstallationAccess('github-user-token', '120081765', {
-      flow: 'shared-org-discovery',
-      userId: 'user-1',
-      installationId: '120081765',
-      accountName: 'effprop',
-    })).rejects.toThrow('Server unavailable');
+    await expect(
+      verifyUserInstallationAccess('github-user-token', '120081765', {
+        flow: 'shared-org-discovery',
+        userId: 'user-1',
+        installationId: '120081765',
+        accountName: 'effprop',
+      })
+    ).rejects.toThrow('Server unavailable');
+  });
+
+  it('falls back to a generic message when the error probe body is non-JSON', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response('<html>bad gateway</html>', {
+          status: 502,
+          headers: { 'Content-Type': 'text/html' },
+        })
+      )
+    );
+
+    await expect(
+      verifyUserInstallationAccess('github-user-token', '120081765', {
+        flow: 'shared-org-discovery',
+        userId: 'user-1',
+        installationId: '120081765',
+        accountName: 'effprop',
+      })
+    ).rejects.toThrow('Failed to verify user installation access: 502');
+  });
+});
+
+describe('verifyWebhookSignature', () => {
+  const secret = 'webhook-secret';
+  const payload = '{"action":"installation.created"}';
+
+  async function sign(body: string, key: string): Promise<string> {
+    const enc = new TextEncoder();
+    const cryptoKey = await crypto.subtle.importKey(
+      'raw',
+      enc.encode(key),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign']
+    );
+    const mac = await crypto.subtle.sign('HMAC', cryptoKey, enc.encode(body));
+    const hex = Array.from(new Uint8Array(mac))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+    return `sha256=${hex}`;
+  }
+
+  it('accepts a valid sha256 HMAC signature', async () => {
+    const signature = await sign(payload, secret);
+    await expect(verifyWebhookSignature(payload, signature, secret)).resolves.toBe(true);
+  });
+
+  it('rejects a signature computed with the wrong secret', async () => {
+    const signature = await sign(payload, 'other-secret');
+    await expect(verifyWebhookSignature(payload, signature, secret)).resolves.toBe(false);
+  });
+
+  it('rejects a signature for a tampered payload', async () => {
+    const signature = await sign(payload, secret);
+    await expect(verifyWebhookSignature('{"action":"tampered"}', signature, secret)).resolves.toBe(
+      false
+    );
+  });
+
+  it('rejects a header missing the sha256= prefix', async () => {
+    const signature = (await sign(payload, secret)).slice('sha256='.length);
+    await expect(verifyWebhookSignature(payload, signature, secret)).resolves.toBe(false);
+  });
+
+  it('rejects a malformed (non-hex / wrong-length) digest without throwing', async () => {
+    await expect(verifyWebhookSignature(payload, 'sha256=not-hex', secret)).resolves.toBe(false);
+    await expect(verifyWebhookSignature(payload, 'sha256=abcd', secret)).resolves.toBe(false);
+  });
+});
+
+describe('parseGitmodules', () => {
+  it.each([
+    {
+      name: 'resolves https GitHub submodule URLs to lowercased owner/repo and strips .git',
+      url: 'https://github.com/Acme/Shared-Lib.git',
+      path: 'vendor/lib',
+      owner: 'acme',
+      expected: { path: 'vendor/lib', repository: 'acme/shared-lib' },
+    },
+    {
+      name: 'resolves scp-like ssh submodule URLs (git@github.com:owner/repo.git)',
+      url: 'git@github.com:Acme/Shared-Lib.git',
+      path: 'vendor/lib',
+      owner: 'acme',
+      expected: { path: 'vendor/lib', repository: 'acme/shared-lib' },
+    },
+    {
+      name: 'resolves relative submodule URLs against the parent owner',
+      url: '../sibling-repo.git',
+      path: 'sibling',
+      owner: 'Acme',
+      expected: { path: 'sibling', repository: 'acme/sibling-repo' },
+    },
+    {
+      name: 'returns repository: null for non-GitHub hosts (unsupported-url surface)',
+      url: 'https://gitlab.com/acme/external.git',
+      path: 'external',
+      owner: 'acme',
+      expected: { path: 'external', repository: null },
+    },
+    {
+      name: 'returns repository: null for a malformed URL',
+      url: 'not a url',
+      path: 'broken',
+      owner: 'acme',
+      expected: { path: 'broken', repository: null },
+    },
+  ])('$name', ({ url, path, owner, expected }) => {
+    const content = ['[submodule "entry"]', `\tpath = ${path}`, `\turl = ${url}`].join('\n');
+    expect(parseGitmodules(content, owner)).toEqual([expected]);
+  });
+
+  it('parses multiple submodule entries and preserves order', () => {
+    const content = [
+      '[submodule "a"]',
+      '\tpath = pkgs/a',
+      '\turl = https://github.com/acme/a.git',
+      '[submodule "b"]',
+      '\tpath = pkgs/b',
+      '\turl = git@github.com:acme/b.git',
+      '[submodule "c"]',
+      '\tpath = pkgs/c',
+      '\turl = ../c.git',
+    ].join('\n');
+
+    expect(parseGitmodules(content, 'acme')).toEqual([
+      { path: 'pkgs/a', repository: 'acme/a' },
+      { path: 'pkgs/b', repository: 'acme/b' },
+      { path: 'pkgs/c', repository: 'acme/c' },
+    ]);
+  });
+
+  it('skips entries missing a path or url', () => {
+    const content = [
+      '[submodule "no-url"]',
+      '\tpath = pkgs/no-url',
+      '[submodule "no-path"]',
+      '\turl = https://github.com/acme/no-path.git',
+      '[submodule "complete"]',
+      '\tpath = pkgs/complete',
+      '\turl = https://github.com/acme/complete.git',
+    ].join('\n');
+
+    expect(parseGitmodules(content, 'acme')).toEqual([
+      { path: 'pkgs/complete', repository: 'acme/complete' },
+    ]);
+  });
+
+  it('returns an empty array for empty content', () => {
+    expect(parseGitmodules('', 'acme')).toEqual([]);
   });
 });

@@ -1,4 +1,4 @@
-import type { PlatformErrorLevel,PlatformErrorSource, UserRole, UserStatus } from '@simple-agent-manager/shared';
+import type { UserRole, UserStatus } from '@simple-agent-manager/shared';
 import { desc, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -6,17 +6,46 @@ import { Hono } from 'hono';
 import * as schema from '../db/schema';
 import type { ProjectData as ProjectDataDO } from '../durable-objects/project-data';
 import type { Env } from '../env';
-import { getUserId,requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
+import { getUserId, requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { rateLimit } from '../middleware/rate-limit';
-import { AdminLogQuerySchema,AdminUserActionSchema, AdminUserRoleSchema, jsonValidator } from '../schemas';
+import { getTaskReconciliationDiagnostics } from '../scheduled/stuck-tasks';
+import {
+  AdminUserActionSchema,
+  AdminUserRoleSchema,
+  jsonValidator,
+  UpdateSignupApprovalConfigSchema,
+} from '../schemas';
 import { getRuntimeLimits } from '../services/limits';
-import { CfApiError,getErrorTrends, getHealthSummary, getLogQueryRateLimit, queryCloudflareLogs, queryErrors } from '../services/observability';
+import { getSignupApprovalConfig, setSignupApprovalConfig } from '../services/signup-approval';
+import { getVmAdmissionDiagnostics } from '../services/vm-admission-control';
+import { adminObservabilityRoutes } from './admin/observability';
+import { adminProjectDataStorageRoutes } from './admin/project-data-storage';
 
 const adminRoutes = new Hono<{ Bindings: Env }>();
 
 // All admin routes require auth + approval + superadmin
 adminRoutes.use('/*', requireAuth(), requireApproved(), requireSuperadmin());
+
+/**
+ * GET /api/admin/signup-approval - Read runtime signup approval config
+ */
+adminRoutes.get('/signup-approval', async (c) => {
+  const config = await getSignupApprovalConfig(c.env);
+  return c.json({ config });
+});
+
+/**
+ * PUT /api/admin/signup-approval - Update runtime signup approval config
+ * Body: { requireApproval: boolean }
+ */
+adminRoutes.put('/signup-approval', jsonValidator(UpdateSignupApprovalConfigSchema), async (c) => {
+  const body = c.req.valid('json');
+  const config = await setSignupApprovalConfig(c.env, {
+    requireApproval: body.requireApproval,
+    updatedBy: getUserId(c),
+  });
+  return c.json({ config });
+});
 
 /**
  * GET /api/admin/users - List all users
@@ -175,6 +204,63 @@ adminRoutes.get('/tasks/stuck', async (c) => {
 });
 
 /**
+ * GET /api/admin/tasks/:taskId/reconciliation-diagnostics - Explain the
+ * read-only evidence and decision used by scheduled task reconciliation.
+ */
+adminRoutes.get('/tasks/:taskId/reconciliation-diagnostics', async (c) => {
+  const { taskId } = c.req.param();
+  const diagnostics = await getTaskReconciliationDiagnostics(c.env, taskId);
+
+  if (!diagnostics) throw errors.notFound('Task');
+  return c.json({ diagnostics });
+});
+
+/**
+ * GET /api/admin/vm-admissions - Bounded list of VM admission records.
+ */
+adminRoutes.get('/vm-admissions', async (c) => {
+  const limits = getRuntimeLimits(c.env);
+  const limitParam = Number.parseInt(c.req.query('limit') ?? '', 10);
+  const limit = Number.isFinite(limitParam)
+    ? Math.min(Math.max(1, limitParam), limits.taskListMaxPageSize)
+    : limits.taskListDefaultPageSize;
+  const state = c.req.query('state')?.trim();
+  const binds: unknown[] = [];
+  const where = state ? 'WHERE state = ?' : '';
+  if (state) binds.push(state);
+  binds.push(limit);
+
+  const rows = await c.env.DATABASE.prepare(
+    `
+      SELECT task_id, project_id, user_id, provider, credential_domain_key,
+        provider_domain_key, scope_key, requested_vm_size, requested_vm_location,
+        state, reason, selected_node_id, inflight_node_id, fencing_token,
+        attempt_count, next_retry_at, wait_deadline_at, provider_category,
+        provider_code, provider_status_code, provider_message, enqueued_at,
+        claimed_at, last_evaluated_at, completed_at, updated_at
+      FROM vm_task_admissions
+      ${where}
+      ORDER BY updated_at DESC
+      LIMIT ?
+    `
+  )
+    .bind(...binds)
+    .all<Record<string, unknown>>();
+
+  return c.json({ admissions: rows.results ?? [], limit });
+});
+
+/**
+ * GET /api/admin/vm-admissions/:taskId - Full admission/lease/capacity diagnostics.
+ */
+adminRoutes.get('/vm-admissions/:taskId', async (c) => {
+  const { taskId } = c.req.param();
+  const diagnostics = await getVmAdmissionDiagnostics(c.env, taskId);
+  if (!diagnostics.admission) throw errors.notFound('VM admission');
+  return c.json({ diagnostics });
+});
+
+/**
  * GET /api/admin/tasks/recent-failures - List recently failed tasks with error details
  *
  * Returns the most recent failed tasks for debugging delegation issues.
@@ -208,186 +294,10 @@ adminRoutes.get('/tasks/recent-failures', async (c) => {
   return c.json({ tasks: failures });
 });
 
-// =============================================================================
-// Admin Observability Routes (spec 023)
-// =============================================================================
+adminRoutes.route('/project-data/storage', adminProjectDataStorageRoutes);
 
-const VALID_ERROR_SOURCES = new Set<string>(['client', 'vm-agent', 'api']);
-const VALID_ERROR_LEVELS = new Set<string>(['error', 'warn', 'info']);
-
-/**
- * GET /api/admin/observability/errors - Query platform errors
- *
- * Query params: source, level, search, startTime, endTime, limit, cursor
- */
-adminRoutes.get('/observability/errors', async (c) => {
-  if (!c.env.OBSERVABILITY_DATABASE) {
-    return c.json({ errors: [], cursor: null, hasMore: false, total: 0 });
-  }
-
-  const source = c.req.query('source');
-  const level = c.req.query('level');
-  const search = c.req.query('search');
-  const startTime = c.req.query('startTime');
-  const endTime = c.req.query('endTime');
-  const limitParam = c.req.query('limit');
-  const cursor = c.req.query('cursor');
-
-  // Validate source
-  if (source && source !== 'all' && !VALID_ERROR_SOURCES.has(source)) {
-    throw errors.badRequest(`Invalid source: ${source}. Must be one of: client, vm-agent, api`);
-  }
-
-  // Validate level
-  if (level && level !== 'all' && !VALID_ERROR_LEVELS.has(level)) {
-    throw errors.badRequest(`Invalid level: ${level}. Must be one of: error, warn, info`);
-  }
-
-  // Validate limit
-  const limit = limitParam ? parseInt(limitParam, 10) : undefined;
-  if (limit !== undefined && (isNaN(limit) || limit < 1 || limit > 200)) {
-    throw errors.badRequest('limit must be between 1 and 200');
-  }
-
-  const result = await queryErrors(c.env.OBSERVABILITY_DATABASE, {
-    source: source && source !== 'all' ? source as PlatformErrorSource : undefined,
-    level: level && level !== 'all' ? level as PlatformErrorLevel : undefined,
-    search: search || undefined,
-    startTime: startTime ? new Date(startTime).getTime() : undefined,
-    endTime: endTime ? new Date(endTime).getTime() : undefined,
-    limit,
-    cursor: cursor || undefined,
-  });
-
-  return c.json(result);
-});
-
-/**
- * GET /api/admin/observability/health - Platform health summary
- */
-adminRoutes.get('/observability/health', async (c) => {
-  if (!c.env.OBSERVABILITY_DATABASE) {
-    return c.json({
-      activeNodes: 0,
-      activeWorkspaces: 0,
-      inProgressTasks: 0,
-      errorCount24h: 0,
-      timestamp: new Date().toISOString(),
-    });
-  }
-
-  const result = await getHealthSummary(c.env.DATABASE, c.env.OBSERVABILITY_DATABASE);
-  return c.json(result);
-});
-
-/**
- * GET /api/admin/observability/trends - Error trends over time
- *
- * Query params: range (1h|24h|7d|30d)
- */
-adminRoutes.get('/observability/trends', async (c) => {
-  if (!c.env.OBSERVABILITY_DATABASE) {
-    return c.json({ range: '24h', interval: '1h', buckets: [] });
-  }
-
-  const range = c.req.query('range') || '24h';
-  const validRanges = new Set(['1h', '24h', '7d', '30d']);
-  if (!validRanges.has(range)) {
-    throw errors.badRequest(`Invalid range: ${range}. Must be one of: 1h, 24h, 7d, 30d`);
-  }
-
-  const result = await getErrorTrends(c.env.OBSERVABILITY_DATABASE, range);
-  return c.json(result);
-});
-
-/**
- * POST /api/admin/observability/logs/query - Query Cloudflare Workers Observability API
- *
- * Body: { timeRange: { start, end }, levels?, search?, limit?, cursor? }
- */
-adminRoutes.post('/observability/logs/query',
-  // Per-admin KV-based rate limiting (1-minute window)
-  async (c, next) => {
-    const limiter = rateLimit({
-      limit: getLogQueryRateLimit(c.env),
-      keyPrefix: 'cf-log-query',
-      windowSeconds: 60,
-    });
-    return limiter(c, next);
-  },
-  jsonValidator(AdminLogQuerySchema),
-  async (c) => {
-  if (!c.env.CF_API_TOKEN || !c.env.CF_ACCOUNT_ID) {
-    throw errors.badRequest('Cloudflare API credentials not configured. Set CF_API_TOKEN and CF_ACCOUNT_ID.');
-  }
-
-  const body = c.req.valid('json');
-
-  // Validate dates
-  const startDate = new Date(body.timeRange.start);
-  const endDate = new Date(body.timeRange.end);
-  if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
-    throw errors.badRequest('timeRange start and end must be valid ISO 8601 dates');
-  }
-
-  // Validate levels
-  if (body.levels) {
-    const validLogLevels = new Set(['error', 'warn', 'info', 'debug', 'log']);
-    for (const level of body.levels) {
-      if (!validLogLevels.has(level)) {
-        throw errors.badRequest(`Invalid level: ${level}. Must be one of: error, warn, info, debug, log`);
-      }
-    }
-  }
-
-  // Validate limit
-  if (body.limit !== undefined && (body.limit < 1 || body.limit > 500)) {
-    throw errors.badRequest('limit must be between 1 and 500');
-  }
-
-  try {
-    const result = await queryCloudflareLogs({
-      cfApiToken: c.env.CF_API_TOKEN,
-      cfAccountId: c.env.CF_ACCOUNT_ID,
-      timeRange: { start: body.timeRange.start, end: body.timeRange.end },
-      levels: body.levels ?? undefined,
-      search: body.search || undefined,
-      limit: body.limit,
-      cursor: body.cursor || undefined,
-      queryId: body.queryId || undefined,
-    });
-
-    return c.json(result);
-  } catch (err) {
-    if (err instanceof CfApiError) {
-      return c.json({ error: 'CF_API_ERROR', message: err.message }, 502);
-    }
-    throw err;
-  }
-});
-
-/**
- * GET /api/admin/observability/logs/stream - WebSocket upgrade for real-time log stream
- *
- * Auth is validated on the HTTP upgrade request. The WebSocket connection is
- * forwarded to the AdminLogs DO singleton for hibernatable handling.
- */
-adminRoutes.get('/observability/logs/stream', async (c) => {
-  const upgradeHeader = c.req.header('Upgrade');
-  if (!upgradeHeader || upgradeHeader.toLowerCase() !== 'websocket') {
-    throw errors.badRequest('WebSocket upgrade required');
-  }
-
-  // Forward the upgrade request to the AdminLogs DO singleton
-  const doId = c.env.ADMIN_LOGS.idFromName('admin-logs');
-  const doStub = c.env.ADMIN_LOGS.get(doId);
-
-  // Rewrite the URL path to /ws for the DO handler
-  const doUrl = new URL(c.req.url);
-  doUrl.pathname = '/ws';
-
-  return doStub.fetch(new Request(doUrl.toString(), c.req.raw));
-});
+// Admin observability routes (spec 023) — extracted sub-router (rule 18 file-size split)
+adminRoutes.route('/observability', adminObservabilityRoutes);
 
 /**
  * GET /api/admin/health/details - Detailed health info (superadmin only)
@@ -443,7 +353,10 @@ adminRoutes.post('/backfill-session-summaries', async (c) => {
       const stub = c.env.PROJECT_DATA.get(doId) as DurableObjectStub<ProjectDataDO>;
 
       // List all sessions from the DO (up to 1000)
-      const result = await stub.listSessions(null, 1000, 0) as { sessions: Record<string, unknown>[]; total: number };
+      const result = (await stub.listSessions(null, 1000, 0)) as {
+        sessions: Record<string, unknown>[];
+        total: number;
+      };
 
       if (result.sessions.length === 0) continue;
 

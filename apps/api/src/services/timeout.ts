@@ -12,6 +12,7 @@ import { and, eq, lt } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
+import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { persistError } from './observability';
 
@@ -45,7 +46,7 @@ export function getProvisioningTimeoutMs(env?: { PROVISIONING_TIMEOUT_MS?: strin
  */
 export async function checkProvisioningTimeouts(
   database: D1Database,
-  env?: { PROVISIONING_TIMEOUT_MS?: string },
+  env?: Env,
   observabilityDb?: D1Database
 ): Promise<number> {
   const db = drizzle(database, { schema });
@@ -111,7 +112,7 @@ export async function checkProvisioningTimeouts(
         userId: workspace.userId,
         nodeId: workspace.nodeId,
         workspaceId: workspace.id,
-      });
+      }, env);
     }
   }
 

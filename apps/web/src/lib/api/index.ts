@@ -1,4 +1,31 @@
-export type { AdminErrorsFilter, AdminLogQueryParams, AIProxyConfigResponse, BillingMode, CostByModel, CostSummaryResponse } from './admin';
+export type {
+  AcpInteractionAnswerResponse,
+  AcpInteractionDetailResponse,
+  AcpInteractionSnapshotItem,
+  AcpInteractionSnapshotResponse,
+} from './acp-interactions';
+export {
+  answerAcpInteraction,
+  getAcpInteractionDetail,
+  listAcpInteractions,
+} from './acp-interactions';
+export type {
+  AdminErrorsFilter,
+  AdminLogQueryParams,
+  AdminProjectEventInspectorResponse,
+  AdminTrialsConfigResponse,
+  AIProxyConfigResponse,
+  BillingMode,
+  CostByModel,
+  CostSummaryResponse,
+  FeedbackProjectStatus,
+  PlatformConfigFieldStatus,
+  PlatformConfigSource,
+  PlatformConfigStatus,
+  PlatformConfigStatusResponse,
+  PlatformIntegrationConfigInput,
+  PlatformIntegrationStatus,
+} from './admin';
 export type {
   AiUsageByDay,
   AiUsageByModel,
@@ -23,16 +50,25 @@ export type {
 } from './admin';
 export {
   approveOrSuspendUser,
+  cancelAdminDebugDiagnosisRun,
   changeUserRole,
   createPlatformCredential,
   deletePlatformCredential,
+  downloadAdminDiagnosticArtifact,
   fetchAdminComputeUsage,
   fetchAdminCosts,
+  fetchAdminDebugDiagnoses,
+  fetchAdminDebugDiagnosisRun,
+  fetchAdminDebugDiagnosisRunEvents,
+  fetchAdminDebugProjects,
   fetchAdminDefaultQuota,
   fetchAdminErrors,
   fetchAdminErrorTrends,
   fetchAdminHealth,
   fetchAdminNodeUsage,
+  fetchAdminPlatformConfig,
+  fetchAdminProjectEventInspector,
+  fetchAdminTrialsConfig,
   fetchAdminUserComputeUsage,
   fetchAdminUserNodeUsage,
   fetchAdminUserQuota,
@@ -47,20 +83,35 @@ export {
   fetchAnalyticsGeo,
   fetchAnalyticsRetention,
   fetchAnalyticsWebsiteTraffic,
+  fetchSignupApprovalConfig,
   getAdminLogStreamUrl,
   listAdminUsers,
   listPlatformCredentials,
   queryAdminLogs,
   removeAdminUserQuota,
   resetAIProxyConfig,
+  retryAdminDebugDiagnosisRun,
+  runAdminDebugDiagnosis,
+  saveAdminDebugDiagnosisAsIdea,
   updateAdminDefaultQuota,
+  updateAdminPlatformConfig,
+  updateAdminTrialsConfig,
   updateAdminUserQuota,
   updateAIProxyBillingMode,
   updateAIProxyConfig,
   updatePlatformCredential,
+  updateSignupApprovalConfig,
 } from './admin';
 export {
+  abandonAdminProjectDataArchiveMigration,
+  closeAdminProjectDataArchiveCircuitBreaker,
+  fetchAdminProjectDataArchiveCircuitBreakers,
+  fetchAdminProjectDataArchiveProblemMigrations,
+  fetchAdminProjectDataStorageTelemetry,
+} from './admin-project-data-storage';
+export {
   createAgentProfile,
+  createSkill,
   deleteAgentCredential,
   deleteAgentCredentialByKind,
   deleteAgentProfile,
@@ -68,36 +119,190 @@ export {
   deleteProfileRuntimeEnvVar,
   deleteProfileRuntimeFile,
   deleteProjectAgentCredential,
+  deleteProjectCloudCredential,
+  deleteSkill,
+  deleteSkillRuntimeEnvVar,
+  deleteSkillRuntimeFile,
   getAgentSettings,
   getAnalyticsApiUrl,
   getClientErrorsApiUrl,
   getProfileRuntimeConfig,
+  getSkillRuntimeConfig,
   getTranscribeApiUrl,
   getTtsApiUrl,
   listAgentCredentials,
   listAgentProfiles,
   listAgents,
   listProjectAgentCredentials,
+  listSkills,
   saveAgentCredential,
   saveAgentSettings,
   saveProjectAgentCredential,
+  saveProjectCloudCredential,
   toggleAgentCredential,
   updateAgentProfile,
+  updateSkill,
   upsertProfileRuntimeEnvVar,
   upsertProfileRuntimeFile,
+  upsertSkillRuntimeEnvVar,
+  upsertSkillRuntimeFile,
 } from './agents';
 export { getCurrentUser } from './auth';
-export { API_URL, ApiClientError, request } from './client';
-export type { CredentialValidationResponse, GcpProject, GcpSetupRequest, GcpSetupResponse } from './credentials';
-export { createCredential, deleteCredential, listCredentials, validateAgentCredential, validateCredential } from './credentials';
-export { getGcpOAuthResult, listGcpProjects, runGcpSetup, verifyGcpSetup } from './credentials';
-export type { ProjectDeploymentGcpResponse } from './deployment';
 export {
+  fetchInstallationDefaultCapacityPools,
+  fetchProjectDefaultCapacityPools,
+  fetchUserDefaultCapacityPools,
+  reconcileInstallationDefaultCapacityPools,
+  reconcileProjectDefaultCapacityPools,
+  reconcileUserDefaultCapacityPools,
+} from './capacity-pools';
+export { type CliVersionInfo, getCliDownloadUrl, getCliVersion } from './cli';
+export { API_URL, ApiClientError, request } from './client';
+export type {
+  AgentCredentialSetupConfig,
+  AgentCredentialSetupSession,
+  AgentCredentialSetupStatus,
+  CodexSetupConfig,
+  CodexSetupSession,
+  CodexSetupStatus,
+  CreateAgentCredentialSetupResult,
+  CreateCodexSetupResult,
+  GuidedSetupAgentType,
+} from './codex-setup';
+export {
+  cancelAgentCredentialSetupSession,
+  cancelCodexSetupSession,
+  CLAUDE_CODE_SETUP_AGENT_TYPE,
+  CODEX_SETUP_AGENT_TYPE,
+  createAgentCredentialSetupSession,
+  createCodexSetupSession,
+  getAgentCredentialSetupConfig,
+  getAgentCredentialSetupSession,
+  getCodexSetupConfig,
+  getCodexSetupSession,
+  GUIDED_SETUP_AGENT_TYPES,
+  isGuidedSetupAgentType,
+  isTerminalAgentCredentialSetupStatus,
+  isTerminalCodexSetupStatus,
+  setupConfigSupportsAgent,
+  submitAgentCredentialSetupVerificationCode,
+} from './codex-setup';
+export type {
+  CreateMessageCommentReplyRequest,
+  CreateMessageCommentThreadRequest,
+  ListMessageCommentsResponse,
+  MessageCommentAction,
+  MessageCommentAnchor,
+  MessageCommentAuthor,
+  MessageCommentRealtimeEvent,
+  MessageCommentReply,
+  MessageCommentStatus,
+  MessageCommentThread,
+  MessageCommentThreadResponse,
+  SendMessageCommentThreadRequest,
+} from './comments';
+export {
+  createMessageCommentReply,
+  createMessageCommentThread,
+  listMessageComments,
+  reopenMessageCommentThread,
+  resolveMessageCommentThread,
+  sendMessageCommentThreadToAgent,
+} from './comments';
+export type {
+  CCAttachmentListItem,
+  CCConfigurationListItem,
+  CCCredentialListItem,
+} from './composable-credentials';
+export {
+  createCCAttachment,
+  createCCConfiguration,
+  createCCCredential,
+  deleteCCAttachment,
+  deleteCCConfiguration,
+  deleteCCCredential,
+  getResolutionStatus,
+  listCCAttachments,
+  listCCConfigurations,
+  listCCCredentials,
+  updateCCAttachment,
+  updateCCConfiguration,
+  updateCCCredential,
+} from './composable-credentials';
+export { getMyCredentialLimits, getProjectCredentialLimits } from './credential-limits';
+export type {
+  CredentialValidationResponse,
+  GcpProject,
+  GcpSetupRequest,
+  GcpSetupResponse,
+} from './credentials';
+export {
+  createCredential,
+  deleteCredential,
+  listCredentials,
+  validateAgentCredential,
+  validateCredential,
+} from './credentials';
+export {
+  getGcpOAuthResult,
+  listGcpProjects,
+  runGcpSetup,
+  saveGcpServiceAccountCredential,
+  verifyGcpSetup,
+} from './credentials';
+export type {
+  CreateDeploymentCustomDomainRequest,
+  CreateDeploymentVolumeRequest,
+  DeleteDeploymentEnvironmentResponse,
+  DeploymentAgentPolicy,
+  DeploymentCustomDomain,
+  DeploymentCustomDomainVerificationStatus,
+  DeploymentEnvironment,
+  DeploymentEnvironmentConfigResponse,
+  DeploymentEnvironmentConfigVar,
+  DeploymentEnvironmentMetricsResponse,
+  DeploymentEnvironmentNodeSummary,
+  DeploymentEnvironmentStartResponse,
+  DeploymentEnvironmentStopResponse,
+  DeploymentObservedState,
+  DeploymentPublicRoute,
+  DeploymentReleaseSummary,
+  DeploymentSecretEntry,
+  DeploymentVolume,
+  ProjectDeploymentGcpResponse,
+  UpsertDeploymentEnvironmentConfigVarRequest,
+} from './deployment';
+export {
+  attachDeploymentEnvironmentVolumes,
+  createDeploymentCustomDomain,
+  createDeploymentEnvironment,
+  createDeploymentEnvironmentVolume,
+  deleteDeploymentCustomDomain,
+  deleteDeploymentEnvironment,
+  deleteDeploymentEnvironmentConfigVar,
+  deleteDeploymentEnvironmentVolume,
+  deleteDeploymentSecret,
   deleteProjectDeploymentGcp,
+  detachDeploymentEnvironmentVolumes,
+  getDeploymentEnvironmentConfig,
+  getDeploymentEnvironmentLogs,
+  getDeploymentEnvironmentMetrics,
   getDeployOAuthResult,
   getProjectDeploymentGcp,
+  listDeploymentCustomDomains,
+  listDeploymentEnvironmentContainers,
+  listDeploymentEnvironments,
+  listDeploymentEnvironmentVolumes,
+  listDeploymentPublicRoutes,
+  listDeploymentSecrets,
   listGcpProjectsForDeploy,
+  setDeploymentSecret,
   setupProjectDeploymentGcp,
+  startDeploymentEnvironment,
+  stopDeploymentEnvironment,
+  updateDeploymentEnvironmentPolicy,
+  upsertDeploymentEnvironmentConfigVar,
+  verifyDeploymentCustomDomain,
 } from './deployment';
 export type {
   FileEntry,
@@ -128,7 +333,13 @@ export {
   removeWorktree,
   uploadSessionFiles,
 } from './files';
-export { getGitHubInstallUrl, listBranches, listGitHubInstallations, listRepositories } from './github';
+export {
+  getGitHubInstallUrl,
+  listBranches,
+  listGitHubInstallations,
+  listRepositories,
+} from './github';
+export { listGitLabBranches, listGitLabProjects } from './gitlab';
 export {
   addObservation,
   createKnowledgeEntity,
@@ -153,20 +364,25 @@ export {
   updateFileTags,
   uploadLibraryFile,
 } from './library';
+export {
+  createMcpConnection,
+  deleteMcpConnection,
+  listMcpConnections,
+  updateMcpConnection,
+} from './mcp-connections';
 export type {
+  ApiTokenResponse,
   CachedCommandResponse,
-  CreateSmokeTestTokenResponse,
-  SmokeTestStatusResponse,
-  SmokeTestTokenResponse,
+  CreateApiTokenResponse,
   TrialStatusResponse,
 } from './misc';
 export {
-  createSmokeTestToken,
+  approveDeviceCode,
+  createApiToken,
   getCachedCommands,
-  getSmokeTestStatus,
   getTrialStatus,
-  listSmokeTestTokens,
-  revokeSmokeTestToken,
+  listApiTokens,
+  revokeApiToken,
   saveCachedCommands,
 } from './misc';
 export {
@@ -176,6 +392,7 @@ export {
   getNodeLogs,
   getNodeLogStreamUrl,
   getNodeSystemInfo,
+  listNodeContainers,
   listNodeEvents,
   listNodes,
   stopNode,
@@ -185,28 +402,73 @@ export {
   getNotificationPreferences,
   getNotificationUnreadCount,
   getNotificationWsUrl,
+  getVapidPublicKey,
   listNotifications,
+  listWebPushSubscriptions,
   markAllNotificationsRead,
   markNotificationRead,
+  subscribeWebPush,
+  unsubscribeWebPush,
   updateNotificationPreference,
 } from './notifications';
-export type { AccountMapResponse, DevcontainerConfigEntry, DevcontainerConfigsResponse } from './projects';
+export type { ListPoliciesResponse, ProjectPolicy } from './policies';
+export { deletePolicy, getPolicy, listPolicies, updatePolicy } from './policies';
+export type {
+  AccountMapResponse,
+  DevcontainerConfigEntry,
+  DevcontainerConfigsResponse,
+} from './projects';
 export {
+  addProjectRepository,
+  applyProjectMemberOffboarding,
+  approveProjectAccessRequest,
   createProject,
+  createProjectInviteLink,
   deleteProject,
   deleteProjectRuntimeEnvVar,
   deleteProjectRuntimeFile,
+  denyProjectAccessRequest,
+  discoverSubmoduleRepos,
   getAccountMap,
+  getArtifactsEnabled,
   getProject,
+  getProjectCredentialAttributionHealth,
+  getProjectInvitePreview,
+  getProjectMembers,
   getProjectRuntimeConfig,
   listActiveTasks,
+  listAvailableRepositories,
   listProjectDevcontainerConfigs,
+  listProjectRepositories,
   listProjects,
+  previewProjectMemberOffboarding,
+  removeProjectRepository,
+  requestProjectAccess,
+  revokeProjectInviteLink,
+  transferProjectOwnership,
   updateProject,
   upsertProjectRuntimeEnvVar,
   upsertProjectRuntimeFile,
 } from './projects';
-export { getProviderCatalog } from './providers';
+export { getProviderCatalog, type ProviderCatalogRequestOptions } from './providers';
+export {
+  getRepoBranches,
+  getRepoCompare,
+  getRepoFile,
+  getRepoTree,
+  repoRawUrl,
+} from './repo-browse';
+export { getReportIssueConfig, submitReportIssue } from './report';
+export type {
+  ResourceTimelineChunkEntry,
+  ResourceTimelineChunkResponse,
+  ResourceTimelineIndexResponse,
+  ResourceTimelineRollup,
+  ResourceTimelineRunEntry,
+  WorkspaceResourceSample,
+  WorkspaceResourceToolSpan,
+} from './resource-timeline';
+export { getSessionResourceTimeline, getSessionResourceTimelineChunk } from './resource-timeline';
 export type {
   ActivityEventResponse,
   ActivityEventsListResponse,
@@ -216,25 +478,36 @@ export type {
   ChatSessionListItem,
   ChatSessionListResponse,
   ChatSessionResponse,
+  ChatSessionStateResponse,
   ChatSessionTaskEmbed,
+  ForkPreparationResponse,
   RecentChatsApiResponse,
   SessionStateSnapshot,
   SessionSummaryItem,
   SessionSummaryResponse,
+  StartInstantChatSessionRequest,
+  StartInstantChatSessionResponse,
 } from './sessions';
 export {
   cancelAgentPrompt,
   createChatSession,
   getAllChats,
   getChatSession,
+  getChatSessionState,
   getRecentChats,
   listActivityEvents,
+  listChatMessages,
   listChatSessions,
+  prepareForkSession,
   resetIdleTimer,
+  resolveAttentionAnswer,
   sendFollowUpPrompt,
+  startInstantChatSession,
   stopChatSession,
   summarizeSession,
 } from './sessions';
+export type { SetupCompleteResponse, SetupStatusResponse, SetupVerifyResponse } from './setup';
+export { completeSetup, fetchSetupStatus, saveSetupConfig, verifySetupToken } from './setup';
 export type {
   ListProjectTasksParams,
   RequestAttachmentUploadResponse,
@@ -269,11 +542,21 @@ export {
   getTrigger,
   listTriggerExecutions,
   listTriggers,
+  listWebhookDeliveries,
+  previewWebhookTrigger,
+  rotateWebhookTriggerToken,
   runTrigger,
   testTrigger,
   updateTrigger,
 } from './triggers';
-export { fetchComputeUsage, fetchUserAiBudget, fetchUserAiUsage, fetchUserQuotaStatus, resetUserAiBudget, updateUserAiBudget } from './usage';
+export {
+  fetchComputeUsage,
+  fetchUserAiBudget,
+  fetchUserAiUsage,
+  fetchUserQuotaStatus,
+  resetUserAiBudget,
+  updateUserAiBudget,
+} from './usage';
 export {
   createAgentSession,
   createWorkspace,
@@ -291,8 +574,10 @@ export {
   renameAgentSession,
   restartWorkspace,
   resumeAgentSession,
+  sleepWorkspace,
   stopAgentSession,
   stopWorkspace,
   suspendAgentSession,
   updateWorkspace,
+  updateWorkspacePortsPublic,
 } from './workspaces';

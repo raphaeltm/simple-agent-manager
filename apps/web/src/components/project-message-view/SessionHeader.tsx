@@ -1,221 +1,131 @@
-import type { DetectedPort, NodeResponse, TaskDetailResponse, VMSize, WorkspaceResponse } from '@simple-agent-manager/shared';
-import { VM_SIZE_LABELS } from '@simple-agent-manager/shared';
-import { Button, Dialog, Spinner } from '@simple-agent-manager/ui';
-import { AlertTriangle, Bot, Box, CheckCircle2, ChevronDown, ChevronUp, Clock, Cloud, Copy, Cpu, ExternalLink, FolderOpen, GitBranch, GitCompare, GitFork, Globe, Hash, MapPin, MessageSquare, RotateCcw, Server, Tag, Timer, User2 } from 'lucide-react';
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import type {
+  DetectedPort,
+  NodeResponse,
+  TaskDetailResponse,
+  WorkspaceResponse,
+} from '@simple-agent-manager/shared';
+import { Spinner } from '@simple-agent-manager/ui';
+import {
+  Bot,
+  CheckCircle2,
+  Clock,
+  Cpu,
+  Globe,
+  Hash,
+  MessageSquare,
+  Tag,
+  Timer,
+  User2,
+} from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 
 import type { ChatSessionResponse } from '../../lib/api';
-import { deleteWorkspace, getPortAccessUrl, getProjectTask, updateProjectTaskStatus } from '../../lib/api';
+import { getPortAccessUrl, getProjectTask, listChatMessages } from '../../lib/api';
 import { stripMarkdown } from '../../lib/text-utils';
 import { sanitizeUrl } from '../../lib/url-utils';
+import type { SessionSourceContext } from '../../pages/project-chat/lineageUtils';
+import { SessionCredentialLimitChip } from '../credential-limits/SessionCredentialLimitChip';
+import { CopyableId } from './CopyableId';
+import { PublicPortsToggleRow } from './PublicPortsToggleRow';
+import { SessionCommentChip } from './SessionCommentChip';
+import { WorkspaceProfileBadge } from './SessionHeaderBadges';
+import {
+  formatAgentType,
+  formatDuration,
+  formatExecutionStep,
+  formatTaskMode,
+  formatTime,
+  getCreatorLabel,
+} from './SessionHeaderFormatters';
+import { SessionHeaderInfrastructure } from './SessionHeaderInfrastructure';
+import { SessionSourceContextRow } from './SessionSourceContextRow';
 import type { SessionState } from './types';
 import { formatCountdown } from './types';
+import { usePublicPortsToggle } from './usePublicPortsToggle';
 
-/** Labeled value pill used in the session context panel. */
-function ContextItem({ icon, label, children }: { icon: React.ReactNode; label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-1.5 text-xs text-fg-muted min-w-0">
-      <span className="shrink-0 opacity-60" aria-hidden="true">{icon}</span>
-      <span className="font-medium shrink-0">{label}:</span>
-      <span className="text-fg-primary truncate min-w-0">{children}</span>
-    </div>
-  );
-}
-
-/** Human-readable VM size label from shared constants. */
-function formatVmSize(size: string): string {
-  const config = VM_SIZE_LABELS[size as VMSize];
-  return config ? config.label : size;
-}
-
-/** Copyable reference ID pill — click to copy the full value, shows truncated display. */
-function CopyableId({ label, value, icon }: { label: string; value: string; icon?: React.ReactNode }) {
-  const [copied, setCopied] = useState(false);
-  const handleCopy = useCallback(() => {
-    void navigator.clipboard.writeText(value).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
-  }, [value]);
-
-  return (
-    <button
-      type="button"
-      onClick={handleCopy}
-      title={`${label}: ${value} — click to copy`}
-      className="inline-flex items-center gap-1 text-[11px] font-mono px-1.5 py-0.5 rounded border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)]-default cursor-pointer hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-primary transition-colors min-w-0"
-      style={{ color: copied ? 'var(--sam-color-success)' : 'var(--sam-color-fg-muted)' }}
-    >
-      {icon && <span className="shrink-0 opacity-60" aria-hidden="true">{icon}</span>}
-      <span className="shrink-0 text-[10px] font-sans font-medium opacity-70">{label}</span>
-      <span className="truncate min-w-0">{value.length > 12 ? `${value.slice(0, 6)}...${value.slice(-4)}` : value}</span>
-      <span className="shrink-0" aria-hidden="true">
-        {copied ? <CheckCircle2 size={10} /> : <Copy size={10} />}
-      </span>
-    </button>
-  );
-}
-
-/** Format a duration in ms to a human-readable string. */
-function formatDuration(ms: number): string {
-  if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
-  if (ms < 3_600_000) {
-    const min = Math.floor(ms / 60_000);
-    const sec = Math.round((ms % 60_000) / 1000);
-    return sec > 0 ? `${min}m ${sec}s` : `${min}m`;
-  }
-  const hrs = Math.floor(ms / 3_600_000);
-  const min = Math.round((ms % 3_600_000) / 60_000);
-  return min > 0 ? `${hrs}h ${min}m` : `${hrs}h`;
-}
-
-/** Format a timestamp to a short locale string. */
-function formatTime(ts: number): string {
-  return new Date(ts).toLocaleString(undefined, {
-    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-  });
-}
-
-/** Human-readable task execution step. */
-function formatExecutionStep(step: string | null | undefined): string | null {
-  if (!step) return null;
-  const labels: Record<string, string> = {
-    node_selection: 'Selecting node',
-    node_provisioning: 'Provisioning node',
-    workspace_creation: 'Creating workspace',
-    workspace_ready: 'Workspace ready',
-    attachment_transfer: 'Transferring files',
-    agent_session: 'Agent running',
-    running: 'Running',
-    awaiting_followup: 'Awaiting follow-up',
-  };
-  return labels[step] ?? step.replace(/_/g, ' ');
-}
-
-/** Human-readable agent type label. */
-function formatAgentType(agentType: string): string {
-  const labels: Record<string, string> = {
-    'claude-code': 'Claude Code',
-    'openai-codex': 'OpenAI Codex',
-  };
-  return labels[agentType] ?? agentType;
-}
-
-/** Human-readable task mode label. */
-function formatTaskMode(mode: string): string {
-  return mode === 'conversation' ? 'Conversation' : 'Task';
-}
-
-function getWorkspaceProfileLabel(workspace: WorkspaceResponse): string {
-  if (workspace.status === 'recovery') return 'Recovery container';
-  return workspace.workspaceProfile === 'lightweight' ? 'Lightweight' : 'Full';
-}
-
-const RECOVERY_CONTAINER_HELP = 'The devcontainer build failed, so SAM started a fallback recovery container to keep this chat usable. Open the workspace and check Boot Logs for the devcontainer error output.';
-
-function WorkspaceProfileBadge({ workspace }: Readonly<{ workspace: WorkspaceResponse }>) {
-  const [open, setOpen] = useState(false);
-  const tooltipId = useId();
-  const isRecovery = workspace.status === 'recovery';
-  const label = getWorkspaceProfileLabel(workspace);
-  const badgeClassName = 'inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0';
-
-  if (!isRecovery) {
-    return (
-      <span
-        className={badgeClassName}
-        aria-label={`Workspace profile: ${label}`}
-        style={{
-          backgroundColor: workspace.workspaceProfile === 'lightweight' ? 'var(--sam-color-info-tint)' : 'var(--sam-color-success-tint)',
-          color: workspace.workspaceProfile === 'lightweight' ? 'var(--sam-color-info)' : 'var(--sam-color-success)',
-        }}
-      >
-        {label}
-      </span>
-    );
-  }
-
-  return (
-    <span className="relative inline-flex shrink-0">
-      <button
-        type="button"
-        aria-label="Recovery container: devcontainer build failed"
-        aria-describedby={open ? tooltipId : undefined}
-        onClick={() => setOpen(true)}
-        onFocus={() => setOpen(true)}
-        onBlur={() => setOpen(false)}
-        onMouseEnter={() => setOpen(true)}
-        onMouseLeave={() => setOpen(false)}
-        className={`${badgeClassName} border border-transparent cursor-help focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-primary`}
-        style={{
-          backgroundColor: 'var(--sam-color-warning-tint, rgba(245, 158, 11, 0.12))',
-          color: 'var(--sam-color-warning, #f59e0b)',
-          borderColor: 'color-mix(in srgb, var(--sam-color-warning, #f59e0b) 24%, transparent)',
-        }}
-      >
-        <AlertTriangle size={10} aria-hidden="true" />
-        {label}
-      </button>
-      {open && (
-        <span
-          id={tooltipId}
-          role="tooltip"
-          className="absolute right-0 top-full mt-1 w-[min(280px,calc(100vw-2rem))] rounded-sm glass-surface bg-[rgba(8,15,12,0.94)] px-3 py-2 text-left text-fg-primary shadow-tooltip z-dropdown whitespace-normal pointer-events-none"
-          style={{
-            fontSize: 'var(--sam-type-caption-size)',
-            lineHeight: 'var(--sam-type-caption-line-height)',
-          }}
-        >
-          {RECOVERY_CONTAINER_HELP}
-        </span>
-      )}
-    </span>
-  );
-}
-
-/** Collapsible session header — shows title + state dot, with expandable details. */
+/**
+ * Session header — title, status chips, and an expandable details panel.
+ *
+ * The session's ACTIONS no longer live here. Files/Git/Workspace/Timeline/Comments/
+ * Report/Complete used to sit inside the details disclosure and Retry/Fork were
+ * unlabeled icons in the title row, which put nine controls behind one 14px chevron.
+ * They now live in `SessionToolRail`, and the disclosure is controlled by the rail's
+ * "Details" action (see `useSessionTools`). This component is presentational: it owns
+ * no action state and triggers no mutations.
+ */
 export function SessionHeader({
   projectId,
   session,
   sessionState,
-  loading,
   idleCountdownMs,
   taskEmbed,
   workspace,
   node,
   detectedPorts,
   onSessionMutated,
-  onOpenFiles,
-  onOpenGit,
-  onRetry,
-  onFork,
+  onOpenComments,
+  unresolvedCommentCount = 0,
+  needsAttentionCommentCount = 0,
   lineageText,
+  initialPromptFallback = null,
+  sourceContext,
   hasContentBelow = false,
+  onShowHierarchy,
+  expanded,
+  onExpandedChange,
+  flushRight = false,
+  completeError = null,
+  onDismissCompleteError,
 }: {
   projectId: string;
   session: ChatSessionResponse;
   sessionState: SessionState;
-  loading: boolean;
   idleCountdownMs: number | null;
   taskEmbed: ChatSessionResponse['task'] | null;
   workspace: WorkspaceResponse | null;
   node: NodeResponse | null;
   detectedPorts: DetectedPort[];
   onSessionMutated?: () => void;
-  onOpenFiles?: () => void;
-  onOpenGit?: () => void;
-  onRetry?: () => void;
-  onFork?: () => void;
+  onOpenComments?: () => void;
+  /** Threads in this session that are not resolved. Drives the header chip. */
+  unresolvedCommentCount?: number;
+  /** Subset of the above whose last activity came from someone other than you. */
+  needsAttentionCommentCount?: number;
   /** Lineage subtitle for retries/forks (e.g., "↩ attempt 3"). */
   lineageText?: string;
+  /** First user prompt when the currently loaded page is known to contain it. */
+  initialPromptFallback?: string | null;
+  /** Parent/source details for forked or retried sessions. */
+  sourceContext?: SessionSourceContext;
   /** When true, suppress bottom rounding and glow (content follows below). */
   hasContentBelow?: boolean;
+  /** Open hierarchy modal for the given task. */
+  onShowHierarchy?: (taskId: string) => void;
+  /**
+   * Details-panel visibility. Controlled by the owner so the tool rail's "Details"
+   * action and the "+N more ports" chip drive the same panel.
+   */
+  expanded: boolean;
+  onExpandedChange: (expanded: boolean) => void;
+  /**
+   * True when the tool rail sits directly to the right of this card.
+   *
+   * The card's bottom corners are rounded so it reads as a panel hanging from the top of
+   * the conversation. Against the rail that curve is wrong: it leaves a lens-shaped gap
+   * between the card's rounded corner and the rail's straight edge. Squaring the right
+   * side lets the two butt flush and read as one continuous piece of chrome.
+   */
+  flushRight?: boolean;
+  /** Surfaced by the owner's mark-complete flow, which lives with the rail. */
+  completeError?: string | null;
+  onDismissCompleteError?: () => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const [completing, setCompleting] = useState(false);
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [completeError, setCompleteError] = useState<string | null>(null);
+  const [initialPrompt, setInitialPrompt] = useState<string | null>(initialPromptFallback);
+  const [initialPromptLoading, setInitialPromptLoading] = useState(false);
+  const [initialPromptError, setInitialPromptError] = useState<string | null>(null);
+  const initialPromptFetchedRef = useRef<string | null>(null);
+  const publicPorts = usePublicPortsToggle(workspace, onSessionMutated);
 
   // Trigger info — fetched on demand when expanding a task-linked session
   const [triggerDetail, setTriggerDetail] = useState<TaskDetailResponse | null>(null);
@@ -224,167 +134,273 @@ export function SessionHeader({
   useEffect(() => {
     if (!expanded || !session.taskId || triggerFetchedRef.current === session.taskId) return;
     triggerFetchedRef.current = session.taskId;
-    void getProjectTask(projectId, session.taskId).then((detail) => {
-      if (detail.trigger) setTriggerDetail(detail);
-    }).catch(() => { /* best-effort */ });
+    void getProjectTask(projectId, session.taskId)
+      .then((detail) => {
+        if (detail.trigger) setTriggerDetail(detail);
+      })
+      .catch(() => {
+        /* best-effort */
+      });
   }, [expanded, session.taskId, projectId]);
 
-  // Always show details — we always have at least reference IDs to display
-  const hasDetails = true;
+  useEffect(() => {
+    setInitialPrompt(initialPromptFallback);
+    setInitialPromptError(null);
+    setInitialPromptLoading(false);
+    initialPromptFetchedRef.current = null;
+  }, [session.id, initialPromptFallback]);
 
-  const canMarkComplete = !!(
-    taskEmbed?.id &&
-    taskEmbed.status !== 'completed' &&
-    taskEmbed.status !== 'cancelled' &&
-    taskEmbed.status !== 'failed'
+  useEffect(() => {
+    if (!expanded || initialPrompt || initialPromptFetchedRef.current === session.id) return;
+    initialPromptFetchedRef.current = session.id;
+    setInitialPromptLoading(true);
+    setInitialPromptError(null);
+
+    void listChatMessages(projectId, session.id, {
+      limit: 1,
+      roles: ['user'],
+      compact: true,
+      order: 'asc',
+    })
+      .then((result) => {
+        const firstUserPrompt = result.messages[0]?.content.trim() || null;
+        setInitialPrompt(firstUserPrompt);
+      })
+      .catch(() => {
+        setInitialPromptError('Initial prompt unavailable');
+      })
+      .finally(() => {
+        setInitialPromptLoading(false);
+      });
+  }, [expanded, initialPrompt, projectId, session.id]);
+
+  const getWorkspacePortHref = useCallback(
+    (port: DetectedPort) => {
+      if (!workspace) return sanitizeUrl(port.url);
+      return publicPorts.enabled
+        ? sanitizeUrl(port.url)
+        : getPortAccessUrl(workspace.id, port.port);
+    },
+    [publicPorts.enabled, workspace]
   );
 
-  const handleMarkComplete = useCallback(async () => {
-    if (!taskEmbed?.id || completing) return;
-    setCompleteError(null);
-    setCompleting(true);
-    setConfirmOpen(false);
-    try {
-      // 1. Mark the task as completed (this also stops the chat session server-side)
-      await updateProjectTaskStatus(projectId, taskEmbed.id, { toStatus: 'completed' });
-
-      // 2. Delete the workspace if one exists
-      if (session.workspaceId) {
-        await deleteWorkspace(session.workspaceId);
-      }
-
-      // Refresh session list via callback instead of full page reload.
-      // Reset completing before the callback so the button is not stuck in
-      // "Completing..." if the parent's refresh is slower than expected.
-      setCompleting(false);
-      onSessionMutated?.();
-    } catch (err) {
-      console.error('Failed to mark task complete:', err);
-      setCompleteError(err instanceof Error ? err.message : 'Failed to complete task');
-      setCompleting(false);
-    }
-  }, [projectId, taskEmbed?.id, session.workspaceId, completing, onSessionMutated]);
+  const sessionTitle = session.topic
+    ? stripMarkdown(session.topic)
+    : `Chat ${session.id.slice(0, 8)}`;
+  const creatorLabel = getCreatorLabel(session);
+  const sortedPorts = detectedPorts.slice().sort((a, b) => a.port - b.port);
+  const firstPort = sortedPorts[0];
+  const extraPortCount = Math.max(0, sortedPorts.length - 1);
 
   return (
     <div
-      className={`relative glass-chrome border-t-0 shrink-0${hasContentBelow ? '' : ' rounded-b-2xl after:content-[\'\'] after:absolute after:bottom-0 after:left-[8%] after:right-[8%] after:h-[3px] after:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.55)_0%,transparent_70%)] after:blur-[2px] after:pointer-events-none after:z-10'}`}
-      style={{ backgroundColor: 'rgba(8, 15, 12, 0.68)', boxShadow: hasContentBelow ? '0 4px 24px rgba(0, 0, 0, 0.4)' : '0 4px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(34, 197, 94, 0.08)' }}
+      data-testid="session-header"
+      className={`relative glass-chrome border-t-0 shrink-0${hasContentBelow ? '' : `${flushRight ? ' rounded-bl-2xl' : ' rounded-b-2xl'}` + " after:content-[''] after:absolute after:bottom-0 after:left-[8%] after:right-[8%] after:h-[3px] after:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.55)_0%,transparent_70%)] after:blur-[2px] after:pointer-events-none after:z-10"}`}
+      style={{
+        boxShadow: hasContentBelow
+          ? '0 4px 24px rgba(0, 0, 0, 0.4)'
+          : '0 4px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(34, 197, 94, 0.08)',
+      }}
     >
-      {/* Compact row — always visible */}
-      <div className="flex items-center gap-2 px-4 py-2 min-h-[44px]">
-        <span className="text-sm font-semibold text-fg-primary truncate flex-1 min-w-0">
-          {session.topic ? stripMarkdown(session.topic) : `Chat ${session.id.slice(0, 8)}`}
-        </span>
-
-        {/* Lineage info for retries/forks */}
-        {lineageText && (
-          <span
-            className="text-[10px] font-medium shrink-0"
-            style={{ color: 'var(--sam-color-fg-muted)' }}
-            title={lineageText}
-          >
-            {lineageText}
-          </span>
-        )}
-
-        {workspace && <WorkspaceProfileBadge workspace={workspace} />}
-
-        {/* Active port badges — shown inline in compact row */}
-        {detectedPorts.length > 0 && (
-          <span className="inline-flex items-center gap-1 shrink-0">
-            {detectedPorts
-              .slice()
-              .sort((a, b) => a.port - b.port)
-              .slice(0, 3) // Show up to 3 port badges inline
-              .map((p) => (
-                <a
-                  key={p.port}
-                  href={workspace ? getPortAccessUrl(workspace.id, p.port) : sanitizeUrl(p.url)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-0.5 text-[10px] font-mono font-medium px-1.5 py-0.5 rounded no-underline shrink-0"
-                  style={{
-                    backgroundColor: 'var(--sam-color-accent-tint, rgba(59, 130, 246, 0.1))',
-                    color: 'var(--sam-color-accent-primary)',
-                  }}
-                  title={`${p.label} — ${p.url}`}
-                >
-                  <Globe size={10} />
-                  {p.port}
-                </a>
-              ))}
-            {detectedPorts.length > 3 && (
-              <span className="text-[10px] text-fg-muted">+{detectedPorts.length - 3}</span>
-            )}
-          </span>
-        )}
-
-        {/* Retry & Fork — always visible when session has a task */}
-        {(session.task?.id ?? session.taskId) && (
-          <span className="inline-flex items-center gap-0.5 shrink-0">
-            {onRetry && (
-              <button
-                type="button"
-                onClick={onRetry}
-                aria-label="Retry task"
-                title="Retry — re-run this task"
-                className="shrink-0 p-1.5 bg-transparent border-none cursor-pointer text-fg-muted rounded-sm hover:text-fg-primary hover:bg-surface-hover transition-colors"
-              >
-                <RotateCcw size={14} />
-              </button>
-            )}
-            {onFork && (
-              <button
-                type="button"
-                onClick={onFork}
-                aria-label="Fork session"
-                title="Fork — start a new task from this session"
-                className="shrink-0 p-1.5 bg-transparent border-none cursor-pointer text-fg-muted rounded-sm hover:text-fg-primary hover:bg-surface-hover transition-colors"
-              >
-                <GitFork size={14} />
-              </button>
-            )}
-          </span>
-        )}
-
-        {/* State indicator */}
-        <span
-          className="inline-flex items-center gap-1 text-xs font-medium shrink-0"
+      {/* Opacity scrim: Chromium does not sample composited scroll-container
+          content for backdrop-filter, so the glass blur silently no-ops over
+          the message list and scrolled messages collide with the header text.
+          This underlay keeps the header legible without depending on blur. */}
+      <div
+        aria-hidden="true"
+        className="absolute inset-0 rounded-[inherit] -z-10 pointer-events-none"
+        style={{
+          backgroundColor: 'color-mix(in srgb, var(--sam-color-bg-canvas) 78%, transparent)',
+        }}
+      />
+      <div className="px-4 py-2 min-h-[54px] space-y-1.5">
+        {/* Retry / Fork / the details chevron used to sit to the right of this title as
+            unlabeled 14px icons. They are now named, grouped controls in
+            `SessionToolRail`, so the title gets the full width. */}
+        <div
+          // Focus target after an in-chat link opens another chat (session-focus-handoff).
+          data-session-title
+          tabIndex={-1}
+          className="text-sm font-semibold text-fg-primary min-w-0 leading-snug rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+          title={sessionTitle}
           style={{
-            color: sessionState === 'active' ? 'var(--sam-color-success)'
-              : sessionState === 'idle' ? 'var(--sam-color-warning, #f59e0b)'
-              : 'var(--sam-color-fg-muted)',
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+            overflowWrap: 'anywhere',
           }}
         >
-          <span className="w-[6px] h-[6px] rounded-full bg-current" />
-          {sessionState === 'active' ? 'Active' : sessionState === 'idle' ? 'Idle' : 'Stopped'}
-        </span>
+          {sessionTitle}
+        </div>
 
-        {/* Background refresh indicator */}
-        {loading && (
-          <span role="status" aria-label="Refreshing messages" className="inline-flex items-center shrink-0">
-            <Spinner size="sm" />
-          </span>
-        )}
-
-        {/* Expand/collapse toggle — only shown when there are details to show */}
-        {hasDetails && (
-          <button
-            type="button"
-            onClick={() => setExpanded((v) => !v)}
-            aria-expanded={expanded}
-            aria-label={expanded ? 'Hide session details' : 'Show session details'}
-            className="shrink-0 p-2 bg-transparent border-none cursor-pointer text-fg-muted rounded-sm hover:text-fg-primary transition-colors"
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
+          <span
+            className="inline-flex items-center gap-1 text-xs font-medium shrink-0"
+            style={{
+              color:
+                sessionState === 'active'
+                  ? 'var(--sam-color-success)'
+                  : sessionState === 'idle'
+                    ? 'var(--sam-color-warning, #f59e0b)'
+                    : sessionState === 'sleeping'
+                      ? 'var(--sam-color-info, #3b82f6)'
+                      : 'var(--sam-color-fg-muted)',
+            }}
           >
-            {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          </button>
-        )}
+            <span className="w-[6px] h-[6px] rounded-full bg-current" />
+            {sessionState === 'active'
+              ? 'Active'
+              : sessionState === 'idle'
+                ? 'Idle'
+                : sessionState === 'sleeping'
+                  ? 'Sleeping'
+                  : 'Stopped'}
+          </span>
+
+          {workspace && <WorkspaceProfileBadge workspace={workspace} />}
+
+          <SessionCredentialLimitChip
+            projectId={projectId}
+            agentSessionId={session.agentSessionId ?? null}
+          />
+
+          {creatorLabel && (
+            <span
+              className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 ${
+                session.isMine ? 'text-fg-secondary bg-surface' : 'text-fg-muted bg-surface'
+              }`}
+              title={session.isMine ? 'Created by you' : `Created by ${creatorLabel}`}
+            >
+              <User2 size={10} aria-hidden="true" />
+              <span>{session.isMine ? 'Your session' : creatorLabel}</span>
+            </span>
+          )}
+
+          {firstPort && (
+            <a
+              href={getWorkspacePortHref(firstPort)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-0.5 text-[10px] font-mono font-medium px-1.5 py-0.5 rounded no-underline shrink-0"
+              style={{
+                backgroundColor: 'var(--sam-color-accent-tint, rgba(59, 130, 246, 0.1))',
+                color: 'var(--sam-color-accent-primary)',
+              }}
+              title={`${firstPort.label} — ${firstPort.url}`}
+            >
+              <Globe size={10} aria-hidden="true" />
+              {firstPort.port}
+            </a>
+          )}
+
+          {extraPortCount > 0 && (
+            <button
+              type="button"
+              onClick={() => onExpandedChange(true)}
+              className="text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 bg-transparent border cursor-pointer whitespace-nowrap hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-primary"
+              style={{
+                color: 'var(--sam-color-fg-muted)',
+                borderColor: 'var(--sam-color-border-default)',
+              }}
+              aria-label={`Show ${extraPortCount} more forwarded ${extraPortCount === 1 ? 'port' : 'ports'}`}
+            >
+              +{extraPortCount} more
+            </button>
+          )}
+
+          {onOpenComments && (
+            <SessionCommentChip
+              unresolvedCommentCount={unresolvedCommentCount}
+              needsAttentionCommentCount={needsAttentionCommentCount}
+              onOpenComments={onOpenComments}
+            />
+          )}
+
+          {lineageText && (
+            <span
+              className="text-[10px] font-medium shrink-0"
+              style={{ color: 'var(--sam-color-fg-muted)' }}
+              title={lineageText}
+            >
+              {lineageText.startsWith('⑂') ? '⑂ fork' : lineageText}
+            </span>
+          )}
+        </div>
       </div>
 
-      {/* Expanded details panel */}
-      {expanded && hasDetails && (
+      {/* Mark-complete failures. Rendered OUTSIDE the disclosure: the action that
+          produces this error now lives in the tool rail, so the user has no reason to
+          have the details panel open when it fails. */}
+      {completeError && (
+        <div className="flex items-center gap-2 border-t border-[rgba(239,68,68,0.16)] px-4 py-1.5">
+          <span className="text-xs" style={{ color: 'var(--sam-color-danger)' }}>
+            {completeError}
+          </span>
+          {onDismissCompleteError && (
+            <button
+              type="button"
+              onClick={onDismissCompleteError}
+              className="text-xs bg-transparent border-none cursor-pointer underline"
+              style={{ color: 'var(--sam-color-fg-muted)' }}
+            >
+              Dismiss
+            </button>
+          )}
+        </div>
+      )}
+
+      {workspace && detectedPorts.length > 0 && (
+        <PublicPortsToggleRow
+          enabled={publicPorts.enabled}
+          saving={publicPorts.saving}
+          error={publicPorts.error}
+          onToggle={publicPorts.toggle}
+        />
+      )}
+
+      {expanded && (
         <div className="border-t border-[rgba(34,197,94,0.08)] px-4 py-2 space-y-2">
-          {/* Reference IDs — copyable pills for cross-referencing */}
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-1 text-[10px] font-medium text-fg-muted uppercase tracking-wide">
+              <Tag size={10} />
+              Title
+            </div>
+            <div
+              className="text-sm font-semibold text-fg-primary"
+              style={{ overflowWrap: 'anywhere' }}
+            >
+              {sessionTitle}
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-1 text-[10px] font-medium text-fg-muted uppercase tracking-wide">
+              <MessageSquare size={10} />
+              Initial prompt
+            </div>
+            {initialPromptLoading ? (
+              <div role="status" className="inline-flex items-center gap-2 text-xs text-fg-muted">
+                <Spinner size="sm" />
+                Loading initial prompt...
+              </div>
+            ) : initialPrompt ? (
+              <div
+                className="text-xs leading-relaxed rounded p-2 max-h-32 overflow-y-auto whitespace-pre-wrap text-fg-primary"
+                style={{
+                  background: 'var(--sam-color-bg-inset, rgba(255,255,255,0.03))',
+                  overflowWrap: 'anywhere',
+                }}
+              >
+                {initialPrompt}
+              </div>
+            ) : (
+              <div className="text-xs text-fg-muted">
+                {initialPromptError ?? 'No initial user prompt found.'}
+              </div>
+            )}
+          </div>
+
           <div className="space-y-1.5">
             <div className="flex items-center gap-1 text-[10px] font-medium text-fg-muted uppercase tracking-wide">
               <Hash size={10} />
@@ -395,30 +411,28 @@ export function SessionHeader({
                 <CopyableId label="Task" value={taskEmbed.id} icon={<Tag size={9} />} />
               )}
               <CopyableId label="Session" value={session.id} icon={<Hash size={9} />} />
-              {session.workspaceId && (
-                <CopyableId label="Workspace" value={session.workspaceId} />
-              )}
-              {session.agentSessionId && (
-                <CopyableId label="ACP" value={session.agentSessionId} />
-              )}
+              {session.workspaceId && <CopyableId label="Workspace" value={session.workspaceId} />}
+              {session.agentSessionId && <CopyableId label="ACP" value={session.agentSessionId} />}
             </div>
           </div>
 
-          {/* Agent info — type, mode, profile */}
           {(session.agentType || taskEmbed?.taskMode || taskEmbed?.agentProfileHint) && (
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-fg-muted min-w-0">
               {session.agentType && (
                 <span className="inline-flex items-center gap-1">
                   <Bot size={11} className="opacity-60" aria-hidden="true" />
-                  <span className="font-medium text-fg-primary">{formatAgentType(session.agentType)}</span>
+                  <span className="font-medium text-fg-primary">
+                    {formatAgentType(session.agentType)}
+                  </span>
                 </span>
               )}
               {taskEmbed?.taskMode && (
                 <span className="inline-flex items-center gap-1">
-                  {taskEmbed.taskMode === 'conversation'
-                    ? <MessageSquare size={11} className="opacity-60" aria-hidden="true" />
-                    : <Cpu size={11} className="opacity-60" aria-hidden="true" />
-                  }
+                  {taskEmbed.taskMode === 'conversation' ? (
+                    <MessageSquare size={11} className="opacity-60" aria-hidden="true" />
+                  ) : (
+                    <Cpu size={11} className="opacity-60" aria-hidden="true" />
+                  )}
                   {formatTaskMode(taskEmbed.taskMode)}
                 </span>
               )}
@@ -431,52 +445,58 @@ export function SessionHeader({
             </div>
           )}
 
-          {/* Task execution status + timing */}
           {(taskEmbed?.id || session.startedAt) && (
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-fg-muted">
-              {/* Task execution step */}
               {taskEmbed?.executionStep && taskEmbed.status === 'in_progress' && (
                 <span className="inline-flex items-center gap-1">
                   <Spinner size="sm" />
-                  <span className="font-medium" style={{ color: 'var(--sam-color-accent-primary)' }}>
+                  <span
+                    className="font-medium"
+                    style={{ color: 'var(--sam-color-accent-primary)' }}
+                  >
                     {formatExecutionStep(taskEmbed.executionStep)}
                   </span>
                 </span>
               )}
-              {/* Task status badge */}
               {taskEmbed?.status && (
                 <span
                   className="inline-flex items-center gap-1 text-[11px] font-medium px-1.5 py-0.5 rounded"
                   style={{
-                    backgroundColor: taskEmbed.status === 'completed' ? 'var(--sam-color-success-tint)'
-                      : taskEmbed.status === 'failed' ? 'color-mix(in srgb, var(--sam-color-danger) 10%, transparent)'
-                      : taskEmbed.status === 'in_progress' ? 'var(--sam-color-accent-tint, rgba(59, 130, 246, 0.1))'
-                      : 'var(--sam-color-surface-hover)',
-                    color: taskEmbed.status === 'completed' ? 'var(--sam-color-success)'
-                      : taskEmbed.status === 'failed' ? 'var(--sam-color-danger)'
-                      : taskEmbed.status === 'in_progress' ? 'var(--sam-color-accent-primary)'
-                      : 'var(--sam-color-fg-muted)',
+                    backgroundColor:
+                      taskEmbed.status === 'completed'
+                        ? 'var(--sam-color-success-tint)'
+                        : taskEmbed.status === 'failed'
+                          ? 'color-mix(in srgb, var(--sam-color-danger) 10%, transparent)'
+                          : taskEmbed.status === 'in_progress'
+                            ? 'var(--sam-color-accent-tint, rgba(59, 130, 246, 0.1))'
+                            : 'var(--sam-color-surface-hover)',
+                    color:
+                      taskEmbed.status === 'completed'
+                        ? 'var(--sam-color-success)'
+                        : taskEmbed.status === 'failed'
+                          ? 'var(--sam-color-danger)'
+                          : taskEmbed.status === 'in_progress'
+                            ? 'var(--sam-color-accent-primary)'
+                            : 'var(--sam-color-fg-muted)',
                   }}
                 >
                   {taskEmbed.status === 'completed' && <CheckCircle2 size={10} />}
-                  {taskEmbed.status.charAt(0).toUpperCase() + taskEmbed.status.slice(1).replace(/_/g, ' ')}
+                  {taskEmbed.status.charAt(0).toUpperCase() +
+                    taskEmbed.status.slice(1).replace(/_/g, ' ')}
                 </span>
               )}
-              {/* Started time */}
               {session.startedAt && (
                 <span className="inline-flex items-center gap-1">
                   <Clock size={11} className="opacity-60" />
                   {formatTime(session.startedAt)}
                 </span>
               )}
-              {/* Duration */}
               {session.startedAt && (
                 <span className="inline-flex items-center gap-1">
                   <Timer size={11} className="opacity-60" />
                   {session.endedAt
                     ? formatDuration(session.endedAt - session.startedAt)
-                    : formatDuration(Date.now() - session.startedAt)
-                  }
+                    : formatDuration(Date.now() - session.startedAt)}
                   {!session.endedAt && <span className="text-[10px] opacity-50">(running)</span>}
                 </span>
               )}
@@ -491,9 +511,10 @@ export function SessionHeader({
                 <span
                   className="sam-type-caption font-mono"
                   style={{
-                    color: idleCountdownMs < 5 * 60 * 1000
-                      ? 'var(--sam-color-danger)'
-                      : 'var(--sam-color-warning, #f59e0b)',
+                    color:
+                      idleCountdownMs < 5 * 60 * 1000
+                        ? 'var(--sam-color-danger)'
+                        : 'var(--sam-color-warning, #f59e0b)',
                   }}
                 >
                   Cleanup in {formatCountdown(idleCountdownMs)}
@@ -519,9 +540,15 @@ export function SessionHeader({
           {triggerDetail?.trigger && (
             <div
               className="flex items-start gap-2 px-2 py-1.5 rounded text-xs"
-              style={{ background: 'color-mix(in srgb, var(--sam-color-info, #3b82f6) 8%, transparent)' }}
+              style={{
+                background: 'color-mix(in srgb, var(--sam-color-info, #3b82f6) 8%, transparent)',
+              }}
             >
-              <Clock size={12} className="shrink-0 mt-0.5" style={{ color: 'var(--sam-color-info, #3b82f6)' }} />
+              <Clock
+                size={12}
+                className="shrink-0 mt-0.5"
+                style={{ color: 'var(--sam-color-info, #3b82f6)' }}
+              />
               <div className="flex-1 min-w-0 space-y-0.5">
                 <div className="font-medium text-fg-primary">
                   Triggered by: {triggerDetail.trigger.name}
@@ -554,208 +581,28 @@ export function SessionHeader({
             </div>
           )}
 
-          {/* Action buttons — wraps on narrow viewports */}
-          <div className="flex flex-wrap items-center gap-1.5">
-            {session.workspaceId && sessionState === 'active' && (
-              <>
-                {onOpenFiles && (
-                  <Button variant="ghost" size="sm" onClick={onOpenFiles}>
-                    <FolderOpen size={14} className="mr-1" />
-                    Files
-                  </Button>
-                )}
-                {onOpenGit && (
-                  <Button variant="ghost" size="sm" onClick={onOpenGit}>
-                    <GitCompare size={14} className="mr-1" />
-                    Git
-                  </Button>
-                )}
-                <a
-                  href={`/workspaces/${session.workspaceId}`}
-                  aria-label="Open workspace"
-                  className="no-underline"
-                >
-                  <Button variant="ghost" size="sm">
-                    <ExternalLink size={14} className="mr-1" />
-                    Workspace
-                  </Button>
-                </a>
-              </>
-            )}
-
-            {canMarkComplete && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setConfirmOpen(true)}
-                disabled={completing}
-                style={{ color: completing ? undefined : 'var(--sam-color-success)' }}
-              >
-                <CheckCircle2 size={14} className="mr-1" />
-                {completing ? 'Completing...' : 'Complete'}
-              </Button>
-            )}
-          </div>
-
-          {/* Inline error for mark-complete failures */}
-          {completeError && (
-            <div className="flex items-center gap-2 px-1 py-1">
-              <span className="text-xs" style={{ color: 'var(--sam-color-danger)' }}>{completeError}</span>
-              <button
-                type="button"
-                onClick={() => setCompleteError(null)}
-                className="text-xs bg-transparent border-none cursor-pointer underline"
-                style={{ color: 'var(--sam-color-fg-muted)' }}
-              >
-                Dismiss
-              </button>
-            </div>
+          {sourceContext && (
+            <SessionSourceContextRow
+              projectId={projectId}
+              sourceContext={sourceContext}
+              onShowHierarchy={onShowHierarchy}
+            />
           )}
 
-          {/* Infrastructure context — workspace & node details */}
-          {session.workspaceId && (workspace || node) && (
-            <div className="flex flex-col gap-1.5 pt-1 border-t border-border-default">
-              {workspace && (
-                <>
-                  <ContextItem icon={<Box size={12} />} label="Workspace">
-                    <a
-                      href={`/workspaces/${workspace.id}`}
-                      className="no-underline hover:underline"
-                      style={{ color: 'var(--sam-color-accent-primary)' }}
-                    >
-                      {workspace.displayName || workspace.name}
-                    </a>
-                    <span className="text-fg-muted ml-1">({workspace.status})</span>
-                  </ContextItem>
-                  <ContextItem icon={<Cpu size={12} />} label="VM Size">
-                    {formatVmSize(workspace.vmSize)}
-                  </ContextItem>
-                </>
-              )}
-              {node && (
-                <>
-                  <ContextItem icon={<Server size={12} />} label="Node">
-                    <a
-                      href={`/nodes/${node.id}`}
-                      className="no-underline hover:underline"
-                      style={{ color: 'var(--sam-color-accent-primary)' }}
-                    >
-                      {node.name}
-                    </a>
-                    {node.healthStatus && (
-                      <span
-                        className="ml-1"
-                        style={{
-                          color: node.healthStatus === 'healthy' ? 'var(--sam-color-success)'
-                            : node.healthStatus === 'stale' ? 'var(--sam-color-warning, #f59e0b)'
-                            : 'var(--sam-color-danger)',
-                        }}
-                      >
-                        ({node.healthStatus})
-                      </span>
-                    )}
-                  </ContextItem>
-                  {node.cloudProvider && (
-                    <ContextItem icon={<Cloud size={12} />} label="Provider">
-                      {node.cloudProvider.charAt(0).toUpperCase() + node.cloudProvider.slice(1)}
-                      {workspace?.vmLocation && (
-                        <span className="text-fg-muted ml-1">— {workspace.vmLocation}</span>
-                      )}
-                    </ContextItem>
-                  )}
-                </>
-              )}
-              {!node && workspace?.vmLocation && (
-                <ContextItem icon={<MapPin size={12} />} label="Location">
-                  {workspace.vmLocation}
-                </ContextItem>
-              )}
-              {taskEmbed?.outputBranch && (
-                <ContextItem icon={<GitBranch size={12} />} label="Branch">
-                  <span className="font-mono text-[11px]">
-                    {taskEmbed.outputBranch}
-                  </span>
-                </ContextItem>
-              )}
-              {detectedPorts.length > 0 && (
-                <ContextItem icon={<Globe size={12} />} label="Ports">
-                  <span className="inline-flex flex-wrap gap-1.5">
-                    {detectedPorts
-                      .slice()
-                      .sort((a, b) => a.port - b.port)
-                      .map((p) => (
-                        <a
-                          key={p.port}
-                          href={workspace ? getPortAccessUrl(workspace.id, p.port) : sanitizeUrl(p.url)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 font-mono text-[11px] no-underline hover:underline"
-                          style={{ color: 'var(--sam-color-accent-primary)' }}
-                          title={p.label}
-                        >
-                          {p.port}
-                          {p.address === '127.0.0.1' || p.address === '::1' ? ' (local)' : ''}
-                          <ExternalLink size={10} />
-                        </a>
-                      ))}
-                  </span>
-                </ContextItem>
-              )}
-            </div>
-          )}
-          {/* Active ports section — shown when ports are detected and no infrastructure section is shown */}
-          {detectedPorts.length > 0 && !(session.workspaceId && (workspace || node)) && (
-            <div className="flex flex-col gap-1.5 pt-1 border-t border-border-default">
-              <ContextItem icon={<Globe size={12} />} label="Ports">
-                <span className="inline-flex flex-wrap gap-1.5">
-                  {detectedPorts
-                    .slice()
-                    .sort((a, b) => a.port - b.port)
-                    .map((p) => (
-                      <a
-                        key={p.port}
-                        href={workspace ? getPortAccessUrl(workspace.id, p.port) : sanitizeUrl(p.url)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 font-mono text-[11px] no-underline hover:underline"
-                        style={{ color: 'var(--sam-color-accent-primary)' }}
-                        title={p.label}
-                      >
-                        {p.port}
-                        {p.address === '127.0.0.1' || p.address === '::1' ? ' (local)' : ''}
-                        <ExternalLink size={10} />
-                      </a>
-                    ))}
-                </span>
-              </ContextItem>
-            </div>
-          )}
-          {/* Fallback when workspace data is still loading or failed */}
-          {session.workspaceId && !workspace && !node && (
-            <div className="pt-1 border-t border-border-default">
-              <span className="text-xs text-fg-muted">Loading infrastructure details...</span>
-            </div>
-          )}
+          {/* The action row that used to live here — Files, Git, Workspace, Timeline,
+              Comments, Report, Complete — moved to `SessionToolRail`. This panel is
+              now purely reference material: title, initial prompt, IDs, infrastructure. */}
+
+          <SessionHeaderInfrastructure
+            session={session}
+            workspace={workspace}
+            node={node}
+            taskEmbed={taskEmbed}
+            detectedPorts={detectedPorts}
+            getWorkspacePortHref={getWorkspacePortHref}
+          />
         </div>
       )}
-
-      {/* Confirmation dialog for mark-complete action */}
-      <Dialog isOpen={confirmOpen} onClose={() => setConfirmOpen(false)} maxWidth="sm">
-        <h3 id="dialog-title" className="text-base font-semibold text-fg-primary mb-2">
-          Mark task as complete?
-        </h3>
-        <p className="text-sm text-fg-muted mb-4">
-          This will archive the task and delete the workspace. This action cannot be undone.
-        </p>
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" size="sm" onClick={() => setConfirmOpen(false)}>
-            Cancel
-          </Button>
-          <Button variant="primary" size="sm" onClick={handleMarkComplete}>
-            Complete & Delete
-          </Button>
-        </div>
-      </Dialog>
     </div>
   );
 }

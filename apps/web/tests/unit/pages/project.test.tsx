@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Navigate, Route, Routes } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ToastProvider } from '../../../src/hooks/useToast';
+import { renderWithQuery } from '../../test-utils/query-test-utils';
 
 const mocks = vi.hoisted(() => ({
   getProject: vi.fn(),
@@ -31,6 +32,10 @@ const mocks = vi.hoisted(() => ({
   getProviderCatalog: vi.fn(),
   listCredentials: vi.fn(),
   listAgentProfiles: vi.fn(),
+  listProjectRepositories: vi.fn(),
+  discoverSubmoduleRepos: vi.fn(),
+  listAvailableRepositories: vi.fn(),
+  getProjectMembers: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
@@ -61,10 +66,19 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   getProviderCatalog: mocks.getProviderCatalog,
   listCredentials: mocks.listCredentials,
   listAgentProfiles: mocks.listAgentProfiles,
+  listProjectRepositories: mocks.listProjectRepositories,
+  discoverSubmoduleRepos: mocks.discoverSubmoduleRepos,
+  listAvailableRepositories: mocks.listAvailableRepositories,
+  getProjectMembers: mocks.getProjectMembers,
 }));
 
 vi.mock('../../../src/components/UserMenu', () => ({
   UserMenu: () => <div data-testid="user-menu">user-menu</div>,
+}));
+
+vi.mock('../../../src/components/AuthProvider', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/components/AuthProvider')>()),
+  useAuth: () => ({ user: { id: 'user-1', email: 'owner@example.com', name: 'Project Owner' } }),
 }));
 
 const mockSetProjectName = vi.fn();
@@ -74,18 +88,37 @@ vi.mock('../../../src/components/AppShell', () => ({
 
 import { Project } from '../../../src/pages/Project';
 import { ProjectActivity } from '../../../src/pages/ProjectActivity';
-import { ProjectSettings } from '../../../src/pages/ProjectSettings';
+import {
+  ProjectSettings,
+  ProjectSettingsAccess,
+  ProjectSettingsAgents,
+  ProjectSettingsConnections,
+  ProjectSettingsDeploy,
+  ProjectSettingsGeneral,
+  ProjectSettingsIndexRedirect,
+  ProjectSettingsInfrastructure,
+  ProjectSettingsRuntime,
+} from '../../../src/pages/ProjectSettings';
 import { ProjectTasks } from '../../../src/pages/ProjectTasks';
 
 function renderProjectPage(path = '/projects/proj-1/tasks') {
-  return render(
+  return renderWithQuery(
     <ToastProvider>
       <MemoryRouter initialEntries={[path]}>
         <Routes>
           <Route path="/projects/:id" element={<Project />}>
             <Route index element={<Navigate to="tasks" replace />} />
             <Route path="tasks" element={<ProjectTasks />} />
-            <Route path="settings" element={<ProjectSettings />} />
+            <Route path="settings" element={<ProjectSettings />}>
+              <Route index element={<ProjectSettingsIndexRedirect />} />
+              <Route path="general" element={<ProjectSettingsGeneral />} />
+              <Route path="access" element={<ProjectSettingsAccess />} />
+              <Route path="connections" element={<ProjectSettingsConnections />} />
+              <Route path="agents" element={<ProjectSettingsAgents />} />
+              <Route path="infrastructure" element={<ProjectSettingsInfrastructure />} />
+              <Route path="runtime" element={<ProjectSettingsRuntime />} />
+              <Route path="deploy" element={<ProjectSettingsDeploy />} />
+            </Route>
             <Route path="activity" element={<ProjectActivity />} />
           </Route>
         </Routes>
@@ -153,6 +186,34 @@ describe('Project page', () => {
       },
     ]);
     mocks.listWorkspaces.mockResolvedValue([]);
+    // RepositoryAccessSettings (rendered in the settings tab) lazy-loads these.
+    mocks.listProjectRepositories.mockResolvedValue({
+      primaryRepository: 'acme/repo-one',
+      repositories: [],
+    });
+    mocks.discoverSubmoduleRepos.mockResolvedValue({ suggestions: [] });
+    mocks.listAvailableRepositories.mockResolvedValue({ repositories: [] });
+    mocks.getProjectMembers.mockResolvedValue({
+      members: [
+        {
+          id: 'member-1',
+          projectId: 'proj-1',
+          userId: 'user-1',
+          role: 'owner',
+          status: 'active',
+          joinedAt: '2026-02-18T00:00:00.000Z',
+          createdAt: '2026-02-18T00:00:00.000Z',
+          updatedAt: '2026-02-18T00:00:00.000Z',
+          user: {
+            id: 'user-1',
+            email: 'owner@example.com',
+            name: 'Project Owner',
+          },
+        },
+      ],
+      inviteLinks: [],
+      accessRequests: [],
+    });
     mocks.getProjectRuntimeConfig.mockResolvedValue({
       envVars: [],
       files: [],
@@ -274,7 +335,7 @@ describe('Project page', () => {
       files: [],
     });
 
-    renderProjectPage('/projects/proj-1/settings');
+    renderProjectPage('/projects/proj-1/settings/runtime');
 
     fireEvent.change(await screen.findByLabelText('Runtime env key'), {
       target: { value: 'API_TOKEN' },

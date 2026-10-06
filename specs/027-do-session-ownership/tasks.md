@@ -19,7 +19,7 @@
 
 **Purpose**: Shared types, migration schema, and configuration constants
 
-- [ ] T001 [P] Add `AcpSessionStatus`, `AcpSession`, `AcpSessionEvent`, `ForkRequest` types to `packages/shared/src/types.ts`
+- [ ] T001 [P] Add `AcpSessionStatus`, `AcpSession`, `AcpSessionEvent`, `AcpSessionForkRequest` types to `packages/shared/src/types/session.ts`
 - [ ] T002 [P] Add configurable env var constants (`ACP_SESSION_HEARTBEAT_INTERVAL_MS`, `ACP_SESSION_DETECTION_WINDOW_MS`, `ACP_SESSION_RECONCILIATION_TIMEOUT_MS`, `ACP_SESSION_FORK_CONTEXT_MESSAGES`, `ACP_SESSION_MAX_FORK_DEPTH`) to `packages/shared/src/constants.ts` (create if needed) with defaults
 - [ ] T003 [P] Add ACP session contract types (heartbeat request, status report request, reconciliation response) to `packages/shared/src/vm-agent-contract.ts`
 - [ ] T004 Rebuild shared package: `pnpm --filter @simple-agent-manager/shared build`
@@ -33,10 +33,10 @@
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
 - [ ] T005 Add migration 008 to `apps/api/src/durable-objects/migrations.ts` creating `acp_sessions` and `acp_session_events` tables per data-model.md schema
-- [ ] T006 Add `createAcpSession()` method to `apps/api/src/durable-objects/project-data.ts` — insert with status "pending", record creation event in `acp_session_events`
-- [ ] T007 Add `getAcpSession()` and `listAcpSessions()` query methods to `apps/api/src/durable-objects/project-data.ts`
-- [ ] T008 Add `transitionAcpSession(sessionId, toStatus, { actorType, actorId, reason, metadata })` to `apps/api/src/durable-objects/project-data.ts` — enforce valid transitions per state machine, reject invalid ones with 409, log structured diagnostics
-- [ ] T009 Add `mapAcpSessionRow()` private helper to `apps/api/src/durable-objects/project-data.ts` for consistent response mapping
+- [ ] T006 Add `createAcpSession()` ProjectData facade in `apps/api/src/durable-objects/project-data/index.ts` and helper in `apps/api/src/durable-objects/project-data/acp-sessions.ts` — insert with status "pending", record creation event in `acp_session_events`
+- [ ] T007 Add `getAcpSession()` and `listAcpSessions()` query methods in `apps/api/src/durable-objects/project-data/index.ts`, backed by `apps/api/src/durable-objects/project-data/acp-sessions.ts`
+- [ ] T008 Add `transitionAcpSession(sessionId, toStatus, { actorType, actorId, reason, metadata })` through `apps/api/src/durable-objects/project-data/index.ts` / `apps/api/src/durable-objects/project-data/acp-sessions.ts` — enforce valid transitions per state machine, reject invalid ones with 409, log structured diagnostics
+- [ ] T009 Add `mapAcpSessionRow()` helper to `apps/api/src/durable-objects/project-data/acp-sessions.ts` for consistent response mapping
 - [ ] T010 [P] Add ACP session service functions (`createAcpSession`, `getAcpSession`, `listAcpSessions`, `transitionAcpSession`) to `apps/api/src/services/project-data.ts` using existing `getStub()` pattern
 - [ ] T011 [P] Write unit tests for state machine transitions (all 8 valid + all invalid) in `apps/api/tests/unit/acp-session-state-machine.test.ts`
 - [ ] T012 [P] Write migration test verifying tables are created correctly in `apps/api/tests/unit/acp-session-migration.test.ts`
@@ -48,23 +48,23 @@
 
 ## Phase 3: User Story 1 — Resilient Task Execution (Priority: P1) 🎯 MVP
 
-**Goal**: DO tracks ACP session state machine (pending → assigned → running → completed/failed/interrupted). VM failure detected via heartbeat timeout.
+**Goal**: DO tracks ACP session state machine (pending → assigned → running → completed/failed/interrupted). ProjectData heartbeat timeout marks storage-history data stale/suspect; VM interruption requires explicit terminal ACP evidence, terminal owning workspace/node state, cf-container terminal lifecycle, or another authoritative runtime signal.
 
-**Independent Test**: Submit a task, verify session record exists in DO with correct state transitions. Simulate VM failure, verify DO marks session as "interrupted".
+**Independent Test**: Submit a task, verify session record exists in DO with correct state transitions. Simulate conclusive VM failure evidence, verify DO marks session as "interrupted"; simulate stale ProjectData heartbeat data alone and verify VM-backed work is preserved.
 
 ### Implementation for User Story 1
 
-- [ ] T014 [US1] Add POST `/api/projects/:projectId/acp-sessions` endpoint to `apps/api/src/routes/projects.ts` — create session, validate project exists, validate chatSessionId belongs to project
-- [ ] T015 [US1] Add GET `/api/projects/:projectId/acp-sessions` and GET `/api/projects/:projectId/acp-sessions/:sessionId` endpoints to `apps/api/src/routes/projects.ts`
-- [ ] T016 [US1] Add POST `/api/projects/:projectId/acp-sessions/:sessionId/assign` endpoint to `apps/api/src/routes/projects.ts` — assign workspace + node, transition to "assigned"
-- [ ] T017 [US1] Add POST `/api/projects/:projectId/acp-sessions/:sessionId/status` endpoint to `apps/api/src/routes/projects.ts` — VM agent reports running/completed/failed, validate nodeId matches
-- [ ] T018 [US1] Add POST `/api/projects/:projectId/acp-sessions/:sessionId/heartbeat` endpoint to `apps/api/src/routes/projects.ts` — update `last_heartbeat_at`, reset DO alarm
-- [ ] T019 [US1] Add `updateHeartbeat(sessionId, nodeId)` method to `apps/api/src/durable-objects/project-data.ts` — validate node match, update timestamp, set alarm for detection window
-- [ ] T020 [US1] Add heartbeat timeout check to DO `alarm()` handler in `apps/api/src/durable-objects/project-data.ts` — query stale sessions, transition to "interrupted"
+- [ ] T014 [US1] Add POST `/api/projects/:projectId/acp-sessions` endpoint to `apps/api/src/routes/projects/acp-sessions.ts` — create session, validate project exists, validate chatSessionId belongs to project
+- [ ] T015 [US1] Add GET `/api/projects/:projectId/acp-sessions` and GET `/api/projects/:projectId/acp-sessions/:sessionId` endpoints to `apps/api/src/routes/projects/acp-sessions.ts`
+- [ ] T016 [US1] Add POST `/api/projects/:projectId/acp-sessions/:sessionId/assign` endpoint to `apps/api/src/routes/projects/acp-sessions.ts` — assign workspace + node, transition to "assigned"
+- [ ] T017 [US1] Add POST `/api/projects/:projectId/acp-sessions/:sessionId/status` endpoint to `apps/api/src/routes/projects/acp-sessions.ts` — VM agent reports running/completed/failed, validate nodeId matches
+- [ ] T018 [US1] Add POST `/api/projects/:projectId/acp-sessions/:sessionId/heartbeat` endpoint to `apps/api/src/routes/projects/acp-sessions.ts` — update `last_heartbeat_at`, reset DO alarm
+- [ ] T019 [US1] Add `updateHeartbeat(sessionId, nodeId)` method to `apps/api/src/durable-objects/project-data/index.ts` / `apps/api/src/durable-objects/project-data/acp-sessions.ts` — validate node match, update timestamp, set alarm for detection window
+- [ ] T020 [US1] Add heartbeat timeout check to DO `alarm()` handler in `apps/api/src/durable-objects/project-data/index.ts` — query stale sessions, treat VM-backed ProjectData heartbeat staleness as suspect, and transition only with conclusive runtime/workspace evidence
 - [ ] T021 [US1] Write integration test: create session → assign → report running → heartbeat → report completed in `apps/api/tests/integration/acp-session-lifecycle.test.ts`
-- [ ] T022 [US1] Write integration test: create session → assign → report running → heartbeat timeout → verify interrupted in `apps/api/tests/integration/acp-session-interruption.test.ts`
+- [ ] T022 [US1] Write integration tests: create session → assign → report running → stale ProjectData heartbeat alone preserves VM-backed work; conclusive terminal runtime/workspace evidence verifies interrupted in `apps/api/tests/integration/acp-session-interruption.test.ts`
 
-**Checkpoint**: API endpoints fully functional. Sessions tracked in DO with heartbeat-based interruption detection.
+**Checkpoint**: API endpoints fully functional. Sessions tracked in DO with ProjectData heartbeat stale/suspect detection and conclusive runtime/workspace interruption detection.
 
 ---
 
@@ -76,7 +76,7 @@
 
 ### Implementation for User Story 3
 
-- [ ] T023 [US3] Add workspace-project validation to `POST /api/projects/:projectId/acp-sessions/:sessionId/assign` in `apps/api/src/routes/projects.ts` — verify `workspace.projectId === projectId`, reject with 422 if mismatched
+- [ ] T023 [US3] Add workspace-project validation to `POST /api/projects/:projectId/acp-sessions/:sessionId/assign` in `apps/api/src/routes/projects/acp-sessions.ts` — verify `workspace.projectId === projectId`, reject with 422 if mismatched
 - [ ] T024 [US3] Write test: assign workspace without project → 422 rejection in `apps/api/tests/integration/acp-session-workspace-binding.test.ts`
 - [ ] T025 [US3] Write test: assign workspace to wrong project → 422 rejection in same test file
 
@@ -93,7 +93,7 @@
 ### Implementation for User Story 4
 
 - [ ] T026 [US4] Add GET `/api/nodes/:nodeId/acp-sessions` reconciliation endpoint to `apps/api/src/routes/nodes.ts` (or projects.ts) — query D1 projection table for sessions assigned to node
-- [ ] T027 [US4] Add `listAcpSessionsByNode(nodeId, statuses)` method to `apps/api/src/durable-objects/project-data.ts` for cross-project node queries (or use D1 projection)
+- [ ] T027 [US4] Add `listAcpSessionsByNode(nodeId, statuses)` method to `apps/api/src/durable-objects/project-data/index.ts` / `apps/api/src/durable-objects/project-data/acp-sessions.ts` for cross-project node queries (or use D1 projection)
 - [ ] T028 [US4] Add D1 projection sync: when DO transitions ACP session, upsert `agent_sessions` in D1 via API route or direct D1 write from the route handler
 - [ ] T029 [US4] Add reconciliation logic to `packages/vm-agent/internal/agentsessions/manager.go` — on startup, query `GET /api/nodes/:nodeId/acp-sessions?status=assigned,running`, start assigned sessions, report errors for orphaned running sessions
 - [ ] T030 [US4] Add heartbeat goroutine to `packages/vm-agent/internal/agentsessions/manager.go` — per active ACP session, POST heartbeat at `ACP_SESSION_HEARTBEAT_INTERVAL_MS`
@@ -114,10 +114,10 @@
 
 ### Implementation for User Story 2
 
-- [ ] T035 [US2] Add `forkAcpSession(sessionId, contextSummary)` method to `apps/api/src/durable-objects/project-data.ts` — create child session with `parentSessionId`, increment `fork_depth`, enforce max depth
-- [ ] T036 [US2] Add `getAcpSessionLineage(sessionId)` method to `apps/api/src/durable-objects/project-data.ts` — walk parent chain and collect children
-- [ ] T037 [US2] Add POST `/api/projects/:projectId/acp-sessions/:sessionId/fork` endpoint to `apps/api/src/routes/projects.ts` — validate terminal state, call DO fork method
-- [ ] T038 [US2] Add GET `/api/projects/:projectId/acp-sessions/:sessionId/lineage` endpoint to `apps/api/src/routes/projects.ts`
+- [ ] T035 [US2] Add `forkAcpSession(sessionId, contextSummary)` method to `apps/api/src/durable-objects/project-data/index.ts` / `apps/api/src/durable-objects/project-data/acp-sessions.ts` — create child session with `parentSessionId`, increment `fork_depth`, enforce max depth
+- [ ] T036 [US2] Add `getAcpSessionLineage(sessionId)` method to `apps/api/src/durable-objects/project-data/index.ts` / `apps/api/src/durable-objects/project-data/acp-sessions.ts` — walk parent chain and collect children
+- [ ] T037 [US2] Add POST `/api/projects/:projectId/acp-sessions/:sessionId/fork` endpoint to `apps/api/src/routes/projects/acp-sessions.ts` — validate terminal state, call DO fork method
+- [ ] T038 [US2] Add GET `/api/projects/:projectId/acp-sessions/:sessionId/lineage` endpoint to `apps/api/src/routes/projects/acp-sessions.ts`
 - [ ] T039 [US2] Write integration test: fork completed session → verify child with correct parentSessionId and forkDepth in `apps/api/tests/integration/acp-session-fork.test.ts`
 - [ ] T040 [US2] Write test: fork beyond max depth → 422 rejection in same test file
 - [ ] T041 [US2] Write test: fork non-terminal session → 409 rejection in same test file
@@ -135,7 +135,7 @@
 ### Implementation for User Story 5
 
 - [ ] T042 [US5] Verify `parentSessionId` is already functional from fork implementation (T035-T038). Add test creating session with explicit `parentSessionId` (not via fork) in `apps/api/tests/integration/acp-session-tree.test.ts`
-- [ ] T043 [US5] Add tree query: `getAcpSessionTree(rootSessionId)` to `apps/api/src/durable-objects/project-data.ts` — recursive CTE to get full tree from any node
+- [ ] T043 [US5] Add tree query: `getAcpSessionTree(rootSessionId)` to `apps/api/src/durable-objects/project-data/index.ts` / `apps/api/src/durable-objects/project-data/acp-sessions.ts` — recursive CTE to get full tree from any node
 
 **Checkpoint**: Session tree data model proven. Ready for future MCP sub-agent integration.
 

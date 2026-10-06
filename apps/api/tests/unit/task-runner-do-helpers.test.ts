@@ -101,6 +101,15 @@ describe('isTransientError', () => {
     expect(isTransientError(new Error('503 Service Unavailable'))).toBe(true);
   });
 
+  it('explicitly classifies Durable Object code-update reset as transient', () => {
+    expect(isTransientError(
+      new Error('Durable Object reset because its code was updated.')
+    )).toBe(true);
+    expect(isTransientError(
+      new Error('DURABLE OBJECT RESET BECAUSE ITS CODE WAS UPDATED.')
+    )).toBe(true);
+  });
+
   it('classifies not_found errors as permanent', () => {
     expect(isTransientError(new Error('resource not found'))).toBe(false);
     expect(isTransientError(new Error('NOT_FOUND'))).toBe(false);

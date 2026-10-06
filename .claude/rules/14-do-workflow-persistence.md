@@ -16,50 +16,65 @@ As the very first action when starting a `/do` execution, create `.do-state.md`:
 # /do Workflow State
 
 ## Task
+
 <one-line summary of what you're doing>
 
 ## Task File
-<path to the task file, e.g., tasks/active/2026-03-14-notification-system.md>
+
+<path to the task file, e.g., tasks/active/2026-03-14-my-feature.md>
 
 ## Branch
+
 <branch name once created>
 
 ## Worktree
+
 <worktree path once created>
 
 ## Current Phase
+
 Phase 1: Research & Task Creation
 
 ## Phase Checklist
+
 - [ ] Phase 1: Research & Task Creation
 - [ ] Phase 2: Worktree Setup
 - [ ] Phase 3: Implementation
 - [ ] Phase 4: Pre-PR Validation
 - [ ] Phase 5: Review
 - [ ] Phase 6: Staging Verification
-- [ ] Phase 7: Pull Request & Post-Merge Deploy Monitoring
+- [ ] Phase 7: Pull Request, CodeRabbit Review & Post-Merge Deploy Monitoring
 
 ## Phase 5: Review Tracker
-<populated when Phase 5 starts — one line per dispatched reviewer>
+
+<populated when Phase 5 starts — one line per local reviewer>
 <Phase 5 is NOT complete until every entry shows PASS or ADDRESSED>
 
+## Phase 7: CodeRabbit Review Tracker
+
+<populated when CodeRabbit review is requested — record the request time and method, then either the review's findings, fix commits, and incremental review status, or what you observed when no review arrived (silence after ~15 minutes, `Review skipped`, rate limit)>
+<If CodeRabbit reviewed, Phase 7 is NOT merge-ready until no CodeRabbit feedback is unresolved. If no review arrived within the wait, record that and continue: a silent CodeRabbit never blocks merge (rule 25)>
+
 ## Implementation Progress
+
 <checklist items from the task file, updated as you go>
 
 ## Notes
+
 <anything important discovered during execution>
 ```
 
 ### Update It at Every Phase Transition
 
 Before starting any new phase, update `.do-state.md`:
+
 1. Check off the completed phase
 2. Update "Current Phase" to the new phase
 3. Add any notes about what was accomplished
 
 ### Update It During Long Phases
 
-During Phase 3 (Implementation) and Phase 5 (Review), update the file after every significant unit of work — every commit, every test run, every reviewer dispatched.
+During Phase 3 (Implementation) and Phase 5 (Review), update the file after every significant unit of work — every commit, every test run, every local reviewer started.
 
 ### Re-Read It Regularly
 
@@ -68,6 +83,7 @@ During Phase 3 (Implementation) and Phase 5 (Review), update the file after ever
 ### Use Plan Mode as a Checkpoint
 
 At the transition between Phase 3 (Implementation) and Phase 4 (Pre-PR Validation), enter Plan Mode briefly to:
+
 1. Re-read the state file
 2. Re-read the task file
 3. Verify all checklist items are actually done (not just checked off from memory)
@@ -75,22 +91,39 @@ At the transition between Phase 3 (Implementation) and Phase 4 (Pre-PR Validatio
 
 This forces a deliberate pause that prevents the "rush to PR" failure mode.
 
+## Durable Subtask Waiting
+
+When a workflow is waiting for SAM-dispatched child tasks, the orchestrator MUST
+persist its workflow state and a stable workflow-step `waitKey`, call
+`wait_for_subtasks`, and end the current turn. Reuse the exact key if the call's
+response is lost or registration is otherwise retried.
+Do not rely on a harness-owned background task, timer, or polling loop: ACP can
+legitimately report the top-level prompt as complete while that work remains
+private to the harness, allowing SAM to sleep the runtime before the poller can
+surface its result.
+
+Foreground polling is a compatibility fallback only when the connected SAM
+server reports that `wait_for_subtasks` is unavailable or disabled. Keep that
+fallback bounded and record it in the workflow state file.
+
 ## What the State File Prevents
 
-| Failure Mode | How the State File Helps |
-|---|---|
-| Forgetting which phase you're in | "Current Phase" field is always current |
-| Skipping review phase | Checklist shows Phase 5 unchecked |
-| Losing track of implementation items | "Implementation Progress" mirrors the task file |
-| Forgetting the branch/worktree path | Recorded at creation time |
-| Repeating already-done work | Checked items + notes show what's been accomplished |
-| Jumping to PR creation early | Phase checklist enforces ordering |
-| Merging before reviewers finish | Review Tracker blocks Phase 5 completion until all reviewers report back |
-| Silently failing production deploy | Phase 7 checklist includes deploy monitoring — task is not complete until deploy succeeds or user is alerted |
+| Failure Mode                                          | How the State File Helps                                                                                     |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Forgetting which phase you're in                      | "Current Phase" field is always current                                                                      |
+| Skipping review phase                                 | Checklist shows Phase 5 unchecked                                                                            |
+| Losing track of implementation items                  | "Implementation Progress" mirrors the task file                                                              |
+| Forgetting the branch/worktree path                   | Recorded at creation time                                                                                    |
+| Repeating already-done work                           | Checked items + notes show what's been accomplished                                                          |
+| Jumping to PR creation early                          | Phase checklist enforces ordering                                                                            |
+| Merging before reviewers finish                       | Review Tracker blocks Phase 5 completion until all reviewers report back                                     |
+| Forgetting unresolved CodeRabbit feedback             | Phase 7 CodeRabbit Review Tracker records the request, the wait outcome, and any findings with fix commits   |
+| Silently failing production deploy                    | Phase 7 checklist includes deploy monitoring — task is not complete until deploy succeeds or user is alerted |
+| Harness poller disappears after ACP prompt completion | Durable wait subscription wakes the parent through SAM-owned delivery                                        |
 
 ## Cleanup
 
-Delete `.do-state.md` at the end of Phase 7 (after PR merge, deploy monitoring, and worktree cleanup). It's gitignored, so even if you forget, it won't pollute the repo.
+Delete `.do-state.md` at the end of Phase 7 (after the CodeRabbit request-and-wait step, PR merge, deploy monitoring, and worktree cleanup). It's gitignored, so even if you forget, it won't pollute the repo.
 
 ## Phase 5 → Phase 6 Transition Guard
 
@@ -98,30 +131,34 @@ Before advancing past Phase 5, you MUST:
 
 1. Re-read `.do-state.md`
 2. Check the "Phase 5: Review Tracker" section
-3. If ANY reviewer shows `DISPATCHED`, **STOP** — you are not done with Phase 5
+3. If ANY reviewer shows `PENDING`, **STOP** — you are not done with Phase 5
 4. Wait for the outstanding reviewer(s) to complete, then update their status
 5. Only after every reviewer shows `PASS` or `ADDRESSED` may you check off Phase 5
 
-**Why this exists:** PR #409's security auditor was dispatched during Phase 5 but completed after the PR was merged. Context compaction caused the agent to forget it was waiting for a reviewer and advance through Phases 6-7. PR #568 repeated this exact failure — the go-specialist and security-auditor completed post-merge, and their CRITICAL findings were filed as backlog tasks instead of being fixed. See `docs/notes/2026-03-31-pr568-premature-merge-postmortem.md`.
+**Why this exists:** PR #409's security auditor was started during Phase 5 but completed after the PR was merged. Context compaction caused the agent to forget it was waiting for a reviewer and advance through Phases 6-7. PR #568 repeated this exact failure — the go-specialist and security-auditor completed post-merge, and their CRITICAL findings were filed as backlog tasks instead of being fixed. See the retained incident lesson in this rule.
 
 ### Updating the Review Tracker
 
-When dispatching a reviewer agent, immediately write:
+When starting a local reviewer subagent, immediately write:
+
 ```markdown
-- [ ] security-auditor — DISPATCHED (agent-id: <id>)
+- [ ] security-auditor — PENDING (local subagent running)
 ```
 
 When the reviewer completes with no blockers:
+
 ```markdown
 - [x] security-auditor — PASS, no critical findings
 ```
 
 When the reviewer finds issues that you fix:
+
 ```markdown
 - [x] security-auditor — ADDRESSED, 2 HIGH fixed in commit abc123
 ```
 
 When the reviewer finds issues deferred to backlog:
+
 ```markdown
 - [x] security-auditor — DEFERRED, 1 MEDIUM → tasks/backlog/2026-03-16-rate-limiting.md
 ```
@@ -130,7 +167,7 @@ When the reviewer finds issues deferred to backlog:
 
 `.do-state.md` is gitignored and lives in the worktree. It is destroyed when the workspace is killed. The PR description, by contrast, is durable — it lives on GitHub and is visible to humans.
 
-**When you create the PR in Phase 7, you MUST copy the Review Tracker into the PR description's "Specialist Review Evidence" table.** This is the authoritative record. If `.do-state.md` is lost (workspace killed, worktree removed), the PR description is what humans will use to verify whether reviews were actually completed.
+**When you create the PR in Phase 7, you MUST copy the Review Tracker into the PR description's "Specialist Review Evidence" table and maintain the PR template's "CodeRabbit Review Evidence" section.** This is the authoritative record. If `.do-state.md` is lost (workspace killed, worktree removed), the PR description is what humans will use to verify whether reviews were actually completed.
 
 If you cannot populate the PR's review table because you've lost track of reviewer state (context compaction, workspace killed), you MUST add the `needs-human-review` label and stop. See `.claude/rules/25-review-merge-gate.md`.
 

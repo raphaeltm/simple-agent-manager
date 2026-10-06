@@ -83,10 +83,13 @@ export function getPeriodLabel(period: GatewayPeriod): string {
 
 /** Default number of AI Gateway log entries per page. CF max is 50. */
 const DEFAULT_PAGE_SIZE = 50;
+const MIN_PAGE_SIZE = 1;
+const MAX_PAGE_SIZE = 50;
 /** Default maximum pages to iterate for request-time dashboards. */
 const DEFAULT_MAX_PAGES = 20;
 /** Hard cap on request-time dashboard pages to prevent Workers CPU timeout. */
 const MAX_PAGES_HARD_CAP = 20;
+const MIN_MAX_PAGES = 1;
 
 const gatewayLogEntrySchema = v.object({
   id: v.string(),
@@ -99,7 +102,7 @@ const gatewayLogEntrySchema = v.object({
   cached: v.boolean(),
   created_at: v.string(),
   duration: v.number(),
-  metadata: v.nullable(v.record(v.string(), v.string())),
+  metadata: v.nullable(v.record(v.string(), v.unknown())),
 });
 
 const gatewayLogsResponseSchema = v.object({
@@ -109,11 +112,49 @@ const gatewayLogsResponseSchema = v.object({
     per_page: v.number(),
     count: v.number(),
     total_count: v.number(),
-    total_pages: v.number(),
+    total_pages: v.optional(v.number()),
   }),
   success: v.boolean(),
-  errors: v.array(v.unknown()),
+  errors: v.optional(v.nullable(v.array(v.unknown()))),
 });
+
+type RawGatewayLogsResponse = v.InferOutput<typeof gatewayLogsResponseSchema>;
+type RawGatewayLogEntry = RawGatewayLogsResponse['result'][number];
+
+function normalizeGatewayMetadata(metadata: RawGatewayLogEntry['metadata']): Record<string, string> | null {
+  if (!metadata) return null;
+
+  const normalized: Record<string, string> = {};
+  for (const [key, value] of Object.entries(metadata)) {
+    if (value === null || value === undefined) continue;
+    normalized[key] = typeof value === 'string' ? value : JSON.stringify(value);
+  }
+
+  return normalized;
+}
+
+function normalizeGatewayLogEntry(entry: RawGatewayLogEntry): AIGatewayLogEntry {
+  return {
+    ...entry,
+    metadata: normalizeGatewayMetadata(entry.metadata),
+  };
+}
+
+function normalizeGatewayLogsResponse(resp: RawGatewayLogsResponse): AIGatewayLogsResponse {
+  const perPage = Math.max(1, resp.result_info.per_page);
+  const totalPages = resp.result_info.total_pages
+    ?? Math.ceil(resp.result_info.total_count / perPage);
+
+  return {
+    ...resp,
+    result: resp.result.map(normalizeGatewayLogEntry),
+    result_info: {
+      ...resp.result_info,
+      total_pages: totalPages,
+    },
+    errors: resp.errors ?? [],
+  };
+}
 
 export interface GatewayPaginationOptions {
   defaultMaxPages?: number;
@@ -126,14 +167,38 @@ export function resolveGatewayPagination(
   env: Env,
   options: GatewayPaginationOptions = {},
 ): { pageSize: number; maxPages: number } {
-  const pageSize = parseInt(env.AI_USAGE_PAGE_SIZE || '', 10) || DEFAULT_PAGE_SIZE;
+  const pageSize = readBoundedPositiveInteger(
+    env.AI_USAGE_PAGE_SIZE,
+    DEFAULT_PAGE_SIZE,
+    MIN_PAGE_SIZE,
+    MAX_PAGE_SIZE,
+  );
   const defaultMaxPages = options.defaultMaxPages ?? DEFAULT_MAX_PAGES;
   const maxPagesHardCap = options.maxPagesHardCap ?? MAX_PAGES_HARD_CAP;
-  const maxPages = Math.min(
-    parseInt(options.maxPagesEnvValue ?? env.AI_USAGE_MAX_PAGES ?? '', 10) || defaultMaxPages,
+  const maxPages = readBoundedPositiveInteger(
+    options.maxPagesEnvValue ?? env.AI_USAGE_MAX_PAGES,
+    defaultMaxPages,
+    MIN_MAX_PAGES,
     maxPagesHardCap,
   );
   return { pageSize, maxPages };
+}
+
+function readBoundedPositiveInteger(
+  raw: string | undefined,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < min) {
+    return clampInteger(fallback, min, max);
+  }
+  return clampInteger(Math.floor(parsed), min, max);
+}
+
+function clampInteger(value: number, min: number, max: number): number {
+  return Math.min(Math.max(Math.floor(value), min), max);
 }
 
 // ---------------------------------------------------------------------------
@@ -168,7 +233,8 @@ export async function fetchGatewayLogs(
     throw errors.internal(`AI Gateway API error (${resp.status})`);
   }
 
-  return readResponseJson(resp, gatewayLogsResponseSchema, 'ai_gateway.logs');
+  const data = await readResponseJson(resp, gatewayLogsResponseSchema, 'ai_gateway.logs');
+  return normalizeGatewayLogsResponse(data);
 }
 
 /**
@@ -199,6 +265,15 @@ export async function iterateGatewayLogs(
       visitor(entry);
     }
 
+    if (page >= maxPages && resp.result_info.total_pages > maxPages) {
+      log.warn('ai_gateway.logs_pagination_truncated', {
+        maxPages,
+        totalPages: resp.result_info.total_pages,
+        pageSize,
+        startDate,
+      });
+    }
+
     if (resp.result.length < pageSize || page >= resp.result_info.total_pages) {
       break;
     }
@@ -217,6 +292,20 @@ export interface UsageByModel {
   outputTokens: number;
   totalTokens: number;
   costUsd: number;
+  cachedRequests: number;
+  errorRequests: number;
+}
+
+export interface UsageByProvider {
+  providerId: string;
+  providerName: string;
+  dialect: string;
+  requests: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  costUsd: number;
+  costSource: 'gateway' | 'unavailable' | 'mixed';
   cachedRequests: number;
   errorRequests: number;
 }
@@ -260,6 +349,40 @@ export function aggregateByModel(map: Map<string, UsageByModel>, entry: AIGatewa
   }
 }
 
+/** Accumulate a gateway log entry into a by-provider map. */
+export function aggregateByProvider(map: Map<string, UsageByProvider>, entry: AIGatewayLogEntry): void {
+  const provider = providerAttributionFromEntry(entry);
+  const key = `${provider.providerId}:${provider.dialect}`;
+  const tokensIn = entry.tokens_in || 0;
+  const tokensOut = entry.tokens_out || 0;
+  const cost = entry.cost || 0;
+
+  const existing = map.get(key);
+  if (existing) {
+    existing.requests++;
+    existing.inputTokens += tokensIn;
+    existing.outputTokens += tokensOut;
+    existing.totalTokens += tokensIn + tokensOut;
+    existing.costUsd += cost;
+    if (entry.cached) existing.cachedRequests++;
+    if (!entry.success) existing.errorRequests++;
+  } else {
+    map.set(key, {
+      providerId: provider.providerId,
+      providerName: provider.providerName,
+      dialect: provider.dialect,
+      requests: 1,
+      inputTokens: tokensIn,
+      outputTokens: tokensOut,
+      totalTokens: tokensIn + tokensOut,
+      costUsd: cost,
+      costSource: 'gateway',
+      cachedRequests: entry.cached ? 1 : 0,
+      errorRequests: entry.success ? 0 : 1,
+    });
+  }
+}
+
 /** Accumulate a gateway log entry into a by-day map. */
 export function aggregateByDay(map: Map<string, UsageByDay>, entry: AIGatewayLogEntry): void {
   const key = entry.created_at?.slice(0, 10) || 'unknown';
@@ -282,4 +405,28 @@ export function aggregateByDay(map: Map<string, UsageByDay>, entry: AIGatewayLog
       costUsd: cost,
     });
   }
+}
+
+function providerAttributionFromEntry(entry: AIGatewayLogEntry): {
+  providerId: string;
+  providerName: string;
+  dialect: string;
+} {
+  const metadata = entry.metadata ?? {};
+  const providerId = nonEmpty(metadata.providerId) ?? nonEmpty(entry.provider) ?? 'unknown';
+  const providerName = nonEmpty(metadata.providerName) ?? labelFromProviderId(providerId);
+  const dialect = nonEmpty(metadata.providerDialect) ?? nonEmpty(metadata.dialect) ?? 'unknown';
+  return { providerId, providerName, dialect };
+}
+
+function nonEmpty(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : null;
+}
+
+function labelFromProviderId(providerId: string): string {
+  return providerId
+    .split(/[-_]/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ') || 'Unknown';
 }

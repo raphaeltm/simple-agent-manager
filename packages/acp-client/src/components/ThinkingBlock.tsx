@@ -1,3 +1,4 @@
+import { ChevronDown } from 'lucide-react';
 import React, { useState } from 'react';
 
 interface ThinkingBlockProps {
@@ -27,14 +28,10 @@ export const ThinkingBlock = React.memo(function ThinkingBlock({ text, active }:
         ) : (
           <span>Thought</span>
         )}
-        <svg
-          className={`h-3 w-3 transition-transform ${expanded ? 'rotate-180' : ''}`}
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
+        <ChevronDown
+          size={12}
+          className={`transition-transform ${expanded ? 'rotate-180' : ''}`}
+        />
       </button>
       {expanded && text && (
         <div className="mt-1 ml-4 p-2 bg-gray-50 border-l-2 border-gray-300 text-xs text-gray-600 whitespace-pre-wrap break-words overflow-hidden">

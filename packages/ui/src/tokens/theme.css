@@ -44,8 +44,43 @@
   --sam-glass-wash-opacity: 0.05;
 
   /* Backdrop dim for modals */
-  --sam-glass-backdrop-dim: rgba(0, 0, 0, 0.5);
-  --sam-glass-backdrop-blur: 4px;
+  --sam-glass-backdrop-dim: rgba(0, 0, 0, 0.68);
+  --sam-glass-backdrop-blur: 12px;
+
+  /* Opaque glass fallbacks (no backdrop-filter / reduced-transparency / contrast) */
+  --sam-glass-fallback-chrome: rgb(8, 15, 12);
+  --sam-glass-fallback-surface: rgb(13, 24, 20);
+  --sam-glass-fallback-backdrop: rgb(0, 0, 0);
+  /* Nested glass (a glass surface inside another) — flat fill, no blur */
+  --sam-glass-nested-bg: rgba(8, 15, 12, 0.5);
+
+  /* Body background radial-gradient color stops */
+  --sam-bg-gradient-1: rgba(16, 185, 129, 0.15);
+  --sam-bg-gradient-2: rgba(34, 197, 94, 0.10);
+  --sam-bg-gradient-3: rgba(6, 78, 59, 0.12);
+
+  /* Onboarding full-screen overlay background — green vignette over the app bg */
+  --sam-onboarding-overlay-bg:
+    radial-gradient(ellipse 60% 50% at 50% 45%, rgba(34, 197, 94, 0.12) 0%, rgba(34, 197, 94, 0.04) 40%, transparent 70%),
+    radial-gradient(ellipse 100% 100% at 50% 50%, rgba(10, 14, 10, 0) 30%, rgba(0, 0, 0, 0.7) 100%),
+    #0a0e0a;
+
+  /* Form element surfaces and borders */
+  --sam-form-bg: rgba(8, 15, 12, 0.5);
+  --sam-form-bg-focus: rgba(8, 15, 12, 0.6);
+  --sam-form-border: rgba(34, 197, 94, 0.10);
+  --sam-form-border-hover: rgba(34, 197, 94, 0.18);
+  --sam-form-border-focus: rgba(34, 197, 94, 0.35);
+  --sam-form-focus-ring: rgba(34, 197, 94, 0.10);
+  --sam-form-focus-inset: rgba(34, 197, 94, 0.05);
+
+  /* Glass chat message bubbles */
+  --sam-msg-user-bg: linear-gradient(135deg, rgba(22, 163, 74, 0.22), rgba(34, 197, 94, 0.1));
+  --sam-msg-user-border: rgba(34, 197, 94, 0.22);
+  --sam-msg-assistant-bg:
+    linear-gradient(to top, rgba(34, 197, 94, 0.1), rgba(34, 197, 94, 0) 45%),
+    rgba(12, 20, 17, 0.72);
+  --sam-msg-assistant-border: rgba(34, 197, 94, 0.34);
 
   --sam-space-1: 4px;
   --sam-space-2: 8px;
@@ -113,12 +148,79 @@
   --sam-color-purple: #c084fc;
   --sam-color-warning-surface: #2e2a1f;
 
+  /* Task hierarchy tree connector */
+  --sam-color-tree-connector: #3d6e5c;
+
+  /* Admin analytics chart tokens.
+     Dark defaults match the pre-light slice colors; light overrides below
+     darken non-green series so bars/lines remain legible on light surfaces. */
+  --sam-admin-chart-tooltip-bg: rgba(8, 15, 12, 0.78);
+  --sam-admin-chart-tooltip-border: rgba(34, 197, 94, 0.10);
+  --sam-admin-chart-grid: var(--sam-color-border-default);
+  --sam-admin-chart-axis: var(--sam-color-border-default);
+  --sam-admin-chart-cursor: var(--sam-color-bg-surface-hover);
+  --sam-admin-chart-series-1: var(--sam-color-accent-primary);
+  --sam-admin-chart-series-2: #60a5fa;
+  --sam-admin-chart-series-3: #a78bfa;
+  --sam-admin-chart-series-4: var(--sam-color-warning);
+  --sam-admin-chart-series-5: #f97316;
+  --sam-admin-chart-series-6: #ec4899;
+  --sam-admin-chart-series-7: #14b8a6;
+  --sam-admin-chart-series-8: #8b5cf6;
+  --sam-admin-chart-series-9: #06b6d4;
+  --sam-admin-chart-series-10: #84cc16;
+  --sam-admin-chart-series-11: #f43f5e;
+  --sam-admin-chart-series-12: #6366f1;
+  --sam-admin-chart-heat-0: var(--sam-color-bg-inset);
+  --sam-admin-chart-heat-1: rgba(34, 197, 94, 0.10);
+  --sam-admin-chart-heat-2: rgba(34, 197, 94, 0.25);
+  --sam-admin-chart-heat-3: rgba(34, 197, 94, 0.50);
+  --sam-admin-chart-heat-text-on-strong: #ffffff;
+
   /* Color Tints */
   --sam-color-accent-primary-tint: rgba(22, 163, 74, 0.1);
   --sam-color-success-tint: rgba(34, 197, 94, 0.1);
   --sam-color-warning-tint: rgba(245, 158, 11, 0.1);
   --sam-color-danger-tint: rgba(239, 68, 68, 0.1);
   --sam-color-info-tint: rgba(122, 162, 247, 0.1);
+
+  /* Chrome interaction tints */
+  --sam-chrome-accent-hover-subtle: rgba(34, 197, 94, 0.04);
+  --sam-chrome-accent-soft: rgba(34, 197, 94, 0.06);
+  --sam-chrome-accent-active-subtle: rgba(34, 197, 94, 0.08);
+  --sam-chrome-accent-active: rgba(34, 197, 94, 0.12);
+  --sam-chrome-accent-divider: rgba(34, 197, 94, 0.18);
+  --sam-chrome-accent-glow: rgba(34, 197, 94, 0.3);
+  --sam-chrome-drawer-edge-glow: rgba(34, 197, 94, 0.55);
+  --sam-chrome-footer-bg: rgba(0, 0, 0, 0.15);
+  --sam-button-secondary-hover-bg: rgba(8, 15, 12, 0.3);
+  --sam-button-on-accent-border: rgba(255, 255, 255, 0.2);
+  --sam-button-on-accent-spinner-border: rgba(255, 255, 255, 0.3);
+  --sam-tabs-active-border: rgba(52, 211, 153, 0.85);
+  --sam-tooltip-bg: rgba(8, 15, 12, 0.82);
+  --sam-status-muted-bg: rgba(159, 183, 174, 0.15);
+  --sam-status-muted-fg: #9fb7ae;
+  --sam-status-info-bg: rgba(59, 130, 246, 0.15);
+  --sam-status-info-fg: #60a5fa;
+  --sam-status-success-bg: rgba(34, 197, 94, 0.15);
+  --sam-status-success-strong-bg: rgba(34, 197, 94, 0.2);
+  --sam-status-success-fg: #4ade80;
+  --sam-status-success-strong-fg: #22c55e;
+  --sam-status-warning-bg: rgba(245, 158, 11, 0.15);
+  --sam-status-warning-fg: #fbbf24;
+  --sam-status-danger-bg: rgba(239, 68, 68, 0.15);
+  --sam-status-danger-fg: #f87171;
+  /* critical: between warning (amber) and danger (red) — a quota window that is nearly exhausted but still usable */
+  --sam-status-critical-bg: rgba(249, 115, 22, 0.15);
+  --sam-status-critical-fg: #fb923c;
+  --sam-status-neutral-bg: rgba(127, 127, 127, 0.15);
+  --sam-status-neutral-fg: #9ca3af;
+  --sam-status-indigo-bg: rgba(99, 102, 241, 0.15);
+  --sam-status-indigo-fg: #a5b4fc;
+  --sam-status-purple-bg: rgba(139, 92, 246, 0.15);
+  --sam-status-purple-fg: #c4b5fd;
+  --sam-status-unknown-bg: #e5e7eb;
+  --sam-status-unknown-fg: #1f2937;
 
   /* Shadows — scale (dark-tuned: 4x stronger opacity for dark UI) */
   --sam-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
@@ -131,6 +233,16 @@
   --sam-shadow-dropdown: 0 4px 16px rgba(0, 0, 0, 0.3);
   --sam-shadow-overlay: 0 8px 32px rgba(0, 0, 0, 0.4);
   --sam-shadow-tooltip: 0 2px 8px rgba(0, 0, 0, 0.3);
+
+  /*
+   * Left-cast shadows for right-edge chrome (the session tool rail and its pull-tab).
+   * Every other shadow token casts DOWNWARD, which is wrong for an element flush to the
+   * right edge. These carry the same per-theme weighting as their downward siblings: the
+   * rail previously hardcoded rgba(0,0,0,0.34), roughly 3x the light theme's equivalent,
+   * so it rendered as the heaviest edge on the screen in light mode.
+   */
+  --sam-shadow-rail-tab: -2px 0 12px rgba(0, 0, 0, 0.28);
+  --sam-shadow-rail-overlay: -8px 0 32px rgba(0, 0, 0, 0.5);
 
   /* Z-Index Scale */
   --sam-z-sticky: 10;
@@ -155,6 +267,232 @@
 }
 
 [data-ui-theme='sam'] {
+  color: var(--sam-color-fg-primary);
+  background-color: var(--sam-color-bg-canvas);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   LIGHT THEME — additive override layer (Phase 0 foundation)
+
+   Every value below overrides a token defined in :root above. Dark mode is the
+   default (:root) and is NOT touched here. This block only takes effect when
+   <html data-ui-theme="sam-light"> is set by the runtime ThemeProvider.
+
+   Palette: warm greenish-white canvas/surfaces (NOT pure #fff), dark
+   green-tinted text, light green-tinted borders. The green accent hue is
+   preserved; accents/hovers are darkened for WCAG AA contrast on light bg.
+
+   Tokyo Night (--sam-color-tn-*) is overridden with the official Tokyo
+   Night Light palette for proper contrast on light backgrounds.
+
+   WCAG AA contrast (verified — sRGB relative-luminance ratio):
+     fg-primary  #11271d on canvas  #eef3ef → 14.04:1  (body text, ≥4.5 ✓)
+     fg-primary  #11271d on surface #f8fbf8 → 15.13:1  (body text, ≥4.5 ✓)
+     fg-muted    #4a5d54 on canvas  #eef3ef →  6.27:1  (body text, ≥4.5 ✓)
+     fg-muted    #4a5d54 on surface #f8fbf8 →  6.75:1  (body text, ≥4.5 ✓)
+     accent      #15803d on surface #f8fbf8 →  4.81:1  (link/UI,    ≥3 ✓)
+     accent      #15803d on canvas  #eef3ef →  4.47:1  (link/UI,    ≥3 ✓)
+     danger      #dc2626 on surface #f8fbf8 →  4.63:1  (status text,≥4.5 ✓)
+     warning-fg  #b45309 on surface #f8fbf8 →  4.82:1  (status text,≥4.5 ✓)
+   ────────────────────────────────────────────────────────────────────────── */
+[data-ui-theme='sam-light'] {
+  /* Base surfaces — warm greenish-white, not pure white */
+  --sam-color-bg-canvas: #eef3ef;
+  --sam-color-bg-surface: #f8fbf8;
+  --sam-color-fg-primary: #11271d;
+  --sam-color-fg-muted: #4a5d54;
+  --sam-color-border-default: #cdddd2;
+  --sam-color-accent-primary: #15803d;
+  --sam-color-accent-primary-hover: #166534;
+  --sam-color-success: #15803d;
+  --sam-color-warning: #b45309;
+  --sam-color-danger: #dc2626;
+  --sam-color-focus-ring: #16a34a;
+  --sam-color-bg-surface-hover: #eaf2eb;
+  --sam-color-bg-overlay: rgba(0, 0, 0, 0.4);
+  --sam-color-bg-inset: #e3ebe4;
+  --sam-color-bg-page: #eef3ef;
+
+  /* Glass background colors (frosted white with faint green tint) */
+  --sam-glass-bg-chrome: rgba(248, 252, 249, 0.6);
+  --sam-glass-bg-surface: rgba(248, 252, 249, 0.7);
+  --sam-glass-bg-modal: rgba(248, 252, 249, 0.6);
+
+  /* Edge glow — softer green on light */
+  --sam-glass-glow-color: rgba(22, 163, 74, 0.25);
+
+  /* Glass border */
+  --sam-glass-border-color: rgba(22, 163, 74, 0.18);
+
+  /* Backdrop dim for modals — dark green-tinted scrim, lighter than dark theme */
+  --sam-glass-backdrop-dim: rgba(20, 40, 30, 0.32);
+
+  /* Opaque glass fallbacks (no backdrop-filter / reduced-transparency / contrast) */
+  --sam-glass-fallback-chrome: rgb(248, 252, 249);
+  --sam-glass-fallback-surface: rgb(241, 247, 242);
+  --sam-glass-fallback-backdrop: rgb(225, 232, 227);
+  --sam-glass-nested-bg: rgba(255, 255, 255, 0.5);
+
+  /* Body background radial-gradient color stops — lighter green washes */
+  --sam-bg-gradient-1: rgba(16, 185, 129, 0.1);
+  --sam-bg-gradient-2: rgba(34, 197, 94, 0.07);
+  --sam-bg-gradient-3: rgba(134, 239, 172, 0.18);
+
+  /* Onboarding full-screen overlay background — soft green vignette over the light app bg */
+  --sam-onboarding-overlay-bg:
+    radial-gradient(ellipse 60% 50% at 50% 45%, rgba(34, 197, 94, 0.1) 0%, rgba(34, 197, 94, 0.03) 40%, transparent 70%),
+    radial-gradient(ellipse 100% 100% at 50% 50%, rgba(238, 243, 239, 0) 30%, rgba(205, 221, 210, 0.55) 100%),
+    #eef3ef;
+
+  /* Form element surfaces and borders */
+  --sam-form-bg: rgba(255, 255, 255, 0.7);
+  --sam-form-bg-focus: rgba(255, 255, 255, 0.9);
+  --sam-form-border: rgba(22, 163, 74, 0.2);
+  --sam-form-border-hover: rgba(22, 163, 74, 0.32);
+  --sam-form-border-focus: rgba(22, 163, 74, 0.5);
+  --sam-form-focus-ring: rgba(22, 163, 74, 0.15);
+  --sam-form-focus-inset: rgba(22, 163, 74, 0.06);
+
+  /* Glass chat message bubbles — lighter washes */
+  --sam-msg-user-bg: linear-gradient(135deg, rgba(22, 163, 74, 0.18), rgba(34, 197, 94, 0.08));
+  --sam-msg-user-border: rgba(22, 163, 74, 0.28);
+  --sam-msg-assistant-bg:
+    linear-gradient(to top, rgba(34, 197, 94, 0.08), rgba(34, 197, 94, 0) 45%),
+    rgba(255, 255, 255, 0.82);
+  --sam-msg-assistant-border: rgba(22, 163, 74, 0.3);
+
+  /* Additional semantic colors — darkened for contrast on light bg */
+  --sam-color-info: #2563eb;
+  --sam-color-fg-on-accent: #ffffff;
+  --sam-color-success-fg: #15803d;
+  --sam-color-danger-fg: #b91c1c;
+  --sam-color-warning-fg: #b45309;
+  --sam-color-info-fg: #1d4ed8;
+  --sam-color-purple: #7c3aed;
+  --sam-color-warning-surface: #fdf6e9;
+
+  /* Task hierarchy tree connector */
+  --sam-color-tree-connector: #6b9e88;
+
+  /* Tokyo Night Light palette (workspace/terminal UI on light backgrounds)
+     Source: https://github.com/enkia/tokyo-night-vscode-theme
+     Contrast checked against glass-modal surface #f8fbf8 (sRGB luminance ratio):
+       tn-fg       #3760bf → 6.71:1  (body text,   ≥4.5 ✓)
+       tn-fg-bright#343b58 → 8.64:1  (headings,    ≥4.5 ✓)
+       tn-green    #587539 → 5.38:1  (status text,  ≥4.5 ✓)
+       tn-red      #c4233d → 5.51:1  (status text,  ≥4.5 ✓)
+       tn-yellow   #8c6c3e → 4.95:1  (status text,  ≥4.5 ✓)
+       tn-blue     #2959a3 → 6.60:1  (link/UI,      ≥3   ✓)
+       tn-purple   #7847bd → 5.57:1  (highlight,    ≥3   ✓)
+       tn-orange   #b15c00 → 5.06:1  (highlight,    ≥3   ✓)
+       tn-fg-muted #6e7891 → 4.23:1  (secondary,   AA-large ✓)
+       tn-fg-dim   #848da5 → 3.18:1  (placeholder, AA-large ✓)
+       tn-fg-dimmer#9499a8 → 2.73:1  (decorative only) */
+  --sam-color-tn-bg: #d5d6db;
+  --sam-color-tn-bg-dark: #cbccd1;
+  --sam-color-tn-surface: #dcdde1;
+  --sam-color-tn-selected: #c4c8da;
+  --sam-color-tn-active: #2e7de9;
+  --sam-color-tn-fg: #3760bf;
+  --sam-color-tn-fg-bright: #343b58;
+  --sam-color-tn-fg-muted: #6e7891;
+  --sam-color-tn-fg-dim: #848da5;
+  --sam-color-tn-fg-dimmer: #9499a8;
+  --sam-color-tn-green: #587539;
+  --sam-color-tn-yellow: #8c6c3e;
+  --sam-color-tn-red: #c4233d;
+  --sam-color-tn-purple: #7847bd;
+  --sam-color-tn-blue: #2959a3;
+  --sam-color-tn-orange: #b15c00;
+  --sam-color-tn-border: #c4c8da;
+  --sam-color-tn-border-highlight: #a8aecb;
+
+  /* Admin analytics chart tokens — contrast checked on #f8fbf8 surfaces:
+     series-2 #2563eb 5.27:1, series-3 #7c3aed 4.81:1,
+     series-5 #c2410c 4.53:1, series-6 #be185d 4.91:1,
+     series-7 #0f766e 4.95:1, series-8 #6d28d9 6.56:1,
+     series-9 #0e7490 4.93:1, series-10 #3f6212 6.81:1. */
+  --sam-admin-chart-tooltip-bg: rgba(248, 252, 249, 0.96);
+  --sam-admin-chart-tooltip-border: var(--sam-color-border-default);
+  --sam-admin-chart-grid: var(--sam-color-border-default);
+  --sam-admin-chart-axis: var(--sam-color-border-default);
+  --sam-admin-chart-cursor: var(--sam-color-bg-surface-hover);
+  --sam-admin-chart-series-1: var(--sam-color-accent-primary);
+  --sam-admin-chart-series-2: var(--sam-color-info);
+  --sam-admin-chart-series-3: var(--sam-color-purple);
+  --sam-admin-chart-series-4: var(--sam-color-warning);
+  --sam-admin-chart-series-5: #c2410c;
+  --sam-admin-chart-series-6: #be185d;
+  --sam-admin-chart-series-7: #0f766e;
+  --sam-admin-chart-series-8: #6d28d9;
+  --sam-admin-chart-series-9: #0e7490;
+  --sam-admin-chart-series-10: #3f6212;
+  --sam-admin-chart-series-11: #be123c;
+  --sam-admin-chart-series-12: #4338ca;
+  --sam-admin-chart-heat-0: var(--sam-color-bg-inset);
+  --sam-admin-chart-heat-1: rgba(21, 128, 61, 0.10);
+  --sam-admin-chart-heat-2: rgba(21, 128, 61, 0.22);
+  --sam-admin-chart-heat-3: rgba(21, 128, 61, 0.48);
+  --sam-admin-chart-heat-text-on-strong: #ffffff;
+
+  /* Color Tints */
+  --sam-color-accent-primary-tint: rgba(22, 163, 74, 0.08);
+  --sam-color-success-tint: rgba(34, 197, 94, 0.08);
+  --sam-color-warning-tint: rgba(245, 158, 11, 0.1);
+  --sam-color-danger-tint: rgba(239, 68, 68, 0.08);
+  --sam-color-info-tint: rgba(37, 99, 235, 0.08);
+
+  /* Chrome interaction tints */
+  --sam-chrome-accent-hover-subtle: rgba(22, 163, 74, 0.07);
+  --sam-chrome-accent-soft: rgba(22, 163, 74, 0.09);
+  --sam-chrome-accent-active-subtle: rgba(22, 163, 74, 0.11);
+  --sam-chrome-accent-active: rgba(22, 163, 74, 0.16);
+  --sam-chrome-accent-divider: rgba(22, 163, 74, 0.22);
+  --sam-chrome-accent-glow: rgba(22, 163, 74, 0.22);
+  --sam-chrome-drawer-edge-glow: rgba(22, 163, 74, 0.32);
+  --sam-chrome-footer-bg: rgba(255, 255, 255, 0.42);
+  --sam-button-secondary-hover-bg: rgba(227, 235, 228, 0.9);
+  --sam-button-on-accent-border: rgba(255, 255, 255, 0.28);
+  --sam-button-on-accent-spinner-border: rgba(255, 255, 255, 0.38);
+  --sam-tabs-active-border: rgba(22, 163, 74, 0.85);
+  --sam-tooltip-bg: rgba(17, 39, 29, 0.92);
+  --sam-status-muted-bg: rgba(74, 93, 84, 0.12);
+  --sam-status-muted-fg: #4a5d54;
+  --sam-status-info-bg: rgba(37, 99, 235, 0.1);
+  --sam-status-info-fg: #1d4ed8;
+  --sam-status-success-bg: rgba(21, 128, 61, 0.12);
+  --sam-status-success-strong-bg: rgba(21, 128, 61, 0.16);
+  --sam-status-success-fg: #15803d;
+  --sam-status-success-strong-fg: #15803d;
+  --sam-status-warning-bg: rgba(180, 83, 9, 0.12);
+  --sam-status-warning-fg: #b45309;
+  --sam-status-danger-bg: rgba(185, 28, 28, 0.1);
+  --sam-status-danger-fg: #b91c1c;
+  --sam-status-critical-bg: rgba(194, 65, 12, 0.12);
+  --sam-status-critical-fg: #c2410c;
+  --sam-status-neutral-bg: rgba(74, 93, 84, 0.12);
+  --sam-status-neutral-fg: #4a5d54;
+  --sam-status-indigo-bg: rgba(67, 56, 202, 0.1);
+  --sam-status-indigo-fg: #4338ca;
+  --sam-status-purple-bg: rgba(124, 58, 237, 0.1);
+  --sam-status-purple-fg: #7c3aed;
+  --sam-status-unknown-bg: #e3ebe4;
+  --sam-status-unknown-fg: #11271d;
+
+  /* Shadows — softer, lower opacity, green-tinted for light UI */
+  --sam-shadow-sm: 0 1px 2px rgba(16, 40, 28, 0.06);
+  --sam-shadow-default: 0 1px 3px rgba(16, 40, 28, 0.08);
+  --sam-shadow-md: 0 4px 6px -1px rgba(16, 40, 28, 0.08);
+  --sam-shadow-lg: 0 10px 15px -3px rgba(16, 40, 28, 0.1);
+  --sam-shadow-xl: 0 20px 25px -5px rgba(16, 40, 28, 0.1);
+  --sam-shadow-dropdown: 0 4px 16px rgba(16, 40, 28, 0.12);
+  --sam-shadow-overlay: 0 8px 32px rgba(16, 40, 28, 0.16);
+  --sam-shadow-tooltip: 0 2px 8px rgba(16, 40, 28, 0.12);
+
+  /* Left-cast rail shadows — see the dark-theme block for why these exist. */
+  --sam-shadow-rail-tab: -2px 0 12px rgba(16, 40, 28, 0.1);
+  --sam-shadow-rail-overlay: -8px 0 32px rgba(16, 40, 28, 0.16);
+
   color: var(--sam-color-fg-primary);
   background-color: var(--sam-color-bg-canvas);
 }
@@ -316,8 +654,11 @@
     will-change: transform;
   }
 
+  /* `backwards`, not `both`: the end frame equals the row's natural state, and a
+     lingering translateY(0) would make every row a stacking context, so a
+     message's info popover would paint underneath the rows after it. */
   .sam-message-entry {
-    animation: slideUp 250ms ease-out both;
+    animation: slideUp 250ms ease-out backwards;
   }
 
   .sam-message-entry:nth-child(2n) {

@@ -1,42 +1,67 @@
 import type {
   CreateTriggerRequest,
+  CreateTriggerResponse,
   ListTriggerExecutionsResponse,
   ListTriggersResponse,
+  ListWebhookDeliveriesResponse,
   TriggerExecutionStatus,
+  TriggerPreviewRequest,
+  TriggerPreviewResponse,
   TriggerResponse,
   UpdateTriggerRequest,
+  WebhookCredential,
 } from '@simple-agent-manager/shared';
 
 import { request } from './client';
 
-export async function listTriggers(
-  projectId: string
-): Promise<ListTriggersResponse> {
-  return request<ListTriggersResponse>(
-    `/api/projects/${projectId}/triggers`
+export async function listTriggers(projectId: string): Promise<ListTriggersResponse> {
+  return request<ListTriggersResponse>(`/api/projects/${projectId}/triggers`);
+}
+
+export async function getTrigger(projectId: string, triggerId: string): Promise<TriggerResponse> {
+  return request<TriggerResponse>(`/api/projects/${projectId}/triggers/${triggerId}`);
+}
+
+export async function previewWebhookTrigger(
+  projectId: string,
+  triggerId: string,
+  data: TriggerPreviewRequest
+): Promise<TriggerPreviewResponse> {
+  return request<TriggerPreviewResponse>(
+    `/api/projects/${projectId}/triggers/${triggerId}/webhook/preview`,
+    { method: 'POST', body: JSON.stringify(data) }
   );
 }
 
-export async function getTrigger(
+export async function rotateWebhookTriggerToken(
   projectId: string,
   triggerId: string
-): Promise<TriggerResponse> {
-  return request<TriggerResponse>(
-    `/api/projects/${projectId}/triggers/${triggerId}`
+): Promise<{ webhookCredential: WebhookCredential }> {
+  return request<{ webhookCredential: WebhookCredential }>(
+    `/api/projects/${projectId}/triggers/${triggerId}/webhook/rotate`,
+    { method: 'POST' }
+  );
+}
+
+export async function listWebhookDeliveries(
+  projectId: string,
+  triggerId: string,
+  cursor?: string
+): Promise<ListWebhookDeliveriesResponse> {
+  const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
+  return request<ListWebhookDeliveriesResponse>(
+    `/api/projects/${projectId}/triggers/${triggerId}/webhook/deliveries${query}`
   );
 }
 
 export async function createTrigger(
   projectId: string,
   data: CreateTriggerRequest
-): Promise<TriggerResponse> {
-  return request<TriggerResponse>(
-    `/api/projects/${projectId}/triggers`,
-    {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }
-  );
+): Promise<CreateTriggerResponse> {
+  return request<CreateTriggerResponse>(`/api/projects/${projectId}/triggers`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
 }
 
 export async function updateTrigger(
@@ -44,25 +69,19 @@ export async function updateTrigger(
   triggerId: string,
   data: UpdateTriggerRequest
 ): Promise<TriggerResponse> {
-  return request<TriggerResponse>(
-    `/api/projects/${projectId}/triggers/${triggerId}`,
-    {
-      method: 'PATCH',
-      body: JSON.stringify(data),
-    }
-  );
+  return request<TriggerResponse>(`/api/projects/${projectId}/triggers/${triggerId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
 }
 
 export async function deleteTrigger(
   projectId: string,
   triggerId: string
 ): Promise<{ success: boolean }> {
-  return request<{ success: boolean }>(
-    `/api/projects/${projectId}/triggers/${triggerId}`,
-    {
-      method: 'DELETE',
-    }
-  );
+  return request<{ success: boolean }>(`/api/projects/${projectId}/triggers/${triggerId}`, {
+    method: 'DELETE',
+  });
 }
 
 export async function testTrigger(

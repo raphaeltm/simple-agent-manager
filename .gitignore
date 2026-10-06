@@ -10,6 +10,19 @@ build/
 # Test coverage
 coverage/
 packages/cli/coverage.out
+**/test-results/
+**/storybook-static/
+
+# Generated Go binaries
+packages/cli/bin/
+packages/vm-agent/bin/
+packages/vm-agent/vm-agent
+apps/api/container-artifacts/
+
+# SQLite files a vm-agent test run can leave beside the package (message reporter databases)
+packages/vm-agent/**/*.db
+packages/vm-agent/**/*.db-shm
+packages/vm-agent/**/*.db-wal
 
 # Environment files
 .env
@@ -41,20 +54,36 @@ pnpm-debug.log*
 *.temp
 .cache/
 
-# Codex local state (CODEX_HOME defaults to ~/.codex)
-# Note: .codex/config.toml is NOT ignored — it's project-scoped config that should be tracked
-.codex/auth.json
-.codex/.credentials.json
-.codex/history.jsonl
-.codex/models_cache.json
-.codex/.personality_migration
-.codex/version.json
-.codex/log/
-.codex/sessions/
-.codex/tmp/
+# Codex local state. CODEX_HOME points at the repo's .codex/ (see
+# .devcontainer/devcontainer.json) so the project-scoped config survives container
+# rebuilds. Codex ALSO writes mutable runtime state here — sqlite DBs
+# (goals/logs/memories/state) plus their -wal/-shm sidecars, auth, history, model
+# caches, downloaded plugins, and session/shell snapshots — which must NEVER be
+# committed. Ignore ALL of .codex/ and track ONLY the config we author by hand.
+.codex/*
+!.codex/config.toml
+# Playwright audit screenshots write under apps/web cwd, not the repo root
+**/.codex/tmp/
+
+# Ephemeral agent scratch space — screenshots, debug dumps, downloads, notes.
+# Anything that should NOT be committed goes in .tmp/ (see .tmp/README.md).
+.tmp/
+!.tmp/README.md
+
+# Playwright MCP session artifacts (page snapshots, login scripts)
+.playwright-mcp/
+
+# SAM library downloads (download_library_file MCP tool target — canonical copies live in the platform library)
+.library/
 
 # /do workflow state (ephemeral, per-session)
 .do-state.md
 
+# Local git worktrees used by agents during branch/integration work.
+.worktrees/
+
 # /workflow orchestrator state (ephemeral, per-session)
 .workflow-state.md
+
+# Playwright run artifacts
+apps/web/test-results/

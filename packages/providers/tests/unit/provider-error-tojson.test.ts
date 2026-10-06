@@ -12,7 +12,10 @@ describe('ProviderError.toJSON', () => {
       message: 'Server not found',
       provider: 'hetzner',
       statusCode: 404,
+      providerCode: undefined,
+      category: 'unknown',
       cause: undefined,
+      context: undefined,
     });
   });
 
@@ -68,5 +71,34 @@ describe('ProviderError.toJSON', () => {
 
     expect('stack' in json).toBe(false);
   });
-});
 
+  it('serializes structured context deterministically', () => {
+    const err = new ProviderError('scaleway', 500, 'cloud-init failed', {
+      context: {
+        failedStep: 'cloud-init-upload',
+        cleanup: {
+          operation: 'cleanup-created-server',
+          zone: 'fr-par-1',
+          serverId: 'server-id',
+          error: {
+            statusCode: 503,
+            message: 'cleanup failed',
+          },
+        },
+      },
+    });
+
+    expect(err.toJSON().context).toEqual({
+      failedStep: 'cloud-init-upload',
+      cleanup: {
+        operation: 'cleanup-created-server',
+        zone: 'fr-par-1',
+        serverId: 'server-id',
+        error: {
+          statusCode: 503,
+          message: 'cleanup failed',
+        },
+      },
+    });
+  });
+});

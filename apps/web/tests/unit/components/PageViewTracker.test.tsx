@@ -102,6 +102,33 @@ describe('PageViewTracker', () => {
     expect(pageViewCall?.[1]).toMatchObject({ referrer: '' });
   });
 
+
+
+  it('does not duplicate page_view when search or hash changes without pathname changes', async () => {
+    const { getByText } = renderTrackerWithNav('/dashboard?token=secret#frag', '/dashboard?token=other#next');
+    mockTrack.mockClear();
+
+    await act(async () => {
+      getByText('go').click();
+    });
+
+    expect(mockTrack).not.toHaveBeenCalled();
+  });
+
+  it('tracks nested route path without query or fragment on navigation', async () => {
+    const { getByText } = renderTrackerWithNav('/docs', '/docs/guides/agents?email=user@example.com#tokens');
+    mockTrack.mockClear();
+
+    await act(async () => {
+      getByText('go').click();
+    });
+
+    expect(mockTrack).toHaveBeenNthCalledWith(2, 'page_view', {
+      page: '/docs/guides/agents',
+      referrer: '',
+    });
+  });
+
   it('renders nothing (returns null)', () => {
     const { container } = renderTracker('/dashboard');
     expect(container.firstChild).toBeNull();

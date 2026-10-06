@@ -33,8 +33,8 @@ Build order matters: shared -> providers -> api/web
 Before making ANY changes related to architecture, secrets, credentials, data models, or security:
 
 1. Research relevant architecture documentation:
-   - `docs/architecture/` — Core architecture decisions
-   - `docs/adr/` — Architecture Decision Records
+   - `apps/www/src/content/docs/docs/architecture/` — Core architecture decisions
+   - `apps/www/src/content/docs/docs/architecture/` — Architecture Decision Records
    - `specs/` — Feature specifications with data models
    - `.specify/memory/constitution.md` — Project principles (especially Principle XI)
 
@@ -51,14 +51,14 @@ Before making ANY changes related to architecture, secrets, credentials, data mo
 
 | Document | Contents |
 |----------|----------|
-| `docs/architecture/credential-security.md` | BYOC model, encryption, user credentials |
-| `docs/architecture/secrets-taxonomy.md` | Platform secrets vs user credentials |
-| `docs/adr/002-stateless-architecture.md` | Stateless design principles |
+| `apps/www/src/content/docs/docs/architecture/security.md` | BYOC model, encryption, user credentials |
+| `apps/www/src/content/docs/docs/reference/configuration.md` | Platform secrets vs user credentials |
+| `apps/www/src/content/docs/docs/architecture/overview.md` | Current storage and architecture model |
 | `.specify/memory/constitution.md` | Core principles and rules |
 
 ### Architecture Principles (Quick Reference)
 
-1. **Bring-Your-Own-Cloud (BYOC)**: Users provide their own Hetzner tokens. The platform does NOT have cloud provider credentials.
+1. **Bring-Your-Own-Cloud (BYOC) with platform fallback**: Users can provide their own cloud provider tokens, and administrators can configure enabled platform compute credentials for installation fallback. A user cloud credential is not required when SAM resolves to that platform fallback.
 2. **User credentials are encrypted per-user** in the database, NOT stored as environment variables or Worker secrets.
 3. **Platform secrets** (ENCRYPTION_KEY, JWT keys, CF_API_TOKEN) are Cloudflare Worker secrets set during deployment.
 

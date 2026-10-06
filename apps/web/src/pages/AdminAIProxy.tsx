@@ -56,13 +56,13 @@ function formatCost(cost: number): string {
 function tierBadgeClasses(tier: string): string {
   switch (tier) {
     case 'low-cost':
-      return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400';
+      return 'bg-success-tint text-success-fg';
     case 'standard':
-      return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400';
+      return 'bg-info-tint text-info-fg';
     case 'premium':
-      return 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400';
+      return 'bg-info-tint text-[var(--sam-color-purple)]';
     default:
-      return 'bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400';
+      return 'bg-surface-secondary text-fg-muted';
   }
 }
 
@@ -140,7 +140,7 @@ export function AdminAIProxy() {
 
   if (!config) {
     return (
-      <div role="alert" className="rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">
+      <div role="alert" className="rounded-md bg-danger-tint p-3 text-sm text-danger-fg">
         {error || 'Failed to load config'}
       </div>
     );
@@ -171,7 +171,7 @@ export function AdminAIProxy() {
       </Body>
 
       {error && (
-        <div role="alert" className="rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">
+        <div role="alert" className="rounded-md bg-danger-tint p-3 text-sm text-danger-fg">
           {error}
         </div>
       )}
@@ -185,7 +185,7 @@ export function AdminAIProxy() {
               {BILLING_MODE_OPTIONS.map((option) => (
                 <label
                   key={option.value}
-                  className="flex cursor-pointer items-start gap-3 rounded-md border border-[var(--sam-border)] p-3 transition-colors hover:bg-[var(--sam-bg-secondary)]"
+                  className="flex cursor-pointer items-start gap-3 rounded-md border border-border-default p-3 transition-colors hover:bg-surface-secondary"
                 >
                   <input
                     type="radio"
@@ -198,7 +198,7 @@ export function AdminAIProxy() {
                   />
                   <div className="min-w-0">
                     <span className="text-sm font-medium">{option.label}</span>
-                    <p className="mt-0.5 text-xs text-[var(--sam-text-secondary)]">
+                    <p className="mt-0.5 text-xs text-fg-muted">
                       {option.description}
                     </p>
                   </div>
@@ -207,25 +207,25 @@ export function AdminAIProxy() {
             </div>
           </fieldset>
 
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-[var(--sam-text-secondary)]">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-fg-muted">
             {config.hasUnifiedBilling && (
-              <span className="font-medium text-green-600 dark:text-green-400">
+              <span className="font-medium text-success-fg">
                 ● Unified Billing active
               </span>
             )}
             <span>
               Anthropic:{' '}
               <span className={config.hasAnthropicCredential
-                ? 'font-medium text-green-600 dark:text-green-400'
-                : 'font-medium text-yellow-600 dark:text-yellow-400'}>
+                ? 'font-medium text-success-fg'
+                : 'font-medium text-warning-fg'}>
                 {config.hasAnthropicCredential ? '● configured' : '○ not configured'}
               </span>
             </span>
             <span>
               OpenAI:{' '}
               <span className={config.hasOpenAICredential
-                ? 'font-medium text-green-600 dark:text-green-400'
-                : 'font-medium text-yellow-600 dark:text-yellow-400'}>
+                ? 'font-medium text-success-fg'
+                : 'font-medium text-warning-fg'}>
                 {config.hasOpenAICredential ? '● configured' : '○ not configured'}
               </span>
             </span>
@@ -244,7 +244,7 @@ export function AdminAIProxy() {
               id="default-model"
               value={selectedModel}
               onChange={(e) => setSelectedModel(e.target.value)}
-              className="w-full rounded-md border border-[var(--sam-border)] bg-[var(--sam-bg-primary)] px-3 py-2 text-sm"
+              className="w-full rounded-md border border-border-default bg-surface-secondary px-3 py-2 text-sm text-fg-primary"
             >
               {sortedTiers.map((tier) => (
                 <optgroup key={tier} label={TIER_LABELS[tier] ?? tier}>
@@ -264,19 +264,19 @@ export function AdminAIProxy() {
                 </optgroup>
               ))}
             </select>
-            <p className="mt-1.5 text-xs text-[var(--sam-text-secondary)]">
+            <p className="mt-1.5 text-xs text-fg-muted">
               Workers AI models bill through Cloudflare. Anthropic and OpenAI models require credentials on the{' '}
-              <a href="/admin/credentials" className="text-[var(--sam-accent)] underline">
+              <a href="/admin/credentials" className="text-accent underline">
                 Credentials
               </a>{' '}
               tab or Unified Billing via <code className="text-xs">CF_AIG_TOKEN</code>.
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-[var(--sam-text-secondary)]">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-fg-muted">
             <span>
               Source:{' '}
-              <span className="font-medium text-[var(--sam-text-primary)]">
+              <span className="font-medium text-fg-primary">
                 {config.source === 'admin' ? 'Admin override' : config.source === 'env' ? 'Environment variable' : 'Platform default'}
               </span>
             </span>
@@ -325,27 +325,27 @@ export function AdminAIProxy() {
                   {modelsByTier[tier]?.map((model) => (
                     <div
                       key={model.id}
-                      className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-[var(--sam-border)] px-3 py-2 text-sm"
+                      className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-border-default px-3 py-2 text-sm"
                     >
                       <span className="font-medium">{model.label}</span>
-                      <span className="text-xs text-[var(--sam-text-secondary)]">
+                      <span className="text-xs text-fg-muted">
                         {PROVIDER_LABELS[model.provider] ?? model.provider}
                       </span>
                       {model.costPer1kInputTokens > 0 ? (
-                        <span className="text-xs text-[var(--sam-text-secondary)]">
+                        <span className="text-xs text-fg-muted">
                           {formatCost(model.costPer1kInputTokens)}/1K in &middot;{' '}
                           {formatCost(model.costPer1kOutputTokens)}/1K out
                         </span>
                       ) : (
-                        <span className="text-xs text-[var(--sam-text-secondary)]">No metered cost</span>
+                        <span className="text-xs text-fg-muted">No metered cost</span>
                       )}
                       {!model.available && (
-                        <span className="text-xs text-yellow-600 dark:text-yellow-400">
+                        <span className="text-xs text-warning-fg">
                           Requires credentials
                         </span>
                       )}
                       {model.id === config.defaultModel && (
-                        <span className="rounded bg-[var(--sam-accent)]/10 px-1.5 py-0.5 text-xs font-medium text-[var(--sam-accent)]">
+                        <span className="rounded bg-accent-tint px-1.5 py-0.5 text-xs font-medium text-accent">
                           Default
                         </span>
                       )}

@@ -1,5 +1,7 @@
 # MCP Token Plaintext Storage in Durable Object State
 
+> **Reconciliation 2026-10-05:** The cited `durable-objects/task-runner.ts:89,860-861` predates the TaskRunner split. The token is now set at `apps/api/src/durable-objects/task-runner/agent-session-step.ts:105-132` and persisted unredacted through `task-runner/attempt-storage.ts:5-18`. It is redacted only in `task-runner/status.ts:4-5` and revoked only on failure (`task-runner/state-machine.ts:456-467`). #2230's wake reset nulls it without revoking it, which matches the existing TTL-only expiry for runs that did not fail: no new exposure, scope unchanged.
+
 **Created**: 2026-03-17
 **Source**: Security audit of fix/mcp-token-ttl-alignment branch
 

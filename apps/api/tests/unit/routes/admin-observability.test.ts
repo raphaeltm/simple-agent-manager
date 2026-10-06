@@ -1,14 +1,25 @@
+import Database from 'better-sqlite3';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
+import {
+  diagnosticSecretCanaries,
+  expectDiagnosticCanariesAbsent,
+} from '../../helpers/diagnostic-secret-canaries';
+import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
 // Mock auth middleware
 const mockGetUserId = vi.fn().mockReturnValue('user-superadmin');
 vi.mock('../../../src/middleware/auth', () => ({
   requireAuth: () => vi.fn((_c: any, next: any) => next()),
   requireApproved: () => vi.fn((_c: any, next: any) => next()),
-  requireSuperadmin: () => vi.fn((_c: any, next: any) => next()),
+  requireSuperadmin: () =>
+    vi.fn((c: any, next: any) => {
+      if (c.req.header('x-test-role') === 'non-superadmin')
+        return c.json({ error: 'FORBIDDEN' }, 403);
+      return next();
+    }),
   getUserId: (...args: unknown[]) => mockGetUserId(...args),
 }));
 
@@ -33,6 +44,31 @@ vi.mock('../../../src/middleware/error', () => {
   };
 });
 
+const mockCreateDebugDiagnosisRun = vi.fn();
+const mockGetDebugDiagnosisRun = vi.fn();
+const mockStartDiagnosisRunner = vi.fn();
+const mockCancelDiagnosisRunner = vi.fn();
+const mockListDiagnosisEvents = vi.fn();
+const mockRetryDebugDiagnosisRun = vi.fn();
+const mockListDebugDiagnoses = vi.fn();
+const mockSaveDebugDiagnosisAsIdea = vi.fn();
+vi.mock('../../../src/services/debug-agent', () => ({
+  createDebugDiagnosisRun: (...args: unknown[]) => mockCreateDebugDiagnosisRun(...args),
+  getDebugDiagnosisRun: (...args: unknown[]) => mockGetDebugDiagnosisRun(...args),
+  retryDebugDiagnosisRun: (...args: unknown[]) => mockRetryDebugDiagnosisRun(...args),
+  listDebugDiagnoses: (...args: unknown[]) => mockListDebugDiagnoses(...args),
+  saveDebugDiagnosisAsIdea: (...args: unknown[]) => mockSaveDebugDiagnosisAsIdea(...args),
+}));
+vi.mock('../../../src/services/diagnosis-runner', () => ({
+  startDiagnosisRunner: (...args: unknown[]) => mockStartDiagnosisRunner(...args),
+  cancelDiagnosisRunner: (...args: unknown[]) => mockCancelDiagnosisRunner(...args),
+  listDiagnosisEvents: (...args: unknown[]) => mockListDiagnosisEvents(...args),
+}));
+const mockRunPlatformFeedbackTriage = vi.fn();
+vi.mock('../../../src/services/platform-feedback-triage', () => ({
+  runPlatformFeedbackTriage: (...args: unknown[]) => mockRunPlatformFeedbackTriage(...args),
+}));
+
 // Mock observability service
 const mockQueryErrors = vi.fn();
 const mockGetHealthSummary = vi.fn();
@@ -53,6 +89,21 @@ vi.mock('../../../src/services/observability', () => ({
   queryCloudflareLogs: (...args: unknown[]) => mockQueryCloudflareLogs(...args),
   getLogQueryRateLimit: () => 30,
   CfApiError: MockCfApiError,
+}));
+
+const mockGetDiagnosticIncidentsByErrorIds = vi.fn().mockResolvedValue(new Map());
+const mockGetDiagnosticIncidentByErrorId = vi.fn();
+const mockGetDiagnosticArtifactForDownload = vi.fn();
+const mockGetDiagnosticIncidentsByNodeId = vi.fn();
+vi.mock('../../../src/services/diagnostic-incidents', () => ({
+  getDiagnosticIncidentsByErrorIds: (...args: unknown[]) =>
+    mockGetDiagnosticIncidentsByErrorIds(...args),
+  getDiagnosticIncidentByErrorId: (...args: unknown[]) =>
+    mockGetDiagnosticIncidentByErrorId(...args),
+  getDiagnosticArtifactForDownload: (...args: unknown[]) =>
+    mockGetDiagnosticArtifactForDownload(...args),
+  getDiagnosticIncidentsByNodeId: (...args: unknown[]) =>
+    mockGetDiagnosticIncidentsByNodeId(...args),
 }));
 
 // Mock rate-limit middleware (allow all by default)
@@ -128,6 +179,130 @@ describe('Admin Observability Routes', () => {
       expect(body.errors).toHaveLength(1);
       expect(body.errors[0].source).toBe('client');
       expect(body.total).toBe(1);
+      expect(mockGetDiagnosticIncidentsByErrorIds).toHaveBeenCalledWith(expect.anything(), [
+        'err-1',
+      ]);
+    });
+
+    it('batch-decorates errors with incident summaries without per-row reads', async () => {
+      const incident = {
+        id: 'incident-1',
+        platformErrorId: 'err-1',
+        status: 'pending',
+        artifacts: [],
+      };
+      mockQueryErrors.mockResolvedValue({
+        errors: [
+          {
+            id: 'err-1',
+            source: 'vm-agent',
+            level: 'error',
+            message: 'failed',
+            timestamp: '2026-08-05T12:00:00.000Z',
+          },
+          {
+            id: 'err-2',
+            source: 'api',
+            level: 'error',
+            message: 'other',
+            timestamp: '2026-08-05T12:00:00.000Z',
+          },
+        ],
+        cursor: null,
+        hasMore: false,
+        total: 2,
+      });
+      mockGetDiagnosticIncidentsByErrorIds.mockResolvedValue(new Map([['err-1', incident]]));
+
+      const res = await app.request('/api/admin/observability/errors', {}, createEnv());
+      expect(res.status).toBe(200);
+      expect((await res.json()).errors).toEqual([
+        expect.objectContaining({ id: 'err-1', incident }),
+        expect.objectContaining({ id: 'err-2', incident: null }),
+      ]);
+      expect(mockGetDiagnosticIncidentsByErrorIds).toHaveBeenCalledTimes(1);
+      expect(mockGetDiagnosticIncidentByErrorId).not.toHaveBeenCalled();
+    });
+
+    it('rejects non-superadmins before incident summary or download reads', async () => {
+      const headers = { 'x-test-role': 'non-superadmin' };
+      const summary = await app.request(
+        '/api/admin/observability/errors/err-1/incident',
+        { headers },
+        createEnv()
+      );
+      const download = await app.request(
+        '/api/admin/observability/errors/err-1/incident/artifacts/art-1/download',
+        { headers },
+        createEnv()
+      );
+      expect(summary.status).toBe(403);
+      expect(download.status).toBe(403);
+      expect(mockGetDiagnosticIncidentByErrorId).not.toHaveBeenCalled();
+      expect(mockGetDiagnosticArtifactForDownload).not.toHaveBeenCalled();
+    });
+
+    it('returns the sanitized incident contract without any shared canary in the admin response', async () => {
+      mockGetDiagnosticIncidentByErrorId.mockResolvedValue({
+        id: 'incident-safe',
+        platformErrorId: 'err-1',
+        status: 'available',
+        preview: {
+          health: 'degraded',
+          values: diagnosticSecretCanaries.map(() => '[REDACTED]'),
+        },
+        artifacts: [],
+      });
+
+      const res = await app.request(
+        '/api/admin/observability/errors/err-1/incident',
+        {},
+        createEnv()
+      );
+      expect(res.status).toBe(200);
+      const body = await res.text();
+      expect(body).toContain('[REDACTED]');
+      expectDiagnosticCanariesAbsent(body);
+    });
+
+    it('streams an available artifact through the private no-store admin proxy', async () => {
+      const safeArchive = JSON.stringify({
+        values: diagnosticSecretCanaries.map(() => '[REDACTED]'),
+      });
+      mockGetDiagnosticArtifactForDownload.mockResolvedValue({
+        row: {
+          id: 'art-1',
+          incident_id: 'incident-1',
+          content_type: 'application/gzip',
+          actual_bytes: 4,
+        },
+        object: {
+          body: new ReadableStream({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode(safeArchive));
+              controller.close();
+            },
+          }),
+        },
+      });
+      const res = await app.request(
+        '/api/admin/observability/errors/err-1/incident/artifacts/art-1/download',
+        {},
+        createEnv()
+      );
+      expect(res.status).toBe(200);
+      expect(res.headers.get('cache-control')).toBe('private, no-store');
+      expect(res.headers.get('content-type')).toBe('application/gzip');
+      expect(res.headers.get('content-disposition')).toBe('attachment; filename="art-1.tar.gz"');
+      expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+      const body = await res.text();
+      expect(body).toBe(safeArchive);
+      expectDiagnosticCanariesAbsent(body);
+      expect(mockGetDiagnosticArtifactForDownload).toHaveBeenCalledWith(
+        expect.anything(),
+        'err-1',
+        'art-1'
+      );
     });
 
     it('should pass filter params to queryErrors', async () => {
@@ -146,6 +321,29 @@ describe('Admin Observability Routes', () => {
           level: 'warn',
           search: 'test',
           limit: 10,
+        })
+      );
+    });
+
+    it('passes every exact-match correlation filter and epoch endTime to queryErrors', async () => {
+      mockQueryErrors.mockResolvedValue({ errors: [], cursor: null, hasMore: false, total: 0 });
+      const endTime = Date.UTC(2026, 7, 7, 23, 59, 59);
+
+      await app.request(
+        `/api/admin/observability/errors?nodeId=node-1&workspaceId=workspace-1&taskId=task-1&sessionId=session-1&userId=user-1&endTime=${endTime}`,
+        {},
+        createEnv()
+      );
+
+      expect(mockQueryErrors).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          nodeId: 'node-1',
+          workspaceId: 'workspace-1',
+          taskId: 'task-1',
+          sessionId: 'session-1',
+          userId: 'user-1',
+          endTime,
         })
       );
     });
@@ -174,11 +372,7 @@ describe('Admin Observability Routes', () => {
     it('should pass cursor param to queryErrors', async () => {
       mockQueryErrors.mockResolvedValue({ errors: [], cursor: null, hasMore: false, total: 0 });
 
-      await app.request(
-        '/api/admin/observability/errors?cursor=abc123',
-        {},
-        createEnv()
-      );
+      await app.request('/api/admin/observability/errors?cursor=abc123', {}, createEnv());
 
       expect(mockQueryErrors).toHaveBeenCalledWith(
         expect.anything(),
@@ -239,11 +433,7 @@ describe('Admin Observability Routes', () => {
     });
 
     it('should return 400 for invalid limit', async () => {
-      const res = await app.request(
-        '/api/admin/observability/errors?limit=999',
-        {},
-        createEnv()
-      );
+      const res = await app.request('/api/admin/observability/errors?limit=999', {}, createEnv());
 
       expect(res.status).toBe(400);
       const body = await res.json();
@@ -251,11 +441,7 @@ describe('Admin Observability Routes', () => {
     });
 
     it('should return 400 for non-numeric limit', async () => {
-      const res = await app.request(
-        '/api/admin/observability/errors?limit=abc',
-        {},
-        createEnv()
-      );
+      const res = await app.request('/api/admin/observability/errors?limit=abc', {}, createEnv());
 
       expect(res.status).toBe(400);
     });
@@ -306,6 +492,143 @@ describe('Admin Observability Routes', () => {
     });
   });
 
+  describe('node observability routes', () => {
+    it('rejects non-superadmins on node summaries and incidents before database reads', async () => {
+      const headers = { 'x-test-role': 'non-superadmin' };
+      const nodes = await app.request('/api/admin/observability/nodes', { headers }, createEnv());
+      const incidents = await app.request(
+        '/api/admin/observability/nodes/node-1/incidents',
+        { headers },
+        createEnv()
+      );
+      expect(nodes.status).toBe(403);
+      expect(incidents.status).toBe(403);
+      expect(mockGetDiagnosticIncidentsByNodeId).not.toHaveBeenCalled();
+    });
+
+    it('returns stopped/error and recent destroyed nodes with NULL heartbeats last', async () => {
+      const sqlite = new Database(':memory:');
+      sqlite.exec(`
+        CREATE TABLE nodes (
+          id TEXT PRIMARY KEY, name TEXT NOT NULL, status TEXT NOT NULL,
+          health_status TEXT, last_heartbeat_at TEXT, cloud_provider TEXT,
+          node_class TEXT, agent_version TEXT, error_message TEXT,
+          created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+      `);
+      const insert = sqlite.prepare(`INSERT INTO nodes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+      const now = Date.now();
+      insert.run(
+        'node-error',
+        'Error node',
+        'error',
+        'unhealthy',
+        new Date(now - 1_000).toISOString(),
+        'hetzner',
+        'managed',
+        'build-1',
+        'agent stopped',
+        new Date(now - 100_000).toISOString(),
+        new Date(now - 1_000).toISOString()
+      );
+      insert.run(
+        'node-recent-destroyed',
+        'Recent destroyed',
+        'destroyed',
+        'unhealthy',
+        new Date(now - 2_000).toISOString(),
+        'hetzner',
+        'managed',
+        'build-2',
+        null,
+        new Date(now - 100_000).toISOString(),
+        new Date(now - 60_000).toISOString()
+      );
+      insert.run(
+        'node-stopped',
+        'Stopped node',
+        'stopped',
+        'unhealthy',
+        null,
+        'hetzner',
+        'managed',
+        'build-3',
+        null,
+        new Date(now - 100_000).toISOString(),
+        new Date(now - 3_000).toISOString()
+      );
+      insert.run(
+        'node-old-destroyed',
+        'Old destroyed',
+        'destroyed',
+        'unhealthy',
+        new Date(now - 200_000).toISOString(),
+        'hetzner',
+        'managed',
+        'build-old',
+        null,
+        new Date(now - 200_000_000).toISOString(),
+        new Date(now - 25 * 60 * 60 * 1_000).toISOString()
+      );
+
+      try {
+        const response = await app.request(
+          '/api/admin/observability/nodes',
+          {},
+          createEnv({ DATABASE: createSqliteD1(sqlite) })
+        );
+        expect(response.status).toBe(200);
+        const body = await response.json();
+        expect(body.nodes.map((node: { id: string }) => node.id)).toEqual([
+          'node-error',
+          'node-recent-destroyed',
+          'node-stopped',
+        ]);
+        expect(body.nodes[0]).toMatchObject({
+          provider: 'hetzner',
+          vmAgentBuild: 'build-1',
+          errorMessage: 'agent stopped',
+        });
+      } finally {
+        sqlite.close();
+      }
+    });
+
+    it('returns bounded node incidents with artifact status after node death', async () => {
+      mockGetDiagnosticIncidentsByNodeId.mockResolvedValue([
+        { id: 'incident-1', status: 'available', artifacts: [{ status: 'available' }] },
+      ]);
+      const response = await app.request(
+        '/api/admin/observability/nodes/dead-node/incidents?limit=12',
+        {},
+        createEnv()
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        incidents: [
+          { id: 'incident-1', status: 'available', artifacts: [{ status: 'available' }] },
+        ],
+      });
+      expect(mockGetDiagnosticIncidentsByNodeId).toHaveBeenCalledWith(
+        expect.anything(),
+        'dead-node',
+        12
+      );
+    });
+
+    it('rejects node and incident limits above their contract maxima', async () => {
+      const nodes = await app.request('/api/admin/observability/nodes?limit=101', {}, createEnv());
+      const incidents = await app.request(
+        '/api/admin/observability/nodes/node-1/incidents?limit=51',
+        {},
+        createEnv()
+      );
+      expect(nodes.status).toBe(400);
+      expect(incidents.status).toBe(400);
+      expect(mockGetDiagnosticIncidentsByNodeId).not.toHaveBeenCalled();
+    });
+  });
+
   // ===========================================================================
   // GET /api/admin/observability/health
   // ===========================================================================
@@ -352,7 +675,11 @@ describe('Admin Observability Routes', () => {
         range: '24h',
         interval: '1h',
         buckets: [
-          { timestamp: '2026-02-14T00:00:00.000Z', total: 5, bySource: { client: 2, 'vm-agent': 1, api: 2 } },
+          {
+            timestamp: '2026-02-14T00:00:00.000Z',
+            total: 5,
+            bySource: { client: 2, 'vm-agent': 1, api: 2 },
+          },
         ],
       };
       mockGetErrorTrends.mockResolvedValue(mockTrends);
@@ -374,11 +701,7 @@ describe('Admin Observability Routes', () => {
     });
 
     it('should return 400 for invalid range', async () => {
-      const res = await app.request(
-        '/api/admin/observability/trends?range=2w',
-        {},
-        createEnv()
-      );
+      const res = await app.request('/api/admin/observability/trends?range=2w', {}, createEnv());
 
       expect(res.status).toBe(400);
       const body = await res.json();
@@ -411,20 +734,33 @@ describe('Admin Observability Routes', () => {
     };
 
     function postLogs(body: unknown, envOverrides: Partial<Env> = {}) {
-      return app.request('/api/admin/observability/logs/query', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      }, createEnv({
-        CF_API_TOKEN: 'test-token',
-        CF_ACCOUNT_ID: 'test-account',
-        ...envOverrides,
-      }));
+      return app.request(
+        '/api/admin/observability/logs/query',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        },
+        createEnv({
+          CF_API_TOKEN: 'test-token',
+          CF_ACCOUNT_ID: 'test-account',
+          ...envOverrides,
+        })
+      );
     }
 
     it('should return 200 with log results from queryCloudflareLogs', async () => {
       const mockResult = {
-        logs: [{ timestamp: '2026-02-14T12:00:00Z', level: 'info', event: 'http.request', message: 'GET /health', details: {}, invocationId: 'inv-1' }],
+        logs: [
+          {
+            timestamp: '2026-02-14T12:00:00Z',
+            level: 'info',
+            event: 'http.request',
+            message: 'GET /health',
+            details: {},
+            invocationId: 'inv-1',
+          },
+        ],
         cursor: null,
         hasMore: false,
       };
@@ -447,17 +783,27 @@ describe('Admin Observability Routes', () => {
         search: 'timeout',
         limit: 50,
         cursor: 'page-2',
+        scriptName: 'sam-api-prod',
       });
 
-      expect(mockQueryCloudflareLogs).toHaveBeenCalledWith(expect.objectContaining({
-        cfApiToken: 'test-token',
-        cfAccountId: 'test-account',
-        timeRange: { start: '2026-02-14T00:00:00Z', end: '2026-02-14T12:00:00Z' },
-        levels: ['error', 'warn'],
-        search: 'timeout',
-        limit: 50,
-        cursor: 'page-2',
-      }));
+      expect(mockQueryCloudflareLogs).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cfApiToken: 'test-token',
+          cfAccountId: 'test-account',
+          timeRange: { start: '2026-02-14T00:00:00Z', end: '2026-02-14T12:00:00Z' },
+          levels: ['error', 'warn'],
+          search: 'timeout',
+          limit: 50,
+          cursor: 'page-2',
+          scriptName: 'sam-api-prod',
+        })
+      );
+    });
+
+    it('rejects script names outside the safe Worker-name pattern', async () => {
+      const response = await postLogs({ ...validBody, scriptName: 'bad/script/name' });
+      expect(response.status).toBe(400);
+      expect(mockQueryCloudflareLogs).not.toHaveBeenCalled();
     });
 
     it('should return 400 when CF credentials are not configured', async () => {
@@ -525,7 +871,11 @@ describe('Admin Observability Routes', () => {
     it('should return 429 when rate limited', async () => {
       // Mock the rate limit middleware to throw a rate limit error
       mockRateLimitMiddleware.mockImplementationOnce(() => {
-        const err = new Error('Too many requests. Please try again later.') as Error & { statusCode: number; error: string; retryAfter: number };
+        const err = new Error('Too many requests. Please try again later.') as Error & {
+          statusCode: number;
+          error: string;
+          retryAfter: number;
+        };
         err.statusCode = 429;
         err.error = 'RATE_LIMIT_EXCEEDED';
         err.retryAfter = 30;
@@ -565,9 +915,16 @@ describe('Admin Observability Routes', () => {
       const mockIdFromName = vi.fn().mockReturnValue('do-id');
       const mockGet = vi.fn().mockReturnValue(mockDoStub);
 
-      const res = await app.request('/api/admin/observability/logs/stream', {}, createEnv({
-        ADMIN_LOGS: { idFromName: mockIdFromName, get: mockGet } as unknown as DurableObjectNamespace,
-      }));
+      const res = await app.request(
+        '/api/admin/observability/logs/stream',
+        {},
+        createEnv({
+          ADMIN_LOGS: {
+            idFromName: mockIdFromName,
+            get: mockGet,
+          } as unknown as DurableObjectNamespace,
+        })
+      );
 
       expect(res.status).toBe(400);
       const body = await res.json();
@@ -584,11 +941,18 @@ describe('Admin Observability Routes', () => {
       const mockIdFromName = vi.fn().mockReturnValue('do-id');
       const mockGet = vi.fn().mockReturnValue(mockDoStub);
 
-      await app.request('/api/admin/observability/logs/stream', {
-        headers: { Upgrade: 'websocket' },
-      }, createEnv({
-        ADMIN_LOGS: { idFromName: mockIdFromName, get: mockGet } as unknown as DurableObjectNamespace,
-      }));
+      await app.request(
+        '/api/admin/observability/logs/stream',
+        {
+          headers: { Upgrade: 'websocket' },
+        },
+        createEnv({
+          ADMIN_LOGS: {
+            idFromName: mockIdFromName,
+            get: mockGet,
+          } as unknown as DurableObjectNamespace,
+        })
+      );
 
       expect(mockIdFromName).toHaveBeenCalledWith('admin-logs');
       expect(mockGet).toHaveBeenCalledWith('do-id');
@@ -610,26 +974,35 @@ describe('Admin Observability Routes', () => {
       const mockIdFromName = vi.fn().mockReturnValue('do-id');
       const mockGet = vi.fn().mockReturnValue(mockDoStub);
 
-      const logs = [{
-        type: 'log',
-        entry: {
-          timestamp: '2026-02-14T12:00:00Z',
-          level: 'info',
-          event: 'test',
-          message: 'test log',
-          details: {},
-          scriptName: 'test-worker',
+      const logs = [
+        {
+          type: 'log',
+          entry: {
+            timestamp: '2026-02-14T12:00:00Z',
+            level: 'info',
+            event: 'test',
+            message: 'test log',
+            details: {},
+            scriptName: 'test-worker',
+          },
         },
-      }];
+      ];
 
       // Use synthetic hostname to simulate service binding call
-      const res = await app.request('https://internal/api/admin/observability/logs/ingest', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ logs }),
-      }, createEnv({
-        ADMIN_LOGS: { idFromName: mockIdFromName, get: mockGet } as unknown as DurableObjectNamespace,
-      }));
+      const res = await app.request(
+        'https://internal/api/admin/observability/logs/ingest',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ logs }),
+        },
+        createEnv({
+          ADMIN_LOGS: {
+            idFromName: mockIdFromName,
+            get: mockGet,
+          } as unknown as DurableObjectNamespace,
+        })
+      );
 
       expect(res.status).toBe(200);
       expect(mockIdFromName).toHaveBeenCalledWith('admin-logs');
@@ -638,6 +1011,137 @@ describe('Admin Observability Routes', () => {
       // Verify the DO receives a request with /ingest path
       const doRequest = mockDoStub.fetch.mock.calls[0][0] as Request;
       expect(new URL(doRequest.url).pathname).toBe('/ingest');
+    });
+  });
+
+  describe('deployment diagnosis routes', () => {
+    it('runs an error-targeted diagnosis as the authenticated superadmin', async () => {
+      const diagnosis = {
+        id: 'diag-1',
+        errorId: 'err-1',
+        startTime: '2026-07-29T10:00:00Z',
+        endTime: '2026-07-29T10:30:00Z',
+        diagnosis: 'Actionable result',
+        model: '@cf/zai-org/glm-5.2',
+        ideaId: null,
+        createdBy: 'user-superadmin',
+        createdAt: '2026-07-29T10:31:00Z',
+        usage: {
+          turns: 2,
+          inputTokens: 100,
+          outputTokens: 20,
+          totalTokens: 120,
+          dailyTokensUsed: 120,
+          dailyTokenLimit: 120000,
+        },
+      };
+      mockCreateDebugDiagnosisRun.mockResolvedValue(diagnosis);
+      const response = await app.request(
+        '/api/admin/observability/diagnoses',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ errorId: 'err-1' }),
+        },
+        createEnv()
+      );
+      
+      expect(response.status).toBe(202);
+      expect(await response.json()).toEqual({ run: diagnosis });
+      expect(mockCreateDebugDiagnosisRun).toHaveBeenCalledWith(
+        expect.any(Object),
+        'user-superadmin',
+        {
+          errorId: 'err-1',
+        }
+      );
+    });
+
+    it('returns 429 when the deployment feature budget is exhausted', async () => {
+      mockCreateDebugDiagnosisRun.mockRejectedValue(
+        new Error('Daily deployment debugging budget exhausted')
+      );
+      const response = await app.request(
+        '/api/admin/observability/diagnoses',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ errorId: 'err-1' }),
+        },
+        createEnv()
+      );
+      expect(response.status).toBe(429);
+      expect(await response.json()).toMatchObject({ error: 'DEBUG_BUDGET_EXHAUSTED' });
+    });
+
+    it('saves a persisted diagnosis as a draft Idea', async () => {
+      mockSaveDebugDiagnosisAsIdea.mockResolvedValue({ ideaId: 'idea-1' });
+      const response = await app.request(
+        '/api/admin/observability/diagnoses/diag-1/idea',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ projectId: 'project-1' }),
+        },
+        createEnv()
+      );
+      expect(response.status).toBe(201);
+      expect(await response.json()).toEqual({ ideaId: 'idea-1' });
+    });
+    it('uses the shared manual feedback-triage core from the admin router', async () => {
+      const result = {
+        enabled: true,
+        trigger: 'manual',
+        groupsFound: 1,
+        ideasCreated: 1,
+        ideasUpdated: 0,
+        groupsSkipped: 0,
+        groupsFailed: 1,
+        failureReasons: ['provider rejected [email] token [REDACTED_API_KEY]'],
+      };
+      mockRunPlatformFeedbackTriage.mockResolvedValue(result);
+      const env = createEnv({ PLATFORM_FEEDBACK_PROJECT_ID: 'project-1' });
+      const response = await app.request(
+        '/api/admin/observability/feedback-triage',
+        { method: 'POST' },
+        env
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ result });
+      expect(mockRunPlatformFeedbackTriage).toHaveBeenCalledWith(env, 'manual');
+    });
+    it('returns sanitized failure accounting from manual feedback triage', async () => {
+      const result = {
+        enabled: true,
+        trigger: 'manual',
+        groupsFound: 2,
+        ideasCreated: 1,
+        ideasUpdated: 0,
+        groupsSkipped: 0,
+        groupsFailed: 1,
+        failureReasons: ['diagnosis failed for [email] using [REDACTED_API_KEY]'],
+      };
+      mockRunPlatformFeedbackTriage.mockResolvedValue(result);
+      const response = await app.request(
+        '/api/admin/observability/feedback-triage',
+        { method: 'POST' },
+        createEnv()
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ result });
+    });
+
+    it('rejects a non-superadmin before invoking manual triage', async () => {
+      const response = await app.request(
+        '/api/admin/observability/feedback-triage',
+        {
+          method: 'POST',
+          headers: { 'x-test-role': 'non-superadmin' },
+        },
+        createEnv({ PLATFORM_FEEDBACK_PROJECT_ID: 'project-1' })
+      );
+      expect(response.status).toBe(403);
+      expect(mockRunPlatformFeedbackTriage).not.toHaveBeenCalled();
     });
   });
 });

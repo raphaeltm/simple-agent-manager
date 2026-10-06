@@ -1,0 +1,114 @@
+name: Update Self-Hosted Instance
+
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "Release tag to update to (e.g. v2026.09.20), or 'latest' for the most recent release"
+        required: false
+        default: 'latest'
+        type: string
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  update:
+    name: Sync upstream release and deploy
+    if: github.repository != 'raphaeltm/simple-agent-manager' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote and fetch tags
+        run: |
+          git remote add upstream https://github.com/raphaeltm/simple-agent-manager.git
+          git fetch upstream --tags
+
+      - name: Resolve release tag
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_RELEASE: ${{ inputs.release }}
+        run: |
+          if [ "$INPUT_RELEASE" = "latest" ] || [ -z "$INPUT_RELEASE" ]; then
+            TAG_NAME=$(gh release view \
+              --repo raphaeltm/simple-agent-manager \
+              --json tagName -q .tagName)
+            if [ -z "$TAG_NAME" ]; then
+              echo "::error::No releases found on upstream repository."
+              exit 1
+            fi
+            echo "Resolved 'latest' to tag: $TAG_NAME"
+          else
+            TAG_NAME="$INPUT_RELEASE"
+          fi
+
+          # Verify the tag exists locally (fetched from upstream)
+          if ! git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
+            echo "::error::Tag $TAG_NAME does not exist. Check available releases at https://github.com/raphaeltm/simple-agent-manager/releases"
+            exit 1
+          fi
+
+          # Verify the tag corresponds to a GitHub Release on upstream (security check)
+          if ! gh release view "$TAG_NAME" --repo raphaeltm/simple-agent-manager --json tagName -q .tagName >/dev/null 2>&1; then
+            echo "::error::Tag $TAG_NAME is not a published GitHub Release on the upstream repository. Only official releases are allowed."
+            exit 1
+          fi
+
+          TAG_SHA=$(git rev-parse "$TAG_NAME^{commit}")
+          echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
+          echo "tag_sha=$TAG_SHA" >> "$GITHUB_OUTPUT"
+          echo "Tag $TAG_NAME points to commit $TAG_SHA"
+
+      - name: Verify fast-forward is possible
+        env:
+          TAG_SHA: ${{ steps.resolve.outputs.tag_sha }}
+          TAG_NAME: ${{ steps.resolve.outputs.tag_name }}
+        run: |
+          if ! git merge-base --is-ancestor HEAD "$TAG_SHA"; then
+            echo "::error::Cannot fast-forward main to $TAG_NAME. Your fork has local commits that are not in the upstream release. Merge manually: git fetch upstream --tags && git merge $TAG_NAME"
+            exit 1
+          fi
+
+          CURRENT_SHA=$(git rev-parse HEAD)
+          if [ "$CURRENT_SHA" = "$TAG_SHA" ]; then
+            echo "::notice::Fork main is already at $TAG_NAME ($TAG_SHA). No update needed."
+            exit 0
+          fi
+
+      - name: Fast-forward main to release
+        env:
+          TAG_SHA: ${{ steps.resolve.outputs.tag_sha }}
+          TAG_NAME: ${{ steps.resolve.outputs.tag_name }}
+        run: |
+          CURRENT_SHA=$(git rev-parse HEAD)
+          if [ "$CURRENT_SHA" = "$TAG_SHA" ]; then
+            echo "Already up to date."
+            exit 0
+          fi
+
+          git merge --ff-only "$TAG_SHA"
+          git push origin main
+          git push origin "$TAG_NAME"
+          echo "Fast-forwarded main to $TAG_NAME ($TAG_SHA)"
+
+      - name: Trigger Deploy Production
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_SERVER_URL: ${{ github.server_url }}
+          GH_REPOSITORY: ${{ github.repository }}
+          TAG_SHA: ${{ steps.resolve.outputs.tag_sha }}
+        run: |
+          gh workflow run deploy.yml --ref main -f target_commit_sha="$TAG_SHA"
+          echo "Triggered Deploy Production workflow on main for $TAG_SHA."
+          echo "Monitor progress at: ${GH_SERVER_URL}/${GH_REPOSITORY}/actions/workflows/deploy.yml"

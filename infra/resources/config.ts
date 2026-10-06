@@ -1,12 +1,88 @@
-import * as crypto from "node:crypto";
-import * as pulumi from "@pulumi/pulumi";
+import * as crypto from 'node:crypto';
+import * as pulumi from '@pulumi/pulumi';
+
+export const DEFAULT_R2_LOCATION = 'WNAM';
+export const SUPPORTED_R2_LOCATIONS = ['WNAM', 'ENAM', 'WEUR', 'EEUR', 'APAC', 'OC'] as const;
+export type R2Location = (typeof SUPPORTED_R2_LOCATIONS)[number];
+
+export const DEFAULT_PAGES_PRODUCTION_BRANCH = 'main';
+export const DEFAULT_SESSION_SNAPSHOT_TTL_DAYS = 7;
+export const DEFAULT_TEMP_UPLOAD_TTL_DAYS = 1;
+export const DEFAULT_TTS_TTL_DAYS = 30;
+export const DEFAULT_DIAGNOSTIC_INCIDENT_PREFIX = 'diagnostic-incidents';
+export const DEFAULT_DIAGNOSTIC_INCIDENT_TTL_DAYS = 7;
+export const RESERVED_R2_TOP_LEVEL_PREFIXES = new Set([
+  'agents',
+  'cli',
+  'compose-image-artifacts',
+  'library',
+  'session-snapshots',
+  'temp-uploads',
+  'tts',
+]);
+
+export interface ConfigReader {
+  get(key: string): string | undefined;
+  require(key: string): string;
+}
+
+export interface InfraConfig {
+  accountId: string;
+  zoneId: string;
+  baseDomain: string;
+  stack: string;
+  prefix: string;
+  r2Location: R2Location;
+  pagesProductionBranch: string;
+  sessionSnapshotTtlDays: number;
+  tempUploadTtlDays: number;
+  ttsTtlDays: number;
+  diagnosticIncidentPrefix: string;
+  diagnosticIncidentTtlDays: number;
+}
 
 const pulumiConfig = new pulumi.Config();
 
-export const accountId = pulumiConfig.require("cloudflareAccountId");
-export const zoneId = pulumiConfig.get("cloudflareZoneId") || "";
-export const baseDomain = pulumiConfig.get("baseDomain") || "";
-export const stack = pulumi.getStack();
+export function parseInfraConfig(config: ConfigReader, currentStack: string): InfraConfig {
+  const baseDomain = requireNonEmptyConfig(config, 'baseDomain');
+  const resourcePrefix = optionalNonEmptyConfig(config, 'resourcePrefix');
+
+  return {
+    accountId: requireNonEmptyConfig(config, 'cloudflareAccountId'),
+    zoneId: requireNonEmptyConfig(config, 'cloudflareZoneId'),
+    baseDomain,
+    stack: currentStack,
+    prefix: resourcePrefix ?? derivePrefix(baseDomain),
+    r2Location: parseR2Location(optionalNonEmptyConfig(config, 'r2Location')),
+    pagesProductionBranch:
+      optionalNonEmptyConfig(config, 'pagesProductionBranch') ?? DEFAULT_PAGES_PRODUCTION_BRANCH,
+    sessionSnapshotTtlDays: parsePositiveInteger(
+      optionalNonEmptyConfig(config, 'sessionSnapshotTtlDays'),
+      DEFAULT_SESSION_SNAPSHOT_TTL_DAYS,
+      'sessionSnapshotTtlDays'
+    ),
+    tempUploadTtlDays: parsePositiveInteger(
+      optionalNonEmptyConfig(config, 'tempUploadTtlDays'),
+      DEFAULT_TEMP_UPLOAD_TTL_DAYS,
+      'tempUploadTtlDays'
+    ),
+    ttsTtlDays: parsePositiveInteger(
+      optionalNonEmptyConfig(config, 'ttsTtlDays'),
+      DEFAULT_TTS_TTL_DAYS,
+      'ttsTtlDays'
+    ),
+    diagnosticIncidentPrefix: parseR2Prefix(
+      optionalNonEmptyConfig(config, 'diagnosticIncidentPrefix') ??
+        DEFAULT_DIAGNOSTIC_INCIDENT_PREFIX,
+      'diagnosticIncidentPrefix'
+    ),
+    diagnosticIncidentTtlDays: parsePositiveInteger(
+      optionalNonEmptyConfig(config, 'diagnosticIncidentTtlDays'),
+      DEFAULT_DIAGNOSTIC_INCIDENT_TTL_DAYS,
+      'diagnosticIncidentTtlDays'
+    ),
+  };
+}
 
 /**
  * Resource name prefix — used to namespace all Cloudflare resources.
@@ -17,12 +93,92 @@ export const stack = pulumi.getStack();
  * This prevents Cloudflare Pages project name collisions (which are globally
  * unique) and Worker name collisions across different deployments.
  */
-export const prefix = pulumiConfig.get("resourcePrefix") || derivePrefix(baseDomain);
+const infraConfig = parseInfraConfig(pulumiConfig, pulumi.getStack());
 
-function derivePrefix(domain: string): string {
-  if (!domain) return "sam";
-  const hash = crypto.createHash("sha256").update(domain).digest("hex");
+export const accountId = infraConfig.accountId;
+export const zoneId = infraConfig.zoneId;
+export const baseDomain = infraConfig.baseDomain;
+export const stack = infraConfig.stack;
+export const prefix = infraConfig.prefix;
+export const r2Location = infraConfig.r2Location;
+export const pagesProductionBranch = infraConfig.pagesProductionBranch;
+export const sessionSnapshotTtlDays = infraConfig.sessionSnapshotTtlDays;
+export const tempUploadTtlDays = infraConfig.tempUploadTtlDays;
+export const ttsTtlDays = infraConfig.ttsTtlDays;
+export const diagnosticIncidentPrefix = infraConfig.diagnosticIncidentPrefix;
+export const diagnosticIncidentTtlDays = infraConfig.diagnosticIncidentTtlDays;
+
+export function derivePrefix(domain: string): string {
+  const hash = crypto.createHash('sha256').update(domain).digest('hex');
   // Use first 6 hex chars, prefixed with 's' to ensure it starts with a letter
   // (Cloudflare resource names must start with a letter)
   return `s${hash.slice(0, 6)}`;
+}
+
+function requireNonEmptyConfig(config: ConfigReader, key: string): string {
+  const value = config.require(key).trim();
+  if (!value) {
+    throw new Error(`Pulumi config "${key}" must not be empty`);
+  }
+  return value;
+}
+
+function optionalNonEmptyConfig(config: ConfigReader, key: string): string | undefined {
+  const rawValue = config.get(key);
+  if (rawValue === undefined) {
+    return undefined;
+  }
+
+  const value = rawValue.trim();
+  if (!value) {
+    throw new Error(`Pulumi config "${key}" must not be empty when set`);
+  }
+  return value;
+}
+
+function parsePositiveInteger(
+  value: string | undefined,
+  fallback: number,
+  key: string,
+  maximum?: number
+): number {
+  if (value === undefined) return fallback;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new Error('Pulumi config "' + key + '" must be a positive integer');
+  }
+  if (maximum !== undefined && parsed > maximum) {
+    throw new Error(`Pulumi config "${key}" must be at most ${maximum}`);
+  }
+  return parsed;
+}
+
+function parseR2Prefix(value: string, key: string): string {
+  const segments = value.split('/');
+  if (
+    segments.length === 0 ||
+    segments.some((segment) => !segment || segment === '..' || !/^[a-zA-Z0-9._-]+$/.test(segment))
+  ) {
+    throw new Error(`Pulumi config "${key}" must be a safe private R2 prefix`);
+  }
+  if (RESERVED_R2_TOP_LEVEL_PREFIXES.has(segments[0])) {
+    throw new Error(
+      `Pulumi config "${key}" must not use a reserved application R2 prefix: ${segments[0]}`
+    );
+  }
+  return segments.join('/');
+}
+
+function parseR2Location(value: string | undefined): R2Location {
+  if (value === undefined) {
+    return DEFAULT_R2_LOCATION;
+  }
+
+  if (SUPPORTED_R2_LOCATIONS.includes(value as R2Location)) {
+    return value as R2Location;
+  }
+
+  throw new Error(
+    `Pulumi config "r2Location" must be one of: ${SUPPORTED_R2_LOCATIONS.join(', ')}`
+  );
 }

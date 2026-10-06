@@ -54,6 +54,229 @@ func TestWorkspaceManagementSourceContract(t *testing.T) {
 	}
 }
 
+func TestBuildQueueSerializesConcurrentBuilds(t *testing.T) {
+	s := &Server{buildQueue: make(chan struct{}, 1)}
+
+	firstAcquired := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	firstReleased := make(chan struct{})
+	secondAcquired := make(chan struct{})
+
+	go func() {
+		s.acquireBuildSlot("ws-first")
+		close(firstAcquired)
+		<-releaseFirst
+		s.releaseBuildSlot("ws-first")
+		close(firstReleased)
+	}()
+
+	select {
+	case <-firstAcquired:
+	case <-time.After(time.Second):
+		t.Fatal("first build did not acquire slot")
+	}
+
+	go func() {
+		s.acquireBuildSlot("ws-second")
+		close(secondAcquired)
+	}()
+
+	select {
+	case <-secondAcquired:
+		t.Fatal("second build acquired slot before first released")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(releaseFirst)
+
+	select {
+	case <-firstReleased:
+	case <-time.After(time.Second):
+		t.Fatal("first build did not release slot")
+	}
+
+	select {
+	case <-secondAcquired:
+	case <-time.After(time.Second):
+		t.Fatal("second build did not acquire slot after first released")
+	}
+	s.releaseBuildSlot("ws-second")
+}
+
+func TestConfiguredWorkspaceBuildQueueDepth(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  *config.Config
+		want int
+	}{
+		{name: "nil config", cfg: nil, want: config.DefaultWorkspaceBuildQueueDepth},
+		{name: "zero config", cfg: &config.Config{}, want: config.DefaultWorkspaceBuildQueueDepth},
+		{name: "configured", cfg: &config.Config{WorkspaceBuildQueueDepth: 3}, want: 3},
+		{
+			name: "above max config",
+			cfg:  &config.Config{WorkspaceBuildQueueDepth: config.MaxWorkspaceBuildQueueDepth + 1},
+			want: config.DefaultWorkspaceBuildQueueDepth,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := configuredWorkspaceBuildQueueDepth(tt.cfg); got != tt.want {
+				t.Fatalf("configuredWorkspaceBuildQueueDepth()=%d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNewServerUsesConfiguredWorkspaceBuildQueueDepth(t *testing.T) {
+	srv := newWorkspaceBuildQueueDepthTestServer(t, "node-queue-depth", 2)
+
+	if got := cap(srv.buildQueue); got != 2 {
+		t.Fatalf("cap(buildQueue)=%d, want 2", got)
+	}
+}
+
+func TestNewServerUsesDefaultWorkspaceBuildQueueDepthAboveMax(t *testing.T) {
+	srv := newWorkspaceBuildQueueDepthTestServer(
+		t,
+		"node-queue-depth-above-max",
+		config.MaxWorkspaceBuildQueueDepth+1,
+	)
+
+	if got := cap(srv.buildQueue); got != config.DefaultWorkspaceBuildQueueDepth {
+		t.Fatalf("cap(buildQueue)=%d, want %d", got, config.DefaultWorkspaceBuildQueueDepth)
+	}
+}
+
+func newWorkspaceBuildQueueDepthTestServer(
+	t *testing.T,
+	nodeID string,
+	workspaceBuildQueueDepth int,
+) *Server {
+	t.Helper()
+
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate RSA key: %v", err)
+	}
+	jwks := buildWorkspaceCreateJWKS(privateKey.Public().(*rsa.PublicKey))
+	jwksServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(jwks)
+	}))
+	t.Cleanup(jwksServer.Close)
+
+	dir := t.TempDir()
+	cfg := &config.Config{
+		NodeID:                   nodeID,
+		ControlPlaneURL:          "http://localhost:8787",
+		JWKSEndpoint:             jwksServer.URL,
+		JWTIssuer:                "test-issuer",
+		JWTAudience:              "test-audience",
+		CookieName:               "vm_session",
+		SessionTTL:               time.Hour,
+		SessionCleanupInterval:   time.Hour,
+		SessionMaxCount:          10,
+		DefaultShell:             "/bin/sh",
+		DefaultRows:              24,
+		DefaultCols:              80,
+		WorkspaceDir:             dir,
+		PersistenceDBPath:        filepath.Join(dir, "persistence.db"),
+		ErrorReportDBPath:        filepath.Join(dir, "errors.db"),
+		ErrorReportSpoolDir:      filepath.Join(dir, "error-spool"),
+		EventStoreDBPath:         filepath.Join(dir, "events.db"),
+		MetricsDBPath:            filepath.Join(dir, "metrics.db"),
+		MetricsInterval:          time.Hour,
+		HTTPCallbackTimeout:      time.Second,
+		WorkspaceBuildQueueDepth: workspaceBuildQueueDepth,
+	}
+
+	srv, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+	t.Cleanup(func() {
+		if srv.resourceMonitor != nil {
+			_ = srv.resourceMonitor.Close()
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = srv.Stop(ctx)
+	})
+
+	return srv
+}
+
+func TestBuildQueueAllowsConfiguredParallelBuilds(t *testing.T) {
+	s := &Server{buildQueue: make(chan struct{}, 2)}
+
+	s.acquireBuildSlot("ws-first")
+	s.acquireBuildSlot("ws-second")
+
+	thirdAcquired := make(chan struct{})
+	go func() {
+		s.acquireBuildSlot("ws-third")
+		close(thirdAcquired)
+	}()
+
+	select {
+	case <-thirdAcquired:
+		t.Fatal("third build acquired slot before a configured slot was released")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	s.releaseBuildSlot("ws-first")
+	select {
+	case <-thirdAcquired:
+	case <-time.After(time.Second):
+		t.Fatal("third build did not acquire slot after a configured slot was released")
+	}
+
+	s.releaseBuildSlot("ws-second")
+	s.releaseBuildSlot("ws-third")
+}
+
+func TestNotifyWorkspaceBuildStartedAllowsZeroCallbackTimeout(t *testing.T) {
+	requestSeen := make(chan struct{}, 1)
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/projects/project-1/tasks/task-1/build-started" {
+			t.Fatalf("unexpected callback path %s", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer callback-token" {
+			t.Fatalf("Authorization = %q, want Bearer callback-token", got)
+		}
+		var payload map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode callback body: %v", err)
+		}
+		if got := payload["workspaceId"]; got != "ws-1" {
+			t.Fatalf("workspaceId = %q, want ws-1", got)
+		}
+		requestSeen <- struct{}{}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer controlPlane.Close()
+
+	s := &Server{
+		config: &config.Config{
+			ControlPlaneURL:               controlPlane.URL,
+			WorkspaceReadyCallbackTimeout: 0,
+		},
+	}
+
+	s.notifyWorkspaceBuildStarted(WorkspaceRuntime{
+		ID:            "ws-1",
+		ProjectID:     "project-1",
+		TaskID:        "task-1",
+		CallbackToken: "callback-token",
+	})
+
+	select {
+	case <-requestSeen:
+	case <-time.After(time.Second):
+		t.Fatal("build-started callback was not sent")
+	}
+}
+
 func TestCreateWorkspaceDuplicateProvisioningReturnsIdempotentAccepted(t *testing.T) {
 	originalPrepare := prepareWorkspaceForRuntime
 	defer func() { prepareWorkspaceForRuntime = originalPrepare }()
@@ -105,7 +328,7 @@ func TestCreateWorkspaceDuplicateProvisioningReturnsIdempotentAccepted(t *testin
 	waitForProvisioningInactive(t, s, "ws-race")
 }
 
-func TestCreateWorkspaceCanProvisionAgainAfterCompletion(t *testing.T) {
+func TestCreateWorkspaceReplayAfterCompletionDoesNotProvisionAgain(t *testing.T) {
 	originalPrepare := prepareWorkspaceForRuntime
 	defer func() { prepareWorkspaceForRuntime = originalPrepare }()
 
@@ -128,11 +351,260 @@ func TestCreateWorkspaceCanProvisionAgainAfterCompletion(t *testing.T) {
 	waitForProvisioningInactive(t, s, "ws-repeat")
 
 	second := postCreateWorkspace(t, s, token, "ws-repeat")
-	if second.Code != http.StatusAccepted {
-		t.Fatalf("expected second create status 202, got %d", second.Code)
+	if second.Code != http.StatusOK {
+		t.Fatalf("expected second create status 200, got %d", second.Code)
 	}
-	waitForProvisioningCalls(t, &prepareCalls, 2)
-	waitForProvisioningInactive(t, s, "ws-repeat")
+	if got := atomic.LoadInt32(&prepareCalls); got != 1 {
+		t.Fatalf("expected replay not to start provisioning again, got %d calls", got)
+	}
+}
+
+func TestCreateWorkspaceReplayConflictReturnsConflict(t *testing.T) {
+	controlPlane := newWorkspaceCreateControlPlane(t)
+	validator, privateKey := newWorkspaceCreateJWTValidator(t, "node-1")
+	s := newWorkspaceCreateServer(t, controlPlane.URL, validator)
+	token := signWorkspaceCreateNodeToken(t, privateKey, "node-1", "ws-conflict")
+	s.upsertWorkspaceRuntime("ws-conflict", "owner/repo", "main", "running", "callback-token")
+
+	rec := postCreateWorkspaceWithRepository(t, s, token, "ws-conflict", "other/repo")
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected conflict status 409, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "workspace_conflict") {
+		t.Fatalf("expected workspace_conflict response, got %s", rec.Body.String())
+	}
+}
+
+func TestCreateWorkspaceStandaloneClonesBeforeRunning(t *testing.T) {
+	validator, privateKey := newWorkspaceCreateJWTValidator(t, "node-1")
+	workspaceID := "ws-standalone"
+	workDir := filepath.Join(t.TempDir(), "repo")
+	var readyCalled atomic.Bool
+
+	controlPlane := newStandaloneCloneControlPlane(t, workspaceID, workDir, &readyCalled)
+	defer controlPlane.Close()
+
+	s := newWorkspaceCreateServer(t, controlPlane.URL, validator)
+	s.config.Role = config.RoleStandalone
+	s.config.WorkspaceID = workspaceID
+	s.config.WorkspaceDir = workDir
+	s.config.ContainerWorkDir = workDir
+	s.config.WorkspaceReadyCallbackTimeout = time.Second
+
+	var cloneCalled atomic.Bool
+	installStandaloneCloneGitStub(t, s, workspaceID, workDir, &cloneCalled)
+
+	token := signWorkspaceCreateNodeToken(t, privateKey, "node-1", workspaceID)
+	rec := postCreateWorkspaceWithRepository(t, s, token, workspaceID, "owner/repo")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected standalone create status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !cloneCalled.Load() {
+		t.Fatal("expected standalone create to clone repository")
+	}
+	if !readyCalled.Load() {
+		t.Fatal("expected standalone create to notify ready after clone")
+	}
+	runtime, ok := s.getWorkspaceRuntime(workspaceID)
+	if !ok {
+		t.Fatal("workspace runtime missing")
+	}
+	if runtime.Status != "running" {
+		t.Fatalf("workspace status = %q, want running", runtime.Status)
+	}
+	if runtime.ContainerWorkDir != workDir {
+		t.Fatalf("container workdir = %q, want %q", runtime.ContainerWorkDir, workDir)
+	}
+}
+
+// standaloneCloneTestHarness spins up a standalone-mode server with a control
+// plane, git stub (capturing clone args), and a signed node token, then posts
+// the create-workspace request and asserts it succeeded with a clone.
+type standaloneCloneTestHarness struct {
+	server    *Server
+	cloneArgs []string
+}
+
+func runStandaloneCloneCreate(t *testing.T, workspaceID, cloneFilter string) *standaloneCloneTestHarness {
+	t.Helper()
+
+	validator, privateKey := newWorkspaceCreateJWTValidator(t, "node-1")
+	workDir := filepath.Join(t.TempDir(), "repo")
+	var readyCalled atomic.Bool
+
+	controlPlane := newStandaloneCloneControlPlane(t, workspaceID, workDir, &readyCalled)
+	t.Cleanup(controlPlane.Close)
+
+	s := newWorkspaceCreateServer(t, controlPlane.URL, validator)
+	s.config.Role = config.RoleStandalone
+	s.config.WorkspaceID = workspaceID
+	s.config.WorkspaceDir = workDir
+	s.config.ContainerWorkDir = workDir
+	s.config.WorkspaceReadyCallbackTimeout = time.Second
+	s.config.StandaloneCloneFilter = cloneFilter
+
+	harness := &standaloneCloneTestHarness{server: s}
+	var cloneCalled atomic.Bool
+	installStandaloneCloneGitStubCapture(t, s, workspaceID, workDir, &cloneCalled, &harness.cloneArgs)
+
+	token := signWorkspaceCreateNodeToken(t, privateKey, "node-1", workspaceID)
+	rec := postCreateWorkspaceWithRepository(t, s, token, workspaceID, "owner/repo")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected standalone create status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !cloneCalled.Load() {
+		t.Fatal("expected standalone create to clone repository")
+	}
+	return harness
+}
+
+// Regression test for the 2026-07-18 instant-container outage: standalone
+// clones run synchronously inside the control plane's create-workspace request,
+// so they MUST use the partial-clone filter to keep clone cost proportional to
+// the working tree instead of the full history pack. This fails on pre-fix
+// code, which issued a full clone.
+func TestCreateWorkspaceStandaloneUsesPartialCloneFilter(t *testing.T) {
+	harness := runStandaloneCloneCreate(t, "ws-standalone-filter", config.DefaultStandaloneCloneFilter)
+
+	joined := strings.Join(harness.cloneArgs, " ")
+	if !strings.Contains(joined, "clone --filter=blob:none --branch") {
+		t.Fatalf("clone args missing partial-clone filter: %v", harness.cloneArgs)
+	}
+}
+
+func TestCreateWorkspaceStandaloneCloneFilterDisabled(t *testing.T) {
+	harness := runStandaloneCloneCreate(t, "ws-standalone-nofilter", config.ResolveStandaloneCloneFilter("off"))
+
+	for _, arg := range harness.cloneArgs {
+		if strings.HasPrefix(arg, "--filter") {
+			t.Fatalf("clone args must not include --filter when disabled: %v", harness.cloneArgs)
+		}
+	}
+	joined := strings.Join(harness.cloneArgs, " ")
+	if !strings.Contains(joined, "clone --branch") {
+		t.Fatalf("expected plain full clone args, got: %v", harness.cloneArgs)
+	}
+}
+
+func newStandaloneCloneControlPlane(
+	t *testing.T,
+	workspaceID string,
+	workDir string,
+	readyCalled *atomic.Bool,
+) *httptest.Server {
+	t.Helper()
+
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/workspaces/" + workspaceID + "/git-token":
+			_, _ = w.Write([]byte(`{"token":"git-token"}`))
+		case "/api/workspaces/" + workspaceID + "/ready":
+			if _, err := os.Stat(filepath.Join(workDir, ".git")); err != nil {
+				t.Errorf("ready callback arrived before repository was materialized: %v", err)
+			}
+			readyCalled.Store(true)
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+}
+
+func installStandaloneCloneGitStub(
+	t *testing.T,
+	s *Server,
+	workspaceID string,
+	workDir string,
+	cloneCalled *atomic.Bool,
+) {
+	t.Helper()
+	installStandaloneCloneGitStubCapture(t, s, workspaceID, workDir, cloneCalled, nil)
+}
+
+func installStandaloneCloneGitStubCapture(
+	t *testing.T,
+	s *Server,
+	workspaceID string,
+	workDir string,
+	cloneCalled *atomic.Bool,
+	capturedCloneArgs *[]string,
+) {
+	t.Helper()
+
+	originalRunGit := runStandaloneGitCommand
+	t.Cleanup(func() { runStandaloneGitCommand = originalRunGit })
+	runStandaloneGitCommand = func(_ context.Context, _ string, env []string, args ...string) (string, error) {
+		joinedArgs := strings.Join(args, " ")
+		if !strings.Contains(joinedArgs, "clone") {
+			return "", nil
+		}
+		if !envContains(env, "GH_TOKEN=git-token") {
+			t.Fatalf("standalone clone did not receive scoped GH_TOKEN env: %v", env)
+		}
+		s.workspaceMu.RLock()
+		status := s.workspaces[workspaceID].Status
+		s.workspaceMu.RUnlock()
+		if status != "creating" {
+			t.Fatalf("workspace status during clone = %q, want creating", status)
+		}
+		target := args[len(args)-1]
+		if target != workDir {
+			t.Fatalf("clone target = %q, want %q", target, workDir)
+		}
+		if err := os.MkdirAll(filepath.Join(target, ".git"), 0o755); err != nil {
+			t.Fatalf("create fake git dir: %v", err)
+		}
+		if capturedCloneArgs != nil {
+			*capturedCloneArgs = append([]string(nil), args...)
+		}
+		cloneCalled.Store(true)
+		return "", nil
+	}
+}
+
+func TestCreateWorkspaceStandaloneRejectsUnsafeWorkDir(t *testing.T) {
+	validator, privateKey := newWorkspaceCreateJWTValidator(t, "node-1")
+	workspaceID := "ws-unsafe"
+
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/workspaces/" + workspaceID + "/provisioning-failed":
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer controlPlane.Close()
+
+	s := newWorkspaceCreateServer(t, controlPlane.URL, validator)
+	s.config.Role = config.RoleStandalone
+	s.config.WorkspaceID = workspaceID
+	s.config.WorkspaceDir = "/"
+	s.config.ContainerWorkDir = "/"
+	s.config.WorkspaceReadyCallbackTimeout = time.Second
+
+	originalRunGit := runStandaloneGitCommand
+	defer func() { runStandaloneGitCommand = originalRunGit }()
+	runStandaloneGitCommand = func(context.Context, string, []string, ...string) (string, error) {
+		t.Fatal("standalone git command should not run for an unsafe workdir")
+		return "", nil
+	}
+
+	token := signWorkspaceCreateNodeToken(t, privateKey, "node-1", workspaceID)
+	rec := postCreateWorkspaceWithRepository(t, s, token, workspaceID, "owner/repo")
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected standalone create status 500, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "unsafe standalone workspace directory") {
+		t.Fatalf("expected unsafe workdir error, got %s", rec.Body.String())
+	}
+	runtime, ok := s.getWorkspaceRuntime(workspaceID)
+	if !ok {
+		t.Fatal("workspace runtime missing")
+	}
+	if runtime.Status != "error" {
+		t.Fatalf("workspace status = %q, want error", runtime.Status)
+	}
 }
 
 func newWorkspaceCreateControlPlane(t *testing.T) *httptest.Server {
@@ -143,6 +615,8 @@ func newWorkspaceCreateControlPlane(t *testing.T) *httptest.Server {
 			_, _ = w.Write([]byte(`{"token":"git-token"}`))
 		case strings.HasSuffix(r.URL.Path, "/runtime-assets"):
 			_, _ = w.Write([]byte(`{"envVars":[],"files":[]}`))
+		case strings.HasSuffix(r.URL.Path, "/ready"):
+			w.WriteHeader(http.StatusOK)
 		default:
 			http.NotFound(w, r)
 		}
@@ -236,7 +710,12 @@ func signWorkspaceCreateNodeToken(t *testing.T, key *rsa.PrivateKey, nodeID, wor
 
 func postCreateWorkspace(t *testing.T, s *Server, token, workspaceID string) *httptest.ResponseRecorder {
 	t.Helper()
-	body := []byte(`{"workspaceId":"` + workspaceID + `","repository":"owner/repo","branch":"main","callbackToken":"callback-token"}`)
+	return postCreateWorkspaceWithRepository(t, s, token, workspaceID, "owner/repo")
+}
+
+func postCreateWorkspaceWithRepository(t *testing.T, s *Server, token, workspaceID, repository string) *httptest.ResponseRecorder {
+	t.Helper()
+	body := []byte(`{"workspaceId":"` + workspaceID + `","repository":"` + repository + `","branch":"main","callbackToken":"callback-token"}`)
 	req := httptest.NewRequest(http.MethodPost, "/workspaces", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("X-SAM-Node-Id", "node-1")
@@ -244,6 +723,15 @@ func postCreateWorkspace(t *testing.T, s *Server, token, workspaceID string) *ht
 	rec := httptest.NewRecorder()
 	s.handleCreateWorkspace(rec, req)
 	return rec
+}
+
+func envContains(env []string, want string) bool {
+	for _, item := range env {
+		if item == want {
+			return true
+		}
+	}
+	return false
 }
 
 func waitForProvisioningCalls(t *testing.T, calls *int32, want int32) {

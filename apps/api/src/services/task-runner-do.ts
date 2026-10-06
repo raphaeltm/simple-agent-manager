@@ -5,11 +5,32 @@
  * This is the bridge between HTTP routes and the DO. Routes should call
  * these functions instead of accessing the DO binding directly.
  */
-import type { CredentialProvider, TaskAttachment,TaskMode, VMLocation, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
+import type {
+  AgentEffort,
+  CredentialProvider,
+  CredentialSource,
+  ResolvedResourceReservation,
+  ResourceRequirements,
+  ResourceRequirementsSource,
+  TaskAttachment,
+  TaskMode,
+  VMLocation,
+  VMSize,
+  WorkspaceProfile,
+} from '@simple-agent-manager/shared';
 
 import type { StartTaskInput, TaskRunner } from '../durable-objects/task-runner';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import type {
+  TaskStartCapacityCandidate,
+  TaskStartCapacityPoolSelection,
+} from './placement-resolver';
+import { assertReplacementDeletionConfirmed } from './replacement-deletion-fence';
+import type { ProjectEventWakeRecoveryGuard } from './session-recovery-authority';
+import type { TaskRunnerStartGuard } from './task-runner-start-guard';
+
+const TASK_RUNNER_COMPACT_SELECTION_MAX_BYTES = 96 * 1024;
 
 /**
  * Get a typed DO stub for the given task.
@@ -18,6 +39,73 @@ import { log } from '../lib/logger';
 function getStub(env: Env, taskId: string): DurableObjectStub<TaskRunner> {
   const id = env.TASK_RUNNER.idFromName(taskId);
   return env.TASK_RUNNER.get(id) as DurableObjectStub<TaskRunner>;
+}
+
+function capacityCandidateMatchesStartInput(
+  candidate: TaskStartCapacityCandidate,
+  input: {
+    cloudProvider?: CredentialProvider | null;
+    explicitVmLocation?: boolean | null;
+    vmLocation: VMLocation;
+  }
+): boolean {
+  if (input.cloudProvider && candidate.provider !== input.cloudProvider) return false;
+  if (input.explicitVmLocation === true && candidate.location !== input.vmLocation) return false;
+  return true;
+}
+
+function capacityPoolSelectionForStart(input: {
+  capacityPoolSelection?: TaskStartCapacityPoolSelection | null;
+  cloudProvider?: CredentialProvider | null;
+  explicitVmLocation?: boolean | null;
+  vmLocation: VMLocation;
+}): TaskStartCapacityPoolSelection | null {
+  const selection = input.capacityPoolSelection ?? null;
+  const candidate = selection?.candidates[0] ?? null;
+  if (!selection || !candidate) return selection;
+  if (!capacityCandidateMatchesStartInput(candidate, input)) return null;
+  return compactCapacityPoolSelectionForTaskRunner(selection);
+}
+
+function compactCapacityPoolSelectionForTaskRunner(
+  selection: TaskStartCapacityPoolSelection
+): TaskStartCapacityPoolSelection {
+  const compactSelection: TaskStartCapacityPoolSelection = {
+    ...selection,
+    poolSnapshot: {
+      ...selection.poolSnapshot,
+      placementExplanationJson: null,
+    },
+    candidates: selection.candidates.map((candidate, index) =>
+      compactCapacityCandidateForTaskRunner(candidate, { primary: index === 0 })
+    ),
+  };
+
+  if (
+    new TextEncoder().encode(JSON.stringify(compactSelection)).length <=
+    TASK_RUNNER_COMPACT_SELECTION_MAX_BYTES
+  ) {
+    return compactSelection;
+  }
+
+  return {
+    ...compactSelection,
+    candidates: compactSelection.candidates.slice(0, 1),
+  };
+}
+
+function compactCapacityCandidateForTaskRunner(
+  candidate: TaskStartCapacityCandidate,
+  options: { primary: boolean }
+): TaskStartCapacityCandidate {
+  const rest = { ...candidate };
+  delete rest.snapshot;
+  // Any candidate may become the selected reuse/provisioning target. Its prices
+  // remain part of placement diagnostics and ranking after snapshot compaction.
+  return {
+    ...rest,
+    machineClass: options.primary ? candidate.machineClass : null,
+  };
 }
 
 /**
@@ -33,7 +121,9 @@ export async function startTaskRunnerDO(
     vmSize: VMSize;
     vmLocation: VMLocation;
     branch: string;
+    defaultBranch?: string;
     preferredNodeId?: string | null;
+    excludedNodeId?: string | null;
     userName?: string | null;
     userEmail?: string | null;
     githubId?: string | null;
@@ -53,10 +143,20 @@ export async function startTaskRunnerDO(
     devcontainerConfigName?: string | null;
     /** Cloud provider for auto-provisioned nodes. Falls back to any available credential. */
     cloudProvider?: CredentialProvider | null;
+    /** Whether vmLocation came from a caller-supplied explicit placement override. */
+    explicitVmLocation?: boolean | null;
+    /** Root-pinned credential attribution user for this task tree. */
+    credentialAttributionUserId?: string | null;
+    /** Project scope when credentialAttributionSource is 'project'. */
+    credentialAttributionProjectId?: string | null;
+    /** Root-pinned credential attribution source. */
+    credentialAttributionSource?: CredentialSource | null;
     /** Task execution mode. 'task' = push/PR/complete. 'conversation' = human-controlled. */
     taskMode?: TaskMode;
     /** Model override from agent profile. Null = use agent default. */
     model?: string | null;
+    /** Reasoning effort override from agent profile. Null = use agent default. */
+    effort?: AgentEffort | null;
     /** Permission mode override from agent profile. Null = use agent default. */
     permissionMode?: string | null;
     /** OpenCode inference provider override. Null = use agent default. */
@@ -65,19 +165,64 @@ export async function startTaskRunnerDO(
     opencodeBaseUrl?: string | null;
     /** System prompt text to append to the initial prompt (from agent profile). */
     systemPromptAppend?: string | null;
+    /** Agent profile ID — stored on workspace for GitHub CLI policy enforcement. */
+    agentProfileHint?: string | null;
     /** File attachments uploaded to R2 before task submission. */
     attachments?: TaskAttachment[] | null;
     /** Per-project scaling overrides. */
     projectScaling?: {
       taskExecutionTimeoutMs?: number | null;
-      maxWorkspacesPerNode?: number | null;
       nodeCpuThresholdPercent?: number | null;
       nodeMemoryThresholdPercent?: number | null;
+      nodeCpuShareBudgetPercent?: number | null;
+      nodeHostMemoryReserveMb?: number | null;
+      nodeDiskPressureThresholdPercent?: number | null;
+      nodeMetricsTtlMs?: number | null;
+      nodeCpuScoreWeightPercent?: number | null;
+      nodeMemoryScoreWeightPercent?: number | null;
       warmNodeTimeoutMs?: number | null;
     } | null;
+    /** Raw resolved inputs retained for audit and provenance. */
+    resourceRequirements?: ResourceRequirements | null;
+    /** Immutable scheduler reservation used for node selection and final workspace placement. */
+    resolvedReservation: ResolvedResourceReservation;
+    /** Effective one-pool capacity selection for VM task placement. */
+    capacityPoolSelection?: TaskStartCapacityPoolSelection | null;
+    /** Where the VM size came from in the precedence chain. */
+    vmSizeSource?: ResourceRequirementsSource | 'explicit' | null;
+    /** Existing sleeping chat whose snapshot is restored before queued prompt delivery. */
+    resumeSnapshotChatSessionId?: string | null;
+    /** Resource-eviction identity that must remain current through replacement allocation. */
+    evictionFence?: {
+      workspaceId: string;
+      nodeId: string;
+      generation: string | null;
+    } | null;
+    /** Original parent whose live status authorizes this snapshot-recovery runner. */
+    recoverySourceTaskId?: string | null;
+    recoveryAttemptId?: string | null;
+    /** Original attempt whose runtime deletion fences this replacement. */
+    retrySourceTaskId?: string | null;
+    /** Optional durable lifecycle guard for reserved first-start submissions. */
+    startGuard?: TaskRunnerStartGuard | null;
+    /** Event wake batch/subscription identity that must still authorize guarded recovery. */
+    projectEventWakeGuard?: ProjectEventWakeRecoveryGuard | null;
+    /** Member whose continued write permission authorizes a scheduled wake. */
+    recoveryRequiredProjectMemberId?: string | null;
   },
+  options: { reactivate?: boolean } = {}
 ): Promise<void> {
+  const deletionSourceTaskId = input.retrySourceTaskId ?? input.recoverySourceTaskId ?? null;
+  if (deletionSourceTaskId && deletionSourceTaskId !== input.taskId) {
+    await assertReplacementDeletionConfirmed(env, {
+      sourceTaskId: deletionSourceTaskId,
+      projectId: input.projectId,
+      userId: input.userId,
+    });
+  }
   const stub = getStub(env, input.taskId);
+  const capacityPoolSelection = capacityPoolSelectionForStart(input);
+  const initialCapacityCandidate = capacityPoolSelection?.candidates[0] ?? null;
 
   const startInput: StartTaskInput = {
     taskId: input.taskId,
@@ -85,9 +230,11 @@ export async function startTaskRunnerDO(
     userId: input.userId,
     config: {
       vmSize: input.vmSize,
-      vmLocation: input.vmLocation,
+      vmLocation: initialCapacityCandidate?.location ?? input.vmLocation,
       branch: input.branch,
+      defaultBranch: input.defaultBranch ?? input.branch,
       preferredNodeId: input.preferredNodeId ?? null,
+      excludedNodeId: input.excludedNodeId ?? null,
       userName: input.userName ?? null,
       userEmail: input.userEmail ?? null,
       githubId: input.githubId ?? null,
@@ -101,24 +248,60 @@ export async function startTaskRunnerDO(
       agentType: input.agentType ?? null,
       workspaceProfile: input.workspaceProfile ?? null,
       devcontainerConfigName: input.devcontainerConfigName ?? null,
-      cloudProvider: input.cloudProvider ?? null,
+      cloudProvider: initialCapacityCandidate?.provider ?? input.cloudProvider ?? null,
+      providerInstanceType: initialCapacityCandidate?.providerInstanceType ?? null,
+      credentialAttributionUserId: input.credentialAttributionUserId ?? input.userId,
+      credentialAttributionProjectId:
+        (input.credentialAttributionSource ??
+          initialCapacityCandidate?.credentialAttributionSource) === 'project'
+          ? (input.credentialAttributionProjectId ??
+            initialCapacityCandidate?.capacityPoolProjectId ??
+            input.projectId)
+          : null,
+      credentialAttributionSource:
+        input.credentialAttributionSource ??
+        initialCapacityCandidate?.credentialAttributionSource ??
+        'user',
       taskMode: input.taskMode ?? 'task',
       model: input.model ?? null,
+      effort: input.effort ?? null,
       permissionMode: input.permissionMode ?? null,
       opencodeProvider: input.opencodeProvider ?? null,
       opencodeBaseUrl: input.opencodeBaseUrl ?? null,
       systemPromptAppend: input.systemPromptAppend ?? null,
+      agentProfileHint: input.agentProfileHint ?? null,
       attachments: input.attachments ?? null,
       projectScaling: input.projectScaling ?? null,
+      resourceRequirements: input.resourceRequirements ?? null,
+      resolvedReservation: input.resolvedReservation,
+      capacityPoolSelection,
+      vmSizeSource: input.vmSizeSource ?? null,
+      resumeSnapshotChatSessionId: input.resumeSnapshotChatSessionId ?? null,
+      evictionFence: input.evictionFence ?? null,
+      recoverySourceTaskId: input.recoverySourceTaskId ?? null,
+      recoveryAttemptId: input.recoveryAttemptId ?? null,
+      retrySourceTaskId: input.retrySourceTaskId ?? null,
+      startGuard: input.startGuard ?? null,
+      projectEventWakeGuard: input.projectEventWakeGuard ?? null,
+      recoveryRequiredProjectMemberId: input.recoveryRequiredProjectMemberId ?? null,
     },
   };
 
-  await stub.start(startInput);
+  if (options.reactivate === true) {
+    await stub.reactivate(startInput);
+  } else {
+    await stub.start(startInput);
+  }
 
-  log.info('task_runner_do_service.started', {
-    taskId: input.taskId,
-    projectId: input.projectId,
-  });
+  log.info(
+    options.reactivate === true
+      ? 'task_runner_do_service.reactivated'
+      : 'task_runner_do_service.started',
+    {
+      taskId: input.taskId,
+      projectId: input.projectId,
+    }
+  );
 }
 
 /**
@@ -130,10 +313,11 @@ export async function advanceTaskRunnerWorkspaceReady(
   taskId: string,
   status: 'running' | 'recovery' | 'error',
   errorMessage: string | null,
+  workspaceId: string
 ): Promise<void> {
   const stub = getStub(env, taskId);
 
-  await stub.advanceWorkspaceReady(status, errorMessage);
+  await stub.advanceWorkspaceReady(status, errorMessage, workspaceId);
 
   log.info('task_runner_do_service.workspace_ready_advanced', {
     taskId,
@@ -142,13 +326,53 @@ export async function advanceTaskRunnerWorkspaceReady(
 }
 
 /**
- * Get the current state of a TaskRunner DO (for debugging).
+ * Notify the TaskRunner DO that the VM agent has started the queued workspace build.
+ * Called from the build-started callback route.
  */
-export async function getTaskRunnerStatus(
+export async function notifyTaskRunnerWorkspaceBuildStarted(
   env: Env,
   taskId: string,
-): Promise<unknown> {
+  workspaceId: string
+): Promise<void> {
+  const stub = getStub(env, taskId);
+
+  await stub.notifyWorkspaceBuildStarted(workspaceId);
+
+  log.info('task_runner_do_service.workspace_build_started_notified', {
+    taskId,
+    workspaceId,
+  });
+}
+
+/**
+ * Get the current state of a TaskRunner DO (for debugging).
+ */
+export async function getTaskRunnerStatus(env: Env, taskId: string): Promise<unknown> {
   const stub = getStub(env, taskId);
 
   return stub.getStatus();
+}
+
+/**
+ * Confirm that TaskRunner initialization committed and repair a missing alarm.
+ */
+export async function ensureTaskRunnerStarted(
+  env: Env,
+  taskId: string,
+  recoveryAttemptId?: string
+): Promise<boolean> {
+  const stub = getStub(env, taskId);
+  return recoveryAttemptId ? stub.ensureStarted(recoveryAttemptId) : stub.ensureStarted();
+}
+
+/**
+ * Pull a TaskRunner alarm forward after external capacity/admission changes.
+ */
+export async function nudgeTaskRunnerDO(
+  env: Env,
+  taskId: string,
+  reason?: string
+): Promise<boolean> {
+  const stub = getStub(env, taskId);
+  return stub.nudge(reason);
 }

@@ -6,16 +6,22 @@ import { useAuth } from '../components/AuthProvider';
 
 const ADMIN_TABS: Tab[] = [
   { id: 'users', label: 'Users', path: 'users' },
+  { id: 'integrations', label: 'Integrations', path: 'integrations' },
   { id: 'credentials', label: 'Credentials', path: 'credentials' },
+  { id: 'infrastructure', label: 'Infrastructure', path: 'infrastructure' },
+  { id: 'storage', label: 'Storage', path: 'storage' },
   { id: 'ai-proxy', label: 'AI Proxy', path: 'ai-proxy' },
+  { id: 'trials', label: 'Trials', path: 'trials' },
   { id: 'costs', label: 'Costs', path: 'costs' },
   { id: 'usage', label: 'Usage', path: 'usage' },
   { id: 'quotas', label: 'Quotas', path: 'quotas' },
   { id: 'errors', label: 'Errors', path: 'errors' },
+  { id: 'diagnoses', label: 'Diagnoses', path: 'diagnoses' },
   { id: 'overview', label: 'Overview', path: 'overview' },
   { id: 'logs', label: 'Logs', path: 'logs' },
   { id: 'stream', label: 'Stream', path: 'stream' },
   { id: 'analytics', label: 'Analytics', path: 'analytics' },
+  { id: 'project-events', label: 'Eventing', path: 'project-events' },
 ];
 
 export function Admin() {

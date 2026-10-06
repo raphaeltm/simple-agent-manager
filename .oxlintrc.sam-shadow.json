@@ -1,0 +1,21 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "jsPlugins": [
+    {
+      "name": "sam",
+      "specifier": "./packages/eslint-plugin-sam/src/index.js"
+    }
+  ],
+  "options": {
+    "denyWarnings": false,
+    "reportUnusedDisableDirectives": "off",
+    "typeAware": false,
+    "typeCheck": false
+  },
+  "plugins": [],
+  "rules": {
+    "sam/no-local-record-guard": "warn",
+    "sam/no-unsafe-json-parse-assertion": "warn",
+    "sam/no-unvalidated-request-json": "warn"
+  }
+}

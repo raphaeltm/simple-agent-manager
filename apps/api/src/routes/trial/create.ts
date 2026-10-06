@@ -425,7 +425,7 @@ createRoutes.post('/create', async (c) => {
   // c.executionCtx may be absent in unit tests that construct Hono apps
   // without a real Worker executionCtx. Hono throws on access when it's
   // missing, so we guard with try/catch rather than a simple null check.
-  let exec: ExecutionContext | undefined;
+  let exec: { waitUntil(p: Promise<unknown>): void } | undefined;
   try {
     exec = c.executionCtx;
   } catch {

@@ -11,7 +11,7 @@ import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { getUserId, requireApproved,requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { requireOwnedProject } from '../middleware/project-auth';
+import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
 import { jsonValidator, SaveCachedCommandsSchema } from '../schemas';
 import * as projectDataService from '../services/project-data';
 
@@ -36,7 +36,7 @@ cachedCommandRoutes.get('/', async (c) => {
   if (!projectId) throw errors.badRequest('projectId is required');
 
   const db = drizzle(c.env.DATABASE, { schema });
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectAccess(db, projectId, userId);
 
   const agentType = c.req.query('agentType') || undefined;
   const maxAgentTypeLen = parsePositiveInt(c.env.CACHED_COMMANDS_MAX_AGENT_TYPE_LENGTH, DEFAULT_MAX_AGENT_TYPE_LENGTH);
@@ -58,7 +58,7 @@ cachedCommandRoutes.post('/', jsonValidator(SaveCachedCommandsSchema), async (c)
   if (!projectId) throw errors.badRequest('projectId is required');
 
   const db = drizzle(c.env.DATABASE, { schema });
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectCapability(db, projectId, userId, 'project:update');
 
   const body = c.req.valid('json');
 

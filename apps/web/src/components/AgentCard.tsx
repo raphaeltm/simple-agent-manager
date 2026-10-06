@@ -18,10 +18,12 @@ export interface AgentCardProps {
   agent: AgentInfo;
   credentials: AgentCredentialInfo[] | null;
   settings: AgentSettingsResponse | null;
-  onSaveCredential: (request: SaveAgentCredentialRequest) => Promise<void>;
+  onSaveCredential: (request: SaveAgentCredentialRequest) => Promise<AgentCredentialInfo>;
   onDeleteCredential: (agentType: AgentType, credentialKind: CredentialKind) => Promise<void>;
   onSaveSettings: (agentType: AgentType, data: SaveAgentSettingsRequest) => Promise<void>;
   onResetSettings: (agentType: AgentType) => Promise<void>;
+  /** Refresh credentials after the guided "Connect with Codex" flow succeeds. */
+  onCredentialConnected?: () => void;
 }
 
 /**
@@ -41,9 +43,10 @@ export function AgentCard({
   onDeleteCredential,
   onSaveSettings,
   onResetSettings,
+  onCredentialConnected,
 }: AgentCardProps) {
   const opencodeProvider = (settings?.opencodeProvider as OpenCodeProvider | null | undefined) ?? null;
-  const summary = getAgentConnectionSummary(agent, credentials, opencodeProvider, 'user');
+  const summary = getAgentConnectionSummary(agent, credentials);
 
   return (
     <Card
@@ -77,6 +80,7 @@ export function AgentCard({
           opencodeProvider={opencodeProvider}
           scope="user"
           embedded
+          onCredentialConnected={onCredentialConnected}
         />
       </section>
 

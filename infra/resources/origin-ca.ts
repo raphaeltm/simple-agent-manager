@@ -21,21 +21,19 @@
  * - Cert/key persisted in Pulumi state (encrypted in R2)
  */
 
-import * as cloudflare from "@pulumi/cloudflare";
-import * as pulumi from "@pulumi/pulumi";
-import * as tls from "@pulumi/tls";
-
-const config = new pulumi.Config();
-const baseDomain = config.require("baseDomain");
+import * as cloudflare from '@pulumi/cloudflare';
+import * as pulumi from '@pulumi/pulumi';
+import * as tls from '@pulumi/tls';
+import { baseDomain } from './config';
 
 /**
  * RSA-2048 private key for the Origin CA certificate.
  * The VM agent loads this to serve TLS.
  */
 const originCaKey = new tls.PrivateKey(
-  "origin-ca-key",
+  'origin-ca-key',
   {
-    algorithm: "RSA",
+    algorithm: 'RSA',
     rsaBits: 2048,
   },
   { protect: true }
@@ -44,11 +42,11 @@ const originCaKey = new tls.PrivateKey(
 /**
  * Certificate Signing Request for the Origin CA certificate.
  */
-const originCaCsr = new tls.CertRequest("origin-ca-csr", {
+const originCaCsr = new tls.CertRequest('origin-ca-csr', {
   privateKeyPem: originCaKey.privateKeyPem,
   subject: {
     commonName: `*.${baseDomain}`,
-    organization: "Simple Agent Manager",
+    organization: 'Simple Agent Manager',
   },
   dnsNames: [`*.${baseDomain}`, `*.vm.${baseDomain}`, baseDomain],
 });
@@ -59,11 +57,11 @@ const originCaCsr = new tls.CertRequest("origin-ca-csr", {
  * by browsers directly — which is the intended use case (orange-clouded DNS).
  */
 const originCaCert = new cloudflare.OriginCaCertificate(
-  "origin-ca-cert",
+  'origin-ca-cert',
   {
     csr: originCaCsr.certRequestPem,
     hostnames: [`*.${baseDomain}`, `*.vm.${baseDomain}`, baseDomain],
-    requestType: "origin-rsa",
+    requestType: 'origin-rsa',
     requestedValidity: 5475, // 15 years
   },
   {

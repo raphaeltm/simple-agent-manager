@@ -3,17 +3,17 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
-	"fmt"
-
 	"github.com/workspace/vm-agent/internal/bootlog"
-	"github.com/workspace/vm-agent/internal/bootstrap"
 	"github.com/workspace/vm-agent/internal/config"
+	"github.com/workspace/vm-agent/internal/deploy"
+	"github.com/workspace/vm-agent/internal/errorreport"
 	"github.com/workspace/vm-agent/internal/logging"
 	"github.com/workspace/vm-agent/internal/provision"
 	"github.com/workspace/vm-agent/internal/server"
@@ -34,14 +34,203 @@ func main() {
 		os.Exit(1)
 	}
 
-	reporter := bootlog.New(cfg.ControlPlaneURL, cfg.NodeID)
+	slog.Info("Configuration loaded", "node", cfg.NodeID, "port", cfg.Port, "role", cfg.Role)
 
-	slog.Info("Configuration loaded", "node", cfg.NodeID, "port", cfg.Port)
+	// Branch on node role
+	if cfg.IsDeploymentMode() {
+		runDeploymentMode(cfg)
+	} else if cfg.IsStandaloneMode() {
+		runStandaloneMode(cfg)
+	} else {
+		runWorkspaceMode(cfg)
+	}
+}
+
+// runStandaloneMode starts the agent inside a single Cloudflare Container.
+// It intentionally skips host provisioning, cloud-init bootstrap, Docker,
+// devcontainers, TLS setup, DNS setup, and port scanning. The container DO
+// provides bootstrap/config via environment variables and proxies plain HTTP.
+func runStandaloneMode(cfg *config.Config) {
+	slog.Info("Starting in standalone mode",
+		"workspaceId", cfg.WorkspaceID,
+		"workspaceDir", cfg.WorkspaceDir)
+
+	srv, err := server.New(cfg)
+	if err != nil {
+		slog.Error("Failed to create server", "error", err)
+		os.Exit(1)
+	}
+
+	// Configure git and gh to authenticate by exchanging through the local
+	// vm-agent endpoint. Without this, the agent's `git` commands prompt for a username
+	// and fail in the non-interactive container. Non-fatal — the agent can still
+	// run without git access.
+	server.ConfigureStandaloneGitCredentialHelper(cfg.GitCredentialTimeout)
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	errCh := make(chan error, 1)
+	go func() {
+		if err := srv.Start(); err != nil {
+			errCh <- err
+		}
+	}()
+
+	srv.SendNodeReady()
+
+	select {
+	case err := <-errCh:
+		slog.Error("Server error", "error", err)
+		os.Exit(1)
+	case sig := <-sigCh:
+		slog.Info("Received signal, shutting down standalone agent...", "signal", sig)
+		srv.StopAllWorkspacesAndSessions()
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.GracefulShutdownTimeout)
+	defer cancel()
+	if err := srv.Stop(ctx); err != nil {
+		slog.Error("Error during shutdown", "error", err)
+	}
+	slog.Info("VM Agent (standalone mode) stopped")
+}
+
+// runDeploymentMode starts the agent in deployment mode.
+// It skips provision/bootstrap and runs the deploy reconcile loop instead.
+func runDeploymentMode(cfg *config.Config) {
+	slog.Info("Starting in deployment mode",
+		"environmentId", cfg.EnvironmentID,
+		"baseDir", cfg.DeployBaseDir)
+
+	// EnsureRuntime runs BEFORE the HTTP server and heartbeat loop start, so the
+	// only telemetry channel during host-dependency install is this reporter,
+	// which POSTs to the control plane's node-error endpoint. Without it, an
+	// install failure (or a crash loop on os.Exit) is completely invisible: no
+	// heartbeat, no boot log, agent unreachable on its serving port. The reporter
+	// is nil-safe and started here so progress and any terminal failure are
+	// flushed to the control plane before this function can exit.
+	bootReporter := errorreport.New(cfg.ControlPlaneURL, cfg.NodeID, cfg.CallbackToken, errorreport.Config{
+		FlushInterval:    cfg.ErrorReportFlushInterval,
+		MaxBatchSize:     cfg.ErrorReportMaxBatchSize,
+		MaxBatchBytes:    cfg.ErrorReportMaxBatchBytes,
+		MaxQueueSize:     cfg.ErrorReportMaxQueueSize,
+		HTTPTimeout:      cfg.ErrorReportHTTPTimeout,
+		RetryInitial:     cfg.ErrorReportRetryInitial,
+		RetryMax:         cfg.ErrorReportRetryMax,
+		MaxAttempts:      cfg.ErrorReportMaxAttempts,
+		DBPath:           cfg.ErrorReportDBPath,
+		DBBusyTimeout:    cfg.ErrorReportDBBusyTimeout,
+		SpoolDir:         cfg.ErrorReportSpoolDir,
+		ArtifactMaxBytes: cfg.ErrorReportArtifactBytes,
+		SpoolMaxBytes:    cfg.ErrorReportSpoolBytes,
+		Retention:        cfg.ErrorReportRetention,
+		CollectorTimeout: cfg.ErrorReportCollectTimeout,
+		MaxCollectorDocs: cfg.ErrorReportCollectorDocs,
+		MaxDocumentBytes: cfg.ErrorReportDocumentBytes,
+		MaxValueDepth:    cfg.ErrorReportValueDepth,
+		MaxValueItems:    cfg.ErrorReportValueItems,
+		MaxStringBytes:   cfg.ErrorReportStringBytes,
+		ResponseMaxBytes: cfg.ErrorReportResponseBytes,
+		StoredErrorBytes: cfg.ErrorReportStoredErrBytes,
+		CollectorWorkers: cfg.ErrorReportCollectorJobs,
+	})
+	if err := bootReporter.InitError(); err != nil {
+		slog.Error("Failed to initialize durable deployment error reporter", "error", err)
+		os.Exit(1)
+	}
+	bootReporter.Start()
+	bootReporter.ReportInfo("deploy: agent started in deployment mode; ensuring host runtime", "deploy.bootstrap", "", map[string]interface{}{
+		"environmentId": cfg.EnvironmentID,
+	})
+
+	runtimeCtx, runtimeCancel := context.WithTimeout(context.Background(), cfg.DeployRuntimeTimeout)
+	if err := deploy.EnsureRuntime(runtimeCtx, bootReporter); err != nil {
+		runtimeCancel()
+		// Report and flush synchronously before exiting so the failure is visible
+		// in control-plane observability — systemd will restart us into a silent
+		// crash loop otherwise.
+		bootReporter.ReportError(err, "deploy.bootstrap", "", map[string]interface{}{"phase": "ensure_runtime"})
+		bootReporter.Shutdown()
+		slog.Error("Deployment runtime provisioning failed", "error", err)
+		os.Exit(1)
+	}
+	runtimeCancel()
+
+	// Host runtime is ready. Flush the bootstrap reporter's progress entries; the
+	// server constructs and starts its own error reporter for steady-state use.
+	bootReporter.ReportInfo("deploy: host runtime ready; starting agent server", "deploy.bootstrap", "", nil)
+	bootReporter.Shutdown()
+
+	// Create server with deployment-mode routes only
+	srv, err := server.New(cfg)
+	if err != nil {
+		slog.Error("Failed to create server", "error", err)
+		os.Exit(1)
+	}
+
+	// Initialize signature verifier when a boot-time key is available.
+	// If not, heartbeat can refresh the key before the first release is applied.
+	var verifier *deploy.Verifier
+	if cfg.DeploySigningPubKey != "" {
+		verifier, err = deploy.NewVerifier(cfg.DeploySigningPubKey)
+		if err != nil {
+			slog.Error("Failed to initialize deploy signature verifier", "error", err)
+			os.Exit(1)
+		}
+	} else {
+		slog.Warn("deploy: DEPLOY_SIGNING_PUB_KEY is not set; waiting for heartbeat key refresh")
+	}
+
+	// Wire verifier into the server. Deployment engines are created lazily per
+	// environment after heartbeat returns the node's placement records.
+	srv.SetDeployVerifier(verifier)
+
+	// Handle shutdown signals
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	// Start HTTP server after the deployment engine is attached so the first
+	// heartbeat can refresh signing keys and observe pending releases.
+	errCh := make(chan error, 1)
+	go func() {
+		if err := srv.Start(); err != nil {
+			errCh <- err
+		}
+	}()
+
+	// Send node-ready callback
+	srv.SendNodeReady()
+
+	// Wait for shutdown signal or fatal server error.
+	// The heartbeat loop (started by the server) checks for pending releases
+	// advertised in the heartbeat response and triggers FetchAndApply via the
+	// deploy engine.
+	select {
+	case err := <-errCh:
+		slog.Error("Server error", "error", err)
+		os.Exit(1)
+	case sig := <-sigCh:
+		slog.Info("Received signal, shutting down...", "signal", sig)
+		// In deployment mode, we do NOT stop containers — they must survive agent restart.
+		// Containers use restart: unless-stopped and are independent of agent lifecycle.
+	}
+
+	// Graceful shutdown of HTTP server only
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.GracefulShutdownTimeout)
+	defer cancel()
+	if err := srv.Stop(ctx); err != nil {
+		slog.Error("Error during shutdown", "error", err)
+	}
+	slog.Info("VM Agent (deployment mode) stopped")
+}
+
+// runWorkspaceMode starts the agent in the traditional workspace mode.
+func runWorkspaceMode(cfg *config.Config) {
+	reporter := bootlog.NewWithHTTPTimeout(cfg.ControlPlaneURL, cfg.NodeID, cfg.BootLogHTTPTimeout)
 
 	// Create server BEFORE bootstrap so /health and /boot-log/ws are available
-	// while the workspace is still being provisioned. This allows the API's
-	// waitForNodeAgentReady() to succeed and UI clients to connect for real-time
-	// boot log streaming during the "creating" phase.
+	// while the workspace is still being provisioned.
 	srv, err := server.New(cfg)
 	if err != nil {
 		slog.Error("Failed to create server", "error", err)
@@ -58,9 +247,9 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	// Start server in goroutine — HTTP is available immediately.
-	// This means /health responds right away, allowing the control plane
-	// to detect the agent within seconds of boot.
+	// Register the build barrier before HTTP can accept dynamic workspaces.
+	finishSystemProvisioning := srv.BeginSystemProvisioning()
+	// Start server in goroutine — HTTP liveness and boot logs are available immediately.
 	errCh := make(chan error, 1)
 	go func() {
 		if err := srv.Start(); err != nil {
@@ -69,46 +258,38 @@ func main() {
 	}()
 
 	// Run system provisioning (firewall, Node.js, devcontainer CLI, etc.)
-	// BEFORE workspace bootstrap. This replaces the slow cloud-init runcmd
-	// steps — the agent is already running and heartbeating while this happens.
-	provisionCtx, provisionCancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	provisionCtx, provisionCancel := context.WithTimeout(context.Background(), cfg.SystemProvisioningTimeout)
 	provisionStatus, provisionErr := provision.Run(provisionCtx, provision.Config{
 		VMAgentPort:      fmt.Sprintf("%d", cfg.Port),
-		CFIPFetchTimeout: "10",
+		CFIPFetchTimeout: fmt.Sprintf("%.0f", cfg.CFIPFetchTimeout.Seconds()),
 	}, srv.GetEventStore())
 	provisionCancel()
+	finishSystemProvisioning(provisionErr)
 
 	if provisionErr != nil {
 		slog.Error("System provisioning failed", "error", provisionErr,
 			"phase", provisionStatus.Phase,
 			"completedSteps", countCompleted(provisionStatus.Steps))
-		// Don't exit — the agent should keep running for diagnostics.
-		// Bootstrap will likely fail (no devcontainer CLI), but the agent
-		// stays up so we can download logs and debug.
 	} else {
 		slog.Info("System provisioning completed",
 			"duration", provisionStatus.CompletedAt.Sub(provisionStatus.StartedAt).Round(time.Millisecond))
 	}
 
-	// Send node-ready callback AFTER provisioning. This tells the control plane
-	// to start dispatching workspace creation. If we send it earlier (e.g. when
-	// the HTTP server starts), the control plane creates workspaces before Docker
-	// is installed, causing "docker: executable file not found" failures.
-	srv.SendNodeReady()
-
-	// Run bootstrap (blocks until workspace is provisioned).
-	// The server is already serving /health and /boot-log/ws during this time.
-	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), cfg.BootstrapTimeout)
-	defer bootstrapCancel()
-
-	if err := bootstrap.Run(bootstrapCtx, cfg, reporter); err != nil {
-		slog.Error("Bootstrap failed", "error", err)
-		os.Exit(1)
+	// Failed host setup must not advertise readiness for workspace builds.
+	if provisionErr == nil {
+		srv.SendNodeReady()
 	}
 
-	// Propagate callback token (obtained during bootstrap) to all subsystems
-	// and notify WebSocket clients that bootstrap is complete.
-	srv.UpdateAfterBootstrap(cfg)
+	// Legacy token bootstrap performs Docker work too. Keep failed hosts available
+	// for diagnostics without letting that path bypass the dynamic-workspace gate.
+	if provisionErr == nil {
+		bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), cfg.BootstrapTimeout)
+		defer bootstrapCancel()
+		if err := srv.BootstrapWorkspace(bootstrapCtx, cfg, reporter); err != nil {
+			slog.Error("Bootstrap failed", "error", err)
+			os.Exit(1)
+		}
+	}
 
 	// Wait for shutdown signal or fatal server error.
 	select {
@@ -121,7 +302,7 @@ func main() {
 	}
 
 	// Graceful shutdown of local server
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.GracefulShutdownTimeout)
 	defer cancel()
 
 	if err := srv.Stop(ctx); err != nil {

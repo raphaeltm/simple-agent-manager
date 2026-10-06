@@ -3,72 +3,137 @@ name: CI
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - 'apps/www/**'
   pull_request:
     branches: [main]
-    paths-ignore:
-      - 'apps/www/**'
+  workflow_dispatch:
+
+env:
+  DEVCONTAINERS_CLI_VERSION: 0.80.2
+  GITLEAKS_VERSION: 8.30.1
+  GO_VERSION: '1.26.6'
 
 permissions:
   contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Keep main CI runs alive so every successful main merge can trigger production deploy.
+  # Pull request runs still cancel superseded commits for faster feedback.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   changes:
     name: Detect Changes
+    # Fork bypass: on a push to main in a fork (self-host), skip the canonical
+    # repo's full CI suite. Pull requests always run CI (any repo), and the
+    # canonical repo always runs CI. Fork operators update their running SAM
+    # instance by manually running Deploy Production on main; the workflow_run
+    # production deploy path is for the canonical repository's successful CI.
+    # Because every other job depends on `changes` (directly via `needs`, or
+    # explicitly via this same guard), skipping `changes` cascades a skip across
+    # the whole workflow.
+    if: github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager'
     timeout-minutes: 5
     runs-on: ubuntu-latest
     outputs:
+      api: ${{ steps.filter.outputs.api }}
       vm-agent: ${{ steps.filter.outputs.vm-agent }}
       cli: ${{ steps.filter.outputs.cli }}
       devcontainer: ${{ steps.filter.outputs.devcontainer }}
       devcontainer-volume-mount: ${{ steps.filter.outputs.devcontainer-volume-mount }}
+      infra: ${{ steps.filter.outputs.infra }}
+      deploy-scripts: ${{ steps.filter.outputs.deploy-scripts }}
+      ci-workflow: ${{ steps.filter.outputs.ci-workflow }}
+      marketing-site: ${{ steps.filter.outputs.marketing-site }}
+      repo-quality: ${{ steps.filter.outputs.repo-quality }}
       web-ui: ${{ steps.filter.outputs.web-ui }}
+      go-modules: ${{ steps.filter.outputs.go-modules }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
         with:
           filters: |
+            api:
+              - 'apps/api/**'
+              - 'packages/shared/**'
+              - 'packages/task-runner/**'
+              - 'packages/config/**'
+              - 'scripts/quality/*migration*.ts'
+              - 'scripts/quality/runtime-boundary*.ts'
             vm-agent:
               - 'packages/vm-agent/**'
-              - '.github/workflows/ci.yml'
+              - 'apps/api/Dockerfile.vm-agent-container'
+              - 'scripts/ci/verify-codex-runtime-image.sh'
+              - 'scripts/deploy/prepare-codex-runtime-artifact.sh'
             cli:
               - 'packages/cli/**'
               - 'sonar-project.properties'
               - '.claude/rules/36-cli-quality.md'
-              - '.github/workflows/ci.yml'
             devcontainer:
               - '.devcontainer/**'
-              - '.github/workflows/ci.yml'
             devcontainer-volume-mount:
               - '.devcontainer/**'
               - 'scripts/ci/**'
               - 'packages/vm-agent/**'
               - 'packages/cloud-init/**'
+            infra:
+              - 'infra/**'
+            deploy-scripts:
+              - 'scripts/deploy/**'
+              - 'scripts/quality/deploy*.test.ts'
+              - 'scripts/quality/sync-wrangler-config.test.ts'
+              - 'scripts/quality/do-migration-compatibility.test.ts'
+              - '.github/workflows/deploy*.yml'
+              - '.github/workflows/provision*.yml'
+              - '.github/workflows/teardown*.yml'
+            ci-workflow:
               - '.github/workflows/ci.yml'
+              - 'scripts/quality/ci*.test.ts'
+            marketing-site:
+              - 'apps/www/**'
+              - '.github/workflows/deploy-www.yml'
+            repo-quality:
+              - 'apps/api/**'
+              - 'apps/web/**'
+              - 'infra/**'
+              - 'packages/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'tsconfig*.json'
+              - 'vitest*.ts'
+              - 'eslint.config.*'
+              - 'prettier.config.*'
             web-ui:
               - 'apps/web/**'
               - 'packages/ui/**'
               - 'packages/terminal/**'
               - 'packages/acp-client/**'
-              - '.github/workflows/ci.yml'
+            go-modules:
+              - '**/go.mod'
+              - '**/go.sum'
+              - 'scripts/quality/check-go-vulnerability-diff.ts'
 
   preflight-evidence:
     name: Preflight Evidence
     if: github.event_name == 'pull_request'
     timeout-minutes: 15
     runs-on: ubuntu-latest
+    # `pull-requests: read` + GITHUB_TOKEN let the check read the PR's CURRENT
+    # body/labels instead of the frozen event payload. Job-level `permissions`
+    # REPLACES the top-level block, so `contents: read` must be restated for
+    # actions/checkout. Without both of these the check silently degrades to the
+    # stale payload — see scripts/quality/ci-evidence-token-wiring.test.ts.
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
           cache: 'pnpm'
@@ -76,20 +141,42 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Preflight evidence documents an agent's pre-implementation research. Dependabot
+      # opens PRs from a fixed template and cannot produce that evidence, so the check
+      # is unsatisfiable for it and leaves the whole dependency lane permanently red.
+      # The stale-binary guard below still runs for every author.
+      #
+      # Both identities are required. `user.login` is frozen when the PR is opened, and
+      # dependabot branches live in this repo rather than a fork, so anyone with push
+      # access can add a commit to an open dependabot/** branch without changing it.
+      # `github.actor` is the actor of THIS event, so a human push flips it back and the
+      # evidence check runs again. Skip only when both say dependabot.
       - name: Validate agent preflight evidence
+        if: >-
+          github.actor != 'dependabot[bot]' ||
+          github.event.pull_request.user.login != 'dependabot[bot]'
         run: pnpm quality:preflight
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Validate no stale binary artifacts are tracked
+        run: pnpm quality:no-tracked-stale-binaries
 
   specialist-review-evidence:
     name: Specialist Review Evidence
     if: github.event_name == 'pull_request'
     timeout-minutes: 15
+    # See preflight-evidence above: required for live PR body/label reads.
+    permissions:
+      contents: read
+      pull-requests: read
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
           cache: 'pnpm'
@@ -99,17 +186,42 @@ jobs:
 
       - name: Validate specialist review evidence
         run: pnpm quality:specialist-review
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+  ci-workflow:
+    name: CI Workflow
+    needs: [changes]
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.ci-workflow == 'true'
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate CI workflow wiring
+        run: pnpm exec vitest run --config scripts/quality/vitest.config.ts ci-quality-program.test.ts ci-worker-suite.test.ts ci-workspace-surfaces.test.ts
 
   ui-compliance:
     name: UI Compliance
+    if: github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager'
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
           cache: 'pnpm'
@@ -122,14 +234,18 @@ jobs:
 
   lint:
     name: Lint
+    needs: [changes]
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.repo-quality == 'true'
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
-      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
           cache: 'pnpm'
@@ -137,19 +253,81 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Lint
+      - name: Check formatting
+        run: pnpm format:check
+
+      - name: Run Oxlint shadow
+        run: pnpm lint:oxlint
+
+      - name: Run ESLint authoritative layer
         run: pnpm lint
 
-  typecheck:
-    name: Type Check
+      - name: Enforce type-boundary ratchet
+        run: pnpm quality:type-boundaries
+
+      - name: Run SAM RuleTester fixtures
+        run: pnpm --filter @simple-agent-manager/eslint-plugin-sam test
+
+      - name: Shadow SAM fixtures through Oxlint alpha host
+        continue-on-error: true
+        run: pnpm lint:oxlint:sam-shadow
+
+  secret-scan:
+    name: Secret Scan
+    if: github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager'
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
-      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Install verified Gitleaks release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/gitleaks"
+          cd "$RUNNER_TEMP/gitleaks"
+          gh release download "v${GITLEAKS_VERSION}" \
+            --repo gitleaks/gitleaks \
+            --pattern "gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            --pattern "gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          sha256sum --ignore-missing --check "gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          tar -xzf "gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+
+      - name: Scan current tree
+        env:
+          SAM_GITLEAKS_BIN: ${{ runner.temp }}/gitleaks/gitleaks
+        run: pnpm quality:gitleaks:current
+
+      - name: Scan pull request commit range
+        if: github.event_name == 'pull_request'
+        env:
+          SAM_GITLEAKS_BIN: ${{ runner.temp }}/gitleaks/gitleaks
+        run: pnpm quality:gitleaks:pr
+
+  typecheck:
+    name: Type Check
+    needs: [changes]
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.repo-quality == 'true'
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
           cache: 'pnpm'
@@ -165,14 +343,16 @@ jobs:
 
   test:
     name: Test
-    timeout-minutes: 15
+    needs: [changes]
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.repo-quality == 'true'
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
           cache: 'pnpm'
@@ -188,14 +368,16 @@ jobs:
 
   build:
     name: Build
+    needs: [changes]
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.repo-quality == 'true'
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
           cache: 'pnpm'
@@ -206,18 +388,114 @@ jobs:
       - name: Build all packages
         run: pnpm build
 
+  workspace-quality-surfaces:
+    name: Workspace Quality Surfaces
+    needs: [changes]
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.repo-quality == 'true'
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Require test coverage scripts for every tested workspace
+        run: pnpm quality:workspace-test-surfaces
+
+      - name: Build Storybook production bundle
+        run: pnpm --filter @simple-agent-manager/ui build-storybook
+
+      - name: Build public docs and check internal links
+        run: pnpm --filter @simple-agent-manager/www build && pnpm --filter @simple-agent-manager/www check:links
+
+      - name: Install Chromium
+        working-directory: packages/ui
+        run: ./node_modules/.bin/playwright install --with-deps chromium
+
+      - name: Audit Storybook in desktop and mobile browsers
+        run: pnpm --filter @simple-agent-manager/ui test:storybook
+
+      - name: Test public site in desktop and mobile browsers
+        run: pnpm --filter @simple-agent-manager/www test:browser
+
+      - name: Require complete Storybook and public browser evidence
+        run: pnpm quality:browser-evidence
+
+      - name: Upload workspace browser evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: workspace-browser-evidence
+          path: .codex/tmp/playwright-screenshots/
+          if-no-files-found: error
+          retention-days: 7
+
+  marketing-site:
+    name: Marketing Site
+    needs: [changes]
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.marketing-site == 'true'
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint marketing site
+        run: pnpm --filter @simple-agent-manager/www lint
+
+      - name: Type check marketing site
+        run: pnpm --filter @simple-agent-manager/www typecheck
+
+      - name: Build public docs and check internal links
+        run: pnpm --filter @simple-agent-manager/www build && pnpm --filter @simple-agent-manager/www check:links
+
+      - name: Install Chromium
+        working-directory: apps/www
+        run: ./node_modules/.bin/playwright install --with-deps chromium
+
+      - name: Test public site in desktop and mobile browsers
+        run: pnpm --filter @simple-agent-manager/www test:browser
+
+      - name: Upload marketing browser evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: marketing-browser-evidence
+          path: .codex/tmp/playwright-screenshots/
+          if-no-files-found: ignore
+          retention-days: 7
+
   playwright-visual:
     name: Playwright Visual Tests
     needs: [changes]
-    if: needs.changes.outputs.web-ui == 'true'
+    # Visual audits are informational and only relevant to reviewing a change.
+    # Restrict to pull requests so they never run on push to main.
+    if: github.event_name == 'pull_request' && needs.changes.outputs.web-ui == 'true'
     timeout-minutes: 45
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
           cache: 'pnpm'
@@ -236,29 +514,27 @@ jobs:
         working-directory: apps/web
         run: mkdir -p ../../.codex/tmp/playwright-screenshots
 
+      - name: Select non-quarantined Playwright visual audits
+        id: visual-audits
+        run: |
+          pnpm exec tsx scripts/quality/select-playwright-visual-audits.ts \
+            > /tmp/playwright-visual-audits.txt
+          echo "Selected Playwright visual audit specs:"
+          sed 's/^/  - /' /tmp/playwright-visual-audits.txt
+
       - name: Run Playwright visual audit tests
         id: playwright
-        continue-on-error: true
         working-directory: apps/web
         run: |
-          find tests/playwright \
-            -name '*audit*.spec.ts' \
-            ! -name 'staging-*.spec.ts' \
-            -print0 \
-            | xargs -0 npx playwright test \
-                --project='iPhone 14 (390x844)' \
-                --reporter=list
+          xargs npx playwright test \
+            --project='iPhone 14 (390x844)' \
+            --reporter=list \
+            < /tmp/playwright-visual-audits.txt
         env:
           CI: true
 
-      - name: Fail if Playwright timed out
-        if: steps.playwright.outcome == 'failure'
-        run: |
-          echo "::warning::Playwright visual audit tests had failures. See uploaded screenshots for details."
-          echo "Visual audit failures are informational — individual test fixes tracked separately."
-
       - name: Upload screenshots on failure
-        if: failure() || steps.playwright.outcome == 'failure'
+        if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: playwright-screenshots
@@ -267,14 +543,16 @@ jobs:
 
   deploy-scripts:
     name: Validate Deploy Scripts
+    needs: [changes]
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.deploy-scripts == 'true'
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
           cache: 'pnpm'
@@ -292,19 +570,31 @@ jobs:
           npx tsx --check scripts/deploy/sync-wrangler-config.ts
           npx tsx --check scripts/deploy/generate-keys.ts
 
+      # Deploy/quality script behavior — includes the Durable Object migration
+      # compatibility regression suite (clean install vs applied history).
+      - name: Run deploy and quality script tests
+        run: pnpm quality:scripts:test
+
       - name: Validate wrangler binding consistency
         run: pnpm quality:wrangler-bindings
 
+      - name: Validate agent install manifest consistency
+        run: pnpm quality:agent-install-manifest
+
   code-quality:
     name: Code Quality Checks
+    needs: [changes]
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.repo-quality == 'true'
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
-      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
           cache: 'pnpm'
@@ -315,6 +605,9 @@ jobs:
       - name: D1 migration safety check (blocks destructive DROP TABLE)
         run: pnpm quality:migration-safety
 
+      - name: D1 migration ordering check (blocks ambiguous prefixes)
+        run: pnpm quality:migration-ordering
+
       - name: DO migration safety check (blocks destructive patterns in Durable Object SQLite)
         run: pnpm quality:do-migration-safety
 
@@ -324,19 +617,115 @@ jobs:
       - name: File size limit enforcement
         run: pnpm quality:file-sizes
 
+      - name: Stale artifact check
+        run: pnpm quality:stale-artifacts
+      - name: Repo quality visibility report
+        continue-on-error: true
+        run: pnpm quality:repo-visibility
+
       - name: Source-contract test detection
         run: pnpm quality:source-contract-tests
 
+      - name: Dependency governance pinning check
+        run: pnpm quality:dependency-governance
+
+      - name: Workspace test surface completeness
+        run: pnpm quality:workspace-test-surfaces
+
+      - name: Direct dependency evidence
+        run: pnpm quality:direct-dependency-evidence
+
+      - name: Runtime-boundary semantic check (blocking for apps/api/src)
+        run: pnpm quality:runtime-boundary-semantics
+
+      - name: Native node-pool allocation boundaries
+        run: pnpm quality:node-pool-boundary
+
+      - name: CI workflow wiring tests
+        run: pnpm exec vitest run --config scripts/quality/vitest.config.ts ci-quality-program.test.ts ci-worker-suite.test.ts
+
+  go-vulnerability-diff:
+    name: Go Vulnerability Diff
+    needs: [changes]
+    if: needs.changes.outputs.go-modules == 'true'
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Assert Go version
+        run: go version | grep -E '^go version go1\.26\.6 '
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Install govulncheck
+        run: |
+          mkdir -p "$RUNNER_TEMP/go/bin"
+          cd scripts/quality/govulncheck-tool
+          go build -o "$RUNNER_TEMP/go/bin/govulncheck" golang.org/x/vuln/cmd/govulncheck
+
+      - name: Scan changed Go modules
+        env:
+          SAM_GOVULNCHECK_BIN: ${{ runner.temp }}/go/bin/govulncheck
+        run: pnpm quality:govulncheck-diff
+
+  durable-object-workers:
+    name: Durable Object Workers
+    needs: [changes]
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.api == 'true'
+    # The serial workerd suite passed 55/74 files before the former 15-minute
+    # job budget expired; include setup/build and the full suite with bounded headroom.
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check Durable Object migration safety
+        run: pnpm quality:do-migration-safety
+
+      - name: Build packages
+        run: pnpm build
+
+      - name: Run Worker and Durable Object suites
+        run: pnpm --filter @simple-agent-manager/api test:workers
+
   pulumi-infra:
     name: Pulumi Infrastructure Tests
+    needs: [changes]
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.infra == 'true'
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
           cache: 'pnpm'
@@ -359,13 +748,16 @@ jobs:
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Go
-        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.24'
+          go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: packages/vm-agent/go.sum
+
+      - name: Assert Go version
+        run: go version | grep -E '^go version go1\.26\.6 '
 
       - name: Run VM Agent tests
         working-directory: packages/vm-agent
@@ -378,16 +770,23 @@ jobs:
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Go
-        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.24'
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Assert Go version
+        run: go version | grep -E '^go version go1\.26\.6 '
 
       - name: Run CLI tests
         working-directory: packages/cli
         run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Cross-build CLI
+        working-directory: packages/cli
+        run: make build-all
 
       - name: Print CLI coverage summary
         working-directory: packages/cli
@@ -407,25 +806,25 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Go
-        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.24'
+          go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: packages/vm-agent/go.sum
 
-      - name: Install devcontainers CLI
-        run: npm install -g @devcontainers/cli
+      - name: Assert Go version
+        run: go version | grep -E '^go version go1\.26\.6 '
 
-      - name: Pull test images
-        run: |
-          docker pull debian:bookworm-slim &
-          docker pull node:22-bookworm &
-          docker pull mcr.microsoft.com/devcontainers/base:debian &
-          docker pull mcr.microsoft.com/devcontainers/python:3.12 &
-          docker pull mcr.microsoft.com/devcontainers/typescript-node:22-bookworm &
-          wait
+      - name: Install devcontainers CLI
+        run: npm install -g --ignore-scripts "@devcontainers/cli@${DEVCONTAINERS_CLI_VERSION}"
+
+      - name: Prepare devcontainer fixture images
+        run: bash scripts/ci/prepare-devcontainer-fixture-images.sh
+
+      - name: Verify pinned runtime image
+        run: bash scripts/ci/verify-codex-runtime-image.sh
 
       - name: Run VM Agent integration tests
         working-directory: packages/vm-agent
@@ -438,21 +837,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Go
-        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.24'
+          go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: packages/vm-agent/go.sum
 
-      - name: Install devcontainers CLI
-        run: npm install -g @devcontainers/cli
+      - name: Assert Go version
+        run: go version | grep -E '^go version go1\.26\.6 '
 
-      - name: Pull test images
-        run: |
-          docker pull mcr.microsoft.com/devcontainers/base:debian &
-          wait
+      - name: Install devcontainers CLI
+        run: npm install -g --ignore-scripts "@devcontainers/cli@${DEVCONTAINERS_CLI_VERSION}"
+
+      - name: Prepare devcontainer fixture images
+        run: bash scripts/ci/prepare-devcontainer-fixture-images.sh
 
       - name: Run VM Agent E2E tests
         working-directory: packages/vm-agent
@@ -465,14 +865,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
 
       - name: Install devcontainer CLI
-        run: npm install -g @devcontainers/cli
+        run: npm install -g --ignore-scripts "@devcontainers/cli@${DEVCONTAINERS_CLI_VERSION}"
+
+      - name: Prepare devcontainer fixture images
+        run: bash scripts/ci/prepare-devcontainer-fixture-images.sh
 
       - name: Validate devcontainer.json syntax
         run: |
@@ -569,8 +972,10 @@ jobs:
             }
 
             echo "=== Post-Create Hook Tools ==="
-            check "Claude Code"   claude --version
-            check "OpenAI Codex"  codex --version
+            # post-create.sh installs these with try_run so transient external
+            # installer failures do not make the workspace invalid.
+            optional_check "Claude Code"   claude --version
+            optional_check "OpenAI Codex"  codex --version
             optional_check "happy-coder"   happy --version
             optional_check "Playwright"    npx playwright --version
 
@@ -633,15 +1038,20 @@ jobs:
 
             echo "=== MCP Server Configuration ==="
 
-            # Claude MCP servers configured by post-create.sh
-            for server in playwright sequential-thinking context7 cloudflare-observability; do
-              if claude mcp get "$server" >/dev/null 2>&1; then
-                echo "OK: Claude MCP server '$server' configured"
-              else
-                echo "FAIL: Claude MCP server '$server' not found"
-                FAIL=$((FAIL + 1))
-              fi
-            done
+            # Claude MCP servers are configured only when the non-fatal Claude
+            # install succeeds and the binary is available on PATH.
+            if command -v claude >/dev/null 2>&1; then
+              for server in playwright sequential-thinking context7 cloudflare-observability; do
+                if claude mcp get "$server" >/dev/null 2>&1; then
+                  echo "OK: Claude MCP server '$server' configured"
+                else
+                  echo "FAIL: Claude MCP server '$server' not found"
+                  FAIL=$((FAIL + 1))
+                fi
+              done
+            else
+              echo "WARNING: Claude CLI unavailable; skipping Claude MCP server verification"
+            fi
 
             # Codex Cloudflare Observability MCP is intentionally opt-in after
             # OAuth login. post-create.sh prints the setup commands instead of
@@ -666,21 +1076,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
 
       - name: Install devcontainer CLI
-        run: npm install -g @devcontainers/cli
+        run: npm install -g --ignore-scripts "@devcontainers/cli@${DEVCONTAINERS_CLI_VERSION}"
 
-      - name: Pull base images
-        run: |
-          docker pull alpine:latest &
-          docker pull mcr.microsoft.com/devcontainers/typescript-node:24-bookworm &
-          docker pull mcr.microsoft.com/devcontainers/base:ubuntu &
-          wait
+      - name: Prepare devcontainer fixture images
+        run: bash scripts/ci/prepare-devcontainer-fixture-images.sh
 
       - name: Run SAM volume mount devcontainer test
         run: bash scripts/ci/test-devcontainer-volume-mount.sh .

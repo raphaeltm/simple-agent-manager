@@ -294,22 +294,23 @@ export interface CloudflareWorker {
 
 // Note: Resource naming is centralized in config.ts (DEPLOYMENT_CONFIG.resources)
 // Do NOT add resource naming constants here - use DEPLOYMENT_CONFIG instead.
+//
+// These are required Cloudflare Worker secrets after deployment configuration
+// runs. Do not treat this list as the manual GitHub Environment prerequisite
+// list: several platform-owned secrets are generated and persisted in Pulumi
+// state, then copied to Worker secrets by scripts/deploy/configure-secrets.sh.
+// GitHub App/OAuth values are optional compatibility fallbacks because runtime
+// platform config can now provide them after first-run setup.
 
 export const REQUIRED_SECRETS = [
-  'GITHUB_CLIENT_ID',
-  'GITHUB_CLIENT_SECRET',
-  'GITHUB_APP_ID',
-  'GITHUB_APP_PRIVATE_KEY',
-  'GITHUB_APP_SLUG',
-  'GITHUB_WEBHOOK_SECRET',
   'CF_API_TOKEN',
   'CF_ZONE_ID',
   'CF_ACCOUNT_ID',
   'ENCRYPTION_KEY',
   'JWT_PRIVATE_KEY',
   'JWT_PUBLIC_KEY',
-  'ORIGIN_CA_CERT',
-  'ORIGIN_CA_KEY',
+  'DEPLOY_SIGNING_PRIVATE_KEY',
+  'DEPLOY_SIGNING_PUBLIC_KEY',
   'TRIAL_CLAIM_TOKEN_SECRET',
 ] as const;
 
@@ -317,8 +318,22 @@ export const REQUIRED_SECRETS = [
 // Users provide their own tokens via Settings UI, stored encrypted per-user.
 // See docs/architecture/credential-security.md
 export const OPTIONAL_SECRETS = [
+  'VAPID_PRIVATE_KEY',
+  'VAPID_PUBLIC_KEY',
+  'VAPID_SUBJECT',
+  'GITHUB_CLIENT_ID',
+  'GITHUB_CLIENT_SECRET',
+  'GITHUB_APP_ID',
+  'GITHUB_APP_PRIVATE_KEY',
+  'GITHUB_APP_SLUG',
+  'GITHUB_WEBHOOK_SECRET',
   'GOOGLE_CLIENT_ID',
   'GOOGLE_CLIENT_SECRET',
+  'GOOGLE_LOGIN_CLIENT_ID',
+  'GOOGLE_LOGIN_CLIENT_SECRET',
+  'GITLAB_HOST',
+  'GITLAB_CLIENT_ID',
+  'GITLAB_CLIENT_SECRET',
   'SEGMENT_WRITE_KEY',
   'GA4_API_SECRET',
   'GA4_MEASUREMENT_ID',
@@ -341,6 +356,9 @@ export interface PulumiOutputs {
   kvId: string;
   kvName: string;
   r2Name: string;
+  sessionSnapshotTtlDays: number;
+  diagnosticIncidentPrefix: string;
+  diagnosticIncidentTtlDays: number;
   dnsIds: {
     api: string;
     app: string;
@@ -361,6 +379,7 @@ export interface PulumiOutputs {
   };
   cloudflareAccountId: string;
   pagesName: string;
+  installationId: string;
 }
 
 /**
@@ -392,6 +411,7 @@ export interface WranglerToml extends WranglerTomlBindings {
   compatibility_date?: string;
   compatibility_flags?: string[];
   vars?: Record<string, string>;
+  limits?: WorkerLimitsConfig;
   env?: Record<string, WranglerEnvConfig>;
   [key: string]: unknown;
 }
@@ -421,6 +441,16 @@ export interface MigrationEntry {
   tag: string;
   new_sqlite_classes?: string[];
   new_classes?: string[];
+  renamed_classes?: Array<{
+    from: string;
+    to: string;
+  }>;
+  deleted_classes?: string[];
+  transferred_classes?: Array<{
+    from: string;
+    from_script: string;
+    to: string;
+  }>;
 }
 
 export interface AnalyticsEngineDatasetBinding {
@@ -434,6 +464,10 @@ export interface ObservabilityConfig {
     invocation_logs: boolean;
     head_sampling_rate: number;
   };
+}
+
+export interface WorkerLimitsConfig {
+  cpu_ms: number;
 }
 
 export interface ContainerBinding {
@@ -462,6 +496,7 @@ export interface WranglerEnvConfig {
   tail_consumers?: TailConsumer[];
   migrations?: MigrationEntry[];
   observability?: ObservabilityConfig;
+  limits?: WorkerLimitsConfig;
   vars?: Record<string, string>;
   [key: string]: unknown;
 }

@@ -13,9 +13,12 @@ import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { expectJsonRecord } from '../lib/runtime-validation';
+import { normalizeSearchQuery } from '../lib/search-query-limits';
 import { requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { requireOwnedProject } from '../middleware/project-auth';
+import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
+import { AgentChatRequestSchema, jsonValidator } from '../schemas';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -26,14 +29,14 @@ function getProjectAgent(env: Env, projectId: string): DurableObjectStub {
 }
 
 /** POST /chat — send a message and stream the response. */
-app.post('/chat', requireAuth(), async (c) => {
+app.post('/chat', requireAuth(), jsonValidator(AgentChatRequestSchema), async (c) => {
   const auth = c.get('auth');
   const projectId = c.req.param('projectId');
   if (!projectId) throw errors.badRequest('Missing projectId');
   const db = drizzle(c.env.DATABASE, { schema });
-  await requireOwnedProject(db, projectId, auth.user.id);
+  await requireProjectCapability(db, projectId, auth.user.id, 'task:write');
 
-  const body = await c.req.json<{ conversationId?: string; message: string }>();
+  const body = c.req.valid('json');
 
   if (!body.message?.trim()) {
     return c.json({ error: 'Message is required' }, 400);
@@ -59,7 +62,7 @@ app.post('/chat', requireAuth(), async (c) => {
     headers: {
       'content-type': 'text/event-stream',
       'cache-control': 'no-cache',
-      'connection': 'keep-alive',
+      connection: 'keep-alive',
     },
   });
 });
@@ -70,7 +73,7 @@ app.get('/conversations', requireAuth(), async (c) => {
   const projectId = c.req.param('projectId');
   if (!projectId) throw errors.badRequest('Missing projectId');
   const db = drizzle(c.env.DATABASE, { schema });
-  await requireOwnedProject(db, projectId, auth.user.id);
+  await requireProjectAccess(db, projectId, auth.user.id);
 
   const stub = getProjectAgent(c.env, projectId);
   const response = await stub.fetch('https://project-agent/conversations');
@@ -84,7 +87,7 @@ app.get('/conversations/:id/messages', requireAuth(), async (c) => {
   const projectId = c.req.param('projectId');
   if (!projectId) throw errors.badRequest('Missing projectId');
   const db = drizzle(c.env.DATABASE, { schema });
-  await requireOwnedProject(db, projectId, auth.user.id);
+  await requireProjectAccess(db, projectId, auth.user.id);
 
   const conversationId = c.req.param('id');
   const limit = c.req.query('limit') || '';
@@ -103,19 +106,23 @@ app.get('/search', requireAuth(), async (c) => {
   const projectId = c.req.param('projectId');
   if (!projectId) throw errors.badRequest('Missing projectId');
   const db = drizzle(c.env.DATABASE, { schema });
-  await requireOwnedProject(db, projectId, auth.user.id);
+  await requireProjectAccess(db, projectId, auth.user.id);
 
-  const query = c.req.query('query') || '';
+  const inputQuery = c.req.query('query') || '';
   const limit = c.req.query('limit') || '';
-  if (!query.trim()) {
+  if (!inputQuery.trim()) {
     return c.json({ error: 'Query parameter is required' }, 400);
   }
+  const normalizedQuery = normalizeSearchQuery(inputQuery, c.env);
   const stub = getProjectAgent(c.env, projectId);
-  const params = new URLSearchParams({ query });
+  const params = new URLSearchParams({ query: normalizedQuery.query });
   if (limit) params.set('limit', limit);
   const response = await stub.fetch(`https://project-agent/search?${params.toString()}`);
-  const data = await response.json();
-  return c.json(data);
+  const data = expectJsonRecord(await response.json(), 'project_agent.search.response');
+  return new Response(JSON.stringify({ ...data, ...normalizedQuery }), {
+    status: response.status,
+    headers: { 'content-type': 'application/json' },
+  });
 });
 
 export const projectAgentRoutes = app;

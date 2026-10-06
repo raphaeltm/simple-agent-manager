@@ -1,7 +1,6 @@
-import { defineConfig } from 'astro/config';
 import sitemap from '@astrojs/sitemap';
 import starlight from '@astrojs/starlight';
-
+import { defineConfig } from 'astro/config';
 export default defineConfig({
   site: process.env.SITE_URL || 'https://www.simple-agent-manager.org',
   server: {
@@ -24,8 +23,7 @@ export default defineConfig({
         },
       ],
       editLink: {
-        baseUrl:
-          'https://github.com/raphaeltm/simple-agent-manager/edit/main/apps/www/',
+        baseUrl: 'https://github.com/raphaeltm/simple-agent-manager/edit/main/apps/www/',
       },
       sidebar: [
         {
@@ -42,8 +40,20 @@ export default defineConfig({
             { slug: 'docs/guides/agents' },
             { slug: 'docs/guides/idea-execution' },
             { slug: 'docs/guides/chat-features' },
-            { slug: 'docs/guides/notifications' },
+            { slug: 'docs/guides/collaboration' },
+            { slug: 'docs/guides/project-files' },
             { slug: 'docs/guides/creating-workspaces' },
+            { slug: 'docs/guides/compute-pools' },
+            { slug: 'docs/guides/session-resources' },
+            { slug: 'docs/guides/instant-sessions' },
+            { slug: 'docs/guides/session-troubleshooting' },
+            { slug: 'docs/guides/reporting-issues' },
+            { slug: 'docs/guides/recent-product-changes' },
+            { slug: 'docs/guides/notifications' },
+            { slug: 'docs/guides/webhook-triggers' },
+            { slug: 'docs/guides/scheduled-actions' },
+            { slug: 'docs/guides/mcp-servers' },
+            { slug: 'docs/guides/app-deployments' },
             { slug: 'docs/guides/self-hosting' },
             { slug: 'docs/guides/local-development' },
           ],
@@ -51,10 +61,7 @@ export default defineConfig({
         {
           label: 'Architecture',
           collapsed: true,
-          items: [
-            { slug: 'docs/architecture/overview' },
-            { slug: 'docs/architecture/security' },
-          ],
+          items: [{ slug: 'docs/architecture/overview' }, { slug: 'docs/architecture/security' }],
         },
         {
           label: 'Reference',
@@ -63,6 +70,9 @@ export default defineConfig({
             { slug: 'docs/reference/api' },
             { slug: 'docs/reference/vm-agent' },
             { slug: 'docs/reference/configuration' },
+            { slug: 'docs/reference/cli-openapi' },
+            { slug: 'docs/reference/contributing' },
+            { slug: 'docs/reference/roadmap' },
           ],
         },
       ],
@@ -85,6 +95,10 @@ export default defineConfig({
             'data-api': `https://api.${process.env.PUBLIC_BASE_DOMAIN || 'simple-agent-manager.org'}/api/t`,
             defer: true,
           },
+        },
+        {
+          tag: 'script',
+          attrs: { type: 'module', src: '/scripts/docs-mermaid.js' },
         },
       ],
       disable404Route: true,

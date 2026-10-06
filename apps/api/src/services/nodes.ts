@@ -1,27 +1,55 @@
-import { generateCloudInit, validateCloudInitSize } from '@simple-agent-manager/cloud-init';
-import { ProviderError } from '@simple-agent-manager/providers';
-import type { CredentialProvider, TaskMode } from '@simple-agent-manager/shared';
-import { and, eq } from 'drizzle-orm';
+import { type NativeVMConfig } from '@simple-agent-manager/providers';
+import {
+  type CapacityPlacementSnapshot,
+  type CredentialSource,
+} from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
-import { log, serializeError } from '../lib/logger';
-import { getCredentialEncryptionKey } from '../lib/secrets';
 import { ulid } from '../lib/ulid';
-import { createNodeBackendDNSRecord, deleteDNSRecord } from './dns';
-import { GcpApiError, sanitizeGcpError } from './gcp-errors';
-import { signNodeCallbackToken } from './jwt';
-import { persistError } from './observability';
-import { createProviderForUser } from './provider-credentials';
+import { capacityPlacementSnapshotDbValues } from './capacity-placement-snapshot';
+
+export {
+  assertNodeAllocationPlanCurrent,
+  type NodeAllocationPlanRole,
+} from './node-allocation-validation';
+export {
+  type DeploymentProvisionContext,
+  provisionNode,
+  type ProvisionNodeOptions,
+  type ProvisionTaskContext,
+  resolveHetznerBaseImageOverride,
+} from './node-provisioning';
+export type { DeleteNodeResourcesResult } from './node-resource-deletion';
+export { deleteNodeResources } from './node-resource-deletion';
+export { retireDeletedDeploymentNodeRecord, stopNodeResources } from './node-resource-lifecycle';
+export type { StrictNodeDeletionResult } from './strict-node-deletion';
+export { deleteNodeResourcesStrict } from './strict-node-deletion';
 
 export interface CreateNodeInput {
   userId: string;
+  credentialAttributionUserId?: string | null;
+  credentialAttributionProjectId?: string | null;
+  credentialAttributionSource?: CredentialSource | null;
   name: string;
   vmSize: string;
   vmLocation: string;
   heartbeatStaleAfterSeconds: number;
   cloudProvider?: string;
+  /** Provider-native instance type/SKU selected from a compute pool. */
+  providerInstanceType?: string | null;
+  providerInstanceBootDiskSizeGb?: number | null;
+  providerInstanceImage?: string | null;
+  providerInstanceArchitecture?: NativeVMConfig['architecture'] | null;
+  /** 'workspace' (default) or 'deployment'. */
+  nodeRole?: 'workspace' | 'deployment';
+  /** 'shared' (default) or 'exclusive'. Exclusive deployment nodes accept one environment. */
+  nodeMode?: 'shared' | 'exclusive';
+  /** Runtime substrate. Defaults to traditional VM. */
+  runtime?: 'vm' | 'cf-container';
+  /** Capacity pool/source/candidate audit snapshot for auto-provisioned placement. */
+  capacityPlacementSnapshot?: CapacityPlacementSnapshot | null;
 }
 
 export interface ProvisionedNode {
@@ -32,6 +60,11 @@ export interface ProvisionedNode {
   vmSize: string;
   vmLocation: string;
   cloudProvider: string | null;
+  providerInstanceType: string | null;
+  providerInstanceBootDiskSizeGb: number | null;
+  providerInstanceImage: string | null;
+  providerInstanceArchitecture: string | null;
+  runtime: string;
   ipAddress: string | null;
   lastHeartbeatAt: string | null;
   healthStatus: string;
@@ -41,45 +74,77 @@ export interface ProvisionedNode {
   updatedAt: string;
 }
 
-/**
- * Resolves the Hetzner base image override from the `HETZNER_BASE_IMAGE` env var.
- *
- * The default (returned as `undefined`) lets the Hetzner provider pick its own
- * default — currently `docker-ce` (Hetzner's Docker marketplace image, which
- * skips Docker install and saves ~30-60s on cold provisioning). Setting
- * `HETZNER_BASE_IMAGE=ubuntu-24.04` provides an emergency rollback without a
- * code change. The override is only applied for the Hetzner provider; other
- * providers have their own image resolution logic.
- *
- * Exported for unit-testing the env-var → provider plumbing.
- */
-export function resolveHetznerBaseImageOverride(
-  targetProvider: CredentialProvider | undefined,
-  envValue: string | undefined,
-): string | undefined {
-  if (targetProvider !== 'hetzner') return undefined;
-  const trimmed = envValue?.trim();
-  return trimmed ? trimmed : undefined;
+export class CapacityPoolNodeLimitExceededError extends Error {
+  constructor() {
+    super('Capacity pool node limit reached');
+    this.name = 'CapacityPoolNodeLimitExceededError';
+  }
+}
+
+function isCapacityPoolNodeLimitViolation(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 4 && current; depth += 1) {
+    if (current instanceof Error && current.message.includes('capacity_pool_node_limit')) {
+      return true;
+    }
+    current =
+      typeof current === 'object' && 'cause' in current
+        ? (current as { cause?: unknown }).cause
+        : undefined;
+  }
+  return false;
 }
 
 export async function createNodeRecord(env: Env, input: CreateNodeInput): Promise<ProvisionedNode> {
   const db = drizzle(env.DATABASE, { schema });
   const now = new Date().toISOString();
   const nodeId = ulid();
+  const capacitySnapshotValues = capacityPlacementSnapshotDbValues(input.capacityPlacementSnapshot);
 
-  await db.insert(schema.nodes).values({
-    id: nodeId,
-    userId: input.userId,
-    name: input.name,
-    status: 'creating',
-    vmSize: input.vmSize,
-    vmLocation: input.vmLocation,
-    cloudProvider: input.cloudProvider ?? null,
-    healthStatus: 'stale',
-    heartbeatStaleAfterSeconds: input.heartbeatStaleAfterSeconds,
-    createdAt: now,
-    updatedAt: now,
-  });
+  try {
+    await db.insert(schema.nodes).values({
+      id: nodeId,
+      userId: input.userId,
+      credentialAttributionUserId: input.credentialAttributionUserId ?? input.userId,
+      credentialAttributionProjectId:
+        input.credentialAttributionSource === 'project'
+          ? (input.credentialAttributionProjectId ?? null)
+          : null,
+      credentialAttributionSource: input.credentialAttributionSource ?? 'user',
+      name: input.name,
+      status: 'creating',
+      vmSize: input.vmSize,
+      vmLocation: input.vmLocation,
+      cloudProvider: input.cloudProvider ?? null,
+      healthStatus: 'stale',
+      heartbeatStaleAfterSeconds: input.heartbeatStaleAfterSeconds,
+      nodeRole: input.nodeRole ?? 'workspace',
+      nodeMode: input.nodeMode ?? 'shared',
+      runtime: input.runtime ?? 'vm',
+      runtimeIncarnationId: crypto.randomUUID(),
+      // This newly inserted VM placeholder has never reached a provider. The
+      // provisioner's incarnation claim clears this proof before external create.
+      // Container allocation follows a separate path without that claim.
+      runtimeTerminationConfirmedAt: (input.runtime ?? 'vm') === 'vm' ? now : null,
+      ...capacitySnapshotValues,
+      providerInstanceType:
+        input.providerInstanceType ?? capacitySnapshotValues.providerInstanceType,
+      providerInstanceBootDiskSizeGb:
+        input.providerInstanceBootDiskSizeGb ??
+        capacitySnapshotValues.providerInstanceBootDiskSizeGb,
+      providerInstanceImage:
+        input.providerInstanceImage ?? capacitySnapshotValues.providerInstanceImage,
+      providerInstanceArchitecture:
+        input.providerInstanceArchitecture ?? capacitySnapshotValues.providerInstanceArchitecture,
+      createdAt: now,
+      updatedAt: now,
+    });
+  } catch (error) {
+    if (isCapacityPoolNodeLimitViolation(error)) {
+      throw new CapacityPoolNodeLimitExceededError();
+    }
+    throw error;
+  }
 
   return {
     id: nodeId,
@@ -89,6 +154,14 @@ export async function createNodeRecord(env: Env, input: CreateNodeInput): Promis
     vmSize: input.vmSize,
     vmLocation: input.vmLocation,
     cloudProvider: input.cloudProvider ?? null,
+    providerInstanceType: input.providerInstanceType ?? capacitySnapshotValues.providerInstanceType,
+    providerInstanceBootDiskSizeGb:
+      input.providerInstanceBootDiskSizeGb ?? capacitySnapshotValues.providerInstanceBootDiskSizeGb,
+    providerInstanceImage:
+      input.providerInstanceImage ?? capacitySnapshotValues.providerInstanceImage,
+    providerInstanceArchitecture:
+      input.providerInstanceArchitecture ?? capacitySnapshotValues.providerInstanceArchitecture,
+    runtime: input.runtime ?? 'vm',
     ipAddress: null,
     lastHeartbeatAt: null,
     healthStatus: 'stale',
@@ -97,315 +170,4 @@ export async function createNodeRecord(env: Env, input: CreateNodeInput): Promis
     createdAt: now,
     updatedAt: now,
   };
-}
-
-/** Optional task context for cloud-init (enables message reporter on VM). */
-export interface ProvisionTaskContext {
-  projectId: string;
-  chatSessionId: string;
-  taskId: string;
-  taskMode?: TaskMode;
-}
-
-export async function provisionNode(
-  nodeId: string,
-  env: Env,
-  taskContext?: ProvisionTaskContext,
-): Promise<void> {
-  const db = drizzle(env.DATABASE, { schema });
-
-  const nodes = await db
-    .select()
-    .from(schema.nodes)
-    .where(eq(schema.nodes.id, nodeId))
-    .limit(1);
-
-  const node = nodes[0];
-  if (!node) {
-    return;
-  }
-
-  const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
-
-  try {
-    const providerResult = await createProviderForUser(db, node.userId, getCredentialEncryptionKey(env), env, targetProvider);
-    if (!providerResult) {
-      throw new Error(
-        targetProvider
-          ? `Cloud provider "${targetProvider}" not connected`
-          : 'Cloud provider account not connected',
-      );
-    }
-
-    // Track credential source on the node record
-    if (providerResult.credentialSource === 'platform') {
-      await db
-        .update(schema.nodes)
-        .set({ credentialSource: 'platform' })
-        .where(eq(schema.nodes.id, node.id));
-    }
-
-    const callbackToken = await signNodeCallbackToken(node.id, env);
-
-    const cloudInit = generateCloudInit({
-      nodeId: node.id,
-      hostname: `node-${node.id.toLowerCase()}`,
-      controlPlaneUrl: `https://api.${env.BASE_DOMAIN}`,
-      jwksUrl: `https://api.${env.BASE_DOMAIN}/.well-known/jwks.json`,
-      callbackToken,
-      provider: targetProvider,
-      logJournalMaxUse: env.LOG_JOURNAL_MAX_USE,
-      logJournalKeepFree: env.LOG_JOURNAL_KEEP_FREE,
-      logJournalMaxRetention: env.LOG_JOURNAL_MAX_RETENTION,
-      projectId: taskContext?.projectId,
-      chatSessionId: taskContext?.chatSessionId,
-      taskId: taskContext?.taskId,
-      taskMode: taskContext?.taskMode,
-      dockerDnsServers: env.DOCKER_DNS_SERVERS,
-      originCaCert: env.ORIGIN_CA_CERT,
-      originCaKey: env.ORIGIN_CA_KEY,
-      vmAgentPort: env.VM_AGENT_PORT,
-      devcontainerCacheEnabled: env.DEVCONTAINER_CACHE_ENABLED,
-    });
-
-    if (!validateCloudInitSize(cloudInit)) {
-      throw new Error('Cloud-init config exceeds size limit');
-    }
-
-    const provider = providerResult.provider;
-
-    const baseImageOverride = resolveHetznerBaseImageOverride(
-      targetProvider,
-      env.HETZNER_BASE_IMAGE,
-    );
-
-    const vm = await provider.createVM({
-      name: `node-${node.id.toLowerCase()}`,
-      size: node.vmSize as 'small' | 'medium' | 'large',
-      location: node.vmLocation,
-      userData: cloudInit,
-      ...(baseImageOverride ? { image: baseImageOverride } : {}),
-      labels: {
-        node: node.id.toLowerCase(),
-        managed: 'simple-agent-manager',
-      },
-    });
-
-    // Scaleway allocates IPs asynchronously after boot — vm.ip will be empty.
-    // Store the provider instance ID and mark as pending-ip; heartbeat backfill
-    // will capture the IP when the VM agent sends its first heartbeat.
-    if (!vm.ip) {
-      log.info('node_provisioning.awaiting_ip_backfill', {
-        nodeId: node.id,
-        providerInstanceId: vm.id,
-      });
-      await db
-        .update(schema.nodes)
-        .set({
-          providerInstanceId: vm.id,
-          status: 'creating',
-          errorMessage: 'Awaiting IP allocation — will be set on first heartbeat',
-          updatedAt: new Date().toISOString(),
-        })
-        .where(eq(schema.nodes.id, node.id));
-      return;
-    }
-
-    let backendDnsRecordId: string | null = null;
-    try {
-      backendDnsRecordId = await createNodeBackendDNSRecord(node.id, vm.ip, env);
-    } catch (dnsErr) {
-      log.error('node_provisioning.dns_record_failed', { nodeId: node.id, ...serializeError(dnsErr) });
-    }
-
-    await db
-      .update(schema.nodes)
-      .set({
-        providerInstanceId: vm.id,
-        ipAddress: vm.ip,
-        backendDnsRecordId,
-        status: 'running',
-        healthStatus: 'stale',
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(schema.nodes.id, node.id));
-  } catch (err) {
-    // Sanitize GCP errors to prevent leaking resource paths in client-visible errorMessage
-    const errorMessage = err instanceof GcpApiError
-      ? sanitizeGcpError(err, 'node-provisioning')
-      : (err instanceof Error ? err.message : String(err));
-    const providerName = targetProvider ?? 'unknown';
-    const statusCode = err instanceof ProviderError ? err.statusCode : undefined;
-
-    log.error('node_provisioning.failed', {
-      nodeId: node.id,
-      provider: providerName,
-      vmSize: node.vmSize,
-      vmLocation: node.vmLocation,
-      statusCode,
-      error: errorMessage,
-    });
-
-    // Persist detailed error to observability database
-    try {
-      await persistError(env.OBSERVABILITY_DATABASE, {
-        source: 'api',
-        level: 'error',
-        message: `Node provisioning failed: ${errorMessage}`,
-        context: {
-          component: 'node-provisioning',
-          nodeId: node.id,
-          userId: node.userId,
-          provider: providerName,
-          vmSize: node.vmSize,
-          vmLocation: node.vmLocation,
-          statusCode,
-        },
-        nodeId: node.id,
-        userId: node.userId,
-      });
-    } catch (obsErr) {
-      log.error('node_provisioning.observability_persist_failed', serializeError(obsErr));
-    }
-
-    // Store the actual error message (truncated) in the node record
-    const truncatedError = errorMessage.length > 500 ? errorMessage.slice(0, 500) + '...' : errorMessage;
-    await db
-      .update(schema.nodes)
-      .set({
-        status: 'error',
-        healthStatus: 'unhealthy',
-        errorMessage: `[${providerName}] ${truncatedError}`,
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(schema.nodes.id, node.id));
-  }
-}
-
-export async function stopNodeResources(nodeId: string, userId: string, env: Env): Promise<void> {
-  const db = drizzle(env.DATABASE, { schema });
-  const now = new Date().toISOString();
-
-  const rows = await db
-    .select()
-    .from(schema.nodes)
-    .where(
-      and(
-        eq(schema.nodes.id, nodeId),
-        eq(schema.nodes.userId, userId)
-      )
-    )
-    .limit(1);
-
-  const node = rows[0];
-  if (!node) {
-    return;
-  }
-
-  // Delete the cloud provider server since stopped nodes cannot be restarted
-  if (node.providerInstanceId) {
-    const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
-    const providerResult = await createProviderForUser(db, userId, getCredentialEncryptionKey(env), env, targetProvider);
-    if (providerResult) {
-      try {
-        await providerResult.provider.deleteVM(node.providerInstanceId);
-      } catch (err) {
-        log.error('node_stop.delete_vm_failed', { nodeId, ...serializeError(err) });
-      }
-    }
-  }
-
-  // Delete the DNS record since the node is being permanently stopped
-  if (node.backendDnsRecordId) {
-    try {
-      await deleteDNSRecord(node.backendDnsRecordId, env);
-    } catch (err) {
-      log.error('node_stop.delete_dns_failed', { nodeId, ...serializeError(err) });
-    }
-  }
-
-  // Mark node and workspaces as deleted since stopped nodes are non-recoverable
-  await db
-    .update(schema.workspaces)
-    .set({
-      status: 'deleted',
-      updatedAt: now,
-    })
-    .where(
-      and(
-        eq(schema.workspaces.nodeId, nodeId),
-        eq(schema.workspaces.userId, userId)
-      )
-    );
-
-  await db
-    .update(schema.nodes)
-    .set({
-      status: 'deleted',
-      healthStatus: 'stale',
-      updatedAt: now,
-    })
-    .where(
-      and(
-        eq(schema.nodes.id, nodeId),
-        eq(schema.nodes.userId, userId)
-      )
-    );
-}
-
-export async function deleteNodeResources(nodeId: string, userId: string, env: Env): Promise<void> {
-  const db = drizzle(env.DATABASE, { schema });
-
-  const rows = await db
-    .select()
-    .from(schema.nodes)
-    .where(
-      and(
-        eq(schema.nodes.id, nodeId),
-        eq(schema.nodes.userId, userId)
-      )
-    )
-    .limit(1);
-
-  const node = rows[0];
-  if (!node) {
-    return;
-  }
-
-  if (node.providerInstanceId) {
-    const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
-    const providerResult2 = await createProviderForUser(db, userId, getCredentialEncryptionKey(env), env, targetProvider);
-    if (providerResult2) {
-      try {
-        await providerResult2.provider.deleteVM(node.providerInstanceId);
-      } catch (err) {
-        log.error('node_delete.delete_vm_failed', { nodeId, ...serializeError(err) });
-      }
-    } else {
-      log.error('node_cleanup.credential_missing_vm_orphaned', {
-        nodeId,
-        userId,
-        providerInstanceId: node.providerInstanceId,
-        cloudProvider: node.cloudProvider,
-      });
-    }
-  }
-
-  if (node.backendDnsRecordId) {
-    try {
-      await deleteDNSRecord(node.backendDnsRecordId, env);
-    } catch (err) {
-      log.error('node_delete.delete_dns_failed', { nodeId, ...serializeError(err) });
-    }
-  }
-
-  // Cascade workspace status: mark all workspaces on this node as deleted
-  const now = new Date().toISOString();
-  await db
-    .update(schema.workspaces)
-    .set({ status: 'deleted', updatedAt: now })
-    .where(and(
-      eq(schema.workspaces.nodeId, nodeId),
-      eq(schema.workspaces.userId, userId)
-    ));
 }

@@ -1,16 +1,12 @@
 package messagereport
 
 import (
-	"bytes"
+	"context"
 	"database/sql"
-	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"log/slog"
-	"math"
-	"math/rand"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -26,6 +22,8 @@ type Message struct {
 	Content      string `json:"content"`
 	ToolMetadata string `json:"toolMetadata,omitempty"` // JSON string
 	Timestamp    string `json:"timestamp"`
+	// Origin is "system" for SAM-injected messages the UI collapses; empty otherwise.
+	Origin string `json:"origin,omitempty"`
 }
 
 // Reporter batches chat messages from the SQLite outbox and POSTs them to
@@ -39,14 +37,32 @@ type Reporter struct {
 	authToken   string
 	workspaceID string // dynamically set after workspace creation
 	sessionID   string // dynamically updated when warm node is reused for new task
+	// messageLimitReached disables persistence for the current chat session
+	// once the control plane reports SESSION_MESSAGE_LIMIT_EXCEEDED. Retrying
+	// cannot succeed until a new session is selected, so the reporter drops
+	// later messages instead of growing an unwinnable outbox.
+	messageLimitReached bool
+	// terminalPersistenceFailure disables persistence after the control plane
+	// reports that this callback resource is no longer valid. Retrying with
+	// the same workspace/session token cannot succeed, so later messages are
+	// dropped instead of creating permanent-failure storms.
+	terminalPersistenceFailure bool
+	terminalPersistenceReason  string
+	terminalWakeC              chan struct{}
+	// credentialWait pauses delivery while the control plane rejects the
+	// current token (see credential.go). Guarded by mu.
+	credentialWait credentialWait
+	now            func() time.Time
 
 	// flushMu serializes flush() calls with outbox mutations in SetSessionID.
 	// Lock ordering: flushMu must always be acquired BEFORE mu when both
 	// are held. Acquiring mu first would risk deadlock with flush().
 	flushMu sync.Mutex
 
-	stopC chan struct{}
-	doneC chan struct{}
+	stopC      chan struct{}
+	stopCtx    context.Context
+	stopCancel context.CancelFunc
+	doneC      chan struct{}
 }
 
 // New creates a Reporter backed by the given SQLite database.
@@ -74,6 +90,9 @@ func New(db *sql.DB, cfg Config) (*Reporter, error) {
 	if cfg.BatchMaxBytes <= 0 {
 		cfg.BatchMaxBytes = defaults.BatchMaxBytes
 	}
+	if cfg.MaxMessageContentBytes <= 0 {
+		cfg.MaxMessageContentBytes = defaults.MaxMessageContentBytes
+	}
 	if cfg.OutboxMaxSize <= 0 {
 		cfg.OutboxMaxSize = defaults.OutboxMaxSize
 	}
@@ -89,19 +108,31 @@ func New(db *sql.DB, cfg Config) (*Reporter, error) {
 	if cfg.HTTPTimeout <= 0 {
 		cfg.HTTPTimeout = defaults.HTTPTimeout
 	}
+	if cfg.ResponseMaxBytes <= 0 {
+		cfg.ResponseMaxBytes = defaults.ResponseMaxBytes
+	}
+	if cfg.AuthRenewalWait <= 0 {
+		cfg.AuthRenewalWait = defaults.AuthRenewalWait
+	}
 
 	if err := migrateOutbox(db); err != nil {
 		return nil, fmt.Errorf("messagereport: migrate outbox: %w", err)
 	}
 
+	stopCtx, stopCancel := context.WithCancel(context.Background())
+
 	r := &Reporter{
-		cfg:         cfg,
-		db:          db,
-		client:      config.NewControlPlaneClient(cfg.HTTPTimeout),
-		workspaceID: cfg.WorkspaceID,
-		sessionID:   cfg.SessionID,
-		stopC:       make(chan struct{}),
-		doneC:       make(chan struct{}),
+		cfg:           cfg,
+		db:            db,
+		client:        config.NewControlPlaneClient(cfg.HTTPTimeout),
+		workspaceID:   cfg.WorkspaceID,
+		sessionID:     cfg.SessionID,
+		terminalWakeC: make(chan struct{}, 1),
+		now:           time.Now,
+		stopC:         make(chan struct{}),
+		stopCtx:       stopCtx,
+		stopCancel:    stopCancel,
+		doneC:         make(chan struct{}),
 	}
 
 	go r.flushLoop()
@@ -109,14 +140,22 @@ func New(db *sql.DB, cfg Config) (*Reporter, error) {
 }
 
 // SetToken updates the authorization token used for HTTP POSTs.
-// Call this after bootstrap when the callback JWT becomes available.
+// Call this after bootstrap when the callback JWT becomes available, and whenever
+// the workspace token is renewed or re-delivered. A token different from one the
+// control plane rejected resumes delivery of the held messages.
 func (r *Reporter) SetToken(token string) {
 	if r == nil {
 		return
 	}
 	r.mu.Lock()
 	r.authToken = token
+	resumed := r.credentialWait.resumeWith(token)
+	wsID, sessionID := r.workspaceID, r.sessionID
 	r.mu.Unlock()
+	if resumed {
+		slog.Info("messagereport: workspace callback token replaced, resuming held messages",
+			"workspaceId", wsID, "sessionId", sessionID)
+	}
 }
 
 // SetWorkspaceID updates the workspace ID used in the batch POST URL.
@@ -145,14 +184,16 @@ func (r *Reporter) SetSessionID(id string) {
 		return
 	}
 
-	// Acquire flushMu FIRST to block any concurrent flush, then read the
-	// old session ID under mu. This closes the window where a flush could
-	// start between reading oldSessionID and clearing the outbox.
+	// Acquire flushMu FIRST to block any concurrent flush, then hold mu through
+	// the outbox clear and session update. Enqueue also holds mu through its
+	// insert, so a concurrent enqueue either lands before the clear and is
+	// removed with the old session, or waits and uses the new session ID.
 	r.flushMu.Lock()
+	defer r.flushMu.Unlock()
 
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	oldSessionID := r.sessionID
-	r.mu.Unlock()
 
 	// Clear stale messages from the previous session BEFORE updating the
 	// session ID to prevent a race where Enqueue reads the new sessionID
@@ -167,40 +208,14 @@ func (r *Reporter) SetSessionID(id string) {
 				"cleared", cleared, "oldSessionId", oldSessionID, "newSessionId", id)
 		}
 
-		// Update session ID while still holding flushMu so that no flush
-		// can observe the new session ID with stale outbox contents.
-		r.mu.Lock()
-		r.sessionID = id
-		r.mu.Unlock()
-
-		r.flushMu.Unlock()
-
 		slog.Info("messagereport: session ID updated",
 			"sessionId", id, "previousSessionId", oldSessionID)
-	} else {
-		r.mu.Lock()
-		r.sessionID = id
-		r.mu.Unlock()
+	}
 
-		r.flushMu.Unlock()
+	if oldSessionID != id {
+		r.messageLimitReached = false
 	}
-}
-
-// clearOutboxForSession removes messages for a specific session from the
-// outbox. Returns the number of rows deleted. Using a session-scoped delete
-// avoids accidentally clearing messages that were already enqueued for the
-// new session in a narrow race window.
-func (r *Reporter) clearOutboxForSession(sessionID string) (int64, error) {
-	result, err := r.db.Exec("DELETE FROM message_outbox WHERE session_id = ?", sessionID)
-	if err != nil {
-		return 0, fmt.Errorf("messagereport: clear outbox for session: %w", err)
-	}
-	n, err := result.RowsAffected()
-	if err != nil {
-		slog.Warn("messagereport: could not determine rows affected by outbox clear", "error", err)
-		n = -1
-	}
-	return n, nil
+	r.sessionID = id
 }
 
 // Enqueue inserts a message into the SQLite outbox for eventual delivery.
@@ -208,6 +223,20 @@ func (r *Reporter) clearOutboxForSession(sessionID string) (int64, error) {
 // Returns an error if the outbox is at capacity.
 func (r *Reporter) Enqueue(msg Message) error {
 	if r == nil {
+		return nil
+	}
+
+	if msg.Timestamp == "" {
+		msg.Timestamp = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.messageLimitReached {
+		return nil
+	}
+	if r.terminalPersistenceFailure {
 		return nil
 	}
 
@@ -226,16 +255,10 @@ func (r *Reporter) Enqueue(msg Message) error {
 		return fmt.Errorf("messagereport: outbox full (%d/%d)", count, r.cfg.OutboxMaxSize)
 	}
 
-	if msg.Timestamp == "" {
-		msg.Timestamp = time.Now().UTC().Format(time.RFC3339Nano)
-	}
-
 	// Use the dynamically updatable session ID (updated via SetSessionID
 	// when a warm node is reused for a new task).
-	r.mu.Lock()
 	sessionID := r.sessionID
 	workspaceID := r.workspaceID
-	r.mu.Unlock()
 
 	// Principle XIII (Fail-Fast): Reject messages when no session ID is set.
 	// This is a defensive check — by construction, a non-nil Reporter should
@@ -251,12 +274,27 @@ func (r *Reporter) Enqueue(msg Message) error {
 		return fmt.Errorf("messagereport: cannot enqueue message without session ID")
 	}
 
+	msg.SessionID = sessionID
+	queued := fitForTransport(msg, r.transportLimits())
+	if queued != msg {
+		slog.Warn("messagereport: reduced oversized message to fit transport limits",
+			"messageId", msg.MessageID,
+			"role", msg.Role,
+			"workspaceId", workspaceID,
+			"contentBytes", len(msg.Content),
+			"queuedContentBytes", len(queued.Content),
+			"toolMetadataBytes", len(msg.ToolMetadata),
+			"queuedToolMetadataBytes", len(queued.ToolMetadata),
+		)
+	}
+
 	// INSERT OR IGNORE for crash-recovery dedup on message_id UNIQUE constraint.
 	_, err := r.db.Exec(
 		`INSERT OR IGNORE INTO message_outbox
-			(message_id, session_id, role, content, tool_metadata, created_at)
-		VALUES (?, ?, ?, ?, ?, ?)`,
-		msg.MessageID, sessionID, msg.Role, msg.Content, msg.ToolMetadata, msg.Timestamp,
+			(message_id, session_id, role, content, tool_metadata, created_at, origin)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		queued.MessageID, queued.SessionID, queued.Role, queued.Content, queued.ToolMetadata,
+		queued.Timestamp, queued.Origin,
 	)
 	if err != nil {
 		return fmt.Errorf("messagereport: insert outbox: %w", err)
@@ -269,6 +307,9 @@ func (r *Reporter) Enqueue(msg Message) error {
 func (r *Reporter) Shutdown() {
 	if r == nil {
 		return
+	}
+	if r.stopCancel != nil {
+		r.stopCancel()
 	}
 	close(r.stopC)
 	<-r.doneC
@@ -304,6 +345,7 @@ func (r *Reporter) flush() {
 	r.flushMu.Lock()
 	defer r.flushMu.Unlock()
 
+	rotatedRetries := 0
 	for {
 		batch, err := r.readBatch()
 		if err != nil {
@@ -315,6 +357,15 @@ func (r *Reporter) flush() {
 		}
 
 		if err := r.sendBatch(batch); err != nil {
+			if errors.Is(err, errCredentialRotated) && rotatedRetries < maxRotatedTokenRetriesPerFlush {
+				// A renewed token replaced the one that got 401: resend now.
+				rotatedRetries++
+				continue
+			}
+			if errors.Is(err, errAwaitingCredential) {
+				// Held until a new token arrives; not a delivery attempt.
+				return
+			}
 			// sendBatch handles retry internally; if it returns an error the
 			// batch was NOT sent and remains in the outbox for the next tick.
 			slog.Warn("messagereport: send batch failed", "error", err, "count", len(batch))
@@ -327,210 +378,90 @@ func (r *Reporter) flush() {
 	}
 }
 
-type outboxRow struct {
-	id           int64
-	messageID    string
-	sessionID    string
-	role         string
-	content      string
-	toolMetadata sql.NullString
-	createdAt    string
-}
-
-func (r *Reporter) readBatch() ([]outboxRow, error) {
-	rows, err := r.db.Query(
-		`SELECT id, message_id, session_id, role, content, tool_metadata, created_at
-		 FROM message_outbox
-		 ORDER BY id ASC
-		 LIMIT ?`,
-		r.cfg.BatchMaxSize,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var batch []outboxRow
-	var totalBytes int
-	for rows.Next() {
-		var row outboxRow
-		if err := rows.Scan(&row.id, &row.messageID, &row.sessionID, &row.role, &row.content, &row.toolMetadata, &row.createdAt); err != nil {
-			return nil, err
-		}
-		rowBytes := len(row.content)
-		if row.toolMetadata.Valid {
-			rowBytes += len(row.toolMetadata.String)
-		}
-		// Respect byte limit (but always include at least one message).
-		if len(batch) > 0 && totalBytes+rowBytes > r.cfg.BatchMaxBytes {
-			break
-		}
-		batch = append(batch, row)
-		totalBytes += rowBytes
-	}
-	return batch, rows.Err()
-}
-
-// sendBatch POSTs the batch to the control plane with exponential backoff.
-func (r *Reporter) sendBatch(batch []outboxRow) error {
+func (r *Reporter) markMessageLimitReached(batch []outboxRow, responseBody string) {
 	r.mu.Lock()
-	token := r.authToken
+	r.messageLimitReached = true
 	wsID := r.workspaceID
+	sessionID := r.sessionID
 	r.mu.Unlock()
 
-	if token == "" {
-		// No token yet — leave messages in outbox for later.
-		return fmt.Errorf("no auth token")
+	slog.Warn("messagereport: session message limit reached, disabling reporter for session",
+		"count", len(batch),
+		"workspaceId", wsID,
+		"sessionId", sessionID,
+		"responseBody", responseBody,
+	)
+	r.deleteBatch(batch)
+}
+
+// MarkTerminal disables future sends for this reporter after an owner outside
+// the reporter observes a terminal control-plane callback response.
+func (r *Reporter) MarkTerminal(reason string) {
+	if r == nil {
+		return
 	}
-	if wsID == "" {
-		// No workspace yet — leave messages in outbox for later.
-		return fmt.Errorf("no workspace ID")
+	if !r.setTerminalPersistenceFailure(reason) {
+		return
 	}
+	r.flushMu.Lock()
+	defer r.flushMu.Unlock()
+	r.clearAndLogTerminalOutbox(reason, 0, "")
+}
 
-	// Build the request body matching the API contract.
-	type apiMessage struct {
-		MessageID    string `json:"messageId"`
-		SessionID    string `json:"sessionId"`
-		Role         string `json:"role"`
-		Content      string `json:"content"`
-		ToolMetadata string `json:"toolMetadata,omitempty"`
-		Timestamp    string `json:"timestamp"`
-		Sequence     int64  `json:"sequence"`
-	}
-	messages := make([]apiMessage, 0, len(batch))
-	for _, row := range batch {
-		m := apiMessage{
-			MessageID: row.messageID,
-			SessionID: row.sessionID,
-			Role:      row.role,
-			Content:   row.content,
-			Timestamp: row.createdAt,
-			Sequence:  row.id, // outbox AUTOINCREMENT id is monotonic
-		}
-		if row.toolMetadata.Valid {
-			m.ToolMetadata = row.toolMetadata.String
-		}
-		messages = append(messages, m)
-	}
-
-	payload := map[string]interface{}{
-		"messages": messages,
-	}
-
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("marshal payload: %w", err)
-	}
-
-	url := strings.TrimRight(r.cfg.Endpoint, "/") +
-		"/api/workspaces/" + wsID + "/messages"
-
-	// Retry with exponential backoff + jitter.
-	delay := r.cfg.RetryInitial
-	start := time.Now()
-
-	for {
-		statusCode, responseBody, err := r.doPost(url, token, body)
-		if err == nil && statusCode >= 200 && statusCode < 300 {
-			return nil // success
-		}
-
-		// Permanent client errors — discard the batch.
-		if statusCode == 400 || statusCode == 401 || statusCode == 403 {
-			slog.Warn("messagereport: permanent error, discarding batch",
-				"statusCode", statusCode,
-				"count", len(batch),
-				"workspaceId", wsID,
-				"responseBody", responseBody,
-			)
-			// Delete from outbox so we don't retry forever.
-			r.deleteBatch(batch)
-			return nil
-		}
-
-		// Check elapsed time.
-		if time.Since(start) > r.cfg.RetryMaxElapsed {
-			return fmt.Errorf("retries exhausted after %v (last status=%d, err=%v)",
-				time.Since(start), statusCode, err)
-		}
-
-		// Check if we should stop.
-		select {
-		case <-r.stopC:
-			return fmt.Errorf("shutdown during retry")
-		default:
-		}
-
-		// Backoff with jitter.
-		jitter := time.Duration(rand.Int63n(int64(delay) / 2))
-		sleepDur := delay + jitter
-		slog.Info("messagereport: retrying after backoff",
-			"delay", sleepDur, "statusCode", statusCode, "err", err)
-
-		timer := time.NewTimer(sleepDur)
-		select {
-		case <-timer.C:
-		case <-r.stopC:
-			timer.Stop()
-			return fmt.Errorf("shutdown during backoff")
-		}
-
-		// Exponential increase capped at RetryMax.
-		delay = time.Duration(math.Min(float64(delay*2), float64(r.cfg.RetryMax)))
+func (r *Reporter) markTerminalPersistenceFailure(batch []outboxRow, statusCode int, responseBody string) {
+	reason := fmt.Sprintf("message persistence returned terminal status %d", statusCode)
+	if r.setTerminalPersistenceFailure(reason) {
+		r.clearAndLogTerminalOutbox(reason, statusCode, responseBody)
+	} else if len(batch) > 0 {
+		r.deleteBatch(batch)
 	}
 }
 
-func (r *Reporter) doPost(url, token string, body []byte) (int, string, error) {
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return 0, "", err
+func (r *Reporter) setTerminalPersistenceFailure(reason string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.terminalPersistenceFailure {
+		return false
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
-
-	resp, err := r.client.Do(req)
-	if err != nil {
-		return 0, "", err
+	r.terminalPersistenceFailure = true
+	r.terminalPersistenceReason = reason
+	select {
+	case r.terminalWakeC <- struct{}{}:
+	default:
 	}
-	defer resp.Body.Close()
-	responseBody := readBoundedHTTPBody(resp.Body)
-	return resp.StatusCode, responseBody, nil
+	return true
 }
 
-const maxLoggedResponseBodyBytes int64 = 2048
-
-func readBoundedHTTPBody(body httpBodyReader) string {
-	if body == nil {
-		return ""
-	}
-	data, err := io.ReadAll(io.LimitReader(body, maxLoggedResponseBodyBytes))
-	if err != nil {
-		return fmt.Sprintf("<read error: %v>", err)
-	}
-	return strings.TrimSpace(string(data))
+func (r *Reporter) terminalPersistenceStopped() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.terminalPersistenceFailure
 }
 
-type httpBodyReader interface {
-	Read([]byte) (int, error)
-}
+func (r *Reporter) clearAndLogTerminalOutbox(reason string, statusCode int, responseBody string) {
+	r.mu.Lock()
+	wsID := r.workspaceID
+	sessionID := r.sessionID
+	r.mu.Unlock()
 
-func (r *Reporter) bumpAttempts(batch []outboxRow) {
-	now := time.Now().UTC().Format(time.RFC3339)
-	for _, row := range batch {
-		_, err := r.db.Exec(
-			"UPDATE message_outbox SET attempts = attempts + 1, last_attempt_at = ? WHERE id = ?",
-			now, row.id,
-		)
+	var cleared int64
+	if sessionID != "" {
+		var err error
+		cleared, err = r.clearOutboxForSession(sessionID)
 		if err != nil {
-			slog.Error("messagereport: bump attempts", "id", row.id, "error", err)
+			slog.Warn("messagereport: failed to clear outbox after terminal persistence response",
+				"workspaceId", wsID,
+				"sessionId", sessionID,
+				"error", err)
 		}
 	}
-}
 
-func (r *Reporter) deleteBatch(batch []outboxRow) {
-	for _, row := range batch {
-		if _, err := r.db.Exec("DELETE FROM message_outbox WHERE id = ?", row.id); err != nil {
-			slog.Error("messagereport: delete outbox row", "id", row.id, "error", err)
-		}
-	}
+	slog.Warn("messagereport: terminal persistence response, disabling reporter",
+		"workspaceId", wsID,
+		"sessionId", sessionID,
+		"statusCode", statusCode,
+		"responseBody", responseBody,
+		"cleared", cleared,
+		"reason", reason,
+	)
 }

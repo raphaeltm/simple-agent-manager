@@ -11,6 +11,8 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -34,7 +36,7 @@ const (
 //
 // Both are parsed by parseEnvExportLines which handles both quoting styles.
 var samEnvFiles = []string{
-	"/etc/sam/env",         // SAM platform vars (GH_TOKEN, SAM_WORKSPACE_ID, etc.) — single-quoted
+	"/etc/sam/env",         // SAM platform vars (SAM_WORKSPACE_ID, etc.) — single-quoted
 	"/etc/sam/project-env", // Project-specific vars configured by the user — single-quoted
 }
 
@@ -90,16 +92,15 @@ func parseEnvExportLines(content string) []string {
 // secretEnvNames are well-known secret environment variable names that must
 // not appear in docker exec command-line arguments (visible in /proc/*/cmdline).
 var secretEnvNames = map[string]bool{
-	"ANTHROPIC_API_KEY":         true,
-	"ANTHROPIC_AUTH_TOKEN":      true,
-	"CLAUDE_CODE_OAUTH_TOKEN":   true,
-	"OPENAI_API_KEY":            true,
-	"GH_TOKEN":                  true,
-	"GEMINI_API_KEY":            true,
-	"MISTRAL_API_KEY":           true,
-	"SCW_SECRET_KEY":            true,
-	"OPENCODE_CONFIG_CONTENT":   true,
-	"OPENCODE_PLATFORM_API_KEY": true, // also matches _KEY substring, explicit for clarity
+	"ANTHROPIC_API_KEY":       true,
+	"ANTHROPIC_AUTH_TOKEN":    true,
+	"CLAUDE_CODE_OAUTH_TOKEN": true,
+	"OPENAI_API_KEY":          true,
+	"GH_TOKEN":                true,
+	"GEMINI_API_KEY":          true,
+	"MISTRAL_API_KEY":         true,
+	"OPENCODE_CONFIG_CONTENT": true,
+	"OPENCODE_API_KEY":        true,
 }
 
 // secretEnvSubstrings are substrings in env var names that indicate a secret.
@@ -176,6 +177,8 @@ type AgentProcess struct {
 	stopTimeout     time.Duration
 	mu              sync.Mutex
 	stopped         bool
+	recoveryMu      sync.Mutex
+	recoveryNotify  recoveryNotify
 
 	// envFilePath is the tmpfs-backed file containing secret env vars.
 	// Cleaned up after the process exits (in Wait) rather than immediately
@@ -191,6 +194,25 @@ type AgentProcess struct {
 	waitDone chan struct{} // closed when cmd.Wait() returns
 }
 
+// ProcessLauncher starts an ACP agent process. The docker implementation keeps
+// the existing devcontainer behavior; the local implementation is used by the
+// Cloudflare Container standalone spike.
+type ProcessLauncher interface {
+	Start(ProcessConfig) (*AgentProcess, error)
+}
+
+type DockerExecLauncher struct{}
+
+func (DockerExecLauncher) Start(cfg ProcessConfig) (*AgentProcess, error) {
+	return startProcessWithMode(cfg, true)
+}
+
+type LocalLauncher struct{}
+
+func (LocalLauncher) Start(cfg ProcessConfig) (*AgentProcess, error) {
+	return startProcessWithMode(cfg, false)
+}
+
 // ProcessConfig holds configuration for spawning an agent process.
 type ProcessConfig struct {
 	// ContainerID is the Docker container to exec into.
@@ -203,6 +225,9 @@ type ProcessConfig struct {
 	AcpArgs []string
 	// EnvVars are environment variables to set (e.g., "ANTHROPIC_API_KEY=sk-...").
 	EnvVars []string
+	// SecretEnvKeys marks env var names that must be treated as secret even if
+	// their names do not match SAM's secret-name heuristic.
+	SecretEnvKeys map[string]bool
 	// WorkDir is the working directory inside the container.
 	WorkDir string
 	// StopGracePeriod is how long Stop() waits after SIGTERM before SIGKILL.
@@ -217,7 +242,40 @@ type ProcessConfig struct {
 // The process is placed in its own process group (Setpgid) so that Stop()
 // can signal the entire tree reliably.
 func StartProcess(cfg ProcessConfig) (*AgentProcess, error) {
-	// Build docker exec command: docker exec -i [-u user] [-w dir] [-e VAR=val...] [--env-file path] container command args...
+	return DockerExecLauncher{}.Start(cfg)
+}
+
+func StartLocalProcess(cfg ProcessConfig) (*AgentProcess, error) {
+	return LocalLauncher{}.Start(cfg)
+}
+
+func startProcessWithMode(cfg ProcessConfig, dockerExec bool) (*AgentProcess, error) {
+	if dockerExec {
+		return startDockerExecProcess(cfg)
+	}
+	return startLocalProcess(cfg)
+}
+
+type processPipes struct {
+	stdin  io.WriteCloser
+	stdout io.ReadCloser
+	stderr io.ReadCloser
+}
+
+func splitProcessEnvVars(envVars []string, explicitSecretKeys map[string]bool) (secrets []string, nonSecrets []string) {
+	for _, env := range envVars {
+		key, _, ok := strings.Cut(env, "=")
+		explicitSecret := ok && explicitSecretKeys != nil && explicitSecretKeys[key]
+		if explicitSecret || isSecretEnvVar(env) {
+			secrets = append(secrets, env)
+		} else {
+			nonSecrets = append(nonSecrets, env)
+		}
+	}
+	return secrets, nonSecrets
+}
+
+func buildDockerExecArgs(cfg ProcessConfig) ([]string, string, error) {
 	args := []string{"exec", "-i"}
 
 	if cfg.ContainerUser != "" {
@@ -230,14 +288,7 @@ func StartProcess(cfg ProcessConfig) (*AgentProcess, error) {
 	// Separate secret env vars from non-secret ones. Secrets are written to
 	// a tmpfs-backed file and passed via --env-file to avoid exposing them
 	// in /proc/<pid>/cmdline on the host.
-	var secrets, nonSecrets []string
-	for _, env := range cfg.EnvVars {
-		if isSecretEnvVar(env) {
-			secrets = append(secrets, env)
-		} else {
-			nonSecrets = append(nonSecrets, env)
-		}
-	}
+	secrets, nonSecrets := splitProcessEnvVars(cfg.EnvVars, cfg.SecretEnvKeys)
 
 	for _, env := range nonSecrets {
 		args = append(args, "-e", env)
@@ -249,7 +300,7 @@ func StartProcess(cfg ProcessConfig) (*AgentProcess, error) {
 	if len(secrets) > 0 {
 		path, err := writeSecretEnvFile(secrets)
 		if err != nil {
-			return nil, fmt.Errorf("failed to write secret env file: %w", err)
+			return nil, "", fmt.Errorf("failed to write secret env file: %w", err)
 		}
 		envFilePath = path
 		args = append(args, "--env-file", envFilePath)
@@ -257,6 +308,56 @@ func StartProcess(cfg ProcessConfig) (*AgentProcess, error) {
 
 	args = append(args, cfg.ContainerID, cfg.AcpCommand)
 	args = append(args, cfg.AcpArgs...)
+	return args, envFilePath, nil
+}
+
+func openProcessPipes(cmd *exec.Cmd, envFilePath string) (processPipes, error) {
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		removeEnvFile(envFilePath)
+		return processPipes{}, fmt.Errorf("failed to create stdin pipe: %w", err)
+	}
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		stdin.Close()
+		removeEnvFile(envFilePath)
+		return processPipes{}, fmt.Errorf("failed to create stdout pipe: %w", err)
+	}
+
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		stdin.Close()
+		stdout.Close()
+		removeEnvFile(envFilePath)
+		return processPipes{}, fmt.Errorf("failed to create stderr pipe: %w", err)
+	}
+	return processPipes{stdin: stdin, stdout: stdout, stderr: stderr}, nil
+}
+
+func closeProcessPipes(pipes processPipes) {
+	if pipes.stdin != nil {
+		pipes.stdin.Close()
+	}
+	if pipes.stdout != nil {
+		pipes.stdout.Close()
+	}
+	if pipes.stderr != nil {
+		pipes.stderr.Close()
+	}
+}
+
+func removeEnvFile(path string) {
+	if path != "" {
+		os.Remove(path)
+	}
+}
+
+func startDockerExecProcess(cfg ProcessConfig) (*AgentProcess, error) {
+	args, envFilePath, err := buildDockerExecArgs(cfg)
+	if err != nil {
+		return nil, err
+	}
 
 	cmd := exec.Command("docker", args...)
 
@@ -264,40 +365,14 @@ func StartProcess(cfg ProcessConfig) (*AgentProcess, error) {
 	// tree (docker exec CLI + its children) via negative PGID in Stop().
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
-	stdin, err := cmd.StdinPipe()
+	pipes, err := openProcessPipes(cmd, envFilePath)
 	if err != nil {
-		if envFilePath != "" {
-			os.Remove(envFilePath)
-		}
-		return nil, fmt.Errorf("failed to create stdin pipe: %w", err)
-	}
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		stdin.Close()
-		if envFilePath != "" {
-			os.Remove(envFilePath)
-		}
-		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
-	}
-
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		stdin.Close()
-		stdout.Close()
-		if envFilePath != "" {
-			os.Remove(envFilePath)
-		}
-		return nil, fmt.Errorf("failed to create stderr pipe: %w", err)
+		return nil, err
 	}
 
 	if err := cmd.Start(); err != nil {
-		stdin.Close()
-		stdout.Close()
-		stderr.Close()
-		if envFilePath != "" {
-			os.Remove(envFilePath)
-		}
+		closeProcessPipes(pipes)
+		removeEnvFile(envFilePath)
 		return nil, fmt.Errorf("failed to start agent process: %w", err)
 	}
 
@@ -315,9 +390,9 @@ func StartProcess(cfg ProcessConfig) (*AgentProcess, error) {
 	return &AgentProcess{
 		agentType:       cfg.AcpCommand,
 		cmd:             cmd,
-		stdin:           stdin,
-		stdout:          stdout,
-		stderr:          stderr,
+		stdin:           pipes.stdin,
+		stdout:          pipes.stdout,
+		stderr:          pipes.stderr,
 		containerID:     cfg.ContainerID,
 		envFilePath:     envFilePath,
 		startTime:       time.Now(),
@@ -325,6 +400,130 @@ func StartProcess(cfg ProcessConfig) (*AgentProcess, error) {
 		stopTimeout:     stopTimeout,
 		waitDone:        make(chan struct{}),
 	}, nil
+}
+
+func startLocalProcess(cfg ProcessConfig) (*AgentProcess, error) {
+	if cfg.WorkDir != "" {
+		// In standalone (cf-container) mode the vm-agent owns the local
+		// filesystem and there is no devcontainer to create the workspace
+		// mount, so the configured work dir (derived as /workspaces/<repo>)
+		// may not exist. Create it before resolving or starting the adapter.
+		if err := os.MkdirAll(cfg.WorkDir, 0o755); err != nil {
+			return nil, fmt.Errorf("failed to ensure local work dir %q: %w", cfg.WorkDir, err)
+		}
+	}
+	processEnv := mergeProcessEnv(os.Environ(), cfg.EnvVars)
+	command := resolveLocalProcessCommand(cfg.AcpCommand, processEnv)
+	cmd := exec.Command(command, cfg.AcpArgs...)
+	cmd.Env = processEnv
+	if cfg.WorkDir != "" {
+		cmd.Dir = cfg.WorkDir
+	}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create stdin pipe: %w", err)
+	}
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		stdin.Close()
+		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
+	}
+
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		stdin.Close()
+		stdout.Close()
+		return nil, fmt.Errorf("failed to create stderr pipe: %w", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		stdin.Close()
+		stdout.Close()
+		stderr.Close()
+		return nil, fmt.Errorf("failed to start local agent process: %w", err)
+	}
+
+	slog.Info("ACP local agent process started", "command", cfg.AcpCommand, "pid", cmd.Process.Pid)
+
+	gracePeriod := cfg.StopGracePeriod
+	if gracePeriod <= 0 {
+		gracePeriod = DefaultStopGracePeriod
+	}
+	stopTimeout := cfg.StopTimeout
+	if stopTimeout <= 0 {
+		stopTimeout = DefaultStopTimeout
+	}
+
+	return &AgentProcess{
+		agentType:       cfg.AcpCommand,
+		cmd:             cmd,
+		stdin:           stdin,
+		stdout:          stdout,
+		stderr:          stderr,
+		startTime:       time.Now(),
+		stopGracePeriod: gracePeriod,
+		stopTimeout:     stopTimeout,
+		waitDone:        make(chan struct{}),
+	}, nil
+}
+
+func resolveLocalProcessCommand(command string, envVars []string) string {
+	if command == "" || strings.ContainsRune(command, os.PathSeparator) {
+		return command
+	}
+	pathValue := ""
+	for _, entry := range envVars {
+		if key, value, ok := strings.Cut(entry, "="); ok && key == "PATH" {
+			pathValue = value
+		}
+	}
+	for _, dir := range filepath.SplitList(pathValue) {
+		// Keep Go's ErrDot protection: profile runtime environments may select
+		// an explicit absolute adapter directory, but an empty or relative PATH
+		// entry must never make a repository executable implicit authority.
+		if !filepath.IsAbs(dir) {
+			continue
+		}
+		candidate := filepath.Join(dir, command)
+		info, err := os.Stat(candidate)
+		if err == nil && !info.IsDir() && info.Mode().Perm()&0o111 != 0 {
+			return candidate
+		}
+	}
+	return command
+}
+
+func mergeProcessEnv(ambient, overrides []string) []string {
+	overrideValues := make(map[string]string, len(overrides))
+	overrideOrder := make([]string, 0, len(overrides))
+	for _, entry := range overrides {
+		key, _, ok := strings.Cut(entry, "=")
+		if !ok || key == "" {
+			continue
+		}
+		if _, exists := overrideValues[key]; !exists {
+			overrideOrder = append(overrideOrder, key)
+		}
+		overrideValues[key] = entry
+	}
+
+	merged := make([]string, 0, len(ambient)+len(overrideOrder))
+	for _, entry := range ambient {
+		key, _, ok := strings.Cut(entry, "=")
+		if ok {
+			if _, overridden := overrideValues[key]; overridden {
+				continue
+			}
+		}
+		merged = append(merged, entry)
+	}
+	for _, key := range overrideOrder {
+		merged = append(merged, overrideValues[key])
+	}
+	return merged
 }
 
 // Stdin returns the writer to the agent's stdin (for sending NDJSON).
@@ -456,18 +655,31 @@ func (p *AgentProcess) killContainerProcesses(sig syscall.Signal) {
 
 	// Kill the ACP adapter process and all its children inside the container.
 	// Using pkill with -f matches the full command line.
-	cmd := exec.CommandContext(ctx, "docker", "exec", p.containerID,
-		"pkill", fmt.Sprintf("-%s", sigName), "-f", p.agentType)
-	if err := cmd.Run(); err != nil {
-		// Exit code 1 means no processes matched — that's fine, they already exited.
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
-			slog.Debug("No container processes matched for kill", "signal", sigName, "pattern", p.agentType)
+	patterns := containerProcessKillPatterns(p.agentType)
+	for _, pattern := range patterns {
+		cmd := exec.CommandContext(ctx, "docker", "exec", p.containerID,
+			"pkill", fmt.Sprintf("-%s", sigName), "-f", pattern)
+		if err := cmd.Run(); err != nil {
+			// Exit code 1 means no processes matched — that's fine, they already exited.
+			if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+				slog.Debug("No container processes matched for kill", "signal", sigName, "pattern", pattern)
+			} else {
+				slog.Warn("Failed to kill container processes", "signal", sigName, "pattern", pattern, "error", err)
+			}
 		} else {
-			slog.Warn("Failed to kill container processes", "signal", sigName, "pattern", p.agentType, "error", err)
+			slog.Info("Sent signal to container processes", "signal", sigName, "pattern", pattern, "container", p.containerID)
 		}
-	} else {
-		slog.Info("Sent signal to container processes", "signal", sigName, "pattern", p.agentType, "container", p.containerID)
 	}
+}
+
+func containerProcessKillPatterns(command string) []string {
+	if command == codexC2ReleaseRoot+"/current/bin/codex-acp" {
+		// The reviewed wrapper execs Node and its paired CLI through the real
+		// release directory, so neither process retains the wrapper path.
+		base := codexC2ReleaseRoot + "/releases/" + codexC2ReleaseIdentity + "/payload/"
+		return []string{regexp.QuoteMeta(base + "adapter.js"), regexp.QuoteMeta(base + "codex")}
+	}
+	return []string{command}
 }
 
 // Wait waits for the agent process to exit and returns the error (if any).

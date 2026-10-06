@@ -42,10 +42,15 @@ type logEntry struct {
 // New creates a Reporter. The reporter starts without a token and will no-op
 // until SetToken is called (typically after bootstrap token redemption).
 func New(controlPlaneURL, workspaceID string) *Reporter {
+	return NewWithHTTPTimeout(controlPlaneURL, workspaceID, config.DefaultBootLogHTTPTimeout)
+}
+
+// NewWithHTTPTimeout creates a Reporter with an explicit control-plane HTTP timeout.
+func NewWithHTTPTimeout(controlPlaneURL, workspaceID string, timeout time.Duration) *Reporter {
 	return &Reporter{
 		controlPlaneURL: strings.TrimRight(controlPlaneURL, "/"),
 		workspaceID:     workspaceID,
-		client:          config.NewControlPlaneClient(10 * time.Second),
+		client:          config.NewControlPlaneClient(timeout),
 	}
 }
 

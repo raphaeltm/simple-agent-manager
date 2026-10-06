@@ -1,12 +1,12 @@
 /**
  * Project File Library API routes.
  *
- * All routes are scoped to a project and require authentication + project ownership.
+ * All routes are scoped to a project and require authentication + project membership.
  * Mounted at /api/projects/:projectId/library
  */
 
-import type { ListFilesRequest, MoveFileRequest, UpdateTagsRequest } from '@simple-agent-manager/shared';
-import { LIBRARY_DEFAULTS } from '@simple-agent-manager/shared';
+import type { ListFilesRequest } from '@simple-agent-manager/shared';
+import { LIBRARY_DEFAULTS, resolveEffectiveMimeType } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -14,7 +14,8 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { getAuth, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { requireOwnedProject } from '../middleware/project-auth';
+import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
+import { jsonValidator, MoveFileSchema, UpdateTagsSchema } from '../schemas';
 import {
   deleteFile,
   downloadFile,
@@ -31,6 +32,18 @@ import {
   validateFilename,
 } from '../services/file-library';
 import { getMaxSearchLength } from '../services/file-library-config';
+import {
+  contentDispositionFilename,
+  downloadContentType,
+  hasPreviewableContent,
+  isInlinePreviewable,
+  previewHeaders,
+} from '../services/file-serving-policy';
+import {
+  getPreviewHostname,
+  getPreviewUrlTtlSeconds,
+  mintPreviewPath,
+} from '../services/interactive-preview';
 
 const libraryRoutes = new Hono<{ Bindings: Env }>();
 
@@ -40,7 +53,9 @@ const libraryRoutes = new Hono<{ Bindings: Env }>();
 
 function validateSearchLength(search: string | undefined, env: Env): void {
   if (search && search.length > getMaxSearchLength(env)) {
-    throw errors.badRequest(`Search query exceeds maximum length of ${getMaxSearchLength(env)} characters`);
+    throw errors.badRequest(
+      `Search query exceeds maximum length of ${getMaxSearchLength(env)} characters`
+    );
   }
 }
 
@@ -69,7 +84,7 @@ libraryRoutes.post('/upload', requireAuth(), requireApproved(), async (c) => {
   const projectId = requireParam(c.req.param('projectId'), 'projectId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectCapability(db, projectId, userId, 'project:update');
 
   // Parse multipart form data
   let formData: Record<string, string | File>;
@@ -96,7 +111,12 @@ libraryRoutes.post('/upload', requireAuth(), requireApproved(), async (c) => {
   const mimeType = (formData['mimeType'] as string) || file.type || 'application/octet-stream';
   const description = formData['description'] as string | undefined;
   const tagsRaw = formData['tags'] as string | undefined;
-  const tags = tagsRaw ? tagsRaw.split(',').map((t) => t.trim()).filter(Boolean) : undefined;
+  const tags = tagsRaw
+    ? tagsRaw
+        .split(',')
+        .map((t) => t.trim())
+        .filter(Boolean)
+    : undefined;
   const uploadSource = (formData['uploadSource'] as string) || 'user';
   const uploadSessionId = formData['uploadSessionId'] as string | undefined;
   const uploadTaskId = formData['uploadTaskId'] as string | undefined;
@@ -106,8 +126,15 @@ libraryRoutes.post('/upload', requireAuth(), requireApproved(), async (c) => {
   const encryptionKey = getEncryptionKey(c.env);
 
   const result = await uploadFile(
-    db, c.env.R2, encryptionKey, c.env, projectId, userId,
-    filename, mimeType, data,
+    db,
+    c.env.R2,
+    encryptionKey,
+    c.env,
+    projectId,
+    userId,
+    filename,
+    mimeType,
+    data,
     {
       description,
       tags,
@@ -132,7 +159,7 @@ libraryRoutes.put('/:fileId/replace', requireAuth(), requireApproved(), async (c
   const fileId = requireParam(c.req.param('fileId'), 'fileId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectCapability(db, projectId, userId, 'project:update');
 
   let formData: Record<string, string | File>;
   try {
@@ -156,8 +183,16 @@ libraryRoutes.put('/:fileId/replace', requireAuth(), requireApproved(), async (c
   const encryptionKey = getEncryptionKey(c.env);
 
   const result = await replaceFile(
-    db, c.env.R2, encryptionKey, c.env, projectId, fileId, userId,
-    filename, mimeType, data,
+    db,
+    c.env.R2,
+    encryptionKey,
+    c.env,
+    projectId,
+    fileId,
+    userId,
+    filename,
+    mimeType,
+    data,
     { description }
   );
 
@@ -174,12 +209,17 @@ libraryRoutes.get('/', requireAuth(), requireApproved(), async (c) => {
   const projectId = requireParam(c.req.param('projectId'), 'projectId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectAccess(db, projectId, userId);
 
   const query = c.req.query();
   validateSearchLength(query['search'] || undefined, c.env);
   const filters: ListFilesRequest = {
-    tags: query['tags'] ? query['tags'].split(',').map((t) => t.trim()).filter(Boolean) : undefined,
+    tags: query['tags']
+      ? query['tags']
+          .split(',')
+          .map((t) => t.trim())
+          .filter(Boolean)
+      : undefined,
     mimeType: query['mimeType'] || undefined,
     uploadSource: query['uploadSource'] as ListFilesRequest['uploadSource'],
     status: query['status'] as ListFilesRequest['status'],
@@ -207,7 +247,7 @@ libraryRoutes.get('/directories', requireAuth(), requireApproved(), async (c) =>
   const projectId = requireParam(c.req.param('projectId'), 'projectId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectAccess(db, projectId, userId);
 
   const rawParent = c.req.query('parentDirectory') || '/';
   const parentDirectory = validateDirectory(rawParent, c.env);
@@ -229,7 +269,7 @@ libraryRoutes.get('/:fileId', requireAuth(), requireApproved(), async (c) => {
   const fileId = requireParam(c.req.param('fileId'), 'fileId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectAccess(db, projectId, userId);
 
   const result = await getFile(db, projectId, fileId);
   return c.json(result, 200);
@@ -246,7 +286,7 @@ libraryRoutes.get('/:fileId/download', requireAuth(), requireApproved(), async (
   const fileId = requireParam(c.req.param('fileId'), 'fileId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectAccess(db, projectId, userId);
 
   const encryptionKey = getEncryptionKey(c.env);
   const timeoutMs = getDownloadTimeoutMs(c.env);
@@ -258,42 +298,60 @@ libraryRoutes.get('/:fileId/download', requireAuth(), requireApproved(), async (
     }),
   ]).finally(() => clearTimeout(timeoutHandle));
 
-  // Sanitize filename for Content-Disposition (strip non-printable + header-unsafe chars)
-  const safeFilename = file.filename.replace(/[^\x20-\x7E]|["\\;]/g, '_');
-
-  // Force safe Content-Type for MIME types that can execute scripts in browsers
-  const DANGEROUS_MIMES = ['text/html', 'application/javascript', 'application/xhtml+xml', 'image/svg+xml', 'text/xml'];
-  const contentType = DANGEROUS_MIMES.includes(file.mimeType.toLowerCase())
-    ? 'application/octet-stream'
-    : file.mimeType;
-
   return new Response(data, {
     status: 200,
     headers: {
-      'Content-Type': contentType,
+      'Content-Type': downloadContentType(file.mimeType),
       'Content-Length': String(data.byteLength),
-      'Content-Disposition': `attachment; filename="${safeFilename}"`,
+      'Content-Disposition': `attachment; filename="${contentDispositionFilename(file.filename)}"`,
       'Cache-Control': 'private, no-store',
       'X-Content-Type-Options': 'nosniff',
     },
   });
 });
 
+libraryRoutes.post(
+  '/:fileId/interactive-preview-url',
+  requireAuth(),
+  requireApproved(),
+  async (c) => {
+    const auth = getAuth(c);
+    const userId = auth.user.id;
+    const projectId = requireParam(c.req.param('projectId'), 'projectId');
+    const fileId = requireParam(c.req.param('fileId'), 'fileId');
+    const db = drizzle(c.env.DATABASE, { schema });
+    await requireProjectAccess(db, projectId, userId);
+
+    const { file } = await getFile(db, projectId, fileId);
+    if (resolveEffectiveMimeType(file.mimeType, file.filename) !== 'text/html') {
+      throw errors.badRequest('Only HTML files support interactive preview');
+    }
+    const previewMaxBytes = parseInt(
+      c.env.FILE_PREVIEW_MAX_BYTES ?? String(LIBRARY_DEFAULTS.FILE_PREVIEW_MAX_BYTES),
+      10
+    );
+    if (file.sizeBytes > previewMaxBytes) {
+      throw errors.badRequest('File is too large for interactive preview');
+    }
+    if (!c.env.PREVIEW_SIGNING_KEY) {
+      throw errors.internal('Interactive preview signing is not configured');
+    }
+    const expiresAt = Math.floor(Date.now() / 1000) + getPreviewUrlTtlSeconds(c.env);
+    const path = await mintPreviewPath(
+      { projectId, fileId, version: file.updatedAt, expiresAt },
+      c.env.PREVIEW_SIGNING_KEY
+    );
+    return c.json({
+      url: `https://${getPreviewHostname(c.env)}${path}`,
+      expiresAt: new Date(expiresAt * 1000).toISOString(),
+      version: file.updatedAt,
+    });
+  }
+);
+
 // ---------------------------------------------------------------------------
 // GET /:fileId/preview — decrypt + serve inline for previewable types
 // ---------------------------------------------------------------------------
-
-/** MIME types safe to render inline in a browser (images, PDF, markdown).
- *  Keep in sync with PREVIEWABLE_IMAGE_MIMES + PREVIEWABLE_MIMES in apps/web/src/lib/file-utils.ts */
-const PREVIEWABLE_MIMES = new Set([
-  'image/png',
-  'image/jpeg',
-  'image/gif',
-  'image/webp',
-  'image/avif',
-  'application/pdf',
-  'text/markdown',
-]);
 
 libraryRoutes.get('/:fileId/preview', requireAuth(), requireApproved(), async (c) => {
   const auth = getAuth(c);
@@ -302,19 +360,25 @@ libraryRoutes.get('/:fileId/preview', requireAuth(), requireApproved(), async (c
   const fileId = requireParam(c.req.param('fileId'), 'fileId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectAccess(db, projectId, userId);
 
-  // Check MIME type BEFORE decrypting to avoid wasting CPU on unsupported types
+  // Check MIME type BEFORE decrypting to avoid wasting CPU on unsupported types.
+  // When the stored type is octet-stream/empty (agent uploads whose type was
+  // derived on a minimal image without /etc/mime.types), recover the effective
+  // type from the filename extension. Safety is preserved: text/html is always
+  // served as inert text/plain with a strict CSP below, and image/svg+xml is not
+  // inline-previewable (rejected here) — so no extension-sniffed HTML/SVG is
+  // ever served in a way the browser would execute.
   const { file } = await getFile(db, projectId, fileId);
-  const mimeTypeLower = (file.mimeType.split(';')[0] ?? file.mimeType).trim().toLowerCase();
-  if (!PREVIEWABLE_MIMES.has(mimeTypeLower)) {
+  const effectiveMime = resolveEffectiveMimeType(file.mimeType, file.filename);
+  if (!isInlinePreviewable(effectiveMime)) {
     throw errors.badRequest('File type is not supported for inline preview');
   }
 
   // Enforce size limit before decrypting (reuse the configurable load-max from file-utils)
   const previewMaxBytes = parseInt(
     c.env.FILE_PREVIEW_MAX_BYTES ?? String(LIBRARY_DEFAULTS.FILE_PREVIEW_MAX_BYTES),
-    10,
+    10
   );
   if (file.sizeBytes > previewMaxBytes) {
     throw errors.badRequest('File is too large for inline preview');
@@ -329,21 +393,20 @@ libraryRoutes.get('/:fileId/preview', requireAuth(), requireApproved(), async (c
       timeoutHandle = setTimeout(() => reject(errors.internal('Preview timed out')), timeoutMs);
     }),
   ]).finally(() => clearTimeout(timeoutHandle));
+  if (!hasPreviewableContent(effectiveMime, data)) {
+    throw errors.badRequest('File type is not supported for inline preview');
+  }
 
-  const safeFilename = file.filename.replace(/[^\x20-\x7E]|["\\;]/g, '_');
-
+  const { contentType, contentSecurityPolicy } = previewHeaders(effectiveMime, c.env);
   return new Response(data, {
     status: 200,
     headers: {
-      'Content-Type': mimeTypeLower,
+      'Content-Type': contentType,
       'Content-Length': String(data.byteLength),
-      'Content-Disposition': `inline; filename="${safeFilename}"`,
+      'Content-Disposition': `inline; filename="${contentDispositionFilename(file.filename)}"`,
       'Cache-Control': 'private, no-store',
       'X-Content-Type-Options': 'nosniff',
-      // PDF viewers need script-src for browser-native rendering; images get strict CSP
-      'Content-Security-Policy': mimeTypeLower === 'application/pdf'
-        ? "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; object-src 'self'"
-        : "default-src 'none'; style-src 'unsafe-inline'",
+      'Content-Security-Policy': contentSecurityPolicy,
     },
   });
 });
@@ -359,7 +422,7 @@ libraryRoutes.delete('/:fileId', requireAuth(), requireApproved(), async (c) => 
   const fileId = requireParam(c.req.param('fileId'), 'fileId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectCapability(db, projectId, userId, 'project:update');
 
   await deleteFile(db, c.env.R2, projectId, fileId);
 
@@ -370,48 +433,60 @@ libraryRoutes.delete('/:fileId', requireAuth(), requireApproved(), async (c) => 
 // PATCH /:fileId/move — move file to a different directory/filename
 // ---------------------------------------------------------------------------
 
-libraryRoutes.patch('/:fileId/move', requireAuth(), requireApproved(), async (c) => {
-  const auth = getAuth(c);
-  const userId = auth.user.id;
-  const projectId = requireParam(c.req.param('projectId'), 'projectId');
-  const fileId = requireParam(c.req.param('fileId'), 'fileId');
-  const db = drizzle(c.env.DATABASE, { schema });
+libraryRoutes.patch(
+  '/:fileId/move',
+  requireAuth(),
+  requireApproved(),
+  jsonValidator(MoveFileSchema),
+  async (c) => {
+    const auth = getAuth(c);
+    const userId = auth.user.id;
+    const projectId = requireParam(c.req.param('projectId'), 'projectId');
+    const fileId = requireParam(c.req.param('fileId'), 'fileId');
+    const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+    await requireProjectCapability(db, projectId, userId, 'project:update');
 
-  const body = await c.req.json<MoveFileRequest>();
+    const body = c.req.valid('json');
 
-  if (!body.directory && !body.filename) {
-    throw errors.badRequest('Must provide "directory" or "filename" (or both)');
+    if (!body.directory && !body.filename) {
+      throw errors.badRequest('Must provide "directory" or "filename" (or both)');
+    }
+
+    const result = await moveFile(db, c.env, projectId, fileId, body);
+
+    return c.json(result, 200);
   }
-
-  const result = await moveFile(db, c.env, projectId, fileId, body);
-
-  return c.json(result, 200);
-});
+);
 
 // ---------------------------------------------------------------------------
 // POST /:fileId/tags — add/remove tags
 // ---------------------------------------------------------------------------
 
-libraryRoutes.post('/:fileId/tags', requireAuth(), requireApproved(), async (c) => {
-  const auth = getAuth(c);
-  const userId = auth.user.id;
-  const projectId = requireParam(c.req.param('projectId'), 'projectId');
-  const fileId = requireParam(c.req.param('fileId'), 'fileId');
-  const db = drizzle(c.env.DATABASE, { schema });
+libraryRoutes.post(
+  '/:fileId/tags',
+  requireAuth(),
+  requireApproved(),
+  jsonValidator(UpdateTagsSchema),
+  async (c) => {
+    const auth = getAuth(c);
+    const userId = auth.user.id;
+    const projectId = requireParam(c.req.param('projectId'), 'projectId');
+    const fileId = requireParam(c.req.param('fileId'), 'fileId');
+    const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+    await requireProjectCapability(db, projectId, userId, 'project:update');
 
-  const body = await c.req.json<UpdateTagsRequest>();
+    const body = c.req.valid('json');
 
-  if (!body.add && !body.remove) {
-    throw errors.badRequest('Must provide "add" or "remove" arrays');
+    if (!body.add && !body.remove) {
+      throw errors.badRequest('Must provide "add" or "remove" arrays');
+    }
+
+    const tags = await updateTags(db, c.env, projectId, fileId, body);
+
+    return c.json({ tags }, 200);
   }
-
-  const tags = await updateTags(db, c.env, projectId, fileId, body);
-
-  return c.json({ tags }, 200);
-});
+);
 
 export { libraryRoutes };

@@ -1,5 +1,8 @@
+import { TRIAL_ANONYMOUS_USER_ID } from '@simple-agent-manager/shared';
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
+import type { GithubProfile, SocialProviders } from 'better-auth/social-providers';
+import { ne } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import * as v from 'valibot';
 
@@ -8,8 +11,54 @@ import type { Env } from './env';
 import { createModuleLogger } from './lib/logger';
 import { readResponseJson } from './lib/runtime-validation';
 import { getBetterAuthSecret } from './lib/secrets';
+import {
+  getGitHubOAuthConfig,
+  resolvePlatformConfig,
+  selectGitHubOAuthConfig,
+  selectGitLabOAuthConfig,
+  selectGoogleLoginOAuthConfig,
+} from './services/platform-config';
+import { isSignupApprovalRequired } from './services/signup-approval';
 
 const log = createModuleLogger('auth');
+
+/**
+ * Atomic, race-free login-time superadmin self-heal.
+ *
+ * Promotes the logging-in user to superadmin/active IFF they are the only real
+ * (non-internal) user on the deployment AND no superadmin exists — i.e. a fresh or
+ * sentinel-orphaned fork. Every guard lives in the WHERE clause so the statement is
+ * a single atomic UPDATE with no read-modify-write race; concurrent logins of the
+ * same user are idempotent (the second is a no-op).
+ *
+ * Numbered params: ?1 = current user id (referenced twice), ?2 = sentinel id.
+ * Guards: (a) skip already-superadmin rows; (d) never auto-elevate a suspended
+ * account; status!='system' never mutates the sentinel; (b) the current user is the
+ * only non-internal user; (c) no non-system superadmin exists anywhere.
+ *
+ * Drizzle cannot express the correlated-subquery WHERE, so this is issued via the
+ * raw D1 binding (prepare/bind/run) — the same mechanism used by
+ * services/scheduler-state-sync.ts and services/github-trigger-handler.ts.
+ */
+const LOGIN_SELF_HEAL_SQL = `
+UPDATE users
+SET role = 'superadmin', status = 'active'
+WHERE id = ?1
+  AND role != 'superadmin'
+  AND status != 'system'
+  AND status != 'suspended'
+  AND (
+    SELECT COUNT(*) FROM users u2
+    WHERE u2.id != ?1
+      AND u2.status != 'system'
+      AND u2.id != ?2
+  ) = 0
+  AND (
+    SELECT COUNT(*) FROM users u3
+    WHERE u3.role = 'superadmin'
+      AND u3.status != 'system'
+  ) = 0
+`;
 
 interface GitHubEmailResponse {
   email: string;
@@ -18,9 +67,11 @@ interface GitHubEmailResponse {
 }
 
 const GITHUB_API_VERSION = '2022-11-28';
+const GITHUB_TOKEN_URL = 'https://github.com/login/oauth/access_token';
 
 const githubUserSchema = v.object({
-  id: v.union([v.number(), v.string()]),
+  // GitHub sends a number; normalised to the string stored in `accounts.account_id`.
+  id: v.pipe(v.union([v.number(), v.string()]), v.transform(String)),
   login: v.optional(v.nullable(v.string())),
   name: v.optional(v.nullable(v.string())),
   email: v.optional(v.nullable(v.string())),
@@ -32,6 +83,78 @@ const githubEmailSchema = v.object({
   primary: v.boolean(),
   verified: v.boolean(),
 });
+
+const githubRefreshTokenSuccessSchema = v.object({
+  access_token: v.string(),
+  refresh_token: v.optional(v.string()),
+  expires_in: v.optional(v.number()),
+  refresh_token_expires_in: v.optional(v.number()),
+  scope: v.optional(v.string()),
+  token_type: v.optional(v.string()),
+  id_token: v.optional(v.string()),
+});
+
+const githubRefreshTokenErrorSchema = v.object({
+  error: v.string(),
+  error_description: v.optional(v.string()),
+});
+
+function expiresAtFromSeconds(seconds: number | undefined): Date | undefined {
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds)) {
+    return undefined;
+  }
+  return new Date(Date.now() + seconds * 1000);
+}
+
+export async function refreshGitHubAccessToken(env: Env, refreshToken: string) {
+  const githubOAuth = await getGitHubOAuthConfig(env);
+  if (!githubOAuth) {
+    throw new Error('GitHub OAuth is not configured');
+  }
+
+  const requestBody = new URLSearchParams();
+  requestBody.set('client_id', githubOAuth.clientId);
+  requestBody.set('client_secret', githubOAuth.clientSecret);
+  requestBody.set('grant_type', 'refresh_token');
+  requestBody.set('refresh_token', refreshToken);
+
+  const response = await fetch(GITHUB_TOKEN_URL, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'User-Agent': 'SAM-Auth',
+    },
+    body: requestBody,
+  });
+
+  const body = await response.json().catch(() => null);
+  if (!response.ok) {
+    log.warn('github_oauth_refresh_failed', { status: response.status });
+    throw new Error('GitHub OAuth refresh failed');
+  }
+
+  const errorResult = v.safeParse(githubRefreshTokenErrorSchema, body);
+  if (errorResult.success) {
+    log.warn('github_oauth_refresh_error_body', {
+      status: response.status,
+      error: errorResult.output.error,
+    });
+    throw new Error('GitHub OAuth refresh failed');
+  }
+
+  const data = v.parse(githubRefreshTokenSuccessSchema, body);
+  return {
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token,
+    accessTokenExpiresAt: expiresAtFromSeconds(data.expires_in),
+    refreshTokenExpiresAt: expiresAtFromSeconds(data.refresh_token_expires_in),
+    scopes: data.scope ? data.scope.split(/[,\s]+/).filter(Boolean) : [],
+    tokenType: data.token_type,
+    idToken: data.id_token,
+    raw: data,
+  };
+}
 
 function githubApiHeaders(accessToken: string): HeadersInit {
   return {
@@ -61,7 +184,9 @@ export function selectPrimaryGitHubEmail(
       primary: Boolean(entry.primary),
       verified: Boolean(entry.verified),
     }))
-    .filter((entry): entry is { email: string; primary: boolean; verified: boolean } => Boolean(entry.email));
+    .filter((entry): entry is { email: string; primary: boolean; verified: boolean } =>
+      Boolean(entry.email)
+    );
 
   const verifiedPrimary = normalizedEmails.find((entry) => entry.primary && entry.verified);
   if (verifiedPrimary) {
@@ -78,10 +203,137 @@ export function selectPrimaryGitHubEmail(
 
 /**
  * Create BetterAuth instance with Cloudflare D1 + KV configuration.
- * Uses GitHub OAuth as the social provider.
  */
-export function createAuth(env: Env) {
+export async function createAuth(env: Env) {
   const db = drizzle(env.DATABASE, { schema });
+  // Sentinel id is env-overridable; fall back to the shared constant.
+  const sentinelId = env.TRIAL_ANONYMOUS_USER_ID ?? TRIAL_ANONYMOUS_USER_ID;
+  // Resolve the platform config ONCE. Each `get*OAuthConfig` helper independently issues
+  // `resolvePlatformConfig`'s 14 D1 queries, so awaiting three of them cost 42 D1 round-trips in
+  // 3 sequential waves on the preamble of every authenticated request. `createAuth` is reached
+  // from 9 call sites and more than one can run per request (e.g. `requireAuth` then
+  // `routes/auth.ts`), so that was up to 78 queries for a single `GET /api/auth/me`.
+  // `resolvePlatformConfig` additionally serves a per-isolate cached copy, so a warm isolate
+  // pays 0. See `.claude/rules/60-request-io-and-bundle-budgets.md`.
+  const platformConfig = await resolvePlatformConfig(env);
+  const githubOAuth = selectGitHubOAuthConfig(platformConfig);
+  const googleOAuth = selectGoogleLoginOAuthConfig(platformConfig);
+  const gitlabOAuth = selectGitLabOAuthConfig(platformConfig);
+  // Typed with better-auth's own provider contract so a library upgrade that changes what a
+  // provider hook must return fails `pnpm typecheck` instead of failing sign-in in production.
+  const socialProviders: SocialProviders = {};
+  const trustedProviders: string[] = [];
+
+  if (githubOAuth) {
+    trustedProviders.push('github');
+    socialProviders.github = {
+      clientId: githubOAuth.clientId,
+      clientSecret: githubOAuth.clientSecret,
+      scope: ['read:user', 'user:email', 'read:org'],
+      refreshAccessToken: (refreshToken: string) => refreshGitHubAccessToken(env, refreshToken),
+      // Ensure existing linked users are refreshed with latest provider profile data on sign-in.
+      overrideUserInfoOnSignIn: true,
+      // Custom getUserInfo to ensure we persist the account's primary email when available.
+      getUserInfo: async (token) => {
+        const accessToken = token.accessToken;
+        if (!accessToken) {
+          log.error('missing_github_access_token');
+          return null;
+        }
+
+        const userRes = await fetch('https://api.github.com/user', {
+          headers: githubApiHeaders(accessToken),
+        });
+        if (!userRes.ok) {
+          log.error('github_user_fetch_failed', { status: userRes.status });
+          return null;
+        }
+
+        const user = await readResponseJson(userRes, githubUserSchema, 'github.user');
+        let email = normalizeEmail(user.email);
+
+        // Resolve the user's primary email from /user/emails.
+        // OAuth apps need user:email scope. GitHub Apps need "Email addresses" user permission.
+        try {
+          const emailsRes = await fetch('https://api.github.com/user/emails', {
+            headers: githubApiHeaders(accessToken),
+          });
+          if (emailsRes.ok) {
+            const emailsData = await readResponseJson(
+              emailsRes,
+              v.array(githubEmailSchema),
+              'github.user_emails'
+            );
+            email = selectPrimaryGitHubEmail(email, emailsData);
+          } else {
+            const errorBody = await emailsRes.text();
+            if (emailsRes.status === 403 || emailsRes.status === 404) {
+              log.error('github_emails_unavailable', {
+                status: emailsRes.status,
+                hint: 'Ensure GitHub App user permission "Email addresses" is read-only or OAuth app has user:email scope',
+                responseBody: errorBody,
+              });
+            } else {
+              log.error('github_emails_fetch_failed', {
+                status: emailsRes.status,
+                responseBody: errorBody,
+              });
+            }
+          }
+        } catch (err) {
+          log.error('github_emails_fetch_exception', {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+
+        // Last resort: use GitHub noreply email
+        if (!email && user.login && user.id) {
+          email = `${user.id}+${user.login}@users.noreply.github.com`;
+        }
+
+        if (!email) {
+          return null;
+        }
+
+        return {
+          user: {
+            email,
+            name: (user.name || user.login || '').trim(),
+            image: user.avatar_url || undefined,
+            emailVerified: true,
+          },
+          // better-auth keys the linked account on `data.id` (its GitHub provider declares
+          // `accountSubject: ({ profile }) => profile.id`); without it every sign-in fails
+          // with `unable_to_get_user_info`. Only the fields `githubUserSchema` validates exist
+          // at runtime; the cast covers the rest of GithubProfile, which nothing reads today
+          // (better-auth also passes `data` to `user.validateUserInfo`, which SAM leaves
+          // unset). Validate a field there before any hook relies on it.
+          data: user as GithubProfile,
+        };
+      },
+    };
+  }
+
+  if (googleOAuth) {
+    trustedProviders.push('google');
+    socialProviders.google = {
+      clientId: googleOAuth.clientId,
+      clientSecret: googleOAuth.clientSecret,
+      scope: ['openid', 'email', 'profile'],
+      overrideUserInfoOnSignIn: true,
+    };
+  }
+
+  if (gitlabOAuth) {
+    trustedProviders.push('gitlab');
+    socialProviders.gitlab = {
+      clientId: gitlabOAuth.clientId,
+      clientSecret: gitlabOAuth.clientSecret,
+      issuer: gitlabOAuth.host,
+      scope: ['read_user', 'api', 'read_repository', 'write_repository'],
+      overrideUserInfoOnSignIn: true,
+    };
+  }
 
   return betterAuth({
     database: drizzleAdapter(db, {
@@ -100,87 +352,26 @@ export function createAuth(env: Env) {
         : []),
     ],
     session: {
+      // The signed session-cookie cache stays configured, but every SAM call site reads sessions
+      // with `query: { disableCookieCache: true }` (`middleware/auth.ts`, `index.ts`,
+      // `routes/auth.ts`, `services/session-factory.ts`) and that is DELIBERATE — do not remove
+      // those flags to save the ~2 session/user D1 queries.
+      //
+      // `requireAuth` calls `assertUserNotSuspended(authContext.user)` and `requireApproved`
+      // calls `assertUserAllowedBySignupApproval(..., auth.user)`; both read `status`/`role`
+      // straight out of this session payload. Serving it from the cookie would let a suspended
+      // or de-approved account keep full access for up to `maxAge`, and no write path re-checks
+      // account status independently. `.claude/rules/02-quality-gates.md` ("Unconditional
+      // Account-Denial Gates") requires `suspended` to be enforced before any bypass.
+      //
+      // Re-enabling the cache is only safe once account status is re-verified against D1 on
+      // denial-sensitive paths (e.g. a `user.updatedAt` revalidation shorter than this maxAge).
       cookieCache: {
         enabled: true,
         maxAge: 5 * 60, // 5 minutes
       },
     },
-    socialProviders: {
-      github: {
-        clientId: env.GITHUB_CLIENT_ID,
-        clientSecret: env.GITHUB_CLIENT_SECRET,
-        scope: ['read:user', 'user:email'],
-        // Ensure existing linked users are refreshed with latest provider profile data on sign-in.
-        overrideUserInfoOnSignIn: true,
-        // Custom getUserInfo to ensure we persist the account's primary email when available.
-        getUserInfo: async (token) => {
-          const accessToken = token.accessToken;
-          if (!accessToken) {
-            log.error('missing_github_access_token');
-            return null;
-          }
-
-          const userRes = await fetch('https://api.github.com/user', {
-            headers: githubApiHeaders(accessToken),
-          });
-          if (!userRes.ok) {
-            log.error('github_user_fetch_failed', { status: userRes.status });
-            return null;
-          }
-
-          const user = await readResponseJson(userRes, githubUserSchema, 'github.user');
-          let email = normalizeEmail(user.email);
-
-          // Resolve the user's primary email from /user/emails.
-          // OAuth apps need user:email scope. GitHub Apps need "Email addresses" user permission.
-          try {
-            const emailsRes = await fetch('https://api.github.com/user/emails', {
-              headers: githubApiHeaders(accessToken),
-            });
-            if (emailsRes.ok) {
-              const emailsData = await readResponseJson(emailsRes, v.array(githubEmailSchema), 'github.user_emails');
-              email = selectPrimaryGitHubEmail(email, emailsData);
-            } else {
-              const errorBody = await emailsRes.text();
-              if (emailsRes.status === 403 || emailsRes.status === 404) {
-                log.error('github_emails_unavailable', {
-                  status: emailsRes.status,
-                  hint: 'Ensure GitHub App user permission "Email addresses" is read-only or OAuth app has user:email scope',
-                  responseBody: errorBody,
-                });
-              } else {
-                log.error('github_emails_fetch_failed', { status: emailsRes.status, responseBody: errorBody });
-              }
-            }
-          } catch (err) {
-            log.error('github_emails_fetch_exception', { error: err instanceof Error ? err.message : String(err) });
-          }
-
-          // Last resort: use GitHub noreply email
-          if (!email && user.login && user.id) {
-            email = `${user.id}+${user.login}@users.noreply.github.com`;
-          }
-
-          if (!email) {
-            return null;
-          }
-
-          return {
-            user: {
-              id: String(user.id),
-              email,
-              name: (user.name || user.login || '').trim(),
-              image: user.avatar_url || undefined,
-              emailVerified: true,
-            },
-            data: {
-              githubId: String(user.id),
-              avatarUrl: user.avatar_url || undefined,
-            },
-          };
-        },
-      },
-    },
+    socialProviders,
     user: {
       additionalFields: {
         githubId: {
@@ -209,7 +400,7 @@ export function createAuth(env: Env) {
       user: {
         create: {
           before: async (user) => {
-            if (env.REQUIRE_APPROVAL !== 'true') {
+            if (!(await isSignupApprovalRequired(env))) {
               // Open registration — defaults are fine (role='user', status='active')
               return { data: user };
             }
@@ -219,6 +410,7 @@ export function createAuth(env: Env) {
             const existing = await hookDb
               .select({ id: schema.users.id })
               .from(schema.users)
+              .where(ne(schema.users.id, sentinelId))
               .limit(1)
               .all();
 
@@ -235,12 +427,47 @@ export function createAuth(env: Env) {
           },
         },
       },
+      session: {
+        create: {
+          // Login-time superadmin self-heal. Fires on EVERY session creation —
+          // OAuth (GitHub), token-login, and device-flow all route through
+          // internalAdapter.createSession -> createWithHooks, which runs this
+          // session.create.after hook. Promotes the sole real user to
+          // superadmin/active on a sentinel-orphaned or fresh deployment (see
+          // LOGIN_SELF_HEAL_SQL). The data migration is the deploy-time guarantee:
+          // it heals the known orphaned victim at migration time regardless of
+          // whether that user ever signs in again.
+          //
+          // The try/catch is LOAD-BEARING: better-auth awaits session.create.after
+          // hooks before returning the login response, so an uncaught throw would
+          // surface as a 500 and break login. Swallow + log so login always succeeds.
+          after: async (session) => {
+            const userId = session.userId;
+            if (!userId) {
+              return;
+            }
+            try {
+              const result = await env.DATABASE.prepare(LOGIN_SELF_HEAL_SQL)
+                .bind(userId, sentinelId)
+                .run();
+              if (result.meta.changes > 0) {
+                log.info('login_self_heal.promoted', { userId });
+              }
+            } catch (err) {
+              log.error('login_self_heal.failed', {
+                userId,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
+          },
+        },
+      },
     },
     account: {
       encryptOAuthTokens: true,
       accountLinking: {
         enabled: true,
-        trustedProviders: ['github'],
+        trustedProviders,
       },
     },
   });
@@ -249,4 +476,4 @@ export function createAuth(env: Env) {
 /**
  * Type for the auth instance.
  */
-export type Auth = ReturnType<typeof createAuth>;
+export type Auth = Awaited<ReturnType<typeof createAuth>>;

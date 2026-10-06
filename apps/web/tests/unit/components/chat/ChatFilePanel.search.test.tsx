@@ -42,6 +42,7 @@ vi.mock('../../../../src/lib/api', async (importOriginal) => ({
 vi.mock('../../../../src/components/MarkdownRenderer', () => ({
   RenderedMarkdown: ({ content }: { content: string }) => <div data-testid="rendered-md">{content}</div>,
   SyntaxHighlightedCode: ({ content }: { content: string }) => <pre data-testid="syntax-code">{content}</pre>,
+  CODE_THEME_BG: '#011627',
 }));
 
 vi.mock('../../../../src/components/shared-file-viewer', () => ({

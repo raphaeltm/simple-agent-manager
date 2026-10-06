@@ -1,14 +1,15 @@
 package acp
 
 import (
-	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os/exec"
 	"strings"
 	"sync"
-	"syscall"
+	"sync/atomic"
 	"time"
 
 	acpsdk "github.com/coder/acp-go-sdk"
@@ -29,13 +30,30 @@ const (
 )
 
 const (
-	// DefaultPromptCancelGracePeriod is how long we wait after cancel before
-	// force-stopping an unresponsive agent process.
+	// DefaultPromptCancelGracePeriod is how long a cancelled prompt may take to
+	// settle before it is finished as "cancelled" and the agent is restarted.
+	// The watchdog is bound to that one prompt attempt and disarms when it ends.
 	DefaultPromptCancelGracePeriod = 5 * time.Second
+
+	// DefaultPromptRetryInitialDelay is the first delay before retrying a
+	// transient provider prompt error when no explicit delay is configured.
+	DefaultPromptRetryInitialDelay = 15 * time.Second
+
+	// DefaultPromptRetryMaxDelay caps retry backoff for transient provider
+	// prompt errors when no explicit cap is configured.
+	DefaultPromptRetryMaxDelay = 2 * time.Minute
 
 	// DefaultACPInitTimeout is the safety-net timeout for ACP phase operations
 	// when InitTimeoutMs is not configured. Matches the default for ACP_INIT_TIMEOUT_MS.
 	DefaultACPInitTimeout = 30 * time.Second
+
+	// DefaultRecoveryWatchdogTimeout bounds crash recovery after an ACP stdio
+	// disconnect so a leaked process monitor cannot strand the prompt forever.
+	DefaultRecoveryWatchdogTimeout = 2 * time.Minute
+
+	// DefaultRestartDecayWindow is the quiet period after which restartCount is
+	// reset before counting a new unexpected agent exit.
+	DefaultRestartDecayWindow = 5 * time.Minute
 
 	// defaultControlPlaneHTTPTimeout is the safety-net HTTP client timeout
 	// used when no HTTPClient is injected via GatewayConfig. Production code
@@ -44,37 +62,6 @@ const (
 	defaultControlPlaneHTTPTimeout = 30 * time.Second
 )
 
-// buildAcpMcpServers converts McpServerEntry configs into acpsdk.McpServer
-// entries for NewSession/LoadSession requests.
-func buildAcpMcpServers(entries []McpServerEntry) []acpsdk.McpServer {
-	if len(entries) == 0 {
-		return []acpsdk.McpServer{}
-	}
-	servers := make([]acpsdk.McpServer, 0, len(entries))
-	for i, e := range entries {
-		var headers []acpsdk.HttpHeader
-		if e.Token != "" {
-			headers = append(headers, acpsdk.HttpHeader{
-				Name:  "Authorization",
-				Value: "Bearer " + e.Token,
-			})
-		}
-		name := "sam-mcp"
-		if len(entries) > 1 {
-			name = fmt.Sprintf("sam-mcp-%d", i)
-		}
-		servers = append(servers, acpsdk.McpServer{
-			Http: &acpsdk.McpServerHttpInline{
-				Name: name,
-				// Type is set to "http" by McpServer.MarshalJSON regardless of this field.
-				Url:     e.URL,
-				Headers: headers,
-			},
-		})
-	}
-	return servers
-}
-
 // DefaultMessageBufferSize is the default maximum number of messages buffered
 // per session for late-join replay. Override via ACP_MESSAGE_BUFFER_SIZE.
 const DefaultMessageBufferSize = 5000
@@ -82,6 +69,10 @@ const DefaultMessageBufferSize = 5000
 // DefaultViewerSendBuffer is the default channel buffer size per viewer.
 // Override via ACP_VIEWER_SEND_BUFFER.
 const DefaultViewerSendBuffer = 256
+
+// DefaultUsageReportPendingWindows bounds usage reports queued while the
+// serialized usage reporter is busy.
+const DefaultUsageReportPendingWindows = 16
 
 // SessionHostConfig holds configuration for a SessionHost.
 // It extends GatewayConfig with multi-viewer settings.
@@ -96,12 +87,38 @@ type SessionHostConfig struct {
 	// channel is full, messages are dropped for that viewer.
 	ViewerSendBuffer int
 
+	// StderrBufferBytes is the maximum agent stderr captured for crash reports.
+	// Override via ACP_STDERR_BUFFER_BYTES. Default: 4096 bytes.
+	StderrBufferBytes int
+
 	// NotifSerializeTimeout is the maximum time to wait for a previous
 	// notification handler to complete before delivering the next notification
 	// to the SDK. This serializes session/update processing to prevent the
 	// SDK's concurrent goroutine dispatch from reordering streaming tokens.
 	// Override via ACP_NOTIF_SERIALIZE_TIMEOUT. Default: 5s.
 	NotifSerializeTimeout time.Duration
+
+	// UsageReportPendingLimit bounds usage reports queued while one usage
+	// callback is being delivered. Zero uses the package default.
+	UsageReportPendingLimit int
+
+	// StartProcess is an internal test hook. Production code leaves it nil and
+	// uses StartProcess via startAgentProcess.
+	StartProcess func(*agentStartup) (agentProcess, error)
+
+	// BeforeCheckpointProcessStop is an internal deterministic-race test hook.
+	// Production code leaves it nil.
+	BeforeCheckpointProcessStop func()
+
+	// RuntimeAssetsProvider fetches resolved project/profile/skill runtime assets
+	// for standalone sessions. It must not log or persist secret values.
+	//
+	// Set once at construction and never reassigned, which is what makes the
+	// unlocked read in HasRuntimeAssetsProvider safe. If this ever becomes
+	// mutable (e.g. a hot-reloadable provider), every reader must take h.mu —
+	// note consumePreviousSelectionOnSuccess already mutates two sibling fields
+	// of this struct under that lock.
+	RuntimeAssetsProvider RuntimeAssetsProvider
 }
 
 // BufferedMessage holds a single message in the replay buffer.
@@ -136,19 +153,73 @@ type SessionHost struct {
 	config SessionHostConfig
 
 	// Agent state (guarded by mu)
-	mu             sync.RWMutex
-	process        *AgentProcess
-	acpConn        *acpsdk.ClientSideConnection
-	agentType      string
-	sessionID      acpsdk.SessionId
-	restartCount   int
-	permissionMode string
-	status         SessionHostStatus
-	statusErr      string
+	mu                       sync.RWMutex
+	process                  agentProcess
+	acpConn                  *acpsdk.ClientSideConnection
+	agentType                string
+	codexC2SelectionMu       sync.Mutex // independent: startup can hold mu
+	codexC2Selector          string     // explicit profile selector, guarded by codexC2SelectionMu
+	codexC2EffectiveSelector string     // executable selection latched for this host
+	codexC2SelectionLatched  bool
+	sessionID                acpsdk.SessionId
+
+	// Lock-free mirrors of sessionID/status, read ONLY by code reachable from
+	// the ACP SDK's single notification-processing goroutine
+	// (HandleExtensionMethod -> matchesHarnessSession / activityForHarnessWork).
+	//
+	// That goroutine must never block on `mu`: the ACP handshake
+	// (startAgent/applySessionSettings) holds `mu` for its whole duration while
+	// its in-flight RPC blocks in the SDK's waitNotificationsUpTo, which waits
+	// for this very notification worker. Taking mu.RLock() there is a genuine
+	// self-deadlock (reproduced: a _claude/sdkMessage notification arriving just
+	// before the session/new response turned a 5ms handshake into an 800ms
+	// timeout; with SetSessionMode's unbounded ctx it hangs indefinitely).
+	//
+	// Writers keep these in step with the mu-guarded fields via
+	// setSessionIDLocked/setStatusLocked. See .claude/rules/46.
+	//
+	// This constraint is transitive: NOTHING reachable from
+	// HandleExtensionMethod may call a helper that takes mu, however far down the
+	// call chain. reportActivity is the trap — it looks like a fire-and-forget
+	// reporter but takes mu.RLock to snapshot agentType/restartCount/statusErr.
+	// Use nudgeHarnessActivityReport from that goroutine instead.
+	mirrorSessionID atomic.Value // string
+	mirrorStatus    atomic.Value // SessionHostStatus
+	configOptions   []acpsdk.SessionConfigOption
+	restartCount    int
+	lastCrashTime   time.Time
+	permissionMode  string
+	// agentSupportsLoadSession is captured from ACP Initialize so prompt error
+	// handling can decide whether a process crash is recoverable.
+	agentSupportsLoadSession bool
+	status                   SessionHostStatus
+	statusErr                string
+	// selectionInProgress is set for the duration of a selectAgent call (from
+	// beginAgentSelection until selectAgent returns). It guards the fresh-host
+	// window where h.process is still nil during the multi-second
+	// credential-fetch/install phase, so two concurrent selections for the same
+	// agent cannot double-spawn a process for one session.
+	selectionInProgress bool
 	// intentionalPromptCancelProcessStop suppresses rapid-exit crash handling
 	// when a user cancel intentionally terminates an agent that lacks native
 	// session/cancel support.
 	intentionalPromptCancelProcessStop bool
+	checkpointRollover                 *checkpointRolloverEpisode
+
+	// replaySuppressed is set while an ACP LoadSession is in flight. LoadSession
+	// makes the agent replay the entire transcript as session/update
+	// notifications; suppressing them here (lock-free, checked in
+	// sessionHostClient.SessionUpdate) prevents the replay from being broadcast
+	// to viewers, buffered for late-join, or re-persisted with fresh UUIDs.
+	// Lock-free atomic so SessionUpdate never blocks on h.mu during a load.
+	replaySuppressed atomic.Bool
+	// credentialAttribution stores non-secret server-selected credential identity
+	// for usage callbacks. It is lock-free so SessionUpdate never waits on h.mu.
+	credentialAttribution atomic.Value
+	// renewedCallbackToken holds a workspace callback token delivered after the
+	// host was created (SetCallbackToken). Lock-free like the fields above:
+	// control-plane reporting runs on the ACP notification goroutine.
+	renewedCallbackToken atomic.Value // string
 
 	// Credential injection metadata (set during startAgent, read during stop).
 	// These track whether the agent used file-based credential injection so
@@ -156,6 +227,27 @@ type SessionHost struct {
 	credInjectionMode string // "env" or "auth-file"
 	credAuthFilePath  string // relative to home dir, e.g. ".codex/auth.json"
 	credKind          string // "api-key" or "oauth-token"
+
+	usageReportMu           sync.Mutex
+	usageReportPending      map[string]usageReportPendingEntry
+	usageReportOrder        []string
+	usageReportNextSeq      uint64
+	usageReportRunning      bool
+	usageReportDone         chan struct{}
+	usageReportCancel       context.CancelFunc
+	usageReportFailureCount int
+	usageReportLastError    string
+	usageReportClosed       bool
+	usageReportCloseGrace   bool
+	usageReportCallbacks    sync.WaitGroup
+
+	// Post-turn provider usage probes (session_host_usage_probe.go).
+	// usageProbeInFlight makes probes single-flight per host; opencodeUsageKey
+	// holds the OpenCode Go API key only while an opencode-go session runs and
+	// is cleared on agent stop; codexRolloutReader is a test seam (nil = real).
+	usageProbeInFlight atomic.Bool
+	opencodeUsageKey   atomic.Value // string
+	codexRolloutReader codexRolloutTailReader
 
 	// Viewers (guarded by viewerMu)
 	viewerMu sync.RWMutex
@@ -171,11 +263,43 @@ type SessionHost struct {
 	promptMu       sync.Mutex
 	promptInFlight bool
 	promptSeq      uint64
+	// promptAttempt remains attached until the next accepted prompt so late
+	// terminal signals from the same runtime are absorbed by its exact-once
+	// arbiter instead of reaching the control plane twice.
+	promptAttempt *promptAttempt
 	// promptCancelMu guards promptCancel independently from promptMu so that
 	// CancelPrompt() can read it without waiting for Prompt() to finish.
 	promptCancelMu sync.Mutex
 	// promptCancel cancels the in-flight Prompt() context. Protected by promptCancelMu.
 	promptCancel context.CancelFunc
+	// promptActivityCancel stops the periodic prompting re-report loop.
+	// Protected by promptCancelMu.
+	promptActivityCancel context.CancelFunc
+	// cancelGraceTimer replaces the cancel-grace timer in tests so they can own
+	// the ordering between a cancel, the next prompt, and the deadline. Set
+	// only before the host is used; nil means a real time.Timer.
+	cancelGraceTimer func(time.Duration) (<-chan time.Time, func())
+
+	// Harness-owned background work is normalized from optional ACP extension
+	// notifications. It is isolated from the prompt lifecycle because it may
+	// continue after session/prompt has returned.
+	harnessWorkMu         sync.Mutex
+	harnessWork           harnessWorkStatus
+	harnessTaskIDs        map[string]struct{}
+	harnessActivityCancel context.CancelFunc
+	// harnessReportMu owns the debounced, single-flight activity reporter
+	// triggered by harness lifecycle notifications. The ACP notification
+	// goroutine must never call reportActivity inline: reportActivity takes
+	// mu.RLock for its agentType/restartCount/statusErr snapshot, which is
+	// exactly the block the lock-free mirrors above exist to avoid.
+	harnessReportMu       sync.Mutex
+	harnessReportTimer    *time.Timer
+	harnessReportSequence uint64
+	harnessReportRunning  bool
+	harnessReportPending  bool
+	lastActivityReportMu  sync.Mutex
+	lastActivityReport    activityReportSnapshot
+	lastActivityReportSet bool
 	// activePromptID identifies the in-flight prompt associated with promptCancel.
 	// Protected by promptCancelMu.
 	activePromptID uint64
@@ -183,6 +307,16 @@ type SessionHost struct {
 	// cancelled by a viewer or control-plane request.
 	// Protected by promptCancelMu.
 	promptCancelRequested bool
+
+	// Crash recovery state (guarded by mu). When a prompt fails because the
+	// agent process disconnected, finishPromptWithError records this context
+	// and lets monitorProcessExit attempt LoadSession recovery.
+	crashRecoveryInProgress bool
+	crashStderr             string
+	crashAgentType          string
+	crashSessionID          string
+	crashPromptReqID        json.RawMessage
+	crashPromptViewerID     string
 
 	// Stderr collection
 	stderrMu  sync.Mutex
@@ -194,6 +328,23 @@ type SessionHost struct {
 	// Lifecycle
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	// Durable ACP permission waiters are in-memory by design: Cloudflare owns
+	// durable state, while only the live connection generation may consume an answer.
+	interactionMu           sync.Mutex
+	interactionConfig       AcpInteractionRuntimeConfig
+	interactionGeneration   string
+	interactionWaiters      map[string]*acpInteractionWaiter
+	urlElicitations         map[string]acpUrlElicitation
+	interactionReceipts     map[string]acpInteractionReceipt
+	interactionReceiptOrder []string
+}
+
+func (h *SessionHost) now() time.Time {
+	if h.config.Now != nil {
+		return h.config.Now()
+	}
+	return time.Now()
 }
 
 // NewSessionHost creates a new SessionHost for the given session.
@@ -205,16 +356,22 @@ func NewSessionHost(config SessionHostConfig) *SessionHost {
 	if config.ViewerSendBuffer <= 0 {
 		config.ViewerSendBuffer = DefaultViewerSendBuffer
 	}
+	if config.StderrBufferBytes <= 0 {
+		config.StderrBufferBytes = DefaultStderrBufferBytes
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &SessionHost{
-		config:     config,
-		status:     HostIdle,
-		viewers:    make(map[string]*Viewer),
-		messageBuf: make([]BufferedMessage, 0, 256),
-		ctx:        ctx,
-		cancel:     cancel,
+		config:              config,
+		status:              HostIdle,
+		viewers:             make(map[string]*Viewer),
+		messageBuf:          make([]BufferedMessage, 0, 256),
+		interactionWaiters:  make(map[string]*acpInteractionWaiter),
+		urlElicitations:     make(map[string]acpUrlElicitation),
+		interactionReceipts: make(map[string]acpInteractionReceipt),
+		ctx:                 ctx,
+		cancel:              cancel,
 	}
 }
 
@@ -244,6 +401,15 @@ func (h *SessionHost) AgentType() string {
 // ContainerWorkDir returns the configured working directory for this session host.
 func (h *SessionHost) ContainerWorkDir() string {
 	return h.config.ContainerWorkDir
+}
+
+// HasRuntimeAssetsProvider reports whether this host was wired to fetch resolved
+// project/profile/skill runtime assets. Standalone (cf-container) sessions have no
+// devcontainer to read /etc/sam/project-env from, so the provider is the only path
+// by which project env vars and runtime files reach the agent process — a nil
+// provider there means the session silently starts without them.
+func (h *SessionHost) HasRuntimeAssetsProvider() bool {
+	return h.config.RuntimeAssetsProvider != nil
 }
 
 // ViewerCount returns the number of active viewers.
@@ -277,7 +443,7 @@ func (h *SessionHost) AttachViewer(id string, conn *websocket.Conn) *Viewer {
 	// Register the viewer BEFORE starting the write pump goroutine to
 	// close the TOCTOU window between the status check above and the
 	// goroutine launch. If the session transitions to stopped after our
-	// check, the goroutine will exit via h.ctx.Done().
+	// check, the goroutine will exit via lifecycleContext().Done().
 	h.viewerMu.Lock()
 	h.viewers[id] = viewer
 	if h.suspendTimer != nil {
@@ -344,7 +510,7 @@ func (h *SessionHost) DetachViewer(viewerID string) {
 // autoSuspend is called by the suspend timer. It re-checks conditions before
 // suspending to avoid interrupting work that started after the timer was set.
 func (h *SessionHost) autoSuspend() {
-	// Re-check conditions under lock: no viewers and not prompting.
+	// Re-check conditions under lock: no viewers and not prompting/recovering.
 	// Hold viewerMu across both checks to prevent races with DetachViewer.
 	h.viewerMu.Lock()
 	h.suspendTimer = nil // Timer has fired, clear reference.
@@ -354,9 +520,9 @@ func (h *SessionHost) autoSuspend() {
 		return
 	}
 
-	// Check prompting status while still holding viewerMu to prevent race
+	// Check prompting/recovery status while still holding viewerMu to prevent race
 	// where a viewer detaches and also tries to start a timer.
-	if h.IsPrompting() {
+	if h.isPromptingOrRecovering() {
 		// Re-arm the timer without releasing the lock.
 		if h.suspendTimer == nil {
 			h.suspendTimer = time.AfterFunc(h.config.IdleSuspendTimeout, func() {
@@ -364,7 +530,7 @@ func (h *SessionHost) autoSuspend() {
 			})
 		}
 		h.viewerMu.Unlock()
-		slog.Info("SessionHost: auto-suspend deferred (prompt in progress)", "sessionID", h.config.SessionID)
+		slog.Info("SessionHost: auto-suspend deferred (prompt/recovery in progress)", "sessionID", h.config.SessionID)
 		return
 	}
 	h.viewerMu.Unlock()
@@ -388,128 +554,25 @@ func (h *SessionHost) autoSuspend() {
 	})
 }
 
-// CancelPrompt cancels the currently running Prompt() call, if any.
-// This is safe to call from any goroutine. If no prompt is in flight,
-// it's a no-op. The cancel function is guarded by promptCancelMu
-// (separate from promptMu) so we never deadlock with HandlePrompt.
-func (h *SessionHost) CancelPrompt() {
-	h.cancelPrompt(true)
-}
-
-// CancelPromptFromControlPlane mirrors the viewer WebSocket session/cancel path
-// for HTTP control-plane cancellation requests.
-func (h *SessionHost) CancelPromptFromControlPlane() {
-	if h.AgentType() == "opencode" {
-		h.cancelPrompt(false)
-		h.StopProcessForPromptCancel()
-		return
-	}
-
-	h.CancelPrompt()
-	h.ForwardToAgent([]byte(`{"jsonrpc":"2.0","method":"session/cancel","params":{}}`))
-	h.StopProcessForPromptCancel()
-}
-
-func (h *SessionHost) cancelPrompt(startGraceTimer bool) {
-	h.promptCancelMu.Lock()
-	cancelFn := h.promptCancel
-	promptID := h.activePromptID
-	if cancelFn != nil {
-		h.promptCancelRequested = true
-	}
-	h.promptCancelMu.Unlock()
-
-	if cancelFn == nil {
-		slog.Info("CancelPrompt: no prompt in flight")
-		return
-	}
-
-	slog.Info("CancelPrompt: cancelling in-flight prompt")
-	h.reportLifecycle("info", "Prompt cancel requested", nil)
-	cancelFn()
-
-	if !startGraceTimer {
-		return
-	}
-
-	grace := h.promptCancelGracePeriod()
-	if grace <= 0 {
-		return
-	}
-
-	go func(id uint64, wait time.Duration) {
-		timer := time.NewTimer(wait)
-		defer timer.Stop()
-		<-timer.C
-		h.triggerPromptForceStopIfStuck(id, fmt.Sprintf("Prompt cancel grace elapsed after %s", wait))
-	}(promptID, grace)
-}
-
-// ForwardToAgent sends a raw message to the agent's stdin.
-func (h *SessionHost) ForwardToAgent(message []byte) {
-	h.mu.RLock()
-	process := h.process
-	h.mu.RUnlock()
-
-	if process == nil {
-		slog.Warn("No agent process running, dropping message")
-		return
-	}
-
-	data := append(message, '\n')
-	if _, err := process.Stdin().Write(data); err != nil {
-		slog.Error("Failed to write to agent stdin", "error", err)
-	}
-}
-
-// SignalProcess sends a signal to the agent process. This is used for agents
-// that don't implement session/cancel (e.g., opencode) — SIGTERM is sent
-// directly to the process instead of forwarding the cancel RPC.
-func (h *SessionHost) SignalProcess(sig syscall.Signal) {
-	h.mu.RLock()
-	process := h.process
-	h.mu.RUnlock()
-
-	if process == nil {
-		slog.Warn("SignalProcess: no agent process running")
-		return
-	}
-
-	process.killContainerProcesses(sig)
-	slog.Info("SignalProcess: sent signal to agent process", "signal", sig, "agentType", h.AgentType())
-}
-
-// StopProcessForPromptCancel terminates the current agent process for a user
-// prompt cancel without marking the host stopped. The process monitor will
-// restart the agent and return the host to ready for follow-up prompts.
-func (h *SessionHost) StopProcessForPromptCancel() {
-	h.mu.Lock()
-	process := h.process
-	if process != nil {
-		h.intentionalPromptCancelProcessStop = true
-	}
-	h.mu.Unlock()
-
-	if process == nil {
-		slog.Warn("StopProcessForPromptCancel: no agent process running")
-		return
-	}
-
-	if err := process.Stop(); err != nil {
-		slog.Warn("StopProcessForPromptCancel: failed to stop agent process", "error", err)
-	}
-}
-
 // Stop kills the agent process, disconnects all viewers, and marks the session
 // as stopped. This is the only way to terminate the agent — browser disconnects
 // do NOT call this.
 func (h *SessionHost) Stop() {
+	h.cancelInteractionWaiters("session_stopped")
+	h.promptMu.Lock()
+	attempt := h.promptAttempt
+	activePrompt := h.promptInFlight
+	h.promptMu.Unlock()
+	if activePrompt && attempt != nil {
+		attempt.complete(h, "cancelled", context.Canceled)
+	}
 	h.mu.Lock()
 	if h.status == HostStopped {
 		h.mu.Unlock()
 		return
 	}
-	h.status = HostStopped
+	h.closeUsageReportIngress()
+	h.setStatusLocked(HostStopped)
 	h.statusErr = ""
 	h.stopCurrentAgentLocked()
 	// Snapshot credential metadata while still holding the lock.
@@ -524,6 +587,17 @@ func (h *SessionHost) Stop() {
 	// Sync refreshed credentials back to the control plane before cleanup.
 	// The agent process is dead but the container is still alive.
 	h.syncCredentialOnStop(snap)
+
+	// Report idle to the control plane so the browser status bar clears.
+	h.stopPromptActivityRereport()
+	h.clearHarnessWork()
+	if err := h.waitForUsageReportCallbacks(h.activityReportTimeout()); err != nil {
+		slog.Warn("usageReport: shutdown callback drain failed", "error", err)
+	}
+	if err := h.flushUsageReports(h.activityReportTimeout()); err != nil {
+		slog.Warn("usageReport: shutdown flush failed", "error", err)
+	}
+	h.reportActivity("idle")
 
 	// Cancel any pending auto-suspend timer.
 	h.viewerMu.Lock()
@@ -554,79 +628,31 @@ func (h *SessionHost) Stop() {
 	h.viewerMu.Unlock()
 }
 
-// phaseTimeout returns a per-phase timeout duration. If phaseMs is > 0, it is
-// used; otherwise the fallback timeout is returned.
-func phaseTimeout(phaseMs int, fallback time.Duration) time.Duration {
-	if phaseMs > 0 {
-		return time.Duration(phaseMs) * time.Millisecond
-	}
-	return fallback
-}
-
-// applySessionSettings calls SetSessionModel and SetSessionMode on the ACP
-// connection. Both calls are non-fatal.
-func (h *SessionHost) applySessionSettings(ctx context.Context, settings *agentSettingsPayload) {
-	if settings == nil || h.acpConn == nil || h.sessionID == "" {
-		return
-	}
-
-	if settings.Model != "" {
-		// Skip SetSessionModel for platform AI proxy — OpenCode's model resolver
-		// splits on "/" (e.g. "meta/llama-4-scout..." → providerID:"meta") which
-		// breaks for Workers AI model IDs regardless of prefix. The model is
-		// already set in the OpenCode config file for the openai-compatible provider.
-		//
-		// Safety: OpencodeProvider is only set to "platform" via the credential
-		// injection blocks (gated on APIKeySource=="callback-token" or "user-credential"),
-		// which are exclusive to OpenCode + proxy paths. For non-opencode agents,
-		// OpencodeProvider remains empty and this branch is not taken.
-		if settings.OpencodeProvider == "platform" {
-			slog.Info("ACP: skipping SetSessionModel for platform proxy (model set in config)", "model", settings.Model)
-		} else {
-			slog.Info("ACP: setting session model", "model", settings.Model)
-			if _, err := h.acpConn.UnstableSetSessionModel(ctx, acpsdk.UnstableSetSessionModelRequest{
-				SessionId: h.sessionID,
-				ModelId:   acpsdk.UnstableModelId(settings.Model),
-			}); err != nil {
-				slog.Warn("ACP SetSessionModel failed (non-fatal)", "model", settings.Model, "error", err)
-				h.reportLifecycle("warn", "ACP SetSessionModel failed", map[string]interface{}{
-					"model": settings.Model,
-					"error": err.Error(),
-				})
-			} else {
-				slog.Info("ACP: session model set", "model", settings.Model)
-				h.reportLifecycle("info", "ACP session model applied", map[string]interface{}{
-					"model": settings.Model,
-				})
-			}
-		}
-	}
-
-	if settings.PermissionMode != "" && settings.PermissionMode != "default" {
-		slog.Info("ACP: setting session mode", "mode", settings.PermissionMode)
-		if _, err := h.acpConn.SetSessionMode(ctx, acpsdk.SetSessionModeRequest{
-			SessionId: h.sessionID,
-			ModeId:    acpsdk.SessionModeId(settings.PermissionMode),
-		}); err != nil {
-			slog.Warn("ACP SetSessionMode failed (non-fatal)", "mode", settings.PermissionMode, "error", err)
-			h.reportLifecycle("warn", "ACP SetSessionMode failed", map[string]interface{}{
-				"mode":  settings.PermissionMode,
-				"error": err.Error(),
-			})
-		} else {
-			slog.Info("ACP: session mode set", "mode", settings.PermissionMode)
-			h.reportLifecycle("info", "ACP session mode applied", map[string]interface{}{
-				"mode": settings.PermissionMode,
-			})
-		}
-	}
-}
-
 // ensureAgentInstalled checks if the ACP adapter binary exists and installs it
 // on-demand if missing.
 func (h *SessionHost) ensureAgentInstalled(ctx context.Context, info agentCommandInfo) error {
+	if info.verifyOnly {
+		if h.config.ProcessLauncher != nil {
+			if err := exec.CommandContext(ctx, localShellPath, "-c", info.validationCmd).Run(); err != nil {
+				return fmt.Errorf("staged Codex release verification failed: %w", err)
+			}
+			return nil
+		}
+		containerID, err := h.config.ContainerResolver()
+		if err != nil {
+			return fmt.Errorf("failed to discover devcontainer: %w", err)
+		}
+		return h.ensureCodexRuntimeInContainer(ctx, containerID, info)
+	}
 	if info.installCmd == "" {
 		return nil
+	}
+	// Standalone / cf-container mode configures a custom ProcessLauncher and has
+	// no devcontainer ContainerResolver. Install the ACP adapter locally (same
+	// hardcoded install script) instead of via docker exec.
+	if h.config.ProcessLauncher != nil {
+		h.broadcastAgentStatus(StatusInstalling, info.command, "")
+		return installAgentBinaryLocal(ctx, info)
 	}
 
 	containerID, err := h.config.ContainerResolver()
@@ -641,95 +667,24 @@ func (h *SessionHost) ensureAgentInstalled(ctx context.Context, info agentComman
 	return installAgentBinary(ctx, containerID, info)
 }
 
-// monitorStderr reads the agent's stderr and collects it for error reporting.
-func (h *SessionHost) monitorStderr(process *AgentProcess) {
-	scanner := bufio.NewScanner(process.Stderr())
-	for scanner.Scan() {
-		line := scanner.Text()
-		slog.Warn("Agent stderr", "line", line)
-		h.stderrMu.Lock()
-		if h.stderrBuf.Len() < 4096 {
-			if h.stderrBuf.Len() > 0 {
-				h.stderrBuf.WriteByte('\n')
-			}
-			h.stderrBuf.WriteString(line)
-		}
-		h.stderrMu.Unlock()
-	}
-}
-
-func (h *SessionHost) getAndClearStderr() string {
-	h.stderrMu.Lock()
-	defer h.stderrMu.Unlock()
-	s := h.stderrBuf.String()
-	h.stderrBuf.Reset()
-	return s
-}
-
-// silentErrorPatterns are stderr substrings that indicate an API-level error
-// the agent may have swallowed (returning a normal end_turn instead of an error).
-var silentErrorPatterns = []string{
-	"AI_APICallError",
-	"Unauthorized",
-	"401",
-	"403",
-	"invalid_api_key",
-	"authentication_error",
-}
-
-// checkStderrForSilentErrors peeks at the accumulated stderr buffer for known
-// API error patterns. Some agents (notably OpenCode with Scaleway) silently
-// swallow API errors and return {stopReason: "end_turn"} instead of an error.
-// When detected, we log a warning and report a lifecycle event so the UI can
-// surface the issue. The stderr buffer is NOT cleared — it remains available
-// for crash reporting in monitorProcessExit.
-func (h *SessionHost) checkStderrForSilentErrors(stopReason acpsdk.StopReason) {
-	h.stderrMu.Lock()
-	stderr := h.stderrBuf.String()
-	h.stderrMu.Unlock()
-
-	if stderr == "" {
-		return
-	}
-
-	for _, pattern := range silentErrorPatterns {
-		if strings.Contains(stderr, pattern) {
-			slog.Warn("ACP: possible silent API error detected in stderr after prompt completion",
-				"stopReason", string(stopReason),
-				"pattern", pattern,
-				"stderrSnippet", truncateString(stderr, 512),
-				"agentType", h.AgentType(),
-			)
-			h.reportLifecycle("warn", "Possible silent API error — check agent credentials", map[string]interface{}{
-				"stopReason":    string(stopReason),
-				"errorPattern":  pattern,
-				"stderrSnippet": truncateString(stderr, 256),
-			})
-			return // report once per prompt, not per pattern
-		}
-	}
-}
-
-// truncateString returns s truncated to maxLen with "..." appended if needed.
-func truncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
-}
-
 // stopCurrentAgentLocked stops the current agent process. Must hold h.mu.
 func (h *SessionHost) stopCurrentAgentLocked() {
+	h.cancelInteractionWaiters("connection_closed")
+	// Stop the process-scoped harness heartbeat before clearing the ACP
+	// connection. A replacement connection will establish fresh state.
+	h.clearHarnessWork()
 	if h.process != nil {
 		_ = h.process.Stop()
 		h.process = nil
 	}
 	h.acpConn = nil
-	h.sessionID = ""
+	h.setSessionIDLocked("")
+	h.agentSupportsLoadSession = false
 	// Clear credential metadata so stale values don't leak across agent switches.
 	h.credInjectionMode = ""
 	h.credAuthFilePath = ""
 	h.credKind = ""
+	h.clearOpencodeUsageProbeKey()
 }
 
 // persistAcpSessionID saves the ACP session ID for reconnection support.
@@ -789,9 +744,47 @@ func (h *SessionHost) IsPrompting() bool {
 	return h.status == HostPrompting
 }
 
+func (h *SessionHost) isPromptingOrRecovering() bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.status == HostPrompting || h.status == HostStarting || h.crashRecoveryInProgress
+}
+
 // OnPromptCompleteCallback returns the OnPromptComplete callback, if configured.
 // Used by server-initiated prompt flows to report agent start failures back to
 // the control plane without going through HandlePrompt.
 func (h *SessionHost) OnPromptCompleteCallback() func(string, error) {
 	return h.config.OnPromptComplete
+}
+
+// setSessionIDLocked assigns the ACP session ID and its lock-free mirror.
+// Callers must hold h.mu for write.
+func (h *SessionHost) setSessionIDLocked(id acpsdk.SessionId) {
+	h.sessionID = id
+	h.mirrorSessionID.Store(string(id))
+}
+
+// setStatusLocked assigns the host status and its lock-free mirror.
+// Callers must hold h.mu for write.
+func (h *SessionHost) setStatusLocked(status SessionHostStatus) {
+	h.status = status
+	h.mirrorStatus.Store(status)
+}
+
+// loadMirroredSessionID reads the session ID WITHOUT taking h.mu. Safe to call
+// from the ACP notification-processing goroutine.
+func (h *SessionHost) loadMirroredSessionID() string {
+	if v, ok := h.mirrorSessionID.Load().(string); ok {
+		return v
+	}
+	return ""
+}
+
+// loadMirroredStatus reads the host status WITHOUT taking h.mu. Safe to call
+// from the ACP notification-processing goroutine.
+func (h *SessionHost) loadMirroredStatus() SessionHostStatus {
+	if v, ok := h.mirrorStatus.Load().(SessionHostStatus); ok {
+		return v
+	}
+	return HostIdle
 }

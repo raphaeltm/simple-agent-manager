@@ -13,12 +13,12 @@ As a user, I submit a task and the system provisions a VM and runs an agent on i
 
 **Why this priority**: This is the foundational change. Without DO-owned session state, VM death means total session state loss. Every other story depends on the DO being the authoritative record.
 
-**Independent Test**: Submit a task, verify session record exists in DO with correct state machine transitions (pending → assigned → running). Simulate VM failure and verify DO marks session as "interrupted" rather than leaving it in "running" forever.
+**Independent Test**: Submit a task, verify session record exists in DO with correct state machine transitions (pending → assigned → running). Simulate conclusive VM/runtime failure evidence and verify DO marks session as "interrupted"; simulate stale ProjectData heartbeat history alone and verify VM-backed work is preserved rather than interrupted.
 
 **Acceptance Scenarios**:
 
 1. **Given** a user submits a task, **When** the DO creates the session and provisions a VM, **Then** the session state transitions through pending → assigned → running, all tracked in the DO.
-2. **Given** a running session on a VM, **When** the VM becomes unreachable (crash, network failure, warm pool recycling), **Then** the DO detects the failure and marks the session as "interrupted" within a bounded time.
+2. **Given** a running session on a VM, **When** conclusive runtime or owning workspace/node evidence proves the VM has become unreachable (crash, terminal node/workspace state, warm pool recycling), **Then** the DO marks the session as "interrupted" within a bounded time; stale ProjectData heartbeat history alone remains suspect.
 3. **Given** an interrupted session, **When** the user views the project chat, **Then** they see the session marked as interrupted with the last known messages preserved.
 4. **Given** a running session, **When** the VM agent reports completion, **Then** the DO transitions the session to "completed" and records final state.
 

@@ -1,4 +1,4 @@
-import * as pulumi from "@pulumi/pulumi";
+import * as pulumi from '@pulumi/pulumi';
 
 // Import all resource modules
 import {
@@ -8,28 +8,21 @@ import {
   observabilityDatabase,
   observabilityDatabaseId,
   observabilityDatabaseName,
-} from "./resources/database";
-import { kvNamespace, kvNamespaceId, kvNamespaceName } from "./resources/kv";
-import { r2Bucket, r2BucketName } from "./resources/storage";
+} from './resources/database';
+import { kvNamespace, kvNamespaceId, kvNamespaceName } from './resources/kv';
+import { r2Bucket, r2BucketLifecycle, r2BucketName } from './resources/storage';
 import {
   apiDnsRecord,
   appDnsRecord,
+  previewDnsRecord,
   wildcardDnsRecord,
   vmRouteExclusion,
   dnsRecordIds,
   dnsHostnames,
-} from "./resources/dns";
-import {
-  encryptionKey,
-  jwtPrivateKey,
-  jwtPublicKey,
-  trialClaimTokenSecret,
-} from "./resources/secrets";
-import {
-  originCaCertPem,
-  originCaKeyPem,
-} from "./resources/origin-ca";
-import { pagesProject, pagesProjectName, pagesCustomDomain } from "./resources/pages";
+} from './resources/dns';
+import { originCaCertPem, originCaKeyPem } from './resources/origin-ca';
+import { pagesProject, pagesProjectName, pagesCustomDomain } from './resources/pages';
+import { accountId, baseDomain } from './resources/config';
 
 // Export resource references for internal use
 export {
@@ -37,10 +30,12 @@ export {
   observabilityDatabase,
   kvNamespace,
   r2Bucket,
+  r2BucketLifecycle,
   pagesProject,
   pagesCustomDomain,
   apiDnsRecord,
   appDnsRecord,
+  previewDnsRecord,
   wildcardDnsRecord,
   vmRouteExclusion,
 };
@@ -53,22 +48,34 @@ export const observabilityD1DatabaseName = observabilityDatabaseName;
 export const kvId = kvNamespaceId;
 export const kvName = kvNamespaceName;
 export const r2Name = r2BucketName;
+export {
+  diagnosticIncidentPrefix,
+  diagnosticIncidentTtlDays,
+  sessionSnapshotTtlDays,
+} from './resources/config';
 export const pagesName = pagesProjectName;
 export const dnsIds = dnsRecordIds;
 export const hostnames = dnsHostnames;
 
-// Export security keys (persisted in Pulumi state, encrypted in R2)
-// These are marked as secrets - use `pulumi stack output --show-secrets` to view
-export { encryptionKey, jwtPrivateKey, jwtPublicKey, trialClaimTokenSecret };
+// Export persisted keys plus the non-secret installation identity.
+export {
+  deploySigningPrivateKey,
+  encryptionKey,
+  installationId,
+  jwtPrivateKey,
+  jwtPublicKey,
+  previewSigningKey,
+  trialClaimTokenSecret,
+  vapidPrivateKeyPem,
+} from './resources/secrets';
 
 // Export Origin CA certificate (for TLS between Cloudflare edge and VM agents)
 export { originCaCertPem, originCaKeyPem };
 
 // Stack summary output
-const config = new pulumi.Config();
 export const stackSummary = {
   stack: pulumi.getStack(),
-  baseDomain: config.require("baseDomain"),
+  baseDomain,
   resources: {
     d1: d1DatabaseName,
     kv: kvName,
@@ -77,4 +84,4 @@ export const stackSummary = {
 };
 
 // Export Cloudflare account ID for wrangler.toml
-export const cloudflareAccountId = config.require("cloudflareAccountId");
+export const cloudflareAccountId = accountId;

@@ -1,5 +1,35 @@
 # Notification Phase 2 — Test Coverage Gaps
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:**
+>   - Gap 11: all three preference tiers are tested
+>     (`apps/api/tests/unit/durable-objects/notification-preferences.test.ts:256-336`).
+>   - Gap 1: generic body (`apps/api/tests/unit/services/notification.test.ts:188`).
+>   - Gap 22, tab filter: `apps/web/tests/unit/components/notification-grouping.test.tsx:468-584`.
+>   - Gaps 16/17, partly: the real hook with a fake WebSocket covers `notification.new`,
+>     `notification.unread_count` and malformed frames
+>     (`apps/web/tests/unit/hooks/useNotifications-malformed.test.ts:58-178`).
+> - **Still open:**
+>   - Gap 6: the task-mode `complete_task` notification is never asserted. `mcp.test.ts:4664+`
+>     covers `update_task_status` and conversation mode; `mcp-complete-task-cleanup.test.ts:53`
+>     only mocks it.
+>   - Gap 14: `enforceLimit` eviction.
+>   - Gap 9: options count cap and truncation
+>     (`apps/api/src/routes/mcp/instruction-tools.ts:575-576`).
+>   - Gap 12: `actionUrl` stripping in the DO (only the web-push path is tested).
+>   - Gap 19: `handleNotificationClick`.
+>   - Gaps 16/17, rest: `updated`, `read`, `dismissed` and `all_read` through the real hook
+>     (`notification-grouping.test.tsx:332-384` still mocks the hook).
+>   - Gaps 20, 21 and 23: mark-all-read, load-more and Escape/click-outside in `NotificationCenter`.
+>   - Medium gaps 3, 7/8, 13 and 15: not re-checked; keep.
+>   - Test item carried over from the phase-1 follow-ups file (end of this file).
+> - **Moot/dropped:**
+>   - Gap 10: non-string options are now rejected, and that is tested (`mcp.test.ts`, "should
+>     reject options array with non-string elements").
+>   - Gap 18: the dead `dismiss` code was removed (PR #1872).
+>   - The `/tmp/claude-1000/...` transcript linked under Notes no longer exists.
+
 **Created**: 2026-03-16
 **Source**: Late-arriving test-engineer review of PR #420 (merged)
 **Priority**: High (regression holes in new Phase 2 paths)
@@ -71,3 +101,11 @@ Post-merge test coverage analysis identified 23 gaps across 4 test files. Three 
 ## Notes
 
 The review output includes concrete test code for each gap — see full transcript at `/tmp/claude-1000/-workspaces-simple-agent-manager/tasks/a30c0a08fb4381d13.output` for copy-paste test implementations.
+
+## Carried over 2026-09-30
+
+From `2026-03-16-notification-system-phase1-followups` (removed from the backlog 2026-09-30; see git history), dissolved in the
+2026-09-30 weekly queue audit:
+
+- [ ] `useNotifications` reconnection test: drop the WebSocket and assert the hook reconnects with
+      backoff (`apps/web/src/hooks/useNotifications.ts:282-311`). No such test exists today.

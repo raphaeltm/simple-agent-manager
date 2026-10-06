@@ -1,7 +1,10 @@
 import type { ModelDefinition, ModelGroup } from '@simple-agent-manager/shared';
 import { getModelGroupsForAgent } from '@simple-agent-manager/shared';
 import { ChevronDown, ChevronUp } from 'lucide-react';
-import { type FC, useCallback, useMemo, useRef, useState } from 'react';
+import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+
+import { getAgentModelCatalog } from '../lib/api/agents';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -22,6 +25,12 @@ interface ModelSelectProps {
   id?: string;
   /** data-testid for testing */
   'data-testid'?: string;
+  /** Load model groups from the API when available */
+  useDynamicCatalog?: boolean;
+  /** Restrict grouped model IDs to these provider prefixes, e.g. opencode-go/ */
+  modelProviderFilter?: readonly string[];
+  /** Fall back to the static shared catalog when dynamic loading fails or is disabled */
+  allowStaticCatalog?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -31,11 +40,9 @@ interface ModelSelectProps {
 const FOCUS_RING =
   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
 
-const INPUT_CLASSES =
-  `w-full min-h-11 py-2 pl-3 pr-9 rounded-sm border border-border-default bg-inset text-fg-primary text-sm outline-none box-border ${FOCUS_RING}`;
+const INPUT_CLASSES = `w-full min-h-11 py-2 pl-3 pr-9 rounded-sm border border-border-default bg-inset text-fg-primary text-sm outline-none box-border ${FOCUS_RING}`;
 
-const DROPDOWN_CLASSES =
-  'absolute z-50 left-0 right-0 mt-1 max-h-60 overflow-y-auto rounded-md border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.78)] shadow-lg backdrop-blur-xl';
+const DROPDOWN_CLASSES = 'max-h-60 overflow-y-auto rounded-md glass-surface shadow-lg';
 
 const OPTION_CLASSES =
   'px-3 min-h-11 py-2.5 text-sm cursor-pointer text-fg-primary w-full text-left flex items-center';
@@ -66,6 +73,23 @@ function flattenOptions(groups: ModelGroup[]): FlatOption[] {
   return opts;
 }
 
+function filterModelGroups(
+  groups: ModelGroup[],
+  modelProviderFilter: readonly string[] | undefined
+): ModelGroup[] {
+  if (!modelProviderFilter || modelProviderFilter.length === 0) return groups;
+
+  const prefixes = modelProviderFilter.map((provider) => `${provider}/`);
+  return groups
+    .map((group) => ({
+      ...group,
+      models: group.models.filter((model) =>
+        prefixes.some((prefix) => model.id.startsWith(prefix))
+      ),
+    }))
+    .filter((group) => group.models.length > 0);
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -83,14 +107,54 @@ export const ModelSelect: FC<ModelSelectProps> = ({
   placeholder = 'Select or type a model...',
   id,
   'data-testid': testId,
+  useDynamicCatalog = false,
+  modelProviderFilter,
+  allowStaticCatalog = true,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [filterText, setFilterText] = useState('');
   const [activeIndex, setActiveIndex] = useState(-1);
+  const [remoteGroups, setRemoteGroups] = useState<ModelGroup[] | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const groups = useMemo(() => getModelGroupsForAgent(agentType), [agentType]);
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!useDynamicCatalog) {
+      setRemoteGroups(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    getAgentModelCatalog(agentType)
+      .then((catalog) => {
+        if (!cancelled) setRemoteGroups(catalog.groups);
+      })
+      .catch(() => {
+        if (!cancelled) setRemoteGroups(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [agentType, useDynamicCatalog]);
+
+  const staticGroups = useMemo(
+    () => filterModelGroups(getModelGroupsForAgent(agentType), modelProviderFilter),
+    [agentType, modelProviderFilter]
+  );
+  const remoteFilteredGroups = useMemo(
+    () => filterModelGroups(remoteGroups ?? [], modelProviderFilter),
+    [remoteGroups, modelProviderFilter]
+  );
+  const groups = useMemo(() => {
+    if (useDynamicCatalog && remoteGroups && remoteFilteredGroups.length > 0) {
+      return remoteFilteredGroups;
+    }
+    return allowStaticCatalog ? staticGroups : [];
+  }, [allowStaticCatalog, remoteFilteredGroups, remoteGroups, staticGroups, useDynamicCatalog]);
   const hasModels = groups.length > 0;
 
   // Filter models by search text
@@ -101,9 +165,7 @@ export const ModelSelect: FC<ModelSelectProps> = ({
       .map((g) => ({
         ...g,
         models: g.models.filter(
-          (m) =>
-            m.id.toLowerCase().includes(lower) ||
-            m.name.toLowerCase().includes(lower)
+          (m) => m.id.toLowerCase().includes(lower) || m.name.toLowerCase().includes(lower)
         ),
       }))
       .filter((g) => g.models.length > 0);
@@ -174,7 +236,8 @@ export const ModelSelect: FC<ModelSelectProps> = ({
         case 'Enter':
           e.preventDefault();
           if (activeIndex >= 0 && activeIndex < flatOptions.length) {
-            handleSelect(flatOptions[activeIndex]!.id);
+            const option = flatOptions[activeIndex];
+            if (option) handleSelect(option.id);
           } else if (filterText) {
             // Accept custom model text
             setIsOpen(false);
@@ -205,9 +268,10 @@ export const ModelSelect: FC<ModelSelectProps> = ({
   const listboxId = id ? `${id}-listbox` : 'model-select-listbox';
 
   // Active descendant for aria
-  const activeOptionId = activeIndex >= 0 && activeIndex < flatOptions.length
-    ? `${listboxId}-opt-${activeIndex}`
-    : undefined;
+  const activeOptionId =
+    activeIndex >= 0 && activeIndex < flatOptions.length
+      ? `${listboxId}-opt-${activeIndex}`
+      : undefined;
 
   // If no models in catalog for this agent type, render a simple text input
   if (!hasModels) {
@@ -258,54 +322,70 @@ export const ModelSelect: FC<ModelSelectProps> = ({
         </span>
       </div>
 
-      {isOpen && (
-        <div id={listboxId} className={DROPDOWN_CLASSES} role="listbox">
-          {/* Clear / No override option */}
-          <button
-            type="button"
-            id={`${listboxId}-opt-0`}
-            className={`${OPTION_CLASSES} text-fg-muted italic ${activeIndex === 0 ? 'bg-surface-hover' : 'hover:bg-surface-hover'}`}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => handleSelect(NO_OVERRIDE)}
-            role="option"
-            aria-selected={value === ''}
+      {isOpen &&
+        createPortal(
+          <div
+            id={listboxId}
+            className={DROPDOWN_CLASSES}
+            style={{
+              position: 'fixed',
+              zIndex: 50,
+              ...(() => {
+                const container = containerRef.current;
+                if (!container) return {};
+                const r = container.getBoundingClientRect();
+                return { top: r.bottom + 4, left: r.left, width: r.width };
+              })(),
+            }}
+            role="listbox"
           >
-            No override (use default)
-          </button>
+            {/* Clear / No override option */}
+            <button
+              type="button"
+              id={`${listboxId}-opt-0`}
+              className={`${OPTION_CLASSES} text-fg-muted italic ${activeIndex === 0 ? 'bg-surface-hover' : 'hover:bg-surface-hover'}`}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handleSelect(NO_OVERRIDE)}
+              role="option"
+              aria-selected={value === ''}
+            >
+              No override (use default)
+            </button>
 
-          {filteredGroups.map((group) => (
-            <div key={group.label} role="group" aria-label={group.label}>
-              <div className={GROUP_LABEL_CLASSES}>{group.label}</div>
-              {group.models.map((model) => {
-                // Index 0 is "No override", so real models start at 1
-                optionIndex++;
-                const idx = optionIndex;
-                return (
-                  <button
-                    type="button"
-                    key={model.id}
-                    id={`${listboxId}-opt-${idx}`}
-                    className={`${OPTION_CLASSES} ${model.id === value ? 'bg-accent-tint font-medium' : ''} ${activeIndex === idx ? 'bg-surface-hover' : 'hover:bg-surface-hover'}`}
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => handleSelect(model.id)}
-                    role="option"
-                    aria-selected={model.id === value}
-                  >
-                    <span>{model.name}</span>
-                    <span className="ml-2 text-xs text-fg-muted font-mono">{model.id}</span>
-                  </button>
-                );
-              })}
-            </div>
-          ))}
+            {filteredGroups.map((group) => (
+              <div key={group.label} role="group" aria-label={group.label}>
+                <div className={GROUP_LABEL_CLASSES}>{group.label}</div>
+                {group.models.map((model) => {
+                  // Index 0 is "No override", so real models start at 1
+                  optionIndex++;
+                  const idx = optionIndex;
+                  return (
+                    <button
+                      type="button"
+                      key={model.id}
+                      id={`${listboxId}-opt-${idx}`}
+                      className={`${OPTION_CLASSES} ${model.id === value ? 'bg-accent-tint font-medium' : ''} ${activeIndex === idx ? 'bg-surface-hover' : 'hover:bg-surface-hover'}`}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => handleSelect(model.id)}
+                      role="option"
+                      aria-selected={model.id === value}
+                    >
+                      <span>{model.name}</span>
+                      <span className="ml-2 text-xs text-fg-muted font-mono">{model.id}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
 
-          {filteredGroups.length === 0 && filterText && (
-            <div className="px-3 py-2 text-sm text-fg-muted">
-              No matching models — press Enter to use &quot;{filterText}&quot; as custom model
-            </div>
-          )}
-        </div>
-      )}
+            {filteredGroups.length === 0 && filterText && (
+              <div className="px-3 py-2 text-sm text-fg-muted">
+                No matching models — press Enter to use &quot;{filterText}&quot; as custom model
+              </div>
+            )}
+          </div>,
+          document.body
+        )}
     </div>
   );
 };

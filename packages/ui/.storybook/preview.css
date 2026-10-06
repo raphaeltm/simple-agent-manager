@@ -1,0 +1,19 @@
+@import 'tailwindcss';
+@import './sam-tailwind-theme.css';
+@import '../src/styles.css';
+@source '../src/**/*.{ts,tsx}';
+
+html,
+body,
+#storybook-root {
+  min-height: 100%;
+}
+
+body {
+  box-sizing: border-box;
+  margin: 0;
+  padding: var(--sam-space-6);
+  background: var(--sam-color-bg-canvas);
+  color: var(--sam-color-fg-primary);
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+}

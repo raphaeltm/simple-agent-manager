@@ -1,5 +1,8 @@
 import type { BootstrapTokenData } from '@simple-agent-manager/shared';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
 // Mock KV namespace
 const mockKV = {
@@ -10,11 +13,37 @@ const mockKV = {
 
 const mockEnv = {
   ENCRYPTION_KEY: 'iZEI8rg5FHtTo2yvt6Qw3m4z6aTfqj5MdLEGqOvdqw0=',
+  DATABASE: undefined as unknown as D1Database,
 };
+
+let sqlite: Database.Database;
+
+function installBootstrapLedger(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE bootstrap_token_consumes (
+      token_hash TEXT PRIMARY KEY NOT NULL,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      consumed_at INTEGER
+    );
+  `);
+}
+
+async function tokenHash(token: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
 
 describe('Bootstrap Service', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
+    sqlite = new Database(':memory:');
+    installBootstrapLedger(sqlite);
+    mockEnv.DATABASE = createSqliteD1(sqlite);
+  });
+
+  afterEach(() => {
+    sqlite.close();
   });
 
   describe('generateBootstrapToken', () => {
@@ -45,7 +74,7 @@ describe('Bootstrap Service', () => {
   });
 
   describe('storeBootstrapToken', () => {
-    it('should store token data in KV with 15-minute TTL', async () => {
+    it('should store token data in KV with the default TTL', async () => {
       const { storeBootstrapToken } = await import(
         '../../../src/services/bootstrap'
       );
@@ -79,7 +108,7 @@ describe('Bootstrap Service', () => {
     });
   });
 
-  describe('redeemBootstrapToken (get + delete for single-use)', () => {
+  describe('redeemBootstrapToken (D1 atomic consume + KV payload)', () => {
     it('should return null for non-existent token', async () => {
       const { redeemBootstrapToken } = await import(
         '../../../src/services/bootstrap'
@@ -139,6 +168,134 @@ describe('Bootstrap Service', () => {
       // Token should be deleted after redemption (single-use)
       expect(mockKV.delete).toHaveBeenCalledWith('bootstrap:valid-token');
     });
+
+    it('allows exactly one concurrent redemption across requests', async () => {
+      const { redeemBootstrapToken, registerBootstrapTokenConsume } = await import(
+        '../../../src/services/bootstrap'
+      );
+      const { encrypt } = await import('../../../src/services/encryption');
+
+      const encryptedCallbackToken = await encrypt('jwt-callback-token', mockEnv.ENCRYPTION_KEY);
+      const data: BootstrapTokenData = {
+        workspaceId: 'ws-atomic',
+        encryptedHetznerToken: 'encrypted-hetzner',
+        hetznerTokenIv: 'hetzner-iv',
+        encryptedCallbackToken: encryptedCallbackToken.ciphertext,
+        callbackTokenIv: encryptedCallbackToken.iv,
+        encryptedGithubToken: null,
+        githubTokenIv: null,
+        createdAt: new Date().toISOString(),
+      };
+
+      await registerBootstrapTokenConsume(
+        mockEnv.DATABASE,
+        'atomic-token',
+        new Date(Date.now() + 60_000).toISOString()
+      );
+      mockKV.get.mockResolvedValue(data);
+
+      const results = await Promise.all([
+        redeemBootstrapToken(mockKV as unknown as KVNamespace, 'atomic-token', mockEnv),
+        redeemBootstrapToken(mockKV as unknown as KVNamespace, 'atomic-token', mockEnv),
+      ]);
+
+      expect(results.filter(Boolean)).toHaveLength(1);
+      expect(results.filter((result) => result === null)).toHaveLength(1);
+      expect(mockKV.delete).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects replay after a successful registered-token consume', async () => {
+      const { redeemBootstrapToken, registerBootstrapTokenConsume } = await import(
+        '../../../src/services/bootstrap'
+      );
+      const { encrypt } = await import('../../../src/services/encryption');
+
+      const encryptedCallbackToken = await encrypt('jwt-callback-token', mockEnv.ENCRYPTION_KEY);
+      const data: BootstrapTokenData = {
+        workspaceId: 'ws-once',
+        encryptedHetznerToken: 'encrypted-hetzner',
+        hetznerTokenIv: 'hetzner-iv',
+        encryptedCallbackToken: encryptedCallbackToken.ciphertext,
+        callbackTokenIv: encryptedCallbackToken.iv,
+        encryptedGithubToken: null,
+        githubTokenIv: null,
+        createdAt: new Date().toISOString(),
+      };
+
+      await registerBootstrapTokenConsume(
+        mockEnv.DATABASE,
+        'single-use-registered',
+        new Date(Date.now() + 60_000).toISOString()
+      );
+      mockKV.get.mockResolvedValueOnce(data);
+
+      const first = await redeemBootstrapToken(
+        mockKV as unknown as KVNamespace,
+        'single-use-registered',
+        mockEnv
+      );
+      const second = await redeemBootstrapToken(
+        mockKV as unknown as KVNamespace,
+        'single-use-registered',
+        mockEnv
+      );
+
+      expect(first?.workspaceId).toBe('ws-once');
+      expect(second).toBeNull();
+      expect(mockKV.get).toHaveBeenCalledTimes(1);
+    });
+
+    it('fails closed for expired registered tokens without reading KV', async () => {
+      const { redeemBootstrapToken, registerBootstrapTokenConsume } = await import(
+        '../../../src/services/bootstrap'
+      );
+
+      await registerBootstrapTokenConsume(
+        mockEnv.DATABASE,
+        'expired-registered',
+        new Date(Date.now() - 1_000).toISOString()
+      );
+
+      const result = await redeemBootstrapToken(
+        mockKV as unknown as KVNamespace,
+        'expired-registered',
+        mockEnv
+      );
+
+      expect(result).toBeNull();
+      expect(mockKV.get).not.toHaveBeenCalled();
+      expect(mockKV.delete).not.toHaveBeenCalled();
+    });
+
+    it('allows one KV-only legacy token redemption through atomic insert-wins claim', async () => {
+      const { redeemBootstrapToken } = await import('../../../src/services/bootstrap');
+
+      const data: BootstrapTokenData = {
+        workspaceId: 'ws-legacy',
+        encryptedHetznerToken: 'encrypted-hetzner',
+        hetznerTokenIv: 'hetzner-iv',
+        callbackToken: 'legacy-callback-token',
+        encryptedGithubToken: null,
+        githubTokenIv: null,
+        createdAt: new Date().toISOString(),
+      };
+      mockKV.get.mockResolvedValue(data);
+
+      const results = await Promise.all([
+        redeemBootstrapToken(mockKV as unknown as KVNamespace, 'legacy-kv-only', mockEnv),
+        redeemBootstrapToken(mockKV as unknown as KVNamespace, 'legacy-kv-only', mockEnv),
+      ]);
+
+      expect(results.filter(Boolean)).toHaveLength(1);
+      expect(results.find(Boolean)?.callbackToken).toBe('legacy-callback-token');
+      expect(mockKV.delete).toHaveBeenCalledTimes(1);
+
+      const rows = sqlite.prepare('SELECT * FROM bootstrap_token_consumes WHERE token_hash = ?').all(
+        await tokenHash('legacy-kv-only')
+      );
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ consumed_at: expect.any(Number) });
+    });
   });
 
   describe('Token expiry (KV TTL)', () => {
@@ -167,7 +324,7 @@ describe('Bootstrap Service', () => {
         mockEnv
       );
 
-      // Verify TTL is set to 900 seconds (15 minutes)
+      // Verify the default TTL is used when no override is configured
       expect(mockKV.put).toHaveBeenCalledWith(
         expect.any(String),
         expect.any(String),

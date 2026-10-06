@@ -6,7 +6,7 @@
 //
 // Timestamp conventions:
 //   - BetterAuth tables (users, sessions, accounts, verifications, agentSettings,
-//     smokeTestTokens) use `integer('...', { mode: 'timestamp_ms' })` which stores
+//     apiTokens) use `integer('...', { mode: 'timestamp_ms' })` which stores
 //     millisecond-epoch integers. Drizzle auto-converts JS Date objects.
 //   - All other tables use `text('...')` with `DEFAULT CURRENT_TIMESTAMP` or
 //     `DEFAULT (datetime('now'))`, storing ISO-8601 strings (e.g. "2026-04-12 14:30:00").
@@ -34,8 +34,9 @@
 //     a session in the ProjectData Durable Object, not a D1 table).
 //
 // Credential tables:
-//   - `credentials`: Per-user credentials (BYOC model). Users provide their own
-//     cloud provider tokens and agent API keys. Encrypted per-user, cascade on
+//   - `credentials`: Legacy per-user/project credentials (BYOC model) plus
+//     non-user-facing capacity-source FK mirrors. Users provide their own cloud
+//     provider tokens and agent API keys. Encrypted per credential, cascade on
 //     user delete.
 //   - `platformCredentials`: Admin-managed fallback credentials shared across
 //     users. Used when a user lacks their own credential. No cascade on creator
@@ -45,7 +46,64 @@
 
 import { DEFAULT_WORKSPACE_PROFILE } from '@simple-agent-manager/shared';
 import { sql } from 'drizzle-orm';
-import { index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import {
+  index,
+  integer,
+  primaryKey,
+  real,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from 'drizzle-orm/sqlite-core';
+
+const capacityPlacementColumns = () => ({
+  /** Capacity pool selected for placement/provisioning. Null for legacy rows. */
+  capacityPoolId: text('capacity_pool_id').references(() => capacityPools.id, {
+    onDelete: 'set null',
+  }),
+  /** Scope snapshot for the selected capacity pool: 'installation' | 'user' | 'project'. */
+  capacityPoolScope: text('capacity_pool_scope'),
+  /** Pool revision used for placement; copied so later edits do not rewrite audit history. */
+  capacityPoolRevision: integer('capacity_pool_revision'),
+  /** Capacity source selected from the pool. */
+  capacitySourceId: text('capacity_source_id').references(() => capacitySources.id, {
+    onDelete: 'set null',
+  }),
+  /** Capacity source row generation used for final authority checks. */
+  capacitySourceGeneration: integer('capacity_source_generation'),
+  /** Non-secret capacity source external reference snapshot used for attachment fencing. */
+  capacitySourceExternalRef: text('capacity_source_external_ref'),
+  /** Capacity pool candidate selected for placement/provisioning. Snapshot only. */
+  capacityPoolCandidateId: text('capacity_pool_candidate_id'),
+  /** Credential provenance snapshot used for placement/provisioning, without secret material. */
+  placementCredentialSource: text('placement_credential_source'),
+  /** Non-secret reference to the canonical credential record used for placement/provisioning. */
+  placementCredentialReference: text('placement_credential_reference'),
+  /** Optional credential version snapshot for future rotating credential records. */
+  placementCredentialVersion: integer('placement_credential_version'),
+  /** Effective placement settings generation used to derive the selected authority. */
+  selectionSettingsVersion: integer('selection_settings_version'),
+  /** Stable semantic authority for the selected pool/source/candidate/settings plan. */
+  capacityAuthorityGeneration: integer('capacity_authority_generation'),
+  /** Project scope snapshot for project-scoped pools. */
+  capacityPoolProjectId: text('capacity_pool_project_id').references(() => projects.id, {
+    onDelete: 'set null',
+  }),
+  /** Workload role used for placement, e.g. 'workspace' or 'deployment'. */
+  workloadRole: text('workload_role'),
+  /** Provider-native offering selected from a compute pool. */
+  providerInstanceType: text('provider_instance_type'),
+  providerInstanceVcpuCount: integer('provider_instance_vcpu_count'),
+  providerInstanceMemoryMb: integer('provider_instance_memory_mb'),
+  providerInstanceDiskGb: integer('provider_instance_disk_gb'),
+  providerInstanceBootDiskSizeGb: integer('provider_instance_boot_disk_size_gb'),
+  providerInstanceImage: text('provider_instance_image'),
+  providerInstanceArchitecture: text('provider_instance_architecture'),
+  providerInstancePriceDisplay: text('provider_instance_price_display'),
+  providerInstancePriceCurrency: text('provider_instance_price_currency'),
+  providerInstancePriceMonthlyCents: integer('provider_instance_price_monthly_cents'),
+  providerInstancePriceHourlyMicros: integer('provider_instance_price_hourly_micros'),
+});
 
 // =============================================================================
 // Users (BetterAuth compatible + custom fields)
@@ -71,6 +129,50 @@ export const users = sqliteTable('users', {
     .notNull()
     .default(sql`(cast(unixepoch() * 1000 as integer))`),
 });
+
+// =============================================================================
+// Platform Settings
+// =============================================================================
+export const platformSettings = sqliteTable('platform_settings', {
+  key: text('key').primaryKey(),
+  value: text('value').notNull(),
+  updatedAt: text('updated_at')
+    .notNull()
+    .default(sql`CURRENT_TIMESTAMP`),
+  updatedBy: text('updated_by').references(() => users.id, { onDelete: 'set null' }),
+});
+
+// =============================================================================
+// AI Spend Rate Limits
+// =============================================================================
+export const aiSpendRateLimits = sqliteTable(
+  'ai_spend_rate_limits',
+  {
+    bucket: text('bucket').notNull(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    windowStart: integer('window_start').notNull(),
+    count: integer('count').notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.bucket, table.userId] }),
+  })
+);
+
+// =============================================================================
+// Workspace Callback Token Renewal Rate Limits
+// =============================================================================
+export const workspaceCallbackTokenRenewalRateLimits = sqliteTable(
+  'workspace_callback_token_renewal_rate_limits',
+  {
+    workspaceId: text('workspace_id')
+      .primaryKey()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    windowStart: integer('window_start').notNull(),
+    count: integer('count').notNull(),
+  }
+);
 
 // =============================================================================
 // Sessions (BetterAuth)
@@ -203,6 +305,56 @@ export const credentials = sqliteTable(
 );
 
 // =============================================================================
+// Agent Credential Setup Sessions (guided Cloudflare Sandbox native login)
+//
+// Ephemeral, short-lived (TTL ~10-15 min) sessions that run the provider login
+// CLI inside a Cloudflare Sandbox,
+// capture the resulting credential server-side, and save it via the normal
+// encrypted credentials path. SECURITY: NO secret/credential material is ever
+// stored on this table — only non-secret lifecycle metadata.
+// =============================================================================
+export const agentCredentialSetupSessions = sqliteTable(
+  'agent_credential_setup_sessions',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** Null for user-scoped setup; set to project id for a project-scoped override. */
+    projectId: text('project_id').references(() => projects.id, { onDelete: 'cascade' }),
+    scope: text('scope').notNull().default('user'), // 'user' | 'project'
+    agentType: text('agent_type').notNull(),
+    credentialKind: text('credential_kind').notNull().default('oauth-token'),
+    /** creating|admitting|provisioning|waiting_for_user|exchanging|capturing|saving|completed|failed|cancelled|expired */
+    status: text('status').notNull().default('creating'),
+    /** Cloudflare Sandbox id (== setup session id, 1:1, never shared across users). */
+    sandboxId: text('sandbox_id').notNull(),
+    /** Concurrency-pool lease id; released on teardown. */
+    poolLeaseId: text('pool_lease_id'),
+    errorCode: text('error_code'),
+    errorMessage: text('error_message'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    startedAt: text('started_at'),
+    expiresAt: text('expires_at').notNull(),
+    completedAt: text('completed_at'),
+  },
+  (table) => ({
+    oneActive: uniqueIndex('idx_acss_one_active')
+      .on(table.userId, table.agentType)
+      .where(
+        sql`status IN ('creating', 'admitting', 'provisioning', 'waiting_for_user', 'exchanging', 'capturing', 'saving')`
+      ),
+    sweep: index('idx_acss_sweep').on(table.status, table.expiresAt),
+    userLookup: index('idx_acss_user').on(table.userId, table.createdAt),
+  })
+);
+
+// =============================================================================
 // GitHub App Installations
 // =============================================================================
 export const githubInstallationAccounts = sqliteTable(
@@ -238,6 +390,7 @@ export const githubInstallations = sqliteTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     installationId: text('installation_id').notNull(),
+    externalInstallationId: text('external_installation_id'),
     accountType: text('account_type').notNull(),
     accountName: text('account_name').notNull(),
     createdAt: text('created_at')
@@ -248,10 +401,9 @@ export const githubInstallations = sqliteTable(
       .default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => ({
-    userInstallationIdx: uniqueIndex('idx_github_installations_user_installation').on(
-      table.userId,
-      table.installationId
-    ),
+    userInstallationIdx: uniqueIndex('idx_github_installations_user_external_installation')
+      .on(table.userId, table.externalInstallationId)
+      .where(sql`external_installation_id IS NOT NULL`),
   })
 );
 
@@ -282,6 +434,8 @@ export const projects = sqliteTable(
     // Per-project defaults (null = use platform defaults from env vars).
     // Resolved via `resolveProjectScalingConfig()` in task-runner and node services.
     defaultVmSize: text('default_vm_size'),
+    /** Project-layer modern workload requirements JSON. Null = inherit lower layers. */
+    resourceRequirementsJson: text('resource_requirements_json'),
     defaultAgentType: text('default_agent_type'),
     defaultWorkspaceProfile: text('default_workspace_profile'),
     /** Default devcontainer config name for new workspaces. null = auto-discover default. */
@@ -301,9 +455,16 @@ export const projects = sqliteTable(
     maxDispatchDepth: integer('max_dispatch_depth'),
     maxSubTasksPerTask: integer('max_sub_tasks_per_task'),
     warmNodeTimeoutMs: integer('warm_node_timeout_ms'),
+    /**
+     * Retired 2026-09-25. The per-node workspace-count cap no longer exists; placement is decided
+     * by CPU/memory/disk reservations and exclusiveNode. The column stays for audit history only
+     * (never read, never written, not exposed by the API).
+     */
     maxWorkspacesPerNode: integer('max_workspaces_per_node'),
     nodeCpuThresholdPercent: integer('node_cpu_threshold_percent'),
     nodeMemoryThresholdPercent: integer('node_memory_threshold_percent'),
+    /** Per-project max triggers override. null = use platform default (MAX_TRIGGERS_PER_PROJECT). */
+    maxTriggers: integer('max_triggers'),
     status: text('status').notNull().default('active'),
     lastActivityAt: text('last_activity_at'),
     activeSessionCount: integer('active_session_count').notNull().default(0),
@@ -342,6 +503,173 @@ export const projects = sqliteTable(
   })
 );
 
+export const projectMembers = sqliteTable(
+  'project_members',
+  {
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    role: text('role').notNull().default('owner'),
+    status: text('status').notNull().default('active'),
+    invitedBy: text('invited_by').references(() => users.id, { onDelete: 'set null' }),
+    removedAt: text('removed_at'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.projectId, table.userId] }),
+    userStatusIdx: index('idx_project_members_user_status').on(table.userId, table.status),
+    projectStatusIdx: index('idx_project_members_project_status').on(table.projectId, table.status),
+  })
+);
+
+export const projectOwnershipTransfers = sqliteTable('project_ownership_transfers', {
+  id: text('id').primaryKey(),
+  projectId: text('project_id').notNull(),
+  fromUserId: text('from_user_id').notNull(),
+  toUserId: text('to_user_id').notNull(),
+  initiatedBy: text('initiated_by').notNull(),
+  completedAt: text('completed_at'),
+  createdAt: text('created_at')
+    .notNull()
+    .default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const projectMemberOffboardingPlans = sqliteTable(
+  'project_member_offboarding_plans',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id').notNull(),
+    memberUserId: text('member_user_id').notNull(),
+    requestedBy: text('requested_by').notNull(),
+    status: text('status').notNull().default('preview'),
+    resourceSummaryJson: text('resource_summary_json').notNull(),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    expiresAt: text('expires_at').notNull(),
+    appliedAt: text('applied_at'),
+  },
+  (table) => ({
+    projectMemberStatusIdx: index('idx_project_offboarding_plans_project_member_status').on(
+      table.projectId,
+      table.memberUserId,
+      table.status
+    ),
+  })
+);
+
+export const projectMemberOffboardingResourceActions = sqliteTable(
+  'project_member_offboarding_resource_actions',
+  {
+    id: text('id').primaryKey(),
+    planId: text('plan_id')
+      .notNull()
+      .references(() => projectMemberOffboardingPlans.id, { onDelete: 'cascade' }),
+    resourceKind: text('resource_kind').notNull(),
+    resourceId: text('resource_id').notNull(),
+    credentialSourceBefore: text('credential_source_before').notNull(),
+    attributionUserIdBefore: text('attribution_user_id_before'),
+    attributionProjectIdBefore: text('attribution_project_id_before'),
+    recommendedAction: text('recommended_action').notNull(),
+    selectedAction: text('selected_action'),
+    status: text('status').notNull().default('pending'),
+    detailsJson: text('details_json').notNull(),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    planKindIdx: index('idx_project_offboarding_actions_plan_kind').on(
+      table.planId,
+      table.resourceKind
+    ),
+  })
+);
+
+export const projectInviteLinks = sqliteTable(
+  'project_invite_links',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    tokenHash: text('token_hash').notNull().unique(),
+    createdBy: text('created_by').references(() => users.id, { onDelete: 'set null' }),
+    expiresAt: text('expires_at').notNull(),
+    revokedAt: text('revoked_at'),
+    revokedBy: text('revoked_by').references(() => users.id, { onDelete: 'set null' }),
+    lastUsedAt: text('last_used_at'),
+    useCount: integer('use_count').notNull().default(0),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    projectActiveIdx: index('idx_project_invite_links_project').on(
+      table.projectId,
+      table.revokedAt,
+      table.expiresAt
+    ),
+  })
+);
+
+export const projectAccessRequests = sqliteTable(
+  'project_access_requests',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    inviteLinkId: text('invite_link_id').references(() => projectInviteLinks.id, {
+      onDelete: 'set null',
+    }),
+    requesterUserId: text('requester_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    status: text('status').notNull().default('pending'),
+    githubAccessStatus: text('github_access_status').notNull().default('unchecked'),
+    githubAccessCheckedAt: text('github_access_checked_at'),
+    githubAccessMessage: text('github_access_message'),
+    requestedAt: text('requested_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    decidedAt: text('decided_at'),
+    decidedBy: text('decided_by').references(() => users.id, { onDelete: 'set null' }),
+    decisionNote: text('decision_note'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    projectRequesterUnique: uniqueIndex('idx_project_access_requests_project_requester').on(
+      table.projectId,
+      table.requesterUserId
+    ),
+    projectStatusIdx: index('idx_project_access_requests_project_status').on(
+      table.projectId,
+      table.status,
+      table.requestedAt
+    ),
+  })
+);
+
 /** Per-project runtime environment variables injected into workspaces.
  *  Secret values are AES-256-GCM encrypted; non-secret values are stored in plaintext. */
 export const projectRuntimeEnvVars = sqliteTable(
@@ -368,7 +696,10 @@ export const projectRuntimeEnvVars = sqliteTable(
       .default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => ({
-    projectKeyUnique: uniqueIndex('idx_project_runtime_env_project_key').on(table.projectId, table.envKey),
+    projectKeyUnique: uniqueIndex('idx_project_runtime_env_project_key').on(
+      table.projectId,
+      table.envKey
+    ),
     userProjectIdx: index('idx_project_runtime_env_user_project').on(table.userId, table.projectId),
   })
 );
@@ -403,7 +734,88 @@ export const projectRuntimeFiles = sqliteTable(
       table.projectId,
       table.filePath
     ),
-    userProjectIdx: index('idx_project_runtime_files_user_project').on(table.userId, table.projectId),
+    userProjectIdx: index('idx_project_runtime_files_user_project').on(
+      table.userId,
+      table.projectId
+    ),
+  })
+);
+
+/** Additional same-installation GitHub repositories a project's workspace tokens
+ *  may access (Codespaces-style "additional repository access"). The primary
+ *  project repository is always included implicitly and is NOT stored here.
+ *  Each row is verified (user∩app access) at add time and re-verified at every
+ *  token mint. Workspace `/git-token` mints scope `repository_ids` to the primary
+ *  repo plus all active rows here, so same-org submodules can be fetched. */
+export const projectGithubRepositories = sqliteTable(
+  'project_github_repositories',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** Full repository name, e.g. "octocat/hello-world". */
+    repository: text('repository').notNull(),
+    /** GitHub numeric repo id captured at verification time (rename-stable). */
+    githubRepoId: integer('github_repo_id').notNull(),
+    /** GitHub GraphQL node id (nullable for legacy/edge cases). */
+    githubRepoNodeId: text('github_repo_node_id'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    projectRepoUnique: uniqueIndex('idx_project_github_repos_project_repo').on(
+      table.projectId,
+      table.repository
+    ),
+    userProjectIdx: index('idx_project_github_repos_user_project').on(
+      table.userId,
+      table.projectId
+    ),
+  })
+);
+
+export const projectGitlabRepositories = sqliteTable(
+  'project_gitlab_repositories',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    host: text('host').notNull(),
+    gitlabProjectId: integer('gitlab_project_id').notNull(),
+    pathWithNamespace: text('path_with_namespace').notNull(),
+    webUrl: text('web_url'),
+    httpUrlToRepo: text('http_url_to_repo').notNull(),
+    defaultBranch: text('default_branch').notNull(),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    projectUnique: uniqueIndex('idx_project_gitlab_repos_project').on(table.projectId),
+    userHostProjectUnique: uniqueIndex('idx_project_gitlab_repos_user_host_project').on(
+      table.userId,
+      table.host,
+      table.gitlabProjectId
+    ),
+    projectUserIdx: index('idx_project_gitlab_repos_project_user').on(
+      table.projectId,
+      table.userId
+    ),
   })
 );
 
@@ -492,6 +904,12 @@ export const tasks = sqliteTable(
     userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    /** Soft cross-store link to the ProjectData chat session backing this task. */
+    chatSessionId: text('chat_session_id'),
+    /** Soft link from a sleeping-session recovery task to the live task whose conversation it resumes. */
+    recoverySourceTaskId: text('recovery_source_task_id'),
+    /** Soft link from a superseded predecessor to the recovery task that took over its conversation. */
+    supersededByTaskId: text('superseded_by_task_id'),
     /** Null for top-level tasks; set for agent-dispatched sub-tasks (dispatch depth > 0). No FK — parent may be in another project's scope. */
     parentTaskId: text('parent_task_id'),
     /** Null until a workspace is assigned during task execution. Set by TaskRunner DO. */
@@ -502,12 +920,18 @@ export const tasks = sqliteTable(
     executionStep: text('execution_step'),
     priority: integer('priority').notNull().default(0),
     agentProfileHint: text('agent_profile_hint'),
+    /** Optional skill selected for repeatable-work configuration. */
+    skillId: text('skill_id'),
+    /** Original skill hint/id requested by the caller. */
+    skillHint: text('skill_hint'),
     startedAt: text('started_at'),
     completedAt: text('completed_at'),
+    terminalTransitionId: text('terminal_transition_id'),
     errorMessage: text('error_message'),
     outputSummary: text('output_summary'),
     outputBranch: text('output_branch'),
     outputPrUrl: text('output_pr_url'),
+    completionEvidence: text('completion_evidence'),
     finalizedAt: text('finalized_at'),
     /** Task execution mode. 'task' = push/PR/complete lifecycle. 'conversation' = human-controlled lifecycle. */
     taskMode: text('task_mode').notNull().default('task'),
@@ -517,6 +941,12 @@ export const tasks = sqliteTable(
     autoProvisionedNodeId: text('auto_provisioned_node_id').references(() => nodes.id, {
       onDelete: 'set null',
     }),
+    /** Warm-pool node claimed by this task until workspace activation or release. */
+    claimedWarmNodeId: text('claimed_warm_node_id').references(() => nodes.id, {
+      onDelete: 'set null',
+    }),
+    /** Fixed timestamp for the warm-pool claim. Cleanup may honor this only for a bounded placement window. */
+    claimedWarmNodeAt: text('claimed_warm_node_at'),
     /** Source that created this task. 'user' = manual, 'cron'/'webhook'/'mcp' = automated. */
     triggeredBy: text('triggered_by').notNull().default('user'),
     /** Soft FK to triggers table (null for user-created tasks). No DB constraint — trigger may be deleted independently. */
@@ -524,11 +954,47 @@ export const tasks = sqliteTable(
     /** Soft FK to trigger_executions table. No DB constraint — execution record may be cleaned up independently. */
     triggerExecutionId: text('trigger_execution_id'),
     /** Whether the agent credential came from the user or the platform. */
-    agentCredentialSource: text('agent_credential_source').default('user'), // 'user' | 'platform'
+    agentCredentialSource: text('agent_credential_source').default('user'), // 'user' | 'project' | 'platform'
+    /** User whose credential attribution is pinned for this task tree. */
+    credentialAttributionUserId: text('credential_attribution_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    /** Project scope used when credentialAttributionSource is 'project'. */
+    credentialAttributionProjectId: text('credential_attribution_project_id').references(
+      () => projects.id,
+      { onDelete: 'set null' }
+    ),
+    /** Root-pinned credential attribution source: 'user' | 'project' | 'platform'. */
+    credentialAttributionSource: text('credential_attribution_source').default('user'),
+    credentialBlockedReason: text('credential_blocked_reason'),
+    credentialBlockedAt: text('credential_blocked_at'),
     /** Null for standalone tasks; set when task belongs to a mission. Set null on mission delete. */
     missionId: text('mission_id').references(() => missions.id, { onDelete: 'set null' }),
     /** Scheduler classification for mission tasks. Null for standalone tasks. */
     schedulerState: text('scheduler_state'),
+    /** Resolved VM size for audit (e.g. 'small', 'medium', 'large'). */
+    requestedVmSize: text('requested_vm_size'),
+    /** Where the VM size came from (e.g. 'task', 'agent-profile', 'project', 'platform'). */
+    requestedVmSizeSource: text('requested_vm_size_source'),
+    /** VM size actually provisioned. Differs from requestedVmSize only when size-fallback descended on capacity exhaustion. Null until an auto-provisioned node succeeds at a smaller size. */
+    provisionedVmSize: text('provisioned_vm_size'),
+    /** JSON snapshot of ResourceRequirements as resolved from the precedence chain. */
+    resourceRequirementsJson: text('resource_requirements_json'),
+    /** Versioned persisted resource intent and resolved reservation plan. */
+    resourceRequirementPlanJson: text('resource_requirement_plan_json'),
+    /** Which level of the precedence chain provided the resource requirements. */
+    resourceRequirementsSource: text('resource_requirements_source'),
+    /** JSON snapshot of ResolvedResourceReservation (scheduler-facing units). */
+    resolvedReservationJson: text('resolved_reservation_json'),
+    /** JSON snapshot of PlacementExplanation (audit trail). */
+    placementExplanationJson: text('placement_explanation_json'),
+    ...capacityPlacementColumns(),
+    /** Durable VM admission status mirrored for UI/API visibility. */
+    admissionState: text('admission_state'),
+    /** Durable VM admission/backpressure reason mirrored for UI/API visibility. */
+    admissionReason: text('admission_reason'),
+    /** Next admission retry/wakeup timestamp, if the task is waiting for capacity. */
+    admissionNextRetryAt: text('admission_next_retry_at'),
     createdBy: text('created_by')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
@@ -551,9 +1017,165 @@ export const tasks = sqliteTable(
     ),
     projectCreatedAtIdx: index('idx_tasks_project_created_at').on(table.projectId, table.createdAt),
     projectUserIdx: index('idx_tasks_project_user').on(table.projectId, table.userId),
+    chatSessionIdUnique: uniqueIndex('idx_tasks_chat_session_id_unique')
+      .on(table.chatSessionId)
+      .where(sql`chat_session_id IS NOT NULL`),
+    recoverySourceTaskIdx: index('idx_tasks_recovery_source_task_id')
+      .on(table.recoverySourceTaskId)
+      .where(sql`recovery_source_task_id IS NOT NULL`),
+    supersededByTaskIdx: index('idx_tasks_superseded_by_task_id')
+      .on(table.supersededByTaskId)
+      .where(sql`superseded_by_task_id IS NOT NULL`),
+    claimedWarmNodeUnique: uniqueIndex('idx_tasks_claimed_warm_node_unique')
+      .on(table.claimedWarmNodeId)
+      .where(
+        sql`claimed_warm_node_id IS NOT NULL AND status NOT IN ('completed', 'failed', 'cancelled')`
+      ),
+    claimedWarmNodeAtIdx: index('idx_tasks_claimed_warm_node_at')
+      .on(table.claimedWarmNodeId, table.claimedWarmNodeAt)
+      .where(
+        sql`claimed_warm_node_id IS NOT NULL AND status IN ('queued', 'delegated', 'in_progress')`
+      ),
+    // Supports the `WHERE workspace_id = ? AND status IN (...)` lookups on the
+    // mass-outage recovery hot path (persistRuntimeRecoveryFailed) and other
+    // workspace-scoped task queries. Partial: most tasks never bind a workspace.
+    workspaceIdIdx: index('idx_tasks_workspace_id')
+      .on(table.workspaceId)
+      .where(sql`workspace_id IS NOT NULL`),
+    triggerExecutionIdIdx: index('idx_tasks_trigger_execution_id')
+      .on(table.triggerExecutionId)
+      .where(sql`trigger_execution_id IS NOT NULL`),
     missionIdIdx: index('idx_tasks_mission_id')
       .on(table.missionId)
       .where(sql`mission_id IS NOT NULL`),
+    admissionStateIdx: index('idx_tasks_admission_state')
+      .on(table.admissionState)
+      .where(sql`admission_state IS NOT NULL`),
+    capacityPoolIdx: index('idx_tasks_capacity_pool')
+      .on(table.capacityPoolId)
+      .where(sql`capacity_pool_id IS NOT NULL`),
+    capacitySourceIdx: index('idx_tasks_capacity_source')
+      .on(table.capacitySourceId)
+      .where(sql`capacity_source_id IS NOT NULL`),
+    capacityPoolCandidateIdx: index('idx_tasks_capacity_pool_candidate')
+      .on(table.capacityPoolCandidateId)
+      .where(sql`capacity_pool_candidate_id IS NOT NULL`),
+    capacityPoolProjectIdx: index('idx_tasks_capacity_pool_project')
+      .on(table.capacityPoolProjectId)
+      .where(sql`capacity_pool_project_id IS NOT NULL`),
+  })
+);
+
+export const vmTaskAdmissions = sqliteTable(
+  'vm_task_admissions',
+  {
+    taskId: text('task_id').primaryKey(),
+    projectId: text('project_id').notNull(),
+    userId: text('user_id').notNull(),
+    provider: text('provider').notNull(),
+    credentialDomainKey: text('credential_domain_key').notNull(),
+    providerDomainKey: text('provider_domain_key').notNull(),
+    scopeKey: text('scope_key').notNull(),
+    requestedVmSize: text('requested_vm_size').notNull(),
+    requestedVmLocation: text('requested_vm_location').notNull(),
+    preferredNodeId: text('preferred_node_id'),
+    state: text('state').notNull().default('queued'),
+    reason: text('reason'),
+    selectedNodeId: text('selected_node_id'),
+    inflightNodeId: text('inflight_node_id'),
+    fencingToken: integer('fencing_token'),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    nextRetryAt: text('next_retry_at'),
+    waitDeadlineAt: text('wait_deadline_at'),
+    providerCategory: text('provider_category'),
+    providerCode: text('provider_code'),
+    providerStatusCode: integer('provider_status_code'),
+    providerMessage: text('provider_message'),
+    enqueuedAt: text('enqueued_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    claimedAt: text('claimed_at'),
+    lastEvaluatedAt: text('last_evaluated_at'),
+    completedAt: text('completed_at'),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    userStateRetryIdx: index('idx_vm_task_admissions_user_state_retry').on(
+      table.userId,
+      table.state,
+      table.nextRetryAt
+    ),
+    scopeStateRetryIdx: index('idx_vm_task_admissions_scope_state_retry').on(
+      table.scopeKey,
+      table.state,
+      table.nextRetryAt
+    ),
+    providerDomainStateRetryIdx: index('idx_vm_task_admissions_provider_domain_state_retry').on(
+      table.providerDomainKey,
+      table.state,
+      table.nextRetryAt
+    ),
+    inflightNodeIdx: index('idx_vm_task_admissions_inflight_node')
+      .on(table.inflightNodeId)
+      .where(sql`inflight_node_id IS NOT NULL`),
+  })
+);
+
+export const vmProvisioningLeases = sqliteTable(
+  'vm_provisioning_leases',
+  {
+    scopeKey: text('scope_key').primaryKey(),
+    ownerTaskId: text('owner_task_id').notNull(),
+    fencingToken: integer('fencing_token').notNull().default(1),
+    provider: text('provider').notNull(),
+    credentialDomainKey: text('credential_domain_key').notNull(),
+    providerDomainKey: text('provider_domain_key').notNull(),
+    requestedVmSize: text('requested_vm_size').notNull(),
+    inflightNodeId: text('inflight_node_id'),
+    acquiredAt: text('acquired_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    heartbeatAt: text('heartbeat_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    expiresAt: text('expires_at').notNull(),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    ownerIdx: index('idx_vm_provisioning_leases_owner').on(table.ownerTaskId),
+    expiresIdx: index('idx_vm_provisioning_leases_expires').on(table.expiresAt),
+    inflightNodeIdx: index('idx_vm_provisioning_leases_inflight_node')
+      .on(table.inflightNodeId)
+      .where(sql`inflight_node_id IS NOT NULL`),
+  })
+);
+
+export const vmProviderCapacityState = sqliteTable(
+  'vm_provider_capacity_state',
+  {
+    providerDomainKey: text('provider_domain_key').primaryKey(),
+    provider: text('provider').notNull(),
+    credentialDomainKey: text('credential_domain_key').notNull(),
+    state: text('state').notNull().default('ok'),
+    reason: text('reason'),
+    providerCategory: text('provider_category'),
+    providerCode: text('provider_code'),
+    providerStatusCode: integer('provider_status_code'),
+    providerMessage: text('provider_message'),
+    failureCount: integer('failure_count').notNull().default(0),
+    retryAt: text('retry_at'),
+    lastFailureAt: text('last_failure_at'),
+    lastSuccessAt: text('last_success_at'),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    retryIdx: index('idx_vm_provider_capacity_state_retry').on(table.state, table.retryAt),
   })
 );
 
@@ -596,13 +1218,119 @@ export const taskStatusEvents = sqliteTable(
       .default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => ({
-    taskCreatedAtIdx: index('idx_task_status_events_task_created_at').on(table.taskId, table.createdAt),
+    taskCreatedAtIdx: index('idx_task_status_events_task_created_at').on(
+      table.taskId,
+      table.createdAt
+    ),
+  })
+);
+
+export const taskSubmissionCheckpoints = sqliteTable(
+  'task_submission_checkpoints',
+  {
+    taskId: text('task_id')
+      .primaryKey()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    chatSessionId: text('chat_session_id').notNull(),
+    initialMessageId: text('initial_message_id').notNull(),
+    initialStatusEventId: text('initial_status_event_id')
+      .notNull()
+      .references(() => taskStatusEvents.id, { onDelete: 'cascade' }),
+    sourceKind: text('source_kind').notNull(),
+    sourceId: text('source_id').notNull(),
+    sourceExecutionId: text('source_execution_id').notNull(),
+    triggeredBy: text('triggered_by').notNull(),
+    intentFingerprint: text('intent_fingerprint').notNull(),
+    acceptedSnapshotJson: text('accepted_snapshot_json').notNull(),
+    branchName: text('branch_name').notNull(),
+    taskTitle: text('task_title').notNull(),
+    checkpointState: text('checkpoint_state').notNull().default('d1_committed'),
+    projectDataCommittedAt: text('project_data_committed_at'),
+    runnerStartAttemptedAt: text('runner_start_attempted_at'),
+    runnerStartedAt: text('runner_started_at'),
+    terminalObservedAt: text('terminal_observed_at'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    chatSessionIdUnique: uniqueIndex('idx_task_submission_checkpoints_chat_session').on(
+      table.chatSessionId
+    ),
+    initialMessageIdUnique: uniqueIndex('idx_task_submission_checkpoints_initial_message').on(
+      table.initialMessageId
+    ),
+    initialStatusEventIdUnique: uniqueIndex(
+      'idx_task_submission_checkpoints_initial_status_event'
+    ).on(table.initialStatusEventId),
+    sourceUnique: uniqueIndex('idx_task_submission_checkpoints_source').on(
+      table.projectId,
+      table.sourceKind,
+      table.sourceId,
+      table.sourceExecutionId
+    ),
+    stateIdx: index('idx_task_submission_checkpoints_state').on(
+      table.checkpointState,
+      table.updatedAt
+    ),
+  })
+);
+
+export const reservedTaskSessionRevocations = sqliteTable(
+  'reserved_task_session_revocations',
+  {
+    projectId: text('project_id').notNull(),
+    chatSessionId: text('chat_session_id').notNull(),
+    taskId: text('task_id').notNull(),
+    reason: text('reason').notNull(),
+    source: text('source').notNull(),
+    revokedAt: text('revoked_at').notNull(),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.projectId, table.chatSessionId] }),
+    taskIdx: index('idx_reserved_task_session_revocations_task').on(table.taskId),
   })
 );
 
 // =============================================================================
 // Nodes
 // =============================================================================
+export const nodeHealthEvents = sqliteTable(
+  'node_health_events',
+  {
+    id: text('id').primaryKey(),
+    nodeId: text('node_id').notNull(),
+    episodeStartedAt: text('episode_started_at').notNull(),
+    event: text('event').notNull(),
+    reason: text('reason').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => ({
+    episodeEventIdx: uniqueIndex('idx_node_health_events_episode_event').on(
+      table.nodeId,
+      table.episodeStartedAt,
+      table.event,
+      table.reason
+    ),
+    nodeCreatedIdx: index('idx_node_health_events_node_created').on(table.nodeId, table.createdAt),
+  })
+);
+
 export const nodes = sqliteTable(
   'nodes',
   {
@@ -616,19 +1344,76 @@ export const nodes = sqliteTable(
     vmLocation: text('vm_location').notNull().default('nbg1'),
     cloudProvider: text('cloud_provider'),
     providerInstanceId: text('provider_instance_id'),
+    observedProviderInstanceType: text('observed_provider_instance_type'),
+    observedProviderInstanceVcpuCount: integer('observed_provider_instance_vcpu_count'),
+    observedProviderInstanceMemoryMb: integer('observed_provider_instance_memory_mb'),
+    observedProviderInstanceDiskGb: integer('observed_provider_instance_disk_gb'),
+    observedHardwareJson: text('observed_hardware_json'),
+    observedHardwareSource: text('observed_hardware_source'),
     ipAddress: text('ip_address'),
     backendDnsRecordId: text('backend_dns_record_id'),
     lastHeartbeatAt: text('last_heartbeat_at'),
     /** ISO-8601 timestamp from VM agent /ready after system provisioning completes. */
     agentReadyAt: text('agent_ready_at'),
+    /** Build identity reported by the VM agent. Used to drain incompatible rollout generations. */
+    agentVersion: text('agent_version'),
     healthStatus: text('health_status').notNull().default('unhealthy'),
     heartbeatStaleAfterSeconds: integer('heartbeat_stale_after_seconds').notNull().default(180),
     lastMetrics: text('last_metrics'),
     /** ISO-8601 timestamp when node entered warm pool. Null if node is not warm. Used by NodeLifecycle DO for timeout. */
     warmSince: text('warm_since'),
-    /** 'user' = provisioned with user's own credential; 'platform' = provisioned with platform credential. */
+    /**
+     * 'user' = provisioned with user's own credential; 'platform' = provisioned with platform
+     * credential; 'self-hosted' = user-owned (BYO) node SAM provisioned nothing for ($0 compute).
+     */
     credentialSource: text('credential_source').default('user'),
+    /** User whose credential attribution was used to provision this node. */
+    credentialAttributionUserId: text('credential_attribution_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    /** Project scope used when credentialAttributionSource is 'project'. */
+    credentialAttributionProjectId: text('credential_attribution_project_id').references(
+      () => projects.id,
+      { onDelete: 'set null' }
+    ),
+    /** Credential attribution source used at node creation: 'user' | 'project' | 'platform'. */
+    credentialAttributionSource: text('credential_attribution_source').default('user'),
+    ...capacityPlacementColumns(),
+    /** JSON snapshot of PlacementExplanation for node-level provisioning audit. */
+    placementExplanationJson: text('placement_explanation_json'),
+    offboardingStatus: text('offboarding_status'),
+    offboardingBlockedReason: text('offboarding_blocked_reason'),
+    offboardingBlockedAt: text('offboarding_blocked_at'),
+    /** 'workspace' = ephemeral task/dev node (default); 'deployment' = long-lived app-hosting node. */
+    nodeRole: text('node_role').notNull().default('workspace'),
+    /** 'shared' = eligible for multi-tenant placement; 'exclusive' = one deployment environment only. */
+    nodeMode: text('node_mode').notNull().default('shared'),
+    /** Runtime substrate: 'vm' (default) or 'cf-container' for the Sandbox spike. */
+    runtime: text('runtime').notNull().default('vm'),
+    /**
+     * Ownership/lifecycle class: 'managed' (default, SAM-provisioned) or 'user-owned' (BYO
+     * enrolled machine). Drives lifecycle guards, billing, quota, and UI. Orthogonal to `runtime`.
+     */
+    nodeClass: text('node_class').notNull().default('managed'),
+    /** Reachability transport: 'vm-public-dns' | 'cloudflare-tunnel'. Null for implicit transport. */
+    transport: text('transport'),
+    /** Cloudflare Tunnel UUID for user-owned tunnel nodes. Null otherwise. */
+    tunnelId: text('tunnel_id'),
+    /** Cloudflare Tunnel display name for user-owned tunnel nodes. Null otherwise. */
+    tunnelName: text('tunnel_name'),
     errorMessage: text('error_message'),
+    /** Durable runtime absence proof; cleared before any provider create request. */
+    runtimeTerminationConfirmedAt: text('runtime_termination_confirmed_at'),
+    /** Server-written identity rotated whenever the runtime behind this node row is replaced. */
+    runtimeIncarnationId: text('runtime_incarnation_id'),
+    /**
+     * SHA-256 fingerprint of the encrypted provider credential used for this runtime. The
+     * fingerprint is pinned before provider I/O so strict deletion cannot follow a mutable
+     * credential row into a different provider account.
+     */
+    placementCredentialFingerprint: text('placement_credential_fingerprint'),
+    /** Candidate-page escape after cleanup failure; ISO-8601 UTC timestamp. */
+    cleanupBackoffUntil: text('cleanup_backoff_until'),
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
@@ -638,6 +1423,23 @@ export const nodes = sqliteTable(
   },
   (table) => ({
     userIdIdx: index('idx_nodes_user_id').on(table.userId),
+    runtimeIdx: index('idx_nodes_runtime').on(table.runtime),
+    nodeClassIdx: index('idx_nodes_node_class').on(table.nodeClass),
+    capacityPoolIdx: index('idx_nodes_capacity_pool')
+      .on(table.capacityPoolId)
+      .where(sql`capacity_pool_id IS NOT NULL`),
+    capacityPoolUserStatusIdx: index('idx_nodes_capacity_pool_user_status')
+      .on(table.capacityPoolId, table.userId, table.status)
+      .where(sql`capacity_pool_id IS NOT NULL`),
+    capacitySourceIdx: index('idx_nodes_capacity_source')
+      .on(table.capacitySourceId)
+      .where(sql`capacity_source_id IS NOT NULL`),
+    capacityPoolCandidateIdx: index('idx_nodes_capacity_pool_candidate')
+      .on(table.capacityPoolCandidateId)
+      .where(sql`capacity_pool_candidate_id IS NOT NULL`),
+    capacityPoolProjectIdx: index('idx_nodes_capacity_pool_project')
+      .on(table.capacityPoolProjectId)
+      .where(sql`capacity_pool_project_id IS NOT NULL`),
   })
 );
 
@@ -674,8 +1476,30 @@ export const workspaces = sqliteTable(
     lastActivityAt: text('last_activity_at'),
     /** Soft FK to ProjectData DO session (not a D1 table). Null until a chat session binds to this workspace. */
     chatSessionId: text('chat_session_id'),
+    portsPublicEnabled: integer('ports_public_enabled', { mode: 'boolean' })
+      .notNull()
+      .default(false),
     errorMessage: text('error_message'),
+    /** Set only after VM-agent absence/success or strict node-runtime termination proof. */
+    runtimeDeletionConfirmedAt: text('runtime_deletion_confirmed_at'),
+    /** Proof classifier paired with runtimeDeletionConfirmedAt. */
+    runtimeDeletionProof: text('runtime_deletion_proof'),
+    /** Rotated for runtime recreation; stale eviction callbacks cannot affect its successor. */
+    evictionGeneration: text('eviction_generation'),
+    /** Restart may reserve capacity only after serialized eviction cleanup completes. */
+    evictionFinalizedAt: text('eviction_finalized_at'),
+    /** VM Stop acknowledged; explicit Stop can retry internal cleanup without stopping again. */
+    stopRuntimeConfirmedAt: text('stop_runtime_confirmed_at'),
     dispatchedAt: text('dispatched_at'),
+    /** Agent profile ID used for this workspace's task — drives GitHub CLI policy enforcement. */
+    agentProfileHint: text('agent_profile_hint'),
+    /** JSON snapshot of ResourceRequirements for audit. */
+    resourceRequirementsJson: text('resource_requirements_json'),
+    /** JSON snapshot of ResolvedResourceReservation for audit. */
+    resolvedReservationJson: text('resolved_reservation_json'),
+    /** JSON snapshot of PlacementExplanation for audit. */
+    placementExplanationJson: text('placement_explanation_json'),
+    ...capacityPlacementColumns(),
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
@@ -698,11 +1522,175 @@ export const workspaces = sqliteTable(
       table.status
     ),
     nodeStatusIdx: index('idx_workspaces_node_status').on(table.nodeId, table.status),
+    statusUpdatedNodeIdx: index('idx_workspaces_status_updated_node').on(
+      table.status,
+      table.updatedAt,
+      table.nodeId
+    ),
     chatSessionIdUnique: uniqueIndex('idx_workspaces_chat_session_id_unique')
       .on(table.chatSessionId)
       .where(sql`chat_session_id IS NOT NULL`),
+    capacityPoolIdx: index('idx_workspaces_capacity_pool')
+      .on(table.capacityPoolId)
+      .where(sql`capacity_pool_id IS NOT NULL`),
+    capacitySourceIdx: index('idx_workspaces_capacity_source')
+      .on(table.capacitySourceId)
+      .where(sql`capacity_source_id IS NOT NULL`),
+    capacityPoolCandidateIdx: index('idx_workspaces_capacity_pool_candidate')
+      .on(table.capacityPoolCandidateId)
+      .where(sql`capacity_pool_candidate_id IS NOT NULL`),
+    capacityPoolProjectIdx: index('idx_workspaces_capacity_pool_project')
+      .on(table.capacityPoolProjectId)
+      .where(sql`capacity_pool_project_id IS NOT NULL`),
   })
 );
+
+/** Atomic throttle claims for payload-free callbacks observed during deletion quarantine. */
+export const workspaceCallbackSignalClaims = sqliteTable(
+  'workspace_callback_signal_claims',
+  {
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    callbackKind: text('callback_kind').notNull(),
+    expiresAt: text('expires_at').notNull(),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.workspaceId, table.callbackKind] }),
+    expiresAtIdx: index('idx_workspace_callback_signal_claims_expires_at').on(table.expiresAt),
+  })
+);
+
+// =============================================================================
+// Workspace Resource History
+// =============================================================================
+export const workspaceResourceSummaries = sqliteTable(
+  'workspace_resource_summaries',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    sessionId: text('session_id'),
+    taskId: text('task_id').references(() => tasks.id, { onDelete: 'set null' }),
+    nodeId: text('node_id').references(() => nodes.id, { onDelete: 'set null' }),
+    agentProfileId: text('agent_profile_id').references(() => agentProfiles.id, {
+      onDelete: 'set null',
+    }),
+    skillId: text('skill_id').references(() => skills.id, { onDelete: 'set null' }),
+    agentType: text('agent_type'),
+    runtime: text('runtime').notNull().default('vm'),
+    sourceVersion: integer('source_version').notNull(),
+    startedAt: integer('started_at').notNull(),
+    endedAt: integer('ended_at').notNull(),
+    sampleCount: integer('sample_count').notNull(),
+    gapCount: integer('gap_count').notNull().default(0),
+    cpuMeanMillis: real('cpu_mean_millis'),
+    cpuPeakMillis: real('cpu_peak_millis'),
+    memoryMeanBytes: integer('memory_mean_bytes'),
+    memoryPeakBytes: integer('memory_peak_bytes'),
+    memoryKernelPeakBytes: integer('memory_kernel_peak_bytes'),
+    memoryWorkingSetMeanBytes: integer('memory_working_set_mean_bytes'),
+    memoryWorkingSetPeakBytes: integer('memory_working_set_peak_bytes'),
+    memoryWorkingSetSampleCount: integer('memory_working_set_sample_count').notNull().default(0),
+    ioReadBytes: integer('io_read_bytes'),
+    ioWriteBytes: integer('io_write_bytes'),
+    oomCount: integer('oom_count').notNull().default(0),
+    toolSpanCount: integer('tool_span_count').notNull().default(0),
+    completenessJson: text('completeness_json').notNull(),
+    summaryJson: text('summary_json').notNull(),
+    firstChunkId: text('first_chunk_id'),
+    latestChunkId: text('latest_chunk_id'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => ({
+    projectSessionIdx: index('idx_workspace_resource_summaries_project_session').on(
+      table.projectId,
+      table.sessionId,
+      table.endedAt
+    ),
+    projectWorkspaceIdx: index('idx_workspace_resource_summaries_project_workspace').on(
+      table.projectId,
+      table.workspaceId,
+      table.endedAt
+    ),
+    projectTaskIdx: index('idx_workspace_resource_summaries_project_task').on(
+      table.projectId,
+      table.taskId,
+      table.endedAt
+    ),
+  })
+);
+
+export type WorkspaceResourceSummaryRow = typeof workspaceResourceSummaries.$inferSelect;
+
+export const workspaceResourceChunks = sqliteTable(
+  'workspace_resource_chunks',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    summaryId: text('summary_id').references(() => workspaceResourceSummaries.id, {
+      onDelete: 'set null',
+    }),
+    sessionId: text('session_id'),
+    taskId: text('task_id').references(() => tasks.id, { onDelete: 'set null' }),
+    nodeId: text('node_id').references(() => nodes.id, { onDelete: 'set null' }),
+    chunkSequence: integer('chunk_sequence').notNull(),
+    sourceVersion: integer('source_version').notNull(),
+    r2Key: text('r2_key').notNull().unique(),
+    storageFormat: text('storage_format').notNull(),
+    compressedBytes: integer('compressed_bytes').notNull(),
+    uncompressedBytes: integer('uncompressed_bytes').notNull(),
+    sha256: text('sha256').notNull(),
+    startedAt: integer('started_at').notNull(),
+    endedAt: integer('ended_at').notNull(),
+    sampleCount: integer('sample_count').notNull(),
+    gapCount: integer('gap_count').notNull().default(0),
+    toolSpanCount: integer('tool_span_count').notNull().default(0),
+    completenessJson: text('completeness_json').notNull(),
+    summaryJson: text('summary_json').notNull(),
+    /** Per-minute rollup computed on upload; NULL for chunks uploaded before migration 0177. */
+    rollupJson: text('rollup_json'),
+    createdAt: integer('created_at').notNull(),
+    expiresAt: integer('expires_at').notNull(),
+    uploadedByNodeId: text('uploaded_by_node_id'),
+  },
+  (table) => ({
+    identityIdx: index('idx_workspace_resource_chunks_identity').on(
+      table.projectId,
+      table.workspaceId,
+      table.sessionId,
+      table.taskId,
+      table.chunkSequence,
+      table.sourceVersion
+    ),
+    projectSessionIdx: index('idx_workspace_resource_chunks_project_session').on(
+      table.projectId,
+      table.sessionId,
+      table.startedAt
+    ),
+    projectWorkspaceIdx: index('idx_workspace_resource_chunks_project_workspace').on(
+      table.projectId,
+      table.workspaceId,
+      table.startedAt
+    ),
+    expiresIdx: index('idx_workspace_resource_chunks_expires').on(table.expiresAt),
+  })
+);
+
+export type WorkspaceResourceChunkRow = typeof workspaceResourceChunks.$inferSelect;
 
 // =============================================================================
 // Agent Sessions
@@ -720,6 +1708,17 @@ export const agentSessions = sqliteTable(
     status: text('status').notNull().default('running'),
     label: text('label'),
     agentType: text('agent_type'),
+    agentProfileId: text('agent_profile_id').references(() => agentProfiles.id, {
+      onDelete: 'set null',
+    }),
+    agentCredentialSource: text('agent_credential_source', {
+      enum: ['user', 'project', 'platform'],
+    }).default('user'),
+    agentCredentialReference: text('agent_credential_reference'),
+    agentCredentialProvider: text('agent_credential_provider'),
+    agentProviderMode: text('agent_provider_mode'),
+    agentCredentialGeneration: integer('agent_credential_generation').notNull().default(0),
+    skillId: text('skill_id').references(() => skills.id, { onDelete: 'set null' }),
     worktreePath: text('worktree_path'),
     stoppedAt: text('stopped_at'),
     suspendedAt: text('suspended_at'),
@@ -735,11 +1734,208 @@ export const agentSessions = sqliteTable(
   (table) => ({
     workspaceIdIdx: index('idx_agent_sessions_workspace_id').on(table.workspaceId),
     userIdIdx: index('idx_agent_sessions_user_id').on(table.userId),
+    agentProfileIdIdx: index('idx_agent_sessions_agent_profile_id').on(table.agentProfileId),
+    credentialReferenceIdx: index('idx_agent_sessions_credential_reference')
+      .on(table.agentCredentialReference)
+      .where(sql`agent_credential_reference IS NOT NULL`),
+    skillIdIdx: index('idx_agent_sessions_skill_id').on(table.skillId),
     // Compound index for filtered session queries (P2 fix).
     workspaceUserStatusIdx: index('idx_agent_sessions_ws_user_status').on(
       table.workspaceId,
       table.userId,
       table.status
+    ),
+  })
+);
+
+// =============================================================================
+// Credential Limit Observation Windows
+// =============================================================================
+export const credentialLimitWindows = sqliteTable(
+  'credential_limit_windows',
+  {
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    credentialReference: text('credential_reference').notNull(),
+    windowType: text('window_type').notNull(),
+    credentialSource: text('credential_source', {
+      enum: ['user', 'project', 'platform'],
+    }).notNull(),
+    provider: text('provider').notNull(),
+    providerMode: text('provider_mode').notNull(),
+    agentType: text('agent_type'),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    workspaceId: text('workspace_id').references(() => workspaces.id, { onDelete: 'set null' }),
+    agentSessionId: text('agent_session_id').references(() => agentSessions.id, {
+      onDelete: 'set null',
+    }),
+    chatSessionId: text('chat_session_id'),
+    source: text('source').notNull(),
+    status: text('status', {
+      enum: ['allowed', 'allowed_warning', 'rejected', 'unknown'],
+    }).notNull(),
+    lastEventLevel: text('last_event_level', {
+      enum: ['ok', 'warning', 'critical', 'rejected'],
+    })
+      .notNull()
+      .default('ok'),
+    utilizationPercent: real('utilization_percent'),
+    limitAmount: integer('limit_amount'),
+    remainingAmount: integer('remaining_amount'),
+    windowMinutes: integer('window_minutes'),
+    resetsAt: integer('resets_at'),
+    observedAt: integer('observed_at').notNull(),
+    freshnessMs: integer('freshness_ms').notNull().default(0),
+    lastEventDeliveryKey: text('last_event_delivery_key'),
+    duplicateSampleCount: integer('duplicate_sample_count').notNull().default(0),
+    staleSampleCount: integer('stale_sample_count').notNull().default(0),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.projectId, table.credentialReference, table.windowType] }),
+    projectSessionIdx: index('idx_credential_limit_windows_project_session').on(
+      table.projectId,
+      table.workspaceId,
+      table.agentSessionId
+    ),
+    observedAtIdx: index('idx_credential_limit_windows_observed_at').on(table.observedAt),
+    userSourceObservedIdx: index('idx_credential_limit_windows_user_source_observed').on(
+      table.userId,
+      table.credentialSource,
+      table.observedAt
+    ),
+    projectUpdatedIdx: index('idx_credential_limit_windows_project_updated').on(
+      table.projectId,
+      table.updatedAt,
+      table.credentialReference,
+      table.windowType
+    ),
+    updatedGlobalIdx: index('idx_credential_limit_windows_updated_global').on(
+      table.updatedAt,
+      table.projectId,
+      table.credentialReference,
+      table.windowType
+    ),
+    projectDeliveryIdx: index('idx_credential_limit_windows_project_delivery')
+      .on(table.projectId, table.lastEventDeliveryKey)
+      .where(sql`last_event_delivery_key IS NOT NULL`),
+  })
+);
+
+// =============================================================================
+// Runtime-neutral Session Snapshots
+// =============================================================================
+export const sessionSnapshots = sqliteTable(
+  'session_snapshots',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id').references(() => projects.id, { onDelete: 'set null' }),
+    workspaceId: text('workspace_id').references(() => workspaces.id, { onDelete: 'set null' }),
+    nodeId: text('node_id').references(() => nodes.id, { onDelete: 'set null' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    chatSessionId: text('chat_session_id').notNull(),
+    agentSessionId: text('agent_session_id'),
+    runtime: text('runtime').notNull(),
+    status: text('status').notNull().default('pending'),
+    degradation: text('degradation').notNull().default('none'),
+    homeR2Key: text('home_r2_key'),
+    wipR2Key: text('wip_r2_key'),
+    manifestR2Key: text('manifest_r2_key').notNull(),
+    baseCommit: text('base_commit'),
+    expiresAt: text('expires_at').notNull(),
+    manifestJson: text('manifest_json'),
+    restoreStatus: text('restore_status'),
+    restoreMessage: text('restore_message'),
+    restoredAt: text('restored_at'),
+    sleepingAt: text('sleeping_at'),
+    recoveryStatus: text('recovery_status'),
+    recoveryTaskId: text('recovery_task_id'),
+    recoveryAttemptId: text('recovery_attempt_id'),
+    recoveryWorkspaceId: text('recovery_workspace_id').references(() => workspaces.id, {
+      onDelete: 'set null',
+    }),
+    recoveryAttempts: integer('recovery_attempts').notNull().default(0),
+    recoveryError: text('recovery_error'),
+    recoveryClaimedAt: text('recovery_claimed_at'),
+    evictionRecoveryWorkspaceId: text('eviction_recovery_workspace_id'),
+    evictionRecoveryNodeId: text('eviction_recovery_node_id'),
+    evictionRecoveryGeneration: text('eviction_recovery_generation'),
+    /**
+     * When a wake attempt last reported failure, as a canonical
+     * `toISOString()` value — the decay predicate compares it lexicographically
+     * against another `toISOString()` cutoff, so a non-canonical string would
+     * silently misbehave. Written by both writers of `recovery_status='failed'`
+     * (`failSessionSnapshotRecovery` and `failAndRestoreSessionRecoveryHandoff`,
+     * pinned by `session-snapshot-failed-writer-coverage.test.ts`), and cleared
+     * by every path that resets `recoveryAttempts`. Drives the attempt-budget
+     * decay in `session-snapshot-recovery-budget.ts`.
+     */
+    recoveryFailedAt: text('recovery_failed_at'),
+    sleepStatus: text('sleep_status'),
+    sleepAfter: text('sleep_after'),
+    sleepAttempts: integer('sleep_attempts').notNull().default(0),
+    sleepError: text('sleep_error'),
+    sleepClaimId: text('sleep_claim_id'),
+    sleepClaimedAt: text('sleep_claimed_at'),
+    sleepStoppingSince: text('sleep_stopping_since'),
+    /**
+     * Bounded sleep-failure episode (`services/session-sleep-episode.ts`): when the
+     * current sleep episode first claimed the session, and how many attempts in it
+     * failed. Neither is reset by a capture generation; only a finished sleep, a wake,
+     * or a human follow-up ends the episode (migration 0179).
+     */
+    sleepEpisodeStartedAt: text('sleep_episode_started_at'),
+    sleepEpisodeFailures: integer('sleep_episode_failures').notNull().default(0),
+    /** The bounded-failure decision record (`SessionSleepFallbackRecord`), or NULL. */
+    sleepFallbackJson: text('sleep_fallback_json'),
+    snapshotGeneration: text('snapshot_generation'),
+    captureGeneration: text('capture_generation'),
+    captureError: text('capture_error'),
+    authorizedHomeBytes: integer('authorized_home_bytes'),
+    authorizedHomeSha256: text('authorized_home_sha256'),
+    authorizedWipBytes: integer('authorized_wip_bytes'),
+    authorizedWipSha256: text('authorized_wip_sha256'),
+    homeSha256: text('home_sha256'),
+    wipSha256: text('wip_sha256'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    chatSessionIdUnique: uniqueIndex('idx_session_snapshots_chat_session_id').on(
+      table.chatSessionId
+    ),
+    workspaceIdIdx: index('idx_session_snapshots_workspace_id').on(table.workspaceId),
+    expiresAtIdx: index('idx_session_snapshots_expires_at').on(table.expiresAt),
+    recoveryStatusIdx: index('idx_session_snapshots_recovery_status').on(
+      table.recoveryStatus,
+      table.expiresAt
+    ),
+    recoveryClaimIdx: index('idx_session_snapshots_recovery_claim').on(
+      table.recoveryStatus,
+      table.recoveryClaimedAt
+    ),
+    sleepDueIdx: index('idx_session_snapshots_sleep_due').on(table.sleepStatus, table.sleepAfter),
+    sleepClaimIdx: index('idx_session_snapshots_sleep_claim').on(
+      table.sleepStatus,
+      table.sleepClaimedAt
+    ),
+    sleepStoppingSinceIdx: index('idx_session_snapshots_sleep_stopping_since').on(
+      table.sleepStatus,
+      table.sleepStoppingSince
+    ),
+    sleepExpiryIdx: index('idx_session_snapshots_sleep_expiry').on(
+      table.sleepStatus,
+      table.expiresAt
     ),
   })
 );
@@ -760,12 +1956,10 @@ export const agentSettings = sqliteTable(
     allowedTools: text('allowed_tools'),
     deniedTools: text('denied_tools'),
     additionalEnv: text('additional_env'),
-    /** OpenCode inference provider: 'platform' | 'scaleway' | 'google-vertex' | 'openai-compatible' | 'anthropic' | 'custom'. null = use default. */
+    /** OpenCode inference provider: 'opencode-zen' | 'opencode-go' | 'custom'. null = use default (zen). */
     opencodeProvider: text('opencode_provider'),
-    /** Base URL for custom/openai-compatible OpenCode providers. */
+    /** Base URL for the custom OpenCode provider. */
     opencodeBaseUrl: text('opencode_base_url'),
-    /** Display name for custom OpenCode providers. */
-    opencodeProviderName: text('opencode_provider_name'),
     /** Explicit provider mode for Claude Code / Codex: 'sam' | 'user-api-key' | 'oauth'. null = not set. */
     providerMode: text('provider_mode'),
     createdAt: integer('created_at', { mode: 'timestamp_ms' })
@@ -807,17 +2001,23 @@ export const agentProfiles = sqliteTable(
     description: text('description'),
     agentType: text('agent_type').notNull().default('claude-code'),
     model: text('model'),
+    effort: text('effort').notNull().default('auto'),
     permissionMode: text('permission_mode'),
     systemPromptAppend: text('system_prompt_append'),
     maxTurns: integer('max_turns'),
     timeoutMinutes: integer('timeout_minutes'),
     vmSizeOverride: text('vm_size_override'),
+    resourceRequirementsJson: text('resource_requirements_json'),
     provider: text('provider'),
     vmLocation: text('vm_location'),
     workspaceProfile: text('workspace_profile'),
+    /** Runtime preference: null = automatic, 'vm' = cloud VM, 'cf-container' = Cloudflare Container. */
+    runtime: text('runtime'),
     /** Devcontainer config name override. null = inherit from project/platform defaults. */
     devcontainerConfigName: text('devcontainer_config_name'),
     taskMode: text('task_mode'),
+    /** JSON GitHubCliPolicy. null = inherit full installation token behavior. */
+    githubCliPolicy: text('github_cli_policy'),
     isBuiltin: integer('is_builtin').notNull().default(0),
     createdAt: text('created_at')
       .notNull()
@@ -833,8 +2033,10 @@ export const agentProfiles = sqliteTable(
     // Drizzle ORM does not support partial/conditional indexes, so only the
     // project-scoped index is represented here. Global-profile uniqueness is
     // enforced by the raw SQL migration only.
-    projectNameUnique: uniqueIndex('idx_agent_profiles_project_name')
-      .on(table.projectId, table.name),
+    projectNameUnique: uniqueIndex('idx_agent_profiles_project_name').on(
+      table.projectId,
+      table.name
+    ),
     projectIdIdx: index('idx_agent_profiles_project_id').on(table.projectId),
     userIdIdx: index('idx_agent_profiles_user_id').on(table.userId),
   })
@@ -842,6 +2044,118 @@ export const agentProfiles = sqliteTable(
 
 export type AgentProfileRow = typeof agentProfiles.$inferSelect;
 export type NewAgentProfileRow = typeof agentProfiles.$inferInsert;
+
+// =============================================================================
+// Skills (per-project repeatable-work definitions)
+// =============================================================================
+export const skills = sqliteTable(
+  'skills',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id').references(() => projects.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    description: text('description'),
+    agentType: text('agent_type').notNull().default('claude-code'),
+    model: text('model'),
+    effort: text('effort'),
+    permissionMode: text('permission_mode'),
+    systemPromptAppend: text('system_prompt_append'),
+    maxTurns: integer('max_turns'),
+    timeoutMinutes: integer('timeout_minutes'),
+    vmSizeOverride: text('vm_size_override'),
+    provider: text('provider'),
+    vmLocation: text('vm_location'),
+    workspaceProfile: text('workspace_profile'),
+    runtime: text('runtime'),
+    devcontainerConfigName: text('devcontainer_config_name'),
+    taskMode: text('task_mode').default('task'),
+    resourceRequirementsJson: text('resource_requirements_json'),
+    defaultProfileId: text('default_profile_id').references(() => agentProfiles.id, {
+      onDelete: 'set null',
+    }),
+    isBuiltin: integer('is_builtin').notNull().default(0),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    projectNameUnique: uniqueIndex('idx_skills_project_name').on(table.projectId, table.name),
+    projectIdIdx: index('idx_skills_project_id').on(table.projectId),
+    userIdIdx: index('idx_skills_user_id').on(table.userId),
+    defaultProfileIdx: index('idx_skills_default_profile_id').on(table.defaultProfileId),
+  })
+);
+
+export type SkillRow = typeof skills.$inferSelect;
+export type NewSkillRow = typeof skills.$inferInsert;
+
+/**
+ * Bring-your-own MCP servers injected into agent sessions alongside SAM's own `sam-mcp`.
+ *
+ * The URL, the token and the custom headers are AES-256-GCM encrypted
+ * (`services/encryption.ts`). The URL is a secret because providers issue pre-signed MCP URLs
+ * with the credential embedded in the path/query; `urlHost` is the display-only
+ * `scheme://host` the API returns instead, as `headerNames` is for the headers. `projectId`
+ * NULL means personal scope; a project row overrides a personal row with the same name.
+ */
+export const mcpConnections = sqliteTable(
+  'mcp_connections',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    projectId: text('project_id').references(() => projects.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    /** AES-256-GCM ciphertext (base64) of the full MCP endpoint URL. */
+    encryptedUrl: text('encrypted_url').notNull(),
+    /** AES-256-GCM IV (base64) for `encryptedUrl`. */
+    urlIv: text('url_iv').notNull(),
+    /** Display-only `scheme://host`. Never the path or query. */
+    urlHost: text('url_host').notNull(),
+    authType: text('auth_type').notNull().default('bearer'),
+    /** AES-256-GCM ciphertext (base64). Null when authType is 'none'. */
+    encryptedToken: text('encrypted_token'),
+    /** AES-256-GCM IV (base64). Null when authType is 'none'. */
+    tokenIv: text('token_iv'),
+    /** Display-only JSON array of custom header names. Never the values. */
+    headerNames: text('header_names').notNull().default('[]'),
+    /** AES-256-GCM ciphertext (base64) of the JSON `[{name, value}]` list. Null when none. */
+    encryptedHeaders: text('encrypted_headers'),
+    /** AES-256-GCM IV (base64) for `encryptedHeaders`. Null when none. */
+    headersIv: text('headers_iv'),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    // Partial, mirroring 0120_mcp_connections.sql. Without the WHERE clauses these would be
+    // FULL unique indexes, which is different semantics: a non-partial UNIQUE(user_id, name)
+    // also covers project rows (every row has a non-null user_id) and would wrongly stop a
+    // user from having a personal and a project connection with the same name.
+    projectNameUnique: uniqueIndex('idx_mcp_connections_project_name')
+      .on(table.projectId, table.name)
+      .where(sql`project_id IS NOT NULL`),
+    userNameUnique: uniqueIndex('idx_mcp_connections_user_name')
+      .on(table.userId, table.name)
+      .where(sql`project_id IS NULL`),
+    userIdIdx: index('idx_mcp_connections_user_id').on(table.userId),
+    projectIdIdx: index('idx_mcp_connections_project_id').on(table.projectId),
+  })
+);
+
+export type McpConnectionRow = typeof mcpConnections.$inferSelect;
+export type NewMcpConnectionRow = typeof mcpConnections.$inferInsert;
 
 const profileRuntimeBaseColumns = () => ({
   id: text('id').primaryKey(),
@@ -873,7 +2187,10 @@ export const profileRuntimeEnvVars = sqliteTable(
     valueIv: text('value_iv'),
   },
   (table) => ({
-    profileKeyUnique: uniqueIndex('idx_profile_runtime_env_profile_key').on(table.profileId, table.envKey),
+    profileKeyUnique: uniqueIndex('idx_profile_runtime_env_profile_key').on(
+      table.profileId,
+      table.envKey
+    ),
     userProfileIdx: index('idx_profile_runtime_env_user_profile').on(table.userId, table.profileId),
   })
 );
@@ -895,7 +2212,58 @@ export const profileRuntimeFiles = sqliteTable(
       table.profileId,
       table.filePath
     ),
-    userProfileIdx: index('idx_profile_runtime_files_user_profile').on(table.userId, table.profileId),
+    userProfileIdx: index('idx_profile_runtime_files_user_profile').on(
+      table.userId,
+      table.profileId
+    ),
+  })
+);
+
+const skillRuntimeBaseColumns = () => ({
+  id: text('id').primaryKey(),
+  skillId: text('skill_id')
+    .notNull()
+    .references(() => skills.id, { onDelete: 'cascade' }),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  isSecret: integer('is_secret', { mode: 'boolean' }).notNull().default(false),
+  createdAt: text('created_at')
+    .notNull()
+    .default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at')
+    .notNull()
+    .default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const skillRuntimeEnvVars = sqliteTable(
+  'skill_runtime_env_vars',
+  {
+    ...skillRuntimeBaseColumns(),
+    envKey: text('env_key').notNull(),
+    storedValue: text('stored_value').notNull(),
+    valueIv: text('value_iv'),
+  },
+  (table) => ({
+    skillKeyUnique: uniqueIndex('idx_skill_runtime_env_skill_key').on(table.skillId, table.envKey),
+    userSkillIdx: index('idx_skill_runtime_env_user_skill').on(table.userId, table.skillId),
+  })
+);
+
+export const skillRuntimeFiles = sqliteTable(
+  'skill_runtime_files',
+  {
+    ...skillRuntimeBaseColumns(),
+    filePath: text('file_path').notNull(),
+    storedContent: text('stored_content').notNull(),
+    contentIv: text('content_iv'),
+  },
+  (table) => ({
+    skillPathUnique: uniqueIndex('idx_skill_runtime_files_skill_path').on(
+      table.skillId,
+      table.filePath
+    ),
+    userSkillIdx: index('idx_skill_runtime_files_user_skill').on(table.userId, table.skillId),
   })
 );
 
@@ -1106,10 +2474,18 @@ export type GitHubInstallation = typeof githubInstallations.$inferSelect;
 export type NewGitHubInstallation = typeof githubInstallations.$inferInsert;
 export type Project = typeof projects.$inferSelect;
 export type NewProject = typeof projects.$inferInsert;
+export type ProjectMember = typeof projectMembers.$inferSelect;
+export type NewProjectMember = typeof projectMembers.$inferInsert;
+export type ProjectInviteLink = typeof projectInviteLinks.$inferSelect;
+export type NewProjectInviteLink = typeof projectInviteLinks.$inferInsert;
+export type ProjectAccessRequest = typeof projectAccessRequests.$inferSelect;
+export type NewProjectAccessRequest = typeof projectAccessRequests.$inferInsert;
 export type ProjectRuntimeEnvVar = typeof projectRuntimeEnvVars.$inferSelect;
 export type NewProjectRuntimeEnvVar = typeof projectRuntimeEnvVars.$inferInsert;
 export type ProjectRuntimeFile = typeof projectRuntimeFiles.$inferSelect;
 export type NewProjectRuntimeFile = typeof projectRuntimeFiles.$inferInsert;
+export type ProjectGithubRepository = typeof projectGithubRepositories.$inferSelect;
+export type NewProjectGithubRepository = typeof projectGithubRepositories.$inferInsert;
 export type ProfileRuntimeEnvVar = typeof profileRuntimeEnvVars.$inferSelect;
 export type NewProfileRuntimeEnvVar = typeof profileRuntimeEnvVars.$inferInsert;
 export type ProfileRuntimeFile = typeof profileRuntimeFiles.$inferSelect;
@@ -1128,6 +2504,10 @@ export type Workspace = typeof workspaces.$inferSelect;
 export type NewWorkspace = typeof workspaces.$inferInsert;
 export type AgentSession = typeof agentSessions.$inferSelect;
 export type NewAgentSession = typeof agentSessions.$inferInsert;
+export type CredentialLimitWindow = typeof credentialLimitWindows.$inferSelect;
+export type NewCredentialLimitWindow = typeof credentialLimitWindows.$inferInsert;
+export type SessionSnapshot = typeof sessionSnapshots.$inferSelect;
+export type NewSessionSnapshot = typeof sessionSnapshots.$inferInsert;
 export type UIStandard = typeof uiStandards.$inferSelect;
 export type NewUIStandard = typeof uiStandards.$inferInsert;
 export type ThemeToken = typeof themeTokens.$inferSelect;
@@ -1148,9 +2528,9 @@ export type AgentSettingsRow = typeof agentSettings.$inferSelect;
 export type NewAgentSettingsRow = typeof agentSettings.$inferInsert;
 
 // =============================================================================
-// Smoke Test Auth Tokens (CI authentication, gated by SMOKE_TEST_AUTH_ENABLED)
+// API Tokens (stored in legacy smoke_test_tokens table)
 // =============================================================================
-export const smokeTestTokens = sqliteTable(
+export const apiTokens = sqliteTable(
   'smoke_test_tokens',
   {
     id: text('id').primaryKey(),
@@ -1171,8 +2551,8 @@ export const smokeTestTokens = sqliteTable(
   })
 );
 
-export type SmokeTestToken = typeof smokeTestTokens.$inferSelect;
-export type NewSmokeTestToken = typeof smokeTestTokens.$inferInsert;
+export type ApiToken = typeof apiTokens.$inferSelect;
+export type NewApiToken = typeof apiTokens.$inferInsert;
 
 // =============================================================================
 // Project File Library (per-project encrypted file storage in R2)
@@ -1203,15 +2583,26 @@ export const projectFiles = sqliteTable(
     r2Key: text('r2_key').notNull(),
     extractedTextPreview: text('extracted_text_preview'),
     directory: text('directory').notNull().default('/'),
-    createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
-    updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
   },
   (table) => ({
     projectIdx: index('idx_project_files_project_id').on(table.projectId),
     projectStatusIdx: index('idx_project_files_project_status').on(table.projectId, table.status),
-    projectSourceIdx: index('idx_project_files_project_source').on(table.projectId, table.uploadSource),
+    projectSourceIdx: index('idx_project_files_project_source').on(
+      table.projectId,
+      table.uploadSource
+    ),
     projectMimeIdx: index('idx_project_files_project_mime').on(table.projectId, table.mimeType),
-    projectDirFilenameUniq: uniqueIndex('idx_project_files_project_dir_filename').on(table.projectId, table.directory, table.filename),
+    projectDirFilenameUniq: uniqueIndex('idx_project_files_project_dir_filename').on(
+      table.projectId,
+      table.directory,
+      table.filename
+    ),
     projectDirIdx: index('idx_project_files_project_dir').on(table.projectId, table.directory),
   })
 );
@@ -1258,16 +2649,32 @@ export const triggers = sqliteTable(
     cronTimezone: text('cron_timezone').default('UTC'),
     skipIfRunning: integer('skip_if_running', { mode: 'boolean' }).notNull().default(true),
     promptTemplate: text('prompt_template').notNull(),
+    /** Current authorized execution principal. Null means legacy owner-based execution. */
+    executionUserId: text('execution_user_id').references(() => users.id, { onDelete: 'set null' }),
+    /** Audit timestamp for execution principal assignment/transfer. */
+    executionUserAuthorizedAt: text('execution_user_authorized_at'),
+    /** Actor who authorized execution principal assignment/transfer. */
+    executionUserAuthorizedBy: text('execution_user_authorized_by').references(() => users.id, {
+      onDelete: 'set null',
+    }),
     /** Optional agent profile for triggered tasks. set null on profile delete — trigger continues with defaults. */
     agentProfileId: text('agent_profile_id').references(() => agentProfiles.id, {
       onDelete: 'set null',
     }),
+    /** Optional skill for triggered tasks. set null on skill delete — trigger continues with profile/defaults. */
+    skillId: text('skill_id').references(() => skills.id, { onDelete: 'set null' }),
     taskMode: text('task_mode').default('task'),
     vmSizeOverride: text('vm_size_override'),
+    resourceRequirementsJson: text('resource_requirements_json'),
     maxConcurrent: integer('max_concurrent').notNull().default(1),
     lastTriggeredAt: text('last_triggered_at'),
     triggerCount: integer('trigger_count').notNull().default(0),
+    /** Monotonic sequence for every execution attempt, including skipped attempts. */
+    nextExecutionSequence: integer('next_execution_sequence').notNull().default(1),
     nextFireAt: text('next_fire_at'),
+    credentialBlockedReason: text('credential_blocked_reason'),
+    credentialBlockedAt: text('credential_blocked_at'),
+    credentialBlockedBy: text('credential_blocked_by'),
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
@@ -1326,6 +2733,246 @@ export type TriggerExecutionRow = typeof triggerExecutions.$inferSelect;
 export type NewTriggerExecutionRow = typeof triggerExecutions.$inferInsert;
 
 // =============================================================================
+// GitHub Trigger Configs (source-specific config for GitHub event triggers)
+// =============================================================================
+export const githubTriggerConfigs = sqliteTable(
+  'github_trigger_configs',
+  {
+    id: text('id').primaryKey(),
+    triggerId: text('trigger_id')
+      .notNull()
+      .references(() => triggers.id, { onDelete: 'cascade' }),
+    eventType: text('event_type').notNull(),
+    filtersJson: text('filters_json').notNull().default('{}'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    triggerIdUnique: uniqueIndex('idx_github_trigger_configs_trigger_id').on(table.triggerId),
+    eventTypeIdx: index('idx_github_trigger_configs_event_type').on(table.eventType),
+  })
+);
+
+export type GitHubTriggerConfigRow = typeof githubTriggerConfigs.$inferSelect;
+export type NewGitHubTriggerConfigRow = typeof githubTriggerConfigs.$inferInsert;
+
+// =============================================================================
+// GitHub Webhook Deliveries (dedup and audit trail)
+// =============================================================================
+export const githubWebhookDeliveries = sqliteTable(
+  'github_webhook_deliveries',
+  {
+    id: text('id').primaryKey(),
+    eventType: text('event_type').notNull(),
+    action: text('action'),
+    installationId: text('installation_id'),
+    repositoryFullName: text('repository_full_name'),
+    senderLogin: text('sender_login'),
+    matchedTriggerId: text('matched_trigger_id'),
+    decision: text('decision').notNull(),
+    decisionReason: text('decision_reason'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    createdIdx: index('idx_github_webhook_deliveries_created').on(table.createdAt),
+    installationIdx: index('idx_github_webhook_deliveries_installation').on(table.installationId),
+  })
+);
+
+export type GitHubWebhookDeliveryRow = typeof githubWebhookDeliveries.$inferSelect;
+export type NewGitHubWebhookDeliveryRow = typeof githubWebhookDeliveries.$inferInsert;
+
+// =============================================================================
+// Generic Webhook Trigger Configs
+// =============================================================================
+export const webhookTriggerConfigs = sqliteTable(
+  'webhook_trigger_configs',
+  {
+    triggerId: text('trigger_id')
+      .primaryKey()
+      .references(() => triggers.id, { onDelete: 'cascade' }),
+    tokenHash: text('token_hash').notNull(),
+    tokenLastFour: text('token_last_four').notNull(),
+    tokenCreatedAt: text('token_created_at').notNull(),
+    tokenRotatedAt: text('token_rotated_at'),
+    sourceLabel: text('source_label'),
+    filterMode: text('filter_mode').notNull().default('all'),
+    filtersJson: text('filters_json').notNull().default('[]'),
+    includedHeadersJson: text('included_headers_json').notNull().default('[]'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    tokenHashUnique: uniqueIndex('idx_webhook_trigger_configs_token_hash').on(table.tokenHash),
+  })
+);
+
+export type WebhookTriggerConfigRow = typeof webhookTriggerConfigs.$inferSelect;
+export type NewWebhookTriggerConfigRow = typeof webhookTriggerConfigs.$inferInsert;
+
+// =============================================================================
+// Generic Webhook Deliveries (bounded audit metadata; never stores raw payload)
+// =============================================================================
+export const webhookDeliveries = sqliteTable(
+  'webhook_deliveries',
+  {
+    id: text('id').primaryKey(),
+    triggerId: text('trigger_id')
+      .notNull()
+      .references(() => triggers.id, { onDelete: 'cascade' }),
+    idempotencyKeyHash: text('idempotency_key_hash'),
+    requestFingerprint: text('request_fingerprint').notNull(),
+    outcome: text('outcome').notNull(),
+    httpStatus: integer('http_status').notNull(),
+    bodyBytes: integer('body_bytes').notNull(),
+    processingToken: text('processing_token'),
+    processingHeartbeatAt: text('processing_heartbeat_at'),
+    executionId: text('execution_id').references(() => triggerExecutions.id, {
+      onDelete: 'set null',
+    }),
+    errorCode: text('error_code'),
+    receivedAt: text('received_at').notNull(),
+    processedAt: text('processed_at'),
+    expiresAt: text('expires_at').notNull(),
+  },
+  (table) => ({
+    triggerReceivedIdx: index('idx_webhook_deliveries_trigger_received').on(
+      table.triggerId,
+      table.receivedAt,
+      table.id
+    ),
+    idempotencyUnique: uniqueIndex('idx_webhook_deliveries_trigger_idempotency')
+      .on(table.triggerId, table.idempotencyKeyHash)
+      .where(sql`idempotency_key_hash IS NOT NULL`),
+    expiresIdx: index('idx_webhook_deliveries_expires').on(table.expiresAt),
+    executionIdx: index('idx_webhook_deliveries_execution').on(table.executionId),
+    processingHeartbeatIdx: index('idx_webhook_deliveries_processing_heartbeat')
+      .on(table.processingHeartbeatAt, table.id)
+      .where(sql`outcome = 'processing' AND processing_token IS NOT NULL`),
+  })
+);
+
+export type WebhookDeliveryRow = typeof webhookDeliveries.$inferSelect;
+export type NewWebhookDeliveryRow = typeof webhookDeliveries.$inferInsert;
+
+// =============================================================================
+// Project Event Source Outbox (producer-side admission retry ledger)
+// =============================================================================
+export const projectEventSourceOutbox = sqliteTable(
+  'project_event_source_outbox',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    source: text('source').notNull(),
+    eventType: text('event_type').notNull(),
+    subjectType: text('subject_type').notNull(),
+    subjectId: text('subject_id').notNull(),
+    deliveryKey: text('delivery_key').notNull(),
+    payloadFingerprint: text('payload_fingerprint').notNull(),
+    eventPayloadJson: text('event_payload_json').notNull(),
+    state: text('state').notNull().default('pending'),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    maxAttempts: integer('max_attempts').notNull(),
+    nextAttemptAt: text('next_attempt_at').notNull(),
+    processingLeaseExpiresAt: text('processing_lease_expires_at'),
+    claimToken: text('claim_token'),
+    claimedAt: text('claimed_at'),
+    expiresAt: text('expires_at').notNull(),
+    admittedEventId: text('admitted_event_id'),
+    admissionOutcome: text('admission_outcome'),
+    lastError: text('last_error'),
+    credentialLimitWindowType: text('credential_limit_window_type'),
+    credentialLimitObservedAt: integer('credential_limit_observed_at'),
+    terminalizedAt: text('terminalized_at'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    deliveryUnique: uniqueIndex('idx_project_event_source_outbox_delivery').on(
+      table.projectId,
+      table.source,
+      table.deliveryKey
+    ),
+    dueIdx: index('idx_project_event_source_outbox_due').on(
+      table.state,
+      table.nextAttemptAt,
+      table.id
+    ),
+    processingLeaseIdx: index('idx_project_event_source_outbox_processing_lease').on(
+      table.state,
+      table.processingLeaseExpiresAt,
+      table.id
+    ),
+    activeExpiryIdx: index('idx_project_event_source_outbox_active_expiry').on(
+      table.state,
+      table.expiresAt,
+      table.id
+    ),
+    activeCapacityIdx: index('idx_project_event_source_outbox_active_capacity').on(
+      table.projectId,
+      table.source,
+      table.state,
+      table.expiresAt,
+      table.id
+    ),
+    activeAttemptsIdx: index('idx_project_event_source_outbox_active_attempts').on(
+      table.state,
+      table.attemptCount,
+      table.id
+    ),
+    exhaustedReadyIdx: index('idx_project_event_source_outbox_exhausted_ready').on(
+      table.state,
+      sql`(attempt_count >= max_attempts)`,
+      table.processingLeaseExpiresAt,
+      table.id
+    ),
+    terminalRetentionIdx: index('idx_project_event_source_outbox_terminal_retention').on(
+      table.state,
+      table.terminalizedAt,
+      table.id
+    ),
+    projectSubjectIdx: index('idx_project_event_source_outbox_project_subject').on(
+      table.projectId,
+      table.subjectType,
+      table.subjectId,
+      table.state
+    ),
+    credentialLimitActiveIdx: index('idx_project_event_source_outbox_credential_limit_active')
+      .on(
+        table.projectId,
+        table.source,
+        table.subjectId,
+        table.credentialLimitWindowType,
+        table.state,
+        table.credentialLimitObservedAt,
+        table.id
+      )
+      .where(
+        sql`credential_limit_window_type IS NOT NULL AND credential_limit_observed_at IS NOT NULL`
+      ),
+  })
+);
+
+export type ProjectEventSourceOutboxRow = typeof projectEventSourceOutbox.$inferSelect;
+export type NewProjectEventSourceOutboxRow = typeof projectEventSourceOutbox.$inferInsert;
+
+// =============================================================================
 // Platform Credentials (admin-managed fallback keys)
 //
 // Unlike user `credentials`, these are shared across all users and managed by
@@ -1341,7 +2988,7 @@ export const platformCredentials = sqliteTable(
   {
     id: text('id').primaryKey(),
     credentialType: text('credential_type').notNull(), // 'cloud-provider' | 'agent-api-key'
-    /** Null for agent-api-key type. Set to 'hetzner' | 'scaleway' | 'gcp' for cloud-provider type. */
+    /** Null for agent-api-key type. Set to a supported provider id for cloud-provider type. */
     provider: text('provider'),
     /** Null for cloud-provider type. Set to 'claude-code' | 'openai-codex' for agent-api-key type. */
     agentType: text('agent_type'),
@@ -1359,6 +3006,8 @@ export const platformCredentials = sqliteTable(
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
+    /** Admin user who most recently rotated this credential. */
+    updatedBy: text('updated_by').references(() => users.id),
     updatedAt: text('updated_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
@@ -1375,6 +3024,233 @@ export const platformCredentials = sqliteTable(
 
 export type PlatformCredentialRow = typeof platformCredentials.$inferSelect;
 export type NewPlatformCredentialRow = typeof platformCredentials.$inferInsert;
+
+// =============================================================================
+// Capacity Pools
+// =============================================================================
+
+/**
+ * Non-secret identity for something SAM can schedule capacity from. Cloud-provider sources point
+ * at canonical credential rows; future registered-runner and instant-runtime sources do not require
+ * credentials here.
+ */
+export const capacitySources = sqliteTable(
+  'capacity_sources',
+  {
+    id: text('id').primaryKey(),
+    scope: text('scope').notNull(),
+    ownerUserId: text('owner_user_id').references(() => users.id, { onDelete: 'cascade' }),
+    ownerProjectId: text('owner_project_id').references(() => projects.id, {
+      onDelete: 'cascade',
+    }),
+    sourceKind: text('source_kind').notNull(),
+    provider: text('provider'),
+    credentialSource: text('credential_source'),
+    credentialId: text('credential_id').references(() => credentials.id, { onDelete: 'cascade' }),
+    platformCredentialId: text('platform_credential_id').references(() => platformCredentials.id, {
+      onDelete: 'cascade',
+    }),
+    credentialReference: text('credential_reference'),
+    credentialVersion: integer('credential_version'),
+    externalSourceRef: text('external_source_ref'),
+    authorityGeneration: integer('authority_generation').notNull().default(0),
+    sourceGeneration: integer('source_generation').notNull().default(0),
+    status: text('status').notNull().default('active'),
+    createdBy: text('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    ownerUserIdx: index('idx_capacity_sources_owner_user')
+      .on(table.ownerUserId)
+      .where(sql`owner_user_id IS NOT NULL`),
+    ownerProjectIdx: index('idx_capacity_sources_owner_project')
+      .on(table.ownerProjectId)
+      .where(sql`owner_project_id IS NOT NULL`),
+    credentialIdx: index('idx_capacity_sources_credential')
+      .on(table.credentialId)
+      .where(sql`credential_id IS NOT NULL`),
+    platformCredentialIdx: index('idx_capacity_sources_platform_credential')
+      .on(table.platformCredentialId)
+      .where(sql`platform_credential_id IS NOT NULL`),
+    scopeGenerationIdx: index('idx_capacity_sources_scope_generation').on(
+      table.scope,
+      table.ownerUserId,
+      table.ownerProjectId,
+      table.sourceGeneration
+    ),
+    authorityGenerationIdx: index('idx_capacity_sources_authority_generation').on(
+      table.authorityGeneration
+    ),
+  })
+);
+
+/**
+ * Product-neutral pool policy. V1 resolves at most one default pool per scope using
+ * project -> user -> installation precedence; multiple rows and fallback links support future waves.
+ */
+export const capacityPools = sqliteTable(
+  'capacity_pools',
+  {
+    id: text('id').primaryKey(),
+    scope: text('scope').notNull(),
+    ownerUserId: text('owner_user_id').references(() => users.id, { onDelete: 'cascade' }),
+    ownerProjectId: text('owner_project_id').references(() => projects.id, {
+      onDelete: 'cascade',
+    }),
+    name: text('name').notNull(),
+    isDefault: integer('is_default', { mode: 'boolean' }).notNull().default(false),
+    revision: integer('revision').notNull().default(1),
+    status: text('status').notNull().default('active'),
+    configurationState: text('configuration_state').notNull().default('configured-ready'),
+    strategy: text('strategy').notNull().default('balanced'),
+    /** Candidate ordering used when provisioning deployment-role nodes. */
+    deploymentStrategy: text('deployment_strategy').notNull().default('smallest-fit'),
+    exhaustionPolicy: text('exhaustion_policy').notNull().default('queue'),
+    maxNodes: integer('max_nodes').notNull().default(3),
+    lastReconciledAt: text('last_reconciled_at'),
+    /**
+     * Digest of the pool's selection-affecting candidate state. Reconciliation bumps
+     * `revision` only when this changes, so an identical catalog refresh is stable while a
+     * ranking-affecting change (e.g. two comparable offerings swapping cheapest position)
+     * invalidates prior placement authority. NULL = not yet computed.
+     */
+    selectionDigest: text('selection_digest'),
+    migrationVersion: text('migration_version'),
+    migrationState: text('migration_state').notNull().default('complete'),
+    createdBy: text('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    defaultInstallationUnique: uniqueIndex('idx_capacity_pools_default_installation')
+      .on(table.scope)
+      .where(sql`scope = 'installation' AND is_default = 1`),
+    defaultUserUnique: uniqueIndex('idx_capacity_pools_default_user')
+      .on(table.ownerUserId)
+      .where(sql`scope = 'user' AND is_default = 1`),
+    defaultProjectUnique: uniqueIndex('idx_capacity_pools_default_project')
+      .on(table.ownerProjectId)
+      .where(sql`scope = 'project' AND is_default = 1`),
+    scopeStatusIdx: index('idx_capacity_pools_scope_status').on(table.scope, table.status),
+    configurationStateIdx: index('idx_capacity_pools_configuration_state').on(
+      table.configurationState
+    ),
+  })
+);
+
+/** Candidate capacity entries ranked within a pool. */
+export const capacityPoolCandidates = sqliteTable(
+  'capacity_pool_candidates',
+  {
+    id: text('id').primaryKey(),
+    poolId: text('pool_id')
+      .notNull()
+      .references(() => capacityPools.id, { onDelete: 'cascade' }),
+    capacitySourceId: text('capacity_source_id')
+      .notNull()
+      .references(() => capacitySources.id, { onDelete: 'cascade' }),
+    provider: text('provider'),
+    location: text('location'),
+    workloadRole: text('workload_role').notNull().default('workspace'),
+    runtime: text('runtime'),
+    machineClass: text('machine_class'),
+    machineSize: text('machine_size'),
+    /** Provider-native instance type/SKU selected by this candidate. */
+    providerInstanceType: text('provider_instance_type'),
+    providerInstanceSku: text('provider_instance_sku'),
+    providerInstanceDisplayName: text('provider_instance_display_name'),
+    /** Normalized concrete offering capacity and price metadata. */
+    providerInstanceVcpuCount: integer('provider_instance_vcpu_count'),
+    providerInstanceMemoryMb: integer('provider_instance_memory_mb'),
+    providerInstanceDiskGb: integer('provider_instance_disk_gb'),
+    providerInstanceBootDiskSizeGb: integer('provider_instance_boot_disk_size_gb'),
+    providerInstanceImage: text('provider_instance_image'),
+    providerInstanceArchitecture: text('provider_instance_architecture'),
+    providerInstancePriceDisplay: text('provider_instance_price_display'),
+    providerInstancePriceCurrency: text('provider_instance_price_currency'),
+    providerInstancePriceMonthlyCents: integer('provider_instance_price_monthly_cents'),
+    providerInstancePriceHourlyMicros: integer('provider_instance_price_hourly_micros'),
+    providerInstanceCatalogSource: text('provider_instance_catalog_source'),
+    providerInstanceCatalogLastSeenAt: text('provider_instance_catalog_last_seen_at'),
+    catalogAvailability: text('catalog_availability').notNull().default('available'),
+    catalogUnavailableAt: text('catalog_unavailable_at'),
+    catalogReturnedAt: text('catalog_returned_at'),
+    catalogGeneration: integer('catalog_generation').notNull().default(0),
+    authorityGeneration: integer('authority_generation').notNull().default(0),
+    priority: integer('priority').notNull().default(0),
+    candidateOrder: integer('candidate_order').notNull().default(0),
+    status: text('status').notNull().default('active'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    poolStatusOrderIdx: index('idx_capacity_pool_candidates_pool_status_order').on(
+      table.poolId,
+      table.status,
+      table.priority,
+      table.candidateOrder
+    ),
+    sourceIdx: index('idx_capacity_pool_candidates_source').on(table.capacitySourceId),
+    catalogAvailabilityIdx: index('idx_capacity_pool_candidates_catalog_availability').on(
+      table.catalogAvailability
+    ),
+    sourceGenerationIdx: index('idx_capacity_pool_candidates_source_generation').on(
+      table.capacitySourceId,
+      table.catalogGeneration
+    ),
+    authorityGenerationIdx: index('idx_capacity_pool_candidates_authority_generation').on(
+      table.capacitySourceId,
+      table.authorityGeneration
+    ),
+  })
+);
+
+/** Future fallback-chain edges between pools. No current scheduler behavior reads this table. */
+export const capacityPoolFallbacks = sqliteTable(
+  'capacity_pool_fallbacks',
+  {
+    poolId: text('pool_id')
+      .notNull()
+      .references(() => capacityPools.id, { onDelete: 'cascade' }),
+    fallbackPoolId: text('fallback_pool_id')
+      .notNull()
+      .references(() => capacityPools.id, { onDelete: 'cascade' }),
+    fallbackOrder: integer('fallback_order').notNull().default(0),
+    condition: text('condition'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.poolId, table.fallbackPoolId] }),
+    orderUnique: uniqueIndex('idx_capacity_pool_fallbacks_order').on(
+      table.poolId,
+      table.fallbackOrder
+    ),
+  })
+);
+
+export type CapacitySource = typeof capacitySources.$inferSelect;
+export type NewCapacitySource = typeof capacitySources.$inferInsert;
+export type CapacityPool = typeof capacityPools.$inferSelect;
+export type NewCapacityPool = typeof capacityPools.$inferInsert;
+export type CapacityPoolCandidate = typeof capacityPoolCandidates.$inferSelect;
+export type NewCapacityPoolCandidate = typeof capacityPoolCandidates.$inferInsert;
+export type CapacityPoolFallback = typeof capacityPoolFallbacks.$inferSelect;
+export type NewCapacityPoolFallback = typeof capacityPoolFallbacks.$inferInsert;
 
 // =============================================================================
 // Compute Usage
@@ -1394,17 +3270,33 @@ export const computeUsage = sqliteTable(
     nodeId: text('node_id').notNull(),
     serverType: text('server_type').notNull(),
     vcpuCount: integer('vcpu_count').notNull(),
+    providerInstanceType: text('provider_instance_type'),
+    providerInstanceVcpuCount: integer('provider_instance_vcpu_count'),
+    providerInstanceMemoryMb: integer('provider_instance_memory_mb'),
+    providerInstanceDiskGb: integer('provider_instance_disk_gb'),
+    providerInstanceBootDiskSizeGb: integer('provider_instance_boot_disk_size_gb'),
+    providerInstanceImage: text('provider_instance_image'),
+    providerInstanceArchitecture: text('provider_instance_architecture'),
+    observedProviderInstanceType: text('observed_provider_instance_type'),
+    observedProviderInstanceVcpuCount: integer('observed_provider_instance_vcpu_count'),
+    observedProviderInstanceMemoryMb: integer('observed_provider_instance_memory_mb'),
+    observedProviderInstanceDiskGb: integer('observed_provider_instance_disk_gb'),
+    observedHardwareJson: text('observed_hardware_json'),
+    observedHardwareSource: text('observed_hardware_source'),
+    providerInstancePriceDisplay: text('provider_instance_price_display'),
+    providerInstancePriceCurrency: text('provider_instance_price_currency'),
+    providerInstancePriceMonthlyCents: integer('provider_instance_price_monthly_cents'),
+    providerInstancePriceHourlyMicros: integer('provider_instance_price_hourly_micros'),
     credentialSource: text('credential_source').notNull().default('user'),
     startedAt: text('started_at').notNull(),
     /** ISO-8601 timestamp. Null while workspace is still running (open-ended usage record). */
     endedAt: text('ended_at'),
-    createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
   },
   (table) => ({
-    userPeriodIdx: index('idx_compute_usage_user_period').on(
-      table.userId,
-      table.startedAt
-    ),
+    userPeriodIdx: index('idx_compute_usage_user_period').on(table.userId, table.startedAt),
     workspaceIdx: index('idx_compute_usage_workspace').on(table.workspaceId),
   })
 );
@@ -1421,7 +3313,9 @@ export const defaultQuotas = sqliteTable('default_quotas', {
   id: text('id').primaryKey(),
   /** Null = unlimited. Applies to all users who don't have a per-user override in userQuotas. */
   monthlyVcpuHoursLimit: real('monthly_vcpu_hours_limit'),
-  updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
+  updatedAt: text('updated_at')
+    .notNull()
+    .default(sql`(datetime('now'))`),
   /** Admin who last updated. Bare FK — no onDelete to preserve audit trail. */
   updatedBy: text('updated_by')
     .notNull()
@@ -1439,7 +3333,9 @@ export const userQuotas = sqliteTable('user_quotas', {
     .references(() => users.id, { onDelete: 'cascade' }), // Cascade — quota meaningless without the user
   /** Null = unlimited (overrides any default limit). */
   monthlyVcpuHoursLimit: real('monthly_vcpu_hours_limit'),
-  updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
+  updatedAt: text('updated_at')
+    .notNull()
+    .default(sql`(datetime('now'))`),
   /** Admin who last updated. Bare FK — no onDelete to preserve audit trail. */
   updatedBy: text('updated_by')
     .notNull()
@@ -1467,14 +3363,8 @@ export const trialWaitlist = sqliteTable(
     notifiedAt: integer('notified_at'), // epoch ms, nullable
   },
   (table) => ({
-    emailResetIdx: uniqueIndex('idx_trial_waitlist_email_reset').on(
-      table.email,
-      table.resetDate
-    ),
-    resetNotifyIdx: index('idx_trial_waitlist_reset_notify').on(
-      table.resetDate,
-      table.notifiedAt
-    ),
+    emailResetIdx: uniqueIndex('idx_trial_waitlist_email_reset').on(table.email, table.resetDate),
+    resetNotifyIdx: index('idx_trial_waitlist_reset_notify').on(table.resetDate, table.notifiedAt),
   })
 );
 
@@ -1519,18 +3409,9 @@ export const trials = sqliteTable(
     errorMessage: text('error_message'),
   },
   (table) => ({
-    fingerprintIdx: index('idx_trials_fingerprint').on(
-      table.fingerprint,
-      table.createdAt
-    ),
-    statusExpiryIdx: index('idx_trials_status_expiry').on(
-      table.status,
-      table.expiresAt
-    ),
-    monthKeyStatusIdx: index('idx_trials_month_key_status').on(
-      table.monthKey,
-      table.status
-    ),
+    fingerprintIdx: index('idx_trials_fingerprint').on(table.fingerprint, table.createdAt),
+    statusExpiryIdx: index('idx_trials_status_expiry').on(table.status, table.expiresAt),
+    monthKeyStatusIdx: index('idx_trials_month_key_status').on(table.monthKey, table.status),
   })
 );
 
@@ -1561,6 +3442,21 @@ export const sessionSummaries = sqliteTable(
     agentCompletedAt: integer('agent_completed_at'),
     endedAt: integer('ended_at'),
     updatedAt: integer('updated_at').notNull(),
+    /**
+     * Session creator. `userId` above is the PROJECT OWNER, not the creator, so
+     * it cannot answer `scope=my` / `isMine` on a shared project.
+     */
+    createdByUserId: text('created_by_user_id'),
+    /** Mirrors `chat_sessions.created_at`; distinct from `startedAt`. */
+    createdAt: integer('created_at'),
+    /** Serialized `getAttentionSummary()` result for the newest unresolved marker. */
+    attentionJson: text('attention_json'),
+    /** When the DO last wrote this row — the freshness signal, not session activity. */
+    syncedAt: integer('synced_at'),
+    /** Next time the terminal-ledger repair sweep may reconsider this D1 index row. */
+    terminalReconcileDeferredUntil: integer('terminal_reconcile_deferred_until'),
+    /** Machine-readable reason this row was deferred by the terminal-ledger repair sweep. */
+    terminalReconcileDeferReason: text('terminal_reconcile_defer_reason'),
   },
   (table) => ({
     userRecentIdx: index('idx_session_summaries_user_recent').on(
@@ -1568,12 +3464,1388 @@ export const sessionSummaries = sqliteTable(
       table.status,
       table.updatedAt
     ),
-    projectIdx: index('idx_session_summaries_project').on(
+    projectIdx: index('idx_session_summaries_project').on(table.projectId, table.updatedAt),
+    projectCreatorIdx: index('idx_session_summaries_project_creator').on(
       table.projectId,
+      table.createdByUserId,
       table.updatedAt
+    ),
+    terminalReconcileIdx: index('idx_session_summaries_terminal_reconcile').on(
+      table.status,
+      table.terminalReconcileDeferredUntil,
+      table.updatedAt,
+      table.id
     ),
   })
 );
 
 export type SessionSummaryRow = typeof sessionSummaries.$inferSelect;
 export type NewSessionSummaryRow = typeof sessionSummaries.$inferInsert;
+
+/**
+ * Per-project coverage record for `session_summaries` — the gate that decides
+ * whether a per-project session list may be answered from D1 instead of the
+ * ProjectData DO.
+ *
+ * D1 is an eventually-consistent index, so it may only serve a read it can
+ * prove is equivalent: `complete` records whether the sync captured every
+ * session (it is capped), `sessionCount` is how many the DO held at sync time,
+ * and `syncedAt` bounds staleness. Anything missing or stale means fall back to
+ * the DO rather than guess.
+ */
+export const sessionIndexCoverage = sqliteTable('session_index_coverage', {
+  projectId: text('project_id')
+    .primaryKey()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  syncedAt: integer('synced_at').notNull(),
+  sessionCount: integer('session_count').notNull().default(0),
+  complete: integer('complete').notNull().default(0),
+  backfillCursorUpdatedAt: integer('backfill_cursor_updated_at'),
+  backfillCursorId: text('backfill_cursor_id'),
+  backfillStartedAt: integer('backfill_started_at'),
+  backfillCompletedAt: integer('backfill_completed_at'),
+});
+
+export type SessionIndexCoverageRow = typeof sessionIndexCoverage.$inferSelect;
+
+export const projectDataArchiveCircuitBreakers = sqliteTable(
+  'project_data_archive_circuit_breakers',
+  {
+    projectId: text('project_id')
+      .primaryKey()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    state: text('state', { enum: ['closed', 'open', 'frozen'] })
+      .notNull()
+      .default('closed'),
+    reason: text('reason'),
+    openedAt: integer('opened_at'),
+    updatedAt: integer('updated_at').notNull(),
+  }
+);
+
+export type ProjectDataArchiveCircuitBreakerRow =
+  typeof projectDataArchiveCircuitBreakers.$inferSelect;
+
+export const projectDataArchiveGlobalSweepCadence = sqliteTable(
+  'project_data_archive_global_sweep_cadence',
+  {
+    sweepName: text('sweep_name', {
+      enum: ['archive_sharding_global_sweep'],
+    }).primaryKey(),
+    lastStartedAt: integer('last_started_at'),
+    lastCompletedAt: integer('last_completed_at'),
+    nextEligibleAt: integer('next_eligible_at').notNull().default(0),
+    lastStatus: text('last_status', {
+      enum: ['never', 'running', 'succeeded', 'failed', 'partial'],
+    })
+      .notNull()
+      .default('never'),
+    lastSkipReason: text('last_skip_reason'),
+    lastError: text('last_error'),
+    leaseOwner: text('lease_owner'),
+    leaseExpiresAt: integer('lease_expires_at'),
+    runCount: integer('run_count').notNull().default(0),
+    /**
+     * Consecutive sweeps that journaled nothing because EVERY candidate they considered cost
+     * more than the whole daily write allowance. Non-zero means the sweep is stuck rather than
+     * idle; at `PROJECT_DATA_ARCHIVE_BUDGET_STALL_ALERT_SWEEPS` it flips `lastStatus` to
+     * `partial`. Added by migration `0156`.
+     */
+    consecutiveBudgetStalls: integer('consecutive_budget_stalls').notNull().default(0),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => ({
+    nextEligibleIdx: index('idx_project_data_archive_global_sweep_cadence_next_eligible').on(
+      table.nextEligibleAt
+    ),
+  })
+);
+
+export type ProjectDataArchiveGlobalSweepCadenceRow =
+  typeof projectDataArchiveGlobalSweepCadence.$inferSelect;
+
+export const projectDataStorageReliefPreflights = sqliteTable(
+  'project_data_storage_relief_preflights',
+  {
+    planId: text('plan_id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    status: text('status', { enum: ['running', 'complete', 'truncated', 'failed'] })
+      .notNull()
+      .default('running'),
+    cutoffCreatedAt: integer('cutoff_created_at').notNull(),
+    configJson: text('config_json').notNull(),
+    cursorJson: text('cursor_json'),
+    batchesStarted: integer('batches_started').notNull().default(0),
+    rowsExamined: integer('rows_examined').notNull().default(0),
+    eligibleRows: integer('eligible_rows').notNull().default(0),
+    eligibleBytes: integer('eligible_bytes').notNull().default(0),
+    legacyOversizedRows: integer('legacy_oversized_rows').notNull().default(0),
+    legacyOversizedBytes: integer('legacy_oversized_bytes').notNull().default(0),
+    rearchivableOversizedRows: integer('rearchivable_oversized_rows').notNull().default(0),
+    rearchivableOversizedBytes: integer('rearchivable_oversized_bytes').notNull().default(0),
+    oversizedRows: integer('oversized_rows').notNull().default(0),
+    oversizedBytes: integer('oversized_bytes').notNull().default(0),
+    archivedRows: integer('archived_rows').notNull().default(0),
+    skippedRows: integer('skipped_rows').notNull().default(0),
+    sessionCount: integer('session_count').notNull().default(0),
+    sessionsJson: text('sessions_json').notNull().default('{}'),
+    sessionsSha256: text('sessions_sha256'),
+    targetBatchesJson: text('target_batches_json').notNull().default('[]'),
+    targetManifestKey: text('target_manifest_key'),
+    targetManifestBytes: integer('target_manifest_bytes'),
+    targetManifestSha256: text('target_manifest_sha256'),
+    databaseSizeBytes: integer('database_size_bytes'),
+    nextEligibleAt: integer('next_eligible_at').notNull().default(0),
+    leaseOwner: text('lease_owner'),
+    leaseExpiresAt: integer('lease_expires_at'),
+    startedAt: integer('started_at').notNull(),
+    completedAt: integer('completed_at'),
+    lastError: text('last_error'),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => ({
+    projectStatusIdx: index('idx_project_data_storage_relief_preflights_project_status').on(
+      table.projectId,
+      table.status,
+      table.updatedAt
+    ),
+    nextEligibleIdx: index('idx_project_data_storage_relief_preflights_next_eligible').on(
+      table.status,
+      table.nextEligibleAt
+    ),
+  })
+);
+
+export type ProjectDataStorageReliefPreflightRow =
+  typeof projectDataStorageReliefPreflights.$inferSelect;
+
+export const projectDataArchiveUnusedReservations = sqliteTable(
+  'project_data_archive_unused_reservations',
+  {
+    reservationId: text('reservation_id').primaryKey(),
+    windowStartedAt: integer('window_started_at').notNull(),
+    estimatedWrites: integer('estimated_writes').notNull(),
+    released: integer('released').notNull().default(0),
+  },
+  (table) => ({
+    windowIdx: index('idx_archive_unused_reservation_window').on(table.windowStartedAt),
+  })
+);
+
+export const projectDataArchiveWriteBudget = sqliteTable('project_data_archive_write_budget', {
+  id: text('id').primaryKey(),
+  windowStartedAt: integer('window_started_at').notNull(),
+  reservedWrites: integer('reserved_writes').notNull(),
+});
+
+export const projectDataArchiveMigrations = sqliteTable(
+  'project_data_archive_migrations',
+  {
+    migrationId: text('migration_id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    sessionId: text('session_id').notNull(),
+    storageFormat: text('storage_format', { enum: ['sqlite-v1', 'r2-gzip-v1'] })
+      .notNull()
+      .default('sqlite-v1'),
+    state: text('state', {
+      enum: [
+        'candidate',
+        'leased',
+        'intent_prepared',
+        'target_prepared',
+        'copying',
+        'target_sealed',
+        'recovery_manifest_persisted',
+        'source_deleted',
+        'published',
+        'failed',
+        'poisoned',
+        'frozen',
+      ],
+    }).notNull(),
+    sourceOwnerName: text('source_owner_name').notNull(),
+    targetOwnerName: text('target_owner_name').notNull(),
+    sourceGeneration: integer('source_generation').notNull().default(0),
+    targetGeneration: integer('target_generation').notNull(),
+    sourceIntentToken: text('source_intent_token'),
+    terminalVersionSha256: text('terminal_version_sha256'),
+    targetAggregateSha256: text('target_aggregate_sha256'),
+    r2ManifestKey: text('r2_manifest_key'),
+    leaseOwner: text('lease_owner'),
+    leaseEpoch: integer('lease_epoch').notNull().default(0),
+    leaseExpiresAt: integer('lease_expires_at'),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    errorCode: text('error_code'),
+    errorMessage: text('error_message'),
+    candidateAt: integer('candidate_at'),
+    intentPreparedAt: integer('intent_prepared_at'),
+    targetPreparedAt: integer('target_prepared_at'),
+    copyingStartedAt: integer('copying_started_at'),
+    targetSealedAt: integer('target_sealed_at'),
+    recoveryManifestPersistedAt: integer('recovery_manifest_persisted_at'),
+    sourceDeletedAt: integer('source_deleted_at'),
+    publishedAt: integer('published_at'),
+    poisonedAt: integer('poisoned_at'),
+    frozenAt: integer('frozen_at'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => ({
+    stateLeaseIdx: index('idx_project_data_archive_migrations_state_lease').on(
+      table.state,
+      table.leaseExpiresAt,
+      table.updatedAt
+    ),
+    projectStateIdx: index('idx_project_data_archive_migrations_project_state').on(
+      table.projectId,
+      table.state,
+      table.updatedAt
+    ),
+    sessionIdx: index('idx_project_data_archive_migrations_session').on(
+      table.projectId,
+      table.sessionId,
+      table.state
+    ),
+  })
+);
+
+export type ProjectDataArchiveMigrationRow = typeof projectDataArchiveMigrations.$inferSelect;
+
+export const projectDataArchiveCopyCheckpoints = sqliteTable(
+  'project_data_archive_copy_checkpoints',
+  {
+    migrationId: text('migration_id')
+      .notNull()
+      .references(() => projectDataArchiveMigrations.migrationId, { onDelete: 'cascade' }),
+    tableName: text('table_name', {
+      enum: ['chat_messages', 'chat_messages_grouped', 'tool_payload_archives'],
+    }).notNull(),
+    storageFormat: text('storage_format', { enum: ['sqlite-v1', 'r2-gzip-v1'] }).notNull(),
+    chunkRows: integer('chunk_rows').notNull(),
+    chunkBytes: integer('chunk_bytes').notNull(),
+    nextOrdinal: integer('next_ordinal').notNull().default(0),
+    sourceCursor: text('source_cursor'),
+    complete: integer('complete').notNull().default(0),
+    copiedRows: integer('copied_rows').notNull().default(0),
+    copiedBytes: integer('copied_bytes').notNull().default(0),
+    lastChunkSha256: text('last_chunk_sha256'),
+    leaseEpoch: integer('lease_epoch').notNull().default(0),
+    lastOperation: text('last_operation'),
+    lastOperationId: text('last_operation_id'),
+    lastOperationStartedAt: integer('last_operation_started_at'),
+    lastOperationCompletedAt: integer('last_operation_completed_at'),
+    lastOperationDurationMs: integer('last_operation_duration_ms'),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => ({
+    primaryKey: primaryKey({ columns: [table.migrationId, table.tableName] }),
+    progressIdx: index('idx_project_data_archive_copy_checkpoints_progress').on(
+      table.complete,
+      table.updatedAt,
+      table.migrationId
+    ),
+  })
+);
+
+export type ProjectDataArchiveCopyCheckpointRow =
+  typeof projectDataArchiveCopyCheckpoints.$inferSelect;
+
+export const projectDataSessionLocations = sqliteTable(
+  'project_data_session_locations',
+  {
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    sessionId: text('session_id').notNull(),
+    locationState: text('location_state', {
+      enum: ['root', 'migrating', 'archive_shard', 'frozen'],
+    }).notNull(),
+    ownerKind: text('owner_kind', { enum: ['root', 'archive_shard'] }).notNull(),
+    ownerName: text('owner_name').notNull(),
+    generation: integer('generation').notNull(),
+    migrationId: text('migration_id').references(() => projectDataArchiveMigrations.migrationId, {
+      onDelete: 'set null',
+    }),
+    sourceOwnerName: text('source_owner_name'),
+    targetOwnerName: text('target_owner_name'),
+    targetAggregateSha256: text('target_aggregate_sha256'),
+    routingSchemaVersion: integer('routing_schema_version').notNull().default(1),
+    publishedAt: integer('published_at'),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.projectId, table.sessionId] }),
+    ownerIdx: index('idx_project_data_session_locations_owner').on(
+      table.ownerKind,
+      table.ownerName,
+      table.generation
+    ),
+    stateIdx: index('idx_project_data_session_locations_state').on(
+      table.locationState,
+      table.updatedAt
+    ),
+  })
+);
+
+export type ProjectDataSessionLocationRow = typeof projectDataSessionLocations.$inferSelect;
+
+export const projectDataSessionIndexCursors = sqliteTable('project_data_session_index_cursors', {
+  projectId: text('project_id')
+    .primaryKey()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  cursorUpdatedAt: integer('cursor_updated_at'),
+  cursorId: text('cursor_id'),
+  fullSyncStartedAt: integer('full_sync_started_at'),
+  lastProgressAt: integer('last_progress_at'),
+  observedSessionCount: integer('observed_session_count').notNull().default(0),
+  complete: integer('complete').notNull().default(0),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+export type ProjectDataSessionIndexCursorRow = typeof projectDataSessionIndexCursors.$inferSelect;
+
+export const projectDataStorageTelemetry = sqliteTable(
+  'project_data_storage_telemetry',
+  {
+    projectId: text('project_id')
+      .primaryKey()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    measuredAt: integer('measured_at').notNull(),
+    databaseSizeBytes: integer('database_size_bytes').notNull(),
+    limitBytes: integer('limit_bytes').notNull(),
+    usageRatio: real('usage_ratio').notNull(),
+    status: text('status', { enum: ['ok', 'notice', 'warning', 'critical', 'degraded'] }).notNull(),
+    growthRateBytesPerDay: real('growth_rate_bytes_per_day'),
+    estimatedDaysToLimit: real('estimated_days_to_limit'),
+    cleanupHealth: text('cleanup_health', {
+      enum: ['not_needed', 'running', 'target_reached', 'target_unreachable', 'failed'],
+    }),
+    reclaimableBytes: integer('reclaimable_bytes'),
+    categoryBreakdownJson: text('category_breakdown_json'),
+    lastAlarmAt: integer('last_alarm_at'),
+    lastAlertAt: integer('last_alert_at'),
+    lastAlertStatus: text('last_alert_status', {
+      enum: ['ok', 'notice', 'warning', 'critical', 'degraded'],
+    }),
+    lastAlertReason: text('last_alert_reason'),
+    lastPurgeAt: integer('last_purge_at'),
+    lastPurgeReason: text('last_purge_reason'),
+    lastPurgeRows: integer('last_purge_rows'),
+    lastPurgeDatabaseSizeBytes: integer('last_purge_database_size_bytes'),
+    lastError: text('last_error'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => ({
+    statusIdx: index('idx_project_data_storage_telemetry_status').on(
+      table.status,
+      table.usageRatio,
+      table.measuredAt
+    ),
+    measuredAtIdx: index('idx_project_data_storage_telemetry_measured_at').on(table.measuredAt),
+  })
+);
+
+export type ProjectDataStorageTelemetryRow = typeof projectDataStorageTelemetry.$inferSelect;
+
+export const projectDataStorageTelemetryHistory = sqliteTable(
+  'project_data_storage_telemetry_history',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    measuredAt: integer('measured_at').notNull(),
+    databaseSizeBytes: integer('database_size_bytes').notNull(),
+    limitBytes: integer('limit_bytes').notNull(),
+    usageRatio: real('usage_ratio').notNull(),
+    status: text('status', { enum: ['ok', 'notice', 'warning', 'critical', 'degraded'] }).notNull(),
+    growthRateBytesPerDay: real('growth_rate_bytes_per_day'),
+    estimatedDaysToLimit: real('estimated_days_to_limit'),
+    cleanupHealth: text('cleanup_health', {
+      enum: ['not_needed', 'running', 'target_reached', 'target_unreachable', 'failed'],
+    }),
+    reclaimableBytes: integer('reclaimable_bytes'),
+    categoryBreakdownJson: text('category_breakdown_json'),
+    createdAt: integer('created_at').notNull(),
+  },
+  (table) => ({
+    projectMeasuredAtIdx: index('idx_project_data_storage_telemetry_history_project_measured').on(
+      table.projectId,
+      table.measuredAt
+    ),
+    statusMeasuredAtIdx: index('idx_project_data_storage_telemetry_history_status_measured').on(
+      table.status,
+      table.measuredAt
+    ),
+    cleanupHealthMeasuredAtIdx: index(
+      'idx_project_data_storage_telemetry_history_cleanup_health_measured'
+    ).on(table.cleanupHealth, table.measuredAt),
+  })
+);
+
+export type ProjectDataStorageTelemetryHistoryRow =
+  typeof projectDataStorageTelemetryHistory.$inferSelect;
+
+export const diagnosticIncidents = sqliteTable(
+  'diagnostic_incidents',
+  {
+    id: text('id').primaryKey(),
+    platformErrorId: text('platform_error_id').notNull().unique(),
+    nodeId: text('node_id').notNull(),
+    workspaceId: text('workspace_id'),
+    signature: text('signature'),
+    deploymentId: text('deployment_id'),
+    status: text('status', { enum: ['pending', 'available', 'failed', 'expired'] })
+      .notNull()
+      .default('pending'),
+    occurrenceCount: integer('occurrence_count').notNull().default(1),
+    lastSeenAt: text('last_seen_at'),
+    artifactCount: integer('artifact_count').notNull().default(0),
+    totalBytes: integer('total_bytes').notNull().default(0),
+    manifestJson: text('manifest_json'),
+    previewJson: text('preview_json'),
+    failureReason: text('failure_reason'),
+    expiresAt: text('expires_at').notNull(),
+    deleteAfter: text('delete_after').notNull(),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    nodeStatusIdx: index('idx_diagnostic_incidents_node_status').on(
+      table.nodeId,
+      table.status,
+      table.createdAt
+    ),
+    expiryIdx: index('idx_diagnostic_incidents_expiry').on(table.status, table.expiresAt),
+    deleteAfterIdx: index('idx_diagnostic_incidents_delete_after').on(table.deleteAfter),
+    signatureDeploymentIdx: uniqueIndex('idx_diagnostic_incidents_signature_deployment')
+      .on(table.signature, table.deploymentId)
+      .where(sql`${table.signature} IS NOT NULL AND ${table.deploymentId} IS NOT NULL`),
+  })
+);
+
+export const diagnosticIncidentOccurrences = sqliteTable(
+  'diagnostic_incident_occurrences',
+  {
+    platformErrorId: text('platform_error_id').primaryKey(),
+    incidentId: text('incident_id')
+      .notNull()
+      .references(() => diagnosticIncidents.id, { onDelete: 'cascade' }),
+    nodeId: text('node_id').notNull(),
+    workspaceId: text('workspace_id'),
+    occurredAt: text('occurred_at').notNull(),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    incidentIdx: index('idx_diagnostic_incident_occurrences_incident').on(
+      table.incidentId,
+      table.occurredAt
+    ),
+  })
+);
+
+export const diagnosticArtifacts = sqliteTable(
+  'diagnostic_artifacts',
+  {
+    id: text('id').primaryKey(),
+    incidentId: text('incident_id')
+      .notNull()
+      .references(() => diagnosticIncidents.id),
+    nodeId: text('node_id').notNull(),
+    kind: text('kind').notNull(),
+    status: text('status', { enum: ['pending', 'available', 'failed', 'expired'] })
+      .notNull()
+      .default('pending'),
+    objectKey: text('object_key').notNull().unique(),
+    contentType: text('content_type').notNull(),
+    checksumSha256: text('checksum_sha256'),
+    expectedBytes: integer('expected_bytes').notNull().default(0),
+    actualBytes: integer('actual_bytes'),
+    manifestJson: text('manifest_json'),
+    previewJson: text('preview_json'),
+    uploadAttempts: integer('upload_attempts').notNull().default(0),
+    uploadLeaseId: text('upload_lease_id'),
+    uploadLeaseExpiresAt: text('upload_lease_expires_at'),
+    failureReason: text('failure_reason'),
+    expiresAt: text('expires_at').notNull(),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    incidentKindUnique: uniqueIndex('idx_diagnostic_artifacts_incident_kind').on(
+      table.incidentId,
+      table.kind
+    ),
+    incidentStatusIdx: index('idx_diagnostic_artifacts_incident_status').on(
+      table.incidentId,
+      table.status
+    ),
+    nodeStatusIdx: index('idx_diagnostic_artifacts_node_status').on(
+      table.nodeId,
+      table.status,
+      table.createdAt
+    ),
+    expiryIdx: index('idx_diagnostic_artifacts_expiry').on(table.status, table.expiresAt),
+    pendingExpiryIdx: index('idx_diagnostic_artifacts_pending_expiry')
+      .on(table.expiresAt)
+      .where(sql`${table.status} <> 'expired'`),
+    statusUpdatedIdx: index('idx_diagnostic_artifacts_status_updated').on(
+      table.status,
+      sql`datetime(${table.updatedAt})`,
+      table.id
+    ),
+  })
+);
+
+export const debugDiagnoses = sqliteTable(
+  'debug_diagnoses',
+  {
+    id: text('id').primaryKey(),
+    errorId: text('error_id'),
+    startTime: text('start_time').notNull(),
+    endTime: text('end_time').notNull(),
+    diagnosis: text('diagnosis').notNull(),
+    model: text('model').notNull(),
+    turns: integer('turns').notNull(),
+    inputTokens: integer('input_tokens').notNull(),
+    outputTokens: integer('output_tokens').notNull(),
+    dailyTokensUsed: integer('daily_tokens_used').notNull(),
+    dailyTokenLimit: integer('daily_token_limit').notNull(),
+    ideaId: text('idea_id').references(() => tasks.id, { onDelete: 'set null' }),
+    createdBy: text('created_by')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    errorCreatedIdx: index('idx_debug_diagnoses_error_created').on(table.errorId, table.createdAt),
+    windowIdx: index('idx_debug_diagnoses_window').on(table.startTime, table.endTime),
+  })
+);
+export const debugDiagnosisRuns = sqliteTable(
+  'debug_diagnosis_runs',
+  {
+    id: text('id').primaryKey(),
+    legacyStatus: text('status', { enum: ['queued', 'running', 'succeeded', 'failed'] }).notNull(),
+    status: text('run_status', {
+      enum: ['queued', 'running', 'succeeded', 'failed', 'cancelled'],
+    }).notNull(),
+    errorId: text('error_id'),
+    startTime: text('start_time').notNull(),
+    endTime: text('end_time').notNull(),
+    diagnosisId: text('diagnosis_id').references(() => debugDiagnoses.id, { onDelete: 'set null' }),
+    retryOfRunId: text('retry_of_run_id'),
+    currentStep: text('current_step'),
+    heartbeatAt: text('heartbeat_at'),
+    attempt: integer('attempt').notNull().default(0),
+    executorVersion: text('executor_version').notNull().default('diagnosis-runner-v1'),
+    cancelRequestedAt: text('cancel_requested_at'),
+    deadlineAt: text('deadline_at').notNull(),
+    model: text('model'),
+    turns: integer('turns').notNull().default(0),
+    inputTokens: integer('input_tokens').notNull().default(0),
+    outputTokens: integer('output_tokens').notNull().default(0),
+    dailyTokensUsed: integer('daily_tokens_used').notNull().default(0),
+    dailyTokenLimit: integer('daily_token_limit').notNull().default(0),
+    errorMessage: text('error_message'),
+    createdBy: text('created_by')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    startedAt: text('started_at'),
+    completedAt: text('completed_at'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    statusCreatedIdx: index('idx_debug_diagnosis_runs_canonical_status_created').on(
+      table.status,
+      table.createdAt
+    ),
+    activeDeadlineIdx: index('idx_debug_diagnosis_runs_canonical_active_deadline').on(
+      table.status,
+      table.deadlineAt
+    ),
+    errorCreatedIdx: index('idx_debug_diagnosis_runs_error_created').on(
+      table.errorId,
+      table.createdAt
+    ),
+    windowIdx: index('idx_debug_diagnosis_runs_window').on(table.startTime, table.endTime),
+  })
+);
+
+export const debugDiagnosisRunEvents = sqliteTable(
+  'debug_diagnosis_run_events',
+  {
+    id: text('id').primaryKey(),
+    runId: text('run_id')
+      .notNull()
+      .references(() => debugDiagnosisRuns.id, { onDelete: 'cascade' }),
+    sequence: integer('sequence').notNull(),
+    stepKey: text('step_key').notNull(),
+    eventType: text('event_type').notNull(),
+    status: text('status').notNull(),
+    sourceName: text('source_name'),
+    argumentsPreview: text('arguments_preview'),
+    evidencePreview: text('evidence_preview'),
+    resultCount: integer('result_count'),
+    durationMs: integer('duration_ms'),
+    retryAttempt: integer('retry_attempt').notNull().default(0),
+    errorCode: text('error_code'),
+    errorMessage: text('error_message'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    runSequenceIdx: index('idx_debug_diagnosis_events_run_sequence').on(
+      table.runId,
+      table.sequence
+    ),
+    runStepUnique: uniqueIndex('idx_debug_diagnosis_events_run_step').on(
+      table.runId,
+      table.stepKey
+    ),
+  })
+);
+
+export const platformFeedbackTriages = sqliteTable(
+  'platform_feedback_triages',
+  {
+    signature: text('signature').primaryKey(),
+    canonicalSignature: text('canonical_signature'),
+    source: text('source').notNull(),
+    summary: text('summary').notNull(),
+    firstSeenAt: integer('first_seen_at').notNull(),
+    lastSeenAt: integer('last_seen_at').notNull(),
+    occurrenceCount: integer('occurrence_count').notNull(),
+    severity: text('severity').notNull().default('error'),
+    evidenceRefs: text('evidence_refs').notNull(),
+    diagnosisId: text('diagnosis_id').references(() => debugDiagnoses.id, { onDelete: 'set null' }),
+    ideaId: text('idea_id').references(() => tasks.id, { onDelete: 'set null' }),
+    claimToken: text('claim_token'),
+    claimExpiresAt: integer('claim_expires_at'),
+    failureCount: integer('failure_count').notNull().default(0),
+    lastFailureReason: text('last_failure_reason'),
+    lastFailedAt: integer('last_failed_at'),
+    rejectedAt: integer('rejected_at'),
+    budgetDeferredUntil: integer('budget_deferred_until'),
+    budgetDeferredReason: text('budget_deferred_reason'),
+    budgetDeferCount: integer('budget_defer_count').notNull().default(0),
+    lastBudgetDeferredAt: integer('last_budget_deferred_at'),
+    queueState: text('queue_state').notNull().default('resolved'),
+    queuedAt: integer('queued_at'),
+    dispatchLeaseToken: text('dispatch_lease_token'),
+    dispatchLeaseExpiresAt: integer('dispatch_lease_expires_at'),
+    dispatchedTriggerId: text('dispatched_trigger_id').references(() => triggers.id, {
+      onDelete: 'set null',
+    }),
+    dispatchedExecutionId: text('dispatched_execution_id').references(() => triggerExecutions.id, {
+      onDelete: 'set null',
+    }),
+    dispatchedTaskId: text('dispatched_task_id').references(() => tasks.id, {
+      onDelete: 'set null',
+    }),
+    dispatchedAt: integer('dispatched_at'),
+    dispatchAttempts: integer('dispatch_attempts').notNull().default(0),
+    incidentClaimToken: text('incident_claim_token'),
+    incidentClaimExpiresAt: integer('incident_claim_expires_at'),
+    incidentClaimedByTaskId: text('incident_claimed_by_task_id').references(() => tasks.id, {
+      onDelete: 'set null',
+    }),
+    incidentClaimedAt: integer('incident_claimed_at'),
+    resolvedAt: integer('resolved_at'),
+    resolvedByTaskId: text('resolved_by_task_id').references(() => tasks.id, {
+      onDelete: 'set null',
+    }),
+    resolutionNote: text('resolution_note'),
+    resolutionReferences: text('resolution_references'),
+    expiredAt: integer('expired_at'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    ideaIdx: index('idx_platform_feedback_triages_idea').on(table.ideaId),
+    canonicalSignatureIdx: uniqueIndex('idx_platform_feedback_triages_canonical_signature')
+      .on(table.canonicalSignature)
+      .where(sql`${table.canonicalSignature} IS NOT NULL`),
+    lastSeenIdx: index('idx_platform_feedback_triages_last_seen').on(table.lastSeenAt),
+    rejectedIdx: index('idx_platform_feedback_triages_rejected').on(table.rejectedAt),
+    queueStateIdx: index('idx_platform_feedback_triages_queue_state').on(
+      table.queueState,
+      table.queuedAt,
+      table.lastSeenAt
+    ),
+    dispatchLeaseIdx: index('idx_platform_feedback_triages_dispatch_lease').on(
+      table.dispatchLeaseExpiresAt
+    ),
+    incidentClaimIdx: index('idx_platform_feedback_triages_incident_claim').on(
+      table.incidentClaimExpiresAt
+    ),
+    budgetDeferIdx: index('idx_platform_feedback_triages_budget_defer')
+      .on(table.budgetDeferredUntil)
+      .where(sql`${table.budgetDeferredUntil} IS NOT NULL`),
+  })
+);
+
+// =============================================================================
+// DEPLOYMENT ENVIRONMENTS
+// =============================================================================
+
+export const deploymentEnvironments = sqliteTable(
+  'deployment_environments',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    status: text('status').notNull().default('active'),
+    /** Deployment node hosting this environment; many environments may share one node. */
+    nodeId: text('node_id').references(() => nodes.id, { onDelete: 'set null' }),
+    /** True when the latest submitted manifest declares persistent volumes. */
+    requiresVolumes: integer('requires_volumes', { mode: 'boolean' }).notNull().default(false),
+    /** Exact aggregate manifest reservation consumed by deployment-node admission. */
+    resolvedReservationJson: text('resolved_reservation_json'),
+    /** Cloud provider used for placement (e.g. 'hetzner', 'scaleway'). */
+    provider: text('provider'),
+    /** Provider location/region for placement constraint. */
+    location: text('location'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    createdByUserId: text('created_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    createdByAgentProfileId: text('created_by_agent_profile_id').references(
+      () => agentProfiles.id,
+      {
+        onDelete: 'set null',
+      }
+    ),
+    createdByTaskId: text('created_by_task_id').references(() => tasks.id, {
+      onDelete: 'set null',
+    }),
+    createdByWorkspaceId: text('created_by_workspace_id'),
+    creationSource: text('creation_source').notNull().default('user'),
+    secretsUpdatedAt: text('secrets_updated_at'),
+    configUpdatedAt: text('config_updated_at'),
+    /** Latest deployment state observed from the authenticated deployment node. */
+    observedAppliedSeq: integer('observed_applied_seq'),
+    observedStatus: text('observed_status'),
+    observedErrorMessage: text('observed_error_message'),
+    observedServicesJson: text('observed_services_json'),
+    observedDeployStatusJson: text('observed_deploy_status_json'),
+    observedDiskTelemetryJson: text('observed_disk_telemetry_json'),
+    /** Desired and observed route-only Caddy configuration revision. */
+    desiredRoutingRevision: integer('desired_routing_revision').notNull().default(0),
+    observedRoutingRevision: integer('observed_routing_revision').notNull().default(0),
+    observedRoutingStatus: text('observed_routing_status'),
+    observedRoutingError: text('observed_routing_error'),
+    observedRoutingAt: text('observed_routing_at'),
+    observedAt: text('observed_at'),
+    /** User-controlled gate for agent-facing app-deployment tools. */
+    agentDeployEnabled: integer('agent_deploy_enabled', { mode: 'boolean' })
+      .notNull()
+      .default(false),
+    offboardingStatus: text('offboarding_status'),
+    agentDeployEnabledBy: text('agent_deploy_enabled_by').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    agentDeployEnabledAt: text('agent_deploy_enabled_at'),
+    agentDeployDisabledAt: text('agent_deploy_disabled_at'),
+    allowedDeployProfileIdsJson: text('allowed_deploy_profile_ids_json'),
+  },
+  (table) => ({
+    projectNameUnique: uniqueIndex('idx_deployment_environments_project_name').on(
+      table.projectId,
+      table.name
+    ),
+    projectIdIdx: index('idx_deployment_environments_project_id').on(table.projectId),
+    nodeIdIdx: index('idx_deployment_environments_node_id').on(table.nodeId),
+    observedStatusIdx: index('idx_deployment_environments_observed_status').on(
+      table.observedStatus
+    ),
+    routingRevisionIdx: index('idx_deployment_environments_routing_revision').on(
+      table.desiredRoutingRevision,
+      table.observedRoutingRevision
+    ),
+    agentDeployEnabledIdx: index('idx_deployment_environments_agent_deploy_enabled').on(
+      table.agentDeployEnabled
+    ),
+    createdByAgentProfileIdx: index('idx_deployment_environments_created_by_agent_profile').on(
+      table.createdByAgentProfileId
+    ),
+    creationSourceIdx: index('idx_deployment_environments_creation_source').on(
+      table.creationSource
+    ),
+  })
+);
+
+export type DeploymentEnvironmentRow = typeof deploymentEnvironments.$inferSelect;
+export type NewDeploymentEnvironmentRow = typeof deploymentEnvironments.$inferInsert;
+
+// =============================================================================
+// DEPLOYMENT SECRETS
+// =============================================================================
+
+export const deploymentSecrets = sqliteTable(
+  'deployment_secrets',
+  {
+    id: text('id').primaryKey(),
+    environmentId: text('environment_id')
+      .notNull()
+      .references(() => deploymentEnvironments.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    encryptedValue: text('encrypted_value').notNull(),
+    iv: text('iv').notNull(),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    envNameUnique: uniqueIndex('idx_deployment_secrets_env_name').on(
+      table.environmentId,
+      table.name
+    ),
+    environmentIdIdx: index('idx_deployment_secrets_environment_id').on(table.environmentId),
+  })
+);
+
+export type DeploymentSecretRow = typeof deploymentSecrets.$inferSelect;
+export type NewDeploymentSecretRow = typeof deploymentSecrets.$inferInsert;
+
+// =============================================================================
+// DEPLOYMENT ENVIRONMENT CONFIG VARS
+// =============================================================================
+
+/** Per-deployment-environment Compose interpolation variables.
+ *  Secret values are AES-256-GCM encrypted; non-secret values are stored in plaintext. */
+export const deploymentEnvironmentConfigVars = sqliteTable(
+  'deployment_environment_config_vars',
+  {
+    id: text('id').primaryKey(),
+    environmentId: text('environment_id')
+      .notNull()
+      .references(() => deploymentEnvironments.id, { onDelete: 'cascade' }),
+    envKey: text('env_key').notNull(),
+    /** When isSecret=true: AES-256-GCM ciphertext (base64). When isSecret=false: plaintext value. */
+    storedValue: text('stored_value').notNull(),
+    /** AES-256-GCM IV (base64). Null when isSecret=false (value stored in plaintext). */
+    valueIv: text('value_iv'),
+    isSecret: integer('is_secret', { mode: 'boolean' }).notNull().default(false),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    envKeyUnique: uniqueIndex('idx_deployment_environment_config_vars_env_key').on(
+      table.environmentId,
+      table.envKey
+    ),
+    environmentIdIdx: index('idx_deployment_environment_config_vars_environment_id').on(
+      table.environmentId
+    ),
+  })
+);
+
+export type DeploymentEnvironmentConfigVarRow = typeof deploymentEnvironmentConfigVars.$inferSelect;
+export type NewDeploymentEnvironmentConfigVarRow =
+  typeof deploymentEnvironmentConfigVars.$inferInsert;
+
+// =============================================================================
+// DEPLOYMENT RELEASES
+// =============================================================================
+
+export const deploymentReleases = sqliteTable(
+  'deployment_releases',
+  {
+    id: text('id').primaryKey(),
+    environmentId: text('environment_id')
+      .notNull()
+      .references(() => deploymentEnvironments.id, { onDelete: 'cascade' }),
+    manifest: text('manifest').notNull(),
+    version: integer('version').notNull(),
+    status: text('status').notNull().default('created'),
+    /** Updated whenever the control plane changes release.status. Added in migration 0112. */
+    statusUpdatedAt: text('status_updated_at'),
+    // Discriminator for how the release was produced (migration 0073).
+    // NULL / 'build-on-node' = manifest is a DeploymentManifest.
+    // 'compose-publish' = manifest is a captured `docker compose publish`
+    //   ReleaseSubmission (compose YAML + image-digests + pushed service refs).
+    source: text('source'),
+    createdBy: text('created_by')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    environmentIdIdx: index('idx_deployment_releases_environment_id').on(table.environmentId),
+    envVersionUnique: uniqueIndex('idx_deployment_releases_env_version').on(
+      table.environmentId,
+      table.version
+    ),
+    sourceIdx: index('idx_deployment_releases_source').on(table.source),
+    statusUpdatedAtIdx: index('idx_deployment_releases_status_updated_at').on(
+      table.status,
+      table.statusUpdatedAt
+    ),
+  })
+);
+
+export type DeploymentReleaseRow = typeof deploymentReleases.$inferSelect;
+export type NewDeploymentReleaseRow = typeof deploymentReleases.$inferInsert;
+
+// =============================================================================
+// DEPLOYMENT PUBLISH JOBS
+// =============================================================================
+
+export const deploymentPublishJobs = sqliteTable(
+  'deployment_publish_jobs',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    environmentId: text('environment_id')
+      .notNull()
+      .references(() => deploymentEnvironments.id, { onDelete: 'cascade' }),
+    workspaceId: text('workspace_id').notNull(),
+    nodeId: text('node_id')
+      .notNull()
+      .references(() => nodes.id, { onDelete: 'cascade' }),
+    taskId: text('task_id'),
+    agentProfileId: text('agent_profile_id'),
+    requestedBy: text('requested_by')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    environmentName: text('environment_name').notNull(),
+    reference: text('reference').notNull().default('latest'),
+    workingDir: text('working_dir'),
+    sourceDir: text('source_dir'),
+    status: text('status').notNull().default('queued'),
+    currentStep: text('current_step'),
+    releaseId: text('release_id').references(() => deploymentReleases.id, {
+      onDelete: 'set null',
+    }),
+    releaseVersion: integer('release_version'),
+    releaseStatus: text('release_status'),
+    errorMessage: text('error_message'),
+    errorCode: text('error_code'),
+    retryable: integer('retryable', { mode: 'boolean' }).notNull().default(false),
+    attempt: integer('attempt').notNull().default(1),
+    lastEventAt: text('last_event_at'),
+    startedAt: text('started_at'),
+    completedAt: text('completed_at'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    projectCreatedAtIdx: index('idx_deployment_publish_jobs_project_created_at').on(
+      table.projectId,
+      table.createdAt
+    ),
+    environmentCreatedAtIdx: index('idx_deployment_publish_jobs_environment_created_at').on(
+      table.environmentId,
+      table.createdAt
+    ),
+    workspaceCreatedAtIdx: index('idx_deployment_publish_jobs_workspace_created_at').on(
+      table.workspaceId,
+      table.createdAt
+    ),
+    statusUpdatedAtIdx: index('idx_deployment_publish_jobs_status_updated_at').on(
+      table.status,
+      table.updatedAt
+    ),
+    releaseIdIdx: index('idx_deployment_publish_jobs_release_id').on(table.releaseId),
+  })
+);
+
+export type DeploymentPublishJobRow = typeof deploymentPublishJobs.$inferSelect;
+export type NewDeploymentPublishJobRow = typeof deploymentPublishJobs.$inferInsert;
+
+export const deploymentPublishJobEvents = sqliteTable(
+  'deployment_publish_job_events',
+  {
+    id: text('id').primaryKey(),
+    publishJobId: text('publish_job_id')
+      .notNull()
+      .references(() => deploymentPublishJobs.id, { onDelete: 'cascade' }),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    environmentId: text('environment_id')
+      .notNull()
+      .references(() => deploymentEnvironments.id, { onDelete: 'cascade' }),
+    nodeId: text('node_id')
+      .notNull()
+      .references(() => nodes.id, { onDelete: 'cascade' }),
+    /** Immutable node identifier for event history when node FK semantics change. */
+    nodeIdentifier: text('node_identifier'),
+    workspaceId: text('workspace_id').notNull(),
+    seq: integer('seq').notNull(),
+    level: text('level').notNull().default('info'),
+    eventType: text('event_type').notNull(),
+    step: text('step'),
+    message: text('message').notNull(),
+    detailJson: text('detail_json'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    jobSeqUnique: uniqueIndex('idx_deployment_publish_job_events_job_seq').on(
+      table.publishJobId,
+      table.seq
+    ),
+    projectCreatedAtIdx: index('idx_deployment_publish_job_events_project_created_at').on(
+      table.projectId,
+      table.createdAt
+    ),
+    environmentCreatedAtIdx: index('idx_deployment_publish_job_events_environment_created_at').on(
+      table.environmentId,
+      table.createdAt
+    ),
+  })
+);
+
+export type DeploymentPublishJobEventRow = typeof deploymentPublishJobEvents.$inferSelect;
+export type NewDeploymentPublishJobEventRow = typeof deploymentPublishJobEvents.$inferInsert;
+
+export const deploymentReleaseEvents = sqliteTable(
+  'deployment_release_events',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    environmentId: text('environment_id')
+      .notNull()
+      .references(() => deploymentEnvironments.id, { onDelete: 'cascade' }),
+    releaseId: text('release_id').references(() => deploymentReleases.id, {
+      onDelete: 'cascade',
+    }),
+    releaseVersion: integer('release_version'),
+    nodeId: text('node_id')
+      .notNull()
+      .references(() => nodes.id, { onDelete: 'cascade' }),
+    /** Immutable node identifier for event history when node FK semantics change. */
+    nodeIdentifier: text('node_identifier'),
+    seq: integer('seq').notNull(),
+    level: text('level').notNull().default('info'),
+    eventType: text('event_type').notNull(),
+    step: text('step'),
+    message: text('message').notNull(),
+    detailJson: text('detail_json'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    releaseSeqIdx: index('idx_deployment_release_events_release_seq').on(
+      table.releaseId,
+      table.seq
+    ),
+    environmentCreatedAtIdx: index('idx_deployment_release_events_environment_created_at').on(
+      table.environmentId,
+      table.createdAt
+    ),
+    nodeCreatedAtIdx: index('idx_deployment_release_events_node_created_at').on(
+      table.nodeId,
+      table.createdAt
+    ),
+  })
+);
+
+export type DeploymentReleaseEventRow = typeof deploymentReleaseEvents.$inferSelect;
+export type NewDeploymentReleaseEventRow = typeof deploymentReleaseEvents.$inferInsert;
+
+// =============================================================================
+// DEPLOYMENT VOLUMES
+// =============================================================================
+
+export const deploymentVolumes = sqliteTable(
+  'deployment_volumes',
+  {
+    id: text('id').primaryKey(),
+    environmentId: text('environment_id')
+      .notNull()
+      .references(() => deploymentEnvironments.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    providerVolumeId: text('provider_volume_id').notNull(),
+    providerName: text('provider_name').notNull(),
+    sizeGb: integer('size_gb').notNull(),
+    location: text('location').notNull(),
+    status: text('status').notNull().default('available'),
+    attachedServerId: text('attached_server_id'),
+    linuxDevice: text('linux_device'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    envNameUnique: uniqueIndex('idx_deployment_volumes_env_name').on(
+      table.environmentId,
+      table.name
+    ),
+    environmentIdIdx: index('idx_deployment_volumes_environment_id').on(table.environmentId),
+  })
+);
+
+export type DeploymentVolumeRow = typeof deploymentVolumes.$inferSelect;
+export type NewDeploymentVolumeRow = typeof deploymentVolumes.$inferInsert;
+
+// =============================================================================
+// DEPLOYMENT CUSTOM DOMAINS (migration 0076)
+// =============================================================================
+// A user-owned subdomain attached to an existing public route of an
+// environment. SAM verifies the hostname resolves to the route target via
+// Cloudflare DoH, then emits an additional Caddy site block (same hostPort as
+// the parent public route) in the signed ApplyPayload. SAM does NOT create the
+// user's DNS record.
+
+export const deploymentCustomDomains = sqliteTable(
+  'deployment_custom_domains',
+  {
+    id: text('id').primaryKey(),
+    environmentId: text('environment_id')
+      .notNull()
+      .references(() => deploymentEnvironments.id, { onDelete: 'cascade' }),
+    /** Service name of the parent public route this domain attaches to. */
+    service: text('service').notNull(),
+    /** Container port of the parent public route. */
+    port: integer('port').notNull(),
+    /** Zero-based route index of the parent public route within the manifest. */
+    routeIndex: integer('route_index').notNull(),
+    /** The user's custom hostname (e.g. app.theircompany.com). */
+    hostname: text('hostname').notNull(),
+    /** 'pending' | 'verified' | 'failed'. */
+    verificationStatus: text('verification_status').notNull().default('pending'),
+    /** Human-readable reason the last verification attempt failed. */
+    verificationError: text('verification_error'),
+    verifiedAt: text('verified_at'),
+    /** SAM-owned generated hostname this domain resolved to when verified. */
+    verifiedCnameTarget: text('verified_cname_target'),
+    /** 'active' | 'deactivating' | 'deleted'. */
+    desiredState: text('desired_state').notNull().default('active'),
+    /** Route-application lifecycle status exposed separately from DNS status. */
+    routingStatus: text('routing_status').notNull().default('pending_dns'),
+    activationRoutingRevision: integer('activation_routing_revision'),
+    deactivationRoutingRevision: integer('deactivation_routing_revision'),
+    deletedAt: text('deleted_at'),
+    createdBy: text('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    hostnameUnique: uniqueIndex('idx_deployment_custom_domains_hostname').on(table.hostname),
+    environmentIdIdx: index('idx_deployment_custom_domains_environment_id').on(table.environmentId),
+    environmentStateIdx: index('idx_deployment_custom_domains_environment_state').on(
+      table.environmentId,
+      table.desiredState,
+      table.routingStatus
+    ),
+    activationRevisionIdx: index('idx_deployment_custom_domains_activation_revision').on(
+      table.environmentId,
+      table.activationRoutingRevision
+    ),
+    deactivationRevisionIdx: index('idx_deployment_custom_domains_deactivation_revision').on(
+      table.environmentId,
+      table.deactivationRoutingRevision
+    ),
+  })
+);
+
+export type DeploymentCustomDomainRow = typeof deploymentCustomDomains.$inferSelect;
+export type NewDeploymentCustomDomainRow = typeof deploymentCustomDomains.$inferInsert;
+
+export const deploymentCustomDomainEvents = sqliteTable(
+  'deployment_custom_domain_events',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    environmentId: text('environment_id')
+      .notNull()
+      .references(() => deploymentEnvironments.id, { onDelete: 'cascade' }),
+    customDomainId: text('custom_domain_id').references(() => deploymentCustomDomains.id, {
+      onDelete: 'set null',
+    }),
+    hostname: text('hostname').notNull(),
+    nodeId: text('node_id').references(() => nodes.id, { onDelete: 'set null' }),
+    nodeIdentifier: text('node_identifier'),
+    routingRevision: integer('routing_revision'),
+    eventType: text('event_type').notNull(),
+    level: text('level').notNull().default('info'),
+    message: text('message').notNull(),
+    detailJson: text('detail_json'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    environmentCreatedAtIdx: index('idx_deployment_custom_domain_events_environment_created_at').on(
+      table.environmentId,
+      table.createdAt
+    ),
+    domainCreatedAtIdx: index('idx_deployment_custom_domain_events_domain_created_at').on(
+      table.customDomainId,
+      table.createdAt
+    ),
+    nodeCreatedAtIdx: index('idx_deployment_custom_domain_events_node_created_at').on(
+      table.nodeIdentifier,
+      table.createdAt
+    ),
+  })
+);
+
+export type DeploymentCustomDomainEventRow = typeof deploymentCustomDomainEvents.$inferSelect;
+export type NewDeploymentCustomDomainEventRow = typeof deploymentCustomDomainEvents.$inferInsert;
+
+// =============================================================================
+// Composable Credentials — three-primitive model (migration 0071)
+// =============================================================================
+
+export const ccCredentials = sqliteTable(
+  'cc_credentials',
+  {
+    id: text('id').primaryKey(),
+    ownerId: text('owner_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    kind: text('kind').notNull(), // 'api-key' | 'oauth-token' | 'openai-compatible' | 'cloud-provider' | 'auth-json'
+    encryptedToken: text('encrypted_token').notNull(),
+    iv: text('iv').notNull(),
+    isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    ownerIdx: index('idx_cc_credentials_owner').on(table.ownerId),
+    ownerKindIdx: index('idx_cc_credentials_owner_kind').on(table.ownerId, table.kind),
+  })
+);
+
+export type CCCredentialRow = typeof ccCredentials.$inferSelect;
+export type NewCCCredentialRow = typeof ccCredentials.$inferInsert;
+
+export const ccConfigurations = sqliteTable(
+  'cc_configurations',
+  {
+    id: text('id').primaryKey(),
+    ownerId: text('owner_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    consumerKind: text('consumer_kind').notNull(), // 'agent' | 'compute'
+    consumerTarget: text('consumer_target').notNull(), // 'claude-code' | 'hetzner' etc.
+    credentialId: text('credential_id').references(() => ccCredentials.id, {
+      onDelete: 'set null',
+    }),
+    settingsJson: text('settings_json'), // JSON blob
+    isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    ownerIdx: index('idx_cc_configurations_owner').on(table.ownerId),
+    credentialIdx: index('idx_cc_configurations_credential').on(table.credentialId),
+  })
+);
+
+export type CCConfigurationRow = typeof ccConfigurations.$inferSelect;
+export type NewCCConfigurationRow = typeof ccConfigurations.$inferInsert;
+
+export const ccAttachments = sqliteTable(
+  'cc_attachments',
+  {
+    id: text('id').primaryKey(),
+    configurationId: text('configuration_id')
+      .notNull()
+      .references(() => ccConfigurations.id, { onDelete: 'cascade' }),
+    consumerKind: text('consumer_kind').notNull(),
+    consumerTarget: text('consumer_target').notNull(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    projectId: text('project_id').references(() => projects.id, { onDelete: 'cascade' }),
+    isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    userIdx: index('idx_cc_attachments_user').on(table.userId),
+    userConsumerIdx: index('idx_cc_attachments_user_consumer').on(
+      table.userId,
+      table.consumerKind,
+      table.consumerTarget
+    ),
+    projectIdx: index('idx_cc_attachments_project').on(
+      table.userId,
+      table.projectId,
+      table.consumerKind,
+      table.consumerTarget
+    ),
+    configIdx: index('idx_cc_attachments_config').on(table.configurationId),
+  })
+);
+
+export type CCAttachmentRow = typeof ccAttachments.$inferSelect;
+export type NewCCAttachmentRow = typeof ccAttachments.$inferInsert;

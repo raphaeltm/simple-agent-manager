@@ -12,6 +12,7 @@ import {
   notifyTaskComplete,
   notifyTaskFailed,
   sendNotification,
+  sendNotificationOnce,
 } from '../../../src/services/notification';
 
 function createMockEnv() {
@@ -23,6 +24,7 @@ function createMockEnv() {
   });
 
   const mockStub = {
+    claimNotificationDeduplication: vi.fn().mockResolvedValue(true),
     createNotification: createNotificationMock,
   };
 
@@ -41,6 +43,7 @@ function createMockEnv() {
       },
     } as any,
     createNotificationMock,
+    mockStub,
   };
 }
 
@@ -69,6 +72,34 @@ describe('Notification Service', () => {
         urgency: 'medium',
         title: 'Test notification',
       });
+    });
+  });
+
+  describe('sendNotificationOnce', () => {
+    it('creates only when the per-user Durable Object claim succeeds', async () => {
+      const first = await sendNotificationOnce(
+        env,
+        'user-123',
+        'cron-failure:node_cleanup',
+        10_000,
+        { type: 'cron_failure', urgency: 'high', title: 'Sweep failed' },
+        1_000
+      );
+      expect(first).toBe(true);
+      expect(createNotificationMock).toHaveBeenCalledTimes(1);
+
+      const stub = env.NOTIFICATION.get();
+      stub.claimNotificationDeduplication.mockResolvedValue(false);
+      const second = await sendNotificationOnce(
+        env,
+        'user-123',
+        'cron-failure:node_cleanup',
+        10_000,
+        { type: 'cron_failure', urgency: 'high', title: 'Sweep failed' },
+        1_001
+      );
+      expect(second).toBe(false);
+      expect(createNotificationMock).toHaveBeenCalledTimes(1);
     });
   });
 

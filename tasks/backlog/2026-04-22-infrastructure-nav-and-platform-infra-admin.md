@@ -1,5 +1,20 @@
 # Make Personal Infrastructure Visible and Add Platform Infra Admin Surface
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** Nodes and Workspaces are in the nav for every user since PR #994 (`7b653c7ad`).
+>   `apps/web/src/components/NavSidebar.tsx:139-142,322,364` are ungated; only the Admin item is
+>   gated (`:213`).
+> - **Still open:** the whole platform-infra admin half.
+>   - Explicit admin capability flags (`apps/web/src/components/AuthProvider.tsx:48,192` only
+>     expose `isSuperadmin`).
+>   - Schema for node-to-user association metadata with a reason.
+>   - `/api/admin/platform-infra/*` endpoints (none exist).
+>   - An admin page with trial context, open to `admin` as well as `superadmin`.
+>   - Unit tests and a Playwright audit for it.
+>   - Note: the existing superadmin node list (`GET /api/admin/observability/nodes`,
+>     `apps/api/src/routes/admin/observability.ts`) is not this surface.
+
 ## Problem Statement
 
 The control plane currently hides the `Infrastructure` navigation section behind a superadmin-only UI gate even though the underlying `Nodes` and `Workspaces` pages already scope results to the authenticated user's own infrastructure. This creates an unnecessary UX restriction for regular users.

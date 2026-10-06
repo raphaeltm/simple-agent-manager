@@ -1,5 +1,6 @@
 import { Download, Eye, MoreVertical, Tag, Trash2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { deleteLibraryFile, downloadLibraryFile } from '../../lib/api';
 import { isPreviewableMime } from '../../lib/file-utils';
@@ -22,11 +23,16 @@ export function FileActionsMenu({
 }: FileActionsMenuProps) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const portalRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) return;
     const handleClick = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      const insideTrigger = menuRef.current?.contains(target);
+      const insidePortal = portalRef.current?.contains(target);
+      if (!insideTrigger && !insidePortal) {
         setOpen(false);
       }
     };
@@ -53,6 +59,7 @@ export function FileActionsMenu({
   return (
     <div ref={menuRef} className="relative">
       <button
+        ref={triggerRef}
         onClick={() => setOpen(!open)}
         className={`p-1.5 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary rounded ${FOCUS_RING}`}
         aria-label={`Actions for ${file.filename}`}
@@ -61,43 +68,58 @@ export function FileActionsMenu({
       >
         <MoreVertical size={16} />
       </button>
-      {open && (
-        <div className="absolute right-0 top-full mt-1 z-20 min-w-[160px] rounded-lg border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)] shadow-lg py-1">
-          {onPreview && isPreviewableMime(file.mimeType) && (
+      {open &&
+        createPortal(
+          <div
+            ref={portalRef}
+            className="min-w-[160px] rounded-lg glass-surface shadow-lg py-1"
+            style={{
+              position: 'fixed',
+              zIndex: 20,
+              ...(() => {
+                const trigger = triggerRef.current;
+                if (!trigger) return {};
+                const r = trigger.getBoundingClientRect();
+                return { top: r.bottom + 4, right: window.innerWidth - r.right };
+              })(),
+            }}
+          >
+            {onPreview && isPreviewableMime(file.mimeType, file.filename) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  onPreview(file);
+                }}
+                className={`flex items-center gap-2 w-full px-3 py-2 text-sm text-fg-primary bg-transparent border-none cursor-pointer hover:bg-surface-hover text-left ${FOCUS_RING}`}
+              >
+                <Eye size={14} /> Preview
+              </button>
+            )}
             <button
-              type="button"
+              onClick={handleDownload}
+              className="flex items-center gap-2 w-full px-3 py-2 text-sm text-fg-primary bg-transparent border-none cursor-pointer hover:bg-surface-hover text-left"
+            >
+              <Download size={14} /> Download
+            </button>
+            <button
               onClick={() => {
                 setOpen(false);
-                onPreview(file);
+                onEditTags(file);
               }}
-              className={`flex items-center gap-2 w-full px-3 py-2 text-sm text-fg-primary bg-transparent border-none cursor-pointer hover:bg-surface-hover text-left ${FOCUS_RING}`}
+              className="flex items-center gap-2 w-full px-3 py-2 text-sm text-fg-primary bg-transparent border-none cursor-pointer hover:bg-surface-hover text-left"
             >
-              <Eye size={14} /> Preview
+              <Tag size={14} /> Edit Tags
             </button>
-          )}
-          <button
-            onClick={handleDownload}
-            className="flex items-center gap-2 w-full px-3 py-2 text-sm text-fg-primary bg-transparent border-none cursor-pointer hover:bg-surface-hover text-left"
-          >
-            <Download size={14} /> Download
-          </button>
-          <button
-            onClick={() => {
-              setOpen(false);
-              onEditTags(file);
-            }}
-            className="flex items-center gap-2 w-full px-3 py-2 text-sm text-fg-primary bg-transparent border-none cursor-pointer hover:bg-surface-hover text-left"
-          >
-            <Tag size={14} /> Edit Tags
-          </button>
-          <button
-            onClick={handleDelete}
-            className="flex items-center gap-2 w-full px-3 py-2 text-sm text-danger bg-transparent border-none cursor-pointer hover:bg-surface-hover text-left"
-          >
-            <Trash2 size={14} /> Delete
-          </button>
-        </div>
-      )}
+            <button
+              onClick={handleDelete}
+              className="flex items-center gap-2 w-full px-3 py-2 text-sm text-danger bg-transparent border-none cursor-pointer hover:bg-surface-hover text-left"
+            >
+              <Trash2 size={14} /> Delete
+            </button>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }

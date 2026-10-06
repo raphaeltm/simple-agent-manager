@@ -12,9 +12,9 @@ export interface ButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement
 
 const variantClasses: Record<ButtonVariant, string> = {
   primary: 'bg-accent text-fg-on-accent border border-transparent',
-  secondary: 'bg-surface text-fg-primary border border-border-default hover:bg-[rgba(8,15,12,0.3)]',
+  secondary: 'bg-surface text-fg-primary border border-border-default hover:bg-[var(--sam-button-secondary-hover-bg)]',
   danger: 'bg-danger text-fg-on-accent border border-transparent',
-  ghost: 'bg-transparent text-fg-primary border border-border-default hover:bg-[rgba(34,197,94,0.05)]',
+  ghost: 'bg-transparent text-fg-primary border border-border-default hover:bg-[var(--sam-form-focus-inset)]',
 };
 
 const sizeClasses: Record<ButtonSize, string> = {
@@ -39,10 +39,11 @@ export function Button({
     <button
       {...props}
       disabled={isDisabled}
-      className={`inline-flex items-center justify-center gap-2 rounded-md font-semibold transition-all duration-150 ease-in-out ${isDisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'} ${variantClasses[variant]} ${sizeClasses[size]} ${className}`}
+      aria-busy={loading || undefined}
+      className={`inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md font-semibold transition-all duration-150 ease-in-out ${isDisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'} ${variantClasses[variant]} ${sizeClasses[size]} ${className}`}
       style={style}
     >
-      {loading ? 'Loading...' : children}
+      {children}
     </button>
   );
 }

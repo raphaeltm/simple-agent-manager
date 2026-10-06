@@ -10,6 +10,20 @@ export type PolicyCategory = (typeof POLICY_CATEGORIES)[number];
 export const POLICY_SOURCES = ['explicit', 'inferred'] as const;
 export type PolicySource = (typeof POLICY_SOURCES)[number];
 
+/**
+ * Policy scopes — how long a policy is meant to apply.
+ *
+ * - `always`: a standing project policy. Injected into every session, forever.
+ *   This is the default and matches the behavior of every policy created before
+ *   lifecycle controls existed.
+ * - `task`: a one-shot policy captured for a specific piece of work ("use profile
+ *   X for the 2026-08-21 reliability wave"). A task-scoped policy MUST carry an
+ *   `expiresAt` — that requirement is enforced at the write boundary and is the
+ *   mechanism that stops one-shot constraints from silently becoming permanent.
+ */
+export const POLICY_SCOPES = ['always', 'task'] as const;
+export type PolicyScope = (typeof POLICY_SCOPES)[number];
+
 /** A project policy entry stored in ProjectData DO SQLite. */
 export interface ProjectPolicy {
   id: string;
@@ -20,6 +34,17 @@ export interface ProjectPolicy {
   sourceSessionId: string | null;
   confidence: number;
   active: boolean;
+  /** How long this policy applies. Defaults to `always`. */
+  scope: PolicyScope;
+  /**
+   * Epoch millis after which this policy stops being injected into sessions.
+   * `null` means it never expires — the behavior of every pre-lifecycle policy.
+   *
+   * Expiry is evaluated at read time in `getActivePolicies`; an expired policy is
+   * still `active`, still readable via `get_policy`, and still listed in the UI,
+   * so a human can see why it stopped applying.
+   */
+  expiresAt: number | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -32,6 +57,8 @@ export interface CreatePolicyRequest {
   source?: PolicySource;
   sourceSessionId?: string | null;
   confidence?: number;
+  scope?: PolicyScope;
+  expiresAt?: number | null;
 }
 
 /** Request to update an existing policy. */
@@ -41,6 +68,9 @@ export interface UpdatePolicyRequest {
   category?: PolicyCategory;
   active?: boolean;
   confidence?: number;
+  scope?: PolicyScope;
+  /** Pass `null` to clear an existing expiry (make the policy permanent). */
+  expiresAt?: number | null;
 }
 
 /** Response from the list policies endpoint. */
@@ -65,4 +95,8 @@ export function isPolicyCategory(value: string): value is PolicyCategory {
 
 export function isPolicySource(value: string): value is PolicySource {
   return (POLICY_SOURCES as readonly string[]).includes(value);
+}
+
+export function isPolicyScope(value: string): value is PolicyScope {
+  return (POLICY_SCOPES as readonly string[]).includes(value);
 }

@@ -3,13 +3,45 @@ package server
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os/exec"
 	"path/filepath"
 	"strings"
 )
+
+// Sentinels for the two ways resolveContainerForWorkspace fails because the workspace
+// itself is gone rather than because the caller did something wrong. They let callers
+// classify with errors.Is instead of matching on message text; the wrapped messages are
+// unchanged, so operator-facing error strings and HTTP responses are byte-identical.
+var (
+	errWorkspaceRuntimeNotFound = errors.New("workspace not found")
+	errWorkspaceNotRunning      = errors.New("workspace is not running/recovery")
+)
+
+// workspaceStatusStopped is the only non-running status that means "this workspace was
+// deliberately torn down". It is set solely by StopAllWorkspacesAndSessions. The other
+// non-running statuses — "creating" (including a restart of a previously running
+// workspace) and "error" (a provisioning attempt that never reached running) — are NOT
+// teardown, so callers classifying failures must distinguish them rather than treating
+// every errWorkspaceNotRunning alike.
+const workspaceStatusStopped = "stopped"
+
+// workspaceNotRunningError carries the status alongside errWorkspaceNotRunning so callers
+// can branch on which non-running status was observed. errors.Is still reports it as
+// errWorkspaceNotRunning for callers that only care about the class.
+type workspaceNotRunningError struct {
+	status string
+}
+
+func (e *workspaceNotRunningError) Error() string {
+	return fmt.Sprintf("%s (status: %s)", errWorkspaceNotRunning.Error(), e.status)
+}
+
+func (e *workspaceNotRunningError) Is(target error) bool {
+	return target == errWorkspaceNotRunning
+}
 
 // ---------- Response types ----------
 
@@ -356,20 +388,34 @@ func isValidRefChar(r rune) bool {
 // resolveContainerForWorkspace looks up the workspace runtime, validates its status,
 // and resolves the devcontainer's container ID, work directory, and user.
 func (s *Server) resolveContainerForWorkspace(workspaceID string) (containerID, workDir, user string, err error) {
+	return s.resolveContainerForWorkspaceContext(context.Background(), workspaceID)
+}
+
+// resolveContainerForWorkspaceContext looks up the workspace runtime, validates
+// its status, and resolves the devcontainer using the caller's context.
+func (s *Server) resolveContainerForWorkspaceContext(ctx context.Context, workspaceID string) (containerID, workDir, user string, err error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	runtime, ok := s.getWorkspaceRuntime(workspaceID)
 	if !ok {
-		return "", "", "", fmt.Errorf("workspace not found")
+		return "", "", "", errWorkspaceRuntimeNotFound
 	}
 	if runtime.Status != "running" && runtime.Status != "recovery" {
-		return "", "", "", fmt.Errorf("workspace is not running/recovery (status: %s)", runtime.Status)
+		return "", "", "", &workspaceNotRunningError{status: runtime.Status}
 	}
 
-	resolver := s.ptyManagerContainerResolverForLabel(runtime.ContainerLabelValue)
+	if s.config.IsStandaloneMode() {
+		workDir, user = s.resolveStandaloneWorkspaceExecContext(runtime)
+		return "", workDir, user, nil
+	}
+
+	resolver := s.ptyManagerContainerResolverForLabelContext(runtime.ContainerLabelValue)
 	if resolver == nil {
 		return "", "", "", fmt.Errorf("container mode is not enabled")
 	}
 
-	containerID, err = resolver()
+	containerID, err = resolver(ctx)
 	if err != nil {
 		return "", "", "", fmt.Errorf("failed to resolve container: %w", err)
 	}
@@ -390,20 +436,22 @@ func (s *Server) resolveContainerForWorkspace(workspaceID string) (containerID, 
 	return containerID, workDir, user, nil
 }
 
+func (s *Server) resolveStandaloneWorkspaceExecContext(runtime *WorkspaceRuntime) (workDir, user string) {
+	workDir = standaloneWorkspaceWorkDir(runtime, s.config.WorkspaceDir, s.config.ContainerWorkDir)
+	user = strings.TrimSpace(runtime.ContainerUser)
+	if user == "" {
+		user = strings.TrimSpace(s.config.ContainerUser)
+	}
+	return workDir, user
+}
+
 // execInContainer runs a command inside a devcontainer and returns stdout.
 // Uses docker exec with optional user and workdir flags.
 func (s *Server) execInContainer(ctx context.Context, containerID, user, workDir string, args ...string) (stdout string, stderr string, err error) {
-	dockerArgs := []string{"exec", "-i"}
-	if user != "" {
-		dockerArgs = append(dockerArgs, "-u", user)
+	cmd, err := s.workspaceExecCommand(ctx, containerID, user, workDir, args...)
+	if err != nil {
+		return "", "", err
 	}
-	if workDir != "" {
-		dockerArgs = append(dockerArgs, "-w", workDir)
-	}
-	dockerArgs = append(dockerArgs, containerID)
-	dockerArgs = append(dockerArgs, args...)
-
-	cmd := exec.CommandContext(ctx, "docker", dockerArgs...)
 
 	var stdoutBuf, stderrBuf bytes.Buffer
 	cmd.Stdout = &stdoutBuf

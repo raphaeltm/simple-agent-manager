@@ -9,6 +9,7 @@ import {
 } from 'react-simple-maps';
 
 import type { AnalyticsGeoResponse } from '../../lib/api';
+import { adminChartSeries, chartAxisStroke } from './chartTokens';
 
 // TopoJSON world atlas — configurable for CSP/air-gapped environments
 const DEFAULT_GEO_TOPOJSON_URL = 'https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json';
@@ -63,7 +64,7 @@ export const GeoDistribution: FC<Props> = ({ data }) => {
     }
     const scale = scaleLinear<string>()
       .domain([0, max])
-      .range(['var(--sam-color-bg-surface, #13201d)', 'var(--sam-color-accent-primary, #16a34a)']);
+      .range(['var(--sam-color-bg-surface)', adminChartSeries[0]]);
     return { countryMap: map, maxUsers: max, totalUsers: total, colorScale: scale };
   }, [data]);
 
@@ -92,12 +93,12 @@ export const GeoDistribution: FC<Props> = ({ data }) => {
                     <Geography
                       key={geo.rsmKey}
                       geography={geo}
-                      fill={match ? colorScale(match.unique_users) : 'var(--sam-color-bg-inset, #0e1a17)'}
-                      stroke="var(--sam-color-border-default, #29423b)"
+                      fill={match ? colorScale(match.unique_users) : 'var(--sam-color-bg-inset)'}
+                      stroke={chartAxisStroke}
                       strokeWidth={isHovered ? 1.5 : 0.5}
                       style={{
                         default: { outline: 'none' },
-                        hover: { outline: 'none', fill: match ? 'var(--sam-color-success, #22c55e)' : 'var(--sam-color-bg-surface-hover, #1a2e29)' },
+                        hover: { outline: 'none', fill: match ? 'var(--sam-color-success)' : 'var(--sam-color-bg-surface-hover)' },
                         pressed: { outline: 'none' },
                       }}
                       onMouseEnter={() => setHoveredCountry(alpha3)}
@@ -117,7 +118,7 @@ export const GeoDistribution: FC<Props> = ({ data }) => {
         <div
           className="h-3 flex-1 max-w-[200px] rounded-sm"
           style={{
-            background: 'linear-gradient(to right, var(--sam-color-bg-surface, #13201d), var(--sam-color-accent-primary, #16a34a))',
+            background: `linear-gradient(to right, var(--sam-color-bg-surface), ${adminChartSeries[0]})`,
           }}
         />
         <span>{maxUsers.toLocaleString()} users</span>
@@ -155,7 +156,7 @@ export const GeoDistribution: FC<Props> = ({ data }) => {
                           className="h-full rounded-sm"
                           style={{
                             width: `${barWidth}%`,
-                            backgroundColor: 'var(--sam-color-accent-primary, #16a34a)',
+                            backgroundColor: adminChartSeries[0],
                           }}
                         />
                       </div>

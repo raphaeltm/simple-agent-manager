@@ -93,7 +93,7 @@ describe('TruncatedSummary', () => {
     await user.click(screen.getByText('Read more'));
 
     // Modal should show title and full text
-    expect(screen.getByText('Task Summary')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Task Summary', level: 3 })).toBeInTheDocument();
     const summaryElements = screen.getAllByText('Full summary content here');
     expect(summaryElements.length).toBeGreaterThanOrEqual(2); // truncated + modal
 
@@ -106,10 +106,10 @@ describe('TruncatedSummary', () => {
     renderWithTruncation('Summary text for close test');
 
     await user.click(screen.getByText('Read more'));
-    expect(screen.getByText('Task Summary')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Task Summary', level: 3 })).toBeInTheDocument();
 
     await user.click(screen.getByText('Close'));
-    expect(screen.queryByText('Task Summary')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Task Summary', level: 3 })).not.toBeInTheDocument();
   });
 
   it('keeps Close button accessible when modal has long content', async () => {
@@ -120,13 +120,13 @@ describe('TruncatedSummary', () => {
 
     // The modal should show the full content and the Close button should
     // remain interactive even when content is long (scroll fix ensures this)
-    expect(screen.getByText('Task Summary')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Task Summary', level: 3 })).toBeInTheDocument();
     const closeButton = screen.getByText('Close');
     expect(closeButton).toBeInTheDocument();
 
     // Verify Close button still works (proves it's not hidden behind overflow)
     await user.click(closeButton);
-    expect(screen.queryByText('Task Summary')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Task Summary', level: 3 })).not.toBeInTheDocument();
   });
 
   it('closes modal on Escape key', async () => {
@@ -134,10 +134,55 @@ describe('TruncatedSummary', () => {
     renderWithTruncation('Summary text for escape test');
 
     await user.click(screen.getByText('Read more'));
-    expect(screen.getByText('Task Summary')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Task Summary', level: 3 })).toBeInTheDocument();
 
     await user.keyboard('{Escape}');
-    expect(screen.queryByText('Task Summary')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Task Summary', level: 3 })).not.toBeInTheDocument();
+  });
+
+  it('renders markdown content in modal instead of plain text', async () => {
+    const user = userEvent.setup();
+    const markdownSummary = [
+      '## Heading',
+      '',
+      'Some **bold** text and `inline code`.',
+      '',
+      '- List item one',
+      '- List item two',
+      '',
+      '| Col A | Col B |',
+      '|-------|-------|',
+      '| cell1 | cell2 |',
+      '',
+      '[a link](https://example.com)',
+    ].join('\n');
+    renderWithTruncation(markdownSummary);
+
+    await user.click(screen.getByText('Read more'));
+
+    // The rendered-markdown test-id should be present (from RenderedMarkdown component)
+    const modal = screen.getByTestId('rendered-markdown');
+    expect(modal).toBeInTheDocument();
+
+    // Heading renders as h2
+    expect(screen.getByRole('heading', { name: 'Heading', level: 2 })).toBeInTheDocument();
+
+    // Bold and inline code
+    expect(screen.getByText('bold')).toBeInTheDocument();
+    expect(screen.getByText('inline code')).toBeInTheDocument();
+
+    // List items render as <li>
+    expect(modal.querySelector('li')).toBeInTheDocument();
+    expect(screen.getByText('List item one')).toBeInTheDocument();
+
+    // Table renders
+    expect(modal.querySelector('table')).toBeInTheDocument();
+    expect(screen.getByText('Col A')).toBeInTheDocument();
+    expect(screen.getByText('cell1')).toBeInTheDocument();
+
+    // Link renders as anchor
+    const link = screen.getByRole('link', { name: 'a link' });
+    expect(link).toHaveAttribute('href', 'https://example.com');
   });
 
   describe('taskId prop — global audio integration', () => {

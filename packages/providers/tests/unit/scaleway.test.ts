@@ -1,4 +1,4 @@
-import { afterEach,beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ScalewayProvider } from '../../src/scaleway';
 import type { VMConfig } from '../../src/types';
@@ -137,8 +137,102 @@ describe('ScalewayProvider', () => {
       size: 'medium',
       location: 'fr-par-1',
       userData: '#cloud-config\npackages:\n  - docker.io',
-      labels: { node: 'node-123', managed: 'simple-agent-manager' },
+      labels: {
+        node: 'node-123',
+        managed: 'simple-agent-manager',
+        env: 'production',
+        installation: '0123456789abcdef0123456789abcdef',
+      },
     };
+
+    const createResponse = () =>
+      new Response(
+        JSON.stringify({
+          server: createMockScalewayServer({
+            id: 'created-server-id',
+            state: 'stopped',
+            public_ip: null,
+            public_ips: [],
+          }),
+        }),
+        { status: 201 }
+      );
+
+    const imageResponse = () =>
+      new Response(JSON.stringify({ images: [{ id: 'img-uuid-1234', name: 'ubuntu_noble' }] }), {
+        status: 200,
+      });
+
+    const jsonErrorResponse = (message: string, status: number) =>
+      new Response(JSON.stringify({ message }), { status });
+
+    function mockCreateFailure(
+      failedStep: 'cloud-init' | 'poweron',
+      cleanupResponse = new Response(JSON.stringify({ task: {} }), { status: 202 })
+    ) {
+      const mockFetch = vi
+        .fn()
+        .mockResolvedValueOnce(imageResponse())
+        .mockResolvedValueOnce(createResponse());
+
+      if (failedStep === 'cloud-init') {
+        mockFetch.mockResolvedValueOnce(jsonErrorResponse('cloud-init rejected', 500));
+      } else {
+        mockFetch
+          .mockResolvedValueOnce(new Response(null, { status: 204 }))
+          .mockResolvedValueOnce(jsonErrorResponse('poweron failed', 500));
+      }
+
+      mockFetch.mockResolvedValueOnce(cleanupResponse);
+      globalThis.fetch = mockFetch;
+      return mockFetch;
+    }
+
+    it.each(['cloud-init', 'poweron'] as const)(
+      'preserves cancellation during %s and starts no later forward or cleanup mutation',
+      async (cancelAt) => {
+        const controller = new AbortController();
+        const callerReason = new ProviderError(
+          'scaleway',
+          409,
+          `caller cancelled during ${cancelAt}`
+        );
+        const mutationLedger: string[] = [];
+        globalThis.fetch = vi.fn(async (url: string, init: RequestInit = {}) => {
+          const method = init.method ?? 'GET';
+          if (url.includes('/images')) return imageResponse();
+          if (url.endsWith('/servers') && method === 'POST') {
+            mutationLedger.push('create-server');
+            return createResponse();
+          }
+          if (url.includes('/user_data/cloud-init')) {
+            mutationLedger.push('upload-cloud-init');
+            if (cancelAt === 'cloud-init') controller.abort(callerReason);
+            return new Response(null, { status: 204 });
+          }
+          if (url.endsWith('/action') && method === 'POST') {
+            const body = jsonBody(init);
+            mutationLedger.push(String(body.action));
+            if (body.action === 'poweron' && cancelAt === 'poweron') {
+              controller.abort(callerReason);
+            }
+            return new Response(JSON.stringify({ task: {} }), { status: 202 });
+          }
+          throw new Error(`Unexpected Scaleway request: ${method} ${url}`);
+        });
+
+        await expect(provider.createVM(vmConfig, { signal: controller.signal })).rejects.toBe(
+          callerReason
+        );
+
+        expect(mutationLedger).toEqual(
+          cancelAt === 'cloud-init'
+            ? ['create-server', 'upload-cloud-init']
+            : ['create-server', 'upload-cloud-init', 'poweron']
+        );
+        expect(mutationLedger).not.toContain('terminate');
+      }
+    );
 
     it('should perform three-step creation: create server, set cloud-init, poweron', async () => {
       const mockFetch = createScalewayFetchMock();
@@ -157,6 +251,13 @@ describe('ScalewayProvider', () => {
       const { url: call2Url, init: call2Init } = fetchCall(mockFetch, 1);
       expect(call2Url).toContain('/servers');
       expect(call2Init.method).toBe('POST');
+      expect(jsonBody(call2Init).tags).toEqual(
+        expect.arrayContaining([
+          'managed=simple-agent-manager',
+          'env=production',
+          'installation=0123456789abcdef0123456789abcdef',
+        ]),
+      );
 
       // Call 3: PATCH cloud-init
       const { url: call3Url, init: call3Init } = fetchCall(mockFetch, 2);
@@ -184,7 +285,21 @@ describe('ScalewayProvider', () => {
       expect(body.image).toBe('img-uuid-1234');
       expect(body.project).toBe('test-project-id');
       expect(body.dynamic_ip_required).toBe(true);
-      expect(body.tags).toEqual(['node=node-123', 'managed=simple-agent-manager']);
+      expect(body.tags).toEqual([
+        'node=node-123',
+        'managed=simple-agent-manager',
+        'env=production',
+        'installation=0123456789abcdef0123456789abcdef',
+      ]);
+    });
+
+    it('uses config.instanceType as the concrete commercial_type when provided', async () => {
+      globalThis.fetch = createScalewayFetchMock();
+
+      await provider.createVM({ ...vmConfig, size: 'small', instanceType: 'GP1-S' });
+
+      const body = jsonBody(fetchCall(fetch as ReturnType<typeof vi.fn>, 1).init);
+      expect(body.commercial_type).toBe('GP1-S');
     });
 
     it('should use X-Auth-Token header', async () => {
@@ -192,7 +307,10 @@ describe('ScalewayProvider', () => {
 
       await provider.createVM(vmConfig);
 
-      const headers = fetchCall(fetch as ReturnType<typeof vi.fn>, 1).init.headers as Record<string, string>;
+      const headers = fetchCall(fetch as ReturnType<typeof vi.fn>, 1).init.headers as Record<
+        string,
+        string
+      >;
       expect(headers['X-Auth-Token']).toBe('test-secret-key');
     });
 
@@ -228,6 +346,14 @@ describe('ScalewayProvider', () => {
         ip: '',
         status: 'off',
         serverType: 'DEV1-XL',
+        observedHardware: {
+          serverType: { value: 'DEV1-XL', source: 'observed' },
+          resources: {
+            value: null,
+            source: 'unknown',
+            reason: 'Scaleway server response does not include resource fields',
+          },
+        },
         createdAt: '2024-06-01T00:00:00Z',
         labels: { node: 'n1' },
       });
@@ -255,12 +381,74 @@ describe('ScalewayProvider', () => {
     });
 
     it('should throw ProviderError on API failure', async () => {
-      globalThis.fetch = vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ message: 'Forbidden' }), { status: 403 }),
-      );
+      globalThis.fetch = vi
+        .fn()
+        .mockResolvedValue(new Response(JSON.stringify({ message: 'Forbidden' }), { status: 403 }));
 
       await expect(provider.createVM(vmConfig)).rejects.toThrow(ProviderError);
     });
 
+    it('should clean up the created server when cloud-init upload fails', async () => {
+      const mockFetch = mockCreateFailure('cloud-init');
+
+      const err = await provider.createVM(vmConfig).catch((error) => error);
+
+      expect(err).toBeInstanceOf(ProviderError);
+      expect(err.message).toContain('cloud-init rejected');
+      expect(mockFetch).toHaveBeenCalledTimes(4);
+      const cleanupCall = fetchCall(mockFetch, 3);
+      expect(cleanupCall.url).toContain('/zones/fr-par-1/servers/created-server-id/action');
+      expect(jsonBody(cleanupCall.init)).toEqual({ action: 'terminate' });
+    });
+
+    it('should clean up the created server when poweron fails', async () => {
+      const mockFetch = mockCreateFailure('poweron');
+
+      const err = await provider.createVM(vmConfig).catch((error) => error);
+
+      expect(err).toBeInstanceOf(ProviderError);
+      expect(err.message).toContain('poweron failed');
+      expect(mockFetch).toHaveBeenCalledTimes(5);
+      const cleanupCall = fetchCall(mockFetch, 4);
+      expect(cleanupCall.url).toContain('/zones/fr-par-1/servers/created-server-id/action');
+      expect(jsonBody(cleanupCall.init)).toEqual({ action: 'terminate' });
+    });
+
+    it('should keep cleanup failure inspectable without suppressing the cloud-init failure', async () => {
+      mockCreateFailure('cloud-init', jsonErrorResponse('cleanup failed', 503));
+
+      const err = await provider.createVM(vmConfig).catch((error) => error);
+
+      expect(err).toBeInstanceOf(ProviderError);
+      expect(err.message).toContain('cloud-init rejected');
+      expect(err.cause).toBeInstanceOf(ProviderError);
+      expect((err as ProviderError).context).toEqual({
+        failedStep: 'cloud-init-upload',
+        cleanup: {
+          operation: 'cleanup-created-server',
+          provider: 'scaleway',
+          zone: 'fr-par-1',
+          serverId: 'created-server-id',
+          error: {
+            name: 'ProviderError',
+            provider: 'scaleway',
+            statusCode: 503,
+            message: 'scaleway API error (503): cleanup failed',
+          },
+        },
+      });
+      expect((err as ProviderError).toJSON().context).toEqual((err as ProviderError).context);
+    });
+
+    it('should tolerate 404 while cleaning up a failed create', async () => {
+      const mockFetch = mockCreateFailure('cloud-init', jsonErrorResponse('already gone', 404));
+
+      const err = await provider.createVM(vmConfig).catch((error) => error);
+
+      expect(err).toBeInstanceOf(ProviderError);
+      expect(err.message).toContain('cloud-init rejected');
+      expect((err as ProviderError).context).toBeUndefined();
+      expect(mockFetch).toHaveBeenCalledTimes(4);
+    });
   });
 });

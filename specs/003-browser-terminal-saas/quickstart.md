@@ -1,5 +1,7 @@
 # Quickstart: Browser Terminal SaaS
 
+> Spec validation artifact only. This is not canonical setup documentation; use `apps/www/src/content/docs/docs/` for public docs.
+
 **Date**: 2026-01-26
 **Plan**: [plan.md](./plan.md)
 

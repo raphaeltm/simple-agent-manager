@@ -22,12 +22,16 @@ try_run() {
 
 # Defaults are overridable to avoid hardcoding config.
 : "${CLOUDFLARE_OBSERVABILITY_MCP_URL:=https://observability.mcp.cloudflare.com/mcp}"
+: "${SAM_PLAYWRIGHT_MCP_VERSION:=0.0.47}"
 
 echo "=== Ensuring agent config dirs exist ==="
 mkdir -p "${CODEX_HOME:-$HOME/.codex}"
 
 echo "=== Installing Claude Code (native) ==="
 try_run "Install Claude Code" bash -c 'curl -fsSL https://claude.ai/install.sh | bash'
+if [[ -x "$HOME/.local/bin/claude" ]]; then
+	export PATH="$HOME/.local/bin:$PATH"
+fi
 
 echo "=== Installing OpenAI Codex ==="
 try_run "Install OpenAI Codex" npm i -g @openai/codex
@@ -37,7 +41,7 @@ try_run "Install happy-coder" npm install -g happy-coder
 
 echo "=== Configuring MCP servers ==="
 if ! claude mcp get playwright >/dev/null 2>&1; then
-	try_run "Add Playwright MCP" claude mcp add playwright npx -- @playwright/mcp@latest --browser chromium
+	try_run "Add Playwright MCP" claude mcp add playwright npx -- "@playwright/mcp@${SAM_PLAYWRIGHT_MCP_VERSION}" --browser chromium
 fi
 
 # Install Playwright Chromium for ARM64 compatibility (Chrome not supported on ARM64 Linux)
@@ -72,7 +76,7 @@ echo "Building packages..."
 try_run "pnpm build" pnpm build
 
 echo ""
-if [ "$FAILURES" -gt 0 ]; then
+if [[ "$FAILURES" -gt 0 ]]; then
 	echo "=== Setup completed with $FAILURES warning(s) ==="
 	echo "Some optional tools failed to install. The workspace is functional."
 	echo "Re-run this script to retry: bash .devcontainer/post-create.sh"

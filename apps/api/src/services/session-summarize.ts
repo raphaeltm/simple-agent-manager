@@ -9,16 +9,14 @@
  *   ProjectData DO (message source)
  *     → filter (keep user + assistant, exclude tool/system/thinking/plan)
  *       → chunk (strategy varies by message count)
- *         → Workers AI via Mastra Agent → structured summary
+ *         → Workers AI via AI Gateway → structured summary
  *
  * Fallback: If AI fails or times out, produces a heuristic summary by
  * concatenating the last N messages with role labels + task metadata.
  *
- * Follows the same patterns as task-title.ts: Mastra Agent, timeout,
- * retry with exponential backoff, and graceful fallback.
+ * Follows the same timeout and graceful fallback patterns as task-title.ts.
  */
 
-import { Agent } from '@mastra/core/agent';
 import {
   DEFAULT_CONTEXT_SUMMARY_HEAD_MESSAGES,
   DEFAULT_CONTEXT_SUMMARY_HEURISTIC_RECENT_MESSAGES,
@@ -29,9 +27,10 @@ import {
   DEFAULT_CONTEXT_SUMMARY_SHORT_THRESHOLD,
   DEFAULT_CONTEXT_SUMMARY_TIMEOUT_MS,
 } from '@simple-agent-manager/shared';
-import { createWorkersAI } from 'workers-ai-provider';
 
+import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { fetchWorkersAIChatCompletion } from './ai-proxy-shared';
 import { classifyError } from './task-title';
 
 /** Message shape expected from the ProjectData DO. */
@@ -84,24 +83,34 @@ export interface SummarizeEnvVars {
 export function getSummarizeConfig(env: SummarizeEnvVars): SummarizeConfig {
   return {
     model: env.CONTEXT_SUMMARY_MODEL || DEFAULT_CONTEXT_SUMMARY_MODEL,
-    maxLength: parseInt(env.CONTEXT_SUMMARY_MAX_LENGTH || String(DEFAULT_CONTEXT_SUMMARY_MAX_LENGTH), 10),
-    timeoutMs: parseInt(env.CONTEXT_SUMMARY_TIMEOUT_MS || String(DEFAULT_CONTEXT_SUMMARY_TIMEOUT_MS), 10),
-    maxMessages: parseInt(env.CONTEXT_SUMMARY_MAX_MESSAGES || String(DEFAULT_CONTEXT_SUMMARY_MAX_MESSAGES), 10),
+    maxLength: parseInt(
+      env.CONTEXT_SUMMARY_MAX_LENGTH || String(DEFAULT_CONTEXT_SUMMARY_MAX_LENGTH),
+      10
+    ),
+    timeoutMs: parseInt(
+      env.CONTEXT_SUMMARY_TIMEOUT_MS || String(DEFAULT_CONTEXT_SUMMARY_TIMEOUT_MS),
+      10
+    ),
+    maxMessages: parseInt(
+      env.CONTEXT_SUMMARY_MAX_MESSAGES || String(DEFAULT_CONTEXT_SUMMARY_MAX_MESSAGES),
+      10
+    ),
     recentMessages: parseInt(
       env.CONTEXT_SUMMARY_RECENT_MESSAGES || String(DEFAULT_CONTEXT_SUMMARY_RECENT_MESSAGES),
-      10,
+      10
     ),
     shortThreshold: parseInt(
       env.CONTEXT_SUMMARY_SHORT_THRESHOLD || String(DEFAULT_CONTEXT_SUMMARY_SHORT_THRESHOLD),
-      10,
+      10
     ),
     headMessages: parseInt(
       env.CONTEXT_SUMMARY_HEAD_MESSAGES || String(DEFAULT_CONTEXT_SUMMARY_HEAD_MESSAGES),
-      10,
+      10
     ),
     heuristicRecentMessages: parseInt(
-      env.CONTEXT_SUMMARY_HEURISTIC_RECENT_MESSAGES || String(DEFAULT_CONTEXT_SUMMARY_HEURISTIC_RECENT_MESSAGES),
-      10,
+      env.CONTEXT_SUMMARY_HEURISTIC_RECENT_MESSAGES ||
+        String(DEFAULT_CONTEXT_SUMMARY_HEURISTIC_RECENT_MESSAGES),
+      10
     ),
   };
 }
@@ -127,7 +136,7 @@ export function chunkMessages(
   messages: SummarizeMessage[],
   maxMessages: number,
   recentMessages: number,
-  headMessages: number = DEFAULT_CONTEXT_SUMMARY_HEAD_MESSAGES,
+  headMessages: number = DEFAULT_CONTEXT_SUMMARY_HEAD_MESSAGES
 ): SummarizeMessage[] {
   if (messages.length <= maxMessages) {
     return messages;
@@ -155,7 +164,7 @@ function truncateMessageContent(content: string, maxChars: number): string {
  */
 export function formatMessagesForPrompt(
   messages: SummarizeMessage[],
-  totalFiltered: number,
+  totalFiltered: number
 ): string {
   const maxContentChars = totalFiltered > 50 ? 300 : totalFiltered > 20 ? 500 : Infinity;
 
@@ -200,7 +209,7 @@ Rules:
 export function buildHeuristicSummary(
   messages: SummarizeMessage[],
   taskContext?: TaskContext,
-  recentCount: number = DEFAULT_CONTEXT_SUMMARY_HEURISTIC_RECENT_MESSAGES,
+  recentCount: number = DEFAULT_CONTEXT_SUMMARY_HEURISTIC_RECENT_MESSAGES
 ): string {
   const parts: string[] = [];
 
@@ -234,6 +243,27 @@ export function buildHeuristicSummary(
   return parts.join('\n').trim();
 }
 
+async function fetchSessionSummary(
+  env: Env,
+  modelId: string,
+  promptInput: string,
+  maxLength: number,
+  timeoutMs: number,
+  messageCount: number
+): Promise<string | null> {
+  return fetchWorkersAIChatCompletion(env, {
+    modelId,
+    maxTokens: maxLength,
+    timeoutMs,
+    metadata: { source: 'session-summarize', modelId, messageCount },
+    responseLabel: 'session_summarize.gateway_response',
+    messages: [
+      { role: 'system', content: buildSystemInstructions(maxLength) },
+      { role: 'user', content: promptInput },
+    ],
+  });
+}
+
 /**
  * Generate a context summary from a session's messages.
  *
@@ -242,10 +272,10 @@ export function buildHeuristicSummary(
  * - Falls back to heuristic extraction on AI failure
  */
 export async function summarizeSession(
-  ai: Ai,
+  env: Env,
   allMessages: SummarizeMessage[],
   config: SummarizeConfig = {},
-  taskContext?: TaskContext,
+  taskContext?: TaskContext
 ): Promise<SummarizeResult> {
   const maxLength = config.maxLength ?? DEFAULT_CONTEXT_SUMMARY_MAX_LENGTH;
   const timeoutMs = config.timeoutMs ?? DEFAULT_CONTEXT_SUMMARY_TIMEOUT_MS;
@@ -254,7 +284,8 @@ export async function summarizeSession(
   const recentMessages = config.recentMessages ?? DEFAULT_CONTEXT_SUMMARY_RECENT_MESSAGES;
   const shortThreshold = config.shortThreshold ?? DEFAULT_CONTEXT_SUMMARY_SHORT_THRESHOLD;
   const headMessages = config.headMessages ?? DEFAULT_CONTEXT_SUMMARY_HEAD_MESSAGES;
-  const heuristicRecentMessages = config.heuristicRecentMessages ?? DEFAULT_CONTEXT_SUMMARY_HEURISTIC_RECENT_MESSAGES;
+  const heuristicRecentMessages =
+    config.heuristicRecentMessages ?? DEFAULT_CONTEXT_SUMMARY_HEURISTIC_RECENT_MESSAGES;
 
   const messageCount = allMessages.length;
   const filtered = filterMessages(allMessages);
@@ -285,20 +316,14 @@ export async function summarizeSession(
 
   // Try AI summarization
   try {
-    const workersAi = createWorkersAI({ binding: ai });
-    const model = workersAi(modelId as Parameters<typeof workersAi>[0]);
-    const agent = new Agent({
-      id: 'session-summarizer',
-      name: 'Session Summarizer',
-      instructions: buildSystemInstructions(maxLength),
-      model,
-    });
-
-    const result = await agent.generate(promptInput, {
-      abortSignal: AbortSignal.timeout(timeoutMs),
-    });
-
-    const summary = result.text?.trim();
+    const summary = await fetchSessionSummary(
+      env,
+      modelId,
+      promptInput,
+      maxLength,
+      timeoutMs,
+      messageCount
+    );
     if (!summary) {
       log.warn('session_summarize.empty_response', { modelId, messageCount, filteredCount });
       return {
@@ -310,7 +335,8 @@ export async function summarizeSession(
     }
 
     // Enforce max length
-    const truncated = summary.length > maxLength ? summary.slice(0, maxLength - 3) + '...' : summary;
+    const truncated =
+      summary.length > maxLength ? summary.slice(0, maxLength - 3) + '...' : summary;
 
     return { summary: truncated, messageCount, filteredCount, method: 'ai' };
   } catch (err) {

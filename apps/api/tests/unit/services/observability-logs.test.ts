@@ -343,8 +343,8 @@ describe('queryCloudflareLogs()', () => {
 
     const result = await queryCloudflareLogs(baseInput);
 
-    expect(result.logs[0].details).not.toHaveProperty('authorization');
-    expect(result.logs[0].details).not.toHaveProperty('cookie');
+    expect(result.logs[0].details).toHaveProperty('authorization', '[REDACTED]');
+    expect(result.logs[0].details).toHaveProperty('cookie', '[REDACTED]');
     expect(result.logs[0].details).toHaveProperty('safeField', 'keep this');
   });
 

@@ -1,0 +1,42 @@
+{
+  "slug": "chat",
+  "label": "Chat-First Development",
+  "title": "Describe what you want.\nWatch it happen.",
+  "subtitle": "Talk to your agents like teammates. Pick the right model for the job, attach files, and watch them write code, run tests, and open PRs — all from a single chat.",
+  "summary": "Talk to your agents like teammates — pick a profile, describe the task, and watch every tool call stream live.",
+  "highlights": [
+    "Switch between Claude Code, Codex, Gemini CLI, Mistral Vibe, OpenCode, and Amp without leaving the chat",
+    "Every tool call, shell command, and file edit streams live, with a cancel button",
+    "Session header chips surface comments, infrastructure, and task status at a glance",
+    "Pick the agent profile that fits the task, not a one-size-fits-all default"
+  ],
+  "docsHref": "/docs/guides/chat-features/",
+  "group": "run",
+  "screenshots": [
+    {
+      "src": "/images/features/sam-hero-live-session.png",
+      "alt": "A busy SAM project chat showing a user prompt, the agent’s plan, grouped tool calls, header chips for comments, infrastructure, and task status, a profile bar, and a session sidebar with several topics",
+      "caption": "A live project chat — plan, tool calls, comments, infrastructure, and task status in one view"
+    }
+  ],
+  "details": [
+    {
+      "headline": "Multiple agents, one interface",
+      "body": "Switch between Claude Code, Codex, Gemini CLI, Amp, and more — each configured with their own API key or OAuth token. Choose the right agent for the task without leaving the chat.",
+      "screenshot": {
+        "src": "/images/features/sam-chat-new-session.png",
+        "alt": "Project chat with no session selected: a What do you want to build composer with four starter prompts, an agent profile bar listing Claude Code — Opus 5, Codex 5.5 High, Gemini CLI Reviewer, Brainstormer, and Picky CTO, and a sidebar of seven sessions",
+        "caption": "Agent profiles listed at the bottom of the chat — click to switch"
+      }
+    },
+    {
+      "headline": "Real-time visibility into agent work",
+      "body": "Tool calls, file edits, and shell commands are streamed to your browser as they happen — MCP calls, file reads and edits with their paths, and commands with their output size. You can read every step the agent takes and stop it at any time.",
+      "screenshot": {
+        "src": "/images/features/sam-chat-tool-stream.png",
+        "alt": "Live chat session showing a user prompt, the agent's plan, and six tool rows: an MCP get_instructions call, Read and Edit file rows with paths, an alembic upgrade command, and a running pytest command with a stop button",
+        "caption": "Every MCP tool call, shell command, and file edit — streamed live with the ability to cancel"
+      }
+    }
+  ]
+}

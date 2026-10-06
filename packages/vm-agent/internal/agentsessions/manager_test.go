@@ -174,6 +174,32 @@ func TestUpdateAcpSessionIDNotFound(t *testing.T) {
 	}
 }
 
+func TestPrepareDegradedRestoreFallbackClearsErrorAndRestoreIdentity(t *testing.T) {
+	m := NewManager()
+	_, _, err := m.Create("ws1", "s1", "Chat 1", "")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := m.UpdateAcpSessionID("ws1", "s1", "acp-session-old", "claude-code"); err != nil {
+		t.Fatalf("update ACP session: %v", err)
+	}
+	if err := m.MarkError("ws1", "s1", "claude-code", "ACP LoadSession failed"); err != nil {
+		t.Fatalf("mark error: %v", err)
+	}
+
+	session, err := m.PrepareDegradedRestoreFallback("ws1", "s1")
+	if err != nil {
+		t.Fatalf("prepare degraded fallback: %v", err)
+	}
+
+	if session.Status != StatusRunning {
+		t.Fatalf("status = %s, want %s", session.Status, StatusRunning)
+	}
+	if session.AcpSessionID != "" || session.AgentType != "" || session.Error != "" {
+		t.Fatalf("restore/error state = (%q, %q, %q), want cleared", session.AcpSessionID, session.AgentType, session.Error)
+	}
+}
+
 func TestRemoveWorkspace(t *testing.T) {
 	m := NewManager()
 	m.Create("ws1", "s1", "Chat 1", "")

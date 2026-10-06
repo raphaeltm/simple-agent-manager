@@ -7,6 +7,7 @@ import type {
 import {
   isValidAgentType,
   OPENCODE_PROVIDERS,
+  resolveOpenCodeProvider,
   VALID_AGENT_PROVIDER_MODES,
   VALID_PERMISSION_MODES,
 } from '@simple-agent-manager/shared';
@@ -82,7 +83,7 @@ function permissionModeFromDb(raw: string | null): AgentPermissionMode | null {
 }
 
 function opencodeProviderFromDb(raw: string | null): OpenCodeProvider | null {
-  return isOpenCodeProvider(raw) ? raw : null;
+  return isOpenCodeProvider(raw) ? resolveOpenCodeProvider(raw) : null;
 }
 
 function isAgentProviderMode(raw: string | null): raw is AgentProviderMode {
@@ -173,7 +174,6 @@ function toResponse(row: schema.AgentSettingsRow): AgentSettingsResponse {
     additionalEnv: stringRecordFromJson(row.additionalEnv),
     opencodeProvider: opencodeProviderFromDb(row.opencodeProvider),
     opencodeBaseUrl: row.opencodeBaseUrl ?? null,
-    opencodeProviderName: row.opencodeProviderName ?? null,
     providerMode: providerModeFromDb(row.providerMode),
     createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : String(row.createdAt),
     updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : String(row.updatedAt),
@@ -215,7 +215,6 @@ agentSettingsRoutes.get('/:agentType', async (c) => {
       additionalEnv: null,
       opencodeProvider: null,
       opencodeBaseUrl: null,
-      opencodeProviderName: null,
       providerMode: null,
       createdAt: null,
       updatedAt: null,
@@ -272,7 +271,6 @@ agentSettingsRoutes.put('/:agentType', async (c) => {
     opencodeBaseUrl: requiresBaseUrl(body.opencodeProvider)
       ? (body.opencodeBaseUrl ?? null)
       : null,
-    opencodeProviderName: body.opencodeProviderName ?? null,
     providerMode: body.providerMode ?? null,
     updatedAt: now,
   };

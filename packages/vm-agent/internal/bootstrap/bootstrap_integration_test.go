@@ -403,7 +403,7 @@ echo '{"outcome":"success","containerId":"mock-container-id"}'
 	origPath := os.Getenv("PATH")
 	t.Setenv("PATH", mockBinDir+":"+origPath)
 
-	t.Run("without_devcontainer_config_includes_features", func(t *testing.T) {
+	t.Run("without_devcontainer_config_uses_lightweight_default", func(t *testing.T) {
 		// Remove any previous args file
 		_ = os.Remove(argsFile)
 
@@ -427,8 +427,8 @@ echo '{"outcome":"success","containerId":"mock-container-id"}'
 			t.Fatalf("read args file: %v", err)
 		}
 		argsStr := string(args)
-		if !strings.Contains(argsStr, "--additional-features") {
-			t.Fatalf("expected --additional-features in args, got: %s", argsStr)
+		if strings.Contains(argsStr, "--additional-features") {
+			t.Fatalf("expected no-config lightweight startup to omit --additional-features, got: %s", argsStr)
 		}
 		if !strings.Contains(argsStr, "--override-config") {
 			t.Fatalf("expected --override-config in args for repo without devcontainer config, got: %s", argsStr)
@@ -514,14 +514,20 @@ func TestIntegration_GitCredentialHelperFullFlow(t *testing.T) {
 		t.Fatalf("script not executable: %v\n%s", err, string(out))
 	}
 
-	// Verify: script contains expected token and port
+	// Verify: hardened script uses the local /git-credential exchange and does
+	// NOT embed the durable callback token (the helper asks the VM agent to
+	// perform the control-plane token exchange via its in-memory workspace
+	// callback instead of carrying a reusable bearer in the on-disk script).
 	out, err = exec.CommandContext(ctx, "docker", "exec", containerID, "cat", installPath).CombinedOutput()
 	if err != nil {
 		t.Fatalf("cat script: %v\n%s", err, string(out))
 	}
 	scriptContent := string(out)
-	if !strings.Contains(scriptContent, "test-cred-token-abc") {
-		t.Fatal("script missing callback token")
+	if strings.Contains(scriptContent, "test-cred-token-abc") {
+		t.Fatal("script must NOT embed the reusable callback token")
+	}
+	if !strings.Contains(scriptContent, "/git-credential") {
+		t.Fatal("script missing /git-credential local exchange endpoint")
 	}
 	if !strings.Contains(scriptContent, "9999") {
 		t.Fatal("script missing port")

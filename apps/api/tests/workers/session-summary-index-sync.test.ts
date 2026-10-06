@@ -1,0 +1,535 @@
+/**
+ * ProjectData -> D1 session index sync, against a real Durable Object.
+ *
+ * Two things are proven here:
+ *
+ *  1. The sync produces an index the per-project sidebar read can actually use —
+ *     creator, created_at, the unresolved attention marker, and a coverage row
+ *     that says whether every session was captured.
+ *  2. It stays EQUIVALENT to the DO's own `listSessions`. The whole design rests
+ *     on the two paths agreeing, so a divergence has to be a test failure rather
+ *     than a subtly wrong sidebar in production.
+ */
+import { env, runInDurableObject } from 'cloudflare:test';
+import { beforeEach, describe, expect, it } from 'vitest';
+
+import type { Env as WorkerEnv } from '../../src/env';
+import { listSessionsFromIndex } from '../../src/services/session-summary-index';
+import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
+import { type ProjectDataTestDouble } from './support/expected-error-doubles';
+
+function getStub(projectId: string): DurableObjectStub<ProjectDataTestDouble> {
+  const id = env.PROJECT_DATA.idFromName(projectId);
+  return env.PROJECT_DATA.get(id) as DurableObjectStub<ProjectDataTestDouble>;
+}
+
+const OWNER = 'user-index-owner';
+const INSTALLATION = 'inst-index';
+
+async function seed(projectId: string): Promise<void> {
+  await seedUser(OWNER);
+  await seedInstallation(INSTALLATION, OWNER);
+  await seedProject(projectId, OWNER, INSTALLATION);
+}
+
+async function readCoverage(projectId: string) {
+  return env.DATABASE.prepare(
+    'SELECT synced_at, session_count, complete FROM session_index_coverage WHERE project_id = ?'
+  )
+    .bind(projectId)
+    .first<{ synced_at: number; session_count: number; complete: number }>();
+}
+
+describe('D1 session index sync', () => {
+  let projectId: string;
+  let counter = 0;
+
+  beforeEach(() => {
+    counter += 1;
+    projectId = `project-index-${counter}`;
+  });
+
+  it('writes a complete coverage row alongside the session rows', async () => {
+    await seed(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    await stub.createSession('workspace-1', 'First chat');
+    await stub.createSession('workspace-2', 'Second chat');
+
+    await stub.runSummarySyncForTest();
+
+    const coverage = await readCoverage(projectId);
+    expect(coverage?.session_count).toBe(2);
+    expect(coverage?.complete).toBe(1);
+    expect(coverage?.synced_at).toBeGreaterThan(0);
+  });
+
+  it('marks coverage incomplete while bounded backfill still has remaining rows', async () => {
+    await seed(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    await stub.createSession('workspace-1', 'One');
+    await stub.createSession('workspace-2', 'Two');
+    await stub.createSession('workspace-3', 'Three');
+
+    // Cap below the session count — the first bounded page cannot prove complete coverage.
+    const cappedEnv = { ...env, SESSION_INDEX_MAX_ROWS: '2' };
+    await stub.runSummarySyncWithEnvForTest({ SESSION_INDEX_MAX_ROWS: '2' });
+
+    const coverage = await readCoverage(projectId);
+    expect(coverage?.session_count).toBe(3);
+    expect(coverage?.complete).toBe(0);
+    const rows = await env.DATABASE.prepare(
+      'SELECT COUNT(*) AS cnt FROM session_summaries WHERE project_id = ?'
+    )
+      .bind(projectId)
+      .first<{ cnt: number }>();
+    expect(rows?.cnt).toBe(2);
+
+    // And the read path must refuse to serve from an incomplete index.
+    const out = await listSessionsFromIndex(cappedEnv as unknown as WorkerEnv, {
+      projectId,
+      status: null,
+      limit: 20,
+      offset: 0,
+      createdByUserId: null,
+    });
+    expect(out).toEqual({ missReason: 'incomplete_coverage' });
+  });
+
+  it('resumes bounded keyset backfill until coverage is complete', async () => {
+    await seed(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    await stub.createSession('workspace-1', 'One');
+    await stub.createSession('workspace-2', 'Two');
+    await stub.createSession('workspace-3', 'Three');
+
+    await stub.runSummarySyncWithEnvForTest({ SESSION_INDEX_MAX_ROWS: '2' });
+    await stub.runSummarySyncWithEnvForTest({ SESSION_INDEX_MAX_ROWS: '2' });
+
+    const rows = await env.DATABASE.prepare(
+      'SELECT COUNT(*) AS cnt FROM session_summaries WHERE project_id = ?'
+    )
+      .bind(projectId)
+      .first<{ cnt: number }>();
+
+    expect(rows?.cnt).toBe(3);
+    const coverage = await readCoverage(projectId);
+    expect(coverage?.complete).toBe(1);
+    expect(coverage?.session_count).toBe(3);
+
+    const out = await listSessionsFromIndex(
+      { ...env, SESSION_INDEX_MAX_ROWS: '2' } as unknown as WorkerEnv,
+      {
+        projectId,
+        status: null,
+        limit: 20,
+        offset: 0,
+        createdByUserId: null,
+      }
+    );
+    if (!('result' in out)) throw new Error(`expected completed index, got ${out.missReason}`);
+    expect(out.result.total).toBe(3);
+  });
+
+  it('uses archive_last_message_at when raw messages have moved out of the root object', async () => {
+    await seed(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const sessionId = await stub.createSession('workspace-1', 'Archived anchor');
+    await stub.persistMessage(sessionId, 'user', 'message before archive', null);
+
+    const anchoredAt = 1_781_900_000_000;
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `UPDATE chat_sessions
+         SET status = 'stopped',
+             ended_at = ?,
+             archive_last_message_at = ?,
+             archive_state = 'source_deleted'
+         WHERE id = ?`,
+        anchoredAt + 1,
+        anchoredAt,
+        sessionId
+      );
+      state.storage.sql.exec('DELETE FROM chat_messages WHERE session_id = ?', sessionId);
+    });
+
+    await stub.runSummarySyncForTest();
+
+    const row = await env.DATABASE.prepare(
+      'SELECT last_message_at FROM session_summaries WHERE id = ?'
+    )
+      .bind(sessionId)
+      .first<{ last_message_at: number | null }>();
+    expect(row?.last_message_at).toBe(anchoredAt);
+  });
+
+  it('mirrors only rows changed since the last sync instead of the whole project', async () => {
+    // The original implementation re-wrote every session on every debounce fire,
+    // so one message in one session cost as many D1 row-writes as the project had
+    // sessions. This asserts the sync is delta-shaped after the first full pass.
+    await seed(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const untouched = await stub.createSession('workspace-1', 'Untouched');
+    const changed = await stub.createSession('workspace-2', 'Will change');
+
+    await stub.runSummarySyncForTest();
+
+    // Corrupt the already-synced rows directly in D1. A delta sync must rewrite
+    // ONLY the session that changed; a full mirror would repair both.
+    await env.DATABASE.prepare('UPDATE session_summaries SET topic = ? WHERE project_id = ?')
+      .bind('SENTINEL', projectId)
+      .run();
+
+    await stub.updateSessionTopic(changed, 'Changed topic');
+    await stub.runSummarySyncForTest();
+
+    const changedRow = await env.DATABASE.prepare(
+      'SELECT topic FROM session_summaries WHERE id = ?'
+    )
+      .bind(changed)
+      .first<{ topic: string }>();
+    const untouchedRow = await env.DATABASE.prepare(
+      'SELECT topic FROM session_summaries WHERE id = ?'
+    )
+      .bind(untouched)
+      .first<{ topic: string }>();
+
+    expect(changedRow?.topic).toBe('Changed topic');
+    // Still the sentinel => the untouched row was NOT rewritten.
+    expect(untouchedRow?.topic).toBe('SENTINEL');
+  });
+
+  it('serializes overlapping syncs so an older snapshot cannot overwrite a newer one', async () => {
+    // Rule 45: a Durable Object does not serialize across `await`. The debounce
+    // only stops two PENDING timers coexisting — once a callback starts, a fresh
+    // timer can be armed immediately, so two syncs could interleave across their
+    // D1 awaits and the slower (older) one could land last, reverting row content
+    // under a coverage row readers trust.
+    await seed(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const sessionId = await stub.createSession('workspace-1', 'Initial');
+
+    await stub.runSummarySyncForTest();
+    await stub.updateSessionTopic(sessionId, 'Final topic');
+
+    // Fire overlapping syncs; the lock must make them run one after another.
+    await Promise.all([
+      stub.runSummarySyncForTest(),
+      stub.runSummarySyncForTest(),
+      stub.runSummarySyncForTest(),
+    ]);
+
+    const row = await env.DATABASE.prepare('SELECT topic FROM session_summaries WHERE id = ?')
+      .bind(sessionId)
+      .first<{ topic: string }>();
+    expect(row?.topic).toBe('Final topic');
+
+    // And the index still answers, i.e. coverage was not left inconsistent.
+    const out = await listSessionsFromIndex(env as unknown as WorkerEnv, {
+      projectId,
+      status: null,
+      limit: 20,
+      offset: 0,
+      createdByUserId: null,
+    });
+    if (!('result' in out)) throw new Error(`expected a result, got ${out.missReason}`);
+    expect(out.result.sessions[0]?.topic).toBe('Final topic');
+  });
+
+  it('produces the same rows the Durable Object listSessions returns', async () => {
+    await seed(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const sessionA = await stub.createSession('workspace-a', 'Chat A', undefined, OWNER);
+    await stub.createSession('workspace-b', 'Chat B', undefined, OWNER);
+    await stub.markAgentCompleted(sessionA);
+
+    await stub.runSummarySyncForTest();
+
+    const fromDo = await stub.listSessions(null, 20, 0, null, null);
+    const fromIndex = await listSessionsFromIndex(env as unknown as WorkerEnv, {
+      projectId,
+      status: null,
+      limit: 20,
+      offset: 0,
+      createdByUserId: null,
+    });
+
+    if (!('result' in fromIndex)) {
+      throw new Error(`index read missed: ${fromIndex.missReason}`);
+    }
+
+    expect(fromIndex.result.total).toBe(fromDo.total);
+    expect(fromIndex.result.hasMore).toBe(fromDo.hasMore);
+    expect(fromIndex.result.sessions.map((s) => s.id)).toEqual(fromDo.sessions.map((s) => s.id));
+
+    // Field-by-field parity on every key the sidebar reads. `attention` is
+    // compared separately below because the DO adds it via enrichment.
+    const parityKeys = [
+      'id',
+      'workspaceId',
+      'taskId',
+      'createdByUserId',
+      'topic',
+      'status',
+      'messageCount',
+      'startedAt',
+      'endedAt',
+      'createdAt',
+      'agentCompletedAt',
+      'lastMessageAt',
+      'isIdle',
+      'isTerminated',
+      'workspaceUrl',
+      'cleanupAt',
+    ];
+    for (const [i, doRow] of fromDo.sessions.entries()) {
+      const indexRow = fromIndex.result.sessions[i];
+      for (const key of parityKeys) {
+        expect({ key, value: indexRow?.[key] }).toEqual({ key, value: doRow[key] });
+      }
+    }
+  });
+
+  it('keeps project and user activity pages on their migration-backed expression indexes', async () => {
+    await seed(projectId);
+
+    const plans = await Promise.all([
+      env.DATABASE.prepare(
+        `EXPLAIN QUERY PLAN
+         SELECT id FROM session_summaries
+         WHERE project_id = ?
+         ORDER BY COALESCE(last_message_at, created_at, started_at) DESC, id DESC
+         LIMIT ?`
+      )
+        .bind(projectId, 20)
+        .all<{ detail: string }>(),
+      env.DATABASE.prepare(
+        `EXPLAIN QUERY PLAN
+         SELECT id FROM session_summaries
+         WHERE user_id = ?
+           AND COALESCE(last_message_at, created_at, started_at) > ?
+         ORDER BY COALESCE(last_message_at, created_at, started_at) DESC, id DESC
+         LIMIT ?`
+      )
+        .bind(OWNER, 0, 20)
+        .all<{ detail: string }>(),
+      env.DATABASE.prepare(
+        `EXPLAIN QUERY PLAN
+         SELECT id FROM session_summaries
+         WHERE project_id = ? AND created_by_user_id = ?
+         ORDER BY COALESCE(last_message_at, created_at, started_at) DESC, id DESC
+         LIMIT ?`
+      )
+        .bind(projectId, OWNER, 20)
+        .all<{ detail: string }>(),
+    ]);
+
+    const planTexts = plans.map((plan) => (plan.results ?? []).map((row) => row.detail).join('\n'));
+    expect(planTexts[0]).toContain('idx_session_summaries_project_activity');
+    expect(planTexts[1]).toContain('idx_session_summaries_user_activity');
+    expect(planTexts[2]).toContain('idx_session_summaries_project_creator_activity');
+    for (const planText of planTexts) {
+      expect(planText).not.toContain('USE TEMP B-TREE FOR ORDER BY');
+    }
+  });
+
+  it('orders sessions by conversation activity across live and compact-archive messages', async () => {
+    await seed(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const compacted = await stub.createSession('workspace-a', 'Compacted history');
+    const live = await stub.createSession('workspace-b', 'Live history');
+    const empty = await stub.createSession('workspace-c', 'No messages');
+
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `UPDATE chat_sessions
+         SET status = 'stopped', ended_at = 90000, updated_at = 90000,
+             created_at = 1000, started_at = 1000, archive_last_message_at = 2000,
+             archive_state = 'source_deleted'
+         WHERE id = ?`,
+        compacted
+      );
+      state.storage.sql.exec(
+        `INSERT INTO chat_messages
+           (id, session_id, role, content, tool_metadata, created_at, sequence, origin)
+         VALUES (?, ?, 'user', 'newer than the archived transcript', NULL, 4000, 2, NULL)`,
+        `message-${compacted}`,
+        compacted
+      );
+      state.storage.sql.exec(
+        `UPDATE chat_sessions
+         SET status = 'stopped', ended_at = 80000, updated_at = 80000,
+             created_at = 1000, started_at = 1000
+         WHERE id = ?`,
+        live
+      );
+      state.storage.sql.exec(
+        `INSERT INTO chat_messages
+           (id, session_id, role, content, tool_metadata, created_at, sequence, origin)
+         VALUES (?, ?, 'user', 'the next most recent message', NULL, 3500, 1, NULL)`,
+        `message-${live}`,
+        live
+      );
+      state.storage.sql.exec(
+        `UPDATE chat_sessions
+         SET status = 'stopped', ended_at = 100000, updated_at = 100000,
+             created_at = 3000, started_at = 1000
+         WHERE id = ?`,
+        empty
+      );
+    });
+
+    await stub.runSummarySyncForTest();
+    const fromDo = await stub.listSessions(null, 20, 0, null, null);
+    const fromIndex = await listSessionsFromIndex(env as unknown as WorkerEnv, {
+      projectId,
+      status: null,
+      limit: 20,
+      offset: 0,
+      createdByUserId: null,
+    });
+    if (!('result' in fromIndex)) throw new Error(`index read missed: ${fromIndex.missReason}`);
+
+    const expected = [
+      [compacted, 4000],
+      [live, 3500],
+      [empty, 3000],
+    ];
+    expect(fromDo.sessions.map((session) => [session.id, session.lastMessageAt])).toEqual(expected);
+    expect(fromIndex.result.sessions.map((session) => [session.id, session.lastMessageAt])).toEqual(
+      expected
+    );
+
+    // Offset pages remain stable across repeated reads while there is no new
+    // conversation activity; a new message may legitimately shift later pages.
+    const firstPage = await stub.listSessions(null, 2, 0, null, null);
+    const secondPage = await stub.listSessions(null, 2, 2, null, null);
+    expect(firstPage.sessions.map((session) => session.id)).toEqual([compacted, live]);
+    expect(secondPage.sessions.map((session) => session.id)).toEqual([empty]);
+
+    await stub.persistMessage(live, 'user', 'new message should move this session first', null);
+    await stub.runSummarySyncForTest();
+    const afterMessage = await stub.listSessions(null, 20, 0, null, null);
+    expect(afterMessage.sessions[0]?.id).toBe(live);
+  });
+
+  it('mirrors the unresolved attention marker so the sidebar badge survives', async () => {
+    await seed(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const sessionId = await stub.createSession('workspace-1', 'Needs input');
+    await stub.createAttentionMarker({
+      sessionId,
+      taskId: null,
+      workspaceId: 'workspace-1',
+      kind: 'needs_input',
+      source: 'agent',
+      reason: 'Waiting on you',
+    });
+
+    await stub.runSummarySyncForTest();
+
+    const fromDo = await stub.listSessions(null, 20, 0, null, null);
+    const fromIndex = await listSessionsFromIndex(env as unknown as WorkerEnv, {
+      projectId,
+      status: null,
+      limit: 20,
+      offset: 0,
+      createdByUserId: null,
+    });
+    if (!('result' in fromIndex)) {
+      throw new Error(`index read missed: ${fromIndex.missReason}`);
+    }
+
+    expect(fromIndex.result.sessions[0]?.attention).toEqual(fromDo.sessions[0]?.attention);
+    expect((fromIndex.result.sessions[0]?.attention as { kind?: string } | null)?.kind).toBe(
+      'needs_input'
+    );
+  });
+
+  it('reflects markAgentCompleted in the index (writer previously had no sync hook)', async () => {
+    // Regression for a rule-44 gap: markAgentCompleted mutates chat_sessions but
+    // never scheduled a summary sync, so `agentCompletedAt` — and the derived
+    // `isIdle` the sidebar renders — drifted in D1 until an unrelated write
+    // happened to resync the project.
+    await seed(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const sessionId = await stub.createSession('workspace-1', 'Working');
+
+    await stub.runSummarySyncForTest();
+    let out = await listSessionsFromIndex(env as unknown as WorkerEnv, {
+      projectId,
+      status: null,
+      limit: 20,
+      offset: 0,
+      createdByUserId: null,
+    });
+    if (!('result' in out)) throw new Error('expected a result');
+    expect(out.result.sessions[0]?.isIdle).toBe(false);
+
+    await stub.markAgentCompleted(sessionId);
+    await stub.runSummarySyncForTest();
+
+    out = await listSessionsFromIndex(env as unknown as WorkerEnv, {
+      projectId,
+      status: null,
+      limit: 20,
+      offset: 0,
+      createdByUserId: null,
+    });
+    if (!('result' in out)) throw new Error('expected a result');
+    expect(out.result.sessions[0]?.isIdle).toBe(true);
+    expect(out.result.sessions[0]?.agentCompletedAt).not.toBeNull();
+  });
+
+  it('reflects linkSessionToWorkspace in the index (writer previously had no sync hook)', async () => {
+    await seed(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const sessionId = await stub.createSession(null, 'Unlinked');
+
+    await stub.runSummarySyncForTest();
+    await stub.linkSessionToWorkspace(sessionId, 'workspace-linked');
+    await stub.runSummarySyncForTest();
+
+    const out = await listSessionsFromIndex(env as unknown as WorkerEnv, {
+      projectId,
+      status: null,
+      limit: 20,
+      offset: 0,
+      createdByUserId: null,
+    });
+    if (!('result' in out)) throw new Error('expected a result');
+    expect(out.result.sessions[0]?.workspaceId).toBe('workspace-linked');
+  });
+
+  it('reflects a stopped session so the index cannot report it as still active', async () => {
+    await seed(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const sessionId = await stub.createSession('workspace-1', 'Ends soon');
+
+    await stub.runSummarySyncForTest();
+    await stub.stopSession(sessionId);
+    await stub.runSummarySyncForTest();
+
+    const out = await listSessionsFromIndex(env as unknown as WorkerEnv, {
+      projectId,
+      status: null,
+      limit: 20,
+      offset: 0,
+      createdByUserId: null,
+    });
+    if (!('result' in out)) throw new Error('expected a result');
+    expect(out.result.sessions[0]?.status).toBe('stopped');
+    expect(out.result.sessions[0]?.isTerminated).toBe(true);
+  });
+});

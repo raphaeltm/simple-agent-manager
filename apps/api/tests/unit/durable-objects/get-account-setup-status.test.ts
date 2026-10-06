@@ -9,7 +9,8 @@ vi.mock('drizzle-orm/d1', () => ({
   drizzle: vi.fn(),
 }));
 
-vi.mock('@simple-agent-manager/shared', () => ({
+vi.mock('@simple-agent-manager/shared', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@simple-agent-manager/shared')>()),
   DEFAULT_MISSION_MAX_PER_PROJECT: 50,
   DEFAULT_SAM_SEARCH_LIMIT: 10,
   DEFAULT_SAM_SEARCH_MAX_LIMIT: 50,
@@ -17,7 +18,10 @@ vi.mock('@simple-agent-manager/shared', () => ({
   DEFAULT_VM_SIZE: 'small',
   DEFAULT_WORKSPACE_PROFILE: 'full',
   KNOWLEDGE_ENTITY_TYPES: ['preference', 'context'],
+  KNOWLEDGE_RELATION_TYPES: ['influences', 'contradicts', 'supports', 'requires', 'related_to'],
   KNOWLEDGE_SOURCE_TYPES: ['explicit', 'inferred'],
+  POLICY_CATEGORIES: ['rule', 'constraint', 'delegation', 'preference'],
+  POLICY_SOURCES: ['explicit', 'inferred'],
   getDefaultLocationForProvider: vi.fn().mockReturnValue('fsn1'),
   getLocationsForProvider: vi.fn().mockReturnValue(['fsn1']),
   isPolicyCategory: vi.fn().mockReturnValue(true),

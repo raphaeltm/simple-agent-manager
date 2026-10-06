@@ -18,6 +18,12 @@ export const DEFAULT_ORCHESTRATOR_MAX_DISPATCHES_PER_CYCLE = 5;
 /** Default max active (running/provisioning) tasks per mission if budget_config.maxActiveTasks unset. */
 export const DEFAULT_ORCHESTRATOR_MAX_ACTIVE_TASKS_PER_MISSION = 5;
 
+/** Grace for tasks to arrive after a mission is registered (ms). */
+export const DEFAULT_ORCHESTRATOR_ZERO_TASK_GRACE_MS = 10 * 60 * 1000; // 10 minutes
+
+/** Hard upper bound on mission scheduling lifetime (ms). */
+export const DEFAULT_ORCHESTRATOR_MAX_MISSION_LIFETIME_MS = 24 * 60 * 60 * 1000; // 24 hours
+
 // ── Decision Log ──────────────────────────────────────────────────────────────
 
 /** Maximum decision log entries kept per project (oldest pruned). */
@@ -38,6 +44,8 @@ export interface OrchestratorConfig {
   stallTimeoutMs: number;
   maxDispatchesPerCycle: number;
   maxActiveTasksPerMission: number;
+  zeroTaskGraceMs: number;
+  maxMissionLifetimeMs: number;
   decisionLogMaxEntries: number;
   recentDecisionsLimit: number;
   queueMaxEntries: number;
@@ -52,6 +60,8 @@ export function resolveOrchestratorConfig(env: {
   ORCHESTRATOR_STALL_TIMEOUT_MS?: string;
   ORCHESTRATOR_MAX_DISPATCHES_PER_CYCLE?: string;
   ORCHESTRATOR_MAX_ACTIVE_TASKS_PER_MISSION?: string;
+  ORCHESTRATOR_ZERO_TASK_GRACE_MS?: string;
+  ORCHESTRATOR_MAX_MISSION_LIFETIME_MS?: string;
   ORCHESTRATOR_DECISION_LOG_MAX_ENTRIES?: string;
   ORCHESTRATOR_RECENT_DECISIONS_LIMIT?: string;
   ORCHESTRATOR_QUEUE_MAX_ENTRIES?: string;
@@ -61,6 +71,8 @@ export function resolveOrchestratorConfig(env: {
     stallTimeoutMs: parsePositiveInt(env.ORCHESTRATOR_STALL_TIMEOUT_MS, DEFAULT_ORCHESTRATOR_STALL_TIMEOUT_MS),
     maxDispatchesPerCycle: parsePositiveInt(env.ORCHESTRATOR_MAX_DISPATCHES_PER_CYCLE, DEFAULT_ORCHESTRATOR_MAX_DISPATCHES_PER_CYCLE),
     maxActiveTasksPerMission: parsePositiveInt(env.ORCHESTRATOR_MAX_ACTIVE_TASKS_PER_MISSION, DEFAULT_ORCHESTRATOR_MAX_ACTIVE_TASKS_PER_MISSION),
+    zeroTaskGraceMs: parsePositiveInt(env.ORCHESTRATOR_ZERO_TASK_GRACE_MS, DEFAULT_ORCHESTRATOR_ZERO_TASK_GRACE_MS),
+    maxMissionLifetimeMs: parsePositiveInt(env.ORCHESTRATOR_MAX_MISSION_LIFETIME_MS, DEFAULT_ORCHESTRATOR_MAX_MISSION_LIFETIME_MS),
     decisionLogMaxEntries: parsePositiveInt(env.ORCHESTRATOR_DECISION_LOG_MAX_ENTRIES, DEFAULT_ORCHESTRATOR_DECISION_LOG_MAX_ENTRIES),
     recentDecisionsLimit: parsePositiveInt(env.ORCHESTRATOR_RECENT_DECISIONS_LIMIT, DEFAULT_ORCHESTRATOR_RECENT_DECISIONS_LIMIT),
     queueMaxEntries: parsePositiveInt(env.ORCHESTRATOR_QUEUE_MAX_ENTRIES, DEFAULT_ORCHESTRATOR_QUEUE_MAX_ENTRIES),

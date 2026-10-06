@@ -1,30 +1,78 @@
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Env } from '../../../src/env';
 import { chatRoutes } from '../../../src/routes/chat';
 
 const mocks = vi.hoisted(() => ({
   drizzle: vi.fn(),
-  requireOwnedProject: vi.fn(),
+  requireProjectAccess: vi.fn(),
+  requireProjectCapability: vi.fn(),
   getSession: vi.fn(),
   getMessages: vi.fn(),
   listAcpSessions: vi.fn(),
+  getSessionState: vi.fn(),
   persistError: vi.fn(async () => undefined),
   userRole: 'user',
 }));
+
+function makeTaskQuery(rows: unknown[]) {
+  return {
+    from: vi.fn().mockReturnThis(),
+    where: vi.fn().mockReturnThis(),
+    limit: vi.fn().mockResolvedValue(rows),
+    orderBy: vi.fn(),
+  };
+}
+
+function makeProfileQuery(rows: unknown[]) {
+  return {
+    from: vi.fn().mockReturnThis(),
+    where: vi.fn().mockResolvedValue(rows),
+  };
+}
+
+function makePersistedMessage(
+  id: string,
+  role: string,
+  content: string,
+  createdAt: number,
+  sequence: number
+) {
+  return {
+    id,
+    sessionId: 'chat-1',
+    role,
+    content,
+    toolMetadata: null,
+    createdAt,
+    sequence,
+  };
+}
+
+function createChatRoutesTestApp(): Hono<{ Bindings: Env }> {
+  const app = new Hono<{ Bindings: Env }>();
+  app.onError((err, c) => {
+    const appError = err as { statusCode?: number; error?: string; message?: string };
+    if (typeof appError.statusCode === 'number' && typeof appError.error === 'string') {
+      return c.json({ error: appError.error, message: appError.message }, appError.statusCode);
+    }
+    return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
+  });
+  app.route('/api/projects/:projectId/sessions', chatRoutes);
+  return app;
+}
 
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: mocks.drizzle,
 }));
 
-vi.mock('@simple-agent-manager/shared', () => ({
-  DEFAULT_CHAT_SESSION_MESSAGE_LIMIT: 3000,
-  DEFAULT_CHAT_COMPACT_MODE: true,
-  DEFAULT_WORKSPACE_PROFILE: 'full',
-  isTaskExecutionStep: () => true,
-  isTaskMode: (v: unknown) => v === 'task' || v === 'conversation',
-}));
+vi.mock('@simple-agent-manager/shared', async (importActual) => {
+  const actual = await importActual<typeof import('@simple-agent-manager/shared')>();
+  return {
+    ...actual,
+    isTaskExecutionStep: () => true,
+  };
+});
 
 vi.mock('../../../src/middleware/auth', () => ({
   requireAuth: () => vi.fn((c: unknown, next: () => Promise<void>) => next()),
@@ -47,7 +95,8 @@ vi.mock('../../../src/middleware/auth', () => ({
 }));
 
 vi.mock('../../../src/middleware/project-auth', () => ({
-  requireOwnedProject: mocks.requireOwnedProject,
+  requireProjectAccess: mocks.requireProjectAccess,
+  requireProjectCapability: mocks.requireProjectCapability,
 }));
 
 vi.mock('../../../src/services/project-data', () => ({
@@ -58,6 +107,7 @@ vi.mock('../../../src/services/project-data', () => ({
   getMessages: mocks.getMessages,
   resetIdleCleanup: vi.fn(),
   listAcpSessions: mocks.listAcpSessions,
+  getSessionState: mocks.getSessionState,
   stopSession: vi.fn(),
   linkSessionIdea: vi.fn(),
   unlinkSessionIdea: vi.fn(),
@@ -97,7 +147,7 @@ describe('chatRoutes agent session routing', () => {
       select: vi.fn().mockReturnValue(queryBuilder),
     });
 
-    mocks.requireOwnedProject.mockResolvedValue({
+    mocks.requireProjectAccess.mockResolvedValue({
       id: 'proj-1',
       userId: 'user-1',
     });
@@ -115,30 +165,65 @@ describe('chatRoutes agent session routing', () => {
     });
 
     mocks.getMessages.mockResolvedValue({
-      messages: [
-        {
-          id: 'msg-1',
-          sessionId: 'chat-1',
-          role: 'assistant',
-          content: 'Persisted output',
-          toolMetadata: null,
-          createdAt: 1,
-          sequence: 1,
-        },
-      ],
+      messages: [makePersistedMessage('msg-1', 'assistant', 'Persisted output', 1, 1)],
       hasMore: false,
     });
+    mocks.getSessionState.mockResolvedValue(null);
 
-    app = new Hono<{ Bindings: Env }>();
-    app.onError((err, c) => {
-      const appError = err as { statusCode?: number; error?: string; message?: string };
-      if (typeof appError.statusCode === 'number' && typeof appError.error === 'string') {
-        return c.json({ error: appError.error, message: appError.message }, appError.statusCode);
-      }
-      return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
-    });
-    app.route('/api/projects/:projectId/sessions', chatRoutes);
+    app = createChatRoutesTestApp();
   });
+
+  async function requestTaskEmbed(input: {
+    taskMode: 'task' | 'conversation';
+    placementExplanationJson?: string;
+    storedHint: string;
+    profileRows: Array<{ id: string; name: string }>;
+  }) {
+    mocks.listAcpSessions.mockResolvedValue({ sessions: [], total: 0 });
+    mocks.drizzle.mockReturnValue({
+      select: vi
+        .fn()
+        .mockReturnValueOnce(
+          makeTaskQuery([
+            {
+              id: 'task-1',
+              status: 'in_progress',
+              executionStep: 'agent_session',
+              errorMessage: null,
+              placementExplanationJson: input.placementExplanationJson ?? null,
+              outputBranch: 'sam/feature-x',
+              outputPrUrl: null,
+              outputSummary: null,
+              finalizedAt: null,
+              taskMode: input.taskMode,
+              agentProfileHint: input.storedHint,
+            },
+          ])
+        )
+        .mockReturnValueOnce(makeProfileQuery(input.profileRows)),
+    });
+
+    mocks.getSession.mockResolvedValue({
+      id: 'chat-1',
+      workspaceId: 'ws-1',
+      taskId: 'task-1',
+      topic: 'Test task embed',
+      status: 'active',
+      messageCount: 1,
+      startedAt: 1,
+      endedAt: null,
+      createdAt: 1,
+    });
+
+    const response = await app.request('/api/projects/proj-1/sessions/chat-1', { method: 'GET' }, {
+      DATABASE: {} as D1Database,
+    } as Env);
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.session.task).toBeDefined();
+    return body.session.task;
+  }
 
   it('resolves agentSessionId from the ACP session linked to the chat session', async () => {
     mocks.listAcpSessions.mockResolvedValue({
@@ -155,17 +240,16 @@ describe('chatRoutes agent session routing', () => {
     const response = await app.request(
       '/api/projects/proj-1/sessions/chat-1',
       { method: 'GET' },
-      { DATABASE: {} as D1Database } as Env,
+      { DATABASE: {} as D1Database }
     );
 
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.session.agentSessionId).toBe('acp-chat-1');
-    expect(mocks.listAcpSessions).toHaveBeenCalledWith(
-      expect.anything(),
-      'proj-1',
-      { chatSessionId: 'chat-1', limit: 1 },
-    );
+    expect(mocks.listAcpSessions).toHaveBeenCalledWith(expect.anything(), 'proj-1', {
+      chatSessionId: 'chat-1',
+      limit: 1,
+    });
     expect(orderBySpy).not.toHaveBeenCalled();
   });
 
@@ -175,11 +259,9 @@ describe('chatRoutes agent session routing', () => {
       total: 0,
     });
 
-    const response = await app.request(
-      '/api/projects/proj-1/sessions/chat-1',
-      { method: 'GET' },
-      { DATABASE: {} as D1Database } as Env,
-    );
+    const response = await app.request('/api/projects/proj-1/sessions/chat-1', { method: 'GET' }, {
+      DATABASE: {} as D1Database,
+    } as Env);
 
     expect(response.status).toBe(200);
     const body = await response.json();
@@ -199,31 +281,155 @@ describe('chatRoutes agent session routing', () => {
       total: 1,
     });
 
-    const response = await app.request(
-      '/api/projects/proj-1/sessions/chat-1',
-      { method: 'GET' },
-      { DATABASE: {} as D1Database } as Env,
-    );
+    const response = await app.request('/api/projects/proj-1/sessions/chat-1', { method: 'GET' }, {
+      DATABASE: {} as D1Database,
+    } as Env);
 
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.session.agentType).toBe('claude-code');
   });
 
-  it('caps session detail message loads to the configured chat session limit', async () => {
+  it('returns lightweight session state without loading messages or task metadata', async () => {
+    const state = {
+      activity: 'prompting',
+      activityAt: 1000,
+      statusError: null,
+      currentPlan: null,
+      planUpdatedAt: null,
+      promptStartedAt: 900,
+      agentType: 'openai-codex',
+      lastStopReason: null,
+    };
+    mocks.listAcpSessions.mockResolvedValue({
+      sessions: [
+        {
+          id: 'acp-chat-1',
+          chatSessionId: 'chat-1',
+          status: 'running',
+          agentType: 'openai-codex',
+        },
+      ],
+      total: 1,
+    });
+    mocks.getSessionState.mockResolvedValue(state);
+
+    const response = await app.request(
+      '/api/projects/proj-1/sessions/chat-1/state',
+      { method: 'GET' },
+      { DATABASE: {} as D1Database } as Env
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      state,
+      agentSessionId: 'acp-chat-1',
+      agentType: 'openai-codex',
+    });
+    expect(mocks.getMessages).not.toHaveBeenCalled();
+  });
+
+  it('clamps a requested limit to CHAT_SESSION_MESSAGE_MAX', async () => {
     mocks.listAcpSessions.mockResolvedValue({
       sessions: [],
       total: 0,
     });
 
     const response = await app.request(
+      '/api/projects/proj-1/sessions/chat-1?limit=999999',
+      { method: 'GET' },
+      {
+        DATABASE: {} as D1Database,
+        CHAT_SESSION_MESSAGE_MAX: '5000',
+      } as Env
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.getMessages).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'chat-1',
+      5000,
+      null,
+      null,
+      undefined,
+      true,
+      'desc'
+    );
+  });
+
+  it('honors a full-conversation load request up to the max ceiling', async () => {
+    mocks.listAcpSessions.mockResolvedValue({
+      sessions: [],
+      total: 0,
+    });
+
+    // The project chat no longer asks for the ceiling (it pages newest-first), but
+    // an explicit request up to it must still be honoured, not clamped down to the
+    // small default page size.
+    const response = await app.request(
       '/api/projects/proj-1/sessions/chat-1?limit=50000',
       { method: 'GET' },
       {
         DATABASE: {} as D1Database,
         CHAT_SESSION_MESSAGE_LIMIT: '500',
-      } as Env,
+        CHAT_SESSION_MESSAGE_MAX: '50000',
+      } as Env
     );
+
+    expect(response.status).toBe(200);
+    expect(mocks.getMessages).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'chat-1',
+      50000,
+      null,
+      null,
+      undefined,
+      true,
+      'desc'
+    );
+  });
+
+  it('promotes the ceiling to the page size when misconfigured (default > max)', async () => {
+    mocks.listAcpSessions.mockResolvedValue({
+      sessions: [],
+      total: 0,
+    });
+
+    // Operator misconfiguration: page-size default (8000) exceeds the ceiling (3000).
+    // The guard promotes the effective ceiling to the page size so the default page
+    // still fits — an unspecified request resolves to the default, not the smaller max.
+    const response = await app.request('/api/projects/proj-1/sessions/chat-1', { method: 'GET' }, {
+      DATABASE: {} as D1Database,
+      CHAT_SESSION_MESSAGE_LIMIT: '8000',
+      CHAT_SESSION_MESSAGE_MAX: '3000',
+    } as Env);
+
+    expect(response.status).toBe(200);
+    expect(mocks.getMessages).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'chat-1',
+      8000,
+      null,
+      null,
+      undefined,
+      true,
+      'desc'
+    );
+  });
+
+  it('uses CHAT_SESSION_MESSAGE_LIMIT as the page size when no limit is requested', async () => {
+    mocks.listAcpSessions.mockResolvedValue({
+      sessions: [],
+      total: 0,
+    });
+
+    const response = await app.request('/api/projects/proj-1/sessions/chat-1', { method: 'GET' }, {
+      DATABASE: {} as D1Database,
+      CHAT_SESSION_MESSAGE_LIMIT: '500',
+    } as Env);
 
     expect(response.status).toBe(200);
     expect(mocks.getMessages).toHaveBeenCalledWith(
@@ -232,37 +438,30 @@ describe('chatRoutes agent session routing', () => {
       'chat-1',
       500,
       null,
+      null,
       undefined,
       true,
+      'desc'
     );
   });
 
-  it('uses the default chat session limit (3000) when no limit is requested', async () => {
+  it('does not record a load failure when ProjectData retries internally and returns session detail', async () => {
     mocks.listAcpSessions.mockResolvedValue({
       sessions: [],
       total: 0,
     });
 
-    const response = await app.request(
-      '/api/projects/proj-1/sessions/chat-1',
-      { method: 'GET' },
-      { DATABASE: {} as D1Database } as Env,
-    );
+    const response = await app.request('/api/projects/proj-1/sessions/chat-1', { method: 'GET' }, {
+      DATABASE: {} as D1Database,
+      OBSERVABILITY_DATABASE: {} as D1Database,
+    } as Env);
 
     expect(response.status).toBe(200);
-    expect(mocks.getMessages).toHaveBeenCalledWith(
-      expect.anything(),
-      'proj-1',
-      'chat-1',
-      3000,
-      null,
-      undefined,
-      true,
-    );
+    expect(mocks.persistError).not.toHaveBeenCalled();
   });
 
   it('returns a structured diagnostic response when session lookup fails', async () => {
-    const loadError = new Error('Durable Object session lookup failed');
+    const loadError = new Error('Durable Object reset because its code was updated.');
     mocks.getSession.mockRejectedValue(loadError);
 
     const response = await app.request(
@@ -271,7 +470,7 @@ describe('chatRoutes agent session routing', () => {
       {
         DATABASE: {} as D1Database,
         OBSERVABILITY_DATABASE: {} as D1Database,
-      } as Env,
+      } as Env
     );
 
     expect(response.status).toBe(500);
@@ -289,7 +488,7 @@ describe('chatRoutes agent session routing', () => {
         source: 'api',
         level: 'error',
         message: 'chat.session_detail_load_failed',
-        stack: expect.stringContaining('Durable Object session lookup failed'),
+        stack: expect.stringContaining('Durable Object reset because its code was updated.'),
         userId: 'user-1',
         userAgent: 'vitest',
         context: expect.objectContaining({
@@ -300,23 +499,20 @@ describe('chatRoutes agent session routing', () => {
           sessionId: 'chat-1',
           userId: 'user-1',
           errorName: 'Error',
-          errorMessage: 'Durable Object session lookup failed',
+          errorMessage: 'Durable Object reset because its code was updated.',
         }),
       }),
+      expect.anything()
     );
   });
 
   it('returns safe diagnostics for regular users when message lookup fails', async () => {
     mocks.getMessages.mockRejectedValue(new Error('Malformed tool metadata'));
 
-    const response = await app.request(
-      '/api/projects/proj-1/sessions/chat-1',
-      { method: 'GET' },
-      {
-        DATABASE: {} as D1Database,
-        OBSERVABILITY_DATABASE: {} as D1Database,
-      } as Env,
-    );
+    const response = await app.request('/api/projects/proj-1/sessions/chat-1', { method: 'GET' }, {
+      DATABASE: {} as D1Database,
+      OBSERVABILITY_DATABASE: {} as D1Database,
+    } as Env);
 
     expect(response.status).toBe(500);
     const body = await response.json();
@@ -333,14 +529,10 @@ describe('chatRoutes agent session routing', () => {
     mocks.userRole = 'admin';
     mocks.getMessages.mockRejectedValue(new Error('Malformed tool metadata'));
 
-    const response = await app.request(
-      '/api/projects/proj-1/sessions/chat-1',
-      { method: 'GET' },
-      {
-        DATABASE: {} as D1Database,
-        OBSERVABILITY_DATABASE: {} as D1Database,
-      } as Env,
-    );
+    const response = await app.request('/api/projects/proj-1/sessions/chat-1', { method: 'GET' }, {
+      DATABASE: {} as D1Database,
+      OBSERVABILITY_DATABASE: {} as D1Database,
+    } as Env);
 
     expect(response.status).toBe(500);
     const body = await response.json();
@@ -369,68 +561,253 @@ describe('chatRoutes agent session routing', () => {
       total: 1,
     });
 
-    const response = await app.request(
-      '/api/projects/proj-1/sessions/chat-1',
-      { method: 'GET' },
-      { DATABASE: {} as D1Database } as Env,
-    );
+    const response = await app.request('/api/projects/proj-1/sessions/chat-1', { method: 'GET' }, {
+      DATABASE: {} as D1Database,
+    } as Env);
 
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.session.agentType).toBeNull();
   });
 
-  it('returns taskMode and agentProfileHint in task embed when task has them', async () => {
-    mocks.listAcpSessions.mockResolvedValue({ sessions: [], total: 0 });
+  it('includes the saved placement decision for a task before a workspace exists', async () => {
+    const placementExplanationJson = JSON.stringify({
+      diagnostics: { version: 1, queue: { state: 'waiting' } },
+    });
+    const task = await requestTaskEmbed({
+      taskMode: 'task',
+      storedHint: 'Default',
+      profileRows: [],
+      placementExplanationJson,
+    });
+    expect(task.placementExplanationJson).toBe(placementExplanationJson);
+  });
 
-    // Mock D1 task query to return a task with taskMode and agentProfileHint
-    const taskRow = {
-      id: 'task-1',
-      status: 'in_progress',
-      executionStep: 'agent_session',
-      errorMessage: null,
-      outputBranch: 'sam/feature-x',
-      outputPrUrl: null,
-      outputSummary: null,
-      finalizedAt: null,
+  it('resolves a task embed agentProfileHint profile ID to the profile name', async () => {
+    const task = await requestTaskEmbed({
       taskMode: 'conversation',
-      agentProfileHint: 'fast-profile',
-    };
+      storedHint: 'profile-fast-001',
+      profileRows: [{ id: 'profile-fast-001', name: 'Fast Profile' }],
+    });
 
-    // The route calls db.select().from(tasks).where(...).limit(1)
-    // The mock chain: select() -> { from -> where -> limit }
-    const queryBuilder = {
-      from: vi.fn().mockReturnThis(),
-      where: vi.fn().mockReturnThis(),
-      limit: vi.fn().mockResolvedValue([taskRow]),
-      orderBy: orderBySpy,
-    };
+    expect(task.taskMode).toBe('conversation');
+    expect(task.agentProfileHint).toBe('Fast Profile');
+  });
+
+  it('falls back to the raw task embed agentProfileHint when no profile matches', async () => {
+    const task = await requestTaskEmbed({
+      taskMode: 'task',
+      storedHint: 'Legacy Free Text Profile',
+      profileRows: [],
+    });
+
+    expect(task.agentProfileHint).toBe('Legacy Free Text Profile');
+  });
+});
+
+describe('chatRoutes message list', () => {
+  let app: Hono<{ Bindings: Env }>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.userRole = 'user';
+
     mocks.drizzle.mockReturnValue({
-      select: vi.fn().mockReturnValue(queryBuilder),
+      select: vi.fn().mockReturnValue(makeTaskQuery([])),
+    });
+
+    mocks.requireProjectAccess.mockResolvedValue({
+      id: 'proj-1',
+      userId: 'user-1',
     });
 
     mocks.getSession.mockResolvedValue({
       id: 'chat-1',
       workspaceId: 'ws-1',
-      taskId: 'task-1',
-      topic: 'Test task embed',
+      taskId: null,
+      topic: 'Timeline source',
       status: 'active',
-      messageCount: 1,
+      messageCount: 2,
       startedAt: 1,
       endedAt: null,
       createdAt: 1,
     });
 
+    mocks.getMessages.mockResolvedValue({
+      messages: [makePersistedMessage('msg-user-1', 'user', 'Initial prompt', 1000, 1)],
+      hasMore: false,
+    });
+
+    app = createChatRoutesTestApp();
+  });
+
+  it('returns role-filtered persisted messages for a session', async () => {
     const response = await app.request(
-      '/api/projects/proj-1/sessions/chat-1',
+      '/api/projects/proj-1/sessions/chat-1/messages?roles=user&limit=20&before=2000&compact=true',
       { method: 'GET' },
-      { DATABASE: {} as D1Database } as Env,
+      { DATABASE: {}, CHAT_SESSION_MESSAGE_LIMIT: '500' } as Env
     );
 
     expect(response.status).toBe(200);
     const body = await response.json();
-    expect(body.session.task).toBeDefined();
-    expect(body.session.task.taskMode).toBe('conversation');
-    expect(body.session.task.agentProfileHint).toBe('fast-profile');
+    expect(body.messages).toHaveLength(1);
+    expect(body.messages[0].id).toBe('msg-user-1');
+    expect(mocks.getMessages).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'chat-1',
+      20,
+      2000,
+      null,
+      ['user'],
+      true,
+      'desc'
+    );
+  });
+
+  it('passes ascending order through for first-message lookups', async () => {
+    const response = await app.request(
+      '/api/projects/proj-1/sessions/chat-1/messages?roles=user&limit=1&compact=true&order=asc',
+      { method: 'GET' },
+      { DATABASE: {}, CHAT_SESSION_MESSAGE_LIMIT: '500' } as Env
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.getMessages).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'chat-1',
+      1,
+      null,
+      null,
+      ['user'],
+      true,
+      'asc'
+    );
+  });
+
+  it('returns 404 when the session does not exist', async () => {
+    mocks.getSession.mockResolvedValue(null);
+
+    const response = await app.request(
+      '/api/projects/proj-1/sessions/missing/messages?roles=user',
+      { method: 'GET' },
+      { DATABASE: {} } as Env
+    );
+
+    expect(response.status).toBe(404);
+    expect(mocks.getMessages).not.toHaveBeenCalled();
+  });
+
+  it('rejects invalid before cursors', async () => {
+    const response = await app.request(
+      '/api/projects/proj-1/sessions/chat-1/messages?before=not-a-timestamp',
+      { method: 'GET' },
+      { DATABASE: {} } as Env
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.getMessages).not.toHaveBeenCalled();
+  });
+
+  it('rejects invalid message order values', async () => {
+    const response = await app.request(
+      '/api/projects/proj-1/sessions/chat-1/messages?order=sideways',
+      { method: 'GET' },
+      { DATABASE: {} } as Env
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.getMessages).not.toHaveBeenCalled();
+  });
+
+  describe('exact message cursors', () => {
+    const position = { createdAt: 1_700_000_000_000, sequence: 7, id: 'msg-tied' };
+    const encoded = encodeURIComponent(JSON.stringify([1_700_000_000_000, 7, 'msg-tied']));
+
+    it('drains a session-detail delta forward from the exact position', async () => {
+      mocks.listAcpSessions.mockResolvedValue({ sessions: [], total: 0 });
+
+      const response = await app.request(
+        `/api/projects/proj-1/sessions/chat-1?after=${encoded}`,
+        { method: 'GET' },
+        { DATABASE: {} as D1Database, CHAT_SESSION_DELTA_MESSAGE_LIMIT: '250' } as Env
+      );
+
+      expect(response.status).toBe(200);
+      expect(mocks.getMessages).toHaveBeenCalledWith(
+        expect.anything(),
+        'proj-1',
+        'chat-1',
+        250,
+        null,
+        position,
+        undefined,
+        true,
+        'asc'
+      );
+    });
+
+    it('reads older history newest-first from an exact before position', async () => {
+      mocks.listAcpSessions.mockResolvedValue({ sessions: [], total: 0 });
+
+      const response = await app.request(
+        `/api/projects/proj-1/sessions/chat-1?before=${encoded}`,
+        { method: 'GET' },
+        { DATABASE: {} as D1Database, CHAT_SESSION_MESSAGE_LIMIT: '500' } as Env
+      );
+
+      expect(response.status).toBe(200);
+      expect(mocks.getMessages).toHaveBeenCalledWith(
+        expect.anything(),
+        'proj-1',
+        'chat-1',
+        500,
+        position,
+        null,
+        undefined,
+        true,
+        'desc'
+      );
+    });
+
+    it('defaults an after-only message list to ascending unless an order is given', async () => {
+      const env = { DATABASE: {} } as Env;
+      await app.request(`/api/projects/proj-1/sessions/chat-1/messages?after=${encoded}`, {}, env);
+      await app.request(
+        `/api/projects/proj-1/sessions/chat-1/messages?after=${encoded}&order=desc`,
+        {},
+        env
+      );
+
+      expect(mocks.getMessages.mock.calls.map((call) => [call[5], call[8]])).toEqual([
+        [position, 'asc'],
+        [position, 'desc'],
+      ]);
+    });
+
+    it('keeps accepting a legacy timestamp cursor', async () => {
+      const response = await app.request(
+        '/api/projects/proj-1/sessions/chat-1/messages?before=1700000000000',
+        { method: 'GET' },
+        { DATABASE: {} } as Env
+      );
+
+      expect(response.status).toBe(200);
+      expect(mocks.getMessages.mock.calls[0]?.[4]).toBe(1_700_000_000_000);
+    });
+
+    it('rejects a malformed session-detail cursor instead of reading from NaN', async () => {
+      mocks.listAcpSessions.mockResolvedValue({ sessions: [], total: 0 });
+
+      const response = await app.request(
+        `/api/projects/proj-1/sessions/chat-1?after=${encodeURIComponent('[1,2]')}`,
+        { method: 'GET' },
+        { DATABASE: {} as D1Database } as Env
+      );
+
+      expect(response.status).toBe(400);
+      expect(mocks.getMessages).not.toHaveBeenCalled();
+    });
   });
 });

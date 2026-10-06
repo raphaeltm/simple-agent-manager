@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/workspace/vm-agent/internal/auth"
 )
 
 // getEnv returns the value of an environment variable or a default.
@@ -29,12 +31,26 @@ func getEnvInt(key string, defaultValue int) int {
 	if value := os.Getenv(key); value != "" {
 		i, err := strconv.Atoi(value)
 		if err != nil {
-			slog.Warn("config: could not parse env var", "key", key, "value", value, "default", defaultValue, "error", err)
+			slog.Warn("config: could not parse env var", "key", key, "default", defaultValue)
 			return defaultValue
 		}
 		return i
 	}
 	return defaultValue
+}
+
+// getBoundedPositiveEnvInt returns a positive integer environment variable in range or a default.
+func getBoundedPositiveEnvInt(key string, defaultValue int, maxValue int) int {
+	value := getEnvInt(key, defaultValue)
+	if value < 1 {
+		slog.Warn("config: env var must be positive", "key", key, "default", defaultValue)
+		return defaultValue
+	}
+	if value > maxValue {
+		slog.Warn("config: env var exceeds maximum", "key", key, "value", value, "max", maxValue, "default", defaultValue)
+		return defaultValue
+	}
+	return value
 }
 
 // getEnvInt64 returns an int64 environment variable or a default.
@@ -42,7 +58,7 @@ func getEnvInt64(key string, defaultValue int64) int64 {
 	if value := os.Getenv(key); value != "" {
 		i, err := strconv.ParseInt(value, 10, 64)
 		if err != nil {
-			slog.Warn("config: could not parse env var", "key", key, "value", value, "default", defaultValue, "error", err)
+			slog.Warn("config: could not parse env var", "key", key, "default", defaultValue)
 			return defaultValue
 		}
 		return i
@@ -50,12 +66,27 @@ func getEnvInt64(key string, defaultValue int64) int64 {
 	return defaultValue
 }
 
+// getEnvInt64Strict returns an int64 environment variable or a default. Unlike
+// getEnvInt64, a present-but-malformed value is rejected so operators do not
+// unknowingly run with a smaller safety cap than they configured.
+func getEnvInt64Strict(key string, defaultValue int64) (int64, error) {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue, nil
+	}
+	i, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be a base-10 integer: %w", key, err)
+	}
+	return i, nil
+}
+
 // getEnvBool returns a boolean environment variable or a default.
 func getEnvBool(key string, defaultValue bool) bool {
 	if value := os.Getenv(key); value != "" {
 		b, err := strconv.ParseBool(value)
 		if err != nil {
-			slog.Warn("config: could not parse env var", "key", key, "value", value, "default", defaultValue, "error", err)
+			slog.Warn("config: could not parse env var", "key", key, "default", defaultValue)
 			return defaultValue
 		}
 		return b
@@ -68,7 +99,7 @@ func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
 	if value := os.Getenv(key); value != "" {
 		d, err := time.ParseDuration(value)
 		if err != nil {
-			slog.Warn("config: could not parse env var", "key", key, "value", value, "default", defaultValue, "error", err)
+			slog.Warn("config: could not parse env var", "key", key, "default", defaultValue)
 			return defaultValue
 		}
 		return d
@@ -81,7 +112,7 @@ func getEnvFloat(key string, defaultValue float64) float64 {
 	if value := os.Getenv(key); value != "" {
 		f, err := strconv.ParseFloat(value, 64)
 		if err != nil {
-			slog.Warn("config: could not parse env var", "key", key, "value", value, "default", defaultValue, "error", err)
+			slog.Warn("config: could not parse env var", "key", key, "default", defaultValue)
 			return defaultValue
 		}
 		return f
@@ -105,6 +136,22 @@ func getEnvStringSlice(key string, defaultValue []string) []string {
 		}
 	}
 	return defaultValue
+}
+
+// ResolveStandaloneCloneFilter normalizes a STANDALONE_CLONE_FILTER value.
+// "off", "none", and "false" (case-insensitive) disable partial cloning and
+// return "" (full clone); any other non-blank value is passed to git verbatim
+// as --filter=<value>. Note: through Load(), an unset or empty env var yields
+// DefaultStandaloneCloneFilter (getEnv treats empty as unset), so the only
+// env-var way to disable the filter is an explicit "off"/"none"/"false".
+// Blank input to this function directly resolves to "" (no filter).
+func ResolveStandaloneCloneFilter(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	switch strings.ToLower(trimmed) {
+	case "", "off", "none", "false":
+		return ""
+	}
+	return trimmed
 }
 
 // getEnvOrGenerate returns the value of an environment variable, or generates
@@ -200,6 +247,80 @@ func (c *Config) Validate() error {
 		errs = append(errs, fmt.Errorf("CONTROL_PLANE_URL is not a valid URL: %w", err))
 	} else if u.Scheme != "http" && u.Scheme != "https" {
 		errs = append(errs, fmt.Errorf("CONTROL_PLANE_URL must use http or https scheme, got %q", u.Scheme))
+	} else if err := auth.ValidateIssuerURL(c.ControlPlaneURL); err != nil {
+		errs = append(errs, fmt.Errorf("CONTROL_PLANE_URL: %w", err))
+	}
+
+	if c.JWKSEndpoint != "" {
+		if err := auth.ValidateJWKSURL(c.JWKSEndpoint); err != nil {
+			errs = append(errs, fmt.Errorf("JWKS_ENDPOINT: %w", err))
+		}
+	}
+
+	if err := validateOpenCodeGoUsageURL(c.OpenCodeGoUsageURL); err != nil {
+		errs = append(errs, fmt.Errorf("OPENCODE_GO_USAGE_URL: %w", err))
+	}
+
+	if c.ErrorReportEventLimit < 0 {
+		errs = append(errs, fmt.Errorf(
+			"ERROR_REPORT_EVENT_LIMIT must be non-negative, got %d",
+			c.ErrorReportEventLimit,
+		))
+	}
+	if c.ErrorReportResponseBytes <= 0 {
+		errs = append(errs, fmt.Errorf(
+			"ERROR_REPORT_RESPONSE_MAX_BYTES must be positive, got %d",
+			c.ErrorReportResponseBytes,
+		))
+	}
+	if c.ErrorReportStoredErrBytes <= 0 {
+		errs = append(errs, fmt.Errorf(
+			"ERROR_REPORT_STORED_ERROR_MAX_BYTES must be positive, got %d",
+			c.ErrorReportStoredErrBytes,
+		))
+	}
+	if c.ErrorReportCollectorJobs <= 0 {
+		errs = append(errs, fmt.Errorf(
+			"ERROR_REPORT_COLLECTOR_CONCURRENCY must be positive, got %d",
+			c.ErrorReportCollectorJobs,
+		))
+	}
+	if c.HeartbeatDockerStatsTimeout <= 0 {
+		errs = append(errs, fmt.Errorf(
+			"HEARTBEAT_DOCKER_STATS_TIMEOUT must be > 0, got %s",
+			c.HeartbeatDockerStatsTimeout,
+		))
+	}
+	if c.HeartbeatWorkspaceMetricsMaxContainers < 0 || c.HeartbeatWorkspaceMetricsMaxContainers > 128 {
+		errs = append(errs, fmt.Errorf(
+			"HEARTBEAT_WORKSPACE_METRICS_MAX_CONTAINERS must be 0-128, got %d",
+			c.HeartbeatWorkspaceMetricsMaxContainers,
+		))
+	}
+	if c.HeartbeatWorkspaceMetricsMaxOutputBytes < 1024 || c.HeartbeatWorkspaceMetricsMaxOutputBytes > 1048576 {
+		errs = append(errs, fmt.Errorf(
+			"HEARTBEAT_WORKSPACE_METRICS_MAX_OUTPUT_BYTES must be 1024-1048576, got %d",
+			c.HeartbeatWorkspaceMetricsMaxOutputBytes,
+		))
+	}
+	if c.ComposeOutputRetentionBytes < 1024 || c.ComposeOutputRetentionBytes > 1048576 {
+		errs = append(errs, fmt.Errorf(
+			"COMPOSE_OUTPUT_RETENTION_BYTES must be 1024-1048576, got %d",
+			c.ComposeOutputRetentionBytes,
+		))
+	}
+	if c.WorkspaceBuildQueueDepth < 1 || c.WorkspaceBuildQueueDepth > MaxWorkspaceBuildQueueDepth {
+		errs = append(errs, fmt.Errorf(
+			"WORKSPACE_BUILD_QUEUE_DEPTH must be 1-%d, got %d",
+			MaxWorkspaceBuildQueueDepth,
+			c.WorkspaceBuildQueueDepth,
+		))
+	}
+
+	if c.JWTIssuer != "" {
+		if err := auth.ValidateIssuerURL(c.JWTIssuer); err != nil {
+			errs = append(errs, fmt.Errorf("JWT_ISSUER: %w", err))
+		}
 	}
 
 	// TLS cert/key paths must exist when TLS is enabled
@@ -212,24 +333,152 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	// Positive integer fields
-	if c.SessionMaxCount < 1 {
-		errs = append(errs, fmt.Errorf("SESSION_MAX_COUNT must be > 0, got %d", c.SessionMaxCount))
+	requiredTimeouts := []struct {
+		key   string
+		value time.Duration
+	}{
+		{"GRACEFUL_SHUTDOWN_TIMEOUT", c.GracefulShutdownTimeout},
+		{"BOOTSTRAP_TIMEOUT", c.BootstrapTimeout},
+		{"BOOTSTRAP_MAX_WAIT", c.BootstrapMaxWait},
+		{"SYSTEM_PROVISIONING_TIMEOUT", c.SystemProvisioningTimeout},
+		{"CF_IP_FETCH_TIMEOUT", c.CFIPFetchTimeout},
+		{"BOOT_LOG_HTTP_TIMEOUT", c.BootLogHTTPTimeout},
+		{"HTTP_READ_TIMEOUT", c.HTTPReadTimeout},
+		{"HTTP_WRITE_TIMEOUT", c.HTTPWriteTimeout},
+		{"HTTP_IDLE_TIMEOUT", c.HTTPIdleTimeout},
+		{"HTTP_CALLBACK_TIMEOUT", c.HTTPCallbackTimeout},
+		{"MCP_SHORT_COMMAND_TIMEOUT", c.MCPShortCommandTimeout},
+		{"MCP_DIFF_COMMAND_TIMEOUT", c.MCPDiffCommandTimeout},
+		{"MCP_BUILD_PREPARE_TIMEOUT", c.MCPBuildPrepareTimeout},
+		{"DEPLOY_PREFLIGHT_COMMAND_TIMEOUT", c.DeployPreflightCommandTimeout},
+		{"LOG_STREAM_PING_WRITE_TIMEOUT", c.LogStreamPingWriteTimeout},
+		{"DEVCONTAINER_CACHE_PUSH_TIMEOUT", c.DevcontainerCachePushTimeout},
+		{"ACP_CREDENTIAL_SYNC_TIMEOUT", c.ACPCredentialSyncTimeout},
+		{"ACP_RESTART_ATTEMPT_TIMEOUT", c.ACPRestartAttemptTimeout},
+		{"ACP_ACTIVITY_REPORT_TIMEOUT", c.ACPActivityReportTimeout},
+		{"ACP_USAGE_PROBE_TIMEOUT", c.ACPUsageProbeTimeout},
+		{"ACP_HARNESS_ACTIVITY_REPORT_DEBOUNCE", c.ACPHarnessActivityReportDebounce},
+		{"JWKS_FETCH_TIMEOUT", c.JWKSFetchTimeout},
+		{EnvDefaultPSIPollIntervalSeconds, c.PSIPollInterval},
+		{EnvDefaultContainerStatsIntervalSeconds, c.ContainerStatsInterval},
+		{EnvDefaultEvictionDebounceSeconds, c.EvictionDebounceWindow},
+		{EnvDefaultEvictionSnapshotTimeoutSeconds, c.EvictionSnapshotTimeout},
+		{EnvDefaultEvictionDockerStopTimeoutSeconds, c.EvictionDockerStopTimeout},
+		{EnvDefaultEvictionResolveTimeoutSeconds, c.EvictionResolveTimeout},
+		{EnvDefaultEvictionCallbackRetryMaxSeconds, c.EvictionCallbackRetryMaxInterval},
 	}
-	if c.DefaultRows < 1 {
-		errs = append(errs, fmt.Errorf("DEFAULT_ROWS must be > 0, got %d", c.DefaultRows))
-	}
-	if c.DefaultCols < 1 {
-		errs = append(errs, fmt.Errorf("DEFAULT_COLS must be > 0, got %d", c.DefaultCols))
+	for _, timeout := range requiredTimeouts {
+		if timeout.value <= 0 {
+			errs = append(errs, fmt.Errorf("%s must be > 0, got %s", timeout.key, timeout.value))
+		}
 	}
 
-	// WebSocket buffer sizes
-	if c.WSReadBufferSize < 1 {
-		errs = append(errs, fmt.Errorf("WS_READ_BUFFER_SIZE must be > 0, got %d", c.WSReadBufferSize))
+	if c.ResourceEventBufferSize <= 0 {
+		errs = append(errs, fmt.Errorf("%s must be > 0", EnvDefaultResourceEventBufferSize))
 	}
-	if c.WSWriteBufferSize < 1 {
-		errs = append(errs, fmt.Errorf("WS_WRITE_BUFFER_SIZE must be > 0, got %d", c.WSWriteBufferSize))
+	if !IsValidPSIThreshold(c.PSIMemorySomeWarningThreshold) {
+		errs = append(errs, fmt.Errorf("%s must be a finite percentage in (0, 100], got %f", EnvDefaultPSIMemorySomeWarningThreshold, c.PSIMemorySomeWarningThreshold))
+	}
+	if !IsValidPSIThreshold(c.PSIMemorySomeCriticalThreshold) {
+		errs = append(errs, fmt.Errorf("%s must be a finite percentage in (0, 100], got %f", EnvDefaultPSIMemorySomeCriticalThreshold, c.PSIMemorySomeCriticalThreshold))
+	}
+	if !IsValidPSIThreshold(c.PSIMemoryFullWarningThreshold) {
+		errs = append(errs, fmt.Errorf("%s must be a finite percentage in (0, 100], got %f", EnvDefaultPSIMemoryFullWarningThreshold, c.PSIMemoryFullWarningThreshold))
+	}
+	if !IsValidPSIThreshold(c.PSIMemoryFullCriticalThreshold) {
+		errs = append(errs, fmt.Errorf("%s must be a finite percentage in (0, 100], got %f", EnvDefaultPSIMemoryFullCriticalThreshold, c.PSIMemoryFullCriticalThreshold))
+	}
+	if c.PSIMemorySomeWarningThreshold > c.PSIMemorySomeCriticalThreshold {
+		errs = append(errs, fmt.Errorf("%s must be <= %s", EnvDefaultPSIMemorySomeWarningThreshold, EnvDefaultPSIMemorySomeCriticalThreshold))
+	}
+	if c.PSIMemoryFullWarningThreshold > c.PSIMemoryFullCriticalThreshold {
+		errs = append(errs, fmt.Errorf("%s must be <= %s", EnvDefaultPSIMemoryFullWarningThreshold, EnvDefaultPSIMemoryFullCriticalThreshold))
+	}
+
+	// Workspace-specific validations (skip in deployment mode)
+	if !c.IsDeploymentMode() {
+		if c.GitCredentialTimeout <= 0 {
+			errs = append(errs, fmt.Errorf("GIT_CREDENTIAL_TIMEOUT must be > 0, got %s", c.GitCredentialTimeout))
+		}
+		if c.SessionMaxCount < 1 {
+			errs = append(errs, fmt.Errorf("SESSION_MAX_COUNT must be > 0, got %d", c.SessionMaxCount))
+		}
+		if c.DefaultRows < 1 {
+			errs = append(errs, fmt.Errorf("DEFAULT_ROWS must be > 0, got %d", c.DefaultRows))
+		}
+		if c.DefaultCols < 1 {
+			errs = append(errs, fmt.Errorf("DEFAULT_COLS must be > 0, got %d", c.DefaultCols))
+		}
+
+		// WebSocket buffer sizes
+		if c.WSReadBufferSize < 1 {
+			errs = append(errs, fmt.Errorf("WS_READ_BUFFER_SIZE must be > 0, got %d", c.WSReadBufferSize))
+		}
+		if c.WSWriteBufferSize < 1 {
+			errs = append(errs, fmt.Errorf("WS_WRITE_BUFFER_SIZE must be > 0, got %d", c.WSWriteBufferSize))
+		}
+		if c.TerminalWSMaxMessageBytes < 1 {
+			errs = append(errs, fmt.Errorf("TERMINAL_WS_MAX_MESSAGE_BYTES must be > 0, got %d", c.TerminalWSMaxMessageBytes))
+		}
+		if c.TerminalWSReadTimeout <= 0 {
+			errs = append(errs, fmt.Errorf("TERMINAL_WS_READ_TIMEOUT must be > 0, got %s", c.TerminalWSReadTimeout))
+		}
+		if c.TerminalWSPingInterval <= 0 {
+			errs = append(errs, fmt.Errorf("TERMINAL_WS_PING_INTERVAL must be > 0, got %s", c.TerminalWSPingInterval))
+		}
+		if c.TerminalWSPingInterval >= c.TerminalWSReadTimeout {
+			errs = append(errs, fmt.Errorf("TERMINAL_WS_PING_INTERVAL must be less than TERMINAL_WS_READ_TIMEOUT, got %s >= %s", c.TerminalWSPingInterval, c.TerminalWSReadTimeout))
+		}
+		if c.TerminalWSMessageRate < 1 {
+			errs = append(errs, fmt.Errorf("TERMINAL_WS_MESSAGE_RATE must be > 0, got %d", c.TerminalWSMessageRate))
+		}
+		if c.TerminalWSMessageBurst < 1 {
+			errs = append(errs, fmt.Errorf("TERMINAL_WS_MESSAGE_BURST must be > 0, got %d", c.TerminalWSMessageBurst))
+		}
+		if c.TerminalSessionIDMaxLength < 1 {
+			errs = append(errs, fmt.Errorf("TERMINAL_SESSION_ID_MAX_LENGTH must be > 0, got %d", c.TerminalSessionIDMaxLength))
+		}
 	}
 
 	return errors.Join(errs...)
+}
+
+// validateOpenCodeGoUsageURL accepts the empty value (the built-in default
+// applies) and otherwise requires an absolute http(s) URL. The probe sends the
+// session's OpenCode API key as a bearer token, so plain http is only allowed
+// for loopback hosts (local test doubles); any remote host must use https.
+func validateOpenCodeGoUsageURL(raw string) error {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil
+	}
+	u, err := url.Parse(trimmed)
+	if err != nil {
+		return fmt.Errorf("not a valid URL: %w", err)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("must be an absolute URL, got %q", trimmed)
+	}
+	switch u.Scheme {
+	case "https":
+		return nil
+	case "http":
+		if isLoopbackHost(u.Hostname()) {
+			return nil
+		}
+		return fmt.Errorf("must use https for non-loopback host %q (the probe sends a bearer token)", u.Hostname())
+	default:
+		return fmt.Errorf("must use http or https scheme, got %q", u.Scheme)
+	}
+}
+
+// isLoopbackHost reports whether host names the local machine: "localhost",
+// "*.localhost", or a loopback IP literal.
+func isLoopbackHost(host string) bool {
+	lower := strings.ToLower(host)
+	if lower == "localhost" || strings.HasSuffix(lower, ".localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

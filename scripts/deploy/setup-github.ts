@@ -135,16 +135,24 @@ async function runSetupGitHub(options: SetupGitHubOptions): Promise<void> {
   logger.info(`
 After creating your GitHub App and configuring credentials:
 
-1. Re-run the deployment with GitHub credentials:
-   pnpm deploy:setup --environment production
+1. Finish configuring the production GitHub Environment with the Cloudflare,
+   R2, Pulumi, and GitHub App values from the self-hosting guide.
 
-2. Or set the credentials as GitHub repository secrets:
+   Before adding secrets, restrict that environment's Deployment branches and
+   tags to the selected branch \`main\` only. This external policy prevents a
+   workflow dispatched from another ref from accessing production secrets.
+
+2. Required GitHub App environment secrets:
    - GH_APP_ID
    - GH_CLIENT_ID
    - GH_CLIENT_SECRET
    - GH_APP_PRIVATE_KEY
+   - GH_APP_SLUG
+   - GH_WEBHOOK_SECRET
 
-3. Verify the setup by signing in with GitHub on your deployed app
+3. Run Actions → Deploy Production → Run workflow, choose main, enter the exact
+   40-character commit SHA from that branch tip as target_commit_sha, then verify
+   the setup by signing in with GitHub on your deployed app.
 `);
 }
 

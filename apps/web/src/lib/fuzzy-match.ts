@@ -30,8 +30,9 @@ function isDigit(ch: string): boolean {
 /** Check if position i is a word boundary in target. */
 function isWordBoundary(target: string, i: number): boolean {
   if (i === 0) return true;
-  const prev = target[i - 1]!;
-  const curr = target[i]!;
+  const prev = target[i - 1];
+  const curr = target[i];
+  if (prev === undefined || curr === undefined) return false;
   // Separators: /, ., -, _, space
   if (prev === '/' || prev === '.' || prev === '-' || prev === '_' || prev === ' ') return true;
   // camelCase: lowercase -> uppercase
@@ -88,7 +89,8 @@ export function fuzzyMatch(query: string, target: string): FuzzyMatchResult | nu
       if (isWordBoundary(target, ti)) score += 10;
 
       // Consecutive match bonus
-      if (matches.length > 1 && ti === matches[matches.length - 2]! + 1) {
+      const prevMatch = matches.at(-2);
+      if (prevMatch !== undefined && ti === prevMatch + 1) {
         score += 5;
       }
 

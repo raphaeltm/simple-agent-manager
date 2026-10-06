@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+here=$(cd -- "$(dirname -- "$0")/.." && pwd -P)
+export CODEX_PATH="$here/bin/codex"
+exec node "$here/payload/adapter.js" "$@"

@@ -19,10 +19,10 @@ export const PlanView = React.memo(function PlanView({ plan }: PlanViewProps) {
         padding: 12,
         borderRadius: 10,
         border: '1px solid rgba(34, 197, 94, 0.12)',
-        backgroundColor: 'rgba(8, 15, 12, 0.45)',
+        backgroundColor: 'var(--sam-glass-bg-surface)',
       }}
     >
-      <h4 style={{ fontSize: '0.75rem', fontWeight: 500, color: '#9fb7ae', textTransform: 'uppercase', marginBottom: 8, marginTop: 0 }}>Plan</h4>
+      <h4 style={{ fontSize: '0.75rem', fontWeight: 500, color: 'var(--sam-color-fg-muted)', textTransform: 'uppercase', marginBottom: 8, marginTop: 0 }}>Plan</h4>
       <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
         {plan.entries.map((entry, idx) => (
           <li key={idx} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.875rem' }}>
@@ -42,7 +42,7 @@ export const PlanView = React.memo(function PlanView({ plan }: PlanViewProps) {
             />
             <span
               style={{
-                color: entry.status === 'completed' ? '#9fb7ae' : '#e6f2ee',
+                color: entry.status === 'completed' ? 'var(--sam-color-fg-muted)' : 'var(--sam-color-fg-primary)',
                 textDecoration: entry.status === 'completed' ? 'line-through' : 'none',
                 opacity: entry.status === 'completed' ? 0.7 : 1,
               }}

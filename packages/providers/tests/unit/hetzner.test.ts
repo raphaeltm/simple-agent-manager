@@ -1,10 +1,17 @@
-import { afterEach,beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { HetznerProvider, isTransientCapacityError } from '../../src/hetzner';
-import type { VMConfig } from '../../src/types';
+import type { ProviderLogger, VMConfig } from '../../src/types';
 import { ProviderError } from '../../src/types';
 import { createMockServer } from '../fixtures/hetzner-mocks';
 import { fetchCall, jsonBody, testIpv4 } from './test-helpers';
+
+function mockLogger(): ProviderLogger {
+  return {
+    warn: vi.fn(),
+    info: vi.fn(),
+  };
+}
 
 describe('HetznerProvider', () => {
   let provider: HetznerProvider;
@@ -145,13 +152,192 @@ describe('HetznerProvider', () => {
     });
   });
 
+  describe('listInstanceOfferings', () => {
+    it('maps Hetzner server_types API payloads into provider-native offerings', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            server_types: [
+              {
+                id: 1,
+                name: 'cx23',
+                description: 'CX23',
+                cores: 2,
+                memory: 4,
+                disk: 40,
+                architecture: 'x86',
+                cpu_type: 'shared',
+                deprecated: false,
+                prices: [
+                  {
+                    location: 'fsn1',
+                    price_hourly: { net: '0.0034', gross: '0.0048' },
+                    price_monthly: { net: '3.35', gross: '3.99' },
+                  },
+                ],
+              },
+              {
+                id: 2,
+                name: 'old-plan',
+                description: 'Deprecated',
+                cores: 1,
+                memory: 2,
+                disk: 20,
+                deprecated: true,
+                prices: [
+                  {
+                    location: 'fsn1',
+                    price_hourly: { net: '0.001', gross: '0.001' },
+                    price_monthly: { net: '1.00', gross: '1.00' },
+                  },
+                ],
+              },
+            ],
+            meta: { pagination: { next_page: null } },
+          }),
+          { status: 200 }
+        )
+      );
+
+      const offerings = await provider.listInstanceOfferings({ preferApi: true });
+
+      expect(fetch).toHaveBeenCalledWith(
+        'https://api.hetzner.cloud/v1/server_types',
+        expect.objectContaining({
+          headers: expect.objectContaining({ Authorization: 'Bearer test-token' }),
+        })
+      );
+      expect(offerings).toHaveLength(1);
+      expect(offerings[0]).toMatchObject({
+        provider: 'hetzner',
+        location: 'fsn1',
+        locationName: 'Falkenstein',
+        country: 'DE',
+        providerInstanceType: 'cx23',
+        providerInstanceSku: null,
+        displayName: 'CX23',
+        sku: 'cx23',
+        instanceType: 'cx23',
+        type: 'cx23',
+        vcpu: 2,
+        memoryMb: 4096,
+        ramGb: 4,
+        diskGb: 40,
+        price: '€3.99/mo',
+        priceMonthlyUsd: null,
+        priceHourlyUsd: null,
+        priceMonthly: 3.99,
+        priceHourly: 0.0048,
+        currency: 'EUR',
+        catalogSource: 'api',
+        catalogMetadata: {
+          hetznerServerTypeId: 1,
+          architecture: 'x86',
+          cpuType: 'shared',
+          locationName: 'Falkenstein',
+          locationCountry: 'DE',
+        },
+      });
+      expect(offerings[0]?.catalogLastSeenAt).toEqual(expect.any(String));
+    });
+
+    it('falls back to static offerings when the Hetzner server_types API fails', async () => {
+      const logger = mockLogger();
+      provider = new HetznerProvider(
+        'test-token',
+        'fsn1',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        {
+          logger,
+        }
+      );
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: { message: 'catalog unavailable' } }), {
+          status: 500,
+        })
+      );
+
+      const offerings = await provider.listInstanceOfferings({ preferApi: true });
+
+      expect(offerings).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            provider: 'hetzner',
+            location: 'fsn1',
+            providerInstanceType: 'cx23',
+            catalogSource: 'static',
+            catalogLastSeenAt: null,
+          }),
+        ])
+      );
+      expect(logger.warn).toHaveBeenCalledWith(
+        'hetzner catalog API unavailable; using static instance offerings',
+        expect.objectContaining({ error: expect.stringContaining('500') })
+      );
+    });
+
+    it('surfaces Hetzner server_types API failures when static fallback is disabled', async () => {
+      const logger = mockLogger();
+      provider = new HetznerProvider(
+        'test-token',
+        'fsn1',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        {
+          logger,
+        }
+      );
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: { message: 'catalog unavailable' } }), {
+          status: 503,
+        })
+      );
+
+      await expect(
+        provider.listInstanceOfferings({ preferApi: true, allowStaticFallback: false })
+      ).rejects.toThrow('503');
+      expect(logger.warn).toHaveBeenCalledWith(
+        'hetzner catalog API unavailable',
+        expect.objectContaining({ error: expect.stringContaining('503') })
+      );
+    });
+
+    it('uses static metadata without provider API calls when requested', async () => {
+      globalThis.fetch = vi.fn();
+
+      const offerings = await provider.listInstanceOfferings({ preferApi: false });
+
+      expect(fetch).not.toHaveBeenCalled();
+      expect(offerings).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            provider: 'hetzner',
+            location: 'fsn1',
+            providerInstanceType: 'cx23',
+            catalogSource: 'static',
+          }),
+        ])
+      );
+    });
+  });
+
   describe('createVM', () => {
     const vmConfig: VMConfig = {
       name: 'test-server',
       size: 'medium',
       location: 'fsn1',
       userData: '#cloud-config\npackages:\n  - docker.io',
-      labels: { node: 'node-123', managed: 'simple-agent-manager' },
+      labels: {
+        node: 'node-123',
+        managed: 'simple-agent-manager',
+        env: 'production',
+        installation: '0123456789abcdef0123456789abcdef',
+      },
     };
 
     it('should call Hetzner API with correct parameters', async () => {
@@ -159,9 +345,9 @@ describe('HetznerProvider', () => {
         server: createMockServer({ status: 'initializing', labels: { node: 'node-123' } }),
       };
 
-      globalThis.fetch = vi.fn().mockResolvedValue(
-        new Response(JSON.stringify(mockResponse), { status: 200 }),
-      );
+      globalThis.fetch = vi
+        .fn()
+        .mockResolvedValue(new Response(JSON.stringify(mockResponse), { status: 200 }));
 
       const result = await provider.createVM(vmConfig);
 
@@ -172,7 +358,7 @@ describe('HetznerProvider', () => {
           headers: expect.objectContaining({
             Authorization: 'Bearer test-token',
           }),
-        }),
+        })
       );
 
       // Verify the body contains the correct fields
@@ -189,24 +375,53 @@ describe('HetznerProvider', () => {
         ip: testIpv4(1, 2, 3, 4),
         status: 'initializing',
         serverType: 'cx33',
+        observedHardware: {
+          serverType: { value: 'cx33', source: 'observed' },
+          resources: {
+            value: null,
+            source: 'unknown',
+            reason: 'Hetzner response omitted server_type resource fields',
+          },
+        },
         createdAt: '2024-01-24T12:00:00Z',
         labels: { node: 'node-123' },
       });
     });
 
-    it('should throw ProviderError on API failure', async () => {
+    it('uses config.instanceType as the concrete server_type when provided', async () => {
       globalThis.fetch = vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ error: { message: 'Quota exceeded' } }), { status: 403 }),
+        new Response(
+          JSON.stringify({
+            server: createMockServer({ status: 'initializing', server_type: { name: 'cx42' } }),
+          }),
+          { status: 200 }
+        )
       );
+
+      await provider.createVM({ ...vmConfig, size: 'small', instanceType: 'cx42' });
+
+      const body = jsonBody(fetchCall(fetch as ReturnType<typeof vi.fn>, 0).init);
+      expect(body.server_type).toBe('cx42');
+    });
+
+    it('should throw ProviderError on API failure', async () => {
+      globalThis.fetch = vi
+        .fn()
+        .mockResolvedValue(
+          new Response(JSON.stringify({ error: { message: 'Quota exceeded' } }), { status: 403 })
+        );
 
       await expect(provider.createVM(vmConfig)).rejects.toThrow(ProviderError);
     });
 
     it('should use docker-ce marketplace image by default', async () => {
       globalThis.fetch = vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({
-          server: createMockServer({ id: 1, name: 'test', status: 'initializing' }),
-        }), { status: 200 }),
+        new Response(
+          JSON.stringify({
+            server: createMockServer({ id: 1, name: 'test', status: 'initializing' }),
+          }),
+          { status: 200 }
+        )
       );
 
       await provider.createVM(vmConfig);
@@ -217,9 +432,12 @@ describe('HetznerProvider', () => {
 
     it('should honor explicit image override (e.g. rollback to ubuntu-24.04)', async () => {
       globalThis.fetch = vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({
-          server: createMockServer({ id: 1, name: 'test', status: 'initializing' }),
-        }), { status: 200 }),
+        new Response(
+          JSON.stringify({
+            server: createMockServer({ id: 1, name: 'test', status: 'initializing' }),
+          }),
+          { status: 200 }
+        )
       );
 
       await provider.createVM({ ...vmConfig, image: 'ubuntu-24.04' });
@@ -230,18 +448,17 @@ describe('HetznerProvider', () => {
 
     it('should retry same location after delay on 412 before trying other locations', async () => {
       vi.useFakeTimers();
-      const mockFetch = vi.fn()
+      const mockFetch = vi
+        .fn()
         .mockResolvedValueOnce(
-          new Response(
-            JSON.stringify({ error: { message: 'error during placement' } }),
-            { status: 412 },
-          ),
+          new Response(JSON.stringify({ error: { message: 'error during placement' } }), {
+            status: 412,
+          })
         )
         .mockResolvedValueOnce(
-          new Response(
-            JSON.stringify({ server: createMockServer({ status: 'initializing' }) }),
-            { status: 200 },
-          ),
+          new Response(JSON.stringify({ server: createMockServer({ status: 'initializing' }) }), {
+            status: 200,
+          })
         );
 
       globalThis.fetch = mockFetch;
@@ -262,18 +479,17 @@ describe('HetznerProvider', () => {
 
     it('should wait the full delay before retrying the primary location', async () => {
       vi.useFakeTimers();
-      const mockFetch = vi.fn()
+      const mockFetch = vi
+        .fn()
         .mockResolvedValueOnce(
-          new Response(
-            JSON.stringify({ error: { message: 'error during placement' } }),
-            { status: 412 },
-          ),
+          new Response(JSON.stringify({ error: { message: 'error during placement' } }), {
+            status: 412,
+          })
         )
         .mockResolvedValueOnce(
-          new Response(
-            JSON.stringify({ server: createMockServer({ status: 'initializing' }) }),
-            { status: 200 },
-          ),
+          new Response(JSON.stringify({ server: createMockServer({ status: 'initializing' }) }), {
+            status: 200,
+          })
         );
 
       globalThis.fetch = mockFetch;
@@ -296,29 +512,37 @@ describe('HetznerProvider', () => {
 
     it('should fall back to other locations after primary retry fails', async () => {
       vi.useFakeTimers();
-      const mockFetch = vi.fn()
+      const logger = mockLogger();
+      const providerWithLogger = new HetznerProvider(
+        'test-token',
+        'fsn1',
+        undefined,
+        true,
+        undefined,
+        undefined,
+        { logger }
+      );
+      const mockFetch = vi
+        .fn()
         .mockResolvedValueOnce(
-          new Response(
-            JSON.stringify({ error: { message: 'error during placement' } }),
-            { status: 412 },
-          ),
+          new Response(JSON.stringify({ error: { message: 'error during placement' } }), {
+            status: 412,
+          })
         )
         .mockResolvedValueOnce(
-          new Response(
-            JSON.stringify({ error: { message: 'error during placement' } }),
-            { status: 412 },
-          ),
+          new Response(JSON.stringify({ error: { message: 'error during placement' } }), {
+            status: 412,
+          })
         )
         .mockResolvedValueOnce(
-          new Response(
-            JSON.stringify({ server: createMockServer({ status: 'initializing' }) }),
-            { status: 200 },
-          ),
+          new Response(JSON.stringify({ server: createMockServer({ status: 'initializing' }) }), {
+            status: 200,
+          })
         );
 
       globalThis.fetch = mockFetch;
 
-      const promise = provider.createVM(vmConfig);
+      const promise = providerWithLogger.createVM(vmConfig);
       await vi.runAllTimersAsync();
       const result = await promise;
 
@@ -332,33 +556,48 @@ describe('HetznerProvider', () => {
       expect(firstBody.location).toBe('fsn1');
       expect(secondBody.location).toBe('fsn1');
       expect(thirdBody.location).not.toBe('fsn1');
+      expect(logger.warn).toHaveBeenCalledWith('hetzner placement attempt failed', {
+        location: 'fsn1',
+        statusCode: 412,
+      });
+      expect(logger.info).toHaveBeenCalledWith('hetzner placement fallback succeeded', {
+        primaryLocation: 'fsn1',
+        selectedLocation: thirdBody.location,
+      });
     });
+
+    /**
+     * A FRESH 412 response per call. A `Response` body can be read only once, so a mock that
+     * resolves one shared instance degrades every call after the first to `HTTP 412` with no
+     * providerCode — a fixture that stops resembling production (`.claude/rules/72`).
+     */
+    const alwaysPlacementError = () =>
+      vi.fn().mockImplementation(() =>
+        Promise.resolve(
+          new Response(JSON.stringify({ error: { message: 'error during placement' } }), {
+            status: 412,
+          })
+        )
+      );
 
     it('should throw after all locations exhausted on 412', async () => {
       vi.useFakeTimers();
-      globalThis.fetch = vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({ error: { message: 'error during placement' } }),
-          { status: 412 },
-        ),
-      );
+      globalThis.fetch = alwaysPlacementError();
 
       const promise = provider.createVM(vmConfig).catch((err) => err);
       await vi.runAllTimersAsync();
       const result = await promise;
       expect(result).toBeInstanceOf(ProviderError);
+      expect((result as ProviderError).message).toBe(
+        'hetzner API error (412): error during placement'
+      );
       // primary (1) + primary retry (2) + 4 fallback locations = 6
       expect(fetch).toHaveBeenCalledTimes(6);
     });
 
     it('should never retry the primary location in the fallback phase', async () => {
       vi.useFakeTimers();
-      const mockFetch = vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({ error: { message: 'error during placement' } }),
-          { status: 412 },
-        ),
-      );
+      const mockFetch = alwaysPlacementError();
       globalThis.fetch = mockFetch;
 
       const promise = provider.createVM(vmConfig).catch(() => {});
@@ -366,19 +605,18 @@ describe('HetznerProvider', () => {
       await promise;
 
       // Calls after the first two (primary + primary retry) should not include fsn1
-      const fallbackLocations = mockFetch.mock.calls.slice(2).map(
-        (call) => JSON.parse((call[1] as RequestInit).body as string).location as string,
-      );
+      const fallbackLocations = mockFetch.mock.calls
+        .slice(2)
+        .map((call) => JSON.parse((call[1] as RequestInit).body as string).location as string);
       expect(fallbackLocations).not.toContain('fsn1');
     });
 
     it('should not retry on non-412 errors', async () => {
-      globalThis.fetch = vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({ error: { message: 'Quota exceeded' } }),
-          { status: 403 },
-        ),
-      );
+      globalThis.fetch = vi
+        .fn()
+        .mockResolvedValue(
+          new Response(JSON.stringify({ error: { message: 'Quota exceeded' } }), { status: 403 })
+        );
 
       await expect(provider.createVM(vmConfig)).rejects.toThrow(ProviderError);
       expect(fetch).toHaveBeenCalledTimes(1);
@@ -393,10 +631,9 @@ describe('HetznerProvider', () => {
 
     it('should try primary location first', async () => {
       globalThis.fetch = vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({ server: createMockServer({ status: 'initializing' }) }),
-          { status: 200 },
-        ),
+        new Response(JSON.stringify({ server: createMockServer({ status: 'initializing' }) }), {
+          status: 200,
+        })
       );
 
       await provider.createVM(vmConfig);
@@ -409,10 +646,9 @@ describe('HetznerProvider', () => {
     it('should use constructor datacenter when config.location is not set', async () => {
       const providerWithDc = new HetznerProvider('test-token', 'hel1');
       globalThis.fetch = vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({ server: createMockServer({ status: 'initializing' }) }),
-          { status: 200 },
-        ),
+        new Response(JSON.stringify({ server: createMockServer({ status: 'initializing' }) }), {
+          status: 200,
+        })
       );
 
       await providerWithDc.createVM({ name: 'test', size: 'small', userData: '' });
@@ -421,14 +657,59 @@ describe('HetznerProvider', () => {
       expect(body.location).toBe('hel1');
     });
 
+    it.each(['fsn1', undefined])('keeps native placement in its authorized location (%s)', async (location) => {
+      vi.useFakeTimers();
+      const mockFetch = vi.fn().mockImplementation(async (_url, init) => {
+        const body = jsonBody(init);
+        if (body.location === 'fsn1') {
+          return new Response(JSON.stringify({ error: { message: 'error during placement' } }), {
+            status: 412,
+          });
+        }
+        return new Response(JSON.stringify({ server: createMockServer() }), { status: 200 });
+      });
+      globalThis.fetch = mockFetch;
+
+      const promise = provider.createVM({
+        name: 'pool-node',
+        location,
+        userData: '',
+        native: { instanceType: 'cx33' },
+      }).catch((err) => err);
+      await vi.runAllTimersAsync();
+
+      expect(await promise).toMatchObject({ statusCode: 412 });
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      for (let index = 0; index < mockFetch.mock.calls.length; index++) {
+        expect(jsonBody(fetchCall(mockFetch, index).init).location).toBe('fsn1');
+      }
+    });
+
+    it('allows native placement to recover on the same-location retry', async () => {
+      vi.useFakeTimers();
+      const mockFetch = vi.fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: 'error during placement' } }), { status: 412 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ server: createMockServer() }), { status: 200 }));
+      globalThis.fetch = mockFetch;
+
+      const promise = provider.createVM({
+        name: 'pool-node', location: 'hel1', userData: '', native: { instanceType: 'cx33' },
+      });
+      await vi.runAllTimersAsync();
+
+      expect(await promise).toMatchObject({ id: String(createMockServer().id) });
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(jsonBody(fetchCall(mockFetch, 0).init).location).toBe('hel1');
+      expect(jsonBody(fetchCall(mockFetch, 1).init).location).toBe('hel1');
+    });
+
     it('should only retry primary when fallback is disabled', async () => {
       vi.useFakeTimers();
       const noFallbackProvider = new HetznerProvider('test-token', 'fsn1', undefined, false);
       globalThis.fetch = vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({ error: { message: 'error during placement' } }),
-          { status: 412 },
-        ),
+        new Response(JSON.stringify({ error: { message: 'error during placement' } }), {
+          status: 412,
+        })
       );
 
       const promise = noFallbackProvider.createVM(vmConfig).catch((err) => err);
@@ -448,7 +729,11 @@ describe('isTransientCapacityError', () => {
   });
 
   it('should return true for "currently not available" message with 422', () => {
-    const err = new ProviderError('hetzner', 422, 'Server type cx43 is currently not available in location ash');
+    const err = new ProviderError(
+      'hetzner',
+      422,
+      'Server type cx43 is currently not available in location ash'
+    );
     expect(isTransientCapacityError(err)).toBe(true);
   });
 
@@ -477,13 +762,25 @@ describe('isTransientCapacityError', () => {
     expect(isTransientCapacityError(err)).toBe(false);
   });
 
-  it('should return false for 412 errors', () => {
+  // Inverted 2026-09-09. This pinned the defect: a 412 placement failure IS capacity
+  // scarcity, and treating it as non-capacity stopped the compute pool's fallback chain
+  // from ever reaching its second offering in production.
+  it('should return true for 412 placement errors', () => {
     const err = new ProviderError('hetzner', 412, 'error during placement');
+    expect(isTransientCapacityError(err)).toBe(true);
+  });
+
+  it('should still return false for a 412 that is not a placement failure', () => {
+    const err = new ProviderError('hetzner', 412, 'server is locked', { providerCode: 'locked' });
     expect(isTransientCapacityError(err)).toBe(false);
   });
 
   it('should return true for "resources temporarily unavailable" variant', () => {
-    const err = new ProviderError('hetzner', 422, 'resources temporarily unavailable in this region');
+    const err = new ProviderError(
+      'hetzner',
+      422,
+      'resources temporarily unavailable in this region'
+    );
     expect(isTransientCapacityError(err)).toBe(true);
   });
 
@@ -493,7 +790,11 @@ describe('isTransientCapacityError', () => {
   });
 
   it('should return true for "could not find" variant', () => {
-    const err = new ProviderError('hetzner', 422, 'could not find available host for server type cx33');
+    const err = new ProviderError(
+      'hetzner',
+      422,
+      'could not find available host for server type cx33'
+    );
     expect(isTransientCapacityError(err)).toBe(true);
   });
 });
@@ -516,17 +817,23 @@ describe('HetznerProvider capacity retry', () => {
 
   /** Create a mock 412 placement error response */
   function placementErrorResponse() {
-    return new Response(JSON.stringify({ error: { message: 'error during placement' } }), { status: 412 });
+    return new Response(JSON.stringify({ error: { message: 'error during placement' } }), {
+      status: 412,
+    });
   }
 
   /** Create a mock successful server creation response */
   function successResponse() {
-    return new Response(JSON.stringify({ server: createMockServer({ status: 'initializing' }) }), { status: 200 });
+    return new Response(JSON.stringify({ server: createMockServer({ status: 'initializing' }) }), {
+      status: 200,
+    });
   }
 
   /** Mock fetch to always return the same capacity error */
   function mockAlwaysCapacityError(msg?: string) {
-    globalThis.fetch = vi.fn().mockImplementation(() => Promise.resolve(capacityErrorResponse(msg)));
+    globalThis.fetch = vi
+      .fn()
+      .mockImplementation(() => Promise.resolve(capacityErrorResponse(msg)));
   }
 
   afterEach(() => {
@@ -537,7 +844,8 @@ describe('HetznerProvider capacity retry', () => {
   it('should retry transient capacity 422 and succeed on subsequent attempt', async () => {
     vi.useFakeTimers();
     const provider = new HetznerProvider('test-token', 'fsn1', undefined, true, 100, 1000, 3);
-    const mockFetch = vi.fn()
+    const mockFetch = vi
+      .fn()
       .mockResolvedValueOnce(capacityErrorResponse())
       .mockResolvedValueOnce(successResponse());
 
@@ -554,12 +862,16 @@ describe('HetznerProvider capacity retry', () => {
 
   it('should NOT retry non-capacity 422 errors', async () => {
     const provider = new HetznerProvider('test-token', 'fsn1', undefined, true, 100, 1000, 3);
-    globalThis.fetch = vi.fn().mockImplementation(() =>
-      Promise.resolve(new Response(
-        JSON.stringify({ error: { message: 'invalid input: server_type is not valid' } }),
-        { status: 422 },
-      )),
-    );
+    globalThis.fetch = vi
+      .fn()
+      .mockImplementation(() =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({ error: { message: 'invalid input: server_type is not valid' } }),
+            { status: 422 }
+          )
+        )
+      );
 
     const err = await provider.createVM(vmConfig).catch((e) => e);
     expect(err).toBeInstanceOf(ProviderError);
@@ -588,8 +900,17 @@ describe('HetznerProvider capacity retry', () => {
     vi.useFakeTimers();
     const initialDelay = 1000;
     const maxDelay = 10000;
-    const provider = new HetznerProvider('test-token', 'fsn1', undefined, true, initialDelay, maxDelay, 4);
-    const mockFetch = vi.fn()
+    const provider = new HetznerProvider(
+      'test-token',
+      'fsn1',
+      undefined,
+      true,
+      initialDelay,
+      maxDelay,
+      4
+    );
+    const mockFetch = vi
+      .fn()
       .mockResolvedValueOnce(capacityErrorResponse('no capacity for this server type'))
       .mockResolvedValueOnce(capacityErrorResponse('no capacity for this server type'))
       .mockResolvedValueOnce(capacityErrorResponse('no capacity for this server type'))
@@ -633,7 +954,8 @@ describe('HetznerProvider capacity retry', () => {
     // With initialDelay=100 and maxDelay=200, attempt 3 would be 100*2^2=400 but capped to 200
     vi.useFakeTimers();
     const provider = new HetznerProvider('test-token', 'fsn1', undefined, true, 100, 200, 5);
-    const mockFetch = vi.fn()
+    const mockFetch = vi
+      .fn()
       .mockResolvedValueOnce(capacityErrorResponse('no capacity for this server type'))
       .mockResolvedValueOnce(capacityErrorResponse('no capacity for this server type'))
       .mockResolvedValueOnce(capacityErrorResponse('no capacity for this server type'))
@@ -724,7 +1046,8 @@ describe('HetznerProvider capacity retry', () => {
     vi.useFakeTimers();
     const provider = new HetznerProvider('test-token', 'fsn1', undefined, true, 100, 1000, 3);
     // First capacity attempt: 422 (transient), then second attempt: all 412 placement errors
-    const mockFetch = vi.fn()
+    const mockFetch = vi
+      .fn()
       .mockResolvedValueOnce(capacityErrorResponse())
       .mockImplementation(() => Promise.resolve(placementErrorResponse()));
 
@@ -743,29 +1066,39 @@ describe('HetznerProvider capacity retry', () => {
 
   it('should NOT log a warn on the final exhaustion attempt', async () => {
     vi.useFakeTimers();
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const provider = new HetznerProvider('test-token', 'fsn1', undefined, true, 100, 1000, 2);
+    const logger = mockLogger();
+    const provider = new HetznerProvider('test-token', 'fsn1', undefined, true, 100, 1000, {
+      capacityRetryMaxAttempts: 2,
+      logger,
+    });
     mockAlwaysCapacityError('no capacity for this server type');
 
     const promise = provider.createVM(vmConfig).catch((e) => e);
     await vi.runAllTimersAsync();
     await promise;
 
-    const capacityWarnCalls = warnSpy.mock.calls.filter(
-      (call) => typeof call[0] === 'string' && call[0].includes('transient capacity error'),
-    );
+    const capacityWarnCalls = vi
+      .mocked(logger.warn)
+      .mock.calls.filter((call) => call[0].includes('transient capacity error'));
     // Only 1 warn for first attempt; second attempt is the last and throws without logging
     expect(capacityWarnCalls).toHaveLength(1);
-    expect(String(capacityWarnCalls[0]?.[0])).toContain('attempt 1/2');
-
-    warnSpy.mockRestore();
+    expect(capacityWarnCalls[0]?.[1]).toEqual(
+      expect.objectContaining({
+        attempt: 1,
+        maxAttempts: 2,
+      })
+    );
   });
 
   it('should log capacity retry attempts with context', async () => {
     vi.useFakeTimers();
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const provider = new HetznerProvider('test-token', 'fsn1', undefined, true, 100, 1000, 3);
-    const mockFetch = vi.fn()
+    const logger = mockLogger();
+    const provider = new HetznerProvider('test-token', 'fsn1', undefined, true, 100, 1000, {
+      capacityRetryMaxAttempts: 3,
+      logger,
+    });
+    const mockFetch = vi
+      .fn()
       .mockResolvedValueOnce(capacityErrorResponse())
       .mockResolvedValueOnce(successResponse());
 
@@ -775,16 +1108,20 @@ describe('HetznerProvider capacity retry', () => {
     await vi.runAllTimersAsync();
     await promise;
 
-    const capacityWarnCalls = warnSpy.mock.calls.filter(
-      (call) => typeof call[0] === 'string' && call[0].includes('transient capacity error'),
-    );
+    const capacityWarnCalls = vi
+      .mocked(logger.warn)
+      .mock.calls.filter((call) => call[0].includes('transient capacity error'));
     expect(capacityWarnCalls).toHaveLength(1);
-    const logMsg = String(capacityWarnCalls[0]?.[0]);
-    expect(logMsg).toContain('attempt 1/3');
-    expect(logMsg).toContain('server_type=cx33');
-    expect(logMsg).toContain('location=fsn1');
-    expect(logMsg).toContain('100ms');
-
-    warnSpy.mockRestore();
+    expect(capacityWarnCalls[0]).toEqual([
+      'hetzner transient capacity error; retrying createVM',
+      expect.objectContaining({
+        delayMs: 100,
+        attempt: 1,
+        maxAttempts: 3,
+        serverType: 'cx33',
+        location: 'fsn1',
+        statusCode: 422,
+      }),
+    ]);
   });
 });

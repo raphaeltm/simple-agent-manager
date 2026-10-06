@@ -1,211 +1,252 @@
-/**
- * useSessionLifecycle — DO-only session lifecycle for project chat.
- *
- * All messages flow through a single source: the Durable Object WebSocket.
- * Prompts are sent via the REST API (POST /sessions/:sessionId/prompt).
- * Agent state (idle/prompting/responding) is derived from message flow.
- */
-import type { NodeResponse, WorkspaceResponse } from '@simple-agent-manager/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { ChatConnectionState } from '../../hooks/useChatWebSocket';
+import type { WakeProgressUpdate } from '../../hooks/useChatWebSocket';
 import { useChatWebSocket } from '../../hooks/useChatWebSocket';
 import { useTokenRefresh } from '../../hooks/useTokenRefresh';
 import { useWorkspacePorts } from '../../hooks/useWorkspacePorts';
-import type { ChatMessageResponse, ChatSessionDetailResponse, ChatSessionResponse, SessionStateSnapshot } from '../../lib/api';
-import { cancelAgentPrompt, getChatSession, getNode, getTerminalToken, getTranscribeApiUrl, getWorkspace, resetIdleTimer, sendFollowUpPrompt, uploadSessionFiles } from '../../lib/api';
-import { mergeMessages } from '../../lib/merge-messages';
+import type {
+  ChatMessageResponse,
+  ChatSessionResponse,
+  MessageCommentRealtimeEvent,
+  SessionStateSnapshot,
+} from '../../lib/api';
+import {
+  getTerminalToken,
+  getTranscribeApiUrl,
+  resetIdleTimer,
+  sendFollowUpPrompt,
+} from '../../lib/api';
 import { isWorkspaceOperational } from '../../lib/workspace-status-utils';
-import type { SessionState } from './types';
-import { deriveSessionState, IDLE_TIMEOUT_MS, VIRTUAL_START } from './types';
+import { useSessionDraft } from './session-drafts';
+import type { FilePanelState } from './session-lifecycle-helpers';
+import { parsePlanContent } from './session-lifecycle-helpers';
+import type { AgentActivityState } from './types';
+import { deriveSessionState, IDLE_TIMEOUT_MS, isWorkingActivity } from './types';
+import { useActivityVerifyTimer } from './useActivityVerifyTimer';
+import { useCancelAgentPrompt } from './useCancelAgentPrompt';
+import { useCompletionDockWorking } from './useCompletionDockWorking';
 import { useConnectionRecovery } from './useConnectionRecovery';
-
-/** Agent activity state derived from message flow (no ACP connection needed). */
-export type AgentActivityState = 'idle' | 'prompting' | 'responding';
-
-export interface UseSessionLifecycleResult {
-  // Session state
-  session: ChatSessionResponse | null;
-  messages: ChatMessageResponse[];
-  hasMore: boolean;
-  loading: boolean;
-  error: string | null;
-  setError: (e: string | null) => void;
-  sessionState: SessionState;
-
-  // Task embed
-  taskEmbed: ChatSessionResponse['task'] | null;
-
-  // Workspace context
-  workspace: WorkspaceResponse | null;
-  node: NodeResponse | null;
-  detectedPorts: ReturnType<typeof useWorkspacePorts>['ports'];
-
-  // Follow-up state
-  followUp: string;
-  setFollowUp: (v: string) => void;
-  sendingFollowUp: boolean;
-  uploading: boolean;
-
-  // Resume state
-  isResuming: boolean;
-  resumeError: string | null;
-
-  // Connection state
-  connectionState: ChatConnectionState;
-  showConnectionBanner: boolean;
-  retryWs: () => void;
-
-  // Agent activity (derived from message flow + server state)
-  agentActivity: AgentActivityState;
-  currentPlan: SessionStateSnapshot['currentPlan'];
-  promptStartedAt: number | null;
-
-  // Scroll state
-  firstItemIndex: number;
-  showScrollButton: boolean;
-  setShowScrollButton: (v: boolean) => void;
-
-  // Idle timer
-  idleCountdownMs: number | null;
-
-  // File panel
-  filePanel: { mode: 'browse' | 'view' | 'diff' | 'git-status'; path?: string; line?: number | null } | null;
-  setFilePanel: (v: { mode: 'browse' | 'view' | 'diff' | 'git-status'; path?: string; line?: number | null } | null) => void;
-  handleFileClick: (path: string, line?: number | null) => void;
-  handleOpenFileBrowser: () => void;
-  handleOpenGitChanges: () => void;
-
-  // Actions
-  handleCancelPrompt: () => void;
-  handleSendFollowUp: () => Promise<void>;
-  handleUploadFiles: (files: FileList | File[]) => Promise<void>;
-  loadMore: () => Promise<void>;
-  loadingMore: boolean;
-
-  // Misc
-  transcribeApiUrl: string;
-  wsRef: React.RefObject<WebSocket | null>;
-}
+import { useFallbackSessionPoll } from './useFallbackSessionPoll';
+import { useSessionFileUpload } from './useSessionFileUpload';
+import { useSessionInfrastructure } from './useSessionInfrastructure';
+import type { UseSessionLifecycleResult } from './useSessionLifecycle.types';
+import { useSessionTranscript } from './useSessionTranscript';
+import { useWakeProgress } from './useWakeProgress';
 
 export function useSessionLifecycle(
   projectId: string,
   sessionId: string,
   isProvisioning: boolean,
   _onSessionMutated?: () => void,
+  onCommentEvent?: (event: MessageCommentRealtimeEvent) => void
 ): UseSessionLifecycleResult {
-  const [session, setSession] = useState<ChatSessionResponse | null>(null);
-  const [taskEmbed, setTaskEmbed] = useState<ChatSessionResponse['task'] | null>(null);
-  const [messages, setMessages] = useState<ChatMessageResponse[]>([]);
-  const [hasMore, setHasMore] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const transcript = useSessionTranscript(projectId, sessionId);
+  const { appendMessages, mergeRecentWindow } = transcript;
+  // Seeded from the cached transcript so a cached chat renders whole on its first
+  // render; the server-snapshot effect below keeps both current from then on.
+  const [session, setSession] = useState<ChatSessionResponse | null>(
+    () => transcript.detail?.session ?? null
+  );
+  const [taskEmbed, setTaskEmbed] = useState<ChatSessionResponse['task'] | null>(
+    () => transcript.detail?.session.task ?? null
+  );
 
-  // Workspace & node context
-  const [workspace, setWorkspace] = useState<WorkspaceResponse | null>(null);
-  const [node, setNode] = useState<NodeResponse | null>(null);
+  const appendOptimisticMessage = useCallback(
+    (message: ChatMessageResponse) => appendMessages([message]),
+    [appendMessages]
+  );
+  const { uploading, handleUploadFiles } = useSessionFileUpload({
+    projectId,
+    sessionId,
+    onOptimisticMessage: appendOptimisticMessage,
+  });
 
-  // Follow-up input state
-  const [followUp, setFollowUp] = useState('');
+  const { workspace, node } = useSessionInfrastructure(session?.workspaceId);
+  const draft = useSessionDraft(sessionId);
+  const { text: followUp, setText: setFollowUp } = draft;
   const [sendingFollowUp, setSendingFollowUp] = useState(false);
-  const [uploading, setUploading] = useState(false);
-
-  // Agent activity state (derived from message flow + server state)
   const [agentActivity, setAgentActivity] = useState<AgentActivityState>('idle');
-  const idleTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-
-  // Plan state (from session state mirror)
+  const completionDockWorking = useCompletionDockWorking(agentActivity);
+  const sleepingWakePendingRef = useRef(false);
   const [currentPlan, setCurrentPlan] = useState<SessionStateSnapshot['currentPlan']>(null);
   const [promptStartedAt, setPromptStartedAt] = useState<number | null>(null);
+  const [staleNotice, setStaleNotice] = useState(false);
+  const clearActivity = useCallback(() => {
+    setAgentActivity('idle');
+    setPromptStartedAt(null);
+  }, []);
+  const hydratePlan = useCallback((s: SessionStateSnapshot | null | undefined) => {
+    if (!s) return;
+    setCurrentPlan(s.currentPlan ?? null);
+  }, []);
+  const handleVerifiedStale = useCallback(() => setStaleNotice(true), []);
+  const dismissStaleNotice = useCallback(() => setStaleNotice(false), []);
+  const { startVerifyDecayTimer, stopVerifyDecayTimer } = useActivityVerifyTimer({
+    projectId,
+    sessionId,
+    delayMs: IDLE_TIMEOUT_MS,
+    logMessage: 'Agent activity verify failed; re-arming timer',
+    onVerifiedIdle: clearActivity,
+    onVerifiedStale: handleVerifiedStale,
+    onStateSnapshot: hydratePlan,
+  });
 
-  // File panel
-  const [filePanel, setFilePanel] = useState<{
-    mode: 'browse' | 'view' | 'diff' | 'git-status';
-    path?: string;
-    line?: number | null;
-  } | null>(null);
+  const wake = useWakeProgress(sessionId);
+  const { hydrateWakeProgress } = wake;
 
+  const hydrateState = useCallback(
+    (s: SessionStateSnapshot | null | undefined) => {
+      if (!s) return;
+      // Wake phase is folded in first so the banner has a phase to render in the
+      // same commit that flips activity to 'recovering'.
+      hydrateWakeProgress(s);
+      if (isWorkingActivity(s.activity)) {
+        setAgentActivity(s.activity);
+        setPromptStartedAt(s.promptStartedAt ?? null);
+        startVerifyDecayTimer();
+      } else if (s.recoveryStatus === 'waking') {
+        setAgentActivity('recovering');
+        sleepingWakePendingRef.current = true;
+      } else {
+        clearActivity();
+        stopVerifyDecayTimer();
+      }
+      hydratePlan(s);
+    },
+    [clearActivity, hydratePlan, hydrateWakeProgress, startVerifyDecayTimer, stopVerifyDecayTimer]
+  );
+
+  const [filePanel, setFilePanel] = useState<FilePanelState>(null);
   const handleFileClick = useCallback((path: string, line?: number | null) => {
     setFilePanel({ mode: 'view', path, line });
   }, []);
-  const handleOpenFileBrowser = useCallback(() => {
-    setFilePanel({ mode: 'browse', path: '.' });
-  }, []);
-  const handleOpenGitChanges = useCallback(() => {
-    setFilePanel({ mode: 'git-status' });
-  }, []);
-
-  // Virtual scroll
-  const [firstItemIndex, setFirstItemIndex] = useState(VIRTUAL_START);
+  const handleOpenFileBrowser = useCallback(() => setFilePanel({ mode: 'browse', path: '.' }), []);
+  const handleOpenGitChanges = useCallback(() => setFilePanel({ mode: 'git-status' }), []);
   const [showScrollButton, setShowScrollButton] = useState(false);
-
   const sessionState = session ? deriveSessionState(session) : 'terminated';
   const transcribeApiUrl = getTranscribeApiUrl();
 
   // ── DO WebSocket (sole message source) ──
-  const { connectionState, wsRef, retry: retryWs } = useChatWebSocket({
+  const {
+    connectionState,
+    wsRef,
+    retry: retryWs,
+  } = useChatWebSocket({
     projectId,
     sessionId,
-    enabled: session?.status === 'active',
-    onMessage: useCallback((msg: ChatMessageResponse) => {
-      setMessages((prev) => mergeMessages(prev, [msg], 'append'));
+    // A waking session is still `sleeping` server-side for the whole wake —
+    // `wakeSession()` only flips it to `active` at the very end, after the agent
+    // session is live. Gating the socket on `active` alone therefore means the
+    // client holds NO connection during the exact window the wake-progress
+    // broadcasts are being sent, and every phase delta is dropped.
+    //
+    // `isWaking` comes from the D1 hydrate, so it is known on mount and on every
+    // poll. Opening the socket for that bounded window (and only then — an
+    // ordinary sleeping session still connects nothing) is what makes the push
+    // half of wake progress actually reach the user.
+    enabled: session?.status === 'active' || wake.isWaking,
+    onMessage: useCallback(
+      (msg: ChatMessageResponse) => {
+        appendMessages([msg]);
 
-      // Update current plan from incoming plan messages
-      if (msg.role === 'plan' && msg.content) {
-        try {
-          const parsed = JSON.parse(msg.content);
-          if (Array.isArray(parsed)) setCurrentPlan(parsed);
-        } catch { /* ignore malformed plan */ }
-      }
-
-      // Derive agent activity from any non-user message (assistant, tool, thinking, plan).
-      // Reset the idle fallback timer on every message role — tool calls and
-      // thinking chunks also indicate the agent is active. The 30s timeout is a
-      // safety net; the primary signal is the server-pushed session.activity event.
-      if (msg.role !== 'user') {
-        setAgentActivity('responding');
-        clearTimeout(idleTimerRef.current);
-        idleTimerRef.current = setTimeout(() => {
-          setAgentActivity('idle');
-        }, IDLE_TIMEOUT_MS);
-      }
-    }, []),
-    onSessionStopped: useCallback(() => {
-      setSession((prev) => prev ? { ...prev, status: 'stopped' } : prev);
-      setAgentActivity('idle');
-    }, []),
-    onCatchUp: useCallback((catchUpMessages: ChatMessageResponse[], catchUpSession: ChatSessionResponse, state?: SessionStateSnapshot | null) => {
-      setSession(catchUpSession);
-      setMessages((prev) => mergeMessages(prev, catchUpMessages, 'replace'));
-      // Hydrate activity + plan from server state on reconnect
-      if (state) {
-        if (state.activity === 'prompting') {
-          setAgentActivity('prompting');
-          setPromptStartedAt(state.promptStartedAt ?? null);
-        } else if (state.activity === 'idle') {
-          setAgentActivity('idle');
+        if (msg.role === 'plan' && msg.content) {
+          const parsed = parsePlanContent(msg.content);
+          if (parsed) setCurrentPlan(parsed);
         }
-        if (state.currentPlan) setCurrentPlan(state.currentPlan);
-      }
-    }, []),
-    onAgentCompleted: useCallback((agentCompletedAt: number) => {
-      setSession((prev) => prev ? { ...prev, agentCompletedAt, isIdle: true } as ChatSessionResponse : prev);
+        // Streaming agent output: show 'responding' heuristic, but arm the SHARED
+        // verify-before-decay timer instead of a blind decay. The blind timer used to
+        // clobber onAgentActivity's verified timer and flip to idle during long tool calls.
+        if (msg.role !== 'user') {
+          setAgentActivity('responding');
+          // Fresh agent output disproves the stall — retire the notice.
+          setStaleNotice(false);
+          startVerifyDecayTimer();
+        }
+      },
+      [appendMessages, startVerifyDecayTimer]
+    ),
+    onSessionStopped: useCallback(() => {
+      setSession((prev) => (prev ? { ...prev, status: 'stopped' } : prev));
       setAgentActivity('idle');
-    }, []),
-    onAgentActivity: useCallback((activity: 'prompting' | 'idle', promptStartedAt?: number | null) => {
-      setAgentActivity(activity === 'prompting' ? 'prompting' : 'idle');
-      setPromptStartedAt(activity === 'prompting' ? (promptStartedAt ?? Date.now()) : null);
-      clearTimeout(idleTimerRef.current);
-      if (activity === 'prompting') {
-        // Safety backstop: if the server never sends "idle" (e.g., crashed or
-        // network partition), fall back to idle after the same timeout used by
-        // the message-based heuristic.
-        idleTimerRef.current = setTimeout(() => {
-          setAgentActivity('idle');
-        }, IDLE_TIMEOUT_MS);
-      }
-    }, []),
+      setPromptStartedAt(null);
+      // Stop any pending verify timer so it can't re-arm and flash the bar back on.
+      stopVerifyDecayTimer();
+    }, [stopVerifyDecayTimer]),
+    onCatchUp: useCallback(
+      (
+        catchUpMessages: ChatMessageResponse[],
+        catchUpSession: ChatSessionResponse,
+        state?: SessionStateSnapshot | null
+      ) => {
+        setSession(catchUpSession);
+        mergeRecentWindow({
+          session: catchUpSession,
+          messages: catchUpMessages,
+          // A window's own `hasMore` is used only when no transcript is loaded
+          // yet; the catch-up does not report it, so assume older history.
+          hasMore: true,
+          state: state ?? null,
+        }).catch(() => {
+          // Best-effort catch-up: the socket remains connected, and the next
+          // explicit refresh/reconnect will retry from the current cache.
+        });
+        hydrateState(state);
+      },
+      [hydrateState, mergeRecentWindow]
+    ),
+    onAgentCompleted: useCallback(
+      (agentCompletedAt: number) => {
+        setSession((prev) =>
+          prev ? ({ ...prev, agentCompletedAt, isIdle: true } as ChatSessionResponse) : prev
+        );
+        setAgentActivity('idle');
+        setPromptStartedAt(null);
+        // Stop any pending verify timer so it can't re-arm and flash the bar back on.
+        stopVerifyDecayTimer();
+      },
+      [stopVerifyDecayTimer]
+    ),
+    onAgentActivity: useCallback(
+      (
+        activity: 'prompting' | 'idle' | 'recovering' | 'error',
+        promptStartedAt?: number | null
+      ) => {
+        const working = activity === 'prompting' || activity === 'recovering';
+        setAgentActivity(working ? activity : 'idle');
+        setPromptStartedAt(working ? (promptStartedAt ?? Date.now()) : null);
+        if (working) {
+          // A live working signal disproves the stall — retire the notice.
+          setStaleNotice(false);
+          // Arm the shared verify-before-decay timer (prevents false idle during long tool calls).
+          startVerifyDecayTimer();
+        } else {
+          // Authoritative idle from the DO: stop any pending verify timer.
+          stopVerifyDecayTimer();
+        }
+      },
+      [startVerifyDecayTimer, stopVerifyDecayTimer]
+    ),
+    onSessionUpdated: useCallback(
+      (updates: Partial<Pick<ChatSessionResponse, 'topic' | 'workspaceId' | 'agentSessionId'>>) => {
+        setSession((prev) => (prev ? { ...prev, ...updates } : prev));
+      },
+      []
+    ),
+    // Pushed wake phase — arrives well ahead of the fallback poll, so the banner
+    // tracks the actual wake instead of lagging a poll interval behind it.
+    onWakeProgress: useCallback(
+      (update: WakeProgressUpdate) => {
+        wake.applyWakeProgress(update);
+        if (update.recoveryStatus !== 'waking') {
+          // The replacement runner is live (or gave up). Release the local wake
+          // latch so the fallback poll is allowed to publish authoritative state
+          // again instead of being suppressed as "stale sleeping state".
+          sleepingWakePendingRef.current = false;
+        }
+      },
+      [wake]
+    ),
+    onCommentEvent,
   });
 
   // Connection recovery (banner debounce, idle timer, auto-resume)
@@ -219,85 +260,38 @@ export function useSessionLifecycle(
     setSession,
   });
 
-  // Reset virtual scroll on session change
+  // Hydrate from each session and state snapshot the SERVER reports — a load, a
+  // refresh, a poll, a catch-up. Keyed on those two objects rather than on the
+  // whole transcript entry: every streamed row rewrites the entry, and
+  // re-applying a load-time `idle` snapshot on each one would knock a working
+  // agent back to idle. Structural sharing keeps both references stable until
+  // the server reports something different.
+  const serverSession = transcript.detail?.session;
+  const serverState = transcript.detail?.state;
   useEffect(() => {
-    setFirstItemIndex(VIRTUAL_START);
-    setShowScrollButton(false);
-  }, [sessionId]);
+    if (!serverSession) return;
 
-  // Cleanup idle timer on unmount
-  useEffect(() => {
-    return () => clearTimeout(idleTimerRef.current);
-  }, []);
-
-  // Hydrate session state from server snapshot
-  const hydrateSessionState = useCallback((state: SessionStateSnapshot | null | undefined) => {
-    if (!state) return;
-    if (state.activity === 'prompting') {
-      setAgentActivity('prompting');
-      setPromptStartedAt(state.promptStartedAt ?? null);
-    } else if (state.activity === 'idle') {
-      setAgentActivity('idle');
-    }
-    if (state.currentPlan) {
-      setCurrentPlan(state.currentPlan);
-    }
-  }, []);
-
-  // Load session
-  const loadSession = useCallback(async () => {
-    try {
-      setError(null);
-      setLoading(true);
-      const data: ChatSessionDetailResponse = await getChatSession(projectId, sessionId);
-      setSession(data.session);
-      setMessages(data.messages);
-      setHasMore(data.hasMore);
-      if (data.session.task) setTaskEmbed(data.session.task);
-      // Hydrate activity + plan from persisted session state
-      hydrateSessionState(data.state);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load session');
-    } finally {
-      setLoading(false);
-    }
-  }, [projectId, sessionId, hydrateSessionState]);
-
-  useEffect(() => { void loadSession(); }, [loadSession]);
-
-  // Fetch workspace and node details
-  useEffect(() => {
-    const wsId = session?.workspaceId;
-    if (!wsId) return;
-    if (workspace?.id === wsId) return;
-
-    let cancelled = false;
-    let retryTimer: ReturnType<typeof setTimeout> | null = null;
-    const RETRY_DELAYS_MS = [2_000, 5_000, 10_000];
-
-    async function attemptFetch(attempt = 0) {
-      try {
-        const ws = await getWorkspace(wsId!);
-        if (cancelled) return;
-        setWorkspace(ws);
-        if (ws.nodeId) {
-          const nd = await getNode(ws.nodeId);
-          if (!cancelled) setNode(nd);
-        }
-      } catch {
-        if (cancelled) return;
-        if (attempt < RETRY_DELAYS_MS.length) {
-          retryTimer = setTimeout(() => attemptFetch(attempt + 1), RETRY_DELAYS_MS[attempt]);
-        }
+    setSession(serverSession);
+    setTaskEmbed(serverSession.task ?? null);
+    const serverStillHasStaleSleepingState =
+      sleepingWakePendingRef.current &&
+      serverSession.status === 'sleeping' &&
+      !isWorkingActivity(serverState?.activity);
+    if (serverStillHasStaleSleepingState) {
+      hydratePlan(serverState);
+      // The guard exists to stop a stale `idle` activity from erasing the user's
+      // wake feedback — NOT to discard wake progress. Its condition holds for most
+      // of a wake (status stays `sleeping`, activity stays `idle` until the agent
+      // actually starts), so routing around `hydrateState` without this would drop
+      // every phase update and leave `isWaking` false for the entire wake.
+      hydrateWakeProgress(serverState);
+    } else {
+      if (serverSession.status !== 'sleeping' || isWorkingActivity(serverState?.activity)) {
+        sleepingWakePendingRef.current = false;
       }
+      hydrateState(serverState);
     }
-
-    attemptFetch();
-    return () => {
-      cancelled = true;
-      if (retryTimer) clearTimeout(retryTimer);
-    };
-  }, [session?.workspaceId, workspace?.id]);
+  }, [serverSession, serverState, hydrateState, hydratePlan, hydrateWakeProgress]);
 
   // Token refresh for port scanning
   const isWorkspaceRunning = isWorkspaceOperational(workspace?.status);
@@ -316,50 +310,36 @@ export function useSessionLifecycle(
     workspace?.url ?? undefined,
     session?.workspaceId ?? undefined,
     terminalToken ?? undefined,
-    isWorkspaceRunning,
+    workspace?.status
   );
 
-  // Polling fallback
-  useEffect(() => {
-    if (!session || session.status !== 'active') return;
-
-    const abortController = new AbortController();
-    const ACTIVE_POLL_MS = 3000;
-    let lastPollFingerprint = '';
-    const pollInterval = setInterval(async () => {
-      try {
-        const data: ChatSessionDetailResponse = await getChatSession(
-          projectId, sessionId, { signal: abortController.signal },
-        );
-        if (data.session.id !== sessionId) return;
-        const newLastId = data.messages[data.messages.length - 1]?.id ?? '';
-        const taskStatus = data.session.task?.status ?? '';
-        const agentSessId = data.session.agentSessionId ?? '';
-        const fingerprint = `${data.messages.length}:${newLastId}:${data.session.status}:${taskStatus}:${agentSessId}`;
-        if (fingerprint !== lastPollFingerprint) {
-          lastPollFingerprint = fingerprint;
-          setSession(data.session);
-          setMessages((prev) => mergeMessages(prev, data.messages, 'replace'));
-          if (data.session.task) setTaskEmbed(data.session.task);
-        }
-      } catch (err) {
-        if (err instanceof DOMException && err.name === 'AbortError') return;
-      }
-    }, ACTIVE_POLL_MS);
-
-    return () => {
-      clearInterval(pollInterval);
-      abortController.abort();
-    };
-  }, [session?.status, projectId, sessionId]);
+  useFallbackSessionPoll({
+    projectId,
+    sessionId,
+    session,
+    connectionState,
+    mergeRecentWindow,
+    sleepingWakePendingRef,
+    setSession,
+    setTaskEmbed,
+    hydrateState,
+    hydratePlan,
+    hydrateWakeProgress,
+  });
 
   // ── Send follow-up via REST API ──
   const handleSendFollowUp = async () => {
     const trimmed = followUp.trim();
     if (!trimmed || sendingFollowUp) return;
 
+    const wakingSleepingSession = sessionState === 'sleeping';
+    if (wakingSleepingSession) sleepingWakePendingRef.current = true;
     setSendingFollowUp(true);
     setAgentActivity('prompting');
+    setStaleNotice(false);
+    // A new turn supersedes any failed interrupt of the previous one — leaving
+    // the old error visible would attach it to work it has nothing to do with.
+    clearCancelError();
     try {
       if (sessionState === 'idle') {
         resetIdleTimer(projectId, sessionId)
@@ -367,7 +347,12 @@ export function useSessionLifecycle(
             if (result.cleanupAt) {
               setSession((prev) => {
                 if (!prev) return prev;
-                return { ...prev, cleanupAt: result.cleanupAt, isIdle: false, agentCompletedAt: null } as ChatSessionResponse;
+                return {
+                  ...prev,
+                  cleanupAt: result.cleanupAt,
+                  isIdle: false,
+                  agentCompletedAt: null,
+                } as ChatSessionResponse;
               });
             }
           })
@@ -376,114 +361,85 @@ export function useSessionLifecycle(
 
       // Optimistic user message
       const optimisticId = `optimistic-${crypto.randomUUID()}`;
-      setMessages((prev) => [...prev, {
+      const optimisticMessage: ChatMessageResponse = {
         id: optimisticId,
         sessionId,
         role: 'user',
         content: trimmed,
         toolMetadata: null,
         createdAt: Date.now(),
-      }]);
+      };
+      appendMessages([optimisticMessage]);
+      draft.sending(trimmed);
 
       // Persist via DO WebSocket
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({
-          type: 'message.send',
-          sessionId,
-          content: trimmed,
-          role: 'user',
-        }));
+        wsRef.current.send(
+          JSON.stringify({
+            type: 'message.send',
+            sessionId,
+            content: trimmed,
+            role: 'user',
+          })
+        );
       }
 
-      // For idle sessions, resume first then send the prompt
+      // For idle sessions, resume first then send the prompt. The composer is
+      // cleared only when delivery is confirmed (onDelivered); a failed resume
+      // or delivery resets the working state and keeps the typed text as the
+      // manual-retry affordance (onFailed).
       if (sessionState === 'idle' && session?.workspaceId && session?.agentSessionId) {
-        recovery.resumeAndSend(trimmed);
+        recovery.resumeAndSend(trimmed, {
+          onDelivered: () => {
+            draft.delivered(trimmed);
+          },
+          onFailed: () => {
+            draft.failed(trimmed);
+            setAgentActivity('idle');
+          },
+        });
       } else {
         // Forward prompt to the running agent via REST API
         try {
           await sendFollowUpPrompt(projectId, sessionId, trimmed);
-        } catch {
-          // Agent may be offline — message is still persisted via DO.
+          // Delivery confirmed — clear any stale recovery banner and the composer.
+          recovery.clearResumeError();
+          draft.delivered(trimmed);
+        } catch (err) {
+          // reportDeliveryError terminates the session on a terminal RUNTIME_STOPPED
+          // (composer disabled) or shows the recovery banner otherwise. Reset the
+          // working state and keep the composer text so the user can retry.
+          recovery.reportDeliveryError(err);
+          draft.failed(trimmed);
+          if (wakingSleepingSession) sleepingWakePendingRef.current = false;
           setAgentActivity('idle');
         }
       }
-
-      setFollowUp('');
     } finally {
       setSendingFollowUp(false);
     }
   };
 
   // Upload files
-  const handleUploadFiles = useCallback(async (files: FileList | File[]) => {
-    const fileArray = Array.from(files);
-    if (fileArray.length === 0) return;
-    setUploading(true);
-    try {
-      const result = await uploadSessionFiles(projectId, sessionId, fileArray);
-      const names = result.files.map((f) => f.name).join(', ');
-      setMessages((prev) => [...prev, {
-        id: `optimistic-upload-${crypto.randomUUID()}`,
-        sessionId,
-        role: 'user' as const,
-        content: `Uploaded ${result.files.length} file${result.files.length > 1 ? 's' : ''}: ${names}`,
-        toolMetadata: null,
-        createdAt: Date.now(),
-      }]);
-    } catch (err) {
-      console.error('File upload failed:', err);
-    } finally {
-      setUploading(false);
-    }
-  }, [projectId, sessionId]);
-
-  // Cancel the current in-flight prompt via REST API
-  const cancellingRef = useRef(false);
-  const handleCancelPrompt = useCallback(() => {
-    if (agentActivity === 'idle' || cancellingRef.current) return;
-    cancellingRef.current = true;
-    cancelAgentPrompt(projectId, sessionId)
-      .then(() => {
-        setAgentActivity('idle');
-      })
-      .catch(() => {
-        // Network/server error — keep spinner visible so user can retry
-      })
-      .finally(() => {
-        cancellingRef.current = false;
-      });
-  }, [agentActivity, projectId, sessionId]);
-
-  // Load more (pagination)
-  const loadMore = async () => {
-    if (!hasMore || loadingMore) return;
-    const firstMessage = messages[0];
-    if (!firstMessage) return;
-
-    setLoadingMore(true);
-    try {
-      const data = await getChatSession(projectId, sessionId, {
-        before: firstMessage.createdAt,
-      });
-      setMessages((prev) => {
-        const merged = mergeMessages(prev, data.messages, 'prepend');
-        const actualAdded = merged.length - prev.length;
-        setFirstItemIndex((fi) => fi - actualAdded);
-        return merged;
-      });
-      setHasMore(data.hasMore);
-    } finally {
-      setLoadingMore(false);
-    }
-  };
+  const onCancelled = useCallback(() => setAgentActivity('idle'), []);
+  const {
+    cancelling,
+    cancelError,
+    cancelPrompt: handleCancelPrompt,
+    clearCancelError,
+  } = useCancelAgentPrompt({
+    projectId,
+    sessionId,
+    enabled: completionDockWorking,
+    onCancelled,
+  });
 
   return {
     session,
-    messages,
-    hasMore,
-    loading,
-    error,
-    setError,
+    messages: transcript.messages,
+    hasMore: transcript.hasMore,
+    loading: transcript.loading,
+    error: transcript.error,
     sessionState,
     taskEmbed,
     workspace,
@@ -494,14 +450,23 @@ export function useSessionLifecycle(
     sendingFollowUp,
     uploading,
     isResuming: recovery.isResuming,
+    resumeStartedAt: recovery.resumeStartedAt,
     resumeError: recovery.resumeError,
+    clearResumeError: recovery.clearResumeError,
     connectionState,
     showConnectionBanner: recovery.showConnectionBanner,
     retryWs,
     agentActivity,
+    completionDockWorking,
+    /** True while a wake is in flight (hydrated from D1 or pushed over the socket). */
+    isWaking: wake.isWaking,
+    /** Current wake phase, or null before the replacement runner reports a step. */
+    wakePhase: wake.wakePhase,
+    staleNotice,
+    dismissStaleNotice,
     currentPlan,
     promptStartedAt,
-    firstItemIndex,
+    firstItemIndex: transcript.firstItemIndex,
     showScrollButton,
     setShowScrollButton,
     idleCountdownMs: recovery.idleCountdownMs,
@@ -511,10 +476,13 @@ export function useSessionLifecycle(
     handleOpenFileBrowser,
     handleOpenGitChanges,
     handleCancelPrompt,
+    cancelling,
+    cancelError,
     handleSendFollowUp,
     handleUploadFiles,
-    loadMore,
-    loadingMore,
+    loadMore: transcript.loadMore,
+    loadUntil: transcript.loadUntil,
+    loadingMore: transcript.loadingMore,
     transcribeApiUrl,
     wsRef,
   };

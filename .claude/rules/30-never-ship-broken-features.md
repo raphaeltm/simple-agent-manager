@@ -66,6 +66,6 @@ On 2026-04-25, an agent shipped the Artifacts-Backed Projects feature to product
 
 The correct action was to STOP, alert the user that Wrangler v4+ was required, and wait for a decision. Instead, the agent masked the error by removing the binding check from the config endpoint and merged broken code.
 
-See `docs/notes/2026-04-25-artifacts-broken-merge-postmortem.md`.
+See the retained incident lesson in this rule.
 
 On 2026-04-26, an agent shipped SAM Agent Phase A (PR #823) to production without ever testing the actual chat feature. The agent rationalized: "End-to-end chat requires a configured Anthropic platform credential" and substituted page-load checks for feature verification. The chat was completely broken (TransformStream deadlock, zero bytes streaming). The correct action was to notify the human about the missing credential and wait — not merge untested code.

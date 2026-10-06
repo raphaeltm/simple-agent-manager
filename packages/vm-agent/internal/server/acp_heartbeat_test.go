@@ -21,10 +21,10 @@ func TestActiveProjectIDs_ReturnsUniqueRunningProjects(t *testing.T) {
 		config: &config.Config{NodeID: "node-1"},
 		workspaces: map[string]*WorkspaceRuntime{
 			"ws-1": {ID: "ws-1", ProjectID: "proj-a", Status: "running"},
-			"ws-2": {ID: "ws-2", ProjectID: "proj-a", Status: "running"},  // duplicate project
+			"ws-2": {ID: "ws-2", ProjectID: "proj-a", Status: "running"}, // duplicate project
 			"ws-3": {ID: "ws-3", ProjectID: "proj-b", Status: "running"},
 			"ws-4": {ID: "ws-4", ProjectID: "proj-c", Status: "stopped"},  // not running
-			"ws-5": {ID: "ws-5", ProjectID: "", Status: "running"},         // no project
+			"ws-5": {ID: "ws-5", ProjectID: "", Status: "running"},        // no project
 			"ws-6": {ID: "ws-6", ProjectID: "proj-d", Status: "recovery"}, // recovery counts
 		},
 		done: make(chan struct{}),

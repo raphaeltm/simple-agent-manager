@@ -1,10 +1,21 @@
-import type { NodeResponse, WorkspaceResponse } from '@simple-agent-manager/shared';
-import { PROVIDER_LABELS,VM_LOCATIONS, VM_SIZE_LABELS } from '@simple-agent-manager/shared';
-import { Button, Card, DropdownMenu, type DropdownMenuItem,StatusBadge } from '@simple-agent-manager/ui';
-import { Plus,Server } from 'lucide-react';
+import type {
+  NodeResponse,
+  ProviderCatalog,
+  WorkspaceResponse,
+} from '@simple-agent-manager/shared';
+import { PROVIDER_LABELS, VM_LOCATIONS } from '@simple-agent-manager/shared';
+import {
+  Button,
+  Card,
+  DropdownMenu,
+  type DropdownMenuItem,
+  StatusBadge,
+} from '@simple-agent-manager/ui';
+import { Plus, Rocket, Server } from 'lucide-react';
 import type { FC } from 'react';
 import { useNavigate } from 'react-router';
 
+import { HardwareDetails } from '../hardware/HardwareDetails';
 import { MiniMetricBadge } from './MiniMetricBadge';
 import { NodeWorkspaceMiniCard } from './NodeWorkspaceMiniCard';
 
@@ -16,11 +27,13 @@ interface NodeCardProps {
   onStop: (id: string) => void;
   onDelete: (id: string) => void;
   onCreateWorkspace: (nodeId: string) => void;
+  /** @deprecated Existing nodes display persisted hardware, never current catalog guesses. */
+  catalogs?: ProviderCatalog[];
 }
 
 function getNodeActions(
   node: NodeResponse,
-  handlers: { onStop: (id: string) => void; onDelete: (id: string) => void },
+  handlers: { onStop: (id: string) => void; onDelete: (id: string) => void }
 ): DropdownMenuItem[] {
   const items: DropdownMenuItem[] = [];
   const isTransitional = node.status === 'creating' || node.status === 'stopping';
@@ -54,12 +67,18 @@ export const NodeCard: FC<NodeCardProps> = ({
 }) => {
   const navigate = useNavigate();
   const overflowItems = getNodeActions(node, { onStop, onDelete });
-  const sizeLabels = VM_SIZE_LABELS[node.vmSize];
   const locationConfig = VM_LOCATIONS[node.vmLocation];
   const metrics = node.lastMetrics;
-  const hasMetrics = metrics && (metrics.cpuLoadAvg1 != null || metrics.memoryPercent != null || metrics.diskPercent != null);
+  const hasMetrics =
+    metrics &&
+    (metrics.cpuLoadAvg1 != null || metrics.memoryPercent != null || metrics.diskPercent != null);
   const visibleWorkspaces = workspaces.slice(0, MAX_VISIBLE_WORKSPACES);
   const hiddenCount = workspaces.length - visibleWorkspaces.length;
+  const isDeploymentNode = node.nodeRole === 'deployment';
+  const deploymentEnvironments = node.deploymentEnvironments ?? [];
+  const visibleDeploymentEnvironments = deploymentEnvironments.slice(0, MAX_VISIBLE_WORKSPACES);
+  const hiddenDeploymentCount =
+    deploymentEnvironments.length - visibleDeploymentEnvironments.length;
 
   const handleCardClick = () => {
     navigate(`/nodes/${node.id}`);
@@ -86,11 +105,23 @@ export const NodeCard: FC<NodeCardProps> = ({
       aria-label={`View node ${node.name}`}
       className="cursor-pointer"
     >
-      <Card variant="glass" className="flex flex-col gap-3" style={{ padding: 'clamp(var(--sam-space-3), 3vw, var(--sam-space-4))' }}>
+      <Card
+        variant="glass"
+        className="flex flex-col gap-3"
+        style={{ padding: 'clamp(var(--sam-space-3), 3vw, var(--sam-space-4))' }}
+      >
         {/* Header: icon + name + dropdown */}
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-sm bg-info-tint flex items-center justify-center shrink-0">
-            <Server size={20} color="var(--sam-color-info-fg)" />
+          <div
+            className={`w-9 h-9 rounded-sm flex items-center justify-center shrink-0 ${
+              isDeploymentNode ? 'bg-accent-tint' : 'bg-info-tint'
+            }`}
+          >
+            {isDeploymentNode ? (
+              <Rocket size={20} className="text-accent" />
+            ) : (
+              <Server size={20} color="var(--sam-color-info-fg)" />
+            )}
           </div>
 
           <div className="flex-1 min-w-0">
@@ -100,7 +131,7 @@ export const NodeCard: FC<NodeCardProps> = ({
           </div>
 
           {overflowItems.length > 0 && (
-            <div onClick={(e) => e.stopPropagation()} className="shrink-0">
+            <div role="presentation" onClick={(e) => e.stopPropagation()} className="shrink-0">
               <DropdownMenu items={overflowItems} aria-label={`Actions for ${node.name}`} />
             </div>
           )}
@@ -110,22 +141,36 @@ export const NodeCard: FC<NodeCardProps> = ({
         <div className="flex items-center gap-2">
           <StatusBadge status={node.status} />
           <StatusBadge status={node.healthStatus || 'stale'} />
+          {isDeploymentNode && (
+            <span className="inline-flex items-center rounded-full bg-accent-tint px-2.5 py-0.5 text-xs font-semibold text-accent">
+              Deployment
+            </span>
+          )}
         </div>
 
         {/* VM info */}
         <div className="sam-type-caption text-fg-muted flex flex-wrap gap-x-1">
-          <span aria-label={`Provider: ${node.cloudProvider ? (PROVIDER_LABELS[node.cloudProvider] ?? node.cloudProvider) : 'Unknown'}`}>
-            {node.cloudProvider ? (PROVIDER_LABELS[node.cloudProvider] ?? node.cloudProvider) : 'Unknown'}
+          <span
+            aria-label={`Provider: ${node.cloudProvider ? (PROVIDER_LABELS[node.cloudProvider] ?? node.cloudProvider) : 'Unknown'}`}
+          >
+            {node.cloudProvider
+              ? (PROVIDER_LABELS[node.cloudProvider] ?? node.cloudProvider)
+              : 'Unknown'}
           </span>
           <span aria-hidden="true">&middot;</span>
-          <span aria-label={`Size: ${sizeLabels ? sizeLabels.label : node.vmSize}`}>
-            {sizeLabels ? `${sizeLabels.label} \u2014 ${sizeLabels.shortDescription}` : node.vmSize}
-          </span>
-          <span aria-hidden="true">&middot;</span>
-          <span aria-label={`Location: ${locationConfig ? `${locationConfig.name}, ${locationConfig.country}` : node.vmLocation}`}>
+          <span
+            aria-label={`Location: ${locationConfig ? `${locationConfig.name}, ${locationConfig.country}` : node.vmLocation}`}
+          >
             {locationConfig ? `${locationConfig.name}, ${locationConfig.country}` : node.vmLocation}
           </span>
         </div>
+
+        <HardwareDetails hardware={node} />
+        {node.providerInstancePriceDisplay && (
+          <span className="text-xs text-fg-muted">
+            Offering price: {node.providerInstancePriceDisplay}
+          </span>
+        )}
 
         {/* Resource metrics */}
         {hasMetrics ? (
@@ -141,51 +186,71 @@ export const NodeCard: FC<NodeCardProps> = ({
             )}
           </div>
         ) : (
-          <span className="sam-type-caption text-fg-muted italic">
-            No metrics yet
-          </span>
+          <span className="sam-type-caption text-fg-muted italic">No metrics yet</span>
         )}
 
         {/* Workspaces section */}
         <div className="border-t border-border-default pt-3 flex flex-col gap-2">
           <span className="sam-type-caption text-fg-muted font-medium">
-            Workspaces ({workspaces.length})
+            {isDeploymentNode
+              ? `Deployment environments (${deploymentEnvironments.length})`
+              : `Workspaces (${workspaces.length})`}
           </span>
 
-          {visibleWorkspaces.length > 0 ? (
+          {isDeploymentNode && visibleDeploymentEnvironments.length > 0 ? (
+            <>
+              {visibleDeploymentEnvironments.map((env) => (
+                <span
+                  key={env.id}
+                  className="sam-type-caption text-fg-primary pl-3 overflow-hidden text-ellipsis whitespace-nowrap"
+                >
+                  {env.name}
+                </span>
+              ))}
+              {hiddenDeploymentCount > 0 && (
+                <span className="sam-type-caption text-fg-muted pl-3">
+                  +{hiddenDeploymentCount} more
+                </span>
+              )}
+            </>
+          ) : visibleWorkspaces.length > 0 ? (
             <>
               {visibleWorkspaces.map((ws) => (
-                <div key={ws.id} onClick={(e) => e.stopPropagation()}>
+                <div key={ws.id} role="presentation" onClick={(e) => e.stopPropagation()}>
                   <NodeWorkspaceMiniCard workspace={ws} />
                 </div>
               ))}
               {hiddenCount > 0 && (
-                <span className="sam-type-caption text-fg-muted pl-3">
-                  +{hiddenCount} more
-                </span>
+                <span className="sam-type-caption text-fg-muted pl-3">+{hiddenCount} more</span>
               )}
             </>
           ) : (
             <span className="sam-type-caption text-fg-muted italic">
-              No workspaces
+              {isDeploymentNode ? 'No deployment environments' : 'No workspaces'}
             </span>
           )}
 
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleCreateWorkspace}
-            className="self-start"
-          >
-            <Plus size={14} />
-            Create Workspace
-          </Button>
+          {isDeploymentNode ? (
+            <span className="sam-type-caption text-fg-muted">
+              Managed from the project deployment environment.
+            </span>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleCreateWorkspace}
+              className="self-start"
+            >
+              <Plus size={14} />
+              Create Workspace
+            </Button>
+          )}
         </div>
 
         {/* Error message */}
         {node.errorMessage && (
           <div className="p-2 bg-danger-tint rounded-sm">
-            <span className="sam-type-caption text-danger">
+            <span className="sam-type-caption text-danger [overflow-wrap:anywhere]">
               {node.errorMessage}
             </span>
           </div>

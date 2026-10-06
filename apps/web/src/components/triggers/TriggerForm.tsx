@@ -3,47 +3,52 @@
  * Follows SettingsDrawer pattern (min(560px, 95vw)).
  */
 import type {
-  AgentProfile,
   CreateTriggerRequest,
+  GitHubTriggerEventType,
   TriggerResponse,
+  TriggerSourceType,
   UpdateTriggerRequest,
+  WebhookCredential,
+  WebhookTriggerFilter,
 } from '@simple-agent-manager/shared';
-import {
-  DEFAULT_CRON_TEMPLATE_MAX_LENGTH,
-  DEFAULT_TRIGGER_DESCRIPTION_MAX_LENGTH,
-  DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT,
-  DEFAULT_TRIGGER_NAME_MAX_LENGTH,
-} from '@simple-agent-manager/shared';
-import { Button, Spinner } from '@simple-agent-manager/ui';
-import { ChevronDown, ChevronRight, X } from 'lucide-react';
+import { Button, Spinner, useModalInteraction } from '@simple-agent-manager/ui';
+import { X } from 'lucide-react';
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
+import { useAgentProfiles } from '../../hooks/useAgentProfiles';
+import { useQueryScope } from '../../hooks/useQueryScope';
 import { useToast } from '../../hooks/useToast';
-import { createTrigger, listAgentProfiles, updateTrigger } from '../../lib/api';
+import { createTrigger, updateTrigger } from '../../lib/api';
 import { useProjectContext } from '../../pages/ProjectContext';
+import {
+  deserializeResourceRequirements,
+  EMPTY_RESOURCE_STATE,
+  hasValidationErrors,
+  type ResourceRequirementsFormState,
+  type ResourceValidationErrors,
+  serializeResourceRequirements,
+  validateResourceState,
+} from '../resource-requirements';
+import { GitHubTriggerFields } from './GitHubTriggerFields';
 import { SchedulePicker } from './SchedulePicker';
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-const FOCUS_RING =
-  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
-
-const VM_SIZES = [
-  { value: '', label: 'Project default' },
-  { value: 'small', label: 'Small (2 vCPU, 4 GB)' },
-  { value: 'medium', label: 'Medium (4 vCPU, 8 GB)' },
-  { value: 'large', label: 'Large (8 vCPU, 16 GB)' },
-];
-
-/** Template variables available for prompt interpolation. */
-const TEMPLATE_VARIABLES = [
-  { group: 'schedule', vars: ['schedule.time', 'schedule.date', 'schedule.dayOfWeek', 'schedule.hour', 'schedule.minute', 'schedule.timezone'] },
-  { group: 'trigger', vars: ['trigger.id', 'trigger.name', 'trigger.description', 'trigger.fireCount'] },
-  { group: 'project', vars: ['project.id', 'project.name'] },
-  { group: 'execution', vars: ['execution.id', 'execution.sequenceNumber'] },
-];
+import {
+  buildGitHubFilters,
+  CRON_TEMPLATE_VARIABLES,
+  FOCUS_RING,
+  GITHUB_TEMPLATE_VARIABLES,
+  INCIDENT_TEMPLATE_VARIABLES,
+  joinList,
+  splitList,
+  WEBHOOK_TEMPLATE_VARIABLES,
+} from './trigger-form-support';
+import { TriggerAdvancedOptions } from './TriggerAdvancedOptions';
+import { TriggerCredentialWarning } from './TriggerCredentialWarning';
+import { TriggerIdentityFields } from './TriggerIdentityFields';
+import { TriggerProfileSelect } from './TriggerProfileSelect';
+import { TriggerPromptTemplate } from './TriggerPromptTemplate';
+import { TriggerSourceSelector } from './TriggerSourceSelector';
+import { WebhookTriggerFields } from './WebhookTriggerFields';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -55,46 +60,102 @@ interface TriggerFormProps {
   /** If set, we're editing this trigger. Otherwise, creating new. */
   editTrigger?: TriggerResponse | null;
   /** Called after successful create/update. */
-  onSaved?: () => void;
+  onSaved?: (credential?: WebhookCredential, returnFocusTarget?: HTMLElement | null) => void;
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export const TriggerForm: FC<TriggerFormProps> = ({
-  open,
-  onClose,
-  editTrigger,
-  onSaved,
-}) => {
+export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, onSaved }) => {
   const toast = useToast();
   const { projectId } = useProjectContext();
   const templateRef = useRef<HTMLTextAreaElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const shouldRestoreFocusRef = useRef(true);
   const isEdit = Boolean(editTrigger);
 
   // Form state
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [sourceType, setSourceType] = useState<TriggerSourceType>('cron');
   const [cronExpression, setCronExpression] = useState('0 9 * * *');
   const [cronTimezone, setCronTimezone] = useState('UTC');
+  const [githubEventType, setGitHubEventType] = useState<GitHubTriggerEventType>('issue_comment');
+  const [githubActions, setGitHubActions] = useState('created');
+  const [githubLabels, setGitHubLabels] = useState('');
+  const [githubIgnoreActors, setGitHubIgnoreActors] = useState('dependabot[bot]');
+  const [githubCommandPrefix, setGitHubCommandPrefix] = useState('/sam');
+  const [githubBodyContains, setGitHubBodyContains] = useState('');
+  const [githubBranches, setGitHubBranches] = useState('');
+  const [githubIgnoreDrafts, setGitHubIgnoreDrafts] = useState(true);
+  const [webhookSourceLabel, setWebhookSourceLabel] = useState('');
+  const [webhookIncludedHeaders, setWebhookIncludedHeaders] = useState('');
+  const [webhookFilterMode, setWebhookFilterMode] = useState<'all' | 'any'>('all');
+  const [webhookFilters, setWebhookFilters] = useState<WebhookTriggerFilter[]>([]);
   const [promptTemplate, setPromptTemplate] = useState('');
   const [skipIfRunning, setSkipIfRunning] = useState(true);
   const [maxConcurrent, setMaxConcurrent] = useState(1);
   const [vmSizeOverride, setVmSizeOverride] = useState('');
+  const [resourceReqs, setResourceReqs] = useState<ResourceRequirementsFormState>({
+    ...EMPTY_RESOURCE_STATE,
+  });
   const [taskMode, setTaskMode] = useState<'task' | 'conversation'>('task');
   const [agentProfileId, setAgentProfileId] = useState('');
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [resourceErrors, setResourceErrors] = useState<ResourceValidationErrors>({});
   const [, setCronDescription] = useState('');
 
-  // Agent profiles for the dropdown
-  const [profiles, setProfiles] = useState<AgentProfile[]>([]);
+  // Agent profiles for the dropdown. Shared with the profiles page, both task forms
+  // and project chat, so opening this drawer reuses their cache instead of refetching.
+  // Scope is blanked while closed so the query stays disabled until the drawer opens.
+  const queryScope = useQueryScope();
+  const { profiles } = useAgentProfiles(projectId, open ? queryScope : '');
+
+  /*
+   * Focus restore is split around `useModalInteraction` deliberately, because
+   * effects run (and clean up) in definition order:
+   *
+   *  1. CAPTURE runs first, so it reads the genuinely-previous `activeElement`
+   *     before the focus trap pulls focus into the drawer.
+   *  2. `useModalInteraction` traps focus, isolates the background and locks
+   *     scrolling.
+   *  3. RESTORE's cleanup runs last, so by the time it calls `.focus()` the
+   *     hook has already un-inerted the background — focusing an element still
+   *     inside an `inert` subtree silently does nothing.
+   *
+   * `restoreFocus: false` on the hook because RESTORE below knows the one case
+   * where focus must NOT come back here: when saving returns a webhook
+   * credential, `WebhookCredentialDialog` takes over and must keep focus.
+   */
+  // 1. CAPTURE
   useEffect(() => {
-    if (open && projectId) {
-      void listAgentProfiles(projectId).then(setProfiles).catch(() => setProfiles([]));
-    }
-  }, [open, projectId]);
+    if (!open) return;
+    shouldRestoreFocusRef.current = true;
+    returnFocusRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  }, [open]);
+
+  // 2. TRAP
+  useModalInteraction({
+    enabled: open,
+    modalRef: panelRef,
+    onEscape: onClose,
+    restoreFocus: false,
+    lockScroll: true,
+    isolateBackground: true,
+  });
+
+  // 3. RESTORE
+  useEffect(() => {
+    if (!open) return;
+    return () => {
+      if (shouldRestoreFocusRef.current) returnFocusRef.current?.focus();
+      returnFocusRef.current = null;
+    };
+  }, [open]);
 
   // Reset form when trigger changes or panel opens
   useEffect(() => {
@@ -102,24 +163,54 @@ export const TriggerForm: FC<TriggerFormProps> = ({
       if (editTrigger) {
         setName(editTrigger.name);
         setDescription(editTrigger.description ?? '');
+        setSourceType(editTrigger.sourceType);
         setCronExpression(editTrigger.cronExpression ?? '0 9 * * *');
         setCronTimezone(editTrigger.cronTimezone);
+        setGitHubEventType(editTrigger.githubConfig?.eventType ?? 'issue_comment');
+        setGitHubActions(joinList(editTrigger.githubConfig?.filters.actions) || 'created');
+        setGitHubLabels(joinList(editTrigger.githubConfig?.filters.labels));
+        setGitHubIgnoreActors(
+          joinList(editTrigger.githubConfig?.filters.ignoreActors) || 'dependabot[bot]'
+        );
+        setGitHubCommandPrefix(editTrigger.githubConfig?.filters.commandPrefix ?? '/sam');
+        setGitHubBodyContains(editTrigger.githubConfig?.filters.bodyContains ?? '');
+        setGitHubBranches(joinList(editTrigger.githubConfig?.filters.branches));
+        setGitHubIgnoreDrafts(editTrigger.githubConfig?.filters.ignoreDrafts ?? true);
+        setWebhookSourceLabel(editTrigger.webhookConfig?.sourceLabel ?? '');
+        setWebhookIncludedHeaders(joinList(editTrigger.webhookConfig?.includedHeaders));
+        setWebhookFilterMode(editTrigger.webhookConfig?.filterMode ?? 'all');
+        setWebhookFilters(editTrigger.webhookConfig?.filters ?? []);
         setPromptTemplate(editTrigger.promptTemplate);
         setSkipIfRunning(editTrigger.skipIfRunning);
         setMaxConcurrent(editTrigger.maxConcurrent);
         setVmSizeOverride(editTrigger.vmSizeOverride ?? '');
+        setResourceReqs(deserializeResourceRequirements(editTrigger.resourceRequirementsJson));
         setTaskMode(editTrigger.taskMode);
         setAgentProfileId(editTrigger.agentProfileId ?? '');
         setAdvancedOpen(false);
       } else {
         setName('');
         setDescription('');
+        setSourceType('cron');
         setCronExpression('0 9 * * *');
         setCronTimezone('UTC');
+        setGitHubEventType('issue_comment');
+        setGitHubActions('created');
+        setGitHubLabels('');
+        setGitHubIgnoreActors('dependabot[bot]');
+        setGitHubCommandPrefix('/sam');
+        setGitHubBodyContains('');
+        setGitHubBranches('');
+        setGitHubIgnoreDrafts(true);
+        setWebhookSourceLabel('');
+        setWebhookIncludedHeaders('');
+        setWebhookFilterMode('all');
+        setWebhookFilters([]);
         setPromptTemplate('');
         setSkipIfRunning(true);
         setMaxConcurrent(1);
         setVmSizeOverride('');
+        setResourceReqs({ ...EMPTY_RESOURCE_STATE });
         setTaskMode('task');
         setAgentProfileId('');
         setAdvancedOpen(false);
@@ -127,21 +218,24 @@ export const TriggerForm: FC<TriggerFormProps> = ({
     }
   }, [open, editTrigger]);
 
-  const insertVariable = useCallback((varName: string) => {
-    const textarea = templateRef.current;
-    if (!textarea) return;
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    const text = promptTemplate;
-    const insertion = `{{${varName}}}`;
-    const newText = text.substring(0, start) + insertion + text.substring(end);
-    setPromptTemplate(newText);
-    // Restore cursor position after insertion
-    requestAnimationFrame(() => {
-      textarea.focus();
-      textarea.setSelectionRange(start + insertion.length, start + insertion.length);
-    });
-  }, [promptTemplate]);
+  const insertVariable = useCallback(
+    (varName: string) => {
+      const textarea = templateRef.current;
+      if (!textarea) return;
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const text = promptTemplate;
+      const insertion = `{{${varName}}}`;
+      const newText = text.substring(0, start) + insertion + text.substring(end);
+      setPromptTemplate(newText);
+      // Restore cursor position after insertion
+      requestAnimationFrame(() => {
+        textarea.focus();
+        textarea.setSelectionRange(start + insertion.length, start + insertion.length);
+      });
+    },
+    [promptTemplate]
+  );
 
   const handleSubmit = useCallback(async () => {
     if (!name.trim()) {
@@ -152,25 +246,51 @@ export const TriggerForm: FC<TriggerFormProps> = ({
       toast.error('Prompt template is required');
       return;
     }
-    if (!cronExpression.trim()) {
+    if (sourceType === 'cron' && !cronExpression.trim()) {
       toast.error('Schedule is required');
+      return;
+    }
+    if (sourceType === 'webhook' && !agentProfileId) {
+      toast.error('Webhook triggers require an agent profile');
+      return;
+    }
+    if (sourceType === 'webhook' && webhookFilters.some((filter) => !filter.path.trim())) {
+      toast.error('Every webhook filter needs a path');
+      return;
+    }
+
+    const resErrors = validateResourceState(resourceReqs);
+    setResourceErrors(resErrors);
+    if (hasValidationErrors(resErrors)) {
+      toast.error('Fix resource requirement errors before saving');
       return;
     }
 
     setSaving(true);
     try {
+      let credential: WebhookCredential | undefined;
       if (isEdit && editTrigger) {
         const data: UpdateTriggerRequest = {
           name: name.trim(),
           description: description.trim() || null,
-          cronExpression,
-          cronTimezone,
+          cronExpression: sourceType === 'cron' ? cronExpression : undefined,
+          cronTimezone: sourceType === 'cron' ? cronTimezone : undefined,
           promptTemplate,
           skipIfRunning,
           maxConcurrent,
           vmSizeOverride: vmSizeOverride || null,
+          resourceRequirementsJson: serializeResourceRequirements(resourceReqs),
           taskMode,
           agentProfileId: agentProfileId || null,
+          webhookConfig:
+            sourceType === 'webhook'
+              ? {
+                  sourceLabel: webhookSourceLabel.trim() || undefined,
+                  includedHeaders: splitList(webhookIncludedHeaders),
+                  filterMode: webhookFilterMode,
+                  filters: webhookFilters,
+                }
+              : undefined,
         };
         await updateTrigger(projectId, editTrigger.id, data);
         toast.success('Trigger updated');
@@ -178,20 +298,50 @@ export const TriggerForm: FC<TriggerFormProps> = ({
         const data: CreateTriggerRequest = {
           name: name.trim(),
           description: description.trim() || undefined,
-          sourceType: 'cron',
-          cronExpression,
-          cronTimezone,
+          sourceType,
+          cronExpression: sourceType === 'cron' ? cronExpression : undefined,
+          cronTimezone: sourceType === 'cron' ? cronTimezone : undefined,
           promptTemplate,
           skipIfRunning,
           maxConcurrent,
           vmSizeOverride: vmSizeOverride || undefined,
+          resourceRequirementsJson: serializeResourceRequirements(resourceReqs),
           taskMode,
           agentProfileId: agentProfileId || undefined,
+          githubConfig:
+            sourceType === 'github'
+              ? {
+                  eventType: githubEventType,
+                  filters: buildGitHubFilters({
+                    eventType: githubEventType,
+                    actions: githubActions,
+                    labels: githubLabels,
+                    ignoreActors: githubIgnoreActors,
+                    commandPrefix: githubCommandPrefix,
+                    bodyContains: githubBodyContains,
+                    branches: githubBranches,
+                    ignoreDrafts: githubIgnoreDrafts,
+                  }),
+                }
+              : undefined,
+          webhookConfig:
+            sourceType === 'webhook'
+              ? {
+                  sourceLabel: webhookSourceLabel.trim() || undefined,
+                  includedHeaders: splitList(webhookIncludedHeaders),
+                  filterMode: webhookFilterMode,
+                  filters: webhookFilters,
+                }
+              : undefined,
         };
-        await createTrigger(projectId, data);
+        const created = await createTrigger(projectId, data);
+        credential = created.webhookCredential;
         toast.success('Trigger created');
       }
-      onSaved?.();
+      // The one-time credential dialog becomes the active modal after creation.
+      // Let it claim focus instead of returning focus to the form opener.
+      shouldRestoreFocusRef.current = !credential;
+      onSaved?.(credential, credential ? returnFocusRef.current : undefined);
       onClose();
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to save trigger';
@@ -200,34 +350,84 @@ export const TriggerForm: FC<TriggerFormProps> = ({
       setSaving(false);
     }
   }, [
-    name, description, cronExpression, cronTimezone, promptTemplate,
-    skipIfRunning, maxConcurrent, vmSizeOverride, taskMode, agentProfileId,
-    isEdit, editTrigger, projectId, toast, onSaved, onClose,
+    name,
+    description,
+    sourceType,
+    cronExpression,
+    cronTimezone,
+    githubEventType,
+    githubActions,
+    githubLabels,
+    githubIgnoreActors,
+    githubCommandPrefix,
+    githubBodyContains,
+    githubBranches,
+    githubIgnoreDrafts,
+    webhookSourceLabel,
+    webhookIncludedHeaders,
+    webhookFilterMode,
+    webhookFilters,
+    promptTemplate,
+    skipIfRunning,
+    maxConcurrent,
+    vmSizeOverride,
+    resourceReqs,
+    taskMode,
+    agentProfileId,
+    isEdit,
+    editTrigger,
+    projectId,
+    toast,
+    onSaved,
+    onClose,
   ]);
 
-  return (
-    <>
+  const templateVariables =
+    sourceType === 'github'
+      ? GITHUB_TEMPLATE_VARIABLES
+      : sourceType === 'webhook'
+        ? WEBHOOK_TEMPLATE_VARIABLES
+        : sourceType === 'incident'
+          ? INCIDENT_TEMPLATE_VARIABLES
+          : CRON_TEMPLATE_VARIABLES;
+  const promptPlaceholder =
+    sourceType === 'github'
+      ? 'When {{github.actor}} comments {{github.comment}} on {{github.repository}}#{{github.number}}, decide whether to start the requested SAM task.'
+      : sourceType === 'webhook'
+        ? 'Process this untrusted webhook payload: {{webhook.payload}}'
+        : sourceType === 'incident'
+          ? 'Investigate the private incident backlog: {{incident.backlogSummary}}'
+          : 'Review all open pull requests and summarize their status. Current time: {{schedule.time}}';
+
+  if (!open) return null;
+
+  return createPortal(
+    /* `data-sam-modal-root` keeps the backdrop inside the modal root so
+       `isolateBackground` does not mark it `inert` — an inert backdrop swallows
+       the click that closes the drawer. */
+    <div data-sam-modal-root="">
       {/* Backdrop */}
-      {open && (
-        <div
-          className="fixed inset-0 glass-backdrop-dim z-[var(--sam-z-drawer-backdrop)]"
-          onClick={onClose}
-          aria-hidden="true"
-        />
-      )}
+      <div
+        className="fixed inset-0 glass-backdrop-dim z-[var(--sam-z-drawer-backdrop)]"
+        onClick={onClose}
+        aria-hidden="true"
+      />
 
       {/* Drawer panel */}
       <div
-        className={`fixed top-0 right-0 bottom-0 glass-modal glass-panel-container glass-composited shadow-lg z-[var(--sam-z-drawer)] overflow-y-auto transition-transform duration-300 ease-out motion-reduce:transition-none ${
-          open ? 'translate-x-0' : 'translate-x-full'
-        }`}
+        ref={panelRef}
+        tabIndex={-1}
+        className="fixed top-0 right-0 bottom-0 glass-modal glass-panel-container glass-composited shadow-lg z-[var(--sam-z-drawer)] flex flex-col overflow-hidden transition-transform duration-300 ease-out motion-reduce:transition-none translate-x-0"
         style={{ width: 'min(560px, 95vw)' }}
         role="dialog"
         aria-modal="true"
         aria-label={isEdit ? 'Edit trigger' : 'Create trigger'}
       >
         {/* Header */}
-        <div className="sticky top-0 glass-chrome p-4 flex items-center justify-between z-10">
+        <div
+          className="glass-chrome p-4 flex shrink-0 items-center justify-between z-10"
+          data-testid="trigger-form-header"
+        >
           <h2 className="sam-type-section-heading m-0">
             {isEdit ? 'Edit Trigger' : 'New Trigger'}
           </h2>
@@ -241,194 +441,118 @@ export const TriggerForm: FC<TriggerFormProps> = ({
         </div>
 
         {/* Form content */}
-        <div className="p-4 space-y-6">
-          {/* Name */}
-          <div>
-            <label htmlFor="trigger-name" className="block text-sm font-medium text-fg-primary mb-1">
-              Name
-            </label>
-            <input
-              id="trigger-name"
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Daily code review"
-              className={`w-full px-3 py-2 rounded-md text-fg-primary text-sm ${FOCUS_RING}`}
-              maxLength={DEFAULT_TRIGGER_NAME_MAX_LENGTH}
-            />
-          </div>
+        <div
+          className="min-h-0 flex-1 overflow-y-auto scroll-pb-28 p-4 space-y-6"
+          data-testid="trigger-form-scroll-body"
+        >
+          {editTrigger?.credentialAttribution?.multiplayerActive &&
+            editTrigger.credentialAttribution.hasPersonalWarning && (
+              <TriggerCredentialWarning trigger={editTrigger} />
+            )}
 
-          {/* Description */}
-          <div>
-            <label htmlFor="trigger-description" className="block text-sm font-medium text-fg-primary mb-1">
-              Description <span className="text-fg-muted font-normal">(optional)</span>
-            </label>
-            <input
-              id="trigger-description"
-              type="text"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Runs a daily code review on the main branch"
-              className={`w-full px-3 py-2 rounded-md text-fg-primary text-sm ${FOCUS_RING}`}
-              maxLength={DEFAULT_TRIGGER_DESCRIPTION_MAX_LENGTH}
-            />
-          </div>
+          <TriggerIdentityFields
+            description={description}
+            name={name}
+            onDescriptionChange={setDescription}
+            onNameChange={setName}
+          />
+
+          <TriggerSourceSelector value={sourceType} disabled={isEdit} onChange={setSourceType} />
 
           {/* Schedule */}
-          <div>
-            <h3 className="text-sm font-medium text-fg-primary mb-2">Schedule</h3>
-            <SchedulePicker
-              value={cronExpression}
-              onChange={setCronExpression}
-              onDescriptionChange={setCronDescription}
-              timezone={cronTimezone}
-              onTimezoneChange={setCronTimezone}
-            />
-          </div>
-
-          {/* Prompt Template */}
-          <div>
-            <h3 className="text-sm font-medium text-fg-primary mb-2">Prompt Template</h3>
-            <div className="flex flex-col md:flex-row gap-3">
-              <div className="flex-1 min-w-0">
-                <textarea
-                  ref={templateRef}
-                  value={promptTemplate}
-                  onChange={(e) => setPromptTemplate(e.target.value)}
-                  placeholder="Review all open pull requests and summarize their status. Current time: {{schedule.time}}"
-                  rows={6}
-                  maxLength={DEFAULT_CRON_TEMPLATE_MAX_LENGTH}
-                  className={`w-full px-3 py-2 rounded-md text-fg-primary text-sm font-mono resize-y ${FOCUS_RING}`}
-                  aria-label="Prompt template"
-                />
-                <p className="text-xs text-fg-muted mt-1 m-0">
-                  {promptTemplate.length}/{DEFAULT_CRON_TEMPLATE_MAX_LENGTH} characters
-                </p>
-              </div>
-              {/* Variable sidebar */}
-              <div className="md:w-48 shrink-0">
-                <p className="text-xs font-medium text-fg-muted mb-2 m-0">Available Variables</p>
-                <div className="space-y-2 max-h-48 overflow-y-auto">
-                  {TEMPLATE_VARIABLES.map((group) => (
-                    <div key={group.group}>
-                      <p className="text-xs font-semibold text-fg-muted uppercase tracking-wider mb-1 m-0">
-                        {group.group}
-                      </p>
-                      {group.vars.map((v) => (
-                        <button
-                          key={v}
-                          onClick={() => insertVariable(v)}
-                          className={`block w-full text-left px-2 py-1 text-xs font-mono text-accent hover:bg-surface-hover rounded cursor-pointer bg-transparent border-none ${FOCUS_RING}`}
-                          title={`Insert {{${v}}}`}
-                        >
-                          {`{{${v}}}`}
-                        </button>
-                      ))}
-                    </div>
-                  ))}
-                </div>
-              </div>
+          {sourceType === 'webhook' ? (
+            <div className="space-y-4">
+              <TriggerProfileSelect
+                profiles={profiles}
+                value={agentProfileId}
+                required
+                onChange={setAgentProfileId}
+              />
+              <WebhookTriggerFields
+                sourceLabel={webhookSourceLabel}
+                includedHeaders={webhookIncludedHeaders}
+                filterMode={webhookFilterMode}
+                filters={webhookFilters}
+                onSourceLabelChange={setWebhookSourceLabel}
+                onIncludedHeadersChange={setWebhookIncludedHeaders}
+                onFilterModeChange={setWebhookFilterMode}
+                onFiltersChange={setWebhookFilters}
+              />
             </div>
-          </div>
+          ) : sourceType === 'incident' ? (
+            <div className="rounded-md border border-border-default bg-surface p-3 text-sm text-fg-muted">
+              Private incident triggers are dispatched only by the scheduled incident backlog sweep.
+              Manual preview/run actions are disabled server-side so a trigger cannot bypass grouped
+              incident leases.
+            </div>
+          ) : sourceType === 'cron' ? (
+            <div>
+              <h3 className="text-sm font-medium text-fg-primary mb-2">Schedule</h3>
+              <SchedulePicker
+                value={cronExpression}
+                onChange={setCronExpression}
+                onDescriptionChange={setCronDescription}
+                timezone={cronTimezone}
+                onTimezoneChange={setCronTimezone}
+              />
+            </div>
+          ) : (
+            <GitHubTriggerFields
+              actions={githubActions}
+              bodyContains={githubBodyContains}
+              branches={githubBranches}
+              commandPrefix={githubCommandPrefix}
+              disabled={isEdit}
+              eventType={githubEventType}
+              ignoreActors={githubIgnoreActors}
+              ignoreDrafts={githubIgnoreDrafts}
+              labels={githubLabels}
+              onActionsChange={setGitHubActions}
+              onBodyContainsChange={setGitHubBodyContains}
+              onBranchesChange={setGitHubBranches}
+              onCommandPrefixChange={setGitHubCommandPrefix}
+              onEventTypeChange={setGitHubEventType}
+              onIgnoreActorsChange={setGitHubIgnoreActors}
+              onIgnoreDraftsChange={setGitHubIgnoreDrafts}
+              onLabelsChange={setGitHubLabels}
+            />
+          )}
 
-          {/* Advanced Options */}
-          <div>
-            <button
-              onClick={() => setAdvancedOpen(!advancedOpen)}
-              className={`flex items-center gap-2 text-sm font-medium text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer p-0 ${FOCUS_RING}`}
-              aria-expanded={advancedOpen}
-            >
-              {advancedOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-              Advanced Options
-            </button>
-            {advancedOpen && (
-              <div className="mt-3 space-y-4 pl-6">
-                {/* Skip if running */}
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={skipIfRunning}
-                    onChange={(e) => setSkipIfRunning(e.target.checked)}
-                    className="rounded border-border-default"
-                  />
-                  <span className="text-sm text-fg-primary">Skip if previous execution still running</span>
-                </label>
+          <TriggerPromptTemplate
+            onChange={setPromptTemplate}
+            onInsertVariable={insertVariable}
+            placeholder={promptPlaceholder}
+            textareaRef={templateRef}
+            value={promptTemplate}
+            variables={templateVariables}
+          />
 
-                {/* Max concurrent */}
-                <div>
-                  <label htmlFor="max-concurrent" className="block text-sm text-fg-primary mb-1">
-                    Max concurrent runs
-                  </label>
-                  <input
-                    id="max-concurrent"
-                    type="number"
-                    min={1}
-                    max={DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT}
-                    value={maxConcurrent}
-                    onChange={(e) => setMaxConcurrent(Math.min(DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT, Math.max(1, parseInt(e.target.value, 10) || 1)))}
-                    className={`w-20 px-2 py-1.5 rounded-md text-fg-primary text-sm ${FOCUS_RING}`}
-                  />
-                </div>
-
-                {/* Agent Profile */}
-                <div>
-                  <label htmlFor="agent-profile" className="block text-sm text-fg-primary mb-1">
-                    Agent Profile
-                  </label>
-                  <select
-                    id="agent-profile"
-                    value={agentProfileId}
-                    onChange={(e) => setAgentProfileId(e.target.value)}
-                    className={`w-full px-2 py-1.5 rounded-md text-fg-primary text-sm ${FOCUS_RING}`}
-                  >
-                    <option value="">Project default</option>
-                    {profiles.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}{p.model ? ` (${p.model})` : ''}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* VM size */}
-                <div>
-                  <label htmlFor="vm-size" className="block text-sm text-fg-primary mb-1">
-                    VM size
-                  </label>
-                  <select
-                    id="vm-size"
-                    value={vmSizeOverride}
-                    onChange={(e) => setVmSizeOverride(e.target.value)}
-                    className={`px-2 py-1.5 rounded-md text-fg-primary text-sm ${FOCUS_RING}`}
-                  >
-                    {VM_SIZES.map((s) => (
-                      <option key={s.value} value={s.value}>{s.label}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Task mode */}
-                <div>
-                  <label htmlFor="task-mode" className="block text-sm text-fg-primary mb-1">
-                    Task mode
-                  </label>
-                  <select
-                    id="task-mode"
-                    value={taskMode}
-                    onChange={(e) => setTaskMode(e.target.value as 'task' | 'conversation')}
-                    className={`px-2 py-1.5 rounded-md text-fg-primary text-sm ${FOCUS_RING}`}
-                  >
-                    <option value="task">Task (run once, complete)</option>
-                    <option value="conversation">Conversation (interactive)</option>
-                  </select>
-                </div>
-              </div>
-            )}
-          </div>
+          <TriggerAdvancedOptions
+            agentProfileId={agentProfileId}
+            maxConcurrent={maxConcurrent}
+            onAgentProfileChange={setAgentProfileId}
+            onMaxConcurrentChange={setMaxConcurrent}
+            onOpenChange={setAdvancedOpen}
+            onSkipIfRunningChange={setSkipIfRunning}
+            onTaskModeChange={setTaskMode}
+            onResourceReqsChange={(next) => { setResourceReqs(next); setResourceErrors({}); }}
+            onClearLegacy={() => setVmSizeOverride('')}
+            open={advancedOpen}
+            profiles={profiles}
+            resourceReqs={resourceReqs}
+            resourceErrors={resourceErrors}
+            skipIfRunning={skipIfRunning}
+            sourceType={sourceType}
+            taskMode={taskMode}
+            legacyVmSize={vmSizeOverride}
+          />
         </div>
 
         {/* Footer actions */}
-        <div className="sticky bottom-0 bg-surface border-t border-border-default p-4 flex items-center justify-end gap-3">
+        <div
+          className="bg-surface border-t border-border-default p-4 flex shrink-0 items-center justify-end gap-3"
+          data-testid="trigger-form-footer"
+        >
           <button
             onClick={onClose}
             className={`px-4 py-2 text-sm font-medium text-fg-muted hover:text-fg-primary bg-transparent border border-border-default rounded-md cursor-pointer ${FOCUS_RING}`}
@@ -443,12 +567,15 @@ export const TriggerForm: FC<TriggerFormProps> = ({
               <span className="flex items-center gap-2">
                 <Spinner size="sm" /> Saving...
               </span>
+            ) : isEdit ? (
+              'Save Changes'
             ) : (
-              isEdit ? 'Save Changes' : 'Create Trigger'
+              'Create Trigger'
             )}
           </Button>
         </div>
       </div>
-    </>
+    </div>,
+    document.body
   );
 };

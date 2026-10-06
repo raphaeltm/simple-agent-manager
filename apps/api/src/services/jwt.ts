@@ -1,7 +1,20 @@
-import { DEFAULT_GCP_IDENTITY_TOKEN_EXPIRY_SECONDS } from '@simple-agent-manager/shared';
-import { decodeJwt, exportJWK, importPKCS8, importSPKI,jwtVerify, SignJWT } from 'jose';
+import {
+  DEFAULT_GCP_IDENTITY_TOKEN_EXPIRY_SECONDS,
+  DEFAULT_TERMINAL_TOKEN_EXPIRY_MS,
+} from '@simple-agent-manager/shared';
+import {
+  decodeJwt,
+  exportJWK,
+  importPKCS8,
+  importSPKI,
+  type JWTPayload,
+  jwtVerify,
+  SignJWT,
+} from 'jose';
 
 import type { Env } from '../env';
+import { AppError } from '../middleware/error';
+import { CALLBACK_TOKEN_GENERATION_ISSUED_AT_CLAIM } from './callback-token-claims';
 
 // Key ID format: key-YYYY-MM (rotates monthly)
 const KEY_ID = `key-${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
@@ -11,7 +24,25 @@ const TERMINAL_AUDIENCE = 'workspace-terminal';
 const CALLBACK_AUDIENCE = 'workspace-callback';
 const NODE_MANAGEMENT_AUDIENCE = 'node-management';
 const PORT_ACCESS_AUDIENCE = 'port-access';
+const LOCAL_FORWARD_AUDIENCE = 'local-forward';
 const IDENTITY_TOKEN_TYPE = 'identity';
+
+function callbackTokenUnauthorized(message = 'Invalid or expired callback token'): AppError {
+  return new AppError(401, 'UNAUTHORIZED', message);
+}
+
+function callbackTokenForbidden(message: string): AppError {
+  return new AppError(403, 'FORBIDDEN', message);
+}
+
+function isJoseVerificationFailure(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const code = (error as { code?: unknown }).code;
+  return (
+    typeof code === 'string' &&
+    (code.startsWith('ERR_JWT_') || code.startsWith('ERR_JWS_') || code.startsWith('ERR_JOSE_'))
+  );
+}
 
 /**
  * Get the JWT issuer URL from environment.
@@ -23,11 +54,11 @@ function getIssuer(env: Env): string {
 
 /**
  * Get terminal token expiry in milliseconds.
- * Default: 1 hour (3600000ms)
+ * Default: 1 hour.
  */
 function getTerminalTokenExpiry(env: Env): number {
   const envValue = env.TERMINAL_TOKEN_EXPIRY_MS;
-  return envValue ? parseInt(envValue, 10) : 60 * 60 * 1000;
+  return envValue ? parseInt(envValue, 10) : DEFAULT_TERMINAL_TOKEN_EXPIRY_MS;
 }
 
 /**
@@ -46,7 +77,8 @@ function getCallbackTokenExpiry(env: Env): number {
 export async function signTerminalToken(
   userId: string,
   workspaceId: string,
-  env: Env
+  env: Env,
+  options: { sessionToken?: string | null } = {}
 ): Promise<{ token: string; expiresAt: string }> {
   const privateKey = await importPKCS8(env.JWT_PRIVATE_KEY, 'RS256');
   const expiry = getTerminalTokenExpiry(env);
@@ -55,6 +87,7 @@ export async function signTerminalToken(
 
   const token = await new SignJWT({
     workspace: workspaceId,
+    ...(options.sessionToken ? { sessionToken: options.sessionToken } : {}),
   })
     .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
     .setIssuer(issuer)
@@ -70,6 +103,11 @@ export async function signTerminalToken(
   };
 }
 
+export interface SignCallbackTokenOptions {
+  /** Generation issue time (seconds) to preserve when renewing an existing token. */
+  generationIssuedAtSeconds?: number;
+}
+
 /**
  * Sign a workspace-scoped callback token for VM-to-API authentication.
  * Used by VM agent to call back to control plane for workspace-specific operations
@@ -80,17 +118,22 @@ export async function signTerminalToken(
  */
 export async function signCallbackToken(
   workspaceId: string,
-  env: Env
+  env: Env,
+  options: SignCallbackTokenOptions = {}
 ): Promise<string> {
   const privateKey = await importPKCS8(env.JWT_PRIVATE_KEY, 'RS256');
   const expiry = getCallbackTokenExpiry(env);
   const expiresAt = new Date(Date.now() + expiry);
   const issuer = getIssuer(env);
+  const generationIssuedAt = options.generationIssuedAtSeconds;
 
   const token = await new SignJWT({
     workspace: workspaceId,
     type: 'callback',
     scope: 'workspace',
+    ...(generationIssuedAt !== undefined
+      ? { [CALLBACK_TOKEN_GENERATION_ISSUED_AT_CLAIM]: generationIssuedAt }
+      : {}),
   })
     .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
     .setIssuer(issuer)
@@ -111,10 +154,7 @@ export async function signCallbackToken(
  * Node-scoped tokens CANNOT be used for workspace-scoped endpoints (agent-key,
  * runtime-assets, etc.) to prevent cross-workspace secret access on multi-tenant nodes.
  */
-export async function signNodeCallbackToken(
-  nodeId: string,
-  env: Env
-): Promise<string> {
+export async function signNodeCallbackToken(nodeId: string, env: Env): Promise<string> {
   const privateKey = await importPKCS8(env.JWT_PRIVATE_KEY, 'RS256');
   const expiry = getCallbackTokenExpiry(env);
   const expiresAt = new Date(Date.now() + expiry);
@@ -185,11 +225,22 @@ export interface CallbackTokenPayload {
 export interface TerminalTokenPayload {
   workspace: string;
   subject: string;
+  sessionToken?: string;
 }
 
 export interface PortAccessTokenPayload {
   workspace: string;
   port: number;
+  subject: string;
+}
+
+export interface LocalForwardTokenPayload {
+  userId: string;
+  workspaceId: string;
+  nodeId: string;
+  remotePort: number;
+  mode: 'http';
+  localAuthority: string;
   subject: string;
 }
 
@@ -207,30 +258,40 @@ export async function verifyCallbackToken(
   const publicKey = await importSPKI(env.JWT_PUBLIC_KEY, 'RS256');
   const issuer = getIssuer(env);
 
-  const { payload } = await jwtVerify(token, publicKey, {
-    issuer,
-    audience: CALLBACK_AUDIENCE,
-  });
+  let payload: JWTPayload;
+  try {
+    ({ payload } = await jwtVerify(token, publicKey, {
+      issuer,
+      audience: CALLBACK_AUDIENCE,
+    }));
+  } catch (error) {
+    if (isJoseVerificationFailure(error)) {
+      throw callbackTokenUnauthorized();
+    }
+    throw error;
+  }
 
   // Validate required claims
   if (payload.type !== 'callback') {
-    throw new Error('Invalid token type');
+    throw callbackTokenUnauthorized('Invalid token type');
   }
 
   if (typeof payload.workspace !== 'string') {
-    throw new Error('Missing workspace claim');
+    throw callbackTokenUnauthorized('Missing workspace claim');
   }
 
   // Extract and validate optional scope claim (legacy tokens won't have it)
   const rawScope = payload.scope;
   if (rawScope !== undefined && rawScope !== 'node' && rawScope !== 'workspace') {
-    throw new Error('Invalid token scope claim');
+    throw callbackTokenUnauthorized('Invalid token scope claim');
   }
   const scope = rawScope as CallbackTokenScope | undefined;
 
   // Enforce expected scope when specified (unified scope check — F-010)
   if (options?.expectedScope && scope !== options.expectedScope) {
-    throw new Error(`Token scope '${scope ?? 'none'}' does not match expected '${options.expectedScope}'`);
+    throw callbackTokenForbidden(
+      `Token scope '${scope ?? 'none'}' does not match expected '${options.expectedScope}'`
+    );
   }
 
   return {
@@ -250,10 +311,7 @@ export async function verifyCallbackToken(
  * request to the VM agent so token-only project chat connections do not depend
  * on cross-subdomain app cookies.
  */
-export async function verifyTerminalToken(
-  token: string,
-  env: Env
-): Promise<TerminalTokenPayload> {
+export async function verifyTerminalToken(token: string, env: Env): Promise<TerminalTokenPayload> {
   const publicKey = await importSPKI(env.JWT_PUBLIC_KEY, 'RS256');
   const issuer = getIssuer(env);
 
@@ -272,6 +330,10 @@ export async function verifyTerminalToken(
   return {
     workspace: payload.workspace,
     subject: payload.sub,
+    sessionToken:
+      typeof payload.sessionToken === 'string' && payload.sessionToken.length > 0
+        ? payload.sessionToken
+        : undefined,
   };
 }
 
@@ -282,6 +344,11 @@ export async function verifyTerminalToken(
 function getPortAccessTokenExpiry(env: Env): number {
   const envValue = env.PORT_ACCESS_TOKEN_EXPIRY_MS;
   return envValue ? parseInt(envValue, 10) : 15 * 60 * 1000;
+}
+
+function getLocalForwardTokenExpiry(env: Env): number {
+  const envValue = env.LOCAL_FORWARD_TOKEN_EXPIRY_MS;
+  return envValue ? Number.parseInt(envValue, 10) : 5 * 60 * 1000;
 }
 
 /**
@@ -346,6 +413,90 @@ export async function verifyPortAccessToken(
   return {
     workspace: payload.workspace,
     port: payload.port,
+    subject: payload.sub,
+  };
+}
+
+export async function signLocalForwardToken(
+  claims: Omit<LocalForwardTokenPayload, 'subject'>,
+  env: Env
+): Promise<{ token: string; expiresAt: string }> {
+  const privateKey = await importPKCS8(env.JWT_PRIVATE_KEY, 'RS256');
+  const expiry = getLocalForwardTokenExpiry(env);
+  const expiresAt = new Date(Date.now() + expiry);
+  const issuer = getIssuer(env);
+
+  const token = await new SignJWT({
+    type: 'local-forward',
+    userId: claims.userId,
+    workspace: claims.workspaceId,
+    node: claims.nodeId,
+    remotePort: claims.remotePort,
+    mode: claims.mode,
+    localAuthority: claims.localAuthority,
+  })
+    .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
+    .setIssuer(issuer)
+    .setSubject(claims.userId)
+    .setAudience(LOCAL_FORWARD_AUDIENCE)
+    .setExpirationTime(expiresAt)
+    .setIssuedAt()
+    .sign(privateKey);
+
+  return {
+    token,
+    expiresAt: expiresAt.toISOString(),
+  };
+}
+
+export async function verifyLocalForwardToken(
+  token: string,
+  env: Env
+): Promise<LocalForwardTokenPayload> {
+  const publicKey = await importSPKI(env.JWT_PUBLIC_KEY, 'RS256');
+  const issuer = getIssuer(env);
+
+  const { payload } = await jwtVerify(token, publicKey, {
+    issuer,
+    audience: LOCAL_FORWARD_AUDIENCE,
+  });
+
+  if (payload.type !== 'local-forward') {
+    throw new Error('Invalid token type');
+  }
+  if (typeof payload.sub !== 'string' || payload.sub.length === 0) {
+    throw new Error('Missing subject claim');
+  }
+  if (typeof payload.userId !== 'string' || payload.userId !== payload.sub) {
+    throw new Error('Invalid user claim');
+  }
+  if (typeof payload.workspace !== 'string') {
+    throw new TypeError('Missing workspace claim');
+  }
+  if (typeof payload.node !== 'string') {
+    throw new TypeError('Missing node claim');
+  }
+  if (
+    typeof payload.remotePort !== 'number' ||
+    payload.remotePort < 1 ||
+    payload.remotePort > 65535
+  ) {
+    throw new Error('Invalid remote port claim');
+  }
+  if (payload.mode !== 'http') {
+    throw new Error('Invalid local forward mode');
+  }
+  if (typeof payload.localAuthority !== 'string' || payload.localAuthority.length === 0) {
+    throw new Error('Missing local authority claim');
+  }
+
+  return {
+    userId: payload.userId,
+    workspaceId: payload.workspace,
+    nodeId: payload.node,
+    remotePort: payload.remotePort,
+    mode: payload.mode,
+    localAuthority: payload.localAuthority,
     subject: payload.sub,
   };
 }
@@ -433,7 +584,7 @@ export interface IdentityTokenClaims {
 export async function signIdentityToken(
   claims: IdentityTokenClaims,
   env: Env,
-  expirySecondsOverride?: number,
+  expirySecondsOverride?: number
 ): Promise<string> {
   const privateKey = await importPKCS8(env.JWT_PRIVATE_KEY, 'RS256');
   const expirySeconds = expirySecondsOverride ?? getIdentityTokenExpiry(env);
@@ -470,8 +621,14 @@ export function getOidcDiscovery(env: Env) {
     subject_types_supported: ['public'],
     id_token_signing_alg_values_supported: ['RS256'],
     claims_supported: [
-      'iss', 'sub', 'aud', 'exp', 'iat',
-      'workspace_id', 'project_id', 'user_id',
+      'iss',
+      'sub',
+      'aud',
+      'exp',
+      'iat',
+      'workspace_id',
+      'project_id',
+      'user_id',
       'node_id',
     ],
   };

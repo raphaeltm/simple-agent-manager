@@ -1,0 +1,854 @@
+/**
+ * Behavioral tests for useSessionLifecycle loading semantics:
+ * - Initial load requests only the newest page (CHAT_SESSION_MESSAGE_LIMIT), never
+ *   the CHAT_SESSION_MESSAGE_MAX ceiling; older history pages in on demand.
+ * - The fallback poll requests the same small newest window.
+ * - loadUntil() pages backward until a jump target is loaded, and short-circuits
+ *   when the target is already loaded or there is no more history.
+ */
+import {
+  DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
+  DEFAULT_CHAT_SESSION_MESSAGE_MAX,
+} from '@simple-agent-manager/shared';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { act, renderHook, waitFor } from '@testing-library/react';
+import type { ReactNode } from 'react';
+import { createElement } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const mocks = vi.hoisted(() => ({
+  getChatSession: vi.fn(),
+  getWorkspace: vi.fn(),
+  getNode: vi.fn(),
+  getTerminalToken: vi.fn(),
+  getTranscribeApiUrl: vi.fn(() => 'https://api.test/api/transcribe'),
+  resetIdleTimer: vi.fn(),
+  sendFollowUpPrompt: vi.fn(),
+  cancelAgentPrompt: vi.fn(),
+  uploadSessionFiles: vi.fn(),
+  startVerifyDecayTimer: vi.fn(),
+  stopVerifyDecayTimer: vi.fn(),
+  connectionState: 'connected' as 'connected' | 'disconnected',
+  wsOptions: [] as Array<{
+    enabled: boolean;
+    onMessage?: (msg: Msg) => void;
+    onAgentActivity?: (activity: 'prompting' | 'idle', promptStartedAt?: number | null) => void;
+    onCatchUp?: (messages: Msg[], session: unknown, state?: unknown) => void;
+  }>,
+}));
+
+vi.mock('../../../src/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api')>()),
+  getChatSession: mocks.getChatSession,
+  getWorkspace: mocks.getWorkspace,
+  getNode: mocks.getNode,
+  getTerminalToken: mocks.getTerminalToken,
+  getTranscribeApiUrl: mocks.getTranscribeApiUrl,
+  resetIdleTimer: mocks.resetIdleTimer,
+  sendFollowUpPrompt: mocks.sendFollowUpPrompt,
+  cancelAgentPrompt: mocks.cancelAgentPrompt,
+  uploadSessionFiles: mocks.uploadSessionFiles,
+}));
+
+vi.mock('../../../src/hooks/useChatWebSocket', () => ({
+  useChatWebSocket: (options: { enabled: boolean; onMessage?: (msg: Msg) => void }) => {
+    // Capture the options so tests can assert on `enabled`. The socket gate is
+    // production behavior worth pinning: it decides whether wake-progress
+    // broadcasts can reach the client at all.
+    mocks.wsOptions.push(options);
+    return {
+      connectionState: mocks.connectionState,
+      wsRef: { current: null },
+      retry: vi.fn(),
+    };
+  },
+}));
+vi.mock('../../../src/components/AuthProvider', () => ({
+  useAuth: () => ({ user: { id: 'user-1' } }),
+}));
+vi.mock('../../../src/hooks/useQueryScope', () => ({
+  useQueryScope: () => 'user-1',
+}));
+vi.mock('../../../src/hooks/useTokenRefresh', () => ({
+  useTokenRefresh: () => ({ token: null }),
+}));
+vi.mock('../../../src/hooks/useWorkspacePorts', () => ({
+  useWorkspacePorts: () => ({ ports: [] }),
+}));
+vi.mock('../../../src/components/project-message-view/useActivityVerifyTimer', () => ({
+  useActivityVerifyTimer: () => ({
+    startVerifyDecayTimer: mocks.startVerifyDecayTimer,
+    stopVerifyDecayTimer: mocks.stopVerifyDecayTimer,
+  }),
+}));
+vi.mock('../../../src/components/project-message-view/useConnectionRecovery', () => ({
+  useConnectionRecovery: () => ({
+    isResuming: false,
+    resumeError: null,
+    showConnectionBanner: false,
+    idleCountdownMs: null,
+    clearResumeError: vi.fn(),
+    reportDeliveryError: vi.fn(),
+    resumeAndSend: vi.fn(),
+  }),
+}));
+vi.mock('../../../src/components/project-message-view/types', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/components/project-message-view/types')>()),
+  CHAT_FALLBACK_POLL_MS: 1,
+}));
+
+import { useSessionLifecycle } from '../../../src/components/project-message-view/useSessionLifecycle';
+import { chatQueryKeys } from '../../../src/lib/query-options';
+import { CHAT_TRANSCRIPT_CACHE_MAX_SESSIONS } from '../../../src/lib/query-persist-config';
+
+type Msg = {
+  id: string;
+  sessionId: string;
+  role: string;
+  content: string;
+  toolMetadata: null;
+  createdAt: number;
+  sequence?: number;
+};
+
+/** A server-persisted row; the server always assigns a sequence. */
+function msg(id: string, createdAt: number): Msg {
+  return {
+    id,
+    sessionId: 'sess-1',
+    role: 'user',
+    content: `m-${id}`,
+    toolMetadata: null,
+    createdAt,
+    sequence: createdAt,
+  };
+}
+
+/** A row the client appended before the server echoed it: no sequence, client-clock time. */
+function optimisticMsg(id: string, createdAt: number): Msg {
+  return { ...msg(id, createdAt), sequence: undefined };
+}
+
+function sessionResponse(status: string) {
+  return {
+    id: 'sess-1',
+    workspaceId: null,
+    topic: 'T',
+    status,
+    messageCount: 1,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+}
+
+function detail(
+  messages: Msg[],
+  hasMore: boolean,
+  status = 'stopped',
+  currentPlan: Array<{ content: string; status: string }> | null = null,
+  planUpdatedAt: number | null = null
+) {
+  return {
+    session: sessionResponse(status),
+    messages,
+    hasMore,
+    state: {
+      activity: 'idle',
+      activityAt: Date.now(),
+      statusError: null,
+      currentPlan,
+      planUpdatedAt,
+      promptStartedAt: null,
+      agentType: null,
+      lastStopReason: null,
+    },
+  };
+}
+
+function detailWithWorkspace() {
+  const response = detail([msg('a', 1000)], false, 'active');
+  return {
+    ...response,
+    session: {
+      ...response.session,
+      workspaceId: 'ws-1',
+    },
+  };
+}
+
+function deferred<T>() {
+  let resolve: (value: T) => void = () => {};
+  let reject: (reason?: unknown) => void = () => {};
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+function workspaceResponse(nodeId: string | null = 'node-1') {
+  return {
+    id: 'ws-1',
+    nodeId,
+    status: 'running',
+  };
+}
+
+describe('useSessionLifecycle loading semantics', () => {
+  let queryClient: QueryClient;
+  function wrapper({ children }: { children: ReactNode }) {
+    return createElement(QueryClientProvider, { client: queryClient }, children);
+  }
+
+  beforeEach(() => {
+    vi.useRealTimers();
+    vi.clearAllMocks();
+    mocks.connectionState = 'connected';
+    mocks.wsOptions.length = 0;
+    queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  });
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
+  it('opens the socket while a sleeping session is waking', async () => {
+    // Discriminating. A waking session is `sleeping` server-side for the WHOLE
+    // wake — wakeSession() only flips it to `active` at the very end. Gating the
+    // socket on `active` alone means the client holds no connection during
+    // exactly the window the wake-progress broadcasts are sent, so every phase
+    // delta is dropped and the push half of the feature is inert.
+    const waking = detail([msg('a', 1000)], false, 'sleeping');
+    waking.state = { ...waking.state, recoveryStatus: 'waking', wakePhase: 'node_provisioning' };
+    mocks.getChatSession.mockResolvedValue(waking);
+
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+
+    await waitFor(() => expect(result.current.isWaking).toBe(true));
+    await waitFor(() => expect(mocks.wsOptions.at(-1)?.enabled).toBe(true));
+    expect(result.current.wakePhase).toBe('node_provisioning');
+  });
+
+  it('does NOT open the socket for an ordinary sleeping session', async () => {
+    // Control for the case above: without this, "enabled: true" could simply mean
+    // the gate was removed, which would connect a socket for every sleeping
+    // session the user browses past.
+    mocks.getChatSession.mockResolvedValue(detail([msg('a', 1000)], false, 'sleeping'));
+
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+
+    await waitFor(() => expect(result.current.session?.status).toBe('sleeping'));
+    expect(result.current.isWaking).toBe(false);
+    expect(mocks.wsOptions.every((o) => o.enabled === false)).toBe(true);
+  });
+
+  it('requests only the newest page on initial load, never the ceiling', async () => {
+    mocks.getChatSession.mockResolvedValue(detail([msg('a', 1000)], true));
+
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+
+    await waitFor(() => expect(result.current.messages.map((m) => m.id)).toEqual(['a']));
+    expect(mocks.getChatSession).toHaveBeenCalledTimes(1);
+    expect(mocks.getChatSession).toHaveBeenCalledWith('proj-1', 'sess-1', {
+      signal: expect.any(AbortSignal),
+      limit: DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
+    });
+    expect(DEFAULT_CHAT_SESSION_MESSAGE_LIMIT).toBeLessThan(DEFAULT_CHAT_SESSION_MESSAGE_MAX);
+    // Older history is still there to page in.
+    expect(result.current.hasMore).toBe(true);
+  });
+
+  it('delta-fetches after the newest cached message and merges cached plus new rows', async () => {
+    const queryKey = chatQueryKeys.sessionMessages('user-1', 'proj-1', 'sess-1');
+    queryClient.setQueryData(queryKey, detail([msg('cached', 1000)], false));
+    mocks.getChatSession.mockResolvedValue(detail([msg('new', 2000)], false));
+
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+
+    await waitFor(() =>
+      expect(result.current.messages.map((m) => m.id)).toEqual(['cached', 'new'])
+    );
+    expect(mocks.getChatSession).toHaveBeenCalledWith('proj-1', 'sess-1', {
+      signal: expect.any(AbortSignal),
+      after: '[1000,1000,"cached"]',
+    });
+  });
+
+  it('refreshes a fresh cached transcript on mount within query staleTime', async () => {
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 15_000 } },
+    });
+    const queryKey = chatQueryKeys.sessionMessages('user-1', 'proj-1', 'sess-1');
+    queryClient.setQueryData(queryKey, detail([msg('cached', 1000)], false));
+    mocks.getChatSession.mockResolvedValue(detail([msg('persisted-while-closed', 2000)], false));
+
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+
+    expect(result.current.messages.map((m) => m.id)).toEqual(['cached']);
+    await waitFor(() =>
+      expect(result.current.messages.map((m) => m.id)).toEqual(['cached', 'persisted-while-closed'])
+    );
+    expect(mocks.getChatSession).toHaveBeenCalledWith('proj-1', 'sess-1', {
+      signal: expect.any(AbortSignal),
+      after: '[1000,1000,"cached"]',
+    });
+  });
+
+  it('keeps a WebSocket message that arrives while the mount refresh is in flight', async () => {
+    const queryKey = chatQueryKeys.sessionMessages('user-1', 'proj-1', 'sess-1');
+    queryClient.setQueryData(queryKey, detail([msg('cached', 1000)], false));
+    const refresh = deferred<ReturnType<typeof detail>>();
+    mocks.getChatSession.mockReturnValueOnce(refresh.promise);
+
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+
+    await waitFor(() => expect(mocks.getChatSession).toHaveBeenCalled());
+    act(() => {
+      mocks.wsOptions.at(-1)?.onMessage?.(msg('ws-during-refresh', 2500));
+    });
+    await waitFor(() =>
+      expect(result.current.messages.map((m) => m.id)).toEqual(['cached', 'ws-during-refresh'])
+    );
+
+    await act(async () => {
+      refresh.resolve(detail([msg('server-refresh', 2000)], false));
+      await refresh.promise;
+    });
+
+    await waitFor(() =>
+      expect(result.current.messages.map((m) => m.id)).toEqual([
+        'cached',
+        'server-refresh',
+        'ws-during-refresh',
+      ])
+    );
+  });
+
+  it('anchors the refresh on the newest persisted row, never on a trailing optimistic one', async () => {
+    const queryKey = chatQueryKeys.sessionMessages('user-1', 'proj-1', 'sess-1');
+    // The optimistic row carries the client's clock, which runs ahead of the server's.
+    queryClient.setQueryData(
+      queryKey,
+      detail([msg('cached', 1000), optimisticMsg('optimistic-sent', 9000)], false)
+    );
+    mocks.getChatSession.mockResolvedValue(detail([msg('persisted-before-clock', 2000)], false));
+
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+
+    await waitFor(() =>
+      expect(result.current.messages.map((m) => m.id)).toContain('persisted-before-clock')
+    );
+    expect(mocks.getChatSession).toHaveBeenCalledWith('proj-1', 'sess-1', {
+      signal: expect.any(AbortSignal),
+      after: '[1000,1000,"cached"]',
+    });
+  });
+
+  it('keeps a working agent working when a streamed row lands after the load-time snapshot', async () => {
+    // The chat loaded while the agent was idle. Every streamed row rewrites the
+    // transcript's cache entry; re-applying that load-time `idle` snapshot on each
+    // one knocked a working agent back to idle mid-turn.
+    const idleAtLoad = detail([msg('a', 1000)], false, 'active');
+    mocks.getChatSession.mockResolvedValue(idleAtLoad);
+    const queryKey = chatQueryKeys.sessionMessages('user-1', 'proj-1', 'sess-1');
+
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+    await waitFor(() => expect(result.current.session?.status).toBe('active'));
+    expect(result.current.agentActivity).toBe('idle');
+
+    const socket = mocks.wsOptions.at(-1)!;
+    act(() => socket.onAgentActivity?.('prompting', Date.now()));
+    act(() => socket.onMessage?.({ ...msg('streamed', 2000), role: 'assistant' }));
+    await waitFor(() =>
+      expect(queryClient.getQueryData<{ messages: Msg[] }>(queryKey)?.messages).toHaveLength(2)
+    );
+    await waitFor(() => expect(result.current.messages.map((m) => m.id)).toContain('streamed'));
+    expect(result.current.agentActivity).toBe('responding');
+
+    // Control: a snapshot the SERVER reports is still applied.
+    mocks.getChatSession.mockResolvedValue({
+      ...detail([], false, 'active'),
+      state: { ...idleAtLoad.state, activityAt: idleAtLoad.state.activityAt + 1 },
+    });
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey });
+    });
+    await waitFor(() => expect(result.current.agentActivity).toBe('idle'));
+  });
+
+  it('drains every newer page before merging, keeping hasMore for older history', async () => {
+    const queryKey = chatQueryKeys.sessionMessages('user-1', 'proj-1', 'sess-1');
+    queryClient.setQueryData(queryKey, detail([msg('cached', 1000)], true));
+    mocks.getChatSession
+      .mockResolvedValueOnce(detail([msg('first', 2000)], true))
+      .mockResolvedValueOnce(detail([msg('second', 3000)], false));
+
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+
+    await waitFor(() =>
+      expect(result.current.messages.map((m) => m.id)).toEqual(['cached', 'first', 'second'])
+    );
+    expect(mocks.getChatSession).toHaveBeenNthCalledWith(2, 'proj-1', 'sess-1', {
+      signal: expect.any(AbortSignal),
+      after: '[2000,2000,"first"]',
+    });
+    expect(result.current.hasMore).toBe(true);
+  });
+
+  describe('fallback poll visibility gating', () => {
+    const setVisibility = (state: DocumentVisibilityState) => {
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => state,
+      });
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+    };
+
+    afterEach(() => setVisibility('visible'));
+
+    it('stops the degraded fallback poll while the tab is hidden', async () => {
+      // This poll fetches the FULL session detail every CHAT_FALLBACK_POLL_MS
+      // while the WebSocket is down. Nobody is reading it in a hidden tab.
+      mocks.connectionState = 'disconnected';
+      mocks.getChatSession.mockResolvedValue(detail([msg('a', 1000)], false, 'active'));
+
+      const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+        wrapper,
+      });
+      await waitFor(() => expect(result.current.session?.status).toBe('active'));
+      await waitFor(() => expect(mocks.getChatSession.mock.calls.length).toBeGreaterThan(1));
+
+      setVisibility('hidden');
+      const callsWhenHidden = mocks.getChatSession.mock.calls.length;
+
+      // CHAT_FALLBACK_POLL_MS is mocked to 1ms, so many ticks would land here.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(mocks.getChatSession.mock.calls.length).toBe(callsWhenHidden);
+    });
+
+    it('catches up immediately when the tab becomes visible again', async () => {
+      mocks.connectionState = 'disconnected';
+      mocks.getChatSession.mockResolvedValue(detail([msg('a', 1000)], false, 'active'));
+
+      const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+        wrapper,
+      });
+      await waitFor(() => expect(result.current.session?.status).toBe('active'));
+
+      setVisibility('hidden');
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      const callsWhenHidden = mocks.getChatSession.mock.calls.length;
+
+      setVisibility('visible');
+      // Immediate, not "within one interval" — the conversation must be current
+      // at the moment the user looks at it.
+      await waitFor(() =>
+        expect(mocks.getChatSession.mock.calls.length).toBeGreaterThan(callsWhenHidden)
+      );
+    });
+  });
+
+  it('drains forward instead of leaving a gap when fallback poll recent window starts after the loaded tail', async () => {
+    mocks.connectionState = 'disconnected';
+    const initial = detail([msg('loaded-tail', 1000)], false, 'active');
+    const recentWindow = detail([msg('recent-window', 4000)], false, 'active');
+    const drainedForward = detail(
+      [msg('gap-1', 2000), msg('gap-2', 3000), msg('recent-window', 4000)],
+      false,
+      'active'
+    );
+    mocks.getChatSession
+      .mockResolvedValueOnce(initial)
+      .mockResolvedValueOnce(recentWindow)
+      .mockResolvedValue(drainedForward);
+
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+
+    await waitFor(() =>
+      expect(result.current.messages.map((m) => m.id)).toEqual([
+        'loaded-tail',
+        'gap-1',
+        'gap-2',
+        'recent-window',
+      ])
+    );
+    expect(mocks.getChatSession).toHaveBeenCalledWith('proj-1', 'sess-1', {
+      signal: expect.any(AbortSignal),
+      after: '[1000,1000,"loaded-tail"]',
+    });
+  });
+
+  it('keeps a socket row that lands while a reconnect catch-up drains a gap', async () => {
+    mocks.getChatSession.mockResolvedValueOnce(detail([msg('loaded-tail', 1000)], false, 'active'));
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+    await waitFor(() => expect(result.current.messages.map((m) => m.id)).toEqual(['loaded-tail']));
+
+    // The socket reconnects. Its catch-up window starts after the loaded tail, so
+    // the gap between them drains forward first — and that read is still out.
+    const drain = deferred<ReturnType<typeof detail>>();
+    mocks.getChatSession.mockReturnValueOnce(drain.promise);
+    const socket = mocks.wsOptions.at(-1)!;
+    act(() => {
+      socket.onCatchUp?.([msg('recent-window', 4000)], sessionResponse('active'), null);
+    });
+    await waitFor(() =>
+      expect(mocks.getChatSession).toHaveBeenLastCalledWith('proj-1', 'sess-1', {
+        signal: undefined,
+        after: '[1000,1000,"loaded-tail"]',
+      })
+    );
+
+    act(() => socket.onMessage?.(msg('live', 5000)));
+    await waitFor(() => expect(result.current.messages.map((m) => m.id)).toContain('live'));
+
+    await act(async () => {
+      drain.resolve(
+        detail(
+          [msg('gap-1', 2000), msg('gap-2', 3000), msg('recent-window', 4000)],
+          false,
+          'active'
+        )
+      );
+      await drain.promise;
+    });
+    await waitFor(() =>
+      expect(result.current.messages.map((m) => m.id)).toEqual([
+        'loaded-tail',
+        'gap-1',
+        'gap-2',
+        'recent-window',
+        'live',
+      ])
+    );
+  });
+
+  it('trims the cached transcripts to the most recently used when a chat opens', async () => {
+    const otherChat = (n: number) => chatQueryKeys.sessionMessages('user-1', 'proj-1', `other-${n}`);
+    for (let n = 1; n <= CHAT_TRANSCRIPT_CACHE_MAX_SESSIONS + 1; n += 1) {
+      queryClient.setQueryData(otherChat(n), detail([msg(`o${n}`, n)], false), { updatedAt: n });
+    }
+    mocks.getChatSession.mockResolvedValue(detail([msg('a', 1000)], false, 'active'));
+
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+    await waitFor(() => expect(result.current.messages.map((m) => m.id)).toEqual(['a']));
+
+    // One chat over the limit: the least recently used goes, the rest and the
+    // chat being opened stay.
+    expect(queryClient.getQueryData(otherChat(1))).toBeUndefined();
+    for (let n = 2; n <= CHAT_TRANSCRIPT_CACHE_MAX_SESSIONS + 1; n += 1) {
+      expect(queryClient.getQueryData(otherChat(n))).toBeDefined();
+    }
+    expect(
+      queryClient.getQueryData(chatQueryKeys.sessionMessages('user-1', 'proj-1', 'sess-1'))
+    ).toBeDefined();
+  });
+
+  it('recovers from a failed older-page load, so the reader can try again', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mocks.getChatSession.mockResolvedValueOnce(
+      detail([msg('b', 2000), msg('c', 3000)], true, 'active')
+    );
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+    await waitFor(() => expect(result.current.messages.map((m) => m.id)).toEqual(['b', 'c']));
+
+    mocks.getChatSession.mockRejectedValueOnce(new Error('network down'));
+    await act(async () => {
+      await result.current.loadMore();
+    });
+    expect(result.current.loadingMore).toBe(false);
+    expect(result.current.hasMore).toBe(true);
+    expect(result.current.messages.map((m) => m.id)).toEqual(['b', 'c']);
+
+    mocks.getChatSession.mockResolvedValueOnce(detail([msg('a', 1000)], false, 'active'));
+    await act(async () => {
+      await result.current.loadMore();
+    });
+    await waitFor(() => expect(result.current.messages.map((m) => m.id)).toEqual(['a', 'b', 'c']));
+    expect(result.current.hasMore).toBe(false);
+    warn.mockRestore();
+  });
+
+  it('rehydrates a plan-only state change between fallback polls', async () => {
+    mocks.connectionState = 'disconnected';
+    const messages = [msg('a', 1000)];
+    const plan = [{ content: 'Recovered from poll state', status: 'in_progress' }];
+    mocks.getChatSession
+      .mockResolvedValueOnce(detail(messages, false, 'active', null, null))
+      .mockResolvedValue(detail(messages, false, 'active', plan, 2000));
+
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+
+    await waitFor(() => expect(result.current.session?.status).toBe('active'));
+
+    await waitFor(() => expect(result.current.currentPlan).toEqual(plan));
+  });
+
+  it('keeps the wake indicator active while sleeping polls still report stale idle state', async () => {
+    const sleeping = detail([msg('a', 1000)], false, 'sleeping');
+    mocks.getChatSession.mockResolvedValue(sleeping);
+    mocks.sendFollowUpPrompt.mockResolvedValue({ accepted: true, status: 'queued' });
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+
+    await waitFor(() => expect(result.current.sessionState).toBe('sleeping'));
+    act(() => result.current.setFollowUp('Wake and continue'));
+    act(() => {
+      void result.current.handleSendFollowUp();
+    });
+
+    await waitFor(() => expect(mocks.sendFollowUpPrompt).toHaveBeenCalled());
+    await waitFor(() => expect(mocks.getChatSession.mock.calls.length).toBeGreaterThan(2));
+    expect(result.current.agentActivity).toBe('prompting');
+  });
+
+  it('surfaces wake phase for a USER-TRIGGERED wake, through the stale-sleeping guard', async () => {
+    // The most common trigger: type into a sleeping session. `handleSendFollowUp`
+    // arms `sleepingWakePendingRef`, and for nearly the whole wake the guard
+    // condition holds (status stays `sleeping`, activity stays `idle`). That
+    // branch calls only `hydratePlan`, so without an explicit `hydrateWakeProgress`
+    // there it silently discards every `wakePhase`/`recoveryStatus` the poll
+    // carries — `isWaking` never flips, the socket gate never opens, and the push
+    // half of the feature is dead on the path users actually take.
+    //
+    // Ordering is load-bearing: `isWaking` is sticky, so if any wake-bearing
+    // response lands BEFORE the guard is armed the hook latches on through the
+    // normal path and this test stops discriminating. The flag below guarantees
+    // every pre-send response is wake-free.
+    const sleeping = detail([msg('a', 1000)], false, 'sleeping');
+    const waking = {
+      ...sleeping,
+      state: { ...sleeping.state, recoveryStatus: 'waking', wakePhase: 'node_provisioning' },
+    };
+    let wakeInFlight = false;
+    mocks.getChatSession.mockImplementation(async () => (wakeInFlight ? waking : sleeping));
+    mocks.sendFollowUpPrompt.mockResolvedValue({ accepted: true, status: 'queued' });
+
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+
+    await waitFor(() => expect(result.current.sessionState).toBe('sleeping'));
+    expect(result.current.isWaking).toBe(false);
+
+    act(() => result.current.setFollowUp('Wake and continue'));
+    await act(async () => {
+      await result.current.handleSendFollowUp();
+    });
+    await waitFor(() => expect(mocks.sendFollowUpPrompt).toHaveBeenCalled());
+
+    // Only now does the server start reporting the wake — after the guard is armed.
+    wakeInFlight = true;
+
+    await waitFor(() => expect(result.current.isWaking).toBe(true));
+    await waitFor(() => expect(result.current.wakePhase).toBe('node_provisioning'));
+    await waitFor(() => expect(mocks.wsOptions.at(-1)?.enabled).toBe(true));
+    // The pre-existing guard must still do its job: activity is not reset to idle.
+    expect(result.current.agentActivity).not.toBe('idle');
+  });
+
+  it('returns a failed wake attempt to a retryable sleeping state', async () => {
+    const sleeping = detail([msg('a', 1000)], false, 'sleeping');
+    const failedWake = {
+      ...sleeping,
+      session: {
+        ...sleeping.session,
+        attention: {
+          markerId: 'marker-1',
+          kind: 'wake_failed',
+          createdAt: Date.now(),
+          expiresAt: null,
+          reason: 'wake_refused',
+          options: [],
+        },
+      },
+    };
+    let recoveryFailed = false;
+    mocks.getChatSession.mockImplementation(async () => (recoveryFailed ? failedWake : sleeping));
+    mocks.sendFollowUpPrompt.mockResolvedValue({ accepted: true, status: 'queued' });
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+
+    await waitFor(() => expect(result.current.sessionState).toBe('sleeping'));
+    act(() => result.current.setFollowUp('Wake and continue'));
+    act(() => {
+      void result.current.handleSendFollowUp();
+    });
+
+    await waitFor(() => expect(result.current.agentActivity).toBe('prompting'));
+    recoveryFailed = true;
+    await waitFor(() => expect(result.current.agentActivity).toBe('idle'));
+    expect(result.current.sessionState).toBe('sleeping');
+  });
+
+  it('hydrates recoveryStatus=waking into agentActivity=recovering so wake banner persists across navigation', async () => {
+    const wakingDetail = {
+      session: sessionResponse('sleeping'),
+      messages: [msg('a', 1000)],
+      hasMore: false,
+      state: {
+        activity: 'idle' as const,
+        activityAt: Date.now(),
+        statusError: null,
+        currentPlan: null,
+        planUpdatedAt: null,
+        promptStartedAt: null,
+        agentType: null,
+        lastStopReason: null,
+        recoveryStatus: 'waking' as const,
+      },
+    };
+    mocks.getChatSession.mockResolvedValue(wakingDetail);
+
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+
+    await waitFor(() => expect(result.current.sessionState).toBe('sleeping'));
+    expect(result.current.agentActivity).toBe('recovering');
+  });
+
+  it('does NOT set agentActivity=recovering when recoveryStatus is null (normal sleeping)', async () => {
+    const normalSleeping = detail([msg('a', 1000)], false, 'sleeping');
+    mocks.getChatSession.mockResolvedValue(normalSleeping);
+
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+
+    await waitFor(() => expect(result.current.sessionState).toBe('sleeping'));
+    expect(result.current.agentActivity).toBe('idle');
+  });
+
+  describe('workspace and node detail fetches', () => {
+    it('keeps the node after the workspace lands, despite the re-render it causes', async () => {
+      const node = { id: 'node-1', name: 'node-alpha' };
+      let resolveNode: (value: typeof node) => void = () => {};
+      const nodeFetch = new Promise<typeof node>((resolve) => {
+        resolveNode = resolve;
+      });
+      mocks.getChatSession.mockResolvedValue(detailWithWorkspace());
+      mocks.getWorkspace.mockResolvedValue(workspaceResponse());
+      mocks.getNode.mockReturnValue(nodeFetch);
+
+      const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+        wrapper,
+      });
+
+      await waitFor(() => expect(result.current.workspace?.id).toBe('ws-1'));
+      await waitFor(() => expect(mocks.getNode).toHaveBeenCalledWith('node-1'));
+
+      // This is the discriminating point. In production the workspace state commit
+      // happens while the node request is still in flight. The pre-fix single effect
+      // cleaned up that same request when `setWorkspace` re-rendered the hook, so a
+      // successful node response was discarded here.
+      expect(result.current.node).toBeNull();
+      await act(async () => {
+        resolveNode(node);
+        await nodeFetch;
+      });
+
+      await waitFor(() => expect(result.current.node?.id).toBe('node-1'));
+      expect(result.current.node?.name).toBe('node-alpha');
+    });
+
+    it('does not request a node when the workspace has no node id', async () => {
+      mocks.getChatSession.mockResolvedValue(detailWithWorkspace());
+      mocks.getWorkspace.mockResolvedValue(workspaceResponse(null));
+
+      const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+        wrapper,
+      });
+
+      await waitFor(() => expect(result.current.workspace?.id).toBe('ws-1'));
+      expect(result.current.node).toBeNull();
+      expect(mocks.getNode).not.toHaveBeenCalled();
+    });
+
+    it('does not re-request either resource once both have landed', async () => {
+      mocks.getChatSession.mockResolvedValue(detailWithWorkspace());
+      mocks.getWorkspace.mockResolvedValue(workspaceResponse());
+      mocks.getNode.mockResolvedValue({ id: 'node-1', name: 'node-alpha' });
+
+      const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+        wrapper,
+      });
+
+      await waitFor(() => expect(result.current.node?.id).toBe('node-1'));
+      // Both effects are identity-guarded (`workspace?.id === wsId`, `node?.id === nodeId`).
+      // Splitting them must not turn either into a refetch loop.
+      expect(mocks.getWorkspace).toHaveBeenCalledTimes(1);
+      expect(mocks.getNode).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('loadUntil', () => {
+    it('short-circuits (no fetch) when the target timestamp is already loaded', async () => {
+      mocks.getChatSession.mockResolvedValue(detail([msg('a', 500), msg('b', 1000)], false));
+      const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+        wrapper,
+      });
+      await waitFor(() => expect(result.current.messages.length).toBe(2));
+      mocks.getChatSession.mockClear();
+
+      await act(async () => {
+        await result.current.loadUntil({ timestamp: 700 });
+      });
+
+      // Oldest loaded is 500 <= 700 → nothing to fetch.
+      expect(mocks.getChatSession).not.toHaveBeenCalled();
+    });
+
+    it('short-circuits when there is no more history (hasMore=false)', async () => {
+      mocks.getChatSession.mockResolvedValue(detail([msg('b', 1000)], false));
+      const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+        wrapper,
+      });
+      await waitFor(() => expect(result.current.messages.length).toBe(1));
+      mocks.getChatSession.mockClear();
+
+      await act(async () => {
+        await result.current.loadUntil({ timestamp: 200 });
+      });
+
+      // Target (200) predates the loaded window, but hasMore=false → no fetch.
+      expect(mocks.getChatSession).not.toHaveBeenCalled();
+    });
+
+    // Note: loadUntil's multi-page backward pagination shares the prepend +
+    // firstItemIndex mechanism with loadMore (covered elsewhere) and is verified
+    // end-to-end by the timeline-jump Playwright audit. The guard branches above
+    // (already-loaded and no-more-history) cover loadUntil's early-return logic.
+  });
+});

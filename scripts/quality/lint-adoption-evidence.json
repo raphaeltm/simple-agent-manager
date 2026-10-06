@@ -1,0 +1,99 @@
+{
+  "version": 1,
+  "auditedAt": "2026-08-09T00:00:00.000Z",
+  "baseCommit": "8c689a6a7923f76a33d96d6272797090598d6c2d",
+  "toolchain": {
+    "typescript": "5.9.3",
+    "eslint": "9.39.5",
+    "typescriptEslint": "8.65.0",
+    "eslintPluginAstro": "1.7.0",
+    "oxlint": "1.77.0"
+  },
+  "eslintFoundationParity": {
+    "legacyFiles": 2229,
+    "legacyDiagnostics": 2372,
+    "flatDiagnostics": 2372,
+    "missingNormalizedFindings": 0,
+    "addedNormalizedFindings": 0
+  },
+  "oxlintShadow": {
+    "mode": "report-only",
+    "typeAware": false,
+    "typeCheck": false,
+    "coldWallMilliseconds": 3195,
+    "engineSeconds": 0.201,
+    "files": 2448,
+    "diagnostics": 2774,
+    "rules": 127,
+    "trackedAstroFiles": 33,
+    "observedAstroFiles": 33,
+    "samFixtureExpectedFindings": 8,
+    "samFixtureObservedFindings": 8,
+    "samFixtureConformancePercent": 100
+  },
+  "alignedRuleSamples": [
+    {
+      "rule": "no-non-null-assertion",
+      "eslint": 1804,
+      "oxlint": 1804,
+      "parity": true
+    },
+    {
+      "rule": "no-explicit-any",
+      "eslint": 655,
+      "oxlint": 650,
+      "parity": false
+    },
+    {
+      "rule": "consistent-type-imports",
+      "eslint": 22,
+      "oxlint": 1,
+      "parity": false
+    },
+    {
+      "rule": "react-hooks/exhaustive-deps",
+      "eslint": 6,
+      "oxlint": 16,
+      "parity": false
+    },
+    {
+      "rule": "jsx-a11y/aria-role",
+      "eslint": 51,
+      "oxlint": 51,
+      "parity": true
+    },
+    {
+      "rule": "jsx-a11y/no-static-element-interactions",
+      "eslint": 14,
+      "oxlint": 17,
+      "parity": false
+    }
+  ],
+  "fixEvidence": {
+    "fixture": "inline-type-import",
+    "eslintProducedOutput": true,
+    "exactSafeFixOutputMatch": false,
+    "fixesAppliedToRepository": false
+  },
+  "newInlineSuppressions": 0,
+  "promotion": {
+    "decision": "stay-shadow",
+    "gates": {
+      "findingParity": false,
+      "safeFixParity": false,
+      "zeroNewInlineSuppressions": true,
+      "directoryAndTemplateCoverage": false,
+      "samAlphaFixtureParity": true,
+      "coldRuntimeFaster": true
+    },
+    "reasons": [
+      "Aligned TypeScript, hooks, accessibility, and type-import finding counts are not all preserved.",
+      "The controlled inline-type-import safe-fix output differs from ESLint.",
+      "The aligned repository file populations differ even though all tracked Astro templates are enumerated."
+    ]
+  },
+  "rollback": {
+    "switch": "Remove lint:oxlint from check:fast and the CI lint job.",
+    "authoritativeLayer": "ESLint 9 flat config remains unchanged and blocking."
+  }
+}

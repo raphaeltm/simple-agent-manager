@@ -1,0 +1,83 @@
+:root {
+  --sam-workspace-chrome-bg: var(--sam-color-tn-bg);
+  --sam-workspace-status-fg: var(--sam-color-tn-fg);
+  --sam-workspace-status-muted: var(--sam-color-tn-fg-muted);
+  --sam-workspace-tab-bg: var(--sam-color-tn-bg-dark);
+  --sam-workspace-tab-active-bg: var(--sam-color-tn-bg);
+  --sam-workspace-tab-hover-bg: var(--sam-color-tn-surface);
+  --sam-workspace-tab-border: var(--sam-color-tn-border);
+  --sam-workspace-tab-fg: var(--sam-color-tn-fg);
+  --sam-workspace-tab-muted: var(--sam-color-tn-fg-muted);
+  --sam-workspace-tab-accent: var(--sam-color-tn-blue);
+  --sam-workspace-tab-badge-border: var(--sam-color-tn-active);
+  --sam-workspace-link-fg: var(--sam-color-tn-blue);
+  --sam-workspace-success-fg: var(--sam-color-tn-green);
+  --sam-workspace-warning-fg: var(--sam-color-tn-yellow);
+  --sam-workspace-danger-fg: var(--sam-color-tn-red);
+  --sam-workspace-info-fg: var(--sam-color-tn-blue);
+  --sam-workspace-purple-fg: var(--sam-color-tn-purple);
+  --sam-workspace-muted-dot: var(--sam-color-tn-fg-dimmer);
+
+  --sam-node-log-icon-fg: #06b6d4;
+  --sam-node-log-icon-bg: rgba(6, 182, 212, 0.15);
+  --sam-node-live-fg: #22c55e;
+  --sam-node-warning-fg: #f59e0b;
+  --sam-node-info-fg: #3b82f6;
+  --sam-node-danger-fg: #ef4444;
+  --sam-node-purple-fg: #a78bfa;
+  --sam-node-neutral-fg: #6b7280;
+  --sam-node-success-tint: rgba(34, 197, 94, 0.12);
+  --sam-node-warning-tint: rgba(245, 158, 11, 0.12);
+  --sam-node-info-tint: rgba(59, 130, 246, 0.12);
+  --sam-node-danger-tint: rgba(239, 68, 68, 0.12);
+  --sam-node-purple-tint: rgba(167, 139, 250, 0.15);
+  --sam-node-neutral-tint: rgba(128, 128, 128, 0.1);
+  --sam-node-neutral-tint-subtle: rgba(128, 128, 128, 0.08);
+  --sam-node-danger-tint-subtle: rgba(239, 68, 68, 0.08);
+  --sam-node-danger-border: rgba(239, 68, 68, 0.2);
+  --sam-node-error-border: rgba(248, 113, 113, 0.3);
+  --sam-node-code-bg: #0d1117;
+  --sam-node-code-subtle-bg: rgba(0, 0, 0, 0.05);
+}
+
+[data-ui-theme='sam-light'] {
+  --sam-workspace-chrome-bg: var(--sam-color-bg-canvas);
+  --sam-workspace-status-fg: var(--sam-color-fg-primary);
+  --sam-workspace-status-muted: var(--sam-color-fg-muted);
+  --sam-workspace-tab-bg: var(--sam-color-bg-surface);
+  --sam-workspace-tab-active-bg: var(--sam-color-bg-canvas);
+  --sam-workspace-tab-hover-bg: var(--sam-color-bg-surface-hover);
+  --sam-workspace-tab-border: var(--sam-color-border-default);
+  --sam-workspace-tab-fg: var(--sam-color-fg-primary);
+  --sam-workspace-tab-muted: var(--sam-color-fg-muted);
+  --sam-workspace-tab-accent: var(--sam-color-accent-primary);
+  --sam-workspace-tab-badge-border: var(--sam-color-border-default);
+  --sam-workspace-link-fg: var(--sam-color-info-fg);
+  --sam-workspace-success-fg: var(--sam-color-success-fg);
+  --sam-workspace-warning-fg: var(--sam-color-warning-fg);
+  --sam-workspace-danger-fg: var(--sam-color-danger-fg);
+  --sam-workspace-info-fg: var(--sam-color-info-fg);
+  --sam-workspace-purple-fg: var(--sam-color-purple);
+  --sam-workspace-muted-dot: var(--sam-color-fg-muted);
+
+  --sam-node-log-icon-fg: var(--sam-color-info-fg);
+  --sam-node-log-icon-bg: var(--sam-color-info-tint);
+  --sam-node-live-fg: var(--sam-color-success-fg);
+  --sam-node-warning-fg: var(--sam-color-warning-fg);
+  --sam-node-info-fg: var(--sam-color-info-fg);
+  --sam-node-danger-fg: var(--sam-color-danger-fg);
+  --sam-node-purple-fg: var(--sam-color-purple);
+  --sam-node-neutral-fg: var(--sam-color-fg-muted);
+  --sam-node-success-tint: var(--sam-color-success-tint);
+  --sam-node-warning-tint: var(--sam-color-warning-tint);
+  --sam-node-info-tint: var(--sam-color-info-tint);
+  --sam-node-danger-tint: var(--sam-color-danger-tint);
+  --sam-node-purple-tint: var(--sam-color-info-tint);
+  --sam-node-neutral-tint: var(--sam-color-bg-inset);
+  --sam-node-neutral-tint-subtle: var(--sam-color-bg-inset);
+  --sam-node-danger-tint-subtle: var(--sam-color-danger-tint);
+  --sam-node-danger-border: var(--sam-color-border-default);
+  --sam-node-error-border: var(--sam-color-border-default);
+  --sam-node-code-bg: var(--sam-color-tn-bg-dark);
+  --sam-node-code-subtle-bg: var(--sam-color-bg-inset);
+}

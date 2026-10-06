@@ -1,6 +1,4 @@
-import type {
-  AgentSession,
-} from '@simple-agent-manager/shared';
+import type { AgentSession } from '@simple-agent-manager/shared';
 import { and, desc, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -10,20 +8,45 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { toAgentSessionResponse } from '../../lib/mappers';
 import { parsePositiveInt } from '../../lib/route-helpers';
+import { getCredentialEncryptionKey } from '../../lib/secrets';
 import { ulid } from '../../lib/ulid';
-import { getUserId, requireApproved,requireAuth } from '../../middleware/auth';
+import { getUserId, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { CreateAgentSessionSchema, jsonValidator, UpdateAgentSessionSchema } from '../../schemas';
 import { getRuntimeLimits } from '../../services/limits';
+import { buildSessionMcpServers } from '../../services/mcp-connection-resolution';
+import { generateMcpToken, revokeMcpToken, storeMcpToken } from '../../services/mcp-token';
+import { createAgentSessionOnNode, stopAgentSessionOnNode } from '../../services/node-agent';
+import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
+import { isSleepingContainerNode } from '../../services/sleeping-container-runtime';
+import { requireRepositoryOwnerAccess } from '../projects/_helpers';
 import {
-  createAgentSessionOnNode,
-  resumeAgentSessionOnNode,
-  stopAgentSessionOnNode,
-  suspendAgentSessionOnNode,
-} from '../../services/node-agent';
-import { assertNodeOperational,getOwnedNode, getOwnedWorkspace } from './_helpers';
+  assertNodeOperational,
+  getOwnedAgentSession,
+  getOwnedNode,
+  getOwnedNodeAgentSession,
+  getOwnedWorkspace,
+} from './_helpers';
 
 const agentSessionRoutes = new Hono<{ Bindings: Env }>();
+
+async function requireWorkspaceAgentGitHubAccess(
+  env: Env,
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  workspace: schema.Workspace,
+  userId: string
+): Promise<void> {
+  if (!workspace.projectId) return;
+  const [project] = await db
+    .select()
+    .from(schema.projects)
+    .where(and(eq(schema.projects.id, workspace.projectId), eq(schema.projects.userId, userId)))
+    .limit(1);
+  if (!project) {
+    throw errors.notFound('Project');
+  }
+  await requireRepositoryOwnerAccess(env, db, project, userId, 'workspace-agent-session');
+}
 
 // Auth applied per-route (NOT via use('/*', ...)) to prevent middleware leakage
 // to other subrouters (lifecycle, runtime) mounted at the same base path.
@@ -53,320 +76,300 @@ agentSessionRoutes.get('/:id/agent-sessions', requireAuth(), requireApproved(), 
   return c.json(sessions.map(toAgentSessionResponse));
 });
 
-agentSessionRoutes.post('/:id/agent-sessions', requireAuth(), requireApproved(), jsonValidator(CreateAgentSessionSchema), async (c) => {
-  const userId = getUserId(c);
-  const workspaceId = c.req.param('id');
-  const db = drizzle(c.env.DATABASE, { schema });
-  const body = c.req.valid('json');
-  const limits = getRuntimeLimits(c.env);
+agentSessionRoutes.post(
+  '/:id/agent-sessions',
+  requireAuth(),
+  requireApproved(),
+  jsonValidator(CreateAgentSessionSchema),
+  async (c) => {
+    const userId = getUserId(c);
+    const workspaceId = c.req.param('id');
+    const db = drizzle(c.env.DATABASE, { schema });
+    const body = c.req.valid('json');
+    const limits = getRuntimeLimits(c.env);
 
-  const workspace = await getOwnedWorkspace(db, workspaceId, userId);
-  if (!workspace.nodeId) {
-    throw errors.badRequest('Workspace is not attached to a node');
-  }
+    const workspace = await getOwnedWorkspace(db, workspaceId, userId);
+    if (!workspace.nodeId) {
+      throw errors.badRequest('Workspace is not attached to a node');
+    }
 
-  const node = await getOwnedNode(db, workspace.nodeId, userId);
-  assertNodeOperational(node, 'create agent session');
+    const node = await getOwnedNode(db, workspace.nodeId, userId);
+    assertNodeOperational(node, 'create agent session');
+    // This route creates directly on an existing workspace and bypasses the
+    // scheduler's required-version placement check.
+    if (
+      node.runtime === 'vm' &&
+      !isNodeAgentVersionCompatible(node.agentVersion, c.env.VM_AGENT_REQUIRED_VERSION)
+    ) {
+      throw errors.conflict('Workspace node is running an incompatible VM agent build');
+    }
+    await requireWorkspaceAgentGitHubAccess(c.env, db, workspace, userId);
 
-  const existingRunning = await db
-    .select({ id: schema.agentSessions.id })
-    .from(schema.agentSessions)
-    .where(
-      and(
-        eq(schema.agentSessions.workspaceId, workspace.id),
-        eq(schema.agentSessions.userId, userId),
-        eq(schema.agentSessions.status, 'running')
-      )
-    );
+    // A manually created workspace session can bind a project profile before
+    // agent selection. Runtime-assets lookup then uses this exact session ID;
+    // a profile from another project cannot supply its environment marker.
+    let profileAgentType: string | null = null;
+    const profileId = body.agentProfileId?.trim();
+    const requestedAgentType = body.agentType?.trim() || null;
+    if (body.agentProfileId !== undefined && !profileId) {
+      throw errors.badRequest('Agent profile ID must not be empty');
+    }
+    if (profileId) {
+      if (!workspace.projectId) {
+        throw errors.badRequest('Agent profile requires a project workspace');
+      }
+      const [profile] = await db
+        .select({ id: schema.agentProfiles.id, agentType: schema.agentProfiles.agentType })
+        .from(schema.agentProfiles)
+        .where(
+          and(
+            eq(schema.agentProfiles.id, profileId),
+            eq(schema.agentProfiles.projectId, workspace.projectId)
+          )
+        )
+        .limit(1);
+      if (!profile) {
+        throw errors.notFound('Agent profile');
+      }
+      if (requestedAgentType && requestedAgentType !== profile.agentType) {
+        throw errors.badRequest('Agent type does not match selected profile');
+      }
+      profileAgentType = profile.agentType;
+    }
 
-  if (existingRunning.length >= limits.maxAgentSessionsPerWorkspace) {
-    throw errors.badRequest(
-      `Maximum ${limits.maxAgentSessionsPerWorkspace} agent sessions per workspace`
-    );
-  }
+    // Manual project workspaces are task-backed. Only the exact linked
+    // conversation task may enable URL/form interactions on this direct-create
+    // path; a chatSessionId by itself is not a task-mode authorization.
+    let interactionTaskMode: 'conversation' | undefined;
+    if (workspace.projectId && workspace.chatSessionId) {
+      const [conversationTask] = await db
+        .select({ id: schema.tasks.id, taskMode: schema.tasks.taskMode })
+        .from(schema.tasks)
+        .where(
+          and(
+            eq(schema.tasks.workspaceId, workspace.id),
+            eq(schema.tasks.projectId, workspace.projectId),
+            eq(schema.tasks.userId, userId),
+            eq(schema.tasks.chatSessionId, workspace.chatSessionId),
+            eq(schema.tasks.taskMode, 'conversation'),
+            eq(schema.tasks.status, 'in_progress')
+          )
+        )
+        .limit(1);
+      if (conversationTask?.taskMode === 'conversation') {
+        interactionTaskMode = 'conversation';
+      }
+    }
 
-  const sessionId = ulid();
-  const now = new Date().toISOString();
+    const existingRunning = await db
+      .select({ id: schema.agentSessions.id })
+      .from(schema.agentSessions)
+      .where(
+        and(
+          eq(schema.agentSessions.workspaceId, workspace.id),
+          eq(schema.agentSessions.userId, userId),
+          eq(schema.agentSessions.status, 'running')
+        )
+      );
 
-  await db.insert(schema.agentSessions).values({
-    id: sessionId,
-    workspaceId: workspace.id,
-    userId,
-    status: 'running',
-    label: body.label?.trim() || null,
-    agentType: body.agentType?.trim() || null,
-    worktreePath: body.worktreePath?.trim() || null,
-    createdAt: now,
-    updatedAt: now,
-  });
+    if (existingRunning.length >= limits.maxAgentSessionsPerWorkspace) {
+      throw errors.badRequest(
+        `Maximum ${limits.maxAgentSessionsPerWorkspace} agent sessions per workspace`
+      );
+    }
 
-  try {
-    await createAgentSessionOnNode(
-      workspace.nodeId,
-      workspace.id,
-      sessionId,
-      body.label?.trim() || null,
-      c.env,
+    const sessionId = ulid();
+    const now = new Date().toISOString();
+
+    await db.insert(schema.agentSessions).values({
+      id: sessionId,
+      workspaceId: workspace.id,
       userId,
-      workspace.chatSessionId,
-      workspace.projectId,
-    );
-  } catch (err) {
+      status: 'running',
+      label: body.label?.trim() || null,
+      agentType: profileAgentType ?? requestedAgentType,
+      agentProfileId: profileId ?? null,
+      worktreePath: body.worktreePath?.trim() || null,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    let mcpToken: string | null = null;
+    try {
+      if (workspace.projectId) {
+        mcpToken = generateMcpToken();
+        await storeMcpToken(
+          c.env.KV,
+          mcpToken,
+          {
+            // Empty taskId for direct project-chat sessions — only task-runner dispatched
+            // sessions have a real task row. Setting sessionId as taskId was wrong because
+            // MCP tools query tasks by this ID and would get "Task not found". Empty string
+            // is falsy so tools guarding on !tokenData.taskId correctly reject early.
+            taskId: '',
+            contextType: workspace.chatSessionId ? 'conversation' : 'direct-workspace',
+            taskMode: workspace.chatSessionId ? 'conversation' : undefined,
+            projectId: workspace.projectId,
+            userId,
+            workspaceId: workspace.id,
+            chatSessionId: workspace.chatSessionId ?? undefined,
+            agentSessionId: sessionId,
+            createdAt: new Date().toISOString(),
+          },
+          c.env
+        );
+      }
+
+      // Manual workspace sessions are a separate producer from the shared bootstrap, so the
+      // MCP server list has to be built here too — otherwise a user's connections would work
+      // in project chat but silently vanish on a workspace-created session (rule 61).
+      const mcpServers = mcpToken
+        ? await buildSessionMcpServers(
+            db,
+            {
+              baseDomain: c.env.BASE_DOMAIN,
+              encryptionKey: getCredentialEncryptionKey(c.env),
+            },
+            { userId, projectId: workspace.projectId },
+            mcpToken
+          )
+        : undefined;
+
+      await createAgentSessionOnNode(
+        workspace.nodeId,
+        workspace.id,
+        sessionId,
+        body.label?.trim() || null,
+        c.env,
+        userId,
+        workspace.chatSessionId,
+        workspace.projectId,
+        mcpServers,
+        undefined,
+        interactionTaskMode
+      );
+    } catch (err) {
+      if (mcpToken) {
+        await revokeMcpToken(c.env.KV, mcpToken).catch((revokeErr) => {
+          log.warn('agent_session.mcp_token_revoke_failed', {
+            sessionId,
+            workspaceId: workspace.id,
+            error: revokeErr instanceof Error ? revokeErr.message : String(revokeErr),
+          });
+        });
+      }
+
+      await db
+        .update(schema.agentSessions)
+        .set({
+          status: 'error',
+          errorMessage: err instanceof Error ? err.message : 'Failed to create agent session',
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(schema.agentSessions.id, sessionId));
+
+      throw errors.internal('Failed to create agent session on node');
+    }
+
+    const rows = await db
+      .select()
+      .from(schema.agentSessions)
+      .where(eq(schema.agentSessions.id, sessionId))
+      .limit(1);
+
+    const createdSession = rows[0];
+    if (!createdSession) {
+      throw new Error(`Agent session ${sessionId} disappeared immediately after creation`);
+    }
+
+    return c.json(toAgentSessionResponse(createdSession), 201);
+  }
+);
+
+agentSessionRoutes.patch(
+  '/:id/agent-sessions/:sessionId',
+  requireAuth(),
+  requireApproved(),
+  jsonValidator(UpdateAgentSessionSchema),
+  async (c) => {
+    const userId = getUserId(c);
+    const workspaceId = c.req.param('id');
+    const sessionId = c.req.param('sessionId');
+    const db = drizzle(c.env.DATABASE, { schema });
+
+    const workspace = await getOwnedWorkspace(db, workspaceId, userId);
+
+    const body = c.req.valid('json');
+    const maxLabelLength = parsePositiveInt(c.env.MAX_AGENT_SESSION_LABEL_LENGTH, 50);
+    const label = body.label?.trim()?.slice(0, maxLabelLength);
+    if (!label) {
+      throw errors.badRequest('Label is required and must be non-empty');
+    }
+
+    const session = await getOwnedAgentSession(db, workspace.id, sessionId, userId);
+    if (session.status !== 'running') {
+      throw errors.badRequest('Cannot rename a session that is not running');
+    }
+
     await db
       .update(schema.agentSessions)
       .set({
-        status: 'error',
-        errorMessage: err instanceof Error ? err.message : 'Failed to create agent session',
+        label,
         updatedAt: new Date().toISOString(),
       })
-      .where(eq(schema.agentSessions.id, sessionId));
+      .where(eq(schema.agentSessions.id, session.id));
 
-    throw errors.internal('Failed to create agent session on node');
+    return c.json(
+      toAgentSessionResponse({ ...session, label, updatedAt: new Date().toISOString() })
+    );
   }
+);
 
-  const rows = await db
-    .select()
-    .from(schema.agentSessions)
-    .where(eq(schema.agentSessions.id, sessionId))
-    .limit(1);
+agentSessionRoutes.post(
+  '/:id/agent-sessions/:sessionId/stop',
+  requireAuth(),
+  requireApproved(),
+  async (c) => {
+    const userId = getUserId(c);
+    const db = drizzle(c.env.DATABASE, { schema });
+    const { workspace, session } = await getOwnedNodeAgentSession(
+      db,
+      c.req.param('id'),
+      c.req.param('sessionId'),
+      userId
+    );
+    const running = session.status === 'running';
 
-  return c.json(toAgentSessionResponse(rows[0]!), 201);
-});
-
-agentSessionRoutes.patch('/:id/agent-sessions/:sessionId', requireAuth(), requireApproved(), jsonValidator(UpdateAgentSessionSchema), async (c) => {
-  const userId = getUserId(c);
-  const workspaceId = c.req.param('id');
-  const sessionId = c.req.param('sessionId');
-  const db = drizzle(c.env.DATABASE, { schema });
-
-  const workspace = await getOwnedWorkspace(db, workspaceId, userId);
-  if (!workspace) {
-    throw errors.notFound('Workspace');
-  }
-
-  const body = c.req.valid('json');
-  const maxLabelLength = parsePositiveInt(c.env.MAX_AGENT_SESSION_LABEL_LENGTH, 50);
-  const label = body.label?.trim()?.slice(0, maxLabelLength);
-  if (!label) {
-    throw errors.badRequest('Label is required and must be non-empty');
-  }
-
-  const rows = await db
-    .select()
-    .from(schema.agentSessions)
-    .where(
-      and(
-        eq(schema.agentSessions.id, sessionId),
-        eq(schema.agentSessions.workspaceId, workspace.id),
-        eq(schema.agentSessions.userId, userId)
-      )
-    )
-    .limit(1);
-
-  const session = rows[0];
-  if (!session) {
-    throw errors.notFound('Agent session');
-  }
-
-  if (session.status !== 'running') {
-    throw errors.badRequest('Cannot rename a session that is not running');
-  }
-
-  await db
-    .update(schema.agentSessions)
-    .set({
-      label,
-      updatedAt: new Date().toISOString(),
-    })
-    .where(eq(schema.agentSessions.id, session.id));
-
-  return c.json(toAgentSessionResponse({ ...session, label, updatedAt: new Date().toISOString() }));
-});
-
-agentSessionRoutes.post('/:id/agent-sessions/:sessionId/stop', requireAuth(), requireApproved(), async (c) => {
-  const userId = getUserId(c);
-  const workspaceId = c.req.param('id');
-  const sessionId = c.req.param('sessionId');
-  const db = drizzle(c.env.DATABASE, { schema });
-
-  const workspace = await getOwnedWorkspace(db, workspaceId, userId);
-  if (!workspace.nodeId) {
-    throw errors.badRequest('Workspace is not attached to a node');
-  }
-
-  const rows = await db
-    .select()
-    .from(schema.agentSessions)
-    .where(
-      and(
-        eq(schema.agentSessions.id, sessionId),
-        eq(schema.agentSessions.workspaceId, workspace.id),
-        eq(schema.agentSessions.userId, userId)
-      )
-    )
-    .limit(1);
-
-  const session = rows[0];
-  if (!session) {
-    throw errors.notFound('Agent session');
-  }
-
-  if (session.status !== 'running') {
-    // Still attempt VM stop for orphaned sessions whose process may be alive
-    if (workspace.nodeId) {
+    // A session that is not running may still be an orphan whose process is alive, so it gets
+    // the stop too. A slept Instant runtime runs nothing, and the request would restore it just
+    // to stop it.
+    if (!(await isSleepingContainerNode(db, workspace.nodeId))) {
       try {
         await stopAgentSessionOnNode(workspace.nodeId, workspace.id, session.id, c.env, userId);
       } catch (e) {
-        log.error('agent_session.orphaned_stop_failed', { sessionId: session.id, workspaceId: workspace.id, nodeId: workspace.nodeId, error: String(e) });
+        log.error(
+          running ? 'agent_session.stop_on_node_failed' : 'agent_session.orphaned_stop_failed',
+          {
+            sessionId: session.id,
+            workspaceId: workspace.id,
+            nodeId: workspace.nodeId,
+            error: String(e),
+          }
+        );
       }
     }
-    return c.json({ status: session.status });
-  }
-
-  try {
-    await stopAgentSessionOnNode(workspace.nodeId, workspace.id, session.id, c.env, userId);
-  } catch (e) {
-    log.error('agent_session.stop_on_node_failed', { sessionId: session.id, workspaceId: workspace.id, nodeId: workspace.nodeId, error: String(e) });
-  }
-
-  await db
-    .update(schema.agentSessions)
-    .set({
-      status: 'stopped',
-      stoppedAt: new Date().toISOString(),
-      errorMessage: null,
-      updatedAt: new Date().toISOString(),
-    })
-    .where(eq(schema.agentSessions.id, session.id));
-
-  return c.json({ status: 'stopped' });
-});
-
-agentSessionRoutes.post('/:id/agent-sessions/:sessionId/suspend', requireAuth(), requireApproved(), async (c) => {
-  const userId = getUserId(c);
-  const workspaceId = c.req.param('id');
-  const sessionId = c.req.param('sessionId');
-  const db = drizzle(c.env.DATABASE, { schema });
-
-  const workspace = await getOwnedWorkspace(db, workspaceId, userId);
-  if (!workspace.nodeId) {
-    throw errors.badRequest('Workspace is not attached to a node');
-  }
-
-  const rows = await db
-    .select()
-    .from(schema.agentSessions)
-    .where(
-      and(
-        eq(schema.agentSessions.id, sessionId),
-        eq(schema.agentSessions.workspaceId, workspace.id),
-        eq(schema.agentSessions.userId, userId)
-      )
-    )
-    .limit(1);
-
-  const session = rows[0];
-  if (!session) {
-    throw errors.notFound('Agent session');
-  }
-
-  if (session.status !== 'running' && session.status !== 'error') {
-    throw errors.badRequest(`Session cannot be suspended from status: ${session.status}`);
-  }
-
-  try {
-    await suspendAgentSessionOnNode(workspace.nodeId, workspace.id, session.id, c.env, userId);
-  } catch (e) {
-    log.warn('agent_session.suspend_on_node_failed', { sessionId: session.id, workspaceId: workspace.id, nodeId: workspace.nodeId, error: String(e) });
-  }
-
-  const now = new Date().toISOString();
-  await db
-    .update(schema.agentSessions)
-    .set({
-      status: 'suspended',
-      suspendedAt: now,
-      errorMessage: null,
-      updatedAt: now,
-    })
-    .where(eq(schema.agentSessions.id, session.id));
-
-  return c.json(
-    toAgentSessionResponse({
-      ...session,
-      status: 'suspended',
-      suspendedAt: now,
-      errorMessage: null,
-      updatedAt: now,
-    })
-  );
-});
-
-agentSessionRoutes.post('/:id/agent-sessions/:sessionId/resume', requireAuth(), requireApproved(), async (c) => {
-  const userId = getUserId(c);
-  const workspaceId = c.req.param('id');
-  const sessionId = c.req.param('sessionId');
-  const db = drizzle(c.env.DATABASE, { schema });
-
-  const workspace = await getOwnedWorkspace(db, workspaceId, userId);
-  if (!workspace.nodeId) {
-    throw errors.badRequest('Workspace is not attached to a node');
-  }
-
-  const rows = await db
-    .select()
-    .from(schema.agentSessions)
-    .where(
-      and(
-        eq(schema.agentSessions.id, sessionId),
-        eq(schema.agentSessions.workspaceId, workspace.id),
-        eq(schema.agentSessions.userId, userId)
-      )
-    )
-    .limit(1);
-
-  const session = rows[0];
-  if (!session) {
-    throw errors.notFound('Agent session');
-  }
-
-  // Already running -- idempotent
-  if (session.status === 'running') {
-    return c.json(toAgentSessionResponse(session));
-  }
-
-  // Resume is allowed from suspended, stopped, or error states.
-  // For suspended sessions, also tell the VM agent to resume.
-  if (session.status === 'suspended') {
-    try {
-      await resumeAgentSessionOnNode(workspace.nodeId, workspace.id, session.id, c.env, userId);
-    } catch (e) {
-      log.warn('agent_session.resume_on_node_failed', { sessionId: session.id, workspaceId: workspace.id, nodeId: workspace.nodeId, error: String(e) });
+    if (!running) {
+      return c.json({ status: session.status });
     }
+
+    const now = new Date().toISOString();
+    await db
+      .update(schema.agentSessions)
+      .set({ status: 'stopped', stoppedAt: now, errorMessage: null, updatedAt: now })
+      .where(eq(schema.agentSessions.id, session.id));
+
+    return c.json({ status: 'stopped' });
   }
-
-  const now = new Date().toISOString();
-  await db
-    .update(schema.agentSessions)
-    .set({
-      status: 'running',
-      stoppedAt: null,
-      suspendedAt: null,
-      errorMessage: null,
-      updatedAt: now,
-    })
-    .where(eq(schema.agentSessions.id, session.id));
-
-  return c.json(
-    toAgentSessionResponse({
-      ...session,
-      status: 'running',
-      stoppedAt: null,
-      suspendedAt: null,
-      errorMessage: null,
-      updatedAt: now,
-    })
-  );
-});
+);
 
 export { agentSessionRoutes };

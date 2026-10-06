@@ -13,7 +13,7 @@ Phase 2 of multi-provider support: implement the actual `ScalewayProvider` class
 - `packages/providers/src/index.ts` — factory (currently throws for scaleway)
 - `packages/providers/src/errors.ts` — ProviderError class
 - `packages/shared/src/constants.ts` — constants pattern (DEFAULT_* with env var overrides)
-- `tasks/backlog/2026-02-16-provider-scaleway.md` — Scaleway API research
+- `tasks/archive/2026-02-16-provider-scaleway.md` — Scaleway API research
 
 ### Scaleway API Quirks
 1. **Three-step VM creation**: POST /servers → PATCH user_data/cloud-init → POST action poweron

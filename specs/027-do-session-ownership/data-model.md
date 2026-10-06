@@ -41,7 +41,7 @@ CREATE TABLE acp_sessions (
   assigned_at INTEGER,                          -- When workspace was assigned
   started_at INTEGER,                           -- When ACP SDK session started (running)
   completed_at INTEGER,                         -- When session reached terminal state
-  interrupted_at INTEGER                        -- When VM failure detected
+  interrupted_at INTEGER                        -- When conclusive runtime/workspace failure is detected
 );
 
 CREATE INDEX idx_acp_sessions_chat ON acp_sessions(chat_session_id);
@@ -81,7 +81,7 @@ stateDiagram-v2
     assigned --> running: VM agent reports ACP SDK started
     running --> completed: Agent finished normally
     running --> failed: Agent error / unrecoverable
-    running --> interrupted: VM failure detected (heartbeat timeout)
+    running --> interrupted: VM failure proven (terminal runtime/workspace evidence)
     assigned --> failed: VM agent cannot start (unreachable, error)
     assigned --> interrupted: VM failure before agent starts
 
@@ -92,7 +92,7 @@ stateDiagram-v2
     note right of pending: Created when user submits task\nor sends follow-up message
     note right of assigned: Workspace provisioned,\nVM agent notified
     note right of running: ACP SDK session active,\nmessages flowing
-    note right of interrupted: VM died, heartbeat timeout.\nMessages up to last flush preserved.
+    note right of interrupted: VM/runtime death was conclusive.\nProjectData heartbeat staleness alone is suspect.
 ```
 
 ### Valid Transitions
@@ -104,9 +104,9 @@ stateDiagram-v2
 | `assigned` | `running` | VM agent reports ACP SDK session started | vm-agent |
 | `running` | `completed` | Agent reports completion | vm-agent |
 | `running` | `failed` | Agent reports error | vm-agent |
-| `running` | `interrupted` | Heartbeat timeout alarm fires | alarm |
+| `running` | `interrupted` | Conclusive runtime/workspace failure evidence | alarm / system |
 | `assigned` | `failed` | VM agent reports cannot start | vm-agent |
-| `assigned` | `interrupted` | Heartbeat timeout / node destroyed | alarm / system |
+| `assigned` | `interrupted` | Conclusive runtime/workspace failure evidence / node destroyed | alarm / system |
 
 ### Invalid Transitions (Enforced)
 

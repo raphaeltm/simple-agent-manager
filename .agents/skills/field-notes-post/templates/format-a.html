@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face {
+    font-family: 'Chillax';
+    src: url('./assets/Chillax-Variable.woff2') format('woff2');
+    font-weight: 200 700;
+  }
+  :root {
+    --bg: #070d0b;
+    --surface: #13201d;
+    --fg: #e6f2ee;
+    --muted: #9fb7ae;
+    --dim: #6b8a7f;
+    --border: #29423b;
+    --accent: #16a34a;
+    --accent-strong: #22c55e;
+    --font-display: 'Chillax', system-ui, sans-serif;
+    --font-body: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    --font-mono: 'SF Mono', 'Fira Code', Consolas, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1200px; height: 675px;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-body);
+    overflow: hidden;
+    position: relative;
+  }
+  body::before {
+    content: '';
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(ellipse 70% 60% at 15% 10%, rgba(22,163,74,0.13) 0%, transparent 60%),
+      radial-gradient(ellipse 50% 40% at 85% 90%, rgba(22,163,74,0.08) 0%, transparent 55%);
+    pointer-events: none;
+  }
+  .layout { display: flex; height: 100%; position: relative; }
+
+  /* Left column */
+  .left {
+    width: 460px;
+    padding: 44px 36px 36px 44px;
+    display: flex; flex-direction: column;
+  }
+  .badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 12.5px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted);
+    padding: 6px 14px;
+    background: rgba(19,32,29,0.45);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 100px;
+    align-self: flex-start;
+    margin-bottom: 22px;
+  }
+  .badge-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent-strong); box-shadow: 0 0 8px var(--accent-strong); }
+  h1 {
+    font-family: var(--font-display);
+    font-size: 37px; font-weight: 600; line-height: 1.12; letter-spacing: -0.02em;
+    margin-bottom: 26px;
+  }
+  h1 .grad {
+    background: linear-gradient(135deg, #16a34a 0%, #22c55e 100%);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .timeline { display: flex; flex-direction: column; gap: 15px; flex: 1; }
+  .stop { display: flex; gap: 13px; align-items: flex-start; }
+  .stop-n {
+    flex: none;
+    width: 26px; height: 26px; border-radius: 50%;
+    background: var(--accent); border: 2px solid var(--accent-strong);
+    box-shadow: 0 0 12px rgba(34,197,94,0.5);
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-display); font-weight: 600; font-size: 13.5px;
+    margin-top: 1px;
+  }
+  .stop-meta {
+    font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--accent-strong); margin-bottom: 3px;
+  }
+  .stop-text { font-size: 14.5px; color: var(--muted); line-height: 1.42; }
+  .stop-text b { color: var(--fg); font-weight: 600; }
+  .footer {
+    display: flex; align-items: center; gap: 12px;
+    padding-top: 22px; border-top: 1px solid rgba(41,66,59,0.6);
+  }
+  .footer img { width: 30px; height: 30px; }
+  .wordmark { font-family: var(--font-display); font-weight: 600; font-size: 19px; }
+  .footer .url { margin-left: auto; font-family: var(--font-mono); font-size: 12px; color: var(--dim); }
+
+  /* Right: photos + map */
+  .right { flex: 1; padding: 26px 26px 26px 0; position: relative; }
+  .grid {
+    display: grid; height: 100%;
+    grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr;
+    gap: 12px;
+  }
+  .cell {
+    position: relative; border-radius: 14px; overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.09);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.35);
+  }
+  .cell img.photo { width: 100%; height: 100%; object-fit: cover; }
+  .cell .pin {
+    position: absolute; top: 12px; left: 12px;
+    width: 28px; height: 28px; border-radius: 50%;
+    background: var(--accent); border: 2px solid var(--accent-strong);
+    box-shadow: 0 0 14px rgba(34,197,94,0.6), 0 2px 6px rgba(0,0,0,0.5);
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-display); font-weight: 600; font-size: 14px;
+  }
+  .cell .time {
+    position: absolute; bottom: 10px; right: 12px;
+    font-family: var(--font-mono); font-size: 12px; color: rgba(230,242,238,0.95);
+    background: rgba(7,13,11,0.55); backdrop-filter: blur(8px);
+    padding: 3px 9px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.1);
+  }
+  .map-inset {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 190px; height: 190px; border-radius: 16px; overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.16);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.6), 0 0 24px rgba(34,197,94,0.12);
+  }
+  .map-inset img { width: 300px; height: 300px; object-fit: cover; margin: -55px 0 0 -55px; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <div class="left">
+    <div class="badge"><span class="badge-dot"></span>Field notes &middot; Paris &middot; Jul 4</div>
+    <h1>My agents shipped <span class="grad">4 pull requests</span> while I walked across Paris</h1>
+    <div class="timeline">
+      <div class="stop">
+        <div class="stop-n">1</div>
+        <div><div class="stop-meta">13:12 &middot; Pont Neuf</div>
+        <div class="stop-text">Kicked off agents on <b>chat performance</b> — full-conversation loading &amp; timeline jumps</div></div>
+      </div>
+      <div class="stop">
+        <div class="stop-n">2</div>
+        <div><div class="stop-meta">14:19 &middot; Port de la Rap&eacute;e</div>
+        <div class="stop-text">Agents <b>hunting a flaky CI test</b> and fixing message-history loading</div></div>
+      </div>
+      <div class="stop">
+        <div class="stop-n">3</div>
+        <div><div class="stop-meta">15:25 &middot; Jardin des Plantes</div>
+        <div class="stop-text"><b>3 agents in parallel</b> building project-sharing auth, wave by wave</div></div>
+      </div>
+      <div class="stop">
+        <div class="stop-n">4</div>
+        <div><div class="stop-meta">16:46 &middot; Coul&eacute;e Verte</div>
+        <div class="stop-text">Watched the <b>production deploy go green</b> from a rose trellis</div></div>
+      </div>
+    </div>
+    <div class="footer">
+      <img src="./assets/favicon.png" alt="">
+      <span class="wordmark">SAM</span>
+      <span class="url">simple-agent-manager.org</span>
+    </div>
+  </div>
+  <div class="right">
+    <div class="grid">
+      <div class="cell"><img class="photo" src="./assets/20260704_131201.jpg"><div class="pin">1</div><div class="time">13:12</div></div>
+      <div class="cell"><img class="photo" src="./assets/20260704_141952.jpg"><div class="pin">2</div><div class="time">14:19</div></div>
+      <div class="cell"><img class="photo" src="./assets/20260704_152542.jpg"><div class="pin">3</div><div class="time">15:25</div></div>
+      <div class="cell"><img class="photo" src="./assets/20260704_164644.jpg"><div class="pin">4</div><div class="time">16:46</div></div>
+    </div>
+    <div class="map-inset"><img src="./assets/map.png"></div>
+  </div>
+</div>
+</body>
+</html>

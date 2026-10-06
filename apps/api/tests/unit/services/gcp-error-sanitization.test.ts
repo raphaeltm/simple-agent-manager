@@ -319,6 +319,28 @@ describe('end-to-end sanitization: raw GCP errors produce safe output', () => {
     expect(sanitized).toContain('Permission denied');
   });
 
+  it('uses key guidance for token exchange permission errors', () => {
+    const sanitized = sanitizeGcpError(new GcpApiError({
+      step: 'service_account_token',
+      message: 'token rejected',
+      statusCode: 403,
+    }));
+
+    expect(sanitized).toContain('key status');
+    expect(sanitized).not.toContain('roles/compute.instanceAdmin.v1');
+  });
+
+  it('uses Compute role guidance only for Compute verification errors', () => {
+    const sanitized = sanitizeGcpError(new GcpApiError({
+      step: 'service_account_compute_verify',
+      message: 'zone access rejected',
+      statusCode: 403,
+    }));
+
+    expect(sanitized).toContain('roles/compute.instanceAdmin.v1');
+    expect(sanitized).toContain('roles/compute.securityAdmin');
+  });
+
   it('a realistic IAM policy error with binding details is fully sanitized', () => {
     const err = new GcpApiError({
       step: 'grant_project_roles',

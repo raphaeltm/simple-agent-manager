@@ -29,7 +29,7 @@ export function SuggestionChip({ idea, onSelect, disabled = false }: SuggestionC
       className="
         flex-shrink-0 inline-flex flex-col items-start gap-0.5
         min-h-11 px-4 py-2 rounded-full
-        border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)]
+        border border-[rgba(34,197,94,0.10)] bg-inset
         text-left text-fg-primary
         hover:border-accent hover:bg-surface-hover
         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent

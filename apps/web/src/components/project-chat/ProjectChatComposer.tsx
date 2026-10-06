@@ -1,11 +1,26 @@
-import type { MentionPaletteHandle, SlashCommand, SlashCommandPaletteHandle } from '@simple-agent-manager/acp-client';
-import { MentionPalette, SlashCommandPalette, VoiceButton } from '@simple-agent-manager/acp-client';
-import type { AgentProfile } from '@simple-agent-manager/shared';
+import type {
+  MentionPaletteHandle,
+  SlashCommand,
+  SlashCommandPaletteHandle,
+} from '@simple-agent-manager/acp-client';
+import {
+  appendDictatedText,
+  MentionPalette,
+  SlashCommandPalette,
+  VoiceButton,
+} from '@simple-agent-manager/acp-client';
+import type { AgentProfile, AgentSkill } from '@simple-agent-manager/shared';
 import { Paperclip, X } from 'lucide-react';
 import type { MutableRefObject } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { formatFileSize } from '../../lib/file-utils';
+import {
+  getSendButtonTitle,
+  getSendShortcutAriaKey,
+  getSendShortcutHint,
+} from '../../lib/platform-shortcuts';
+import { SkillSelector } from '../skills/SkillSelector';
 
 export interface ProjectChatComposerAttachment {
   file: File;
@@ -19,10 +34,14 @@ interface ProjectChatComposerProps {
   onChange: (value: string) => void;
   onSend: () => void;
   sending: boolean;
+  disabled?: boolean;
   placeholder: string;
   transcribeApiUrl: string;
   slashCommands?: SlashCommand[];
   agentProfiles?: AgentProfile[];
+  skills?: AgentSkill[];
+  selectedSkillId?: string | null;
+  onSkillChange?: (skillId: string | null) => void;
   attachments?: ProjectChatComposerAttachment[];
   onFilesSelected?: (files: FileList | null) => void;
   onRemoveAttachment?: (index: number) => void;
@@ -43,10 +62,14 @@ export function ProjectChatComposer({
   onChange,
   onSend,
   sending,
+  disabled = false,
   placeholder,
   transcribeApiUrl,
   slashCommands = [],
   agentProfiles = [],
+  skills = [],
+  selectedSkillId = null,
+  onSkillChange,
   attachments = [],
   onFilesSelected,
   onRemoveAttachment,
@@ -69,9 +92,7 @@ export function ProjectChatComposer({
     dismissedSlashFilterRef.current = null;
   }
   const showSlashPalette =
-    !!slashMatch &&
-    slashCommands.length > 0 &&
-    dismissedSlashFilterRef.current !== slashFilter;
+    !!slashMatch && slashCommands.length > 0 && dismissedSlashFilterRef.current !== slashFilter;
 
   const textBeforeCursor = value.slice(0, cursorPos);
   const mentionMatch = textBeforeCursor.match(/@(\w*)$/);
@@ -85,6 +106,9 @@ export function ProjectChatComposer({
     agentProfiles.length > 0 &&
     !showSlashPalette &&
     dismissedMentionFilterRef.current !== mentionFilter;
+  const sendButtonTitle = getSendButtonTitle();
+  const sendShortcutAriaKey = getSendShortcutAriaKey();
+  const sendShortcutHint = getSendShortcutHint();
 
   useEffect(() => {
     textareaRef.current?.focus();
@@ -97,23 +121,31 @@ export function ProjectChatComposer({
     textarea.style.height = `${Math.min(textarea.scrollHeight, TEXTAREA_MAX_HEIGHT_PX)}px`;
   }, [value]);
 
-  const setFileInput = useCallback((node: HTMLInputElement | null) => {
-    internalFileInputRef.current = node;
-    if (fileInputRef) {
-      fileInputRef.current = node;
-    }
-  }, [fileInputRef]);
+  const setFileInput = useCallback(
+    (node: HTMLInputElement | null) => {
+      internalFileInputRef.current = node;
+      if (fileInputRef) {
+        fileInputRef.current = node;
+      }
+    },
+    [fileInputRef]
+  );
 
-  const handleTranscription = useCallback((text: string) => {
-    const separator = value.length > 0 && !value.endsWith(' ') ? ' ' : '';
-    onChange(value + separator + text);
-    textareaRef.current?.focus();
-  }, [value, onChange]);
+  const handleTranscription = useCallback(
+    (text: string) => {
+      onChange(appendDictatedText(value, text));
+      textareaRef.current?.focus();
+    },
+    [value, onChange]
+  );
 
-  const handleCommandSelect = useCallback((command: SlashCommand) => {
-    onChange(`/${command.name} `);
-    textareaRef.current?.focus();
-  }, [onChange]);
+  const handleCommandSelect = useCallback(
+    (command: SlashCommand) => {
+      onChange(`/${command.name} `);
+      textareaRef.current?.focus();
+    },
+    [onChange]
+  );
 
   const handleMentionSelect = useCallback(
     (profile: { name: string }) => {
@@ -129,24 +161,30 @@ export function ProjectChatComposer({
         textareaRef.current?.setSelectionRange(nextCursorPos, nextCursorPos);
       });
     },
-    [cursorPos, mentionTriggerIndex, onChange, value],
+    [cursorPos, mentionTriggerIndex, onChange, value]
   );
 
-  const handleFilesSelected = useCallback((files: FileList | null) => {
-    onFilesSelected?.(files);
-    if (internalFileInputRef.current) internalFileInputRef.current.value = '';
-  }, [onFilesSelected]);
+  const handleFilesSelected = useCallback(
+    (files: FileList | null) => {
+      onFilesSelected?.(files);
+      if (internalFileInputRef.current) internalFileInputRef.current.value = '';
+    },
+    [onFilesSelected]
+  );
 
-  const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (slashPaletteRef.current?.handleKeyDown(event)) return;
-    if (mentionPaletteRef.current?.handleKeyDown(event)) return;
-    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !sending) {
-      event.preventDefault();
-      onSend();
-    }
-  }, [onSend, sending]);
+  const handleKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (slashPaletteRef.current?.handleKeyDown(event)) return;
+      if (mentionPaletteRef.current?.handleKeyDown(event)) return;
+      if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !sending && !disabled) {
+        event.preventDefault();
+        onSend();
+      }
+    },
+    [disabled, onSend, sending]
+  );
 
-  const sendDisabled = sending || !value.trim() || uploading;
+  const sendDisabled = sending || disabled || !value.trim() || uploading;
 
   return (
     <>
@@ -196,7 +234,9 @@ export function ProjectChatComposer({
                   : formatFileSize(attachment.file.size)}
               </span>
               {attachment.status === 'error' && (
-                <span className="text-danger shrink-0" title={attachment.error}>!</span>
+                <span className="text-danger shrink-0" title={attachment.error}>
+                  !
+                </span>
               )}
               {onRemoveAttachment && (
                 <button
@@ -218,6 +258,17 @@ export function ProjectChatComposer({
           ))}
         </div>
       )}
+      {skills.length > 0 && onSkillChange && (
+        <div className="mb-2 max-w-md">
+          <SkillSelector
+            skills={skills}
+            selectedSkillId={selectedSkillId}
+            onChange={onSkillChange}
+            disabled={sending || disabled}
+            compact
+          />
+        </div>
+      )}
       <div className="flex gap-2 items-end">
         {onFilesSelected && (
           <>
@@ -231,7 +282,7 @@ export function ProjectChatComposer({
             <button
               type="button"
               onClick={() => internalFileInputRef.current?.click()}
-              disabled={sending || uploading}
+              disabled={sending || disabled || uploading}
               className="shrink-0 p-2 min-h-[44px] min-w-[44px] flex items-center justify-center bg-transparent border border-[rgba(34,197,94,0.12)] rounded-md text-fg-muted hover:text-fg-primary hover:border-[rgba(34,197,94,0.25)] hover:shadow-[0_0_8px_rgba(22,163,74,0.1)] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-all"
               aria-label={attachTitle}
               title={attachTitle}
@@ -250,24 +301,38 @@ export function ProjectChatComposer({
           onSelect={(event) => setCursorPos(event.currentTarget.selectionStart ?? 0)}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
-          disabled={sending}
+          disabled={sending || disabled}
           rows={1}
           role="combobox"
           aria-autocomplete="list"
           aria-expanded={showSlashPalette || showMentionPalette}
-          aria-controls={showSlashPalette ? 'slash-palette-listbox' : showMentionPalette ? 'mention-palette-listbox' : undefined}
-          aria-activedescendant={showSlashPalette ? slashPaletteRef.current?.activeDescendantId : showMentionPalette ? mentionPaletteRef.current?.activeDescendantId : undefined}
-          className="flex-1 p-2 px-3 bg-[rgba(10,15,13,0.6)] border border-[rgba(34,197,94,0.12)] rounded-md text-fg-primary text-base outline-none resize-none font-[inherit] leading-[1.5] min-h-[38px] max-h-[120px] overflow-y-auto focus:border-[rgba(34,197,94,0.35)] focus:shadow-[0_0_0_3px_rgba(34,197,94,0.08),0_0_20px_rgba(22,163,74,0.08)] transition-all"
+          aria-controls={
+            showSlashPalette
+              ? 'slash-palette-listbox'
+              : showMentionPalette
+                ? 'mention-palette-listbox'
+                : undefined
+          }
+          aria-activedescendant={
+            showSlashPalette
+              ? slashPaletteRef.current?.activeDescendantId
+              : showMentionPalette
+                ? mentionPaletteRef.current?.activeDescendantId
+                : undefined
+          }
+          className="flex-1 p-2 px-3 bg-[var(--sam-form-bg)] border border-[rgba(34,197,94,0.12)] rounded-md text-fg-primary text-base outline-none resize-none font-[inherit] leading-[1.5] min-h-[38px] max-h-[120px] overflow-y-auto focus:border-[rgba(34,197,94,0.35)] focus:shadow-[0_0_0_3px_rgba(34,197,94,0.08),0_0_20px_rgba(22,163,74,0.08)] transition-all"
         />
         <VoiceButton
           onTranscription={handleTranscription}
-          disabled={sending}
+          disabled={sending || disabled}
           apiUrl={transcribeApiUrl}
         />
         <button
           type="button"
           onClick={onSend}
           disabled={sendDisabled}
+          title={sendButtonTitle}
+          aria-keyshortcuts={sendShortcutAriaKey}
           className={`px-3 py-2 min-h-[44px] border-none rounded-md text-base font-medium whitespace-nowrap transition-all ${
             sendDisabled
               ? 'bg-inset text-fg-muted cursor-default opacity-50'
@@ -278,9 +343,7 @@ export function ProjectChatComposer({
         </button>
       </div>
       {showShortcutHint && (
-        <div className="sam-type-caption text-fg-muted mt-1">
-          Press Ctrl+Enter to send, Enter for new line
-        </div>
+        <div className="sam-type-caption text-fg-muted mt-1">{sendShortcutHint}</div>
       )}
     </>
   );

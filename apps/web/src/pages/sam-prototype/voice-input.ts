@@ -46,7 +46,7 @@ export function useVoiceInput(opts: {
         const tick = () => {
           analyser.getByteFrequencyData(dataArray);
           let sum = 0;
-          for (let i = 0; i < dataArray.length; i++) sum += dataArray[i]!;
+          for (const value of dataArray) sum += value;
           const avg = sum / dataArray.length;
           amplitudeRef.current = Math.min(avg / 128, 1);
           animFrameRef.current = requestAnimationFrame(tick);
@@ -56,7 +56,7 @@ export function useVoiceInput(opts: {
         // AudioContext not supported
       }
     },
-    [amplitudeRef],
+    [amplitudeRef]
   );
 
   const stopAmplitudeMonitor = useCallback(() => {

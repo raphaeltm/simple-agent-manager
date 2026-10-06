@@ -30,6 +30,42 @@ export interface Integration {
   models?: string[];
 }
 
+function titleDescriptionItem(title: string, description: string): { title: string; description: string } {
+  return { title, description };
+}
+
+function stepDescriptionItem(step: string, description: string): { step: string; description: string } {
+  return { step, description };
+}
+
+function faqItem(question: string, answer: string): { question: string; answer: string } {
+  return { question, answer };
+}
+
+const workersAiMarketingFields = {
+  tagline: 'Built-in edge AI for platform features',
+  description:
+    "SAM runs on Cloudflare Workers, and Workers AI provides edge inference for platform features. SAM uses Workers AI for task title generation, text-to-speech, and context summarization without requiring a separate model API key.",
+  seoTitle: 'Built-in AI with Cloudflare Workers AI | SAM',
+  seoDescription:
+    'SAM includes Cloudflare Workers AI for task titles, text-to-speech, and summarization. Built into the platform with no separate model key.',
+} satisfies Pick<Integration, 'tagline' | 'description' | 'seoTitle' | 'seoDescription'>;
+
+const workersAiNoSeparateModelKeyFeature = titleDescriptionItem(
+  'No Separate Model Key',
+  'Workers AI is part of SAM\'s Cloudflare deployment — no additional model API key is needed for task titles and TTS.',
+);
+
+const workersAiSelfHostedUseCase = titleDescriptionItem(
+  'Self-hosted AI platform',
+  'When self-hosting SAM on the Workers Paid plan, Workers AI powers platform features without a separate model API key.',
+);
+
+const workersAiApiKeyFaq = faqItem(
+  'Does Workers AI require a separate API key?',
+  'No — Workers AI is available through the Cloudflare account that runs SAM. Self-hosting SAM still requires the Workers Paid plan because the default deployment uses Durable Objects and Cloudflare Containers.',
+);
+
 export const categories = [
   { id: 'ai-agents' as const, label: 'AI Coding Agents', description: 'Run any coding agent on your infrastructure' },
   { id: 'cloud-providers' as const, label: 'Cloud Providers', description: 'Bring your own cloud — your VMs, your data' },
@@ -204,14 +240,14 @@ export const integrations: Integration[] = [
     categoryLabel: 'AI Coding Agents',
     tagline: 'Run OpenCode agents with any inference provider',
     description:
-      "OpenCode is an open-source AI coding agent from SST that works with multiple inference providers. With SAM, you can run OpenCode on your cloud VMs using Scaleway, Google Vertex, Anthropic, or any OpenAI-compatible API as the backend.",
+      "OpenCode is an open-source AI coding agent from SST that works with multiple inference providers. With SAM, you can run OpenCode on your cloud VMs using SAM Platform inference, Scaleway, OpenCode Managed, Google Vertex, Anthropic, or any OpenAI-compatible API as the backend.",
     color: '#6366F1',
     logoPath: '/images/integrations/sst.svg',
     seoTitle: 'Run OpenCode with Any AI Provider | SAM',
     seoDescription:
       'Run OpenCode agents on your cloud with any inference provider — Scaleway, Google Vertex, Anthropic, or custom endpoints. SAM handles VM provisioning and agent lifecycle.',
     features: [
-      { title: 'Provider Flexibility', description: 'Use any OpenAI-compatible inference provider — Scaleway, Google Vertex, Anthropic, or your own endpoint.' },
+      { title: 'Provider Flexibility', description: 'Use SAM Platform inference, Scaleway, OpenCode Managed, Google Vertex, Anthropic, or your own OpenAI-compatible endpoint.' },
       { title: 'Open Source', description: 'OpenCode is fully open source (from SST), so you can audit, modify, and extend the agent to fit your needs.' },
       { title: 'Lightweight Footprint', description: 'Minimal resource requirements mean you can run more OpenCode instances on smaller VMs.' },
       { title: 'Scaleway Native', description: 'First-class integration with Scaleway\'s inference API — a natural pairing with SAM\'s Scaleway cloud provider support.' },
@@ -228,7 +264,7 @@ export const integrations: Integration[] = [
       { title: 'Custom model experimentation', description: 'Test different models and providers by swapping OpenCode\'s inference backend without changing your workflow.' },
     ],
     faq: [
-      { question: 'What inference providers work with OpenCode?', answer: 'OpenCode supports Scaleway, Google Vertex AI, Anthropic, and any OpenAI-compatible endpoint. Configure the provider in your project settings.' },
+      { question: 'What inference providers work with OpenCode?', answer: 'OpenCode supports SAM Platform inference, Scaleway, OpenCode Managed, Google Vertex AI, Anthropic, and OpenAI-compatible or custom endpoints. Configure the provider in your project settings.' },
       { question: 'Is OpenCode the same as OpenAI Codex?', answer: 'No — OpenCode is a separate open-source project from SST. It\'s a different agent that happens to support multiple AI providers including (but not limited to) OpenAI-compatible APIs.' },
       { question: 'Can I use my own fine-tuned models?', answer: 'Yes — if your model is served via an OpenAI-compatible API endpoint, OpenCode can use it. Point the inference URL to your custom endpoint.' },
     ],
@@ -273,7 +309,7 @@ export const integrations: Integration[] = [
       { question: 'Do I need a Hetzner account?', answer: 'Yes — SAM uses a BYOC (Bring Your Own Cloud) model. You create a Hetzner Cloud project, generate an API token, and add it to SAM.' },
       { question: 'Is my Hetzner token secure?', answer: 'Your token is encrypted with AES-GCM and stored per-user in the database. SAM never stores cloud provider credentials as plain text or environment variables.' },
     ],
-    relatedSlugs: ['scaleway', 'claude-code', 'codex'],
+    relatedSlugs: ['scaleway', 'vultr', 'claude-code', 'codex'],
     externalUrl: 'https://www.hetzner.com/cloud/',
   },
   {
@@ -311,8 +347,171 @@ export const integrations: Integration[] = [
       { question: 'Can I use Scaleway inference with SAM?', answer: 'Yes — use OpenCode as your agent and configure it to use Scaleway\'s inference API as the backend. This creates a fully Scaleway-native stack.' },
       { question: 'How does Scaleway compare to Hetzner?', answer: 'Both are excellent European providers. Hetzner tends to be cheaper for raw compute. Scaleway offers additional services like managed inference that can complement SAM.' },
     ],
-    relatedSlugs: ['hetzner', 'opencode', 'mistral-vibe'],
+    relatedSlugs: ['hetzner', 'vultr', 'opencode', 'mistral-vibe'],
     externalUrl: 'https://www.scaleway.com/',
+  },
+  {
+    slug: 'infomaniak', name: 'Infomaniak Public Cloud', shortName: 'Infomaniak', category: 'cloud-providers', categoryLabel: 'Cloud Providers',
+    tagline: 'Run coding agents on sovereign Swiss OpenStack infrastructure',
+    description: 'Connect a Keystone application credential and let SAM provision workspace and deployment nodes on Infomaniak Public Cloud, with persistent Cinder volumes that survive node replacement.',
+    color: '#0098FF', logoPath: '/images/integrations/infomaniak.svg', seoTitle: 'Run AI Coding Agents on Infomaniak Public Cloud | SAM', seoDescription: 'Run coding agents and persistent app deployments on Swiss Infomaniak Public Cloud with SAM.',
+    features: [
+      titleDescriptionItem('Swiss Data Location', 'Compute and encrypted Ceph/Cinder storage run in Infomaniak data centers in Switzerland.'),
+      titleDescriptionItem('OpenStack Automation', 'SAM uses Keystone, Nova, Glance, Neutron, and Cinder APIs with runtime-validated responses.'),
+      titleDescriptionItem('Persistent Deployment Volumes', 'Cinder volumes detach and reattach to replacement nodes while retaining application data.'),
+      titleDescriptionItem('Explicit Application Credentials', 'Use a scoped application credential ID and one-time secret instead of a broad account password.'),
+    ],
+    howItWorks: [
+      stepDescriptionItem('Create an Application Credential', 'Create a Keystone application credential with reader and member roles; both roles are required in dc4-a.'),
+      stepDescriptionItem('Connect Infomaniak', 'Enter the application credential ID and one-time secret in SAM settings.'),
+      stepDescriptionItem('Choose a Swiss Region', 'Select dc4-a or dc3-a for workspace and deployment nodes.'),
+      stepDescriptionItem('Run Agents and Apps', 'SAM provisions Nova instances and region-matched Cinder volumes.'),
+    ],
+    useCases: [
+      titleDescriptionItem('European and Swiss data residency', 'Keep workspace and deployment infrastructure in Switzerland with English and French provider support.'),
+      titleDescriptionItem('Replacement-safe app data', 'Preserve application state on a Cinder volume while replacing deployment nodes.'),
+      titleDescriptionItem('Open cloud operations', 'Use standard OpenStack infrastructure without coupling SAM to proprietary VM or volume semantics.'),
+    ],
+    faq: [
+      faqItem('Which credential does SAM need?', 'A Keystone application credential ID and secret. In dc4-a, assign both reader and member roles.'),
+      faqItem('Do Infomaniak volumes survive node replacement?', 'Yes. Cinder volumes are independent resources that can be detached and reattached within the same region.'),
+      faqItem('Can SAM resize an attached volume?', 'SAM uses the documented safe path: detach first, grow the volume, then reattach. Shrinking is not supported.'),
+    ],
+    relatedSlugs: ['hetzner', 'scaleway', 'vultr', 'claude-code'], externalUrl: 'https://www.infomaniak.com/en/hosting/public-cloud',
+  },
+  {
+    slug: 'vultr',
+    name: 'Vultr',
+    category: 'cloud-providers',
+    categoryLabel: 'Cloud Providers',
+    tagline: 'Run coding agents on global Vultr Cloud VMs',
+    description:
+      "Vultr is a global cloud provider with data center locations across six continents and simple hourly billing. With SAM, you connect a single Vultr API key and run AI coding agents on high-performance Vultr Cloud Compute VMs — with NVMe Block Storage available for persistent deployment volumes.",
+    color: '#007BFC',
+    logoPath: '/images/integrations/vultr.svg',
+    seoTitle: 'Run AI Coding Agents on Vultr Cloud | SAM',
+    seoDescription:
+      'Run AI coding agents on global Vultr Cloud VMs with hourly billing. SAM handles provisioning, devcontainer setup, and lifecycle on your Vultr account.',
+    features: [
+      { title: 'Global Footprint', description: 'Vultr operates data center locations across six continents — provision agents close to wherever your team works.' },
+      { title: 'Simple Hourly Billing', description: 'Vultr bills VMs by the hour, so you pay only for the compute time your agents actually use.' },
+      { title: 'Single API Key Auth', description: 'Connect Vultr with one Personal Access Token — no IAM roles or service accounts, just like Hetzner.' },
+      { title: 'NVMe Block Storage', description: 'Vultr Block Storage provides high-performance NVMe volumes, so Vultr-backed deployment environments can use persistent volumes.' },
+    ],
+    howItWorks: [
+      { step: 'Create a Vultr API Key', description: 'In the Vultr Customer Portal, open Account → API and generate a Personal Access Token.' },
+      { step: 'Allow All IPs on the Token', description: 'Set the token\'s access control to "Allow All IPv4/IPv6". SAM calls Vultr from Cloudflare Workers, which have no static egress IP, so a restricted allowlist blocks provisioning.' },
+      { step: 'Add Key to SAM', description: 'Paste your Vultr API key in SAM settings. It\'s encrypted with AES-GCM and stored per-user.' },
+      { step: 'Start Running Agents', description: 'Submit tasks and SAM provisions Vultr Cloud Compute VMs automatically, defaulting to the Frankfurt (fra) region.' },
+    ],
+    useCases: [
+      { title: 'Global low-latency compute', description: 'Vultr\'s worldwide regions let you run agents near your team — from North America and Europe to Asia and Australia.' },
+      { title: 'Persistent deployment volumes', description: 'Pair Vultr Block Storage with SAM app deployments to keep data across releases on high-performance NVMe volumes.' },
+      { title: 'Simple multi-cloud setup', description: 'Add Vultr alongside Hetzner and Scaleway for provider redundancy with the same single-API-key simplicity.' },
+    ],
+    faq: [
+      { question: 'How much does Vultr cost?', answer: 'SAM\'s default Vultr sizes range from about $20/mo (2 vCPU / 4GB) to $80/mo (6 vCPU / 16GB), billed hourly so you only pay for compute time used.' },
+      { question: 'Why must I set the Vultr token to "Allow All IPv4/IPv6"?', answer: 'Vultr Personal Access Tokens support an IP access-control allowlist. SAM provisions VMs from Cloudflare Workers, which have no fixed egress IP, so the token must allow all IPv4/IPv6 addresses or provisioning requests will be rejected.' },
+      { question: 'Does Vultr support persistent volumes?', answer: 'Yes — Vultr Block Storage provides NVMe-backed volumes, so Vultr-backed deployment environments can use persistent volumes. Block Storage is available in a subset of Vultr regions, so volume-backed environments are pinned to a supported region.' },
+    ],
+    relatedSlugs: ['hetzner', 'scaleway', 'claude-code'],
+    externalUrl: 'https://www.vultr.com',
+  },
+  {
+    slug: 'digitalocean',
+    name: 'DigitalOcean',
+    category: 'cloud-providers',
+    categoryLabel: 'Cloud Providers',
+    tagline: 'Run coding agents on DigitalOcean Droplets',
+    description:
+      'Connect a DigitalOcean Personal Access Token and let SAM provision Droplets for workspaces and deployment environments, with Block Storage for persistent deployment volumes.',
+    color: '#0080FF',
+    logoPath: '/images/integrations/digitalocean.svg',
+    seoTitle: 'Run AI Coding Agents on DigitalOcean | SAM',
+    seoDescription:
+      'Run AI coding agents on DigitalOcean Droplets. SAM handles provisioning, cloud-init, lifecycle, and persistent Block Storage volumes.',
+    features: [
+      {
+        title: 'Global Droplet Regions',
+        description:
+          'Provision SAM nodes across DigitalOcean regions in Europe, North America, Asia, India, and Australia.',
+      },
+      {
+        title: 'Simple PAT Authentication',
+        description: 'Connect one Full Access Personal Access Token; SAM encrypts it per user.',
+      },
+      {
+        title: 'Persistent Block Storage',
+        description:
+          'Attach grow-only DigitalOcean volumes to deployment environments with deterministic Linux device paths.',
+      },
+    ],
+    howItWorks: [
+      {
+        step: 'Create a PAT',
+        description:
+          'Generate a Full Access Personal Access Token in the DigitalOcean API settings.',
+      },
+      {
+        step: 'Connect DigitalOcean',
+        description:
+          'Paste the token in SAM Settings → Cloud Providers; SAM validates it against the account endpoint.',
+      },
+      {
+        step: 'Run Workspaces and Deployments',
+        description:
+          'SAM provisions Ubuntu 24.04 Droplets in Frankfurt by default and manages their lifecycle.',
+      },
+    ],
+    useCases: [
+      {
+        title: 'Multi-cloud agent capacity',
+        description:
+          'Add DigitalOcean alongside Hetzner, Scaleway, Vultr, or GCP for regional choice and provider redundancy.',
+      },
+      {
+        title: 'Persistent app environments',
+        description:
+          'Use same-region Block Storage for databases, uploads, and state that survives deployments.',
+      },
+    ],
+    faq: [
+      {
+        question: 'Which DigitalOcean token does SAM need?',
+        answer:
+          'Use a Full Access PAT, or custom scopes covering droplets, block storage, tags, account, actions, images, regions, and sizes.',
+      },
+      {
+        question: 'Which region does SAM use by default?',
+        answer:
+          'SAM defaults to fra1 (Frankfurt), with other curated DigitalOcean regions available in workspace and deployment settings.',
+      },
+      {
+        question: 'Does DigitalOcean support persistent deployment volumes?',
+        answer:
+          'Yes. SAM creates, attaches, detaches, grows, and deletes DigitalOcean Block Storage volumes in the same region as the Droplet.',
+      },
+    ],
+    relatedSlugs: ['hetzner', 'scaleway', 'vultr', 'codex'],
+    externalUrl: 'https://www.digitalocean.com/',
+  },
+  {
+    slug: 'upcloud',
+    name: 'UpCloud',
+    category: 'cloud-providers',
+    categoryLabel: 'Cloud Providers',
+    tagline: 'European cloud compute with persistent deployment storage',
+    description: 'Connect a dedicated UpCloud API subaccount to run SAM workspace and deployment nodes with encrypted MaxIOPS storage.',
+    color: 'rgb(123 0 255)',
+    logoPath: '/images/integrations/upcloud.svg',
+    seoTitle: 'Run AI Coding Agents on UpCloud',
+    seoDescription: 'Run AI coding agents and persistent app deployments on UpCloud.',
+    features: [titleDescriptionItem('Persistent Storage', 'Create, attach, detach, preserve, and grow encrypted deployment volumes in the same zone.')],
+    howItWorks: [{ step: 'Connect UpCloud', description: 'Create a dedicated API subaccount and enter its username and password in SAM settings.' }],
+    useCases: [titleDescriptionItem('European agent infrastructure', 'Run coding agents and persistent deployments in UpCloud regions.')],
+    faq: [faqItem('Do volumes survive node deletion?', 'SAM preserves tracked deployment volumes until explicit teardown.')],
+    relatedSlugs: ['hetzner', 'scaleway', 'vultr'],
+    externalUrl: 'https://upcloud.com',
   },
   {
     slug: 'gcp',
@@ -361,35 +560,30 @@ export const integrations: Integration[] = [
     shortName: 'Workers AI',
     category: 'ai-models',
     categoryLabel: 'AI Models',
-    tagline: 'Free AI inference built into the platform',
-    description:
-      "SAM runs on Cloudflare Workers, and Workers AI provides free AI inference at the edge. SAM uses Workers AI for task title generation, text-to-speech, and context summarization — all included with the platform at no extra cost.",
+    ...workersAiMarketingFields,
     color: '#F6821F',
     logoPath: '/images/integrations/cloudflare.svg',
-    seoTitle: 'Free AI with Cloudflare Workers AI | SAM',
-    seoDescription:
-      'SAM includes free AI inference via Cloudflare Workers AI — task titles, text-to-speech, and summarization at no extra cost. Built into the platform.',
     features: [
-      { title: 'Zero Extra Cost', description: 'Workers AI inference is included with SAM — no API keys needed for built-in features like task titles and TTS.' },
+      workersAiNoSeparateModelKeyFeature,
       { title: 'Edge Inference', description: 'Models run at Cloudflare\'s edge — low latency for platform features, no cold starts.' },
-      { title: 'Multiple Models', description: 'Llama 4, Gemma 3, Qwen 3, and Deepgram for different tasks — SAM picks the right model automatically.' },
+      { title: 'Multiple Models', description: 'Llama 4, Gemma 4, GLM-4.7, Qwen 3, and Deepgram for different tasks — SAM picks the right model automatically.' },
       { title: 'AI Gateway', description: 'All inference is routed through Cloudflare AI Gateway for rate limiting, analytics, and reliability.' },
     ],
     howItWorks: [
       { step: 'Already Built In', description: 'Workers AI is part of SAM\'s Cloudflare infrastructure — no setup required.' },
-      { step: 'Automatic Model Selection', description: 'SAM uses the right model for each task: Gemma for titles, Deepgram for TTS, Llama for summarization.' },
+      { step: 'Automatic Model Selection', description: 'SAM uses the right model for each task: GLM for titles, Deepgram for TTS, Gemma for summarization.' },
       { step: 'AI Proxy (Optional)', description: 'Enable the AI proxy to route custom inference through Workers AI with rate limiting and token budgets.' },
       { step: 'Monitor Usage', description: 'Track AI usage, costs, and model distribution via the admin analytics dashboard.' },
     ],
     useCases: [
       { title: 'Zero-config AI features', description: 'Task title generation, text-to-speech for messages, and context summarization work out of the box.' },
       { title: 'AI proxy gateway', description: 'Route LLM requests through SAM\'s AI proxy for rate limiting, token budgets, and centralized analytics.' },
-      { title: 'Self-hosted AI platform', description: 'When self-hosting SAM on Cloudflare\'s free tier, Workers AI provides AI capabilities without any API key costs.' },
+      workersAiSelfHostedUseCase,
     ],
     faq: [
-      { question: 'Is Workers AI really free?', answer: 'Yes — Cloudflare provides a generous free tier for Workers AI inference. SAM\'s built-in features (task titles, TTS, summarization) use this free tier.' },
+      workersAiApiKeyFaq,
       { question: 'Can I use Workers AI for my coding agents?', answer: 'Workers AI powers platform features, not the coding agents themselves. Agents use their own models (Claude, GPT, Gemini, Devstral) via their respective API keys.' },
-      { question: 'What models does SAM use?', answer: 'Llama 4 Scout 17B for general inference, Gemma 3 12B for task titles, Qwen 3 30B for complex tasks, and Deepgram Aura 2 for text-to-speech.' },
+      { question: 'What models does SAM use?', answer: 'Llama 4 Scout 17B for general inference, GLM-4.7 Flash for task titles, Gemma 4 26B for context summarization, Qwen 3 30B for complex tasks, and Deepgram Aura 2 for text-to-speech.' },
     ],
     relatedSlugs: ['claude-code', 'codex', 'gemini-cli'],
     externalUrl: 'https://ai.cloudflare.com/',

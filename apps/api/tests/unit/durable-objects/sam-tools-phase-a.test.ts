@@ -38,6 +38,13 @@ vi.mock('../../../src/services/platform-credentials', () => ({
   }),
 }));
 
+vi.mock('../../../src/services/task-final-assistant-message', () => ({
+  getLatestAssistantMessageForTask: vi.fn().mockResolvedValue(null),
+}));
+
+import { getLatestAssistantMessageForTask } from '../../../src/services/task-final-assistant-message';
+const mockGetLatestAssistant = vi.mocked(getLatestAssistantMessageForTask);
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Create a mock D1Database that returns configurable results. */
@@ -46,13 +53,15 @@ function mockD1(options: {
   allResults?: Record<string, unknown>[];
   runChanges?: number;
 } = {}) {
+  const results = options.allResults ?? [];
   const mockStatement = {
     bind: vi.fn().mockReturnThis(),
     first: vi.fn().mockResolvedValue(options.firstResult ?? null),
     all: vi.fn().mockResolvedValue({
-      results: options.allResults ?? [],
+      results,
       success: true,
     }),
+    raw: vi.fn().mockResolvedValue(results.map((r) => Object.values(r))),
     run: vi.fn().mockResolvedValue({
       success: true,
       meta: { changes: options.runChanges ?? 1 },
@@ -132,6 +141,52 @@ describe('get_task_details', () => {
     const r = result as { error?: string };
     expect(r.error).toBeDefined();
     expect(r.error).not.toContain('Unknown tool');
+  });
+
+  it('includes finalAssistantMessage from the service when a chat session exists', async () => {
+    const taskRow = {
+      id: 'task-with-session',
+      title: 'Test task',
+      description: 'Test',
+      status: 'completed',
+      priority: 1,
+      output_branch: null,
+      output_pr_url: null,
+      output_summary: null,
+      completion_evidence: null,
+      error_message: null,
+      execution_step: null,
+      created_at: '2026-03-14T00:00:00Z',
+      updated_at: '2026-03-14T01:00:00Z',
+      started_at: '2026-03-14T00:05:00Z',
+      completed_at: '2026-03-14T01:00:00Z',
+      chat_session_id: 'chat-session-99',
+      project_id: 'proj-1',
+      name: 'Test Project',
+    };
+
+    const ctx = buildCtx({ dbAllResults: [taskRow] });
+
+    mockGetLatestAssistant.mockResolvedValueOnce({
+      id: 'msg-final',
+      content: 'Final diagnostic output',
+      createdAt: 1710000002000,
+    });
+
+    const result = (await getTaskDetails({ taskId: 'task-with-session' }, ctx)) as Record<
+      string,
+      unknown
+    >;
+    expect(result.finalAssistantMessage).toEqual({
+      id: 'msg-final',
+      content: 'Final diagnostic output',
+      createdAt: 1710000002000,
+    });
+    expect(mockGetLatestAssistant).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'chat-session-99',
+    );
   });
 });
 

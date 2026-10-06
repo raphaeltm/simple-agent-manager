@@ -1,4 +1,3 @@
-import type { WorkspaceRuntimeAssetsResponse } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { Context } from 'hono';
@@ -9,20 +8,215 @@ import { extractBearerToken } from '../../lib/auth-helpers';
 import { log } from '../../lib/logger';
 import { expectJsonRecord } from '../../lib/runtime-validation';
 import { errors } from '../../middleware/error';
-import { signCallbackToken,verifyCallbackToken } from '../../services/jwt';
+import { signCallbackToken, verifyCallbackToken } from '../../services/jwt';
 import { createWorkspaceOnNode } from '../../services/node-agent';
+import { nodeStatusTerminatesCallbacks } from '../../services/node-callback-auth';
 import {
-  getProfileRuntimeAssets,
-  mergeRuntimeAssetRows,
-  resolveRuntimeEnvRows,
-  resolveRuntimeFileRows,
-  type RuntimeAssetRows,
-} from '../../services/profile-runtime-assets';
+  sameWorkspaceCallbackIdentity,
+  WORKSPACE_CALLBACK_ACTIVE_STATUSES,
+  type WorkspaceCallbackIdentitySnapshot,
+} from '../../services/workspace-callback-identity';
+import {
+  signalWorkspaceDeletionUnconfirmedCallback,
+  type WorkspaceDeletionCallbackKind,
+} from '../../services/workspace-deletion-callback-signal';
+import {
+  resolveWorkspaceGitSource,
+  type WorkspaceGitSourceProject,
+} from '../../services/workspace-git-source';
+
+export {
+  sameWorkspaceCallbackIdentity,
+  WORKSPACE_CALLBACK_ACTIVE_STATUSES,
+  type WorkspaceCallbackIdentitySnapshot,
+} from '../../services/workspace-callback-identity';
 
 export const ACTIVE_WORKSPACE_STATUSES = new Set(['running', 'recovery'] as const);
+export const WORKSPACE_CALLBACK_PROVISIONING_FAILURE_STATUSES: ReadonlySet<string> = new Set([
+  'creating',
+  'error',
+]);
 
 export function isActiveWorkspaceStatus(status: string): boolean {
   return ACTIVE_WORKSPACE_STATUSES.has(status as 'running' | 'recovery');
+}
+
+export async function assertWorkspaceAcceptsCallback<
+  T extends { status: string; nodeId: string | null; nodeStatus: string | null },
+>(
+  env: Env,
+  workspace: T | null | undefined,
+  workspaceId: string,
+  callback: WorkspaceDeletionCallbackKind,
+  allowedStatuses: ReadonlySet<string> = WORKSPACE_CALLBACK_ACTIVE_STATUSES
+): Promise<T> {
+  if (!workspace || !allowedStatuses.has(workspace.status)) {
+    const observedStatus = workspace?.status ?? 'missing';
+    await signalWorkspaceDeletionUnconfirmedCallback(env, workspaceId, callback);
+    log.info('workspace_callback.terminal_resource', {
+      workspaceId,
+      status: observedStatus,
+      callback,
+      action: 'terminal_gone',
+    });
+    throw errors.gone(`Workspace is ${observedStatus}; callback resource is gone`);
+  }
+
+  if (
+    !workspace.nodeId ||
+    !workspace.nodeStatus ||
+    nodeStatusTerminatesCallbacks(workspace.nodeStatus)
+  ) {
+    const observedNodeStatus = workspace.nodeStatus ?? 'missing';
+    log.info('workspace_callback.terminal_node', {
+      workspaceId,
+      nodeId: workspace.nodeId ?? null,
+      nodeStatus: observedNodeStatus,
+      workspaceStatus: workspace.status,
+      callback,
+      action: 'terminal_gone',
+    });
+    throw errors.gone(`Workspace node is ${observedNodeStatus}; callback resource is gone`);
+  }
+  return workspace;
+}
+
+export async function assertWorkspaceCallbackResourceById(
+  env: Env,
+  workspaceId: string,
+  callback: WorkspaceDeletionCallbackKind,
+  allowedStatuses: ReadonlySet<string> = WORKSPACE_CALLBACK_ACTIVE_STATUSES
+): Promise<WorkspaceCallbackIdentitySnapshot> {
+  const workspace = await loadWorkspaceCallbackIdentity(env, workspaceId);
+  return assertWorkspaceAcceptsCallback(env, workspace, workspaceId, callback, allowedStatuses);
+}
+
+export async function loadWorkspaceCallbackIdentity(
+  env: Env,
+  workspaceId: string
+): Promise<WorkspaceCallbackIdentitySnapshot | null> {
+  const db = drizzle(env.DATABASE, { schema });
+  const rows = await db
+    .select({
+      workspaceId: schema.workspaces.id,
+      userId: schema.workspaces.userId,
+      projectId: schema.workspaces.projectId,
+      chatSessionId: schema.workspaces.chatSessionId,
+      status: schema.workspaces.status,
+      nodeId: schema.workspaces.nodeId,
+      nodeStatus: schema.nodes.status,
+    })
+    .from(schema.workspaces)
+    .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
+    .where(eq(schema.workspaces.id, workspaceId))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+interface WorkspaceCallbackTransitionValues {
+  status: string;
+  updatedAt: string;
+  lastActivityAt?: string;
+  errorMessage?: string | null;
+  workspaceProfile?: 'full' | 'lightweight';
+}
+
+/** Exact D1 CAS for callback-driven workspace transitions. */
+export async function transitionWorkspaceFromCallback(
+  env: Env,
+  expected: WorkspaceCallbackIdentitySnapshot,
+  callback: WorkspaceDeletionCallbackKind,
+  values: WorkspaceCallbackTransitionValues,
+  allowedStatuses: ReadonlySet<string> = WORKSPACE_CALLBACK_ACTIVE_STATUSES
+): Promise<WorkspaceCallbackIdentitySnapshot> {
+  const assignments = ['status = ?', 'updated_at = ?'];
+  const bindings: Array<string | null> = [values.status, values.updatedAt];
+  if (values.lastActivityAt !== undefined) {
+    assignments.push('last_activity_at = ?');
+    bindings.push(values.lastActivityAt);
+  }
+  if (values.errorMessage !== undefined) {
+    assignments.push('error_message = ?');
+    bindings.push(values.errorMessage);
+  }
+  if (values.workspaceProfile !== undefined) {
+    assignments.push('workspace_profile = ?');
+    bindings.push(values.workspaceProfile);
+  }
+
+  const result = await env.DATABASE.prepare(
+    `UPDATE workspaces
+        SET ${assignments.join(', ')}
+      WHERE id = ?
+        AND user_id = ?
+        AND project_id IS ?
+        AND chat_session_id IS ?
+        AND node_id IS ?
+        AND status = ?
+        AND EXISTS (
+          SELECT 1 FROM nodes
+           WHERE nodes.id = workspaces.node_id
+             AND nodes.status = ?
+        )`
+  )
+    .bind(
+      ...bindings,
+      expected.workspaceId,
+      expected.userId,
+      expected.projectId,
+      expected.chatSessionId,
+      expected.nodeId,
+      expected.status,
+      expected.nodeStatus
+    )
+    .run();
+  if ((result.meta.changes ?? 0) !== 1) {
+    await assertWorkspaceCallbackIdentityCurrent(env, expected, callback, allowedStatuses);
+    throw errors.gone('Workspace callback state changed; callback resource is gone');
+  }
+  return { ...expected, status: values.status };
+}
+
+/**
+ * Rule 49 callback fence: re-read the complete workspace incarnation at the
+ * final side-effect/secret-delivery boundary. A callback authenticated before
+ * deletion began must not act on a now-stopping (or reassigned) workspace.
+ */
+export async function assertWorkspaceCallbackIdentityCurrent(
+  env: Env,
+  expected: WorkspaceCallbackIdentitySnapshot,
+  callback: WorkspaceDeletionCallbackKind,
+  allowedStatuses: ReadonlySet<string> = WORKSPACE_CALLBACK_ACTIVE_STATUSES
+): Promise<WorkspaceCallbackIdentitySnapshot> {
+  const current = await loadWorkspaceCallbackIdentity(env, expected.workspaceId);
+  const active = await assertWorkspaceAcceptsCallback(
+    env,
+    current,
+    expected.workspaceId,
+    callback,
+    allowedStatuses
+  );
+  if (!sameWorkspaceCallbackIdentity(active, expected)) {
+    log.info('workspace_callback.incarnation_changed', {
+      workspaceId: expected.workspaceId,
+      expectedUserId: expected.userId,
+      currentUserId: active.userId,
+      expectedProjectId: expected.projectId,
+      currentProjectId: active.projectId,
+      expectedChatSessionId: expected.chatSessionId,
+      currentChatSessionId: active.chatSessionId,
+      expectedNodeId: expected.nodeId,
+      currentNodeId: active.nodeId,
+      expectedWorkspaceStatus: expected.status,
+      currentWorkspaceStatus: active.status,
+      expectedNodeStatus: expected.nodeStatus,
+      currentNodeStatus: active.nodeStatus,
+      callback,
+      action: 'terminal_gone',
+    });
+    throw errors.gone('Workspace callback identity changed; callback resource is gone');
+  }
+  return active;
 }
 
 /** Parse a JSON string into a plain object, returning null on failure or prototype pollution. */
@@ -56,7 +250,8 @@ export function normalizeWorkspaceReadyStatus(status: unknown): 'running' | 'rec
 export async function getOwnedWorkspace(
   db: ReturnType<typeof drizzle<typeof schema>>,
   workspaceId: string,
-  userId: string
+  userId: string,
+  options: { includeDeleted?: boolean } = {}
 ): Promise<schema.Workspace> {
   const rows = await db
     .select()
@@ -65,11 +260,51 @@ export async function getOwnedWorkspace(
     .limit(1);
 
   const workspace = rows[0];
-  if (!workspace || workspace.status === 'deleted') {
+  if (!workspace || (workspace.status === 'deleted' && !options.includeDeleted)) {
     throw errors.notFound('Workspace');
   }
 
   return workspace;
+}
+
+/** The caller's agent session on the given workspace, or a 404. */
+export async function getOwnedAgentSession(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  workspaceId: string,
+  sessionId: string,
+  userId: string
+): Promise<schema.AgentSession> {
+  const [session] = await db
+    .select()
+    .from(schema.agentSessions)
+    .where(
+      and(
+        eq(schema.agentSessions.id, sessionId),
+        eq(schema.agentSessions.workspaceId, workspaceId),
+        eq(schema.agentSessions.userId, userId)
+      )
+    )
+    .limit(1);
+  if (!session) {
+    throw errors.notFound('Agent session');
+  }
+  return session;
+}
+
+/** The caller's workspace, which must be attached to a node, and their agent session on it. */
+export async function getOwnedNodeAgentSession(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  workspaceId: string,
+  sessionId: string,
+  userId: string
+): Promise<{ workspace: schema.Workspace & { nodeId: string }; session: schema.AgentSession }> {
+  const workspace = await getOwnedWorkspace(db, workspaceId, userId);
+  const { nodeId } = workspace;
+  if (!nodeId) {
+    throw errors.badRequest('Workspace is not attached to a node');
+  }
+  const session = await getOwnedAgentSession(db, workspace.id, sessionId, userId);
+  return { workspace: { ...workspace, nodeId }, session };
 }
 
 export async function getOwnedNode(
@@ -110,7 +345,7 @@ export async function verifyWorkspaceCallbackAuth(
   // Node-scoped tokens CANNOT access workspace-scoped endpoints.
   // This prevents cross-workspace secret access on multi-tenant nodes.
   if (payload.scope === 'node') {
-    log.error('workspace_auth.rejected_node_scoped_token', {
+    log.warn('workspace_auth.rejected_node_scoped_token', {
       tokenWorkspace: payload.workspace,
       requestedWorkspaceId: workspaceId,
       scope: payload.scope,
@@ -141,117 +376,6 @@ export async function verifyWorkspaceCallbackAuth(
   throw errors.forbidden('Insufficient token scope');
 }
 
-export async function getWorkspaceRuntimeAssets(
-  db: ReturnType<typeof drizzle<typeof schema>>,
-  workspaceId: string,
-  encryptionKey: string
-): Promise<WorkspaceRuntimeAssetsResponse> {
-  const workspaceRows = await db
-    .select({ id: schema.workspaces.id, userId: schema.workspaces.userId, projectId: schema.workspaces.projectId })
-    .from(schema.workspaces)
-    .where(eq(schema.workspaces.id, workspaceId))
-    .limit(1);
-
-  const workspace = workspaceRows[0];
-  if (!workspace) {
-    throw errors.notFound('Workspace');
-  }
-
-  if (!workspace.projectId) {
-    return {
-      workspaceId: workspace.id,
-      envVars: [],
-      files: [],
-    };
-  }
-
-  const [envRows, fileRows] = await Promise.all([
-    db
-      .select({
-        key: schema.projectRuntimeEnvVars.envKey,
-        storedValue: schema.projectRuntimeEnvVars.storedValue,
-        valueIv: schema.projectRuntimeEnvVars.valueIv,
-        isSecret: schema.projectRuntimeEnvVars.isSecret,
-      })
-      .from(schema.projectRuntimeEnvVars)
-      .where(
-        and(
-          eq(schema.projectRuntimeEnvVars.projectId, workspace.projectId),
-          eq(schema.projectRuntimeEnvVars.userId, workspace.userId)
-        )
-      ),
-    db
-      .select({
-        path: schema.projectRuntimeFiles.filePath,
-        storedContent: schema.projectRuntimeFiles.storedContent,
-        contentIv: schema.projectRuntimeFiles.contentIv,
-        isSecret: schema.projectRuntimeFiles.isSecret,
-      })
-      .from(schema.projectRuntimeFiles)
-      .where(
-        and(
-          eq(schema.projectRuntimeFiles.projectId, workspace.projectId),
-          eq(schema.projectRuntimeFiles.userId, workspace.userId)
-        )
-      ),
-  ]);
-
-  const projectAssets: RuntimeAssetRows = {
-    envVars: await resolveRuntimeEnvRows(envRows, encryptionKey),
-    files: await resolveRuntimeFileRows(fileRows, encryptionKey),
-  };
-
-  const profileId = await getWorkspaceTaskProfileId(db, workspace.id, workspace.projectId, workspace.userId);
-  const profileAssets = profileId
-    ? await getProfileRuntimeAssets(db, profileId, workspace.userId, encryptionKey)
-    : { envVars: [], files: [] };
-  const mergedAssets = mergeRuntimeAssetRows(projectAssets, profileAssets);
-
-  return {
-    workspaceId: workspace.id,
-    envVars: mergedAssets.envVars,
-    files: mergedAssets.files,
-  };
-}
-
-async function getWorkspaceTaskProfileId(
-  db: ReturnType<typeof drizzle<typeof schema>>,
-  workspaceId: string,
-  projectId: string,
-  userId: string
-): Promise<string | null> {
-  const taskRows = await db
-    .select({ profileId: schema.tasks.agentProfileHint })
-    .from(schema.tasks)
-    .where(
-      and(
-        eq(schema.tasks.workspaceId, workspaceId),
-        eq(schema.tasks.projectId, projectId),
-        eq(schema.tasks.userId, userId)
-      )
-    )
-    .limit(1);
-
-  const profileId = taskRows[0]?.profileId;
-  if (!profileId) {
-    return null;
-  }
-
-  const profileRows = await db
-    .select({ id: schema.agentProfiles.id })
-    .from(schema.agentProfiles)
-    .where(
-      and(
-        eq(schema.agentProfiles.id, profileId),
-        eq(schema.agentProfiles.projectId, projectId),
-        eq(schema.agentProfiles.userId, userId)
-      )
-    )
-    .limit(1);
-
-  return profileRows[0]?.id ?? null;
-}
-
 export async function scheduleWorkspaceCreateOnNode(
   env: Env,
   workspaceId: string,
@@ -259,38 +383,93 @@ export async function scheduleWorkspaceCreateOnNode(
   userId: string,
   repository: string,
   branch: string,
+  project: WorkspaceGitSourceProject,
   gitUserName?: string | null,
-  gitUserEmail?: string | null
+  gitUserEmail?: string | null,
+  options: { beforeExternalMutation?: () => Promise<void>; durableRetry?: boolean } = {}
 ): Promise<void> {
   const db = drizzle(env.DATABASE, { schema });
   const now = new Date().toISOString();
 
-  await db
-    .update(schema.workspaces)
-    .set({ status: 'creating', errorMessage: null, updatedAt: now })
-    .where(eq(schema.workspaces.id, workspaceId));
+  const assertCurrent = async () => {
+    await options.beforeExternalMutation?.();
+  };
 
   try {
+    await assertCurrent();
+    const claimed = await env.DATABASE.prepare(
+      `UPDATE workspaces
+          SET status = 'creating', error_message = NULL, updated_at = ?
+        WHERE id = ?
+          AND user_id = ?
+          AND node_id = ?
+          AND status = 'creating'
+          AND runtime_deletion_confirmed_at IS NULL`
+    )
+      .bind(now, workspaceId, userId, nodeId)
+      .run();
+    if ((claimed.meta?.changes ?? 0) !== 1) {
+      throw errors.gone('Workspace changed before workspace creation dispatch');
+    }
+
     const callbackToken = await signCallbackToken(workspaceId, env);
-    await createWorkspaceOnNode(nodeId, env, userId, {
-      workspaceId,
-      repository,
-      branch,
-      callbackToken,
-      gitUserName,
-      gitUserEmail,
-    });
+    const gitSource = await resolveWorkspaceGitSource(db, project);
+    const acknowledgement = await createWorkspaceOnNode(
+      nodeId,
+      env,
+      userId,
+      {
+        workspaceId,
+        repository,
+        branch,
+        ...gitSource,
+        callbackToken,
+        gitUserName,
+        gitUserEmail,
+      },
+      { beforeExternalMutation: assertCurrent }
+    );
+    if (
+      options.durableRetry &&
+      (!acknowledgement ||
+        typeof acknowledgement !== 'object' ||
+        !('workspaceId' in acknowledgement) ||
+        acknowledgement.workspaceId !== workspaceId)
+    ) {
+      throw new Error('Node agent did not acknowledge the expected workspace identity');
+    }
+    await assertCurrent();
     await env.DATABASE.prepare(
-      `UPDATE workspaces SET dispatched_at = ? WHERE id = ?`
-    ).bind(new Date().toISOString(), workspaceId).run();
+      `UPDATE workspaces
+          SET dispatched_at = ?, updated_at = ?
+        WHERE id = ?
+          AND user_id = ?
+          AND node_id = ?
+          AND status = 'creating'
+          AND dispatched_at IS NULL
+          AND runtime_deletion_confirmed_at IS NULL`
+    )
+      .bind(new Date().toISOString(), new Date().toISOString(), workspaceId, userId, nodeId)
+      .run();
   } catch (err) {
-    await db
-      .update(schema.workspaces)
-      .set({
-        status: 'error',
-        errorMessage: err instanceof Error ? err.message : 'Failed to create workspace on node',
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(schema.workspaces.id, workspaceId));
+    // A durable caller replays the same idempotent VM-agent workspace ID after a lost response.
+    if (options.durableRetry) throw err;
+    await env.DATABASE.prepare(
+      `UPDATE workspaces
+          SET status = 'error', error_message = ?, updated_at = ?
+        WHERE id = ?
+          AND user_id = ?
+          AND node_id = ?
+          AND status = 'creating'
+          AND runtime_deletion_confirmed_at IS NULL`
+    )
+      .bind(
+        err instanceof Error ? err.message : 'Failed to create workspace on node',
+        new Date().toISOString(),
+        workspaceId,
+        userId,
+        nodeId
+      )
+      .run();
   }
 }

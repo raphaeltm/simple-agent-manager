@@ -6,7 +6,7 @@
  * See specs/023-admin-observability/data-model.md for entity definitions.
  */
 
-import type { PlatformErrorLevel,PlatformErrorSource } from '@simple-agent-manager/shared';
+import type { PlatformErrorLevel, PlatformErrorSource } from '@simple-agent-manager/shared';
 import type { SQL } from 'drizzle-orm';
 import { and, count, desc, eq, gte, like, lte, or } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -16,6 +16,18 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { expectJsonRecord, optionalJsonRecord } from '../lib/runtime-validation';
+import { CfApiError, redactSensitiveData } from './observability-cf-support';
+import {
+  DEFAULT_MAX_CONTEXT_LENGTH,
+  DEFAULT_MAX_MESSAGE_LENGTH,
+  DEFAULT_MAX_STACK_LENGTH,
+  DEFAULT_MAX_USER_AGENT_LENGTH,
+  getFieldLimit,
+  type ObservabilityFieldLimitEnv,
+  safeParseContext,
+  serializeBoundedContext as boundContext,
+  truncate,
+} from './observability-fields';
 
 // =============================================================================
 // Constants (configurable via env)
@@ -24,9 +36,6 @@ import { expectJsonRecord, optionalJsonRecord } from '../lib/runtime-validation'
 const DEFAULT_RETENTION_DAYS = 30;
 const DEFAULT_MAX_ROWS = 100_000;
 const DEFAULT_BATCH_SIZE = 25;
-const MAX_MESSAGE_LENGTH = 2048;
-const MAX_STACK_LENGTH = 4096;
-const MAX_USER_AGENT_LENGTH = 512;
 const MAX_QUERY_LIMIT = 200;
 const DEFAULT_QUERY_LIMIT = 50;
 
@@ -37,9 +46,14 @@ const VALID_LEVELS = new Set<string>(['error', 'warn', 'info']);
 // Helpers
 // =============================================================================
 
-function truncate(value: string, maxLength: number): string {
-  return value.length > maxLength ? value.slice(0, maxLength) + '...' : value;
-}
+// Field-bounding helpers live in observability-fields.ts (rule 18 split);
+// re-exported here so existing consumers keep their import path.
+export { type ObservabilityFieldLimitEnv, serializeBoundedContext } from './observability-fields';
+
+// CF Observability API error type + secret redaction live in
+// observability-cf-support.ts (rule 18 split); re-exported here so existing
+// consumers keep their import path.
+export { CfApiError, redactSensitiveData } from './observability-cf-support';
 
 function generateId(): string {
   return crypto.randomUUID();
@@ -48,8 +62,8 @@ function generateId(): string {
 function getConfigNumber(env: Env, key: keyof Env, fallback: number): number {
   const val = env[key] as string | undefined;
   if (val) {
-    const n = parseInt(val, 10);
-    if (!isNaN(n)) return n;
+    const n = Number.parseInt(val, 10);
+    if (Number.isSafeInteger(n) && n > 0) return n;
   }
   return fallback;
 }
@@ -59,6 +73,7 @@ function getConfigNumber(env: Env, key: keyof Env, fallback: number): number {
 // =============================================================================
 
 export interface PersistErrorInput {
+  id?: string;
   source: PlatformErrorSource;
   level?: PlatformErrorLevel;
   message: string;
@@ -67,6 +82,8 @@ export interface PersistErrorInput {
   userId?: string | null;
   nodeId?: string | null;
   workspaceId?: string | null;
+  taskId?: string | null;
+  sessionId?: string | null;
   ipAddress?: string | null;
   userAgent?: string | null;
   timestamp?: number; // ms epoch; defaults to now
@@ -78,31 +95,52 @@ export interface PersistErrorInput {
  */
 export async function persistError(
   db: D1Database,
-  input: PersistErrorInput
+  input: PersistErrorInput,
+  env?: ObservabilityFieldLimitEnv
 ): Promise<void> {
   try {
     const source = VALID_SOURCES.has(input.source) ? input.source : 'api';
     const level = input.level && VALID_LEVELS.has(input.level) ? input.level : 'error';
+    const messageMaxLength = env
+      ? getFieldLimit(env, 'OBSERVABILITY_ERROR_MESSAGE_MAX_LENGTH', DEFAULT_MAX_MESSAGE_LENGTH)
+      : DEFAULT_MAX_MESSAGE_LENGTH;
+    const stackMaxLength = env
+      ? getFieldLimit(env, 'OBSERVABILITY_ERROR_STACK_MAX_LENGTH', DEFAULT_MAX_STACK_LENGTH)
+      : DEFAULT_MAX_STACK_LENGTH;
+    const userAgentMaxLength = env
+      ? getFieldLimit(
+          env,
+          'OBSERVABILITY_ERROR_USER_AGENT_MAX_LENGTH',
+          DEFAULT_MAX_USER_AGENT_LENGTH
+        )
+      : DEFAULT_MAX_USER_AGENT_LENGTH;
+    const contextMaxLength = env
+      ? getFieldLimit(env, 'OBSERVABILITY_ERROR_CONTEXT_MAX_LENGTH', DEFAULT_MAX_CONTEXT_LENGTH)
+      : DEFAULT_MAX_CONTEXT_LENGTH;
 
     const drizzleDb = drizzle(db, { schema: observabilitySchema });
 
     await drizzleDb.insert(observabilitySchema.platformErrors).values({
-      id: generateId(),
+      id: input.id ?? generateId(),
       source,
       level,
-      message: truncate(input.message, MAX_MESSAGE_LENGTH),
-      stack: input.stack ? truncate(input.stack, MAX_STACK_LENGTH) : null,
-      context: input.context ? JSON.stringify(input.context) : null,
+      message: truncate(input.message, messageMaxLength),
+      stack: input.stack ? truncate(input.stack, stackMaxLength) : null,
+      context: input.context ? boundContext(input.context, contextMaxLength) : null,
       userId: input.userId ?? null,
       nodeId: input.nodeId ?? null,
       workspaceId: input.workspaceId ?? null,
+      taskId: input.taskId ?? null,
+      sessionId: input.sessionId ?? null,
       ipAddress: input.ipAddress ?? null,
-      userAgent: input.userAgent ? truncate(input.userAgent, MAX_USER_AGENT_LENGTH) : null,
+      userAgent: input.userAgent ? truncate(input.userAgent, userAgentMaxLength) : null,
       timestamp: input.timestamp ?? Date.now(),
     });
   } catch (err) {
     // Fail-silent: never let observability writes impact the caller
-    log.warn('observability.persist_error_failed', { error: err instanceof Error ? err.message : String(err) });
+    log.warn('observability.persist_error_failed', {
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 
@@ -122,7 +160,7 @@ export async function persistErrorBatch(
   const batch = inputs.slice(0, maxBatch);
 
   for (const input of batch) {
-    await persistError(db, input);
+    await persistError(db, input, env);
   }
 }
 
@@ -136,6 +174,11 @@ export interface QueryErrorsParams {
   search?: string;
   startTime?: number; // ms epoch
   endTime?: number; // ms epoch
+  nodeId?: string;
+  workspaceId?: string;
+  taskId?: string;
+  sessionId?: string;
+  userId?: string;
   limit?: number;
   cursor?: string; // base64 encoded timestamp cursor
 }
@@ -151,6 +194,8 @@ export interface QueryErrorsResult {
     userId: string | null;
     nodeId: string | null;
     workspaceId: string | null;
+    taskId: string | null;
+    sessionId: string | null;
     ipAddress: string | null;
     userAgent: string | null;
     timestamp: string; // ISO 8601
@@ -188,6 +233,12 @@ export async function queryErrors(
   if (params.endTime) {
     conditions.push(lte(platformErrors.timestamp, params.endTime));
   }
+
+  if (params.nodeId) conditions.push(eq(platformErrors.nodeId, params.nodeId));
+  if (params.workspaceId) conditions.push(eq(platformErrors.workspaceId, params.workspaceId));
+  if (params.taskId) conditions.push(eq(platformErrors.taskId, params.taskId));
+  if (params.sessionId) conditions.push(eq(platformErrors.sessionId, params.sessionId));
+  if (params.userId) conditions.push(eq(platformErrors.userId, params.userId));
 
   if (params.search) {
     const searchPattern = `%${params.search}%`;
@@ -242,9 +293,7 @@ export async function queryErrors(
 
   // Build next cursor from last row's timestamp
   const lastRow = resultRows[resultRows.length - 1];
-  const nextCursor = hasMore && lastRow
-    ? btoa(String(lastRow.timestamp - 1))
-    : null;
+  const nextCursor = hasMore && lastRow ? btoa(String(lastRow.timestamp - 1)) : null;
 
   return {
     errors: resultRows.map((row) => ({
@@ -253,10 +302,12 @@ export async function queryErrors(
       level: row.level,
       message: row.message,
       stack: row.stack,
-      context: row.context ? JSON.parse(row.context) : null,
+      context: safeParseContext(row.context, row.id),
       userId: row.userId,
       nodeId: row.nodeId,
       workspaceId: row.workspaceId,
+      taskId: row.taskId,
+      sessionId: row.sessionId,
       ipAddress: row.ipAddress,
       userAgent: row.userAgent,
       timestamp: new Date(row.timestamp).toISOString(),
@@ -293,17 +344,24 @@ export async function getHealthSummary(
 
   const [nodesResult, workspacesResult, tasksResult, errorsResult] = await Promise.all([
     db.select({ count: count() }).from(schema.nodes).where(eq(schema.nodes.status, 'running')),
-    db.select({ count: count() }).from(schema.workspaces).where(eq(schema.workspaces.status, 'running')),
-    db.select({ count: count() }).from(schema.tasks).where(
-      or(
-        eq(schema.tasks.status, 'queued'),
-        eq(schema.tasks.status, 'delegated'),
-        eq(schema.tasks.status, 'in_progress')
-      )
-    ),
-    obsDb.select({ count: count() }).from(observabilitySchema.platformErrors).where(
-      gte(observabilitySchema.platformErrors.timestamp, twentyFourHoursAgo)
-    ),
+    db
+      .select({ count: count() })
+      .from(schema.workspaces)
+      .where(eq(schema.workspaces.status, 'running')),
+    db
+      .select({ count: count() })
+      .from(schema.tasks)
+      .where(
+        or(
+          eq(schema.tasks.status, 'queued'),
+          eq(schema.tasks.status, 'delegated'),
+          eq(schema.tasks.status, 'in_progress')
+        )
+      ),
+    obsDb
+      .select({ count: count() })
+      .from(observabilitySchema.platformErrors)
+      .where(gte(observabilitySchema.platformErrors.timestamp, twentyFourHoursAgo)),
   ]);
 
   return {
@@ -320,16 +378,16 @@ export async function getHealthSummary(
 // =============================================================================
 
 const RANGE_TO_INTERVAL: Record<string, { intervalMs: number; intervalLabel: string }> = {
-  '1h':  { intervalMs: 5 * 60 * 1000, intervalLabel: '5m' },
+  '1h': { intervalMs: 5 * 60 * 1000, intervalLabel: '5m' },
   '24h': { intervalMs: 60 * 60 * 1000, intervalLabel: '1h' },
-  '7d':  { intervalMs: 24 * 60 * 60 * 1000, intervalLabel: '1d' },
+  '7d': { intervalMs: 24 * 60 * 60 * 1000, intervalLabel: '1d' },
   '30d': { intervalMs: 24 * 60 * 60 * 1000, intervalLabel: '1d' },
 };
 
 const RANGE_TO_MS: Record<string, number> = {
-  '1h':  60 * 60 * 1000,
+  '1h': 60 * 60 * 1000,
   '24h': 24 * 60 * 60 * 1000,
-  '7d':  7 * 24 * 60 * 60 * 1000,
+  '7d': 7 * 24 * 60 * 60 * 1000,
   '30d': 30 * 24 * 60 * 60 * 1000,
 };
 
@@ -351,10 +409,19 @@ export async function getErrorTrends(
   range: string = '24h',
   interval?: string
 ): Promise<ErrorTrendsResult> {
-  const rangeMs = RANGE_TO_MS[range] ?? RANGE_TO_MS['24h']!;
-  const resolvedInterval = (interval && RANGE_TO_INTERVAL[range])
-    ? RANGE_TO_INTERVAL[range]!
-    : (RANGE_TO_INTERVAL[range] ?? RANGE_TO_INTERVAL['24h']!);
+  const fallbackRangeMs = RANGE_TO_MS['24h'];
+  if (fallbackRangeMs === undefined) {
+    throw new Error('Internal error: RANGE_TO_MS is missing the 24h fallback entry');
+  }
+  const rangeMs = RANGE_TO_MS[range] ?? fallbackRangeMs;
+
+  const fallbackInterval = RANGE_TO_INTERVAL['24h'];
+  if (fallbackInterval === undefined) {
+    throw new Error('Internal error: RANGE_TO_INTERVAL is missing the 24h fallback entry');
+  }
+  const rangeInterval = RANGE_TO_INTERVAL[range];
+  const resolvedInterval =
+    interval && rangeInterval ? rangeInterval : (rangeInterval ?? fallbackInterval);
 
   const now = Date.now();
   const startTime = now - rangeMs;
@@ -422,11 +489,12 @@ export interface PurgeResult {
 /**
  * Purge expired errors based on retention days and max row count.
  */
-export async function purgeExpiredErrors(
-  db: D1Database,
-  env: Env
-): Promise<PurgeResult> {
-  const retentionDays = getConfigNumber(env, 'OBSERVABILITY_ERROR_RETENTION_DAYS', DEFAULT_RETENTION_DAYS);
+export async function purgeExpiredErrors(db: D1Database, env: Env): Promise<PurgeResult> {
+  const retentionDays = getConfigNumber(
+    env,
+    'OBSERVABILITY_ERROR_RETENTION_DAYS',
+    DEFAULT_RETENTION_DAYS
+  );
   const maxRows = getConfigNumber(env, 'OBSERVABILITY_ERROR_MAX_ROWS', DEFAULT_MAX_ROWS);
 
   const drizzleDb = drizzle(db, { schema: observabilitySchema });
@@ -435,15 +503,11 @@ export async function purgeExpiredErrors(
   const cutoffTimestamp = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
 
   // 1. Delete by age
-  await drizzleDb
-    .delete(platformErrors)
-    .where(lte(platformErrors.createdAt, cutoffTimestamp));
+  await drizzleDb.delete(platformErrors).where(lte(platformErrors.createdAt, cutoffTimestamp));
 
   // D1 doesn't return row count from delete, so we track separately
   // Count remaining rows
-  const [countResult] = await drizzleDb
-    .select({ count: count() })
-    .from(platformErrors);
+  const [countResult] = await drizzleDb.select({ count: count() }).from(platformErrors);
 
   const currentCount = countResult?.count ?? 0;
   let deletedByCount = 0;
@@ -459,9 +523,7 @@ export async function purgeExpiredErrors(
       .limit(excess);
 
     for (const row of oldestRows) {
-      await drizzleDb
-        .delete(platformErrors)
-        .where(eq(platformErrors.id, row.id));
+      await drizzleDb.delete(platformErrors).where(eq(platformErrors.id, row.id));
     }
 
     deletedByCount = oldestRows.length;
@@ -507,9 +569,19 @@ export interface QueryCloudflarLogsInput {
  * Proxy query to Cloudflare Workers Observability Telemetry API.
  * Transforms request/response and never exposes CF credentials or raw errors.
  */
-export async function queryCloudflareLogs(
-  input: QueryCloudflarLogsInput
-): Promise<{ logs: Array<{ timestamp: string; level: string; event: string; message: string; details: Record<string, unknown>; invocationId?: string }>; cursor: string | null; hasMore: boolean; queryId: string }> {
+export async function queryCloudflareLogs(input: QueryCloudflarLogsInput): Promise<{
+  logs: Array<{
+    timestamp: string;
+    level: string;
+    event: string;
+    message: string;
+    details: Record<string, unknown>;
+    invocationId?: string;
+  }>;
+  cursor: string | null;
+  hasMore: boolean;
+  queryId: string;
+}> {
   const limit = Math.min(input.limit ?? DEFAULT_LOG_QUERY_LIMIT, MAX_LOG_QUERY_LIMIT);
   const queryId = input.queryId || crypto.randomUUID();
 
@@ -575,7 +647,7 @@ export async function queryCloudflareLogs(
     response = await fetch(url, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${input.cfApiToken}`,
+        Authorization: `Bearer ${input.cfApiToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),
@@ -589,20 +661,22 @@ export async function queryCloudflareLogs(
     if (response.status === 403) {
       throw new CfApiError(
         'Cloudflare Observability API returned 403: The CF_API_TOKEN is missing the "Account: Workers Observability (Read)" permission. ' +
-        'Edit the API token in Cloudflare Dashboard to add this permission.'
+          'Edit the API token in Cloudflare Dashboard to add this permission.'
       );
     }
     if (response.status === 401) {
       throw new CfApiError(
         'Cloudflare Observability API returned 401: The CF_API_TOKEN is invalid or expired. ' +
-        'Regenerate the token in Cloudflare Dashboard.'
+          'Regenerate the token in Cloudflare Dashboard.'
       );
     }
     let detail = '';
     try {
       const errBody = await response.text();
       if (errBody) detail = `: ${errBody.slice(0, 200)}`;
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     throw new CfApiError(`Cloudflare Observability API returned ${response.status}${detail}`);
   }
 
@@ -624,15 +698,24 @@ export async function queryCloudflareLogs(
   const eventsContainer = result?.events;
   if (Array.isArray(eventsContainer)) {
     // Legacy format: result.events is directly an array
-    events = eventsContainer.map((event, index) => expectJsonRecord(event, `cloudflare.observability.result.events[${index}]`));
-  } else if (eventsContainer && typeof eventsContainer === 'object' && !Array.isArray(eventsContainer) && Array.isArray((eventsContainer as { events?: unknown }).events)) {
+    events = eventsContainer.map((event, index) =>
+      expectJsonRecord(event, `cloudflare.observability.result.events[${index}]`)
+    );
+  } else if (
+    eventsContainer &&
+    typeof eventsContainer === 'object' &&
+    !Array.isArray(eventsContainer) &&
+    Array.isArray((eventsContainer as { events?: unknown }).events)
+  ) {
     // New format: result.events.events is the array
     events = (eventsContainer as { events: unknown[] }).events.map((event, index) =>
       expectJsonRecord(event, `cloudflare.observability.result.events.events[${index}]`)
     );
   } else if (result?.data && Array.isArray(result.data)) {
     // Fallback: result.data
-    events = result.data.map((event, index) => expectJsonRecord(event, `cloudflare.observability.result.data[${index}]`));
+    events = result.data.map((event, index) =>
+      expectJsonRecord(event, `cloudflare.observability.result.data[${index}]`)
+    );
   }
 
   // Extract cursor for pagination from the run object
@@ -642,29 +725,43 @@ export async function queryCloudflareLogs(
 
   const logs = events.map((event) => {
     // New format: $metadata contains level, message, type; $workers contains scriptName, event details
-    const metadata = optionalJsonRecord(event.$metadata, 'cloudflare.observability.event.$metadata');
+    const metadata = optionalJsonRecord(
+      event.$metadata,
+      'cloudflare.observability.event.$metadata'
+    );
     const workers = optionalJsonRecord(event.$workers, 'cloudflare.observability.event.$workers');
-    const workerEvent = optionalJsonRecord(workers?.event, 'cloudflare.observability.event.$workers.event');
+    const workerEvent = optionalJsonRecord(
+      workers?.event,
+      'cloudflare.observability.event.$workers.event'
+    );
     // Legacy format fallback
     const legacyEvent = optionalJsonRecord(event.event, 'cloudflare.observability.event.event');
 
     const timestamp = event.timestamp;
-    const timestampStr = typeof timestamp === 'number'
-      ? new Date(timestamp).toISOString()
-      : (timestamp ?? event.eventTimestamp ?? '') as string;
+    const timestampStr =
+      typeof timestamp === 'number'
+        ? new Date(timestamp).toISOString()
+        : ((timestamp ?? event.eventTimestamp ?? '') as string);
 
     return {
       timestamp: timestampStr,
       level: (metadata?.level ?? legacyEvent?.level ?? event.level ?? 'info') as string,
-      event: (metadata?.type ?? workers?.eventType ?? legacyEvent?.type ?? event.type ?? 'unknown') as string,
+      event: (metadata?.type ??
+        workers?.eventType ??
+        legacyEvent?.type ??
+        event.type ??
+        'unknown') as string,
       message: (metadata?.message ?? legacyEvent?.message ?? event.message ?? '') as string,
-      details: stripSensitiveFields({
+      details: redactSensitiveData({
         ...(workerEvent ?? legacyEvent ?? {}),
         scriptName: workers?.scriptName,
         requestId: metadata?.requestId ?? workers?.requestId,
         outcome: workers?.outcome,
       }),
-      invocationId: (metadata?.requestId ?? workers?.requestId ?? event.invocationId ?? event.traceId) as string | undefined,
+      invocationId: (metadata?.requestId ??
+        workers?.requestId ??
+        event.invocationId ??
+        event.traceId) as string | undefined,
     };
   });
 
@@ -674,29 +771,4 @@ export async function queryCloudflareLogs(
     hasMore: nextCursor !== null && logs.length >= limit,
     queryId,
   };
-}
-
-/**
- * Remove potentially sensitive fields from CF API response details.
- */
-function stripSensitiveFields(obj: Record<string, unknown>): Record<string, unknown> {
-  const sensitiveKeys = new Set(['authorization', 'cookie', 'set-cookie', 'x-api-key', 'token']);
-  const result: Record<string, unknown> = {};
-
-  for (const [key, value] of Object.entries(obj)) {
-    if (sensitiveKeys.has(key.toLowerCase())) continue;
-    result[key] = value;
-  }
-
-  return result;
-}
-
-/**
- * Error class for CF API failures — surfaces a safe message.
- */
-export class CfApiError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'CfApiError';
-  }
 }

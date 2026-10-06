@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,7 +12,9 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/workspace/vm-agent/internal/acp"
 	"github.com/workspace/vm-agent/internal/agentsessions"
 	"github.com/workspace/vm-agent/internal/bootstrap"
@@ -18,6 +22,36 @@ import (
 	"github.com/workspace/vm-agent/internal/persistence"
 	"github.com/workspace/vm-agent/internal/sysinfo"
 )
+
+const (
+	vmExecutionProtocolVersion        = 1
+	acpInteractionCapabilityVersion   = 1
+	maxDeliveryIDLength               = 128
+	maxRolloverOperationIDLength      = 128
+	maxAcpInteractionIDLength         = 128
+	maxAcpInteractionGenerationLength = 128
+)
+
+type sendPromptRequest struct {
+	ProtocolVersion int    `json:"protocolVersion,omitempty"`
+	DeliveryID      string `json:"deliveryId,omitempty"`
+	Prompt          string `json:"prompt"`
+	MessageID       string `json:"messageId"`
+}
+
+func validExecutionProtocolID(value string, maxLength int) bool {
+	if value == "" || len(value) > maxLength {
+		return false
+	}
+	for _, char := range value {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') || char == '-' || char == '_' || char == '.' || char == ':' {
+			continue
+		}
+		return false
+	}
+	return true
+}
 
 func (s *Server) stopSessionHost(workspaceID, sessionID string) {
 	hostKey := workspaceID + ":" + sessionID
@@ -30,6 +64,7 @@ func (s *Server) stopSessionHost(workspaceID, sessionID string) {
 	delete(s.sessionMcpServers, hostKey)
 	delete(s.sessionProfileOvr, hostKey)
 	delete(s.sessionTaskCtx, hostKey)
+	delete(s.sessionManualInteractionConfig, hostKey)
 	s.sessionHostMu.Unlock()
 
 	// Clean up persisted MCP servers (best-effort).
@@ -79,17 +114,23 @@ func (s *Server) removeWorkspaceContainer(workspaceID string) {
 func (s *Server) stopSessionHostsForWorkspace(workspaceID string) {
 	prefix := workspaceID + ":"
 
+	var hosts []*acp.SessionHost
 	s.sessionHostMu.Lock()
 	for key, host := range s.sessionHosts {
 		if !strings.HasPrefix(key, prefix) {
 			continue
 		}
-		host.Stop()
+		hosts = append(hosts, host)
 		delete(s.sessionHosts, key)
 		delete(s.sessionMcpServers, key)
 		delete(s.sessionProfileOvr, key)
+		delete(s.sessionTaskCtx, key)
+		delete(s.sessionManualInteractionConfig, key)
 	}
 	s.sessionHostMu.Unlock()
+	for _, host := range hosts {
+		host.Stop()
+	}
 
 	// Clean up all persisted MCP servers for this workspace (best-effort).
 	if s.store != nil {
@@ -173,7 +214,81 @@ func (s *Server) handleListWorkspaces(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"workspaces": result})
 }
 
-const timeRFC3339 = "2006-01-02T15:04:05Z07:00"
+const (
+	timeRFC3339                = "2006-01-02T15:04:05Z07:00"
+	workspaceIDRequiredMessage = "workspaceId is required"
+)
+
+func workspaceCreateConflict(runtime *WorkspaceRuntime, repository, branch, devcontainerConfigName string, lightweight bool) string {
+	if runtime == nil {
+		return ""
+	}
+	if runtime.Repository != "" && repository != "" && runtime.Repository != repository {
+		return "workspace already exists with a different repository"
+	}
+	if runtime.Branch != "" && branch != "" && runtime.Branch != branch {
+		return "workspace already exists with a different branch"
+	}
+	if runtime.DevcontainerConfigName != "" && devcontainerConfigName != "" && runtime.DevcontainerConfigName != devcontainerConfigName {
+		return "workspace already exists with a different devcontainer config"
+	}
+	if runtime.Lightweight != lightweight {
+		return "workspace already exists with a different workspace profile"
+	}
+	return ""
+}
+
+func (s *Server) maybeHandleDuplicateWorkspaceCreate(w http.ResponseWriter, workspaceID, repository, branch, devcontainerConfigName string, lightweight bool) bool {
+	s.workspaceMu.RLock()
+	runtime, ok := s.workspaces[workspaceID]
+	if !ok {
+		s.workspaceMu.RUnlock()
+		return false
+	}
+
+	status := runtime.Status
+	provisioningActive := runtime.ProvisioningActive
+	conflict := workspaceCreateConflict(runtime, repository, branch, devcontainerConfigName, lightweight)
+	s.workspaceMu.RUnlock()
+
+	if conflict != "" {
+		writeJSON(w, http.StatusConflict, map[string]interface{}{
+			"error":       "workspace_conflict",
+			"message":     conflict,
+			"workspaceId": workspaceID,
+			"status":      status,
+		})
+		return true
+	}
+
+	if provisioningActive || status == "running" || status == "recovery" {
+		statusCode := http.StatusOK
+		if provisioningActive {
+			statusCode = http.StatusAccepted
+		}
+		slog.Warn("Workspace creation replay accepted idempotently",
+			"workspace", workspaceID,
+			"status", status,
+			"provisioningActive", provisioningActive)
+		writeJSON(w, statusCode, map[string]interface{}{
+			"workspaceId": workspaceID,
+			"status":      status,
+		})
+		return true
+	}
+
+	if status == "creating" {
+		return false
+	}
+
+	writeJSON(w, http.StatusConflict, map[string]interface{}{
+		"error":       "workspace_not_creatable",
+		"message":     "Workspace cannot be created from current state: " + status,
+		"workspaceId": workspaceID,
+		"status":      status,
+	})
+	return true
+}
 
 // resourceDiagnostics holds the result of a post-timeout resource check.
 type resourceDiagnostics struct {
@@ -250,6 +365,10 @@ func (s *Server) startWorkspaceProvision(
 	detail map[string]interface{},
 ) {
 	go func() {
+		s.acquireBuildSlot(provisionRuntime.ID)
+		defer s.releaseBuildSlot(provisionRuntime.ID)
+		go s.notifyWorkspaceBuildStarted(provisionRuntime)
+
 		defer func() {
 			if runtime == nil {
 				return
@@ -362,6 +481,46 @@ func (s *Server) startWorkspaceProvision(
 	}()
 }
 
+func (s *Server) acquireBuildSlot(workspaceID string) {
+	if s.buildQueue == nil {
+		return
+	}
+	slog.Info("Workspace provisioning waiting for build slot", "workspace", workspaceID)
+	s.buildQueue <- struct{}{}
+	slog.Info("Workspace provisioning acquired build slot", "workspace", workspaceID)
+}
+
+func (s *Server) releaseBuildSlot(workspaceID string) {
+	if s.buildQueue == nil {
+		return
+	}
+	select {
+	case <-s.buildQueue:
+		slog.Info("Workspace provisioning released build slot", "workspace", workspaceID)
+	default:
+	}
+}
+
+func (s *Server) notifyWorkspaceBuildStarted(runtime WorkspaceRuntime) {
+	projectID := strings.TrimSpace(runtime.ProjectID)
+	taskID := strings.TrimSpace(runtime.TaskID)
+	callbackToken := strings.TrimSpace(runtime.CallbackToken)
+	if projectID == "" || taskID == "" || callbackToken == "" || s.config.ControlPlaneURL == "" {
+		return
+	}
+
+	ctx := context.Background()
+	cancel := func() {}
+	if s.config.WorkspaceReadyCallbackTimeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, s.config.WorkspaceReadyCallbackTimeout)
+	}
+	defer cancel()
+
+	if err := s.notifyBuildStarted(ctx, projectID, taskID, runtime.ID, callbackToken); err != nil {
+		slog.Warn("Build-started callback failed", "workspace", runtime.ID, "taskId", taskID, "error", err)
+	}
+}
+
 func (s *Server) snapshotWorkspaceRuntime(runtime *WorkspaceRuntime) WorkspaceRuntime {
 	if runtime == nil {
 		return WorkspaceRuntime{}
@@ -389,66 +548,229 @@ func (s *Server) applyProvisionedContainerUser(workspaceID string, detected stri
 	s.rebuildWorkspacePTYManager(runtime)
 }
 
-func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		WorkspaceID            string `json:"workspaceId"`
-		Repository             string `json:"repository"`
-		Branch                 string `json:"branch"`
-		CallbackToken          string `json:"callbackToken,omitempty"`
-		GitUserName            string `json:"gitUserName,omitempty"`
-		GitUserEmail           string `json:"gitUserEmail,omitempty"`
-		GitHubID               string `json:"githubId,omitempty"`
-		Lightweight            bool   `json:"lightweight,omitempty"`
-		DevcontainerConfigName string `json:"devcontainerConfigName,omitempty"`
-		DevcontainerCache      struct {
-			Registry string `json:"registry,omitempty"`
-			Username string `json:"username,omitempty"`
-			Password string `json:"password,omitempty"`
-			Ref      string `json:"ref,omitempty"`
-		} `json:"devcontainerCache,omitempty"`
-	}
+type createWorkspaceRequest struct {
+	WorkspaceID            string `json:"workspaceId"`
+	Repository             string `json:"repository"`
+	Branch                 string `json:"branch"`
+	BaseBranch             string `json:"baseBranch,omitempty"`
+	DefaultBranch          string `json:"defaultBranch,omitempty"`
+	RepoProvider           string `json:"repoProvider,omitempty"`
+	CloneURL               string `json:"cloneUrl,omitempty"`
+	RepositoryHost         string `json:"repositoryHost,omitempty"`
+	RepositoryPath         string `json:"repositoryPath,omitempty"`
+	CallbackToken          string `json:"callbackToken,omitempty"`
+	ProjectID              string `json:"projectId,omitempty"`
+	TaskID                 string `json:"taskId,omitempty"`
+	GitUserName            string `json:"gitUserName,omitempty"`
+	GitUserEmail           string `json:"gitUserEmail,omitempty"`
+	GitHubID               string `json:"githubId,omitempty"`
+	Lightweight            bool   `json:"lightweight,omitempty"`
+	DevcontainerConfigName string `json:"devcontainerConfigName,omitempty"`
+	DevcontainerCache      struct {
+		Registry string `json:"registry,omitempty"`
+		Username string `json:"username,omitempty"`
+		Password string `json:"password,omitempty"`
+		Ref      string `json:"ref,omitempty"`
+	} `json:"devcontainerCache,omitempty"`
+}
 
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-
+func validateCreateWorkspaceRequest(body createWorkspaceRequest) (int, string) {
 	if body.WorkspaceID == "" {
-		writeError(w, http.StatusBadRequest, "workspaceId is required")
-		return
+		return http.StatusBadRequest, workspaceIDRequiredMessage
 	}
-
-	// Reject devcontainerConfigName values that could escape the .devcontainer/ directory.
 	if name := body.DevcontainerConfigName; name != "" {
 		if strings.Contains(name, "/") || strings.Contains(name, "\\") || strings.Contains(name, "..") {
-			writeError(w, http.StatusBadRequest, "devcontainerConfigName must not contain path separators or '..'")
-			return
+			return http.StatusBadRequest, "devcontainerConfigName must not contain path separators or '..'"
 		}
 	}
+	return http.StatusOK, ""
+}
 
-	if !s.requireNodeManagementAuth(w, r, body.WorkspaceID) {
-		return
-	}
-
-	branch := strings.TrimSpace(body.Branch)
+func createWorkspaceBranch(rawBranch string) string {
+	branch := strings.TrimSpace(rawBranch)
 	if branch == "" {
-		branch = "main"
+		return "main"
 	}
+	return branch
+}
 
-	runtime := s.upsertWorkspaceRuntime(body.WorkspaceID, strings.TrimSpace(body.Repository), branch, "creating", strings.TrimSpace(body.CallbackToken), workspaceRuntimeOpts{
+func createWorkspaceRuntimeOptions(body createWorkspaceRequest, devcontainerConfigName string) workspaceRuntimeOpts {
+	return workspaceRuntimeOpts{
 		GitUserName:            strings.TrimSpace(body.GitUserName),
 		GitUserEmail:           strings.TrimSpace(body.GitUserEmail),
 		GitHubID:               strings.TrimSpace(body.GitHubID),
-		Lightweight:            body.Lightweight,
-		DevcontainerConfigName: strings.TrimSpace(body.DevcontainerConfigName),
+		RepoProvider:           strings.TrimSpace(body.RepoProvider),
+		BaseBranch:             strings.TrimSpace(body.BaseBranch),
+		CloneURL:               strings.TrimSpace(body.CloneURL),
+		RepositoryHost:         strings.TrimSpace(body.RepositoryHost),
+		RepositoryPath:         strings.TrimSpace(body.RepositoryPath),
+		Lightweight:            lightweightOpt(body.Lightweight),
+		DevcontainerConfigName: devcontainerConfigName,
+		DefaultBranch:          strings.TrimSpace(body.DefaultBranch),
+		ProjectID:              strings.TrimSpace(body.ProjectID),
+		TaskID:                 strings.TrimSpace(body.TaskID),
 		DevcontainerCache: DevcontainerCacheCredentials{
 			Registry: strings.TrimSpace(body.DevcontainerCache.Registry),
 			Username: strings.TrimSpace(body.DevcontainerCache.Username),
 			Password: strings.TrimSpace(body.DevcontainerCache.Password),
 			Ref:      strings.TrimSpace(body.DevcontainerCache.Ref),
 		},
-	})
+	}
+}
 
+func workspaceCreateEventDetail(body createWorkspaceRequest, branch string) map[string]interface{} {
+	return map[string]interface{}{
+		"workspaceId": body.WorkspaceID,
+		"repository":  body.Repository,
+		"branch":      branch,
+	}
+}
+
+func (s *Server) hasWorkspaceCreateConflict(
+	w http.ResponseWriter,
+	body createWorkspaceRequest,
+	repository string,
+	branch string,
+	devcontainerConfigName string,
+) bool {
+	if !s.config.IsStandaloneMode() {
+		return s.maybeHandleDuplicateWorkspaceCreate(w, body.WorkspaceID, repository, branch, devcontainerConfigName, body.Lightweight)
+	}
+
+	s.workspaceMu.RLock()
+	conflict := workspaceCreateConflict(s.workspaces[body.WorkspaceID], repository, branch, devcontainerConfigName, body.Lightweight)
+	s.workspaceMu.RUnlock()
+	if conflict == "" {
+		return false
+	}
+	writeJSON(w, http.StatusConflict, map[string]interface{}{
+		"error":       "workspace_conflict",
+		"message":     conflict,
+		"workspaceId": body.WorkspaceID,
+	})
+	return true
+}
+
+func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
+	var body createWorkspaceRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if status, message := validateCreateWorkspaceRequest(body); message != "" {
+		writeError(w, status, message)
+		return
+	}
+
+	if !s.requireNodeManagementAuth(w, r, body.WorkspaceID) {
+		return
+	}
+
+	lock := s.workspaceLifecycleLock(body.WorkspaceID)
+	if err := lock.Lock(r.Context()); err != nil {
+		writeError(w, http.StatusRequestTimeout, "workspace lifecycle operation canceled")
+		return
+	}
+	defer lock.Unlock()
+	if !s.requireWorkspaceCreateEvictionState(w, body.WorkspaceID) {
+		return
+	}
+
+	branch := createWorkspaceBranch(body.Branch)
+	repository := strings.TrimSpace(body.Repository)
+	devcontainerConfigName := strings.TrimSpace(body.DevcontainerConfigName)
+	if s.hasWorkspaceCreateConflict(w, body, repository, branch, devcontainerConfigName) {
+		return
+	}
+
+	runtime := s.upsertWorkspaceRuntime(
+		body.WorkspaceID,
+		repository,
+		branch,
+		"creating",
+		strings.TrimSpace(body.CallbackToken),
+		createWorkspaceRuntimeOptions(body, devcontainerConfigName),
+	)
+
+	if snapshot, err := s.refreshWorkspaceEvictionState(runtime); err != nil || snapshot.Status == "evicted" {
+		writeError(w, http.StatusConflict, "workspace eviction state does not permit creation")
+		return
+	}
+
+	if s.config.IsStandaloneMode() {
+		s.handleStandaloneWorkspaceCreate(w, r, body, runtime, branch)
+		return
+	}
+
+	s.handleAsyncWorkspaceCreate(w, body, runtime, branch)
+}
+
+func (s *Server) handleStandaloneWorkspaceCreate(
+	w http.ResponseWriter,
+	r *http.Request,
+	body createWorkspaceRequest,
+	runtime *WorkspaceRuntime,
+	branch string,
+) {
+	if err := s.prepareStandaloneWorkspaceRuntime(r.Context(), runtime); err != nil {
+		s.handleStandaloneWorkspaceCreateFailure(w, body, branch, err.Error())
+		return
+	}
+
+	s.casWorkspaceStatus(body.WorkspaceID, []string{"creating"}, "running")
+	s.notifyStandaloneWorkspaceReady(body)
+	s.appendNodeEvent(body.WorkspaceID, "info", "workspace.created", "Standalone workspace runtime created", workspaceCreateEventDetail(body, branch))
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"workspaceId": runtime.ID,
+		"status":      "running",
+	})
+}
+
+func (s *Server) handleStandaloneWorkspaceCreateFailure(
+	w http.ResponseWriter,
+	body createWorkspaceRequest,
+	branch string,
+	errorMsg string,
+) {
+	s.casWorkspaceStatus(body.WorkspaceID, []string{"creating"}, "error")
+	callbackToken := strings.TrimSpace(body.CallbackToken)
+	if callbackToken != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), s.config.WorkspaceReadyCallbackTimeout)
+		if callbackErr := s.notifyWorkspaceProvisioningFailed(ctx, body.WorkspaceID, callbackToken, errorMsg); callbackErr != nil {
+			slog.Error("Standalone provisioning-failed callback error", "workspace", body.WorkspaceID, "error", callbackErr)
+		}
+		cancel()
+	}
+	detail := workspaceCreateEventDetail(body, branch)
+	detail["error"] = errorMsg
+	s.appendNodeEvent(body.WorkspaceID, "error", "workspace.provisioning_failed", "Standalone workspace provisioning failed", detail)
+	writeError(w, http.StatusInternalServerError, errorMsg)
+}
+
+func (s *Server) notifyStandaloneWorkspaceReady(body createWorkspaceRequest) {
+	callbackToken := strings.TrimSpace(body.CallbackToken)
+	if callbackToken == "" {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), s.config.WorkspaceReadyCallbackTimeout)
+	err := s.notifyWorkspaceReady(ctx, body.WorkspaceID, callbackToken, "running")
+	cancel()
+	if err != nil {
+		s.markReadyCallbackPending(body.WorkspaceID, "running")
+		slog.Warn("Standalone workspace ready callback failed; will retry on heartbeat",
+			"workspace", body.WorkspaceID, "error", err)
+	}
+}
+
+func (s *Server) handleAsyncWorkspaceCreate(
+	w http.ResponseWriter,
+	body createWorkspaceRequest,
+	runtime *WorkspaceRuntime,
+	branch string,
+) {
 	s.workspaceMu.Lock()
 	if runtime.ProvisioningActive {
 		s.workspaceMu.Unlock()
@@ -469,18 +791,8 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	// At workspace creation time, we only have workspaceID but not session context.
 	// For boot-time reporters (auto-provisioned task nodes), the reporter was
 	// already created with the correct workspaceID at server startup.
-
-	s.appendNodeEvent(body.WorkspaceID, "info", "workspace.provisioning", "Workspace provisioning started", map[string]interface{}{
-		"workspaceId": body.WorkspaceID,
-		"repository":  body.Repository,
-		"branch":      branch,
-	})
-
-	detail := map[string]interface{}{
-		"workspaceId": body.WorkspaceID,
-		"repository":  body.Repository,
-		"branch":      branch,
-	}
+	detail := workspaceCreateEventDetail(body, branch)
+	s.appendNodeEvent(body.WorkspaceID, "info", "workspace.provisioning", "Workspace provisioning started", detail)
 	s.startWorkspaceProvision(
 		runtime,
 		provisionRuntime,
@@ -500,7 +812,7 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleStopWorkspace(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.PathValue("workspaceId")
 	if workspaceID == "" {
-		writeError(w, http.StatusBadRequest, "workspaceId is required")
+		writeError(w, http.StatusBadRequest, workspaceIDRequiredMessage)
 		return
 	}
 
@@ -508,9 +820,33 @@ func (s *Server) handleStopWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	expectedGeneration, valid := decodeWorkspaceStopGeneration(w, r)
+	if !valid {
+		return
+	}
+
+	lock := s.workspaceLifecycleLock(workspaceID)
+	if err := lock.Lock(r.Context()); err != nil {
+		writeError(w, http.StatusRequestTimeout, "workspace lifecycle operation canceled")
+		return
+	}
+	defer lock.Unlock()
+
 	runtime, ok := s.getWorkspaceRuntime(workspaceID)
 	if !ok {
 		writeError(w, http.StatusNotFound, "workspace not found")
+		return
+	}
+
+	// Validate after acquiring lifecycle ownership: this request may have waited
+	// behind an admitted restart that established a successor generation.
+	snapshot := s.snapshotWorkspaceRuntime(runtime)
+	if expectedGeneration == nil && snapshot.EvictionGeneration != "" && !s.config.IsStandaloneMode() {
+		writeError(w, http.StatusBadRequest, "workspace stop requires expectedEvictionGeneration")
+		return
+	}
+	if expectedGeneration != nil && *expectedGeneration != snapshot.EvictionGeneration {
+		writeError(w, http.StatusConflict, "workspace eviction generation changed")
 		return
 	}
 
@@ -534,8 +870,9 @@ func (s *Server) handleStopWorkspace(w http.ResponseWriter, r *http.Request) {
 	// Stop port scanner for this workspace.
 	s.stopPortScanner(workspaceID)
 
-	// Shut down per-workspace message reporter (final flush before cleanup).
+	// Shut down per-workspace message reporter and telemetry collectors (final best-effort flush before cleanup).
 	s.shutdownReporter(workspaceID)
+	s.stopResourceHistoryForWorkspace(workspaceID, context.Background())
 
 	// Clear persisted tabs — workspace is stopped, no live sessions remain
 	if s.store != nil {
@@ -551,7 +888,7 @@ func (s *Server) handleStopWorkspace(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRestartWorkspace(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.PathValue("workspaceId")
 	if workspaceID == "" {
-		writeError(w, http.StatusBadRequest, "workspaceId is required")
+		writeError(w, http.StatusBadRequest, workspaceIDRequiredMessage)
 		return
 	}
 
@@ -559,25 +896,20 @@ func (s *Server) handleRestartWorkspace(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	runtime, ok := s.getWorkspaceRuntime(workspaceID)
+	body, ok := decodeWorkspaceReprovisionRequest(w, r)
 	if !ok {
-		writeError(w, http.StatusNotFound, "workspace not found")
 		return
 	}
-
-	// CAS-style transition: only restart from stopped or error
-	if !s.casWorkspaceStatus(workspaceID, []string{"stopped", "error"}, "creating") {
-		writeJSON(w, http.StatusConflict, map[string]interface{}{
-			"error":   "invalid_transition",
-			"message": "Workspace cannot be restarted from current state: " + runtime.Status,
-		})
+	runtime, snapshot, statusCode, err := s.claimWorkspaceReprovision(r.Context(), workspaceID, body, []string{"stopped", "evicted", "error"})
+	if err != nil {
+		writeWorkspaceReprovisionError(w, statusCode, err)
 		return
 	}
 	s.appendNodeEvent(workspaceID, "info", "workspace.restarting", "Workspace restart started", nil)
 
 	s.startWorkspaceProvision(
 		runtime,
-		s.snapshotWorkspaceRuntime(runtime),
+		snapshot,
 		"workspace.restart_failed",
 		"Workspace restart failed",
 		"workspace.restarted",
@@ -590,7 +922,7 @@ func (s *Server) handleRestartWorkspace(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleRebuildWorkspace(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.PathValue("workspaceId")
 	if workspaceID == "" {
-		writeError(w, http.StatusBadRequest, "workspaceId is required")
+		writeError(w, http.StatusBadRequest, workspaceIDRequiredMessage)
 		return
 	}
 
@@ -598,25 +930,20 @@ func (s *Server) handleRebuildWorkspace(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	runtime, ok := s.getWorkspaceRuntime(workspaceID)
+	body, ok := decodeWorkspaceReprovisionRequest(w, r)
 	if !ok {
-		writeError(w, http.StatusNotFound, "workspace not found")
 		return
 	}
-
-	// CAS-style transition: only rebuild from running/recovery/error
-	if !s.casWorkspaceStatus(workspaceID, []string{"running", "recovery", "error"}, "creating") {
-		writeJSON(w, http.StatusConflict, map[string]interface{}{
-			"error":   "invalid_transition",
-			"message": "Workspace must be running, recovery, or in error state to rebuild, currently " + runtime.Status,
-		})
+	runtime, snapshot, statusCode, err := s.claimWorkspaceReprovision(r.Context(), workspaceID, body, []string{"running", "recovery", "error"})
+	if err != nil {
+		writeWorkspaceReprovisionError(w, statusCode, err)
 		return
 	}
 	s.appendNodeEvent(workspaceID, "info", "workspace.rebuilding", "Rebuilding devcontainer", nil)
 
 	s.startWorkspaceProvision(
 		runtime,
-		s.snapshotWorkspaceRuntime(runtime),
+		snapshot,
 		"workspace.rebuild_failed",
 		"Workspace rebuild failed",
 		"workspace.rebuilt",
@@ -630,7 +957,7 @@ func (s *Server) handleRebuildWorkspace(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.PathValue("workspaceId")
 	if workspaceID == "" {
-		writeError(w, http.StatusBadRequest, "workspaceId is required")
+		writeError(w, http.StatusBadRequest, workspaceIDRequiredMessage)
 		return
 	}
 
@@ -638,13 +965,21 @@ func (s *Server) handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	lock := s.workspaceLifecycleLock(workspaceID)
+	if err := lock.Lock(r.Context()); err != nil {
+		writeError(w, http.StatusRequestTimeout, "workspace lifecycle operation canceled")
+		return
+	}
+	defer lock.Unlock()
+
 	s.stopSessionHostsForWorkspace(workspaceID)
 
 	// Stop port scanner for this workspace.
 	s.stopPortScanner(workspaceID)
 
-	// Shut down per-workspace message reporter (final flush before cleanup).
+	// Shut down per-workspace message reporter and telemetry collectors (final best-effort flush before cleanup).
 	s.shutdownReporter(workspaceID)
+	s.stopResourceHistoryForWorkspace(workspaceID, context.Background())
 
 	// Remove the devcontainer and its Docker volume.
 	// The container must be removed before the volume (Docker won't remove a volume in use).
@@ -664,6 +999,9 @@ func (s *Server) handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		if err := s.store.DeleteWorkspaceMcpServers(workspaceID); err != nil {
 			slog.Warn("Failed to delete persisted MCP servers for workspace", "workspace", workspaceID, "error", err)
 		}
+		if err := s.store.DeleteWorkspaceExecutionProtocol(workspaceID); err != nil {
+			slog.Warn("Failed to delete durable execution ledgers for workspace", "workspace", workspaceID, "error", err)
+		}
 	}
 
 	s.appendNodeEvent(workspaceID, "info", "workspace.deleted", "Workspace deleted", nil)
@@ -673,7 +1011,7 @@ func (s *Server) handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleListTabs(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.PathValue("workspaceId")
 	if workspaceID == "" {
-		writeError(w, http.StatusBadRequest, "workspaceId is required")
+		writeError(w, http.StatusBadRequest, workspaceIDRequiredMessage)
 		return
 	}
 
@@ -711,7 +1049,7 @@ type enrichedSession struct {
 func (s *Server) handleListAgentSessions(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.PathValue("workspaceId")
 	if workspaceID == "" {
-		writeError(w, http.StatusBadRequest, "workspaceId is required")
+		writeError(w, http.StatusBadRequest, workspaceIDRequiredMessage)
 		return
 	}
 	// Accept both workspace session cookies (browser) and management tokens (control plane).
@@ -748,7 +1086,7 @@ func (s *Server) handleListAgentSessions(w http.ResponseWriter, r *http.Request)
 func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.PathValue("workspaceId")
 	if workspaceID == "" {
-		writeError(w, http.StatusBadRequest, "workspaceId is required")
+		writeError(w, http.StatusBadRequest, workspaceIDRequiredMessage)
 		return
 	}
 	if !s.requireNodeManagementAuth(w, r, workspaceID) {
@@ -756,10 +1094,12 @@ func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request
 	}
 
 	var body struct {
-		SessionID     string `json:"sessionId"`
-		Label         string `json:"label"`
-		ChatSessionID string `json:"chatSessionId"` // Chat session ID for message routing (warm node reuse)
-		ProjectID     string `json:"projectId"`     // Project ID for late-init of message reporter (manual nodes)
+		SessionID       string                           `json:"sessionId"`
+		Label           string                           `json:"label"`
+		ChatSessionID   string                           `json:"chatSessionId"` // Chat session ID for message routing (warm node reuse)
+		ProjectID       string                           `json:"projectId"`     // Project ID for late-init of message reporter (manual nodes)
+		McpServers      []acp.McpServerEntry             `json:"mcpServers,omitempty"`
+		AcpInteractions *acp.AcpInteractionRuntimeConfig `json:"acpInteractions,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -769,17 +1109,84 @@ func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "sessionId is required")
 		return
 	}
+	if body.AcpInteractions != nil {
+		if err := acp.ValidateAcpInteractionRuntimeConfig(*body.AcpInteractions); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 
 	chatSID := strings.TrimSpace(body.ChatSessionID)
 	projectID := strings.TrimSpace(body.ProjectID)
+	mcpServers, err := normalizeMcpServers(body.McpServers)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
-	// Store projectID on workspace runtime for ACP heartbeat goroutine.
-	if projectID != "" {
+	finishCreate, err := s.beginSessionCreation(r.Context(), workspaceID, strings.TrimSpace(body.SessionID))
+	if err != nil {
+		writeError(w, http.StatusConflict, "session creation wait canceled")
+		return
+	}
+	defer finishCreate()
+
+	// A persisted tab does not retain immutable bootstrap provenance. Refuse
+	// automatic replay after restart before changing reporter/routing state.
+	if _, exists := s.agentSessions.Get(workspaceID, strings.TrimSpace(body.SessionID)); !exists && s.store != nil {
+		tabs, err := s.store.ListTabs(workspaceID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "cannot verify persisted session identity")
+			return
+		}
+		for _, tab := range tabs {
+			if _, known := s.agentSessions.Get(workspaceID, strings.TrimSpace(body.SessionID)); tab.ID == strings.TrimSpace(body.SessionID) && !known {
+				writeError(w, http.StatusConflict, "persisted session requires reconnect before bootstrap retry")
+				return
+			}
+		}
+	}
+	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	s.sessionHostMu.Lock()
+	if _, exists := s.agentSessions.Get(workspaceID, strings.TrimSpace(body.SessionID)); !exists && s.workspaceRestorePendingLocked(workspaceID) {
+		s.sessionHostMu.Unlock()
+		writeError(w, http.StatusConflict, "workspace snapshot restore is in progress")
+		return
+	}
+	session, idempotentHit, err := s.agentSessions.CreateRouted(workspaceID, strings.TrimSpace(body.SessionID), strings.TrimSpace(body.Label), idempotencyKey, projectID, chatSID)
+	s.sessionHostMu.Unlock()
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if idempotentHit {
+		finishCreate()
+		writeJSON(w, http.StatusCreated, session)
+		return
+	}
+
+	// Store project/chat identity for heartbeat and eviction snapshots.
+	if projectID != "" || chatSID != "" {
+		var updated *WorkspaceRuntime
 		s.workspaceMu.Lock()
 		if rt, ok := s.workspaces[workspaceID]; ok {
-			rt.ProjectID = projectID
+			if projectID != "" {
+				rt.ProjectID = projectID
+			}
+			if chatSID != "" {
+				rt.ChatSessionID = chatSID
+			}
+			rt.UpdatedAt = nowUTC()
+			copy := *rt
+			updated = &copy
 		}
 		s.workspaceMu.Unlock()
+		if updated != nil && updated.Repository != "" {
+			s.persistWorkspaceMetadata(updated)
+		}
+		if updated != nil {
+			s.ensureResourceHistoryForRuntime(updated)
+		}
 	}
 
 	// Ensure a per-workspace message reporter exists for this workspace.
@@ -797,11 +1204,14 @@ func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
-	session, idempotentHit, err := s.agentSessions.Create(workspaceID, strings.TrimSpace(body.SessionID), strings.TrimSpace(body.Label), idempotencyKey)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
+	s.registerSessionMcpServers(workspaceID, session.ID, mcpServers)
+	if body.AcpInteractions != nil {
+		s.sessionHostMu.Lock()
+		if s.sessionManualInteractionConfig == nil {
+			s.sessionManualInteractionConfig = make(map[string]acp.AcpInteractionRuntimeConfig)
+		}
+		s.sessionManualInteractionConfig[workspaceID+":"+session.ID] = *body.AcpInteractions
+		s.sessionHostMu.Unlock()
 	}
 
 	if !idempotentHit {
@@ -823,6 +1233,7 @@ func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request
 		}
 	}
 
+	finishCreate()
 	writeJSON(w, http.StatusCreated, session)
 }
 
@@ -846,16 +1257,25 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 	}
 
 	var body struct {
-		AgentType        string               `json:"agentType"`
-		InitialPrompt    string               `json:"initialPrompt"`
-		McpServers       []acp.McpServerEntry `json:"mcpServers,omitempty"`
-		Model            string               `json:"model,omitempty"`
-		PermissionMode   string               `json:"permissionMode,omitempty"`
-		OpencodeProvider string               `json:"opencodeProvider,omitempty"`
-		OpencodeBaseURL  string               `json:"opencodeBaseUrl,omitempty"`
-		ProjectID        string               `json:"projectId,omitempty"`
-		TaskID           string               `json:"taskId,omitempty"`
-		TaskMode         string               `json:"taskMode,omitempty"`
+		ProtocolVersion  int                             `json:"protocolVersion,omitempty"`
+		DeliveryID       string                          `json:"deliveryId,omitempty"`
+		MessageID        string                          `json:"messageId,omitempty"`
+		AgentType        string                          `json:"agentType"`
+		InitialPrompt    string                          `json:"initialPrompt"`
+		McpServers       []acp.McpServerEntry            `json:"mcpServers,omitempty"`
+		Model            string                          `json:"model,omitempty"`
+		PermissionMode   string                          `json:"permissionMode,omitempty"`
+		Effort           string                          `json:"effort,omitempty"`
+		OpencodeProvider string                          `json:"opencodeProvider,omitempty"`
+		OpencodeBaseURL  string                          `json:"opencodeBaseUrl,omitempty"`
+		ProjectID        string                          `json:"projectId,omitempty"`
+		TaskID           string                          `json:"taskId,omitempty"`
+		TaskMode         string                          `json:"taskMode,omitempty"`
+		AcpInteractions  acp.AcpInteractionRuntimeConfig `json:"acpInteractions,omitempty"`
+		// InjectedInstructions is SAM-managed system-injected prompt text (e.g. the
+		// get_instructions reminder). Delivered to the agent as model input but
+		// mirrored as a separate origin="system" user message the UI collapses.
+		InjectedInstructions string `json:"injectedInstructions,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -868,6 +1288,25 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 	if strings.TrimSpace(body.InitialPrompt) == "" {
 		writeError(w, http.StatusBadRequest, "initialPrompt is required")
 		return
+	}
+	if err := acp.ValidateAcpInteractionRuntimeConfig(body.AcpInteractions); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	body.DeliveryID = strings.TrimSpace(body.DeliveryID)
+	body.MessageID = strings.TrimSpace(body.MessageID)
+	if body.DeliveryID != "" {
+		if body.ProtocolVersion != vmExecutionProtocolVersion {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+				"error":             "unsupported_protocol_version",
+				"supportedVersions": []int{vmExecutionProtocolVersion},
+			})
+			return
+		}
+		if !validExecutionProtocolID(body.DeliveryID, maxDeliveryIDLength) {
+			writeError(w, http.StatusBadRequest, "deliveryId has an invalid format")
+			return
+		}
 	}
 
 	session, exists := s.agentSessions.Get(workspaceID, sessionID)
@@ -886,52 +1325,27 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Validate and store MCP servers for this session before creating the SessionHost.
-	// getOrCreateSessionHost reads these and wires them into GatewayConfig.
 	hostKey := workspaceID + ":" + sessionID
-	for i, srv := range body.McpServers {
-		u := strings.TrimSpace(srv.URL)
-		if u == "" {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("mcpServers[%d].url is required", i))
-			return
-		}
-		if !strings.HasPrefix(u, "https://") && !strings.HasPrefix(u, "http://") {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("mcpServers[%d].url must be an HTTP(S) URL", i))
-			return
-		}
-		body.McpServers[i].URL = u
+	mcpServers, err := normalizeMcpServers(body.McpServers)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
-	if len(body.McpServers) > 0 {
-		s.sessionHostMu.Lock()
-		s.sessionMcpServers[hostKey] = body.McpServers
-		s.sessionHostMu.Unlock()
-
-		// Persist to SQLite so MCP servers survive VM agent restarts and
-		// are available even if a WebSocket creates the SessionHost first.
-		if s.store != nil {
-			persistEntries := make([]persistence.McpServer, len(body.McpServers))
-			for i, srv := range body.McpServers {
-				persistEntries[i] = persistence.McpServer{URL: srv.URL, Token: srv.Token}
-			}
-			if err := s.store.UpsertSessionMcpServers(workspaceID, sessionID, persistEntries); err != nil {
-				slog.Warn("Failed to persist MCP servers to SQLite",
-					"workspace", workspaceID, "session", sessionID, "error", err)
-			}
-		}
-
-		slog.Info("MCP servers registered for agent session",
-			"workspace", workspaceID, "session", sessionID, "count", len(body.McpServers))
-	}
-
 	// Always store profile overrides so getOrCreateSessionHost can apply them.
 	// Even empty overrides are stored to distinguish "no profile" from "not set".
 	s.sessionHostMu.Lock()
+	if s.workspaceRestorePendingLocked(workspaceID) || s.workspaceCreationPendingLocked(workspaceID) {
+		s.sessionHostMu.Unlock()
+		writeError(w, http.StatusConflict, "workspace session bootstrap is in progress")
+		return
+	}
 	if s.sessionTaskCtx == nil {
 		s.sessionTaskCtx = make(map[string]taskCallbackContext)
 	}
 	s.sessionProfileOvr[hostKey] = profileOverrides{
 		Model:            body.Model,
 		PermissionMode:   body.PermissionMode,
+		Effort:           body.Effort,
 		OpencodeProvider: body.OpencodeProvider,
 		OpencodeBaseURL:  body.OpencodeBaseURL,
 	}
@@ -955,25 +1369,78 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 		delete(s.sessionTaskCtx, hostKey)
 	}
 	s.sessionHostMu.Unlock()
-	if body.Model != "" || body.PermissionMode != "" || body.OpencodeProvider != "" || body.OpencodeBaseURL != "" {
+	if taskID != "" && projectIDForTask != "" {
+		s.updateResourceHistoryAttribution(workspaceID, projectIDForTask, "", taskID)
+	}
+	s.registerSessionMcpServers(workspaceID, sessionID, mcpServers)
+	if body.Model != "" || body.PermissionMode != "" || body.Effort != "" || body.OpencodeProvider != "" || body.OpencodeBaseURL != "" {
 		slog.Info("Profile overrides registered for agent session",
 			"workspace", workspaceID, "session", sessionID,
-			"model", body.Model, "permissionMode", body.PermissionMode,
+			"model", body.Model, "permissionMode", body.PermissionMode, "effort", body.Effort,
 			"opencodeProvider", body.OpencodeProvider,
 			"opencodeBaseUrl", body.OpencodeBaseURL)
 	}
 
 	// Create or retrieve the SessionHost for this session.
 	host := s.getOrCreateSessionHost(hostKey, workspaceID, sessionID, session, runtime, "")
-
+	if host == nil {
+		writeError(w, http.StatusConflict, "workspace snapshot restore is in progress")
+		return
+	}
 	s.appendNodeEvent(workspaceID, "info", "agent_session.starting", "Starting agent with initial prompt", map[string]interface{}{
 		"sessionId": sessionID,
 		"agentType": body.AgentType,
 	})
 
+	if body.DeliveryID != "" {
+		hash := agentStartDeliveryFingerprint(body.ProtocolVersion, body.MessageID,
+			body.InitialPrompt, body.InjectedInstructions, body.AcpInteractions)
+		receipt, _, conflict, receiptErr := s.store.AcceptPromptDelivery(workspaceID, sessionID,
+			body.DeliveryID, body.ProtocolVersion, hash)
+		if receiptErr != nil {
+			writeError(w, http.StatusInternalServerError, "failed to persist prompt receipt")
+			return
+		}
+		if conflict {
+			writeJSON(w, http.StatusConflict, versionedPromptResponse{
+				Status: "conflict", SessionID: sessionID, Receipt: receipt,
+			})
+			return
+		}
+		if receipt.State != persistence.PromptReceiptAccepted {
+			receipt, receiptErr = s.store.GetPromptDelivery(workspaceID, sessionID,
+				body.DeliveryID, s.executionRuntimeID)
+			if receiptErr != nil {
+				writeError(w, http.StatusInternalServerError, "failed to reconcile prompt receipt")
+				return
+			}
+			writeJSON(w, http.StatusOK, versionedPromptResponse{
+				Status: "duplicate", SessionID: sessionID, Receipt: receipt,
+			})
+			return
+		}
+		receipt, claimed, claimErr := s.store.ClaimPromptDelivery(workspaceID, sessionID,
+			body.DeliveryID, s.executionRuntimeID)
+		if claimErr != nil || !claimed {
+			writeJSON(w, http.StatusConflict, versionedPromptResponse{
+				Status: "not_ready", SessionID: sessionID, Receipt: receipt,
+			})
+			return
+		}
+		host.ConfigureAcpInteractions(body.AcpInteractions)
+		observer := s.promptReceiptObserver(workspaceID, sessionID, body.DeliveryID)
+		go s.startAgentWithPromptObserved(host, workspaceID, sessionID, body.AgentType,
+			body.InitialPrompt, body.InjectedInstructions, body.MessageID, observer)
+		writeJSON(w, http.StatusAccepted, versionedPromptResponse{
+			Status: "accepted", SessionID: sessionID, Receipt: receipt,
+		})
+		return
+	}
+
 	// Start agent and send initial prompt in a background goroutine.
 	// The endpoint returns 202 immediately — the agent runs asynchronously.
-	go s.startAgentWithPrompt(host, workspaceID, sessionID, body.AgentType, body.InitialPrompt)
+	host.ConfigureAcpInteractions(body.AcpInteractions)
+	go s.startAgentWithPrompt(host, workspaceID, sessionID, body.AgentType, body.InitialPrompt, body.InjectedInstructions)
 
 	writeJSON(w, http.StatusAccepted, map[string]interface{}{
 		"status":    "starting",
@@ -981,9 +1448,34 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 	})
 }
 
+func buildInitialPromptParams(initialPrompt, injectedInstructions string) ([]byte, error) {
+	return buildInitialPromptParamsWithMessageID(initialPrompt, injectedInstructions, "")
+}
+
+func buildInitialPromptParamsWithMessageID(initialPrompt, injectedInstructions, messageID string) ([]byte, error) {
+	promptBlocks := []map[string]interface{}{
+		{"type": "text", "text": initialPrompt},
+	}
+	if strings.TrimSpace(injectedInstructions) != "" {
+		promptBlocks = append(promptBlocks, map[string]interface{}{
+			"type":  "text",
+			"text":  injectedInstructions,
+			"_meta": map[string]interface{}{acp.MetaOriginKey: acp.OriginSystem},
+		})
+	}
+	return json.Marshal(map[string]interface{}{
+		"messageId": messageID,
+		"prompt":    promptBlocks,
+	})
+}
+
 // startAgentWithPrompt runs SelectAgent and then sends the initial prompt.
 // Called as a goroutine from handleStartAgentSession.
-func (s *Server) startAgentWithPrompt(host *acp.SessionHost, workspaceID, sessionID, agentType, initialPrompt string) {
+func (s *Server) startAgentWithPrompt(host *acp.SessionHost, workspaceID, sessionID, agentType, initialPrompt, injectedInstructions string) {
+	s.startAgentWithPromptObserved(host, workspaceID, sessionID, agentType, initialPrompt, injectedInstructions, "", nil)
+}
+
+func (s *Server) startAgentWithPromptObserved(host *acp.SessionHost, workspaceID, sessionID, agentType, initialPrompt, injectedInstructions, messageID string, observer acp.PromptTerminalObserver) {
 	ctx := context.Background()
 
 	// Idempotency: if the host is already prompting, a prompt is in progress —
@@ -992,6 +1484,9 @@ func (s *Server) startAgentWithPrompt(host *acp.SessionHost, workspaceID, sessio
 	if currentStatus == acp.HostPrompting {
 		slog.Info("Agent already processing a prompt, skipping duplicate",
 			"workspace", workspaceID, "session", sessionID)
+		if observer != nil {
+			observer("error", errors.New("agent is already processing another prompt"))
+		}
 		return
 	}
 	if currentStatus == acp.HostReady {
@@ -1010,8 +1505,12 @@ func (s *Server) startAgentWithPrompt(host *acp.SessionHost, workspaceID, sessio
 
 			// Fire the completion callback with error so the control plane
 			// can transition the task to failed.
+			promptErr := fmt.Errorf("%s: agent status is %s", errMsg, host.Status())
 			if cb := host.OnPromptCompleteCallback(); cb != nil {
-				cb("error", fmt.Errorf("%s: agent status is %s", errMsg, host.Status()))
+				cb("error", promptErr)
+			}
+			if observer != nil {
+				observer("error", promptErr)
 			}
 			return
 		}
@@ -1024,17 +1523,45 @@ func (s *Server) startAgentWithPrompt(host *acp.SessionHost, workspaceID, sessio
 		"agentType": agentType,
 	})
 
-	// Build JSON-RPC params matching what HandlePrompt expects.
-	promptParams, _ := json.Marshal(map[string]interface{}{
-		"prompt": []map[string]string{
-			{"type": "text", "text": initialPrompt},
-		},
-	})
+	// Build JSON-RPC params matching what HandlePrompt expects. The visible task
+	// prompt is one block; SAM-injected instructions (e.g. the get_instructions
+	// reminder) are a SEPARATE block carrying the origin marker in _meta. Both are
+	// sent to the agent as model input, but the injected block is mirrored as a
+	// distinct origin="system" user message the UI collapses. The marker rides the
+	// INBOUND JSON-RPC params (parsed by parsePromptBlocks) — it is read in-process
+	// before any SDK marshaling, so it reaches persistence even though the SDK
+	// strips _meta on outbound serialization.
+	promptParams, err := buildInitialPromptParamsWithMessageID(initialPrompt, injectedInstructions, messageID)
+	if err != nil {
+		slog.Error("Failed to encode initial prompt", "workspace", workspaceID, "session", sessionID, "error", err)
+		if observer != nil {
+			observer("error", err)
+		}
+		if cb := host.OnPromptCompleteCallback(); cb != nil {
+			cb("error", err)
+		}
+		return
+	}
 	syntheticReqID, _ := json.Marshal("server-initiated-1")
 
 	// HandlePrompt blocks until the agent completes. The OnPromptComplete
 	// callback fires automatically, handling git push and task status updates.
-	host.HandlePrompt(ctx, syntheticReqID, promptParams, "server")
+	// trustedSource=true: this is the SAM-built initial task prompt, the only
+	// legitimate origin=system producer (the injected instructions block).
+	if observer == nil {
+		host.HandlePrompt(ctx, syntheticReqID, promptParams, "server", true)
+		return
+	}
+	accepted, ok := host.AcceptPrompt(ctx, syntheticReqID, promptParams, "server", true, "", observer)
+	if !ok {
+		promptErr := errors.New("initial prompt was not accepted by the session host")
+		observer("error", promptErr)
+		if cb := host.OnPromptCompleteCallback(); cb != nil {
+			cb("error", promptErr)
+		}
+		return
+	}
+	accepted.Run()
 }
 
 // handleSendPrompt sends a follow-up prompt to a running agent session.
@@ -1052,17 +1579,30 @@ func (s *Server) handleSendPrompt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var body struct {
-		Prompt    string `json:"prompt"`
-		MessageID string `json:"messageId"`
-	}
+	var body sendPromptRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if strings.TrimSpace(body.Prompt) == "" {
+	body.Prompt = strings.TrimSpace(body.Prompt)
+	body.MessageID = strings.TrimSpace(body.MessageID)
+	body.DeliveryID = strings.TrimSpace(body.DeliveryID)
+	if body.Prompt == "" {
 		writeError(w, http.StatusBadRequest, "prompt is required")
 		return
+	}
+	if body.DeliveryID != "" {
+		if body.ProtocolVersion != vmExecutionProtocolVersion {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+				"error":             "unsupported_protocol_version",
+				"supportedVersions": []int{vmExecutionProtocolVersion},
+			})
+			return
+		}
+		if !validExecutionProtocolID(body.DeliveryID, maxDeliveryIDLength) {
+			writeError(w, http.StatusBadRequest, "deliveryId has an invalid format")
+			return
+		}
 	}
 
 	// Look up the existing SessionHost for this session.
@@ -1076,16 +1616,18 @@ func (s *Server) handleSendPrompt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check agent status — must be ready (not already prompting).
+	// Legacy callers retain the historical status response. Versioned callers
+	// reserve the SessionHost synchronously below so status and invocation cannot
+	// race two accepted deliveries.
 	status := host.Status()
-	if status == acp.HostPrompting {
+	if body.DeliveryID == "" && status == acp.HostPrompting {
 		writeJSON(w, http.StatusConflict, map[string]interface{}{
 			"status":  "busy",
 			"message": "Agent is already processing a prompt",
 		})
 		return
 	}
-	if status != acp.HostReady {
+	if body.DeliveryID == "" && status != acp.HostReady {
 		writeJSON(w, http.StatusConflict, map[string]interface{}{
 			"status":  string(status),
 			"message": "Agent is not ready for prompts",
@@ -1095,25 +1637,431 @@ func (s *Server) handleSendPrompt(w http.ResponseWriter, r *http.Request) {
 
 	// Build JSON-RPC params matching what HandlePrompt expects.
 	promptParams, _ := json.Marshal(map[string]interface{}{
-		"messageId": strings.TrimSpace(body.MessageID),
+		"messageId": body.MessageID,
 		"prompt": []map[string]string{
-			{"type": "text", "text": strings.TrimSpace(body.Prompt)},
+			{"type": "text", "text": body.Prompt},
 		},
 	})
 	syntheticReqID, _ := json.Marshal("control-plane-followup")
 
 	s.appendNodeEvent(workspaceID, "info", "agent_session.followup_prompt", "Sending follow-up prompt to agent", map[string]interface{}{
 		"sessionId": sessionID,
-		"messageId": strings.TrimSpace(body.MessageID),
+		"messageId": body.MessageID,
 	})
 
+	if body.DeliveryID != "" {
+		s.handleVersionedPromptDelivery(w, host, workspaceID, sessionID, body.ProtocolVersion,
+			body.DeliveryID, body.MessageID, body.Prompt, syntheticReqID, promptParams)
+		return
+	}
+
 	// Dispatch asynchronously — HandlePrompt blocks until the agent completes.
-	go host.HandlePrompt(context.Background(), syntheticReqID, promptParams, "control-plane")
+	// trustedSource=false: a follow-up carries the user's own message text and
+	// must not be able to mark itself origin=system.
+	go host.HandlePrompt(context.Background(), syntheticReqID, promptParams, "control-plane", false)
 
 	writeJSON(w, http.StatusAccepted, map[string]interface{}{
 		"status":    "prompting",
 		"sessionId": sessionID,
 	})
+}
+
+func promptDeliveryFingerprint(protocolVersion int, messageID, prompt string) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%d\x00%s\x00%s", protocolVersion, messageID, prompt)))
+	return fmt.Sprintf("%x", sum[:])
+}
+
+func agentStartDeliveryFingerprint(
+	protocolVersion int,
+	messageID string,
+	prompt string,
+	injectedInstructions string,
+	interactions acp.AcpInteractionRuntimeConfig,
+) string {
+	encodedInteractions, _ := json.Marshal(interactions)
+	return promptDeliveryFingerprint(protocolVersion, messageID,
+		prompt+"\x00"+injectedInstructions+"\x00"+string(encodedInteractions))
+}
+
+type versionedPromptResponse struct {
+	Status    string                            `json:"status"`
+	SessionID string                            `json:"sessionId"`
+	Receipt   persistence.PromptDeliveryReceipt `json:"receipt"`
+}
+
+func writeVersionedPromptResponse(
+	w http.ResponseWriter,
+	statusCode int,
+	status, sessionID string,
+	receipt persistence.PromptDeliveryReceipt,
+) {
+	writeJSON(w, statusCode, versionedPromptResponse{
+		Status: status, SessionID: sessionID, Receipt: receipt,
+	})
+}
+
+func (s *Server) handleVersionedPromptDelivery(
+	w http.ResponseWriter,
+	host *acp.SessionHost,
+	workspaceID, sessionID string,
+	protocolVersion int,
+	deliveryID, messageID, prompt string,
+	reqID, promptParams json.RawMessage,
+) {
+	hash := promptDeliveryFingerprint(protocolVersion, messageID, prompt)
+	receipt, _, conflict, err := s.store.AcceptPromptDelivery(workspaceID, sessionID,
+		deliveryID, protocolVersion, hash)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to persist prompt receipt")
+		return
+	}
+	if conflict {
+		writeVersionedPromptResponse(w, http.StatusConflict, "conflict", sessionID, receipt)
+		return
+	}
+	if receipt.State != persistence.PromptReceiptAccepted {
+		receipt, err = s.store.GetPromptDelivery(workspaceID, sessionID, deliveryID, s.executionRuntimeID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to reconcile prompt receipt")
+			return
+		}
+		writeVersionedPromptResponse(w, http.StatusOK, "duplicate", sessionID, receipt)
+		return
+	}
+
+	observer := s.promptReceiptObserver(workspaceID, sessionID, deliveryID)
+	accepted, ok := host.AcceptPrompt(context.Background(), reqID, promptParams,
+		"control-plane", false, deliveryID, observer)
+	if !ok {
+		receipt.RuntimeIdentity = s.executionRuntimeID
+		writeVersionedPromptResponse(w, http.StatusConflict, "not_ready", sessionID, receipt)
+		return
+	}
+	receipt, claimed, err := s.store.ClaimPromptDelivery(workspaceID, sessionID,
+		deliveryID, s.executionRuntimeID)
+	if err != nil || !claimed {
+		claimErr := err
+		if claimErr == nil {
+			claimErr = errors.New("delivery receipt was not claimable")
+		}
+		accepted.Abort(claimErr)
+		writeVersionedPromptResponse(w, http.StatusConflict, "not_ready", sessionID, receipt)
+		return
+	}
+
+	go accepted.Run()
+	writeVersionedPromptResponse(w, http.StatusAccepted, "accepted", sessionID, receipt)
+}
+
+func (s *Server) promptReceiptObserver(workspaceID, sessionID, deliveryID string) acp.PromptTerminalObserver {
+	return func(stopReason string, promptErr error) {
+		errorCode := ""
+		if promptErr != nil {
+			errorCode = "prompt_terminal_error"
+		}
+		if err := s.store.CompletePromptDelivery(workspaceID, sessionID, deliveryID,
+			s.executionRuntimeID, stopReason, errorCode); err != nil {
+			slog.Error("Failed to complete prompt delivery receipt", "workspace", workspaceID,
+				"session", sessionID, "deliveryId", deliveryID, "error", err)
+		}
+	}
+}
+
+func (s *Server) handleGetPromptReceipt(w http.ResponseWriter, r *http.Request) {
+	workspaceID := r.PathValue("workspaceId")
+	sessionID := r.PathValue("sessionId")
+	deliveryID := strings.TrimSpace(r.PathValue("deliveryId"))
+	if workspaceID == "" || sessionID == "" || !validExecutionProtocolID(deliveryID, maxDeliveryIDLength) {
+		writeError(w, http.StatusBadRequest, "workspaceId, sessionId, and deliveryId are required")
+		return
+	}
+	if !s.requireNodeManagementAuth(w, r, workspaceID) {
+		return
+	}
+	receipt, err := s.store.GetPromptDelivery(workspaceID, sessionID, deliveryID, s.executionRuntimeID)
+	if errors.Is(err, sql.ErrNoRows) {
+		s.writePromptReceiptNotFound(w, deliveryID)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read prompt receipt")
+		return
+	}
+	writeJSON(w, http.StatusOK, receipt)
+}
+
+func (s *Server) writePromptReceiptNotFound(w http.ResponseWriter, deliveryID string) {
+	writeJSON(w, http.StatusNotFound, persistence.PromptDeliveryReceipt{
+		DeliveryID: deliveryID, State: "not_found", RuntimeIdentity: s.executionRuntimeID,
+	})
+}
+
+type acpInteractionAnswerRequest struct {
+	ProtocolVersion int                              `json:"protocolVersion"`
+	InteractionID   string                           `json:"interactionId"`
+	Generation      string                           `json:"generation"`
+	RuntimeIdentity string                           `json:"runtimeIdentity"`
+	Decision        acp.AcpInteractionAnswerDecision `json:"decision"`
+}
+
+type acpInteractionAnswerResponse struct {
+	Status          string `json:"status"`
+	InteractionID   string `json:"interactionId"`
+	Generation      string `json:"generation"`
+	RuntimeIdentity string `json:"runtimeIdentity"`
+}
+
+func (s *Server) handleAcpInteractionAnswer(w http.ResponseWriter, r *http.Request) {
+	workspaceID := r.PathValue("workspaceId")
+	sessionID := r.PathValue("sessionId")
+	interactionID := strings.TrimSpace(r.PathValue("interactionId"))
+	if workspaceID == "" || sessionID == "" || interactionID == "" {
+		writeError(w, http.StatusBadRequest, "workspaceId, sessionId, and interactionId are required")
+		return
+	}
+	if !s.requireNodeManagementAuth(w, r, workspaceID) {
+		return
+	}
+	hostKey := workspaceID + ":" + sessionID
+	s.sessionHostMu.Lock()
+	host := s.sessionHosts[hostKey]
+	s.sessionHostMu.Unlock()
+	if host == nil || host.Status() == acp.HostStopped || host.Status() == acp.HostError {
+		writeError(w, http.StatusNotFound, "no active agent session found")
+		return
+	}
+
+	var body acpInteractionAnswerRequest
+	r.Body = http.MaxBytesReader(w, r.Body, host.AcpInteractionResponseMaxBytes())
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	body.InteractionID = strings.TrimSpace(body.InteractionID)
+	body.Generation = strings.TrimSpace(body.Generation)
+	body.RuntimeIdentity = strings.TrimSpace(body.RuntimeIdentity)
+	if body.ProtocolVersion != vmExecutionProtocolVersion {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"error":             "unsupported_protocol_version",
+			"supportedVersions": []int{vmExecutionProtocolVersion},
+		})
+		return
+	}
+	if body.InteractionID != interactionID || !validExecutionProtocolID(body.InteractionID, maxAcpInteractionIDLength) {
+		writeError(w, http.StatusBadRequest, "interactionId has an invalid format")
+		return
+	}
+	if _, err := uuid.Parse(body.InteractionID); err != nil {
+		writeError(w, http.StatusBadRequest, "interactionId must be a UUID")
+		return
+	}
+	if !validExecutionProtocolID(body.Generation, maxAcpInteractionGenerationLength) {
+		writeError(w, http.StatusBadRequest, "generation has an invalid format")
+		return
+	}
+	if _, err := uuid.Parse(body.Generation); err != nil {
+		writeError(w, http.StatusBadRequest, "generation must be a UUID")
+		return
+	}
+	if err := acp.ValidateAcpInteractionDecision(body.Decision); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if body.RuntimeIdentity != s.executionRuntimeID {
+		writeJSON(w, http.StatusConflict, acpInteractionAnswerResponse{
+			Status:          "stale_generation",
+			InteractionID:   body.InteractionID,
+			Generation:      body.Generation,
+			RuntimeIdentity: s.executionRuntimeID,
+		})
+		return
+	}
+
+	status := host.ResolveAcpInteractionAnswer(body.InteractionID, body.Generation, body.Decision)
+	writeJSON(w, http.StatusOK, acpInteractionAnswerResponse{
+		Status:          status,
+		InteractionID:   body.InteractionID,
+		Generation:      body.Generation,
+		RuntimeIdentity: s.executionRuntimeID,
+	})
+}
+
+func (s *Server) handleAgentCapabilities(w http.ResponseWriter, r *http.Request) {
+	workspaceID := r.PathValue("workspaceId")
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, workspaceIDRequiredMessage)
+		return
+	}
+	if !s.requireNodeManagementAuth(w, r, workspaceID) {
+		return
+	}
+	writeJSON(w, http.StatusOK, s.agentCapabilities())
+}
+
+func (s *Server) agentCapabilities() map[string]interface{} {
+	return map[string]interface{}{
+		"protocolVersion": vmExecutionProtocolVersion,
+		"runtimeIdentity": s.executionRuntimeID,
+		"promptReceipts": map[string]interface{}{
+			"supported": true,
+			"lookup":    true,
+			"states": []string{persistence.PromptReceiptAccepted, persistence.PromptReceiptInFlight,
+				persistence.PromptReceiptCompleted, persistence.PromptReceiptAmbiguous},
+		},
+		"interactions": map[string]interface{}{
+			"supported":         true,
+			"version":           acpInteractionCapabilityVersion,
+			"answerEndpoint":    true,
+			"permissionBridge":  true,
+			"formBridge":        true,
+			"urlBridge":         true,
+			"deliverySemantics": "best_effort_no_wake",
+			"noWaiterStatus":    "no_waiter",
+			"staleStatus":       "stale_generation",
+		},
+		"checkpointRollover": map[string]interface{}{
+			"supported": true,
+			"automatic": false,
+			"states": []string{persistence.RolloverAccepted, persistence.RolloverInProgress,
+				persistence.RolloverCompleted, persistence.RolloverSuperseded, persistence.RolloverFailed},
+			"defaultGraceMs":     s.config.ACPCheckpointPreemptGrace.Milliseconds(),
+			"maxGraceMs":         s.config.ACPCheckpointPreemptMaxGrace.Milliseconds(),
+			"operationTimeoutMs": s.config.ACPCheckpointRolloverTimeout.Milliseconds(),
+		},
+	}
+}
+
+func (s *Server) handleCheckpointRollover(w http.ResponseWriter, r *http.Request) {
+	workspaceID := r.PathValue("workspaceId")
+	sessionID := r.PathValue("sessionId")
+	if workspaceID == "" || sessionID == "" {
+		writeError(w, http.StatusBadRequest, "workspaceId and sessionId are required")
+		return
+	}
+	if !s.requireNodeManagementAuth(w, r, workspaceID) {
+		return
+	}
+	var body struct {
+		ProtocolVersion int    `json:"protocolVersion"`
+		OperationID     string `json:"operationId"`
+		GraceMs         *int64 `json:"graceMs,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	body.OperationID = strings.TrimSpace(body.OperationID)
+	if body.ProtocolVersion != vmExecutionProtocolVersion {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"error":             "unsupported_protocol_version",
+			"supportedVersions": []int{vmExecutionProtocolVersion},
+		})
+		return
+	}
+	if !validExecutionProtocolID(body.OperationID, maxRolloverOperationIDLength) {
+		writeError(w, http.StatusBadRequest, "operationId has an invalid format")
+		return
+	}
+	grace := s.config.ACPCheckpointPreemptGrace
+	if body.GraceMs != nil {
+		if *body.GraceMs < 0 {
+			writeError(w, http.StatusBadRequest, "graceMs must be non-negative")
+			return
+		}
+		if *body.GraceMs > s.config.ACPCheckpointPreemptMaxGrace.Milliseconds() {
+			writeError(w, http.StatusBadRequest, "graceMs exceeds the advertised maximum")
+			return
+		}
+		grace = time.Duration(*body.GraceMs) * time.Millisecond
+	}
+	if grace > s.config.ACPCheckpointPreemptMaxGrace {
+		writeError(w, http.StatusBadRequest, "graceMs exceeds the advertised maximum")
+		return
+	}
+
+	hostKey := workspaceID + ":" + sessionID
+	s.sessionHostMu.Lock()
+	host := s.sessionHosts[hostKey]
+	s.sessionHostMu.Unlock()
+	if host == nil {
+		writeError(w, http.StatusNotFound, "no active agent session found")
+		return
+	}
+	hash := promptDeliveryFingerprint(body.ProtocolVersion, body.OperationID, grace.String())
+	op, _, conflict, err := s.store.AcceptCheckpointRollover(workspaceID, sessionID,
+		body.OperationID, body.ProtocolVersion, hash)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to persist rollover operation")
+		return
+	}
+	if conflict {
+		writeJSON(w, http.StatusConflict, map[string]interface{}{
+			"error":       "operation_id_conflict",
+			"operationId": body.OperationID,
+		})
+		return
+	}
+	if op.State != persistence.RolloverAccepted {
+		op, err = s.store.GetCheckpointRollover(workspaceID, sessionID, body.OperationID, s.executionRuntimeID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to reconcile rollover operation")
+			return
+		}
+		writeJSON(w, http.StatusOK, op)
+		return
+	}
+	op, started, err := s.store.StartCheckpointRollover(workspaceID, sessionID,
+		body.OperationID, s.executionRuntimeID)
+	if err != nil || !started {
+		writeError(w, http.StatusConflict, "rollover operation could not be started")
+		return
+	}
+	go s.runCheckpointRollover(host, workspaceID, sessionID, body.OperationID, grace)
+	writeJSON(w, http.StatusAccepted, op)
+}
+
+func (s *Server) runCheckpointRollover(host *acp.SessionHost, workspaceID, sessionID, operationID string, grace time.Duration) {
+	ctx, cancel := context.WithTimeout(context.Background(), s.config.ACPCheckpointRolloverTimeout)
+	defer cancel()
+	result, err := host.CheckpointRollover(ctx, grace)
+	state := result.State
+	if state == "" {
+		state = persistence.RolloverFailed
+		result.ErrorCode = "rollover_failed"
+		result.ErrorMessage = "checkpoint rollover failed"
+	}
+	if err != nil && result.ErrorMessage == "" {
+		result.ErrorMessage = "checkpoint rollover failed"
+	}
+	if persistErr := s.store.CompleteCheckpointRollover(workspaceID, sessionID, operationID,
+		s.executionRuntimeID, state, result.Forced, result.ACPSessionID,
+		result.ErrorCode, result.ErrorMessage); persistErr != nil {
+		slog.Error("Failed to complete checkpoint rollover operation", "workspace", workspaceID,
+			"session", sessionID, "operationId", operationID, "error", persistErr)
+	}
+}
+
+func (s *Server) handleGetCheckpointRollover(w http.ResponseWriter, r *http.Request) {
+	workspaceID := r.PathValue("workspaceId")
+	sessionID := r.PathValue("sessionId")
+	operationID := strings.TrimSpace(r.PathValue("operationId"))
+	if workspaceID == "" || sessionID == "" || !validExecutionProtocolID(operationID, maxRolloverOperationIDLength) {
+		writeError(w, http.StatusBadRequest, "workspaceId, sessionId, and operationId are required")
+		return
+	}
+	if !s.requireNodeManagementAuth(w, r, workspaceID) {
+		return
+	}
+	op, err := s.store.GetCheckpointRollover(workspaceID, sessionID, operationID, s.executionRuntimeID)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "checkpoint rollover operation not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read checkpoint rollover operation")
+		return
+	}
+	writeJSON(w, http.StatusOK, op)
 }
 
 func (s *Server) handleCancelAgentSession(w http.ResponseWriter, r *http.Request) {

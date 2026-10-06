@@ -1,0 +1,192 @@
+import type Database from 'better-sqlite3';
+import { is } from 'drizzle-orm';
+import { getTableConfig, SQLiteTable } from 'drizzle-orm/sqlite-core';
+
+interface ExecutableStatement {
+  run(): Promise<unknown>;
+  runSync(): unknown;
+}
+
+/**
+ * Create tables in an in-memory SQLite database directly from the drizzle schema
+ * definitions, so a test database can never drift from the columns production
+ * queries actually select (`db.select().from(table)` selects every column).
+ *
+ * Only column names/affinities and the primary key are emitted. FK, NOT NULL and
+ * DEFAULT constraints are intentionally omitted so tests can seed narrow fixtures
+ * without materialising every referenced table. The point of this helper is that
+ * real WHERE predicates get evaluated by a real SQL engine — a mock whose
+ * `.where()` ignores its arguments cannot prove an ownership guard filters.
+ */
+export function createSchemaTables(sqlite: Database.Database, tables: SQLiteTable[]): void {
+  for (const table of tables) {
+    const config = getTableConfig(table);
+    const inlinePrimaryKey = config.columns.filter((column) => column.primary);
+    const definitions = config.columns.map((column) => {
+      // Only inline PRIMARY KEY when exactly one column claims it; SQLite rejects
+      // multiple inline primary keys, so composite keys become a table constraint.
+      const primary = column.primary && inlinePrimaryKey.length === 1 ? ' PRIMARY KEY' : '';
+      return `"${column.name}" ${column.getSQLType()}${primary}`;
+    });
+
+    if (inlinePrimaryKey.length > 1) {
+      definitions.push(
+        `PRIMARY KEY (${inlinePrimaryKey.map((column) => `"${column.name}"`).join(', ')})`
+      );
+    }
+    for (const compositeKey of config.primaryKeys) {
+      definitions.push(
+        `PRIMARY KEY (${compositeKey.columns.map((column) => `"${column.name}"`).join(', ')})`
+      );
+    }
+
+    sqlite.exec(`CREATE TABLE "${config.name}" (${definitions.join(', ')})`);
+  }
+}
+
+/**
+ * Materialise every table exported by a drizzle schema module. Use this for route-level tests,
+ * where a handler's incidental reads (profile hints, activity, dependencies) would otherwise
+ * force the test to enumerate — and keep re-enumerating — tables it does not care about.
+ */
+export function createAllSchemaTables(
+  sqlite: Database.Database,
+  schemaModule: Record<string, unknown>
+): void {
+  const tables = Object.values(schemaModule).filter((value): value is SQLiteTable =>
+    is(value, SQLiteTable)
+  );
+  createSchemaTables(sqlite, tables);
+}
+
+/** Faithful D1 boundary adapter backed by a real in-memory SQLite engine. */
+export function createSqliteD1(sqlite: Database.Database): D1Database {
+  const normalize = (params: unknown[]) =>
+    params.map((value) => (value === undefined ? null : value));
+
+  const bound = (sql: string, params: unknown[]): ExecutableStatement & Record<string, unknown> => {
+    const runSync = () => {
+      const statement = sqlite.prepare(sql);
+      // D1's `batch()` returns a populated `results` array for row-returning statements, and
+      // drizzle's D1 driver reads `result.results` straight back out of each batch entry.
+      // Reporting `results: []` unconditionally would silently turn every batched SELECT into
+      // "no rows" — the kind of infidelity `.claude/rules/28` bans, since a guard fed an empty
+      // result set rejects for the wrong reason.
+      if (statement.reader) {
+        return {
+          success: true,
+          results: statement.all(...normalize(params)),
+          meta: { changes: 0, last_row_id: 0 },
+        };
+      }
+      const info = statement.run(...normalize(params));
+      return {
+        success: true,
+        results: [],
+        meta: { changes: info.changes, last_row_id: Number(info.lastInsertRowid) },
+      };
+    };
+    return {
+      runSync,
+      run: async () => runSync(),
+      all: async () => ({
+        success: true,
+        results: sqlite.prepare(sql).all(...normalize(params)),
+        meta: {},
+      }),
+      raw: async () =>
+        sqlite
+          .prepare(sql)
+          .raw()
+          .all(...normalize(params)),
+      first: async (column?: string) => {
+        const row = sqlite.prepare(sql).get(...normalize(params)) as
+          | Record<string, unknown>
+          | undefined;
+        return column === undefined ? (row ?? null) : (row?.[column] ?? null);
+      },
+    };
+  };
+
+  const statement = (sql: string) => ({
+    bind: (...params: unknown[]) => bound(sql, params),
+    ...bound(sql, []),
+  });
+
+  const batch = async (statements: ExecutableStatement[]) =>
+    sqlite.transaction((items: ExecutableStatement[]) => items.map((item) => item.runSync()))(
+      statements
+    );
+
+  const database = {
+    prepare: statement,
+    batch,
+    exec: async (sql: string) => {
+      sqlite.exec(sql);
+      return { count: 0, duration: 0 };
+    },
+    dump: async () => new ArrayBuffer(0),
+    /**
+     * Shape-fidelity shim for the Sessions API so `lib/d1-session.ts` can be exercised in
+     * node-environment tests. It is NOT a replica simulator: there is one engine, so every
+     * query is trivially "consistent". Replica routing, bookmark propagation and
+     * read-after-write across a real session must be proven on workerd
+     * (`tests/workers/`), per `.claude/rules/69`.
+     *
+     * Shares `prepare`/`batch` with the binding by reference rather than re-implementing
+     * them, so a session can never drift from what the binding itself does.
+     */
+    withSession: () => ({ prepare: statement, batch, getBookmark: () => null }),
+  };
+
+  return database as unknown as D1Database;
+}
+
+/** D1 adapter wrapper that fails when one statement exceeds Cloudflare's bind parameter limit. */
+export function createSqliteD1WithBindLimit(
+  sqlite: Database.Database,
+  maxBoundParameters: number
+): D1Database {
+  const database = createSqliteD1(sqlite) as D1Database & {
+    prepare(sql: string): D1PreparedStatement;
+  };
+
+  const prepare = (sql: string) => {
+    const statement = database.prepare(sql);
+    return {
+      ...statement,
+      bind: (...params: unknown[]) => {
+        if (params.length > maxBoundParameters) {
+          throw new Error(
+            `D1 bind parameter limit exceeded: ${params.length} > ${maxBoundParameters}`
+          );
+        }
+        return statement.bind(...params);
+      },
+    };
+  };
+
+  return {
+    ...database,
+    prepare,
+    // A session must not be an escape hatch from the very limit this wrapper exists to
+    // enforce: inheriting `createSqliteD1`'s `withSession` through the spread would hand
+    // back the unlimited `prepare` and silently pass statements this helper is meant to
+    // reject.
+    withSession: () => ({ prepare, batch: database.batch, getBookmark: () => null }),
+  } as unknown as D1Database;
+}
+
+/** Small stateful KV boundary fake that preserves JSON get/put semantics. */
+export function createMemoryKv(): KVNamespace {
+  const values = new Map<string, string>();
+  return {
+    get: async (key: string, type?: string) => {
+      const value = values.get(key) ?? null;
+      return type === 'json' && value !== null ? JSON.parse(value) : value;
+    },
+    put: async (key: string, value: string) => {
+      values.set(key, value);
+    },
+  } as unknown as KVNamespace;
+}

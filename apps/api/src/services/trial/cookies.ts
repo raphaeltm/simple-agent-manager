@@ -47,7 +47,7 @@ export interface TrialClaimPayload {
 function base64urlEncode(bytes: Uint8Array): string {
   // btoa requires a binary string; Uint8Array iteration is safe for bytes.
   let binary = '';
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]!);
+  for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
@@ -94,19 +94,13 @@ function timingSafeEqual(a: string, b: string): boolean {
  * Sign a fingerprint UUID — returns "<uuid>.<sig>" (dotted, base64url sig).
  * The value is opaque to callers; only `verifyFingerprint` re-reads it.
  */
-export async function signFingerprint(
-  uuid: string,
-  secret: string
-): Promise<string> {
+export async function signFingerprint(uuid: string, secret: string): Promise<string> {
   const sig = await hmacSign(secret, uuid);
   return `${uuid}.${sig}`;
 }
 
 /** Returns the UUID on success, or `null` if the signature is invalid. */
-export async function verifyFingerprint(
-  value: string,
-  secret: string
-): Promise<string | null> {
+export async function verifyFingerprint(value: string, secret: string): Promise<string | null> {
   const dot = value.lastIndexOf('.');
   if (dot <= 0 || dot === value.length - 1) return null;
   const uuid = value.slice(0, dot);
@@ -123,10 +117,7 @@ export async function verifyFingerprint(
  * Sign a claim payload — returns "<base64url(json)>.<sig>". The entire string
  * is then placed in the `sam_trial_claim` cookie.
  */
-export async function signClaimToken(
-  payload: TrialClaimPayload,
-  secret: string
-): Promise<string> {
+export async function signClaimToken(payload: TrialClaimPayload, secret: string): Promise<string> {
   const body = base64urlEncode(new TextEncoder().encode(JSON.stringify(payload)));
   const sig = await hmacSign(secret, body);
   return `${body}.${sig}`;
@@ -137,9 +128,7 @@ export type ClaimVerifyFailure =
   | { ok: false; reason: 'bad_signature' }
   | { ok: false; reason: 'expired' };
 
-export type ClaimVerifyResult =
-  | { ok: true; payload: TrialClaimPayload }
-  | ClaimVerifyFailure;
+export type ClaimVerifyResult = { ok: true; payload: TrialClaimPayload } | ClaimVerifyFailure;
 
 /**
  * Verify a signed claim token. Returns the decoded payload or a reason tag on

@@ -8,9 +8,9 @@ SAM uses a **Cloudflare-first development approach**. Local development has sign
 ## Recommended Workflow
 
 1. **Make changes locally** — edit code, run lint and typecheck
-2. **Deploy to staging** — via GitHub Actions or `pnpm deploy:setup --environment staging`
+2. **Deploy to staging** — via the "Deploy Staging" GitHub Actions workflow or `pnpm deploy:staging`
 3. **Test on Cloudflare** — real D1, KV, Workers, DNS
-4. **Merge to main** — triggers production deployment
+4. **Merge to main** — in the canonical repository, successful `main` CI triggers production deployment; in self-host forks, run **Deploy Production** manually with the exact synced commit SHA when you want to update the instance
 
 ## What Works Locally
 
@@ -21,18 +21,19 @@ pnpm dev
 ```
 
 This starts:
+
 - **API** at `http://localhost:8787` (Wrangler with Miniflare)
 - **Web UI** at `http://localhost:5173` (Vite dev server)
 
 ### Limitations
 
-| Feature | Local | Staging |
-|---------|-------|---------|
-| GitHub OAuth | No (callbacks won't work) | Yes |
-| DNS/subdomains | No | Yes |
-| VM provisioning | No | Yes |
-| D1/KV/R2 | Emulated (may differ) | Real |
-| Agent sessions | No | Yes |
+| Feature         | Local                     | Staging |
+| --------------- | ------------------------- | ------- |
+| GitHub OAuth    | No (callbacks won't work) | Yes     |
+| DNS/subdomains  | No                        | Yes     |
+| VM provisioning | No                        | Yes     |
+| D1/KV/R2        | Emulated (may differ)     | Real    |
+| Agent sessions  | No                        | Yes     |
 
 ## Prerequisites
 
@@ -41,7 +42,7 @@ node --version   # v20.x or higher
 pnpm --version   # 9.x or higher
 ```
 
-Go 1.22+ is only needed if you're working on the VM Agent (`packages/vm-agent/`).
+Go 1.26.6+ is needed if you're working on the VM Agent (`packages/vm-agent/`) or CLI (`packages/cli/`).
 
 ## Setup
 
@@ -109,7 +110,7 @@ apps/
 
 packages/
 ├── shared/       # Shared types and utilities
-├── providers/    # Cloud provider abstraction (Hetzner)
+├── providers/    # Cloud provider abstraction (Hetzner, Scaleway, GCP, Vultr, Infomaniak, DigitalOcean, UpCloud)
 ├── cloud-init/   # Cloud-init template generator
 ├── terminal/     # Shared terminal component (xterm.js)
 ├── ui/           # Design system components
@@ -122,10 +123,10 @@ For real testing, deploy to a staging environment:
 
 ```bash
 # Via GitHub Actions (recommended)
-# Trigger the "Deploy Setup" workflow with environment=staging
+# Trigger the "Deploy Staging" workflow
 
 # Or via CLI
-pnpm deploy:setup --environment staging
+pnpm deploy:staging
 ```
 
 Staging gives you the full Cloudflare stack: real D1, KV, Workers, DNS, and VM provisioning.

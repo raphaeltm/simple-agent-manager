@@ -1,3 +1,5 @@
+import type { CredentialValidationStatus } from './types/user';
+
 // =============================================================================
 // Agent Types
 // =============================================================================
@@ -12,7 +14,7 @@ export const AGENT_TYPE_VALUES = [
   'amp',
 ] as const;
 
-export type AgentType = typeof AGENT_TYPE_VALUES[number];
+export type AgentType = (typeof AGENT_TYPE_VALUES)[number];
 
 /** API key provider identifiers */
 export const AGENT_PROVIDER_VALUES = [
@@ -24,7 +26,7 @@ export const AGENT_PROVIDER_VALUES = [
   'amp',
 ] as const;
 
-export type AgentProvider = typeof AGENT_PROVIDER_VALUES[number];
+export type AgentProvider = (typeof AGENT_PROVIDER_VALUES)[number];
 
 // =============================================================================
 // Agent Definition (Configuration Registry)
@@ -50,8 +52,6 @@ export interface AgentDefinition {
   supportsAcp: boolean;
   /** URL where users can obtain an API key */
   credentialHelpUrl: string;
-  /** npm global install command */
-  installCommand: string;
   /** Cloud provider whose credential can be used as a fallback when no dedicated agent key exists */
   fallbackCloudProvider?: string;
   /** OAuth-specific metadata */
@@ -81,10 +81,10 @@ export const AGENT_CATALOG: readonly AgentDefinition[] = [
     acpArgs: [],
     supportsAcp: true,
     credentialHelpUrl: 'https://console.anthropic.com/settings/keys',
-    installCommand: 'npm install -g @zed-industries/claude-agent-acp',
     oauthSupport: {
       envVarName: 'CLAUDE_CODE_OAUTH_TOKEN',
-      setupInstructions: 'Generate a token using "claude setup-token" or "claude login" in your terminal',
+      setupInstructions:
+        'Generate a token using "claude setup-token" or "claude login" in your terminal',
       subscriptionUrl: 'https://claude.ai/settings/plan',
     },
   },
@@ -98,10 +98,10 @@ export const AGENT_CATALOG: readonly AgentDefinition[] = [
     acpArgs: [],
     supportsAcp: true,
     credentialHelpUrl: 'https://platform.openai.com/api-keys',
-    installCommand: 'npx --yes @zed-industries/codex-acp --version',
     oauthSupport: {
       envVarName: 'CODEX_AUTH_JSON',
-      setupInstructions: 'Run "codex login" on your local machine and sign in with your ChatGPT account, then paste the contents of ~/.codex/auth.json',
+      setupInstructions:
+        'Run "codex login" on your local machine and sign in with your ChatGPT account, then paste the contents of ~/.codex/auth.json',
       subscriptionUrl: 'https://openai.com/chatgpt/pricing/',
     },
   },
@@ -115,7 +115,6 @@ export const AGENT_CATALOG: readonly AgentDefinition[] = [
     acpArgs: ['--acp'],
     supportsAcp: true,
     credentialHelpUrl: 'https://aistudio.google.com/apikey',
-    installCommand: 'npm install -g @google/gemini-cli',
   },
   {
     id: 'mistral-vibe',
@@ -127,21 +126,17 @@ export const AGENT_CATALOG: readonly AgentDefinition[] = [
     acpArgs: [],
     supportsAcp: true,
     credentialHelpUrl: 'https://console.mistral.ai/api-keys',
-    installCommand:
-      'curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe==2.7.0 --python 3.12 --quiet',
   },
   {
     id: 'opencode',
     name: 'OpenCode',
-    description: 'Open-source AI coding agent by SST. Uses Scaleway Generative APIs for inference.',
+    description: 'Open-source AI coding agent by SST. Uses OpenCode managed inference.',
     provider: 'opencode',
-    envVarName: 'SCW_SECRET_KEY',
+    envVarName: 'OPENCODE_API_KEY',
     acpCommand: 'opencode',
     acpArgs: ['acp'],
     supportsAcp: true,
-    credentialHelpUrl: 'https://console.scaleway.com/iam/api-keys',
-    fallbackCloudProvider: 'scaleway',
-    installCommand: 'npm install -g opencode-ai@1.4.3',
+    credentialHelpUrl: 'https://opencode.ai/auth',
   },
   {
     id: 'amp',
@@ -153,8 +148,6 @@ export const AGENT_CATALOG: readonly AgentDefinition[] = [
     acpArgs: ['run'],
     supportsAcp: true,
     credentialHelpUrl: 'https://ampcode.com/settings',
-    installCommand:
-      'curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install acp-amp==0.1.3 --with agent-client-protocol==0.7.1 --with amp-sdk==0.1.2 --with pydantic==2.12.5 --with pydantic-core==2.41.5 --with annotated-types==0.7.0 --with typing-inspection==0.4.2 --with typing-extensions==4.15.0 --python 3.12 --quiet && npm install -g @sourcegraph/amp',
   },
 ] as const;
 
@@ -181,7 +174,7 @@ export interface AgentInfo {
   configured: boolean;
   credentialHelpUrl: string;
   /** When configured through a fallback path rather than a dedicated agent key */
-  fallbackCredentialSource: 'scaleway-cloud' | 'platform-opencode' | 'platform-sam' | null;
+  fallbackCredentialSource: 'platform-sam' | null;
 }
 
 /** Credential kinds supported by agents */
@@ -194,6 +187,7 @@ export interface AgentCredentialInfo {
   credentialKind: CredentialKind;
   isActive: boolean;
   maskedKey: string;
+  validation?: CredentialValidationStatus;
   label?: string; // e.g., "Pro/Max Subscription" for OAuth
   createdAt: string;
   updatedAt: string;
@@ -219,4 +213,5 @@ export interface SaveAgentCredentialRequest {
 export interface AgentKeyResponse {
   apiKey: string; // Decrypted credential (API key or OAuth token)
   credentialKind: CredentialKind; // Type for proper env var injection
+  credentialGeneration?: number; // Server-side attribution generation for usage callbacks
 }

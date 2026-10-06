@@ -20,6 +20,15 @@ import { AppError } from '../../src/middleware/error';
 import { verifyCallbackToken } from '../../src/services/jwt';
 import * as projectDataService from '../../src/services/project-data';
 
+const dbState = vi.hoisted(() => ({
+  workspaceGuardRow: {
+    nodeId: 'node-test',
+    nodeStatus: 'running',
+    projectId: 'proj-test',
+    status: 'running',
+  } as { nodeId: string; nodeStatus: string; projectId: string; status: string } | null,
+}));
+
 // Mock better-auth before any route imports
 vi.mock('../../src/auth', () => ({
   createAuth: () => ({
@@ -33,23 +42,28 @@ vi.mock('../../src/auth', () => ({
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => ({
     select: () => ({
-      from: () => ({
-        where: () => ({
-          limit: () =>
-            Promise.resolve([
-              {
-                id: 'task-test',
-                projectId: 'proj-test',
-                userId: 'user-test',
-                workspaceId: 'ws-test',
-                status: 'running',
-                title: 'Test task',
-                taskMode: 'task',
-              },
-            ]),
-          orderBy: () => Promise.resolve([]),
-        }),
-      }),
+      from: () => {
+        const query = {
+          leftJoin: () => query,
+          where: () => ({
+            limit: () =>
+              Promise.resolve([
+                {
+                  id: 'task-test',
+                  projectId: 'proj-test',
+                  userId: 'user-test',
+                  workspaceId: 'ws-test',
+                  status: 'running',
+                  title: 'Test task',
+                  taskMode: 'task',
+                },
+              ]),
+            orderBy: () => Promise.resolve([]),
+            get: () => Promise.resolve(dbState.workspaceGuardRow),
+          }),
+        };
+        return query;
+      },
     }),
     update: () => ({
       set: () => ({
@@ -75,6 +89,12 @@ vi.mock('../../src/services/jwt', () => ({
 }));
 
 vi.mock('../../src/lib/logger', () => ({
+  createModuleLogger: () => ({
+    debug: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+  }),
   log: {
     debug: vi.fn(),
     error: vi.fn(),
@@ -189,7 +209,7 @@ async function createTestApp(): Promise<Hono> {
 
   app.onError((err, c) => {
     if (err instanceof AppError) {
-      return c.json(err.toJSON(), err.statusCode as 401 | 403 | 404 | 500);
+      return c.json(err.toJSON(), err.statusCode as 401 | 403 | 404 | 410 | 500);
     }
     return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
   });
@@ -202,6 +222,12 @@ describe('task callback auth routing (regression)', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    dbState.workspaceGuardRow = {
+      nodeId: 'node-test',
+      nodeStatus: 'running',
+      projectId: 'proj-test',
+      status: 'running',
+    };
     app = await createTestApp();
   });
 
@@ -312,6 +338,9 @@ describe('task callback auth routing (regression)', () => {
     // The callback route's own JWT verification handles the invalid token.
     const body = await res.json();
     expect(body.message).not.toBe('Authentication required');
+    expect(verifyCallbackToken).toHaveBeenCalledWith('bad-token', expect.anything(), {
+      expectedScope: 'workspace',
+    });
 
     // Restore default mock for other tests
     vi.mocked(verifyCallbackToken).mockResolvedValue({
@@ -319,6 +348,33 @@ describe('task callback auth routing (regression)', () => {
       type: 'callback',
       scope: 'workspace',
     });
+  });
+
+  it('POST callback with node-scoped token is rejected by workspace callback scope gate', async () => {
+    vi.mocked(verifyCallbackToken).mockRejectedValueOnce(
+      new Error("Token scope 'node' does not match expected 'workspace'")
+    );
+
+    const res = await app.request(
+      '/api/projects/proj-test/tasks/task-test/status/callback',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer node-scoped-callback-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ toStatus: 'completed' }),
+      },
+      { DATABASE: {}, SESSIONS: {}, PROJECT_DATA: { idFromName: vi.fn() } }
+    );
+
+    const body = await res.json();
+    expect(body.message).not.toBe('Authentication required');
+    expect(verifyCallbackToken).toHaveBeenCalledWith(
+      'node-scoped-callback-token',
+      expect.anything(),
+      { expectedScope: 'workspace' }
+    );
   });
 
   it('POST callback with workspace mismatch returns 403', async () => {
@@ -347,5 +403,30 @@ describe('task callback auth routing (regression)', () => {
     expect(res.status).toBe(403);
     const body = await res.json();
     expect(body.message).toBe('Token workspace mismatch');
+  });
+
+  it('POST callback from a workspace attached to a deleted node returns terminal 410 before side effects', async () => {
+    dbState.workspaceGuardRow = {
+      nodeId: 'node-test',
+      nodeStatus: 'deleted',
+      projectId: 'proj-test',
+      status: 'running',
+    };
+
+    const res = await app.request(
+      '/api/projects/proj-test/tasks/task-test/status/callback',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer valid-callback-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ toStatus: 'completed' }),
+      },
+      { DATABASE: {}, SESSIONS: {}, PROJECT_DATA: { idFromName: vi.fn() } }
+    );
+
+    expect(res.status).toBe(410);
+    expect(projectDataService.recordActivityEvent).not.toHaveBeenCalled();
   });
 });

@@ -1,6 +1,11 @@
-import { afterEach,describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { getTimeoutMs,providerFetch } from '../../src/provider-fetch';
+import {
+  getMaxProviderErrorBodyChars,
+  getTimeoutMs,
+  providerDelay,
+  providerFetch,
+} from '../../src/provider-fetch';
 import { ProviderError } from '../../src/types';
 
 describe('getTimeoutMs', () => {
@@ -33,17 +38,52 @@ describe('getTimeoutMs', () => {
   });
 });
 
+describe('getMaxProviderErrorBodyChars', () => {
+  it('returns default for missing or invalid env values', () => {
+    expect(getMaxProviderErrorBodyChars(undefined, 2048)).toBe(2048);
+    expect(getMaxProviderErrorBodyChars('0', 2048)).toBe(2048);
+    expect(getMaxProviderErrorBodyChars('bad', 2048)).toBe(2048);
+  });
+
+  it('parses valid positive integer strings', () => {
+    expect(getMaxProviderErrorBodyChars('1024', 2048)).toBe(1024);
+  });
+});
+
 describe('providerFetch', () => {
   const originalFetch = globalThis.fetch;
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    vi.useRealTimers();
   });
 
+  function installPendingAbortAwareFetch() {
+    let requestSignal: AbortSignal | undefined;
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
+      requestSignal = init?.signal ?? undefined;
+      return new Promise<Response>((_resolve, reject) => {
+        if (!requestSignal) {
+          reject(new Error('Expected provider request to include a signal'));
+          return;
+        }
+        if (requestSignal.aborted) {
+          reject(requestSignal.reason);
+          return;
+        }
+        requestSignal.addEventListener('abort', () => reject(requestSignal?.reason), {
+          once: true,
+        });
+      });
+    });
+    globalThis.fetch = fetchMock as typeof fetch;
+    return { fetchMock, getRequestSignal: () => requestSignal };
+  }
+
   it('returns response on successful fetch', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ data: 'ok' }), { status: 200 }),
-    );
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ data: 'ok' }), { status: 200 }));
 
     const response = await providerFetch('test-provider', 'https://api.example.com/test');
     expect(response.ok).toBe(true);
@@ -51,10 +91,261 @@ describe('providerFetch', () => {
     expect(body).toEqual({ data: 'ok' });
   });
 
-  it('throws ProviderError on HTTP 4xx with JSON error body', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ error: { message: 'Unauthorized' } }), { status: 401 }),
+  it('does not start a request when the existing RequestInit signal is already cancelled', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('should not run'));
+    globalThis.fetch = fetchMock;
+    const cancellation = new ProviderError(
+      'hetzner',
+      undefined,
+      'caller cancelled before provisioning'
     );
+    const caller = new AbortController();
+    caller.abort(cancellation);
+
+    await expect(
+      providerFetch(
+        'hetzner',
+        'https://api.example.com/servers',
+        { method: 'POST', signal: caller.signal },
+        10_000
+      )
+    ).rejects.toBe(cancellation);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('preserves the exact caller reason when cancellation interrupts a pending fetch', async () => {
+    const { fetchMock } = installPendingAbortAwareFetch();
+    const caller = new AbortController();
+    const cancellation = new Error('caller stopped waiting for the provider');
+
+    const request = providerFetch(
+      'hetzner',
+      'https://api.example.com/servers/server-1',
+      { signal: caller.signal },
+      25
+    );
+    const rejection = expect(request).rejects.toBe(cancellation);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    caller.abort(cancellation);
+    await rejection;
+  });
+
+  it('preserves caller cancellation after headers while the response body is pending', async () => {
+    let requestSignal: AbortSignal | undefined;
+    globalThis.fetch = vi.fn((_url: string, init?: RequestInit) => {
+      requestSignal = init?.signal ?? undefined;
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          requestSignal?.addEventListener('abort', () => controller.error(requestSignal?.reason), {
+            once: true,
+          });
+        },
+      });
+      return Promise.resolve(new Response(body));
+    }) as typeof fetch;
+    const caller = new AbortController();
+    const addListener = vi.spyOn(caller.signal, 'addEventListener');
+    const removeListener = vi.spyOn(caller.signal, 'removeEventListener');
+    const reason = new ProviderError('gcp', 409, 'caller cancelled pending provider body');
+
+    const request = providerFetch(
+      'gcp',
+      'https://compute.googleapis.test/instances',
+      undefined,
+      10_000,
+      undefined,
+      { signal: caller.signal }
+    );
+    await vi.waitFor(() => expect(requestSignal).toBeDefined());
+    const callerListener = addListener.mock.calls[0]?.[1];
+    expect(callerListener).toBeTypeOf('function');
+    expect(removeListener).not.toHaveBeenCalledWith('abort', callerListener);
+    caller.abort(reason);
+
+    await expect(request).rejects.toBe(reason);
+    expect(requestSignal?.reason).toBe(reason);
+    expect(removeListener).toHaveBeenCalledWith('abort', callerListener);
+  });
+
+  it('reports the internal timeout when it expires after headers but before the body', async () => {
+    vi.useFakeTimers();
+    globalThis.fetch = vi.fn((_url: string, init?: RequestInit) => {
+      const signal = init?.signal;
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          signal?.addEventListener('abort', () => controller.error(signal.reason), { once: true });
+        },
+      });
+      return Promise.resolve(new Response(body));
+    }) as typeof fetch;
+
+    const request = providerFetch(
+      'gcp',
+      'https://compute.googleapis.test/instances',
+      undefined,
+      40
+    ).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(40);
+
+    await expect(request).resolves.toMatchObject({
+      providerName: 'gcp',
+      message: expect.stringContaining('timed out after 40ms'),
+    });
+  });
+
+  it('preserves cancellation that wins as a successful zero-body response settles', async () => {
+    const caller = new AbortController();
+    const reason = new ProviderError('digitalocean', 404, 'caller cancelled DELETE response');
+    globalThis.fetch = vi.fn(() => {
+      queueMicrotask(() => caller.abort(reason));
+      return Promise.resolve(new Response(null, { status: 204 }));
+    });
+
+    await expect(
+      providerFetch(
+        'digitalocean',
+        'https://api.digitalocean.test/v2/droplets/123',
+        { method: 'DELETE' },
+        10_000,
+        undefined,
+        { signal: caller.signal }
+      )
+    ).rejects.toBe(reason);
+  });
+
+  it('uses the first caller cancellation when it wins the race with the internal timeout', async () => {
+    const { getRequestSignal } = installPendingAbortAwareFetch();
+    const initCaller = new AbortController();
+    const contextCaller = new AbortController();
+    const cancellation = new ProviderError(
+      'hetzner',
+      undefined,
+      'request owner cancelled the operation'
+    );
+
+    const request = providerFetch(
+      'hetzner',
+      'https://api.example.com/servers/server-1',
+      { signal: initCaller.signal },
+      25,
+      undefined,
+      { signal: contextCaller.signal }
+    );
+    const rejection = expect(request).rejects.toBe(cancellation);
+
+    contextCaller.abort(cancellation);
+    await rejection;
+    expect(getRequestSignal()?.reason).toBe(cancellation);
+  });
+
+  it('reports the configured timeout when it wins before either caller signal', async () => {
+    vi.useFakeTimers();
+    const { getRequestSignal } = installPendingAbortAwareFetch();
+    const initCaller = new AbortController();
+    const contextCaller = new AbortController();
+
+    const request = providerFetch(
+      'hetzner',
+      'https://api.example.com/servers/server-1',
+      { signal: initCaller.signal },
+      40,
+      undefined,
+      { signal: contextCaller.signal }
+    );
+    const result = request.catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(40);
+
+    const error = await result;
+    expect(error).toBeInstanceOf(ProviderError);
+    expect(error).toMatchObject({
+      providerName: 'hetzner',
+      message: expect.stringContaining('timed out after 40ms'),
+    });
+
+    const timeoutReason = getRequestSignal()?.reason;
+    const lateCallerReason = new Error('caller was too late');
+    contextCaller.abort(lateCallerReason);
+    expect(getRequestSignal()?.reason).toBe(timeoutReason);
+  });
+
+  it('cleans caller listeners and the internal timer after a normal request', async () => {
+    vi.useFakeTimers();
+    let requestSignal: AbortSignal | undefined;
+    globalThis.fetch = vi.fn((_url: string, init?: RequestInit) => {
+      requestSignal = init?.signal ?? undefined;
+      return Promise.resolve(new Response('ok', { status: 200 }));
+    }) as typeof fetch;
+    const initCaller = new AbortController();
+    const contextCaller = new AbortController();
+
+    const response = await providerFetch(
+      'hetzner',
+      'https://api.example.com/servers',
+      { signal: initCaller.signal },
+      10_000,
+      undefined,
+      { signal: contextCaller.signal }
+    );
+
+    expect(await response.text()).toBe('ok');
+    expect(requestSignal?.aborted).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+
+    initCaller.abort(new Error('request already completed'));
+    contextCaller.abort(new Error('request already completed'));
+    expect(requestSignal?.aborted).toBe(false);
+  });
+
+  it.each([
+    { name: 'network failure', outcome: 'network' },
+    { name: 'caller cancellation', outcome: 'caller' },
+    { name: 'internal timeout', outcome: 'timeout' },
+  ] as const)('removes caller listeners after $name', async ({ outcome }) => {
+    vi.useFakeTimers();
+    const caller = new AbortController();
+    const addListener = vi.spyOn(caller.signal, 'addEventListener');
+    const removeListener = vi.spyOn(caller.signal, 'removeEventListener');
+    const callerReason = new Error('request owner cancelled');
+
+    if (outcome === 'network') {
+      globalThis.fetch = vi.fn().mockRejectedValue(new Error('provider network failed'));
+    } else {
+      globalThis.fetch = vi.fn((_url: string, init?: RequestInit) => {
+        const requestSignal = init?.signal;
+        return new Promise<Response>((_resolve, reject) => {
+          requestSignal?.addEventListener('abort', () => reject(requestSignal.reason), {
+            once: true,
+          });
+        });
+      }) as typeof fetch;
+    }
+
+    const request = providerFetch(
+      'hetzner',
+      'https://api.example.com/servers',
+      undefined,
+      50,
+      undefined,
+      { signal: caller.signal }
+    ).catch((error: unknown) => error);
+
+    if (outcome === 'caller') caller.abort(callerReason);
+    if (outcome === 'timeout') await vi.advanceTimersByTimeAsync(50);
+    await request;
+
+    const listener = addListener.mock.calls[0]?.[1];
+    expect(listener).toBeTypeOf('function');
+    expect(removeListener).toHaveBeenCalledWith('abort', listener);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('throws ProviderError on HTTP 4xx with JSON error body', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ error: { message: 'Unauthorized' } }), { status: 401 })
+      );
 
     try {
       await providerFetch('hetzner', 'https://api.example.com/test');
@@ -69,9 +360,9 @@ describe('providerFetch', () => {
   });
 
   it('throws ProviderError on HTTP 5xx with text error body', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response('Internal Server Error', { status: 500 }),
-    );
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(new Response('Internal Server Error', { status: 500 }));
 
     try {
       await providerFetch('hetzner', 'https://api.example.com/test');
@@ -86,9 +377,7 @@ describe('providerFetch', () => {
   });
 
   it('throws ProviderError on HTTP error with empty body', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response('', { status: 403 }),
-    );
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response('', { status: 403 }));
 
     try {
       await providerFetch('hetzner', 'https://api.example.com/test');
@@ -157,14 +446,60 @@ describe('providerFetch', () => {
         method: 'POST',
         headers: { Authorization: 'Bearer token' },
         body: JSON.stringify({ data: 'test' }),
-      }),
+      })
     );
   });
 
+  it('bounds non-JSON provider error bodies in normalized ProviderError messages', async () => {
+    const longBody = 'provider failure: ' + 'x'.repeat(10_000) + 'DO_NOT_LEAK_TAIL';
+    globalThis.fetch = vi
+      .fn()
+      .mockImplementation(() => Promise.resolve(new Response(longBody, { status: 502 })));
+
+    await expect(providerFetch('hetzner', 'https://api.example.com/test')).rejects.toMatchObject({
+      providerName: 'hetzner',
+      statusCode: 502,
+    });
+
+    try {
+      await providerFetch('hetzner', 'https://api.example.com/test', undefined, undefined, 256);
+      expect.fail('Should have thrown');
+    } catch (err) {
+      const pe = err as ProviderError;
+      expect(pe.message).toContain('provider failure:');
+      expect(pe.message).toContain('truncated');
+      expect(pe.message).not.toContain('DO_NOT_LEAK_TAIL');
+      expect(pe.message.length).toBeLessThan(400);
+    }
+  });
+
+  it('bounds JSON provider error messages in normalized ProviderError messages', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({ error: { message: 'bad ' + 'y'.repeat(10_000), code: 'rate_limit' } }),
+          { status: 429 }
+        )
+      );
+
+    try {
+      await providerFetch('hetzner', 'https://api.example.com/test');
+      expect.fail('Should have thrown');
+    } catch (err) {
+      const pe = err as ProviderError;
+      expect(pe.providerCode).toBe('rate_limit');
+      expect(pe.message).toContain('truncated');
+      expect(pe.message.length).toBeLessThan(4_500);
+    }
+  });
+
   it('extracts message from JSON error with top-level message field', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ message: 'Rate limited' }), { status: 429 }),
-    );
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ message: 'Rate limited' }), { status: 429 })
+      );
 
     try {
       await providerFetch('hetzner', 'https://api.example.com/test');
@@ -173,5 +508,93 @@ describe('providerFetch', () => {
       const pe = err as ProviderError;
       expect(pe.message).toContain('Rate limited');
     }
+  });
+
+  // Vultr errors are `{ "error": "<flat string>", "status": <int> }` — the top-level
+  // `error` is a plain STRING, not a nested { code, message } object. The message must
+  // be the string itself, NOT the raw JSON blob (which would leak the whole body).
+  it('extracts a Vultr-style flat-string error without leaking the raw JSON', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ error: 'Invalid API key.', status: 401 }), { status: 401 })
+      );
+
+    try {
+      await providerFetch('vultr', 'https://api.vultr.com/v2/account');
+      expect.fail('Should have thrown');
+    } catch (err) {
+      const pe = err as ProviderError;
+      expect(pe).toBeInstanceOf(ProviderError);
+      expect(pe.statusCode).toBe(401);
+      expect(pe.message).toContain('Invalid API key.');
+      // The raw JSON body must NOT be dumped into the message.
+      expect(pe.message).not.toContain('{"error"');
+    }
+  });
+
+  it('still extracts a nested { error: { code, message } } object body (no regression)', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ error: { code: 'x', message: 'boom' } }), { status: 400 })
+      );
+
+    try {
+      await providerFetch('vultr', 'https://api.vultr.com/v2/instances');
+      expect.fail('Should have thrown');
+    } catch (err) {
+      const pe = err as ProviderError;
+      expect(pe.message).toContain('boom');
+      expect(pe.providerCode).toBe('x');
+      expect(pe.message).not.toContain('{"error"');
+    }
+  });
+});
+
+describe('providerDelay', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('resolves after the requested delay and removes its caller listener', async () => {
+    vi.useFakeTimers();
+    const caller = new AbortController();
+    const addListener = vi.spyOn(caller.signal, 'addEventListener');
+    const removeListener = vi.spyOn(caller.signal, 'removeEventListener');
+
+    const delay = providerDelay(25, { signal: caller.signal });
+    expect(vi.getTimerCount()).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(25);
+    await expect(delay).resolves.toBeUndefined();
+
+    const listener = addListener.mock.calls[0]?.[1];
+    expect(listener).toBeTypeOf('function');
+    expect(removeListener).toHaveBeenCalledWith('abort', listener);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('rejects with the exact caller reason and clears its timer and listener', async () => {
+    vi.useFakeTimers();
+    const caller = new AbortController();
+    const addListener = vi.spyOn(caller.signal, 'addEventListener');
+    const removeListener = vi.spyOn(caller.signal, 'removeEventListener');
+    const reason = new ProviderError('hetzner', 503, 'caller cancelled provider backoff', {
+      category: 'transient_capacity',
+    });
+
+    const delay = providerDelay(10_000, { signal: caller.signal });
+    const rejection = expect(delay).rejects.toBe(reason);
+    expect(vi.getTimerCount()).toBe(1);
+
+    caller.abort(reason);
+    await rejection;
+
+    const listener = addListener.mock.calls[0]?.[1];
+    expect(listener).toBeTypeOf('function');
+    expect(removeListener).toHaveBeenCalledWith('abort', listener);
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

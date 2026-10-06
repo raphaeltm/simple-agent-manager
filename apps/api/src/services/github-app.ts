@@ -1,9 +1,13 @@
+// FILE SIZE EXCEPTION: GitHub App API wrapper centralizes shared schemas, token minting, and user-context access during security hotfix.
 import { importPKCS8, SignJWT } from 'jose';
 import * as v from 'valibot';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { readResponseJson } from '../lib/runtime-validation';
+import { AppError } from '../middleware/error';
+import { parseCacheTtlSeconds } from './cache-config';
+import { getGitHubAppConfig } from './platform-config';
 
 const githubErrorSchema = v.object({
   message: v.optional(v.string()),
@@ -16,6 +20,7 @@ const installationTokenSchema = v.object({
 
 const repositorySchema = v.object({
   id: v.number(),
+  node_id: v.optional(v.string()),
   full_name: v.string(),
   private: v.boolean(),
   default_branch: v.string(),
@@ -29,17 +34,51 @@ const installationRepositoriesSchema = v.object({
 const userInstallationSchema = v.object({
   id: v.number(),
   account: v.object({
+    id: v.optional(v.number()),
     login: v.string(),
     type: v.string(),
   }),
 });
 
+export const DEFAULT_GITHUB_INSTALLATION_TOKEN_CACHE_TTL_SECONDS = 50 * 60;
+
+async function installationTokenCacheKey(
+  installationId: string,
+  body: string | undefined
+): Promise<string> {
+  if (!body) return `github-installation-token:v1:${installationId}:default`;
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body));
+  const hash = Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, '0')
+  ).join('');
+  return `github-installation-token:v1:${installationId}:${hash}`;
+}
+
 const userInstallationsSchema = v.object({
   installations: v.array(userInstallationSchema),
 });
 
+const authenticatedGitHubUserSchema = v.object({
+  id: v.number(),
+  login: v.string(),
+});
+
+const installationDetailSchema = v.object({
+  account: v.nullable(
+    v.object({
+      id: v.optional(v.number()),
+      login: v.optional(v.string()),
+      type: v.optional(v.string()),
+    })
+  ),
+});
+
 const branchSchema = v.object({
   name: v.string(),
+});
+
+const githubOrgSchema = v.object({
+  login: v.string(),
 });
 
 async function readGitHubError(response: Response, fallback: string): Promise<string> {
@@ -51,9 +90,43 @@ async function readGitHubError(response: Response, fallback: string): Promise<st
   }
 }
 
+async function githubRepositoryAccessError(response: Response): Promise<AppError> {
+  if (response.status === 401) {
+    return new AppError(
+      401,
+      'GITHUB_REAUTH_REQUIRED',
+      'Your GitHub authorization has expired — please sign out and back in'
+    );
+  }
+  if (response.status === 403) {
+    const message = await readGitHubError(
+      response,
+      'GitHub denied access to this repository or installation'
+    );
+    return new AppError(403, 'GITHUB_FORBIDDEN', message);
+  }
+  const message = await readGitHubError(response, `GitHub API request failed: ${response.status}`);
+  return new AppError(response.status >= 500 ? 502 : response.status, 'GITHUB_API_ERROR', message, {
+    githubStatus: response.status,
+  });
+}
+
 export interface UserAccessibleInstallation {
   id: number;
-  account: { login: string; type: string };
+  account: { id?: number; login: string; type: string };
+}
+
+export interface AuthenticatedGitHubUser {
+  id: number;
+  login: string;
+}
+
+export interface GitHubRepositoryAccess {
+  id: number;
+  nodeId: string | null;
+  fullName: string;
+  private: boolean;
+  defaultBranch: string;
 }
 
 export interface GitHubUserOrganization {
@@ -66,6 +139,13 @@ interface UserAccessibleInstallationsDiagnostics {
   installationId?: string;
 }
 
+interface UserInstallationRepositoriesDiagnostics {
+  flow: 'repositories' | 'branches' | 'project-access' | 'project-invite';
+  userId: string;
+  installationId: string;
+  repository?: string;
+}
+
 interface UserOrganizationDiagnostics {
   flow: 'shared-org-discovery';
   userId: string;
@@ -76,6 +156,11 @@ interface UserInstallationAccessDiagnostics {
   userId: string;
   installationId: string;
   accountName?: string;
+}
+
+interface AuthenticatedGitHubUserDiagnostics {
+  flow: 'callback' | 'sync';
+  userId: string;
 }
 
 /**
@@ -144,8 +229,7 @@ function convertPkcs1ToPkcs8(pem: string): string {
   // PKCS#8 header for RSA: SEQUENCE { AlgorithmIdentifier { OID rsaEncryption, NULL }, OCTET STRING { pkcs1Der } }
   // The RSA AlgorithmIdentifier is the fixed bytes: 30 0d 06 09 2a 86 48 86 f7 0d 01 01 01 05 00
   const algId = new Uint8Array([
-    0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01,
-    0x01, 0x05, 0x00,
+    0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00,
   ]);
 
   // Build the OCTET STRING wrapping the PKCS#1 key
@@ -199,19 +283,58 @@ function concatBytes(...arrays: Uint8Array[]): Uint8Array {
   return result;
 }
 
+/** GitHub App installation tokens expire one hour after they are minted. */
+const GITHUB_INSTALLATION_TOKEN_LIFETIME_SECONDS = 60 * 60;
+
+export const DEFAULT_GITHUB_INSTALLATION_TOKEN_REFRESH_MARGIN_SECONDS = 5 * 60;
+
+/**
+ * A refresh margin may consume at most half a token's lifetime. A larger margin
+ * leaves the cache almost nothing to serve, so nearly every git credential
+ * exchange would mint a new installation token.
+ */
+export const MAX_GITHUB_INSTALLATION_TOKEN_REFRESH_MARGIN_SECONDS =
+  GITHUB_INSTALLATION_TOKEN_LIFETIME_SECONDS / 2;
+
+function resolveInstallationTokenRefreshMarginSeconds(env: Env): number {
+  const margin = parseCacheTtlSeconds(
+    env.GITHUB_INSTALLATION_TOKEN_REFRESH_MARGIN_SECONDS,
+    DEFAULT_GITHUB_INSTALLATION_TOKEN_REFRESH_MARGIN_SECONDS
+  );
+  return Math.min(margin, MAX_GITHUB_INSTALLATION_TOKEN_REFRESH_MARGIN_SECONDS);
+}
+
+function cachedInstallationTokenIsFresh(
+  cached: { token?: string; expiresAt?: string } | null | undefined,
+  refreshMarginSeconds: number
+): cached is { token: string; expiresAt: string } {
+  if (!cached?.token || !cached.expiresAt) return false;
+  const expiresAtMs = Date.parse(cached.expiresAt);
+  if (!Number.isFinite(expiresAtMs)) return false;
+  return expiresAtMs - Date.now() > refreshMarginSeconds * 1000;
+}
+
 /**
  * Generate a JWT for GitHub App authentication.
  * This JWT is used to authenticate as the GitHub App.
  */
 export async function generateAppJWT(env: Env): Promise<string> {
-  const pemKey = decodePrivateKey(env.GITHUB_APP_PRIVATE_KEY);
+  const config = await getGitHubAppConfig(env);
+  if (!config) {
+    throw new AppError(
+      500,
+      'GITHUB_APP_NOT_CONFIGURED',
+      'GitHub App credentials are not configured'
+    );
+  }
+  const pemKey = decodePrivateKey(config.privateKey);
   const privateKey = await importPKCS8(pemKey, 'RS256');
   const now = Math.floor(Date.now() / 1000);
 
   return new SignJWT({})
     .setProtectedHeader({ alg: 'RS256' })
     .setIssuedAt(now - 60) // 1 minute in the past to account for clock drift
-    .setIssuer(env.GITHUB_APP_ID)
+    .setIssuer(config.appId)
     .setExpirationTime(now + 600) // 10 minutes
     .sign(privateKey);
 }
@@ -223,11 +346,32 @@ export async function generateAppJWT(env: Env): Promise<string> {
 export async function getInstallationToken(
   installationId: string,
   env: Env,
-  extraPermissions?: Record<string, string>,
+  options?:
+    | Record<string, string>
+    | {
+        permissions?: Record<string, string>;
+        repositoryIds?: number[];
+        repositories?: string[];
+      }
 ): Promise<{ token: string; expiresAt: string }> {
-  const jwt = await generateAppJWT(env);
+  const body = options
+    ? JSON.stringify(
+        'permissions' in options || 'repositoryIds' in options || 'repositories' in options
+          ? {
+              ...(options.permissions ? { permissions: options.permissions } : {}),
+              ...(options.repositoryIds ? { repository_ids: options.repositoryIds } : {}),
+              ...(options.repositories ? { repositories: options.repositories } : {}),
+            }
+          : { permissions: options }
+      )
+    : undefined;
+  const cacheKey = await installationTokenCacheKey(installationId, body);
+  const cached = await env.KV?.get<{ token: string; expiresAt: string }>(cacheKey, 'json');
+  if (cachedInstallationTokenIsFresh(cached, resolveInstallationTokenRefreshMarginSeconds(env))) {
+    return cached;
+  }
 
-  const body = extraPermissions ? JSON.stringify({ permissions: extraPermissions }) : undefined;
+  const jwt = await generateAppJWT(env);
 
   const response = await fetch(
     `https://api.github.com/app/installations/${installationId}/access_tokens`,
@@ -245,13 +389,94 @@ export async function getInstallationToken(
   );
 
   if (!response.ok) {
-    throw new Error(await readGitHubError(response, `Failed to get installation token: ${response.status}`));
+    throw new Error(
+      await readGitHubError(response, `Failed to get installation token: ${response.status}`)
+    );
   }
 
-  const data = await readResponseJson(response, installationTokenSchema, 'github.installation_token');
-  return {
+  const data = await readResponseJson(
+    response,
+    installationTokenSchema,
+    'github.installation_token'
+  );
+  const token = {
     token: data.token,
     expiresAt: data.expires_at,
+  };
+  const cacheTtl = parseCacheTtlSeconds(
+    env.GITHUB_INSTALLATION_TOKEN_CACHE_TTL_SECONDS,
+    DEFAULT_GITHUB_INSTALLATION_TOKEN_CACHE_TTL_SECONDS
+  );
+  if (cacheTtl > 0) {
+    await env.KV?.put(cacheKey, JSON.stringify(token), {
+      expirationTtl: cacheTtl,
+    });
+  }
+  return token;
+}
+
+/** Canonical GitHub account identity for an installation (resolved via the App API). */
+export interface InstallationAccount {
+  id: number | null;
+  login: string | null;
+  type: string | null;
+}
+
+/**
+ * Resolve the canonical GitHub account that owns an installation by calling
+ * GET /app/installations/{id} with the App JWT.
+ *
+ * Returns null when the installation no longer exists (404) or has no account
+ * object. Used by the residual leak-row sweep to compare the installation's true
+ * numeric account id against the owning SAM user's github_id — a comparison that
+ * cannot be done in SQL because neither the users table nor the canonical
+ * account table stores both the numeric id and the login.
+ *
+ * Pass `appJwt` to reuse a single App JWT across many calls (e.g. the leak-row
+ * sweep resolves up to a full batch of installations per invocation). A GitHub
+ * App JWT is valid for 10 minutes, so minting it once avoids one RSA key import
+ * + sign per row. When omitted, a fresh JWT is generated.
+ */
+export async function getInstallationAccount(
+  installationId: string,
+  env: Env,
+  appJwt?: string
+): Promise<InstallationAccount | null> {
+  const jwt = appJwt ?? (await generateAppJWT(env));
+
+  const response = await fetch(`https://api.github.com/app/installations/${installationId}`, {
+    headers: {
+      Authorization: `Bearer ${jwt}`,
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      'User-Agent': 'Simple-Agent-Manager',
+    },
+  });
+
+  if (response.status === 404) {
+    return null;
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      await readGitHubError(response, `Failed to get installation: ${response.status}`)
+    );
+  }
+
+  const data = await readResponseJson(
+    response,
+    installationDetailSchema,
+    'github.installation_detail'
+  );
+
+  if (!data.account) {
+    return null;
+  }
+
+  return {
+    id: typeof data.account.id === 'number' ? data.account.id : null,
+    login: typeof data.account.login === 'string' ? data.account.login : null,
+    type: typeof data.account.type === 'string' ? data.account.type : null,
   };
 }
 
@@ -262,10 +487,10 @@ export async function getInstallationToken(
 export async function getInstallationRepositories(
   installationId: string,
   env: Env
-): Promise<Array<{ id: number; fullName: string; private: boolean; defaultBranch: string }>> {
+): Promise<GitHubRepositoryAccess[]> {
   const { token } = await getInstallationToken(installationId, env);
 
-  const allRepos: Array<{ id: number; fullName: string; private: boolean; defaultBranch: string }> = [];
+  const allRepos: GitHubRepositoryAccess[] = [];
   let page = 1;
   const perPage = 100; // GitHub's max per_page value
   let hasMore = true;
@@ -284,13 +509,20 @@ export async function getInstallationRepositories(
     );
 
     if (!response.ok) {
-      throw new Error(await readGitHubError(response, `Failed to get repositories: ${response.status}`));
+      throw new Error(
+        await readGitHubError(response, `Failed to get repositories: ${response.status}`)
+      );
     }
 
-    const data = await readResponseJson(response, installationRepositoriesSchema, 'github.installation_repositories');
+    const data = await readResponseJson(
+      response,
+      installationRepositoriesSchema,
+      'github.installation_repositories'
+    );
 
     const repos = data.repositories.map((repo) => ({
       id: repo.id,
+      nodeId: repo.node_id ?? null,
       fullName: repo.full_name,
       private: repo.private,
       defaultBranch: repo.default_branch,
@@ -304,7 +536,10 @@ export async function getInstallationRepositories(
 
     // Safety limit to prevent infinite loops (10,000 repos max)
     if (allRepos.length >= 10000) {
-      log.warn('github_app.repo_safety_limit_reached', { installationId, repoCount: allRepos.length });
+      log.warn('github_app.repo_safety_limit_reached', {
+        installationId,
+        repoCount: allRepos.length,
+      });
       break;
     }
   }
@@ -349,10 +584,16 @@ export async function getUserAccessibleInstallations(
         ok: false,
         installationCount: 0,
       });
-      throw new Error(await readGitHubError(response, `Failed to get user installations: ${response.status}`));
+      throw new Error(
+        await readGitHubError(response, `Failed to get user installations: ${response.status}`)
+      );
     }
 
-    const data = await readResponseJson(response, userInstallationsSchema, 'github.user_installations');
+    const data = await readResponseJson(
+      response,
+      userInstallationsSchema,
+      'github.user_installations'
+    );
 
     log.info('github.user_accessible_installations.response', {
       flow: diagnostics?.flow,
@@ -364,16 +605,129 @@ export async function getUserAccessibleInstallations(
       installationCount: data.installations.length,
     });
 
-    allInstallations.push(...data.installations.map((installation) => ({
-      id: installation.id,
-      account: installation.account,
-    })));
+    allInstallations.push(
+      ...data.installations.map((installation) => ({
+        id: installation.id,
+        account: installation.account,
+      }))
+    );
 
     hasMore = data.installations.length === perPage;
     page++;
   }
 
   return allInstallations;
+}
+
+/**
+ * Get repositories accessible to the authenticated GitHub user for a specific
+ * app installation. Unlike `/installation/repositories`, this endpoint is
+ * filtered by the OAuth user token and is safe for UI lists and authorization.
+ */
+export async function getUserInstallationRepositories(
+  accessToken: string,
+  installationId: string,
+  diagnostics: UserInstallationRepositoriesDiagnostics
+): Promise<GitHubRepositoryAccess[]> {
+  const allRepos: GitHubRepositoryAccess[] = [];
+  let page = 1;
+  const perPage = 100;
+  let hasMore = true;
+
+  while (hasMore) {
+    const response = await fetch(
+      `https://api.github.com/user/installations/${encodeURIComponent(installationId)}/repositories?per_page=${perPage}&page=${page}`,
+      {
+        headers: githubUserTokenHeaders(accessToken),
+      }
+    );
+
+    const details = {
+      flow: diagnostics.flow,
+      userId: diagnostics.userId,
+      installationId: diagnostics.installationId,
+      repository: diagnostics.repository,
+      page,
+      status: response.status,
+      ok: response.ok,
+    };
+    if (response.ok) {
+      log.info('github.user_installation_repositories.response', details);
+    } else {
+      log.warn('github.user_installation_repositories.response', details);
+    }
+
+    if (!response.ok) {
+      throw await githubRepositoryAccessError(response);
+    }
+
+    const data = await readResponseJson(
+      response,
+      installationRepositoriesSchema,
+      'github.user_installation_repositories'
+    );
+    allRepos.push(
+      ...data.repositories.map((repo) => ({
+        id: repo.id,
+        nodeId: repo.node_id ?? null,
+        fullName: repo.full_name,
+        private: repo.private,
+        defaultBranch: repo.default_branch,
+      }))
+    );
+
+    hasMore = data.repositories.length === perPage;
+    page++;
+
+    if (allRepos.length >= 10000) {
+      log.warn('github.user_installation_repositories.safety_limit_reached', {
+        flow: diagnostics.flow,
+        userId: diagnostics.userId,
+        installationId: diagnostics.installationId,
+        repository: diagnostics.repository,
+        repoCount: allRepos.length,
+      });
+      break;
+    }
+  }
+
+  return allRepos;
+}
+
+/**
+ * Fetch the GitHub identity for the OAuth token owner.
+ *
+ * SAM cannot infer this from `users.github_id` because older production rows may
+ * not have that column populated. The OAuth token is the source of truth for the
+ * current sync request.
+ */
+export async function getAuthenticatedGitHubUser(
+  accessToken: string,
+  diagnostics: AuthenticatedGitHubUserDiagnostics
+): Promise<AuthenticatedGitHubUser> {
+  const response = await fetch('https://api.github.com/user', {
+    headers: githubUserTokenHeaders(accessToken),
+  });
+
+  const details = {
+    flow: diagnostics.flow,
+    userId: diagnostics.userId,
+    status: response.status,
+    ok: response.ok,
+  };
+  if (response.ok) {
+    log.info('github.authenticated_user.response', details);
+  } else {
+    log.warn('github.authenticated_user.response', details);
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      await readGitHubError(response, `Failed to get authenticated GitHub user: ${response.status}`)
+    );
+  }
+
+  return readResponseJson(response, authenticatedGitHubUserSchema, 'github.authenticated_user');
 }
 
 /**
@@ -408,11 +762,24 @@ export async function getAuthenticatedUserOrganizations(
         ok: false,
         organizationCount: 0,
       });
-      const error = await response.json().catch(() => ({})) as { message?: string };
-      throw new Error(error.message || `Failed to get user organizations: ${response.status}`);
+      throw new Error(
+        await readGitHubError(response, `Failed to get user organizations: ${response.status}`)
+      );
     }
 
-    const data = await response.json() as Array<{ login: string }>;
+    let parsedBody: unknown;
+    try {
+      parsedBody = await response.json();
+    } catch (err) {
+      throw new Error(
+        err instanceof Error
+          ? `Failed to parse user organizations response: ${err.message}`
+          : 'Failed to parse user organizations response'
+      );
+    }
+    if (!Array.isArray(parsedBody)) {
+      throw new Error('Failed to get user organizations: response was not a JSON array');
+    }
 
     log.info('github.user_organizations.response', {
       flow: diagnostics.flow,
@@ -420,11 +787,26 @@ export async function getAuthenticatedUserOrganizations(
       page,
       status: response.status,
       ok: true,
-      organizationCount: data.length,
+      organizationCount: parsedBody.length,
     });
 
-    allOrganizations.push(...data.map((org) => ({ login: org.login })));
-    hasMore = data.length === perPage;
+    // Per-entry validation instead of a blind cast: a null/malformed entry
+    // previously either crashed (null.login) or silently produced
+    // `{ login: undefined }`. Skip and log instead, matching rule 50's
+    // list-read fault isolation — one bad entry no longer breaks the page.
+    for (const entry of parsedBody) {
+      const result = v.safeParse(githubOrgSchema, entry);
+      if (result.success) {
+        allOrganizations.push({ login: result.output.login });
+      } else {
+        log.warn('github.user_organizations.invalid_entry', {
+          flow: diagnostics.flow,
+          userId: diagnostics.userId,
+          page,
+        });
+      }
+    }
+    hasMore = parsedBody.length === perPage;
     page++;
   }
 
@@ -471,8 +853,9 @@ export async function verifyUserInstallationAccess(
     return false;
   }
 
-  const error = await response.json().catch(() => ({})) as { message?: string };
-  throw new Error(error.message || `Failed to verify user installation access: ${response.status}`);
+  throw new Error(
+    await readGitHubError(response, `Failed to verify user installation access: ${response.status}`)
+  );
 }
 
 function githubUserTokenHeaders(accessToken: string): HeadersInit {
@@ -485,6 +868,200 @@ function githubUserTokenHeaders(accessToken: string): HeadersInit {
 }
 
 const DEFAULT_MAX_BRANCHES_PER_REPO = 5000;
+
+export interface GitHubRepositoryMetadata {
+  id: number;
+  nodeId: string | null;
+  fullName: string;
+}
+
+/**
+ * Fetch a repository's stable numeric id, node id, and canonical full name using
+ * an installation token (no user token required). Used to backfill `github_repo_id`
+ * for legacy GitHub-backed projects created before the id was captured.
+ *
+ * Returns `null` when the repository is inaccessible (404 repo deleted/never-installed,
+ * or 403 permission) so callers can fall back to name-based scoping without throwing.
+ * Throws on other unexpected errors (auth/rate-limit) so they surface loudly.
+ *
+ * Pass `installationToken` to reuse an already-minted installation token (the bulk
+ * backfill mints one token per installation and reuses it across that installation's
+ * repos to stay under GitHub's installation-token rate limit). When omitted, a token
+ * is minted on demand.
+ */
+export async function getRepositoryMetadata(
+  installationId: string,
+  owner: string,
+  repo: string,
+  env: Env,
+  installationToken?: string
+): Promise<GitHubRepositoryMetadata | null> {
+  const token = installationToken ?? (await getInstallationToken(installationId, env)).token;
+
+  const response = await fetch(
+    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        'User-Agent': 'Simple-Agent-Manager',
+      },
+    }
+  );
+
+  if (response.status === 404 || response.status === 403) {
+    log.warn('github_app.repo_metadata_inaccessible', {
+      installationId,
+      owner,
+      repo,
+      status: response.status,
+    });
+    return null;
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      await readGitHubError(response, `Failed to get repository metadata: ${response.status}`)
+    );
+  }
+
+  const data = await readResponseJson(response, repositorySchema, 'github.repository_metadata');
+  return {
+    id: data.id,
+    nodeId: data.node_id ?? null,
+    fullName: data.full_name,
+  };
+}
+
+/** A submodule entry parsed from a repository's `.gitmodules` file. */
+export interface GitmoduleEntry {
+  /** Submodule path within the parent repo (from `.gitmodules`). */
+  path: string;
+  /** Full repository name parsed from the URL, e.g. "octocat/lib", or null when the
+   *  URL could not be parsed as a GitHub repository (non-GitHub host, malformed). */
+  repository: string | null;
+}
+
+/**
+ * Parse `.gitmodules` content into submodule entries, resolving GitHub repository
+ * full names from each submodule URL. Supports https, ssh, and relative URLs.
+ *
+ * Relative URLs (e.g. `../sibling.git`) resolve against the parent repository's
+ * owner (`parentOwner`), matching git's own relative-submodule resolution against
+ * the configured `origin`.
+ *
+ * Entries whose URL is not a parseable GitHub repository yield `repository: null`
+ * so callers can surface an `unsupported-url` status rather than silently dropping
+ * them.
+ */
+export function parseGitmodules(content: string, parentOwner: string): GitmoduleEntry[] {
+  const entries: GitmoduleEntry[] = [];
+  let currentPath: string | null = null;
+  let currentUrl: string | null = null;
+
+  const flush = () => {
+    if (currentPath && currentUrl) {
+      entries.push({
+        path: currentPath,
+        repository: resolveGitmoduleRepository(currentUrl, parentOwner),
+      });
+    }
+    currentPath = null;
+    currentUrl = null;
+  };
+
+  for (const rawLine of content.split('\n')) {
+    const line = rawLine.trim();
+    if (line.startsWith('[submodule')) {
+      flush();
+      continue;
+    }
+    const eq = line.indexOf('=');
+    if (eq === -1) continue;
+    const key = line.slice(0, eq).trim().toLowerCase();
+    const value = line.slice(eq + 1).trim();
+    if (key === 'path') currentPath = value;
+    else if (key === 'url') currentUrl = value;
+  }
+  flush();
+
+  return entries;
+}
+
+/** Resolve a `.gitmodules` URL to a GitHub `owner/repo` full name, or null. */
+function resolveGitmoduleRepository(url: string, parentOwner: string): string | null {
+  const stripGit = (s: string) => s.replace(/\.git$/, '');
+
+  // Relative URL (resolved against origin owner).
+  if (url.startsWith('./') || url.startsWith('../')) {
+    const segments = url.split('/').filter((s) => s && s !== '.');
+    // A relative submodule URL points at a sibling repo: the last segment is the
+    // repo name and `..` climbs out of the parent repo to the owner level.
+    const repoName = stripGit(segments[segments.length - 1] ?? '');
+    if (!repoName) return null;
+    return `${parentOwner}/${repoName}`.toLowerCase();
+  }
+
+  // scp-like ssh URL: git@github.com:owner/repo.git
+  const sshMatch = url.match(/^[^@]+@github\.com:([^/]+)\/(.+)$/);
+  if (sshMatch?.[1] && sshMatch[2]) {
+    return `${sshMatch[1]}/${stripGit(sshMatch[2])}`.toLowerCase();
+  }
+
+  // https/ssh URL with explicit host.
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname !== 'github.com') return null;
+    const parts = parsed.pathname.split('/').filter(Boolean);
+    const owner = parts[0];
+    const repo = parts[1];
+    if (!owner || !repo) return null;
+    return `${owner}/${stripGit(repo)}`.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch and parse a repository's `.gitmodules` file via an installation token.
+ * Returns an empty array when the repo has no `.gitmodules` (404). Throws on
+ * unexpected GitHub errors so auth/rate-limit failures surface loudly.
+ */
+export async function getRepositoryGitmodules(
+  installationId: string,
+  owner: string,
+  repo: string,
+  parentOwner: string,
+  env: Env,
+  ref?: string
+): Promise<GitmoduleEntry[]> {
+  const { token } = await getInstallationToken(installationId, env);
+  const refQuery = ref ? `?ref=${encodeURIComponent(ref)}` : '';
+  const response = await fetch(
+    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/.gitmodules${refQuery}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.github.raw+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        'User-Agent': 'Simple-Agent-Manager',
+      },
+    }
+  );
+
+  if (response.status === 404) {
+    return [];
+  }
+  if (!response.ok) {
+    throw new Error(
+      await readGitHubError(response, `Failed to fetch .gitmodules: ${response.status}`)
+    );
+  }
+
+  const content = await response.text();
+  return parseGitmodules(content, parentOwner);
+}
 
 /**
  * List branches for a repository via an installation token.
@@ -499,7 +1076,8 @@ export async function getRepositoryBranches(
 ): Promise<Array<{ name: string }>> {
   const { token } = await getInstallationToken(installationId, env);
 
-  const maxBranches = parseInt(env.MAX_BRANCHES_PER_REPO || '', 10) || DEFAULT_MAX_BRANCHES_PER_REPO;
+  const maxBranches =
+    parseInt(env.MAX_BRANCHES_PER_REPO || '', 10) || DEFAULT_MAX_BRANCHES_PER_REPO;
   const allBranches: Array<{ name: string }> = [];
   let page = 1;
   const perPage = 100;
@@ -519,7 +1097,9 @@ export async function getRepositoryBranches(
     );
 
     if (!response.ok) {
-      throw new Error(await readGitHubError(response, `Failed to list branches: ${response.status}`));
+      throw new Error(
+        await readGitHubError(response, `Failed to list branches: ${response.status}`)
+      );
     }
 
     const data = await readResponseJson(response, v.array(branchSchema), 'github.branches');
@@ -529,7 +1109,12 @@ export async function getRepositoryBranches(
     page++;
 
     if (allBranches.length >= maxBranches) {
-      log.warn('github_app.branch_safety_limit_reached', { owner, repo, branchCount: allBranches.length, maxBranches });
+      log.warn('github_app.branch_safety_limit_reached', {
+        owner,
+        repo,
+        branchCount: allBranches.length,
+        maxBranches,
+      });
       break;
     }
   }
@@ -550,31 +1135,177 @@ export async function getRepositoryBranches(
 }
 
 /**
+ * Outcome of an ensure-branch attempt.
+ *
+ * `missing` and `unknown` both mean "the branch is not known to be on the
+ * remote", but callers must treat them differently: `missing` is positive
+ * evidence that a `git clone --branch` will fail (the ref was confirmed absent
+ * and could not be created), while `unknown` means the check itself could not
+ * run. Only `missing` justifies refusing to provision — see
+ * `services/workspace-branch.ts`.
+ */
+export type EnsureBranchOutcome =
+  | { status: 'exists' }
+  | { status: 'created' }
+  | { status: 'missing'; reason: string }
+  | { status: 'unknown'; reason: string };
+
+/**
+ * Ensure a branch exists in a repository. If the branch does not exist,
+ * create it from the default branch.
+ *
+ * This is called before workspace provisioning to prevent git clone failures
+ * when a task specifies a branch that hasn't been created yet.
+ */
+export async function ensureBranchExists(
+  installationId: string,
+  owner: string,
+  repo: string,
+  branchName: string,
+  defaultBranch: string,
+  env: Env
+): Promise<EnsureBranchOutcome> {
+  const { token } = await getInstallationToken(installationId, env);
+  const headers: HeadersInit = {
+    Authorization: `Bearer ${token}`,
+    Accept: 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28',
+    'User-Agent': 'Simple-Agent-Manager',
+  };
+
+  // Check if the branch already exists
+  const checkResp = await fetch(
+    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches/${encodeURIComponent(branchName)}`,
+    { headers }
+  );
+
+  if (checkResp.ok) {
+    return { status: 'exists' };
+  }
+
+  if (checkResp.status !== 404) {
+    // The lookup itself failed, so we learned nothing about the ref.
+    log.warn('github.ensure_branch.check_failed', {
+      owner,
+      repo,
+      branchName,
+      status: checkResp.status,
+    });
+    return { status: 'unknown', reason: `branch lookup returned ${checkResp.status}` };
+  }
+
+  // Branch doesn't exist — get the SHA of the default branch
+  const refResp = await fetch(
+    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/ref/heads/${encodeURIComponent(defaultBranch)}`,
+    { headers }
+  );
+
+  if (!refResp.ok) {
+    log.warn('github.ensure_branch.default_branch_ref_failed', {
+      owner,
+      repo,
+      defaultBranch,
+      status: refResp.status,
+    });
+    // The branch is confirmed absent (404 above); we simply could not build it.
+    return {
+      status: 'missing',
+      reason: `base branch "${defaultBranch}" could not be resolved (${refResp.status})`,
+    };
+  }
+
+  const refData = (await refResp.json()) as { object?: { sha?: string } };
+  const sha = refData.object?.sha;
+  if (!sha) {
+    log.warn('github.ensure_branch.no_sha', { owner, repo, defaultBranch });
+    return {
+      status: 'missing',
+      reason: `base branch "${defaultBranch}" returned no commit SHA`,
+    };
+  }
+
+  // Create the new branch
+  const createResp = await fetch(
+    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/refs`,
+    {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ref: `refs/heads/${branchName}`,
+        sha,
+      }),
+    }
+  );
+
+  if (createResp.ok) {
+    log.info('github.ensure_branch.created', {
+      owner,
+      repo,
+      branchName,
+      fromBranch: defaultBranch,
+      sha,
+    });
+    return { status: 'created' };
+  }
+
+  if (createResp.status === 422) {
+    // Race condition — another caller created the branch between our check and create
+    log.info('github.ensure_branch.race_already_exists', { owner, repo, branchName });
+    return { status: 'exists' };
+  }
+
+  const errorText = await createResp.text().catch(() => '');
+  log.warn('github.ensure_branch.create_failed', {
+    owner,
+    repo,
+    branchName,
+    status: createResp.status,
+    message: errorText.slice(0, 200),
+  });
+  return {
+    status: 'missing',
+    reason: `branch creation failed (${createResp.status})`,
+  };
+}
+
+/**
  * Verify a webhook signature from GitHub.
+ *
+ * Uses `crypto.subtle.verify`, which performs the HMAC comparison in constant
+ * time, instead of a string `===` of hex digests (which short-circuits on the
+ * first differing character and is therefore timing-unsafe). The owner guard on
+ * the `installation.created` webhook path depends on this signature check being
+ * trustworthy, so it must not leak comparison timing.
  */
 export async function verifyWebhookSignature(
   payload: string,
   signature: string,
   secret: string
 ): Promise<boolean> {
+  const prefix = 'sha256=';
+  if (!signature.startsWith(prefix)) {
+    return false;
+  }
+  const hex = signature.slice(prefix.length);
+  // A SHA-256 HMAC is 32 bytes -> 64 hex chars. Reject anything malformed
+  // before decoding so a bad header can't reach crypto.subtle.verify.
+  if (hex.length !== 64 || !/^[0-9a-f]{64}$/i.test(hex)) {
+    return false;
+  }
+
+  const signatureBytes = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) {
+    signatureBytes[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  }
+
   const encoder = new TextEncoder();
   const key = await crypto.subtle.importKey(
     'raw',
     encoder.encode(secret),
     { name: 'HMAC', hash: 'SHA-256' },
     false,
-    ['sign']
+    ['verify']
   );
 
-  const signatureBuffer = await crypto.subtle.sign(
-    'HMAC',
-    key,
-    encoder.encode(payload)
-  );
-
-  const expectedSignature = 'sha256=' + Array.from(new Uint8Array(signatureBuffer))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-
-  return signature === expectedSignature;
+  return crypto.subtle.verify('HMAC', key, signatureBytes, encoder.encode(payload));
 }

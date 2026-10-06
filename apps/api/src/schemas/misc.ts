@@ -1,3 +1,4 @@
+import { MAX_HUMAN_INPUT_OPTION_LENGTH } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
 // Terminal
@@ -5,13 +6,21 @@ export const TerminalRequestSchema = v.object({
   workspaceId: v.string(),
 });
 
-// Smoke test tokens
-export const SmokeTestCreateSchema = v.object({
+// API tokens
+export const ApiTokenCreateSchema = v.object({
   name: v.optional(v.string()),
 });
 
-export const SmokeTestRedeemSchema = v.object({
+export const ApiTokenRedeemSchema = v.object({
   token: v.optional(v.string()),
+});
+
+export const DeviceApproveSchema = v.object({
+  userCode: v.optional(v.string()),
+});
+
+export const DeviceTokenSchema = v.object({
+  deviceCode: v.optional(v.string()),
 });
 
 // Cached commands — name is optional because the handler filters entries
@@ -41,6 +50,18 @@ export const CreateChatSessionSchema = v.object({
 
 export const SendChatMessageSchema = v.object({
   content: v.optional(v.string()),
+});
+
+export const ResolveAttentionAnswerSchema = v.object({
+  answer: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(MAX_HUMAN_INPUT_OPTION_LENGTH)),
+});
+
+export const StartChatSessionSchema = v.object({
+  message: v.optional(v.string()),
+  agentProfileId: v.optional(v.string()),
+  skillId: v.optional(v.string()),
+  parentTaskId: v.optional(v.string()),
+  contextSummary: v.optional(v.string()),
 });
 
 export const LinkTaskToChatSchema = v.object({
@@ -77,12 +98,57 @@ const NodeMetricsSchema = v.object({
   cpuLoadAvg1: v.optional(v.number()),
   memoryPercent: v.optional(v.number()),
   diskPercent: v.optional(v.number()),
+  workspaceMemory: v.optional(
+    v.array(
+      v.object({
+        workspaceId: v.string(),
+        memoryUsageBytes: v.number(),
+        memoryLimitBytes: v.optional(v.number()),
+        memoryPercent: v.optional(v.number()),
+        containerId: v.optional(v.string()),
+        containerName: v.optional(v.string()),
+        collectedAt: v.optional(v.string()),
+      })
+    )
+  ),
+});
+
+const DeploymentStateSchema = v.object({
+  environmentId: v.optional(v.string()),
+  appliedSeq: v.optional(v.number()),
+  status: v.optional(v.string()),
+  errorMessage: v.optional(v.string()),
+  routingRevision: v.optional(v.number()),
+  routingStatus: v.optional(v.string()),
+  routingError: v.optional(v.string()),
+  services: v.optional(v.unknown()),
+  deployStatus: v.optional(v.unknown()),
+  diskTelemetry: v.optional(v.unknown()),
+  environments: v.optional(
+    v.array(
+      v.object({
+        environmentId: v.string(),
+        appliedSeq: v.optional(v.number()),
+        status: v.optional(v.string()),
+        errorMessage: v.optional(v.string()),
+        routingRevision: v.optional(v.number()),
+        routingStatus: v.optional(v.string()),
+        routingError: v.optional(v.string()),
+        services: v.optional(v.unknown()),
+        deployStatus: v.optional(v.unknown()),
+        diskTelemetry: v.optional(v.unknown()),
+      })
+    )
+  ),
 });
 
 export const NodeHeartbeatSchema = v.object({
   activeWorkspaces: v.optional(v.number()),
+  creatingWorkspaces: v.optional(v.number()),
   nodeId: v.optional(v.string()),
+  agentVersion: v.optional(v.string()),
   metrics: v.optional(NodeMetricsSchema),
+  deployment: v.optional(DeploymentStateSchema),
 });
 
 // Node error report — entries are v.unknown() for the same reason as client errors
@@ -101,6 +167,23 @@ export const AdminLogQuerySchema = v.object({
   limit: v.optional(v.number()),
   cursor: v.optional(v.string()),
   queryId: v.optional(v.string()),
+  scriptName: v.optional(
+    v.pipe(
+      v.string(),
+      v.regex(/^[a-zA-Z0-9_-]{1,64}$/, 'scriptName must contain 1-64 safe characters')
+    )
+  ),
+});
+
+export const RunDebugDiagnosisSchema = v.object({
+  errorId: v.optional(v.string()),
+  startTime: v.optional(v.string()),
+  endTime: v.optional(v.string()),
+});
+
+export const SaveDebugDiagnosisIdeaSchema = v.object({
+  projectId: v.string(),
+  title: v.optional(v.string()),
 });
 
 // UI Governance schemas (replacing manual validators)
@@ -113,7 +196,14 @@ export const UIStandardUpsertSchema = v.object({
   ownerRole: v.string(),
 });
 
-const ComponentCategorySchema = v.picklist(['input', 'navigation', 'feedback', 'layout', 'display', 'overlay']);
+const ComponentCategorySchema = v.picklist([
+  'input',
+  'navigation',
+  'feedback',
+  'layout',
+  'display',
+  'overlay',
+]);
 const ComponentStatusSchema = v.picklist(['draft', 'ready', 'deprecated']);
 
 export const ComponentDefinitionCreateSchema = v.object({
@@ -154,7 +244,13 @@ export const ExceptionRequestCreateSchema = v.object({
   expirationDate: v.string(),
 });
 
-const MigrationWorkItemStatusSchema = v.picklist(['backlog', 'planned', 'in-progress', 'completed', 'verified']);
+const MigrationWorkItemStatusSchema = v.picklist([
+  'backlog',
+  'planned',
+  'in-progress',
+  'completed',
+  'verified',
+]);
 
 export const MigrationWorkItemCreateSchema = v.object({
   standardId: v.string(),

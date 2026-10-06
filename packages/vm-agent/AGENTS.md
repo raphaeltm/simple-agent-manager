@@ -1,6 +1,6 @@
 # VM Agent Technical Patterns
 
-Full rules: `.claude/rules/06-vm-agent-patterns.md`
+Full scoped rules: `packages/vm-agent/.claude/rules/`
 
 ## VM Agent Lifecycle Pattern
 

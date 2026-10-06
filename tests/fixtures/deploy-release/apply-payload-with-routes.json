@@ -1,0 +1,34 @@
+{
+  "environmentId": "env-1",
+  "nodeId": "node-1",
+  "seq": 7,
+  "expiresAt": 4102444800,
+  "composeYaml": "services:\n  web:\n    image: docker.io/example/web@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n    ports:\n      - 127.0.0.1:35000:3000\n",
+  "routes": [
+    {
+      "hostname": "r1-web-3000-env-1.apps.sammy.party",
+      "service": "web",
+      "containerPort": 3000,
+      "hostPort": 35000
+    },
+    {
+      "hostname": "r2-api-8080-env-1.apps.sammy.party",
+      "service": "api",
+      "containerPort": 8080,
+      "hostPort": 35001
+    },
+    {
+      "hostname": "app.customer.example.com",
+      "service": "web",
+      "containerPort": 3000,
+      "hostPort": 35000
+    }
+  ],
+  "volumeMounts": [],
+  "signature": "bUfOaLqTQjCCNt9qC888gMWjkfcy0IE3YI8iDrYFGWhKF4Ah1mllIoh31hejZRakZIHqKr8EIhjy/IpVU+BvBg==",
+  "registryCredentials": {
+    "server": "registry.cloudflare.com",
+    "username": "cf-mint-user",
+    "password": "cf-mint-secret"
+  }
+}

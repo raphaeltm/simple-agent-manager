@@ -42,8 +42,8 @@ describe('renderTemplate', () => {
 
   it('handles null context values', () => {
     const result = renderTemplate('{{val}}', { val: null });
-    expect(result.rendered).toBe('');
-    expect(result.warnings).toContain('Missing variable: {{val}}');
+    expect(result.rendered).toBe('null');
+    expect(result.warnings).toHaveLength(0);
   });
 
   it('handles multiple variables in one template', () => {
@@ -72,39 +72,49 @@ describe('renderTemplate', () => {
     expect(result.rendered).toBe('09:00');
   });
 
-  it('sanitizes HTML in interpolated values', () => {
-    const result = renderTemplate('{{val}}', { val: '<script>alert("xss")</script>' });
-    expect(result.rendered).toBe('&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;');
-    expect(result.rendered).not.toContain('<script>');
+  it('preserves HTML-like text without prompt-layer entity encoding', () => {
+    const value = '**important** <script>alert("xss")</script>';
+    const result = renderTemplate('{{val}}', { val: value });
+    expect(result.rendered).toBe(value);
   });
 
-  it('sanitizes ampersands in interpolated values', () => {
+  it('preserves ampersands and quotes in plain-text values', () => {
     const result = renderTemplate('{{val}}', { val: 'a & b' });
-    expect(result.rendered).toBe('a &amp; b');
-  });
-
-  it('sanitizes single quotes in interpolated values', () => {
-    const result = renderTemplate('{{val}}', { val: "it's" });
-    expect(result.rendered).toContain('&#x27;');
+    expect(result.rendered).toBe('a & b');
+    expect(renderTemplate('{{val}}', { val: `it's "quoted"` }).rendered).toBe(`it's "quoted"`);
   });
 
   it('does not process triple-braces as unescaped', () => {
     const result = renderTemplate('{{{val}}}', { val: '<b>bold</b>' });
     // The inner {{val}} gets replaced, outer braces remain
-    expect(result.rendered).toContain('&lt;b&gt;');
+    expect(result.rendered).toBe('{<b>bold</b>}');
+  });
+
+  it('renders objects and arrays as deterministic compact JSON', () => {
+    const result = renderTemplate('{{object}}\n{{array}}', {
+      object: { z: 1, a: { d: 4, c: 3 } },
+      array: [{ z: 2, a: 1 }, true, null],
+    });
+    expect(result.rendered).toBe('{"a":{"c":3,"d":4},"z":1}\n[{"a":1,"z":2},true,null]');
+  });
+
+  it('renders bigint values without losing precision', () => {
+    expect(renderTemplate('{{val}}', { val: 9007199254740993n }).rendered).toBe('9007199254740993');
   });
 
   it('truncates fields exceeding maxFieldLength', () => {
     const longValue = 'x'.repeat(3000);
     const result = renderTemplate('{{val}}', { val: longValue }, 8000, 2000);
-    expect(result.rendered.length).toBeLessThanOrEqual(2000);
+    expect(result.rendered).toHaveLength(2000);
+    expect(result.rendered.endsWith('[truncated by SAM]')).toBe(true);
     expect(result.warnings.some((w) => w.includes('truncated'))).toBe(true);
   });
 
   it('truncates total output exceeding maxLength', () => {
     const template = 'prefix-' + '{{val}}'.repeat(100);
     const result = renderTemplate(template, { val: 'x'.repeat(100) }, 500);
-    expect(result.rendered.length).toBeLessThanOrEqual(500);
+    expect(result.rendered).toHaveLength(500);
+    expect(result.rendered.endsWith('[truncated by SAM]')).toBe(true);
     expect(result.warnings.some((w) => w.includes('truncated'))).toBe(true);
   });
 
@@ -163,13 +173,7 @@ describe('buildCronContext', () => {
   });
 
   it('handles null description', () => {
-    const ctx = buildCronContext(
-      { ...trigger, description: null },
-      now,
-      'Test',
-      'exec-1',
-      1
-    );
+    const ctx = buildCronContext({ ...trigger, description: null }, now, 'Test', 'exec-1', 1);
     expect(ctx.trigger.description).toBe('');
   });
 
@@ -198,19 +202,14 @@ describe('buildCronContext', () => {
   });
 
   it('increments fire count correctly', () => {
-    const ctx = buildCronContext(
-      { ...trigger, triggerCount: 0 },
-      now,
-      'Test',
-      'exec-1',
-      1
-    );
+    const ctx = buildCronContext({ ...trigger, triggerCount: 0 }, now, 'Test', 'exec-1', 1);
     expect(ctx.trigger.fireCount).toBe('1');
   });
 
   it('can be used with renderTemplate for end-to-end rendering', () => {
     const ctx = buildCronContext(trigger, now, 'My Project', 'exec-1', 6);
-    const template = 'Run daily check for {{project.name}} (fire #{{trigger.fireCount}}) at {{schedule.time}}';
+    const template =
+      'Run daily check for {{project.name}} (fire #{{trigger.fireCount}}) at {{schedule.time}}';
     const result = renderTemplate(template, ctx as unknown as Record<string, unknown>);
     expect(result.rendered).toContain('My Project');
     expect(result.rendered).toContain('fire #6');

@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { resolvePullRequestEvidenceState } from './pr-evidence-source';
 
 const PREFLIGHT_START = '<!-- AGENT_PREFLIGHT_START -->';
 const PREFLIGHT_END = '<!-- AGENT_PREFLIGHT_END -->';
@@ -14,38 +14,22 @@ const CLASSIFICATIONS = [
   'infra-change',
 ] as const;
 
+const SCREENSHOT_LINK_PATTERN =
+  /!\[[^\]]+\]\([^)]+\)|https?:\/\/\S+\.(?:png|jpg|jpeg|webp)(?:\?\S*)?|#issuecomment-\d+/i;
+
+const SURFACE_HEADING_PATTERN = /^#{4,6}\s+Surface:\s+(.+)\s*$/i;
+
+const STRESS_DATA_PATTERN =
+  /\b(mock|edge|stress|long text|many items|empty|error|special characters|push(?:es|ed)? the limits)\b/i;
+
+const QC_REVIEW_PATTERN = /\b(reviewed|inspected)\b/i;
+
+const QC_RESULT_PATTERN =
+  /\b(no issues|no visual issues|quality|overflow|clipping|layout|found|fixed|documented)\b/i;
+
 function fail(message: string): never {
   console.error(`\nPreflight evidence check failed:\n- ${message}\n`);
   process.exit(1);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function parsePullRequestPayload(raw: string): { body: string } {
-  const payload: unknown = JSON.parse(raw);
-  if (!isRecord(payload)) {
-    fail('GitHub event payload must be an object.');
-  }
-
-  const pullRequest = payload.pull_request;
-  if (!isRecord(pullRequest)) {
-    fail('GitHub event payload is missing pull_request.');
-  }
-
-  const body = pullRequest.body;
-  if (body !== undefined && body !== null && typeof body !== 'string') {
-    fail('GitHub event pull_request.body must be a string when present.');
-  }
-
-  if (pullRequest.html_url !== undefined && typeof pullRequest.html_url !== 'string') {
-    fail('GitHub event pull_request.html_url must be a string when present.');
-  }
-
-  return {
-    body: body ?? '',
-  };
 }
 
 function escapeRegExp(value: string): string {
@@ -61,6 +45,15 @@ function getSectionContent(block: string, heading: string): string | null {
   return match?.[1]?.trim() ?? null;
 }
 
+function getMarkdownSectionContent(body: string, heading: string): string | null {
+  const pattern = new RegExp(
+    `(?:^|\\n)#{2,3} ${escapeRegExp(heading)}\\s*([\\s\\S]*?)(?=\\n#{2,3} |\\n${escapeRegExp(PREFLIGHT_START)}|\\s*$)`,
+    'i'
+  );
+  const match = body.match(pattern);
+  return match?.[1]?.trim() ?? null;
+}
+
 function hasCheckedLine(block: string, text: string): boolean {
   const pattern = new RegExp(`- \\[[xX]\\] ${escapeRegExp(text)}`, 'i');
   return pattern.test(block);
@@ -71,6 +64,43 @@ function getCheckedClasses(block: string): string[] {
     const pattern = new RegExp(`- \\[[xX]\\] ${escapeRegExp(classification)}`, 'i');
     return pattern.test(block);
   });
+}
+
+/**
+ * Splits the `UI Screenshot Evidence` section into per-surface blocks. Each block
+ * starts at a `#### Surface: <name>` heading and runs until the next such heading.
+ * Returns an empty array when the section does not enumerate surfaces, which the
+ * caller treats as an invalid global-only evidence layout.
+ */
+function extractSurfaceBlocks(section: string): Array<{ name: string; block: string }> {
+  const lines = section.split('\n');
+  const headings: Array<{ index: number; name: string }> = [];
+  for (const [index, line] of lines.entries()) {
+    const match = line.match(SURFACE_HEADING_PATTERN);
+    if (match) headings.push({ index, name: match[1].trim() });
+  }
+  if (headings.length === 0) return [];
+
+  return headings.map((heading, i) => ({
+    name: heading.name,
+    block: lines
+      .slice(heading.index + 1, headings[i + 1]?.index)
+      .join('\n')
+      .trim(),
+  }));
+}
+
+/**
+ * Returns the single-line value of a `- <label>: <value>` field inside a surface
+ * block. Returns an empty string when the field is absent or has no value.
+ */
+function getSurfaceFieldValue(block: string, label: string): string {
+  const pattern = new RegExp(`-\\s*${escapeRegExp(label)}\\s*:\\s*(.+)\\s*$`, 'im');
+  for (const line of block.split('\n')) {
+    const match = line.match(pattern);
+    if (match) return match[1].trim();
+  }
+  return '';
 }
 
 function isExplicitNA(content: string): boolean {
@@ -105,19 +135,20 @@ function validateSection(name: string, content: string | null, failures: string[
   }
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const eventName = process.env.GITHUB_EVENT_NAME;
   if (eventName !== 'pull_request' && eventName !== 'pull_request_target') {
     console.log('Skipping preflight evidence check: not a pull request event.');
     return;
   }
 
-  const eventPath = process.env.GITHUB_EVENT_PATH;
-  if (!eventPath) {
-    fail('GITHUB_EVENT_PATH is missing.');
+  let payload;
+  try {
+    payload = await resolvePullRequestEvidenceState();
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
   }
-
-  const payload = parsePullRequestPayload(readFileSync(eventPath, 'utf8'));
+  console.log(`Validating preflight evidence from: ${payload.source}`);
 
   const body = payload.body;
   if (!body.trim()) {
@@ -196,6 +227,60 @@ function main(): void {
     }
   }
 
+  if (checkedClasses.includes('ui-change')) {
+    const uiScreenshots = getMarkdownSectionContent(body, 'UI Screenshot Evidence');
+    if (!uiScreenshots || isExplicitNA(uiScreenshots)) {
+      failures.push(
+        'ui-change requires a filled "UI Screenshot Evidence" section with per-surface desktop/mobile Playwright screenshots and review attestation.'
+      );
+    } else {
+      if (!/\bplaywright\b/i.test(uiScreenshots)) {
+        failures.push(
+          'UI Screenshot Evidence must state that screenshots were taken with Playwright.'
+        );
+      }
+
+      const surfaces = extractSurfaceBlocks(uiScreenshots);
+      if (surfaces.length === 0) {
+        failures.push(
+          'UI Screenshot Evidence must enumerate every changed UI surface under a "#### Surface: <name>" heading with desktop and mobile evidence per surface. Global-only desktop/mobile links cannot satisfy per-surface evidence.'
+        );
+      }
+
+      for (const surface of surfaces) {
+        const desktop = getSurfaceFieldValue(surface.block, 'Desktop evidence');
+        const mobile = getSurfaceFieldValue(surface.block, 'Mobile evidence');
+        const stressData = getSurfaceFieldValue(surface.block, 'Mock/stress data used');
+        const qualityReview = getSurfaceFieldValue(surface.block, 'Screenshot quality review');
+
+        if (!desktop || !SCREENSHOT_LINK_PATTERN.test(desktop)) {
+          failures.push(
+            `Surface "${surface.name}" is missing desktop screenshot evidence (a "Desktop evidence:" line with an image link or #issuecomment-... URL).`
+          );
+        }
+        if (!mobile || !SCREENSHOT_LINK_PATTERN.test(mobile)) {
+          failures.push(
+            `Surface "${surface.name}" is missing mobile screenshot evidence (a "Mobile evidence:" line with an image link or #issuecomment-... URL).`
+          );
+        }
+        if (!stressData || !STRESS_DATA_PATTERN.test(stressData)) {
+          failures.push(
+            `Surface "${surface.name}" must describe the mock/stress data used to push the surface (for example long text, many items, empty, error, special characters).`
+          );
+        }
+        if (
+          !qualityReview ||
+          !QC_REVIEW_PATTERN.test(qualityReview) ||
+          !QC_RESULT_PATTERN.test(qualityReview)
+        ) {
+          failures.push(
+            `Surface "${surface.name}" must explicitly attest that its screenshots were reviewed for quality and note the result.`
+          );
+        }
+      }
+    }
+  }
+
   if (failures.length > 0) {
     console.error('\nPreflight evidence check failed:\n');
     for (const issue of failures) {
@@ -207,9 +292,16 @@ function main(): void {
 
   console.log('Preflight evidence check passed.');
   console.log(`Checked classes: ${checkedClasses.join(', ')}`);
-  if (payload.pull_request?.html_url) {
-    console.log(`PR: ${payload.pull_request.html_url}`);
+  if (payload.htmlUrl) {
+    console.log(`PR: ${payload.htmlUrl}`);
   }
 }
 
-main();
+// main() is async: an unhandled rejection must not exit 0 and silently pass the
+// gate. Fail closed on any unexpected error.
+main().catch((error: unknown) => {
+  console.error(
+    `\nPreflight evidence check errored:\n- ${error instanceof Error ? error.message : String(error)}\n`
+  );
+  process.exit(1);
+});

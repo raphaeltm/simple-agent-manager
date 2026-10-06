@@ -17,9 +17,19 @@ import type { Env as AppEnv } from '../../env';
 import { buildSafeFtsQuery } from '../../lib/fts5';
 import { createModuleLogger } from '../../lib/logger';
 import { readRequestJsonRecord } from '../../lib/runtime-validation';
+import { getSearchQueryLikePatterns, normalizeSearchQuery } from '../../lib/search-query-limits';
+import {
+  type ConversationSummaryRow,
+  ConversationSummaryRowSchema,
+  mapRows,
+  MessageRowSchema,
+  parseRowOrNull,
+  RateLimitRowSchema,
+  RowidRowSchema,
+} from '../row-validation';
 import { runAgentLoop, SAM_SYSTEM_PROMPT } from './agent-loop';
 import { executeTool, SAM_TOOLS } from './tools';
-import type { ConversationRow, MessageRow, SamSseEvent } from './types';
+import type { MessageRow, SamSseEvent } from './types';
 
 const log = createModuleLogger('sam_session');
 
@@ -34,7 +44,10 @@ function migrate(sql: SqlStorage): void {
   `);
 
   const applied = new Set(
-    sql.exec('SELECT name FROM sam_migrations').toArray().map((r) => String(r.name))
+    sql
+      .exec('SELECT name FROM sam_migrations')
+      .toArray()
+      .map((r) => String(r.name))
   );
 
   if (!applied.has('001-initial')) {
@@ -116,6 +129,39 @@ export function extractSnippet(content: string, query: string): string {
   return (start > 0 ? '...' : '') + content.slice(start, end) + (end < content.length ? '...' : '');
 }
 
+type MessageSearchResult = { snippet: string; role: string; sequence: number; createdAt: string };
+
+export function appendMessageLikeSearchResults(
+  sql: SqlStorage,
+  query: string,
+  remaining: number,
+  results: MessageSearchResult[]
+): void {
+  const likePatterns = getSearchQueryLikePatterns(query);
+  const likeConditions = likePatterns.map(() => String.raw`content LIKE ? ESCAPE '\'`).join(' AND ');
+  const querySql = [
+    'SELECT role, content, sequence, created_at',
+    'FROM messages',
+    `WHERE ${likeConditions}`,
+    'ORDER BY created_at DESC',
+    'LIMIT ?',
+  ].join('\n');
+  const rows = sql.exec(querySql, ...likePatterns, remaining).toArray();
+
+  const seenSequences = new Set(results.map((r) => r.sequence));
+  for (const row of rows) {
+    const seq = Number(row.sequence);
+    if (seenSequences.has(seq)) continue;
+    seenSequences.add(seq);
+    results.push({
+      snippet: extractSnippet(String(row.content), query),
+      role: String(row.role),
+      sequence: seq,
+      createdAt: String(row.created_at),
+    });
+  }
+}
+
 /** Encode an SSE event as unnamed data frame. */
 function encodeSseEvent(event: SamSseEvent): Uint8Array {
   return new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`);
@@ -158,9 +204,10 @@ export class SamSession extends DurableObject<AppEnv> {
 
       // GET /conversations/:id/messages — get messages for a conversation
       const messagesMatch = path.match(/^\/conversations\/([^/]+)\/messages$/);
-      if (method === 'GET' && messagesMatch) {
+      const messagesConversationId = messagesMatch?.[1];
+      if (method === 'GET' && messagesConversationId) {
         const limit = parseInt(url.searchParams.get('limit') || '', 10) || undefined;
-        return this.handleGetMessages(messagesMatch[1]!, limit);
+        return this.handleGetMessages(messagesConversationId, limit);
       }
 
       return new Response(JSON.stringify({ error: 'Not found' }), {
@@ -201,7 +248,10 @@ export class SamSession extends DurableObject<AppEnv> {
     const config = resolveSamConfig(this.env as unknown as Record<string, string | undefined>);
 
     // Rate limit check
-    const rateLimitResponse = this.checkRateLimit(config.rateLimitRpm, config.rateLimitWindowSeconds);
+    const rateLimitResponse = this.checkRateLimit(
+      config.rateLimitRpm,
+      config.rateLimitWindowSeconds
+    );
     if (rateLimitResponse) {
       return rateLimitResponse;
     }
@@ -213,10 +263,9 @@ export class SamSession extends DurableObject<AppEnv> {
       this.createConversation(conversationId, body.message.slice(0, 100));
     } else {
       // Verify conversation exists
-      const conv = this.sql.exec(
-        'SELECT id FROM conversations WHERE id = ?',
-        conversationId
-      ).toArray();
+      const conv = this.sql
+        .exec('SELECT id FROM conversations WHERE id = ?', conversationId)
+        .toArray();
       if (conv.length === 0) {
         return new Response(JSON.stringify({ error: 'Conversation not found' }), {
           status: 404,
@@ -229,7 +278,8 @@ export class SamSession extends DurableObject<AppEnv> {
     this.persistMessage(conversationId, 'user', body.message);
 
     // Load conversation history (limited to context window)
-    const contextWindow = Number(this.env.SAM_CONVERSATION_CONTEXT_WINDOW) || DEFAULT_SAM_CONVERSATION_CONTEXT_WINDOW;
+    const contextWindow =
+      Number(this.env.SAM_CONVERSATION_CONTEXT_WINDOW) || DEFAULT_SAM_CONVERSATION_CONTEXT_WINDOW;
     const historyRows = this.loadHistory(conversationId, contextWindow);
 
     // Create SSE stream
@@ -244,7 +294,7 @@ export class SamSession extends DurableObject<AppEnv> {
         try {
           await writer.write(encodeSseEvent({ type: 'conversation_started', conversationId }));
           await runAgentLoop(
-            conversationId!,
+            conversationId,
             historyRows,
             body.message,
             config,
@@ -260,6 +310,7 @@ export class SamSession extends DurableObject<AppEnv> {
               tools: SAM_TOOLS,
               executeTool,
             },
+            { waitUntil: this.ctx.waitUntil.bind(this.ctx) }
           );
         } catch (err) {
           log.error('sam_session.agent_loop_error', {
@@ -267,14 +318,22 @@ export class SamSession extends DurableObject<AppEnv> {
             error: err instanceof Error ? err.message : String(err),
           });
           try {
-            await writer.write(encodeSseEvent({
-              type: 'error',
-              message: 'An unexpected error occurred. Please try again.',
-            }));
+            await writer.write(
+              encodeSseEvent({
+                type: 'error',
+                message: 'An unexpected error occurred. Please try again.',
+              })
+            );
             await writer.write(encodeSseEvent({ type: 'done' }));
-          } catch { /* writer may be closed */ }
+          } catch {
+            /* writer may be closed */
+          }
         } finally {
-          try { await writer.close(); } catch { /* already closed */ }
+          try {
+            await writer.close();
+          } catch {
+            /* already closed */
+          }
         }
       })()
     );
@@ -289,20 +348,27 @@ export class SamSession extends DurableObject<AppEnv> {
 
   /** Handle GET /conversations — list conversations, optionally filtered by type. */
   private handleListConversations(typeFilter: string | null): Response {
-    const maxConversations = Number(this.env.SAM_MAX_CONVERSATIONS) || DEFAULT_SAM_MAX_CONVERSATIONS;
-    let rows: ConversationRow[];
-    if (typeFilter) {
-      rows = this.sql.exec(
-        'SELECT id, title, type, created_at, updated_at FROM conversations WHERE type = ? ORDER BY updated_at DESC LIMIT ?',
-        typeFilter,
-        maxConversations
-      ).toArray() as unknown as ConversationRow[];
-    } else {
-      rows = this.sql.exec(
-        'SELECT id, title, type, created_at, updated_at FROM conversations ORDER BY updated_at DESC LIMIT ?',
-        maxConversations
-      ).toArray() as unknown as ConversationRow[];
-    }
+    const maxConversations =
+      Number(this.env.SAM_MAX_CONVERSATIONS) || DEFAULT_SAM_MAX_CONVERSATIONS;
+    const rawRows = typeFilter
+      ? this.sql
+          .exec(
+            'SELECT id, title, type, created_at, updated_at FROM conversations WHERE type = ? ORDER BY updated_at DESC LIMIT ?',
+            typeFilter,
+            maxConversations
+          )
+          .toArray()
+      : this.sql
+          .exec(
+            'SELECT id, title, type, created_at, updated_at FROM conversations ORDER BY updated_at DESC LIMIT ?',
+            maxConversations
+          )
+          .toArray();
+    const rows: ConversationSummaryRow[] = mapRows(
+      rawRows,
+      ConversationSummaryRowSchema,
+      'sam_session.conversations_list'
+    );
 
     return new Response(JSON.stringify({ conversations: rows }), {
       headers: { 'content-type': 'application/json' },
@@ -313,14 +379,21 @@ export class SamSession extends DurableObject<AppEnv> {
   private handleGetMessages(conversationId: string, requestedLimit?: number): Response {
     const historyLimit = Number(this.env.SAM_HISTORY_LOAD_LIMIT) || DEFAULT_SAM_HISTORY_LOAD_LIMIT;
     const maxMessages = requestedLimit
-      ? Math.min(requestedLimit, Number(this.env.SAM_MAX_MESSAGES_PER_CONVERSATION) || DEFAULT_SAM_MAX_MESSAGES_PER_CONVERSATION)
+      ? Math.min(
+          requestedLimit,
+          Number(this.env.SAM_MAX_MESSAGES_PER_CONVERSATION) ||
+            DEFAULT_SAM_MAX_MESSAGES_PER_CONVERSATION
+        )
       : historyLimit;
-    const rows = this.sql.exec(
-      `SELECT id, conversation_id, role, content, tool_calls_json, tool_call_id, sequence, created_at
+    const rawRows = this.sql
+      .exec(
+        `SELECT id, conversation_id, role, content, tool_calls_json, tool_call_id, sequence, created_at
        FROM messages WHERE conversation_id = ? ORDER BY sequence ASC LIMIT ?`,
-      conversationId,
-      maxMessages
-    ).toArray() as unknown as MessageRow[];
+        conversationId,
+        maxMessages
+      )
+      .toArray();
+    const rows: MessageRow[] = mapRows(rawRows, MessageRowSchema, 'sam_session.messages_list');
 
     return new Response(JSON.stringify({ messages: rows }), {
       headers: { 'content-type': 'application/json' },
@@ -330,15 +403,16 @@ export class SamSession extends DurableObject<AppEnv> {
   /** Create a new conversation. */
   private createConversation(id: string, title: string): void {
     // Enforce max conversations limit
-    const maxConversations = Number(this.env.SAM_MAX_CONVERSATIONS) || DEFAULT_SAM_MAX_CONVERSATIONS;
+    const maxConversations =
+      Number(this.env.SAM_MAX_CONVERSATIONS) || DEFAULT_SAM_MAX_CONVERSATIONS;
     const countResult = this.sql.exec('SELECT COUNT(*) as cnt FROM conversations').toArray();
     const count = Number(countResult[0]?.cnt ?? 0);
     if (count >= maxConversations) {
       // Clean FTS5 entries before CASCADE deletes messages (FTS5 external-content
       // tables don't auto-sync on DELETE — we must remove entries manually)
-      const oldestId = this.sql.exec(
-        'SELECT id FROM conversations ORDER BY updated_at ASC LIMIT 1'
-      ).toArray()[0]?.id;
+      const oldestId = this.sql
+        .exec('SELECT id FROM conversations ORDER BY updated_at ASC LIMIT 1')
+        .toArray()[0]?.id;
       if (oldestId) {
         try {
           this.sql.exec(
@@ -354,11 +428,7 @@ export class SamSession extends DurableObject<AppEnv> {
       }
     }
 
-    this.sql.exec(
-      'INSERT INTO conversations (id, title) VALUES (?, ?)',
-      id,
-      title
-    );
+    this.sql.exec('INSERT INTO conversations (id, title) VALUES (?, ?)', id, title);
   }
 
   /** Persist a message to the conversation (atomic via transactionSync). */
@@ -367,16 +437,18 @@ export class SamSession extends DurableObject<AppEnv> {
     role: string,
     content: string,
     toolCallsJson?: string | null,
-    toolCallId?: string | null,
+    toolCallId?: string | null
   ): void {
     this.ctx.storage.transactionSync(() => {
       const id = crypto.randomUUID();
 
       // Get next sequence number
-      const seqResult = this.sql.exec(
-        'SELECT COALESCE(MAX(sequence), 0) as max_seq FROM messages WHERE conversation_id = ?',
-        conversationId
-      ).toArray();
+      const seqResult = this.sql
+        .exec(
+          'SELECT COALESCE(MAX(sequence), 0) as max_seq FROM messages WHERE conversation_id = ?',
+          conversationId
+        )
+        .toArray();
       const nextSeq = Number(seqResult[0]?.max_seq ?? 0) + 1;
 
       this.sql.exec(
@@ -394,13 +466,14 @@ export class SamSession extends DurableObject<AppEnv> {
       // Sync content to FTS5 index
       if (content) {
         try {
-          const rowid = this.sql.exec(
-            'SELECT rowid FROM messages WHERE id = ?', id
-          ).toArray()[0]?.rowid;
-          if (rowid != null) {
+          const rowidRow = this.sql
+            .exec('SELECT rowid FROM messages WHERE id = ?', id)
+            .toArray()[0];
+          const parsedRowid = parseRowOrNull(rowidRow, RowidRowSchema, 'sam_session.message_rowid');
+          if (parsedRowid !== null) {
             this.sql.exec(
               'INSERT INTO messages_fts(rowid, content) VALUES (?, ?)',
-              rowid as number,
+              parsedRowid.rowid,
               content
             );
           }
@@ -426,9 +499,13 @@ export class SamSession extends DurableObject<AppEnv> {
     const nowMs = Date.now();
     const windowMs = windowSeconds * 1000;
 
-    const row = this.sql.exec(
-      'SELECT window_start, request_count FROM rate_limits WHERE id = 1'
-    ).toArray()[0] as { window_start: number; request_count: number } | undefined;
+    const row = parseRowOrNull(
+      this.sql
+        .exec('SELECT window_start, request_count FROM rate_limits WHERE id = 1')
+        .toArray()[0],
+      RateLimitRowSchema,
+      'sam_session.rate_limit'
+    );
 
     if (!row) {
       // Seed row if missing (shouldn't happen after migration)
@@ -470,9 +547,7 @@ export class SamSession extends DurableObject<AppEnv> {
     }
 
     // Increment counter
-    this.sql.exec(
-      'UPDATE rate_limits SET request_count = request_count + 1 WHERE id = 1'
-    );
+    this.sql.exec('UPDATE rate_limits SET request_count = request_count + 1 WHERE id = 1');
     return null;
   }
 
@@ -486,13 +561,11 @@ export class SamSession extends DurableObject<AppEnv> {
     }
 
     const config = resolveSamConfig(this.env as unknown as Record<string, string | undefined>);
-    const limit = Math.min(
-      requestedLimit || config.searchLimit,
-      config.searchMaxLimit
-    );
+    const limit = Math.min(requestedLimit || config.searchLimit, config.searchMaxLimit);
+    const normalizedQuery = normalizeSearchQuery(query, this.env);
 
-    const results = this.searchMessages(query, limit, config.ftsEnabled);
-    return new Response(JSON.stringify({ results }), {
+    const results = this.searchMessages(normalizedQuery.query, limit, config.ftsEnabled);
+    return new Response(JSON.stringify({ results, ...normalizedQuery }), {
       headers: { 'content-type': 'application/json' },
     });
   }
@@ -504,24 +577,28 @@ export class SamSession extends DurableObject<AppEnv> {
   searchMessages(
     query: string,
     limit: number,
-    ftsEnabled: boolean = true,
+    ftsEnabled: boolean = true
   ): Array<{ snippet: string; role: string; sequence: number; createdAt: string }> {
-    const results: Array<{ snippet: string; role: string; sequence: number; createdAt: string }> = [];
+    query = normalizeSearchQuery(query, this.env).query;
+    const results: Array<{ snippet: string; role: string; sequence: number; createdAt: string }> =
+      [];
 
     if (ftsEnabled) {
       const ftsQuery = buildFtsQuery(query);
       if (ftsQuery) {
         try {
-          const rows = this.sql.exec(
-            `SELECT m.role, m.content, m.sequence, m.created_at
+          const rows = this.sql
+            .exec(
+              `SELECT m.role, m.content, m.sequence, m.created_at
              FROM messages_fts f
              JOIN messages m ON m.rowid = f.rowid
              WHERE f.messages_fts MATCH ?
              ORDER BY rank
              LIMIT ?`,
-            ftsQuery,
-            limit
-          ).toArray();
+              ftsQuery,
+              limit
+            )
+            .toArray();
           for (const row of rows) {
             results.push({
               snippet: extractSnippet(String(row.content), query),
@@ -538,31 +615,7 @@ export class SamSession extends DurableObject<AppEnv> {
 
     // LIKE fallback if FTS5 returned fewer results than requested
     if (results.length < limit) {
-      const remaining = limit - results.length;
-      const escapedQuery = query.replace(/[%_\\]/g, '\\$&');
-      const rows = this.sql.exec(
-        `SELECT role, content, sequence, created_at
-         FROM messages
-         WHERE content LIKE ? ESCAPE '\\'
-         ORDER BY created_at DESC
-         LIMIT ?`,
-        `%${escapedQuery}%`,
-        remaining
-      ).toArray();
-
-      // De-duplicate: skip rows already found by FTS5 (compare by sequence)
-      const seenSequences = new Set(results.map((r) => r.sequence));
-      for (const row of rows) {
-        const seq = Number(row.sequence);
-        if (seenSequences.has(seq)) continue;
-        seenSequences.add(seq);
-        results.push({
-          snippet: extractSnippet(String(row.content), query),
-          role: String(row.role),
-          sequence: seq,
-          createdAt: String(row.created_at),
-        });
-      }
+      appendMessageLikeSearchResults(this.sql, query, limit - results.length, results);
     }
 
     return results;
@@ -573,13 +626,16 @@ export class SamSession extends DurableObject<AppEnv> {
     // Rows are ordered DESC (most recent first). rows[0] is the user message we just
     // persisted — skip it because runAgentLoop adds it separately. Then reverse the
     // rest into chronological order for the LLM context.
-    const rows = this.sql.exec(
-      `SELECT id, conversation_id, role, content, tool_calls_json, tool_call_id, sequence, created_at
+    const rawRows = this.sql
+      .exec(
+        `SELECT id, conversation_id, role, content, tool_calls_json, tool_call_id, sequence, created_at
        FROM messages WHERE conversation_id = ?
        ORDER BY sequence DESC LIMIT ?`,
-      conversationId,
-      contextWindow + 1 // +1 because we skip the most recent (just-added user message)
-    ).toArray() as unknown as MessageRow[];
+        conversationId,
+        contextWindow + 1 // +1 because we skip the most recent (just-added user message)
+      )
+      .toArray();
+    const rows: MessageRow[] = mapRows(rawRows, MessageRowSchema, 'sam_session.messages_history');
 
     const filtered = rows.length > 0 ? rows.slice(1) : [];
     return filtered.reverse();

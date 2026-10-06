@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -6,6 +6,9 @@ const mocks = vi.hoisted(() => ({
   runGcpSetup: vi.fn(),
   deleteCredential: vi.fn(),
   getGcpOAuthResult: vi.fn(),
+  saveGcpServiceAccountCredential: vi.fn(),
+  toastError: vi.fn(),
+  toastSuccess: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
@@ -14,10 +17,11 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   runGcpSetup: mocks.runGcpSetup,
   deleteCredential: mocks.deleteCredential,
   getGcpOAuthResult: mocks.getGcpOAuthResult,
+  saveGcpServiceAccountCredential: mocks.saveGcpServiceAccountCredential,
 }));
 
 vi.mock('../../../src/hooks/useToast', () => ({
-  useToast: () => ({ success: vi.fn(), error: vi.fn() }),
+  useToast: () => ({ success: mocks.toastSuccess, error: mocks.toastError }),
 }));
 
 import { GcpCredentialForm } from '../../../src/components/GcpCredentialForm';
@@ -27,6 +31,23 @@ const credential = {
   provider: 'gcp' as const,
   connected: true,
   createdAt: '2026-03-20T00:00:00.000Z',
+  gcp: {
+    authType: 'workload-identity' as const,
+    gcpProjectId: 'proj-1',
+    serviceAccountEmail: 'sam-wif@proj-1.iam.gserviceaccount.com',
+    defaultZone: 'us-central1-a',
+  },
+};
+
+const serviceAccountCredential = {
+  ...credential,
+  gcp: {
+    authType: 'service-account-key' as const,
+    gcpProjectId: 'proj-long-name-世界',
+    serviceAccountEmail: 'sam-vm-manager@proj-long-name.iam.gserviceaccount.com',
+    defaultZone: 'europe-west3-a',
+    privateKeyId: '0123456789abcdef0123456789abcdef01234567',
+  },
 };
 
 const gcpProjects = [
@@ -43,16 +64,26 @@ describe('GcpCredentialForm', () => {
     mocks.listGcpProjects.mockResolvedValue({ projects: gcpProjects });
     mocks.runGcpSetup.mockResolvedValue({ success: true, verified: true });
     mocks.deleteCredential.mockResolvedValue({});
+    mocks.saveGcpServiceAccountCredential.mockResolvedValue({
+      success: true,
+      credential: serviceAccountCredential,
+    });
     // Reset URL params
     window.history.replaceState({}, '', window.location.pathname);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+    });
   });
 
   describe('idle state', () => {
     it('renders connect button when no credential', () => {
       render(<GcpCredentialForm onUpdate={onUpdate} />);
 
-      expect(screen.getByText(/Connect your Google Cloud account/)).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Connect Google Cloud' })).toBeInTheDocument();
+      expect(screen.getByText('Workload Identity Federation')).toBeInTheDocument();
+      expect(screen.getByText('Recommended')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Connect with Google' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Use service account JSON' })).toBeInTheDocument();
     });
   });
 
@@ -71,7 +102,9 @@ describe('GcpCredentialForm', () => {
 
       // ConfirmDialog should be open with the title
       expect(screen.getByText('Disconnect Google Cloud?')).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Confirm Disconnect' })).toBeInTheDocument();
+      expect(
+        within(screen.getByRole('dialog')).getByRole('button', { name: 'Disconnect' })
+      ).toBeInTheDocument();
     });
 
     it('calls deleteCredential when disconnect is confirmed via dialog', async () => {
@@ -80,7 +113,9 @@ describe('GcpCredentialForm', () => {
       // Click Disconnect to open dialog
       fireEvent.click(screen.getByRole('button', { name: 'Disconnect' }));
       // Confirm in dialog
-      fireEvent.click(screen.getByRole('button', { name: 'Confirm Disconnect' }));
+      fireEvent.click(
+        within(screen.getByRole('dialog')).getByRole('button', { name: 'Disconnect' })
+      );
 
       await waitFor(() => {
         expect(mocks.deleteCredential).toHaveBeenCalledWith('gcp');
@@ -104,7 +139,9 @@ describe('GcpCredentialForm', () => {
       render(<GcpCredentialForm credential={credential} onUpdate={onUpdate} />);
 
       fireEvent.click(screen.getByRole('button', { name: 'Disconnect' }));
-      fireEvent.click(screen.getByRole('button', { name: 'Confirm Disconnect' }));
+      fireEvent.click(
+        within(screen.getByRole('dialog')).getByRole('button', { name: 'Disconnect' })
+      );
 
       await waitFor(() => {
         expect(screen.getByText('Delete failed')).toBeInTheDocument();
@@ -113,6 +150,118 @@ describe('GcpCredentialForm', () => {
     });
   });
 
+  describe('service-account credential', () => {
+    it('keeps WIF recommended and saves pasted JSON without retaining it after success', async () => {
+      render(<GcpCredentialForm onUpdate={onUpdate} />);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Use service account JSON' }));
+
+      expect(
+        screen.getByText(/Google recommends Workload Identity Federation/)
+      ).toBeInTheDocument();
+      expect(screen.getByText(/Project Owner is not required/)).toBeInTheDocument();
+
+      const json = '{"type":"service_account","private_key":"secret-value"}';
+      fireEvent.change(screen.getByLabelText('Or paste JSON'), { target: { value: json } });
+      fireEvent.change(screen.getByLabelText('Default zone'), {
+        target: { value: 'europe-west3-a' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Validate and connect' }));
+
+      await waitFor(() => {
+        expect(mocks.saveGcpServiceAccountCredential).toHaveBeenCalledWith({
+          serviceAccountJson: json,
+          defaultZone: 'europe-west3-a',
+        });
+      });
+      expect(onUpdate).toHaveBeenCalled();
+      expect(screen.queryByDisplayValue(json)).not.toBeInTheDocument();
+      expect(screen.queryByText('secret-value')).not.toBeInTheDocument();
+    });
+
+    it('reads a selected local JSON file into the unsaved form', async () => {
+      render(<GcpCredentialForm onUpdate={onUpdate} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Use service account JSON' }));
+
+      const json = '{"type":"service_account","client_email":"sam@example.invalid"}';
+      const file = new File([json], 'sam-key.json', { type: 'application/json' });
+      Object.defineProperty(file, 'text', { value: vi.fn().mockResolvedValue(json) });
+      fireEvent.change(screen.getByLabelText('Choose JSON file'), { target: { files: [file] } });
+
+      await waitFor(() => {
+        expect(screen.getByLabelText('Or paste JSON')).toHaveValue(json);
+      });
+    });
+
+    it('shows a retryable sanitized server error', async () => {
+      mocks.saveGcpServiceAccountCredential.mockRejectedValue(new Error('Compute API is disabled'));
+      render(<GcpCredentialForm onUpdate={onUpdate} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Use service account JSON' }));
+      fireEvent.change(screen.getByLabelText('Or paste JSON'), { target: { value: '{}' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Validate and connect' }));
+
+      await waitFor(() => {
+        expect(screen.getByText('Compute API is disabled')).toBeInTheDocument();
+      });
+      expect(screen.getByRole('button', { name: 'Validate and connect' })).toBeInTheDocument();
+      expect(onUpdate).not.toHaveBeenCalled();
+    });
+
+    it('shows safe metadata and requires confirmation before rotation', async () => {
+      render(<GcpCredentialForm credential={serviceAccountCredential} onUpdate={onUpdate} />);
+
+      expect(screen.getByText('Service account JSON (long-lived key)')).toBeInTheDocument();
+      expect(screen.getByText(serviceAccountCredential.gcp.gcpProjectId)).toBeInTheDocument();
+      expect(
+        screen.getByText(serviceAccountCredential.gcp.serviceAccountEmail)
+      ).toBeInTheDocument();
+      expect(screen.getByText(serviceAccountCredential.gcp.privateKeyId)).toBeInTheDocument();
+      expect(screen.queryByText(/BEGIN PRIVATE KEY/)).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Rotate JSON key' }));
+      expect(screen.getByLabelText('Or paste JSON')).toHaveValue('');
+      expect(screen.getByLabelText('Default zone')).toHaveValue('europe-west3-a');
+      fireEvent.change(screen.getByLabelText('Or paste JSON'), {
+        target: { value: '{"new":true}' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Validate and rotate key' }));
+
+      expect(
+        screen.getByRole('dialog', { name: 'Rotate GCP service-account key?' })
+      ).toBeInTheDocument();
+      expect(mocks.saveGcpServiceAccountCredential).not.toHaveBeenCalled();
+      fireEvent.click(
+        within(screen.getByRole('dialog')).getByRole('button', { name: 'Validate and rotate' })
+      );
+
+      await waitFor(() => {
+        expect(mocks.saveGcpServiceAccountCredential).toHaveBeenCalledWith({
+          serviceAccountJson: '{"new":true}',
+          defaultZone: 'europe-west3-a',
+        });
+      });
+    });
+
+    it('reports clipboard failures without an unhandled rejection', async () => {
+      vi.mocked(navigator.clipboard.writeText).mockRejectedValue(new Error('denied'));
+      render(<GcpCredentialForm onUpdate={onUpdate} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Use service account JSON' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Copy commands' }));
+
+      await waitFor(() => {
+        expect(mocks.toastError).toHaveBeenCalledWith('Could not copy gcloud commands');
+      });
+    });
+
+    it('explains that disconnect does not revoke the Google-managed key', () => {
+      render(<GcpCredentialForm credential={serviceAccountCredential} onUpdate={onUpdate} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Disconnect' }));
+
+      expect(
+        screen.getByText(/will not delete or revoke a service-account key in Google Cloud/)
+      ).toBeInTheDocument();
+    });
+  });
   describe('OAuth redirect loading state', () => {
     it('shows loading spinner when returning from OAuth', async () => {
       // Simulate OAuth callback URL
@@ -144,7 +293,7 @@ describe('GcpCredentialForm', () => {
 
       // After failure, should return to idle with error and connect button
       await waitFor(() => {
-        expect(screen.getByRole('button', { name: 'Connect Google Cloud' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Connect with Google' })).toBeInTheDocument();
         expect(screen.getByText('Session expired')).toBeInTheDocument();
       });
     });
@@ -160,7 +309,7 @@ describe('GcpCredentialForm', () => {
 
       // After failure, should return to idle with error and connect button
       await waitFor(() => {
-        expect(screen.getByRole('button', { name: 'Connect Google Cloud' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Connect with Google' })).toBeInTheDocument();
         expect(screen.getByText('Network error')).toBeInTheDocument();
       });
     });
@@ -171,7 +320,7 @@ describe('GcpCredentialForm', () => {
       render(<GcpCredentialForm onUpdate={onUpdate} />);
 
       expect(screen.getByText('Google OAuth failed: access_denied')).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Connect Google Cloud' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Connect with Google' })).toBeInTheDocument();
       expect(mocks.getGcpOAuthResult).not.toHaveBeenCalled();
     });
   });
@@ -192,7 +341,7 @@ describe('GcpCredentialForm', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Next' }));
 
       // Zone select phase — click connect
-      fireEvent.click(screen.getByRole('button', { name: 'Connect Google Cloud' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Connect with WIF' }));
 
       // Wait for setup to complete
       await waitFor(() => {
@@ -221,14 +370,14 @@ describe('GcpCredentialForm', () => {
       // Select project and zone, then attempt setup
       fireEvent.change(screen.getByLabelText('GCP Project'), { target: { value: 'proj-1' } });
       fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-      fireEvent.click(screen.getByRole('button', { name: 'Connect Google Cloud' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Connect with WIF' }));
 
       // Should show error and return to zone-select for retry
       await waitFor(() => {
         expect(screen.getByText('IAM quota exceeded')).toBeInTheDocument();
       });
       // Connect button should still be present (zone-select phase allows retry)
-      expect(screen.getByRole('button', { name: 'Connect Google Cloud' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Connect with WIF' })).toBeInTheDocument();
       expect(onUpdate).not.toHaveBeenCalled();
     });
   });

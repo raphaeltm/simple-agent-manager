@@ -5,11 +5,17 @@ import { CLOUD_INIT_TEMPLATE } from './template';
 /** Alphanumeric, hyphens, underscores (IDs like nodeId, projectId, etc.) */
 const SAFE_ID_RE = /^[a-zA-Z0-9_-]+$/;
 
+/** Full lowercase Git commit SHA used for immutable VM-agent releases. */
+const VM_AGENT_RELEASE_RE = /^[0-9a-f]{40}$/;
+
 /** Valid hostname: alphanumeric, hyphens, dots */
 const SAFE_HOSTNAME_RE = /^[a-zA-Z0-9.-]+$/;
 
 /** Numeric positive integer */
 const NUMERIC_RE = /^[0-9]+$/;
+
+/** Highest workspace build queue depth accepted in cloud-init variables. */
+const WORKSPACE_BUILD_QUEUE_DEPTH_MAX = 16;
 
 /** journald size values: digits + optional K/M/G/T suffix */
 const JOURNALD_SIZE_RE = /^[0-9]+[KMGT]?$/;
@@ -24,18 +30,27 @@ const SAFE_URL_RE = /^https:\/\/[a-zA-Z0-9._~:/?#[\]@!&()*+,;=-]+$/;
 /** callbackToken: JWT format (base64url segments separated by dots) */
 const SAFE_TOKEN_RE = /^[a-zA-Z0-9_.\-/+=]+$/;
 
-/** Docker DNS servers: one or more quoted dotted-decimal IPv4 addresses, comma-separated.
- * e.g. "1.1.1.1", "8.8.8.8" */
-const SAFE_DNS_SERVERS_RE = /^"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}"(, "\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}")*$/;
+/** Boolean strings accepted by the VM agent config loader. */
+const BOOLEAN_RE = /^(true|false)$/;
 
-/**
- * PEM envelope: must start with -----BEGIN <label>----- and end with -----END <label>-----.
- * BEGIN and END labels must match (enforced via backreference).
- * Content between markers must be base64 characters, spaces, and newlines only.
- * Uses `[ \n\r]` instead of `\s` to exclude tab/form-feed/vertical-tab which are
- * not valid in PEM and could smuggle YAML indentation.
- */
-const PEM_ENVELOPE_RE = /^-----BEGIN ([A-Z0-9 ]+)-----\n[A-Za-z0-9+/= \n\r]+\n-----END \1-----$/;
+/** Simple email syntax for ACME account contact, excluding whitespace/control chars. */
+const SAFE_EMAIL_RE = /^[a-zA-Z0-9.!#$%&*+/=?^_`{|}~-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+
+/** Deployment compose command: executable plus optional space-separated args, no shell metacharacters. */
+const SAFE_DEPLOY_COMPOSE_CMD_RE = /^[a-zA-Z0-9_./:-]+(?: [a-zA-Z0-9_./:-]+)*$/;
+
+/** Go duration syntax accepted for deployment health timeout (e.g. 5m, 1m30s). */
+const GO_DURATION_RE = /^(?:[0-9]+(?:ns|us|ms|s|m|h))+$/;
+
+/** Absolute Linux path without whitespace or shell metacharacters. */
+const SAFE_ABSOLUTE_PATH_RE = /^\/[a-zA-Z0-9._/-]+$/;
+
+function isSafeAbsolutePath(value: string): boolean {
+  if (!SAFE_ABSOLUTE_PATH_RE.test(value) || value.includes('//')) {
+    return false;
+  }
+  return value.split('/').every((segment) => segment !== '.' && segment !== '..');
+}
 
 /**
  * Validate all CloudInitVariables before they are embedded into shell/YAML.
@@ -49,38 +64,62 @@ export function validateCloudInitVariables(variables: CloudInitVariables): void 
     errors.push(`nodeId: must match ${SAFE_ID_RE} (got ${JSON.stringify(variables.nodeId)})`);
   }
   if (!variables.hostname || !SAFE_HOSTNAME_RE.test(variables.hostname)) {
-    errors.push(`hostname: must match ${SAFE_HOSTNAME_RE} (got ${JSON.stringify(variables.hostname)})`);
+    errors.push(
+      `hostname: must match ${SAFE_HOSTNAME_RE} (got ${JSON.stringify(variables.hostname)})`
+    );
   }
   if (!variables.controlPlaneUrl || !SAFE_URL_RE.test(variables.controlPlaneUrl)) {
-    errors.push(`controlPlaneUrl: must be a valid HTTPS URL (got ${JSON.stringify(variables.controlPlaneUrl)})`);
+    errors.push(
+      `controlPlaneUrl: must be a valid HTTPS URL (got ${JSON.stringify(variables.controlPlaneUrl)})`
+    );
   }
   if (!variables.jwksUrl || !SAFE_URL_RE.test(variables.jwksUrl)) {
     errors.push(`jwksUrl: must be a valid HTTPS URL (got ${JSON.stringify(variables.jwksUrl)})`);
   }
   if (!variables.callbackToken || !SAFE_TOKEN_RE.test(variables.callbackToken)) {
-    errors.push(`callbackToken: must contain only safe token characters (got ${JSON.stringify(variables.callbackToken)})`);
+    errors.push(
+      `callbackToken: must contain only safe token characters (got ${JSON.stringify(variables.callbackToken)})`
+    );
   }
 
   // Optional fields — only validated when present and non-empty
   if (variables.vmAgentPort !== undefined && variables.vmAgentPort !== '') {
     const port = Number(variables.vmAgentPort);
     if (!NUMERIC_RE.test(variables.vmAgentPort) || port < 1 || port > 65535) {
-      errors.push(`vmAgentPort: must be numeric 1-65535 (got ${JSON.stringify(variables.vmAgentPort)})`);
+      errors.push(
+        `vmAgentPort: must be numeric 1-65535 (got ${JSON.stringify(variables.vmAgentPort)})`
+      );
     }
   }
+  if (
+    variables.vmAgentRequiredVersion !== undefined &&
+    variables.vmAgentRequiredVersion !== '' &&
+    !VM_AGENT_RELEASE_RE.test(variables.vmAgentRequiredVersion)
+  ) {
+    errors.push(
+      `vmAgentRequiredVersion: must be a full lowercase Git commit SHA (got ${JSON.stringify(variables.vmAgentRequiredVersion)})`
+    );
+  }
   if (variables.cfIpFetchTimeout !== undefined && variables.cfIpFetchTimeout !== '') {
-    if (!NUMERIC_RE.test(variables.cfIpFetchTimeout)) {
-      errors.push(`cfIpFetchTimeout: must be a positive integer (got ${JSON.stringify(variables.cfIpFetchTimeout)})`);
+    const timeout = Number(variables.cfIpFetchTimeout);
+    if (!NUMERIC_RE.test(variables.cfIpFetchTimeout) || timeout < 1) {
+      errors.push(
+        `cfIpFetchTimeout: must be a positive integer (got ${JSON.stringify(variables.cfIpFetchTimeout)})`
+      );
     }
   }
   if (variables.projectId !== undefined && variables.projectId !== '') {
     if (!SAFE_ID_RE.test(variables.projectId)) {
-      errors.push(`projectId: must match ${SAFE_ID_RE} (got ${JSON.stringify(variables.projectId)})`);
+      errors.push(
+        `projectId: must match ${SAFE_ID_RE} (got ${JSON.stringify(variables.projectId)})`
+      );
     }
   }
   if (variables.chatSessionId !== undefined && variables.chatSessionId !== '') {
     if (!SAFE_ID_RE.test(variables.chatSessionId)) {
-      errors.push(`chatSessionId: must match ${SAFE_ID_RE} (got ${JSON.stringify(variables.chatSessionId)})`);
+      errors.push(
+        `chatSessionId: must match ${SAFE_ID_RE} (got ${JSON.stringify(variables.chatSessionId)})`
+      );
     }
   }
   if (variables.taskId !== undefined && variables.taskId !== '') {
@@ -90,42 +129,283 @@ export function validateCloudInitVariables(variables: CloudInitVariables): void 
   }
   if (variables.taskMode !== undefined && variables.taskMode !== '') {
     if (variables.taskMode !== 'task' && variables.taskMode !== 'conversation') {
-      errors.push(`taskMode: must be 'task' or 'conversation' (got ${JSON.stringify(variables.taskMode)})`);
+      errors.push(
+        `taskMode: must be 'task' or 'conversation' (got ${JSON.stringify(variables.taskMode)})`
+      );
     }
   }
   if (variables.provider !== undefined && variables.provider !== '') {
     if (!VALID_CLOUD_PROVIDERS.includes(variables.provider as CloudProvider)) {
-      errors.push(`provider: must be one of ${VALID_CLOUD_PROVIDERS.join(', ')} (got ${JSON.stringify(variables.provider)})`);
+      errors.push(
+        `provider: must be one of ${VALID_CLOUD_PROVIDERS.join(', ')} (got ${JSON.stringify(variables.provider)})`
+      );
     }
   }
   if (variables.logJournalMaxUse !== undefined && variables.logJournalMaxUse !== '') {
     if (!JOURNALD_SIZE_RE.test(variables.logJournalMaxUse)) {
-      errors.push(`logJournalMaxUse: must match ${JOURNALD_SIZE_RE} (got ${JSON.stringify(variables.logJournalMaxUse)})`);
+      errors.push(
+        `logJournalMaxUse: must match ${JOURNALD_SIZE_RE} (got ${JSON.stringify(variables.logJournalMaxUse)})`
+      );
     }
   }
   if (variables.logJournalKeepFree !== undefined && variables.logJournalKeepFree !== '') {
     if (!JOURNALD_SIZE_RE.test(variables.logJournalKeepFree)) {
-      errors.push(`logJournalKeepFree: must match ${JOURNALD_SIZE_RE} (got ${JSON.stringify(variables.logJournalKeepFree)})`);
+      errors.push(
+        `logJournalKeepFree: must match ${JOURNALD_SIZE_RE} (got ${JSON.stringify(variables.logJournalKeepFree)})`
+      );
     }
   }
   if (variables.logJournalMaxRetention !== undefined && variables.logJournalMaxRetention !== '') {
     if (!JOURNALD_TIME_RE.test(variables.logJournalMaxRetention)) {
-      errors.push(`logJournalMaxRetention: must match ${JOURNALD_TIME_RE} (got ${JSON.stringify(variables.logJournalMaxRetention)})`);
+      errors.push(
+        `logJournalMaxRetention: must match ${JOURNALD_TIME_RE} (got ${JSON.stringify(variables.logJournalMaxRetention)})`
+      );
     }
   }
   if (variables.dockerDnsServers !== undefined && variables.dockerDnsServers !== '') {
-    if (!SAFE_DNS_SERVERS_RE.test(variables.dockerDnsServers)) {
-      errors.push(`dockerDnsServers: must contain only quoted IPs (got ${JSON.stringify(variables.dockerDnsServers)})`);
+    if (!isValidDockerDnsServers(variables.dockerDnsServers)) {
+      errors.push(
+        `dockerDnsServers: must be a JSON fragment containing valid quoted IPv4 addresses (got ${JSON.stringify(variables.dockerDnsServers)})`
+      );
     }
   }
-  if (variables.originCaCert !== undefined && variables.originCaCert !== '') {
-    if (!PEM_ENVELOPE_RE.test(variables.originCaCert)) {
-      errors.push('originCaCert: must be a valid PEM-encoded certificate (-----BEGIN ... ----- / -----END ... -----)');
+  if (
+    variables.devcontainerCacheEnabled !== undefined &&
+    variables.devcontainerCacheEnabled !== ''
+  ) {
+    if (!BOOLEAN_RE.test(variables.devcontainerCacheEnabled)) {
+      errors.push(
+        `devcontainerCacheEnabled: must be "true" or "false" (got ${JSON.stringify(variables.devcontainerCacheEnabled)})`
+      );
     }
   }
-  if (variables.originCaKey !== undefined && variables.originCaKey !== '') {
-    if (!PEM_ENVELOPE_RE.test(variables.originCaKey)) {
-      errors.push('originCaKey: must be a valid PEM-encoded key (-----BEGIN ... ----- / -----END ... -----)');
+  if (
+    variables.workspaceBuildQueueDepth !== undefined &&
+    variables.workspaceBuildQueueDepth !== ''
+  ) {
+    const depth = Number(variables.workspaceBuildQueueDepth);
+    if (
+      !NUMERIC_RE.test(variables.workspaceBuildQueueDepth) ||
+      depth < 1 ||
+      depth > WORKSPACE_BUILD_QUEUE_DEPTH_MAX
+    ) {
+      errors.push(
+        `workspaceBuildQueueDepth: must be numeric 1-${WORKSPACE_BUILD_QUEUE_DEPTH_MAX} (got ${JSON.stringify(variables.workspaceBuildQueueDepth)})`
+      );
+    }
+  }
+  if (variables.originCaCertificateUrl !== undefined && variables.originCaCertificateUrl !== '') {
+    if (!SAFE_URL_RE.test(variables.originCaCertificateUrl)) {
+      errors.push(
+        `originCaCertificateUrl: must be a valid HTTPS URL (got ${JSON.stringify(variables.originCaCertificateUrl)})`
+      );
+    }
+  }
+  if (variables.swapSizeMb !== undefined && variables.swapSizeMb !== '') {
+    const size = Number(variables.swapSizeMb);
+    if (!NUMERIC_RE.test(variables.swapSizeMb) || size < 0 || size > 65536) {
+      errors.push(
+        `swapSizeMb: must be numeric 0-65536 (got ${JSON.stringify(variables.swapSizeMb)})`
+      );
+    }
+  }
+  if (variables.swapSwappiness !== undefined && variables.swapSwappiness !== '') {
+    const val = Number(variables.swapSwappiness);
+    if (!NUMERIC_RE.test(variables.swapSwappiness) || val < 0 || val > 100) {
+      errors.push(
+        `swapSwappiness: must be numeric 0-100 (got ${JSON.stringify(variables.swapSwappiness)})`
+      );
+    }
+  }
+  if (variables.vmAgentMemoryReserveMb !== undefined && variables.vmAgentMemoryReserveMb !== '') {
+    const reserve = Number(variables.vmAgentMemoryReserveMb);
+    if (!NUMERIC_RE.test(variables.vmAgentMemoryReserveMb) || reserve < 0 || reserve > 65536) {
+      errors.push(
+        `vmAgentMemoryReserveMb: must be numeric 0-65536 (got ${JSON.stringify(variables.vmAgentMemoryReserveMb)})`
+      );
+    }
+  }
+  if (
+    variables.samInfraSliceMemoryMinMb !== undefined &&
+    variables.samInfraSliceMemoryMinMb !== ''
+  ) {
+    const reserve = Number(variables.samInfraSliceMemoryMinMb);
+    if (!NUMERIC_RE.test(variables.samInfraSliceMemoryMinMb) || reserve < 1 || reserve > 65536) {
+      errors.push(
+        `samInfraSliceMemoryMinMb: must be numeric 1-65536 (got ${JSON.stringify(variables.samInfraSliceMemoryMinMb)})`
+      );
+    }
+  }
+  for (const [field, raw] of [
+    ['samInfraSliceCpuWeight', variables.samInfraSliceCpuWeight],
+    ['samWorkloadSliceCpuWeight', variables.samWorkloadSliceCpuWeight],
+  ] as const) {
+    if (raw === undefined || raw === '') continue;
+    const weight = Number(raw);
+    // systemd/cgroup v2 accepts 1-10000 for CPUWeight; anything else makes the
+    // unit fail to load, which would take the whole slice hierarchy down.
+    if (!NUMERIC_RE.test(raw) || weight < 1 || weight > 10000) {
+      errors.push(`${field}: must be numeric 1-10000 (got ${JSON.stringify(raw)})`);
+    }
+  }
+  if (variables.dockerMemoryMinMb !== undefined && variables.dockerMemoryMinMb !== '') {
+    const minimum = Number(variables.dockerMemoryMinMb);
+    if (!NUMERIC_RE.test(variables.dockerMemoryMinMb) || minimum < 1 || minimum > 65536) {
+      errors.push(
+        `dockerMemoryMinMb: must be numeric 1-65536 (got ${JSON.stringify(variables.dockerMemoryMinMb)})`
+      );
+    }
+  }
+  if (
+    variables.heartbeatDockerStatsTimeout !== undefined &&
+    variables.heartbeatDockerStatsTimeout !== '' &&
+    !GO_DURATION_RE.test(variables.heartbeatDockerStatsTimeout)
+  ) {
+    errors.push(
+      `heartbeatDockerStatsTimeout: must be a Go duration (got ${JSON.stringify(variables.heartbeatDockerStatsTimeout)})`
+    );
+  }
+  if (
+    variables.heartbeatWorkspaceMetricsMaxContainers !== undefined &&
+    variables.heartbeatWorkspaceMetricsMaxContainers !== ''
+  ) {
+    const maxContainers = Number(variables.heartbeatWorkspaceMetricsMaxContainers);
+    if (
+      !NUMERIC_RE.test(variables.heartbeatWorkspaceMetricsMaxContainers) ||
+      maxContainers < 0 ||
+      maxContainers > 128
+    ) {
+      errors.push(
+        `heartbeatWorkspaceMetricsMaxContainers: must be numeric 0-128 (got ${JSON.stringify(variables.heartbeatWorkspaceMetricsMaxContainers)})`
+      );
+    }
+  }
+  if (
+    variables.heartbeatWorkspaceMetricsMaxOutputBytes !== undefined &&
+    variables.heartbeatWorkspaceMetricsMaxOutputBytes !== ''
+  ) {
+    const maxOutputBytes = Number(variables.heartbeatWorkspaceMetricsMaxOutputBytes);
+    if (
+      !NUMERIC_RE.test(variables.heartbeatWorkspaceMetricsMaxOutputBytes) ||
+      maxOutputBytes < 1024 ||
+      maxOutputBytes > 1048576
+    ) {
+      errors.push(
+        `heartbeatWorkspaceMetricsMaxOutputBytes: must be numeric 1024-1048576 (got ${JSON.stringify(variables.heartbeatWorkspaceMetricsMaxOutputBytes)})`
+      );
+    }
+  }
+  if (variables.role !== undefined && variables.role !== '') {
+    if (variables.role !== 'workspace' && variables.role !== 'deployment') {
+      errors.push(
+        `role: must be 'workspace' or 'deployment' (got ${JSON.stringify(variables.role)})`
+      );
+    }
+  }
+  if (variables.environmentId !== undefined && variables.environmentId !== '') {
+    if (!SAFE_ID_RE.test(variables.environmentId)) {
+      errors.push(
+        `environmentId: must match ${SAFE_ID_RE} (got ${JSON.stringify(variables.environmentId)})`
+      );
+    }
+  }
+  if (variables.deploySigningPubKey !== undefined && variables.deploySigningPubKey !== '') {
+    if (!SAFE_TOKEN_RE.test(variables.deploySigningPubKey)) {
+      errors.push(
+        `deploySigningPubKey: must contain only safe token characters (got ${JSON.stringify(variables.deploySigningPubKey)})`
+      );
+    }
+  }
+  if (variables.deployAcmeEmail !== undefined && variables.deployAcmeEmail !== '') {
+    if (!SAFE_EMAIL_RE.test(variables.deployAcmeEmail)) {
+      errors.push(
+        `deployAcmeEmail: must be a valid email address (got ${JSON.stringify(variables.deployAcmeEmail)})`
+      );
+    }
+  }
+  if (variables.deployAcmeCa !== undefined && variables.deployAcmeCa !== '') {
+    if (!SAFE_URL_RE.test(variables.deployAcmeCa)) {
+      errors.push(
+        `deployAcmeCa: must be a valid HTTPS URL (got ${JSON.stringify(variables.deployAcmeCa)})`
+      );
+    }
+  }
+  if (variables.deployComposeCmd !== undefined && variables.deployComposeCmd !== '') {
+    if (!SAFE_DEPLOY_COMPOSE_CMD_RE.test(variables.deployComposeCmd)) {
+      errors.push(
+        `deployComposeCmd: must be a command plus optional arguments without shell metacharacters (got ${JSON.stringify(variables.deployComposeCmd)})`
+      );
+    }
+  }
+  if (variables.deployHealthTimeout !== undefined && variables.deployHealthTimeout !== '') {
+    if (!GO_DURATION_RE.test(variables.deployHealthTimeout)) {
+      errors.push(
+        `deployHealthTimeout: must be a Go duration using ns/us/ms/s/m/h units (got ${JSON.stringify(variables.deployHealthTimeout)})`
+      );
+    }
+  }
+  if (
+    variables.sessionSnapshotOperationTimeout !== undefined &&
+    variables.sessionSnapshotOperationTimeout !== '' &&
+    !GO_DURATION_RE.test(variables.sessionSnapshotOperationTimeout)
+  ) {
+    errors.push(
+      `sessionSnapshotOperationTimeout: must be a Go duration using ns/us/ms/s/m/h units (got ${JSON.stringify(variables.sessionSnapshotOperationTimeout)})`
+    );
+  }
+  for (const [name, value] of [
+    ['sessionSnapshotProgressReportInterval', variables.sessionSnapshotProgressReportInterval],
+    ['sessionSnapshotProgressReportTimeout', variables.sessionSnapshotProgressReportTimeout],
+  ] as const) {
+    if (value !== undefined && value !== '' && !GO_DURATION_RE.test(value)) {
+      errors.push(`${name}: must be a Go duration (got ${JSON.stringify(value)})`);
+    }
+  }
+  for (const [name, value] of [
+    ['errorReportFlushInterval', variables.errorReportFlushInterval],
+    ['errorReportHttpTimeout', variables.errorReportHttpTimeout],
+    ['errorReportRetryInitial', variables.errorReportRetryInitial],
+    ['errorReportRetryMax', variables.errorReportRetryMax],
+    ['errorReportDbBusyTimeout', variables.errorReportDbBusyTimeout],
+    ['errorReportRetention', variables.errorReportRetention],
+    ['errorReportCollectorTimeout', variables.errorReportCollectorTimeout],
+  ] as const) {
+    if (value !== undefined && value !== '' && !GO_DURATION_RE.test(value)) {
+      errors.push(`${name}: must be a Go duration (got ${JSON.stringify(value)})`);
+    }
+  }
+  for (const [name, value] of [
+    ['errorReportMaxBatchSize', variables.errorReportMaxBatchSize],
+    ['errorReportMaxBatchBytes', variables.errorReportMaxBatchBytes],
+    ['errorReportMaxQueueSize', variables.errorReportMaxQueueSize],
+    ['errorReportMaxAttempts', variables.errorReportMaxAttempts],
+    ['errorReportArtifactMaxBytes', variables.errorReportArtifactMaxBytes],
+    ['errorReportSpoolMaxBytes', variables.errorReportSpoolMaxBytes],
+    ['errorReportMaxCollectorDocs', variables.errorReportMaxCollectorDocs],
+    ['errorReportMaxDocumentBytes', variables.errorReportMaxDocumentBytes],
+    ['errorReportMaxValueDepth', variables.errorReportMaxValueDepth],
+    ['errorReportMaxValueItems', variables.errorReportMaxValueItems],
+    ['errorReportMaxStringBytes', variables.errorReportMaxStringBytes],
+    ['errorReportEventLimit', variables.errorReportEventLimit],
+    ['errorReportResponseMaxBytes', variables.errorReportResponseMaxBytes],
+    ['errorReportStoredErrorMaxBytes', variables.errorReportStoredErrorMaxBytes],
+    ['errorReportCollectorConcurrency', variables.errorReportCollectorConcurrency],
+  ] as const) {
+    const numeric = Number(value);
+    if (
+      value !== undefined &&
+      value !== '' &&
+      (!NUMERIC_RE.test(value) || !Number.isSafeInteger(numeric) || numeric < 1)
+    ) {
+      errors.push(`${name}: must be a positive integer (got ${JSON.stringify(value)})`);
+    }
+  }
+  for (const [name, value] of [
+    ['errorReportDbPath', variables.errorReportDbPath],
+    ['errorReportSpoolDir', variables.errorReportSpoolDir],
+  ] as const) {
+    if (value !== undefined && value !== '' && !isSafeAbsolutePath(value)) {
+      errors.push(`${name}: must be a safe absolute path (got ${JSON.stringify(value)})`);
     }
   }
 
@@ -135,7 +415,15 @@ export function validateCloudInitVariables(variables: CloudInitVariables): void 
 }
 
 /** Valid cloud provider values for cloud-init. */
-export const VALID_CLOUD_PROVIDERS = ['hetzner', 'scaleway', 'gcp'] as const;
+export const VALID_CLOUD_PROVIDERS = [
+  'hetzner',
+  'scaleway',
+  'gcp',
+  'vultr',
+  'infomaniak',
+  'digitalocean',
+  'upcloud',
+] as const;
 export type CloudProvider = (typeof VALID_CLOUD_PROVIDERS)[number];
 
 /**
@@ -147,7 +435,9 @@ export interface CloudInitVariables {
   controlPlaneUrl: string;
   jwksUrl: string;
   callbackToken: string;
-  /** Cloud provider (hetzner, scaleway, gcp). Used for provider-specific apt mirrors. */
+  /** Cloud provider (hetzner, scaleway, gcp, vultr, infomaniak). Used for provider-specific apt mirrors. */
+  /** Cloud provider (hetzner, scaleway, gcp, vultr, digitalocean). Used for provider-specific apt mirrors. */
+  /** Cloud provider (hetzner, scaleway, gcp, vultr, upcloud). Used for provider-specific apt mirrors. */
   provider?: string;
   /** journald SystemMaxUse (default: 500M) */
   logJournalMaxUse?: string;
@@ -165,16 +455,83 @@ export interface CloudInitVariables {
   taskMode?: string;
   /** Docker daemon DNS servers as JSON array content (default: "1.1.1.1", "8.8.8.8") */
   dockerDnsServers?: string;
-  /** Origin CA certificate PEM for TLS between CF edge and VM agent (nullable) */
-  originCaCert?: string;
-  /** Origin CA private key PEM for TLS (nullable) */
-  originCaKey?: string;
+  /** Node-scoped endpoint used at boot to sign a locally generated Origin CA CSR. */
+  originCaCertificateUrl?: string;
   /** VM agent port override (default: 8443 with TLS, 8080 without) */
   vmAgentPort?: string;
+  /** Immutable VM-agent release selected by the control-plane deployment. */
+  vmAgentRequiredVersion?: string;
   /** Timeout in seconds for fetching Cloudflare IP ranges at boot (default: 10) */
   cfIpFetchTimeout?: string;
   /** Enable opportunistic devcontainer image caching via GHCR (default: false) */
   devcontainerCacheEnabled?: string;
+  /** Concurrent devcontainer build slots on a workspace VM (default: 1). */
+  workspaceBuildQueueDepth?: string;
+  /** Swap file size in MB (default: 2048). Set to "0" to disable swap. */
+  swapSizeMb?: string;
+  /** Swap swappiness value 0-100 (default: 60). Only relevant when swap is enabled. */
+  swapSwappiness?: string;
+  /** Host memory reserve in MB subtracted from the Docker workload slice (default: 512). */
+  vmAgentMemoryReserveMb?: string;
+  /** Minimum memory protection for VM agent/system services in MB (default: 256). */
+  samInfraSliceMemoryMinMb?: string;
+  /** systemd CPUWeight for the vm-agent slice (cgroup v2 range 1-10000). */
+  samInfraSliceCpuWeight?: string;
+  /** systemd CPUWeight for the Docker workload slice (cgroup v2 range 1-10000). */
+  samWorkloadSliceCpuWeight?: string;
+  /** Minimum Docker MemoryMax value retained when reserve is enabled (default: 512). */
+  dockerMemoryMinMb?: string;
+  /** Bounded Docker stats timeout for heartbeat workspace metrics (default: 2s). */
+  heartbeatDockerStatsTimeout?: string;
+  /** Max workspace containers measured by each heartbeat (default: 8). */
+  heartbeatWorkspaceMetricsMaxContainers?: string;
+  /** Max bytes read from each heartbeat Docker CLI command (default: 65536). */
+  heartbeatWorkspaceMetricsMaxOutputBytes?: string;
+  /** VM agent role: 'workspace' (default) or 'deployment'. */
+  role?: string;
+  /** Deployment environment ID (required when role='deployment'). */
+  environmentId?: string;
+  /** Base64-encoded Ed25519 deploy signing public key for release verification. */
+  deploySigningPubKey?: string;
+  /** Contact email for ACME/Let's Encrypt account on deployment nodes. */
+  deployAcmeEmail?: string;
+  /** Optional ACME CA directory URL override for deployment nodes. */
+  deployAcmeCa?: string;
+  /** Docker Compose command override for deployment nodes. */
+  deployComposeCmd?: string;
+  /** Max time for deployment health checks, as Go duration string. */
+  deployHealthTimeout?: string;
+  /** Overall VM-agent checkpoint deadline, as a Go duration string (default: 15m). */
+  sessionSnapshotOperationTimeout?: string;
+  /** Min interval between VM-agent snapshot progress callbacks (default: 15s). */
+  sessionSnapshotProgressReportInterval?: string;
+  /** Timeout for each VM-agent snapshot progress callback (default: 5s). */
+  sessionSnapshotProgressReportTimeout?: string;
+  /** VM Agent durable error reporter tunables. */
+  errorReportFlushInterval?: string;
+  errorReportMaxBatchSize?: string;
+  errorReportMaxBatchBytes?: string;
+  errorReportMaxQueueSize?: string;
+  errorReportHttpTimeout?: string;
+  errorReportRetryInitial?: string;
+  errorReportRetryMax?: string;
+  errorReportMaxAttempts?: string;
+  errorReportDbPath?: string;
+  errorReportDbBusyTimeout?: string;
+  errorReportSpoolDir?: string;
+  errorReportArtifactMaxBytes?: string;
+  errorReportSpoolMaxBytes?: string;
+  errorReportRetention?: string;
+  errorReportCollectorTimeout?: string;
+  errorReportMaxCollectorDocs?: string;
+  errorReportMaxDocumentBytes?: string;
+  errorReportMaxValueDepth?: string;
+  errorReportMaxValueItems?: string;
+  errorReportMaxStringBytes?: string;
+  errorReportEventLimit?: string;
+  errorReportResponseMaxBytes?: string;
+  errorReportStoredErrorMaxBytes?: string;
+  errorReportCollectorConcurrency?: string;
 }
 
 /**
@@ -185,12 +542,16 @@ export interface GenerateCloudInitOptions {
   validateSize?: boolean;
 }
 
+function defaultWhenBlank(value: string | undefined, fallback: string): string {
+  return value === undefined || value === '' ? fallback : value;
+}
+
 /**
  * Generate cloud-init configuration from template with variables.
  */
 export function generateCloudInit(
   variables: CloudInitVariables,
-  options?: GenerateCloudInitOptions,
+  options?: GenerateCloudInitOptions
 ): string {
   validateCloudInitVariables(variables);
 
@@ -200,6 +561,9 @@ export function generateCloudInit(
     '{{ node_id }}': variables.nodeId,
     '{{ hostname }}': variables.hostname,
     '{{ control_plane_url }}': variables.controlPlaneUrl,
+    '{{ vm_agent_release_query }}': variables.vmAgentRequiredVersion
+      ? '&release=' + variables.vmAgentRequiredVersion
+      : '',
     '{{ jwks_url }}': variables.jwksUrl,
     '{{ callback_token }}': variables.callbackToken,
     '{{ log_journal_max_use }}': variables.logJournalMaxUse ?? '500M',
@@ -211,14 +575,74 @@ export function generateCloudInit(
     '{{ task_mode }}': variables.taskMode ?? 'task',
     '{{ docker_name_tag }}': '{{.Name}}',
     '{{ docker_dns_servers }}': variables.dockerDnsServers ?? '"1.1.1.1", "8.8.8.8"',
-    '{{ origin_ca_cert }}': indentForYamlBlock(variables.originCaCert ?? '', 6),
-    '{{ origin_ca_key }}': indentForYamlBlock(variables.originCaKey ?? '', 6),
-    '{{ vm_agent_port }}': variables.vmAgentPort ?? (variables.originCaCert ? '8443' : '8080'),
-    '{{ tls_cert_path }}': variables.originCaCert ? '/etc/sam/tls/origin-ca.pem' : '',
-    '{{ tls_key_path }}': variables.originCaCert ? '/etc/sam/tls/origin-ca-key.pem' : '',
+    '{{ vm_agent_port }}':
+      variables.vmAgentPort ?? (variables.originCaCertificateUrl ? '8443' : '8080'),
+    '{{ tls_cert_path }}': variables.originCaCertificateUrl ? '/etc/sam/tls/origin-ca.pem' : '',
+    '{{ tls_key_path }}': variables.originCaCertificateUrl ? '/etc/sam/tls/origin-ca-key.pem' : '',
+    '{{ origin_ca_certificate_url }}': variables.originCaCertificateUrl ?? '',
     '{{ cf_ip_fetch_timeout }}': variables.cfIpFetchTimeout ?? '10',
     '{{ provider }}': variables.provider ?? '',
     '{{ devcontainer_cache_enabled }}': variables.devcontainerCacheEnabled ?? 'false',
+    '{{ workspace_build_queue_depth }}': variables.workspaceBuildQueueDepth ?? '1',
+    '{{ swap_size_mb }}': variables.swapSizeMb ?? '2048',
+    '{{ swap_swappiness }}': variables.swapSwappiness ?? '60',
+    '{{ vm_agent_memory_reserve_mb }}': variables.vmAgentMemoryReserveMb ?? '512',
+    '{{ sam_infra_slice_memory_min_mb }}': variables.samInfraSliceMemoryMinMb ?? '256',
+    // The vm-agent shares the CPU with workload containers. Memory already has a
+    // reservation (MemoryMin above) because starvation there KILLS the agent;
+    // CPU had none, so a busy workspace could delay the heartbeat until the
+    // control plane declared the node dead. CFS weights are proportional and
+    // only apply under contention, so this costs nothing on an idle box: the
+    // agent's demand is tiny, it simply stops queueing behind builds.
+    '{{ sam_infra_slice_cpu_weight }}': defaultWhenBlank(variables.samInfraSliceCpuWeight, '1000'),
+    '{{ sam_workload_slice_cpu_weight }}': defaultWhenBlank(
+      variables.samWorkloadSliceCpuWeight,
+      '100'
+    ),
+    '{{ docker_memory_min_mb }}': variables.dockerMemoryMinMb ?? '512',
+    '{{ heartbeat_docker_stats_timeout }}': variables.heartbeatDockerStatsTimeout ?? '2s',
+    '{{ heartbeat_workspace_metrics_max_containers }}':
+      variables.heartbeatWorkspaceMetricsMaxContainers ?? '8',
+    '{{ heartbeat_workspace_metrics_max_output_bytes }}':
+      variables.heartbeatWorkspaceMetricsMaxOutputBytes ?? '65536',
+    '{{ role }}': variables.role ?? '',
+    '{{ environment_id }}': variables.environmentId ?? '',
+    '{{ deploy_signing_pub_key }}': variables.deploySigningPubKey ?? '',
+    '{{ deploy_acme_email }}': variables.deployAcmeEmail ?? '',
+    '{{ deploy_acme_ca }}': variables.deployAcmeCa ?? '',
+    '{{ deploy_compose_cmd }}': variables.deployComposeCmd ?? '',
+    '{{ deploy_health_timeout }}': variables.deployHealthTimeout ?? '',
+    '{{ session_snapshot_operation_timeout }}': variables.sessionSnapshotOperationTimeout ?? '15m',
+    '{{ session_snapshot_progress_report_interval }}':
+      variables.sessionSnapshotProgressReportInterval ?? '15s',
+    '{{ session_snapshot_progress_report_timeout }}':
+      variables.sessionSnapshotProgressReportTimeout ?? '5s',
+    '{{ error_report_flush_interval }}': variables.errorReportFlushInterval ?? '30s',
+    '{{ error_report_max_batch_size }}': variables.errorReportMaxBatchSize ?? '10',
+    '{{ error_report_max_batch_bytes }}': variables.errorReportMaxBatchBytes ?? '32768',
+    '{{ error_report_max_queue_size }}': variables.errorReportMaxQueueSize ?? '1000',
+    '{{ error_report_http_timeout }}': variables.errorReportHttpTimeout ?? '10s',
+    '{{ error_report_retry_initial }}': variables.errorReportRetryInitial ?? '1s',
+    '{{ error_report_retry_max }}': variables.errorReportRetryMax ?? '5m',
+    '{{ error_report_max_attempts }}': variables.errorReportMaxAttempts ?? '20',
+    '{{ error_report_db_path }}':
+      variables.errorReportDbPath ?? '/var/lib/vm-agent/error-reports.db',
+    '{{ error_report_db_busy_timeout }}': variables.errorReportDbBusyTimeout ?? '5s',
+    '{{ error_report_spool_dir }}':
+      variables.errorReportSpoolDir ?? '/var/lib/vm-agent/diagnostic-incidents',
+    '{{ error_report_artifact_max_bytes }}': variables.errorReportArtifactMaxBytes ?? '2097152',
+    '{{ error_report_spool_max_bytes }}': variables.errorReportSpoolMaxBytes ?? '20971520',
+    '{{ error_report_retention }}': variables.errorReportRetention ?? '24h',
+    '{{ error_report_collector_timeout }}': variables.errorReportCollectorTimeout ?? '10s',
+    '{{ error_report_max_collector_docs }}': variables.errorReportMaxCollectorDocs ?? '8',
+    '{{ error_report_max_document_bytes }}': variables.errorReportMaxDocumentBytes ?? '131072',
+    '{{ error_report_max_value_depth }}': variables.errorReportMaxValueDepth ?? '8',
+    '{{ error_report_max_value_items }}': variables.errorReportMaxValueItems ?? '256',
+    '{{ error_report_max_string_bytes }}': variables.errorReportMaxStringBytes ?? '4096',
+    '{{ error_report_event_limit }}': variables.errorReportEventLimit ?? '100',
+    '{{ error_report_response_max_bytes }}': variables.errorReportResponseMaxBytes ?? '4096',
+    '{{ error_report_stored_error_max_bytes }}': variables.errorReportStoredErrorMaxBytes ?? '512',
+    '{{ error_report_collector_concurrency }}': variables.errorReportCollectorConcurrency ?? '1',
   };
 
   // Use function replacement to prevent $-pattern interpretation in values.
@@ -232,7 +656,7 @@ export function generateCloudInit(
     if (!validateCloudInitSize(config)) {
       const sizeBytes = new TextEncoder().encode(config).length;
       throw new Error(
-        `Cloud-init config exceeds ${HETZNER_USER_DATA_MAX_BYTES / 1024}KB Hetzner user-data limit (${sizeBytes} bytes)`,
+        `Cloud-init config exceeds ${HETZNER_USER_DATA_MAX_BYTES / 1024}KB Hetzner user-data limit (${sizeBytes} bytes)`
       );
     }
   }
@@ -257,6 +681,31 @@ export function indentForYamlBlock(content: string, indent: number): string {
     .split('\n')
     .map((line, i) => (i === 0 ? line : pad + line))
     .join('\n');
+}
+
+function isValidDockerDnsServers(value: string): boolean {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(`[${value}]`);
+  } catch {
+    return false;
+  }
+
+  return Array.isArray(parsed) && parsed.length > 0 && parsed.every(isValidIpv4Address);
+}
+
+function isValidIpv4Address(value: unknown): boolean {
+  if (typeof value !== 'string') return false;
+
+  const octets = value.split('.');
+  return (
+    octets.length === 4 &&
+    octets.every((octet) => {
+      if (!/^\d{1,3}$/.test(octet)) return false;
+      const numeric = Number(octet);
+      return numeric >= 0 && numeric <= 255;
+    })
+  );
 }
 
 function escapeRegExp(str: string): string {

@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "auditedAt": "2026-08-11T00:00:00.000Z",
+  "scope": "apps/api/src",
+  "stage": "blocking",
+  "blockingEnabled": true,
+  "rules": {
+    "blind-external-payload-narrowing": 0,
+    "unvalidated-row-narrowing": 0
+  },
+  "totalDiagnostics": 0,
+  "fixtureTests": 3,
+  "sampleReview": {
+    "method": "first ten deterministic file-and-line ordered diagnostics (no diagnostics remain to sample)",
+    "sampleSize": 0,
+    "potentialFalsePositives": 0,
+    "potentialFalsePositivePercent": 0
+  },
+  "decision": {
+    "promote": true,
+    "reason": "Promotion criteria met 2026-08-11 (ai-slop debt burn-down, tasks/archive/2026-08-10-ai-slop-debt-burndown.md): both rules were driven to 0 diagnostics in apps/api/src. The prior 20% sampled false-positive-rate concern from the 45-diagnostic baseline is moot against a clean slate — there is nothing left to sample. check-runtime-boundary-semantics.ts now reads blockingEnabled+scope from this file and fails pnpm quality:runtime-boundary-semantics (nonzero exit) on any new diagnostic in apps/api/src, without requiring the --fail-on-findings flag."
+  }
+}

@@ -1,5 +1,19 @@
 # Fork Dialog UI Polish
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** none of the five items as written; four targeted UI that no longer exists (below).
+> - **Still open:** a visible close button in the `MobileSessionDrawer` header
+>   (`apps/web/src/pages/project-chat/MobileSessionDrawer.tsx:114-146`). The drawer still closes
+>   only by backdrop tap (`:100-104`) or Escape (`:86-92`).
+> - **Moot/dropped:**
+>   - Continue-button touch target and disabled-Continue tooltip: the button was removed from
+>     session items in PR #1477 (`c8946c46e`); fork now lives in the session header.
+>   - Summary `method` tooltip and the 375px ForkDialog check: `ForkDialog` was deleted in PR #991
+>     (`6e4c33e21`), and `DerivedSessionBanner.tsx` does not show the method.
+>   - The 56px touch-target minimum also conflicts with `apps/web` rule 17, which no longer asks
+>     for enlarged touch targets.
+
 **Created**: 2026-03-14
 **Source**: UI/UX review of PR #376 (conversation forking)
 

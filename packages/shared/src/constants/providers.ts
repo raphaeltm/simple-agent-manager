@@ -1,4 +1,4 @@
-import { CREDENTIAL_PROVIDERS,type CredentialProvider } from '../types';
+import { CREDENTIAL_PROVIDERS, type CredentialProvider } from '../types';
 
 // =============================================================================
 // Provider Display Labels
@@ -9,6 +9,10 @@ export const PROVIDER_LABELS: Record<CredentialProvider, string> = {
   hetzner: 'Hetzner',
   scaleway: 'Scaleway',
   gcp: 'Google Cloud',
+  vultr: 'Vultr',
+  infomaniak: 'Infomaniak Public Cloud',
+  digitalocean: 'DigitalOcean',
+  upcloud: 'UpCloud',
 };
 
 /** Provider console URLs and help text for onboarding / credential setup. */
@@ -22,7 +26,8 @@ export const PROVIDER_HELP: Record<CredentialProvider, ProviderHelpMeta> = {
   hetzner: {
     description: 'European cloud, great value',
     helpUrl: 'https://console.hetzner.cloud/projects',
-    helpText: 'Go to your project \u2192 Security \u2192 API Tokens \u2192 Generate API Token (Read & Write)',
+    helpText:
+      'Go to your project \u2192 Security \u2192 API Tokens \u2192 Generate API Token (Read & Write)',
   },
   scaleway: {
     description: 'European cloud, GPU options',
@@ -33,6 +38,30 @@ export const PROVIDER_HELP: Record<CredentialProvider, ProviderHelpMeta> = {
     description: 'Google Cloud Platform',
     helpUrl: 'https://console.cloud.google.com/iam-admin/serviceaccounts',
     helpText: 'Set up Workload Identity Federation or create a service account key',
+  },
+  vultr: {
+    description: 'Global cloud, hourly billing',
+    helpUrl: 'https://my.vultr.com/settings/#settingsapi',
+    helpText:
+      'Go to Account → API, enable API access, and set Access Control to "Allow All IPv4/IPv6" (SAM calls from Cloudflare with no fixed IP), then copy your Personal Access Token',
+  },
+  infomaniak: {
+    description: 'Swiss OpenStack cloud',
+    helpUrl: 'https://docs.infomaniak.cloud/identity/applications_credentials/',
+    helpText:
+      'Create an application credential with reader and member roles (both are required in dc4-a), then copy its ID and one-time secret',
+  },
+  digitalocean: {
+    description: 'Global cloud, simple droplets',
+    helpUrl: 'https://cloud.digitalocean.com/account/api/tokens',
+    helpText:
+      'Go to API → Tokens/Keys → Generate New Token with Full Access (or custom scopes covering droplet, block_storage, tag, image, region, size, account, and actions), then copy your Personal Access Token',
+  },
+  upcloud: {
+    description: 'European cloud with global regions',
+    helpUrl: 'https://hub.upcloud.com/people/accounts',
+    helpText:
+      'Create a dedicated API subaccount with server and storage permissions, then enter its username and password',
   },
 };
 
@@ -76,6 +105,45 @@ export const PROVIDER_LOCATIONS: Record<CredentialProvider, LocationMeta[]> = {
     { id: 'asia-southeast1-a', name: 'Singapore', country: 'SG' },
     { id: 'asia-northeast1-a', name: 'Tokyo', country: 'JP' },
   ],
+  vultr: [
+    { id: 'fra', name: 'Frankfurt', country: 'DE' },
+    { id: 'ams', name: 'Amsterdam', country: 'NL' },
+    { id: 'lhr', name: 'London', country: 'GB' },
+    { id: 'ewr', name: 'New Jersey', country: 'US' },
+    { id: 'ord', name: 'Chicago', country: 'US' },
+    { id: 'lax', name: 'Los Angeles', country: 'US' },
+    { id: 'nrt', name: 'Tokyo', country: 'JP' },
+    { id: 'sgp', name: 'Singapore', country: 'SG' },
+    { id: 'syd', name: 'Sydney', country: 'AU' },
+  ],
+  infomaniak: [
+    { id: 'dc4-a', name: 'Geneva DC4', country: 'CH' },
+    { id: 'dc3-a', name: 'Geneva DC3', country: 'CH' },
+  ],
+  digitalocean: [
+    { id: 'fra1', name: 'Frankfurt', country: 'DE' },
+    { id: 'ams3', name: 'Amsterdam', country: 'NL' },
+    { id: 'lon1', name: 'London', country: 'GB' },
+    { id: 'nyc1', name: 'New York 1', country: 'US' },
+    { id: 'nyc3', name: 'New York 3', country: 'US' },
+    { id: 'sfo3', name: 'San Francisco', country: 'US' },
+    { id: 'tor1', name: 'Toronto', country: 'CA' },
+    { id: 'sgp1', name: 'Singapore', country: 'SG' },
+    { id: 'blr1', name: 'Bangalore', country: 'IN' },
+    { id: 'syd1', name: 'Sydney', country: 'AU' },
+  ],
+  upcloud: [
+    { id: 'de-fra1', name: 'Frankfurt', country: 'DE' },
+    { id: 'fi-hel1', name: 'Helsinki 1', country: 'FI' },
+    { id: 'fi-hel2', name: 'Helsinki 2', country: 'FI' },
+    { id: 'nl-ams1', name: 'Amsterdam', country: 'NL' },
+    { id: 'uk-lon1', name: 'London', country: 'GB' },
+    { id: 'us-chi1', name: 'Chicago', country: 'US' },
+    { id: 'us-nyc1', name: 'New York', country: 'US' },
+    { id: 'us-sjo1', name: 'San Jose', country: 'US' },
+    { id: 'sg-sin1', name: 'Singapore', country: 'SG' },
+    { id: 'au-syd1', name: 'Sydney', country: 'AU' },
+  ],
 };
 
 /** Default location per provider. */
@@ -83,7 +151,47 @@ export const PROVIDER_DEFAULT_LOCATIONS: Record<CredentialProvider, string> = {
   hetzner: 'fsn1',
   scaleway: 'fr-par-1',
   gcp: 'us-central1-a',
+  vultr: 'fra',
+  infomaniak: 'dc4-a',
+  digitalocean: 'fra1',
+  upcloud: 'de-fra1',
 };
+
+// =============================================================================
+// BYOC compute credential gating (DRY helper for the has-cloud onboarding gates)
+// =============================================================================
+
+/**
+ * BYOC compute providers that count as "a cloud provider is connected"
+ * for the onboarding / has-cloud-provider gates. A connected credential for
+ * any of these makes the user immediately provisionable.
+ *
+ * GCP is intentionally EXCLUDED: it requires a multi-step Workload Identity
+ * Federation handshake, and its has-cloud gating is a pre-existing question tracked
+ * separately (tasks/backlog/2026-07-23-credential-routes-preexisting-hardening.md).
+ * Do not add GCP here without addressing that follow-up.
+ */
+export const TOKEN_COMPUTE_PROVIDERS = [
+  'hetzner',
+  'scaleway',
+  'vultr',
+  'infomaniak',
+  'digitalocean',
+  'upcloud',
+] as const;
+
+/**
+ * True when the credential list contains at least one BYOC compute credential
+ * (Hetzner / Scaleway / Vultr / Infomaniak / DigitalOcean / UpCloud). Excludes GCP by design — see
+ * TOKEN_COMPUTE_PROVIDERS. Shared by every "does the user have a cloud provider"
+ * onboarding gate so the provider set lives in exactly one place.
+ */
+export function hasByocComputeCredential(
+  credentials: ReadonlyArray<{ provider: string }>
+): boolean {
+  const providers = TOKEN_COMPUTE_PROVIDERS as readonly string[];
+  return credentials.some((c) => providers.includes(c.provider));
+}
 
 /** Flat lookup of all locations (derived from PROVIDER_LOCATIONS). */
 export const VM_LOCATIONS: Record<string, { name: string; country: string }> = Object.fromEntries(
@@ -108,6 +216,9 @@ export function getDefaultLocationForProvider(provider: CredentialProvider): str
 }
 
 /** Check if a location is valid for the given provider. */
-export function isValidLocationForProvider(provider: CredentialProvider, location: string): boolean {
+export function isValidLocationForProvider(
+  provider: CredentialProvider,
+  location: string
+): boolean {
   return PROVIDER_LOCATIONS[provider].some((loc) => loc.id === location);
 }

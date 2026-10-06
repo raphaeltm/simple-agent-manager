@@ -1,0 +1,69 @@
+# Deployment Provisioning Route-Level Behavioral Tests + Resilience
+
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:**
+>   - Gap 1: route-level tests for first release, existing node, null return and throw
+>     (`apps/api/tests/unit/routes/deployment-release-provisioning.test.ts:389,446,709,728`,
+>     PR #1312). No `readFileSync` remains in `deployment-provisioning.test.ts`.
+>   - Gap 4: `nodeId` rolls back when provisioning fails, with tests
+>     (`apps/api/tests/unit/deployment-provisioning.test.ts:541,561`).
+> - **Still open:**
+>   - Gap 3: the workspace-creation quota check is still a `readFileSync` source-contract test
+>     (`apps/api/tests/unit/node-role-exemption.test.ts:174-190`, also `:114-160`).
+>   - Gap 5: credential-tier tests. Provisioning now goes through
+>     `resolveCanonicalVmAllocationPlan` and shared tier tests exist
+>     (`resolve-credential-source.test.ts:150-245`); confirm the deployment path is covered.
+> - **Moot/dropped:** Gap 2 (DNS skip). PR #1356 removed the skip, so deployment nodes now
+>   create backend DNS records (`apps/api/src/services/node-provisioning.ts:620-626`). The test
+>   named "…triggers DNS skip" (`deployment-provisioning.test.ts:688`) is now misnamed.
+
+**Created**: 2026-06-12
+**Source**: Late-arriving test-engineer, security-auditor, cloudflare-specialist, and task-completion-validator reviews on PR #1302 (deployment node provisioning)
+**Priority**: MEDIUM
+
+## Problem
+
+The deployment provisioning service (`deployment-provisioning.ts`) has solid behavioral tests, but the route-level provisioning trigger in `deployment-releases.ts` (lines 248-279) lacks behavioral test coverage. The existing tests for the route use source-contract patterns (reading source as string + `toContain()`), which are banned by rule 02 for behavioral code.
+
+Additionally, the security auditor identified a resilience gap: if `provisionNode` fails inside the `.catch()`, the environment keeps a stale `nodeId` pointing to a node stuck in `creating` state, preventing re-provisioning on subsequent releases.
+
+## Gaps to Address
+
+1. **Replace source-contract tests with behavioral tests** for the provisioning trigger in the release route:
+   - First release to an environment without a node triggers `provisionDeploymentNode()`
+   - Second release to an environment that already has a node does NOT re-provision
+   - `provisionDeploymentNode` returning `null` (no credentials) still returns 201 with `nodeId: null`
+   - `provisionDeploymentNode` throwing still returns 201 (error is caught and logged)
+
+2. **Replace source-contract DNS skip test** with a spy-based behavioral test asserting `createNodeBackendDNSRecord` is not called when `deploymentContext` is set.
+
+3. **Replace workspace-creation quota source-contract test** with a behavioral mock test.
+
+4. **Roll back `nodeId` on provisioning failure** (security-auditor finding): When `provisionNode` rejects inside the `.catch()` in `deployment-provisioning.ts`, issue `UPDATE deploymentEnvironments SET nodeId = NULL WHERE id = envId` so subsequent release submissions can re-trigger provisioning. Without this, a provisioning failure permanently orphans the environment.
+
+5. **Add credential discrimination tests** (task-completion-validator finding, per rule 28):
+   - Inactive user credential + active platform credential → platform credential used (inactive does not fall through)
+   - Both user credential and platform credential present → user credential wins (priority ordering)
+
+## What Is NOT a Gap (Reviewer Errors Across All 4 Reviews)
+
+- The env-to-node link update IS asserted in "links environment to node via conditional UPDATE" test
+- The DNS skip IS tested behaviorally via deployment context assertion on `provisionNode`
+- The heartbeat IDOR was already fixed in commit fa1a5452 (resolves envId from node placement, not request body)
+- The FK ON DELETE SET NULL and node_id index were already added in commit fa1a5452
+- The concurrent-release race was already fixed with conditional UPDATE WHERE node_id IS NULL
+- `live-restore: true` was already added to Docker daemon.json in commit fa1a5452
+- Staging verification WAS completed during Phase 6 (deploy, auth, release submission, node verification, heartbeat, DNS skip, cleanup)
+
+## Acceptance Criteria
+
+- [ ] All source-contract tests in `deployment-provisioning.test.ts` replaced with behavioral `app.request()` tests
+- [ ] Route-level test covers first-release provisioning trigger
+- [ ] Route-level test covers skip-provisioning-when-node-exists branch
+- [ ] Route-level test covers null-return and throw paths
+- [ ] DNS skip tested with spy on `createNodeBackendDNSRecord`
+- [ ] Provisioning failure rolls back environment `nodeId` to NULL
+- [ ] Test covers provisioning-failure rollback behavior
+- [ ] Credential discrimination tests added per rule 28 (inactive-doesn't-fall-through, user-beats-platform)
+- [ ] All tests pass

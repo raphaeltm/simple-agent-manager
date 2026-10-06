@@ -1,5 +1,31 @@
 # Simplify Shared Packages
 
+> **Reconciliation 2026-10-05:** #2225 (9ef726c20) deleted the unused `AGENT_PERMISSION_MODE_DESCRIPTIONS`. Only `AGENT_PERMISSION_MODE_LABELS` remains (`packages/shared/src/constants/agent-settings.ts:24-30`), so the labels/descriptions merge is done. Still open:
+>
+> - Move the computed `isIdle`, `isTerminated` and `workspaceUrl` out of the API response type (`packages/shared/src/types/session.ts:23-27`).
+> - Decide `toolMetadata`: `z.string()` at `vm-agent-contract.ts:202` vs a Record at `types/session.ts:62`.
+> - Remove the `HETZNER_IMAGE` alias (`constants/hetzner.ts:20-21`).
+> - Remove the positional-args overload (`packages/acp-client/src/transport/websocket.ts:91-128`).
+
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:**
+>   - `types.ts` split into `packages/shared/src/types/*` with a barrel (PR #588, e5d155c7e).
+>   - Hetzner no longer inlines cloud-init; it passes `config.userData`
+>     (`packages/providers/src/hetzner-server-create.ts:207`; 714ebee9b).
+>   - `serverSessionId` is on the terminal session type
+>     (`packages/terminal/src/types/multi-terminal.ts:43`); no `as any` left in the package.
+> - **Still open:**
+>   - Move computed `isIdle`, `isTerminated` and `workspaceUrl` out of the API response type
+>     (`packages/shared/src/types/session.ts:22-27`).
+>   - Decide on `toolMetadata`: `z.string()` in `vm-agent-contract.ts:193` vs a Record in
+>     `session.ts:62` (possibly an intentional wire-vs-parsed split; document it either way).
+>   - Remove the unused `HETZNER_IMAGE` alias (`constants/hetzner.ts:20-21`) and the
+>     positional-args overload in `packages/acp-client/src/transport/websocket.ts:94-115`; merge
+>     `AGENT_PERMISSION_MODE_LABELS`/`_DESCRIPTIONS` (`constants/agent-settings.ts:12,21`).
+> - **Moot/dropped:** the Tokyo Night palette dedupe; `semantic-tokens.ts` was deleted in PR #1239
+>   (0c3f3e3be).
+
 **Status:** backlog
 **Priority:** medium
 **Estimated Effort:** 3 days

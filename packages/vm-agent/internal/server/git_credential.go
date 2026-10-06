@@ -8,16 +8,23 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/workspace/vm-agent/internal/gitrepo"
 )
 
 type gitTokenResponse struct {
+	Provider  string `json:"provider,omitempty"`
 	Token     string `json:"token"`
 	ExpiresAt string `json:"expiresAt"`
 	// CloneURL is set for Artifacts-backed projects. Empty for GitHub projects.
-	CloneURL string `json:"cloneUrl,omitempty"`
+	CloneURL       string `json:"cloneUrl,omitempty"`
+	Host           string `json:"host,omitempty"`
+	Username       string `json:"username,omitempty"`
+	RepositoryPath string `json:"repositoryPath,omitempty"`
 }
 
 func (s *Server) handleGitCredential(w http.ResponseWriter, r *http.Request) {
@@ -26,12 +33,37 @@ func (s *Server) handleGitCredential(w http.ResponseWriter, r *http.Request) {
 		workspaceID = strings.TrimSpace(s.routedWorkspaceID(r))
 	}
 
-	if !s.isValidCallbackAuth(r, workspaceID) {
+	if !isAuthorizedGitCredentialRequest(s, r, workspaceID) {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	bearerToken := bearerTokenFromHeader(r.Header.Get("Authorization"))
+	requestedHost := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("host")))
+	requestedPath := strings.TrimSpace(r.URL.Query().Get("path"))
+	// GitLab-bound workspaces vend a broad user OAuth token, so the exchange is
+	// fail-closed: the caller must identify both the host and the repository path
+	// it is requesting credentials for. GitHub/Artifacts keep the empty-allow
+	// behavior because the gh wrapper flow sends host=github.com with no path.
+	boundProvider, _ := s.credentialPathBinding(workspaceID)
+	if strings.EqualFold(boundProvider, "gitlab") && (requestedHost == "" || requestedPath == "") {
+		slog.Warn("Git credential request refused: gitlab-bound workspace requires host and path",
+			"workspaceID", workspaceID,
+			"hasHost", requestedHost != "",
+			"hasPath", requestedPath != "",
+		)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if requestedHost != "" && !s.isAllowedCredentialHostForWorkspace(workspaceID, requestedHost) {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if requestedPath != "" && !s.isAllowedCredentialPathForWorkspace(workspaceID, requestedPath) {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
 	resp, err := s.fetchGitTokenResponseForWorkspace(r.Context(), workspaceID, bearerToken)
 	if err != nil {
 		slog.Error("Failed to fetch git token", "error", err)
@@ -43,19 +75,125 @@ func (s *Server) handleGitCredential(w http.ResponseWriter, r *http.Request) {
 	// Artifacts clone URLs use username "x"; GitHub uses "x-access-token".
 	host := "github.com"
 	username := "x-access-token"
+	repositoryPath := strings.TrimSpace(resp.RepositoryPath)
 	if resp.CloneURL != "" {
 		if parsed, parseErr := url.Parse(resp.CloneURL); parseErr == nil && parsed.Host != "" {
 			host = parsed.Host
-			h := strings.ToLower(parsed.Host)
-			if h == "artifacts.cloudflare.net" || strings.HasSuffix(h, ".artifacts.cloudflare.net") {
+			if gitrepo.IsArtifactsHost(parsed.Host) {
 				username = "x"
 			}
+			if repositoryPath == "" {
+				repositoryPath = strings.Trim(strings.TrimSuffix(parsed.Path, ".git"), "/")
+			}
 		}
+	}
+	if resp.Host != "" {
+		host = strings.ToLower(strings.TrimSpace(resp.Host))
+	}
+	if resp.Username != "" {
+		username = strings.TrimSpace(resp.Username)
+	}
+
+	// Response-side fail-closed gate for GitLab credentials: regardless of what
+	// the local binding said pre-fetch, a GitLab token is only released when the
+	// caller supplied a host and path AND both verifiably match the credential
+	// the control plane resolved. An empty resolved repositoryPath means we
+	// cannot verify the binding — refuse rather than vend a broad OAuth token.
+	gitlabResponse := strings.EqualFold(strings.TrimSpace(resp.Provider), "gitlab")
+	if gitlabResponse && (requestedHost == "" || requestedPath == "" || repositoryPath == "") {
+		slog.Warn("Git credential response withheld: gitlab credential requires verified host and path",
+			"workspaceID", workspaceID,
+			"hasRequestedHost", requestedHost != "",
+			"hasRequestedPath", requestedPath != "",
+			"hasResolvedPath", repositoryPath != "",
+		)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if requestedHost != "" && !credentialHostMatchesRequest(host, requestedHost) {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if requestedPath != "" && repositoryPath != "" && !credentialPathMatchesRequest(repositoryPath, requestedPath) {
+		w.WriteHeader(http.StatusNoContent)
+		return
 	}
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = fmt.Fprintf(w, "protocol=https\nhost=%s\nusername=%s\npassword=%s\n\n", host, username, resp.Token)
+}
+
+func credentialHostMatchesRequest(resolvedHost, requestedHost string) bool {
+	resolvedHost = strings.ToLower(strings.TrimSpace(resolvedHost))
+	requestedHost = strings.ToLower(strings.TrimSpace(requestedHost))
+	if requestedHost == "" {
+		return true
+	}
+	if gitrepo.IsGitHubCredentialHost(resolvedHost) {
+		return gitrepo.IsGitHubCredentialHost(requestedHost)
+	}
+	if gitrepo.IsArtifactsHost(resolvedHost) {
+		return requestedHost == resolvedHost
+	}
+	return requestedHost == resolvedHost
+}
+
+func (s *Server) isAllowedCredentialHostForWorkspace(workspaceID, requestedHost string) bool {
+	requestedHost = strings.ToLower(strings.TrimSpace(requestedHost))
+	if requestedHost == "" || gitrepo.IsKnownGitHost(requestedHost) {
+		return true
+	}
+	if runtime, ok := s.getWorkspaceRuntime(workspaceID); ok {
+		return strings.EqualFold(strings.TrimSpace(runtime.RepositoryHost), requestedHost)
+	}
+	return strings.EqualFold(strings.TrimSpace(s.config.RepositoryHost), requestedHost)
+}
+
+func (s *Server) isAllowedCredentialPathForWorkspace(workspaceID, requestedPath string) bool {
+	requestedPath = strings.TrimSpace(requestedPath)
+	if requestedPath == "" {
+		return true
+	}
+	// Resolve the provider/path this workspace is bound to. When the workspace is
+	// not registered in the runtime map (standalone single-workspace mode, or a
+	// request racing with runtime setup), fall back to the process config instead
+	// of failing open — mirroring isAllowedCredentialHostForWorkspace.
+	provider, repositoryPath := s.credentialPathBinding(workspaceID)
+	if !strings.EqualFold(provider, "gitlab") {
+		return true
+	}
+	// Fail closed: a gitlab-bound workspace with no bound repository path cannot
+	// verify the request, so refuse rather than vend a broad user OAuth token.
+	// (The response-side gate re-checks this against the control-plane-resolved
+	// path, but the pre-fetch gate must not be the weaker of the two.)
+	if repositoryPath == "" {
+		slog.Warn("Git credential path check refused: gitlab-bound workspace has no bound repository path",
+			"workspaceID", workspaceID,
+		)
+		return false
+	}
+	return credentialPathMatchesRequest(repositoryPath, requestedPath)
+}
+
+func (s *Server) credentialPathBinding(workspaceID string) (provider, repositoryPath string) {
+	if runtime, ok := s.getWorkspaceRuntime(workspaceID); ok {
+		return strings.TrimSpace(runtime.RepoProvider), strings.TrimSpace(runtime.RepositoryPath)
+	}
+	return strings.TrimSpace(s.config.RepoProvider), strings.TrimSpace(s.config.RepositoryPath)
+}
+
+func credentialPathMatchesRequest(repositoryPath, requestedPath string) bool {
+	normalize := func(path string) string {
+		path = strings.TrimSpace(path)
+		path = strings.TrimPrefix(path, "/")
+		path = strings.TrimSuffix(path, ".git")
+		path = strings.TrimSuffix(path, "/")
+		return strings.ToLower(path)
+	}
+	repositoryPath = normalize(repositoryPath)
+	requestedPath = normalize(requestedPath)
+	return repositoryPath != "" && requestedPath != "" && repositoryPath == requestedPath
 }
 
 func (s *Server) fetchGitToken(ctx context.Context) (string, error) {
@@ -114,7 +252,7 @@ func (s *Server) fetchGitTokenResponseForWorkspace(ctx context.Context, workspac
 		return nil, fmt.Errorf("git-token: read response body: %w", err)
 	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return nil, fmt.Errorf("git-token endpoint returned HTTP %d: %s", res.StatusCode, strings.TrimSpace(string(body)))
+		return nil, fmt.Errorf("git-token endpoint returned HTTP %d (response body %d bytes)", res.StatusCode, len(body))
 	}
 
 	var payload gitTokenResponse
@@ -133,6 +271,50 @@ func bearerTokenFromHeader(authHeader string) string {
 		return ""
 	}
 	return strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+}
+
+func isLocalGitCredentialExchange(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(strings.TrimSpace(host))
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate()
+}
+
+func isAuthorizedGitCredentialRequest(s *Server, r *http.Request, workspaceID string) bool {
+	if bearerTokenFromHeader(r.Header.Get("Authorization")) != "" {
+		return s.isValidCallbackAuth(r, workspaceID)
+	}
+	return isLocalGitCredentialExchange(r) && isKnownWorkspaceGitCredentialRequest(s, workspaceID)
+}
+
+// isKnownWorkspaceGitCredentialRequest authorizes a bearerless loopback credential
+// exchange for ANY workspace currently running on this node — the node's primary
+// workspace and every secondary workspace registered in the runtime map are treated
+// equally. The control-plane exchange still returns a tightly scoped (per-workspace,
+// ~1h, owner-scoped) token covering only the project's primary repository plus any
+// explicitly granted additional repositories, so equal treatment here does not widen
+// the blast radius: it only lets each running workspace refresh its own token over the
+// loopback interface. An empty workspace id defaults to the node's primary so the
+// single-workspace host path is unchanged.
+func isKnownWorkspaceGitCredentialRequest(s *Server, workspaceID string) bool {
+	requestedWorkspaceID := strings.TrimSpace(workspaceID)
+	primaryWorkspaceID := strings.TrimSpace(s.config.WorkspaceID)
+	if requestedWorkspaceID == "" {
+		requestedWorkspaceID = primaryWorkspaceID
+	}
+	if requestedWorkspaceID == "" {
+		return false
+	}
+	if primaryWorkspaceID != "" && requestedWorkspaceID == primaryWorkspaceID {
+		return true
+	}
+	_, ok := s.getWorkspaceRuntime(requestedWorkspaceID)
+	return ok
 }
 
 func (s *Server) isValidCallbackAuth(r *http.Request, workspaceID string) bool {
@@ -177,10 +359,10 @@ func (s *Server) callbackAuthCandidates(workspaceID string) []callbackAuthCandid
 	if workspaceID == "" {
 		return candidates
 	}
-	if runtime, ok := s.getWorkspaceRuntime(workspaceID); ok {
+	if token, ok := s.lookupWorkspaceCallbackToken(workspaceID); ok {
 		candidates = append(candidates, callbackAuthCandidate{
 			source: "workspace",
-			token:  strings.TrimSpace(runtime.CallbackToken),
+			token:  token,
 		})
 	}
 	return candidates

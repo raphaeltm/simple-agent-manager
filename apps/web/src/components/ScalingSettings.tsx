@@ -1,4 +1,8 @@
-import type { CredentialProvider, Project, UpdateProjectRequest } from '@simple-agent-manager/shared';
+import type {
+  CredentialProvider,
+  Project,
+  UpdateProjectRequest,
+} from '@simple-agent-manager/shared';
 import {
   DEFAULT_NODE_WARM_TIMEOUT_MS,
   MAX_NODE_IDLE_TIMEOUT_MS,
@@ -10,10 +14,12 @@ import {
   type ScalingParamMeta,
 } from '@simple-agent-manager/shared';
 import { Button } from '@simple-agent-manager/ui';
-import { useCallback,useEffect, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 
+import { useCredentials } from '../hooks/useCredentials';
+import { useQueryScope } from '../hooks/useQueryScope';
 import { useToast } from '../hooks/useToast';
-import { listCredentials,updateProject } from '../lib/api';
+import { updateProject } from '../lib/api';
 
 /** Format milliseconds as a human-readable duration. */
 function formatMs(ms: number): string {
@@ -42,13 +48,19 @@ function ScalingField({
       : meta.unit === 'percent'
         ? `${meta.defaultValue}%`
         : String(meta.defaultValue);
+  const fieldId = useId();
 
   return (
     <div className="flex items-center gap-2">
-      <label className="text-xs text-fg-muted flex-1 min-w-0" title={`Env: ${meta.envVar}`}>
+      <label
+        htmlFor={fieldId}
+        className="text-xs text-fg-muted flex-1 min-w-0"
+        title={`Env: ${meta.envVar}`}
+      >
         {meta.label}
       </label>
       <input
+        id={fieldId}
         type="number"
         min={meta.min}
         max={meta.max}
@@ -94,6 +106,7 @@ export function ScalingSettings({
   reload: () => Promise<void>;
 }) {
   const toast = useToast();
+  const nodeIdleTimeoutId = useId();
 
   // Provider & Location state
   const [selectedProvider, setSelectedProvider] = useState<CredentialProvider | null>(
@@ -102,7 +115,14 @@ export function ScalingSettings({
   const [selectedLocation, setSelectedLocation] = useState<string | null>(
     project.defaultLocation ?? null
   );
-  const [configuredProviders, setConfiguredProviders] = useState<CredentialProvider[]>([]);
+  // Derived from the shared credentials query rather than a local mount fetch — this
+  // is the same list the settings pages and workspace creation already load.
+  const queryScope = useQueryScope();
+  const { credentials } = useCredentials(queryScope);
+  const configuredProviders = useMemo<CredentialProvider[]>(
+    () => [...new Set(credentials.filter((c) => c.connected).map((c) => c.provider))],
+    [credentials]
+  );
   const [savingLocation, setSavingLocation] = useState(false);
 
   // Scaling params state
@@ -118,19 +138,6 @@ export function ScalingSettings({
   );
   const [savingScaling, setSavingScaling] = useState(false);
 
-  // Fetch configured providers
-  useEffect(() => {
-    listCredentials()
-      .then((creds) => {
-        const providers = [...new Set(
-          creds
-            .filter((c) => c.connected)
-            .map((c) => c.provider)
-        )];
-        setConfiguredProviders(providers);
-      })
-      .catch((err: unknown) => { console.error('Failed to load credentials', err); });
-  }, []);
 
   // Sync from project prop
   useEffect(() => {
@@ -158,7 +165,8 @@ export function ScalingSettings({
     } finally {
       setSavingLocation(false);
     }
-  }, [projectId, selectedProvider, selectedLocation, reload, toast]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- toast removed per stale-while-revalidate rule
+  }, [projectId, selectedProvider, selectedLocation, reload]);
 
   const handleSaveScaling = useCallback(async () => {
     setSavingScaling(true);
@@ -172,17 +180,28 @@ export function ScalingSettings({
     } finally {
       setSavingScaling(false);
     }
-  }, [projectId, scalingValues, nodeIdleTimeoutMs, reload, toast]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- toast removed per stale-while-revalidate rule
+  }, [projectId, scalingValues, nodeIdleTimeoutMs, reload]);
 
   const locations = selectedProvider ? (PROVIDER_LOCATIONS[selectedProvider] ?? []) : [];
 
   // Task limit params
   const taskParams = SCALING_PARAMS.filter((p) =>
-    ['taskExecutionTimeoutMs', 'maxConcurrentTasks', 'maxDispatchDepth', 'maxSubTasksPerTask'].includes(p.key)
+    [
+      'taskExecutionTimeoutMs',
+      'maxConcurrentTasks',
+      'maxDispatchDepth',
+      'maxSubTasksPerTask',
+      'maxTriggers',
+    ].includes(p.key)
   );
   // Node scheduling params
   const nodeParams = SCALING_PARAMS.filter((p) =>
-    ['warmNodeTimeoutMs', 'maxWorkspacesPerNode', 'nodeCpuThresholdPercent', 'nodeMemoryThresholdPercent'].includes(p.key)
+    [
+      'warmNodeTimeoutMs',
+      'nodeCpuThresholdPercent',
+      'nodeMemoryThresholdPercent',
+    ].includes(p.key)
   );
 
   return (
@@ -190,7 +209,8 @@ export function ScalingSettings({
       <div>
         <h2 className="sam-type-section-heading m-0 text-fg-primary">Scaling & Scheduling</h2>
         <p className="m-0 mt-1 text-xs text-fg-muted">
-          Override platform defaults for this project. Empty fields use the platform default shown as placeholder.
+          Override platform defaults for this project. Empty fields use the platform default shown
+          as placeholder.
         </p>
       </div>
 
@@ -283,10 +303,11 @@ export function ScalingSettings({
         ))}
         {/* Node Idle Timeout — existing dead column, now wired up */}
         <div className="flex items-center gap-2">
-          <label className="text-xs text-fg-muted flex-1 min-w-0">
+          <label htmlFor={nodeIdleTimeoutId} className="text-xs text-fg-muted flex-1 min-w-0">
             Node Idle Timeout
           </label>
           <input
+            id={nodeIdleTimeoutId}
             type="number"
             min={MIN_NODE_IDLE_TIMEOUT_MS}
             max={MAX_NODE_IDLE_TIMEOUT_MS}
@@ -301,7 +322,9 @@ export function ScalingSettings({
           />
           {nodeIdleTimeoutMs != null && (
             <>
-              <span className="text-xs text-fg-muted min-w-[3rem]">{formatMs(nodeIdleTimeoutMs)}</span>
+              <span className="text-xs text-fg-muted min-w-[3rem]">
+                {formatMs(nodeIdleTimeoutMs)}
+              </span>
               <button
                 type="button"
                 onClick={() => setNodeIdleTimeoutMs(null)}
@@ -314,12 +337,7 @@ export function ScalingSettings({
         </div>
       </div>
 
-      <Button
-        variant="primary"
-        size="sm"
-        onClick={handleSaveScaling}
-        disabled={savingScaling}
-      >
+      <Button variant="primary" size="sm" onClick={handleSaveScaling} disabled={savingScaling}>
         {savingScaling ? 'Saving...' : 'Save Scaling Settings'}
       </Button>
     </section>

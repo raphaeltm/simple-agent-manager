@@ -1,0 +1,499 @@
+/**
+ * Probe-backed reconciliation of the authoritative session-activity state.
+ *
+ * `session_state.activity` is written by the VM agent's own activity reports.
+ * Those reports are lossy: a callback can 401, a turn can end abnormally
+ * (cancel / interrupt / force-stop), or the report can simply never arrive.
+ * When that happens the row wedges in a working state and THREE consumers
+ * break together — the stop-button UI, durable-message delivery gating, and
+ * idle/sleep scheduling.
+ *
+ * So: a working state older than the staleness bound with no progress
+ * evidence is UNPROVEN, not trusted. We ask the only authority that actually
+ * knows — the vm-agent's live SessionHost status, already exposed by
+ * `GET /workspaces/{workspaceId}/agent-sessions` (`hostStatus`) on every
+ * deployed agent, so no vm-agent rollout is involved.
+ *
+ * Control-loop budget (`.claude/rules/47`): candidate selection is cheap SQL
+ * on the alarm path; the network probe runs outside it via `waitUntil`, under
+ * a short background timeout, bounded per pass, and every candidate leaves the
+ * candidate set — reconciled, refreshed, or quarantined after a bounded
+ * number of unreachable probes. Quarantine preserves "work may be in flight"
+ * and authoritative VM reports reset it.
+ */
+import { createModuleLogger } from '../../lib/logger';
+import { recordActivityEventInternal } from './activity';
+import {
+  minReconciliationAlarmDelayMs,
+  sessionActivityProbeMaxAttempts,
+  sessionActivityProbeMaxCandidates,
+  sessionActivityProbeTimeoutMs,
+} from './reconciliation-thresholds';
+import {
+  parseActivityStaleThreshold,
+  recordProbeReconciledTurnEnd,
+  WORKING_ACTIVITIES,
+} from './session-state';
+import type { Env as DOEnv } from './types';
+
+const log = createModuleLogger('session_activity_reconciliation');
+
+/** SessionHost states in which the VM can still be initializing or running work. */
+const HOST_WORKING_STATUSES = new Set(['starting', 'prompting']);
+const HOST_NON_WORKING_STATUSES = new Set(['idle', 'ready', 'error', 'stopped']);
+const AGENT_SESSION_STATUSES = new Set([
+  'running',
+  'recovery',
+  'sleeping',
+  'suspended',
+  'stopped',
+  'error',
+]);
+const PROBE_RECONCILIABLE_ACTIVITIES = [...WORKING_ACTIVITIES, 'error'] as const;
+
+export interface StaleActivityCandidate {
+  acpSessionId: string;
+  chatSessionId: string;
+  workspaceId: string;
+  nodeId: string;
+  activityAt: number;
+  probeAttempts: number;
+}
+
+export type ProbeOutcome =
+  /** The vm-agent confirms a turn really is in flight. */
+  | { kind: 'working' }
+  /** The vm-agent is reachable and reports no turn in flight. */
+  | { kind: 'not_working'; hostStatus: string | null }
+  /** The vm-agent did not answer within the background budget. */
+  | { kind: 'unreachable'; error: string };
+
+export interface SessionActivityReconciliationHooks {
+  broadcastEvent: (type: string, payload: Record<string, unknown>, sessionId?: string) => void;
+  /** Release durable messages queued behind the (now ended) turn. */
+  nudgeDeliveries: (chatSessionId: string) => number;
+  /** Re-arm the idle timer a wrongly-active session was never given. */
+  armIdleCleanup: (chatSessionId: string) => void;
+  recalculateAlarm: () => Promise<void>;
+}
+
+/**
+ * What happened to the session, as distinct from what happened to the turn.
+ *
+ * Required rather than defaulted so a new caller must state which it means. The
+ * distinction is load-bearing for the idle timer:
+ *
+ * - A TURN ending on a session that lives on RE-ARMS the timer — that session
+ *   was wrongly denied one while its mirror was wedged, which is the whole
+ *   point of the reconciliation.
+ * - A SESSION ending LEAVES THE EXISTING SCHEDULE ALONE. Neither alternative is
+ *   safe: re-arming pushes the deadline out on a session that will never report
+ *   again, while cancelling deletes the row whose expiry is what actually calls
+ *   `stopWorkspaceInD1`. Some callers deliberately keep the workspace running
+ *   past the session's end (`scheduled/stuck-tasks.ts` transitions with
+ *   `stopWorkspace: false` before failing the session), so cancelling would
+ *   remove that workspace's only teardown path. Leaving the original deadline
+ *   intact preserves teardown, and the row is not an immortal candidate because
+ *   `processExpiredCleanups` terminalizes it when it fires.
+ */
+export type TurnEndDisposition =
+  /** The turn ended; the session remains alive and may receive another prompt. */
+  | { kind: 'idle' }
+  /** The session itself was stopped. */
+  | { kind: 'stopped' }
+  /** The session itself ended in failure. */
+  | { kind: 'failed'; statusError: string };
+
+function dispositionActivity(disposition: TurnEndDisposition): string {
+  if (disposition.kind === 'idle') return 'idle';
+  return disposition.kind === 'stopped' ? 'stopped' : 'error';
+}
+
+/**
+ * Select working-state rows that are stale and have no RECENT progress, then
+ * claim them so a concurrent pass cannot probe the same row twice. SQL only —
+ * no I/O.
+ *
+ * Two bounds keep the candidate set finite:
+ * - `activity_probe_attempts < maxAttempts` — a target that never answers is
+ *   quarantined as ambiguous by `applyProbeOutcome` on its final attempt.
+ * - `activity_probe_at` acts as a lease: a row claimed by an in-flight pass is
+ *   skipped until the lease expires, so overlapping alarms do not double-probe.
+ *
+ * The progress guard deliberately measures message recency against the ROLLING
+ * staleness cutoff, not against the frozen `activity_at`. Anchoring it to
+ * `activity_at` means a single trailing message that lands after the last
+ * successful activity report disqualifies the row FOREVER — it can never age
+ * out, because `activity_at` never advances again once reporting dies. That
+ * would recreate the permanent wedge this whole module exists to break.
+ */
+export function selectStaleActivityProbeCandidates(
+  sql: SqlStorage,
+  options: {
+    thresholdMs: number;
+    maxAttempts: number;
+    maxCandidates: number;
+    /** Lease window for a claimed candidate. Defaults to the staleness bound. */
+    leaseMs?: number;
+    now?: number;
+  }
+): StaleActivityCandidate[] {
+  const now = options.now ?? Date.now();
+  const cutoff = now - options.thresholdMs;
+  const leaseCutoff = now - (options.leaseMs ?? options.thresholdMs);
+  const placeholders = PROBE_RECONCILIABLE_ACTIVITIES.map(() => '?').join(', ');
+
+  const candidates = sql
+    .exec(
+      `SELECT ss.session_id AS acp_session_id,
+              acp.chat_session_id AS chat_session_id,
+              acp.workspace_id AS workspace_id,
+              acp.node_id AS node_id,
+              ss.activity_at AS activity_at,
+              ss.activity_probe_attempts AS probe_attempts
+       FROM session_state ss
+       JOIN acp_sessions acp ON acp.id = ss.session_id
+       WHERE ss.activity IN (${placeholders})
+         AND ss.activity_at < ?
+         AND COALESCE(ss.activity_probe_attempts, 0) < ?
+         AND (ss.activity_probe_at IS NULL OR ss.activity_probe_at <= ?)
+         AND acp.workspace_id IS NOT NULL
+         AND acp.node_id IS NOT NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM chat_messages msg
+           WHERE msg.session_id = acp.chat_session_id
+             AND msg.created_at > ?
+         )
+       ORDER BY ss.activity_at ASC
+       LIMIT ?`,
+      ...PROBE_RECONCILIABLE_ACTIVITIES,
+      cutoff,
+      options.maxAttempts,
+      leaseCutoff,
+      cutoff,
+      options.maxCandidates
+    )
+    .toArray()
+    .flatMap((row) => {
+      const acpSessionId = row.acp_session_id;
+      const chatSessionId = row.chat_session_id;
+      const workspaceId = row.workspace_id;
+      const nodeId = row.node_id;
+      if (
+        typeof acpSessionId !== 'string' ||
+        typeof chatSessionId !== 'string' ||
+        typeof workspaceId !== 'string' ||
+        typeof nodeId !== 'string'
+      ) {
+        // A malformed row must not abort the whole sweep (.claude/rules/50).
+        log.warn('session_activity.candidate_row_skipped', { acpSessionId: String(acpSessionId) });
+        return [];
+      }
+      return [
+        {
+          acpSessionId,
+          chatSessionId,
+          workspaceId,
+          nodeId,
+          activityAt: typeof row.activity_at === 'number' ? row.activity_at : 0,
+          probeAttempts: typeof row.probe_attempts === 'number' ? row.probe_attempts : 0,
+        },
+      ];
+    });
+
+  // Claim the batch in the same synchronous block as the read, so a second
+  // alarm firing while this pass is awaiting the network cannot re-select the
+  // same rows (.claude/rules/45 — there is no `await` between read and claim,
+  // so this pair cannot be interleaved).
+  for (const candidate of candidates) {
+    sql.exec(
+      'UPDATE session_state SET activity_probe_at = ? WHERE session_id = ?',
+      now,
+      candidate.acpSessionId
+    );
+  }
+
+  return candidates;
+}
+
+/**
+ * When the next stale-activity probe becomes due.
+ *
+ * Without this, conversation-mode sessions would depend on some unrelated
+ * alarm source happening to fire — the task-mode reconciliation query is
+ * task-scoped and contributes nothing for them, so the probe's own staleness
+ * bound would not actually be honoured by the scheduler.
+ */
+export function computeSessionActivityProbeAlarmTime(
+  sql: SqlStorage,
+  env: DOEnv,
+  now = Date.now()
+): number | null {
+  const thresholdMs = parseActivityStaleThreshold(
+    (env as unknown as Record<string, string | undefined>).SESSION_ACTIVITY_STALE_THRESHOLD_MS
+  );
+  const maxAttempts = sessionActivityProbeMaxAttempts(env);
+  const minDelayMs = minReconciliationAlarmDelayMs(env);
+  // Must mirror `probeStaleSessionActivity`'s lease derivation exactly
+  // (`session-activity-probe.ts`), or the scheduler and the selector disagree about
+  // when a claimed row is due again.
+  const leaseMs = sessionActivityProbeMaxCandidates(env) * sessionActivityProbeTimeoutMs(env);
+  const placeholders = PROBE_RECONCILIABLE_ACTIVITIES.map(() => '?').join(', ');
+
+  // A row is next selectable at the LATER of (a) its staleness bound and (b) its
+  // outstanding probe lease expiring. Scanning only (a) reports a claimed-but-
+  // unresolved candidate as due *now* on every tick — the SELECT then correctly
+  // returns nothing (the lease holds), but the alarm has already re-armed to
+  // `now`, so the whole handler busy-loops for the entire reconciliation episode
+  // with no log signal. See `.claude/rules/47`.
+  const row = sql
+    .exec(
+      `SELECT MIN(MAX(ss.activity_at + ?, COALESCE(ss.activity_probe_at, 0) + ?)) AS earliest_due
+       FROM session_state ss
+       JOIN acp_sessions acp ON acp.id = ss.session_id
+       WHERE ss.activity IN (${placeholders})
+         AND COALESCE(ss.activity_probe_attempts, 0) < ?
+         AND acp.workspace_id IS NOT NULL
+         AND acp.node_id IS NOT NULL`,
+      thresholdMs,
+      leaseMs,
+      ...PROBE_RECONCILIABLE_ACTIVITIES,
+      maxAttempts
+    )
+    .toArray()[0];
+
+  const earliestDue = row?.earliest_due;
+  if (typeof earliestDue !== 'number') return null;
+  // Floor the alarm into the future even when a candidate is already overdue,
+  // matching `computeReconciliationAlarmTime`'s `minAlarmDelayMs` clamp. Belt
+  // and braces against any future predicate drift reintroducing the tight loop.
+  return Math.max(earliestDue, now + minDelayMs);
+}
+
+function validateAgentSessionEntry(entry: unknown): { kind: 'unreachable'; error: string } | null {
+  if (!entry || typeof entry !== 'object') {
+    return { kind: 'unreachable', error: 'malformed_agent_session_entry' };
+  }
+  const record = entry as Record<string, unknown>;
+  if (
+    typeof record.id !== 'string' ||
+    typeof record.workspaceId !== 'string' ||
+    typeof record.status !== 'string' ||
+    !AGENT_SESSION_STATUSES.has(record.status) ||
+    typeof record.createdAt !== 'string' ||
+    typeof record.updatedAt !== 'string' ||
+    (record.hostStatus !== undefined &&
+      record.hostStatus !== null &&
+      typeof record.hostStatus !== 'string')
+  ) {
+    return { kind: 'unreachable', error: 'malformed_agent_session_entry' };
+  }
+  return null;
+}
+
+function classifyHostStatus(hostStatus: string | null): ProbeOutcome {
+  if (hostStatus !== null && HOST_WORKING_STATUSES.has(hostStatus)) {
+    return { kind: 'working' };
+  }
+  if (hostStatus === null || HOST_NON_WORKING_STATUSES.has(hostStatus)) {
+    return { kind: 'not_working', hostStatus };
+  }
+  return { kind: 'unreachable', error: 'unknown_agent_session_host_status' };
+}
+
+/**
+ * Classify a vm-agent agent-session listing for one ACP session.
+ *
+ * A malformed payload is not evidence of anything. Only a well-formed listing
+ * may end a turn; anything else degrades to `unreachable` so it inherits the
+ * bounded-retry path instead of terminalizing a possibly live turn on the
+ * strength of a response we could not parse.
+ */
+export function classifyProbeResponse(
+  payload: unknown,
+  acpSessionId: string,
+  workspaceId: string
+): ProbeOutcome {
+  const rawSessions =
+    payload && typeof payload === 'object'
+      ? (payload as { sessions?: unknown }).sessions
+      : undefined;
+  if (!Array.isArray(rawSessions)) {
+    return { kind: 'unreachable', error: 'malformed_agent_sessions_response' };
+  }
+  const matches: Record<string, unknown>[] = [];
+  for (const entry of rawSessions) {
+    const validationError = validateAgentSessionEntry(entry);
+    if (validationError) return validationError;
+    const record = entry as Record<string, unknown>;
+    if (record.id === acpSessionId) matches.push(record);
+  }
+
+  if (matches.length === 0) {
+    return { kind: 'unreachable', error: 'agent_session_identity_missing' };
+  }
+  if (matches.length > 1) {
+    return { kind: 'unreachable', error: 'agent_session_identity_ambiguous' };
+  }
+
+  const match = matches[0];
+  if (!match) {
+    return { kind: 'unreachable', error: 'agent_session_identity_missing' };
+  }
+  if (match.workspaceId !== workspaceId) {
+    return { kind: 'unreachable', error: 'agent_session_workspace_mismatch' };
+  }
+
+  const hostStatus = typeof match.hostStatus === 'string' ? match.hostStatus : null;
+  return classifyHostStatus(hostStatus);
+}
+
+/**
+ * Apply one probe result to the authoritative row.
+ *
+ * Returns true when the session left its working state (callers then fan the
+ * transition out to the UI, delivery, and idle scheduling consumers).
+ */
+export function applyProbeOutcome(
+  sql: SqlStorage,
+  candidate: StaleActivityCandidate,
+  outcome: ProbeOutcome,
+  options: { maxAttempts: number; now?: number }
+): boolean {
+  const now = options.now ?? Date.now();
+
+  if (outcome.kind === 'working') {
+    // Positive proof of an in-flight turn. Refresh the staleness clock and
+    // clear probe accounting so a long legitimate turn is never flipped.
+    //
+    // Same compare-and-set as `recordTurnEnd`: the row may have legitimately
+    // left its working state while this probe was in flight (a real VM `idle`
+    // report, or a concurrent probe's `not_working` result winning the race).
+    // Bumping `activity_at` unconditionally would push the idle clock that
+    // `session-sleep.ts` reads forward on an already-idle session, delaying
+    // sleep — a regression in one of the three consumers this fixes.
+    const placeholders = PROBE_RECONCILIABLE_ACTIVITIES.map(() => '?').join(', ');
+    sql.exec(
+      `UPDATE session_state
+       SET activity_at = ?, activity_probe_attempts = 0, activity_probe_at = ?
+       WHERE session_id = ?
+         AND activity IN (${placeholders})
+         AND activity_at <= ?`,
+      now,
+      now,
+      candidate.acpSessionId,
+      ...PROBE_RECONCILIABLE_ACTIVITIES,
+      candidate.activityAt
+    );
+    return false;
+  }
+
+  if (outcome.kind === 'not_working') {
+    return recordProbeReconciledTurnEnd(sql, candidate.acpSessionId, {
+      reason: 'probe_reconciled',
+      source: 'probe',
+      // `observedAt` here is the `activity_at` read at candidate selection, not
+      // a wall-clock observation, so the guard is optimistic concurrency: any
+      // fresh report since selection withdraws this probe's stale verdict.
+      observedAt: candidate.activityAt,
+      guard: 'row_unchanged',
+      now,
+    });
+  }
+
+  const attempts = Math.min(candidate.probeAttempts + 1, options.maxAttempts);
+  // Same compare-and-set discipline as the two branches above. Without it a
+  // stale `unreachable` outcome — one whose probe was still in flight while the
+  // turn ended and a brand-new prompt epoch began — would charge an attempt
+  // against that new epoch, which resets `activity_probe_attempts` to 0 on
+  // every authoritative write.
+  const placeholders = PROBE_RECONCILIABLE_ACTIVITIES.map(() => '?').join(', ');
+  const updated = sql.exec(
+    `UPDATE session_state
+     SET activity_probe_attempts = ?, activity_probe_at = ?
+     WHERE session_id = ?
+       AND activity IN (${placeholders})
+       AND activity_at <= ?`,
+    attempts,
+    now,
+    candidate.acpSessionId,
+    ...PROBE_RECONCILIABLE_ACTIVITIES,
+    candidate.activityAt
+  );
+
+  if (attempts >= options.maxAttempts && updated.rowsWritten > 0) {
+    // Non-hot escape path: silence remains ambiguous, so preserve the working
+    // mirror and saturate the counter. Candidate selection/alarm scheduling
+    // exclude it until a later authoritative VM report resets probe accounting.
+    recordActivityEventInternal(
+      sql,
+      'session.activity_probe_quarantined',
+      'system',
+      null,
+      candidate.workspaceId,
+      candidate.chatSessionId,
+      null,
+      JSON.stringify({
+        acpSessionId: candidate.acpSessionId,
+        nodeId: candidate.nodeId,
+        attempts,
+        error: outcome.error,
+      })
+    );
+    log.warn('session_activity.probe_quarantined', {
+      acpSessionId: candidate.acpSessionId,
+      workspaceId: candidate.workspaceId,
+      nodeId: candidate.nodeId,
+      attempts,
+      error: outcome.error,
+      action: 'preserved',
+    });
+  }
+  return false;
+}
+
+/**
+ * Fan a terminal activity transition out to every consumer of the state.
+ *
+ * Consolidated here so no consumer can be forgotten: the status UI reads the
+ * broadcast, durable-message delivery reads the inbox nudge, and idle/sleep
+ * scheduling reads the re-armed cleanup schedule.
+ */
+export async function publishTurnEnd(
+  hooks: SessionActivityReconciliationHooks,
+  chatSessionId: string,
+  disposition: TurnEndDisposition,
+  options: { deferAlarm?: boolean } = {}
+): Promise<void> {
+  hooks.broadcastEvent(
+    'session.activity',
+    {
+      sessionId: chatSessionId,
+      activity: dispositionActivity(disposition),
+      promptStartedAt: null,
+      ...(disposition.kind === 'failed' ? { statusError: disposition.statusError } : {}),
+    },
+    chatSessionId
+  );
+  // Only a TURN ending re-arms. A session ending leaves the existing schedule
+  // untouched — see TurnEndDisposition for why neither re-arming nor cancelling
+  // is safe there.
+  let alarmMayHaveMoved = false;
+  if (disposition.kind === 'idle') {
+    hooks.armIdleCleanup(chatSessionId);
+    alarmMayHaveMoved = true;
+  }
+  // Releasing a queued delivery makes it due sooner, which is the only reason a
+  // terminal ending needs the alarm touched at all.
+  alarmMayHaveMoved = hooks.nudgeDeliveries(chatSessionId) > 0 || alarmMayHaveMoved;
+
+  // Recompute only when something actually moved. `stopSession`/`failSession`
+  // never scheduled an alarm before this fan-out existed, and scheduling one
+  // unconditionally makes every terminal transition wake the object to re-read
+  // all nine alarm sources and run storage maintenance that nothing asked for.
+  //
+  // Batch callers defer entirely and recompute once for the whole sweep, since
+  // paying a full nine-source recompute per candidate is an N x amplification
+  // inside a single alarm tick (.claude/rules/47).
+  if (!options.deferAlarm && alarmMayHaveMoved) await hooks.recalculateAlarm();
+}

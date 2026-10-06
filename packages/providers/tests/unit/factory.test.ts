@@ -1,6 +1,14 @@
-import { describe, expect,it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { createProvider, HetznerProvider, ProviderError,ScalewayProvider } from '../../src/index';
+import {
+  createProvider,
+  DigitalOceanProvider,
+  HetznerProvider,
+  InfomaniakProvider,
+  ProviderError,
+  ScalewayProvider,
+  VultrProvider,
+} from '../../src/index';
 
 describe('createProvider', () => {
   it('should return HetznerProvider for hetzner config', () => {
@@ -18,18 +26,28 @@ describe('createProvider', () => {
     expect(provider).toBeInstanceOf(HetznerProvider);
   });
 
+  it('should pass Hetzner list-page tuning to HetznerProvider', () => {
+    const provider = createProvider({
+      provider: 'hetzner',
+      apiToken: 'test-token',
+      maxListPages: 4,
+    });
+    expect(provider).toBeInstanceOf(HetznerProvider);
+    expect((provider as unknown as { maxListPages: number }).maxListPages).toBe(4);
+  });
+
   it('should throw ProviderError for unknown provider type', () => {
-    expect(() =>
-      createProvider({ provider: 'unknown' as 'hetzner', apiToken: 'x' }),
-    ).toThrow(ProviderError);
+    expect(() => createProvider({ provider: 'unknown' as 'hetzner', apiToken: 'x' })).toThrow(
+      ProviderError
+    );
   });
 
   it('should throw ProviderError with descriptive message for unknown provider', () => {
     try {
-      createProvider({ provider: 'digitalocean' as 'hetzner', apiToken: 'x' });
+      createProvider({ provider: 'unsupported' as 'hetzner', apiToken: 'x' });
     } catch (err) {
       expect(err).toBeInstanceOf(ProviderError);
-      expect((err as ProviderError).message).toContain('digitalocean');
+      expect((err as ProviderError).message).toContain('unsupported');
       expect((err as ProviderError).providerName).toBe('factory');
     }
   });
@@ -48,6 +66,56 @@ describe('createProvider', () => {
       zone: 'nl-ams-1',
     });
     expect(provider).toBeInstanceOf(ScalewayProvider);
+  });
+
+  it('should return InfomaniakProvider for explicit application credentials', () => {
+    const provider = createProvider({
+      provider: 'infomaniak',
+      applicationCredentialId: 'id',
+      applicationCredentialSecret: 'secret',
+      region: 'dc3-a',
+    });
+    expect(provider).toBeInstanceOf(InfomaniakProvider);
+    expect(provider.name).toBe('infomaniak');
+    expect(provider.defaultLocation).toBe('dc3-a');
+  });
+
+  it('should return VultrProvider for vultr config', () => {
+    const provider = createProvider({ provider: 'vultr', apiToken: 'vultr-key' });
+    expect(provider).toBeInstanceOf(VultrProvider);
+    expect(provider.name).toBe('vultr');
+  });
+
+  it('should pass region + tuning to VultrProvider', () => {
+    const provider = createProvider({
+      provider: 'vultr',
+      apiToken: 'vultr-key',
+      region: 'ewr',
+      ipPollTimeoutMs: 1000,
+    });
+    expect(provider).toBeInstanceOf(VultrProvider);
+    expect(provider.defaultLocation).toBe('ewr');
+  });
+
+  it('should return DigitalOceanProvider with runtime tuning', () => {
+    const provider = createProvider({
+      provider: 'digitalocean',
+      apiToken: 'do-key',
+      region: 'ams3',
+      actionPollTimeoutMs: 500,
+      actionPollIntervalMs: 17,
+      maxListPages: 3,
+    });
+    expect(provider).toBeInstanceOf(DigitalOceanProvider);
+    expect(provider.name).toBe('digitalocean');
+    expect(provider.defaultLocation).toBe('ams3');
+    const runtime = provider as unknown as {
+      maxListPages: number;
+      volumeClient: { actionPollIntervalMs: number; maxListPages: number };
+    };
+    expect(runtime.maxListPages).toBe(3);
+    expect(runtime.volumeClient.actionPollIntervalMs).toBe(17);
+    expect(runtime.volumeClient.maxListPages).toBe(3);
   });
 
   it('should not access process.env', () => {

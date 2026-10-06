@@ -64,6 +64,14 @@ func captureJSONRequest(t *testing.T, responseBody string, status int) (HTTPDoer
 	return doer, captured
 }
 
+func noRequestDoer(t *testing.T) HTTPDoer {
+	t.Helper()
+	return roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		t.Fatalf("unexpected HTTP request: %s %s", req.Method, req.URL.String())
+		return jsonResponse(`{}`, http.StatusInternalServerError), nil
+	})
+}
+
 type fakeRunner struct {
 	goos     string
 	goarch   string
@@ -151,4 +159,18 @@ func jsonResponse(body string, status int) *http.Response {
 func tempConfigEnv(t *testing.T) fakeEnv {
 	t.Helper()
 	return fakeEnv{values: map[string]string{"SAM_CONFIG_DIR": filepath.Join(t.TempDir(), "sam")}}
+}
+
+// setActiveProjectConfig saves a config with auth + active project for tests.
+func setActiveProjectConfig(t *testing.T, env fakeEnv, projectID string, projectName string) {
+	t.Helper()
+	cfg := CLIConfig{
+		APIURL:            "https://api.example.com",
+		SessionCookie:     "cookie=value",
+		ActiveProjectID:   projectID,
+		ActiveProjectName: projectName,
+	}
+	if _, err := SaveConfig(env, cfg); err != nil {
+		t.Fatal(err)
+	}
 }

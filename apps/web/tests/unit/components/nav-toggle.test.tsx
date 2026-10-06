@@ -1,9 +1,17 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render as baseRender, type RenderOptions, screen } from '@testing-library/react';
+import type { ReactElement } from 'react';
 import { MemoryRouter } from 'react-router';
 import { describe, expect, it, vi } from 'vitest';
 
 import { MobileNavDrawer, type MobileNavItem } from '../../../src/components/MobileNavDrawer';
 import { extractProjectId, NavSidebar } from '../../../src/components/NavSidebar';
+import { ThemeProvider } from '../../../src/contexts/ThemeContext';
+
+// MobileNavDrawer renders the shared <ThemeSwitcher />, which calls useTheme and
+// therefore requires a ThemeProvider ancestor.
+function render(ui: ReactElement, options?: Omit<RenderOptions, 'wrapper'>) {
+  return baseRender(ui, { wrapper: ThemeProvider, ...options });
+}
 
 // Mock AuthProvider to provide superadmin context
 vi.mock('../../../src/components/AuthProvider', () => ({
@@ -62,7 +70,8 @@ describe('NavSidebar — desktop toggle', () => {
     renderSidebar({ pathname: '/projects/proj-1/chat' });
     expect(screen.getByText('Chat')).toBeTruthy();
     expect(screen.getByText('Ideas')).toBeTruthy();
-    expect(screen.getByText('Activity')).toBeTruthy();
+    expect(screen.getByText('Deployments')).toBeTruthy();
+    expect(screen.queryByText('Activity')).toBeNull();
   });
 
   it('shows global nav items when showGlobalNav is true', () => {

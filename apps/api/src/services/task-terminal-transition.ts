@@ -1,0 +1,383 @@
+import type { TaskActorType, TaskTerminalStatus } from '@simple-agent-manager/shared';
+
+import type { Env } from '../env';
+import { createModuleLogger } from '../lib/logger';
+import { ulid } from '../lib/ulid';
+import { projectEventSourceOutboxInsertStatement } from './project-event-source-outbox';
+import { buildTaskLifecycleEventInput } from './project-lifecycle-event-inputs';
+import { loadTaskSupersession } from './task-runtime-liveness';
+import {
+  createProjectEventTaskTerminalTransitionHook,
+  createTaskWaitTerminalTransitionHook,
+  runTaskTerminalTransitionHooks,
+} from './task-terminal-transition-hooks';
+import { syncTriggerExecutionStatus } from './trigger-execution-sync';
+import { cancelVmTaskAdmission } from './vm-admission-control';
+
+const log = createModuleLogger('task_terminal_transition');
+
+const ACTIVE_TERMINALIZABLE_TASK_STATUSES = new Set([
+  'queued',
+  'in_progress',
+  'delegated',
+  'awaiting_followup',
+]);
+
+export type TaskTerminalTransitionOutcome =
+  | 'transitioned'
+  | 'already_terminal'
+  | 'not_terminalizable'
+  | 'not_found'
+  | 'scope_mismatch'
+  | 'superseded';
+
+interface TaskTerminalTransitionRow {
+  id: string;
+  project_id: string;
+  status: string;
+  workspace_id: string | null;
+  chat_session_id: string | null;
+  parent_task_id: string | null;
+}
+
+export interface TransitionTaskToTerminalOptions {
+  taskId: string;
+  projectId: string | null;
+  status: TaskTerminalStatus;
+  reason: string | null;
+  source: string;
+  expectedWorkspaceId?: string | null;
+  expectedChatSessionId?: string | null;
+  expectedNodeId?: string | null;
+  actorType?: TaskActorType;
+  actorId?: string | null;
+  stopWorkspace?: boolean;
+  /** Preserve a specific failure phase when startup never reached the runner. */
+  executionStep?: string | null;
+  /**
+   * Attention/reconciliation terminalization happens after a task is already
+   * actively running. If a legacy row missed `started_at`, set it at the same
+   * instant as completion so lifecycle consumers never see a terminal task that
+   * appears never to have started.
+   */
+  fillMissingStartedAt?: boolean;
+  /**
+   * This termination is a NORMAL lifecycle outcome, not a malfunction: suppress
+   * `tasks.error_message` (and therefore the red failure banner and the debug
+   * diagnosis it invites) while still recording `reason` on the status event.
+   * See `terminalErrorMessage`.
+   */
+  lifecycleOutcome?: boolean;
+}
+
+function changed(result: D1Result<unknown> | undefined): number {
+  return Number(result?.meta?.changes ?? 0);
+}
+
+function admissionReason(status: TaskTerminalStatus): string {
+  if (status === 'failed') return 'task_failed';
+  if (status === 'cancelled') return 'task_cancelled';
+  return 'task_completed_cleanup';
+}
+
+/**
+ * `tasks.error_message` is what renders the red "Task failed" block in chat
+ * (`project-message-view/FloatingHeader.tsx` gates the whole failure panel on it
+ * being non-null, and `classifyFailure` runs on its text). A NORMAL lifecycle
+ * outcome must therefore leave it null, or the user is shown a failure for
+ * something that did not fail — policies `a974b04f` ("Do not diagnose normal
+ * lifecycle terminations") and `486d1dd1` ("Parent-stopped tasks are cancelled,
+ * not failed").
+ *
+ * The reason itself is NOT lost: `task_status_events.reason` is written from
+ * `options.reason` independently of this value, so the timeline still explains
+ * why the task ended.
+ */
+function terminalErrorMessage(
+  status: TaskTerminalStatus,
+  reason: string | null,
+  lifecycleOutcome: boolean | undefined
+): string | null {
+  if (status === 'completed') return null;
+  if (lifecycleOutcome) return null;
+  return reason;
+}
+
+async function loadTaskRow(
+  db: D1Database,
+  taskId: string
+): Promise<TaskTerminalTransitionRow | null> {
+  return db
+    .prepare(
+      `SELECT id, project_id, status, workspace_id, chat_session_id, parent_task_id
+       FROM tasks
+       WHERE id = ?
+       LIMIT 1`
+    )
+    .bind(taskId)
+    .first<TaskTerminalTransitionRow>();
+}
+
+async function workspaceMatchesExpectedNode(
+  db: D1Database,
+  task: TaskTerminalTransitionRow,
+  expectedNodeId: string
+): Promise<boolean> {
+  if (!task.workspace_id) return false;
+  const workspace = await db
+    .prepare(
+      `SELECT node_id
+       FROM workspaces
+       WHERE id = ? AND project_id = ?
+       LIMIT 1`
+    )
+    .bind(task.workspace_id, task.project_id)
+    .first<{ node_id: string | null }>();
+  return workspace?.node_id === expectedNodeId;
+}
+
+/**
+ * Shared D1 terminal transition contract for non-TaskRunner writers.
+ *
+ * This helper owns the task-row CAS, task_status_events row, trigger execution
+ * sync, durable parent-wake hook, VM admission cancellation, and the same
+ * supersession fence used by stuck-task recovery. Callers still own any
+ * ProjectData-local session state transitions and activity events.
+ */
+export async function transitionTaskToTerminal(
+  env: Env,
+  options: TransitionTaskToTerminalOptions
+): Promise<TaskTerminalTransitionOutcome> {
+  if (!options.projectId) {
+    log.warn('task_terminal_transition.project_scope_missing', {
+      taskId: options.taskId,
+      status: options.status,
+      source: options.source,
+      action: 'rejected',
+    });
+    return 'scope_mismatch';
+  }
+
+  const task = await loadTaskRow(env.DATABASE, options.taskId);
+  if (!task) return 'not_found';
+  if (task.project_id !== options.projectId) return 'scope_mismatch';
+  if (
+    options.expectedWorkspaceId !== undefined &&
+    options.expectedWorkspaceId !== null &&
+    task.workspace_id !== options.expectedWorkspaceId
+  ) {
+    return 'scope_mismatch';
+  }
+  if (
+    options.expectedChatSessionId !== undefined &&
+    options.expectedChatSessionId !== null &&
+    task.chat_session_id !== options.expectedChatSessionId
+  ) {
+    return 'scope_mismatch';
+  }
+  if (
+    options.expectedNodeId !== undefined &&
+    options.expectedNodeId !== null &&
+    !(await workspaceMatchesExpectedNode(env.DATABASE, task, options.expectedNodeId))
+  ) {
+    return 'scope_mismatch';
+  }
+  if (task.status === options.status) return 'already_terminal';
+  if (['completed', 'failed', 'cancelled'].includes(task.status)) return 'already_terminal';
+  if (!ACTIVE_TERMINALIZABLE_TASK_STATUSES.has(task.status)) return 'not_terminalizable';
+
+  const now = new Date().toISOString();
+  const terminalTransitionId = ulid();
+  const lifecycleEventIntentId = ulid();
+  const lifecycleEventIntent = await buildTaskLifecycleEventInput({
+    transitionId: terminalTransitionId,
+    projectId: options.projectId,
+    taskId: options.taskId,
+    status: options.status,
+    fromStatus: task.status,
+    parentTaskId: task.parent_task_id,
+    workspaceId: task.workspace_id,
+    sessionId: task.chat_session_id,
+    actorType: options.actorType ?? 'system',
+    actorId: options.actorId ?? null,
+    reason: options.reason,
+    source: options.source,
+    occurredAt: now,
+  });
+  const errorMessage = terminalErrorMessage(
+    options.status,
+    options.reason,
+    options.lifecycleOutcome
+  );
+  const updateTask = env.DATABASE.prepare(
+    `UPDATE tasks
+     SET status = ?,
+         execution_step = ?,
+         error_message = ?,
+         started_at = CASE WHEN ? = 1 THEN COALESCE(started_at, ?) ELSE started_at END,
+         completed_at = ?,
+         terminal_transition_id = ?,
+         updated_at = ?
+     WHERE id = ?
+       AND project_id = ?
+       AND status = ?
+       AND (? IS NULL OR workspace_id = ?)
+       AND (? IS NULL OR chat_session_id = ?)
+       AND (
+         ? IS NULL
+         OR (
+           workspace_id IS NOT NULL
+           AND EXISTS (
+             SELECT 1
+             FROM workspaces w
+             WHERE w.id = tasks.workspace_id
+               AND w.project_id = tasks.project_id
+               AND w.node_id = ?
+           )
+         )
+       )
+       AND (
+         ? = 'cancelled'
+         OR NOT EXISTS (
+           SELECT 1 FROM tasks succ
+            WHERE succ.project_id = tasks.project_id
+              AND succ.id <> tasks.id
+              AND succ.triggered_by = 'session-recovery'
+              AND succ.created_at > tasks.created_at
+              AND succ.status NOT IN ('completed', 'failed', 'cancelled')
+              AND succ.id = tasks.superseded_by_task_id
+         )
+       )`
+  ).bind(
+    options.status,
+    options.executionStep ?? null,
+    errorMessage,
+    options.fillMissingStartedAt === false ? 0 : 1,
+    now,
+    now,
+    terminalTransitionId,
+    now,
+    options.taskId,
+    options.projectId,
+    task.status,
+    options.expectedWorkspaceId ?? null,
+    options.expectedWorkspaceId ?? null,
+    options.expectedChatSessionId ?? null,
+    options.expectedChatSessionId ?? null,
+    options.expectedNodeId ?? null,
+    options.expectedNodeId ?? null,
+    options.status
+  );
+  const insertEvent = env.DATABASE.prepare(
+    `INSERT INTO task_status_events
+       (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)
+     SELECT ?, id, ?, ?, ?, ?, ?, ?
+     FROM tasks
+     WHERE id = ?
+       AND project_id = ?
+       AND status = ?
+       AND completed_at = ?
+       AND terminal_transition_id = ?
+       AND ((? IS NULL AND error_message IS NULL) OR error_message = ?)`
+  ).bind(
+    ulid(),
+    task.status,
+    options.status,
+    options.actorType ?? 'system',
+    options.actorId ?? null,
+    options.reason,
+    now,
+    options.taskId,
+    options.projectId,
+    options.status,
+    now,
+    terminalTransitionId,
+    errorMessage,
+    errorMessage
+  );
+
+  const insertLifecycleEventIntent = projectEventSourceOutboxInsertStatement(
+    env,
+    lifecycleEventIntent,
+    {
+      now: new Date(now),
+      id: lifecycleEventIntentId,
+      capture: {
+        kind: 'task_terminal_transition',
+        projectId: options.projectId,
+        taskId: options.taskId,
+        terminalTransitionId,
+      },
+    }
+  );
+
+  const [updateResult, eventResult, outboxResult] = await env.DATABASE.batch([
+    updateTask,
+    insertEvent,
+    insertLifecycleEventIntent,
+  ]);
+  if (changed(updateResult) === 0) {
+    try {
+      const supersession = await loadTaskSupersession(
+        env.DATABASE,
+        options.projectId,
+        options.taskId
+      );
+      return supersession === 'none' ? 'not_terminalizable' : 'superseded';
+    } catch (err) {
+      log.warn('task_terminal_transition.supersession_diagnosis_failed', {
+        taskId: options.taskId,
+        projectId: options.projectId,
+        source: options.source,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return 'not_terminalizable';
+    }
+  }
+  if (changed(eventResult) === 0) {
+    throw new Error('Task terminal transition did not append its status event');
+  }
+  if (changed(outboxResult) === 0) {
+    throw new Error('Task terminal transition did not append its source outbox intent');
+  }
+
+  await syncTriggerExecutionStatus(
+    env.DATABASE,
+    options.taskId,
+    options.status,
+    options.reason ?? undefined
+  );
+  await cancelVmTaskAdmission(env, options.taskId, admissionReason(options.status)).catch((err) => {
+    log.warn('task_terminal_transition.admission_cancel_failed', {
+      taskId: options.taskId,
+      projectId: options.projectId,
+      status: options.status,
+      source: options.source,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
+  if (options.stopWorkspace !== false && task.workspace_id) {
+    await env.DATABASE.prepare(
+      `UPDATE workspaces
+       SET status = 'stopped', updated_at = ?
+       WHERE id = ? AND project_id = ? AND status IN ('running', 'recovery')`
+    )
+      .bind(now, task.workspace_id, options.projectId)
+      .run();
+  }
+  await runTaskTerminalTransitionHooks(
+    {
+      taskId: options.taskId,
+      projectId: options.projectId,
+      parentTaskId: task.parent_task_id,
+      projectEventSourceIntentId: lifecycleEventIntentId,
+      status: options.status,
+      reason: options.reason,
+      occurredAt: now,
+      source: options.source,
+    },
+    [createTaskWaitTerminalTransitionHook(env), createProjectEventTaskTerminalTransitionHook(env)]
+  );
+
+  return 'transitioned';
+}

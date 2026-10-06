@@ -1,3 +1,5 @@
+import type { ResourceRequirements } from './resource';
+
 // =============================================================================
 // Agent Settings (per-user, per-agent configuration)
 // =============================================================================
@@ -12,7 +14,11 @@
 export type AgentProviderMode = 'sam' | 'user-api-key' | 'oauth';
 
 /** Valid provider modes — single source of truth for validation. */
-export const VALID_AGENT_PROVIDER_MODES: readonly AgentProviderMode[] = ['sam', 'user-api-key', 'oauth'] as const;
+export const VALID_AGENT_PROVIDER_MODES: readonly AgentProviderMode[] = [
+  'sam',
+  'user-api-key',
+  'oauth',
+] as const;
 
 /** Valid permission modes for agent sessions */
 export type AgentPermissionMode =
@@ -23,13 +29,11 @@ export type AgentPermissionMode =
   | 'bypassPermissions';
 
 /** Valid OpenCode inference provider types */
-export type OpenCodeProvider =
-  | 'platform'
-  | 'scaleway'
-  | 'google-vertex'
-  | 'openai-compatible'
-  | 'anthropic'
-  | 'custom';
+export type OpenCodeProvider = 'opencode-zen' | 'opencode-go' | 'custom';
+
+export const DEFAULT_OPENCODE_PROVIDER = 'opencode-zen' as const;
+export const DEFAULT_OPENCODE_ZEN_MODEL = 'opencode/claude-sonnet-4-6' as const;
+export const DEFAULT_OPENCODE_GO_MODEL = 'opencode-go/glm-5.2' as const;
 
 /** Metadata for an OpenCode provider option */
 export interface OpenCodeProviderMeta {
@@ -47,65 +51,45 @@ export interface OpenCodeProviderMeta {
 
 /** Provider metadata registry — used by both UI and validation */
 export const OPENCODE_PROVIDERS: Record<OpenCodeProvider, OpenCodeProviderMeta> = {
-  platform: {
-    label: 'SAM Platform (Workers AI)',
-    modelPlaceholder: 'e.g. @cf/qwen/qwen3-30b-a3b-fp8',
-    requiresBaseUrl: false,
-    requiresApiKey: false,
-    keyLabel: '',
-    keyHelpText: "Using SAM's platform AI — daily limit applies",
-  },
-  scaleway: {
-    label: 'Scaleway',
-    modelPlaceholder: 'e.g. scaleway/qwen3-coder-30b-a3b-instruct',
+  'opencode-zen': {
+    label: 'OpenCode Zen',
+    modelPlaceholder: `e.g. ${DEFAULT_OPENCODE_ZEN_MODEL}`,
     requiresBaseUrl: false,
     requiresApiKey: true,
-    keyLabel: 'Scaleway Secret Key',
-    keyHelpText: 'Create a Scaleway API key with GenerativeApisModelAccess permission',
+    keyLabel: 'OpenCode API Key',
+    keyHelpText: 'Create an OpenCode API key at opencode.ai/auth',
   },
-  'google-vertex': {
-    label: 'Google Vertex',
-    modelPlaceholder: 'e.g. gemini-2.5-pro',
+  'opencode-go': {
+    label: 'OpenCode Go',
+    modelPlaceholder: `e.g. ${DEFAULT_OPENCODE_GO_MODEL}`,
     requiresBaseUrl: false,
     requiresApiKey: true,
-    keyLabel: 'Google Cloud API Key',
-    keyHelpText: 'Enter your Google Cloud API key for Vertex AI',
-  },
-  'openai-compatible': {
-    label: 'OpenAI Compatible',
-    modelPlaceholder: 'e.g. your-model-name',
-    requiresBaseUrl: true,
-    requiresApiKey: true,
-    keyLabel: 'API Key',
-    keyHelpText: 'Enter your API key for the OpenAI-compatible endpoint',
-  },
-  anthropic: {
-    label: 'Anthropic',
-    modelPlaceholder: 'e.g. claude-sonnet-4-5-20250514',
-    requiresBaseUrl: false,
-    requiresApiKey: true,
-    keyLabel: 'Anthropic API Key',
-    keyHelpText: 'Enter your Anthropic API key',
+    keyLabel: 'OpenCode API Key',
+    keyHelpText: 'Create an OpenCode API key at opencode.ai/auth',
   },
   custom: {
-    label: 'Custom',
+    label: 'Custom (OpenAI-compatible)',
     modelPlaceholder: 'e.g. your-model-name',
     requiresBaseUrl: true,
     requiresApiKey: true,
     keyLabel: 'API Key',
-    keyHelpText: 'Enter your API key for the custom provider',
+    keyHelpText: 'Enter the base URL and API key for your OpenAI-compatible endpoint',
   },
 };
 
 /** Ordered list of OpenCode provider values for dropdown rendering */
 export const OPENCODE_PROVIDER_OPTIONS: OpenCodeProvider[] = [
-  'platform',
-  'scaleway',
-  'google-vertex',
-  'openai-compatible',
-  'anthropic',
+  'opencode-zen',
+  'opencode-go',
   'custom',
 ];
+
+export function resolveOpenCodeProvider(raw: unknown): OpenCodeProvider {
+  if (typeof raw === 'string' && Object.hasOwn(OPENCODE_PROVIDERS, raw)) {
+    return raw as OpenCodeProvider;
+  }
+  return DEFAULT_OPENCODE_PROVIDER;
+}
 
 /** Agent settings stored per-user, per-agent in D1 */
 export interface AgentSettings {
@@ -130,10 +114,8 @@ export interface AgentSettingsResponse {
   additionalEnv: Record<string, string> | null;
   /** OpenCode inference provider. null = use default. */
   opencodeProvider: OpenCodeProvider | null;
-  /** Base URL for custom/openai-compatible providers. */
+  /** Base URL for the custom provider. */
   opencodeBaseUrl: string | null;
-  /** Display name for custom providers. */
-  opencodeProviderName: string | null;
   /** Provider mode for Claude Code / Codex. null = not explicitly selected. */
   providerMode: AgentProviderMode | null;
   createdAt: string | null;
@@ -149,12 +131,45 @@ export interface SaveAgentSettingsRequest {
   additionalEnv?: Record<string, string> | null;
   /** OpenCode inference provider. null = use default. */
   opencodeProvider?: OpenCodeProvider | null;
-  /** Base URL for custom/openai-compatible providers. */
+  /** Base URL for the custom provider. */
   opencodeBaseUrl?: string | null;
-  /** Display name for custom providers. */
-  opencodeProviderName?: string | null;
   /** Provider mode for Claude Code / Codex. null = clear selection. */
   providerMode?: AgentProviderMode | null;
+}
+
+// =============================================================================
+// Agent Effort
+// =============================================================================
+
+export const AGENT_EFFORT_LEVELS = ['auto', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+export type AgentEffort = (typeof AGENT_EFFORT_LEVELS)[number];
+
+export const DEFAULT_AGENT_EFFORT: AgentEffort = 'auto';
+
+export function isAgentEffort(value: unknown): value is AgentEffort {
+  return typeof value === 'string' && (AGENT_EFFORT_LEVELS as readonly string[]).includes(value);
+}
+
+export function getSupportedEffortsForAgent(agentType: string): readonly AgentEffort[] {
+  switch (agentType) {
+    case 'claude-code':
+      return AGENT_EFFORT_LEVELS;
+    case 'openai-codex':
+      return ['auto', 'low', 'medium', 'high', 'xhigh'];
+    default:
+      return ['auto'];
+  }
+}
+
+export function isAgentEffortSupported(agentType: string, effort: AgentEffort): boolean {
+  return getSupportedEffortsForAgent(agentType).includes(effort);
+}
+
+export const AGENT_PROFILE_RUNTIMES = ['vm', 'cf-container'] as const;
+export type AgentProfileRuntime = (typeof AGENT_PROFILE_RUNTIMES)[number];
+
+export function isAgentProfileRuntime(value: unknown): value is AgentProfileRuntime {
+  return typeof value === 'string' && (AGENT_PROFILE_RUNTIMES as readonly string[]).includes(value);
 }
 
 // =============================================================================
@@ -170,17 +185,23 @@ export interface AgentProfile {
   description: string | null;
   agentType: string;
   model: string | null;
+  effort: AgentEffort;
   permissionMode: string | null;
   systemPromptAppend: string | null;
   maxTurns: number | null;
   timeoutMinutes: number | null;
   vmSizeOverride: string | null;
+  resourceRequirementsJson?: string | null;
   provider: string | null;
   vmLocation: string | null;
   workspaceProfile: string | null;
+  /** Workspace runtime preference. null = auto-resolve from environment/profile/user tier. */
+  runtime: AgentProfileRuntime | null;
   /** Devcontainer config name (subdirectory under .devcontainer/). null = auto-discover default. */
   devcontainerConfigName: string | null;
   taskMode: string | null;
+  /** SAM platform policy slice for GitHub CLI installation-token scoping. */
+  githubCliPolicy: GitHubCliPolicy | null;
   isBuiltin: boolean;
   createdAt: string;
   updatedAt: string;
@@ -192,17 +213,24 @@ export interface CreateAgentProfileRequest {
   description?: string | null;
   agentType?: string;
   model?: string | null;
+  effort?: AgentEffort | null;
   permissionMode?: string | null;
   systemPromptAppend?: string | null;
   maxTurns?: number | null;
   timeoutMinutes?: number | null;
   vmSizeOverride?: string | null;
+  resourceRequirements?: ResourceRequirements | null;
+  resourceRequirementsJson?: string | null;
   provider?: string | null;
   vmLocation?: string | null;
   workspaceProfile?: string | null;
+  /** Workspace runtime preference. null/omitted = automatic. */
+  runtime?: AgentProfileRuntime | null;
   /** Devcontainer config name (subdirectory under .devcontainer/). null = auto-discover default. */
   devcontainerConfigName?: string | null;
   taskMode?: string | null;
+  /** SAM platform policy slice for GitHub CLI installation-token scoping. */
+  githubCliPolicy?: GitHubCliPolicy | null;
 }
 
 /** Request body for PUT /api/projects/:projectId/agent-profiles/:profileId */
@@ -211,17 +239,24 @@ export interface UpdateAgentProfileRequest {
   description?: string | null;
   agentType?: string;
   model?: string | null;
+  effort?: AgentEffort | null;
   permissionMode?: string | null;
   systemPromptAppend?: string | null;
   maxTurns?: number | null;
   timeoutMinutes?: number | null;
   vmSizeOverride?: string | null;
+  resourceRequirements?: ResourceRequirements | null;
+  resourceRequirementsJson?: string | null;
   provider?: string | null;
   vmLocation?: string | null;
   workspaceProfile?: string | null;
+  /** Workspace runtime preference. null = automatic. */
+  runtime?: AgentProfileRuntime | null;
   /** Devcontainer config name (subdirectory under .devcontainer/). null = auto-discover default. */
   devcontainerConfigName?: string | null;
   taskMode?: string | null;
+  /** SAM platform policy slice for GitHub CLI installation-token scoping. */
+  githubCliPolicy?: GitHubCliPolicy | null;
 }
 
 /** Resolved agent profile for task execution */
@@ -230,15 +265,96 @@ export interface ResolvedAgentProfile {
   profileName: string | null;
   agentType: string;
   model: string | null;
+  effort: AgentEffort;
   permissionMode: string | null;
   systemPromptAppend: string | null;
   maxTurns: number | null;
   timeoutMinutes: number | null;
   vmSizeOverride: string | null;
+  resourceRequirementsJson?: string | null;
   provider: string | null;
   vmLocation: string | null;
   workspaceProfile: string | null;
+  /** Workspace runtime preference. null = automatic. */
+  runtime: AgentProfileRuntime | null;
   /** Devcontainer config name (subdirectory under .devcontainer/). null = auto-discover default. */
   devcontainerConfigName: string | null;
   taskMode: string | null;
+  /** SAM platform policy slice for GitHub CLI installation-token scoping. */
+  githubCliPolicy: GitHubCliPolicy | null;
 }
+
+// =============================================================================
+// Skills (per-project repeatable-work definitions)
+// =============================================================================
+
+export interface AgentSkill extends Omit<AgentProfile, 'effort'> {
+  /** null = inherit from the selected/default profile. */
+  effort: AgentEffort | null;
+  resourceRequirementsJson: string | null;
+  defaultProfileId: string | null;
+}
+
+export interface CreateSkillRequest extends CreateAgentProfileRequest {
+  resourceRequirementsJson?: string | null;
+  defaultProfileId?: string | null;
+}
+
+export interface UpdateSkillRequest extends UpdateAgentProfileRequest {
+  resourceRequirementsJson?: string | null;
+  defaultProfileId?: string | null;
+}
+
+export interface ResolvedSkillProfile extends ResolvedAgentProfile {
+  skillId: string | null;
+  skillName: string | null;
+  skillHint: string | null;
+  skillVmSizeOverride?: string | null;
+  agentProfileVmSizeOverride?: string | null;
+  resourceRequirementsJson: string | null;
+  agentProfileResourceRequirementsJson: string | null;
+  defaultProfileId: string | null;
+}
+
+// =============================================================================
+// SAM Platform Policy — GitHub CLI
+// =============================================================================
+
+export type GitHubCliPolicyMode = 'inherit' | 'custom';
+export type GitHubCliPermissionLevel = 'none' | 'read' | 'write';
+export type GitHubCliContentsPermissionLevel = 'read' | 'write';
+
+export interface GitHubCliPolicyPermissions {
+  /** Required for clone/fetch/push. Kept at read/write because disabling contents breaks workspace boot. */
+  contents: GitHubCliContentsPermissionLevel;
+  pullRequests: GitHubCliPermissionLevel;
+  issues: GitHubCliPermissionLevel;
+  actions: GitHubCliPermissionLevel;
+  packages: GitHubCliPermissionLevel;
+}
+
+export interface GitHubCliPolicy {
+  mode: GitHubCliPolicyMode;
+  repositoryScope: 'project';
+  permissions: GitHubCliPolicyPermissions;
+}
+
+export const GITHUB_CLI_POLICY_PERMISSION_KEYS = [
+  'contents',
+  'pullRequests',
+  'issues',
+  'actions',
+  'packages',
+] as const;
+
+export const DEFAULT_GITHUB_CLI_POLICY: GitHubCliPolicy = {
+  mode: 'inherit',
+  repositoryScope: 'project',
+  permissions: {
+    contents: 'write',
+    pullRequests: 'write',
+    issues: 'write',
+    actions: 'none',
+    packages: 'write',
+  },
+};

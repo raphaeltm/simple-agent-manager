@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 import { useAvailableCommands } from '../../../src/hooks/useAvailableCommands';
+import { QueryTestWrapper } from '../../test-utils/query-test-utils';
 
 // Mock the API module
 const mockGetCachedCommands = vi.fn();
@@ -25,6 +26,10 @@ vi.mock('@simple-agent-manager/acp-client', () => ({
   getStaticCommands: () => [],
 }));
 
+vi.mock('../../../src/hooks/useQueryScope', () => ({
+  useQueryScope: () => 'user-1',
+}));
+
 describe('useAvailableCommands', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -37,7 +42,9 @@ describe('useAvailableCommands', () => {
       commands: [{ name: 'review-pr', description: 'Review a PR' }],
     });
 
-    const { result } = renderHook(() => useAvailableCommands('proj-1'));
+    const { result } = renderHook(() => useAvailableCommands('proj-1'), {
+      wrapper: QueryTestWrapper,
+    });
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -51,7 +58,9 @@ describe('useAvailableCommands', () => {
     let resolveApi: (value: unknown) => void;
     mockGetCachedCommands.mockReturnValue(new Promise((r) => { resolveApi = r; }));
 
-    const { result } = renderHook(() => useAvailableCommands('proj-1'));
+    const { result } = renderHook(() => useAvailableCommands('proj-1'), {
+      wrapper: QueryTestWrapper,
+    });
 
     expect(result.current.isLoading).toBe(true);
 
@@ -59,13 +68,17 @@ describe('useAvailableCommands', () => {
       resolveApi!({ commands: [] });
     });
 
-    expect(result.current.isLoading).toBe(false);
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
   });
 
   it('returns static + client commands even when API fails', async () => {
     mockGetCachedCommands.mockRejectedValue(new Error('Network error'));
 
-    const { result } = renderHook(() => useAvailableCommands('proj-1'));
+    const { result } = renderHook(() => useAvailableCommands('proj-1'), {
+      wrapper: QueryTestWrapper,
+    });
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -75,6 +88,21 @@ describe('useAvailableCommands', () => {
     expect(result.current.commands.find((c) => c.name === 'compact')).toBeDefined();
     expect(result.current.commands.find((c) => c.name === 'new-chat')).toBeDefined();
     expect(result.current.commands.find((c) => c.name === 'help')).toBeDefined();
+  });
+
+  it('keeps static + client commands when cached command payload omits commands', async () => {
+    mockGetCachedCommands.mockResolvedValue({});
+
+    const { result } = renderHook(() => useAvailableCommands('proj-1'), {
+      wrapper: QueryTestWrapper,
+    });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    expect(result.current.commands.find((c) => c.name === 'compact')).toBeDefined();
+    expect(result.current.commands.find((c) => c.name === 'new-chat')).toBeDefined();
   });
 
   it('deduplicates with priority: live > cached > static > client', async () => {
@@ -89,9 +117,9 @@ describe('useAvailableCommands', () => {
       { name: 'help', description: 'Live help', source: 'agent' as const },
     ];
 
-    const { result } = renderHook(() =>
-      useAvailableCommands('proj-1', liveCommands),
-    );
+    const { result } = renderHook(() => useAvailableCommands('proj-1', liveCommands), {
+      wrapper: QueryTestWrapper,
+    });
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -112,7 +140,9 @@ describe('useAvailableCommands', () => {
   });
 
   it('persistCommands calls saveCachedCommands', async () => {
-    const { result } = renderHook(() => useAvailableCommands('proj-1'));
+    const { result } = renderHook(() => useAvailableCommands('proj-1'), {
+      wrapper: QueryTestWrapper,
+    });
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -131,10 +161,27 @@ describe('useAvailableCommands', () => {
     ]);
   });
 
+  it('persistCommands tolerates omitted command arrays', async () => {
+    const { result } = renderHook(() => useAvailableCommands('proj-1'), {
+      wrapper: QueryTestWrapper,
+    });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    await act(async () => {
+      result.current.persistCommands('claude-code');
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    expect(mockSaveCachedCommands).toHaveBeenCalledWith('proj-1', 'claude-code', []);
+  });
+
   it('does not re-fetch for same projectId and refreshKey', async () => {
     const { result, rerender } = renderHook(
       ({ pid, rk }) => useAvailableCommands(pid, undefined, rk),
-      { initialProps: { pid: 'proj-1', rk: 'session-1' } },
+      { initialProps: { pid: 'proj-1', rk: 'session-1' }, wrapper: QueryTestWrapper },
     );
 
     await waitFor(() => {
@@ -152,7 +199,7 @@ describe('useAvailableCommands', () => {
 
     const { result, rerender } = renderHook(
       ({ pid, rk }) => useAvailableCommands(pid, undefined, rk),
-      { initialProps: { pid: 'proj-1', rk: 'session-1' } },
+      { initialProps: { pid: 'proj-1', rk: 'session-1' }, wrapper: QueryTestWrapper },
     );
 
     await waitFor(() => {
@@ -178,7 +225,9 @@ describe('useAvailableCommands', () => {
   it('refetch() imperatively re-fetches cached commands', async () => {
     mockGetCachedCommands.mockResolvedValue({ commands: [] });
 
-    const { result } = renderHook(() => useAvailableCommands('proj-1'));
+    const { result } = renderHook(() => useAvailableCommands('proj-1'), {
+      wrapper: QueryTestWrapper,
+    });
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);

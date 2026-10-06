@@ -7,6 +7,7 @@ import {
   useEffect,
   useState,
 } from 'react';
+import { createPortal } from 'react-dom';
 
 import { getFileRawUrl,getGitFile } from '../lib/api';
 import { detectLanguage, isImageFile } from '../lib/file-utils';
@@ -115,7 +116,7 @@ export const FileViewerPanel: FC<FileViewerPanelProps> = ({
   const language = detectLanguage(filePath);
   const binary = content !== null && isBinaryContent(content);
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-panel bg-canvas flex flex-col">
       {/* Header */}
       <header
@@ -227,7 +228,7 @@ export const FileViewerPanel: FC<FileViewerPanelProps> = ({
 
             {error && (
               <div
-                className="m-4 p-3 bg-danger-tint rounded-lg text-tn-red"
+                className="m-4 p-3 bg-danger-tint rounded-lg text-danger-fg"
                 style={{ fontSize: 'var(--sam-type-caption-size)' }}
               >
                 {error}
@@ -253,7 +254,8 @@ export const FileViewerPanel: FC<FileViewerPanelProps> = ({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 };
 

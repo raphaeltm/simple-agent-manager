@@ -16,14 +16,20 @@ const DEFAULT_MAX_BODY_BYTES = 65_536;
 const DEFAULT_MAX_BATCH_SIZE = 25;
 
 /** Truncation limits for string fields */
-const MAX_MESSAGE_LENGTH = 2048;
+const DEFAULT_MAX_MESSAGE_LENGTH = 2048;
 const MAX_SOURCE_LENGTH = 256;
-const MAX_STACK_LENGTH = 4096;
+const DEFAULT_MAX_STACK_LENGTH = 4096;
+const DEFAULT_MAX_USER_AGENT_LENGTH = 512;
 
 const VALID_LEVELS = new Set(['error', 'warn', 'info']);
 
 function truncate(value: string, maxLength: number): string {
   return value.length > maxLength ? value.slice(0, maxLength) + '...' : value;
+}
+
+function getPositiveInteger(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(value ?? '', 10);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function getClientIp(c: { req: { header: (name: string) => string | undefined } }): string {
@@ -61,6 +67,18 @@ clientErrorsRoutes.post('/', jsonValidator(ClientErrorBatchSchema), async (c) =>
   const maxBatchSize = parseInt(
     c.env.MAX_CLIENT_ERROR_BATCH_SIZE || String(DEFAULT_MAX_BATCH_SIZE),
     10
+  );
+  const messageMaxLength = getPositiveInteger(
+    c.env.OBSERVABILITY_ERROR_MESSAGE_MAX_LENGTH,
+    DEFAULT_MAX_MESSAGE_LENGTH
+  );
+  const stackMaxLength = getPositiveInteger(
+    c.env.OBSERVABILITY_ERROR_STACK_MAX_LENGTH,
+    DEFAULT_MAX_STACK_LENGTH
+  );
+  const userAgentMaxLength = getPositiveInteger(
+    c.env.OBSERVABILITY_ERROR_USER_AGENT_MAX_LENGTH,
+    DEFAULT_MAX_USER_AGENT_LENGTH
   );
 
   // Check Content-Length before reading body
@@ -110,11 +128,11 @@ clientErrorsRoutes.post('/', jsonValidator(ClientErrorBatchSchema), async (c) =>
 
     log.error('client_error', {
       level,
-      message: truncate(message, MAX_MESSAGE_LENGTH),
+      message: truncate(message, messageMaxLength),
       source: truncate(source, MAX_SOURCE_LENGTH),
-      stack: typeof e.stack === 'string' ? truncate(e.stack, MAX_STACK_LENGTH) : null,
-      pageUrl: typeof e.url === 'string' ? truncate(e.url, MAX_MESSAGE_LENGTH) : null,
-      userAgent: typeof e.userAgent === 'string' ? truncate(e.userAgent, 512) : null,
+      stack: typeof e.stack === 'string' ? truncate(e.stack, stackMaxLength) : null,
+      pageUrl: typeof e.url === 'string' ? truncate(e.url, messageMaxLength) : null,
+      userAgent: typeof e.userAgent === 'string' ? truncate(e.userAgent, userAgentMaxLength) : null,
       clientTimestamp: typeof e.timestamp === 'string' ? e.timestamp : null,
       context: e.context && typeof e.context === 'object' ? e.context : null,
       userId,

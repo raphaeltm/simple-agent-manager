@@ -3,14 +3,13 @@
  *
  * Three responsibilities:
  * 1. **Stale running recovery**: Finds `trigger_executions` stuck in 'running' past a
- *    configurable timeout and transitions them to 'failed' with a descriptive reason.
- *    Handles: task deleted, task in terminal state (sync missed), task stuck in
- *    non-terminal state, and no task linked (submission failure).
+ *    configurable age, reads linked task liveness, and terminalizes only missing,
+ *    terminal-unsynced, or hard-residence-expired rows. A non-terminal linked task is
+ *    preserved at the normal stale threshold.
  *
  * 2. **Stale queued recovery**: Finds `trigger_executions` stuck in 'queued' past a
- *    configurable timeout (default: 5 min) and transitions them to 'failed'. A queued
- *    execution should transition to 'running' within seconds — if it's still queued
- *    after 5 minutes, the request that created it failed mid-flight.
+ *    configurable timeout (default: 5 min), while preserving rows whose linked task is
+ *    still non-terminal.
  *
  * 3. **Retention purge**: Deletes old completed/failed/skipped execution records
  *    past the configurable retention period, preventing unbounded table growth.
@@ -21,18 +20,27 @@
  * Called from the cron handler alongside node cleanup and stuck-task recovery.
  */
 import {
+  DEFAULT_TRIGGER_EXECUTION_HARD_MAX_RESIDENCE_HOURS,
   DEFAULT_TRIGGER_EXECUTION_LOG_RETENTION_DAYS,
   DEFAULT_TRIGGER_STALE_EXECUTION_TIMEOUT_MS,
   DEFAULT_TRIGGER_STALE_QUEUED_TIMEOUT_MS,
+  TASK_TERMINAL_STATUSES,
+  TRIGGER_EXECUTION_HARD_MAX_FAILURE_PREFIX,
 } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
 import { createModuleLogger } from '../lib/logger';
+import { purgeExpiredCredentialLimitWindows } from '../services/credential-limit-events/admissions';
+import { resolveCredentialLimitConfig } from '../services/credential-limit-events/config';
+import { reconcileProjectEventSourceOutbox } from '../services/project-event-source-outbox';
+import { reconcileStaleWebhookDeliveries } from '../services/webhook-delivery-reconciliation';
+import { purgeExpiredWebhookDeliveries } from '../services/webhook-trigger-store';
 
 const log = createModuleLogger('trigger-execution-cleanup');
 
 /** Default batch size for stale execution recovery per sweep. */
 const DEFAULT_TRIGGER_STALE_RECOVERY_BATCH_SIZE = 100;
+const MS_PER_HOUR = 60 * 60 * 1000;
 
 function parsePositiveInt(value: string | undefined, fallback: number): number {
   if (!value) return fallback;
@@ -42,12 +50,18 @@ function parsePositiveInt(value: string | undefined, fallback: number): number {
 }
 
 export interface TriggerExecutionCleanupStats {
-  /** Number of stale running executions recovered to 'failed' */
+  /** Number of stale running executions reconciled to a terminal execution status */
   staleRecovered: number;
-  /** Number of stale queued executions recovered to 'failed' */
+  /** Number of stale queued executions reconciled to a terminal execution status */
   staleQueuedRecovered: number;
   /** Number of old execution logs purged */
   retentionPurged: number;
+  /** Number of expired generic webhook delivery records purged */
+  webhookDeliveriesPurged: number;
+  /** Number of source outbox intents admitted to ProjectData */
+  projectEventSourceOutboxAdmitted: number;
+  /** Number of expired credential-limit observation windows purged */
+  credentialLimitWindowsPurged: number;
   /** Number of errors encountered */
   errors: number;
 }
@@ -56,6 +70,7 @@ interface StaleExecution {
   id: string;
   trigger_id: string;
   task_id: string | null;
+  event_type: string | null;
   started_at: string | null;
   created_at: string;
 }
@@ -66,27 +81,75 @@ interface TaskRow {
 }
 
 /** Terminal task statuses — if a task is in one of these states, the execution should not be 'running'. */
-const TERMINAL_TASK_STATUSES = new Set(['completed', 'failed', 'cancelled']);
+const TERMINAL_TASK_STATUSES = new Set<string>(TASK_TERMINAL_STATUSES);
+
+interface ExecutionRecoveryAction {
+  exec: StaleExecution;
+  toStatus: 'completed' | 'failed';
+  errorMessage: string | null;
+}
 
 /**
- * Build the reason string for why a stale execution is being recovered.
+ * Build the status update for a stale execution after reading the linked task row.
+ *
+ * Rule 58: the normal stale-threshold verdict mirrors the task terminal record that
+ * `syncTriggerExecutionStatus()` reads. A non-terminal task is still the execution
+ * owner, so wall-clock age alone is inconclusive and the execution remains active.
+ *
+ * Rule 47: the hard residence bound is a separate backstop. Admission and incident
+ * dispatch reclaim also read task liveness, so this backstop cannot by itself admit
+ * a colliding sibling or release a live incident task's lease.
  */
-function buildRecoveryReason(
+function buildRecoveryAction(
   exec: StaleExecution,
   taskMap: Map<string, TaskRow>,
-): string {
+  options: { hardMaxCutoff: string; hardMaxHours: number }
+): ExecutionRecoveryAction | null {
   if (!exec.task_id) {
-    return 'Task was never created (submission failed)';
+    return {
+      exec,
+      toStatus: 'failed',
+      errorMessage: 'Task was never created (submission failed)',
+    };
   }
 
   const task = taskMap.get(exec.task_id);
   if (!task) {
-    return `Linked task ${exec.task_id} was deleted`;
+    return {
+      exec,
+      toStatus: 'failed',
+      errorMessage: `Linked task ${exec.task_id} was deleted`,
+    };
   }
   if (TERMINAL_TASK_STATUSES.has(task.status)) {
-    return `Linked task ${exec.task_id} is ${task.status} (sync missed)`;
+    return {
+      exec,
+      toStatus: task.status === 'completed' ? 'completed' : 'failed',
+      errorMessage:
+        task.status === 'completed'
+          ? null
+          : `Linked task ${exec.task_id} is ${task.status} (sync missed)`,
+    };
   }
-  return `Linked task ${exec.task_id} stuck in '${task.status}' past stale threshold`;
+
+  if (exec.created_at <= options.hardMaxCutoff) {
+    return {
+      exec,
+      toStatus: 'failed',
+      errorMessage: `${TRIGGER_EXECUTION_HARD_MAX_FAILURE_PREFIX} of ${options.hardMaxHours} hours while linked task ${exec.task_id} remained ${task.status}; task liveness still controls trigger admission and incident dispatch lease ownership until the task terminalizes.`,
+    };
+  }
+
+  log.info('stale_execution_preserved_live_task', {
+    executionId: exec.id,
+    triggerId: exec.trigger_id,
+    taskId: exec.task_id,
+    taskStatus: task.status,
+    createdAt: exec.created_at,
+    startedAt: exec.started_at,
+    hardMaxHours: options.hardMaxHours,
+  });
+  return null;
 }
 
 /**
@@ -101,9 +164,11 @@ async function recoverStaleExecutionsByStatus(
   db: D1Database,
   status: 'running' | 'queued',
   staleThresholdMs: number,
-  batchSize: number,
+  hardMaxResidenceHours: number,
+  batchSize: number
 ): Promise<{ recovered: number; errors: number }> {
   const cutoff = new Date(Date.now() - staleThresholdMs).toISOString();
+  const hardMaxCutoff = new Date(Date.now() - hardMaxResidenceHours * MS_PER_HOUR).toISOString();
 
   // Step 1: Find stale executions (bounded by LIMIT).
   // Use COALESCE to handle cases where started_at was never set (submission failure).
@@ -111,11 +176,15 @@ async function recoverStaleExecutionsByStatus(
   try {
     staleRows = await db
       .prepare(
-        `SELECT id, trigger_id, task_id, started_at, created_at
+        `SELECT id, trigger_id, task_id, event_type, started_at, created_at
          FROM trigger_executions
          WHERE status = ?
            AND COALESCE(started_at, created_at) <= ?
-         LIMIT ?`,
+           AND NOT EXISTS (
+             SELECT 1 FROM webhook_deliveries d
+              WHERE d.execution_id = trigger_executions.id AND d.outcome = 'processing'
+           )
+         LIMIT ?`
       )
       .bind(status, cutoff, batchSize)
       .all<StaleExecution>();
@@ -135,14 +204,12 @@ async function recoverStaleExecutionsByStatus(
 
   // Step 2: Batch-fetch all linked task statuses in a single query.
   const taskIds = [
-    ...new Set(
-      staleRows.results
-        .map((e) => e.task_id)
-        .filter((id): id is string => id !== null),
-    ),
+    ...new Set(staleRows.results.map((e) => e.task_id).filter((id): id is string => id !== null)),
   ];
 
   const taskMap = new Map<string, TaskRow>();
+  let taskLookupFailed = false;
+  let errors = 0;
   if (taskIds.length > 0) {
     try {
       const placeholders = taskIds.map(() => '?').join(', ');
@@ -158,35 +225,76 @@ async function recoverStaleExecutionsByStatus(
         taskIds,
         error: err instanceof Error ? err.message : String(err),
       });
-      // Fall through — missing tasks will be treated as "deleted"
+      // Rule 58: a failed liveness lookup withholds the destructive verdict for
+      // linked task rows. Rows with no task_id still have no owner and can be
+      // recovered without this lookup.
+      taskLookupFailed = true;
+      errors += 1;
     }
   }
 
   // Step 3: Build UPDATE statements and execute as a batch.
   const now = new Date().toISOString();
   let recovered = 0;
-  let errors = 0;
 
   const updateStatements: D1PreparedStatement[] = [];
-  const execReasons: { exec: StaleExecution; reason: string }[] = [];
+  const actions: ExecutionRecoveryAction[] = [];
 
   for (const exec of staleRows.results) {
-    const reason =
+    if (taskLookupFailed && exec.task_id) {
+      log.info('stale_execution_preserved_task_lookup_failed', {
+        executionId: exec.id,
+        triggerId: exec.trigger_id,
+        taskId: exec.task_id,
+        status,
+      });
+      continue;
+    }
+    const linkedTask = exec.task_id ? taskMap.get(exec.task_id) : undefined;
+    if (
+      status === 'running' &&
+      exec.event_type === 'incident_backlog' &&
+      linkedTask &&
+      !TERMINAL_TASK_STATUSES.has(linkedTask.status)
+    ) {
+      log.info('stale_incident_trigger_execution_retained', {
+        executionId: exec.id,
+        triggerId: exec.trigger_id,
+        taskId: exec.task_id,
+        taskStatus: linkedTask.status,
+      });
+      continue;
+    }
+    const action =
       status === 'queued' && !exec.task_id
-        ? 'Queued execution never started (submission failed or timed out)'
-        : status === 'queued'
-          ? `Queued execution stale — task ${exec.task_id} never transitioned to running`
-          : buildRecoveryReason(exec, taskMap);
-    execReasons.push({ exec, reason });
+        ? {
+            exec,
+            toStatus: 'failed' as const,
+            errorMessage: 'Queued execution never started (submission failed or timed out)',
+          }
+        : buildRecoveryAction(exec, taskMap, {
+            hardMaxCutoff,
+            hardMaxHours: hardMaxResidenceHours,
+          });
+    if (!action) continue;
+    actions.push(action);
     updateStatements.push(
       db
         .prepare(
           `UPDATE trigger_executions
-           SET status = 'failed', error_message = ?, completed_at = ?
-           WHERE id = ? AND status = ?`,
+           SET status = ?, error_message = ?, completed_at = ?
+           WHERE id = ? AND status = ?
+             AND NOT EXISTS (
+               SELECT 1 FROM webhook_deliveries d
+                WHERE d.execution_id = trigger_executions.id AND d.outcome = 'processing'
+             )`
         )
-        .bind(reason, now, exec.id, status),
+        .bind(action.toStatus, action.errorMessage, now, exec.id, status)
     );
+  }
+
+  if (updateStatements.length === 0) {
+    return { recovered: 0, errors };
   }
 
   try {
@@ -194,7 +302,7 @@ async function recoverStaleExecutionsByStatus(
 
     for (let i = 0; i < results.length; i++) {
       const result = results[i];
-      const entry = execReasons[i];
+      const entry = actions[i];
       if (!result || !entry) continue;
       if (result.meta.changes && result.meta.changes > 0) {
         recovered++;
@@ -203,15 +311,16 @@ async function recoverStaleExecutionsByStatus(
           triggerId: entry.exec.trigger_id,
           taskId: entry.exec.task_id,
           originalStatus: status,
-          reason: entry.reason,
+          recoveredStatus: entry.toStatus,
+          reason: entry.errorMessage,
         });
       }
     }
   } catch (err) {
-    errors = staleRows.results.length;
+    errors += actions.length;
     log.error('stale_execution_batch_update_failed', {
       status,
-      count: staleRows.results.length,
+      count: actions.length,
       error: err instanceof Error ? err.message : String(err),
     });
   }
@@ -230,18 +339,16 @@ async function recoverStaleExecutionsByStatus(
  */
 async function purgeOldTriggerExecutions(
   db: D1Database,
-  retentionDays: number,
+  retentionDays: number
 ): Promise<{ purged: number; errors: number }> {
-  const cutoff = new Date(
-    Date.now() - retentionDays * 24 * 60 * 60 * 1000,
-  ).toISOString();
+  const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
 
   try {
     const result = await db
       .prepare(
         `DELETE FROM trigger_executions
          WHERE status IN ('completed', 'failed', 'skipped')
-           AND created_at <= ?`,
+           AND created_at <= ?`
       )
       .bind(cutoff)
       .run();
@@ -265,52 +372,128 @@ async function purgeOldTriggerExecutions(
  * @param env - Worker environment bindings
  * @returns Stats about recovered stale executions and purged logs
  */
-export async function runTriggerExecutionCleanup(
-  env: Env,
-): Promise<TriggerExecutionCleanupStats> {
+export async function runTriggerExecutionCleanup(env: Env): Promise<TriggerExecutionCleanupStats> {
   // Kill switch
   if (env.TRIGGER_EXECUTION_CLEANUP_ENABLED === 'false') {
-    return { staleRecovered: 0, staleQueuedRecovered: 0, retentionPurged: 0, errors: 0 };
+    return {
+      staleRecovered: 0,
+      staleQueuedRecovered: 0,
+      retentionPurged: 0,
+      webhookDeliveriesPurged: 0,
+      projectEventSourceOutboxAdmitted: 0,
+      credentialLimitWindowsPurged: 0,
+      errors: 0,
+    };
   }
 
   const staleRunningThresholdMs = parsePositiveInt(
     env.TRIGGER_STALE_EXECUTION_TIMEOUT_MS,
-    DEFAULT_TRIGGER_STALE_EXECUTION_TIMEOUT_MS,
+    DEFAULT_TRIGGER_STALE_EXECUTION_TIMEOUT_MS
   );
   const staleQueuedThresholdMs = parsePositiveInt(
     env.TRIGGER_STALE_QUEUED_TIMEOUT_MS,
-    DEFAULT_TRIGGER_STALE_QUEUED_TIMEOUT_MS,
+    DEFAULT_TRIGGER_STALE_QUEUED_TIMEOUT_MS
+  );
+  const hardMaxResidenceHours = parsePositiveInt(
+    env.TRIGGER_EXECUTION_HARD_MAX_RESIDENCE_HOURS,
+    DEFAULT_TRIGGER_EXECUTION_HARD_MAX_RESIDENCE_HOURS
   );
   const retentionDays = parsePositiveInt(
     env.TRIGGER_EXECUTION_LOG_RETENTION_DAYS,
-    DEFAULT_TRIGGER_EXECUTION_LOG_RETENTION_DAYS,
+    DEFAULT_TRIGGER_EXECUTION_LOG_RETENTION_DAYS
   );
   const batchSize = parsePositiveInt(
     env.TRIGGER_STALE_RECOVERY_BATCH_SIZE,
-    DEFAULT_TRIGGER_STALE_RECOVERY_BATCH_SIZE,
+    DEFAULT_TRIGGER_STALE_RECOVERY_BATCH_SIZE
   );
+
+  let webhookCleanupErrors = 0;
+  let sourceOutboxErrors = 0;
+  let credentialLimitErrors = 0;
+  let projectEventSourceOutboxAdmitted = 0;
+  let credentialLimitWindowsPurged = 0;
+  try {
+    const credentialConfig = resolveCredentialLimitConfig(env);
+    credentialLimitWindowsPurged = await purgeExpiredCredentialLimitWindows(
+      env,
+      Date.now(),
+      credentialConfig
+    );
+    if (credentialLimitWindowsPurged > 0) {
+      log.info('credential_limit_windows_purged', { count: credentialLimitWindowsPurged });
+    }
+  } catch (error) {
+    credentialLimitErrors += 1;
+    log.error('credential_limit_window_purge_failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  try {
+    const reconciled = await reconcileProjectEventSourceOutbox(env);
+    projectEventSourceOutboxAdmitted = reconciled.admitted;
+    if (
+      reconciled.admitted > 0 ||
+      reconciled.retryableFailed > 0 ||
+      reconciled.permanentFailed > 0 ||
+      reconciled.expired > 0
+    ) {
+      log.info('project_event_source_outbox_reconciled', { ...reconciled });
+    }
+  } catch (error) {
+    sourceOutboxErrors += 1;
+    log.error('project_event_source_outbox_reconciliation_failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  try {
+    const reconciled = await reconcileStaleWebhookDeliveries(env);
+    if (reconciled > 0) log.info('webhook_deliveries_reconciled', { count: reconciled });
+  } catch (error) {
+    webhookCleanupErrors += 1;
+    log.error('webhook_delivery_reconciliation_failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 
   const staleRunning = await recoverStaleExecutionsByStatus(
     env.DATABASE,
     'running',
     staleRunningThresholdMs,
-    batchSize,
+    hardMaxResidenceHours,
+    batchSize
   );
   const staleQueued = await recoverStaleExecutionsByStatus(
     env.DATABASE,
     'queued',
     staleQueuedThresholdMs,
-    batchSize,
+    hardMaxResidenceHours,
+    batchSize
   );
-  const retention = await purgeOldTriggerExecutions(
-    env.DATABASE,
-    retentionDays,
-  );
+  const retention = await purgeOldTriggerExecutions(env.DATABASE, retentionDays);
+  let webhookDeliveriesPurged = 0;
+  try {
+    webhookDeliveriesPurged = await purgeExpiredWebhookDeliveries(env);
+  } catch (error) {
+    webhookCleanupErrors += 1;
+    log.error('webhook_delivery_purge_failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 
   return {
     staleRecovered: staleRunning.recovered,
     staleQueuedRecovered: staleQueued.recovered,
     retentionPurged: retention.purged,
-    errors: staleRunning.errors + staleQueued.errors + retention.errors,
+    webhookDeliveriesPurged,
+    projectEventSourceOutboxAdmitted,
+    credentialLimitWindowsPurged,
+    errors:
+      staleRunning.errors +
+      staleQueued.errors +
+      retention.errors +
+      webhookCleanupErrors +
+      sourceOutboxErrors +
+      credentialLimitErrors,
   };
 }

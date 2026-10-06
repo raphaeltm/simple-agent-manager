@@ -1,6 +1,10 @@
+import { useModalInteraction } from '@simple-agent-manager/ui/hooks/useModalInteraction';
 import { ArrowLeft, ArrowRight, ChevronDown, ChevronRight, LogOut } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+
+import { ThemeSwitcher } from './ThemeSwitcher';
 
 const FOCUS_RING =
   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
@@ -27,6 +31,7 @@ interface MobileNavDrawerProps {
   infraSection?: InfraSection;
   /** Rendered below Infrastructure in both default and global panels */
   projectListSection?: ReactNode;
+  projectHealthElement?: ReactNode;
   showGlobalNav?: boolean;
   onToggleGlobalNav?: () => void;
 }
@@ -49,11 +54,13 @@ export function MobileNavDrawer({
   projectName,
   infraSection,
   projectListSection,
+  projectHealthElement,
   showGlobalNav,
   onToggleGlobalNav,
 }: MobileNavDrawerProps) {
   const [infraOpen, setInfraOpen] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   const handleClose = useCallback(() => {
     if (isClosing) return;
@@ -61,13 +68,11 @@ export function MobileNavDrawer({
     window.setTimeout(onClose, 250);
   }, [isClosing, onClose]);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') handleClose();
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [handleClose]);
+  useModalInteraction({
+    enabled: true,
+    modalRef: panelRef,
+    onEscape: handleClose,
+  });
 
   // Determine if we're in project context with toggle capability
   const canToggle = Boolean(projectName && globalNavItems && onToggleGlobalNav);
@@ -77,7 +82,7 @@ export function MobileNavDrawer({
     ? navItems.filter((item) => item.label !== 'Back to Projects')
     : navItems;
 
-  return (
+  return createPortal(
     <>
       {/* Backdrop */}
       <div
@@ -90,11 +95,14 @@ export function MobileNavDrawer({
 
       {/* Panel */}
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label="Navigation menu"
+        tabIndex={-1}
+        data-sam-modal-root=""
         data-testid="mobile-nav-panel"
-        className="sam-glass-drawer-panel glass-panel-container fixed top-0 right-0 bottom-0 w-[85vw] max-w-80 glass-modal border-r-0 rounded-l-[20px] rounded-r-none z-drawer flex flex-col overflow-hidden before:content-[''] before:absolute before:top-0 before:bottom-0 before:left-0 before:w-[3px] before:bg-[linear-gradient(to_bottom,transparent_0%,rgba(34,197,94,0.55)_50%,transparent_100%)] before:pointer-events-none before:blur-[1px]"
+        className="sam-glass-drawer-panel glass-panel-container fixed top-0 right-0 bottom-0 w-[85vw] max-w-80 glass-modal border-r-0 rounded-l-[20px] rounded-r-none z-drawer flex flex-col overflow-hidden before:content-[''] before:absolute before:top-0 before:bottom-0 before:left-0 before:w-[3px] before:bg-[linear-gradient(to_bottom,transparent_0%,var(--sam-chrome-drawer-edge-glow)_50%,transparent_100%)] before:pointer-events-none before:blur-[1px]"
         data-state={isClosing ? 'closing' : 'open'}
       >
         {/* Header: user info + close */}
@@ -134,7 +142,7 @@ export function MobileNavDrawer({
           <button
               onClick={onToggleGlobalNav}
               data-testid="mobile-nav-toggle"
-              className={`flex items-center gap-3 w-full px-5 py-3 bg-transparent border-none border-b border-border-default cursor-pointer text-left text-sm font-medium text-fg-muted hover:text-fg-primary hover:bg-[rgba(34,197,94,0.04)] transition-all duration-150 ${FOCUS_RING}`}
+              className={`flex items-center gap-3 w-full px-5 py-3 bg-transparent border-none border-b border-border-default cursor-pointer text-left text-sm font-medium text-fg-muted hover:text-fg-primary hover:bg-[var(--sam-chrome-accent-hover-subtle)] transition-all duration-150 ${FOCUS_RING}`}
             aria-label={showGlobalNav ? `Back to ${projectName} navigation` : 'Show global navigation'}
           >
             {showGlobalNav ? (
@@ -166,7 +174,11 @@ export function MobileNavDrawer({
         )}
 
         {/* Nav items with slide transition */}
+        {/* `data-intentional-clip`: two-panel carousel — both panels sit side by
+            side (2x width) and are translated into view, so the content is
+            deliberately wider than the box. See NavSidebar for the twin. */}
         <nav
+          data-intentional-clip
           aria-label={showGlobalNav ? 'Primary navigation' : 'Project navigation'}
           className="flex-1 overflow-hidden relative"
         >
@@ -180,6 +192,12 @@ export function MobileNavDrawer({
               aria-hidden={(canToggle && showGlobalNav) || undefined}
               inert={canToggle && showGlobalNav ? true : undefined}
             >
+              {projectHealthElement && !showGlobalNav && (
+                <div className="px-5 pb-2">
+                  {projectHealthElement}
+                </div>
+              )}
+
               {(canToggle ? projectItems : navItems).map((item) => {
                 const active = isNavItemActive(item.path, currentPath);
                 return (
@@ -188,8 +206,8 @@ export function MobileNavDrawer({
                     aria-current={active ? 'page' : undefined}
                     className={`flex items-center gap-3 w-full min-h-11 px-5 py-2.5 text-base font-medium bg-transparent border-none cursor-pointer text-left border-l-3 transition-all duration-[120ms] ${FOCUS_RING} ${
                       active
-                        ? 'text-accent border-l-accent bg-[rgba(34,197,94,0.08)]'
-                        : 'text-fg-muted border-l-transparent hover:text-fg-primary hover:bg-[rgba(34,197,94,0.04)]'
+                        ? 'text-accent border-l-accent bg-[var(--sam-chrome-accent-active-subtle)]'
+                        : 'text-fg-muted border-l-transparent hover:text-fg-primary hover:bg-[var(--sam-chrome-accent-hover-subtle)]'
                     }`}
                     onClick={() => onNavigate(item.path)}
                   >
@@ -204,7 +222,7 @@ export function MobileNavDrawer({
                 <div className="mt-2">
                   <button
                     onClick={() => setInfraOpen(!infraOpen)}
-                    className={`flex items-center gap-2 w-full px-5 py-2.5 bg-transparent border-none text-xs font-semibold text-fg-muted uppercase tracking-wider cursor-pointer hover:text-fg-primary hover:bg-[rgba(34,197,94,0.04)] transition-all duration-[120ms] ${FOCUS_RING}`}
+                    className={`flex items-center gap-2 w-full px-5 py-2.5 bg-transparent border-none text-xs font-semibold text-fg-muted uppercase tracking-wider cursor-pointer hover:text-fg-primary hover:bg-[var(--sam-chrome-accent-hover-subtle)] transition-all duration-[120ms] ${FOCUS_RING}`}
                     aria-expanded={infraOpen}
                     aria-controls="mobile-infra-nav-panel"
                   >
@@ -221,8 +239,8 @@ export function MobileNavDrawer({
                             aria-current={active ? 'page' : undefined}
                             className={`flex items-center gap-3 w-full min-h-11 px-5 pl-8 py-2.5 text-base font-medium bg-transparent border-none cursor-pointer text-left border-l-3 transition-all duration-[120ms] ${FOCUS_RING} ${
                               active
-                                ? 'text-accent border-l-accent bg-[rgba(34,197,94,0.08)]'
-                                : 'text-fg-muted border-l-transparent hover:text-fg-primary hover:bg-[rgba(34,197,94,0.04)]'
+                                ? 'text-accent border-l-accent bg-[var(--sam-chrome-accent-active-subtle)]'
+                                : 'text-fg-muted border-l-transparent hover:text-fg-primary hover:bg-[var(--sam-chrome-accent-hover-subtle)]'
                             }`}
                             onClick={() => onNavigate(item.path)}
                           >
@@ -255,8 +273,8 @@ export function MobileNavDrawer({
                       aria-current={active ? 'page' : undefined}
                       className={`flex items-center gap-3 w-full min-h-11 px-5 py-2.5 text-base font-medium bg-transparent border-none cursor-pointer text-left border-l-3 transition-all duration-[120ms] ${FOCUS_RING} ${
                         active
-                          ? 'text-accent border-l-accent bg-[rgba(34,197,94,0.08)]'
-                          : 'text-fg-muted border-l-transparent hover:text-fg-primary hover:bg-[rgba(34,197,94,0.04)]'
+                          ? 'text-accent border-l-accent bg-[var(--sam-chrome-accent-active-subtle)]'
+                          : 'text-fg-muted border-l-transparent hover:text-fg-primary hover:bg-[var(--sam-chrome-accent-hover-subtle)]'
                       }`}
                       onClick={() => onNavigate(item.path)}
                     >
@@ -271,7 +289,7 @@ export function MobileNavDrawer({
                   <div className="mt-2">
                     <button
                       onClick={() => setInfraOpen(!infraOpen)}
-                      className={`flex items-center gap-2 w-full px-5 py-2.5 bg-transparent border-none text-xs font-semibold text-fg-muted uppercase tracking-wider cursor-pointer hover:text-fg-primary hover:bg-[rgba(34,197,94,0.04)] transition-all duration-[120ms] ${FOCUS_RING}`}
+                      className={`flex items-center gap-2 w-full px-5 py-2.5 bg-transparent border-none text-xs font-semibold text-fg-muted uppercase tracking-wider cursor-pointer hover:text-fg-primary hover:bg-[var(--sam-chrome-accent-hover-subtle)] transition-all duration-[120ms] ${FOCUS_RING}`}
                       aria-expanded={infraOpen}
                       aria-controls="mobile-infra-nav-panel-global"
                     >
@@ -288,8 +306,8 @@ export function MobileNavDrawer({
                               aria-current={active ? 'page' : undefined}
                               className={`flex items-center gap-3 w-full min-h-11 px-5 pl-8 py-2.5 text-base font-medium bg-transparent border-none cursor-pointer text-left border-l-3 transition-all duration-[120ms] ${FOCUS_RING} ${
                                 active
-                                  ? 'text-accent border-l-accent bg-[rgba(34,197,94,0.08)]'
-                                  : 'text-fg-muted border-l-transparent hover:text-fg-primary hover:bg-[rgba(34,197,94,0.04)]'
+                                  ? 'text-accent border-l-accent bg-[var(--sam-chrome-accent-active-subtle)]'
+                                  : 'text-fg-muted border-l-transparent hover:text-fg-primary hover:bg-[var(--sam-chrome-accent-hover-subtle)]'
                               }`}
                               onClick={() => onNavigate(item.path)}
                             >
@@ -310,17 +328,23 @@ export function MobileNavDrawer({
           </div>
         </nav>
 
+        {/* Theme switcher */}
+        <div className="border-t border-border-default px-5 py-3">
+          <ThemeSwitcher />
+        </div>
+
         {/* Sign out */}
         <div className="border-t border-border-default py-2">
           <button
             onClick={onSignOut}
-            className={`flex items-center gap-3 w-full min-h-11 px-5 py-2.5 text-base font-medium bg-transparent border-none cursor-pointer text-left border-l-3 border-l-transparent text-danger-fg hover:bg-[rgba(34,197,94,0.04)] transition-all duration-[120ms] ${FOCUS_RING}`}
+            className={`flex items-center gap-3 w-full min-h-11 px-5 py-2.5 text-base font-medium bg-transparent border-none cursor-pointer text-left border-l-3 border-l-transparent text-danger-fg hover:bg-[var(--sam-chrome-accent-hover-subtle)] transition-all duration-[120ms] ${FOCUS_RING}`}
           >
             <LogOut size={18} />
             Sign out
           </button>
         </div>
       </div>
-    </>
+    </>,
+    document.body,
   );
 }

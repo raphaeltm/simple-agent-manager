@@ -1,8 +1,26 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render as baseRender, type RenderOptions, screen, within } from '@testing-library/react';
+import { type ReactElement, useEffect, useState } from 'react';
 import { MemoryRouter, useNavigate } from 'react-router';
 import { afterEach, beforeAll, beforeEach,describe, expect, it, vi } from 'vitest';
 
 import { AppShell } from '../../src/components/AppShell';
+import { GLOBAL_NAV_ITEMS, PROJECT_NAV_ITEMS } from '../../src/components/NavSidebar';
+import { ThemeProvider } from '../../src/contexts/ThemeContext';
+import { QueryTestWrapper } from '../test-utils/query-test-utils';
+
+// AppShell renders the shared <ThemeSwitcher /> (desktop sidebar footer and the
+// mobile drawer), which calls useTheme and requires a ThemeProvider ancestor.
+function render(ui: ReactElement, options?: Omit<RenderOptions, 'wrapper'>) {
+  function Wrapper({ children }: { children: ReactElement }) {
+    return (
+      <QueryTestWrapper>
+        <ThemeProvider>{children}</ThemeProvider>
+      </QueryTestWrapper>
+    );
+  }
+
+  return baseRender(ui, { wrapper: Wrapper, ...options });
+}
 
 // Mutable auth state so individual tests can override
 let mockAuthState: Record<string, unknown> = {
@@ -12,6 +30,14 @@ let mockAuthState: Record<string, unknown> = {
 
 // jsdom does not implement window.matchMedia — stub it for useIsMobile hook
 let matchMediaMatches = false;
+const matchMediaListeners = new Set<(event: MediaQueryListEvent) => void>();
+
+function setMatchMediaMatches(matches: boolean) {
+  matchMediaMatches = matches;
+  const event = { matches, media: '(max-width: 767px)' } as MediaQueryListEvent;
+  for (const listener of matchMediaListeners) listener(event);
+}
+
 beforeAll(() => {
   Object.defineProperty(window, 'matchMedia', {
     writable: true,
@@ -21,8 +47,16 @@ beforeAll(() => {
       onchange: null,
       addListener: vi.fn(),
       removeListener: vi.fn(),
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
+      addEventListener: vi.fn(
+        (_type: string, listener: (event: MediaQueryListEvent) => void) => {
+          matchMediaListeners.add(listener);
+        },
+      ),
+      removeEventListener: vi.fn(
+        (_type: string, listener: (event: MediaQueryListEvent) => void) => {
+          matchMediaListeners.delete(listener);
+        },
+      ),
       dispatchEvent: vi.fn(),
     })),
   });
@@ -45,7 +79,34 @@ vi.mock('../../src/lib/api', async (importOriginal) => ({
   listNodes: vi.fn().mockResolvedValue([]),
 }));
 
+vi.mock('../../src/components/NotificationCenter', () => ({
+  NotificationCenter: () => <button type="button" aria-label="Notifications" />,
+}));
+
+vi.mock('../../src/components/RecentChatsDropdown', () => ({
+  RecentChatsDropdown: () => <button type="button" aria-label="Recent chats" />,
+}));
+
+vi.mock('../../src/components/GlobalAudioPlayer', () => ({
+  GlobalAudioPlayer: () => null,
+}));
+
+vi.mock('../../src/components/onboarding/choose-path/ChoosePathWizard', () => ({
+  ChoosePathWizard: () => null,
+}));
+
+vi.mock('../../src/components/GlobalCommandPalette', () => ({
+  GlobalCommandPalette: ({ onClose }: { onClose: () => void }) => (
+    <div role="dialog" aria-label="Command palette">
+      <button type="button" onClick={onClose}>
+        Close
+      </button>
+    </div>
+  ),
+}));
+
 beforeEach(() => {
+  matchMediaListeners.clear();
   matchMediaMatches = false;
   mockAuthState = {
     user: { name: 'Test User', email: 'test@example.com', image: null },
@@ -126,6 +187,19 @@ describe('AppShell (global context)', () => {
     renderAppShell();
     expect(screen.queryByText('Admin')).not.toBeInTheDocument();
   });
+
+  it('does not include prototype or test-only destinations in production navigation models', () => {
+    const navPaths = [
+      ...GLOBAL_NAV_ITEMS.map((item) => item.path),
+      ...PROJECT_NAV_ITEMS.map((item) => `/projects/project-id/${item.path}`),
+    ];
+
+    expect(navPaths).not.toContain('/sam');
+    expect(navPaths).not.toContain('/__test/trial-chat-gate');
+    expect(navPaths).not.toContain('/ui-standards');
+    expect(navPaths.every((path) => !path.includes('prototype'))).toBe(true);
+    expect(navPaths.every((path) => !path.includes('__test'))).toBe(true);
+  });
 });
 
 describe('AppShell (project context)', () => {
@@ -137,7 +211,8 @@ describe('AppShell (project context)', () => {
     expect(projectNav.getAttribute('aria-hidden')).not.toBe('true');
     expect(screen.getByText('Chat')).toBeInTheDocument();
     expect(screen.getByText('Ideas')).toBeInTheDocument();
-    expect(screen.getByText('Activity')).toBeInTheDocument();
+    expect(screen.getByText('Deployments')).toBeInTheDocument();
+    expect(screen.queryByText('Activity')).not.toBeInTheDocument();
   });
 
   it('shows Back to Projects toggle button when inside a project', () => {
@@ -257,7 +332,8 @@ describe('AppShell (mobile)', () => {
     expect(drawer).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Chat' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Ideas' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Activity' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Deployments' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Activity' })).not.toBeInTheDocument();
   });
 
   it('renders icons alongside labels in mobile drawer nav items', () => {
@@ -368,5 +444,177 @@ describe('AppShell (mobile)', () => {
 
     expect(screen.queryByRole('dialog', { name: 'Navigation menu' })).not.toBeInTheDocument();
     vi.useRealTimers();
+  });
+
+  it('preserves routed child state when rotation crosses the mobile breakpoint', () => {
+    let mountCount = 0;
+
+    function StatefulPage() {
+      const [draft, setDraft] = useState('');
+      useEffect(() => {
+        mountCount += 1;
+      }, []);
+
+      return (
+        <label>
+          Draft
+          <input value={draft} onChange={(event) => setDraft(event.target.value)} />
+        </label>
+      );
+    }
+
+    render(
+      <MemoryRouter initialEntries={['/dashboard']}>
+        <AppShell>
+          <StatefulPage />
+        </AppShell>
+      </MemoryRouter>,
+    );
+
+    fireEvent.change(screen.getByLabelText('Draft'), { target: { value: 'keep this' } });
+
+    act(() => {
+      setMatchMediaMatches(false);
+    });
+
+    expect(screen.getByLabelText('Draft')).toHaveValue('keep this');
+    expect(mountCount).toBe(1);
+  });
+});
+
+describe('AppShell (Focus Mode — desktop)', () => {
+  // The grid wrapper carries the collapsing nav column as an inline width.
+  // navWidthForMode: default=220, focus=56, zen=0 (see src/lib/focus-mode.ts).
+  function gridColumns(): string {
+    const grid = document.querySelector('div.grid.h-screen') as HTMLElement | null;
+    expect(grid).toBeTruthy();
+    return grid!.style.gridTemplateColumns;
+  }
+
+  beforeEach(() => {
+    matchMediaMatches = false; // desktop — Focus Mode is desktop-only
+    window.localStorage.clear();
+  });
+
+  afterEach(() => {
+    window.localStorage.clear();
+    vi.restoreAllMocks();
+  });
+
+  it('persists mode changes to localStorage and collapses the nav column', () => {
+    const setItem = vi.spyOn(Storage.prototype, 'setItem');
+    renderAppShell();
+
+    // Default: full nav rail (220px) and the segmented toggle is visible.
+    expect(gridColumns()).toBe('220px 1fr');
+    expect(screen.getByRole('group', { name: 'Focus Mode' })).toBeInTheDocument();
+
+    // Select Focus -> nav collapses to the 56px icon rail, persisted.
+    fireEvent.click(screen.getByRole('button', { name: 'Focus', exact: true }));
+    expect(setItem).toHaveBeenCalledWith('sam:focus-mode', 'focus');
+    expect(gridColumns()).toBe('56px 1fr');
+
+    // In focus mode the compact cycle control replaces the segmented group.
+    const cycle = screen.getByRole('button', {
+      name: /Focus Mode: Focus\. Activate to switch to Zen/,
+    });
+    fireEvent.click(cycle);
+    expect(setItem).toHaveBeenCalledWith('sam:focus-mode', 'zen');
+    expect(gridColumns()).toBe('0px 1fr');
+  });
+
+  it('hydrates the persisted mode across reloads', () => {
+    // Simulate a prior session that left Focus Mode in "focus".
+    window.localStorage.setItem('sam:focus-mode', 'focus');
+    renderAppShell();
+
+    // The hydration effect reads localStorage on mount and collapses to 56px.
+    expect(gridColumns()).toBe('56px 1fr');
+    // The compact cycle control (not the segmented group) is shown in focus mode.
+    expect(
+      screen.getByRole('button', { name: /Focus Mode: Focus\. Activate to switch to Zen/ }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Focus Mode' })).not.toBeInTheDocument();
+  });
+
+  it('cycles default -> focus -> zen -> default with the F key', () => {
+    renderAppShell();
+    expect(gridColumns()).toBe('220px 1fr');
+
+    fireEvent.keyDown(window, { key: 'f' });
+    expect(gridColumns()).toBe('56px 1fr');
+
+    fireEvent.keyDown(window, { key: 'f' });
+    expect(gridColumns()).toBe('0px 1fr');
+
+    fireEvent.keyDown(window, { key: 'f' });
+    expect(gridColumns()).toBe('220px 1fr');
+  });
+
+  it('disables the column transition under prefers-reduced-motion', () => {
+    renderAppShell();
+    const grid = document.querySelector('div.grid.h-screen') as HTMLElement | null;
+    expect(grid).toBeTruthy();
+    // The grid animates grid-template-columns, but must opt out when the user
+    // requests reduced motion (Tailwind motion-reduce: variant).
+    expect(grid!.className).toContain('transition-[grid-template-columns]');
+    expect(grid!.className).toContain('motion-reduce:transition-none');
+  });
+
+  it('ignores the F key while typing in an input', () => {
+    renderAppShell();
+    const search = screen.getByLabelText('Open command palette');
+    // Focus a text-like element and press F — Focus Mode must not cycle.
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    input.focus();
+    fireEvent.keyDown(input, { key: 'f' });
+    expect(gridColumns()).toBe('220px 1fr');
+    input.remove();
+    expect(search).toBeInTheDocument();
+  });
+
+  it('ignores the F key while a select element is focused', () => {
+    renderAppShell();
+    // A native <select> captures "f" for type-ahead option matching, so the
+    // global Focus Mode cycle must not also fire.
+    const select = document.createElement('select');
+    document.body.appendChild(select);
+    select.focus();
+    fireEvent.keyDown(select, { key: 'f' });
+    expect(gridColumns()).toBe('220px 1fr');
+    select.remove();
+  });
+});
+
+describe('AppShell (Focus Mode — mobile is disabled)', () => {
+  beforeEach(() => {
+    matchMediaMatches = true; // mobile
+    window.localStorage.clear();
+  });
+
+  afterEach(() => {
+    window.localStorage.clear();
+  });
+
+  it('never renders the Focus Mode toggle and ignores a persisted mode', () => {
+    // Even with a persisted non-default mode, mobile must stay default.
+    window.localStorage.setItem('sam:focus-mode', 'zen');
+    renderAppShell();
+
+    expect(screen.queryByRole('group', { name: 'Focus Mode' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /Focus Mode: .*Activate to switch/ }),
+    ).not.toBeInTheDocument();
+    // The collapsing desktop grid wrapper is not used on mobile.
+    expect(document.querySelector('div.grid.h-screen')).toBeNull();
+  });
+
+  it('does not cycle Focus Mode when the F key is pressed', () => {
+    renderAppShell();
+    fireEvent.keyDown(window, { key: 'f' });
+    expect(
+      screen.queryByRole('button', { name: /Focus Mode: .*Activate to switch/ }),
+    ).not.toBeInTheDocument();
   });
 });

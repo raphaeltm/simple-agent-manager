@@ -1,50 +1,51 @@
-import type { CredentialResponse } from '@simple-agent-manager/shared';
 import { Alert, Breadcrumb, PageLayout, Tabs } from '@simple-agent-manager/ui';
-import { useCallback,useEffect, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Outlet } from 'react-router';
 
-import { getSmokeTestStatus,listCredentials } from '../lib/api';
+import { useCredentials, useInvalidateCredentials } from '../hooks/useCredentials';
+import { useQueryScope } from '../hooks/useQueryScope';
 import { SettingsContext } from './SettingsContext';
 
 const BASE_TABS = [
   { id: 'cloud-provider', label: 'Cloud Provider', path: 'cloud-provider' },
+  { id: 'infrastructure', label: 'Infrastructure', path: 'infrastructure' },
   { id: 'github', label: 'GitHub', path: 'github' },
+  { id: 'connections', label: 'Connections', path: 'connections' },
   { id: 'agents', label: 'Agents', path: 'agents' },
+  { id: 'mcp-servers', label: 'MCP Servers', path: 'mcp-servers' },
+  { id: 'advanced', label: 'Advanced', path: 'advanced' },
   { id: 'notifications', label: 'Notifications', path: 'notifications' },
   { id: 'usage', label: 'Usage', path: 'usage' },
 ];
 
-const SMOKE_TEST_TAB = { id: 'smoke-test-tokens', label: 'Test Tokens', path: 'smoke-test-tokens' };
+const API_TOKENS_TAB = { id: 'api-tokens', label: 'API Tokens', path: 'api-tokens' };
 
 /**
  * Settings shell — Tabs + Outlet for sub-route pages.
  */
 export function Settings() {
-  const [credentials, setCredentials] = useState<CredentialResponse[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [smokeTestEnabled, setSmokeTestEnabled] = useState(false);
+  const queryScope = useQueryScope();
+  const { credentials, loading, isRefreshing, error } = useCredentials(queryScope);
+  const invalidateCredentials = useInvalidateCredentials(queryScope);
+  const [dismissedError, setDismissedError] = useState<string | null>(null);
 
-  const loadCredentials = useCallback(async () => {
-    try {
-      setError(null);
-      const data = await listCredentials();
-      setCredentials(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load credentials');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  // Deliberately NOT a `useCallback` closing over a toast/context object. The
+  // refetch-loop incident behind `.claude/rules/48-stale-while-revalidate-ui.md`
+  // started with a loader whose identity changed whenever a context re-rendered;
+  // `invalidateCredentials` depends only on the query client and the scope.
+  const reload = useCallback(async () => {
+    setDismissedError(null);
+    await invalidateCredentials();
+  }, [invalidateCredentials]);
 
-  useEffect(() => {
-    loadCredentials();
-    getSmokeTestStatus()
-      .then((status) => setSmokeTestEnabled(status.enabled))
-      .catch(() => setSmokeTestEnabled(false));
-  }, [loadCredentials]);
+  const settingsValue = useMemo(
+    () => ({ credentials, loading, isRefreshing, reload }),
+    [credentials, loading, isRefreshing, reload]
+  );
 
-  const tabs = smokeTestEnabled ? [...BASE_TABS, SMOKE_TEST_TAB] : BASE_TABS;
+  const visibleError = error && error !== dismissedError ? error : null;
+
+  const tabs = [...BASE_TABS, API_TOKENS_TAB];
 
   return (
     <PageLayout title="Settings" maxWidth="xl">
@@ -55,16 +56,18 @@ export function Settings() {
         ]}
       />
 
-      {error && (
+      {visibleError && (
         <div className="mt-3">
-          <Alert variant="error" onDismiss={() => setError(null)}>{error}</Alert>
+          <Alert variant="error" onDismiss={() => setDismissedError(visibleError)}>
+            {visibleError}
+          </Alert>
         </div>
       )}
 
       <div className="grid gap-4 mt-4">
         <Tabs tabs={tabs} basePath="/settings" />
 
-        <SettingsContext.Provider value={{ credentials, loading, reload: loadCredentials }}>
+        <SettingsContext.Provider value={settingsValue}>
           <Outlet />
         </SettingsContext.Provider>
       </div>

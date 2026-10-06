@@ -11,6 +11,7 @@
 - `X-SAM-Node-Id` is required for all Node Agent management/observability requests.
 - `X-SAM-Workspace-Id` is required for workspace-scoped routes.
 - Header trust rule: Node Agent only trusts `X-SAM-*` headers from Control Plane ingress; direct client traffic is not an authoritative source.
+- Node-wide diagnostic routes require node-scoped management JWTs with no workspace claim. Workspace browser sessions and workspace-scoped management JWTs cannot authorize node-wide raw diagnostics on multi-workspace nodes.
 
 ## Node-Level Endpoints
 
@@ -46,6 +47,7 @@
 - `GET /workspaces/{workspaceId}/events`
 - Returns recent workspace-scoped events/log entries.
 - Query: `limit`, `cursor`.
+- May also be reached with a valid workspace session for the matching workspace; responses remain scoped to that workspace.
 
 ## Agent Session Endpoints
 

@@ -1,0 +1,144 @@
+{
+  "$schema": "./fixtures/supply-chain/direct-dependency-evidence.schema.json",
+  "npm": {
+    "@astrojs/check": {
+      "registryUrl": "https://www.npmjs.com/package/@astrojs/check",
+      "necessity": "Validates Astro templates and embedded TypeScript."
+    },
+    "@axe-core/playwright": {
+      "registryUrl": "https://www.npmjs.com/package/@axe-core/playwright",
+      "necessity": "Runs accessibility assertions in browser evidence tests."
+    },
+    "@eslint/js": {
+      "registryUrl": "https://www.npmjs.com/package/@eslint/js",
+      "necessity": "Provides supported ESLint flat recommended configuration."
+    },
+    "@modelcontextprotocol/sdk": {
+      "registryUrl": "https://www.npmjs.com/package/@modelcontextprotocol/sdk",
+      "necessity": "Runs the disposable HTTPS MCP service and notification fixture for ACP URL completion verification."
+    },
+    "@playwright/test": {
+      "registryUrl": "https://www.npmjs.com/package/@playwright/test",
+      "necessity": "Executes browser evidence and screenshot checks."
+    },
+    "@storybook/addon-a11y": {
+      "registryUrl": "https://www.npmjs.com/package/@storybook/addon-a11y",
+      "necessity": "Adds Storybook accessibility testing integration."
+    },
+    "@storybook/addon-docs": {
+      "registryUrl": "https://www.npmjs.com/package/@storybook/addon-docs",
+      "necessity": "Builds Storybook documentation pages for components."
+    },
+    "@storybook/react": {
+      "registryUrl": "https://www.npmjs.com/package/@storybook/react",
+      "necessity": "Provides the React renderer for Storybook."
+    },
+    "@storybook/react-vite": {
+      "registryUrl": "https://www.npmjs.com/package/@storybook/react-vite",
+      "necessity": "Provides Vite integration for React Storybook."
+    },
+    "@tailwindcss/vite": {
+      "registryUrl": "https://www.npmjs.com/package/@tailwindcss/vite",
+      "necessity": "Compiles Tailwind CSS through Vite builds."
+    },
+    "@tanstack/query-persist-client-core": {
+      "registryUrl": "https://www.npmjs.com/package/@tanstack/query-persist-client-core",
+      "necessity": "Persists an allowlisted slice of the TanStack Query cache so a reload paints from cache instead of an empty state. Loaded via dynamic import for signed-in sessions only."
+    },
+    "@typescript-eslint/eslint-plugin": {
+      "registryUrl": "https://www.npmjs.com/package/@typescript-eslint/eslint-plugin",
+      "necessity": "Hosts supported TypeScript lint rules."
+    },
+    "@typescript-eslint/parser": {
+      "registryUrl": "https://www.npmjs.com/package/@typescript-eslint/parser",
+      "necessity": "Parses TypeScript for ESLint rules and fixtures."
+    },
+    "@vitest/coverage-v8": {
+      "registryUrl": "https://www.npmjs.com/package/@vitest/coverage-v8",
+      "necessity": "Generates V8 coverage for workspace gates."
+    },
+    "eslint": {
+      "registryUrl": "https://www.npmjs.com/package/eslint",
+      "necessity": "Runs authoritative lint and local rule fixtures."
+    },
+    "eslint-plugin-astro": {
+      "registryUrl": "https://www.npmjs.com/package/eslint-plugin-astro",
+      "necessity": "Parses and lints tracked Astro templates."
+    },
+    "eslint-plugin-react": {
+      "registryUrl": "https://www.npmjs.com/package/eslint-plugin-react",
+      "necessity": "Preserves existing React lint findings."
+    },
+    "eslint-plugin-react-hooks": {
+      "registryUrl": "https://www.npmjs.com/package/eslint-plugin-react-hooks",
+      "necessity": "Preserves existing React Hooks lint findings."
+    },
+    "fake-indexeddb": {
+      "registryUrl": "https://www.npmjs.com/package/fake-indexeddb",
+      "necessity": "In-memory IndexedDB for tests of the query-cache persister; jsdom provides no IndexedDB implementation."
+    },
+    "globals": {
+      "registryUrl": "https://www.npmjs.com/package/globals",
+      "necessity": "Defines explicit flat-config runtime globals."
+    },
+    "idb-keyval": {
+      "registryUrl": "https://www.npmjs.com/package/idb-keyval",
+      "necessity": "IndexedDB backing store for the persisted query cache. Chosen over localStorage so it cannot evict the library-cache index, which already needs its own LRU within the ~5 MB localStorage budget."
+    },
+    "oxlint": {
+      "registryUrl": "https://www.npmjs.com/package/oxlint",
+      "necessity": "Measures native lint findings in shadow mode."
+    },
+    "sharp": {
+      "registryUrl": "https://www.npmjs.com/package/sharp",
+      "necessity": "Downscales marketing feature screenshots and writes their WebP siblings (apps/www optimize:features)."
+    },
+    "storybook": {
+      "registryUrl": "https://www.npmjs.com/package/storybook",
+      "necessity": "Provides the Storybook build and test CLI."
+    },
+    "tailwindcss": {
+      "registryUrl": "https://www.npmjs.com/package/tailwindcss",
+      "necessity": "Provides Tailwind CSS styling primitives."
+    },
+    "tsx": {
+      "registryUrl": "https://www.npmjs.com/package/tsx",
+      "necessity": "Runs the deterministic Astro validation wrapper."
+    },
+    "typescript": {
+      "registryUrl": "https://www.npmjs.com/package/typescript",
+      "necessity": "Checks local plugin JavaScript declarations."
+    },
+    "typescript-eslint": {
+      "registryUrl": "https://www.npmjs.com/package/typescript-eslint",
+      "necessity": "Provides supported ESLint flat TypeScript configuration."
+    },
+    "uplot": {
+      "registryUrl": "https://www.npmjs.com/package/uplot",
+      "homepageUrl": "https://github.com/leeoniya/uPlot",
+      "necessity": "Canvas time-series charts for the session resource timeline; handles tens of thousands of points with zoom and synced cursors in ~23 KB gzipped, loaded only when Resources opens."
+    },
+    "vite": {
+      "registryUrl": "https://www.npmjs.com/package/vite",
+      "necessity": "Bundles browser-facing Storybook test assets."
+    },
+    "vitest": {
+      "registryUrl": "https://www.npmjs.com/package/vitest",
+      "necessity": "Runs local plugin and quality checker fixtures."
+    },
+    "wrangler": {
+      "registryUrl": "https://www.npmjs.com/package/wrangler",
+      "necessity": "Provides the lockfile-pinned Cloudflare Pages deployment executable for the marketing workspace."
+    },
+    "yaml": {
+      "registryUrl": "https://www.npmjs.com/package/yaml",
+      "necessity": "Structurally parses GitHub workflow contracts in security regression tests."
+    }
+  },
+  "go": {
+    "golang.org/x/vuln/cmd/govulncheck": {
+      "registryUrl": "https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck",
+      "necessity": "Pins the official govulncheck CLI used by the diff-local Go vulnerability gate."
+    }
+  }
+}

@@ -12,6 +12,14 @@ import {
 } from 'recharts';
 
 import type { AnalyticsFeatureAdoptionResponse } from '../../lib/api';
+import {
+  adminChartSeries,
+  chartCategoryTick,
+  chartCursor,
+  chartGridStroke,
+  chartTick,
+  chartTooltipStyle,
+} from './chartTokens';
 
 const EVENT_LABELS: Record<string, string> = {
   project_created: 'Create Project',
@@ -29,36 +37,28 @@ const EVENT_LABELS: Record<string, string> = {
   settings_changed: 'Change Settings',
 };
 
-/** Categorical colors for bars. */
-const BAR_COLORS = [
-  'var(--sam-color-accent-primary, #16a34a)',
-  'var(--sam-color-success, #22c55e)',
-  '#60a5fa',
-  '#a78bfa',
-  'var(--sam-color-warning, #f59e0b)',
-  '#f97316',
-  '#ec4899',
-  '#14b8a6',
-  '#8b5cf6',
-  '#06b6d4',
-  '#84cc16',
-  '#f43f5e',
-  '#6366f1',
-];
-
 interface Props {
   data: AnalyticsFeatureAdoptionResponse | null;
 }
 
 /** Custom tooltip for feature adoption chart. */
-function AdoptionTooltip({ active, payload }: { active?: boolean; payload?: Array<{ payload: { label: string; count: number; unique_users: number } }> }) {
-  if (!active || !payload?.length) return null;
-  const d = payload[0]!.payload;
+function AdoptionTooltip({
+  active,
+  payload,
+}: {
+  active?: boolean;
+  payload?: Array<{ payload: { label: string; count: number; unique_users: number } }>;
+}) {
+  const point = payload?.[0];
+  if (!active || !point) return null;
+  const d = point.payload;
   return (
-    <div className="rounded-md border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)]-primary px-3 py-2 shadow-lg text-sm">
+    <div className="rounded-md px-3 py-2 shadow-lg text-sm" style={chartTooltipStyle}>
       <div className="text-fg-primary font-medium">{d.label}</div>
       <div className="text-fg-secondary tabular-nums">{d.count.toLocaleString()} events</div>
-      <div className="text-fg-muted tabular-nums text-xs">{d.unique_users.toLocaleString()} unique users</div>
+      <div className="text-fg-muted tabular-nums text-xs">
+        {d.unique_users.toLocaleString()} unique users
+      </div>
     </div>
   );
 }
@@ -80,26 +80,30 @@ export const FeatureAdoptionChart: FC<Props> = ({ data }) => {
   return (
     <div className="w-full" style={{ height: chartHeight }}>
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={chartData} layout="vertical" margin={{ top: 0, right: 4, left: 0, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="var(--sam-color-border-default, #29423b)" strokeOpacity={0.3} horizontal={false} />
-          <XAxis
-            type="number"
-            tick={{ fontSize: 11, fill: 'var(--sam-color-fg-muted, #9fb7ae)' }}
-            axisLine={false}
-            tickLine={false}
+        <BarChart
+          data={chartData}
+          layout="vertical"
+          margin={{ top: 0, right: 4, left: 0, bottom: 0 }}
+        >
+          <CartesianGrid
+            strokeDasharray="3 3"
+            stroke={chartGridStroke}
+            strokeOpacity={0.3}
+            horizontal={false}
           />
+          <XAxis type="number" tick={chartTick} axisLine={false} tickLine={false} />
           <YAxis
             dataKey="label"
             type="category"
             width={120}
-            tick={{ fontSize: 12, fill: 'var(--sam-color-fg-secondary, #c5d6cf)' }}
+            tick={chartCategoryTick}
             axisLine={false}
             tickLine={false}
           />
-          <Tooltip content={<AdoptionTooltip />} cursor={{ fill: 'var(--sam-color-bg-surface-hover, #1a2e29)', opacity: 0.5 }} />
+          <Tooltip content={<AdoptionTooltip />} cursor={chartCursor} />
           <Bar dataKey="count" radius={[0, 4, 4, 0]} maxBarSize={28}>
             {chartData.map((_, i) => (
-              <Cell key={i} fill={BAR_COLORS[i % BAR_COLORS.length]} />
+              <Cell key={i} fill={adminChartSeries[i % adminChartSeries.length]} />
             ))}
           </Bar>
         </BarChart>

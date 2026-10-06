@@ -1,0 +1,371 @@
+---
+import OptimizedFeatureImage from './OptimizedFeatureImage.astro';
+import { featureSections } from '../data/features';
+
+// The homepage showcase is a curated tour, not the full feature catalog — see
+// /features/ for every section. Each entry below renders only its first
+// detail row, in the order that tells the clearest product story.
+const CURATED_SLUGS = [
+  'chat',
+  'multiplayer',
+  'comments',
+  'compute-pools',
+  'events',
+  'durable-sessions',
+  'agent-context',
+];
+
+const curatedSections = CURATED_SLUGS.map((slug) =>
+  featureSections.find((section) => section.slug === slug)
+).filter((section): section is (typeof featureSections)[number] => Boolean(section));
+---
+
+<div class="showcase-index animate-on-scroll">
+  {curatedSections.map((section) => (
+    <a href={`#feature-${section.slug}`} class="showcase-pill">{section.label}</a>
+  ))}
+</div>
+
+{curatedSections.map((section, sectionIdx) => {
+  const detail = section.details[0];
+  const flip = sectionIdx % 2 === 1;
+  const eager = sectionIdx === 0;
+  return (
+    <section class="showcase-section" id={`feature-${section.slug}`}>
+      <div class="container">
+        <div class="showcase-header animate-on-scroll">
+          <span class="section-label">{section.label}</span>
+          <h2 class="section-title" set:html={section.title.replace('\n', '<br />')} />
+          <p class="section-subtitle">{section.subtitle}</p>
+        </div>
+
+        <div class="editorial-rows">
+          <div class={`editorial-row animate-on-scroll${flip ? ' is-flipped' : ''}`}>
+            <div class="editorial-copy">
+              <h3 class="editorial-headline">{detail.headline}</h3>
+              <p class="editorial-body">{detail.body}</p>
+              <a href={`/features/${section.slug}/`} class="editorial-link">
+                Explore {section.label}
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+              </a>
+            </div>
+
+            <a href={`/features/${section.slug}/`} class="spotlight" aria-label={detail.headline}>
+              <span class="spotlight-glow" aria-hidden="true"></span>
+              <span class="spotlight-frame">
+                <OptimizedFeatureImage
+                  src={detail.screenshot.src}
+                  alt={detail.screenshot.alt}
+                  loading={eager ? 'eager' : 'lazy'}
+                />
+                <span class="spotlight-caption">{detail.screenshot.caption}</span>
+              </span>
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+})}
+
+<div class="showcase-more animate-on-scroll">
+  <a href="/features/" class="showcase-more-link">
+    See every feature
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+  </a>
+</div>
+
+<style>
+  .showcase-index {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+    padding: 0 20px 48px;
+    max-width: var(--max-width);
+    margin: 0 auto;
+  }
+
+  .showcase-pill {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--color-fg-muted);
+    padding: 6px 14px;
+    border-radius: 100px;
+    border: 1px solid var(--glass-border);
+    background: var(--glass-bg-subtle);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+    white-space: nowrap;
+  }
+
+  .showcase-pill:hover {
+    color: var(--color-fg-primary);
+    border-color: var(--glass-border-hover);
+    background: var(--color-bg-surface-hover);
+  }
+
+  .showcase-more {
+    text-align: center;
+    padding: 8px 0 40px;
+  }
+
+  .showcase-more-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9375rem;
+    font-weight: 500;
+    color: var(--color-accent);
+    transition: gap 0.2s ease, color 0.2s ease;
+  }
+
+  .showcase-more-link:hover {
+    color: var(--color-accent-hover);
+    gap: 12px;
+  }
+
+  .showcase-section {
+    padding: 80px 0;
+  }
+
+  @media (min-width: 768px) {
+    .showcase-section {
+      padding: 120px 0;
+    }
+  }
+
+  .showcase-section + .showcase-section {
+    border-top: 1px solid var(--glass-border);
+  }
+
+  .showcase-header {
+    text-align: center;
+    margin-bottom: 56px;
+  }
+
+  @media (min-width: 768px) {
+    .showcase-header {
+      margin-bottom: 88px;
+    }
+  }
+
+  .showcase-header .section-subtitle {
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  /* ---- Editorial rows ---- */
+
+  .editorial-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 72px;
+  }
+
+  @media (min-width: 768px) {
+    .editorial-rows {
+      gap: 120px;
+    }
+  }
+
+  .editorial-row {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 32px;
+    align-items: center;
+  }
+
+  @media (min-width: 900px) {
+    .editorial-row {
+      grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+      gap: 64px;
+    }
+
+    .editorial-row.is-flipped {
+      grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+    }
+
+    /* Keep the copy column on the left visually, image on the right —
+       when flipped, swap source order so the image sits on the left. */
+    .editorial-row.is-flipped .editorial-copy {
+      order: 2;
+    }
+
+    .editorial-row.is-flipped .spotlight {
+      order: 1;
+    }
+  }
+
+  /* ---- Copy ---- */
+
+  .editorial-copy {
+    max-width: 520px;
+  }
+
+  .editorial-headline {
+    font-family: var(--font-display);
+    font-size: clamp(1.5rem, 3vw, 2rem);
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+    color: var(--color-fg-primary);
+    margin: 0 0 16px;
+  }
+
+  .editorial-body {
+    font-size: 1.0625rem;
+    line-height: 1.7;
+    color: var(--color-fg-muted);
+    margin: 0 0 24px;
+  }
+
+  .editorial-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-body);
+    font-size: 0.9375rem;
+    font-weight: 500;
+    color: var(--color-accent);
+    transition: gap 0.2s ease, color 0.2s ease;
+  }
+
+  .editorial-link svg {
+    transition: transform 0.2s ease;
+  }
+
+  .editorial-link:hover {
+    color: var(--color-accent-hover);
+    gap: 12px;
+  }
+
+  .editorial-link:hover svg {
+    transform: translateX(2px);
+  }
+
+  /* ---- Spotlight screenshot (no added browser frame) ---- */
+
+  .spotlight {
+    position: relative;
+    display: block;
+    isolation: isolate;
+  }
+
+  .spotlight-glow {
+    position: absolute;
+    inset: -8% -6%;
+    z-index: -1;
+    background: radial-gradient(
+      ellipse at center,
+      rgba(22, 163, 74, 0.22) 0%,
+      rgba(22, 163, 74, 0.08) 45%,
+      transparent 72%
+    );
+    opacity: 0.65;
+    filter: blur(8px);
+    transition: opacity 0.4s ease;
+    pointer-events: none;
+  }
+
+  .spotlight:hover .spotlight-glow {
+    opacity: 1;
+  }
+
+  .spotlight-frame {
+    position: relative;
+    display: block;
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    border: 1px solid var(--glass-border);
+    box-shadow:
+      var(--glass-shadow),
+      0 0 60px rgba(22, 163, 74, 0.1),
+      0 0 120px rgba(22, 163, 74, 0.05);
+    transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+  }
+
+  .spotlight:hover .spotlight-frame {
+    border-color: var(--glass-border-hover);
+    box-shadow:
+      var(--glass-shadow),
+      0 0 80px rgba(22, 163, 74, 0.18),
+      0 0 160px rgba(22, 163, 74, 0.08);
+    transform: translateY(-3px);
+  }
+
+  .spotlight-frame :global(picture),
+  .spotlight-frame :global(img) {
+    display: block;
+  }
+
+  .spotlight-frame :global(img) {
+    width: 100%;
+    height: auto;
+    transition: transform 0.5s ease;
+  }
+
+  .spotlight:hover .spotlight-frame :global(img) {
+    transform: scale(1.02);
+  }
+
+  .spotlight-caption {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    padding: 48px 20px 18px;
+    font-size: 0.875rem;
+    line-height: 1.4;
+    /* Sits over a screenshot beneath a dark scrim — keep text light in both themes */
+    color: #eef5f2;
+    background: linear-gradient(
+      to top,
+      rgba(8, 14, 12, 0.92) 0%,
+      rgba(8, 14, 12, 0.7) 45%,
+      transparent 100%
+    );
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+  }
+
+  .spotlight:hover .spotlight-caption,
+  .spotlight:focus-visible .spotlight-caption {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  /* On touch / small screens the caption is always visible since there's no hover */
+  @media (max-width: 899px) {
+    .spotlight-caption {
+      opacity: 1;
+      transform: none;
+      padding: 40px 16px 14px;
+    }
+  }
+
+  :global(html[data-theme='light']) .spotlight-glow {
+    background: radial-gradient(
+      ellipse at center,
+      rgba(21, 128, 61, 0.14) 0%,
+      rgba(21, 128, 61, 0.05) 45%,
+      transparent 72%
+    );
+  }
+
+  :global(html[data-theme='light']) .spotlight-frame {
+    box-shadow:
+      var(--glass-shadow),
+      0 0 40px rgba(21, 128, 61, 0.06),
+      0 0 90px rgba(21, 128, 61, 0.03);
+  }
+
+  :global(html[data-theme='light']) .spotlight:hover .spotlight-frame {
+    box-shadow:
+      var(--glass-shadow),
+      0 0 60px rgba(21, 128, 61, 0.1),
+      0 0 120px rgba(21, 128, 61, 0.05);
+  }
+</style>

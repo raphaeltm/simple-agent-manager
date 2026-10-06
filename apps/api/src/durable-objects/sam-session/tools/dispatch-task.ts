@@ -1,38 +1,48 @@
 /**
  * SAM dispatch_task tool — submit a task to a project.
  *
- * Unlike the MCP dispatch_task (which runs within a workspace context with
- * depth tracking and parent task), SAM dispatches on behalf of the user
- * with no parent task or depth constraints.
+ * Supports optional parent-task lineage via the `parentTaskId` input:
+ * when provided, the new task's `parent_task_id` and `dispatch_depth`
+ * are set so the UI groups it as a subtask (same semantics as the
+ * workspace-MCP dispatch path in `routes/mcp/dispatch-tool.ts`).
  */
 import type {
-  CredentialProvider,
+  ResourceRequirements,
   TaskMode,
-  VMLocation,
   VMSize,
   WorkspaceProfile,
 } from '@simple-agent-manager/shared';
-import {
-  DEFAULT_VM_LOCATION,
-  DEFAULT_VM_SIZE,
-  DEFAULT_WORKSPACE_PROFILE,
-  getDefaultLocationForProvider,
-  getLocationsForProvider,
-  isValidAgentType,
-  isValidLocationForProvider,
-  isValidProvider,
-} from '@simple-agent-manager/shared';
-import { and, eq } from 'drizzle-orm';
+import { isValidAgentType } from '@simple-agent-manager/shared';
+import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../../db/schema';
 import type { Env } from '../../../env';
 import { log } from '../../../lib/logger';
 import { ulid } from '../../../lib/ulid';
-import { resolveAgentProfile } from '../../../services/agent-profiles';
+import { AppError } from '../../../middleware/error';
+import { requireProjectCapability } from '../../../middleware/project-auth';
+import { requireRepositoryOwnerAccess } from '../../../routes/projects/_helpers';
 import { generateBranchName } from '../../../services/branch-name';
+import {
+  CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS,
+  CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS,
+  capacityPlacementSnapshotSqlValues,
+} from '../../../services/capacity-placement-snapshot';
+import { resolveTaskStartPlacementCredentialAttribution } from '../../../services/placement-resolver';
 import { resolveProjectAgentDefault } from '../../../services/project-agent-defaults';
 import * as projectDataService from '../../../services/project-data';
+import {
+  collectStoredResourceRequirementLayers,
+  createPersistedTaskResourcePlanJson,
+  firstResourceRequirementLayer,
+  firstResourceRequirementLayerJson,
+  mergeResourceRequirementLayers,
+  normalizeResourceRequirementsInput,
+  ResourceRequirementsValidationError,
+} from '../../../services/resource-requirements-input';
+import { resolveSkillProfile } from '../../../services/skills';
+import { markTaskFailedIfNonTerminal } from '../../../services/task-failure';
 import { startTaskRunnerDO } from '../../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../../services/task-title';
 import type { AnthropicToolDef, ToolContext } from '../types';
@@ -40,6 +50,14 @@ import type { AnthropicToolDef, ToolContext } from '../types';
 const VALID_TASK_MODES: TaskMode[] = ['task', 'conversation'];
 const VALID_WORKSPACE_PROFILES: WorkspaceProfile[] = ['full', 'lightweight'];
 const DEFAULT_MAX_DESCRIPTION_LENGTH = 32_000;
+
+export function getConversationTaskModeWarning(): string {
+  return (
+    'Resolved taskMode is "conversation": the dispatched agent will not auto-complete. ' +
+    'Actively manage its lifecycle with send_message_to_subtask and get_session_messages, ' +
+    'or pass taskMode: "task" explicitly to use task completion semantics.'
+  );
+}
 
 export const dispatchTaskDef: AnthropicToolDef = {
   name: 'dispatch_task',
@@ -59,17 +77,32 @@ export const dispatchTaskDef: AnthropicToolDef = {
       },
       agentType: {
         type: 'string',
-        description: 'Agent type (e.g. "claude-code", "openai-codex"). Uses project default if omitted.',
+        description:
+          'Agent type (e.g. "claude-code", "openai-codex"). Uses project default if omitted.',
       },
       vmSize: {
         type: 'string',
         enum: ['small', 'medium', 'large'],
-        description: 'VM size for the workspace. Uses project default if omitted.',
+        description:
+          'Deprecated legacy VM size for the workspace. Prefer resourceRequirements; canonical compatibility translates legacy tiers. Uses project default if omitted.',
+      },
+      resourceRequirements: {
+        type: 'object',
+        description:
+          'Modern workload requirements for this task. Known fields: minVcpu, minMemoryGb, minDiskGb, and exclusiveNode. Placement uses explicit CPU, memory, and disk reservations. Omitted fields inherit; explicit false is preserved.',
+        properties: {
+          minVcpu: { type: 'number', exclusiveMinimum: 0 },
+          minMemoryGb: { type: 'number', exclusiveMinimum: 0 },
+          minDiskGb: { type: 'number', minimum: 0 },
+          exclusiveNode: { type: 'boolean' },
+        },
+        additionalProperties: true,
       },
       workspaceProfile: {
         type: 'string',
         enum: ['full', 'lightweight'],
-        description: 'Workspace profile. "full" includes devcontainer build, "lightweight" skips it.',
+        description:
+          'Workspace profile. "full" includes devcontainer build, "lightweight" skips it.',
       },
       priority: {
         type: 'number',
@@ -82,15 +115,26 @@ export const dispatchTaskDef: AnthropicToolDef = {
       taskMode: {
         type: 'string',
         enum: ['task', 'conversation'],
-        description: '"task" = agent pushes code + creates PR. "conversation" = interactive session.',
+        description:
+          '"task" is recommended for subtasks: the agent reports completion. "conversation" requires active lifecycle management via send_message_to_subtask.',
       },
       agentProfileId: {
         type: 'string',
         description: 'Agent profile ID or name to use for configuration.',
       },
+      skillId: {
+        type: 'string',
+        description: 'Skill ID or name to use as the repeatable-work configuration layer.',
+      },
       missionId: {
         type: 'string',
         description: 'Mission ID to associate this task with. Use after create_mission.',
+      },
+      parentTaskId: {
+        type: 'string',
+        description:
+          'Parent task ID for lineage tracking. When set, the new task is grouped ' +
+          'as a subtask in the UI (sidebar nesting + hierarchy button).',
       },
     },
     required: ['projectId', 'description'],
@@ -102,18 +146,18 @@ interface DispatchTaskInput {
   description: string;
   agentType?: string;
   vmSize?: string;
+  resourceRequirements?: ResourceRequirements;
   workspaceProfile?: string;
   priority?: number;
   branch?: string;
   taskMode?: string;
   agentProfileId?: string;
+  skillId?: string;
   missionId?: string;
+  parentTaskId?: string;
 }
 
-export async function dispatchTask(
-  input: DispatchTaskInput,
-  ctx: ToolContext,
-): Promise<unknown> {
+export async function dispatchTask(input: DispatchTaskInput, ctx: ToolContext): Promise<unknown> {
   const env = ctx.env as unknown as Env;
   const db = drizzle(env.DATABASE, { schema });
 
@@ -125,7 +169,8 @@ export async function dispatchTask(
     return { error: 'description is required.' };
   }
 
-  const maxDescLen = Number(env.SAM_DISPATCH_MAX_DESCRIPTION_LENGTH) || DEFAULT_MAX_DESCRIPTION_LENGTH;
+  const maxDescLen =
+    Number(env.SAM_DISPATCH_MAX_DESCRIPTION_LENGTH) || DEFAULT_MAX_DESCRIPTION_LENGTH;
   const description = input.description.trim().slice(0, maxDescLen);
 
   // ── Validate optional params (before any DB access) ───────────────────
@@ -136,12 +181,26 @@ export async function dispatchTask(
     }
     vmSize = input.vmSize as VMSize;
   }
+  let resourceRequirements: ResourceRequirements | undefined;
+  if (input.resourceRequirements !== undefined) {
+    try {
+      resourceRequirements = normalizeResourceRequirementsInput(input.resourceRequirements);
+    } catch (err) {
+      if (err instanceof ResourceRequirementsValidationError) {
+        return { error: err.message };
+      }
+      throw err;
+    }
+  }
 
   if (input.agentType !== undefined && !isValidAgentType(input.agentType)) {
     return { error: 'Unrecognized agentType.' };
   }
 
-  if (input.workspaceProfile !== undefined && !VALID_WORKSPACE_PROFILES.includes(input.workspaceProfile as WorkspaceProfile)) {
+  if (
+    input.workspaceProfile !== undefined &&
+    !VALID_WORKSPACE_PROFILES.includes(input.workspaceProfile as WorkspaceProfile)
+  ) {
     return { error: `workspaceProfile must be one of: ${VALID_WORKSPACE_PROFILES.join(', ')}` };
   }
 
@@ -149,127 +208,238 @@ export async function dispatchTask(
     return { error: `taskMode must be one of: ${VALID_TASK_MODES.join(', ')}` };
   }
 
-  const priority = typeof input.priority === 'number'
-    ? Math.min(Math.max(0, Math.round(input.priority)), 10)
-    : 0;
+  const priority =
+    typeof input.priority === 'number' ? Math.min(Math.max(0, Math.round(input.priority)), 10) : 0;
 
-  // ── Verify ownership ──────────────────────────────────────────────────
-  const [project] = await db
-    .select()
-    .from(schema.projects)
-    .where(
-      and(
-        eq(schema.projects.id, input.projectId),
-        eq(schema.projects.userId, ctx.userId),
-      ),
+  // ── Verify current task execution authority ───────────────────────────
+  let project: typeof schema.projects.$inferSelect;
+  try {
+    project = await requireProjectCapability(db, input.projectId, ctx.userId, 'task:write');
+  } catch (err) {
+    if (err instanceof AppError) {
+      return { error: err.message };
+    }
+    throw err;
+  }
+
+  // ── Resolve parent task lineage ────────────────────────────────────────
+  let parentTaskId: string | null = null;
+  let dispatchDepth = 0;
+  let inheritedAttributionUserId: string | null = null;
+  let inheritedAttributionProjectId: string | null = null;
+  let inheritedAttributionSource: import('@simple-agent-manager/shared').CredentialSource | null =
+    null;
+
+  if (input.parentTaskId?.trim()) {
+    const parentRow = await env.DATABASE.prepare(
+      `SELECT id, dispatch_depth, user_id, credential_attribution_user_id,
+        credential_attribution_project_id, credential_attribution_source
+       FROM tasks WHERE id = ? AND project_id = ? AND user_id = ?`
     )
-    .limit(1);
+      .bind(input.parentTaskId.trim(), input.projectId, ctx.userId)
+      .first<{
+        id: string;
+        dispatch_depth: number;
+        user_id: string;
+        credential_attribution_user_id: string | null;
+        credential_attribution_project_id: string | null;
+        credential_attribution_source: string | null;
+      }>();
 
-  if (!project) {
-    return { error: 'Project not found or not owned by you.' };
+    if (!parentRow) {
+      return { error: 'Parent task not found or not owned by you in this project.' };
+    }
+
+    parentTaskId = parentRow.id;
+    dispatchDepth = (parentRow.dispatch_depth ?? 0) + 1;
+    inheritedAttributionUserId = parentRow.credential_attribution_user_id ?? parentRow.user_id;
+    inheritedAttributionSource = (parentRow.credential_attribution_source ??
+      'user') as import('@simple-agent-manager/shared').CredentialSource;
+    inheritedAttributionProjectId =
+      inheritedAttributionSource === 'project'
+        ? (parentRow.credential_attribution_project_id ?? input.projectId)
+        : null;
+
+    // Enforce dispatch depth limit (mirrors MCP path in dispatch-tool.ts:234-250)
+    const DEFAULT_DISPATCH_MAX_DEPTH = 3;
+    const effectiveMaxDepth = project.maxDispatchDepth ?? DEFAULT_DISPATCH_MAX_DEPTH;
+    if (dispatchDepth > effectiveMaxDepth) {
+      return {
+        error:
+          `Dispatch depth limit (${effectiveMaxDepth}) exceeded. Current depth: ${parentRow.dispatch_depth ?? 0}, max allowed: ${effectiveMaxDepth}. ` +
+          'Agent-dispatched tasks have a depth limit to prevent runaway recursive spawning.',
+      };
+    }
   }
 
   // ── Resolve agent profile ────────────────────────────────────────────
-  const resolvedProfile = input.agentProfileId
-    ? await resolveAgentProfile(db, input.projectId, input.agentProfileId, ctx.userId, env)
-    : null;
-
-  // ── Resolve config (explicit → profile → project default → platform default) ──
-  const profileProvider =
-    typeof resolvedProfile?.provider === 'string' && isValidProvider(resolvedProfile.provider)
-      ? resolvedProfile.provider
+  const resolvedProfile =
+    input.agentProfileId || input.skillId
+      ? await resolveSkillProfile(
+          db,
+          input.projectId,
+          input.agentProfileId,
+          input.skillId,
+          ctx.userId,
+          env
+        )
       : null;
-  const projectDefaultProvider =
-    typeof project.defaultProvider === 'string' && isValidProvider(project.defaultProvider)
-      ? project.defaultProvider
-      : null;
-  const resolvedProvider: CredentialProvider | null = profileProvider
-    ?? projectDefaultProvider
-    ?? null;
-
-  const resolvedVmSize: VMSize = vmSize
-    ?? (resolvedProfile?.vmSizeOverride as VMSize | null)
-    ?? (project.defaultVmSize as VMSize | null)
-    ?? DEFAULT_VM_SIZE;
-
-  const resolvedVmLocation: VMLocation = (
-    (resolvedProfile?.vmLocation as VMLocation | null)
-    ?? (project.defaultLocation as VMLocation | null)
-    ?? (resolvedProvider ? getDefaultLocationForProvider(resolvedProvider) as VMLocation | null : null)
-    ?? DEFAULT_VM_LOCATION
-  ) as VMLocation;
-
-  const resolvedWorkspaceProfile: WorkspaceProfile = (input.workspaceProfile as WorkspaceProfile | undefined)
-    ?? (resolvedProfile?.workspaceProfile as WorkspaceProfile | null)
-    ?? (project.defaultWorkspaceProfile as WorkspaceProfile | null)
-    ?? DEFAULT_WORKSPACE_PROFILE;
-
-  const resolvedTaskMode: TaskMode = (input.taskMode as TaskMode | undefined)
-    ?? (resolvedProfile?.taskMode as TaskMode | null)
-    ?? (resolvedWorkspaceProfile === 'lightweight' ? 'conversation' : 'task');
-
-  const resolvedAgentType: string | null = input.agentType
-    ?? resolvedProfile?.agentType
-    ?? project.defaultAgentType
-    ?? null;
-
-  const checkoutBranch = input.branch?.trim() || project.defaultBranch;
-
-  // Validate location against resolved provider
-  if (resolvedProvider !== null && !isValidLocationForProvider(resolvedProvider, resolvedVmLocation)) {
-    const validLocations = getLocationsForProvider(resolvedProvider).map((l) => l.id);
-    return { error: `Location '${resolvedVmLocation}' is not valid for provider '${resolvedProvider}'. Valid: ${validLocations.join(', ')}` };
+  let resourceRequirementLayers: ReturnType<typeof collectStoredResourceRequirementLayers>;
+  try {
+    resourceRequirementLayers = mergeResourceRequirementLayers(
+      collectStoredResourceRequirementLayers({
+        skill: resolvedProfile?.skillId ? resolvedProfile.resourceRequirementsJson : null,
+        agentProfile:
+          resolvedProfile?.agentProfileResourceRequirementsJson ??
+          (resolvedProfile?.skillId ? null : resolvedProfile?.resourceRequirementsJson),
+        project: project.resourceRequirementsJson,
+      }),
+      {
+        task: resourceRequirements,
+      }
+    );
+  } catch (err) {
+    if (err instanceof ResourceRequirementsValidationError) {
+      return { error: err.message };
+    }
+    throw err;
   }
+  const persistedResourceRequirementsJson =
+    firstResourceRequirementLayerJson(resourceRequirementLayers);
+  const taskRunnerResourceRequirements = firstResourceRequirementLayer(resourceRequirementLayers);
 
-  // ── Verify cloud credentials ──────────────────────────────────────────
-  const { resolveCredentialSource } = await import('../../../services/provider-credentials');
-  const credResult = await resolveCredentialSource(db, ctx.userId, resolvedProvider ?? undefined);
-  if (!credResult) {
-    return { error: 'No cloud provider credentials found. The user must connect a cloud provider in Settings.' };
+  const explicitBranch = input.branch?.trim();
+  const taskId = ulid();
+
+  const placementResolution = await resolveTaskStartPlacementCredentialAttribution(
+    db,
+    {
+      entryPoint: 'sam-session-dispatch',
+      taskId,
+      projectId: input.projectId,
+      userId: ctx.userId,
+      project,
+      profile: resolvedProfile,
+      explicit: {
+        vmSize: vmSize ?? null,
+        vmSizeSource: 'task',
+        workspaceProfile: (input.workspaceProfile as WorkspaceProfile | undefined) ?? null,
+        taskMode: (input.taskMode as TaskMode | undefined) ?? null,
+        agentType: input.agentType ?? null,
+      },
+      inheritedCredentialAttribution: {
+        userId: inheritedAttributionUserId,
+        projectId: inheritedAttributionProjectId,
+        source: inheritedAttributionSource,
+      },
+      credentialProjectPolicy: 'current-project-unless-inherited',
+      taskModeDefault: 'task',
+      resourceRequirements: resourceRequirementLayers,
+    },
+    { env: ctx.env as unknown as Env }
+  );
+  if ('error' in placementResolution) {
+    return placementResolution;
   }
+  const {
+    placement,
+    effectiveProvider,
+    credentialAttributionUserId,
+    credentialAttributionProjectId,
+    credentialAttributionSource,
+    capacityPoolSelection,
+    capacityPlacementSnapshot,
+  } = placementResolution;
+  const {
+    vmSize: resolvedVmSize,
+    vmSizeSource,
+    vmLocation: resolvedVmLocation,
+    workspaceProfile: resolvedWorkspaceProfile,
+    devcontainerConfigName: resolvedDevcontainerConfigName,
+    taskMode: resolvedTaskMode,
+    agentType: resolvedAgentType,
+    resolvedReservation,
+  } = placement;
+  const persistedResourceRequirementPlanJson = createPersistedTaskResourcePlanJson({
+    layers: resourceRequirementLayers,
+    resolvedReservation,
+    requestedVmSize: resolvedVmSize,
+    requestedVmSizeSource: vmSizeSource,
+  });
 
   // ── Generate title and branch name ────────────────────────────────────
   const titleConfig = getTaskTitleConfig(env);
-  const taskTitle = await generateTaskTitle(env.AI, description, titleConfig);
+  const taskTitle = await generateTaskTitle(env, description, titleConfig);
 
-  const taskId = ulid();
   const branchPrefix = env.BRANCH_NAME_PREFIX || 'sam/';
   const branchMaxLength = parseInt(env.BRANCH_NAME_MAX_LENGTH || '60', 10);
   const branchName = generateBranchName(description, taskId, {
     prefix: branchPrefix,
     maxLength: branchMaxLength,
   });
+  // Explicit branch means "continue work from this branch"; otherwise task
+  // work must start on the generated output branch so VM-agent completion
+  // pushes cannot land on the repository default branch.
+  const checkoutBranch = explicitBranch || branchName;
 
   const now = new Date().toISOString();
 
   // ── Insert task ────────────────────────────────────────────────────────
   await env.DATABASE.prepare(
-    `INSERT INTO tasks (id, project_id, user_id, title, description,
+    `INSERT INTO tasks (id, project_id, user_id, parent_task_id, title, description,
      status, execution_step, priority, dispatch_depth, output_branch, created_by,
-     task_mode, agent_profile_hint, mission_id, triggered_by,
+     task_mode, agent_profile_hint, skill_id, skill_hint, mission_id, triggered_by,
+     requested_vm_size, requested_vm_size_source, resource_requirements_json, resource_requirement_plan_json, resource_requirements_source, resolved_reservation_json,
+     credential_attribution_user_id, credential_attribution_project_id, credential_attribution_source,
+     ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS},
      created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'queued', 'node_selection', ?, 0, ?, ?,
-     ?, ?, ?, 'mcp',
-     ?, ?)`,
-  ).bind(
-    taskId, input.projectId, ctx.userId,
-    taskTitle, description, priority, branchName,
-    ctx.userId,
-    resolvedTaskMode, resolvedProfile?.profileId ?? null, input.missionId?.trim() || null,
-    now, now,
-  ).run();
+     VALUES (?, ?, ?, ?, ?, ?, 'queued', 'node_selection', ?, ?, ?, ?,
+     ?, ?, ?, ?, ?, 'mcp',
+     ?, ?, ?, ?, ?, ?,
+     ?, ?, ?,
+     ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS},
+     ?, ?)`
+  )
+    .bind(
+      taskId,
+      input.projectId,
+      ctx.userId,
+      parentTaskId,
+      taskTitle,
+      description,
+      priority,
+      dispatchDepth,
+      branchName,
+      ctx.userId,
+      resolvedTaskMode,
+      resolvedProfile?.profileId ?? null,
+      resolvedProfile?.skillId ?? null,
+      input.skillId ?? null,
+      input.missionId?.trim() || null,
+      resolvedVmSize,
+      vmSizeSource,
+      persistedResourceRequirementsJson,
+      persistedResourceRequirementPlanJson,
+      resolvedReservation.source,
+      JSON.stringify(resolvedReservation),
+      credentialAttributionUserId,
+      credentialAttributionProjectId,
+      credentialAttributionSource,
+      ...capacityPlacementSnapshotSqlValues(capacityPlacementSnapshot),
+      now,
+      now
+    )
+    .run();
 
   // Record status event: null -> queued
   const statusEventId = ulid();
   await env.DATABASE.prepare(
     `INSERT INTO task_status_events (id, task_id, from_status, to_status,
      actor_type, actor_id, reason, created_at)
-     VALUES (?, ?, NULL, 'queued', 'user', ?, ?, ?)`,
-  ).bind(
-    statusEventId, taskId, ctx.userId,
-    'Dispatched via SAM',
-    now,
-  ).run();
+     VALUES (?, ?, NULL, 'queued', 'user', ?, ?, ?)`
+  )
+    .bind(statusEventId, taskId, ctx.userId, 'Dispatched via SAM', now)
+    .run();
 
   // ── Create chat session and persist initial message ──────────────────
   let sessionId: string;
@@ -280,6 +450,7 @@ export async function dispatchTask(
       null,
       taskTitle,
       taskId,
+      ctx.userId
     );
 
     await projectDataService.persistMessage(
@@ -288,14 +459,21 @@ export async function dispatchTask(
       sessionId,
       'user',
       description,
-      null,
+      null
     );
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    await env.DATABASE.prepare(
-      `UPDATE tasks SET status = 'failed', error_message = ?, updated_at = ? WHERE id = ?`,
-    ).bind(`Session creation failed: ${errorMsg}`, new Date().toISOString(), taskId).run();
-    log.error('sam.dispatch_task.session_failed', { taskId, projectId: input.projectId, error: errorMsg });
+    await markTaskFailedIfNonTerminal(
+      env.DATABASE,
+      taskId,
+      `Session creation failed: ${errorMsg}`,
+      { env, projectId: input.projectId, source: 'sam.dispatch_task.session_creation' }
+    );
+    log.error('sam.dispatch_task.session_failed', {
+      taskId,
+      projectId: input.projectId,
+      error: errorMsg,
+    });
     return { error: `Failed to create chat session: ${errorMsg}` };
   }
 
@@ -307,6 +485,7 @@ export async function dispatchTask(
     .limit(1);
 
   try {
+    await requireRepositoryOwnerAccess(env, db, project, ctx.userId, 'sam-session-dispatch');
     await startTaskRunnerDO(env, {
       taskId,
       projectId: input.projectId,
@@ -314,6 +493,7 @@ export async function dispatchTask(
       vmSize: resolvedVmSize,
       vmLocation: resolvedVmLocation,
       branch: checkoutBranch,
+      defaultBranch: project.defaultBranch,
       userName: userRow?.name ?? null,
       userEmail: userRow?.email ?? null,
       githubId: userRow?.githubId ?? null,
@@ -326,31 +506,48 @@ export async function dispatchTask(
       chatSessionId: sessionId,
       agentType: resolvedAgentType,
       workspaceProfile: resolvedWorkspaceProfile,
-      cloudProvider: resolvedProvider,
+      devcontainerConfigName: resolvedDevcontainerConfigName,
+      cloudProvider: placement.provider ?? effectiveProvider,
+      explicitVmLocation: placement.explicitVmLocation === true,
+      credentialAttributionUserId,
+      credentialAttributionProjectId,
+      credentialAttributionSource,
       taskMode: resolvedTaskMode,
       model:
         resolvedProfile?.model ??
         resolveProjectAgentDefault(project.agentDefaults, resolvedAgentType).model,
+      effort: resolvedProfile?.effort ?? null,
       permissionMode:
         resolvedProfile?.permissionMode ??
         resolveProjectAgentDefault(project.agentDefaults, resolvedAgentType).permissionMode,
       opencodeProvider: null,
       opencodeBaseUrl: null,
       systemPromptAppend: resolvedProfile?.systemPromptAppend ?? null,
+      agentProfileHint: resolvedProfile?.profileId ?? null,
       projectScaling: {
         taskExecutionTimeoutMs: project.taskExecutionTimeoutMs ?? null,
-        maxWorkspacesPerNode: project.maxWorkspacesPerNode ?? null,
         nodeCpuThresholdPercent: project.nodeCpuThresholdPercent ?? null,
         nodeMemoryThresholdPercent: project.nodeMemoryThresholdPercent ?? null,
         warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,
       },
+      resolvedReservation,
+      capacityPoolSelection,
+      vmSizeSource,
+      resourceRequirements: taskRunnerResourceRequirements,
     });
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    await env.DATABASE.prepare(
-      `UPDATE tasks SET status = 'failed', error_message = ?, updated_at = ? WHERE id = ?`,
-    ).bind(`Task runner startup failed: ${errorMsg}`, new Date().toISOString(), taskId).run();
-    log.error('sam.dispatch_task.do_startup_failed', { taskId, projectId: input.projectId, error: errorMsg });
+    await markTaskFailedIfNonTerminal(
+      env.DATABASE,
+      taskId,
+      `Task runner startup failed: ${errorMsg}`,
+      { env, projectId: input.projectId, source: 'sam.dispatch_task.runner_startup', sessionId }
+    );
+    log.error('sam.dispatch_task.do_startup_failed', {
+      taskId,
+      projectId: input.projectId,
+      error: errorMsg,
+    });
     return { error: `Failed to start task runner: ${errorMsg}` };
   }
 
@@ -358,21 +555,23 @@ export async function dispatchTask(
   try {
     const doId = env.PROJECT_DATA.idFromName(input.projectId);
     const doStub = env.PROJECT_DATA.get(doId);
-    await doStub.fetch(new Request('https://do/activity', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        type: 'task.dispatched',
-        actorType: 'user',
-        actorId: ctx.userId,
-        metadata: {
-          taskId,
-          title: taskTitle,
-          branchName,
-          source: 'sam',
-        },
-      }),
-    }));
+    await doStub.fetch(
+      new Request('https://do/activity', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'task.dispatched',
+          actorType: 'user',
+          actorId: ctx.userId,
+          metadata: {
+            taskId,
+            title: taskTitle,
+            branchName,
+            source: 'sam',
+          },
+        }),
+      })
+    );
   } catch (err) {
     log.warn('sam.dispatch_task.activity_event_failed', {
       taskId,
@@ -388,6 +587,8 @@ export async function dispatchTask(
     sessionId,
     branchName,
     projectId: input.projectId,
+    parentTaskId,
+    dispatchDepth,
     vmSize: resolvedVmSize,
     taskMode: resolvedTaskMode,
     agentType: resolvedAgentType,
@@ -399,6 +600,10 @@ export async function dispatchTask(
     branchName,
     title: taskTitle,
     status: 'queued',
+    parentTaskId,
+    dispatchDepth,
+    taskMode: resolvedTaskMode,
+    ...(resolvedTaskMode === 'conversation' ? { warning: getConversationTaskModeWarning() } : {}),
     url: taskUrl,
     message: `Task dispatched successfully. Track progress at: ${taskUrl}`,
   };

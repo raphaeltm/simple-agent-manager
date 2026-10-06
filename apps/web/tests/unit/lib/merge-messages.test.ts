@@ -1,5 +1,6 @@
 import { describe, expect,it } from 'vitest';
 
+import { hasActiveLoopbackGuidance } from '../../../src/components/project-message-view/SessionStatusBanners';
 import type { ChatMessageResponse } from '../../../src/lib/api';
 import { getLastMessageId,mergeMessages } from '../../../src/lib/merge-messages';
 
@@ -16,6 +17,27 @@ function msg(overrides: Partial<ChatMessageResponse> & { id: string }): ChatMess
 }
 
 describe('mergeMessages', () => {
+  it('keeps delayed loopback guidance cleared after a retry despite timestamp ties and skew', () => {
+    const prompt = msg({ id: 'prompt-a', role: 'user', content: 'sign in', createdAt: 10, sequence: 1 });
+    const retry = msg({ id: 'prompt-b', role: 'user', content: 'retry', createdAt: 10, sequence: 2 });
+    const diagnostic = msg({ id: 'diagnostic-a', role: 'system',
+      content: 'This sign-in flow requires a local callback that this session cannot complete.',
+      toolMetadata: { promptMessageId: prompt.id }, createdAt: 10, sequence: 3 });
+    expect(hasActiveLoopbackGuidance(mergeMessages([prompt], [diagnostic], 'append'))).toBe(true);
+    const sameMillisecond = mergeMessages([prompt, retry], [diagnostic], 'append');
+    expect(sameMillisecond.map((row) => row.id)).toEqual(['prompt-a', 'prompt-b', 'diagnostic-a']);
+    expect(hasActiveLoopbackGuidance(sameMillisecond)).toBe(false);
+    const skewed = mergeMessages([prompt, retry], [{ ...diagnostic, createdAt: 20 }], 'append');
+    expect(hasActiveLoopbackGuidance(skewed)).toBe(false);
+    expect(hasActiveLoopbackGuidance(mergeMessages([], [diagnostic], 'append'))).toBe(false);
+    expect(hasActiveLoopbackGuidance(mergeMessages([prompt], [
+      { ...diagnostic, toolMetadata: { promptMessageId: 'foreign-prompt' } },
+    ], 'append'))).toBe(false);
+    expect(hasActiveLoopbackGuidance(mergeMessages([
+      msg({ id: 'spoof-prompt', role: 'assistant', createdAt: 10, sequence: 1 }),
+    ], [{ ...diagnostic, toolMetadata: { promptMessageId: 'spoof-prompt' } }], 'append'))).toBe(false);
+  });
+
   describe('append strategy', () => {
     it('appends new messages', () => {
       const prev = [msg({ id: 'a', createdAt: 1 })];
@@ -172,6 +194,28 @@ describe('mergeMessages', () => {
       expect(result.map((m) => m.id)).toEqual(['a', 'b', 'c', 'd']);
     });
 
+    it('preserves messages newer than the incoming window: they arrived after the server built it', () => {
+      const prev = [
+        msg({ id: 'a', createdAt: 1 }),
+        msg({ id: 'b', createdAt: 2 }),
+        msg({ id: 'live', createdAt: 9 }),
+      ];
+      const incoming = [msg({ id: 'b', createdAt: 2 }), msg({ id: 'c', createdAt: 3 })];
+      const result = mergeMessages(prev, incoming, 'replace');
+      expect(result.map((m) => m.id)).toEqual(['a', 'b', 'c', 'live']);
+    });
+
+    it('still drops a loaded message inside the window the server no longer returns', () => {
+      const prev = [
+        msg({ id: 'a', createdAt: 1 }),
+        msg({ id: 'gone', createdAt: 3 }),
+        msg({ id: 'd', createdAt: 5 }),
+      ];
+      const incoming = [msg({ id: 'b', createdAt: 2 }), msg({ id: 'd', createdAt: 5 })];
+      const result = mergeMessages(prev, incoming, 'replace');
+      expect(result.map((m) => m.id)).toEqual(['a', 'b', 'd']);
+    });
+
     it('replaces messages within the incoming time range (same IDs)', () => {
       // prev has messages at t=1,2,3; incoming has same messages at t=2,3 plus new at t=4
       // In real usage, IDs are stable — the server returns the same IDs
@@ -273,6 +317,27 @@ describe('mergeMessages', () => {
       expect(result).toHaveLength(6);
       expect(result.map((m) => m.id)).toEqual([
         'early-1', 'early-2', 'early-3', 'recent-4', 'recent-5', 'recent-6',
+      ]);
+    });
+
+    it('preserves a fully-loaded conversation when the poll returns only a small recent window', () => {
+      // Scroll-up paging can load far more history than the 3s poll's small
+      // recent window. mergeReplace must NOT discard the loaded history —
+      // otherwise every poll would clobber the pages the reader already loaded.
+      const fullyLoaded = Array.from({ length: 12 }, (_, i) =>
+        msg({ id: `m-${i + 1}`, createdAt: i + 1 }),
+      );
+      // Poll returns just the latest 3 messages (t=10..12).
+      const pollWindow = [
+        msg({ id: 'm-10', createdAt: 10 }),
+        msg({ id: 'm-11', createdAt: 11 }),
+        msg({ id: 'm-12', createdAt: 12 }),
+      ];
+      const result = mergeMessages(fullyLoaded, pollWindow, 'replace');
+      expect(result).toHaveLength(12);
+      expect(result.map((m) => m.id)).toEqual([
+        'm-1', 'm-2', 'm-3', 'm-4', 'm-5', 'm-6',
+        'm-7', 'm-8', 'm-9', 'm-10', 'm-11', 'm-12',
       ]);
     });
 

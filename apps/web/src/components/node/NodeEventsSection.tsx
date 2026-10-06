@@ -76,8 +76,8 @@ export const NodeEventsSection: FC<NodeEventsSectionProps> = ({
   return (
     <Section>
       <SectionHeader
-        icon={<Activity size={20} color="#9fb7ae" />}
-        iconBg="rgba(159, 183, 174, 0.15)"
+        icon={<Activity size={20} color="var(--sam-color-fg-muted)" />}
+        iconBg="var(--sam-node-neutral-tint)"
         title="Events"
         description={`${events.length} recent event${events.length !== 1 ? 's' : ''}`}
         actions={
@@ -89,9 +89,9 @@ export const NodeEventsSection: FC<NodeEventsSectionProps> = ({
                 className="flex items-center gap-1 px-2 py-1 rounded-sm cursor-pointer disabled:opacity-50"
                 style={{
                   fontSize: 'var(--sam-type-caption-size)',
-                  border: '1px solid var(--sam-color-accent-emphasis)',
-                  color: 'var(--sam-color-accent-fg)',
-                  background: 'var(--sam-color-accent-subtle)',
+                  border: '1px solid var(--sam-color-border-default)',
+                  color: 'var(--sam-color-accent-primary)',
+                  background: 'var(--sam-color-accent-primary-tint)',
                 }}
                 title="Download all logs, metrics, events, and system info as a tar.gz archive"
               >
@@ -139,7 +139,7 @@ export const NodeEventsSection: FC<NodeEventsSectionProps> = ({
         <div
           className="p-3 bg-danger-tint rounded-sm flex justify-between items-center"
           style={{
-            border: '1px solid rgba(248, 113, 113, 0.3)',
+            border: '1px solid var(--sam-node-error-border)',
             fontSize: 'var(--sam-type-secondary-size)',
             color: 'var(--sam-color-danger)',
           }}
@@ -151,7 +151,7 @@ export const NodeEventsSection: FC<NodeEventsSectionProps> = ({
               className="px-3 py-1 rounded-sm bg-transparent cursor-pointer"
               style={{
                 fontSize: 'var(--sam-type-caption-size)',
-                border: '1px solid rgba(248, 113, 113, 0.3)',
+                border: '1px solid var(--sam-node-error-border)',
                 color: 'var(--sam-color-danger)',
               }}
             >

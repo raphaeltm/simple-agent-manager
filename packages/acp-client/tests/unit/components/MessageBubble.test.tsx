@@ -90,7 +90,7 @@ describe('MessageBubble', () => {
       expect(proseDiv!.className).not.toContain('overflow-hidden');
     });
 
-    it('applies Night Owl theme background to code blocks', () => {
+    it('applies Night Owl theme background and foreground to syntax-highlighted code blocks', () => {
       const markdown = '```python\nprint("hello")\n```';
       const { container } = render(
         <MessageBubble text={markdown} role="agent" />
@@ -100,6 +100,83 @@ describe('MessageBubble', () => {
       expect(pre).not.toBeNull();
       // Night Owl theme uses #011627 as background (JSDOM normalizes to rgb)
       expect(pre!.style.background).toBe('rgb(1, 22, 39)');
+      // Explicit light text color prevents dark-on-dark in light mode
+      expect(pre!.style.color).toBe('rgb(214, 222, 235)');
+    });
+
+    it('uses explicit light text on language-less fenced code blocks', () => {
+      const markdown = '```\nOn branch main\nnothing to commit\n```';
+      const { container } = render(
+        <MessageBubble text={markdown} role="agent" />
+      );
+
+      const pre = container.querySelector('pre');
+      expect(pre).not.toBeNull();
+      expect(pre!.style.background).toBe('rgb(1, 22, 39)');
+      expect(pre!.style.color).toBe('rgb(214, 222, 235)');
+    });
+
+    it('renders a language-less fenced block as a <pre>, preserving line breaks', () => {
+      // No language → no `language-*` class. The old `!match && !className`
+      // test misclassified this as inline <code> and collapsed the newlines.
+      const markdown = '```\nOn branch main\nnothing to commit\n```';
+      const { container } = render(
+        <MessageBubble text={markdown} role="agent" />
+      );
+
+      const pre = container.querySelector('pre');
+      expect(pre).not.toBeNull();
+      // Both lines survive AND the newline between them is preserved.
+      expect(pre!.textContent).toContain('On branch main');
+      expect(pre!.textContent).toContain('nothing to commit');
+      expect(pre!.textContent).toContain('\n');
+      expect(pre!.className).toContain('whitespace-pre');
+    });
+
+    it('does not render a multi-line language-less block as inline code', () => {
+      const markdown = '```\nfirst line\nsecond line\n```';
+      const { container } = render(
+        <MessageBubble text={markdown} role="agent" />
+      );
+
+      // It must be a block (<pre>), never a standalone inline <code> pill.
+      expect(container.querySelector('pre')).not.toBeNull();
+      const code = container.querySelector('code');
+      if (code) {
+        // If a <code> exists at all, it must be inside the <pre>, not standalone.
+        expect(code.closest('pre')).not.toBeNull();
+      }
+    });
+
+    it('renders a multi-line language-less block as a <pre> for user messages too', () => {
+      // makeCodeComponent is shared between user and agent roles, so the
+      // block/inline classification must behave identically for user messages.
+      const markdown = '```\nuser line one\nuser line two\n```';
+      const { container } = render(
+        <MessageBubble text={markdown} role="user" />
+      );
+
+      const pre = container.querySelector('pre');
+      expect(pre).not.toBeNull();
+      expect(pre!.textContent).toContain('user line one');
+      expect(pre!.textContent).toContain('user line two');
+      expect(pre!.textContent).toContain('\n');
+    });
+
+    it('renders a single-line language-less fenced block as inline <code>', () => {
+      // Documents the new logic's edge case: a single-line language-less block
+      // has its trailing newline stripped, so `code.includes('\n')` is false and
+      // there is no language match → it renders inline. This is intentional
+      // (single-line snippets read fine inline) and not a regression.
+      const markdown = '```\ngit status\n```';
+      const { container } = render(
+        <MessageBubble text={markdown} role="agent" />
+      );
+
+      expect(container.querySelector('pre')).toBeNull();
+      const code = container.querySelector('code');
+      expect(code).not.toBeNull();
+      expect(code!.textContent).toContain('git status');
     });
   });
 
@@ -295,6 +372,84 @@ describe('MessageBubble', () => {
 
       // Inline player must NOT appear — global player handles UI
       expect(screen.queryByRole('region', { name: 'Audio player' })).toBeNull();
+    });
+
+    it('puts user actions at the trailing edge, light-on-dark on the built-in blue bubble', () => {
+      render(<MessageBubble text="Hello" role="user" timestamp={1710288000000} />);
+      const info = screen.getByLabelText('Message info');
+      expect(info.parentElement!.className).toContain('justify-end');
+      expect(info.style.color).toBe('rgba(255, 255, 255, 0.7)');
+    });
+
+    it('gives a themed user bubble the theme palette, still at the trailing edge', () => {
+      render(
+        <MessageBubble
+          text="Hello"
+          role="user"
+          timestamp={1710288000000}
+          bubbleClassName="glass-msg-user"
+        />
+      );
+      const info = screen.getByLabelText('Message info');
+      expect(info.parentElement!.className).toContain('justify-end');
+      expect(info.style.color).toBe('var(--sam-color-fg-muted)');
+
+      fireEvent.click(info);
+      expect(screen.getByRole('dialog').className).toContain('right-0');
+    });
+
+    it('keeps agent actions at the leading edge', () => {
+      render(
+        <MessageBubble
+          text="Hello"
+          role="agent"
+          timestamp={1710288000000}
+          bubbleClassName="glass-msg-assistant"
+        />
+      );
+      const info = screen.getByLabelText('Message info');
+      expect(info.parentElement!.className).not.toContain('justify-end');
+      expect(info.style.color).toBe('var(--sam-color-fg-muted)');
+    });
+
+    it('fades a just-sent user message in with info and copy already shown', () => {
+      const { container } = render(
+        <MessageBubble
+          text="Sent"
+          role="user"
+          animated
+          timestamp={1710288000000}
+          bubbleClassName="glass-msg-user"
+        />
+      );
+      expect(container.querySelectorAll('.char-fade')).toHaveLength(4);
+      expect(screen.getByLabelText('Message info')).toBeTruthy();
+      expect(screen.getByLabelText('Copy message')).toBeTruthy();
+      expect(screen.queryByLabelText('Read aloud')).toBeNull();
+    });
+
+    it('keeps the user action row (and an open popover) mounted when the fade ends', () => {
+      const props = {
+        text: 'Sent',
+        role: 'user' as const,
+        timestamp: 1710288000000,
+        bubbleClassName: 'glass-msg-user',
+      };
+      const { container, rerender } = render(<MessageBubble {...props} animated />);
+      const info = screen.getByLabelText('Message info');
+      fireEvent.click(info);
+      expect(screen.getByRole('dialog')).toBeTruthy();
+
+      rerender(<MessageBubble {...props} animated={false} />);
+      expect(container.querySelectorAll('.char-fade')).toHaveLength(0);
+      expect(screen.getByText('Sent')).toBeTruthy();
+      expect(screen.getByLabelText('Message info')).toBe(info);
+      expect(screen.getByRole('dialog')).toBeTruthy();
+    });
+
+    it('hides actions while an agent message is still animating in', () => {
+      render(<MessageBubble text="typing" role="agent" animated timestamp={1710288000000} />);
+      expect(screen.queryByLabelText('Message info')).toBeNull();
     });
   });
 

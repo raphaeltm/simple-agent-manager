@@ -18,7 +18,10 @@ interface ProvisioningIndicatorProps {
 }
 
 const PROVISIONING_STAGES: ProvisioningStage[] = [
-  { label: 'Provisioning VM', steps: ['node_selection', 'node_provisioning', 'node_agent_ready'] },
+  {
+    label: 'Provisioning VM',
+    steps: ['node_selection', 'waiting_for_node_capacity', 'node_provisioning', 'node_agent_ready'],
+  },
   { label: 'Cloning repository', steps: ['workspace_creation'] },
   { label: 'Installing dependencies', steps: ['workspace_ready', 'attachment_transfer'] },
   { label: 'Starting agent', steps: ['agent_session'] },

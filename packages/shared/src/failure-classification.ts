@@ -1,0 +1,345 @@
+/**
+ * Failure classification for task/session/agent errors.
+ *
+ * SAM stores failure reasons as free text (`tasks.error_message`,
+ * `task_status_events.reason`, platform error messages). This module maps that
+ * free text onto a small stable taxonomy so UI surfaces can show users WHAT
+ * kind of failure happened and WHAT to do next, without a schema migration.
+ *
+ * Classification is display-time only: it must never gate behavior on the
+ * server. Rules are ordered — first match wins — and the fallback is `unknown`.
+ */
+
+export type FailureCode =
+  | 'cancelled'
+  | 'input-expired'
+  | 'capacity'
+  | 'provisioning'
+  | 'agent-install'
+  | 'model-credential-missing'
+  | 'model-credential-rejected'
+  | 'mcp-auth-required'
+  | 'unsupported-loopback-auth'
+  | 'model-unavailable'
+  | 'provider-overload'
+  | 'agent-prompt-failed'
+  | 'prompt-timeout'
+  | 'agent-crash'
+  | 'runtime-lost'
+  | 'stalled'
+  | 'network'
+  | 'unknown';
+
+export interface FailureClassification {
+  code: FailureCode;
+  /** Short human label, e.g. "Cloud capacity" */
+  label: string;
+  /** One-sentence plain-language explanation of what this failure class means. */
+  explanation: string;
+  /** Concrete next step the user can take. */
+  guidance: string;
+  /** Whether retrying the same task/session is likely to help. */
+  retryable: boolean;
+  /** False for expected lifecycle outcomes that are not themselves bugs. */
+  diagnosable: boolean;
+}
+
+interface FailureRule {
+  code: FailureCode;
+  label: string;
+  explanation: string;
+  guidance: string;
+  retryable: boolean;
+  diagnosable: boolean;
+  patterns: RegExp[];
+}
+
+/**
+ * Ordered rules — first match wins. Patterns are matched against the combined
+ * lowercase `message` + `step` text. Keep patterns conservative: a wrong
+ * classification is worse than `unknown`.
+ */
+const FAILURE_RULES: FailureRule[] = [
+  {
+    code: 'cancelled',
+    label: 'Cancelled',
+    explanation: 'The task was stopped intentionally by a user or a parent agent.',
+    guidance: 'No action needed. Start a new task or retry if this was unintended.',
+    retryable: true,
+    diagnosable: false,
+    patterns: [
+      /\bcancell?ed\b/,
+      /stopped[ _]by[ _](the[ _])?(user|parent|orchestrator)/,
+      /stop_subtask/,
+      // A session wake retires its predecessor; the conversation continued
+      // elsewhere. Historical rows carry this text in `error_message`; new ones
+      // record it only on the status event (`.claude/rules/66`, policy a974b04f).
+      /superseded by a later session wake/,
+    ],
+  },
+  {
+    code: 'input-expired',
+    label: 'Input request expired',
+    explanation:
+      'No human reply arrived before the configured input window ended, so SAM closed the task.',
+    guidance: 'No debugging is needed. Retry the task if you still want to continue the work.',
+    retryable: true,
+    diagnosable: false,
+    patterns: [/human input request expired/, /input request expired after timeout/],
+  },
+  {
+    code: 'capacity',
+    label: 'Cloud capacity',
+    explanation:
+      'The cloud provider refused to create a VM because an account or datacenter limit was reached.',
+    guidance:
+      'Free unused nodes or wait for capacity, then retry. Admins can check provider limits.',
+    retryable: true,
+    diagnosable: true,
+    patterns: [
+      /server limit reached/,
+      /resource_unavailable/,
+      /\bquota\b.*(exceeded|reached|limit)/,
+      /(exceeded|reached).*\bquota\b/,
+      /out of capacity/,
+      /placement.*(failed|exhausted)/,
+    ],
+  },
+  {
+    code: 'model-unavailable',
+    label: 'Model unavailable for this account',
+    explanation: 'The provider rejected this model for the current account or credential.',
+    guidance: 'Check model access with the provider. Changing a working login alone may not grant access.',
+    retryable: false,
+    diagnosable: true,
+    patterns: [/^model_unavailable$/],
+  },
+  {
+    code: 'unsupported-loopback-auth',
+    label: 'Sign-in flow unavailable',
+    explanation: 'This service requires a local browser callback that this session cannot complete.',
+    guidance: 'Use a connection method supported by that service. This session cannot complete its local callback flow.',
+    retryable: false,
+    diagnosable: true,
+    patterns: [/^unsupported_loopback_auth$/],
+  },
+  {
+    code: 'mcp-auth-required',
+    label: 'Tool connection needs sign-in',
+    explanation: 'An MCP service rejected the tool connection because it needs authentication.',
+    guidance: 'Review the personal or project MCP connection. A project administrator may need to update a shared server. Its service may require sign-in rather than a bearer token.',
+    retryable: true,
+    diagnosable: true,
+    patterns: [/^mcp_endpoint_needs_auth$/],
+  },
+  {
+    code: 'model-credential-missing',
+    label: 'Agent connection missing',
+    explanation: 'The selected agent has no usable provider connection for this session.',
+    guidance: 'The session creator can connect the agent in Settings using the guided sign-in or supported key method.',
+    retryable: true,
+    diagnosable: true,
+    patterns: [/^model_provider_credential_missing$/],
+  },
+  {
+    code: 'agent-prompt-failed',
+    label: 'Agent request failed',
+    explanation: 'The agent could not complete this request. The cause is not yet known.',
+    guidance: 'Retry the request. If it fails again, copy the debug report for investigation.',
+    retryable: true,
+    diagnosable: true,
+    patterns: [/^agent_prompt_failed$/],
+  },
+  {
+    code: 'model-credential-rejected',
+    label: 'Agent connection rejected',
+    explanation: 'The model provider rejected the credential used by this agent.',
+    guidance: 'The session creator can check or reconnect the agent in Settings, then retry.',
+    retryable: true,
+    diagnosable: true,
+    patterns: [/^model_provider_credential_rejected$/],
+  },
+  {
+    code: 'provider-overload',
+    label: 'Provider overloaded',
+    explanation: 'The LLM provider was temporarily overloaded or rate-limited the request.',
+    guidance: 'This is usually transient. Wait a few minutes and retry.',
+    retryable: true,
+    diagnosable: true,
+    patterns: [
+      /provider_overloaded/,
+      /\boverloaded\b/,
+      /rate.?limit/,
+      /\b429\b/,
+      /\b529\b/,
+      /\b503\b/,
+      /temporarily unavailable/,
+      /too many requests/,
+    ],
+  },
+  {
+    code: 'agent-install',
+    label: 'Agent install failed',
+    explanation: 'The coding agent could not be installed inside the workspace.',
+    guidance:
+      'Retry the task. If it persists, check the node network/debug package or try a different agent type.',
+    retryable: true,
+    diagnosable: true,
+    patterns: [
+      /(install|installation).*(agent|claude|codex|gemini|opencode|amp)/,
+      /(agent|claude|codex|gemini|opencode|amp).*(install|installation) (failed|error|timed out)/,
+      /npm (install|error).*(agent|-g)/,
+    ],
+  },
+  {
+    code: 'provisioning',
+    label: 'Provisioning failed',
+    explanation: 'The workspace or VM did not finish starting up.',
+    guidance:
+      'Retry the task — a fresh node will be provisioned. If it repeats, check the node debug package or provider status.',
+    retryable: true,
+    diagnosable: true,
+    patterns: [
+      /provision(ing)? (failed|error|timed? ?out)/,
+      /node provisioning may have failed/,
+      /workspace may have failed to start/,
+      /devcontainer.*(build|up).*(failed|timed? ?out)/,
+      /cloud-init/,
+      /no (available|eligible) node/,
+      /workspace (creation|create) (failed|timed out)/,
+      /failed to (create|start) workspace/,
+    ],
+  },
+  {
+    code: 'prompt-timeout',
+    label: 'Prompt timed out',
+    explanation: 'The agent ran a single turn longer than the allowed time and was force-stopped.',
+    guidance:
+      'Break the work into smaller prompts, or retry. Long orchestration should report progress between turns.',
+    retryable: true,
+    diagnosable: true,
+    patterns: [
+      /prompt.*(timed? ?out|force.?stopped)/,
+      /force.?stopped.*prompt/,
+      /acp_task_prompt_timeout/,
+    ],
+  },
+  {
+    code: 'runtime-lost',
+    label: 'Runtime lost',
+    explanation:
+      'The container or VM running the agent died and automatic recovery could not restore it.',
+    guidance:
+      'Your chat history is preserved. Send a follow-up message to resume on a fresh runtime, or retry the task.',
+    retryable: true,
+    diagnosable: true,
+    patterns: [
+      /runtime recovery exhausted/,
+      /instant runtime recovery/,
+      /container (exited|died|not found|stopped unexpectedly)/,
+      /node (became )?(unreachable|unhealthy|stale)/,
+      /heartbeat (lost|timed? ?out|stale)/,
+      /workspace (was |has been )?(deleted|destroyed|removed)/,
+      // Reconciliation sweep terminal messages (verified verbatim in production)
+      /runtime is (conclusively gone|no longer live)/,
+      /workspace_missing/,
+    ],
+  },
+  {
+    code: 'agent-crash',
+    label: 'Agent crashed',
+    explanation: 'The agent process exited unexpectedly while working.',
+    guidance:
+      'SAM usually recovers crashed sessions automatically. If it did not, send a follow-up message or retry.',
+    retryable: true,
+    diagnosable: true,
+    patterns: [
+      /agent_crash/,
+      /peer disconnected/,
+      /process (exited|crashed|terminated)/,
+      /agent (process )?(crashed|exited|died)/,
+      /\bsigkill\b|\bsigsegv\b|\boom\b|out of memory/,
+      /broken pipe/,
+      /\bepipe\b|\beconnreset\b/,
+    ],
+  },
+  {
+    code: 'stalled',
+    label: 'Stalled',
+    explanation: 'The task stopped making progress and was terminated by the platform watchdog.',
+    guidance:
+      'Retry the task. If this repeats, check whether the agent was waiting on something (input, network, a long tool call).',
+    retryable: true,
+    diagnosable: true,
+    patterns: [
+      /task stuck in/,
+      /\bstuck\b.*(threshold|timeout)/,
+      /no (progress|activity|output) (for|since)/,
+      /watchdog/,
+    ],
+  },
+  {
+    code: 'network',
+    label: 'Network error',
+    explanation:
+      'A network problem interrupted communication between SAM and the workspace or provider.',
+    guidance: 'Usually transient — retry. If it persists, check the node status page.',
+    retryable: true,
+    diagnosable: true,
+    patterns: [
+      /network_error/,
+      /\betimedout\b|\beconnrefused\b|\benotfound\b/,
+      /network (error|failure|unreachable)/,
+      /fetch failed/,
+      /request timed out/,
+      /\btls\b.*(handshake|certificate)/,
+      /dns (error|failure|resolution)/,
+    ],
+  },
+];
+
+const UNKNOWN_CLASSIFICATION: FailureClassification = {
+  code: 'unknown',
+  label: 'Failed',
+  explanation: 'The task failed for a reason SAM could not automatically classify.',
+  guidance:
+    'Read the error details below. Copy the debug report and paste it to an agent to investigate.',
+  retryable: true,
+  diagnosable: true,
+};
+
+// These codes are emitted by the VM task callback. Never infer them from an
+// execution step, conversation text, URL, schema field, or wrapper metadata.
+const STRUCTURAL_FAILURE_CODES = new Set<FailureCode>([
+  'model-unavailable', 'unsupported-loopback-auth', 'mcp-auth-required',
+  'model-credential-missing', 'model-credential-rejected', 'agent-prompt-failed',
+]);
+
+/**
+ * Classify a failure from its free-text message (and optional execution step).
+ * Returns a stable classification; falls back to `unknown` when no rule matches.
+ */
+export function classifyFailure(
+  message: string | null | undefined,
+  step?: string | null
+): FailureClassification {
+  const haystack = `${message ?? ''} ${step ?? ''}`.toLowerCase();
+  const structuralEvidence = (message ?? '').trim().toLowerCase();
+  if (!haystack.trim()) {
+    return UNKNOWN_CLASSIFICATION;
+  }
+  for (const rule of FAILURE_RULES) {
+    const evidence = STRUCTURAL_FAILURE_CODES.has(rule.code) ? structuralEvidence : haystack;
+    if (rule.patterns.some((p) => p.test(evidence))) {
+      return {
+        code: rule.code,
+        label: rule.label,
+        explanation: rule.explanation,
+        guidance: rule.guidance,
+        retryable: rule.retryable,
+        diagnosable: rule.diagnosable,
+      };
+    }
+  }
+  return UNKNOWN_CLASSIFICATION;
+}

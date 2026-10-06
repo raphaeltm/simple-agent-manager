@@ -1,110 +1,179 @@
 ---
 title: AI Agents
-description: Configure and use AI coding agents in SAM — Claude Code, OpenAI Codex, Google Gemini, Mistral Vibe, OpenCode, and Amp.
+description: Configure and use AI coding agents in SAM — Claude Code, OpenAI Codex, Gemini CLI, Mistral Vibe, OpenCode, and Amp.
 ---
 
-SAM supports six AI coding agents. Each runs inside a workspace container and communicates via the **Agent Communication Protocol (ACP)**.
+SAM supports six AI coding agents. You connect the ones you want to use, then choose which to run for a given chat by selecting an **agent profile**.
 
 ## Supported Agents
 
 ### Claude Code
 
-| Property | Value |
-|----------|-------|
-| **Provider** | Anthropic |
-| **API Key** | `ANTHROPIC_API_KEY` |
-| **OAuth Support** | Yes (Claude Max/Pro subscriptions) |
-| **Get a Key** | [Anthropic Console](https://console.anthropic.com/settings/keys) |
+| Property          | Value                                                            |
+| ----------------- | ---------------------------------------------------------------- |
+| **Provider**      | Anthropic                                                        |
+| **API Key**       | `ANTHROPIC_API_KEY`                                              |
+| **OAuth Support** | Yes (Claude Max/Pro subscriptions)                               |
+| **Get a Key**     | [Anthropic Console](https://console.anthropic.com/settings/keys) |
 
-Claude Code supports dual authentication: API keys (pay-per-use) and OAuth tokens (from Claude Max/Pro subscriptions via `claude setup-token`). Toggle between them in Settings.
+Claude Code supports two authentication methods: an **API key** (pay-per-use) or your **Claude Max/Pro subscription**. To use a subscription, choose **Connect with Claude Code** for the [guided sign-in](#connecting-a-subscription-with-guided-sign-in) — SAM opens a Claude sign-in page, then you paste Claude's browser-displayed `code#state` value back into SAM, so you never run `claude setup-token` or paste a token by hand. Pasting a `claude setup-token` value manually is still available as a fallback.
 
 ### OpenAI Codex
 
-| Property | Value |
-|----------|-------|
-| **Provider** | OpenAI |
-| **API Key** | `OPENAI_API_KEY` |
-| **OAuth Support** | Yes (via `~/.codex/auth.json`) |
-| **Get a Key** | [OpenAI Platform](https://platform.openai.com/api-keys) |
+| Property          | Value                                                   |
+| ----------------- | ------------------------------------------------------- |
+| **Provider**      | OpenAI                                                  |
+| **API Key**       | `OPENAI_API_KEY`                                        |
+| **OAuth Support** | Yes (via `~/.codex/auth.json`)                          |
+| **Get a Key**     | [OpenAI Platform](https://platform.openai.com/api-keys) |
 
-### Google Gemini
+For a ChatGPT subscription, choose **Connect with Codex** for the [guided
+sign-in](#connecting-a-subscription-with-guided-sign-in). SAM opens an OpenAI
+sign-in page and shows a copyable one-time code; no terminal interaction or
+manual `~/.codex/auth.json` paste is required. Pasting `auth.json` manually is
+still available as a fallback.
 
-| Property | Value |
-|----------|-------|
-| **Provider** | Google |
-| **API Key** | `GEMINI_API_KEY` |
+### Gemini CLI
+
+| Property      | Value                                                  |
+| ------------- | ------------------------------------------------------ |
+| **Provider**  | Google                                                 |
+| **API Key**   | `GEMINI_API_KEY`                                       |
 | **Get a Key** | [Google AI Studio](https://aistudio.google.com/apikey) |
 
 ### Mistral Vibe
 
-| Property | Value |
-|----------|-------|
-| **Provider** | Mistral |
-| **API Key** | `MISTRAL_API_KEY` |
+| Property      | Value                                                  |
+| ------------- | ------------------------------------------------------ |
+| **Provider**  | Mistral                                                |
+| **API Key**   | `MISTRAL_API_KEY`                                      |
 | **Get a Key** | [Mistral Console](https://console.mistral.ai/api-keys) |
 
 Mistral Vibe is installed via `uv` (Python package manager) and requires Python 3.12.
 
 ### OpenCode
 
-| Property | Value |
-|----------|-------|
-| **Provider** | OpenCode (SST) |
-| **API Key** | Uses Scaleway credentials (`SCW_SECRET_KEY`) |
-| **Get a Key** | [Scaleway Console](https://console.scaleway.com/iam/api-keys) |
+| Property                         | Value                                                                                                 |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| **Provider**                     | OpenCode (SST)                                                                                        |
+| **Default Inference Provider**   | OpenCode Zen                                                                                          |
+| **Advanced Inference Providers** | OpenCode Go, SAM Platform (Workers AI), Scaleway, Google Vertex, OpenAI-compatible, Anthropic, custom |
+| **API Key**                      | `OPENCODE_API_KEY` for OpenCode Zen and OpenCode Go                                                   |
+| **Get a Key**                    | [OpenCode auth](https://opencode.ai/auth)                                                             |
 
-OpenCode uses Scaleway's Generative APIs for inference. If you already have a Scaleway cloud provider credential configured, OpenCode can use that — no separate API key required.
+OpenCode defaults to OpenCode Zen. SAM loads the Zen and Go model dropdowns from Models.dev through its authenticated model-catalog API, with a static fallback if that upstream catalog is unavailable. Select OpenCode Go in agent settings to use Go-only models such as `opencode-go/glm-5.2`. Advanced configurations can use SAM Platform inference without a user API key, or another user-selected inference provider. If you explicitly select Scaleway and already have a Scaleway cloud provider credential configured, OpenCode can reuse that credential — no separate API key required.
 
 ### Amp
 
-| Property | Value |
-|----------|-------|
-| **Provider** | Sourcegraph |
-| **API Key** | `AMP_API_KEY` |
-| **OAuth Support** | No |
-| **Get a Key** | [Amp settings](https://ampcode.com/settings) |
+| Property          | Value                                        |
+| ----------------- | -------------------------------------------- |
+| **Provider**      | Sourcegraph                                  |
+| **API Key**       | `AMP_API_KEY`                                |
+| **OAuth Support** | No                                           |
+| **Get a Key**     | [Amp settings](https://ampcode.com/settings) |
 
-Amp uses the community `acp-amp` ACP bridge in SAM v1. It requires an Amp API key and may require paid Amp credits.
+Amp requires an Amp API key and may require paid Amp credits.
 
-## Configuring Agent Credentials
+## Connecting Agent Credentials
 
-1. Go to **Settings** in the SAM web UI
-2. Open the **Agents** tab
-3. Add your API key (or OAuth token) for each agent you want to use. Connection and configuration for each agent are grouped together on a single card.
-4. Keys are encrypted at rest using AES-256-GCM
+1. Go to **Settings → Connections** in the SAM web UI
+2. Start the **Connect** flow for the agent you want to use
+3. Provide your API key (or OAuth token). Your credentials are encrypted at rest.
 
-You can configure credentials for multiple agents simultaneously and switch between them per project.
+You can connect multiple agents and switch between them per chat by choosing a different profile.
 
-## Project Default Agent
+## Connecting a subscription with guided sign-in
 
-Each project can set a **default agent type** that's used when executing ideas. If no default is set, you'll need to specify the agent when starting execution.
+If you pay for **Claude Max/Pro** or a **ChatGPT** plan, you can connect that subscription instead of an API key — without leaving the browser or touching a terminal. This is the recommended way to use Claude Code or OpenAI Codex on a subscription.
 
-To set the default:
-1. Open the project settings
-2. Select your preferred agent from the dropdown
-3. Save changes
+1. Go to **Settings → Connections** (or **Settings → Agents**) and start the connect flow for Claude Code or OpenAI Codex.
+2. Choose the OAuth / subscription authentication method (rather than API key), then click **Connect with Claude Code** or **Connect with Codex**.
+3. Click the **Open sign-in** link and approve access on the provider's page. For Codex, enter the short code SAM displays when the provider asks. For Claude Code, copy the `code#state` value Claude displays, return to SAM, paste the complete value into the dialog, and click **Continue sign-in**.
+4. Leave the SAM window open — it updates on its own. When the provider confirms, the panel shows **Connected** and your subscription credential is saved, encrypted at rest.
 
-The agent selection follows this precedence:
-1. Explicit override on execution
-2. Project default agent
-3. Platform default (`claude-code`)
+![The guided sign-in dialog for Claude Code: a status line reading "Waiting for sign-in", an "Open Claude sign-in" button, and a protected field for the complete browser-displayed code. No terminal is shown.](/images/docs/agent-guided-login.png)
+
+A few things worth knowing:
+
+- **No terminal, no file paste.** The old flow asked you to run `claude setup-token` or paste `~/.codex/auth.json`. Those still work as a manual fallback (in the same panel), but the guided flow removes them from the happy path.
+- **User-scoped.** Guided sign-in saves the credential for your account, so it applies across your projects. To set a subscription credential for a single [shared project](/docs/guides/collaboration/), use the manual paste fallback in that project's connections.
+- **Availability.** Guided sign-in is available on the hosted platform and on self-hosted deployments running on Cloudflare Containers (SAM's default runtime). If the button isn't shown, use the manual API key or token fields in the same panel.
+
+## Usage Limits
+
+SAM shows how much of a credential's provider allowance is used, so you can see a Claude Max 5-hour window at 72% before the agent hits it.
+
+Where it appears:
+
+- **Chat header** — a usage chip next to the workspace badge for the credential the running session uses (for example `Claude · 5h 72% · Week 31%`), shortest window first. Tap it for every window with its reset time. The chip appears as soon as the agent's first turn completes; you do not need to reload.
+- **Settings → Credentials** — the same chip on each personal credential that has samples.
+- **Agents** — the MCP tool `get_credential_limits` returns the same windows, so an orchestrator can pause dispatching and schedule a wake for after the reset instead of running into the limit.
+
+Where the numbers come from (`apps/api/src/services/credential-limit-events/`, table `credential_limit_windows`):
+
+| Harness / mode                                | Windows                                                                                                         | Source                                                                                                                 |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Claude Code with a Claude Pro/Max OAuth token | 5-hour, weekly, Opus weekly, Sonnet weekly                                                                      | Claude Code's own rate-limit events on the ACP stream (`session_host_usage.go`)                                        |
+| Codex with a ChatGPT plan                     | One or two windows depending on the plan, e.g. 5-hour and weekly (labelled by window length, never by position) | The pinned Codex CLI's session rollout, read by the VM agent after each completed turn (`session_host_usage_probe.go`) |
+| OpenCode with an OpenCode Go key              | rolling, weekly, monthly                                                                                        | OpenCode's official Go usage endpoint, called by the VM agent after each completed turn                                |
+| API keys routed through the SAM proxy         | request and token rate limits                                                                                   | Provider rate-limit response headers                                                                                   |
+
+Values are the latest samples SAM observed while an agent was running on that credential; they are not live quotes, and an idle credential keeps showing its last sample. SAM does not call undocumented provider account endpoints. OpenCode Zen bills per request from a credit balance that only the OpenCode console shows, so Zen sessions have no usage chip; agent settings link to the console instead.
+
+## AI Provider Modes
+
+Each agent runs in one of three provider modes, which control where LLM traffic goes and who pays for it:
+
+| Mode        | What it uses                                                                     |
+| ----------- | -------------------------------------------------------------------------------- |
+| **API key** | Your own provider API key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.)          |
+| **OAuth**   | A token from your provider subscription (for example Claude Max/Pro)             |
+| **SAM**     | The platform's managed AI proxy, with billing and budget handled by SAM (opt-in) |
+
+You pick the mode when you connect an agent. The **SAM** platform proxy is never selected automatically — you have to opt in.
+
+In **SAM** mode the proxy serves the models in the platform catalog, which an operator can narrow, and an administrator can limit your account to certain model tiers (low-cost, standard, premium). A model outside either is refused with an error naming the model and what you can use; your own API keys and subscriptions are not affected.
+
+## Agent Profiles
+
+An **agent profile** bundles a connected agent, a model, and settings into a reusable configuration. Profiles are how you choose what runs: pick a profile from the chat input when you start a session, or attach one to a [trigger](/docs/guides/webhook-triggers/) for automated work. Create and manage profiles under a project's **Profiles** page.
+
+In a [shared project](/docs/guides/collaboration/), agent profiles (and skills, environment variables, secrets, and files) are project-scoped resources — any member can use profiles another member created. LLM cost still follows the running user's own key unless a shared project credential is attached.
+
+When work starts, the agent is resolved in this order:
+
+1. The profile you selected (or the trigger's profile)
+2. The project's default profile
+3. The platform default (`DEFAULT_TASK_AGENT_TYPE`, `opencode` in the checked-in Worker config)
+
+### Choosing a model
+
+The profile's model picker lists the models SAM knows each agent supports. The list is bundled with
+SAM and updated with its releases, OpenCode's included. (In **Settings → Agents**, OpenCode's model
+dropdown loads live from Models.dev when its provider is OpenCode Zen or OpenCode Go.) If a model you
+want isn't listed yet, type its exact ID and press **Enter** to use it as a custom model. SAM does not check a custom ID against any list, so it
+has to be a model your provider accepts and your agent's version can run. The exception is the
+**SAM** provider mode: the platform proxy only serves models in its catalog, so there an unlisted
+ID is refused.
+
+### Permission mode
+
+Agents start in **Bypass Permissions** mode, so they edit files and run commands without stopping to
+ask. Each workspace is its own isolated VM or container. To make an agent more careful, choose another
+mode in a profile, in the project's **Agent Overrides** (project settings), or in **Settings → Agents**.
+SAM uses the first of these that sets a mode, in that order. **Manual** asks before making changes;
+**Plan Mode** plans without changing anything.
+
+Claude Code supports every mode. Even in Bypass Permissions it still asks about a few safety checks,
+and those questions appear in the chat. Codex always runs with full access. Other agents keep their
+own behavior when they don't support the chosen mode.
 
 ## Workspace Profiles
 
-When running an agent, you can choose between two workspace profiles:
+When you start a chat you can also choose how much environment to bring:
 
-### Full Profile (Default)
-
-- Builds the complete devcontainer from your project's `.devcontainer` configuration
-- Includes all custom build steps, extensions, and dependencies
-- Startup time: 2-3 minutes depending on build complexity
-
-### Lightweight Profile
-
-- Skips the devcontainer build entirely
-- Uses a minimal base image with core tools pre-installed
-- Startup time: 30-120 seconds faster than full profile
-- Best for quick conversations that don't need custom environments
+- **Full** (default) — builds your project's `.devcontainer` so the agent can run your stack, tests, and services. Best when the work depends on your real environment.
+- **Lightweight** — starts faster with a minimal environment. Best for quick questions, planning, and code exploration.
 
 ## Agent Session Features
 
@@ -114,14 +183,10 @@ Agent output streams to your browser in real-time via WebSocket. You see code be
 
 ### Conversation Forking
 
-You can fork a conversation from any message to explore an alternative approach:
-
-1. Hover over a message in the chat
-2. Click the **Fork** button
-3. SAM generates an AI context summary of the conversation up to that point
-4. A new session starts with the context and awareness of the previous conversation
-
-Fork depth is limited to 10 levels (configurable via `ACP_SESSION_MAX_FORK_DEPTH`).
+**Fork** in the session tool rail starts a new session that carries an AI-written summary of the
+current one, so you can try an alternative without losing the original thread. A fork covers the
+whole session, not a single message. See
+[Conversation Forking](/docs/guides/chat-features/#conversation-forking) for the steps and limits.
 
 ### Voice Input
 
@@ -133,38 +198,61 @@ Agent responses can be played back as audio using Deepgram Aura 2 (via Workers A
 
 ### Session Lifecycle
 
-Each agent session follows this state machine:
+SAM tracks related lifecycle state at three levels:
 
-```
-pending → assigned → running → completed/failed/interrupted
-```
+- **Chat session**: `active`, `sleeping`, `stopped`, or `error` in the public API. A sleeping conversation keeps the composer visible so a same-chat follow-up can wake and resume it.
+- **Task record**: `draft`, `ready`, `queued`, `delegated`, `in_progress`, `sleeping`, `completed`, `failed`, or `cancelled`. A sleeping VM conversation retains the same task when it wakes. Task-mode work keeps its task completion lifecycle instead of showing the manual Sleep action while idle.
+- **Runtime agent session**: `running`, `recovery`, `sleeping`, `suspended`, `stopped`, or `error`. Recovery means SAM is rebuilding runtime compute and restoring the saved harness/session state.
 
-- **Pending**: Session created, waiting for workspace assignment
-- **Assigned**: Workspace ready, agent starting up
-- **Running**: Agent actively executing
-- **Completed**: Agent finished successfully
-- **Failed**: Agent encountered an error
-- **Interrupted**: VM heartbeat lost (detected after 5 minutes of silence)
+Sleeping VM tasks remain visible in Active Tasks, the account map, and agent lists. Agents in the same project can send a follow-up using `send_message_to_subtask` or `send_durable_message`; durable delivery wakes the saved conversation. If durable delivery is disabled, the tools explain that sleeping targets require it. A direct parent can cancel a sleeping child with `stop_subtask` without waking its VM.
+
+Conversation-mode sessions with an attached workspace can be manually slept when awake and idle. Archive remains destructive and appears after the reversible sleep boundary.
+
+SAM now backs chat sessions with task records across more runtime paths. In practice, that means forking, archive/complete controls, lineage, and status reporting behave consistently whether the work started as an idea execution, a full task, or an instant chat.
 
 ### MCP Tools
 
 Running agents have access to project-aware MCP tools:
 
-| Tool | Description |
-|------|-------------|
-| `dispatch_task` | Spawn a follow-up idea for execution |
-| `create_idea` | Create a new idea |
-| `update_idea` | Update an idea's title, content, priority, or status |
-| `list_ideas` | View project ideas |
-| `get_idea` | Read idea details |
-| `search_ideas` | Search ideas by keyword |
-| `link_idea` | Link an idea to a chat session |
-| `unlink_idea` | Remove an idea-session link |
-| `find_related_ideas` | Find ideas related to a session |
-| `list_linked_ideas` | List ideas linked to a session |
-| `list_sessions` | View chat sessions |
-| `get_session_messages` | Read conversation history (consecutive streaming tokens are concatenated into logical messages) |
-| `search_messages` | Search messages by keyword — uses FTS5 full-text search for completed sessions; keyword matching for active sessions |
-| `update_task_status` | Report progress |
-| `complete_task` | Mark current work as done |
-| `request_human_input` | Ask for user decision (blocks until answered) |
+| Tool                                | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dispatch_task`                     | Spawn follow-up work using the selected profile runtime, or an explicit `runtime` override                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `create_idea`                       | Create a new idea                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `update_idea`                       | Update an idea's title, content, priority, or status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `list_ideas`                        | View project ideas                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `get_idea`                          | Read idea details                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `search_ideas`                      | Search ideas by keyword. Long multi-word input searches every retained term; input beyond the configured guardrails is truncated and disclosed in the response.                                                                                                                                                                                                                                                                                                                                                                     |
+| `link_idea`                         | Link an idea to a chat session                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `unlink_idea`                       | Remove an idea-session link                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `find_related_ideas`                | Find ideas related to a session                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `list_linked_ideas`                 | List ideas linked to a session                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `list_sessions`                     | View chat sessions                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `get_session_messages`              | Read conversation history (consecutive streaming tokens are concatenated into logical messages)                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `search_messages`                   | Search current and archived messages by keyword. Long multi-word input searches every retained term; input beyond the configured guardrails is truncated and disclosed through `queryTruncated`, `query`, and `queryLimits`. Sessions are indexed incrementally as they sleep or stop. Project-wide results may be provisional: repeat the same input query, roles, and limit with `archiveSearch.continuation` until `archiveSearch.complete` is true; owner, index, execution, and `rootSearch` coverage are reported separately. |
+| `get_resource_history`              | Read a VM-backed workspace's retained CPU, memory, I/O and OOM history; defaults to the caller's own session                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `list_triggers`                     | List this project's automation triggers, optionally filtered by status or source type                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `create_project_event_subscription` | Subscribe the current task agent to durable project events using bounded v1 exact/set filters for source, event type, subject, and severity                                                                                                                                                                                                                                                                                                                                                                                         |
+| `list_project_event_subscriptions`  | Recover active event subscription IDs owned by the current task agent                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `get_project_event_subscription`    | Inspect one owned event subscription, including filter and recorded delivery preference                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `cancel_project_event_subscription` | Idempotently cancel one owned event subscription                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `list_subscription_events`          | Replay missed or queued events for one visible subscription; returns payload-free summaries, delivery IDs, and an opaque subscription-bound cursor                                                                                                                                                                                                                                                                                                                                                                                  |
+| `get_event`                         | Fetch full stored details for one event that is visible through an active subscription                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `ack_event_delivery`                | Idempotently acknowledge a processed pull delivery by delivery ID                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `list_incident_queue`               | List grouped private feedback incidents; available only inside the configured feedback project                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `get_incident`                      | Read one bounded, redacted private incident and its untrusted evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `claim_incident`                    | Atomically claim a private incident for the current task                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `resolve_incident`                  | Terminally resolve or reject a claimed private incident; resolved outcomes require a PR/task/Idea ship-or-track reference                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `update_task_status`                | Report progress                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `get_task_details`                  | Inspect task state, persisted output fields, PR/error details, session id, and bounded recent assistant diagnostics                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `complete_task`                     | Mark current work as done. Pass the pull request URL as `evidence.prUrl`; it is saved on the task alongside optional test, staging, CI, manual verification, and note evidence.                                                                                                                                                                                                                                                                                                                                                     |
+| `request_human_input`               | Record a user decision request and notify the user; the tool call itself is non-blocking                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+
+`get_task_details` keeps `outputPrUrl`, `outputSummary`, and `completionEvidence` as the canonical persisted completion fields. When a task has a linked chat session, it can also include a bounded `recentAssistantMessages` array with up to five recent assistant messages, each capped to 2,000 characters, so orchestrators can recover useful final output when the persisted summary is sparse. The SAM session (Anthropic tool) variant returns a single `finalAssistantMessage` (the latest assistant message, content capped to 2,000 characters) instead of the full array. If session diagnostics are unavailable, task details still return and the diagnostic fields are empty/null.
+
+For durable project eventing, use this loop: create the narrowest useful subscription, list subscription events until `hasMore` is false, fetch full event details only with `get_event` when needed, then ack each processed `deliveryId`. List responses deliberately omit payloads and raw payload references. The cursor is opaque and bound to the subscription that produced it. Project and caller identity always come from the MCP token. The pull/replay/ack tools never steer runtimes or spawn tasks; wake delivery is out of band — `existing_session_prompt` and `runtime_interrupt` subscriptions wake the target chat through the prompt queue, and `runtime_interrupt` wakes may stop an in-flight turn so the batch is delivered immediately.
+
+Claude Code and Codex get these tools on both the VM and [Instant](/docs/guides/instant-sessions/) runtimes. If a Codex session is handed an MCP server without a usable token, it fails to start with an explicit error rather than launching a tool-less agent.
+
+If a chat reports that its **agent connection is missing or rejected**, the session creator can open **Settings → Connections**. Claude Code and Codex offer guided sign-in; other agents may require a supported key method. A provider error saying the **model is unsupported or unavailable for the account** is different: a working sign-in does not grant model access. Check that model's availability with the provider.
+
+An agent that reports it has no SAM tools is worth [reporting](/docs/guides/reporting-issues/) — it is not expected behavior on either runtime.

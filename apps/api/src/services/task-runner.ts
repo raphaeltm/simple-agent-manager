@@ -27,6 +27,9 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { stopWorkspaceOnNode } from './node-agent';
 import * as nodeLifecycleService from './node-lifecycle';
+import { stopNodeResources } from './nodes';
+import { wakeVmAdmissionWaiters } from './vm-admission-control';
+import { finalizeWorkspaceLifecycleClosure } from './workspace-lifecycle-finalizer';
 
 function getCleanupDelayMs(env: Env): number {
   const value = env.TASK_RUN_CLEANUP_DELAY_MS;
@@ -47,7 +50,8 @@ function getCleanupDelayMs(env: Env): number {
 export async function cleanupTaskRun(
   taskId: string,
   env: Env,
-  warmTimeoutOverrideMs?: number | null
+  warmTimeoutOverrideMs?: number | null,
+  requiredUserId?: string
 ): Promise<void> {
   const db = drizzle(env.DATABASE, { schema });
   const cleanupDelay = getCleanupDelayMs(env);
@@ -57,32 +61,99 @@ export async function cleanupTaskRun(
     await new Promise((resolve) => setTimeout(resolve, cleanupDelay));
   }
 
-  const [task] = await db
-    .select()
-    .from(schema.tasks)
-    .where(eq(schema.tasks.id, taskId))
-    .limit(1);
+  const [task] = await db.select().from(schema.tasks).where(eq(schema.tasks.id, taskId)).limit(1);
 
   if (!task || !task.workspaceId) {
     return;
   }
 
+  const workspaceConditions = [eq(schema.workspaces.id, task.workspaceId)];
+  if (requiredUserId) {
+    workspaceConditions.push(eq(schema.workspaces.userId, requiredUserId));
+  }
+
   const [workspace] = await db
     .select()
     .from(schema.workspaces)
-    .where(eq(schema.workspaces.id, task.workspaceId))
+    .where(and(...workspaceConditions))
     .limit(1);
 
   if (!workspace || !workspace.nodeId) {
+    if (requiredUserId) {
+      log.info('task_run.cleanup.skipped_owner_mismatch', {
+        taskId,
+        workspaceId: task.workspaceId,
+        requiredUserId,
+        action: 'skipped',
+      });
+    }
     return;
   }
 
-  log.info('task_run.cleanup.started', { taskId, workspaceId: task.workspaceId, nodeId: workspace.nodeId });
+  // Fall back to the WORKSPACE owner, not the task creator. Now that task lifecycle routes are
+  // project-scoped, a member can run or be delegated another member's task, so the workspace/node
+  // belong to the runner while `task.userId` stays the original creator. Internal callers (VM-agent
+  // status callback, TaskRunner DO, stuck-task cron) pass no requiredUserId; using the creator there
+  // makes the node lookup below miss, which silently misclassifies a cf-container as a VM and leaves
+  // the container running while D1 records the workspace as stopped.
+  // When requiredUserId IS supplied, the workspace WHERE clause above already guarantees
+  // workspace.userId === requiredUserId, so this is a no-op for the caller-scoped paths.
+  const cleanupUserId = requiredUserId ?? workspace.userId;
+
+  log.info('task_run.cleanup.started', {
+    taskId,
+    workspaceId: task.workspaceId,
+    nodeId: workspace.nodeId,
+  });
+
+  const [node] = await db
+    .select({
+      id: schema.nodes.id,
+      runtime: schema.nodes.runtime,
+    })
+    .from(schema.nodes)
+    .where(and(eq(schema.nodes.id, workspace.nodeId), eq(schema.nodes.userId, cleanupUserId)))
+    .limit(1);
+
+  if (node?.runtime === 'cf-container') {
+    const [snapshot] = workspace.chatSessionId
+      ? await db
+          .select({
+            status: schema.sessionSnapshots.status,
+            degradation: schema.sessionSnapshots.degradation,
+            expiresAt: schema.sessionSnapshots.expiresAt,
+          })
+          .from(schema.sessionSnapshots)
+          .where(eq(schema.sessionSnapshots.chatSessionId, workspace.chatSessionId))
+          .limit(1)
+      : [];
+    const preserveSleepingSnapshot =
+      workspace.status === 'sleeping' &&
+      snapshot?.status === 'available' &&
+      snapshot.degradation === 'none' &&
+      Date.parse(snapshot.expiresAt) > Date.now();
+    if (preserveSleepingSnapshot) {
+      log.info('task_run.cleanup.cf_container_sleep_preserved', {
+        taskId,
+        workspaceId: workspace.id,
+        nodeId: workspace.nodeId,
+        snapshotExpiresAt: snapshot.expiresAt,
+      });
+      return;
+    }
+    await stopNodeResources(workspace.nodeId, cleanupUserId, env);
+    log.info('task_run.cleanup.cf_container_destroyed', {
+      taskId,
+      workspaceId: workspace.id,
+      nodeId: workspace.nodeId,
+    });
+    return;
+  }
 
   // Stop the workspace (idempotent: only if still running/recovery)
   if (workspace.status === 'running' || workspace.status === 'recovery') {
     try {
-      await stopWorkspaceOnNode(workspace.nodeId, workspace.id, env, task.userId);
+      await stopWorkspaceOnNode(workspace.nodeId, workspace.id, env, cleanupUserId);
     } catch (err) {
       log.error('task_run.cleanup.workspace_stop_failed', {
         taskId,
@@ -92,10 +163,18 @@ export async function cleanupTaskRun(
       });
     }
 
+    const stoppedAt = new Date().toISOString();
     await db
       .update(schema.workspaces)
-      .set({ status: 'stopped', updatedAt: new Date().toISOString() })
+      .set({ status: 'stopped', updatedAt: stoppedAt })
       .where(eq(schema.workspaces.id, workspace.id));
+    await finalizeWorkspaceLifecycleClosure(env, {
+      workspaceIds: [workspace.id],
+      userId: cleanupUserId,
+      agentSessionStatus: 'completed',
+      nowIso: stoppedAt,
+      reason: 'task_run_cleanup_workspace_stopped',
+    });
   } else {
     log.info('task_run.cleanup.workspace_already_stopped', {
       taskId,
@@ -105,12 +184,19 @@ export async function cleanupTaskRun(
   }
 
   // Schedule automatic deletion after TTL (best-effort)
-  if (workspace.nodeId && (workspace.status === 'running' || workspace.status === 'recovery' || workspace.status === 'stopped')) {
+  if (
+    workspace.nodeId &&
+    (workspace.status === 'running' ||
+      workspace.status === 'recovery' ||
+      workspace.status === 'sleeping' ||
+      workspace.status === 'stopped')
+  ) {
     try {
       const doId = env.NODE_LIFECYCLE.idFromName(workspace.nodeId);
       const stub = env.NODE_LIFECYCLE.get(doId);
-      await (stub as unknown as import('../durable-objects/node-lifecycle').NodeLifecycle)
-        .scheduleWorkspaceDeletion(workspace.id, task.userId);
+      await (
+        stub as unknown as import('../durable-objects/node-lifecycle').NodeLifecycle
+      ).scheduleWorkspaceDeletion(workspace.nodeId, workspace.id, cleanupUserId);
     } catch (e) {
       log.warn('task_run.cleanup.schedule_deletion_failed', {
         taskId,
@@ -125,7 +211,7 @@ export async function cleanupTaskRun(
     await cleanupAutoProvisionedNode(
       db,
       task.autoProvisionedNodeId,
-      task.userId,
+      cleanupUserId,
       workspace.id,
       env,
       warmTimeoutOverrideMs
@@ -178,17 +264,10 @@ async function cleanupAutoProvisionedNode(
   const workspaces = await db
     .select({ id: schema.workspaces.id, status: schema.workspaces.status })
     .from(schema.workspaces)
-    .where(
-      and(
-        eq(schema.workspaces.nodeId, nodeId),
-        eq(schema.workspaces.userId, userId)
-      )
-    );
+    .where(and(eq(schema.workspaces.nodeId, nodeId), eq(schema.workspaces.userId, userId)));
 
   const activeWorkspaces = workspaces.filter(
-    (ws) =>
-      ws.id !== excludeWorkspaceId &&
-      (ws.status === 'running' || ws.status === 'creating' || ws.status === 'recovery')
+    (ws) => ws.id !== excludeWorkspaceId && isActiveWorkspaceForNodeCleanup(ws.status)
   );
 
   if (activeWorkspaces.length > 0) {
@@ -198,9 +277,34 @@ async function cleanupAutoProvisionedNode(
 
   // No active workspaces — mark node as warm for reuse.
   // The NodeLifecycle DO will schedule an alarm for eventual teardown.
+  const markedIdle = await markNodeIdleForReuse(env, nodeId, userId, warmTimeoutOverrideMs);
+  if (!markedIdle) return;
+
+  try {
+    await wakeVmAdmissionWaiters(env, { userId, reason: 'node_marked_warm' });
+  } catch (err) {
+    log.warn('task_run.cleanup.admission_wake_failed', {
+      nodeId,
+      userId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+function isActiveWorkspaceForNodeCleanup(status: string): boolean {
+  return status === 'running' || status === 'creating' || status === 'recovery';
+}
+
+async function markNodeIdleForReuse(
+  env: Env,
+  nodeId: string,
+  userId: string,
+  warmTimeoutOverrideMs?: number | null
+): Promise<boolean> {
   try {
     await nodeLifecycleService.markIdle(env, nodeId, userId, warmTimeoutOverrideMs);
     log.info('task_run.cleanup.node_marked_warm', { nodeId, userId, warmTimeoutOverrideMs });
+    return true;
   } catch (err) {
     log.error('task_run.cleanup.mark_idle_failed', {
       nodeId,
@@ -221,6 +325,7 @@ async function cleanupAutoProvisionedNode(
         stopError: stopErr instanceof Error ? stopErr.message : String(stopErr),
       });
     }
+    return false;
   }
 }
 

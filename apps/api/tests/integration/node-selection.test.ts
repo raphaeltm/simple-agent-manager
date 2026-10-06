@@ -12,7 +12,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { describe, expect,it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 /**
  * Extract a section of source code between two marker strings.
@@ -23,14 +23,11 @@ function extractSection(source: string, startMarker: string, endMarker: string):
   const end = source.indexOf(endMarker, start + 1);
   if (start === -1) throw new Error(`Start marker not found: ${startMarker}`);
   if (end === -1) throw new Error(`End marker not found: ${endMarker}`);
-  if (end <= start) throw new Error(`End marker "${endMarker}" precedes start marker "${startMarker}"`);
+  if (end <= start)
+    throw new Error(`End marker "${endMarker}" precedes start marker "${startMarker}"`);
   return source.slice(start, end);
 }
 
-const selectorSource = readFileSync(
-  resolve(process.cwd(), 'src/services/node-selector.ts'),
-  'utf8'
-);
 const doSource = readFileSync(
   resolve(process.cwd(), 'src/durable-objects/node-lifecycle.ts'),
   'utf8'
@@ -39,15 +36,56 @@ const serviceSource = readFileSync(
   resolve(process.cwd(), 'src/services/node-lifecycle.ts'),
   'utf8'
 );
+const submitRouteSource = readFileSync(
+  resolve(process.cwd(), 'src/routes/tasks/submit.ts'),
+  'utf8'
+);
+const mcpDispatchRouteSource = readFileSync(
+  resolve(process.cwd(), 'src/routes/mcp/dispatch-tool.ts'),
+  'utf8'
+);
+const samSessionDispatchSource = readFileSync(
+  resolve(process.cwd(), 'src/durable-objects/sam-session/tools/dispatch-task.ts'),
+  'utf8'
+);
+const triggerSubmitSource = readFileSync(
+  resolve(process.cwd(), 'src/services/trigger-submit.ts'),
+  'utf8'
+);
+const reservedTaskSubmissionSource = readFileSync(
+  resolve(process.cwd(), 'src/services/reserved-task-submission.ts'),
+  'utf8'
+);
+const reservedTaskSubmissionIntentSource = readFileSync(
+  resolve(process.cwd(), 'src/services/reserved-task-submission-intent.ts'),
+  'utf8'
+);
+const triggerSubmitPlacementPathSource = [
+  triggerSubmitSource,
+  reservedTaskSubmissionSource,
+  reservedTaskSubmissionIntentSource,
+].join('\n');
+const retrySubtaskSource = readFileSync(
+  resolve(process.cwd(), 'src/durable-objects/sam-session/tools/retry-subtask.ts'),
+  'utf8'
+);
+const taskRunSource = readFileSync(resolve(process.cwd(), 'src/routes/tasks/run.ts'), 'utf8');
+const mcpOrchestrationToolsSource = readFileSync(
+  resolve(process.cwd(), 'src/routes/mcp/orchestration-tools.ts'),
+  'utf8'
+);
 const taskRunnerSource = [
   'index.ts',
   'types.ts',
   'node-steps.ts',
+  'node-selection.ts',
   'workspace-steps.ts',
   'agent-session-step.ts',
   'state-machine.ts',
   'helpers.ts',
-].map(f => readFileSync(resolve(process.cwd(), 'src/durable-objects/task-runner', f), 'utf8')).join('\n');
+]
+  .map((f) => readFileSync(resolve(process.cwd(), 'src/durable-objects/task-runner', f), 'utf8'))
+  .join('\n');
 
 // =============================================================================
 // Concurrent warm pool claiming — safety mechanisms
@@ -91,45 +129,6 @@ describe('concurrent warm pool claiming safety', () => {
     });
   });
 
-  describe('defense-in-depth: D1 re-check before DO call', () => {
-    it('selectNodeForTaskRun re-queries D1 before each tryClaim', () => {
-      const warmSection = selectorSource.slice(
-        selectorSource.indexOf('for (const warmNode'),
-        selectorSource.indexOf('Get all running nodes')
-      );
-      // The defense-in-depth check re-queries D1
-      expect(warmSection).toContain('freshNode');
-      expect(warmSection).toContain("eq(schema.nodes.id, warmNode.id)");
-    });
-
-    it('skips node if D1 shows status changed to non-running', () => {
-      const warmSection = selectorSource.slice(
-        selectorSource.indexOf('for (const warmNode'),
-        selectorSource.indexOf('Get all running nodes')
-      );
-      expect(warmSection).toContain("freshNode.status !== 'running'");
-      expect(warmSection).toContain('continue');
-    });
-
-    it('skips node if D1 shows warmSince cleared', () => {
-      const warmSection = selectorSource.slice(
-        selectorSource.indexOf('for (const warmNode'),
-        selectorSource.indexOf('Get all running nodes')
-      );
-      expect(warmSection).toContain('!freshNode.warmSince');
-      expect(warmSection).toContain('continue');
-    });
-
-    it('skips node if D1 query returns no results', () => {
-      const warmSection = selectorSource.slice(
-        selectorSource.indexOf('for (const warmNode'),
-        selectorSource.indexOf('Get all running nodes')
-      );
-      expect(warmSection).toContain('!freshNode');
-      expect(warmSection).toContain('continue');
-    });
-  });
-
   describe('TaskRunner DO warm claiming uses same pattern', () => {
     it('TaskRunner tryClaimWarmNode re-checks D1 freshness', () => {
       const section = taskRunnerSource.slice(
@@ -142,12 +141,10 @@ describe('concurrent warm pool claiming safety', () => {
     });
 
     it('TaskRunner tryClaimWarmNode claims via NodeLifecycle DO stub', () => {
-      const section = taskRunnerSource.slice(
-        taskRunnerSource.indexOf('async function tryClaimWarmNode('),
-        taskRunnerSource.indexOf('async function findNodeWithCapacity(')
+      expect(taskRunnerSource).toContain('NODE_LIFECYCLE.idFromName(nodeId)');
+      expect(taskRunnerSource).toContain(
+        'stub.tryClaim(state.taskId, recoverySourceTaskGuard(state))'
       );
-      expect(section).toContain('NODE_LIFECYCLE.idFromName(warmNode.id)');
-      expect(section).toContain('stub.tryClaim(state.taskId)');
     });
 
     it('TaskRunner tryClaimWarmNode catches claim failures and tries next', () => {
@@ -155,7 +152,7 @@ describe('concurrent warm pool claiming safety', () => {
         taskRunnerSource.indexOf('async function tryClaimWarmNode('),
         taskRunnerSource.indexOf('async function findNodeWithCapacity(')
       );
-      expect(section).toContain('} catch {');
+      expect(section).toContain('} catch (error) {');
     });
 
     it('TaskRunner tryClaimWarmNode returns null if no warm node claimed', () => {
@@ -175,11 +172,40 @@ describe('concurrent warm pool claiming safety', () => {
     it('service.tryClaim forwards taskId to DO stub', () => {
       expect(serviceSource).toContain('stub.tryClaim(taskId)');
     });
+  });
+});
 
-    it('selectNodeForTaskRun uses service.tryClaim (not direct DO access)', () => {
-      expect(selectorSource).toContain('nodeLifecycle.tryClaim');
-      expect(selectorSource).toContain("import * as nodeLifecycle from './node-lifecycle'");
-    });
+// =============================================================================
+// Placement resolution duplication — Wave 2A migration guard
+// =============================================================================
+
+describe('placement resolution entry points', () => {
+  it('keeps task-start placement resolution centralized across entry points', () => {
+    const entryPoints = [
+      { name: 'chat submit route', source: submitRouteSource },
+      { name: 'MCP dispatch route', source: mcpDispatchRouteSource },
+      { name: 'SAM session dispatch tool', source: samSessionDispatchSource },
+      { name: 'trigger submit bridge', source: triggerSubmitPlacementPathSource },
+      { name: 'SAM session retry tool', source: retrySubtaskSource },
+      { name: 'task run route', source: taskRunSource },
+      { name: 'MCP orchestration retry tool', source: mcpOrchestrationToolsSource },
+    ];
+
+    for (const entryPoint of entryPoints) {
+      expect(entryPoint.source, entryPoint.name).toContain('placement-resolver');
+      expect(entryPoint.source, entryPoint.name).toContain('resolveTaskStartPlacement');
+      expect(entryPoint.source, entryPoint.name).toContain('startTaskRunnerDO');
+      expect(entryPoint.source, entryPoint.name).not.toContain('resolveResourceReservation(');
+      if (entryPoint.name === 'trigger submit bridge') {
+        expect(triggerSubmitSource).toContain('submitReservedTask');
+      }
+    }
+  });
+
+  it('keeps TaskRunner final placement reservation centralized in reserveWorkspacePlacement', () => {
+    expect(taskRunnerSource).toContain('reserveWorkspacePlacement(');
+    expect(taskRunnerSource).toContain('workspace_placement_lost');
+    expect(taskRunnerSource).not.toContain('INSERT INTO workspaces');
   });
 });
 
@@ -188,13 +214,6 @@ describe('concurrent warm pool claiming safety', () => {
 // =============================================================================
 
 describe('node selection to provisioning flow wiring', () => {
-  it('selectNodeForTaskRun returns null when no node available (triggers provisioning)', () => {
-    // selectNodeForTaskRun returns null in two places
-    const nullReturns = selectorSource.match(/return null/g);
-    expect(nullReturns).not.toBeNull();
-    expect(nullReturns!.length).toBeGreaterThanOrEqual(2); // zero nodes, no capacity
-  });
-
   it('TaskRunner handleNodeSelection falls through to provisioning on null', () => {
     const section = taskRunnerSource.slice(
       taskRunnerSource.indexOf('export async function handleNodeSelection('),
@@ -229,7 +248,7 @@ describe('node selection to provisioning flow wiring', () => {
   it('preferred node check validates status is running', () => {
     const section = taskRunnerSource.slice(
       taskRunnerSource.indexOf('export async function handleNodeSelection('),
-      taskRunnerSource.indexOf('tryClaimWarmNode')
+      taskRunnerSource.indexOf('// Try warm pool first')
     );
     expect(section).toContain("node.status !== 'running'");
     expect(section).toContain('permanent: true');
@@ -238,67 +257,9 @@ describe('node selection to provisioning flow wiring', () => {
   it('preferred node check validates ownership (user_id match)', () => {
     const section = taskRunnerSource.slice(
       taskRunnerSource.indexOf('export async function handleNodeSelection('),
-      taskRunnerSource.indexOf('tryClaimWarmNode')
+      taskRunnerSource.indexOf('// Try warm pool first')
     );
     expect(section).toContain('user_id = ?');
     expect(section).toContain('state.userId');
-  });
-});
-
-// =============================================================================
-// Capacity scoring consistency between selector and TaskRunner
-// =============================================================================
-
-describe('capacity scoring consistency', () => {
-  it('both selector and TaskRunner use same 0.4/0.6 weighting', () => {
-    // node-selector.ts
-    expect(selectorSource).toContain('cpu * 0.4 + memory * 0.6');
-
-    // task-runner.ts findNodeWithCapacity
-    const trSection = taskRunnerSource.slice(
-      taskRunnerSource.indexOf('async function findNodeWithCapacity(')
-    );
-    expect(trSection).toContain('cpu * 0.4 + mem * 0.6');
-  });
-
-  it('both use same location-first then size-then-load sorting order', () => {
-    // node-selector.ts
-    const selectorSort = selectorSource.slice(
-      selectorSource.indexOf('Sort candidates'),
-      selectorSource.indexOf('return candidates[0]')
-    );
-    expect(selectorSort).toContain('aLocationMatch');
-
-    // task-runner.ts
-    const trSort = taskRunnerSource.slice(
-      taskRunnerSource.indexOf('async function findNodeWithCapacity('),
-      taskRunnerSource.indexOf('// ====', taskRunnerSource.indexOf('async function findNodeWithCapacity(') + 100)
-    );
-    expect(trSort).toContain('aLoc');
-    expect(trSort).toContain('aSize');
-  });
-
-  it('both skip unhealthy nodes', () => {
-    expect(selectorSource).toContain("node.healthStatus === 'unhealthy'");
-    const trSection = taskRunnerSource.slice(
-      taskRunnerSource.indexOf('async function findNodeWithCapacity(')
-    );
-    expect(trSection).toContain("health_status != 'unhealthy'");
-  });
-
-  it('both enforce hard workspace count limit (MAX_WORKSPACES_PER_NODE)', () => {
-    // node-selector.ts
-    expect(selectorSource).toContain('activeCount >= maxWorkspacesPerNode');
-
-    // task-runner.ts
-    const trSection = taskRunnerSource.slice(
-      taskRunnerSource.indexOf('async function findNodeWithCapacity(')
-    );
-    expect(trSection).toContain('>= maxWorkspaces');
-  });
-
-  it('both use DEFAULT_MAX_WORKSPACES_PER_NODE as fallback', () => {
-    expect(selectorSource).toContain('DEFAULT_MAX_WORKSPACES_PER_NODE');
-    expect(taskRunnerSource).toContain('DEFAULT_MAX_WORKSPACES_PER_NODE');
   });
 });

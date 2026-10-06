@@ -1,37 +1,43 @@
 import { ChevronDown, ChevronRight, Search, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { useScrollLock } from '../../hooks/useScrollLock';
-import type { ChatSessionListItem, ChatSessionResponse } from '../../lib/api';
+import type { ChatSessionListItem } from '../../lib/api';
 import { isStaleSession } from '../../lib/chat-session-utils';
 import { stripMarkdown } from '../../lib/text-utils';
 import { SessionList } from './SessionList';
+import type { SessionScope } from './useProjectChatState';
 import type { TaskInfo } from './useTaskGroups';
 
 export function MobileSessionDrawer({
   sessions,
   selectedSessionId,
   onSelect,
-  onFork,
   onNewChat,
   onClose,
   realtimeDegraded = false,
   isRefreshing = false,
   onRefresh,
-  taskTitleMap = new Map(),
   taskInfoMap = new Map(),
+  onShowHierarchy,
+  sessionScope,
+  onSessionScopeChange,
+  showOwnership,
 }: {
   sessions: ChatSessionListItem[];
   selectedSessionId: string | null;
   onSelect: (id: string) => void;
-  onFork: (session: ChatSessionResponse) => void;
   onNewChat: () => void;
   onClose: () => void;
   realtimeDegraded?: boolean;
   isRefreshing?: boolean;
   onRefresh?: () => void;
-  taskTitleMap?: Map<string, string>;
   taskInfoMap?: Map<string, TaskInfo>;
+  onShowHierarchy: (taskId: string) => void;
+  sessionScope: SessionScope;
+  onSessionScopeChange: (scope: SessionScope) => void;
+  showOwnership: boolean;
 }) {
   const [mobileSearch, setMobileSearch] = useState('');
   const [mobileShowStale, setMobileShowStale] = useState(false);
@@ -57,7 +63,10 @@ export function MobileSessionDrawer({
     if (!mobileSearch.trim()) return recent;
     const q = mobileSearch.toLowerCase();
     return recent.filter(
-      (s) => (s.topic && stripMarkdown(s.topic).toLowerCase().includes(q)) || s.id.includes(q),
+      (s) => (s.topic && stripMarkdown(s.topic).toLowerCase().includes(q))
+        || s.id.includes(q)
+        || (s.createdBy?.name?.toLowerCase().includes(q) ?? false)
+        || (s.createdBy?.email?.toLowerCase().includes(q) ?? false),
     );
   }, [recent, mobileSearch]);
 
@@ -65,7 +74,10 @@ export function MobileSessionDrawer({
     if (!mobileSearch.trim()) return stale;
     const q = mobileSearch.toLowerCase();
     return stale.filter(
-      (s) => (s.topic && stripMarkdown(s.topic).toLowerCase().includes(q)) || s.id.includes(q),
+      (s) => (s.topic && stripMarkdown(s.topic).toLowerCase().includes(q))
+        || s.id.includes(q)
+        || (s.createdBy?.name?.toLowerCase().includes(q) ?? false)
+        || (s.createdBy?.email?.toLowerCase().includes(q) ?? false),
     );
   }, [stale, mobileSearch]);
 
@@ -82,7 +94,7 @@ export function MobileSessionDrawer({
   // Prevent body scroll — always active while this drawer is mounted
   useScrollLock(true);
 
-  return (
+  return createPortal(
     <>
       {/* Backdrop */}
       <div
@@ -134,7 +146,7 @@ export function MobileSessionDrawer({
         </div>
 
         {/* Search */}
-        <div className="shrink-0 px-2 py-1.5 border-b border-border-default">
+        <div className="shrink-0 px-2 py-1.5 border-b border-border-default space-y-1.5">
           <div className="relative flex items-center">
             <Search size={13} className="absolute left-2 text-fg-muted pointer-events-none" />
             <input
@@ -155,6 +167,25 @@ export function MobileSessionDrawer({
               </button>
             )}
           </div>
+          {showOwnership && (
+            <div className="grid grid-cols-2 gap-1 rounded-md border border-border-default bg-surface/40 p-0.5" aria-label="Session ownership filter">
+              {(['my', 'all'] as const).map((scope) => (
+                <button
+                  key={scope}
+                  type="button"
+                  onClick={() => onSessionScopeChange(scope)}
+                  aria-pressed={sessionScope === scope}
+                  className={`rounded-sm px-2 py-1 text-[11px] font-medium transition-colors ${
+                    sessionScope === scope
+                      ? 'bg-accent/15 text-accent'
+                      : 'bg-transparent text-fg-muted hover:text-fg-primary'
+                  }`}
+                >
+                  {scope === 'my' ? 'My sessions' : 'All sessions'}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Subtle refresh indicator */}
@@ -166,13 +197,11 @@ export function MobileSessionDrawer({
         <nav aria-label="Chat sessions" className="flex-1 overflow-y-auto min-h-0">
           <SessionList
             sessions={filteredR}
-            allSessions={sessions}
             selectedSessionId={selectedSessionId}
             onSelect={onSelect}
-            onFork={onFork}
-            taskTitleMap={taskTitleMap}
             taskInfoMap={taskInfoMap}
-            searchQuery={mobileSearch}
+            onShowHierarchy={onShowHierarchy}
+            showOwnership={showOwnership}
           />
           {filteredS.length > 0 && (
             <>
@@ -187,19 +216,18 @@ export function MobileSessionDrawer({
               {showOlder && (
                 <SessionList
                   sessions={filteredS}
-                  allSessions={sessions}
                   selectedSessionId={selectedSessionId}
                   onSelect={onSelect}
-                  onFork={onFork}
-                  taskTitleMap={taskTitleMap}
                   taskInfoMap={taskInfoMap}
-                  searchQuery={mobileSearch}
+                  onShowHierarchy={onShowHierarchy}
+                  showOwnership={showOwnership}
                 />
               )}
             </>
           )}
         </nav>
       </div>
-    </>
+    </>,
+    document.body,
   );
 }

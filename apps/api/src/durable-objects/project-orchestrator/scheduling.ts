@@ -5,24 +5,29 @@
  * handoff packets, recompute scheduler states, detect stalls, and
  * log decisions.
  */
-import type { DecisionAction } from '@simple-agent-manager/shared';
+import type { HandoffFact } from '@simple-agent-manager/shared';
+import type { HandoffPacket } from '@simple-agent-manager/shared';
 import type { OrchestratorConfig } from '@simple-agent-manager/shared';
-import type { CredentialProvider, VMLocation, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
-import {
-  DEFAULT_VM_LOCATION,
-  DEFAULT_VM_SIZE,
-  DEFAULT_WORKSPACE_PROFILE,
-  getDefaultLocationForProvider,
-  isValidProvider,
-} from '@simple-agent-manager/shared';
+import type { VMSize } from '@simple-agent-manager/shared';
+import { drizzle } from 'drizzle-orm/d1';
+import * as v from 'valibot';
 
+import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { expectJsonRecord } from '../../lib/runtime-validation';
 import { ulid } from '../../lib/ulid';
+import {
+  CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS,
+  capacityPlacementSnapshotSqlValues,
+} from '../../services/capacity-placement-snapshot';
+import { resolveTaskStartPlacementCredentialAttribution } from '../../services/placement-resolver';
 import * as projectDataService from '../../services/project-data';
 import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-sync';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
+import { mapRows } from '../row-validation';
+import { logDecision } from './decision-log';
+import { detectStalls, resolveActiveSessionIdsForTaskIds } from './stall-detection';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -34,6 +39,37 @@ interface TaskRow {
   updated_at: string;
 }
 
+type RoutableHandoff = Pick<
+  HandoffPacket,
+  'id' | 'summary' | 'facts' | 'openQuestions' | 'suggestedActions'
+>;
+
+const handoffFactObjectSchema = v.object({
+  key: v.optional(v.string()),
+  value: v.optional(v.string()),
+  fact: v.optional(v.string()),
+});
+
+const routableHandoffSchema = v.object({
+  id: v.string(),
+  summary: v.string(),
+  facts: v.optional(v.array(v.union([v.string(), handoffFactObjectSchema]))),
+  openQuestions: v.optional(v.array(v.string())),
+  suggestedActions: v.optional(v.array(v.string())),
+});
+
+/**
+ * `SELECT mission_id, status, registered_at FROM orchestrator_missions ...`
+ * shape used by the scheduling cycle. `status`/`registered_at` are NOT NULL
+ * columns (see ./migrations.ts) but stay required (not optional) here — a
+ * row missing them is malformed and should be skipped, not silently defaulted.
+ */
+const SchedulingMissionRowSchema = v.object({
+  mission_id: v.string(),
+  status: v.string(),
+  registered_at: v.number(),
+});
+
 // ── Scheduling Cycle ──────────────────────────────────────────────────────────
 
 /**
@@ -44,20 +80,55 @@ export async function runSchedulingCycle(
   sql: SqlStorage,
   env: Env,
   projectId: string,
-  config: OrchestratorConfig,
+  config: OrchestratorConfig
 ): Promise<void> {
   const now = Date.now();
 
-  // Load active missions (raw snake_case from SQLite)
-  const missions = sql.exec(
-    `SELECT mission_id FROM orchestrator_missions WHERE status = 'active'`,
-  ).toArray() as unknown as Array<{ mission_id: string }>;
+  // Include completing rows left by the old lifecycle so they receive a
+  // terminal cleanup instead of pinning an alarm chain forever.
+  const missions = mapRows(
+    sql
+      .exec(
+        `SELECT mission_id, status, registered_at
+           FROM orchestrator_missions
+           WHERE status IN ('active', 'completing')`
+      )
+      .toArray(),
+    SchedulingMissionRowSchema,
+    'orchestrator.scheduling_missions_list',
+    'mission_id'
+  );
 
   if (missions.length === 0) return;
 
   for (const mission of missions) {
     try {
-      await processMission(sql, env, projectId, mission.mission_id, config, now);
+      const status = mission.status ?? 'active';
+      if (status === 'completing') {
+        cleanupMissionTracking(sql, mission.mission_id);
+        log.info('orchestrator.mission_terminal', {
+          projectId,
+          missionId: mission.mission_id,
+          reason: 'completing_reconciled',
+        });
+        continue;
+      }
+
+      const registeredAt = mission.registered_at ?? now;
+      if (now - registeredAt >= config.maxMissionLifetimeMs) {
+        await terminalizeMission(
+          sql,
+          env,
+          projectId,
+          mission.mission_id,
+          'completed',
+          'max_mission_lifetime',
+          now
+        );
+        continue;
+      }
+
+      await processMission(sql, env, projectId, mission.mission_id, config, now, registeredAt);
     } catch (err) {
       log.error('orchestrator.scheduling_cycle.mission_error', {
         projectId,
@@ -69,7 +140,8 @@ export async function runSchedulingCycle(
     // Update last_checked_at
     sql.exec(
       'UPDATE orchestrator_missions SET last_checked_at = ? WHERE mission_id = ?',
-      now, mission.mission_id,
+      now,
+      mission.mission_id
     );
   }
 }
@@ -84,15 +156,31 @@ async function processMission(
   missionId: string,
   config: OrchestratorConfig,
   now: number,
+  registeredAt: number
 ): Promise<void> {
   // 1. Fetch all tasks for this mission from D1
   const tasksResult = await env.DATABASE.prepare(
     `SELECT id, status, scheduler_state, mission_id, updated_at
-     FROM tasks WHERE mission_id = ?`,
-  ).bind(missionId).all<TaskRow>();
+     FROM tasks WHERE mission_id = ?`
+  )
+    .bind(missionId)
+    .all<TaskRow>();
 
   const tasks = tasksResult.results ?? [];
-  if (tasks.length === 0) return;
+  if (tasks.length === 0) {
+    if (now - registeredAt >= config.zeroTaskGraceMs) {
+      await terminalizeMission(
+        sql,
+        env,
+        projectId,
+        missionId,
+        'completed',
+        'zero_tasks_grace_expired',
+        now
+      );
+    }
+    return;
+  }
 
   // 2. Recompute scheduler states
   await recomputeMissionSchedulerStates(env.DATABASE, missionId);
@@ -111,28 +199,53 @@ async function processMission(
 
   // 7. Check if mission is complete (all tasks terminal)
   const allTerminal = tasks.every(
-    (t) => t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled',
+    (t) => t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled'
   );
   if (allTerminal) {
     const anyFailed = tasks.some((t) => t.status === 'failed');
     const newMissionStatus = anyFailed ? 'failed' : 'completed';
 
-    // Update D1 mission status
-    await env.DATABASE.prepare(
-      'UPDATE missions SET status = ?, updated_at = ? WHERE id = ?',
-    ).bind(newMissionStatus, new Date().toISOString(), missionId).run();
-
-    // Remove from orchestrator tracking
-    sql.exec(
-      `UPDATE orchestrator_missions SET status = 'completing' WHERE mission_id = ?`,
+    logDecision(
+      sql,
       missionId,
+      null,
+      anyFailed ? 'skip' : 'dispatch', // 'dispatch' is semantic for "completed"
+      `Mission ${anyFailed ? 'failed' : 'completed'}: all ${tasks.length} tasks are terminal`,
+      now
     );
 
-    logDecision(sql, missionId, null, anyFailed ? 'skip' : 'dispatch', // 'dispatch' is semantic for "completed"
-      `Mission ${anyFailed ? 'failed' : 'completed'}: all ${tasks.length} tasks are terminal`, now);
-
-    log.info('orchestrator.mission_completed', { projectId, missionId, status: newMissionStatus });
+    await terminalizeMission(
+      sql,
+      env,
+      projectId,
+      missionId,
+      newMissionStatus,
+      'all_tasks_terminal',
+      now
+    );
   }
+}
+
+function cleanupMissionTracking(sql: SqlStorage, missionId: string): void {
+  sql.exec('DELETE FROM scheduling_queue WHERE mission_id = ?', missionId);
+  sql.exec('DELETE FROM orchestrator_missions WHERE mission_id = ?', missionId);
+}
+
+async function terminalizeMission(
+  sql: SqlStorage,
+  env: Env,
+  projectId: string,
+  missionId: string,
+  status: 'completed' | 'failed',
+  reason: string,
+  now: number
+): Promise<void> {
+  await env.DATABASE.prepare('UPDATE missions SET status = ?, updated_at = ? WHERE id = ?')
+    .bind(status, new Date(now).toISOString(), missionId)
+    .run();
+
+  cleanupMissionTracking(sql, missionId);
+  log.info('orchestrator.mission_terminal', { projectId, missionId, status, reason });
 }
 
 // ── Auto-Dispatch ─────────────────────────────────────────────────────────────
@@ -144,6 +257,7 @@ interface DispatchableTaskRow {
   user_id: string;
   project_id: string;
   output_branch: string | null;
+  agent_profile_hint: string | null;
   dispatch_depth: number;
   priority: number;
 }
@@ -158,16 +272,29 @@ async function autoDispatchSchedulableTasks(
   projectId: string,
   missionId: string,
   config: OrchestratorConfig,
-  now: number,
+  now: number
 ): Promise<void> {
   // Re-read task states from D1 (fresh after recompute)
   const schedulableResult = await env.DATABASE.prepare(
-    `SELECT id, title, description, user_id, project_id, output_branch, dispatch_depth, priority
+    `SELECT id, title, description, user_id, project_id, output_branch, agent_profile_hint, dispatch_depth, priority
      FROM tasks
-     WHERE mission_id = ? AND scheduler_state = 'schedulable' AND status = 'queued'
+     WHERE mission_id = ?
+       AND scheduler_state = 'schedulable'
+       AND status = 'queued'
+       AND chat_session_id IS NULL
+       AND NOT EXISTS (
+         SELECT 1
+         FROM vm_task_admissions
+         WHERE vm_task_admissions.task_id = tasks.id
+           AND vm_task_admissions.state IN (
+             'queued', 'waiting', 'provisioning_granted', 'provisioning', 'node_ready'
+           )
+       )
      ORDER BY priority DESC, created_at ASC
-     LIMIT ?`,
-  ).bind(missionId, config.maxDispatchesPerCycle).all<DispatchableTaskRow>();
+     LIMIT ?`
+  )
+    .bind(missionId, config.maxDispatchesPerCycle)
+    .all<DispatchableTaskRow>();
 
   const schedulable = schedulableResult.results ?? [];
   if (schedulable.length === 0) return;
@@ -175,20 +302,37 @@ async function autoDispatchSchedulableTasks(
   // Check concurrency limit: count currently active tasks in this mission
   const activeCountResult = await env.DATABASE.prepare(
     `SELECT COUNT(*) as cnt FROM tasks
-     WHERE mission_id = ? AND status IN ('in_progress', 'delegated', 'provisioning', 'running')`,
-  ).bind(missionId).first<{ cnt: number }>();
+     WHERE mission_id = ?
+       AND (
+         status IN ('in_progress', 'delegated')
+         OR (status = 'queued' AND chat_session_id IS NOT NULL)
+         OR EXISTS (
+           SELECT 1
+           FROM vm_task_admissions
+           WHERE vm_task_admissions.task_id = tasks.id
+             AND vm_task_admissions.state IN (
+               'queued', 'waiting', 'provisioning_granted', 'provisioning', 'node_ready'
+             )
+         )
+       )`
+  )
+    .bind(missionId)
+    .first<{ cnt: number }>();
 
   const activeCount = activeCountResult?.cnt ?? 0;
 
   // Resolve max active tasks from mission budget_config
-  const missionRow = await env.DATABASE.prepare(
-    'SELECT budget_config FROM missions WHERE id = ?',
-  ).bind(missionId).first<{ budget_config: string | null }>();
+  const missionRow = await env.DATABASE.prepare('SELECT budget_config FROM missions WHERE id = ?')
+    .bind(missionId)
+    .first<{ budget_config: string | null }>();
 
   let maxActive = config.maxActiveTasksPerMission;
   if (missionRow?.budget_config) {
     try {
-      const budget = expectJsonRecord(JSON.parse(missionRow.budget_config), 'mission.budget_config');
+      const budget = expectJsonRecord(
+        JSON.parse(missionRow.budget_config),
+        'mission.budget_config'
+      );
       if (typeof budget.maxActiveTasks === 'number' && budget.maxActiveTasks > 0) {
         maxActive = budget.maxActiveTasks;
       }
@@ -199,8 +343,14 @@ async function autoDispatchSchedulableTasks(
 
   const slotsAvailable = Math.max(0, maxActive - activeCount);
   if (slotsAvailable === 0) {
-    logDecision(sql, missionId, null, 'skip',
-      `${schedulable.length} schedulable task(s) held: concurrency limit reached (${activeCount}/${maxActive} active)`, now);
+    logDecision(
+      sql,
+      missionId,
+      null,
+      'skip',
+      `${schedulable.length} schedulable task(s) held: concurrency limit reached (${activeCount}/${maxActive} active)`,
+      now
+    );
     return;
   }
 
@@ -208,31 +358,33 @@ async function autoDispatchSchedulableTasks(
   const projectRow = await env.DATABASE.prepare(
     `SELECT repository, installation_id, default_branch, default_vm_size, default_provider,
             default_location, default_agent_type, default_workspace_profile, default_devcontainer_config_name,
-            task_execution_timeout_ms, max_workspaces_per_node, node_cpu_threshold_percent,
+            task_execution_timeout_ms, node_cpu_threshold_percent,
             node_memory_threshold_percent, warm_node_timeout_ms
-     FROM projects WHERE id = ?`,
-  ).bind(projectId).first<{
-    repository: string;
-    installation_id: string;
-    default_branch: string;
-    default_vm_size: string | null;
-    default_provider: string | null;
-    default_location: string | null;
-    default_agent_type: string | null;
-    default_workspace_profile: string | null;
-    default_devcontainer_config_name: string | null;
-    task_execution_timeout_ms: number | null;
-    max_workspaces_per_node: number | null;
-    node_cpu_threshold_percent: number | null;
-    node_memory_threshold_percent: number | null;
-    warm_node_timeout_ms: number | null;
-  }>();
+     FROM projects WHERE id = ?`
+  )
+    .bind(projectId)
+    .first<{
+      repository: string;
+      installation_id: string;
+      default_branch: string;
+      default_vm_size: string | null;
+      default_provider: string | null;
+      default_location: string | null;
+      default_agent_type: string | null;
+      default_workspace_profile: string | null;
+      default_devcontainer_config_name: string | null;
+      task_execution_timeout_ms: number | null;
+      node_cpu_threshold_percent: number | null;
+      node_memory_threshold_percent: number | null;
+      warm_node_timeout_ms: number | null;
+    }>();
 
   if (!projectRow) {
     logDecision(sql, missionId, null, 'skip', 'Project not found — cannot dispatch', now);
     return;
   }
 
+  const db = drizzle(env.DATABASE, { schema });
   const toDispatch = schedulable.slice(0, Math.min(slotsAvailable, config.maxDispatchesPerCycle));
   let dispatched = 0;
 
@@ -240,37 +392,113 @@ async function autoDispatchSchedulableTasks(
     try {
       // Resolve user info for git config
       const userRow = await env.DATABASE.prepare(
-        'SELECT name, email, github_id FROM users WHERE id = ?',
-      ).bind(task.user_id).first<{ name: string | null; email: string | null; github_id: string | null }>();
+        'SELECT name, email, github_id FROM users WHERE id = ?'
+      )
+        .bind(task.user_id)
+        .first<{ name: string | null; email: string | null; github_id: string | null }>();
 
-      // Resolve VM config from project defaults
-      const resolvedProvider: CredentialProvider | null =
-        typeof projectRow.default_provider === 'string' && isValidProvider(projectRow.default_provider)
-          ? projectRow.default_provider
-          : null;
-      const resolvedVmSize: VMSize = (projectRow.default_vm_size as VMSize | null) ?? DEFAULT_VM_SIZE;
-      const resolvedVmLocation: VMLocation = (projectRow.default_location as VMLocation | null)
-        ?? (resolvedProvider ? getDefaultLocationForProvider(resolvedProvider) as VMLocation | null : null)
-        ?? DEFAULT_VM_LOCATION;
-      const resolvedWorkspaceProfile: WorkspaceProfile =
-        (projectRow.default_workspace_profile as WorkspaceProfile | null) ?? DEFAULT_WORKSPACE_PROFILE;
-      const resolvedDevcontainerConfig: string | null = resolvedWorkspaceProfile === 'lightweight'
-        ? null
-        : (projectRow.default_devcontainer_config_name ?? null);
+      const placementResolution = await resolveTaskStartPlacementCredentialAttribution(
+        db,
+        {
+          entryPoint: 'orchestrator-dispatch',
+          taskId: task.id,
+          projectId,
+          userId: task.user_id,
+          project: {
+            id: projectId,
+            defaultVmSize: projectRow.default_vm_size,
+            defaultProvider: projectRow.default_provider,
+            defaultLocation: projectRow.default_location,
+            defaultWorkspaceProfile: projectRow.default_workspace_profile,
+            defaultDevcontainerConfigName: projectRow.default_devcontainer_config_name,
+            defaultAgentType: projectRow.default_agent_type,
+          },
+          profile: null,
+          credentialProjectPolicy: 'current-project',
+          taskModeDefault: 'task',
+          resourceRequirements: {},
+        },
+        { env }
+      );
+      if ('error' in placementResolution) {
+        logDecision(sql, missionId, task.id, 'skip', placementResolution.error, now);
+        continue;
+      }
+      const {
+        placement,
+        effectiveProvider,
+        credentialAttributionUserId,
+        credentialAttributionProjectId,
+        credentialAttributionSource,
+        capacityPoolSelection,
+        capacityPlacementSnapshot,
+      } = placementResolution;
+      const {
+        vmSize: resolvedVmSize,
+        vmSizeSource,
+        vmLocation: resolvedVmLocation,
+        workspaceProfile: resolvedWorkspaceProfile,
+        devcontainerConfigName: resolvedDevcontainerConfig,
+        agentType: resolvedAgentType,
+        resolvedReservation,
+      } = placement;
 
       // Create chat session for the task
       const sessionId = await projectDataService.createSession(
-        env, projectId, null, task.title, task.id,
+        env,
+        projectId,
+        null,
+        task.title,
+        task.id,
+        task.user_id
       );
 
       if (task.description) {
-        await projectDataService.persistMessage(env, projectId, sessionId, 'user', task.description, null);
+        await projectDataService.persistMessage(
+          env,
+          projectId,
+          sessionId,
+          'user',
+          task.description,
+          null
+        );
       }
 
       // Transition task to queued → provisioning via status update
-      await env.DATABASE.prepare(
-        `UPDATE tasks SET status = 'queued', execution_step = 'node_selection', updated_at = ? WHERE id = ?`,
-      ).bind(new Date().toISOString(), task.id).run();
+      const dispatchTransition = await env.DATABASE.prepare(
+        `UPDATE tasks
+         SET status = 'queued',
+             chat_session_id = ?,
+             execution_step = 'node_selection',
+             requested_vm_size = ?,
+             requested_vm_size_source = ?,
+             resource_requirements_source = ?,
+             resolved_reservation_json = ?,
+             credential_attribution_user_id = ?,
+             credential_attribution_project_id = ?,
+             credential_attribution_source = ?,
+             ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS},
+             updated_at = ?
+         WHERE id = ? AND (chat_session_id IS NULL OR chat_session_id = ?)`
+      )
+        .bind(
+          sessionId,
+          resolvedVmSize,
+          vmSizeSource,
+          resolvedReservation.source,
+          JSON.stringify(resolvedReservation),
+          credentialAttributionUserId,
+          credentialAttributionProjectId,
+          credentialAttributionSource,
+          ...capacityPlacementSnapshotSqlValues(capacityPlacementSnapshot),
+          new Date().toISOString(),
+          task.id,
+          sessionId
+        )
+        .run();
+      if (!dispatchTransition.meta.changes) {
+        throw new Error('Task was already bound to a different chat session');
+      }
 
       // Start the TaskRunner DO
       await startTaskRunnerDO(env, {
@@ -280,6 +508,7 @@ async function autoDispatchSchedulableTasks(
         vmSize: resolvedVmSize,
         vmLocation: resolvedVmLocation,
         branch: projectRow.default_branch,
+        defaultBranch: projectRow.default_branch,
         userName: userRow?.name ?? null,
         userEmail: userRow?.email ?? null,
         githubId: userRow?.github_id ?? null,
@@ -290,41 +519,72 @@ async function autoDispatchSchedulableTasks(
         outputBranch: task.output_branch ?? null,
         projectDefaultVmSize: projectRow.default_vm_size as VMSize | null,
         chatSessionId: sessionId,
-        agentType: projectRow.default_agent_type ?? null,
+        agentType: resolvedAgentType,
         workspaceProfile: resolvedWorkspaceProfile,
         devcontainerConfigName: resolvedDevcontainerConfig,
-        cloudProvider: resolvedProvider,
+        cloudProvider: placement.provider ?? effectiveProvider,
+        explicitVmLocation: placement.explicitVmLocation === true,
+        credentialAttributionUserId,
+        credentialAttributionProjectId,
+        credentialAttributionSource,
+        agentProfileHint: task.agent_profile_hint ?? null,
+        effort: null,
         projectScaling: {
           taskExecutionTimeoutMs: projectRow.task_execution_timeout_ms ?? null,
-          maxWorkspacesPerNode: projectRow.max_workspaces_per_node ?? null,
           nodeCpuThresholdPercent: projectRow.node_cpu_threshold_percent ?? null,
           nodeMemoryThresholdPercent: projectRow.node_memory_threshold_percent ?? null,
           warmNodeTimeoutMs: projectRow.warm_node_timeout_ms ?? null,
         },
+        resolvedReservation,
+        capacityPoolSelection,
+        vmSizeSource,
       });
 
       // Record in scheduling_queue
       sql.exec(
         `INSERT INTO scheduling_queue (id, mission_id, task_id, scheduled_at, dispatched_at, reason)
          VALUES (?, ?, ?, ?, ?, ?)`,
-        ulid(), missionId, task.id, now, now, 'auto-dispatch: task became schedulable',
+        ulid(),
+        missionId,
+        task.id,
+        now,
+        now,
+        'auto-dispatch: task became schedulable'
       );
 
-      logDecision(sql, missionId, task.id, 'dispatch',
-        `Auto-dispatched schedulable task (slot ${dispatched + 1}/${slotsAvailable})`, now);
+      logDecision(
+        sql,
+        missionId,
+        task.id,
+        'dispatch',
+        `Auto-dispatched schedulable task (slot ${dispatched + 1}/${slotsAvailable})`,
+        now
+      );
 
       dispatched++;
 
       log.info('orchestrator.task_dispatched', {
-        projectId, missionId, taskId: task.id, slot: dispatched, slotsAvailable,
+        projectId,
+        missionId,
+        taskId: task.id,
+        slot: dispatched,
+        slotsAvailable,
       });
     } catch (err) {
       log.error('orchestrator.auto_dispatch_failed', {
-        projectId, missionId, taskId: task.id,
+        projectId,
+        missionId,
+        taskId: task.id,
         error: err instanceof Error ? err.message : String(err),
       });
-      logDecision(sql, missionId, task.id, 'skip',
-        `Auto-dispatch failed: ${err instanceof Error ? err.message : String(err)}`, now);
+      logDecision(
+        sql,
+        missionId,
+        task.id,
+        'skip',
+        `Auto-dispatch failed: ${err instanceof Error ? err.message : String(err)}`,
+        now
+      );
     }
   }
 
@@ -332,7 +592,8 @@ async function autoDispatchSchedulableTasks(
     // Update last_dispatch_at
     sql.exec(
       'UPDATE orchestrator_missions SET last_dispatch_at = ? WHERE mission_id = ?',
-      now, missionId,
+      now,
+      missionId
     );
   }
 }
@@ -349,19 +610,29 @@ async function routeHandoffsForTask(
   missionId: string,
   completedTaskId: string,
   allTasks: TaskRow[],
-  now: number,
+  now: number
 ): Promise<void> {
   // Check if we already routed handoffs for this task in this mission
-  const alreadyRouted = sql.exec(
-    `SELECT 1 FROM decision_log WHERE mission_id = ? AND task_id = ? AND action = 'handoff_routed' LIMIT 1`,
-    missionId, completedTaskId,
-  ).toArray();
+  const alreadyRouted = sql
+    .exec(
+      `SELECT 1 FROM decision_log WHERE mission_id = ? AND task_id = ? AND action = 'handoff_routed' LIMIT 1`,
+      missionId,
+      completedTaskId
+    )
+    .toArray();
   if (alreadyRouted.length > 0) return;
 
   // Get handoff packets from the completed task
-  let handoffs;
+  let handoffs: RoutableHandoff[];
   try {
-    handoffs = await projectDataService.getHandoffPacketsForTask(env, projectId, completedTaskId);
+    const rawHandoffs = await projectDataService.getHandoffPacketsForTask(
+      env,
+      projectId,
+      completedTaskId
+    );
+    handoffs = rawHandoffs
+      .map(parseRoutableHandoff)
+      .filter((handoff): handoff is RoutableHandoff => handoff !== null);
   } catch {
     return; // No handoffs to route
   }
@@ -371,11 +642,20 @@ async function routeHandoffsForTask(
   const depsResult = await env.DATABASE.prepare(
     `SELECT task_id FROM task_dependencies WHERE depends_on_task_id = ? AND task_id IN (
        SELECT id FROM tasks WHERE mission_id = ?
-     )`,
-  ).bind(completedTaskId, missionId).all<{ task_id: string }>();
+     )`
+  )
+    .bind(completedTaskId, missionId)
+    .all<{ task_id: string }>();
 
   const dependentTaskIds = (depsResult.results ?? []).map((r) => r.task_id);
   if (dependentTaskIds.length === 0) return;
+
+  const sessionResolutions = await resolveActiveSessionIdsForTaskIds(
+    env,
+    projectId,
+    dependentTaskIds
+  );
+  let routeIncomplete = false;
 
   // Route each handoff to dependent tasks via durable messages
   for (const depTaskId of dependentTaskIds) {
@@ -383,11 +663,30 @@ async function routeHandoffsForTask(
     const depTask = allTasks.find((t) => t.id === depTaskId);
     if (!depTask || depTask.status === 'completed' || depTask.status === 'cancelled') continue;
 
+    const targetSessionId = sessionResolutions.get(depTaskId) ?? null;
+    if (!targetSessionId) {
+      const reason = 'No active chat session found for dependent task; handoff not enqueued';
+      log.warn('orchestrator.handoff_target_session_missing', {
+        projectId,
+        missionId,
+        fromTaskId: completedTaskId,
+        toTaskId: depTaskId,
+        reason,
+      });
+      logDecision(sql, missionId, depTaskId, 'skip', reason, now, {
+        fromTaskId: completedTaskId,
+        toTaskId: depTaskId,
+        reason: 'missing_target_session',
+      });
+      routeIncomplete = true;
+      continue;
+    }
+
     for (const handoff of handoffs) {
       try {
         const content = buildHandoffContent(completedTaskId, handoff);
         await projectDataService.enqueueMailboxMessage(env, projectId, {
-          targetSessionId: depTaskId, // Use task ID as target — resolved to session at delivery time
+          targetSessionId,
           sourceTaskId: completedTaskId,
           senderType: 'orchestrator' as const,
           senderId: `orchestrator:${projectId}`,
@@ -396,131 +695,90 @@ async function routeHandoffsForTask(
           metadata: { handoffId: handoff.id, fromTaskId: completedTaskId },
         });
       } catch (err) {
+        routeIncomplete = true;
         log.warn('orchestrator.handoff_route_failed', {
-          projectId, missionId, fromTaskId: completedTaskId,
-          toTaskId: depTaskId, handoffId: handoff.id,
+          projectId,
+          missionId,
+          fromTaskId: completedTaskId,
+          toTaskId: depTaskId,
+          handoffId: handoff.id,
           error: err instanceof Error ? err.message : String(err),
         });
       }
     }
   }
 
-  logDecision(sql, missionId, completedTaskId, 'handoff_routed',
-    `Routed ${handoffs.length} handoff(s) to ${dependentTaskIds.length} dependent task(s)`, now);
+  if (routeIncomplete) {
+    logDecision(
+      sql,
+      missionId,
+      completedTaskId,
+      'retry',
+      `Handoff routing deferred: one or more dependent task sessions were unavailable`,
+      now,
+      {
+        handoffCount: handoffs.length,
+        dependentTaskCount: dependentTaskIds.length,
+        reason: 'handoff_route_incomplete',
+      }
+    );
+    return;
+  }
+
+  logDecision(
+    sql,
+    missionId,
+    completedTaskId,
+    'handoff_routed',
+    `Routed ${handoffs.length} handoff(s) to ${dependentTaskIds.length} dependent task(s)`,
+    now
+  );
 }
 
 /** Build a readable content string from a handoff packet for durable message delivery. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function buildHandoffContent(fromTaskId: string, handoff: any): string {
-  const parts: string[] = [`Handoff from task ${fromTaskId}:`, '', `**Summary:** ${handoff.summary}`];
-  if (handoff.facts?.length) {
-    const facts = (handoff.facts as Array<string | Record<string, string>>)
-      .map((f) => `- ${typeof f === 'string' ? f : f.fact}`)
-      .join('\n');
+function buildHandoffContent(fromTaskId: string, handoff: RoutableHandoff): string {
+  const parts: string[] = [
+    `Handoff from task ${fromTaskId}:`,
+    '',
+    `**Summary:** ${handoff.summary}`,
+  ];
+  if (handoff.facts.length > 0) {
+    const facts = handoff.facts.map((fact) => `- ${fact.key}: ${fact.value}`).join('\n');
     parts.push('', `**Key Facts:**\n${facts}`);
   }
-  if (handoff.openQuestions?.length) {
-    const qs = (handoff.openQuestions as string[]).map((q) => `- ${q}`).join('\n');
+  if (handoff.openQuestions.length > 0) {
+    const qs = handoff.openQuestions.map((q) => `- ${q}`).join('\n');
     parts.push('', `**Open Questions:**\n${qs}`);
   }
-  if (handoff.suggestedActions?.length) {
-    const acts = (handoff.suggestedActions as string[]).map((a) => `- ${a}`).join('\n');
+  if (handoff.suggestedActions.length > 0) {
+    const acts = handoff.suggestedActions.map((a) => `- ${a}`).join('\n');
     parts.push('', `**Suggested Actions:**\n${acts}`);
   }
   return parts.join('\n');
 }
 
-// ── Stall Detection ───────────────────────────────────────────────────────────
+function parseRoutableHandoff(value: unknown): RoutableHandoff | null {
+  const parsed = v.safeParse(routableHandoffSchema, value);
+  if (!parsed.success) return null;
 
-/**
- * Detect tasks that have been running without progress for too long.
- */
-async function detectStalls(
-  sql: SqlStorage,
-  env: Env,
-  projectId: string,
-  missionId: string,
-  tasks: TaskRow[],
-  config: OrchestratorConfig,
-  now: number,
-): Promise<void> {
-  const stallThreshold = now - config.stallTimeoutMs;
+  return {
+    id: parsed.output.id,
+    summary: parsed.output.summary,
+    facts: readHandoffFacts(parsed.output.facts),
+    openQuestions: parsed.output.openQuestions ?? [],
+    suggestedActions: parsed.output.suggestedActions ?? [],
+  };
+}
 
-  const runningTasks = tasks.filter(
-    (t) => t.status === 'running' || t.status === 'delegated',
-  );
-
-  for (const task of runningTasks) {
-    const updatedAt = new Date(task.updated_at).getTime();
-    if (updatedAt > stallThreshold) continue;
-
-    // Check if we already sent a stall interrupt recently
-    const recentStall = sql.exec(
-      `SELECT 1 FROM decision_log
-       WHERE task_id = ? AND action = 'stall_detected'
-       AND created_at > ?
-       LIMIT 1`,
-      task.id, stallThreshold,
-    ).toArray();
-    if (recentStall.length > 0) continue;
-
-    // Send interrupt message to the stalled task
-    try {
-      await projectDataService.enqueueMailboxMessage(env, projectId, {
-        targetSessionId: task.id,
-        sourceTaskId: null,
-        senderType: 'orchestrator' as const,
-        senderId: `orchestrator:${projectId}`,
-        messageClass: 'interrupt' as const,
-        content: `[Orchestrator] This task has not reported progress for ${Math.round(config.stallTimeoutMs / 60000)} minutes. ` +
-          `Please provide a status update. If you are blocked, update your task status or request human input.`,
-        metadata: { reason: 'stall_detection', stallDurationMs: now - updatedAt },
-      });
-
-      logDecision(sql, missionId, task.id, 'stall_detected',
-        `Task stalled for ${Math.round((now - updatedAt) / 60000)}min — interrupt sent`, now);
-
-      log.info('orchestrator.stall_detected', {
-        projectId, missionId, taskId: task.id,
-        stallDurationMs: now - updatedAt,
-      });
-    } catch (err) {
-      log.warn('orchestrator.stall_interrupt_failed', {
-        projectId, missionId, taskId: task.id,
-        error: err instanceof Error ? err.message : String(err),
-      });
+function readHandoffFacts(
+  value: NonNullable<v.InferOutput<typeof routableHandoffSchema>['facts']> | undefined
+): HandoffFact[] {
+  return (value ?? []).flatMap((item): HandoffFact[] => {
+    if (typeof item === 'string') {
+      return [{ key: 'fact', value: item }];
     }
-  }
-}
-
-// ── Decision Log ──────────────────────────────────────────────────────────────
-
-export function logDecision(
-  sql: SqlStorage,
-  missionId: string,
-  taskId: string | null,
-  action: DecisionAction,
-  reason: string,
-  now: number,
-  metadata?: Record<string, unknown>,
-): void {
-  sql.exec(
-    `INSERT INTO decision_log (id, mission_id, task_id, action, reason, metadata, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    ulid(), missionId, taskId, action, reason,
-    metadata ? JSON.stringify(metadata) : null,
-    now,
-  );
-}
-
-/**
- * Prune old decision log entries beyond the configured max.
- */
-export function pruneDecisionLog(sql: SqlStorage, maxEntries: number): void {
-  sql.exec(
-    `DELETE FROM decision_log WHERE id NOT IN (
-       SELECT id FROM decision_log ORDER BY created_at DESC LIMIT ?
-     )`,
-    maxEntries,
-  );
+    const key = item.key ? item.key : item.fact ? 'fact' : null;
+    const factValue = item.value ? item.value : (item.fact ?? null);
+    return key && factValue ? [{ key, value: factValue }] : [];
+  });
 }

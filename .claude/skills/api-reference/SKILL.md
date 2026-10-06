@@ -23,17 +23,57 @@ user-invocable: false
 - `GET /api/workspaces` — List user's workspaces
 - `GET /api/workspaces/:id` — Get workspace details
 - `PATCH /api/workspaces/:id` — Rename workspace display name
-- `POST /api/workspaces/:id/stop` — Stop a running workspace
-- `POST /api/workspaces/:id/restart` — Restart a workspace
-- `DELETE /api/workspaces/:id` — Delete a workspace
+- `POST /api/workspaces/:id/sleep` — Strictly checkpoint and sleep a persistent session; verified VM snapshots are resumable on a replacement workspace
+- `POST /api/workspaces/:id/stop` — Permanently stop a running workspace and delete retained session snapshot state
+- `POST /api/workspaces/:id/restart` — Restart a stopped, errored, or evicted workspace. Cancellation is allowed only before a deletion attempt is claimed; exact workspace identity/status is rechecked before the VM request.
+- `POST /api/workspaces/:id/rebuild` — Rebuild a running, recovering, or errored workspace. Returns `202`; uses the same claimed-deletion and final VM-request identity fences as restart.
+- `DELETE /api/workspaces/:id` — Request permanent workspace deletion. Returns confirmed success only after VM absence/success proof or an explicit strict provider/container termination marker and terminal finalization; returns `202` with `deletionStatus: "pending"` when durable retry is armed, the same exact attempt is already in flight, or proof-bearing finalization must converge after a concurrent state write. An identity/status fence without retained retry returns `409` with `deletionStatus: "rejected"`. Retained snapshot/session state is removed only after confirmation.
 
 ## Project Management
 
 - `POST /api/projects` — Create project
 - `GET /api/projects` — List user's projects (supports `limit` and `cursor`)
 - `GET /api/projects/:id` — Get project detail (includes task status counts and linked workspace count)
+- `GET /api/projects/:projectId/comments` — List project-wide comment inbox across chat and library threads (supports `status=open|sent|resolved`, `limit`)
+- `GET /api/projects/:id/capacity-pools/defaults` — Read default capacity pool context for the current project/user context. Requires project `project:read`; every active member receives the redacted `effectiveSummary` plus safe `placementSettings` resource defaults/settings. Raw project/user summaries require project `secret:read`, raw installation summaries are superadmin-only, and encrypted credential material is never returned. `?ensure=true` reconciles only for callers that also have project `secret:read`; non-superadmins never reconcile installation credentials through this route.
+- `POST /api/projects/:id/capacity-pools/defaults/reconcile` — Explicitly reconcile visible default capacity pool metadata from existing credentials and return the same safe summary payload. Non-superadmins reconcile project/user scopes only.
+- `PATCH /api/projects/:id/capacity-pools/defaults` — Update only the project-owned default pool policy (workspace strategy, deployment strategy, exhaustion policy, or maximum nodes), candidate statuses, or provider-native `catalogAdditions`; requires project `secret:write` and never mutates user or installation fallback pools.
 - `PATCH /api/projects/:id` — Update project metadata (`name`, `description`, `defaultBranch`)
 - `DELETE /api/projects/:id` — Delete project (cascades project tasks/dependencies/events)
+
+## Default Capacity Pools
+
+- `GET /api/capacity-pools/defaults` — Read the authenticated user's default compute pool summaries. Hidden project/installation scopes are represented structurally and are not rendered as user-facing placeholder rows. Pass `?ensure=true` for idempotent user-scope reconciliation before returning. Existing installation metadata may appear only through redacted `effectiveSummary`; this route never reconciles installation credentials.
+- `POST /api/capacity-pools/defaults/reconcile` — Explicitly reconcile the authenticated user's default compute pool metadata from their cloud credentials.
+- `PATCH /api/capacity-pools/defaults` — Update only the authenticated user's owned default pool policy (including separate workspace and deployment strategies), candidate statuses, or provider-native `catalogAdditions`.
+- `GET /api/admin/capacity-pools/defaults` — Superadmin-only read for the SAM installation default compute pool summaries; reveals non-secret metadata about platform cloud credentials.
+- `POST /api/admin/capacity-pools/defaults/reconcile` — Superadmin-only explicit reconciliation for installation default pool metadata from platform cloud credentials.
+- `PATCH /api/admin/capacity-pools/defaults` — Superadmin-only update for the installation-owned default pool policy (including separate workspace and deployment strategies), candidate statuses, or provider-native `catalogAdditions`.
+- `GET /api/providers/catalog` — Return concrete provider-native offering catalogs available to the authenticated context. Omitted `scope` is personal/user-only; project catalogs require `scope=project&projectId=...` plus project `secret:read`; installation catalogs require superadmin. The response is `Cache-Control: private, no-store` and includes non-secret metadata only.
+
+## Chat Sessions (Project Scoped)
+
+- `GET /api/projects/:projectId/sessions` — List chat sessions for a project
+- `GET /api/projects/:projectId/sessions/:sessionId` — Get chat session detail with recent messages (`before`/`after` take the same cursors as the message list below; an `after`-only request reads forward so a client can drain newer messages page by page)
+- `GET /api/projects/:projectId/sessions/:sessionId/state` — Get lightweight ACP activity state for a chat session
+- `GET /api/projects/:projectId/sessions/:sessionId/messages` — List persisted session messages (supports `roles`, `before`, `after`, `limit`, `compact`, `order=asc|desc`). `before`/`after` accept an exact `[createdAt,sequence,id]` cursor taken from a page's edge row — required to resume inside a group of rows sharing one timestamp — or a legacy millisecond timestamp that excludes every row at that time. Without `order`, an `after`-only request reads ascending; anything else reads newest-first. Pages are always returned oldest-first.
+- `GET /api/projects/:projectId/sessions/:sessionId/messages/:messageId/tool-content` — Lazy-load stored tool content for compact messages, falling back to the private R2 archive when inline payloads have been stripped
+- `GET /api/projects/:projectId/sessions/:sessionId/resource-timeline` — Whole-session resource timeline index: every retained chunk (ascending) with its summary and per-minute `rollup`, `runs` per workspace with `reservation`, `omittedChunkCount` past `WORKSPACE_RESOURCE_TIMELINE_MAX_CHUNKS`, and `collection` (`collected`/`pending`/`unsupported`/`expired`) explaining an empty timeline
+- `GET /api/projects/:projectId/sessions/:sessionId/resource-timeline/chunks/:chunkId` — One chunk's 5-second samples and tool spans, scoped to the path's project and session (foreign chunk → 404)
+- `GET /api/projects/:projectId/sessions/:sessionId/comments` — List message-anchored comment threads (supports `messageId`, `status=open|sent|resolved`, `afterSequence`, `limit`)
+- `POST /api/projects/:projectId/sessions/:sessionId/comments` — Create a message-anchored comment thread (`{ messageId, body, quote?, clientMutationId? }`)
+- `POST /api/projects/:projectId/sessions/:sessionId/comments/:threadId/replies` — Append a comment reply (`{ body, clientMutationId? }`)
+- `POST /api/projects/:projectId/sessions/:sessionId/comments/:threadId/send` — Mark a thread `sent` (`{ clientMutationId? }`)
+- `POST /api/projects/:projectId/sessions/:sessionId/comments/:threadId/resolve` — Mark a thread `resolved` (`{ clientMutationId? }`)
+- `POST /api/projects/:projectId/sessions/:sessionId/comments/:threadId/reopen` — Reopen a thread to `open` (`{ clientMutationId? }`)
+- `POST /api/projects/:projectId/sessions/:sessionId/prompt` — Send a follow-up prompt to the active agent session
+- `POST /api/projects/:projectId/sessions/:sessionId/comments/:threadId/send-to-agent` — Queue one idempotent comment directive through ProjectData prompt delivery for the explicit human "send to agent" action
+- `POST /api/projects/:projectId/sessions/:sessionId/attention/:markerId/resolve` — Validate, forward, and record one structured human-input answer (`{ answer }`)
+- `POST /api/projects/:projectId/sessions/:sessionId/fork-prepare` — Repair fork lineage and summarize the source session for Fork
+- `POST /api/projects/:projectId/sessions/:sessionId/summarize` — Generate a session summary for Retry. Shares one per-user rate-limit bucket with `fork-prepare` (`RATE_LIMIT_SESSION_SUMMARIZE`, default 30 per `RATE_LIMIT_SESSION_SUMMARIZE_WINDOW_SECONDS` = 3600); over it both return `429` with `Retry-After`
+- `POST /api/projects/:projectId/sessions/:sessionId/stop` — Stop a chat session
+
+Comment threads are scoped to the ProjectData Durable Object addressed by `projectId`; route authorization requires project `task:read` for list and project-wide inbox reads, and `task:write` for mutations. The DO rejects missing sessions, missing messages, and cross-session message anchors. Mutations return `{ thread, idempotent }` or `{ thread, reply, idempotent }`; successful first writes use HTTP 201 for create/reply and 200 for status transitions. Project session WebSocket listeners receive `{ type: "comment.thread.changed", payload: { sessionId, thread, reason } }` with `reason` in `thread_created | reply_created | marked_sent | resolved | reopened`.
 
 ## Task Management (Project Scoped)
 
@@ -44,10 +84,71 @@ user-invocable: false
 - `DELETE /api/projects/:projectId/tasks/:taskId` — Delete task
 - `POST /api/projects/:projectId/tasks/:taskId/status` — Transition task status
 - `POST /api/projects/:projectId/tasks/:taskId/status/callback` — Trusted callback status update for delegated tasks
+- `POST /api/projects/:projectId/tasks/:taskId/build-started` — VM-agent callback JWT endpoint that tells the TaskRunner a queued workspace build has started so it can reset the workspace-ready timeout
 - `POST /api/projects/:projectId/tasks/:taskId/dependencies` — Add dependency edge (`dependsOnTaskId`)
 - `DELETE /api/projects/:projectId/tasks/:taskId/dependencies?dependsOnTaskId=...` — Remove dependency edge
 - `POST /api/projects/:projectId/tasks/:taskId/delegate` — Delegate ready+unblocked task to owned running workspace
 - `GET /api/projects/:projectId/tasks/:taskId/events` — List append-only task status events
+
+## Search Input Limits
+
+- The `search_ideas`, `search_tasks`, `search_knowledge`, and `search_messages` MCP tools search every retained term separately. `SEARCH_QUERY_MAX_LENGTH` (default `4096`) and `SEARCH_QUERY_MAX_TERMS` (default `40`, higher values clamp to the safe D1 parameter ceiling) are total-input guardrails; `SEARCH_QUERY_MAX_TERM_LENGTH` (default `48`) keeps each escaped LIKE term under SQLite's pattern budget. They return the effective `query`, `queryTruncated`, and `queryLimits`.
+- `GET /api/projects/:projectId/knowledge/search?q=...`, `GET /api/sam/search?query=...`, and `GET /api/projects/:projectId/agent/search?query=...` apply the same limits and return the same metadata alongside their results.
+- Oversized queries are simplified before FTS5 or LIKE evaluation, preventing SQLite pattern/parser errors while keeping all retained terms searchable.
+
+## Member event subscriptions
+
+- `GET /api/projects/:projectId/event-subscriptions` — Requires project `task:read`. Returns `{ subscriptions, hasMore }`, accepting `state=active|cancelled|expired|any`, bounded `limit`, and optional `sessionId`. Session filtering happens before the result limit.
+- `GET /api/projects/:projectId/event-subscriptions/:subscriptionId` — Requires project `task:read`; returns `{ subscription }` within the authorized project.
+- `GET /api/projects/:projectId/event-subscriptions/:subscriptionId/deliveries` — Requires project `task:read`; returns bounded `{ deliveries, hasMore }` with actual transport state/method, timestamps and terminal reason. Accepts only optional positive `limit`, capped by event limits. Does not expose event payloads or match identities. Transport receipt and explicit acknowledgment remain distinct from agent action.
+- `POST /api/projects/:projectId/event-subscriptions/:subscriptionId/cancel` — Requires project `task:write`; accepts only optional `{ reason }`. Cancels human/agent subscriptions through canonical cancellation, derives `cancelledBy` from the authenticated human, and returns `{ subscription, idempotent, changed }`. System, policy and standing-watch subscriptions must be managed through their owning controls. Cancellation requests use the configured event metadata byte cap and reason limit. No platform caller identity is granted to members.
+
+## MCP Orchestration
+
+- `list_project_agents` includes sleeping VM tasks. `send_message_to_subtask` and `send_durable_message` accept same-project sleeping targets through durable prompt delivery; when that rollout is disabled, they return an explicit refusal instead of attempting a live-node send. `stop_subtask` allows direct-parent cancellation of a sleeping child without contacting its released runtime. Live-caller authorization and terminal-target exclusions remain enforced.
+
+- `wait_for_subtasks` — Task-agent-only tool that registers one durable wait for unique same-project task IDs. `waitKey` is a required stable workflow-step idempotency key and must be reused after a lost response. `condition` is `all` (default) or `any`; optional `wakeAfterSeconds` is positive and server-capped. Persist workflow state before calling, then end the turn. ProjectData wakes the caller through exact-once durable prompt delivery when the condition or finite deadline resolves.
+- `dispatch_task` — Create a direct child task subject to project dispatch depth and concurrency limits. Accepts `resourceRequirements` for modern workload sizing and deprecated `vmSize` for legacy compatibility. `resourceRequirements` is VM-only and conflicts with `runtime: "cf-container"`.
+- `get_task_details` / `get_peer_agent_output` — Read authoritative child status and output after a durable wake.
+- `get_archived_tool_payloads` — Retrieve ProjectData tool-call payload JSON that has been archived to private R2 and stripped from message rows. Accepts `messageId`, `sessionId`, or `startTime`/`endTime` with bounded `limit`; returns payloads through the Worker without exposing R2 keys.
+- `get_resource_history` — Read bounded workspace resource history for a session, task, or workspace through the current project scope. Returns a D1 summary/chunk index by default; the summary includes nullable, server-resolved `agentProfileId`, `skillId`, and `agentType` from records scoped to the same project and workspace. Optional `chunkId` lazy-loads downsampled R2 samples and sanitized tool-span correlation. Tool spans are correlation windows, not causal per-process attribution, and payloads omit prompts, commands, tool arguments/output, paths, environment, and secrets.
+- `create_project_event_subscription` / `list_project_event_subscriptions` / `get_project_event_subscription` / `cancel_project_event_subscription` — Task-agent-only ProjectData event-subscription tools. The server derives project, owner, task, workspace, chat session, and agent-session identity from the MCP token; callers cannot supply `projectId`, `owner`, `ownerScope`, or `cancelledBy`. Creates are short-lived and capped by the MCP token lifetime. Filters are v1 exact/set matches for `source`, `eventType`, `subjectType`, `subjectId`, and `severity`. Requested delivery policy is recorded separately from matching/routing: `existing_session_prompt` and `runtime_interrupt` resolve to `queued_for_prompt_delivery` (the latter with the `interrupt` mailbox class, so its wakes may stop an in-flight turn — stop-and-deliver); other non-record-only modes resolve to `recorded_not_injected` until their adapters are enabled. The pull tools never steer runtimes or spawn tasks. Missing get/cancel requests error by default; `required=false` returns `subscription:null`.
+- `list_subscription_events` — Cursor-paginate missed or queued ProjectData event deliveries for one active, unexpired subscription visible to the calling task agent. Use it immediately after `create_project_event_subscription`, after wake/resume, and during bounded polling. Responses include compact summaries, delivery IDs, delivery state, and an opaque `nextCursor`; they intentionally omit event payloads and raw payload references. Cursors are bound to the subscription and are bounded by `PROJECT_EVENT_SUBSCRIPTION_EVENT_CURSOR_MAX_LENGTH`; page size uses `PROJECT_EVENT_LIST_LIMIT` / `PROJECT_EVENT_LIST_MAX`.
+- `get_event` — Fetch one durable ProjectData event by stable event ID when it is visible through an active, unexpired subscription owned by or targeted at the calling task agent. Use this after a `list_subscription_events` summary identifies work that needs full stored details such as normalized metadata, display data, raw payload reference, delivery key, payload fingerprint, and conflict counters.
+- `ack_event_delivery` — Idempotently acknowledge a ProjectData pull delivery after the agent has processed it. Use the `deliveryId` returned by `list_subscription_events` or `get_event`. Repeated acks on the same delivery return the existing `acked` state. Acks are scoped by the verified MCP token plus active/unexpired subscription visibility; missing or unauthorized event, subscription, and delivery reads use nondisclosing not-found-or-not-visible errors.
+- `list_incident_queue` / `get_incident` / `claim_incident` / `resolve_incident` — Private feedback-project-only incident backlog tools. The server derives scope from the MCP token and the effective private feedback project setting (Admin → Integrations runtime value first, then `PLATFORM_FEEDBACK_PROJECT_ID` fallback); agents cannot pass a project id. Claim/resolve require a task-scoped token and use bounded leases/CAS tokens. Returned evidence is allowlisted, bounded, recursively redacted, and labelled as untrusted; agents must not copy machine-generated diagnostics or feedback into public GitHub issues.
+
+`wait_for_subtasks` rejects conversation/direct-workspace agents, cross-project task IDs, terminal callers, duplicate IDs, mismatched caller sessions, invalid wait keys, and installations where durable prompt delivery is disabled. Reusing the same `waitKey` and intent is idempotent even after resolution; using a key for a different intent is rejected. Automatic wake prompts contain only trusted task IDs/statuses—peer-authored summaries, errors, and URLs must be fetched explicitly and treated as untrusted data.
+
+Project event pull loop: create a subscription with the narrowest useful filter, call `list_subscription_events` until `hasMore=false`, call `get_event` only for summaries that require full stored details, process the work, then call `ack_event_delivery` for each returned delivery. The canonical storage is the ProjectData `project_event_*` schema; do not add or depend on parallel `event_bus_*` tables.
+
+## Administration (Superadmin Only)
+
+- `GET|PUT|DELETE /api/admin/ai-allowance/:userId` — Per-user AI allowance: budget ceilings plus `allowedModelTiers` (`null` = every tier, else a subset of `low-cost`/`standard`/`premium`; unknown names are `400`). The AI proxy enforces the tiers on every platform-credential route (`services/ai-model-tier-gate.ts`): out-of-tier or untiered models get `403 permission_error`, an unreadable allowance fails closed; BYO-key passthrough is not restricted
+- `GET /api/admin/tasks/stuck` — List tasks currently in transient states
+- `GET /api/admin/tasks/:taskId/reconciliation-diagnostics` — Read the TaskRunner probe, task-scoped runtime liveness, eligibility threshold, reconciliation decision, and whether/where the bounded cursor page selects the task, without mutating task state
+- `GET /api/admin/tasks/recent-failures` — List recent failed tasks with error details
+- `GET /api/admin/observability/errors` — Query platform errors; VM error rows include their same-installation diagnostic incident summary
+- `GET /api/admin/observability/errors/:errorId/incident` — Read one diagnostic incident summary and redacted preview
+- `GET /api/admin/observability/errors/:errorId/incident/artifacts/:artifactId/download` — Stream one private diagnostic artifact through the authenticated Worker; R2 keys and URLs are never exposed
+- `GET /api/admin/project-events/:projectId/inspector` — Superadmin-only read view for one project's ProjectData event subscriptions, recent normalized events, matches, delivery batches, attempts, and storage accounting. The response is bounded by `limit` and intentionally omits raw payload references, event metadata, idempotency keys, and raw model/event content beyond normalized untrusted display summaries.
+- `GET /api/admin/project-data/storage` — List latest per-project ProjectData storage telemetry from D1 (`projectId`, `status`, `limit` filters), including growth forecast, cleanup health, reclaimable bytes, category breakdown JSON, and last alert reason
+- `GET /api/admin/project-data/storage/history` — List append-only ProjectData storage telemetry history from D1 (`projectId`, `status`, `cleanupHealth`, `limit` filters) for growth and cleanup-health trends
+- `GET /api/admin/project-data/storage/:projectId/archive-sharding/state` — D1-only archive-sharding rollout summary for one project, optionally scoped by `sessionId`, including complete journal/session-location state counts, project circuit breaker state, bounded recent migrations/session locations, `recentMigrationsHasMore`/`locationsHasMore`, and bounded row-fault warnings for malformed read rows
+- `GET /api/admin/project-data/storage/archive-sharding/problem-migrations` — Bounded D1 list of failed, poisoned, or frozen archive-sharding migrations, optionally filtered by `projectId` and `sessionId`; malformed read rows are skipped and returned as bounded warnings; rows that need a human (`failed`, `poisoned`, operator-frozen) sort before self-healing `precopy_refused` rows. A `frozen` row with `error_code = precopy_refused` is a session the root object refused before any copy (its `error_message` carries the invariant, e.g. `active_session_state: ...`); its location is already back at `root`, it needs no abandon, and the unscoped sweep skips it for `PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS`
+- `POST /api/admin/project-data/storage/:projectId/archive-sharding/canary` — Superadmin-only scoped manual archive-sharding dry-run/canary. Defaults to `{ dryRun: true }`; dry-runs do not require `PROJECT_DATA_ARCHIVE_SHARDING_ENABLED=true` or `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED=true` and select only the requested project plus optional `sessionId`. Non-dry runs require `reason` and fail closed unless exact archive routing is active. The unscoped scheduled sweep has its own fail-closed `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED` gate.
+- `POST /api/admin/project-data/storage/:projectId/archive-sharding/freeze` — Freeze non-terminal archive migrations for one project, freeze migrating session locations, and set the project archive circuit breaker to `frozen` with an explicit `reason`
+- `POST /api/admin/project-data/storage/:projectId/archive-sharding/circuit-breaker` — Set the project archive circuit breaker to `closed`, `open`, or `frozen` with an explicit `reason`; closing allows future work but does not thaw existing frozen migrations
+- `POST /api/admin/project-data/storage/:projectId/archive-sharding/unfreeze` — Alias for closing the project archive circuit breaker with an explicit `reason`; frozen migrations remain frozen until copy-back (source already deleted) or abandon (source intact) resolves them
+- `GET /api/admin/project-data/storage/:projectId/archive-sharding/frozen-intents` — Bounded inspection of failed/poisoned/frozen migrations using existing source/target DO inspection helpers; malformed journal rows are skipped with bounded warnings; detail inspection defaults to 5 rows and rejects limits above 10 to cap hot ProjectData DO fan-out; `frozen`/`precopy_refused` rows are excluded because a pre-copy refusal created nothing on either object to inspect
+- `POST /api/admin/project-data/storage/:projectId/archive-sharding/migrations/:migrationId/copy-back` — Invoke the existing safe archive copy-back helper for a migration that belongs to the project; requires explicit `reason` and exact archive routing to be enabled. Only for migrations whose source transcript was already deleted (`source_deleted` / `published`)
+- `POST /api/admin/project-data/storage/:projectId/archive-sharding/migrations/:migrationId/abandon` — Abandon a migration that never reached source deletion (`candidate` .. `recovery_manifest_persisted`, `failed`, `poisoned`, `frozen`): drops the partial shard copy and the root source intent, freezes the journal as `operator_abandoned` without opening the project circuit breaker, and returns the session location to `root` so the session reads again. Reserves the journal lease (epoch bump) before touching any object, removes the root source intent under the source transcript lock BEFORE dropping the shard copy, and releases the reservation if a step fails. Requires explicit non-blank `reason` (400 otherwise); refuses with 400 once the source was deleted (use copy-back), while an in-flight migration still holds a live lease (wait for `PROJECT_DATA_ARCHIVE_LEASE_MS` or freeze the project first), on a project mismatch, or for an unknown migration. Idempotent on rerun
+- `POST /api/admin/project-data/storage/:projectId/measure` — Force one ProjectData `databaseSize` measurement and D1 telemetry upsert
+- `POST /api/admin/project-data/storage/:projectId/relief-measure` — Run one strictly bounded, cursor-resumable ProjectData storage-relief measurement slice for grouped/FTS derived rows, legacy tool payload stock, and stale `oversized` attempts now below the archive cap; never performs the old full hot-object scan
+- `POST /api/admin/project-data/storage/:projectId/tool-payload-cleanup` — Superadmin-only explicit manual ProjectData tool-payload archival cleanup slice for one project. Requires `reason` and `idempotencyKey`, accepts optional `batchRows`, `batchBytes`, and `wallTimeMs` capped by env-backed hard maxima, bypasses automatic cleanup enablement, reuses archive-confirmed-before-delete cleanup semantics, and returns termination/reclaim/cooldown telemetry. Completed same-key retries replay the stored result; crashed in-progress same-key retries are held until cooldown and then can retry.
+- `POST /api/admin/project-data/storage/:projectId/grouped-fts-cleanup` — Run one explicitly enabled, production-disabled canary slice that removes old terminal-session grouped message rows and external-content FTS entries while preserving raw `chat_messages`
+- `POST /api/admin/project-data/storage/:projectId/grouped-fts-wall-recovery` — Superadmin storage relief that still works at the hard per-object cap: prunes grouped/FTS search rows of terminal sessions older than the grouped/FTS minimum age, largest first and delete-first, never touching `chat_messages`. Requires `reason`, `dryRun`, `maxRows`, `maxBytes`, `maxSessions` (bounded by `PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_*` ceilings); optional `skipSessionIds` bypasses a session whose page keeps failing; `dryRun: true` reports without writing
+- `POST /api/admin/project-data/storage/:projectId/emergency-purge` — Run a bounded ProjectData emergency purge of oldest `activity_events` and `acp_session_events` rows only
 
 ## Agent Sessions
 
@@ -56,26 +157,89 @@ user-invocable: false
 - `PATCH /api/workspaces/:id/agent-sessions/:sessionId` — Rename agent session label
 - `POST /api/workspaces/:id/agent-sessions/:sessionId/stop` — Stop agent session
 
+### VM Agent direct execution protocol (node-management JWT)
+
+- `GET /workspaces/:workspaceId/agent-capabilities` — Discover VM execution protocol version, durable receipt support, checkpoint-rollover support, and configured timing bounds
+- `POST /workspaces/:workspaceId/agent-sessions/:sessionId/start` — Start a session; optional protocol-v1 `deliveryId` durably guards the initial prompt
+- `POST /workspaces/:workspaceId/agent-sessions/:sessionId/prompt` — Send a follow-up; optional protocol-v1 `deliveryId` durably guards agent invocation
+- `GET /workspaces/:workspaceId/agent-sessions/:sessionId/prompt-receipts/:deliveryId` — Reconcile `accepted`, `in_flight`, `completed`, or cross-runtime `ambiguous` delivery state
+- `POST /workspaces/:workspaceId/agent-sessions/:sessionId/checkpoint-rollovers` — Submit an idempotent protocol-v1 graceful/forced strict same-session rollover operation
+- `GET /workspaces/:workspaceId/agent-sessions/:sessionId/checkpoint-rollovers/:operationId` — Reconcile rollover state
+
+All direct routes require the workspace-scoped node-management Bearer token. Omitting new version/delivery fields preserves the legacy start/prompt behavior. Automatic rollover remains disabled until a control-plane caller invokes it.
+
+## Agent Profiles and Skills
+
+Agent profile and skill create/update surfaces accept `resourceRequirements` as an object and `resourceRequirementsJson` as a compatibility JSON string/null. Modern object input takes precedence inside the same request body. Known fields use the same bounded client/API validation contract as task submit; unknown JSON metadata is preserved for compatibility. Deprecated `vmSizeOverride` remains accepted without client-side tier-to-hardware expansion.
+
 ## Agent Settings
 
 - `GET /api/agent-settings/:agentType` — Get user's agent settings
 - `PUT /api/agent-settings/:agentType` — Upsert agent settings (model, permissionMode)
 - `DELETE /api/agent-settings/:agentType` — Reset agent settings to defaults
 
+## Notifications
+
+- `GET /api/notifications` — List notifications (supports `cursor`, `limit`, `filter`, `type`, `projectId`, `sessionId`)
+- `GET /api/notifications/unread-count` — Get unread notification count
+- `POST /api/notifications/:id/read` — Mark a notification as read
+- `POST /api/notifications/read-all` — Mark all notifications as read
+- `POST /api/notifications/:id/dismiss` — Dismiss a notification
+- `GET /api/notifications/preferences` — Get notification preferences
+- `PUT /api/notifications/preferences` — Update a notification preference
+- `POST /api/notifications/push/subscriptions` — Add or refresh the authenticated browser's PushSubscription
+- `GET /api/notifications/push/subscriptions` — List the authenticated user's PushSubscriptions
+- `DELETE /api/notifications/push/subscriptions` — Remove the authenticated user's matching endpoint (`{ endpoint }`)
+- `GET /api/notifications/ws` — WebSocket upgrade for real-time notification delivery
+- `GET /api/config/vapid-public-key` — Public runtime VAPID key used when creating a browser PushSubscription
+
+## Automation Triggers (Project Scoped)
+
+- `POST /api/projects/:projectId/triggers` — Create a cron, GitHub, generic webhook, or private incident trigger. Webhook creation requires `agentProfileId` and `webhookConfig`; its response includes a one-time `webhookCredential`. Incident triggers are intended for the configured private feedback project and fire from the scheduled incident backlog sweep.
+- `GET /api/projects/:projectId/triggers` — List triggers with safe source configuration. Webhook tokens are redacted to `tokenLastFour`.
+- `GET /api/projects/:projectId/triggers/:triggerId` — Get trigger details and recent execution history.
+- `PATCH /api/projects/:projectId/triggers/:triggerId` — Update common trigger settings or source-specific webhook configuration.
+- `DELETE /api/projects/:projectId/triggers/:triggerId` — Delete a trigger and cascading source configuration, delivery audit, and execution history.
+- `POST /api/projects/:projectId/triggers/:triggerId/test` — Preview the cron template context.
+- `POST /api/projects/:projectId/triggers/:triggerId/run` — Submit a manual trigger execution. Webhook triggers accept optional `{ payload, headers }` preview context.
+- `POST /api/projects/:projectId/triggers/:triggerId/webhook/preview` — Render a webhook template and evaluate configured filters without creating an execution.
+- `POST /api/projects/:projectId/triggers/:triggerId/webhook/rotate` — Rotate the webhook bearer token and return the replacement once.
+- `GET /api/projects/:projectId/triggers/:triggerId/webhook/deliveries` — List redacted webhook delivery audit metadata (`limit`, `cursor`).
+- `POST /api/webhooks/ingest` — Public generic webhook ingress. Requires `Authorization: Bearer <token>`, `Content-Type: application/json`, and a JSON object body. Supports optional `Idempotency-Key`.
+
+Trigger create/update accepts `resourceRequirements` or `resourceRequirementsJson` and persists normalized JSON on the trigger layer. Omitted fields inherit lower layers; explicit `null` clears the trigger-layer JSON. Deprecated `vmSizeOverride` remains accepted as `small`, `medium`, `large`, or `null`.
+
+The MCP `create_trigger` tool intentionally creates cron triggers only. Generic webhook creation, incident trigger creation, filter management, preview, and credential rotation use the authenticated UI/REST surface so one-time credentials and private operator configuration can be handled explicitly.
+
 ## VM Communication (Callback Endpoints)
 
 - `POST /api/nodes/:id/ready` — Node Agent ready callback
 - `POST /api/nodes/:id/heartbeat` — Node Agent heartbeat callback
-- `POST /api/nodes/:id/errors` — VM agent error report (batch, logged to CF Workers observability)
+- `POST /api/nodes/:id/errors` — VM agent error report batch. An optional stable ULID `incidentId` makes persistence idempotent; error-level entries create the same-installation diagnostic incident before acknowledgment.
+- `POST /api/nodes/:id/diagnostic-incidents/:incidentId/artifacts` — Register bounded, redacted VM evidence metadata using the node callback JWT
+- `PUT /api/nodes/:id/diagnostic-incidents/:incidentId/artifacts/:artifactId/content` — Stream the registered gzip artifact into private R2 storage using the node callback JWT
 - `POST /api/workspaces/:id/ready` — Workspace ready callback
 - `POST /api/workspaces/:id/provisioning-failed` — Workspace provisioning failure callback (sets workspace to `error`)
 - `POST /api/workspaces/:id/heartbeat` — Workspace activity heartbeat callback
 - `GET /api/workspaces/:id/runtime` — Workspace runtime metadata callback (repository/branch for recovery)
+- `POST /api/workspaces/:id/callback-token/renew` — Renew a workspace callback token before it expires. Two proofs: the current, unexpired workspace token in `Authorization`, and `{ nodeId, nodeToken }` (the hosting node's node-scoped token) in the body. The workspace must be `creating`/`running`/`recovery`, bound to that VM node (never an Instant `cf-container` node), owned by the node's user, and on a non-terminal node; otherwise 401/403/410 (`NODE_CALLBACK_UNAUTHORIZED`/`NODE_CALLBACK_FORBIDDEN` when only the node proof failed). Authenticated attempts count against `RATE_LIMIT_CALLBACK_TOKEN_RENEWAL` per workspace per window (429 `RATE_LIMIT_EXCEEDED` with `Retry-After`). A token younger than `CALLBACK_TOKEN_REFRESH_THRESHOLD_RATIO` of its lifetime gets `{ renewed: false }`; otherwise `{ renewed: true, token, expiresAt }`, where the token keeps the chain's first `iat` as `gen_iat`. Responses carry `Cache-Control: no-store`
 - `POST /api/workspaces/:id/boot-log` — Workspace boot progress log callback
 - `POST /api/workspaces/:id/agent-settings` — Workspace agent settings callback (model, permissionMode)
+- `POST /api/projects/:id/workspaces/:workspaceId/eviction` — VM-agent callback JWT endpoint that validates node/workspace/runtime-generation identity and successful container stop, atomically marks the workspace `evicted` and closes usage/agent sessions, then serializes replay-safe ProjectData finalization through NodeLifecycle. A stale generation returns 410; failed finalization is retryable. Explicit restart requires renewed capacity admission and rotates the runtime generation
+- `POST /api/workspaces/:id/session-snapshot/prepare` — Prepare deterministic R2 artifact uploads for the workspace-scoped chat snapshot
+- `POST /api/workspaces/:id/session-snapshot/artifacts/:artifact/upload-url` — Authorize a short-lived, exact-length/checksum-bound private-R2 PUT for `home` or `wip`. Requires the workspace callback bearer; current-agent relays additionally present their independent node-scoped callback identity.
+- `PUT /api/workspaces/:id/session-snapshot/artifacts/:artifact` — Upload a bounded HOME tar or Git WIP bundle with a workspace callback token
+- `POST /api/workspaces/:id/session-snapshot/complete` — Verify artifact metadata and commit the snapshot manifest
+- `POST /api/workspaces/:id/session-snapshot/failure` — Persist a generation-scoped VM-agent capture failure so sleep fallback can degrade with the real capture error
+- `GET /api/workspaces/:id/session-snapshot/restore` — Fetch strict restore metadata and signed artifact paths
+- `POST /api/workspaces/:id/session-snapshot/restore-result` — Persist the VM Agent's strict restore result
 - `POST /api/bootstrap/:token` — Redeem one-time bootstrap token (credentials + git identity)
 - `POST /api/agent/ready` — VM agent ready callback
 - `POST /api/agent/activity` — VM agent activity report
+
+### VM Agent snapshot relay (busy legacy node compatibility)
+
+- `PUT /session-snapshot-upload-relay?authorizationPath=...` — A current same-user managed VM streams a busy legacy agent's bounded snapshot to the checksum-bound R2 URL returned by the control plane. The relay supplies independent workspace- and node-scoped callback credentials, accepts only the exact relative snapshot authorization route, uses the configurable snapshot-operation deadline, and forwards neither bearer to R2.
 
 ## Terminal Access
 
@@ -97,7 +261,7 @@ user-invocable: false
 
 ## Voice Transcription
 
-- `POST /api/transcribe` — Transcribe audio via Workers AI (Whisper)
+- `POST /api/transcribe` — Transcribe audio via Workers AI (Whisper). Rate-limited per user (`RATE_LIMIT_TRANSCRIBE`, default 30 per `RATE_LIMIT_TRANSCRIBE_WINDOW_SECONDS` = 60)
 
 ## Client Error Reporting
 
@@ -111,9 +275,18 @@ user-invocable: false
 
 ## Credentials
 
-- `GET /api/credentials` — Get user's cloud provider credentials
-- `POST /api/credentials` — Save cloud provider credentials
-- `DELETE /api/credentials/:provider` — Delete stored cloud provider credential
+- `GET /api/credentials` — Get the user's cloud provider connections. GCP returns safe `authType`, project, service-account email, zone, and optional key ID metadata; encrypted source credentials are never returned, and malformed rows are isolated.
+- `POST /api/credentials` — Save a cloud provider credential. New GCP WIF writes use the versioned `workload-identity` variant.
+- `DELETE /api/credentials/:provider` — Delete the stored cloud provider credential. GCP deletion atomically removes legacy and generated composable copies and cached derivatives; it does not revoke Google-managed keys.
+
+### GCP
+
+- `PUT /api/gcp/service-account` — Validate and atomically save or rotate an OAuth-free service-account JSON credential. Body: `{ serviceAccountJson, defaultZone }`. Verification and the mutation rate limit run before replacement; the response contains safe metadata only.
+- `POST /api/gcp/setup` — Complete the recommended keyless WIF setup using an OAuth handle and store the versioned WIF credential.
+- `POST /api/gcp/projects` — List Google Cloud projects for a short-lived infrastructure OAuth handle.
+- `POST /api/gcp/verify` — Verify the currently stored GCP credential, dispatching to WIF or service-account authentication.
+
+The service-account flow ignores uploaded endpoint fields and exchanges RS256 assertions only at SAM's fixed Google token endpoint.
 
 ## GitHub Integration
 
@@ -131,3 +304,48 @@ All API errors follow this format:
   message: "Human-readable description"
 }
 ```
+
+## Agent event channels
+
+Follow defaults to `record_only`. Follow/catch-up return canonical `wakeInstructions`
+for resolved same-chat prompt delivery; record-only responses return null.
+
+`GET /api/projects/:projectId/event-channels` lists bounded lifetime catalog summaries (`cursor`, `limit`; response `channels`, `nextCursor`). `GET /api/projects/:projectId/event-channels/:channel/history` returns a bounded snapshot (`events`, `cursor`, `watermark`, `hasMore`, `retentionGap`). Both use active project `task:read` membership. Catalog counts are lifetime counts within a generation, never retained-event counts.
+
+MCP names: `publish_channel_event(channel,message,idempotencyKey)`, `list_event_channels(cursor?,limit?)`, `get_channel_history(channel,cursor?,limit?)`, `follow_event_channel(channel,idempotencyKey,cursor?,requestedDelivery?,reason?,expiresAt?)`, `catch_up_event_channel(subscriptionId,limit?)`. Source/type/actor/project/target identity are verified/server-derived; publishing/follow/catch-up require task:write and active agent authority. Channel source is sam.agent_channel, type agent.channel.published, subject type agent_channel with stable channel name. Read text is untrusted evidence. Canonical list/read/ack performs delivery after catch-up.
+
+Follow captures the current canonical sequence watermark and live subscription atomically. Catch-up pages insert unique canonical matches and advance only a contiguous page; capacity or retention gaps roll back without skipping events. Cursor generation/scope/expiry are validated; follow replay preserves immutable start and deadline. Catalog reclamation never changes name-based live routing. Retained event key replays bypass admission quota; changed message conflicts; idempotency ends with canonical retention. Rate limiting is a shared fixed project window, so boundary bursts can consume two windows. Configuration is documented in the public configuration reference.
+
+## Schedules and standing watches
+
+Authenticated project members can inspect `/api/projects/:projectId/schedules` and
+`/standing-watches` with GET, and `/:id` for a single record. Project writers can
+POST to create. Schedule POST `/:id/reschedule`, `/:id/cancel`, and `/:id/reconcile` require
+`expectedVersion`; watch POST `/:id/update`, `/:id/pause` (with `paused` boolean),
+and `/:id/revoke` also require a version. A stale version returns conflict.
+Schedule list cursors are scoped to project and optional `sessionId`, including
+creator and message-target sessions. Watch contextual lists include message targets.
+
+Task-scoped MCP exposes `create_project_schedule`, `list_project_schedules`,
+`get_project_schedule`, `reschedule_project_schedule`, `cancel_project_schedule`, and
+`reconcile_project_schedule`.
+Creator/project identity comes from the verified caller. Human-owned standing-watch
+mutations are deliberately absent from agent tools. Schedule actions are
+`message_session` (sessionId, prompt) or `start_session` (prompt, optional
+agentProfileId/skillId). `dueAt` and optional `expiresAt` are UTC epoch milliseconds;
+`displayTimezone` is IANA. Creation requires a reusable `idempotencyKey`.
+
+Admission is the cancellation boundary. Cancelling after admission reports
+`actionAlreadyAdmitted`; it does not retract a queued prompt or task. Reads report
+resulting event/delivery/task/session IDs, attempts and errors. Busy targets queue;
+expired authority, archive, finite grace or uncertain receipts are visible outcomes.
+
+Schedule GET/list/create/mutation responses include `schedule.execution`, a bounded read-only
+observation of canonical task/inbox status, separately from schedule admission `state`.
+Reconcile accepts `{ expectedVersion, retrySubmission?: boolean }`; the default reads receipts
+without compute wake or prompt replay. Known running receipts restore monitoring; only terminal
+receipts release watch concurrency. Explicit task retry requires a matching queued reserved
+checkpoint, current creator authority, and the original unexpired submission deadline. It reuses
+all reserved identities and immutable intent. Missing/ambiguous receipts are never proof of
+completion or permission to replay. The response includes `recovery.outcome` and
+`execution.retrySubmissionAllowed`; original deadlines cannot be extended by recovery.

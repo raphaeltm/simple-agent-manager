@@ -1,4 +1,5 @@
-FROM debian:bookworm-slim
+# Reviewed source tag: docker.io/library/debian:bookworm-slim
+FROM docker.io/library/debian@sha256:9cc080028c43b27d2074d63a5f9caf7166d731494965616c1a6d2827a004585c
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends bash ca-certificates coreutils sed \
@@ -7,10 +8,16 @@ RUN apt-get update \
 WORKDIR /workspace
 
 COPY mock-acp-agent.sh /usr/local/bin/mock-acp-agent
+COPY mock-claude.sh /usr/local/bin/claude
 
 RUN chmod +x /usr/local/bin/mock-acp-agent \
+  && chmod +x /usr/local/bin/claude \
   && ln -s /usr/local/bin/mock-acp-agent /usr/local/bin/claude-agent-acp \
   && ln -s /usr/local/bin/mock-acp-agent /usr/local/bin/codex-acp \
-  && ln -s /usr/local/bin/mock-acp-agent /usr/local/bin/gemini
+  && ln -s /usr/local/bin/mock-acp-agent /usr/local/bin/gemini \
+  && useradd --create-home --shell /bin/bash sam-mock \
+  && chown -R sam-mock:sam-mock /workspace
+
+USER sam-mock
 
 CMD ["bash", "-lc", "sleep infinity"]

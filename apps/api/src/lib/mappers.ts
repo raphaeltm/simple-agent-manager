@@ -7,7 +7,6 @@
  * - toProjectResponse, toProjectSummaryResponse (was in projects.ts)
  * - toTaskResponse, toDependencyResponse (was in tasks.ts)
  */
-
 import type {
   AgentSession,
   Project,
@@ -20,32 +19,97 @@ import type {
   TaskStatus,
   WorkspaceResponse,
 } from '@simple-agent-manager/shared';
-import { DEFAULT_WORKSPACE_PROFILE,isTaskExecutionStep } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_WORKSPACE_PROFILE,
+  isTaskExecutionStep,
+  parseCompletionEvidenceJson,
+  VALID_PERMISSION_MODES,
+} from '@simple-agent-manager/shared';
+import * as v from 'valibot';
+
+import { publicPlacementExplanationJson } from '../services/public-placement-explanation';
+
+// Mirrors ProjectAgentDefaults (packages/shared/src/types/project.ts) and the
+// write-time AgentDefaultEntrySchema (apps/api/src/schemas/projects.ts,
+// unexported so it isn't reused directly): a record keyed by agent type, each
+// entry optionally overriding model/permissionMode. Any row written through
+// the PATCH route already satisfies this; the schema exists to stop a
+// pre-validation legacy or hand-edited row from being blindly cast and handed
+// to callers as if it were well-formed.
+const agentDefaultEntrySchema = v.object({
+  model: v.optional(v.nullable(v.string())),
+  permissionMode: v.optional(v.nullable(v.picklist(VALID_PERMISSION_MODES))),
+});
+const projectAgentDefaultsSchema = v.record(v.string(), agentDefaultEntrySchema);
 
 /**
  * Parse the project.agentDefaults JSON column. Returns null if unset or invalid.
- * We intentionally do NOT re-validate contents here — validation happens at write time.
+ * We validate the *shape* (a record of agent-type -> { model?, permissionMode? }
+ * objects); per-field content validation beyond that (e.g. the permission-mode
+ * enum) mirrors the write-time schema so the inferred type lines up with
+ * ProjectAgentDefaults, not an independent re-validation policy.
  */
 function parseAgentDefaults(raw: string | null): ProjectAgentDefaults | null {
   if (!raw) return null;
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return parsed as ProjectAgentDefaults;
-    }
-    return null;
+    parsed = JSON.parse(raw);
   } catch {
     return null;
   }
+  // v.record() alone accepts arrays (numeric indices satisfy string keys), so
+  // the array rejection needs to stay explicit — matching the original
+  // `!Array.isArray(parsed)` guard — rather than relying on the record schema.
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
+  const result = v.safeParse(projectAgentDefaultsSchema, parsed);
+  return result.success ? result.output : null;
 }
 
 import type * as schema from '../db/schema';
 import { getWorkspaceUrl } from '../services/dns';
 
-export function toWorkspaceResponse(ws: schema.Workspace, baseDomain: string): WorkspaceResponse {
+export function toWorkspaceResponse(
+  ws: schema.Workspace,
+  baseDomain: string,
+  node?: Pick<
+    schema.Node,
+    | 'cloudProvider'
+    | 'vmSize'
+    | 'providerInstanceType'
+    | 'providerInstanceVcpuCount'
+    | 'providerInstanceMemoryMb'
+    | 'providerInstanceDiskGb'
+    | 'providerInstanceBootDiskSizeGb'
+    | 'providerInstanceArchitecture'
+    | 'observedProviderInstanceType'
+    | 'observedProviderInstanceVcpuCount'
+    | 'observedProviderInstanceMemoryMb'
+    | 'observedProviderInstanceDiskGb'
+  > | null
+): WorkspaceResponse {
   return {
     id: ws.id,
     nodeId: ws.nodeId ?? undefined,
+    ...(node
+      ? {
+          hardware: {
+            cloudProvider: node.cloudProvider as NonNullable<
+              WorkspaceResponse['hardware']
+            >['cloudProvider'],
+            vmSize: node.vmSize as WorkspaceResponse['vmSize'],
+            providerInstanceType: node.providerInstanceType,
+            providerInstanceVcpuCount: node.providerInstanceVcpuCount,
+            providerInstanceMemoryMb: node.providerInstanceMemoryMb,
+            providerInstanceDiskGb: node.providerInstanceDiskGb,
+            providerInstanceBootDiskSizeGb: node.providerInstanceBootDiskSizeGb,
+            providerInstanceArchitecture: node.providerInstanceArchitecture,
+            observedProviderInstanceType: node.observedProviderInstanceType,
+            observedProviderInstanceVcpuCount: node.observedProviderInstanceVcpuCount,
+            observedProviderInstanceMemoryMb: node.observedProviderInstanceMemoryMb,
+            observedProviderInstanceDiskGb: node.observedProviderInstanceDiskGb,
+          },
+        }
+      : {}),
     projectId: ws.projectId,
     displayName: ws.displayName ?? ws.name,
     name: ws.name,
@@ -54,10 +118,19 @@ export function toWorkspaceResponse(ws: schema.Workspace, baseDomain: string): W
     status: ws.status as WorkspaceResponse['status'],
     vmSize: ws.vmSize as WorkspaceResponse['vmSize'],
     vmLocation: ws.vmLocation as WorkspaceResponse['vmLocation'],
-    workspaceProfile: (ws.workspaceProfile as WorkspaceResponse['workspaceProfile']) ?? DEFAULT_WORKSPACE_PROFILE,
+    providerInstanceType: ws.providerInstanceType ?? null,
+    providerInstanceBootDiskSizeGb: ws.providerInstanceBootDiskSizeGb ?? null,
+    providerInstanceImage: ws.providerInstanceImage ?? null,
+    providerInstanceArchitecture: ws.providerInstanceArchitecture ?? null,
+    resourceRequirementsJson: ws.resourceRequirementsJson ?? null,
+    resolvedReservationJson: ws.resolvedReservationJson ?? null,
+    placementExplanationJson: publicPlacementExplanationJson(ws.placementExplanationJson),
+    workspaceProfile:
+      (ws.workspaceProfile as WorkspaceResponse['workspaceProfile']) ?? DEFAULT_WORKSPACE_PROFILE,
     devcontainerConfigName: ws.devcontainerConfigName ?? null,
     vmIp: ws.vmIp,
     lastActivityAt: ws.lastActivityAt,
+    portsPublicEnabled: ws.portsPublicEnabled,
     errorMessage: ws.errorMessage,
     createdAt: ws.createdAt,
     updatedAt: ws.updatedAt,
@@ -95,8 +168,10 @@ export function toProjectResponse(project: schema.Project): Project {
     repoProvider: (project.repoProvider as RepoProvider) || 'github',
     artifactsRepoId: project.artifactsRepoId ?? null,
     defaultVmSize: (project.defaultVmSize as Project['defaultVmSize']) ?? null,
+    resourceRequirementsJson: project.resourceRequirementsJson ?? null,
     defaultAgentType: project.defaultAgentType ?? null,
-    defaultWorkspaceProfile: (project.defaultWorkspaceProfile as Project['defaultWorkspaceProfile']) ?? null,
+    defaultWorkspaceProfile:
+      (project.defaultWorkspaceProfile as Project['defaultWorkspaceProfile']) ?? null,
     defaultDevcontainerConfigName: project.defaultDevcontainerConfigName ?? null,
     defaultProvider: (project.defaultProvider as Project['defaultProvider']) ?? null,
     defaultLocation: project.defaultLocation ?? null,
@@ -108,9 +183,9 @@ export function toProjectResponse(project: schema.Project): Project {
     maxDispatchDepth: project.maxDispatchDepth ?? null,
     maxSubTasksPerTask: project.maxSubTasksPerTask ?? null,
     warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,
-    maxWorkspacesPerNode: project.maxWorkspacesPerNode ?? null,
     nodeCpuThresholdPercent: project.nodeCpuThresholdPercent ?? null,
     nodeMemoryThresholdPercent: project.nodeMemoryThresholdPercent ?? null,
+    maxTriggers: project.maxTriggers ?? null,
     status: (project.status as 'active' | 'detached') || 'active',
     createdAt: project.createdAt,
     updatedAt: project.updatedAt,
@@ -138,7 +213,11 @@ export function toProjectSummaryResponse(
   };
 }
 
-export function toTaskResponse(task: schema.Task, blocked = false): Task {
+export function toTaskResponse(
+  task: schema.Task,
+  blocked = false,
+  displayAgentProfileHint = task.agentProfileHint
+): Task {
   return {
     id: task.id,
     projectId: task.projectId,
@@ -152,17 +231,31 @@ export function toTaskResponse(task: schema.Task, blocked = false): Task {
     priority: task.priority,
     taskMode: (task.taskMode as TaskMode) || 'task',
     dispatchDepth: task.dispatchDepth,
-    agentProfileHint: task.agentProfileHint,
+    agentProfileHint: displayAgentProfileHint,
+    skillId: task.skillId ?? null,
+    skillHint: task.skillHint ?? null,
     blocked,
     triggeredBy: task.triggeredBy ?? 'user',
     triggerId: task.triggerId ?? null,
     triggerExecutionId: task.triggerExecutionId ?? null,
+    requestedVmSize: task.requestedVmSize ?? null,
+    requestedVmSizeSource: (task.requestedVmSizeSource as Task['requestedVmSizeSource']) ?? null,
+    provisionedVmSize: task.provisionedVmSize ?? null,
+    resourceRequirementsJson: task.resourceRequirementsJson ?? null,
+    resourceRequirementsSource:
+      (task.resourceRequirementsSource as Task['resourceRequirementsSource']) ?? null,
+    resolvedReservationJson: task.resolvedReservationJson ?? null,
+    placementExplanationJson: publicPlacementExplanationJson(task.placementExplanationJson),
+    admissionState: task.admissionState ?? null,
+    admissionReason: task.admissionReason ?? null,
+    admissionNextRetryAt: task.admissionNextRetryAt ?? null,
     startedAt: task.startedAt,
     completedAt: task.completedAt,
     errorMessage: task.errorMessage,
     outputSummary: task.outputSummary,
     outputBranch: task.outputBranch,
     outputPrUrl: task.outputPrUrl,
+    completionEvidence: parseCompletionEvidenceJson(task.completionEvidence ?? null),
     finalizedAt: task.finalizedAt ?? null,
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,

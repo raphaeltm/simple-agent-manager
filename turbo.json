@@ -11,7 +11,13 @@
     "test:coverage": {
       "dependsOn": ["build"]
     },
-    "lint": {},
+    "lint": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/eslint.config.mjs",
+        "$TURBO_ROOT$/packages/eslint-plugin-sam/**"
+      ]
+    },
     "typecheck": {
       "dependsOn": ["^build"]
     },

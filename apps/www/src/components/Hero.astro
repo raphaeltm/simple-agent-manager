@@ -1,8 +1,7 @@
 ---
 import NodeGrid from './NodeGrid.astro';
-
-const baseDomain = import.meta.env.PUBLIC_BASE_DOMAIN || 'simple-agent-manager.org';
-const appUrl = `https://app.${baseDomain}`;
+import OptimizedFeatureImage from './OptimizedFeatureImage.astro';
+import { proofStrip } from '../data/proof-strip';
 ---
 
 <section class="hero">
@@ -19,12 +18,13 @@ const appUrl = `https://app.${baseDomain}`;
     </h1>
 
     <p class="hero-subtitle animate-on-scroll">
-      Every agent runs in its own isolated container on your cloud.
-      Run 5 or 500 in parallel — SAM handles provisioning, scheduling, and cleanup.
+      Use coding agents as a team, with shared context, and collaborative tools and controls.
+      Agents run in isolated Instant containers or VM workspaces, with hosted compute and BYOC
+      options. SAM handles provisioning, scheduling, and cleanup.
     </p>
 
     <div class="hero-actions animate-on-scroll">
-      <a href={appUrl} class="btn-hero btn-hero-primary">
+      <a href="https://www.simple-agent-manager.org/self-host/" class="btn-hero btn-hero-primary">
         Get Started
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
       </a>
@@ -34,53 +34,22 @@ const appUrl = `https://app.${baseDomain}`;
       </a>
     </div>
 
-    <!-- Agent workspace mockup -->
-    <div class="workspace-preview animate-on-scroll">
-      <div class="terminal-chrome">
-        <div class="terminal-dots">
-          <span class="dot dot-red"></span>
-          <span class="dot dot-yellow"></span>
-          <span class="dot dot-green"></span>
-        </div>
-        <span class="terminal-title">workspace — api-service</span>
-      </div>
-      <div class="workspace-body">
-        <div class="agent-message assistant-msg">
-          <div class="msg-header">
-            <span class="agent-badge">Claude Code</span>
-            <span class="msg-time">just now</span>
-          </div>
-          <p class="msg-text">I'll refactor the auth middleware. The frontend and API tests can run in parallel — let me dispatch two agents.</p>
-        </div>
+    <div class="hero-proof animate-on-scroll">
+      {proofStrip.map((item, i) => (
+        <>
+          {i > 0 && <span class="hero-proof-dot" aria-hidden="true">·</span>}
+          <span class="hero-proof-item">{item}</span>
+        </>
+      ))}
+    </div>
 
-        <div class="tool-call">
-          <div class="tool-header">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-            <span class="tool-name">Edit</span>
-            <span class="tool-path">src/middleware/auth.ts</span>
-            <span class="tool-diff">+42 -18</span>
-          </div>
-        </div>
-
-        <div class="tool-call dispatch-call">
-          <div class="tool-header">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-            <span class="tool-name">Dispatch</span>
-            <span class="tool-path">2 sub-agents &rarr; frontend-tests, api-tests</span>
-          </div>
-        </div>
-
-        <div class="sub-agents-row">
-          <div class="sub-agent-pill">
-            <span class="sub-agent-dot running"></span>
-            frontend-tests
-          </div>
-          <div class="sub-agent-pill">
-            <span class="sub-agent-dot running"></span>
-            api-tests
-          </div>
-        </div>
-      </div>
+    <!-- App screenshot -->
+    <div class="screenshot-preview animate-on-scroll">
+      <OptimizedFeatureImage
+        src="/images/features/sam-hero-live-session.png"
+        alt="A busy SAM project chat showing a user prompt, the agent’s plan, grouped tool calls, header chips for comments, infrastructure, and task status, a profile bar, and a session sidebar with several topics"
+        loading="eager"
+      />
     </div>
   </div>
 </section>
@@ -173,7 +142,27 @@ const appUrl = `https://app.${baseDomain}`;
     flex-wrap: wrap;
     justify-content: center;
     gap: 12px;
-    margin-bottom: 64px;
+    margin-bottom: 28px;
+  }
+
+  .hero-proof {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--color-fg-dim);
+    margin-bottom: 56px;
+  }
+
+  .hero-proof-item {
+    white-space: nowrap;
+  }
+
+  .hero-proof-dot {
+    color: var(--color-accent);
   }
 
   .btn-hero {
@@ -217,15 +206,12 @@ const appUrl = `https://app.${baseDomain}`;
     border-color: var(--glass-border-hover);
   }
 
-  /* Workspace mockup */
-  .workspace-preview {
+  /* App screenshot */
+  .screenshot-preview {
     width: 100%;
-    max-width: 720px;
+    max-width: 960px;
     border-radius: var(--radius-lg);
     overflow: hidden;
-    background: var(--glass-bg);
-    backdrop-filter: var(--glass-blur);
-    -webkit-backdrop-filter: var(--glass-blur);
     border: 1px solid var(--glass-border);
     box-shadow:
       var(--glass-shadow),
@@ -233,155 +219,32 @@ const appUrl = `https://app.${baseDomain}`;
       0 0 120px rgba(22, 163, 74, 0.06);
   }
 
-  .terminal-chrome {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 12px 16px;
-    background: rgba(19, 32, 29, 0.6);
-    border-bottom: 1px solid var(--glass-border);
+  .screenshot-preview picture,
+  .screenshot-preview img {
+    display: block;
   }
 
-  .terminal-dots {
-    display: flex;
-    gap: 6px;
+  .screenshot-preview img {
+    width: 100%;
+    height: auto;
   }
 
-  .dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
+  :global(html[data-theme='light']) .hero-glow {
+    background: radial-gradient(ellipse at center, rgba(21, 128, 61, 0.12) 0%, rgba(21, 128, 61, 0.05) 40%, transparent 70%);
   }
 
-  .dot-red { background: #ef4444; }
-  .dot-yellow { background: #f59e0b; }
-  .dot-green { background: #22c55e; }
-
-  .terminal-title {
-    font-family: var(--font-mono);
-    font-size: 0.75rem;
-    color: var(--color-fg-dim);
+  :global(html[data-theme='light']) .btn-hero-primary {
+    box-shadow: 0 0 20px var(--shadow-accent-soft), 0 0 60px var(--color-accent-glow);
   }
 
-  .workspace-body {
-    padding: 20px;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
+  :global(html[data-theme='light']) .btn-hero-primary:hover {
+    box-shadow: 0 0 30px var(--shadow-accent-strong), 0 0 80px var(--color-accent-glow);
   }
 
-  /* Agent message */
-  .agent-message {
-    padding: 16px;
-    border-radius: var(--radius-md);
-    background: var(--glass-bg-subtle);
-    border: 1px solid var(--glass-border);
+  :global(html[data-theme='light']) .screenshot-preview {
+    box-shadow:
+      var(--glass-shadow),
+      0 0 50px rgba(21, 128, 61, 0.08),
+      0 0 100px rgba(21, 128, 61, 0.04);
   }
-
-  .msg-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 8px;
-  }
-
-  .agent-badge {
-    font-family: var(--font-mono);
-    font-size: 0.6875rem;
-    color: var(--color-accent);
-    background: var(--color-accent-glow);
-    padding: 2px 10px;
-    border-radius: 100px;
-    letter-spacing: 0.02em;
-  }
-
-  .msg-time {
-    font-family: var(--font-mono);
-    font-size: 0.6875rem;
-    color: var(--color-fg-dim);
-  }
-
-  .msg-text {
-    font-size: 0.8125rem;
-    color: var(--color-fg-muted);
-    line-height: 1.6;
-  }
-
-  /* Tool calls */
-  .tool-call {
-    padding: 10px 16px;
-    border-radius: var(--radius-md);
-    background: var(--glass-bg-subtle);
-    border: 1px solid var(--glass-border);
-  }
-
-  .dispatch-call {
-    border-color: rgba(22, 163, 74, 0.2);
-    background: rgba(22, 163, 74, 0.06);
-  }
-
-  /* Sub-agent pills */
-  .sub-agents-row {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-
-  .sub-agent-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 14px;
-    border-radius: 100px;
-    background: rgba(22, 163, 74, 0.08);
-    border: 1px solid rgba(22, 163, 74, 0.2);
-    font-family: var(--font-mono);
-    font-size: 0.6875rem;
-    color: var(--color-accent);
-    box-shadow: 0 0 12px rgba(22, 163, 74, 0.1);
-  }
-
-  .sub-agent-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
-
-  .sub-agent-dot.running {
-    background: var(--color-accent);
-    box-shadow: 0 0 6px var(--color-accent);
-    animation: glow-pulse 2s ease-in-out infinite;
-  }
-
-  .tool-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-family: var(--font-mono);
-    font-size: 0.75rem;
-    color: var(--color-fg-dim);
-  }
-
-  .tool-header svg {
-    color: var(--color-fg-dim);
-    flex-shrink: 0;
-  }
-
-  .tool-name {
-    color: var(--color-accent);
-    font-weight: 500;
-  }
-
-  .tool-path {
-    color: var(--color-fg-muted);
-  }
-
-  .tool-diff {
-    margin-left: auto;
-    color: var(--color-success);
-    font-size: 0.6875rem;
-  }
-
-  /* Permission prompt */
 </style>

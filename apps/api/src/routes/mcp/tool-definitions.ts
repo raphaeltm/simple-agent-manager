@@ -1,3 +1,4 @@
+import { PROJECT_SCHEDULE_TOOLS } from './tool-definitions-project-schedule-tools';
 /**
  * MCP tool definitions — the schema for all tools exposed via the MCP server.
  *
@@ -9,10 +10,19 @@
  *   - tool-definitions-workspace-tools.ts     (workspace info, env, CI, cost, onboarding)
  *   - tool-definitions-library-tools.ts       (project file library)
  *   - tool-definitions-orchestration-tools.ts (agent-to-agent communication & control)
+ *   - tool-definitions-comment-tools.ts       (message comment threads)
  *   - tool-definitions-trigger-tools.ts       (trigger management — cron automation)
+ *   - tool-definitions-incident-tools.ts      (private feedback incident backlog)
+ *   - tool-definitions-event-subscription-tools.ts (ProjectData event subscriptions)
+ *   - tool-definitions-project-event-tools.ts (ProjectData event retrieval + ack)
  */
 
+export { COMMENT_TOOLS } from './tool-definitions-comment-tools';
+export { DEPLOYMENT_TOOLS } from './tool-definitions-deployment-tools';
+export { PROJECT_EVENT_SUBSCRIPTION_TOOLS } from './tool-definitions-event-subscription-tools';
+export { INCIDENT_TOOLS } from './tool-definitions-incident-tools';
 export { KNOWLEDGE_TOOLS } from './tool-definitions-knowledge-tools';
+export { LIBRARY_FILE_COMMENT_TOOLS } from './tool-definitions-library-file-comment-tools';
 export { LIBRARY_TOOLS } from './tool-definitions-library-tools';
 export { MISSION_TOOLS } from './tool-definitions-mission-tools';
 export { ORCHESTRATION_TOOLS } from './tool-definitions-orchestration-tools';
@@ -20,12 +30,19 @@ export { ORCHESTRATOR_LIFECYCLE_TOOLS } from './tool-definitions-orchestrator-to
 export { POLICY_TOOLS } from './tool-definitions-policy-tools';
 export { PROFILE_TOOLS } from './tool-definitions-profile-tools';
 export { PROJECT_AWARENESS_TOOLS } from './tool-definitions-project-awareness';
+export { PROJECT_EVENT_TOOLS } from './tool-definitions-project-event-tools';
 export { SESSION_IDEA_TOOLS } from './tool-definitions-session-idea-tools';
+export { SKILL_TOOLS } from './tool-definitions-skill-tools';
 export { TASK_LIFECYCLE_TOOLS } from './tool-definitions-task-tools';
 export { TRIGGER_TOOLS } from './tool-definitions-trigger-tools';
 export { WORKSPACE_TOOLS } from './tool-definitions-workspace-tools';
 
+import { COMMENT_TOOLS } from './tool-definitions-comment-tools';
+import { DEPLOYMENT_TOOLS } from './tool-definitions-deployment-tools';
+import { PROJECT_EVENT_SUBSCRIPTION_TOOLS } from './tool-definitions-event-subscription-tools';
+import { INCIDENT_TOOLS } from './tool-definitions-incident-tools';
 import { KNOWLEDGE_TOOLS } from './tool-definitions-knowledge-tools';
+import { LIBRARY_FILE_COMMENT_TOOLS } from './tool-definitions-library-file-comment-tools';
 import { LIBRARY_TOOLS } from './tool-definitions-library-tools';
 import { MISSION_TOOLS } from './tool-definitions-mission-tools';
 import { ORCHESTRATION_TOOLS } from './tool-definitions-orchestration-tools';
@@ -33,7 +50,10 @@ import { ORCHESTRATOR_LIFECYCLE_TOOLS } from './tool-definitions-orchestrator-to
 import { POLICY_TOOLS } from './tool-definitions-policy-tools';
 import { PROFILE_TOOLS } from './tool-definitions-profile-tools';
 import { PROJECT_AWARENESS_TOOLS } from './tool-definitions-project-awareness';
+import { PROJECT_EVENT_CHANNEL_TOOLS } from './tool-definitions-project-event-channel-tools';
+import { PROJECT_EVENT_TOOLS } from './tool-definitions-project-event-tools';
 import { SESSION_IDEA_TOOLS } from './tool-definitions-session-idea-tools';
+import { SKILL_TOOLS } from './tool-definitions-skill-tools';
 import { TASK_LIFECYCLE_TOOLS } from './tool-definitions-task-tools';
 import { TRIGGER_TOOLS } from './tool-definitions-trigger-tools';
 import { WORKSPACE_TOOLS } from './tool-definitions-workspace-tools';
@@ -43,10 +63,19 @@ export const MCP_TOOLS = [
   ...PROJECT_AWARENESS_TOOLS,
   ...SESSION_IDEA_TOOLS,
   ...WORKSPACE_TOOLS,
+  ...DEPLOYMENT_TOOLS,
   ...LIBRARY_TOOLS,
   ...ORCHESTRATION_TOOLS,
+  ...COMMENT_TOOLS,
+  ...LIBRARY_FILE_COMMENT_TOOLS,
+  ...PROJECT_EVENT_SUBSCRIPTION_TOOLS,
+  ...PROJECT_EVENT_CHANNEL_TOOLS,
+  ...PROJECT_SCHEDULE_TOOLS,
+  ...PROJECT_EVENT_TOOLS,
   ...TRIGGER_TOOLS,
+  ...INCIDENT_TOOLS,
   ...PROFILE_TOOLS,
+  ...SKILL_TOOLS,
   ...KNOWLEDGE_TOOLS,
   ...MISSION_TOOLS,
   ...ORCHESTRATOR_LIFECYCLE_TOOLS,

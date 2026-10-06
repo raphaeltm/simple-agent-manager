@@ -1,5 +1,41 @@
 # Knowledge Graph Hardening — Post-Merge Review Findings
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:**
+>   - `get_related` validates `relationType` against the allowlist
+>     (`apps/api/src/routes/mcp/knowledge-tools.ts:437–443`).
+>   - FTS5 operator safety, done differently: `buildSafeFtsQuery` (`apps/api/src/lib/fts5.ts`)
+>     strips punctuation and AND/OR/NOT/NEAR instead of quoting tokens, so those words are
+>     dropped rather than searched literally.
+>   - MCP half of two items: `search_knowledge` rejects `minConfidence` outside 0..1
+>     (`knowledge-tools.ts:48–60,296–298`), and `search_knowledge` / `get_project_knowledge`
+>     validate `entityType` (`knowledge-tools.ts:289–295,325–331`).
+>   - Mitigated: `ensureProjectId` now runs once per isolate (`ensureOncePerIsolate` in
+>     `getStubForOwner`, `apps/api/src/services/project-data.ts`); the first call in each
+>     isolate still costs two RPCs.
+> - **Still open:**
+>   - FTS sync, removal and search failures are swallowed with no log
+>     (`apps/api/src/durable-objects/project-data/knowledge.ts:383,726,740`).
+>   - Observation routes are still `/observations/:observationId`
+>     (`apps/api/src/routes/knowledge.ts:302,353`).
+>   - `flagContradiction` still writes a self-loop relation (`project-data/knowledge.ts:699–708`).
+>   - `KNOWLEDGE_*` defaults are not in `wrangler.toml [vars]`.
+>   - No duplicate-relation guard: no UNIQUE constraint (`durable-objects/migrations.ts:722–732`)
+>     and no check in `createRelation` (`project-data/knowledge.ts:638–659`).
+>   - REST handlers return raw `err.message` (`routes/knowledge.ts:237,296,346,364`).
+>   - REST half of two items: search does not clamp `minConfidence` (`routes/knowledge.ts:108`),
+>     and list/search do not validate `entityType` (`routes/knowledge.ts:66,106`).
+>   - Duplicate `resolveSessionId` (`knowledge-tools.ts:29–34`; the shared one is
+>     `routes/mcp/_helpers.ts:440`).
+>   - Hardcoded constants: 30-day recency scale (`project-data/knowledge.ts:40`), fallback
+>     minimum confidence 0.5 (`:445`), contradiction penalty 0.8 (`:696`).
+>   - `getLimit` uses an unsafe cast and accepts negative values (`routes/knowledge.ts:42–45`).
+>   - Deleting a missing entity returns success instead of 404
+>     (`durable-objects/project-data/index.ts:2792–2795`).
+> - **Moot/dropped:** the five unwired `getMcpLimits` fields (`routes/mcp/_helpers.ts:158–162`)
+>   moved to `tasks/backlog/2026-03-16-mcp-page-size-limits-not-configurable.md`.
+
 **Created**: 2026-04-13
 **Source**: Late-arriving cloudflare-specialist, constitution-validator, and security-auditor reviews on PR #693
 

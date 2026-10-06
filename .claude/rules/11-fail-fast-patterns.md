@@ -38,6 +38,29 @@ At every boundary, check:
 2. **IDs are consistent** — workspace.chatSessionId must match the sessionId in the message
 3. **IDs belong to the right scope** — sessions must belong to the correct project, workspaces to the correct project
 
+### Project-Scoped Write Requirements
+
+Every project-scoped write endpoint, MCP tool, service, or Durable Object RPC MUST verify ownership before mutating state and MUST include the project scope in the final write predicate when the backing table has `project_id`.
+
+Required pattern:
+
+1. Resolve the target row by its caller-supplied IDs before the write.
+2. Reject if `target.projectId !== callerProjectId`; do not silently rely on "row not found" from a later update.
+3. Log the rejection with caller projectId, target resource ID, target projectId, expected vs. received project IDs, and `action: 'rejected'`.
+4. Include `project_id = ?` in the `UPDATE`/`DELETE` predicate as a final defence-in-depth guard.
+5. When a Durable Object maintains project-local tracking state, verify the target is tracked in that project-local state before mutating global D1 rows.
+
+### Project-Scoped Read Requirements
+
+Every project-scoped read endpoint, MCP tool, service, or Durable Object RPC MUST bind the requested resource to the caller's authorized project before returning resource data or an existence signal.
+
+Required pattern:
+
+1. Authorizing the caller for a route-level `projectId` is necessary but not sufficient; include that project scope in the resource lookup itself.
+2. When both a child row and its parent carry project identity, require both stored relationships to agree with the authorized project. Treat inconsistent or stale relationships as not found.
+3. Return the same non-disclosing not-found contract for missing and cross-project resources; do not reveal which supplied identifier matched.
+4. When the protection is a SQL predicate, test it against a real SQL engine with a foreign-project attack fixture and a same-project owner control. Temporarily removing the project predicate must fail the attack test while the owner control still passes.
+
 ### Structured Logging Requirements
 
 Every validation failure MUST log:

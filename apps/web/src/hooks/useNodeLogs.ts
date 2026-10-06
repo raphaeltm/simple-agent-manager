@@ -1,7 +1,13 @@
-import type { NodeLogEntry, NodeLogFilter, NodeLogLevel,NodeLogSource } from '@simple-agent-manager/shared';
+import type {
+  NodeContainerLogTarget,
+  NodeLogEntry,
+  NodeLogFilter,
+  NodeLogLevel,
+  NodeLogSource,
+} from '@simple-agent-manager/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { getNodeLogs, getNodeLogStreamUrl } from '../lib/api';
+import { getNodeLogs, getNodeLogStreamUrl, listNodeContainers } from '../lib/api';
 
 interface UseNodeLogsOptions {
   nodeId: string | undefined;
@@ -15,6 +21,8 @@ interface UseNodeLogsReturn {
   hasMore: boolean;
   streaming: boolean;
   paused: boolean;
+  containers: NodeContainerLogTarget[];
+  containersLoading: boolean;
   filter: LogFilterState;
   setSource: (source: NodeLogSource) => void;
   setLevel: (level: NodeLogLevel) => void;
@@ -41,6 +49,8 @@ export function useNodeLogs({ nodeId, nodeStatus }: UseNodeLogsOptions): UseNode
   const [hasMore, setHasMore] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [paused, setPaused] = useState(false);
+  const [containers, setContainers] = useState<NodeContainerLogTarget[]>([]);
+  const [containersLoading, setContainersLoading] = useState(false);
 
   const [filter, setFilter] = useState<LogFilterState>({
     source: 'all',
@@ -197,6 +207,36 @@ export function useNodeLogs({ nodeId, nodeStatus }: UseNodeLogsOptions): UseNode
     };
   }, [nodeId, nodeStatus, fetchLogs, connectStream]);
 
+  useEffect(() => {
+    if (!nodeId || nodeStatus !== 'running') {
+      setContainers([]);
+      return;
+    }
+
+    let cancelled = false;
+    setContainersLoading(true);
+    listNodeContainers(nodeId)
+      .then((result) => {
+        if (!cancelled) {
+          setContainers(result.containers ?? []);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setContainers([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setContainersLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [nodeId, nodeStatus]);
+
   const setSource = useCallback((source: NodeLogSource) => {
     setFilter((prev) => {
       // Clear container filter when switching away from docker-relevant sources
@@ -241,6 +281,8 @@ export function useNodeLogs({ nodeId, nodeStatus }: UseNodeLogsOptions): UseNode
     hasMore,
     streaming,
     paused,
+    containers,
+    containersLoading,
     filter,
     setSource,
     setLevel,

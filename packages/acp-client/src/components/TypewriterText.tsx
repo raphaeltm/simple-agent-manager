@@ -10,7 +10,7 @@ export interface TypewriterTextProps {
   text: string;
   /** When false, renders all text instantly (use for historical messages). Default: true. */
   animated?: boolean;
-  /** Milliseconds per character for the reveal. Default: 20. */
+  /** Milliseconds per character for the reveal. Default: 10. */
   charDelayMs?: number;
   /** Custom react-markdown component overrides (for code highlighting, file links, etc.). */
   markdownComponents?: Components;
@@ -27,7 +27,7 @@ export interface TypewriterTextProps {
 export const TypewriterText = memo(function TypewriterText({
   text,
   animated = true,
-  charDelayMs = 20,
+  charDelayMs = 10,
   markdownComponents,
 }: TypewriterTextProps) {
   const { revealedText, isRevealing } = useStreamingReveal(text, animated, { charDelayMs });

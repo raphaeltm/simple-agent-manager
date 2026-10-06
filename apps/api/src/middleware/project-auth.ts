@@ -6,6 +6,51 @@ import { errors } from './error';
 
 export type AppDb = ReturnType<typeof drizzle<typeof schema>>;
 
+export const PROJECT_MEMBER_ROLES = ['owner', 'admin', 'maintainer', 'viewer'] as const;
+export type ProjectMemberRole = (typeof PROJECT_MEMBER_ROLES)[number];
+
+export const PROJECT_MEMBER_STATUSES = ['active', 'invited', 'suspended', 'removed'] as const;
+export type ProjectMemberStatus = (typeof PROJECT_MEMBER_STATUSES)[number];
+
+export const PROJECT_CAPABILITIES = [
+  'project:read',
+  'project:update',
+  'project:delete',
+  'project:transfer_ownership',
+  'task:read',
+  'task:write',
+  'workspace:read',
+  'workspace:write',
+  'deployment:read',
+  'deployment:deploy',
+  'deployment:manage',
+  'secret:read',
+  'secret:write',
+  'infra:manage',
+  'member:manage',
+] as const;
+export type ProjectCapability = (typeof PROJECT_CAPABILITIES)[number];
+
+const ROLE_CAPABILITIES: Record<ProjectMemberRole, ReadonlySet<ProjectCapability>> = {
+  owner: new Set(PROJECT_CAPABILITIES),
+  admin: new Set(
+    PROJECT_CAPABILITIES.filter(
+      (capability) => capability !== 'project:delete' && capability !== 'project:transfer_ownership'
+    )
+  ),
+  maintainer: new Set([
+    'project:read',
+    'task:read',
+    'task:write',
+    'workspace:read',
+    'workspace:write',
+    'deployment:read',
+    'deployment:deploy',
+    'secret:read',
+  ]),
+  viewer: new Set(['project:read', 'task:read', 'workspace:read', 'deployment:read']),
+};
+
 /**
  * Defence-in-depth identity check. The query WHERE clause already filters on
  * `userId`, so in normal operation a row is only returned when it belongs to
@@ -27,6 +72,169 @@ function assertOwnership<T extends { userId: string }>(
   return row;
 }
 
+function assertProject<T extends { id: string }>(
+  row: T | undefined,
+  projectId: string,
+  resource: string
+): T {
+  if (!row || row.id !== projectId) {
+    throw errors.notFound(resource);
+  }
+  return row;
+}
+
+function assertActiveMembership(
+  row: schema.ProjectMember | undefined,
+  projectId: string,
+  userId: string
+): schema.ProjectMember {
+  if (!row || row.projectId !== projectId || row.userId !== userId || row.status !== 'active') {
+    throw errors.notFound('Project');
+  }
+  return row;
+}
+
+function parseProjectMemberRole(role: string): ProjectMemberRole | null {
+  return PROJECT_MEMBER_ROLES.includes(role as ProjectMemberRole)
+    ? (role as ProjectMemberRole)
+    : null;
+}
+
+/**
+ * Single source of truth for role -> capability. Exported so callers that
+ * already hold membership rows (offboarding principal selection) rank them
+ * against the same table the request-time guards use, instead of duplicating it.
+ */
+export function projectRoleHasCapability(role: string, capability: ProjectCapability): boolean {
+  const parsedRole = parseProjectMemberRole(role);
+  if (!parsedRole) return false;
+  return ROLE_CAPABILITIES[parsedRole].has(capability);
+}
+
+export function projectMemberRolesWithCapability(
+  capability: ProjectCapability
+): ProjectMemberRole[] {
+  return PROJECT_MEMBER_ROLES.filter((role) => ROLE_CAPABILITIES[role].has(capability));
+}
+
+/**
+ * Runs on every project-scoped request.
+ *
+ * The two lookups have no data dependency on each other, so they go out CONCURRENTLY rather
+ * than one after the other — the request waits for the slower of the two instead of their sum.
+ *
+ * `db.batch()` would be one statement rather than two concurrent ones, and was tried first,
+ * but it is not worth its cost here: `lib/d1-session.ts` anchors each request `first-primary`,
+ * so by the time this runs the session is already open (the auth preamble issued the request's
+ * first query) and BOTH of these are replica-eligible. Batching would therefore save the
+ * overhead of one extra hop between two already-cheap reads, while forcing seven unrelated
+ * authorization test doubles to grow `batch` support — including one whose D1-level double
+ * shares a single statement object across every `prepare()` and so cannot distinguish batched
+ * statements at all. `Promise.all` gets the concurrency without any of that.
+ *
+ * Both guards are unchanged and still evaluated on the rows that come back: a missing or
+ * mismatched project, and a missing / non-active / wrong-tenant membership, both still surface
+ * as `notFound('Project')`. Order matters for the error a caller sees — the project assertion
+ * is evaluated first, exactly as when these ran sequentially.
+ */
+async function requireActiveProjectMembership(
+  db: AppDb,
+  projectId: string,
+  userId: string
+): Promise<{ project: schema.Project; membership: schema.ProjectMember }> {
+  const [projectRows, memberRows] = await Promise.all([
+    db.select().from(schema.projects).where(eq(schema.projects.id, projectId)).limit(1),
+    db
+      .select()
+      .from(schema.projectMembers)
+      .where(
+        and(
+          eq(schema.projectMembers.projectId, projectId),
+          eq(schema.projectMembers.userId, userId),
+          eq(schema.projectMembers.status, 'active')
+        )
+      )
+      .limit(1),
+  ]);
+
+  const project = assertProject(projectRows[0], projectId, 'Project');
+  const membership = assertActiveMembership(memberRows[0], projectId, userId);
+
+  return { project, membership };
+}
+
+export async function createOwnerProjectMembership(
+  db: AppDb,
+  projectId: string,
+  userId: string,
+  invitedBy: string | null = userId,
+  now: string = new Date().toISOString()
+): Promise<void> {
+  await db
+    .insert(schema.projectMembers)
+    .values({
+      projectId,
+      userId,
+      role: 'owner',
+      status: 'active',
+      invitedBy,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [schema.projectMembers.projectId, schema.projectMembers.userId],
+      set: {
+        role: 'owner',
+        status: 'active',
+        invitedBy,
+        updatedAt: now,
+      },
+    });
+}
+
+export async function requireProjectAccess(
+  db: AppDb,
+  projectId: string,
+  userId: string
+): Promise<schema.Project> {
+  const { project } = await requireActiveProjectMembership(db, projectId, userId);
+  return project;
+}
+
+export async function requireProjectCapability(
+  db: AppDb,
+  projectId: string,
+  userId: string,
+  capability: ProjectCapability
+): Promise<schema.Project> {
+  const { project, membership } = await requireActiveProjectMembership(db, projectId, userId);
+  if (!projectRoleHasCapability(membership.role, capability)) {
+    throw errors.forbidden('Project capability is required');
+  }
+  return project;
+}
+
+export async function hasProjectCapability(
+  db: AppDb,
+  projectId: string,
+  userId: string,
+  capability: ProjectCapability
+): Promise<boolean> {
+  const memberRows = await db
+    .select({ role: schema.projectMembers.role })
+    .from(schema.projectMembers)
+    .where(
+      and(
+        eq(schema.projectMembers.projectId, projectId),
+        eq(schema.projectMembers.userId, userId),
+        eq(schema.projectMembers.status, 'active')
+      )
+    )
+    .limit(1);
+  const membership = memberRows[0];
+  return membership ? projectRoleHasCapability(membership.role, capability) : false;
+}
+
 export async function requireOwnedProject(
   db: AppDb,
   projectId: string,
@@ -39,32 +247,6 @@ export async function requireOwnedProject(
     .limit(1);
 
   return assertOwnership(rows[0], userId, 'Project');
-}
-
-export async function requireOwnedTask(
-  db: AppDb,
-  projectId: string,
-  taskId: string,
-  userId: string
-): Promise<schema.Task> {
-  const rows = await db
-    .select()
-    .from(schema.tasks)
-    .where(
-      and(
-        eq(schema.tasks.id, taskId),
-        eq(schema.tasks.projectId, projectId),
-        eq(schema.tasks.userId, userId)
-      )
-    )
-    .limit(1);
-
-  // Task has an additional projectId invariant beyond userId.
-  const task = rows[0];
-  if (!task || task.userId !== userId || task.projectId !== projectId) {
-    throw errors.notFound('Task');
-  }
-  return task;
 }
 
 export async function requireOwnedWorkspace(

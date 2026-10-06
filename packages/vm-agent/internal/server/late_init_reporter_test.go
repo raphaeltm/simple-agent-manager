@@ -95,6 +95,47 @@ func TestGetOrCreateReporter_CreatesReporter(t *testing.T) {
 	r.Shutdown()
 }
 
+func TestGetOrCreateReporterReturnsNilAfterTerminalCallbacks(t *testing.T) {
+	t.Parallel()
+	s, _ := newServerWithoutReporter(t)
+	s.callbacksTerminal.Store(true)
+
+	r := s.getOrCreateReporter("ws-terminal", "proj-1", "sess-1")
+	if r != nil {
+		r.Shutdown()
+		t.Fatal("expected no reporter after terminal callback state")
+	}
+	if len(s.messageReporters) != 0 {
+		t.Fatalf("expected no stored reporters after terminal callback state, got %d", len(s.messageReporters))
+	}
+}
+
+func TestGetOrCreateReporterDisablesExistingReporterAfterTerminalCallbacks(t *testing.T) {
+	t.Parallel()
+	s, _ := newServerWithoutReporter(t)
+
+	r := s.getOrCreateReporter("ws-existing-terminal", "proj-1", "sess-1")
+	if r == nil {
+		t.Fatal("expected reporter before terminal callback state")
+	}
+	s.callbacksTerminal.Store(true)
+
+	got := s.getOrCreateReporter("ws-existing-terminal", "proj-1", "sess-1")
+	if got != nil {
+		t.Fatal("expected existing reporter access to return nil after terminal callback state")
+	}
+	if err := r.Enqueue(messagereport.Message{
+		MessageID: "m-after-terminal",
+		SessionID: "sess-1",
+		Role:      "assistant",
+		Content:   "after terminal",
+		Timestamp: "2024-01-01T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("enqueue after terminal state should drop without error: %v", err)
+	}
+	r.Shutdown()
+}
+
 func TestGetOrCreateReporter_SetsCallbackToken(t *testing.T) {
 	t.Parallel()
 	s, _ := newServerWithoutReporter(t)

@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face {
+    font-family: 'Chillax';
+    src: url('./assets/Chillax-Variable.woff2') format('woff2');
+    font-weight: 200 700;
+  }
+  :root {
+    --bg: #070d0b;
+    --fg: #e6f2ee;
+    --muted: #9fb7ae;
+    --dim: #6b8a7f;
+    --accent: #16a34a;
+    --accent-strong: #22c55e;
+    --font-display: 'Chillax', system-ui, sans-serif;
+    --font-body: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    --font-mono: 'SF Mono', 'Fira Code', Consolas, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1080px; height: 1350px;
+    background: var(--bg); color: var(--fg);
+    font-family: var(--font-body);
+    overflow: hidden; position: relative;
+  }
+  body::before {
+    content: '';
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(ellipse 80% 40% at 20% 8%, rgba(22,163,74,0.14) 0%, transparent 60%),
+      radial-gradient(ellipse 60% 35% at 85% 60%, rgba(22,163,74,0.07) 0%, transparent 50%);
+    pointer-events: none;
+  }
+  .wrap { position: relative; height: 100%; padding: 52px 56px 44px; display: flex; flex-direction: column; }
+  .head { display: flex; align-items: flex-start; gap: 24px; margin-bottom: 34px; }
+  .head-text { flex: 1; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--font-mono); font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted);
+    padding: 7px 16px;
+    background: rgba(19,32,29,0.45);
+    border: 1px solid rgba(255,255,255,0.08); border-radius: 100px;
+    margin-bottom: 18px;
+  }
+  .badge-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent-strong); box-shadow: 0 0 8px var(--accent-strong); }
+  h1 {
+    font-family: var(--font-display); font-size: 46px; font-weight: 600;
+    line-height: 1.1; letter-spacing: -0.02em; max-width: 640px;
+  }
+  h1 .grad {
+    background: linear-gradient(135deg, #16a34a 0%, #22c55e 100%);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .head-map {
+    flex: none; width: 260px; height: 260px;
+    border-radius: 18px; overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.13);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.55), 0 0 28px rgba(34,197,94,0.12);
+  }
+  .head-map img { width: 380px; height: 380px; object-fit: cover; margin: -62px 0 0 -62px; }
+
+  .rows { flex: 1; display: flex; flex-direction: column; gap: 22px; position: relative; }
+  .rows::before {
+    content: ''; position: absolute; left: 17px; top: 20px; bottom: 20px;
+    width: 2px;
+    background: linear-gradient(180deg, rgba(34,197,94,0.7) 0%, rgba(34,197,94,0.15) 100%);
+  }
+  .row { display: flex; gap: 20px; align-items: stretch; }
+  .row-n {
+    flex: none; width: 36px; height: 36px; border-radius: 50%;
+    background: var(--accent); border: 2.5px solid var(--accent-strong);
+    box-shadow: 0 0 16px rgba(34,197,94,0.55);
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-display); font-weight: 600; font-size: 17px;
+    align-self: center; position: relative; z-index: 1;
+  }
+  .row-photo {
+    flex: none; width: 300px; height: 190px;
+    border-radius: 14px; overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.1);
+    box-shadow: 0 8px 28px rgba(0,0,0,0.4);
+    position: relative;
+  }
+  .row-photo img { width: 100%; height: 100%; object-fit: cover; }
+  .row-photo .time {
+    position: absolute; bottom: 8px; right: 10px;
+    font-family: var(--font-mono); font-size: 13px;
+    background: rgba(7,13,11,0.55); backdrop-filter: blur(8px);
+    padding: 3px 10px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.1);
+  }
+  .row-card {
+    flex: 1;
+    background: rgba(19,32,29,0.45);
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 14px;
+    padding: 24px 28px;
+    display: flex; flex-direction: column; justify-content: center;
+  }
+  .row-place {
+    font-family: var(--font-mono); font-size: 13.5px; letter-spacing: 0.07em;
+    text-transform: uppercase; color: var(--accent-strong); margin-bottom: 8px;
+  }
+  .row-text { font-size: 19px; color: var(--muted); line-height: 1.45; }
+  .row-text b { color: var(--fg); font-weight: 600; }
+
+  .foot {
+    display: flex; align-items: center; gap: 14px;
+    margin-top: 30px; padding-top: 26px;
+    border-top: 1px solid rgba(41,66,59,0.6);
+  }
+  .foot img { width: 38px; height: 38px; }
+  .wordmark { font-family: var(--font-display); font-weight: 600; font-size: 24px; }
+  .stats { margin-left: auto; text-align: right; }
+  .stats .line1 { font-family: var(--font-display); font-weight: 600; font-size: 17px; color: var(--accent-strong); }
+  .stats .line2 { font-family: var(--font-mono); font-size: 13px; color: var(--dim); margin-top: 2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="head">
+    <div class="head-text">
+      <div class="badge"><span class="badge-dot"></span>Field notes &middot; Paris &middot; Jul 4</div>
+      <h1>A day of <span class="grad">multi-agent work</span>, measured in kilometers</h1>
+    </div>
+    <div class="head-map"><img src="./assets/map.png"></div>
+  </div>
+  <div class="rows">
+    <div class="row">
+      <div class="row-n">1</div>
+      <div class="row-photo"><img src="./assets/20260704_131201.jpg" style="object-position: 50% 60%;"><div class="time">13:12</div></div>
+      <div class="row-card">
+        <div class="row-place">Pont Neuf</div>
+        <div class="row-text">Kicked off agents on <b>chat performance</b> — full-conversation loading &amp; timeline jumps</div>
+      </div>
+    </div>
+    <div class="row">
+      <div class="row-n">2</div>
+      <div class="row-photo"><img src="./assets/20260704_141952.jpg" style="object-position: 50% 45%;"><div class="time">14:19</div></div>
+      <div class="row-card">
+        <div class="row-place">Port de la Rap&eacute;e</div>
+        <div class="row-text">Agents <b>hunting a flaky CI test</b> and fixing message-history loading</div>
+      </div>
+    </div>
+    <div class="row">
+      <div class="row-n">3</div>
+      <div class="row-photo"><img src="./assets/20260704_152542.jpg" style="object-position: 50% 55%;"><div class="time">15:25</div></div>
+      <div class="row-card">
+        <div class="row-place">Jardin des Plantes</div>
+        <div class="row-text"><b>3 agents in parallel</b> building project-sharing auth, wave by wave</div>
+      </div>
+    </div>
+    <div class="row">
+      <div class="row-n">4</div>
+      <div class="row-photo"><img src="./assets/20260704_164644.jpg" style="object-position: 50% 40%;"><div class="time">16:46</div></div>
+      <div class="row-card">
+        <div class="row-place">Coul&eacute;e Verte</div>
+        <div class="row-text">Watched the <b>production deploy go green</b> from a rose trellis</div>
+      </div>
+    </div>
+  </div>
+  <div class="foot">
+    <img src="./assets/favicon.png" alt="">
+    <span class="wordmark">SAM</span>
+    <div class="stats">
+      <div class="line1">4 PRs merged &middot; 0 desks used</div>
+      <div class="line2">simple-agent-manager.org</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

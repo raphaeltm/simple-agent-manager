@@ -9,7 +9,7 @@ export * from './transport/types';
 export * from './transport/websocket';
 
 // Commands
-export { getAllStaticCommands,getStaticCommands } from './commands/registry';
+export { getAllStaticCommands, getStaticCommands } from './commands/registry';
 
 // Hooks
 export * from './hooks/useAcpMessages';
@@ -19,6 +19,7 @@ export * from './hooks/useAutoScroll';
 export * from './hooks/useStreamingReveal';
 
 // Components
+export { AgentCrashReportView } from './components/AgentCrashReportView';
 export type { AgentPanelHandle } from './components/AgentPanel';
 export { AgentPanel, CLIENT_COMMANDS } from './components/AgentPanel';
 export type { AudioPlayerProps } from './components/AudioPlayer';
@@ -26,18 +27,24 @@ export { AudioPlayer } from './components/AudioPlayer';
 export type { ChatSettingsData, ChatSettingsPanelProps } from './components/ChatSettingsPanel';
 export { ChatSettingsPanel } from './components/ChatSettingsPanel';
 export { FileDiffView } from './components/FileDiffView';
-export type { MentionPaletteHandle, MentionPaletteProps, MentionProfile } from './components/MentionPalette';
+export type {
+  MentionPaletteHandle,
+  MentionPaletteProps,
+  MentionProfile,
+} from './components/MentionPalette';
 export { MentionPalette } from './components/MentionPalette';
 export type { MessageActionsProps } from './components/MessageActions';
 export { MessageActions } from './components/MessageActions';
 export { MessageBubble } from './components/MessageBubble';
 export { ModeSelector } from './components/ModeSelector';
-export { PermissionDialog } from './components/PermissionDialog';
 export type { PlanModalProps } from './components/PlanModal';
 export { PlanModal } from './components/PlanModal';
 export { PlanView } from './components/PlanView';
 export { RawFallbackView } from './components/RawFallbackView';
-export type { SlashCommandPaletteHandle, SlashCommandPaletteProps } from './components/SlashCommandPalette';
+export type {
+  SlashCommandPaletteHandle,
+  SlashCommandPaletteProps,
+} from './components/SlashCommandPalette';
 export { SlashCommandPalette } from './components/SlashCommandPalette';
 export type { StickyPlanButtonProps } from './components/StickyPlanButton';
 export { StickyPlanButton } from './components/StickyPlanButton';
@@ -49,5 +56,5 @@ export { TypewriterText } from './components/TypewriterText';
 export { UsageIndicator } from './components/UsageIndicator';
 export type { UserMessageFadeProps } from './components/UserMessageFade';
 export { UserMessageFade } from './components/UserMessageFade';
-export type { VoiceButtonProps } from './components/VoiceButton';
-export { VoiceButton } from './components/VoiceButton';
+export type { VoiceButtonProps, VoiceButtonState } from './components/VoiceButton';
+export { appendDictatedText, VoiceButton } from './components/VoiceButton';

@@ -1,0 +1,39 @@
+---
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+interface Props {
+  src: string;
+  alt: string;
+  loading?: 'eager' | 'lazy';
+}
+
+const { src, alt, loading = 'lazy' } = Astro.props;
+
+// Screenshots are generated in both themes (`<name>.png` and `<name>-light.png`,
+// see apps/web/tests/playwright/marketing-shots-helpers.ts). When a light
+// sibling exists we render both and let the site theme pick one, so a visitor
+// in light mode never sees a dark screenshot.
+const publicDir = resolve(process.cwd(), 'public');
+const lightSrc = src.replace(/\.png$/, '-light.png');
+const hasLight = lightSrc !== src && existsSync(resolve(publicDir, `.${lightSrc}`));
+
+const escapeAttribute = (value: string) =>
+  value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+
+const picture = (pngSrc: string, className?: string) => {
+  const webpSrc = pngSrc.replace(/\.png$/, '.webp');
+  const classAttr = className ? ` class="${className}"` : '';
+  return `<picture${classAttr}><source srcset="${escapeAttribute(webpSrc)}" type="image/webp"><img src="${escapeAttribute(pngSrc)}" alt="${escapeAttribute(alt)}" loading="${loading}" decoding="async"></picture>`;
+};
+
+const pictureHtml = hasLight
+  ? picture(src, 'shot-dark') + picture(lightSrc, 'shot-light')
+  : picture(src);
+---
+
+<Fragment set:html={pictureHtml} />

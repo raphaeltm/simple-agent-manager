@@ -13,6 +13,11 @@ const mockService = vi.hoisted(() => ({
   resolveAgentProfile: vi.fn(),
 }));
 
+const mockProjectAuth = vi.hoisted(() => ({
+  requireProjectAccess: vi.fn(),
+  requireProjectCapability: vi.fn(),
+}));
+
 // Mock auth middleware
 vi.mock('../../../src/middleware/auth', () => ({
   requireAuth: () => vi.fn((c: any, next: any) => next()),
@@ -20,10 +25,8 @@ vi.mock('../../../src/middleware/auth', () => ({
   getUserId: () => 'test-user-id',
 }));
 vi.mock('../../../src/middleware/project-auth', () => ({
-  requireOwnedProject: vi.fn().mockResolvedValue({
-    id: 'test-project-id',
-    userId: 'test-user-id',
-  }),
+  requireProjectAccess: mockProjectAuth.requireProjectAccess,
+  requireProjectCapability: mockProjectAuth.requireProjectCapability,
 }));
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: vi.fn().mockReturnValue({}),
@@ -54,6 +57,7 @@ function makeProfile(overrides: Record<string, unknown> = {}) {
     description: 'General-purpose coding agent',
     agentType: 'claude-code',
     model: 'claude-sonnet-4-5-20250929',
+    effort: 'auto',
     permissionMode: 'acceptEdits',
     systemPromptAppend: null,
     maxTurns: null,
@@ -71,6 +75,14 @@ describe('Agent Profiles Routes', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockProjectAuth.requireProjectAccess.mockResolvedValue({
+      id: 'test-project-id',
+      userId: 'owner-user-id',
+    });
+    mockProjectAuth.requireProjectCapability.mockResolvedValue({
+      id: 'test-project-id',
+      userId: 'owner-user-id',
+    });
 
     app = new Hono<{ Bindings: Env }>();
     app.onError((err, c) => {
@@ -84,7 +96,7 @@ describe('Agent Profiles Routes', () => {
   });
 
   describe('GET /', () => {
-    it('returns list of profiles', async () => {
+    it('allows an active project member who is not the project owner to list profiles', async () => {
       const profiles = [
         makeProfile({ id: 'p1', name: 'default' }),
         makeProfile({ id: 'p2', name: 'planner' }),
@@ -98,6 +110,51 @@ describe('Agent Profiles Routes', () => {
       expect(body.items).toHaveLength(2);
       expect(body.items[0].name).toBe('default');
       expect(body.items[1].name).toBe('planner');
+      expect(mockProjectAuth.requireProjectAccess).toHaveBeenCalledWith(
+        expect.anything(),
+        'test-project-id',
+        'test-user-id'
+      );
+    });
+
+    it('marks the list private, always-revalidate, and varying on Cookie', async () => {
+      // Per-user body (project profiles OR this caller's global profiles).
+      mockService.listProfiles.mockResolvedValueOnce([makeProfile({ id: 'p1', name: 'default' })]);
+
+      const res = await app.request(`${BASE_URL}${REQUEST_PATH}`, { method: 'GET' }, makeEnv());
+
+      expect(res.headers.get('cache-control')).toBe(
+        'private, max-age=0, stale-while-revalidate=30'
+      );
+      expect(res.headers.get('vary')).toBe('Cookie');
+      expect(res.headers.get('cache-control')).not.toContain('public');
+    });
+
+    it('does NOT cache a rejected (non-member) response', async () => {
+      // A 404 for a non-member must never be cacheable — otherwise a later
+      // successful membership check could be masked by the cached rejection.
+      mockProjectAuth.requireProjectAccess.mockRejectedValueOnce(
+        Object.assign(new Error('Project not found'), { statusCode: 404, error: 'NOT_FOUND' })
+      );
+
+      const res = await app.request(`${BASE_URL}${REQUEST_PATH}`, { method: 'GET' }, makeEnv());
+
+      expect(res.status).toBe(404);
+      expect(res.headers.get('cache-control')).toBeNull();
+    });
+
+    it('rejects non-members before listing profiles', async () => {
+      mockProjectAuth.requireProjectAccess.mockRejectedValueOnce(
+        Object.assign(new Error('Project not found'), {
+          statusCode: 404,
+          error: 'NOT_FOUND',
+        })
+      );
+
+      const res = await app.request(`${BASE_URL}${REQUEST_PATH}`, { method: 'GET' }, makeEnv());
+
+      expect(res.status).toBe(404);
+      expect(mockService.listProfiles).not.toHaveBeenCalled();
     });
   });
 

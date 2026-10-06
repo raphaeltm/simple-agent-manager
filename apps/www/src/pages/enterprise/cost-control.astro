@@ -1,0 +1,188 @@
+---
+import Base from '../../layouts/Base.astro';
+import Header from '../../components/Header.astro';
+import CtaFooter from '../../components/CtaFooter.astro';
+import OptimizedFeatureImage from '../../components/OptimizedFeatureImage.astro';
+---
+
+<Base
+  title="Cost Transparency — SAM Enterprise"
+  description="Pay cloud providers directly at your negotiated rate. Built-in usage dashboards, token budgets, and cost caps for full financial visibility."
+>
+  <Header />
+  <main>
+    <section class="detail-hero">
+      <div class="detail-glow" aria-hidden="true"></div>
+      <div class="container detail-hero-content">
+        <a href="/enterprise/" class="back-link animate-on-scroll">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+          Enterprise
+        </a>
+        <span class="section-label animate-on-scroll">Cost Transparency</span>
+        <h1 class="detail-title animate-on-scroll">
+          Pay your cloud provider.<br />
+          <span class="gradient-text">See every token.</span>
+        </h1>
+        <p class="detail-subtitle animate-on-scroll">
+          No opaque bundles. Compute costs go to your cloud provider at your negotiated rate.
+          LLM costs go through your API key agreements. SAM gives you dashboards to track it all.
+        </p>
+      </div>
+    </section>
+
+    <hr class="divider" />
+
+    <section class="section">
+      <div class="container detail-content">
+        <div class="detail-block animate-on-scroll">
+          <h2>Direct Cloud Pricing</h2>
+          <p>
+            VMs are provisioned in your cloud account. You pay Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, or GCP directly.
+            No markup, no middleman. Your existing volume discounts and enterprise agreements apply.
+          </p>
+          <p>
+            The SAM control plane runs on Cloudflare Workers. Self-hosters need the Workers Paid plan
+            for Durable Objects and Cloudflare Containers, while usage-based costs stay low for small
+            to medium teams.
+          </p>
+        </div>
+
+        <div class="detail-block animate-on-scroll">
+          <h2>Token Usage, by Model and by Day</h2>
+          <p>
+            <strong>Settings → Usage</strong> shows each user their own AI usage broken down by
+            model and by day, tracked through the SAM AI proxy and Cloudflare AI Gateway. Only
+            traffic routed through the platform proxy is metered this way — bring-your-own-key
+            traffic that bypasses the proxy is not counted here.
+          </p>
+          <div class="detail-image animate-on-scroll">
+            <OptimizedFeatureImage
+              src="/images/features/sam-usage-tokens.png"
+              alt="Settings → Usage page showing token usage and cost per model, a per-day usage chart, and progress against a monthly budget"
+              loading="lazy"
+            />
+            <span class="detail-caption">Token usage by model and by day, against a monthly budget</span>
+          </div>
+        </div>
+
+        <div class="detail-block animate-on-scroll">
+          <h2>Budget and Quota Controls</h2>
+          <p>
+            Set daily token limits and a monthly cost cap per user. Compute has its own quota,
+            tracked in node-hours against a monthly limit — BYOC users who connect their own
+            cloud credentials are exempt, since that spend never touches SAM's billing.
+          </p>
+          <div class="detail-image animate-on-scroll">
+            <OptimizedFeatureImage
+              src="/images/features/sam-usage-compute.png"
+              alt="Settings → Usage compute section showing the monthly quota with hours remaining, node-hours, vCPU-hours, platform vCPU, active nodes, and the active node list with observed and configured hardware"
+              loading="lazy"
+            />
+            <span class="detail-caption">Compute usage in node-hours and vCPU-hours against the monthly quota</span>
+          </div>
+          <div class="detail-table-wrap" tabindex="0" role="region" aria-label="Budget and quota controls table">
+            <table class="detail-table">
+              <thead>
+                <tr>
+                  <th>Control</th>
+                  <th>Scope</th>
+                  <th>Enforcement</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Daily token limit</td>
+                  <td>Per user</td>
+                  <td>Input/output token ceiling, resets daily</td>
+                </tr>
+                <tr>
+                  <td>Monthly cost cap</td>
+                  <td>Per user</td>
+                  <td>USD ceiling on SAM-proxied AI spend</td>
+                </tr>
+                <tr>
+                  <td>Compute quota</td>
+                  <td>Per user</td>
+                  <td>Node-hours per month; exempt for BYOC users</td>
+                </tr>
+                <tr>
+                  <td>Admin allowance ceiling</td>
+                  <td>Per user (admin-set)</td>
+                  <td>Max limit a user can self-assign</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="detail-block animate-on-scroll">
+          <h2>Admin Cost Dashboard</h2>
+          <p>
+            <strong>Admin → Costs</strong> aggregates LLM spend by model, by day, and by user,
+            with a projection, alongside compute cost. <strong>Admin → Usage</strong> breaks out
+            per-user node usage across the installation. Superadmins get one place to see what
+            the whole team is spending without parsing cloud provider invoices.
+          </p>
+          <div class="detail-image animate-on-scroll">
+            <OptimizedFeatureImage
+              src="/images/features/sam-admin-costs.png"
+              alt="Admin → Costs dashboard showing LLM spend by model, day, and user, a cost projection, and compute cost"
+              loading="lazy"
+            />
+            <span class="detail-caption">LLM spend by model, day, and user, with a projection, plus compute cost</span>
+          </div>
+          <div class="detail-image animate-on-scroll">
+            <OptimizedFeatureImage
+              src="/images/features/sam-admin-usage-nodes.png"
+              alt="Admin → Usage node usage table listing each user with node-hours, vCPU-hours, platform hours, and active node count for the billing period"
+              loading="lazy"
+            />
+            <span class="detail-caption">Per-user node usage across the installation for the billing period</span>
+          </div>
+        </div>
+
+        <div class="detail-nav animate-on-scroll">
+          <a href="/enterprise/open-source/" class="detail-nav-link">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+            Open Source
+          </a>
+          <a href="/enterprise/scale/" class="detail-nav-link">
+            Scale
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <hr class="divider" />
+    <CtaFooter />
+  </main>
+</Base>
+
+<style>
+  .detail-hero { position: relative; padding: 140px 0 60px; overflow: hidden; }
+  @media (min-width: 768px) { .detail-hero { padding: 160px 0 80px; } }
+  .detail-glow { position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 600px; height: 400px; background: radial-gradient(ellipse, rgba(22, 163, 74, 0.1) 0%, transparent 70%); pointer-events: none; }
+  :global(html[data-theme='light']) .detail-glow { background: radial-gradient(ellipse, rgba(21, 128, 61, 0.07) 0%, transparent 70%); }
+  .detail-hero-content { max-width: 720px; }
+  .back-link { display: inline-flex; align-items: center; gap: 6px; font-size: 0.8125rem; color: var(--color-fg-dim); margin-bottom: 24px; }
+  .back-link:hover { color: var(--color-fg-muted); }
+  .detail-title { font-family: var(--font-display); font-size: clamp(1.75rem, 4.5vw, 2.75rem); font-weight: 600; line-height: 1.15; color: var(--color-fg-primary); margin-bottom: 20px; }
+  .gradient-text { background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-success) 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .detail-subtitle { font-size: 1.0625rem; color: var(--color-fg-muted); line-height: 1.7; max-width: 600px; }
+  .detail-content { max-width: 720px; }
+  .detail-block { margin-bottom: 48px; }
+  .detail-block h2 { font-family: var(--font-display); font-size: 1.375rem; font-weight: 600; color: var(--color-fg-primary); margin-bottom: 16px; }
+  .detail-block p { font-size: 1rem; color: var(--color-fg-muted); line-height: 1.7; margin-bottom: 16px; }
+  .detail-image { border-radius: var(--radius-lg); overflow: hidden; border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow); margin-top: 16px; }
+  .detail-image :global(picture), .detail-image :global(img) { display: block; width: 100%; height: auto; }
+  .detail-caption { display: block; padding: 12px 16px; font-size: 0.8125rem; color: var(--color-fg-muted); background: var(--glass-bg); border-top: 1px solid var(--glass-border); }
+  .detail-table-wrap { overflow-x: auto; border-radius: var(--radius-md); border: 1px solid var(--glass-border); margin-top: 16px; }
+  .detail-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+  .detail-table th { padding: 12px 16px; text-align: left; background: var(--color-bg-surface); font-weight: 600; font-size: 0.8125rem; color: var(--color-fg-muted); border-bottom: 1px solid var(--glass-border); }
+  .detail-table td { padding: 10px 16px; border-bottom: 1px solid var(--color-border-subtle); color: var(--color-fg-muted); }
+  .detail-table tbody tr:last-child td { border-bottom: none; }
+  .detail-nav { display: flex; justify-content: space-between; gap: 16px; padding-top: 32px; border-top: 1px solid var(--color-border-subtle); }
+  .detail-nav-link { display: inline-flex; align-items: center; gap: 6px; font-size: 0.875rem; font-weight: 500; color: var(--color-fg-muted); }
+  .detail-nav-link:hover { color: var(--color-accent); }
+</style>

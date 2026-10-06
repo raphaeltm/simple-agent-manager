@@ -13,7 +13,7 @@ const phases = [
   {
     title: 'Multi-Agent Support',
     status: 'complete',
-    description: 'Claude Code, Codex, Gemini CLI, Mistral Vibe, OpenCode',
+    description: 'Claude Code, Codex, Gemini CLI, Mistral Vibe, OpenCode, Amp',
   },
   {
     title: 'Multi-Workspace Nodes',
@@ -28,7 +28,7 @@ const phases = [
   {
     title: 'Multi-Cloud & More',
     status: 'complete',
-    description: 'Scaleway, GCP, notifications, voice input, conversation forking, warm pooling',
+    description: 'Scaleway, GCP, Vultr, Infomaniak, DigitalOcean, UpCloud, notifications, voice input, conversation forking, warm pooling',
   },
   {
     title: 'Task Orchestration',
@@ -36,14 +36,44 @@ const phases = [
     description: 'Missions, agent-to-agent dispatch, task dependencies, durable messaging',
   },
   {
-    title: 'CLI & More Providers',
-    status: 'planned',
-    description: 'DigitalOcean, Vultr, AWS. CLI for scripting agent workflows',
+    title: 'CLI',
+    status: 'complete',
+    description: 'Auth, task submission, chat prompts, task status, and runner doctor commands',
+  },
+  {
+    title: 'App Deployments',
+    status: 'complete',
+    description: 'Deployment environments, agent policy gates, Compose releases, logs, config, and volumes',
   },
   {
     title: 'Teams & Collaboration',
+    status: 'complete',
+    description: 'Shared projects, invite links, access requests, roles, and credential attribution',
+  },
+  {
+    title: 'Comments',
+    status: 'complete',
+    description: 'Threads on chat messages and library files, sent to the agent as context',
+  },
+  {
+    title: 'Compute Pools',
+    status: 'complete',
+    description: 'Multi-cloud offering catalogs, placement strategy, exhaustion policy, and cost reporting',
+  },
+  {
+    title: 'Event Streams & Triggers',
+    status: 'complete',
+    description: 'Cron, GitHub, and webhook triggers, plus schedules, standing watches, and agent channels',
+  },
+  {
+    title: 'More Providers (AWS)',
     status: 'planned',
-    description: 'Team workspaces, shared projects, organization management',
+    description: 'AWS and expanded provider coverage',
+  },
+  {
+    title: 'Role assignment for project members',
+    status: 'planned',
+    description: 'User-facing controls for assigning maintainer and viewer roles',
   },
 ];
 ---
@@ -54,7 +84,7 @@ const phases = [
       <span class="section-label">Roadmap</span>
       <h2 class="section-title">Built in the open, shipped fast</h2>
       <p class="section-subtitle">
-        Seven phases shipped. More providers and team collaboration coming next.
+        DigitalOcean and UpCloud are live. More providers are coming next.
       </p>
     </div>
 
@@ -133,6 +163,10 @@ const phases = [
   .timeline-dot.planned {
     background: transparent;
     border: 2px solid var(--color-fg-dim);
+  }
+
+  :global(html[data-theme='light']) .timeline-dot.complete {
+    box-shadow: 0 0 8px var(--shadow-accent-soft), 0 0 16px var(--color-accent-glow);
   }
 
   .timeline-line {

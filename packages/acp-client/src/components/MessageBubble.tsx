@@ -4,14 +4,19 @@ import type { Components } from 'react-markdown';
 import Markdown from 'react-markdown';
 
 import { REMARK_PLUGINS } from './markdown-config';
+import { MermaidCodeFallback, MermaidDiagram } from './MermaidDiagram';
 import { MessageActions } from './MessageActions';
 import { TypewriterText } from './TypewriterText';
+import { UserMessageFade } from './UserMessageFade';
+
+const NIGHT_OWL_CODE_BACKGROUND = '#011627';
+const NIGHT_OWL_CODE_FOREGROUND = '#d6deeb';
 
 interface MessageBubbleProps {
   text: string;
   role: 'user' | 'agent';
   streaming?: boolean;
-  /** When true, agent text is animated with per-character fade-in via TypewriterText. */
+  /** When true, text fades in per character: agent text via TypewriterText, user text via UserMessageFade. */
   animated?: boolean;
   /** Unix-millisecond timestamp for metadata display. */
   timestamp?: number;
@@ -23,7 +28,11 @@ interface MessageBubbleProps {
   onPlayAudio?: () => void;
   /** Optional callback when a file path link is clicked. Receives path and optional line number. */
   onFileClick?: (path: string, line?: number | null) => void;
-  /** Optional CSS class for the bubble container — allows theming from the app layer. */
+  /**
+   * Optional CSS class for the bubble container — allows theming from the app layer.
+   * It replaces the built-in colors, including the solid blue user bubble, so the
+   * action buttons switch from their light-on-dark palette to the theme's colors.
+   */
   bubbleClassName?: string;
 }
 
@@ -31,10 +40,11 @@ interface MessageBubbleProps {
  * Detect whether a markdown link href looks like a file path rather than a URL.
  * File paths are routed to the file browser instead of opening a new window.
  */
-export function isFilePathHref(href: string | undefined): boolean {
+export function isFilePathHref(href: string | undefined): href is string {
   if (!href) return false;
   // URLs, anchors, and special protocols are not file paths
-  if (/^(https?:|ftp:|wss?:|file:|mailto:|#|javascript:|tel:|data:|blob:)/i.test(href)) return false;
+  if (/^(https?:|ftp:|wss?:|file:|mailto:|#|javascript:|tel:|data:|blob:)/i.test(href))
+    return false;
   // Bare hostnames without protocol (e.g., www.example.com, docs.example.com) are URLs, not file paths
   if (/^(www\.|([a-z0-9-]+\.)+?(com|org|net|io|dev|app|co|edu|gov)\b)/i.test(href)) return false;
   // Must contain a dot (extension) or a slash (path separator) to look like a file path
@@ -50,7 +60,13 @@ export function isFilePathHref(href: string | undefined): boolean {
 export function parseFilePathRef(ref: string): { path: string; line: number | null } {
   const match = ref.match(/^(.+?):(\d+)$/);
   if (match) {
-    return { path: match[1]!, line: parseInt(match[2]!, 10) };
+    const [, path, lineStr] = match;
+    if (path === undefined || lineStr === undefined) {
+      throw new Error(
+        `parseFilePathRef: regex match unexpectedly missing capture groups for "${ref}"`
+      );
+    }
+    return { path, line: parseInt(lineStr, 10) };
   }
   return { path: ref, line: null };
 }
@@ -62,7 +78,13 @@ function HighlightedCode({ code, language }: { code: string; language: string })
       {({ tokens, getLineProps, getTokenProps }) => (
         <pre
           className="p-3 rounded-md overflow-x-auto text-xs whitespace-pre"
-          style={{ margin: 0, background: '#011627', fontFamily: 'monospace', lineHeight: '1.5' }}
+          style={{
+            margin: 0,
+            background: NIGHT_OWL_CODE_BACKGROUND,
+            color: NIGHT_OWL_CODE_FOREGROUND,
+            fontFamily: 'monospace',
+            lineHeight: '1.5',
+          }}
         >
           {tokens.map((line, lineIdx) => {
             const lineProps = getLineProps({ line });
@@ -118,22 +140,68 @@ const SharedLink: Components['a'] = ({ href, children }) => (
   </a>
 );
 
+const DEFAULT_CODE_OPTIONS: Readonly<{ renderMermaid: boolean }> = { renderMermaid: true };
+
 /** Build a code component with a configurable inline-code class. */
-function makeCodeComponent(inlineClassName: string): NonNullable<Components['code']> {
+function makeCodeComponent(
+  inlineClassName: string,
+  options: Readonly<{ renderMermaid: boolean }> = DEFAULT_CODE_OPTIONS
+): NonNullable<Components['code']> {
   const CodeComponent: NonNullable<Components['code']> = ({ className, children, ...props }) => {
-    const match = /language-(\w+)/.exec(className || '');
+    const match = /language-([^\s]+)/.exec(className || '');
     const code = String(children ?? '').replace(/\n$/, '');
-    const isInline = !match && !className;
-    if (isInline) {
+    // A fenced block with no language has no `language-*` class, so the old
+    // `!match && !className` test misclassified it as inline and collapsed its
+    // newlines. Inline code never contains a newline, so a multi-line block is
+    // reliably a block regardless of language.
+    const isBlock = !!match || code.includes('\n');
+    if (!isBlock) {
       return (
-        <code className={`${inlineClassName} px-1 py-0.5 rounded text-xs font-mono break-all`} {...props}>
+        <code
+          className={`${inlineClassName} px-1 py-0.5 rounded text-xs font-mono break-all`}
+          {...props}
+        >
           {children}
         </code>
       );
     }
+    if (match) {
+      const language = (match[1] ?? '').toLowerCase();
+      if (language === 'mermaid') {
+        return (
+          <div className="my-2">
+            {options.renderMermaid ? (
+              <MermaidDiagram code={code} />
+            ) : (
+              <MermaidCodeFallback code={code} />
+            )}
+          </div>
+        );
+      }
+      return (
+        <div className="my-2">
+          <HighlightedCode code={code} language={language} />
+        </div>
+      );
+    }
+    // Language-less block (e.g. command output): preserve line breaks with a
+    // plain dark <pre>; no syntax highlighting or line numbers. Wrapped in a
+    // my-2 div to match the typed-code path's vertical spacing (the <pre>'s own
+    // margin is zeroed by the inline style).
     return (
       <div className="my-2">
-        <HighlightedCode code={code} language={match?.[1] ?? ''} />
+        <pre
+          className="p-3 rounded-md overflow-x-auto text-xs whitespace-pre"
+          style={{
+            margin: 0,
+            background: NIGHT_OWL_CODE_BACKGROUND,
+            color: NIGHT_OWL_CODE_FOREGROUND,
+            fontFamily: 'monospace',
+            lineHeight: '1.5',
+          }}
+        >
+          {code}
+        </pre>
       </div>
     );
   };
@@ -163,14 +231,15 @@ const AGENT_MARKDOWN_COMPONENTS: Components = {
  * instead of opening a new browser window.
  */
 function buildAgentMarkdownComponents(
-  onFileClick: (path: string, line?: number | null) => void
+  onFileClick: (path: string, line?: number | null) => void,
+  options: Readonly<{ renderMermaid: boolean }> = DEFAULT_CODE_OPTIONS
 ): Components {
   return {
     pre: SharedPre,
-    code: makeCodeComponent('bg-gray-100 text-gray-800'),
+    code: makeCodeComponent('bg-gray-100 text-gray-800', options),
     a: ({ href, children }) => {
       if (isFilePathHref(href)) {
-        const { path, line } = parseFilePathRef(href!);
+        const { path, line } = parseFilePathRef(href);
         return (
           <button
             type="button"
@@ -186,7 +255,12 @@ function buildAgentMarkdownComponents(
         );
       }
       return (
-        <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-400 underline">
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-400 underline"
+        >
           {children}
         </a>
       );
@@ -201,16 +275,50 @@ function buildAgentMarkdownComponents(
  * Wrapped in React.memo to prevent re-renders when parent state changes
  * (e.g., scroll position, input value) don't affect this component's props.
  */
-export const MessageBubble = React.memo(function MessageBubble({ text, role, streaming, animated, timestamp, ttsApiUrl, ttsStorageId, onPlayAudio, onFileClick, bubbleClassName }: MessageBubbleProps) {
+export const MessageBubble = React.memo(function MessageBubble({
+  text,
+  role,
+  streaming,
+  animated,
+  timestamp,
+  ttsApiUrl,
+  ttsStorageId,
+  onPlayAudio,
+  onFileClick,
+  bubbleClassName,
+}: MessageBubbleProps) {
   const isUser = role === 'user';
+  const renderMermaid = !streaming && !animated;
   // When onFileClick is provided for agent messages, build components that intercept file-path links.
   // useMemo ensures stable references — react-markdown won't unmount/remount custom renderers.
-  const agentComponents = useMemo(
-    () => onFileClick ? buildAgentMarkdownComponents(onFileClick) : AGENT_MARKDOWN_COMPONENTS,
-    [onFileClick]
+  const agentComponents = useMemo(() => {
+    if (onFileClick) {
+      return buildAgentMarkdownComponents(onFileClick, { renderMermaid });
+    }
+    if (!renderMermaid) {
+      return {
+        ...AGENT_MARKDOWN_COMPONENTS,
+        code: makeCodeComponent('bg-gray-100 text-gray-800', { renderMermaid }),
+      };
+    }
+    return AGENT_MARKDOWN_COMPONENTS;
+  }, [onFileClick, renderMermaid]);
+  const userComponents = useMemo(
+    () =>
+      renderMermaid
+        ? USER_MARKDOWN_COMPONENTS
+        : {
+            ...USER_MARKDOWN_COMPONENTS,
+            code: makeCodeComponent('bg-blue-500 text-blue-50', { renderMermaid }),
+          },
+    [renderMermaid]
   );
-  const components = isUser ? USER_MARKDOWN_COMPONENTS : agentComponents;
-  const showActions = !streaming && !animated && timestamp != null && timestamp > 0;
+  const components = isUser ? userComponents : agentComponents;
+  // Agent text is still arriving while streaming or animating, so its actions
+  // wait for it to settle. A user message is complete once sent (its fade-in is
+  // cosmetic), so its actions show at once and stay mounted when the fade ends.
+  const textSettled = isUser || (!streaming && !animated);
+  const showActions = textSettled && timestamp != null && timestamp > 0;
 
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
@@ -224,13 +332,12 @@ export const MessageBubble = React.memo(function MessageBubble({ text, role, str
         }`}
       >
         <div className="prose prose-sm max-w-none overflow-x-auto break-words">
-          {animated && !isUser ? (
+          {animated && isUser ? (
+            <UserMessageFade text={text} />
+          ) : animated ? (
             <TypewriterText text={text} animated={true} markdownComponents={components} />
           ) : (
-            <Markdown
-              remarkPlugins={REMARK_PLUGINS}
-              components={components}
-            >
+            <Markdown remarkPlugins={REMARK_PLUGINS} components={components}>
               {text}
             </Markdown>
           )}
@@ -245,7 +352,10 @@ export const MessageBubble = React.memo(function MessageBubble({ text, role, str
             ttsApiUrl={isUser ? undefined : ttsApiUrl}
             ttsStorageId={isUser ? undefined : ttsStorageId}
             hideTts={isUser}
-            variant={isUser ? 'on-dark' : 'default'}
+            // Light-on-dark icons belong to the built-in solid blue user bubble;
+            // a bubbleClassName replaces that background with themed colors.
+            variant={isUser && !bubbleClassName ? 'on-dark' : 'default'}
+            align={isUser ? 'end' : 'start'}
             onPlayAudio={isUser ? undefined : onPlayAudio}
           />
         )}

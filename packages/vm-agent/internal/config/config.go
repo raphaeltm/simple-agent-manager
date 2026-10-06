@@ -2,11 +2,6 @@
 package config
 
 import (
-	"fmt"
-	"net/url"
-	"os"
-	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -35,8 +30,150 @@ const DefaultDevcontainerImage = "mcr.microsoft.com/devcontainers/typescript-nod
 // when a repo has no devcontainer config. Override via DEFAULT_DEVCONTAINER_CONFIG_PATH env var.
 const DefaultDevcontainerConfigPath = "/etc/sam/default-devcontainer.json"
 
+const (
+	// DefaultCodexRuntimeInstallTimeout bounds an opted-in runtime download/install.
+	DefaultCodexRuntimeInstallTimeout   = 5 * time.Minute
+	DefaultCodexRuntimeInstallKillGrace = 5 * time.Second
+
+	// DefaultACPRecoveryWatchdogTimeout bounds crash recovery after an ACP
+	// disconnect. Override via DEFAULT_RECOVERY_WATCHDOG_TIMEOUT.
+	DefaultACPRecoveryWatchdogTimeout = 2 * time.Minute
+
+	// DefaultACPRestartDecayWindow is the quiet period after which restartCount
+	// resets. Override via DEFAULT_RESTART_DECAY_WINDOW.
+	DefaultACPRestartDecayWindow = 5 * time.Minute
+
+	// DefaultACPActivityRereportInterval refreshes prompt activity while a
+	// prompt is in flight. Override via ACTIVITY_REREPORT_INTERVAL.
+	DefaultACPActivityRereportInterval = 60 * time.Second
+
+	// DefaultACPHarnessActivityReportDebounce coalesces high-frequency harness
+	// lifecycle edges before reporting durable activity. Override via
+	// ACP_HARNESS_ACTIVITY_REPORT_DEBOUNCE.
+	DefaultACPHarnessActivityReportDebounce = 750 * time.Millisecond
+
+	// DefaultClaudeHarnessLifecycleMaxBytes bounds a single `_claude/sdkMessage`
+	// extension notification. Override via CLAUDE_HARNESS_LIFECYCLE_MAX_BYTES.
+	DefaultClaudeHarnessLifecycleMaxBytes = 64 * 1024
+
+	// DefaultClaudeHarnessLifecycleMaxTasks bounds how many background tasks a
+	// single harness snapshot may track. Override via
+	// CLAUDE_HARNESS_LIFECYCLE_MAX_TASKS.
+	DefaultClaudeHarnessLifecycleMaxTasks = 256
+
+	// DefaultClaudeHarnessLifecycleMaxIDBytes bounds session/task identifier
+	// length inside a lifecycle notification. Override via
+	// CLAUDE_HARNESS_LIFECYCLE_MAX_ID_BYTES.
+	DefaultClaudeHarnessLifecycleMaxIDBytes = 256
+
+	// DefaultACPTerminalActivityReportAttempts is the retry budget for
+	// terminal/error activity reports. Override via ACTIVITY_TERMINAL_REPORT_ATTEMPTS.
+	DefaultACPTerminalActivityReportAttempts = 5
+
+	// DefaultACPTerminalActivityReportBackoff is the delay between terminal
+	// activity report retries. Override via ACTIVITY_TERMINAL_REPORT_BACKOFF.
+	DefaultACPTerminalActivityReportBackoff = time.Second
+
+	// DefaultACPCheckpointPreemptGrace bounds graceful ACP cancel/close before
+	// checkpoint rollover force-stops the harness.
+	DefaultACPCheckpointPreemptGrace = 30 * time.Second
+
+	// DefaultACPCheckpointPreemptMaxGrace caps caller-requested graceful waits.
+	DefaultACPCheckpointPreemptMaxGrace = 2 * time.Minute
+
+	// DefaultACPCheckpointRolloverTimeout bounds the full strict restart/resume.
+	DefaultACPCheckpointRolloverTimeout = 2 * time.Minute
+
+	// DefaultGitCredentialTimeout bounds credential-helper calls back to the
+	// local VM agent. Override via GIT_CREDENTIAL_TIMEOUT.
+	DefaultGitCredentialTimeout = 5 * time.Second
+
+	// DefaultStandaloneCloneFilter is the git partial-clone filter used by
+	// standalone (container) workspace preparation. Blobless clones skip all
+	// history blobs that are not in the checked-out tree, keeping clone time
+	// proportional to the working tree instead of the full pack — critical
+	// because standalone clones run synchronously inside the control plane's
+	// create-workspace request deadline. Override via STANDALONE_CLONE_FILTER;
+	// set to "off" (or "none"/"false") to force a full clone.
+	DefaultStandaloneCloneFilter = "blob:none"
+
+	// DefaultSessionSnapshotOperationTimeout is the VM-agent deadline for one
+	// asynchronous snapshot checkpoint. Override via
+	// SESSION_SNAPSHOT_OPERATION_TIMEOUT.
+	DefaultSessionSnapshotOperationTimeout = 15 * time.Minute
+
+	// DefaultSessionSnapshotProgressReportInterval throttles control-plane
+	// progress callbacks while a data-scaled snapshot operation is still making
+	// progress. Override via SESSION_SNAPSHOT_PROGRESS_REPORT_INTERVAL.
+	DefaultSessionSnapshotProgressReportInterval = 15 * time.Second
+
+	// DefaultSessionSnapshotProgressReportTimeout bounds each best-effort
+	// control-plane progress callback. Override via
+	// SESSION_SNAPSHOT_PROGRESS_REPORT_TIMEOUT.
+	DefaultSessionSnapshotProgressReportTimeout = 5 * time.Second
+)
+
+const (
+	// DefaultDeployArtifactDialTimeout bounds TCP connection establishment for
+	// artifact downloads without imposing a total body-read deadline. Override
+	// via DEPLOY_ARTIFACT_DIAL_TIMEOUT.
+	DefaultDeployArtifactDialTimeout = 30 * time.Second
+
+	// DefaultDeployArtifactTLSHandshakeTimeout bounds TLS handshakes for
+	// artifact downloads. Override via DEPLOY_ARTIFACT_TLS_HANDSHAKE_TIMEOUT.
+	DefaultDeployArtifactTLSHandshakeTimeout = 15 * time.Second
+
+	// DefaultDeployArtifactResponseHeaderTimeout bounds waiting for the first
+	// response headers. Override via DEPLOY_ARTIFACT_RESPONSE_HEADER_TIMEOUT.
+	DefaultDeployArtifactResponseHeaderTimeout = 60 * time.Second
+
+	// DefaultDeployArtifactIdleTimeout bounds lack of body-read progress. Slow
+	// transfers that keep yielding bytes are allowed to continue. Override via
+	// DEPLOY_ARTIFACT_IDLE_TIMEOUT.
+	DefaultDeployArtifactIdleTimeout = 2 * time.Minute
+
+	// DefaultDeployApplyIdleTimeout bounds deployment apply goroutines only when
+	// no progress events have been emitted. Override via DEPLOY_APPLY_IDLE_TIMEOUT.
+	DefaultDeployApplyIdleTimeout = 15 * time.Minute
+
+	// DefaultComposeOutputRetentionBytes caps how much compose output is retained
+	// for an apply's error message. A long pull can emit megabytes of progress
+	// lines; only the tail is diagnostically useful, and the whole thing would
+	// otherwise be embedded in an error string and a DB column. The liveness signal
+	// keeps firing past the cap, so a chatty pull is never killed as stalled merely
+	// because its output stopped being recorded.
+	DefaultComposeOutputRetentionBytes int64 = 64 * 1024
+
+	// DefaultDeployBuildPublishTimeout bounds host build + push + release publish
+	// work. Override via DEPLOY_BUILD_PUBLISH_TIMEOUT.
+	DefaultDeployBuildPublishTimeout = 20 * time.Minute
+
+	// DefaultWorkspaceBuildQueueDepth preserves the historical single devcontainer
+	// build slot per VM while allowing operators to tune the per-node queue depth.
+	// Override via WORKSPACE_BUILD_QUEUE_DEPTH.
+	DefaultWorkspaceBuildQueueDepth = 1
+
+	// MaxWorkspaceBuildQueueDepth bounds the per-node devcontainer build semaphore
+	// so direct env usage cannot allocate an unbounded channel.
+	MaxWorkspaceBuildQueueDepth = 16
+
+	// DefaultDeployTeardownTimeout bounds per-environment deployment teardown.
+	// Override via DEPLOY_TEARDOWN_TIMEOUT.
+	DefaultDeployTeardownTimeout = 2 * time.Minute
+)
+
+// Node role constants.
+const (
+	RoleWorkspace  = "workspace"
+	RoleDeployment = "deployment"
+	RoleStandalone = "standalone"
+)
+
 // Config holds all configuration values for the VM Agent.
 type Config struct {
+	// Node role: "workspace" (default), "deployment", or "standalone"
+	Role string
+
 	// Server settings
 	Port           int
 	Host           string
@@ -57,17 +194,37 @@ type Config struct {
 	BootstrapToken     string
 	Repository         string
 	Branch             string
+	BaseBranch         string
+	RepoProvider       string
+	CloneURL           string
+	RepositoryHost     string
+	RepositoryPath     string
 	WorkspaceDir       string
 	BootstrapStatePath string
 	BootstrapMaxWait   time.Duration
 	BootstrapTimeout   time.Duration // Overall bootstrap timeout including devcontainer build
 
+	// VM-agent lifecycle/provisioning settings - configurable per constitution principle XI
+	GracefulShutdownTimeout   time.Duration // Max time to wait for HTTP shutdown after SIGTERM (env: GRACEFUL_SHUTDOWN_TIMEOUT, default: 30s)
+	SystemProvisioningTimeout time.Duration // Max time for workspace host provisioning (env: SYSTEM_PROVISIONING_TIMEOUT, default: 15m)
+	CFIPFetchTimeout          time.Duration // Timeout for Cloudflare IP range fetches during firewall setup (env: CF_IP_FETCH_TIMEOUT, default: 10s)
+	BootLogHTTPTimeout        time.Duration // Timeout for boot-log callbacks (env: BOOT_LOG_HTTP_TIMEOUT, default: 10s)
+	JWKSFetchTimeout          time.Duration // Timeout for startup JWKS fetches (env: JWKS_FETCH_TIMEOUT, default: 10s)
+
+	// StandaloneCloneFilter is the resolved git partial-clone filter for
+	// standalone (container) workspace clones. Empty means "full clone".
+	// See DefaultStandaloneCloneFilter and env STANDALONE_CLONE_FILTER.
+	StandaloneCloneFilter string
+
 	// Session settings
-	SessionTTL             time.Duration
-	SessionCleanupInterval time.Duration
-	SessionMaxCount        int
-	CookieName             string
-	CookieSecure           bool
+	SessionTTL                            time.Duration
+	SessionCleanupInterval                time.Duration
+	SessionMaxCount                       int
+	SessionSnapshotOperationTimeout       time.Duration // Overall background/final snapshot deadline (env: SESSION_SNAPSHOT_OPERATION_TIMEOUT, default: 15m)
+	SessionSnapshotProgressReportInterval time.Duration // Min interval between snapshot progress callbacks (env: SESSION_SNAPSHOT_PROGRESS_REPORT_INTERVAL, default: 15s)
+	SessionSnapshotProgressReportTimeout  time.Duration // Timeout for each snapshot progress callback (env: SESSION_SNAPSHOT_PROGRESS_REPORT_TIMEOUT, default: 5s)
+	CookieName                            string
+	CookieSecure                          bool
 
 	// Node health reporter interval
 	HeartbeatInterval time.Duration
@@ -79,8 +236,14 @@ type Config struct {
 	HTTPCallbackTimeout time.Duration // timeout for outbound HTTP callbacks to the control plane
 
 	// WebSocket settings
-	WSReadBufferSize  int
-	WSWriteBufferSize int
+	WSReadBufferSize           int
+	WSWriteBufferSize          int
+	TerminalWSMaxMessageBytes  int64
+	TerminalWSReadTimeout      time.Duration
+	TerminalWSPingInterval     time.Duration
+	TerminalWSMessageRate      int
+	TerminalWSMessageBurst     int
+	TerminalSessionIDMaxLength int
 
 	// PTY settings
 	DefaultShell string
@@ -90,25 +253,49 @@ type Config struct {
 	// PTY session persistence settings - configurable per constitution principle XI
 	PTYOrphanGracePeriod time.Duration // How long orphaned sessions survive before cleanup (0 = disabled)
 	PTYOutputBufferSize  int           // Ring buffer capacity per session in bytes
+	PTYCloseGracePeriod  time.Duration // Bounded wait after graceful PTY close signals (env: PTY_CLOSE_GRACE_PERIOD)
 
 	// ACP settings - configurable per constitution principle XI
-	ACPInitTimeoutMs         int // Fallback timeout for all ACP init phases (default: 30000ms)
-	ACPInitializeTimeoutMs   int // Per-phase timeout for Initialize RPC; 0 = use ACPInitTimeoutMs (default: 0)
-	ACPNewSessionTimeoutMs   int // Per-phase timeout for NewSession RPC; 0 = use ACPInitTimeoutMs (default: 0)
-	ACPLoadSessionTimeoutMs  int // Per-phase timeout for LoadSession RPC; 0 = use ACPInitTimeoutMs (default: 0)
-	ACPReconnectDelayMs      int
-	ACPReconnectTimeoutMs    int
-	ACPMaxRestartAttempts    int
-	ACPMessageBufferSize     int           // Max buffered messages per SessionHost for late-join replay
-	ACPViewerSendBuffer      int           // Per-viewer send channel buffer size
-	ACPPingInterval          time.Duration // WebSocket ping interval (default: 30s)
-	ACPPongTimeout           time.Duration // WebSocket pong deadline after ping (default: 10s)
-	ACPPromptTimeout         time.Duration // Max prompt runtime; 0 = no timeout (default: 0). Used for workspace sessions; task sessions use ACPTaskPromptTimeout via effectivePromptTimeout().
-	ACPTaskPromptTimeout     time.Duration // Max prompt runtime for task-driven sessions; 0 = no timeout (default: 6h)
-	ACPPromptCancelGrace     time.Duration // Wait after cancel before force-stop fallback (default: 5s)
-	ACPIdleSuspendTimeout    time.Duration // Auto-suspend after this idle duration with no viewers (default: 30m, 0=disabled)
-	ACPNotifSerializeTimeout time.Duration // Max wait for previous notification processing before delivering next (default: 5s)
-	ACPHeartbeatInterval     time.Duration // Interval for direct ACP session heartbeats to control plane (default: 60s, env: ACP_HEARTBEAT_INTERVAL)
+	CodexRuntimeInstallTimeout        time.Duration // CODEX_RUNTIME_INSTALL_TIMEOUT, default 5m
+	CodexRuntimeInstallKillGrace      time.Duration // CODEX_RUNTIME_INSTALL_KILL_GRACE, default 5s
+	ACPInitTimeoutMs                  int           // Fallback timeout for all ACP init phases (default: 30000ms)
+	ACPInitializeTimeoutMs            int           // Per-phase timeout for Initialize RPC; 0 = use ACPInitTimeoutMs (default: 0)
+	ACPNewSessionTimeoutMs            int           // Per-phase timeout for NewSession RPC; 0 = use ACPInitTimeoutMs (default: 0)
+	ACPLoadSessionTimeoutMs           int           // Per-phase timeout for LoadSession RPC; 0 = use ACPInitTimeoutMs (default: 0)
+	ACPReconnectDelayMs               int
+	ACPReconnectTimeoutMs             int
+	ACPMaxRestartAttempts             int
+	ACPMessageBufferSize              int           // Max buffered messages per SessionHost for late-join replay
+	ACPViewerSendBuffer               int           // Per-viewer send channel buffer size
+	ACPStderrBufferBytes              int           // Max agent stderr bytes retained for crash reports
+	ACPPingInterval                   time.Duration // WebSocket ping interval (default: 30s)
+	ACPPongTimeout                    time.Duration // WebSocket pong deadline after ping (default: 10s)
+	ACPPromptTimeout                  time.Duration // Max prompt runtime; 0 = no timeout (default: 0). Used for workspace sessions; task sessions use ACPTaskPromptTimeout via effectivePromptTimeout().
+	ACPTaskPromptTimeout              time.Duration // Max prompt runtime for task-driven sessions; 0 = no timeout (default: 8h)
+	ACPPromptCancelGrace              time.Duration // Wait for a cancelled prompt to settle before finishing it cancelled and restarting the agent (default: 5s)
+	ACPPromptRetryMaxRetries          int           // Retryable transient provider prompt errors after initial attempt (default: 2)
+	ACPPromptRetryInitial             time.Duration // Initial backoff for transient provider prompt retries (default: 15s)
+	ACPPromptRetryMax                 time.Duration // Max backoff for transient provider prompt retries (default: 2m)
+	ACPRecoveryWatchdog               time.Duration // Max crash recovery duration before terminal error (default: 2m)
+	ACPRestartDecayWindow             time.Duration // Quiet period before restartCount decays (default: 5m)
+	ACPIdleSuspendTimeout             time.Duration // Auto-suspend after this idle duration with no viewers (default: 30m, 0=disabled)
+	ACPNotifSerializeTimeout          time.Duration // Max wait for previous notification processing before delivering next (default: 5s)
+	ACPHeartbeatInterval              time.Duration // Interval for direct ACP session heartbeats to control plane (default: 60s, env: ACP_HEARTBEAT_INTERVAL)
+	ACPActivityRereportInterval       time.Duration // Re-report prompting while a prompt is active (default: 60s, env: ACTIVITY_REREPORT_INTERVAL)
+	ACPHarnessActivityReportDebounce  time.Duration // Debounce high-frequency harness activity reports (default: 750ms, env: ACP_HARNESS_ACTIVITY_REPORT_DEBOUNCE)
+	ClaudeHarnessLifecycleMaxBytes    int           // Max bytes per harness lifecycle notification (default: 65536, env: CLAUDE_HARNESS_LIFECYCLE_MAX_BYTES)
+	ClaudeHarnessLifecycleMaxTasks    int           // Max tracked background tasks per snapshot (default: 256, env: CLAUDE_HARNESS_LIFECYCLE_MAX_TASKS)
+	ClaudeHarnessLifecycleMaxIDBytes  int           // Max identifier length in a lifecycle notification (default: 256, env: CLAUDE_HARNESS_LIFECYCLE_MAX_ID_BYTES)
+	ACPTerminalActivityReportAttempts int           // Retry attempts for terminal activity reports (default: 5, env: ACTIVITY_TERMINAL_REPORT_ATTEMPTS)
+	ACPTerminalActivityReportBackoff  time.Duration // Retry backoff for terminal activity reports (default: 1s, env: ACTIVITY_TERMINAL_REPORT_BACKOFF)
+	ACPCredentialSyncTimeout          time.Duration // Timeout for auth-file sync-back during shutdown (default: 10s, env: ACP_CREDENTIAL_SYNC_TIMEOUT)
+	ACPRestartAttemptTimeout          time.Duration // Bounds one process-monitor agent restart attempt (default: 5m, env: ACP_RESTART_ATTEMPT_TIMEOUT)
+	ACPActivityReportTimeout          time.Duration // Timeout for each ACP activity callback attempt (default: 10s, env: ACP_ACTIVITY_REPORT_TIMEOUT)
+	ACPUsageProbeTimeout              time.Duration // Timeout for one post-turn provider usage probe (default: 10s, env: ACP_USAGE_PROBE_TIMEOUT)
+	OpenCodeGoUsageURL                string        // OpenCode Go usage endpoint probed after each turn (default: https://opencode.ai/zen/go/v1/usage, env: OPENCODE_GO_USAGE_URL)
+	ACPCheckpointPreemptGrace         time.Duration // Graceful cancel/close wait before force fallback (default: 30s, env: ACP_CHECKPOINT_PREEMPT_GRACE)
+	ACPCheckpointPreemptMaxGrace      time.Duration // Maximum caller-selected grace (default: 2m, env: ACP_CHECKPOINT_PREEMPT_MAX_GRACE)
+	ACPCheckpointRolloverTimeout      time.Duration // Full strict rollover operation deadline (default: 2m, env: ACP_CHECKPOINT_ROLLOVER_TIMEOUT)
 
 	// Event log settings - configurable per constitution principle XI
 	MaxNodeEvents      int // Max node-level events retained in memory (default: 500)
@@ -137,13 +324,18 @@ type Config struct {
 	// Configurable per constitution principle XI.
 	DevcontainerBuildTimeout time.Duration // Max time for a single devcontainer up call (env: DEVCONTAINER_BUILD_TIMEOUT, default: 15m)
 
+	// WorkspaceBuildQueueDepth limits concurrent devcontainer builds on this VM.
+	// Configurable per constitution principle XI.
+	WorkspaceBuildQueueDepth int // Concurrent build slots (env: WORKSPACE_BUILD_QUEUE_DEPTH, default: 1)
+
 	// Devcontainer cache settings — opportunistic image caching via container registry.
 	// Configurable per constitution principle XI.
-	DevcontainerCacheEnabled  bool   // Enable devcontainer image caching (env: DEVCONTAINER_CACHE_ENABLED, default: false)
-	DevcontainerCacheRegistry string // Container registry for cache images (env: DEVCONTAINER_CACHE_REGISTRY, default: ghcr.io)
-	DevcontainerCacheUsername string // Optional registry username (env: DEVCONTAINER_CACHE_USERNAME)
-	DevcontainerCachePassword string // Optional registry password/token (env: DEVCONTAINER_CACHE_PASSWORD)
-	DevcontainerCacheRef      string // Optional full cache image ref (env: DEVCONTAINER_CACHE_REF)
+	DevcontainerCacheEnabled     bool          // Enable devcontainer image caching (env: DEVCONTAINER_CACHE_ENABLED, default: false)
+	DevcontainerCacheRegistry    string        // Container registry for cache images (env: DEVCONTAINER_CACHE_REGISTRY, default: ghcr.io)
+	DevcontainerCacheUsername    string        // Optional registry username (env: DEVCONTAINER_CACHE_USERNAME)
+	DevcontainerCachePassword    string        // Optional registry password/token (env: DEVCONTAINER_CACHE_PASSWORD)
+	DevcontainerCacheRef         string        // Optional full cache image ref (env: DEVCONTAINER_CACHE_REF)
+	DevcontainerCachePushTimeout time.Duration // Timeout for best-effort cache image push (env: DEVCONTAINER_CACHE_PUSH_TIMEOUT, default: 10m)
 
 	// Cloud provider — used for provider-specific optimizations (apt mirrors, etc.)
 	Provider string // Cloud provider name (env: PROVIDER, e.g. "hetzner", "scaleway", "gcp")
@@ -161,7 +353,28 @@ type Config struct {
 	MetricsDBPath     string        // SQLite database path for resource metrics snapshots
 	MetricsInterval   time.Duration // Resource metrics collection interval (default: 1m)
 
+	// Active resource monitoring settings - configurable per constitution principle XI
+	ResourceEventBufferSize          int           // Bounded pressure event queue capacity (env: DEFAULT_RESOURCE_EVENT_BUFFER_SIZE, default: 64)
+	PSIPollInterval                  time.Duration // PSI memory pressure polling interval (env: DEFAULT_PSI_POLL_INTERVAL_SECONDS, default: 10s)
+	ContainerStatsInterval           time.Duration // Docker stats polling interval (env: DEFAULT_CONTAINER_STATS_INTERVAL_SECONDS, default: 30s)
+	PSIMemorySomeWarningThreshold    float64       // some memory PSI warning threshold (env: DEFAULT_PSI_MEMORY_SOME_WARNING_THRESHOLD, default: 25.0)
+	PSIMemorySomeCriticalThreshold   float64       // some memory PSI critical threshold (env: DEFAULT_PSI_MEMORY_SOME_CRITICAL_THRESHOLD, default: 50.0)
+	PSIMemoryFullWarningThreshold    float64       // full memory PSI warning threshold (env: DEFAULT_PSI_MEMORY_FULL_WARNING_THRESHOLD, default: 10.0)
+	PSIMemoryFullCriticalThreshold   float64       // full memory PSI critical threshold (env: DEFAULT_PSI_MEMORY_FULL_CRITICAL_THRESHOLD, default: 25.0)
+	EvictionDebounceWindow           time.Duration // Duplicate eviction debounce window (env: DEFAULT_EVICTION_DEBOUNCE_SECONDS, default: 30s)
+	EvictionSnapshotTimeout          time.Duration // Pre-stop eviction snapshot deadline (env: DEFAULT_EVICTION_SNAPSHOT_TIMEOUT_SECONDS, default: 120s)
+	EvictionDockerStopTimeout        time.Duration // Graceful docker stop timeout for evictions (env: DEFAULT_EVICTION_DOCKER_STOP_TIMEOUT_SECONDS, default: 10s)
+	EvictionCallbackRetryMaxInterval time.Duration // Durable callback retry backoff cap (env: DEFAULT_EVICTION_CALLBACK_RETRY_MAX_SECONDS, default: 300s)
+	EvictionResolveTimeout           time.Duration // Docker label resolution timeout for evictions (env: DEFAULT_EVICTION_RESOLVE_TIMEOUT_SECONDS, default: 5s)
+	ResourceHistorySampleInterval    time.Duration // Retained per-workspace resource sampling cadence (env: RESOURCE_HISTORY_SAMPLE_INTERVAL, default: 5s)
+	ResourceHistoryChunkInterval     time.Duration // Retained resource chunk duration (env: RESOURCE_HISTORY_CHUNK_INTERVAL, default: 15m)
+	ResourceHistorySpoolDir          string        // Node-local retry spool directory (env: RESOURCE_HISTORY_SPOOL_DIR)
+	ResourceHistorySpoolMaxBytes     int64         // Node-local retry spool size (env: RESOURCE_HISTORY_SPOOL_MAX_BYTES, default: 20MiB)
+	ResourceHistoryUploadTimeout     time.Duration // Upload request timeout (env: RESOURCE_HISTORY_UPLOAD_TIMEOUT, default: 10s)
+	ResourceHistoryMaxSamples        int           // Max samples per chunk (env: RESOURCE_HISTORY_MAX_SAMPLES, default: 4096)
+
 	// Git integration settings - configurable per constitution principle XI
+	GitCredentialTimeout     time.Duration // Timeout for credential-helper callbacks (env: GIT_CREDENTIAL_TIMEOUT, default: 5s)
 	GitExecTimeout           time.Duration // Timeout for git commands via docker exec (default: 30s)
 	GitFileMaxSize           int           // Max file size in bytes for /git/file (default: 1MB)
 	GitWorktreeTimeout       time.Duration // Timeout for git worktree commands (default: 30s)
@@ -183,24 +396,59 @@ type Config struct {
 	FileDownloadTimeout     time.Duration // Timeout for file download operations (default: 60s)
 	FileDownloadMaxBytes    int64         // Max file download size in bytes (default: 50MB)
 
+	// MCP tool command settings - configurable per constitution principle XI
+	MCPShortCommandTimeout time.Duration // Timeout for short MCP workspace probes (default: 10s, env: MCP_SHORT_COMMAND_TIMEOUT)
+	MCPDiffCommandTimeout  time.Duration // Timeout for MCP diff-summary commands (default: 30s, env: MCP_DIFF_COMMAND_TIMEOUT)
+	MCPBuildPrepareTimeout time.Duration // Timeout for MCP build/publish preparation probes (default: 30s, env: MCP_BUILD_PREPARE_TIMEOUT)
+
 	// Callback retry settings - configurable per constitution principle XI
-	WorkspaceReadyCallbackTimeout time.Duration // HTTP timeout for workspace-ready retry callbacks (env: WORKSPACE_READY_CALLBACK_TIMEOUT, default: 10s)
+	WorkspaceReadyCallbackTimeout time.Duration // HTTP timeout for workspace-ready retry callbacks (env: WORKSPACE_READY_CALLBACK_TIMEOUT, default: 30s)
+
+	// Workspace callback token renewal (see callback_token_renewal.go for defaults and env vars)
+	WorkspaceCallbackTokenRefreshRatio        float64
+	WorkspaceCallbackTokenRenewalTimeout      time.Duration
+	WorkspaceCallbackTokenRenewalRetryInitial time.Duration
+	WorkspaceCallbackTokenRenewalRetryMax     time.Duration
 
 	// Error reporting settings - configurable per constitution principle XI
-	ErrorReportFlushInterval time.Duration // Background flush interval (default: 30s)
-	ErrorReportMaxBatchSize  int           // Immediate flush threshold (default: 10)
-	ErrorReportMaxQueueSize  int           // Max queued entries before dropping (default: 100)
-	ErrorReportHTTPTimeout   time.Duration // HTTP POST timeout (default: 10s)
+	ErrorReportFlushInterval  time.Duration // Background flush interval (default: 30s)
+	ErrorReportMaxBatchSize   int           // Immediate flush threshold (default: 10)
+	ErrorReportMaxBatchBytes  int           // Maximum structured error body bytes (default: 32 KiB)
+	ErrorReportMaxQueueSize   int           // Maximum durable outbox rows (default: 1000)
+	ErrorReportHTTPTimeout    time.Duration // HTTP POST timeout (default: 10s)
+	ErrorReportRetryInitial   time.Duration // Initial transient delivery backoff (default: 1s)
+	ErrorReportRetryMax       time.Duration // Maximum transient delivery backoff (default: 5m)
+	ErrorReportMaxAttempts    int           // Bounded delivery attempts (default: 20)
+	ErrorReportDBPath         string        // SQLite WAL outbox path
+	ErrorReportDBBusyTimeout  time.Duration // SQLite outbox contention timeout (default: 5s)
+	ErrorReportSpoolDir       string        // Private automatic-evidence spool directory
+	ErrorReportArtifactBytes  int64         // Maximum compressed automatic artifact bytes (default: 2 MiB)
+	ErrorReportSpoolBytes     int64         // Maximum local spool bytes (default: 20 MiB)
+	ErrorReportRetention      time.Duration // Maximum local outbox/spool retention (default: 24h)
+	ErrorReportCollectTimeout time.Duration // Total safe collector deadline (default: 10s)
+	ErrorReportCollectorDocs  int           // Maximum allowlisted collector documents (default: 8)
+	ErrorReportDocumentBytes  int           // Maximum bytes per collector document (default: 128 KiB)
+	ErrorReportValueDepth     int           // Recursive evidence depth bound (default: 8)
+	ErrorReportValueItems     int           // Recursive evidence item bound (default: 256)
+	ErrorReportStringBytes    int           // Maximum safe evidence string bytes (default: 4096)
+	ErrorReportEventLimit     int           // Maximum structured events in automatic evidence (default: 100)
+	ErrorReportResponseBytes  int           // Maximum control-plane response bytes read for diagnostics (default: 4096)
+	ErrorReportStoredErrBytes int           // Maximum durable last-error bytes (default: 512)
+	ErrorReportCollectorJobs  int           // Maximum concurrent automatic evidence collectors (default: 1)
 
 	// System info collection settings - configurable per constitution principle XI
-	SysInfoDockerTimeout  time.Duration // Timeout for Docker CLI commands in system info (default: 10s)
-	SysInfoVersionTimeout time.Duration // Timeout for version check commands (default: 5s)
-	SysInfoCacheTTL       time.Duration // Cache TTL for system info responses (default: 5s)
+	SysInfoDockerTimeout                    time.Duration // Timeout for Docker CLI commands in system info (default: 10s)
+	SysInfoVersionTimeout                   time.Duration // Timeout for version check commands (default: 5s)
+	SysInfoCacheTTL                         time.Duration // Cache TTL for system info responses (default: 5s)
+	HeartbeatDockerStatsTimeout             time.Duration // Timeout for heartbeat Docker stats (default: 2s)
+	HeartbeatWorkspaceMetricsMaxContainers  int           // Max workspace containers measured per heartbeat (default: 8)
+	HeartbeatWorkspaceMetricsMaxOutputBytes int64         // Max bytes read from heartbeat Docker metric commands (default: 64 KiB)
 
 	// Log reader/stream settings - configurable per constitution principle XI
-	LogReaderTimeout      time.Duration // Timeout for journalctl read commands (default: 30s)
-	LogStreamPingInterval time.Duration // WebSocket ping interval for log stream (default: 30s)
-	LogStreamPongTimeout  time.Duration // WebSocket pong deadline for log stream (default: 90s)
+	LogReaderTimeout          time.Duration // Timeout for journalctl read commands (default: 30s)
+	LogStreamPingInterval     time.Duration // WebSocket ping interval for log stream (default: 30s)
+	LogStreamPongTimeout      time.Duration // WebSocket pong deadline for log stream (default: 90s)
+	LogStreamPingWriteTimeout time.Duration // WebSocket ping write deadline for log stream (default: 10s)
 
 	// TLS settings - configurable per constitution principle XI
 	TLSCertPath string // Path to TLS certificate PEM (env: TLS_CERT_PATH)
@@ -218,406 +466,36 @@ type Config struct {
 	DiagCPUSaturationThreshold float64 // Load per core above which build is "CPU saturated" (env: DIAG_CPU_SATURATION_THRESHOLD, default: 2.0)
 	DiagMemExhaustedThreshold  float64 // Memory % above which build is "memory exhausted" (env: DIAG_MEM_EXHAUSTED_THRESHOLD, default: 90)
 	DiagDiskFullThreshold      float64 // Disk % above which build is "disk full" (env: DIAG_DISK_FULL_THRESHOLD, default: 90)
+
+	// Deployment mode settings (only used when Role == "deployment")
+	EnvironmentID         string        // Deployment environment ID (env: ENVIRONMENT_ID)
+	DeployBaseDir         string        // Base directory for deployment state (env: DEPLOY_BASE_DIR, default: /var/lib/sam-deploy)
+	DeploySigningPubKey   string        // Ed25519 public key for payload verification, base64-encoded (env: DEPLOY_SIGNING_PUB_KEY)
+	DeployRuntimeTimeout  time.Duration // Max time for deployment-node host dependency setup (env: DEPLOY_RUNTIME_TIMEOUT, default: 15m)
+	DeployHealthTimeout   time.Duration // Max time to wait for container health checks (env: DEPLOY_HEALTH_TIMEOUT, default: 5m)
+	DeployComposeCmd      string        // Docker Compose command (env: DEPLOY_COMPOSE_CMD, default: "docker compose")
+	DeployACMEEmail       string        // Contact email for ACME/Let's Encrypt account (env: DEPLOY_ACME_EMAIL)
+	DeployACMECA          string        // Optional ACME CA directory URL override, e.g. LE staging (env: DEPLOY_ACME_CA)
+	DeployTeardownTimeout time.Duration // Max time for deployment environment teardown (env: DEPLOY_TEARDOWN_TIMEOUT)
+
+	// Deployment artifact/apply watchdog settings - configurable per constitution principle XI.
+	DeployArtifactDialTimeout           time.Duration // TCP dial timeout for artifact downloads (env: DEPLOY_ARTIFACT_DIAL_TIMEOUT)
+	DeployArtifactTLSHandshakeTimeout   time.Duration // TLS handshake timeout for artifact downloads (env: DEPLOY_ARTIFACT_TLS_HANDSHAKE_TIMEOUT)
+	DeployArtifactResponseHeaderTimeout time.Duration // Response-header timeout for artifact downloads (env: DEPLOY_ARTIFACT_RESPONSE_HEADER_TIMEOUT)
+	DeployArtifactIdleTimeout           time.Duration // Max no-progress body read interval for artifact downloads (env: DEPLOY_ARTIFACT_IDLE_TIMEOUT)
+	DeployApplyIdleTimeout              time.Duration // Max no-progress interval for detached apply goroutines (env: DEPLOY_APPLY_IDLE_TIMEOUT)
+	ComposeOutputRetentionBytes         int64         // Max compose output bytes retained (tail) for apply error messages (env: COMPOSE_OUTPUT_RETENTION_BYTES)
+	DeployBuildPublishTimeout           time.Duration // Max host build/push/release publish duration (env: DEPLOY_BUILD_PUBLISH_TIMEOUT)
+	DeployPreflightCommandTimeout       time.Duration // Max deployment preflight diagnostic command duration (env: DEPLOY_PREFLIGHT_COMMAND_TIMEOUT)
 }
 
-// Load reads configuration from environment variables.
-func Load() (*Config, error) {
-	controlPlaneURL := getEnv("CONTROL_PLANE_URL", "")
-	repository := getEnv("REPOSITORY", "")
-
-	workspaceDir := getEnv("WORKSPACE_DIR", "")
-	if workspaceDir == "" {
-		workspaceBaseDir := getEnv("WORKSPACE_BASE_DIR", "/workspace")
-		workspaceDir = deriveWorkspaceDir(workspaceBaseDir, repository)
-	}
-
-	containerLabelValue := getEnv("CONTAINER_LABEL_VALUE", "")
-	if containerLabelValue == "" {
-		// The devcontainer CLI labels containers with the local folder path used for --workspace-folder.
-		containerLabelValue = workspaceDir
-	}
-
-	containerWorkDir := getEnv("CONTAINER_WORK_DIR", "")
-	if containerWorkDir == "" {
-		// Devcontainers mount the workspace under /workspaces/<foldername> by default, where <foldername>
-		// matches the basename of the local folder passed to --workspace-folder.
-		containerWorkDir = deriveContainerWorkDir(workspaceDir)
-	}
-
-	cfg := &Config{
-		// Default values
-		Port:           getEnvInt("VM_AGENT_PORT", 8080),
-		Host:           getEnv("VM_AGENT_HOST", "0.0.0.0"),
-		AllowedOrigins: getEnvStringSlice("ALLOWED_ORIGINS", nil), // Parsed from comma-separated list
-
-		ControlPlaneURL: controlPlaneURL,
-		JWKSEndpoint:    getEnv("JWKS_ENDPOINT", ""),
-
-		// JWT settings - derived from control plane URL by default
-		JWTAudience: getEnv("JWT_AUDIENCE", "workspace-terminal"),
-		JWTIssuer:   getEnv("JWT_ISSUER", ""), // Will be derived from ControlPlaneURL if not set
-
-		NodeID:             getEnv("NODE_ID", getEnv("WORKSPACE_ID", "")),
-		WorkspaceID:        getEnv("WORKSPACE_ID", ""),
-		CallbackToken:      getEnv("CALLBACK_TOKEN", ""),
-		BootstrapToken:     getEnv("BOOTSTRAP_TOKEN", ""),
-		Repository:         repository,
-		Branch:             getEnv("BRANCH", "main"),
-		WorkspaceDir:       workspaceDir,
-		BootstrapStatePath: getEnv("BOOTSTRAP_STATE_PATH", "/var/lib/vm-agent/bootstrap-state.json"),
-		BootstrapMaxWait:   getEnvDuration("BOOTSTRAP_MAX_WAIT", 5*time.Minute),
-		// Must be <= API-side TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS (default 30m).
-		// If larger, the API declares the workspace dead while bootstrap is still running.
-		BootstrapTimeout: getEnvDuration("BOOTSTRAP_TIMEOUT", 30*time.Minute),
-
-		SessionTTL:             getEnvDuration("SESSION_TTL", 24*time.Hour),
-		SessionCleanupInterval: getEnvDuration("SESSION_CLEANUP_INTERVAL", 1*time.Minute),
-		SessionMaxCount:        getEnvInt("SESSION_MAX_COUNT", 100),
-		CookieName:             getEnv("COOKIE_NAME", "vm_session"),
-		CookieSecure:           getEnvBool("COOKIE_SECURE", true),
-
-		HeartbeatInterval: getEnvDuration("HEARTBEAT_INTERVAL", 60*time.Second),
-
-		// HTTP server timeouts - configurable per constitution
-		HTTPReadTimeout:     getEnvDuration("HTTP_READ_TIMEOUT", 15*time.Second),
-		HTTPWriteTimeout:    getEnvDuration("HTTP_WRITE_TIMEOUT", 15*time.Second),
-		HTTPIdleTimeout:     getEnvDuration("HTTP_IDLE_TIMEOUT", 60*time.Second),
-		HTTPCallbackTimeout: getEnvDuration("HTTP_CALLBACK_TIMEOUT", 30*time.Second),
-
-		// WebSocket buffer sizes - configurable per constitution
-		WSReadBufferSize:  getEnvInt("WS_READ_BUFFER_SIZE", 1024),
-		WSWriteBufferSize: getEnvInt("WS_WRITE_BUFFER_SIZE", 1024),
-
-		DefaultShell: getEnv("DEFAULT_SHELL", "/bin/bash"),
-		DefaultRows:  getEnvInt("DEFAULT_ROWS", 24),
-		DefaultCols:  getEnvInt("DEFAULT_COLS", 80),
-
-		// PTY session persistence - configurable per constitution principle XI.
-		// Default keeps orphaned sessions until explicitly closed by the user.
-		PTYOrphanGracePeriod: time.Duration(getEnvInt("PTY_ORPHAN_GRACE_PERIOD", 0)) * time.Second,
-		PTYOutputBufferSize:  getEnvInt("PTY_OUTPUT_BUFFER_SIZE", 262144), // 256 KB default
-
-		// ACP settings - configurable per constitution principle XI
-		ACPInitTimeoutMs:         getEnvInt("ACP_INIT_TIMEOUT_MS", 30000),
-		ACPInitializeTimeoutMs:   getEnvInt("ACP_INITIALIZE_TIMEOUT_MS", 0),   // 0 = use ACPInitTimeoutMs
-		ACPNewSessionTimeoutMs:   getEnvInt("ACP_NEW_SESSION_TIMEOUT_MS", 0),  // 0 = use ACPInitTimeoutMs
-		ACPLoadSessionTimeoutMs:  getEnvInt("ACP_LOAD_SESSION_TIMEOUT_MS", 0), // 0 = use ACPInitTimeoutMs
-		ACPReconnectDelayMs:      getEnvInt("ACP_RECONNECT_DELAY_MS", 2000),
-		ACPReconnectTimeoutMs:    getEnvInt("ACP_RECONNECT_TIMEOUT_MS", 30000),
-		ACPMaxRestartAttempts:    getEnvInt("ACP_MAX_RESTART_ATTEMPTS", 3),
-		ACPMessageBufferSize:     getEnvInt("ACP_MESSAGE_BUFFER_SIZE", 5000),
-		ACPViewerSendBuffer:      getEnvInt("ACP_VIEWER_SEND_BUFFER", 256),
-		ACPPingInterval:          getEnvDuration("ACP_PING_INTERVAL", 30*time.Second),
-		ACPPongTimeout:           getEnvDuration("ACP_PONG_TIMEOUT", 10*time.Second),
-		ACPPromptTimeout:         getEnvDuration("ACP_PROMPT_TIMEOUT", 0),
-		ACPTaskPromptTimeout:     getEnvDuration("ACP_TASK_PROMPT_TIMEOUT", 6*time.Hour),
-		ACPPromptCancelGrace:     getEnvDuration("ACP_PROMPT_CANCEL_GRACE_PERIOD", 5*time.Second),
-		ACPIdleSuspendTimeout:    getEnvDuration("ACP_IDLE_SUSPEND_TIMEOUT", 30*time.Minute),
-		ACPNotifSerializeTimeout: getEnvDuration("ACP_NOTIF_SERIALIZE_TIMEOUT", 5*time.Second),
-		ACPHeartbeatInterval:     getEnvDuration("ACP_HEARTBEAT_INTERVAL", 60*time.Second),
-
-		// Event log settings
-		MaxNodeEvents:      getEnvInt("MAX_NODE_EVENTS", 500),
-		MaxWorkspaceEvents: getEnvInt("MAX_WORKSPACE_EVENTS", 500),
-
-		ContainerMode: getEnvBool("CONTAINER_MODE", true),
-		// Optional manual override for docker exec user.
-		// When empty, bootstrap resolves the effective devcontainer user
-		// from devcontainer configuration/metadata at runtime.
-		ContainerUser:       getEnv("CONTAINER_USER", ""),
-		ContainerWorkDir:    containerWorkDir,
-		ContainerLabelKey:   getEnv("CONTAINER_LABEL_KEY", "devcontainer.local_folder"),
-		ContainerLabelValue: containerLabelValue,
-		ContainerCacheTTL:   getEnvDuration("CONTAINER_CACHE_TTL", 30*time.Second),
-
-		// Default installs Node.js (required by ACP adapters) and claude-agent-acp.
-		// Override via ADDITIONAL_FEATURES env var. Set to empty string to disable.
-		AdditionalFeatures: getEnv("ADDITIONAL_FEATURES", DefaultAdditionalFeatures),
-
-		// Default devcontainer settings for repos without their own config.
-		DefaultDevcontainerImage:      getEnv("DEFAULT_DEVCONTAINER_IMAGE", DefaultDevcontainerImage),
-		DefaultDevcontainerConfigPath: getEnv("DEFAULT_DEVCONTAINER_CONFIG_PATH", DefaultDevcontainerConfigPath),
-		DefaultDevcontainerRemoteUser: getEnv("DEFAULT_DEVCONTAINER_REMOTE_USER", ""), // Empty = omit, use image default
-
-		// Devcontainer build timeout — prevents indefinite hangs on network failures.
-		DevcontainerBuildTimeout: getEnvDuration("DEVCONTAINER_BUILD_TIMEOUT", 15*time.Minute),
-
-		// Devcontainer cache settings — opportunistic image caching.
-		DevcontainerCacheEnabled:  getEnvBool("DEVCONTAINER_CACHE_ENABLED", false),
-		DevcontainerCacheRegistry: getEnv("DEVCONTAINER_CACHE_REGISTRY", "ghcr.io"),
-		DevcontainerCacheUsername: getEnv("DEVCONTAINER_CACHE_USERNAME", ""),
-		DevcontainerCachePassword: getEnv("DEVCONTAINER_CACHE_PASSWORD", ""),
-		DevcontainerCacheRef:      getEnv("DEVCONTAINER_CACHE_REF", ""),
-
-		// Cloud provider (set via cloud-init)
-		Provider: getEnv("PROVIDER", ""),
-
-		// Project linkage (set via cloud-init)
-		ProjectID:     getEnv("PROJECT_ID", ""),
-		ChatSessionID: getEnv("CHAT_SESSION_ID", ""),
-		TaskID:        getEnv("TASK_ID", ""),
-		TaskMode:      getEnv("TASK_MODE", "task"),
-
-		// Persistence settings
-		PersistenceDBPath: getEnv("PERSISTENCE_DB_PATH", "/var/lib/vm-agent/state.db"),
-		EventStoreDBPath:  getEnv("EVENTSTORE_DB_PATH", "/var/lib/vm-agent/events.db"),
-		MetricsDBPath:     getEnv("METRICS_DB_PATH", "/var/lib/vm-agent/metrics.db"),
-		MetricsInterval:   getEnvDuration("METRICS_INTERVAL", time.Minute),
-
-		// Git integration settings - configurable per constitution principle XI
-		GitExecTimeout:           getEnvDuration("GIT_EXEC_TIMEOUT", 30*time.Second),
-		GitFileMaxSize:           getEnvInt("GIT_FILE_MAX_SIZE", 1048576), // 1 MB
-		GitWorktreeTimeout:       getEnvDuration("GIT_WORKTREE_TIMEOUT", 30*time.Second),
-		WorktreeCacheTTL:         getEnvDuration("WORKTREE_CACHE_TTL", 5*time.Second),
-		MaxWorktreesPerWorkspace: getEnvInt("MAX_WORKTREES_PER_WORKSPACE", 5),
-
-		// File browser settings
-		FileListTimeout:    getEnvDuration("FILE_LIST_TIMEOUT", 10*time.Second),
-		FileListMaxEntries: getEnvInt("FILE_LIST_MAX_ENTRIES", 1000),
-		FileFindTimeout:    getEnvDuration("FILE_FIND_TIMEOUT", 15*time.Second),
-		FileFindMaxEntries: getEnvInt("FILE_FIND_MAX_ENTRIES", 5000),
-		FileRawMaxSize:     getEnvInt("FILE_RAW_MAX_SIZE", 50*1024*1024), // 50 MB
-		FileRawTimeout:     getEnvDuration("FILE_RAW_TIMEOUT", 60*time.Second),
-
-		// File transfer settings
-		FileUploadMaxBytes:      getEnvInt64("FILE_UPLOAD_MAX_BYTES", 50*1024*1024),        // 50 MB
-		FileUploadBatchMaxBytes: getEnvInt64("FILE_UPLOAD_BATCH_MAX_BYTES", 250*1024*1024), // 250 MB
-		FileUploadTimeout:       getEnvDuration("FILE_UPLOAD_TIMEOUT", 120*time.Second),
-		FileDownloadTimeout:     getEnvDuration("FILE_DOWNLOAD_TIMEOUT", 60*time.Second),
-		FileDownloadMaxBytes:    getEnvInt64("FILE_DOWNLOAD_MAX_BYTES", 50*1024*1024), // 50 MB
-
-		// Callback retry settings - configurable per constitution principle XI
-		WorkspaceReadyCallbackTimeout: getEnvDuration("WORKSPACE_READY_CALLBACK_TIMEOUT", 10*time.Second),
-
-		// Error reporting settings - configurable per constitution principle XI
-		ErrorReportFlushInterval: getEnvDuration("ERROR_REPORT_FLUSH_INTERVAL", 30*time.Second),
-		ErrorReportMaxBatchSize:  getEnvInt("ERROR_REPORT_MAX_BATCH_SIZE", 10),
-		ErrorReportMaxQueueSize:  getEnvInt("ERROR_REPORT_MAX_QUEUE_SIZE", 100),
-		ErrorReportHTTPTimeout:   getEnvDuration("ERROR_REPORT_HTTP_TIMEOUT", 10*time.Second),
-
-		// System info settings - configurable per constitution principle XI
-		SysInfoDockerTimeout:  getEnvDuration("SYSINFO_DOCKER_TIMEOUT", 10*time.Second),
-		SysInfoVersionTimeout: getEnvDuration("SYSINFO_VERSION_TIMEOUT", 5*time.Second),
-		SysInfoCacheTTL:       getEnvDuration("SYSINFO_CACHE_TTL", 5*time.Second),
-
-		// Log reader/stream settings - configurable per constitution principle XI
-		LogReaderTimeout:      getEnvDuration("LOG_READER_TIMEOUT", 30*time.Second),
-		LogStreamPingInterval: getEnvDuration("LOG_STREAM_PING_INTERVAL", 30*time.Second),
-		LogStreamPongTimeout:  getEnvDuration("LOG_STREAM_PONG_TIMEOUT", 90*time.Second),
-
-		// TLS settings - configurable per constitution principle XI
-		TLSCertPath: getEnv("TLS_CERT_PATH", ""),
-		TLSKeyPath:  getEnv("TLS_KEY_PATH", ""),
-
-		// Port scanning settings - configurable per constitution principle XI
-		PortScanEnabled:      getEnvBool("PORT_SCAN_ENABLED", true),
-		PortScanInterval:     getEnvDuration("PORT_SCAN_INTERVAL", 5*time.Second),
-		PortScanExclude:      getEnv("PORT_SCAN_EXCLUDE", "22,2375,2376,8443"),
-		PortScanEphemeralMin: getEnvInt("PORT_SCAN_EPHEMERAL_MIN", 32768),
-		PortProxyCacheTTL:    getEnvDuration("PORT_PROXY_CACHE_TTL", 30*time.Second),
-
-		DiagCPUSaturationThreshold: getEnvFloat("DIAG_CPU_SATURATION_THRESHOLD", 2.0),
-		DiagMemExhaustedThreshold:  getEnvFloat("DIAG_MEM_EXHAUSTED_THRESHOLD", 90),
-		DiagDiskFullThreshold:      getEnvFloat("DIAG_DISK_FULL_THRESHOLD", 90),
-	}
-
-	// Derive TLS enabled state from cert/key paths
-	certSet := cfg.TLSCertPath != ""
-	keySet := cfg.TLSKeyPath != ""
-	if certSet != keySet {
-		return nil, fmt.Errorf(
-			"TLS misconfiguration: TLS_CERT_PATH and TLS_KEY_PATH must both be set or both be empty "+
-				"(cert=%q, key=%q)", cfg.TLSCertPath, cfg.TLSKeyPath)
-	}
-	cfg.TLSEnabled = certSet && keySet
-
-	if cfg.TLSEnabled {
-		if _, err := os.Stat(cfg.TLSCertPath); err != nil {
-			return nil, fmt.Errorf("TLS_CERT_PATH %q: %w", cfg.TLSCertPath, err)
-		}
-		if _, err := os.Stat(cfg.TLSKeyPath); err != nil {
-			return nil, fmt.Errorf("TLS_KEY_PATH %q: %w", cfg.TLSKeyPath, err)
-		}
-	}
-
-	// Validate required fields
-	if cfg.ControlPlaneURL == "" {
-		return nil, fmt.Errorf("CONTROL_PLANE_URL is required")
-	}
-
-	// Derive JWKS endpoint if not set
-	if cfg.JWKSEndpoint == "" {
-		cfg.JWKSEndpoint = cfg.ControlPlaneURL + "/.well-known/jwks.json"
-	}
-
-	// Derive JWT issuer from control plane URL if not explicitly set
-	if cfg.JWTIssuer == "" {
-		cfg.JWTIssuer = cfg.ControlPlaneURL
-	}
-
-	// Derive allowed origins from control plane URL if not explicitly set
-	if len(cfg.AllowedOrigins) == 0 {
-		// Extract base domain from control plane URL to allow workspace subdomains
-		// e.g., https://api.example.com -> allow *.example.com
-		cfg.AllowedOrigins = deriveAllowedOrigins(cfg.ControlPlaneURL)
-	}
-
-	// Validate TaskMode enum
-	switch cfg.TaskMode {
-	case TaskModeTask, TaskModeConversation:
-		// valid
-	default:
-		return nil, fmt.Errorf("TASK_MODE must be %q or %q, got %q", TaskModeTask, TaskModeConversation, cfg.TaskMode)
-	}
-
-	if cfg.NodeID == "" {
-		return nil, fmt.Errorf("NODE_ID is required")
-	}
-	if cfg.MaxWorktreesPerWorkspace < 1 {
-		cfg.MaxWorktreesPerWorkspace = 1
-	}
-	if cfg.WorktreeCacheTTL <= 0 {
-		cfg.WorktreeCacheTTL = 5 * time.Second
-	}
-
-	return cfg, nil
+// IsDeploymentMode returns true if the agent is running in deployment role.
+func (c *Config) IsDeploymentMode() bool {
+	return c.Role == RoleDeployment
 }
 
-func deriveWorkspaceDir(workspaceBaseDir, repository string) string {
-	baseDir := strings.TrimSpace(workspaceBaseDir)
-	if baseDir == "" {
-		baseDir = "/workspace"
-	}
-
-	repoDirName := DeriveRepoDirName(repository)
-	if repoDirName == "" {
-		// Preserve legacy behavior when the repo is unknown: a fixed base directory.
-		return baseDir
-	}
-
-	return filepath.Join(baseDir, repoDirName)
-}
-
-func deriveContainerWorkDir(workspaceDir string) string {
-	if strings.TrimSpace(workspaceDir) == "" {
-		return "/workspaces"
-	}
-	base := filepath.Base(workspaceDir)
-	if base == "" || base == "." || base == "/" {
-		return "/workspaces"
-	}
-	return filepath.Join("/workspaces", base)
-}
-
-// DeriveRepoDirName extracts a filesystem-safe directory name from a repository
-// URL or owner/repo string. Exported for use by the bootstrap package.
-func DeriveRepoDirName(repository string) string {
-	repo := strings.TrimSpace(repository)
-	if repo == "" {
-		return ""
-	}
-
-	// Handle full URLs (https://github.com/org/repo.git).
-	if strings.Contains(repo, "://") {
-		if parsed, err := url.Parse(repo); err == nil {
-			repo = parsed.Path
-		}
-	}
-
-	repo = strings.Trim(repo, "/")
-	if repo == "" {
-		return ""
-	}
-
-	parts := strings.Split(repo, "/")
-	name := parts[len(parts)-1]
-	name = strings.TrimSuffix(name, ".git")
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return ""
-	}
-
-	// Keep the name filesystem-safe. This is intentionally conservative.
-	var b strings.Builder
-	b.Grow(len(name))
-	for _, r := range name {
-		switch {
-		case r >= 'a' && r <= 'z':
-			b.WriteRune(r)
-		case r >= 'A' && r <= 'Z':
-			b.WriteRune(r)
-		case r >= '0' && r <= '9':
-			b.WriteRune(r)
-		case r == '-' || r == '_' || r == '.':
-			b.WriteRune(r)
-		default:
-			b.WriteRune('-')
-		}
-	}
-	safe := strings.Trim(b.String(), "-")
-	return safe
-}
-
-// DeriveBaseDomain extracts the base domain from a control plane URL by stripping
-// the protocol, path, port, and "api." subdomain prefix.
-// Example: "https://api.example.com/foo" → "example.com"
-func DeriveBaseDomain(controlPlaneURL string) string {
-	host := controlPlaneURL
-	host = strings.TrimPrefix(host, "https://")
-	host = strings.TrimPrefix(host, "http://")
-
-	if idx := strings.Index(host, "/"); idx != -1 {
-		host = host[:idx]
-	}
-	if idx := strings.Index(host, ":"); idx != -1 {
-		host = host[:idx]
-	}
-	if strings.HasPrefix(host, "api.") {
-		return host[4:]
-	}
-	return host
-}
-
-// BuildSAMEnvFallback returns KEY=value pairs for SAM environment variables
-// derived from the vm-agent config. Used as fallback injection into ACP sessions
-// when the bootstrap-written /etc/sam/env file is missing or incomplete.
-func (c *Config) BuildSAMEnvFallback() []string {
-	baseDomain := DeriveBaseDomain(c.ControlPlaneURL)
-
-	type entry struct{ key, value string }
-	entries := []entry{
-		{"SAM_API_URL", strings.TrimRight(c.ControlPlaneURL, "/")},
-		{"SAM_BRANCH", c.Branch},
-		{"SAM_NODE_ID", c.NodeID},
-		{"SAM_PROJECT_ID", c.ProjectID},
-		{"SAM_CHAT_SESSION_ID", c.ChatSessionID},
-		{"SAM_TASK_ID", c.TaskID},
-		{"SAM_TASK_MODE", c.TaskMode},
-		{"SAM_REPOSITORY", c.Repository},
-		{"SAM_WORKSPACE_ID", c.WorkspaceID},
-	}
-	if baseDomain != "" {
-		entries = append(entries, entry{"SAM_BASE_DOMAIN", baseDomain})
-		if c.WorkspaceID != "" {
-			entries = append(entries, entry{"SAM_WORKSPACE_URL", fmt.Sprintf("https://ws-%s.%s", c.WorkspaceID, baseDomain)})
-		}
-	}
-
-	var result []string
-	for _, e := range entries {
-		if e.value != "" {
-			result = append(result, e.key+"="+e.value)
-		}
-	}
-	return result
-}
-
-// deriveAllowedOrigins extracts allowed origins from the control plane URL.
-// This allows the control plane domain and workspace subdomains.
-func deriveAllowedOrigins(controlPlaneURL string) []string {
-	baseDomain := DeriveBaseDomain(controlPlaneURL)
-	return []string{
-		controlPlaneURL,
-		"https://*." + baseDomain, // Allow workspace subdomains
-	}
+// IsStandaloneMode returns true if the agent is running directly inside a
+// single-workspace container without Docker/devcontainer indirection.
+func (c *Config) IsStandaloneMode() bool {
+	return c.Role == RoleStandalone
 }

@@ -1,4 +1,4 @@
-import type { TaskExecutionStep,TaskStatus } from '@simple-agent-manager/shared';
+import type { TaskExecutionStep, TaskStatus } from '@simple-agent-manager/shared';
 import { TASK_EXECUTION_STEPS } from '@simple-agent-manager/shared';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
@@ -23,8 +23,9 @@ const VALID_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
   draft: ['ready', 'cancelled'],
   ready: ['queued', 'delegated', 'cancelled'],
   queued: ['delegated', 'failed', 'cancelled'],
-  delegated: ['in_progress', 'failed', 'cancelled'],
-  in_progress: ['completed', 'failed', 'cancelled'],
+  delegated: ['in_progress', 'sleeping', 'failed', 'cancelled'],
+  in_progress: ['sleeping', 'completed', 'failed', 'cancelled'],
+  sleeping: ['queued', 'delegated', 'in_progress', 'cancelled'],
   completed: [],
   failed: ['ready', 'cancelled'],
   cancelled: ['ready'],
@@ -103,7 +104,7 @@ describe('canTransitionTaskStatus — exhaustive matrix', () => {
   });
 
   // Verify complete matrix coverage
-  it('covers all 64 combinations (8 × 8)', () => {
+  it('covers all 81 combinations (9 × 9)', () => {
     let testedCount = 0;
     for (const from of TASK_STATUSES) {
       for (const to of TASK_STATUSES) {
@@ -113,7 +114,7 @@ describe('canTransitionTaskStatus — exhaustive matrix', () => {
         testedCount++;
       }
     }
-    expect(testedCount).toBe(64);
+    expect(testedCount).toBe(81);
   });
 });
 
@@ -168,7 +169,7 @@ describe('isTerminalStatus', () => {
     },
   );
 
-  it.each(['draft', 'ready', 'queued', 'delegated', 'in_progress'] as TaskStatus[])(
+  it.each(['draft', 'ready', 'queued', 'delegated', 'in_progress', 'sleeping'] as TaskStatus[])(
     '%s is not terminal',
     (status) => {
       expect(isTerminalStatus(status)).toBe(false);
@@ -194,7 +195,7 @@ describe('isExecutableTaskStatus', () => {
     },
   );
 
-  it.each(['draft', 'ready', 'completed', 'failed', 'cancelled'] as TaskStatus[])(
+  it.each(['draft', 'ready', 'sleeping', 'completed', 'failed', 'cancelled'] as TaskStatus[])(
     '%s is not executable',
     (status) => {
       expect(isExecutableTaskStatus(status)).toBe(false);
@@ -224,13 +225,16 @@ describe('getExecutionStepIndex', () => {
     expect(getExecutionStepIndex('awaiting_followup')).toBe(TASK_EXECUTION_STEPS.length - 1);
   });
 
-  it('steps are ordered: node_selection < node_provisioning < node_agent_ready < workspace_creation < workspace_ready < agent_session < running < awaiting_followup', () => {
+  it('steps are ordered from node admission through follow-up', () => {
     const ordered: TaskExecutionStep[] = [
       'node_selection',
+      'waiting_for_node_capacity',
       'node_provisioning',
       'node_agent_ready',
       'workspace_creation',
+      'workspace_dispatch',
       'workspace_ready',
+      'attachment_transfer',
       'agent_session',
       'running',
       'awaiting_followup',
@@ -278,6 +282,10 @@ describe('canProgressExecutionStep', () => {
 
     it('workspace_creation → agent_session (skip workspace_ready)', () => {
       expect(canProgressExecutionStep('workspace_creation', 'agent_session')).toBe(true);
+    });
+
+    it('workspace_dispatch → agent_session (skip workspace_ready)', () => {
+      expect(canProgressExecutionStep('workspace_dispatch', 'agent_session')).toBe(true);
     });
   });
 
@@ -379,7 +387,7 @@ describe('state machine structural invariants', () => {
 
   it('cancellation is available from all non-terminal, non-completed states', () => {
     const cancellableStatuses: TaskStatus[] = [
-      'draft', 'ready', 'queued', 'delegated', 'in_progress', 'failed',
+      'draft', 'ready', 'queued', 'delegated', 'in_progress', 'sleeping', 'failed',
     ];
     for (const status of cancellableStatuses) {
       expect(canTransitionTaskStatus(status, 'cancelled')).toBe(true);
@@ -446,8 +454,8 @@ describe('property-based tests', () => {
     fc.assert(
       fc.property(statusArb, (status) => {
         const allowed = getAllowedTaskTransitions(status);
-        // No state has more than 3 outgoing transitions
-        expect(allowed.length).toBeLessThanOrEqual(3);
+        // No state has more than 4 outgoing transitions
+        expect(allowed.length).toBeLessThanOrEqual(4);
       }),
     );
   });
@@ -492,12 +500,24 @@ describe('property-based tests', () => {
 // Edge cases and regression guards
 // =============================================================================
 describe('edge cases', () => {
-  it('TASK_STATUSES has exactly 8 statuses', () => {
-    expect(TASK_STATUSES).toHaveLength(8);
+  it('TASK_STATUSES has exactly 9 statuses', () => {
+    expect(TASK_STATUSES).toHaveLength(9);
   });
 
-  it('TASK_EXECUTION_STEPS has exactly 9 steps', () => {
-    expect(TASK_EXECUTION_STEPS).toHaveLength(9);
+  it('TASK_EXECUTION_STEPS has the expected ordered steps', () => {
+    expect(TASK_EXECUTION_STEPS).toEqual([
+      'node_selection',
+      'waiting_for_node_capacity',
+      'node_provisioning',
+      'node_agent_ready',
+      'workspace_creation',
+      'workspace_dispatch',
+      'workspace_ready',
+      'attachment_transfer',
+      'agent_session',
+      'running',
+      'awaiting_followup',
+    ]);
   });
 
   it('execution steps include awaiting_followup', () => {

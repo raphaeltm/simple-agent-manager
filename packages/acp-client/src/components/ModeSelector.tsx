@@ -22,6 +22,7 @@ export function ModeSelector({ modes, currentMode, onSelectMode }: ModeSelectorP
           <button
             key={mode}
             onClick={() => onSelectMode(mode)}
+            aria-pressed={mode === currentMode}
             className={`px-2.5 py-1 text-xs font-medium capitalize transition-colors ${
               mode === currentMode
                 ? 'bg-blue-600 text-white'

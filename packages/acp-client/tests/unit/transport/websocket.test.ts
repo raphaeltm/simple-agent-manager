@@ -107,6 +107,56 @@ describe('createAcpWebSocketTransport', () => {
     expect(onAgentStatus).not.toHaveBeenCalled();
   });
 
+  it('routes agent_crash_report messages to onAcpMessage by default', () => {
+    createAcpWebSocketTransport(ws, onAgentStatus, onAcpMessage, onClose, onError, onLifecycleEvent);
+
+    ws._simulateMessage(JSON.stringify({
+      type: 'agent_crash_report',
+      agentType: 'openai-codex',
+      recovered: true,
+      message: 'Codex crashed',
+      attribution: "The crash points to a bug in Codex's agent process, not SAM's workspace runner.",
+      stderrTruncated: false,
+      suggestion: 'Please report this to OpenAI with redacted diagnostics.',
+      timestamp: '2026-05-22T00:00:00Z',
+    }));
+
+    expect(onAcpMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'agent_crash_report', recovered: true })
+    );
+    expect(onAgentStatus).not.toHaveBeenCalled();
+  });
+
+  it('routes agent_crash_report messages to explicit crash callback when provided', () => {
+    const onAgentCrashReport = vi.fn();
+    createAcpWebSocketTransport({
+      ws,
+      onAgentStatus,
+      onAcpMessage,
+      onAgentCrashReport,
+      onClose,
+      onError,
+      onLifecycleEvent,
+    });
+
+    ws._simulateMessage(JSON.stringify({
+      type: 'agent_crash_report',
+      agentType: 'claude-code',
+      recovered: false,
+      message: 'Claude Code crashed',
+      attribution: "The crash points to a bug in Claude Code's agent process, not SAM's workspace runner.",
+      stderrTruncated: true,
+      suggestion: 'Please report this to Anthropic with redacted diagnostics.',
+      recoveryError: 'LoadSession failed',
+      timestamp: '2026-05-22T00:00:00Z',
+    }));
+
+    expect(onAgentCrashReport).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'agent_crash_report', recovered: false })
+    );
+    expect(onAcpMessage).not.toHaveBeenCalled();
+  });
+
   it('logs lifecycle event when JSON parse fails', () => {
     createAcpWebSocketTransport(ws, onAgentStatus, onAcpMessage, onClose, onError, onLifecycleEvent);
 

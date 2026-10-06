@@ -2,16 +2,35 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/workspace/vm-agent/internal/config"
+	"github.com/workspace/vm-agent/internal/deploy"
 	"github.com/workspace/vm-agent/internal/errorreport"
+	"github.com/workspace/vm-agent/internal/persistence"
+	"github.com/workspace/vm-agent/internal/sysinfo"
 )
+
+func TestWorkspaceRuntimeReportsAdmissionMetricsStatuses(t *testing.T) {
+	for _, status := range []string{"running", "creating", "recovery"} {
+		if !workspaceRuntimeReportsAdmissionMetrics(status) {
+			t.Fatalf("status %q should report admission metrics", status)
+		}
+	}
+	for _, status := range []string{"", "stopped", "error"} {
+		if workspaceRuntimeReportsAdmissionMetrics(status) {
+			t.Fatalf("status %q should not report admission metrics", status)
+		}
+	}
+}
 
 // newTestErrorReporter creates a minimal error reporter for tests.
 func newTestErrorReporter() *errorreport.Reporter {
@@ -85,6 +104,273 @@ func TestCallbackTokenRefresh(t *testing.T) {
 
 	if heartbeatCount != 2 {
 		t.Fatalf("expected 2 heartbeats, got %d", heartbeatCount)
+	}
+}
+
+func TestNodeHeartbeatTerminalStatusStopsFurtherHeartbeats(t *testing.T) {
+	for _, status := range []int{
+		http.StatusUnauthorized,
+		http.StatusForbidden,
+		http.StatusNotFound,
+		http.StatusGone,
+	} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			var heartbeatCount int
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				heartbeatCount++
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte(`{"error":"terminal","message":"callback resource is gone"}`))
+			}))
+			defer ts.Close()
+
+			cfg := &config.Config{
+				ControlPlaneURL:   ts.URL,
+				NodeID:            "deleted-node-001",
+				CallbackToken:     "callback-token",
+				HeartbeatInterval: time.Minute,
+			}
+			s := &Server{
+				config:        cfg,
+				callbackToken: cfg.CallbackToken,
+				workspaces:    map[string]*WorkspaceRuntime{},
+				errorReporter: newTestErrorReporter(),
+				done:          make(chan struct{}),
+			}
+
+			s.sendNodeHeartbeat()
+
+			if !s.controlPlaneCallbacksStopped() {
+				t.Fatal("expected terminal heartbeat response to stop control-plane callbacks")
+			}
+
+			s.sendNodeHeartbeat()
+
+			if heartbeatCount != 1 {
+				t.Fatalf("expected no retry after terminal heartbeat response, got %d requests", heartbeatCount)
+			}
+		})
+	}
+}
+
+func TestCreatingWorkspaceCountIncludesQueuedAndActiveBuilds(t *testing.T) {
+	s := &Server{
+		workspaces: map[string]*WorkspaceRuntime{
+			"ws-queued":  {ID: "ws-queued", Status: "creating", ProvisioningActive: true},
+			"ws-active":  {ID: "ws-active", Status: "creating", ProvisioningActive: true},
+			"ws-running": {ID: "ws-running", Status: "running"},
+			"ws-stopped": {ID: "ws-stopped", Status: "stopped"},
+		},
+	}
+
+	if got := s.creatingWorkspaceCount(); got != 2 {
+		t.Fatalf("creatingWorkspaceCount() = %d, want 2", got)
+	}
+	if got := s.activeWorkspaceCount(); got != 1 {
+		t.Fatalf("activeWorkspaceCount() = %d, want 1", got)
+	}
+}
+
+func TestNodeReadyAndHeartbeatReportAgentVersion(t *testing.T) {
+	originalVersion := sysinfo.Version
+	sysinfo.Version = "test-build-sha"
+	t.Cleanup(func() { sysinfo.Version = originalVersion })
+
+	seen := map[string]string{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode %s payload: %v", r.URL.Path, err)
+		}
+		version, _ := payload["agentVersion"].(string)
+		seen[r.URL.Path] = version
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(heartbeatResponse{
+			Status:          "running",
+			LastHeartbeatAt: time.Now().UTC().Format(time.RFC3339),
+			HealthStatus:    "healthy",
+		})
+	}))
+	defer ts.Close()
+
+	cfg := &config.Config{
+		ControlPlaneURL:   ts.URL,
+		NodeID:            "node-version",
+		CallbackToken:     "callback-token",
+		HeartbeatInterval: time.Minute,
+	}
+	s := &Server{
+		config:        cfg,
+		callbackToken: cfg.CallbackToken,
+		errorReporter: newTestErrorReporter(),
+		done:          make(chan struct{}),
+	}
+
+	s.sendNodeReady()
+	s.sendNodeHeartbeat()
+
+	if got := seen["/api/nodes/node-version/ready"]; got != "test-build-sha" {
+		t.Fatalf("ready agentVersion = %q, want test-build-sha", got)
+	}
+	if got := seen["/api/nodes/node-version/heartbeat"]; got != "test-build-sha" {
+		t.Fatalf("heartbeat agentVersion = %q, want test-build-sha", got)
+	}
+}
+
+func TestNodeHeartbeatBuildQueueDepthRolloutCompatible(t *testing.T) {
+	var payload map[string]any
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/nodes/node-build-queue/heartbeat" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode heartbeat payload: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(heartbeatResponse{
+			Status:          "running",
+			LastHeartbeatAt: time.Now().UTC().Format(time.RFC3339),
+			HealthStatus:    "healthy",
+		})
+	}))
+	defer ts.Close()
+
+	cfg := &config.Config{
+		ControlPlaneURL:          ts.URL,
+		NodeID:                   "node-build-queue",
+		CallbackToken:            "callback-token",
+		HeartbeatInterval:        time.Minute,
+		WorkspaceBuildQueueDepth: 3,
+	}
+	s := &Server{
+		config:        cfg,
+		callbackToken: cfg.CallbackToken,
+		workspaces: map[string]*WorkspaceRuntime{
+			"ws-creating": {ID: "ws-creating", Status: "creating", ProvisioningActive: true},
+		},
+		errorReporter: newTestErrorReporter(),
+		done:          make(chan struct{}),
+	}
+
+	s.sendNodeHeartbeat()
+	if payload == nil {
+		t.Fatal("heartbeat payload was not captured")
+	}
+	if _, ok := payload["workspaceBuildQueueDepth"]; ok {
+		t.Fatal("heartbeat should not require a new build-queue-depth field for rollout compatibility")
+	}
+	if got, ok := payload["creatingWorkspaces"].(float64); !ok || got != 1 {
+		t.Fatalf("creatingWorkspaces = %v (%T), want 1", payload["creatingWorkspaces"], payload["creatingWorkspaces"])
+	}
+}
+
+func TestRunDetachedDeploymentApplyCancelsAfterIdleProgress(t *testing.T) {
+	jobID := applyJobID("env-1", 7)
+	releaseRequested := make(chan struct{})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/deploy-release") {
+			close(releaseRequested)
+			<-r.Context().Done()
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer ts.Close()
+
+	store, err := persistence.Open(filepath.Join(t.TempDir(), "vm-agent.db"))
+	if err != nil {
+		t.Fatalf("Open persistence store: %v", err)
+	}
+	defer store.Close()
+
+	s := &Server{
+		config: &config.Config{
+			NodeID:                 "node-1",
+			ControlPlaneURL:        ts.URL,
+			CallbackToken:          "callback-token",
+			DeployApplyIdleTimeout: 40 * time.Millisecond,
+		},
+		store:          store,
+		applyWatchdogs: make(map[string]chan struct{}),
+	}
+	disk, err := deploy.NewDiskState(filepath.Join(t.TempDir(), "state"))
+	if err != nil {
+		t.Fatalf("NewDiskState: %v", err)
+	}
+	engine := deploy.NewEngine(disk, nil, deploy.EngineConfig{
+		EnvironmentID:   "env-1",
+		NodeID:          "node-1",
+		ControlPlaneURL: ts.URL,
+		CallbackToken:   "",
+		HTTPClient:      deploy.NewArtifactHTTPClient(deploy.ArtifactHTTPClientConfig{}),
+		ApplyProgress:   s.persistApplyProgress,
+	})
+
+	// Keep the idle watchdog alive until FetchAndApply reaches the intended
+	// stalled section. Otherwise a loaded CI runner can spend the whole 40ms
+	// budget before the fetch goroutine reaches the test HTTP server.
+	stopProgress := make(chan struct{})
+	var stopProgressOnce sync.Once
+	stopProgressPump := func() {
+		stopProgressOnce.Do(func() {
+			close(stopProgress)
+		})
+	}
+	defer stopProgressPump()
+	go func() {
+		ticker := time.NewTicker(5 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopProgress:
+				return
+			case <-ticker.C:
+				s.signalApplyProgress(jobID)
+			}
+		}
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		s.runDetachedDeploymentApply("env-1", 7, engine)
+		close(done)
+	}()
+
+	select {
+	case <-releaseRequested:
+		stopProgressPump()
+	case <-time.After(time.Second):
+		t.Fatal("deploy-release endpoint was not requested")
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("apply watchdog did not cancel stalled apply")
+	}
+
+	job, err := store.GetJob(jobID)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	if job == nil || job.Status != vmJobStatusFailed || !strings.Contains(job.ErrorMessage, "no progress") {
+		t.Fatalf("expected durable stalled apply failure, got %+v", job)
+	}
+
+	// The stall must be the PRIMARY cause, not something buried inside the child's
+	// error. The child fails BECAUSE we cancelled it, so reporting only its error
+	// (`signal: killed` for compose) makes a self-inflicted timeout
+	// indistinguishable from an OOM kill — which is exactly how the 2026-09-05
+	// incident presented. A Contains() check cannot see this: the cancel cause
+	// propagates into the child's error text, so it passes either way. Anchoring on
+	// the prefix is what discriminates.
+	if !strings.HasPrefix(job.ErrorMessage, "deployment apply stalled:") {
+		t.Fatalf("stall must lead the error message, got %q", job.ErrorMessage)
+	}
+	if !strings.Contains(job.ErrorMessage, "child result:") {
+		t.Fatalf("child result must be retained as context, got %q", job.ErrorMessage)
 	}
 }
 
@@ -171,6 +457,195 @@ func TestHeartbeatNoRefreshOnServerError(t *testing.T) {
 
 	if got := s.getCallbackToken(); got != "keep-this-token" {
 		t.Fatalf("expected token unchanged on error, got %q", got)
+	}
+}
+
+type deploymentHeartbeatHarness struct {
+	server     *Server
+	sitesDir   string
+	composeLog string
+}
+
+func newDeploymentHeartbeatHarness(t *testing.T, configureResponse func(*heartbeatResponse)) *deploymentHeartbeatHarness {
+	t.Helper()
+
+	dir := t.TempDir()
+	activeDir := filepath.Join(dir, "active")
+	sitesDir := filepath.Join(activeDir, "sites")
+	if err := os.MkdirAll(sitesDir, 0755); err != nil {
+		t.Fatalf("mkdir sites: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sitesDir, "env-a.caddy"), []byte("env-a"), 0644); err != nil {
+		t.Fatalf("write env-a snippet: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sitesDir, "env-b.caddy"), []byte("env-b"), 0644); err != nil {
+		t.Fatalf("write env-b snippet: %v", err)
+	}
+
+	disk, err := deploy.NewDiskState(filepath.Join(dir, "deploy", "env-a"))
+	if err != nil {
+		t.Fatalf("NewDiskState: %v", err)
+	}
+	state := &deploy.ReleaseState{Seq: 1, EnvironmentID: "env-a", NodeID: "node-deploy", Status: deploy.StatusApplied}
+	if err := disk.WriteRelease(state, "services: {}\n", "env-a.apps.example.com {\n\treverse_proxy 127.0.0.1:35000\n}\n"); err != nil {
+		t.Fatalf("WriteRelease: %v", err)
+	}
+	if err := disk.SetCurrent(1); err != nil {
+		t.Fatalf("SetCurrent: %v", err)
+	}
+
+	composeLog := filepath.Join(dir, "compose.log")
+	composeScript := filepath.Join(dir, "compose.sh")
+	if err := os.WriteFile(composeScript, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$COMPOSE_LOG\"\n"), 0755); err != nil {
+		t.Fatalf("write compose script: %v", err)
+	}
+	reloadLog := filepath.Join(dir, "reload.log")
+	reloadScript := filepath.Join(dir, "reload.sh")
+	if err := os.WriteFile(reloadScript, []byte("#!/bin/sh\necho reloaded > \"$1\"\n"), 0755); err != nil {
+		t.Fatalf("write reload script: %v", err)
+	}
+	t.Setenv("COMPOSE_LOG", composeLog)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := heartbeatResponse{
+			Status:          "running",
+			LastHeartbeatAt: time.Now().UTC().Format(time.RFC3339),
+			HealthStatus:    "healthy",
+		}
+		configureResponse(&resp)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	t.Cleanup(ts.Close)
+
+	cfg := &config.Config{
+		ControlPlaneURL:   ts.URL,
+		NodeID:            "node-deploy",
+		CallbackToken:     "token",
+		Role:              config.RoleDeployment,
+		DeployBaseDir:     filepath.Join(dir, "deploy"),
+		DeployComposeCmd:  composeScript,
+		HeartbeatInterval: time.Minute,
+	}
+
+	s := &Server{
+		config:        cfg,
+		callbackToken: cfg.CallbackToken,
+		workspaces:    make(map[string]*WorkspaceRuntime),
+		errorReporter: newTestErrorReporter(),
+		done:          make(chan struct{}),
+		deployEngines: make(map[string]*deploy.Engine),
+	}
+	s.SetDeployEngine(deploy.NewEngine(disk, nil, deploy.EngineConfig{
+		EnvironmentID:      "env-a",
+		NodeID:             cfg.NodeID,
+		ControlPlaneURL:    cfg.ControlPlaneURL,
+		CallbackToken:      cfg.CallbackToken,
+		ComposeCmd:         composeScript,
+		ComposeProjectName: "sam-env-env-a",
+		CaddyfilePath:      filepath.Join(activeDir, "Caddyfile"),
+		CaddyReloadCmd:     reloadScript + " " + reloadLog,
+	}))
+
+	return &deploymentHeartbeatHarness{
+		server:     s,
+		sitesDir:   sitesDir,
+		composeLog: composeLog,
+	}
+}
+
+func TestDeploymentHeartbeatMissingEnvironmentListDoesNotRetireExistingEnvironment(t *testing.T) {
+	h := newDeploymentHeartbeatHarness(t, func(resp *heartbeatResponse) {
+		resp.DeployPubKey = ""
+	})
+
+	h.server.sendNodeHeartbeat()
+
+	assertDeploymentSnippetExists(t, h.sitesDir, "env-a")
+	assertDeploymentSnippetExists(t, h.sitesDir, "env-b")
+	assertDeployEngineExists(t, h.server, "env-a")
+	assertDeployEngineMissing(t, h.server, "env-b")
+	assertNoComposeDown(t, h.composeLog)
+}
+
+func TestDeploymentHeartbeatDiscoversActiveEnvironmentWithoutRetiringOmittedEngine(t *testing.T) {
+	h := newDeploymentHeartbeatHarness(t, func(resp *heartbeatResponse) {
+		environments := []deploymentEnvironmentResponse{{EnvironmentID: "env-b"}}
+		resp.Deployment.Environments = &environments
+	})
+
+	h.server.sendNodeHeartbeat()
+
+	assertDeploymentSnippetExists(t, h.sitesDir, "env-a")
+	assertDeploymentSnippetExists(t, h.sitesDir, "env-b")
+	assertDeployEngineExists(t, h.server, "env-a")
+	assertDeployEngineExists(t, h.server, "env-b")
+	assertNoComposeDown(t, h.composeLog)
+}
+
+func TestDeploymentHeartbeatExplicitRetireEnvironment(t *testing.T) {
+	h := newDeploymentHeartbeatHarness(t, func(resp *heartbeatResponse) {
+		resp.Deployment.RetireEnvironments = []deploymentEnvironmentResponse{{EnvironmentID: "env-a"}}
+	})
+
+	h.server.sendNodeHeartbeat()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		_, enginePresent := h.server.deploymentEnginesSnapshot()["env-a"]
+		_, snippetErr := os.Stat(filepath.Join(h.sitesDir, "env-a.caddy"))
+		if os.IsNotExist(snippetErr) && !enginePresent {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err := os.Stat(filepath.Join(h.sitesDir, "env-a.caddy")); !os.IsNotExist(err) {
+		t.Fatalf("expected env-a snippet removed after retirement, stat err=%v", err)
+	}
+	assertDeploymentSnippetExists(t, h.sitesDir, "env-b")
+	assertDeployEngineMissing(t, h.server, "env-a")
+
+	composeArgs, err := os.ReadFile(h.composeLog)
+	if err != nil {
+		t.Fatalf("read compose log: %v", err)
+	}
+	if !strings.Contains(string(composeArgs), "--project-name\nsam-env-env-a") || !strings.Contains(string(composeArgs), "\ndown\n") {
+		t.Fatalf("expected retired env compose down, got:\n%s", composeArgs)
+	}
+}
+
+func assertDeploymentSnippetExists(t *testing.T, sitesDir, environmentID string) {
+	t.Helper()
+	if _, err := os.Stat(filepath.Join(sitesDir, environmentID+".caddy")); err != nil {
+		t.Fatalf("expected %s snippet preserved: %v", environmentID, err)
+	}
+}
+
+func assertDeployEngineExists(t *testing.T, s *Server, environmentID string) {
+	t.Helper()
+	if _, ok := s.deploymentEnginesSnapshot()[environmentID]; !ok {
+		t.Fatalf("expected %s engine present on server", environmentID)
+	}
+}
+
+func assertDeployEngineMissing(t *testing.T, s *Server, environmentID string) {
+	t.Helper()
+	if _, ok := s.deploymentEnginesSnapshot()[environmentID]; ok {
+		t.Fatalf("expected %s engine absent from server", environmentID)
+	}
+}
+
+func assertNoComposeDown(t *testing.T, composeLog string) {
+	t.Helper()
+	composeArgs, err := os.ReadFile(composeLog)
+	if os.IsNotExist(err) {
+		return
+	}
+	if err != nil {
+		t.Fatalf("read compose log: %v", err)
+	}
+	if strings.Contains(string(composeArgs), "\ndown\n") {
+		t.Fatalf("expected no compose down call, got:\n%s", composeArgs)
 	}
 }
 
@@ -526,4 +1001,42 @@ func TestHeartbeatNoRefreshWhenFieldEmpty(t *testing.T) {
 	if got := s.getCallbackToken(); got != "stable-token" {
 		t.Fatalf("expected token unchanged when no refresh, got %q", got)
 	}
+}
+
+// The apply idle timer firing does NOT imply the apply failed. `done` is buffered,
+// so Go's select can pick the timer case even when the apply had already succeeded
+// and both cases were ready — recording that as "stalled" would fail a deployment
+// that actually worked. And when the child really did fail, its error is a
+// consequence of our own cancel, so the stall must stay the primary cause.
+func TestStalledApplyResultDistinguishesRacedSuccessFromRealStall(t *testing.T) {
+	stallErr := errors.New("deployment apply stalled: no progress for 15m0s")
+
+	t.Run("raced success is not reported as stalled", func(t *testing.T) {
+		succeeded, failure := stalledApplyResult(stallErr, nil)
+		if !succeeded {
+			t.Fatal("a nil child result means the apply completed; it must not be recorded as stalled")
+		}
+		if failure != nil {
+			t.Fatalf("failure = %v, want nil", failure)
+		}
+	})
+
+	t.Run("real stall keeps the stall as the primary cause", func(t *testing.T) {
+		childErr := errors.New("docker compose up: signal: killed")
+		succeeded, failure := stalledApplyResult(stallErr, childErr)
+		if succeeded {
+			t.Fatal("a failing child must not be reported as a success")
+		}
+		if !strings.HasPrefix(failure.Error(), "deployment apply stalled:") {
+			t.Fatalf("stall must lead the message, got %q", failure.Error())
+		}
+		if !strings.Contains(failure.Error(), "signal: killed") {
+			t.Fatalf("child result must be retained as context, got %q", failure.Error())
+		}
+		// The wrap must preserve the stall for errors.Is, so callers can still
+		// classify it without string matching.
+		if !errors.Is(failure, stallErr) {
+			t.Fatal("failure must wrap the stall error")
+		}
+	})
 }

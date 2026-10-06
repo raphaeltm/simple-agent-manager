@@ -17,6 +17,92 @@ export const DEFAULT_ORPHANED_WORKSPACE_GRACE_PERIOD_MS = 10 * 60 * 1000; // 10 
 /** Default alarm retry delay (ms) when node destruction fails. */
 export const DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS = 60 * 1000; // 1 minute
 
+/** Maximum time the NodeLifecycle nudge may remain in destroying before self-cleaning. */
+export const DEFAULT_NODE_LIFECYCLE_MAX_DESTROYING_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+// =============================================================================
+// Idle / Orphan Node Reaping (cron sweep)
+// =============================================================================
+
+/**
+ * Deprecated legacy default for NODE_ORPHAN_IDLE_TIMEOUT_MS. New node cleanup
+ * idleness uses DEFAULT_NODE_WORKSPACE_IDLE_TIMEOUT_MS / NODE_WORKSPACE_IDLE_TIMEOUT_MS.
+ *
+ * Kept exported so old config references and downstream imports do not break.
+ */
+export const DEFAULT_NODE_ORPHAN_IDLE_TIMEOUT_MS = 45 * 60 * 1000; // 45 minutes
+
+/**
+ * Default workspace-idle window (ms) after which an auto-provisioned workspace node
+ * holding no active workspaces is destroy-eligible. Override via
+ * NODE_WORKSPACE_IDLE_TIMEOUT_MS env var.
+ *
+ * This is intentionally aligned with DEFAULT_NODE_WARM_TIMEOUT_MS without replacing
+ * it: NodeLifecycle still keeps the full warm-retention window, and cron uses this
+ * clock only after a node is otherwise in a cleanup candidate shape.
+ */
+export const DEFAULT_NODE_WORKSPACE_IDLE_TIMEOUT_MS = DEFAULT_NODE_WARM_TIMEOUT_MS; // 30 minutes
+
+/**
+ * Default absolute ceiling (ms) on the age of an auto-provisioned workspace node.
+ * Override via NODE_ABSOLUTE_MAX_LIFETIME_MS env var.
+ *
+ * This is the true backstop. DEFAULT_MAX_AUTO_NODE_LIFETIME_MS only applies to nodes
+ * whose workspaces are all inactive, so a node with a workspace row wedged in
+ * `running` escapes it forever — two production nodes survived 1932h and 2135h that
+ * way. This ceiling additionally requires that no workspace has *reported activity*
+ * within DEFAULT_NODE_WORKSPACE_IDLE_TIMEOUT_MS, which distinguishes a genuinely busy
+ * node from one holding a stuck workspace row.
+ */
+export const DEFAULT_NODE_ABSOLUTE_MAX_LIFETIME_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+/**
+ * Default maximum node candidates processed per cleanup phase per sweep (rule 47).
+ * Bounds worst-case wall time: limit x per-candidate provider/VM-agent cost.
+ * Override via NODE_CLEANUP_SWEEP_LIMIT env var.
+ */
+export const DEFAULT_NODE_CLEANUP_SWEEP_LIMIT = 25;
+
+/** Backoff after a node cleanup candidate fails permanently or transiently. */
+export const DEFAULT_NODE_CLEANUP_FAILURE_BACKOFF_MS = 60 * 60 * 1000; // 1 hour
+
+/** Wall-time and per-candidate network budgets for stopped VM handoff cleanup. */
+export const DEFAULT_NODE_STOPPED_HANDOFF_SWEEP_BUDGET_MS = 20_000;
+export const DEFAULT_NODE_STOPPED_HANDOFF_REQUEST_TIMEOUT_MS = 5_000;
+
+/**
+ * Default maximum workspace candidates processed per cleanup phase per sweep (rule 47).
+ * Override via WORKSPACE_CLEANUP_SWEEP_LIMIT env var.
+ */
+export const DEFAULT_WORKSPACE_CLEANUP_SWEEP_LIMIT = 50;
+
+// =============================================================================
+// Provider-Side Orphan Reconciliation
+// =============================================================================
+
+/**
+ * Default minimum age (ms) a provider server must reach before it can be considered
+ * an orphan. Override via PROVIDER_ORPHAN_MIN_AGE_MS env var.
+ *
+ * `nodes.provider_instance_id` is written only AFTER the provider returns the created
+ * server, so there is a window in which a live server has no claiming D1 value. This
+ * age floor must comfortably exceed that window.
+ */
+export const DEFAULT_PROVIDER_ORPHAN_MIN_AGE_MS = 60 * 60 * 1000; // 1 hour
+
+/**
+ * Default maximum provider servers destroyed per reconciliation run (rule 47).
+ * Override via PROVIDER_ORPHAN_DESTROY_LIMIT env var.
+ */
+export const DEFAULT_PROVIDER_ORPHAN_DESTROY_LIMIT = 5;
+
+/**
+ * Default interval (ms) between provider-side reconciliation runs. The 5-minute cron
+ * is far more frequent than this sweep needs, and each run costs a provider list call.
+ * Override via PROVIDER_ORPHAN_RECONCILE_INTERVAL_MS env var.
+ */
+export const DEFAULT_PROVIDER_ORPHAN_RECONCILE_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+
 // =============================================================================
 // Workspace Stopped Auto-Delete
 // =============================================================================
@@ -24,9 +110,55 @@ export const DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS = 60 * 1000; // 1 minute
 /** Default TTL (ms) before a stopped workspace is automatically deleted. Override via WORKSPACE_STOPPED_TTL_MS env var. */
 export const DEFAULT_WORKSPACE_STOPPED_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
+/** Initial delay before retrying an unconfirmed VM workspace deletion. */
+export const DEFAULT_WORKSPACE_DELETION_RETRY_BASE_MS = 60 * 1000; // 1 minute
+
+/** Maximum exponential backoff for an unconfirmed VM workspace deletion. */
+export const DEFAULT_WORKSPACE_DELETION_RETRY_MAX_MS = 60 * 60 * 1000; // 1 hour
+
+/**
+ * Maximum time an unconfirmed deletion remains on the hot retry alarm before it is retained as
+ * an operator-visible dead letter. The workspace remains quarantined and replacement-fenced.
+ */
+export const DEFAULT_WORKSPACE_DELETION_MAX_RESIDENCE_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+/** Maximum due workspace deletions processed by one NodeLifecycle alarm. */
+export const DEFAULT_WORKSPACE_DELETION_ALARM_BATCH_SIZE = 3;
+
+/** Per-workspace/callback throttle for deletion-unconfirmed telemetry. */
+export const DEFAULT_WORKSPACE_DELETION_CALLBACK_SIGNAL_TTL_SECONDS = 5 * 60;
+
+/** Maximum expired callback throttle claims pruned by one signal attempt. */
+export const DEFAULT_WORKSPACE_DELETION_CALLBACK_SIGNAL_CLEANUP_LIMIT = 25;
+
+/** Maximum sanitized diagnostic length stored on a stopping workspace. */
+export const DEFAULT_WORKSPACE_DELETION_DIAGNOSTIC_MAX_LENGTH = 500;
+
 // =============================================================================
 // Workspace Idle Timeout (Compute Lifecycle Management)
 // =============================================================================
+
+/** Default session idle timeout in minutes. Override via SESSION_IDLE_TIMEOUT_MINUTES. */
+export const DEFAULT_SESSION_IDLE_TIMEOUT_MINUTES = 15;
+
+/** Default delay before retrying an inconclusive or failed idle-cleanup pass. */
+export const DEFAULT_IDLE_CLEANUP_RETRY_DELAY_MS = 5 * 60 * 1000;
+
+/** Default number of retries after an idle-cleanup operation throws. */
+export const DEFAULT_IDLE_CLEANUP_MAX_RETRIES = 1;
+
+/** Default maximum age for an idle-cleanup schedule before it becomes attention-required. */
+export const DEFAULT_IDLE_CLEANUP_MAX_RESIDENCE_MS = 2 * 60 * 60 * 1000; // 2 hours
+
+/** Minimum delay before rescheduling a workspace-idle alarm for an overdue check. A hot-loop floor,
+ * deliberately not env-configurable, like `PROJECT_DATA_ALARM_FAILED_SECTION_RETRY_MS`. */
+export const DEFAULT_WORKSPACE_IDLE_MIN_ALARM_DELAY_MS = 60 * 1000;
+
+/** First retry delay after a workspace-idle check finds an idle workspace it cannot retire yet. */
+export const DEFAULT_WORKSPACE_IDLE_BACKOFF_BASE_MS = 10 * 60 * 1000; // 10 minutes
+
+/** Maximum retry delay after repeated workspace-idle checks that cannot retire an idle workspace. */
+export const DEFAULT_WORKSPACE_IDLE_BACKOFF_MAX_MS = 6 * 60 * 60 * 1000; // 6 hours
 
 /** Default workspace idle timeout (ms). Workspaces with no messages AND no terminal activity
  * for this duration are auto-deleted. Override per-project via project settings or via
@@ -45,7 +177,8 @@ export const MIN_NODE_IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 /** Maximum node idle timeout (ms). */
 export const MAX_NODE_IDLE_TIMEOUT_MS = 4 * 60 * 60 * 1000; // 4 hours
 
-/** Interval (ms) at which the ProjectData DO checks workspace idle state. */
+/** Delay (ms) after a workspace's latest activity before the ProjectData DO first checks it and
+ * records when it will become idle. */
 export const WORKSPACE_IDLE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
 /** Minimum interval (ms) between terminal activity updates to the DO to avoid write amplification.

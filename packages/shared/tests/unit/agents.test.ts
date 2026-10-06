@@ -1,10 +1,6 @@
-import { describe, expect,it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import {
-  AGENT_CATALOG,
-  getAgentDefinition,
-  isValidAgentType,
-} from '../../src/agents';
+import { AGENT_CATALOG, getAgentDefinition, isValidAgentType } from '../../src/agents';
 
 describe('AGENT_CATALOG', () => {
   it('includes mistral-vibe as a supported agent', () => {
@@ -17,12 +13,7 @@ describe('AGENT_CATALOG', () => {
     expect(mistral!.acpCommand).toBe('vibe-acp');
     expect(mistral!.acpArgs).toEqual([]);
     expect(mistral!.supportsAcp).toBe(true);
-    expect(mistral!.credentialHelpUrl).toBe(
-      'https://console.mistral.ai/api-keys'
-    );
-    expect(mistral!.installCommand).toBe(
-      'curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe==2.7.0 --python 3.12 --quiet'
-    );
+    expect(mistral!.credentialHelpUrl).toBe('https://console.mistral.ai/api-keys');
   });
 
   it('includes opencode as a supported agent', () => {
@@ -30,17 +21,15 @@ describe('AGENT_CATALOG', () => {
     expect(opencode).toBeDefined();
     expect(opencode!.name).toBe('OpenCode');
     expect(opencode!.description).toBe(
-      'Open-source AI coding agent by SST. Uses Scaleway Generative APIs for inference.'
+      'Open-source AI coding agent by SST. Uses OpenCode managed inference.'
     );
     expect(opencode!.provider).toBe('opencode');
-    expect(opencode!.envVarName).toBe('SCW_SECRET_KEY');
+    expect(opencode!.envVarName).toBe('OPENCODE_API_KEY');
     expect(opencode!.acpCommand).toBe('opencode');
     expect(opencode!.acpArgs).toEqual(['acp']);
     expect(opencode!.supportsAcp).toBe(true);
-    expect(opencode!.credentialHelpUrl).toBe(
-      'https://console.scaleway.com/iam/api-keys'
-    );
-    expect(opencode!.installCommand).toBe('npm install -g opencode-ai@1.4.3');
+    expect(opencode!.credentialHelpUrl).toBe('https://opencode.ai/auth');
+    expect(opencode!.fallbackCloudProvider).toBeUndefined();
   });
 
   it('includes Gemini CLI as a supported ACP agent', () => {
@@ -52,8 +41,16 @@ describe('AGENT_CATALOG', () => {
     expect(gemini!.acpCommand).toBe('gemini');
     expect(gemini!.acpArgs).toEqual(['--acp']);
     expect(gemini!.supportsAcp).toBe(true);
-    expect(gemini!.installCommand).toBe('npm install -g @google/gemini-cli');
     expect(gemini!.oauthSupport).toBeUndefined();
+  });
+
+  it('uses the maintained Codex ACP wrapper for OpenAI Codex', () => {
+    const codex = AGENT_CATALOG.find((a) => a.id === 'openai-codex');
+    expect(codex).toMatchObject({
+      acpCommand: 'codex-acp',
+      supportsAcp: true,
+    });
+    expect(codex?.oauthSupport?.envVarName).toBe('CODEX_AUTH_JSON');
   });
 
   it('opencode has no OAuth support', () => {
@@ -72,9 +69,6 @@ describe('AGENT_CATALOG', () => {
     expect(amp!.acpArgs).toEqual(['run']);
     expect(amp!.supportsAcp).toBe(true);
     expect(amp!.credentialHelpUrl).toBe('https://ampcode.com/settings');
-    expect(amp!.installCommand).toBe(
-      'curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install acp-amp==0.1.3 --with agent-client-protocol==0.7.1 --with amp-sdk==0.1.2 --with pydantic==2.12.5 --with pydantic-core==2.41.5 --with annotated-types==0.7.0 --with typing-inspection==0.4.2 --with typing-extensions==4.15.0 --python 3.12 --quiet && npm install -g @sourcegraph/amp'
-    );
     expect(amp!.fallbackCloudProvider).toBeUndefined();
     expect(amp!.oauthSupport).toBeUndefined();
   });

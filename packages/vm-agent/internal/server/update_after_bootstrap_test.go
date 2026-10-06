@@ -9,6 +9,7 @@ import (
 	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/errorreport"
 	"github.com/workspace/vm-agent/internal/pty"
+	"github.com/workspace/vm-agent/internal/testutil/fakedocker"
 )
 
 // newTestServerPreBootstrap creates a Server in the state it would be in
@@ -126,6 +127,8 @@ func TestUpdateAfterBootstrap_SkipsEmptyContainerUser(t *testing.T) {
 //
 // If step 3 is removed or broken, this test fails.
 func TestBootstrapLifecycle_SessionsUseDetectedUser(t *testing.T) {
+	fakedocker.InstallExec(t)
+
 	containerID := "test-container-lifecycle"
 	resolver := func() (string, error) {
 		return containerID, nil

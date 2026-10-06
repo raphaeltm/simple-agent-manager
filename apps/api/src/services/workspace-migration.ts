@@ -10,6 +10,7 @@ import { type drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
+import { createOwnerProjectMembership } from '../middleware/project-auth';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -82,6 +83,7 @@ export async function migrateOrphanedWorkspaces(db: Db): Promise<number> {
 
       if (existingProjects[0]) {
         projectId = existingProjects[0].id;
+        await createOwnerProjectMembership(db, projectId, group.userId);
       } else if (group.installationId) {
         // Create a new project for this repo
         projectId = ulid();
@@ -102,6 +104,7 @@ export async function migrateOrphanedWorkspaces(db: Db): Promise<number> {
           createdAt: now,
           updatedAt: now,
         });
+        await createOwnerProjectMembership(db, projectId, group.userId, group.userId, now);
       } else {
         // Can't create a project without installationId — skip
         continue;

@@ -14,7 +14,7 @@ import type { Env } from '../env';
 import { requireRouteParam } from '../lib/route-helpers';
 import { getUserId, requireApproved,requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { requireOwnedProject } from '../middleware/project-auth';
+import { requireProjectAccess } from '../middleware/project-auth';
 import * as projectDataService from '../services/project-data';
 
 const activityRoutes = new Hono<{ Bindings: Env }>();
@@ -26,6 +26,7 @@ activityRoutes.use('/*', requireAuth(), requireApproved());
  *
  * Query params:
  *   - eventType: filter by event type (e.g. 'workspace.created', 'session.started', 'task.completed')
+ *   - sessionId: filter by chat session ID
  *   - before: cursor for pagination (timestamp in ms)
  *   - limit: max events to return (default 50, max 100)
  */
@@ -34,9 +35,15 @@ activityRoutes.get('/', async (c) => {
   const projectId = requireRouteParam(c, 'projectId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectAccess(db, projectId, userId);
 
   const eventType = c.req.query('eventType')?.trim() || null;
+  const rawSessionId = c.req.query('sessionId')?.trim() || null;
+  const SESSION_ID_RE = /^[\w-]{1,64}$/;
+  if (rawSessionId !== null && !SESSION_ID_RE.test(rawSessionId)) {
+    throw errors.badRequest('sessionId must be a valid identifier');
+  }
+  const sessionId = rawSessionId;
   const beforeParam = c.req.query('before')?.trim();
   const limitParam = c.req.query('limit')?.trim();
 
@@ -46,6 +53,9 @@ activityRoutes.get('/', async (c) => {
   }
 
   const requestedLimit = limitParam ? Number.parseInt(limitParam, 10) : 50;
+  if (limitParam && !Number.isFinite(requestedLimit)) {
+    throw errors.badRequest('limit must be a valid integer');
+  }
   const limit = Math.min(Math.max(requestedLimit, 1), 100);
 
   const result = await projectDataService.listActivityEvents(
@@ -53,7 +63,8 @@ activityRoutes.get('/', async (c) => {
     projectId,
     eventType,
     limit,
-    before
+    before,
+    sessionId
   );
 
   return c.json(result);

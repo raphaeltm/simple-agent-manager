@@ -61,6 +61,7 @@ vi.mock('../../../src/middleware/error', () => {
 const mockGet = vi.fn();
 const mockAll = vi.fn();
 const mockUpdate = vi.fn();
+const mockGetTaskReconciliationDiagnostics = vi.fn();
 
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => ({
@@ -103,13 +104,20 @@ vi.mock('../../../src/services/limits', () => ({
   }),
 }));
 
-// --- Schemas mock ---
-vi.mock('../../../src/schemas', () => ({
-  AdminUserActionSchema: {},
-  AdminUserRoleSchema: {},
-  AdminLogQuerySchema: {},
-  jsonValidator: () => vi.fn((_c: any, next: any) => next()),
+vi.mock('../../../src/scheduled/stuck-tasks', () => ({
+  getTaskReconciliationDiagnostics: (...args: unknown[]) =>
+    mockGetTaskReconciliationDiagnostics(...args),
 }));
+
+// --- Schemas mock ---
+vi.mock('../../../src/schemas', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../src/schemas')>();
+  return {
+    ...actual,
+    jsonValidator: () => vi.fn((_c: any, next: any) => next()),
+    parseOptionalBody: vi.fn(async () => ({})),
+  };
+});
 
 // Import routes after mocks
 const { adminRoutes } = await import('../../../src/routes/admin');
@@ -236,6 +244,90 @@ describe('Admin security hardening (route-level)', () => {
       expect(body.missingBindings).toContain('NOTIFICATION');
       expect(body.bindings.ADMIN_LOGS).toBe(false);
       expect(body.bindings.NOTIFICATION).toBe(false);
+    });
+  });
+
+  describe('GET /api/admin/project-data/storage', () => {
+    it('keeps the latest telemetry endpoint mounted without a trailing slash', async () => {
+      const all = vi.fn().mockResolvedValue({ results: [] });
+      const bind = vi.fn(() => ({ all }));
+      const prepare = vi.fn(() => ({ bind }));
+      const env = createEnv({
+        DATABASE: { prepare } as unknown as D1Database,
+      });
+
+      const res = await app.request('/api/admin/project-data/storage', {}, env);
+
+      const body = await res.json() as any;
+      expect(res.status).toBe(200);
+      expect(body.telemetry).toEqual([]);
+      expect(prepare).toHaveBeenCalledWith(
+        expect.stringContaining('project_data_storage_telemetry')
+      );
+      expect(bind).toHaveBeenCalledWith(50);
+    });
+
+    it('honors configured telemetry list limits', async () => {
+      const all = vi.fn().mockResolvedValue({ results: [] });
+      const bind = vi.fn(() => ({ all }));
+      const prepare = vi.fn(() => ({ bind }));
+      const env = createEnv({
+        DATABASE: { prepare } as unknown as D1Database,
+        PROJECT_DATA_STORAGE_TELEMETRY_LIST_LIMIT_DEFAULT: '3',
+        PROJECT_DATA_STORAGE_TELEMETRY_LIST_LIMIT_MAX: '7',
+      });
+
+      const defaultRes = await app.request('/api/admin/project-data/storage', {}, env);
+      expect(defaultRes.status).toBe(200);
+      expect(bind).toHaveBeenLastCalledWith(3);
+
+      const boundedRes = await app.request('/api/admin/project-data/storage?limit=7', {}, env);
+      expect(boundedRes.status).toBe(200);
+      expect(bind).toHaveBeenLastCalledWith(7);
+
+      const tooLargeRes = await app.request('/api/admin/project-data/storage?limit=8', {}, env);
+      expect(tooLargeRes.status).toBe(400);
+      expect(await tooLargeRes.json()).toMatchObject({
+        error: 'BAD_REQUEST',
+        message: 'limit must be between 1 and 7',
+      });
+    });
+  });
+
+  describe('GET /api/admin/tasks/:taskId/reconciliation-diagnostics', () => {
+    it('returns the read-only reconciliation evidence for the requested task', async () => {
+      const env = createEnv();
+      const diagnostics = {
+        taskId: 'task-1',
+        eligible: true,
+        decision: 'reconcile_dead_runtime',
+        liveness: { live: false, conclusive: true, reason: 'workspace_deleted' },
+        taskRunner: { outcome: 'missing', status: null },
+      };
+      mockGetTaskReconciliationDiagnostics.mockResolvedValueOnce(diagnostics);
+
+      const res = await app.request(
+        '/api/admin/tasks/task-1/reconciliation-diagnostics',
+        {},
+        env,
+      );
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ diagnostics });
+      expect(mockGetTaskReconciliationDiagnostics).toHaveBeenCalledWith(env, 'task-1');
+    });
+
+    it('returns 404 when the task does not exist', async () => {
+      mockGetTaskReconciliationDiagnostics.mockResolvedValueOnce(null);
+
+      const res = await app.request(
+        '/api/admin/tasks/missing/reconciliation-diagnostics',
+        {},
+        createEnv(),
+      );
+
+      expect(res.status).toBe(404);
+      expect(await res.json()).toMatchObject({ error: 'NOT_FOUND' });
     });
   });
 });

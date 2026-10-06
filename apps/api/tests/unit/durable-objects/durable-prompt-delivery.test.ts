@@ -1,0 +1,1518 @@
+import type { PromptDeliverySource } from '@simple-agent-manager/shared';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { runMigrations } from '../../../src/durable-objects/migrations';
+import { processPromptDeliveryAlarm } from '../../../src/durable-objects/project-data/durability-foundation';
+import type { DurableExecutionConfig } from '../../../src/durable-objects/project-data/durable-execution-config';
+import * as mailbox from '../../../src/durable-objects/project-data/mailbox';
+import { admitProjectEvent } from '../../../src/durable-objects/project-data/project-events';
+import {
+  insertMatchIfAbsent,
+  readSubscriptionById,
+} from '../../../src/durable-objects/project-data/project-events-storage-helpers';
+import {
+  acceptPromptDelivery,
+  applyPromptDeliveryResult,
+  claimDuePromptDeliveries,
+  expireDuePromptDeliveries,
+  markPromptDeliverySubmitting,
+  nudgePromptDeliveriesForTarget,
+} from '../../../src/durable-objects/project-data/prompt-delivery';
+import { runPromptDeliveryClaim } from '../../../src/durable-objects/project-data/prompt-delivery-runner';
+import * as sessionState from '../../../src/durable-objects/project-data/session-state';
+import { NodeAgentHttpError } from '../../../src/services/node-agent';
+import {
+  DefaultVmPromptDeliveryAdapter,
+  type VmPromptDeliveryAdapter,
+} from '../../../src/services/vm-prompt-delivery-adapter';
+import { acceptedPromptResponse } from '../../helpers/vm-prompt-delivery-fixtures';
+import { createSqlStorage } from './sql-storage-test-utils';
+
+const preparationMocks = vi.hoisted(() => ({
+  recover: vi.fn(),
+  capabilities: vi.fn(),
+  send: vi.fn(),
+  sign: vi.fn(),
+  cancel: vi.fn(),
+}));
+vi.mock('../../../src/services/jwt', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/services/jwt')>()),
+  signNodeManagementToken: preparationMocks.sign,
+}));
+vi.mock('../../../src/services/session-recovery', () => ({
+  ensureSessionRecovery: preparationMocks.recover,
+}));
+vi.mock('../../../src/services/node-agent', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/services/node-agent')>()),
+  nodeAgentRequest: preparationMocks.capabilities,
+  sendPromptToAgentOnNode: preparationMocks.send,
+  cancelAgentSessionOnNode: preparationMocks.cancel,
+}));
+
+const config: DurableExecutionConfig = {
+  deliveryEnabled: true,
+  legacyVmCompatEnabled: false,
+  supervisorEnabled: false,
+  checkpointThresholdMs: 18_000_000,
+  preemptGraceMs: 30_000,
+  maxCandidatesPerAlarm: 5,
+  maxAttempts: 3,
+  retryBaseMs: 5_000,
+  retryMaxMs: 20_000,
+  ttlMs: 60_000,
+  receiptTimeoutMs: 10_000,
+  backgroundTimeoutMs: 5_000,
+  minAlarmDelayMs: 1_000,
+};
+
+const capabilities = {
+  protocolVersion: 1,
+  runtimeIdentity: 'runtime-1',
+  promptReceipts: {
+    supported: true,
+    lookup: true,
+    states: ['accepted', 'in_flight', 'completed', 'not_found', 'ambiguous'] as const,
+  },
+  checkpointRollover: {
+    supported: true,
+    automatic: true,
+    states: ['requested', 'stopping', 'resuming', 'completed', 'failed'] as const,
+    defaultGraceMs: 30_000,
+    maxGraceMs: 120_000,
+    operationTimeoutMs: 300_000,
+  },
+};
+
+describe('ProjectData durable prompt delivery', () => {
+  let db: Database.Database;
+  let sql: SqlStorage;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    db = new Database(':memory:');
+    sql = createSqlStorage(db);
+    runMigrations(sql);
+    sql.exec(
+      `INSERT INTO chat_sessions
+       (id, workspace_id, topic, status, message_count, started_at, created_at, updated_at)
+       VALUES ('chat-1', 'workspace-1', 'Test', 'active', 0, 10000, 10000, 10000)`
+    );
+  });
+
+  afterEach(() => {
+    db.close();
+    vi.useRealTimers();
+  });
+
+  function accept(
+    deliveryId = 'delivery-1',
+    ttlMs = config.ttlMs,
+    sourceKind: PromptDeliverySource = 'user_followup'
+  ) {
+    return acceptPromptDelivery(
+      sql,
+      {},
+      {
+        deliveryId,
+        targetSessionId: 'chat-1',
+        displayContent: 'Visible follow-up',
+        deliveryContent: 'Enriched follow-up',
+        senderType: 'human',
+        senderId: 'user-1',
+        messageClass: 'deliver',
+        sourceKind,
+        ttlMs,
+      },
+      Date.now()
+    );
+  }
+
+  function acceptParentWake(deliveryId: string) {
+    acceptPromptDelivery(
+      sql,
+      {},
+      {
+        deliveryId,
+        targetSessionId: 'chat-1',
+        displayContent: 'trusted wake',
+        sourceTaskId: 'parent-task-1',
+        senderType: 'system',
+        sourceKind: 'parent_wakeup',
+        metadata: { waitId: 'wait-1', childTaskIds: ['child-task-1'] },
+      },
+      Date.now()
+    );
+    return claimDuePromptDeliveries(sql, config, Date.now())[0];
+  }
+
+  function acceptProjectEventWake(
+    deliveryId: string,
+    options: { sourceTaskId?: string; targetTaskId?: string } = {}
+  ) {
+    const sourceTaskId = options.sourceTaskId ?? 'source-task-1';
+    const targetTaskId = options.targetTaskId ?? sourceTaskId;
+    acceptPromptDelivery(
+      sql,
+      {},
+      {
+        deliveryId,
+        targetSessionId: 'chat-1',
+        displayContent: 'Project event wake batch is ready. Event IDs: event-1.',
+        sourceTaskId,
+        senderType: 'system',
+        sourceKind: 'project_event_wake',
+        metadata: {
+          projectEventWake: true,
+          batchId: deliveryId,
+          subscriptionId: 'sub-event-wake',
+          eventIds: ['event-1'],
+        },
+      },
+      Date.now()
+    );
+    sql.exec(
+      `INSERT INTO project_event_subscriptions
+       (id, project_id, contract_version, owner_type, owner_id, owner_name,
+        idempotency_key, idempotency_fingerprint, filter_version, filter_json,
+        filter_fingerprint, match_key_count, requested_delivery, resolved_delivery,
+        target_session_id, target_task_id, target_runtime_id, target_agent_id,
+        lifecycle_state, reason, created_at, updated_at, expires_at,
+        owner_version, owner_project_id, owner_chat_session_id, owner_task_id,
+        owner_runtime_id, prompt_delivery_count, prompt_delivery_last_at,
+        delivery_cooldown_until, delivery_lifetime_expires_at)
+       VALUES ('sub-event-wake', 'project-1', 2, 'agent', 'project-1:chat-1', NULL,
+        'idem-event-wake', 'fp-event-wake', 1, '{"version":1}', 'filter-event-wake', 0,
+        'existing_session_prompt', 'queued_for_prompt_delivery', 'chat-1', ?,
+        NULL, 'agent-1', 'active', NULL, 10000, 10000, NULL, 2, 'project-1', 'chat-1',
+        ?, NULL, 0, NULL, NULL, 70000)`,
+      targetTaskId,
+      sourceTaskId
+    );
+    sql.exec(
+      `INSERT INTO project_event_delivery_batches
+       (id, project_id, subscription_id, idempotency_key, idempotency_fingerprint, state,
+        delivery_channel, delivery_expires_at, readable_until, ack_required,
+        requested_delivery, resolved_delivery, adapter_decision_json,
+       target_session_id, target_task_id, target_runtime_id, target_agent_id,
+       match_ids_json, event_count, created_at, updated_at, terminal_reason)
+       VALUES (?, 'project-1', 'sub-event-wake', ?, ?, 'pending', 'prompt_queue',
+        70000, 70000, 1, 'existing_session_prompt', 'queued_for_prompt_delivery', '{}',
+        'chat-1', ?, NULL, 'agent-1', '[]', 1, 10000, 10000, NULL)`,
+      deliveryId,
+      `event-wake:${deliveryId}`,
+      `fp:event-wake:${deliveryId}`,
+      targetTaskId
+    );
+    const event = admitProjectEvent(sql, {}, 'project-1', {
+      projectId: 'project-1',
+      source: 'sam.lifecycle',
+      eventType: 'task.completed',
+      subject: { type: 'task', id: sourceTaskId },
+      deliveryKey: `event:${deliveryId}`,
+      payloadFingerprint: `event-fingerprint:${deliveryId}`,
+    }).event;
+    const subscription = readSubscriptionById(sql, 'project-1', 'sub-event-wake');
+    const match = insertMatchIfAbsent(sql, event, subscription, Date.now());
+    sql.exec(
+      `UPDATE project_event_matches SET batch_id = ?, state = 'batch_created' WHERE id = ?`,
+      deliveryId,
+      match.id
+    );
+    sql.exec(
+      `UPDATE project_event_delivery_batches SET match_ids_json = ? WHERE id = ?`,
+      JSON.stringify([match.id]),
+      deliveryId
+    );
+    return claimDuePromptDeliveries(sql, config, Date.now())[0];
+  }
+
+  function taskRow(
+    id: string,
+    status: string,
+    overrides: Partial<{
+      chat_session_id: string | null;
+      superseded_by_task_id: string | null;
+      parent_task_id: string | null;
+      recovery_source_task_id: string | null;
+      triggered_by: string;
+    }> = {}
+  ) {
+    return {
+      id,
+      status,
+      chat_session_id: id === 'child-task-1' ? 'child-chat-1' : 'chat-1',
+      superseded_by_task_id: null,
+      parent_task_id: id === 'child-task-1' ? 'parent-task-1' : null,
+      recovery_source_task_id: null,
+      triggered_by: 'mcp',
+      ...overrides,
+    };
+  }
+
+  function envWithTaskRows(results: ReturnType<typeof taskRow>[]) {
+    return {
+      DATABASE: {
+        prepare: vi.fn(() => ({
+          bind: vi.fn(() => ({
+            all: vi.fn().mockResolvedValue({ results }),
+          })),
+        })),
+      },
+    } as never;
+  }
+
+  function envWithSourceGuard(first: () => Promise<{ id: string } | null>) {
+    return {
+      PROJECT_EVENT_WAKE_ENABLED: 'true',
+      DATABASE: {
+        prepare: vi.fn(() => ({
+          bind: vi.fn(() => ({ first })),
+        })),
+      },
+    } as never;
+  }
+
+  function acceptedSubmit() {
+    return vi.fn<VmPromptDeliveryAdapter['submit']>().mockResolvedValue({
+      kind: 'accepted',
+      acpSessionId: 'acp-1',
+      promptEpoch: Date.now(),
+      runtimeIdentity: 'runtime-1',
+      capabilities,
+      receipt: null,
+    });
+  }
+
+  const hooks = {
+    projectId: 'project-1',
+    recalculateAlarm: vi.fn(async () => {}),
+    broadcastEvent: vi.fn(),
+    scheduleSummarySync: vi.fn(),
+    armIdleCleanup: vi.fn(),
+    nudgeDeliveries: vi.fn((chatSessionId: string) =>
+      nudgePromptDeliveriesForTarget(sql, chatSessionId)
+    ),
+  };
+
+  it('keeps a slow recovery retryable and sends once after the late preparation finishes', async () => {
+    let finishRecovery!: (result: { status: 'waking'; taskId: string }) => void;
+    preparationMocks.recover.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishRecovery = resolve;
+        })
+    );
+    preparationMocks.capabilities.mockResolvedValue(capabilities);
+    preparationMocks.send.mockImplementation(async () =>
+      acceptedPromptResponse('acp-1', 'delivery-1', 'runtime-1', Date.now())
+    );
+    const target = {
+      workspace_id: 'workspace-1',
+      user_id: 'user-1',
+      workspace_status: 'sleeping',
+      node_id: 'node-1',
+      node_status: 'running',
+      node_health_status: 'healthy',
+      node_runtime: 'vm',
+      agent_session_id: 'acp-1',
+      agent_session_status: 'running',
+    };
+    const env = {
+      DATABASE: { prepare: () => ({ bind: () => ({ first: async () => target }) }) },
+    } as never;
+    const adapter = new DefaultVmPromptDeliveryAdapter(env);
+    accept();
+    const claim = claimDuePromptDeliveries(sql, config)[0]!;
+    const attempt = runPromptDeliveryClaim(sql, env, config, claim, adapter, hooks);
+    await vi.advanceTimersByTimeAsync(config.backgroundTimeoutMs);
+
+    expect(mailbox.getMessage(sql, 'delivery-1')).toMatchObject({
+      deliveryState: 'retry_wait',
+      terminalReason: null,
+      acceptedAt: null,
+    });
+    await expect(attempt).resolves.toMatchObject({ kind: 'retry', reason: 'not_ready' });
+    finishRecovery({ status: 'waking', taskId: 'recovery-1' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(preparationMocks.send).not.toHaveBeenCalled();
+    target.workspace_status = 'running';
+    await vi.advanceTimersByTimeAsync(config.retryBaseMs);
+    const retry = claimDuePromptDeliveries(sql, config)[0]!;
+    expect(retry.mode).toBe('submit');
+    await expect(
+      runPromptDeliveryClaim(sql, env, config, retry, adapter, hooks)
+    ).resolves.toMatchObject({ kind: 'accepted' });
+    expect(mailbox.getMessage(sql, 'delivery-1')).toMatchObject({
+      deliveryState: 'acked',
+      terminalReason: null,
+    });
+    expect(preparationMocks.send).toHaveBeenCalledTimes(1);
+    expect(preparationMocks.recover).toHaveBeenCalledTimes(1);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM chat_messages').get()).toEqual({ count: 1 });
+  });
+
+  it('never submits from a capability preparation that completes after its deadline', async () => {
+    let finishProbe!: (result: typeof capabilities) => void;
+    preparationMocks.capabilities.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishProbe = resolve;
+        })
+    );
+    const env = {} as never;
+    const adapter = new DefaultVmPromptDeliveryAdapter(env);
+    accept();
+    const claim = claimDuePromptDeliveries(sql, config)[0]!;
+    const pending = adapter.submit({
+      projectId: 'project-1',
+      claim,
+      allowLegacyVm: false,
+      requestTimeoutMs: config.backgroundTimeoutMs,
+      resolvedTarget: {
+        projectId: 'project-1',
+        chatSessionId: 'chat-1',
+        workspaceId: 'workspace-1',
+        nodeId: 'node-1',
+        agentSessionId: 'acp-1',
+        userId: 'user-1',
+        runtimeIdentity: 'runtime-1',
+        runtime: 'vm',
+      },
+    });
+    await vi.advanceTimersByTimeAsync(config.backgroundTimeoutMs);
+    await expect(pending).resolves.toMatchObject({ kind: 'retry', reason: 'not_ready' });
+    finishProbe(capabilities);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(preparationMocks.send).not.toHaveBeenCalled();
+  });
+
+  it('retries a recovery exception before any prompt could have been sent', async () => {
+    preparationMocks.recover.mockRejectedValue(
+      new Error('Recovery storage temporarily unavailable')
+    );
+    const env = {
+      DATABASE: { prepare: () => ({ bind: () => ({ first: async () => null }) }) },
+    } as never;
+    accept();
+    const claim = claimDuePromptDeliveries(sql, config)[0]!;
+    await expect(
+      runPromptDeliveryClaim(
+        sql,
+        env,
+        config,
+        claim,
+        new DefaultVmPromptDeliveryAdapter(env),
+        hooks
+      )
+    ).resolves.toMatchObject({ kind: 'retry', reason: 'not_ready' });
+    expect(mailbox.getMessage(sql, 'delivery-1')).toMatchObject({
+      deliveryState: 'retry_wait',
+      terminalReason: null,
+    });
+    expect(preparationMocks.send).not.toHaveBeenCalled();
+  });
+
+  it('persists one transcript message and one queue record idempotently', () => {
+    const first = accept();
+    const second = accept();
+
+    expect(first.transcriptInserted).toBe(true);
+    expect(second.transcriptInserted).toBe(false);
+    expect(second.message.id).toBe(first.message.id);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM chat_messages').get()).toEqual({ count: 1 });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM session_inbox').get()).toEqual({ count: 1 });
+    expect(first.message.promptMessageId).toBe(first.transcriptMessageId);
+  });
+
+  it('claims same-priority same-timestamp comment directives in insertion order', () => {
+    accept('comment-directive-thread-1', config.ttlMs, 'comment_directive');
+    accept('comment-directive-thread-2', config.ttlMs, 'comment_directive');
+
+    sql.exec(
+      `UPDATE session_inbox
+       SET created_at = ?, next_attempt_at = ?
+       WHERE id IN ('comment-directive-thread-1', 'comment-directive-thread-2')`,
+      10_000,
+      10_000
+    );
+
+    expect(mailbox.getPendingMessages(sql, 'chat-1').map((message) => message.id)).toEqual([
+      'comment-directive-thread-1',
+      'comment-directive-thread-2',
+    ]);
+
+    const claims = claimDuePromptDeliveries(sql, config, 10_000);
+
+    expect(claims.map((claim) => claim.message.id)).toEqual([
+      'comment-directive-thread-1',
+      'comment-directive-thread-2',
+    ]);
+    expect(claims.map((claim) => claim.message.sourceKind)).toEqual([
+      'comment_directive',
+      'comment_directive',
+    ]);
+  });
+
+  it('rejects reuse of a stable delivery identity for different prompt intent', () => {
+    accept();
+    expect(() =>
+      acceptPromptDelivery(
+        sql,
+        {},
+        {
+          deliveryId: 'delivery-1',
+          targetSessionId: 'chat-1',
+          displayContent: 'different',
+          deliveryContent: 'different',
+          senderType: 'human',
+          sourceKind: 'user_followup',
+        },
+        Date.now()
+      )
+    ).toThrow('different prompt intent');
+  });
+
+  it('retries busy delivery on readiness and accepts it exactly once despite duplicate alarms', async () => {
+    accept();
+    const submit = vi
+      .fn<VmPromptDeliveryAdapter['submit']>()
+      .mockResolvedValueOnce({
+        kind: 'retry',
+        reason: 'busy',
+        error: 'prompt in flight',
+        runtimeIdentity: 'runtime-1',
+        capabilities,
+      })
+      .mockResolvedValueOnce({
+        kind: 'accepted',
+        acpSessionId: 'acp-1',
+        promptEpoch: 12_000,
+        runtimeIdentity: 'runtime-1',
+        capabilities,
+        receipt: {
+          deliveryId: 'delivery-1',
+          state: 'accepted',
+          runtimeIdentity: 'runtime-1',
+          acceptedAt: 12_000,
+          completedAt: null,
+        },
+      });
+    const adapter: VmPromptDeliveryAdapter = {
+      submit,
+      reconcile: vi.fn(),
+    };
+
+    const firstClaim = claimDuePromptDeliveries(sql, config, 10_000);
+    expect(firstClaim).toHaveLength(1);
+    expect(claimDuePromptDeliveries(sql, config, 10_000)).toHaveLength(0);
+    await runPromptDeliveryClaim(sql, {}, config, firstClaim[0]!, adapter, hooks);
+    expect(mailbox.getMessage(sql, 'delivery-1')?.deliveryState).toBe('retry_wait');
+    expect(mailbox.getMessage(sql, 'delivery-1')?.nextAttemptAt).toBe(15_000);
+    expect(claimDuePromptDeliveries(sql, config, 14_999)).toHaveLength(0);
+
+    expect(nudgePromptDeliveriesForTarget(sql, 'chat-1', 12_000)).toBe(1);
+    vi.setSystemTime(12_000);
+    const readyClaim = claimDuePromptDeliveries(sql, config, 12_000);
+    expect(readyClaim).toHaveLength(1);
+    expect(claimDuePromptDeliveries(sql, config, 12_000)).toHaveLength(0);
+    await runPromptDeliveryClaim(sql, {}, config, readyClaim[0]!, adapter, hooks);
+
+    expect(submit).toHaveBeenCalledTimes(2);
+    expect(mailbox.getMessage(sql, 'delivery-1')?.deliveryState).toBe('acked');
+    expect(mailbox.getMessage(sql, 'delivery-1')?.acceptedAt).toBe(12_000);
+    expect(claimDuePromptDeliveries(sql, config, 40_000)).toHaveLength(0);
+  });
+
+  it('fails a parent wake claim before adapter recovery when the parent is terminal', async () => {
+    const claim = acceptParentWake('parent-wake-1');
+    const submit = vi.fn<VmPromptDeliveryAdapter['submit']>();
+    const adapter: VmPromptDeliveryAdapter = { submit, reconcile: vi.fn() };
+    const env = envWithTaskRows([
+      taskRow('parent-task-1', 'completed'),
+      taskRow('child-task-1', 'completed'),
+    ]);
+
+    await expect(
+      runPromptDeliveryClaim(sql, env, config, claim, adapter, hooks)
+    ).resolves.toMatchObject({ kind: 'failed', reason: 'terminal_target' });
+    expect(submit).not.toHaveBeenCalled();
+    expect(mailbox.getMessage(sql, 'parent-wake-1')).toMatchObject({
+      deliveryState: 'failed',
+      terminalReason: 'terminal_target',
+    });
+  });
+
+  it('blocks a cancelled event wake at the real VM fetch boundary after token signing stalls', async () => {
+    const claim = acceptProjectEventWake('event-wake-transport-cancel');
+    const env = {
+      BASE_DOMAIN: 'example.com',
+      PROJECT_EVENT_WAKE_ENABLED: 'true',
+      DATABASE: {
+        prepare: () => ({
+          bind: () => ({
+            first: async () => ({ id: 'source-task-1' }),
+            raw: async () => [['vm']],
+          }),
+        }),
+      },
+    } as never;
+    const realNodeAgent = await vi.importActual<typeof import('../../../src/services/node-agent')>(
+      '../../../src/services/node-agent'
+    );
+    preparationMocks.send.mockImplementationOnce(realNodeAgent.sendPromptToAgentOnNode);
+    preparationMocks.capabilities.mockResolvedValue(capabilities);
+    let signingStarted!: () => void;
+    let releaseSigning!: () => void;
+    const started = new Promise<void>((resolve) => {
+      signingStarted = resolve;
+    });
+    const barrier = new Promise<void>((resolve) => {
+      releaseSigning = resolve;
+    });
+    preparationMocks.sign.mockImplementationOnce(async () => {
+      signingStarted();
+      await barrier;
+      return { token: 'test-management-token' };
+    });
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const realAdapter = new DefaultVmPromptDeliveryAdapter(env);
+    const adapter: VmPromptDeliveryAdapter = {
+      submit: (input) =>
+        realAdapter.submit({
+          ...input,
+          resolvedTarget: {
+            projectId: 'project-1',
+            chatSessionId: 'chat-1',
+            workspaceId: 'workspace-1',
+            nodeId: 'node-1',
+            agentSessionId: 'acp-1',
+            userId: 'user-1',
+            runtimeIdentity: 'runtime-1',
+            runtime: 'vm',
+          },
+        }),
+      reconcile: (input) => realAdapter.reconcile(input),
+    };
+    try {
+      const pending = runPromptDeliveryClaim(sql, env, config, claim, adapter, hooks);
+      await started;
+      sql.exec(
+        "UPDATE project_event_subscriptions SET lifecycle_state = 'cancelled' WHERE id = ?",
+        'sub-event-wake'
+      );
+      releaseSigning();
+      expect(await pending).toMatchObject({ kind: 'failed', reason: 'terminal_target' });
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(mailbox.getMessage(sql, claim.message.id)?.deliveryState).toBe('failed');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('fails an event wake claim before adapter side effects when source authority is revoked', async () => {
+    const claim = acceptProjectEventWake('event-wake-revoked-source');
+    const first = vi.fn().mockResolvedValue(null);
+    const env = envWithSourceGuard(first);
+    const submit = vi.fn<VmPromptDeliveryAdapter['submit']>();
+
+    await expect(
+      runPromptDeliveryClaim(sql, env, config, claim, { submit, reconcile: vi.fn() }, hooks)
+    ).resolves.toMatchObject({
+      kind: 'failed',
+      reason: 'terminal_target',
+      error: 'Project event wake source task authority was revoked',
+    });
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(submit).not.toHaveBeenCalled();
+    expect(mailbox.getMessage(sql, 'event-wake-revoked-source')).toMatchObject({
+      deliveryState: 'failed',
+      terminalReason: 'terminal_target',
+    });
+  });
+
+  it('validates event wake delivery against the original source task when target task differs', async () => {
+    const claim = acceptProjectEventWake('event-wake-recovery-target-revoked-source', {
+      sourceTaskId: 'source-task-1',
+      targetTaskId: 'recovery-task-1',
+    });
+    const first = vi.fn().mockResolvedValue(null);
+    const env = envWithSourceGuard(first);
+    const submit = vi.fn<VmPromptDeliveryAdapter['submit']>();
+
+    await expect(
+      runPromptDeliveryClaim(sql, env, config, claim, { submit, reconcile: vi.fn() }, hooks)
+    ).resolves.toMatchObject({
+      kind: 'failed',
+      reason: 'terminal_target',
+      error: 'Project event wake source task authority was revoked',
+    });
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(submit).not.toHaveBeenCalled();
+    expect(mailbox.getMessage(sql, 'event-wake-recovery-target-revoked-source')).toMatchObject({
+      sourceTaskId: 'source-task-1',
+      deliveryState: 'failed',
+      terminalReason: 'terminal_target',
+    });
+  });
+
+  it('rejects event wake delivery when the subscription source binding changes', async () => {
+    const claim = acceptProjectEventWake('event-wake-source-binding-changed', {
+      sourceTaskId: 'recovery-task-1',
+      targetTaskId: 'recovery-task-1',
+    });
+    sql.exec(
+      `UPDATE project_event_subscriptions
+       SET owner_task_id = 'source-task-1'
+       WHERE id = 'sub-event-wake'`
+    );
+    const first = vi.fn().mockResolvedValue({ id: 'recovery-task-1' });
+    const env = envWithSourceGuard(first);
+    const submit = vi.fn<VmPromptDeliveryAdapter['submit']>();
+
+    await expect(
+      runPromptDeliveryClaim(sql, env, config, claim, { submit, reconcile: vi.fn() }, hooks)
+    ).resolves.toMatchObject({
+      kind: 'failed',
+      reason: 'terminal_target',
+      error: 'Project event wake source task binding changed',
+    });
+    expect(first).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
+    expect(mailbox.getMessage(sql, 'event-wake-source-binding-changed')).toMatchObject({
+      sourceTaskId: 'recovery-task-1',
+      deliveryState: 'failed',
+      terminalReason: 'terminal_target',
+    });
+  });
+
+  it('passes an event wake source guard through adapter boundaries when D1 authority is live', async () => {
+    const claim = acceptProjectEventWake('event-wake-live-source');
+    const first = vi.fn().mockResolvedValue({ id: 'source-task-1' });
+    const env = envWithSourceGuard(first);
+    const expectedGuard = {
+      taskId: 'source-task-1',
+      projectId: 'project-1',
+      chatSessionId: 'chat-1',
+      projectEventWake: {
+        batchId: 'event-wake-live-source',
+        subscriptionId: 'sub-event-wake',
+      },
+    };
+    const submit = vi.fn<VmPromptDeliveryAdapter['submit']>(async (input) => {
+      expect(input.sourceTaskGuard).toEqual(expectedGuard);
+      await expect(input.beforeSideEffect?.()).resolves.toBeNull();
+      return {
+        kind: 'accepted',
+        acpSessionId: 'acp-1',
+        promptEpoch: Date.now(),
+        runtimeIdentity: 'runtime-1',
+        capabilities,
+        receipt: null,
+      };
+    });
+
+    await expect(
+      runPromptDeliveryClaim(sql, env, config, claim, { submit, reconcile: vi.fn() }, hooks)
+    ).resolves.toMatchObject({ kind: 'accepted' });
+    expect(first).toHaveBeenCalledTimes(2);
+    expect(submit).toHaveBeenCalledTimes(1);
+  });
+
+  it('accepts the recovery task as session owner while preserving the live source parent', async () => {
+    const claim = acceptParentWake('parent-wake-recovery-owner');
+    const submit = vi.fn<VmPromptDeliveryAdapter['submit']>().mockResolvedValue({
+      kind: 'retry',
+      reason: 'not_ready',
+      error: 'replacement runtime is starting',
+      runtimeIdentity: null,
+      capabilities: null,
+    });
+    const env = envWithTaskRows([
+      taskRow('parent-task-1', 'awaiting_followup', { chat_session_id: null }),
+      taskRow('child-task-1', 'completed'),
+      taskRow('recovery-task-1', 'queued', {
+        recovery_source_task_id: 'parent-task-1',
+        triggered_by: 'session-recovery',
+      }),
+    ]);
+
+    await expect(
+      runPromptDeliveryClaim(sql, env, config, claim, { submit, reconcile: vi.fn() }, hooks)
+    ).resolves.toMatchObject({ kind: 'retry', reason: 'not_ready' });
+    expect(submit).toHaveBeenCalledTimes(1);
+  });
+
+  it('accepts parent wake delivery when a cancelled source is superseded by a live owner', async () => {
+    const claim = acceptParentWake('parent-wake-cancelled-superseded');
+    const env = envWithTaskRows([
+      taskRow('parent-task-1', 'cancelled', {
+        chat_session_id: null,
+        superseded_by_task_id: 'recovery-task-1',
+      }),
+      taskRow('child-task-1', 'completed'),
+      taskRow('recovery-task-1', 'in_progress', {
+        recovery_source_task_id: 'parent-task-1',
+        triggered_by: 'session-recovery',
+      }),
+    ]);
+    const submit = acceptedSubmit();
+
+    await expect(
+      runPromptDeliveryClaim(sql, env, config, claim, { submit, reconcile: vi.fn() }, hooks)
+    ).resolves.toMatchObject({ kind: 'accepted' });
+    expect(submit).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries a parent wake when target validation storage is temporarily unavailable', async () => {
+    const claim = acceptParentWake('parent-wake-read-retry');
+    const submit = vi.fn<VmPromptDeliveryAdapter['submit']>();
+    const env = {
+      DATABASE: {
+        prepare: vi.fn(() => ({
+          bind: vi.fn(() => ({ all: vi.fn().mockRejectedValue(new Error('D1 unavailable')) })),
+        })),
+      },
+    } as never;
+
+    await expect(
+      runPromptDeliveryClaim(sql, env, config, claim, { submit, reconcile: vi.fn() }, hooks)
+    ).resolves.toMatchObject({ kind: 'retry', reason: 'not_ready' });
+    expect(submit).not.toHaveBeenCalled();
+    expect(mailbox.getMessage(sql, 'parent-wake-read-retry')).toMatchObject({
+      deliveryState: 'retry_wait',
+      terminalReason: null,
+    });
+  });
+
+  it('revalidates parent state inside the adapter boundary before side effects', async () => {
+    const claim = acceptParentWake('parent-wake-race');
+    let validationCount = 0;
+    const all = vi.fn(async () => {
+      validationCount++;
+      return {
+        results: [
+          {
+            id: 'parent-task-1',
+            status: validationCount === 1 ? 'in_progress' : 'completed',
+            chat_session_id: 'chat-1',
+            parent_task_id: null,
+          },
+          {
+            id: 'child-task-1',
+            status: 'completed',
+            chat_session_id: 'child-chat-1',
+            parent_task_id: 'parent-task-1',
+          },
+        ],
+      };
+    });
+    const env = {
+      DATABASE: { prepare: vi.fn(() => ({ bind: vi.fn(() => ({ all })) })) },
+    } as never;
+    const sideEffect = vi.fn();
+    const submit = vi.fn<VmPromptDeliveryAdapter['submit']>(async (input) => {
+      const guarded = await input.beforeSideEffect?.();
+      if (guarded) return guarded;
+      sideEffect();
+      throw new Error('guard unexpectedly allowed side effect');
+    });
+
+    await expect(
+      runPromptDeliveryClaim(sql, env, config, claim, { submit, reconcile: vi.fn() }, hooks)
+    ).resolves.toMatchObject({ kind: 'failed', reason: 'terminal_target' });
+    expect(validationCount).toBe(2);
+    expect(sideEffect).not.toHaveBeenCalled();
+  });
+
+  it('allows a queued parent wake when a child was reparented inside the same project', async () => {
+    const claim = acceptParentWake('parent-wake-reparented');
+    const env = envWithTaskRows([
+      taskRow('parent-task-1', 'in_progress'),
+      taskRow('child-task-1', 'completed', { parent_task_id: 'other-parent' }),
+    ]);
+    const submit = acceptedSubmit();
+
+    await expect(
+      runPromptDeliveryClaim(sql, env, config, claim, { submit, reconcile: vi.fn() }, hooks)
+    ).resolves.toMatchObject({ kind: 'accepted' });
+    expect(submit).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails a queued parent wake when a child is no longer in the project', async () => {
+    const claim = acceptParentWake('parent-wake-missing-child');
+    const env = envWithTaskRows([taskRow('parent-task-1', 'in_progress')]);
+    const submit = vi.fn<VmPromptDeliveryAdapter['submit']>();
+
+    await expect(
+      runPromptDeliveryClaim(sql, env, config, claim, { submit, reconcile: vi.fn() }, hooks)
+    ).resolves.toMatchObject({ kind: 'failed', reason: 'terminal_target' });
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it('keeps a cold-start busy delivery retryable at the attempt cap until TTL', () => {
+    accept();
+    let now = 10_000;
+
+    for (let attempt = 0; attempt < config.maxAttempts + 2; attempt += 1) {
+      const [claim] = claimDuePromptDeliveries(sql, config, now);
+      expect(claim?.mode).toBe('submit');
+      expect(
+        applyPromptDeliveryResult(
+          sql,
+          claim!,
+          {
+            kind: 'retry',
+            reason: 'not_ready',
+            error: 'replacement agent is still starting',
+            runtimeIdentity: 'runtime-1',
+            capabilities,
+          },
+          config,
+          now
+        )
+      ).toBe(true);
+
+      const pending = mailbox.getMessage(sql, 'delivery-1');
+      expect(pending?.deliveryState).toBe('retry_wait');
+      expect(pending?.terminalReason).toBeNull();
+      expect(pending?.deliveryAttempts).toBeLessThan(config.maxAttempts);
+      now = pending!.nextAttemptAt!;
+    }
+
+    expect(expireDuePromptDeliveries(sql, config, 69_999)).toEqual({
+      expired: 0,
+      failed: 0,
+      expiredWakeFailures: [],
+    });
+    expect(mailbox.getMessage(sql, 'delivery-1')?.deliveryState).toBe('retry_wait');
+    expect(expireDuePromptDeliveries(sql, config, 70_000)).toEqual({
+      expired: 1,
+      failed: 0,
+      expiredWakeFailures: [],
+    });
+    expect(mailbox.getMessage(sql, 'delivery-1')?.terminalReason).toBe('ttl_expired');
+  });
+
+  it('reconciles a stale in-flight attempt without replaying it', () => {
+    accept();
+    const [claim] = claimDuePromptDeliveries(sql, config, 10_000);
+    expect(claim?.mode).toBe('submit');
+    expect(markPromptDeliverySubmitting(sql, claim!, capabilities)).toBe(true);
+
+    const [reconciliation] = claimDuePromptDeliveries(sql, config, 20_000);
+    expect(reconciliation?.mode).toBe('reconcile');
+    expect(reconciliation?.message.deliveryAttempts).toBe(1);
+    expect(claimDuePromptDeliveries(sql, config, 20_000)).toHaveLength(0);
+  });
+
+  it('reclaims interrupted preparation and fences the previous attempt before sending', () => {
+    accept();
+    const original = claimDuePromptDeliveries(sql, config, 10_000)[0]!;
+    const replacement = claimDuePromptDeliveries(sql, config, 20_000)[0]!;
+    expect(replacement.mode).toBe('submit');
+    expect(replacement.message.deliveryAttempts).toBe(1);
+    expect(replacement.attemptId).not.toBe(original.attemptId);
+    expect(markPromptDeliverySubmitting(sql, original, capabilities)).toBe(false);
+    expect(markPromptDeliverySubmitting(sql, replacement, capabilities)).toBe(true);
+    expect(markPromptDeliverySubmitting(sql, replacement, capabilities)).toBe(false);
+    expect(mailbox.getMessage(sql, 'delivery-1')).toMatchObject({
+      runtimeIdentity: 'runtime-1',
+      adapterProtocolVersion: 1,
+      receiptSupported: true,
+    });
+  });
+
+  it('reconciles legacy claims without a positive preparation checkpoint', () => {
+    accept();
+    claimDuePromptDeliveries(sql, config, 10_000);
+    sql.exec('UPDATE session_inbox SET prompt_delivery_phase = NULL WHERE id = ?', 'delivery-1');
+    expect(claimDuePromptDeliveries(sql, config, 20_000)[0]?.mode).toBe('reconcile');
+  });
+
+  it('prevents late preparation from sending after another alarm reclaims the attempt', async () => {
+    let finishProbe!: (result: typeof capabilities) => void;
+    preparationMocks.capabilities.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishProbe = resolve;
+        })
+    );
+    preparationMocks.capabilities.mockResolvedValue(capabilities);
+    preparationMocks.send.mockImplementation(async () => {
+      expect(
+        db.prepare('SELECT prompt_delivery_phase, runtime_identity FROM session_inbox').get()
+      ).toEqual({ prompt_delivery_phase: 'submitting', runtime_identity: 'runtime-1' });
+      return acceptedPromptResponse('acp-1', 'delivery-1', 'runtime-1', Date.now());
+    });
+    const target = {
+      workspace_id: 'workspace-1',
+      user_id: 'user-1',
+      workspace_status: 'running',
+      node_id: 'node-1',
+      node_status: 'running',
+      node_health_status: 'healthy',
+      node_runtime: 'vm',
+      agent_session_id: 'acp-1',
+      agent_session_status: 'running',
+    };
+    const env = {
+      DATABASE: { prepare: () => ({ bind: () => ({ first: async () => target }) }) },
+    } as never;
+    const adapter = new DefaultVmPromptDeliveryAdapter(env);
+    // A suspended preparation may outlive its lease, even before its timeout fires.
+    const suspendedConfig = { ...config, backgroundTimeoutMs: config.receiptTimeoutMs * 3 };
+    accept();
+    const original = claimDuePromptDeliveries(sql, suspendedConfig)[0]!;
+    const pending = runPromptDeliveryClaim(sql, env, suspendedConfig, original, adapter, hooks);
+    await vi.advanceTimersByTimeAsync(config.receiptTimeoutMs);
+    const replacement = claimDuePromptDeliveries(sql, suspendedConfig)[0]!;
+    expect(replacement.mode).toBe('submit');
+    finishProbe(capabilities);
+    await expect(pending).resolves.toMatchObject({ kind: 'retry', reason: 'not_ready' });
+    expect(preparationMocks.send).not.toHaveBeenCalled();
+    expect(mailbox.getMessage(sql, 'delivery-1')).toMatchObject({
+      deliveryState: 'delivering',
+      attemptId: replacement.attemptId,
+    });
+    await expect(
+      runPromptDeliveryClaim(sql, env, suspendedConfig, replacement, adapter, hooks)
+    ).resolves.toMatchObject({ kind: 'accepted' });
+    expect(preparationMocks.send).toHaveBeenCalledTimes(1);
+    expect(mailbox.getMessage(sql, 'delivery-1')?.deliveryState).toBe('acked');
+  });
+
+  it.each([
+    ['terminal_target', 'Target session completed'],
+    ['dead_target', 'Target node is unavailable'],
+  ] as const)('fails %s targets explicitly', (reason, error) => {
+    accept();
+    const [claim] = claimDuePromptDeliveries(sql, config, 10_000);
+    expect(
+      applyPromptDeliveryResult(
+        sql,
+        claim!,
+        {
+          kind: 'failed',
+          reason,
+          error,
+          runtimeIdentity: null,
+          capabilities: null,
+        },
+        config,
+        10_100
+      )
+    ).toBe(true);
+
+    const message = mailbox.getMessage(sql, 'delivery-1');
+    expect(message?.deliveryState).toBe('failed');
+    expect(message?.terminalReason).toBe(reason);
+    expect(message?.lastError).toBe(error);
+  });
+
+  it('raises a visible wake failure when a real claim applies wake_refused', async () => {
+    sql.exec(
+      "UPDATE chat_sessions SET status = 'sleeping', task_id = 'task-1' WHERE id = 'chat-1'"
+    );
+    accept('wake-refused');
+    const [claim] = claimDuePromptDeliveries(sql, config, 10_000);
+    const submit = vi.fn<VmPromptDeliveryAdapter['submit']>().mockResolvedValue({
+      kind: 'failed',
+      reason: 'wake_refused',
+      error: 'The retained sleep snapshot has expired. (snapshot_expired)',
+      runtimeIdentity: null,
+      capabilities: null,
+    });
+
+    await expect(
+      runPromptDeliveryClaim(sql, {}, config, claim!, { submit, reconcile: vi.fn() }, hooks)
+    ).resolves.toMatchObject({ kind: 'failed', reason: 'wake_refused' });
+
+    expect(mailbox.getMessage(sql, 'wake-refused')).toMatchObject({
+      deliveryState: 'failed',
+      terminalReason: 'wake_refused',
+    });
+    expect(
+      sql
+        .exec(
+          `SELECT kind, reason, task_id
+             FROM session_attention_markers
+            WHERE session_id = 'chat-1' AND resolved_at IS NULL`
+        )
+        .toArray()
+    ).toEqual([{ kind: 'wake_failed', reason: 'wake_refused', task_id: 'task-1' }]);
+    expect(
+      sql
+        .exec(
+          `SELECT role, content
+             FROM chat_messages
+            WHERE session_id = 'chat-1'
+            ORDER BY sequence DESC
+            LIMIT 1`
+        )
+        .toArray()[0]
+    ).toEqual({
+      role: 'system',
+      content: 'Wake failed: The retained sleep snapshot has expired. (snapshot_expired)',
+    });
+    expect(hooks.broadcastEvent).toHaveBeenCalledWith(
+      'session.wake_failed',
+      expect.objectContaining({ sessionId: 'chat-1', reason: 'wake_refused' }),
+      'chat-1'
+    );
+    expect(hooks.broadcastEvent).toHaveBeenCalledWith(
+      'message.new',
+      expect.objectContaining({ sessionId: 'chat-1', role: 'system' }),
+      'chat-1'
+    );
+    expect(hooks.scheduleSummarySync).toHaveBeenCalled();
+  });
+
+  it('marks cross-runtime uncertainty ambiguous and never requeues it', () => {
+    accept();
+    const [claim] = claimDuePromptDeliveries(sql, config, 10_000);
+    expect(
+      applyPromptDeliveryResult(
+        sql,
+        claim!,
+        {
+          kind: 'ambiguous',
+          reason: 'runtime_changed',
+          error: 'runtime identity changed',
+          runtimeIdentity: 'runtime-2',
+          capabilities,
+          receipt: null,
+        },
+        config,
+        10_100
+      )
+    ).toBe(true);
+
+    const message = mailbox.getMessage(sql, 'delivery-1');
+    expect(message?.deliveryState).toBe('ambiguous');
+    expect(message?.terminalReason).toBe('runtime_changed');
+    expect(claimDuePromptDeliveries(sql, config, 100_000)).toHaveLength(0);
+  });
+
+  it('expires by TTL and fails exhausted attempts without claiming either row', () => {
+    accept('ttl-delivery', 100);
+    accept('attempt-delivery');
+    sql.exec(
+      `UPDATE session_inbox SET delivery_attempts = ? WHERE id = 'attempt-delivery'`,
+      config.maxAttempts
+    );
+
+    expect(expireDuePromptDeliveries(sql, config, 10_100)).toEqual({
+      expired: 1,
+      failed: 1,
+      expiredWakeFailures: [],
+    });
+    expect(mailbox.getMessage(sql, 'ttl-delivery')?.deliveryState).toBe('expired');
+    expect(mailbox.getMessage(sql, 'attempt-delivery')?.deliveryState).toBe('failed');
+    expect(claimDuePromptDeliveries(sql, config, 10_100)).toHaveLength(0);
+  });
+
+  it('raises a visible wake failure when the real alarm expires a sleeping wake delivery', () => {
+    sql.exec(
+      "UPDATE chat_sessions SET status = 'sleeping', task_id = 'task-1' WHERE id = 'chat-1'"
+    );
+    accept('ttl-wake', 100, 'user_followup');
+    const waitUntil = vi.fn((promise: Promise<unknown>) => void promise.catch(() => undefined));
+    const alarmHooks = {
+      getProjectId: () => 'project-1',
+      transactionSync: <T>(callback: () => T) => callback(),
+      waitUntil,
+      recalculateAlarm: vi.fn(async () => {}),
+      scheduleSummarySync: vi.fn(),
+      broadcastEvent: vi.fn(),
+      armIdleCleanup: vi.fn(),
+      nudgeDeliveries: vi.fn((chatSessionId: string) =>
+        nudgePromptDeliveriesForTarget(sql, chatSessionId)
+      ),
+    };
+
+    vi.setSystemTime(10_100);
+    processPromptDeliveryAlarm(sql, {}, alarmHooks);
+
+    expect(mailbox.getMessage(sql, 'ttl-wake')).toMatchObject({
+      deliveryState: 'expired',
+      terminalReason: 'ttl_expired',
+    });
+    expect(
+      sql
+        .exec(
+          `SELECT kind, reason, task_id
+             FROM session_attention_markers
+            WHERE session_id = 'chat-1' AND resolved_at IS NULL`
+        )
+        .toArray()
+    ).toEqual([{ kind: 'wake_failed', reason: 'ttl_expired', task_id: 'task-1' }]);
+    expect(
+      sql
+        .exec(
+          `SELECT role, content FROM chat_messages WHERE session_id = 'chat-1' ORDER BY sequence DESC LIMIT 1`
+        )
+        .toArray()[0]
+    ).toEqual({
+      role: 'system',
+      content:
+        'Wake failed: SAM retried the wake until the delivery expired, but the session did not wake.',
+    });
+    expect(alarmHooks.broadcastEvent).toHaveBeenCalledWith(
+      'session.wake_failed',
+      expect.objectContaining({ sessionId: 'chat-1', reason: 'ttl_expired' }),
+      'chat-1'
+    );
+    expect(alarmHooks.broadcastEvent).toHaveBeenCalledWith(
+      'message.new',
+      expect.objectContaining({ sessionId: 'chat-1', role: 'system' }),
+      'chat-1'
+    );
+    expect(alarmHooks.scheduleSummarySync).toHaveBeenCalled();
+  });
+
+  it('keeps durable delivery states out of the legacy mailbox expiry sweep', () => {
+    accept('durable-expired', 100, 'agent_mailbox');
+    accept('durable-exhausted', config.ttlMs, 'agent_mailbox');
+    mailbox.enqueueMessage(sql, {
+      id: 'legacy-expired',
+      targetSessionId: 'chat-1',
+      sourceTaskId: null,
+      senderType: 'system',
+      senderId: null,
+      messageClass: 'deliver',
+      content: 'legacy mailbox delivery',
+      sourceKind: 'agent_mailbox',
+      ttlMs: 100,
+      now: 10_000,
+    });
+    sql.exec(
+      `UPDATE session_inbox SET delivery_attempts = ? WHERE id = 'durable-exhausted'`,
+      config.maxAttempts
+    );
+
+    vi.setSystemTime(10_100);
+    expect(mailbox.expireStaleMessages(sql, config.maxAttempts)).toBe(1);
+    expect(mailbox.getMessage(sql, 'durable-expired')?.deliveryState).toBe('queued');
+    expect(mailbox.getMessage(sql, 'durable-exhausted')?.deliveryState).toBe('queued');
+    expect(mailbox.getMessage(sql, 'legacy-expired')?.deliveryState).toBe('expired');
+
+    expect(expireDuePromptDeliveries(sql, config, 10_100)).toEqual({
+      expired: 1,
+      failed: 1,
+      expiredWakeFailures: [],
+    });
+    expect(mailbox.getMessage(sql, 'durable-expired')?.terminalReason).toBe('ttl_expired');
+    expect(mailbox.getMessage(sql, 'durable-exhausted')?.terminalReason).toBe(
+      'max_attempts_exceeded'
+    );
+  });
+
+  // ─── Stop-and-deliver (urgent delivery phase 1) ────────────────────────────
+
+  const busyTargetRow = {
+    workspace_id: 'workspace-1',
+    user_id: 'user-1',
+    workspace_status: 'running',
+    node_id: 'node-1',
+    node_status: 'running',
+    node_health_status: 'healthy',
+    agent_version: 'v1',
+    node_runtime: 'vm',
+    agent_session_id: 'acp-1',
+    agent_session_status: 'running',
+    agent_session_updated_at: '2026-08-09T00:00:00Z',
+  };
+
+  function seedBusyTargetSession() {
+    sql.exec(
+      `INSERT INTO acp_sessions (id, chat_session_id, status)
+       VALUES ('acp-1', 'chat-1', 'running')`
+    );
+    sessionState.upsertActivityState(sql, 'acp-1', {
+      activity: 'prompting',
+      observedAt: 9_000,
+      promptStartedAt: 9_000,
+      source: 'vm_report',
+    });
+  }
+
+  function busyEnv() {
+    return {
+      DATABASE: {
+        prepare: () => ({ bind: () => ({ first: async () => busyTargetRow }) }),
+      },
+    } as never;
+  }
+
+  function mockBusySubmit() {
+    preparationMocks.capabilities.mockResolvedValue(capabilities);
+    preparationMocks.send.mockRejectedValue(
+      new NodeAgentHttpError(
+        409,
+        JSON.stringify({
+          status: 'not_ready',
+          sessionId: 'acp-1',
+          receipt: {
+            deliveryId: 'delivery-1',
+            state: 'accepted',
+            runtimeIdentity: 'runtime-1',
+            acceptedAt: 1_786_312_800_123,
+            completedAt: null,
+          },
+        })
+      )
+    );
+  }
+
+  async function runBusyClaim(messageClass: 'interrupt' | 'deliver') {
+    acceptPromptDelivery(
+      sql,
+      {},
+      {
+        deliveryId: 'delivery-1',
+        targetSessionId: 'chat-1',
+        displayContent: 'stop doing that',
+        deliveryContent: 'stop doing that',
+        sourceTaskId: 'task-2',
+        senderType: 'agent',
+        senderId: 'workspace-2',
+        messageClass,
+        sourceKind: 'agent_mailbox',
+        ttlMs: config.ttlMs,
+      },
+      Date.now()
+    );
+    const claim = claimDuePromptDeliveries(sql, config)[0]!;
+    const env = busyEnv();
+    const attempt = runPromptDeliveryClaim(
+      sql,
+      env,
+      config,
+      claim,
+      new DefaultVmPromptDeliveryAdapter(env),
+      hooks
+    );
+    await vi.advanceTimersByTimeAsync(config.backgroundTimeoutMs);
+    return attempt;
+  }
+
+  it('stops a busy turn for an interrupt-class claim and parks the delivery for retry', async () => {
+    seedBusyTargetSession();
+    mockBusySubmit();
+    preparationMocks.cancel.mockResolvedValue({ success: true, status: 200 });
+
+    await expect(runBusyClaim('interrupt')).resolves.toMatchObject({
+      kind: 'retry',
+      reason: 'busy',
+    });
+
+    // The stop used the existing cancel transport against the resolved target,
+    // with the background timeout tier (this runs in the DO alarm context).
+    expect(preparationMocks.cancel).toHaveBeenCalledTimes(1);
+    expect(preparationMocks.cancel).toHaveBeenCalledWith(
+      'node-1',
+      'workspace-1',
+      'acp-1',
+      expect.anything(),
+      'user-1',
+      { requestTimeoutMs: config.backgroundTimeoutMs }
+    );
+
+    // The turn end was recorded from the control plane with the turn_start
+    // guard semantics — the session is idle, not stopped.
+    expect(sessionState.getSessionState(sql, 'acp-1')).toMatchObject({
+      activity: 'idle',
+      activitySource: 'control_plane',
+      activityReason: 'cancelled',
+      promptStartedAt: null,
+    });
+
+    // Provenance for this specific path stays diagnosable, including the
+    // rule-49 observation instant captured before the VM call.
+    expect(
+      db
+        .prepare(
+          `SELECT COUNT(*) AS count FROM activity_events
+           WHERE event_type = 'prompt_delivery.turn_interrupted' AND session_id = 'chat-1'`
+        )
+        .get()
+    ).toEqual({ count: 1 });
+    const provenance = db
+      .prepare(
+        `SELECT payload FROM activity_events
+           WHERE event_type = 'prompt_delivery.turn_interrupted' AND session_id = 'chat-1'`
+      )
+      .get() as { payload: string };
+    expect(JSON.parse(provenance.payload)).toMatchObject({
+      deliveryId: 'delivery-1',
+      messageClass: 'interrupt',
+      targetAgentSessionId: 'acp-1',
+      observedAt: expect.any(Number),
+    });
+    expect(
+      (JSON.parse(provenance.payload) as { observedAt: number }).observedAt
+    ).toBeLessThanOrEqual(Date.now());
+
+    // The turn-end fan-out released the queue surface and re-armed idle.
+    expect(hooks.nudgeDeliveries).toHaveBeenCalledWith('chat-1');
+    expect(hooks.armIdleCleanup).toHaveBeenCalledWith('chat-1');
+    expect(hooks.broadcastEvent).toHaveBeenCalledWith(
+      'session.activity',
+      expect.objectContaining({ sessionId: 'chat-1', activity: 'idle' }),
+      'chat-1'
+    );
+
+    // The urgent delivery parked in retry_wait and was then re-nudged due
+    // immediately: it was still `delivering` when the turn-end fan-out ran, so
+    // without this release a nudged lower-urgency sibling could be claimed as
+    // the next prompt ahead of the urgent message that caused the stop.
+    expect(mailbox.getMessage(sql, 'delivery-1')).toMatchObject({
+      deliveryState: 'retry_wait',
+      terminalReason: null,
+      // The runner settles at t=10_000 before the advanced clock reaches
+      // t=15_000, so the re-nudge pins the attempt to the stop instant.
+      nextAttemptAt: 10_000,
+    });
+  });
+
+  it('does not stop a busy turn for informational classes', async () => {
+    seedBusyTargetSession();
+    mockBusySubmit();
+
+    await expect(runBusyClaim('deliver')).resolves.toMatchObject({
+      kind: 'retry',
+      reason: 'busy',
+    });
+
+    expect(preparationMocks.cancel).not.toHaveBeenCalled();
+    expect(sessionState.getSessionState(sql, 'acp-1')).toMatchObject({
+      activity: 'prompting',
+    });
+    expect(
+      db
+        .prepare(
+          `SELECT COUNT(*) AS count FROM activity_events WHERE event_type = 'prompt_delivery.turn_interrupted'`
+        )
+        .get()
+    ).toEqual({ count: 0 });
+    // No turn ended and no stop happened, so nothing nudged the queue: the
+    // informational delivery keeps its ordinary backoff.
+    expect(hooks.nudgeDeliveries).not.toHaveBeenCalled();
+    expect(mailbox.getMessage(sql, 'delivery-1')).toMatchObject({
+      deliveryState: 'retry_wait',
+      nextAttemptAt: 10_000 + config.retryBaseMs,
+    });
+  });
+
+  it('keeps the urgent delivery retryable when the cancel transport fails', async () => {
+    seedBusyTargetSession();
+    mockBusySubmit();
+    preparationMocks.cancel.mockResolvedValue({ success: false, status: 500 });
+
+    await expect(runBusyClaim('interrupt')).resolves.toMatchObject({
+      kind: 'retry',
+      reason: 'busy',
+    });
+
+    expect(preparationMocks.cancel).toHaveBeenCalledTimes(1);
+    // No turn end was recorded — the busy turn is untouched and the delivery
+    // degrades to today's parked-in-retry_wait behaviour with ordinary backoff
+    // (a broken node must not be hot-looped by immediate retries).
+    expect(sessionState.getSessionState(sql, 'acp-1')).toMatchObject({
+      activity: 'prompting',
+    });
+    expect(hooks.nudgeDeliveries).not.toHaveBeenCalled();
+    expect(mailbox.getMessage(sql, 'delivery-1')).toMatchObject({
+      deliveryState: 'retry_wait',
+      nextAttemptAt: 10_000 + config.retryBaseMs,
+    });
+  });
+
+  it('treats a 409 from the cancel transport as an already-ended turn and repairs the mirror', async () => {
+    seedBusyTargetSession();
+    mockBusySubmit();
+    preparationMocks.cancel.mockResolvedValue({ success: false, status: 409 });
+
+    await expect(runBusyClaim('interrupt')).resolves.toMatchObject({
+      kind: 'retry',
+      reason: 'busy',
+    });
+
+    // Like the user stop button on 409, the control plane still records the
+    // turn end so a lost VM `idle` report cannot wedge a stale prompting
+    // mirror (.claude/rules/57).
+    expect(sessionState.getSessionState(sql, 'acp-1')).toMatchObject({
+      activity: 'idle',
+      activitySource: 'control_plane',
+      activityReason: 'cancelled',
+    });
+    // No stop signal reached the VM, so this is a repair, not an interruption.
+    expect(
+      db
+        .prepare(
+          `SELECT COUNT(*) AS count FROM activity_events WHERE event_type = 'prompt_delivery.turn_interrupted'`
+        )
+        .get()
+    ).toEqual({ count: 0 });
+    // The busy turn already ended, so the parked urgent delivery is due
+    // immediately.
+    expect(hooks.nudgeDeliveries).toHaveBeenCalledWith('chat-1');
+    expect(mailbox.getMessage(sql, 'delivery-1')).toMatchObject({
+      deliveryState: 'retry_wait',
+      nextAttemptAt: 10_000,
+    });
+  });
+
+  it('does not stomp a newer turn that started after the stop was observed', async () => {
+    seedBusyTargetSession();
+    mockBusySubmit();
+    // The cancel call observes at t=10_000, but a NEWER turn began at t=10_500
+    // while the cancel round-trip was in flight.
+    preparationMocks.cancel.mockImplementation(async () => {
+      // The old turn ends, then a NEW turn begins at t=10_500 while the
+      // cancel round-trip is still in flight (observed at t=10_000).
+      sessionState.upsertActivityState(sql, 'acp-1', {
+        activity: 'idle',
+        observedAt: 10_400,
+        source: 'vm_report',
+      });
+      sessionState.upsertActivityState(sql, 'acp-1', {
+        activity: 'prompting',
+        observedAt: 10_500,
+        promptStartedAt: 10_500,
+        source: 'vm_report',
+      });
+      return { success: true, status: 200 };
+    });
+
+    await expect(runBusyClaim('interrupt')).resolves.toMatchObject({
+      kind: 'retry',
+      reason: 'busy',
+    });
+
+    // The turn_start guard refused the stomp: the newer turn survives.
+    expect(sessionState.getSessionState(sql, 'acp-1')).toMatchObject({
+      activity: 'prompting',
+      promptStartedAt: 10_500,
+    });
+    expect(
+      db
+        .prepare(
+          `SELECT COUNT(*) AS count FROM activity_events WHERE event_type = 'prompt_delivery.turn_interrupted'`
+        )
+        .get()
+    ).toEqual({ count: 0 });
+    // A stop signal still reached the VM, so the parked delivery re-nudges due
+    // immediately — it will stop the newer turn on its next claim if that turn
+    // is still in flight when it lands.
+    expect(hooks.nudgeDeliveries).toHaveBeenCalledWith('chat-1');
+    expect(mailbox.getMessage(sql, 'delivery-1')).toMatchObject({
+      deliveryState: 'retry_wait',
+      nextAttemptAt: 10_000,
+    });
+  });
+});

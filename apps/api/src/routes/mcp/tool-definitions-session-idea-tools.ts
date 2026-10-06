@@ -7,7 +7,7 @@ export const SESSION_IDEA_TOOLS = [
   {
     name: 'update_session_topic',
     description:
-      'Update the topic (title) of your current chat session. Use this when you understand the conversation\'s true subject after a few messages, ' +
+      "Update the topic (title) of your current chat session. Use this when you understand the conversation's true subject after a few messages, " +
       'or when the conversation changes direction. The topic is displayed in the session list and helps users identify what each session is about.',
     inputSchema: {
       type: 'object' as const,
@@ -71,18 +71,27 @@ export const SESSION_IDEA_TOOLS = [
   {
     name: 'find_related_ideas',
     description:
-      'Search existing ideas in your project by keyword. Defaults to searching draft (idea) tasks only. Use this to find ideas that might relate to the current conversation before creating a new one.',
+      'Search existing ideas in your project by keyword. Defaults to searching draft (idea) tasks only. Over-limit input is truncated and disclosed in the response. Use this to find ideas that might relate to the current conversation before creating a new one.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         query: {
           type: 'string',
-          description: 'Search keyword to find in idea titles and descriptions',
+          description: 'Search keyword to find in idea titles and descriptions. Over-limit input is truncated.',
         },
         status: {
           type: 'string',
           description: 'Filter by idea status. Omit for all statuses.',
-          enum: ['draft', 'queued', 'in_progress', 'delegated', 'awaiting_followup', 'completed', 'failed', 'cancelled'],
+          enum: [
+            'draft',
+            'queued',
+            'in_progress',
+            'delegated',
+            'awaiting_followup',
+            'completed',
+            'failed',
+            'cancelled',
+          ],
         },
         limit: {
           type: 'number',
@@ -140,7 +149,8 @@ export const SESSION_IDEA_TOOLS = [
         },
         append: {
           type: 'boolean',
-          description: 'If true (default), append content to existing description. If false, replace it.',
+          description:
+            'If true (default), append content to existing description. If false, replace it.',
         },
         priority: {
           type: 'number',
@@ -191,13 +201,14 @@ export const SESSION_IDEA_TOOLS = [
   {
     name: 'search_ideas',
     description:
-      'Search ideas in your project by keyword. Searches both title and content fields. Only returns ideas (draft tasks), not executed tasks.',
+      'Search ideas in your project by keyword. Searches both title and content fields, requiring every retained term to match. Only returns ideas (draft tasks), not executed tasks. Queries beyond the server-configured guardrails are truncated; the response reports queryTruncated, the effective query, and queryLimits.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         query: {
           type: 'string',
-          description: 'Search keyword to find in idea titles and content',
+          description:
+            'Search text for idea titles and content. Over-limit input is truncated and disclosed in the response.',
         },
         limit: {
           type: 'number',
@@ -209,12 +220,53 @@ export const SESSION_IDEA_TOOLS = [
     },
   },
   {
-    name: 'get_deployment_credentials',
+    name: 'build_and_publish',
     description:
-      'Get GCP deployment credentials for the current project. Returns a GCP external_account credential config JSON that can be written to a file and used with GOOGLE_APPLICATION_CREDENTIALS. GCP client libraries will auto-refresh tokens via SAM.',
+      "Start an asynchronous build/publish job for your project's Docker Compose stack and return a durable publishJobId immediately. This is the publish path for compose-based projects. SAM builds services on the host Docker daemon, uploads scoped image artifacts, records a deployment release server-side, and rewrites safe declared named Compose volumes to SAM provider-backed deployment volumes. You run ZERO docker or registry commands and never receive credentials. Unsafe volume forms are rejected with unsupported_compose_volumes: host bind mounts, Docker socket mounts, anonymous volumes, undeclared named volumes, volumes_from, tmpfs, external volumes, custom volume drivers, and driver options. After this tool returns, call get_publish_status with the publishJobId every 10-20 seconds until the status is succeeded, failed, canceled, or unknown. Do not treat the initial response as deployment success.",
     inputSchema: {
       type: 'object' as const,
-      properties: {},
+      properties: {
+        environment: {
+          type: 'string',
+          description:
+            'Deployment environment name (e.g. "staging", "production"). The environment must exist, be active, and have agent deployment enabled by a user.',
+        },
+        reference: {
+          type: 'string',
+          description: 'Optional release tag for the published images (defaults to "latest").',
+        },
+        workingDir: {
+          type: 'string',
+          description:
+            'Optional absolute path to the working directory to build, under /workspaces (e.g. "/workspaces/myrepo" or a git worktree like "/workspaces/myrepo-wt-feature"). Pass your current working directory — especially when working in a git worktree — so SAM builds the source you actually edited. Defaults to the workspace\'s primary repository directory.',
+        },
+      },
+      required: ['environment'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'get_publish_status',
+    description:
+      'Poll a durable build_and_publish job. Returns current status, current step, recent events, terminal release details on success, and sanitized failure diagnostics on failure. Use sinceSeq to fetch only new events after an earlier poll.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        publishJobId: {
+          type: 'string',
+          description: 'The publishJobId returned by build_and_publish.',
+        },
+        sinceSeq: {
+          type: 'number',
+          description:
+            'Optional last seen event sequence. Only events with seq greater than this value are returned.',
+        },
+        limit: {
+          type: 'number',
+          description: 'Optional maximum number of events to return (default 50, max 100).',
+        },
+      },
+      required: ['publishJobId'],
       additionalProperties: false,
     },
   },

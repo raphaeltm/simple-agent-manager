@@ -18,7 +18,7 @@ import { API_URL, request } from './client';
 
 export async function listLibraryFiles(
   projectId: string,
-  filters?: ListFilesRequest,
+  filters?: ListFilesRequest
 ): Promise<ListFilesResponse> {
   const params = new URLSearchParams();
   if (filters?.tags?.length) params.set('tags', filters.tags.join(','));
@@ -44,7 +44,7 @@ export async function listLibraryFiles(
 
 export async function getLibraryFile(
   projectId: string,
-  fileId: string,
+  fileId: string
 ): Promise<FileMetadataResponse> {
   return request<FileMetadataResponse>(`/api/projects/${projectId}/library/${fileId}`);
 }
@@ -64,7 +64,7 @@ export interface UploadLibraryFileOptions {
 export function uploadLibraryFile(
   projectId: string,
   file: File,
-  options?: UploadLibraryFileOptions,
+  options?: UploadLibraryFileOptions
 ): Promise<FileMetadataResponse> {
   return new Promise((resolve, reject) => {
     const formData = new FormData();
@@ -118,7 +118,7 @@ export function replaceLibraryFile(
   projectId: string,
   fileId: string,
   file: File,
-  options?: { description?: string; onProgress?: (loaded: number, total: number) => void },
+  options?: { description?: string; onProgress?: (loaded: number, total: number) => void }
 ): Promise<FileMetadataResponse> {
   return new Promise((resolve, reject) => {
     const formData = new FormData();
@@ -181,13 +181,29 @@ export function getLibraryFilePreviewUrl(projectId: string, fileId: string): str
   return `${API_URL}/api/projects/${projectId}/library/${fileId}/preview`;
 }
 
+export interface InteractivePreviewUrl {
+  url: string;
+  expiresAt: string;
+  version: string;
+}
+
+export async function mintInteractivePreviewUrl(
+  projectId: string,
+  fileId: string
+): Promise<InteractivePreviewUrl> {
+  return request<InteractivePreviewUrl>(
+    `/api/projects/${projectId}/library/${fileId}/interactive-preview-url`,
+    { method: 'POST' }
+  );
+}
+
 // =============================================================================
 // Delete file
 // =============================================================================
 
 export async function deleteLibraryFile(
   projectId: string,
-  fileId: string,
+  fileId: string
 ): Promise<{ success: boolean }> {
   return request<{ success: boolean }>(`/api/projects/${projectId}/library/${fileId}`, {
     method: 'DELETE',
@@ -205,14 +221,14 @@ export async function deleteLibraryFile(
 export async function listLibraryDirectories(
   projectId: string,
   parentDirectory: string = '/',
-  search?: string,
+  search?: string
 ): Promise<{ directories: DirectoryEntry[] }> {
   const params = new URLSearchParams();
   if (parentDirectory !== '/') params.set('parentDirectory', parentDirectory);
   if (search) params.set('search', search);
   const qs = params.toString();
   return request<{ directories: DirectoryEntry[] }>(
-    `/api/projects/${projectId}/library/directories${qs ? `?${qs}` : ''}`,
+    `/api/projects/${projectId}/library/directories${qs ? `?${qs}` : ''}`
   );
 }
 
@@ -223,15 +239,12 @@ export async function listLibraryDirectories(
 export async function moveLibraryFile(
   projectId: string,
   fileId: string,
-  move: MoveFileRequest,
+  move: MoveFileRequest
 ): Promise<ProjectFile> {
-  return request<ProjectFile>(
-    `/api/projects/${projectId}/library/${fileId}/move`,
-    {
-      method: 'PATCH',
-      body: JSON.stringify(move),
-    },
-  );
+  return request<ProjectFile>(`/api/projects/${projectId}/library/${fileId}/move`, {
+    method: 'PATCH',
+    body: JSON.stringify(move),
+  });
 }
 
 // =============================================================================
@@ -241,13 +254,10 @@ export async function moveLibraryFile(
 export async function updateFileTags(
   projectId: string,
   fileId: string,
-  tagsUpdate: UpdateTagsRequest,
+  tagsUpdate: UpdateTagsRequest
 ): Promise<{ tags: ProjectFileTag[] }> {
-  return request<{ tags: ProjectFileTag[] }>(
-    `/api/projects/${projectId}/library/${fileId}/tags`,
-    {
-      method: 'POST',
-      body: JSON.stringify(tagsUpdate),
-    },
-  );
+  return request<{ tags: ProjectFileTag[] }>(`/api/projects/${projectId}/library/${fileId}/tags`, {
+    method: 'POST',
+    body: JSON.stringify(tagsUpdate),
+  });
 }

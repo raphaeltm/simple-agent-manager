@@ -32,6 +32,12 @@ const mocks = vi.hoisted(() => ({
 
 let confirmSpy: ReturnType<typeof vi.spyOn>;
 
+// `useQueryScope()` reads the authenticated identity, and every migrated query
+// is keyed by it. Without a provider `useAuth` throws, so supply a stable identity.
+vi.mock('../../../src/components/AuthProvider', () => ({
+  useAuth: () => ({ user: { id: 'user-1', email: 'user@example.com', name: 'Test User' } }),
+}));
+
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   getNode: mocks.getNode,
@@ -56,6 +62,8 @@ vi.mock('../../../src/hooks/useNodeLogs', () => ({
     hasMore: false,
     streaming: false,
     paused: false,
+    containers: [],
+    containersLoading: false,
     filter: { source: 'all', level: 'info', container: '', search: '' },
     setSource: vi.fn(),
     setLevel: vi.fn(),
@@ -73,6 +81,7 @@ vi.mock('../../../src/components/UserMenu', () => ({
 
 import { ToastProvider } from '../../../src/hooks/useToast';
 import { Node } from '../../../src/pages/Node';
+import { QueryTestWrapper } from '../../test-utils/query-test-utils';
 
 function renderNode(path: string) {
   return render(
@@ -85,7 +94,7 @@ function renderNode(path: string) {
         </Routes>
       </MemoryRouter>
     </ToastProvider>
-  );
+  , { wrapper: QueryTestWrapper });
 }
 
 describe('Node page', () => {
@@ -158,7 +167,7 @@ describe('Node page', () => {
     await waitFor(() => {
       expect(mocks.listNodeEvents).toHaveBeenCalled();
     });
-    expect(screen.getByText('Node started')).toBeInTheDocument();
+    expect(await screen.findByText('Node started')).toBeInTheDocument();
   });
 
   it('supports create-workspace navigation from node detail', async () => {

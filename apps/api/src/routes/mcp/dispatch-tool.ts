@@ -1,13 +1,10 @@
-/**
- * MCP dispatch_task tool — spawns a new task in the current project.
- *
- * Supports full task execution configuration parity with the normal submit path:
- * agentProfileId, taskMode, agentType, workspaceProfile, provider, vmLocation.
- *
- * Config precedence: explicit field → profile value → project default → platform default.
- */
-import type { CredentialProvider, TaskMode, VMLocation, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
-import { CREDENTIAL_PROVIDERS, DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, DEVCONTAINER_CONFIG_NAME_MAX_LENGTH, DEVCONTAINER_CONFIG_NAME_REGEX, getDefaultLocationForProvider, getLocationsForProvider, isValidAgentType, isValidLocationForProvider, isValidProvider } from '@simple-agent-manager/shared';
+/** Dispatch a project task using explicit → profile → project → platform configuration. */
+import type {
+  CapacityPlacementSnapshot,
+  CredentialProvider,
+  CredentialSource,
+  VMSize,
+} from '@simple-agent-manager/shared';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -15,13 +12,36 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
-import { resolveAgentProfile } from '../../services/agent-profiles';
 import { generateBranchName } from '../../services/branch-name';
+import {
+  CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS,
+  CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS,
+  capacityPlacementSnapshotSqlValues,
+} from '../../services/capacity-placement-snapshot';
+import {
+  PlacementResolutionError,
+  resolveTaskStartPlacement,
+  resolveTaskStartPlacementCredentialAttributionFromPlacement,
+  type TaskStartCapacityPoolSelection,
+  type TaskStartPlacement,
+  type TaskStartPlacementInput,
+} from '../../services/placement-resolver';
 import { resolveProjectAgentDefault } from '../../services/project-agent-defaults';
 import * as projectDataService from '../../services/project-data';
-import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-sync';
+import {
+  collectStoredResourceRequirementLayers,
+  createPersistedTaskResourcePlanJson,
+  firstResourceRequirementLayer,
+  firstResourceRequirementLayerJson,
+  mergeResourceRequirementLayers,
+  ResourceRequirementsValidationError,
+} from '../../services/resource-requirements-input';
+import { resolveSkillProfile } from '../../services/skills';
+import { markTaskFailedIfNonTerminal } from '../../services/task-failure';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title';
+import { resolveWorkspaceRuntime } from '../../services/workspace-runtime';
+import { requireRepositoryOwnerAccess } from '../projects/_helpers';
 import {
   ACTIVE_STATUSES,
   getMcpLimits,
@@ -29,134 +49,64 @@ import {
   INVALID_PARAMS,
   jsonRpcError,
   type JsonRpcResponse,
-  jsonRpcSuccess,
   type McpTokenData,
 } from './_helpers';
+import {
+  recomputeDispatchMissionSchedulerState,
+  recordDispatchActivityEvent,
+} from './dispatch-activity';
+import {
+  type DispatchExecutionContext,
+  getRuntimeValidationError,
+  launchDispatchedInstantSession,
+} from './dispatch-instant';
+import { buildDispatchTaskSuccessResponse } from './dispatch-task-response';
+import { parseDispatchTaskParams } from './dispatch-tool-params';
+import { requireMcpTaskWriteProject } from './task-project-access';
 
-/** Valid task modes for dispatch */
-const VALID_TASK_MODES: TaskMode[] = ['task', 'conversation'];
-/** Valid workspace profiles for dispatch */
-const VALID_WORKSPACE_PROFILES: WorkspaceProfile[] = ['full', 'lightweight'];
+export { getConversationTaskModeWarning } from './dispatch-task-response';
 
 export async function handleDispatchTask(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
   env: Env,
+  execCtx?: DispatchExecutionContext
 ): Promise<JsonRpcResponse> {
   const limits = getMcpLimits(env);
   const db = drizzle(env.DATABASE, { schema });
 
-  // ── Validate description ────────────────────────────────────────────────
-  const description = typeof params.description === 'string' ? params.description.trim() : '';
-  if (!description) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'description is required and must be a non-empty string');
+  const parsedParams = parseDispatchTaskParams(requestId, params, limits);
+  if ('error' in parsedParams) {
+    return parsedParams.error;
   }
-  if (description.length > limits.dispatchDescriptionMaxLength) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      `description exceeds maximum length of ${limits.dispatchDescriptionMaxLength} characters`,
-    );
-  }
+  const {
+    description,
+    vmSize,
+    explicitRuntime,
+    priority,
+    references,
+    explicitBranch,
+    agentProfileId,
+    skillId,
+    explicitTaskMode,
+    explicitAgentType,
+    explicitWorkspaceProfile,
+    explicitDevcontainerConfigName,
+    explicitProvider,
+    explicitVmLocation,
+    explicitMissionId,
+    resourceRequirements,
+  } = parsedParams.parsed;
 
-  let vmSize: VMSize | undefined;
-  if (params.vmSize !== undefined) {
-    if (typeof params.vmSize !== 'string' || !['small', 'medium', 'large'].includes(params.vmSize)) {
-      return jsonRpcError(requestId, INVALID_PARAMS, 'vmSize must be small, medium, or large');
-    }
-    vmSize = params.vmSize as VMSize;
-  }
-
-  // Clamp priority to [0, max] to prevent agents from monopolizing the task queue
-  const priority = typeof params.priority === 'number'
-    ? Math.min(Math.max(0, Math.round(params.priority)), limits.dispatchMaxPriority)
-    : 0;
-  const references = Array.isArray(params.references)
-    ? params.references
-        .filter((r): r is string => typeof r === 'string')
-        .slice(0, limits.dispatchMaxReferences)
-        .map((r) => r.slice(0, limits.dispatchMaxReferenceLength))
-    : [];
-
-  // Validate optional branch parameter
-  let explicitBranch: string | undefined;
-  if (params.branch !== undefined) {
-    if (typeof params.branch !== 'string' || params.branch.trim().length === 0) {
-      return jsonRpcError(requestId, INVALID_PARAMS, 'branch must be a non-empty string');
-    }
-    explicitBranch = params.branch.trim();
-  }
-
-  // ── Validate new config parameters ──────────────────────────────────────
-
-  // agentProfileId — validated later via resolveAgentProfile
-  const agentProfileId = typeof params.agentProfileId === 'string' ? params.agentProfileId.trim() : undefined;
-  if (params.agentProfileId !== undefined && !agentProfileId) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'agentProfileId must be a non-empty string');
-  }
-
-  // taskMode
-  let explicitTaskMode: TaskMode | undefined;
-  if (params.taskMode !== undefined) {
-    if (typeof params.taskMode !== 'string' || !VALID_TASK_MODES.includes(params.taskMode as TaskMode)) {
-      return jsonRpcError(requestId, INVALID_PARAMS, `taskMode must be one of: ${VALID_TASK_MODES.join(', ')}`);
-    }
-    explicitTaskMode = params.taskMode as TaskMode;
-  }
-
-  // agentType
-  let explicitAgentType: string | undefined;
-  if (params.agentType !== undefined) {
-    if (typeof params.agentType !== 'string' || !isValidAgentType(params.agentType)) {
-      return jsonRpcError(requestId, INVALID_PARAMS, `agentType is not a recognized agent type`);
-    }
-    explicitAgentType = params.agentType;
-  }
-
-  // workspaceProfile
-  let explicitWorkspaceProfile: WorkspaceProfile | undefined;
-  if (params.workspaceProfile !== undefined) {
-    if (typeof params.workspaceProfile !== 'string' || !VALID_WORKSPACE_PROFILES.includes(params.workspaceProfile as WorkspaceProfile)) {
-      return jsonRpcError(requestId, INVALID_PARAMS, `workspaceProfile must be one of: ${VALID_WORKSPACE_PROFILES.join(', ')}`);
-    }
-    explicitWorkspaceProfile = params.workspaceProfile as WorkspaceProfile;
-  }
-
-  // devcontainerConfigName
-  let explicitDevcontainerConfigName: string | null | undefined;
-  if (params.devcontainerConfigName !== undefined) {
-    if (params.devcontainerConfigName === null) {
-      explicitDevcontainerConfigName = null;
-    } else if (typeof params.devcontainerConfigName !== 'string' || !DEVCONTAINER_CONFIG_NAME_REGEX.test(params.devcontainerConfigName)) {
-      return jsonRpcError(requestId, INVALID_PARAMS, 'devcontainerConfigName must be alphanumeric with hyphens/underscores');
-    } else if (params.devcontainerConfigName.length > DEVCONTAINER_CONFIG_NAME_MAX_LENGTH) {
-      return jsonRpcError(requestId, INVALID_PARAMS, `devcontainerConfigName must be at most ${DEVCONTAINER_CONFIG_NAME_MAX_LENGTH} characters`);
-    } else {
-      explicitDevcontainerConfigName = params.devcontainerConfigName;
-    }
-  }
-
-  // provider
-  let explicitProvider: CredentialProvider | undefined;
-  if (params.provider !== undefined) {
-    if (typeof params.provider !== 'string' || !CREDENTIAL_PROVIDERS.includes(params.provider as CredentialProvider)) {
-      return jsonRpcError(requestId, INVALID_PARAMS, `provider must be one of: ${CREDENTIAL_PROVIDERS.join(', ')}`);
-    }
-    explicitProvider = params.provider as CredentialProvider;
-  }
-
-  // vmLocation — validated against provider after resolution
-  let explicitVmLocation: string | undefined;
-  if (params.vmLocation !== undefined) {
-    if (typeof params.vmLocation !== 'string' || params.vmLocation.trim().length === 0) {
-      return jsonRpcError(requestId, INVALID_PARAMS, 'vmLocation must be a non-empty string');
-    }
-    explicitVmLocation = params.vmLocation.trim();
-  }
-
-  // missionId — inherit from parent task or explicit override
-  const explicitMissionId = typeof params.missionId === 'string' ? params.missionId.trim() : undefined;
+  const projectOrError = await requireMcpTaskWriteProject(
+    db,
+    tokenData.projectId,
+    tokenData.userId,
+    requestId
+  );
+  if ('jsonrpc' in projectOrError) return projectOrError;
+  const project = projectOrError;
 
   // ── Look up current task to get dispatch depth ──────────────────────────
   const [currentTask] = await db
@@ -165,13 +115,13 @@ export async function handleDispatchTask(
       dispatchDepth: schema.tasks.dispatchDepth,
       status: schema.tasks.status,
       missionId: schema.tasks.missionId,
+      credentialAttributionUserId: schema.tasks.credentialAttributionUserId,
+      credentialAttributionProjectId: schema.tasks.credentialAttributionProjectId,
+      credentialAttributionSource: schema.tasks.credentialAttributionSource,
     })
     .from(schema.tasks)
     .where(
-      and(
-        eq(schema.tasks.id, tokenData.taskId),
-        eq(schema.tasks.projectId, tokenData.projectId),
-      ),
+      and(eq(schema.tasks.id, tokenData.taskId), eq(schema.tasks.projectId, tokenData.projectId))
     )
     .limit(1);
 
@@ -183,40 +133,37 @@ export async function handleDispatchTask(
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
-      `Cannot dispatch from a task in '${currentTask.status}' status`,
+      `Cannot dispatch from a task in '${currentTask.status}' status`
     );
   }
 
   // ── Compute new depth (enforcement deferred until project overrides are resolved) ──
   const newDepth = currentTask.dispatchDepth + 1;
 
-  // ── Parallel: pre-flight checks, project fetch, and AI title ────────────
+  // ── Parallel: pre-flight checks and AI title ────────────────────────────
   const titleConfig = getTaskTitleConfig(env);
-  const [
-    [childCountResult],
-    [activeDispatchedResult],
-    [project],
-    taskTitle,
-  ] = await Promise.all([
-    db.select({ count: sql<number>`count(*)` })
+  const [[childCountResult], [activeDispatchedResult], taskTitle] = await Promise.all([
+    db
+      .select({ count: sql<number>`count(*)` })
       .from(schema.tasks)
-      .where(and(
-        eq(schema.tasks.parentTaskId, tokenData.taskId),
-        eq(schema.tasks.projectId, tokenData.projectId),
-        inArray(schema.tasks.status, ACTIVE_STATUSES),
-      )),
-    db.select({ count: sql<number>`count(*)` })
+      .where(
+        and(
+          eq(schema.tasks.parentTaskId, tokenData.taskId),
+          eq(schema.tasks.projectId, tokenData.projectId),
+          inArray(schema.tasks.status, ACTIVE_STATUSES)
+        )
+      ),
+    db
+      .select({ count: sql<number>`count(*)` })
       .from(schema.tasks)
-      .where(and(
-        eq(schema.tasks.projectId, tokenData.projectId),
-        inArray(schema.tasks.status, ACTIVE_STATUSES),
-        sql`${schema.tasks.dispatchDepth} > 0`,
-      )),
-    db.select()
-      .from(schema.projects)
-      .where(eq(schema.projects.id, tokenData.projectId))
-      .limit(1),
-    generateTaskTitle(env.AI, description, titleConfig),
+      .where(
+        and(
+          eq(schema.tasks.projectId, tokenData.projectId),
+          inArray(schema.tasks.status, ACTIVE_STATUSES),
+          sql`${schema.tasks.dispatchDepth} > 0`
+        )
+      ),
+    generateTaskTitle(env, description, titleConfig),
   ]);
 
   // ── Apply per-project overrides to dispatch limits ──────────────────────
@@ -236,7 +183,7 @@ export async function handleDispatchTask(
       requestId,
       INVALID_PARAMS,
       `Dispatch depth limit exceeded. Current depth: ${currentTask.dispatchDepth}, max allowed: ${effectiveMaxDepth}. ` +
-      'Agent-dispatched tasks have a depth limit to prevent runaway recursive spawning.',
+        'Agent-dispatched tasks have a depth limit to prevent runaway recursive spawning.'
     );
   }
 
@@ -253,7 +200,7 @@ export async function handleDispatchTask(
       requestId,
       INVALID_PARAMS,
       `Per-task dispatch limit reached (${childCount}/${effectiveMaxPerTask}). ` +
-      'A single agent can only dispatch a limited number of tasks to prevent resource exhaustion.',
+        'A single agent can only dispatch a limited number of tasks to prevent resource exhaustion.'
     );
   }
 
@@ -268,21 +215,55 @@ export async function handleDispatchTask(
       requestId,
       INVALID_PARAMS,
       `Project has ${activeDispatched} active agent-dispatched tasks (limit: ${effectiveMaxActive}). ` +
-      'Wait for existing tasks to complete before dispatching more.',
+        'Wait for existing tasks to complete before dispatching more.'
     );
   }
 
-  // ── Verify project exists ──────────────────────────────────────────────
-  if (!project) {
-    return jsonRpcError(requestId, INTERNAL_ERROR, 'Project not found');
-  }
+  const inheritedAttributionUserId = currentTask.credentialAttributionUserId ?? tokenData.userId;
+  const inheritedAttributionSource = (currentTask.credentialAttributionSource ??
+    'user') as import('@simple-agent-manager/shared').CredentialSource;
+  const inheritedAttributionProjectId =
+    inheritedAttributionSource === 'project'
+      ? (currentTask.credentialAttributionProjectId ?? tokenData.projectId)
+      : null;
 
   // ── Resolve agent profile ───────────────────────────────────────────────
   // Same pattern as submit.ts — resolveAgentProfile handles ID/name lookup
   // with built-in profile seeding.
-  const resolvedProfile = agentProfileId
-    ? await resolveAgentProfile(db, tokenData.projectId, agentProfileId, tokenData.userId, env)
-    : null;
+  const resolvedProfile =
+    agentProfileId || skillId
+      ? await resolveSkillProfile(
+          db,
+          tokenData.projectId,
+          agentProfileId,
+          skillId,
+          tokenData.userId,
+          env
+        )
+      : null;
+  let resourceRequirementLayers: ReturnType<typeof collectStoredResourceRequirementLayers>;
+  try {
+    resourceRequirementLayers = mergeResourceRequirementLayers(
+      collectStoredResourceRequirementLayers({
+        skill: resolvedProfile?.skillId ? resolvedProfile.resourceRequirementsJson : null,
+        agentProfile:
+          resolvedProfile?.agentProfileResourceRequirementsJson ??
+          (resolvedProfile?.skillId ? null : resolvedProfile?.resourceRequirementsJson),
+        project: project.resourceRequirementsJson,
+      }),
+      {
+        task: resourceRequirements,
+      }
+    );
+  } catch (err) {
+    if (err instanceof ResourceRequirementsValidationError) {
+      return jsonRpcError(requestId, INVALID_PARAMS, err.message);
+    }
+    throw err;
+  }
+  const persistedResourceRequirementsJson =
+    firstResourceRequirementLayerJson(resourceRequirementLayers);
+  const taskRunnerResourceRequirements = firstResourceRequirementLayer(resourceRequirementLayers);
 
   // ── Build the task description with references ──────────────────────────
   let fullDescription = description;
@@ -304,7 +285,8 @@ export async function handleDispatchTask(
           preference: 'PREFERENCE',
         };
         const policyLines = activePolicies.map(
-          (p) => `- [${categoryLabels[p.category] || p.category.toUpperCase()}] ${p.title}: ${p.content}`,
+          (p) =>
+            `- [${categoryLabels[p.category] || p.category.toUpperCase()}] ${p.title}: ${p.content}`
         );
         fullDescription += '\n\n## Project Policies (inherited)\n' + policyLines.join('\n');
       }
@@ -333,98 +315,149 @@ export async function handleDispatchTask(
     maxLength: branchMaxLength,
   });
 
-  // ── Resolve config (explicit → profile → project default → platform default) ──
-  const resolvedVmSize: VMSize = vmSize
-    ?? (resolvedProfile?.vmSizeOverride as VMSize | null)
-    ?? (project.defaultVmSize as VMSize | null)
-    ?? DEFAULT_VM_SIZE;
+  const placementInput: Omit<TaskStartPlacementInput, 'runtimeDecision' | 'validateLocation'> = {
+    entryPoint: 'mcp-dispatch',
+    taskId,
+    projectId: tokenData.projectId,
+    userId: tokenData.userId,
+    project,
+    profile: resolvedProfile,
+    explicit: {
+      vmSize: vmSize ?? null,
+      vmSizeSource: 'task',
+      provider: explicitProvider ?? null,
+      vmLocation: explicitVmLocation ?? null,
+      workspaceProfile: explicitWorkspaceProfile ?? null,
+      devcontainerConfigName: explicitDevcontainerConfigName,
+      taskMode: explicitTaskMode ?? null,
+      agentType: explicitAgentType ?? null,
+      runtime: explicitRuntime ?? null,
+    },
+    inheritedCredentialAttribution: {
+      userId: inheritedAttributionUserId,
+      projectId: inheritedAttributionProjectId,
+      source: inheritedAttributionSource,
+    },
+    credentialProjectPolicy: 'inherited-or-none',
+    taskModeDefault: 'task',
+    resourceRequirements: resourceRequirementLayers,
+  };
 
-  const profileProvider =
-    typeof resolvedProfile?.provider === 'string' && isValidProvider(resolvedProfile.provider)
-      ? resolvedProfile.provider
-      : null;
-  const projectDefaultProvider =
-    typeof project.defaultProvider === 'string' && isValidProvider(project.defaultProvider)
-      ? project.defaultProvider
-      : null;
-  const resolvedProvider: CredentialProvider | null = explicitProvider
-    ?? profileProvider
-    ?? projectDefaultProvider
-    ?? null;
-
-  const resolvedVmLocation: VMLocation = (explicitVmLocation as VMLocation)
-    ?? (resolvedProfile?.vmLocation as VMLocation | null)
-    ?? (project.defaultLocation as VMLocation | null)
-    ?? (resolvedProvider ? getDefaultLocationForProvider(resolvedProvider) as VMLocation | null : null)
-    ?? DEFAULT_VM_LOCATION;
-
-  const resolvedWorkspaceProfile: WorkspaceProfile = explicitWorkspaceProfile
-    ?? (resolvedProfile?.workspaceProfile as WorkspaceProfile | null)
-    ?? (project.defaultWorkspaceProfile as WorkspaceProfile | null)
-    ?? DEFAULT_WORKSPACE_PROFILE;
-
-  // Devcontainer config name: explicit → profile → project default → null (auto-discover).
-  // Irrelevant when workspace profile is 'lightweight' (devcontainer build skipped entirely).
-  const resolvedDevcontainerConfigName: string | null = resolvedWorkspaceProfile === 'lightweight'
-    ? null
-    : (explicitDevcontainerConfigName
-      ?? resolvedProfile?.devcontainerConfigName
-      ?? project.defaultDevcontainerConfigName
-      ?? null);
-
-  // Validate location against resolved provider
-  if (resolvedProvider !== null && !isValidLocationForProvider(resolvedProvider, resolvedVmLocation)) {
-    const validLocations = getLocationsForProvider(resolvedProvider).map((l) => l.id);
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      `Location '${resolvedVmLocation}' is not valid for provider '${resolvedProvider}'. Valid locations: ${validLocations.join(', ')}`,
-    );
+  let preliminaryPlacement: TaskStartPlacement;
+  try {
+    preliminaryPlacement = resolveTaskStartPlacement({
+      ...placementInput,
+      validateLocation: false,
+    });
+  } catch (err) {
+    if (err instanceof PlacementResolutionError) {
+      return jsonRpcError(requestId, INVALID_PARAMS, err.message);
+    }
+    throw err;
   }
 
-  // Task mode: explicit → profile → task.
-  // MCP dispatch is agent-to-agent delegated work; workspace profile controls
-  // provisioning shape, not whether the task reports completion.
-  const resolvedTaskMode: TaskMode = explicitTaskMode
-    ?? (resolvedProfile?.taskMode as TaskMode | null)
-    ?? 'task';
+  const runtimeValidationError = getRuntimeValidationError(
+    params,
+    preliminaryPlacement.runtime.requestedRuntime
+  );
+  if (runtimeValidationError) {
+    return jsonRpcError(requestId, INVALID_PARAMS, runtimeValidationError);
+  }
+  const runtimeDecision = await resolveWorkspaceRuntime(db, env, {
+    userId: preliminaryPlacement.credentialLookup.userId,
+    projectId: tokenData.projectId,
+    provider: preliminaryPlacement.provider,
+    explicitRuntime: preliminaryPlacement.runtime.requestedRuntime,
+  });
+  let placement: TaskStartPlacement;
+  try {
+    placement = resolveTaskStartPlacement({
+      ...placementInput,
+      runtimeDecision,
+    });
+  } catch (err) {
+    if (err instanceof PlacementResolutionError) {
+      return jsonRpcError(requestId, INVALID_PARAMS, err.message);
+    }
+    throw err;
+  }
 
-  // Agent type: explicit → profile → project default → platform default
-  const resolvedAgentType: string | null = explicitAgentType
-    ?? resolvedProfile?.agentType
-    ?? project.defaultAgentType
-    ?? null;
+  const {
+    vmSize: resolvedVmSize,
+    vmSizeSource,
+    vmLocation: resolvedVmLocation,
+    workspaceProfile: resolvedWorkspaceProfile,
+    devcontainerConfigName: resolvedDevcontainerConfigName,
+    taskMode: resolvedTaskMode,
+    agentType: resolvedAgentType,
+    resolvedReservation,
+  } = placement;
+  const persistedResourceRequirementPlanJson = createPersistedTaskResourcePlanJson({
+    layers: resourceRequirementLayers,
+    resolvedReservation,
+    requestedVmSize: resolvedVmSize,
+    requestedVmSizeSource: vmSizeSource,
+  });
+  const isInstantRuntime = placement.runtime.isInstantRuntime;
+  const executionRuntime = placement.runtime.executionRuntime;
 
-  // Explicit branch > project default branch.
-  const checkoutBranch = explicitBranch || project.defaultBranch;
+  // Explicit branch means "continue work from this branch"; otherwise task
+  // work must start on the generated output branch so VM-agent completion
+  // pushes cannot land on the repository default branch.
+  const checkoutBranch = explicitBranch || branchName;
 
   // ── Verify cloud credentials and enforce quota ──────────────────────────
-  // Uses resolveCredentialSource to determine whether the user's own credential
-  // or a platform credential will be used for the resolved provider. Quota is
-  // enforced only when platform credentials are used.
-  const { resolveCredentialSource } = await import('../../services/provider-credentials');
-  const credResult = await resolveCredentialSource(db, tokenData.userId, resolvedProvider ?? undefined);
-
-  if (!credResult) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      'Cloud provider credentials required. The user must connect a cloud provider in Settings.',
+  // Uses the centralized placement resolver to determine whether user,
+  // project, or platform credentials back the resolved provider. Quota is
+  // enforced only when platform credentials are used. Instant containers do
+  // not consume cloud credentials or platform VM compute quota.
+  let effectiveProvider: CredentialProvider | null = placement.provider;
+  let credentialAttributionUserId =
+    placement.inheritedCredentialAttribution.userId ?? placement.credentialLookup.userId;
+  let credentialAttributionSource = (placement.inheritedCredentialAttribution.source ??
+    'user') as CredentialSource;
+  let credentialAttributionProjectId =
+    credentialAttributionSource === 'project'
+      ? (placement.inheritedCredentialAttribution.projectId ??
+        placement.credentialLookup.projectId ??
+        tokenData.projectId)
+      : null;
+  let capacityPoolSelection: TaskStartCapacityPoolSelection | null = null;
+  let capacityPlacementSnapshot: CapacityPlacementSnapshot | null = null;
+  if (!isInstantRuntime) {
+    const placementResolution = await resolveTaskStartPlacementCredentialAttributionFromPlacement(
+      db,
+      placement,
+      {
+        credentialsRequiredMessage:
+          'Cloud provider credentials required. The user must connect a cloud provider in Settings.',
+        env,
+      }
     );
-  }
+    if ('error' in placementResolution) {
+      return jsonRpcError(requestId, INVALID_PARAMS, placementResolution.error);
+    }
+    capacityPoolSelection = placementResolution.capacityPoolSelection;
+    capacityPlacementSnapshot = placementResolution.capacityPlacementSnapshot;
+    effectiveProvider = placementResolution.effectiveProvider;
+    credentialAttributionUserId = placementResolution.credentialAttributionUserId;
+    credentialAttributionProjectId = placementResolution.credentialAttributionProjectId;
+    credentialAttributionSource = placementResolution.credentialAttributionSource;
 
-  if (credResult.credentialSource === 'platform') {
-    const quotaEnforcementEnabled = env.COMPUTE_QUOTA_ENFORCEMENT_ENABLED !== 'false';
-    if (quotaEnforcementEnabled) {
-      const { checkQuotaForUser } = await import('../../services/compute-quotas');
-      const quotaCheck = await checkQuotaForUser(db, tokenData.userId);
-      if (!quotaCheck.allowed) {
-        return jsonRpcError(
-          requestId,
-          INVALID_PARAMS,
-          `Monthly compute quota exceeded. You've used ${quotaCheck.used} of ${quotaCheck.limit} vCPU-hours this month. ` +
-          'Add your own cloud provider credentials in Settings or contact your admin to increase your quota.',
-        );
+    const quotaCredentialSource = placementResolution.quotaCredentialSource;
+    if (quotaCredentialSource === 'platform') {
+      const quotaEnforcementEnabled = env.COMPUTE_QUOTA_ENFORCEMENT_ENABLED !== 'false';
+      if (quotaEnforcementEnabled) {
+        const { checkQuotaForUser } = await import('../../services/compute-quotas');
+        const quotaCheck = await checkQuotaForUser(db, tokenData.userId);
+        if (!quotaCheck.allowed) {
+          return jsonRpcError(
+            requestId,
+            INVALID_PARAMS,
+            `Monthly compute quota exceeded. You've used ${quotaCheck.used} of ${quotaCheck.limit} vCPU-hours this month. ` +
+              'Add your own cloud provider credentials in Settings or contact your admin to increase your quota.'
+          );
+        }
       }
     }
   }
@@ -434,10 +467,16 @@ export async function handleDispatchTask(
   const conditionalInsertResult = await env.DATABASE.prepare(
     `INSERT INTO tasks (id, project_id, user_id, parent_task_id, title, description,
      status, execution_step, priority, dispatch_depth, output_branch, created_by,
-     task_mode, agent_profile_hint, mission_id, triggered_by,
+     task_mode, agent_profile_hint, skill_id, skill_hint, mission_id, triggered_by,
+     requested_vm_size, requested_vm_size_source, resource_requirements_json, resource_requirement_plan_json, resource_requirements_source, resolved_reservation_json,
+     credential_attribution_user_id, credential_attribution_project_id, credential_attribution_source,
+     ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS},
      created_at, updated_at)
      SELECT ?, ?, ?, ?, ?, ?, 'queued', 'node_selection', ?, ?, ?, ?,
-     ?, ?, ?, 'mcp',
+     ?, ?, ?, ?, ?, 'mcp',
+     ?, ?, ?, ?, ?, ?,
+     ?, ?, ?,
+     ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS},
      ?, ?
      WHERE (
        SELECT count(*) FROM tasks
@@ -448,24 +487,48 @@ export async function handleDispatchTask(
        SELECT count(*) FROM tasks
        WHERE project_id = ? AND status IN (${statusPlaceholders})
        AND dispatch_depth > 0
-     ) < ?`,
-  ).bind(
-    // INSERT values
-    taskId, tokenData.projectId, tokenData.userId, tokenData.taskId,
-    taskTitle, fullDescription, priority, newDepth, branchName,
-    tokenData.userId,
-    resolvedTaskMode, resolvedProfile?.profileId ?? null,
-    explicitMissionId ?? currentTask.missionId ?? null,
-    now, now,
-    // Per-task child count subquery
-    tokenData.taskId, tokenData.projectId,
-    ...ACTIVE_STATUSES,
-    effectiveMaxPerTask,
-    // Per-project active count subquery
-    tokenData.projectId,
-    ...ACTIVE_STATUSES,
-    effectiveMaxActive,
-  ).run();
+     ) < ?`
+  )
+    .bind(
+      // INSERT values
+      taskId,
+      tokenData.projectId,
+      tokenData.userId,
+      tokenData.taskId,
+      taskTitle,
+      fullDescription,
+      priority,
+      newDepth,
+      branchName,
+      tokenData.userId,
+      resolvedTaskMode,
+      resolvedProfile?.profileId ?? null,
+      resolvedProfile?.skillId ?? null,
+      skillId ?? null,
+      explicitMissionId ?? currentTask.missionId ?? null,
+      resolvedVmSize,
+      vmSizeSource,
+      persistedResourceRequirementsJson,
+      persistedResourceRequirementPlanJson,
+      resolvedReservation.source,
+      JSON.stringify(resolvedReservation),
+      credentialAttributionUserId,
+      credentialAttributionProjectId,
+      credentialAttributionSource,
+      ...capacityPlacementSnapshotSqlValues(capacityPlacementSnapshot),
+      now,
+      now,
+      // Per-task child count subquery
+      tokenData.taskId,
+      tokenData.projectId,
+      ...ACTIVE_STATUSES,
+      effectiveMaxPerTask,
+      // Per-project active count subquery
+      tokenData.projectId,
+      ...ACTIVE_STATUSES,
+      effectiveMaxActive
+    )
+    .run();
 
   if (!conditionalInsertResult.meta.changes || conditionalInsertResult.meta.changes === 0) {
     log.warn('mcp.dispatch_task.atomic_limit_breach', {
@@ -477,7 +540,7 @@ export async function handleDispatchTask(
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
-      'Dispatch rate limit exceeded (concurrent dispatch detected). Please retry.',
+      'Dispatch rate limit exceeded (concurrent dispatch detected). Please retry.'
     );
   }
 
@@ -486,171 +549,218 @@ export async function handleDispatchTask(
   await env.DATABASE.prepare(
     `INSERT INTO task_status_events (id, task_id, from_status, to_status,
      actor_type, actor_id, reason, created_at)
-     VALUES (?, ?, NULL, 'queued', 'agent', ?, ?, ?)`,
-  ).bind(
-    statusEventId, taskId, tokenData.workspaceId,
-    `Dispatched by agent (depth ${newDepth}, parent task ${tokenData.taskId})`,
-    now,
-  ).run();
+     VALUES (?, ?, NULL, 'queued', 'agent', ?, ?, ?)`
+  )
+    .bind(
+      statusEventId,
+      taskId,
+      tokenData.workspaceId,
+      `Dispatched by agent (depth ${newDepth}, parent task ${tokenData.taskId})`,
+      now
+    )
+    .run();
 
-  // ── Create chat session and persist initial message ─────────────────────
-  let sessionId: string;
-  try {
-    sessionId = await projectDataService.createSession(
+  let sessionId: string | undefined;
+  if (isInstantRuntime) {
+    // Same fail-fast repo-access re-verification as the VM branch below and the
+    // browser Instant path (chat-start.ts) — a user whose GitHub access was
+    // revoked must not be able to spawn a cloning container via dispatch.
+    try {
+      await requireRepositoryOwnerAccess(env, db, project, tokenData.userId, 'mcp-dispatch');
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      await markTaskFailedIfNonTerminal(env.DATABASE, taskId, `Repository access check failed: ${errorMsg}`, {
+        env,
+        projectId: tokenData.projectId,
+        source: 'mcp.dispatch_task.instant_access_check',
+      });
+      log.error('mcp.dispatch_task.instant_access_check_failed', {
+        taskId,
+        projectId: tokenData.projectId,
+        error: errorMsg,
+      });
+      return jsonRpcError(
+        requestId,
+        INTERNAL_ERROR,
+        `Failed to launch instant session: ${errorMsg}`
+      );
+    }
+    await launchDispatchedInstantSession(
+      db,
       env,
-      tokenData.projectId,
-      null, // workspaceId — linked later by TaskRunner DO
-      taskTitle,
-      taskId,
-    );
-
-    // Persist the description as the initial user message
-    await projectDataService.persistMessage(
-      env,
-      tokenData.projectId,
-      sessionId,
-      'user',
-      fullDescription,
-      null,
-    );
-  } catch (err) {
-    // Session creation failed — mark task as failed
-    const failedAt = new Date().toISOString();
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    await db.update(schema.tasks)
-      .set({ status: 'failed', errorMessage: `Session creation failed: ${errorMsg}`, updatedAt: failedAt })
-      .where(eq(schema.tasks.id, taskId));
-    await db.insert(schema.taskStatusEvents).values({
-      id: ulid(),
-      taskId,
-      fromStatus: 'queued',
-      toStatus: 'failed',
-      actorType: 'system',
-      actorId: null,
-      reason: `Session creation failed: ${errorMsg}`,
-      createdAt: failedAt,
-    });
-    log.error('mcp.dispatch_task.session_failed', { taskId, projectId: tokenData.projectId, error: errorMsg });
-    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to create chat session: ${errorMsg}`);
-  }
-
-  // ── Start TaskRunner DO ─────────────────────────────────────────────────
-  // Look up user's githubId for noreply email fallback
-  const [userRow] = await db
-    .select({ name: schema.users.name, email: schema.users.email, githubId: schema.users.githubId })
-    .from(schema.users)
-    .where(eq(schema.users.id, tokenData.userId))
-    .limit(1);
-
-  try {
-    await startTaskRunnerDO(env, {
-      taskId,
-      projectId: tokenData.projectId,
-      userId: tokenData.userId,
-      vmSize: resolvedVmSize,
-      vmLocation: resolvedVmLocation,
-      branch: checkoutBranch,
-      userName: userRow?.name ?? null,
-      userEmail: userRow?.email ?? null,
-      githubId: userRow?.githubId ?? null,
-      taskTitle,
-      taskDescription: fullDescription,
-      repository: project.repository,
-      installationId: project.installationId,
-      outputBranch: branchName,
-      projectDefaultVmSize: project.defaultVmSize as VMSize | null,
-      chatSessionId: sessionId,
-      agentType: resolvedAgentType,
-      workspaceProfile: resolvedWorkspaceProfile,
-      devcontainerConfigName: resolvedDevcontainerConfigName,
-      cloudProvider: resolvedProvider,
-      taskMode: resolvedTaskMode,
-      // Resolution chain: agent profile > project.agentDefaults[agentType] > null (VM agent
-      // falls through to user agent_settings via callback, then platform default).
-      model:
-        resolvedProfile?.model ??
-        resolveProjectAgentDefault(project.agentDefaults, resolvedAgentType).model,
-      permissionMode:
-        resolvedProfile?.permissionMode ??
-        resolveProjectAgentDefault(project.agentDefaults, resolvedAgentType).permissionMode,
-      // OpenCode settings: VM agent fetches user-level settings via callback
-      opencodeProvider: null,
-      opencodeBaseUrl: null,
-      systemPromptAppend: resolvedProfile?.systemPromptAppend ?? null,
-      projectScaling: {
-        taskExecutionTimeoutMs: project.taskExecutionTimeoutMs ?? null,
-        maxWorkspacesPerNode: project.maxWorkspacesPerNode ?? null,
-        nodeCpuThresholdPercent: project.nodeCpuThresholdPercent ?? null,
-        nodeMemoryThresholdPercent: project.nodeMemoryThresholdPercent ?? null,
-        warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,
+      {
+        taskId,
+        project,
+        userId: tokenData.userId,
+        fullDescription,
+        agentType: resolvedAgentType ?? env.DEFAULT_TASK_AGENT_TYPE ?? 'opencode',
+        agentProfileId: resolvedProfile?.profileId ?? null,
+        skillId: resolvedProfile?.skillId ?? null,
+        branch: checkoutBranch,
+        taskMode: resolvedTaskMode,
+        systemPromptAppend: resolvedProfile?.systemPromptAppend ?? null,
+        overrides: {
+          model:
+            resolvedProfile?.model ??
+            resolveProjectAgentDefault(project.agentDefaults, resolvedAgentType).model,
+          effort: resolvedProfile?.effort ?? null,
+          permissionMode:
+            resolvedProfile?.permissionMode ??
+            resolveProjectAgentDefault(project.agentDefaults, resolvedAgentType).permissionMode,
+        },
       },
-    });
-  } catch (err) {
-    // TaskRunner DO startup failed — mark task as failed
-    const failedAt = new Date().toISOString();
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    await db.update(schema.tasks)
-      .set({ status: 'failed', errorMessage: `Task runner startup failed: ${errorMsg}`, updatedAt: failedAt })
-      .where(eq(schema.tasks.id, taskId));
-    await db.insert(schema.taskStatusEvents).values({
-      id: ulid(),
-      taskId,
-      fromStatus: 'queued',
-      toStatus: 'failed',
-      actorType: 'system',
-      actorId: null,
-      reason: `Task runner startup failed: ${errorMsg}`,
-      createdAt: failedAt,
-    });
-    log.error('mcp.dispatch_task.do_startup_failed', { taskId, projectId: tokenData.projectId, error: errorMsg });
-    await projectDataService.stopSession(env, tokenData.projectId, sessionId).catch((e) => {
-      log.error('mcp.dispatch_task.orphaned_session_stop_failed', { projectId: tokenData.projectId, sessionId, error: String(e) });
-    });
-    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to start task runner: ${errorMsg}`);
+      execCtx
+    );
+  } else {
+    // ── Create chat session and persist initial message ─────────────────────
+    try {
+      sessionId = await projectDataService.createSession(
+        env,
+        tokenData.projectId,
+        null, // workspaceId — linked later by TaskRunner DO
+        taskTitle,
+        taskId,
+        tokenData.userId
+      );
+
+      // Persist the description as the initial user message
+      await projectDataService.persistMessage(
+        env,
+        tokenData.projectId,
+        sessionId,
+        'user',
+        fullDescription,
+        null
+      );
+    } catch (err) {
+      // Session creation failed — mark task as failed
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      await markTaskFailedIfNonTerminal(env.DATABASE, taskId, `Session creation failed: ${errorMsg}`, {
+        env,
+        projectId: tokenData.projectId,
+        source: 'mcp.dispatch_task.session_creation',
+      });
+      log.error('mcp.dispatch_task.session_failed', {
+        taskId,
+        projectId: tokenData.projectId,
+        error: errorMsg,
+      });
+      return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to create chat session: ${errorMsg}`);
+    }
+
+    if (!sessionId) {
+      return jsonRpcError(requestId, INTERNAL_ERROR, 'Failed to create chat session');
+    }
+    // ── Start TaskRunner DO ─────────────────────────────────────────────────
+    // Look up user's githubId for noreply email fallback
+    const [userRow] = await db
+      .select({
+        name: schema.users.name,
+        email: schema.users.email,
+        githubId: schema.users.githubId,
+      })
+      .from(schema.users)
+      .where(eq(schema.users.id, tokenData.userId))
+      .limit(1);
+
+    try {
+      await requireRepositoryOwnerAccess(env, db, project, tokenData.userId, 'mcp-dispatch');
+      await startTaskRunnerDO(env, {
+        taskId,
+        projectId: tokenData.projectId,
+        userId: tokenData.userId,
+        vmSize: resolvedVmSize,
+        vmLocation: resolvedVmLocation,
+        branch: checkoutBranch,
+        defaultBranch: project.defaultBranch,
+        userName: userRow?.name ?? null,
+        userEmail: userRow?.email ?? null,
+        githubId: userRow?.githubId ?? null,
+        taskTitle,
+        taskDescription: fullDescription,
+        repository: project.repository,
+        installationId: project.installationId,
+        outputBranch: branchName,
+        projectDefaultVmSize: project.defaultVmSize as VMSize | null,
+        chatSessionId: sessionId,
+        agentType: resolvedAgentType,
+        workspaceProfile: resolvedWorkspaceProfile,
+        devcontainerConfigName: resolvedDevcontainerConfigName,
+        cloudProvider: placement.provider ?? effectiveProvider,
+        explicitVmLocation: placement.explicitVmLocation === true,
+        credentialAttributionUserId,
+        credentialAttributionProjectId,
+        credentialAttributionSource,
+        taskMode: resolvedTaskMode,
+        // Resolution chain: agent profile > project.agentDefaults[agentType] > null (VM agent
+        // falls through to user agent_settings via callback, then platform default).
+        model:
+          resolvedProfile?.model ??
+          resolveProjectAgentDefault(project.agentDefaults, resolvedAgentType).model,
+        effort: resolvedProfile?.effort ?? null,
+        permissionMode:
+          resolvedProfile?.permissionMode ??
+          resolveProjectAgentDefault(project.agentDefaults, resolvedAgentType).permissionMode,
+        // OpenCode settings: VM agent fetches user-level settings via callback
+        opencodeProvider: null,
+        opencodeBaseUrl: null,
+        systemPromptAppend: resolvedProfile?.systemPromptAppend ?? null,
+        agentProfileHint: resolvedProfile?.profileId ?? null,
+        projectScaling: {
+          taskExecutionTimeoutMs: project.taskExecutionTimeoutMs ?? null,
+          nodeCpuThresholdPercent: project.nodeCpuThresholdPercent ?? null,
+          nodeMemoryThresholdPercent: project.nodeMemoryThresholdPercent ?? null,
+          warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,
+        },
+        resolvedReservation,
+        capacityPoolSelection,
+        vmSizeSource,
+        resourceRequirements: taskRunnerResourceRequirements,
+      });
+    } catch (err) {
+      // TaskRunner DO startup failed — mark task as failed
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      await markTaskFailedIfNonTerminal(env.DATABASE, taskId, `Task runner startup failed: ${errorMsg}`, {
+        env,
+        projectId: tokenData.projectId,
+        source: 'mcp.dispatch_task.task_runner_startup',
+        sessionId,
+      });
+      log.error('mcp.dispatch_task.do_startup_failed', {
+        taskId,
+        projectId: tokenData.projectId,
+        error: errorMsg,
+      });
+      await projectDataService.stopSession(env, tokenData.projectId, sessionId).catch((e) => {
+        log.error('mcp.dispatch_task.orphaned_session_stop_failed', {
+          projectId: tokenData.projectId,
+          sessionId,
+          error: String(e),
+        });
+      });
+      return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to start task runner: ${errorMsg}`);
+    }
   }
 
   // ── Record activity event (best-effort) ─────────────────────────────────
-  try {
-    const doId = env.PROJECT_DATA.idFromName(tokenData.projectId);
-    const doStub = env.PROJECT_DATA.get(doId);
-    await doStub.fetch(new Request('https://do/activity', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        type: 'task.dispatched',
-        actorType: 'agent',
-        actorId: tokenData.workspaceId,
-        metadata: {
-          taskId,
-          parentTaskId: tokenData.taskId,
-          dispatchDepth: newDepth,
-          title: taskTitle,
-          branchName,
-          agentProfileId: agentProfileId ?? undefined,
-          taskMode: resolvedTaskMode,
-        },
-      }),
-    }));
-  } catch (err) {
-    log.warn('mcp.dispatch_task.activity_event_failed', {
-      taskId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
+  await recordDispatchActivityEvent({
+    env,
+    tokenData,
+    taskId,
+    newDepth,
+    taskTitle,
+    branchName,
+    executionRuntime,
+    runtimeReason: placement.runtime.reason,
+    agentProfileId: agentProfileId ?? undefined,
+    skillId: skillId ?? undefined,
+    taskMode: resolvedTaskMode,
+  });
 
   // Recompute scheduler states if the new task belongs to a mission (best-effort)
   const resolvedMissionId = explicitMissionId ?? currentTask.missionId ?? null;
-  if (resolvedMissionId) {
-    try {
-      await recomputeMissionSchedulerStates(env.DATABASE, resolvedMissionId);
-    } catch (err) {
-      log.warn('mcp.dispatch_task.scheduler_state_recompute_failed', {
-        taskId,
-        missionId: resolvedMissionId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
+  if (resolvedMissionId)
+    await recomputeDispatchMissionSchedulerState(env, resolvedMissionId, taskId);
 
   log.info('mcp.dispatch_task.created', {
     taskId,
@@ -659,29 +769,28 @@ export async function handleDispatchTask(
     parentTaskId: tokenData.taskId,
     projectId: tokenData.projectId,
     dispatchDepth: newDepth,
+    runtime: executionRuntime,
+    runtimeReason: placement.runtime.reason,
     vmSize: resolvedVmSize,
     vmLocation: resolvedVmLocation,
     taskMode: resolvedTaskMode,
     agentType: resolvedAgentType,
     agentProfileId: agentProfileId ?? null,
+    skillId: skillId ?? null,
   });
 
-  const appDomain = `app.${env.BASE_DOMAIN}`;
-  const taskUrl = `https://${appDomain}/projects/${tokenData.projectId}/ideas/${taskId}`;
-
-  return jsonRpcSuccess(requestId, {
-    content: [{
-      type: 'text',
-      text: JSON.stringify({
-        taskId,
-        sessionId,
-        branchName,
-        title: taskTitle,
-        status: 'queued',
-        dispatchDepth: newDepth,
-        url: taskUrl,
-        message: `Task dispatched successfully. The agent will start working independently. Track progress at: ${taskUrl}`,
-      }, null, 2),
-    }],
+  return buildDispatchTaskSuccessResponse({
+    requestId,
+    env,
+    projectId: tokenData.projectId,
+    taskId,
+    sessionId,
+    executionRuntime,
+    runtimeReason: placement.runtime.reason,
+    branchName,
+    taskTitle,
+    resolvedTaskMode,
+    newDepth,
+    isInstantRuntime,
   });
 }

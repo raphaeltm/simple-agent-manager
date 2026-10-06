@@ -62,7 +62,7 @@ database_name = "my-db-staging"
 database_id = "staging-uuid"
 
 # GOOD: Document secrets
-# Secrets (set via wrangler secret put):
+# Secrets (set via scripts/deploy/configure-secrets.sh / wrangler secret bulk):
 # - API_KEY
 # - ENCRYPTION_SECRET
 ```
@@ -285,8 +285,8 @@ wrangler deploy --env production
 # Run migrations (D1)
 wrangler d1 migrations apply DATABASE --env staging
 
-# Set secrets
-wrangler secret put GITHUB_CLIENT_SECRET --env production
+# Apply Worker secrets in a bounded bulk operation
+bash scripts/deploy/configure-secrets.sh production
 
 # Rollback
 wrangler rollback --env production

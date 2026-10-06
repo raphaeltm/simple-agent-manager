@@ -1,10 +1,10 @@
-import { readFileSync } from 'node:fs';
+import { resolvePullRequestEvidenceState } from './pr-evidence-source';
 
 /**
  * CI quality check: validates the Specialist Review Evidence table in PR bodies.
  *
  * Fails if:
- * 1. Any reviewer has DISPATCHED or FAILED status (incomplete reviews)
+ * 1. Any reviewer has PENDING or FAILED status (incomplete reviews)
  * 2. The `needs-human-review` label is present on the PR
  * 3. The review evidence table is missing/empty on agent-authored PRs
  *
@@ -19,7 +19,7 @@ const AGENT_AUTHORED_PATTERN = /Co-Authored-By:\s*Claude/i;
 const NEEDS_HUMAN_REVIEW_LABEL = 'needs-human-review';
 
 // Blocking statuses — reviews that have not completed
-const BLOCKING_STATUSES = ['DISPATCHED', 'FAILED'] as const;
+const BLOCKING_STATUSES = ['PENDING', 'FAILED'] as const;
 
 // Acceptable statuses — reviews that are complete
 const ACCEPTABLE_STATUSES = ['PASS', 'ADDRESSED', 'DEFERRED'] as const;
@@ -40,55 +40,6 @@ export interface CheckResult {
 function fail(message: string): never {
   console.error(`\nSpecialist review evidence check failed:\n- ${message}\n`);
   process.exit(1);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function parsePullRequestPayload(raw: string): {
-  body: string;
-  labels: Array<{ name: string }>;
-  htmlUrl?: string;
-} {
-  const payload: unknown = JSON.parse(raw);
-  if (!isRecord(payload)) {
-    fail('GitHub event payload must be an object.');
-  }
-
-  const pullRequest = payload.pull_request;
-  if (!isRecord(pullRequest)) {
-    fail('GitHub event payload is missing pull_request.');
-  }
-
-  const body = pullRequest.body;
-  if (body !== undefined && body !== null && typeof body !== 'string') {
-    fail('GitHub event pull_request.body must be a string when present.');
-  }
-
-  const htmlUrl = pullRequest.html_url;
-  if (htmlUrl !== undefined && typeof htmlUrl !== 'string') {
-    fail('GitHub event pull_request.html_url must be a string when present.');
-  }
-
-  const rawLabels = pullRequest.labels;
-  if (rawLabels !== undefined && !Array.isArray(rawLabels)) {
-    fail('GitHub event pull_request.labels must be an array when present.');
-  }
-
-  const labels =
-    rawLabels?.map((label, index) => {
-      if (!isRecord(label) || typeof label.name !== 'string') {
-        fail(`GitHub event pull_request.labels[${index}].name must be a string.`);
-      }
-      return { name: label.name };
-    }) ?? [];
-
-  return {
-    body: body ?? '',
-    labels,
-    htmlUrl,
-  };
 }
 
 /**
@@ -152,7 +103,10 @@ export function parseReviewTable(section: string): ReviewRow[] {
 
     rows.push({
       reviewer: reviewer.replace(/<!--.*?-->/g, '').trim(),
-      status: status.replace(/<!--.*?-->/g, '').trim().toUpperCase(),
+      status: status
+        .replace(/<!--.*?-->/g, '')
+        .trim()
+        .toUpperCase(),
       outcome: outcome.replace(/<!--.*?-->/g, '').trim(),
     });
   }
@@ -184,10 +138,7 @@ export function hasNeedsHumanReviewLabel(labels: Array<{ name: string }>): boole
 /**
  * Main validation logic — separated from I/O for testability.
  */
-export function validateReviewEvidence(
-  body: string,
-  labels: Array<{ name: string }>
-): CheckResult {
+export function validateReviewEvidence(body: string, labels: Array<{ name: string }>): CheckResult {
   const result: CheckResult = {
     pass: true,
     failures: [],
@@ -235,7 +186,7 @@ export function validateReviewEvidence(
       result.pass = false;
       result.failures.push(
         'Agent-authored PR has an empty Specialist Review Evidence table. ' +
-          'All dispatched reviewers must be listed with their status.'
+          'All local reviewers must be listed with their status.'
       );
     }
     return result;
@@ -269,19 +220,20 @@ export function validateReviewEvidence(
   return result;
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const eventName = process.env.GITHUB_EVENT_NAME;
   if (eventName !== 'pull_request' && eventName !== 'pull_request_target') {
     console.log('Skipping specialist review evidence check: not a pull request event.');
     return;
   }
 
-  const eventPath = process.env.GITHUB_EVENT_PATH;
-  if (!eventPath) {
-    fail('GITHUB_EVENT_PATH is missing.');
+  let payload;
+  try {
+    payload = await resolvePullRequestEvidenceState();
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
   }
-
-  const payload = parsePullRequestPayload(readFileSync(eventPath, 'utf8'));
+  console.log(`Validating specialist review evidence from: ${payload.source}`);
 
   const body = payload.body;
   const labels = payload.labels;
@@ -323,4 +275,18 @@ function main(): void {
   }
 }
 
-main();
+// Only run main when executed directly (not when imported for testing).
+// Under vitest in CI, GITHUB_EVENT_NAME/GITHUB_EVENT_PATH are set, so an
+// import-time main() would evaluate the real PR and process.exit inside the
+// test runner.
+const isDirectExecution = process.argv[1]?.endsWith('check-specialist-review-evidence.ts');
+if (isDirectExecution) {
+  // main() is async: an unhandled rejection must not exit 0 and silently pass the
+  // gate. Fail closed on any unexpected error.
+  main().catch((error: unknown) => {
+    console.error(
+      `\nSpecialist review evidence check errored:\n- ${error instanceof Error ? error.message : String(error)}\n`
+    );
+    process.exit(1);
+  });
+}

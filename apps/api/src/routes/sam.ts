@@ -9,7 +9,10 @@
 import { Hono } from 'hono';
 
 import type { Env } from '../env';
+import { expectJsonRecord } from '../lib/runtime-validation';
+import { normalizeSearchQuery } from '../lib/search-query-limits';
 import { requireAuth } from '../middleware/auth';
+import { AgentChatRequestSchema, jsonValidator } from '../schemas';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -23,9 +26,9 @@ function getSamSession(env: Env, userId: string): DurableObjectStub {
 }
 
 /** POST /chat — send a message and stream the response. */
-app.post('/chat', async (c) => {
+app.post('/chat', jsonValidator(AgentChatRequestSchema), async (c) => {
   const userId = c.get('auth').user.id;
-  const body = await c.req.json<{ conversationId?: string; message: string }>();
+  const body = c.req.valid('json');
 
   if (!body.message?.trim()) {
     return c.json({ error: 'Message is required' }, 400);
@@ -51,7 +54,7 @@ app.post('/chat', async (c) => {
     headers: {
       'content-type': 'text/event-stream',
       'cache-control': 'no-cache',
-      'connection': 'keep-alive',
+      connection: 'keep-alive',
     },
   });
 });
@@ -86,17 +89,21 @@ app.get('/conversations/:id/messages', async (c) => {
 /** GET /search — full-text search across conversation history. */
 app.get('/search', async (c) => {
   const userId = c.get('auth').user.id;
-  const query = c.req.query('query') || '';
+  const inputQuery = c.req.query('query') || '';
   const limit = c.req.query('limit') || '';
-  if (!query.trim()) {
+  if (!inputQuery.trim()) {
     return c.json({ error: 'Query parameter is required' }, 400);
   }
+  const normalizedQuery = normalizeSearchQuery(inputQuery, c.env);
   const stub = getSamSession(c.env, userId);
-  const params = new URLSearchParams({ query });
+  const params = new URLSearchParams({ query: normalizedQuery.query });
   if (limit) params.set('limit', limit);
   const response = await stub.fetch(`https://sam-session/search?${params.toString()}`);
-  const data = await response.json();
-  return c.json(data);
+  const data = expectJsonRecord(await response.json(), 'sam.search.response');
+  return new Response(JSON.stringify({ ...data, ...normalizedQuery }), {
+    status: response.status,
+    headers: { 'content-type': 'application/json' },
+  });
 });
 
 export const samRoutes = app;

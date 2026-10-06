@@ -14,21 +14,11 @@ import { type FC, useCallback, useState } from 'react';
 
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { cleanupStuckExecutions, deleteExecution } from '../../lib/api/triggers';
+import { FOCUS_RING, formatDuration } from './trigger-presentation';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function formatDuration(startedAt: string | null, completedAt: string | null): string {
-  if (!startedAt || !completedAt) return '\u2014';
-  const durationMs = new Date(completedAt).getTime() - new Date(startedAt).getTime();
-  if (durationMs < 1000) return '<1s';
-  const seconds = Math.floor(durationMs / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return secs > 0 ? `${minutes}m ${secs}s` : `${minutes}m`;
-}
 
 function formatDateTime(dateStr: string): string {
   return new Date(dateStr).toLocaleString(undefined, {
@@ -92,9 +82,6 @@ const STUCK_STATUSES = new Set(['queued']);
 /** Statuses where individual deletion is allowed (non-running). */
 const DELETABLE_STATUSES = new Set(['queued', 'failed', 'skipped', 'completed']);
 
-const FOCUS_RING =
-  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
-
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -121,14 +108,19 @@ export const ExecutionHistory: FC<ExecutionHistoryProps> = ({
   const isMobile = useIsMobile();
   const [cleaningUp, setCleaningUp] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [mutationError, setMutationError] = useState<string | null>(null);
 
   const hasStuckExecutions = executions.some((e) => STUCK_STATUSES.has(e.status));
+  const mutationInFlight = cleaningUp || deletingId !== null;
 
   const handleCleanup = useCallback(async () => {
     setCleaningUp(true);
+    setMutationError(null);
     try {
       await cleanupStuckExecutions(projectId, triggerId);
       onMutated?.();
+    } catch (err) {
+      setMutationError(err instanceof Error ? err.message : 'Failed to clear stuck executions');
     } finally {
       setCleaningUp(false);
     }
@@ -136,9 +128,12 @@ export const ExecutionHistory: FC<ExecutionHistoryProps> = ({
 
   const handleDelete = useCallback(async (executionId: string) => {
     setDeletingId(executionId);
+    setMutationError(null);
     try {
       await deleteExecution(projectId, triggerId, executionId);
       onMutated?.();
+    } catch (err) {
+      setMutationError(err instanceof Error ? err.message : 'Failed to delete execution');
     } finally {
       setDeletingId(null);
     }
@@ -165,8 +160,9 @@ export const ExecutionHistory: FC<ExecutionHistoryProps> = ({
   if (isMobile) {
     return (
       <div className="space-y-3">
+        <MutationError message={mutationError} />
         {hasStuckExecutions && (
-          <CleanupButton loading={cleaningUp} onClick={handleCleanup} />
+          <CleanupButton loading={cleaningUp} disabled={mutationInFlight} onClick={handleCleanup} />
         )}
         {executions.map((exec) => (
           <ExecutionCard
@@ -175,6 +171,7 @@ export const ExecutionHistory: FC<ExecutionHistoryProps> = ({
             projectId={projectId}
             onDelete={handleDelete}
             deletingId={deletingId}
+            mutationInFlight={mutationInFlight}
           />
         ))}
         {hasMore && (
@@ -192,9 +189,10 @@ export const ExecutionHistory: FC<ExecutionHistoryProps> = ({
 
   return (
     <div>
+      <MutationError message={mutationError} />
       {hasStuckExecutions && (
         <div className="mb-3">
-          <CleanupButton loading={cleaningUp} onClick={handleCleanup} />
+          <CleanupButton loading={cleaningUp} disabled={mutationInFlight} onClick={handleCleanup} />
         </div>
       )}
       <table className="w-full text-sm">
@@ -256,7 +254,7 @@ export const ExecutionHistory: FC<ExecutionHistoryProps> = ({
                   {canDelete && (
                     <button
                       onClick={() => handleDelete(exec.id)}
-                      disabled={deletingId === exec.id}
+                      disabled={mutationInFlight}
                       className={`p-1 text-fg-muted hover:text-danger bg-transparent border-none cursor-pointer disabled:opacity-50 ${FOCUS_RING}`}
                       title="Delete execution"
                       aria-label={`Delete execution from ${formatDateTime(exec.scheduledAt)}`}
@@ -293,13 +291,23 @@ export const ExecutionHistory: FC<ExecutionHistoryProps> = ({
 // Cleanup button
 // ---------------------------------------------------------------------------
 
-const CleanupButton: FC<{ loading: boolean; onClick: () => void }> = ({ loading, onClick }) => (
+const MutationError: FC<{ message: string | null }> = ({ message }) => {
+  if (!message) return null;
+  return (
+    <div className="mb-3 flex items-start gap-2 rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger" role="alert">
+      <AlertCircle size={14} className="shrink-0 mt-0.5" aria-hidden="true" />
+      <span>{message}</span>
+    </div>
+  );
+};
+
+const CleanupButton: FC<{ loading: boolean; disabled: boolean; onClick: () => void }> = ({ loading, disabled, onClick }) => (
   <button
     onClick={onClick}
-    disabled={loading}
+    disabled={disabled}
     className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-warning hover:text-warning/80 bg-transparent border border-warning/30 rounded-md cursor-pointer disabled:opacity-50 ${FOCUS_RING}`}
   >
-    {loading ? <Spinner size="sm" /> : <Zap size={12} />}
+    {loading ? <Spinner size="sm" /> : <Zap size={12} aria-hidden="true" />}
     {loading ? 'Cleaning up...' : 'Clear stuck queued'}
   </button>
 );
@@ -313,7 +321,8 @@ const ExecutionCard: FC<{
   projectId: string;
   onDelete: (id: string) => void;
   deletingId: string | null;
-}> = ({ execution, projectId, onDelete, deletingId }) => {
+  mutationInFlight: boolean;
+}> = ({ execution, projectId, onDelete, deletingId, mutationInFlight }) => {
   const statusCfg = EXECUTION_STATUS_CONFIG[execution.status] ?? DEFAULT_EXEC_STATUS;
   const canDelete = DELETABLE_STATUSES.has(execution.status);
 
@@ -334,7 +343,7 @@ const ExecutionCard: FC<{
           {canDelete && (
             <button
               onClick={() => onDelete(execution.id)}
-              disabled={deletingId === execution.id}
+              disabled={mutationInFlight}
               className={`p-1 text-fg-muted hover:text-danger bg-transparent border-none cursor-pointer disabled:opacity-50 ${FOCUS_RING}`}
               title="Delete execution"
               aria-label={`Delete execution from ${formatDateTime(execution.scheduledAt)}`}

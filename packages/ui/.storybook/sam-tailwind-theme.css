@@ -1,0 +1,57 @@
+/* Keep Storybook's Tailwind utilities aligned with the SAM token mapping used by consumers. */
+@theme {
+  --color-canvas: var(--sam-color-bg-canvas);
+  --color-surface: var(--sam-color-bg-surface);
+  --color-surface-hover: var(--sam-color-bg-surface-hover);
+  --color-inset: var(--sam-color-bg-inset);
+  --color-overlay: var(--sam-color-bg-overlay);
+  --color-page: var(--sam-color-bg-page);
+
+  --color-glass-chrome: var(--sam-glass-bg-chrome);
+  --color-glass-surface: var(--sam-glass-bg-surface);
+  --color-glass-modal: var(--sam-glass-bg-modal);
+  --color-glass-backdrop-dim: var(--sam-glass-backdrop-dim);
+  --color-glass-border: var(--sam-glass-border-color);
+  --color-glass-glow: var(--sam-glass-glow-color);
+
+  --color-fg-primary: var(--sam-color-fg-primary);
+  --color-fg-muted: var(--sam-color-fg-muted);
+  --color-fg-on-accent: var(--sam-color-fg-on-accent);
+
+  --color-accent: var(--sam-color-accent-primary);
+  --color-accent-hover: var(--sam-color-accent-primary-hover);
+  --color-success: var(--sam-color-success);
+  --color-warning: var(--sam-color-warning);
+  --color-danger: var(--sam-color-danger);
+  --color-info: var(--sam-color-info);
+  --color-purple: var(--sam-color-purple);
+  --color-focus-ring: var(--sam-color-focus-ring);
+  --color-border-default: var(--sam-color-border-default);
+
+  --color-success-fg: var(--sam-color-success-fg);
+  --color-danger-fg: var(--sam-color-danger-fg);
+  --color-warning-fg: var(--sam-color-warning-fg);
+  --color-info-fg: var(--sam-color-info-fg);
+  --color-warning-surface: var(--sam-color-warning-surface);
+
+  --color-accent-tint: var(--sam-color-accent-primary-tint);
+  --color-success-tint: var(--sam-color-success-tint);
+  --color-warning-tint: var(--sam-color-warning-tint);
+  --color-danger-tint: var(--sam-color-danger-tint);
+  --color-info-tint: var(--sam-color-info-tint);
+
+  --shadow-sm: var(--sam-shadow-sm);
+  --shadow: var(--sam-shadow-default);
+  --shadow-md: var(--sam-shadow-md);
+  --shadow-lg: var(--sam-shadow-lg);
+  --shadow-xl: var(--sam-shadow-xl);
+  --shadow-dropdown: var(--sam-shadow-dropdown);
+  --shadow-overlay: var(--sam-shadow-overlay);
+  --shadow-tooltip: var(--sam-shadow-tooltip);
+
+  --radius-sm: var(--sam-radius-sm);
+  --radius-md: var(--sam-radius-md);
+  --radius-lg: var(--sam-radius-lg);
+}
+
+@custom-variant dark (&:where([data-ui-theme='sam'], [data-ui-theme='sam'] *));

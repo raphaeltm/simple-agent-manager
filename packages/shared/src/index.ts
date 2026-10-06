@@ -4,6 +4,12 @@ export * from './types';
 // Agents
 export * from './agents';
 
+// Harness Capabilities
+export * from './harness-capabilities';
+
+// Provider Presets
+export * from './provider-presets';
+
 // Model Catalog
 export * from './model-catalog';
 
@@ -13,5 +19,37 @@ export * from './constants';
 // VM Agent Contract (Zod schemas + types)
 export * from './vm-agent-contract';
 
+// Durable ACP interaction contracts (Valibot schemas + defaults)
+export * from './acp-form';
+export * from './acp-interactions';
+export * from './acp-url-eligibility';
+
 // Trial Onboarding (types + Valibot schemas)
 export * from './trial';
+
+// Deployment Manifest (Zod schemas + validation)
+export * from './deployment-manifest';
+
+// Compose Parser (Compose YAML → deployment manifest)
+export * from './compose-parser';
+
+// Composable Credentials (three-primitive model)
+export * from './composable-credentials';
+
+// MIME-type helpers (extension fallback for library preview)
+export * from './mime';
+
+// Credential usage-limit presentation helpers
+export * from './credential-limits';
+
+// Failure classification (display-time taxonomy for task/session errors)
+export * from './failure-classification';
+
+// Runtime validation (dependency-free "is this a plain JSON object" predicate)
+export * from './runtime-validation';
+
+// Resource requirements validation
+export * from './resource-requirements';
+
+// Chat message pagination cursors (web client ↔ API contract)
+export * from './message-cursor';

@@ -4,12 +4,18 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -23,6 +29,30 @@ type bufferWriteCloser struct {
 
 func (w *bufferWriteCloser) Close() error {
 	return nil
+}
+
+func syntheticSecretForRedactionTest() string {
+	return "sk-" + "secret1234567890"
+}
+
+func syntheticOpenAIKeyEnvLine() string {
+	return "OPENAI_API_" + "KEY=" + syntheticSecretForRedactionTest()
+}
+
+func syntheticGitHubTokenForRedactionTest() string {
+	return "ghp_" + "secret1234567890"
+}
+
+func syntheticGitHubTokenEnvLine() string {
+	return "GH_" + "TOKEN=" + syntheticGitHubTokenForRedactionTest()
+}
+
+func syntheticSmokeTestTokenForRedactionTest() string {
+	return "sam_test_" + "secret-token-123456"
+}
+
+func syntheticSmokeTestTokenEnvLine() string {
+	return "SMOKE_TEST_" + "TOKEN=" + syntheticSmokeTestTokenForRedactionTest()
 }
 
 // testWSPair creates a connected client+server WebSocket pair using httptest.
@@ -180,6 +210,284 @@ func TestNewSessionHost_Defaults(t *testing.T) {
 		t.Fatalf("default ViewerSendBuffer = %d, want %d", host.config.ViewerSendBuffer, DefaultViewerSendBuffer)
 	}
 	host.Stop()
+}
+
+// TestSessionHostEnsureAgentInstalledLocalFastPath verifies that in
+// standalone/local mode (custom ProcessLauncher, no ContainerResolver) the
+// local install path is taken. Using a command that already exists on PATH
+// exercises the fast path (returns nil without running the install script).
+// Critically, ContainerResolver is nil here — if the code incorrectly fell
+// through to the docker install path it would panic, so a nil return proves
+// the local branch was used.
+func TestSessionHostEnsureAgentInstalledLocalFastPath(t *testing.T) {
+	t.Parallel()
+
+	// Pick a binary guaranteed to be on PATH in the test/CI environment.
+	existing := "sh"
+	if _, err := exec.LookPath(existing); err != nil {
+		t.Skipf("%q not on PATH in this environment", existing)
+	}
+
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			ProcessLauncher: LocalLauncher{},
+			// ContainerResolver deliberately nil: the docker path would panic.
+		},
+	})
+	defer host.Stop()
+
+	err := host.ensureAgentInstalled(context.Background(), agentCommandInfo{
+		command:    existing,
+		installCmd: "npm install -g @zed-industries/claude-agent-acp",
+		isNpmBased: true,
+	})
+	if err != nil {
+		t.Fatalf("ensureAgentInstalled() error = %v, want nil", err)
+	}
+}
+
+func TestPrepareAgentStartupAppliesStandaloneRuntimeAssets(t *testing.T) {
+	t.Parallel()
+
+	workDir := t.TempDir()
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			SessionID:        "test-session",
+			WorkspaceID:      "test-workspace",
+			ContainerWorkDir: workDir,
+			ProcessLauncher:  LocalLauncher{},
+			SAMEnvFallback:   []string{"SAM_WORKSPACE_ID=test-workspace"},
+		},
+		RuntimeAssetsProvider: func(context.Context) (RuntimeAssets, error) {
+			return RuntimeAssets{
+				EnvVars: []RuntimeEnvVar{{
+					Key:      "CUSTOM_VALUE",
+					Value:    "secret-runtime-value",
+					IsSecret: true,
+				}},
+				Files: []RuntimeFile{{
+					Path:    ".sam-runtime-test.txt",
+					Content: "runtime-file-present",
+				}},
+			}, nil
+		},
+	})
+	defer host.Stop()
+
+	startup, err := host.prepareAgentStartup(context.Background(), "claude-code", &agentCredential{
+		credential:     "agent-key",
+		credentialKind: "api-key",
+	}, nil)
+	if err != nil {
+		t.Fatalf("prepareAgentStartup returned error: %v", err)
+	}
+
+	if !hasEnvVar(startup.envVars, "CUSTOM_VALUE") {
+		t.Fatalf("runtime env var was not added: %v", startup.envVars)
+	}
+	if !startup.secretEnvKey["CUSTOM_VALUE"] {
+		t.Fatalf("runtime secret metadata was not preserved")
+	}
+	content, err := os.ReadFile(filepath.Join(workDir, ".sam-runtime-test.txt"))
+	if err != nil {
+		t.Fatalf("runtime file was not written: %v", err)
+	}
+	if string(content) != "runtime-file-present" {
+		t.Fatalf("runtime file content = %q", string(content))
+	}
+}
+
+func TestPrepareAgentStartupRuntimeAssetFailurePreventsStart(t *testing.T) {
+	t.Parallel()
+
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			SessionID:        "test-session",
+			WorkspaceID:      "test-workspace",
+			ContainerWorkDir: t.TempDir(),
+			ProcessLauncher:  LocalLauncher{},
+		},
+		RuntimeAssetsProvider: func(context.Context) (RuntimeAssets, error) {
+			return RuntimeAssets{}, errors.New("runtime asset fetch failed")
+		},
+	})
+	defer host.Stop()
+
+	_, err := host.prepareAgentStartup(context.Background(), "claude-code", &agentCredential{
+		credential:     "agent-key",
+		credentialKind: "api-key",
+	}, nil)
+	if err == nil {
+		t.Fatal("expected runtime asset provider failure to prevent startup")
+	}
+	if !strings.Contains(err.Error(), "runtime asset fetch failed") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestPrepareAgentStartupStandaloneCodexOAuthWritesAuthFileToHome(t *testing.T) {
+	workDir := t.TempDir()
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	t.Setenv("CODEX_HOME", "")
+
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			SessionID:        "test-session",
+			WorkspaceID:      "test-workspace",
+			ContainerWorkDir: workDir,
+			ProcessLauncher:  LocalLauncher{},
+		},
+	})
+	defer host.Stop()
+
+	credential := `{"tokens":{"id_token":"id-token","refresh_token":"refresh-token"}}`
+	startup, err := host.prepareAgentStartup(context.Background(), "openai-codex", &agentCredential{
+		credential:     credential,
+		credentialKind: "oauth-token",
+	}, nil)
+	if err != nil {
+		t.Fatalf("prepareAgentStartup returned error: %v", err)
+	}
+
+	if startup.containerID != "" {
+		t.Fatalf("containerID = %q, want standalone empty container", startup.containerID)
+	}
+	if !hasEnvVar(startup.envVars, "NO_BROWSER") {
+		t.Fatalf("NO_BROWSER was not injected: %v", startup.envVars)
+	}
+
+	authPath := filepath.Join(homeDir, ".codex", "auth.json")
+	content, err := os.ReadFile(authPath)
+	if err != nil {
+		t.Fatalf("auth file was not written under home: %v", err)
+	}
+	if string(content) != credential {
+		t.Fatalf("auth file content = %q, want %q", string(content), credential)
+	}
+	assertFileMode(t, filepath.Dir(authPath), 0o700)
+	assertFileMode(t, authPath, 0o600)
+
+	if _, err := os.Stat(filepath.Join(workDir, ".codex", "auth.json")); !os.IsNotExist(err) {
+		t.Fatalf("workspace-local auth file should not exist, stat err = %v", err)
+	}
+}
+
+func TestPrepareAgentStartupStandaloneCodexOAuthHonorsCodexHome(t *testing.T) {
+	workDir := t.TempDir()
+	homeDir := t.TempDir()
+	codexHome := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	t.Setenv("CODEX_HOME", codexHome)
+
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			SessionID:        "test-session",
+			WorkspaceID:      "test-workspace",
+			ContainerWorkDir: workDir,
+			ProcessLauncher:  LocalLauncher{},
+		},
+	})
+	defer host.Stop()
+
+	credential := `{"tokens":{"id_token":"id-token","refresh_token":"refresh-token"}}`
+	if _, err := host.prepareAgentStartup(context.Background(), "openai-codex", &agentCredential{
+		credential:     credential,
+		credentialKind: "oauth-token",
+	}, nil); err != nil {
+		t.Fatalf("prepareAgentStartup returned error: %v", err)
+	}
+
+	authPath := filepath.Join(codexHome, "auth.json")
+	content, err := os.ReadFile(authPath)
+	if err != nil {
+		t.Fatalf("auth file was not written under CODEX_HOME: %v", err)
+	}
+	if string(content) != credential {
+		t.Fatalf("auth file content = %q, want %q", string(content), credential)
+	}
+	assertFileMode(t, filepath.Dir(authPath), 0o700)
+	assertFileMode(t, authPath, 0o600)
+
+	if _, err := os.Stat(filepath.Join(homeDir, ".codex", "auth.json")); !os.IsNotExist(err) {
+		t.Fatalf("home auth file should not exist when CODEX_HOME is set, stat err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(workDir, ".codex", "auth.json")); !os.IsNotExist(err) {
+		t.Fatalf("workspace-local auth file should not exist, stat err = %v", err)
+	}
+}
+
+func TestResolveLocalAuthFileTargetPath(t *testing.T) {
+	homeDir := t.TempDir()
+	codexHome := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	tests := []struct {
+		name         string
+		authFilePath string
+		codexHome    string
+		want         string
+		wantErr      string
+	}{
+		{
+			name:         "codex auth path resolves under home when CODEX_HOME is empty",
+			authFilePath: ".codex/auth.json",
+			want:         filepath.Join(homeDir, ".codex", "auth.json"),
+		},
+		{
+			name:         "codex auth path honors CODEX_HOME",
+			authFilePath: ".codex/auth.json",
+			codexHome:    codexHome,
+			want:         filepath.Join(codexHome, "auth.json"),
+		},
+		{
+			name:         "non-codex auth path ignores CODEX_HOME and resolves under home",
+			authFilePath: ".vibe/config.toml",
+			codexHome:    codexHome,
+			want:         filepath.Join(homeDir, ".vibe", "config.toml"),
+		},
+		{
+			name:         "path traversal is rejected",
+			authFilePath: "../auth.json",
+			wantErr:      "invalid authFilePath",
+		},
+		{
+			name:         "shell metacharacter is rejected",
+			authFilePath: ".codex/auth`bad.json",
+			wantErr:      "invalid authFilePath",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("CODEX_HOME", tt.codexHome)
+
+			got, err := resolveLocalAuthFileTargetPath(tt.authFilePath)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("resolveLocalAuthFileTargetPath() error = %v, want containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("resolveLocalAuthFileTargetPath() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("resolveLocalAuthFileTargetPath() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func assertFileMode(t *testing.T, path string, want os.FileMode) {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	if got := info.Mode().Perm(); got != want {
+		t.Fatalf("mode for %s = %o, want %o", path, got, want)
+	}
 }
 
 func TestSessionHost_AttachDetachViewer(t *testing.T) {
@@ -740,6 +1048,706 @@ func TestSessionHost_BroadcastAgentStatus(t *testing.T) {
 	}
 }
 
+func TestIsCrashPromptError(t *testing.T) {
+	t.Parallel()
+
+	crashErrors := []error{
+		io.EOF,
+		fmt.Errorf("wrapped pipe: %w", syscall.EPIPE),
+		fmt.Errorf("wrapped reset: %w", syscall.ECONNRESET),
+		fmt.Errorf("connection closed, peer disconnected"),
+		fmt.Errorf("write: broken pipe"),
+		fmt.Errorf("read tcp: connection reset by peer"),
+		fmt.Errorf("write_stdin failed: stdin is closed for this session"),
+	}
+	for _, err := range crashErrors {
+		if !isCrashPromptError(err) {
+			t.Fatalf("isCrashPromptError(%q) = false, want true", err.Error())
+		}
+	}
+
+	if isCrashPromptError(context.DeadlineExceeded) {
+		t.Fatal("deadline exceeded should not be treated as an agent crash")
+	}
+	if isCrashPromptError(context.Canceled) {
+		t.Fatal("context canceled should not be treated as an agent crash")
+	}
+	if isCrashPromptError(errors.New("permission denied")) {
+		t.Fatal("unrelated errors should not be treated as agent crashes")
+	}
+}
+
+func TestRedactAgentDiagnosticText(t *testing.T) {
+	t.Parallel()
+
+	input := strings.Join([]string{
+		"Authorization: Bearer secret-bearer-token-123456",
+		syntheticOpenAIKeyEnvLine(),
+		syntheticGitHubTokenEnvLine(),
+		syntheticSmokeTestTokenEnvLine(),
+		"safe diagnostic line",
+	}, "\n")
+	got := redactAgentDiagnosticText(input)
+
+	for _, leaked := range []string{
+		"secret-bearer-token-123456",
+		syntheticSecretForRedactionTest(),
+		syntheticGitHubTokenForRedactionTest(),
+		syntheticSmokeTestTokenForRedactionTest(),
+	} {
+		if strings.Contains(got, leaked) {
+			t.Fatalf("redacted text leaked %q: %s", leaked, got)
+		}
+	}
+	if !strings.Contains(got, "safe diagnostic line") {
+		t.Fatalf("redacted text removed safe diagnostic line: %s", got)
+	}
+}
+
+func TestMonitorStderrStoresRedactedDiagnostics(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+	proc, _, _ := newFakeAgentProcess(time.Now(), true)
+	proc.stderr = strings.NewReader("fatal diagnostic\n" + syntheticOpenAIKeyEnvLine())
+
+	host.monitorStderr(proc)
+	got := host.peekStderr()
+	if strings.Contains(got, syntheticSecretForRedactionTest()) {
+		t.Fatalf("stderr buffer leaked secret: %s", got)
+	}
+	if !strings.Contains(got, "fatal diagnostic") {
+		t.Fatalf("stderr buffer removed safe diagnostic: %s", got)
+	}
+}
+
+func TestSessionHost_BeginCrashRecoveryRequiresLoadSession(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+	defer host.Stop()
+
+	host.mu.Lock()
+	host.agentType = "openai-codex"
+	host.setSessionIDLocked("acp-session-1")
+	host.agentSupportsLoadSession = false
+	host.mu.Unlock()
+
+	if _, _, _, _, ok := host.beginCrashRecovery(json.RawMessage(`"req-1"`), "viewer-1"); ok {
+		t.Fatal("beginCrashRecovery succeeded without LoadSession support")
+	}
+
+	host.mu.Lock()
+	host.agentSupportsLoadSession = true
+	host.mu.Unlock()
+
+	agentType, _, _, _, ok := host.beginCrashRecovery(json.RawMessage(`"req-1"`), "viewer-1")
+	if !ok {
+		t.Fatal("beginCrashRecovery failed with LoadSession support")
+	}
+	if agentType != "openai-codex" {
+		t.Fatalf("agentType = %q, want openai-codex", agentType)
+	}
+
+	host.mu.RLock()
+	defer host.mu.RUnlock()
+	if !host.crashRecoveryInProgress {
+		t.Fatal("crashRecoveryInProgress = false, want true")
+	}
+	if string(host.crashPromptReqID) != `"req-1"` {
+		t.Fatalf("crashPromptReqID = %s, want \"req-1\"", string(host.crashPromptReqID))
+	}
+	if host.crashPromptViewerID != "viewer-1" {
+		t.Fatalf("crashPromptViewerID = %q, want viewer-1", host.crashPromptViewerID)
+	}
+}
+
+func TestSessionHost_FinishPromptWithPeerDisconnectBeginsCrashRecovery(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+	defer host.Stop()
+
+	completed := make(chan string, 1)
+	host.config.OnPromptComplete = func(stopReason string, _ error) {
+		completed <- stopReason
+	}
+	host.mu.Lock()
+	host.agentType = "openai-codex"
+	host.setSessionIDLocked("acp-session-1")
+	host.agentSupportsLoadSession = true
+	host.mu.Unlock()
+
+	host.finishPromptWithError(
+		context.Background(),
+		json.RawMessage(`"req-1"`),
+		promptStartInfo{startedAt: time.Now(), viewerID: "viewer-1"},
+		errors.New(`{"code":-32603,"message":"Internal error","data":{"error":"peer disconnected before response"}}`),
+	)
+
+	select {
+	case stopReason := <-completed:
+		t.Fatalf("prompt completed before crash recovery: %q", stopReason)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	host.mu.RLock()
+	defer host.mu.RUnlock()
+	if !host.crashRecoveryInProgress {
+		t.Fatal("crashRecoveryInProgress = false, want true")
+	}
+	if host.status != HostStarting {
+		t.Fatalf("status = %s, want %s", host.status, HostStarting)
+	}
+}
+
+func TestSessionHost_FinishPromptWithPeerDisconnectUsesPromptStartPrerequisitesAfterLiveStateClears(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+	defer host.Stop()
+	host.mu.Lock()
+	host.agentType = "openai-codex"
+	host.setSessionIDLocked("acp-session-before-disconnect")
+	host.agentSupportsLoadSession = true
+	host.mu.Unlock()
+
+	captured := host.captureCrashRecoveryPrerequisites()
+	host.mu.Lock()
+	host.clearCurrentAgentSessionLocked()
+	host.mu.Unlock()
+
+	host.finishPromptWithError(
+		context.Background(),
+		json.RawMessage(`"req-race"`),
+		promptStartInfo{startedAt: time.Now(), viewerID: "viewer-1", recovery: captured},
+		errors.New(`{"code":-32603,"message":"Internal error","data":{"error":"peer disconnected before response"}}`),
+	)
+
+	host.mu.RLock()
+	defer host.mu.RUnlock()
+	if !host.crashRecoveryInProgress {
+		t.Fatal("crashRecoveryInProgress = false after live prerequisites cleared, want true")
+	}
+	if host.crashSessionID != "acp-session-before-disconnect" {
+		t.Fatalf("crashSessionID = %q, want prompt-start session ID", host.crashSessionID)
+	}
+	if host.crashAgentType != "openai-codex" {
+		t.Fatalf("crashAgentType = %q, want openai-codex", host.crashAgentType)
+	}
+}
+
+// TestSessionHost_FinishPromptRecoveryUsesCapturedAgentTypeWhenLiveAgentTypeCleared
+// exercises the partial-clear merge branch: the live sessionID and LoadSession
+// capability survive, but the live agentType has been cleared. Recovery must
+// fill agentType from the prompt-start capture (not fail), so a LoadSession-
+// capable prompt still recovers with the captured agent type.
+func TestSessionHost_FinishPromptRecoveryUsesCapturedAgentTypeWhenLiveAgentTypeCleared(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+	defer host.Stop()
+	host.mu.Lock()
+	host.agentType = "openai-codex"
+	host.setSessionIDLocked("acp-session-live")
+	host.agentSupportsLoadSession = true
+	host.mu.Unlock()
+
+	captured := host.captureCrashRecoveryPrerequisites()
+	// Clear ONLY the live agentType; sessionID and LoadSession capability remain
+	// live and must win over the captured snapshot.
+	host.mu.Lock()
+	host.agentType = ""
+	host.mu.Unlock()
+
+	host.finishPromptWithError(
+		context.Background(),
+		json.RawMessage(`"req-agenttype"`),
+		promptStartInfo{startedAt: time.Now(), viewerID: "viewer-1", recovery: captured},
+		errors.New(`{"code":-32603,"message":"Internal error","data":{"error":"peer disconnected before response"}}`),
+	)
+
+	host.mu.RLock()
+	defer host.mu.RUnlock()
+	if !host.crashRecoveryInProgress {
+		t.Fatal("crashRecoveryInProgress = false when only live agentType was cleared, want true (captured agentType fallback)")
+	}
+	if host.crashAgentType != "openai-codex" {
+		t.Fatalf("crashAgentType = %q, want captured openai-codex", host.crashAgentType)
+	}
+	if host.crashSessionID != "acp-session-live" {
+		t.Fatalf("crashSessionID = %q, want live acp-session-live (live sessionID must win)", host.crashSessionID)
+	}
+}
+
+func TestSessionHost_FinishPromptWithUnrecoverablePeerDisconnectReportsActionableFailure(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+	defer host.Stop()
+
+	completed := make(chan error, 1)
+	host.config.OnPromptComplete = func(stopReason string, promptErr error) {
+		if stopReason != fatalErrorStopReason {
+			t.Errorf("stopReason = %q, want %s", stopReason, fatalErrorStopReason)
+		}
+		completed <- promptErr
+	}
+	host.mu.Lock()
+	host.agentType = "openai-codex"
+	host.setSessionIDLocked("acp-session-1")
+	host.agentSupportsLoadSession = false
+	host.mu.Unlock()
+	host.stderrMu.Lock()
+	host.stderrBuf.WriteString("fatal: peer disconnected before response\n" + syntheticOpenAIKeyEnvLine())
+	host.stderrMu.Unlock()
+
+	host.finishPromptWithError(
+		context.Background(),
+		json.RawMessage(`"req-1"`),
+		promptStartInfo{startedAt: time.Now(), viewerID: "viewer-1"},
+		errors.New(`{"code":-32603,"message":"Internal error","data":{"error":"peer disconnected before response"}}`),
+	)
+
+	select {
+	case err := <-completed:
+		if err == nil {
+			t.Fatal("promptErr = nil, want actionable failure")
+		}
+		if !strings.Contains(err.Error(), "cannot be recovered automatically") {
+			t.Fatalf("promptErr = %q, want actionable recovery message", err.Error())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for prompt completion callback")
+	}
+
+	host.bufMu.RLock()
+	defer host.bufMu.RUnlock()
+	foundReport := false
+	foundRPCError := false
+	for _, msg := range host.messageBuf {
+		var report AgentCrashReportMessage
+		if err := json.Unmarshal(msg.Data, &report); err == nil && report.Type == MsgAgentCrashReport {
+			foundReport = true
+			if report.Recovered {
+				t.Fatal("crash report recovered = true, want false")
+			}
+			if strings.Contains(report.Stderr, syntheticSecretForRedactionTest()) {
+				t.Fatalf("crash report leaked secret: %q", report.Stderr)
+			}
+			if report.RecoveryError != "LoadSession recovery is unavailable; missing prerequisites: loadSessionCapability" {
+				t.Fatalf("recoveryError = %q, want missing LoadSession capability diagnostic", report.RecoveryError)
+			}
+		}
+
+		var rpc struct {
+			Error struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(msg.Data, &rpc); err == nil && strings.Contains(rpc.Error.Message, "cannot be recovered automatically") {
+			foundRPCError = true
+		}
+	}
+	if !foundReport {
+		t.Fatal("missing unrecovered crash report")
+	}
+	if !foundRPCError {
+		t.Fatal("missing actionable JSON-RPC error")
+	}
+
+	// After an unrecoverable crash the host must be in HostError, not HostReady.
+	if status := host.Status(); status != HostError {
+		t.Fatalf("host.Status() = %s after unrecoverable crash, want %s", status, HostError)
+	}
+
+	// No recovery episode may be left armed on the unrecoverable path: a lingering
+	// crashRecoveryInProgress would let the watchdog fire a second terminal
+	// completion. The terminal error must be the only outcome.
+	host.mu.RLock()
+	inRecovery := host.crashRecoveryInProgress
+	host.mu.RUnlock()
+	if inRecovery {
+		t.Fatal("crashRecoveryInProgress = true after unrecoverable crash, want false (no recovery episode may be armed)")
+	}
+}
+
+// TestSessionHost_UnrecoverablePeerDisconnectNamesEachMissingPrerequisite proves
+// the sanitized terminal diagnostic identifies exactly which recovery
+// prerequisites were absent — for each prerequisite in isolation and for all
+// three together — never leaking the actual session ID value. The existing
+// TestSessionHost_FinishPromptWithUnrecoverablePeerDisconnectReportsActionableFailure
+// covers only the loadSessionCapability-missing permutation.
+func TestSessionHost_UnrecoverablePeerDisconnectNamesEachMissingPrerequisite(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name                string
+		sessionID           string
+		agentType           string
+		supportsLoadSession bool
+		wantMissing         string
+	}{
+		{
+			name:                "only acpSessionId missing",
+			sessionID:           "",
+			agentType:           "openai-codex",
+			supportsLoadSession: true,
+			wantMissing:         "acpSessionId",
+		},
+		{
+			name:                "only agentType missing",
+			sessionID:           "acp-session-1",
+			agentType:           "",
+			supportsLoadSession: true,
+			wantMissing:         "agentType",
+		},
+		{
+			name:                "all three missing",
+			sessionID:           "",
+			agentType:           "",
+			supportsLoadSession: false,
+			wantMissing:         "acpSessionId, loadSessionCapability, agentType",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			host := newTestSessionHost(t)
+			defer host.Stop()
+
+			completed := make(chan string, 1)
+			host.config.OnPromptComplete = func(stopReason string, _ error) { completed <- stopReason }
+			host.mu.Lock()
+			host.agentType = tc.agentType
+			host.setSessionIDLocked(acpsdk.SessionId(tc.sessionID))
+			host.agentSupportsLoadSession = tc.supportsLoadSession
+			host.mu.Unlock()
+
+			// Empty recovery snapshot: no captured fallback, so the live gaps are
+			// the only prerequisites and the diagnostic must name exactly them.
+			host.finishPromptWithError(
+				context.Background(),
+				json.RawMessage(`"req-diag"`),
+				promptStartInfo{startedAt: time.Now(), viewerID: "viewer-1"},
+				errors.New(`{"code":-32603,"message":"Internal error","data":{"error":"peer disconnected before response"}}`),
+			)
+
+			select {
+			case reason := <-completed:
+				if reason != fatalErrorStopReason {
+					t.Fatalf("stopReason = %q, want %s", reason, fatalErrorStopReason)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("timed out waiting for terminal completion")
+			}
+
+			wantErr := "LoadSession recovery is unavailable; missing prerequisites: " + tc.wantMissing
+			host.bufMu.RLock()
+			foundReport := false
+			for _, msg := range host.messageBuf {
+				var report AgentCrashReportMessage
+				if err := json.Unmarshal(msg.Data, &report); err == nil && report.Type == MsgAgentCrashReport {
+					foundReport = true
+					if report.RecoveryError != wantErr {
+						t.Fatalf("recoveryError = %q, want %q", report.RecoveryError, wantErr)
+					}
+					// The diagnostic must never contain a real session ID value.
+					if tc.sessionID != "" && strings.Contains(report.RecoveryError, tc.sessionID) {
+						t.Fatalf("recoveryError leaked session ID value: %q", report.RecoveryError)
+					}
+				}
+			}
+			host.bufMu.RUnlock()
+			if !foundReport {
+				t.Fatal("missing unrecovered crash report")
+			}
+
+			host.mu.RLock()
+			inRecovery := host.crashRecoveryInProgress
+			host.mu.RUnlock()
+			if inRecovery {
+				t.Fatal("crashRecoveryInProgress = true after terminal diagnostic, want false")
+			}
+		})
+	}
+}
+
+func TestSessionHost_FinishPromptDeadlineExceededReportsFatalWithoutCrashRecovery(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+	defer host.Stop()
+
+	completed := make(chan string, 1)
+	host.config.OnPromptComplete = func(stopReason string, _ error) {
+		completed <- stopReason
+	}
+	host.mu.Lock()
+	host.agentType = "openai-codex"
+	host.setSessionIDLocked("acp-session-1")
+	host.agentSupportsLoadSession = true
+	host.mu.Unlock()
+
+	promptCtx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+
+	host.finishPromptWithError(
+		promptCtx,
+		json.RawMessage(`"req-1"`),
+		promptStartInfo{startedAt: time.Now(), viewerID: "viewer-1", timeout: 6 * time.Hour},
+		errors.New("peer disconnected before response"),
+	)
+
+	select {
+	case stopReason := <-completed:
+		if stopReason != fatalErrorStopReason {
+			t.Fatalf("stopReason = %q, want %s", stopReason, fatalErrorStopReason)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for prompt completion callback")
+	}
+
+	host.mu.RLock()
+	defer host.mu.RUnlock()
+	if host.crashRecoveryInProgress {
+		t.Fatal("crashRecoveryInProgress = true, want false for prompt deadline")
+	}
+}
+
+func TestSessionHost_ForceStoppedPromptReportsFatalCompletionExactlyOnce(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+	defer host.Stop()
+
+	type completion struct {
+		stopReason string
+		err        error
+	}
+	completed := make(chan completion, 2)
+	host.config.OnPromptComplete = func(stopReason string, err error) {
+		completed <- completion{stopReason: stopReason, err: err}
+	}
+
+	const timeoutReason = "Prompt timed out after 6h0m0s"
+	_, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	attempt, ok := host.beginPrompt(cancel, nil)
+	if !ok {
+		t.Fatal("prompt was not accepted")
+	}
+	host.mu.Lock()
+	host.setStatusLocked(HostPrompting)
+	host.agentType = "openai-codex"
+	host.mu.Unlock()
+
+	host.triggerPromptForceStopIfStuck(attempt, timeoutReason)
+
+	select {
+	case got := <-completed:
+		if got.stopReason != fatalErrorStopReason {
+			t.Fatalf("stopReason = %q, want %q", got.stopReason, fatalErrorStopReason)
+		}
+		if got.err == nil || got.err.Error() != timeoutReason {
+			t.Fatalf("completion error = %v, want %q", got.err, timeoutReason)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for force-stop completion callback")
+	}
+
+	// A late watchdog/retry for the same prompt must not terminalize twice.
+	host.triggerPromptForceStopIfStuck(attempt, timeoutReason)
+	select {
+	case got := <-completed:
+		t.Fatalf("received duplicate force-stop completion: %+v", got)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestSessionHost_CompetingPromptCompletionPathsClaimExactlyOnce(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+	defer host.Stop()
+
+	type completion struct {
+		stopReason string
+		err        error
+	}
+	completed := make(chan completion, 2)
+	host.config.OnPromptComplete = func(stopReason string, err error) {
+		completed <- completion{stopReason: stopReason, err: err}
+	}
+
+	const timeoutReason = "Prompt timed out after 6h0m0s"
+	_, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	attempt, ok := host.beginPrompt(cancel, nil)
+	if !ok {
+		t.Fatal("prompt was not accepted")
+	}
+	host.mu.Lock()
+	host.setStatusLocked(HostPrompting)
+	host.agentType = "openai-codex"
+	host.mu.Unlock()
+
+	start := make(chan struct{})
+	var contenders sync.WaitGroup
+	contenders.Add(2)
+	go func() {
+		defer contenders.Done()
+		<-start
+		attempt.completeWith(host, "normal_return", nil, host.markPromptDone)
+	}()
+	go func() {
+		defer contenders.Done()
+		<-start
+		host.triggerPromptForceStopIfStuck(attempt, timeoutReason)
+	}()
+	close(start)
+	contenders.Wait()
+
+	select {
+	case got := <-completed:
+		if got.stopReason != "normal_return" && got.stopReason != fatalErrorStopReason {
+			t.Fatalf("unexpected completion owner: %+v", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for completion owner")
+	}
+	select {
+	case got := <-completed:
+		t.Fatalf("received duplicate competing completion: %+v", got)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestSessionHost_BroadcastAgentCrashReport(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+	defer host.Stop()
+
+	report := host.crashReport(crashRecoverySnapshot{
+		stderr:      "write_stdin failed: stdin is closed\n" + syntheticOpenAIKeyEnvLine(),
+		agentType:   "openai-codex",
+		promptReqID: json.RawMessage(`"req-1"`),
+	}, true, "")
+	host.broadcastAgentCrashReport(report)
+
+	host.bufMu.RLock()
+	defer host.bufMu.RUnlock()
+
+	if len(host.messageBuf) != 1 {
+		t.Fatalf("buffer length = %d, want 1", len(host.messageBuf))
+	}
+
+	var got AgentCrashReportMessage
+	if err := json.Unmarshal(host.messageBuf[0].Data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.Type != MsgAgentCrashReport {
+		t.Fatalf("type = %s, want %s", got.Type, MsgAgentCrashReport)
+	}
+	if got.AgentType != "openai-codex" {
+		t.Fatalf("agentType = %q, want openai-codex", got.AgentType)
+	}
+	if !got.Recovered {
+		t.Fatal("recovered = false, want true")
+	}
+	if !strings.Contains(got.Attribution, "not SAM") {
+		t.Fatalf("attribution = %q, want SAM fault attribution", got.Attribution)
+	}
+	if !strings.Contains(got.Stderr, "stdin is closed") {
+		t.Fatalf("stderr = %q, want captured stderr", got.Stderr)
+	}
+	if strings.Contains(got.Stderr, syntheticSecretForRedactionTest()) {
+		t.Fatalf("stderr leaked secret: %q", got.Stderr)
+	}
+	if !strings.Contains(got.Suggestion, "OpenAI") {
+		t.Fatalf("suggestion = %q, want OpenAI vendor attribution", got.Suggestion)
+	}
+	if strings.Contains(string(host.messageBuf[0].Data), "originalPromptId") {
+		t.Fatalf("crash report exposed originalPromptId: %s", string(host.messageBuf[0].Data))
+	}
+}
+
+func TestSessionHost_MonitorRapidExitCrashRecoveryFailsWithReport(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+	defer host.Stop()
+
+	done := make(chan string, 1)
+	host.config.OnPromptComplete = func(stopReason string, promptErr error) {
+		if promptErr == nil {
+			t.Errorf("promptErr = nil, want rapid-exit error")
+		}
+		done <- stopReason
+	}
+
+	cmd := exec.Command("sh", "-c", "exit 1")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start command: %v", err)
+	}
+	process := &AgentProcess{
+		agentType: "openai-codex",
+		cmd:       cmd,
+		startTime: time.Now(),
+		waitDone:  make(chan struct{}),
+	}
+	process.SetRecoveryNotify(func(stopReason string, promptErr error) {
+		host.notifyPromptComplete(stopReason, promptErr)
+	})
+
+	host.mu.Lock()
+	host.process = process
+	host.setStatusLocked(HostReady)
+	host.agentType = "openai-codex"
+	host.setSessionIDLocked("acp-session-1")
+	host.crashRecoveryInProgress = true
+	host.crashAgentType = "openai-codex"
+	host.crashStderr = "write_stdin failed: stdin is closed\n" + syntheticOpenAIKeyEnvLine()
+	host.mu.Unlock()
+
+	host.monitorProcessExit(process, "openai-codex", nil, nil)
+
+	select {
+	case stopReason := <-done:
+		if stopReason != fatalErrorStopReason {
+			t.Fatalf("stopReason = %q, want %s", stopReason, fatalErrorStopReason)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for prompt completion callback")
+	}
+
+	host.bufMu.RLock()
+	defer host.bufMu.RUnlock()
+	if len(host.messageBuf) == 0 {
+		t.Fatal("message buffer empty, want crash report/status")
+	}
+	var report AgentCrashReportMessage
+	foundReport := false
+	for _, msg := range host.messageBuf {
+		if err := json.Unmarshal(msg.Data, &report); err == nil && report.Type == MsgAgentCrashReport {
+			foundReport = true
+			break
+		}
+	}
+	if !foundReport {
+		t.Fatalf("crash report not broadcast; buffered messages = %d", len(host.messageBuf))
+	}
+	if report.Recovered {
+		t.Fatal("recovered = true, want false for rapid exit")
+	}
+	if strings.Contains(report.Stderr, syntheticSecretForRedactionTest()) {
+		t.Fatalf("crash report leaked secret: %q", report.Stderr)
+	}
+}
+
 func TestSessionHost_ViewerDisconnectDoesNotStopAgent(t *testing.T) {
 	t.Parallel()
 
@@ -854,7 +1862,7 @@ func TestSessionHost_CancelPromptFromControlPlane_ForwardsSessionCancel(t *testi
 	}
 
 	got := strings.TrimSpace(stdin.String())
-	want := `{"jsonrpc":"2.0","method":"session/cancel","params":{}}`
+	want := `{"jsonrpc":"2.0","method":"session/cancel","params":{"sessionId":"test-session"}}`
 	if got != want {
 		t.Fatalf("forwarded cancel = %q, want %q", got, want)
 	}
@@ -863,11 +1871,166 @@ func TestSessionHost_CancelPromptFromControlPlane_ForwardsSessionCancel(t *testi
 	process := host.process
 	intentionalStop := host.intentionalPromptCancelProcessStop
 	host.mu.RUnlock()
-	if process == nil || !process.stopped {
+	agentProc, ok := process.(*AgentProcess)
+	if process == nil || !ok || !agentProc.stopped {
 		t.Fatal("expected control-plane cancel to stop the agent process")
 	}
 	if !intentionalStop {
 		t.Fatal("expected control-plane cancel to mark process stop as intentional")
+	}
+}
+
+func TestSessionHost_MonitorIntentionalPromptCancelDoesNotConsumeRestartBudget(t *testing.T) {
+	t.Parallel()
+
+	process := newExitedAgentProcess(t, "claude-code")
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			SessionID:          "test-session",
+			WorkspaceID:        "test-workspace",
+			MaxRestartAttempts: 1,
+			ContainerResolver:  func() (string, error) { return "", errors.New("container unavailable") },
+		},
+		MessageBufferSize: 100,
+		ViewerSendBuffer:  32,
+	})
+	defer host.Stop()
+
+	host.mu.Lock()
+	host.process = process
+	host.setStatusLocked(HostReady)
+	host.agentType = "claude-code"
+	host.setSessionIDLocked("acp-session-1")
+	host.restartCount = 1
+	host.intentionalPromptCancelProcessStop = true
+	host.mu.Unlock()
+
+	host.monitorProcessExit(process, "claude-code", nil, nil)
+
+	host.mu.RLock()
+	restartCount := host.restartCount
+	statusErr := host.statusErr
+	host.mu.RUnlock()
+
+	if restartCount != 1 {
+		t.Fatalf("restartCount = %d, want 1 after intentional prompt cancel", restartCount)
+	}
+	if strings.Contains(statusErr, "could not be restarted") {
+		t.Fatalf("statusErr = %q, expected restart attempt rather than max-restarts failure", statusErr)
+	}
+	if !strings.Contains(statusErr, "container unavailable") {
+		t.Fatalf("statusErr = %q, expected restart attempt failure from container resolver", statusErr)
+	}
+}
+
+func TestSessionHost_MonitorIntentionalPromptCancelReportsIdleAfterSuccessfulRestart(t *testing.T) {
+	recorder := newActivityRecorder(t)
+
+	host := newRecoveryTestHost(t, time.Second)
+	defer host.Stop()
+	host.config.ProjectID = "project-1"
+	host.config.NodeID = "node-1"
+	host.config.ControlPlaneURL = recorder.server.URL
+	host.config.CallbackToken = "token"
+	host.config.HTTPClient = recorder.server.Client()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CODEX_HOME", "")
+	host.config.ContainerResolver = func() (string, error) { return "", nil }
+	var starts atomic.Int32
+	host.config.StartProcess = func(*agentStartup) (agentProcess, error) {
+		starts.Add(1)
+		proc, reader, writer := newFakeAgentProcess(time.Now(), true)
+		serveRecoveryACP(t, reader, writer)
+		return proc, nil
+	}
+
+	oldProc, _, _ := newFakeAgentProcess(time.Now().Add(-10*time.Second), false)
+	host.mu.Lock()
+	host.process = oldProc
+	host.setStatusLocked(HostReady)
+	host.agentType = "claude-code"
+	host.setSessionIDLocked("acp-session-1")
+	host.agentSupportsLoadSession = true
+	host.intentionalPromptCancelProcessStop = true
+	host.mu.Unlock()
+	close(oldProc.waitCh)
+
+	host.monitorProcessExit(
+		oldProc,
+		"claude-code",
+		&agentCredential{credentialKind: "api-key"},
+		nil,
+	)
+
+	waitFor(t, 250*time.Millisecond, func() bool {
+		return countActivity(&recorder.mu, &recorder.activities, "idle") == 1
+	})
+	if starts.Load() != 1 {
+		t.Fatalf("restart count = %d, want 1", starts.Load())
+	}
+	if host.Status() != HostReady {
+		t.Fatalf("status = %s, want %s", host.Status(), HostReady)
+	}
+	if countActivity(&recorder.mu, &recorder.activities, "recovering") != 1 {
+		t.Fatalf("activities = %v, want one recovering report before idle", snapshotActivities(&recorder.mu, &recorder.activities))
+	}
+}
+
+func TestSessionHost_MonitorUnexpectedExitConsumesRestartBudget(t *testing.T) {
+	t.Parallel()
+
+	process := newExitedAgentProcess(t, "claude-code")
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			SessionID:          "test-session",
+			WorkspaceID:        "test-workspace",
+			MaxRestartAttempts: 1,
+		},
+		MessageBufferSize: 100,
+		ViewerSendBuffer:  32,
+	})
+	defer host.Stop()
+
+	host.mu.Lock()
+	host.process = process
+	host.setStatusLocked(HostReady)
+	host.agentType = "claude-code"
+	host.setSessionIDLocked("acp-session-1")
+	host.restartCount = 1
+	host.mu.Unlock()
+
+	host.monitorProcessExit(process, "claude-code", nil, nil)
+
+	host.mu.RLock()
+	restartCount := host.restartCount
+	status := host.status
+	statusErr := host.statusErr
+	host.mu.RUnlock()
+
+	if restartCount != 2 {
+		t.Fatalf("restartCount = %d, want 2 after unexpected exit", restartCount)
+	}
+	if status != HostError {
+		t.Fatalf("status = %s, want %s", status, HostError)
+	}
+	if !strings.Contains(statusErr, "could not be restarted") {
+		t.Fatalf("statusErr = %q, expected max-restarts failure", statusErr)
+	}
+}
+
+func newExitedAgentProcess(t *testing.T, agentType string) *AgentProcess {
+	t.Helper()
+
+	cmd := exec.Command("sh", "-c", "exit 0")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start command: %v", err)
+	}
+
+	return &AgentProcess{
+		agentType: agentType,
+		cmd:       cmd,
+		startTime: time.Now().Add(-10 * time.Second),
+		waitDone:  make(chan struct{}),
 	}
 }
 
@@ -950,8 +2113,8 @@ func TestSessionHost_Suspend(t *testing.T) {
 	// Set up some state to verify it's preserved
 	host.mu.Lock()
 	host.agentType = "claude-code"
-	host.sessionID = "acp-session-xyz"
-	host.status = HostReady
+	host.setSessionIDLocked("acp-session-xyz")
+	host.setStatusLocked(HostReady)
 	host.mu.Unlock()
 
 	acpSessionID, agentType := host.Suspend()
@@ -1416,88 +2579,6 @@ func TestSessionUpdate_EmptyUpdate_NoEnqueue(t *testing.T) {
 	}
 }
 
-func TestSessionHost_CancelPrompt_ForceStopsAfterGracePeriod(t *testing.T) {
-	t.Parallel()
-
-	host := NewSessionHost(SessionHostConfig{
-		GatewayConfig: GatewayConfig{
-			SessionID:               "test-session",
-			WorkspaceID:             "test-workspace",
-			PromptCancelGracePeriod: 10 * time.Millisecond,
-		},
-		MessageBufferSize: 100,
-		ViewerSendBuffer:  32,
-	})
-	defer host.Stop()
-
-	host.mu.Lock()
-	host.status = HostPrompting
-	host.agentType = "claude-code"
-	host.mu.Unlock()
-
-	host.promptMu.Lock()
-	host.promptInFlight = true
-	host.promptMu.Unlock()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	host.promptCancelMu.Lock()
-	host.promptCancel = cancel
-	host.activePromptID = 42
-	host.promptCancelMu.Unlock()
-
-	host.CancelPrompt()
-
-	select {
-	case <-ctx.Done():
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("expected prompt context to be cancelled")
-	}
-
-	deadline := time.Now().Add(1 * time.Second)
-	for host.Status() != HostError {
-		if time.Now().After(deadline) {
-			t.Fatal("expected host to transition to error after cancel grace elapsed")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	host.mu.RLock()
-	statusErr := host.statusErr
-	host.mu.RUnlock()
-	if !strings.Contains(statusErr, "Prompt cancel grace elapsed") {
-		t.Fatalf("statusErr = %q, expected cancel grace reason", statusErr)
-	}
-
-	host.promptCancelMu.Lock()
-	if host.activePromptID != 0 {
-		t.Fatalf("activePromptID = %d, want 0", host.activePromptID)
-	}
-	if host.promptCancel != nil {
-		t.Fatal("promptCancel should be cleared after force-stop")
-	}
-	host.promptCancelMu.Unlock()
-
-	host.promptMu.Lock()
-	if host.promptInFlight {
-		t.Fatal("promptInFlight should be false after force-stop")
-	}
-	host.promptMu.Unlock()
-
-	bufferDeadline := time.Now().Add(500 * time.Millisecond)
-	for {
-		host.bufMu.RLock()
-		buffered := len(host.messageBuf)
-		host.bufMu.RUnlock()
-		if buffered >= 2 {
-			break
-		}
-		if time.Now().After(bufferDeadline) {
-			t.Fatalf("expected prompt_done + error status messages, buffered=%d", buffered)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-}
-
 func TestHandlePrompt_InjectsSyntheticUserMessage(t *testing.T) {
 	t.Parallel()
 
@@ -1534,8 +2615,8 @@ func TestHandlePrompt_InjectsSyntheticUserMessage(t *testing.T) {
 	// Set up host state so HandlePrompt passes the nil checks.
 	host.mu.Lock()
 	host.acpConn = acpConn
-	host.sessionID = "acp-session-123"
-	host.status = HostReady
+	host.setSessionIDLocked("acp-session-123")
+	host.setStatusLocked(HostReady)
 	host.mu.Unlock()
 
 	// Build a prompt request payload
@@ -1548,7 +2629,7 @@ func TestHandlePrompt_InjectsSyntheticUserMessage(t *testing.T) {
 	reqID, _ := json.Marshal(42)
 
 	// HandlePrompt is blocking but will return quickly because Prompt() fails.
-	host.HandlePrompt(context.Background(), reqID, promptParams, "viewer-1")
+	host.HandlePrompt(context.Background(), reqID, promptParams, "viewer-1", false)
 
 	// Verify: the replay buffer should contain the synthetic user_message_chunk.
 	host.bufMu.RLock()
@@ -1613,6 +2694,66 @@ func TestHandlePrompt_InjectsSyntheticUserMessage(t *testing.T) {
 	}
 }
 
+// A browser viewer prompt (trustedSource=false) must NOT be able to mark its own
+// content origin=system via the ACP _meta marker — the marker is stripped so the
+// reported message has an empty Origin. Only the SAM control-plane initial prompt
+// (trustedSource=true) may set origin=system. This closes the evasion where a
+// viewer could hide their content from search/dedup/topic/attention.
+func TestHandlePrompt_OriginMarkerHonoredOnlyForTrustedSource(t *testing.T) {
+	t.Parallel()
+
+	reportedOrigin := func(trusted bool) string {
+		reporter := &mockMessageReporter{}
+		host := NewSessionHost(SessionHostConfig{
+			GatewayConfig: GatewayConfig{
+				SessionID:       "test-session",
+				WorkspaceID:     "test-workspace",
+				MessageReporter: reporter,
+			},
+			MessageBufferSize: 100,
+			ViewerSendBuffer:  32,
+		})
+		defer host.Stop()
+
+		agentReader, clientWriter := io.Pipe()
+		clientReader, agentWriter := io.Pipe()
+		agentWriter.Close()
+		agentReader.Close()
+		acpConn := acpsdk.NewClientSideConnection(&sessionHostClient{host: host}, clientWriter, clientReader)
+
+		host.mu.Lock()
+		host.acpConn = acpConn
+		host.setSessionIDLocked("acp-session-origin")
+		host.setStatusLocked(HostReady)
+		host.mu.Unlock()
+
+		// A prompt block carrying the SAM system-origin marker in _meta.
+		promptParams, _ := json.Marshal(map[string]any{
+			"messageId": "origin-msg-001",
+			"prompt": []map[string]any{
+				{"type": "text", "text": "sneaky content", "_meta": map[string]any{MetaOriginKey: OriginSystem}},
+			},
+		})
+		reqID, _ := json.Marshal(77)
+		host.HandlePrompt(context.Background(), reqID, promptParams, "viewer-1", trusted)
+
+		for _, m := range reporter.Messages() {
+			if m.MessageID == "origin-msg-001" && m.Role == "user" {
+				return m.Origin
+			}
+		}
+		t.Fatalf("reporter missing user message (trusted=%v)", trusted)
+		return ""
+	}
+
+	if got := reportedOrigin(false); got != "" {
+		t.Fatalf("untrusted viewer prompt: Origin = %q, want empty (marker must be stripped)", got)
+	}
+	if got := reportedOrigin(true); got != OriginSystem {
+		t.Fatalf("trusted control-plane prompt: Origin = %q, want %q", got, OriginSystem)
+	}
+}
+
 func TestHandlePrompt_MultiBlockPrompt_InjectsAllBlocks(t *testing.T) {
 	t.Parallel()
 
@@ -1642,8 +2783,8 @@ func TestHandlePrompt_MultiBlockPrompt_InjectsAllBlocks(t *testing.T) {
 
 	host.mu.Lock()
 	host.acpConn = acpConn
-	host.sessionID = "acp-session-456"
-	host.status = HostReady
+	host.setSessionIDLocked("acp-session-456")
+	host.setStatusLocked(HostReady)
 	host.mu.Unlock()
 
 	promptParams, _ := json.Marshal(map[string]interface{}{
@@ -1654,7 +2795,7 @@ func TestHandlePrompt_MultiBlockPrompt_InjectsAllBlocks(t *testing.T) {
 	})
 	reqID, _ := json.Marshal(43)
 
-	host.HandlePrompt(context.Background(), reqID, promptParams, "viewer-1")
+	host.HandlePrompt(context.Background(), reqID, promptParams, "viewer-1", false)
 
 	// Both text blocks should be reported.
 	msgs := reporter.Messages()
@@ -1703,8 +2844,8 @@ func TestHandlePrompt_NoReporter_StillBuffers(t *testing.T) {
 
 	host.mu.Lock()
 	host.acpConn = acpConn
-	host.sessionID = "acp-session-789"
-	host.status = HostReady
+	host.setSessionIDLocked("acp-session-789")
+	host.setStatusLocked(HostReady)
 	host.mu.Unlock()
 
 	promptParams, _ := json.Marshal(map[string]interface{}{
@@ -1714,7 +2855,7 @@ func TestHandlePrompt_NoReporter_StillBuffers(t *testing.T) {
 	})
 	reqID, _ := json.Marshal(44)
 
-	host.HandlePrompt(context.Background(), reqID, promptParams, "viewer-1")
+	host.HandlePrompt(context.Background(), reqID, promptParams, "viewer-1", false)
 
 	// Buffer should have the synthetic user message even without a reporter.
 	host.bufMu.RLock()
@@ -1904,38 +3045,83 @@ func TestCredentialMetadataTracking(t *testing.T) {
 	host.Stop()
 }
 
-func TestInjectAgentCredential_UserPassthroughProxy(t *testing.T) {
-	t.Parallel()
-
+func newProxyCredentialTestHost(t *testing.T, callbackToken string) *SessionHost {
+	t.Helper()
 	host := NewSessionHost(SessionHostConfig{
 		GatewayConfig: GatewayConfig{
 			WorkspaceID:   "test-workspace",
-			CallbackToken: "workspace-token",
+			CallbackToken: callbackToken,
 		},
 	})
-	defer host.Stop()
+	t.Cleanup(host.Stop)
+	return host
+}
 
-	cred := &agentCredential{
-		credential: "sk-user",
+func proxyCredentialForTest(credential, provider, baseURL, model, apiKeySource string) *agentCredential {
+	return &agentCredential{
+		credential: credential,
 		inferenceConfig: &inferenceConfig{
-			Provider:     "anthropic-passthrough",
-			BaseURL:      "https://api.example.com/ai/{wstoken}/v1",
-			Model:        "claude-sonnet",
-			APIKeySource: "user-credential",
+			Provider:     provider,
+			BaseURL:      baseURL,
+			Model:        model,
+			APIKeySource: apiKeySource,
 		},
 	}
+}
+
+func injectProxyCredentialForTest(
+	t *testing.T,
+	host *SessionHost,
+	agentType string,
+	cred *agentCredential,
+) ([]string, *agentSettingsPayload) {
+	t.Helper()
 	envVars, settings, err := host.injectAgentCredential(
 		context.Background(),
 		"container-id",
-		"claude-code",
+		agentType,
 		cred,
 		nil,
-		getAgentCommandInfo("claude-code", "api-key"),
+		getAgentCommandInfo(agentType, "api-key"),
 		nil,
 	)
 	if err != nil {
 		t.Fatalf("injectAgentCredential returned error: %v", err)
 	}
+	return envVars, settings
+}
+
+func injectProxyCredentialErrForTest(
+	t *testing.T,
+	host *SessionHost,
+	agentType string,
+	cred *agentCredential,
+) error {
+	t.Helper()
+	_, _, err := host.injectAgentCredential(
+		context.Background(),
+		"container-id",
+		agentType,
+		cred,
+		nil,
+		getAgentCommandInfo(agentType, "api-key"),
+		nil,
+	)
+	return err
+}
+
+func TestInjectAgentCredential_UserPassthroughProxy(t *testing.T) {
+	t.Parallel()
+
+	host := newProxyCredentialTestHost(t, "workspace-token")
+	cred := proxyCredentialForTest(
+		"sk-user",
+		"anthropic-passthrough",
+		"https://api.example.com/ai/{wstoken}/v1",
+		"claude-sonnet",
+		"user-credential",
+	)
+	envVars, settings := injectProxyCredentialForTest(t, host, "claude-code", cred)
 	if settings != nil {
 		t.Fatalf("settings = %#v, want nil", settings)
 	}
@@ -1944,80 +3130,78 @@ func TestInjectAgentCredential_UserPassthroughProxy(t *testing.T) {
 	assertEnvEntry(t, envVars, "ANTHROPIC_MODEL=claude-sonnet")
 }
 
-func TestInjectAgentCredential_PlatformOpenCodeConfiguresSettings(t *testing.T) {
+func TestInjectAgentCredential_CallbackTokenPassthroughProxyReplacesWorkspaceToken(t *testing.T) {
 	t.Parallel()
 
-	host := NewSessionHost(SessionHostConfig{
-		GatewayConfig: GatewayConfig{
-			WorkspaceID:   "test-workspace",
-			CallbackToken: "workspace-token",
-		},
-	})
-	defer host.Stop()
-
-	cred := &agentCredential{
-		inferenceConfig: &inferenceConfig{
-			Provider:     "openai-proxy",
-			BaseURL:      "https://api.example.com/ai/v1",
-			Model:        "@cf/meta/llama-4-scout",
-			APIKeySource: "callback-token",
-		},
-	}
-	envVars, settings, err := host.injectAgentCredential(
-		context.Background(),
-		"container-id",
-		"opencode",
-		cred,
-		nil,
-		getAgentCommandInfo("opencode", "api-key"),
-		nil,
+	host := newProxyCredentialTestHost(t, "workspace-token")
+	cred := proxyCredentialForTest(
+		"__sam_proxy__",
+		"openai-passthrough",
+		"https://api.example.com/ai/proxy/{wstoken}/openai/v1",
+		"gpt-4.1",
+		"callback-token",
 	)
-	if err != nil {
-		t.Fatalf("injectAgentCredential returned error: %v", err)
+	envVars, settings := injectProxyCredentialForTest(t, host, "openai-codex", cred)
+	if settings != nil {
+		t.Fatalf("settings = %#v, want nil", settings)
 	}
-	assertEnvEntry(t, envVars, "OPENCODE_PLATFORM_BASE_URL=https://api.example.com/ai/v1")
-	assertEnvEntry(t, envVars, "OPENCODE_PLATFORM_API_KEY=workspace-token")
-	if settings == nil {
-		t.Fatal("settings is nil, want OpenCode platform settings")
-	}
-	if settings.OpencodeProvider != "platform" {
-		t.Fatalf("OpencodeProvider = %q, want platform", settings.OpencodeProvider)
-	}
-	if settings.Model != "meta/llama-4-scout" {
-		t.Fatalf("Model = %q, want stripped Workers AI model", settings.Model)
+	assertEnvEntry(t, envVars, "OPENAI_BASE_URL=https://api.example.com/ai/proxy/workspace-token/openai/v1")
+	assertEnvEntry(t, envVars, "OPENAI_API_KEY=workspace-token")
+	assertEnvEntry(t, envVars, "OPENAI_MODEL=gpt-4.1")
+	for _, entry := range envVars {
+		if strings.Contains(entry, "{wstoken}") {
+			t.Fatalf("env var still contains placeholder: %q", entry)
+		}
+		if strings.Contains(entry, "__sam_proxy__") {
+			t.Fatalf("env var leaked proxy sentinel as credential: %q", entry)
+		}
 	}
 }
 
 func TestInjectAgentCredential_ProxyRequiresCallbackToken(t *testing.T) {
 	t.Parallel()
 
-	host := NewSessionHost(SessionHostConfig{
-		GatewayConfig: GatewayConfig{WorkspaceID: "test-workspace"},
-	})
-	defer host.Stop()
-
-	cred := &agentCredential{
-		credential: "sk-user",
-		inferenceConfig: &inferenceConfig{
-			Provider:     "openai-passthrough",
-			BaseURL:      "https://api.example.com/ai/{wstoken}/v1",
-			APIKeySource: "user-credential",
-		},
-	}
-	_, _, err := host.injectAgentCredential(
-		context.Background(),
-		"container-id",
-		"openai-codex",
-		cred,
-		nil,
-		getAgentCommandInfo("openai-codex", "api-key"),
-		nil,
+	host := newProxyCredentialTestHost(t, "")
+	cred := proxyCredentialForTest(
+		"sk-user",
+		"openai-passthrough",
+		"https://api.example.com/ai/{wstoken}/v1",
+		"",
+		"user-credential",
 	)
+	err := injectProxyCredentialErrForTest(t, host, "openai-codex", cred)
 	if err == nil {
 		t.Fatal("injectAgentCredential returned nil error, want missing CallbackToken error")
 	}
 	if !strings.Contains(err.Error(), "CallbackToken is empty") {
 		t.Fatalf("error = %q, want CallbackToken message", err.Error())
+	}
+}
+
+func TestInjectAgentCredential_OpencodeRejectsInferenceProxy(t *testing.T) {
+	t.Parallel()
+
+	// OpenCode has no proxy descriptor, so any non-nil inferenceConfig (platform
+	// or passthrough proxy) must be a hard error rather than silently degrading
+	// to a plain env-var injection. CallbackToken is set so the failure is the
+	// "not supported" descriptor error, not the missing-token error.
+	host := newProxyCredentialTestHost(t, "workspace-token")
+	cred := proxyCredentialForTest(
+		"sk-user",
+		"opencode-zen",
+		"",
+		"opencode/claude-sonnet-4-6",
+		"callback-token",
+	)
+	err := injectProxyCredentialErrForTest(t, host, "opencode", cred)
+	if err == nil {
+		t.Fatal("injectAgentCredential returned nil error, want unsupported-proxy error")
+	}
+	if !strings.Contains(err.Error(), "not supported") {
+		t.Fatalf("error = %q, want not-supported message", err.Error())
+	}
+	if !strings.Contains(err.Error(), "opencode") {
+		t.Fatalf("error = %q, want agent name in message", err.Error())
 	}
 }
 
@@ -2063,7 +3247,7 @@ func TestSessionHost_SelectAgent_SkipsRestartWhenSameAgentRunning(t *testing.T) 
 	// Simulate an agent that is already running with status Ready.
 	host.mu.Lock()
 	host.agentType = "mistral-vibe"
-	host.status = HostReady
+	host.setStatusLocked(HostReady)
 	host.process = &AgentProcess{agentType: "mistral-vibe"} // stub process
 	host.mu.Unlock()
 
@@ -2104,7 +3288,7 @@ func TestSessionHost_SelectAgent_SkipsRestartWhenSameAgentStarting(t *testing.T)
 	// Simulate an agent that is starting (HostStarting with process set).
 	host.mu.Lock()
 	host.agentType = "mistral-vibe"
-	host.status = HostStarting
+	host.setStatusLocked(HostStarting)
 	host.process = &AgentProcess{agentType: "mistral-vibe"}
 	host.mu.Unlock()
 
@@ -2139,7 +3323,7 @@ func TestSessionHost_SelectAgent_AllowsSwitchToDifferentAgent(t *testing.T) {
 
 	host.mu.Lock()
 	host.agentType = "claude-code"
-	host.status = HostReady
+	host.setStatusLocked(HostReady)
 	host.process = &AgentProcess{agentType: "claude-code", stopped: true} // pre-mark stopped to avoid nil deref
 	host.mu.Unlock()
 
@@ -2160,4 +3344,113 @@ func TestSessionHost_SelectAgent_AllowsSwitchToDifferentAgent(t *testing.T) {
 	}
 
 	host.Stop()
+}
+
+func TestSessionHost_RestoreAgentRequiresPreviousACPContext(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+	defer host.Stop()
+
+	err := host.RestoreAgent(context.Background(), "openai-codex")
+	if err == nil {
+		t.Fatal("RestoreAgent returned nil error without previous ACP context")
+	}
+	if !strings.Contains(err.Error(), "previous ACP session") {
+		t.Fatalf("error = %q, want missing previous ACP session", err.Error())
+	}
+}
+
+func TestFindModelConfigOptionID(t *testing.T) {
+	t.Parallel()
+
+	modelCategory := acpsdk.SessionConfigOptionCategoryModel
+	modeCategory := acpsdk.SessionConfigOptionCategoryMode
+
+	tests := []struct {
+		name    string
+		options []acpsdk.SessionConfigOption
+		want    acpsdk.SessionConfigId
+		wantOK  bool
+	}{
+		{
+			name: "finds model select option",
+			options: []acpsdk.SessionConfigOption{
+				{Select: &acpsdk.SessionConfigOptionSelect{Id: "mode", Category: &modeCategory}},
+				{Select: &acpsdk.SessionConfigOptionSelect{Id: "model", Category: &modelCategory}},
+			},
+			want:   "model",
+			wantOK: true,
+		},
+		{
+			name: "ignores uncategorized select option",
+			options: []acpsdk.SessionConfigOption{
+				{Select: &acpsdk.SessionConfigOptionSelect{Id: "model"}},
+			},
+			wantOK: false,
+		},
+		{
+			name: "ignores boolean model option",
+			options: []acpsdk.SessionConfigOption{
+				{Boolean: &acpsdk.SessionConfigOptionBoolean{Id: "model", Category: &modelCategory}},
+			},
+			wantOK: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, ok := findModelConfigOptionID(tt.options)
+			if ok != tt.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tt.wantOK)
+			}
+			if got != tt.want {
+				t.Fatalf("id = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestInjectAgentCredential_OpenCodeProviderEnvVarOverrides(t *testing.T) {
+	t.Parallel()
+
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{WorkspaceID: "test-workspace"},
+	})
+	defer host.Stop()
+
+	tests := []struct {
+		name     string
+		provider string
+		wantEnv  string
+	}{
+		{name: "default uses opencode env", provider: "", wantEnv: "OPENCODE_API_KEY=sk-test"},
+		{name: "zen uses opencode env", provider: "opencode-zen", wantEnv: "OPENCODE_API_KEY=sk-test"},
+		{name: "go uses opencode env", provider: "opencode-go", wantEnv: "OPENCODE_API_KEY=sk-test"},
+		{name: "custom uses opencode env", provider: "custom", wantEnv: "OPENCODE_API_KEY=sk-test"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			envVars, settings, err := host.injectAgentCredential(
+				context.Background(),
+				"container-id",
+				"opencode",
+				&agentCredential{credential: "sk-test"},
+				&agentSettingsPayload{OpencodeProvider: tt.provider},
+				getAgentCommandInfo("opencode", "api-key"),
+				nil,
+			)
+			if err != nil {
+				t.Fatalf("injectAgentCredential returned error: %v", err)
+			}
+			if settings == nil || settings.OpencodeProvider != tt.provider {
+				t.Fatalf("settings provider = %#v, want %q", settings, tt.provider)
+			}
+			assertEnvEntry(t, envVars, tt.wantEnv)
+		})
+	}
 }

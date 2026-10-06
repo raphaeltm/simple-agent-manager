@@ -1,5 +1,12 @@
 # Credential Validity Quota Bypass
 
+> **Reconciliation 2026-09-30:** still open; `resolveCredentialSource` still treats any active
+> row as a user credential (`apps/api/src/services/provider-credentials.ts:573–636`). Premise
+> changed: with a user credential present, provisioning now fails on a bad token instead of
+> falling back to the platform credential. Only capacity-pool candidate chains might still reach
+> it (the quota check reads only `candidates[0]`, `placement-resolver.ts:390`). Verify before
+> fixing or closing.
+
 **Created**: 2026-04-12
 **Context**: Discovered by task-completion-validator during PR #682 review
 

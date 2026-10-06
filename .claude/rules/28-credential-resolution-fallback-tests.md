@@ -13,9 +13,26 @@ This rule applies whenever code:
 
 PR #753 introduced per-project credential overrides with 3-tier resolution. The initial security review passed because the happy path (project-row-found, no-project-falls-through-to-user) was tested. A post-merge re-audit found 11 additional findings — most severely, a `CodexRefreshLock` stale-token branch that returned the live rotating refresh_token to any same-user caller who submitted a non-matching value.
 
-The class of bug is **silent acceptance at credential trust boundaries.** Every finding was a path where the code accepted something it should have rejected, with no user-visible signal. See `docs/notes/2026-04-18-project-credentials-security-hardening-postmortem.md`.
+The class of bug is **silent acceptance at credential trust boundaries.** Every finding was a path where the code accepted something it should have rejected, with no user-visible signal. See the retained incident lesson in this rule.
 
 ## Required Behavioral Tests
+
+### 0. Provider / Dialect Identity Consistency
+
+When a resolved consumer and the decrypted credential secret both name a
+downstream provider, dialect, audience, or equivalent identity, tests MUST assert
+that disagreement is rejected before the secret leaves the credential boundary.
+
+Examples:
+
+- A `compute:hetzner` consumer resolving a `cloud-provider` secret with
+  `provider: "scaleway"` MUST throw before provider client construction.
+- An agent/provider-dialect configuration that resolves to an incompatible
+  secret dialect MUST throw before env vars, proxy config, or auth files are
+  assembled.
+
+The error should include both identities so the bad row is diagnosable without
+logging the secret value.
 
 ### 1. Fallback Branch Coverage
 
@@ -65,21 +82,40 @@ Credential rotation endpoints (OAuth refresh, key rotation) MUST have:
 
 4. **Defence-in-depth absent.** The query-layer filter (`WHERE userId = ?`) is one line of defence; the middleware MUST also check `row.userId === userId` post-query. An ORM bug, a refactor typo, or a stub in a test harness must not be able to return the wrong row without tripping an assertion.
 
+5. **A DB mock whose `.where()` ignores its arguments cannot prove a WHERE-clause guard.** When the
+   protection under test IS a query predicate (`AND user_id = ?`, `AND project_id = ?`), a chainable
+   stub like `where: vi.fn(() => chain)` returning canned rows evaluates nothing — the test passes
+   identically with the predicate deleted. This is the query-layer twin of the source-contract ban:
+   it asserts the code was *written*, not that it *filters*.
+
+   Ownership/scoping guards expressed as SQL predicates MUST be tested against a real SQL engine —
+   use `createSqliteD1` + `createSchemaTables` (`apps/api/tests/helpers/sqlite-d1.ts`), which builds
+   the in-memory schema from the drizzle definitions so it cannot drift. Assert on rows read back
+   from the database, not on mock call arguments.
+
+   **Pair every attack case with an owner-path control.** An attack assertion that says "nothing was
+   torn down" is also satisfied by teardown being broken outright, so the same fixture must prove the
+   legitimate owner DOES get the action. Then verify the pair is discriminating by temporarily
+   deleting the guard: the attack case must fail and the control must still pass.
+
 ## Quick Compliance Check
 
 Before merging any PR that touches credential resolution, rotation, or comparison:
 
 - [ ] Every fallback branch has a behavioral test (active-scoped, inactive-scoped, no-scoped, no-row-at-all)
+- [ ] Provider/dialect identity mismatches are rejected before a credential is assembled or a downstream client is constructed
 - [ ] Stale/mismatch responses are asserted to OMIT the rotating credential
 - [ ] Rotation validation defaults to a conservative allowlist (not disabled)
 - [ ] Rotation validation BLOCKS on failure, not warns
 - [ ] Rate limit on rotation endpoints uses an atomic primitive (DO storage, DB lock), not KV
 - [ ] At least one test returns a mismatched-user row from the DB stub and asserts the middleware still throws 404 (defence-in-depth)
 - [ ] No source-contract tests on auth middleware
+- [ ] Guards that are SQL predicates are tested against a real SQL engine, not a `.where()`-ignoring mock
+- [ ] Every attack case has an owner-path control, and the pair was verified discriminating by deleting the guard
 
 ## References
 
-- Post-mortem: `docs/notes/2026-04-18-project-credentials-security-hardening-postmortem.md`
+- Post-mortem: the retained incident lesson in this rule
 - Rule 02: source-contract tests banned
 - Rule 11: identity validation at system boundaries
 - Rule 25: review merge gate — CRITICAL/HIGH findings block merge

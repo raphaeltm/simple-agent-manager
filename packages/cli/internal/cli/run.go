@@ -6,7 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
+	"net/http"
+	"strconv"
 	"strings"
+	"time"
 )
 
 func Run(ctx context.Context, runtime Runtime) int {
@@ -24,57 +28,227 @@ func Run(ctx context.Context, runtime Runtime) int {
 	switch namespace {
 	case "auth":
 		return runAuth(ctx, runtime, parsed, args)
+	case "projects":
+		return runListProjects(ctx, runtime, parsed)
+	case "project":
+		return runProjectCommand(ctx, runtime, parsed, args)
+	case "status":
+		return runStatus(ctx, runtime, parsed)
+	case "chat":
+		return runChatCommand(ctx, runtime, parsed, args)
+	case "ideas":
+		return runIdeas(ctx, runtime, parsed)
+	case "library":
+		return runLibrary(ctx, runtime, parsed)
+	case "context":
+		return runContext(ctx, runtime, parsed)
+	case "notifications":
+		return runNotifications(ctx, runtime, parsed)
+	case "triggers":
+		return runTriggers(ctx, runtime, parsed)
+	case "profiles":
+		return runProfiles(ctx, runtime, parsed)
+	case "activity":
+		return runActivity(ctx, runtime, parsed)
+	case "nodes":
+		return runNodes(ctx, runtime, parsed)
+	case "workspace":
+		return runWorkspace(ctx, runtime, parsed, args)
+	// Legacy commands (hidden from help, still functional)
 	case "task":
 		return runTask(ctx, runtime, parsed, args)
 	case "tasks":
 		return runTasks(ctx, runtime, parsed, args)
-	case "chat":
-		return runChat(ctx, runtime, parsed, args)
 	case "runner":
 		return runRunner(ctx, runtime, parsed, args)
 	case "harness":
 		return fail(runtime.Stderr, plannedCommand("sam harness"))
 	default:
-		return fail(runtime.Stderr, fmt.Errorf("unknown command: %s", strings.Join(parsed.Positionals, " ")))
+		return fail(runtime.Stderr, fmt.Errorf("unknown command: %s\nRun `sam --help` for usage", namespace))
 	}
 }
 
-func runAuth(_ context.Context, runtime Runtime, parsed parsedArgs, args []string) int {
+func runAuth(ctx context.Context, runtime Runtime, parsed parsedArgs, args []string) int {
 	if len(args) == 0 {
 		return fail(runtime.Stderr, errors.New("auth requires an action"))
 	}
 	switch args[0] {
 	case "login":
-		return runAuthLogin(runtime, parsed)
+		return runAuthLogin(ctx, runtime, parsed)
 	case "status":
-		return runAuthStatus(runtime, parsed)
+		return runAuthStatus(ctx, runtime, parsed)
 	default:
 		return fail(runtime.Stderr, fmt.Errorf("unknown auth action: %s", args[0]))
 	}
 }
 
-func runAuthLogin(runtime Runtime, parsed parsedArgs) int {
-	apiURL := flagValue(parsed.Flags, "api-url")
+func runAuthLogin(ctx context.Context, runtime Runtime, parsed parsedArgs) int {
+	apiURL := resolveLoginAPIURL(runtime, parsed)
+	token := flagValue(parsed.Flags, "token")
+	if token != "" {
+		return runTokenLogin(ctx, runtime, parsed, apiURL, token)
+	}
+
 	cookie, err := readSessionCookie(runtime, parsed)
 	if err != nil {
 		return fail(runtime.Stderr, err)
 	}
-	if apiURL == "" || cookie == "" {
-		return fail(runtime.Stderr, errors.New("auth login requires --api-url and a session cookie"))
+	if cookie != "" {
+		return saveAuthConfig(runtime, parsed, normalizeAPIURL(apiURL), cookie, AuthUser{})
 	}
 
-	config := CLIConfig{APIURL: normalizeAPIURL(apiURL), SessionCookie: cookie}
+	return runDeviceFlow(ctx, runtime, parsed, apiURL)
+}
+
+const defaultAPIURL = "https://api.simple-agent-manager.org"
+
+func resolveLoginAPIURL(runtime Runtime, parsed parsedArgs) string {
+	if apiURL := flagValue(parsed.Flags, "api-url"); apiURL != "" {
+		return apiURL
+	}
+	config, err := LoadConfig(runtime.Env)
+	if err == nil && config != nil {
+		return config.APIURL
+	}
+	if envURL := strings.TrimSpace(runtime.Env.Getenv("SAM_API_URL")); envURL != "" {
+		return envURL
+	}
+	return defaultAPIURL
+}
+
+func runTokenLogin(ctx context.Context, runtime Runtime, parsed parsedArgs, apiURL string, token string) int {
+	response, err := ExchangeAPIToken(ctx, runtime.HTTPClient, apiURL, token)
+	if err != nil {
+		return fail(runtime.Stderr, err)
+	}
+	return saveAuthConfig(runtime, parsed, normalizeAPIURL(apiURL), response.SessionCookie, response.User)
+}
+
+func runDeviceFlow(ctx context.Context, runtime Runtime, parsed parsedArgs, apiURL string) int {
+	code, err := CreateDeviceCode(ctx, runtime.HTTPClient, apiURL)
+	if err != nil {
+		return fail(runtime.Stderr, err)
+	}
+	if code.Interval <= 0 {
+		code.Interval = 5
+	}
+	if code.ExpiresIn <= 0 {
+		code.ExpiresIn = 900
+	}
+
+	fmt.Fprintf(runtime.Stdout, "Open this URL to authorize SAM CLI:\n%s\n\nUser code: %s\n", code.VerificationURIComplete, code.UserCode)
+	tryOpenBrowser(ctx, runtime, code.VerificationURIComplete)
+
+	response, err := pollDeviceToken(ctx, runtime, apiURL, code)
+	if err != nil {
+		return fail(runtime.Stderr, err)
+	}
+	fmt.Fprintln(runtime.Stdout)
+	return saveAuthConfig(runtime, parsed, normalizeAPIURL(apiURL), response.SessionCookie, response.User)
+}
+
+func pollDeviceToken(ctx context.Context, runtime Runtime, apiURL string, code DeviceCodeResponse) (TokenLoginResponse, error) {
+	deadline := time.Now().Add(time.Duration(code.ExpiresIn) * time.Second)
+	interval := time.Duration(code.Interval) * time.Second
+	for {
+		response, err := ExchangeDeviceCode(ctx, runtime.HTTPClient, apiURL, code.DeviceCode)
+		if err == nil {
+			return response, nil
+		}
+		var apiErr APIError
+		if !errors.As(err, &apiErr) {
+			return TokenLoginResponse{}, err
+		}
+		switch {
+		case apiErr.Status == http.StatusPreconditionRequired || apiErr.Code == "authorization_pending":
+			fmt.Fprint(runtime.Stdout, ".")
+		case apiErr.Status == http.StatusTooManyRequests || apiErr.Code == "slow_down":
+			interval += 5 * time.Second
+			fmt.Fprint(runtime.Stdout, ".")
+		case apiErr.Status == http.StatusGone || apiErr.Code == "expired_token":
+			return TokenLoginResponse{}, errors.New("code expired. Run `sam auth login` again")
+		default:
+			return TokenLoginResponse{}, err
+		}
+		if time.Now().Add(interval).After(deadline) {
+			return TokenLoginResponse{}, errors.New("code expired. Run `sam auth login` again")
+		}
+		if err := sleepContext(ctx, interval); err != nil {
+			return TokenLoginResponse{}, err
+		}
+	}
+}
+
+func sleepContext(ctx context.Context, duration time.Duration) error {
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func tryOpenBrowser(ctx context.Context, runtime Runtime, url string) {
+	commands := browserCommands(runtime.Runner.GOOS(), url)
+	for _, command := range commands {
+		if _, err := runtime.Runner.LookPath(command.name); err != nil {
+			continue
+		}
+		_, _ = runtime.Runner.Command(ctx, command.name, command.args...)
+		return
+	}
+}
+
+type browserCommand struct {
+	name string
+	args []string
+}
+
+func browserCommands(goos string, target string) []browserCommand {
+	switch goos {
+	case "darwin":
+		return []browserCommand{{name: "open", args: []string{target}}}
+	case "windows":
+		return []browserCommand{{name: "rundll32", args: []string{"url.dll,FileProtocolHandler", target}}}
+	default:
+		return []browserCommand{{name: "xdg-open", args: []string{target}}}
+	}
+}
+
+func saveAuthConfig(runtime Runtime, parsed parsedArgs, apiURL string, sessionCookie string, user AuthUser) int {
+	config := CLIConfig{APIURL: normalizeAPIURL(apiURL), SessionCookie: sessionCookie}
 	paths, err := SaveConfig(runtime.Env, config)
 	if err != nil {
 		return fail(runtime.Stderr, err)
 	}
-	text := fmt.Sprintf("Saved SAM CLI auth config to %s", paths.ConfigFile)
-	value := map[string]string{
+	text := "Authenticated"
+	if user.Email != "" || user.Name != "" {
+		text = "Authenticated as " + formatAuthUser(user)
+	}
+	text += fmt.Sprintf("\nSaved SAM CLI auth config to %s", paths.ConfigFile)
+	value := map[string]any{
+		"authenticated": true,
 		"apiUrl":        config.APIURL,
 		"configFile":    paths.ConfigFile,
 		"sessionCookie": redactSecret(config.SessionCookie),
+		"user":          user,
 	}
 	return writeOrFail(runtime, parsed.Globals.JSON, text, value)
+}
+
+func formatAuthUser(user AuthUser) string {
+	if user.Name != "" && user.Email != "" {
+		return fmt.Sprintf("%s <%s>", user.Name, user.Email)
+	}
+	if user.Email != "" {
+		return user.Email
+	}
+	if user.Name != "" {
+		return user.Name
+	}
+	return "user"
 }
 
 func readSessionCookie(runtime Runtime, parsed parsedArgs) (string, error) {
@@ -92,8 +266,8 @@ func readSessionCookie(runtime Runtime, parsed parsedArgs) (string, error) {
 	return strings.TrimSpace(string(read)), nil
 }
 
-func runAuthStatus(runtime Runtime, parsed parsedArgs) int {
-	config, err := LoadConfig(runtime.Env)
+func runAuthStatus(ctx context.Context, runtime Runtime, parsed parsedArgs) int {
+	config, source, err := resolveAuthenticatedConfig(ctx, runtime)
 	if err != nil {
 		return fail(runtime.Stderr, err)
 	}
@@ -112,6 +286,7 @@ func runAuthStatus(runtime Runtime, parsed parsedArgs) int {
 		"Authenticated",
 		"apiUrl: " + config.APIURL,
 		"sessionCookie: " + redactSecret(config.SessionCookie),
+		"source: " + source,
 		"configFile: " + paths.ConfigFile,
 	}, "\n")
 	value := map[string]any{
@@ -119,6 +294,7 @@ func runAuthStatus(runtime Runtime, parsed parsedArgs) int {
 		"apiUrl":        config.APIURL,
 		"configFile":    paths.ConfigFile,
 		"sessionCookie": redactSecret(config.SessionCookie),
+		"source":        source,
 	}
 	return writeOrFail(runtime, parsed.Globals.JSON, text, value)
 }
@@ -158,7 +334,7 @@ func runTaskStatus(ctx context.Context, runtime Runtime, parsed parsedArgs, proj
 	if len(args) != 1 {
 		return fail(runtime.Stderr, errors.New("task status requires <taskId>"))
 	}
-	client, err := authenticatedClient(runtime)
+	client, err := authenticatedClient(ctx, runtime)
 	if err != nil {
 		return fail(runtime.Stderr, err)
 	}
@@ -191,32 +367,29 @@ func runTasks(ctx context.Context, runtime Runtime, parsed parsedArgs, args []st
 	return submitTask(ctx, runtime, parsed, projectID, message, options)
 }
 
-func runChat(ctx context.Context, runtime Runtime, parsed parsedArgs, args []string) int {
-	projectID, rest, err := projectFromArgs(parsed.Globals, args, "chat")
-	if err != nil {
-		return fail(runtime.Stderr, err)
+func runProjectCommand(ctx context.Context, runtime Runtime, parsed parsedArgs, args []string) int {
+	if len(args) == 0 {
+		return runProjectDetail(ctx, runtime, parsed)
 	}
-	message := commandMessage(parsed, rest)
-	if strings.TrimSpace(message) == "" {
-		return fail(runtime.Stderr, errors.New("chat requires <message> or --prompt"))
+	switch args[0] {
+	case "use":
+		return runProjectUse(ctx, runtime, parsed, args[1:])
+	default:
+		return fail(runtime.Stderr, fmt.Errorf("unknown project action: %s", args[0]))
 	}
-	client, err := authenticatedClient(runtime)
-	if err != nil {
-		return fail(runtime.Stderr, err)
+}
+
+func runChatCommand(ctx context.Context, runtime Runtime, parsed parsedArgs, args []string) int {
+	if len(args) == 0 {
+		return runChatList(ctx, runtime, parsed)
 	}
-	if sessionID := flagValue(parsed.Flags, "session"); sessionID != "" {
-		response, err := client.SendPrompt(ctx, projectID, sessionID, message)
-		if err != nil {
-			return fail(runtime.Stderr, err)
-		}
-		return writeOrFail(runtime, parsed.Globals.JSON, "Prompt sent to session "+sessionID, response)
+	switch args[0] {
+	case "new":
+		return runChatNew(ctx, runtime, parsed, args[1:])
+	default:
+		// Treat the first arg as a session ID for chat view
+		return runChatView(ctx, runtime, parsed, args[0])
 	}
-	options, err := parseSubmitOptions(parsed)
-	if err != nil {
-		return fail(runtime.Stderr, err)
-	}
-	options.Mode = "conversation"
-	return submitTask(ctx, runtime, parsed, projectID, message, options)
 }
 
 func commandMessage(parsed parsedArgs, args []string) string {
@@ -245,10 +418,15 @@ func runRunner(ctx context.Context, runtime Runtime, parsed parsedArgs, args []s
 }
 
 func submitTask(ctx context.Context, runtime Runtime, parsed parsedArgs, projectID string, message string, options TaskSubmitOptions) int {
-	client, err := authenticatedClient(runtime)
+	client, err := authenticatedClient(ctx, runtime)
 	if err != nil {
 		return fail(runtime.Stderr, err)
 	}
+	return submitTaskWithClient(ctx, runtime, parsed, client, projectID, message, options)
+}
+
+func submitTaskWithClient(ctx context.Context, runtime Runtime, parsed parsedArgs, client APIClient, projectID string, message string, options TaskSubmitOptions) int {
+	warnDeprecatedVMSize(runtime.Stderr, options)
 	response, err := client.SubmitTask(ctx, projectID, message, options)
 	if err != nil {
 		return fail(runtime.Stderr, err)
@@ -256,9 +434,19 @@ func submitTask(ctx context.Context, runtime Runtime, parsed parsedArgs, project
 	return writeOrFail(runtime, parsed.Globals.JSON, formatSubmitResponse(response), response)
 }
 
+func warnDeprecatedVMSize(stderr io.Writer, options TaskSubmitOptions) {
+	if options.VMSize != "" {
+		fmt.Fprintln(stderr, "warning: --vm-size is deprecated; prefer --min-vcpu, --min-memory-gb, --min-disk-gb, and --exclusive-node. Legacy tiers are translated by SAM compatibility policy.")
+	}
+}
+
 func parseSubmitOptions(parsed parsedArgs) (TaskSubmitOptions, error) {
 	if flagValue(parsed.Flags, "model") != "" {
 		return TaskSubmitOptions{}, errors.New("--model is reserved, but the current task submit API does not accept a per-dispatch model yet; use --agent-profile for configured model selection")
+	}
+	resource, err := parseResourceRequirementFlags(parsed)
+	if err != nil {
+		return TaskSubmitOptions{}, err
 	}
 	return TaskSubmitOptions{
 		Agent:          flagValue(parsed.Flags, "agent"),
@@ -269,14 +457,158 @@ func parseSubmitOptions(parsed parsedArgs) (TaskSubmitOptions, error) {
 		Node:           flagValue(parsed.Flags, "node", "node-id"),
 		ParentTask:     flagValue(parsed.Flags, "parent-task", "parent-task-id"),
 		Provider:       flagValue(parsed.Flags, "provider"),
+		Resource:       resource,
 		VMLocation:     flagValue(parsed.Flags, "vm-location"),
 		VMSize:         flagValue(parsed.Flags, "vm-size"),
 		Workspace:      flagValue(parsed.Flags, "workspace", "workspace-profile"),
 	}, nil
 }
 
-func authenticatedClient(runtime Runtime) (APIClient, error) {
-	config, err := LoadConfig(runtime.Env)
+// retiredResourceFlags are flags SAM used to accept and has since removed. They fail
+// loudly instead of being silently dropped by the permissive parser: a caller relying on
+// an old cap would otherwise believe it was applied.
+var retiredResourceFlags = map[string]string{
+	"max-co-tenants": "SAM no longer caps workspaces per node by count; placement uses --min-vcpu, --min-memory-gb, --min-disk-gb, and --exclusive-node",
+}
+
+func parseResourceRequirementFlags(parsed parsedArgs) (*ResourceRequirements, error) {
+	for name, reason := range retiredResourceFlags {
+		if _, present := parsed.Flags[name]; present || hasValuelessFlagOccurrence(parsed, name) {
+			return nil, fmt.Errorf("--%s was removed: %s", name, reason)
+		}
+	}
+	resource := ResourceRequirements{}
+	set := false
+
+	if value, present, err := parseOptionalPositiveFloat(parsed, "min-vcpu", 1000); err != nil {
+		return nil, err
+	} else if present {
+		resource.MinVCPU = &value
+		set = true
+	}
+	if value, present, err := parseOptionalPositiveFloat(parsed, "min-memory-gb", 1024); err != nil {
+		return nil, err
+	} else if present {
+		resource.MinMemoryGB = &value
+		set = true
+	}
+	if value, present, err := parseOptionalNonNegativeFloat(parsed, "min-disk-gb", 1024); err != nil {
+		return nil, err
+	} else if present {
+		resource.MinDiskGB = &value
+		set = true
+	}
+	if value, present, err := parseOptionalBoolFlag(parsed, "exclusive-node"); err != nil {
+		return nil, err
+	} else if present {
+		resource.ExclusiveNode = &value
+		set = true
+	}
+
+	if !set {
+		return nil, nil
+	}
+	return &resource, nil
+}
+
+const maxSafeInteger = 1<<53 - 1
+
+func parseOptionalPositiveFloat(parsed parsedArgs, name string, unitScale float64) (float64, bool, error) {
+	raw, present, err := resourceFlagValue(parsed, name)
+	if err != nil || !present {
+		return 0, present, err
+	}
+	value, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+	if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || value <= 0 {
+		return 0, true, fmt.Errorf("--%s must be a finite positive number", name)
+	}
+	if err := validateRoundedUnitBound(name, value, unitScale); err != nil {
+		return 0, true, err
+	}
+	return value, true, nil
+}
+
+func parseOptionalNonNegativeFloat(parsed parsedArgs, name string, unitScale float64) (float64, bool, error) {
+	raw, present, err := resourceFlagValue(parsed, name)
+	if err != nil || !present {
+		return 0, present, err
+	}
+	value, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+	if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+		return 0, true, fmt.Errorf("--%s must be a finite non-negative number", name)
+	}
+	if err := validateRoundedUnitBound(name, value, unitScale); err != nil {
+		return 0, true, err
+	}
+	return value, true, nil
+}
+
+func resourceFlagValue(parsed parsedArgs, name string) (string, bool, error) {
+	if hasValuelessFlagOccurrence(parsed, name) {
+		return "", true, fmt.Errorf("--%s requires a numeric value", name)
+	}
+	raw, present := parsed.Flags[name]
+	if !present {
+		return "", false, nil
+	}
+	return raw, true, nil
+}
+
+func validateRoundedUnitBound(name string, value float64, unitScale float64) error {
+	if value > float64(maxSafeInteger)/unitScale {
+		return fmt.Errorf("--%s is too large", name)
+	}
+	units := math.Ceil(value * unitScale)
+	if math.IsInf(units, 0) || units > float64(maxSafeInteger) {
+		return fmt.Errorf("--%s is too large", name)
+	}
+	return nil
+}
+
+func parseOptionalBoolFlag(parsed parsedArgs, name string) (bool, bool, error) {
+	value, present, err := booleanFlagOccurrenceValue(parsed, name)
+	if err != nil || present {
+		return value, present, err
+	}
+	return false, false, nil
+}
+
+func hasValuelessFlagOccurrence(parsed parsedArgs, name string) bool {
+	for _, occurrence := range parsed.FlagOccurrences {
+		if occurrence.Name == name && !occurrence.HasValue {
+			return true
+		}
+	}
+	return false
+}
+
+func booleanFlagOccurrenceValue(parsed parsedArgs, name string) (bool, bool, error) {
+	var matched *flagOccurrence
+	for i := range parsed.FlagOccurrences {
+		occurrence := &parsed.FlagOccurrences[i]
+		if occurrence.Name != name {
+			continue
+		}
+		if matched != nil {
+			return false, true, fmt.Errorf("--%s may only be specified once", name)
+		}
+		matched = occurrence
+	}
+	if matched == nil {
+		return false, false, nil
+	}
+	if !matched.HasValue {
+		return true, true, nil
+	}
+	value, err := strconv.ParseBool(strings.TrimSpace(matched.Value))
+	if err != nil {
+		return false, true, fmt.Errorf("--%s must be true or false", name)
+	}
+	return value, true, nil
+}
+
+func authenticatedClient(ctx context.Context, runtime Runtime) (APIClient, error) {
+	config, _, err := resolveAuthenticatedConfig(ctx, runtime)
 	if err != nil {
 		return APIClient{}, err
 	}
@@ -284,6 +616,33 @@ func authenticatedClient(runtime Runtime) (APIClient, error) {
 		return APIClient{}, errors.New("not authenticated. Run `sam auth login` first")
 	}
 	return NewAPIClient(*config, runtime.HTTPClient), nil
+}
+
+func resolveAuthenticatedConfig(ctx context.Context, runtime Runtime) (*CLIConfig, string, error) {
+	config, err := LoadConfig(runtime.Env)
+	if err != nil {
+		return nil, "", err
+	}
+	if config != nil {
+		return config, "config-or-session-env", nil
+	}
+	token := strings.TrimSpace(runtime.Env.Getenv("SAM_API_TOKEN"))
+	if token == "" {
+		return nil, "", nil
+	}
+	apiURL := strings.TrimSpace(runtime.Env.Getenv("SAM_API_URL"))
+	if apiURL == "" {
+		apiURL = defaultAPIURL
+	}
+	maxAPIResponseBytes, err := loadMaxAPIResponseBytes(runtime.Env)
+	if err != nil {
+		return nil, "", err
+	}
+	response, err := ExchangeAPIToken(ctx, runtime.HTTPClient, apiURL, token)
+	if err != nil {
+		return nil, "", err
+	}
+	return &CLIConfig{APIURL: normalizeAPIURL(apiURL), SessionCookie: response.SessionCookie, MaxAPIResponseBytes: maxAPIResponseBytes}, "env-token", nil
 }
 
 func writeOrFail(runtime Runtime, jsonMode bool, text string, value any) int {
@@ -306,16 +665,41 @@ func helpText() string {
 	return `SAM CLI
 
 Usage:
-  sam auth login --api-url <url> --session-cookie-stdin
-  sam auth status
-  sam --project <projectId> tasks dispatch --prompt <prompt>
-  sam --project <projectId> task submit <prompt>
-  sam --project <projectId> task status <taskId>
-  sam --project <projectId> chat [--session <sessionId>] <prompt>
-  sam runner doctor
+  sam auth login [--api-url <url>]              Log in to SAM
+  sam auth status                               Show auth status
+
+  sam projects                                  List all projects
+  sam project use [<name-or-id>]                Set the active project
+  sam project                                   Show active project details
+  sam status                                    Project dashboard (detail + recent chats)
+
+  sam chat                                      List chats
+  sam chat new <message>                        Start a new chat
+  sam chat <sessionId>                          View chat messages
+
+  sam ideas                                     List ideas (draft tasks)
+  sam library [--recursive|--all]               List library files
+  sam context                                   List knowledge entities
+  sam notifications                             List notifications
+  sam triggers                                  List triggers
+  sam profiles                                  List agent profiles
+  sam activity                                  List recent activity
+  sam nodes                                     List infrastructure nodes
+
+  sam workspace <id> forward [--port <port>] [--local-port <port>] [--local-host localhost|127.0.0.1]
+                                                Forward workspace ports
+  sam workspace <id> ports                      List workspace ports
 
 Global flags:
-  --project <projectId>  Project scope for project commands
-  --json                 Print machine-readable JSON output
+  --project <name-or-id>  Override active project (accepts name, prefix, or full ID)
+  --json                  Print machine-readable JSON output
+
+Task resource flags:
+  --min-vcpu <number>       Minimum vCPU count for task/chat dispatch
+  --min-memory-gb <number>  Minimum memory in GB
+  --min-disk-gb <number>    Minimum disk in GB
+  --exclusive-node[=bool]   Request no co-tenants; explicit false is preserved
+  --vm-size <small|medium|large>
+                            Deprecated legacy tier; prefer resource flags
 `
 }

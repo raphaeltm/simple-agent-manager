@@ -3,7 +3,16 @@ import type { CredentialProvider } from './user';
 // =============================================================================
 // Workspace & Node Core Types
 // =============================================================================
-export type NodeStatus = 'pending' | 'creating' | 'running' | 'stopping' | 'stopped' | 'deleted' | 'error';
+export type NodeStatus =
+  | 'pending'
+  | 'creating'
+  | 'running'
+  | 'recovery'
+  | 'sleeping'
+  | 'stopping'
+  | 'stopped'
+  | 'deleted'
+  | 'error';
 
 export type NodeHealthStatus = 'healthy' | 'stale' | 'unhealthy';
 
@@ -12,12 +21,50 @@ export type WorkspaceStatus =
   | 'creating'
   | 'running'
   | 'recovery'
+  | 'sleeping'
   | 'stopping'
   | 'stopped'
+  | 'evicted'
   | 'deleted'
   | 'error';
 
 export type VMSize = 'small' | 'medium' | 'large';
+
+/**
+ * Node role determines lifecycle behavior:
+ * - 'workspace': Ephemeral task/dev node. Subject to warm-pool, cron sweep, max lifetime.
+ * - 'deployment': Long-lived app-hosting node. Exempt from all ephemeral lifecycle machinery.
+ */
+export type NodeRole = 'workspace' | 'deployment';
+
+/**
+ * Node class — the ownership/lifecycle axis, orthogonal to `runtime` and `nodeRole`.
+ * - 'managed' (default): SAM provisions and owns the machine's lifecycle (cloud VM or
+ *   cf-container). Eligible for warm pooling, idle teardown, billing, and quota.
+ * - 'user-owned': a machine the user already owns and enrolled (BYO). SAM never provisions,
+ *   warms, or destroys it; it is excluded from vCPU-hour metering, $ cost, and MAX_NODES_PER_USER.
+ *   `runtime` stays 'vm' (it handles transport); `nodeClass` handles lifecycle/billing — do NOT conflate.
+ */
+export type NodeClass = 'managed' | 'user-owned';
+
+/**
+ * Node transport — how the control plane and browser reach the node's vm-agent.
+ * - 'vm-public-dns' (default for managed cloud VMs): proxied A record → public IP, Origin CA TLS.
+ * - 'cloudflare-tunnel': proxied CNAME → {tunnelUUID}.cfargotunnel.com; cloudflared is the sole
+ *   ingress and vm-agent serves plain HTTP on loopback. Tunnel presence ⇒ skip A-record backfill.
+ * Null for nodes (e.g. cf-container) where transport is implicit.
+ */
+export type NodeTransport = 'vm-public-dns' | 'cloudflare-tunnel';
+
+/** Runtime type guard for {@link NodeClass}. Unknown/legacy values are treated as not user-owned. */
+export function isNodeClass(value: unknown): value is NodeClass {
+  return value === 'managed' || value === 'user-owned';
+}
+
+/** True only for enrolled BYO machines. Any unknown/absent value is treated as managed (safe default). */
+export function isUserOwnedNodeClass(value: unknown): boolean {
+  return value === 'user-owned';
+}
 
 /**
  * VM location identifier. Widened to string to support all providers:
@@ -42,6 +89,24 @@ export interface Node {
   healthStatus?: NodeHealthStatus;
   vmSize: VMSize;
   vmLocation: VMLocation;
+  providerInstanceType?: string | null;
+  providerInstanceVcpuCount?: number | null;
+  providerInstanceMemoryMb?: number | null;
+  providerInstanceDiskGb?: number | null;
+  providerInstanceBootDiskSizeGb?: number | null;
+  providerInstanceImage?: string | null;
+  providerInstanceArchitecture?: string | null;
+  observedProviderInstanceType?: string | null;
+  observedProviderInstanceVcpuCount?: number | null;
+  observedProviderInstanceMemoryMb?: number | null;
+  observedProviderInstanceDiskGb?: number | null;
+  observedHardwareJson?: string | null;
+  observedHardwareSource?: string | null;
+  providerInstancePriceDisplay?: string | null;
+  providerInstancePriceCurrency?: string | null;
+  providerInstancePriceMonthlyCents?: number | null;
+  providerInstancePriceHourlyMicros?: number | null;
+  nodeRole: NodeRole;
   providerInstanceId: string | null;
   ipAddress: string | null;
   lastHeartbeatAt: string | null;
@@ -66,10 +131,42 @@ export interface NodeResponse {
   cloudProvider?: CredentialProvider | null;
   vmSize: VMSize;
   vmLocation: VMLocation;
+  providerInstanceType?: string | null;
+  providerInstanceVcpuCount?: number | null;
+  providerInstanceMemoryMb?: number | null;
+  providerInstanceDiskGb?: number | null;
+  providerInstanceBootDiskSizeGb?: number | null;
+  providerInstanceImage?: string | null;
+  providerInstanceArchitecture?: string | null;
+  observedProviderInstanceType?: string | null;
+  observedProviderInstanceVcpuCount?: number | null;
+  observedProviderInstanceMemoryMb?: number | null;
+  observedProviderInstanceDiskGb?: number | null;
+  observedHardwareJson?: string | null;
+  observedHardwareSource?: string | null;
+  providerInstancePriceDisplay?: string | null;
+  providerInstancePriceCurrency?: string | null;
+  providerInstancePriceMonthlyCents?: number | null;
+  providerInstancePriceHourlyMicros?: number | null;
+  nodeRole: NodeRole;
+  /**
+   * Ownership/lifecycle class. Optional for backward compatibility; the API always populates it.
+   * Absent ⇒ treat as 'managed'.
+   */
+  nodeClass?: NodeClass;
+  /** Reachability transport. Null/absent for implicit-transport nodes (e.g. cf-container). */
+  transport?: NodeTransport | null;
+  /** Cloudflare Tunnel display name for user-owned tunnel nodes; null otherwise. */
+  tunnelName?: string | null;
   ipAddress: string | null;
   lastHeartbeatAt: string | null;
   heartbeatStaleAfterSeconds?: number;
   lastMetrics?: NodeMetrics | null;
+  deploymentEnvironments?: Array<{
+    id: string;
+    projectId: string;
+    name: string;
+  }>;
   errorMessage: string | null;
   createdAt: string;
   updatedAt: string;
@@ -131,6 +228,11 @@ export interface CreateNodeRequest {
   vmSize?: VMSize;
   vmLocation?: VMLocation;
   provider?: CredentialProvider;
+  providerInstanceType?: string;
+  nativeOffering?: string;
+  bootDiskSizeGb?: number;
+  image?: string;
+  architecture?: 'x86_64' | 'arm64';
 }
 
 export interface Workspace {
@@ -150,6 +252,7 @@ export interface Workspace {
   vmIp: string | null;
   dnsRecordId: string | null;
   lastActivityAt: string | null;
+  portsPublicEnabled?: boolean;
   errorMessage: string | null;
   createdAt: string;
   updatedAt: string;
@@ -166,6 +269,22 @@ export interface BootLogEntry {
 
 /** API response (includes computed URL) */
 export interface WorkspaceResponse {
+  /** Safe current host hardware; never includes credentials or allocation authority. */
+  hardware?: Pick<
+    NodeResponse,
+    | 'cloudProvider'
+    | 'vmSize'
+    | 'providerInstanceType'
+    | 'providerInstanceVcpuCount'
+    | 'providerInstanceMemoryMb'
+    | 'providerInstanceDiskGb'
+    | 'providerInstanceBootDiskSizeGb'
+    | 'providerInstanceArchitecture'
+    | 'observedProviderInstanceType'
+    | 'observedProviderInstanceVcpuCount'
+    | 'observedProviderInstanceMemoryMb'
+    | 'observedProviderInstanceDiskGb'
+  >;
   id: string;
   nodeId?: string;
   projectId?: string | null;
@@ -176,11 +295,20 @@ export interface WorkspaceResponse {
   status: WorkspaceStatus;
   vmSize: VMSize;
   vmLocation: VMLocation;
+  providerInstanceType?: string | null;
+  providerInstanceBootDiskSizeGb?: number | null;
+  providerInstanceImage?: string | null;
+  providerInstanceArchitecture?: string | null;
+  resourceRequirementsJson?: string | null;
+  resolvedReservationJson?: string | null;
+  placementExplanationJson?: string | null;
   workspaceProfile?: WorkspaceProfile | null;
   /** Selected devcontainer config name (subdirectory under .devcontainer/). null = auto-discover default. */
   devcontainerConfigName?: string | null;
   vmIp: string | null;
   lastActivityAt: string | null;
+  /** When true, forwarded workspace ports are reachable without per-port browser tokens. */
+  portsPublicEnabled?: boolean;
   errorMessage: string | null;
   createdAt: string;
   updatedAt: string;
@@ -200,6 +328,17 @@ export interface CreateWorkspaceRequest {
   vmLocation?: VMLocation;
   installationId?: string;
   provider?: CredentialProvider;
+  providerInstanceType?: string;
+  nativeOffering?: string;
+  bootDiskSizeGb?: number;
+  image?: string;
+  architecture?: 'x86_64' | 'arm64';
+  resourceRequirements?: {
+    minVcpu?: number;
+    minMemoryGb?: number;
+    minDiskGb?: number;
+    exclusiveNode?: boolean;
+  };
   /** Devcontainer config name (subdirectory under .devcontainer/). null/undefined = auto-discover default. */
   devcontainerConfigName?: string | null;
 }
@@ -230,9 +369,32 @@ export interface DetectedPort {
   detectedAt: string;
 }
 
+export type WorkspacePortsState =
+  | 'ready'
+  | 'not_ready'
+  | 'sleeping'
+  | 'stopped'
+  | 'evicted'
+  | 'deleted'
+  | 'gone'
+  | 'error';
+
 /** Response from GET /workspaces/{id}/ports on the VM agent. */
 export interface PortsResponse {
   ports: DetectedPort[];
+  /**
+   * Optional readiness/lifecycle state. Older VM agents omit this field; clients
+   * treat an omitted state as `ready` for backwards compatibility.
+   */
+  state?: WorkspacePortsState;
+  /** Workspace lifecycle status observed by the control plane, when known. */
+  workspaceStatus?: WorkspaceStatus | null;
+  /** Whether polling may later succeed without an external lifecycle transition. */
+  retryable?: boolean;
+  /** Human-readable diagnostic for expected non-ready states. */
+  message?: string;
+  /** Endpoint-specific diagnostics; intentionally untyped across runtimes. */
+  diagnostics?: Record<string, unknown>;
 }
 
 // =============================================================================
@@ -326,6 +488,20 @@ export interface NodeLogResponse {
   entries: NodeLogEntry[];
   nextCursor?: string | null;
   hasMore: boolean;
+}
+
+export interface NodeContainerLogTarget {
+  id: string;
+  name: string;
+  image: string;
+  state: string;
+  status: string;
+}
+
+export interface NodeContainerListResponse {
+  containers: NodeContainerLogTarget[];
+  nodeId?: string | null;
+  unavailableReason?: string;
 }
 
 // =============================================================================

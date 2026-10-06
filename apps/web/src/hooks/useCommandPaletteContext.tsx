@@ -1,10 +1,17 @@
 import {
-  Activity,
+  Bell,
+  Brain,
+  Clock,
   Eye,
+  FolderOpen,
   Lightbulb,
   MessageSquare,
   Monitor,
+  Plus,
+  Rocket,
   Settings,
+  UserCog,
+  Zap,
 } from 'lucide-react';
 import { useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router';
@@ -14,7 +21,7 @@ import type { SessionSummaryItem } from '../lib/api';
 
 // ── Configurable limits ──
 
-const DEFAULT_MAX_CONTEXT_RESULTS = 10;
+const DEFAULT_MAX_CONTEXT_RESULTS = 20;
 
 const MAX_CONTEXT_RESULTS = parseInt(
   import.meta.env.VITE_CMD_PALETTE_MAX_CONTEXT_RESULTS ||
@@ -48,6 +55,36 @@ function extractTaskId(pathname: string): string | undefined {
   const match = pathname.match(/^\/projects\/[^/]+\/(?:ideas|tasks)\/([^/]+)/);
   return match?.[1];
 }
+
+// ── Static action definitions ──
+
+interface ProjectActionItem {
+  id: string;
+  label: string;
+  icon: React.ReactNode;
+  path: string;
+}
+
+// Project-scoped navigation targets. `path` is appended to `/projects/:projectId/`.
+const PROJECT_NAV_ITEMS: ProjectActionItem[] = [
+  { id: 'ctx-project-chat', label: 'Go to Chat', icon: <MessageSquare size={14} />, path: 'chat' },
+  { id: 'ctx-project-ideas', label: 'Go to Ideas', icon: <Lightbulb size={14} />, path: 'ideas' },
+  { id: 'ctx-project-deployments', label: 'Go to Deployments', icon: <Rocket size={14} />, path: 'deployments' },
+  { id: 'ctx-project-settings', label: 'Go to Settings', icon: <Settings size={14} />, path: 'settings' },
+  { id: 'ctx-project-library', label: 'Go to Library', icon: <FolderOpen size={14} />, path: 'library' },
+  { id: 'ctx-project-agent-context', label: 'Go to Agent Context', icon: <Brain size={14} />, path: 'agent-context' },
+  { id: 'ctx-project-notifications', label: 'Go to Notifications', icon: <Bell size={14} />, path: 'notifications' },
+  { id: 'ctx-project-triggers', label: 'Go to Triggers', icon: <Clock size={14} />, path: 'triggers' },
+  { id: 'ctx-project-profiles', label: 'Go to Profiles', icon: <UserCog size={14} />, path: 'profiles' },
+  { id: 'ctx-project-skills', label: 'Go to Skills', icon: <Zap size={14} />, path: 'skills' },
+];
+
+// Project-scoped create actions. `?edit=new` opens the create editor on the target page.
+const PROJECT_CREATE_ITEMS: ProjectActionItem[] = [
+  { id: 'ctx-create-trigger', label: 'Create Trigger', icon: <Plus size={14} />, path: 'triggers?edit=new' },
+  { id: 'ctx-create-profile', label: 'Create Profile', icon: <Plus size={14} />, path: 'profiles?edit=new' },
+  { id: 'ctx-create-skill', label: 'Create Skill', icon: <Plus size={14} />, path: 'skills?edit=new' },
+];
 
 // ── Hook ──
 
@@ -87,33 +124,15 @@ export function useCommandPaletteContext({
     const projectName = projects.find((p) => p.id === projectId)?.name;
     const prefix = projectName ? `${projectName}: ` : '';
 
-    // ── Project-scoped navigation ──
-    actions.push(
-      {
-        id: 'ctx-project-chat',
-        label: `${prefix}Go to Chat`,
-        icon: <MessageSquare size={14} />,
-        action: () => navigate(`/projects/${projectId}/chat`),
-      },
-      {
-        id: 'ctx-project-ideas',
-        label: `${prefix}Go to Ideas`,
-        icon: <Lightbulb size={14} />,
-        action: () => navigate(`/projects/${projectId}/ideas`),
-      },
-      {
-        id: 'ctx-project-activity',
-        label: `${prefix}Go to Activity`,
-        icon: <Activity size={14} />,
-        action: () => navigate(`/projects/${projectId}/activity`),
-      },
-      {
-        id: 'ctx-project-settings',
-        label: `${prefix}Go to Settings`,
-        icon: <Settings size={14} />,
-        action: () => navigate(`/projects/${projectId}/settings`),
-      },
-    );
+    // ── Project-scoped navigation + create actions ──
+    for (const item of [...PROJECT_NAV_ITEMS, ...PROJECT_CREATE_ITEMS]) {
+      actions.push({
+        id: item.id,
+        label: `${prefix}${item.label}`,
+        icon: item.icon,
+        action: () => navigate(`/projects/${projectId}/${item.path}`),
+      });
+    }
 
     // ── Session-scoped actions ──
     if (sessionId) {

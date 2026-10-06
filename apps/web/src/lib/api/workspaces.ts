@@ -4,8 +4,10 @@ import type {
   CreateWorkspaceRequest,
   DetectedPort,
   Event,
+  PortsResponse,
   TerminalTokenResponse,
   UpdateWorkspaceRequest,
+  WorkspacePortsState,
   WorkspaceResponse,
   WorkspaceTab,
 } from '@simple-agent-manager/shared';
@@ -47,8 +49,34 @@ export async function updateWorkspace(
   });
 }
 
+export async function updateWorkspacePortsPublic(
+  id: string,
+  enabled: boolean
+): Promise<WorkspaceResponse> {
+  return request<WorkspaceResponse>(`/api/workspaces/${id}/ports-public`, {
+    method: 'PATCH',
+    body: JSON.stringify({ enabled }),
+  });
+}
+
 export async function stopWorkspace(id: string): Promise<{ status: string }> {
   return request<{ status: string }>(`/api/workspaces/${id}/stop`, {
+    method: 'POST',
+  });
+}
+
+export async function sleepWorkspace(id: string): Promise<{
+  status: 'sleeping';
+  workspaceId: string;
+  chatSessionId: string;
+  snapshotExpiresAt: string;
+}> {
+  return request<{
+    status: 'sleeping';
+    workspaceId: string;
+    chatSessionId: string;
+    snapshotExpiresAt: string;
+  }>(`/api/workspaces/${id}/sleep`, {
     method: 'POST',
   });
 }
@@ -111,20 +139,53 @@ export async function listWorkspaceEvents(
 export async function listWorkspacePorts(
   workspaceUrl: string,
   workspaceId: string,
-  token: string
-): Promise<DetectedPort[]> {
+  token: string,
+  signal?: AbortSignal
+): Promise<PortsResponse> {
   const params = new URLSearchParams();
   params.set('token', token);
 
   const res = await fetch(
-    `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/ports?${params.toString()}`
+    `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/ports?${params.toString()}`,
+    signal ? { signal } : undefined
   );
   if (!res.ok) {
     const text = await res.text().catch(() => 'Unknown error');
     throw new Error(`Failed to load workspace ports: ${text}`);
   }
   const data = await readResponseJsonRecord(res, 'workspace.ports');
-  return requireArray(data, 'ports', 'workspace.ports') as DetectedPort[];
+  const ports = requireArray(data, 'ports', 'workspace.ports') as DetectedPort[];
+  const state = parseWorkspacePortsState(data.state);
+  return {
+    ports,
+    state,
+    workspaceStatus:
+      typeof data.workspaceStatus === 'string'
+        ? (data.workspaceStatus as PortsResponse['workspaceStatus'])
+        : null,
+    retryable: typeof data.retryable === 'boolean' ? data.retryable : state === 'not_ready',
+    message: typeof data.message === 'string' ? data.message : undefined,
+    diagnostics:
+      data.diagnostics && typeof data.diagnostics === 'object' && !Array.isArray(data.diagnostics)
+        ? (data.diagnostics as Record<string, unknown>)
+        : undefined,
+  };
+}
+
+function parseWorkspacePortsState(value: unknown): WorkspacePortsState {
+  switch (value) {
+    case 'ready':
+    case 'not_ready':
+    case 'sleeping':
+    case 'stopped':
+    case 'evicted':
+    case 'deleted':
+    case 'gone':
+    case 'error':
+      return value;
+    default:
+      return 'ready';
+  }
 }
 
 /** Build the authenticated port-access redirect URL (API mints token and 302-redirects). */

@@ -1,19 +1,28 @@
+import { DEFAULT_TASK_RUNNER_AGENT_READY_FRESHNESS_SKEW_MS } from '@simple-agent-manager/shared';
+
+import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
+
 export type NodeReadinessRow = {
   health_status: string | null;
   last_heartbeat_at: string | null;
   agent_ready_at: string | null;
   status: string | null;
+  agent_version?: string | null;
 } | null;
 
 export function isNodeAgentReadyForWorkspaceDispatch(
   node: NodeReadinessRow,
   waitStartedAtMs: number,
-  freshnessSkewMs = 30_000,
+  freshnessSkewMs = DEFAULT_TASK_RUNNER_AGENT_READY_FRESHNESS_SKEW_MS,
+  requiredAgentVersion?: string | null
 ): boolean {
   if (!node || node.status !== 'running' || node.health_status !== 'healthy') {
     return false;
   }
   if (!node.last_heartbeat_at || !node.agent_ready_at) {
+    return false;
+  }
+  if (!isNodeAgentVersionCompatible(node.agent_version, requiredAgentVersion)) {
     return false;
   }
 

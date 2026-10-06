@@ -30,10 +30,11 @@ const DefaultNotifSerializeTimeout = 5 * time.Second
 // blocks on the pipe when empty. So we control exactly when the SDK sees each
 // line.
 type orderedPipe struct {
-	reader  io.Reader     // Real stdout from agent process
-	pr      *io.PipeReader
-	pw      *io.PipeWriter
-	timeout time.Duration // Safety-net timeout for waiting on processedCh
+	reader              io.Reader // Real stdout from agent process
+	pr                  *io.PipeReader
+	pw                  *io.PipeWriter
+	timeout             time.Duration // Safety-net timeout for waiting on processedCh
+	expectedFormSession func() string
 }
 
 // jsonRPCEnvelope is a minimal struct for determining JSON-RPC message type.
@@ -44,9 +45,11 @@ type jsonRPCEnvelope struct {
 
 // newOrderedPipe creates a serializing wrapper around stdout.
 //
-// processedCh: each ACP Client method (e.g. SessionUpdate) must send to this
-// channel after completing its work. The orderedPipe waits on this channel
-// between consecutive notifications to guarantee ordering.
+// processedCh: SessionUpdate sends to this channel after completing its work.
+// Other ACP methods must not send credits: an intervening extension method
+// could otherwise release the next session/update before the prior update's
+// handler completes. The orderedPipe waits on this channel between consecutive
+// session/update notifications to guarantee ordering.
 //
 // done: closed when the session is shutting down (e.g. SessionHost.ctx.Done()).
 //
@@ -55,7 +58,7 @@ type jsonRPCEnvelope struct {
 // DefaultNotifSerializeTimeout.
 //
 // Returns an io.Reader that should be passed to the SDK instead of raw stdout.
-func newOrderedPipe(stdout io.Reader, processedCh <-chan struct{}, done <-chan struct{}, timeout time.Duration) io.Reader {
+func newOrderedPipe(stdout io.Reader, processedCh <-chan struct{}, done <-chan struct{}, timeout time.Duration, expectedFormSession ...func() string) io.Reader {
 	if timeout <= 0 {
 		timeout = DefaultNotifSerializeTimeout
 	}
@@ -65,6 +68,9 @@ func newOrderedPipe(stdout io.Reader, processedCh <-chan struct{}, done <-chan s
 		pr:      pr,
 		pw:      pw,
 		timeout: timeout,
+	}
+	if len(expectedFormSession) > 0 {
+		op.expectedFormSession = expectedFormSession[0]
 	}
 	go op.run(processedCh, done)
 	return pr
@@ -111,6 +117,13 @@ func (op *orderedPipe) run(processedCh <-chan struct{}, done <-chan struct{}) {
 		isSessionUpdate := false
 		if err := json.Unmarshal(line, &env); err == nil {
 			isSessionUpdate = env.Method == sessionUpdateMethod && env.ID == nil
+			if env.Method == "elicitation/create" {
+				expectedSession := ""
+				if op.expectedFormSession != nil {
+					expectedSession = op.expectedFormSession()
+				}
+				line = guardRawElicitationSchema(line, expectedSession)
+			}
 		}
 
 		// If a session/update is pending and this is also a session/update,
@@ -121,7 +134,7 @@ func (op *orderedPipe) run(processedCh <-chan struct{}, done <-chan struct{}) {
 			case <-processedCh:
 				timer.Stop()
 			case <-timer.C:
-				slog.Warn("orderedPipe: timeout waiting for notification processing, proceeding",
+				slog.Debug("orderedPipe: timeout waiting for notification processing, proceeding",
 					"timeout", op.timeout)
 				// Drain any stale signal that may arrive later to prevent it
 				// from being consumed as the credit for a future notification.

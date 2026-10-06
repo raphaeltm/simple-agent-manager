@@ -1,0 +1,797 @@
+import {
+  ACP_INTERACTION_ATTENTION_SOURCE,
+  ACP_INTERACTION_PROTOCOL_VERSION,
+  AcpInteractionAnswerDecisionSchema,
+  type AcpInteractionRuntimeCompleteUrl,
+  type AcpInteractionSafeSummary,
+  isJsonRecord,
+} from '@simple-agent-manager/shared';
+import { DurableObject } from 'cloudflare:workers';
+import * as v from 'valibot';
+
+import type { Env } from '../env';
+import { canonicalJson } from '../lib/canonical-json';
+import { createModuleLogger } from '../lib/logger';
+import { getCredentialEncryptionKey } from '../lib/secrets';
+import {
+  type AcpInteractionConfig,
+  getAcpInteractionConfig,
+} from '../services/acp-interaction-config';
+import {
+  deliverAcpInteractionAnswer,
+  resolveAcpInteractionDeliveryTarget,
+} from '../services/acp-interaction-delivery';
+import { decrypt, encrypt } from '../services/encryption';
+import {
+  protectedFormReceiptHash,
+  validFormAnswerDecision,
+  validFormCreateDetail,
+} from './interaction-store-form';
+import {
+  answerBoundsViolation,
+  answerResultForCommittedRow,
+  detailBoundsViolation,
+  type InteractionRow,
+  type InteractionStoreAnswerInput,
+  type InteractionStoreAnswerResult,
+  type InteractionStoreCreateInput,
+  type InteractionStoreCreateResult,
+  type InteractionStoreSettleInput,
+  type InteractionStoreSnapshot,
+  nowMs,
+  parseSummary,
+  pendingInteractionCount,
+  terminalState,
+} from './interaction-store-model';
+import {
+  hasUnexpiredInteractionInput,
+  readInteractionDetail,
+  readInteractionRow,
+  readInteractionSnapshot,
+} from './interaction-store-read';
+import {
+  completeUrlInteraction,
+  validUrlAnswerDecision,
+  validUrlCreateDetail,
+} from './interaction-store-url';
+import type { ProjectData } from './project-data';
+
+const log = createModuleLogger('interaction_store');
+
+type CreateValidationResult = Exclude<
+  InteractionStoreCreateResult,
+  { status: 'created' | 'existing' }
+>;
+
+export type {
+  InteractionStoreAnswerInput,
+  InteractionStoreCreateInput,
+  InteractionStoreSettleInput,
+} from './interaction-store-model';
+
+export class InteractionStore extends DurableObject<Env> {
+  private readonly sql: SqlStorage;
+  private createLock: Promise<unknown> = Promise.resolve();
+
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    this.sql = ctx.storage.sql;
+    ctx.blockConcurrencyWhile(async () => {
+      this.sql.exec(
+        `CREATE TABLE IF NOT EXISTS interactions (
+          interaction_id TEXT PRIMARY KEY NOT NULL,
+          project_id TEXT NOT NULL,
+          chat_session_id TEXT NOT NULL,
+          agent_session_id TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          state TEXT NOT NULL,
+          generation TEXT NOT NULL,
+          runtime_identity TEXT NOT NULL,
+          payload_hash TEXT NOT NULL,
+          encrypted_detail TEXT,
+          detail_iv TEXT,
+          detail_purged_at INTEGER,
+          url_completed_at INTEGER,
+          safe_summary_json TEXT NOT NULL,
+          upstream_request_id TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          deadline_at INTEGER NOT NULL,
+          answered_at INTEGER,
+          answer_key TEXT,
+          answer_body_hash TEXT,
+          decision_kind TEXT,
+          decision_hash TEXT,
+          encrypted_answer TEXT,
+          answer_iv TEXT,
+          encrypted_decision TEXT,
+          decision_iv TEXT,
+          delivery_state TEXT,
+          delivery_attempts INTEGER NOT NULL DEFAULT 0,
+          delivery_deadline_at INTEGER,
+          last_delivery_error TEXT,
+          attention_marker_id TEXT,
+          attention_projection_state TEXT,
+          terminal_at INTEGER,
+          purge_at INTEGER
+        )`
+      );
+      this.sql.exec(
+        `CREATE TABLE IF NOT EXISTS outbox (
+          id TEXT PRIMARY KEY NOT NULL,
+          interaction_id TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          due_at INTEGER NOT NULL,
+          attempts INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )`
+      );
+      this.sql.exec(
+        `CREATE INDEX IF NOT EXISTS idx_interactions_state_deadline
+           ON interactions(state, deadline_at)`
+      );
+      this.sql.exec(
+        `CREATE INDEX IF NOT EXISTS idx_interactions_delivery_due
+           ON interactions(delivery_state, delivery_deadline_at)`
+      );
+      this.addMissingDecisionColumns();
+      this.addMissingUrlCompletionColumn();
+      this.sql.exec(`CREATE INDEX IF NOT EXISTS idx_interactions_purge ON interactions(purge_at)`);
+      this.sql.exec(`CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(due_at)`);
+    });
+  }
+
+  async create(input: InteractionStoreCreateInput): Promise<InteractionStoreCreateResult> {
+    const run = this.createLock.then(() => this.createLocked(input));
+    this.createLock = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
+  }
+
+  private async createLocked(
+    input: InteractionStoreCreateInput
+  ): Promise<InteractionStoreCreateResult> {
+    const config = getAcpInteractionConfig(this.env);
+    const now = nowMs();
+    const existing = readInteractionRow(this.sql, input.interactionId);
+    if (existing) {
+      if (existing.payload_hash !== input.payloadHash) {
+        return { status: 'conflict', reason: 'interaction id already exists with another payload' };
+      }
+      return { status: 'existing', summary: parseSummary(existing) };
+    }
+    const validation = this.validateCreateInput(input, config, now);
+    if (validation) return validation;
+
+    const detailPlaintext = canonicalJson(input.detail);
+    const encrypted = await encrypt(detailPlaintext, getCredentialEncryptionKey(this.env));
+    const safeSummary = canonicalJson(input.safeSummary);
+    this.sql.exec(
+      `INSERT INTO interactions (
+        interaction_id, project_id, chat_session_id, agent_session_id, kind, state,
+        generation, runtime_identity, payload_hash, encrypted_detail, detail_iv,
+        safe_summary_json, upstream_request_id, created_at, updated_at, deadline_at,
+        delivery_attempts, attention_projection_state
+      ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'pending')`,
+      input.interactionId,
+      input.projectId,
+      input.chatSessionId,
+      input.agentSessionId,
+      input.kind,
+      input.generation,
+      input.runtimeIdentity,
+      input.payloadHash,
+      encrypted.ciphertext,
+      encrypted.iv,
+      safeSummary,
+      input.upstreamRequestId ?? null,
+      now,
+      now,
+      input.deadlineAt
+    );
+    this.enqueue(`projection:${input.interactionId}`, input.interactionId, 'projection', now);
+    this.enqueue(`expire:${input.interactionId}`, input.interactionId, 'expiry', input.deadlineAt);
+    await this.scheduleNextAlarm();
+    return { status: 'created', summary: parseSummary(this.readRequired(input.interactionId)) };
+  }
+
+  private validateCreateInput(
+    input: InteractionStoreCreateInput,
+    config: AcpInteractionConfig,
+    now: number
+  ): CreateValidationResult | null {
+    if (!config.enabled) return { status: 'disabled', reason: 'ACP interactions are disabled' };
+    if (input.kind === 'url') {
+      if (!config.urlsEnabled) return { status: 'disabled', reason: 'ACP URLs are disabled' };
+      if (!validUrlCreateDetail(input.detail, config))
+        return { status: 'invalid', reason: 'unsupported URL request' };
+      if (input.deadlineAt - now > config.urlDeadlineMs + config.deadlineMarginMs)
+        return { status: 'invalid', reason: 'URL deadline exceeds limit' };
+    }
+    if (input.kind === 'form') {
+      if (!config.formsEnabled) return { status: 'disabled', reason: 'ACP forms are disabled' };
+      if (!validFormCreateDetail(input.detail, config)) {
+        return { status: 'invalid', reason: 'unsupported form schema' };
+      }
+    }
+    if (input.protocolVersion !== ACP_INTERACTION_PROTOCOL_VERSION)
+      return { status: 'invalid', reason: 'unsupported protocol version' };
+    if (input.deadlineAt <= now) return { status: 'expired', reason: 'deadline is already past' };
+    const maxDeadlineMs =
+      config.maxDeadlineMs + (input.kind === 'url' ? config.deadlineMarginMs : 0);
+    if (input.deadlineAt - now > maxDeadlineMs)
+      return { status: 'invalid', reason: 'deadline exceeds configured maximum' };
+    if (pendingInteractionCount(this.sql) >= config.maxPendingPerSession) {
+      return { status: 'too_many_pending', reason: 'too many pending interactions for session' };
+    }
+    const detailPlaintext = canonicalJson(input.detail);
+    if (new TextEncoder().encode(detailPlaintext).byteLength > config.requestMaxBytes) {
+      return { status: 'invalid', reason: 'request detail exceeds configured maximum' };
+    }
+    const boundsViolation = detailBoundsViolation(input.detail, config);
+    if (boundsViolation) return { status: 'invalid', reason: boundsViolation };
+    return null;
+  }
+
+  async answer(input: InteractionStoreAnswerInput): Promise<InteractionStoreAnswerResult> {
+    const config = getAcpInteractionConfig(this.env);
+    const row = readInteractionRow(this.sql, input.interactionId);
+    if (row?.project_id !== input.projectId || row.chat_session_id !== input.chatSessionId) {
+      return { status: 'not_found', reason: 'interaction not found' };
+    }
+    const storedBodyHash =
+      row.kind === 'form'
+        ? await protectedFormReceiptHash(
+            getCredentialEncryptionKey(this.env),
+            input.interactionId,
+            input.answerBodyHash
+          )
+        : input.answerBodyHash;
+    if (row.state !== 'pending') {
+      return answerResultForCommittedRow(row, input, storedBodyHash);
+    }
+    if (row.deadline_at <= nowMs()) {
+      this.markTerminal(input.interactionId, 'expired', nowMs(), 'deadline');
+      await this.scheduleNextAlarm();
+      return { status: 'stale', reason: 'interaction is expired' };
+    }
+    if (row.kind === 'permission') {
+      if (
+        input.decision.content !== undefined ||
+        input.decision.encryptedAnswer !== undefined ||
+        !['selected_option', 'declined', 'cancelled'].includes(input.decision.kind)
+      ) {
+        return { status: 'conflict', reason: 'invalid permission decision' };
+      }
+      if (input.decision.kind === 'selected_option') {
+        const detail = await this.detail(input.interactionId);
+        const options = detail?.detail?.options;
+        if (
+          !Array.isArray(options) ||
+          !options.some((option) => isJsonRecord(option) && option.id === input.decision.optionId)
+        ) {
+          return { status: 'conflict', reason: 'invalid permission option' };
+        }
+      } else if (input.decision.optionId !== undefined) {
+        return { status: 'conflict', reason: 'invalid permission option' };
+      }
+    }
+    if (row.kind === 'form') {
+      const detail = await this.detail(input.interactionId);
+      const verdict = await validFormAnswerDecision(detail?.detail?.schema, input.decision, config);
+      if (verdict === 'schema_unavailable') {
+        return { status: 'conflict', reason: 'form schema unavailable' };
+      }
+      if (verdict === 'invalid_answer') {
+        return { status: 'conflict', reason: 'invalid form decision' };
+      }
+    }
+    if (row.kind === 'url' && !(await validUrlAnswerDecision(input.decision))) {
+      return { status: 'conflict', reason: 'invalid URL decision' };
+    }
+    const answerPlaintext = canonicalJson(input.decision);
+    if (new TextEncoder().encode(answerPlaintext).byteLength > config.answerMaxBytes) {
+      return { status: 'payload_too_large', reason: 'answer exceeds configured maximum' };
+    }
+    const answerBounds = answerBoundsViolation(input.decision, config);
+    if (answerBounds) return { status: 'payload_too_large', reason: answerBounds };
+    const encryptionKey = getCredentialEncryptionKey(this.env);
+    const encryptedDecision = await encrypt(answerPlaintext, encryptionKey);
+    const encryptedAnswer = input.decision.encryptedAnswer
+      ? await encrypt(canonicalJson(input.decision.encryptedAnswer), encryptionKey)
+      : { ciphertext: null, iv: null };
+    const now = nowMs();
+    if (now >= row.deadline_at) {
+      const current = this.readRequired(input.interactionId);
+      if (current.state !== 'pending')
+        return answerResultForCommittedRow(current, input, storedBodyHash);
+      this.markTerminal(input.interactionId, 'expired', now, 'deadline');
+      await this.scheduleNextAlarm();
+      return { status: 'stale', reason: 'interaction is expired' };
+    }
+    const deliveryDeadlineAt = Math.min(now + config.deliveryWindowMs, row.deadline_at);
+    this.sql.exec(
+      `UPDATE interactions
+       SET state = 'answered',
+           updated_at = ?,
+           answered_at = ?,
+           answer_key = ?,
+           answer_body_hash = ?,
+           decision_kind = ?,
+           decision_hash = ?,
+           encrypted_answer = ?,
+           answer_iv = ?,
+           encrypted_decision = ?,
+           decision_iv = ?,
+           delivery_state = 'pending',
+           delivery_deadline_at = ?,
+           purge_at = NULL
+       WHERE interaction_id = ? AND state = 'pending' AND deadline_at > ?`,
+      now,
+      now,
+      input.answerKey,
+      storedBodyHash,
+      input.decision.kind,
+      row.kind === 'form' ? null : input.decision.answerHash,
+      encryptedAnswer.ciphertext,
+      encryptedAnswer.iv,
+      encryptedDecision.ciphertext,
+      encryptedDecision.iv,
+      deliveryDeadlineAt,
+      input.interactionId,
+      now
+    );
+    const updated = this.readRequired(input.interactionId);
+    if (updated.state !== 'answered')
+      return answerResultForCommittedRow(updated, input, storedBodyHash);
+    if (updated.answer_key !== input.answerKey || updated.answer_body_hash !== storedBodyHash) {
+      return answerResultForCommittedRow(updated, input, storedBodyHash);
+    }
+    this.enqueue(`delivery:${input.interactionId}`, input.interactionId, 'delivery', now);
+    await this.scheduleNextAlarm();
+    return {
+      status: 'answered',
+      summary: parseSummary(updated),
+      delivery: {
+        generation: updated.generation,
+        runtimeIdentity: updated.runtime_identity,
+        agentSessionId: updated.agent_session_id,
+      },
+    };
+  }
+
+  async settle(
+    input: InteractionStoreSettleInput
+  ): Promise<{ status: 'settled' | 'not_found' | 'stale' }> {
+    const row = readInteractionRow(this.sql, input.interactionId);
+    if (!row) return { status: 'not_found' };
+    if (
+      row.generation !== input.generation ||
+      row.runtime_identity !== input.runtimeIdentity ||
+      row.agent_session_id !== input.agentSessionId
+    ) {
+      return { status: 'stale' };
+    }
+    if (row.state !== 'pending') return { status: 'settled' };
+    const now = nowMs();
+    this.markTerminal(row.interaction_id, 'cancelled', now, input.reason);
+    await this.scheduleNextAlarm();
+    return { status: 'settled' };
+  }
+
+  async completeURL(
+    input: AcpInteractionRuntimeCompleteUrl
+  ): Promise<{ status: 'completed' | 'duplicate' | 'not_found' | 'stale' }> {
+    return completeUrlInteraction(this.sql, this.env, input);
+  }
+  hasUnexpiredHumanInput(now: number): boolean {
+    return hasUnexpiredInteractionInput(this.sql, now);
+  }
+
+  snapshot(cursor: string | null = null): InteractionStoreSnapshot {
+    return readInteractionSnapshot(this.sql, this.env, cursor);
+  }
+
+  async detail(interactionId: string): Promise<{
+    summary: AcpInteractionSafeSummary;
+    detail: Record<string, unknown> | null;
+  } | null> {
+    const row = readInteractionRow(this.sql, interactionId);
+    if (!row) return null;
+    return readInteractionDetail(row, this.env);
+  }
+
+  async alarm(): Promise<void> {
+    const now = nowMs();
+    const config = getAcpInteractionConfig(this.env);
+    await this.processDueExpiry(now, config);
+    await this.processDueOutbox(now, config, now);
+    await this.processDuePurge(now);
+    this.compactSettled(now);
+    await this.scheduleNextAlarm();
+  }
+
+  async recordDelivery(
+    interactionId: string,
+    outcome: 'confirmed' | 'unconfirmed' | 'interrupted',
+    error: string | null = null
+  ): Promise<{ status: 'recorded' | 'not_found' }> {
+    const row = readInteractionRow(this.sql, interactionId);
+    if (!row) return { status: 'not_found' };
+    const now = nowMs();
+    // The wrapper may report completion after answer delivery. Keep the encrypted
+    // elicitation ID available through its bounded URL deadline for exact matching.
+    const purgeAt = Math.max(
+      now + getAcpInteractionConfig(this.env).sensitivePurgeMs,
+      row.kind === 'url' ? row.deadline_at : 0
+    );
+    const state = deliveryStateForOutcome(outcome);
+    this.sql.exec(
+      `UPDATE interactions
+       SET state = ?, delivery_state = ?, updated_at = ?, terminal_at = ?, last_delivery_error = ?,
+           purge_at = ?
+       WHERE interaction_id = ? AND state = 'answered'`,
+      state,
+      outcome,
+      now,
+      now,
+      error,
+      purgeAt,
+      interactionId
+    );
+    this.enqueue(`resolve:${interactionId}`, interactionId, 'projection_resolve', now);
+    this.enqueue(`purge:${interactionId}`, interactionId, 'purge', purgeAt);
+    await this.scheduleNextAlarm();
+    return { status: 'recorded' };
+  }
+
+  purge(): void {
+    this.sql.exec(`DELETE FROM outbox`);
+    this.sql.exec(`DELETE FROM interactions`);
+  }
+
+  private addMissingDecisionColumns(): void {
+    try {
+      this.sql.exec('ALTER TABLE interactions ADD COLUMN encrypted_decision TEXT');
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.includes('duplicate column')) {
+        log.warn('interaction_store.add_encrypted_decision_column_failed', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
+    }
+    try {
+      this.sql.exec('ALTER TABLE interactions ADD COLUMN decision_iv TEXT');
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.includes('duplicate column')) {
+        log.warn('interaction_store.add_decision_iv_column_failed', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
+    }
+  }
+
+  private addMissingUrlCompletionColumn(): void {
+    try {
+      this.sql.exec('ALTER TABLE interactions ADD COLUMN url_completed_at INTEGER');
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.includes('duplicate column')) throw error;
+    }
+  }
+
+  private readRequired(interactionId: string): InteractionRow {
+    const row = readInteractionRow(this.sql, interactionId);
+    if (!row) throw new Error('interaction row disappeared after write');
+    return row;
+  }
+
+  private enqueue(id: string, interactionId: string, kind: string, dueAt: number): void {
+    const now = nowMs();
+    this.sql.exec(
+      `INSERT INTO outbox (id, interaction_id, kind, due_at, attempts, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 0, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET due_at = excluded.due_at, updated_at = excluded.updated_at`,
+      id,
+      interactionId,
+      kind,
+      dueAt,
+      now,
+      now
+    );
+  }
+
+  private async processDueExpiry(now: number, config: AcpInteractionConfig): Promise<void> {
+    for (const row of this.sql
+      .exec<InteractionRow>(
+        `SELECT * FROM interactions
+         WHERE state = 'pending' AND deadline_at <= ?
+         ORDER BY deadline_at ASC
+         LIMIT ?`,
+        now,
+        config.expiryBatchSize
+      )
+      .toArray()) {
+      this.markTerminal(row.interaction_id, 'expired', now, 'deadline');
+    }
+  }
+
+  private async processDueOutbox(
+    now: number,
+    config: AcpInteractionConfig,
+    startedAt: number
+  ): Promise<void> {
+    const due = this.sql
+      .exec<{
+        id: string;
+        interaction_id: string;
+        kind: string;
+        attempts: number;
+        due_at: number;
+      }>(
+        `SELECT id, interaction_id, kind, attempts, due_at FROM outbox
+         WHERE due_at <= ?
+         ORDER BY CASE WHEN kind = 'delivery' THEN 1 ELSE 0 END, due_at ASC
+         LIMIT ?`,
+        now,
+        config.outboxBatchSize
+      )
+      .toArray();
+    let deliveries = 0;
+    for (const job of due) {
+      if (nowMs() - startedAt >= config.alarmWallTimeMs) break;
+      if (job.kind === 'delivery' && deliveries >= config.deliveryBatchSize) continue;
+      if (job.kind === 'delivery') deliveries += 1;
+      try {
+        if (job.kind === 'projection') await this.projectAttention(job.interaction_id);
+        else if (job.kind === 'projection_resolve')
+          await this.resolveProjectedAttention(job.interaction_id);
+        else if (job.kind === 'delivery') await this.processDeliveryJob(job.interaction_id, now);
+        this.sql.exec(`DELETE FROM outbox WHERE id = ? AND due_at = ?`, job.id, job.due_at);
+      } catch (error) {
+        const retryAt = now + config.retrySteadyMs;
+        this.sql.exec(
+          `UPDATE outbox SET attempts = attempts + 1, due_at = ?, updated_at = ?
+           WHERE id = ? AND due_at = ?`,
+          retryAt,
+          now,
+          job.id,
+          job.due_at
+        );
+        log.warn('interaction_store.outbox_retry', {
+          interactionId: job.interaction_id,
+          kind: job.kind,
+          reason: error instanceof Error ? error.name : 'unknown',
+        });
+      }
+    }
+  }
+
+  private async processDeliveryJob(interactionId: string, now: number): Promise<void> {
+    const row = readInteractionRow(this.sql, interactionId);
+    if (row?.state !== 'answered') return;
+    if (!row.encrypted_decision || !row.decision_iv) {
+      await this.recordDelivery(
+        interactionId,
+        'unconfirmed',
+        'missing encrypted decision for retry'
+      );
+      return;
+    }
+    if (row.delivery_deadline_at !== null && now >= row.delivery_deadline_at) {
+      await this.recordDelivery(interactionId, 'unconfirmed', 'delivery deadline elapsed');
+      return;
+    }
+    const target = await resolveAcpInteractionDeliveryTarget(
+      this.env,
+      row.project_id,
+      row.chat_session_id,
+      row.agent_session_id
+    );
+    if (target.status === 'interrupted') {
+      await this.recordDelivery(interactionId, 'interrupted', target.reason);
+      return;
+    }
+    if (target.status === 'retry') {
+      await this.rescheduleDelivery(row, now, target.reason);
+      return;
+    }
+    const plaintext = await decrypt(
+      row.encrypted_decision,
+      row.decision_iv,
+      getCredentialEncryptionKey(this.env)
+    );
+    const decision = v.parse(AcpInteractionAnswerDecisionSchema, JSON.parse(plaintext) as unknown);
+    if (target.status !== 'ready') {
+      await this.rescheduleDelivery(row, now, 'target not ready');
+      return;
+    }
+    const delivery = await deliverAcpInteractionAnswer(this.env, target.target, {
+      interactionId,
+      kind: row.kind as 'permission' | 'form' | 'url',
+      generation: row.generation,
+      runtimeIdentity: row.runtime_identity,
+      decision,
+    });
+    if (delivery.outcome === 'confirmed') {
+      await this.recordDelivery(interactionId, 'confirmed', null);
+      return;
+    }
+    if (delivery.outcome === 'interrupted') {
+      await this.recordDelivery(interactionId, 'interrupted', delivery.reason);
+      return;
+    }
+    await this.rescheduleDelivery(row, now, delivery.reason);
+  }
+
+  private async rescheduleDelivery(
+    row: InteractionRow,
+    now: number,
+    reason: string
+  ): Promise<void> {
+    const config = getAcpInteractionConfig(this.env);
+    const attempts = row.delivery_attempts + 1;
+    const delay =
+      config.retryDelaysMs[Math.min(attempts - 1, config.retryDelaysMs.length - 1)] ??
+      config.retrySteadyMs;
+    const dueAt = Math.min(now + delay, row.delivery_deadline_at ?? now + delay);
+    if (row.delivery_deadline_at !== null && dueAt >= row.delivery_deadline_at) {
+      await this.recordDelivery(row.interaction_id, 'unconfirmed', reason);
+      return;
+    }
+    this.sql.exec(
+      `UPDATE interactions
+       SET delivery_attempts = ?, last_delivery_error = ?, updated_at = ?
+       WHERE interaction_id = ? AND state = 'answered'`,
+      attempts,
+      reason,
+      now,
+      row.interaction_id
+    );
+    this.enqueue(`delivery:${row.interaction_id}`, row.interaction_id, 'delivery', dueAt);
+  }
+
+  private async processDuePurge(now: number): Promise<void> {
+    this.sql.exec(
+      `UPDATE interactions
+       SET encrypted_detail = NULL,
+           detail_iv = NULL,
+           encrypted_answer = NULL,
+           answer_iv = NULL,
+           encrypted_decision = NULL,
+           decision_iv = NULL,
+           detail_purged_at = ?
+       WHERE purge_at IS NOT NULL
+         AND purge_at <= ?
+         AND state != 'answered'
+         AND detail_purged_at IS NULL`,
+      now,
+      now
+    );
+  }
+
+  private compactSettled(now: number): void {
+    const config = getAcpInteractionConfig(this.env);
+    const cutoff = now - config.summaryRetentionMs;
+    this.sql.exec(
+      `DELETE FROM interactions
+       WHERE state NOT IN ('pending', 'answered')
+         AND terminal_at IS NOT NULL
+         AND terminal_at < ?
+         AND interaction_id NOT IN (
+           SELECT interaction_id FROM interactions
+           WHERE state NOT IN ('pending', 'answered')
+           ORDER BY terminal_at DESC
+           LIMIT ?
+         )`,
+      cutoff,
+      config.summaryLastSettled
+    );
+  }
+
+  private markTerminal(interactionId: string, state: string, at: number, reason: string): void {
+    this.sql.exec(
+      `UPDATE interactions
+       SET state = ?,
+           updated_at = ?,
+           terminal_at = ?,
+           purge_at = COALESCE(purge_at, ?),
+           delivery_state = CASE WHEN delivery_state IS NULL THEN 'interrupted' ELSE delivery_state END,
+           last_delivery_error = ?
+       WHERE interaction_id = ? AND state IN ('pending', 'answered')`,
+      state,
+      at,
+      at,
+      at + getAcpInteractionConfig(this.env).sensitivePurgeMs,
+      reason,
+      interactionId
+    );
+    const purgeAt = at + getAcpInteractionConfig(this.env).sensitivePurgeMs;
+    this.enqueue(`resolve:${interactionId}`, interactionId, 'projection_resolve', at);
+    this.enqueue(`purge:${interactionId}`, interactionId, 'purge', purgeAt);
+  }
+
+  private async projectAttention(interactionId: string): Promise<void> {
+    const row = readInteractionRow(this.sql, interactionId);
+    if (!row || terminalState(row.state) || row.attention_marker_id?.length) return;
+    const stub = this.projectDataStub(row.project_id);
+    const summary = parseSummary(row);
+    const marker = await stub.createAttentionMarker({
+      sessionId: row.chat_session_id,
+      taskId: null,
+      workspaceId: null,
+      kind: 'needs_input',
+      source: ACP_INTERACTION_ATTENTION_SOURCE,
+      reason: 'acp_interaction_pending',
+      metadata: canonicalJson({
+        source: ACP_INTERACTION_ATTENTION_SOURCE,
+        interactionId: row.interaction_id,
+        kind: row.kind,
+        state: row.state,
+        toolCallId: summary.toolCallId,
+      }),
+      expiresAt: null,
+    });
+    this.sql.exec(
+      `UPDATE interactions
+       SET attention_marker_id = ?, attention_projection_state = 'created', updated_at = ?
+       WHERE interaction_id = ?`,
+      marker.id,
+      nowMs(),
+      interactionId
+    );
+  }
+
+  private async resolveProjectedAttention(interactionId: string): Promise<void> {
+    const row = readInteractionRow(this.sql, interactionId);
+    if (!row?.attention_marker_id) return;
+    const stub = this.projectDataStub(row.project_id);
+    await stub.resolveAttentionMarkerById(
+      row.attention_marker_id,
+      'system',
+      `${ACP_INTERACTION_ATTENTION_SOURCE}:${row.state}`
+    );
+    this.sql.exec(
+      `UPDATE interactions
+       SET attention_projection_state = 'resolved', updated_at = ?
+       WHERE interaction_id = ?`,
+      nowMs(),
+      interactionId
+    );
+  }
+
+  private projectDataStub(projectId: string): DurableObjectStub<ProjectData> {
+    return this.env.PROJECT_DATA.get(
+      this.env.PROJECT_DATA.idFromName(projectId)
+    ) as DurableObjectStub<ProjectData>;
+  }
+
+  private async scheduleNextAlarm(): Promise<void> {
+    const due = this.sql
+      .exec<{ due_at: number }>(
+        `SELECT due_at FROM outbox
+         UNION ALL
+         SELECT deadline_at AS due_at FROM interactions WHERE state = 'pending'
+         UNION ALL
+         SELECT purge_at AS due_at FROM interactions
+         WHERE purge_at IS NOT NULL AND detail_purged_at IS NULL
+         ORDER BY due_at ASC
+         LIMIT 1`
+      )
+      .toArray()[0]?.due_at;
+    if (due) {
+      const config = getAcpInteractionConfig(this.env);
+      await this.ctx.storage.setAlarm(Math.max(due, nowMs() + config.alarmRearmDelayMs));
+    }
+  }
+}
+
+function deliveryStateForOutcome(outcome: 'confirmed' | 'unconfirmed' | 'interrupted'): string {
+  if (outcome === 'confirmed') return 'delivery_confirmed';
+  if (outcome === 'unconfirmed') return 'delivery_unconfirmed';
+  return 'interrupted';
+}

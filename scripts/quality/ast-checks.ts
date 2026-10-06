@@ -82,7 +82,16 @@ const rules: Rule[] = [
             // Allow safe dynamic clause builders:
             // - whereClause / where: dynamic WHERE from parameterized conditions array
             // - placeholders: IN (?, ?, ?) expansion from .map(() => '?').join(', ')
-            if (/^(whereClause|where|placeholders|orderClause|groupClause)$/.test(exprText)) continue;
+            // - PROMPT_QUEUE_WAKE_REQUESTED_DELIVERY(_UNALIASED)_SQL: frozen module
+            //   constants in project-events-wake-config.ts, built at module load
+            //   from a type-checked literal array (identifier-safe values asserted
+            //   at runtime); no caller value ever reaches the SQL text.
+            if (
+              /^(whereClause|where|placeholders|orderClause|groupClause|PROMPT_QUEUE_WAKE_REQUESTED_DELIVERY_SQL|PROMPT_QUEUE_WAKE_REQUESTED_DELIVERY_UNALIASED_SQL)$/.test(
+                exprText
+              )
+            )
+              continue;
 
             ctx.findings.push({
               rule: 'sql-injection',

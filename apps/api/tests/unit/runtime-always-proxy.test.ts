@@ -6,11 +6,15 @@
  * the upstream provider.
  *
  * Two modes:
- * - User has upstream-compatible credential → apiKeySource: 'user-credential' (passthrough proxy)
- * - No user credential → apiKeySource: 'callback-token' (platform proxy, existing)
+ * - Claude/Codex user has upstream-compatible credential → passthrough proxy
+ * - Claude/Codex explicit SAM provider or OpenCode explicit platform provider
+ *   with no user credential → platform proxy
  */
+import type Database from 'better-sqlite3';
 import { Hono } from 'hono';
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { createAgentCredentialAttributionFixture } from '../helpers/agent-credential-attribution-fixture';
 
 // --- Mock dependencies ---
 
@@ -20,11 +24,15 @@ const mockKvGet = vi.fn();
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => ({
     select: () => ({
-      from: () => ({
-        where: () => ({
-          limit: () => mockDbLimit(),
-        }),
-      }),
+      from: () => {
+        const query = {
+          leftJoin: () => query,
+          where: () => ({
+            limit: () => mockDbLimit(),
+          }),
+        };
+        return query;
+      },
     }),
     update: () => ({
       set: () => ({
@@ -45,13 +53,22 @@ vi.mock('drizzle-orm', async (importOriginal) => {
 });
 
 vi.mock('../../src/db/schema', () => ({
-  workspaces: { id: 'id', userId: 'userId', projectId: 'projectId' },
+  workspaces: {
+    id: 'id',
+    userId: 'userId',
+    projectId: 'projectId',
+    chatSessionId: 'chatSessionId',
+    status: 'status',
+    nodeId: 'nodeId',
+  },
+  nodes: { id: 'nodeId', status: 'nodeStatus' },
   tasks: { id: 'id', workspaceId: 'workspaceId' },
   credentials: {},
   agentSettings: {},
 }));
 
 vi.mock('../../src/lib/logger', () => ({
+  createModuleLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
   log: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
 }));
 
@@ -82,6 +99,18 @@ vi.mock('../../src/middleware/error', () => ({
       err.error = 'BAD_REQUEST';
       return err;
     },
+    conflict: (msg: string) => {
+      const err = new Error(msg) as Error & { statusCode: number; error: string };
+      err.statusCode = 409;
+      err.error = 'CONFLICT';
+      return err;
+    },
+    gone: (msg: string) => {
+      const err = new Error(msg) as Error & { statusCode: number; error: string };
+      err.statusCode = 410;
+      err.error = 'GONE';
+      return err;
+    },
   },
 }));
 
@@ -91,19 +120,56 @@ vi.mock('../../src/routes/credentials', () => ({
   getDecryptedCredential: vi.fn().mockResolvedValue(null),
 }));
 
-vi.mock('../../src/schemas', () => ({
-  AgentTypeBodySchema: {},
-  AgentCredentialSyncSchema: {},
-  BootLogEntrySchema: {},
-  MessageBatchSchema: {},
-  jsonValidator: () => async (c: { req: { json: () => Promise<unknown>; addValidatedData: (target: string, data: unknown) => void }}, next: () => Promise<void>) => {
-    const body = await c.req.json();
-    c.req.addValidatedData('json', body);
-    await next();
-  },
-}));
+vi.mock('../../src/schemas', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/schemas')>();
+  return {
+    ...actual,
+    AgentTypeBodySchema: {},
+    AgentCredentialSyncSchema: {},
+    BootLogEntrySchema: {},
+    jsonValidator:
+      () =>
+      async (
+        c: {
+          req: {
+            json: () => Promise<unknown>;
+            addValidatedData: (target: string, data: unknown) => void;
+          };
+        },
+        next: () => Promise<void>
+      ) => {
+        const body = await c.req.json();
+        c.req.addValidatedData('json', body);
+        await next();
+      },
+  };
+});
 
 vi.mock('../../src/routes/workspaces/_helpers', () => ({
+  assertWorkspaceAcceptsCallback: vi.fn(async (_env: unknown, workspace: unknown) => workspace),
+  assertWorkspaceCallbackResourceById: vi.fn(async () => ({
+    workspaceId: 'test-workspace',
+    userId: 'user1',
+    projectId: 'proj1',
+    chatSessionId: 'session1',
+    status: 'running',
+    nodeId: 'node1',
+    nodeStatus: 'running',
+    ...(mockDbLimit()[0] ?? {}),
+  })),
+  assertWorkspaceCallbackIdentityCurrent: vi.fn(async (_env: unknown, workspace: unknown) =>
+    Promise.resolve(workspace)
+  ),
+  sameWorkspaceCallbackIdentity: vi.fn(
+    (current: Record<string, unknown>, expected: Record<string, unknown>) =>
+      current.workspaceId === expected.workspaceId &&
+      current.userId === expected.userId &&
+      current.projectId === expected.projectId &&
+      current.chatSessionId === expected.chatSessionId &&
+      current.status === expected.status &&
+      current.nodeId === expected.nodeId &&
+      current.nodeStatus === expected.nodeStatus
+  ),
   verifyWorkspaceCallbackAuth: vi.fn().mockResolvedValue(undefined),
   getWorkspaceRuntimeAssets: vi.fn(),
   safeParseJson: vi.fn(),
@@ -151,7 +217,9 @@ vi.mock('../../src/lib/route-helpers', () => ({
 }));
 
 import type { Env } from '../../src/env';
+import { verifyWorkspaceCallbackAuth } from '../../src/routes/workspaces/_helpers';
 import { runtimeRoutes } from '../../src/routes/workspaces/runtime';
+import * as projectDataService from '../../src/services/project-data';
 
 // Wrap subrouter in parent app for correct env binding
 const testApp = new Hono<{ Bindings: Env }>();
@@ -176,14 +244,37 @@ const mockEnv = {
 } as unknown as Env;
 
 function postAgentKey(agentType: string, envOverrides?: Partial<Env>) {
-  return testApp.request('/ws/test-workspace/agent-key', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer test-callback-token',
+  return testApp.request(
+    '/ws/test-workspace/agent-key',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer test-callback-token',
+      },
+      body: JSON.stringify({ agentType }),
     },
-    body: JSON.stringify({ agentType }),
-  }, envOverrides ? { ...mockEnv, ...envOverrides } as Env : mockEnv);
+    envOverrides ? { ...mockEnv, ...envOverrides } : mockEnv
+  );
+}
+
+function postMessages(messages: Record<string, unknown>[], envOverrides?: Partial<Env>) {
+  return postMessagesRaw(JSON.stringify({ messages }), envOverrides);
+}
+
+function postMessagesRaw(body: string, envOverrides?: Partial<Env>) {
+  return testApp.request(
+    '/ws/test-workspace/messages',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer test-callback-token',
+      },
+      body,
+    },
+    envOverrides ? ({ ...mockEnv, ...envOverrides } as Env) : mockEnv
+  );
 }
 
 function mockWorkspaceOnly() {
@@ -196,7 +287,7 @@ function mockWorkspaceOnly() {
 
 async function readAgentKey(agentType: string) {
   const res = await postAgentKey(agentType);
-  const json = await res.json() as {
+  const json = (await res.json()) as {
     apiKey?: string;
     credentialKind?: string;
     inferenceConfig?: unknown;
@@ -207,14 +298,269 @@ async function readAgentKey(agentType: string) {
 
 // Track query count across DB calls
 let queryCount = 0;
+let attributionSqlite: Database.Database;
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
+  mockGetDecryptedAgentKey.mockReset();
+  mockDbLimit.mockReset();
+  mockKvGet.mockReset();
   queryCount = 0;
   mockKvGet.mockResolvedValue(null);
+  const attribution = await createAgentCredentialAttributionFixture('test-workspace', 'user1');
+  attributionSqlite = attribution.sqlite;
+  mockEnv.DATABASE = attribution.database;
 });
 
+afterEach(() => attributionSqlite?.close());
+
 describe('runtime.ts always-proxy', () => {
+  it('authenticates message persistence before reading or validating the JSON body', async () => {
+    const authError = Object.assign(new Error('Unauthorized'), {
+      statusCode: 401,
+      error: 'UNAUTHORIZED',
+    });
+    vi.mocked(verifyWorkspaceCallbackAuth).mockRejectedValueOnce(authError);
+
+    const response = await postMessagesRaw('{not valid json', { MAX_MESSAGES_PAYLOAD_BYTES: '8' });
+    const body = (await response.json()) as { error: string; message: string };
+
+    expect(response.status, body.message).toBe(401);
+    expect(body.error).toBe('UNAUTHORIZED');
+    expect(mockDbLimit).not.toHaveBeenCalled();
+    expect(projectDataService.persistMessageBatch).not.toHaveBeenCalled();
+  });
+
+  it('rejects oversized message payloads after terminal-state preflight and before persistence', async () => {
+    mockDbLimit.mockImplementation(() => [
+      {
+        projectId: 'proj1',
+        chatSessionId: 'sess1',
+        status: 'running',
+        nodeId: 'node1',
+        nodeStatus: 'running',
+      },
+    ]);
+
+    const response = await postMessagesRaw(
+      JSON.stringify({
+        messages: [
+          {
+            messageId: 'msg1',
+            sessionId: 'sess1',
+            role: 'assistant',
+            content: 'this body is intentionally longer than the configured payload cap',
+            timestamp: '2026-06-18T14:18:22.000Z',
+          },
+        ],
+      }),
+      { MAX_MESSAGES_PAYLOAD_BYTES: '64' }
+    );
+    const body = (await response.json()) as { error: string; message: string };
+
+    expect(response.status, body.message).toBe(400);
+    expect(body).toMatchObject({
+      error: 'BAD_REQUEST',
+      message: 'Payload exceeds 64 byte limit',
+    });
+    expect(mockDbLimit).toHaveBeenCalledTimes(1);
+    expect(projectDataService.persistMessageBatch).not.toHaveBeenCalled();
+  });
+
+  it('rejects message persistence for inactive workspaces before ProjectData writes', async () => {
+    mockDbLimit.mockImplementation(() => [
+      {
+        projectId: 'proj1',
+        chatSessionId: 'sess1',
+        status: 'stopped',
+        nodeId: 'node1',
+        nodeStatus: 'running',
+      },
+    ]);
+
+    const response = await postMessages([
+      {
+        messageId: 'msg1',
+        sessionId: 'sess1',
+        role: 'assistant',
+        content: 'one',
+        timestamp: '2026-06-18T14:18:22.000Z',
+      },
+    ]);
+    expect(response.status).toBe(204);
+    expect(projectDataService.persistMessageBatch).not.toHaveBeenCalled();
+  });
+
+  it('drops a batch when deletion starts while the request body is read', async () => {
+    let workspaceRead = 0;
+    mockDbLimit.mockImplementation(() => {
+      workspaceRead += 1;
+      return [
+        {
+          workspaceId: 'test-workspace',
+          userId: 'user1',
+          projectId: 'proj1',
+          chatSessionId: 'sess1',
+          status: workspaceRead === 1 ? 'running' : 'stopping',
+          nodeId: 'node1',
+          nodeStatus: 'running',
+        },
+      ];
+    });
+
+    const response = await postMessages([
+      {
+        messageId: 'msg-race',
+        sessionId: 'sess1',
+        role: 'assistant',
+        content: 'must not persist',
+        timestamp: '2026-06-18T14:18:22.000Z',
+      },
+    ]);
+
+    expect(response.status).toBe(204);
+    expect(mockDbLimit).toHaveBeenCalledTimes(2);
+    expect(projectDataService.persistMessageBatch).not.toHaveBeenCalled();
+  });
+
+  it('returns structured 409 when message batch reaches the session cap', async () => {
+    mockDbLimit.mockImplementation(() => [
+      {
+        projectId: 'proj1',
+        chatSessionId: 'sess1',
+        status: 'running',
+        nodeId: 'node1',
+        nodeStatus: 'running',
+      },
+    ]);
+    vi.mocked(projectDataService.persistMessageBatch).mockResolvedValueOnce({
+      persisted: 1,
+      duplicates: 0,
+      limitReached: true,
+      maxMessages: 100000,
+      remainingCapacity: 0,
+    });
+
+    const response = await postMessages([
+      {
+        messageId: 'msg1',
+        sessionId: 'sess1',
+        role: 'assistant',
+        content: 'one',
+        timestamp: '2026-06-18T14:18:22.000Z',
+      },
+      {
+        messageId: 'msg2',
+        sessionId: 'sess1',
+        role: 'assistant',
+        content: 'two',
+        timestamp: '2026-06-18T14:18:23.000Z',
+      },
+    ]);
+
+    const body = (await response.json()) as {
+      error: string;
+      message?: string;
+      persisted: number;
+      maxMessages: number;
+      remainingCapacity: number;
+    };
+    expect(response.status, body.message).toBe(409);
+    expect(body).toMatchObject({
+      error: 'SESSION_MESSAGE_LIMIT_EXCEEDED',
+      persisted: 1,
+      maxMessages: 100000,
+      remainingCapacity: 0,
+    });
+  });
+
+  it('preserves passthrough inferenceConfig outputs for Claude/Codex agents', async () => {
+    const outputs: Record<string, unknown> = {};
+
+    for (const agentType of ['claude-code', 'openai-codex']) {
+      vi.clearAllMocks();
+      queryCount = 0;
+      mockKvGet.mockResolvedValue(null);
+      mockDbLimit.mockImplementation(() => {
+        queryCount++;
+        if (queryCount === 1) return [{ userId: 'user1', projectId: 'proj1' }];
+        if (queryCount === 2) return [];
+        return [];
+      });
+      mockGetDecryptedAgentKey.mockResolvedValueOnce({
+        credential: `sk-${agentType}`,
+        credentialKind: 'api-key',
+        credentialSource: 'user',
+        baseUrl:
+          agentType === 'claude-code'
+            ? 'https://anthropic-alt.example/anthropic'
+            : 'https://custom-openai.example/v1',
+        providerDialect: agentType === 'claude-code' ? 'anthropic' : 'openai-compatible',
+      });
+
+      const response = await postAgentKey(agentType);
+      const json = (await response.json()) as { inferenceConfig?: unknown };
+      expect(response.status).toBe(200);
+      outputs[agentType] = json.inferenceConfig;
+    }
+
+    expect(outputs).toMatchInlineSnapshot(`
+      {
+        "claude-code": {
+          "apiKeySource": "callback-token",
+          "baseURL": "https://api.example.com/ai/proxy/{wstoken}/anthropic",
+          "model": "claude-sonnet-5",
+          "provider": "anthropic-passthrough",
+        },
+        "openai-codex": {
+          "apiKeySource": "callback-token",
+          "baseURL": "https://api.example.com/ai/proxy/{wstoken}/openai/v1",
+          "model": "gpt-4.1",
+          "provider": "openai-passthrough",
+        },
+      }
+    `);
+  });
+
+  it('preserves platform inferenceConfig outputs for explicit platform selections by agent type', async () => {
+    const outputs: Record<string, unknown> = {};
+
+    for (const agentType of ['claude-code', 'openai-codex']) {
+      vi.clearAllMocks();
+      queryCount = 0;
+      mockKvGet.mockResolvedValue(null);
+      mockDbLimit.mockImplementation(() => {
+        queryCount++;
+        if (queryCount === 1) return [{ userId: 'user1', projectId: 'proj1' }];
+        if (queryCount === 2) return [{ providerMode: 'sam' }];
+        return [];
+      });
+      mockGetDecryptedAgentKey.mockResolvedValueOnce(null);
+
+      const response = await postAgentKey(agentType);
+      const json = (await response.json()) as { inferenceConfig?: unknown };
+      expect(response.status).toBe(200);
+      outputs[agentType] = json.inferenceConfig;
+    }
+
+    expect(outputs).toMatchInlineSnapshot(`
+      {
+        "claude-code": {
+          "apiKeySource": "callback-token",
+          "baseURL": "https://api.example.com/ai/anthropic",
+          "model": "claude-sonnet-5",
+          "provider": "anthropic-proxy",
+        },
+        "openai-codex": {
+          "apiKeySource": "callback-token",
+          "baseURL": "https://api.example.com/ai/v1",
+          "model": "gpt-4.1",
+          "provider": "openai-proxy",
+        },
+      }
+    `);
+  });
+
   it('returns passthrough proxy config when user has claude-code credential and proxy enabled', async () => {
     mockDbLimit.mockImplementation(() => {
       queryCount++;
@@ -226,22 +572,37 @@ describe('runtime.ts always-proxy', () => {
       credential: 'sk-ant-user-key',
       credentialKind: 'api-key',
       credentialSource: 'user',
+      baseUrl: 'https://anthropic-alt.example/anthropic',
+      providerDialect: 'anthropic',
     });
 
     const res = await postAgentKey('claude-code');
 
     expect(res.status).toBe(200);
-    const json = await res.json() as {
+    const json = (await res.json()) as {
       apiKey: string;
       credentialKind: string;
       inferenceConfig: { provider: string; baseURL: string; apiKeySource: string };
     };
-    expect(json.apiKey).toBe('sk-ant-user-key');
+    expect(json.apiKey).toBe('__sam_proxy__');
     expect(json.credentialKind).toBe('api-key');
     expect(json.inferenceConfig).toBeDefined();
     expect(json.inferenceConfig.provider).toBe('anthropic-passthrough');
-    expect(json.inferenceConfig.apiKeySource).toBe('user-credential');
+    expect(json.inferenceConfig.apiKeySource).toBe('callback-token');
     expect(json.inferenceConfig.baseURL).toContain('/ai/proxy/{wstoken}/anthropic');
+    expect(json).toMatchObject({ credentialGeneration: 8 });
+    expect(
+      attributionSqlite
+        .prepare(
+          `SELECT id, agent_credential_generation AS generation
+      FROM agent_sessions ORDER BY id`
+        )
+        .all()
+    ).toEqual([
+      { id: 'foreign-user', generation: 17 },
+      { id: 'foreign-workspace', generation: 13 },
+      { id: 'owned-agent', generation: 8 },
+    ]);
   });
 
   it('returns direct credential when user has claude-code OAuth token and proxy enabled', async () => {
@@ -259,7 +620,7 @@ describe('runtime.ts always-proxy', () => {
     const res = await postAgentKey('claude-code');
 
     expect(res.status).toBe(200);
-    const json = await res.json() as {
+    const json = (await res.json()) as {
       apiKey: string;
       credentialKind: string;
       inferenceConfig?: unknown;
@@ -281,7 +642,7 @@ describe('runtime.ts always-proxy', () => {
     const res = await postAgentKey('claude-code');
 
     expect(res.status).toBe(200);
-    const json = await res.json() as {
+    const json = (await res.json()) as {
       apiKey: string;
       credentialSource: string;
       inferenceConfig: { provider: string; apiKeySource: string };
@@ -307,7 +668,7 @@ describe('runtime.ts always-proxy', () => {
     const res = await postAgentKey('claude-code', { AI_PROXY_ENABLED: 'false' } as Partial<Env>);
 
     expect(res.status).toBe(200);
-    const json = await res.json() as {
+    const json = (await res.json()) as {
       apiKey: string;
       inferenceConfig?: unknown;
     };
@@ -352,18 +713,81 @@ describe('runtime.ts always-proxy', () => {
       credential: 'sk-openai-user-key',
       credentialKind: 'api-key',
       credentialSource: 'user',
+      baseUrl: 'https://custom-openai.example/v1',
+      providerDialect: 'openai-compatible',
     });
 
     const res = await postAgentKey('openai-codex');
 
     expect(res.status).toBe(200);
-    const json = await res.json() as {
+    const json = (await res.json()) as {
       apiKey: string;
-      inferenceConfig: { provider: string; baseURL: string; apiKeySource: string };
+      inferenceConfig: {
+        provider: string;
+        baseURL: string;
+        apiKeySource: string;
+        upstreamBaseURL?: string;
+      };
     };
-    expect(json.apiKey).toBe('sk-openai-user-key');
+    expect(json.apiKey).toBe('__sam_proxy__');
     expect(json.inferenceConfig.provider).toBe('openai-passthrough');
-    expect(json.inferenceConfig.apiKeySource).toBe('user-credential');
+    expect(json.inferenceConfig.apiKeySource).toBe('callback-token');
     expect(json.inferenceConfig.baseURL).toContain('/ai/proxy/{wstoken}/openai/v1');
+    expect(json.inferenceConfig.upstreamBaseURL).toBeUndefined();
+    expect(JSON.stringify(json)).not.toContain('https://custom-openai.example/v1');
+  });
+
+  it('returns direct credential when codex has auth-file OAuth credential', async () => {
+    mockWorkspaceOnly();
+    mockGetDecryptedAgentKey.mockResolvedValueOnce({
+      credential: '{"tokens":{"access_token":"codex-access-token"}}',
+      credentialKind: 'oauth-token',
+      credentialSource: 'user',
+    });
+
+    const { res, json } = await readAgentKey('openai-codex');
+
+    expect(res.status).toBe(200);
+    expect(json.apiKey).toContain('codex-access-token');
+    expect(json.credentialKind).toBe('oauth-token');
+    expect(json.inferenceConfig).toBeUndefined();
+  });
+
+  it('fails closed instead of injecting an incompatible baseURL-backed credential', async () => {
+    mockDbLimit.mockImplementation(() => {
+      queryCount++;
+      if (queryCount === 1) return [{ userId: 'user1', projectId: 'proj1' }];
+      return [];
+    });
+    mockGetDecryptedAgentKey.mockResolvedValueOnce({
+      credential: 'sk-openai-user-key',
+      credentialKind: 'api-key',
+      credentialSource: 'user',
+      baseUrl: 'https://custom-openai.example/v1',
+      providerDialect: 'openai-compatible',
+    });
+
+    const res = await postAgentKey('claude-code');
+    const json = (await res.json()) as { message?: string; apiKey?: string };
+
+    expect(res.status).toBe(404);
+    expect(json.message).toBe('Agent credential');
+    expect(json.apiKey).toBeUndefined();
+  });
+
+  it('returns direct auth-file credential for Codex oauth-token without passthrough proxy', async () => {
+    mockWorkspaceOnly();
+    mockGetDecryptedAgentKey.mockResolvedValueOnce({
+      credential: '{"tokens":{"access_token":"codex-access"}}',
+      credentialKind: 'oauth-token',
+      credentialSource: 'user',
+    });
+
+    const { res, json } = await readAgentKey('openai-codex');
+
+    expect(res.status).toBe(200);
+    expect(json.apiKey).toBe('{"tokens":{"access_token":"codex-access"}}');
+    expect(json.credentialKind).toBe('oauth-token');
+    expect(json.inferenceConfig).toBeUndefined();
   });
 });

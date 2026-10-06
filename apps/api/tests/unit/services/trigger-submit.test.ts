@@ -1,78 +1,28 @@
-/**
- * Unit tests for the trigger task submission bridge.
- *
- * These test the submitTriggeredTask function's behavior when interacting
- * with the database, project data service, and TaskRunner DO.
- */
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-// =============================================================================
-// Mock all external dependencies
-// =============================================================================
-vi.mock('../../../src/services/task-runner-do', () => ({
-  startTaskRunnerDO: vi.fn().mockResolvedValue(undefined),
+import type { Env } from '../../../src/env';
+import type { SubmitTriggeredTaskInput } from '../../../src/services/trigger-submit';
+
+const reservedMocks = vi.hoisted(() => ({
+  submitReservedTask: vi.fn(),
+  reservedIdentitiesForTriggerExecution: vi.fn((triggerExecutionId: string) => ({
+    taskId: `task-${triggerExecutionId}`,
+    chatSessionId: `chat-${triggerExecutionId}`,
+    initialMessageId: `msg-${triggerExecutionId}`,
+    initialStatusEventId: `status-${triggerExecutionId}`,
+  })),
 }));
 
-vi.mock('../../../src/services/project-data', () => ({
-  createSession: vi.fn().mockResolvedValue('session-001'),
-  persistMessage: vi.fn().mockResolvedValue(undefined),
-  stopSession: vi.fn().mockResolvedValue(undefined),
-}));
-
-vi.mock('../../../src/services/agent-profiles', () => ({
-  resolveAgentProfile: vi.fn().mockResolvedValue(null),
-}));
-
-vi.mock('../../../src/services/branch-name', () => ({
-  generateBranchName: vi.fn().mockReturnValue('sam/daily-review-abc123'),
-}));
-
-vi.mock('../../../src/services/task-title', () => ({
-  generateTaskTitle: vi.fn().mockResolvedValue('Daily PR Review'),
-  getTaskTitleConfig: vi.fn().mockReturnValue({}),
-}));
+vi.mock('../../../src/services/reserved-task-submission', () => reservedMocks);
 
 vi.mock('../../../src/lib/logger', () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-let ulidCounter = 0;
-vi.mock('../../../src/lib/ulid', () => ({
-  ulid: () => `ULID${String(++ulidCounter).padStart(6, '0')}`,
-}));
+const { submitTriggeredTask, TriggerTaskSubmissionPendingError } =
+  await import('../../../src/services/trigger-submit');
 
-// Mock drizzle
-const mockInsertValues = vi.fn().mockResolvedValue(undefined);
-const mockUpdateSetWhere = vi.fn().mockResolvedValue(undefined);
-const mockSelectResult: any[] = [];
-
-vi.mock('drizzle-orm/d1', () => ({
-  drizzle: () => ({
-    select: () => ({
-      from: () => ({
-        where: () => ({
-          limit: () => Promise.resolve(mockSelectResult.shift() || []),
-        }),
-      }),
-    }),
-    insert: () => ({
-      values: mockInsertValues,
-    }),
-    update: () => ({
-      set: () => ({
-        where: mockUpdateSetWhere,
-      }),
-    }),
-  }),
-}));
-
-vi.mock('drizzle-orm', () => ({
-  eq: vi.fn((_col: unknown, val: unknown) => val),
-  and: vi.fn((...args: unknown[]) => args),
-  sql: Object.assign((s: unknown) => s, { raw: (s: unknown) => s }),
-}));
-
-import type { SubmitTriggeredTaskInput } from '../../../src/services/trigger-submit';
+const env = { DATABASE: {} } as Env;
 
 const defaultInput: SubmitTriggeredTaskInput = {
   triggerId: 'trigger-1',
@@ -83,80 +33,148 @@ const defaultInput: SubmitTriggeredTaskInput = {
   triggeredBy: 'cron',
   agentProfileId: null,
   taskMode: 'task',
+  skillId: null,
   vmSizeOverride: null,
   triggerName: 'Daily Review',
 };
 
-// =============================================================================
-// Tests
-// =============================================================================
-
 describe('submitTriggeredTask', () => {
   beforeEach(() => {
-    ulidCounter = 0;
     vi.clearAllMocks();
-    mockSelectResult.length = 0;
   });
 
-  it('creates a task with trigger metadata fields', async () => {
-    // Setup mock DB responses: project, credential, user
-    mockSelectResult.push(
-      [{ // project
-        id: 'project-1',
-        userId: 'user-1',
-        name: 'Test Project',
-        repository: 'user/repo',
-        installationId: 'install-1',
-        defaultBranch: 'main',
-        defaultVmSize: null,
-        defaultAgentType: null,
-        defaultWorkspaceProfile: null,
-        defaultProvider: null,
-        defaultLocation: null,
-        taskExecutionTimeoutMs: null,
-        maxWorkspacesPerNode: null,
-        nodeCpuThresholdPercent: null,
-        nodeMemoryThresholdPercent: null,
-        warmNodeTimeoutMs: null,
-      }],
-      [{ id: 'cred-1' }], // credential
-      [{ githubId: '123', name: 'User', email: 'user@test.com' }], // user
-    );
+  it('submits trigger executions through the reserved task adapter', async () => {
+    reservedMocks.submitReservedTask.mockResolvedValueOnce({
+      outcome: 'admitted',
+      taskId: 'task-exec-1',
+      sessionId: 'chat-exec-1',
+      branchName: 'sam/daily-review-exec-1',
+      startState: 'started',
+      reused: false,
+    });
 
-    const { submitTriggeredTask } = await import('../../../src/services/trigger-submit');
-    const result = await submitTriggeredTask({} as any, defaultInput);
+    await expect(submitTriggeredTask(env, defaultInput)).resolves.toEqual({
+      taskId: 'task-exec-1',
+      sessionId: 'chat-exec-1',
+      branchName: 'sam/daily-review-exec-1',
+    });
 
-    expect(result.taskId).toBeDefined();
-    expect(result.sessionId).toBe('session-001');
-    expect(result.branchName).toBe('sam/daily-review-abc123');
-
-    // Verify task was inserted with trigger metadata
-    expect(mockInsertValues).toHaveBeenCalled();
-    const insertCall = mockInsertValues.mock.calls[0]![0];
-    expect(insertCall.triggeredBy).toBe('cron');
-    expect(insertCall.triggerId).toBe('trigger-1');
-    expect(insertCall.triggerExecutionId).toBe('exec-1');
-    expect(insertCall.status).toBe('queued');
+    expect(reservedMocks.reservedIdentitiesForTriggerExecution).toHaveBeenCalledWith('exec-1');
+    expect(reservedMocks.submitReservedTask).toHaveBeenCalledWith(env, {
+      identities: {
+        taskId: 'task-exec-1',
+        chatSessionId: 'chat-exec-1',
+        initialMessageId: 'msg-exec-1',
+        initialStatusEventId: 'status-exec-1',
+      },
+      projectId: 'project-1',
+      userId: 'user-1',
+      prompt: 'Review all PRs from today',
+      branchNameSeed: 'Daily Review',
+      agentProfileId: null,
+      skillId: null,
+      taskMode: 'task',
+      vmSizeOverride: null,
+      resourceRequirementsJson: null,
+      source: {
+        kind: 'trigger',
+        sourceId: 'trigger-1',
+        sourceExecutionId: 'exec-1',
+        triggeredBy: 'cron',
+        displayName: 'Daily Review',
+        repositoryAccessFlow: 'trigger-cron',
+        initialStatusReason: 'Triggered by cron (trigger: trigger-1)',
+        initialStatusActorType: 'system',
+        initialStatusActorId: null,
+        triggerId: 'trigger-1',
+        triggerExecutionId: 'exec-1',
+      },
+    });
   });
 
-  it('throws when project is not found', async () => {
-    mockSelectResult.push([]); // empty project result
+  it('preserves skill/profile and conversation-mode inputs for the adapter', async () => {
+    reservedMocks.submitReservedTask.mockResolvedValueOnce({
+      outcome: 'admitted',
+      taskId: 'task-exec-1',
+      sessionId: 'chat-exec-1',
+      branchName: 'sam/daily-review-exec-1',
+      startState: 'already_started',
+      reused: true,
+    });
 
-    const { submitTriggeredTask } = await import('../../../src/services/trigger-submit');
-    await expect(submitTriggeredTask({} as any, defaultInput)).rejects.toThrow(
-      'Project project-1 not found'
+    await submitTriggeredTask(env, {
+      ...defaultInput,
+      agentProfileId: 'profile-1',
+      skillId: 'skill-1',
+      taskMode: 'conversation',
+      vmSizeOverride: 'medium',
+      resourceRequirementsJson: '{"minVcpu":4}',
+    });
+
+    expect(reservedMocks.submitReservedTask).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({
+        agentProfileId: 'profile-1',
+        skillId: 'skill-1',
+        taskMode: 'conversation',
+        vmSizeOverride: 'medium',
+        resourceRequirementsJson: '{"minVcpu":4}',
+      })
     );
   });
 
-  it('throws when user has no cloud provider credentials', async () => {
-    mockSelectResult.push(
-      [{ id: 'project-1', repository: 'user/repo', installationId: 'i1', defaultBranch: 'main' }],
-      [], // no credentials
-    );
+  it('maps pending adapter outcomes to TriggerTaskSubmissionPendingError', async () => {
+    reservedMocks.submitReservedTask.mockResolvedValueOnce({
+      outcome: 'pending',
+      taskId: 'task-exec-1',
+      sessionId: 'chat-exec-1',
+      branchName: 'sam/daily-review-exec-1',
+      pendingAt: 'task_runner_start',
+      reason: 'TaskRunner start confirmation is unavailable',
+      reused: true,
+    });
 
-    const { submitTriggeredTask } = await import('../../../src/services/trigger-submit');
-    await expect(submitTriggeredTask({} as any, defaultInput)).rejects.toThrow(
-      'no cloud provider credentials'
+    await expect(submitTriggeredTask(env, defaultInput)).rejects.toMatchObject({
+      name: 'TriggerTaskSubmissionPendingError',
+      submission: {
+        taskId: 'task-exec-1',
+        sessionId: 'chat-exec-1',
+        branchName: 'sam/daily-review-exec-1',
+      },
+    });
+    expect(TriggerTaskSubmissionPendingError).toBeDefined();
+  });
+
+  it('surfaces conflicting adapter outcomes without retrying internally', async () => {
+    reservedMocks.submitReservedTask.mockResolvedValueOnce({
+      outcome: 'conflict',
+      taskId: 'task-exec-1',
+      sessionId: 'chat-exec-1',
+      branchName: 'sam/daily-review-exec-1',
+      reason: 'intent_fingerprint_mismatch',
+      message: 'Task identity is already reserved for a different submission intent',
+    });
+
+    await expect(submitTriggeredTask(env, defaultInput)).rejects.toThrow(
+      'Task identity is already reserved for a different submission intent'
     );
+    expect(reservedMocks.submitReservedTask).toHaveBeenCalledOnce();
+  });
+
+  it('surfaces terminal adapter outcomes without restarting the task', async () => {
+    reservedMocks.submitReservedTask.mockResolvedValueOnce({
+      outcome: 'terminal',
+      taskId: 'task-exec-1',
+      sessionId: 'chat-exec-1',
+      branchName: 'sam/daily-review-exec-1',
+      status: 'completed',
+      reason: null,
+      reused: true,
+    });
+
+    await expect(submitTriggeredTask(env, defaultInput)).rejects.toThrow(
+      'Reserved trigger task task-exec-1 is already terminal: completed'
+    );
+    expect(reservedMocks.submitReservedTask).toHaveBeenCalledOnce();
   });
 });

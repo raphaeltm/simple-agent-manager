@@ -17,9 +17,9 @@ import { extractBearerToken } from '../lib/auth-helpers';
 import { log } from '../lib/logger';
 import { expectJsonRecord, maybeJsonRecord, readResponseJson } from '../lib/runtime-validation';
 import { ulid } from '../lib/ulid';
-import { getUserId,requireApproved, requireAuth } from '../middleware/auth';
+import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { requireOwnedProject } from '../middleware/project-auth';
+import { requireProjectCapability } from '../middleware/project-auth';
 import {
   checkRateLimit,
   createRateLimitKey,
@@ -34,6 +34,7 @@ import { toSanitizedAppError } from '../services/gcp-errors';
 import { listGcpProjects } from '../services/gcp-setup';
 import { signIdentityToken } from '../services/jwt';
 import { validateMcpToken } from '../services/mcp-token';
+import { getGoogleInfraOAuthConfig } from '../services/platform-config';
 
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -58,13 +59,14 @@ projectDeploymentRoutes.get(
     const projectId = c.req.param('id');
     const userId = getUserId(c);
 
-    if (!c.env.GOOGLE_CLIENT_ID || !c.env.GOOGLE_CLIENT_SECRET) {
+    const googleOAuth = await getGoogleInfraOAuthConfig(c.env);
+    if (!googleOAuth) {
       throw errors.badRequest('Google OAuth is not configured on this SAM instance');
     }
 
-    // Verify project ownership
+    // Verify project infrastructure-management capability.
     const db = drizzle(c.env.DATABASE, { schema });
-    await requireOwnedProject(db, projectId, userId);
+    await requireProjectCapability(db, projectId, userId, 'infra:manage');
 
     // Generate CSRF state token with project context
     const state = crypto.randomUUID();
@@ -79,7 +81,7 @@ projectDeploymentRoutes.get(
 
     const redirectUri = `https://api.${c.env.BASE_DOMAIN}/api/deployment/gcp/callback`;
     const params = new URLSearchParams({
-      client_id: c.env.GOOGLE_CLIENT_ID,
+      client_id: googleOAuth.clientId,
       redirect_uri: redirectUri,
       response_type: 'code',
       scope: 'https://www.googleapis.com/auth/cloud-platform',
@@ -109,7 +111,7 @@ projectDeploymentRoutes.get(
     const projectId = c.req.param('id');
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
-    await requireOwnedProject(db, projectId, userId);
+    await requireProjectCapability(db, projectId, userId, 'infra:manage');
 
     const kvKey = `gcp-deploy-oauth-result:${userId}:${projectId}`;
     const handle = await c.env.KV.get(kvKey);
@@ -142,7 +144,7 @@ projectDeploymentRoutes.post(
     const projectId = c.req.param('id');
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
-    await requireOwnedProject(db, projectId, userId);
+    await requireProjectCapability(db, projectId, userId, 'infra:manage');
 
     const body = c.req.valid('json');
 
@@ -173,11 +175,11 @@ projectDeploymentRoutes.post(
     const projectId = c.req.param('id');
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
-    await requireOwnedProject(db, projectId, userId);
+    await requireProjectCapability(db, projectId, userId, 'infra:manage');
 
     const body = c.req.valid('json');
 
-    if (!c.env.GOOGLE_CLIENT_ID || !c.env.GOOGLE_CLIENT_SECRET) {
+    if (!(await getGoogleInfraOAuthConfig(c.env))) {
       throw errors.badRequest('Google OAuth is not configured on this SAM instance');
     }
 
@@ -259,7 +261,7 @@ projectDeploymentRoutes.get(
     const projectId = c.req.param('id');
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
-    await requireOwnedProject(db, projectId, userId);
+    await requireProjectCapability(db, projectId, userId, 'infra:manage');
 
     const rows = await db
       .select()
@@ -299,7 +301,7 @@ projectDeploymentRoutes.delete(
     const projectId = c.req.param('id');
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
-    await requireOwnedProject(db, projectId, userId);
+    await requireProjectCapability(db, projectId, userId, 'infra:manage');
 
     await db
       .delete(schema.projectDeploymentCredentials)
@@ -465,7 +467,8 @@ gcpDeployCallbackRoute.get(
     const sessionUserId = getUserId(c);
     const appBaseUrl = `https://app.${c.env.BASE_DOMAIN}`;
 
-    if (!c.env.GOOGLE_CLIENT_ID || !c.env.GOOGLE_CLIENT_SECRET) {
+    const googleOAuth = await getGoogleInfraOAuthConfig(c.env);
+    if (!googleOAuth) {
       throw errors.badRequest('Google OAuth is not configured');
     }
 
@@ -522,12 +525,13 @@ gcpDeployCallbackRoute.get(
 
     const projectId = storedState.projectId;
 
-    // Defense-in-depth: verify the session user owns the project in the database,
-    // even though the KV state was created by an authenticated owner at authorize time
+    // Defense-in-depth: verify the session user can still manage project
+    // infrastructure, even though the KV state was created by an authenticated
+    // actor at authorize time.
     const db = drizzle(c.env.DATABASE, { schema });
-    await requireOwnedProject(db, projectId, sessionUserId);
+    await requireProjectCapability(db, projectId, sessionUserId, 'infra:manage');
 
-    const appUrl = `https://app.${c.env.BASE_DOMAIN}/projects/${projectId}/settings`;
+    const appUrl = `https://app.${c.env.BASE_DOMAIN}/projects/${projectId}/settings/deploy`;
 
     // Exchange auth code for access token
     const redirectUri = `https://api.${c.env.BASE_DOMAIN}/api/deployment/gcp/callback`;
@@ -536,8 +540,8 @@ gcpDeployCallbackRoute.get(
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         code,
-        client_id: c.env.GOOGLE_CLIENT_ID,
-        client_secret: c.env.GOOGLE_CLIENT_SECRET,
+        client_id: googleOAuth.clientId,
+        client_secret: googleOAuth.clientSecret,
         redirect_uri: redirectUri,
         grant_type: 'authorization_code',
       }),

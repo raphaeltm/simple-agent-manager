@@ -63,11 +63,11 @@ deliverable, not an afterthought.
 **Rules:**
 
 - Public APIs MUST have complete reference documentation with examples
-- Every user journey has a corresponding guide in `/docs/guides/`
-- Architecture decisions are recorded in `/docs/adr/` (Architecture Decision Records)
-- All code comments reference relevant documentation: `// See docs/guides/idle-detection.md`
-- README.md provides <5 minute quickstart for new users
-- CHANGELOG.md follows Keep a Changelog format
+- Every public user journey has a corresponding guide in `apps/www/src/content/docs/docs/guides/`
+- Public architecture documentation is recorded in `apps/www/src/content/docs/docs/architecture/`
+- Code comments reference relevant public docs, specs, or task records using current paths
+- Public quickstart content lives in `apps/www/src/content/docs/docs/quickstart.md`
+- Product change history lives in public docs/blog content or task/spec records, not a root changelog
 
 **Rationale:** Good documentation reduces support burden, accelerates contributor onboarding, and
 demonstrates project maturity.
@@ -166,7 +166,7 @@ code are clearly separated.
   - `apps/` - Deployable applications (UI, API, workers)
   - `packages/` - Shared, reusable libraries (providers, cloud-init, shared types)
   - `scripts/` - VM-side scripts and tooling
-  - `docs/` - Documentation
+  - `apps/www/src/content/docs/docs/` - Public documentation
   - `specs/` - Feature specifications
 - Dependencies flow inward: apps → packages, never packages → apps
 - No circular dependencies between packages
@@ -242,12 +242,12 @@ scratch to their own infrastructure accounts.
   the current state. Fresh installs run the full migration chain. There is no separate "initial schema"
   to maintain — migrations are the single source of truth for database structure.
 - **Self-hosting docs updated in the same PR**: When adding infrastructure requirements (new bindings,
-  new secrets, new services), update `docs/guides/self-hosting.md` in the same change. Do not defer.
+  new secrets, new services), update `apps/www/src/content/docs/docs/guides/self-hosting.md` in the same change. Do not defer.
 - **Minimal external dependencies at deploy time**: The deployment should not depend on specific CI
   providers, specific DNS providers beyond Cloudflare, or any service that the self-hoster cannot
   substitute. GitHub Actions workflows are conveniences, not requirements.
-- **Architecture Decision Records for infrastructure changes**: When introducing new infrastructure
-  components (e.g., Durable Objects, new storage layers), document the decision in `docs/adr/` with
+- **Architecture documentation for infrastructure changes**: When introducing new infrastructure
+  components (e.g., Durable Objects, new storage layers), document the decision in `apps/www/src/content/docs/docs/architecture/` with
   the self-hosting implications explicitly addressed.
 
 **Validation Checklist (for architectural changes):**
@@ -319,10 +319,10 @@ simple-agent-manager/
 │       └── Makefile         # Build commands
 ├── scripts/
 │   └── vm/                  # VM-side scripts (idle-check, setup)
-├── docs/
-│   ├── guides/              # User guides
-│   ├── adr/                 # Architecture Decision Records
-│   └── api/                 # API reference
+├── apps/www/src/content/docs/docs/
+│   ├── guides/              # Public user guides
+│   ├── architecture/        # Public architecture docs
+│   └── reference/           # API/configuration/reference docs
 ├── specs/                   # Feature specifications
 ├── .github/
 │   ├── workflows/           # CI/CD pipelines
@@ -388,7 +388,8 @@ The project uses a deliberate separation of concerns between two tools:
 - All infrastructure changes go through PR review (no manual console changes)
 - Infrastructure drift is checked quarterly (compare deployed state vs config)
 - Never use `--force` or bypass flags without documented justification
-- Pulumi state bucket is the ONE manual prerequisite for deployment
+- Pulumi state bucket and provider/app credentials are the manual prerequisites for deployment
+- Platform-owned security material MUST be generated automatically and persisted in Pulumi state when practical; users should supply as little deployment configuration as possible
 
 ### Environment Management
 
@@ -414,7 +415,9 @@ Secrets are sensitive values (API keys, tokens, passwords) that MUST NOT be expo
 **Rules:**
 
 - NEVER hardcode secrets in source code, config files, or commit history
-- Use Cloudflare Workers secrets: `wrangler secret put SECRET_NAME`
+- Use Cloudflare Workers secrets through the bounded deploy-secret workflow
+  (`scripts/deploy/configure-secrets.sh`, backed by `wrangler secret bulk`);
+  never log secret values
 - Local development uses `.dev.vars` file (gitignored)
 - Document all required secrets in README with descriptions (not values)
 - Secrets follow principle of least privilege (minimal required permissions)
@@ -534,22 +537,24 @@ Infrastructure changes require testing before production deployment.
 
 ## Multi-Tenant Architecture Guidelines
 
-This platform operates as a multi-tenant SaaS where users bring their own cloud credentials. We manage
-authentication, orchestration, and workspace metadata while users retain ownership of their infrastructure.
+This platform operates as a multi-tenant SaaS where compute can come from project, user, or
+installation/platform cloud credentials. We manage authentication, orchestration, and workspace
+metadata while the selected provider account retains ownership and billing for the infrastructure.
 
 ### Data Ownership Model
 
 **What We Store (Cloudflare D1/KV):**
 
 - User profiles (from GitHub OAuth)
-- User's Hetzner API tokens (AES-GCM encrypted with per-user initialization vectors)
+- Cloud-provider credentials for supported compute providers (AES-GCM encrypted with unique
+  initialization vectors)
 - Workspace metadata (name, repo, status, VM ID, DNS record ID)
 - JWT signing keys
 - Sessions and rate limiting data
 
 **What We DON'T Store:**
 
-- VMs (created on user's Hetzner account, billed to them)
+- VMs (created in the selected project, user, or platform cloud provider account and billed there)
 - Code (lives on Git provider and in user's VMs)
 
 **Rules:**
@@ -557,7 +562,8 @@ authentication, orchestration, and workspace metadata while users retain ownersh
 - Users MUST be able to delete all their data via account deletion
 - Encrypted credentials use AES-GCM with unique IVs per credential
 - Workspace metadata is soft-deleted first, hard-deleted after 30 days
-- Users can revoke their Hetzner token at any time (workspaces stop working)
+- Users or admins can revoke provider credentials at any time; future reconciliation and
+  provisioning fall back only to still-active project → user → installation credentials.
 
 ### User Credential Security
 
@@ -567,7 +573,8 @@ authentication, orchestration, and workspace metadata while users retain ownersh
 - Credentials are decrypted only at point of use (just-in-time)
 - Encryption key is a Worker secret, never in source code
 - Failed decryption attempts are logged for security monitoring
-- Credential rotation: users can update their Hetzner token without recreating workspaces
+- Credential rotation: users and admins can update provider credentials without recreating
+  existing workspaces.
 
 ### Privacy Principles
 
@@ -773,7 +780,7 @@ This enables self-hosting in air-gapped or restricted environments and ensures v
 - User's Git provider (GitHub, GitLab, etc.) - required for repository access
 - Container registries (Docker Hub, GHCR) - required for devcontainer images
 - OS package repositories (apt, apk) - required for system packages
-- User's cloud provider APIs (Hetzner, etc.) - required for VM provisioning
+- Effective project, user, or platform cloud provider APIs (Hetzner, etc.) - required for VM provisioning
 
 **Version Consistency:**
 
@@ -798,41 +805,46 @@ a realistic local environment is impractical. Instead, we deploy frequently and 
 
 ### Continuous Deployment
 
-**Philosophy:** Merge to main = deploy to production. Configuration lives in GitHub, visible and editable.
+**Philosophy:** Merge to main = deploy to production. User-supplied configuration lives in GitHub, visible and editable; platform-owned generated secrets live in encrypted Pulumi state.
 
-**Rationale:** Deployment should be automatic and predictable. Configuration should be visible in the GitHub UI,
-not buried in one-time scripts or hidden state files. This enables easy auditing and modification.
+**Rationale:** Deployment should be automatic and predictable. User-provided credentials should be visible in the GitHub UI,
+while generated signing/encryption material should not become manual setup work. This enables easy auditing and modification without making users paste values SAM can create itself.
 
 **Rules:**
 
 - Push/merge to `main` automatically deploys to production
-- All configuration lives in **GitHub Environments** (Settings → Environments → production)
-- Environment **variables** (visible) for non-sensitive config: `BASE_DOMAIN`, `RESOURCE_PREFIX`
+- User-supplied configuration lives in **GitHub Environments** (Settings → Environments → production)
+- Platform-owned generated secrets live in encrypted Pulumi state and are copied to Worker secrets during deployment
+- Environment **variables** (visible) for non-sensitive config: `BASE_DOMAIN`, `RESOURCE_PREFIX`, optional `PULUMI_STATE_BUCKET`
 - Environment **secrets** (hidden) for sensitive values: API tokens, keys, credentials
+- Do not add a manual GitHub Environment prerequisite when the deployment can generate and persist the value safely
 - Deployment is idempotent: safe to re-run, only updates changed resources
 - Concurrent deployments are queued, not cancelled
 
 **GitHub Environment Configuration:**
 
-| Type     | Name                       | Description                                              |
-| -------- | -------------------------- | -------------------------------------------------------- |
-| Variable | `BASE_DOMAIN`              | Base domain for deployment (e.g., `example.com`)         |
-| Variable | `RESOURCE_PREFIX`          | Prefix for resources (default: `sam`)                    |
-| Variable | `PULUMI_STATE_BUCKET`      | R2 bucket for Pulumi state (default: `sam-pulumi-state`) |
-| Secret   | `CF_API_TOKEN`             | Cloudflare API token                                     |
-| Secret   | `CF_ACCOUNT_ID`            | Cloudflare account ID                                    |
-| Secret   | `CF_ZONE_ID`               | Cloudflare zone ID                                       |
-| Secret   | `R2_ACCESS_KEY_ID`         | R2 access key for Pulumi state                           |
-| Secret   | `R2_SECRET_ACCESS_KEY`     | R2 secret key for Pulumi state                           |
-| Secret   | `PULUMI_CONFIG_PASSPHRASE` | Encryption passphrase for Pulumi state                   |
-| Secret   | `GH_CLIENT_ID`             | GitHub OAuth client ID                                   |
-| Secret   | `GH_CLIENT_SECRET`         | GitHub OAuth client secret                               |
-| Secret   | `GH_APP_ID`                | GitHub App ID                                            |
-| Secret   | `GH_APP_PRIVATE_KEY`       | GitHub App private key                                   |
-| Secret   | `GH_APP_SLUG`              | GitHub App slug                                          |
-| Secret   | `ENCRYPTION_KEY`           | AES-256 key (optional, auto-generated)                   |
-| Secret   | `JWT_PRIVATE_KEY`          | JWT signing key (optional, auto-generated)               |
-| Secret   | `JWT_PUBLIC_KEY`           | JWT verification key (optional, auto-generated)          |
+| Type     | Name                         | Description                                                                    |
+| -------- | ---------------------------- | ------------------------------------------------------------------------------ |
+| Variable | `BASE_DOMAIN`                | Base domain for deployment (e.g., `example.com`)                               |
+| Variable | `RESOURCE_PREFIX`            | Domain-derived resource prefix (`s` + first 6 SHA-256 hex chars)               |
+| Variable | `PULUMI_STATE_BUCKET`        | Optional R2 state bucket override (default: `${RESOURCE_PREFIX}-pulumi-state`) |
+| Secret   | `CF_API_TOKEN`               | Cloudflare API token                                                           |
+| Secret   | `CF_ACCOUNT_ID`              | Cloudflare account ID                                                          |
+| Secret   | `CF_ZONE_ID`                 | Cloudflare zone ID                                                             |
+| Secret   | `R2_ACCESS_KEY_ID`           | R2 access key for Pulumi state                                                 |
+| Secret   | `R2_SECRET_ACCESS_KEY`       | R2 secret key for Pulumi state                                                 |
+| Secret   | `PULUMI_CONFIG_PASSPHRASE`   | Encryption passphrase for Pulumi state                                         |
+| Secret   | `GH_CLIENT_ID`               | GitHub OAuth client ID                                                         |
+| Secret   | `GH_CLIENT_SECRET`           | GitHub OAuth client secret                                                     |
+| Secret   | `GH_APP_ID`                  | GitHub App ID                                                                  |
+| Secret   | `GH_APP_PRIVATE_KEY`         | GitHub App private key                                                         |
+| Secret   | `GH_APP_SLUG`                | GitHub App slug                                                                |
+| Secret   | `GH_WEBHOOK_SECRET`          | GitHub App webhook secret                                                      |
+| Secret   | `ENCRYPTION_KEY`             | AES-256 key (optional override; auto-generated)                                |
+| Secret   | `JWT_PRIVATE_KEY`            | JWT signing key (optional override; auto-generated)                            |
+| Secret   | `JWT_PUBLIC_KEY`             | JWT verification key (optional override; auto-generated)                       |
+| Secret   | `DEPLOY_SIGNING_PRIVATE_KEY` | Deploy payload signing key (optional override; auto-generated)                 |
+| Secret   | `DEPLOY_SIGNING_PUBLIC_KEY`  | Deploy payload verification key (optional override; derived)                   |
 
 **Naming Convention**: GitHub App secrets use `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB_*`. The deployment workflow (`configure-secrets.sh`) maps these to `GITHUB_*` Cloudflare Worker secrets (e.g., `GH_CLIENT_ID` → `GITHUB_CLIENT_ID`, `GH_WEBHOOK_SECRET` → `GITHUB_WEBHOOK_SECRET`).
 

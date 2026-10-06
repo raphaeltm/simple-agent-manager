@@ -1,19 +1,33 @@
 import { Hono } from 'hono';
 
 import type { Env } from '../../env';
-import { requireApproved,requireAuth } from '../../middleware/auth';
+import { requireApproved, requireAuth } from '../../middleware/auth';
 import { acpSessionRoutes } from './acp-sessions';
+import { capacityPoolRoutes } from './capacity-pools';
+import { credentialHealthRoutes } from './credential-health';
+import { credentialLimitRoutes } from './credential-limits';
 import { projectCredentialsRoutes } from './credentials';
 import { crudRoutes } from './crud';
 import { devcontainerConfigRoutes } from './devcontainer-configs';
 import { fileProxyRoutes } from './files';
+import { projectMembersRoutes } from './members';
+import { repoBrowseRoutes } from './repo-browse';
+import { repositoryAccessRoutes } from './repository-access';
+import { projectResourceHistoryRoutes } from './workspace-resource-history';
 
 const projectsRoutes = new Hono<{ Bindings: Env }>();
 projectsRoutes.use('/*', requireAuth(), requireApproved());
 projectsRoutes.route('/', crudRoutes);
 projectsRoutes.route('/', acpSessionRoutes);
+projectsRoutes.route('/', capacityPoolRoutes);
 projectsRoutes.route('/', fileProxyRoutes);
 projectsRoutes.route('/', projectCredentialsRoutes);
+projectsRoutes.route('/', credentialHealthRoutes);
+projectsRoutes.route('/', credentialLimitRoutes);
 projectsRoutes.route('/', devcontainerConfigRoutes);
+projectsRoutes.route('/', repositoryAccessRoutes);
+projectsRoutes.route('/', projectMembersRoutes);
+projectsRoutes.route('/', repoBrowseRoutes);
+projectsRoutes.route('/', projectResourceHistoryRoutes);
 
 export { projectsRoutes };

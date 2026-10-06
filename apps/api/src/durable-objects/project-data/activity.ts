@@ -36,7 +36,8 @@ export function listActivityEvents(
   sql: SqlStorage,
   eventType: string | null,
   limit: number = 50,
-  before: number | null = null
+  before: number | null = null,
+  sessionId: string | null = null
 ): { events: Record<string, unknown>[]; hasMore: boolean } {
   let query =
     'SELECT id, event_type, actor_type, actor_id, workspace_id, session_id, task_id, payload, created_at FROM activity_events WHERE 1=1';
@@ -45,6 +46,10 @@ export function listActivityEvents(
   if (eventType) {
     query += ' AND event_type = ?';
     params.push(eventType);
+  }
+  if (sessionId) {
+    query += ' AND session_id = ?';
+    params.push(sessionId);
   }
   if (before !== null) {
     query += ' AND created_at < ?';
@@ -76,12 +81,35 @@ export function updateTerminalActivity(
   sql.exec(
     `INSERT INTO workspace_activity (workspace_id, session_id, last_terminal_activity_at, created_at)
      VALUES (?, ?, ?, ?)
-     ON CONFLICT(workspace_id) DO UPDATE SET last_terminal_activity_at = ?, session_id = COALESCE(?, session_id)`,
+     ON CONFLICT(workspace_id) DO UPDATE SET
+       last_terminal_activity_at = ?,
+       session_id = COALESCE(?, session_id),
+       idle_check_retry_count = 0,
+       next_idle_check_at = NULL`,
     workspaceId,
     sessionId,
     now,
     now,
     now,
+    sessionId
+  );
+}
+
+/**
+ * Forget the workspace idle sweep's recorded check for a session that just woke: it was a verdict
+ * about the runtime that slept, so the woken session starts a new idle cycle.
+ */
+export function clearWorkspaceIdleCheck(
+  sql: SqlStorage,
+  workspaceId: string,
+  sessionId: string
+): void {
+  sql.exec(
+    `UPDATE workspace_activity
+        SET idle_check_retry_count = 0,
+            next_idle_check_at = NULL
+      WHERE workspace_id = ? AND session_id = ?`,
+    workspaceId,
     sessionId
   );
 }
@@ -105,7 +133,11 @@ export function updateMessageActivity(
   sql.exec(
     `INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, created_at)
      VALUES (?, ?, ?, ?)
-     ON CONFLICT(workspace_id) DO UPDATE SET last_message_at = ?, session_id = COALESCE(?, session_id)`,
+     ON CONFLICT(workspace_id) DO UPDATE SET
+       last_message_at = ?,
+       session_id = COALESCE(?, session_id),
+       idle_check_retry_count = 0,
+       next_idle_check_at = NULL`,
     workspaceId,
     sessionId,
     now,

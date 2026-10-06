@@ -2,7 +2,7 @@
  * Unit tests for the cron trigger sweep engine.
  *
  * Tests the sweep logic in isolation by mocking the database layer and
- * the submitTriggeredTask bridge function.
+ * the shared admission boundary.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -10,15 +10,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // Mock modules before importing the module under test
 // =============================================================================
 
-const { submitMockFn } = vi.hoisted(() => ({
-  submitMockFn: vi.fn(),
+const { admissionMockFn } = vi.hoisted(() => ({
+  admissionMockFn: vi.fn(),
 }));
-vi.mock('../../../src/services/trigger-submit', () => ({
-  submitTriggeredTask: submitMockFn,
+vi.mock('../../../src/services/trigger-admission', () => ({
+  admitAndSubmitTriggerExecution: admissionMockFn,
 }));
 
 vi.mock('../../../src/services/trigger-template', () => ({
-  renderTemplate: vi.fn().mockReturnValue({ rendered: 'Review PRs for Daily Review', warnings: [] }),
+  renderTemplate: vi
+    .fn()
+    .mockReturnValue({ rendered: 'Review PRs for Daily Review', warnings: [] }),
   buildCronContext: vi.fn().mockReturnValue({}),
 }));
 
@@ -49,6 +51,7 @@ vi.mock('drizzle-orm/d1', () => ({
         orderBy: vi.fn(() => makeThenable(resolveData)),
         limit: vi.fn((n: number) => makeThenable(async () => (await resolveData()).slice(0, n))),
         offset: vi.fn(() => makeThenable(resolveData)),
+        get: vi.fn(async () => (await resolveData())[0]),
         then: (resolve: any, reject?: any) => resolveData().then(resolve, reject),
       };
     }
@@ -136,7 +139,9 @@ describe('runCronTriggerSweep', () => {
   });
 
   it('fires a due trigger and returns correct stats', async () => {
-    submitMockFn.mockResolvedValueOnce({
+    admissionMockFn.mockResolvedValueOnce({
+      outcome: 'submitted',
+      executionId: 'execution-123',
       taskId: 'task-123',
       sessionId: 'session-123',
       branchName: 'sam/daily-review-abc123',
@@ -144,23 +149,9 @@ describe('runCronTriggerSweep', () => {
 
     const trigger = makeTrigger();
 
-    // Queue DB results in order of queries made by processTrigger:
-    // 1. dueTriggers query (from runCronTriggerSweep)
-    // 2. getConsecutiveFailureCount: recent executions (ordered by createdAt desc)
-    // 3. skipIfRunning: count of running executions
-    // 4. maxConcurrent: count of running executions
-    // 5. project name lookup
-    // 6. (insert execution — not a select)
-    // 7. (update execution — not a select)
-    // 8. (update trigger — not a select)
-    // 9. (advanceNextFireAt — update, not a select)
-    queryResults = [
-      [trigger],               // 1. dueTriggers
-      [],                       // 2. consecutive failures (none)
-      [{ count: 0 }],          // 3. skipIfRunning check
-      [{ count: 0 }],          // 4. maxConcurrent check
-      [{ name: 'My Project' }], // 5. project name
-    ];
+    // Cron owns due selection, source context, and schedule advancement. Shared
+    // admission owns concurrency, sequence allocation, execution rows, and submission.
+    queryResults = [[trigger], [{ name: 'My Project' }]];
 
     const stats = await runCronTriggerSweep({ DATABASE: {} } as any);
 
@@ -169,19 +160,14 @@ describe('runCronTriggerSweep', () => {
     expect(stats.skipped).toBe(0);
     expect(stats.failed).toBe(0);
 
-    // Verify submitTriggeredTask was called
-    expect(submitMockFn).toHaveBeenCalledTimes(1);
-    expect(submitMockFn.mock.calls[0]![1]).toMatchObject({
-      triggerId: 'trigger-1',
-      projectId: 'project-1',
+    expect(admissionMockFn).toHaveBeenCalledTimes(1);
+    expect(admissionMockFn.mock.calls[0]![1]).toMatchObject({
+      trigger,
+      eventType: 'cron',
       triggeredBy: 'cron',
     });
-
-    // Verify concurrent limit checks use inArray(['queued', 'running']), not just eq('running')
-    const { inArray } = await import('drizzle-orm');
-    expect(inArray).toHaveBeenCalledWith(
-      expect.anything(),
-      ['queued', 'running']
+    expect(admissionMockFn.mock.calls[0]![1].renderPrompt('execution-123', 7)).toBe(
+      'Review PRs for Daily Review'
     );
   });
 });

@@ -1,128 +1,205 @@
+// FILE SIZE EXCEPTION: Cross-boundary node-agent request layer marginally over the limit; interactive/background timeout tiers and cf-container interruption classification are one cohesive concern. Split candidate if it grows further. See .claude/rules/18-file-size-limits.md
+import type { McpServerEntry } from '@simple-agent-manager/shared';
+import { eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
+
+import * as schema from '../db/schema';
+import type { VmAgentContainerRequestGuard } from '../durable-objects/vm-agent-container';
+import {
+  getRuntimeRecoveryMessage,
+  type RuntimeRecoveryCode,
+} from '../durable-objects/vm-agent-container-recovery';
 import type { Env } from '../env';
-import { expectJsonRecord } from '../lib/runtime-validation';
+import { expectJsonRecord, maybeJsonRecord } from '../lib/runtime-validation';
+import { AppError } from '../middleware/error';
+import { buildAcpInteractionRuntimeConfig } from './acp-interaction-runtime-config';
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
-import { signNodeManagementToken } from './jwt';
+import { signNodeManagementToken, signTerminalToken } from './jwt';
+import {
+  getNodeAgentReadyPollIntervalMs,
+  getNodeAgentReadyTimeoutMs,
+  getNodeBackendBaseUrl,
+  waitForNodeAgentReadyWith,
+} from './node-agent-readiness';
 import { recordNodeRoutingMetric } from './telemetry';
+import {
+  fetchVmAgentContainer,
+  fetchVmAgentContainerNoWake,
+  getVmAgentContainerConfig,
+  markVmAgentContainerActiveWorkEndedBestEffort,
+  markVmAgentContainerActiveWorkStarted,
+  markVmAgentContainerRequestInterrupted,
+} from './vm-agent-container';
 
 const DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS = 30_000;
-
-const DEFAULT_NODE_AGENT_READY_TIMEOUT_MS = 900_000; // 15 min — cloud-init takes 8-12 min on Hetzner
-const DEFAULT_NODE_AGENT_READY_POLL_INTERVAL_MS = 5000;
-
-function getNodeBackendBaseUrl(nodeId: string, env: Env): string {
-  const protocol = env.VM_AGENT_PROTOCOL || 'https';
-  const port = env.VM_AGENT_PORT || '8443';
-  // Two-level subdomain ({nodeId}.vm.{domain}) bypasses Cloudflare same-zone routing.
-  // The wildcard Worker route *.{domain}/* matches exactly one subdomain level,
-  // so {nodeId}.vm.{domain} is NOT intercepted — requests reach the VM directly.
-  return `${protocol}://${nodeId.toLowerCase()}.vm.${env.BASE_DOMAIN}:${port}`;
-}
+// Background control loops (cron sweeps, reconcilers) must NOT inherit the
+// interactive 30s budget above. A healthy node answers a control request in
+// milliseconds; 5s of silence means "down" for cleanup purposes. Without this
+// tier, an unbounded sweep over unreachable nodes burns 30s per candidate and
+// blows the Worker wall-clock budget, aborting the whole cron. See rule 47.
+const DEFAULT_NODE_AGENT_BACKGROUND_REQUEST_TIMEOUT_MS = 5_000;
+const DEFAULT_CF_CONTAINER_WAKE_TIMEOUT_MS = 120_000;
+// cf-container workspace creation clones the repository synchronously inside
+// the request (vm-agent handleStandaloneWorkspaceCreate), so it needs a
+// background-work budget rather than the interactive 30s default. 120s mirrors
+// the wake/restore budget, which re-runs the same clone. See rule 43.
+const DEFAULT_CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS = 120_000;
 
 interface NodeAgentRequestOptions extends RequestInit {
   userId: string;
   workspaceId?: string | null;
+  requestTimeoutMs?: number;
+  /** Internal authorization checked inside a cf-container DO before cold wake. */
+  sourceTaskGuard?: VmAgentContainerRequestGuard;
+  /** Caller-side fail-closed check repeated at the physical fetch boundary. */
+  beforeExternalMutation?: () => Promise<void>;
+  /** Whether a cf-container timeout may initiate normal runtime recovery. */
+  recoverContainerOnTimeout?: boolean;
+  /** Route an Instant request only to an already-running container. */
+  noWakeContainer?: boolean;
 }
 
-export function getNodeAgentReadyTimeoutMs(env: { NODE_AGENT_READY_TIMEOUT_MS?: string }): number {
-  const parsed = env.NODE_AGENT_READY_TIMEOUT_MS
-    ? Number.parseInt(env.NODE_AGENT_READY_TIMEOUT_MS, 10)
-    : DEFAULT_NODE_AGENT_READY_TIMEOUT_MS;
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return DEFAULT_NODE_AGENT_READY_TIMEOUT_MS;
-  }
-  return parsed;
+interface FetchNodeAgentControls {
+  sourceTaskGuard?: VmAgentContainerRequestGuard;
+  beforeExternalMutation?: () => Promise<void>;
+  recoverContainerOnTimeout?: boolean;
+  noWakeContainer?: boolean;
 }
 
-export function getNodeAgentReadyPollIntervalMs(env: { NODE_AGENT_READY_POLL_INTERVAL_MS?: string }): number {
-  const parsed = env.NODE_AGENT_READY_POLL_INTERVAL_MS
-    ? Number.parseInt(env.NODE_AGENT_READY_POLL_INTERVAL_MS, 10)
-    : DEFAULT_NODE_AGENT_READY_POLL_INTERVAL_MS;
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return DEFAULT_NODE_AGENT_READY_POLL_INTERVAL_MS;
+export interface GuardedNodeAgentMutationOptions {
+  sourceTaskGuard?: VmAgentContainerRequestGuard;
+  beforeExternalMutation?: () => Promise<void>;
+}
+
+const RUNTIME_RECOVERY_CODES: ReadonlySet<string> = new Set([
+  'RUNTIME_RECOVERING',
+  'RUNTIME_REQUEST_INTERRUPTED',
+  'RUNTIME_RECOVERY_DEGRADED',
+  'RUNTIME_STOPPED',
+]);
+
+function isRuntimeRecoveryCode(value: unknown): value is RuntimeRecoveryCode {
+  return typeof value === 'string' && RUNTIME_RECOVERY_CODES.has(value);
+}
+
+function runtimeRecoveryStatus(code: RuntimeRecoveryCode): number {
+  if (code === 'RUNTIME_STOPPED') return 410;
+  if (code === 'RUNTIME_RECOVERING') return 503;
+  return 409;
+}
+
+export class NodeAgentRequestError extends AppError {
+  constructor(statusCode: number, code: RuntimeRecoveryCode, message: string) {
+    super(statusCode, code, message);
+    this.name = 'NodeAgentRequestError';
   }
-  return parsed;
+}
+
+export class NodeAgentHttpError extends Error {
+  constructor(
+    public readonly statusCode: number,
+    public readonly responseBody: string
+  ) {
+    super(`Node Agent request failed: ${statusCode} ${responseBody}`);
+    this.name = 'NodeAgentHttpError';
+  }
+}
+
+export class NodeAgentFetchError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'NodeAgentFetchError';
+  }
+}
+
+function isNodeAgentTransportError(err: unknown): boolean {
+  if (err instanceof TypeError) return true;
+  if (!(err instanceof Error)) return false;
+  if (err.name === 'AbortError') return true;
+  return (
+    err.message.includes('Request timed out') ||
+    err.message.includes('fetch failed') ||
+    err.message.includes('Failed to fetch') ||
+    err.message.includes('NetworkError')
+  );
+}
+
+function requestInitWithoutSignal(options: RequestInit): RequestInit {
+  const serializableOptions = { ...options };
+  delete serializableOptions.signal;
+  return serializableOptions;
+}
+
+export { getNodeAgentReadyPollIntervalMs, getNodeAgentReadyTimeoutMs };
+
+export function getNodeAgentRequestTimeoutMs(env: {
+  NODE_AGENT_REQUEST_TIMEOUT_MS?: string;
+}): number {
+  return getTimeoutMs(env.NODE_AGENT_REQUEST_TIMEOUT_MS, DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS);
+}
+
+/**
+ * Request timeout for VM-agent calls made from background control loops.
+ *
+ * Deliberately far shorter than the interactive timeout — see rule 47. Cleanup
+ * work only needs to know whether the agent responds promptly; a slow or dead
+ * node should be abandoned quickly so the sweep can make progress on the rest of
+ * its candidates rather than stalling the entire cron invocation.
+ */
+export function getNodeAgentBackgroundRequestTimeoutMs(env: {
+  NODE_AGENT_BACKGROUND_REQUEST_TIMEOUT_MS?: string;
+}): number {
+  return getTimeoutMs(
+    env.NODE_AGENT_BACKGROUND_REQUEST_TIMEOUT_MS,
+    DEFAULT_NODE_AGENT_BACKGROUND_REQUEST_TIMEOUT_MS
+  );
+}
+
+export function getCfContainerWakeTimeoutMs(env: {
+  CF_CONTAINER_WAKE_TIMEOUT_MS?: string;
+}): number {
+  return getTimeoutMs(env.CF_CONTAINER_WAKE_TIMEOUT_MS, DEFAULT_CF_CONTAINER_WAKE_TIMEOUT_MS);
+}
+
+export function getCfContainerCreateWorkspaceTimeoutMs(env: {
+  CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS?: string;
+}): number {
+  return getTimeoutMs(
+    env.CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS,
+    DEFAULT_CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS
+  );
 }
 
 export async function waitForNodeAgentReady(nodeId: string, env: Env): Promise<void> {
-  const timeoutMs = getNodeAgentReadyTimeoutMs(env);
-  const pollIntervalMs = getNodeAgentReadyPollIntervalMs(env);
-  const baseUrl = getNodeBackendBaseUrl(nodeId, env);
-  const healthUrl = `${baseUrl}/health`;
-  const deadline = Date.now() + timeoutMs;
-
-  let lastError = '';
-
-  while (Date.now() < deadline) {
-    const remainingMs = deadline - Date.now();
-    const requestTimeoutMs = Math.max(1, Math.min(pollIntervalMs, remainingMs));
-    const controller = new AbortController();
-    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
-
-    try {
-      const requestTimeoutError = `request timeout after ${requestTimeoutMs}ms`;
-      const response = await Promise.race([
-        fetch(healthUrl, { method: 'GET', signal: controller.signal }),
-        new Promise<Response>((_resolve, reject) => {
-          timeoutHandle = setTimeout(() => {
-            controller.abort();
-            reject(new Error(requestTimeoutError));
-          }, requestTimeoutMs);
-        }),
-      ]);
-      if (response.ok) {
-        return;
-      }
-
-      const responseBody = await response.text().catch(() => '');
-      lastError = `HTTP ${response.status}${responseBody ? ` ${responseBody}` : ''}`.trim();
-    } catch (err) {
-      if (err instanceof Error && err.message.startsWith('request timeout after ')) {
-        lastError = err.message;
-      } else if (err instanceof Error && err.name === 'AbortError') {
-        lastError = `request timeout after ${requestTimeoutMs}ms`;
-      } else {
-        lastError = err instanceof Error ? err.message : String(err);
-      }
-    } finally {
-      if (timeoutHandle) {
-        clearTimeout(timeoutHandle);
-      }
-    }
-
-    const nextRemainingMs = deadline - Date.now();
-    if (nextRemainingMs <= 0) {
-      break;
-    }
-    await new Promise((resolve) =>
-      setTimeout(resolve, Math.min(pollIntervalMs, nextRemainingMs))
-    );
-  }
-
-  const details = lastError ? ` Last error: ${lastError}` : '';
-  throw new Error(`Node Agent not reachable at ${healthUrl} within ${timeoutMs}ms.${details}`);
+  return waitForNodeAgentReadyWith(fetchNodeAgent, nodeId, env);
 }
 
-async function nodeAgentRequest(
+export async function nodeAgentRequest(
   nodeId: string,
   env: Env,
   path: string,
   options: NodeAgentRequestOptions
 ): Promise<unknown> {
-  const { token } = await signNodeManagementToken(
-    options.userId,
-    nodeId,
-    options.workspaceId ?? null,
-    env
-  );
+  const {
+    userId,
+    workspaceId = null,
+    requestTimeoutMs: configuredRequestTimeoutMs,
+    sourceTaskGuard,
+    beforeExternalMutation,
+    recoverContainerOnTimeout = true,
+    noWakeContainer = false,
+    ...requestOptions
+  } = options;
+  const { token } = await signNodeManagementToken(userId, nodeId, workspaceId, env);
 
   const url = `${getNodeBackendBaseUrl(nodeId, env)}${path}`;
-  const headers = new Headers(options.headers);
+  const headers = new Headers(requestOptions.headers);
   headers.set('Authorization', `Bearer ${token}`);
   headers.set('Content-Type', 'application/json');
   headers.set('X-SAM-Node-Id', nodeId);
 
-  if (options.workspaceId) {
-    headers.set('X-SAM-Workspace-Id', options.workspaceId);
+  if (workspaceId) {
+    headers.set('X-SAM-Workspace-Id', workspaceId);
   } else {
     headers.delete('X-SAM-Workspace-Id');
   }
@@ -132,25 +209,26 @@ async function nodeAgentRequest(
     {
       metric: 'node_agent_request',
       nodeId,
-      workspaceId: options.workspaceId ?? null,
+      workspaceId,
     },
     env
   );
 
-  const requestTimeoutMs = getTimeoutMs(
-    env.NODE_AGENT_REQUEST_TIMEOUT_MS,
-    DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS
+  const requestTimeoutMs = configuredRequestTimeoutMs ?? getNodeAgentRequestTimeoutMs(env);
+  const response = await fetchNodeAgent(
+    nodeId,
+    env,
+    url,
+    { ...requestOptions, headers },
+    requestTimeoutMs,
+    { sourceTaskGuard, beforeExternalMutation, recoverContainerOnTimeout, noWakeContainer }
   );
-  const response = await fetchWithTimeout(url, {
-    ...options,
-    headers,
-  }, requestTimeoutMs);
 
   recordNodeRoutingMetric(
     {
       metric: 'node_agent_response',
       nodeId,
-      workspaceId: options.workspaceId ?? null,
+      workspaceId,
       statusCode: response.status,
       durationMs: Date.now() - startedAt,
     },
@@ -160,17 +238,31 @@ async function nodeAgentRequest(
   if (!response.ok) {
     const body = await response.text().catch(() => '');
 
+    let recoveryPayload: ReturnType<typeof maybeJsonRecord> = null;
+    try {
+      recoveryPayload = maybeJsonRecord(JSON.parse(body) as unknown);
+    } catch {
+      // Non-recovery Node Agent responses retain the existing generic handling.
+    }
+    if (recoveryPayload && isRuntimeRecoveryCode(recoveryPayload.error)) {
+      throw new NodeAgentRequestError(
+        runtimeRecoveryStatus(recoveryPayload.error),
+        recoveryPayload.error,
+        getRuntimeRecoveryMessage(recoveryPayload.error)
+      );
+    }
+
     // Detect Worker loop-back: when the vm-{nodeId} DNS record is missing,
     // the wildcard DNS record routes the request back to this API Worker,
     // which returns its own 404 format. Provide a clear error instead.
     if (response.status === 404 && body.includes('"Endpoint not found"')) {
       throw new Error(
         `Node Agent unreachable: DNS record for ${nodeId.toLowerCase()}.vm may be missing. ` +
-        `The request was routed back to the API Worker instead of the VM.`
+          `The request was routed back to the API Worker instead of the VM.`
       );
     }
 
-    throw new Error(`Node Agent request failed: ${response.status} ${body}`);
+    throw new NodeAgentHttpError(response.status, body);
   }
 
   if (response.status === 204) {
@@ -188,6 +280,117 @@ async function nodeAgentRequest(
   }
 }
 
+export async function fetchNodeAgent(
+  nodeId: string,
+  env: Env,
+  url: string,
+  options: RequestInit,
+  requestTimeoutMs: number,
+  controls: FetchNodeAgentControls = {}
+): Promise<Response> {
+  const {
+    sourceTaskGuard,
+    beforeExternalMutation,
+    recoverContainerOnTimeout = true,
+    noWakeContainer = false,
+  } = controls;
+  if (!env.DATABASE || typeof env.DATABASE.prepare !== 'function') {
+    await beforeExternalMutation?.();
+    return fetchWithTimeout(url, options, requestTimeoutMs);
+  }
+
+  const db = drizzle(env.DATABASE, { schema });
+  const node = await db
+    .select({ runtime: schema.nodes.runtime })
+    .from(schema.nodes)
+    .where(eq(schema.nodes.id, nodeId))
+    .get();
+
+  if (node?.runtime !== 'cf-container') {
+    await beforeExternalMutation?.();
+    return fetchWithTimeout(url, options, requestTimeoutMs);
+  }
+
+  const config = getVmAgentContainerConfig(env);
+  if (!config.enabled) {
+    throw new Error('Container workspace runtime is disabled');
+  }
+  if (!env.VM_AGENT_CONTAINER) {
+    throw new Error('VM_AGENT_CONTAINER binding is unavailable');
+  }
+
+  const vmAgentPort = config.vmAgentPort;
+  const containerUrl = new URL(url);
+  containerUrl.protocol = 'http:';
+  containerUrl.hostname = 'localhost';
+  containerUrl.port = String(vmAgentPort);
+
+  // Known limitation (tracked: tasks/backlog/2026-07-21-instant-container-request-timeout-cancellation.md):
+  // the loser of this race is NOT cancelled. The container fetch is a
+  // VmAgentContainer DO RPC (fetchVmAgentContainer -> stub.proxyHttp), and an
+  // AbortSignal cannot be wired to it — passing a signal into the container node
+  // fetch is a proven regression (SPIKE PR #1544 "avoid abort signal in container
+  // node fetch"), which is exactly why requestInitWithoutSignal strips it. So on
+  // timeout the DO RPC keeps running and may still succeed, yet we mark the
+  // runtime interrupted below. That is over-eager for a slow-but-healthy request.
+  // Genuine cancellation requires the per-request timeout to live INSIDE
+  // proxyHttp, wrapping this.containerFetch (a real fetch that honors signals)
+  // with an AbortController — which needs the budget plumbed through
+  // fetchVmAgentContainer. Deferred to the tracked backlog task.
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+  try {
+    await beforeExternalMutation?.();
+    const response = await Promise.race([
+      noWakeContainer
+        ? fetchVmAgentContainerNoWake(
+            env,
+            nodeId,
+            new Request(containerUrl.toString(), requestInitWithoutSignal(options)),
+            vmAgentPort
+          )
+        : fetchVmAgentContainer(
+            env,
+            nodeId,
+            new Request(containerUrl.toString(), requestInitWithoutSignal(options)),
+            vmAgentPort,
+            sourceTaskGuard
+          ),
+      new Promise<Response>((_resolve, reject) => {
+        timeoutHandle = setTimeout(
+          () => reject(new Error(`Request timed out after ${requestTimeoutMs}ms`)),
+          requestTimeoutMs
+        );
+      }),
+    ]);
+    return response;
+  } catch (error) {
+    const timedOut = error instanceof Error && error.message.startsWith('Request timed out after ');
+    if (!timedOut) throw error;
+
+    // A delete timeout is deliberately ambiguous: the container request keeps
+    // running after the caller stops waiting, so starting recovery could revive
+    // or rotate the exact runtime that deletion has quarantined as `stopping`.
+    if (!recoverContainerOnTimeout) throw error;
+
+    const recovery = await markVmAgentContainerRequestInterrupted(env, nodeId, {
+      method: options.method ?? 'GET',
+      errorName: 'request_timeout',
+    }).catch(() => null);
+    if (recovery?.code && recovery.message) {
+      throw new NodeAgentRequestError(
+        runtimeRecoveryStatus(recovery.code),
+        recovery.code,
+        getRuntimeRecoveryMessage(recovery.code)
+      );
+    }
+    throw error;
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
+  }
+}
+
 export async function createWorkspaceOnNode(
   nodeId: string,
   env: Env,
@@ -196,6 +399,13 @@ export async function createWorkspaceOnNode(
     workspaceId: string;
     repository: string;
     branch: string;
+    /** Existing remote branch used as the clone base when `branch` is new. */
+    baseBranch?: string;
+    defaultBranch?: string;
+    repoProvider?: 'github' | 'artifacts' | 'gitlab';
+    cloneUrl?: string | null;
+    repositoryHost?: string | null;
+    repositoryPath?: string | null;
     callbackToken: string;
     gitUserName?: string | null;
     gitUserEmail?: string | null;
@@ -210,13 +420,27 @@ export async function createWorkspaceOnNode(
       password: string;
       ref: string;
     } | null;
-  }
+    projectId?: string;
+    taskId?: string;
+  },
+  options?: {
+    /**
+     * Override for the request timeout. cf-container creation must pass the
+     * create-workspace budget (getCfContainerCreateWorkspaceTimeoutMs) because
+     * the vm-agent clones synchronously inside this request; VM-node creation
+     * is a fast 202 dispatch ack and keeps the interactive default.
+     */
+    requestTimeoutMs?: number;
+  } & GuardedNodeAgentMutationOptions
 ): Promise<unknown> {
   return nodeAgentRequest(nodeId, env, '/workspaces', {
     method: 'POST',
     userId,
     workspaceId: workspace.workspaceId,
     body: JSON.stringify(workspace),
+    requestTimeoutMs: options?.requestTimeoutMs,
+    sourceTaskGuard: options?.sourceTaskGuard,
+    beforeExternalMutation: options?.beforeExternalMutation,
   });
 }
 
@@ -224,12 +448,38 @@ export async function stopWorkspaceOnNode(
   nodeId: string,
   workspaceId: string,
   env: Env,
-  userId: string
+  userId: string,
+  options?: {
+    requestTimeoutMs?: number;
+    expectedEvictionGeneration?: string;
+  } & GuardedNodeAgentMutationOptions
 ): Promise<unknown> {
+  let expectedEvictionGeneration = options?.expectedEvictionGeneration;
+  if (expectedEvictionGeneration === undefined) {
+    // Snapshot before network dispatch for older internal callers. This guards
+    // in-flight transport delay; callers with an earlier lifecycle claim must
+    // pass that claim's generation explicitly, as the Stop route does.
+    const workspace = await env.DATABASE.prepare(
+      `SELECT w.eviction_generation, n.runtime
+      FROM workspaces w JOIN nodes n ON n.id = w.node_id
+      WHERE w.id = ? AND w.node_id = ? AND w.user_id = ? AND n.user_id = ?`
+    )
+      .bind(workspaceId, nodeId, userId, userId)
+      .first<{ eviction_generation: string | null; runtime: string | null }>();
+    if (!workspace) throw new AppError(409, 'CONFLICT', 'Workspace stop identity changed');
+    if (workspace.runtime !== 'cf-container') {
+      expectedEvictionGeneration = workspace.eviction_generation ?? '';
+    }
+  }
   return nodeAgentRequest(nodeId, env, `/workspaces/${workspaceId}/stop`, {
     method: 'POST',
+    ...(expectedEvictionGeneration !== undefined
+      ? { body: JSON.stringify({ expectedEvictionGeneration }) }
+      : {}),
     userId,
     workspaceId,
+    requestTimeoutMs: options?.requestTimeoutMs,
+    beforeExternalMutation: options?.beforeExternalMutation,
   });
 }
 
@@ -237,12 +487,25 @@ export async function restartWorkspaceOnNode(
   nodeId: string,
   workspaceId: string,
   env: Env,
-  userId: string
+  userId: string,
+  options?: GuardedNodeAgentMutationOptions & {
+    evictionGeneration?: string;
+    expectedEvictionGeneration?: string;
+  }
 ): Promise<unknown> {
   return nodeAgentRequest(nodeId, env, `/workspaces/${workspaceId}/restart`, {
     method: 'POST',
+    ...(options?.evictionGeneration
+      ? {
+          body: JSON.stringify({
+            evictionGeneration: options.evictionGeneration,
+            expectedEvictionGeneration: options.expectedEvictionGeneration ?? '',
+          }),
+        }
+      : {}),
     userId,
     workspaceId,
+    beforeExternalMutation: options?.beforeExternalMutation,
   });
 }
 
@@ -250,13 +513,34 @@ export async function deleteWorkspaceOnNode(
   nodeId: string,
   workspaceId: string,
   env: Env,
-  userId: string
+  userId: string,
+  options?: { requestTimeoutMs?: number } & GuardedNodeAgentMutationOptions
 ): Promise<unknown> {
   return nodeAgentRequest(nodeId, env, `/workspaces/${workspaceId}`, {
     method: 'DELETE',
     userId,
     workspaceId,
+    requestTimeoutMs: options?.requestTimeoutMs,
+    beforeExternalMutation: options?.beforeExternalMutation,
+    recoverContainerOnTimeout: false,
   });
+}
+
+export async function teardownDeploymentEnvironmentOnNode(
+  nodeId: string,
+  environmentId: string,
+  env: Env,
+  userId: string
+): Promise<unknown> {
+  return nodeAgentRequest(
+    nodeId,
+    env,
+    `/deployment/environments/${encodeURIComponent(environmentId)}/teardown`,
+    {
+      method: 'POST',
+      userId,
+    }
+  );
 }
 
 export async function createAgentSessionOnNode(
@@ -268,33 +552,71 @@ export async function createAgentSessionOnNode(
   userId: string,
   chatSessionId?: string | null,
   projectId?: string | null,
+  mcpServers?: McpServerConfig[],
+  options?: GuardedNodeAgentMutationOptions,
+  interactionTaskMode?: string | null
 ): Promise<unknown> {
+  const body: Record<string, unknown> = {
+    sessionId,
+    label,
+    chatSessionId: chatSessionId ?? undefined,
+    projectId: projectId ?? undefined,
+  };
+  const serializedMcpServers = serializeMcpServers(mcpServers);
+  if (interactionTaskMode) {
+    body.acpInteractions = buildAcpInteractionRuntimeConfig(env, interactionTaskMode);
+  }
+  if (serializedMcpServers) {
+    body.mcpServers = serializedMcpServers;
+  }
+
   return nodeAgentRequest(nodeId, env, `/workspaces/${workspaceId}/agent-sessions`, {
     method: 'POST',
     userId,
     workspaceId,
-    body: JSON.stringify({
-      sessionId,
-      label,
-      chatSessionId: chatSessionId ?? undefined,
-      projectId: projectId ?? undefined,
-    }),
+    sourceTaskGuard: options?.sourceTaskGuard,
+    beforeExternalMutation: options?.beforeExternalMutation,
+    body: JSON.stringify(body),
   });
 }
 
-/** MCP server configuration passed to the VM agent for ACP session injection */
-export interface McpServerConfig {
-  url: string;
-  token: string;
+/**
+ * MCP server configuration passed to the VM agent for ACP session injection. The wire contract,
+ * including why `name` and `headers` are optional (rule 54), is `McpServerEntrySchema`.
+ */
+export type McpServerConfig = McpServerEntry;
+
+/**
+ * Serializes MCP servers for the vm-agent request body.
+ *
+ * Single choke point so the create and start paths cannot drift — historically both inlined
+ * their own single-element array literal, which is why adding a field here previously meant
+ * remembering two places.
+ */
+function serializeMcpServers(
+  mcpServers: McpServerConfig[] | undefined
+): McpServerConfig[] | undefined {
+  if (!mcpServers || mcpServers.length === 0) {
+    return undefined;
+  }
+  // Optional fields are sent only when set, so a server without them serializes byte-for-byte
+  // as it did before they existed.
+  return mcpServers.map((server) => ({
+    url: server.url,
+    token: server.token,
+    ...(server.name ? { name: server.name } : {}),
+    ...(server.headers?.length ? { headers: server.headers } : {}),
+  }));
 }
 
 /** Optional overrides for agent model and permission mode, resolved from agent profiles. */
 export interface AgentSessionOverrides {
   model?: string | null;
+  effort?: string | null;
   permissionMode?: string | null;
-  /** OpenCode inference provider (e.g. 'scaleway', 'anthropic', 'custom'). */
+  /** OpenCode inference provider ('opencode-zen', 'opencode-go', or 'custom'). */
   opencodeProvider?: string | null;
-  /** Base URL for custom/openai-compatible OpenCode providers. */
+  /** Base URL for the 'custom' OpenCode provider. */
   opencodeBaseUrl?: string | null;
 }
 
@@ -312,21 +634,32 @@ export async function startAgentSessionOnNode(
   initialPrompt: string,
   env: Env,
   userId: string,
-  mcpServer?: McpServerConfig,
+  mcpServers?: McpServerConfig[],
   overrides?: AgentSessionOverrides,
   taskContext?: AgentSessionTaskContext,
+  injectedInstructions?: string,
+  options?: GuardedNodeAgentMutationOptions
 ): Promise<unknown> {
-  const body: Record<string, unknown> = { agentType, initialPrompt };
-  if (mcpServer) {
-    body.mcpServers = [
-      {
-        url: mcpServer.url,
-        token: mcpServer.token,
-      },
-    ];
+  const body: Record<string, unknown> = {
+    agentType,
+    initialPrompt,
+    acpInteractions: buildAcpInteractionRuntimeConfig(env, taskContext?.taskMode),
+  };
+  if (injectedInstructions != null && injectedInstructions !== '') {
+    // SAM-injected system instructions delivered as a separate origin="system"
+    // prompt block (see buildInjectedInstructions). The agent reads it as model
+    // input; the UI collapses the mirrored message.
+    body.injectedInstructions = injectedInstructions;
+  }
+  const serializedMcpServers = serializeMcpServers(mcpServers);
+  if (serializedMcpServers) {
+    body.mcpServers = serializedMcpServers;
   }
   if (overrides?.model != null) {
     body.model = overrides.model;
+  }
+  if (overrides?.effort != null) {
+    body.effort = overrides.effort;
   }
   if (overrides?.permissionMode != null) {
     body.permissionMode = overrides.permissionMode;
@@ -344,17 +677,30 @@ export async function startAgentSessionOnNode(
       body.taskMode = taskContext.taskMode;
     }
   }
-  return nodeAgentRequest(
-    nodeId,
-    env,
-    `/workspaces/${workspaceId}/agent-sessions/${sessionId}/start`,
-    {
-      method: 'POST',
-      userId,
-      workspaceId,
-      body: JSON.stringify(body),
-    }
-  );
+  await options?.beforeExternalMutation?.();
+  await markVmAgentContainerActiveWorkStarted(env, nodeId, {
+    workspaceId,
+    agentSessionId: sessionId,
+    reason: 'start_agent_session',
+  });
+  try {
+    return await nodeAgentRequest(
+      nodeId,
+      env,
+      `/workspaces/${workspaceId}/agent-sessions/${sessionId}/start`,
+      {
+        method: 'POST',
+        userId,
+        workspaceId,
+        sourceTaskGuard: options?.sourceTaskGuard,
+        beforeExternalMutation: options?.beforeExternalMutation,
+        body: JSON.stringify(body),
+      }
+    );
+  } catch (err) {
+    await markVmAgentContainerActiveWorkEndedBestEffort(env, nodeId, 'start_agent_session_failed');
+    throw err;
+  }
 }
 
 export async function sendPromptToAgentOnNode(
@@ -365,22 +711,55 @@ export async function sendPromptToAgentOnNode(
   env: Env,
   userId: string,
   messageId?: string,
+  options?: {
+    requestTimeoutMs?: number;
+    protocolVersion?: number;
+    deliveryId?: string;
+    sourceTaskGuard?: VmAgentContainerRequestGuard;
+    beforeExternalMutation?: () => Promise<void>;
+  }
 ): Promise<unknown> {
-  const body: { prompt: string; messageId?: string } = { prompt };
+  const body: {
+    prompt: string;
+    messageId?: string;
+    protocolVersion?: number;
+    deliveryId?: string;
+  } = { prompt };
   if (messageId) body.messageId = messageId;
+  if (options?.protocolVersion !== undefined) body.protocolVersion = options.protocolVersion;
+  if (options?.deliveryId) body.deliveryId = options.deliveryId;
 
-  return nodeAgentRequest(
-    nodeId,
-    env,
-    `/workspaces/${workspaceId}/agent-sessions/${sessionId}/prompt`,
-    {
-      method: 'POST',
-      userId,
-      workspaceId,
-      body: JSON.stringify(body),
-    }
-  );
+  await markVmAgentContainerActiveWorkStarted(env, nodeId, {
+    workspaceId,
+    agentSessionId: sessionId,
+    reason: 'send_prompt',
+  });
+  try {
+    return await nodeAgentRequest(
+      nodeId,
+      env,
+      `/workspaces/${workspaceId}/agent-sessions/${sessionId}/prompt`,
+      {
+        method: 'POST',
+        userId,
+        workspaceId,
+        requestTimeoutMs: options?.requestTimeoutMs,
+        sourceTaskGuard: options?.sourceTaskGuard,
+        beforeExternalMutation: options?.beforeExternalMutation,
+        body: JSON.stringify(body),
+      }
+    );
+  } catch (err) {
+    await markVmAgentContainerActiveWorkEndedBestEffort(env, nodeId, 'send_prompt_failed');
+    throw err;
+  }
 }
+
+export type { HibernateCallbackTokenDelivery } from './node-agent-session-snapshots';
+export {
+  hibernateAgentSessionOnNode,
+  restoreAgentSessionOnNode,
+} from './node-agent-session-snapshots';
 
 /**
  * Cancel a running prompt on an agent session.
@@ -393,6 +772,7 @@ export async function cancelAgentSessionOnNode(
   sessionId: string,
   env: Env,
   userId: string,
+  options?: { requestTimeoutMs?: number }
 ): Promise<{ success: boolean; status: number }> {
   try {
     await nodeAgentRequest(
@@ -403,14 +783,23 @@ export async function cancelAgentSessionOnNode(
         method: 'POST',
         userId,
         workspaceId,
-      },
+        requestTimeoutMs: options?.requestTimeoutMs,
+      }
     );
+    await markVmAgentContainerActiveWorkEndedBestEffort(env, nodeId, 'cancel_agent_session');
     return { success: true, status: 200 };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     // Extract HTTP status from error message (format: "Node Agent request failed: 409 ...")
     const statusMatch = msg.match(/failed:\s*(\d{3})/);
     const status = statusMatch?.[1] ? parseInt(statusMatch[1], 10) : 500;
+    if (status === 409) {
+      await markVmAgentContainerActiveWorkEndedBestEffort(
+        env,
+        nodeId,
+        'cancel_agent_session_no_prompt'
+      );
+    }
     return { success: false, status };
   }
 }
@@ -420,18 +809,24 @@ export async function stopAgentSessionOnNode(
   workspaceId: string,
   sessionId: string,
   env: Env,
-  userId: string
+  userId: string,
+  options?: { requestTimeoutMs?: number }
 ): Promise<unknown> {
-  return nodeAgentRequest(
-    nodeId,
-    env,
-    `/workspaces/${workspaceId}/agent-sessions/${sessionId}/stop`,
-    {
-      method: 'POST',
-      userId,
-      workspaceId,
-    }
-  );
+  try {
+    return await nodeAgentRequest(
+      nodeId,
+      env,
+      `/workspaces/${workspaceId}/agent-sessions/${sessionId}/stop`,
+      {
+        method: 'POST',
+        userId,
+        workspaceId,
+        requestTimeoutMs: options?.requestTimeoutMs,
+      }
+    );
+  } finally {
+    await markVmAgentContainerActiveWorkEndedBestEffort(env, nodeId, 'stop_agent_session');
+  }
 }
 
 export async function suspendAgentSessionOnNode(
@@ -476,12 +871,14 @@ export async function listAgentSessionsOnNode(
   nodeId: string,
   workspaceId: string,
   env: Env,
-  userId: string
+  userId: string,
+  options?: { requestTimeoutMs?: number }
 ): Promise<unknown> {
   return nodeAgentRequest(nodeId, env, `/workspaces/${workspaceId}/agent-sessions`, {
     method: 'GET',
     userId,
     workspaceId,
+    requestTimeoutMs: options?.requestTimeoutMs,
   });
 }
 
@@ -491,10 +888,13 @@ export async function listNodeEventsOnNode(
   userId: string,
   limit = 100
 ): Promise<{ events: unknown[]; nextCursor?: string | null }> {
-  const payload = expectJsonRecord(await nodeAgentRequest(nodeId, env, `/events?limit=${limit}`, {
-    method: 'GET',
-    userId,
-  }), 'node-agent.events');
+  const payload = expectJsonRecord(
+    await nodeAgentRequest(nodeId, env, `/events?limit=${limit}`, {
+      method: 'GET',
+      userId,
+    }),
+    'node-agent.events'
+  );
   if (!Array.isArray(payload.events)) {
     throw new Error('Node Agent events response missing events array');
   }
@@ -502,30 +902,6 @@ export async function listNodeEventsOnNode(
     events: payload.events,
     nextCursor: typeof payload.nextCursor === 'string' ? payload.nextCursor : null,
   };
-}
-
-export async function getNodeSystemInfoFromNode(
-  nodeId: string,
-  env: Env,
-  userId: string
-): Promise<unknown> {
-  return nodeAgentRequest(nodeId, env, '/system-info', {
-    method: 'GET',
-    userId,
-  });
-}
-
-export async function getNodeLogsFromNode(
-  nodeId: string,
-  env: Env,
-  userId: string,
-  queryString: string
-): Promise<unknown> {
-  const path = queryString ? `/logs?${queryString}` : '/logs';
-  return nodeAgentRequest(nodeId, env, path, {
-    method: 'GET',
-    userId,
-  });
 }
 
 /**
@@ -547,18 +923,105 @@ export async function nodeAgentRawRequest(
 
   const DEFAULT_EXPORT_TIMEOUT_MS = 60_000;
   const timeoutMs = getTimeoutMs(env.NODE_AGENT_REQUEST_TIMEOUT_MS, DEFAULT_EXPORT_TIMEOUT_MS);
-  return fetchWithTimeout(url, { method: 'GET', headers }, timeoutMs);
+  return fetchNodeAgent(nodeId, env, url, { method: 'GET', headers }, timeoutMs);
+}
+
+export async function getWorkspacePortsOnNode(
+  nodeId: string,
+  workspaceId: string,
+  env: Env,
+  userId: string
+): Promise<unknown> {
+  // The VM agent ports endpoint is workspace-scoped and uses the same
+  // workspace-terminal audience accepted by browser/direct workspace calls.
+  // A node-management token fails requireWorkspaceRequestAuth().
+  const { token } = await signTerminalToken(userId, workspaceId, env);
+  const url = `${getNodeBackendBaseUrl(nodeId, env)}/workspaces/${workspaceId}/ports`;
+  const headers = new Headers();
+  headers.set('Authorization', `Bearer ${token}`);
+  headers.set('X-SAM-Node-Id', nodeId);
+  headers.set('X-SAM-Workspace-Id', workspaceId);
+
+  const startedAt = Date.now();
+  recordNodeRoutingMetric(
+    {
+      metric: 'node_agent_request',
+      nodeId,
+      workspaceId,
+    },
+    env
+  );
+
+  const requestTimeoutMs = getTimeoutMs(
+    env.NODE_AGENT_REQUEST_TIMEOUT_MS,
+    DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS
+  );
+  let response: Response;
+  try {
+    response = await fetchNodeAgent(
+      nodeId,
+      env,
+      url,
+      {
+        method: 'GET',
+        headers,
+      },
+      requestTimeoutMs
+    );
+  } catch (err) {
+    if (!isNodeAgentTransportError(err)) throw err;
+    throw new NodeAgentFetchError(err instanceof Error ? err.message : String(err));
+  }
+
+  recordNodeRoutingMetric(
+    {
+      metric: 'node_agent_response',
+      nodeId,
+      workspaceId,
+      statusCode: response.status,
+      durationMs: Date.now() - startedAt,
+    },
+    env
+  );
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new NodeAgentHttpError(response.status, body);
+  }
+
+  try {
+    return await response.json();
+  } catch (err) {
+    throw new Error(
+      err instanceof Error
+        ? `Node Agent returned invalid JSON: ${err.message}`
+        : 'Node Agent returned invalid JSON'
+    );
+  }
 }
 
 export async function rebuildWorkspaceOnNode(
   nodeId: string,
   workspaceId: string,
   env: Env,
-  userId: string
+  userId: string,
+  options?: GuardedNodeAgentMutationOptions & {
+    evictionGeneration?: string;
+    expectedEvictionGeneration?: string;
+  }
 ): Promise<unknown> {
   return nodeAgentRequest(nodeId, env, `/workspaces/${workspaceId}/rebuild`, {
     method: 'POST',
+    ...(options?.evictionGeneration
+      ? {
+          body: JSON.stringify({
+            evictionGeneration: options.evictionGeneration,
+            expectedEvictionGeneration: options.expectedEvictionGeneration ?? '',
+          }),
+        }
+      : {}),
     userId,
     workspaceId,
+    beforeExternalMutation: options?.beforeExternalMutation,
   });
 }

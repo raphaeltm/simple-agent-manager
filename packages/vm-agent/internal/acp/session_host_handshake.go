@@ -10,14 +10,21 @@ import (
 	"github.com/workspace/vm-agent/internal/sysinfo"
 )
 
-func (h *SessionHost) establishACPSession(ctx context.Context, agentType string, settings *agentSettingsPayload, previousAcpSessionID string) error {
+func (h *SessionHost) establishACPSession(ctx context.Context, agentType string, settings *agentSettingsPayload, previousAcpSessionID string, requireLoadSession bool) error {
 	timeouts := h.acpPhaseTimeouts()
 	initResp, err := h.initializeACP(ctx, agentType, timeouts.initialize)
 	if err != nil {
 		return err
 	}
-	if h.tryLoadPreviousACPSession(ctx, agentType, settings, previousAcpSessionID, initResp.AgentCapabilities.LoadSession, timeouts.loadSession) {
-		return nil
+	loaded, err := h.tryLoadPreviousACPSession(ctx, agentType, settings, previousAcpSessionID, initResp.AgentCapabilities.LoadSession, timeouts.loadSession, !requireLoadSession)
+	if loaded {
+		return err
+	}
+	if requireLoadSession {
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("ACP LoadSession required for crash recovery but no previous session is available")
 	}
 	return h.startNewACPSession(ctx, agentType, settings, timeouts.newSession)
 }
@@ -46,15 +53,25 @@ func (h *SessionHost) initializeACP(ctx context.Context, agentType string, timeo
 
 	slog.Info("ACP: sending Initialize request", "timeout", timeout)
 	h.reportLifecycle("info", "ACP Initialize started", map[string]interface{}{"agentType": agentType})
+	capabilities := acpsdk.ClientCapabilities{
+		Fs: acpsdk.FileSystemCapabilities{ReadTextFile: true, WriteTextFile: true},
+	}
+	if config := h.acpInteractionConfigSnapshot(); config.Enabled && config.validate() == nil && (config.FormsEnabled || config.URLsEnabled) {
+		capabilities.Elicitation = &acpsdk.ElicitationCapabilities{}
+		if config.FormsEnabled {
+			capabilities.Elicitation.Form = &acpsdk.ElicitationFormCapabilities{}
+		}
+		if config.URLsEnabled {
+			capabilities.Elicitation.Url = &acpsdk.ElicitationUrlCapabilities{}
+		}
+	}
 	resp, err := h.acpConn.Initialize(initCtx, acpsdk.InitializeRequest{
 		ProtocolVersion: acpsdk.ProtocolVersionNumber,
 		ClientInfo: &acpsdk.Implementation{
 			Name:    "sam",
 			Version: sysinfo.Version,
 		},
-		ClientCapabilities: acpsdk.ClientCapabilities{
-			Fs: acpsdk.FileSystemCapabilities{ReadTextFile: true, WriteTextFile: true},
-		},
+		ClientCapabilities: capabilities,
 	})
 	if err != nil {
 		h.reportLifecycle("warn", "ACP Initialize failed", map[string]interface{}{
@@ -64,6 +81,7 @@ func (h *SessionHost) initializeACP(ctx context.Context, agentType string, timeo
 		return acpsdk.InitializeResponse{}, fmt.Errorf("ACP initialize failed: %w", err)
 	}
 	cancel()
+	h.agentSupportsLoadSession = resp.AgentCapabilities.LoadSession
 	slog.Info("ACP: Initialize succeeded", "loadSession", resp.AgentCapabilities.LoadSession)
 	h.reportLifecycle("info", "ACP Initialize succeeded", map[string]interface{}{
 		"agentType":           agentType,
@@ -79,15 +97,31 @@ func (h *SessionHost) tryLoadPreviousACPSession(
 	previousAcpSessionID string,
 	supportsLoadSession bool,
 	timeout time.Duration,
-) bool {
+	allowNewSessionFallback bool,
+) (bool, error) {
 	if previousAcpSessionID == "" {
-		return false
+		return false, nil
 	}
 	if !supportsLoadSession {
-		slog.Info("ACP: agent does not support LoadSession, using NewSession instead")
-		h.reportLifecycle("info", "Agent does not support LoadSession", map[string]interface{}{"agentType": agentType})
-		return false
+		message := "Agent does not support LoadSession"
+		if allowNewSessionFallback {
+			message = "Agent does not support LoadSession, using NewSession instead"
+		}
+		slog.Info("ACP: " + message)
+		h.reportLifecycle("info", message, map[string]interface{}{"agentType": agentType})
+		return false, fmt.Errorf("agent %s does not support LoadSession", agentType)
 	}
+
+	// Suppress the transcript replay that LoadSession emits as session/update
+	// notifications. The flag is checked lock-free in sessionHostClient.SessionUpdate.
+	// Scope it to the end of this function (covering applySessionSettings's RPC
+	// round-trips) so the replay window stays closed past the LoadSession response,
+	// which the orderedPipe delivers without waiting on the final replayed update.
+	// Accepted tradeoff: any genuine session/update the agent emits while
+	// applySessionSettings runs (e.g. a SetSessionConfigOption/SetSessionMode
+	// acknowledgement) is also suppressed. Tested agents do not do this.
+	h.replaySuppressed.Store(true)
+	defer h.replaySuppressed.Store(false)
 
 	loadCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -98,23 +132,31 @@ func (h *SessionHost) tryLoadPreviousACPSession(
 		"previousAcpSessionID": previousAcpSessionID,
 	})
 	h.reportEvent("info", "agent.load_session", "Restoring previous conversation", map[string]interface{}{"previousAcpSessionID": previousAcpSessionID})
-	_, loadErr := h.acpConn.LoadSession(loadCtx, acpsdk.LoadSessionRequest{
+	loadResp, loadErr := h.acpConn.LoadSession(loadCtx, acpsdk.LoadSessionRequest{
 		SessionId:  acpsdk.SessionId(previousAcpSessionID),
 		Cwd:        h.config.ContainerWorkDir,
-		McpServers: buildAcpMcpServers(h.config.McpServers),
+		McpServers: buildAcpMcpServers(h.config.McpServers, agentType),
+		Meta:       harnessLifecycleSessionMeta(agentType),
 	})
 	cancel()
 	if loadErr != nil {
-		slog.Warn("ACP: LoadSession failed, falling back to NewSession", "error", loadErr)
-		h.reportLifecycle("warn", "ACP LoadSession failed, falling back to NewSession", map[string]interface{}{
+		message := "ACP LoadSession failed"
+		eventMessage := "Could not restore conversation"
+		if allowNewSessionFallback {
+			message = "ACP LoadSession failed, falling back to NewSession"
+			eventMessage = "Could not restore conversation, starting fresh"
+		}
+		slog.Warn("ACP: "+message, "error", loadErr)
+		h.reportLifecycle("warn", message, map[string]interface{}{
 			"agentType": agentType,
 			"error":     loadErr.Error(),
 		})
-		h.reportEvent("warn", "agent.load_session_failed", "Could not restore conversation, starting fresh", map[string]interface{}{"error": loadErr.Error()})
-		return false
+		h.reportEvent("warn", "agent.load_session_failed", eventMessage, map[string]interface{}{"error": loadErr.Error()})
+		return false, fmt.Errorf("ACP LoadSession failed: %w", loadErr)
 	}
 
-	h.sessionID = acpsdk.SessionId(previousAcpSessionID)
+	h.setSessionIDLocked(acpsdk.SessionId(previousAcpSessionID))
+	h.configOptions = loadResp.ConfigOptions
 	slog.Info("ACP: LoadSession succeeded", "sessionID", previousAcpSessionID)
 	h.reportLifecycle("info", "ACP LoadSession succeeded", map[string]interface{}{
 		"agentType":    agentType,
@@ -122,8 +164,10 @@ func (h *SessionHost) tryLoadPreviousACPSession(
 	})
 	h.reportEvent("info", "agent.load_session_ok", "Previous conversation restored", map[string]interface{}{"acpSessionId": previousAcpSessionID})
 	h.persistAcpSessionID(agentType)
-	h.applySessionSettings(ctx, settings)
-	return true
+	if err := h.applySessionSettings(ctx, settings); err != nil {
+		return true, fmt.Errorf("ACP loaded session settings failed: %w", err)
+	}
+	return true, nil
 }
 
 func (h *SessionHost) startNewACPSession(ctx context.Context, agentType string, settings *agentSettingsPayload, timeout time.Duration) error {
@@ -134,7 +178,8 @@ func (h *SessionHost) startNewACPSession(ctx context.Context, agentType string, 
 	h.reportLifecycle("info", "ACP NewSession started", map[string]interface{}{"agentType": agentType})
 	sessResp, err := h.acpConn.NewSession(newCtx, acpsdk.NewSessionRequest{
 		Cwd:        h.config.ContainerWorkDir,
-		McpServers: buildAcpMcpServers(h.config.McpServers),
+		McpServers: buildAcpMcpServers(h.config.McpServers, agentType),
+		Meta:       harnessLifecycleSessionMeta(agentType),
 	})
 	if err != nil {
 		h.reportLifecycle("warn", "ACP NewSession failed", map[string]interface{}{
@@ -144,14 +189,17 @@ func (h *SessionHost) startNewACPSession(ctx context.Context, agentType string, 
 		return fmt.Errorf("ACP new session failed: %w", err)
 	}
 	cancel()
-	h.sessionID = sessResp.SessionId
+	h.setSessionIDLocked(sessResp.SessionId)
+	h.configOptions = sessResp.ConfigOptions
 	slog.Info("ACP: NewSession succeeded", "sessionID", string(h.sessionID))
 	h.reportLifecycle("info", "ACP NewSession succeeded", map[string]interface{}{
 		"agentType":    agentType,
 		"acpSessionId": string(h.sessionID),
 	})
 	h.persistAcpSessionID(agentType)
-	h.applySessionSettings(ctx, settings)
+	if err := h.applySessionSettings(ctx, settings); err != nil {
+		return fmt.Errorf("ACP new session settings failed: %w", err)
+	}
 
 	return nil
 }

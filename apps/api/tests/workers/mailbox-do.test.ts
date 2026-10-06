@@ -7,11 +7,14 @@
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
-import type { ProjectData } from '../../src/durable-objects/project-data';
+import {
+  captureProjectDataExpectedError,
+  type ProjectDataTestDouble,
+} from './support/expected-error-doubles';
 
-function getStub(projectId: string): DurableObjectStub<ProjectData> {
+function getStub(projectId: string): DurableObjectStub<ProjectDataTestDouble> {
   const id = env.PROJECT_DATA.idFromName(projectId);
-  return env.PROJECT_DATA.get(id) as DurableObjectStub<ProjectData>;
+  return env.PROJECT_DATA.get(id) as DurableObjectStub<ProjectDataTestDouble>;
 }
 
 describe('Agent Mailbox (Durable Messaging)', () => {
@@ -39,6 +42,8 @@ describe('Agent Mailbox (Durable Messaging)', () => {
       expect(msg.messageClass).toBe('notify');
       expect(msg.ackRequired).toBe(false); // notify is best-effort
       expect(msg.content).toBe('Hello from parent');
+      expect(msg.expiresAt).not.toBeNull();
+      expect(msg.expiresAt! - msg.createdAt).toBe(3_600_000);
     });
 
     it('enqueues a durable message with ackRequired=true', async () => {
@@ -159,6 +164,27 @@ describe('Agent Mailbox (Durable Messaging)', () => {
       // Cannot ack a queued message (must be delivered first)
       const acked = await stub.acknowledgeMailboxMessage(msg.id);
       expect(acked).toBe(false);
+    });
+
+    it('increments delivery attempts when requeueing for redelivery', async () => {
+      const stub = getStub('mailbox-requeue-attempt-test');
+      const sessionId = await stub.createSession(null, 'Redelivery attempts');
+      const msg = await stub.enqueueMailboxMessage({
+        targetSessionId: sessionId,
+        sourceTaskId: 'task-redelivery-1',
+        senderType: 'agent',
+        senderId: null,
+        messageClass: 'deliver',
+        content: 'Retry this message',
+      });
+
+      await stub.markMailboxMessageDelivered(msg.id);
+      expect((await stub.getMailboxMessage(msg.id))!.deliveryAttempts).toBe(1);
+
+      await stub.requeueMailboxMessage(msg.id);
+      const requeued = await stub.getMailboxMessage(msg.id);
+      expect(requeued!.deliveryState).toBe('queued');
+      expect(requeued!.deliveryAttempts).toBe(2);
     });
 
     it('cannot ack an already expired message', async () => {
@@ -334,19 +360,26 @@ describe('Agent Mailbox (Durable Messaging)', () => {
         });
       }
 
-      // The 4th should fail
-      await expect(
-        stub.enqueueMailboxMessage({
-          targetSessionId: sessionId,
-          sourceTaskId: 'task-cap-overflow',
-          senderType: 'agent',
-          senderId: null,
-          messageClass: 'notify',
-          content: 'Overflow',
-          metadata: null,
-          maxMessages: 3,
-        }),
-      ).rejects.toThrow(/message limit/i);
+      const rejection = await captureProjectDataExpectedError(stub, {
+        operation: 'enqueueMailboxMessage',
+        args: [
+          {
+            targetSessionId: sessionId,
+            sourceTaskId: 'task-cap-overflow',
+            senderType: 'agent',
+            senderId: null,
+            messageClass: 'notify',
+            content: 'Overflow',
+            metadata: null,
+            maxMessages: 3,
+          },
+        ],
+      });
+
+      expect(rejection).toMatchObject({ threw: true });
+      expect(rejection.message).toMatch(/message limit/i);
+      const { total } = await stub.listMailboxMessages({});
+      expect(total).toBe(3);
     });
   });
 

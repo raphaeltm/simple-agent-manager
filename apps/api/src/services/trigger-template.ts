@@ -4,17 +4,19 @@ import {
   DEFAULT_CRON_TEMPLATE_MAX_LENGTH,
 } from '@simple-agent-manager/shared';
 
+import { canonicalJson } from '../lib/canonical-json';
 import { maybeJsonRecord } from '../lib/runtime-validation';
 
 // =============================================================================
 // Mustache-Style Template Rendering Engine
 // Supports {{variable.path}} interpolation with safety guarantees:
 // - No triple-brace (unescaped) support
-// - HTML entities sanitized in interpolated values
+// - Plain-text values are preserved; objects and arrays use canonical compact JSON
 // - Per-field and total length limits enforced
 // =============================================================================
 
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const TRUNCATION_MARKER = '[truncated by SAM]';
 
 export interface RenderResult {
   rendered: string;
@@ -25,9 +27,10 @@ export interface RenderResult {
  * Render a Mustache-style template with the given context.
  *
  * - Replaces `{{path.to.value}}` with the corresponding context value
- * - Missing variables are replaced with empty string and generate a warning
+ * - Missing (`undefined`) variables are replaced with empty string and generate a warning
+ * - `null` renders as `null`; objects and arrays render as canonical compact JSON
  * - Triple-braces `{{{...}}}` are not supported (treated as `{{...}}` with extra braces left)
- * - HTML special characters in interpolated values are escaped
+ * - Strings are inserted as plain text without HTML entity encoding
  *
  * @param template - The template string with {{variable}} placeholders
  * @param context - Key-value context object (supports nested paths via dot notation)
@@ -47,29 +50,26 @@ export function renderTemplate(
     const trimmedPath = path.trim();
     const value = resolvePath(context, trimmedPath);
 
-    if (value === undefined || value === null) {
+    if (value === undefined) {
       warnings.push(`Missing variable: {{${trimmedPath}}}`);
       return '';
     }
 
-    let strValue = String(value);
+    let strValue = serializeTemplateValue(value);
 
     // Enforce per-field length limit
     if (strValue.length > maxFieldLength) {
-      strValue = strValue.slice(0, maxFieldLength);
-      warnings.push(
-        `Variable {{${trimmedPath}}} truncated to ${maxFieldLength} characters`
-      );
+      strValue = truncateWithMarker(strValue, maxFieldLength);
+      warnings.push(`Variable {{${trimmedPath}}} truncated to ${maxFieldLength} characters`);
     }
 
-    // Sanitize HTML special characters to prevent injection
-    return sanitizeHtml(strValue);
+    return strValue;
   });
 
   // Enforce total length limit
   if (rendered.length > maxLength) {
     warnings.push(`Rendered template truncated to ${maxLength} characters`);
-    return { rendered: rendered.slice(0, maxLength), warnings };
+    return { rendered: truncateWithMarker(rendered, maxLength), warnings };
   }
 
   return { rendered, warnings };
@@ -95,14 +95,19 @@ function resolvePath(obj: Record<string, unknown>, path: string): unknown {
   return current;
 }
 
-/** Escape HTML special characters to prevent injection in rendered prompts. */
-function sanitizeHtml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#x27;');
+function serializeTemplateValue(value: unknown): string {
+  if (value === null) return 'null';
+  if (typeof value === 'object') return canonicalJson(value);
+  return String(value);
+}
+
+function truncateWithMarker(value: string, maxLength: number): string {
+  const boundedLength = Math.max(0, maxLength);
+  if (value.length <= boundedLength) return value;
+  if (boundedLength <= TRUNCATION_MARKER.length) {
+    return TRUNCATION_MARKER.slice(0, boundedLength);
+  }
+  return value.slice(0, boundedLength - TRUNCATION_MARKER.length) + TRUNCATION_MARKER;
 }
 
 /**
@@ -116,7 +121,10 @@ function sanitizeHtml(str: string): string {
  * @param sequenceNumber - The execution sequence number for this trigger
  */
 export function buildCronContext(
-  trigger: Pick<Trigger, 'id' | 'name' | 'description' | 'triggerCount' | 'cronTimezone' | 'projectId'>,
+  trigger: Pick<
+    Trigger,
+    'id' | 'name' | 'description' | 'triggerCount' | 'cronTimezone' | 'projectId'
+  >,
   now: Date,
   projectName: string,
   executionId: string,

@@ -1,4 +1,4 @@
-import type { NodeLogLevel,NodeLogSource } from '@simple-agent-manager/shared';
+import type { NodeContainerLogTarget, NodeLogLevel,NodeLogSource } from '@simple-agent-manager/shared';
 import { type FC, useEffect, useRef,useState } from 'react';
 
 interface LogFiltersProps {
@@ -6,6 +6,8 @@ interface LogFiltersProps {
   level: NodeLogLevel;
   search: string;
   container: string;
+  containers: NodeContainerLogTarget[];
+  containersLoading?: boolean;
   onSourceChange: (source: NodeLogSource) => void;
   onLevelChange: (level: NodeLogLevel) => void;
   onSearchChange: (search: string) => void;
@@ -19,6 +21,8 @@ export const LogFilters: FC<LogFiltersProps> = ({
   level,
   search,
   container,
+  containers,
+  containersLoading = false,
   onSourceChange,
   onLevelChange,
   onSearchChange,
@@ -44,8 +48,9 @@ export const LogFilters: FC<LogFiltersProps> = ({
   return (
     <div className="flex gap-3 items-end flex-wrap">
       <div className="flex flex-col">
-        <label className="text-fg-muted font-semibold uppercase tracking-wide mb-0.5" style={{ fontSize: '0.625rem', letterSpacing: '0.05em' }}>Source</label>
+        <label htmlFor="node-log-source" className="text-fg-muted font-semibold uppercase tracking-wide mb-0.5" style={{ fontSize: '0.625rem', letterSpacing: '0.05em' }}>Source</label>
         <select
+          id="node-log-source"
           className="px-2 py-1 rounded-sm text-fg-primary outline-none"
           style={{ fontSize: 'var(--sam-type-caption-size, 0.75rem)' }}
           value={source}
@@ -60,8 +65,9 @@ export const LogFilters: FC<LogFiltersProps> = ({
       </div>
 
       <div className="flex flex-col">
-        <label className="text-fg-muted font-semibold uppercase tracking-wide mb-0.5" style={{ fontSize: '0.625rem', letterSpacing: '0.05em' }}>Level</label>
+        <label htmlFor="node-log-level" className="text-fg-muted font-semibold uppercase tracking-wide mb-0.5" style={{ fontSize: '0.625rem', letterSpacing: '0.05em' }}>Level</label>
         <select
+          id="node-log-level"
           className="px-2 py-1 rounded-sm text-fg-primary outline-none"
           style={{ fontSize: 'var(--sam-type-caption-size, 0.75rem)' }}
           value={level}
@@ -76,21 +82,32 @@ export const LogFilters: FC<LogFiltersProps> = ({
 
       {(source === 'docker' || source === 'all') && (
         <div className="flex flex-col min-w-[140px]">
-          <label className="text-fg-muted font-semibold uppercase tracking-wide mb-0.5" style={{ fontSize: '0.625rem', letterSpacing: '0.05em' }}>Container</label>
-          <input
-            type="text"
-            placeholder="All containers"
+          <label htmlFor="node-log-container" className="text-fg-muted font-semibold uppercase tracking-wide mb-0.5" style={{ fontSize: '0.625rem', letterSpacing: '0.05em' }}>Container</label>
+          <select
+            id="node-log-container"
             value={container}
             onChange={(e) => onContainerChange(e.target.value)}
             className="px-2 py-1 rounded-sm text-fg-primary outline-none min-w-[120px]"
             style={{ fontSize: 'var(--sam-type-caption-size, 0.75rem)' }}
-          />
+            disabled={containersLoading}
+          >
+            <option value="">{containersLoading ? 'Loading containers...' : 'All containers'}</option>
+            {containers.map((target) => (
+              <option key={target.name} value={target.name}>
+                {target.name}
+              </option>
+            ))}
+            {container && !containers.some((target) => target.name === container) && (
+              <option value={container}>{container}</option>
+            )}
+          </select>
         </div>
       )}
 
       <div className="flex flex-col flex-1 min-w-40">
-        <label className="text-fg-muted font-semibold uppercase tracking-wide mb-0.5" style={{ fontSize: '0.625rem', letterSpacing: '0.05em' }}>Search</label>
+        <label htmlFor="node-log-search" className="text-fg-muted font-semibold uppercase tracking-wide mb-0.5" style={{ fontSize: '0.625rem', letterSpacing: '0.05em' }}>Search</label>
         <input
+          id="node-log-search"
           type="text"
           placeholder="Search logs..."
           value={localSearch}

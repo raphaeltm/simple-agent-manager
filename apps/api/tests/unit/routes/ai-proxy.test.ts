@@ -12,6 +12,7 @@ import {
   normalizeModelId,
   resolveModelId,
 } from '../../../src/routes/ai-proxy';
+import { buildAIGatewayMetadata, buildWorkersAIGatewayUrl } from '../../../src/services/ai-proxy-shared';
 
 // =============================================================================
 // Model Normalization
@@ -95,13 +96,13 @@ describe('model allowlist parsing', () => {
 
   it('handles mixed provider model lists', () => {
     const models = parseAndNormalizeModels(
-      '@cf/meta/llama-4-scout-17b-16e-instruct,claude-sonnet-4-6,gpt-4.1,@cf/google/gemma-3-12b-it',
+      '@cf/meta/llama-4-scout-17b-16e-instruct,claude-sonnet-4-6,gpt-4.1,@cf/qwen/qwen3-30b-a3b-fp8',
     );
     expect(models.size).toBe(4);
     expect(models.has('@cf/meta/llama-4-scout-17b-16e-instruct')).toBe(true);
     expect(models.has('claude-sonnet-4-6')).toBe(true);
     expect(models.has('gpt-4.1')).toBe(true);
-    expect(models.has('@cf/google/gemma-3-12b-it')).toBe(true);
+    expect(models.has('@cf/qwen/qwen3-30b-a3b-fp8')).toBe(true);
   });
 });
 
@@ -244,7 +245,6 @@ describe('isOpenAIModel', () => {
 
   it('does not match Workers AI models', () => {
     expect(isOpenAIModel('@cf/meta/llama-4-scout-17b-16e-instruct')).toBe(false);
-    expect(isOpenAIModel('@cf/google/gemma-3-12b-it')).toBe(false);
   });
 
   it('does not match Anthropic models', () => {
@@ -278,7 +278,6 @@ describe('getModelProvider', () => {
   it('returns workers-ai for @cf/ models', () => {
     expect(getModelProvider('@cf/meta/llama-4-scout-17b-16e-instruct')).toBe('workers-ai');
     expect(getModelProvider('@cf/qwen/qwen3-30b-a3b-fp8')).toBe('workers-ai');
-    expect(getModelProvider('@cf/google/gemma-3-12b-it')).toBe('workers-ai');
   });
 
   it('returns workers-ai for unknown models', () => {
@@ -341,5 +340,37 @@ describe('PLATFORM_AI_MODELS catalog', () => {
     for (const m of PLATFORM_AI_MODELS) {
       expect(getModelProvider(m.id)).toBe(m.provider);
     }
+  });
+});
+
+
+describe('AI Gateway shared metadata', () => {
+  it('includes chat session id when provided', () => {
+    const metadata = JSON.parse(buildAIGatewayMetadata({
+      userId: 'user-1',
+      workspaceId: 'workspace-1',
+      projectId: 'project-1',
+      sessionId: 'session-1',
+      trialId: 'trial-1',
+      modelId: '@cf/test/model',
+      stream: true,
+      hasTools: true,
+    }));
+
+    expect(metadata).toMatchObject({
+      userId: 'user-1',
+      workspaceId: 'workspace-1',
+      projectId: 'project-1',
+      sessionId: 'session-1',
+      trialId: 'trial-1',
+      modelId: '@cf/test/model',
+      stream: true,
+      hasTools: true,
+    });
+  });
+
+  it('builds the shared Workers AI Gateway URL', () => {
+    expect(buildWorkersAIGatewayUrl({ CF_ACCOUNT_ID: 'account-1', AI_GATEWAY_ID: 'gateway-1' } as never))
+      .toBe('https://gateway.ai.cloudflare.com/v1/account-1/gateway-1/workers-ai/v1/chat/completions');
   });
 });

@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,15 +24,19 @@ import (
 	"github.com/workspace/vm-agent/internal/callbackretry"
 	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/container"
+	"github.com/workspace/vm-agent/internal/gitrepo"
 )
 
 const (
-	maxBackoff = 30 * time.Second
+	gitBinaryPath = "/usr/bin/git"
+	maxBackoff    = 30 * time.Second
 
 	// volumePrefix is prepended to workspace IDs to form Docker named volume names.
 	volumePrefix = "sam-ws-"
 
 	buildErrorLogFilename = ".devcontainer-build-error.log"
+	devcontainerDirname   = ".devcontainer"
+	devcontainerFilename  = "devcontainer.json"
 
 	workspaceReadyStatusRunning  = "running"
 	workspaceReadyStatusRecovery = "recovery"
@@ -92,13 +97,15 @@ type bootstrapState struct {
 }
 
 type ProjectRuntimeEnvVar struct {
-	Key   string
-	Value string
+	Key      string
+	Value    string
+	IsSecret bool
 }
 
 type ProjectRuntimeFile struct {
-	Path    string
-	Content string
+	Path     string
+	Content  string
+	IsSecret bool
 }
 
 // ProvisionState carries optional credential and git identity data used when
@@ -108,6 +115,10 @@ type ProvisionState struct {
 	GitUserName            string
 	GitUserEmail           string
 	GitHubID               string
+	RepoProvider           string
+	CloneURL               string
+	RepositoryHost         string
+	RepositoryPath         string
 	ProjectEnvVars         []ProjectRuntimeEnvVar
 	ProjectFiles           []ProjectRuntimeFile
 	Lightweight            bool   // Skip devcontainer build, use fallback image for faster startup
@@ -271,7 +282,7 @@ func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) er
 	bootstrapSucceeded = true
 
 	reporter.Log("workspace_ready", "started", "Marking workspace ready")
-	if err := markWorkspaceReady(ctx, cfg, readyStatus); err != nil {
+	if err := markWorkspaceReady(ctx, cfg, readyStatus, ""); err != nil {
 		reporter.Log("workspace_ready", "failed", "Failed to mark workspace ready", err.Error())
 		return &CallbackError{Err: err, Status: readyStatus}
 	}
@@ -302,6 +313,10 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 		GitUserEmail:  strings.TrimSpace(state.GitUserEmail),
 		GitHubID:      strings.TrimSpace(state.GitHubID),
 	}
+	cfg.RepoProvider = strings.TrimSpace(state.RepoProvider)
+	cfg.CloneURL = strings.TrimSpace(state.CloneURL)
+	cfg.RepositoryHost = strings.TrimSpace(state.RepositoryHost)
+	cfg.RepositoryPath = strings.TrimSpace(state.RepositoryPath)
 
 	// Create a named Docker volume for container-mode workspaces.
 	volumeName := ""
@@ -323,6 +338,12 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 	}
 	reporter.Log("git_clone", "completed", "Repository cloned")
 
+	repoHasDevcontainerConfig := hasDevcontainerConfig(cfg.WorkspaceDir)
+	effectiveWorkspaceProfile := ""
+	if state.Lightweight || (state.DevcontainerConfigName == "" && !repoHasDevcontainerConfig) {
+		effectiveWorkspaceProfile = "lightweight"
+	}
+
 	// Pre-generate credential helper on the VM host so it can be bind-mounted
 	// into the container during devcontainer lifecycle hooks.
 	credHelperHostPath, credErr := writeCredentialHelperToHost(cfg)
@@ -341,7 +362,7 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 
 	// Resolve devcontainer cache ref (best-effort, only for non-lightweight workspaces).
 	cacheRef := ""
-	if cfg.DevcontainerCacheEnabled && !state.Lightweight {
+	if cfg.DevcontainerCacheEnabled && !state.Lightweight && repoHasDevcontainerConfig {
 		var cacheErr error
 		cacheRef, cacheErr = prepareDevcontainerCache(ctx, cfg, bootstrap.GitHubToken, state.DevcontainerConfigName)
 		if cacheErr != nil {
@@ -428,6 +449,7 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 	} else {
 		reporter.Log("sam_env", "completed", "SAM environment configured")
 	}
+
 	if err := ensureProjectRuntimeAssets(ctx, cfg, state.ProjectEnvVars, state.ProjectFiles); err != nil {
 		return recoveryMode, err
 	}
@@ -441,7 +463,7 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 	if recoveryMode {
 		readyStatus = workspaceReadyStatusRecovery
 	}
-	if err := markWorkspaceReady(ctx, cfg, readyStatus); err != nil {
+	if err := markWorkspaceReady(ctx, cfg, readyStatus, effectiveWorkspaceProfile); err != nil {
 		reporter.Log("workspace_ready", "failed", "Failed to mark workspace ready", err.Error())
 		// Workspace is fully provisioned — only the callback to the control plane
 		// failed. Return a CallbackError so the caller can distinguish this from
@@ -766,14 +788,18 @@ func ensureRepositoryReady(ctx context.Context, cfg *config.Config, state *boots
 	if branch == "" {
 		branch = "main"
 	}
+	cloneBranch := strings.TrimSpace(cfg.BaseBranch)
+	if cloneBranch == "" {
+		cloneBranch = branch
+	}
 
-	repoURL := normalizeRepoURL(cfg.Repository)
+	repoURL := normalizeRepoURL(firstNonEmptyString(cfg.CloneURL, cfg.Repository))
 	cloneToken := ""
 	if state != nil {
 		cloneToken = state.GitHubToken
 	}
 
-	cloneURL, err := withGitHubToken(repoURL, cloneToken)
+	cloneURL, err := withGitToken(repoURL, cloneToken, cfg)
 	if err != nil {
 		return fmt.Errorf("failed to prepare clone URL: %w", err)
 	}
@@ -797,19 +823,32 @@ func ensureRepositoryReady(ctx context.Context, cfg *config.Config, state *boots
 			return fmt.Errorf("failed to clean workspace directory: %w", err)
 		}
 
-		slog.Info("Cloning repository", "repository", cfg.Repository, "branch", branch, "workspaceDir", cfg.WorkspaceDir)
-		cmd := exec.CommandContext(ctx, "git", "clone", "--branch", branch, cloneURL, cfg.WorkspaceDir)
+		slog.Info("Cloning repository", "repository", cfg.Repository, "branch", cloneBranch, "checkoutBranch", branch, "workspaceDir", cfg.WorkspaceDir)
+		// Never add --single-branch: a single-branch clone has no
+		// refs/remotes/origin/HEAD, which session snapshots use to leave
+		// default-branch history out of the WIP bundle
+		// (internal/server/session_snapshot_bundle.go).
+		cmd := exec.CommandContext(ctx, gitBinaryPath, "clone", "--branch", cloneBranch, cloneURL, cfg.WorkspaceDir)
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("git clone failed: %w: %s", err, redactSecret(strings.TrimSpace(string(output)), cloneToken))
 		}
 
 		// Persist origin without embedded credentials.
-		cmd = exec.CommandContext(ctx, "git", "-C", cfg.WorkspaceDir, "remote", "set-url", "origin", repoURL)
+		cmd = exec.CommandContext(ctx, gitBinaryPath, "-C", cfg.WorkspaceDir, "remote", "set-url", "origin", repoURL)
 		output, err = cmd.CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("failed to sanitize repository origin URL: %w: %s", err, strings.TrimSpace(string(output)))
 		}
+
+		if err := createCheckoutBranch(ctx, cfg.WorkspaceDir, cloneBranch, branch); err != nil {
+			return err
+		}
+
+		// Initialize same-org GitHub submodules using the multi-repo scoped token.
+		// Best-effort: submodule access depends on the project's Repository Access
+		// selection, so failures here must not block the primary clone.
+		initSubmodules(ctx, cfg.WorkspaceDir, cloneToken)
 	}
 
 	// When using a Docker volume, populate it from the host clone. The host clone
@@ -820,6 +859,46 @@ func ensureRepositoryReady(ctx context.Context, cfg *config.Config, state *boots
 	}
 
 	return nil
+}
+
+// initSubmodules clones and checks out the repository's GitHub submodules using
+// the multi-repo scoped installation token via an inline `insteadOf` rewrite, so
+// the token is never persisted to `.git/config` or the submodule remotes. It is
+// best-effort: when the repo has no `.gitmodules`, or a submodule points at a
+// repo outside the project's Repository Access selection, the operation is logged
+// and skipped rather than failing the workspace bootstrap. The primary clone has
+// already succeeded by the time this runs.
+func initSubmodules(ctx context.Context, workspaceDir, token string) {
+	gitmodulesPath := filepath.Join(workspaceDir, ".gitmodules")
+	if _, err := os.Stat(gitmodulesPath); err != nil {
+		// No submodules — nothing to do.
+		return
+	}
+
+	args := []string{"-C", workspaceDir}
+	if token != "" {
+		// Rewrite GitHub remote URLs to embed the token only for the duration of
+		// this command. Covers https and scp-like ssh submodule URL forms.
+		tokenHTTPS := fmt.Sprintf("https://x-access-token:%s@github.com/", token)
+		args = append(args,
+			"-c", fmt.Sprintf("url.%s.insteadOf=https://github.com/", tokenHTTPS),
+			"-c", fmt.Sprintf("url.%s.insteadOf=git@github.com:", tokenHTTPS),
+			"-c", fmt.Sprintf("url.%s.insteadOf=ssh://git@github.com/", tokenHTTPS),
+		)
+	}
+	args = append(args, "submodule", "update", "--init", "--recursive")
+
+	// NOSONAR - git is resolved from the controlled VM-agent PATH, identical to the
+	// accepted clone/remote exec calls above; arguments are not attacker-controlled.
+	cmd := exec.CommandContext(ctx, gitBinaryPath, args...) // NOSONAR
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		slog.Warn("Submodule initialization failed (non-fatal)",
+			"error", err,
+			"output", redactSecret(strings.TrimSpace(string(output)), token))
+		return
+	}
+	slog.Info("Submodules initialized", "workspaceDir", workspaceDir)
 }
 
 // ensureDevcontainerFallback starts a container using the default devcontainer image,
@@ -841,7 +920,9 @@ func ensureDevcontainerFallback(ctx context.Context, cfg *config.Config, volumeN
 	}
 
 	slog.Info("Starting lightweight container (default image)", "workspaceDir", cfg.WorkspaceDir)
-	if _, err := runLightweightDevcontainerWithDefault(ctx, cfg, volumeName, credHelperHostPath); err != nil {
+	buildCtx, buildCancel := devcontainerBuildContext(ctx, cfg)
+	defer buildCancel()
+	if _, err := runLightweightDevcontainerWithDefault(buildCtx, cfg, volumeName, credHelperHostPath); err != nil {
 		return false, err
 	}
 
@@ -872,6 +953,16 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 			return false, err
 		}
 		return false, nil
+	}
+
+	if devcontainerConfigName != "" {
+		configPath := namedDevcontainerConfigPath(cfg.WorkspaceDir, devcontainerConfigName)
+		if _, err := os.Stat(configPath); err != nil {
+			if os.IsNotExist(err) {
+				return false, fmt.Errorf("devcontainer config %q not found at %s", devcontainerConfigName, configPath)
+			}
+			return false, fmt.Errorf("failed to inspect devcontainer config %q at %s: %w", devcontainerConfigName, configPath, err)
+		}
 	}
 
 	// Wait for devcontainer CLI to be available. Cloud-init installs Node.js and
@@ -968,10 +1059,13 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 			}
 		}
 	} else {
-		// No config — use default.
+		// No config — use the lightweight default image. Repos without a
+		// devcontainer have nothing project-specific to build, so avoid
+		// devcontainer Features and the slower build path entirely.
+		slog.Info("No repo devcontainer config found; using lightweight default image", "workspaceDir", cfg.WorkspaceDir)
 		buildCtx, buildCancel := devcontainerBuildContext(ctx, cfg)
-		defer buildCancel()
-		_, err := runDevcontainerWithDefault(buildCtx, cfg, volumeName, credHelperHostPath)
+		_, err := runLightweightDevcontainerWithDefault(buildCtx, cfg, volumeName, credHelperHostPath)
+		buildCancel()
 		if err != nil {
 			return false, err
 		}
@@ -986,8 +1080,12 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 	if cacheRef != "" && !usedFallback && hasConfig {
 		labelKey := cfg.ContainerLabelKey
 		labelValue := cfg.ContainerLabelValue
+		cachePushTimeout := cfg.DevcontainerCachePushTimeout
+		if cachePushTimeout <= 0 {
+			cachePushTimeout = config.DefaultDevcontainerCachePushTimeout
+		}
 		go func() {
-			pushCtx, pushCancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			pushCtx, pushCancel := context.WithTimeout(context.Background(), cachePushTimeout)
 			defer pushCancel()
 			if pushErr := cache.PushCacheImage(pushCtx, labelKey, labelValue, cacheRef); pushErr != nil {
 				slog.Warn("Cache image push failed (non-fatal)", "ref", cacheRef, "error", pushErr)
@@ -1142,8 +1240,7 @@ func devcontainerUpArgs(cfg *config.Config, overrideConfigPath, devcontainerConf
 	args := []string{"up", "--workspace-folder", cfg.WorkspaceDir}
 
 	if devcontainerConfigName != "" {
-		configPath := filepath.Join(cfg.WorkspaceDir, ".devcontainer", devcontainerConfigName, "devcontainer.json")
-		args = append(args, "--config", configPath)
+		args = append(args, "--config", namedDevcontainerConfigPath(cfg.WorkspaceDir, devcontainerConfigName))
 	}
 
 	if overrideConfigPath != "" {
@@ -1151,6 +1248,10 @@ func devcontainerUpArgs(cfg *config.Config, overrideConfigPath, devcontainerConf
 	}
 
 	return args
+}
+
+func namedDevcontainerConfigPath(workspaceDir, devcontainerConfigName string) string {
+	return filepath.Join(workspaceDir, devcontainerDirname, devcontainerConfigName, devcontainerFilename)
 }
 
 type devcontainerReadConfigurationResult struct {
@@ -1325,7 +1426,7 @@ func runReadConfiguration(ctx context.Context, workspaceDir, devcontainerConfigN
 		"--include-merged-configuration",
 	}
 	if devcontainerConfigName != "" {
-		configPath := filepath.Join(workspaceDir, ".devcontainer", devcontainerConfigName, "devcontainer.json")
+		configPath := namedDevcontainerConfigPath(workspaceDir, devcontainerConfigName)
 		args = append(args, "--config", configPath)
 	}
 	cmd := exec.CommandContext(ctx, "devcontainer", args...)
@@ -1830,7 +1931,7 @@ func writeDefaultDevcontainerConfigForMode(cfg *config.Config, volumeName, credH
 	// containerEnv so the helper is available during devcontainer lifecycle hooks.
 	credLines := ""
 	if credHelperHostPath != "" {
-		credLines = fmt.Sprintf(",\n  \"mounts\": [\"%s\"],\n  \"containerEnv\": {\n    \"GIT_CONFIG_COUNT\": \"1\",\n    \"GIT_CONFIG_KEY_0\": \"credential.helper\",\n    \"GIT_CONFIG_VALUE_0\": \"%s\"\n  }", credentialHelperMountEntry(credHelperHostPath), credentialHelperContainerPath)
+		credLines = fmt.Sprintf(",\n  \"mounts\": [\"%s\"],\n  \"containerEnv\": {\n    \"GIT_CONFIG_COUNT\": \"2\",\n    \"GIT_CONFIG_KEY_0\": \"credential.helper\",\n    \"GIT_CONFIG_VALUE_0\": \"%s\",\n    \"GIT_CONFIG_KEY_1\": \"credential.useHttpPath\",\n    \"GIT_CONFIG_VALUE_1\": \"true\"\n  }", credentialHelperMountEntry(credHelperHostPath), credentialHelperContainerPath)
 	}
 
 	featuresLine := ""
@@ -1871,7 +1972,7 @@ func writeDefaultDevcontainerConfigForMode(cfg *config.Config, volumeName, credH
 // When present, we skip --additional-features to avoid conflicts with the repo's own setup.
 func hasDevcontainerConfig(workspaceDir string) bool {
 	candidates := []string{
-		filepath.Join(workspaceDir, ".devcontainer", "devcontainer.json"),
+		filepath.Join(workspaceDir, devcontainerDirname, devcontainerFilename),
 		filepath.Join(workspaceDir, ".devcontainer.json"),
 	}
 	for _, path := range candidates {
@@ -1881,12 +1982,12 @@ func hasDevcontainerConfig(workspaceDir string) bool {
 		}
 	}
 	// Check for named subdirectory configs (.devcontainer/*/devcontainer.json)
-	devcontainerDir := filepath.Join(workspaceDir, ".devcontainer")
+	devcontainerDir := filepath.Join(workspaceDir, devcontainerDirname)
 	entries, err := os.ReadDir(devcontainerDir)
 	if err == nil {
 		for _, entry := range entries {
 			if entry.IsDir() {
-				subConfig := filepath.Join(devcontainerDir, entry.Name(), "devcontainer.json")
+				subConfig := filepath.Join(devcontainerDir, entry.Name(), devcontainerFilename)
 				if _, statErr := os.Stat(subConfig); statErr == nil {
 					slog.Info("Found named devcontainer config", "path", subConfig)
 					return true
@@ -1933,7 +2034,7 @@ func ensureGitHubCLI(ctx context.Context, cfg *config.Config) error {
 	if cfg.Repository == "" {
 		return nil
 	}
-	if !isGitHubRepo(cfg.Repository) {
+	if !gitrepo.IsGitHubRepo(cfg.Repository) {
 		return nil
 	}
 
@@ -1990,7 +2091,7 @@ func ensureGitCredentialHelper(ctx context.Context, cfg *config.Config) error {
 	if cfg.Repository == "" {
 		return nil
 	}
-	if !needsCredentialHelper(cfg.Repository) {
+	if !needsCredentialHelperForConfig(cfg) {
 		slog.Info("Repository does not need credential helper, skipping setup", "repository", cfg.Repository)
 		return nil
 	}
@@ -2017,8 +2118,10 @@ func ensureGitCredentialHelper(ctx context.Context, cfg *config.Config) error {
 			return err
 		}
 		slog.Info("Configured git credential helper in devcontainer", "containerID", containerID)
-		if err := installGhWrapper(ctx, cfg, containerID); err != nil {
-			slog.Warn("gh wrapper install failed (non-fatal)", "error", err)
+		if gitrepo.IsGitHubRepo(cfg.Repository) {
+			if err := installGhWrapper(ctx, cfg, containerID); err != nil {
+				slog.Warn("gh wrapper install failed (non-fatal)", "error", err)
+			}
 		}
 		return nil
 	}
@@ -2069,10 +2172,12 @@ func ensureGitCredentialHelper(ctx context.Context, cfg *config.Config) error {
 	// This ensures gh CLI works even for sessions longer than 1 hour when the
 	// initial GH_TOKEN has expired. The wrapper fetches a fresh token from the
 	// git credential helper (which calls back to the VM agent for a new token).
-	if err := installGhWrapper(ctx, cfg, containerID); err != nil {
-		// Non-fatal: gh still works with the static GH_TOKEN from /etc/sam/env,
-		// just won't auto-refresh for long sessions.
-		slog.Warn("gh wrapper install failed (non-fatal)", "error", err)
+	if gitrepo.IsGitHubRepo(cfg.Repository) {
+		if err := installGhWrapper(ctx, cfg, containerID); err != nil {
+			// Non-fatal: git clone/fetch still use the credential helper. Direct gh
+			// invocations may lack GH_TOKEN until shell startup fallback runs.
+			slog.Warn("gh wrapper install failed (non-fatal)", "error", err)
+		}
 	}
 
 	return nil
@@ -2141,18 +2246,29 @@ func renderGitCredentialHelperScript(cfg *config.Config) (string, error) {
 	if cfg.Port <= 0 {
 		return "", fmt.Errorf("invalid VM agent port: %d", cfg.Port)
 	}
+	credentialTimeout := cfg.GitCredentialTimeout
+	if credentialTimeout == 0 {
+		credentialTimeout = config.DefaultGitCredentialTimeout
+	}
+	if credentialTimeout < 0 {
+		return "", fmt.Errorf("invalid git credential timeout: %s", cfg.GitCredentialTimeout)
+	}
+	credentialTimeoutSeconds := strconv.FormatFloat(credentialTimeout.Seconds(), 'f', -1, 64)
 
 	query := ""
 	if workspaceID := strings.TrimSpace(cfg.WorkspaceID); workspaceID != "" {
 		query = "?workspaceId=" + url.QueryEscape(workspaceID)
 	}
+	// Hostnames are case-insensitive; normalize once here and lowercase the
+	// requested host in the shell so the comparison cannot fail on casing.
+	allowedGitLabHost := strings.ToLower(strings.TrimSpace(cfg.RepositoryHost))
 
 	// When TLS is enabled on the VM agent, the credential helper must use https://
 	// with -k (skip cert verification) because the TLS cert is issued for the
 	// external domain (e.g. ws-*.example.com), not for internal Docker addresses
-	// like host.docker.internal or 172.17.0.1. This is acceptable because the
-	// credential endpoint is only bound to the VM host, and each request is
-	// authenticated via the callback token.
+	// like host.docker.internal or 172.17.0.1. The helper deliberately does not
+	// carry the durable workspace callback token; it asks the VM agent to perform
+	// the control-plane token exchange using its in-memory workspace callback.
 	scheme := "http"
 	curlTLSFlag := ""
 	if cfg.TLSEnabled {
@@ -2169,15 +2285,45 @@ if [ "$action" != "get" ]; then
 fi
 
 requested_host=""
+requested_path=""
 while IFS= read -r line; do
   [ -z "$line" ] && break
   case "$line" in
     host=*) requested_host="${line#host=}" ;;
+    path=*) requested_path="${line#path=}" ;;
   esac
 done
 
-if [ -n "$requested_host" ] && [ "$requested_host" != "github.com" ] && [ "$requested_host" != "api.github.com" ]; then
-  exit 0
+case "$requested_host" in
+  ""|github.com|api.github.com|artifacts.cloudflare.net|*.artifacts.cloudflare.net) ;;
+  *)
+    allowed_gitlab_host=%s
+    requested_host_lower=$(printf '%%s' "$requested_host" | tr '[:upper:]' '[:lower:]')
+    if [ -z "$allowed_gitlab_host" ] || [ "$requested_host_lower" != "$allowed_gitlab_host" ]; then
+      exit 0
+    fi
+    ;;
+esac
+
+credential_query="%s"
+url_encode_query_value() {
+  printf '%%s' "$1" | sed 's/%%/%%25/g; s/&/%%26/g; s/=/%%3D/g; s/?/%%3F/g; s/#/%%23/g; s/+/%%2B/g; s/ /%%20/g'
+}
+if [ -n "$requested_host" ]; then
+  encoded_host=$(url_encode_query_value "$requested_host")
+  if [ -n "$credential_query" ]; then
+    credential_query="${credential_query}&host=${encoded_host}"
+  else
+    credential_query="?host=${encoded_host}"
+  fi
+fi
+if [ -n "$requested_path" ]; then
+  encoded_path=$(url_encode_query_value "$requested_path")
+  if [ -n "$credential_query" ]; then
+    credential_query="${credential_query}&path=${encoded_path}"
+  else
+    credential_query="?path=${encoded_path}"
+  fi
 fi
 
 resolve_gateway() {
@@ -2186,9 +2332,8 @@ resolve_gateway() {
 
 request_credentials() {
   target="$1"
-  curl -fsS --max-time 5%s \
-    -H "Authorization: Bearer %s" \
-    "%s://${target}:%d/git-credential%s"
+  curl -fsS --max-time %s%s \
+    "%s://${target}:%d/git-credential${credential_query}"
 }
 
 gateway="$(resolve_gateway || true)"
@@ -2200,7 +2345,7 @@ for target in host.docker.internal "$gateway" 172.17.0.1; do
 done
 
 exit 0
-`, curlTLSFlag, cfg.CallbackToken, scheme, cfg.Port, query), nil
+`, shellSingleQuote(allowedGitLabHost), query, credentialTimeoutSeconds, curlTLSFlag, scheme, cfg.Port), nil
 }
 
 // sanitizeWorkspaceID strips characters that are not alphanumeric or hyphens
@@ -2233,7 +2378,7 @@ const credentialHelperContainerPath = "/usr/local/bin/git-credential-sam"
 //
 // Returns the host path of the written file, or empty string if skipped.
 func writeCredentialHelperToHost(cfg *config.Config) (string, error) {
-	if !needsCredentialHelper(cfg.Repository) {
+	if !needsCredentialHelperForConfig(cfg) {
 		slog.Info("Repository does not need credential helper, skipping host-side write", "repository", cfg.Repository)
 		return "", nil
 	}
@@ -2320,9 +2465,11 @@ func credentialHelperMountEntry(hostPath string) string {
 // these values will collide. See tasks/backlog/2026-03-31-git-config-count-collision.md.
 func credentialHelperContainerEnv() map[string]string {
 	return map[string]string{
-		"GIT_CONFIG_COUNT":   "1",
+		"GIT_CONFIG_COUNT":   "2",
 		"GIT_CONFIG_KEY_0":   "credential.helper",
 		"GIT_CONFIG_VALUE_0": credentialHelperContainerPath,
+		"GIT_CONFIG_KEY_1":   "credential.useHttpPath",
+		"GIT_CONFIG_VALUE_1": "true",
 	}
 }
 
@@ -2408,7 +2555,10 @@ func findDevcontainerID(ctx context.Context, cfg *config.Config) (string, error)
 }
 
 func configureGitCredentialHelper(ctx context.Context, containerID, helperPath string) error {
-	return configureSystemGit(ctx, containerID, "credential.helper", helperPath, "git credential helper")
+	if err := configureSystemGit(ctx, containerID, "credential.helper", helperPath, "git credential helper"); err != nil {
+		return err
+	}
+	return configureSystemGit(ctx, containerID, "credential.useHttpPath", "true", "git credential useHttpPath")
 }
 
 func configureSystemGit(ctx context.Context, containerID, key, value, label string) error {
@@ -2677,18 +2827,15 @@ func ensureGitIdentity(ctx context.Context, cfg *config.Config, state *bootstrap
 
 // buildSAMEnvScript generates a shell script that exports SAM platform metadata
 // as environment variables. Only non-empty values are included.
-// When githubToken is non-empty, it is exported as GH_TOKEN so that the
-// gh CLI and other GitHub API consumers work out of the box. GH_TOKEN is
-// preferred over GITHUB_TOKEN because the gh CLI gives it higher precedence
-// and GITHUB_TOKEN can interfere with `gh auth login`.
-func buildSAMEnvScript(cfg *config.Config, githubToken string) string {
+// GitHub credentials are intentionally resolved on demand via the credential
+// helper/gh wrapper rather than persisted as static GH_TOKEN exports.
+func buildSAMEnvScript(cfg *config.Config, _ string) string {
 	baseDomain := config.DeriveBaseDomain(cfg.ControlPlaneURL)
 
 	type envEntry struct {
 		key, value string
 	}
 	entries := []envEntry{
-		{"GH_TOKEN", strings.TrimSpace(githubToken)},
 		{"SAM_API_URL", strings.TrimRight(cfg.ControlPlaneURL, "/")},
 		{"SAM_BRANCH", cfg.Branch},
 		{"SAM_NODE_ID", cfg.NodeID},
@@ -2713,18 +2860,20 @@ func buildSAMEnvScript(cfg *config.Config, githubToken string) string {
 		}
 	}
 
-	// Dynamic GH_TOKEN fallback: if the static value was empty (e.g. token
-	// wasn't available at provisioning time), fetch a fresh one from the git
-	// credential helper on shell startup. This ensures PTY sessions always
-	// have a working GH_TOKEN.
-	sb.WriteString("\n# Dynamic GH_TOKEN fallback — fetch from credential helper if not set\n")
-	sb.WriteString("if [ -z \"$GH_TOKEN\" ] && command -v git >/dev/null 2>&1; then\n")
-	sb.WriteString("  _gh_token=$(printf 'protocol=https\\nhost=github.com\\n\\n' | git credential fill 2>/dev/null | sed -n 's/^password=//p')\n")
-	sb.WriteString("  if [ -n \"$_gh_token\" ]; then\n")
-	sb.WriteString("    export GH_TOKEN=\"$_gh_token\"\n")
-	sb.WriteString("  fi\n")
-	sb.WriteString("  unset _gh_token\n")
-	sb.WriteString("fi\n")
+	if gitrepo.IsGitHubRepo(cfg.Repository) {
+		// Dynamic GH_TOKEN fallback: if the static value was empty (e.g. token
+		// wasn't available at provisioning time), fetch a fresh one from the git
+		// credential helper on shell startup. This ensures PTY sessions always
+		// have a working GH_TOKEN for GitHub-backed projects.
+		sb.WriteString("\n# Dynamic GH_TOKEN fallback — fetch from credential helper if not set\n")
+		sb.WriteString("if [ -z \"$GH_TOKEN\" ] && command -v git >/dev/null 2>&1; then\n")
+		sb.WriteString("  _gh_token=$(printf 'protocol=https\\nhost=github.com\\n\\n' | git credential fill 2>/dev/null | sed -n 's/^password=//p')\n")
+		sb.WriteString("  if [ -n \"$_gh_token\" ]; then\n")
+		sb.WriteString("    export GH_TOKEN=\"$_gh_token\"\n")
+		sb.WriteString("  fi\n")
+		sb.WriteString("  unset _gh_token\n")
+		sb.WriteString("fi\n")
+	}
 
 	return sb.String()
 }
@@ -2732,14 +2881,14 @@ func buildSAMEnvScript(cfg *config.Config, githubToken string) string {
 // buildSAMStaticEnv returns a shell-quoted env file (POSIX single-quoting via
 // shellSingleQuote) for /etc/sam/env. Format: export KEY='value'.
 // Parsed by ReadContainerEnvFiles (parseEnvExportLines) for ACP sessions.
-func buildSAMStaticEnv(cfg *config.Config, githubToken string) string {
+// GH_TOKEN is excluded so ACP sessions fetch a fresh scoped token at startup.
+func buildSAMStaticEnv(cfg *config.Config, _ string) string {
 	baseDomain := config.DeriveBaseDomain(cfg.ControlPlaneURL)
 
 	type envEntry struct {
 		key, value string
 	}
 	entries := []envEntry{
-		{"GH_TOKEN", strings.TrimSpace(githubToken)},
 		{"SAM_API_URL", strings.TrimRight(cfg.ControlPlaneURL, "/")},
 		{"SAM_BRANCH", cfg.Branch},
 		{"SAM_NODE_ID", cfg.NodeID},
@@ -2768,7 +2917,8 @@ func buildSAMStaticEnv(cfg *config.Config, githubToken string) string {
 // ensureSAMEnvironment injects SAM platform metadata as environment variables into
 // the devcontainer. Variables are written to /etc/profile.d/sam-env.sh (sourced by
 // login/interactive shells) and /etc/sam/env (for non-shell consumers).
-// When githubToken is non-empty, it is exported as GH_TOKEN for gh CLI usage.
+// GitHub tokens are resolved on demand; githubToken is accepted for legacy call
+// sites but is not persisted into either environment file.
 func ensureSAMEnvironment(ctx context.Context, cfg *config.Config, githubToken string) error {
 	containerID, err := findDevcontainerID(ctx, cfg)
 	if err != nil {
@@ -2941,24 +3091,30 @@ func ensureProjectRuntimeAssets(
 }
 
 type readyRequestBody struct {
-	Status string `json:"status"`
+	Status           string `json:"status"`
+	WorkspaceProfile string `json:"workspaceProfile,omitempty"`
 }
 
-func markWorkspaceReady(ctx context.Context, cfg *config.Config, status string) error {
+func markWorkspaceReady(ctx context.Context, cfg *config.Config, status, workspaceProfile string) error {
 	if status == "" {
 		status = workspaceReadyStatusRunning
 	}
 
-	body, err := json.Marshal(readyRequestBody{Status: status})
+	body, err := json.Marshal(readyRequestBody{Status: status, WorkspaceProfile: workspaceProfile})
 	if err != nil {
 		return fmt.Errorf("failed to encode ready request body: %w", err)
 	}
 
 	endpoint := fmt.Sprintf("%s/api/workspaces/%s/ready", strings.TrimRight(cfg.ControlPlaneURL, "/"), cfg.WorkspaceID)
 
+	requestTimeout := cfg.WorkspaceReadyCallbackTimeout
+	if requestTimeout <= 0 {
+		requestTimeout = 30 * time.Second
+	}
+
 	return callbackretry.Do(ctx, callbackretry.DefaultConfig(), "workspace-ready", func(retryCtx context.Context) error {
 		// Per-request timeout to prevent a single hung request from consuming the entire retry budget
-		requestCtx, cancel := context.WithTimeout(retryCtx, 30*time.Second)
+		requestCtx, cancel := context.WithTimeout(retryCtx, requestTimeout)
 		defer cancel()
 
 		req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, endpoint, bytes.NewReader(body))
@@ -2990,6 +3146,33 @@ func markWorkspaceReady(ctx context.Context, cfg *config.Config, status string) 
 	})
 }
 
+func createCheckoutBranch(ctx context.Context, workspaceDir, cloneBranch, checkoutBranch string) error {
+	if cloneBranch == checkoutBranch {
+		return nil
+	}
+	remoteRef := "refs/remotes/origin/" + checkoutBranch
+	cmd := exec.CommandContext(ctx, gitBinaryPath, "-C", workspaceDir, "show-ref", "--verify", "--quiet", remoteRef)
+	if err := cmd.Run(); err == nil {
+		cmd = exec.CommandContext(ctx, gitBinaryPath, "-C", workspaceDir, "checkout", "--track", "-b", checkoutBranch, "origin/"+checkoutBranch)
+		output, checkoutErr := cmd.CombinedOutput()
+		if checkoutErr != nil {
+			return fmt.Errorf("failed to check out existing remote branch %q: %w: %s", checkoutBranch, checkoutErr, strings.TrimSpace(string(output)))
+		}
+		return nil
+	} else {
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
+			return fmt.Errorf("failed to inspect remote checkout branch %q: %w", checkoutBranch, err)
+		}
+	}
+	cmd = exec.CommandContext(ctx, gitBinaryPath, "-C", workspaceDir, "checkout", "-b", checkoutBranch)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to create checkout branch %q from %q: %w: %s", checkoutBranch, cloneBranch, err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
 func normalizeRepoURL(repo string) string {
 	repo = strings.TrimSpace(repo)
 	if strings.HasPrefix(repo, "http://") || strings.HasPrefix(repo, "https://") {
@@ -3007,6 +3190,10 @@ func normalizeRepoURL(repo string) string {
 }
 
 func withGitHubToken(repoURL, token string) (string, error) {
+	return withGitToken(repoURL, token, nil)
+}
+
+func withGitToken(repoURL, token string, cfg *config.Config) (string, error) {
 	if token == "" {
 		return repoURL, nil
 	}
@@ -3021,37 +3208,32 @@ func withGitHubToken(repoURL, token string) (string, error) {
 
 	// Only inject credentials for hosts we actually vend tokens for.
 	host := strings.ToLower(u.Host)
-	if !isKnownGitHost(host) {
+	isGitLabHost := cfg != nil &&
+		strings.EqualFold(strings.TrimSpace(cfg.RepoProvider), "gitlab") &&
+		strings.EqualFold(strings.TrimSpace(cfg.RepositoryHost), host)
+	if !gitrepo.IsKnownGitHost(host) && !isGitLabHost {
 		return repoURL, nil
 	}
 
-	// For GitHub repos use "x-access-token" username; for Artifacts use "x".
+	// For GitHub repos use "x-access-token"; for Artifacts use "x"; for
+	// GitLab OAuth use the conventional "oauth2" username.
 	username := "x-access-token"
-	if isArtifactsHost(host) {
+	if gitrepo.IsArtifactsHost(host) {
 		username = "x"
+	} else if isGitLabHost {
+		username = "oauth2"
 	}
 	u.User = url.UserPassword(username, token)
 	return u.String(), nil
 }
 
-func isGitHubRepo(repo string) bool {
-	normalized := normalizeRepoURL(repo)
-	u, err := url.Parse(normalized)
-	if err != nil {
-		return false
+func firstNonEmptyString(vals ...string) string {
+	for _, val := range vals {
+		if strings.TrimSpace(val) != "" {
+			return strings.TrimSpace(val)
+		}
 	}
-	return strings.EqualFold(u.Host, "github.com")
-}
-
-// isArtifactsHost returns true if host is a Cloudflare Artifacts git host.
-func isArtifactsHost(host string) bool {
-	return host == "artifacts.cloudflare.net" ||
-		strings.HasSuffix(host, ".artifacts.cloudflare.net")
-}
-
-// isKnownGitHost returns true if host is one we vend tokens for.
-func isKnownGitHost(host string) bool {
-	return host == "github.com" || isArtifactsHost(host)
+	return ""
 }
 
 // needsCredentialHelper returns true if the repo requires a git credential
@@ -3066,7 +3248,17 @@ func needsCredentialHelper(repo string) bool {
 		return false
 	}
 	host := strings.ToLower(u.Host)
-	return isKnownGitHost(host)
+	return gitrepo.IsKnownGitHost(host)
+}
+
+func needsCredentialHelperForConfig(cfg *config.Config) bool {
+	if cfg == nil {
+		return false
+	}
+	if strings.TrimSpace(cfg.RepositoryHost) != "" && strings.EqualFold(strings.TrimSpace(cfg.RepoProvider), "gitlab") {
+		return true
+	}
+	return needsCredentialHelper(firstNonEmptyString(cfg.CloneURL, cfg.Repository))
 }
 
 func redactSecret(input, secret string) string {

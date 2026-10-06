@@ -1,41 +1,71 @@
-import { expect, type Page, type Route, test } from '@playwright/test';
+import { expect, type Page, type Route, test, type TestInfo } from '@playwright/test';
+
+import {
+  assertNoClippedOverflow,
+  assertNoOverflow,
+  jsonResponse,
+  makeMockUser,
+} from './audit-helpers';
 
 // ---------------------------------------------------------------------------
 // Mock Data
 // ---------------------------------------------------------------------------
 
-const MOCK_USER = {
-  user: {
-    id: 'user-test-1',
-    email: 'test@example.com',
-    name: 'Test User',
-    image: null,
-    role: 'superadmin',
-    status: 'active',
-    emailVerified: true,
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-  },
-  session: {
-    id: 'session-test-1',
-    userId: 'user-test-1',
-    expiresAt: new Date(Date.now() + 86400000).toISOString(),
-    token: 'mock-token',
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-  },
-};
+const MOCK_USER = makeMockUser({
+  email: 'test@example.com',
+  name: 'Test User',
+  role: 'superadmin',
+  sessionId: 'session-test-1',
+  userId: 'user-test-1',
+});
 
 const MOCK_PROJECT = {
   id: 'proj-test-1',
   name: 'Test Project',
+  description: null,
   repository: 'testuser/test-repo',
   defaultBranch: 'main',
   userId: 'user-test-1',
+  installationId: 'inst-1',
   githubInstallationId: 'inst-1',
+  repoProvider: 'github',
+  status: 'active',
   defaultVmSize: null,
+  defaultAgentType: null,
+  defaultWorkspaceProfile: null,
+  defaultProvider: null,
+  defaultLocation: null,
+  agentDefaults: null,
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
+  summary: {
+    activeWorkspaceCount: 0,
+    activeSessionCount: 0,
+    lastActivityAt: null,
+    taskCountsByStatus: {},
+    linkedWorkspaces: 0,
+  },
+};
+
+const MOCK_PROFILE = {
+  id: 'profile-webhook-1',
+  projectId: 'proj-test-1',
+  userId: 'user-test-1',
+  name: 'Webhook operator',
+  description: 'Handles incoming service events',
+  model: 'claude-sonnet-4-6',
+  agentType: 'claude-code',
+  effort: 'medium',
+  isDefault: false,
+  isArchived: false,
+  createdAt: '2026-03-01T00:00:00Z',
+  updatedAt: '2026-03-01T00:00:00Z',
+};
+
+const WEBHOOK_CREDENTIAL = {
+  endpointUrl: 'https://api.example.test/api/webhooks/ingest',
+  token: `sam_wh_${'a'.repeat(43)}`,
+  headerName: 'Authorization' as const,
 };
 
 interface TriggerOverrides {
@@ -49,16 +79,40 @@ interface TriggerOverrides {
   nextFireAt?: string | null;
   lastTriggeredAt?: string | null;
   triggerCount?: number;
+  sourceType?: 'cron' | 'github' | 'webhook' | 'incident';
+  promptTemplate?: string;
+  agentProfileId?: string | null;
+  githubConfig?: {
+    eventType: 'issue_comment' | 'issues' | 'pull_request' | 'push';
+    filters: {
+      actions?: string[];
+      labels?: string[];
+      ignoreActors?: string[];
+      commandPrefix?: string;
+      bodyContains?: string;
+      branches?: string[];
+      ignoreDrafts?: boolean;
+    };
+  };
+  webhookConfig?: {
+    sourceLabel: string | null;
+    filterMode: 'all' | 'any';
+    filters: Array<{ path: string; operator: 'exists' | 'equals' | 'contains'; value?: string }>;
+    includedHeaders: string[];
+    tokenLastFour: string;
+    tokenCreatedAt: string;
+    tokenRotatedAt: string | null;
+  };
 }
 
 function makeTrigger(overrides: TriggerOverrides) {
   return {
     projectId: 'proj-test-1',
     userId: 'user-test-1',
-    sourceType: 'cron',
+    sourceType: overrides.sourceType ?? 'cron',
     skipIfRunning: true,
-    promptTemplate: 'Review open PRs for {{project.name}}',
-    agentProfileId: null,
+    promptTemplate: overrides.promptTemplate ?? 'Review open PRs for {{project.name}}',
+    agentProfileId: overrides.agentProfileId ?? null,
     taskMode: 'task',
     vmSizeOverride: null,
     maxConcurrent: 1,
@@ -140,7 +194,8 @@ const LONG_TEXT_TRIGGERS = [
   makeTrigger({
     id: 'lt-1',
     name: 'This is an extremely long trigger name that should definitely be truncated on mobile screens because it contains way too many words and characters to fit in a single line without breaking the layout',
-    description: 'This trigger has a very long description that goes into great detail about what the trigger does, when it fires, what kind of tasks it creates, and why it was configured this way. It includes multiple sentences with technical details.',
+    description:
+      'This trigger has a very long description that goes into great detail about what the trigger does, when it fires, what kind of tasks it creates, and why it was configured this way. It includes multiple sentences with technical details.',
     status: 'active',
     cronHumanReadable: 'Every 4 hours at minute 0 during weekdays in America/New_York timezone',
   }),
@@ -153,12 +208,48 @@ const LONG_TEXT_TRIGGERS = [
   makeTrigger({
     id: 'lt-3',
     name: 'Special chars: <script>alert("xss")</script> & "quotes" and 日本語テスト',
-    description: 'Unicode: 🚀🎉💻 and HTML: &amp; &lt; &gt; and URL: https://example.com/very/long/path/that/should/not/break/layout',
+    description:
+      'Unicode: 🚀🎉💻 and HTML: &amp; &lt; &gt; and URL: https://example.com/very/long/path/that/should/not/break/layout',
     status: 'paused',
   }),
 ];
 
-const MANY_TRIGGERS = Array.from({ length: 10 }, (_, i) => {
+const GITHUB_SOURCE_TRIGGERS = [
+  makeTrigger({
+    id: 'gh-issues-1',
+    name: 'Issue Reviewer with a deliberately long name that should wrap cleanly while hiding an inactive stale command prefix',
+    description:
+      'Production-shaped GitHub issue trigger carrying a stored /sam prefix that must not be rendered for issues events.',
+    sourceType: 'github',
+    triggerCount: 0,
+    nextFireAt: null,
+    githubConfig: {
+      eventType: 'issues',
+      filters: {
+        actions: ['opened'],
+        ignoreActors: ['dependabot[bot]', 'simple-agent-manager[bot]'],
+        commandPrefix: '/sam',
+      },
+    },
+  }),
+  makeTrigger({
+    id: 'gh-comment-1',
+    name: 'Comment command router /sam with a long unicode suffix 日本語 🚀',
+    description: 'In-scope issue_comment trigger where the command prefix remains visible.',
+    sourceType: 'github',
+    triggerCount: 17,
+    nextFireAt: null,
+    githubConfig: {
+      eventType: 'issue_comment',
+      filters: {
+        actions: ['created'],
+        commandPrefix: '/sam',
+      },
+    },
+  }),
+];
+
+const MANY_TRIGGERS = Array.from({ length: 30 }, (_, i) => {
   const statuses = ['active', 'paused', 'disabled'];
   return makeTrigger({
     id: `many-${i}`,
@@ -168,6 +259,129 @@ const MANY_TRIGGERS = Array.from({ length: 10 }, (_, i) => {
     triggerCount: i * 10,
   });
 });
+
+const WEBHOOK_TRIGGER = makeTrigger({
+  id: 'webhook-1',
+  name: 'Production incident intake 🚨',
+  description:
+    'Receives service events with long identifiers like incident/2026/07/13/region-eu-central-1 and safely starts the response profile.',
+  sourceType: 'webhook',
+  agentProfileId: MOCK_PROFILE.id,
+  promptTemplate: 'Triage this untrusted event: {{webhook.payload}}',
+  triggerCount: 12,
+  nextFireAt: null,
+  webhookConfig: {
+    sourceLabel: 'PagerDuty <primary> & 日本語',
+    filterMode: 'all',
+    filters: [{ path: 'event.action', operator: 'equals', value: 'triggered' }],
+    includedHeaders: ['x-request-id', 'x-event-type'],
+    tokenLastFour: '9xYz',
+    tokenCreatedAt: '2026-07-10T12:00:00Z',
+    tokenRotatedAt: null,
+  },
+});
+
+const WEBHOOK_DELIVERIES = [
+  {
+    id: 'delivery-1',
+    triggerId: WEBHOOK_TRIGGER.id,
+    outcome: 'accepted',
+    httpStatus: 202,
+    bodyBytes: 532,
+    executionId: 'execution-1',
+    errorCode: null,
+    receivedAt: '2026-07-13T10:00:00Z',
+    processedAt: '2026-07-13T10:00:01Z',
+  },
+  {
+    id: 'delivery-2',
+    triggerId: WEBHOOK_TRIGGER.id,
+    outcome: 'filtered',
+    httpStatus: 202,
+    bodyBytes: 98,
+    executionId: null,
+    errorCode: null,
+    receivedAt: '2026-07-13T09:55:00Z',
+    processedAt: '2026-07-13T09:55:00Z',
+  },
+  {
+    id: 'delivery-3',
+    triggerId: WEBHOOK_TRIGGER.id,
+    outcome: 'concurrent_limit',
+    httpStatus: 202,
+    bodyBytes: 12_345,
+    executionId: 'execution-3',
+    errorCode: null,
+    receivedAt: '2026-07-13T09:50:00Z',
+    processedAt: '2026-07-13T09:50:01Z',
+  },
+  {
+    id: 'delivery-4',
+    triggerId: WEBHOOK_TRIGGER.id,
+    outcome: 'duplicate',
+    httpStatus: 202,
+    bodyBytes: 532,
+    executionId: null,
+    errorCode: null,
+    receivedAt: '2026-07-13T09:45:00Z',
+    processedAt: '2026-07-13T09:45:00Z',
+  },
+  {
+    id: 'delivery-5',
+    triggerId: WEBHOOK_TRIGGER.id,
+    outcome: 'inactive',
+    httpStatus: 202,
+    bodyBytes: 256,
+    executionId: null,
+    errorCode: 'paused',
+    receivedAt: '2026-07-13T09:40:00Z',
+    processedAt: '2026-07-13T09:40:00Z',
+  },
+  {
+    id: 'delivery-6',
+    triggerId: WEBHOOK_TRIGGER.id,
+    outcome: 'rate_limited',
+    httpStatus: 429,
+    bodyBytes: 128,
+    executionId: null,
+    errorCode: 'rate_limited',
+    receivedAt: '2026-07-13T09:35:00Z',
+    processedAt: '2026-07-13T09:35:00Z',
+  },
+  {
+    id: 'delivery-7',
+    triggerId: WEBHOOK_TRIGGER.id,
+    outcome: 'still_running',
+    httpStatus: 202,
+    bodyBytes: 384,
+    executionId: 'execution-7',
+    errorCode: null,
+    receivedAt: '2026-07-13T09:30:00Z',
+    processedAt: '2026-07-13T09:30:01Z',
+  },
+  {
+    id: 'delivery-8',
+    triggerId: WEBHOOK_TRIGGER.id,
+    outcome: 'configuration_error',
+    httpStatus: 503,
+    bodyBytes: 211,
+    executionId: null,
+    errorCode: 'missing_agent_profile',
+    receivedAt: '2026-07-13T09:25:00Z',
+    processedAt: '2026-07-13T09:25:00Z',
+  },
+  {
+    id: 'delivery-9',
+    triggerId: WEBHOOK_TRIGGER.id,
+    outcome: 'internal_error',
+    httpStatus: 503,
+    bodyBytes: 777,
+    executionId: 'execution-9',
+    errorCode: 'submission_failed',
+    receivedAt: '2026-07-13T09:20:00Z',
+    processedAt: '2026-07-13T09:20:02Z',
+  },
+] as const;
 
 const NORMAL_EXECUTIONS = [
   makeExecution({ id: 'ex-1', status: 'completed', taskId: 'task-1' }),
@@ -199,28 +413,65 @@ const NORMAL_EXECUTIONS = [
   }),
 ];
 
+const STUCK_EXECUTIONS = [
+  makeExecution({
+    id: 'ex-stuck',
+    status: 'queued',
+    scheduledAt: '2026-03-20T09:00:00Z',
+    startedAt: null,
+    completedAt: null,
+    taskId: null,
+  }),
+  makeExecution({ id: 'ex-complete', status: 'completed', taskId: 'task-1' }),
+];
+
+const INCIDENT_TRIGGER = makeTrigger({
+  id: 'trig-incident',
+  name: 'Private incident backlog triage',
+  description:
+    'Dispatches one operator agent for grouped private feedback incidents, including very long explanatory text that must wrap cleanly on narrow screens.',
+  sourceType: 'incident',
+  promptTemplate: 'Investigate private incidents: {{incident.backlogSummary}}',
+  agentProfileId: MOCK_PROFILE.id,
+  triggerCount: 3,
+  nextFireAt: null,
+  lastTriggeredAt: '2026-03-20T08:30:00Z',
+});
+
 // ---------------------------------------------------------------------------
 // API Mock Setup
 // ---------------------------------------------------------------------------
 
-async function setupApiMocks(page: Page, options: {
-  triggers?: ReturnType<typeof makeTrigger>[];
-  triggerDetail?: ReturnType<typeof makeTrigger> | null;
-  executions?: ReturnType<typeof makeExecution>[];
-  triggersError?: boolean;
-} = {}) {
+async function setupApiMocks(
+  page: Page,
+  options: {
+    agentProfiles?: readonly (typeof MOCK_PROFILE)[];
+    executions?: ReturnType<typeof makeExecution>[];
+    executionCleanupError?: boolean;
+    triggerDetail?: ReturnType<typeof makeTrigger> | null;
+    triggers?: ReturnType<typeof makeTrigger>[];
+    triggersError?: boolean;
+    webhookDeliveries?: readonly object[];
+  } = {}
+) {
   const {
-    triggers = NORMAL_TRIGGERS,
-    triggerDetail = null,
+    agentProfiles = [MOCK_PROFILE],
     executions = NORMAL_EXECUTIONS,
+    executionCleanupError = false,
+    triggerDetail = null,
+    triggers = NORMAL_TRIGGERS,
     triggersError = false,
+    webhookDeliveries = WEBHOOK_DELIVERIES,
   } = options;
+
+  await page.addInitScript((userId) => {
+    window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
+  }, MOCK_USER.user.id);
 
   await page.route('**/api/**', async (route: Route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
-    const respond = (status: number, body: unknown) =>
-      route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+    const respond = (status: number, body: unknown) => jsonResponse(route, status, body);
 
     // Auth
     if (path.includes('/api/auth/')) {
@@ -238,16 +489,42 @@ async function setupApiMocks(page: Page, options: {
     }
 
     // Notifications
+    if (path === '/api/notifications/ws') {
+      return route.abort('connectionrefused');
+    }
     if (path.startsWith('/api/notifications')) {
       return respond(200, { notifications: [], unreadCount: 0 });
     }
 
+    // Recent chats
+    if (path === '/api/chats/recent') {
+      return respond(200, { sessions: [], totalActive: 0 });
+    }
+    if (path === '/api/chats') {
+      return respond(200, { sessions: [], total: 0 });
+    }
+
+    // Account map
+    if (path === '/api/account-map') {
+      return respond(200, {
+        projects: [],
+        nodes: [],
+        workspaces: [],
+        sessions: [],
+        tasks: [],
+        relationships: [],
+      });
+    }
+
     // Agents
     if (path === '/api/agents') {
-      return respond(200, []);
+      return respond(200, { agents: [] });
     }
 
     // Credentials
+    if (path === '/api/credentials') {
+      return respond(200, []);
+    }
     if (path.startsWith('/api/credentials')) {
       return respond(200, { credentials: [] });
     }
@@ -262,6 +539,11 @@ async function setupApiMocks(page: Page, options: {
         return respond(200, { envVars: [], files: [] });
       }
 
+      // Agent profiles
+      if (subPath === '/agent-profiles') {
+        return respond(200, { items: agentProfiles });
+      }
+
       // Sessions
       if (subPath.startsWith('/sessions')) {
         return respond(200, { sessions: [], total: 0 });
@@ -274,7 +556,41 @@ async function setupApiMocks(page: Page, options: {
 
       // Trigger executions
       if (subPath.match(/^\/triggers\/[^/]+\/executions/)) {
+        if (subPath.endsWith('/cleanup') && route.request().method() === 'POST') {
+          if (executionCleanupError) {
+            return respond(500, { error: 'INTERNAL_ERROR', message: 'Cleanup unavailable' });
+          }
+          return respond(200, { cleaned: 1 });
+        }
         return respond(200, { executions, nextCursor: null });
+      }
+
+      if (subPath.match(/^\/triggers\/[^/]+\/webhook\/deliveries$/)) {
+        const cursor = url.searchParams.get('cursor');
+        return respond(200, {
+          deliveries: cursor ? webhookDeliveries.slice(2) : webhookDeliveries.slice(0, 2),
+          nextCursor: !cursor && webhookDeliveries.length > 2 ? 'page-2' : null,
+        });
+      }
+
+      if (
+        subPath.match(/^\/triggers\/[^/]+\/webhook\/preview$/) &&
+        route.request().method() === 'POST'
+      ) {
+        return respond(200, {
+          renderedPrompt:
+            'Triage this untrusted event: {"event":{"action":"triggered","title":"<script>alert(1)</script> 🚨"}}',
+          warnings: [],
+          context: { webhook: { sourceLabel: 'PagerDuty <primary> & 日本語' } },
+          filterResult: { matched: true, matchedFilters: 1, totalFilters: 1 },
+        });
+      }
+
+      if (
+        subPath.match(/^\/triggers\/[^/]+\/webhook\/rotate$/) &&
+        route.request().method() === 'POST'
+      ) {
+        return respond(200, { webhookCredential: WEBHOOK_CREDENTIAL });
       }
 
       // Trigger detail
@@ -287,17 +603,25 @@ async function setupApiMocks(page: Page, options: {
 
       // Triggers list
       if (subPath === '/triggers') {
-        if (triggersError) return respond(500, { error: 'INTERNAL_ERROR', message: 'Server error' });
+        if (triggersError)
+          return respond(500, { error: 'INTERNAL_ERROR', message: 'Server error' });
+        if (route.request().method() === 'POST') {
+          return respond(201, { ...WEBHOOK_TRIGGER, webhookCredential: WEBHOOK_CREDENTIAL });
+        }
         return respond(200, { triggers });
       }
 
       // Project detail
-      return respond(200, MOCK_PROJECT);
+      if (subPath === '') {
+        return respond(200, MOCK_PROJECT);
+      }
+
+      return respond(404, { error: 'not_found', message: `Unhandled project route: ${subPath}` });
     }
 
     // Projects list
     if (path === '/api/projects') {
-      return respond(200, [MOCK_PROJECT]);
+      return respond(200, { projects: [MOCK_PROJECT], nextCursor: null });
     }
 
     return route.continue();
@@ -308,34 +632,297 @@ async function setupApiMocks(page: Page, options: {
 // Screenshot helper
 // ---------------------------------------------------------------------------
 
-async function screenshot(page: Page, name: string) {
+async function screenshot(page: Page, name: string, fullPage = true) {
   await page.waitForTimeout(600);
+  const viewport = page.viewportSize();
+  const suffix = viewport ? `${viewport.width}x${viewport.height}` : 'unknown';
   await page.screenshot({
-    path: `../../.codex/tmp/playwright-screenshots/${name}.png`,
-    fullPage: true,
+    path: `../../.codex/tmp/playwright-screenshots/${name}-${suffix}.png`,
+    fullPage,
   });
 }
 
-async function assertNoOverflow(page: Page) {
-  const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth > window.innerWidth
-  );
-  expect(overflow).toBe(false);
+function requireProject(projectName: string, message: string) {
+  return ({ page: _page }: { page: Page }, testInfo: TestInfo) => {
+    test.skip(testInfo.project.name !== projectName, message);
+  };
 }
+
+const mobileOnly = requireProject('iPhone SE (375x667)', 'mobile audit runs on iPhone SE only');
+const desktopOnly = requireProject(
+  'Desktop (1280x800)',
+  'desktop audit runs on desktop project only'
+);
+
+async function verifyCleanupFailure(page: Page, screenshotName: string) {
+  await setupApiMocks(page, {
+    triggers: NORMAL_TRIGGERS,
+    triggerDetail: NORMAL_TRIGGERS[0],
+    executions: STUCK_EXECUTIONS,
+    executionCleanupError: true,
+  });
+  await page.goto('/projects/proj-test-1/triggers/trig-1');
+  await page.waitForSelector('text=Daily Code Review');
+  await page.getByRole('button', { name: /clear stuck queued/i }).click();
+  await page.waitForSelector('text=Cleanup unavailable');
+  await screenshot(page, screenshotName);
+  await assertNoOverflow(page);
+  await assertNoClippedOverflow(page);
+}
+
+async function verifyWebhookCreation(page: Page, screenshotName: string) {
+  await setupApiMocks(page, { triggers: [] });
+  await page.goto('/projects/proj-test-1/triggers');
+  await page.getByRole('button', { name: /create your first trigger/i }).click();
+  await page.getByRole('button', { name: /Webhook/ }).click();
+  await page.getByLabel('Name').fill('Incident intake <primary> 🚨');
+  await page.getByLabel('Agent Profile *').selectOption(MOCK_PROFILE.id);
+  await page.getByLabel('Source label (optional)').fill('PagerDuty 日本語');
+  await page.getByLabel('Included headers (optional)').fill('x-request-id, x-event-type');
+  await page.getByRole('button', { name: /add filter/i }).click();
+  await page.getByLabel('Filter 1 path').fill('event.action');
+  await page.getByLabel('Filter 1 operator').selectOption('equals');
+  await page.getByLabel('Filter 1 value', { exact: true }).fill('triggered');
+  await page.getByLabel('Prompt template').fill('Triage: {{webhook.payload}}');
+  await page.getByRole('button', { name: 'Create Trigger', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: /save your webhook credential/i })).toBeVisible();
+  await expect(page.getByText(WEBHOOK_CREDENTIAL.token, { exact: true })).toBeVisible();
+  await screenshot(page, screenshotName);
+  await assertNoOverflow(page);
+  await assertNoClippedOverflow(page);
+  await page.getByLabel(/I saved this token/i).check();
+  await page.getByRole('button', { name: 'Done' }).click();
+  await expect(page.getByRole('dialog', { name: /save your webhook credential/i })).toHaveCount(0);
+}
+
+async function verifyWebhookDetail(page: Page, screenshotPrefix: string) {
+  await setupApiMocks(page, {
+    triggers: [WEBHOOK_TRIGGER],
+    triggerDetail: WEBHOOK_TRIGGER,
+    executions: [],
+  });
+  await page.goto(`/projects/proj-test-1/triggers/${WEBHOOK_TRIGGER.id}`);
+  await expect(page.getByRole('heading', { name: WEBHOOK_TRIGGER.name })).toBeVisible();
+  await expect(page.getByText('accepted', { exact: true })).toBeVisible();
+  await screenshot(page, `${screenshotPrefix}-normal`);
+  await assertNoOverflow(page);
+  await assertNoClippedOverflow(page);
+
+  await page.getByRole('button', { name: 'Load more' }).click();
+  await expect(page.getByText('concurrent limit', { exact: true })).toBeVisible();
+  await screenshot(page, `${screenshotPrefix}-deliveries`);
+  await assertNoOverflow(page);
+  await assertNoClippedOverflow(page);
+
+  await page
+    .getByLabel('Sample webhook JSON')
+    .fill('{"event":{"action":"triggered","title":"<script>alert(1)</script> 🚨"}}');
+  await page.getByRole('button', { name: /Preview/ }).click();
+  await expect(page.getByText('Filters: matched')).toBeVisible();
+  await screenshot(page, `${screenshotPrefix}-preview-filter`);
+  await assertNoOverflow(page);
+  await assertNoClippedOverflow(page);
+
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: /Rotate token/ }).click();
+  await expect(page.getByRole('dialog', { name: /save your webhook credential/i })).toBeVisible();
+  await screenshot(page, `${screenshotPrefix}-rotation`);
+  await assertNoOverflow(page);
+  await assertNoClippedOverflow(page);
+}
+
+async function verifyIncidentTriggerDetail(page: Page, screenshotPrefix: string) {
+  await setupApiMocks(page, {
+    triggers: [INCIDENT_TRIGGER],
+    triggerDetail: INCIDENT_TRIGGER,
+    executions: [],
+  });
+  await page.goto(`/projects/proj-test-1/triggers/${INCIDENT_TRIGGER.id}`);
+  await expect(page.getByRole('heading', { name: INCIDENT_TRIGGER.name })).toBeVisible();
+  await expect(page.getByText('Private incident backlog', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('GitHub event', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /run now/i })).toHaveCount(0);
+  await screenshot(page, `${screenshotPrefix}-detail`);
+  await assertNoOverflow(page);
+  await assertNoClippedOverflow(page);
+
+  await page.getByRole('button', { name: /edit trigger/i }).click();
+  await expect(page.getByRole('dialog', { name: /edit trigger/i })).toBeVisible();
+  await expect(page.getByText('Run from grouped feedback incidents')).toBeVisible();
+  await expect(page.getByText('Manual preview/run actions are disabled server-side')).toBeVisible();
+  await expect(page.getByRole('button', { name: '{{incident.backlogSummary}}' })).toBeVisible();
+  await screenshot(page, `${screenshotPrefix}-edit-form`);
+  await assertNoOverflow(page);
+  await assertNoClippedOverflow(page);
+}
+
+async function verifyGitHubIssuesForm(page: Page, screenshotName: string) {
+  await setupApiMocks(page, { triggers: GITHUB_SOURCE_TRIGGERS });
+  await page.goto('/projects/proj-test-1/triggers');
+  await page.waitForSelector('text=Issue Reviewer');
+  await page.click('text=New Trigger');
+  await page.click('role=button[name=/GitHub event/]');
+  await page.getByLabel('GitHub event').selectOption('issues');
+  await page
+    .getByRole('textbox', { name: 'Actions' })
+    .fill('opened, reopened, labeled, assigned, transferred, milestoned');
+  await page
+    .getByRole('textbox', { name: 'Ignore actors' })
+    .fill('dependabot[bot], simple-agent-manager[bot], github-actions[bot]');
+  await page
+    .getByRole('textbox', { name: 'Required labels' })
+    .fill('needs-agent, regression, customer-visible, very-long-label-name-that-wraps');
+  await page
+    .getByRole('textbox', { name: 'Text contains' })
+    .fill('a deliberately long keyword phrase that should wrap without clipping 日本語 🚀');
+  await expect(page.locator('#github-command-prefix')).toHaveCount(0);
+  await assertTriggerFormChrome(page, true);
+  await screenshot(page, screenshotName, false);
+  await assertNoOverflow(page);
+  await assertNoClippedOverflow(page);
+}
+
+async function openNewTriggerDialog(page: Page, triggers: ReturnType<typeof makeTrigger>[]) {
+  await setupApiMocks(page, { triggers });
+  await page.goto('/projects/proj-test-1/triggers');
+  if (triggers.length > 0) {
+    await page.waitForSelector(`text=${triggers[0].name.split(' ')[0]}`);
+    await page.click('text=New Trigger');
+  } else {
+    await page.waitForSelector('text=No triggers yet');
+    await page.click('text=Create your first trigger');
+  }
+  await page.waitForSelector('text=New Trigger');
+}
+
+async function verifyGitHubSourceLabels(page: Page, screenshotName: string) {
+  await setupApiMocks(page, { triggers: GITHUB_SOURCE_TRIGGERS });
+  await page.goto('/projects/proj-test-1/triggers');
+  await page.waitForSelector('text=Issue Reviewer');
+  await expect(page.getByText('GitHub issues: /sam')).toHaveCount(0);
+  await expect(page.getByText('GitHub issues', { exact: true })).toBeVisible();
+  await expect(page.getByText('GitHub issue comment: /sam', { exact: true })).toBeVisible();
+  await screenshot(page, screenshotName);
+  await assertNoOverflow(page);
+  await assertNoClippedOverflow(page);
+}
+
+async function assertTriggerFormChrome(page: Page, scrollToEnd = false) {
+  const scrollBody = page.getByTestId('trigger-form-scroll-body');
+
+  if (scrollToEnd) {
+    const scrollTop = await scrollBody.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+      const focused = document.activeElement;
+      if (focused instanceof HTMLElement && element.contains(focused)) {
+        focused.scrollIntoView({ block: 'nearest' });
+      }
+      return element.scrollTop;
+    });
+    expect(scrollTop).toBeGreaterThan(0);
+  }
+
+  const geometry = await page.evaluate(() => {
+    const header = document.querySelector<HTMLElement>('[data-testid="trigger-form-header"]');
+    const body = document.querySelector<HTMLElement>('[data-testid="trigger-form-scroll-body"]');
+    const footer = document.querySelector<HTMLElement>('[data-testid="trigger-form-footer"]');
+    const focused = document.activeElement as HTMLElement | null;
+
+    if (!header || !body || !footer || !focused) {
+      throw new Error('Trigger form chrome or focused element was not found');
+    }
+
+    return {
+      header: header.getBoundingClientRect().toJSON(),
+      body: body.getBoundingClientRect().toJSON(),
+      footer: footer.getBoundingClientRect().toJSON(),
+      focused: focused.getBoundingClientRect().toJSON(),
+      focusedInBody: body.contains(focused),
+      focusedInFooter: footer.contains(focused),
+      viewportHeight: window.innerHeight,
+    };
+  });
+
+  expect(geometry.header.top).toBeGreaterThanOrEqual(-1);
+  expect(geometry.header.bottom).toBeLessThanOrEqual(geometry.body.top + 1);
+  expect(geometry.body.bottom).toBeLessThanOrEqual(geometry.footer.top + 1);
+  expect(geometry.footer.top).toBeGreaterThanOrEqual(0);
+  expect(geometry.footer.bottom).toBeLessThanOrEqual(geometry.viewportHeight + 1);
+  expect(geometry.focused.top).toBeGreaterThanOrEqual(geometry.body.top - 1);
+  expect(geometry.focused.bottom).toBeLessThanOrEqual(geometry.footer.top + 1);
+  expect(geometry.focusedInBody || geometry.focusedInFooter).toBe(true);
+}
+
+async function verifyGitHubIssuesDetail(page: Page, screenshotName: string) {
+  const trigger = GITHUB_SOURCE_TRIGGERS[0];
+  await setupApiMocks(page, {
+    triggers: GITHUB_SOURCE_TRIGGERS,
+    triggerDetail: trigger,
+    executions: [],
+  });
+  await page.goto(`/projects/proj-test-1/triggers/${trigger.id}`);
+  await expect(page.getByRole('heading', { name: trigger.name })).toBeVisible();
+
+  const label = page.getByText('Command Prefix', { exact: true });
+  const row = label.locator('..');
+  await expect(row.getByText('None', { exact: true })).toBeVisible();
+  await expect(row.getByText('/sam', { exact: true })).toHaveCount(0);
+  await row.scrollIntoViewIfNeeded();
+  await screenshot(page, screenshotName, false);
+  await assertNoOverflow(page);
+  await assertNoClippedOverflow(page);
+}
+
+async function verifyGitHubCommentForm(
+  page: Page,
+  screenshotName: string,
+  triggers: ReturnType<typeof makeTrigger>[]
+) {
+  await openNewTriggerDialog(page, triggers);
+  await page.click('role=button[name=/GitHub event/]');
+  const commandPrefix = page.locator('#github-command-prefix');
+  await expect(commandPrefix).toBeVisible();
+  await commandPrefix.focus();
+  await commandPrefix.scrollIntoViewIfNeeded();
+  await assertTriggerFormChrome(page);
+  await screenshot(page, screenshotName, false);
+  await assertNoOverflow(page);
+  await assertNoClippedOverflow(page);
+}
+
+test.describe('GitHub command-prefix event scoping', () => {
+  test('source labels hide inactive command prefix', async ({ page }) => {
+    await verifyGitHubSourceLabels(page, 'triggers-list-github-source-labels');
+  });
+
+  test('issues detail hides inactive command prefix', async ({ page }) => {
+    await verifyGitHubIssuesDetail(page, 'trigger-detail-github-issues');
+  });
+
+  test('issue comment form shows command prefix field', async ({ page }) => {
+    await verifyGitHubCommentForm(page, 'trigger-form-github-comment', GITHUB_SOURCE_TRIGGERS);
+  });
+
+  test('issues form hides command prefix field', async ({ page }) => {
+    await verifyGitHubIssuesForm(page, 'trigger-form-github-issues');
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Tests: Triggers List — Mobile
 // ---------------------------------------------------------------------------
 
 test.describe('Triggers List — Mobile', () => {
-  test.use({ viewport: { width: 375, height: 667 }, isMobile: true });
+  test.beforeEach(mobileOnly);
 
   test('normal data', async ({ page }) => {
     await setupApiMocks(page, { triggers: NORMAL_TRIGGERS });
     await page.goto('/projects/proj-test-1/triggers');
     await page.waitForSelector('text=Daily Code Review');
+    await expect(page.getByRole('dialog', { name: /create trigger/i })).toHaveCount(0);
     await screenshot(page, 'triggers-list-normal-mobile');
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
   });
 
   test('long text wraps correctly', async ({ page }) => {
@@ -344,6 +931,41 @@ test.describe('Triggers List — Mobile', () => {
     await page.waitForSelector('text=Special chars');
     await screenshot(page, 'triggers-list-long-text-mobile');
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+  });
+
+  /**
+   * Regression guard for the reported mobile bug: a long trigger name made the
+   * page render 768px wide inside a 375px viewport, sheared off by the
+   * ancestors' `overflow-x-hidden`. This measures the page root directly —
+   * `document.documentElement.scrollWidth` never grew, which is why the
+   * document-level check stayed green while the page was visibly broken.
+   */
+  test('a long trigger name cannot widen the page past the viewport', async ({ page }) => {
+    await setupApiMocks(page, {
+      triggers: [
+        makeTrigger({
+          id: 'wide-1',
+          name: 'TTV weekly dependency and security maintenance with a deliberately long tail',
+          description: 'Weekly compatible dependency upgrades, security audit, full verification.',
+        }),
+      ],
+    });
+    await page.goto('/projects/proj-test-1/triggers');
+    await page.waitForSelector('text=TTV weekly dependency');
+
+    const { pageWidth, viewportWidth } = await page.evaluate(() => {
+      const root = document.querySelector('main [class*="max-w-3xl"]');
+      return {
+        pageWidth: Math.round(root?.getBoundingClientRect().width ?? 0),
+        viewportWidth: window.innerWidth,
+      };
+    });
+    expect(pageWidth).toBeGreaterThan(0);
+    expect(pageWidth).toBeLessThanOrEqual(viewportWidth);
+
+    await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
   });
 
   test('empty state', async ({ page }) => {
@@ -352,6 +974,7 @@ test.describe('Triggers List — Mobile', () => {
     await page.waitForSelector('text=No triggers yet');
     await screenshot(page, 'triggers-list-empty-mobile');
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
   });
 
   test('many items', async ({ page }) => {
@@ -360,6 +983,7 @@ test.describe('Triggers List — Mobile', () => {
     await page.waitForSelector('text=Trigger 1');
     await screenshot(page, 'triggers-list-many-mobile');
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
   });
 
   test('error state', async ({ page }) => {
@@ -368,6 +992,33 @@ test.describe('Triggers List — Mobile', () => {
     await page.waitForSelector('text=Retry');
     await screenshot(page, 'triggers-list-error-mobile');
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+  });
+
+  test('delete menu item in overflow menu', async ({ page }) => {
+    await setupApiMocks(page, { triggers: NORMAL_TRIGGERS });
+    await page.goto('/projects/proj-test-1/triggers');
+    await page.waitForSelector('text=Daily Code Review');
+    const menuBtns = page.getByRole('button', { name: /^Actions for/ });
+    await menuBtns.first().click();
+    await page.waitForSelector('text=Delete');
+    await screenshot(page, 'triggers-delete-menu-mobile');
+    await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+  });
+
+  test('delete confirmation dialog', async ({ page }) => {
+    await setupApiMocks(page, { triggers: NORMAL_TRIGGERS });
+    await page.goto('/projects/proj-test-1/triggers');
+    await page.waitForSelector('text=Daily Code Review');
+    const menuBtns = page.getByRole('button', { name: /^Actions for/ });
+    await menuBtns.first().click();
+    await page.waitForSelector('text=Delete');
+    await page.getByRole('menuitem', { name: /delete/i }).click();
+    await page.waitForSelector('role=alertdialog');
+    await screenshot(page, 'triggers-delete-confirm-mobile');
+    await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
   });
 });
 
@@ -376,14 +1027,16 @@ test.describe('Triggers List — Mobile', () => {
 // ---------------------------------------------------------------------------
 
 test.describe('Triggers List — Desktop', () => {
-  test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
+  test.beforeEach(desktopOnly);
 
   test('normal data', async ({ page }) => {
     await setupApiMocks(page, { triggers: NORMAL_TRIGGERS });
     await page.goto('/projects/proj-test-1/triggers');
     await page.waitForSelector('text=Daily Code Review');
+    await expect(page.getByRole('dialog', { name: /create trigger/i })).toHaveCount(0);
     await screenshot(page, 'triggers-list-normal-desktop');
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
   });
 
   test('long text', async ({ page }) => {
@@ -392,6 +1045,7 @@ test.describe('Triggers List — Desktop', () => {
     await page.waitForSelector('text=Special chars');
     await screenshot(page, 'triggers-list-long-text-desktop');
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
   });
 
   test('empty state', async ({ page }) => {
@@ -400,6 +1054,33 @@ test.describe('Triggers List — Desktop', () => {
     await page.waitForSelector('text=No triggers yet');
     await screenshot(page, 'triggers-list-empty-desktop');
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+  });
+
+  test('delete menu item in overflow menu', async ({ page }) => {
+    await setupApiMocks(page, { triggers: NORMAL_TRIGGERS });
+    await page.goto('/projects/proj-test-1/triggers');
+    await page.waitForSelector('text=Daily Code Review');
+    const menuBtns = page.getByRole('button', { name: /^Actions for/ });
+    await menuBtns.first().click();
+    await page.waitForSelector('text=Delete');
+    await screenshot(page, 'triggers-delete-menu-desktop');
+    await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+  });
+
+  test('delete confirmation dialog', async ({ page }) => {
+    await setupApiMocks(page, { triggers: NORMAL_TRIGGERS });
+    await page.goto('/projects/proj-test-1/triggers');
+    await page.waitForSelector('text=Daily Code Review');
+    const menuBtns = page.getByRole('button', { name: /^Actions for/ });
+    await menuBtns.first().click();
+    await page.waitForSelector('text=Delete');
+    await page.getByRole('menuitem', { name: /delete/i }).click();
+    await page.waitForSelector('role=alertdialog');
+    await screenshot(page, 'triggers-delete-confirm-desktop');
+    await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
   });
 });
 
@@ -408,7 +1089,7 @@ test.describe('Triggers List — Desktop', () => {
 // ---------------------------------------------------------------------------
 
 test.describe('Trigger Detail — Mobile', () => {
-  test.use({ viewport: { width: 375, height: 667 }, isMobile: true });
+  test.beforeEach(mobileOnly);
 
   test('normal data with executions', async ({ page }) => {
     await setupApiMocks(page, {
@@ -420,6 +1101,7 @@ test.describe('Trigger Detail — Mobile', () => {
     await page.waitForSelector('text=Daily Code Review');
     await screenshot(page, 'trigger-detail-normal-mobile');
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
   });
 
   test('no executions', async ({ page }) => {
@@ -432,6 +1114,33 @@ test.describe('Trigger Detail — Mobile', () => {
     await page.waitForSelector('text=Weekly Report');
     await screenshot(page, 'trigger-detail-empty-mobile');
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+  });
+
+  test('cleanup failure feedback', async ({ page }) => {
+    await verifyCleanupFailure(page, 'trigger-detail-cleanup-error-mobile');
+  });
+
+  test('webhook delivery, preview, filter, and rotation states', async ({ page }) => {
+    await verifyWebhookDetail(page, 'trigger-webhook-detail-mobile');
+  });
+
+  test('webhook empty delivery state', async ({ page }) => {
+    await setupApiMocks(page, {
+      triggers: [WEBHOOK_TRIGGER],
+      triggerDetail: WEBHOOK_TRIGGER,
+      executions: [],
+      webhookDeliveries: [],
+    });
+    await page.goto(`/projects/proj-test-1/triggers/${WEBHOOK_TRIGGER.id}`);
+    await expect(page.getByText('No webhook deliveries yet.')).toBeVisible();
+    await screenshot(page, 'trigger-webhook-detail-empty-mobile');
+    await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+  });
+
+  test('private incident trigger detail and edit state', async ({ page }) => {
+    await verifyIncidentTriggerDetail(page, 'trigger-incident-mobile');
   });
 });
 
@@ -440,7 +1149,7 @@ test.describe('Trigger Detail — Mobile', () => {
 // ---------------------------------------------------------------------------
 
 test.describe('Trigger Detail — Desktop', () => {
-  test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
+  test.beforeEach(desktopOnly);
 
   test('normal data with execution history', async ({ page }) => {
     await setupApiMocks(page, {
@@ -452,6 +1161,19 @@ test.describe('Trigger Detail — Desktop', () => {
     await page.waitForSelector('text=Daily Code Review');
     await screenshot(page, 'trigger-detail-normal-desktop');
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+  });
+
+  test('cleanup failure feedback', async ({ page }) => {
+    await verifyCleanupFailure(page, 'trigger-detail-cleanup-error-desktop');
+  });
+
+  test('webhook delivery, preview, filter, and rotation states', async ({ page }) => {
+    await verifyWebhookDetail(page, 'trigger-webhook-detail-desktop');
+  });
+
+  test('private incident trigger detail and edit state', async ({ page }) => {
+    await verifyIncidentTriggerDetail(page, 'trigger-incident-desktop');
   });
 });
 
@@ -460,7 +1182,7 @@ test.describe('Trigger Detail — Desktop', () => {
 // ---------------------------------------------------------------------------
 
 test.describe('Trigger Form — Mobile', () => {
-  test.use({ viewport: { width: 375, height: 667 }, isMobile: true });
+  test.beforeEach(mobileOnly);
 
   test('new trigger form renders', async ({ page }) => {
     await setupApiMocks(page, { triggers: [] });
@@ -470,6 +1192,11 @@ test.describe('Trigger Form — Mobile', () => {
     await page.waitForSelector('text=New Trigger');
     await screenshot(page, 'trigger-form-new-mobile');
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+  });
+
+  test('webhook form creates one-time credential', async ({ page }) => {
+    await verifyWebhookCreation(page, 'trigger-webhook-credential-mobile');
   });
 });
 
@@ -478,7 +1205,7 @@ test.describe('Trigger Form — Mobile', () => {
 // ---------------------------------------------------------------------------
 
 test.describe('Trigger Form — Desktop', () => {
-  test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
+  test.beforeEach(desktopOnly);
 
   test('new trigger form with all schedule tabs', async ({ page }) => {
     await setupApiMocks(page, { triggers: NORMAL_TRIGGERS });
@@ -507,5 +1234,10 @@ test.describe('Trigger Form — Desktop', () => {
     await screenshot(page, 'trigger-form-advanced-desktop');
 
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+  });
+
+  test('webhook form creates one-time credential', async ({ page }) => {
+    await verifyWebhookCreation(page, 'trigger-webhook-credential-desktop');
   });
 });

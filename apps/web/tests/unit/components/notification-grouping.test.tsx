@@ -20,15 +20,39 @@
 import type { NotificationResponse } from '@simple-agent-manager/shared';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ---------------------------------------------------------------------------
 // Mock useNotifications so we can inject notifications without WebSocket setup
 // ---------------------------------------------------------------------------
 
+const { mockResolveAttentionAnswer } = vi.hoisted(() => ({
+  mockResolveAttentionAnswer: vi.fn(),
+}));
 const mockUseNotifications = vi.fn();
+const mockUsePushSubscription = vi.fn(() => ({
+  supported: false,
+  permission: 'unsupported' as const,
+  isSubscribed: false,
+  isLoading: false,
+  isBusy: false,
+  error: null,
+  enable: vi.fn(),
+  disable: vi.fn(),
+  refresh: vi.fn(),
+}));
 vi.mock('../../../src/hooks/useNotifications', () => ({
   useNotifications: () => mockUseNotifications(),
+}));
+vi.mock('../../../src/hooks/usePushSubscription', () => ({
+  usePushSubscription: () => mockUsePushSubscription(),
+}));
+vi.mock('../../../src/components/AuthProvider', () => ({
+  useAuth: () => ({ user: { id: 'user-1' } }),
+}));
+vi.mock('../../../src/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api')>()),
+  resolveAttentionAnswer: mockResolveAttentionAnswer,
 }));
 
 // ---------------------------------------------------------------------------
@@ -82,7 +106,7 @@ function renderNotificationCenter(notifications: NotificationResponse[], unreadC
   render(
     <MemoryRouter>
       <NotificationCenter />
-    </MemoryRouter>,
+    </MemoryRouter>
   );
 
   // Open the notification panel
@@ -96,6 +120,7 @@ function renderNotificationCenter(notifications: NotificationResponse[], unreadC
 describe('NotificationCenter grouping logic', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
   });
 
   describe('shouldGroup = false (single project or no notifications)', () => {
@@ -174,8 +199,18 @@ describe('NotificationCenter grouping logic', () => {
 
     it('assigns each notification to the correct group', () => {
       const notifications = [
-        makeNotification({ id: 'n1', title: 'Alpha task help', projectId: 'proj-1', metadata: { projectName: 'Alpha' } }),
-        makeNotification({ id: 'n2', title: 'Beta task help', projectId: 'proj-2', metadata: { projectName: 'Beta' } }),
+        makeNotification({
+          id: 'n1',
+          title: 'Alpha task help',
+          projectId: 'proj-1',
+          metadata: { projectName: 'Alpha' },
+        }),
+        makeNotification({
+          id: 'n2',
+          title: 'Beta task help',
+          projectId: 'proj-2',
+          metadata: { projectName: 'Beta' },
+        }),
       ];
       renderNotificationCenter(notifications);
 
@@ -187,8 +222,18 @@ describe('NotificationCenter grouping logic', () => {
   describe('NotificationGroup collapse/expand toggle', () => {
     it('collapses notifications when the group header is clicked', () => {
       const notifications = [
-        makeNotification({ id: 'n1', title: 'Alpha needs help', projectId: 'proj-1', metadata: { projectName: 'UniqueAlpha' } }),
-        makeNotification({ id: 'n2', title: 'Beta needs help', projectId: 'proj-2', metadata: { projectName: 'UniqueBeta' } }),
+        makeNotification({
+          id: 'n1',
+          title: 'Alpha needs help',
+          projectId: 'proj-1',
+          metadata: { projectName: 'UniqueAlpha' },
+        }),
+        makeNotification({
+          id: 'n2',
+          title: 'Beta needs help',
+          projectId: 'proj-2',
+          metadata: { projectName: 'UniqueBeta' },
+        }),
       ];
       renderNotificationCenter(notifications);
 
@@ -203,8 +248,18 @@ describe('NotificationCenter grouping logic', () => {
 
     it('expands a collapsed group when the header is clicked again', () => {
       const notifications = [
-        makeNotification({ id: 'n1', title: 'Alpha needs help', projectId: 'proj-1', metadata: { projectName: 'UniqueAlpha2' } }),
-        makeNotification({ id: 'n2', title: 'Beta needs help', projectId: 'proj-2', metadata: { projectName: 'UniqueBeta2' } }),
+        makeNotification({
+          id: 'n1',
+          title: 'Alpha needs help',
+          projectId: 'proj-1',
+          metadata: { projectName: 'UniqueAlpha2' },
+        }),
+        makeNotification({
+          id: 'n2',
+          title: 'Beta needs help',
+          projectId: 'proj-2',
+          metadata: { projectName: 'UniqueBeta2' },
+        }),
       ];
       renderNotificationCenter(notifications);
 
@@ -221,9 +276,24 @@ describe('NotificationCenter grouping logic', () => {
   describe('unread count badge per group', () => {
     it('shows unread count badge when group has unread notifications', () => {
       const notifications = [
-        makeNotification({ id: 'n1', projectId: 'proj-1', metadata: { projectName: 'UnreadAlpha' }, readAt: null }),
-        makeNotification({ id: 'n2', projectId: 'proj-1', metadata: { projectName: 'UnreadAlpha' }, readAt: null }),
-        makeNotification({ id: 'n3', projectId: 'proj-2', metadata: { projectName: 'UnreadBeta' }, readAt: new Date().toISOString() }),
+        makeNotification({
+          id: 'n1',
+          projectId: 'proj-1',
+          metadata: { projectName: 'UnreadAlpha' },
+          readAt: null,
+        }),
+        makeNotification({
+          id: 'n2',
+          projectId: 'proj-1',
+          metadata: { projectName: 'UnreadAlpha' },
+          readAt: null,
+        }),
+        makeNotification({
+          id: 'n3',
+          projectId: 'proj-2',
+          metadata: { projectName: 'UnreadBeta' },
+          readAt: new Date().toISOString(),
+        }),
       ];
       renderNotificationCenter(notifications, 2);
 
@@ -234,8 +304,18 @@ describe('NotificationCenter grouping logic', () => {
     it('does not show unread badge when all notifications in a group are read', () => {
       const readAt = new Date().toISOString();
       const notifications = [
-        makeNotification({ id: 'n1', projectId: 'proj-1', metadata: { projectName: 'Alpha' }, readAt }),
-        makeNotification({ id: 'n2', projectId: 'proj-2', metadata: { projectName: 'Beta' }, readAt: null }),
+        makeNotification({
+          id: 'n1',
+          projectId: 'proj-1',
+          metadata: { projectName: 'Alpha' },
+          readAt,
+        }),
+        makeNotification({
+          id: 'n2',
+          projectId: 'proj-2',
+          metadata: { projectName: 'Beta' },
+          readAt: null,
+        }),
       ];
       renderNotificationCenter(notifications, 1);
 
@@ -252,6 +332,7 @@ describe('NotificationCenter grouping logic', () => {
 describe('useNotifications — notification.updated WebSocket handling', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
   });
 
   it('replaces an existing notification by id when notification.updated arrives', async () => {
@@ -279,7 +360,7 @@ describe('useNotifications — notification.updated WebSocket handling', () => {
     render(
       <MemoryRouter>
         <NotificationCenter />
-      </MemoryRouter>,
+      </MemoryRouter>
     );
     fireEvent.click(screen.getByRole('button', { name: /notifications/i }));
 
@@ -304,6 +385,82 @@ describe('useNotifications — notification.updated WebSocket handling', () => {
   });
 });
 
+describe('NotificationCenter push invitation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+  });
+
+  it('asks only after the user opens a relevant notification and honors dismissal', () => {
+    const enable = vi.fn();
+    mockUsePushSubscription.mockReturnValue({
+      supported: true,
+      permission: 'default',
+      isSubscribed: false,
+      isLoading: false,
+      isBusy: false,
+      error: null,
+      enable,
+      disable: vi.fn(),
+      refresh: vi.fn(),
+    });
+
+    renderNotificationCenter([makeNotification({ type: 'needs_input' })], 1);
+    expect(screen.getByText(/Get agent questions on this device/i)).toBeInTheDocument();
+    expect(enable).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Not now' }));
+    expect(screen.queryByText(/Get agent questions on this device/i)).not.toBeInTheDocument();
+    expect(localStorage.getItem('sam-push-invitation-dismissed-user-1')).toBe('true');
+  });
+});
+
+describe('NotificationCenter structured answers', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+  });
+
+  it('renders stored options as touch-sized buttons and sends the chosen answer', async () => {
+    mockResolveAttentionAnswer.mockResolvedValue({
+      resolved: true,
+      alreadyResolved: false,
+      answer: 'Approve',
+    });
+    renderNotificationCenter(
+      [
+        makeNotification({
+          sessionId: 'session-1',
+          metadata: {
+            projectName: 'SAM',
+            attentionMarkerId: 'marker-1',
+            options: ['Approve', 'Reject'],
+          },
+        }),
+      ],
+      1
+    );
+
+    const approve = screen.getByRole('button', { name: 'Approve' });
+    expect(approve).toHaveClass('min-h-11');
+    expect(approve).toHaveClass('min-w-11');
+    expect(approve).toHaveClass('max-w-full');
+    expect(approve).toHaveClass('break-words');
+    expect(approve.closest('[role="button"]')).toBeNull();
+    fireEvent.click(approve);
+
+    await waitFor(() => {
+      expect(mockResolveAttentionAnswer).toHaveBeenCalledWith(
+        'proj-1',
+        'session-1',
+        'marker-1',
+        'Approve'
+      );
+    });
+    expect(await screen.findByRole('status')).toHaveTextContent('Answered: Approve');
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Tab filtering — Attention / Updates / All
 // ---------------------------------------------------------------------------
@@ -320,14 +477,16 @@ describe('NotificationCenter tab filtering', () => {
     makeNotification({ id: 'n-error', type: 'error', title: 'Something broke' }),
     makeNotification({ id: 'n-session', type: 'session_ended', title: 'Session ended' }),
     makeNotification({ id: 'n-pr', type: 'pr_created', title: 'PR opened' }),
+    makeNotification({ id: 'n-cron', type: 'cron_failure', title: 'Sweep failed' }),
   ];
 
-  it('defaults to Attention tab showing only needs_input and error', () => {
-    renderNotificationCenter(mixedNotifications, 6);
+  it('defaults to Attention tab showing needs_input, error, and operational failures', () => {
+    renderNotificationCenter(mixedNotifications, 7);
 
     // Attention items visible
     expect(screen.getByText('Agent needs help')).toBeInTheDocument();
     expect(screen.getByText('Something broke')).toBeInTheDocument();
+    expect(screen.getByText('Sweep failed')).toBeInTheDocument();
 
     // Non-attention items NOT visible on the default tab
     expect(screen.queryByText('Task finished')).toBeNull();
@@ -337,7 +496,7 @@ describe('NotificationCenter tab filtering', () => {
   });
 
   it('Updates tab shows task_complete, progress, session_ended, pr_created', () => {
-    renderNotificationCenter(mixedNotifications, 6);
+    renderNotificationCenter(mixedNotifications, 7);
     fireEvent.click(screen.getByRole('tab', { name: /updates/i }));
 
     // Update items visible
@@ -349,10 +508,11 @@ describe('NotificationCenter tab filtering', () => {
     // Attention items NOT visible
     expect(screen.queryByText('Agent needs help')).toBeNull();
     expect(screen.queryByText('Something broke')).toBeNull();
+    expect(screen.queryByText('Sweep failed')).toBeNull();
   });
 
   it('All tab shows every notification', () => {
-    renderNotificationCenter(mixedNotifications, 6);
+    renderNotificationCenter(mixedNotifications, 7);
     fireEvent.click(screen.getByRole('tab', { name: /^all$/i }));
 
     expect(screen.getByText('Agent needs help')).toBeInTheDocument();
@@ -361,6 +521,7 @@ describe('NotificationCenter tab filtering', () => {
     expect(screen.getByText('Something broke')).toBeInTheDocument();
     expect(screen.getByText('Session ended')).toBeInTheDocument();
     expect(screen.getByText('PR opened')).toBeInTheDocument();
+    expect(screen.getByText('Sweep failed')).toBeInTheDocument();
   });
 
   it('shows attention unread count badge on the Attention tab', () => {
@@ -379,7 +540,7 @@ describe('NotificationCenter tab filtering', () => {
 
   it('shows 99+ when attention unread count exceeds 99', () => {
     const notifications = Array.from({ length: 110 }, (_, i) =>
-      makeNotification({ id: `n${i}`, type: 'needs_input', title: `Help ${i}`, readAt: null }),
+      makeNotification({ id: `n${i}`, type: 'needs_input', title: `Help ${i}`, readAt: null })
     );
     renderNotificationCenter(notifications, 110);
 
@@ -388,9 +549,7 @@ describe('NotificationCenter tab filtering', () => {
   });
 
   it('shows empty state with sub-message on Attention tab when no attention notifications exist', () => {
-    const notifications = [
-      makeNotification({ id: 'n1', type: 'progress', title: 'Working' }),
-    ];
+    const notifications = [makeNotification({ id: 'n1', type: 'progress', title: 'Working' })];
     renderNotificationCenter(notifications, 1);
 
     expect(screen.getByText(/nothing needs your attention/i)).toBeInTheDocument();
@@ -403,7 +562,12 @@ describe('NotificationCenter tab filtering', () => {
       makeNotification({ id: 'n2', type: 'task_complete', title: 'Done 1', readAt: null }),
       makeNotification({ id: 'n3', type: 'progress', title: 'Working', readAt: null }),
       makeNotification({ id: 'n4', type: 'error', title: 'Err', readAt: null }),
-      makeNotification({ id: 'n5', type: 'session_ended', title: 'Ended', readAt: new Date().toISOString() }),
+      makeNotification({
+        id: 'n5',
+        type: 'session_ended',
+        title: 'Ended',
+        readAt: new Date().toISOString(),
+      }),
     ];
     // 4 unread total (n1-n4), 2 are attention-required (n1=needs_input, n4=error)
     renderNotificationCenter(notifications, 4);
@@ -418,9 +582,7 @@ describe('NotificationCenter tab filtering', () => {
   });
 
   it('shows "No updates" on the Updates tab when only attention notifications exist', () => {
-    const notifications = [
-      makeNotification({ id: 'n1', type: 'needs_input', title: 'Help' }),
-    ];
+    const notifications = [makeNotification({ id: 'n1', type: 'needs_input', title: 'Help' })];
     renderNotificationCenter(notifications, 1);
     fireEvent.click(screen.getByRole('tab', { name: /updates/i }));
 

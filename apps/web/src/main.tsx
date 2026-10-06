@@ -1,17 +1,23 @@
 import './app.css';
 import './index.css';
+import './styles/acp-chat.css';
 
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 
 import App from './App';
+import { applyThemeAttribute, readStoredTheme } from './contexts/ThemeContext';
 import { initAnalytics } from './lib/analytics';
-import { getAnalyticsApiUrl,getClientErrorsApiUrl } from './lib/api';
+import { getAnalyticsApiUrl, getClientErrorsApiUrl } from './lib/api';
 import { initErrorReporter } from './lib/error-reporter';
 import { startMobileViewportSync } from './lib/mobile-viewport';
 import { registerAppServiceWorker } from './lib/pwa';
 
-document.documentElement.setAttribute('data-ui-theme', 'sam');
+// Pre-paint theme init: resolve the persisted preference (dark | light |
+// system; default system) and apply the effective `data-ui-theme` before first
+// render so there is no flash of the wrong theme (FOUC). `system` is resolved
+// inline against the OS color-scheme media query inside applyThemeAttribute.
+applyThemeAttribute(readStoredTheme());
 
 const stopViewportSync = startMobileViewportSync();
 registerAppServiceWorker({ enabled: import.meta.env.PROD });
@@ -24,7 +30,12 @@ if (import.meta.hot) {
   });
 }
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
+const rootElement = document.getElementById('root');
+if (!rootElement) {
+  throw new Error('main.tsx: could not find #root element to mount the app');
+}
+
+ReactDOM.createRoot(rootElement).render(
   <React.StrictMode>
     <App />
   </React.StrictMode>

@@ -1,8 +1,20 @@
 import * as v from 'valibot';
 
-const CredentialProviderSchema = v.picklist(['hetzner', 'scaleway', 'gcp']);
+import { ResourceRequirementsSchema } from './resource-requirements';
+
+const CredentialProviderSchema = v.picklist([
+  'hetzner',
+  'scaleway',
+  'gcp',
+  'vultr',
+  'infomaniak',
+  'digitalocean',
+  'upcloud',
+]);
 const VMSizeSchema = v.picklist(['small', 'medium', 'large']);
 const CredentialKindSchema = v.picklist(['api-key', 'oauth-token']);
+const VMArchitectureSchema = v.picklist(['x86_64', 'arm64']);
+const PositiveIntegerSchema = v.pipe(v.number(), v.integer(), v.minValue(1));
 
 export const CreateWorkspaceSchema = v.object({
   name: v.string(),
@@ -14,15 +26,26 @@ export const CreateWorkspaceSchema = v.object({
   vmLocation: v.optional(v.string()),
   installationId: v.optional(v.string()),
   provider: v.optional(CredentialProviderSchema),
+  providerInstanceType: v.optional(v.string()),
+  nativeOffering: v.optional(v.string()),
+  bootDiskSizeGb: v.optional(PositiveIntegerSchema),
+  image: v.optional(v.string()),
+  architecture: v.optional(VMArchitectureSchema),
+  resourceRequirements: v.optional(ResourceRequirementsSchema),
 });
 
 export const UpdateWorkspaceSchema = v.object({
   displayName: v.string(),
 });
 
+export const UpdateWorkspacePortsPublicSchema = v.object({
+  enabled: v.boolean(),
+});
+
 export const CreateAgentSessionSchema = v.object({
   label: v.optional(v.string()),
   agentType: v.optional(v.string()),
+  agentProfileId: v.optional(v.string()),
   worktreePath: v.optional(v.string()),
 });
 
@@ -33,6 +56,7 @@ export const UpdateAgentSessionSchema = v.object({
 // Workspace runtime schemas
 export const AgentTypeBodySchema = v.object({
   agentType: v.string(),
+  agentSessionId: v.optional(v.string()),
 });
 
 export const CredentialInjectionSchema = v.object({
@@ -64,6 +88,8 @@ const MessageEntrySchema = v.object({
   toolMetadata: v.optional(v.nullable(v.string())),
   timestamp: v.string(),
   sequence: v.optional(v.number()),
+  // "system" for SAM-injected messages the UI collapses; absent for normal messages.
+  origin: v.optional(v.nullable(v.picklist(['user', 'system']))),
 });
 
 export const MessageBatchSchema = v.object({
@@ -73,6 +99,7 @@ export const MessageBatchSchema = v.object({
 // Workspace lifecycle schemas
 export const WorkspaceStatusUpdateSchema = v.object({
   status: v.optional(v.string()),
+  workspaceProfile: v.optional(v.picklist(['full', 'lightweight'])),
 });
 
 export const WorkspaceErrorSchema = v.object({

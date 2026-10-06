@@ -18,9 +18,11 @@ export async function createChatSession(
   env: Env,
   projectId: string,
   workspaceId: string | null,
-  topic: string | null
+  topic: string | null,
+  taskId: string,
+  createdByUserId: string | null = null
 ): Promise<string> {
-  return projectDataService.createSession(env, projectId, workspaceId, topic);
+  return projectDataService.createSession(env, projectId, workspaceId, topic, taskId, createdByUserId);
 }
 
 /**
@@ -32,7 +34,7 @@ export async function stopChatSession(
   projectId: string,
   sessionId: string
 ): Promise<void> {
-  return projectDataService.stopSession(env, projectId, sessionId);
+  await projectDataService.stopSession(env, projectId, sessionId);
 }
 
 // Browser-side message persistence removed — messages are now persisted

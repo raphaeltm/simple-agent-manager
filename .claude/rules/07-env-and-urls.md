@@ -32,6 +32,7 @@ GH_WEBHOOK_SECRET      ->  GITHUB_WEBHOOK_SECRET
 3. **Local `.env` files** -> Use `GITHUB_*` prefix (same as Worker)
 4. ALWAYS specify which context you're documenting
 5. NEVER mix prefixes in the same table without explanation
+6. Distinguish manual GitHub Environment prerequisites from generated Worker secrets
 
 ### Quick Reference
 
@@ -40,12 +41,23 @@ GH_WEBHOOK_SECRET      ->  GITHUB_WEBHOOK_SECRET
 - **Local development**: Use `GITHUB_CLIENT_ID` in `.env`
 - **GitHub webhook secret**: Tell them to use `GH_WEBHOOK_SECRET` in GitHub and `GITHUB_WEBHOOK_SECRET` in Worker/local env
 
+## Generated Platform Secrets
+
+Do not ask users to supply platform-owned signing/encryption material when SAM can safely generate and persist it during deployment.
+
+Examples:
+
+- `ENCRYPTION_KEY`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`, `DEPLOY_SIGNING_PRIVATE_KEY`, `DEPLOY_SIGNING_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_PUBLIC_KEY`, `VAPID_SUBJECT`, and `TRIAL_CLAIM_TOKEN_SECRET` are Worker runtime secrets, not required manual GitHub Environment secrets for fresh installs.
+- `ORIGIN_CA_CERT` and `ORIGIN_CA_KEY` are legacy rotation inputs only. New VM nodes generate Origin CA private keys locally and fetch signed certificates through the node-scoped callback endpoint.
+- Pulumi persists the generated source key material; `scripts/deploy/configure-secrets.sh` derives any runtime public keys and copies the resulting values into Cloudflare Worker secrets.
+- GitHub Environment secrets with the same names are compatibility/rotation overrides only. When adding new deployment-owned secrets, prefer Pulumi generation plus an explicit override path over a new manual prerequisite.
+
 ## Wrangler Environment Sections (Generated at Deploy Time)
 
 Environment-specific sections (`[env.staging]`, `[env.production]`) are NOT checked into the repository. They are generated dynamically at deploy time by `scripts/deploy/sync-wrangler-config.ts`, which:
 
 1. Reads Pulumi stack outputs for dynamic bindings (D1 IDs, KV IDs, R2 bucket names)
-2. Copies static bindings from the top-level config (Durable Objects, AI, migrations)
+2. Copies static Durable Object and AI bindings, then resolves Durable Object migrations against the target Worker's deployed tag
 3. Derives worker names from `DEPLOYMENT_CONFIG` in `scripts/deploy/config.ts`
 4. Conditionally adds `tail_consumers` (only if the tail worker already exists)
 
@@ -53,14 +65,38 @@ Environment-specific sections (`[env.staging]`, `[env.production]`) are NOT chec
 
 Add the binding to the **top-level section of `wrangler.toml` only**. The sync script handles the rest.
 
-- **Static bindings** (Durable Objects, AI, migrations): Copied verbatim from top-level to generated env sections.
+- **Static bindings** (Durable Objects, AI): Copied verbatim from top-level to generated env sections.
+- **Durable Object migrations**: The applied prefix is copied verbatim; only pending legacy `new_classes` creates are emitted as `new_sqlite_classes`.
 - **Dynamic bindings** (D1, KV, R2): Generated from Pulumi outputs with correct resource IDs per environment.
 - **Derived bindings** (worker name, routes, tail_consumers): Computed from `DEPLOYMENT_CONFIG` naming conventions.
+
+### Durable Object migration safety
+
+- Applied migration tags are immutable history. Never rewrite an applied `new_classes`, rename, delete, or transfer entry to change storage or behavior.
+- New Durable Object namespaces MUST use `new_sqlite_classes`.
+- The sync script MUST confirm whether the target Worker is absent or read its deployed `migration_tag` before generating an environment.
+- A missing, unreadable, duplicated, or unknown migration tag MUST fail the deployment preflight. Never assume an ambiguous Worker is a clean install; Wrangler can otherwise submit the full local history. The probe retries transient failures a bounded number of times (`DO_MIGRATION_STATE_PROBE_ATTEMPTS`, `DO_MIGRATION_STATE_PROBE_RETRY_DELAY_MS`) before failing closed.
+- The `[[migrations]]` array is append-only with sequential `v1..vN` tags. The resolver (and Wrangler) treat array position relative to the deployed tag as the applied/pending boundary, so inserting or reordering entries silently corrupts that boundary. The compatibility test suite enforces the sequence and runs in the `Validate Deploy Scripts` CI job (`scripts/quality/do-migration-compatibility.test.ts`).
+- Wrangler resolves `migrations` via its `inheritable()` config path: if `env.*.migrations` were ever omitted, Wrangler silently falls back to the top-level (legacy) array with NO "not inherited by environments" warning — the deploy grep-guard does not protect this field. The generated-environment test pins that `env.*.migrations` is always emitted.
+- Test both a clean bootstrap and an existing deployment at the latest historical tag whenever migration generation changes. Miniflare alone does not exercise the remote migration contract.
 
 The CI quality check (`pnpm quality:wrangler-bindings`) verifies:
 
 1. No `[env.*]` sections exist in checked-in `wrangler.toml` files
 2. All required binding types are present at the top level
+
+### GitHub Environment variables override checked-in `[vars]`
+
+Every name in the optional list that `getOptionalProcessEnvVars` reads is taken from the GitHub
+Environment (via `wrangler_sync_env`) when set, and that value REPLACES the top-level `wrangler.toml`
+value for the generated environment. Flipping a value in `wrangler.toml` therefore ships nothing if
+an Environment variable of the same name still pins the old value. The sync script prints every
+such override that differs from `wrangler.toml`; before merging a var change, list the overrides
+and verify the deployed value afterwards. See `.claude/rules/70-flag-flips-must-verify-the-deployed-value.md`.
+
+### Required action when adding a Worker var consumed by sync-wrangler-config
+
+If `scripts/deploy/sync-wrangler-config.ts` reads a GitHub Environment variable from `process.env` to generate Worker `[vars]`, add it to the centralized `wrangler_sync_env` mapping in `.github/workflows/deploy-reusable.yml`. Do not add ad hoc per-step sync env blocks. First deploys run the sync script twice (initial sync, then tail-consumer re-sync), and both invocations must receive identical optional Worker env inputs so the second sync cannot silently drop operator overrides or restore script defaults.
 
 ### Why this architecture
 
@@ -73,12 +109,12 @@ Miniflare (used in Vitest worker tests) configures bindings directly in `vitest.
 ### Workers Secrets
 
 ```bash
-wrangler secret put SECRET_NAME
+wrangler secret bulk secrets.json --env "$ENVIRONMENT"
 ```
 
 Local development uses `.dev.vars`.
 
-**Note**: Hetzner tokens are NOT platform secrets. Users provide their own tokens through the Settings UI, stored encrypted per-user in the database. See `docs/architecture/credential-security.md`.
+**Note**: Hetzner tokens are NOT platform secrets. Users provide their own tokens through the Settings UI, stored encrypted per-user in the database. See `apps/www/src/content/docs/docs/architecture/security.md`.
 
 ## URL Construction Rules
 

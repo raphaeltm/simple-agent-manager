@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 // WriteFile creates or overwrites a file.
@@ -42,7 +41,11 @@ func (t *WriteFile) Execute(_ context.Context, params map[string]any) (string, e
 		return "", err
 	}
 
-	resolved, err := safePath(t.WorkDir, path)
+	boundary, err := newWorkspaceBoundary(t.WorkDir)
+	if err != nil {
+		return "", err
+	}
+	resolved, err := boundary.writePath(path)
 	if err != nil {
 		return "", err
 	}
@@ -94,26 +97,4 @@ func atomicWrite(path string, data []byte, perm os.FileMode) error {
 		return err
 	}
 	return os.Rename(tmpPath, path)
-}
-
-// safePath resolves path relative to workDir and rejects any path that escapes it.
-// Absolute paths and "../" traversals above workDir are rejected.
-func safePath(workDir, path string) (string, error) {
-	if filepath.IsAbs(path) {
-		return "", fmt.Errorf("path %q escapes working directory", path)
-	}
-	resolved := filepath.Join(workDir, path)
-	absWork, err := filepath.Abs(workDir)
-	if err != nil {
-		return "", fmt.Errorf("resolving workdir: %w", err)
-	}
-	absResolved, err := filepath.Abs(resolved)
-	if err != nil {
-		return "", fmt.Errorf("resolving path: %w", err)
-	}
-	rel, err := filepath.Rel(absWork, absResolved)
-	if err != nil || strings.HasPrefix(rel, "..") {
-		return "", fmt.Errorf("path %q escapes working directory", path)
-	}
-	return absResolved, nil
 }

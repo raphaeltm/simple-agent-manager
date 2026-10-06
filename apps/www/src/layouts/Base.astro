@@ -8,7 +8,7 @@ interface Props {
 
 const {
   title = 'SAM — Run Coding Agents in Parallel on Your Infrastructure',
-  description = 'Simple Agent Manager (SAM) is an open-source platform for running coding agents on your own cloud. Run as many instances of Claude Code, Codex, Gemini CLI, or Amp as you need across cloud VMs.',
+  description = 'Simple Agent Manager (SAM) is an open-source platform for running coding agents on your infrastructure. Run Claude Code, Codex, Gemini CLI, Mistral Vibe, OpenCode, and Amp across isolated environments.',
 } = Astro.props;
 
 const baseDomain = import.meta.env.PUBLIC_BASE_DOMAIN || 'simple-agent-manager.org';
@@ -17,12 +17,35 @@ const apiUrl = `https://api.${baseDomain}`;
 ---
 
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content={description} />
-    <meta name="theme-color" content="#0b1110" />
+
+    <!-- Pre-paint theme init (shares Starlight's `starlight-theme` key so docs + marketing stay in sync). Must run before first paint to avoid FOUC. -->
+    <script is:inline>
+      (() => {
+        const parse = (t) =>
+          t === 'auto' || t === 'light' || t === 'dark' ? t : 'auto';
+        let stored = 'auto';
+        try {
+          stored = parse(localStorage.getItem('starlight-theme') || 'auto');
+        } catch {
+          // localStorage may be unavailable (private browsing, disabled
+          // storage) — fall back to the 'auto' default set above.
+        }
+        const resolved =
+          stored === 'auto'
+            ? window.matchMedia('(prefers-color-scheme: light)').matches
+              ? 'light'
+              : 'dark'
+            : stored;
+        document.documentElement.dataset.theme = resolved;
+      })();
+    </script>
+    <meta name="theme-color" content="#0b1110" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f8fbf8" media="(prefers-color-scheme: light)" />
 
     <!-- Content Security Policy -->
     <meta http-equiv="Content-Security-Policy" content={`default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' https:; connect-src 'self' ${apiUrl}; frame-src 'none'; object-src 'none'; base-uri 'self'`} />
@@ -48,6 +71,13 @@ const apiUrl = `https://api.${baseDomain}`;
 
     <!-- Preload font -->
     <link rel="preload" href="/fonts/Chillax-Variable.woff2" as="font" type="font/woff2" crossorigin />
+
+    <!-- Scroll-reveal content must stay readable without JavaScript -->
+    <noscript>
+      <style>
+        .animate-on-scroll { opacity: 1; transform: none; }
+      </style>
+    </noscript>
 
     <!-- Analytics -->
     <script src="/scripts/tracker.js" data-api={`${apiUrl}/api/t`} defer></script>

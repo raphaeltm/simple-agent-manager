@@ -1,6 +1,13 @@
 import type { ChatSessionListItem } from '../../lib/api';
 import type { TaskInfo } from './useTaskGroups';
 
+export interface SessionSourceContext {
+  lineageText: string;
+  parentTaskId: string;
+  parentSessionId: string | null;
+  parentTitle: string;
+}
+
 /**
  * User-triggered tasks with a parentTaskId are retries/forks. Agent-dispatched
  * tasks stay nested as subtasks.
@@ -30,12 +37,38 @@ export function getLineageText(
 
   if (!isRetryOrFork(info)) return undefined;
 
+  const taskToSession = buildTaskToSessionMap(sessions);
+
+  return buildLineageText(info, taskInfoMap, taskToSession);
+}
+
+export function getSessionSourceContext(
+  taskId: string,
+  taskInfoMap: Map<string, TaskInfo>,
+  sessions: ChatSessionListItem[],
+): SessionSourceContext | undefined {
+  const info = taskInfoMap.get(taskId);
+  if (!info?.parentTaskId) return undefined;
+  if (!isRetryOrFork(info)) return undefined;
+
+  const taskToSession = buildTaskToSessionMap(sessions);
+  const parentInfo = taskInfoMap.get(info.parentTaskId);
+  const parentSession = taskToSession.get(info.parentTaskId);
+
+  return {
+    lineageText: buildLineageText(info, taskInfoMap, taskToSession),
+    parentTaskId: info.parentTaskId,
+    parentSessionId: parentSession?.id ?? null,
+    parentTitle: parentSession?.topic || parentInfo?.title || 'Earlier attempt',
+  };
+}
+
+function buildTaskToSessionMap(sessions: ChatSessionListItem[]): Map<string, ChatSessionListItem> {
   const taskToSession = new Map<string, ChatSessionListItem>();
   for (const s of sessions) {
     if (s.taskId) taskToSession.set(s.taskId, s);
   }
-
-  return buildLineageText(info, taskInfoMap, taskToSession);
+  return taskToSession;
 }
 
 export function buildLineageText(

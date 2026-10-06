@@ -2,10 +2,6 @@
 // Task Run Defaults (Autonomous Execution)
 // =============================================================================
 
-/** Default max workspaces per node. Hard ceiling regardless of CPU/memory metrics.
- * Override via MAX_WORKSPACES_PER_NODE env var. */
-export const DEFAULT_MAX_WORKSPACES_PER_NODE = 3;
-
 /** Default CPU usage threshold (%) above which a node is considered full. Override via TASK_RUN_NODE_CPU_THRESHOLD_PERCENT env var. */
 export const DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT = 50;
 
@@ -19,16 +15,22 @@ export const DEFAULT_TASK_RUN_CLEANUP_DELAY_MS = 5000;
 // Task Execution Timeout (Stuck Task Recovery)
 // =============================================================================
 
-/** Soft timeout (ms): tasks past this threshold are checked against the VM agent heartbeat.
- * If the heartbeat is recent, recovery is deferred up to the hard timeout (TASK_RUN_HARD_TIMEOUT_MS).
- * Override via TASK_RUN_MAX_EXECUTION_MS env var. */
+/** Soft timeout (ms): past this age, every stuck-task sweep checks an `in_progress` task's
+ * task-scoped runtime liveness. A conclusively dead runtime is failed; a live or inconclusive
+ * one is preserved, bounded only by TASK_RUN_ABSOLUTE_CEILING_MS. A node heartbeat alone never
+ * counts as live. Override via TASK_RUN_MAX_EXECUTION_MS env var. */
 export const DEFAULT_TASK_RUN_MAX_EXECUTION_MS = 4 * 60 * 60 * 1000; // 4 hours
 
-/** Absolute hard timeout (ms) — tasks are killed regardless of node heartbeat status.
- * The soft timeout (TASK_RUN_MAX_EXECUTION_MS) allows heartbeat-based grace for the
- * window between soft and hard timeout. Past the hard timeout, no grace is given.
- * Override via TASK_RUN_HARD_TIMEOUT_MS env var. */
-export const DEFAULT_TASK_RUN_HARD_TIMEOUT_MS = 8 * 60 * 60 * 1000; // 8 hours
+/** Absolute runaway-cost backstop (ms) that bounds even demonstrably live tasks. Aged from the
+ * current runtime generation (`workspaces.created_at`). */
+export const DEFAULT_TASK_RUN_ABSOLUTE_CEILING_MS = 24 * 60 * 60 * 1000;
+
+/** Longest (ms) the absolute ceiling keeps deferring to a sleep that is still in flight
+ * (scheduled, capturing, stopping or retrying) after the ceiling has passed. Measured on
+ * runtime-generation age, which no sleep writer can re-stamp, so a sleep that retries forever
+ * cannot hold the ceiling off forever. Keep it above one sleep episode
+ * (SESSION_SLEEP_IN_FLIGHT_MAX_AGE_MS). Override via TASK_RUN_ABSOLUTE_CEILING_SLEEP_GRACE_MS. */
+export const DEFAULT_TASK_RUN_ABSOLUTE_CEILING_SLEEP_GRACE_MS = 60 * 60 * 1000;
 
 /** Default threshold (ms) for a task stuck in 'queued' status. Override via TASK_STUCK_QUEUED_TIMEOUT_MS env var.
  * Must be > TASK_RUNNER_AGENT_READY_TIMEOUT_MS (15 min) to avoid the stuck-task cron killing tasks
@@ -40,6 +42,64 @@ export const DEFAULT_TASK_STUCK_QUEUED_TIMEOUT_MS = 20 * 60 * 1000; // 20 minute
  * Must be > TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS (30 min) to avoid stuck-task recovery killing legitimate workspace startups.
  * Set to 31 minutes (1 min buffer above workspace ready timeout). */
 export const DEFAULT_TASK_STUCK_DELEGATED_TIMEOUT_MS = 31 * 60 * 1000; // 31 minutes
+
+/** Minimum age before reconciling a completed TaskRunner DO against active D1 state. */
+export const DEFAULT_TASK_DO_MISMATCH_GRACE_MS = 5 * 60 * 1000;
+
+/** Maximum active task rows inspected by one stuck-task cron invocation. */
+export const DEFAULT_STUCK_TASK_MAX_CANDIDATES_PER_SWEEP = 100;
+
+/** Maximum reporter-scoped tasks inspected by one ProjectData idle-cleanup pass. */
+export const DEFAULT_IDLE_CLEANUP_MAX_CANDIDATES_PER_SWEEP = 5;
+
+/** KV key used to resume the bounded stuck-task scan without starving later rows. */
+export const DEFAULT_STUCK_TASK_SCAN_CURSOR_KV_KEY = 'scheduled:stuck-tasks:scan-cursor:v1';
+
+/** Maximum ACP sessions read while proving task-scoped runtime liveness. */
+export const DEFAULT_TASK_LIVENESS_MAX_ACP_SESSIONS = 5;
+
+/**
+ * Per-candidate timeout for the task-scoped ACP liveness probe (a ProjectData DO
+ * call) inside the stuck-task control loop. A healthy runtime answers in
+ * milliseconds; past this bound the probe is treated as inconclusive (fail-safe:
+ * never fails a task on a slow/unresponsive DO). Keeps the sweep's worst-case
+ * wall time bounded (rule 47 — control-loop I/O budget). */
+export const DEFAULT_TASK_LIVENESS_PROBE_TIMEOUT_MS = 5 * 1000;
+
+// =============================================================================
+// VM Admission Control Defaults
+// =============================================================================
+
+export const VM_ADMISSION_CONTROL_MODES = ['off', 'shadow', 'enforce'] as const;
+
+export type VmAdmissionControlMode = (typeof VM_ADMISSION_CONTROL_MODES)[number];
+
+/** Production default: enforce backpressure, with VM_ADMISSION_CONTROL_MODE=off as rollback. */
+export const DEFAULT_VM_ADMISSION_CONTROL_MODE: VmAdmissionControlMode = 'enforce';
+
+/** Lease TTL while a task is the sole owner allowed to provision a new VM. */
+export const DEFAULT_VM_ADMISSION_LEASE_TTL_MS = 20 * 60 * 1000;
+
+/** Minimum delay before retrying a waiting admission. */
+export const DEFAULT_VM_ADMISSION_RETRY_MIN_MS = 15 * 1000;
+
+/** Maximum delay before retrying a waiting admission. */
+export const DEFAULT_VM_ADMISSION_RETRY_MAX_MS = 60 * 1000;
+
+/** Maximum time a task can wait for VM capacity before visible failure. */
+export const DEFAULT_VM_ADMISSION_WAIT_TIMEOUT_MS = 2 * 60 * 60 * 1000;
+
+/** Maximum time to defer placement onto a node whose only blocker is an active build queue. */
+export const DEFAULT_VM_ADMISSION_BUSY_BUILD_WAIT_TIMEOUT_MS = 20 * 60 * 1000;
+
+/** Cooldown after provider/account-capacity failures such as Hetzner server limits. */
+export const DEFAULT_VM_ADMISSION_PROVIDER_COOLDOWN_MS = 10 * 60 * 1000;
+
+/** Bounded number of admission waiters nudged by one node-ready/cleanup/capacity event. */
+export const DEFAULT_VM_ADMISSION_WAKE_BATCH_SIZE = 25;
+
+/** Maximum safe provider diagnostic message length persisted on admission/capacity rows. */
+export const DEFAULT_VM_ADMISSION_DIAGNOSTIC_MESSAGE_MAX_LENGTH = 500;
 
 // =============================================================================
 // TaskRunner DO Defaults (Alarm-Driven Orchestration — TDF-2)
@@ -57,6 +117,9 @@ export const DEFAULT_TASK_RUNNER_RETRY_MAX_DELAY_MS = 60_000;
 /** Default health check poll interval (ms) for agent readiness. Override via TASK_RUNNER_AGENT_POLL_INTERVAL_MS env var. */
 export const DEFAULT_TASK_RUNNER_AGENT_POLL_INTERVAL_MS = 5_000;
 
+/** Default freshness skew (ms) tolerated between TaskRunner wait start, heartbeat, and /ready timestamps. Override via TASK_RUNNER_AGENT_READY_FRESHNESS_SKEW_MS env var. */
+export const DEFAULT_TASK_RUNNER_AGENT_READY_FRESHNESS_SKEW_MS = 30_000;
+
 /**
  * Default timeout (ms) for VM agent to become healthy after node provisioning.
  * Fresh VMs need cloud-init to complete: install packages, start Docker, set up
@@ -68,6 +131,15 @@ export const DEFAULT_TASK_RUNNER_AGENT_READY_TIMEOUT_MS = 900_000; // 15 minutes
 
 /** Default timeout (ms) for workspace-ready callback. Override via TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS env var. */
 export const DEFAULT_TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+
+/** Default timeout (ms) for VM-agent workspace dispatch acknowledgement. Override via TASK_RUNNER_WORKSPACE_DISPATCH_TIMEOUT_MS env var. */
+export const DEFAULT_TASK_RUNNER_WORKSPACE_DISPATCH_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+
+/** Default base delay (ms) for workspace dispatch retry backoff. Override via TASK_RUNNER_WORKSPACE_DISPATCH_BASE_DELAY_MS env var. */
+export const DEFAULT_TASK_RUNNER_WORKSPACE_DISPATCH_BASE_DELAY_MS = 30_000; // 30 seconds
+
+/** Default max delay (ms) for workspace dispatch retry backoff. Override via TASK_RUNNER_WORKSPACE_DISPATCH_MAX_DELAY_MS env var. */
+export const DEFAULT_TASK_RUNNER_WORKSPACE_DISPATCH_MAX_DELAY_MS = 120_000; // 2 minutes
 
 /**
  * Default poll interval (ms) for checking workspace status in D1 during the
@@ -81,3 +153,10 @@ export const DEFAULT_TASK_RUNNER_WORKSPACE_READY_POLL_INTERVAL_MS = 30_000; // 3
 
 /** Default poll interval (ms) for provisioning status checks. Override via TASK_RUNNER_PROVISION_POLL_INTERVAL_MS env var. */
 export const DEFAULT_TASK_RUNNER_PROVISION_POLL_INTERVAL_MS = 10_000;
+
+/**
+ * Default timeout (ms) for node provisioning (Hetzner API → node status 'running').
+ * If the node stays in 'creating' longer than this, the task fails with a permanent error.
+ * Override via TASK_RUNNER_PROVISION_TIMEOUT_MS env var.
+ */
+export const DEFAULT_TASK_RUNNER_PROVISION_TIMEOUT_MS = 900_000; // 15 minutes

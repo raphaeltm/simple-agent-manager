@@ -120,6 +120,10 @@ async function setupApiMocks(
   const notifs = options.notifications ?? [];
   const unreadCount = options.unreadCount ?? notifs.filter((n) => !n.readAt).length;
 
+  await page.addInitScript((userId) => {
+    window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
+  }, MOCK_USER.user.id);
+
   await page.route('**/api/**', async (route: Route) => {
     const url = route.request().url();
     const path = new URL(url).pathname;
@@ -164,11 +168,6 @@ async function setupApiMocks(
     // Credentials (Settings page expects a bare array)
     if (path.includes('/api/credentials')) {
       return route.fulfill({ json: [] });
-    }
-
-    // Smoke test status
-    if (path.includes('/api/auth/smoke-test-status')) {
-      return route.fulfill({ json: { enabled: false } });
     }
 
     // Catch-all: return empty object

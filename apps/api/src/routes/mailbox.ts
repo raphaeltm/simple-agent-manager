@@ -13,7 +13,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { getAuth, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { requireOwnedProject } from '../middleware/project-auth';
+import { requireProjectCapability } from '../middleware/project-auth';
 import * as projectDataService from '../services/project-data';
 
 const mailboxRoutes = new Hono<{ Bindings: Env }>();
@@ -31,7 +31,7 @@ mailboxRoutes.get('/', async (c) => {
   const auth = getAuth(c);
   const projectId = requireParam(c.req.param('projectId'), 'projectId');
   const db = drizzle(c.env.DATABASE, { schema });
-  await requireOwnedProject(db, projectId, auth.user.id);
+  await requireProjectCapability(db, projectId, auth.user.id, 'task:read');
 
   const deliveryState = c.req.query('deliveryState') as DeliveryState | undefined;
   if (deliveryState && !(DELIVERY_STATES as readonly string[]).includes(deliveryState)) {
@@ -64,7 +64,7 @@ mailboxRoutes.get('/stats', async (c) => {
   const auth = getAuth(c);
   const projectId = requireParam(c.req.param('projectId'), 'projectId');
   const db = drizzle(c.env.DATABASE, { schema });
-  await requireOwnedProject(db, projectId, auth.user.id);
+  await requireProjectCapability(db, projectId, auth.user.id, 'task:read');
 
   const stats = await projectDataService.getMailboxStats(c.env, projectId);
   return c.json(stats);
@@ -77,7 +77,7 @@ mailboxRoutes.get('/:messageId', async (c) => {
   const projectId = requireParam(c.req.param('projectId'), 'projectId');
   const messageId = requireParam(c.req.param('messageId'), 'messageId');
   const db = drizzle(c.env.DATABASE, { schema });
-  await requireOwnedProject(db, projectId, auth.user.id);
+  await requireProjectCapability(db, projectId, auth.user.id, 'task:read');
 
   const message = await projectDataService.getMailboxMessage(c.env, projectId, messageId);
   if (!message) {
@@ -94,7 +94,7 @@ mailboxRoutes.delete('/:messageId', async (c) => {
   const projectId = requireParam(c.req.param('projectId'), 'projectId');
   const messageId = requireParam(c.req.param('messageId'), 'messageId');
   const db = drizzle(c.env.DATABASE, { schema });
-  await requireOwnedProject(db, projectId, auth.user.id);
+  await requireProjectCapability(db, projectId, auth.user.id, 'task:write');
 
   const cancelled = await projectDataService.cancelMailboxMessage(c.env, projectId, messageId);
   if (!cancelled) {

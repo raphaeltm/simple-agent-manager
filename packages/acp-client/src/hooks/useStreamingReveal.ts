@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { usePrefersReducedMotion } from './usePrefersReducedMotion';
 
 export interface UseStreamingRevealOptions {
-  /** Milliseconds per character reveal. Default: 20. */
+  /** Milliseconds per character reveal. Default: 10. */
   charDelayMs?: number;
 }
 
@@ -21,7 +21,7 @@ export function useStreamingReveal(
   animated: boolean,
   options: UseStreamingRevealOptions = {}
 ): { revealedText: string; isRevealing: boolean } {
-  const { charDelayMs = 20 } = options;
+  const { charDelayMs = 10 } = options;
 
   const [revealIndex, setRevealIndex] = useState(animated ? 0 : fullText.length);
   const rafIdRef = useRef(0);
@@ -33,10 +33,16 @@ export function useStreamingReveal(
   const targetLengthRef = useRef(fullText.length);
   targetLengthRef.current = fullText.length;
 
+  // Keep a ref copy of revealIndex so the rAF-start effect can read it
+  // without depending on it (avoids restarting the loop on every tick).
+  const revealIndexRef = useRef(revealIndex);
+  revealIndexRef.current = revealIndex;
+
   // Respect prefers-reduced-motion (reactive)
   const prefersReducedMotion = usePrefersReducedMotion();
   const shouldAnimate = animated && !prefersReducedMotion;
 
+  // Snap revealIndex when animation is disabled or text shrinks
   useEffect(() => {
     if (!shouldAnimate) {
       setRevealIndex(fullText.length);
@@ -44,13 +50,13 @@ export function useStreamingReveal(
     }
 
     // If text shrunk or was replaced, snap to the new text
-    if (fullText.length < revealIndex) {
+    if (fullText.length < revealIndexRef.current) {
       setRevealIndex(fullText.length);
       return;
     }
 
     // Already fully revealed — nothing to do
-    if (revealIndex >= fullText.length) return;
+    if (revealIndexRef.current >= fullText.length) return;
 
     // Start the reveal loop if not already running
     if (rafIdRef.current === 0) {
@@ -86,7 +92,6 @@ export function useStreamingReveal(
         rafIdRef.current = 0;
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fullText, shouldAnimate]);
 
   // Stop the loop once fully revealed

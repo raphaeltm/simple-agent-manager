@@ -1,5 +1,21 @@
 # Harness Phase 1: Capable Coding Agent
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** only the `grep` and `glob` tools reached `main`, with workspace-boundary checks
+>   and tests (#912, `ea9e1a9bf`: `packages/harness/tools/grep.go`, `glob.go` and their tests).
+> - **Still open:** everything else is missing from `main`: the `git_*` tools, the repo map, token
+>   counting and compaction, the system-prompt guidance, the five new evals, real-model runs and
+>   the Claude Code comparison.
+>   - Most of it was built, but merged into the long-lived `harness/develop` branch, not `main`
+>     (PRs #943, #944, #947, #948 and #950; none of their merges are in `main`). The repo map
+>     there uses Go AST plus regex parsing, not tree-sitter (`ada8bbb1a`).
+>   - So the real remaining work is one decision: land or retire `origin/harness/develop`, which
+>     is 61 commits ahead of `main` and idle since 2026-07-04 (#1490).
+>   - Two public blog posts describe branch-only harness features as shipped:
+>     `apps/www/src/content/blog/sams-journal-three-models-one-gateway.md:49-57` and
+>     `apps/www/src/content/blog/sams-journal-the-harness-leaves-the-laptop.md:48-49`.
+
 ## Context
 
 The Go harness spike (`packages/harness/`) has a working agent loop with 4 tools (read_file, write_file, edit_file, bash), a mock LLM provider, and an OpenAI-compatible proxy provider. It completes toy evaluation tasks but lacks the tools and intelligence for real coding work.

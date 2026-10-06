@@ -20,6 +20,8 @@ function makeState(overrides: Partial<ProvisioningState> = {}): ProvisioningStat
     startedAt: Date.now(),
     workspaceId: null,
     workspaceUrl: null,
+    requestedVmSize: null,
+    provisionedVmSize: null,
     ...overrides,
   };
 }
@@ -128,5 +130,27 @@ describe('ProvisioningIndicator', () => {
     );
     const segments = container.querySelectorAll('[title]');
     expect(segments.length).toBe(0);
+  });
+
+  it.each([
+    { requestedVmSize: 'medium', provisionedVmSize: 'small' },
+    { requestedVmSize: 'small', provisionedVmSize: 'large' },
+    { requestedVmSize: null, provisionedVmSize: 'medium' },
+  ])('does not infer capacity exhaustion from compatibility labels: %j', (sizes) => {
+    // A native offering can succeed on its first attempt while its historical
+    // size label differs from the request's compatibility label.
+    const state = makeState({ ...sizes, executionStep: 'node_agent_ready' });
+    const onViewLogs = vi.fn();
+    render(<ProvisioningIndicator state={state} bootLogCount={3} onViewLogs={onViewLogs} />);
+
+    expect(
+      screen.queryByText(/machines were available|larger size was unavailable/),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText('Provisioning VM (1/4)')).toBeInTheDocument();
+    expect(screen.getByText(/Current detail:/)).toHaveTextContent(
+      EXECUTION_STEP_LABELS.node_agent_ready,
+    );
+    screen.getByRole('button', { name: 'View Logs' }).click();
+    expect(onViewLogs).toHaveBeenCalledOnce();
   });
 });

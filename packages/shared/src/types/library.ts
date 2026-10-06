@@ -145,8 +145,10 @@ export interface FileMetadataResponse {
 export const LIBRARY_DEFAULTS = {
   /** Maximum file size per upload in bytes (default: 50MB). Env: LIBRARY_UPLOAD_MAX_BYTES */
   UPLOAD_MAX_BYTES: 50 * 1024 * 1024,
-  /** Maximum files per project (default: 500). Env: LIBRARY_MAX_FILES_PER_PROJECT */
-  MAX_FILES_PER_PROJECT: 500,
+  /** Maximum files per project (default: 10000). Env: LIBRARY_MAX_FILES_PER_PROJECT */
+  MAX_FILES_PER_PROJECT: 10_000,
+  /** Maximum total storage bytes per project (default: 2GB). Env: LIBRARY_MAX_TOTAL_BYTES_PER_PROJECT */
+  MAX_TOTAL_BYTES_PER_PROJECT: 2 * 1024 * 1024 * 1024,
   /** Maximum tags per file (default: 20). Env: LIBRARY_MAX_TAGS_PER_FILE */
   MAX_TAGS_PER_FILE: 20,
   /** Maximum tag length in characters (default: 50). Env: LIBRARY_MAX_TAG_LENGTH */
@@ -159,6 +161,8 @@ export const LIBRARY_DEFAULTS = {
   LIST_DEFAULT_PAGE_SIZE: 50,
   /** Maximum page size for list queries (default: 200). Env: LIBRARY_LIST_MAX_PAGE_SIZE */
   LIST_MAX_PAGE_SIZE: 200,
+  /** File IDs per tag lookup query (default: 80). Env: LIBRARY_TAG_QUERY_BATCH_SIZE */
+  TAG_QUERY_BATCH_SIZE: 80,
   /** Maximum directory nesting depth (default: 10). Env: LIBRARY_MAX_DIRECTORY_DEPTH */
   MAX_DIRECTORY_DEPTH: 10,
   /** Maximum directory path length in chars (default: 500). Env: LIBRARY_MAX_DIRECTORY_PATH_LENGTH */
@@ -169,6 +173,36 @@ export const LIBRARY_DEFAULTS = {
   FILE_PREVIEW_MAX_BYTES: 50 * 1024 * 1024,
   /** Maximum search query length in characters (default: 200). Env: LIBRARY_MAX_SEARCH_LENGTH */
   MAX_SEARCH_LENGTH: 200,
+  /**
+   * Maximum file count for which the web client sweeps the entire library into
+   * a client-side index for instant ranked search (default: 300). At or above
+   * this count the client falls back to the server-search path. The web app may
+   * override this via VITE_LIBRARY_CLIENT_SWEEP_CAP.
+   */
+  CLIENT_SWEEP_CAP: 300,
+  /**
+   * Safety cap on client sweep iterations (default: 10). At LIST_MAX_PAGE_SIZE
+   * (200) this covers 2000 files — far above CLIENT_SWEEP_CAP — so it only ever
+   * fires as a runaway guard. The web app may override via
+   * VITE_LIBRARY_CLIENT_MAX_SWEEP_PAGES.
+   */
+  CLIENT_MAX_SWEEP_PAGES: 10,
+  /**
+   * Client-side library cache TTL in milliseconds (default: 5 minutes). The web
+   * app may override via VITE_LIBRARY_CACHE_TTL_MS.
+   */
+  CLIENT_CACHE_TTL_MS: 5 * 60 * 1000,
+  /**
+   * Maximum LRU evictions attempted on a localStorage quota error before giving
+   * up on a cache write (default: 5). The web app may override via
+   * VITE_LIBRARY_CACHE_MAX_EVICTIONS.
+   */
+  CLIENT_CACHE_MAX_EVICTIONS: 5,
+  /**
+   * Debounce delay in milliseconds for the always-visible library search input
+   * (default: 300). The web app may override via VITE_LIBRARY_SEARCH_DEBOUNCE_MS.
+   */
+  CLIENT_SEARCH_DEBOUNCE_MS: 300,
 } as const;
 
 /**

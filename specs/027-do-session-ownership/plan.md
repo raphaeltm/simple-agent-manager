@@ -21,22 +21,22 @@ Shift ACP session ownership from VM agent in-memory maps to ProjectData Durable 
 
 ## Constitution Check
 
-*GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
+_GATE: Must pass before Phase 0 research. Re-check after Phase 1 design._
 
-| Principle | Status | Notes |
-|-----------|--------|-------|
-| I. Open Source Sustainability | ✅ PASS | Core feature, no enterprise separation needed |
-| II. Infrastructure Stability | ✅ PASS | TDD required — tests before implementation for all state machine transitions |
-| III. Documentation Excellence | ✅ PASS | data-model.md, contracts/, quickstart.md generated in this plan |
-| IV. Approachable Code & UX | ✅ PASS | Session states clearly named, UI shows fork lineage |
-| V. Transparent Roadmap | ✅ PASS | Spec 027 exists with full requirements |
-| VI. Automated Quality Gates | ✅ PASS | CI covers lint, typecheck, test, build |
-| VII. Inclusive Contribution | ✅ PASS | Standard patterns, no exotic abstractions |
-| VIII. AI-Friendly Repository | ✅ PASS | Agent context updated after plan |
-| IX. Clean Code Architecture | ✅ PASS | Changes stay within existing package boundaries (api DO, vm-agent, shared types) |
-| X. Simplicity & Clarity | ✅ PASS | Reuses existing DO patterns (migrations, alarm, SQLite), no new infrastructure |
-| XI. No Hardcoded Values | ✅ PASS | Detection window, reconciliation timeout, heartbeat interval all configurable via env vars with defaults |
-| XII. Zero-to-Production | ✅ PASS | No new services or infrastructure — extends existing DOs |
+| Principle                       | Status  | Notes                                                                                                    |
+| ------------------------------- | ------- | -------------------------------------------------------------------------------------------------------- |
+| I. Open Source Sustainability   | ✅ PASS | Core feature, no enterprise separation needed                                                            |
+| II. Infrastructure Stability    | ✅ PASS | TDD required — tests before implementation for all state machine transitions                             |
+| III. Documentation Excellence   | ✅ PASS | data-model.md, contracts/, quickstart.md generated in this plan                                          |
+| IV. Approachable Code & UX      | ✅ PASS | Session states clearly named, UI shows fork lineage                                                      |
+| V. Transparent Roadmap          | ✅ PASS | Spec 027 exists with full requirements                                                                   |
+| VI. Automated Quality Gates     | ✅ PASS | CI covers lint, typecheck, test, build                                                                   |
+| VII. Inclusive Contribution     | ✅ PASS | Standard patterns, no exotic abstractions                                                                |
+| VIII. AI-Friendly Repository    | ✅ PASS | Agent context updated after plan                                                                         |
+| IX. Clean Code Architecture     | ✅ PASS | Changes stay within existing package boundaries (api DO, vm-agent, shared types)                         |
+| X. Simplicity & Clarity         | ✅ PASS | Reuses existing DO patterns (migrations, alarm, SQLite), no new infrastructure                           |
+| XI. No Hardcoded Values         | ✅ PASS | Detection window, reconciliation timeout, heartbeat interval all configurable via env vars with defaults |
+| XII. Zero-to-Production         | ✅ PASS | No new services or infrastructure — extends existing DOs                                                 |
 | XIII. Fail-Fast Error Detection | ✅ PASS | Validate workspace-project binding before session creation, structured logging at every state transition |
 
 ## Project Structure
@@ -60,15 +60,18 @@ specs/027-do-session-ownership/
 ```text
 apps/api/src/
 ├── durable-objects/
-│   ├── project-data.ts          # Extended: ACP session CRUD, state machine, fork logic
+│   ├── project-data/
+│   │   ├── index.ts             # Extended: ProjectData ACP session facade
+│   │   └── acp-sessions.ts      # Extended: ACP session CRUD, state machine, fork logic
 │   └── migrations.ts            # Extended: migration 008 for acp_sessions table
 ├── routes/
-│   └── projects.ts              # Extended: session management endpoints
+│   └── projects/
+│       └── acp-sessions.ts      # Extended: session management endpoints
 └── services/
     └── session-lifecycle.ts     # New: session state transition logic, fork orchestration
 
 packages/shared/src/
-├── types.ts                     # Extended: AcpSession type, session states enum
+├── types/session.ts             # Extended: AcpSession type, session states enum
 └── vm-agent-contract.ts         # Extended: reconciliation request/response schemas
 
 packages/vm-agent/internal/

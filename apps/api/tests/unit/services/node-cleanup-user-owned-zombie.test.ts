@@ -1,0 +1,307 @@
+/**
+ * Zombie-sweep regression for user-owned (BYO) nodes (rule 47, architecture-critique #2/#10).
+ *
+ * The node-cleanup cron is the real teardown backstop. Every destroy/flag candidate query must
+ * exclude node_class='user-owned', or an enrolled machine SAM does not own could be swept. This
+ * test runs the sweep against a FAITHFUL in-memory DB (so the WHERE-clause guard actually filters)
+ * TWICE, and asserts BYO nodes are never selected for destruction/flagging while equivalent managed
+ * nodes ARE — proving the guard is discriminating and the candidate leaves no zombie behind.
+ */
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import type { Env } from '../../../src/env';
+import { runNodeCleanupSweep } from '../../../src/scheduled/node-cleanup';
+import { deleteNodeResourcesStrict } from '../../../src/services/nodes';
+import { createSqliteD1 } from '../../helpers/sqlite-d1';
+
+const deleteCalls: string[] = [];
+const stopCalls: string[] = [];
+const RUNTIME_TERMINATION_CONFIRMED_AT = '2026-09-04T00:00:00.000Z';
+
+vi.mock('../../../src/services/nodes', () => ({
+  deleteNodeResourcesStrict: vi.fn(async (nodeId: string) => {
+    deleteCalls.push(nodeId);
+    return {
+      providerVm: 'deleted' as const,
+      runtimeTerminationConfirmedAt: RUNTIME_TERMINATION_CONFIRMED_AT,
+      runtimeIncarnationId: null,
+      providerInstanceId: null,
+    };
+  }),
+  stopNodeResources: vi.fn(async (nodeId: string) => {
+    stopCalls.push(nodeId);
+  }),
+}));
+vi.mock('../../../src/services/node-agent', () => ({
+  deleteWorkspaceOnNode: vi.fn().mockResolvedValue(undefined),
+  stopWorkspaceOnNode: vi.fn().mockResolvedValue(undefined),
+  // Background sweeps must not inherit the interactive VM-agent timeout (rule 47).
+  getNodeAgentBackgroundRequestTimeoutMs: vi.fn().mockReturnValue(5_000),
+}));
+vi.mock('../../../src/services/project-data', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/services/project-data')>()),
+  stopSession: vi.fn().mockResolvedValue(undefined),
+  cleanupWorkspaceActivity: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock('../../../src/services/vm-agent-container', () => ({
+  destroyVmAgentContainer: vi.fn().mockResolvedValue(undefined),
+}));
+const persistErrorCalls: Array<Record<string, unknown>> = [];
+vi.mock('../../../src/services/observability', () => ({
+  persistError: vi.fn(async (_db: unknown, input: Record<string, unknown>) => {
+    persistErrorCalls.push(input);
+  }),
+}));
+vi.mock('../../../src/services/workspace-lifecycle-finalizer', () => ({
+  finalizeWorkspaceLifecycleClosure: vi.fn().mockResolvedValue({}),
+}));
+vi.mock('../../../src/lib/logger', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/logger')>()),
+  log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
+
+let sqlite: Database.Database | null = null;
+const OLD = '2020-01-01T00:00:00.000Z';
+
+function seedNode(row: {
+  id: string;
+  nodeClass: 'managed' | 'user-owned';
+  status: string;
+  warmSince: string | null;
+  runtime?: string;
+  createdAt?: string;
+}): void {
+  sqlite
+    ?.prepare(
+      `
+      INSERT INTO nodes (id, user_id, name, status, warm_since, node_role, node_class, runtime, created_at, updated_at)
+      VALUES (?, 'user-1', ?, ?, ?, 'workspace', ?, ?, ?, ?)
+    `
+    )
+    .run(
+      row.id,
+      `node-${row.id}`,
+      row.status,
+      row.warmSince,
+      row.nodeClass,
+      row.runtime ?? 'vm',
+      row.createdAt ?? OLD,
+      row.createdAt ?? OLD
+    );
+}
+
+// A task whose auto_provisioned_node_id points at a node makes the max-lifetime and stopped-handoff
+// queries' INNER JOIN admit that node as a candidate (so the node_class guard is what filters it).
+function seedAutoProvisionedTask(taskId: string, nodeId: string): void {
+  sqlite
+    ?.prepare(
+      `INSERT INTO tasks (id, workspace_id, status, auto_provisioned_node_id, updated_at) VALUES (?, NULL, 'completed', ?, ?)`
+    )
+    .run(taskId, nodeId, OLD);
+}
+
+// A workspace + terminal task on it makes the cf-container terminal-task query admit the node.
+function seedWorkspaceWithTerminalTask(wsId: string, nodeId: string, taskId: string): void {
+  sqlite
+    ?.prepare(
+      `INSERT INTO workspaces (id, node_id, user_id, status, created_at, updated_at) VALUES (?, ?, 'user-1', 'running', ?, ?)`
+    )
+    .run(wsId, nodeId, OLD, OLD);
+  sqlite
+    ?.prepare(
+      `INSERT INTO tasks (id, workspace_id, status, auto_provisioned_node_id, updated_at) VALUES (?, ?, 'completed', NULL, ?)`
+    )
+    .run(taskId, wsId, OLD);
+}
+
+function makeEnv(): Env {
+  const d1 = createSqliteD1(sqlite as Database.Database);
+  return { DATABASE: d1, OBSERVABILITY_DATABASE: d1 } as unknown as Env;
+}
+
+beforeEach(() => {
+  deleteCalls.length = 0;
+  stopCalls.length = 0;
+  persistErrorCalls.length = 0;
+  sqlite = new Database(':memory:');
+  sqlite.exec(`
+    -- health_status is required: the destroy helper writes it alongside status, so a
+    -- table without it makes every destroy's D1 write throw. Asserting only on
+    -- deleteCalls (which the provider mock records BEFORE that write) hides the
+    -- failure, so the result counters would silently read zero.
+    CREATE TABLE nodes (
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, status TEXT NOT NULL,
+      warm_since TEXT, node_role TEXT NOT NULL DEFAULT 'workspace', node_class TEXT NOT NULL DEFAULT 'managed',
+      runtime TEXT NOT NULL DEFAULT 'vm', health_status TEXT NOT NULL DEFAULT 'unhealthy',
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL, cleanup_backoff_until TEXT,
+      runtime_termination_confirmed_at TEXT, runtime_incarnation_id TEXT,
+      capacity_pool_id TEXT, capacity_source_id TEXT, capacity_pool_candidate_id TEXT,
+      capacity_pool_scope TEXT, capacity_pool_project_id TEXT, capacity_pool_revision INTEGER,
+      capacity_source_generation INTEGER, placement_credential_source TEXT,
+      placement_credential_reference TEXT, placement_credential_fingerprint TEXT,
+      placement_credential_version INTEGER, workload_role TEXT, cloud_provider TEXT,
+      provider_instance_id TEXT, provider_instance_type TEXT,
+      provider_instance_vcpu_count INTEGER, provider_instance_memory_mb INTEGER
+    );
+    CREATE TABLE workspaces (
+      id TEXT PRIMARY KEY, node_id TEXT, user_id TEXT, status TEXT NOT NULL,
+      project_id TEXT, chat_session_id TEXT, created_at TEXT, updated_at TEXT,
+      runtime_deletion_confirmed_at TEXT, runtime_deletion_proof TEXT
+    );
+    CREATE TABLE tasks (
+      id TEXT PRIMARY KEY, workspace_id TEXT, status TEXT, auto_provisioned_node_id TEXT,
+      claimed_warm_node_id TEXT, claimed_warm_node_at TEXT, updated_at TEXT
+    );
+    -- The sleep columns and agent_sessions are read by the terminal-task
+    -- ownership predicate (sleepLifecycleOwnsTerminalTaskWorkspaceSql).
+    CREATE TABLE session_snapshots (
+      chat_session_id TEXT PRIMARY KEY, status TEXT NOT NULL,
+      degradation TEXT NOT NULL, expires_at TEXT NOT NULL,
+      sleeping_at TEXT, sleep_status TEXT, sleep_after TEXT, capture_generation TEXT,
+      sleep_attempts INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE agent_sessions (id TEXT PRIMARY KEY, workspace_id TEXT, status TEXT);
+  `);
+  vi.mocked(deleteNodeResourcesStrict).mockImplementation(async (nodeId: string) => {
+    deleteCalls.push(nodeId);
+    sqlite
+      ?.prepare('UPDATE nodes SET runtime_termination_confirmed_at = ? WHERE id = ?')
+      .run(RUNTIME_TERMINATION_CONFIRMED_AT, nodeId);
+    sqlite
+      ?.prepare(
+        `UPDATE workspaces
+            SET status = 'deleted', runtime_deletion_confirmed_at = ?,
+                runtime_deletion_proof = 'node_runtime_terminated'
+          WHERE node_id = ?`
+      )
+      .run(RUNTIME_TERMINATION_CONFIRMED_AT, nodeId);
+    return {
+      providerVm: 'deleted',
+      runtimeTerminationConfirmedAt: RUNTIME_TERMINATION_CONFIRMED_AT,
+      runtimeIncarnationId: null,
+      providerInstanceId: null,
+    };
+  });
+});
+
+afterEach(() => {
+  sqlite?.close();
+  sqlite = null;
+  vi.clearAllMocks();
+});
+
+describe('node-cleanup sweep excludes user-owned nodes', () => {
+  it('stale-warm: destroys a managed warm node but never a user-owned warm node (2 sweeps)', async () => {
+    seedNode({ id: 'managed-warm', nodeClass: 'managed', status: 'running', warmSince: OLD });
+    seedNode({ id: 'byo-warm', nodeClass: 'user-owned', status: 'running', warmSince: OLD });
+    seedAutoProvisionedTask('task-mw', 'managed-warm');
+    seedAutoProvisionedTask('task-bw', 'byo-warm');
+    const env = makeEnv();
+
+    await runNodeCleanupSweep(env);
+    await runNodeCleanupSweep(env); // rule 47: the BYO node must not reappear as a candidate
+
+    expect(deleteCalls).toContain('managed-warm');
+    expect(deleteCalls).not.toContain('byo-warm');
+    expect(stopCalls).not.toContain('byo-warm');
+  });
+
+  it('idle orphan: DESTROYS a managed orphan but never a user-owned node', async () => {
+    // Orphaned = running, no warm_since, idle past the threshold, no active workspaces.
+    // This phase used to only write an observability row, so an orphan lived forever;
+    // it now destroys, and `deleteCalls` is the assertion that proves it.
+    const idleButBelowMaxLifetime = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    seedNode({
+      id: 'managed-orphan',
+      nodeClass: 'managed',
+      status: 'running',
+      warmSince: null,
+      createdAt: idleButBelowMaxLifetime,
+    });
+    seedNode({
+      id: 'byo-orphan',
+      nodeClass: 'user-owned',
+      status: 'running',
+      warmSince: null,
+      createdAt: idleButBelowMaxLifetime,
+    });
+    seedAutoProvisionedTask('task-mo', 'managed-orphan');
+    seedAutoProvisionedTask('task-bo', 'byo-orphan');
+    const env = makeEnv();
+
+    const result = await runNodeCleanupSweep(env);
+    await runNodeCleanupSweep(env);
+
+    // Control: proves the candidate query IS reached, so the BYO assertion below is
+    // discriminating rather than passing because nothing matched at all.
+    expect(deleteCalls).toContain('managed-orphan');
+    expect(result.orphanedNodesDestroyed).toBe(1);
+
+    // Rule 51: a machine SAM does not own must never be destroyed, flagged, or
+    // mutated — across repeated sweeps.
+    expect(deleteCalls).not.toContain('byo-orphan');
+    expect(stopCalls).not.toContain('byo-orphan');
+    expect(persistErrorCalls.map((e) => e.nodeId)).not.toContain('byo-orphan');
+  });
+
+  it('stopped-handoff: destroys a managed stopped auto-provisioned node but never a user-owned one', async () => {
+    // stopNodeResources marks a BYO node 'stopped'; the stopped-handoff sweep (INNER JOIN tasks on
+    // auto_provisioned_node_id) must destroy the managed one and skip the BYO one. Seeding the task
+    // rows is essential — without them the INNER JOIN admits nobody and the guard is never exercised.
+    seedNode({ id: 'managed-stopped', nodeClass: 'managed', status: 'stopped', warmSince: null });
+    seedNode({ id: 'byo-stopped', nodeClass: 'user-owned', status: 'stopped', warmSince: null });
+    seedAutoProvisionedTask('task-ms', 'managed-stopped');
+    seedAutoProvisionedTask('task-bs', 'byo-stopped');
+    const env = makeEnv();
+
+    await runNodeCleanupSweep(env);
+    await runNodeCleanupSweep(env);
+
+    expect(deleteCalls).toContain('managed-stopped'); // control proves the query IS reached
+    expect(deleteCalls).not.toContain('byo-stopped');
+    expect(stopCalls).not.toContain('byo-stopped');
+  });
+
+  it('max-lifetime: destroys a managed auto-provisioned node past lifetime but never a user-owned one', async () => {
+    // max-lifetime query: INNER JOIN tasks on auto_provisioned_node_id, running node, old created_at.
+    seedNode({ id: 'managed-old', nodeClass: 'managed', status: 'running', warmSince: null });
+    seedNode({ id: 'byo-old', nodeClass: 'user-owned', status: 'running', warmSince: null });
+    seedAutoProvisionedTask('task-mold', 'managed-old');
+    seedAutoProvisionedTask('task-bold', 'byo-old');
+    const env = makeEnv();
+
+    await runNodeCleanupSweep(env);
+    await runNodeCleanupSweep(env);
+
+    expect(deleteCalls).toContain('managed-old'); // control
+    expect(deleteCalls).not.toContain('byo-old');
+  });
+
+  it('cf-container terminal-task: stops a managed container node but never a user-owned one', async () => {
+    // cf-container query: INNER JOIN workspaces + tasks (terminal task on the workspace), runtime cf-container.
+    seedNode({
+      id: 'managed-cf',
+      nodeClass: 'managed',
+      status: 'running',
+      warmSince: null,
+      runtime: 'cf-container',
+    });
+    seedNode({
+      id: 'byo-cf',
+      nodeClass: 'user-owned',
+      status: 'running',
+      warmSince: null,
+      runtime: 'cf-container',
+    });
+    seedWorkspaceWithTerminalTask('ws-mcf', 'managed-cf', 'task-mcf');
+    seedWorkspaceWithTerminalTask('ws-bcf', 'byo-cf', 'task-bcf');
+    const env = makeEnv();
+
+    await runNodeCleanupSweep(env);
+    await runNodeCleanupSweep(env);
+
+    expect(stopCalls).toContain('managed-cf'); // control proves the cf-container query IS reached
+    expect(stopCalls).not.toContain('byo-cf');
+  });
+});

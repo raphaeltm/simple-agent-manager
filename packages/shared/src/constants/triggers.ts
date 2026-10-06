@@ -4,7 +4,11 @@
 // =============================================================================
 
 /** Maximum triggers per project. Override via MAX_TRIGGERS_PER_PROJECT env var. */
-export const DEFAULT_MAX_TRIGGERS_PER_PROJECT = 10;
+export const DEFAULT_MAX_TRIGGERS_PER_PROJECT = 20;
+/** Minimum allowed per-project max triggers override. */
+export const MIN_MAX_TRIGGERS_PER_PROJECT = 1;
+/** Maximum allowed per-project max triggers override. */
+export const MAX_MAX_TRIGGERS_PER_PROJECT = 100;
 
 /** Minimum interval between cron fires in minutes. Override via CRON_MIN_INTERVAL_MINUTES env var. */
 export const DEFAULT_CRON_MIN_INTERVAL_MINUTES = 15;
@@ -36,11 +40,69 @@ export const DEFAULT_TRIGGER_DESCRIPTION_MAX_LENGTH = 500;
 /** Upper bound for maxConcurrent per trigger. Override via TRIGGER_MAX_CONCURRENT_LIMIT env var. */
 export const DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT = 10;
 
-/** Timeout in ms before a running execution is considered stale. Override via TRIGGER_STALE_EXECUTION_TIMEOUT_MS env var. */
+/** Age in ms before a non-terminal execution is checked against linked task liveness. Override via TRIGGER_STALE_EXECUTION_TIMEOUT_MS env var. */
 export const DEFAULT_TRIGGER_STALE_EXECUTION_TIMEOUT_MS = 1_800_000; // 30 minutes
 
-/** Timeout in ms before a queued execution is considered stale. Override via TRIGGER_STALE_QUEUED_TIMEOUT_MS env var. */
+/** Age in ms before a queued execution is checked against linked task liveness. Override via TRIGGER_STALE_QUEUED_TIMEOUT_MS env var. */
 export const DEFAULT_TRIGGER_STALE_QUEUED_TIMEOUT_MS = 300_000; // 5 minutes
+
+/** Hard maximum trigger execution residence in hours. Override via TRIGGER_EXECUTION_HARD_MAX_RESIDENCE_HOURS env var. */
+export const DEFAULT_TRIGGER_EXECUTION_HARD_MAX_RESIDENCE_HOURS = 48;
+
+/** Prefix for hard-residence backstop failure messages that may later be reconciled by task terminal sync. */
+export const TRIGGER_EXECUTION_HARD_MAX_FAILURE_PREFIX =
+  'Trigger execution exceeded hard maximum residence';
+
+/** Maximum raw JSON webhook body size. Override via WEBHOOK_TRIGGER_MAX_BODY_BYTES. */
+export const DEFAULT_WEBHOOK_TRIGGER_MAX_BODY_BYTES = 65_536;
+
+/** Maximum deterministic filters per webhook trigger. Override via WEBHOOK_TRIGGER_MAX_FILTERS. */
+export const DEFAULT_WEBHOOK_TRIGGER_MAX_FILTERS = 10;
+
+/** Maximum dot-path length for a webhook filter. Override via WEBHOOK_TRIGGER_MAX_FILTER_PATH_LENGTH. */
+export const DEFAULT_WEBHOOK_TRIGGER_MAX_FILTER_PATH_LENGTH = 200;
+
+/** Maximum dot-path depth for webhook filters. Override via WEBHOOK_TRIGGER_MAX_FILTER_PATH_DEPTH. */
+export const DEFAULT_WEBHOOK_TRIGGER_MAX_FILTER_PATH_DEPTH = 8;
+
+/** Maximum request headers that may be copied into template context. Override via WEBHOOK_TRIGGER_MAX_INCLUDED_HEADERS. */
+export const DEFAULT_WEBHOOK_TRIGGER_MAX_INCLUDED_HEADERS = 10;
+
+/** Maximum configured header-name length. Override via WEBHOOK_TRIGGER_MAX_HEADER_NAME_LENGTH. */
+export const DEFAULT_WEBHOOK_TRIGGER_MAX_HEADER_NAME_LENGTH = 100;
+
+/** Maximum source label length. Override via WEBHOOK_TRIGGER_MAX_SOURCE_LABEL_LENGTH. */
+export const DEFAULT_WEBHOOK_TRIGGER_MAX_SOURCE_LABEL_LENGTH = 100;
+
+/** Maximum incoming idempotency-key length. Override via WEBHOOK_TRIGGER_MAX_IDEMPOTENCY_KEY_LENGTH. */
+export const DEFAULT_WEBHOOK_TRIGGER_MAX_IDEMPOTENCY_KEY_LENGTH = 200;
+
+/** Days to retain webhook delivery audit metadata. Override via WEBHOOK_DELIVERY_RETENTION_DAYS. */
+export const DEFAULT_WEBHOOK_DELIVERY_RETENTION_DAYS = 7;
+
+/** Delivery rows deleted per scheduled cleanup pass. Override via WEBHOOK_DELIVERY_CLEANUP_BATCH_SIZE. */
+export const DEFAULT_WEBHOOK_DELIVERY_CLEANUP_BATCH_SIZE = 500;
+
+/** Default delivery-history page size. Override via WEBHOOK_DELIVERY_DEFAULT_PAGE_SIZE. */
+export const DEFAULT_WEBHOOK_DELIVERY_DEFAULT_PAGE_SIZE = 25;
+
+/** Maximum delivery-history page size. Override via WEBHOOK_DELIVERY_MAX_PAGE_SIZE. */
+export const DEFAULT_WEBHOOK_DELIVERY_MAX_PAGE_SIZE = 100;
+
+/** Seconds before an unfinished delivery reservation may be recovered. Override via WEBHOOK_DELIVERY_PROCESSING_LEASE_SECONDS. */
+export const DEFAULT_WEBHOOK_DELIVERY_PROCESSING_LEASE_SECONDS = 300;
+
+/** Accepted requests per trigger per minute. KV damping; concurrency remains the strict cost guard. */
+export const DEFAULT_WEBHOOK_TRIGGER_RATE_LIMIT_PER_MINUTE = 60;
+
+/** Invalid-token requests per IP per minute. */
+export const DEFAULT_WEBHOOK_INVALID_TOKEN_RATE_LIMIT_PER_MINUTE = 30;
+
+/** All ingress requests per IP/window before token lookup. */
+export const DEFAULT_WEBHOOK_INGRESS_RATE_LIMIT_PER_MINUTE = 120;
+
+/** Fixed-window duration used for webhook abuse damping. */
+export const DEFAULT_WEBHOOK_RATE_LIMIT_WINDOW_SECONDS = 60;
 
 /** All trigger defaults aggregated for convenience. */
 export const TRIGGER_DEFAULTS = {
@@ -57,4 +119,22 @@ export const TRIGGER_DEFAULTS = {
   TRIGGER_MAX_CONCURRENT_LIMIT: DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT,
   TRIGGER_STALE_EXECUTION_TIMEOUT_MS: DEFAULT_TRIGGER_STALE_EXECUTION_TIMEOUT_MS,
   TRIGGER_STALE_QUEUED_TIMEOUT_MS: DEFAULT_TRIGGER_STALE_QUEUED_TIMEOUT_MS,
+  TRIGGER_EXECUTION_HARD_MAX_RESIDENCE_HOURS: DEFAULT_TRIGGER_EXECUTION_HARD_MAX_RESIDENCE_HOURS,
+  WEBHOOK_TRIGGER_MAX_BODY_BYTES: DEFAULT_WEBHOOK_TRIGGER_MAX_BODY_BYTES,
+  WEBHOOK_TRIGGER_MAX_FILTERS: DEFAULT_WEBHOOK_TRIGGER_MAX_FILTERS,
+  WEBHOOK_TRIGGER_MAX_FILTER_PATH_LENGTH: DEFAULT_WEBHOOK_TRIGGER_MAX_FILTER_PATH_LENGTH,
+  WEBHOOK_TRIGGER_MAX_FILTER_PATH_DEPTH: DEFAULT_WEBHOOK_TRIGGER_MAX_FILTER_PATH_DEPTH,
+  WEBHOOK_TRIGGER_MAX_INCLUDED_HEADERS: DEFAULT_WEBHOOK_TRIGGER_MAX_INCLUDED_HEADERS,
+  WEBHOOK_TRIGGER_MAX_HEADER_NAME_LENGTH: DEFAULT_WEBHOOK_TRIGGER_MAX_HEADER_NAME_LENGTH,
+  WEBHOOK_TRIGGER_MAX_SOURCE_LABEL_LENGTH: DEFAULT_WEBHOOK_TRIGGER_MAX_SOURCE_LABEL_LENGTH,
+  WEBHOOK_TRIGGER_MAX_IDEMPOTENCY_KEY_LENGTH: DEFAULT_WEBHOOK_TRIGGER_MAX_IDEMPOTENCY_KEY_LENGTH,
+  WEBHOOK_DELIVERY_RETENTION_DAYS: DEFAULT_WEBHOOK_DELIVERY_RETENTION_DAYS,
+  WEBHOOK_DELIVERY_CLEANUP_BATCH_SIZE: DEFAULT_WEBHOOK_DELIVERY_CLEANUP_BATCH_SIZE,
+  WEBHOOK_DELIVERY_DEFAULT_PAGE_SIZE: DEFAULT_WEBHOOK_DELIVERY_DEFAULT_PAGE_SIZE,
+  WEBHOOK_DELIVERY_MAX_PAGE_SIZE: DEFAULT_WEBHOOK_DELIVERY_MAX_PAGE_SIZE,
+  WEBHOOK_DELIVERY_PROCESSING_LEASE_SECONDS: DEFAULT_WEBHOOK_DELIVERY_PROCESSING_LEASE_SECONDS,
+  WEBHOOK_TRIGGER_RATE_LIMIT_PER_MINUTE: DEFAULT_WEBHOOK_TRIGGER_RATE_LIMIT_PER_MINUTE,
+  WEBHOOK_INVALID_TOKEN_RATE_LIMIT_PER_MINUTE: DEFAULT_WEBHOOK_INVALID_TOKEN_RATE_LIMIT_PER_MINUTE,
+  WEBHOOK_INGRESS_RATE_LIMIT_PER_MINUTE: DEFAULT_WEBHOOK_INGRESS_RATE_LIMIT_PER_MINUTE,
+  WEBHOOK_RATE_LIMIT_WINDOW_SECONDS: DEFAULT_WEBHOOK_RATE_LIMIT_WINDOW_SECONDS,
 } as const;

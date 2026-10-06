@@ -15,12 +15,15 @@
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
+    "test:pinned-acp-forms": "node scripts/verify-pinned-acp-form-fixtures.mjs",
+    "test:pinned-acp-urls": "node scripts/verify-pinned-acp-url-paths.mjs",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
     "lint": "eslint 'src/**/*.ts' 'tests/**/*.ts'"
   },
   "devDependencies": {
+    "@codspeed/vitest-plugin": "5.6.0",
     "@typescript-eslint/eslint-plugin": "catalog:",
     "@typescript-eslint/parser": "catalog:",
     "@vitest/coverage-v8": "catalog:",
@@ -30,6 +33,7 @@
   },
   "dependencies": {
     "valibot": "catalog:",
+    "yaml": "2.9.0",
     "zod": "catalog:"
   }
 }

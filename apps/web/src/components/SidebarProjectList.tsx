@@ -2,9 +2,10 @@ import type { ProjectSummary } from '@simple-agent-manager/shared';
 import { ChevronDown, ChevronRight, Search, X } from 'lucide-react';
 import { type ChangeEvent, useCallback, useMemo, useState } from 'react';
 
+import { useProjectIntentPrefetch } from '../hooks/useProjectIntentPrefetch';
+
 const FOCUS_RING =
   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
-
 /** Maximum projects visible before scrolling kicks in */
 const DEFAULT_MAX_VISIBLE = 8;
 const MAX_VISIBLE = parseInt(
@@ -35,8 +36,10 @@ function relativeTime(dateStr: string | null | undefined): string {
 interface SidebarProjectListProps {
   projects: ProjectSummary[];
   loading: boolean;
+  error?: string | null;
   currentProjectId?: string;
   onNavigate: (path: string) => void;
+  queryScope?: string;
   /** Render variant: 'mobile' uses larger touch targets, 'desktop' uses compact sizing */
   variant?: 'mobile' | 'desktop';
 }
@@ -44,10 +47,14 @@ interface SidebarProjectListProps {
 export function SidebarProjectList({
   projects,
   loading,
+  error = null,
   currentProjectId,
   onNavigate,
+  queryScope = '',
   variant = 'mobile',
 }: SidebarProjectListProps) {
+  const { cancelHoverPrefetch, prefetchProject, scheduleHoverPrefetch } =
+    useProjectIntentPrefetch(queryScope);
   const [open, setOpen] = useState(true);
   const [filter, setFilter] = useState('');
 
@@ -69,7 +76,6 @@ export function SidebarProjectList({
 
   const isMobile = variant === 'mobile';
   const sectionId = 'sidebar-projects-panel';
-
   return (
     <div className="mt-2">
       {/* Section header */}
@@ -128,6 +134,10 @@ export function SidebarProjectList({
               <div className={`${isMobile ? 'px-5' : 'px-3'} py-3 text-sm text-fg-muted`}>
                 Loading...
               </div>
+            ) : error && projects.length === 0 ? (
+              <div className={`${isMobile ? 'px-5' : 'px-3'} py-3 text-sm text-fg-muted`} role="status" aria-live="polite">
+                Projects unavailable
+              </div>
             ) : filtered.length === 0 ? (
               <div className={`${isMobile ? 'px-5' : 'px-3'} py-3 text-sm text-fg-muted`} role="status" aria-live="polite">
                 {filter ? `No projects match "${filter}"` : 'No projects yet'}
@@ -141,6 +151,10 @@ export function SidebarProjectList({
                   <button
                     key={project.id}
                     onClick={() => onNavigate(`/projects/${project.id}/chat`)}
+                    onMouseEnter={() => scheduleHoverPrefetch(project.id)}
+                    onMouseLeave={cancelHoverPrefetch}
+                    onFocus={() => prefetchProject(project.id)}
+                    onTouchStart={() => prefetchProject(project.id)}
                     aria-current={isActive ? 'page' : undefined}
                     className={`flex items-center gap-2.5 w-full ${
                       isMobile
@@ -199,4 +213,3 @@ export function SidebarProjectList({
     </div>
   );
 }
-

@@ -51,7 +51,15 @@ func (t *EditFile) Execute(_ context.Context, params map[string]any) (string, er
 		return "", err
 	}
 
-	resolved, err := safePath(t.WorkDir, path)
+	if oldStr == "" {
+		return "", fmt.Errorf("parameter \"old_string\" must not be empty")
+	}
+
+	boundary, err := newWorkspaceBoundary(t.WorkDir)
+	if err != nil {
+		return "", err
+	}
+	resolved, err := boundary.existingFile(path)
 	if err != nil {
 		return "", err
 	}

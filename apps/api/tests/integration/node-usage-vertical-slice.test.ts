@@ -6,15 +6,12 @@
  */
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
 import { checkQuotaForUser } from '../../src/services/compute-quotas';
 import { getCurrentPeriodBounds } from '../../src/services/compute-usage';
-import {
-  getUserNodeDetailedUsage,
-  getUserNodeUsageSummary,
-} from '../../src/services/node-usage';
+import { getUserNodeDetailedUsage, getUserNodeUsageSummary } from '../../src/services/node-usage';
 
 const MS_PER_HOUR = 60 * 60 * 1000;
 
@@ -45,6 +42,24 @@ function createDb() {
       vm_location TEXT NOT NULL,
       cloud_provider TEXT,
       credential_source TEXT,
+      node_class TEXT NOT NULL DEFAULT 'managed',
+      provider_instance_type TEXT,
+      provider_instance_vcpu_count INTEGER,
+      provider_instance_memory_mb INTEGER,
+      provider_instance_disk_gb INTEGER,
+      provider_instance_boot_disk_size_gb INTEGER,
+      provider_instance_image TEXT,
+      provider_instance_architecture TEXT,
+      observed_provider_instance_type TEXT,
+      observed_provider_instance_vcpu_count INTEGER,
+      observed_provider_instance_memory_mb INTEGER,
+      observed_provider_instance_disk_gb INTEGER,
+      observed_hardware_json TEXT,
+      observed_hardware_source TEXT,
+      provider_instance_price_display TEXT,
+      provider_instance_price_currency TEXT,
+      provider_instance_price_monthly_cents INTEGER,
+      provider_instance_price_hourly_micros INTEGER,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -91,11 +106,13 @@ function seedNode(input: {
   updatedAt: string;
 }): void {
   sqlite
-    ?.prepare(`
+    ?.prepare(
+      `
       INSERT INTO nodes
         (id, user_id, name, status, vm_size, vm_location, cloud_provider, credential_source, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, 'fsn1', ?, ?, ?, ?)
-    `)
+    `
+    )
     .run(
       input.id,
       input.userId,
@@ -105,21 +122,24 @@ function seedNode(input: {
       input.cloudProvider,
       input.credentialSource,
       input.createdAt,
-      input.updatedAt,
+      input.updatedAt
     );
 }
 
 function seedQuotaOverride(userId: string, limit: number): void {
   sqlite
-    ?.prepare(`
+    ?.prepare(
+      `
       INSERT INTO user_quotas
         (id, user_id, monthly_vcpu_hours_limit, updated_at, updated_by)
       VALUES (?, ?, ?, ?, ?)
-    `)
+    `
+    )
     .run(`${userId}-quota`, userId, limit, new Date().toISOString(), userId);
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   sqlite?.close();
   sqlite = null;
 });
@@ -127,10 +147,12 @@ afterEach(() => {
 describe('node uptime compute billing vertical slice', () => {
   it('summarizes current-user usage from node rows with node fields and legacy aliases', async () => {
     const db = createDb();
-    const userId = `node-usage-user-${Date.now()}`;
-    const nowMs = Date.now();
     const { start } = getCurrentPeriodBounds();
     const periodStartMs = new Date(start).getTime();
+    const nowMs = periodStartMs + 8 * MS_PER_HOUR;
+    vi.useFakeTimers();
+    vi.setSystemTime(nowMs);
+    const userId = `node-usage-user-${Date.now()}`;
     seedUser(userId);
 
     seedNode({
@@ -189,8 +211,11 @@ describe('node uptime compute billing vertical slice', () => {
 
   it('enforces quotas from platform node uptime while excluding BYOC uptime', async () => {
     const db = createDb();
+    const { start } = getCurrentPeriodBounds();
+    const nowMs = new Date(start).getTime() + 8 * MS_PER_HOUR;
+    vi.useFakeTimers();
+    vi.setSystemTime(nowMs);
     const userId = `node-quota-user-${Date.now()}`;
-    const nowMs = Date.now();
     seedUser(userId);
     seedQuotaOverride(userId, 3.5);
 

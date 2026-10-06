@@ -2,12 +2,18 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/workspace/vm-agent/internal/config"
+	"github.com/workspace/vm-agent/internal/deploy"
+	"github.com/workspace/vm-agent/internal/sysinfo"
 )
 
 func nowUTC() time.Time {
@@ -37,6 +43,10 @@ func (s *Server) setCallbackToken(token string) {
 
 	// Update ACP gateway config.
 	s.acpConfig.CallbackToken = token
+
+	for _, engine := range s.deploymentEnginesSnapshot() {
+		engine.SetCallbackToken(token)
+	}
 }
 
 func (s *Server) startNodeHealthReporter() {
@@ -58,6 +68,9 @@ func (s *Server) startNodeHealthReporter() {
 			case <-s.done:
 				return
 			case <-ticker.C:
+				if s.controlPlaneCallbacksStopped() {
+					return
+				}
 				s.sendNodeHeartbeat()
 			}
 		}
@@ -71,13 +84,24 @@ func (s *Server) SendNodeReady() {
 }
 
 func (s *Server) sendNodeReady() {
+	if s.controlPlaneCallbacksStopped() {
+		return
+	}
+
 	url := strings.TrimRight(s.config.ControlPlaneURL, "/") + "/api/nodes/" + s.config.NodeID + "/ready"
-	req, err := http.NewRequest(http.MethodPost, url, nil)
+	body, err := json.Marshal(map[string]string{"agentVersion": sysinfo.Version})
+	if err != nil {
+		slog.Error("Node ready callback payload marshal failed", "error", err)
+		return
+	}
+
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		slog.Error("Node ready callback request create failed", "error", err)
 		return
 	}
 	req.Header.Set("Authorization", "Bearer "+s.getCallbackToken())
+	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := s.controlPlaneHTTPClient(0).Do(req)
 	if err != nil {
@@ -87,8 +111,37 @@ func (s *Server) sendNodeReady() {
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
-		slog.Warn("Node ready callback returned non-success status", "statusCode", resp.StatusCode)
+		body := readAcpHeartbeatErrorBody(resp.Body)
+		if isTerminalControlPlaneCallbackStatus(resp.StatusCode) {
+			s.markControlPlaneCallbacksTerminal(nodeReadyCallback, resp.StatusCode, body)
+			return
+		}
+		slog.Warn("Node ready callback returned non-success status",
+			"statusCode", resp.StatusCode,
+			"responseBody", body)
 	}
+}
+
+type deploymentEnvironmentResponse struct {
+	EnvironmentID string `json:"environmentId"`
+}
+
+type deploymentPendingReleaseResponse struct {
+	EnvironmentID string `json:"environmentId"`
+	Seq           int64  `json:"seq"`
+}
+
+type deploymentPendingRouteConfigResponse struct {
+	EnvironmentID string `json:"environmentId"`
+	Revision      int64  `json:"revision"`
+}
+
+type deploymentHeartbeatResponse struct {
+	Environments        *[]deploymentEnvironmentResponse       `json:"environments,omitempty"`
+	RetireEnvironments  []deploymentEnvironmentResponse        `json:"retireEnvironments,omitempty"`
+	PendingReleases     []deploymentPendingReleaseResponse     `json:"pendingReleases"`
+	PendingRouteConfigs []deploymentPendingRouteConfigResponse `json:"pendingRouteConfigs,omitempty"`
+	DeployPubKey        string                                 `json:"deployPubKey,omitempty"`
 }
 
 // heartbeatResponse is the expected JSON response from the heartbeat endpoint.
@@ -97,24 +150,74 @@ type heartbeatResponse struct {
 	LastHeartbeatAt string `json:"lastHeartbeatAt"`
 	HealthStatus    string `json:"healthStatus"`
 	RefreshedToken  string `json:"refreshedToken,omitempty"`
+
+	// Deployment mode fields
+	PendingReleaseSeq int64                       `json:"pendingReleaseSeq,omitempty"`
+	DeployPubKey      string                      `json:"deployPubKey,omitempty"` // Refreshed signing public key (base64)
+	Deployment        deploymentHeartbeatResponse `json:"deployment,omitempty"`
 }
 
 func (s *Server) sendNodeHeartbeat() {
+	if s.controlPlaneCallbacksStopped() {
+		return
+	}
+
 	url := strings.TrimRight(s.config.ControlPlaneURL, "/") + "/api/nodes/" + s.config.NodeID + "/heartbeat"
 
 	payload := map[string]interface{}{
-		"activeWorkspaces": s.activeWorkspaceCount(),
-		"nodeId":           s.config.NodeID,
+		"activeWorkspaces":   s.activeWorkspaceCount(),
+		"creatingWorkspaces": s.creatingWorkspaceCount(),
+		"nodeId":             s.config.NodeID,
+		"agentVersion":       sysinfo.Version,
 	}
 
-	// Enrich heartbeat with lightweight system metrics (procfs only, no exec calls).
+	// In deployment mode, include observed deployment state + disk telemetry per environment.
+	if s.config.Role == config.RoleDeployment {
+		engines := s.deploymentEnginesSnapshot()
+		environments := make([]map[string]interface{}, 0, len(engines))
+		for environmentID, engine := range engines {
+			observed := engine.GetObserved()
+			deployPayload := map[string]interface{}{
+				"environmentId": environmentID,
+				"appliedSeq":    observed.AppliedSeq,
+				"status":        string(observed.Status),
+				"errorMessage":  observed.ErrorMessage,
+				"services":      observed.Services,
+			}
+			if observed.RoutingRevision > 0 {
+				deployPayload["routingRevision"] = observed.RoutingRevision
+			}
+			if observed.RoutingStatus != "" {
+				deployPayload["routingStatus"] = observed.RoutingStatus
+			}
+			if observed.RoutingError != "" {
+				deployPayload["routingError"] = observed.RoutingError
+			}
+			if observed.DeployStatus != nil {
+				deployPayload["deployStatus"] = observed.DeployStatus
+			}
+			if observed.DiskTelemetry != nil {
+				deployPayload["diskTelemetry"] = observed.DiskTelemetry
+			}
+			environments = append(environments, deployPayload)
+		}
+		payload["deployment"] = map[string]interface{}{"environments": environments}
+	}
+
+	// Enrich heartbeat with lightweight system metrics. Workspace container
+	// memory is optional, bounded, and omitted when discovery or Docker stats
+	// cannot complete within its configured timeout.
 	if s.sysInfoCollector != nil {
 		if quick, err := s.sysInfoCollector.CollectQuick(); err == nil {
-			payload["metrics"] = map[string]interface{}{
+			metrics := map[string]interface{}{
 				"cpuLoadAvg1":   quick.CPULoadAvg1,
 				"memoryPercent": quick.MemoryPercent,
 				"diskPercent":   quick.DiskPercent,
 			}
+			if workspaceMemory := s.collectWorkspaceMemoryMetrics(); len(workspaceMemory) > 0 {
+				metrics["workspaceMemory"] = workspaceMemory
+			}
+			payload["metrics"] = metrics
 		} else {
 			slog.Warn("Heartbeat metrics collection failed", "error", err)
 		}
@@ -142,7 +245,14 @@ func (s *Server) sendNodeHeartbeat() {
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
-		slog.Warn("Node heartbeat returned non-success status", "statusCode", resp.StatusCode)
+		body := readAcpHeartbeatErrorBody(resp.Body)
+		if isTerminalControlPlaneCallbackStatus(resp.StatusCode) {
+			s.markControlPlaneCallbacksTerminal(nodeHeartbeatCallback, resp.StatusCode, body)
+			return
+		}
+		slog.Warn("Node heartbeat returned non-success status",
+			"statusCode", resp.StatusCode,
+			"responseBody", body)
 		return
 	}
 
@@ -154,12 +264,123 @@ func (s *Server) sendNodeHeartbeat() {
 	}
 
 	var hbResp heartbeatResponse
-	if json.Unmarshal(respBody, &hbResp) == nil && hbResp.RefreshedToken != "" {
+	if err := json.Unmarshal(respBody, &hbResp); err != nil {
+		slog.Warn("Failed to parse heartbeat response", "error", err)
+		return
+	}
+
+	if hbResp.RefreshedToken != "" {
 		s.setCallbackToken(hbResp.RefreshedToken)
 		slog.Info("Callback token refreshed via heartbeat response")
 	}
 
+	// Deployment mode: handle pending release signal and key refresh
+	if s.config.Role == config.RoleDeployment {
+		deployPubKey := hbResp.DeployPubKey
+		if hbResp.Deployment.DeployPubKey != "" {
+			deployPubKey = hbResp.Deployment.DeployPubKey
+		}
+		if hbResp.Deployment.Environments != nil {
+			for _, env := range *hbResp.Deployment.Environments {
+				environmentID := strings.TrimSpace(env.EnvironmentID)
+				if environmentID == "" {
+					continue
+				}
+				s.ensureDeployEngine(environmentID)
+			}
+		}
+
+		retireEnvironmentIDs := make(map[string]bool, len(hbResp.Deployment.RetireEnvironments))
+		for _, env := range hbResp.Deployment.RetireEnvironments {
+			environmentID := strings.TrimSpace(env.EnvironmentID)
+			if environmentID == "" {
+				continue
+			}
+			retireEnvironmentIDs[environmentID] = true
+		}
+		if len(retireEnvironmentIDs) > 0 {
+			s.retireDeployEngines(retireEnvironmentIDs)
+		}
+
+		// Refresh signing public key if provided
+		if deployPubKey != "" {
+			for environmentID, engine := range s.deploymentEnginesSnapshot() {
+				if err := engine.SetVerifierKey(deployPubKey); err != nil {
+					slog.Error("deploy: failed to refresh signing public key", "environmentId", environmentID, "error", err)
+				} else {
+					slog.Info("deploy: signing public key refreshed from heartbeat", "environmentId", environmentID)
+				}
+			}
+		}
+
+		// `deployment.pendingReleases` is authoritative and complete when present.
+		// The legacy top-level `pendingReleaseSeq` is a FALLBACK for a control
+		// plane old enough not to send the structured list at all — it must never
+		// be merged alongside it. Appending it unconditionally is what turned a
+		// single pending release into two apply goroutines from one heartbeat
+		// tick, and it is also mis-attributed: the seq gets filed under this
+		// node's own cloud-init ENVIRONMENT_ID, so on a node hosting more than one
+		// environment a release for environment B was also applied against
+		// environment A's engine. claimJob cannot dedupe that — the job ids differ.
+		pendingReleases := hbResp.Deployment.PendingReleases
+		if pendingReleases == nil && hbResp.PendingReleaseSeq > 0 && s.config.EnvironmentID != "" {
+			pendingReleases = []deploymentPendingReleaseResponse{{
+				EnvironmentID: s.config.EnvironmentID,
+				Seq:           hbResp.PendingReleaseSeq,
+			}}
+		}
+
+		for _, pending := range pendingReleases {
+			environmentID := strings.TrimSpace(pending.EnvironmentID)
+			if environmentID == "" {
+				continue
+			}
+			engine := s.ensureDeployEngine(environmentID)
+			if engine == nil {
+				continue
+			}
+			observed := engine.GetObserved()
+			if pending.Seq <= observed.AppliedSeq {
+				continue
+			}
+			slog.Info("deploy: pending release detected",
+				"environmentId", environmentID,
+				"pendingSeq", pending.Seq,
+				"appliedSeq", observed.AppliedSeq)
+			go func(environmentID string, seq int64, engine *deploy.Engine) {
+				s.runDetachedDeploymentApply(environmentID, seq, engine)
+			}(environmentID, pending.Seq, engine)
+		}
+
+		for _, pending := range hbResp.Deployment.PendingRouteConfigs {
+			environmentID := strings.TrimSpace(pending.EnvironmentID)
+			if environmentID == "" {
+				continue
+			}
+			engine := s.ensureDeployEngine(environmentID)
+			if engine == nil {
+				continue
+			}
+			observed := engine.GetObserved()
+			if pending.Revision <= observed.RoutingRevision {
+				continue
+			}
+			slog.Info("deploy: pending route config detected",
+				"environmentId", environmentID,
+				"pendingRevision", pending.Revision,
+				"observedRevision", observed.RoutingRevision)
+			go func(environmentID string, revision int64, engine *deploy.Engine) {
+				s.runDetachedDeploymentRouteApply(environmentID, revision, engine)
+			}(environmentID, pending.Revision, engine)
+		}
+	}
+
 	// Heartbeat succeeded — connectivity to the control plane is confirmed.
+	// Resume one durable eviction callback without delaying the heartbeat ticker.
+	go s.retryPendingEvictionCallbacks()
+	// Renew workspace callback tokens that are past their refresh point.
+	go s.renewDueWorkspaceCallbackTokensOnce()
+
 	// Retry any pending workspace-ready callbacks in a background goroutine
 	// so the heartbeat ticker is not blocked by potentially slow HTTP calls.
 	go func() {
@@ -169,6 +390,212 @@ func (s *Server) sendNodeHeartbeat() {
 		defer s.readyRetryMu.Unlock()
 		s.retryPendingReadyCallbacks()
 	}()
+}
+
+type workspaceMemoryMetric struct {
+	WorkspaceID      string  `json:"workspaceId"`
+	MemoryUsageBytes uint64  `json:"memoryUsageBytes"`
+	MemoryLimitBytes uint64  `json:"memoryLimitBytes,omitempty"`
+	MemoryPercent    float64 `json:"memoryPercent,omitempty"`
+	ContainerID      string  `json:"containerId,omitempty"`
+	ContainerName    string  `json:"containerName,omitempty"`
+	CollectedAt      string  `json:"collectedAt,omitempty"`
+}
+
+func (s *Server) collectWorkspaceMemoryMetrics() []workspaceMemoryMetric {
+	if s == nil || s.config == nil || !s.config.ContainerMode {
+		return nil
+	}
+	limit := s.config.HeartbeatWorkspaceMetricsMaxContainers
+	if limit <= 0 {
+		return nil
+	}
+
+	labelValueToWorkspace := make(map[string]string, limit)
+	labelValues := make([]string, 0, limit)
+	s.workspaceMu.RLock()
+	for _, runtime := range s.workspaces {
+		if runtime == nil || !workspaceRuntimeReportsAdmissionMetrics(runtime.Status) {
+			continue
+		}
+		labelValue := strings.TrimSpace(runtime.ContainerLabelValue)
+		if labelValue == "" {
+			continue
+		}
+		labelValueToWorkspace[labelValue] = runtime.ID
+		labelValues = append(labelValues, labelValue)
+		if len(labelValues) > limit {
+			break
+		}
+	}
+	s.workspaceMu.RUnlock()
+	if len(labelValues) == 0 || len(labelValues) > limit {
+		return nil
+	}
+
+	stats, err := sysinfo.CollectDockerContainerStatsForLabelsBounded(
+		context.Background(),
+		sysinfo.DockerContainerStatsOptions{
+			Timeout:        s.config.HeartbeatDockerStatsTimeout,
+			MaxContainers:  limit,
+			MaxOutputBytes: s.config.HeartbeatWorkspaceMetricsMaxOutputBytes,
+		},
+		s.config.ContainerLabelKey,
+		labelValues,
+	)
+	if err != nil {
+		slog.Debug("Heartbeat workspace memory stats unavailable", "error", err)
+		return nil
+	}
+
+	result := make([]workspaceMemoryMetric, 0, len(stats))
+	for _, stat := range stats {
+		workspaceID := labelValueToWorkspace[stat.LabelValue]
+		if workspaceID == "" {
+			continue
+		}
+		result = append(result, workspaceMemoryMetric{
+			WorkspaceID:      workspaceID,
+			MemoryUsageBytes: stat.MemoryUsageBytes,
+			MemoryLimitBytes: stat.MemoryLimitBytes,
+			MemoryPercent:    stat.MemoryPercent,
+			ContainerID:      stat.ID,
+			ContainerName:    stat.Name,
+			CollectedAt:      stat.CollectedAt.Format(time.RFC3339Nano),
+		})
+	}
+	return result
+}
+
+func workspaceRuntimeReportsAdmissionMetrics(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "running", "creating", "recovery":
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Server) runDetachedDeploymentApply(environmentID string, seq int64, engine *deploy.Engine) {
+	jobID := applyJobID(environmentID, seq)
+
+	// Skip if an identical apply is already running. Deferred so the claim is
+	// released even if the apply panics — otherwise this job id stays wedged and
+	// the node stops applying that release entirely.
+	releaseClaim, claimed := s.claimJob(jobID)
+	if !claimed {
+		slog.Info("deploy: apply already in flight; skipping duplicate",
+			"environmentId", environmentID, "seq", seq)
+		return
+	}
+	defer releaseClaim()
+
+	s.persistVMJobStart(jobID, vmJobKindApply, environmentID, vmJobStatusStarting, "accepted")
+	cleanup := s.registerApplyWatchdog(jobID)
+	defer cleanup()
+
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+
+	progress := s.applyProgressChannel(jobID)
+	idleTimeout := s.config.DeployApplyIdleTimeout
+	if idleTimeout <= 0 {
+		idleTimeout = config.DefaultDeployApplyIdleTimeout
+	}
+	timer := time.NewTimer(idleTimeout)
+	defer timer.Stop()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- engine.FetchAndApply(ctx, seq)
+	}()
+
+	for {
+		select {
+		case err := <-done:
+			if err != nil {
+				s.persistVMJobComplete(jobID, vmJobStatusFailed, "failed", err.Error(), nil)
+				slog.Error("deploy: fetch and apply failed",
+					"environmentId", environmentID, "seq", seq, "error", err)
+				return
+			}
+			s.persistVMJobComplete(jobID, vmJobStatusSucceeded, "succeeded", "", map[string]any{"seq": seq})
+			return
+		case <-progress:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(idleTimeout)
+		case <-timer.C:
+			stallErr := fmt.Errorf("deployment apply stalled: no progress for %s", idleTimeout)
+			cancel(stallErr)
+			applyErr := <-done
+
+			succeeded, failure := stalledApplyResult(stallErr, applyErr)
+			if succeeded {
+				s.persistVMJobComplete(jobID, vmJobStatusSucceeded, "succeeded", "", map[string]any{"seq": seq})
+				return
+			}
+			s.persistVMJobComplete(jobID, vmJobStatusFailed, "stalled", failure.Error(), nil)
+			slog.Error("deploy: fetch and apply stalled",
+				"environmentId", environmentID, "seq", seq, "error", failure)
+			return
+		}
+	}
+}
+
+// stalledApplyResult decides what a fired apply idle timer actually means, once
+// the child has reported back.
+//
+// Two distinct lies are possible here and this is where both are prevented:
+//
+//   - `done` is buffered, so select can pick the timer case even when the apply
+//     had ALREADY SUCCEEDED and both cases were ready. Recording that as
+//     "stalled" would fail a deployment that worked, so a nil child result means
+//     believe the apply over our own timer.
+//   - When the child really did fail, its error is a CONSEQUENCE of our cancel —
+//     compose reports `signal: killed` because we killed it. Reporting only that
+//     discards the diagnosis and makes a self-inflicted timeout indistinguishable
+//     from an OOM kill, which is how the 2026-09-05 incident presented. So the
+//     stall stays the primary cause with the child's output as context.
+func stalledApplyResult(stallErr, applyErr error) (succeeded bool, failure error) {
+	if applyErr == nil {
+		return true, nil
+	}
+	return false, fmt.Errorf("%w (child result: %v)", stallErr, applyErr)
+}
+
+func (s *Server) runDetachedDeploymentRouteApply(environmentID string, revision int64, engine *deploy.Engine) {
+	jobID := routeConfigJobID(environmentID, revision)
+
+	// Same duplicate-spawn guard as the apply path: pending route configs are
+	// re-advertised every heartbeat until observed.RoutingRevision catches up.
+	releaseClaim, claimed := s.claimJob(jobID)
+	if !claimed {
+		slog.Info("deploy: route config apply already in flight; skipping duplicate",
+			"environmentId", environmentID, "revision", revision)
+		return
+	}
+	defer releaseClaim()
+
+	s.persistVMJobStart(jobID, vmJobKindRouteConfig, environmentID, vmJobStatusStarting, "accepted")
+
+	idleTimeout := s.config.DeployApplyIdleTimeout
+	if idleTimeout <= 0 {
+		idleTimeout = config.DefaultDeployApplyIdleTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), idleTimeout)
+	defer cancel()
+
+	if err := engine.FetchAndApplyRoutes(ctx, revision); err != nil {
+		s.persistVMJobComplete(jobID, vmJobStatusFailed, "failed", err.Error(), nil)
+		slog.Error("deploy: fetch and apply route config failed", "environmentId", environmentID, "revision", revision, "error", err)
+		return
+	}
+	s.persistVMJobComplete(jobID, vmJobStatusSucceeded, "succeeded", "", map[string]any{"revision": revision})
 }
 
 // retryPendingReadyCallbacks checks for workspaces whose ready callback was not
@@ -211,6 +638,7 @@ func (s *Server) retryPendingReadyCallbacks() {
 				"workspace", p.WorkspaceID, "error", err)
 			continue
 		}
+		responseBody := readAcpHeartbeatErrorBody(resp.Body)
 		resp.Body.Close()
 
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
@@ -222,10 +650,10 @@ func (s *Server) retryPendingReadyCallbacks() {
 			// — stop retrying.
 			s.clearReadyCallbackPending(p.WorkspaceID)
 			slog.Warn("Workspace-ready retry got permanent error, giving up",
-				"workspace", p.WorkspaceID, "statusCode", resp.StatusCode)
+				"workspace", p.WorkspaceID, "statusCode", resp.StatusCode, "responseBody", responseBody)
 		} else {
 			slog.Warn("Workspace-ready retry got transient error (will try again)",
-				"workspace", p.WorkspaceID, "statusCode", resp.StatusCode)
+				"workspace", p.WorkspaceID, "statusCode", resp.StatusCode, "responseBody", responseBody)
 		}
 	}
 }
@@ -236,6 +664,18 @@ func (s *Server) activeWorkspaceCount() int {
 	count := 0
 	for _, runtime := range s.workspaces {
 		if runtime.Status == "running" || runtime.Status == "recovery" {
+			count++
+		}
+	}
+	return count
+}
+
+func (s *Server) creatingWorkspaceCount() int {
+	s.workspaceMu.RLock()
+	defer s.workspaceMu.RUnlock()
+	count := 0
+	for _, runtime := range s.workspaces {
+		if runtime.Status == "creating" {
 			count++
 		}
 	}

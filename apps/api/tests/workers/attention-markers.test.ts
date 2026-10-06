@@ -3,7 +3,7 @@
  *
  * Runs inside the workerd runtime via @cloudflare/vitest-pool-workers.
  */
-import { env } from 'cloudflare:test';
+import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 import type { ProjectData } from '../../src/durable-objects/project-data';
@@ -60,7 +60,7 @@ describe('Attention Markers', () => {
   it('resolves markers when a human message is persisted', async () => {
     const stub = getStub('attn-resolve-msg-1');
     const sessionId = await stub.createSession(null, 'Resolve test');
-    await stub.createAttentionMarker({
+    const marker = await stub.createAttentionMarker({
       sessionId,
       taskId: null,
       workspaceId: null,
@@ -79,6 +79,20 @@ describe('Attention Markers', () => {
     // Verify marker is now resolved
     markers = await stub.listActiveAttentionMarkers(sessionId);
     expect(markers).toHaveLength(0);
+    const resolved = await runInDurableObject(stub, (instance) => {
+      const sql = (instance as unknown as { sql: SqlStorage }).sql;
+      return sql
+        .exec(
+          `SELECT resolved_reason, resolved_answer
+         FROM session_attention_markers WHERE id = ?`,
+          marker.id
+        )
+        .toArray()[0];
+    });
+    expect(resolved).toMatchObject({
+      resolved_reason: 'human_message',
+      resolved_answer: null,
+    });
   });
 
   it('does not resolve markers on assistant messages', async () => {
@@ -137,12 +151,62 @@ describe('Attention Markers', () => {
     });
 
     await stub.persistMessageBatch(sessionId, [
-      { messageId: crypto.randomUUID(), role: 'assistant', content: 'Thinking...', toolMetadata: null, timestamp: new Date().toISOString() },
-      { messageId: crypto.randomUUID(), role: 'user', content: 'Go ahead', toolMetadata: null, timestamp: new Date().toISOString() },
+      {
+        messageId: crypto.randomUUID(),
+        role: 'assistant',
+        content: 'Thinking...',
+        toolMetadata: null,
+        timestamp: new Date().toISOString(),
+      },
+      {
+        messageId: crypto.randomUUID(),
+        role: 'user',
+        content: 'Go ahead',
+        toolMetadata: null,
+        timestamp: new Date().toISOString(),
+      },
     ]);
 
     const markers = await stub.listActiveAttentionMarkers(sessionId);
     expect(markers).toHaveLength(0);
+  });
+
+  it('does not resolve markers on a SAM-injected (origin=system) user message', async () => {
+    const stub = getStub('attn-resolve-system-excluded');
+    const sessionId = await stub.createSession(null, 'System origin resolve test');
+    await stub.createAttentionMarker({
+      sessionId,
+      taskId: null,
+      workspaceId: null,
+      kind: 'needs_input',
+      source: 'test',
+    });
+
+    // A batch whose only user message is system-injected must NOT resolve the
+    // marker — injected instructions are not a human reply.
+    await stub.persistMessageBatch(sessionId, [
+      {
+        messageId: crypto.randomUUID(),
+        role: 'user',
+        content: 'IMPORTANT: call get_instructions first',
+        toolMetadata: null,
+        timestamp: new Date().toISOString(),
+        origin: 'system',
+      },
+    ]);
+    expect(await stub.listActiveAttentionMarkers(sessionId)).toHaveLength(1);
+
+    // A real human message DOES resolve it.
+    await stub.persistMessageBatch(sessionId, [
+      {
+        messageId: crypto.randomUUID(),
+        role: 'user',
+        content: 'Go ahead',
+        toolMetadata: null,
+        timestamp: new Date().toISOString(),
+      },
+    ]);
+    expect(await stub.listActiveAttentionMarkers(sessionId)).toHaveLength(0);
   });
 
   it('returns attention summary for session enrichment', async () => {
@@ -160,6 +224,7 @@ describe('Attention Markers', () => {
       kind: 'needs_input',
       source: 'test',
       reason: 'Please review',
+      metadata: JSON.stringify({ options: ['Approve', 'Reject'] }),
       expiresAt,
     });
 
@@ -168,6 +233,7 @@ describe('Attention Markers', () => {
     expect(summary!.kind).toBe('needs_input');
     expect(summary!.reason).toBe('Please review');
     expect(summary!.expiresAt).toBe(expiresAt);
+    expect(summary!.options).toEqual(['Approve', 'Reject']);
   });
 
   it('includes attention summary in session list', async () => {
@@ -222,8 +288,13 @@ describe('Attention Markers', () => {
       source: 'test',
     });
 
-    const count = await stub.resolveSessionAttentionMarkers(sessionId, null, 'system', 'task_completed');
-    expect(count).toBe(1);
+    const count = await stub.resolveSessionAttentionMarkers(
+      sessionId,
+      null,
+      'system',
+      'task_completed'
+    );
+    expect(count).toBe(2);
 
     const markers = await stub.listActiveAttentionMarkers(sessionId);
     expect(markers).toHaveLength(0);

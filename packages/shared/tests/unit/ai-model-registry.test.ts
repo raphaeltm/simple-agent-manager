@@ -1,13 +1,21 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  DEFAULT_AI_PROXY_ALLOWED_MODELS,
+  DEFAULT_AI_PROXY_ANTHROPIC_MODEL,
+  DEFAULT_AI_PROXY_MODEL,
+  DEFAULT_CONTEXT_SUMMARY_MODEL,
+  DEFAULT_DEBUG_AGENT_MODEL,
   DEFAULT_SANDBOX_MODEL,
+  DEFAULT_TASK_TITLE_MODEL,
+  DEFAULT_TTS_CLEANUP_MODEL,
   filterModelsForAgentLoop,
   type ModelAllowedScope,
   PLATFORM_AI_MODELS,
   type PlatformAIModel,
   type ToolCallSupport,
 } from '../../src/constants/ai-services';
+import { DEFAULT_SAM_MODEL } from '../../src/constants/sam';
 
 describe('AI Model Registry', () => {
   describe('registry integrity', () => {
@@ -26,6 +34,86 @@ describe('AI Model Registry', () => {
     it('has unique model IDs', () => {
       const ids = PLATFORM_AI_MODELS.map((m) => m.id);
       expect(new Set(ids).size).toBe(ids.length);
+    });
+
+    it('does not expose Cloudflare models deprecated on May 30 2026', () => {
+      const deprecatedModels = [
+        '@cf/moonshotai/kimi-k2.5',
+        '@hf/meta-llama/meta-llama-3-8b-instruct',
+        '@cf/meta/llama-3-8b-instruct',
+        '@cf/meta/llama-3-8b-instruct-awq',
+        '@cf/meta/llama-3.1-8b-instruct',
+        '@cf/meta/llama-3.1-8b-instruct-awq',
+        '@cf/meta/llama-3.1-70b-instruct',
+        '@cf/meta/llama-2-7b-chat-int8',
+        '@cf/meta/llama-2-7b-chat-fp16',
+        '@cf/mistral/mistral-7b-instruct-v0.1',
+        '@hf/google/gemma-7b-it',
+        '@cf/google/gemma-3-12b-it',
+        '@hf/nousresearch/hermes-2-pro-mistral-7b',
+        '@cf/microsoft/phi-2',
+        '@cf/defog/sqlcoder-7b-2',
+        '@cf/unum/uform-gen2-qwen-500m',
+        '@cf/facebook/bart-large-cnn',
+        '@hf/mistral/mistral-7b-instruct-v0.2',
+      ];
+      const activeModelIds = new Set([
+        DEFAULT_TASK_TITLE_MODEL,
+        DEFAULT_CONTEXT_SUMMARY_MODEL,
+        DEFAULT_TTS_CLEANUP_MODEL,
+        ...DEFAULT_AI_PROXY_ALLOWED_MODELS.split(','),
+        ...PLATFORM_AI_MODELS.map((m) => m.id),
+      ]);
+
+      for (const deprecatedModel of deprecatedModels) {
+        expect(activeModelIds.has(deprecatedModel), deprecatedModel + ' should not be active').toBe(false);
+      }
+    });
+
+    it('registers the task title default model', () => {
+      expect(PLATFORM_AI_MODELS.some((model) => model.id === DEFAULT_TASK_TITLE_MODEL)).toBe(true);
+    });
+
+    it('does not expose Anthropic models retired upstream', () => {
+      // Retired per https://platform.claude.com/docs/en/about-claude/model-deprecations
+      // (requests to these fail with 404). Add newly retired IDs here when pruning
+      // the catalog — combined with the defaults test below, this catches any
+      // DEFAULT_* constant left pointing at a dead model.
+      // Post-mortem: DEFAULT_SAM_MODEL pointed at claude-sonnet-4-20250514 for ~6
+      // weeks after its 2026-06-15 retirement.
+      const retiredAnthropicModels = [
+        'claude-sonnet-4-20250514',
+        'claude-opus-4-20250514',
+        'claude-opus-4-1-20250805',
+        'claude-3-7-sonnet-20250219',
+        'claude-3-5-haiku-20241022',
+        'claude-3-haiku-20240307',
+      ];
+      const activeModelIds = new Set([
+        DEFAULT_AI_PROXY_ANTHROPIC_MODEL,
+        DEFAULT_DEBUG_AGENT_MODEL,
+        DEFAULT_SAM_MODEL,
+        ...DEFAULT_AI_PROXY_ALLOWED_MODELS.split(','),
+        ...PLATFORM_AI_MODELS.map((m) => m.id),
+      ]);
+
+      for (const retiredModel of retiredAnthropicModels) {
+        expect(activeModelIds.has(retiredModel), retiredModel + ' should not be active').toBe(false);
+      }
+    });
+
+    it('registers every cross-file default model in PLATFORM_AI_MODELS', () => {
+      const platformIds = new Set(PLATFORM_AI_MODELS.map((m) => m.id));
+      const defaults: Record<string, string> = {
+        DEFAULT_AI_PROXY_MODEL,
+        DEFAULT_AI_PROXY_ANTHROPIC_MODEL,
+        DEFAULT_SAM_MODEL,
+      };
+      for (const [name, modelId] of Object.entries(defaults)) {
+        expect(platformIds.has(modelId), `${name} (${modelId}) missing from PLATFORM_AI_MODELS`).toBe(
+          true
+        );
+      }
     });
 
     it('all models have non-empty labels', () => {
@@ -220,6 +308,42 @@ describe('AI Model Registry', () => {
       expect(model!.provider).toBe('anthropic');
       expect(model!.toolCallSupport).toBe('excellent');
       expect(model!.unifiedApiModelId).toBe('anthropic/claude-sonnet-4-6');
+    });
+
+    it('registers Claude Fable 5.1 with current Anthropic metadata', () => {
+      const model = PLATFORM_AI_MODELS.find((m) => m.id === 'claude-fable-5-1');
+
+      expect(model).toBeDefined();
+      expect(model).toMatchObject({
+        label: 'Claude Fable 5.1',
+        provider: 'anthropic',
+        tier: 'premium',
+        costPer1kInputTokens: 0.01,
+        costPer1kOutputTokens: 0.05,
+        contextWindow: 1000000,
+        toolCallSupport: 'excellent',
+        intendedRole: 'workspace-agent',
+        fallbackGroup: 'anthropic-premium',
+        unifiedApiModelId: 'anthropic/claude-fable-5-1',
+      });
+    });
+
+    it('registers GPT-6.1 Sol with current OpenAI metadata', () => {
+      const model = PLATFORM_AI_MODELS.find((candidate) => candidate.id === 'gpt-6.1-sol');
+
+      expect(model).toMatchObject({
+        label: 'GPT-6.1 Sol',
+        provider: 'openai',
+        tier: 'premium',
+        costPer1kInputTokens: 0.002,
+        costPer1kOutputTokens: 0.01,
+        contextWindow: 1050000,
+        toolCallSupport: 'excellent',
+        intendedRole: 'workspace-agent',
+        supportsChatCompletionsToolCalls: false,
+        fallbackGroup: 'openai-premium',
+        unifiedApiModelId: 'openai/gpt-6.1-sol',
+      });
     });
 
     it('can filter models by scope', () => {

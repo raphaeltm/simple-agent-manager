@@ -1,146 +1,51 @@
-import type { Provider, ProviderConfig } from '@simple-agent-manager/providers';
+import type { ProviderConfig, ProviderRequestContext } from '@simple-agent-manager/providers';
 import { createProvider, GcpProvider } from '@simple-agent-manager/providers';
-import type { CredentialProvider, CredentialSource, GcpOidcCredential } from '@simple-agent-manager/shared';
-import { and, eq } from 'drizzle-orm';
+import {
+  type CCResolvedEnvironment,
+  computeAssembler,
+  type CredentialProvider,
+  type CredentialSource,
+} from '@simple-agent-manager/shared';
+import { and, eq, isNull } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
-import { expectJsonRecord } from '../lib/runtime-validation';
+import { lazyBackfillIfNeeded } from './composable-credentials/lazy-backfill';
+import { resolveForConsumer } from './composable-credentials/resolve';
 import { decrypt } from './encryption';
 import { getPlatformCloudCredential } from './platform-credentials';
+import {
+  buildProviderConfig,
+  type HetznerRuntimeEnv,
+  parseGcpCredential,
+} from './provider-credential-codecs';
+import {
+  createProviderForExactCredential,
+  type ExactProviderCredentialBinding,
+  fingerprintEncryptedProviderCredential,
+  type ProviderResolutionResult,
+} from './provider-credential-exact';
 
-/**
- * Serialize provider-specific credential fields into a single string for encryption.
- * Hetzner stores the raw API token; multi-field providers store JSON.
- */
-export function serializeCredentialToken(
-  provider: CredentialProvider,
-  fields: Record<string, string>,
-): string {
-  switch (provider) {
-    case 'hetzner':
-      return fields.token ?? '';
-    case 'scaleway':
-      return JSON.stringify({ secretKey: fields.secretKey, projectId: fields.projectId });
-    case 'gcp':
-      return JSON.stringify({
-        gcpProjectId: fields.gcpProjectId,
-        gcpProjectNumber: fields.gcpProjectNumber,
-        serviceAccountEmail: fields.serviceAccountEmail,
-        wifPoolId: fields.wifPoolId,
-        wifProviderId: fields.wifProviderId,
-        defaultZone: fields.defaultZone,
-      });
-    default: {
-      const _exhaustive: never = provider;
-      throw new Error(`Unsupported provider: ${_exhaustive}`);
-    }
-  }
-}
+export type {
+  DigitalOceanRuntimeEnv,
+  HetznerCapacityRetryEnv,
+  HetznerRuntimeEnv,
+  InfomaniakRuntimeEnv,
+  UpCloudRuntimeEnv,
+  VultrRuntimeEnv,
+} from './provider-credential-codecs';
+export {
+  buildProviderConfig,
+  extractScalewaySecretKey,
+  parseGcpCredential,
+  serializeCredentialToken,
+  serializeGcpCredential,
+  toGcpCredentialMetadata,
+} from './provider-credential-codecs';
+export { exactProviderCredentialBindingFromPlacementSnapshot } from './provider-credential-exact';
 
-/**
- * Extract the Scaleway secret key from a decrypted Scaleway cloud credential token.
- * Returns null if the token is not valid JSON or does not contain a secretKey field.
- * Used by both the provider system and the OpenCode agent key fallback.
- */
-export function extractScalewaySecretKey(decryptedToken: string): string | null {
-  try {
-    const parsed = expectJsonRecord(JSON.parse(decryptedToken), 'provider.scaleway_credential');
-    if (typeof parsed?.secretKey === 'string' && parsed.secretKey) {
-      return parsed.secretKey;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-/** Parse an optional env var string to a positive integer, or return undefined. */
-function parseOptionalInt(value: string | undefined): number | undefined {
-  if (!value) return undefined;
-  const n = Number.parseInt(value, 10);
-  return Number.isFinite(n) && n > 0 ? n : undefined;
-}
-
-/** Env vars that tune Hetzner capacity retry behavior. */
-export interface HetznerCapacityRetryEnv {
-  HETZNER_CAPACITY_RETRY_INITIAL_DELAY_MS?: string;
-  HETZNER_CAPACITY_RETRY_MAX_DELAY_MS?: string;
-  HETZNER_CAPACITY_RETRY_MAX_ATTEMPTS?: string;
-}
-
-/**
- * Build a ProviderConfig from a provider name and decrypted credential token.
- * Handles both raw token strings (Hetzner) and JSON blobs (Scaleway).
- */
-export function buildProviderConfig(
-  provider: CredentialProvider,
-  decryptedToken: string,
-  hetznerEnv?: HetznerCapacityRetryEnv,
-): ProviderConfig {
-  switch (provider) {
-    case 'hetzner':
-      return {
-        provider: 'hetzner',
-        apiToken: decryptedToken,
-        capacityRetryInitialDelayMs: parseOptionalInt(hetznerEnv?.HETZNER_CAPACITY_RETRY_INITIAL_DELAY_MS),
-        capacityRetryMaxDelayMs: parseOptionalInt(hetznerEnv?.HETZNER_CAPACITY_RETRY_MAX_DELAY_MS),
-        capacityRetryMaxAttempts: parseOptionalInt(hetznerEnv?.HETZNER_CAPACITY_RETRY_MAX_ATTEMPTS),
-      };
-    case 'scaleway': {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(decryptedToken);
-      } catch {
-        throw new Error('Invalid Scaleway credential format: malformed stored data');
-      }
-      const obj = expectJsonRecord(parsed, 'provider.scaleway_credential');
-      if (typeof obj?.secretKey !== 'string' || !obj.secretKey || typeof obj?.projectId !== 'string' || !obj.projectId) {
-        throw new Error('Invalid Scaleway credential format: missing secretKey or projectId');
-      }
-      return { provider: 'scaleway', secretKey: obj.secretKey, projectId: obj.projectId };
-    }
-    case 'gcp':
-      // GCP credentials are metadata (not secrets). The tokenProvider must be injected
-      // at a higher layer via buildGcpProviderConfig() since it depends on the env/JWT context.
-      throw new Error('GCP credentials require buildGcpProviderConfig() — cannot use buildProviderConfig() directly');
-    default:
-      throw new Error(`Unsupported provider: ${provider}`);
-  }
-}
-
-/**
- * Parse a decrypted GCP credential token into structured GcpOidcCredential fields.
- */
-export function parseGcpCredential(decryptedToken: string): GcpOidcCredential {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(decryptedToken);
-  } catch {
-    throw new Error('Invalid GCP credential format: malformed stored data');
-  }
-  const obj = expectJsonRecord(parsed, 'provider.gcp_credential');
-  if (
-    typeof obj?.gcpProjectId !== 'string' || !obj.gcpProjectId ||
-    typeof obj?.gcpProjectNumber !== 'string' || !obj.gcpProjectNumber ||
-    typeof obj?.serviceAccountEmail !== 'string' || !obj.serviceAccountEmail ||
-    typeof obj?.wifPoolId !== 'string' || !obj.wifPoolId ||
-    typeof obj?.wifProviderId !== 'string' || !obj.wifProviderId ||
-    typeof obj?.defaultZone !== 'string' || !obj.defaultZone
-  ) {
-    throw new Error('Invalid GCP credential format: missing required fields');
-  }
-  return {
-    provider: 'gcp',
-    gcpProjectId: obj.gcpProjectId,
-    gcpProjectNumber: obj.gcpProjectNumber,
-    serviceAccountEmail: obj.serviceAccountEmail,
-    wifPoolId: obj.wifPoolId,
-    wifProviderId: obj.wifProviderId,
-    defaultZone: obj.defaultZone,
-  };
-}
+export type { ExactProviderCredentialBinding, ProviderResolutionResult };
 
 /**
  * Look up a user's cloud-provider credential, decrypt it, and return a ProviderConfig.
@@ -154,11 +59,13 @@ export async function getUserCloudProviderConfig(
   db: ReturnType<typeof drizzle>,
   userId: string,
   encryptionKey: string,
-  targetProvider?: CredentialProvider,
+  targetProvider?: CredentialProvider
 ): Promise<{ config: ProviderConfig; provider: CredentialProvider } | null> {
   const conditions = [
     eq(schema.credentials.userId, userId),
+    isNull(schema.credentials.projectId),
     eq(schema.credentials.credentialType, 'cloud-provider'),
+    eq(schema.credentials.isActive, true),
   ];
   if (targetProvider) {
     conditions.push(eq(schema.credentials.provider, targetProvider));
@@ -180,7 +87,9 @@ export async function getUserCloudProviderConfig(
 
   // GCP uses OIDC token exchange — cannot produce a static ProviderConfig
   if (provider === 'gcp') {
-    throw new Error('GCP credentials require createProviderForUser() — cannot use getUserCloudProviderConfig()');
+    throw new Error(
+      'GCP credentials require createProviderForUser() — cannot use getUserCloudProviderConfig()'
+    );
   }
 
   const config = buildProviderConfig(provider, decryptedToken);
@@ -191,18 +100,363 @@ export async function getUserCloudProviderConfig(
  * Create a Provider instance for a user, handling all provider types including GCP.
  * Falls back to platform credentials when no user credential is found.
  * For GCP, injects the STS token exchange as the token provider.
+ *
+ * Resolution order (composable-credentials PRIMARY, old path FALLBACK):
+ *   1. CC resolver: project-attachment → user-attachment → platform default
+ *   2. If a project-scoped CC attachment exists but cannot resolve, halt
+ *      rather than falling through to user/platform credentials
+ *   3. If cc_* tables are empty, lazy-backfill from legacy tables, retry
+ *   4. If CC still has no data, fall back to legacy single-table lookup
  */
 export async function createProviderForUser(
   db: ReturnType<typeof drizzle>,
   userId: string,
   encryptionKey: string,
-  env: Env & Partial<HetznerCapacityRetryEnv>,
+  env: Env & Partial<HetznerRuntimeEnv>,
   targetProvider?: CredentialProvider,
-): Promise<{ provider: Provider; providerName: CredentialProvider; credentialSource: CredentialSource } | null> {
-  // 1. Try user's own credential first
+  projectId?: string | null,
+  exactCredential?: ExactProviderCredentialBinding | null
+): Promise<ProviderResolutionResult | null> {
+  if (exactCredential) {
+    return createProviderForExactCredential(
+      db,
+      userId,
+      encryptionKey,
+      env,
+      targetProvider,
+      projectId,
+      exactCredential,
+      createProviderFromDecryptedToken
+    );
+  }
+
+  // --- Primary path: composable-credentials resolver -------------------------
+  // CC resolver requires a specific provider name (compute consumers are always
+  // provider-specific). When targetProvider is undefined, we skip CC and use the
+  // legacy path which handles the "any provider" case. All current call sites
+  // that create nodes specify a targetProvider, so this gap is not reachable in
+  // practice. When legacy tables are fully retired, all call sites must pass
+  // targetProvider explicitly.
+  if (targetProvider) {
+    const ccResult = await resolveProviderViaCC(
+      db,
+      userId,
+      encryptionKey,
+      env,
+      targetProvider,
+      projectId
+    );
+    if (ccResult !== undefined) return ccResult;
+  }
+
+  // --- Fallback: legacy single-table lookup ----------------------------------
+  return createProviderForUserLegacy(db, userId, encryptionKey, env, targetProvider, projectId);
+}
+
+async function createProviderFromDecryptedToken(
+  providerName: CredentialProvider,
+  decryptedToken: string,
+  credentialSource: CredentialSource,
+  userId: string,
+  projectId: string | null,
+  env: Env & Partial<HetznerRuntimeEnv>
+): Promise<ProviderResolutionResult> {
+  if (providerName === 'gcp') {
+    const gcpCred = parseGcpCredential(decryptedToken);
+    const { getGcpAccessToken } = await import('./gcp-sts');
+    const cacheUserId =
+      credentialSource === 'platform'
+        ? `platform:${userId}`
+        : credentialSource === 'project' && projectId
+          ? `project:${projectId}:${userId}`
+          : userId;
+    const cacheProjectId = projectId ?? gcpCred.gcpProjectId;
+    const tokenProvider = (context?: ProviderRequestContext) =>
+      getGcpAccessToken(cacheUserId, cacheProjectId, gcpCred, env, context);
+    return {
+      provider: new GcpProvider(gcpCred.gcpProjectId, tokenProvider, gcpCred.defaultZone),
+      providerName,
+      credentialSource,
+    };
+  }
+
+  const config = buildProviderConfig(providerName, decryptedToken, env);
+  return { provider: createProvider(config), providerName, credentialSource };
+}
+
+type ResolvedComputeCredential = CCResolvedEnvironment;
+
+function providerCredentialSource(resolved: ResolvedComputeCredential): CredentialSource {
+  if (resolved.source === 'project-attachment') return 'project';
+  if (resolved.source === 'user-attachment') return 'user';
+  return 'platform';
+}
+
+async function resolveComputeCredentialWithBackfill(
+  db: ReturnType<typeof drizzle>,
+  userId: string,
+  encryptionKey: string,
+  targetProvider: CredentialProvider,
+  projectId?: string | null
+): Promise<ResolvedComputeCredential | null | undefined> {
+  const consumer = { kind: 'compute' as const, provider: targetProvider };
+  const hasProjectAttachment = await hasProjectComputeCredentialAttachment(
+    db,
+    userId,
+    targetProvider,
+    projectId
+  );
+  let resolved = await resolveForConsumer(db, userId, encryptionKey, consumer, projectId);
+  if (!resolved && hasProjectAttachment) return null;
+
+  const platformOnly = resolved?.source === 'platform';
+  if (!resolved || platformOnly) {
+    const didBackfill = await lazyBackfillIfNeeded(db, userId);
+    if (didBackfill) {
+      resolved = await resolveForConsumer(db, userId, encryptionKey, consumer, projectId);
+    } else if (!resolved) {
+      return undefined;
+    }
+  }
+  return resolved ?? undefined;
+}
+
+async function exactCredentialBindingForResolved(
+  db: ReturnType<typeof drizzle>,
+  resolved: ResolvedComputeCredential,
+  credentialSource: CredentialSource
+): Promise<ExactProviderCredentialBinding | null> {
+  if (!resolved.credential) return null;
+  const credentialTable =
+    credentialSource === 'platform' ? schema.platformCredentials : schema.ccCredentials;
+  const [credentialRow] = await db
+    .select({
+      encryptedToken: credentialTable.encryptedToken,
+      iv: credentialTable.iv,
+      createdAt: credentialTable.createdAt,
+      updatedAt: credentialTable.updatedAt,
+    })
+    .from(credentialTable)
+    .where(eq(credentialTable.id, resolved.credential.id))
+    .limit(1);
+  if (!credentialRow) return null;
+
+  const timestamp = credentialRow.updatedAt ?? credentialRow.createdAt;
+  const parsedVersion = timestamp ? Date.parse(timestamp) : Number.NaN;
+  return {
+    credentialSource,
+    credentialReference:
+      credentialSource === 'platform'
+        ? `platform_credentials:${resolved.credential.id}`
+        : `cc_credentials:${resolved.credential.id}`,
+    credentialVersion: Number.isFinite(parsedVersion) ? parsedVersion : null,
+    credentialFingerprint: await fingerprintEncryptedProviderCredential(
+      credentialRow.encryptedToken,
+      credentialRow.iv
+    ),
+  };
+}
+
+async function createProviderFromComposableConfig(
+  providerName: CredentialProvider,
+  token: string,
+  isPlatform: boolean,
+  credentialSource: CredentialSource,
+  userId: string,
+  projectId: string | null,
+  env: Env & Partial<HetznerRuntimeEnv>
+): Promise<ProviderResolutionResult> {
+  if (providerName === 'gcp') {
+    const gcpCred = parseGcpCredential(token);
+    const { getGcpAccessToken } = await import('./gcp-sts');
+    const cacheUserId = isPlatform ? `platform:${userId}` : userId;
+    const cacheProjectId = projectId ?? gcpCred.gcpProjectId;
+    const tokenProvider = (context?: ProviderRequestContext) =>
+      getGcpAccessToken(cacheUserId, cacheProjectId, gcpCred, env, context);
+    return {
+      provider: new GcpProvider(gcpCred.gcpProjectId, tokenProvider, gcpCred.defaultZone),
+      providerName,
+      credentialSource,
+    };
+  }
+  const config = buildProviderConfig(providerName, token, env);
+  return { provider: createProvider(config), providerName, credentialSource };
+}
+
+/**
+ * Try composable-credentials resolution for compute providers with lazy backfill.
+ * Returns `undefined` when CC has no data and fallback should be attempted.
+ */
+async function resolveProviderViaCC(
+  db: ReturnType<typeof drizzle>,
+  userId: string,
+  encryptionKey: string,
+  env: Env & Partial<HetznerRuntimeEnv>,
+  targetProvider: CredentialProvider,
+  projectId?: string | null
+): Promise<ProviderResolutionResult | null | undefined> {
+  // Rule 28: once a project-scoped compute attachment exists, a null resolution
+  // is an explicit halt. Platform-only resolution still gets one lazy-backfill
+  // pass so a user's own legacy credential can retain precedence.
+  const resolved = await resolveComputeCredentialWithBackfill(
+    db,
+    userId,
+    encryptionKey,
+    targetProvider,
+    projectId
+  );
+  if (!resolved) return resolved;
+
+  // Validate the resolved credential's semantic compute contract before the exact-generation
+  // snapshot path re-reads its ciphertext. In particular, preserve computeAssembler's specific
+  // provider-mismatch classification instead of letting token-shape validation replace it with a
+  // generic stored-format error during exact credential reconstruction.
+  const ccConfig = computeAssembler.assemble(resolved);
+  const providerName = targetProvider;
+  const credentialSource = providerCredentialSource(resolved);
+  if (resolved.credential) {
+    const exactCredentialBinding = await exactCredentialBindingForResolved(
+      db,
+      resolved,
+      credentialSource
+    );
+    if (!exactCredentialBinding) return null;
+
+    // The resolver snapshot and this fingerprint query are separate D1 reads. Re-enter exact
+    // resolution so provider construction and the persisted fingerprint are guaranteed to use
+    // one captured ciphertext generation if an in-place rotation lands between those reads.
+    return createProviderForExactCredential(
+      db,
+      userId,
+      encryptionKey,
+      env,
+      targetProvider,
+      projectId,
+      exactCredentialBinding,
+      createProviderFromDecryptedToken
+    );
+  }
+  return createProviderFromComposableConfig(
+    providerName,
+    ccConfig.token,
+    ccConfig.isPlatform,
+    credentialSource,
+    userId,
+    projectId ?? null,
+    env
+  );
+}
+
+async function hasProjectComputeCredentialAttachment(
+  db: ReturnType<typeof drizzle>,
+  userId: string,
+  targetProvider: CredentialProvider,
+  projectId?: string | null
+): Promise<boolean> {
+  if (!projectId) return false;
+
+  const rows = await db
+    .select({ id: schema.ccAttachments.id })
+    .from(schema.ccAttachments)
+    .where(
+      and(
+        eq(schema.ccAttachments.userId, userId),
+        eq(schema.ccAttachments.projectId, projectId),
+        eq(schema.ccAttachments.consumerKind, 'compute'),
+        eq(schema.ccAttachments.consumerTarget, targetProvider)
+      )
+    )
+    .limit(1);
+
+  return rows.length > 0;
+}
+
+/**
+ * Legacy single-table provider resolution (fallback when CC has no data).
+ */
+async function createProviderForUserLegacy(
+  db: ReturnType<typeof drizzle>,
+  userId: string,
+  encryptionKey: string,
+  env: Env & Partial<HetznerRuntimeEnv>,
+  targetProvider?: CredentialProvider,
+  projectId?: string | null
+): Promise<ProviderResolutionResult | null> {
+  // 1. Try a project-scoped credential only when the caller has already
+  // authorized this project context.
+  if (projectId) {
+    const projectConditions = [
+      eq(schema.credentials.projectId, projectId),
+      eq(schema.credentials.credentialType, 'cloud-provider'),
+    ];
+    if (targetProvider) {
+      projectConditions.push(eq(schema.credentials.provider, targetProvider));
+    }
+
+    const projectCreds = await db
+      .select()
+      .from(schema.credentials)
+      .where(and(...projectConditions))
+      .limit(targetProvider ? 1 : 2);
+
+    if (projectCreds.length > 1) return null;
+    const projectCred = projectCreds[0];
+    if (projectCred) {
+      if (!projectCred.isActive) return null;
+      const providerName = projectCred.provider as CredentialProvider;
+      const decryptedToken = await decrypt(
+        projectCred.encryptedToken,
+        projectCred.iv,
+        encryptionKey
+      );
+
+      if (providerName === 'gcp') {
+        const gcpCred = parseGcpCredential(decryptedToken);
+        const { getGcpAccessToken } = await import('./gcp-sts');
+        const tokenProvider = (context?: ProviderRequestContext) =>
+          getGcpAccessToken(`project:${projectId}:${userId}`, projectId, gcpCred, env, context);
+
+        const provider = new GcpProvider(gcpCred.gcpProjectId, tokenProvider, gcpCred.defaultZone);
+        return {
+          provider,
+          providerName,
+          credentialSource: 'project',
+          exactCredentialBinding: {
+            credentialSource: 'project',
+            credentialReference: `credentials:${projectCred.id}`,
+            credentialVersion: Date.parse(projectCred.updatedAt ?? projectCred.createdAt),
+            credentialFingerprint: await fingerprintEncryptedProviderCredential(
+              projectCred.encryptedToken,
+              projectCred.iv
+            ),
+          },
+        };
+      }
+
+      const config = buildProviderConfig(providerName, decryptedToken, env);
+      return {
+        provider: createProvider(config),
+        providerName,
+        credentialSource: 'project',
+        exactCredentialBinding: {
+          credentialSource: 'project',
+          credentialReference: `credentials:${projectCred.id}`,
+          credentialVersion: Date.parse(projectCred.updatedAt ?? projectCred.createdAt),
+          credentialFingerprint: await fingerprintEncryptedProviderCredential(
+            projectCred.encryptedToken,
+            projectCred.iv
+          ),
+        },
+      };
+    }
+  }
+
+  // 2. Try user's own personal credential.
   const conditions = [
     eq(schema.credentials.userId, userId),
+    isNull(schema.credentials.projectId),
     eq(schema.credentials.credentialType, 'cloud-provider'),
+    eq(schema.credentials.isActive, true),
   ];
   if (targetProvider) {
     conditions.push(eq(schema.credentials.provider, targetProvider));
@@ -222,21 +476,45 @@ export async function createProviderForUser(
     if (providerName === 'gcp') {
       const gcpCred = parseGcpCredential(decryptedToken);
       const { getGcpAccessToken } = await import('./gcp-sts');
-      const tokenProvider = () => getGcpAccessToken(userId, gcpCred.gcpProjectId, gcpCred, env);
+      const cacheProjectId = projectId ?? gcpCred.gcpProjectId;
+      const tokenProvider = (context?: ProviderRequestContext) =>
+        getGcpAccessToken(userId, cacheProjectId, gcpCred, env, context);
 
-      const provider = new GcpProvider(
-        gcpCred.gcpProjectId,
-        tokenProvider,
-        gcpCred.defaultZone,
-      );
-      return { provider, providerName, credentialSource: 'user' };
+      const provider = new GcpProvider(gcpCred.gcpProjectId, tokenProvider, gcpCred.defaultZone);
+      return {
+        provider,
+        providerName,
+        credentialSource: 'user',
+        exactCredentialBinding: {
+          credentialSource: 'user',
+          credentialReference: `credentials:${cred.id}`,
+          credentialVersion: Date.parse(cred.updatedAt ?? cred.createdAt),
+          credentialFingerprint: await fingerprintEncryptedProviderCredential(
+            cred.encryptedToken,
+            cred.iv
+          ),
+        },
+      };
     }
 
     const config = buildProviderConfig(providerName, decryptedToken, env);
-    return { provider: createProvider(config), providerName, credentialSource: 'user' };
+    return {
+      provider: createProvider(config),
+      providerName,
+      credentialSource: 'user',
+      exactCredentialBinding: {
+        credentialSource: 'user',
+        credentialReference: `credentials:${cred.id}`,
+        credentialVersion: Date.parse(cred.updatedAt ?? cred.createdAt),
+        credentialFingerprint: await fingerprintEncryptedProviderCredential(
+          cred.encryptedToken,
+          cred.iv
+        ),
+      },
+    };
   }
 
-  // 2. Fall back to platform credential
+  // 3. Fall back to platform credential
   const platformCred = await getPlatformCloudCredential(db, encryptionKey, targetProvider);
   if (!platformCred) {
     return null;
@@ -247,38 +525,73 @@ export async function createProviderForUser(
   if (platformProvider === 'gcp') {
     const gcpCred = parseGcpCredential(decryptedToken);
     const { getGcpAccessToken } = await import('./gcp-sts');
-    // Use a synthetic user ID for platform credentials in token cache
-    const tokenProvider = () => getGcpAccessToken(`platform:${userId}`, gcpCred.gcpProjectId, gcpCred, env);
+    const cacheProjectId = projectId ?? gcpCred.gcpProjectId;
+    const tokenProvider = (context?: ProviderRequestContext) =>
+      getGcpAccessToken(`platform:${userId}`, cacheProjectId, gcpCred, env, context);
 
-    const provider = new GcpProvider(
-      gcpCred.gcpProjectId,
-      tokenProvider,
-      gcpCred.defaultZone,
-    );
-    return { provider, providerName: platformProvider, credentialSource: 'platform' };
+    const provider = new GcpProvider(gcpCred.gcpProjectId, tokenProvider, gcpCred.defaultZone);
+    return {
+      provider,
+      providerName: platformProvider,
+      credentialSource: 'platform',
+      exactCredentialBinding: platformCred.credentialId
+        ? {
+            credentialSource: 'platform',
+            credentialReference: `platform_credentials:${platformCred.credentialId}`,
+            credentialVersion: platformCred.credentialVersion,
+            credentialFingerprint: platformCred.credentialFingerprint,
+          }
+        : undefined,
+    };
   }
 
   const config = buildProviderConfig(platformProvider, decryptedToken, env);
-  return { provider: createProvider(config), providerName: platformProvider, credentialSource: 'platform' };
+  return {
+    provider: createProvider(config),
+    providerName: platformProvider,
+    credentialSource: 'platform',
+    exactCredentialBinding: platformCred.credentialId
+      ? {
+          credentialSource: 'platform',
+          credentialReference: `platform_credentials:${platformCred.credentialId}`,
+          credentialVersion: platformCred.credentialVersion,
+          credentialFingerprint: platformCred.credentialFingerprint,
+        }
+      : undefined,
+  };
 }
 
 /**
- * Lightweight credential source resolution — determines whether 'user' or 'platform'
- * credentials would be used for a given target provider WITHOUT decrypting tokens
- * or instantiating provider instances. Used for quota enforcement gating.
+ * Lightweight credential source resolution — determines whether project, user,
+ * or platform credentials would be used for a given target provider WITHOUT
+ * decrypting tokens or instantiating provider instances. Used for quota
+ * enforcement gating.
  *
- * Returns 'user' if the user has a cloud-provider credential for the target provider,
- * 'platform' if only a platform credential is available, or null if no credential exists.
+ * Returns the first available source in project → user → platform precedence,
+ * or null if no credential exists.
  */
 export async function resolveCredentialSource(
   db: ReturnType<typeof drizzle>,
   userId: string,
   targetProvider?: CredentialProvider,
+  projectId?: string | null
 ): Promise<{ credentialSource: CredentialSource; providerName: CredentialProvider } | null> {
+  const projectCredential = await resolveProjectComputeCredentialSource(
+    db,
+    userId,
+    targetProvider,
+    projectId
+  );
+  if (projectCredential !== undefined) {
+    return projectCredential;
+  }
+
   // 1. Check user's own credential for the target provider
   const userConditions = [
     eq(schema.credentials.userId, userId),
+    isNull(schema.credentials.projectId),
     eq(schema.credentials.credentialType, 'cloud-provider'),
+    eq(schema.credentials.isActive, true),
   ];
   if (targetProvider) {
     userConditions.push(eq(schema.credentials.provider, targetProvider));
@@ -320,4 +633,85 @@ export async function resolveCredentialSource(
   }
 
   return null;
+}
+
+async function resolveProjectComputeCredentialSource(
+  db: ReturnType<typeof drizzle>,
+  userId: string,
+  targetProvider?: CredentialProvider,
+  projectId?: string | null
+): Promise<
+  { credentialSource: CredentialSource; providerName: CredentialProvider } | null | undefined
+> {
+  if (!projectId) return undefined;
+
+  const conditions = [
+    eq(schema.ccAttachments.userId, userId),
+    eq(schema.ccAttachments.projectId, projectId),
+    eq(schema.ccAttachments.consumerKind, 'compute'),
+  ];
+  if (targetProvider) {
+    conditions.push(eq(schema.ccAttachments.consumerTarget, targetProvider));
+  }
+
+  const rows = await db
+    .select({
+      attachmentActive: schema.ccAttachments.isActive,
+      consumerTarget: schema.ccAttachments.consumerTarget,
+      configurationActive: schema.ccConfigurations.isActive,
+      credentialId: schema.ccConfigurations.credentialId,
+      credentialActive: schema.ccCredentials.isActive,
+    })
+    .from(schema.ccAttachments)
+    .innerJoin(
+      schema.ccConfigurations,
+      eq(schema.ccAttachments.configurationId, schema.ccConfigurations.id)
+    )
+    .leftJoin(
+      schema.ccCredentials,
+      eq(schema.ccConfigurations.credentialId, schema.ccCredentials.id)
+    )
+    .where(and(...conditions))
+    .limit(targetProvider ? 1 : 2);
+
+  if (rows.length === 0) {
+    const legacyProjectConditions = [
+      eq(schema.credentials.projectId, projectId),
+      eq(schema.credentials.credentialType, 'cloud-provider'),
+    ];
+    if (targetProvider) {
+      legacyProjectConditions.push(eq(schema.credentials.provider, targetProvider));
+    }
+
+    const legacyRows = await db
+      .select({
+        provider: schema.credentials.provider,
+        isActive: schema.credentials.isActive,
+      })
+      .from(schema.credentials)
+      .where(and(...legacyProjectConditions))
+      .limit(targetProvider ? 1 : 2);
+
+    if (legacyRows.length === 0) return undefined;
+    if (legacyRows.length > 1) return null;
+
+    const legacyRow = legacyRows[0];
+    if (!legacyRow?.isActive) return null;
+
+    return {
+      credentialSource: 'project',
+      providerName: legacyRow.provider as CredentialProvider,
+    };
+  }
+  if (rows.length > 1) return null;
+
+  const row = rows[0];
+  if (!row) return null;
+  if (!row.attachmentActive || !row.configurationActive) return null;
+  if (row.credentialId && !row.credentialActive) return null;
+
+  return {
+    credentialSource: 'project',
+    providerName: row.consumerTarget as CredentialProvider,
+  };
 }

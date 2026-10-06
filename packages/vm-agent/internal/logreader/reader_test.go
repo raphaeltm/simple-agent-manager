@@ -2,6 +2,7 @@ package logreader
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -42,6 +43,81 @@ func TestParseJournalJSON(t *testing.T) {
 	}
 	if *cursor != "s=def456" {
 		t.Errorf("cursor = %q, want %q", *cursor, "s=def456")
+	}
+}
+
+func TestReadLogs_DockerUsesDockerLogsAndContainerList(t *testing.T) {
+	var commands []string
+	mockExec := func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		commands = append(commands, name+" "+strings.Join(args, " "))
+		if name != "docker" {
+			return exec.CommandContext(ctx, "printf", "")
+		}
+
+		if len(args) >= 2 && args[0] == "ps" {
+			lines := strings.Join([]string{
+				`{"ID":"abc123","Names":"sam-web-1","Image":"nginx:alpine","State":"running","Status":"Up 2 minutes"}`,
+				`{"ID":"def456","Names":"sam-worker-1","Image":"worker:latest","State":"running","Status":"Up 2 minutes"}`,
+			}, "\n")
+			return exec.CommandContext(ctx, "printf", "%s", lines)
+		}
+
+		container := args[len(args)-1]
+		var lines string
+		switch container {
+		case "sam-web-1":
+			lines = "2026-06-18T10:00:00.123456789Z web booted\n2026-06-18T10:00:02.123456789Z GET / 200\n"
+		case "sam-worker-1":
+			lines = "2026-06-18T10:00:01.123456789Z worker warning: queue empty\n"
+		default:
+			return exec.CommandContext(ctx, "sh", "-c", fmt.Sprintf("printf 'unknown container %s' && exit 1", container))
+		}
+		return exec.CommandContext(ctx, "printf", "%s", lines)
+	}
+
+	reader := NewReaderWithExecutor(mockExec)
+	resp, err := reader.ReadLogs(context.Background(), LogFilter{Source: "docker", Level: "debug", Limit: 10})
+	if err != nil {
+		t.Fatalf("ReadLogs: %v", err)
+	}
+
+	if len(resp.Entries) != 3 {
+		t.Fatalf("expected 3 docker entries, got %d: %#v", len(resp.Entries), resp.Entries)
+	}
+	if resp.Entries[0].Source != "docker:sam-web-1" {
+		t.Errorf("newest first source = %q, want docker:sam-web-1", resp.Entries[0].Source)
+	}
+	var sawWarning bool
+	for _, entry := range resp.Entries {
+		if entry.Source == "docker:sam-worker-1" && entry.Level == "warn" {
+			sawWarning = true
+		}
+	}
+	if !sawWarning {
+		t.Errorf("expected worker warning log in entries: %#v", resp.Entries)
+	}
+	if !strings.Contains(strings.Join(commands, "\n"), "docker ps --format {{json .}}") {
+		t.Errorf("expected docker ps container listing, commands: %v", commands)
+	}
+	if !strings.Contains(strings.Join(commands, "\n"), "docker logs --timestamps --tail 11 sam-web-1") {
+		t.Errorf("expected docker logs for sam-web-1, commands: %v", commands)
+	}
+
+	commands = nil
+	resp, err = reader.ReadLogs(context.Background(), LogFilter{Source: "docker", Level: "debug", Container: "sam-web-1", Limit: 10})
+	if err != nil {
+		t.Fatalf("ReadLogs filtered: %v", err)
+	}
+	if len(resp.Entries) != 2 {
+		t.Fatalf("expected 2 filtered entries, got %d", len(resp.Entries))
+	}
+	if strings.Contains(strings.Join(commands, "\n"), "docker ps") {
+		t.Errorf("filtered reads should not list all containers, commands: %v", commands)
+	}
+	for _, entry := range resp.Entries {
+		if entry.Source != "docker:sam-web-1" {
+			t.Errorf("filtered source = %q, want docker:sam-web-1", entry.Source)
+		}
 	}
 }
 
@@ -199,6 +275,30 @@ func TestClampLimit(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("clampLimit(%d) = %d, want %d", tt.input, got, tt.want)
 		}
+	}
+}
+
+func TestClampLimitRepairsInvalidConfiguredValues(t *testing.T) {
+	origDefault := DefaultLimit
+	origMax := MaxLimit
+	defer func() {
+		DefaultLimit = origDefault
+		MaxLimit = origMax
+	}()
+
+	DefaultLimit = -10
+	MaxLimit = 0
+	if got := clampLimit(0); got != defaultRetrievalLimit {
+		t.Fatalf("clampLimit with invalid globals = %d, want %d", got, defaultRetrievalLimit)
+	}
+
+	DefaultLimit = 500
+	MaxLimit = 100
+	if got := clampLimit(0); got != 100 {
+		t.Fatalf("clampLimit with default > max = %d, want 100", got)
+	}
+	if got := clampLimit(500); got != 100 {
+		t.Fatalf("clampLimit explicit over max = %d, want 100", got)
 	}
 }
 
@@ -415,9 +515,9 @@ func TestJournalEntryToLogEntry(t *testing.T) {
 			name: "agent entry",
 			raw: map[string]interface{}{
 				"__REALTIME_TIMESTAMP": "1708700000000000",
-				"MESSAGE":             "test",
-				"PRIORITY":            "6",
-				"_SYSTEMD_UNIT":       "vm-agent.service",
+				"MESSAGE":              "test",
+				"PRIORITY":             "6",
+				"_SYSTEMD_UNIT":        "vm-agent.service",
 			},
 			source: "agent",
 			want: &LogEntry{
@@ -430,9 +530,9 @@ func TestJournalEntryToLogEntry(t *testing.T) {
 			name: "docker entry",
 			raw: map[string]interface{}{
 				"__REALTIME_TIMESTAMP": "1708700000000000",
-				"MESSAGE":             "container log",
-				"PRIORITY":            "6",
-				"CONTAINER_NAME":      "ws-abc",
+				"MESSAGE":              "container log",
+				"PRIORITY":             "6",
+				"CONTAINER_NAME":       "ws-abc",
 			},
 			source: "docker",
 			want: &LogEntry{
@@ -445,8 +545,8 @@ func TestJournalEntryToLogEntry(t *testing.T) {
 			name: "empty message returns nil",
 			raw: map[string]interface{}{
 				"__REALTIME_TIMESTAMP": "1708700000000000",
-				"MESSAGE":             "",
-				"PRIORITY":            "6",
+				"MESSAGE":              "",
+				"PRIORITY":             "6",
 			},
 			source: "agent",
 			want:   nil,
@@ -534,6 +634,18 @@ func TestEnvInt(t *testing.T) {
 	got = envInt("TEST_ENV_INT_BAD", 42)
 	if got != 42 {
 		t.Errorf("envInt bad value = %d, want 42 (default)", got)
+	}
+
+	t.Setenv("TEST_ENV_INT_ZERO", "0")
+	got = envInt("TEST_ENV_INT_ZERO", 42)
+	if got != 42 {
+		t.Errorf("envInt zero value = %d, want 42 (default)", got)
+	}
+
+	t.Setenv("TEST_ENV_INT_NEGATIVE", "-5")
+	got = envInt("TEST_ENV_INT_NEGATIVE", 42)
+	if got != 42 {
+		t.Errorf("envInt negative value = %d, want 42 (default)", got)
 	}
 }
 

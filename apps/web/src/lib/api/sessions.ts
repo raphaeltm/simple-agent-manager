@@ -1,3 +1,5 @@
+import type { AgentProfileRuntime, TaskExecutionStep } from '@simple-agent-manager/shared';
+
 import { request } from './client';
 
 // =============================================================================
@@ -7,6 +9,8 @@ import { request } from './client';
 /** Task embed shape — populated in the detail response, added via enrichment for list items. */
 export interface ChatSessionTaskEmbed {
   id: string;
+  /** Canonical, user-safe saved placement diagnostics, including queued runs. */
+  placementExplanationJson?: string | null;
   status?: string;
   executionStep?: string | null;
   errorMessage?: string | null;
@@ -31,6 +35,15 @@ export interface ChatSessionListItem {
   id: string;
   workspaceId: string | null;
   taskId: string | null;
+  createdByUserId?: string | null;
+  createdBy?: {
+    id: string;
+    name: string | null;
+    email: string | null;
+    image: string | null;
+    avatarUrl: string | null;
+  } | null;
+  isMine?: boolean;
   topic: string | null;
   status: string;
   messageCount: number;
@@ -55,10 +68,12 @@ export interface ChatSessionListItem {
   agentType?: string | null;
   /** Durable attention marker summary from backend (null = no active marker). */
   attention?: {
+    markerId: string;
     kind: string;
     createdAt: number;
     expiresAt: number | null;
     reason: string | null;
+    options: string[];
   } | null;
 }
 
@@ -87,11 +102,13 @@ export interface ChatMessageResponse {
   toolMetadata: Record<string, unknown> | null;
   createdAt: number;
   sequence?: number | null;
+  /** "system" for SAM-injected messages the UI collapses; absent for normal messages. */
+  origin?: 'user' | 'system' | null;
 }
 
 /** Persisted session state snapshot from the DO (for catch-up on page load). */
 export interface SessionStateSnapshot {
-  activity: 'idle' | 'prompting' | 'error' | 'stopped';
+  activity: 'idle' | 'prompting' | 'recovering' | 'error' | 'stopped';
   activityAt: number;
   statusError: string | null;
   currentPlan: Array<{ content: string; status: string }> | null;
@@ -99,6 +116,17 @@ export interface SessionStateSnapshot {
   promptStartedAt: number | null;
   agentType: string | null;
   lastStopReason: string | null;
+  runtimeWorkState: 'inactive' | 'active' | 'settling' | null;
+  runtimeWorkCount: number | null;
+  runtimeWorkSource: string | null;
+  runtimeWorkUpdatedAt: number | null;
+  runtimeWorkProgressAt: number | null;
+  recoveryStatus?: 'waking' | 'restored' | 'failed' | null;
+  /**
+   * Execution step of the replacement TaskRunner waking this session. Drives
+   * phase-level wake progress; null when no wake is in flight.
+   */
+  wakePhase?: TaskExecutionStep | null;
 }
 
 export interface ChatSessionDetailResponse {
@@ -108,14 +136,26 @@ export interface ChatSessionDetailResponse {
   state?: SessionStateSnapshot | null;
 }
 
+export interface ChatSessionStateResponse {
+  state: SessionStateSnapshot | null;
+  agentSessionId: string | null;
+  agentType: string | null;
+}
+
+export interface ChatMessagesListResponse {
+  messages: ChatMessageResponse[];
+  hasMore: boolean;
+}
+
 export async function listChatSessions(
   projectId: string,
-  params: { status?: string; limit?: number; offset?: number } = {}
+  params: { status?: string; limit?: number; offset?: number; scope?: 'my' | 'all' } = {}
 ): Promise<ChatSessionListResponse> {
   const searchParams = new URLSearchParams();
   if (params.status) searchParams.set('status', params.status);
   if (params.limit !== undefined) searchParams.set('limit', String(params.limit));
   if (params.offset !== undefined) searchParams.set('offset', String(params.offset));
+  if (params.scope) searchParams.set('scope', params.scope);
 
   const qs = searchParams.toString();
   const endpoint = qs
@@ -162,7 +202,8 @@ export async function getRecentChats(
 ): Promise<RecentChatsApiResponse> {
   const searchParams = new URLSearchParams();
   if (params.limit !== undefined) searchParams.set('limit', String(params.limit));
-  if (params.staleThreshold !== undefined) searchParams.set('staleThreshold', String(params.staleThreshold));
+  if (params.staleThreshold !== undefined)
+    searchParams.set('staleThreshold', String(params.staleThreshold));
 
   const qs = searchParams.toString();
   return request<RecentChatsApiResponse>(qs ? `/api/chats/recent?${qs}` : '/api/chats/recent');
@@ -185,21 +226,69 @@ export async function getAllChats(
 // Per-Project Chat Session Detail
 // =============================================================================
 
+/** `before`/`after` are exact cursors from `lib/message-paging` (the rows at a page's edge). */
 export async function getChatSession(
   projectId: string,
   sessionId: string,
-  params: { limit?: number; before?: number; signal?: AbortSignal } = {}
+  params: { limit?: number; before?: string; after?: string; signal?: AbortSignal } = {}
 ): Promise<ChatSessionDetailResponse> {
   const searchParams = new URLSearchParams();
   if (params.limit !== undefined) searchParams.set('limit', String(params.limit));
-  if (params.before !== undefined) searchParams.set('before', String(params.before));
+  if (params.before !== undefined) searchParams.set('before', params.before);
+  if (params.after !== undefined) searchParams.set('after', params.after);
 
   const qs = searchParams.toString();
   const endpoint = qs
     ? `/api/projects/${projectId}/sessions/${sessionId}?${qs}`
     : `/api/projects/${projectId}/sessions/${sessionId}`;
 
-  return request<ChatSessionDetailResponse>(endpoint, params.signal ? { signal: params.signal } : {});
+  return request<ChatSessionDetailResponse>(
+    endpoint,
+    params.signal ? { signal: params.signal } : {}
+  );
+}
+
+export async function getChatSessionState(
+  projectId: string,
+  sessionId: string,
+  params: { signal?: AbortSignal } = {}
+): Promise<ChatSessionStateResponse> {
+  return request<ChatSessionStateResponse>(
+    `/api/projects/${projectId}/sessions/${sessionId}/state`,
+    params.signal ? { signal: params.signal } : {}
+  );
+}
+
+export async function listChatMessages(
+  projectId: string,
+  sessionId: string,
+  params: {
+    limit?: number;
+    before?: string;
+    after?: string;
+    roles?: string[];
+    compact?: boolean;
+    order?: 'asc' | 'desc';
+    signal?: AbortSignal;
+  } = {}
+): Promise<ChatMessagesListResponse> {
+  const searchParams = new URLSearchParams();
+  if (params.limit !== undefined) searchParams.set('limit', String(params.limit));
+  if (params.before !== undefined) searchParams.set('before', params.before);
+  if (params.after !== undefined) searchParams.set('after', params.after);
+  if (params.roles && params.roles.length > 0) searchParams.set('roles', params.roles.join(','));
+  if (params.compact !== undefined) searchParams.set('compact', String(params.compact));
+  if (params.order !== undefined) searchParams.set('order', params.order);
+
+  const qs = searchParams.toString();
+  const endpoint = qs
+    ? `/api/projects/${projectId}/sessions/${sessionId}/messages?${qs}`
+    : `/api/projects/${projectId}/sessions/${sessionId}/messages`;
+
+  return request<ChatMessagesListResponse>(
+    endpoint,
+    params.signal ? { signal: params.signal } : {}
+  );
 }
 
 /**
@@ -210,10 +299,16 @@ export async function getMessageToolContent(
   projectId: string,
   sessionId: string,
   messageId: string
-): Promise<{ content: unknown[] }> {
-  return request<{ content: unknown[] }>(
-    `/api/projects/${projectId}/sessions/${sessionId}/messages/${messageId}/tool-content`
-  );
+): Promise<{
+  content: unknown[];
+  source?: 'inline' | 'archive' | 'archived_unavailable';
+  archived?: { archivedAt: number; contentBytes: number; reason?: string };
+}> {
+  return request<{
+    content: unknown[];
+    source?: 'inline' | 'archive' | 'archived_unavailable';
+    archived?: { archivedAt: number; contentBytes: number; reason?: string };
+  }>(`/api/projects/${projectId}/sessions/${sessionId}/messages/${messageId}/tool-content`);
 }
 
 export async function createChatSession(
@@ -226,16 +321,85 @@ export async function createChatSession(
   });
 }
 
-export async function stopChatSession(
+export interface StartInstantChatSessionRequest {
+  message: string;
+  agentProfileId?: string;
+  skillId?: string;
+  parentTaskId?: string;
+  contextSummary?: string;
+}
+
+export interface StartInstantChatSessionResponse {
+  status: 'starting' | 'running';
+  taskId: string;
+  runtime: {
+    runtime: AgentProfileRuntime;
+    reason: string;
+  };
+  sessionId: string;
+  workspaceId: string;
+  nodeId: string;
+  agentSessionId?: string;
+  acpSessionId?: string;
+  workspaceUrl: string;
+  timings?: {
+    totalDurationMs: number;
+    preContainerDurationMs: number;
+    containerLaunchDurationMs: number;
+    /** @deprecated backward-compat alias for totalDurationMs; prefer totalDurationMs. */
+    setupDurationMs: number;
+    /** @deprecated backward-compat alias for containerLaunchDurationMs; prefer containerLaunchDurationMs. */
+    installDurationMs: number;
+    agentReadyDurationMs: number;
+    workspaceCreateDurationMs: number;
+    acpSessionCreateDurationMs: number;
+    acpSessionStartDurationMs: number;
+  };
+}
+
+export async function startInstantChatSession(
   projectId: string,
-  sessionId: string
-): Promise<{ status: string }> {
-  return request<{ status: string }>(`/api/projects/${projectId}/sessions/${sessionId}/stop`, {
+  data: StartInstantChatSessionRequest
+): Promise<StartInstantChatSessionResponse> {
+  return request<StartInstantChatSessionResponse>(`/api/projects/${projectId}/sessions/start`, {
     method: 'POST',
+    body: JSON.stringify(data),
   });
 }
 
+export async function stopChatSession(
+  projectId: string,
+  sessionId: string
+): Promise<{ status: string; workspaceDeleted?: boolean }> {
+  return request<{ status: string; workspaceDeleted?: boolean }>(
+    `/api/projects/${projectId}/sessions/${sessionId}/stop`,
+    {
+      method: 'POST',
+    }
+  );
+}
+
 // Context summarization (conversation forking)
+export interface ForkPreparationResponse {
+  parentTaskId: string;
+  parentSessionId: string;
+  parentBranch: string | null;
+  sessionLabel: string;
+  summary: string;
+  messageCount: number;
+  repaired: boolean;
+}
+
+export async function prepareForkSession(
+  projectId: string,
+  sessionId: string
+): Promise<ForkPreparationResponse> {
+  return request<ForkPreparationResponse>(
+    `/api/projects/${projectId}/sessions/${sessionId}/fork-prepare`,
+    { method: 'POST' }
+  );
+}
+
 export interface SessionSummaryResponse {
   summary: string;
   messageCount: number;
@@ -257,9 +421,12 @@ export async function resetIdleTimer(
   projectId: string,
   sessionId: string
 ): Promise<{ cleanupAt: number }> {
-  return request<{ cleanupAt: number }>(`/api/projects/${projectId}/sessions/${sessionId}/idle-reset`, {
-    method: 'POST',
-  });
+  return request<{ cleanupAt: number }>(
+    `/api/projects/${projectId}/sessions/${sessionId}/idle-reset`,
+    {
+      method: 'POST',
+    }
+  );
 }
 
 /** Send a follow-up prompt to the running agent via the REST API. */
@@ -275,6 +442,28 @@ export async function sendFollowUpPrompt(
       body: JSON.stringify({ content }),
     }
   );
+}
+
+export async function resolveAttentionAnswer(
+  projectId: string,
+  sessionId: string,
+  markerId: string,
+  answer: string
+): Promise<{
+  resolved: boolean;
+  alreadyResolved: boolean;
+  inFlight?: boolean;
+  answer: string;
+}> {
+  return request<{
+    resolved: boolean;
+    alreadyResolved: boolean;
+    inFlight?: boolean;
+    answer: string;
+  }>(`/api/projects/${projectId}/sessions/${sessionId}/attention/${markerId}/resolve`, {
+    method: 'POST',
+    body: JSON.stringify({ answer }),
+  });
 }
 
 /** Cancel the current in-flight prompt on the running agent session. */
@@ -311,10 +500,11 @@ export interface ActivityEventsListResponse {
 
 export async function listActivityEvents(
   projectId: string,
-  params?: { eventType?: string; before?: number; limit?: number }
+  params?: { eventType?: string; sessionId?: string; before?: number; limit?: number }
 ): Promise<ActivityEventsListResponse> {
   const searchParams = new URLSearchParams();
   if (params?.eventType) searchParams.set('eventType', params.eventType);
+  if (params?.sessionId) searchParams.set('sessionId', params.sessionId);
   if (params?.before) searchParams.set('before', String(params.before));
   if (params?.limit) searchParams.set('limit', String(params.limit));
 

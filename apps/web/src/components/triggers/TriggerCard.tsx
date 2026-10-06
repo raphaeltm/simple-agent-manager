@@ -1,45 +1,17 @@
 import type { TriggerResponse } from '@simple-agent-manager/shared';
-import { Card } from '@simple-agent-manager/ui';
-import {
-  AlertCircle,
-  Calendar,
-  Clock,
-  MoreVertical,
-  Pause,
-  Play,
-} from 'lucide-react';
-import type { FC } from 'react';
-import { useState } from 'react';
+import { Card, DropdownMenu, type DropdownMenuItem, StatusBadge } from '@simple-agent-manager/ui';
+import { Calendar, History, Play } from 'lucide-react';
+import { type FC, useMemo } from 'react';
 
 import { timeAgo } from '../../lib/time-utils';
-
-function formatNextRun(dateStr: string): string {
-  const date = new Date(dateStr);
-  const now = new Date();
-  const diffMs = date.getTime() - now.getTime();
-
-  if (diffMs < 0) return 'overdue';
-  const minutes = Math.floor(diffMs / 60_000);
-  if (minutes < 1) return 'less than a minute';
-  if (minutes < 60) return `in ${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `in ${hours}h`;
-  const days = Math.floor(hours / 24);
-  return `in ${days}d`;
-}
-
-const STATUS_CONFIG: Record<string, { color: string; label: string }> = {
-  active: { color: 'var(--sam-color-success)', label: 'Active' },
-  paused: { color: 'var(--sam-color-warning)', label: 'Paused' },
-  disabled: { color: 'var(--sam-color-fg-muted)', label: 'Disabled' },
-};
-
-const FOCUS_RING =
-  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
-
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
+import {
+  FOCUS_RING,
+  formatNextRun,
+  formatTriggerSource,
+  sourceIcon,
+  statusBadgeKey,
+} from './trigger-presentation';
+import { TriggerCredentialWarning } from './TriggerCredentialWarning';
 
 interface TriggerCardProps {
   trigger: TriggerResponse;
@@ -47,6 +19,7 @@ interface TriggerCardProps {
   onRunNow: (trigger: TriggerResponse) => void;
   onTogglePause: (trigger: TriggerResponse) => void;
   onViewHistory: (trigger: TriggerResponse) => void;
+  onDelete?: (trigger: TriggerResponse) => void;
 }
 
 export const TriggerCard: FC<TriggerCardProps> = ({
@@ -55,129 +28,140 @@ export const TriggerCard: FC<TriggerCardProps> = ({
   onRunNow,
   onTogglePause,
   onViewHistory,
+  onDelete,
 }) => {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const statusCfg = STATUS_CONFIG[trigger.status] ?? { color: 'var(--sam-color-fg-muted)', label: 'Disabled' };
-  const disabledClass = trigger.status === 'disabled' ? 'opacity-60' : '';
+  const isDisabled = trigger.status === 'disabled';
+  const isPaused = trigger.status === 'paused';
+  const canRunNow = trigger.sourceType !== 'incident';
+
+  // No item icons: every other DropdownMenu in the app (WorkspaceCard, NodeCard,
+  // ProjectSummaryCard) is icon-less, and a partially-iconed menu also misaligns
+  // its own labels.
+  const menuItems = useMemo<DropdownMenuItem[]>(() => {
+    const items: DropdownMenuItem[] = [
+      { id: 'edit', label: 'Edit', onClick: () => onEdit(trigger) },
+      {
+        id: 'pause',
+        label: isPaused ? 'Resume' : 'Pause',
+        onClick: () => onTogglePause(trigger),
+      },
+      {
+        id: 'history',
+        label: 'View history',
+        onClick: () => onViewHistory(trigger),
+      },
+    ];
+    if (onDelete) {
+      items.push({
+        id: 'delete',
+        label: 'Delete',
+        variant: 'danger',
+        onClick: () => onDelete(trigger),
+      });
+    }
+    return items;
+  }, [isPaused, onDelete, onEdit, onTogglePause, onViewHistory, trigger]);
 
   return (
-    <Card variant="glass" className={`p-4 hover:bg-surface-hover transition-colors duration-150 ${disabledClass}`}>
-      {/* Header row: name + status */}
+    <Card
+      variant="glass"
+      className={`p-4 transition-colors duration-150 hover:bg-surface-hover ${
+        isDisabled ? 'opacity-60' : ''
+      }`}
+    >
+      {/*
+        Title row. `min-w-0` on the text column is what lets the title wrap
+        instead of forcing the row wider than the card. The action cluster is
+        `shrink-0` so it can never be squeezed off the right edge — the exact
+        failure in the reported mobile screenshot.
+      */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span
-              className="inline-block w-2.5 h-2.5 rounded-full shrink-0"
-              style={{ backgroundColor: statusCfg.color }}
-              aria-label={`Status: ${statusCfg.label}`}
-            />
-            <h3 className="sam-type-card-title m-0 truncate">{trigger.name}</h3>
-          </div>
-          {trigger.description && (
-            <p className="sam-type-secondary text-fg-muted mt-1 mb-0 line-clamp-2">
-              {trigger.description}
-            </p>
-          )}
+          {/*
+            The name WRAPS (up to two lines) rather than using `truncate`. A
+            truncated name is unreadable on a 375px screen, and `truncate`'s
+            `white-space: nowrap` also made the heading's min-content width the
+            full untruncated string, which is what blew the whole page past the
+            viewport.
+          */}
+          <h3 className="sam-type-card-title m-0 line-clamp-2 break-words" title={trigger.name}>
+            {trigger.name}
+          </h3>
         </div>
 
-        {/* Actions menu */}
-        <div className="relative shrink-0">
-          <button
-            onClick={() => setMenuOpen(!menuOpen)}
-            onBlur={() => setTimeout(() => setMenuOpen(false), 200)}
-            className={`p-1.5 rounded-sm text-fg-muted hover:text-fg-primary hover:bg-surface-hover cursor-pointer bg-transparent border-none ${FOCUS_RING}`}
-            aria-label="Trigger actions"
-            aria-expanded={menuOpen}
-          >
-            <MoreVertical size={16} />
-          </button>
-          {menuOpen && (
-            <div className="absolute right-0 top-full mt-1 w-40 glass-surface rounded-md shadow-lg z-20 py-1">
-              <button
-                onClick={() => { setMenuOpen(false); onEdit(trigger); }}
-                className="w-full text-left px-3 py-2 text-sm text-fg-primary hover:bg-surface-hover cursor-pointer bg-transparent border-none"
-              >
-                Edit
-              </button>
-              <button
-                onClick={() => { setMenuOpen(false); onRunNow(trigger); }}
-                className="w-full text-left px-3 py-2 text-sm text-fg-primary hover:bg-surface-hover cursor-pointer bg-transparent border-none"
-                disabled={trigger.status === 'disabled'}
-              >
-                Run Now
-              </button>
-              <button
-                onClick={() => { setMenuOpen(false); onTogglePause(trigger); }}
-                className="w-full text-left px-3 py-2 text-sm text-fg-primary hover:bg-surface-hover cursor-pointer bg-transparent border-none"
-              >
-                {trigger.status === 'paused' ? 'Resume' : 'Pause'}
-              </button>
-              <button
-                onClick={() => { setMenuOpen(false); onViewHistory(trigger); }}
-                className="w-full text-left px-3 py-2 text-sm text-fg-primary hover:bg-surface-hover cursor-pointer bg-transparent border-none"
-              >
-                View History
-              </button>
-            </div>
+        <div className="flex shrink-0 items-center gap-1">
+          {/*
+            The label is hidden only where space is genuinely scarce. Running a
+            trigger is this page's core action, and the desktop layout has room —
+            dropping the label everywhere would make it less discoverable than
+            the button it replaced, and inconsistent with the identical action on
+            the detail page (ProjectTriggerDetail.tsx).
+          */}
+          {canRunNow && (
+            <button
+              type="button"
+              onClick={() => onRunNow(trigger)}
+              disabled={isDisabled}
+              title={isDisabled ? 'Trigger is disabled' : 'Run now'}
+              aria-label={`Run "${trigger.name}" now`}
+              className={`inline-flex h-8 items-center justify-center gap-1.5 rounded-sm border border-border-default bg-transparent px-2 text-xs font-medium text-fg-muted hover:bg-surface-hover hover:text-fg-primary cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS_RING}`}
+            >
+              <Play size={14} aria-hidden="true" />
+              <span className="hidden sm:inline">Run now</span>
+            </button>
           )}
+          <DropdownMenu items={menuItems} aria-label={`Actions for "${trigger.name}"`} />
         </div>
       </div>
 
-      {/* Schedule info */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mt-3 text-sm text-fg-muted">
-        <span className="flex items-center gap-1.5">
-          <Clock size={14} aria-hidden="true" />
-          <span className="truncate max-w-[200px]">
-            {trigger.cronHumanReadable ?? trigger.cronExpression ?? 'No schedule'}
-          </span>
+      {/*
+        Status + what makes it fire, on their OWN full-width row. Keeping this
+        inside the title column starved it of space and truncated the schedule
+        to "At 7:00 AM on …" — the single most important fact about a cron
+        trigger — while the row below sat empty.
+      */}
+      <div className="mt-2 flex items-center gap-2">
+        <span className="shrink-0">
+          <StatusBadge status={statusBadgeKey(trigger.status)} pulse={false} />
         </span>
-        {trigger.nextFireAt && (
-          <span className="flex items-center gap-1.5">
-            <Calendar size={14} aria-hidden="true" />
-            Next: {formatNextRun(trigger.nextFireAt)}
-          </span>
-        )}
-        {trigger.lastTriggeredAt && (
-          <span className="flex items-center gap-1.5">
-            Last: {timeAgo(trigger.lastTriggeredAt)}
-          </span>
-        )}
+        <span className="inline-flex min-w-0 items-center gap-1.5 text-sm text-fg-muted">
+          <span className="shrink-0">{sourceIcon(trigger)}</span>
+          <span className="truncate">{formatTriggerSource(trigger)}</span>
+        </span>
       </div>
 
-      {/* Paused warning */}
-      {trigger.status === 'paused' && (
-        <div className="flex items-center gap-2 mt-3 px-3 py-2 rounded-md bg-warning/10 text-warning text-sm">
-          <AlertCircle size={14} aria-hidden="true" />
-          <span>Paused — may be due to consecutive failures</span>
+      {trigger.description && (
+        // `break-words`: a long unbreakable token (a URL in a description) is
+        // wider than the card, and `line-clamp`'s `overflow: hidden` shears it
+        // off with no ellipsis and no way to scroll to it.
+        <p className="sam-type-secondary text-fg-muted mt-2 mb-0 line-clamp-2 break-words">
+          {trigger.description}
+        </p>
+      )}
+
+      {(trigger.nextFireAt || trigger.lastTriggeredAt) && (
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-fg-muted">
+          {trigger.sourceType === 'cron' && trigger.nextFireAt && !isPaused && !isDisabled && (
+            <span className="inline-flex items-center gap-1.5">
+              <Calendar size={12} aria-hidden="true" />
+              Next {formatNextRun(trigger.nextFireAt)}
+            </span>
+          )}
+          {trigger.lastTriggeredAt && (
+            <span className="inline-flex items-center gap-1.5">
+              <History size={12} aria-hidden="true" />
+              Last run {timeAgo(trigger.lastTriggeredAt)}
+            </span>
+          )}
         </div>
       )}
 
-      {/* Quick actions row */}
-      <div className="flex items-center gap-2 mt-3 pt-3 border-t border-border-default">
-        <button
-          onClick={() => onRunNow(trigger)}
-          disabled={trigger.status === 'disabled'}
-          className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-transparent border border-border-default text-fg-primary hover:bg-surface-hover cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${FOCUS_RING}`}
-          aria-label="Run trigger now"
-        >
-          <Play size={12} aria-hidden="true" />
-          Run Now
-        </button>
-        <button
-          onClick={() => onTogglePause(trigger)}
-          className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-transparent border border-border-default text-fg-primary hover:bg-surface-hover cursor-pointer ${FOCUS_RING}`}
-          aria-label={trigger.status === 'paused' ? 'Resume trigger' : 'Pause trigger'}
-        >
-          <Pause size={12} aria-hidden="true" />
-          {trigger.status === 'paused' ? 'Resume' : 'Pause'}
-        </button>
-        <button
-          onClick={() => onViewHistory(trigger)}
-          className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-transparent border border-border-default text-fg-muted hover:text-fg-primary hover:bg-surface-hover cursor-pointer ml-auto ${FOCUS_RING}`}
-        >
-          View History
-        </button>
-      </div>
+      {trigger.credentialAttribution?.multiplayerActive &&
+        trigger.credentialAttribution.hasPersonalWarning && (
+          <div className="mt-3">
+            <TriggerCredentialWarning trigger={trigger} />
+          </div>
+        )}
     </Card>
   );
 };

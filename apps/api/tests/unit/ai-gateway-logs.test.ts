@@ -4,18 +4,22 @@
  * Tests period parsing, period bounds, aggregation functions,
  * and pagination resolution — all pure logic, no bindings needed.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
+import { log } from '../../src/lib/logger';
 import {
   aggregateByDay,
   aggregateByModel,
+  aggregateByProvider,
   type AIGatewayLogEntry,
   getGatewayPeriodBounds,
   getPeriodLabel,
+  iterateGatewayLogs,
   parseGatewayPeriod,
   resolveGatewayPagination,
   type UsageByDay,
   type UsageByModel,
+  type UsageByProvider,
 } from '../../src/services/ai-gateway-logs';
 
 // ---------------------------------------------------------------------------
@@ -138,10 +142,36 @@ describe('resolveGatewayPagination', () => {
     expect(maxPages).toBe(10);
   });
 
+  it('clamps page size to the Cloudflare API bounds', () => {
+    expect(resolveGatewayPagination({ AI_USAGE_PAGE_SIZE: '500' } as never).pageSize)
+      .toBe(50);
+    expect(resolveGatewayPagination({ AI_USAGE_PAGE_SIZE: '0' } as never).pageSize)
+      .toBe(50);
+    expect(resolveGatewayPagination({ AI_USAGE_PAGE_SIZE: '-5' } as never).pageSize)
+      .toBe(50);
+  });
+
+  it('floors fractional page size overrides', () => {
+    const { pageSize } = resolveGatewayPagination({ AI_USAGE_PAGE_SIZE: '12.9' } as never);
+    expect(pageSize).toBe(12);
+  });
+
   it('caps maxPages at 20', () => {
     const env = { AI_USAGE_MAX_PAGES: '100' };
     const { maxPages } = resolveGatewayPagination(env as never);
     expect(maxPages).toBe(20);
+  });
+
+  it('falls back for invalid max page overrides', () => {
+    for (const invalid of ['0', '-1', 'abc']) {
+      const { maxPages } = resolveGatewayPagination({ AI_USAGE_MAX_PAGES: invalid } as never);
+      expect(maxPages).toBe(20);
+    }
+  });
+
+  it('floors fractional max page overrides', () => {
+    const { maxPages } = resolveGatewayPagination({ AI_USAGE_MAX_PAGES: '4.8' } as never);
+    expect(maxPages).toBe(4);
   });
 
   it('supports a separate hard cap for scheduled aggregation', () => {
@@ -162,6 +192,118 @@ describe('resolveGatewayPagination', () => {
       maxPagesEnvValue: env.AI_MONTHLY_COST_AGGREGATION_MAX_PAGES,
     });
     expect(maxPages).toBe(500);
+  });
+
+  it('falls back for invalid scheduled aggregation max pages', () => {
+    const env = { AI_MONTHLY_COST_AGGREGATION_MAX_PAGES: '-10' };
+    const { maxPages } = resolveGatewayPagination(env as never, {
+      defaultMaxPages: 200,
+      maxPagesHardCap: 500,
+      maxPagesEnvValue: env.AI_MONTHLY_COST_AGGREGATION_MAX_PAGES,
+    });
+    expect(maxPages).toBe(200);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// iterateGatewayLogs
+// ---------------------------------------------------------------------------
+
+describe('iterateGatewayLogs', () => {
+  it('accepts Cloudflare responses with omitted errors, no total_pages, and non-string metadata', async () => {
+    const env = {
+      CF_ACCOUNT_ID: 'account-1',
+      CF_API_TOKEN: 'token-1',
+      AI_USAGE_PAGE_SIZE: '3',
+    } as never;
+    const entries = [
+      makeEntry({ id: 'log-1', metadata: { userId: 'user-1', messageCount: 3 } as never }),
+      makeEntry({ id: 'log-2', metadata: { userId: 'user-2', hasTools: false } as never }),
+    ];
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({
+      result: entries,
+      result_info: { page: 1, per_page: 3, count: 2, total_count: 2 },
+      success: true,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const visited: AIGatewayLogEntry[] = [];
+    await iterateGatewayLogs(
+      env,
+      'gateway-1',
+      '2026-05-01T00:00:00.000Z',
+      (entry) => visited.push(entry),
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(visited.map((entry) => entry.id)).toEqual(['log-1', 'log-2']);
+    expect(visited[0]?.metadata).toEqual({ userId: 'user-1', messageCount: '3' });
+    expect(visited[1]?.metadata).toEqual({ userId: 'user-2', hasTools: 'false' });
+  });
+
+  it('derives total_pages from total_count when Cloudflare omits it', async () => {
+    const env = {
+      CF_ACCOUNT_ID: 'account-1',
+      CF_API_TOKEN: 'token-1',
+      AI_USAGE_PAGE_SIZE: '2',
+    } as never;
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = new URL(input.toString());
+      const page = Number(url.searchParams.get('page') ?? '1');
+      const entries = page === 1
+        ? [makeEntry({ id: 'log-1' }), makeEntry({ id: 'log-2' })]
+        : [makeEntry({ id: 'log-3' })];
+
+      return Promise.resolve(new Response(JSON.stringify({
+        result: entries,
+        result_info: { page, per_page: 2, count: entries.length, total_count: 3 },
+        success: true,
+        errors: null,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const visited: AIGatewayLogEntry[] = [];
+    await iterateGatewayLogs(
+      env,
+      'gateway-1',
+      '2026-05-01T00:00:00.000Z',
+      (entry) => visited.push(entry),
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(visited.map((entry) => entry.id)).toEqual(['log-1', 'log-2', 'log-3']);
+  });
+
+  it('warns when pagination reaches maxPages while more pages exist', async () => {
+    const env = {
+      CF_ACCOUNT_ID: 'account-1',
+      CF_API_TOKEN: 'token-1',
+      AI_USAGE_PAGE_SIZE: '1',
+    } as never;
+    const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => undefined);
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({
+      result: [makeEntry()],
+      result_info: { page: 1, per_page: 1, count: 1, total_count: 3, total_pages: 3 },
+      success: true,
+      errors: [],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await iterateGatewayLogs(env, 'gateway-1', '2026-05-01T00:00:00.000Z', () => undefined, {
+      defaultMaxPages: 2,
+      maxPagesHardCap: 2,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(warnSpy).toHaveBeenCalledWith('ai_gateway.logs_pagination_truncated', {
+      maxPages: 2,
+      totalPages: 3,
+      pageSize: 1,
+      startDate: '2026-05-01T00:00:00.000Z',
+    });
+    warnSpy.mockRestore();
   });
 });
 
@@ -220,6 +362,74 @@ describe('aggregateByModel', () => {
     expect(entry.outputTokens).toBe(0);
     expect(entry.totalTokens).toBe(0);
     expect(entry.costUsd).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// aggregateByProvider
+// ---------------------------------------------------------------------------
+
+describe('aggregateByProvider', () => {
+  it('uses explicit provider metadata when present', () => {
+    const map = new Map<string, UsageByProvider>();
+    aggregateByProvider(map, makeEntry({
+      provider: 'openai',
+      metadata: {
+        userId: 'user-1',
+        providerId: 'groq',
+        providerName: 'Groq',
+        providerDialect: 'openai-compatible',
+      },
+    }));
+
+    const entry = map.get('groq:openai-compatible')!;
+    expect(entry).toMatchObject({
+      providerId: 'groq',
+      providerName: 'Groq',
+      dialect: 'openai-compatible',
+      requests: 1,
+      inputTokens: 100,
+      outputTokens: 50,
+      totalTokens: 150,
+      costUsd: 0.01,
+      costSource: 'gateway',
+    });
+  });
+
+  it('accumulates multiple models for the same provider and dialect', () => {
+    const map = new Map<string, UsageByProvider>();
+    aggregateByProvider(map, makeEntry({
+      model: 'model-a',
+      cost: 0.02,
+      metadata: { userId: 'user-1', providerId: 'openai', providerName: 'OpenAI', providerDialect: 'openai-compatible' },
+    }));
+    aggregateByProvider(map, makeEntry({
+      model: 'model-b',
+      tokens_in: 200,
+      tokens_out: 75,
+      cost: 0.03,
+      cached: true,
+      success: false,
+      metadata: { userId: 'user-1', providerId: 'openai', providerName: 'OpenAI', providerDialect: 'openai-compatible' },
+    }));
+
+    const entry = map.get('openai:openai-compatible')!;
+    expect(entry.requests).toBe(2);
+    expect(entry.inputTokens).toBe(300);
+    expect(entry.outputTokens).toBe(125);
+    expect(entry.totalTokens).toBe(425);
+    expect(entry.costUsd).toBeCloseTo(0.05);
+    expect(entry.cachedRequests).toBe(1);
+    expect(entry.errorRequests).toBe(1);
+  });
+
+  it('falls back to the Gateway provider field when metadata is absent', () => {
+    const map = new Map<string, UsageByProvider>();
+    aggregateByProvider(map, makeEntry({ provider: 'workers-ai', metadata: null }));
+
+    const entry = map.get('workers-ai:unknown')!;
+    expect(entry.providerName).toBe('Workers Ai');
+    expect(entry.dialect).toBe('unknown');
   });
 });
 

@@ -1,0 +1,251 @@
+import {
+  DEFAULT_CRON_MIN_INTERVAL_MINUTES,
+  DEFAULT_CRON_TEMPLATE_MAX_LENGTH,
+  DEFAULT_TRIGGER_DEFAULT_MAX_CONCURRENT,
+  DEFAULT_TRIGGER_NAME_MAX_LENGTH,
+} from '@simple-agent-manager/shared';
+
+import type { Env } from '../../env';
+import { log } from '../../lib/logger';
+import { parsePositiveInt } from '../../lib/route-helpers';
+import { ulid } from '../../lib/ulid';
+import {
+  cronToHumanReadable,
+  cronToNextFire,
+  validateCronExpression,
+} from '../../services/cron-utils';
+import {
+  ResourceRequirementsValidationError,
+  serializeModernResourceRequirementsInput,
+  serializeResourceRequirementsInput,
+} from '../../services/resource-requirements-input';
+import {
+  loadProjectMaxTriggersOverride,
+  resolveMaxTriggersPerProject,
+} from '../../services/trigger-limits';
+import {
+  INVALID_PARAMS,
+  jsonRpcError,
+  type JsonRpcResponse,
+  jsonRpcSuccess,
+  type McpTokenData,
+  sanitizeUserInput,
+} from './_helpers';
+
+export async function handleCreateTrigger(
+  requestId: string | number | null,
+  params: Record<string, unknown>,
+  tokenData: McpTokenData,
+  env: Env
+): Promise<JsonRpcResponse> {
+  const maxNameLength = parsePositiveInt(
+    env.TRIGGER_NAME_MAX_LENGTH,
+    DEFAULT_TRIGGER_NAME_MAX_LENGTH
+  );
+  const name =
+    typeof params.name === 'string'
+      ? sanitizeUserInput(params.name.trim()).slice(0, maxNameLength)
+      : '';
+  if (!name) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'name is required and must be a non-empty string'
+    );
+  }
+
+  const cronExpression =
+    typeof params.cronExpression === 'string' ? params.cronExpression.trim() : '';
+  if (!cronExpression) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'cronExpression is required');
+  }
+
+  const promptTemplate =
+    typeof params.promptTemplate === 'string' ? params.promptTemplate.trim() : '';
+  if (!promptTemplate) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'promptTemplate is required and must be non-empty'
+    );
+  }
+
+  const maxTemplateLength = parsePositiveInt(
+    env.CRON_TEMPLATE_MAX_LENGTH,
+    DEFAULT_CRON_TEMPLATE_MAX_LENGTH
+  );
+  if (promptTemplate.length > maxTemplateLength) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      `promptTemplate must be ${maxTemplateLength} characters or less`
+    );
+  }
+
+  const minInterval = parsePositiveInt(
+    env.CRON_MIN_INTERVAL_MINUTES,
+    DEFAULT_CRON_MIN_INTERVAL_MINUTES
+  );
+  const cronValidation = validateCronExpression(cronExpression, minInterval);
+  if (!cronValidation.valid) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      `Invalid cron expression: ${cronValidation.error}`
+    );
+  }
+
+  const cronTimezone = typeof params.cronTimezone === 'string' ? params.cronTimezone.trim() : 'UTC';
+  try {
+    Intl.DateTimeFormat('en-US', { timeZone: cronTimezone });
+  } catch {
+    return jsonRpcError(requestId, INVALID_PARAMS, `Invalid timezone: ${cronTimezone}`);
+  }
+
+  const agentProfileId =
+    typeof params.agentProfileId === 'string' ? params.agentProfileId.trim() : null;
+  if (
+    params.taskMode !== undefined &&
+    params.taskMode !== 'task' &&
+    params.taskMode !== 'conversation'
+  ) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'taskMode must be "task" or "conversation"');
+  }
+  const taskMode = params.taskMode === 'conversation' ? 'conversation' : 'task';
+  if (
+    params.vmSizeOverride !== undefined &&
+    (typeof params.vmSizeOverride !== 'string' ||
+      !['small', 'medium', 'large'].includes(params.vmSizeOverride))
+  ) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'vmSizeOverride must be "small", "medium", or "large"'
+    );
+  }
+  const vmSizeOverride = typeof params.vmSizeOverride === 'string' ? params.vmSizeOverride : null;
+  let resourceRequirementsJson: string | null = null;
+  try {
+    if (params.resourceRequirements !== undefined) {
+      resourceRequirementsJson = serializeModernResourceRequirementsInput(
+        params.resourceRequirements
+      );
+    } else if (params.resourceRequirementsJson !== undefined) {
+      resourceRequirementsJson = serializeResourceRequirementsInput(
+        params.resourceRequirementsJson,
+        'resourceRequirementsJson'
+      );
+    }
+  } catch (err) {
+    if (err instanceof ResourceRequirementsValidationError) {
+      return jsonRpcError(requestId, INVALID_PARAMS, err.message);
+    }
+    throw err;
+  }
+
+  if (agentProfileId) {
+    const profileResult = await env.DATABASE.prepare(
+      'SELECT id FROM agent_profiles WHERE id = ? AND project_id = ? LIMIT 1'
+    )
+      .bind(agentProfileId, tokenData.projectId)
+      .first<{ id: string }>();
+    if (!profileResult) {
+      return jsonRpcError(requestId, INVALID_PARAMS, 'agentProfileId not found in this project');
+    }
+  }
+
+  const existingResult = await env.DATABASE.prepare(
+    'SELECT id FROM triggers WHERE project_id = ? AND name = ? LIMIT 1'
+  )
+    .bind(tokenData.projectId, name)
+    .first<{ id: string }>();
+  if (existingResult) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      `Trigger "${name}" already exists in this project`
+    );
+  }
+
+  const projectMaxTriggers = await loadProjectMaxTriggersOverride(
+    env.DATABASE,
+    tokenData.projectId
+  );
+  const maxTriggers = resolveMaxTriggersPerProject(
+    projectMaxTriggers,
+    env.MAX_TRIGGERS_PER_PROJECT
+  );
+  const countResult = await env.DATABASE.prepare(
+    'SELECT COUNT(*) as cnt FROM triggers WHERE project_id = ?'
+  )
+    .bind(tokenData.projectId)
+    .first<{ cnt: number }>();
+  if ((countResult?.cnt ?? 0) >= maxTriggers) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      `Maximum triggers per project (${maxTriggers}) reached`
+    );
+  }
+
+  const triggerId = ulid();
+  const now = new Date().toISOString();
+  const nextFireAt = cronToNextFire(cronExpression, cronTimezone);
+  const humanReadable = cronToHumanReadable(cronExpression, cronTimezone);
+
+  await env.DATABASE.prepare(
+    `INSERT INTO triggers (
+      id, project_id, user_id, name, description, status, source_type,
+      cron_expression, cron_timezone, skip_if_running, prompt_template,
+      agent_profile_id, task_mode, vm_size_override, resource_requirements_json, max_concurrent,
+      next_fire_at, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, NULL, 'active', 'cron', ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  )
+    .bind(
+      triggerId,
+      tokenData.projectId,
+      tokenData.userId,
+      name,
+      cronExpression,
+      cronTimezone,
+      promptTemplate,
+      agentProfileId,
+      taskMode,
+      vmSizeOverride,
+      resourceRequirementsJson,
+      DEFAULT_TRIGGER_DEFAULT_MAX_CONCURRENT,
+      nextFireAt,
+      now,
+      now
+    )
+    .run();
+
+  log.info('mcp.create_trigger', {
+    triggerId,
+    projectId: tokenData.projectId,
+    userId: tokenData.userId,
+    cronExpression,
+    cronTimezone,
+  });
+
+  return jsonRpcSuccess(requestId, {
+    content: [
+      {
+        type: 'text',
+        text: JSON.stringify({
+          triggerId,
+          name,
+          status: 'active',
+          cronExpression,
+          cronTimezone,
+          cronHumanReadable: humanReadable,
+          nextFireAt,
+          promptTemplate,
+          taskMode,
+          vmSizeOverride,
+          resourceRequirementsJson,
+        }),
+      },
+    ],
+  });
+}

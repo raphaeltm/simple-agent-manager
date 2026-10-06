@@ -1,12 +1,8 @@
-import {
-  DEFAULT_AI_PROXY_DAILY_INPUT_TOKEN_LIMIT,
-  DEFAULT_AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT,
-} from '@simple-agent-manager/shared';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import type { Env } from '../env';
 import { getCredentialEncryptionKey } from '../lib/secrets';
-import { getTokenUsage } from './ai-token-budget';
+import { getTokenUsage, resolvePlatformDailyTokenLimits } from './ai-token-budget';
 import { getPlatformCloudCredential } from './platform-credentials';
 
 export interface TrialStatus {
@@ -30,26 +26,22 @@ export interface PlatformOpencodeAvailability {
  */
 export async function getPlatformOpencodeAvailability(
   db: ReturnType<typeof drizzle>,
-  env: Env,
+  env: Env
 ): Promise<PlatformOpencodeAvailability> {
   const aiProxyEnabled = (env.AI_PROXY_ENABLED ?? 'true') !== 'false';
 
-  // Check for platform cloud credential. Decryption can fail with a DOMException
-  // (OperationError) if the encryption key is mismatched between environments.
-  // Let config errors (missing key) propagate — outer handler returns available: false.
-  let hasInfraCredential = false;
+  // This is a user-facing capability signal, so credential decryption failures
+  // fail closed instead of advertising platform infrastructure as available.
   const encryptionKey = getCredentialEncryptionKey(env);
+  let hasInfraCredential = false;
   try {
     const platformCloud = await getPlatformCloudCredential(db, encryptionKey);
     hasInfraCredential = platformCloud !== null;
   } catch (err) {
     if (err instanceof DOMException && err.name === 'OperationError') {
-      // Decryption failure — credential row exists but can't be decrypted.
-      // Still counts as "infra available" since provisioning uses a different
-      // code path that handles its own decryption.
-      hasInfraCredential = true;
+      hasInfraCredential = false;
     } else {
-      throw err; // D1 failures, network errors — propagate to outer handler
+      throw err;
     }
   }
 
@@ -69,7 +61,7 @@ export async function getPlatformOpencodeAvailability(
 export async function getTrialStatus(
   db: ReturnType<typeof drizzle>,
   userId: string,
-  env: Env,
+  env: Env
 ): Promise<TrialStatus> {
   const availability = await getPlatformOpencodeAvailability(db, env);
 
@@ -87,8 +79,8 @@ export async function getTrialStatus(
   // Fetch current daily usage
   const usage = await getTokenUsage(env.KV, userId, env);
 
-  const inputLimit = parseInt(env.AI_PROXY_DAILY_INPUT_TOKEN_LIMIT ?? '', 10) || DEFAULT_AI_PROXY_DAILY_INPUT_TOKEN_LIMIT;
-  const outputLimit = parseInt(env.AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT ?? '', 10) || DEFAULT_AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT;
+  const { dailyInputTokenLimit: inputLimit, dailyOutputTokenLimit: outputLimit } =
+    resolvePlatformDailyTokenLimits(env);
 
   return {
     available: true,

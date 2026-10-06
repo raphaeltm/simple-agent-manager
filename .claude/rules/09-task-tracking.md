@@ -23,24 +23,24 @@ When writing a task file's research/findings section, every finding that identif
 1. **A checklist item** in the Implementation Checklist section that addresses it
 2. **An explicit deferral** with a backlog task reference (e.g., "Deferred to `tasks/backlog/2026-03-14-fix-xyz.md`")
 
-Findings that exist only in the Research section without a corresponding checklist item or deferral **will be forgotten during implementation**. This is not a theoretical risk — it has caused production bugs. See `docs/notes/2026-03-14-scaleway-node-creation-failure-postmortem.md`.
+Findings that exist only in the Research section without a corresponding checklist item or deferral **will be forgotten during implementation**. This is not a theoretical risk — it has caused production bugs. See the retained incident lesson in this rule.
 
 ## Task Completion Validation (Mandatory Before Archive)
 
 Before moving ANY task from `tasks/active/` to `tasks/archive/`, you MUST run the `task-completion-validator` agent (`.claude/agents/task-completion-validator/`). This agent performs six cross-reference checks:
 
-| Check | What it catches |
-|-------|----------------|
-| **A: Research → Checklist** | Research findings that never became checklist items |
-| **B: Checklist → Diff** | Checklist items checked off but not actually in the code changes |
-| **C: Criteria → Tests** | Acceptance criteria with no test or manual verification |
-| **D: UI → Backend** | UI form fields that collect input but never send it to the API |
-| **E: Multi-Resource** | Selection functions that pick from a set without a discriminator |
-| **F: Vertical Slice** | Cross-boundary features tested only in isolation with empty mocks instead of vertical slice tests with realistic state (see `35-vertical-slice-testing.md`) |
+| Check                       | What it catches                                                                                                                                             |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **A: Research → Checklist** | Research findings that never became checklist items                                                                                                         |
+| **B: Checklist → Diff**     | Checklist items checked off but not actually in the code changes                                                                                            |
+| **C: Criteria → Tests**     | Acceptance criteria with no test or manual verification                                                                                                     |
+| **D: UI → Backend**         | UI form fields that collect input but never send it to the API                                                                                              |
+| **E: Multi-Resource**       | Selection functions that pick from a set without a discriminator                                                                                            |
+| **F: Vertical Slice**       | Cross-boundary features tested only in isolation with empty mocks instead of vertical slice tests with realistic state (see `35-vertical-slice-testing.md`) |
 
 ### Validation Rules
 
-- **CRITICAL/HIGH findings block merge.** Fix them in the branch before merging. Filing a backlog task is NOT an acceptable alternative — the validator exists to catch gaps *before* they ship, not to generate follow-up work. The only exception is explicit human approval to defer a specific finding.
+- **CRITICAL/HIGH findings block merge.** Fix them in the branch before merging. Filing a backlog task is NOT an acceptable alternative — the validator exists to catch gaps _before_ they ship, not to generate follow-up work. The only exception is explicit human approval to defer a specific finding.
 - **A validator FAIL means the task is not complete.** Return to implementation. Do NOT proceed to PR creation or merge.
 - **Do NOT rationalize gaps.** "It works when I test it manually" is not an answer to "no test covers this acceptance criterion." Either add the test or document the manual verification with evidence.
 - **"Fix or defer" is not a real choice.** If you have time to write a backlog task file, you have time to write the test or fix the gap. The backlog escape hatch has been abused in every case where it was used (PR #568, PR #570) — the follow-up tasks add friction and delay but deliver the same work that should have been done in the original PR.
@@ -54,6 +54,7 @@ Before moving ANY task from `tasks/active/` to `tasks/archive/`, you MUST run th
 ## Acceptance Criteria Must Be Testable
 
 When writing acceptance criteria, each criterion must be verifiable by at least one of:
+
 - An automated test (unit, integration, or E2E)
 - A documented manual verification with evidence (screenshot, API response, log output)
 
@@ -62,6 +63,12 @@ Criteria like "User with both providers can select which provider to use" requir
 ## Dispatching Tasks to Other Agents
 
 When dispatching a task to another agent (via `dispatch_task` or any other mechanism), the task description MUST instruct the receiving agent to execute the work using the `/do` skill. The `/do` skill is the standard end-to-end workflow for implementing tasks — it handles research, planning, implementation, review, staging verification, and PR creation.
+
+### Read-Only Requests Are Not Implementation Tasks
+
+PR status, PR history, task status, and diagnostic/investigation questions are read-only by default. Answer them in the current session using SAM MCP tools, GitHub/`gh`, logs, and local repo evidence.
+
+Do not create a task file, branch, commit, or PR for a read-only status/history request unless the user explicitly asks for code changes, config changes, a durable artifact, or a delegated task. Repeated recent failures came from treating simple status/history questions as full SAM task executions, which created branches and failed sessions without improving the answer.
 
 ### How to Write Dispatch Descriptions
 
@@ -73,7 +80,19 @@ Fix the race condition in workspace cleanup.
 Execute this task using the /do skill.
 ```
 
+Do **not** start the dispatched task description with `/do` or any other slash command. Slash-command syntax is not portable across agent runtimes: Codex treats a leading `/do` as a Codex CLI command, rejects the first prompt turn as an unknown command, and may never process SAM-injected bootstrap instructions such as `get_instructions`. Always write the task in normal prose and include the `/do` requirement as a sentence, preferably exactly: `Execute this task using the /do skill.`
+
 The receiving agent will then follow the full `/do` workflow: research, task file creation, worktree setup, implementation, quality checks, specialist review, staging deployment, and PR merge.
+
+### Right-Size Dispatched Workspaces
+
+Oversized dispatches are not free. The Hetzner account has 10 servers shared by production and staging, and a dedicated large node recreates the one-node-per-agent problem the scheduler work exists to remove. Placement also subtracts the 512 MB host reserve before matching an offering, so a request of exactly 8 GB excludes every 8 GB machine and lands on 16 GB, and a request of exactly 4 GB lands on 8 GB. Observed 2026-09-13: a 4 vCPU / 8 GB `resourceRequirements` request placed a branch-reconciliation task on a dedicated cx43 (8 vCPU / 16 GB).
+
+1. **Prefer omitting `resourceRequirements` and `vmSize`.** The profile, skill, or project default applies and the pool can pack the task onto an existing node.
+2. **Look for prior signals before setting anything.** Read the previous attempt's task file or handoff notes, look for recorded OOM kills or "serialize heavy validation" remarks, check what comparable tasks ran on (`nodes.provider_instance_memory_mb` for their workspaces), and check the profile defaults.
+3. **If no signal exists, estimate, cite the source in the dispatch description, and cap the request at 2 vCPU and a 4 GB machine.** In `resourceRequirements` terms that is `minVcpu: 2` and `minMemoryGb` at most `3.5`, because of the host reserve.
+4. **Exceed the cap only for an out-of-memory failure actually observed at that size for this kind of work**, and say so in the dispatch. "The test suite is big" is a guess, not an observation.
+5. **Never combine `resourceRequirements` with `runtime: "cf-container"`**; the dispatch is rejected.
 
 ### Verify Dispatch Succeeded
 
@@ -83,10 +102,53 @@ Verification must confirm all of:
 
 - The task/session actually started and is not failed, stuck queued, or missing
 - The created task title/summary matches the intended work, not a generic or hallucinated title
-- The receiving session is using the requested agent/profile/skill, especially `/do` for implementation work
-- The task description still contains the critical constraints you intended to pass along, such as "do not merge", "draft PR", required branch, or required profile
+- The receiving session is using the requested agent/profile/skill and task mode when those are observable, especially `/do` for implementation work
+- The `/do` instruction survived as prose and the task description does not begin with `/do` or any other slash command
+- The task description still contains the critical constraints you intended to pass along, such as "do not merge", "draft PR", required branch, output branch, required skill, or required profile
 
-If the session failed immediately, never started, launched under the wrong profile, or lost critical constraints, do not wait on it. Re-dispatch with the corrected task/profile or report the dispatch failure with exact status evidence.
+If the session failed immediately, never started, launched under the wrong profile/skill/mode, or lost critical constraints, do not wait on it. Re-dispatch with the corrected task/profile/skill/mode or report the dispatch failure with exact status evidence.
+
+If the requested specialist/profile/skill/mode is not available or cannot be observed from the dispatch result, do not assume it worked. Use the cheapest available status/details check, record what is missing, and either re-dispatch with an explicit supported profile/skill/mode or ask for clarification. A generic task running under the platform default is not a substitute for a requested reviewer, specialist, or constrained profile.
+
+When a dispatched task returns, treat its output as usable only after checking that it came from the intended task/profile/skill/mode and respected the original constraints. If the result was produced by the wrong profile or skill, ignored `draft PR`/`do not merge`, dropped the requested output branch or branch, or skipped `/do` when required, document the mismatch and do not use it as validation evidence.
+
+### Private Incident Triage Is Ship-or-Track
+
+Private incident triage trigger tasks are investigation-only. They may inspect incidents, classify signatures, link existing work, and dispatch implementation tasks, but they must not edit repository files or implement fixes in the triage session.
+
+Before resolving an incident, check whether the signature is already covered by merged code, an open PR, an active dispatched task, or an existing Idea/task. A `resolve_incident` call with `outcome: "resolved"` must include one structured ship-or-track reference: `fixPrUrl` for a merged/open PR, `dispatchedTaskId` for a separate implementation task, or `linkedRecordId` for an existing Idea/task. Do not resolve by citing a local branch, unpushed commit, or code changed in the triage session. Use `outcome: "rejected"` with a justification note for expected behavior or intentionally declined work.
+
+### Before Retrying a Failed Dispatch
+
+Before retrying or redispatching the same work after a SAM task fails, diagnose the failed start:
+
+- Call `get_task_details` for the failed task and read any output summary, output branch, branch, PR URL, profile/skill/mode evidence, and status evidence.
+- If there is a session, read enough messages to distinguish no-workspace/startup failure, transient provider error, human-cancel recovery, wrong profile, or real task failure.
+- Call `list_tasks`/`list_project_agents` to check for active duplicates with the same prompt, title, output branch, branch, PR, profile, or skill.
+- If an active duplicate exists, inspect or coordinate with it instead of creating another copy.
+- If the failure was a transient provider or platform startup issue, adjust the retry only after confirming the current platform behavior has not already fixed it.
+- Include the failed task ID and any active duplicate task IDs in your report or retry context.
+- Recommend or perform cancellation/removal of duplicate queued tasks only when you have authority and an available tool for it; otherwise report the duplicate IDs clearly.
+
+Do not blindly submit the same prompt repeatedly after no-workspace/startup failures, provider overloads, or immediately failed sessions. A fast failure is evidence to inspect, not proof that a fresh duplicate will behave differently. If the cheapest evidence does not reveal why the task failed, report the failure with the exact task IDs and observed state instead of multiplying duplicate tasks.
+
+### Read-Only and Liveness Prompts
+
+When Raphaël asks for status, open PRs, task history, deployment state, or a simple liveness check such as "Hello?" or "Can you hear me?", treat the work as in-session and read-only by default:
+
+- Use SAM MCP tools, GitHub/gh, logs, and local evidence as needed.
+- Do not create task files, branches, PRs, or dispatched SAM subtasks unless the user asks for durable changes, implementation, a PR, or explicit delegation.
+- If the prompt is ambiguous, answer the immediate status/liveness question first and ask whether he wants a follow-up task or PR.
+
+### Context-Resume and Session-History Reviews
+
+When a task asks you to review a previous session or recover context from recent conversations, keep the search bounded and evidence-driven:
+
+- If the prompt names a parent/target session, task, PR, or branch, inspect that object directly first with the relevant SAM MCP or GitHub tool instead of starting with broad global searches.
+- Search tools keep normal long multi-word queries searchable by matching retained terms separately. Generous byte/term guardrails still disclose any trimming through `queryTruncated`, the effective `query`, and `queryLimits`. Callers that require exact coverage should refine an over-limit query or read known sessions directly via `get_session_messages`.
+- Do not create a duplicate robustness idea for historical SQLite pattern-complexity failures unless the bounded search path still reproduces the error.
+- Update the current or resumed session topic when it is stale and the available SAM tool supports it. Do not rewrite unrelated historical session titles unless the task explicitly includes durable state cleanup.
+- A context-resume review remains read-only by default. Only create task files, branches, commits, PRs, or dispatched work when the user asks for implementation, durable artifacts, or delegation.
 
 ### Why This Matters
 

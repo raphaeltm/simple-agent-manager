@@ -19,6 +19,7 @@ import { useCallback, useEffect, useMemo,useRef } from 'react';
 
 import { getTerminalToken, getTranscribeApiUrl } from '../lib/api';
 import { reportError } from '../lib/error-reporter';
+import { getAuthEpoch, isAuthRevoked, registerTerminalCleanup } from '../lib/terminal-cleanup';
 
 const API_URL = (() => {
   const url = import.meta.env.VITE_API_URL;
@@ -104,6 +105,13 @@ export function useProjectAgentSession({
     wsUrlCacheRef.current = null;
   }, [wsHost, workspaceId, sessionId]);
 
+  // Clear cached bearer URL on logout/account switch
+  useEffect(() => {
+    return registerTerminalCleanup(() => {
+      wsUrlCacheRef.current = null;
+    });
+  }, []);
+
   // Lifecycle event handler — routes to error reporter + invalidates cache on errors
   const handleLifecycleEvent = useCallback(
     (event: AcpLifecycleEvent) => {
@@ -132,15 +140,18 @@ export function useProjectAgentSession({
 
   // Resolve ACP WebSocket URL with fresh token (cached for 15s)
   const resolveWsUrl = useCallback(async (): Promise<string | null> => {
-    if (!wsHost || !workspaceId || !enabled) return null;
+    if (!wsHost || !workspaceId || !enabled || isAuthRevoked()) return null;
 
     const cached = wsUrlCacheRef.current;
     if (cached && Date.now() - cached.resolvedAt < 15_000) {
       return cached.url;
     }
 
+    const epochAtStart = getAuthEpoch();
+
     try {
       const { token } = await getTerminalToken(workspaceId);
+      if (isAuthRevoked() || getAuthEpoch() !== epochAtStart) return null;
       const sessionQuery = `&sessionId=${encodeURIComponent(sessionId)}`;
       const url = `${wsHost}/agent/ws?token=${encodeURIComponent(token)}${sessionQuery}`;
       wsUrlCacheRef.current = { url, resolvedAt: Date.now() };
@@ -171,7 +182,14 @@ export function useProjectAgentSession({
     onPrepareForReplay: acpMessages.prepareForReplay,
   });
 
-  const { connected, agentType, state, switchAgent } = acpSession;
+  const { connected, agentType, state, switchAgent, disconnect: acpDisconnect } = acpSession;
+
+  // Force-close ACP socket on logout/account switch
+  useEffect(() => {
+    return registerTerminalCleanup(() => {
+      acpDisconnect();
+    });
+  }, [acpDisconnect]);
 
   // Clear messages when entering no_session state (agent not yet selected)
   const { clear: clearMessages } = acpMessages;

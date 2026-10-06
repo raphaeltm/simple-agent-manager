@@ -1,0 +1,106 @@
+/**
+ * TypeScript half of the cross-language MCP server name contract.
+ *
+ * The Go half is packages/vm-agent/internal/acp/mcp_server_name_contract_test.go and reads the
+ * same fixture. The rule is implemented independently in both languages, so without a shared
+ * corpus they would drift silently — and a drift means the control plane accepts a name the
+ * vm-agent then refuses to use, so the user's server is renamed to `sam-mcp-<i>` with no error
+ * anywhere.
+ */
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+import { describe, expect, it } from 'vitest';
+
+import {
+  MCP_CONNECTION_HEADER_NAME_PATTERN,
+  MCP_CONNECTION_NAME_PATTERN,
+  MCP_CONNECTION_RESERVED_HEADER_NAMES,
+} from '../../src/types/mcp-connection';
+
+interface Contract {
+  valid: string[];
+  invalid: string[];
+  normalized: Record<string, string>;
+  headerNames: { valid: string[]; invalid: string[]; reserved: string[] };
+}
+
+const contract = JSON.parse(
+  readFileSync(
+    fileURLToPath(new URL('../../src/fixtures/mcp-server-name-contract.json', import.meta.url)),
+    'utf8'
+  )
+) as Contract;
+
+/** Mirrors the control-plane normalization in services/mcp-connections.ts. */
+function normalize(raw: string): string {
+  return raw.trim().toLowerCase();
+}
+
+describe('MCP server name contract (TypeScript side)', () => {
+  it('accepts every name the contract marks valid', () => {
+    for (const name of contract.valid) {
+      expect(
+        MCP_CONNECTION_NAME_PATTERN.test(normalize(name)),
+        `expected ${JSON.stringify(name)} to be valid`
+      ).toBe(true);
+    }
+  });
+
+  it('rejects every name the contract marks invalid', () => {
+    for (const name of contract.invalid) {
+      expect(
+        MCP_CONNECTION_NAME_PATTERN.test(normalize(name)),
+        `expected ${JSON.stringify(name)} to be invalid`
+      ).toBe(false);
+    }
+  });
+
+  it('normalizes case and surrounding whitespace to the contract value', () => {
+    for (const [input, expected] of Object.entries(contract.normalized)) {
+      expect(normalize(input)).toBe(expected);
+      expect(MCP_CONNECTION_NAME_PATTERN.test(normalize(input))).toBe(true);
+    }
+  });
+
+  it('has a non-trivial corpus, so a broken fixture read cannot pass as all-clear', () => {
+    expect(contract.valid.length).toBeGreaterThanOrEqual(8);
+    expect(contract.invalid.length).toBeGreaterThanOrEqual(15);
+  });
+});
+
+/**
+ * Header names are judged as exact strings on both sides — no trimming or case folding — so a
+ * name the control plane stores is byte-for-byte the name the vm-agent writes into TOML and
+ * mcp-remote arguments. The Go half is TestMcpHeaderNameContract in mcp_server_name_contract_test.go.
+ */
+describe('MCP custom header name contract (TypeScript side)', () => {
+  it('accepts every header name the contract marks valid', () => {
+    for (const name of contract.headerNames.valid) {
+      expect(
+        MCP_CONNECTION_HEADER_NAME_PATTERN.test(name),
+        `expected ${JSON.stringify(name)} to be valid`
+      ).toBe(true);
+    }
+  });
+
+  it('rejects every header name the contract marks invalid', () => {
+    for (const name of contract.headerNames.invalid) {
+      expect(
+        MCP_CONNECTION_HEADER_NAME_PATTERN.test(name),
+        `expected ${JSON.stringify(name)} to be invalid`
+      ).toBe(false);
+    }
+  });
+
+  it('has a non-trivial header corpus', () => {
+    expect(contract.headerNames.valid.length).toBeGreaterThanOrEqual(8);
+    expect(contract.headerNames.invalid.length).toBeGreaterThanOrEqual(15);
+  });
+
+  it('reserves exactly the transport-managed names the vm-agent reserves', () => {
+    expect([...MCP_CONNECTION_RESERVED_HEADER_NAMES].sort()).toEqual(
+      [...contract.headerNames.reserved].sort()
+    );
+  });
+});

@@ -11,7 +11,6 @@
  * message delivery (~2s intervals) to maintain the perception of continuous
  * streaming.
  */
-import type { ConversationItem } from '@simple-agent-manager/acp-client';
 import { Spinner } from '@simple-agent-manager/ui';
 import { ChevronDown } from 'lucide-react';
 import { type FC, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -19,17 +18,34 @@ import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 
 import { AcpConversationItemView } from '../../components/project-message-view/AcpConversationItemView';
 import { FollowUpInput } from '../../components/project-message-view/FollowUpInput';
-import { chatMessagesToConversationItems, deriveSessionState, VIRTUAL_START } from '../../components/project-message-view/types';
-import { useChatWebSocket } from '../../hooks/useChatWebSocket';
-import { cancelAgentPrompt, getChatSession, getTranscribeApiUrl, resetIdleTimer, sendFollowUpPrompt, uploadSessionFiles } from '../../lib/api';
-import type { ChatMessageResponse, ChatSessionDetailResponse, ChatSessionResponse } from '../../lib/api/sessions';
+import type { DisplayItem } from '../../components/project-message-view/tool-call-groups';
+import {
+  countDisplayRows,
+  groupToolCallItems,
+} from '../../components/project-message-view/tool-call-groups';
+import {
+  chatMessagesToConversationItems,
+  deriveSessionState,
+  VIRTUAL_START,
+} from '../../components/project-message-view/types';
+import { useCancelAgentPrompt } from '../../components/project-message-view/useCancelAgentPrompt';
+import { useCompletionDockWorking } from '../../components/project-message-view/useCompletionDockWorking';
+import { useToolCallGroupRowState } from '../../components/project-message-view/useToolCallGroupRowState';
+import {
+  getChatSession,
+  getTranscribeApiUrl,
+  resetIdleTimer,
+  sendFollowUpPrompt,
+  uploadSessionFiles,
+} from '../../lib/api';
+import type {
+  ChatMessageResponse,
+  ChatSessionDetailResponse,
+  ChatSessionResponse,
+} from '../../lib/api/sessions';
 import { mergeMessages } from '../../lib/merge-messages';
-
-/** Agent activity state derived from message flow (no ACP connection needed). */
-type AgentActivityState = 'idle' | 'prompting' | 'responding';
-
-/** Seconds of silence after last assistant message before returning to idle. */
-const IDLE_TIMEOUT_MS = 3000;
+import { oldestPersistedCursor } from '../../lib/message-paging';
+import { useWorkspaceChatSocket } from './useWorkspaceChatSocket';
 
 interface WorkspaceChatViewProps {
   projectId: string;
@@ -59,10 +75,6 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
   const [sendingFollowUp, setSendingFollowUp] = useState(false);
   const [uploading, setUploading] = useState(false);
 
-  // ── Agent activity state (derived from message flow) ──
-  const [agentActivity, setAgentActivity] = useState<AgentActivityState>('idle');
-  const idleTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-
   // ── Scroll ──
   const [firstItemIndex, setFirstItemIndex] = useState(VIRTUAL_START);
   const [showScrollButton, setShowScrollButton] = useState(false);
@@ -70,38 +82,19 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
   const sessionState = session ? deriveSessionState(session) : 'terminated';
   const transcribeApiUrl = useMemo(() => getTranscribeApiUrl(), []);
 
-  // ── DO WebSocket for real-time message updates (SOLE message source) ──
-  const { connectionState, wsRef } = useChatWebSocket({
+  const {
+    connectionState,
+    wsRef,
+    agentActivity,
+    setAgentActivity,
+    hydrateActivity,
+    stopVerifyDecayTimer,
+  } = useWorkspaceChatSocket({
     projectId,
     sessionId,
-    enabled: session?.status === 'active',
-    onMessage: useCallback((msg: ChatMessageResponse) => {
-      setMessages((prev) => mergeMessages(prev, [msg], 'append'));
-
-      // Transition to 'responding' on any assistant message (covers prompting→responding
-      // and also idle→responding on reconnect with in-progress agent output)
-      if (msg.role === 'assistant') {
-        setAgentActivity('responding');
-
-        // Reset idle timer — go idle after silence
-        clearTimeout(idleTimerRef.current);
-        idleTimerRef.current = setTimeout(() => {
-          setAgentActivity('idle');
-        }, IDLE_TIMEOUT_MS);
-      }
-    }, []),
-    onSessionStopped: useCallback(() => {
-      setSession((prev) => prev ? { ...prev, status: 'stopped' } : prev);
-      setAgentActivity('idle');
-    }, []),
-    onCatchUp: useCallback((catchUpMsgs: ChatMessageResponse[], catchUpSession: ChatSessionResponse) => {
-      setSession(catchUpSession);
-      setMessages((prev) => mergeMessages(prev, catchUpMsgs, 'replace'));
-    }, []),
-    onAgentCompleted: useCallback((agentCompletedAt: number) => {
-      setSession((prev) => prev ? { ...prev, agentCompletedAt, isIdle: true } as ChatSessionResponse : prev);
-      setAgentActivity('idle');
-    }, []),
+    sessionStatus: session?.status,
+    setMessages,
+    setSession,
   });
 
   // ── Load session data ──
@@ -113,30 +106,78 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
       setSession(data.session);
       setMessages(data.messages);
       setHasMore(data.hasMore);
+      hydrateActivity(data.state);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load session');
     } finally {
       setLoading(false);
     }
-  }, [projectId, sessionId]);
+  }, [projectId, sessionId, hydrateActivity]);
 
-  useEffect(() => { void loadSession(); }, [loadSession]);
+  useEffect(() => {
+    void loadSession();
+  }, [loadSession]);
 
   // Reset scroll on session change
   useEffect(() => {
     setFirstItemIndex(VIRTUAL_START);
     setShowScrollButton(false);
-  }, [sessionId]);
-
-  // Cleanup idle timer on unmount
-  useEffect(() => {
-    return () => clearTimeout(idleTimerRef.current);
-  }, []);
+    stopVerifyDecayTimer();
+  }, [sessionId, stopVerifyDecayTimer]);
 
   // ── Conversation items from DO messages only (single source) ──
-  const conversationItems = useMemo<ConversationItem[]>(() => {
-    return chatMessagesToConversationItems(messages);
+  // Consecutive tool calls fold into one collapsed activity row, with the same
+  // parent-held expansion state and the same live signal as project chat, so the
+  // two surfaces cannot drift (`.claude/rules/24`).
+  const conversationItems = useMemo<DisplayItem[]>(() => {
+    return groupToolCallItems(chatMessagesToConversationItems(messages));
   }, [messages]);
+
+  /*
+   * Expansion lives here, not in the card: Virtuoso unmounts rows outside its
+   * overscan window, so card-local state would collapse on scroll. Shared with
+   * project chat so the two surfaces cannot drift again (`.claude/rules/24`);
+   * see the hook's doc comment for why the working signal is
+   * `useCompletionDockWorking` and not `isWorkingActivity`.
+   */
+  const agentIsWorking = useCompletionDockWorking(agentActivity);
+  const groupRowState = useToolCallGroupRowState(conversationItems, agentIsWorking);
+
+  // Stable identity: an inline arrow gives Virtuoso a new `itemContent` on every
+  // parent render, re-rendering every windowed row and defeating
+  // `AcpConversationItemView`'s memo (`.claude/rules/64`).
+  const renderConversationItem = useCallback(
+    (_index: number, item: DisplayItem) => (
+      <div className="px-4 py-1">
+        <AcpConversationItemView
+          item={item}
+          projectId={projectId}
+          groupExpanded={
+            item.kind === 'tool_call_group' ? groupRowState.groupExpandedFor(item.id) : undefined
+          }
+          onToggleGroup={groupRowState.onToggleGroup}
+          groupLive={groupRowState.groupLiveFor(item.id)}
+        />
+      </div>
+    ),
+    [projectId, groupRowState]
+  );
+
+  // ── Cancel the current in-flight prompt ──
+  // Shares one implementation with the project-chat dock so the two surfaces
+  // cannot drift apart again (.claude/rules/24).
+  const onCancelled = useCallback(() => setAgentActivity('idle'), [setAgentActivity]);
+  const {
+    cancelling,
+    cancelError,
+    cancelPrompt: handleCancelPrompt,
+    clearCancelError,
+  } = useCancelAgentPrompt({
+    projectId,
+    sessionId,
+    enabled: agentActivity !== 'idle',
+    onCancelled,
+  });
 
   // ── Send follow-up message via REST API ──
   const handleSendFollowUp = useCallback(async () => {
@@ -145,6 +186,9 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
 
     setSendingFollowUp(true);
     setAgentActivity('prompting');
+    // A new turn supersedes any failed interrupt of the previous one; leaving the
+    // old banner up would attach it to work it has nothing to do with.
+    clearCancelError();
     try {
       if (sessionState === 'idle') {
         resetIdleTimer(projectId, sessionId)
@@ -152,7 +196,12 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
             if (result.cleanupAt) {
               setSession((prev) => {
                 if (!prev) return prev;
-                return { ...prev, cleanupAt: result.cleanupAt, isIdle: false, agentCompletedAt: null } as ChatSessionResponse;
+                return {
+                  ...prev,
+                  cleanupAt: result.cleanupAt,
+                  isIdle: false,
+                  agentCompletedAt: null,
+                } as ChatSessionResponse;
               });
             }
           })
@@ -160,23 +209,28 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
       }
 
       // Optimistic user message
-      setMessages((prev) => [...prev, {
-        id: `optimistic-${crypto.randomUUID()}`,
-        sessionId,
-        role: 'user',
-        content: trimmed,
-        toolMetadata: null,
-        createdAt: Date.now(),
-      }]);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `optimistic-${crypto.randomUUID()}`,
+          sessionId,
+          role: 'user',
+          content: trimmed,
+          toolMetadata: null,
+          createdAt: Date.now(),
+        },
+      ]);
 
       // Persist via DO WebSocket
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({
-          type: 'message.send',
-          sessionId,
-          content: trimmed,
-          role: 'user',
-        }));
+        wsRef.current.send(
+          JSON.stringify({
+            type: 'message.send',
+            sessionId,
+            content: trimmed,
+            role: 'user',
+          })
+        );
       }
 
       // Forward prompt to the running agent via REST API
@@ -192,47 +246,62 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
     } finally {
       setSendingFollowUp(false);
     }
-  }, [followUp, sendingFollowUp, sessionState, projectId, sessionId, wsRef]);
+  }, [
+    followUp,
+    sendingFollowUp,
+    sessionState,
+    projectId,
+    sessionId,
+    wsRef,
+    clearCancelError,
+    setAgentActivity,
+  ]);
 
   // ── Upload files ──
-  const handleUploadFiles = useCallback(async (files: FileList | File[]) => {
-    const fileArray = Array.from(files);
-    if (fileArray.length === 0) return;
-    setUploading(true);
-    try {
-      const result = await uploadSessionFiles(projectId, sessionId, fileArray);
-      const names = result.files.map((f) => f.name).join(', ');
-      setMessages((prev) => [...prev, {
-        id: `optimistic-upload-${crypto.randomUUID()}`,
-        sessionId,
-        role: 'user' as const,
-        content: `Uploaded ${result.files.length} file${result.files.length > 1 ? 's' : ''}: ${names}`,
-        toolMetadata: null,
-        createdAt: Date.now(),
-      }]);
-    } catch (err) {
-      console.error('File upload failed:', err);
-    } finally {
-      setUploading(false);
-    }
-  }, [projectId, sessionId]);
+  const handleUploadFiles = useCallback(
+    async (files: FileList | File[]) => {
+      const fileArray = Array.from(files);
+      if (fileArray.length === 0) return;
+      setUploading(true);
+      try {
+        const result = await uploadSessionFiles(projectId, sessionId, fileArray);
+        const names = result.files.map((f) => f.name).join(', ');
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `optimistic-upload-${crypto.randomUUID()}`,
+            sessionId,
+            role: 'user' as const,
+            content: `Uploaded ${result.files.length} file${result.files.length > 1 ? 's' : ''}: ${names}`,
+            toolMetadata: null,
+            createdAt: Date.now(),
+          },
+        ]);
+      } catch (err) {
+        console.error('File upload failed:', err);
+      } finally {
+        setUploading(false);
+      }
+    },
+    [projectId, sessionId]
+  );
 
   // ── Load more (pagination) ──
   const loadMore = useCallback(async () => {
     if (!hasMore || loadingMore) return;
-    const firstMessage = messages[0];
-    if (!firstMessage) return;
+    const before = oldestPersistedCursor(messages);
+    if (!before) return;
 
     setLoadingMore(true);
     try {
-      const data = await getChatSession(projectId, sessionId, {
-        before: firstMessage.createdAt,
-      });
+      const data = await getChatSession(projectId, sessionId, { before });
       setMessages((prev) => {
         const merged = mergeMessages(prev, data.messages, 'prepend');
-        const actualAdded = merged.length - prev.length;
-        if (actualAdded > 0) {
-          setFirstItemIndex((fi) => fi - actualAdded);
+        // Rendered rows, not messages — same accounting as project chat. See
+        // `countDisplayRows`.
+        const displayRowsAdded = countDisplayRows(merged) - countDisplayRows(prev);
+        if (displayRowsAdded > 0) {
+          setFirstItemIndex((fi) => fi - displayRowsAdded);
         }
         return merged;
       });
@@ -244,27 +313,11 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
     }
   }, [hasMore, loadingMore, messages, projectId, sessionId]);
 
-  // ── Cancel the current in-flight prompt via REST API ──
-  const cancellingRef = useRef(false);
-  const handleCancelPrompt = useCallback(() => {
-    if (agentActivity === 'idle' || cancellingRef.current) return;
-    cancellingRef.current = true;
-    cancelAgentPrompt(projectId, sessionId)
-      .then(() => {
-        setAgentActivity('idle');
-      })
-      .catch(() => {
-        // Network/server error — keep spinner visible so user can retry
-      })
-      .finally(() => {
-        cancellingRef.current = false;
-      });
-  }, [agentActivity, projectId, sessionId]);
-
   // ── Derive placeholder from agent activity ──
-  const placeholder = agentActivity === 'prompting' || agentActivity === 'responding'
-    ? 'Agent is working...'
-    : 'Send a message...';
+  const placeholder =
+    agentActivity === 'prompting' || agentActivity === 'responding'
+      ? 'Agent is working...'
+      : 'Send a message...';
 
   // ── Render ──
   if (loading && messages.length === 0 && !session) {
@@ -276,16 +329,17 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
   }
 
   if (error && !session) {
-    return (
-      <div className="p-4 text-danger text-sm">
-        {error}
-      </div>
-    );
+    return <div className="p-4 text-danger text-sm">{error}</div>;
   }
 
   const isActive = sessionState === 'active' || sessionState === 'idle';
   const showInput = isActive && session?.workspaceId;
-  const connectionLabel = connectionState === 'connected' ? '' : connectionState === 'reconnecting' ? 'Reconnecting...' : '';
+  const connectionLabel =
+    connectionState === 'connected'
+      ? ''
+      : connectionState === 'reconnecting'
+        ? 'Reconnecting...'
+        : '';
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
@@ -297,9 +351,12 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
       )}
 
       {/* Error banner */}
-      {error && session && (
-        <div className="px-4 py-2 bg-danger-tint border-b border-border-default text-danger text-xs">
-          {error}
+      {(error || cancelError) && session && (
+        <div
+          role="alert"
+          className="px-4 py-2 bg-danger-tint border-b border-border-default text-danger text-xs break-words"
+        >
+          {error ?? cancelError}
         </div>
       )}
 
@@ -313,12 +370,14 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
           followOutput="smooth"
           increaseViewportBy={{ top: 200, bottom: 100 }}
           atBottomStateChange={(atBottom) => setShowScrollButton(!atBottom)}
-          startReached={hasMore ? () => { void loadMore(); } : undefined}
-          itemContent={(_index, item) => (
-            <div className="px-4 py-1">
-              <AcpConversationItemView item={item} />
-            </div>
-          )}
+          startReached={
+            hasMore
+              ? () => {
+                  void loadMore();
+                }
+              : undefined
+          }
+          itemContent={renderConversationItem}
         />
 
         {loadingMore && (
@@ -331,7 +390,12 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
           <button
             type="button"
             className="absolute bottom-4 right-4 p-2 rounded-full bg-surface-raised border border-border-default shadow-md cursor-pointer hover:bg-surface-hover"
-            onClick={() => virtuosoRef.current?.scrollToIndex({ index: conversationItems.length - 1, behavior: 'smooth' })}
+            onClick={() =>
+              virtuosoRef.current?.scrollToIndex({
+                index: conversationItems.length - 1,
+                behavior: 'smooth',
+              })
+            }
           >
             <ChevronDown size={16} />
           </button>
@@ -340,16 +404,21 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
 
       {/* Agent working indicator */}
       {agentActivity !== 'idle' && isActive && (
-        <div role="status" className="flex items-center gap-2 px-4 py-2 border-t border-border-default bg-surface shrink-0">
+        <div
+          role="status"
+          className="flex items-center gap-2 px-4 py-2 border-t border-border-default bg-surface shrink-0"
+        >
           <Spinner size="sm" />
           <span className="text-xs text-fg-muted">Agent is working...</span>
           <button
             type="button"
             onClick={handleCancelPrompt}
-            aria-label="Cancel agent"
-            className="ml-auto flex-shrink-0 px-2 py-2.5 min-h-[44px] text-xs font-medium rounded border border-border-default bg-transparent cursor-pointer text-danger hover:bg-danger-tint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            disabled={cancelling}
+            aria-busy={cancelling}
+            aria-label={cancelling ? 'Cancelling agent' : 'Cancel agent'}
+            className="ml-auto flex-shrink-0 px-2 py-2.5 min-h-[44px] text-xs font-medium rounded border border-border-default bg-transparent cursor-pointer text-danger hover:bg-danger-tint disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
-            Cancel
+            {cancelling ? 'Cancelling…' : 'Cancel'}
           </button>
         </div>
       )}
@@ -359,8 +428,12 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
         <FollowUpInput
           value={followUp}
           onChange={setFollowUp}
-          onSend={() => { void handleSendFollowUp(); }}
-          onUploadFiles={(files) => { void handleUploadFiles(files); }}
+          onSend={() => {
+            void handleSendFollowUp();
+          }}
+          onUploadFiles={(files) => {
+            void handleUploadFiles(files);
+          }}
           sending={sendingFollowUp}
           uploading={uploading}
           placeholder={placeholder}

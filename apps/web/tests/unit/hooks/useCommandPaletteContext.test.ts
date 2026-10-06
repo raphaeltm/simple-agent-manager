@@ -149,7 +149,8 @@ describe('useCommandPaletteContext', () => {
     const labels = result.current.contextActions.map((a) => a.label);
     expect(labels).toContain('My Project: Go to Chat');
     expect(labels).toContain('My Project: Go to Ideas');
-    expect(labels).toContain('My Project: Go to Activity');
+    expect(labels).toContain('My Project: Go to Deployments');
+    expect(labels).not.toContain('My Project: Go to Activity');
     expect(labels).toContain('My Project: Go to Settings');
   });
 
@@ -161,6 +162,55 @@ describe('useCommandPaletteContext', () => {
     chatAction?.action();
 
     expect(mockNavigate).toHaveBeenCalledWith('/projects/p1/ideas');
+  });
+
+  it('exposes the full set of project-scoped navigation actions', () => {
+    mockPathname = '/projects/p1/chat';
+    const { result } = renderContextHook();
+
+    const labels = result.current.contextActions.map((a) => a.label);
+    expect(labels).toContain('My Project: Go to Library');
+    expect(labels).toContain('My Project: Go to Deployments');
+    expect(labels).toContain('My Project: Go to Agent Context');
+    expect(labels).toContain('My Project: Go to Notifications');
+    expect(labels).toContain('My Project: Go to Triggers');
+    expect(labels).toContain('My Project: Go to Profiles');
+    expect(labels).toContain('My Project: Go to Skills');
+  });
+
+  it.each([
+    ['ctx-project-library', '/projects/p1/library'],
+    ['ctx-project-deployments', '/projects/p1/deployments'],
+    ['ctx-project-agent-context', '/projects/p1/agent-context'],
+    ['ctx-project-notifications', '/projects/p1/notifications'],
+    ['ctx-project-triggers', '/projects/p1/triggers'],
+    ['ctx-project-profiles', '/projects/p1/profiles'],
+    ['ctx-project-skills', '/projects/p1/skills'],
+  ])('%s navigates to %s', (id, expectedPath) => {
+    mockPathname = '/projects/p1/chat';
+    const { result } = renderContextHook();
+
+    const action = result.current.contextActions.find((a) => a.id === id);
+    action?.action();
+
+    expect(mockNavigate).toHaveBeenCalledWith(expectedPath);
+  });
+
+  // ── Create quick actions (?edit=new opens the create modal) ──
+
+  it.each([
+    ['ctx-create-trigger', 'My Project: Create Trigger', '/projects/p1/triggers?edit=new'],
+    ['ctx-create-profile', 'My Project: Create Profile', '/projects/p1/profiles?edit=new'],
+    ['ctx-create-skill', 'My Project: Create Skill', '/projects/p1/skills?edit=new'],
+  ])('%s navigates with the ?edit=new query string', (id, label, expectedPath) => {
+    mockPathname = '/projects/p1/chat';
+    const { result } = renderContextHook();
+
+    const action = result.current.contextActions.find((a) => a.id === id);
+    expect(action?.label).toBe(label);
+    action?.action();
+
+    expect(mockNavigate).toHaveBeenCalledWith(expectedPath);
   });
 
   // ── Context Actions: Session Scope ──
@@ -273,10 +323,12 @@ describe('useCommandPaletteContext', () => {
     ];
 
     const { result } = renderContextHook({ chatSessions: sessions });
-    // Default cap is 10, and we have 4 project + 2 session = 6 actions (all fit)
+    // Default cap is 20. On a project+session URL we have:
+    //   10 project nav (Chat/Ideas/Activity/Settings/Library/Agent Context/
+    //   Notifications/Triggers/Profiles/Skills) + 3 create + 2 session = 15 (all fit)
     // (outputPrUrl is only on detail endpoint, not list; "Open PR" action removed)
-    expect(result.current.contextActions.length).toBeLessThanOrEqual(10);
-    expect(result.current.contextActions.length).toBe(6);
+    expect(result.current.contextActions.length).toBeLessThanOrEqual(20);
+    expect(result.current.contextActions.length).toBe(15);
   });
 
   // ── window.open assertions ──

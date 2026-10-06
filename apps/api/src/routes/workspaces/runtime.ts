@@ -1,8 +1,22 @@
 // FILE SIZE EXCEPTION: Workspace runtime routes — splitting credential resolution logic across files increases fragmentation risk. See .claude/rules/18-file-size-limits.md
-import { AI_PROXY_DEFAULT_MODEL_KV_KEY, type AIProxyConfig, type BootstrapTokenData, DEFAULT_AI_PROXY_ANTHROPIC_MODEL, DEFAULT_AI_PROXY_MODEL, DEFAULT_AI_PROXY_OPENAI_MODEL, getAgentDefinition, isValidAgentType } from '@simple-agent-manager/shared';
+import {
+  AI_PROXY_DEFAULT_MODEL_KV_KEY,
+  type AIProxyConfig,
+  type BootstrapTokenData,
+  type CredentialSource,
+  DEFAULT_AGENT_PERMISSION_MODE,
+  DEFAULT_AI_PROXY_ANTHROPIC_MODEL,
+  DEFAULT_AI_PROXY_MODEL,
+  DEFAULT_AI_PROXY_OPENAI_MODEL,
+  getAgentDefinition,
+  HARNESS_CAPABILITIES,
+  isValidAgentType,
+  resolveHarnessDialect,
+} from '@simple-agent-manager/shared';
 import { and, eq, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
+import * as v from 'valibot';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
@@ -10,28 +24,843 @@ import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
 import { getCredentialEncryptionKey } from '../../lib/secrets';
 import { ulid } from '../../lib/ulid';
-import { requireApproved,requireAuth } from '../../middleware/auth';
+import { requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
-import { AgentCredentialSyncSchema, AgentTypeBodySchema, BootLogEntrySchema, jsonValidator, MessageBatchSchema } from '../../schemas';
+import {
+  AgentCredentialSyncSchema,
+  AgentTypeBodySchema,
+  BootLogEntrySchema,
+  formatIssues,
+  jsonValidator,
+  MessageBatchSchema,
+} from '../../schemas';
 import { appendBootLog } from '../../services/boot-log';
+import { registerBootstrapTokenConsume } from '../../services/bootstrap';
+import { syncActiveAgentCredentialSecret } from '../../services/composable-credentials/agent-sync';
 import { decrypt, encrypt } from '../../services/encryption';
-import { getInstallationToken } from '../../services/github-app';
+import { getInstallationToken, getUserInstallationRepositories } from '../../services/github-app';
+import {
+  GitHubCliPolicyError,
+  resolveWorkspaceGitHubTokenOptions,
+} from '../../services/github-cli-policy';
+import { getExternalInstallationId } from '../../services/github-installation-ids';
+import { backfillProjectGithubRepoId } from '../../services/github-repo-id-backfill';
+import { getGitHubUserAccessTokenForOwner } from '../../services/github-user-access-token';
+import {
+  getProjectGitLabRepository,
+  requireGitLabUserAccessTokenResultForOwner,
+  verifyGitLabProjectAccess,
+} from '../../services/gitlab';
+import { nodeStatusTerminatesCallbacks } from '../../services/node-callback-auth';
 import { persistError } from '../../services/observability';
 import { resolveProjectAgentDefault } from '../../services/project-agent-defaults';
 import * as projectDataService from '../../services/project-data';
 import { extractScalewaySecretKey } from '../../services/provider-credentials';
 import { bridgeAgentActivity } from '../../services/trial/bridge';
-import { getDecryptedAgentKey, getDecryptedCredential } from '../credentials';
 import {
-  getWorkspaceRuntimeAssets,
+  signalWorkspaceDeletionUnconfirmedCallback,
+  type WorkspaceDeletionCallbackKind,
+} from '../../services/workspace-deletion-callback-signal';
+import { getWorkspaceRuntimeAssets } from '../../services/workspace-runtime-assets';
+import { getDecryptedAgentKey, getDecryptedCredentialRecord } from '../credentials';
+import { assertRepositoryAccess } from '../projects/_helpers';
+import {
+  assertWorkspaceAcceptsCallback,
+  assertWorkspaceCallbackIdentityCurrent,
+  assertWorkspaceCallbackResourceById,
   safeParseJson,
+  sameWorkspaceCallbackIdentity,
   verifyWorkspaceCallbackAuth,
+  type WorkspaceCallbackIdentitySnapshot,
 } from './_helpers';
 
 /** Agent types eligible for AI proxy credential fallback (module-scope for isolate reuse). */
-const PROXY_ELIGIBLE_AGENTS: ReadonlySet<string> = new Set(['opencode', 'claude-code', 'openai-codex']);
+const PROXY_ELIGIBLE_AGENTS: ReadonlySet<string> = new Set(
+  HARNESS_CAPABILITIES.filter(
+    (capability) => capability.proxyRouteSegment && capability.proxyProviderTag
+  ).map((capability) => capability.agentType)
+);
+
+function getProxyCapability(agentType: string) {
+  const capability = HARNESS_CAPABILITIES.find((entry) => entry.agentType === agentType);
+  if (!capability?.proxyRouteSegment || !capability.proxyProviderTag) return null;
+  return capability;
+}
+
+function buildPassthroughInferenceConfig(input: {
+  agentType: string;
+  baseDomain: string;
+  defaultModel: string;
+}) {
+  const capability = getProxyCapability(input.agentType);
+  if (!capability) return null;
+  return {
+    provider: capability.proxyProviderTag,
+    baseURL: `https://api.${input.baseDomain}/ai/proxy/{wstoken}/${capability.proxyRouteSegment}`,
+    model: input.defaultModel,
+    apiKeySource: 'callback-token' as const,
+  };
+}
+
+function buildPlatformInferenceConfig(input: {
+  agentType: string;
+  baseDomain: string;
+  defaultModel: string;
+}) {
+  const capability = getProxyCapability(input.agentType);
+  if (!capability) return null;
+  const provider =
+    capability.proxyProviderTag === 'anthropic-passthrough'
+      ? 'anthropic-proxy'
+      : capability.usesOpencodeConfig
+        ? 'openai-compatible'
+        : 'openai-proxy';
+  const routeSegment = capability.proxyRouteSegment === 'anthropic' ? 'anthropic' : 'v1';
+  return {
+    provider,
+    baseURL: `https://api.${input.baseDomain}/ai/${routeSegment}`,
+    model: input.defaultModel,
+    apiKeySource: 'callback-token' as const,
+  };
+}
 
 const runtimeRoutes = new Hono<{ Bindings: Env }>();
+type RuntimeContext = Context<{ Bindings: Env }>;
+type MessageBatchBody = v.InferOutput<typeof MessageBatchSchema>;
+
+async function callbackJsonWithJit<T extends Record<string, unknown>>(
+  c: RuntimeContext,
+  expected: WorkspaceCallbackIdentitySnapshot,
+  callback: WorkspaceDeletionCallbackKind,
+  body: T
+) {
+  await assertWorkspaceCallbackIdentityCurrent(c.env, expected, callback);
+  return c.json(body);
+}
+
+const DEFAULT_MAX_MESSAGES_PAYLOAD_BYTES = 256 * 1024;
+const DEFAULT_MESSAGE_SIZE_THRESHOLD_BYTES = 102400;
+const ACTIVE_MESSAGE_WORKSPACE_STATUSES = new Set(['creating', 'running', 'recovery']);
+const VALID_MESSAGE_ROLES = new Set(['user', 'assistant', 'system', 'tool', 'thinking', 'plan']);
+
+type MessageWorkspace = WorkspaceCallbackIdentitySnapshot & {
+  projectId: string | null;
+  chatSessionId: string | null;
+};
+
+type MessageBatchPersistenceRouteResult = {
+  persisted: number;
+  duplicates: number;
+  limitReached?: boolean;
+  maxMessages?: number;
+  remainingCapacity?: number;
+};
+
+type MessageRouteContext = {
+  workspaceId: string;
+  projectId: string;
+  sessionId: string;
+  messageCount: number;
+};
+
+type AgentCredentialAttribution = {
+  credentialSource: CredentialSource;
+  credentialReference: string;
+  credentialProvider?: string | null;
+  providerMode?: string | null;
+};
+
+type PersistedAgentCredentialAttribution = {
+  agentSessionId: string;
+  credentialGeneration: number;
+};
+
+async function persistAgentCredentialAttribution(
+  env: Env,
+  workspace: WorkspaceCallbackIdentitySnapshot,
+  input: {
+    workspaceId: string;
+    agentSessionId?: string | null;
+    agentType: string;
+    attribution: AgentCredentialAttribution;
+  }
+): Promise<PersistedAgentCredentialAttribution | null> {
+  await assertWorkspaceCallbackIdentityCurrent(env, workspace, 'agent_key');
+
+  const now = new Date().toISOString();
+  if (input.agentSessionId) {
+    const update = await env.DATABASE.prepare(
+      `UPDATE agent_sessions
+          SET agent_credential_source = ?,
+              agent_credential_reference = ?,
+              agent_credential_provider = ?,
+              agent_provider_mode = ?,
+              agent_credential_generation = agent_credential_generation + 1,
+              updated_at = ?
+        WHERE id = ?
+          AND workspace_id = ?
+          AND user_id = ?
+          AND (agent_type IS NULL OR agent_type = ?)
+      RETURNING id, agent_credential_generation AS credentialGeneration`
+    )
+      .bind(
+        input.attribution.credentialSource,
+        input.attribution.credentialReference,
+        input.attribution.credentialProvider ?? null,
+        input.attribution.providerMode ?? null,
+        now,
+        input.agentSessionId,
+        input.workspaceId,
+        workspace.userId,
+        input.agentType
+      )
+      .first<PersistedAgentCredentialAttribution>();
+
+    if (!update) {
+      throw errors.forbidden('Agent session does not match workspace callback identity');
+    }
+    return update;
+  }
+
+  const target = await env.DATABASE.prepare(
+    `SELECT id
+       FROM agent_sessions
+      WHERE workspace_id = ?
+        AND user_id = ?
+        AND status IN ('running', 'recovery')
+        AND (agent_type IS NULL OR agent_type = ?)
+      ORDER BY updated_at DESC, created_at DESC
+      LIMIT 1`
+  )
+    .bind(input.workspaceId, workspace.userId, input.agentType)
+    .first<{ id: string }>();
+
+  if (!target) {
+    log.warn('agent_key.credential_attribution_session_missing', {
+      workspaceId: input.workspaceId,
+      userId: workspace.userId,
+      agentType: input.agentType,
+    });
+    return null;
+  }
+
+  const update = await env.DATABASE.prepare(
+    `UPDATE agent_sessions
+        SET agent_credential_source = ?,
+            agent_credential_reference = ?,
+            agent_credential_provider = ?,
+            agent_provider_mode = ?,
+            agent_credential_generation = agent_credential_generation + 1,
+            updated_at = ?
+      WHERE id = ?
+      RETURNING id, agent_credential_generation AS credentialGeneration`
+  )
+    .bind(
+      input.attribution.credentialSource,
+      input.attribution.credentialReference,
+      input.attribution.credentialProvider ?? null,
+      input.attribution.providerMode ?? null,
+      now,
+      target.id
+    )
+    .first<PersistedAgentCredentialAttribution>();
+  return update;
+}
+
+function credentialAttributionFromData(
+  credentialData: NonNullable<Awaited<ReturnType<typeof getDecryptedAgentKey>>>,
+  agentType: string,
+  providerMode: string
+): AgentCredentialAttribution {
+  return {
+    credentialSource: credentialData.credentialSource,
+    credentialReference: credentialData.credentialReference,
+    credentialProvider:
+      credentialData.credentialProvider ?? agentCredentialProviderFallback(agentType),
+    providerMode,
+  };
+}
+
+function agentCredentialProviderFallback(agentType: string): string {
+  if (agentType === 'claude-code' || agentType.includes('claude')) return 'anthropic';
+  if (agentType === 'openai-codex' || agentType.includes('codex') || agentType.includes('openai')) {
+    return 'openai';
+  }
+  return agentType;
+}
+
+function platformProxyAttribution(agentType: string): AgentCredentialAttribution {
+  const credentialProvider = agentType === 'claude-code' ? 'anthropic' : 'openai';
+  return {
+    credentialSource: 'platform',
+    credentialReference: `platform_proxy:${credentialProvider}`,
+    credentialProvider,
+    providerMode: 'sam-proxy',
+  };
+}
+
+function waitUntilIfAvailable(
+  c: { executionCtx: { waitUntil(promise: Promise<unknown>): void } },
+  promise: Promise<unknown> | void
+): void {
+  if (!promise) return;
+  try {
+    c.executionCtx.waitUntil(promise);
+  } catch (err) {
+    if (!(err instanceof Error) || !err.message.includes('no ExecutionContext')) {
+      throw err;
+    }
+  }
+}
+
+async function readRequestBodyWithLimit(request: Request, maxBytes: number): Promise<string> {
+  const contentLengthHeader = request.headers.get('content-length');
+  if (contentLengthHeader) {
+    const contentLength = Number.parseInt(contentLengthHeader, 10);
+    if (!Number.isFinite(contentLength) || contentLength < 0) {
+      throw errors.badRequest('Invalid Content-Length header');
+    }
+    if (contentLength > maxBytes) {
+      throw errors.badRequest(`Payload exceeds ${maxBytes} byte limit`);
+    }
+  }
+
+  if (!request.body) {
+    return '';
+  }
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  let done = false;
+
+  try {
+    while (!done) {
+      const read = await reader.read();
+      done = read.done;
+      if (done) continue;
+      const { value } = read;
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBytes) {
+        await reader.cancel();
+        throw errors.badRequest(`Payload exceeds ${maxBytes} byte limit`);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const body = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(body);
+}
+
+async function parseMessageBatchRequest(c: RuntimeContext): Promise<MessageBatchBody> {
+  const maxPayloadBytes = parsePositiveInt(
+    c.env.MAX_MESSAGES_PAYLOAD_BYTES as string,
+    DEFAULT_MAX_MESSAGES_PAYLOAD_BYTES
+  );
+  const rawBody = await readRequestBodyWithLimit(c.req.raw, maxPayloadBytes);
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawBody);
+  } catch {
+    throw errors.badRequest('Invalid JSON in request body');
+  }
+
+  const result = v.safeParse(MessageBatchSchema, parsed);
+  if (!result.success) {
+    throw errors.badRequest(formatIssues(result.issues));
+  }
+  return result.output;
+}
+
+function resolveMaxMessageBytes(env: Env): number {
+  return env.MESSAGE_SIZE_THRESHOLD
+    ? Number.parseInt(env.MESSAGE_SIZE_THRESHOLD, 10)
+    : DEFAULT_MESSAGE_SIZE_THRESHOLD_BYTES;
+}
+
+function validateMessageEntry(
+  msg: MessageBatchBody['messages'][number],
+  maxMessageBytes: number
+): void {
+  if (!msg.messageId) {
+    throw errors.badRequest('Each message must have a messageId string');
+  }
+  if (!msg.sessionId) {
+    throw errors.badRequest('Each message must have a sessionId string');
+  }
+  if (!msg.role || !VALID_MESSAGE_ROLES.has(msg.role)) {
+    throw errors.badRequest(
+      `Invalid role "${msg.role}". Must be one of: user, assistant, system, tool, thinking, plan`
+    );
+  }
+  if (!msg.content) {
+    throw errors.badRequest('Each message must have non-empty content');
+  }
+  if (msg.content.length > maxMessageBytes) {
+    throw errors.badRequest(`Individual message content exceeds ${maxMessageBytes} byte limit`);
+  }
+  if (!msg.timestamp) {
+    throw errors.badRequest('Each message must have a timestamp string');
+  }
+}
+
+function validateMessageBatch(env: Env, body: MessageBatchBody): string {
+  if (body.messages.length === 0) {
+    throw errors.badRequest('messages array must not be empty');
+  }
+  const maxMessagesPerBatch = parsePositiveInt(env.MAX_MESSAGES_PER_BATCH, 100);
+  if (body.messages.length > maxMessagesPerBatch) {
+    throw errors.badRequest(`Maximum ${maxMessagesPerBatch} messages per batch`);
+  }
+
+  const firstMessage = body.messages[0];
+  if (!firstMessage) {
+    throw errors.badRequest('messages array must not be empty');
+  }
+  const maxMessageBytes = resolveMaxMessageBytes(env);
+  const sessionId = firstMessage.sessionId;
+  for (const msg of body.messages) {
+    validateMessageEntry(msg, maxMessageBytes);
+    if (msg.sessionId !== sessionId) {
+      throw errors.badRequest('All messages in a batch must target the same sessionId');
+    }
+  }
+  return sessionId;
+}
+
+async function loadMessageWorkspace(
+  env: Env,
+  workspaceId: string
+): Promise<MessageWorkspace | null> {
+  const db = drizzle(env.DATABASE, { schema });
+  const workspaceRows = await db
+    .select({
+      workspaceId: schema.workspaces.id,
+      userId: schema.workspaces.userId,
+      projectId: schema.workspaces.projectId,
+      chatSessionId: schema.workspaces.chatSessionId,
+      status: schema.workspaces.status,
+      nodeId: schema.workspaces.nodeId,
+      nodeStatus: schema.nodes.status,
+    })
+    .from(schema.workspaces)
+    .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
+    .where(eq(schema.workspaces.id, workspaceId))
+    .limit(1);
+  return workspaceRows[0] ?? null;
+}
+
+function terminalMessagePersistenceResponse(
+  c: RuntimeContext,
+  context: Omit<MessageRouteContext, 'projectId'> & { projectId: string | null },
+  status: string,
+  reason: string
+): Response {
+  const logContext = {
+    ...context,
+    status,
+    reason,
+    action: 'dropped_terminal_resource',
+  };
+  log.info('message_persistence.inactive_workspace', logContext);
+  return c.body(null, 204);
+}
+
+function maybeTerminalMessageWorkspaceResponse(
+  c: RuntimeContext,
+  workspace: MessageWorkspace | null,
+  workspaceId: string,
+  sessionId: string,
+  messageCount: number
+): Response | null {
+  const context = {
+    workspaceId,
+    projectId: workspace?.projectId ?? null,
+    sessionId,
+    messageCount,
+  };
+  if (!workspace) {
+    return terminalMessagePersistenceResponse(c, context, 'missing', 'workspace_missing');
+  }
+  if (!ACTIVE_MESSAGE_WORKSPACE_STATUSES.has(workspace.status)) {
+    return terminalMessagePersistenceResponse(c, context, workspace.status, 'workspace_inactive');
+  }
+  if (
+    !workspace.nodeId ||
+    !workspace.nodeStatus ||
+    nodeStatusTerminatesCallbacks(workspace.nodeStatus)
+  ) {
+    return terminalMessagePersistenceResponse(
+      c,
+      context,
+      workspace.nodeStatus ?? 'missing',
+      'workspace_node_terminal'
+    );
+  }
+  return null;
+}
+
+function rejectMessageSessionMismatch(
+  c: RuntimeContext,
+  context: MessageRouteContext,
+  expectedSessionId: string
+): never {
+  const logContext = {
+    ...context,
+    expectedSessionId,
+    receivedSessionId: context.sessionId,
+    action: 'rejected_batch',
+  };
+  log.error('message_routing.session_mismatch', logContext);
+  waitUntilIfAvailable(
+    c,
+    persistError(
+      c.env.OBSERVABILITY_DATABASE,
+      {
+        source: 'api',
+        level: 'error',
+        message: `Message routing mismatch: workspace ${context.workspaceId} linked to session ${expectedSessionId}, but messages target ${context.sessionId}`,
+        context: logContext,
+        workspaceId: context.workspaceId,
+      },
+      c.env
+    )
+  );
+  throw errors.badRequest(
+    `Session mismatch: workspace is linked to session ${expectedSessionId}, ` +
+      `but messages target session ${context.sessionId}`
+  );
+}
+
+function rejectWorkspaceWithoutChatSession(c: RuntimeContext, context: MessageRouteContext): never {
+  const logContext = {
+    ...context,
+    providedSessionId: context.sessionId,
+    action: 'rejected_no_session_link',
+  };
+  log.warn('message_routing.no_chat_session_linked', logContext);
+  waitUntilIfAvailable(
+    c,
+    persistError(
+      c.env.OBSERVABILITY_DATABASE,
+      {
+        source: 'api',
+        level: 'warn',
+        message: `Rejecting messages for workspace ${context.workspaceId}: no chatSessionId linked yet`,
+        context: logContext,
+        workspaceId: context.workspaceId,
+      },
+      c.env
+    )
+  );
+  throw errors.conflict(
+    'Workspace has no linked chat session yet — messages cannot be routed safely'
+  );
+}
+
+function assertMessageWorkspaceAcceptsBatch(
+  c: RuntimeContext,
+  workspace: MessageWorkspace | null,
+  workspaceId: string,
+  sessionId: string,
+  messageCount: number
+): asserts workspace is MessageWorkspace & { projectId: string; chatSessionId: string } {
+  if (!workspace) {
+    throw errors.notFound('Workspace');
+  }
+  if (!workspace.projectId) {
+    throw errors.badRequest('Workspace is not linked to a project');
+  }
+
+  const context: MessageRouteContext = {
+    workspaceId,
+    projectId: workspace.projectId,
+    sessionId,
+    messageCount,
+  };
+  if (workspace.chatSessionId && workspace.chatSessionId !== sessionId) {
+    rejectMessageSessionMismatch(c, context, workspace.chatSessionId);
+  }
+  if (!workspace.chatSessionId) {
+    rejectWorkspaceWithoutChatSession(c, context);
+  }
+}
+
+function toProjectDataMessages(body: MessageBatchBody) {
+  return body.messages.map((m) => ({
+    messageId: m.messageId,
+    role: m.role,
+    content: m.content,
+    toolMetadata: m.toolMetadata ? safeParseJson(m.toolMetadata) : null,
+    timestamp: m.timestamp,
+    sequence: m.sequence,
+    origin: m.origin ?? null,
+  }));
+}
+
+function sessionLimitReachedResponse(c: RuntimeContext, context: MessageRouteContext): Response {
+  log.error('message_persistence.session_message_limit_exceeded', {
+    ...context,
+    action: 'rejected_session_message_limit',
+  });
+  waitUntilIfAvailable(
+    c,
+    persistError(
+      c.env.OBSERVABILITY_DATABASE,
+      {
+        source: 'api',
+        level: 'error',
+        message: `Session ${context.sessionId} has reached the message limit`,
+        context: { ...context, action: 'rejected_session_message_limit' },
+        workspaceId: context.workspaceId,
+      },
+      c.env
+    )
+  );
+  return c.json(
+    {
+      error: 'SESSION_MESSAGE_LIMIT_EXCEEDED',
+      message: 'Session message limit reached; no additional messages can be persisted',
+    },
+    409
+  );
+}
+
+function handleMessagePersistenceError(
+  c: RuntimeContext,
+  context: MessageRouteContext,
+  err: unknown
+): Response {
+  const message = err instanceof Error ? err.message : 'Failed to persist messages';
+  if (message.includes('SESSION_MESSAGE_LIMIT_EXCEEDED') || message.includes('message limit')) {
+    return sessionLimitReachedResponse(c, context);
+  }
+  if (message.includes('not found') || message.includes('is stopped')) {
+    log.info('message_persistence.dropped_terminal_do_response', {
+      ...context,
+      error: message,
+      action: 'dropped_terminal_resource',
+    });
+    return c.body(null, 204);
+  }
+  log.error('message_persistence.do_error_transient', {
+    ...context,
+    error: message,
+    action: 'rejected_transient',
+  });
+  return c.json(
+    { error: 'SERVICE_UNAVAILABLE', message: 'Message persistence temporarily unavailable' },
+    503
+  );
+}
+
+function partialSessionLimitResponse(
+  c: RuntimeContext,
+  context: MessageRouteContext,
+  result: MessageBatchPersistenceRouteResult
+): Response {
+  const logContext = {
+    ...context,
+    persisted: result.persisted,
+    duplicates: result.duplicates,
+    maxMessages: result.maxMessages,
+    remainingCapacity: result.remainingCapacity,
+    action: 'partial_persist_session_message_limit',
+  };
+  log.error('message_persistence.session_message_limit_reached', logContext);
+  waitUntilIfAvailable(
+    c,
+    persistError(
+      c.env.OBSERVABILITY_DATABASE,
+      {
+        source: 'api',
+        level: 'error',
+        message: `Session ${context.sessionId} reached the message limit while persisting a batch`,
+        context: logContext,
+        workspaceId: context.workspaceId,
+      },
+      c.env
+    )
+  );
+  return c.json(
+    {
+      error: 'SESSION_MESSAGE_LIMIT_EXCEEDED',
+      message: 'Session message limit reached; only part of the batch was persisted',
+      persisted: result.persisted,
+      duplicates: result.duplicates,
+      maxMessages: result.maxMessages,
+      remainingCapacity: result.remainingCapacity,
+    },
+    409
+  );
+}
+
+function bridgePersistedAgentActivity(
+  c: RuntimeContext,
+  projectId: string,
+  result: MessageBatchPersistenceRouteResult,
+  body: MessageBatchBody
+): void {
+  if (result.persisted === 0) return;
+  c.executionCtx.waitUntil(
+    bridgeAgentActivity(
+      c.env,
+      projectId,
+      body.messages.map((m) => ({
+        role: m.role,
+        content: m.content,
+        toolMetadata: m.toolMetadata ? safeParseJson(m.toolMetadata) : undefined,
+      }))
+    )
+  );
+}
+
+async function verifyWorkspaceGitHubOwnerAccess(input: {
+  env: Env;
+  workspaceId: string;
+  projectId: string | null;
+  userId: string;
+  repository: string;
+  externalInstallationId: string;
+  githubRepoId: number | null;
+}): Promise<number> {
+  const accessToken = await getGitHubUserAccessTokenForOwner(
+    input.env,
+    input.userId,
+    'workspace-git-token'
+  );
+  if (!accessToken) {
+    log.warn('workspace_git_token_user_access_missing', {
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      userId: input.userId,
+      action: 'rejected',
+    });
+    throw errors.forbidden('GitHub user token unavailable');
+  }
+
+  // Every git and gh credential exchange lands here, so pass env to use the
+  // short user-access cache (GITHUB_REPO_ACCESS_CACHE_TTL_SECONDS) instead of a
+  // paginated GitHub repository listing per operation.
+  const verifiedRepo = await assertRepositoryAccess(
+    accessToken,
+    input.externalInstallationId,
+    input.repository,
+    input.userId,
+    'project-access',
+    input.env
+  );
+
+  if (input.githubRepoId !== null && verifiedRepo.id !== input.githubRepoId) {
+    log.warn('workspace_git_token_repo_id_drift', {
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      userId: input.userId,
+      expectedRepoId: input.githubRepoId,
+      verifiedRepoId: verifiedRepo.id,
+      action: 'rejected',
+    });
+    throw errors.forbidden('GitHub repository access has changed; repository ID no longer matches');
+  }
+
+  return verifiedRepo.id;
+}
+
+/**
+ * Resolve numeric repository IDs for a project's additional Repository Access
+ * entries, re-verifying user∩app access at the token-mint boundary. Stored rows
+ * whose access has been revoked (or whose installation no longer exposes them)
+ * are dropped from the scope — an unselected/inaccessible repo simply never makes
+ * it into the minted token's `repository_ids`, so it fails clearly downstream.
+ * Failure to fetch the accessible set returns the empty set rather than throwing,
+ * so the primary-repo token still mints (additional repos degrade, never break
+ * the primary clone).
+ */
+async function resolveAdditionalRepositoryIds(input: {
+  env: Env;
+  db: ReturnType<typeof drizzle<typeof schema>>;
+  workspaceId: string;
+  projectId: string;
+  userId: string;
+  externalInstallationId: string;
+}): Promise<number[]> {
+  const rows = await input.db
+    .select({
+      repository: schema.projectGithubRepositories.repository,
+      githubRepoId: schema.projectGithubRepositories.githubRepoId,
+    })
+    .from(schema.projectGithubRepositories)
+    .where(eq(schema.projectGithubRepositories.projectId, input.projectId));
+  if (rows.length === 0) {
+    return [];
+  }
+
+  const accessToken = await getGitHubUserAccessTokenForOwner(
+    input.env,
+    input.userId,
+    'workspace-git-token'
+  );
+  if (!accessToken) {
+    log.warn('workspace_git_token_additional_repos_user_access_missing', {
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      userId: input.userId,
+      action: 'additional_repos_skipped',
+    });
+    return [];
+  }
+
+  let accessibleById = new Map<string, number>();
+  try {
+    const repositories = await getUserInstallationRepositories(
+      accessToken,
+      input.externalInstallationId,
+      {
+        flow: 'project-access',
+        userId: input.userId,
+        installationId: input.externalInstallationId,
+      }
+    );
+    accessibleById = new Map(repositories.map((r) => [r.fullName.toLowerCase(), r.id]));
+  } catch (err) {
+    log.warn('workspace_git_token_additional_repos_unavailable', {
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      userId: input.userId,
+      error: err instanceof Error ? err.message : String(err),
+      action: 'additional_repos_skipped',
+    });
+    return [];
+  }
+
+  const ids: number[] = [];
+  for (const row of rows) {
+    const accessibleId = accessibleById.get(row.repository.toLowerCase());
+    if (accessibleId === undefined) {
+      log.warn('workspace_git_token_additional_repo_access_revoked', {
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+        userId: input.userId,
+        repository: row.repository,
+        action: 'excluded_from_scope',
+      });
+      continue;
+    }
+    // Prefer the live, rename-stable id from the accessible set. Stored ids can
+    // drift if the repo was deleted/recreated; the live id is authoritative.
+    ids.push(accessibleId);
+  }
+  return ids;
+}
 
 runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (c) => {
   const workspaceId = c.req.param('id');
@@ -40,16 +869,11 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
 
   const db = drizzle(c.env.DATABASE, { schema });
 
-  const workspaceRows = await db
-    .select({ userId: schema.workspaces.userId, projectId: schema.workspaces.projectId })
-    .from(schema.workspaces)
-    .where(eq(schema.workspaces.id, workspaceId))
-    .limit(1);
+  const workspace = await assertWorkspaceCallbackResourceById(c.env, workspaceId, 'agent_key');
 
-  const workspace = workspaceRows[0];
-  if (!workspace) {
-    throw errors.notFound('Workspace');
-  }
+  // OpenCode always uses a user-supplied credential (zen/go/custom). It never
+  // routes through the SAM platform proxy, so it always requires a dedicated key.
+  const opencodeRequiresDedicatedCredential = body.agentType === 'opencode';
 
   const encryptionKey = getCredentialEncryptionKey(c.env);
   let credentialData = await getDecryptedAgentKey(
@@ -59,31 +883,89 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     encryptionKey,
     workspace.projectId
   );
+  let credentialProviderMode = 'direct';
+
+  // SECURITY: Never return raw platform-managed credentials to tenant workspaces.
+  // Platform credentials are control-plane secrets and must only be used via
+  // SAM-mediated proxy flows (callback-token auth), not injected into tenant
+  // containers as env vars or auth files.
+  if (credentialData?.credentialSource === 'platform') {
+    credentialData = null;
+  }
 
   // Cloud provider credential fallback: if no dedicated agent key, check if the agent
   // definition specifies a cloud provider whose credential can be used instead.
-  // Currently applies to OpenCode, which shares SCW_SECRET_KEY with Scaleway cloud.
-  const agentDef = isValidAgentType(body.agentType) ? getAgentDefinition(body.agentType) : undefined;
-  if (!credentialData && agentDef?.fallbackCloudProvider) {
-    const scalewayToken = await getDecryptedCredential(db, workspace.userId, agentDef.fallbackCloudProvider, encryptionKey);
-    if (scalewayToken) {
-      const secretKey = extractScalewaySecretKey(scalewayToken);
+  const agentDef = isValidAgentType(body.agentType)
+    ? getAgentDefinition(body.agentType)
+    : undefined;
+  const fallbackCloudProvider = agentDef?.fallbackCloudProvider;
+  if (!credentialData && fallbackCloudProvider) {
+    const fallbackCredential = await getDecryptedCredentialRecord(
+      db,
+      workspace.userId,
+      fallbackCloudProvider,
+      encryptionKey
+    );
+    if (fallbackCredential) {
+      const secretKey = extractScalewaySecretKey(fallbackCredential.credential);
       if (secretKey) {
-        credentialData = { credential: secretKey, credentialKind: 'api-key', credentialSource: 'user' };
+        credentialData = {
+          credential: secretKey,
+          credentialKind: 'api-key',
+          credentialSource: 'user',
+          credentialReference: fallbackCredential.credentialReference,
+          credentialProvider: fallbackCredential.credentialProvider,
+        };
+        credentialProviderMode = 'fallback-cloud-provider';
       } else {
-        log.warn('agent_key.scaleway_credential_missing_secret_key', { workspaceId, userId: workspace.userId, agentType: body.agentType });
+        log.warn('agent_key.scaleway_credential_missing_secret_key', {
+          workspaceId,
+          userId: workspace.userId,
+          agentType: body.agentType,
+        });
       }
     }
+  }
+
+  if (credentialData && opencodeRequiresDedicatedCredential) {
+    const persistedAttribution = await persistAgentCredentialAttribution(c.env, workspace, {
+      workspaceId,
+      agentSessionId: body.agentSessionId,
+      agentType: body.agentType,
+      attribution: credentialAttributionFromData(
+        credentialData,
+        body.agentType,
+        credentialProviderMode
+      ),
+    });
+    return callbackJsonWithJit(c, workspace, 'agent_key', {
+      apiKey: credentialData.credential,
+      credentialKind: credentialData.credentialKind,
+      credentialSource: credentialData.credentialSource,
+      credentialReference: credentialData.credentialReference,
+      credentialProvider:
+        credentialData.credentialProvider ?? agentCredentialProviderFallback(body.agentType),
+      providerMode: credentialProviderMode,
+      credentialGeneration: persistedAttribution?.credentialGeneration,
+    });
+  }
+
+  if (!credentialData && opencodeRequiresDedicatedCredential) {
+    log.info('agent_key.opencode_byo_provider_missing_credential', {
+      workspaceId,
+      userId: workspace.userId,
+      agentType: body.agentType,
+    });
+    throw errors.notFound('Agent credential');
   }
 
   // AI proxy: when enabled and agent is eligible, return proxy config when the
   // credential can be forwarded to the upstream provider.
   // Two modes:
   // - Claude/Codex with no user credential + providerMode='sam' → platform proxy (callback-token auth)
-  // - OpenCode with no user credential → existing platform proxy fallback
   // - User has upstream-compatible credential → passthrough proxy (user credential
   //   forwarded via auth headers, wstoken in URL path for analytics/rate-limiting)
-  // Note: Claude/Codex platform proxy fallback requires explicit providerMode='sam' selection.
+  // Note: platform proxy fallback requires explicit provider selection.
   // Without it, users with no credential get a 404 (agent not configured).
   const aiProxyEnabled = (c.env.AI_PROXY_ENABLED ?? 'true') !== 'false';
   if (PROXY_ELIGIBLE_AGENTS.has(body.agentType) && aiProxyEnabled) {
@@ -121,7 +1003,9 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
           const parsed: AIProxyConfig = JSON.parse(kvConfig);
           if (parsed.defaultModel) defaultModel = parsed.defaultModel;
         }
-      } catch { /* KV unavailable or corrupt data — use env/default */ }
+      } catch {
+        /* KV unavailable or corrupt data — use env/default */
+      }
     }
 
     // Claude Code/Codex explicit SAM mode must route through the SAM proxy,
@@ -130,32 +1014,29 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
       credentialData = null;
     }
 
-    if (credentialData && !((isClaudeCode || isCodex) && credentialData.credentialKind === 'oauth-token')) {
+    if (
+      credentialData &&
+      credentialData.baseUrl &&
+      credentialData.providerDialect &&
+      resolveHarnessDialect(body.agentType, credentialData.providerDialect) &&
+      !((isClaudeCode || isCodex) && credentialData.credentialKind === 'oauth-token')
+    ) {
       // User has their own credential — use passthrough proxy routes.
       // URL-path auth: wstoken embedded in URL, user credential in auth headers.
-      let proxyBaseUrl: string;
-      let proxyProvider: string;
-      if (isClaudeCode) {
-        // Claude Code appends /v1/messages to ANTHROPIC_BASE_URL automatically.
-        // Passthrough route: /ai/proxy/{wstoken}/anthropic/v1/messages
-        // So base URL should be: /ai/proxy/{wstoken}/anthropic
-        // But wstoken is not known at this point — VM agent will substitute {wstoken}
-        // with the callback token at injection time.
-        proxyBaseUrl = `https://api.${baseDomain}/ai/proxy/{wstoken}/anthropic`;
-        proxyProvider = 'anthropic-passthrough';
-      } else if (isCodex) {
-        // Codex appends /chat/completions to OPENAI_BASE_URL.
-        // Passthrough route: /ai/proxy/{wstoken}/openai/v1/chat/completions
-        proxyBaseUrl = `https://api.${baseDomain}/ai/proxy/{wstoken}/openai/v1`;
-        proxyProvider = 'openai-passthrough';
-      } else {
-        // OpenCode: openai-compatible, same pattern as Codex
-        proxyBaseUrl = `https://api.${baseDomain}/ai/proxy/{wstoken}/openai/v1`;
-        proxyProvider = 'openai-passthrough';
+      const inferenceConfig = buildPassthroughInferenceConfig({
+        agentType: body.agentType,
+        baseDomain,
+        defaultModel,
+      });
+      if (!inferenceConfig) {
+        throw errors.notFound('Agent credential');
       }
 
       log.info('agent_key.ai_proxy_passthrough', {
-        workspaceId, userId: workspace.userId, proxyBaseUrl, agentType: body.agentType,
+        workspaceId,
+        userId: workspace.userId,
+        proxyBaseUrl: inferenceConfig.baseURL,
+        agentType: body.agentType,
       });
 
       // Track credential source on associated task
@@ -166,40 +1047,84 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
         .limit(1);
       const task = taskRows[0];
       if (task) {
+        await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'agent_key');
         await db
           .update(schema.tasks)
           .set({ agentCredentialSource: credentialData.credentialSource })
           .where(eq(schema.tasks.id, task.id));
       }
 
-      return c.json({
-        apiKey: credentialData.credential,
+      const persistedAttribution = await persistAgentCredentialAttribution(c.env, workspace, {
+        workspaceId,
+        agentSessionId: body.agentSessionId,
+        agentType: body.agentType,
+        attribution: credentialAttributionFromData(
+          credentialData,
+          body.agentType,
+          'proxy-passthrough'
+        ),
+      });
+
+      return callbackJsonWithJit(c, workspace, 'agent_key', {
+        apiKey: '__sam_proxy__',
         credentialKind: credentialData.credentialKind,
         credentialSource: credentialData.credentialSource,
-        inferenceConfig: {
-          provider: proxyProvider,
-          baseURL: proxyBaseUrl,
-          model: defaultModel,
-          apiKeySource: 'user-credential',
-        },
+        credentialReference: credentialData.credentialReference,
+        credentialProvider:
+          credentialData.credentialProvider ??
+          credentialData.providerDialect ??
+          agentCredentialProviderFallback(body.agentType),
+        providerMode: 'proxy-passthrough',
+        credentialGeneration: persistedAttribution?.credentialGeneration,
+        inferenceConfig,
       });
     }
 
+    if (credentialData?.baseUrl) {
+      log.warn('agent_key.ai_proxy_incompatible_passthrough_credential', {
+        workspaceId,
+        userId: workspace.userId,
+        agentType: body.agentType,
+        providerDialect: credentialData.providerDialect ?? null,
+      });
+      throw errors.notFound('Agent credential');
+    }
+
     if (credentialData) {
-      return c.json({
+      const persistedAttribution = await persistAgentCredentialAttribution(c.env, workspace, {
+        workspaceId,
+        agentSessionId: body.agentSessionId,
+        agentType: body.agentType,
+        attribution: credentialAttributionFromData(
+          credentialData,
+          body.agentType,
+          credentialProviderMode
+        ),
+      });
+      return callbackJsonWithJit(c, workspace, 'agent_key', {
         apiKey: credentialData.credential,
         credentialKind: credentialData.credentialKind,
+        credentialSource: credentialData.credentialSource,
+        credentialReference: credentialData.credentialReference,
+        credentialProvider:
+          credentialData.credentialProvider ?? agentCredentialProviderFallback(body.agentType),
+        providerMode: credentialProviderMode,
+        credentialGeneration: persistedAttribution?.credentialGeneration,
       });
     }
 
     // Claude Code and Codex require an explicit SAM provider selection before
-    // using platform proxy. OpenCode keeps its existing platform fallback path.
+    // using platform proxy. OpenCode never reaches this block — it always
+    // requires a dedicated user credential and returns/throws above.
     if (isClaudeCode || isCodex) {
       const providerMode = await getExplicitProviderMode();
 
       if (providerMode !== 'sam') {
         log.info('agent_key.no_credential_no_sam_provider', {
-          workspaceId, userId: workspace.userId, agentType: body.agentType, providerMode,
+          workspaceId,
+          userId: workspace.userId,
+          agentType: body.agentType,
+          providerMode,
         });
         throw errors.notFound('Agent credential');
       }
@@ -207,20 +1132,21 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
 
     // Activate platform proxy.
     // Auth via callback token in headers.
-    let proxyBaseUrl: string;
-    let proxyProvider: string;
-    if (isClaudeCode) {
-      proxyBaseUrl = `https://api.${baseDomain}/ai/anthropic`;
-      proxyProvider = 'anthropic-proxy';
-    } else if (isCodex) {
-      proxyBaseUrl = `https://api.${baseDomain}/ai/v1`;
-      proxyProvider = 'openai-proxy';
-    } else {
-      proxyBaseUrl = `https://api.${baseDomain}/ai/v1`;
-      proxyProvider = 'openai-compatible';
+    const inferenceConfig = buildPlatformInferenceConfig({
+      agentType: body.agentType,
+      baseDomain,
+      defaultModel,
+    });
+    if (!inferenceConfig) {
+      throw errors.notFound('Agent credential');
     }
 
-    log.info('agent_key.ai_proxy_sam_provider', { workspaceId, userId: workspace.userId, proxyBaseUrl, agentType: body.agentType });
+    log.info('agent_key.ai_proxy_sam_provider', {
+      workspaceId,
+      userId: workspace.userId,
+      proxyBaseUrl: inferenceConfig.baseURL,
+      agentType: body.agentType,
+    });
 
     // Track credential source on associated task
     const taskRows = await db
@@ -230,22 +1156,30 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
       .limit(1);
     const task = taskRows[0];
     if (task) {
+      await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'agent_key');
       await db
         .update(schema.tasks)
         .set({ agentCredentialSource: 'platform' })
         .where(eq(schema.tasks.id, task.id));
     }
 
-    return c.json({
+    const platformAttribution = platformProxyAttribution(body.agentType);
+    const persistedAttribution = await persistAgentCredentialAttribution(c.env, workspace, {
+      workspaceId,
+      agentSessionId: body.agentSessionId,
+      agentType: body.agentType,
+      attribution: platformAttribution,
+    });
+
+    return callbackJsonWithJit(c, workspace, 'agent_key', {
       apiKey: '__platform_proxy__',
       credentialKind: 'api-key' as const,
       credentialSource: 'platform' as const,
-      inferenceConfig: {
-        provider: proxyProvider,
-        baseURL: proxyBaseUrl,
-        model: defaultModel,
-        apiKeySource: 'callback-token',
-      },
+      credentialReference: platformAttribution.credentialReference,
+      credentialProvider: platformAttribution.credentialProvider,
+      providerMode: platformAttribution.providerMode,
+      credentialGeneration: persistedAttribution?.credentialGeneration,
+      inferenceConfig,
     });
   }
 
@@ -262,6 +1196,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
       .limit(1);
     const task = taskRows[0];
     if (task) {
+      await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'agent_key');
       await db
         .update(schema.tasks)
         .set({ agentCredentialSource: 'platform' })
@@ -269,9 +1204,26 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     }
   }
 
-  return c.json({
+  const persistedAttribution = await persistAgentCredentialAttribution(c.env, workspace, {
+    workspaceId,
+    agentSessionId: body.agentSessionId,
+    agentType: body.agentType,
+    attribution: credentialAttributionFromData(
+      credentialData,
+      body.agentType,
+      credentialProviderMode
+    ),
+  });
+
+  return callbackJsonWithJit(c, workspace, 'agent_key', {
     apiKey: credentialData.credential,
     credentialKind: credentialData.credentialKind,
+    credentialSource: credentialData.credentialSource,
+    credentialReference: credentialData.credentialReference,
+    credentialProvider:
+      credentialData.credentialProvider ?? agentCredentialProviderFallback(body.agentType),
+    providerMode: credentialProviderMode,
+    credentialGeneration: persistedAttribution?.credentialGeneration,
   });
 });
 
@@ -282,131 +1234,182 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
  * The VM agent reads the updated auth file from the container and sends it here.
  * Uses workspace callback auth.
  */
-runtimeRoutes.post('/:id/agent-credential-sync', jsonValidator(AgentCredentialSyncSchema), async (c) => {
-  const workspaceId = c.req.param('id');
-  await verifyWorkspaceCallbackAuth(c, workspaceId);
+runtimeRoutes.post(
+  '/:id/agent-credential-sync',
+  jsonValidator(AgentCredentialSyncSchema),
+  async (c) => {
+    const workspaceId = c.req.param('id');
+    await verifyWorkspaceCallbackAuth(c, workspaceId);
 
-  // Payload size check (64KB default — auth.json files are typically a few KB).
-  const contentLength = parseInt(c.req.header('content-length') || '0', 10);
-  const maxPayloadBytes = parsePositiveInt(c.env.MAX_AGENT_CREDENTIAL_SYNC_BYTES as string, 64 * 1024);
-  if (contentLength > maxPayloadBytes) {
-    throw errors.badRequest(`Payload exceeds ${maxPayloadBytes} byte limit`);
-  }
+    // Payload size check (64KB default — auth.json files are typically a few KB).
+    const contentLength = parseInt(c.req.header('content-length') || '0', 10);
+    const maxPayloadBytes = parsePositiveInt(
+      c.env.MAX_AGENT_CREDENTIAL_SYNC_BYTES as string,
+      64 * 1024
+    );
+    if (contentLength > maxPayloadBytes) {
+      throw errors.badRequest(`Payload exceeds ${maxPayloadBytes} byte limit`);
+    }
 
-  const body = c.req.valid('json');
-  const agentType = body.agentType;
-  const credentialKind = body.credentialKind;
+    const body = c.req.valid('json');
+    const agentType = body.agentType;
+    const credentialKind = body.credentialKind;
 
-  // Validate against known values. Use the shared catalog so new agents
-  // are accepted automatically without a manual allowlist update.
-  const validCredentialKinds = new Set(['api-key', 'oauth-token']);
-  if (!agentType || !isValidAgentType(agentType)) {
-    throw errors.badRequest('Invalid agentType');
-  }
-  if (!credentialKind || !validCredentialKinds.has(credentialKind)) {
-    throw errors.badRequest('Invalid credentialKind');
-  }
+    // Validate against known values. Use the shared catalog so new agents
+    // are accepted automatically without a manual allowlist update.
+    const validCredentialKinds = new Set(['api-key', 'oauth-token']);
+    if (!agentType || !isValidAgentType(agentType)) {
+      throw errors.badRequest('Invalid agentType');
+    }
+    if (!credentialKind || !validCredentialKinds.has(credentialKind)) {
+      throw errors.badRequest('Invalid credentialKind');
+    }
 
-  const db = drizzle(c.env.DATABASE, { schema });
+    const db = drizzle(c.env.DATABASE, { schema });
 
-  // Look up the workspace to get the user ID and project ID.
-  const workspaceRows = await db
-    .select({ userId: schema.workspaces.userId, projectId: schema.workspaces.projectId })
-    .from(schema.workspaces)
-    .where(eq(schema.workspaces.id, workspaceId))
-    .limit(1);
+    // Look up the workspace to get the user ID and project ID.
+    const workspace = await assertWorkspaceCallbackResourceById(
+      c.env,
+      workspaceId,
+      'agent_credential_sync'
+    );
 
-  const workspace = workspaceRows[0];
-  if (!workspace) {
-    throw errors.notFound('Workspace');
-  }
-
-  // Find the existing credential row to update. Prefer project-scoped match
-  // when the workspace is in a project; fall back to user-scoped only when
-  // there is no project-scoped row at all.
-  //
-  // Match the same HIGH #2 invariant enforced by runtime credential delivery
-  // and CodexRefreshLock: if a project-scoped row exists but is inactive, do
-  // NOT fall through to the user-scoped row. That would silently collapse a
-  // project override back onto the user default during post-session refresh sync.
-  let existing: typeof schema.credentials.$inferSelect | undefined;
-  if (workspace.projectId) {
-    const projectMatch = await db
-      .select()
-      .from(schema.credentials)
-      .where(
-        and(
-          eq(schema.credentials.userId, workspace.userId),
-          eq(schema.credentials.projectId, workspace.projectId),
-          eq(schema.credentials.credentialType, 'agent-api-key'),
-          eq(schema.credentials.agentType, agentType),
-          eq(schema.credentials.credentialKind, credentialKind)
+    // Find the existing credential row to update. Prefer project-scoped match
+    // when the workspace is in a project; fall back to user-scoped only when
+    // there is no project-scoped row at all.
+    //
+    // Match the same HIGH #2 invariant enforced by runtime credential delivery
+    // and CodexRefreshLock: if a project-scoped row exists but is inactive, do
+    // NOT fall through to the user-scoped row. That would silently collapse a
+    // project override back onto the user default during post-session refresh sync.
+    let existing: typeof schema.credentials.$inferSelect | undefined;
+    if (workspace.projectId) {
+      const projectMatch = await db
+        .select()
+        .from(schema.credentials)
+        .where(
+          and(
+            eq(schema.credentials.userId, workspace.userId),
+            eq(schema.credentials.projectId, workspace.projectId),
+            eq(schema.credentials.credentialType, 'agent-api-key'),
+            eq(schema.credentials.agentType, agentType),
+            eq(schema.credentials.credentialKind, credentialKind)
+          )
         )
-      )
-      .limit(1);
-    const projectCredential = projectMatch[0];
-    if (projectCredential) {
-      if (projectCredential.isActive) {
-        existing = projectCredential;
-      } else {
-        return c.json({ success: false, reason: 'credential_not_found' });
+        .limit(1);
+      const projectCredential = projectMatch[0];
+      if (projectCredential) {
+        if (projectCredential.isActive) {
+          existing = projectCredential;
+        } else {
+          return callbackJsonWithJit(c, workspace, 'agent_credential_sync', {
+            success: false,
+            reason: 'credential_not_found',
+          });
+        }
       }
     }
-  }
-  if (!existing) {
-    const userMatch = await db
-      .select()
-      .from(schema.credentials)
-      .where(
-        and(
-          eq(schema.credentials.userId, workspace.userId),
-          isNull(schema.credentials.projectId),
-          eq(schema.credentials.credentialType, 'agent-api-key'),
-          eq(schema.credentials.agentType, agentType),
-          eq(schema.credentials.credentialKind, credentialKind),
-          eq(schema.credentials.isActive, true)
+    if (!existing) {
+      const userMatch = await db
+        .select()
+        .from(schema.credentials)
+        .where(
+          and(
+            eq(schema.credentials.userId, workspace.userId),
+            isNull(schema.credentials.projectId),
+            eq(schema.credentials.credentialType, 'agent-api-key'),
+            eq(schema.credentials.agentType, agentType),
+            eq(schema.credentials.credentialKind, credentialKind),
+            eq(schema.credentials.isActive, true)
+          )
         )
+        .limit(1);
+      existing = userMatch[0];
+    }
+    if (!existing) {
+      // No credential found — the user may have deleted it while the session was active.
+      return callbackJsonWithJit(c, workspace, 'agent_credential_sync', {
+        success: false,
+        reason: 'credential_not_found',
+      });
+    }
+
+    // Decrypt the current credential to compare.
+    const currentCredential = await decrypt(
+      existing.encryptedToken,
+      existing.iv,
+      getCredentialEncryptionKey(c.env)
+    );
+
+    // Only update if the credential has actually changed.
+    if (currentCredential === body.credential) {
+      return callbackJsonWithJit(c, workspace, 'agent_credential_sync', {
+        success: true,
+        updated: false,
+      });
+    }
+
+    // Re-encrypt with a fresh IV and update.
+    const { ciphertext, iv } = await encrypt(body.credential, getCredentialEncryptionKey(c.env));
+    const update = await c.env.DATABASE.prepare(
+      `UPDATE credentials
+          SET encrypted_token = ?, iv = ?, updated_at = ?
+        WHERE id = ?
+          AND EXISTS (
+            SELECT 1
+              FROM workspaces w
+              JOIN nodes n ON n.id = w.node_id
+             WHERE w.id = ?
+               AND w.user_id = ?
+               AND w.project_id IS ?
+               AND w.chat_session_id IS ?
+               AND w.node_id IS ?
+               AND w.status = ?
+               AND n.status = ?
+          )`
+    )
+      .bind(
+        ciphertext,
+        iv,
+        new Date().toISOString(),
+        existing.id,
+        workspace.workspaceId,
+        workspace.userId,
+        workspace.projectId,
+        workspace.chatSessionId,
+        workspace.nodeId,
+        workspace.status,
+        workspace.nodeStatus
       )
-      .limit(1);
-    existing = userMatch[0];
-  }
-  if (!existing) {
-    // No credential found — the user may have deleted it while the session was active.
-    return c.json({ success: false, reason: 'credential_not_found' });
-  }
+      .run();
+    if ((update.meta.changes ?? 0) !== 1) {
+      await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'agent_credential_sync');
+      throw errors.gone('Workspace callback state changed; callback resource is gone');
+    }
 
-  // Decrypt the current credential to compare.
-  const currentCredential = await decrypt(
-    existing.encryptedToken,
-    existing.iv,
-    getCredentialEncryptionKey(c.env)
-  );
-
-  // Only update if the credential has actually changed.
-  if (currentCredential === body.credential) {
-    return c.json({ success: true, updated: false });
-  }
-
-  // Re-encrypt with a fresh IV and update.
-  const { ciphertext, iv } = await encrypt(body.credential, getCredentialEncryptionKey(c.env));
-  await db
-    .update(schema.credentials)
-    .set({
+    await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'agent_credential_sync');
+    await syncActiveAgentCredentialSecret(c.env.DATABASE, {
+      userId: workspace.userId,
+      projectId: existing.projectId,
+      agentType,
+      credentialKind,
       encryptedToken: ciphertext,
       iv,
-      updatedAt: new Date().toISOString(),
-    })
-    .where(eq(schema.credentials.id, existing.id));
+    });
 
-  log.info('agent_credential_sync.credential_updated', {
-    workspaceId,
-    agentType,
-    credentialKind,
-    credentialId: existing.id,
-  });
+    log.info('agent_credential_sync.credential_updated', {
+      workspaceId,
+      agentType,
+      credentialKind,
+      credentialId: existing.id,
+    });
 
-  return c.json({ success: true, updated: true });
-});
+    return callbackJsonWithJit(c, workspace, 'agent_credential_sync', {
+      success: true,
+      updated: true,
+    });
+  }
+);
 
 /**
  * POST /:id/agent-settings — VM agent callback to fetch user's agent settings.
@@ -419,19 +1422,7 @@ runtimeRoutes.post('/:id/agent-settings', jsonValidator(AgentTypeBodySchema), as
 
   const db = drizzle(c.env.DATABASE, { schema });
 
-  const workspaceRows = await db
-    .select({
-      userId: schema.workspaces.userId,
-      projectId: schema.workspaces.projectId,
-    })
-    .from(schema.workspaces)
-    .where(eq(schema.workspaces.id, workspaceId))
-    .limit(1);
-
-  const workspace = workspaceRows[0];
-  if (!workspace) {
-    throw errors.notFound('Workspace');
-  }
+  const workspace = await assertWorkspaceCallbackResourceById(c.env, workspaceId, 'agent_settings');
 
   // Fetch user-level agent settings (existing behaviour).
   const settingsRows = await db
@@ -459,14 +1450,16 @@ runtimeRoutes.post('/:id/agent-settings', jsonValidator(AgentTypeBodySchema), as
     }
   }
 
-  // Resolution: project.agentDefaults[agentType] > user agent_settings > null.
+  // Resolution: project.agentDefaults[agentType] > user agent_settings > platform default
+  // (permission mode only; model stays null so the agent picks its own). An agent profile's
+  // permission mode is applied on top of this by the VM agent (PermissionModeOverride).
   // OpenCode-specific provider/baseUrl stay user-scoped (phase 1 does not include them).
-  return c.json({
+  return callbackJsonWithJit(c, workspace, 'agent_settings', {
     model: projectDefaults.model ?? userRow?.model ?? null,
-    permissionMode: projectDefaults.permissionMode ?? userRow?.permissionMode ?? null,
+    permissionMode:
+      projectDefaults.permissionMode ?? userRow?.permissionMode ?? DEFAULT_AGENT_PERMISSION_MODE,
     opencodeProvider: userRow?.opencodeProvider ?? null,
     opencodeBaseUrl: userRow?.opencodeBaseUrl ?? null,
-    opencodeProviderName: userRow?.opencodeProviderName ?? null,
   });
 });
 runtimeRoutes.get('/:id/runtime', async (c) => {
@@ -477,25 +1470,31 @@ runtimeRoutes.get('/:id/runtime', async (c) => {
 
   const workspaceRows = await db
     .select({
-      id: schema.workspaces.id,
+      workspaceId: schema.workspaces.id,
+      userId: schema.workspaces.userId,
       repository: schema.workspaces.repository,
       branch: schema.workspaces.branch,
       projectId: schema.workspaces.projectId,
       chatSessionId: schema.workspaces.chatSessionId,
       status: schema.workspaces.status,
       nodeId: schema.workspaces.nodeId,
+      nodeStatus: schema.nodes.status,
     })
     .from(schema.workspaces)
+    .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
     .where(eq(schema.workspaces.id, workspaceId))
     .limit(1);
 
-  const workspace = workspaceRows[0];
-  if (!workspace) {
-    throw errors.notFound('Workspace');
-  }
+  const workspace = await assertWorkspaceAcceptsCallback(
+    c.env,
+    workspaceRows[0],
+    workspaceId,
+    'runtime'
+  );
 
+  await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'runtime');
   return c.json({
-    workspaceId: workspace.id,
+    workspaceId: workspace.workspaceId,
     repository: workspace.repository,
     branch: workspace.branch,
     projectId: workspace.projectId,
@@ -509,7 +1508,14 @@ runtimeRoutes.get('/:id/runtime-assets', async (c) => {
   const workspaceId = c.req.param('id');
   await verifyWorkspaceCallbackAuth(c, workspaceId);
   const db = drizzle(c.env.DATABASE, { schema });
-  const assets = await getWorkspaceRuntimeAssets(db, workspaceId, getCredentialEncryptionKey(c.env));
+  const agentSessionId = c.req.query('agentSessionId')?.trim() || null;
+  const workspace = await assertWorkspaceCallbackResourceById(c.env, workspaceId, 'runtime_assets');
+  const assets = await getWorkspaceRuntimeAssets(
+    db,
+    { workspaceId, agentSessionId },
+    getCredentialEncryptionKey(c.env)
+  );
+  await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'runtime_assets');
   return c.json(assets);
 });
 
@@ -522,26 +1528,39 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
   // Look up workspace → project to determine repo provider
   const workspaceRows = await db
     .select({
+      workspaceId: schema.workspaces.id,
       installationId: schema.workspaces.installationId,
       projectId: schema.workspaces.projectId,
+      chatSessionId: schema.workspaces.chatSessionId,
+      userId: schema.workspaces.userId,
+      status: schema.workspaces.status,
+      nodeId: schema.workspaces.nodeId,
+      nodeStatus: schema.nodes.status,
     })
     .from(schema.workspaces)
+    .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
     .where(eq(schema.workspaces.id, workspaceId))
     .limit(1);
 
-  const workspace = workspaceRows[0];
-  if (!workspace) {
-    throw errors.notFound('Workspace');
-  }
+  const workspace = await assertWorkspaceAcceptsCallback(
+    c.env,
+    workspaceRows[0],
+    workspaceId,
+    'git_token'
+  );
 
   // Look up the project to check repoProvider
   let repoProvider = 'github';
   let artifactsRepoId: string | null = null;
+  let githubRepoId: number | null = null;
+  let repositoryName: string | null = null;
   if (workspace.projectId) {
     const projectRows = await db
       .select({
         repoProvider: schema.projects.repoProvider,
         artifactsRepoId: schema.projects.artifactsRepoId,
+        githubRepoId: schema.projects.githubRepoId,
+        repository: schema.projects.repository,
       })
       .from(schema.projects)
       .where(eq(schema.projects.id, workspace.projectId))
@@ -551,6 +1570,8 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
     if (project) {
       repoProvider = project.repoProvider || 'github';
       artifactsRepoId = project.artifactsRepoId;
+      githubRepoId = project.githubRepoId;
+      repositoryName = project.repository;
     }
   }
 
@@ -563,19 +1584,101 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
       throw errors.internal('Artifacts binding or repo ID missing');
     }
 
-    const ttl = parseInt(c.env.ARTIFACTS_TOKEN_TTL_SECONDS || '', 10) || 3600;
+    // Clamp the token TTL to a sane range: a negative/zero/NaN or excessively
+    // large configured value must not mint a token that never expires (or expires
+    // instantly). Default 1h; hard cap 24h.
+    const rawTtl = Number.parseInt(c.env.ARTIFACTS_TOKEN_TTL_SECONDS || '', 10);
+    const ttl = Number.isFinite(rawTtl) && rawTtl > 0 && rawTtl <= 86400 ? rawTtl : 3600;
     // Use requested scope or default to 'write' (agents need push access)
-    const requestedScope = c.req.query('scope') === 'read' ? 'read' as const : 'write' as const;
+    const requestedScope = c.req.query('scope') === 'read' ? ('read' as const) : ('write' as const);
     const repo = await c.env.ARTIFACTS.get(artifactsRepoId);
+    await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'git_token');
     const tokenResult = await repo.createToken(requestedScope, ttl);
 
     // Strip ?expires= suffix from token for git credential use
     const tokenSecret = tokenResult.plaintext.split('?expires=')[0] || tokenResult.plaintext;
 
-    return c.json({
+    // Prefer the stored project.repository as the clone URL: it is `created.remote`
+    // captured at project creation and is exactly what the VM agent cloned, so its
+    // host is guaranteed to match what git requests from the credential helper. The
+    // Artifacts binding's `get().remote` has been observed to come back empty on
+    // staging (unlike `create().remote`); when that happens an empty cloneUrl makes
+    // the VM agent default the credential host to github.com, which then fails to
+    // match the real Artifacts host and returns no credential (git fetch/push break).
+    const cloneUrl = repositoryName || repo.remote || '';
+    if (!repo.remote) {
+      log.warn('workspace_git_token.artifacts_remote_empty', {
+        workspaceId: workspace.workspaceId,
+        projectId: workspace.projectId,
+        artifactsRepoId,
+        usedStoredRepository: !!repositoryName,
+        action: 'fell_back_to_stored_repository',
+      });
+    }
+    if (!cloneUrl) {
+      log.error('workspace_git_token.artifacts_clone_url_missing', {
+        workspaceId: workspace.workspaceId,
+        projectId: workspace.projectId,
+        artifactsRepoId,
+        action: 'clone_url_empty',
+      });
+    }
+
+    return callbackJsonWithJit(c, workspace, 'git_token', {
       token: tokenSecret,
-      expiresAt: tokenResult.expires_at,
-      cloneUrl: repo.remote,
+      expiresAt: tokenResult.expiresAt ?? tokenResult.expires_at,
+      cloneUrl,
+    });
+  }
+
+  if (repoProvider === 'gitlab') {
+    if (!workspace.projectId) {
+      throw errors.forbidden('GitLab workspace has no project');
+    }
+    const metadata = await getProjectGitLabRepository(db, workspace.projectId);
+    if (!metadata) {
+      throw errors.forbidden('GitLab repository metadata is missing');
+    }
+    if (metadata.userId !== workspace.userId) {
+      // The stored GitLab repo binding belongs to a different user than the
+      // workspace owner — vending the owner's OAuth token against another
+      // user's binding would cross a tenant boundary. Fail closed.
+      log.error('workspace_git_token.gitlab_user_mismatch', {
+        workspaceId: workspace.workspaceId,
+        projectId: workspace.projectId,
+        workspaceUserId: workspace.userId,
+        metadataUserId: metadata.userId,
+        action: 'rejected',
+      });
+      throw errors.forbidden('GitLab repository is not linked for this workspace owner');
+    }
+    await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'git_token');
+    const tokenResult = await requireGitLabUserAccessTokenResultForOwner(
+      c.env,
+      workspace.userId,
+      'workspace-git-token'
+    );
+    const verified = await verifyGitLabProjectAccess(
+      c.env,
+      tokenResult.accessToken,
+      metadata.gitlabProjectId
+    );
+    if (
+      verified.host !== metadata.host ||
+      verified.gitlabProjectId !== metadata.gitlabProjectId ||
+      verified.pathWithNamespace !== metadata.pathWithNamespace
+    ) {
+      throw errors.forbidden('GitLab repository access has changed; repository no longer matches');
+    }
+
+    return callbackJsonWithJit(c, workspace, 'git_token', {
+      provider: 'gitlab',
+      token: tokenResult.accessToken,
+      expiresAt: tokenResult.accessTokenExpiresAt,
+      cloneUrl: metadata.httpUrlToRepo,
+      host: metadata.host,
+      username: 'oauth2',
+      repositoryPath: metadata.pathWithNamespace,
     });
   }
 
@@ -583,25 +1686,126 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
   if (!workspace.installationId) {
     throw errors.notFound('Workspace has no GitHub installation');
   }
+  // Scope the token to a single repo. Prefer the verified numeric repo ID; fall
+  // back to the repository name for legacy projects created before github_repo_id
+  // was backfilled (PR #1236). Both paths scope to exactly one repository, so the
+  // personal-installation leak fix is preserved.
+  const repoShortName =
+    repositoryName && repositoryName.includes('/')
+      ? (repositoryName.split('/').pop() ?? null)
+      : repositoryName;
+  if (!githubRepoId && !repoShortName) {
+    throw errors.forbidden('GitHub repository is not verified for this workspace');
+  }
 
   const installations = await db
-    .select({ installationId: schema.githubInstallations.installationId })
+    .select({
+      installationId: schema.githubInstallations.installationId,
+      externalInstallationId: schema.githubInstallations.externalInstallationId,
+      userId: schema.githubInstallations.userId,
+    })
     .from(schema.githubInstallations)
     .where(eq(schema.githubInstallations.id, workspace.installationId))
     .limit(1);
 
   const installation = installations[0];
   if (!installation) {
+    log.warn('workspace_git_token_installation_owner_mismatch', {
+      workspaceId: workspace.workspaceId,
+      projectId: workspace.projectId,
+      installationRowId: workspace.installationId,
+      expectedUserId: workspace.userId,
+      action: 'rejected',
+    });
     throw errors.notFound('GitHub installation');
   }
+  if (installation.userId !== workspace.userId) {
+    log.info('workspace_git_token_project_installation_shared', {
+      workspaceId: workspace.workspaceId,
+      projectId: workspace.projectId,
+      installationRowId: workspace.installationId,
+      workspaceUserId: workspace.userId,
+      installationOwnerUserId: installation.userId,
+      action: 'allowed_after_user_access_verification',
+    });
+  }
 
-  // Request packages:write when devcontainer caching is enabled so the
-  // VM agent can push cache images to GHCR on behalf of this installation.
+  if (!repositoryName) {
+    throw errors.forbidden('GitHub repository is not verified for this workspace');
+  }
+
+  const verifiedRepoId = await verifyWorkspaceGitHubOwnerAccess({
+    env: c.env,
+    workspaceId: workspace.workspaceId,
+    projectId: workspace.projectId,
+    userId: workspace.userId,
+    repository: repositoryName,
+    externalInstallationId: getExternalInstallationId(installation),
+    githubRepoId,
+  });
+
+  // Lazy self-heal: legacy projects created before the numeric repo id was
+  // captured have github_repo_id = null. Fetch + persist it now, BEFORE policy
+  // resolution, so custom GitHub CLI policies (which require the numeric id) work
+  // and scoping uses the rename-stable repositoryIds path. On any failure we fall
+  // through to the name-based fallback below (no regression).
+  if (!githubRepoId && repositoryName && workspace.projectId) {
+    await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'git_token');
+    const backfill = await backfillProjectGithubRepoId(db, c.env, {
+      projectId: workspace.projectId,
+      repository: repositoryName,
+      externalInstallationId: getExternalInstallationId(installation),
+    });
+    if (backfill.githubRepoId) {
+      githubRepoId = backfill.githubRepoId;
+    }
+  }
+  githubRepoId ??= verifiedRepoId;
+
+  let tokenOptions = null;
+  try {
+    tokenOptions = await resolveWorkspaceGitHubTokenOptions(db, {
+      workspaceId: workspace.workspaceId,
+      userId: workspace.userId,
+      githubRepoId,
+    });
+  } catch (err) {
+    if (err instanceof GitHubCliPolicyError) {
+      throw errors.forbidden('GitHub CLI policy prevents token minting');
+    }
+    throw err;
+  }
+  // Additional Repository Access: same-installation repos selected in Project
+  // Settings. Re-verified at this boundary; revoked/inaccessible entries are
+  // dropped from the scope. Primary repo is always included implicitly.
+  const additionalRepoIds =
+    githubRepoId && workspace.projectId
+      ? await resolveAdditionalRepositoryIds({
+          env: c.env,
+          db,
+          workspaceId: workspace.workspaceId,
+          projectId: workspace.projectId,
+          userId: workspace.userId,
+          externalInstallationId: getExternalInstallationId(installation),
+        })
+      : [];
+
+  const scopedTokenOptions = {
+    ...(tokenOptions ?? {}),
+    ...(githubRepoId
+      ? { repositoryIds: [githubRepoId, ...additionalRepoIds.filter((id) => id !== githubRepoId)] }
+      : { repositories: [repoShortName as string] }),
+  };
+  await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'git_token');
   const token = await getInstallationToken(
-    installation.installationId,
+    getExternalInstallationId(installation),
     c.env,
+    scopedTokenOptions
   );
-  return c.json({ token: token.token, expiresAt: token.expiresAt });
+  return callbackJsonWithJit(c, workspace, 'git_token', {
+    token: token.token,
+    expiresAt: token.expiresAt,
+  });
 });
 
 runtimeRoutes.post('/:id/boot-log', jsonValidator(BootLogEntrySchema), async (c) => {
@@ -609,6 +1813,7 @@ runtimeRoutes.post('/:id/boot-log', jsonValidator(BootLogEntrySchema), async (c)
   await verifyWorkspaceCallbackAuth(c, workspaceId);
 
   const body = c.req.valid('json');
+  const workspace = await assertWorkspaceCallbackResourceById(c.env, workspaceId, 'boot_log');
 
   const entry = {
     step: body.step,
@@ -618,8 +1823,9 @@ runtimeRoutes.post('/:id/boot-log', jsonValidator(BootLogEntrySchema), async (c)
     timestamp: body.timestamp || new Date().toISOString(),
   };
 
+  await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'boot_log');
   await appendBootLog(c.env.KV, workspaceId, entry, c.env);
-  return c.json({ success: true });
+  return callbackJsonWithJit(c, workspace, 'boot_log', { success: true });
 });
 
 /**
@@ -627,198 +1833,95 @@ runtimeRoutes.post('/:id/boot-log', jsonValidator(BootLogEntrySchema), async (c)
  * Uses workspace callback auth. Accepts 1-100 messages per batch.
  * All messages must target the same sessionId.
  */
-runtimeRoutes.post('/:id/messages', jsonValidator(MessageBatchSchema), async (c) => {
+runtimeRoutes.post('/:id/messages', async (c) => {
   const workspaceId = c.req.param('id');
   await verifyWorkspaceCallbackAuth(c, workspaceId);
 
-  // Payload size check (256KB default, configurable via MAX_MESSAGES_PAYLOAD_BYTES)
-  const contentLength = parseInt(c.req.header('content-length') || '0', 10);
-  const maxPayloadBytes = parsePositiveInt(c.env.MAX_MESSAGES_PAYLOAD_BYTES as string, 256 * 1024);
-  if (contentLength > maxPayloadBytes) {
-    throw errors.badRequest(`Payload exceeds ${maxPayloadBytes} byte limit`);
+  // Authenticate and resolve terminal state before reading an untrusted body.
+  // Late deletion callbacks are discarded without parsing or persisting payloads.
+  const workspace = await loadMessageWorkspace(c.env, workspaceId);
+  const preflightTerminalResponse = maybeTerminalMessageWorkspaceResponse(
+    c,
+    workspace,
+    workspaceId,
+    '',
+    0
+  );
+  if (preflightTerminalResponse) {
+    await signalWorkspaceDeletionUnconfirmedCallback(c.env, workspaceId, 'messages');
+    return preflightTerminalResponse;
   }
 
-  const body = c.req.valid('json');
+  const body = await parseMessageBatchRequest(c);
+  const sessionId = validateMessageBatch(c.env, body);
 
-  if (body.messages.length === 0) {
-    throw errors.badRequest('messages array must not be empty');
+  // Rule 49: re-read immediately before crossing into ProjectData. Deletion or
+  // reassignment that wins while the body is read must suppress all persistence.
+  const currentWorkspace = await loadMessageWorkspace(c.env, workspaceId);
+  const terminalResponse = maybeTerminalMessageWorkspaceResponse(
+    c,
+    currentWorkspace,
+    workspaceId,
+    sessionId,
+    body.messages.length
+  );
+  if (terminalResponse) {
+    return terminalResponse;
   }
-  const maxMessagesPerBatch = parsePositiveInt(c.env.MAX_MESSAGES_PER_BATCH as string, 100);
-  if (body.messages.length > maxMessagesPerBatch) {
-    throw errors.badRequest(`Maximum ${maxMessagesPerBatch} messages per batch`);
-  }
-
-  const validRoles = new Set(['user', 'assistant', 'system', 'tool', 'thinking', 'plan']);
-  const maxMessageBytes = c.env.MESSAGE_SIZE_THRESHOLD
-    ? parseInt(c.env.MESSAGE_SIZE_THRESHOLD, 10) : 102400; // 100KB default
-
-  // Validate each message and extract sessionId
-  let sessionId: string | null = null;
-  for (const msg of body.messages) {
-    if (!msg.messageId || typeof msg.messageId !== 'string') {
-      throw errors.badRequest('Each message must have a messageId string');
-    }
-    if (!msg.sessionId || typeof msg.sessionId !== 'string') {
-      throw errors.badRequest('Each message must have a sessionId string');
-    }
-    if (!msg.role || !validRoles.has(msg.role)) {
-      throw errors.badRequest(`Invalid role "${msg.role}". Must be one of: user, assistant, system, tool, thinking, plan`);
-    }
-    if (!msg.content || typeof msg.content !== 'string') {
-      throw errors.badRequest('Each message must have non-empty content');
-    }
-    if (msg.content.length > maxMessageBytes) {
-      throw errors.badRequest(`Individual message content exceeds ${maxMessageBytes} byte limit`);
-    }
-    if (!msg.timestamp || typeof msg.timestamp !== 'string') {
-      throw errors.badRequest('Each message must have a timestamp string');
-    }
-
-    if (sessionId === null) {
-      sessionId = msg.sessionId;
-    } else if (msg.sessionId !== sessionId) {
-      throw errors.badRequest('All messages in a batch must target the same sessionId');
-    }
-  }
-
-  // Resolve workspace to project and validate session linkage (Principle XIII: Fail-Fast)
-  const db = drizzle(c.env.DATABASE, { schema });
-  const workspaceRows = await db
-    .select({
-      projectId: schema.workspaces.projectId,
-      chatSessionId: schema.workspaces.chatSessionId,
-    })
-    .from(schema.workspaces)
-    .where(eq(schema.workspaces.id, workspaceId))
-    .limit(1);
-
-  const workspace = workspaceRows[0];
-  if (!workspace) {
-    throw errors.notFound('Workspace');
-  }
-  if (!workspace.projectId) {
-    throw errors.badRequest('Workspace is not linked to a project');
-  }
-
-  // Validate session ID matches workspace's linked session.
-  // If the workspace has a chatSessionId, messages MUST target that session.
-  // Messages targeting a different session are rejected to prevent misrouting.
-  if (workspace.chatSessionId && workspace.chatSessionId !== sessionId) {
-    const context = {
-      workspaceId,
-      projectId: workspace.projectId,
-      expectedSessionId: workspace.chatSessionId,
-      receivedSessionId: sessionId,
-      messageCount: body.messages.length,
-      action: 'rejected_batch',
-    };
-    log.error('message_routing.session_mismatch', context);
-    c.executionCtx.waitUntil(
-      persistError(c.env.OBSERVABILITY_DATABASE, {
-        source: 'api',
-        level: 'error',
-        message: `Message routing mismatch: workspace ${workspaceId} linked to session ${workspace.chatSessionId}, but messages target ${sessionId}`,
-        context,
+  if (
+    !currentWorkspace ||
+    !workspace ||
+    !sameWorkspaceCallbackIdentity(currentWorkspace, workspace)
+  ) {
+    return terminalMessagePersistenceResponse(
+      c,
+      {
         workspaceId,
-      })
-    );
-    throw errors.badRequest(
-      `Session mismatch: workspace is linked to session ${workspace.chatSessionId}, ` +
-      `but messages target session ${sessionId}`
-    );
-  }
-
-  // Reject messages when workspace has no linked chatSessionId.
-  // This prevents misrouting during the session linking window where
-  // chatSessionId is NULL between workspace creation and ensureSessionLinked().
-  if (!workspace.chatSessionId) {
-    const context = {
-      workspaceId,
-      projectId: workspace.projectId,
-      providedSessionId: sessionId,
-      messageCount: body.messages.length,
-      action: 'rejected_no_session_link',
-    };
-    log.warn('message_routing.no_chat_session_linked', context);
-    c.executionCtx.waitUntil(
-      persistError(c.env.OBSERVABILITY_DATABASE, {
-        source: 'api',
-        level: 'warn',
-        message: `Rejecting messages for workspace ${workspaceId}: no chatSessionId linked yet`,
-        context,
-        workspaceId,
-      })
-    );
-    // Use 409 Conflict (not 400) so the VM agent's outbox retries the batch.
-    // This is a transient condition: chatSessionId will be set once ensureSessionLinked() completes.
-    throw errors.conflict(
-      'Workspace has no linked chat session yet — messages cannot be routed safely'
+        projectId: currentWorkspace?.projectId ?? null,
+        sessionId,
+        messageCount: body.messages.length,
+      },
+      currentWorkspace?.status ?? 'missing',
+      'workspace_incarnation_changed'
     );
   }
+  assertMessageWorkspaceAcceptsBatch(
+    c,
+    currentWorkspace,
+    workspaceId,
+    sessionId,
+    body.messages.length
+  );
 
   // Delegate to ProjectData DO with structured error handling.
   // On failure, return appropriate status codes so the VM agent outbox
   // can distinguish transient (retry) from permanent (discard) errors.
-  let result: { persisted: number; duplicates: number };
+  const context: MessageRouteContext = {
+    workspaceId,
+    projectId: currentWorkspace.projectId,
+    sessionId,
+    messageCount: body.messages.length,
+  };
+  let result: MessageBatchPersistenceRouteResult;
   try {
     result = await projectDataService.persistMessageBatch(
       c.env,
-      workspace.projectId,
-      sessionId!,
-      body.messages.map((m) => ({
-        messageId: m.messageId,
-        role: m.role,
-        content: m.content,
-        toolMetadata: m.toolMetadata ? safeParseJson(m.toolMetadata) : null,
-        timestamp: m.timestamp,
-        sequence: m.sequence,
-      }))
+      currentWorkspace.projectId,
+      sessionId,
+      toProjectDataMessages(body)
     );
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Failed to persist messages';
+    return handleMessagePersistenceError(c, context, err);
+  }
 
-    // Session-not-found and stopped-session errors are permanent — do not retry
-    if (message.includes('not found') || message.includes('is stopped')) {
-      log.error('message_persistence.rejected_by_do', {
-        workspaceId,
-        projectId: workspace.projectId,
-        sessionId,
-        error: message,
-        action: 'rejected_permanent',
-      });
-      throw errors.badRequest(message);
-    }
-
-    // All other DO errors are transient — return 503 so the outbox retries
-    log.error('message_persistence.do_error_transient', {
-      workspaceId,
-      projectId: workspace.projectId,
-      sessionId,
-      error: message,
-      action: 'rejected_transient',
-    });
-    return c.json(
-      { error: 'SERVICE_UNAVAILABLE', message: 'Message persistence temporarily unavailable' },
-      503
-    );
+  if (result.limitReached) {
+    return partialSessionLimitResponse(c, context, result);
   }
 
   // Fire-and-forget: pipe agent activity to the trial SSE feed (if this
   // workspace belongs to a trial project). Non-trial projects short-circuit
   // with a single KV lookup inside the bridge.
-  if (workspace.projectId && result.persisted > 0) {
-    c.executionCtx.waitUntil(
-      bridgeAgentActivity(
-        c.env,
-        workspace.projectId,
-        body.messages.map((m) => ({
-          role: m.role,
-          content: m.content,
-          toolMetadata: m.toolMetadata ? safeParseJson(m.toolMetadata) : undefined,
-        })),
-      ),
-    );
-  }
+  bridgePersistedAgentActivity(c, currentWorkspace.projectId, result, body);
 
   return c.json({
     persisted: result.persisted,
@@ -832,6 +1935,11 @@ runtimeRoutes.post('/:id/messages', jsonValidator(MessageBatchSchema), async (c)
 runtimeRoutes.post('/:id/bootstrap-token', requireAuth(), requireApproved(), async (c) => {
   const workspaceId = c.req.param('id');
   await verifyWorkspaceCallbackAuth(c, workspaceId);
+  const workspace = await assertWorkspaceCallbackResourceById(
+    c.env,
+    workspaceId,
+    'bootstrap_token'
+  );
 
   const bootstrapToken = ulid();
   const now = new Date().toISOString();
@@ -848,11 +1956,18 @@ runtimeRoutes.post('/:id/bootstrap-token', requireAuth(), requireApproved(), asy
     createdAt: now,
   };
 
+  await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'bootstrap_token');
+  await registerBootstrapTokenConsume(
+    c.env.DATABASE,
+    bootstrapToken,
+    new Date(Date.now() + 60 * 1000).toISOString()
+  );
+
   await c.env.KV.put(`bootstrap:${bootstrapToken}`, JSON.stringify(data), {
     expirationTtl: 60,
   });
 
-  return c.json({ token: bootstrapToken });
+  return callbackJsonWithJit(c, workspace, 'bootstrap_token', { token: bootstrapToken });
 });
 
 export { runtimeRoutes };

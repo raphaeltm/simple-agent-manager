@@ -9,6 +9,7 @@
  *   - emitTrialEvent — appends to TrialEventBus DO stub, no-ops on error
  *   - emitTrialEventForProject — looks up trial by project then appends
  */
+import { PLATFORM_AI_MODELS } from '@simple-agent-manager/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock project-data service functions used by startDiscoveryAgent
@@ -41,8 +42,17 @@ vi.mock('../../../src/services/platform-credentials', () => ({
 vi.mock('../../../src/lib/secrets', () => ({
   getCredentialEncryptionKey: () => 'test-encryption-key',
 }));
+const trialDbMock = {
+  select: vi.fn(() => ({
+    from: vi.fn(() => ({
+      where: vi.fn(() => ({ limit: vi.fn().mockResolvedValue([{ userId: 'trial-user' }]) })),
+    })),
+  })),
+  insert: vi.fn(() => ({ values: vi.fn().mockResolvedValue(undefined) })),
+  update: vi.fn(() => ({ set: vi.fn(() => ({ where: vi.fn().mockResolvedValue(undefined) })) })),
+};
 vi.mock('drizzle-orm/d1', () => ({
-  drizzle: () => ({}),
+  drizzle: () => trialDbMock,
 }));
 
 // Silence logs
@@ -78,6 +88,12 @@ describe('trial-runner — resolveTrialRunnerConfig', () => {
     expect(cfg.mode).toBe('production');
     expect(cfg.agentType).toBe('claude-code');
     expect(cfg.provider).toBe('anthropic');
+  });
+
+  it('defaults production trials to an active platform-registered Anthropic model', () => {
+    const cfg = resolveTrialRunnerConfig(envBase({ ENVIRONMENT: 'production' } as Partial<Env>));
+    expect(cfg.model).toBe('claude-sonnet-5');
+    expect(PLATFORM_AI_MODELS.some((m) => m.id === cfg.model)).toBe(true);
   });
 
   it('detects production mode from ENVIRONMENT=prod', () => {
@@ -125,9 +141,7 @@ describe('trial-runner — resolveTrialRunnerConfig', () => {
   });
 
   it('falls back to anthropic model default when provider=anthropic', () => {
-    const cfg = resolveTrialRunnerConfig(
-      envBase({ ENVIRONMENT: 'production' } as Partial<Env>)
-    );
+    const cfg = resolveTrialRunnerConfig(envBase({ ENVIRONMENT: 'production' } as Partial<Env>));
     expect(cfg.model).toContain('claude');
   });
 
@@ -160,7 +174,8 @@ describe('trial-runner — startDiscoveryAgent', () => {
       'proj_1',
       'ws_1',
       'acme/repo',
-      null
+      expect.any(String),
+      'trial-user'
     );
     expect(createAcpSessionMock).toHaveBeenCalledTimes(1);
     const [, projectId, chatSessionId, prompt, agentType] = createAcpSessionMock.mock.calls[0];
@@ -170,6 +185,7 @@ describe('trial-runner — startDiscoveryAgent', () => {
     expect(prompt.length).toBeGreaterThan(0);
     expect(agentType).toBe('opencode'); // staging default
 
+    expect(result.taskId).toEqual(expect.any(String));
     expect(result.chatSessionId).toBe('chat_session_1');
     expect(result.acpSessionId).toBe('acp_session_1');
     expect(result.agentType).toBe('opencode');
@@ -187,16 +203,17 @@ describe('trial-runner — startDiscoveryAgent', () => {
       'p',
       'w',
       'Exploring repository',
-      null
+      expect.any(String),
+      'trial-user'
     );
   });
 
   it('throws when anthropic provider but no platform credential configured', async () => {
     getPlatformAgentCredentialMock.mockResolvedValue(null);
     const env = envBase({ ENVIRONMENT: 'production' } as Partial<Env>);
-    await expect(
-      startDiscoveryAgent(env, { projectId: 'p', workspaceId: 'w' })
-    ).rejects.toThrow(/No Anthropic API key configured/);
+    await expect(startDiscoveryAgent(env, { projectId: 'p', workspaceId: 'w' })).rejects.toThrow(
+      /No Anthropic API key configured/
+    );
   });
 
   it('succeeds when anthropic provider + platform credential is configured', async () => {
@@ -216,10 +233,13 @@ describe('trial-runner — startDiscoveryAgent', () => {
 
 describe('trial-runner — emitTrialEvent', () => {
   it('appends to TrialEventBus DO via /append', async () => {
-    const fetchStub = vi.fn(async () => new Response(JSON.stringify({ cursor: 1 }), {
-      status: 200,
-      headers: { 'content-type': 'application/json' },
-    }));
+    const fetchStub = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ cursor: 1 }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+    );
     const stub = { fetch: fetchStub };
     const env = {
       TRIAL_EVENT_BUS: {
@@ -294,8 +314,8 @@ describe('trial-runner — emitTrialEventForProject', () => {
       trialId: 'trial_abc',
       projectId: 'proj_1',
     });
-    const fetchStub = vi.fn(async () =>
-      new Response(JSON.stringify({ cursor: 1 }), { status: 200 })
+    const fetchStub = vi.fn(
+      async () => new Response(JSON.stringify({ cursor: 1 }), { status: 200 })
     );
     const env = {
       TRIAL_EVENT_BUS: {

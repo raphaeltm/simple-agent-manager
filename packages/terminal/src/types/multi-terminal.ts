@@ -1,3 +1,5 @@
+import type React from 'react';
+
 /**
  * Multi-Terminal UI Type Definitions
  * Provides TypeScript types for multi-terminal session management
@@ -80,7 +82,7 @@ export interface ClientMessage {
     | 'reattach_session';
 
   /** Message payload */
-  data?: any;
+  data?: unknown;
 }
 
 export interface ServerMessage {
@@ -101,7 +103,7 @@ export interface ServerMessage {
     | 'scrollback';
 
   /** Message payload */
-  data?: any;
+  data?: unknown;
 }
 
 /**
@@ -182,14 +184,6 @@ export interface TerminalConfig {
   /** Memory limit per session in MB (VM Agent) */
   resourceLimitMb?: number;
 
-  /** Keyboard shortcuts configuration */
-  shortcuts: {
-    newTab: string;
-    closeTab: string;
-    nextTab: string;
-    previousTab: string;
-    jumpToTab: string; // Pattern like "Alt+{n}"
-  };
 }
 
 /**
@@ -198,9 +192,11 @@ export interface TerminalConfig {
 export interface TabItemProps {
   session: TerminalSession;
   isActive: boolean;
+  tabIndex: 0 | -1;
   onActivate: (sessionId: string) => void;
   onClose: (sessionId: string) => void;
   onRename: (sessionId: string, name: string) => void;
+  onKeyDown?: (event: React.KeyboardEvent<HTMLElement>, sessionId: string) => void;
   isDraggable?: boolean;
 }
 
@@ -246,20 +242,6 @@ export interface UseTerminalSessionsReturn {
   clearPersistedSessions: () => void;
 }
 
-export interface UseTabShortcutsReturn {
-  registerShortcuts: (actions: TabShortcutActions) => void;
-  unregisterShortcuts: () => void;
-  isShortcutPressed: (event: KeyboardEvent) => boolean;
-}
-
-export interface TabShortcutActions {
-  onNewTab: () => void;
-  onCloseTab: () => void;
-  onNextTab: () => void;
-  onPreviousTab: () => void;
-  onJumpToTab: (index: number) => void;
-}
-
 /**
  * Multi-terminal container props
  */
@@ -292,6 +274,9 @@ export interface MultiTerminalProps {
     sessions: MultiTerminalSessionSnapshot[],
     activeSessionId: string | null
   ) => void;
+
+  /** When provided, checked before each reconnect attempt. Returning true suppresses reconnection. */
+  shouldSuppressReconnect?: () => boolean;
 }
 
 /** Read-only terminal session snapshot for parent-level tab UIs. */

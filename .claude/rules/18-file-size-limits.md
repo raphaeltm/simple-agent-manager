@@ -51,7 +51,7 @@ If you need to add functionality to a file that is already over 500 lines:
 Before committing, verify no source file exceeds the limit:
 
 ```bash
-find apps/ packages/ -name '*.ts' -o -name '*.tsx' -o -name '*.go' | \
+find apps/ packages/ scripts/ -name '*.ts' -o -name '*.tsx' -o -name '*.go' | \
   grep -v node_modules | grep -v dist | grep -v '.test.' | grep -v '.spec.' | grep -v '_test.go' | \
   xargs wc -l | sort -rn | awk '$1 > 500 {print}'
 ```

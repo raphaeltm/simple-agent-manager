@@ -7,12 +7,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/workspace/vm-agent/internal/config"
+	"github.com/workspace/vm-agent/internal/gitrepo"
 )
 
 func TestNormalizeRepoURL(t *testing.T) {
@@ -101,6 +103,31 @@ func TestWithGitHubToken(t *testing.T) {
 	}
 }
 
+func TestWithGitTokenGitLab(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		RepoProvider:   "gitlab",
+		RepositoryHost: "gitlab.com",
+	}
+
+	urlWithToken, err := withGitToken("https://gitlab.com/group/project.git", "gl_token", cfg)
+	if err != nil {
+		t.Fatalf("withGitToken returned error: %v", err)
+	}
+	if urlWithToken != "https://oauth2:gl_token@gitlab.com/group/project.git" {
+		t.Fatalf("unexpected GitLab tokenized url: %s", urlWithToken)
+	}
+
+	otherURL, err := withGitToken("https://gitlab.example.com/group/project.git", "gl_token", cfg)
+	if err != nil {
+		t.Fatalf("withGitToken returned error for other host: %v", err)
+	}
+	if otherURL != "https://gitlab.example.com/group/project.git" {
+		t.Fatalf("expected non-configured GitLab host unchanged, got: %s", otherURL)
+	}
+}
+
 func TestNeedsCredentialHelper(t *testing.T) {
 	t.Parallel()
 
@@ -127,6 +154,24 @@ func TestNeedsCredentialHelper(t *testing.T) {
 	}
 }
 
+func TestNeedsCredentialHelperForConfigGitLab(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		RepoProvider:   "gitlab",
+		RepositoryHost: "gitlab.com",
+		CloneURL:       "https://gitlab.com/group/project.git",
+	}
+	if !needsCredentialHelperForConfig(cfg) {
+		t.Fatal("expected GitLab config to require a credential helper")
+	}
+
+	cfg.RepoProvider = "github"
+	if needsCredentialHelperForConfig(cfg) {
+		t.Fatal("non-GitLab config with GitLab host must not require a credential helper")
+	}
+}
+
 func TestIsGitHubRepo(t *testing.T) {
 	t.Parallel()
 
@@ -144,7 +189,7 @@ func TestIsGitHubRepo(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got := isGitHubRepo(tc.repo); got != tc.want {
+			if got := gitrepo.IsGitHubRepo(tc.repo); got != tc.want {
 				t.Fatalf("isGitHubRepo(%q) = %v, want %v", tc.repo, got, tc.want)
 			}
 		})
@@ -155,8 +200,9 @@ func TestRenderGitCredentialHelperScript(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
-		Port:          8080,
-		CallbackToken: "callback-token-123",
+		Port:                 8080,
+		CallbackToken:        "callback-token-123",
+		GitCredentialTimeout: 1750 * time.Millisecond,
 	}
 
 	script, err := renderGitCredentialHelperScript(cfg)
@@ -165,8 +211,8 @@ func TestRenderGitCredentialHelperScript(t *testing.T) {
 	}
 
 	required := []string{
-		`Authorization: Bearer callback-token-123`,
 		`http://${target}:8080/git-credential`,
+		`--max-time 1.75`,
 		"host.docker.internal",
 		"172.17.0.1",
 	}
@@ -176,6 +222,15 @@ func TestRenderGitCredentialHelperScript(t *testing.T) {
 			t.Fatalf("expected script to contain %q", fragment)
 		}
 	}
+	forbidden := []string{
+		"callback-token-123",
+		"Authorization: Bearer",
+	}
+	for _, fragment := range forbidden {
+		if strings.Contains(script, fragment) {
+			t.Fatalf("credential helper must not contain durable callback token fragment %q", fragment)
+		}
+	}
 
 	// Plain HTTP mode must NOT use -k or https
 	if strings.Contains(script, "https://") {
@@ -183,6 +238,146 @@ func TestRenderGitCredentialHelperScript(t *testing.T) {
 	}
 	if strings.Contains(script, " -k") {
 		t.Fatal("plain HTTP mode should not contain -k flag")
+	}
+}
+
+func TestRenderGitCredentialHelperScriptHostFiltering(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		host        string
+		wantCurl    bool
+		wantHostArg string
+	}{
+		{name: "github", host: "github.com", wantCurl: true, wantHostArg: "host=github.com"},
+		{name: "github api", host: "api.github.com", wantCurl: true, wantHostArg: "host=api.github.com"},
+		{name: "artifacts root", host: "artifacts.cloudflare.net", wantCurl: true, wantHostArg: "host=artifacts.cloudflare.net"},
+		{name: "artifacts account", host: "acct.artifacts.cloudflare.net", wantCurl: true, wantHostArg: "host=acct.artifacts.cloudflare.net"},
+		{name: "unknown", host: "gitlab.com", wantCurl: false},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := &config.Config{
+				Port:          8080,
+				CallbackToken: "callback-token-123",
+				WorkspaceID:   "ws-123",
+			}
+			script, err := renderGitCredentialHelperScript(cfg)
+			if err != nil {
+				t.Fatalf("renderGitCredentialHelperScript returned error: %v", err)
+			}
+
+			tmpDir := t.TempDir()
+			curlLog := filepath.Join(tmpDir, "curl.log")
+			curlPath := filepath.Join(tmpDir, "curl")
+			curlScript := fmt.Sprintf("#!/bin/sh\nlast=\"\"\nfor arg in \"$@\"; do last=\"$arg\"; done\nprintf '%%s\\n' \"$last\" >> %s\nprintf 'protocol=https\\nhost=example.com\\nusername=x\\npassword=token\\n\\n'\n", shellSingleQuote(curlLog))
+			if err := os.WriteFile(curlPath, []byte(curlScript), 0o755); err != nil {
+				t.Fatalf("write curl shim: %v", err)
+			}
+
+			helperPath := filepath.Join(tmpDir, "git-credential-sam")
+			if err := os.WriteFile(helperPath, []byte(script), 0o755); err != nil {
+				t.Fatalf("write helper script: %v", err)
+			}
+			cmd := exec.Command("sh", helperPath, "get")
+			cmd.Stdin = strings.NewReader("protocol=https\nhost=" + tc.host + "\n\n")
+			cmd.Env = append(os.Environ(), "PATH="+tmpDir+":"+os.Getenv("PATH"))
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("helper script failed: %v\n%s", err, output)
+			}
+
+			logBytes, readErr := os.ReadFile(curlLog)
+			if !tc.wantCurl {
+				if readErr == nil && strings.TrimSpace(string(logBytes)) != "" {
+					t.Fatalf("expected no curl call for %s, got %q", tc.host, string(logBytes))
+				}
+				return
+			}
+			if readErr != nil {
+				t.Fatalf("expected curl call: %v", readErr)
+			}
+			gotURL := strings.TrimSpace(string(logBytes))
+			if !strings.Contains(gotURL, "workspaceId=ws-123") {
+				t.Fatalf("expected workspaceId in credential request URL, got %q", gotURL)
+			}
+			if !strings.Contains(gotURL, tc.wantHostArg) {
+				t.Fatalf("expected requested host in credential request URL, got %q", gotURL)
+			}
+		})
+	}
+}
+
+// TestRenderGitCredentialHelperScriptGitLabHostCaseInsensitive verifies the
+// GitLab host whitelist in the rendered helper compares hostnames
+// case-insensitively (hostnames are case-insensitive per RFC 4343), and that a
+// non-matching host is still rejected.
+func TestRenderGitCredentialHelperScriptGitLabHostCaseInsensitive(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		host     string
+		wantCurl bool
+	}{
+		{name: "exact case", host: "gitlab.example.com", wantCurl: true},
+		{name: "mixed case", host: "GitLab.Example.COM", wantCurl: true},
+		{name: "other host rejected", host: "evil.example.com", wantCurl: false},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := &config.Config{
+				Port:           8080,
+				CallbackToken:  "callback-token-123",
+				WorkspaceID:    "ws-gl",
+				RepoProvider:   "gitlab",
+				RepositoryHost: "GitLab.Example.com", // mixed case in config too
+			}
+			script, err := renderGitCredentialHelperScript(cfg)
+			if err != nil {
+				t.Fatalf("renderGitCredentialHelperScript returned error: %v", err)
+			}
+
+			tmpDir := t.TempDir()
+			curlLog := filepath.Join(tmpDir, "curl.log")
+			curlPath := filepath.Join(tmpDir, "curl")
+			curlScript := fmt.Sprintf("#!/bin/sh\nlast=\"\"\nfor arg in \"$@\"; do last=\"$arg\"; done\nprintf '%%s\\n' \"$last\" >> %s\nprintf 'protocol=https\\nhost=example.com\\nusername=x\\npassword=token\\n\\n'\n", shellSingleQuote(curlLog))
+			if err := os.WriteFile(curlPath, []byte(curlScript), 0o755); err != nil {
+				t.Fatalf("write curl shim: %v", err)
+			}
+
+			helperPath := filepath.Join(tmpDir, "git-credential-sam")
+			if err := os.WriteFile(helperPath, []byte(script), 0o755); err != nil {
+				t.Fatalf("write helper script: %v", err)
+			}
+			cmd := exec.Command("sh", helperPath, "get")
+			cmd.Stdin = strings.NewReader("protocol=https\nhost=" + tc.host + "\npath=group/project.git\n\n")
+			cmd.Env = append(os.Environ(), "PATH="+tmpDir+":"+os.Getenv("PATH"))
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("helper script failed: %v\n%s", err, output)
+			}
+
+			logBytes, readErr := os.ReadFile(curlLog)
+			if !tc.wantCurl {
+				if readErr == nil && strings.TrimSpace(string(logBytes)) != "" {
+					t.Fatalf("expected no curl call for %s, got %q", tc.host, string(logBytes))
+				}
+				return
+			}
+			if readErr != nil {
+				t.Fatalf("expected curl call for %s: %v", tc.host, readErr)
+			}
+		})
 	}
 }
 
@@ -201,7 +396,6 @@ func TestRenderGitCredentialHelperScriptTLS(t *testing.T) {
 	}
 
 	required := []string{
-		`Authorization: Bearer callback-token-tls`,
 		`https://${target}:8443/git-credential`,
 		" -k",
 		"host.docker.internal",
@@ -211,6 +405,15 @@ func TestRenderGitCredentialHelperScriptTLS(t *testing.T) {
 	for _, fragment := range required {
 		if !strings.Contains(script, fragment) {
 			t.Fatalf("expected TLS script to contain %q", fragment)
+		}
+	}
+	forbidden := []string{
+		"callback-token-tls",
+		"Authorization: Bearer",
+	}
+	for _, fragment := range forbidden {
+		if strings.Contains(script, fragment) {
+			t.Fatalf("credential helper must not contain durable callback token fragment %q", fragment)
 		}
 	}
 
@@ -470,7 +673,7 @@ func TestBuildSAMEnvScriptOmitsEmptyValues(t *testing.T) {
 	cfg := &config.Config{
 		ControlPlaneURL: "https://api.example.com",
 		WorkspaceID:     "ws-123",
-		// NodeID, Repository, Branch left empty
+		// NodeID, Repository, and Branch left empty
 	}
 
 	script := buildSAMEnvScript(cfg, "")
@@ -501,7 +704,7 @@ func TestBuildSAMEnvScriptOmitsEmptyValues(t *testing.T) {
 	}
 }
 
-func TestBuildSAMEnvScriptIncludesGitHubToken(t *testing.T) {
+func TestBuildSAMEnvScriptOmitsStaticGitHubToken(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
@@ -513,9 +716,9 @@ func TestBuildSAMEnvScriptIncludesGitHubToken(t *testing.T) {
 
 	script := buildSAMEnvScript(cfg, "ghs_test_token_abc123")
 
-	want := `export GH_TOKEN='ghs_test_token_abc123'`
-	if !strings.Contains(script, want) {
-		t.Errorf("script missing %q\ngot:\n%s", want, script)
+	forbidden := `export GH_TOKEN='ghs_test_token_abc123'`
+	if strings.Contains(script, forbidden) || strings.Contains(script, "ghs_test_token_abc123") {
+		t.Errorf("script should not persist static GH_TOKEN, got:\n%s", script)
 	}
 
 	// Other SAM vars should still be present.
@@ -534,9 +737,8 @@ func TestBuildSAMEnvScriptTrimsGitHubTokenWhitespace(t *testing.T) {
 
 	script := buildSAMEnvScript(cfg, "  ghs_token  ")
 
-	want := `export GH_TOKEN='ghs_token'`
-	if !strings.Contains(script, want) {
-		t.Errorf("expected trimmed token in script, got:\n%s", script)
+	if strings.Contains(script, "ghs_token") {
+		t.Errorf("script should not persist static GH_TOKEN, got:\n%s", script)
 	}
 }
 
@@ -546,6 +748,7 @@ func TestBuildSAMEnvScriptWhitespaceOnlyTokenOmitted(t *testing.T) {
 	cfg := &config.Config{
 		ControlPlaneURL: "https://api.example.com",
 		WorkspaceID:     "ws-123",
+		Repository:      "octo/repo",
 	}
 
 	script := buildSAMEnvScript(cfg, "   ")
@@ -563,6 +766,25 @@ func TestBuildSAMEnvScriptWhitespaceOnlyTokenOmitted(t *testing.T) {
 	}
 }
 
+func TestBuildSAMEnvScriptSkipsGitHubTokenFallbackForArtifactsRepo(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		ControlPlaneURL: "https://api.example.com",
+		WorkspaceID:     "ws-123",
+		Repository:      "https://acct.artifacts.cloudflare.net/git/default/repo.git",
+	}
+
+	script := buildSAMEnvScript(cfg, "")
+
+	if strings.Contains(script, "GH_TOKEN") {
+		t.Fatalf("Artifacts repo env script must not include GH_TOKEN fallback, got:\n%s", script)
+	}
+	if !strings.Contains(script, `export SAM_REPOSITORY='https://acct.artifacts.cloudflare.net/git/default/repo.git'`) {
+		t.Fatalf("script should still include SAM_REPOSITORY, got:\n%s", script)
+	}
+}
+
 func TestBuildSAMStaticEnv(t *testing.T) {
 	t.Parallel()
 
@@ -577,7 +799,6 @@ func TestBuildSAMStaticEnv(t *testing.T) {
 	env := buildSAMStaticEnv(cfg, "ghs_token")
 
 	for _, want := range []string{
-		`export GH_TOKEN='ghs_token'`,
 		`export SAM_API_URL='https://api.example.com'`,
 		`export SAM_BRANCH='main'`,
 		`export SAM_NODE_ID='node-456'`,
@@ -588,6 +809,9 @@ func TestBuildSAMStaticEnv(t *testing.T) {
 		if !strings.Contains(env, want) {
 			t.Errorf("static env missing %q\ngot:\n%s", want, env)
 		}
+	}
+	if strings.Contains(env, "GH_TOKEN") || strings.Contains(env, "ghs_token") {
+		t.Errorf("static env should not persist GH_TOKEN, got:\n%s", env)
 	}
 }
 
@@ -1144,9 +1368,8 @@ func TestBuildSAMStaticEnvShellInjection(t *testing.T) {
 	if !strings.Contains(env, "'`id`'") {
 		t.Errorf("expected single-quoted backtick value, got:\n%s", env)
 	}
-	// Token with injection should also be single-quoted
-	if !strings.Contains(env, `'token$(cat /etc/passwd)'`) {
-		t.Errorf("expected single-quoted token with injection payload, got:\n%s", env)
+	if strings.Contains(env, "token$(cat /etc/passwd)") || strings.Contains(env, "GH_TOKEN") {
+		t.Errorf("static env should not persist GH_TOKEN, got:\n%s", env)
 	}
 }
 
@@ -1872,6 +2095,7 @@ func TestPrepareWorkspaceMarksReady(t *testing.T) {
 	readyCalled := false
 	readyAuth := ""
 	readyStatus := ""
+	readyWorkspaceProfile := ""
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/api/workspaces/"+workspaceID+"/ready" {
@@ -1881,12 +2105,14 @@ func TestPrepareWorkspaceMarksReady(t *testing.T) {
 		readyCalled = true
 		readyAuth = r.Header.Get("Authorization")
 		var payload struct {
-			Status string `json:"status"`
+			Status           string `json:"status"`
+			WorkspaceProfile string `json:"workspaceProfile"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			t.Fatalf("failed to decode ready payload: %v", err)
 		}
 		readyStatus = payload.Status
+		readyWorkspaceProfile = payload.WorkspaceProfile
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"running"}`))
 	}))
@@ -1917,6 +2143,9 @@ func TestPrepareWorkspaceMarksReady(t *testing.T) {
 	}
 	if readyStatus != workspaceReadyStatusRunning {
 		t.Fatalf("expected ready status %q, got %q", workspaceReadyStatusRunning, readyStatus)
+	}
+	if readyWorkspaceProfile != "lightweight" {
+		t.Fatalf("expected no-config workspace to report effective lightweight profile, got %q", readyWorkspaceProfile)
 	}
 	if recoveryMode {
 		t.Fatal("expected recoveryMode=false when no build error marker exists")
@@ -2321,13 +2550,7 @@ exit 0
 
 func TestEnsureDevcontainerReadyNoFallbackWhenRepoConfigSucceeds(t *testing.T) {
 	// Mock devcontainer CLI that always succeeds
-	mockBinDir := t.TempDir()
-	mockDevcontainer := filepath.Join(mockBinDir, "devcontainer")
-	if err := os.WriteFile(mockDevcontainer, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatalf("failed to write mock devcontainer command: %v", err)
-	}
-	origPath := os.Getenv("PATH")
-	t.Setenv("PATH", mockBinDir+":"+origPath)
+	installMockDevcontainerCommand(t, "#!/bin/sh\nexit 0\n")
 
 	workspaceDir := t.TempDir()
 	// Create a repo devcontainer config
@@ -2353,6 +2576,106 @@ func TestEnsureDevcontainerReadyNoFallbackWhenRepoConfigSucceeds(t *testing.T) {
 	if usedFallback {
 		t.Fatal("expected usedFallback=false when repo config succeeds")
 	}
+}
+
+func TestEnsureDevcontainerReadyNoConfigUsesLightweightDefault(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "default-devcontainer.json")
+	installMockDevcontainerCommand(t, "#!/bin/sh\nexit 0\n")
+	cfg := newNoConfigDevcontainerReadyConfig(t, "/workspace/ws-no-config", configPath)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	usedFallback, err := ensureDevcontainerReady(ctx, cfg, "", "", "", "")
+	if err != nil {
+		t.Fatalf("ensureDevcontainerReady returned error: %v", err)
+	}
+	if usedFallback {
+		t.Fatal("expected usedFallback=false for no-config lightweight default startup")
+	}
+
+	parsed, configJSON := readGeneratedDevcontainerConfig(t, configPath)
+	if _, hasFeatures := parsed["features"]; hasFeatures {
+		t.Fatalf("expected no-config default startup to omit devcontainer Features, got:\n%s", configJSON)
+	}
+	if updateRemoteUserUID, ok := parsed["updateRemoteUserUID"].(bool); !ok || updateRemoteUserUID {
+		t.Fatalf("expected no-config default startup to disable updateRemoteUserUID, got:\n%s", configJSON)
+	}
+}
+
+func TestEnsureDevcontainerReadyNoConfigLightweightStartupHonorsBuildTimeout(t *testing.T) {
+	installMockDevcontainerCommand(t, "#!/bin/sh\nexec sleep 5\n")
+	cfg := newNoConfigDevcontainerReadyConfig(t, "/workspace/ws-no-config-timeout", filepath.Join(t.TempDir(), "default-devcontainer.json"))
+	cfg.DevcontainerBuildTimeout = 100 * time.Millisecond
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	startedAt := time.Now()
+	_, err := ensureDevcontainerReady(ctx, cfg, "", "", "", "")
+	if err == nil {
+		t.Fatal("expected no-config lightweight startup to time out")
+	}
+	if elapsed := time.Since(startedAt); elapsed > time.Second {
+		t.Fatalf("expected lightweight startup to respect build timeout quickly, took %s (err: %v)", elapsed, err)
+	}
+}
+
+func TestEnsureDevcontainerReadyExplicitMissingNamedConfigDoesNotFallback(t *testing.T) {
+	cfg := newNoConfigDevcontainerReadyConfig(t, "/workspace/ws-missing-named-config", filepath.Join(t.TempDir(), "default-devcontainer.json"))
+
+	usedFallback, err := ensureDevcontainerReady(context.Background(), cfg, "", "", "python", "")
+	if err == nil {
+		t.Fatal("expected missing explicit devcontainer config to fail")
+	}
+	if usedFallback {
+		t.Fatal("expected missing explicit devcontainer config not to use fallback")
+	}
+	if !strings.Contains(err.Error(), `devcontainer config "python" not found`) {
+		t.Fatalf("expected clear missing named config error, got: %v", err)
+	}
+	if _, statErr := os.Stat(cfg.DefaultDevcontainerConfigPath); !os.IsNotExist(statErr) {
+		t.Fatalf("expected no fallback config to be written, stat err: %v", statErr)
+	}
+}
+
+func installMockDevcontainerCommand(t *testing.T, script string) {
+	t.Helper()
+
+	mockBinDir := t.TempDir()
+	mockDevcontainer := filepath.Join(mockBinDir, "devcontainer")
+	if err := os.WriteFile(mockDevcontainer, []byte(script), 0o755); err != nil {
+		t.Fatalf("failed to write mock devcontainer command: %v", err)
+	}
+	t.Setenv("PATH", mockBinDir+":"+os.Getenv("PATH"))
+}
+
+func newNoConfigDevcontainerReadyConfig(t *testing.T, labelValue, configPath string) *config.Config {
+	t.Helper()
+
+	return &config.Config{
+		WorkspaceDir:                  t.TempDir(),
+		ContainerMode:                 true,
+		ContainerLabelKey:             "devcontainer.local_folder",
+		ContainerLabelValue:           labelValue,
+		DefaultDevcontainerConfigPath: configPath,
+		DefaultDevcontainerImage:      config.DefaultDevcontainerImage,
+	}
+}
+
+func readGeneratedDevcontainerConfig(t *testing.T, configPath string) (map[string]interface{}, string) {
+	t.Helper()
+
+	rawConfig, readErr := os.ReadFile(configPath)
+	if readErr != nil {
+		t.Fatalf("failed to read generated default config: %v", readErr)
+	}
+	configJSON := string(rawConfig)
+	parsed := make(map[string]interface{})
+	if decodeErr := json.Unmarshal(rawConfig, &parsed); decodeErr != nil {
+		t.Fatalf("generated config is not valid JSON: %v\nContent:\n%s", decodeErr, configJSON)
+	}
+	return parsed, configJSON
 }
 
 // --- Credential helper host-side tests ---
@@ -2445,8 +2768,11 @@ func TestWriteCredentialHelperToHost(t *testing.T) {
 	if !strings.HasPrefix(string(content), "#!/bin/sh") {
 		t.Fatal("expected script to start with #!/bin/sh")
 	}
-	if !strings.Contains(string(content), "test-token") {
-		t.Fatal("expected script to contain callback token")
+	if !strings.Contains(string(content), "/git-credential") {
+		t.Fatal("expected script to call local git-credential endpoint")
+	}
+	if strings.Contains(string(content), "test-token") {
+		t.Fatal("credential helper must not contain callback token")
 	}
 }
 
@@ -2482,8 +2808,8 @@ func TestWriteCredentialHelperToHostReplacesExistingRegularFile(t *testing.T) {
 	if strings.Contains(string(content), "stale-helper") {
 		t.Fatal("expected stale helper content to be replaced")
 	}
-	if !strings.Contains(string(content), "fresh-token") {
-		t.Fatal("expected replacement helper to contain fresh token")
+	if strings.Contains(string(content), "fresh-token") {
+		t.Fatal("replacement helper must not contain callback token")
 	}
 }
 
@@ -2592,14 +2918,20 @@ func TestCredentialHelperContainerEnv(t *testing.T) {
 	t.Parallel()
 
 	env := credentialHelperContainerEnv()
-	if env["GIT_CONFIG_COUNT"] != "1" {
-		t.Fatalf("expected GIT_CONFIG_COUNT=1, got %q", env["GIT_CONFIG_COUNT"])
+	if env["GIT_CONFIG_COUNT"] != "2" {
+		t.Fatalf("expected GIT_CONFIG_COUNT=2, got %q", env["GIT_CONFIG_COUNT"])
 	}
 	if env["GIT_CONFIG_KEY_0"] != "credential.helper" {
 		t.Fatalf("expected GIT_CONFIG_KEY_0=credential.helper, got %q", env["GIT_CONFIG_KEY_0"])
 	}
 	if env["GIT_CONFIG_VALUE_0"] != credentialHelperContainerPath {
 		t.Fatalf("expected GIT_CONFIG_VALUE_0=%s, got %q", credentialHelperContainerPath, env["GIT_CONFIG_VALUE_0"])
+	}
+	if env["GIT_CONFIG_KEY_1"] != "credential.useHttpPath" {
+		t.Fatalf("expected GIT_CONFIG_KEY_1=credential.useHttpPath, got %q", env["GIT_CONFIG_KEY_1"])
+	}
+	if env["GIT_CONFIG_VALUE_1"] != "true" {
+		t.Fatalf("expected GIT_CONFIG_VALUE_1=true, got %q", env["GIT_CONFIG_VALUE_1"])
 	}
 }
 
@@ -2989,8 +3321,14 @@ func TestWriteCredentialOverrideConfig(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected containerEnv to be a map, got %T", cfg["containerEnv"])
 	}
-	if envMap["GIT_CONFIG_COUNT"] != "1" {
-		t.Fatalf("expected GIT_CONFIG_COUNT=1, got %v", envMap["GIT_CONFIG_COUNT"])
+	if envMap["GIT_CONFIG_COUNT"] != "2" {
+		t.Fatalf("expected GIT_CONFIG_COUNT=2, got %v", envMap["GIT_CONFIG_COUNT"])
+	}
+	if envMap["GIT_CONFIG_KEY_1"] != "credential.useHttpPath" {
+		t.Fatalf("expected GIT_CONFIG_KEY_1=credential.useHttpPath, got %v", envMap["GIT_CONFIG_KEY_1"])
+	}
+	if envMap["GIT_CONFIG_VALUE_1"] != "true" {
+		t.Fatalf("expected GIT_CONFIG_VALUE_1=true, got %v", envMap["GIT_CONFIG_VALUE_1"])
 	}
 }
 
@@ -3203,8 +3541,14 @@ func TestWriteDefaultDevcontainerConfigWithCredentialHelper(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected containerEnv to be a map")
 	}
-	if envMap["GIT_CONFIG_COUNT"] != "1" {
-		t.Fatalf("expected GIT_CONFIG_COUNT=1")
+	if envMap["GIT_CONFIG_COUNT"] != "2" {
+		t.Fatalf("expected GIT_CONFIG_COUNT=2")
+	}
+	if envMap["GIT_CONFIG_KEY_1"] != "credential.useHttpPath" {
+		t.Fatalf("expected GIT_CONFIG_KEY_1=credential.useHttpPath")
+	}
+	if envMap["GIT_CONFIG_VALUE_1"] != "true" {
+		t.Fatalf("expected GIT_CONFIG_VALUE_1=true")
 	}
 }
 

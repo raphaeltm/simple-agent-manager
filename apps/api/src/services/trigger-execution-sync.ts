@@ -7,6 +7,7 @@
  *
  * Best-effort: errors are logged but never propagated to the caller.
  */
+import { TRIGGER_EXECUTION_HARD_MAX_FAILURE_PREFIX } from '@simple-agent-manager/shared';
 
 import { createModuleLogger } from '../lib/logger';
 
@@ -25,7 +26,7 @@ export async function syncTriggerExecutionStatus(
   db: D1Database,
   taskId: string,
   toStatus: 'completed' | 'failed' | 'cancelled',
-  errorMessage?: string,
+  errorMessage?: string
 ): Promise<void> {
   try {
     // Look up the task's trigger execution link
@@ -45,13 +46,24 @@ export async function syncTriggerExecutionStatus(
       .prepare(
         // The `AND status = 'running'` guard provides idempotency: if the execution
         // was already synced (e.g., by a concurrent code path), the UPDATE is a no-op.
-        `UPDATE trigger_executions SET status = ?, completed_at = ?, error_message = ? WHERE id = ? AND status = 'running'`,
+        // Hard-residence backstop failures are also syncable: cleanup may mark the
+        // execution failed after the hard bound while admission still treats the
+        // linked non-terminal task as active. Once the task terminalizes, the task
+        // row is again the source of truth.
+        `UPDATE trigger_executions
+         SET status = ?, completed_at = ?, error_message = ?
+         WHERE id = ?
+           AND (
+             status = 'running'
+             OR (status = 'failed' AND error_message LIKE ?)
+           )`
       )
       .bind(
         execStatus,
         now,
-        toStatus === 'failed' ? (errorMessage?.trim() || 'Task failed') : null,
+        toStatus === 'failed' ? errorMessage?.trim() || 'Task failed' : null,
         task.trigger_execution_id,
+        `${TRIGGER_EXECUTION_HARD_MAX_FAILURE_PREFIX}%`
       )
       .run();
 

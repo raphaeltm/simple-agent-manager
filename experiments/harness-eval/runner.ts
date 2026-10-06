@@ -16,6 +16,7 @@ import type {
   ToolCallRecord,
 } from './types.js';
 import { buildGatewayUrl, buildHeaders } from './models.js';
+import * as v from 'valibot';
 
 interface RunnerEnv {
   accountId: string;
@@ -23,98 +24,42 @@ interface RunnerEnv {
   authToken: string;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function requireString(value: unknown, path: string): string {
-  if (typeof value !== 'string') throw new Error(`${path} must be a string`);
-  return value;
-}
-
-function parseUsage(value: unknown): TokenUsage | undefined {
-  if (value === undefined) return undefined;
-  if (!isRecord(value)) throw new Error('usage must be an object');
-  if (
-    typeof value.prompt_tokens !== 'number' ||
-    typeof value.completion_tokens !== 'number' ||
-    typeof value.total_tokens !== 'number'
-  ) {
-    throw new Error('usage token counts must be numbers');
-  }
-  return {
-    prompt_tokens: value.prompt_tokens,
-    completion_tokens: value.completion_tokens,
-    total_tokens: value.total_tokens,
-  };
-}
-
-function parseChatMessage(value: unknown, path: string): ChatMessage {
-  if (!isRecord(value)) throw new Error(`${path} must be an object`);
-  const role = requireString(value.role, `${path}.role`);
-  if (role !== 'system' && role !== 'user' && role !== 'assistant' && role !== 'tool') {
-    throw new Error(`${path}.role has an unsupported value`);
-  }
-
-  let toolCalls: ChatMessage['tool_calls'];
-  if (value.tool_calls !== undefined) {
-    if (!Array.isArray(value.tool_calls)) throw new Error(`${path}.tool_calls must be an array`);
-    toolCalls = value.tool_calls.map((rawToolCall, index) => {
-      if (!isRecord(rawToolCall)) throw new Error(`${path}.tool_calls[${index}] must be an object`);
-      if (rawToolCall.type !== 'function') {
-        throw new Error(`${path}.tool_calls[${index}].type must be "function"`);
-      }
-      if (!isRecord(rawToolCall.function)) {
-        throw new Error(`${path}.tool_calls[${index}].function must be an object`);
-      }
-      return {
-        id: requireString(rawToolCall.id, `${path}.tool_calls[${index}].id`),
-        type: 'function',
-        function: {
-          name: requireString(rawToolCall.function.name, `${path}.tool_calls[${index}].function.name`),
-          arguments: requireString(
-            rawToolCall.function.arguments,
-            `${path}.tool_calls[${index}].function.arguments`,
-          ),
-        },
-      };
-    });
-  }
-
-  return {
-    role,
-    content:
-      value.content === undefined || value.content === null
-        ? value.content
-        : requireString(value.content, `${path}.content`),
-    ...(toolCalls ? { tool_calls: toolCalls } : {}),
-    ...(typeof value.tool_call_id === 'string' ? { tool_call_id: value.tool_call_id } : {}),
-    ...(typeof value.reasoning === 'string' ? { reasoning: value.reasoning } : {}),
-  };
-}
+const usageSchema = v.object({
+  prompt_tokens: v.number(),
+  completion_tokens: v.number(),
+  total_tokens: v.number(),
+});
+const toolCallSchema = v.object({
+  id: v.string(),
+  type: v.literal('function'),
+  function: v.object({
+    name: v.string(),
+    arguments: v.string(),
+  }),
+});
+const chatMessageSchema = v.object({
+  role: v.picklist(['system', 'user', 'assistant', 'tool']),
+  content: v.optional(v.nullable(v.string())),
+  tool_calls: v.optional(v.array(toolCallSchema)),
+  tool_call_id: v.optional(v.string()),
+  reasoning: v.optional(v.string()),
+});
+const chatCompletionResponseSchema = v.object({
+  id: v.string(),
+  choices: v.array(
+    v.object({
+      message: chatMessageSchema,
+      finish_reason: v.string(),
+    })
+  ),
+  model: v.string(),
+  usage: v.optional(usageSchema),
+});
 
 function parseChatCompletionResponse(value: unknown): ChatCompletionResponse {
-  if (!isRecord(value)) throw new Error('chat completion response must be an object');
-  if (!Array.isArray(value.choices)) {
-    throw new Error('chat completion response choices must be an array');
-  }
-  return {
-    id: requireString(value.id, 'chat completion response.id'),
-    model: requireString(value.model, 'chat completion response.model'),
-    choices: value.choices.map((rawChoice, index) => {
-      if (!isRecord(rawChoice)) {
-        throw new Error(`chat completion response.choices[${index}] must be an object`);
-      }
-      return {
-        message: parseChatMessage(rawChoice.message, `chat completion response.choices[${index}].message`),
-        finish_reason: requireString(
-          rawChoice.finish_reason,
-          `chat completion response.choices[${index}].finish_reason`,
-        ),
-      };
-    }),
-    usage: parseUsage(value.usage),
-  };
+  const result = v.safeParse(chatCompletionResponseSchema, value);
+  if (!result.success) throw new Error('chat completion response must match the expected schema');
+  return result.output;
 }
 
 /**
@@ -123,7 +68,7 @@ function parseChatCompletionResponse(value: unknown): ChatCompletionResponse {
 export async function runScenario(
   scenario: EvalScenario,
   model: ModelConfig,
-  env: RunnerEnv,
+  env: RunnerEnv
 ): Promise<ScenarioRun> {
   const url = buildGatewayUrl(env.accountId, env.gatewayId, model);
   const headers = buildHeaders(model, env.authToken);
@@ -188,7 +133,17 @@ export async function runScenario(
 
       if (!resp.ok) {
         const errText = await resp.text();
-        return buildErrorRun(scenario, model, messages, toolCalls, totalUsage, turnUsage, turnLatency, turnsUsed, `API error ${resp.status}: ${errText.slice(0, 500)}`);
+        return buildErrorRun(
+          scenario,
+          model,
+          messages,
+          toolCalls,
+          totalUsage,
+          turnUsage,
+          turnLatency,
+          turnsUsed,
+          `API error ${resp.status}: ${errText.slice(0, 500)}`
+        );
       }
 
       const payload: unknown = await resp.json();
@@ -204,7 +159,17 @@ export async function runScenario(
 
       const choice = response.choices?.[0];
       if (!choice) {
-        return buildErrorRun(scenario, model, messages, toolCalls, totalUsage, turnUsage, turnLatency, turnsUsed, 'No choices in API response');
+        return buildErrorRun(
+          scenario,
+          model,
+          messages,
+          toolCalls,
+          totalUsage,
+          turnUsage,
+          turnLatency,
+          turnsUsed,
+          'No choices in API response'
+        );
       }
 
       const msg = choice.message;
@@ -303,7 +268,7 @@ export async function runScenario(
       turnUsage,
       turnLatency,
       turnsUsed,
-      err instanceof Error ? err.message : String(err),
+      err instanceof Error ? err.message : String(err)
     );
   }
 }
@@ -317,7 +282,7 @@ function buildErrorRun(
   turnUsage: Array<{ turn: number; usage: TokenUsage | null }>,
   turnLatency: Array<{ turn: number; latencyMs: number }>,
   turnsUsed: number,
-  error: string,
+  error: string
 ): ScenarioRun {
   return {
     scenarioId: scenario.id,

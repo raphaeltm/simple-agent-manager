@@ -1,3 +1,4 @@
+// FILE SIZE EXCEPTION: Shared public type barrel intentionally keeps named re-exports centralized for stable package imports. See .claude/rules/18-file-size-limits.md
 // Types barrel — named re-exports only (no `export *`)
 
 // User & Credentials
@@ -12,20 +13,103 @@ export type {
   CredentialProvider,
   CredentialResponse,
   CredentialSource,
+  CredentialValidationStatus,
+  GcpCredential,
+  GcpCredentialAuthType,
+  GcpCredentialMetadata,
   GcpOidcCredential,
+  GcpServiceAccountKeyCredential,
+  GcpWorkloadIdentityCredential,
   ListPlatformCredentialsResponse,
   PlatformCredential,
   PlatformCredentialResponse,
   PlatformCredentialType,
   ProjectDeploymentCredential,
   ProjectDeploymentCredentialResponse,
+  SaveGcpServiceAccountCredentialRequest,
   SetupProjectDeploymentRequest,
+  SignupApprovalConfig,
+  SignupApprovalConfigResponse,
+  SignupApprovalConfigSource,
   UpdatePlatformCredentialRequest,
+  UpdateSignupApprovalConfigRequest,
   User,
   UserRole,
   UserStatus,
 } from './user';
-export { CREDENTIAL_PROVIDERS } from './user';
+export { CREDENTIAL_PROVIDERS, GCP_CREDENTIAL_VERSION } from './user';
+
+// Capacity pools
+export type {
+  CapacityCredentialSource,
+  CapacityExhaustionPolicy,
+  CapacityPlacementCredentialSource,
+  CapacityPlacementSnapshot,
+  CapacityPool,
+  CapacityPoolCandidate,
+  CapacityPoolConfigurationState,
+  CapacityPoolFallback,
+  CapacityPoolPlacementSettings,
+  CapacityPoolScope,
+  CapacityPoolSelectionWeights,
+  CapacityPoolStatus,
+  CapacityPoolStrategy,
+  CapacitySourceIdentity,
+  CapacitySourceKind,
+  CapacityWorkloadRole,
+  DefaultCapacityPoolCandidateCatalogAddition,
+  DefaultCapacityPoolCandidateStatusUpdate,
+  DefaultCapacityPoolEffectiveState,
+  DefaultCapacityPoolPolicyUpdate,
+  DefaultCapacityPoolScopeSummary,
+  DefaultCapacityPoolSummary,
+  DefaultCapacityPoolUpdateRequest,
+  ProjectDefaultCapacityPoolsResponse,
+  SafeCapacityPoolPlacementSettingsSummary,
+  SafeEffectiveCapacityPoolReason,
+  SafeEffectiveCapacityPoolSummary,
+} from './capacity-pool';
+export {
+  CAPACITY_CREDENTIAL_SOURCES,
+  CAPACITY_EXHAUSTION_POLICIES,
+  CAPACITY_PLACEMENT_CREDENTIAL_SOURCES,
+  CAPACITY_POOL_CONFIGURATION_STATES,
+  CAPACITY_POOL_SCOPES,
+  CAPACITY_POOL_STATUSES,
+  CAPACITY_POOL_STRATEGIES,
+  CAPACITY_SOURCE_KINDS,
+  CAPACITY_WORKLOAD_ROLES,
+  DEFAULT_CAPACITY_POOL_DEPLOYMENT_STRATEGY,
+  DEFAULT_CAPACITY_POOL_EFFECTIVE_STATES,
+  DEFAULT_CAPACITY_POOL_MAX_NODES,
+  isCapacityCredentialSource,
+  isCapacityExhaustionPolicy,
+  isCapacityPlacementCredentialSource,
+  isCapacityPoolConfigurationState,
+  isCapacityPoolScope,
+  isCapacityPoolStatus,
+  isCapacityPoolStrategy,
+  isCapacitySourceKind,
+  isCapacityWorkloadRole,
+  SAFE_EFFECTIVE_CAPACITY_POOL_REASONS,
+} from './capacity-pool';
+
+// Placement diagnostics (why-this-node / why-queued / why-rejected)
+export type {
+  PlacementAttemptDiagnostic,
+  PlacementAuthorityDiagnostic,
+  PlacementDecisionDiagnostics,
+  PlacementHostDiagnostic,
+  PlacementQueueDiagnostic,
+  PlacementResourceEvidence,
+  PlacementResourceFacts,
+  PlacementRolloutDiagnostic,
+} from './placement-diagnostics';
+export {
+  assertPlacementDiagnosticsAreUserSafe,
+  PLACEMENT_DIAGNOSTICS_FORBIDDEN_KEYS,
+  PLACEMENT_DIAGNOSTICS_VERSION,
+} from './placement-diagnostics';
 
 // GitHub
 export type {
@@ -38,6 +122,21 @@ export type {
   Repository,
   RepositoryListResponse,
 } from './github';
+
+// GitLab
+export type { GitLabProject, GitLabProjectListResponse } from './gitlab';
+
+// Repo Browse (remote-branch git browser + diff)
+export type {
+  RepoBranch,
+  RepoBranchesResponse,
+  RepoCompareFile,
+  RepoCompareFileStatus,
+  RepoCompareResponse,
+  RepoFileContent,
+  RepoTreeEntry,
+  RepoTreeResponse,
+} from './repo-browse';
 
 // Workspace & Node
 export type {
@@ -52,6 +151,9 @@ export type {
   Event,
   EventLevel,
   Node,
+  NodeClass,
+  NodeContainerListResponse,
+  NodeContainerLogTarget,
   NodeHealthStatus,
   NodeLifecycleState,
   NodeLifecycleStatus,
@@ -62,13 +164,16 @@ export type {
   NodeLogSource,
   NodeMetrics,
   NodeResponse,
+  NodeRole,
   NodeStatus,
   NodeSystemInfo,
+  NodeTransport,
   PortsResponse,
   UpdateWorkspaceRequest,
   VMLocation,
   VMSize,
   Workspace,
+  WorkspacePortsState,
   WorkspaceProfile,
   WorkspaceResponse,
   WorkspaceRuntimeAssetsResponse,
@@ -76,39 +181,110 @@ export type {
   WorkspaceRuntimeFile,
   WorkspaceStatus,
 } from './workspace';
+// Node class runtime guards (value exports, not types)
+export { isNodeClass, isUserOwnedNodeClass } from './workspace';
 // Provider Catalog
 export type {
   LocationInfo,
   ProviderCatalog,
+  ProviderCatalogOfferingInfo,
+  ProviderCatalogRefreshOrigin,
+  ProviderCatalogRefreshStatus,
   ProviderCatalogResponse,
+  ProviderInstanceCatalogSource,
+  ProviderInstanceOffering,
   SizeInfo,
+} from './provider';
+export {
+  isProviderInstanceCatalogSource,
+  PROVIDER_CATALOG_REFRESH_ORIGINS,
+  PROVIDER_INSTANCE_CATALOG_SOURCES,
 } from './provider';
 
 // Project
 export type {
+  AddProjectRepositoryRequest,
+  AvailableRepositoriesResponse,
+  AvailableRepository,
+  CreatedProjectInviteLinkResponse,
+  CreateProjectInviteRequest,
   CreateProjectRequest,
+  CredentialAttributionCheck,
+  CredentialAttributionConsumerKind,
+  CredentialAttributionResource,
+  CredentialAttributionResourceKind,
+  CredentialAttributionSource,
+  CredentialAttributionUser,
+  DecideProjectAccessRequest,
   ListProjectsResponse,
   Project,
+  ProjectAccessRequestResponse,
   ProjectAgentDefaults,
+  ProjectCredentialAttributionHealthSummary,
   ProjectDetail,
   ProjectDetailResponse,
+  ProjectInviteGithubAccessStatus,
+  ProjectInviteLinkResponse,
+  ProjectInviteLinkStatus,
+  ProjectInvitePreviewResponse,
+  ProjectMemberOffboardingAction,
+  ProjectMemberOffboardingApplyActionSelection,
+  ProjectMemberOffboardingApplyRequest,
+  ProjectMemberOffboardingApplyResponse,
+  ProjectMemberOffboardingCredentialSource,
+  ProjectMemberOffboardingPlanStatus,
+  ProjectMemberOffboardingPreviewResponse,
+  ProjectMemberOffboardingResourceKind,
+  ProjectMemberOffboardingResourcePreview,
+  ProjectMemberOffboardingResourceResult,
+  ProjectMemberOffboardingResourceStatus,
+  ProjectMemberResponse,
+  ProjectMemberRole,
+  ProjectMembersResponse,
+  ProjectMemberStatus,
+  ProjectOwnershipTransferRequest,
+  ProjectOwnershipTransferResponse,
+  ProjectRepository,
+  ProjectRepositoryAccessResponse,
+  ProjectRepositoryStatus,
   ProjectRuntimeConfigResponse,
   ProjectRuntimeEnvVarResponse,
   ProjectRuntimeFileResponse,
   ProjectStatus,
   ProjectSummary,
   RepoProvider,
+  SubmoduleDiscoveryResponse,
+  SubmoduleSuggestion,
   UpdateProjectRequest,
   UpsertProjectRuntimeEnvVarRequest,
   UpsertProjectRuntimeFileRequest,
 } from './project';
-export {
-  ARTIFACTS_DEFAULTS,
-  VALID_REPO_PROVIDERS,
-} from './project';
+export { ARTIFACTS_DEFAULTS, VALID_REPO_PROVIDERS } from './project';
+
+// Credential usage limits
+export type {
+  CredentialLimitCredentialSource,
+  CredentialLimitCredentialSummary,
+  CredentialLimitLevel,
+  CredentialLimitsResponse,
+  CredentialLimitStatus,
+  CredentialLimitWindowSummary,
+} from './credential-limits';
+
+// Deployment
+export type {
+  DeploymentEnvironmentConfigResponse,
+  DeploymentEnvironmentConfigVarResponse,
+  UpsertDeploymentEnvironmentConfigVarRequest,
+} from './deployment';
 
 // Task
 export type {
+  AgentActivityState,
+  CompletionEvidence,
+  CompletionEvidenceVerificationKind,
+  CompletionTestRun,
+  CompletionVerification,
   CreateTaskDependencyRequest,
   CreateTaskRequest,
   DashboardActiveTasksResponse,
@@ -130,26 +306,94 @@ export type {
   TaskDependency,
   TaskDetailResponse,
   TaskExecutionStep,
+  TaskFinalAssistantMessage,
   TaskMode,
   TaskSortOrder,
   TaskStatus,
   TaskStatusEvent,
+  TaskTerminalStatus,
+  TaskTerminalTransitionEvent,
   TaskTriggerExecutionInfo,
   TaskTriggerInfo,
   UpdateTaskRequest,
   UpdateTaskStatusRequest,
 } from './task';
+
+// Comments (message-anchored and library-file-anchored)
+export type {
+  CommentAnchor,
+  CommentAnchorKind,
+  CommentAuthor,
+  CommentAuthorKind,
+  CommentReply,
+  CommentStatus,
+  CreateLibraryFileCommentThreadRequest,
+  CreateMessageCommentThreadRequest,
+  LibraryFileCommentAnchor,
+  LibraryFileCommentListResponse,
+  LibraryFileCommentMutationResponse,
+  LibraryFileCommentThread,
+  MessageCommentActorProvenance,
+  MessageCommentAnchor,
+  MessageCommentAuthor,
+  MessageCommentAuthorKind,
+  MessageCommentDirectiveState,
+  MessageCommentListRequest,
+  MessageCommentListResponse,
+  MessageCommentMutationResponse,
+  MessageCommentReply,
+  MessageCommentReplyMutationResponse,
+  MessageCommentSourceMessageContext,
+  MessageCommentThread,
+  MessageCommentThreadEvent,
+  MessageCommentThreadEventReason,
+  MessageCommentThreadStatus,
+  MessageCommentThreadSummary,
+  ProjectCommentFileRef,
+  ProjectCommentListResponse,
+  ProjectCommentSessionRef,
+  ReplyToLibraryFileCommentThreadRequest,
+  ReplyToMessageCommentThreadRequest,
+  UpdateLibraryFileCommentThreadStatusRequest,
+  UpdateMessageCommentThreadStatusRequest,
+} from './comments';
 export {
+  COMMENT_ANCHOR_KINDS,
+  COMMENT_AUTHOR_KINDS,
+  COMMENT_STATUSES,
+  MESSAGE_COMMENT_AUTHOR_KINDS,
+  MESSAGE_COMMENT_THREAD_STATUSES,
+} from './comments';
+
+// ProjectData event subscription core
+// prettier-ignore
+export type { AckProjectEventDeliveryInput, AdmitProjectEventInput, CancelProjectEventSubscriptionInput, CreateProjectEventDeliveryBatchInput, CreateProjectEventSubscriptionInput, ExpireProjectEventSubscriptionsInput, GetProjectEventInput, GetProjectEventRecentStatusInput, GetProjectEventSubscriptionInput, ListProjectEventDeliveryAttemptsInput, ListProjectEventDeliveryBatchesInput, ListProjectEventSubscriptionEventsInput, ListProjectEventSubscriptionsInput, ProjectEventAdmissionOutcome, ProjectEventAdmissionResult, ProjectEventAgentVisibility, ProjectEventAudience, ProjectEventAudienceScope, ProjectEventDeliveryAckResult, ProjectEventDeliveryAdapterAction, ProjectEventDeliveryAdapterCapability, ProjectEventDeliveryAdapterDecision, ProjectEventDeliveryAdapterKind, ProjectEventDeliveryAdapterVersionGate, ProjectEventDeliveryAttemptListResult, ProjectEventDeliveryAttemptMutationResult, ProjectEventDeliveryAttemptRecord, ProjectEventDeliveryAttemptState, ProjectEventDeliveryAuthorization, ProjectEventDeliveryBatchListResult, ProjectEventDeliveryBatchMutationResult, ProjectEventDeliveryBatchRecord, ProjectEventDeliveryBatchState, ProjectEventDeliveryCapabilityMode, ProjectEventDeliveryModelSummary, ProjectEventDeliveryPreference, ProjectEventDeliveryResolution, ProjectEventDeliveryResolutionReason, ProjectEventDeliverySummaryEvent, ProjectEventDeliveryTargetState, ProjectEventDisplayData, ProjectEventExpireSubscriptionsResult, ProjectEventFilterField, ProjectEventFilterV1, ProjectEventJsonPrimitive, ProjectEventJsonValue, ProjectEventLimits, ProjectEventMatchRecord, ProjectEventMatchState, ProjectEventMetadata, ProjectEventPullDeliveryInfo, ProjectEventPullDeliveryRecord, ProjectEventRawPayloadRef, ProjectEventRecentStatus, ProjectEventRecord, ProjectEventRecordState, ProjectEventRequestedDeliveryMode, ProjectEventResolvedDeliveryMode, ProjectEventRetentionResult, ProjectEventSeverity, ProjectEventStorageAccountingRecord, ProjectEventSubject, ProjectEventSubscriptionEvent, ProjectEventSubscriptionEventListResult, ProjectEventSubscriptionEventSummary, ProjectEventSubscriptionListResult, ProjectEventSubscriptionMutationResult, ProjectEventSubscriptionOwner, ProjectEventSubscriptionOwnerType, ProjectEventSubscriptionRecord, ProjectEventSubscriptionState, RecordProjectEventDeliveryAttemptInput, RunProjectEventRetentionInput } from './project-events';
+// prettier-ignore
+export type { ProjectEventSubscriptionAgentCaller, ProjectEventSubscriptionCaller, ProjectEventSubscriptionCallerKind, ProjectEventSubscriptionCancelRequest, ProjectEventSubscriptionCancelResponse, ProjectEventSubscriptionCreateRequest, ProjectEventSubscriptionCreateResponse, ProjectEventSubscriptionExpireRequest, ProjectEventSubscriptionExpireResponse, ProjectEventSubscriptionGetRequest, ProjectEventSubscriptionGetResponse, ProjectEventSubscriptionListRequest, ProjectEventSubscriptionListResponse, ProjectEventSubscriptionOwnerScope, ProjectEventSubscriptionPlatformCaller, ProjectEventSubscriptionPlatformPermissions, ProjectEventWakeInstructions } from './project-event-subscriptions';
+// prettier-ignore
+export { PROJECT_EVENT_SUBSCRIPTION_CALLER_KINDS, PROJECT_EVENT_SUBSCRIPTION_OWNER_SCOPES } from './project-event-subscriptions';
+// prettier-ignore
+export { PROJECT_EVENT_AUDIENCE_SCOPES, PROJECT_EVENT_CONTRACT_VERSION, PROJECT_EVENT_DELIVERY_ADAPTER_ACTIONS, PROJECT_EVENT_DELIVERY_ADAPTER_KINDS, PROJECT_EVENT_DELIVERY_ATTEMPT_STATES, PROJECT_EVENT_DELIVERY_BATCH_STATES, PROJECT_EVENT_DELIVERY_CAPABILITY_MODES, PROJECT_EVENT_DELIVERY_RESOLUTION_REASONS, PROJECT_EVENT_DELIVERY_TARGET_STATES, PROJECT_EVENT_FILTER_FIELDS, PROJECT_EVENT_FILTER_VERSION, PROJECT_EVENT_REQUESTED_DELIVERY_MODES, PROJECT_EVENT_RESOLVED_DELIVERY_MODES, PROJECT_EVENT_SEVERITIES, PROJECT_EVENT_SUBSCRIPTION_OWNER_TYPES, PROJECT_EVENT_SUBSCRIPTION_STATES } from './project-events';
+export {
+  AGENT_ACTIVITY_STATES,
   ATTACHMENT_DEFAULTS,
+  COMPLETION_EVIDENCE_VERIFICATION_KINDS,
   EXECUTION_STEP_LABELS,
   EXECUTION_STEP_ORDER,
   isTaskExecutionStep,
   isTaskMode,
   isTaskStatus,
+  parseCompletionEvidenceJson,
   SAFE_FILENAME_REGEX,
   TASK_EXECUTION_STEPS,
   TASK_MODES,
   TASK_STATUSES,
+  TASK_TERMINAL_STATUSES,
+  taskExecutionStep,
+  validateCompletionEvidence,
+  WAKE_PHASE_LABELS,
+  WAKE_PHASE_PENDING_LABEL,
+  wakePhaseLabel,
 } from './task';
 
 // Session (Chat, Agent, ACP)
@@ -184,6 +428,8 @@ export type {
   ProjectWebSocketEventType,
   RecentChatsResponse,
   RemoveWorktreeResponse,
+  SessionActivitySource,
+  SessionActivityTerminalReason,
   SessionIdeaLink,
   SessionStateSnapshot,
   SessionSummary,
@@ -201,11 +447,7 @@ export {
 } from './session';
 
 // Activity
-export type {
-  ActivityActorType,
-  ActivityEvent,
-  ActivityEventType,
-} from './activity';
+export type { ActivityActorType, ActivityEvent, ActivityEventType } from './activity';
 
 // Notification
 export type {
@@ -219,16 +461,37 @@ export type {
   NotificationUrgency,
   NotificationWsMessage,
   UpdateNotificationPreferenceRequest,
+  WebPushSubscriptionInput,
+  WebPushSubscriptionResponse,
+  WebPushSubscriptionsResponse,
 } from './notification';
-export {
-  NOTIFICATION_CHANNELS,
-  NOTIFICATION_TYPES,
-  NOTIFICATION_URGENCIES,
-} from './notification';
+export { NOTIFICATION_CHANNELS, NOTIFICATION_TYPES, NOTIFICATION_URGENCIES } from './notification';
 
 // Admin Observability
 export type {
   AdminLogEntry,
+  AdminNodesResponse,
+  AdminNodeSummary,
+  AdminProjectDataArchiveCircuitBreaker,
+  AdminProjectDataArchiveCircuitBreakerControlResponse,
+  AdminProjectDataArchiveCircuitBreakerControlResult,
+  AdminProjectDataArchiveCircuitBreakersResponse,
+  AdminProjectDataArchiveCircuitBreakerState,
+  AdminProjectDataArchiveMigrationAbandonResponse,
+  AdminProjectDataArchiveProblemMigration,
+  AdminProjectDataArchiveProblemMigrationsResponse,
+  AdminProjectDataStorageTelemetryResponse,
+  AdminProjectDataStorageTelemetryRow,
+  AdminProjectEventInspectorAdapterDecision,
+  AdminProjectEventInspectorAttempt,
+  AdminProjectEventInspectorBatch,
+  AdminProjectEventInspectorEvent,
+  AdminProjectEventInspectorMatch,
+  AdminProjectEventInspectorProject,
+  AdminProjectEventInspectorResponse,
+  AdminProjectEventInspectorSubscription,
+  AdminProjectEventInspectorTarget,
+  AdminProjectEventInspectorTotals,
   ErrorListResponse,
   ErrorTrendBucket,
   ErrorTrendResponse,
@@ -246,21 +509,45 @@ export type {
 
 // Agent Settings & Profiles
 export type {
+  AgentEffort,
   AgentPermissionMode,
   AgentProfile,
+  AgentProfileRuntime,
   AgentProviderMode,
   AgentSettings,
   AgentSettingsResponse,
+  AgentSkill,
   CreateAgentProfileRequest,
+  CreateSkillRequest,
+  GitHubCliContentsPermissionLevel,
+  GitHubCliPermissionLevel,
+  GitHubCliPolicy,
+  GitHubCliPolicyMode,
+  GitHubCliPolicyPermissions,
   OpenCodeProvider,
   OpenCodeProviderMeta,
   ResolvedAgentProfile,
+  ResolvedSkillProfile,
   SaveAgentSettingsRequest,
   UpdateAgentProfileRequest,
+  UpdateSkillRequest,
 } from './agent-settings';
 export {
+  AGENT_EFFORT_LEVELS,
+  AGENT_PROFILE_RUNTIMES,
+  DEFAULT_AGENT_EFFORT,
+  DEFAULT_GITHUB_CLI_POLICY,
+  DEFAULT_OPENCODE_GO_MODEL,
+  DEFAULT_OPENCODE_PROVIDER,
+  DEFAULT_OPENCODE_ZEN_MODEL,
+  getSupportedEffortsForAgent,
+  GITHUB_CLI_POLICY_PERMISSION_KEYS,
+  isAgentEffort,
+  isAgentEffortSupported,
+  isAgentProfileRuntime,
   OPENCODE_PROVIDER_OPTIONS,
   OPENCODE_PROVIDERS,
+  resolveOpenCodeProvider,
   VALID_AGENT_PROVIDER_MODES,
 } from './agent-settings';
 
@@ -303,28 +590,52 @@ export {
 
 // Triggers (Event-Driven Agent Triggers)
 export type {
+  CreateGitHubTriggerRequest,
   CreateTriggerRequest,
+  CreateTriggerResponse,
   CronTemplateContext,
   CronValidationResult,
+  GitHubTemplateContext,
+  GitHubTriggerConfig,
+  GitHubTriggerEventType,
+  GitHubTriggerFilters,
   ListTriggerExecutionsResponse,
   ListTriggersResponse,
+  ListWebhookDeliveriesResponse,
+  RunTriggerRequest,
   Trigger,
   TriggeredBy,
   TriggerExecution,
   TriggerExecutionResponse,
   TriggerExecutionStatus,
+  TriggerPreviewRequest,
+  TriggerPreviewResponse,
   TriggerResponse,
   TriggerSkipReason,
   TriggerSourceType,
   TriggerStatus,
   UpdateTriggerRequest,
+  WebhookCredential,
+  WebhookDelivery,
+  WebhookDeliveryOutcome,
+  WebhookFilterMode,
+  WebhookFilterOperator,
+  WebhookFilterResult,
+  WebhookTemplateContext,
+  WebhookTriggerConfig,
+  WebhookTriggerConfigInput,
+  WebhookTriggerFilter,
 } from './trigger';
 export {
+  GITHUB_TRIGGER_EVENT_TYPES,
   TRIGGER_EXECUTION_STATUSES,
   TRIGGER_SKIP_REASONS,
   TRIGGER_SOURCE_TYPES,
   TRIGGER_STATUSES,
   TRIGGERED_BY_VALUES,
+  WEBHOOK_DELIVERY_OUTCOMES,
+  WEBHOOK_FILTER_MODES,
+  WEBHOOK_FILTER_OPERATORS,
 } from './trigger';
 
 // Compute Usage
@@ -339,6 +650,7 @@ export type {
   ComputeUsagePeriod,
   ComputeUsageRecord,
   ComputeUsageResponse,
+  ComputeVcpuCountSource,
   NodeUsageRecord,
 } from './compute-usage';
 
@@ -384,19 +696,39 @@ export type {
   GetPendingMessagesResponse,
   ListMailboxResponse,
   MessageClass,
+  PromptDeliverySource,
   SendDurableMessageRequest,
   SendDurableMessageResponse,
   SenderType,
+  VmPromptDeliveryCapabilities,
+  VmPromptDeliveryReceipt,
+  VmPromptDeliveryResponse,
+  VmPromptReceiptState,
 } from './mailbox';
 export {
   DELIVERY_STATE_TRANSITIONS,
   DELIVERY_STATES,
   DELIVERY_TERMINAL_STATES,
   DURABLE_MESSAGE_CLASSES,
+  isUrgentMessageClass,
   MAILBOX_DEFAULTS,
+  MESSAGE_CLASS_URGENCY,
   MESSAGE_CLASSES,
+  PROMPT_DELIVERY_SOURCES,
   SENDER_TYPES,
+  TURN_STOP_URGENCY_THRESHOLD,
+  VM_PROMPT_RECEIPT_STATES,
 } from './mailbox';
+
+// Durable execution checkpoint foundation
+export type {
+  CheckpointEpisode,
+  CheckpointEpisodeState,
+  CheckpointEpisodeTransitionInput,
+  CheckpointProgressEnvelope,
+  CreateCheckpointEpisodeInput,
+} from './checkpoint';
+export { CHECKPOINT_EPISODE_STATES, CHECKPOINT_EPISODE_TRANSITIONS } from './checkpoint';
 
 // Mission (Phase 2: Orchestration Primitives)
 export type {
@@ -435,25 +767,25 @@ export type {
   TaskEventNotification,
   TaskEventType,
 } from './orchestrator';
-export {
-  DECISION_ACTIONS,
-  OVERRIDABLE_SCHEDULER_STATES,
-} from './orchestrator';
+export { DECISION_ACTIONS, OVERRIDABLE_SCHEDULER_STATES } from './orchestrator';
 
 // Project Policy (Phase 4: Policy Propagation)
 export type {
   CreatePolicyRequest,
   ListPoliciesResponse,
   PolicyCategory,
+  PolicyScope,
   PolicySource,
   ProjectPolicy,
   UpdatePolicyRequest,
 } from './policy';
 export {
   isPolicyCategory,
+  isPolicyScope,
   isPolicySource,
   POLICY_CATEGORIES,
   POLICY_DEFAULTS,
+  POLICY_SCOPES,
   POLICY_SOURCES,
 } from './policy';
 
@@ -467,8 +799,32 @@ export type {
   UserAiBudgetSettings,
   UserAiUsageByDay,
   UserAiUsageByModel,
+  UserAiUsageByProvider,
   UserAiUsageResponse,
 } from './ai-usage';
+
+// Deployment Debugging Agent
+export type {
+  DebugAgentTarget,
+  DebugAgentUsage,
+  DebugDiagnosis,
+  DebugDiagnosisListResponse,
+  DebugDiagnosisRun,
+  DebugDiagnosisRunDetailResponse,
+  DebugDiagnosisRunEvent,
+  DebugDiagnosisRunEventsResponse,
+  DebugDiagnosisRunStatus,
+  DebugProjectOption,
+  DebugProjectOptionsResponse,
+  DiagnosticArtifactSummary,
+  DiagnosticCollectorOutcome,
+  DiagnosticIncidentManifest,
+  DiagnosticIncidentStatus,
+  DiagnosticIncidentSummary,
+  RunDebugDiagnosisRequest,
+  RunDebugDiagnosisResponse,
+  SaveDebugDiagnosisIdeaRequest,
+} from './debug-agent';
 
 // API Error
 export type { ApiError } from './api-error';
@@ -480,3 +836,52 @@ export type {
   SandboxFileListResult,
   SandboxFileReadResult,
 } from './sandbox';
+
+// Resource Requirements & Reservations
+export type {
+  LegacyVmSizeResolutionInput,
+  PlacementExplanation,
+  ResolvedResourceReservation,
+  ResourceRequirementField,
+  ResourceRequirementFieldProvenance,
+  ResourceRequirementProvenance,
+  ResourceRequirements,
+  ResourceRequirementsSource,
+  ResourceResolutionInput,
+} from './resource';
+
+// Report Issue
+export type {
+  ReportIssueConfig,
+  ReportIssueRefs,
+  ReportIssueRequest,
+  ReportIssueResponse,
+} from './report';
+
+// Bring-your-own MCP servers
+export type {
+  CreateMcpConnectionRequest,
+  McpConnection,
+  McpConnectionAuthType,
+  McpConnectionHeader,
+  McpConnectionHeaderUpdate,
+  McpConnectionListResponse,
+  McpConnectionScope,
+  UpdateMcpConnectionRequest,
+} from './mcp-connection';
+export {
+  MCP_CONNECTION_AUTH_TYPES,
+  MCP_CONNECTION_HEADER_NAME_MAX_LENGTH,
+  MCP_CONNECTION_HEADER_NAME_PATTERN,
+  MCP_CONNECTION_HEADER_NAME_RULE,
+  MCP_CONNECTION_NAME_PATTERN,
+  MCP_CONNECTION_NAME_RULE,
+  MCP_CONNECTION_RESERVED_HEADER_NAMES,
+  SAM_MCP_SERVER_NAME,
+} from './mcp-connection';
+export * from './project-event-channels';
+export * from './project-event-schedules';
+export type {
+  ProjectEventDeliveryOutcome,
+  ProjectEventDeliveryOutcomeList,
+} from './project-events';

@@ -1,0 +1,12 @@
+{
+  "id": "sam_acp_prototype",
+  "label": "SAM ACP prototype",
+  "command": "node",
+  "args": ["/absolute/path/to/simple-agent-manager/experiments/buzz-sam-acp/buzz-sam-acp.mjs"],
+  "env": {
+    "SAM_PROJECT_ID": "replace-with-project-id",
+    "SAM_AGENT_PROFILE_ID": "replace-with-agent-profile-id"
+  },
+  "installInstructionsUrl": "",
+  "installHint": "Run sam auth login, then point this experimental harness at the Node script and a SAM project/profile."
+}

@@ -117,7 +117,7 @@ export function KnowledgeGroupCard({ items }: { items: TrialKnowledgeEvent[] }) 
   return (
     <article
       data-testid="trial-knowledge-group"
-      className="rounded-md border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)] p-3 sm:p-4"
+      className="rounded-md border border-[rgba(34,197,94,0.10)] bg-inset p-3 sm:p-4"
     >
       <div className="flex items-start gap-3">
         <span aria-hidden className="shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-full bg-accent/10 text-accent">
@@ -193,7 +193,7 @@ export function AgentActivityGroupCard({ items }: { items: TrialAgentActivityEve
   return (
     <article
       data-testid="trial-activity-group"
-      className="rounded-md border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)]/60 p-3 sm:p-4"
+      className="rounded-md border border-[rgba(34,197,94,0.10)] bg-inset p-3 sm:p-4"
     >
       <div className="flex items-start gap-3">
         <span
@@ -257,7 +257,7 @@ export function StageSkeleton({ activeStage }: { activeStage?: string }) {
   return (
     <div
       data-testid="trial-stage-skeleton"
-      className="rounded-md border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)] p-4"
+      className="rounded-md border border-[rgba(34,197,94,0.10)] bg-inset p-4"
     >
       <p className="text-xs text-fg-muted uppercase tracking-wide mb-3">
         Setting things up

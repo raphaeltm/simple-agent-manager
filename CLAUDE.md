@@ -1,5 +1,30 @@
 # Simple Agent Manager (SAM)
 
+> Agent instruction file only. This is not user-facing documentation or a getting-started guide. Canonical public documentation lives in `apps/www/src/content/docs/docs/`.
+
+## Context Loading Policy
+
+Keep startup context small and load detail only when the current task needs it. Prefer indexes, skills, and scoped docs over reading broad instruction trees.
+
+- Start with this file for repo-wide basics, then load the nearest `AGENTS.md` and scoped `.claude/rules/` only for directories you will modify.
+- Treat root `.claude/rules/*.md` as compact routing and safety guidance. When a stub points to scoped copies, read only the copy for the affected app/package.
+- Use skills for bulky reference material: `/changelog` for recent changes, `env-reference` for env vars, `api-reference` for routes, and specialist skills for domain reviews.
+- Search before reading large collections. Do not bulk-read all rules, task archives, specs, or docs unless the task explicitly requires a broad audit.
+- Measure instruction surface with `pnpm quality:agent-context-budget` when changing agent steering docs or scoped rule layout. In Claude Code, use `/context` to inspect loaded context and `/skill-doctor` to audit skill listing cost.
+- Keep volatile history and incident narratives out of root startup docs. Put durable lessons in scoped rules or skills, and route to them from concise root guidance.
+- When compaction risk appears, write state to the task file, `.do-state.md`, or the PR body before continuing.
+
+Route common questions to the smallest durable source first:
+
+| Need                                               | Load first                                                                   | Avoid                                    |
+| -------------------------------------------------- | ---------------------------------------------------------------------------- | ---------------------------------------- |
+| Recent implementation history                      | `/changelog` skill, then `git log --oneline -20`                             | Long history blocks in root instructions |
+| API routes or HTTP contracts                       | `api-reference` skill, then exact files under `apps/api/`                    | Reading the whole API tree               |
+| Environment variables or secrets                   | `env-reference` skill and `apps/api/.env.example`                            | Scanning deploy docs first               |
+| UI behavior or layout                              | Nearest `apps/web/AGENTS.md` / `packages/ui/AGENTS.md`, then scoped UI rules | Loading API/DO incident rules            |
+| Durable Object, D1, KV, R2, or Cloudflare behavior | `apps/api/AGENTS.md`, scoped API rules, and `cloudflare-specialist`          | Generic root troubleshooting             |
+| Active work state                                  | Current task file, `.do-state.md`, and PR body                               | Reconstructing from full chat history    |
+
 A serverless monorepo platform for ephemeral AI coding agent environments on Cloudflare Workers + Hetzner Cloud VMs.
 
 ## Repository Structure
@@ -12,16 +37,15 @@ apps/
 └── tail-worker/  # Cloudflare Tail Worker (observability)
 packages/
 ├── shared/       # Shared types and utilities
-├── providers/    # Cloud provider abstraction (Hetzner, Scaleway)
+├── providers/    # Cloud provider abstraction (Hetzner, Scaleway, GCP, Vultr, UpCloud)
 ├── terminal/     # Shared terminal component
 ├── cloud-init/   # Cloud-init template generator
 ├── acp-client/   # Shared ACP React components (MessageBubble, MessageActions, AudioPlayer)
+├── eslint-plugin-sam/ # Unpublished repository-specific ESLint boundary rules
 ├── ui/           # Design system tokens and shared UI components
 └── vm-agent/     # Go VM agent (PTY, WebSocket, ACP, MCP tool endpoints)
 tasks/            # Task tracking (backlog -> active -> archive)
 specs/            # Feature specifications
-docs/             # Documentation
-strategy/         # Strategic planning (competitive, business, marketing, engineering, content)
 ```
 
 ## Common Commands
@@ -33,7 +57,12 @@ pnpm test             # Run tests
 pnpm typecheck        # Type check
 pnpm lint             # Lint
 pnpm format           # Format
+pnpm check:fast       # Deterministic local quality contract used by CI leaf commands
 ```
+
+`pnpm check:fast` runs the formatting ratchet, report-only Oxlint shadow, authoritative
+ESLint workspace checks (including the SAM custom-rule tail), and the blocking type-boundary
+ratchet. Scanner and quality-policy commands are documented in `scripts/quality/README.md`.
 
 ## Build Order
 
@@ -63,20 +92,25 @@ When the user mentions **app, dashboard, projects, settings, or UI** → look in
 
 1. **Prototype and test locally first** — unit tests, Miniflare integration tests, local Vite dev server, Playwright visual audits. Hybrid loops (local UI against staging API, or local API against staging VM agent) are encouraged. See `.claude/rules/29-local-first-debugging.md`. Prototype artifacts are not production deliverables by default; do not ship throwaway prototype pages, demo routes, fixture-backed UI, or scaffolded experiments unless the user explicitly asks to ship the prototype itself.
 2. **Deploy to staging only when local verification is exhausted** — when the remaining work genuinely needs real OAuth, DNS, or VMs. Partial-feature staging deploys are fine for end-to-end plumbing while the rest is still developed locally. Staging deploys take ~7 minutes via `gh workflow run deploy-staging.yml`.
+   Before repeated, concurrent, or long-running staging tests that may materially increase the Cloudflare or VM bill, estimate the incremental cost or a conservative upper bound and check with Raphaël before starting. Keep routine verification bounded and clean up test resources promptly.
 3. **Query staging directly via Cloudflare API** — use `$CF_TOKEN` to query D1 (SQL), read/write KV, check DNS records, and inspect Workers. This is the fastest way to verify deploys, debug issues, and understand staging state. **Always check infrastructure state via CF API before guessing at fixes.** See `.claude/rules/32-cf-api-debugging.md` for the full cheat sheet.
 4. **When something fails on staging, QUERY THEN READ LOGS before changing any code** — first query D1/KV/DNS via CF API to understand the data state, then use `wrangler tail`, `/admin/logs`, `/admin/errors`, the Node detail page's log stream, `journalctl -u vm-agent` via SSH, `docker logs` for containers. Never guess-and-redeploy. See `.claude/rules/29-local-first-debugging.md` for the log location matrix.
-5. Merge to main — triggers production deployment.
+5. Merge to main — in this canonical repository, successful `main` CI triggers production deployment. Self-host forks update by running the **Update Self-Hosted Instance** workflow (which syncs the latest upstream release and triggers Deploy Production), or by manually running Deploy Production on `main` (the SHA input is optional and defaults to the current `main` tip).
 
-Full local-development guide: `docs/guides/local-development.md`.
+Full local-development guide: `apps/www/src/content/docs/docs/guides/local-development.md`.
 
 ## Deployment
 
-Merge to `main` automatically deploys to production via GitHub Actions.
+Merging to `main` in the canonical repository automatically deploys to production after CI succeeds. The **Create Release** workflow (`release.yml`) tags the latest successful production deployment with a daily CalVer tag (`vYYYY.MM.DD`). Self-host forks do not update from a push alone; operators run the **Update Self-Hosted Instance** workflow to sync the latest upstream release and deploy, or manually run **Deploy Production** on `main` (the `target_commit_sha` input is optional and defaults to the current `main` tip).
 
-- **CI** (`ci.yml`): lint, typecheck, test, build on all pushes/PRs
+- **CI** (`ci.yml`): lint, typecheck, test, build on pull requests and canonical `main` pushes; fork `main` pushes are intentionally skipped
 - **Deploy Staging** (`deploy-staging.yml`): manual trigger only (`workflow_dispatch`) — agents trigger this explicitly during `/do` Phase 6
-- **Deploy Production** (`deploy.yml`): full Pulumi + Wrangler deployment on push to main
+- **Deploy Production** (`deploy.yml`): full Pulumi + Wrangler deployment after successful canonical `main` CI, or manual `workflow_dispatch` for self-host forks (`target_commit_sha` is optional; defaults to current `main` tip)
+- **Create Release** (`release.yml`): daily CalVer tagging of the latest successful production deploy (canonical repo only)
+- **Update Self-Hosted Instance** (`update-self-hosted.yml`): syncs a fork to an upstream release and triggers Deploy Production (fork repos only)
+- **Production Environment branch policy**: GitHub's `production` Environment must allow deployments from the selected `main` branch only. This external secret boundary is required because a workflow dispatched from another ref could remove in-repository branch checks.
 - **Teardown** (`teardown.yml`): manual only — destroys all resources
+- **Generated platform secrets**: deployment-owned signing/encryption keys, including VAPID Web Push keys, are generated and persisted by Pulumi when practical, then copied to Worker secrets. Do not add manual GitHub Environment prerequisites for values SAM can safely create itself; GitHub secrets for generated keys are override/rotation paths only.
 
 ### Staging Deployment is a Merge Gate
 
@@ -88,19 +122,19 @@ Staging verification means the feature WORKS — not that pages load, not that c
 
 ### Post-Merge Production Deploy Monitoring (MANDATORY)
 
-After merging ANY PR to main, agents MUST monitor the Deploy Production workflow to completion. If the deploy fails, **alert the user immediately** with the failure reason and whether it requires human intervention. Do NOT silently finish the task when the deploy fails — a merged PR is not shipped until the deploy succeeds. See the `/do` workflow Phase 7b for the full procedure.
+After merging ANY PR to main in this canonical repository, agents MUST monitor the Deploy Production workflow to completion. If the deploy fails, **alert the user immediately** with the failure reason and whether it requires human intervention. Do NOT silently finish the task when the deploy fails — a merged PR is not shipped until the deploy succeeds. See the `/do` workflow Phase 7b for the full procedure.
 
 ### Data Integrity Safeguards (CRITICAL)
 
 Production data loss is catastrophic and irreversible. Multiple deterministic gates prevent it:
 
-| Gate | Runs in | What it catches |
-|------|---------|----------------|
-| `pnpm quality:migration-safety` | CI (every PR) | DROP TABLE on CASCADE parents, DELETE without WHERE, PRAGMA foreign_keys=OFF, UPDATE without WHERE, any DROP TABLE in new migrations |
-| `pnpm quality:do-migration-safety` | CI (every PR) | DROP TABLE, DELETE without WHERE, UPDATE without WHERE in Durable Object SQLite migrations (no recovery mechanism) |
-| Pre-migration D1 backup | Deploy pipeline | Creates time-travel bookmark + explicit backup before every migration run |
-| Post-migration row count verification | Deploy pipeline | Compares row counts before/after migrations; **blocks deploy** if >50% data loss detected in any table |
-| D1 Time Travel Restore | Manual workflow | Point-in-time recovery for D1 databases (30-day window). See `d1-restore.yml` |
+| Gate                                  | Runs in         | What it catches                                                                                                                                                                                                               |
+| ------------------------------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm quality:migration-safety`       | CI (every PR)   | DROP TABLE on CASCADE parents, DELETE without WHERE, PRAGMA foreign_keys=OFF, UPDATE without WHERE, any DROP TABLE in new migrations                                                                                          |
+| `pnpm quality:do-migration-safety`    | CI (every PR)   | DROP TABLE, DELETE without WHERE, UPDATE without WHERE in Durable Object SQLite migrations (no recovery mechanism)                                                                                                            |
+| Pre-migration D1 recovery bookmark    | Deploy pipeline | Records the D1 time-travel timestamp before every migration run so operators can restore either database                                                                                                                      |
+| Post-migration row count verification | Deploy pipeline | Compares only databases whose D1 migration ledger advanced; business tables have zero decrease tolerance, while code-reviewed churning tables block above a configurable 50% default (configuration may narrow that set only) |
+| D1 Time Travel Restore                | Manual workflow | Point-in-time recovery for D1 databases (30-day window). See `d1-restore.yml`                                                                                                                                                 |
 
 **Migration rules:** See `.claude/rules/31-migration-safety.md`. NEVER use `DROP TABLE` on any table with CASCADE children. Use `ALTER TABLE ADD COLUMN` instead of table recreation.
 
@@ -108,12 +142,12 @@ Production data loss is catastrophic and irreversible. Multiple deterministic ga
 
 - **Workspace**: AI coding environment (VM + devcontainer + Claude Code)
 - **Node**: VM host that runs multiple workspaces
-- **Provider**: Cloud infrastructure abstraction (currently Hetzner only)
+- **Provider**: Cloud infrastructure abstraction for supported compute providers (Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, and GCP)
 - **Project**: Primary organizational unit linking a GitHub repo to workspaces, chat sessions, tasks, and activity
-- **ProjectData DO**: Per-project Durable Object with embedded SQLite for chat sessions, messages, activity events, and ACP sessions (spec 027). Accessed via `env.PROJECT_DATA.idFromName(projectId)`
-- **NodeLifecycle DO**: Per-node Durable Object managing warm pool state machine (active → warm → destroying). Accessed via `env.NODE_LIFECYCLE.idFromName(nodeId)`. Handles idle timeout alarms; actual infrastructure teardown delegated to cron sweep.
-- **Warm Node Pooling**: After task completion, auto-provisioned nodes enter "warm" state for 30 min (configurable via `NODE_WARM_TIMEOUT_MS`) for fast reuse. Three-layer defense against orphans: DO alarm + cron sweep + max lifetime.
-- **Task Runner**: Autonomous task execution — selects/provisions nodes, creates workspaces, runs agents, cleans up. VM size precedence: explicit override > project default > platform default.
+- **ProjectData DO**: Per-project Durable Object with embedded SQLite for chat sessions, messages, activity events, ACP sessions (spec 027), and canonical `project_event_*` event-subscription storage. Accessed via `env.PROJECT_DATA.idFromName(projectId)`
+- **NodeLifecycle DO**: Per-node Durable Object managing the warm pool state machine (active → warm → destroying) and an independent durable queue for proof-bearing workspace deletion. Accessed via `env.NODE_LIFECYCLE.idFromName(nodeId)`. Its alarm dispatches bounded claimed deletion attempts through `waitUntil`, preserves unconfirmed/dead-lettered quarantine state, and also handles idle timeouts; actual infrastructure teardown is delegated to the cron sweep.
+- **Warm Node Pooling**: After a managed auto-provisioned node loses its last active workspace, it enters "warm" state for 30 min (configurable via `NODE_WARM_TIMEOUT_MS`) for fast reuse. Three-layer defense against orphans: DO alarm + cron sweep + max lifetime.
+- **Task Runner**: Autonomous task execution — selects/provisions nodes, creates workspaces, runs agents, cleans up. Placement uses explicit request/resource hints, then effective project → user → installation default capacity pools, with legacy VM sizes translated to concrete provider offerings where needed.
 - **Lifecycle Control**: Workspaces/nodes stopped, restarted, or deleted explicitly via API/UI
 
 ## URL Construction Rules
@@ -144,15 +178,15 @@ Full env var reference: use the `env-reference` skill or see `apps/api/.env.exam
 
 ## Wrangler Binding Rule (CRITICAL)
 
-Environment-specific `[env.*]` sections are NOT checked into the repository. They are generated at deploy time by `scripts/deploy/sync-wrangler-config.ts` from Pulumi outputs + the top-level config. When adding ANY new binding to `wrangler.toml`, add it to the **top-level section only**. The sync script copies static bindings (Durable Objects, AI, migrations) and generates dynamic bindings (D1, KV, R2, worker name, routes, tail_consumers) automatically. The CI quality check (`pnpm quality:wrangler-bindings`) verifies that no env sections are committed and that required binding types are present at the top level. See `.claude/rules/07-env-and-urls.md` for details.
+Environment-specific `[env.*]` sections are NOT checked into the repository. They are generated at deploy time by `scripts/deploy/sync-wrangler-config.ts` from Pulumi outputs + the top-level config. When adding ANY new binding to `wrangler.toml`, add it to the **top-level section only**. The sync script copies static bindings (Durable Objects, AI), resolves Durable Object migrations against the target Worker's deployed migration tag, and generates dynamic bindings (D1, KV, R2, worker name, routes, tail_consumers) automatically. The CI quality check (`pnpm quality:wrangler-bindings`) verifies that no env sections are committed and that required binding types are present at the top level. See `.claude/rules/07-env-and-urls.md` for details.
 
 ## Architecture Principles
 
-1. **BYOC (Bring-Your-Own-Cloud)**: Users provide their own Hetzner tokens. The platform does NOT have cloud provider credentials.
-2. **User credentials encrypted per-user** in the database — NOT stored as env vars or Worker secrets. See `docs/architecture/credential-security.md`.
-3. **Platform secrets** (ENCRYPTION_KEY and purpose-specific overrides, JWT keys, CF_API_TOKEN) are Cloudflare Worker secrets set during deployment. See `docs/architecture/secrets-taxonomy.md`.
+1. **BYOC (Bring-Your-Own-Cloud)**: Self-hosters and users may bring their own supported cloud-provider credentials, encrypted per-user, and projects may have project-scoped compute credentials. This is the model for self-hosted deployments and BYO-key users. **However, SAM's own deployment (staging, and the platform-hosted / zero-config mode) DOES have an enabled platform-level cloud credential** (`platform_credentials`, `credential_type=cloud-provider`, `is_enabled=1`). VM provider resolution falls back **project credential → user credential → platform credential** (`createProviderForUser()` / `resolveCredentialSource()` in `apps/api/src/services/provider-credentials.ts`), and capacity-pool summaries expose the same **project → user → installation** precedence (`resolveEffectiveDefaultCapacityPoolSummary()` in `apps/api/src/services/default-capacity-pools.ts`). Therefore **a user does NOT need their own cloud credential for SAM to provision workspaces or deployment nodes** when a project or platform credential is available. NEVER treat a missing user cloud credential — e.g. a smoke/test user stuck at the cloud-onboarding wizard, or zero active workspaces — as a provisioning or staging-verification blocker. Verify before ever reporting such a blocker: D1 `SELECT id FROM platform_credentials WHERE credential_type='cloud-provider' AND is_enabled=1`.
+2. **Project/user credentials encrypted per credential** in the database — NOT stored as env vars or Worker secrets. Public security architecture documentation lives in `apps/www/src/content/docs/docs/architecture/security.md`.
+3. **Platform secrets** (ENCRYPTION_KEY and purpose-specific overrides, JWT keys, deploy signing keys, VAPID Web Push keys, CF_API_TOKEN) are Cloudflare Worker secrets set during deployment. SAM-owned generated keys should be Pulumi-managed by default, with GitHub secret overrides only when manual rotation is explicitly needed.
 4. **Canonical IDs for identity** — use `workspaceId`, `nodeId`, `sessionId` for all machine-critical operations (storage, routing, lifecycle). Human-readable labels are for UX/logging only and MUST be treated as mutable and non-unique.
-5. **Hybrid D1 + Durable Object storage** — D1 for cross-project queries (dashboard, tasks, users); per-project DOs for write-heavy data (chat sessions, messages, activity events). See `docs/adr/004-hybrid-d1-do-storage.md`.
+5. **Hybrid D1 + Durable Object storage** — D1 for cross-project queries (dashboard, tasks, users); per-project DOs for write-heavy data (chat sessions, messages, activity events, and durable project event subscriptions/deliveries). See `apps/www/src/content/docs/docs/architecture/overview.md`.
 
 ## Git Workflow
 
@@ -167,13 +201,16 @@ Environment-specific `[env.*]` sections are NOT checked into the repository. The
 - **Fix all build/lint errors** before pushing — even pre-existing ones
 - **No dead code** — if code is no longer referenced, remove it in the same change
 - **Capability tests required** — every multi-component feature needs at least one test that exercises the complete happy path across system boundaries. Component tests alone are not sufficient. See `.claude/rules/10-e2e-verification.md`.
-- **Verify assumptions, don't trust documentation** — when specs or docs say "existing X works," verify with a test or manual check before building on it. See post-mortem: `docs/notes/2026-02-28-missing-initial-prompt-postmortem.md`.
+- **Verify assumptions, don't trust documentation** — when specs or docs say "existing X works," verify with a test or manual check before building on it.
 - **Cite code paths in behavioral docs** — when documenting what the system does, cite specific functions. Never write "X happens" without a code reference. Mark unimplemented behavior as "intended" not present tense.
 - **Diagrams in markdown** — use Mermaid (`\`\`\`mermaid`) for all diagrams in `.md` files. The markdown renderer supports Mermaid natively.
 - **Subagents** live in `.claude/agents/`; Codex skills in `.agents/skills/`
 - **Playwright screenshots** go in `.codex/tmp/playwright-screenshots/` (gitignored)
+- **Ephemeral scratch files go in `.tmp/`** — debug dumps, downloaded logs, scratch notes, generated fixtures, anything that must NOT be committed. The directory is gitignored (see `.tmp/README.md`). Never drop temporary artifacts in the repo root or package directories.
+- **No strategy docs in this repo** — this is a public repository; business/marketing/competitive strategy documents are intentionally kept out of it. Do not create a `strategy/` directory.
 - **Playwright visual audit required for UI changes** — any PR touching `apps/web/`, `packages/ui/`, or `packages/terminal/` must run Playwright visual tests with diverse mock data on mobile (375px) and desktop (1280px) viewports. See `.claude/rules/17-ui-visual-testing.md`.
 - **No duplicate UI controls** — before adding any new settings control or form field, search for existing controls managing the same API field. Consolidate into one canonical location. See `.claude/rules/24-no-duplicate-ui-controls.md`.
+- **Stale-while-revalidate UI** — context provider values must be memoized (ESLint-enforced), loading spinners may only gate rendering when there is no data yet, refetches must never unmount visible content, and new fetch surfaces in `apps/web/` use TanStack Query. See `.claude/rules/48-stale-while-revalidate-ui.md`.
 
 ## Agent Authentication
 
@@ -187,7 +224,7 @@ Users select their provider mode per-agent in Settings → Agent Settings. The `
 
 ## Testing
 
-- **Staging authentication**: Use the smoke test token in `SAM_PLAYWRIGHT_PRIMARY_USER` env var. POST it to `https://api.sammy.party/api/auth/token-login` with body `{ "token": "<value>" }` to get a session cookie, then navigate to `https://app.sammy.party`. See `.claude/rules/13-staging-verification.md` for full procedure.
+- **Staging authentication**: Use Playwright browser auth with the staging smoke/API token in `SAM_PLAYWRIGHT_PRIMARY_USER`. In the Playwright browser context, POST to `https://api.sammy.party/api/auth/token-login` with body `{ "token": "<value>" }`, verify a 200 response, then navigate to `https://app.sammy.party`. Do not rely on `SAM_API_URL`; it may point at production, where staging tokens correctly fail with `401 Invalid token`. See `.claude/rules/13-staging-verification.md` for full procedure.
 - **Production authentication**: Use GitHub OAuth credentials at `/workspaces/.tmp/secure/demo-credentials.md` (outside repo)
 - **Live test cleanup required**: delete test workspaces/nodes after verification
 - **Staging verification required for every code PR** — see `.claude/rules/13-staging-verification.md`
@@ -201,6 +238,8 @@ When you discover bugs or errors during testing — even if unrelated to your cu
 2. Include: Problem description, Context (where/when discovered), Acceptance Criteria checklist
 3. Continue with your current work
 
+If the bug is blocking the current task or is a small adjacent fix, fix it in the current branch with evidence. Otherwise file it and keep the assigned work moving.
+
 ## Troubleshooting
 
 - **Build errors**: Run builds in dependency order (see Build Order above)
@@ -212,25 +251,19 @@ When you discover bugs or errors during testing — even if unrelated to your cu
 
 Tasks tracked as markdown in `tasks/` (backlog -> active -> archive). See `tasks/README.md` for conventions.
 
-**Dispatching tasks**: When dispatching tasks to other agents, always instruct them to use the `/do` skill, then verify the task actually started with the requested profile and title. Do not wait on failed, queued, missing, or wrong-profile sessions. See `.claude/rules/09-task-tracking.md`.
+**Dispatching tasks**: When dispatching tasks to other agents, always instruct them to use the `/do` skill in prose, for example `Execute this task using the /do skill.` Never start a dispatched task description with `/do` or any slash command; Codex treats that as CLI slash-command syntax and can reject the prompt before SAM bootstrap instructions are processed. Verify the task actually started with the requested profile and title. Do not wait on failed, queued, missing, or wrong-profile sessions. See `.claude/rules/09-task-tracking.md`.
 
-## Strategy Planning
+**Read-only investigations**: PR status, PR history, task status, and diagnostic questions are read-only by default. Use SAM MCP, GitHub, logs, and local evidence in the current session. Do not create task files, branches, commits, or PRs unless the user asks for code/config changes or durable artifacts.
 
-Strategic planning artifacts live in `strategy/` — see `strategy/README.md` for full structure.
+**Failed task retries**: Before retrying or redispatching a failed SAM task, inspect the failed task/session and check for active duplicate work with the same prompt, output branch, branch, or title. Do not blindly resubmit the same prompt after no-workspace/startup failures or transient provider failures. See `.claude/rules/09-task-tracking.md` for profile, skill, and task-mode validation details.
 
-| Domain               | Directory               | Skill                   | Key Artifacts                                                    |
-| -------------------- | ----------------------- | ----------------------- | ---------------------------------------------------------------- |
-| Competitive Research | `strategy/competitive/` | `/competitive-research` | Competitor profiles, feature matrix, positioning map, SWOT       |
-| Marketing            | `strategy/marketing/`   | `/marketing-strategy`   | Positioning doc, messaging guide, content calendar, gap analysis |
-| Business             | `strategy/business/`    | `/business-strategy`    | Market sizing (TAM/SAM/SOM), pricing, business model, GTM plan   |
-| Engineering          | `strategy/engineering/` | `/engineering-strategy` | Roadmap (Now/Next/Later), tech radar, tech debt register         |
-| Content              | `strategy/content/`     | `/content-create`       | Social posts, blog drafts, changelogs, launch copy               |
+**Agent profile defaults**: When changing profile setup or onboarding, fresh installs should not seed multiple provider-specific built-in profiles. Prefer a setup wizard, templates, or at most one conversational default so users learn profiles intentionally instead of inheriting clutter.
 
-Domains chain together: competitive research feeds marketing and business strategy, which feed engineering priorities and content creation.
+**Memory and ideas**: Keep SAM knowledge, ideas, and policies current when human feedback or shipped work changes what future agents should believe. Do not mark ideas complete unless they are merged or otherwise verifiably shipped. See `.claude/rules/38-agent-feedback-and-memory.md`.
 
 ## Active Technologies
 
-- TypeScript 5.x (Worker/Web), Go 1.24+ (VM Agent)
+- TypeScript 5.x (Worker/Web), Go 1.26.6+ (VM Agent + CLI toolchain)
 - Hono (API framework), Drizzle ORM (D1), React 19 + Vite (Web)
 - Cloudflare Workers SDK (Durable Objects, D1, KV, R2, Workers AI)
 - Tailwind CSS v4 (Web), Astro + Starlight (Marketing site)
@@ -239,16 +272,6 @@ Domains chain together: competitive research feeds marketing and business strate
 
 ## Recent Changes
 
-> Full changelog with implementation details: `docs/recent-changes.md`. Use the `/changelog` skill for structured queries.
+Do not use `CLAUDE.md` as the source for recent implementation history. Keep detailed recent-change narratives out of root startup instructions to avoid compaction pressure.
 
-- explicit-sam-provider-selection: Require explicit opt-in to SAM as AI provider via `providerMode: 'sam'`; three-mode agent auth (user-api-key, oauth, sam); AI proxy auth gate on all endpoints including /models
-- compact-mode-lazy-load-tool-content: Chat compact mode strips tool content from RPC payload (80-90% reduction); lazy-loads on expand
-- harness-track-d-integration-design: SAM-native harness architecture doc; Gemma 4 26B as default Workers AI model
-- ai-proxy-universal-tracking: URL-path-based passthrough proxy for usage tracking without consuming auth headers
-- user-ai-budget-controls: User-facing daily token budgets + monthly cost cap with 3-tier resolution
-- anthropic-proxy-endpoint: Native Anthropic Messages API proxy through AI Gateway with Unified Billing
-- user-ai-usage-dashboard: Per-user LLM usage dashboard from AI Gateway logs (by model, by day)
-- cost-monitoring-dashboard: Admin cost dashboard aggregating LLM + compute costs with projections
-- sam-observability-context-tools: SAM tools for searching task messages and browsing project codebases
-- sam-agent-phase-a-tools: SAM orchestration tools (dispatch_task, create_mission, get_task_details)
-- policy-propagation-phase4: Project policies with MCP tools + propagation to child tasks
+Use the `/changelog` skill for structured recent-change queries, and check `git log --oneline -20` for the current branch history.

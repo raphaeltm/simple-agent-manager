@@ -1,5 +1,7 @@
 import type { ApiError } from '@simple-agent-manager/shared';
 
+export const GITHUB_REAUTH_REQUIRED_EVENT = 'sam:github-reauth-required';
+
 // In production, VITE_API_URL must be explicitly set
 export const API_URL = (() => {
   const url = import.meta.env.VITE_API_URL;
@@ -18,6 +20,15 @@ export class ApiClientError extends Error {
     super(message);
     this.name = 'ApiClientError';
   }
+}
+
+function notifyGitHubReauthRequired(message: string) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  window.dispatchEvent(new CustomEvent(GITHUB_REAUTH_REQUIRED_EVENT, {
+    detail: { message },
+  }));
 }
 
 export async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
@@ -55,6 +66,9 @@ export async function request<T>(endpoint: string, options: RequestInit = {}): P
 
   if (!response.ok) {
     const error = data as ApiError;
+    if (error.error === 'GITHUB_REAUTH_REQUIRED') {
+      notifyGitHubReauthRequired(error.message);
+    }
     throw new ApiClientError(error.error, error.message, response.status);
   }
 

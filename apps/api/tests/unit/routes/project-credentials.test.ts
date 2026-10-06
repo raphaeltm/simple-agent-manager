@@ -15,6 +15,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Env } from '../../../src/env';
 import { getDecryptedAgentKey } from '../../../src/routes/credentials';
 import { projectCredentialsRoutes } from '../../../src/routes/projects/credentials';
+import { resolveForConsumer } from '../../../src/services/composable-credentials/resolve';
 
 vi.mock('drizzle-orm/d1');
 vi.mock('../../../src/middleware/auth', () => ({
@@ -22,12 +23,24 @@ vi.mock('../../../src/middleware/auth', () => ({
   requireApproved: () => vi.fn((_c: unknown, next: () => unknown) => next()),
   getUserId: () => 'test-user-id',
 }));
+const projectAuthMocks = vi.hoisted(() => ({
+  requireProjectCapability: vi.fn(),
+}));
+vi.mock('../../../src/middleware/project-auth', () => ({
+  requireProjectCapability: projectAuthMocks.requireProjectCapability,
+}));
 vi.mock('../../../src/lib/ulid', () => ({
   ulid: () => 'test-ulid',
 }));
 vi.mock('../../../src/services/encryption', () => ({
   encrypt: vi.fn().mockResolvedValue({ ciphertext: 'encrypted', iv: 'iv' }),
   decrypt: vi.fn().mockResolvedValue('sk-ant-live-value'),
+}));
+vi.mock('../../../src/services/composable-credentials/resolve', () => ({
+  resolveForConsumer: vi.fn().mockResolvedValue(null),
+}));
+vi.mock('../../../src/services/composable-credentials/lazy-backfill', () => ({
+  lazyBackfillIfNeeded: vi.fn().mockResolvedValue(false),
 }));
 
 interface MockDB {
@@ -75,6 +88,14 @@ describe('Project Credentials Routes', () => {
 
     mockDB = makeMockDB();
     (drizzle as unknown as ReturnType<typeof vi.fn>).mockReturnValue(mockDB);
+    projectAuthMocks.requireProjectCapability.mockResolvedValue({
+      id: 'proj-1',
+      userId: 'test-user-id',
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response(JSON.stringify({ projects: [] }), { status: 200 }))
+    );
   });
 
   // Rate-limit middleware on PUT /:id/credentials calls KV.get / KV.put; stub
@@ -105,57 +126,45 @@ describe('Project Credentials Routes', () => {
 
   describe('GET /:id/credentials', () => {
     it('rejects read when project is not owned by user (returns 404)', async () => {
-      // requireOwnedProject: ownership check fails
-      mockDB.limit.mockResolvedValueOnce([]);
+      projectAuthMocks.requireProjectCapability.mockRejectedValueOnce(
+        Object.assign(new Error('Project not found'), {
+          statusCode: 404,
+          error: 'NOT_FOUND',
+        })
+      );
 
       const res = await app.request(
         '/api/projects/other-users-project/credentials',
         { method: 'GET' },
-        env,
+        env
       );
       expect(res.status).toBe(404);
     });
 
     it('returns an empty credentials array when no project-scoped credentials exist', async () => {
-      // ownership check succeeds
-      mockDB.limit.mockResolvedValueOnce([{ id: 'proj-1', userId: 'test-user-id' }]);
-      // credentials query: where() resolves with no rows (2nd where call)
-      mockDB.where
-        .mockReturnValueOnce(mockDB) // 1st call: ownership where() → chain continues into limit()
-        .mockResolvedValueOnce([]);  // 2nd call: credentials where() awaited directly
+      mockDB.where.mockResolvedValueOnce([]);
 
-      const res = await app.request(
-        '/api/projects/proj-1/credentials',
-        { method: 'GET' },
-        env,
-      );
+      const res = await app.request('/api/projects/proj-1/credentials', { method: 'GET' }, env);
       expect(res.status).toBe(200);
       const json = (await res.json()) as { credentials: unknown[] };
       expect(json.credentials).toEqual([]);
     });
 
     it('returns project-scoped credentials with scope="project" and the requested projectId', async () => {
-      mockDB.limit.mockResolvedValueOnce([{ id: 'proj-1', userId: 'test-user-id' }]);
-      mockDB.where
-        .mockReturnValueOnce(mockDB)
-        .mockResolvedValueOnce([
-          {
-            agentType: 'claude-code',
-            provider: null,
-            credentialKind: 'api-key',
-            isActive: 1,
-            encryptedToken: 'enc',
-            iv: 'iv',
-            createdAt: 1000,
-            updatedAt: 1000,
-          },
-        ]);
+      mockDB.where.mockResolvedValueOnce([
+        {
+          agentType: 'claude-code',
+          provider: null,
+          credentialKind: 'api-key',
+          isActive: 1,
+          encryptedToken: 'enc',
+          iv: 'iv',
+          createdAt: 1000,
+          updatedAt: 1000,
+        },
+      ]);
 
-      const res = await app.request(
-        '/api/projects/proj-1/credentials',
-        { method: 'GET' },
-        env,
-      );
+      const res = await app.request('/api/projects/proj-1/credentials', { method: 'GET' }, env);
       expect(res.status).toBe(200);
       const json = (await res.json()) as {
         credentials: Array<{
@@ -179,27 +188,20 @@ describe('Project Credentials Routes', () => {
     });
 
     it('adds a "Pro/Max Subscription" label for claude-code OAuth tokens', async () => {
-      mockDB.limit.mockResolvedValueOnce([{ id: 'proj-1', userId: 'test-user-id' }]);
-      mockDB.where
-        .mockReturnValueOnce(mockDB)
-        .mockResolvedValueOnce([
-          {
-            agentType: 'claude-code',
-            provider: null,
-            credentialKind: 'oauth-token',
-            isActive: 1,
-            encryptedToken: 'enc',
-            iv: 'iv',
-            createdAt: 1000,
-            updatedAt: 1000,
-          },
-        ]);
+      mockDB.where.mockResolvedValueOnce([
+        {
+          agentType: 'claude-code',
+          provider: null,
+          credentialKind: 'oauth-token',
+          isActive: 1,
+          encryptedToken: 'enc',
+          iv: 'iv',
+          createdAt: 1000,
+          updatedAt: 1000,
+        },
+      ]);
 
-      const res = await app.request(
-        '/api/projects/proj-1/credentials',
-        { method: 'GET' },
-        env,
-      );
+      const res = await app.request('/api/projects/proj-1/credentials', { method: 'GET' }, env);
       expect(res.status).toBe(200);
       const json = (await res.json()) as {
         credentials: Array<{ label?: string; credentialKind: string }>;
@@ -211,8 +213,12 @@ describe('Project Credentials Routes', () => {
 
   describe('PUT /:id/credentials', () => {
     it('rejects write when project is not owned by user (returns 404)', async () => {
-      // requireOwnedProject: project lookup returns no rows
-      mockDB.limit.mockResolvedValueOnce([]); // ownership check fails
+      projectAuthMocks.requireProjectCapability.mockRejectedValueOnce(
+        Object.assign(new Error('Project not found'), {
+          statusCode: 404,
+          error: 'NOT_FOUND',
+        })
+      );
 
       const body: SaveAgentCredentialRequest = {
         agentType: 'claude-code',
@@ -226,14 +232,12 @@ describe('Project Credentials Routes', () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         },
-        env,
+        env
       );
       expect(res.status).toBe(404);
     });
 
     it('creates a project-scoped credential when none exists', async () => {
-      // ownership check returns a project
-      mockDB.limit.mockResolvedValueOnce([{ id: 'proj-1', userId: 'test-user-id' }]);
       // existing-credential check returns nothing
       mockDB.limit.mockResolvedValueOnce([]);
 
@@ -249,7 +253,7 @@ describe('Project Credentials Routes', () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         },
-        env,
+        env
       );
       expect(res.status).toBe(201);
       const json = (await res.json()) as { scope?: string; projectId?: string };
@@ -265,12 +269,13 @@ describe('Project Credentials Routes', () => {
       expect(insertSql).toContain("'agent-api-key'");
       // The prepared statement was bound with the correct positional values — userId, projectId, etc.
       expect(preparedStmt.bind).toHaveBeenCalled();
-      const bindArgs = preparedStmt.bind.mock.calls.find((c) => c.includes('test-user-id') && c.includes('proj-1'));
+      const bindArgs = preparedStmt.bind.mock.calls.find(
+        (c) => c.includes('test-user-id') && c.includes('proj-1')
+      );
       expect(bindArgs).toBeDefined();
     });
 
     it('when autoActivate is true, only deactivates project-scoped rows (user-scoped rows untouched)', async () => {
-      mockDB.limit.mockResolvedValueOnce([{ id: 'proj-1', userId: 'test-user-id' }]);
       mockDB.limit.mockResolvedValueOnce([]);
 
       const body: SaveAgentCredentialRequest = {
@@ -286,7 +291,7 @@ describe('Project Credentials Routes', () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         },
-        env,
+        env
       );
       expect(res.status).toBe(201);
       // Atomic deactivate+upsert batch should have run.
@@ -294,7 +299,9 @@ describe('Project Credentials Routes', () => {
       // Deactivate SQL must scope to project_id = ? — NOT user-scoped (project_id IS NULL).
       // This is the key scope-guard: project autoActivate must not touch user-scoped rows.
       const prepareCalls = database.prepare.mock.calls.map((c) => c[0] as string);
-      const deactivateSql = prepareCalls.find((sql) => sql.includes('UPDATE credentials SET is_active = 0'));
+      const deactivateSql = prepareCalls.find((sql) =>
+        sql.includes('UPDATE credentials SET is_active = 0')
+      );
       expect(deactivateSql).toBeDefined();
       expect(deactivateSql).toContain('project_id = ?');
       expect(deactivateSql).not.toContain('project_id IS NULL');
@@ -344,7 +351,7 @@ describe('Project Credentials Routes', () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         },
-        cappedEnv,
+        cappedEnv
       );
 
       expect(res.status).toBe(429);
@@ -355,38 +362,150 @@ describe('Project Credentials Routes', () => {
     });
   });
 
+  describe('PUT /:id/cloud-credentials', () => {
+    it('creates a project-scoped cloud credential and mirrors it to compute CC rows', async () => {
+      mockDB.limit.mockResolvedValueOnce([]);
+
+      const res = await app.request(
+        '/api/projects/proj-1/cloud-credentials',
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ provider: 'hetzner', token: 'hetzner-project-token' }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(201);
+      expect(mockDB.insert).toHaveBeenCalled();
+      expect(mockDB.values).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'test-user-id',
+          projectId: 'proj-1',
+          provider: 'hetzner',
+          credentialType: 'cloud-provider',
+          encryptedToken: 'encrypted',
+          iv: 'iv',
+        })
+      );
+
+      const prepareCalls = database.prepare.mock.calls.map((c) => c[0] as string);
+      const deleteSql = prepareCalls.find(
+        (sql) =>
+          sql.includes('DELETE FROM cc_attachments') && sql.includes("consumer_kind = 'compute'")
+      );
+      expect(deleteSql).toBeDefined();
+      expect(deleteSql).toContain("consumer_kind = 'compute'");
+      expect(deleteSql).toContain('project_id = ?');
+      expect(prepareCalls.some((sql) => sql.includes('INSERT INTO cc_credentials'))).toBe(true);
+      expect(prepareCalls.some((sql) => sql.includes('INSERT INTO cc_configurations'))).toBe(true);
+      expect(prepareCalls.some((sql) => sql.includes('INSERT INTO cc_attachments'))).toBe(true);
+      expect(database.batch).toHaveBeenCalled();
+    });
+
+    it('updates a project-scoped cloud credential and mirrors replacement CC rows', async () => {
+      mockDB.limit.mockResolvedValueOnce([
+        {
+          id: 'legacy-project-hetzner',
+          createdAt: '2026-07-05T00:00:00.000Z',
+        },
+      ]);
+
+      const res = await app.request(
+        '/api/projects/proj-1/cloud-credentials',
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ provider: 'hetzner', token: 'replacement-project-token' }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect(mockDB.update).toHaveBeenCalled();
+      expect(mockDB.set).toHaveBeenCalledWith(
+        expect.objectContaining({
+          encryptedToken: 'encrypted',
+          iv: 'iv',
+          isActive: true,
+        })
+      );
+
+      const prepareCalls = database.prepare.mock.calls.map((c) => c[0] as string);
+      expect(prepareCalls.some((sql) => sql.includes('DELETE FROM cc_attachments'))).toBe(true);
+      expect(prepareCalls.some((sql) => sql.includes('INSERT INTO cc_credentials'))).toBe(true);
+      expect(database.batch).toHaveBeenCalled();
+    });
+  });
+
+  describe('DELETE /:id/cloud-credentials/:provider', () => {
+    it('removes a project cloud override from legacy storage and CC attachments', async () => {
+      mockDB.returning.mockResolvedValueOnce([{ id: 'legacy-project-hetzner' }]);
+
+      const res = await app.request(
+        '/api/projects/proj-1/cloud-credentials/hetzner',
+        { method: 'DELETE' },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect(mockDB.delete).toHaveBeenCalled();
+
+      const prepareCalls = database.prepare.mock.calls.map((c) => c[0] as string);
+      const disconnectSql = prepareCalls.find(
+        (sql) =>
+          sql.includes('DELETE FROM cc_attachments') && sql.includes("consumer_kind = 'compute'")
+      );
+      expect(disconnectSql).toBeDefined();
+      expect(disconnectSql).toContain("consumer_kind = 'compute'");
+      expect(disconnectSql).toContain('project_id = ?');
+    });
+  });
+
   describe('DELETE /:id/credentials/:agentType/:credentialKind', () => {
     it('returns 404 when project is not owned', async () => {
-      mockDB.limit.mockResolvedValueOnce([]);
+      projectAuthMocks.requireProjectCapability.mockRejectedValueOnce(
+        Object.assign(new Error('Project not found'), {
+          statusCode: 404,
+          error: 'NOT_FOUND',
+        })
+      );
 
       const res = await app.request(
         '/api/projects/other/credentials/claude-code/api-key',
         { method: 'DELETE' },
-        env,
+        env
       );
       expect(res.status).toBe(404);
     });
 
-    it('returns 404 when project is owned but no credential matches', async () => {
-      mockDB.limit.mockResolvedValueOnce([{ id: 'proj-1', userId: 'test-user-id' }]);
+    it('disconnects a CC-only project override when no legacy row matches', async () => {
       mockDB.returning.mockResolvedValueOnce([]);
+      database.prepare.mockClear();
 
       const res = await app.request(
-        '/api/projects/proj-1/credentials/claude-code/api-key',
+        '/api/projects/proj-1/credentials/openai-codex/oauth-token',
         { method: 'DELETE' },
-        env,
+        env
       );
-      expect(res.status).toBe(404);
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json).toEqual({ success: true, disconnected: true });
+
+      const prepareCalls = database.prepare.mock.calls.map((c) => c[0] as string);
+      const disconnectSql = prepareCalls.find((sql) => sql.includes('DELETE FROM cc_attachments'));
+      expect(disconnectSql).toBeDefined();
+      expect(disconnectSql).toContain('att.project_id = ?');
+      expect(disconnectSql).toContain('cred.kind = ?');
     });
 
     it('deletes only the project-scoped credential', async () => {
-      mockDB.limit.mockResolvedValueOnce([{ id: 'proj-1', userId: 'test-user-id' }]);
       mockDB.returning.mockResolvedValueOnce([{ id: 'cred-1' }]);
 
       const res = await app.request(
         '/api/projects/proj-1/credentials/claude-code/api-key',
         { method: 'DELETE' },
-        env,
+        env
       );
       expect(res.status).toBe(200);
       expect(mockDB.delete).toHaveBeenCalled();
@@ -399,22 +518,34 @@ describe('getDecryptedAgentKey — resolution order', () => {
 
   beforeEach(() => {
     mockDB = makeMockDB();
+    vi.mocked(resolveForConsumer).mockResolvedValue(null);
   });
 
-  it('returns project-scoped credential when projectId is provided and project row exists', async () => {
-    // First query: project-scoped lookup returns an active credential
-    mockDB.limit
-      .mockResolvedValueOnce([
-        {
-          id: 'c1',
-          userId: 'u1',
-          projectId: 'p1',
-          encryptedToken: 'enc',
-          iv: 'iv',
-          credentialKind: 'api-key',
-          isActive: true,
+  it('maps CC settings baseUrl and dialect for Anthropic-compatible passthrough credentials', async () => {
+    vi.mocked(resolveForConsumer).mockResolvedValueOnce({
+      consumer: { kind: 'agent', agentType: 'claude-code' },
+      configuration: {
+        id: 'cfg-anthropic-alt',
+        ownerId: 'u1',
+        name: 'Anthropic-compatible',
+        consumer: { kind: 'agent', agentType: 'claude-code' },
+        credentialId: 'cred-anthropic-alt',
+        settings: {
+          baseUrl: 'https://anthropic-alt.example/anthropic',
+          dialect: 'anthropic',
         },
-      ]);
+        isActive: true,
+      },
+      credential: {
+        id: 'cred-anthropic-alt',
+        ownerId: 'u1',
+        name: 'Anthropic-compatible key',
+        kind: 'api-key',
+        secret: { kind: 'api-key', apiKey: 'sk-anthropic-compatible' },
+        isActive: true,
+      },
+      source: 'user-attachment',
+    });
 
     const result = await getDecryptedAgentKey(
       mockDB as unknown as Parameters<typeof getDecryptedAgentKey>[0],
@@ -422,6 +553,37 @@ describe('getDecryptedAgentKey — resolution order', () => {
       'claude-code',
       'test-key',
       'p1',
+    );
+
+    expect(result).toMatchObject({
+      credential: 'sk-anthropic-compatible',
+      credentialKind: 'api-key',
+      credentialSource: 'user',
+      baseUrl: 'https://anthropic-alt.example/anthropic',
+      providerDialect: 'anthropic',
+    });
+  });
+
+  it('returns project-scoped credential when projectId is provided and project row exists', async () => {
+    // First query: project-scoped lookup returns an active credential
+    mockDB.limit.mockResolvedValueOnce([
+      {
+        id: 'c1',
+        userId: 'u1',
+        projectId: 'p1',
+        encryptedToken: 'enc',
+        iv: 'iv',
+        credentialKind: 'api-key',
+        isActive: true,
+      },
+    ]);
+
+    const result = await getDecryptedAgentKey(
+      mockDB as unknown as Parameters<typeof getDecryptedAgentKey>[0],
+      'u1',
+      'claude-code',
+      'test-key',
+      'p1'
     );
 
     expect(result).not.toBeNull();
@@ -433,25 +595,23 @@ describe('getDecryptedAgentKey — resolution order', () => {
   it('falls back to user-scoped credential when project has no override', async () => {
     // First query: project-scoped returns nothing
     // Second query: user-scoped (project_id IS NULL) returns a credential
-    mockDB.limit
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([
-        {
-          id: 'c2',
-          userId: 'u1',
-          projectId: null,
-          encryptedToken: 'enc',
-          iv: 'iv',
-          credentialKind: 'oauth-token',
-        },
-      ]);
+    mockDB.limit.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      {
+        id: 'c2',
+        userId: 'u1',
+        projectId: null,
+        encryptedToken: 'enc',
+        iv: 'iv',
+        credentialKind: 'oauth-token',
+      },
+    ]);
 
     const result = await getDecryptedAgentKey(
       mockDB as unknown as Parameters<typeof getDecryptedAgentKey>[0],
       'u1',
       'claude-code',
       'test-key',
-      'p1',
+      'p1'
     );
 
     expect(result).not.toBeNull();
@@ -477,7 +637,7 @@ describe('getDecryptedAgentKey — resolution order', () => {
       'u1',
       'claude-code',
       'test-key',
-      null,
+      null
     );
 
     expect(result).not.toBeNull();
@@ -497,7 +657,7 @@ describe('getDecryptedAgentKey — resolution order', () => {
       'u1',
       'claude-code',
       'test-key',
-      'p1',
+      'p1'
     );
     expect(result).toBeNull();
   });
@@ -536,7 +696,7 @@ describe('getDecryptedAgentKey — resolution order', () => {
       'u1',
       'claude-code',
       'test-key',
-      'p1',
+      'p1'
     );
 
     expect(result).toBeNull();

@@ -1,16 +1,48 @@
 # Cloudflare Sandbox SDK base image — includes the /container-server/sandbox
 # binary that exposes the HTTP API used by getSandbox()/exec()/readFile()/etc.
-# IMPORTANT: The image tag MUST match the @cloudflare/sandbox npm package version.
-FROM docker.io/cloudflare/sandbox:0.9.2
+# IMPORTANT: The reviewed source tag for this digest is cloudflare/sandbox:0.12.10 and MUST match the @cloudflare/sandbox npm package version.
+FROM docker.io/cloudflare/sandbox:0.12.10@sha256:35c932d3e5b35f28d350800cf00551cac46dfe28274afb54e16325b8d8f560d1
 
-# The base image already includes Node.js 20, Bun, git, curl, and common tools.
-# Add any extra tools needed for SAM agent workloads here.
-RUN apt-get update && apt-get install -y --no-install-recommends jq && \
+COPY scripts/codex-device-auth.mjs /usr/local/bin/sam-codex-device-auth.mjs
+COPY scripts/claude-setup-token.mjs /usr/local/bin/sam-claude-setup-token.mjs
+
+# The base image already includes Node.js 22, Bun, git, curl, and common tools.
+# Add extra tools needed for SAM agent workloads here. The normal VM runtime
+# can install GitHub CLI during devcontainer bootstrap; standalone cf-container
+# sessions skip that bootstrap path, so the image must include gh for PR flows.
+# Pre-bake the Claude Code and Codex CLIs the guided credential-setup flows
+# spawn (`claude setup-token` via sam-claude-setup-token.mjs, `codex app-server`
+# via sam-codex-device-auth.mjs). Installing them at BUILD time — rather than
+# via runtime `npm install -g` inside the running container — avoids a CF
+# Sandbox / gVisor overlay filesystem visibility gap where a freshly
+# runtime-installed binary is not execve-able for several seconds after npm
+# reports success. Image-layer files are fully materialized at container boot.
+# Keep the CLI pins aligned with agent-install-manifest.json npm companions
+# (enforced for claude-code by cf-container-runtime-contract.test.ts). No ACP
+# adapter is needed here: nothing in the sandbox surfaces execs one (a
+# deprecated unpinned Zed ACP adapter install was removed 2026-09-04).
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ca-certificates jq wget; \
+    mkdir -p -m 755 /etc/apt/keyrings; \
+    wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg > /etc/apt/keyrings/githubcli-archive-keyring.gpg; \
+    chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg; \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends gh; \
+    npm install -g --ignore-scripts @anthropic-ai/claude-code@2.1.281 @openai/codex@0.160.0; \
+    # --ignore-scripts blocks implicit third-party lifecycle scripts (supply-chain
+    # guard). claude-code's postinstall only links the platform-native binary from
+    # its pinned optionalDependencies over the bin placeholder, so run that one
+    # vetted script explicitly; codex ships no lifecycle scripts.
+    node "$(npm root -g)/@anthropic-ai/claude-code/install.cjs"; \
+    npm cache clean --force; \
+    chmod 755 /usr/local/bin/sam-codex-device-auth.mjs /usr/local/bin/sam-claude-setup-token.mjs; \
+    mkdir -p /workspaces; \
     rm -rf /var/lib/apt/lists/*
 
-# Create workspace directory (base image may already have it, but ensure it exists)
-RUN mkdir -p /workspace
-WORKDIR /workspace
+# Create workspace root (base image may already have it, but ensure it exists)
+WORKDIR /workspaces
 
 # Do NOT override ENTRYPOINT — the base image sets ENTRYPOINT ["/container-server/sandbox"]
 # which starts the HTTP API server. CMD is optional (runs as child process of sandbox binary).

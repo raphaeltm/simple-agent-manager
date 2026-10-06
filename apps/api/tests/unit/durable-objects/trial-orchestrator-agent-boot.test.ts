@@ -3,7 +3,7 @@
  * the `fetchDefaultBranch` GitHub probe used during project_creation.
  *
  * These assert the class-of-bug regressions described in
- * tasks/active/2026-04-19-trial-orchestrator-actually-start-agent.md:
+ * tasks/archive/2026-04-19-trial-orchestrator-actually-start-agent.md:
  *
  *   1. handleDiscoveryAgentStart previously only created ACP session rows and
  *      never told the VM agent to actually launch the subprocess. The ACP
@@ -68,12 +68,14 @@ vi.mock('../../../src/services/node-agent', () => ({
   createWorkspaceOnNode: createWorkspaceOnNodeMock,
 }));
 
-const { generateMcpTokenMock, storeMcpTokenMock } = vi.hoisted(() => ({
+const { generateMcpTokenMock, revokeMcpTokenMock, storeMcpTokenMock } = vi.hoisted(() => ({
   generateMcpTokenMock: vi.fn(() => 'mcp_tok_fixture_abc123'),
+  revokeMcpTokenMock: vi.fn(async () => {}),
   storeMcpTokenMock: vi.fn(async () => {}),
 }));
 vi.mock('../../../src/services/mcp-token', () => ({
   generateMcpToken: generateMcpTokenMock,
+  revokeMcpToken: revokeMcpTokenMock,
   storeMcpToken: storeMcpTokenMock,
 }));
 
@@ -189,7 +191,7 @@ describe('handleDiscoveryAgentStart — VM agent boot', () => {
     expect(state.agentSessionCreatedOnVm).toBe(true);
   });
 
-  it('mints + stores an MCP token keyed on trialId (synthetic taskId)', async () => {
+  it('mints + stores a taskless trial MCP token keyed by context', async () => {
     const ctx = makeCtx();
     const rc = makeRc(ctx, []);
     const state = makeState();
@@ -200,8 +202,8 @@ describe('handleDiscoveryAgentStart — VM agent boot', () => {
     expect(storeMcpTokenMock).toHaveBeenCalledTimes(1);
     const [, token, data] = storeMcpTokenMock.mock.calls[0];
     expect(token).toBe('mcp_tok_fixture_abc123');
-    // Trial synthetic taskId = trialId.
-    expect((data as { taskId: string }).taskId).toBe(state.trialId);
+    expect((data as { taskId: string }).taskId).toBe('');
+    expect((data as { contextType: string }).contextType).toBe('trial');
     expect((data as { projectId: string }).projectId).toBe('proj_X');
     expect((data as { workspaceId: string }).workspaceId).toBe('ws_X');
 
@@ -225,10 +227,15 @@ describe('handleDiscoveryAgentStart — VM agent boot', () => {
     expect(typeof initialPrompt).toBe('string');
     expect(initialPrompt as string).toContain('octocat/Hello-World');
     expect(userId).toBe('u_anon_trial');
-    expect(mcpServer).toEqual({
-      url: 'https://api.sammy.party/mcp',
-      token: 'mcp_tok_fixture_abc123',
-    });
+    // Exactly one entry: SAM's own endpoint. Bring-your-own MCP connections are
+    // deliberately NOT resolved for trials, which run as the anonymous sentinel user.
+    expect(mcpServer).toEqual([
+      {
+        url: 'https://api.sammy.party/mcp',
+        token: 'mcp_tok_fixture_abc123',
+        name: 'sam-mcp',
+      },
+    ]);
 
     expect(state.agentStartedOnVm).toBe(true);
   });
@@ -312,7 +319,7 @@ describe('handleDiscoveryAgentStart — VM agent boot', () => {
     expect(transitionAcpSessionMock).toHaveBeenCalledTimes(2);
     // MCP token passed to startAgentSessionOnNode is the persisted one, not a fresh mint.
     const startArgs = startAgentSessionOnNodeMock.mock.calls[0];
-    expect(startArgs[7]).toMatchObject({ token: 'mcp_tok_partial' });
+    expect(startArgs[7]).toMatchObject([{ token: 'mcp_tok_partial', name: 'sam-mcp' }]);
 
     expect(advanced).toEqual(['running']);
   });

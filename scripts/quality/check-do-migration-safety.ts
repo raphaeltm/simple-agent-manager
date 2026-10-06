@@ -43,6 +43,15 @@ const DO_MIGRATION_FILES = [
     import.meta.dirname,
     '../../apps/api/src/durable-objects/trial-counter.ts'
   ),
+  // setup-session-pool uses inline constructor DDL (pure DO-SQLite) — scan it.
+  // NOTE: credential-setup-session is intentionally NOT scanned here: it mixes DO
+  // SQLite with D1 writes (UPDATE agent_credential_setup_sessions ... WHERE id=?),
+  // and this scanner's line heuristic false-positives on the dynamic-SET D1 UPDATE.
+  // Its DO-SQLite DDL is a safe CREATE TABLE IF NOT EXISTS + WHERE-scoped writes.
+  resolve(
+    import.meta.dirname,
+    '../../apps/api/src/durable-objects/setup-session-pool.ts'
+  ),
 ];
 
 interface Violation {
@@ -63,42 +72,41 @@ const ALLOWLISTED_VIOLATIONS = new Set<string>([]);
 
 /**
  * Extract SQL string literals from a TypeScript migration file.
- * Matches template literals (backtick strings) and regular strings
- * that contain SQL keywords.
+ *
+ * Matches all three JavaScript string forms — template literals, single-quoted,
+ * and DOUBLE-quoted. Double quotes are not optional coverage: the idiomatic way
+ * to write `ADD COLUMN scope TEXT NOT NULL DEFAULT 'always'` without escaping is
+ * to wrap the statement in double quotes, so a scanner that skips them is blind
+ * to exactly the statements most likely to embed a literal — and a
+ * `sql.exec("DROP TABLE ...")` would sail straight through a green check.
+ *
+ * Rule 31 calls this gate one that "cannot be bypassed", so a quoting style must
+ * never be able to bypass it.
  */
-function extractSqlFromTypeScript(
+export function extractSqlFromTypeScript(
   content: string
 ): { sql: string; lineStart: number }[] {
   const results: { sql: string; lineStart: number }[] = [];
 
-  // Match template literals (backtick strings)
-  const templateRegex = /`([\s\S]*?)`/g;
-  let match;
-  while ((match = templateRegex.exec(content)) !== null) {
-    const sqlContent = match[1];
-    // Only include if it looks like SQL
-    if (
-      /\b(CREATE|DROP|DELETE|INSERT|UPDATE|ALTER|TRUNCATE|SELECT)\b/i.test(
-        sqlContent
-      )
-    ) {
-      const lineStart =
-        content.substring(0, match.index).split('\n').length;
-      results.push({ sql: sqlContent, lineStart });
-    }
-  }
+  const SQL_KEYWORDS = /\b(CREATE|DROP|DELETE|INSERT|UPDATE|ALTER|TRUNCATE|SELECT)\b/i;
 
-  // Match single-quoted strings with SQL
-  const singleQuoteRegex = /'((?:[^'\\]|\\.)*)'/g;
-  while ((match = singleQuoteRegex.exec(content)) !== null) {
-    const sqlContent = match[1];
-    if (
-      /\b(CREATE|DROP|DELETE|INSERT|UPDATE|ALTER|TRUNCATE)\b/i.test(
-        sqlContent
-      )
-    ) {
-      const lineStart =
-        content.substring(0, match.index).split('\n').length;
+  // One pass per string form. Each pattern is anchored to its own delimiter and
+  // consumes escapes, so a quote character appearing INSIDE a differently-quoted
+  // string cannot pair with a delimiter from a neighbouring statement and produce
+  // a garbled, unscannable capture that spans two statements.
+  const stringPatterns = [
+    /`([^`\\]*(?:\\.[^`\\]*)*)`/g, // template literal
+    /'((?:[^'\\]|\\.)*)'/g, // single-quoted
+    /"((?:[^"\\]|\\.)*)"/g, // double-quoted
+  ];
+
+  for (const pattern of stringPatterns) {
+    let match;
+    while ((match = pattern.exec(content)) !== null) {
+      const sqlContent = match[1];
+      // Only include if it looks like SQL
+      if (!SQL_KEYWORDS.test(sqlContent)) continue;
+      const lineStart = content.substring(0, match.index).split('\n').length;
       results.push({ sql: sqlContent, lineStart });
     }
   }
@@ -264,4 +272,8 @@ function main(): void {
   );
 }
 
-main();
+// Only run main when executed directly (not when imported for testing).
+const isDirectExecution = process.argv[1]?.endsWith('check-do-migration-safety.ts');
+if (isDirectExecution) {
+  main();
+}

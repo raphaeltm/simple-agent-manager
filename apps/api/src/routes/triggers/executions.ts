@@ -12,10 +12,11 @@ import { Hono } from 'hono';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
+import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
 import { getAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
-import { requireOwnedProject } from '../../middleware/project-auth';
+import { requireProjectTaskRead } from '../task-project-auth';
 
 const executionRoutes = new Hono<{ Bindings: Env }>();
 
@@ -56,7 +57,7 @@ executionRoutes.get('/:triggerId/executions', async (c) => {
     throw errors.badRequest('projectId and triggerId are required');
   }
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectTaskRead(db, projectId, userId);
 
   // Verify trigger exists and belongs to project
   const [trigger] = await db
@@ -126,24 +127,34 @@ executionRoutes.get('/:triggerId/executions/:executionId', async (c) => {
     throw errors.badRequest('projectId, triggerId, and executionId are required');
   }
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectTaskRead(db, projectId, userId);
 
-  const [execution] = await db
-    .select()
+  const [result] = await db
+    .select({ execution: schema.triggerExecutions })
     .from(schema.triggerExecutions)
+    .innerJoin(schema.triggers, eq(schema.triggers.id, schema.triggerExecutions.triggerId))
     .where(
       and(
         eq(schema.triggerExecutions.id, executionId),
-        eq(schema.triggerExecutions.triggerId, triggerId)
+        eq(schema.triggerExecutions.triggerId, triggerId),
+        eq(schema.triggerExecutions.projectId, projectId),
+        eq(schema.triggers.projectId, projectId)
       )
     )
     .limit(1);
 
-  if (!execution) {
+  if (!result) {
+    log.warn('trigger_execution.access_miss_rejected', {
+      routeProjectId: projectId,
+      requestedTriggerId: triggerId,
+      requestedExecutionId: executionId,
+      expectedRelationship: 'execution_and_trigger_belong_to_route_project',
+      action: 'rejected',
+    });
     throw errors.notFound('Trigger execution');
   }
 
-  return c.json(toExecutionResponse(execution));
+  return c.json(toExecutionResponse(result.execution));
 });
 
 export { executionRoutes };

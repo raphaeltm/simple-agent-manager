@@ -1,4 +1,9 @@
-import { expect, type Page, type Route } from '@playwright/test';
+import { mkdirSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+import { expect, type Page, type Route, test } from '@playwright/test';
+
+const DEFAULT_SCREENSHOT_DIR = '../../.codex/tmp/playwright-screenshots';
 
 interface MockUserOptions {
   email: string;
@@ -33,11 +38,173 @@ export function makeMockUser({ email, name, role = 'user', sessionId, userId }: 
   };
 }
 
-export async function screenshot(page: Page, name: string) {
+/** `iPhone SE (375x667)` -> `iphone-se-375x667`. */
+function slugifyProjectName(projectName: string): string {
+  return projectName
+    .replace(/[^a-zA-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase();
+}
+
+/**
+ * `scopeToProject` prefixes the Playwright project name.
+ *
+ * The `-{width}x{height}` suffix alone does NOT make a filename unique: a
+ * `test.use`-pinned describe renders at the same size under every project, so
+ * running one spec on two projects has them overwrite each other's captures and
+ * a screenshot review silently inspects only whichever ran last. Opt-in rather
+ * than automatic, because the existing audit specs' filenames are referenced
+ * from PR evidence.
+ */
+export async function screenshot(
+  page: Page,
+  name: string,
+  options: { scopeToProject?: boolean } = {}
+) {
   await page.waitForTimeout(600);
+  const viewport = page.viewportSize();
+  const suffix = viewport ? `-${viewport.width}x${viewport.height}` : '';
+  const prefix = options.scopeToProject ? `${slugifyProjectName(test.info().project.name)}-` : '';
+  const screenshotDir = resolve(process.cwd(), DEFAULT_SCREENSHOT_DIR);
+  mkdirSync(screenshotDir, { recursive: true });
   await page.screenshot({
-    path: `../../.codex/tmp/playwright-screenshots/${name}.png`,
+    path: `${screenshotDir}/${prefix}${name}${suffix}.png`,
     fullPage: true,
+  });
+}
+
+type MutableCapacityCandidate = {
+  id: string;
+  status: string;
+  capacitySourceId?: string;
+  provider?: string | null;
+  location?: string | null;
+  providerInstanceType?: string | null;
+  providerInstanceSku?: string | null;
+  [key: string]: unknown;
+};
+type MutableCapacitySummary = {
+  pool: {
+    id: string;
+    strategy: string;
+    exhaustionPolicy: string;
+    maxNodes?: number;
+    revision: number;
+  };
+  candidates: MutableCapacityCandidate[];
+  activeCandidateCount: number;
+};
+
+type MutableCapacityDefaultsResponse = {
+  effective: MutableCapacitySummary | null;
+  defaults: { summary: MutableCapacitySummary | null }[];
+};
+
+export type MockCapacityDefaultsUpdate = {
+  policy?: { strategy?: string; exhaustionPolicy?: string; maxNodes?: number };
+  candidates?: MutableCapacityCandidate[];
+  catalogAdditions?: Array<{
+    sourceId: string;
+    provider: string;
+    location: string;
+    providerInstanceType: string;
+    providerInstanceSku?: string | null;
+  }>;
+};
+
+export function applyMockCapacityDefaultsUpdate<T extends MutableCapacityDefaultsResponse>(
+  current: T,
+  update: MockCapacityDefaultsUpdate
+): T {
+  const next = JSON.parse(JSON.stringify(current)) as T;
+  const summary = next.effective;
+  if (!summary) return next;
+
+  if (update.policy?.strategy) summary.pool.strategy = update.policy.strategy;
+  if (update.policy?.exhaustionPolicy) {
+    summary.pool.exhaustionPolicy = update.policy.exhaustionPolicy;
+  }
+  if (update.policy?.maxNodes) summary.pool.maxNodes = update.policy.maxNodes;
+  for (const candidateUpdate of update.candidates ?? []) {
+    const candidate = summary.candidates.find((item) => item.id === candidateUpdate.id);
+    if (candidate) candidate.status = candidateUpdate.status;
+  }
+  for (const addition of update.catalogAdditions ?? []) {
+    const candidate = summary.candidates.find(
+      (item) =>
+        item.capacitySourceId === addition.sourceId &&
+        item.provider === addition.provider &&
+        item.location === addition.location &&
+        item.providerInstanceType === addition.providerInstanceType &&
+        (item.providerInstanceSku ?? null) === (addition.providerInstanceSku ?? null)
+    );
+    if (candidate) {
+      candidate.status = 'active';
+      continue;
+    }
+    summary.candidates.push({
+      id: `mock-catalog-addition:${addition.sourceId}:${addition.provider}:${addition.location}:${addition.providerInstanceSku ?? addition.providerInstanceType}`,
+      status: 'active',
+      capacitySourceId: addition.sourceId,
+      provider: addition.provider,
+      location: addition.location,
+      providerInstanceType: addition.providerInstanceType,
+      providerInstanceSku: addition.providerInstanceSku ?? null,
+      workloadRole: 'workspace',
+      runtime: 'vm',
+      machineClass: 'shared-vm',
+      machineSize: null,
+      priority: summary.candidates.length,
+      candidateOrder: summary.candidates.length,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+  }
+  summary.activeCandidateCount = summary.candidates.filter(
+    (candidate) => candidate.status === 'active'
+  ).length;
+  summary.pool.revision += 1;
+  for (const item of next.defaults) {
+    if (item.summary?.pool.id === summary.pool.id) item.summary = summary;
+  }
+  return next;
+}
+
+export async function screenshotNearHeading(
+  page: Page,
+  heading: string,
+  name: string,
+  options: { outputDir?: string } = {}
+) {
+  await page.getByRole('heading', { name: heading }).scrollIntoViewIfNeeded();
+  await page.waitForTimeout(600);
+  const viewport = page.viewportSize();
+  const suffix = viewport ? `-${viewport.width}x${viewport.height}` : '';
+  const screenshotDir = resolve(process.cwd(), options.outputDir ?? DEFAULT_SCREENSHOT_DIR);
+  mkdirSync(screenshotDir, { recursive: true });
+  await page.screenshot({
+    path: `${screenshotDir}/${name}${suffix}.png`,
+    fullPage: false,
+  });
+}
+
+export async function screenshotSectionNearHeading(
+  page: Page,
+  heading: string,
+  name: string,
+  options: { outputDir?: string } = {}
+) {
+  const headingLocator = page.getByRole('heading', { name: heading }).first();
+  await headingLocator.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(600);
+  const viewport = page.viewportSize();
+  const suffix = viewport ? `-${viewport.width}x${viewport.height}` : '';
+  const screenshotDir = resolve(process.cwd(), options.outputDir ?? DEFAULT_SCREENSHOT_DIR);
+  mkdirSync(screenshotDir, { recursive: true });
+  const section = headingLocator.locator('xpath=ancestor::section[1]').first();
+  const target = (await section.count()) > 0 ? section : headingLocator;
+  await target.screenshot({
+    path: `${screenshotDir}/${name}${suffix}.png`,
   });
 }
 
@@ -46,6 +213,233 @@ export async function assertNoOverflow(page: Page) {
     () => document.documentElement.scrollWidth > window.innerWidth
   );
   expect(overflow).toBe(false);
+  // Advisory here, blocking via `assertNoClippedOverflow` — see the rollout note
+  // on `findClippedOverflow` below.
+  await reportClippedOverflow(page);
+}
+
+/**
+ * Detects horizontal overflow that `assertNoOverflow`'s document-level check
+ * CANNOT see.
+ *
+ * AppShell puts `overflow-x-hidden` on `<main>` (AppShell.tsx) and `Project.tsx`
+ * repeats it on its page wrapper. Anything wider than the viewport inside those
+ * is therefore *clipped* — `document.documentElement.scrollWidth` never grows,
+ * so the document-level assertion passes while the user sees content sheared off
+ * at the right edge with no way to scroll to it.
+ *
+ * That false-pass shipped the Triggers mobile bug: the page root rendered 768px
+ * wide inside a 375px viewport (`mx-auto` on a column-flex child disables
+ * `align-items: stretch`, `min-width: auto` then floors the width at the
+ * subtree's min-content, and Tailwind `truncate` makes a heading's min-content
+ * its FULL untruncated string) while 25 `assertNoOverflow` assertions stayed
+ * green.
+ *
+ * The signal is an element that *clips* horizontally (`overflow-x` resolved to
+ * `hidden` or `clip`) whose content is wider than its box. Deliberate clipping
+ * is excluded:
+ *  - `text-overflow: ellipsis` (Tailwind `truncate`) — the ellipsis IS the design
+ *  - `overflow-x: auto | scroll` — the user can scroll to the rest
+ *  - sub-4px boxes — `sr-only` clipping helpers
+ *  - `data-intentional-clip` — an explicit, self-documenting opt-out for
+ *    carousels and sliding panels (see `NavSidebar.tsx`), which are legitimately
+ *    wider than their viewport. Declaring it beats a silent blind spot.
+ *  - `<input>` / `<select>` — a native control scrolls its own value as the
+ *    caret moves, so a value wider than the field is expected behaviour
+ *
+ * ROLLOUT (progressive, per the repo's quality-tool policy: introduce new
+ * checks in advisory mode, ratchet existing debt, promote to blocking once a
+ * surface is clean — do NOT fail unrelated specs on day one).
+ *
+ * A full sweep on 2026-08-11 found this same bug class already present on 11
+ * other surfaces (settings pages, project settings, deployments, agent context,
+ * skills, the composer wizard). Those are tracked in
+ * `tasks/backlog/2026-08-11-clipped-overflow-debt-sweep.md`.
+ *
+ * So: `assertNoOverflow` REPORTS offenders (advisory), and surfaces that are
+ * clean call `assertNoClippedOverflow` directly to make it BLOCKING. The trigger
+ * audits do. As each surface on the list is fixed, switch it over too.
+ */
+export async function findClippedOverflow(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const found: string[] = [];
+    const SELF_SCROLLING_CONTROLS = new Set(['INPUT', 'SELECT']);
+
+    for (const el of Array.from(document.body.querySelectorAll('*'))) {
+      if (SELF_SCROLLING_CONTROLS.has(el.tagName)) continue;
+      const style = getComputedStyle(el);
+      if (style.display === 'none' || style.visibility === 'hidden') continue;
+      if (style.overflowX !== 'hidden' && style.overflowX !== 'clip') continue;
+      if (style.textOverflow === 'ellipsis') continue;
+      // `sr-only` is exactly 1px wide. Keep the exemption that tight: a wider
+      // exemption would also hide a control squashed to near-zero by a flex bug,
+      // which is a worse defect than the one this detector looks for.
+      if (el.clientWidth <= 1) continue;
+      if (el.closest('[data-intentional-clip]')) continue;
+      // +1 absorbs sub-pixel layout rounding.
+      if (el.scrollWidth <= el.clientWidth + 1) continue;
+
+      const cls = (el.getAttribute('class') ?? '').slice(0, 80);
+      const text = (el.textContent ?? '').trim().slice(0, 40).replace(/\s+/g, ' ');
+      found.push(
+        `<${el.tagName.toLowerCase()} class="${cls}"> content ${el.scrollWidth}px ` +
+          `clipped to ${el.clientWidth}px — "${text}"`
+      );
+    }
+
+    return found;
+  });
+}
+
+/** Blocking form. Use on surfaces that are already clean. */
+export async function assertNoClippedOverflow(page: Page) {
+  const offenders = await findClippedOverflow(page);
+  expect(
+    offenders,
+    `Horizontally clipped content (invisible to the user):\n${offenders.join('\n')}`
+  ).toEqual([]);
+}
+
+/**
+ * The VERTICAL counterpart to `findClippedOverflow`.
+ *
+ * That function deliberately looks only at `overflow-x`, which left the
+ * identical vertical condition with no detector at all — and that blind spot is
+ * why the project sidebar shipped with its bottom nav items sheared off and
+ * unreachable on short laptops. The `aside` never overflowed (so its
+ * `overflow-y-auto` never engaged) while the carousel root clipped 280px of nav
+ * behind `overflow: hidden`, and ~40 green audit specs could not see it.
+ *
+ * Walks the ancestors of `selector` and reports any that clip vertically while
+ * holding content taller than their box. Unlike the horizontal sweep this is
+ * ancestor-scoped rather than document-wide: promoting it to a repo-wide
+ * blocking sweep on day one would fail unrelated specs, which the progressive
+ * quality-tool rollout policy forbids. Point it at the subtree you changed.
+ */
+export async function findVerticalClipping(page: Page, selector: string): Promise<string[]> {
+  return page.evaluate((sel) => {
+    const found: string[] = [];
+    let el = document.querySelector(sel)?.parentElement ?? null;
+    while (el && el !== document.documentElement) {
+      const style = getComputedStyle(el);
+      const clips = style.overflowY === 'hidden' || style.overflowY === 'clip';
+      // +1 absorbs sub-pixel layout rounding.
+      if (clips && el.scrollHeight > el.clientHeight + 1) {
+        const cls = (el.getAttribute('class') ?? '').slice(0, 90);
+        found.push(
+          `<${el.tagName.toLowerCase()} class="${cls}"> content ${el.scrollHeight}px ` +
+            `clipped to ${el.clientHeight}px with overflow-y:${style.overflowY}`
+        );
+      }
+      el = el.parentElement;
+    }
+    return found;
+  }, selector);
+}
+
+/** Blocking form. Pair it with a positive-render assertion in the same test. */
+export async function assertNoVerticalClipping(page: Page, selector: string): Promise<void> {
+  const offenders = await findVerticalClipping(page, selector);
+  expect(
+    offenders,
+    `Vertically clipped content the user cannot scroll to:\n${offenders.join('\n')}`
+  ).toEqual([]);
+}
+
+/**
+ * Advisory form. Prints offenders so the debt stays visible in test output
+ * without failing specs for pre-existing clipping on surfaces this change does
+ * not touch.
+ */
+export async function reportClippedOverflow(page: Page) {
+  const offenders = await findClippedOverflow(page);
+  if (offenders.length === 0) return;
+  const where = page.url().replace(/^https?:\/\/[^/]+/, '');
+  const width = page.viewportSize()?.width ?? '?';
+  console.warn(
+    `[clipped-overflow] ${offenders.length} clipped element(s) at ${width}px on ${where}:\n` +
+      offenders.map((o) => `  ${o}`).join('\n')
+  );
+}
+
+/**
+ * Regression guard for the "System" label clipping inside the narrow (220px)
+ * desktop sidebar. Document-level overflow checks do NOT catch a label that is
+ * truncated *within* its own button — the button stays inside the viewport while
+ * its text is clipped. This asserts every option button in the Theme group fully
+ * contains its content (scrollWidth must not exceed clientWidth).
+ */
+export async function assertThemeButtonsNotClipped(page: Page) {
+  const clipped = await page.evaluate(() => {
+    const group = document.querySelector('[role="group"][aria-label="Theme"]');
+    if (!group) return ['MISSING_GROUP'];
+    const offenders: string[] = [];
+    for (const btn of Array.from(group.querySelectorAll('button'))) {
+      // +1 tolerance for sub-pixel rounding.
+      if (btn.scrollWidth > btn.clientWidth + 1) {
+        offenders.push(`${btn.textContent?.trim() ?? '?'}: ${btn.scrollWidth}>${btn.clientWidth}`);
+      }
+    }
+    return offenders;
+  });
+  expect(clipped).toEqual([]);
+}
+
+/**
+ * Seeds the theme before the app boots by writing the `sam-theme` localStorage
+ * key. The ThemeContext reads this on mount and applies `data-ui-theme` on the
+ * `<html>` element.
+ *
+ * For `'system'`, pass `prefersDark` to deterministically control the OS
+ * preference: a `matchMedia` override is installed before the app boots so the
+ * pre-paint script and ThemeContext resolve `system` to a known value.
+ */
+export async function seedTheme(
+  page: Page,
+  theme: 'dark' | 'light' | 'system',
+  prefersDark = true
+) {
+  await page.addInitScript(
+    ({ value, dark }) => {
+      window.localStorage.setItem('sam-theme', value);
+      if (value === 'system') {
+        // Only intercept `prefers-color-scheme` queries so OS-theme resolution
+        // is deterministic. Delegate every other query (notably
+        // `useIsMobile`'s `(max-width: 767px)` breakpoint) to the real
+        // matchMedia so the AppShell still picks the correct mobile/desktop
+        // render branch.
+        const realMatchMedia = window.matchMedia.bind(window);
+        // @ts-expect-error overriding for deterministic system resolution
+        window.matchMedia = (query: string) => {
+          if (query.includes('prefers-color-scheme')) {
+            return {
+              matches: query.includes('dark') ? dark : !dark,
+              media: query,
+              onchange: null,
+              addEventListener: () => {},
+              removeEventListener: () => {},
+              addListener: () => {},
+              removeListener: () => {},
+              dispatchEvent: () => true,
+            };
+          }
+          return realMatchMedia(query);
+        };
+      }
+    },
+    { value: theme, dark: prefersDark }
+  );
+}
+
+/**
+ * Asserts the active theme resolved to the expected `data-ui-theme` token on
+ * `<html>` (`sam` for dark, `sam-light` for light). `effective` is the resolved
+ * theme — for `system` seeds, pass the value the OS preference should resolve to.
+ */
+export async function expectTheme(page: Page, effective: 'dark' | 'light') {
+  const expected = effective === 'dark' ? 'sam' : 'sam-light';
+  const attr = await page.evaluate(() => document.documentElement.getAttribute('data-ui-theme'));
+  expect(attr).toBe(expected);
 }
 
 export function getProjectSuffix(projectName: string): string {
@@ -54,4 +448,294 @@ export function getProjectSuffix(projectName: string): string {
 
 export function jsonResponse(route: Route, status: number, body: unknown) {
   return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+}
+
+/**
+ * Polling variant of {@link expectTheme}. Waits for the ThemeContext to resolve
+ * `data-ui-theme` rather than asserting synchronously, which is required when
+ * the assertion runs immediately after `page.goto()` before the app has mounted.
+ */
+export async function expectThemePoll(page: Page, theme: 'dark' | 'light') {
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.getAttribute('data-ui-theme')))
+    .toBe(theme === 'light' ? 'sam-light' : 'sam');
+}
+
+/**
+ * Navigates to a route, waits for the expected theme to resolve, then captures a
+ * full-page screenshot and asserts no horizontal overflow.
+ *
+ * Includes the ErrorBoundary false-pass guard: a crashed page keeps the seeded
+ * `data-ui-theme` attribute and has no overflow, so the theme + overflow checks
+ * both pass on the error screen. The "Something went wrong" assertion fails
+ * loudly if the boundary rendered instead of the real surface.
+ */
+export async function visitAndCapture(
+  page: Page,
+  path: string,
+  name: string,
+  theme: 'dark' | 'light'
+) {
+  await page.goto(path);
+  await expectThemePoll(page, theme);
+  await page.waitForTimeout(700);
+  await expect(page.getByText('Something went wrong')).toHaveCount(0);
+  await screenshot(page, name);
+  await assertNoOverflow(page);
+}
+
+export type AuditResponder = (status: number, body: unknown) => Promise<void>;
+
+/**
+ * Declares the standard dark + light theme audit describe/test scaffold shared by
+ * every light-mode audit spec. For each theme it seeds the theme, registers the
+ * spec's API mocks, computes the `theme-viewport` screenshot suffix, then invokes
+ * the spec's `run` callback to capture its surfaces.
+ */
+export function describeThemeAudit(
+  label: string,
+  setupMocks: (page: Page) => Promise<void>,
+  run: (page: Page, theme: 'dark' | 'light', suffix: string) => Promise<void>
+) {
+  for (const theme of ['dark', 'light'] as const) {
+    test.describe(`${label} — ${theme}`, () => {
+      test('surfaces', async ({ page }) => {
+        await seedTheme(page, theme);
+        await setupMocks(page);
+        const suffix = `${theme}-${page.viewportSize()?.width ?? 'unknown'}`;
+        await run(page, theme, suffix);
+      });
+    });
+  }
+}
+
+/**
+ * Registers the catch-all `/api` glob route used by the theme audits. The
+ * supplied handler returns the `respond(...)` promise for paths it handles and
+ * `undefined` for everything else, which falls through to an empty `{}` 200 so
+ * unmocked endpoints never hang the page.
+ */
+export async function setupAuditRoutes(
+  page: Page,
+  handler: (path: string, respond: AuditResponder, route: Route) => Promise<void> | undefined
+) {
+  await page.route('**/api/**', async (route: Route) => {
+    const path = new URL(route.request().url()).pathname;
+    const respond: AuditResponder = (status, body) =>
+      route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+    const result = handler(path, respond, route);
+    if (result === undefined) return respond(200, {});
+    return result;
+  });
+}
+
+interface ProjectChatMockOptions {
+  projectId: string;
+  project: unknown;
+  session: unknown;
+  messages: unknown[];
+  user?: { id: string; name: string; email: string };
+}
+
+/**
+ * Registers the common API route mocks needed to render a project chat session
+ * (auth, project, session+messages, and the sidebar/dropdown data the page
+ * loads). Specs supply their own session/messages and may register additional
+ * routes (e.g. tool-content) after calling this — later-registered Playwright
+ * routes take precedence for their specific URLs.
+ */
+export async function setupProjectChatMocks(page: Page, options: ProjectChatMockOptions) {
+  const {
+    projectId,
+    project,
+    session,
+    messages,
+    user = { id: 'test-user', name: 'Test User', email: 'test@example.com' },
+  } = options;
+
+  await page.addInitScript((userId) => {
+    window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
+  }, user.id);
+
+  await page.route('**/api/auth/get-session', (route: Route) =>
+    route.fulfill({ status: 200, json: { user } })
+  );
+
+  await page.route('**/api/github/installations', (route: Route) =>
+    route.fulfill({ status: 200, json: [] })
+  );
+
+  await page.route(new RegExp(`/api/projects/${projectId}(?:\\?.*)?$`), (route: Route) => {
+    if (route.request().method() === 'GET') {
+      return route.fulfill({ status: 200, json: project });
+    }
+    return route.continue();
+  });
+
+  await page.route(
+    new RegExp(`/api/projects/${projectId}/sessions/[^/]+(?:\\?.*)?$`),
+    (route: Route) => route.fulfill({ status: 200, json: { session, messages, hasMore: false } })
+  );
+
+  await page.route(`**/api/projects/${projectId}/sessions*`, (route: Route) =>
+    route.fulfill({ status: 200, json: { sessions: [session], total: 1 } })
+  );
+
+  await page.route(`**/api/projects/${projectId}/tasks*`, (route: Route) =>
+    route.fulfill({ status: 200, json: { tasks: [], total: 0 } })
+  );
+
+  await page.route(`**/api/projects/${projectId}/agent-profiles`, (route: Route) =>
+    route.fulfill({ status: 200, json: { items: [] } })
+  );
+
+  await page.route('**/api/credentials', (route: Route) =>
+    route.fulfill({ status: 200, json: [{ provider: 'hetzner', status: 'valid' }] })
+  );
+
+  await page.route('**/api/trial/status', (route: Route) =>
+    route.fulfill({ status: 200, json: { available: false } })
+  );
+
+  await page.route('**/api/agents', (route: Route) =>
+    route.fulfill({ status: 200, json: { agents: [] } })
+  );
+
+  await page.route(`**/api/projects/${projectId}/commands*`, (route: Route) =>
+    route.fulfill({ status: 200, json: { commands: [] } })
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sleeping / waking project chat mocks
+// ---------------------------------------------------------------------------
+
+/** A project row with the fields the project chat route reads. */
+export function makeMockProject(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'proj-test-1',
+    name: 'Test Project',
+    repository: 'testuser/test-repo',
+    defaultBranch: 'main',
+    userId: 'user-test-1',
+    githubInstallationId: 'inst-1',
+    defaultVmSize: null,
+    defaultAgentType: null,
+    defaultProvider: null,
+    workspaceIdleTimeoutMs: null,
+    nodeIdleTimeoutMs: null,
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+    ...overrides,
+  };
+}
+
+/** The `SessionStateSnapshot` shape `routes/chat/wake-state.ts` returns for an idle session. */
+export function makeIdleSessionState(overrides: Record<string, unknown> = {}) {
+  return {
+    activity: 'idle',
+    activityAt: 0,
+    statusError: null,
+    currentPlan: null,
+    planUpdatedAt: null,
+    promptStartedAt: null,
+    agentType: null,
+    lastStopReason: null,
+    runtimeWorkState: null,
+    runtimeWorkCount: null,
+    runtimeWorkSource: null,
+    runtimeWorkUpdatedAt: null,
+    runtimeWorkProgressAt: null,
+    recoveryStatus: null,
+    wakePhase: null,
+    ...overrides,
+  };
+}
+
+export interface SleepingChatMockOptions {
+  user: unknown;
+  project: unknown;
+  session: { id: string } & Record<string, unknown>;
+  messages: unknown[];
+  /** Session detail `state`; see `makeIdleSessionState`. */
+  state: Record<string, unknown>;
+  /** The session's OWN task row, the one `useProvisioningTracker` reads. */
+  ownTask: Record<string, unknown>;
+}
+
+/**
+ * Registers every API route the project chat page touches when it opens a
+ * sleeping or waking session. Shared by `wake-progress-audit.spec.ts` and
+ * `sleeping-session-audit.spec.ts`, which differ only in the session `state`
+ * and the own-task shape they feed in.
+ *
+ * Envelope shapes matter: the client reads `.sessions`, `.items`, `.commands`
+ * and `.messages`. Returning a bare array crashes the app into its
+ * ErrorBoundary, where an absence-only assertion would still pass.
+ */
+export async function setupSleepingChatMocks(page: Page, options: SleepingChatMockOptions) {
+  const { user, project, session, messages, state, ownTask } = options;
+  await page.route('**/api/**', async (route: Route) => {
+    const path = new URL(route.request().url()).pathname;
+    const respond = (status: number, body: unknown) =>
+      route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+
+    if (path.includes('/api/auth/')) return respond(200, user);
+    if (path.startsWith('/api/notifications/preferences')) return respond(200, {});
+    if (path.startsWith('/api/notifications')) {
+      return respond(200, { notifications: [], unreadCount: 0 });
+    }
+    if (path.startsWith('/api/credentials')) return respond(200, []);
+    if (path.startsWith('/api/provider-catalog')) return respond(200, { catalogs: [] });
+    if (path.startsWith('/api/github/installations')) return respond(200, []);
+    if (path.startsWith('/api/report-issue/config')) return respond(200, { enabled: false });
+    if (path === '/api/trial-status') return respond(200, {});
+    if (path === '/api/agents') return respond(200, []);
+
+    const projectMatch = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
+    if (projectMatch) {
+      const subPath = projectMatch[2] || '';
+      if (subPath === '/sessions') return respond(200, { sessions: [session], total: 1 });
+      if (subPath === '/agent-profiles') return respond(200, { items: [] });
+      if (subPath === '/cached-commands') return respond(200, { commands: [] });
+      if (subPath === '/credential-attribution-health') return respond(200, {});
+      if (subPath.match(/^\/sessions\/[^/]+$/)) {
+        return respond(200, { session, messages, hasMore: false, state });
+      }
+      if (subPath.match(/\/sessions\/[^/]+\/messages/)) {
+        return respond(200, { messages, hasMore: false });
+      }
+      if (subPath === '/tasks') return respond(200, []);
+      if (subPath.match(/^\/tasks\/[^/]+$/)) return respond(200, ownTask);
+      if (subPath === '/agents') return respond(200, []);
+      if (subPath === '/skills') return respond(200, []);
+      if (subPath === '') return respond(200, project);
+      return respond(200, {});
+    }
+
+    if (path === '/api/projects') return respond(200, [project]);
+    return respond(200, {});
+  });
+}
+
+/**
+ * Resolves `'fetched'` when the page fetches the session's own task (the path
+ * that restores ProvisioningIndicator) and `'not-fetched'` once a bounded window
+ * passes without it. Await this before asserting the provisioning block is
+ * absent, so the assertion observes the restore effect's outcome instead of a
+ * moment before it ran.
+ */
+export function awaitOwnTaskFetchOutcome(
+  page: Page,
+  taskId: string,
+  windowMs = 1_500
+): Promise<'fetched' | 'not-fetched'> {
+  return page
+    .waitForResponse((response) => new URL(response.url()).pathname.endsWith(`/tasks/${taskId}`), {
+      timeout: windowMs,
+    })
+    .then(
+      () => 'fetched' as const,
+      () => 'not-fetched' as const
+    );
 }

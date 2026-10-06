@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,6 +59,27 @@ func TestGrep_IncludeFilter(t *testing.T) {
 	}
 	if strings.Contains(result, "main.ts") {
 		t.Errorf("should not include main.ts with *.go filter, got: %s", result)
+	}
+}
+
+func TestGrep_IncludeFilterMatchesRelativePath(t *testing.T) {
+	dir := tmpDir(t)
+	writeTestFile(t, dir, "src/app/main.go", "needle\n")
+	writeTestFile(t, dir, "src/app/main.ts", "needle\n")
+
+	tool := &Grep{WorkDir: dir}
+	result, err := tool.Execute(context.Background(), map[string]any{
+		"pattern": "needle",
+		"include": "src/**/*.go",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "src/app/main.go") {
+		t.Fatalf("expected Go match, got:\n%s", result)
+	}
+	if strings.Contains(result, "main.ts") {
+		t.Fatalf("unexpected TypeScript match:\n%s", result)
 	}
 }
 
@@ -165,5 +187,163 @@ func TestGrep_AbsolutePathRejected(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for absolute path")
+	}
+}
+
+func TestGrep_RejectsSymlinkSearchRoot(t *testing.T) {
+	dir := tmpDir(t)
+	outside := t.TempDir()
+	writeTestFile(t, outside, "secret.txt", "secret\n")
+	if err := os.Symlink(outside, filepath.Join(dir, "linked")); err != nil {
+		t.Fatal(err)
+	}
+
+	tool := &Grep{WorkDir: dir}
+	result, err := tool.Execute(context.Background(), map[string]any{
+		"pattern": "secret",
+		"path":    "linked",
+	})
+	if err == nil {
+		t.Fatal("expected symlink root rejection")
+	}
+	if strings.Contains(result, "secret") {
+		t.Fatalf("leaked external content: %q", result)
+	}
+}
+
+func TestGrep_SkipsSymlinkFilesAndDirectories(t *testing.T) {
+	dir := tmpDir(t)
+	outside := t.TempDir()
+	writeTestFile(t, outside, "secret.txt", "secret\n")
+	writeTestFile(t, dir, "real.txt", "secret\n")
+	if err := os.Symlink(filepath.Join(outside, "secret.txt"), filepath.Join(dir, "link.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "linked-dir")); err != nil {
+		t.Fatal(err)
+	}
+
+	tool := &Grep{WorkDir: dir}
+	result, err := tool.Execute(context.Background(), map[string]any{
+		"pattern": "secret",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(result, "link.txt") || strings.Contains(result, "linked-dir") || strings.Contains(result, "secret.txt") {
+		t.Fatalf("grep should skip symlinks, got:\n%s", result)
+	}
+	if !strings.Contains(result, "real.txt") {
+		t.Fatalf("expected real.txt match, got:\n%s", result)
+	}
+}
+
+func TestGrep_DeterministicOrdering(t *testing.T) {
+	dir := tmpDir(t)
+	writeTestFile(t, dir, "z.txt", "needle\n")
+	writeTestFile(t, dir, "a.txt", "needle\n")
+	writeTestFile(t, dir, "m.txt", "needle\n")
+
+	tool := &Grep{WorkDir: dir}
+	result, err := tool.Execute(context.Background(), map[string]any{
+		"pattern": "needle",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := strings.Split(result, "\n")
+	want := []string{"a.txt:1:needle", "m.txt:1:needle", "z.txt:1:needle"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("result order = %v, want prefix %v", got, want)
+		}
+	}
+}
+
+func TestGrep_RejectsNegativeContextLines(t *testing.T) {
+	dir := tmpDir(t)
+	writeTestFile(t, dir, "main.go", "needle\n")
+
+	tool := &Grep{WorkDir: dir}
+	_, err := tool.Execute(context.Background(), map[string]any{
+		"pattern":       "needle",
+		"context_lines": float64(-1),
+	})
+	if err == nil {
+		t.Fatal("expected error for negative context_lines")
+	}
+}
+
+func TestGrep_RejectsNonIntegerContextLines(t *testing.T) {
+	dir := tmpDir(t)
+	writeTestFile(t, dir, "main.go", "needle\n")
+
+	tool := &Grep{WorkDir: dir}
+	_, err := tool.Execute(context.Background(), map[string]any{
+		"pattern":       "needle",
+		"context_lines": float64(1.5),
+	})
+	if err == nil {
+		t.Fatal("expected error for non-integer context_lines")
+	}
+}
+
+func TestGrep_RejectsInvalidInclude(t *testing.T) {
+	dir := tmpDir(t)
+	tool := &Grep{WorkDir: dir}
+	_, err := tool.Execute(context.Background(), map[string]any{
+		"pattern": "needle",
+		"include": "../*.go",
+	})
+	if err == nil {
+		t.Fatal("expected error for invalid include")
+	}
+}
+
+func TestGrep_RejectsNormalizedTraversalInclude(t *testing.T) {
+	dir := tmpDir(t)
+	tool := &Grep{WorkDir: dir}
+	_, err := tool.Execute(context.Background(), map[string]any{
+		"pattern": "needle",
+		"include": "src/../*.go",
+	})
+	if err == nil {
+		t.Fatal("expected error for traversal include")
+	}
+}
+
+func TestGrep_ReturnsScannerErrors(t *testing.T) {
+	dir := tmpDir(t)
+	writeTestFile(t, dir, "long.txt", strings.Repeat("a", MaxGrepLineBytes+1))
+
+	tool := &Grep{WorkDir: dir}
+	_, err := tool.Execute(context.Background(), map[string]any{
+		"pattern": "a",
+	})
+	if err == nil {
+		t.Fatal("expected scanner error for long line")
+	}
+	if !strings.Contains(err.Error(), "scanning long.txt") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestGrep_TruncatesMatches(t *testing.T) {
+	dir := tmpDir(t)
+	var content strings.Builder
+	for i := 0; i < MaxGrepMatches+10; i++ {
+		fmt.Fprintf(&content, "needle %03d\n", i)
+	}
+	writeTestFile(t, dir, "many.txt", content.String())
+
+	tool := &Grep{WorkDir: dir}
+	result, err := tool.Execute(context.Background(), map[string]any{
+		"pattern": "needle",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "truncated: showing first") {
+		t.Fatalf("expected truncation message")
 	}
 }

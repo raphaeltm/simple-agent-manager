@@ -3,10 +3,13 @@
  *
  * Queries D1 tasks table with ownership verification via projects join.
  */
+import { parseCompletionEvidenceJson } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../../db/schema';
+import type { Env } from '../../../env';
+import { getLatestAssistantMessageForTask } from '../../../services/task-final-assistant-message';
 import type { AnthropicToolDef, ToolContext } from '../types';
 
 export const getTaskDetailsDef: AnthropicToolDef = {
@@ -28,13 +31,14 @@ export const getTaskDetailsDef: AnthropicToolDef = {
 
 export async function getTaskDetails(
   input: { taskId: string },
-  ctx: ToolContext,
+  ctx: ToolContext
 ): Promise<unknown> {
   if (!input.taskId?.trim()) {
     return { error: 'taskId is required.' };
   }
 
-  const db = drizzle(ctx.env.DATABASE as D1Database, { schema });
+  const env = ctx.env as unknown as Env;
+  const db = drizzle(env.DATABASE as D1Database, { schema });
 
   // Join tasks with projects to verify the user owns the project
   const rows = await db
@@ -47,29 +51,32 @@ export async function getTaskDetails(
       outputBranch: schema.tasks.outputBranch,
       outputPrUrl: schema.tasks.outputPrUrl,
       outputSummary: schema.tasks.outputSummary,
+      completionEvidence: schema.tasks.completionEvidence,
       errorMessage: schema.tasks.errorMessage,
       executionStep: schema.tasks.executionStep,
       createdAt: schema.tasks.createdAt,
       updatedAt: schema.tasks.updatedAt,
       startedAt: schema.tasks.startedAt,
       completedAt: schema.tasks.completedAt,
+      chatSessionId: schema.tasks.chatSessionId,
       projectId: schema.tasks.projectId,
       projectName: schema.projects.name,
     })
     .from(schema.tasks)
     .innerJoin(schema.projects, eq(schema.tasks.projectId, schema.projects.id))
-    .where(
-      and(
-        eq(schema.tasks.id, input.taskId.trim()),
-        eq(schema.projects.userId, ctx.userId),
-      ),
-    )
+    .where(and(eq(schema.tasks.id, input.taskId.trim()), eq(schema.projects.userId, ctx.userId)))
     .limit(1);
 
   const task = rows[0];
   if (!task) {
     return { error: 'Task not found or not owned by you.' };
   }
+
+  const finalAssistantMessage = await getLatestAssistantMessageForTask(
+    env,
+    task.projectId,
+    task.chatSessionId
+  );
 
   return {
     id: task.id,
@@ -81,6 +88,8 @@ export async function getTaskDetails(
     outputBranch: task.outputBranch,
     outputPrUrl: task.outputPrUrl,
     outputSummary: task.outputSummary,
+    completionEvidence: parseCompletionEvidenceJson(task.completionEvidence ?? null),
+    finalAssistantMessage,
     errorMessage: task.errorMessage,
     projectId: task.projectId,
     projectName: task.projectName,

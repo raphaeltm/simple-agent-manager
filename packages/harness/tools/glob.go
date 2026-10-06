@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -29,46 +31,48 @@ func (t *Glob) Schema() map[string]any {
 }
 
 func (t *Glob) Execute(_ context.Context, params map[string]any) (string, error) {
-	patternVal, ok := params["pattern"]
-	if !ok {
-		return "", fmt.Errorf("missing required parameter: pattern")
+	pattern, err := requireString(params, "pattern")
+	if err != nil {
+		return "", err
 	}
-	pattern, ok := patternVal.(string)
-	if !ok {
-		return "", fmt.Errorf("parameter 'pattern' must be a string")
-	}
-
-	// Reject absolute patterns
-	if filepath.IsAbs(pattern) {
-		return "", fmt.Errorf("path %q escapes working directory", pattern)
-	}
-	// Reject traversal in pattern
-	if strings.Contains(pattern, "..") {
-		return "", fmt.Errorf("path %q escapes working directory", pattern)
+	pattern, err = validateRelativePattern(pattern)
+	if err != nil {
+		return "", err
 	}
 
-	const maxResults = 1000
+	boundary, err := newWorkspaceBoundary(t.WorkDir)
+	if err != nil {
+		return "", err
+	}
+
 	var matches []string
 
-	err := filepath.WalkDir(t.WorkDir, func(path string, d fs.DirEntry, walkErr error) error {
+	err = filepath.WalkDir(boundary.root, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
-			return nil
+			return fmt.Errorf("walking %s: %w", path, walkErr)
 		}
-		if d.IsDir() {
-			name := d.Name()
-			if name == ".git" || name == "node_modules" || name == "vendor" {
+		if d.Type()&os.ModeSymlink != 0 {
+			if d.IsDir() {
 				return fs.SkipDir
 			}
 			return nil
 		}
-		if len(matches) >= maxResults {
+		if d.IsDir() {
+			name := d.Name()
+			if _, skip := skippedSearchDirs[name]; skip {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if len(matches) >= MaxGlobResults {
 			return fs.SkipAll
 		}
 
-		relPath, err := filepath.Rel(t.WorkDir, path)
+		relPath, err := filepath.Rel(boundary.root, path)
 		if err != nil {
-			return nil
+			return err
 		}
+		relPath = filepath.ToSlash(relPath)
 
 		if globMatch(pattern, relPath) {
 			matches = append(matches, relPath)
@@ -83,69 +87,42 @@ func (t *Glob) Execute(_ context.Context, params map[string]any) (string, error)
 		return "No files matched.", nil
 	}
 
+	sort.Strings(matches)
 	output := strings.Join(matches, "\n")
-	if len(matches) >= maxResults {
-		output += fmt.Sprintf("\n\n(truncated: showing first %d results)", maxResults)
+	if len(matches) >= MaxGlobResults {
+		output += fmt.Sprintf("\n\n(truncated: showing first %d results)", MaxGlobResults)
 	}
 	return output, nil
 }
 
 // globMatch checks whether a relative path matches a glob pattern supporting "**".
 func globMatch(pattern, path string) bool {
-	// Normalize separators for matching
 	pattern = filepath.ToSlash(pattern)
 	path = filepath.ToSlash(path)
-
-	return doubleStarMatch(pattern, path)
+	return globSegments(strings.Split(pattern, "/"), strings.Split(path, "/"))
 }
 
-// doubleStarMatch implements glob matching with ** support.
-func doubleStarMatch(pattern, name string) bool {
-	// Split pattern by "**" segments
-	parts := strings.Split(pattern, "**")
-
-	if len(parts) == 1 {
-		// No ** in pattern, use standard match
-		ok, _ := filepath.Match(pattern, name)
-		return ok
+func globSegments(patternParts, pathParts []string) bool {
+	if len(patternParts) == 0 {
+		return len(pathParts) == 0
 	}
-
-	// Handle prefix before first **
-	prefix := parts[0]
-	if prefix != "" {
-		prefix = strings.TrimSuffix(prefix, "/")
-		if prefix != "" && !hasPathPrefix(name, prefix) {
-			return false
+	if patternParts[0] == "**" {
+		if globSegments(patternParts[1:], pathParts) {
+			return true
 		}
-		if prefix != "" {
-			name = name[len(prefix):]
-			name = strings.TrimPrefix(name, "/")
-		}
-	}
-
-	// Handle suffix after last **
-	suffix := parts[len(parts)-1]
-	if suffix != "" {
-		suffix = strings.TrimPrefix(suffix, "/")
-		if suffix != "" {
-			// The suffix is a glob pattern for the filename
-			ok, _ := filepath.Match(suffix, filepath.Base(name))
-			if !ok {
-				// Also try matching against the full remaining path
-				ok, _ = filepath.Match(suffix, name)
+		for i := range pathParts {
+			if globSegments(patternParts[1:], pathParts[i+1:]) {
+				return true
 			}
-			return ok
 		}
+		return false
 	}
-
-	// Pattern like "**" alone matches everything
-	return true
-}
-
-// hasPathPrefix checks if path starts with the given directory prefix.
-func hasPathPrefix(path, prefix string) bool {
-	if path == prefix {
-		return true
+	if len(pathParts) == 0 {
+		return false
 	}
-	return strings.HasPrefix(path, prefix+"/")
+	ok, err := filepath.Match(patternParts[0], pathParts[0])
+	if err != nil || !ok {
+		return false
+	}
+	return globSegments(patternParts[1:], pathParts[1:])
 }

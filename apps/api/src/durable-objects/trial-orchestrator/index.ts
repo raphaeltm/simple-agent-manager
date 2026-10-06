@@ -23,7 +23,7 @@
  * On permanent failure: emit trial.error + mark DO completed.
  * On overall timeout: emit trial.error with a timeout code.
  *
- * See: tasks/active/2026-04-19-trial-orchestrator-wire-up.md for full spec.
+ * See: tasks/archive/2026-04-19-trial-orchestrator-wire-up.md for full spec.
  */
 import {
   DEFAULT_TRIAL_ORCHESTRATOR_AGENT_READY_TIMEOUT_MS,
@@ -40,6 +40,7 @@ import { DurableObject } from 'cloudflare:workers';
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { deferAlarmWhenDisabled } from '../../services/operational-kill-switch';
 import { computeBackoffMs, isTransientError, parseEnvInt, safeEmitTrialEvent } from './helpers';
 import {
   handleDiscoveryAgentStart,
@@ -157,6 +158,8 @@ export class TrialOrchestrator extends DurableObject<Env> {
   // =========================================================================
 
   async alarm(): Promise<void> {
+    if (await deferAlarmWhenDisabled(this.env, this.ctx.storage, 'TrialOrchestrator')) return;
+
     const state = await this.getState();
     log.info('trial_orchestrator_do.alarm.enter', {
       trialId: state?.trialId ?? null,

@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face {
+    font-family: 'Chillax';
+    src: url('./assets/Chillax-Variable.woff2') format('woff2');
+    font-weight: 200 700;
+  }
+  :root {
+    --bg: #070d0b;
+    --fg: #e6f2ee;
+    --muted: #9fb7ae;
+    --dim: #6b8a7f;
+    --accent: #16a34a;
+    --accent-strong: #22c55e;
+    --font-display: 'Chillax', system-ui, sans-serif;
+    --font-body: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    --font-mono: 'SF Mono', 'Fira Code', Consolas, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1080px; height: 1920px;
+    background: var(--bg); color: var(--fg);
+    font-family: var(--font-body);
+    overflow: hidden; position: relative;
+  }
+  .hero { position: absolute; inset: 0; }
+  .hero img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 45%; }
+  .hero::after {
+    content: ''; position: absolute; inset: 0;
+    background:
+      linear-gradient(180deg, rgba(7,13,11,0.95) 0%, rgba(7,13,11,0.82) 13%, rgba(7,13,11,0.5) 26%, rgba(7,13,11,0.08) 40%, rgba(7,13,11,0.14) 54%, rgba(7,13,11,0.88) 72%, rgba(7,13,11,0.97) 100%);
+  }
+  .content { position: absolute; inset: 0; padding: 72px 64px 56px; display: flex; flex-direction: column; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 9px;
+    font-family: var(--font-mono); font-size: 17px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted);
+    padding: 9px 20px;
+    background: rgba(19,32,29,0.5); backdrop-filter: blur(14px);
+    border: 1px solid rgba(255,255,255,0.1); border-radius: 100px;
+    align-self: flex-start; margin-bottom: 30px;
+  }
+  .badge-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-strong); box-shadow: 0 0 10px var(--accent-strong); }
+  h1 {
+    font-family: var(--font-display); font-size: 72px; font-weight: 600;
+    line-height: 1.08; letter-spacing: -0.02em; max-width: 900px;
+    text-shadow: 0 2px 28px rgba(7,13,11,0.65);
+  }
+  h1 .grad {
+    background: linear-gradient(135deg, #22c55e 0%, #4ade80 100%);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .sub {
+    margin-top: 22px; font-size: 26px; color: var(--muted); max-width: 760px; line-height: 1.5;
+    text-shadow: 0 1px 14px rgba(7,13,11,0.85);
+  }
+  .sub b { color: var(--fg); }
+
+  .maprow {
+    margin-top: auto; margin-bottom: 26px;
+    display: flex; align-items: flex-end; gap: 20px;
+  }
+  .map-inset {
+    width: 250px; height: 250px; border-radius: 20px; overflow: hidden; flex: none;
+    border: 1px solid rgba(255,255,255,0.16);
+    box-shadow: 0 16px 48px rgba(0,0,0,0.65), 0 0 30px rgba(34,197,94,0.14);
+  }
+  .map-inset img { width: 375px; height: 375px; object-fit: cover; margin: -62px 0 0 -62px; }
+  .stats {
+    flex: 1;
+    background: rgba(11,17,16,0.6); backdrop-filter: blur(18px);
+    border: 1px solid rgba(255,255,255,0.1); border-radius: 20px;
+    padding: 28px 32px;
+  }
+  .stats .line1 { font-family: var(--font-display); font-weight: 600; font-size: 36px; color: var(--accent-strong); }
+  .stats .line2 { font-size: 22px; color: var(--muted); margin-top: 8px; line-height: 1.45; }
+  .stats .line2 b { color: var(--fg); }
+
+  .stops { display: flex; flex-direction: column; gap: 16px; position: relative; }
+  .stops::before {
+    content: ''; position: absolute; left: 21px; top: 26px; bottom: 26px;
+    width: 2.5px;
+    background: linear-gradient(180deg, rgba(34,197,94,0.75) 0%, rgba(34,197,94,0.15) 100%);
+  }
+  .stop {
+    display: flex; align-items: center; gap: 20px;
+  }
+  .stop-n {
+    flex: none; width: 44px; height: 44px; border-radius: 50%;
+    background: var(--accent); border: 3px solid var(--accent-strong);
+    box-shadow: 0 0 18px rgba(34,197,94,0.55);
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-display); font-weight: 600; font-size: 21px;
+    position: relative; z-index: 1;
+  }
+  .stop-card {
+    flex: 1;
+    background: rgba(11,17,16,0.62); backdrop-filter: blur(18px);
+    border: 1px solid rgba(255,255,255,0.1); border-radius: 16px;
+    padding: 20px 26px;
+  }
+  .stop-meta {
+    font-family: var(--font-mono); font-size: 16.5px; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--accent-strong); margin-bottom: 6px;
+  }
+  .stop-text { font-size: 22.5px; color: var(--muted); line-height: 1.4; }
+  .stop-text b { color: var(--fg); font-weight: 600; }
+
+  .foot {
+    display: flex; align-items: center; justify-content: center; gap: 14px;
+    margin-top: 34px;
+  }
+  .foot img { width: 40px; height: 40px; }
+  .wordmark { font-family: var(--font-display); font-weight: 600; font-size: 27px; }
+  .foot .url { font-family: var(--font-mono); font-size: 17px; color: var(--dim); margin-left: 6px; }
+</style>
+</head>
+<body>
+  <div class="hero"><img src="./assets/20260704_164644.jpg"></div>
+  <div class="content">
+    <div class="badge"><span class="badge-dot"></span>Field notes &middot; Paris &middot; Jul 4</div>
+    <h1><span class="grad">4 pull requests,</span><br>shipped on foot</h1>
+    <div class="sub">While I walked across Paris, my <b>SAM agents</b> researched, coded, reviewed, and deployed — each in its own cloud sandbox.</div>
+    <div class="maprow">
+      <div class="map-inset"><img src="./assets/map.png"></div>
+      <div class="stats">
+        <div class="line1">4 PRs merged &middot; 0 desks used</div>
+        <div class="line2">One afternoon, <b>6 agents</b>, a phone in my pocket, and the Seine for a status bar.</div>
+      </div>
+    </div>
+    <div class="stops">
+      <div class="stop">
+        <div class="stop-n">1</div>
+        <div class="stop-card">
+          <div class="stop-meta">13:12 &middot; Pont Neuf</div>
+          <div class="stop-text">Kicked off agents on <b>chat performance</b> — full-conversation loading &amp; timeline jumps</div>
+        </div>
+      </div>
+      <div class="stop">
+        <div class="stop-n">2</div>
+        <div class="stop-card">
+          <div class="stop-meta">14:19 &middot; Port de la Rap&eacute;e</div>
+          <div class="stop-text">Agents <b>hunting a flaky CI test</b> and fixing message-history loading</div>
+        </div>
+      </div>
+      <div class="stop">
+        <div class="stop-n">3</div>
+        <div class="stop-card">
+          <div class="stop-meta">15:25 &middot; Jardin des Plantes</div>
+          <div class="stop-text"><b>3 agents in parallel</b> building project-sharing auth, wave by wave</div>
+        </div>
+      </div>
+      <div class="stop">
+        <div class="stop-n">4</div>
+        <div class="stop-card">
+          <div class="stop-meta">16:46 &middot; Coul&eacute;e Verte</div>
+          <div class="stop-text">Watched the <b>production deploy go green</b> from a rose trellis</div>
+        </div>
+      </div>
+    </div>
+    <div class="foot">
+      <img src="./assets/favicon.png">
+      <span class="wordmark">SAM</span>
+      <span class="url">simple-agent-manager.org</span>
+    </div>
+  </div>
+</body>
+</html>

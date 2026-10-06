@@ -7,8 +7,14 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { getUserId } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
-import { requireOwnedProject } from '../../middleware/project-auth';
+import { requireProjectAccess } from '../../middleware/project-auth';
+import {
+  contentDispositionFilename,
+  INERT_DOCUMENT_CSP,
+  isActiveContentType,
+} from '../../services/file-serving-policy';
 import { signTerminalToken } from '../../services/jwt';
+import { fetchNodeAgent } from '../../services/node-agent';
 import * as projectDataService from '../../services/project-data';
 import { normalizeFileProxyPath } from './_helpers';
 
@@ -39,12 +45,6 @@ const FORWARDED_RESPONSE_HEADERS = [
   'Last-Modified',
 ];
 
-/** Additional headers forwarded for raw binary file responses (security headers set by VM agent). */
-const RAW_FILE_EXTRA_HEADERS = [
-  'Content-Security-Policy',
-  'X-Content-Type-Options',
-];
-
 /**
  * Resolve workspace from a chat session and build the VM agent URL + token.
  * Looks up the workspace by chatSessionId in D1 (workspaces table).
@@ -59,7 +59,7 @@ async function resolveSessionWorkspace(
   const db = drizzle(env.DATABASE, { schema });
 
   // Verify project ownership
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectAccess(db, projectId, userId);
 
   // Strategy 1: Find workspace by chatSessionId in D1 (canonical path)
   const workspaces = await db
@@ -146,7 +146,7 @@ async function resolveSessionWorkspace(
   const workspaceUrl = `${protocol}://${workspace.nodeId.toLowerCase()}.vm.${env.BASE_DOMAIN}:${port}`;
   const { token } = await signTerminalToken(userId, workspace.id, env);
 
-  return { workspaceUrl, workspaceId: workspace.id, token };
+  return { workspaceUrl, workspaceId: workspace.id, nodeId: workspace.nodeId, token };
 }
 
 /**
@@ -155,6 +155,7 @@ async function resolveSessionWorkspace(
  */
 async function proxyToVmAgent(
   env: Env,
+  nodeId: string,
   workspaceUrl: string,
   workspaceId: string,
   token: string,
@@ -169,7 +170,7 @@ async function proxyToVmAgent(
 
   let res: Response;
   try {
-    res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+    res = await fetchNodeAgent(nodeId, env, url, {}, timeoutMs);
   } catch (fetchErr) {
     // Network error, DNS failure, or timeout — VM agent is completely unreachable
     const errMsg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
@@ -264,14 +265,14 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/files/find', async (c) => {
   const projectId = c.req.param('id');
   const sessionId = c.req.param('sessionId');
 
-  const { workspaceUrl, workspaceId, token } = await resolveSessionWorkspace(
+  const { workspaceUrl, workspaceId, nodeId, token } = await resolveSessionWorkspace(
     c.env,
     projectId,
     sessionId,
     userId
   );
 
-  return proxyToVmAgent(c.env, workspaceUrl, workspaceId, token, 'files/find', new URLSearchParams());
+  return proxyToVmAgent(c.env, nodeId, workspaceUrl, workspaceId, token, 'files/find', new URLSearchParams());
 });
 
 /** GET /:id/sessions/:sessionId/files/list — Proxy directory listing */
@@ -280,7 +281,7 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/files/list', async (c) => {
   const projectId = c.req.param('id');
   const sessionId = c.req.param('sessionId');
 
-  const { workspaceUrl, workspaceId, token } = await resolveSessionWorkspace(
+  const { workspaceUrl, workspaceId, nodeId, token } = await resolveSessionWorkspace(
     c.env,
     projectId,
     sessionId,
@@ -291,7 +292,7 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/files/list', async (c) => {
   const rawPath = c.req.query('path');
   if (rawPath) params.set('path', normalizeFileProxyPath(rawPath));
 
-  return proxyToVmAgent(c.env, workspaceUrl, workspaceId, token, 'files/list', params);
+  return proxyToVmAgent(c.env, nodeId, workspaceUrl, workspaceId, token, 'files/list', params);
 });
 
 /** GET /:id/sessions/:sessionId/files/view — Proxy file content (via git/file on VM agent) */
@@ -300,7 +301,7 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/files/view', async (c) => {
   const projectId = c.req.param('id');
   const sessionId = c.req.param('sessionId');
 
-  const { workspaceUrl, workspaceId, token } = await resolveSessionWorkspace(
+  const { workspaceUrl, workspaceId, nodeId, token } = await resolveSessionWorkspace(
     c.env,
     projectId,
     sessionId,
@@ -311,7 +312,7 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/files/view', async (c) => {
   const path = requireSafePath(c.req.query('path'));
   params.set('path', path);
 
-  return proxyToVmAgent(c.env, workspaceUrl, workspaceId, token, 'git/file', params);
+  return proxyToVmAgent(c.env, nodeId, workspaceUrl, workspaceId, token, 'git/file', params);
 });
 
 /** GET /:id/sessions/:sessionId/git/status — Proxy git status */
@@ -320,14 +321,14 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/git/status', async (c) => {
   const projectId = c.req.param('id');
   const sessionId = c.req.param('sessionId');
 
-  const { workspaceUrl, workspaceId, token } = await resolveSessionWorkspace(
+  const { workspaceUrl, workspaceId, nodeId, token } = await resolveSessionWorkspace(
     c.env,
     projectId,
     sessionId,
     userId
   );
 
-  return proxyToVmAgent(c.env, workspaceUrl, workspaceId, token, 'git/status', new URLSearchParams());
+  return proxyToVmAgent(c.env, nodeId, workspaceUrl, workspaceId, token, 'git/status', new URLSearchParams());
 });
 
 /** GET /:id/sessions/:sessionId/git/diff — Proxy git diff for a file */
@@ -336,7 +337,7 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/git/diff', async (c) => {
   const projectId = c.req.param('id');
   const sessionId = c.req.param('sessionId');
 
-  const { workspaceUrl, workspaceId, token } = await resolveSessionWorkspace(
+  const { workspaceUrl, workspaceId, nodeId, token } = await resolveSessionWorkspace(
     c.env,
     projectId,
     sessionId,
@@ -349,7 +350,7 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/git/diff', async (c) => {
   const staged = c.req.query('staged');
   if (staged === 'true' || staged === '1') params.set('staged', staged);
 
-  return proxyToVmAgent(c.env, workspaceUrl, workspaceId, token, 'git/diff', params);
+  return proxyToVmAgent(c.env, nodeId, workspaceUrl, workspaceId, token, 'git/diff', params);
 });
 
 /** GET /:id/sessions/:sessionId/files/raw — Proxy raw binary file content */
@@ -358,7 +359,7 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/files/raw', async (c) => {
   const projectId = c.req.param('id');
   const sessionId = c.req.param('sessionId');
 
-  const { workspaceUrl, workspaceId, token } = await resolveSessionWorkspace(
+  const { workspaceUrl, workspaceId, nodeId, token } = await resolveSessionWorkspace(
     c.env,
     projectId,
     sessionId,
@@ -382,10 +383,7 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/files/raw', async (c) => {
   const ifNoneMatch = c.req.header('If-None-Match');
   if (ifNoneMatch) fetchHeaders['If-None-Match'] = ifNoneMatch;
 
-  const res = await fetch(url, {
-    signal: AbortSignal.timeout(timeoutMs),
-    headers: fetchHeaders,
-  });
+  const res = await fetchNodeAgent(nodeId, c.env, url, { headers: fetchHeaders }, timeoutMs);
 
   if (!res.ok && res.status !== 304) {
     const text = await res.text();
@@ -419,9 +417,8 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/files/raw', async (c) => {
     throw errors.badRequest(`File too large for preview (${contentLength} bytes)`);
   }
 
-  // Forward safe response headers + security headers from VM agent
   const headers = new Headers();
-  for (const name of [...FORWARDED_RESPONSE_HEADERS, ...RAW_FILE_EXTRA_HEADERS]) {
+  for (const name of FORWARDED_RESPONSE_HEADERS) {
     const value = res.headers.get(name);
     if (value) headers.set(name, value);
   }
@@ -429,12 +426,16 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/files/raw', async (c) => {
     headers.set('Content-Type', 'application/octet-stream');
   }
 
-  // Enforce security headers independently at the proxy layer,
-  // regardless of what the VM agent sends.
+  // Security headers are the proxy's own, whatever the VM agent sends. The file
+  // may be agent-written HTML or SVG. The app only ever embeds these bytes as an
+  // <img>, which ignores Content-Disposition; opened directly on the API origin,
+  // active content downloads instead of rendering, and anything that does render
+  // stays inert.
   headers.set('X-Content-Type-Options', 'nosniff');
-  const ct = headers.get('Content-Type') ?? '';
-  if (ct.startsWith('image/svg')) {
-    headers.set('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'");
+  headers.set('Content-Security-Policy', INERT_DOCUMENT_CSP);
+  if (isActiveContentType(headers.get('Content-Type') ?? '')) {
+    const filename = contentDispositionFilename(path.split('/').pop() || 'file');
+    headers.set('Content-Disposition', `attachment; filename="${filename}"`);
   }
 
   return new Response(res.body, {
@@ -449,7 +450,7 @@ fileProxyRoutes.post('/:id/sessions/:sessionId/files/upload', async (c) => {
   const projectId = c.req.param('id');
   const sessionId = c.req.param('sessionId');
 
-  const { workspaceUrl, workspaceId, token } = await resolveSessionWorkspace(
+  const { workspaceUrl, workspaceId, nodeId, token } = await resolveSessionWorkspace(
     c.env,
     projectId,
     sessionId,
@@ -469,7 +470,7 @@ fileProxyRoutes.post('/:id/sessions/:sessionId/files/upload', async (c) => {
 
   const url = `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/files/upload?token=${encodeURIComponent(token)}`;
 
-  const res = await fetch(url, {
+  const res = await fetchNodeAgent(nodeId, c.env, url, {
     method: 'POST',
     headers: {
       'Content-Type': c.req.header('Content-Type') ?? 'multipart/form-data',
@@ -477,10 +478,9 @@ fileProxyRoutes.post('/:id/sessions/:sessionId/files/upload', async (c) => {
     body: c.req.raw.body
       ? createSizeLimitedStream(c.req.raw.body, maxBatchBytes + 1024 * 1024)
       : undefined,
-    signal: AbortSignal.timeout(timeoutMs),
     // @ts-expect-error duplex is required for streaming request bodies in fetch
     duplex: 'half',
-  });
+  }, timeoutMs);
 
   if (!res.ok) {
     const text = await res.text();
@@ -508,7 +508,7 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/files/download', async (c) => {
   const projectId = c.req.param('id');
   const sessionId = c.req.param('sessionId');
 
-  const { workspaceUrl, workspaceId, token } = await resolveSessionWorkspace(
+  const { workspaceUrl, workspaceId, nodeId, token } = await resolveSessionWorkspace(
     c.env,
     projectId,
     sessionId,
@@ -527,7 +527,7 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/files/download', async (c) => {
   const params = new URLSearchParams({ path: safePath, token });
   const url = `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/files/download?${params.toString()}`;
 
-  const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+  const res = await fetchNodeAgent(nodeId, c.env, url, {}, timeoutMs);
 
   if (!res.ok) {
     const text = await res.text();

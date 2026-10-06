@@ -45,11 +45,18 @@ type LogResponse struct {
 	HasMore    bool       `json:"hasMore"`
 }
 
+const (
+	defaultRetrievalLimit = 200
+	defaultMaxLimit       = 1000
+)
+
+var configuredLimits = loadLimitConfig()
+
 // DefaultLimit is the default number of log entries per page.
-var DefaultLimit = envInt("LOG_RETRIEVAL_DEFAULT_LIMIT", 200)
+var DefaultLimit = configuredLimits.defaultLimit
 
 // MaxLimit is the maximum number of log entries per page.
-var MaxLimit = envInt("LOG_RETRIEVAL_MAX_LIMIT", 1000)
+var MaxLimit = configuredLimits.maxLimit
 
 // CommandExecutor abstracts exec.Command for testing.
 type CommandExecutor func(ctx context.Context, name string, args ...string) *exec.Cmd
@@ -229,48 +236,7 @@ func (r *Reader) readJournalLogs(ctx context.Context, filter LogFilter, limit in
 	return entries, lastCursor, nil
 }
 
-// readDockerLogs reads Docker container logs from journald.
-func (r *Reader) readDockerLogs(ctx context.Context, filter LogFilter, limit int) ([]LogEntry, *string, error) {
-	ctx, cancel := context.WithTimeout(ctx, r.timeout)
-	defer cancel()
-
-	args := []string{
-		"--output=json",
-		"--no-pager",
-		"-n", strconv.Itoa(limit),
-		"--reverse",
-		// Filter to Docker container entries
-		"_TRANSPORT=journal",
-	}
-
-	if filter.Container != "" {
-		args = append(args, fmt.Sprintf("CONTAINER_NAME=%s", filter.Container))
-	} else {
-		// Match any entry that has CONTAINER_NAME set (Docker journald driver)
-		args = append(args, "CONTAINER_NAME")
-	}
-
-	if filter.Since != "" {
-		args = append(args, "--since", normalizeTimeArg(filter.Since))
-	}
-	if filter.Until != "" {
-		args = append(args, "--until", normalizeTimeArg(filter.Until))
-	}
-	if filter.Cursor != "" {
-		args = append(args, "--after-cursor", filter.Cursor)
-	}
-
-	cmd := r.exec(ctx, "journalctl", args...)
-	out, err := cmd.Output()
-	if err != nil {
-		// Docker logs via journald may not be available if Docker isn't using journald driver
-		return nil, nil, nil
-	}
-
-	entries, lastCursor := parseJournalJSON(string(out), "docker")
-	return entries, lastCursor, nil
-}
-
+// ListContainers returns running Docker containers visible to docker logs.
 // cloudInitTimestamp matches timestamps like "2026-02-23 15:30:00,123"
 var cloudInitTimestamp = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2},?\d*)`)
 
@@ -443,6 +409,15 @@ func parseJournalJSON(output, defaultSource string) ([]LogEntry, *string) {
 // Helper functions
 
 func clampLimit(limit int) int {
+	if MaxLimit <= 0 {
+		MaxLimit = defaultMaxLimit
+	}
+	if DefaultLimit <= 0 {
+		DefaultLimit = defaultRetrievalLimit
+	}
+	if DefaultLimit > MaxLimit {
+		DefaultLimit = MaxLimit
+	}
 	if limit <= 0 {
 		return DefaultLimit
 	}
@@ -644,11 +619,35 @@ func filterByTimeRange(entries []LogEntry, since, until string) []LogEntry {
 	return result
 }
 
-func envInt(key string, defaultVal int) int {
+type limitConfig struct {
+	defaultLimit int
+	maxLimit     int
+}
+
+func loadLimitConfig() limitConfig {
+	maxLimit := envPositiveInt("LOG_RETRIEVAL_MAX_LIMIT", defaultMaxLimit)
+	defaultLimit := envPositiveInt("LOG_RETRIEVAL_DEFAULT_LIMIT", defaultRetrievalLimit)
+	if defaultLimit > maxLimit {
+		defaultLimit = maxLimit
+	}
+	return limitConfig{
+		defaultLimit: defaultLimit,
+		maxLimit:     maxLimit,
+	}
+}
+
+func envPositiveInt(key string, defaultVal int) int {
+	if defaultVal <= 0 {
+		defaultVal = 1
+	}
 	if v := os.Getenv(key); v != "" {
-		if i, err := strconv.Atoi(v); err == nil {
+		if i, err := strconv.Atoi(v); err == nil && i > 0 {
 			return i
 		}
 	}
 	return defaultVal
+}
+
+func envInt(key string, defaultVal int) int {
+	return envPositiveInt(key, defaultVal)
 }

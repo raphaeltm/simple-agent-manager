@@ -11,6 +11,10 @@ describe('ATTENTION_TYPES — notification badge classification', () => {
     expect(ATTENTION_TYPES.has('error')).toBe(true);
   });
 
+  it('includes cron failures as attention-required', () => {
+    expect(ATTENTION_TYPES.has('cron_failure')).toBe(true);
+  });
+
   it('excludes task_complete from attention count', () => {
     expect(ATTENTION_TYPES.has('task_complete')).toBe(false);
   });
@@ -27,8 +31,8 @@ describe('ATTENTION_TYPES — notification badge classification', () => {
     expect(ATTENTION_TYPES.has('pr_created')).toBe(false);
   });
 
-  it('contains exactly 2 attention types', () => {
-    expect(ATTENTION_TYPES.size).toBe(2);
+  it('contains exactly 3 attention types', () => {
+    expect(ATTENTION_TYPES.size).toBe(3);
   });
 });
 
@@ -54,6 +58,7 @@ describe('notification badge count logic', () => {
     const notifications = [
       makeNotification('needs_input'),          // attention - unread
       makeNotification('error'),                // attention - unread
+      makeNotification('cron_failure'),         // attention - unread
       makeNotification('task_complete'),         // update - unread
       makeNotification('progress'),             // update - unread
       makeNotification('session_ended'),         // update - unread
@@ -64,8 +69,8 @@ describe('notification badge count logic', () => {
       (n) => ATTENTION_TYPES.has(n.type) && !n.readAt
     ).length;
 
-    // Badge should show 2 (needs_input + error), not 6 (all unread)
-    expect(attentionUnreadCount).toBe(2);
+    // Badge should show 3 attention items, not every unread update.
+    expect(attentionUnreadCount).toBe(3);
   });
 
   it('does not count read attention notifications', () => {
@@ -99,6 +104,7 @@ describe('notification badge count logic', () => {
     const notifications = [
       makeNotification('needs_input'),
       makeNotification('error'),
+      makeNotification('cron_failure'),
       makeNotification('task_complete'),
       makeNotification('progress'),
     ];
@@ -106,9 +112,13 @@ describe('notification badge count logic', () => {
     const attentionNotifs = notifications.filter((n) => ATTENTION_TYPES.has(n.type));
     const updateNotifs = notifications.filter((n) => !ATTENTION_TYPES.has(n.type));
 
-    expect(attentionNotifs).toHaveLength(2);
+    expect(attentionNotifs).toHaveLength(3);
     expect(updateNotifs).toHaveLength(2);
-    expect(attentionNotifs.map((n) => n.type)).toEqual(['needs_input', 'error']);
+    expect(attentionNotifs.map((n) => n.type)).toEqual([
+      'needs_input',
+      'error',
+      'cron_failure',
+    ]);
     expect(updateNotifs.map((n) => n.type)).toEqual(['task_complete', 'progress']);
   });
 });

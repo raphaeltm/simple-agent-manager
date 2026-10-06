@@ -50,8 +50,7 @@ export const UserMessageFade = memo(function UserMessageFade({
 
     // Use Array.from to handle surrogate pairs (emoji) correctly
     const chars = Array.from(text);
-    for (let i = 0; i < chars.length; i++) {
-      const ch = chars[i]!;
+    for (const [i, ch] of chars.entries()) {
       if (ch === '\n') {
         nodes.push(<br key={`br-${i}`} />);
       } else {
@@ -75,9 +74,5 @@ export const UserMessageFade = memo(function UserMessageFade({
     return nodes;
   }, [text, baseCharDelayMs, maxTotalMs, fadeDurationMs, prefersReducedMotion]);
 
-  return (
-    <span aria-label={text}>
-      {elements}
-    </span>
-  );
+  return <span aria-label={text}>{elements}</span>;
 });

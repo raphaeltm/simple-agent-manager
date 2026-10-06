@@ -1,10 +1,13 @@
-import type { WorkspaceResponse } from '@simple-agent-manager/shared';
 import { Alert, EmptyState,PageLayout, Select, SkeletonCard, Spinner } from '@simple-agent-manager/ui';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Monitor } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import { WorkspaceCard } from '../components/WorkspaceCard';
-import { deleteWorkspace,listWorkspaces, restartWorkspace, stopWorkspace } from '../lib/api';
+import { useQueryScope } from '../hooks/useQueryScope';
+import { deleteWorkspace, restartWorkspace, stopWorkspace } from '../lib/api';
+import { WORKSPACE_LIST_POLL_MS } from '../lib/poll-intervals';
+import { workspaceListQueryOptions, workspaceQueryKeys } from '../lib/query-options';
 
 const STATUS_FILTERS = [
   { value: '', label: 'All statuses' },
@@ -15,45 +18,30 @@ const STATUS_FILTERS = [
 ];
 
 export function Workspaces() {
-  const [workspaces, setWorkspaces] = useState<WorkspaceResponse[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const queryScope = useQueryScope();
   const [statusFilter, setStatusFilter] = useState('');
-  const hasLoadedRef = useRef(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const loadData = useCallback(async () => {
-    try {
-      setError(null);
-      if (hasLoadedRef.current) {
-        setIsRefreshing(true);
-      }
-      const data = await listWorkspaces(statusFilter || undefined);
-      setWorkspaces(data);
-      hasLoadedRef.current = true;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load workspaces');
-    } finally {
-      setLoading(false);
-      setIsRefreshing(false);
-    }
-  }, [statusFilter]);
+  const {
+    data: workspaces,
+    isLoading,
+    isFetching,
+    isError,
+    error: queryError,
+  } = useQuery({
+    ...workspaceListQueryOptions(queryScope, statusFilter || undefined),
+    enabled: Boolean(queryScope),
+    refetchInterval: WORKSPACE_LIST_POLL_MS > 0 ? WORKSPACE_LIST_POLL_MS : false,
+  });
 
-  useEffect(() => {
-    if (!hasLoadedRef.current) {
-      setLoading(true);
-    }
-    void loadData();
-    const interval = window.setInterval(() => {
-      void loadData();
-    }, 10000);
-    return () => window.clearInterval(interval);
-  }, [loadData]);
+  const invalidateWorkspaces = () =>
+    queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.all(queryScope) });
 
   const handleStop = async (id: string) => {
     try {
       await stopWorkspace(id);
-      void loadData();
+      void invalidateWorkspaces();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to stop workspace');
     }
@@ -62,7 +50,7 @@ export function Workspaces() {
   const handleRestart = async (id: string) => {
     try {
       await restartWorkspace(id);
-      void loadData();
+      void invalidateWorkspaces();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to restart workspace');
     }
@@ -71,14 +59,14 @@ export function Workspaces() {
   const handleDelete = async (id: string) => {
     try {
       await deleteWorkspace(id);
-      void loadData();
+      void invalidateWorkspaces();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete workspace');
     }
   };
 
   const sortedWorkspaces = useMemo(
-    () => [...workspaces].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+    () => [...(workspaces ?? [])].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
     [workspaces]
   );
 
@@ -87,7 +75,7 @@ export function Workspaces() {
       <div className="flex justify-between items-center mb-6 gap-3 flex-wrap">
         <p className="sam-type-secondary m-0 text-fg-muted flex items-center gap-2">
           All workspaces across all nodes.
-          {isRefreshing && <Spinner size="sm" />}
+          {isFetching && workspaces && <Spinner size="sm" />}
         </p>
         <div className="flex items-center gap-3">
           <Select
@@ -110,12 +98,23 @@ export function Workspaces() {
         </div>
       )}
 
-      {loading && workspaces.length === 0 ? (
+      {/* Keep the previously rendered list up while a filter change loads its own
+          query key — switching the status filter is a different key, so `isLoading`
+          is true even though there is perfectly good content on screen. Matches the
+          guard `Nodes.tsx` already uses. */}
+      {isLoading && sortedWorkspaces.length === 0 ? (
         <div role="status" aria-label="Loading workspaces" aria-busy="true" className="grid grid-cols-1 gap-3">
           {Array.from({ length: 3 }, (_, i) => (
             <SkeletonCard key={i} lines={2} />
           ))}
         </div>
+      ) : isError && sortedWorkspaces.length === 0 ? (
+        // Initial load failed with no cached data: surface the error instead of
+        // a misleading "No workspaces yet" empty state. A background refetch
+        // failure while stale data is present keeps the data mounted (below).
+        <Alert variant="error">
+          {(queryError instanceof Error && queryError.message) || 'Failed to load workspaces'}
+        </Alert>
       ) : sortedWorkspaces.length === 0 ? (
         <EmptyState
           icon={<Monitor size={48} />}

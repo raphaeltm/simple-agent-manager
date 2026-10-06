@@ -7,8 +7,14 @@
  * the correct user's Notification DO.
  */
 
-import type { CreateNotificationRequest } from '@simple-agent-manager/shared';
-import { type HumanInputCategory,MAX_NOTIFICATION_BODY_LENGTH, MAX_NOTIFICATION_TITLE_LENGTH, MAX_NOTIFICATION_TITLE_LENGTH_NEEDS_INPUT, NOTIFICATION_TYPE_URGENCY } from '@simple-agent-manager/shared';
+import type { CreateNotificationRequest, NotificationResponse } from '@simple-agent-manager/shared';
+import {
+  type HumanInputCategory,
+  MAX_NOTIFICATION_BODY_LENGTH,
+  MAX_NOTIFICATION_TITLE_LENGTH,
+  MAX_NOTIFICATION_TITLE_LENGTH_NEEDS_INPUT,
+  NOTIFICATION_TYPE_URGENCY,
+} from '@simple-agent-manager/shared';
 
 import type { NotificationService } from '../durable-objects/notification';
 import { log } from '../lib/logger';
@@ -26,7 +32,10 @@ export interface NotificationEnv {
  * Uses raw D1 queries instead of Drizzle because this service only receives
  * `{ DATABASE: D1Database }`, not the full Env needed for a Drizzle instance.
  */
-export async function getProjectName(env: { DATABASE: D1Database }, projectId: string): Promise<string> {
+export async function getProjectName(
+  env: { DATABASE: D1Database },
+  projectId: string
+): Promise<string> {
   try {
     const row = await env.DATABASE.prepare('SELECT name FROM projects WHERE id = ?')
       .bind(projectId)
@@ -86,9 +95,28 @@ export async function sendNotification(
   env: NotificationEnv,
   userId: string,
   notification: CreateNotificationRequest
-): Promise<void> {
+): Promise<NotificationResponse> {
   const stub = getStub(env, userId);
+  return stub.createNotification(userId, notification);
+}
+
+/**
+ * Send only after atomically claiming an expiring key in the per-user DO.
+ * KV may be used as a coarse outer cache, but this claim is the strict
+ * concurrency boundary for notification throttles.
+ */
+export async function sendNotificationOnce(
+  env: NotificationEnv,
+  userId: string,
+  dedupKey: string,
+  expiresAt: number,
+  notification: CreateNotificationRequest,
+  now: number = Date.now()
+): Promise<boolean> {
+  const stub = getStub(env, userId);
+  if (!(await stub.claimNotificationDeduplication(dedupKey, expiresAt, now))) return false;
   await stub.createNotification(userId, notification);
+  return true;
 }
 
 /**
@@ -232,13 +260,14 @@ export async function notifyNeedsInput(
     category?: HumanInputCategory | null;
     options?: string[] | null;
     sessionId?: string | null;
+    attentionMarkerId: string;
   }
-): Promise<void> {
+): Promise<NotificationResponse> {
   const categoryLabel = opts.category
     ? opts.category.charAt(0).toUpperCase() + opts.category.slice(1).replaceAll('_', ' ')
     : 'Input';
 
-  await sendNotification(env, userId, {
+  return sendNotification(env, userId, {
     type: 'needs_input',
     urgency: NOTIFICATION_TYPE_URGENCY.needs_input ?? 'high',
     title: `${categoryLabel} needed: ${truncate(opts.taskTitle, MAX_NOTIFICATION_TITLE_LENGTH_NEEDS_INPUT)}`,
@@ -251,6 +280,7 @@ export async function notifyNeedsInput(
       projectName: opts.projectName,
       category: opts.category ?? null,
       options: opts.options ?? null,
+      attentionMarkerId: opts.attentionMarkerId,
     },
   });
 }
@@ -292,7 +322,10 @@ export async function notifyProgress(
  * Look up a workspace's chat session ID from D1 by its workspace ID.
  * Returns null if the workspace is not found or has no linked session.
  */
-export async function getChatSessionId(env: { DATABASE: D1Database }, workspaceId: string): Promise<string | null> {
+export async function getChatSessionId(
+  env: { DATABASE: D1Database },
+  workspaceId: string
+): Promise<string | null> {
   try {
     const row = await env.DATABASE.prepare('SELECT chat_session_id FROM workspaces WHERE id = ?')
       .bind(workspaceId)

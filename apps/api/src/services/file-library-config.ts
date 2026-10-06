@@ -15,12 +15,25 @@ import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { errors } from '../middleware/error';
 
+export const DEFAULT_LIBRARY_PROJECT_DELETE_CLEANUP_BATCH_SIZE = 1000;
+const R2_LIST_MAX_PAGE_SIZE = 1000;
+
 export function getUploadMaxBytes(env: Env): number {
   return parsePositiveInt(env.LIBRARY_UPLOAD_MAX_BYTES, LIBRARY_DEFAULTS.UPLOAD_MAX_BYTES);
 }
 
 export function getMaxFilesPerProject(env: Env): number {
-  return parsePositiveInt(env.LIBRARY_MAX_FILES_PER_PROJECT, LIBRARY_DEFAULTS.MAX_FILES_PER_PROJECT);
+  return parsePositiveInt(
+    env.LIBRARY_MAX_FILES_PER_PROJECT,
+    LIBRARY_DEFAULTS.MAX_FILES_PER_PROJECT
+  );
+}
+
+export function getMaxTotalBytesPerProject(env: Env): number {
+  return parsePositiveInt(
+    env.LIBRARY_MAX_TOTAL_BYTES_PER_PROJECT,
+    LIBRARY_DEFAULTS.MAX_TOTAL_BYTES_PER_PROJECT
+  );
 }
 
 export function getMaxTagsPerFile(env: Env): number {
@@ -44,11 +57,34 @@ export function getKeyVersion(env: Env): string {
 }
 
 function getListDefaultPageSize(env: Env): number {
-  return parsePositiveInt(env.LIBRARY_LIST_DEFAULT_PAGE_SIZE, LIBRARY_DEFAULTS.LIST_DEFAULT_PAGE_SIZE);
+  return parsePositiveInt(
+    env.LIBRARY_LIST_DEFAULT_PAGE_SIZE,
+    LIBRARY_DEFAULTS.LIST_DEFAULT_PAGE_SIZE
+  );
 }
 
 export function getListMaxPageSize(env: Env): number {
   return parsePositiveInt(env.LIBRARY_LIST_MAX_PAGE_SIZE, LIBRARY_DEFAULTS.LIST_MAX_PAGE_SIZE);
+}
+
+export function getTagQueryBatchSize(env: Env): number {
+  // Cloudflare D1 fails at 101 bound variables. Keep this cap fixed while the
+  // default remains configurable downward for self-hosters and tests.
+  const d1BindVariableLimit = 100;
+  return Math.min(
+    parsePositiveInt(env.LIBRARY_TAG_QUERY_BATCH_SIZE, LIBRARY_DEFAULTS.TAG_QUERY_BATCH_SIZE),
+    d1BindVariableLimit
+  );
+}
+
+export function getProjectDeleteCleanupBatchSize(env: Env): number {
+  return Math.min(
+    parsePositiveInt(
+      env.LIBRARY_PROJECT_DELETE_CLEANUP_BATCH_SIZE,
+      DEFAULT_LIBRARY_PROJECT_DELETE_CLEANUP_BATCH_SIZE
+    ),
+    R2_LIST_MAX_PAGE_SIZE
+  );
 }
 
 export function getMaxDirectoryDepth(env: Env): number {
@@ -56,11 +92,17 @@ export function getMaxDirectoryDepth(env: Env): number {
 }
 
 export function getMaxDirectoryPathLength(env: Env): number {
-  return parsePositiveInt(env.LIBRARY_MAX_DIRECTORY_PATH_LENGTH, LIBRARY_DEFAULTS.MAX_DIRECTORY_PATH_LENGTH);
+  return parsePositiveInt(
+    env.LIBRARY_MAX_DIRECTORY_PATH_LENGTH,
+    LIBRARY_DEFAULTS.MAX_DIRECTORY_PATH_LENGTH
+  );
 }
 
 export function getMaxDirectoriesPerProject(env: Env): number {
-  return parsePositiveInt(env.LIBRARY_MAX_DIRECTORIES_PER_PROJECT, LIBRARY_DEFAULTS.MAX_DIRECTORIES_PER_PROJECT);
+  return parsePositiveInt(
+    env.LIBRARY_MAX_DIRECTORIES_PER_PROJECT,
+    LIBRARY_DEFAULTS.MAX_DIRECTORIES_PER_PROJECT
+  );
 }
 
 export function getMaxSearchLength(env: Env): number {
@@ -69,7 +111,11 @@ export function getMaxSearchLength(env: Env): number {
 
 /** Validate a directory path using configurable env limits. Throws on invalid. Returns normalized path. */
 export function validateDirectory(directory: string, env: Env): string {
-  return validateDirectoryPath(directory, getMaxDirectoryDepth(env), getMaxDirectoryPathLength(env));
+  return validateDirectoryPath(
+    directory,
+    getMaxDirectoryDepth(env),
+    getMaxDirectoryPathLength(env)
+  );
 }
 
 // ---------------------------------------------------------------------------

@@ -2,7 +2,12 @@
 // User
 // =============================================================================
 export type UserRole = 'superadmin' | 'admin' | 'user';
-export type UserStatus = 'active' | 'pending' | 'suspended';
+// 'system' is the status of internal sentinel users (e.g. system_anonymous_trials,
+// seeded by migration 0043). It is never settable via the API (the `status`
+// additionalField is input:false) — only migrations write it. It is part of the
+// union so middleware and admin tooling can recognize and exclude internal rows
+// rather than silently coercing the value.
+export type UserStatus = 'active' | 'pending' | 'suspended' | 'system';
 
 export interface User {
   id: string;
@@ -41,10 +46,35 @@ export interface AdminUserRoleRequest {
   role: Exclude<UserRole, 'superadmin'>;
 }
 
+export type SignupApprovalConfigSource = 'environment' | 'runtime';
+
+export interface SignupApprovalConfig {
+  requireApproval: boolean;
+  source: SignupApprovalConfigSource;
+  updatedAt: string | null;
+  updatedBy: string | null;
+}
+
+export interface SignupApprovalConfigResponse {
+  config: SignupApprovalConfig;
+}
+
+export interface UpdateSignupApprovalConfigRequest {
+  requireApproval: boolean;
+}
+
 // =============================================================================
 // Credential
 // =============================================================================
-export const CREDENTIAL_PROVIDERS = ['hetzner', 'scaleway', 'gcp'] as const;
+export const CREDENTIAL_PROVIDERS = [
+  'hetzner',
+  'scaleway',
+  'gcp',
+  'vultr',
+  'infomaniak',
+  'digitalocean',
+  'upcloud',
+] as const;
 export type CredentialProvider = (typeof CREDENTIAL_PROVIDERS)[number];
 
 export interface Credential {
@@ -63,29 +93,91 @@ export interface CredentialResponse {
   provider: CredentialProvider;
   connected: boolean;
   createdAt: string;
+  validation?: CredentialValidationStatus;
+  /** Safe provider-specific metadata. Never contains credential secrets. */
+  gcp?: GcpCredentialMetadata;
+}
+
+export interface CredentialValidationStatus {
+  valid: boolean;
+  message: string;
+  error?: string;
+  status?: number;
+  validationMode: 'format' | 'provider';
 }
 
 /**
  * Create credential request — discriminated by provider.
- * Hetzner uses a single API token; Scaleway requires secretKey + projectId.
+ * Hetzner, Vultr, and DigitalOcean use a single API token; Scaleway requires secretKey + projectId.
+ * Hetzner and Vultr use a single API token; UpCloud uses an API-subaccount username and password; Scaleway requires secretKey + projectId.
  */
 export type CreateCredentialRequest =
   | { provider: 'hetzner'; token: string }
+  | { provider: 'vultr'; token: string }
+  | { provider: 'infomaniak'; applicationCredentialId: string; applicationCredentialSecret: string }
+  | { provider: 'digitalocean'; token: string }
+  | { provider: 'upcloud'; username: string; password: string }
   | { provider: 'scaleway'; secretKey: string; projectId: string }
-  | { provider: 'gcp'; gcpProjectId: string; gcpProjectNumber: string; serviceAccountEmail: string; wifPoolId: string; wifProviderId: string; defaultZone: string };
+  | {
+      provider: 'gcp';
+      authType?: 'workload-identity';
+      gcpProjectId: string;
+      gcpProjectNumber: string;
+      serviceAccountEmail: string;
+      wifPoolId: string;
+      wifProviderId: string;
+      defaultZone: string;
+    };
 
 // =============================================================================
 // GCP OIDC Credential (stored after Connect GCP flow)
 // =============================================================================
 
-/** GCP OIDC credential — public identifiers, not secrets. Stored encrypted for consistency. */
-export interface GcpOidcCredential {
+export const GCP_CREDENTIAL_VERSION = 1 as const;
+
+export type GcpCredentialAuthType = 'workload-identity' | 'service-account-key';
+
+/** GCP WIF credential — public identifiers, stored encrypted for consistency. */
+export interface GcpWorkloadIdentityCredential {
+  version: typeof GCP_CREDENTIAL_VERSION;
   provider: 'gcp';
+  authType: 'workload-identity';
   gcpProjectId: string;
   gcpProjectNumber: string;
   serviceAccountEmail: string;
   wifPoolId: string;
   wifProviderId: string;
+  defaultZone: string;
+}
+
+/** GCP service-account key credential. The private key is always encrypted at rest. */
+export interface GcpServiceAccountKeyCredential {
+  version: typeof GCP_CREDENTIAL_VERSION;
+  provider: 'gcp';
+  authType: 'service-account-key';
+  gcpProjectId: string;
+  serviceAccountEmail: string;
+  privateKeyId: string;
+  privateKey: string;
+  defaultZone: string;
+}
+
+export type GcpCredential = GcpWorkloadIdentityCredential | GcpServiceAccountKeyCredential;
+
+/** Backward-compatible name retained for existing WIF call sites. */
+export type GcpOidcCredential = GcpWorkloadIdentityCredential;
+
+/** Safe metadata returned to the browser for a connected GCP credential. */
+export interface GcpCredentialMetadata {
+  authType: GcpCredentialAuthType;
+  gcpProjectId: string;
+  serviceAccountEmail: string;
+  defaultZone: string;
+  privateKeyId?: string;
+}
+
+export interface SaveGcpServiceAccountCredentialRequest {
+  serviceAccountJson: string;
   defaultZone: string;
 }
 
@@ -128,7 +220,13 @@ export interface SetupProjectDeploymentRequest {
 // =============================================================================
 
 export type PlatformCredentialType = 'cloud-provider' | 'agent-api-key';
-export type CredentialSource = 'user' | 'project' | 'platform';
+/**
+ * Where the credential that provisioned a node came from.
+ * - 'user' | 'project' | 'platform': a real cloud credential SAM used to provision the machine.
+ * - 'self-hosted': sentinel for user-owned (BYO) nodes — SAM provisioned nothing, so these accrue
+ *   $0 compute cost and are excluded from vCPU-hour metering and quota by construction.
+ */
+export type CredentialSource = 'user' | 'project' | 'platform' | 'self-hosted';
 
 export interface PlatformCredential {
   id: string;

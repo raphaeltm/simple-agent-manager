@@ -8,6 +8,7 @@
 ## Problem Statement
 
 The current self-hosting process requires 15+ manual steps across multiple platforms:
+
 - Manual creation of D1 database, KV namespace, and R2 bucket via CLI
 - Manual editing of wrangler.toml with resource IDs
 - Manual execution of deploy commands
@@ -15,19 +16,21 @@ The current self-hosting process requires 15+ manual steps across multiple platf
 - Manual secret generation and configuration
 
 The initial implementation attempted to solve this with custom TypeScript code calling Cloudflare REST APIs directly. This approach is **brittle** because:
+
 - No state management (relies on name-based lookups)
 - No drift detection
 - Manual API maintenance burden
 - Regex-based wrangler.toml manipulation
 
 The solution uses a **Pulumi + Wrangler hybrid approach**:
+
 - **Pulumi** provisions infrastructure (D1, KV, R2, DNS) with proper state management
 - **Wrangler** deploys applications (Workers, Pages) and runs migrations
 - State stored in Cloudflare R2 (self-hosted, no Pulumi Cloud dependency)
 
 The process should be: fork repo → create state bucket → configure secrets → run action → done.
 
-## User Scenarios & Testing *(mandatory)*
+## User Scenarios & Testing _(mandatory)_
 
 ### User Story 1 - First-Time Deployment (Priority: P1)
 
@@ -144,7 +147,7 @@ A developer needs to set up GitHub App integration for repository access. While 
 - What happens when PULUMI_CONFIG_PASSPHRASE is wrong on re-run?
   - Pulumi fails to decrypt state with a clear authentication error.
 
-## Requirements *(mandatory)*
+## Requirements _(mandatory)_
 
 ### Functional Requirements
 
@@ -201,28 +204,28 @@ A developer needs to set up GitHub App integration for repository access. While 
 
 **Required GitHub Secrets:**
 
-| Secret                    | Description                                              |
-|---------------------------|----------------------------------------------------------|
-| `CF_API_TOKEN`            | Cloudflare API token with required permissions           |
-| `CF_ACCOUNT_ID`           | Cloudflare account ID                                    |
-| `CF_ZONE_ID`              | Cloudflare zone ID for the domain                        |
-| `R2_ACCESS_KEY_ID`        | R2 API access key for Pulumi state bucket                |
-| `R2_SECRET_ACCESS_KEY`    | R2 API secret key for Pulumi state bucket                |
-| `PULUMI_CONFIG_PASSPHRASE`| Passphrase for encrypting Pulumi state secrets           |
+| Secret                     | Description                                    |
+| -------------------------- | ---------------------------------------------- |
+| `CF_API_TOKEN`             | Cloudflare API token with required permissions |
+| `CF_ACCOUNT_ID`            | Cloudflare account ID                          |
+| `CF_ZONE_ID`               | Cloudflare zone ID for the domain              |
+| `R2_ACCESS_KEY_ID`         | R2 API access key for Pulumi state bucket      |
+| `R2_SECRET_ACCESS_KEY`     | R2 API secret key for Pulumi state bucket      |
+| `PULUMI_CONFIG_PASSPHRASE` | Passphrase for encrypting Pulumi state secrets |
 
 **Required GitHub Variables (or Workflow Inputs):**
 
-| Variable            | Description                                              |
-|---------------------|----------------------------------------------------------|
-| `HOSTNAME`          | Full hostname for deployment (e.g., `app.example.com`)   |
-| `PULUMI_STATE_BUCKET` | Name of R2 bucket for Pulumi state (e.g., `sam-pulumi-state`) |
+| Variable              | Description                                                        |
+| --------------------- | ------------------------------------------------------------------ |
+| `HOSTNAME`            | Full hostname for deployment (e.g., `app.example.com`)             |
+| `PULUMI_STATE_BUCKET` | Name of R2 bucket for Pulumi state (e.g., `{prefix}-pulumi-state`) |
 
 **Optional GitHub Secrets (for full functionality):**
 
-| Secret                    | Description                              |
-|---------------------------|------------------------------------------|
-| `GITHUB_APP_ID`           | GitHub App ID for repository access      |
-| `GITHUB_APP_PRIVATE_KEY`  | GitHub App private key (base64 encoded)  |
+| Secret                   | Description                             |
+| ------------------------ | --------------------------------------- |
+| `GITHUB_APP_ID`          | GitHub App ID for repository access     |
+| `GITHUB_APP_PRIVATE_KEY` | GitHub App private key (base64 encoded) |
 
 ### Key Entities
 
@@ -232,7 +235,7 @@ A developer needs to set up GitHub App integration for repository access. While 
 - **DNS Configuration**: API record, App record, wildcard record for workspaces (managed by Pulumi).
 - **Security Keys**: JWT key pair for terminal authentication, encryption key for credential storage.
 
-## Success Criteria *(mandatory)*
+## Success Criteria _(mandatory)_
 
 ### Measurable Outcomes
 
@@ -295,15 +298,15 @@ A developer needs to set up GitHub App integration for repository access. While 
 
 ## Risks
 
-| Risk                                               | Likelihood | Impact | Mitigation                                                        |
-|----------------------------------------------------|------------|--------|-------------------------------------------------------------------|
-| R2 S3-compatibility issues with Pulumi             | Low        | High   | Test extensively; R2 S3 API is well-documented                    |
-| Pulumi Cloudflare provider bugs                    | Low        | Medium | Pin provider version; monitor releases; report issues upstream    |
-| State bucket access issues                         | Low        | High   | Clear prerequisite documentation; preflight validation            |
-| PULUMI_CONFIG_PASSPHRASE lost by user              | Medium     | High   | Document passphrase importance; suggest password manager          |
-| Cloudflare API rate limits during deployment       | Low        | Medium | Pulumi handles retries; configure backoff if needed               |
-| GitHub Actions runner resource constraints for Go  | Low        | Medium | Pre-build VM Agent binaries in CI; cache dependencies             |
-| DNS propagation delays cause confusion             | Medium     | Low    | Clear documentation that DNS may take 24 hours                    |
+| Risk                                              | Likelihood | Impact | Mitigation                                                     |
+| ------------------------------------------------- | ---------- | ------ | -------------------------------------------------------------- |
+| R2 S3-compatibility issues with Pulumi            | Low        | High   | Test extensively; R2 S3 API is well-documented                 |
+| Pulumi Cloudflare provider bugs                   | Low        | Medium | Pin provider version; monitor releases; report issues upstream |
+| State bucket access issues                        | Low        | High   | Clear prerequisite documentation; preflight validation         |
+| PULUMI_CONFIG_PASSPHRASE lost by user             | Medium     | High   | Document passphrase importance; suggest password manager       |
+| Cloudflare API rate limits during deployment      | Low        | Medium | Pulumi handles retries; configure backoff if needed            |
+| GitHub Actions runner resource constraints for Go | Low        | Medium | Pre-build VM Agent binaries in CI; cache dependencies          |
+| DNS propagation delays cause confusion            | Medium     | Low    | Clear documentation that DNS may take 24 hours                 |
 
 ## Technical Notes
 
@@ -311,12 +314,13 @@ A developer needs to set up GitHub App integration for repository access. While 
 
 This architecture follows industry best practices for Cloudflare deployments:
 
-| Tool    | Responsibility                                           |
-|---------|----------------------------------------------------------|
-| Pulumi  | Create/manage D1, KV, R2, DNS records (infrastructure)   |
-| Wrangler| Deploy Workers, Pages, run migrations, set secrets (app) |
+| Tool     | Responsibility                                           |
+| -------- | -------------------------------------------------------- |
+| Pulumi   | Create/manage D1, KV, R2, DNS records (infrastructure)   |
+| Wrangler | Deploy Workers, Pages, run migrations, set secrets (app) |
 
 **Rationale:**
+
 - Pulumi provides proper state management, drift detection, and idempotency
 - Wrangler understands Worker internals and deployment nuances
 - This split is [recommended by practitioners](https://developers.cloudflare.com/pulumi/tutorial/dynamic-provider-and-wrangler/)
@@ -336,6 +340,7 @@ export PULUMI_CONFIG_PASSPHRASE=$PULUMI_CONFIG_PASSPHRASE
 ### Official SDK Usage
 
 Per constitution principle X (Simplicity & Clarity), all Cloudflare API interactions use official SDKs:
+
 - Infrastructure: `@pulumi/cloudflare` provider
 - Direct API (if needed): `cloudflare` npm package
 - Deployment: Wrangler CLI

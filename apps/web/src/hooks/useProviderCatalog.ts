@@ -1,0 +1,43 @@
+import type { ProviderCatalog } from '@simple-agent-manager/shared';
+import { useQuery } from '@tanstack/react-query';
+
+import type { ProviderCatalogRequestOptions } from '../lib/api';
+import { providerCatalogQueryOptions } from '../lib/query-options';
+
+interface UseProviderCatalogResult {
+  catalogs: ProviderCatalog[];
+  /** First catalog (convenience for single-provider setups). */
+  catalog: ProviderCatalog | null;
+  loading: boolean;
+  isRefreshing: boolean;
+}
+
+/**
+ * Provider-native instance offerings, locations, and price metadata for the
+ * caller's selected credential scope.
+ *
+ * The API uses live provider catalogs when credentials/API calls permit it and
+ * falls back to static curated metadata per provider on catalog failure.
+ *
+ * Failures stay silent, preserving the previous behaviour: every consumer has its
+ * own fallback size/location list, so an unavailable catalog degrades to those
+ * defaults rather than blocking workspace creation behind an error.
+ */
+export function useProviderCatalog(
+  queryScope: string,
+  options?: ProviderCatalogRequestOptions
+): UseProviderCatalogResult {
+  const query = useQuery({
+    ...providerCatalogQueryOptions(queryScope, options),
+    enabled: Boolean(queryScope),
+  });
+
+  const catalogs = query.data ?? [];
+
+  return {
+    catalogs,
+    catalog: catalogs[0] ?? null,
+    loading: Boolean(queryScope) && query.isPending && query.data === undefined,
+    isRefreshing: query.isFetching && query.data !== undefined,
+  };
+}

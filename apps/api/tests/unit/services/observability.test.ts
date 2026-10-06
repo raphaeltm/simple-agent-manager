@@ -605,3 +605,89 @@ describe('Observability Service', () => {
     });
   });
 });
+
+// Imported after mocks (same pattern as above)
+
+import { serializeBoundedContext } from '../../../src/services/observability';
+
+describe('bounded context serialization (rule 50 companion)', () => {
+  const mockDb = {} as D1Database;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockInsertValues.mockResolvedValue(undefined);
+  });
+
+  it('passes small contexts through verbatim', () => {
+    const ctx = { requestId: 'r-1', path: '/api/x' };
+    expect(serializeBoundedContext(ctx, 8192)).toBe(JSON.stringify(ctx));
+  });
+
+  it('replaces oversized contexts with a valid-JSON sentinel (never sliced JSON)', () => {
+    const ctx = { blob: 'x'.repeat(10_000) };
+    const serialized = serializeBoundedContext(ctx, 1024);
+    expect(serialized.length).toBeLessThan(2048);
+    const parsed = JSON.parse(serialized) as Record<string, unknown>;
+    expect(parsed.contextTruncated).toBe(true);
+    expect(parsed.originalLength).toBeGreaterThan(10_000);
+    expect(typeof parsed.preview).toBe('string');
+  });
+
+  it('persistError stores the sentinel for oversized contexts', async () => {
+    await persistError(
+      mockDb,
+      {
+        source: 'api',
+        message: 'big context',
+        context: { blob: 'y'.repeat(50_000) },
+      },
+      { OBSERVABILITY_ERROR_CONTEXT_MAX_LENGTH: '2048' } as unknown as Env
+    );
+    const inserted = mockInsertValues.mock.calls[0]![0] as { context: string };
+    const parsed = JSON.parse(inserted.context) as Record<string, unknown>;
+    expect(parsed.contextTruncated).toBe(true);
+  });
+
+  it('queryErrors tolerates a malformed context row (good/bad/good)', async () => {
+    const row = (id: string, context: string | null) => ({
+      id,
+      source: 'api',
+      level: 'error',
+      message: `m-${id}`,
+      stack: null,
+      context,
+      userId: null,
+      nodeId: null,
+      workspaceId: null,
+      taskId: null,
+      sessionId: null,
+      ipAddress: null,
+      userAgent: null,
+      timestamp: Date.now(),
+    });
+    // Count query, then row query (mirrors the invalid-cursor test pattern)
+    mockSelectFrom.mockReturnValueOnce({
+      where: vi.fn().mockResolvedValue([{ count: 3 }]),
+    });
+    mockSelectFrom.mockReturnValueOnce({
+      where: vi.fn().mockReturnValue({
+        orderBy: vi.fn().mockReturnValue({
+          limit: vi
+            .fn()
+            .mockResolvedValue([
+              row('good-1', '{"ok":true}'),
+              row('bad-1', '{"contextTruncated":tru'),
+              row('good-2', null),
+            ]),
+        }),
+      }),
+    });
+
+    const result = await queryErrors(mockDb, {});
+    expect(result.errors).toHaveLength(3);
+    expect(result.errors[0]!.context).toEqual({ ok: true });
+    // Malformed context degrades to null instead of throwing the whole read
+    expect(result.errors[1]!.context).toBeNull();
+    expect(result.errors[2]!.context).toBeNull();
+  });
+});

@@ -1,11 +1,38 @@
-import type { CredentialProvider, GitHubInstallation, NodeResponse, Project, ProjectDetailResponse, ProviderCatalog, VMSize } from '@simple-agent-manager/shared';
-import { PROVIDER_LABELS } from '@simple-agent-manager/shared';
-import { Alert, Button, Card, Input, PageLayout, Select, Spinner } from '@simple-agent-manager/ui';
-import { useCallback,useEffect, useState } from 'react';
+import type {
+  CredentialProvider,
+  GitHubInstallation,
+  NodeResponse,
+  ProjectDetailResponse,
+  ProjectSummary,
+  ProviderCatalog,
+} from '@simple-agent-manager/shared';
+import {
+  DEFAULT_VM_LOCATION,
+  hasByocComputeCredential,
+  PROVIDER_LABELS,
+} from '@simple-agent-manager/shared';
+import {
+  Alert,
+  Breadcrumb,
+  Button,
+  Card,
+  Input,
+  PageLayout,
+  Select,
+  Spinner,
+} from '@simple-agent-manager/ui';
+import { useCallback, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 
 import { BranchSelector } from '../components/BranchSelector';
 import { RepoSelector } from '../components/RepoSelector';
+import {
+  EMPTY_RESOURCE_STATE,
+  type ResourceRequirementsFormState,
+  ResourceRequirementsInput,
+  toResourceRequirements,
+} from '../components/resource-requirements';
+import { formatVmSizeInline, lookupSizeInfo } from '../components/vm/format-vm-size';
 import {
   createWorkspace,
   getProject,
@@ -17,7 +44,6 @@ import {
   listNodes,
   listProjects,
 } from '../lib/api';
-import { FALLBACK_VM_SIZES } from '../lib/constants';
 
 type PrereqStatus = 'loading' | 'ready' | 'missing' | 'error';
 
@@ -40,13 +66,13 @@ function PrereqItem({ label, status, detail, actionLabel, onAction }: PrereqItem
 
   return (
     <div className="flex items-center justify-between px-4 py-3 border-b border-border-default gap-3">
-
       <div className="flex items-center gap-3 min-w-0">
         <span
           aria-label={status}
           className="w-6 h-6 rounded-full flex items-center justify-center font-bold shrink-0"
           style={{
-            fontSize: status === 'loading' ? 'var(--sam-type-body-size)' : 'var(--sam-type-secondary-size)',
+            fontSize:
+              status === 'loading' ? 'var(--sam-type-body-size)' : 'var(--sam-type-secondary-size)',
             color: icon.color,
             backgroundColor: `color-mix(in srgb, ${icon.color} 12%, transparent)`,
           }}
@@ -54,11 +80,17 @@ function PrereqItem({ label, status, detail, actionLabel, onAction }: PrereqItem
           {status === 'loading' ? <Spinner size="sm" /> : icon.symbol}
         </span>
         <div className="min-w-0">
-          <div className="text-fg-primary font-medium" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>
+          <div
+            className="text-fg-primary font-medium"
+            style={{ fontSize: 'var(--sam-type-secondary-size)' }}
+          >
             {label}
           </div>
           {detail && (
-            <div className="text-fg-muted mt-0.5" style={{ fontSize: 'var(--sam-type-caption-size)' }}>
+            <div
+              className="text-fg-muted mt-0.5"
+              style={{ fontSize: 'var(--sam-type-caption-size)' }}
+            >
               {detail}
             </div>
           )}
@@ -78,6 +110,10 @@ type LocationState = {
   projectId?: string;
 };
 
+function keepExistingOr(fallback: string): (current: string) => string {
+  return (current) => current || fallback;
+}
+
 export function CreateWorkspace() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -92,8 +128,10 @@ export function CreateWorkspace() {
   const [installations, setInstallations] = useState<GitHubInstallation[]>([]);
   const [nodes, setNodes] = useState<NodeResponse[]>([]);
   const [linkedProject, setLinkedProject] = useState<ProjectDetailResponse | null>(null);
-  const [allProjects, setAllProjects] = useState<Project[]>([]);
-  const [selectedProjectId, setSelectedProjectId] = useState<string>(locationState?.projectId ?? '');
+  const [allProjects, setAllProjects] = useState<ProjectSummary[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string>(
+    locationState?.projectId ?? ''
+  );
 
   // Provider catalog state
   const [catalogs, setCatalogs] = useState<ProviderCatalog[]>([]);
@@ -109,21 +147,23 @@ export function CreateWorkspace() {
   const [branchesError, setBranchesError] = useState<string | null>(null);
   const [repoDefaultBranch, setRepoDefaultBranch] = useState<string | undefined>(undefined);
   const [installationId, setInstallationId] = useState('');
-  const [vmSize, setVmSize] = useState<VMSize>('medium');
+  const [resourceReqs, setResourceReqs] = useState<ResourceRequirementsFormState>({
+    ...EMPTY_RESOURCE_STATE,
+  });
   const [vmLocation, setVmLocation] = useState('');
   const [selectedNodeId, setSelectedNodeId] = useState<string>(locationState?.nodeId ?? '');
 
   // Get the active catalog based on selected provider
   const activeCatalog = catalogs.find((c) => c.provider === selectedProvider);
 
+  const selectedNode = nodes.find((node) => node.id === selectedNodeId) ?? null;
+
   // Check each prerequisite independently so status appears incrementally
   useEffect(() => {
     // Cloud provider credentials + catalog (also check platform trial)
-    Promise.all([
-      listCredentials().catch(() => []),
-      getTrialStatus().catch(() => null),
-    ]).then(([creds, trial]) => {
-        const hasUserCreds = creds.some((c: { provider: string }) => c.provider === 'hetzner' || c.provider === 'scaleway');
+    Promise.all([listCredentials().catch(() => []), getTrialStatus().catch(() => null)])
+      .then(([creds, trial]) => {
+        const hasUserCreds = hasByocComputeCredential(creds);
         const trialAvailable = trial?.available ?? false;
         const hasCloud = hasUserCreds || trialAvailable;
         setHasCloudProvider(hasCloud);
@@ -134,11 +174,15 @@ export function CreateWorkspace() {
           setCatalogLoading(true);
           getProviderCatalog()
             .then((resp) => {
-              setCatalogs(resp.catalogs);
-              const first = resp.catalogs[0];
+              // Guard the shape: a malformed catalog payload must not poison
+              // state with undefined — `catalogs.find(...)` runs on every
+              // render and would crash the whole page via the ErrorBoundary.
+              const catalogList = Array.isArray(resp.catalogs) ? resp.catalogs : [];
+              setCatalogs(catalogList);
+              const first = catalogList[0];
               if (first) {
-                setSelectedProvider(first.provider);
-                setVmLocation(first.defaultLocation);
+                setSelectedProvider(keepExistingOr(first.provider));
+                setVmLocation(keepExistingOr(first.defaultLocation));
               }
             })
             .catch(() => {
@@ -187,28 +231,31 @@ export function CreateWorkspace() {
 
   const checkingPrereqs = cloudStatus === 'loading' || githubStatus === 'loading';
 
-  const fetchBranches = useCallback(async (fullName: string, instId: string, defBranch?: string) => {
-    setBranchesLoading(true);
-    setBranches([]);
-    setBranchesError(null);
-    try {
-      const result = await listBranches(fullName, instId || undefined, defBranch);
-      setBranches(result);
+  const fetchBranches = useCallback(
+    async (fullName: string, instId: string, defBranch?: string) => {
+      setBranchesLoading(true);
+      setBranches([]);
+      setBranchesError(null);
+      try {
+        const result = await listBranches(fullName, instId || undefined, defBranch);
+        setBranches(result);
 
-      // If no branches returned (shouldn't happen), add common defaults
-      if (result.length === 0) {
-        setBranches([{ name: 'main' }, { name: 'master' }]);
-        setBranchesError('Could not fetch branches, showing common defaults');
+        // If no branches returned (shouldn't happen), add common defaults
+        if (result.length === 0) {
+          setBranches([{ name: 'main' }, { name: 'master' }]);
+          setBranchesError('Could not fetch branches, showing common defaults');
+        }
+      } catch (err) {
+        console.error('Could not fetch branches:', err);
+        // Provide common branch names as fallback
+        setBranches([{ name: 'main' }, { name: 'master' }, { name: 'develop' }]);
+        setBranchesError('Unable to fetch branches. Common branch names provided.');
+      } finally {
+        setBranchesLoading(false);
       }
-    } catch (err) {
-      console.error('Could not fetch branches:', err);
-      // Provide common branch names as fallback
-      setBranches([{ name: 'main' }, { name: 'master' }, { name: 'develop' }]);
-      setBranchesError('Unable to fetch branches. Common branch names provided.');
-    } finally {
-      setBranchesLoading(false);
-    }
-  }, []);
+    },
+    []
+  );
 
   const handleRepoSelect = useCallback(
     (repo: { fullName: string; defaultBranch: string } | null) => {
@@ -239,48 +286,61 @@ export function CreateWorkspace() {
   );
 
   // Load project details when a project is selected
-  const loadProjectDetails = useCallback((projectId: string) => {
-    getProject(projectId)
-      .then((proj) => {
-        setLinkedProject(proj);
-        setName(`${proj.name} Workspace`);
-        setRepository(proj.repository);
-        const defBranch = proj.defaultBranch ?? 'main';
-        setBranch(defBranch);
-        setRepoDefaultBranch(defBranch);
-        setInstallationId(proj.installationId ?? '');
-        if (proj.defaultVmSize) {
-          setVmSize(proj.defaultVmSize as VMSize);
-        }
-        void fetchBranches(proj.repository, proj.installationId ?? '', defBranch);
-      })
-      .catch(() => {
-        // Project fetch failed
-      });
-  }, [fetchBranches]);
+  const loadProjectDetails = useCallback(
+    (projectId: string) => {
+      getProject(projectId)
+        .then((proj) => {
+          setLinkedProject(proj);
+          setName(`${proj.name} Workspace`);
+          setRepository(proj.repository);
+          const defBranch = proj.defaultBranch ?? 'main';
+          setBranch(defBranch);
+          setRepoDefaultBranch(defBranch);
+          setInstallationId(proj.installationId ?? '');
+          if (proj.defaultProvider) {
+            setSelectedProvider(proj.defaultProvider);
+          }
+          if (proj.defaultLocation) {
+            setVmLocation(proj.defaultLocation);
+          }
+          void fetchBranches(proj.repository, proj.installationId ?? '', defBranch);
+        })
+        .catch(() => {
+          // Project fetch failed
+        });
+    },
+    [fetchBranches]
+  );
 
-  // Load project context if navigated from a project
+  // Load project context if navigated from a project. loadProjectDetails is
+  // stable (its only dep, fetchBranches, is useCallback([])), and
+  // locationState?.projectId is a primitive that only changes on a genuine
+  // navigation to this route with new state — so including both here does
+  // not add extra runs under normal mount-once-per-navigation usage.
   useEffect(() => {
     const projectId = locationState?.projectId;
     if (!projectId) return;
     loadProjectDetails(projectId);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loadProjectDetails, locationState?.projectId]);
 
   // Handle project selection from dropdown
-  const handleProjectSelect = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
-    const projectId = e.target.value;
-    setSelectedProjectId(projectId);
-    if (projectId) {
-      loadProjectDetails(projectId);
-    } else {
-      setLinkedProject(null);
-      setName('');
-      setRepository('');
-      setBranch('main');
-      setBranches([]);
-      setRepoDefaultBranch(undefined);
-    }
-  }, [loadProjectDetails]);
+  const handleProjectSelect = useCallback(
+    (e: React.ChangeEvent<HTMLSelectElement>) => {
+      const projectId = e.target.value;
+      setSelectedProjectId(projectId);
+      if (projectId) {
+        loadProjectDetails(projectId);
+      } else {
+        setLinkedProject(null);
+        setName('');
+        setRepository('');
+        setBranch('main');
+        setBranches([]);
+        setRepoDefaultBranch(undefined);
+      }
+    },
+    [loadProjectDetails]
+  );
 
   const handleProviderChange = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -311,6 +371,13 @@ export function CreateWorkspace() {
         return;
       }
 
+      const effectiveVmLocation =
+        selectedNode?.vmLocation ??
+        vmLocation ??
+        activeCatalog?.defaultLocation ??
+        DEFAULT_VM_LOCATION;
+
+      const userReqs = toResourceRequirements(resourceReqs);
       const workspace = await createWorkspace({
         name,
         projectId: linkedProject.id,
@@ -318,9 +385,11 @@ export function CreateWorkspace() {
         repository: repo,
         branch,
         installationId,
-        vmSize,
-        vmLocation,
-        ...(selectedProvider && !selectedNodeId ? { provider: selectedProvider as CredentialProvider } : {}),
+        vmLocation: effectiveVmLocation || undefined,
+        ...(userReqs && !selectedNodeId ? { resourceRequirements: userReqs } : {}),
+        ...(selectedProvider && !selectedNodeId
+          ? { provider: selectedProvider as CredentialProvider }
+          : {}),
       });
 
       navigate(`/workspaces/${workspace.id}`);
@@ -332,8 +401,11 @@ export function CreateWorkspace() {
   };
 
   const canCreate = hasCloudProvider && installations.length > 0 && !!linkedProject;
-  const anyMissing = cloudStatus === 'missing' || githubStatus === 'missing'
-    || cloudStatus === 'error' || githubStatus === 'error';
+  const anyMissing =
+    cloudStatus === 'missing' ||
+    githubStatus === 'missing' ||
+    cloudStatus === 'error' ||
+    githubStatus === 'error';
   const showPrereqs = checkingPrereqs || anyMissing;
 
   const labelStyle = {
@@ -343,20 +415,6 @@ export function CreateWorkspace() {
     color: 'var(--sam-color-fg-muted)',
     marginBottom: '0.25rem',
   } as const;
-
-  // Build VM size options from catalog or use generic fallback
-  const vmSizeOptions = activeCatalog
-    ? (['small', 'medium', 'large'] as VMSize[]).map((size) => {
-        const sizeInfo = activeCatalog.sizes[size];
-        return {
-          value: size,
-          label: size.charAt(0).toUpperCase() + size.slice(1),
-          description: sizeInfo
-            ? `${sizeInfo.vcpu} vCPUs, ${sizeInfo.ramGb}GB RAM \u2014 ${sizeInfo.price}`
-            : size,
-        };
-      })
-    : FALLBACK_VM_SIZES;
 
   // Build location options from catalog
   const locationOptions = activeCatalog
@@ -371,14 +429,31 @@ export function CreateWorkspace() {
       title={isProjectLinked ? `New Workspace \u2014 ${linkedProject?.name}` : 'Create Workspace'}
       maxWidth="md"
     >
+      <Breadcrumb
+        className="mb-4"
+        segments={[
+          { label: 'Home', path: '/dashboard' },
+          { label: 'Workspaces', path: '/workspaces' },
+          { label: isProjectLinked && linkedProject ? `New \u2014 ${linkedProject.name}` : 'New' },
+        ]}
+      />
       {showPrereqs && (
         <Card className="mb-6 overflow-hidden">
           <div className="p-4 border-b border-border-default">
-            <h3 className="m-0 text-fg-primary" style={{ fontSize: 'var(--sam-type-card-title-size)', fontWeight: 'var(--sam-type-card-title-weight)' as unknown as number }}>
+            <h3
+              className="m-0 text-fg-primary"
+              style={{
+                fontSize: 'var(--sam-type-card-title-size)',
+                fontWeight: 'var(--sam-type-card-title-weight)' as unknown as number,
+              }}
+            >
               {checkingPrereqs ? 'Checking prerequisites...' : 'Setup Required'}
             </h3>
             {!checkingPrereqs && anyMissing && (
-              <p className="text-fg-muted mt-1" style={{ margin: '4px 0 0', fontSize: 'var(--sam-type-caption-size)' }}>
+              <p
+                className="text-fg-muted mt-1"
+                style={{ margin: '4px 0 0', fontSize: 'var(--sam-type-caption-size)' }}
+              >
                 Complete the items below before creating a workspace.
               </p>
             )}
@@ -387,23 +462,43 @@ export function CreateWorkspace() {
             label="Cloud Provider"
             status={cloudStatus}
             detail={
-              cloudStatus === 'ready' ? 'Connected' :
-              cloudStatus === 'missing' ? 'Connect a cloud provider in Settings, or ask your admin to enable platform trial' :
-              cloudStatus === 'error' ? 'Failed to check credentials' : undefined
+              cloudStatus === 'ready'
+                ? 'Connected'
+                : cloudStatus === 'missing'
+                  ? 'Connect a cloud provider in Settings, or ask your admin to enable platform trial'
+                  : cloudStatus === 'error'
+                    ? 'Failed to check credentials'
+                    : undefined
             }
-            actionLabel={cloudStatus === 'missing' || cloudStatus === 'error' ? 'Settings' : undefined}
-            onAction={cloudStatus === 'missing' || cloudStatus === 'error' ? () => navigate('/settings') : undefined}
+            actionLabel={
+              cloudStatus === 'missing' || cloudStatus === 'error' ? 'Settings' : undefined
+            }
+            onAction={
+              cloudStatus === 'missing' || cloudStatus === 'error'
+                ? () => navigate('/settings')
+                : undefined
+            }
           />
           <PrereqItem
             label="GitHub App Installation"
             status={githubStatus}
             detail={
-              githubStatus === 'ready' ? `${installations.length} installation${installations.length > 1 ? 's' : ''} found` :
-              githubStatus === 'missing' ? 'Required to access repositories' :
-              githubStatus === 'error' ? 'Failed to check installations' : undefined
+              githubStatus === 'ready'
+                ? `${installations.length} installation${installations.length > 1 ? 's' : ''} found`
+                : githubStatus === 'missing'
+                  ? 'Required to access repositories'
+                  : githubStatus === 'error'
+                    ? 'Failed to check installations'
+                    : undefined
             }
-            actionLabel={githubStatus === 'missing' || githubStatus === 'error' ? 'Settings' : undefined}
-            onAction={githubStatus === 'missing' || githubStatus === 'error' ? () => navigate('/settings') : undefined}
+            actionLabel={
+              githubStatus === 'missing' || githubStatus === 'error' ? 'Settings' : undefined
+            }
+            onAction={
+              githubStatus === 'missing' || githubStatus === 'error'
+                ? () => navigate('/settings')
+                : undefined
+            }
           />
           <PrereqItem
             label="Nodes"
@@ -413,7 +508,9 @@ export function CreateWorkspace() {
                 ? nodes.length > 0
                   ? `${nodes.length} available node${nodes.length > 1 ? 's' : ''}`
                   : 'None yet \u2014 one will be created automatically'
-                : nodesStatus === 'error' ? 'Failed to load nodes' : undefined
+                : nodesStatus === 'error'
+                  ? 'Failed to load nodes'
+                  : undefined
             }
           />
         </Card>
@@ -434,7 +531,10 @@ export function CreateWorkspace() {
             ))}
           </Select>
           {!linkedProject && (
-            <p className="text-fg-muted mt-2" style={{ fontSize: 'var(--sam-type-caption-size)', margin: '0.5rem 0 0' }}>
+            <p
+              className="text-fg-muted mt-2"
+              style={{ fontSize: 'var(--sam-type-caption-size)', margin: '0.5rem 0 0' }}
+            >
               All workspaces must be linked to a project for lifecycle management.
             </p>
           )}
@@ -442,10 +542,7 @@ export function CreateWorkspace() {
       )}
 
       {canCreate && (
-        <form
-          onSubmit={handleSubmit}
-          className="glass-surface rounded-lg p-6 flex flex-col gap-6"
-        >
+        <form onSubmit={handleSubmit} className="glass-surface rounded-lg p-6 flex flex-col gap-6">
           {error && (
             <Alert variant="error" onDismiss={() => setError(null)}>
               {error}
@@ -468,16 +565,23 @@ export function CreateWorkspace() {
           </div>
 
           {isProjectLinked && (
-            <div style={{
-              padding: 'var(--sam-space-3) var(--sam-space-4)',
-              borderRadius: 'var(--sam-radius-md)',
-              backgroundColor: 'color-mix(in srgb, var(--sam-color-accent-primary) 8%, transparent)',
-              border: '1px solid color-mix(in srgb, var(--sam-color-accent-primary) 25%, transparent)',
-              fontSize: 'var(--sam-type-caption-size)',
-              color: 'var(--sam-color-fg-muted)',
-            }}>
-              Creating workspace for project <strong style={{ color: 'var(--sam-color-fg-primary)' }}>{linkedProject?.name}</strong>.
-              Repository and branch are pre-filled from the project.
+            <div
+              style={{
+                padding: 'var(--sam-space-3) var(--sam-space-4)',
+                borderRadius: 'var(--sam-radius-md)',
+                backgroundColor:
+                  'color-mix(in srgb, var(--sam-color-accent-primary) 8%, transparent)',
+                border:
+                  '1px solid color-mix(in srgb, var(--sam-color-accent-primary) 25%, transparent)',
+                fontSize: 'var(--sam-type-caption-size)',
+                color: 'var(--sam-color-fg-muted)',
+              }}
+            >
+              Creating workspace for project{' '}
+              <strong style={{ color: 'var(--sam-color-fg-primary)' }}>
+                {linkedProject?.name}
+              </strong>
+              . Repository and branch are pre-filled from the project.
             </div>
           )}
 
@@ -554,11 +658,18 @@ export function CreateWorkspace() {
               onChange={(e) => setSelectedNodeId(e.target.value)}
             >
               <option value="">Create a new node automatically</option>
-              {nodes.map((node) => (
-                <option key={node.id} value={node.id}>
-                  {node.name} ({node.status})
-                </option>
-              ))}
+              {nodes.map((node) => {
+                const sizeInfo = lookupSizeInfo(catalogs, node.cloudProvider, node.vmSize);
+                const provider = node.cloudProvider
+                  ? (PROVIDER_LABELS[node.cloudProvider] ?? node.cloudProvider)
+                  : 'Unknown provider';
+                return (
+                  <option key={node.id} value={node.id}>
+                    {node.name} ({node.status}) - {provider} -{' '}
+                    {formatVmSizeInline(node.vmSize, sizeInfo)}
+                  </option>
+                );
+              })}
             </Select>
           </div>
 
@@ -594,40 +705,28 @@ export function CreateWorkspace() {
 
           {!selectedNodeId && (
             <div>
-              <label style={{ ...labelStyle, marginBottom: '0.5rem' }}>
-                VM Size
+              <div style={{ ...labelStyle, marginBottom: '0.5rem' }}>
+                Workload requirements
                 {activeCatalog && catalogs.length === 1 && (
                   <span className="text-fg-muted font-normal ml-1">
                     ({PROVIDER_LABELS[activeCatalog.provider] ?? activeCatalog.provider})
                   </span>
                 )}
                 {catalogLoading && (
-                  <span className="text-fg-muted font-normal ml-2" style={{ fontSize: 'var(--sam-type-caption-size)' }}>
+                  <span
+                    className="text-fg-muted font-normal ml-2"
+                    style={{ fontSize: 'var(--sam-type-caption-size)' }}
+                  >
                     <Spinner size="sm" className="inline-block align-middle" />
-                    <span className="ml-1 align-middle">Loading pricing...</span>
+                    <span className="ml-1 align-middle">Loading provider options...</span>
                   </span>
                 )}
-              </label>
-              <div className={`grid grid-cols-1 sm:grid-cols-3 gap-3${catalogLoading ? ' opacity-60 pointer-events-none' : ''}`}>
-                {vmSizeOptions.map((size) => (
-                  <button
-                    key={size.value}
-                    type="button"
-                    aria-pressed={vmSize === size.value}
-                    onClick={() => setVmSize(size.value)}
-                    className={`p-3 rounded-md text-left cursor-pointer text-fg-primary transition-all duration-150 ${
-                      vmSize === size.value
-                        ? 'border-2 border-accent bg-accent-tint'
-                        : 'border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.4)]'
-                    }`}
-                  >
-                    <div className="font-medium">{size.label}</div>
-                    <div className="text-fg-muted mt-0.5" style={{ fontSize: 'var(--sam-type-caption-size)' }}>
-                      {size.description}
-                    </div>
-                  </button>
-                ))}
               </div>
+              <ResourceRequirementsInput
+                value={resourceReqs}
+                onChange={setResourceReqs}
+                inheritLabel="project default"
+              />
             </div>
           )}
 
@@ -636,7 +735,11 @@ export function CreateWorkspace() {
               <label htmlFor="location" style={labelStyle}>
                 Node Location
               </label>
-              <Select id="location" value={vmLocation} onChange={(e) => setVmLocation(e.target.value)}>
+              <Select
+                id="location"
+                value={vmLocation}
+                onChange={(e) => setVmLocation(e.target.value)}
+              >
                 {locationOptions.map((loc) => (
                   <option key={loc.value} value={loc.value}>
                     {loc.label}
@@ -647,10 +750,20 @@ export function CreateWorkspace() {
           )}
 
           <div className="flex justify-end gap-3 pt-4">
-            <Button type="button" onClick={() => navigate('/dashboard')} variant="secondary" size="md">
+            <Button
+              type="button"
+              onClick={() => navigate('/dashboard')}
+              variant="secondary"
+              size="md"
+            >
               Cancel
             </Button>
-            <Button type="submit" disabled={loading || !name || !repository || !linkedProject} size="lg" loading={loading}>
+            <Button
+              type="submit"
+              disabled={loading || !name || !repository || !linkedProject}
+              size="lg"
+              loading={loading}
+            >
               Create Workspace
             </Button>
           </div>

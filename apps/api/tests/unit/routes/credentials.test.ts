@@ -53,11 +53,15 @@ function makeTestEnv(): Env {
 }
 
 function putAgentCredential(app: Hono<{ Bindings: Env }>, request: unknown) {
-  return app.request('/api/credentials/agent', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(request),
-  }, makeTestEnv());
+  return app.request(
+    '/api/credentials/agent',
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    },
+    makeTestEnv()
+  );
 }
 
 function makeFakeSecret(prefix: string): string {
@@ -79,6 +83,101 @@ describe('Credentials Routes - OAuth Support', () => {
       'fetch',
       vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [] }), { status: 200 }))
     );
+  });
+
+  describe('POST /api/credentials - cloud provider dual-write', () => {
+    it('saves a Hetzner user credential to legacy storage and mirrors it to compute CC rows', async () => {
+      mockDB.limit.mockResolvedValueOnce([]);
+      const env = makeTestEnv();
+
+      const res = await app.request(
+        '/api/credentials',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ provider: 'hetzner', token: 'hetzner-token-123' }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(201);
+      expect(mockDB.insert).toHaveBeenCalled();
+      expect(mockDB.values).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'test-user-id',
+          provider: 'hetzner',
+          credentialType: 'cloud-provider',
+          encryptedToken: 'encrypted',
+          iv: 'iv',
+        })
+      );
+
+      const database = env.DATABASE as unknown as {
+        prepare: ReturnType<typeof vi.fn>;
+        batch: ReturnType<typeof vi.fn>;
+      };
+      const prepareCalls = database.prepare.mock.calls.map((c) => c[0] as string);
+      expect(prepareCalls.some((sql) => sql.includes('DELETE FROM cc_attachments'))).toBe(true);
+      expect(prepareCalls.some((sql) => sql.includes('INSERT INTO cc_credentials'))).toBe(true);
+      expect(prepareCalls.some((sql) => sql.includes('INSERT INTO cc_configurations'))).toBe(true);
+      expect(prepareCalls.some((sql) => sql.includes('INSERT INTO cc_attachments'))).toBe(true);
+      expect(database.batch).toHaveBeenCalled();
+    });
+
+    it('updates a Hetzner user credential in legacy storage and mirrors replacement CC rows', async () => {
+      mockDB.limit.mockResolvedValueOnce([
+        {
+          id: 'legacy-hetzner',
+          provider: 'hetzner',
+          createdAt: '2026-07-05T00:00:00.000Z',
+        },
+      ]);
+      const env = makeTestEnv();
+
+      const res = await app.request(
+        '/api/credentials',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ provider: 'hetzner', token: 'hetzner-token-456' }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect(mockDB.update).toHaveBeenCalled();
+      expect(mockDB.set).toHaveBeenCalledWith(
+        expect.objectContaining({ encryptedToken: 'encrypted', iv: 'iv' })
+      );
+
+      const database = env.DATABASE as unknown as {
+        prepare: ReturnType<typeof vi.fn>;
+        batch: ReturnType<typeof vi.fn>;
+      };
+      const prepareCalls = database.prepare.mock.calls.map((c) => c[0] as string);
+      expect(prepareCalls.some((sql) => sql.includes('DELETE FROM cc_attachments'))).toBe(true);
+      expect(prepareCalls.some((sql) => sql.includes('INSERT INTO cc_credentials'))).toBe(true);
+      expect(database.batch).toHaveBeenCalled();
+    });
+  });
+
+  describe('DELETE /api/credentials/:provider - cloud provider dual-write', () => {
+    it('deletes a legacy cloud provider credential and removes the compute CC attachment', async () => {
+      mockDB.returning.mockResolvedValueOnce([{ id: 'legacy-hetzner' }]);
+      const env = makeTestEnv();
+
+      const res = await app.request('/api/credentials/hetzner', { method: 'DELETE' }, env);
+
+      expect(res.status).toBe(200);
+      expect(mockDB.delete).toHaveBeenCalled();
+
+      const database = env.DATABASE as unknown as { prepare: ReturnType<typeof vi.fn> };
+      const prepareCalls = database.prepare.mock.calls.map((c) => c[0] as string);
+      const disconnectSql = prepareCalls.find((sql) => sql.includes('DELETE FROM cc_attachments'));
+      expect(disconnectSql).toBeDefined();
+      expect(disconnectSql).toContain("consumer_kind = 'compute'");
+      expect(disconnectSql).toContain('project_id IS NULL');
+    });
   });
 
   describe('POST /api/credentials/agent/validate', () => {
@@ -112,7 +211,10 @@ describe('Credentials Routes - OAuth Support', () => {
 
     it('returns 400 when provider validation rejects the API key', async () => {
       vi.mocked(globalThis.fetch).mockResolvedValueOnce(
-        new Response(JSON.stringify({ error: 'bad key' }), { status: 401 })
+        new Response(JSON.stringify({ error: 'bad key' }), {
+          status: 401,
+          statusText: 'Unauthorized',
+        })
       );
       const claudeApiKey = makeFakeSecret('sk-ant-api03');
 
@@ -132,7 +234,7 @@ describe('Credentials Routes - OAuth Support', () => {
 
       expect(res.status).toBe(400);
       const body = await res.json();
-      expect(body.message).toContain('Invalid or unauthorized Claude Code credential');
+      expect(body.message).toContain('Token rejected by Anthropic API (401 Unauthorized)');
     });
 
     it('validates OAuth credentials by format only', async () => {
@@ -157,16 +259,16 @@ describe('Credentials Routes - OAuth Support', () => {
       expect(globalThis.fetch).not.toHaveBeenCalled();
     });
 
-    it('validates Google API keys without placing the credential in the URL', async () => {
+    it('validates OpenAI API keys with a Bearer token against the models endpoint', async () => {
       const res = await app.request(
         '/api/credentials/agent/validate',
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            agentType: 'google-gemini',
+            agentType: 'openai-codex',
             credentialKind: 'api-key',
-            credential: 'google-api-key-1234567890',
+            credential: 'openai-api-key-1234567890',
           }),
         },
         makeTestEnv()
@@ -174,13 +276,10 @@ describe('Credentials Routes - OAuth Support', () => {
 
       expect(res.status).toBe(200);
       expect(globalThis.fetch).toHaveBeenCalledWith(
-        'https://generativelanguage.googleapis.com/v1beta/models',
+        'https://api.openai.com/v1/models',
         expect.objectContaining({
-          headers: expect.objectContaining({ 'x-goog-api-key': 'google-api-key-1234567890' }),
+          headers: expect.objectContaining({ Authorization: 'Bearer openai-api-key-1234567890' }),
         })
-      );
-      expect(vi.mocked(globalThis.fetch).mock.calls[0]?.[0]).not.toContain(
-        'google-api-key-1234567890'
       );
     });
   });
@@ -218,7 +317,7 @@ describe('Credentials Routes - OAuth Support', () => {
       const request: SaveAgentCredentialRequest = {
         agentType: 'claude-code',
         credentialKind: 'oauth-token',
-        credential: 'oauth_token_from_claude_setup_1234567890abcdefghijklmnopqrstuvwxyz',
+        credential: 'sk-ant-oat01-1234567890abcdefghijklmnopqrstuvwxyz',
         autoActivate: true,
       };
 
@@ -247,7 +346,7 @@ describe('Credentials Routes - OAuth Support', () => {
       const request: SaveAgentCredentialRequest = {
         agentType: 'claude-code',
         credentialKind: 'oauth-token',
-        credential: 'new_oauth_token_1234567890abcdefghijklmnopqrstuvwxyz_1234567890',
+        credential: 'sk-ant-oat01-new1234567890abcdefghijklmnopqrstuvwxyz',
         autoActivate: true,
       };
 
@@ -298,6 +397,34 @@ describe('Credentials Routes - OAuth Support', () => {
       );
 
       expect(res.status).toBe(201);
+    });
+
+    it('saves an API key and returns a warning when provider validation rejects it', async () => {
+      vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: 'bad key' }), {
+          status: 401,
+          statusText: 'Unauthorized',
+        })
+      );
+
+      const res = await app.request(
+        '/api/credentials/agent',
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            agentType: 'claude-code',
+            credentialKind: 'api-key',
+            credential: 'sk-ant-api03-1234567890abcdef',
+          }),
+        },
+        makeTestEnv()
+      );
+
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.validation.valid).toBe(false);
+      expect(body.validation.error).toContain('Token rejected by Anthropic API (401 Unauthorized)');
     });
 
     it('should accept an Amp API key from the shared agent catalog', async () => {
@@ -372,11 +499,15 @@ describe('Credentials Routes - OAuth Support', () => {
         autoActivate: true,
       };
 
-      const res = await app.request('/api/credentials/agent', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request),
-      }, makeTestEnv());
+      const res = await app.request(
+        '/api/credentials/agent',
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(request),
+        },
+        makeTestEnv()
+      );
 
       expect(res.status).toBe(201);
       const body = await res.json();
@@ -456,6 +587,30 @@ describe('Credentials Routes - OAuth Support', () => {
     });
   });
 
+  describe('DELETE /api/credentials/agent/:agentType/:credentialKind', () => {
+    it('disconnects a CC-only Codex auth.json source when no legacy row exists', async () => {
+      mockDB.limit.mockResolvedValueOnce([]);
+      const env = makeTestEnv();
+
+      const res = await app.request(
+        '/api/credentials/agent/openai-codex/oauth-token',
+        { method: 'DELETE' },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body).toEqual({ success: true, disconnected: true });
+
+      const database = env.DATABASE as unknown as { prepare: ReturnType<typeof vi.fn> };
+      const prepareCalls = database.prepare.mock.calls.map((c) => c[0] as string);
+      const disconnectSql = prepareCalls.find((sql) => sql.includes('DELETE FROM cc_attachments'));
+      expect(disconnectSql).toBeDefined();
+      expect(disconnectSql).toContain('consumer_target = ?');
+      expect(disconnectSql).toContain('cred.kind = ?');
+    });
+  });
+
   describe('Auto-activation behavior', () => {
     it('should not auto-activate when autoActivate is false', async () => {
       mockDB.limit.mockResolvedValueOnce([]);
@@ -463,7 +618,7 @@ describe('Credentials Routes - OAuth Support', () => {
       const request: SaveAgentCredentialRequest = {
         agentType: 'claude-code',
         credentialKind: 'oauth-token',
-        credential: 'oauth_token_that_is_long_enough_for_validation_1234567890',
+        credential: 'sk-ant-oat01-that-is-long-enough-for-validation',
         autoActivate: false,
       };
 
@@ -499,7 +654,7 @@ describe('Credentials Routes - OAuth Support', () => {
       const request: SaveAgentCredentialRequest = {
         agentType: 'claude-code',
         credentialKind: 'oauth-token',
-        credential: 'updated_oauth_token_that_is_long_enough_for_validation_1234567890',
+        credential: 'sk-ant-oat01-updated-that-is-long-enough-for-validation',
         autoActivate: true,
       };
 

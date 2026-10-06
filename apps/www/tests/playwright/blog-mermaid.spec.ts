@@ -1,0 +1,164 @@
+import { expect, test } from './fixtures';
+
+const mermaidPosts = [
+  {
+    name: 'the deployment recovery journal',
+    path: '/blog/sams-journal-a-deploy-could-recover/',
+    screenshotName: 'deployment-recovery',
+  },
+  {
+    name: 'the archive recovery and search journal',
+    path: '/blog/sams-journal-archives-got-an-exit/',
+    screenshotName: 'archive-recovery-search',
+  },
+  {
+    name: 'the resumable archive journal',
+    path: '/blog/sams-journal-archives-learned-to-resume/',
+    screenshotName: 'resumable-archive',
+  },
+  {
+    name: 'the workspace resource-history journal',
+    path: '/blog/sams-journal-workspaces-got-a-memory/',
+    screenshotName: 'workspace-resource-history',
+  },
+  {
+    name: 'the resource-management journal',
+    path: '/blog/sams-journal-keeping-agent-workloads-safe/',
+    screenshotName: 'resource-management',
+  },
+  {
+    name: 'an existing archive post',
+    path: '/blog/sams-journal-making-room-for-old-conversations/',
+    screenshotName: 'existing-archive',
+  },
+  {
+    name: 'the new archive drain journal',
+    path: '/blog/sams-journal-the-archive-got-a-clock/',
+    screenshotName: 'archive-drain',
+  },
+  {
+    name: 'the current daily journal',
+    path: '/blog/sams-journal-old-chats-got-a-lighter-home/',
+    screenshotName: 'daily-r2-history',
+  },
+  {
+    name: 'the task-start journal',
+    path: '/blog/sams-journal-a-task-needs-the-right-start/',
+    screenshotName: 'task-start',
+  },
+  {
+    name: 'the wake-reliability journal',
+    path: '/blog/sams-journal-a-wake-up-needs-a-way-home/',
+    screenshotName: 'wake-reliability',
+  },
+  {
+    name: 'the atomic-release journal',
+    path: '/blog/sams-journal-a-version-needs-a-home/',
+    screenshotName: 'atomic-release',
+  },
+  {
+    name: 'the reusable-machine journal',
+    path: '/blog/sams-journal-a-busy-machine-can-still-help/',
+    screenshotName: 'reusable-machine',
+  },
+  {
+    name: 'the affordable-archive journal',
+    path: '/blog/sams-journal-the-archive-learned-to-skip-ahead/',
+    screenshotName: 'affordable-archive',
+  },
+  {
+    name: 'the durable event journal',
+    path: '/blog/sams-journal-when-messages-wake-agents/',
+    screenshotName: 'durable-events',
+  },
+  {
+    name: 'the archive timeout journal',
+    path: '/blog/sams-journal-every-archive-chunk-gets-time/',
+    screenshotName: 'archive-timeout',
+  },
+  {
+    name: 'the readable agent-work journal',
+    path: '/blog/sams-journal-agent-work-got-easier-to-read/',
+    screenshotName: 'readable-agent-work',
+  },
+  {
+    name: 'the conversation-ordering journal',
+    path: '/blog/sams-journal-chats-follow-the-latest-message/',
+    screenshotName: 'conversation-ordering',
+  },
+  {
+    name: 'the stable-task-identity journal',
+    path: '/blog/sams-journal-one-task-through-every-wake/',
+    screenshotName: 'stable-task-identity',
+  },
+];
+
+for (const post of mermaidPosts) {
+  test(`${post.name} has a visible Mermaid viewport`, async ({ page }, testInfo) => {
+    await page.goto(post.path);
+
+    if (post.screenshotName === 'archive-recovery-search') {
+      await expect(
+        page.getByRole('heading', { name: "SAM's Journal: Archives Got an Exit" })
+      ).toBeVisible();
+    }
+
+    const diagram = page.locator('.mermaid-shell svg');
+    await expect(diagram).toBeVisible();
+
+    await expect
+      .poll(() =>
+        diagram.evaluate((svg) => {
+          const values = svg
+            .getAttribute('viewBox')
+            ?.split(/[\s,]+/)
+            .map(Number);
+          return values && values.length === 4 && values[2] > 0 && values[3] > 0;
+        })
+      )
+      .toBe(true);
+
+    const surface = page.locator('.mermaid-surface');
+    await expect(surface).toBeVisible();
+    const surfaceBox = await surface.boundingBox();
+    expect(surfaceBox?.width).toBeGreaterThan(0);
+    expect(surfaceBox?.height).toBeGreaterThan(0);
+
+    const initialViewBox = await diagram.getAttribute('viewBox');
+    await surface.hover();
+    await page.mouse.wheel(0, -400);
+    await expect.poll(() => diagram.getAttribute('viewBox')).not.toBe(initialViewBox);
+
+    await page.getByRole('button', { name: 'Reset view' }).click();
+    await expect.poll(() => diagram.getAttribute('viewBox')).toBe(initialViewBox);
+
+    await page.getByRole('button', { name: 'Full screen' }).click();
+    await expect(page.locator('.mermaid-shell')).toHaveClass(/is-fullscreen/);
+    await expect
+      .poll(() =>
+        diagram.evaluate((svg) => {
+          const values = svg
+            .getAttribute('viewBox')
+            ?.split(/[\s,]+/)
+            .map(Number);
+          return values && values[2] > 0 && values[3] > 0;
+        })
+      )
+      .toBe(true);
+    await page.getByRole('button', { name: 'Close full screen' }).click();
+    await expect(page.locator('.mermaid-shell')).not.toHaveClass(/is-fullscreen/);
+
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth
+      )
+    ).toBe(true);
+
+    const project = testInfo.project.name.toLowerCase().replace(/\W+/g, '-');
+    await page.screenshot({
+      path: `../../.codex/tmp/playwright-screenshots/www-blog-mermaid-${post.screenshotName}-${project}.png`,
+      fullPage: true,
+      animations: 'disabled',
+    });
+  });
+}

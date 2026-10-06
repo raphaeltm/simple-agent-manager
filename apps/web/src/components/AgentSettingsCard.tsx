@@ -1,7 +1,7 @@
 /**
  * Per-agent settings body — model selection, permission mode, and (for OpenCode)
- * provider / base URL / provider-name fields. Supports both the standalone
- * "card" layout and an `embedded` mode used by the unified AgentCard.
+ * provider / base URL fields. Supports both the standalone "card" layout and an
+ * `embedded` mode used by the unified AgentCard.
  */
 import type {
   AgentInfo,
@@ -14,9 +14,11 @@ import type {
 } from '@simple-agent-manager/shared';
 import {
   AGENT_PERMISSION_MODE_LABELS,
+  DEFAULT_AGENT_PERMISSION_MODE,
+  DEFAULT_OPENCODE_PROVIDER,
+  DEFAULT_OPENCODE_ZEN_MODEL,
   OPENCODE_PROVIDER_OPTIONS,
   OPENCODE_PROVIDERS,
-  PLATFORM_AI_MODELS,
   VALID_PERMISSION_MODES,
 } from '@simple-agent-manager/shared';
 import { Alert, Card } from '@simple-agent-manager/ui';
@@ -26,7 +28,7 @@ import { ModelSelect } from './ModelSelect';
 
 const DEFAULT_SUCCESS_BANNER_MS = 3000;
 const SUCCESS_BANNER_MS = Number(
-  import.meta.env.VITE_SUCCESS_BANNER_MS ?? DEFAULT_SUCCESS_BANNER_MS,
+  import.meta.env.VITE_SUCCESS_BANNER_MS ?? DEFAULT_SUCCESS_BANNER_MS
 );
 
 export interface AgentSettingsCardProps {
@@ -45,6 +47,9 @@ export interface AgentSettingsCardProps {
 /**
  * Per-agent settings card for model selection and permission mode.
  */
+/** OpenCode's own console, the only place Zen credit balance is visible. */
+const OPENCODE_CONSOLE_URL = 'https://opencode.ai/zen';
+
 export function AgentSettingsCard({
   agent,
   settings,
@@ -54,13 +59,12 @@ export function AgentSettingsCard({
 }: AgentSettingsCardProps) {
   const [model, setModel] = useState(settings?.model ?? '');
   const [permissionMode, setPermissionMode] = useState<AgentPermissionMode>(
-    settings?.permissionMode ?? 'default'
+    settings?.permissionMode ?? DEFAULT_AGENT_PERMISSION_MODE
   );
-  const [opencodeProvider, setOpencodeProvider] = useState<OpenCodeProvider | ''>(
-    settings?.opencodeProvider ?? ''
+  const [opencodeProvider, setOpencodeProvider] = useState<OpenCodeProvider>(
+    settings?.opencodeProvider ?? DEFAULT_OPENCODE_PROVIDER
   );
   const [opencodeBaseUrl, setOpencodeBaseUrl] = useState(settings?.opencodeBaseUrl ?? '');
-  const [opencodeProviderName, setOpencodeProviderName] = useState(settings?.opencodeProviderName ?? '');
   const [providerMode, setProviderMode] = useState<AgentProviderMode | ''>(
     settings?.providerMode ?? ''
   );
@@ -72,9 +76,16 @@ export function AgentSettingsCard({
   const isOpenCode = agent.id === 'opencode';
   const supportsSamProvider = agent.id === 'claude-code' || agent.id === 'openai-codex';
   const supportsOAuthProvider = agent.id === 'claude-code';
-  const selectedProvider = opencodeProvider || null;
-  const providerMeta = selectedProvider ? OPENCODE_PROVIDERS[selectedProvider] : null;
-  const showBaseUrl = selectedProvider === 'custom' || selectedProvider === 'openai-compatible';
+  const selectedProvider = opencodeProvider;
+  const providerMeta = OPENCODE_PROVIDERS[selectedProvider];
+  const showBaseUrl = selectedProvider === 'custom';
+  const openCodeModelProviderFilter: readonly string[] | undefined = (() => {
+    if (!isOpenCode) return undefined;
+    if (selectedProvider === 'opencode-zen') return ['opencode'];
+    if (selectedProvider === 'opencode-go') return ['opencode-go'];
+    return undefined;
+  })();
+  const useOpenCodeModelCatalog = isOpenCode && openCodeModelProviderFilter !== undefined;
 
   const formControlClass =
     'w-full min-h-11 py-2 px-3 rounded-sm border border-border-default bg-inset text-fg-primary text-sm outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring box-border';
@@ -82,10 +93,9 @@ export function AgentSettingsCard({
   // Sync state when settings prop changes
   useEffect(() => {
     setModel(settings?.model ?? '');
-    setPermissionMode(settings?.permissionMode ?? 'default');
-    setOpencodeProvider(settings?.opencodeProvider ?? '');
+    setPermissionMode(settings?.permissionMode ?? DEFAULT_AGENT_PERMISSION_MODE);
+    setOpencodeProvider(settings?.opencodeProvider ?? DEFAULT_OPENCODE_PROVIDER);
     setOpencodeBaseUrl(settings?.opencodeBaseUrl ?? '');
-    setOpencodeProviderName(settings?.opencodeProviderName ?? '');
     setProviderMode(settings?.providerMode ?? '');
   }, [settings]);
 
@@ -101,9 +111,8 @@ export function AgentSettingsCard({
       };
 
       if (isOpenCode) {
-        data.opencodeProvider = opencodeProvider || null;
+        data.opencodeProvider = opencodeProvider;
         data.opencodeBaseUrl = opencodeBaseUrl.trim() || null;
-        data.opencodeProviderName = opencodeProviderName.trim() || null;
       }
 
       if (supportsSamProvider) {
@@ -127,10 +136,9 @@ export function AgentSettingsCard({
       setResetting(true);
       await onReset(agent.id);
       setModel('');
-      setPermissionMode('default');
-      setOpencodeProvider('');
+      setPermissionMode(DEFAULT_AGENT_PERMISSION_MODE);
+      setOpencodeProvider(DEFAULT_OPENCODE_PROVIDER);
       setOpencodeBaseUrl('');
-      setOpencodeProviderName('');
       setProviderMode('');
       setSuccess(true);
       setTimeout(() => setSuccess(false), SUCCESS_BANNER_MS);
@@ -147,13 +155,13 @@ export function AgentSettingsCard({
     }
     switch (agent.id) {
       case 'claude-code':
-        return 'e.g. claude-opus-4-6, claude-sonnet-4-5-20250929';
+        return 'e.g. claude-opus-5, claude-sonnet-5';
       case 'openai-codex':
         return 'e.g. gpt-5-codex, o3';
       case 'google-gemini':
         return 'e.g. gemini-2.5-pro';
       case 'opencode':
-        return 'e.g. scaleway/qwen3-coder-30b-a3b-instruct';
+        return `e.g. ${DEFAULT_OPENCODE_ZEN_MODEL}`;
       default:
         return 'Model identifier';
     }
@@ -161,11 +169,11 @@ export function AgentSettingsCard({
 
   const hasChanges = (() => {
     if ((model.trim() || null) !== (settings?.model ?? null)) return true;
-    if (permissionMode !== (settings?.permissionMode ?? 'default')) return true;
+    if (permissionMode !== (settings?.permissionMode ?? DEFAULT_AGENT_PERMISSION_MODE)) return true;
     if (isOpenCode) {
-      if ((opencodeProvider || null) !== (settings?.opencodeProvider ?? null)) return true;
+      if (opencodeProvider !== (settings?.opencodeProvider ?? DEFAULT_OPENCODE_PROVIDER))
+        return true;
       if ((opencodeBaseUrl.trim() || null) !== (settings?.opencodeBaseUrl ?? null)) return true;
-      if ((opencodeProviderName.trim() || null) !== (settings?.opencodeProviderName ?? null)) return true;
     }
     if (supportsSamProvider) {
       if ((providerMode || null) !== (settings?.providerMode ?? null)) return true;
@@ -177,7 +185,9 @@ export function AgentSettingsCard({
     <>
       {error && (
         <div className="mb-3">
-          <Alert variant="error" onDismiss={() => setError(null)}>{error}</Alert>
+          <Alert variant="error" onDismiss={() => setError(null)}>
+            {error}
+          </Alert>
         </div>
       )}
 
@@ -190,48 +200,62 @@ export function AgentSettingsCard({
       {/* OpenCode provider selection */}
       {isOpenCode && (
         <div className="mb-4">
-          <label htmlFor={`opencode-provider-${agent.id}`} className="text-sm font-medium text-fg-primary mb-1 block">Inference Provider</label>
+          <label
+            htmlFor={`opencode-provider-${agent.id}`}
+            className="text-sm font-medium text-fg-primary mb-1 block"
+          >
+            Inference Provider
+          </label>
           <div className="text-xs text-fg-muted mb-2">
-            Select the AI provider for OpenCode inference. Leave as &quot;Default&quot; to auto-detect.
+            Select the AI provider for OpenCode inference. Default uses OpenCode Zen.
           </div>
           <select
             id={`opencode-provider-${agent.id}`}
             value={opencodeProvider}
             onChange={(e) => {
-              const val = e.target.value as OpenCodeProvider | '';
-              const prev = opencodeProvider;
+              const val = e.target.value as OpenCodeProvider;
               setOpencodeProvider(val);
-              if (val !== 'custom' && val !== 'openai-compatible') {
-                setOpencodeBaseUrl('');
-              }
               if (val !== 'custom') {
-                setOpencodeProviderName('');
-              }
-              if ((val === 'platform') !== (prev === 'platform')) {
-                setModel('');
+                setOpencodeBaseUrl('');
               }
             }}
             className={formControlClass}
             data-testid="opencode-provider-select"
           >
-            <option value="">Default (auto-detect)</option>
             {OPENCODE_PROVIDER_OPTIONS.map((p) => (
               <option key={p} value={p}>
                 {OPENCODE_PROVIDERS[p].label}
               </option>
             ))}
           </select>
-          {providerMeta && !providerMeta.requiresApiKey && (
-            <div className="text-xs text-fg-muted py-2 px-3 rounded-md bg-inset mt-2 border border-border-default">
-              {providerMeta.keyHelpText}
-            </div>
+          {opencodeProvider === 'opencode-zen' && (
+            <p className="text-xs text-fg-muted mt-2 mb-0" data-testid="opencode-zen-balance-note">
+              Zen bills per request from a credit balance that OpenCode only shows in its own
+              console, so SAM cannot display remaining Zen credit.{' '}
+              <a
+                href={OPENCODE_CONSOLE_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-accent underline-offset-2 hover:underline"
+              >
+                Check your balance in the OpenCode console
+              </a>
+              {
+                '. OpenCode Go plans report rolling, weekly and monthly usage in the session header.'
+              }
+            </p>
           )}
         </div>
       )}
 
       {isOpenCode && showBaseUrl && (
         <div className="mb-4">
-          <label htmlFor={`opencode-base-url-${agent.id}`} className="text-sm font-medium text-fg-primary mb-1 block">Base URL</label>
+          <label
+            htmlFor={`opencode-base-url-${agent.id}`}
+            className="text-sm font-medium text-fg-primary mb-1 block"
+          >
+            Base URL
+          </label>
           <div className="text-xs text-fg-muted mb-2">
             The HTTPS endpoint for your provider&apos;s API.
           </div>
@@ -247,30 +271,18 @@ export function AgentSettingsCard({
         </div>
       )}
 
-      {isOpenCode && selectedProvider === 'custom' && (
-        <div className="mb-4">
-          <label htmlFor={`opencode-provider-name-${agent.id}`} className="text-sm font-medium text-fg-primary mb-1 block">Provider Name</label>
-          <div className="text-xs text-fg-muted mb-2">
-            A display name for your custom provider.
-          </div>
-          <input
-            id={`opencode-provider-name-${agent.id}`}
-            type="text"
-            value={opencodeProviderName}
-            onChange={(e) => setOpencodeProviderName(e.target.value)}
-            placeholder="e.g. My Custom Provider"
-            className={formControlClass}
-            data-testid="opencode-provider-name-input"
-          />
-        </div>
-      )}
-
       {/* Provider mode for Claude Code / Codex */}
       {supportsSamProvider && (
         <div className="mb-4">
-          <label htmlFor={`provider-mode-${agent.id}`} className="text-sm font-medium text-fg-primary mb-1 block">AI Provider</label>
+          <label
+            htmlFor={`provider-mode-${agent.id}`}
+            className="text-sm font-medium text-fg-primary mb-1 block"
+          >
+            AI Provider
+          </label>
           <div className="text-xs text-fg-muted mb-2">
-            Choose how this agent connects to its AI model. &quot;SAM Platform&quot; uses your SAM AI allowance (no API key needed). &quot;Own API Key&quot; uses your personal key.
+            Choose how this agent connects to its AI model. &quot;SAM Platform&quot; uses your SAM
+            AI allowance (no API key needed). &quot;Own API Key&quot; uses your personal key.
             {supportsOAuthProvider ? ' "OAuth Token" uses your subscription token.' : ''}
           </div>
           <select
@@ -287,54 +299,54 @@ export function AgentSettingsCard({
           </select>
           {providerMode === 'sam' && (
             <div className="text-xs text-fg-muted py-2 px-3 rounded-md bg-inset mt-2 border border-border-default">
-              AI requests will be routed through the SAM platform proxy. Usage counts against your daily token budget and monthly cost cap. An admin may set allowance ceilings for your account.
+              AI requests will be routed through the SAM platform proxy. Usage counts against your
+              daily token budget and monthly cost cap. An admin may set allowance ceilings for your
+              account.
             </div>
           )}
         </div>
       )}
 
       <div className="mb-4">
-        <label htmlFor={`model-input-${agent.id}`} className="text-sm font-medium text-fg-primary mb-1 block">Model</label>
+        <label
+          htmlFor={`model-input-${agent.id}`}
+          className="text-sm font-medium text-fg-primary mb-1 block"
+        >
+          Model
+        </label>
         <div className="text-xs text-fg-muted mb-2">
-          {isOpenCode && selectedProvider === 'platform'
-            ? 'Select a model from the available Workers AI models.'
-            : 'Leave empty to use the default model. Model availability depends on your API key or subscription.'}
+          Leave empty to use the default model. Model availability depends on your API key or
+          subscription.
         </div>
-        {isOpenCode && selectedProvider === 'platform' ? (
-          <select
-            id={`model-input-${agent.id}`}
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            className={formControlClass}
-            data-testid={`model-input-${agent.id}`}
-          >
-            <option value="">Default ({PLATFORM_AI_MODELS.find((m) => m.isDefault)?.label ?? 'auto'})</option>
-            {PLATFORM_AI_MODELS.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <ModelSelect
-            id={`model-input-${agent.id}`}
-            agentType={agent.id}
-            value={model}
-            onChange={setModel}
-            placeholder={modelPlaceholder}
-            data-testid={`model-input-${agent.id}`}
-          />
-        )}
+        <ModelSelect
+          id={`model-input-${agent.id}`}
+          agentType={agent.id}
+          value={model}
+          onChange={setModel}
+          placeholder={modelPlaceholder}
+          useDynamicCatalog={useOpenCodeModelCatalog}
+          modelProviderFilter={openCodeModelProviderFilter}
+          allowStaticCatalog={!isOpenCode || useOpenCodeModelCatalog}
+          data-testid={`model-input-${agent.id}`}
+        />
       </div>
 
       <div className="mb-4" role="group" aria-labelledby={`permission-mode-label-${agent.id}`}>
-        <div id={`permission-mode-label-${agent.id}`} className="text-sm font-medium text-fg-primary mb-1">Permission Mode</div>
+        <div
+          id={`permission-mode-label-${agent.id}`}
+          className="text-sm font-medium text-fg-primary mb-1"
+        >
+          Permission Mode
+        </div>
         <div className="text-xs text-fg-muted mb-2">
           Controls how the agent handles file edits and tool execution.
         </div>
         <div className="flex flex-col gap-2">
           {VALID_PERMISSION_MODES.map((mode) => (
-            <label key={mode} className="flex items-center gap-2 text-sm text-fg-primary cursor-pointer">
+            <label
+              key={mode}
+              className="flex items-center gap-2 text-sm text-fg-primary cursor-pointer"
+            >
               <input
                 type="radio"
                 name={`permission-mode-${agent.id}`}
@@ -348,8 +360,12 @@ export function AgentSettingsCard({
           ))}
         </div>
         {permissionMode === 'bypassPermissions' && (
-          <div role="alert" className="text-xs text-danger-fg py-2 px-3 rounded-md bg-danger-tint mt-1">
-            ⚠ Warning: This disables all safety prompts. The agent will execute commands and edit files without confirmation.
+          <div
+            role="alert"
+            className="text-xs text-danger-fg py-2 px-3 rounded-md bg-danger-tint mt-1"
+          >
+            ⚠ Warning: This disables all safety prompts. The agent will execute commands and edit
+            files without confirmation.
           </div>
         )}
       </div>
@@ -385,9 +401,7 @@ export function AgentSettingsCard({
 
   return (
     <Card variant="glass" className="p-4" data-testid={`agent-settings-${agent.id}`}>
-      <div className="mb-2 font-semibold text-base text-fg-primary">
-        {agent.name}
-      </div>
+      <div className="mb-2 font-semibold text-base text-fg-primary">{agent.name}</div>
       {body}
     </Card>
   );

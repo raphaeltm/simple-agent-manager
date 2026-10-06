@@ -20,6 +20,7 @@ vi.mock('drizzle-orm/d1');
 const mocks = {
   requireNodeOwnership: vi.fn(),
   stopNodeResources: vi.fn(),
+  deleteNodeResources: vi.fn(),
   stopWorkspaceOnNode: vi.fn(),
   getUserId: vi.fn(() => 'user-123'),
 };
@@ -37,7 +38,7 @@ vi.mock('../../../src/middleware/node-auth', () => ({
 vi.mock('../../../src/services/nodes', () => ({
   stopNodeResources: (...args: any[]) => mocks.stopNodeResources(...args),
   createNodeRecord: vi.fn(),
-  deleteNodeResources: vi.fn(),
+  deleteNodeResources: (...args: any[]) => mocks.deleteNodeResources(...args),
   provisionNode: vi.fn(),
 }));
 
@@ -56,7 +57,6 @@ vi.mock('../../../src/services/jwt', () => ({
 vi.mock('../../../src/services/limits', () => ({
   getRuntimeLimits: vi.fn(() => ({
     maxNodes: 10,
-    maxWorkspacesPerNode: 5,
     canCreateNode: true,
   })),
 }));
@@ -65,7 +65,18 @@ vi.mock('../../../src/services/telemetry', () => ({
   recordNodeRoutingMetric: vi.fn(),
 }));
 
-vi.mock('../../../src/lib/logger', () => ({
+vi.mock('../../../src/services/node-stranded-tasks', () => ({
+  listStrandedNodeTasks: vi.fn(async () => []),
+  terminalizeStrandedNodeTasks: vi.fn(async () => 0),
+}));
+
+vi.mock('../../../src/services/node-health', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/services/node-health')>()),
+  recordNodeHealthEvent: vi.fn(async () => undefined),
+}));
+
+vi.mock('../../../src/lib/logger', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/logger')>()),
   log: { warn: vi.fn(), info: vi.fn(), error: vi.fn() },
 }));
 
@@ -86,7 +97,7 @@ function createApp() {
     if (typeof appError.statusCode === 'number') {
       return c.json(
         { error: appError.error, message: appError.message },
-        appError.statusCode as any,
+        appError.statusCode as any
       );
     }
     return c.json({ error: 'INTERNAL_ERROR', message: String(err) }, 500);
@@ -99,7 +110,10 @@ function createMockEnv(): Env {
   return {
     DATABASE: {} as any,
     AUTH_KV: {} as any,
-    NODE_LIFECYCLE: {} as any,
+    NODE_LIFECYCLE: {
+      idFromName: vi.fn((nodeId: string) => nodeId),
+      get: vi.fn(() => ({ finalizeDeletion: vi.fn() })),
+    } as any,
     ANALYTICS: {} as any,
   } as Env;
 }
@@ -111,6 +125,7 @@ function createMockEnv(): Env {
 describe('POST /api/nodes/:id/stop', () => {
   let app: ReturnType<typeof createApp>;
   let env: Env;
+  let mockDeleteWhere: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -125,6 +140,14 @@ describe('POST /api/nodes/:id/stop', () => {
       userId: 'user-123',
     });
     mocks.stopNodeResources.mockResolvedValue(undefined);
+    mocks.deleteNodeResources.mockResolvedValue({
+      nodeFound: true,
+      runtimeTerminationConfirmed: true,
+      providerVmDeleted: true,
+      providerVmDeleteSkippedReason: null,
+      backendDnsDeleted: true,
+      errors: [],
+    });
 
     // Mock drizzle to return chainable query builders
     const mockUpdateChain: any = {};
@@ -135,10 +158,12 @@ describe('POST /api/nodes/:id/stop', () => {
     mockSelectChain.from = vi.fn(() => mockSelectChain);
     mockSelectChain.where = vi.fn(() => Promise.resolve([]));
 
+    mockDeleteWhere = vi.fn(() => Promise.resolve());
+
     (drizzle as any).mockReturnValue({
       select: vi.fn(() => mockSelectChain),
       update: vi.fn(() => mockUpdateChain),
-      delete: vi.fn(() => ({ where: vi.fn(() => Promise.resolve()) })),
+      delete: vi.fn(() => ({ where: mockDeleteWhere })),
     });
   });
 
@@ -163,10 +188,139 @@ describe('POST /api/nodes/:id/stop', () => {
         statusCode: 404,
         error: 'NOT_FOUND',
         message: 'Node not found',
-      }),
+      })
     );
 
     const response = await app.request('/api/nodes/node-1/stop', { method: 'POST' }, env);
     expect(response.status).toBe(404);
+  });
+});
+
+describe('DELETE /api/nodes/:id', () => {
+  let app: ReturnType<typeof createApp>;
+  let env: Env;
+  let mockDeleteWhere: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    app = createApp();
+    env = createMockEnv();
+
+    mocks.requireNodeOwnership.mockResolvedValue({
+      id: 'node-1',
+      status: 'running',
+      healthStatus: 'healthy',
+      userId: 'user-123',
+      nodeRole: 'workspace',
+    });
+    mocks.deleteNodeResources.mockResolvedValue({
+      nodeFound: true,
+      runtimeTerminationConfirmed: false,
+      providerVmDeleted: false,
+      providerVmDeleteSkippedReason: null,
+      backendDnsDeleted: false,
+      errors: ['provider cleanup failed'],
+    });
+
+    const mockSelectChain: any = {};
+    mockSelectChain.from = vi.fn(() => mockSelectChain);
+    mockSelectChain.where = vi.fn(() => Promise.resolve([]));
+    mockDeleteWhere = vi.fn(() => Promise.resolve());
+
+    (drizzle as any).mockReturnValue({
+      select: vi.fn(() => mockSelectChain),
+      update: vi.fn(() => ({ set: vi.fn(() => ({ where: vi.fn(() => Promise.resolve()) })) })),
+      delete: vi.fn(() => ({ where: mockDeleteWhere })),
+    });
+  });
+
+  it('returns conflict and preserves deployment node row when provider cleanup fails', async () => {
+    mocks.requireNodeOwnership.mockResolvedValue({
+      id: 'node-deploy-1',
+      status: 'running',
+      healthStatus: 'healthy',
+      userId: 'user-123',
+      nodeRole: 'deployment',
+    });
+
+    const response = await app.request('/api/nodes/node-deploy-1', { method: 'DELETE' }, env);
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      message: 'Deployment node could not be fully deprovisioned: provider cleanup failed',
+    });
+    expect(mocks.deleteNodeResources).toHaveBeenCalledWith('node-deploy-1', 'user-123', env);
+    expect(mockDeleteWhere).not.toHaveBeenCalled();
+  });
+
+  it('returns conflict and preserves workspace/node records when runtime deletion is unconfirmed', async () => {
+    const response = await app.request('/api/nodes/node-1', { method: 'DELETE' }, env);
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      message: 'Node runtime termination is not confirmed: provider cleanup failed',
+    });
+    expect(mocks.deleteNodeResources).toHaveBeenCalledWith('node-1', 'user-123', env);
+    expect(mockDeleteWhere).not.toHaveBeenCalled();
+  });
+
+  it('routes managed workspace deletion through the NodeLifecycle terminal boundary', async () => {
+    const operations: string[] = [];
+    const finalizeDeletion = vi.fn(async (nodeId: string, userId: string) => {
+      operations.push(`lifecycle:${nodeId}:${userId}`);
+    });
+    env.NODE_LIFECYCLE = {
+      idFromName: vi.fn((nodeId: string) => nodeId),
+      get: vi.fn(() => ({ finalizeDeletion })),
+    } as any;
+    mocks.requireNodeOwnership.mockResolvedValue({
+      id: 'node-1',
+      userId: 'user-123',
+      status: 'running',
+      healthStatus: 'healthy',
+      nodeRole: 'workspace',
+      nodeClass: 'managed',
+      cloudProvider: 'hetzner',
+      providerInstanceId: '424242',
+      ipAddress: '192.0.2.10',
+    });
+    mocks.deleteNodeResources.mockResolvedValue({
+      nodeFound: true,
+      runtimeTerminationConfirmed: true,
+      runtimeTerminationConfirmedAt: '2026-09-04T09:00:00.000Z',
+      runtimeIncarnationId: 'runtime-node-1',
+      providerVmDeleted: true,
+      providerVmDeleteSkippedReason: null,
+      backendDnsDeleted: true,
+      errors: [],
+    });
+
+    let selectIndex = 0;
+    const selectResults = [[], [{ id: 'workspace-node-1' }]];
+    const deleteRun = vi.fn(async () => ({ meta: { changes: 1 } }));
+    const deleteWhere = vi.fn(() => {
+      operations.push('d1-delete');
+      return Object.assign(Promise.resolve(), { run: deleteRun });
+    });
+    (drizzle as any).mockReturnValue({
+      select: vi.fn(() => {
+        const result = selectResults[selectIndex++] ?? [];
+        const chain: any = {};
+        chain.from = vi.fn(() => chain);
+        chain.where = vi.fn(async () => result);
+        return chain;
+      }),
+      update: vi.fn(() => ({ set: vi.fn(() => ({ where: vi.fn(async () => undefined) })) })),
+      delete: vi.fn(() => ({ where: deleteWhere })),
+    });
+
+    const response = await app.request('/api/nodes/node-1', { method: 'DELETE' }, env);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ success: true });
+    expect(mocks.deleteNodeResources).toHaveBeenCalledWith('node-1', 'user-123', env);
+    expect(deleteWhere).toHaveBeenCalledTimes(2);
+    expect(finalizeDeletion).toHaveBeenCalledWith('node-1', 'user-123');
+    expect(operations).toEqual(['d1-delete', 'd1-delete', 'lifecycle:node-1:user-123']);
   });
 });

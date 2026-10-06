@@ -1,4 +1,4 @@
-import type { VMSize } from '@simple-agent-manager/shared';
+import type { ProviderInstanceOffering, VMSize } from '@simple-agent-manager/shared';
 
 /**
  * Configuration for creating a VM.
@@ -10,8 +10,14 @@ export interface VMConfig {
   /** Server name */
   name: string;
 
-  /** VM size tier */
-  size: VMSize;
+  /** Deprecated VM size tier. Native callers should use `native.instanceType`. */
+  size?: VMSize;
+
+  /** Deprecated top-level provider-native instance type/SKU. Use `native.instanceType`. */
+  instanceType?: string;
+
+  /** Exact provider-native VM request. Preferred for all new provisioning paths. */
+  native?: NativeVMConfig;
 
   /** Datacenter/region identifier */
   location: string;
@@ -26,6 +32,30 @@ export interface VMConfig {
   image?: string;
 }
 
+export type VMArchitecture = 'x86_64' | 'arm64';
+
+export interface VMHardwareResources {
+  /** vCPU count reported by the provider or catalog. */
+  vcpuCount: number;
+  /** Memory in MiB. */
+  memoryMb: number;
+  /** Root/local disk in GB when the provider exposes it. */
+  diskGb?: number;
+}
+
+export interface NativeVMConfig {
+  /** Exact provider-native instance type/SKU/plan/flavor/machine type. */
+  instanceType: string;
+  /** Explicit boot/root disk request in GB when the provider accepts one. */
+  bootDiskSizeGb?: number;
+  /** Provider image identifier/family/name override for this VM. */
+  image?: string;
+  /** Requested architecture. Providers validate only when their API exposes enough information. */
+  architecture?: VMArchitecture;
+  /** Catalog or caller-known resources for accounting before provider creation. */
+  resources?: VMHardwareResources;
+}
+
 /**
  * VM status as reported by the provider
  */
@@ -35,6 +65,8 @@ export type VMStatus = 'initializing' | 'running' | 'off' | 'starting' | 'stoppi
  * VM instance as returned by provider
  */
 export interface VMInstance {
+  /** Provider-reported location; never inferred from the requested target. */
+  location?: string;
   /** Provider-specific server ID */
   id: string;
 
@@ -50,11 +82,27 @@ export interface VMInstance {
   /** Server type (e.g., "cx23") */
   serverType: string;
 
+  /** Provider-observed hardware metadata. Does not use legacy VM tiers as authority. */
+  observedHardware: VMObservedHardware;
+
   /** ISO 8601 creation timestamp */
   createdAt: string;
 
   /** Labels attached to server */
   labels: Record<string, string>;
+}
+
+export type VMHardwareObservationSource = 'observed' | 'inferred' | 'unknown';
+
+export interface VMObservedValue<T> {
+  value: T | null;
+  source: VMHardwareObservationSource;
+  reason?: string;
+}
+
+export interface VMObservedHardware {
+  serverType: VMObservedValue<string>;
+  resources: VMObservedValue<VMHardwareResources>;
 }
 
 /**
@@ -77,10 +125,152 @@ export interface SizeConfig {
   storageGb: number;
 }
 
+export interface ProviderOfferingListOptions {
+  /** Prefer provider APIs when implemented and credentials are available. */
+  preferApi?: boolean;
+  /** When false, API-backed catalog calls must surface provider failures instead of returning static fallback rows. */
+  allowStaticFallback?: boolean;
+}
+
 /** Location metadata for display purposes */
 export interface LocationMeta {
   name: string;
   country: string;
+}
+
+export type VolumeStatus =
+  | 'creating'
+  | 'available'
+  | 'attaching'
+  | 'attached'
+  | 'detaching'
+  | 'resizing'
+  | 'deleting'
+  | 'unknown';
+
+export const SAM_VOLUME_FILESYSTEM_FORMAT = 'ext4';
+export const SAM_VOLUME_MOUNT_PATH_TEMPLATE = '/mnt/sam-env-{environmentId}/';
+export const SAM_VOLUME_FSTAB_OPTIONS = ['nofail'] as const;
+
+/**
+ * Volume conventions consumed by future cloud-init/agent code.
+ * The provider layer creates provider block devices only; node-side mkfs,
+ * mount, fstab, and "refuse if unmounted" enforcement are intentionally
+ * handled outside this package.
+ */
+export interface VolumeLifecycleConventions {
+  /** Filesystem SAM expects for app data volumes. */
+  readonly filesystem: typeof SAM_VOLUME_FILESYSTEM_FORMAT;
+  /** Mount path template where `{environmentId}` is replaced by the environment ID. */
+  readonly mountPathTemplate: typeof SAM_VOLUME_MOUNT_PATH_TEMPLATE;
+  /** Required fstab options for resilient boot when the volume is detached. */
+  readonly fstabOptions: readonly (typeof SAM_VOLUME_FSTAB_OPTIONS)[number][];
+}
+
+export interface VolumeCapabilities {
+  /** Whether this provider implementation supports first-class block volumes. */
+  readonly supported: boolean;
+  /** Minimum provider volume size in GB, if known. */
+  readonly minSizeGb?: number;
+  /** Maximum provider volume size in GB, if known. */
+  readonly maxSizeGb?: number;
+  /** True when provider resizing can only increase size. */
+  readonly growOnlyResize: boolean;
+  /** True when the volume and server must be in the same location/zone. */
+  readonly requiresSameLocation: boolean;
+  /** Maximum attached volumes per server, if known. */
+  readonly maxAttachedVolumesPerServer?: number;
+  /** Default filesystem format SAM asks the provider to create when supported. */
+  readonly defaultFormat: typeof SAM_VOLUME_FILESYSTEM_FORMAT;
+  /** Node-side lifecycle conventions for future cloud-init/agent consumers. */
+  readonly lifecycle: VolumeLifecycleConventions;
+  /** Known provider support notes or gaps callers may display/log. */
+  readonly notes?: readonly string[];
+}
+
+export interface VolumeConfig {
+  /** Provider volume name. */
+  name: string;
+  /** Requested size in GB. */
+  sizeGb: number;
+  /** Provider datacenter/zone. Must match the future server location. */
+  location: string;
+  /** Metadata labels/tags for the volume. */
+  labels?: Record<string, string>;
+  /** Filesystem format requested at creation. Defaults to ext4. */
+  format?: typeof SAM_VOLUME_FILESYSTEM_FORMAT;
+}
+
+export interface VolumeAttachmentConfig {
+  /** Provider-specific volume ID. */
+  volumeId: string;
+  /** Provider-specific server/instance ID. */
+  serverId: string;
+  /** Provider datacenter/zone shared by volume and server. */
+  location: string;
+}
+
+export interface VolumeDetachConfig {
+  /** Provider-specific volume ID. */
+  volumeId: string;
+  /** Provider-specific server/instance ID, required by providers that detach via server action. */
+  serverId?: string;
+  /** Provider datacenter/zone shared by volume and server. */
+  location: string;
+}
+
+export interface VolumeResizeConfig {
+  /** Provider-specific volume ID. */
+  volumeId: string;
+  /** Provider datacenter/zone where the volume exists. */
+  location: string;
+  /** New desired size in GB. Must not be smaller than current size. */
+  sizeGb: number;
+  /** Current size in GB, when caller already has it. Provider fetches when omitted. */
+  currentSizeGb?: number;
+}
+
+export interface VolumeLookupConfig {
+  /** Provider-specific volume ID. */
+  volumeId: string;
+  /** Provider datacenter/zone where the volume exists. */
+  location: string;
+}
+
+export interface VolumeListConfig {
+  /** Provider datacenter/zone to list. */
+  location: string;
+  /** Optional provider label/tag filtering. */
+  labels?: Record<string, string>;
+}
+
+export interface VolumeInstance {
+  /** Provider-specific volume ID. */
+  id: string;
+  /** Provider volume name. */
+  name: string;
+  /** Volume size in GB. */
+  sizeGb: number;
+  /** Provider datacenter/zone where the volume exists. */
+  location: string;
+  /** Normalized provider status. */
+  status: VolumeStatus;
+  /** Attached provider server/instance ID, if any. */
+  attachedServerId?: string;
+  /** Linux device path reported by provider after attach, if any. */
+  linuxDevice?: string;
+  /** Provider volume type/class, if exposed. */
+  volumeType?: string;
+  /** Provider-reported creation timestamp. */
+  createdAt: string;
+  /** Metadata labels/tags attached to the volume. */
+  labels: Record<string, string>;
+}
+
+/** Optional caller-owned lifecycle context for a provider operation. */
+export interface ProviderRequestContext {
+  /** Cancels pending HTTP, retry, polling, and follow-up work for this operation. */
+  readonly signal?: AbortSignal;
 }
 
 /**
@@ -103,38 +293,100 @@ export interface Provider {
   /** Default location for this provider */
   readonly defaultLocation: string;
 
+  /** Provider volume constraints and SAM lifecycle conventions. */
+  readonly volumeCapabilities: VolumeCapabilities;
+
+  /**
+   * True when `listInstanceOfferings({ preferApi: true, allowStaticFallback: false })` is
+   * backed by a live provider catalog API. Providers that only ever return SAM's curated
+   * static offering table leave this unset, so a caller can never mistake a static list —
+   * or an EMPTY static list — for an authoritative provider inventory.
+   */
+  readonly instanceOfferingApiBacked?: boolean;
+
   /** Provision a new VM */
-  createVM(config: VMConfig): Promise<VMInstance>;
+  createVM(config: VMConfig, context?: ProviderRequestContext): Promise<VMInstance>;
 
   /** Delete a VM. MUST be idempotent (no error on 404). */
-  deleteVM(id: string): Promise<void>;
+  deleteVM(id: string, context?: ProviderRequestContext): Promise<void>;
 
   /** Get VM by ID. Returns null if not found (no throw). */
-  getVM(id: string): Promise<VMInstance | null>;
+  getVM(id: string, context?: ProviderRequestContext): Promise<VMInstance | null>;
 
   /** List VMs with optional label-based filtering */
-  listVMs(labels?: Record<string, string>): Promise<VMInstance[]>;
+  listVMs(labels?: Record<string, string>, context?: ProviderRequestContext): Promise<VMInstance[]>;
 
   /** Power off a VM */
-  powerOff(id: string): Promise<void>;
+  powerOff(id: string, context?: ProviderRequestContext): Promise<void>;
 
   /** Power on a VM */
-  powerOn(id: string): Promise<void>;
+  powerOn(id: string, context?: ProviderRequestContext): Promise<void>;
 
   /** Validate provider credentials. Returns true if valid, throws ProviderError on failure. */
-  validateToken(): Promise<boolean>;
+  validateToken(context?: ProviderRequestContext): Promise<boolean>;
+
+  /** List provider-native instance offerings available for compute-pool candidates. */
+  listInstanceOfferings(
+    options?: ProviderOfferingListOptions,
+    context?: ProviderRequestContext
+  ): Promise<ProviderInstanceOffering[]>;
+
+  /** Create a provider block volume. */
+  createVolume(config: VolumeConfig, context?: ProviderRequestContext): Promise<VolumeInstance>;
+
+  /** Attach a volume to a server in the same location/zone. */
+  attachVolume(
+    config: VolumeAttachmentConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance>;
+
+  /** Detach a volume from its server. MUST be idempotent on already-detached 404s where provider allows it. */
+  detachVolume(
+    config: VolumeDetachConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance | null>;
+
+  /** Resize a volume upward only. Implementations MUST reject shrink requests before API calls. */
+  resizeVolume(
+    config: VolumeResizeConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance>;
+
+  /** Delete a volume. MUST be idempotent (no error on 404). */
+  deleteVolume(config: VolumeLookupConfig, context?: ProviderRequestContext): Promise<void>;
+
+  /** Get volume by ID. Returns null if not found (no throw). */
+  getVolume(
+    config: VolumeLookupConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance | null>;
+
+  /** List volumes in an explicit location/zone with optional label-based filtering. */
+  listVolumes(
+    config: VolumeListConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance[]>;
 }
 
 /**
  * Provider configuration — discriminated union per provider type.
  * Accepts explicit credentials; MUST NOT access process.env.
  */
-export type ProviderConfig = HetznerProviderConfig | ScalewayProviderConfig | GcpProviderConfig;
+export type ProviderConfig =
+  | HetznerProviderConfig
+  | ScalewayProviderConfig
+  | GcpProviderConfig
+  | VultrProviderConfig
+  | InfomaniakProviderConfig
+  | DigitalOceanProviderConfig
+  | UpCloudProviderConfig;
 
 export interface HetznerProviderConfig {
   provider: 'hetzner';
   apiToken: string;
   datacenter?: string;
+  /** Optional provider logger. Defaults to no-op and must not receive secrets. */
+  logger?: ProviderLogger;
   /** Delay in ms before retrying same location on 412 (default: 3000) */
   placementRetryDelayMs?: number;
   /** Whether to try other locations after primary fails (default: true) */
@@ -143,8 +395,12 @@ export interface HetznerProviderConfig {
   capacityRetryInitialDelayMs?: number;
   /** Maximum delay in ms per capacity retry wait (default: 120000) */
   capacityRetryMaxDelayMs?: number;
-  /** Maximum number of capacity retry attempts before giving up (default: 5) */
+  /** Maximum number of capacity retry attempts before giving up (default: 10) */
   capacityRetryMaxAttempts?: number;
+  /** Total time budget in ms for capacity retries (default: 300000 = 5 min) */
+  capacityRetryBudgetMs?: number;
+  /** Maximum list pages fetched per Hetzner list operation. */
+  maxListPages?: number;
 }
 
 export interface ScalewayProviderConfig {
@@ -154,11 +410,82 @@ export interface ScalewayProviderConfig {
   zone?: string;
 }
 
+export interface InfomaniakProviderConfig {
+  provider: 'infomaniak';
+  applicationCredentialId: string;
+  applicationCredentialSecret: string;
+  authUrl?: string;
+  region?: string;
+  endpointInterface?: string;
+  networkName?: string;
+  imageName?: string;
+  volumeType?: string;
+  flavors?: Partial<Record<VMSize, string>>;
+  requestTimeoutMs?: number;
+  ipPollTimeoutMs?: number;
+  ipPollIntervalMs?: number;
+  logger?: ProviderLogger;
+}
+
+export interface VultrProviderConfig {
+  provider: 'vultr';
+  apiToken: string;
+  /** Default region (Vultr region id, e.g. `fra`). Defaults to DEFAULT_VULTR_REGION. */
+  region?: string;
+  /** OS name matched against `GET /v2/os` to resolve the numeric os_id. Defaults to DEFAULT_VULTR_OS_NAME. */
+  osName?: string;
+  /** Per-request timeout in ms. Default from getTimeoutMs(). */
+  requestTimeoutMs?: number;
+  /** Total budget in ms for the post-create main_ip poll (default DEFAULT_VULTR_IP_POLL_TIMEOUT_MS). */
+  ipPollTimeoutMs?: number;
+  /** Delay in ms between main_ip poll attempts (default DEFAULT_VULTR_IP_POLL_INTERVAL_MS). */
+  ipPollIntervalMs?: number;
+  /** Optional provider logger. Defaults to no-op and must not receive secrets. */
+  logger?: ProviderLogger;
+}
+
+export interface DigitalOceanProviderConfig {
+  provider: 'digitalocean';
+  apiToken: string;
+  /** Default region (DO region slug, e.g. `fra1`). Defaults to DEFAULT_DIGITALOCEAN_REGION. */
+  region?: string;
+  /** Image slug (or numeric image id) for new droplets. Defaults to DEFAULT_DIGITALOCEAN_IMAGE. */
+  image?: string;
+  /** Per-request timeout in ms. Default from getTimeoutMs(). */
+  requestTimeoutMs?: number;
+  /** Total budget in ms for the post-create public-IP poll (default DEFAULT_DIGITALOCEAN_IP_POLL_TIMEOUT_MS). */
+  ipPollTimeoutMs?: number;
+  /** Delay in ms between public-IP poll attempts (default DEFAULT_DIGITALOCEAN_IP_POLL_INTERVAL_MS). */
+  ipPollIntervalMs?: number;
+  /** Total budget in ms for polling async volume actions to completion (default DEFAULT_DIGITALOCEAN_ACTION_POLL_TIMEOUT_MS). */
+  actionPollTimeoutMs?: number;
+  /** Delay in ms between async volume action polls. */
+  actionPollIntervalMs?: number;
+  /** Maximum list pages fetched per operation. */
+  maxListPages?: number;
+  /** Optional provider logger. Defaults to no-op and must not receive secrets. */
+  logger?: ProviderLogger;
+}
+
+export interface UpCloudProviderConfig {
+  provider: 'upcloud';
+  username: string;
+  password: string;
+  apiUrl?: string;
+  zone?: string;
+  imageTitle?: string;
+  requestTimeoutMs?: number;
+  ipPollTimeoutMs?: number;
+  ipPollIntervalMs?: number;
+  stopTimeoutSeconds?: number;
+  logger?: ProviderLogger;
+}
+
 export interface GcpProviderConfig {
   provider: 'gcp';
   projectId: string;
   /** Function that returns a valid GCP access token (via STS exchange) */
-  tokenProvider: () => Promise<string>;
+  tokenProvider: (context?: ProviderRequestContext) => Promise<string>;
   defaultZone?: string;
   imageFamily?: string;
   imageProject?: string;
@@ -169,7 +496,51 @@ export interface GcpProviderConfig {
   firewallSourceRanges?: readonly string[];
   /** TCP ports allowed by the GCP VPC firewall rule for VM agent ingress. */
   agentPorts?: readonly string[];
+  /** Source CIDR ranges allowed by the GCP VPC firewall rule for public app-route ingress. */
+  appRouteSourceRanges?: readonly string[];
+  /** TCP ports allowed by the GCP VPC firewall rule for public app-route ingress. */
+  appRoutePorts?: readonly string[];
 }
+
+/**
+ * Normalized error categories for provider operations.
+ * Each provider maps its own native error codes/signals to these categories.
+ * The retry engine consumes only the normalized category.
+ */
+export type ProviderErrorCategory =
+  | 'transient_capacity'
+  | 'quota_exceeded'
+  | 'invalid_config'
+  | 'rate_limited'
+  | 'auth_error'
+  | 'unknown';
+
+export type ProviderErrorContextValue =
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+  | ProviderErrorContext
+  | ProviderErrorContextValue[];
+
+export interface ProviderErrorContext {
+  [key: string]: ProviderErrorContextValue;
+}
+
+export interface ProviderLogContext {
+  [key: string]: string | number | boolean | null | undefined;
+}
+
+export interface ProviderLogger {
+  warn(message: string, context?: ProviderLogContext): void;
+  info(message: string, context?: ProviderLogContext): void;
+}
+
+export const noopProviderLogger: ProviderLogger = {
+  warn: () => {},
+  info: () => {},
+};
 
 /**
  * Normalized error for all provider operations.
@@ -184,11 +555,29 @@ export class ProviderError extends Error {
     /** HTTP status code (if from API call) */
     public readonly statusCode: number | undefined,
     message: string,
-    /** Original error */
-    options?: { cause?: Error },
+    /** Original error and safe structured diagnostics */
+    options?: {
+      cause?: Error;
+      context?: ProviderErrorContext;
+      /** Raw error code from the provider API (e.g., Hetzner's "resource_unavailable") */
+      providerCode?: string;
+      /** Normalized error category for retry decisions */
+      category?: ProviderErrorCategory;
+    }
   ) {
     super(message, options);
+    this.context = options?.context;
+    this.providerCode = options?.providerCode;
+    this.category = options?.category ?? 'unknown';
   }
+
+  readonly context: ProviderErrorContext | undefined;
+
+  /** Raw error code from the provider API response */
+  readonly providerCode: string | undefined;
+
+  /** Normalized error category for provider-agnostic retry decisions */
+  readonly category: ProviderErrorCategory;
 
   /** Make Error properties visible to JSON.stringify */
   toJSON(): Record<string, unknown> {
@@ -197,7 +586,10 @@ export class ProviderError extends Error {
       message: this.message,
       provider: this.providerName,
       statusCode: this.statusCode,
+      providerCode: this.providerCode,
+      category: this.category,
       cause: this.cause instanceof Error ? this.cause.message : this.cause,
+      context: this.context,
     };
   }
 }

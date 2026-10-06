@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "${1:-}" == "--version" ]] || exit 2
+echo "codex-cli 0.155.0-approved-test-fixture"

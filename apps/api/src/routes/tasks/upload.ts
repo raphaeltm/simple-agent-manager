@@ -20,7 +20,7 @@ import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
 import { getAuth, requireApproved,requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
-import { requireOwnedProject } from '../../middleware/project-auth';
+import { requireProjectCapability } from '../../middleware/project-auth';
 import { jsonValidator, RequestAttachmentUploadSchema } from '../../schemas';
 import { generatePresignedUploadUrl } from '../../services/attachment-upload';
 
@@ -48,7 +48,7 @@ uploadRoutes.post('/request-upload', requireAuth(), requireApproved(), jsonValid
   const db = drizzle(c.env.DATABASE, { schema });
 
   // Validate project ownership
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectCapability(db, projectId, userId, 'task:write');
 
   // Check R2 S3 credentials are configured
   if (!c.env.R2_ACCESS_KEY_ID || !c.env.R2_SECRET_ACCESS_KEY) {

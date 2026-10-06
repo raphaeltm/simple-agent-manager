@@ -1,10 +1,10 @@
 import type { TokenUsage } from '@simple-agent-manager/acp-client';
 import type { AgentSession } from '@simple-agent-manager/shared';
-import type { DetectedPort,Event, WorkspaceResponse } from '@simple-agent-manager/shared';
-import { VM_LOCATIONS,VM_SIZE_LABELS } from '@simple-agent-manager/shared';
+import type { DetectedPort, Event, WorkspaceResponse } from '@simple-agent-manager/shared';
+import { VM_LOCATIONS } from '@simple-agent-manager/shared';
 import { Button } from '@simple-agent-manager/ui';
-import { ExternalLink, GitBranch, Globe,Play, Trash2 } from 'lucide-react';
-import { type FC,useEffect, useMemo, useState } from 'react';
+import { ExternalLink, GitBranch, Globe, Play, Trash2 } from 'lucide-react';
+import { type FC, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 
 import { useNodeSystemInfo } from '../hooks/useNodeSystemInfo';
@@ -13,6 +13,8 @@ import { getPortAccessUrl } from '../lib/api';
 import { formatFileSize } from '../lib/file-utils';
 import { sanitizeUrl } from '../lib/url-utils';
 import { CollapsibleSection } from './CollapsibleSection';
+import { EffectivePoolSummary } from './hardware/EffectivePoolSummary';
+import { WorkspaceHardwareDetails } from './hardware/HardwareDetails';
 import { ResourceBar } from './node/ResourceBar';
 
 // ─── Types ───────────────────────────────────────────────────
@@ -83,12 +85,6 @@ function formatTokens(n: number): string {
   return String(n);
 }
 
-// VM display helpers using shared provider-agnostic constants
-function vmSizeLabel(size: string): string {
-  const config = VM_SIZE_LABELS[size as keyof typeof VM_SIZE_LABELS];
-  return config ? `${config.label} (${config.shortDescription})` : size;
-}
-
 function vmLocationLabel(location: string): string {
   const config = VM_LOCATIONS[location];
   return config ? `${config.name}, ${config.country}` : location;
@@ -120,31 +116,31 @@ function sessionStatusColor(status: string, hostStatus?: string | null): string 
   if (hostStatus) {
     switch (hostStatus) {
       case 'prompting':
-        return 'var(--sam-color-tn-purple)'; // purple — actively working
+        return 'var(--sam-workspace-purple-fg)'; // purple: actively working
       case 'ready':
-        return 'var(--sam-color-tn-green)'; // green — ready for prompts
+        return 'var(--sam-workspace-success-fg)'; // green: ready for prompts
       case 'starting':
-        return 'var(--sam-color-tn-yellow)'; // amber — initializing
+        return 'var(--sam-workspace-warning-fg)'; // amber: initializing
       case 'idle':
-        return 'var(--sam-color-tn-fg-muted)'; // dim — no agent selected
+        return 'var(--sam-workspace-tab-muted)'; // dim: no agent selected
       case 'stopped':
-        return 'var(--sam-color-tn-fg-dimmer)'; // dimmer — stopped
+        return 'var(--sam-workspace-muted-dot)'; // dimmer: stopped
       case 'error':
-        return 'var(--sam-color-tn-red)'; // red
+        return 'var(--sam-workspace-danger-fg)'; // red
     }
   }
 
   switch (status) {
     case 'connected':
     case 'running':
-      return 'var(--sam-color-tn-green)';
+      return 'var(--sam-workspace-success-fg)';
     case 'connecting':
     case 'reconnecting':
-      return 'var(--sam-color-tn-yellow)';
+      return 'var(--sam-workspace-warning-fg)';
     case 'error':
-      return 'var(--sam-color-tn-red)';
+      return 'var(--sam-workspace-danger-fg)';
     default:
-      return 'var(--sam-color-tn-fg-muted)';
+      return 'var(--sam-workspace-tab-muted)';
   }
 }
 
@@ -217,14 +213,15 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
     return totals;
   }, [sessionTokenUsages]);
 
-  const repoUrl = workspace?.repository
-    ? `https://github.com/${workspace.repository}`
-    : null;
+  const repoUrl = workspace?.repository ? `https://github.com/${workspace.repository}` : null;
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* ── Header: name + lifecycle ── */}
-      <div className="flex flex-col gap-2 shrink-0 border-b border-border-default" style={{ padding: '10px 12px' }}>
+      <div
+        className="flex flex-col gap-2 shrink-0 border-b border-border-default"
+        style={{ padding: '10px 12px' }}
+      >
         <div className="flex" style={{ gap: 'var(--sam-space-2)' }}>
           <input
             value={displayNameInput}
@@ -239,11 +236,7 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
               fontSize: 'var(--sam-type-caption-size)',
             }}
           />
-          <Button
-            size="sm"
-            onClick={onRename}
-            disabled={renaming || !displayNameInput.trim()}
-          >
+          <Button size="sm" onClick={onRename} disabled={renaming || !displayNameInput.trim()}>
             {renaming ? 'Saving...' : 'Rename'}
           </Button>
         </div>
@@ -292,10 +285,7 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
       {/* ── Scrollable sections ── */}
       <div className="flex-1 overflow-auto">
         {/* Workspace Info */}
-        <CollapsibleSection
-          title="Workspace Info"
-          storageKey="sam-sidebar-workspace-info"
-        >
+        <CollapsibleSection title="Workspace Info" storageKey="sam-sidebar-workspace-info">
           <div className="grid gap-1.5" style={{ fontSize: 'var(--sam-type-caption-size)' }}>
             {/* Repository */}
             {workspace?.repository && (
@@ -305,7 +295,8 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                     href={repoUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-tn-blue no-underline inline-flex items-center gap-1"
+                    className="no-underline inline-flex items-center gap-1"
+                    style={{ color: 'var(--sam-workspace-link-fg)' }}
                   >
                     {workspace.repository}
                     <ExternalLink size={11} />
@@ -326,14 +317,13 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
               </InfoRow>
             )}
 
-            {/* VM */}
-            {workspace?.vmSize && (
-              <InfoRow label="VM">
-                {vmSizeLabel(workspace.vmSize)}
-                {workspace.vmLocation
-                  ? ` \u00B7 ${vmLocationLabel(workspace.vmLocation)}`
-                  : ''}
-              </InfoRow>
+            {/* Hardware */}
+            {workspace && (
+              <div className="grid gap-2">
+                <WorkspaceHardwareDetails workspace={workspace} />
+                <span className="text-fg-muted">{vmLocationLabel(workspace.vmLocation)}</span>
+                <EffectivePoolSummary projectId={workspace.projectId} />
+              </div>
             )}
 
             {/* Node */}
@@ -341,7 +331,8 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
               <InfoRow label="Node">
                 <Link
                   to={`/nodes/${workspace.nodeId}`}
-                  className="text-tn-blue no-underline inline-flex items-center gap-1"
+                  className="no-underline inline-flex items-center gap-1"
+                  style={{ color: 'var(--sam-workspace-link-fg)' }}
                 >
                   {workspace.nodeId.slice(0, 8)}
                   <ExternalLink size={11} />
@@ -442,9 +433,7 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                     key={tab.id}
                     className="flex items-center gap-0 rounded-sm"
                     style={{
-                      background: active
-                        ? 'var(--sam-color-info-tint)'
-                        : 'transparent',
+                      background: active ? 'var(--sam-color-info-tint)' : 'transparent',
                     }}
                   >
                     <button
@@ -454,9 +443,7 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                         padding: isMobile ? '8px 6px' : '5px 6px',
                         minHeight: isMobile ? 44 : undefined,
                         fontSize: 'var(--sam-type-caption-size)',
-                        color: active
-                          ? 'var(--sam-color-fg-primary)'
-                          : 'var(--sam-color-fg-muted)',
+                        color: active ? 'var(--sam-color-fg-primary)' : 'var(--sam-color-fg-muted)',
                       }}
                     >
                       <span
@@ -491,8 +478,11 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                       {/* Active label for non-chat or when no hostStatus */}
                       {active && !(isChat && tab.hostStatus) && (
                         <span
-                          className="text-tn-blue shrink-0"
-                          style={{ fontSize: 'var(--sam-type-caption-size)' }}
+                          className="shrink-0"
+                          style={{
+                            fontSize: 'var(--sam-type-caption-size)',
+                            color: 'var(--sam-workspace-link-fg)',
+                          }}
                         >
                           active
                         </span>
@@ -503,7 +493,7 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          onStopSession!(tab.sessionId);
+                          onStopSession?.(tab.sessionId);
                         }}
                         title="Stop session"
                         aria-label={`Stop session ${tab.title}`}
@@ -549,8 +539,8 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                     style={{
                       backgroundColor:
                         session.status === 'suspended'
-                          ? 'var(--sam-color-tn-yellow)'
-                          : 'var(--sam-color-tn-fg-dimmer)',
+                          ? 'var(--sam-workspace-warning-fg)'
+                          : 'var(--sam-workspace-muted-dot)',
                     }}
                   />
                   {/* Label + last prompt */}
@@ -570,10 +560,7 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                         {session.lastPrompt}
                       </div>
                     )}
-                    <div
-                      className="text-fg-muted mt-px"
-                      style={{ fontSize: '10px' }}
-                    >
+                    <div className="text-fg-muted mt-px" style={{ fontSize: '10px' }}>
                       {session.status === 'suspended' ? 'suspended' : 'stopped'}
                       {session.suspendedAt &&
                         ` \u00B7 ${new Date(session.suspendedAt).toLocaleTimeString()}`}
@@ -589,10 +576,11 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                         onClick={() => onResumeSession(session.id)}
                         title="Resume session"
                         aria-label={`Resume session ${session.label || session.id}`}
-                        className="flex items-center justify-center p-0 border-none bg-transparent text-tn-green cursor-pointer rounded-sm"
+                        className="flex items-center justify-center p-0 border-none bg-transparent cursor-pointer rounded-sm"
                         style={{
                           width: isMobile ? 36 : 24,
                           height: isMobile ? 36 : 24,
+                          color: 'var(--sam-workspace-success-fg)',
                         }}
                       >
                         <Play size={12} />
@@ -633,19 +621,29 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                   style={{ fontSize: 'var(--sam-type-caption-size)' }}
                 >
                   <span>
-                    <strong className="text-tn-green">{gitStatus.staged.length}</strong> staged
+                    <strong style={{ color: 'var(--sam-workspace-success-fg)' }}>
+                      {gitStatus.staged.length}
+                    </strong>{' '}
+                    staged
                   </span>
                   <span>
-                    <strong className="text-tn-yellow">{gitStatus.unstaged.length}</strong> unstaged
+                    <strong style={{ color: 'var(--sam-workspace-warning-fg)' }}>
+                      {gitStatus.unstaged.length}
+                    </strong>{' '}
+                    unstaged
                   </span>
                   <span>
-                    <strong className="text-tn-fg-muted">{gitStatus.untracked.length}</strong> untracked
+                    <strong className="text-fg-muted">{gitStatus.untracked.length}</strong>{' '}
+                    untracked
                   </span>
                 </div>
                 <button
                   onClick={onOpenGitChanges}
-                  className="inline-flex items-center gap-1.5 py-1 px-0 bg-transparent border-none cursor-pointer text-tn-blue text-left"
-                  style={{ fontSize: 'var(--sam-type-caption-size)' }}
+                  className="inline-flex items-center gap-1.5 py-1 px-0 bg-transparent border-none cursor-pointer text-left"
+                  style={{
+                    fontSize: 'var(--sam-type-caption-size)',
+                    color: 'var(--sam-workspace-link-fg)',
+                  }}
                 >
                   <GitBranch size={12} />
                   View Changes
@@ -661,10 +659,7 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
 
         {/* Token Usage */}
         {sessionTokenUsages.length > 0 && totalUsage.totalTokens > 0 && (
-          <CollapsibleSection
-            title="Token Usage"
-            storageKey="sam-sidebar-tokens"
-          >
+          <CollapsibleSection title="Token Usage" storageKey="sam-sidebar-tokens">
             <div
               className="flex flex-col gap-1.5"
               style={{ fontSize: 'var(--sam-type-caption-size)' }}
@@ -672,15 +667,13 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
               {sessionTokenUsages
                 .filter((s) => s.usage.totalTokens > 0)
                 .map((s) => (
-                  <div
-                    key={s.sessionId}
-                    className="flex justify-between text-fg-muted"
-                  >
+                  <div key={s.sessionId} className="flex justify-between text-fg-muted">
                     <span className="overflow-hidden text-ellipsis whitespace-nowrap min-w-0 flex-1">
                       {s.label}
                     </span>
                     <span className="shrink-0 ml-2" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                      {formatTokens(s.usage.inputTokens)} in / {formatTokens(s.usage.outputTokens)} out
+                      {formatTokens(s.usage.inputTokens)} in / {formatTokens(s.usage.outputTokens)}{' '}
+                      out
                     </span>
                   </div>
                 ))}
@@ -689,7 +682,8 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                   <div className="border-t border-border-default pt-1 flex justify-between font-semibold text-fg-primary">
                     <span>Total</span>
                     <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-                      {formatTokens(totalUsage.inputTokens)} in / {formatTokens(totalUsage.outputTokens)} out
+                      {formatTokens(totalUsage.inputTokens)} in /{' '}
+                      {formatTokens(totalUsage.outputTokens)} out
                     </span>
                   </div>
                 </>
@@ -712,21 +706,14 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
           ) : (
             <div className="flex flex-col gap-1.5">
               {workspaceEvents.map((event) => (
-                <div
-                  key={event.id}
-                  style={{ fontSize: 'var(--sam-type-caption-size)' }}
-                >
+                <div key={event.id} style={{ fontSize: 'var(--sam-type-caption-size)' }}>
                   <div className="flex justify-between" style={{ gap: 'var(--sam-space-2)' }}>
-                    <strong className="text-fg-primary">
-                      {event.type}
-                    </strong>
+                    <strong className="text-fg-primary">{event.type}</strong>
                     <span className="text-fg-muted shrink-0">
                       {new Date(event.createdAt).toLocaleTimeString()}
                     </span>
                   </div>
-                  <div className="text-fg-muted">
-                    {event.message}
-                  </div>
+                  <div className="text-fg-muted">{event.message}</div>
                 </div>
               ))}
             </div>

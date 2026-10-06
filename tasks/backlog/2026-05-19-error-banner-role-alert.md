@@ -1,5 +1,11 @@
 # Add role="alert" to error banner in project chat
 
+> **Reconciliation 2026-09-30:** still open, retargeted. #1765 (`8eed3b740`) replaced
+> `ErrorBanner` with `FailureCard` (`apps/web/src/components/debug/FailureCard.tsx`, rendered at
+> `apps/web/src/components/project-message-view/FloatingHeader.tsx:107`). Neither the card root
+> (`FailureCard.tsx:127-134`) nor its wrapper has `role="alert"` or `aria-live`, so the failure is
+> still not announced to screen readers. Apply the fix and the test there.
+
 ## Problem
 
 The glass-chrome error banner in `ProjectMessageView` (showing "Task failed: ...") does not have `role="alert"`, so screen readers won't automatically announce it when it renders. The existing resume-error banner at line ~164 of `index.tsx` correctly uses `role="alert"`, but the task-failure `ErrorBanner` component does not.

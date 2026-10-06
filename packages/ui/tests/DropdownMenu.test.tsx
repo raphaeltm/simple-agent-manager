@@ -79,7 +79,7 @@ describe('DropdownMenu', () => {
     render(<DropdownMenu items={makeItems()} />);
     fireEvent.click(screen.getByRole('button', { name: 'Actions' }));
 
-    const deleteItem = screen.getByText('Delete');
+    const deleteItem = screen.getByRole('menuitem', { name: 'Delete' });
     expect(deleteItem.className).toContain('text-danger');
   });
 
@@ -92,7 +92,7 @@ describe('DropdownMenu', () => {
     render(<DropdownMenu items={items} />);
     fireEvent.click(screen.getByRole('button', { name: 'Actions' }));
 
-    const disabledItem = screen.getByText('Duplicate');
+    const disabledItem = screen.getByRole('menuitem', { name: 'Duplicate' });
     expect(disabledItem).toHaveAttribute('aria-disabled', 'true');
     expect(disabledItem).toHaveAttribute('title', 'Not available');
   });
@@ -104,6 +104,52 @@ describe('DropdownMenu', () => {
     fireEvent.click(screen.getByText('Duplicate'));
 
     expect(items[1].onClick).not.toHaveBeenCalled();
+  });
+
+
+  it('opens with Enter and focuses the first enabled item', () => {
+    render(<DropdownMenu items={makeItems([{ disabled: true }, {}, {}])} />);
+    const trigger = screen.getByRole('button', { name: 'Actions' });
+
+    fireEvent.keyDown(trigger, { key: 'Enter' });
+
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Duplicate' })).toHaveFocus();
+  });
+
+  it('opens with Space and focuses the first enabled item', () => {
+    render(<DropdownMenu items={makeItems()} />);
+    const trigger = screen.getByRole('button', { name: 'Actions' });
+
+    fireEvent.keyDown(trigger, { key: ' ' });
+
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Edit' })).toHaveFocus();
+  });
+
+  it('opens with Arrow Up and focuses the last enabled item', () => {
+    render(<DropdownMenu items={makeItems([{}, {}, { disabled: true }])} />);
+    const trigger = screen.getByRole('button', { name: 'Actions' });
+
+    fireEvent.keyDown(trigger, { key: 'ArrowUp' });
+
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Duplicate' })).toHaveFocus();
+  });
+
+  it('skips disabled items during arrow key navigation', () => {
+    render(<DropdownMenu items={makeItems([{}, { disabled: true }, {}])} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Actions' }));
+
+    const edit = screen.getByRole('menuitem', { name: 'Edit' });
+    const deleteItem = screen.getByRole('menuitem', { name: 'Delete' });
+    expect(edit).toHaveFocus();
+
+    fireEvent.keyDown(edit, { key: 'ArrowDown' });
+    expect(deleteItem).toHaveFocus();
+
+    fireEvent.keyDown(deleteItem, { key: 'ArrowUp' });
+    expect(edit).toHaveFocus();
   });
 
   it('navigates items with Arrow Down/Up keys', () => {

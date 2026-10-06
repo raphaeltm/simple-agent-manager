@@ -10,26 +10,69 @@
  * 3. Returns immediately with 202 Accepted
  * 4. Async: selects/creates node, creates workspace, runs agent, creates PR, cleans up
  */
-import type { CredentialProvider,RunTaskResponse, TaskStatus, VMLocation, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
-import { DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, getDefaultLocationForProvider,getLocationsForProvider, isValidLocationForProvider, isValidProvider } from '@simple-agent-manager/shared';
-import { and, eq } from 'drizzle-orm';
+import type { RunTaskResponse, TaskStatus, VMSize } from '@simple-agent-manager/shared';
+import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
+import type { InferOutput } from 'valibot';
+import * as v from 'valibot';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
-import { getAuth, requireApproved,requireAuth } from '../../middleware/auth';
+import { getAuth, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
-import { requireOwnedProject, requireOwnedTask } from '../../middleware/project-auth';
-import { parseOptionalBody, RunTaskSchema } from '../../schemas';
+import { requireProjectCapability } from '../../middleware/project-auth';
+import { formatIssues, RunTaskSchema } from '../../schemas';
+import {
+  CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS,
+  capacityPlacementSnapshotSqlValues,
+} from '../../services/capacity-placement-snapshot';
+import {
+  PlacementResolutionError,
+  resolveTaskStartPlacement,
+  resolveTaskStartPlacementCredentialAttributionFromPlacement,
+} from '../../services/placement-resolver';
 import * as projectDataService from '../../services/project-data';
+import { cleanupRequestedTaskRun } from '../../services/requested-task-run-cleanup';
+import {
+  collectStoredResourceRequirementLayers,
+  createPersistedTaskResourcePlanJson,
+  firstResourceRequirementLayer,
+  mergeResourceRequirementLayers,
+  normalizeResourceRequirementsInput,
+  parseLegacyVmSize,
+  parseResourceRequirementsSource,
+  readPersistedTaskResourcePlan,
+  ResourceRequirementsValidationError,
+} from '../../services/resource-requirements-input';
+import { markTaskFailedIfNonTerminal } from '../../services/task-failure';
 import { isTaskBlocked } from '../../services/task-graph';
-import { cleanupTaskRun } from '../../services/task-runner';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
+import { requireRepositoryUserAccess } from '../projects/_helpers';
+import { requireProjectTaskById } from './_helpers';
 
 const runRoutes = new Hono<{ Bindings: Env }>();
+type RunTaskBody = Partial<InferOutput<typeof RunTaskSchema>>;
+
+/**
+ * An absent/unparseable body means "no overrides" ({}), but a PRESENT body that fails
+ * the schema is rejected with 400 rather than silently degraded to defaults.
+ */
+async function parseRunTaskBody(req: Request): Promise<RunTaskBody> {
+  let raw: unknown;
+  try {
+    raw = await req.json();
+  } catch {
+    return {};
+  }
+  const result = v.safeParse(RunTaskSchema, raw);
+  if (!result.success) {
+    throw errors.badRequest(formatIssues(result.issues));
+  }
+  return result.output;
+}
 
 // Auth applied per-route to avoid Hono middleware leak across sibling subrouters.
 // See .claude/rules/06-api-patterns.md and docs/notes/2026-03-12-callback-auth-middleware-leak-postmortem.md.
@@ -63,9 +106,9 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
     throw errors.badRequest('taskId is required');
   }
 
-  // Validate ownership
-  await requireOwnedProject(db, projectId, userId);
-  const task = await requireOwnedTask(db, projectId, taskId, userId);
+  // Starting or cleaning up a run uses the caller's credentials and compute context.
+  const project = await requireProjectCapability(db, projectId, userId, 'task:write');
+  const task = await requireProjectTaskById(db, projectId, taskId);
 
   // Check task status
   if (task.status !== 'ready') {
@@ -87,12 +130,7 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
     const depTasks = await db
       .select({ id: schema.tasks.id, status: schema.tasks.status })
       .from(schema.tasks)
-      .where(
-        and(
-          eq(schema.tasks.projectId, projectId),
-          eq(schema.tasks.userId, userId)
-        )
-      );
+      .where(eq(schema.tasks.projectId, projectId));
 
     const statusMap: Record<string, TaskStatus> = {};
     for (const t of depTasks) {
@@ -104,73 +142,188 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
     }
   }
 
-  // Check the user has cloud provider credentials (required for node provisioning)
-  const [credential] = await db
-    .select({ id: schema.credentials.id })
-    .from(schema.credentials)
-    .where(
-      and(
-        eq(schema.credentials.userId, userId),
-        eq(schema.credentials.credentialType, 'cloud-provider')
-      )
-    )
-    .limit(1);
-
-  if (!credential) {
-    throw errors.badRequest('Cloud provider credentials required. Connect your account in Settings.');
-  }
-
   // Parse request body (optional — empty body means use defaults)
-  const body = await parseOptionalBody(c.req.raw, RunTaskSchema, {} as Record<string, never>);
+  const body = await parseRunTaskBody(c.req.raw);
+  const resourceRequirementsProvided = Object.prototype.hasOwnProperty.call(
+    body,
+    'resourceRequirements'
+  );
+  const {
+    resourceRequirementLayers,
+    persistedResourceRequirementsJson,
+    taskRunnerResourceRequirements,
+    resolvedReservationOverride,
+    requestedVmSize,
+    requestedVmSizeSource,
+  } = (() => {
+    try {
+      let nextTaskResourceRequirements = undefined as
+        | ReturnType<typeof normalizeResourceRequirementsInput>
+        | null
+        | undefined;
+      if (resourceRequirementsProvided) {
+        nextTaskResourceRequirements =
+          body.resourceRequirements === null
+            ? null
+            : normalizeResourceRequirementsInput(body.resourceRequirements);
+      }
+
+      const storedPlan = readPersistedTaskResourcePlan(
+        {
+          taskId: task.id,
+          triggerId: task.triggerId,
+          skillId: task.skillId,
+          agentProfileId: task.agentProfileHint,
+          projectId,
+          userId: task.userId,
+          resourceRequirementPlanJson: task.resourceRequirementPlanJson,
+          resourceRequirementsJson: task.resourceRequirementsJson,
+          resourceRequirementsSource: task.resourceRequirementsSource,
+          resolvedReservationJson: task.resolvedReservationJson,
+          requestedVmSize: task.requestedVmSize,
+          requestedVmSizeSource: task.requestedVmSizeSource,
+        },
+        { ignoreLegacyResourceRequirementsJson: resourceRequirementsProvided }
+      );
+      const currentProjectLayers = collectStoredResourceRequirementLayers({
+        project: project.resourceRequirementsJson,
+      });
+      const layers =
+        resourceRequirementsProvided ||
+        storedPlan.source === 'legacy-source-json' ||
+        storedPlan.source === 'empty'
+          ? mergeResourceRequirementLayers(currentProjectLayers, storedPlan.layers)
+          : { ...storedPlan.layers };
+      if (resourceRequirementsProvided) {
+        if (nextTaskResourceRequirements === null) {
+          delete layers.task;
+        } else {
+          layers.task = nextTaskResourceRequirements;
+        }
+      }
+      const storedRequestedVmSize =
+        storedPlan.requestedVmSize ?? parseLegacyVmSize(task.requestedVmSize);
+      const storedRequestedVmSizeSource =
+        storedPlan.requestedVmSizeSource ??
+        parseResourceRequirementsSource(task.requestedVmSizeSource);
+      const requestedVmSize = body.vmSize ?? storedRequestedVmSize;
+      const requestedVmSizeSource = body.vmSize ? 'task' : storedRequestedVmSizeSource;
+      return {
+        resourceRequirementLayers: layers,
+        persistedResourceRequirementsJson: resourceRequirementsProvided
+          ? nextTaskResourceRequirements === null
+            ? null
+            : JSON.stringify(nextTaskResourceRequirements)
+          : task.resourceRequirementsJson,
+        taskRunnerResourceRequirements: firstResourceRequirementLayer(layers),
+        resolvedReservationOverride:
+          resourceRequirementsProvided || body.vmSize ? null : storedPlan.resolvedReservation,
+        requestedVmSize,
+        requestedVmSizeSource,
+      };
+    } catch (err) {
+      if (err instanceof ResourceRequirementsValidationError) {
+        throw errors.badRequest(err.message);
+      }
+      throw err;
+    }
+  })();
 
   // vmSize, workspaceProfile validated by schema (picklist)
 
   // vmLocation validated as string by schema
   // workspaceProfile validated by schema (picklist)
 
-  // Load project for repository/installationId
-  const [project] = await db
-    .select()
-    .from(schema.projects)
-    .where(
-      and(
-        eq(schema.projects.id, projectId),
-        eq(schema.projects.userId, userId)
-      )
-    )
-    .limit(1);
+  // Fail-fast user∩app GitHub repo-access gate. Re-verify the user still has
+  // access to the bound repository through the app installation BEFORE the task
+  // is queued and the Task Runner DO provisions a node / clones the repo. Throws
+  // 403 if access was revoked or the repository id drifted.
+  await requireRepositoryUserAccess(c, db, project, userId);
 
-  if (!project) {
-    throw errors.notFound('Project');
+  const placement = (() => {
+    try {
+      return resolveTaskStartPlacement({
+        entryPoint: 'task-run',
+        taskId: task.id,
+        projectId,
+        userId,
+        project,
+        explicit: {
+          vmSize: requestedVmSize,
+          vmSizeSource: requestedVmSizeSource ?? 'task',
+          vmLocation: body.vmLocation ?? null,
+          workspaceProfile: body.workspaceProfile ?? null,
+          devcontainerConfigName: body.devcontainerConfigName,
+        },
+        credentialProjectPolicy: 'current-project',
+        taskModeDefault: 'task',
+        resourceRequirements: resourceRequirementLayers,
+        resolvedReservationOverride,
+      });
+    } catch (err) {
+      if (err instanceof PlacementResolutionError) {
+        throw errors.badRequest(err.message);
+      }
+      throw err;
+    }
+  })();
+
+  const placementResolution = await resolveTaskStartPlacementCredentialAttributionFromPlacement(
+    db,
+    placement,
+    {
+      credentialsRequiredMessage:
+        'Cloud provider credentials required. Connect your account in Settings.',
+      env: c.env,
+    }
+  );
+  if ('error' in placementResolution) {
+    throw errors.badRequest(placementResolution.error);
+  }
+  const {
+    capacityPoolSelection,
+    quotaCredentialSource,
+    capacityPlacementSnapshot,
+    effectiveProvider,
+    credentialAttributionUserId,
+    credentialAttributionProjectId,
+    credentialAttributionSource,
+  } = placementResolution;
+  if (quotaCredentialSource === 'platform') {
+    const quotaEnforcementEnabled = c.env.COMPUTE_QUOTA_ENFORCEMENT_ENABLED !== 'false';
+    if (quotaEnforcementEnabled) {
+      const { checkQuotaForUser } = await import('../../services/compute-quotas');
+      const quotaCheck = await checkQuotaForUser(db, userId);
+      if (!quotaCheck.allowed) {
+        throw errors.forbidden(
+          `Monthly compute quota exceeded. You've used ${quotaCheck.used} of ${quotaCheck.limit} vCPU-hours this month. ` +
+            'Add your own cloud provider credentials in Settings or contact your admin to increase your quota.'
+        );
+      }
+    }
   }
 
-  // Determine VM config (precedence: explicit override > project default > platform default)
-  const vmSize: VMSize = body.vmSize
-    ?? (project.defaultVmSize as VMSize | null)
-    ?? DEFAULT_VM_SIZE;
-  const provider: CredentialProvider | null =
-    typeof project.defaultProvider === 'string' && isValidProvider(project.defaultProvider)
-      ? project.defaultProvider
-      : null;
-  const vmLocation: VMLocation = (body.vmLocation as VMLocation)
-    ?? (project.defaultLocation as VMLocation | null)
-    ?? (provider ? getDefaultLocationForProvider(provider) as VMLocation | null : null)
-    ?? DEFAULT_VM_LOCATION;
-  const workspaceProfile: WorkspaceProfile = body.workspaceProfile
-    ?? (project.defaultWorkspaceProfile as WorkspaceProfile | null)
-    ?? DEFAULT_WORKSPACE_PROFILE;
-  const devcontainerConfigName: string | null = workspaceProfile === 'lightweight'
-    ? null
-    : (body.devcontainerConfigName ?? project.defaultDevcontainerConfigName ?? null);
-  const branch = body.branch ?? project.defaultBranch;
+  const {
+    vmSize,
+    vmSizeSource,
+    vmLocation,
+    workspaceProfile,
+    devcontainerConfigName,
+    taskMode,
+    agentType,
+    resolvedReservation,
+  } = placement;
+  const persistedResourceRequirementPlanJson = createPersistedTaskResourcePlanJson({
+    layers: resourceRequirementLayers,
+    resolvedReservation,
+    requestedVmSize: vmSize,
+    requestedVmSizeSource: vmSizeSource,
+  });
 
-  // Validate location against provider
-  if (provider !== null && !isValidLocationForProvider(provider, vmLocation)) {
-    const validLocations = getLocationsForProvider(provider).map((l) => l.id);
-    throw errors.badRequest(
-      `Location '${vmLocation}' is not valid for provider '${provider}'. Valid locations: ${validLocations.join(', ')}`
-    );
-  }
+  // Explicit run branch means "continue work from this branch". Otherwise,
+  // use the task output branch when present so VM-agent completion pushes cannot
+  // land on the repository default branch.
+  const branch = body.branch?.trim() || task.outputBranch || project.defaultBranch;
 
   // Look up user's githubId for noreply email fallback
   const [userRow] = await db
@@ -182,8 +335,37 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
   // Transition task to queued with initial execution step (optimistic lock on 'ready')
   const now = new Date().toISOString();
   const transitionResult = await c.env.DATABASE.prepare(
-    `UPDATE tasks SET status = 'queued', execution_step = 'node_selection', updated_at = ? WHERE id = ? AND status = 'ready'`
-  ).bind(now, task.id).run();
+    `UPDATE tasks
+     SET status = 'queued',
+         execution_step = 'node_selection',
+         requested_vm_size = ?,
+         requested_vm_size_source = ?,
+         resource_requirements_json = ?,
+         resource_requirement_plan_json = ?,
+         resource_requirements_source = ?,
+         resolved_reservation_json = ?,
+         credential_attribution_user_id = ?,
+         credential_attribution_project_id = ?,
+         credential_attribution_source = ?,
+         ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS},
+         updated_at = ?
+     WHERE id = ? AND status = 'ready'`
+  )
+    .bind(
+      vmSize,
+      vmSizeSource,
+      persistedResourceRequirementsJson,
+      persistedResourceRequirementPlanJson,
+      resolvedReservation.source,
+      JSON.stringify(resolvedReservation),
+      credentialAttributionUserId,
+      credentialAttributionProjectId,
+      credentialAttributionSource,
+      ...capacityPlacementSnapshotSqlValues(capacityPlacementSnapshot),
+      now,
+      task.id
+    )
+    .run();
 
   // If another request already transitioned this task, reject (double-click protection)
   if (!transitionResult.meta.changes || transitionResult.meta.changes === 0) {
@@ -210,24 +392,16 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
       projectId,
       null, // workspaceId — linked later by TaskRunner DO when workspace is created
       task.title,
-      task.id
+      task.id,
+      userId
     );
   } catch (err) {
-    const failedAt = new Date().toISOString();
     const errorMsg = err instanceof Error ? err.message : String(err);
-    await db.update(schema.tasks)
-      .set({ status: 'failed', errorMessage: `Session creation failed: ${errorMsg}`, updatedAt: failedAt })
-      .where(eq(schema.tasks.id, task.id));
-    await db.insert(schema.taskStatusEvents).values({
-      id: ulid(),
-      taskId: task.id,
-      fromStatus: 'queued',
-      toStatus: 'failed',
-      actorType: 'system',
-      actorId: null,
-      reason: `Session creation failed: ${errorMsg}`,
-      createdAt: failedAt,
-    });
+    await markTaskFailedIfNonTerminal(
+      c.env.DATABASE,
+      task.id,
+      `Session creation failed: ${errorMsg}`
+    );
     log.error('task_run.session_failed', { taskId: task.id, projectId, error: errorMsg });
     throw err;
   }
@@ -247,6 +421,7 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
       vmSize,
       vmLocation,
       branch,
+      defaultBranch: project.defaultBranch,
       preferredNodeId: body.nodeId,
       userName: auth.user.name,
       userEmail: auth.user.email,
@@ -257,43 +432,48 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
       installationId: project.installationId,
       projectDefaultVmSize: project.defaultVmSize as VMSize | null,
       chatSessionId: sessionId,
-      agentType: project.defaultAgentType ?? null,
+      agentType,
       workspaceProfile,
       devcontainerConfigName,
-      cloudProvider: provider,
-      // Agent profile resolution is not supported on the kanban Run path — tasks
-      // re-run with project defaults. Profile support (model, permissionMode,
-      // systemPromptAppend) deferred to a future PR.
+      cloudProvider: placement.provider ?? effectiveProvider,
+      explicitVmLocation: placement.explicitVmLocation === true,
+      credentialAttributionUserId,
+      credentialAttributionProjectId,
+      credentialAttributionSource,
+      taskMode,
+      agentProfileHint: task.agentProfileHint ?? null,
+      resourceRequirements: taskRunnerResourceRequirements,
+      // Full profile resolution is not supported on the kanban Run path, but the
+      // persisted profile hint must still reach TaskRunner so workspace
+      // GitHub-token minting can enforce profile SAM platform policy.
       model: null,
+      effort: null,
       permissionMode: null,
       projectScaling: {
         taskExecutionTimeoutMs: project.taskExecutionTimeoutMs ?? null,
-        maxWorkspacesPerNode: project.maxWorkspacesPerNode ?? null,
         nodeCpuThresholdPercent: project.nodeCpuThresholdPercent ?? null,
         nodeMemoryThresholdPercent: project.nodeMemoryThresholdPercent ?? null,
         warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,
       },
+      resolvedReservation,
+      capacityPoolSelection,
+      vmSizeSource,
     });
   } catch (err) {
-    const failedAt = new Date().toISOString();
     const errorMsg = err instanceof Error ? err.message : String(err);
-    await db.update(schema.tasks)
-      .set({ status: 'failed', errorMessage: `Task runner startup failed: ${errorMsg}`, updatedAt: failedAt })
-      .where(eq(schema.tasks.id, task.id));
-    await db.insert(schema.taskStatusEvents).values({
-      id: ulid(),
-      taskId: task.id,
-      fromStatus: 'queued',
-      toStatus: 'failed',
-      actorType: 'system',
-      actorId: null,
-      reason: `Task runner startup failed: ${errorMsg}`,
-      createdAt: failedAt,
-    });
+    await markTaskFailedIfNonTerminal(
+      c.env.DATABASE,
+      task.id,
+      `Task runner startup failed: ${errorMsg}`
+    );
     log.error('task_run.do_startup_failed', { taskId: task.id, projectId, error: errorMsg });
     // Stop the orphaned session (best-effort — it has no workspace and will never be cleaned up otherwise)
     await projectDataService.stopSession(c.env, projectId, sessionId).catch((e) => {
-      log.error('task_run.orphaned_session_stop_failed', { projectId, sessionId, error: String(e) });
+      log.error('task_run.orphaned_session_stop_failed', {
+        projectId,
+        sessionId,
+        error: String(e),
+      });
     });
     throw err;
   }
@@ -312,9 +492,8 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
 /**
  * POST /projects/:projectId/tasks/:taskId/run/cleanup
  *
- * Trigger cleanup of a completed/failed task run.
- * Stops the workspace and optionally the auto-provisioned node.
- * This can be called manually or is triggered automatically by the callback mechanism.
+ * Explicitly clean up a terminal task run: stops the workspace and optionally the
+ * auto-provisioned node. A failed run's work is snapshotted first (`cleanupRequestedTaskRun`).
  */
 runRoutes.post('/:taskId/run/cleanup', requireAuth(), requireApproved(), async (c) => {
   const auth = getAuth(c);
@@ -327,21 +506,18 @@ runRoutes.post('/:taskId/run/cleanup', requireAuth(), requireApproved(), async (
     throw errors.badRequest('projectId and taskId are required');
   }
 
-  await requireOwnedProject(db, projectId, userId);
-  const task = await requireOwnedTask(db, projectId, taskId, userId);
+  // Cleanup is project-authorized, while resource mutation remains caller-scoped.
+  await requireProjectCapability(db, projectId, userId, 'task:write');
+  const task = await requireProjectTaskById(db, projectId, taskId);
 
   // Only allow cleanup for terminal states
-  if (
-    task.status !== 'completed' &&
-    task.status !== 'failed' &&
-    task.status !== 'cancelled'
-  ) {
+  if (task.status !== 'completed' && task.status !== 'failed' && task.status !== 'cancelled') {
     throw errors.conflict(
       `Task must be in completed, failed, or cancelled status for cleanup, currently '${task.status}'`
     );
   }
 
-  c.executionCtx.waitUntil(cleanupTaskRun(task.id, c.env));
+  c.executionCtx.waitUntil(cleanupRequestedTaskRun(c.env, task, projectId, userId));
 
   return c.json({ success: true, message: 'Cleanup initiated' });
 });

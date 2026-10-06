@@ -1,11 +1,16 @@
 import type { UserRole, UserStatus } from '@simple-agent-manager/shared';
-import type { Context, MiddlewareHandler,Next } from 'hono';
+import type { Context, MiddlewareHandler, Next } from 'hono';
 
 import { createAuth } from '../auth';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { expectJsonRecord } from '../lib/runtime-validation';
-import { AppError, errors } from './error';
+import {
+  assertUserAllowedBySignupApproval,
+  assertUserNotSuspended,
+  isSignupApprovalRequired,
+} from '../services/signup-approval';
+import { errors } from './error';
 
 /**
  * Extended context with authenticated user.
@@ -20,7 +25,8 @@ export interface AuthContext {
     status: UserStatus;
   };
   session: {
-    id: string;
+    id: string | null;
+    token: string | null;
     expiresAt: Date;
   };
 }
@@ -28,40 +34,108 @@ export interface AuthContext {
 declare module 'hono' {
   interface ContextVariableMap {
     auth: AuthContext;
+    /**
+     * Per-request memo of `isSignupApprovalRequired`. Request-scoped only — never an
+     * isolate cache, so an admin flipping approval still takes effect on the very next
+     * request (`.claude/rules/02` "Unconditional Account-Denial Gates").
+     */
+    signupApprovalRequired: boolean;
   }
+}
+
+/**
+ * Resolve the status of an authenticated session user.
+ *
+ * `'system'` is the status of internal sentinel rows (e.g. system_anonymous_trials,
+ * seeded by migration 0043). It is an input:false additionalField — only migrations
+ * ever write it — so a real, OAuth-authenticated request must never carry it. If we
+ * see it on a live session it is an anomaly (a sentinel row was somehow logged in, or
+ * a row was mislabeled), so we log it and fall back to the least-privileged status
+ * rather than silently coercing it to 'active' and granting access.
+ */
+function resolveSessionStatus(rawStatus: unknown, userId: string): UserStatus {
+  if (typeof rawStatus !== 'string') {
+    return 'active';
+  }
+  if (rawStatus === 'system') {
+    log.warn('auth.system_status_anomaly', { userId });
+    return 'pending';
+  }
+  return rawStatus as UserStatus;
+}
+
+type AuthSession = NonNullable<
+  Awaited<ReturnType<Awaited<ReturnType<typeof createAuth>>['api']['getSession']>>
+>;
+
+/**
+ * Project a validated BetterAuth session onto the request `auth` context shape.
+ * Shared by requireAuth and optionalAuth so the role/status resolution lives in
+ * exactly one place.
+ */
+function buildAuthContext(session: AuthSession): AuthContext {
+  const sessionUser = expectJsonRecord(session.user, 'auth.session.user');
+  const sessionRecord = expectJsonRecord(session.session, 'auth.session.session');
+  return {
+    user: {
+      id: session.user.id,
+      email: session.user.email,
+      name: session.user.name ?? null,
+      avatarUrl: session.user.image ?? null,
+      role: (typeof sessionUser.role === 'string' ? sessionUser.role : 'user') as UserRole,
+      status: resolveSessionStatus(sessionUser.status, session.user.id),
+    },
+    session: {
+      id:
+        typeof sessionRecord.id === 'string' && sessionRecord.id.length > 0
+          ? sessionRecord.id
+          : null,
+      token:
+        typeof sessionRecord.token === 'string' && sessionRecord.token.length > 0
+          ? sessionRecord.token
+          : null,
+      expiresAt: session.session.expiresAt,
+    },
+  };
 }
 
 /**
  * Authentication middleware.
  * Validates session and adds user info to context.
  * Throws 401 if not authenticated.
+ *
+ * Resolves the session AT MOST ONCE per request. `projectsRoutes` registers
+ * `use('/*', requireAuth(), requireApproved())` at `/api/projects/*`, which also matches
+ * the separately mounted `/api/projects/:projectId/{tasks,sessions,library,…}` routers —
+ * and those register auth again. Both layers really do run (pinned by
+ * `tests/unit/middleware/auth-single-pass.test.ts`), which cost a second
+ * `getSession` (2 sequential D1 queries) plus a second approval read on every
+ * project sub-route request.
+ *
+ * Reuse is safe because `c.set('auth', …)` has exactly two writers — this function and
+ * `optionalAuth` below — and both write only AFTER `assertUserNotSuspended` has passed for
+ * the same request headers. The alternative fix, deleting the redundant registrations, was
+ * rejected: a route that loses its ONLY auth registration is a security hole, and the
+ * mounting order here is what keeps VM-agent callback routes on callback-JWT auth
+ * (`.claude/rules/34`). Memoising leaves the set of authenticated routes byte-identical.
  */
 export function requireAuth(): MiddlewareHandler<{ Bindings: Env }> {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
-    const auth = createAuth(c.env);
-    const session = await auth.api.getSession({
-      headers: c.req.raw.headers,
-    });
+    if (!c.get('auth')) {
+      const auth = await createAuth(c.env);
+      const session = await auth.api.getSession({
+        headers: c.req.raw.headers,
+        query: { disableCookieCache: true },
+      });
 
-    if (!session?.user) {
-      throw errors.unauthorized('Authentication required');
+      if (!session?.user) {
+        throw errors.unauthorized('Authentication required');
+      }
+
+      const authContext = buildAuthContext(session);
+      assertUserNotSuspended(authContext.user);
+      c.set('auth', authContext);
     }
-
-    const sessionUser = expectJsonRecord(session.user, 'auth.session.user');
-    c.set('auth', {
-      user: {
-        id: session.user.id,
-        email: session.user.email,
-        name: session.user.name ?? null,
-        avatarUrl: session.user.image ?? null,
-        role: (typeof sessionUser.role === 'string' ? sessionUser.role : 'user') as UserRole,
-        status: (typeof sessionUser.status === 'string' ? sessionUser.status : 'active') as UserStatus,
-      },
-      session: {
-        id: session.session.id,
-        expiresAt: session.session.expiresAt,
-      },
-    });
 
     await next();
   };
@@ -75,27 +149,16 @@ export function requireAuth(): MiddlewareHandler<{ Bindings: Env }> {
 export function optionalAuth(): MiddlewareHandler<{ Bindings: Env }> {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
     try {
-      const auth = createAuth(c.env);
+      const auth = await createAuth(c.env);
       const session = await auth.api.getSession({
         headers: c.req.raw.headers,
+        query: { disableCookieCache: true },
       });
 
       if (session?.user) {
-        const sessionUser = expectJsonRecord(session.user, 'auth.session.user');
-        c.set('auth', {
-          user: {
-            id: session.user.id,
-            email: session.user.email,
-            name: session.user.name ?? null,
-            avatarUrl: session.user.image ?? null,
-            role: (typeof sessionUser.role === 'string' ? sessionUser.role : 'user') as UserRole,
-            status: (typeof sessionUser.status === 'string' ? sessionUser.status : 'active') as UserStatus,
-          },
-          session: {
-            id: session.session.id,
-            expiresAt: session.session.expiresAt,
-          },
-        });
+        const authContext = buildAuthContext(session);
+        assertUserNotSuspended(authContext.user);
+        c.set('auth', authContext);
       }
     } catch (e) {
       log.warn('optional_auth.check_failed', { error: String(e) });
@@ -107,39 +170,30 @@ export function optionalAuth(): MiddlewareHandler<{ Bindings: Env }> {
 
 /**
  * Approval middleware.
- * When REQUIRE_APPROVAL is enabled, blocks users whose status is not 'active'.
- * Admins and superadmins always pass through.
+ * Suspended accounts are always blocked. When signup approval is enabled,
+ * pending non-admin users are blocked; admins and superadmins otherwise pass.
  * Must be used AFTER requireAuth().
  */
 export function requireApproved(): MiddlewareHandler<{ Bindings: Env }> {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
-    if (c.env.REQUIRE_APPROVAL !== 'true') {
-      await next();
-      return;
-    }
-
     const auth = c.get('auth');
     if (!auth) {
       throw errors.unauthorized('Authentication required');
     }
 
-    // Admins and superadmins always pass through
-    if (auth.user.role === 'superadmin' || auth.user.role === 'admin') {
-      await next();
-      return;
+    // Read the approval setting at most once per request, for the same reason `requireAuth`
+    // resolves the session at most once: this middleware is entered four times on every
+    // project sub-route. The memo is on the request context, so it expires with the request
+    // and cannot keep a de-approved account alive past the next one. The gate itself is
+    // still evaluated on every pass.
+    let required = c.get('signupApprovalRequired');
+    if (required === undefined) {
+      required = await isSignupApprovalRequired(c.env);
+      c.set('signupApprovalRequired', required);
     }
 
-    if (auth.user.status === 'active') {
-      await next();
-      return;
-    }
-
-    if (auth.user.status === 'suspended') {
-      throw errors.forbidden('Your account has been suspended');
-    }
-
-    // Default: pending
-    throw new AppError(403, 'APPROVAL_REQUIRED', 'Your account is pending admin approval');
+    assertUserAllowedBySignupApproval(required, auth.user);
+    await next();
   };
 }
 

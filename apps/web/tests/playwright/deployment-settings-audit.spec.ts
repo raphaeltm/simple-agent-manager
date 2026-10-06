@@ -215,7 +215,7 @@ async function assertNoHorizontalOverflow(page: Page) {
 
 // Navigate to settings and wait for the Deploy to Cloud section to be visible
 async function gotoSettings(page: Page, extraParams = '') {
-  await page.goto(`/projects/proj-test-1/settings${extraParams}`);
+  await page.goto(`/projects/proj-test-1/settings/deploy${extraParams}`);
   await page.waitForSelector('text=Deploy to Cloud', { timeout: 10000 });
 }
 
@@ -308,7 +308,7 @@ test.describe('DeploymentSettings — Mobile', () => {
 
   test('OAuth error param shows error toast and removes param from URL', async ({ page }) => {
     await setupApiMocks(page, { gcpCredential: GCP_DISCONNECTED_CRED });
-    await page.goto('/projects/proj-test-1/settings?gcp_deploy_error=access_denied');
+    await page.goto('/projects/proj-test-1/settings/deploy?gcp_deploy_error=access_denied');
     await page.waitForSelector('text=Deploy to Cloud');
     // Small wait to let the effect clean the URL
     await page.waitForTimeout(300);
@@ -344,7 +344,7 @@ test.describe('DeploymentSettings — Mobile', () => {
       });
     });
     await setupApiMocks(page, {});
-    await page.goto('/projects/proj-test-1/settings');
+    await page.goto('/projects/proj-test-1/settings/deploy');
     // Look for the loading text inside DeploymentSettings
     await page.waitForSelector('text=Loading deployment config...', { timeout: 8000 });
     await screenshot(page, 'deployment-settings-loading-mobile');

@@ -1,28 +1,40 @@
-import * as cloudflare from "@pulumi/cloudflare";
-import * as pulumi from "@pulumi/pulumi";
-import { pagesProject } from "./pages";
-import { zoneId, baseDomain, prefix, stack } from "./config";
+import * as cloudflare from '@pulumi/cloudflare';
+import * as pulumi from '@pulumi/pulumi';
+import { pagesProject } from './pages';
+import { zoneId, baseDomain, prefix, stack } from './config';
+
+const apiWorkerHostname = `${prefix}-api-${stack}.${prefix}.workers.dev`;
 
 // API subdomain (api.example.com -> Worker)
 export const apiDnsRecord = new cloudflare.Record(`${prefix}-dns-api`, {
   zoneId: zoneId,
   name: `api`,
-  type: "CNAME",
-  content: `${prefix}-api-${stack}.workers.dev`,
+  type: 'CNAME',
+  content: apiWorkerHostname,
   proxied: true,
   ttl: 1,
   comment: `${prefix.toUpperCase()} API - managed by Pulumi`,
 });
 
+export const previewDnsRecord = new cloudflare.Record(`${prefix}-dns-preview`, {
+  zoneId,
+  name: 'preview',
+  type: 'CNAME',
+  content: apiWorkerHostname,
+  proxied: true,
+  ttl: 1,
+  comment: `${prefix.toUpperCase()} isolated HTML previews - managed by Pulumi`,
+});
+
 // App subdomain (app.example.com -> Pages)
 // IMPORTANT: Use the actual subdomain from the Pages project, not the computed name.
-// Cloudflare Pages subdomains are globally unique — if "sam-web-prod" is taken by another
-// account, CF assigns a suffix (e.g., "sam-web-prod-eui"). Using the computed name would
+// Cloudflare Pages subdomains are globally unique — if "sa379a6-web-prod" is taken by another
+// account, CF assigns a suffix (e.g., "sa379a6-web-prod-eui"). Using the computed name would
 // CNAME to someone else's Pages project.
 export const appDnsRecord = new cloudflare.Record(`${prefix}-dns-app`, {
   zoneId: zoneId,
   name: `app`,
-  type: "CNAME",
+  type: 'CNAME',
   content: pagesProject.subdomain,
   proxied: true,
   ttl: 1,
@@ -33,8 +45,8 @@ export const appDnsRecord = new cloudflare.Record(`${prefix}-dns-app`, {
 export const wildcardDnsRecord = new cloudflare.Record(`${prefix}-dns-wildcard`, {
   zoneId: zoneId,
   name: `*`,
-  type: "CNAME",
-  content: `${prefix}-api-${stack}.workers.dev`,
+  type: 'CNAME',
+  content: apiWorkerHostname,
   proxied: true,
   ttl: 1,
   comment: `${prefix.toUpperCase()} Workspaces - managed by Pulumi`,
@@ -63,11 +75,13 @@ export const vmRouteExclusion = new cloudflare.WorkersRoute(`${prefix}-route-vm-
 export const dnsRecordIds = {
   api: apiDnsRecord.id,
   app: appDnsRecord.id,
+  preview: previewDnsRecord.id,
   wildcard: wildcardDnsRecord.id,
 };
 
 export const dnsHostnames = {
   api: pulumi.interpolate`api.${baseDomain}`,
   app: pulumi.interpolate`app.${baseDomain}`,
+  preview: pulumi.interpolate`preview.${baseDomain}`,
   vmBackend: pulumi.interpolate`*.vm.${baseDomain}`,
 };

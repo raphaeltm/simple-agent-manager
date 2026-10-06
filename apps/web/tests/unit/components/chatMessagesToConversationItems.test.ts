@@ -6,9 +6,12 @@
  *
  * These tests exercise the actual runtime behaviour of every branch.
  */
+import type { ToolCallItem } from '@simple-agent-manager/acp-client';
 import { describe, expect, it } from 'vitest';
 
 import { chatMessagesToConversationItems } from '../../../src/components/project-message-view';
+import { DocumentCard } from '../../../src/components/project-message-view/tool-cards/DocumentCard';
+import { matchToolCard } from '../../../src/components/project-message-view/tool-cards/registry';
 import type { ChatMessageResponse } from '../../../src/lib/api';
 
 // ---------------------------------------------------------------------------
@@ -23,6 +26,19 @@ function msg(overrides: Partial<ChatMessageResponse> & { role: string; content: 
     createdAt: Date.now(),
     ...overrides,
   };
+}
+
+function toolMsg(
+  overrides: Partial<ChatMessageResponse> & {
+    content: string;
+    toolMetadata: NonNullable<ChatMessageResponse['toolMetadata']>;
+  }
+): ChatMessageResponse {
+  return msg({
+    role: 'tool',
+    ...overrides,
+    toolMetadata: overrides.toolMetadata as unknown as null,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -47,6 +63,25 @@ describe('chatMessagesToConversationItems', () => {
       kind: 'user_message',
       text: 'hello agent',
     });
+  });
+
+  it('maps origin=system user message to a system-origin item (collapsed in UI)', () => {
+    const input = [msg({ role: 'user', content: 'call get_instructions', origin: 'system' })];
+    const items = chatMessagesToConversationItems(input);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ kind: 'user_message', origin: 'system' });
+  });
+
+  it.each([
+    ['explicit user', 'user' as const, 'user'],
+    ['null (pre-migration)', null, 'user'],
+    ['undefined (old message)', undefined, 'user'],
+    ['system', 'system' as const, 'system'],
+  ])('user message with origin %s maps to item origin %s', (_label, origin, expected) => {
+    const input = [msg({ role: 'user', content: 'x', origin })];
+    const items = chatMessagesToConversationItems(input);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ kind: 'user_message', origin: expected });
   });
 
   it('gives user_message item the message id and createdAt timestamp', () => {
@@ -222,13 +257,17 @@ describe('chatMessagesToConversationItems', () => {
     });
   });
 
-  it('maps tool message content to text content item when no structured metadata', () => {
-    const input = [msg({ role: 'tool', content: 'plain output', toolMetadata: null })];
+  it('marks plain tool message content for lazy loading instead of rendering it inline', () => {
+    const input = [msg({ id: 'tool-plain', role: 'tool', content: 'plain output', toolMetadata: null })];
     const items = chatMessagesToConversationItems(input);
 
-    const toolItem = items[0] as { content: Array<{ type: string; text: string }> };
-    expect(toolItem.content).toHaveLength(1);
-    expect(toolItem.content[0]).toMatchObject({ type: 'content', text: 'plain output' });
+    expect(items[0]).toMatchObject({
+      kind: 'tool_call',
+      content: [],
+      contentLoaded: false,
+      messageId: 'tool-plain',
+      contentSize: 'plain output'.length,
+    });
   });
 
   it('uses toolCallId from metadata for tool_call id field', () => {
@@ -302,10 +341,10 @@ describe('chatMessagesToConversationItems', () => {
       toolKind: 'execute',
       status: 'completed',
     });
-    const toolItem = items[0] as { content: Array<{ type: string; data?: unknown }> };
-    expect(toolItem.content[0]).toMatchObject({
-      type: 'terminal',
-      data: { type: 'terminal', terminalId: 'term-status-only' },
+    expect(items[0]).toMatchObject({
+      content: [],
+      contentLoaded: false,
+      messageId: expect.any(String),
     });
   });
 
@@ -324,10 +363,10 @@ describe('chatMessagesToConversationItems', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Tool messages — structured content (diff/terminal)
+  // Tool messages — lazy content pointers
   // -------------------------------------------------------------------------
 
-  it('uses structured content from metadata when available', () => {
+  it('normalizes structured metadata content to a lazy-load pointer', () => {
     const structuredContent = [
       { type: 'diff', text: '/src/foo.go', path: '/src/foo.go', oldText: 'old', newText: 'new' },
     ];
@@ -341,148 +380,34 @@ describe('chatMessagesToConversationItems', () => {
     const input = [msg({ role: 'tool', content: 'diff: /src/foo.go', toolMetadata: meta as unknown as null })];
     const items = chatMessagesToConversationItems(input);
 
-    const toolItem = items[0] as { content: Array<{ type: string; data?: unknown }> };
-    expect(toolItem.content).toHaveLength(1);
-    expect(toolItem.content[0]?.type).toBe('diff');
-    // diff items should carry a data field for ToolCallCard rendering
-    expect(toolItem.content[0]?.data).toMatchObject({
-      type: 'diff',
-      path: '/src/foo.go',
-      oldText: 'old',
-      newText: 'new',
+    expect(items[0]).toMatchObject({
+      kind: 'tool_call',
+      content: [],
+      contentLoaded: false,
+      messageId: expect.any(String),
+      contentSize: expect.any(Number),
     });
   });
 
-  it('passes terminal structured content type through as-is', () => {
-    const structuredContent = [{ type: 'terminal', text: 'term-1' }];
-    const meta = {
-      toolCallId: 'tc-term',
-      kind: 'execute',
-      status: 'completed',
-      content: structuredContent,
-    };
-    const input = [msg({ role: 'tool', content: '(tool call)', toolMetadata: meta as unknown as null })];
-    const items = chatMessagesToConversationItems(input);
-
-    const toolItem = items[0] as { content: Array<{ type: string }> };
-    expect(toolItem.content[0]?.type).toBe('terminal');
-  });
-
-  it('populates data field for terminal structured content (parity with workspace chat)', () => {
-    const structuredContent = [{ type: 'terminal', text: 'term-123' }];
-    const meta = {
-      toolCallId: 'tc-term-data',
-      kind: 'execute',
-      status: 'completed',
-      content: structuredContent,
-    };
-    const input = [msg({ role: 'tool', content: '(tool call)', toolMetadata: meta as unknown as null })];
-    const items = chatMessagesToConversationItems(input);
-
-    const toolItem = items[0] as { content: Array<{ type: string; data?: unknown }> };
-    expect(toolItem.content[0]?.data).toBeTruthy();
-    expect(toolItem.content[0]?.data).toMatchObject({ type: 'terminal', text: 'term-123' });
-  });
-
-  it('populates data field for content structured content (parity with workspace chat)', () => {
-    const structuredContent = [{ type: 'content', text: 'some output text' }];
-    const meta = {
-      toolCallId: 'tc-content-data',
-      kind: 'read',
-      status: 'completed',
-      content: structuredContent,
-    };
-    const input = [msg({ role: 'tool', content: 'some output text', toolMetadata: meta as unknown as null })];
-    const items = chatMessagesToConversationItems(input);
-
-    const toolItem = items[0] as { content: Array<{ type: string; data?: unknown }> };
-    expect(toolItem.content[0]?.data).toBeTruthy();
-    expect(toolItem.content[0]?.data).toMatchObject({ type: 'content', text: 'some output text' });
-  });
-
-  it('populates data field for ALL content types consistently (diff, terminal, content)', () => {
-    const structuredContent = [
-      { type: 'content', text: 'hello' },
-      { type: 'diff', text: '/src/a.ts', path: '/src/a.ts', oldText: 'x', newText: 'y' },
-      { type: 'terminal', text: 'term-99' },
+  it('preserves lazy-load metadata from compact update rows merged into an existing tool call', () => {
+    const meta1 = { toolCallId: 'tc-compact-merge', title: 'Search files', kind: 'search', status: 'in_progress' };
+    const meta2 = { toolCallId: 'tc-compact-merge', status: 'completed', contentSize: 1234 };
+    const input = [
+      toolMsg({ id: 'tool-start', content: '(tool call)', toolMetadata: meta1 }),
+      toolMsg({ id: 'tool-result', content: '(tool update)', toolMetadata: meta2 }),
     ];
-    const meta = {
-      toolCallId: 'tc-all-types',
-      kind: 'multi',
+    const items = chatMessagesToConversationItems(input);
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      kind: 'tool_call',
+      title: 'Search files',
       status: 'completed',
-      content: structuredContent,
-    };
-    const input = [msg({ role: 'tool', content: 'mixed', toolMetadata: meta as unknown as null })];
-    const items = chatMessagesToConversationItems(input);
-
-    const toolItem = items[0] as { content: Array<{ type: string; data?: unknown }> };
-    expect(toolItem.content).toHaveLength(3);
-    // All content types should have a data field
-    for (const c of toolItem.content) {
-      expect(c.data).toBeTruthy();
-    }
-  });
-
-  it('treats unknown structured content type as "content"', () => {
-    const structuredContent = [{ type: 'unknown_future_type', text: 'raw' }];
-    const meta = { toolCallId: 'tc-x', kind: 'read', status: 'completed', content: structuredContent };
-    const input = [msg({ role: 'tool', content: 'raw', toolMetadata: meta as unknown as null })];
-    const items = chatMessagesToConversationItems(input);
-
-    const toolItem = items[0] as { content: Array<{ type: string }> };
-    expect(toolItem.content[0]?.type).toBe('content');
-  });
-
-  // -------------------------------------------------------------------------
-  // Tool messages — raw ACP wire format (from Go marshalRawContent)
-  // These test the exact JSON shapes the Go VM agent now stores.
-  // -------------------------------------------------------------------------
-
-  it('handles raw ACP wire format for diff content (flat fields, no "text" key)', () => {
-    // Exact shape from Go: {"type":"diff","path":"/foo.go","oldText":"old","newText":"new"}
-    const rawDiff = { type: 'diff', path: '/foo.go', oldText: 'old', newText: 'new' };
-    const meta = { toolCallId: 'tc-raw-diff', kind: 'edit', status: 'completed', content: [rawDiff] };
-    const input = [msg({ role: 'tool', content: 'diff: /foo.go', toolMetadata: meta as unknown as null })];
-    const items = chatMessagesToConversationItems(input);
-
-    const toolItem = items[0] as { content: Array<{ type: string; data?: Record<string, unknown> }> };
-    expect(toolItem.content).toHaveLength(1);
-    expect(toolItem.content[0]?.type).toBe('diff');
-    // data carries the full raw object for ToolCallCard rendering
-    expect(toolItem.content[0]?.data).toMatchObject({
-      type: 'diff',
-      path: '/foo.go',
-      oldText: 'old',
-      newText: 'new',
+      content: [],
+      contentLoaded: false,
+      messageId: 'tool-result',
+      contentSize: 1234,
     });
-  });
-
-  it('handles raw ACP wire format for content type (nested content block)', () => {
-    // Exact shape from Go: {"type":"content","content":{"type":"text","text":"hello"}}
-    const rawContent = { type: 'content', content: { type: 'text', text: 'hello' } };
-    const meta = { toolCallId: 'tc-raw-content', kind: 'read', status: 'completed', content: [rawContent] };
-    const input = [msg({ role: 'tool', content: 'hello', toolMetadata: meta as unknown as null })];
-    const items = chatMessagesToConversationItems(input);
-
-    const toolItem = items[0] as { content: Array<{ type: string; text?: string; data?: unknown }> };
-    expect(toolItem.content).toHaveLength(1);
-    expect(toolItem.content[0]?.type).toBe('content');
-    // extractToolCallText traverses content.content.text to find "hello"
-    expect(toolItem.content[0]?.text).toBe('hello');
-  });
-
-  it('handles raw ACP wire format for terminal type (terminalId field)', () => {
-    // Exact shape from Go: {"type":"terminal","terminalId":"term-1"}
-    const rawTerminal = { type: 'terminal', terminalId: 'term-1' };
-    const meta = { toolCallId: 'tc-raw-term', kind: 'execute', status: 'completed', content: [rawTerminal] };
-    const input = [msg({ role: 'tool', content: '(tool call)', toolMetadata: meta as unknown as null })];
-    const items = chatMessagesToConversationItems(input);
-
-    const toolItem = items[0] as { content: Array<{ type: string; data?: unknown }> };
-    expect(toolItem.content).toHaveLength(1);
-    expect(toolItem.content[0]?.type).toBe('terminal');
-    // data carries the raw object with terminalId
-    expect(toolItem.content[0]?.data).toMatchObject({ type: 'terminal', terminalId: 'term-1' });
   });
 
   // -------------------------------------------------------------------------
@@ -505,13 +430,16 @@ describe('chatMessagesToConversationItems', () => {
     expect(toolItem.content).toHaveLength(0);
   });
 
-  it('does NOT suppress non-placeholder content', () => {
-    const input = [msg({ role: 'tool', content: 'real output here', toolMetadata: null })];
+  it('does not render non-placeholder content inline', () => {
+    const input = [msg({ id: 'tool-output', role: 'tool', content: 'real output here', toolMetadata: null })];
     const items = chatMessagesToConversationItems(input);
 
-    const toolItem = items[0] as { content: Array<{ text: string }> };
-    expect(toolItem.content).toHaveLength(1);
-    expect(toolItem.content[0]?.text).toBe('real output here');
+    expect(items[0]).toMatchObject({
+      content: [],
+      contentLoaded: false,
+      messageId: 'tool-output',
+      contentSize: 'real output here'.length,
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -682,19 +610,23 @@ describe('chatMessagesToConversationItems', () => {
     expect(['in_progress', 'completed']).toContain((items[0] as { status: string }).status);
   });
 
-  it('updates content on deduplication when new content is provided', () => {
+  it('updates lazy-load pointer on deduplication when new content is provided', () => {
     const initialContent = [{ type: 'content', text: 'initial output' }];
     const updatedContent = [{ type: 'content', text: 'final output' }];
     const meta1 = { toolCallId: 'tc-content-update', kind: 'read', status: 'in_progress', content: initialContent };
     const meta2 = { toolCallId: 'tc-content-update', kind: 'read', status: 'completed', content: updatedContent };
     const input = [
-      msg({ role: 'tool', content: 'initial output', toolMetadata: meta1 as unknown as null }),
-      msg({ role: 'tool', content: 'final output', toolMetadata: meta2 as unknown as null }),
+      toolMsg({ id: 'initial-content-message', content: 'initial output', toolMetadata: meta1 }),
+      toolMsg({ id: 'updated-content-message', content: 'final output', toolMetadata: meta2 }),
     ];
     const items = chatMessagesToConversationItems(input);
 
-    const toolItem = items[0] as { content: Array<{ text?: string }> };
-    expect(toolItem.content[0]?.text).toBe('final output');
+    expect(items[0]).toMatchObject({
+      content: [],
+      contentLoaded: false,
+      messageId: 'updated-content-message',
+      contentSize: expect.any(Number),
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -767,5 +699,360 @@ describe('chatMessagesToConversationItems', () => {
     ];
     const items = chatMessagesToConversationItems(input);
     expect(items).toHaveLength(2);
+  });
+
+  it('merges compact normalized Codex call/update rows by toolCallId after reload', () => {
+    const items = chatMessagesToConversationItems([
+      toolMsg({
+        id: 'codex-call',
+        content: '(tool call)',
+        toolMetadata: {
+          toolCallId: 'codex-command-1',
+          title: 'Run shell command',
+          kind: 'execute',
+          status: 'in_progress',
+          contentSize: 80,
+        },
+      }),
+      toolMsg({
+        id: 'codex-update',
+        content: 'SAM_DURABLE_COMMAND_OUTPUT_112',
+        toolMetadata: {
+          toolCallId: 'codex-command-1',
+          status: 'completed',
+          contentSize: 96,
+        },
+      }),
+    ]);
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      kind: 'tool_call',
+      toolCallId: 'codex-command-1',
+      title: 'Run shell command',
+      status: 'completed',
+      contentLoaded: false,
+      messageId: 'codex-update',
+      contentSize: 96,
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Typed tool-call card fields (toolName / rawInput / rawOutput)
+  //
+  // These carry the discriminator + payload that DocumentCard renders. The
+  // initial tool_call carries toolName + rawInput; the result update carries
+  // toolName + rawOutput. Both must reach the ToolCallItem, and — critically —
+  // a status-only update must NOT erase them (rule 02 persisted-parity).
+  // -------------------------------------------------------------------------
+
+  it('extracts toolName, rawInput and rawOutput from tool metadata', () => {
+    const meta = {
+      toolCallId: 'tc-doc',
+      title: 'Display document',
+      status: 'completed',
+      toolName: 'mcp__sam-mcp__display_from_library',
+      rawInput: { fileId: 'file-1', caption: 'the auth doc' },
+      rawOutput: [{ type: 'text', text: '{"fileId":"file-1","filename":"auth.md","mimeType":"text/markdown","sizeBytes":1234}' }],
+    };
+    const items = chatMessagesToConversationItems([
+      toolMsg({ content: '(tool call)', toolMetadata: meta }),
+    ]);
+
+    expect(items[0]).toMatchObject({
+      kind: 'tool_call',
+      toolName: 'mcp__sam-mcp__display_from_library',
+      rawInput: { fileId: 'file-1', caption: 'the auth doc' },
+    });
+    const tool = items[0] as { rawOutput: Array<{ type: string; text: string }> };
+    expect(tool.rawOutput[0]?.type).toBe('text');
+  });
+
+  it('merges rawOutput from the result update while keeping rawInput from the initial call', () => {
+    // Real upload/display flow: initial tool_call has toolName + rawInput (args),
+    // the completed update has toolName + rawOutput (the MCP result payload).
+    const initial = {
+      toolCallId: 'tc-upload',
+      status: 'pending',
+      toolName: 'mcp__sam-mcp__upload_to_library',
+      rawInput: { filePath: '/tmp/auth.md', directory: '/docs/' },
+    };
+    const result = {
+      toolCallId: 'tc-upload',
+      status: 'completed',
+      toolName: 'mcp__sam-mcp__upload_to_library',
+      rawOutput: [{ type: 'text', text: '{"fileId":"f-9","filename":"auth.md","mimeType":"text/markdown","sizeBytes":900}' }],
+    };
+    const items = chatMessagesToConversationItems([
+      toolMsg({ id: 'up-start', content: '(tool call)', toolMetadata: initial }),
+      toolMsg({ id: 'up-done', content: '(tool update)', toolMetadata: result }),
+    ]);
+
+    expect(items).toHaveLength(1);
+    const tool = items[0] as {
+      toolName: string;
+      status: string;
+      rawInput: { filePath: string };
+      rawOutput: Array<{ text: string }>;
+    };
+    expect(tool.toolName).toBe('mcp__sam-mcp__upload_to_library');
+    expect(tool.status).toBe('completed');
+    // rawInput survived from the initial call
+    expect(tool.rawInput.filePath).toBe('/tmp/auth.md');
+    // rawOutput arrived on the update
+    expect(tool.rawOutput[0]?.text).toContain('"fileId":"f-9"');
+  });
+
+  it('does NOT erase toolName/rawInput/rawOutput when a status-only update merges in (regression)', () => {
+    // A6 regression: the completed tool_call_update may be a bare status change
+    // with no toolName/rawInput/rawOutput. The card metadata captured on the
+    // initial call must survive so DocumentCard still renders after reload.
+    const initial = {
+      toolCallId: 'tc-keep-card',
+      status: 'in_progress',
+      toolName: 'mcp__sam-mcp__display_from_library',
+      rawInput: { fileId: 'file-keep' },
+      rawOutput: [{ type: 'text', text: '{"fileId":"file-keep","filename":"guide.md","mimeType":"text/markdown","sizeBytes":42}' }],
+    };
+    const statusOnly = {
+      toolCallId: 'tc-keep-card',
+      status: 'completed',
+    };
+    const items = chatMessagesToConversationItems([
+      toolMsg({ id: 'keep-start', content: '(tool call)', toolMetadata: initial }),
+      toolMsg({ id: 'keep-done', content: '(tool update)', toolMetadata: statusOnly }),
+    ]);
+
+    expect(items).toHaveLength(1);
+    const tool = items[0] as {
+      status: string;
+      toolName?: string;
+      rawInput?: { fileId: string };
+      rawOutput?: Array<{ text: string }>;
+    };
+    expect(tool.status).toBe('completed');
+    expect(tool.toolName).toBe('mcp__sam-mcp__display_from_library');
+    expect(tool.rawInput?.fileId).toBe('file-keep');
+    expect(tool.rawOutput?.[0]?.text).toContain('guide.md');
+  });
+
+  it('recovers document-card metadata from pre-toolName VM agent rows', () => {
+    // Production regression shape from stale shared nodes created before the
+    // typed-card VM-agent change: title carries the MCP tool name, but
+    // toolName/rawInput/rawOutput are absent. The tool result JSON is still in
+    // the persisted message content.
+    const initial = {
+      toolCallId: 'tc-old-display',
+      title: 'mcp__sam-mcp__display_from_library',
+      kind: 'other',
+      status: 'in_progress',
+    };
+    const result = {
+      toolCallId: 'tc-old-display',
+      title: 'mcp__sam-mcp__display_from_library',
+      kind: 'other',
+      status: 'completed',
+    };
+    const items = chatMessagesToConversationItems([
+      toolMsg({ id: 'old-display-start', content: '(tool call)', toolMetadata: initial }),
+      toolMsg({
+        id: 'old-display-done',
+        content: JSON.stringify({
+          fileId: '01KWSG35DYFK7S12P175438Q67',
+          filename: 'format-c.png',
+          mimeType: 'image/png',
+          sizeBytes: 2916416,
+          caption: 'Format C — Landscape hero',
+        }),
+        toolMetadata: result,
+      }),
+    ]);
+
+    expect(items).toHaveLength(1);
+    const tool = items[0] as {
+      kind: string;
+      title: string;
+      toolName?: string;
+      rawOutput?: Array<{ type: string; text: string }>;
+    };
+    expect(tool.kind).toBe('tool_call');
+    expect(tool.title).toBe('mcp__sam-mcp__display_from_library');
+    expect(tool.toolName).toBe('mcp__sam-mcp__display_from_library');
+    expect(tool.rawOutput?.[0]?.type).toBe('text');
+    expect(tool.rawOutput?.[0]?.text).toContain('format-c.png');
+    expect(tool.rawOutput?.[0]?.text).toContain('Landscape hero');
+  });
+
+  it('recovers document-card metadata + selects DocumentCard for Codex slash-title rows', () => {
+    // Codex titles MCP tool calls "<server>/<tool>" (slash) and sets no explicit
+    // toolName. Vertical slice: persisted row (slash title, no toolName/rawOutput,
+    // JSON in content) → reconstructed toolName + rawOutput → matchToolCard picks
+    // the DocumentCard. This is the exact production regression for Codex chats.
+    const initial = {
+      toolCallId: 'tc-codex-display',
+      title: 'sam-mcp/display_from_library',
+      kind: 'other',
+      status: 'in_progress',
+    };
+    const result = {
+      toolCallId: 'tc-codex-display',
+      title: 'sam-mcp/display_from_library',
+      kind: 'other',
+      status: 'completed',
+    };
+    const items = chatMessagesToConversationItems([
+      toolMsg({ id: 'codex-display-start', content: '(tool call)', toolMetadata: initial }),
+      toolMsg({
+        id: 'codex-display-done',
+        content: JSON.stringify({
+          fileId: '01KWV7J5N2Q1AGFTMQSNK1RE7B',
+          filename: 'sam-architecture-basic.html',
+          mimeType: 'text/html; charset=utf-8',
+          sizeBytes: 15357,
+          caption: 'Basic SAM architecture visualization render test.',
+        }),
+        toolMetadata: result,
+      }),
+    ]);
+
+    expect(items).toHaveLength(1);
+    const tool = items[0] as ToolCallItem;
+    expect(tool.title).toBe('sam-mcp/display_from_library');
+    expect(tool.toolName).toBe('sam-mcp/display_from_library');
+    const raw = tool.rawOutput as Array<{ type: string; text: string }> | undefined;
+    expect(raw?.[0]?.text).toContain('sam-architecture-basic.html');
+    // Vertical slice through to card selection.
+    expect(matchToolCard(tool)).toBe(DocumentCard);
+  });
+
+  it('recovers a DocumentCard from the exact sparse Codex staging result sequence', () => {
+    // Staging session d56fd81a-4c0f-49a0-8feb-d662439461a8 emitted:
+    // 1. a dotted-name initial call with MCP arguments nested in rawInput,
+    // 2. a title-less in-progress update, and
+    // 3. a title-less completed update whose document payload exists only in content.
+    // The completed row must inherit the initial tool identity during merge so
+    // its stored JSON can become rawOutput for typed-card selection.
+    const toolCallId = 'call_moHavJdFljpB8I4YHEDgc5Ac';
+    const items = chatMessagesToConversationItems([
+      toolMsg({
+        id: 'codex-staging-start',
+        content: '(tool call)',
+        toolMetadata: {
+          toolCallId,
+          title: 'mcp.sam-mcp.display_from_library',
+          toolName: 'mcp.sam-mcp.display_from_library',
+          kind: 'execute',
+          status: 'in_progress',
+          rawInput: {
+            arguments: {
+              caption: 'Staging Codex HTML card reproduction',
+              fileId: '01KZ4259HS1C47CXXKH7NENHST',
+            },
+            server: 'sam-mcp',
+            tool: 'display_from_library',
+          },
+        },
+      }),
+      toolMsg({
+        id: 'codex-staging-progress',
+        content: '(tool update)',
+        toolMetadata: { toolCallId, status: 'in_progress' },
+      }),
+      toolMsg({
+        id: 'codex-staging-done',
+        content: JSON.stringify({
+          fileId: '01KZ4259HS1C47CXXKH7NENHST',
+          filename: 'codex-library-card-repro-2026-08-03.html',
+          mimeType: 'text/html; charset=utf-8',
+          sizeBytes: 270,
+          caption: 'Staging Codex HTML card reproduction',
+        }),
+        toolMetadata: { toolCallId, status: 'completed' },
+      }),
+    ]);
+
+    expect(items).toHaveLength(1);
+    const tool = items[0] as ToolCallItem;
+    expect(tool).toMatchObject({
+      title: 'mcp.sam-mcp.display_from_library',
+      toolName: 'mcp.sam-mcp.display_from_library',
+      status: 'completed',
+      messageId: 'codex-staging-done',
+    });
+    const raw = tool.rawOutput as Array<{ type: string; text: string }> | undefined;
+    expect(raw?.[0]?.text).toContain('codex-library-card-repro-2026-08-03.html');
+    expect(matchToolCard(tool)).toBe(DocumentCard);
+  });
+
+  it('keeps a malformed sparse Codex document result on the generic card', () => {
+    const toolCallId = 'call-codex-malformed-sparse';
+    const items = chatMessagesToConversationItems([
+      toolMsg({
+        id: 'codex-malformed-start',
+        content: '(tool call)',
+        toolMetadata: {
+          toolCallId,
+          title: 'mcp.sam-mcp.display_from_library',
+          toolName: 'mcp.sam-mcp.display_from_library',
+          kind: 'execute',
+          status: 'in_progress',
+          rawInput: {
+            arguments: { fileId: 'file-not-authoritative-until-result' },
+            server: 'sam-mcp',
+            tool: 'display_from_library',
+          },
+        },
+      }),
+      toolMsg({
+        id: 'codex-malformed-done',
+        content: 'display failed without a structured document payload',
+        toolMetadata: { toolCallId, status: 'completed' },
+      }),
+    ]);
+
+    expect(items).toHaveLength(1);
+    const tool = items[0] as ToolCallItem;
+    expect(tool.rawOutput).toBeUndefined();
+    expect(matchToolCard(tool)).toBeNull();
+  });
+
+  it('recovers the card when the VM agent stored an empty-string toolName', () => {
+    // Pre-fix nodes emit ToolName:"" (omitted) for slash tools; a resurrected
+    // row could carry an explicit empty string. The `&& meta.toolName` guard must
+    // fall through to title inference rather than treating "" as the discriminator.
+    const result = {
+      toolCallId: 'tc-codex-empty',
+      title: 'sam-mcp/display_from_library',
+      toolName: '',
+      kind: 'other',
+      status: 'completed',
+    };
+    const items = chatMessagesToConversationItems([
+      toolMsg({
+        id: 'codex-empty',
+        content: JSON.stringify({ fileId: 'f-empty', filename: 'e.html', mimeType: 'text/html', sizeBytes: 5 }),
+        toolMetadata: result,
+      }),
+    ]);
+    const tool = items[0] as ToolCallItem;
+    expect(tool.toolName).toBe('sam-mcp/display_from_library');
+    expect(matchToolCard(tool)).toBe(DocumentCard);
+  });
+
+  it('falls back to the generic card for a Codex library row with unusable content', () => {
+    // Name matches (slash library tool) but the content is not a document
+    // payload → no fileId → generic card, never a broken empty DocumentCard.
+    const result = {
+      toolCallId: 'tc-codex-bad',
+      title: 'sam-mcp/display_from_library',
+      kind: 'other',
+      status: 'completed',
+    };
+    const items = chatMessagesToConversationItems([
+      toolMsg({ id: 'codex-bad', content: 'the file could not be rendered', toolMetadata: result }),
+    ]);
+
+    const tool = items[0] as ToolCallItem;
+    expect(matchToolCard(tool)).toBeNull();
   });
 });

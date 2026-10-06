@@ -1,5 +1,11 @@
 # Devcontainer Config Name: Secondary Path Gaps
 
+> **Reconciliation 2026-09-30:** still open, but narrower. Task-runner workspaces already
+> forward the name (`apps/api/src/durable-objects/task-runner/workspace-steps.ts:489`). Only
+> direct creation drops it: it hard-codes `devcontainerConfigName: null`
+> (`routes/workspaces/workspace-create.ts:405,529`, `services/direct-workspace-creation.ts:224`),
+> so fixing direct creation also covers the node-reconnect item.
+
 ## Problem
 
 PR #680 added `devcontainerConfigName` support through the primary task submission flow, but two secondary workspace creation paths don't forward the field:

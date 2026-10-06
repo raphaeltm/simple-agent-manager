@@ -2,7 +2,14 @@ import '@xterm/xterm/css/xterm.css';
 
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal as XTerm } from '@xterm/xterm';
-import React, { useCallback, useEffect, useImperativeHandle,useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
 import { TabBar } from './components/TabBar';
 import { useTerminalSessions } from './hooks/useTerminalSessions';
@@ -24,6 +31,7 @@ import {
   isSessionReattachedMessage,
   parseTerminalWsServerMessage,
 } from './protocol';
+import { colors, fonts, xtermTheme } from './terminal-tokens';
 import type {
   MultiTerminalHandle,
   MultiTerminalProps,
@@ -40,6 +48,7 @@ interface TerminalInstance {
   fitAddon: FitAddon;
   containerEl: HTMLDivElement | null;
   resizeObserver: ResizeObserver | null;
+  lastSentResize?: { socket: WebSocket; sessionId: string; rows: number; cols: number };
 }
 
 /**
@@ -59,18 +68,12 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
       persistenceKey,
       hideTabBar = false,
       onSessionsChange,
+      shouldSuppressReconnect,
     } = props;
     const terminalConfig: TerminalConfig = {
       maxSessions: config?.maxSessions || 10,
       tabSwitchAnimationMs: config?.tabSwitchAnimationMs || 200,
       scrollbackLines: config?.scrollbackLines || 1000,
-      shortcuts: config?.shortcuts || {
-        newTab: 'Ctrl+Shift+T',
-        closeTab: 'Ctrl+Shift+W',
-        nextTab: 'Ctrl+Tab',
-        previousTab: 'Ctrl+Shift+Tab',
-        jumpToTab: 'Alt+{n}',
-      },
     };
 
     const {
@@ -85,7 +88,7 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
       updateSessionWorkingDirectory,
       updateServerSessionId,
       getPersistedSessions,
-    } = useTerminalSessions(terminalConfig.maxSessions, persistenceKey);
+    } = useTerminalSessions(terminalConfig.maxSessions, persistenceKey, wsUrl);
 
     // Refs that persist across renders
     const wsRef = useRef<WebSocket | null>(null);
@@ -93,10 +96,14 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
     wsUrlRef.current = wsUrl;
     const resolveWsUrlRef = useRef(resolveWsUrl);
     resolveWsUrlRef.current = resolveWsUrl;
+    const shouldSuppressReconnectRef = useRef(shouldSuppressReconnect);
+    shouldSuppressReconnectRef.current = shouldSuppressReconnect;
     const terminalsRef = useRef<Map<string, TerminalInstance>>(new Map());
     const [wsConnected, setWsConnected] = useState(false);
     // Guard against duplicate list_sessions requests during rapid reconnect cycles
     const reconnectingRef = useRef(false);
+    const onSessionsChangeRef = useRef(onSessionsChange);
+    onSessionsChangeRef.current = onSessionsChange;
 
     // ── Stable refs for latest callback/state versions ──
     // This prevents re-creating the WebSocket connection when callbacks change reference.
@@ -140,35 +147,38 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
       return localSession?.serverSessionId ?? localSessionId;
     }, []);
 
+    // React ref reattachments and overlapping resize sources may report the same size.
+    // Deduplicate only within the same socket and server session; a new connection still
+    // receives its initial dimensions even when the terminal itself has not changed size.
+    const sendTerminalResize = useCallback(
+      (localSessionId: string) => {
+        const instance = terminalsRef.current.get(localSessionId);
+        const socket = wsRef.current;
+        if (!instance || !socket || socket.readyState !== WebSocket.OPEN) return;
+        const sessionId = getOutboundSessionId(localSessionId);
+        const { rows, cols } = instance.terminal;
+        const previous = instance.lastSentResize;
+        if (
+          previous?.socket === socket &&
+          previous.sessionId === sessionId &&
+          previous.rows === rows &&
+          previous.cols === cols
+        )
+          return;
+        socket.send(encodeTerminalWsResize(rows, cols, sessionId));
+        instance.lastSentResize = { socket, sessionId, rows, cols };
+      },
+      [getOutboundSessionId]
+    );
+
     // Create xterm.js instance for a session (stable — only depends on scrollback config)
     const createTerminalInstance = useCallback(
       (sessionId: string): TerminalInstance => {
         const terminal = new XTerm({
           cursorBlink: true,
           scrollback: terminalConfig.scrollbackLines,
-          theme: {
-            background: '#1a1b26',
-            foreground: '#a9b1d6',
-            cursor: '#c0caf5',
-            selectionBackground: '#33467c',
-            black: '#32344a',
-            red: '#f7768e',
-            green: '#9ece6a',
-            yellow: '#e0af68',
-            blue: '#7aa2f7',
-            magenta: '#ad8ee6',
-            cyan: '#449dab',
-            white: '#787c99',
-            brightBlack: '#444b6a',
-            brightRed: '#ff7a93',
-            brightGreen: '#b9f27c',
-            brightYellow: '#ff9e64',
-            brightBlue: '#7da6ff',
-            brightMagenta: '#bb9af7',
-            brightCyan: '#0db9d7',
-            brightWhite: '#acb0d0',
-          },
-          fontFamily: 'JetBrains Mono, Menlo, Monaco, monospace',
+          theme: xtermTheme,
+          fontFamily: fonts.terminal,
           fontSize: 14,
           lineHeight: 1.2,
         });
@@ -185,7 +195,12 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
           }
         });
 
-        const instance: TerminalInstance = { terminal, fitAddon, containerEl: null, resizeObserver: null };
+        const instance: TerminalInstance = {
+          terminal,
+          fitAddon,
+          containerEl: null,
+          resizeObserver: null,
+        };
         terminalsRef.current.set(sessionId, instance);
         return instance;
       },
@@ -257,11 +272,16 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
       let reconnectTimeout: ReturnType<typeof setTimeout>;
       let pingInterval: ReturnType<typeof setInterval>;
       let currentWs: WebSocket | null = null;
+      // Capture ref value at effect creation time so the cleanup closure
+      // always references the same Map instance (react-hooks/exhaustive-deps).
+      const terminalsMap = terminalsRef.current;
 
       const scheduleReconnect = () => {
         if (disposed) return;
+        if (shouldSuppressReconnectRef.current?.()) return;
         clearTimeout(reconnectTimeout);
         reconnectTimeout = setTimeout(() => {
+          if (disposed || shouldSuppressReconnectRef.current?.()) return;
           void connect();
         }, RECONNECT_DELAY_MS);
       };
@@ -306,7 +326,8 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
             setWsConnected(true);
             wsRef.current = ws;
 
-            // Start ping heartbeat
+            // Start ping heartbeat (clear any leaked interval from a prior connection)
+            clearInterval(pingInterval);
             pingInterval = setInterval(() => {
               if (ws.readyState === WebSocket.OPEN) {
                 ws.send(encodeTerminalWsPing());
@@ -517,14 +538,14 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
         clearInterval(pingInterval);
         if (currentWs) currentWs.close();
         wsRef.current = null;
-        // Dispose all terminal instances
-        for (const [, instance] of terminalsRef.current) {
+        // Dispose all terminal instances using the captured map reference
+        for (const [, instance] of terminalsMap) {
           if (instance.resizeObserver) {
             instance.resizeObserver.disconnect();
           }
           instance.terminal.dispose();
         }
-        terminalsRef.current.clear();
+        terminalsMap.clear();
       };
     }, [wsUrl, createTerminalInstance, destroyTerminalInstance, resolveLocalSessionId]);
 
@@ -551,16 +572,7 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
           }
           instance.fitAddon.fit();
 
-          const ws = wsRef.current;
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(
-              encodeTerminalWsResize(
-                instance.terminal.rows,
-                instance.terminal.cols,
-                getOutboundSessionId(sessionId)
-              )
-            );
-          }
+          sendTerminalResize(sessionId);
 
           // Add ResizeObserver to handle container size changes (including
           // display:none → display:block transitions on tab switch).
@@ -581,23 +593,14 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
                 } catch {
                   return; // terminal may be disposed
                 }
-                const currentWs = wsRef.current;
-                if (currentWs && currentWs.readyState === WebSocket.OPEN) {
-                  currentWs.send(
-                    encodeTerminalWsResize(
-                      instance.terminal.rows,
-                      instance.terminal.cols,
-                      getOutboundSessionId(sessionId)
-                    )
-                  );
-                }
+                sendTerminalResize(sessionId);
               }
             }, 100);
           });
           instance.resizeObserver.observe(containerEl);
         }
       },
-      [getOutboundSessionId]
+      [sendTerminalResize]
     );
 
     // Fit active terminal on window resize
@@ -607,21 +610,12 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
         const instance = terminalsRef.current.get(activeSessionId);
         if (instance && instance.containerEl) {
           instance.fitAddon.fit();
-          const ws = wsRef.current;
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(
-              encodeTerminalWsResize(
-                instance.terminal.rows,
-                instance.terminal.cols,
-                getOutboundSessionId(activeSessionId)
-              )
-            );
-          }
+          sendTerminalResize(activeSessionId);
         }
       };
       window.addEventListener('resize', handleResize);
       return () => window.removeEventListener('resize', handleResize);
-    }, [activeSessionId, getOutboundSessionId]);
+    }, [activeSessionId, sendTerminalResize]);
 
     // When active tab changes, fit the terminal.
     // Use double-rAF to ensure the browser has fully recalculated layout after
@@ -644,16 +638,7 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
             return; // terminal disposed
           }
           instance.terminal.focus();
-          const ws = wsRef.current;
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(
-              encodeTerminalWsResize(
-                instance.terminal.rows,
-                instance.terminal.cols,
-                getOutboundSessionId(activeSessionId)
-              )
-            );
-          }
+          sendTerminalResize(activeSessionId);
         });
       });
 
@@ -661,9 +646,9 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
         cancelAnimationFrame(outerRaf);
         cancelAnimationFrame(innerRaf);
       };
-    }, [activeSessionId, getOutboundSessionId]);
+    }, [activeSessionId, sendTerminalResize]);
 
-    const sessionsArray = Array.from(sessions.values());
+    const sessionsArray = useMemo(() => Array.from(sessions.values()), [sessions]);
 
     useImperativeHandle(
       ref,
@@ -701,7 +686,7 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
     );
 
     useEffect(() => {
-      if (!onSessionsChange) return;
+      if (!onSessionsChangeRef.current) return;
 
       const snapshots: MultiTerminalSessionSnapshot[] = sessionsArray
         .slice()
@@ -714,8 +699,8 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
           serverSessionId: session.serverSessionId,
         }));
 
-      onSessionsChange(snapshots, activeSessionId);
-    }, [activeSessionId, onSessionsChange, sessionsArray]);
+      onSessionsChangeRef.current(snapshots, activeSessionId);
+    }, [activeSessionId, sessionsArray]);
 
     return (
       <div
@@ -752,8 +737,8 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
                     alignItems: 'center',
                     justifyContent: 'center',
                     height: '100%',
-                    color: '#f7768e',
-                    backgroundColor: '#1a1b26',
+                    color: colors.error,
+                    backgroundColor: colors.bg,
                   }}
                 >
                   Terminal connection error. Please try again.
@@ -774,8 +759,8 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        backgroundColor: 'rgba(26, 27, 38, 0.7)',
-                        color: '#7aa2f7',
+                        backgroundColor: `${colors.bg}b3`,
+                        color: colors.accent,
                         fontSize: '14px',
                         zIndex: 10,
                       }}
@@ -791,8 +776,8 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
                     alignItems: 'center',
                     justifyContent: 'center',
                     height: '100%',
-                    color: '#a9b1d6',
-                    backgroundColor: '#1a1b26',
+                    color: colors.fg,
+                    backgroundColor: colors.bg,
                   }}
                 >
                   Connecting to terminal...
@@ -809,8 +794,8 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
                 alignItems: 'center',
                 justifyContent: 'center',
                 height: '100%',
-                color: '#a9b1d6',
-                backgroundColor: '#1a1b26',
+                color: colors.fg,
+                backgroundColor: colors.bg,
                 gap: '16px',
               }}
             >
@@ -820,10 +805,10 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
                 disabled={!canCreateSession}
                 style={{
                   padding: '8px 16px',
-                  border: '1px solid #7aa2f7',
+                  border: `1px solid ${colors.accent}`,
                   borderRadius: '4px',
                   backgroundColor: 'transparent',
-                  color: '#7aa2f7',
+                  color: colors.accent,
                   cursor: 'pointer',
                 }}
               >

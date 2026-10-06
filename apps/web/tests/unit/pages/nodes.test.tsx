@@ -1,12 +1,22 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import type { SafeEffectiveCapacityPoolSummary } from '@simple-agent-manager/shared';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { renderWithQuery } from '../../test-utils/query-test-utils';
 
 const mocks = vi.hoisted(() => ({
   listNodes: vi.fn(),
   listWorkspaces: vi.fn(),
   createNode: vi.fn(),
   getProviderCatalog: vi.fn(),
+  fetchUserDefaultCapacityPools: vi.fn(),
+}));
+
+// `useQueryScope()` reads the authenticated identity, and every migrated query
+// is keyed by it. Without a provider `useAuth` throws, so supply a stable identity.
+vi.mock('../../../src/components/AuthProvider', () => ({
+  useAuth: () => ({ user: { id: 'user-1', email: 'user@example.com', name: 'Test User' } }),
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
@@ -21,7 +31,16 @@ vi.mock('../../../src/components/UserMenu', () => ({
   UserMenu: () => <div data-testid="user-menu" />,
 }));
 
+vi.mock('../../../src/lib/api/capacity-pools', () => ({
+  fetchUserDefaultCapacityPools: mocks.fetchUserDefaultCapacityPools,
+}));
+
+import { nodeQueryKeys } from '../../../src/lib/query-options';
 import { Nodes } from '../../../src/pages/Nodes';
+
+/** Must match the id returned by the mocked `useAuth` above — the query keys are
+ * scoped by it, so an invalidate with a different scope would match nothing. */
+const SCOPE = 'user-1';
 
 describe('Nodes page', () => {
   beforeEach(() => {
@@ -58,10 +77,21 @@ describe('Nodes page', () => {
       updatedAt: '2026-01-02T00:00:00.000Z',
     });
     mocks.getProviderCatalog.mockResolvedValue({ catalogs: [] });
+    // An installation-funded user has no personal credential catalog. Creation
+    // uses the safe native offerings from the authoritative effective pool.
+    const effectiveSummary: SafeEffectiveCapacityPoolSummary = {
+      scope: 'installation', state: 'configured-ready', strategy: 'pack',
+      exhaustionPolicy: 'fail', availableCandidateCount: 2,
+      nativeOfferings: [
+        { provider: 'hetzner', location: 'nbg1', providerInstanceType: 'cx23', displayName: 'CX23', vcpu: 2, memoryMb: 4096, diskGb: 40, price: '€4/month' },
+        { provider: 'hetzner', location: 'nbg1', providerInstanceType: 'cx43', displayName: 'CX43', vcpu: 8, memoryMb: 16384, diskGb: 160, price: '€16/month' },
+      ],
+    };
+    mocks.fetchUserDefaultCapacityPools.mockResolvedValue({ effectiveSummary });
   });
 
   it('renders node list', async () => {
-    render(
+    renderWithQuery(
       <MemoryRouter>
         <Nodes />
       </MemoryRouter>
@@ -71,12 +101,12 @@ describe('Nodes page', () => {
       expect(mocks.listNodes).toHaveBeenCalled();
     });
 
-    expect(screen.getByText('Node 1')).toBeInTheDocument();
+    expect(await screen.findByText('Node 1')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /create node/i })).toBeInTheDocument();
   });
 
   it('supports create-node flow and navigates to node detail', async () => {
-    render(
+    renderWithQuery(
       <MemoryRouter initialEntries={['/nodes']}>
         <Routes>
           <Route path="/nodes" element={<Nodes />} />
@@ -92,18 +122,157 @@ describe('Nodes page', () => {
     // Click "Create Node" to open the form (header button toggles to "Cancel")
     fireEvent.click(screen.getByRole('button', { name: /create node/i }));
 
-    // The form is now visible; click the "Create Node" submit button inside it
-    fireEvent.click(screen.getByRole('button', { name: /create node/i }));
+    const offering = await screen.findByLabelText('Native offering');
+    const submit = screen.getByRole('button', { name: /create node/i });
+    expect(submit).toBeDisabled();
+    expect(mocks.createNode).not.toHaveBeenCalled();
+    fireEvent.change(offering, { target: { value: 'cx43' } });
+    expect(screen.getByLabelText('Selected offering resources')).toHaveTextContent('8 vCPU · 16 GB memory · 160 GB disk');
+    expect(submit).toBeEnabled();
+    fireEvent.click(submit);
 
     await waitFor(() => {
       expect(mocks.createNode).toHaveBeenCalledTimes(1);
       expect(mocks.createNode).toHaveBeenCalledWith({
         name: expect.stringMatching(/^node-[0-9]{14}$/),
-        vmSize: 'medium',
+        provider: 'hetzner',
+        providerInstanceType: 'cx43',
         vmLocation: 'nbg1',
       });
     });
 
     expect(await screen.findByTestId('node-detail-page')).toBeInTheDocument();
+  });
+
+  it('surfaces load error instead of empty state when initial load fails', async () => {
+    // Regression: a failed initial load left nodesLoading=false with no data, so
+    // the render gate fell through to the "No nodes yet" empty state — telling the
+    // user they have zero nodes when the request actually errored.
+    mocks.listNodes.mockRejectedValue(new Error('Nodes network error'));
+
+    renderWithQuery(
+      <MemoryRouter>
+        <Nodes />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText('Nodes network error')).toBeInTheDocument();
+    expect(screen.queryByText('No nodes yet')).not.toBeInTheDocument();
+  });
+
+  it('falls back to a friendly message when the load error has no message', async () => {
+    // Guard against a blank error Alert when the API error carries an empty message
+    // (e.g. a 500 whose body has an `error` code but no `message`).
+    mocks.listNodes.mockRejectedValue(new Error(''));
+
+    renderWithQuery(
+      <MemoryRouter>
+        <Nodes />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText('Failed to load nodes')).toBeInTheDocument();
+    expect(screen.queryByText('No nodes yet')).not.toBeInTheDocument();
+  });
+
+  it('keeps stale nodes visible when a background refetch fails (does not show error)', async () => {
+    mocks.listNodes.mockResolvedValue([
+      {
+        id: 'node-1',
+        name: 'Persisted Node',
+        status: 'running',
+        healthStatus: 'healthy',
+        vmSize: 'medium',
+        vmLocation: 'nbg1',
+        ipAddress: '1.1.1.1',
+        lastHeartbeatAt: '2026-01-01T00:00:00.000Z',
+        heartbeatStaleAfterSeconds: 180,
+        errorMessage: null,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ]);
+
+    const { queryClient } = renderWithQuery(
+      <MemoryRouter>
+        <Nodes />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText('Persisted Node')).toBeInTheDocument();
+
+    mocks.listNodes.mockRejectedValueOnce(new Error('Nodes refetch boom'));
+    void queryClient.invalidateQueries({ queryKey: nodeQueryKeys.all(SCOPE) });
+
+    await waitFor(() => {
+      expect(screen.getByText('Persisted Node')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Nodes refetch boom')).not.toBeInTheDocument();
+    expect(screen.queryByText('No nodes yet')).not.toBeInTheDocument();
+  });
+
+  it('keeps stale node list visible during background refetch', async () => {
+    // First load
+    mocks.listNodes.mockResolvedValue([
+      {
+        id: 'node-1',
+        name: 'Stale Node',
+        status: 'running',
+        healthStatus: 'healthy',
+        vmSize: 'medium',
+        vmLocation: 'nbg1',
+        ipAddress: '1.1.1.1',
+        lastHeartbeatAt: '2026-01-01T00:00:00.000Z',
+        heartbeatStaleAfterSeconds: 180,
+        errorMessage: null,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ]);
+
+    const { queryClient } = renderWithQuery(
+      <MemoryRouter>
+        <Nodes />
+      </MemoryRouter>
+    );
+
+    // Wait for initial data
+    expect(await screen.findByText('Stale Node')).toBeInTheDocument();
+
+    // Set up a slow second fetch to simulate background refetch
+    let resolveRefetch: (value: unknown) => void;
+    const refetchPromise = new Promise((resolve) => {
+      resolveRefetch = resolve;
+    });
+    mocks.listNodes.mockReturnValueOnce(refetchPromise);
+
+    // Trigger a refetch
+    void queryClient.invalidateQueries({ queryKey: nodeQueryKeys.all(SCOPE) });
+
+    // Content must stay visible while refetch is in-flight
+    expect(screen.getByText('Stale Node')).toBeInTheDocument();
+
+    // Resolve with updated data
+    resolveRefetch!([
+      {
+        id: 'node-1',
+        name: 'Fresh Node',
+        status: 'running',
+        healthStatus: 'healthy',
+        vmSize: 'medium',
+        vmLocation: 'nbg1',
+        ipAddress: '1.1.1.1',
+        lastHeartbeatAt: '2026-01-01T00:00:00.000Z',
+        heartbeatStaleAfterSeconds: 180,
+        errorMessage: null,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ]);
+
+    // Eventually the new data replaces the stale data
+    await waitFor(() => {
+      expect(screen.getByText('Fresh Node')).toBeInTheDocument();
+    });
   });
 });

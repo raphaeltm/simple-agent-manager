@@ -2,6 +2,7 @@ import type { AgentProfile } from '@simple-agent-manager/shared';
 import { render, screen, waitFor,within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
+import { MemoryRouter } from 'react-router';
 import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 import { ProfileFormDialog } from '../../../src/components/agent-profiles/ProfileFormDialog';
@@ -11,6 +12,19 @@ import { ToastProvider } from '../../../src/hooks/useToast';
 
 // Mock the profile runtime API so ProfileRuntimeSection doesn't make real requests
 vi.mock('../../../src/lib/api', () => ({
+  getProviderCatalog: vi.fn().mockResolvedValue({
+    catalogs: [{
+      provider: 'hetzner',
+      defaultLocation: 'fsn1',
+      locations: [{ id: 'fsn1', name: 'Falkenstein', country: 'DE' }],
+      sizes: {
+        small: { type: 'cx22', price: '€4.35/mo', vcpu: 2, ramGb: 4, storageGb: 40 },
+        medium: { type: 'cx32', price: '€7.69/mo', vcpu: 4, ramGb: 8, storageGb: 80 },
+        large: { type: 'cx42', price: '€15.18/mo', vcpu: 8, ramGb: 16, storageGb: 160 },
+      },
+    }],
+  }),
+  getProject: vi.fn().mockResolvedValue({ id: 'proj-test-1', defaultProvider: 'hetzner', defaultLocation: 'fsn1' }),
   getProfileRuntimeConfig: vi.fn().mockResolvedValue({ envVars: [], files: [] }),
   upsertProfileRuntimeEnvVar: vi.fn().mockResolvedValue({ envVars: [], files: [] }),
   deleteProfileRuntimeEnvVar: vi.fn().mockResolvedValue({ envVars: [], files: [] }),
@@ -18,8 +32,12 @@ vi.mock('../../../src/lib/api', () => ({
   deleteProfileRuntimeFile: vi.fn().mockResolvedValue({ envVars: [], files: [] }),
 }));
 
-function Wrapper({ children }: { children: ReactNode }) {
-  return <ToastProvider>{children}</ToastProvider>;
+function Wrapper({ children, initialEntries = ['/'] }: { children: ReactNode; initialEntries?: string[] }) {
+  return (
+    <MemoryRouter initialEntries={initialEntries}>
+      <ToastProvider>{children}</ToastProvider>
+    </MemoryRouter>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -34,6 +52,7 @@ const makeProfile = (overrides: Partial<AgentProfile> = {}): AgentProfile => ({
   description: 'Sonnet for quick implementation',
   agentType: 'claude-code',
   model: 'claude-sonnet-4-5-20250929',
+  effort: 'auto',
   permissionMode: 'acceptEdits',
   systemPromptAppend: null,
   maxTurns: null,
@@ -43,6 +62,7 @@ const makeProfile = (overrides: Partial<AgentProfile> = {}): AgentProfile => ({
   vmLocation: null,
   workspaceProfile: null,
   taskMode: 'task',
+  runtime: null,
   isBuiltin: false,
   createdAt: '2026-03-15T00:00:00Z',
   updatedAt: '2026-03-15T00:00:00Z',
@@ -51,7 +71,7 @@ const makeProfile = (overrides: Partial<AgentProfile> = {}): AgentProfile => ({
 
 const PROFILES: AgentProfile[] = [
   makeProfile({ id: 'prof-1', name: 'Fast Implementer', model: 'claude-sonnet-4-5-20250929', isBuiltin: false }),
-  makeProfile({ id: 'prof-2', name: 'Deep Planner', model: 'claude-opus-4-6', isBuiltin: false }),
+  makeProfile({ id: 'prof-2', name: 'Deep Planner', model: 'claude-opus-4-6', effort: 'xhigh', isBuiltin: false }),
   makeProfile({ id: 'prof-builtin', name: 'default', model: 'claude-sonnet-4-5-20250929', isBuiltin: true }),
 ];
 
@@ -88,6 +108,16 @@ describe('ProfileSelector', () => {
     const select = screen.getByLabelText('Agent profile');
     const options = within(select).getAllByRole('option');
     expect(options[1]?.textContent).toContain('claude-sonnet');
+  });
+
+  it('shows non-default effort in option text', () => {
+    render(
+      <ProfileSelector profiles={PROFILES} selectedProfileId={null} onChange={vi.fn()} />,
+    );
+    const select = screen.getByLabelText('Agent profile');
+    const options = within(select).getAllByRole('option');
+    expect(options[2]?.textContent).toContain('xhigh');
+    expect(options[1]?.textContent).not.toContain('xhigh');
   });
 
   it('shows "(built-in)" suffix for built-in profiles', () => {
@@ -301,6 +331,29 @@ describe('ProfileList', () => {
       );
     });
   });
+
+  describe('URL-driven edit modal', () => {
+    it('opens edit dialog when ?edit=<profileId> is in the URL', () => {
+      render(<ProfileList {...defaultProps} />, {
+        wrapper: ({ children }) => <Wrapper initialEntries={['/profiles?edit=prof-1']}>{children}</Wrapper>,
+      });
+      expect(screen.getByText('Edit Profile')).toBeInTheDocument();
+      expect(screen.getByDisplayValue('Fast Implementer')).toBeInTheDocument();
+    });
+
+    it('opens create dialog when ?edit=new is in the URL', () => {
+      render(<ProfileList {...defaultProps} />, {
+        wrapper: ({ children }) => <Wrapper initialEntries={['/profiles?edit=new']}>{children}</Wrapper>,
+      });
+      expect(screen.getByText('Create Agent Profile')).toBeInTheDocument();
+    });
+
+    it('does not open dialog when no ?edit param is present', () => {
+      render(<ProfileList {...defaultProps} />, { wrapper: Wrapper });
+      expect(screen.queryByText('Edit Profile')).not.toBeInTheDocument();
+      expect(screen.queryByText('Create Agent Profile')).not.toBeInTheDocument();
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -337,6 +390,22 @@ describe('ProfileFormDialog', () => {
     expect(defaultOnSave).not.toHaveBeenCalled();
   });
 
+  it('saves workload resource overrides without selecting a legacy VM size', async () => {
+    const user = userEvent.setup();
+    render(
+      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} projectId="proj-test-1" />, { wrapper: Wrapper },
+    );
+    await user.type(screen.getByPlaceholderText('e.g. Fast Implementer'), 'Custom resources');
+    await user.click(screen.getByText('Infrastructure'));
+    await user.type(screen.getByRole('spinbutton', { name: 'vCPU' }), '2.5');
+    await user.type(screen.getByRole('spinbutton', { name: 'Memory (GB)' }), '6');
+    await user.click(screen.getByText('Create Profile'));
+    await waitFor(() => expect(defaultOnSave).toHaveBeenCalledOnce());
+    const payload = defaultOnSave.mock.calls[0]?.[0];
+    expect(payload.vmSizeOverride).toBeNull();
+    expect(JSON.parse(payload.resourceRequirementsJson)).toMatchObject({ minVcpu: 2.5, minMemoryGb: 6 });
+  });
+
   it('calls onSave with correct payload in create mode', async () => {
     const user = userEvent.setup();
     render(
@@ -350,6 +419,7 @@ describe('ProfileFormDialog', () => {
         expect.objectContaining({
           name: 'Test Profile',
           description: 'A test',
+          effort: 'auto',
           maxTurns: null,
           timeoutMinutes: null,
           vmSizeOverride: null,
@@ -358,8 +428,30 @@ describe('ProfileFormDialog', () => {
     });
   });
 
+  it('saves instant runtime with lightweight conversation settings', async () => {
+    const user = userEvent.setup();
+    render(
+      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} projectId="proj-test-1" />, { wrapper: Wrapper },
+    );
+    await user.type(screen.getByPlaceholderText('e.g. Fast Implementer'), 'Instant Chat');
+    await user.click(screen.getByText('Infrastructure'));
+    await user.selectOptions(screen.getByLabelText('Runtime'), 'cf-container');
+    await user.click(screen.getByText('Create Profile'));
+    await waitFor(() => {
+      expect(defaultOnSave).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'Instant Chat',
+          runtime: 'cf-container',
+          vmSizeOverride: null,
+          workspaceProfile: 'lightweight',
+          taskMode: 'conversation',
+        }),
+      );
+    });
+  });
+
   it('pre-populates fields in edit mode', () => {
-    const profile = makeProfile({ name: 'My Profile', description: 'desc', model: 'claude-opus-4-6', maxTurns: 5 });
+    const profile = makeProfile({ name: 'My Profile', description: 'desc', model: 'claude-opus-4-6', effort: 'xhigh', maxTurns: 5 });
     render(
       <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} profile={profile} projectId="proj-test-1" />, { wrapper: Wrapper },
     );
@@ -367,20 +459,32 @@ describe('ProfileFormDialog', () => {
     expect(screen.getByDisplayValue('desc')).toBeInTheDocument();
     // ModelSelect shows display format when not focused: "Name (id)"
     expect(screen.getByDisplayValue('Claude Opus 4.6 (claude-opus-4-6)')).toBeInTheDocument();
+    expect(screen.getByLabelText('Effort')).toHaveValue('xhigh');
     expect(screen.getByDisplayValue('5')).toBeInTheDocument();
   });
 
-  it('offers GPT-5.5 Pro for OpenAI Codex profiles', async () => {
+  it('does not offer max effort for OpenAI Codex profiles', () => {
+    const profile = makeProfile({ agentType: 'openai-codex', model: 'gpt-5.5', effort: 'high' });
+    render(
+      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} profile={profile} projectId="proj-test-1" />, { wrapper: Wrapper },
+    );
+
+    const effortSelect = screen.getByLabelText('Effort');
+    expect(within(effortSelect).queryByRole('option', { name: 'Max' })).not.toBeInTheDocument();
+    expect(effortSelect).toHaveValue('high');
+  });
+
+  it('offers GPT-6 Astra for OpenAI Codex profiles', async () => {
     const user = userEvent.setup();
-    const profile = makeProfile({ agentType: 'openai-codex', model: 'gpt-5.5' });
+    const profile = makeProfile({ agentType: 'openai-codex', model: 'gpt-6-sol' });
     render(
       <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} profile={profile} projectId="proj-test-1" />, { wrapper: Wrapper },
     );
 
     await user.click(screen.getByLabelText('Model'));
 
-    expect(screen.getByText('GPT-5.5 Pro')).toBeInTheDocument();
-    expect(screen.getByText('gpt-5.5-pro')).toBeInTheDocument();
+    expect(screen.getByText('GPT-6 Astra')).toBeInTheDocument();
+    expect(screen.getByText('gpt-6-astra')).toBeInTheDocument();
   });
 
   it('shows error when onSave rejects', async () => {

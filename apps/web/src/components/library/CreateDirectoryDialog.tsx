@@ -1,6 +1,7 @@
 import { LIBRARY_DIRECTORY_SEGMENT_PATTERN } from '@simple-agent-manager/shared';
 import type { FC } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { FOCUS_RING } from './types';
 
@@ -32,7 +33,7 @@ export const CreateDirectoryDialog: FC<CreateDirectoryDialogProps> = ({
         onClose();
       }
     },
-    [onClose],
+    [onClose]
   );
 
   useEffect(() => {
@@ -60,22 +61,27 @@ export const CreateDirectoryDialog: FC<CreateDirectoryDialogProps> = ({
   };
 
   const truncatedPath =
-    currentDirectory.length > 40
-      ? '…' + currentDirectory.slice(-38)
-      : currentDirectory;
+    currentDirectory.length > 40 ? '…' + currentDirectory.slice(-38) : currentDirectory;
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+      className="fixed inset-0 z-50 flex items-center justify-center"
       role="dialog"
       aria-modal="true"
       aria-labelledby="create-dir-title"
-      onClick={onClose}
     >
+      {/* Backdrop: a decorative sibling (not an ancestor) of the dialog card
+          below, so clicks inside the card never need to stopPropagation to
+          avoid closing the dialog — same pattern as ConfirmDialog. */}
+      <div
+        data-testid="create-directory-backdrop"
+        className="fixed inset-0 glass-backdrop-dim"
+        aria-hidden="true"
+        onClick={onClose}
+      />
       <div
         ref={dialogRef}
-        className="bg-surface rounded-xl border border-border-default p-5 w-full max-w-sm mx-4 shadow-lg"
-        onClick={(e) => e.stopPropagation()}
+        className="relative glass-modal glass-panel-container glass-composited rounded-xl p-5 w-full max-w-sm mx-4 shadow-overlay"
       >
         <h3 id="create-dir-title" className="text-base font-semibold text-fg-primary m-0 mb-4">
           New Folder
@@ -83,7 +89,10 @@ export const CreateDirectoryDialog: FC<CreateDirectoryDialogProps> = ({
         <form onSubmit={handleSubmit}>
           <label htmlFor="dir-name-input" className="block text-sm text-fg-muted mb-1">
             Creating in:{' '}
-            <span className="font-mono text-fg-primary truncate inline-block max-w-[200px] align-bottom" title={currentDirectory}>
+            <span
+              className="font-mono text-fg-primary truncate inline-block max-w-[200px] align-bottom"
+              title={currentDirectory}
+            >
               {truncatedPath}
             </span>
           </label>
@@ -100,10 +109,10 @@ export const CreateDirectoryDialog: FC<CreateDirectoryDialogProps> = ({
             maxLength={100}
             aria-describedby={error ? 'dir-name-error' : undefined}
             aria-invalid={!!error}
-            className="w-full px-3 py-2 text-sm rounded-lg border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)]-inset text-fg-primary placeholder:text-fg-muted focus:outline-none focus:border-accent mb-1"
+            className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--sam-form-border)] bg-inset text-fg-primary placeholder:text-fg-muted focus:outline-none focus:border-accent mb-1"
           />
           {error && (
-            <p id="dir-name-error" role="alert" className="text-xs text-red-500 m-0 mb-2">
+            <p id="dir-name-error" role="alert" className="text-xs text-danger m-0 mb-2">
               {error}
             </p>
           )}
@@ -111,19 +120,20 @@ export const CreateDirectoryDialog: FC<CreateDirectoryDialogProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className={`px-3 py-2 text-sm rounded-lg border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)] text-fg-muted hover:text-fg-primary cursor-pointer ${FOCUS_RING}`}
+              className={`px-3 py-2 text-sm rounded-lg border border-[var(--sam-form-border)] bg-[var(--sam-glass-nested-bg)] text-fg-muted hover:text-fg-primary cursor-pointer ${FOCUS_RING}`}
             >
               Cancel
             </button>
             <button
               type="submit"
-              className={`px-3 py-2 text-sm rounded-lg border-none bg-accent text-white font-medium cursor-pointer hover:bg-accent/90 ${FOCUS_RING}`}
+              className={`px-3 py-2 text-sm rounded-lg border-none bg-accent text-fg-on-accent font-medium cursor-pointer hover:bg-accent/90 ${FOCUS_RING}`}
             >
               Create
             </button>
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

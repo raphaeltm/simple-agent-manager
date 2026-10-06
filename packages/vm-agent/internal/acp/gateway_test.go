@@ -3,8 +3,15 @@ package acp
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/pelletier/go-toml/v2"
+	"github.com/workspace/vm-agent/internal/config"
 )
 
 // Tests for OAuth support
@@ -18,6 +25,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 		wantInstallCmd    string
 		wantInjectionMode string
 		wantAuthFilePath  string
+		wantArgs          []string
 	}{
 		{
 			name:           "Claude Code with OAuth token",
@@ -25,7 +33,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			credentialKind: "oauth-token",
 			wantCommand:    "claude-agent-acp",
 			wantEnvVar:     "CLAUDE_CODE_OAUTH_TOKEN",
-			wantInstallCmd: "npm install -g @zed-industries/claude-agent-acp",
+			wantInstallCmd: claudeCodeInstallCommand,
 		},
 		{
 			name:           "Claude Code with API key",
@@ -33,7 +41,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			credentialKind: "api-key",
 			wantCommand:    "claude-agent-acp",
 			wantEnvVar:     "ANTHROPIC_API_KEY",
-			wantInstallCmd: "npm install -g @zed-industries/claude-agent-acp",
+			wantInstallCmd: claudeCodeInstallCommand,
 		},
 		{
 			name:           "Claude Code with empty credential kind defaults to API key",
@@ -41,7 +49,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			credentialKind: "",
 			wantCommand:    "claude-agent-acp",
 			wantEnvVar:     "ANTHROPIC_API_KEY",
-			wantInstallCmd: "npm install -g @zed-industries/claude-agent-acp",
+			wantInstallCmd: claudeCodeInstallCommand,
 		},
 		{
 			name:              "OpenAI Codex with OAuth uses auth-file injection",
@@ -49,7 +57,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			credentialKind:    "oauth-token",
 			wantCommand:       "codex-acp",
 			wantEnvVar:        "",
-			wantInstallCmd:    "npm install -g @zed-industries/codex-acp",
+			wantInstallCmd:    codexACPInstallCommand,
 			wantInjectionMode: "auth-file",
 			wantAuthFilePath:  ".codex/auth.json",
 		},
@@ -59,7 +67,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			credentialKind: "api-key",
 			wantCommand:    "codex-acp",
 			wantEnvVar:     "OPENAI_API_KEY",
-			wantInstallCmd: "npm install -g @zed-industries/codex-acp",
+			wantInstallCmd: codexACPInstallCommand,
 		},
 		{
 			name:           "Google Gemini always uses API key",
@@ -67,7 +75,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			credentialKind: "oauth-token",
 			wantCommand:    "gemini",
 			wantEnvVar:     "GEMINI_API_KEY",
-			wantInstallCmd: "npm install -g @google/gemini-cli",
+			wantInstallCmd: "npm install -g @google/gemini-cli@0.61.0",
 		},
 		{
 			name:           "Mistral Vibe uses API key",
@@ -75,7 +83,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			credentialKind: "api-key",
 			wantCommand:    "vibe-acp",
 			wantEnvVar:     "MISTRAL_API_KEY",
-			wantInstallCmd: `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe==2.7.0 --python 3.12 --quiet`,
+			wantInstallCmd: `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe==2.25.8 --python 3.12 --quiet`,
 		},
 		{
 			name:           "Amp uses API key",
@@ -83,7 +91,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			credentialKind: "api-key",
 			wantCommand:    "acp-amp",
 			wantEnvVar:     "AMP_API_KEY",
-			wantInstallCmd: `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install acp-amp==0.1.3 --with agent-client-protocol==0.7.1 --with amp-sdk==0.1.2 --with pydantic==2.12.5 --with pydantic-core==2.41.5 --with annotated-types==0.7.0 --with typing-inspection==0.4.2 --with typing-extensions==4.15.0 --python 3.12 --quiet && npm install -g @sourcegraph/amp`,
+			wantInstallCmd: `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install acp-amp==0.1.3 --with agent-client-protocol==0.7.1 --with amp-sdk==0.1.2 --with pydantic==2.12.5 --with pydantic-core==2.41.5 --with annotated-types==0.7.0 --with typing-inspection==0.4.2 --with typing-extensions==4.15.0 --python 3.12 --quiet && npm install -g @ampcode/cli@0.0.1790261352-g2ab14a`,
 		},
 	}
 
@@ -99,8 +107,8 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 				t.Errorf("getAgentCommandInfo() envVarName = %v, want %v", info.envVarName, tt.wantEnvVar)
 			}
 
-			if info.installCmd != tt.wantInstallCmd {
-				t.Errorf("getAgentCommandInfo() installCmd = %v, want %v", info.installCmd, tt.wantInstallCmd)
+			if !strings.HasPrefix(info.installCmd, tt.wantInstallCmd) {
+				t.Errorf("getAgentCommandInfo() installCmd does not start with expected prefix.\ngot:  %v\nwant prefix: %v", info.installCmd, tt.wantInstallCmd)
 			}
 
 			if info.injectionMode != tt.wantInjectionMode {
@@ -111,9 +119,20 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 				t.Errorf("getAgentCommandInfo() authFilePath = %v, want %v", info.authFilePath, tt.wantAuthFilePath)
 			}
 
-			// Verify args for Gemini
+			// Verify args
 			if tt.agentType == "google-gemini" && len(info.args) == 0 {
 				t.Errorf("getAgentCommandInfo() expected args for google-gemini")
+			}
+			if tt.wantArgs != nil {
+				if len(info.args) != len(tt.wantArgs) {
+					t.Errorf("getAgentCommandInfo() args = %v, want %v", info.args, tt.wantArgs)
+				} else {
+					for i, a := range tt.wantArgs {
+						if info.args[i] != a {
+							t.Errorf("getAgentCommandInfo() args[%d] = %q, want %q", i, info.args[i], a)
+						}
+					}
+				}
 			}
 		})
 	}
@@ -171,6 +190,40 @@ func TestSAMEnvFallbackMerge(t *testing.T) {
 	assertEnvContains(t, merged, "SAM_PROJECT_ID", "proj-789")
 }
 
+func TestResolveAgentEnvVarsPrefersFreshGitTokenOverStaleEnv(t *testing.T) {
+	t.Parallel()
+
+	host := &SessionHost{
+		config: SessionHostConfig{
+			GatewayConfig: GatewayConfig{
+				WorkspaceID:    "ws-123",
+				SAMEnvFallback: []string{"GH_TOKEN=stale-static-token", "SAM_WORKSPACE_ID=ws-123"},
+				GitTokenFetcher: func(context.Context) (string, error) {
+					return "fresh-scoped-token", nil
+				},
+			},
+		},
+	}
+
+	envVars := host.resolveAgentEnvVars(context.Background(), "missing-container")
+
+	if hasEnvEntry(envVars, "GH_TOKEN=stale-static-token") {
+		t.Fatalf("stale static GH_TOKEN should not be preserved: %v", envVars)
+	}
+	if !hasEnvEntry(envVars, "GH_TOKEN=fresh-scoped-token") {
+		t.Fatalf("fresh runtime GH_TOKEN missing: %v", envVars)
+	}
+}
+
+func hasEnvEntry(envVars []string, want string) bool {
+	for _, entry := range envVars {
+		if entry == want {
+			return true
+		}
+	}
+	return false
+}
+
 // cutString is a test helper matching strings.Cut behavior.
 func cutString(s, sep string) (string, string, bool) {
 	for i := 0; i <= len(s)-len(sep); i++ {
@@ -185,16 +238,19 @@ func cutString(s, sep string) (string, string, bool) {
 func assertEnvContains(t *testing.T, envVars []string, key, expectedValue string) {
 	t.Helper()
 	prefix := key + "="
+	matches := 0
 	for _, entry := range envVars {
-		if len(entry) > len(prefix) && entry[:len(prefix)] == prefix {
-			got := entry[len(prefix):]
+		if strings.HasPrefix(entry, prefix) {
+			matches++
+			got := strings.TrimPrefix(entry, prefix)
 			if got != expectedValue {
 				t.Errorf("env %s = %q, want %q", key, got, expectedValue)
 			}
-			return
 		}
 	}
-	t.Errorf("env missing key %s", key)
+	if matches != 1 {
+		t.Errorf("env key %s occurred %d times, want exactly once: %v", key, matches, envVars)
+	}
 }
 
 // Tests from main branch for backward compatibility
@@ -208,11 +264,61 @@ func TestGetAgentCommandInfoClaudeCode(t *testing.T) {
 	if info.envVarName != "ANTHROPIC_API_KEY" {
 		t.Fatalf("envVarName=%q, want %q", info.envVarName, "ANTHROPIC_API_KEY")
 	}
-	if info.installCmd != "npm install -g @zed-industries/claude-agent-acp" {
+	if info.installCmd != claudeCodeInstallCommand {
 		t.Fatalf("installCmd=%q, unexpected", info.installCmd)
+	}
+	if info.validationCmd != claudeCodeVersionCheckCommand() {
+		t.Fatalf("validationCmd=%q, unexpected", info.validationCmd)
 	}
 	if info.args != nil {
 		t.Fatalf("args=%v, want nil", info.args)
+	}
+}
+
+func TestGetAgentCommandInfoClaudeCodeRequiresCatalogCapableCli(t *testing.T) {
+	t.Parallel()
+
+	info := getAgentCommandInfo("claude-code", "api-key")
+	if !strings.Contains(info.installCmd, "@anthropic-ai/claude-code@2.1.281") {
+		t.Fatalf("installCmd=%q, want pinned Claude Code CLI", info.installCmd)
+	}
+	minParts := strings.Split(claudeCodeMinVersion, ".")
+	if !strings.Contains(info.validationCmd, `[ "$3" -ge `+minParts[2]+` ]`) {
+		t.Fatalf("validationCmd=%q, want Claude Code %s floor", info.validationCmd, claudeCodeMinVersion)
+	}
+
+	checkScript := agentInstalledCheckScript(info)
+	for _, want := range []string{
+		"command -v claude-agent-acp",
+		"command -v claude",
+		`claude --version`,
+		`[ "$3" -ge ` + minParts[2] + ` ]`,
+	} {
+		if !strings.Contains(checkScript, want) {
+			t.Fatalf("agentInstalledCheckScript missing %q in %q", want, checkScript)
+		}
+	}
+}
+
+func TestClaudeCodeVersionCheckCommandDerivesFloorFromConstant(t *testing.T) {
+	t.Parallel()
+
+	command := claudeCodeVersionCheckCommand()
+	minParts := strings.Split(claudeCodeMinVersion, ".")
+	for _, want := range []string{
+		`[ "$1" -gt ` + minParts[0] + ` ]`,
+		`[ "$2" -gt ` + minParts[1] + ` ]`,
+		`[ "$3" -ge ` + minParts[2] + ` ]`,
+	} {
+		if !strings.Contains(command, want) {
+			t.Fatalf("claudeCodeVersionCheckCommand()=%q, want derived minimum comparison %q", command, want)
+		}
+	}
+	if strings.Contains(command, "const min=[2,1,251]") {
+		t.Fatalf("claudeCodeVersionCheckCommand() contains duplicated numeric minimum: %q", command)
+	}
+	if strings.Contains(command, "node -e") {
+		t.Fatalf("claudeCodeVersionCheckCommand() should not require Node.js before install bootstrap: %q", command)
 	}
 }
 
@@ -226,11 +332,17 @@ func TestGetAgentCommandInfoOpenAICodex(t *testing.T) {
 	if info.envVarName != "OPENAI_API_KEY" {
 		t.Fatalf("envVarName=%q, want %q", info.envVarName, "OPENAI_API_KEY")
 	}
-	if info.installCmd != "npm install -g @zed-industries/codex-acp" {
+	if info.installCmd != codexACPInstallCommand {
 		t.Fatalf("installCmd=%q, unexpected", info.installCmd)
+	}
+	if info.validationCmd != codexVersionCheckCommand() {
+		t.Fatalf("validationCmd=%q, want %q", info.validationCmd, codexVersionCheckCommand())
 	}
 	if info.injectionMode != "" {
 		t.Fatalf("injectionMode=%q, want empty for api-key", info.injectionMode)
+	}
+	if info.args != nil {
+		t.Fatalf("args=%v, want nil; codex-acp config belongs in CODEX_CONFIG", info.args)
 	}
 }
 
@@ -250,6 +362,52 @@ func TestGetAgentCommandInfoOpenAICodexOAuth(t *testing.T) {
 	if info.envVarName != "" {
 		t.Fatalf("envVarName=%q, want empty for auth-file injection", info.envVarName)
 	}
+	if info.installCmd != codexACPInstallCommand {
+		t.Fatalf("installCmd=%q, unexpected", info.installCmd)
+	}
+	if info.validationCmd != codexVersionCheckCommand() {
+		t.Fatalf("validationCmd=%q, want %q", info.validationCmd, codexVersionCheckCommand())
+	}
+	if info.args != nil {
+		t.Fatalf("args=%v, want nil; codex-acp config belongs in CODEX_CONFIG", info.args)
+	}
+}
+
+func TestCodexInstalledCheckRequiresExactAdapterAndCLI(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	writeVersionCommand := func(name, output string) {
+		t.Helper()
+		path := filepath.Join(tmpDir, name)
+		script := "#!/bin/sh\nprintf '%s\\n' '" + output + "'\n"
+		if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+			t.Fatalf("write fake %s: %v", name, err)
+		}
+	}
+	runCheck := func() error {
+		t.Helper()
+		cmd := exec.Command(localShellPath, "-c", agentInstalledCheckScript(getAgentCommandInfo("openai-codex", "api-key")))
+		cmd.Env = append(os.Environ(), "PATH="+tmpDir)
+		return cmd.Run()
+	}
+
+	writeVersionCommand("codex-acp", "@agentclientprotocol/codex-acp 2.1.1")
+	writeVersionCommand("codex", "codex-cli 0.160.0")
+	if err := runCheck(); err != nil {
+		t.Fatalf("current Codex adapter and CLI should pass validation: %v", err)
+	}
+
+	writeVersionCommand("codex-acp", "@agentclientprotocol/codex-acp 1.8.0")
+	if err := runCheck(); err == nil {
+		t.Fatal("stale Codex adapter unexpectedly passed validation")
+	}
+
+	writeVersionCommand("codex-acp", "@agentclientprotocol/codex-acp 2.1.1")
+	writeVersionCommand("codex", "codex-cli 0.153.2")
+	if err := runCheck(); err == nil {
+		t.Fatal("stale Codex CLI unexpectedly passed validation")
+	}
 }
 
 func TestAgentInstallScriptCleansBrokenGitHubCLIRepoBeforeNpmBootstrap(t *testing.T) {
@@ -257,7 +415,7 @@ func TestAgentInstallScriptCleansBrokenGitHubCLIRepoBeforeNpmBootstrap(t *testin
 
 	info := agentCommandInfo{
 		command:    "claude-agent-acp",
-		installCmd: "npm install -g @zed-industries/claude-agent-acp",
+		installCmd: "npm install -g " + claudeACPInstallPackage,
 		isNpmBased: true,
 	}
 
@@ -269,7 +427,7 @@ func TestAgentInstallScriptCleansBrokenGitHubCLIRepoBeforeNpmBootstrap(t *testin
 		`node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"`,
 		"npm install -g n",
 		"n 22",
-		"npm install -g @zed-industries/claude-agent-acp",
+		info.installCmd,
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("agentInstallScript missing %q in %q", want, script)
@@ -302,7 +460,7 @@ func TestGetAgentCommandInfoMistralVibe(t *testing.T) {
 	if info.envVarName != "MISTRAL_API_KEY" {
 		t.Fatalf("envVarName=%q, want %q", info.envVarName, "MISTRAL_API_KEY")
 	}
-	wantInstall := `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe==2.7.0 --python 3.12 --quiet`
+	wantInstall := `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe==2.25.8 --python 3.12 --quiet`
 	if info.installCmd != wantInstall {
 		t.Fatalf("installCmd=%q, want %q", info.installCmd, wantInstall)
 	}
@@ -344,12 +502,20 @@ func TestGetAgentCommandInfoAmp(t *testing.T) {
 	if info.envVarName != "AMP_API_KEY" {
 		t.Fatalf("envVarName=%q, want %q", info.envVarName, "AMP_API_KEY")
 	}
-	wantInstall := `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install acp-amp==0.1.3 --with agent-client-protocol==0.7.1 --with amp-sdk==0.1.2 --with pydantic==2.12.5 --with pydantic-core==2.41.5 --with annotated-types==0.7.0 --with typing-inspection==0.4.2 --with typing-extensions==4.15.0 --python 3.12 --quiet && npm install -g @sourcegraph/amp`
-	if info.installCmd != wantInstall {
-		t.Fatalf("installCmd=%q, want %q", info.installCmd, wantInstall)
+	// Verify key parts of installCmd rather than exact match (it includes post-install patches)
+	for _, want := range []string{
+		"uv tool install acp-amp==0.1.3",
+		"--with amp-sdk==0.1.2",
+		"npm install -g @ampcode/cli@0.0.1790261352-g2ab14a",
+		"Patched acp-amp: error handling + MCP config wrapping",
+		"visibility default to private",
+	} {
+		if !strings.Contains(info.installCmd, want) {
+			t.Fatalf("installCmd missing %q, got %q", want, info.installCmd)
+		}
 	}
 	if !info.isNpmBased {
-		t.Fatalf("isNpmBased=false, want true (amp chains npm install for @sourcegraph/amp)")
+		t.Fatalf("isNpmBased=false, want true (amp chains npm install for @ampcode/cli@0.0.1790261352-g2ab14a)")
 	}
 	if len(info.args) != 1 || info.args[0] != "run" {
 		t.Fatalf("args=%v, want [run]", info.args)
@@ -379,7 +545,7 @@ func TestAgentInstallScriptAmpIncludesNodeBootstrap(t *testing.T) {
 
 	info := getAgentCommandInfo("amp", "api-key")
 	script := agentInstallScript(info)
-	// Amp is isNpmBased=true because it chains `npm install -g @sourcegraph/amp`.
+	// Amp is isNpmBased=true because it chains `npm install -g @ampcode/cli@0.0.1790261352-g2ab14a`.
 	// agentInstallScript must prepend the Node.js bootstrap preamble so npm is
 	// available in devcontainers that don't ship with Node.js.
 	if !strings.Contains(script, "apt-get install") {
@@ -389,7 +555,7 @@ func TestAgentInstallScriptAmpIncludesNodeBootstrap(t *testing.T) {
 	if !strings.Contains(script, "uv tool install acp-amp") {
 		t.Fatalf("agentInstallScript lost the uv install portion")
 	}
-	if !strings.Contains(script, "npm install -g @sourcegraph/amp") {
+	if !strings.Contains(script, "npm install -g @ampcode/cli@0.0.1790261352-g2ab14a") {
 		t.Fatalf("agentInstallScript lost the npm install portion")
 	}
 }
@@ -672,19 +838,19 @@ func TestProcessConfig_EnvVarInjection(t *testing.T) {
 			name:      "Mistral Vibe API key uses env var",
 			agentType: "mistral-vibe",
 			credential: &agentCredential{
-				credential:     "mistral-api-key-123",
+				credential:     "mistral-placeholder",
 				credentialKind: "api-key",
 			},
-			wantEnvVar: "MISTRAL_API_KEY=mistral-api-key-123",
+			wantEnvVar: "MISTRAL_API_KEY=mistral-placeholder",
 		},
 		{
 			name:      "Amp API key uses env var",
 			agentType: "amp",
 			credential: &agentCredential{
-				credential:     "sgamp-api-key-123",
+				credential:     "amp-placeholder",
 				credentialKind: "api-key",
 			},
-			wantEnvVar: "AMP_API_KEY=sgamp-api-key-123",
+			wantEnvVar: "AMP_API_KEY=amp-placeholder",
 		},
 	}
 
@@ -856,8 +1022,15 @@ func TestGenerateVibeConfig_McpServerWithToken(t *testing.T) {
 	if !strings.Contains(config, "[[mcp_servers]]") {
 		t.Fatal("expected [[mcp_servers]] section in config")
 	}
-	if !strings.Contains(config, `name = "sam-mcp-0"`) {
-		t.Error("expected MCP server name sam-mcp-0")
+	// A single unnamed server is "sam-mcp", matching what buildAcpMcpServers and
+	// generateCodexMcpConfig emit. This call site previously always index-suffixed, so the
+	// same server was "sam-mcp-0" to Vibe and "sam-mcp" to every other harness; all three now
+	// share ResolveMcpServerNames.
+	if !strings.Contains(config, `name = "sam-mcp"`) {
+		t.Error("expected MCP server name sam-mcp")
+	}
+	if strings.Contains(config, `name = "sam-mcp-0"`) {
+		t.Error("single server must not be index-suffixed")
 	}
 	if !strings.Contains(config, `transport = "http"`) {
 		t.Error("expected transport = http for MCP server")
@@ -865,7 +1038,7 @@ func TestGenerateVibeConfig_McpServerWithToken(t *testing.T) {
 	if !strings.Contains(config, `url = "https://api.example.com/mcp"`) {
 		t.Error(expectedMcpServerURLMessage)
 	}
-	if !strings.Contains(config, `headers = { Authorization = "Bearer test-token-123" }`) {
+	if !strings.Contains(config, `headers = { "Authorization" = "Bearer test-token-123" }`) {
 		t.Error("expected Authorization header with token")
 	}
 
@@ -986,9 +1159,41 @@ func TestGenerateVibeConfig_McpServerNewlineRejected(t *testing.T) {
 func TestGenerateCodexMcpConfigNoMcpServers(t *testing.T) {
 	t.Parallel()
 
-	config, envVars := generateCodexMcpConfig(nil, nil)
-	if config != "" {
-		t.Fatalf("expected empty config, got %q", config)
+	config, envVars := generateCodexMcpConfig(nil, nil, "")
+	if !strings.Contains(config, `sandbox_mode = "danger-full-access"`) ||
+		!strings.Contains(config, `approval_policy = "never"`) {
+		t.Fatalf("sandbox-only managed config missing required controls: %q", config)
+	}
+	if len(envVars) != 0 {
+		t.Fatalf("expected no MCP env vars, got %v", envVars)
+	}
+}
+func TestGenerateCodexMcpConfigWithReasoningEffort(t *testing.T) {
+	t.Parallel()
+
+	config, envVars := generateCodexMcpConfig(nil, nil, "high")
+
+	if !strings.Contains(config, `model_reasoning_effort = "high"`) {
+		t.Fatalf("expected model_reasoning_effort in managed config, got %q", config)
+	}
+	if !strings.Contains(config, `sandbox_mode = "danger-full-access"`) {
+		t.Fatal("expected sandbox mode in effort-only managed config")
+	}
+	if len(envVars) != 0 {
+		t.Fatalf("expected no env vars, got %v", envVars)
+	}
+}
+
+func TestGenerateCodexMcpConfigSkipsUnsupportedReasoningEffort(t *testing.T) {
+	t.Parallel()
+
+	config, envVars := generateCodexMcpConfig(nil, nil, "max")
+
+	if !strings.Contains(config, `sandbox_mode = "danger-full-access"`) {
+		t.Fatalf("unsupported effort must still produce sandbox config, got %q", config)
+	}
+	if strings.Contains(config, "model_reasoning_effort") {
+		t.Fatalf("unsupported effort leaked into config: %q", config)
 	}
 	if len(envVars) != 0 {
 		t.Fatalf("expected no env vars, got %v", envVars)
@@ -1000,10 +1205,19 @@ func TestGenerateCodexMcpConfigSingleServerWithToken(t *testing.T) {
 
 	config, envVars := generateCodexMcpConfig([]McpServerEntry{
 		{URL: "https://api.example.com/mcp", Token: "test-token-123"},
-	}, nil)
+	}, nil, "")
 
 	if !strings.Contains(config, codexManagedMcpStartMarker) {
 		t.Fatal("expected managed start marker")
+	}
+	if !strings.Contains(config, `sandbox_mode = "danger-full-access"`) {
+		t.Fatal("expected sandbox mode to disable Codex bubblewrap inside containers")
+	}
+	if !strings.Contains(config, `approval_policy = "never"`) {
+		t.Fatal("expected approval policy to avoid Codex sandbox prompts inside containers")
+	}
+	if strings.Index(config, `sandbox_mode = "danger-full-access"`) > strings.Index(config, `[mcp_servers.sam-mcp]`) {
+		t.Fatal("expected sandbox settings before MCP server entries")
 	}
 	if !strings.Contains(config, `[mcp_servers.sam-mcp]`) {
 		t.Fatal("expected sam-mcp server entry")
@@ -1028,7 +1242,7 @@ func TestGenerateCodexMcpConfigMultipleServers(t *testing.T) {
 	config, envVars := generateCodexMcpConfig([]McpServerEntry{
 		{URL: "https://api.example.com/mcp", Token: "token-1"},
 		{URL: "https://backup.example.com/mcp", Token: "token-2"},
-	}, nil)
+	}, nil, "")
 
 	if !strings.Contains(config, `[mcp_servers.sam-mcp-0]`) {
 		t.Fatal("expected first server entry")
@@ -1052,7 +1266,7 @@ func TestGenerateCodexMcpConfigServerWithoutToken(t *testing.T) {
 
 	config, envVars := generateCodexMcpConfig([]McpServerEntry{
 		{URL: "https://api.example.com/mcp"},
-	}, nil)
+	}, nil, "")
 
 	if !strings.Contains(config, `[mcp_servers.sam-mcp]`) {
 		t.Fatal("expected server entry")
@@ -1071,7 +1285,7 @@ func TestGenerateCodexMcpConfigServerWithControlCharsRejected(t *testing.T) {
 	config, envVars := generateCodexMcpConfig([]McpServerEntry{
 		{URL: "https://good.example.com/mcp", Token: "good-token"},
 		{URL: "https://bad.example.com/mcp", Token: "bad\ninjection"},
-	}, nil)
+	}, nil, "")
 
 	if !strings.Contains(config, `url = "https://good.example.com/mcp"`) {
 		t.Fatal("expected good server to be present")
@@ -1090,8 +1304,14 @@ func TestGenerateCodexMcpConfigWithProxyProvider(t *testing.T) {
 	config, envVars := generateCodexMcpConfig(nil, &codexProxyProviderConfig{
 		baseURL: "https://api.example.com/ai/v1",
 		model:   "gpt-4.1",
-	})
+	}, "")
 
+	if !strings.Contains(config, `sandbox_mode = "danger-full-access"`) {
+		t.Fatal("expected sandbox mode to disable Codex bubblewrap inside containers")
+	}
+	if !strings.Contains(config, `approval_policy = "never"`) {
+		t.Fatal("expected approval policy to avoid Codex sandbox prompts inside containers")
+	}
 	if !strings.Contains(config, `model = "gpt-4.1"`) {
 		t.Fatal("expected model override")
 	}
@@ -1170,6 +1390,86 @@ func TestMergeManagedCodexMcpConfigReplacesExistingManagedBlock(t *testing.T) {
 	}
 	if !strings.Contains(merged, `approval_policy = "never"`) {
 		t.Fatal("expected trailing config to be preserved")
+	}
+}
+
+func TestMergeManagedCodexMcpConfigReplacesOwnedTopLevelKeysOnly(t *testing.T) {
+	t.Parallel()
+
+	existing := strings.Join([]string{
+		`sandbox_mode = "read-only"`,
+		`approval_policy = "on-request"`,
+		`model = "user-model"`,
+		`unrelated = "preserved"`,
+		``,
+		`[profiles.user]`,
+		`sandbox_mode = "workspace-write"`,
+		`approval_policy = "untrusted"`,
+	}, "\n")
+	managed, _ := generateCodexMcpConfig(nil, nil, "")
+
+	merged := mergeManagedCodexMcpConfig(existing, managed)
+	if got := strings.Count(merged, `sandbox_mode = "danger-full-access"`); got != 1 {
+		t.Fatalf("managed sandbox_mode count = %d, want 1:\n%s", got, merged)
+	}
+	if got := strings.Count(merged, `approval_policy = "never"`); got != 1 {
+		t.Fatalf("managed approval_policy count = %d, want 1:\n%s", got, merged)
+	}
+	if strings.Contains(merged, `sandbox_mode = "read-only"`) || strings.Contains(merged, `approval_policy = "on-request"`) {
+		t.Fatalf("pre-existing owned top-level keys were preserved:\n%s", merged)
+	}
+	for _, want := range []string{
+		`model = "user-model"`,
+		`unrelated = "preserved"`,
+		`[profiles.user]`,
+		`sandbox_mode = "workspace-write"`,
+		`approval_policy = "untrusted"`,
+	} {
+		if !strings.Contains(merged, want) {
+			t.Fatalf("unrelated user key %q was not preserved:\n%s", want, merged)
+		}
+	}
+	if strings.Index(merged, codexManagedMcpStartMarker) > strings.Index(merged, `[profiles.user]`) {
+		t.Fatalf("managed top-level block must precede user tables:\n%s", merged)
+	}
+}
+
+func TestMergeManagedCodexMcpConfigNormalizesQuotedTopLevelKeys(t *testing.T) {
+	t.Parallel()
+
+	existing := strings.Join([]string{
+		`"sandbox_mode" = "read-only"`,
+		`'approval_policy' = "on-request"`,
+		`model = "user-model"`,
+		``,
+		`[profiles.user]`,
+		`"sandbox_mode" = "workspace-write"`,
+		`'approval_policy' = "untrusted"`,
+	}, "\n")
+	managed, _ := generateCodexMcpConfig(nil, nil, "")
+	merged := mergeManagedCodexMcpConfig(existing, managed)
+
+	var parsed struct {
+		SandboxMode    string `toml:"sandbox_mode"`
+		ApprovalPolicy string `toml:"approval_policy"`
+		Model          string `toml:"model"`
+		Profiles       map[string]struct {
+			SandboxMode    string `toml:"sandbox_mode"`
+			ApprovalPolicy string `toml:"approval_policy"`
+		} `toml:"profiles"`
+	}
+	if err := toml.Unmarshal([]byte(merged), &parsed); err != nil {
+		t.Fatalf("merged config is invalid TOML: %v\n%s", err, merged)
+	}
+	if parsed.SandboxMode != "danger-full-access" || parsed.ApprovalPolicy != "never" {
+		t.Fatalf("managed top-level values not canonicalized: %#v\n%s", parsed, merged)
+	}
+	if parsed.Model != "user-model" {
+		t.Fatalf("unmanaged top-level model = %q, want user-model", parsed.Model)
+	}
+	profile := parsed.Profiles["user"]
+	if profile.SandboxMode != "workspace-write" || profile.ApprovalPolicy != "untrusted" {
+		t.Fatalf("table-scoped values changed: %#v\n%s", profile, merged)
 	}
 }
 
@@ -1315,5 +1615,726 @@ func TestAuthFilePathValidation(t *testing.T) {
 				t.Errorf("Unexpected error for path %q: %v", tc.path, err)
 			}
 		})
+	}
+}
+
+func TestBuildOpencodeConfig_DefaultUsesOpenCodeZen(t *testing.T) {
+	t.Parallel()
+
+	config := buildOpencodeConfig(nil)
+
+	assertOpenCodeZenDefaultConfig(t, config)
+}
+
+func TestBuildOpencodeConfig_UnknownProviderFallsBackToOpenCodeZen(t *testing.T) {
+	t.Parallel()
+
+	config := buildOpencodeConfig(&agentSettingsPayload{
+		OpencodeProvider: "unknown-provider",
+	})
+
+	assertOpenCodeZenDefaultConfig(t, config)
+}
+
+func assertOpenCodeZenDefaultConfig(t *testing.T, config map[string]any) {
+	t.Helper()
+
+	if got := config["model"]; got != DefaultOpencodeModel {
+		t.Fatalf("model = %v, want %q", got, DefaultOpencodeModel)
+	}
+	if _, ok := config["provider"]; ok {
+		t.Fatalf("provider block present for OpenCode Zen config: %#v", config["provider"])
+	}
+}
+
+func TestBuildOpencodeConfig_OpenCodeZenUsesBuiltInModelPrefixes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		model string
+	}{
+		{name: "zen model", model: "opencode/claude-sonnet-4-6"},
+		{name: "legacy managed alias model", model: "opencode/claude-sonnet-4-5"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			config := buildOpencodeConfig(&agentSettingsPayload{
+				OpencodeProvider: "opencode-zen",
+				Model:            tt.model,
+			})
+
+			if got := config["model"]; got != tt.model {
+				t.Fatalf("model = %v, want %q", got, tt.model)
+			}
+			if _, ok := config["provider"]; ok {
+				t.Fatalf("provider block present for OpenCode Zen built-in provider: %#v", config["provider"])
+			}
+		})
+	}
+}
+
+func TestBuildOpencodeConfig_OpenCodeGoDefaultsToGLM52(t *testing.T) {
+	t.Parallel()
+
+	config := buildOpencodeConfig(&agentSettingsPayload{
+		OpencodeProvider: "opencode-go",
+	})
+
+	if got := config["model"]; got != DefaultOpencodeGoModel {
+		t.Fatalf("model = %v, want %q", got, DefaultOpencodeGoModel)
+	}
+	if _, ok := config["provider"]; ok {
+		t.Fatalf("provider block present for OpenCode Go built-in provider: %#v", config["provider"])
+	}
+}
+
+func TestBuildOpencodeConfig_OpenCodeGoPreservesExplicitModel(t *testing.T) {
+	t.Parallel()
+
+	const model = "opencode-go/kimi-k2.7-code"
+	config := buildOpencodeConfig(&agentSettingsPayload{
+		OpencodeProvider: "opencode-go",
+		Model:            model,
+	})
+
+	if got := config["model"]; got != model {
+		t.Fatalf("model = %v, want %q", got, model)
+	}
+	if _, ok := config["provider"]; ok {
+		t.Fatalf("provider block present for OpenCode Go built-in provider: %#v", config["provider"])
+	}
+}
+
+func TestBuildOpencodeConfig_CustomProviderEmitsOpenAICompatibleBlock(t *testing.T) {
+	t.Parallel()
+
+	const baseURL = "https://llm.example.com/v1"
+	const model = "my-model-7b"
+	config := buildOpencodeConfig(&agentSettingsPayload{
+		OpencodeProvider: "custom",
+		OpencodeBaseURL:  baseURL,
+		Model:            model,
+	})
+
+	alias := sanitizeModelAlias(model)
+	if got := config["model"]; got != "custom/"+alias {
+		t.Fatalf("model = %v, want %q", got, "custom/"+alias)
+	}
+
+	providerBlock, ok := config["provider"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("provider block missing or wrong type for custom provider: %#v", config["provider"])
+	}
+	custom, ok := providerBlock["custom"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("custom provider entry missing: %#v", providerBlock)
+	}
+	if got := custom["npm"]; got != "@ai-sdk/openai-compatible" {
+		t.Fatalf("npm = %v, want @ai-sdk/openai-compatible", got)
+	}
+
+	options, ok := custom["options"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("custom provider options missing: %#v", custom)
+	}
+	if got := options["baseURL"]; got != baseURL {
+		t.Fatalf("baseURL = %v, want %q", got, baseURL)
+	}
+	if got := options["apiKey"]; got != "{env:OPENCODE_API_KEY}" {
+		t.Fatalf("apiKey = %v, want {env:OPENCODE_API_KEY}", got)
+	}
+
+	models, ok := custom["models"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("custom provider models missing: %#v", custom)
+	}
+	if _, ok := models[alias]; !ok {
+		t.Fatalf("model alias %q not registered: %#v", alias, models)
+	}
+}
+
+// Regression test: writeAgentStartupConfig must call writeCodexStartupConfig
+// even when containerID is empty (standalone/cf-container sessions).
+// This is the exact bug this PR fixes — if the containerID=="" guard is moved
+// back above the Codex check, this test fails.
+func TestWriteAgentStartupConfigCodexStandaloneWritesMcpConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("CODEX_HOME", "")
+
+	h := &SessionHost{
+		config: SessionHostConfig{
+			GatewayConfig: GatewayConfig{
+				McpServers: []McpServerEntry{
+					{URL: "https://api.example.com/mcp", Token: "test-standalone-token"},
+				},
+				WorkspaceID: "ws-test-standalone",
+			},
+		},
+	}
+
+	startup := &agentStartup{containerID: "", settings: &agentSettingsPayload{Model: "gpt-6.1-sol"}, envVars: []string{
+		`CODEX_CONFIG={"sandbox_mode":"read-only"}`,
+		"INITIAL_AGENT_MODE=agent",
+		"CODEX_PATH=/stale/codex",
+		"SAM_MCP_TOKEN=stale-standalone-token",
+	}}
+
+	err := h.writeAgentStartupConfig(context.Background(), "openai-codex", nil, startup)
+	if err != nil {
+		t.Fatalf("writeAgentStartupConfig failed: %v", err)
+	}
+
+	configPath := filepath.Join(tmpDir, ".codex", "config.toml")
+	data, readErr := os.ReadFile(configPath)
+	if readErr != nil {
+		t.Fatalf("config.toml not written for standalone Codex: %v", readErr)
+	}
+	if !strings.Contains(string(data), "sam-mcp") {
+		t.Error("config.toml missing SAM MCP server entry")
+	}
+	if !strings.Contains(string(data), `sandbox_mode = "danger-full-access"`) ||
+		!strings.Contains(string(data), `approval_policy = "never"`) {
+		t.Fatalf("config.toml missing sandbox controls: %s", data)
+	}
+	if !strings.Contains(string(data), `url = "https://api.example.com/mcp"`) {
+		t.Errorf("config.toml missing exact SAM MCP URL: %s", data)
+	}
+	if !strings.Contains(string(data), `bearer_token_env_var = "SAM_MCP_TOKEN"`) {
+		t.Errorf("config.toml missing SAM MCP bearer env reference: %s", data)
+	}
+	assertCodexStartupTOML(t, data, "https://api.example.com/mcp", "SAM_MCP_TOKEN")
+	assertEnvContains(t, startup.envVars, "CODEX_CONFIG", `{"sandbox_mode":"danger-full-access","approval_policy":"never","model":"gpt-6.1-sol"}`)
+	assertEnvContains(t, startup.envVars, "INITIAL_AGENT_MODE", "agent-full-access")
+	assertEnvContains(t, startup.envVars, "CODEX_PATH", "codex")
+	if got := countEnvKey(startup.envVars, "CODEX_PATH"); got != 1 {
+		t.Fatalf("CODEX_PATH count=%d, want 1", got)
+	}
+	assertEnvContains(t, startup.envVars, "SAM_MCP_TOKEN", "test-standalone-token")
+}
+
+func TestWriteAgentStartupConfigCodexContainerKeepsConfigAndEnvContract(t *testing.T) {
+	tmpDir := t.TempDir()
+	capturedConfig := filepath.Join(tmpDir, "config.toml")
+	fakeDocker := filepath.Join(tmpDir, "docker")
+	script := `#!/bin/sh
+case " $* " in
+  *" printenv CODEX_HOME "*) exit 1 ;;
+  *" id -un "*) exit 1 ;;
+  *" printenv HOME "*) printf '/home/testuser\n'; exit 0 ;;
+  *" test -f "*) exit 1 ;;
+  *" tee /home/testuser/.codex/config.toml "*) cat > "$FAKE_CODEX_CONFIG"; exit 0 ;;
+  *) exit 0 ;;
+esac
+`
+	if err := os.WriteFile(fakeDocker, []byte(script), 0o700); err != nil {
+		t.Fatalf("write fake docker: %v", err)
+	}
+	t.Setenv("PATH", tmpDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("FAKE_CODEX_CONFIG", capturedConfig)
+
+	h := &SessionHost{config: SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			McpServers:    []McpServerEntry{{URL: "https://api.example.com/mcp", Token: "container-token"}},
+			WorkspaceID:   "ws-container",
+			ContainerUser: "testuser",
+		},
+	}}
+	startup := &agentStartup{containerID: "container-123", settings: &agentSettingsPayload{Model: "gpt-6.1-sol"}, envVars: []string{
+		`CODEX_CONFIG={"sandbox_mode":"read-only"}`,
+		"INITIAL_AGENT_MODE=agent",
+		"CODEX_PATH=/stale/codex",
+		"SAM_MCP_TOKEN=stale-container-token",
+	}}
+
+	if err := h.writeAgentStartupConfig(context.Background(), "openai-codex", nil, startup); err != nil {
+		t.Fatalf("container Codex startup config failed: %v", err)
+	}
+	data, err := os.ReadFile(capturedConfig)
+	if err != nil {
+		t.Fatalf("read captured container config: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, `sandbox_mode = "danger-full-access"`) ||
+		!strings.Contains(content, `approval_policy = "never"`) ||
+		!strings.Contains(content, `[mcp_servers.sam-mcp]`) ||
+		!strings.Contains(content, `url = "https://api.example.com/mcp"`) ||
+		!strings.Contains(content, `bearer_token_env_var = "SAM_MCP_TOKEN"`) {
+		t.Fatalf("container config contract changed: %s", content)
+	}
+	assertCodexStartupTOML(t, data, "https://api.example.com/mcp", "SAM_MCP_TOKEN")
+	assertEnvContains(t, startup.envVars, "CODEX_CONFIG", `{"sandbox_mode":"danger-full-access","approval_policy":"never","model":"gpt-6.1-sol"}`)
+	assertEnvContains(t, startup.envVars, "INITIAL_AGENT_MODE", "agent-full-access")
+	assertEnvContains(t, startup.envVars, "CODEX_PATH", "codex")
+	if got := countEnvKey(startup.envVars, "CODEX_PATH"); got != 1 {
+		t.Fatalf("CODEX_PATH count=%d, want 1", got)
+	}
+	assertEnvContains(t, startup.envVars, "SAM_MCP_TOKEN", "container-token")
+}
+
+func assertCodexStartupTOML(t *testing.T, data []byte, wantURL, wantTokenEnv string) {
+	t.Helper()
+	var config struct {
+		SandboxMode    string `toml:"sandbox_mode"`
+		ApprovalPolicy string `toml:"approval_policy"`
+		MCPServers     map[string]struct {
+			URL               string `toml:"url"`
+			BearerTokenEnvVar string `toml:"bearer_token_env_var"`
+		} `toml:"mcp_servers"`
+	}
+	if err := toml.Unmarshal(data, &config); err != nil {
+		t.Fatalf("parse generated Codex TOML: %v\n%s", err, data)
+	}
+	if config.SandboxMode != "danger-full-access" {
+		t.Fatalf("sandbox_mode = %q, want danger-full-access", config.SandboxMode)
+	}
+	if config.ApprovalPolicy != "never" {
+		t.Fatalf("approval_policy = %q, want never", config.ApprovalPolicy)
+	}
+	server, ok := config.MCPServers["sam-mcp"]
+	if !ok {
+		t.Fatalf("parsed mcp_servers missing sam-mcp: %#v", config.MCPServers)
+	}
+	if server.URL != wantURL {
+		t.Fatalf("sam-mcp URL = %q, want %q", server.URL, wantURL)
+	}
+	if server.BearerTokenEnvVar != wantTokenEnv {
+		t.Fatalf("sam-mcp bearer_token_env_var = %q, want %q", server.BearerTokenEnvVar, wantTokenEnv)
+	}
+}
+
+func TestWriteAgentStartupConfigCodexWithoutOptionalConfigWritesManagedControls(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		containerID string
+	}{
+		{name: "standalone"},
+		{name: "devcontainer", containerID: "container-123"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			t.Setenv("HOME", tmpDir)
+			t.Setenv("CODEX_HOME", "")
+			configPath := filepath.Join(tmpDir, "config.toml")
+
+			if tc.containerID != "" {
+				fakeDocker := filepath.Join(tmpDir, "docker")
+				script := `#!/bin/sh
+case " $* " in
+  *" printenv CODEX_HOME "*) exit 1 ;;
+  *" id -un "*) exit 1 ;;
+  *" printenv HOME "*) printf '/home/testuser\n'; exit 0 ;;
+  *" test -f "*) exit 1 ;;
+  *" tee /home/testuser/.codex/config.toml "*) cat > "$FAKE_CODEX_CONFIG"; exit 0 ;;
+  *) exit 0 ;;
+esac
+`
+				if err := os.WriteFile(fakeDocker, []byte(script), 0o700); err != nil {
+					t.Fatalf("write fake docker: %v", err)
+				}
+				t.Setenv("PATH", tmpDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+				t.Setenv("FAKE_CODEX_CONFIG", configPath)
+			} else {
+				configPath = filepath.Join(tmpDir, ".codex", "config.toml")
+			}
+
+			h := &SessionHost{config: SessionHostConfig{GatewayConfig: GatewayConfig{ContainerUser: "testuser"}}}
+			startup := &agentStartup{
+				containerID: tc.containerID,
+				envVars: []string{
+					`USER_SETTING=preserved`,
+					`CODEX_CONFIG={"sandbox_mode":"read-only","approval_policy":"on-request"}`,
+					`INITIAL_AGENT_MODE=agent`,
+					`CODEX_PATH=/stale/codex`,
+				},
+			}
+
+			if err := h.writeAgentStartupConfig(context.Background(), "openai-codex", nil, startup); err != nil {
+				t.Fatalf("writeAgentStartupConfig failed: %v", err)
+			}
+			data, err := os.ReadFile(configPath)
+			if err != nil {
+				t.Fatalf("read written config: %v", err)
+			}
+			content := string(data)
+			if strings.Count(content, `sandbox_mode = "danger-full-access"`) != 1 ||
+				strings.Count(content, `approval_policy = "never"`) != 1 {
+				t.Fatalf("written config does not contain exactly one managed control pair:\n%s", content)
+			}
+			assertEnvContains(t, startup.envVars, "CODEX_CONFIG", `{"sandbox_mode":"danger-full-access","approval_policy":"never"}`)
+			assertEnvContains(t, startup.envVars, "INITIAL_AGENT_MODE", "agent-full-access")
+			assertEnvContains(t, startup.envVars, "CODEX_PATH", "codex")
+			if got := countEnvKey(startup.envVars, "CODEX_PATH"); got != 1 {
+				t.Fatalf("CODEX_PATH count=%d, want 1", got)
+			}
+			assertEnvContains(t, startup.envVars, "USER_SETTING", "preserved")
+		})
+	}
+}
+
+func countEnvKey(envVars []string, key string) int {
+	count := 0
+	prefix := key + "="
+	for _, envVar := range envVars {
+		if strings.HasPrefix(envVar, prefix) {
+			count++
+		}
+	}
+	return count
+}
+
+func TestWriteAgentStartupConfigCodexReplacesNumberedMcpTokenEnvVars(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		containerID string
+	}{
+		{name: "standalone"},
+		{name: "devcontainer", containerID: "container-123"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			t.Setenv("HOME", tmpDir)
+			t.Setenv("CODEX_HOME", "")
+			if tc.containerID != "" {
+				fakeDocker := filepath.Join(tmpDir, "docker")
+				script := `#!/bin/sh
+case " $* " in
+  *" printenv CODEX_HOME "*) exit 1 ;;
+  *" id -un "*) exit 1 ;;
+  *" printenv HOME "*) printf '/home/testuser\n'; exit 0 ;;
+  *" test -f "*) exit 1 ;;
+  *" tee /home/testuser/.codex/config.toml "*) cat > "$FAKE_CODEX_CONFIG"; exit 0 ;;
+  *) exit 0 ;;
+esac
+`
+				if err := os.WriteFile(fakeDocker, []byte(script), 0o700); err != nil {
+					t.Fatalf("write fake docker: %v", err)
+				}
+				t.Setenv("PATH", tmpDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+				t.Setenv("FAKE_CODEX_CONFIG", filepath.Join(tmpDir, "config.toml"))
+			}
+
+			h := &SessionHost{config: SessionHostConfig{GatewayConfig: GatewayConfig{
+				ContainerUser: "testuser",
+				McpServers: []McpServerEntry{
+					{URL: "https://api.example.com/first", Token: "first-managed-token"},
+					{URL: "https://api.example.com/second", Token: "second-managed-token"},
+				},
+			}}}
+			startup := &agentStartup{containerID: tc.containerID, envVars: []string{
+				"SAM_MCP_TOKEN_0=stale-first-token",
+				"SAM_MCP_TOKEN_1=stale-second-token",
+			}}
+
+			if err := h.writeAgentStartupConfig(context.Background(), "openai-codex", nil, startup); err != nil {
+				t.Fatalf("writeAgentStartupConfig failed: %v", err)
+			}
+			for _, managed := range []struct {
+				key   string
+				value string
+			}{
+				{key: "SAM_MCP_TOKEN_0", value: "first-managed-token"},
+				{key: "SAM_MCP_TOKEN_1", value: "second-managed-token"},
+			} {
+				if got := countEnvKey(startup.envVars, managed.key); got != 1 {
+					t.Fatalf("%s count = %d, want 1: %v", managed.key, got, startup.envVars)
+				}
+				assertEnvContains(t, startup.envVars, managed.key, managed.value)
+			}
+		})
+	}
+}
+
+func TestActivityReportTimeoutPreservesLegacyDefaultAndOverride(t *testing.T) {
+	t.Parallel()
+
+	h := &SessionHost{config: SessionHostConfig{GatewayConfig: GatewayConfig{}}}
+	if got := h.activityReportTimeout(); got != 10*time.Second {
+		t.Fatalf("activityReportTimeout() = %v, want legacy default 10s", got)
+	}
+
+	h.config.ActivityReportTimeout = 17 * time.Second
+	if got := h.activityReportTimeout(); got != 17*time.Second {
+		t.Fatalf("activityReportTimeout() = %v, want configured 17s", got)
+	}
+}
+
+func TestHarnessActivityReportDebouncePreservesDefaultAndOverride(t *testing.T) {
+	t.Parallel()
+
+	h := &SessionHost{config: SessionHostConfig{GatewayConfig: GatewayConfig{}}}
+	if got := h.harnessActivityReportDebounce(); got != config.DefaultACPHarnessActivityReportDebounce {
+		t.Fatalf("harnessActivityReportDebounce() = %v, want default %v", got, config.DefaultACPHarnessActivityReportDebounce)
+	}
+
+	h.config.HarnessActivityReportDebounce = 875 * time.Millisecond
+	if got := h.harnessActivityReportDebounce(); got != 875*time.Millisecond {
+		t.Fatalf("harnessActivityReportDebounce() = %v, want configured 875ms", got)
+	}
+}
+
+func TestWriteAgentStartupConfigCodexMissingMcpTokenFailsClosed(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		containerID string
+	}{
+		{name: "standalone", containerID: ""},
+		{name: "devcontainer", containerID: "container-123"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			t.Setenv("HOME", tmpDir)
+			t.Setenv("CODEX_HOME", "")
+			h := &SessionHost{config: SessionHostConfig{GatewayConfig: GatewayConfig{
+				McpServers:  []McpServerEntry{{URL: "https://api.example.com/mcp"}},
+				WorkspaceID: "ws-missing-token",
+			}}}
+			startup := &agentStartup{containerID: tc.containerID}
+
+			err := h.writeAgentStartupConfig(context.Background(), "openai-codex", nil, startup)
+			if err == nil {
+				t.Fatal("expected missing SAM MCP token to prevent Codex startup")
+			}
+			if !strings.Contains(err.Error(), "missing its bearer token") || !strings.Contains(err.Error(), "SAM_MCP_TOKEN") {
+				t.Fatalf("expected clear missing-token diagnostic, got: %v", err)
+			}
+			if len(startup.envVars) != 0 {
+				t.Fatalf("failed startup must not inject partial env, got: %v", startup.envVars)
+			}
+			configPath := filepath.Join(tmpDir, ".codex", "config.toml")
+			if _, statErr := os.Stat(configPath); !os.IsNotExist(statErr) {
+				t.Fatalf("failed startup must not write local config, stat error: %v", statErr)
+			}
+		})
+	}
+}
+
+func TestStartAgentWithSessionModeCodexMissingMcpTokenDoesNotLaunch(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		containerID string
+	}{
+		{name: "standalone"},
+		{name: "devcontainer", containerID: "container-123"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var launchCalls int
+			h := &SessionHost{config: SessionHostConfig{
+				GatewayConfig: GatewayConfig{
+					McpServers: []McpServerEntry{{URL: "https://api.example.com/mcp"}},
+					ContainerResolver: func() (string, error) {
+						return tc.containerID, nil
+					},
+				},
+				StartProcess: func(*agentStartup) (agentProcess, error) {
+					launchCalls++
+					return nil, fmt.Errorf("unexpected launch")
+				},
+			}}
+
+			err := h.startAgentWithSessionMode(context.Background(), "openai-codex", &agentCredential{
+				credential:     "test-openai-key",
+				credentialKind: "api-key",
+			}, nil, "", false)
+			if err == nil || !strings.Contains(err.Error(), "missing its bearer token") {
+				t.Fatalf("error = %v, want missing bearer token diagnostic", err)
+			}
+			if launchCalls != 0 {
+				t.Fatalf("StartProcess calls = %d, want 0", launchCalls)
+			}
+		})
+	}
+}
+
+func TestWriteAgentStartupConfigCodexRejectsInvalidMcpValuesBeforeWrite(t *testing.T) {
+	tests := []struct {
+		name   string
+		server McpServerEntry
+		want   string
+	}{
+		{name: "blank URL", server: McpServerEntry{URL: " \t", Token: "token"}, want: "blank URL"},
+		{name: "URL with carriage return", server: McpServerEntry{URL: "https://example.com/\rmcp", Token: "token"}, want: "URL contains CR/LF"},
+		{name: "URL with newline", server: McpServerEntry{URL: "https://example.com/\nmcp", Token: "token"}, want: "URL contains CR/LF"},
+		{name: "token with carriage return", server: McpServerEntry{URL: "https://example.com/mcp", Token: "tok\ren"}, want: "bearer token contains CR/LF"},
+		{name: "token with newline", server: McpServerEntry{URL: "https://example.com/mcp", Token: "tok\nen"}, want: "bearer token contains CR/LF"},
+	}
+	for _, discriminator := range []struct {
+		name        string
+		containerID string
+	}{
+		{name: "standalone"},
+		{name: "devcontainer", containerID: "container-123"},
+	} {
+		for _, tc := range tests {
+			t.Run(discriminator.name+"/"+tc.name, func(t *testing.T) {
+				tmpDir := t.TempDir()
+				t.Setenv("HOME", tmpDir)
+				t.Setenv("CODEX_HOME", "")
+				h := &SessionHost{config: SessionHostConfig{GatewayConfig: GatewayConfig{McpServers: []McpServerEntry{tc.server}}}}
+				startup := &agentStartup{containerID: discriminator.containerID}
+
+				err := h.writeAgentStartupConfig(context.Background(), "openai-codex", nil, startup)
+				if err == nil || !strings.Contains(err.Error(), tc.want) {
+					t.Fatalf("error = %v, want diagnostic containing %q", err, tc.want)
+				}
+				if len(startup.envVars) != 0 {
+					t.Fatalf("invalid startup injected partial env: %v", startup.envVars)
+				}
+				if _, statErr := os.Stat(filepath.Join(tmpDir, ".codex", "config.toml")); !os.IsNotExist(statErr) {
+					t.Fatalf("invalid startup wrote config before validation: %v", statErr)
+				}
+			})
+		}
+	}
+}
+func TestWriteAgentStartupConfigNonCodexStandaloneIsNoop(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	h := &SessionHost{
+		config: SessionHostConfig{
+			GatewayConfig: GatewayConfig{
+				McpServers: []McpServerEntry{
+					{URL: "https://api.example.com/mcp", Token: "tok"},
+				},
+			},
+		},
+	}
+
+	for _, agentType := range []string{"opencode", "mistral-vibe", "claude-code"} {
+		startup := &agentStartup{containerID: ""}
+		err := h.writeAgentStartupConfig(context.Background(), agentType, nil, startup)
+		if err != nil {
+			t.Fatalf("writeAgentStartupConfig(%s) failed: %v", agentType, err)
+		}
+		if len(startup.envVars) > 0 {
+			t.Errorf("writeAgentStartupConfig(%s) with empty containerID should not inject env vars, got %v", agentType, startup.envVars)
+		}
+	}
+}
+
+func TestWriteCodexConfigLocallyCreatesFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("CODEX_HOME", "")
+
+	servers := []McpServerEntry{
+		{URL: "https://api.example.com/mcp", Token: "test-token"},
+	}
+
+	envVars, err := writeCodexConfigLocally(servers, nil, "")
+	if err != nil {
+		t.Fatalf("writeCodexConfigLocally failed: %v", err)
+	}
+
+	configPath := filepath.Join(tmpDir, ".codex", "config.toml")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("config file not created at %s: %v", configPath, err)
+	}
+
+	content := string(data)
+	if !strings.Contains(content, "sam-mcp") {
+		t.Error("config missing MCP server entry")
+	}
+	if !strings.Contains(content, "https://api.example.com/mcp") {
+		t.Error("config missing MCP server URL")
+	}
+
+	expectedEnvName := codexMcpTokenEnvVar(SamMcpServerName)
+	foundToken := false
+	for _, ev := range envVars {
+		if strings.HasPrefix(ev, expectedEnvName+"=") {
+			foundToken = true
+			if !strings.Contains(ev, "test-token") {
+				t.Error("SAM_MCP_TOKEN env var missing token value")
+			}
+		}
+	}
+	if !foundToken {
+		t.Errorf("expected %s env var in returned envVars: %v", expectedEnvName, envVars)
+	}
+}
+
+func TestWriteCodexConfigLocallyRespectsCodexHome(t *testing.T) {
+	tmpDir := t.TempDir()
+	codexHome := filepath.Join(tmpDir, "custom-codex")
+	t.Setenv("CODEX_HOME", codexHome)
+
+	servers := []McpServerEntry{
+		{URL: "https://api.example.com/mcp", Token: "tok"},
+	}
+
+	_, err := writeCodexConfigLocally(servers, nil, "")
+	if err != nil {
+		t.Fatalf("writeCodexConfigLocally failed: %v", err)
+	}
+
+	configPath := filepath.Join(codexHome, "config.toml")
+	if _, err := os.Stat(configPath); err != nil {
+		t.Fatalf("config file not written to CODEX_HOME at %s: %v", configPath, err)
+	}
+}
+
+func TestWriteCodexConfigLocallyMergesExistingConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("CODEX_HOME", "")
+
+	codexDir := filepath.Join(tmpDir, ".codex")
+	if err := os.MkdirAll(codexDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	existingContent := "model = \"gpt-5-codex\"\napproval_policy = \"never\"\n"
+	if err := os.WriteFile(filepath.Join(codexDir, "config.toml"), []byte(existingContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	servers := []McpServerEntry{
+		{URL: "https://api.example.com/mcp", Token: "tok"},
+	}
+
+	_, err := writeCodexConfigLocally(servers, nil, "")
+	if err != nil {
+		t.Fatalf("writeCodexConfigLocally failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(codexDir, "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	merged := string(data)
+	if !strings.Contains(merged, "model = \"gpt-5-codex\"") {
+		t.Error("existing model config was lost after merge")
+	}
+	if !strings.Contains(merged, "sam-mcp") {
+		t.Error("MCP server entry was not added during merge")
+	}
+}
+
+func TestWriteCodexConfigLocallyNoServersWritesSandboxControls(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("CODEX_HOME", "")
+
+	envVars, err := writeCodexConfigLocally(nil, nil, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(envVars) != 0 {
+		t.Fatalf("expected no MCP env vars, got %v", envVars)
+	}
+
+	configPath := filepath.Join(tmpDir, ".codex", "config.toml")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("sandbox config file was not created: %v", err)
+	}
+	if !strings.Contains(string(data), `sandbox_mode = "danger-full-access"`) ||
+		!strings.Contains(string(data), `approval_policy = "never"`) {
+		t.Fatalf("sandbox controls missing from local config: %s", data)
 	}
 }

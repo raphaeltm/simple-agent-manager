@@ -1,12 +1,25 @@
-import type { AgentCredentialInfo, AgentInfo, AgentType, CredentialKind, OpenCodeProvider, SaveAgentCredentialRequest } from '@simple-agent-manager/shared';
-import { getAgentDefinition, OPENCODE_PROVIDERS } from '@simple-agent-manager/shared';
+import type {
+  AgentCredentialInfo,
+  AgentInfo,
+  AgentType,
+  CredentialKind,
+  OpenCodeProvider,
+  SaveAgentCredentialRequest,
+} from '@simple-agent-manager/shared';
+import {
+  getAgentDefinition,
+  OPENCODE_PROVIDERS,
+  resolveOpenCodeProvider,
+} from '@simple-agent-manager/shared';
 import { Alert, Button, Input, StatusBadge } from '@simple-agent-manager/ui';
 import { useState } from 'react';
+
+import { AgentCredentialConnectTrigger } from './CodexConnectTrigger';
 
 interface AgentKeyCardProps {
   agent: AgentInfo;
   credentials?: AgentCredentialInfo[] | null; // Now an array for multiple credential types
-  onSave: (request: SaveAgentCredentialRequest) => Promise<void>;
+  onSave: (request: SaveAgentCredentialRequest) => Promise<AgentCredentialInfo>;
   onDelete: (agentType: AgentType, credentialKind: CredentialKind) => Promise<void>;
   /** The currently selected OpenCode provider (from agent settings). Affects key labels. */
   opencodeProvider?: OpenCodeProvider | null;
@@ -14,8 +27,7 @@ interface AgentKeyCardProps {
    * Scope context for this card:
    *   - 'user' (default): user-level credential — removal disables the agent until a new key is added.
    *   - 'project': project-scoped override — removal falls back to the user-level credential.
-   * Affects delete confirmation copy and disables Scaleway-fallback display (project context
-   * does not carry the active provider).
+   * Affects delete confirmation copy.
    */
   scope?: 'user' | 'project';
   /**
@@ -24,58 +36,74 @@ interface AgentKeyCardProps {
    * that already shows the agent name/status in its own header.
    */
   embedded?: boolean;
+  /**
+   * Called after the guided "Connect with Codex" flow captures + saves a
+   * credential, so the parent can refresh the credential list (same refresh it
+   * performs after a manual save). No-op when the guided flow is unavailable.
+   */
+  onCredentialConnected?: () => void;
 }
 
 /**
  * Card for managing a single agent's credentials (API key and/or OAuth token).
  */
-export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodeProvider, scope = 'user', embedded = false }: AgentKeyCardProps) {
+export function AgentKeyCard({
+  agent,
+  credentials,
+  onSave,
+  onDelete,
+  opencodeProvider,
+  scope = 'user',
+  embedded = false,
+  onCredentialConnected,
+}: AgentKeyCardProps) {
   const [credential, setCredential] = useState('');
   const [credentialKind, setCredentialKind] = useState<CredentialKind>('api-key');
   const [loading, setLoading] = useState(false);
+  const [validationMessage, setValidationMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
 
   // Get agent definition for OAuth support check
   const agentDef = getAgentDefinition(agent.id);
   const supportsOAuth = !!agentDef?.oauthSupport;
+  const supportsGuidedSetup = agent.id === 'openai-codex' || agent.id === 'claude-code';
 
   // Find active credential
-  const activeCredential = credentials?.find(c => c.isActive);
+  const activeCredential = credentials?.find((c) => c.isActive);
   const hasAnyCredential = (credentials?.length ?? 0) > 0;
-
-  // OpenCode can use Scaleway cloud credential as fallback (only when using Scaleway provider).
-  // Project scope does not display provider-derived fallbacks — provider selection is user-scoped,
-  // so the project card would be unable to reason about it correctly.
-  const isOpenCodePlatform =
-    scope === 'user' &&
-    agent.id === 'opencode' &&
-    (opencodeProvider === 'platform' || agent.fallbackCredentialSource === 'platform-opencode');
-  const usesScalewayFallback =
-    scope === 'user' &&
-    agent.fallbackCredentialSource === 'scaleway-cloud' &&
-    (!opencodeProvider || opencodeProvider === 'scaleway');
+  const effectiveOpenCodeProvider =
+    agent.id === 'opencode' ? resolveOpenCodeProvider(opencodeProvider) : null;
+  let saveCredentialLabel = 'Save Credential';
+  if (hasAnyCredential) saveCredentialLabel = 'Update Credential';
+  if (loading) saveCredentialLabel = 'Testing...';
 
   // Get provider-specific key label for OpenCode
-  const opencodeKeyLabel = agent.id === 'opencode' && opencodeProvider
-    ? OPENCODE_PROVIDERS[opencodeProvider]?.keyLabel || 'API Key'
+  const opencodeKeyLabel = effectiveOpenCodeProvider
+    ? OPENCODE_PROVIDERS[effectiveOpenCodeProvider]?.keyLabel || 'API Key'
     : null;
-  const opencodeKeyHelp = agent.id === 'opencode' && opencodeProvider
-    ? OPENCODE_PROVIDERS[opencodeProvider]?.keyHelpText || ''
+  const opencodeKeyHelp = effectiveOpenCodeProvider
+    ? OPENCODE_PROVIDERS[effectiveOpenCodeProvider]?.keyHelpText || ''
     : null;
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
+    setValidationMessage(null);
 
     try {
-      await onSave({
+      const result = await onSave({
         agentType: agent.id,
         credentialKind,
         credential,
         autoActivate: true,
       });
+      if (result.validation?.valid === false) {
+        setError(`Saved, but ${result.validation.error ?? result.validation.message}`);
+        return;
+      }
+      setValidationMessage(result.validation?.message ?? 'Credential validated.');
       setCredential('');
       setShowForm(false);
     } catch (err) {
@@ -109,40 +137,6 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodePro
 
   const body = (
     <>
-      {isOpenCodePlatform && !showForm && (
-        <div className="flex items-center justify-between p-3 bg-inset rounded-sm">
-          <div className="flex flex-col gap-1">
-            <span className="text-xs text-fg-muted">SAM Platform (Workers AI)</span>
-            <span className="text-sm text-fg-primary">
-              Using SAM&apos;s platform AI — daily limit applies. No API key needed.
-            </span>
-          </div>
-        </div>
-      )}
-
-      {usesScalewayFallback && !hasAnyCredential && !showForm && !isOpenCodePlatform && (
-        <div className="flex flex-col gap-3">
-          <div className="flex items-center justify-between p-3 bg-inset rounded-sm">
-            <div className="flex flex-col gap-1">
-              <span className="text-xs text-fg-muted">Scaleway Cloud Provider Credential</span>
-              <span className="text-sm text-fg-primary">
-                Your Scaleway cloud credential is being used for inference. No separate key needed.
-              </span>
-            </div>
-          </div>
-          <p className="text-xs text-fg-muted">
-            To use a different key for inference, you can save a dedicated credential below.{' '}
-            <button
-              type="button"
-              onClick={() => setShowForm(true)}
-              className="text-xs bg-transparent border-none cursor-pointer p-0 text-accent underline"
-            >
-              Add dedicated key
-            </button>
-          </p>
-        </div>
-      )}
-
       {activeCredential && !showForm && (
         <div className="flex flex-col gap-3">
           <div className="flex items-center justify-between p-3 bg-inset rounded-sm">
@@ -151,12 +145,13 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodePro
                 {activeCredential.credentialKind === 'oauth-token' ? 'OAuth Token' : 'API Key'}
                 {activeCredential.label && ` (${activeCredential.label})`}
               </span>
-              <span className="text-sm text-fg-muted font-mono">
-                {activeCredential.maskedKey}
-              </span>
+              <span className="text-sm text-fg-muted font-mono">{activeCredential.maskedKey}</span>
             </div>
             <div className="flex gap-2">
-              <button onClick={() => setShowForm(true)} className="text-xs bg-transparent border-none cursor-pointer py-0.5 px-2 text-accent">
+              <button
+                onClick={() => setShowForm(true)}
+                className="text-xs bg-transparent border-none cursor-pointer py-0.5 px-2 text-accent"
+              >
                 Update
               </button>
               <button
@@ -172,13 +167,18 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodePro
         </div>
       )}
 
-      {((!hasAnyCredential && !usesScalewayFallback && !isOpenCodePlatform) || showForm) && (
+      {(!hasAnyCredential || showForm) && (
         <form onSubmit={handleSave} className="flex flex-col gap-3">
           {supportsOAuth && (
             <div className="flex gap-2 mb-2">
               <button
                 type="button"
-                onClick={() => { setCredentialKind('api-key'); setCredential(''); }}
+                onClick={() => {
+                  setCredentialKind('api-key');
+                  setCredential('');
+                  setError(null);
+                  setValidationMessage(null);
+                }}
                 className={`py-2 px-3 border border-border-default rounded-sm text-sm cursor-pointer ${
                   credentialKind === 'api-key'
                     ? 'bg-accent text-white'
@@ -189,7 +189,12 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodePro
               </button>
               <button
                 type="button"
-                onClick={() => { setCredentialKind('oauth-token'); setCredential(''); }}
+                onClick={() => {
+                  setCredentialKind('oauth-token');
+                  setCredential('');
+                  setError(null);
+                  setValidationMessage(null);
+                }}
                 className={`py-2 px-3 border border-border-default rounded-sm text-sm cursor-pointer ${
                   credentialKind === 'oauth-token'
                     ? 'bg-accent text-white'
@@ -202,32 +207,65 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodePro
           )}
 
           <div>
-            {credentialKind === 'oauth-token' && agent.id === 'openai-codex' ? (
-              <textarea
-                value={credential}
-                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setCredential(e.target.value)}
-                placeholder='Paste the full contents of ~/.codex/auth.json'
-                required
-                rows={6}
-                spellCheck={false}
-                autoCorrect="off"
-                autoCapitalize="off"
-                autoComplete="off"
-                className="w-full px-3 py-2 bg-transparent border border-border-default rounded-sm text-sm text-fg-primary font-mono resize-y focus:outline-none focus:border-accent"
-              />
+            {credentialKind === 'oauth-token' && supportsGuidedSetup ? (
+              <div className="flex flex-col gap-3">
+                {/* Guided flow (only rendered when the platform gate is enabled). */}
+                <AgentCredentialConnectTrigger
+                  agentType={agent.id as 'openai-codex' | 'claude-code'}
+                  scope={scope}
+                  onConnected={onCredentialConnected}
+                />
+                <div className="text-xs font-medium text-fg-muted">
+                  {agent.id === 'openai-codex'
+                    ? 'Or paste auth.json manually'
+                    : 'Or paste setup-token manually'}
+                </div>
+                {agent.id === 'openai-codex' ? (
+                  <textarea
+                    value={credential}
+                    onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => {
+                      setCredential(e.target.value);
+                      setError(null);
+                      setValidationMessage(null);
+                    }}
+                    placeholder="Paste the full contents of ~/.codex/auth.json"
+                    required
+                    rows={6}
+                    spellCheck={false}
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    autoComplete="off"
+                    className="w-full px-3 py-2 bg-transparent border border-border-default rounded-sm text-sm text-fg-primary font-mono resize-y focus:outline-none focus:border-accent"
+                  />
+                ) : (
+                  <Input
+                    type="password"
+                    value={credential}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                      setCredential(e.target.value);
+                      setError(null);
+                      setValidationMessage(null);
+                    }}
+                    placeholder='Paste your OAuth token from "claude setup-token"'
+                    required
+                  />
+                )}
+              </div>
             ) : (
               <Input
                 type="password"
                 value={credential}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCredential(e.target.value)}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                  setCredential(e.target.value);
+                  setError(null);
+                  setValidationMessage(null);
+                }}
                 placeholder={
                   credentialKind === 'oauth-token'
                     ? 'Paste your OAuth token from "claude setup-token"'
                     : opencodeKeyLabel
                       ? `Enter your ${opencodeKeyLabel}`
-                      : agent.id === 'opencode'
-                        ? 'Enter your Scaleway Secret Key'
-                        : `Enter your ${agent.name} API key`
+                      : `Enter your ${agent.name} API key`
                 }
                 required
               />
@@ -236,23 +274,26 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodePro
               {credentialKind === 'oauth-token' && agentDef?.oauthSupport ? (
                 <>
                   {agentDef.oauthSupport.setupInstructions}{' '}
-                  <a href={agentDef.oauthSupport.subscriptionUrl} target="_blank" rel="noopener noreferrer" className="text-accent">
+                  <a
+                    href={agentDef.oauthSupport.subscriptionUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-accent"
+                  >
                     View subscription
                   </a>
                 </>
               ) : agent.id === 'opencode' && opencodeKeyHelp ? (
                 <>{opencodeKeyHelp}</>
-              ) : agent.id === 'opencode' ? (
-                <>
-                  Create a Scaleway API key with <strong>GenerativeApisModelAccess</strong> permission at{' '}
-                  <a href={agent.credentialHelpUrl} target="_blank" rel="noopener noreferrer" className="text-accent">
-                    Scaleway IAM Console
-                  </a>
-                </>
               ) : (
                 <>
                   Get your API key from{' '}
-                  <a href={agent.credentialHelpUrl} target="_blank" rel="noopener noreferrer" className="text-accent">
+                  <a
+                    href={agent.credentialHelpUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-accent"
+                  >
                     {agent.name} Console
                   </a>
                 </>
@@ -260,14 +301,25 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodePro
             </p>
           </div>
 
+          {validationMessage && <Alert variant="success">{validationMessage}</Alert>}
           {error && <Alert variant="error">{error}</Alert>}
 
           <div className="flex gap-2">
             <Button type="submit" disabled={loading || !credential} loading={loading} size="sm">
-              {hasAnyCredential ? 'Update Credential' : 'Save Credential'}
+              {saveCredentialLabel}
             </Button>
             {showForm && (
-              <Button type="button" variant="secondary" size="sm" onClick={() => { setShowForm(false); setError(null); setCredential(''); }}>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setShowForm(false);
+                  setError(null);
+                  setValidationMessage(null);
+                  setCredential('');
+                }}
+              >
                 Cancel
               </Button>
             )}
@@ -289,15 +341,14 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodePro
           <p className="text-xs text-fg-muted">{agent.description}</p>
         </div>
         <StatusBadge
-          status={hasAnyCredential || usesScalewayFallback || isOpenCodePlatform ? 'connected' : 'disconnected'}
+          status={hasAnyCredential ? 'connected' : 'disconnected'}
           label={
-            isOpenCodePlatform
-              ? 'Platform AI'
-              : hasAnyCredential
-                ? activeCredential?.label || (activeCredential?.credentialKind === 'oauth-token' ? 'Connected (OAuth)' : 'Connected')
-                : usesScalewayFallback
-                  ? 'Using Scaleway Cloud Key'
-                  : 'Not Configured'
+            hasAnyCredential
+              ? activeCredential?.label ||
+                (activeCredential?.credentialKind === 'oauth-token'
+                  ? 'Connected (OAuth)'
+                  : 'Connected')
+              : 'Not Configured'
           }
         />
       </div>

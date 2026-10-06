@@ -1,283 +1,371 @@
-/**
- * Tests for D1 migration safety check.
- *
- * Verifies that the check correctly catches dangerous migration patterns
- * that can cause production data loss. Uses temp migration directories
- * with synthetic bad patterns to exercise the actual detection logic.
- */
-
-import { describe, expect, it, afterEach } from 'vitest';
-import { execSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { afterEach, describe, expect, it } from 'vitest';
+
+import { checkMigrationSafety, type MigrationSafetyReport } from './check-migration-safety';
+import { splitSqlStatements, tokenizeSql } from './sql-migration-parser';
 
 const ROOT = join(import.meta.dirname, '../..');
+const SCRIPT = join(ROOT, 'scripts/quality/check-migration-safety.ts');
+const REAL_MIGRATION_DIRS = [
+  join(ROOT, 'apps/api/src/db/migrations'),
+  join(ROOT, 'apps/api/src/db/migrations/observability'),
+];
+const tempDirs: string[] = [];
 
-/**
- * Run the migration safety check against the real codebase.
- */
-describe('D1 migration safety check', () => {
-  it('passes on the current codebase migrations', () => {
-    const result = execSync('npx tsx scripts/quality/check-migration-safety.ts', {
-      cwd: ROOT,
-      encoding: 'utf-8',
-      timeout: 30_000,
-    });
-    expect(result).toContain('Migration safety check passed');
-  });
+const CASCADE_SETUP = `
+CREATE TABLE parent_table (id TEXT PRIMARY KEY, note TEXT);
+CREATE TABLE child_table (
+  id TEXT PRIMARY KEY,
+  parent_id TEXT REFERENCES parent_table(id) ON DELETE CASCADE
+);
+`;
 
-  it('prints the CASCADE map for visibility', () => {
-    const result = execSync('npx tsx scripts/quality/check-migration-safety.ts', {
-      cwd: ROOT,
-      encoding: 'utf-8',
-      timeout: 30_000,
-    });
-    expect(result).toContain('Foreign key CASCADE relationships detected:');
-    expect(result).toContain('projects');
-  });
+function makeCorpus(files: Record<string, string>): string {
+  const dir = mkdtempSync(join(tmpdir(), 'migration-safety-'));
+  tempDirs.push(dir);
+  for (const [name, sql] of Object.entries(files)) {
+    writeFileSync(join(dir, name), sql);
+  }
+  return dir;
+}
 
-  it('detects existing allowlisted violations', () => {
-    const result = execSync('npx tsx scripts/quality/check-migration-safety.ts', {
-      cwd: ROOT,
-      encoding: 'utf-8',
-      timeout: 30_000,
-    });
-    expect(result).toContain('allowlisted violation');
+function checkDangerous(sql: string, setup = CASCADE_SETUP): MigrationSafetyReport {
+  return checkMigrationSafety([
+    makeCorpus({
+      '0001_setup.sql': setup,
+      '0100_dangerous.sql': sql,
+    }),
+  ]);
+}
+
+function expectBlocked(sql: string, pattern: string, setup = CASCADE_SETUP): MigrationSafetyReport {
+  const report = checkDangerous(sql, setup);
+  expect(report.newViolations.map((violation) => violation.pattern)).toContain(pattern);
+  return report;
+}
+
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+describe('D1 migration safety — checked-in clean-install history', () => {
+  it('preserves the complete primary and observability migration corpus', () => {
+    const report = checkMigrationSafety(REAL_MIGRATION_DIRS);
+
+    expect(report.newViolations).toEqual([]);
+    expect(report.allowlistedViolations.map(({ file, line }) => `${file}:${line}`)).toEqual([
+      '0002_betterauth_tables.sql:27',
+      '0003_users_timestamp_to_integer.sql:39',
+      '0037_project_file_directories.sql:44',
+    ]);
+    expect(report.foreignKeys.length).toBeGreaterThan(100);
+    expect(report.cascadeMap.has('projects')).toBe(true);
   });
 });
 
-/**
- * Behavioral tests that create temp migration directories with known-bad
- * patterns and verify the check actually catches them.
- *
- * These test the detection logic end-to-end via the real script, not
- * by reading source code.
- */
-describe('D1 migration safety — positive detection (behavioral)', () => {
-  // We can't easily swap MIGRATIONS_DIR at runtime in the existing script,
-  // so we test detection patterns by creating migrations in a temp dir
-  // alongside a parent table definition, then running the check script
-  // with a modified env. Since the script reads from a hardcoded path,
-  // we instead validate the patterns by writing SQL files that would
-  // trigger violations and checking them with inline regex logic
-  // extracted from the check script. This is a pragmatic compromise
-  // that tests the actual regex patterns without modifying the script.
+describe('D1 migration safety — multiline destructive statements', () => {
+  it('blocks the exact R10-008 DROP TABLE bypass with actionable diagnostics', () => {
+    const report = expectBlocked(
+      `-- known bypass fixture\nDROP\nTABLE parent_table;`,
+      'DROP TABLE on CASCADE parent'
+    );
+    const violation = report.newViolations[0];
 
-  function testPatternDetection(sql: string, expectedViolation: string): void {
-    // Create a temp dir with two migration files:
-    // 1. A setup migration that establishes a CASCADE parent table
-    // 2. A migration that contains the dangerous pattern
-    const tmpDir = mkdtempSync(join(tmpdir(), 'migration-safety-'));
+    expect(violation).toMatchObject({ file: '0100_dangerous.sql', line: 2 });
+    expect(violation?.message).toContain('parent_table');
+    expect(violation?.message).toContain('child_table');
+    expect(violation?.message).toContain('ALTER TABLE ADD COLUMN');
+    expect(violation?.message).toContain('.claude/rules/31-migration-safety.md');
+  });
 
-    try {
-      // First migration: create the CASCADE relationship
-      writeFileSync(
-        join(tmpDir, '0001_setup.sql'),
-        `CREATE TABLE parent_table (id TEXT PRIMARY KEY);
+  it.each([
+    ['block comment between keywords', 'DROP/* gap */TABLE parent_table;'],
+    ['line comment and CRLF', 'DROP -- gap\r\n TABLE parent_table;'],
+    ['IF EXISTS with a comment', 'DROP TABLE IF/* gap */EXISTS "parent_table";'],
+    ['double-quoted target', 'DROP\nTABLE "Parent_Table";'],
+    ['backtick-quoted target', 'DROP TABLE `parent_table`;'],
+    ['bracket-quoted target', 'DROP TABLE [parent_table];'],
+    ['schema-qualified target', 'DROP TABLE main."parent_table";'],
+    ['SQLite single-quoted target', "DROP TABLE 'parent_table';"],
+  ])('blocks %s', (_name, sql) => {
+    expectBlocked(sql, 'DROP TABLE on CASCADE parent');
+  });
+
+  it('retains the destructive token line across CRLF comments', () => {
+    const report = expectBlocked(
+      '-- heading\r\nDROP -- gap\r\n TABLE parent_table;',
+      'DROP TABLE on CASCADE parent'
+    );
+    expect(report.newViolations[0]?.line).toBe(2);
+  });
+
+  it('blocks a multiline DROP of a non-CASCADE table in a new migration', () => {
+    const report = expectBlocked('DROP\nTABLE unprotected_table;', 'DROP TABLE in new migration');
+    expect(report.newViolations[0]?.message).toContain('unprotected_table');
+  });
+
+  it('blocks a multiline recreation sequence at its DROP but preserves rename policy', () => {
+    const report = expectBlocked(
+      `CREATE TABLE parent_table_new (id TEXT PRIMARY KEY, note TEXT);
+INSERT INTO parent_table_new SELECT * FROM parent_table;
+DROP
+TABLE
+"parent_table";
+ALTER
+TABLE parent_table_new
+RENAME
+TO parent_table;`,
+      'DROP TABLE on CASCADE parent'
+    );
+
+    expect(report.newViolations).toHaveLength(1);
+    expect(report.newViolations[0]?.line).toBe(3);
+  });
+
+  it('blocks each existing destructive rule across physical lines', () => {
+    expectBlocked('DELETE\nFROM parent_table;', 'DELETE FROM without WHERE on CASCADE parent');
+    expectBlocked(
+      `UPDATE
+parent_table
+SET note = 'WHERE';`,
+      'UPDATE without WHERE on CASCADE parent'
+    );
+    expectBlocked('TRUNCATE\nTABLE parent_table;', 'TRUNCATE on CASCADE parent');
+    expectBlocked('PRAGMA/* gap */foreign_keys\n=\nOFF;', 'PRAGMA foreign_keys = OFF');
+    expectBlocked('PRAGMA foreign_keys = 0;', 'PRAGMA foreign_keys = OFF');
+    expectBlocked('PRAGMA foreign_keys = FALSE;', 'PRAGMA foreign_keys = OFF');
+    expectBlocked("DELETE FROM 'parent_table';", 'DELETE FROM without WHERE on CASCADE parent');
+    expectBlocked("UPDATE 'parent_table' SET note = 1;", 'UPDATE without WHERE on CASCADE parent');
+  });
+
+  it.each([
+    ['schema-qualified', 'PRAGMA main.foreign_keys = OFF;'],
+    ['parenthesized', 'PRAGMA foreign_keys(OFF);'],
+    ['double-quoted', 'PRAGMA "foreign_keys" = OFF;'],
+    ['bracket-quoted', 'PRAGMA [foreign_keys] = FALSE;'],
+    ['backtick-quoted', 'PRAGMA `foreign_keys` = 0;'],
+    ['single-quoted', "PRAGMA 'foreign_keys' = 'OFF';"],
+    ['SQLite NO value', 'PRAGMA foreign_keys = NO;'],
+    ['zero-padded numeric', 'PRAGMA foreign_keys = 00;'],
+    ['positive signed zero', 'PRAGMA foreign_keys = +0;'],
+    ['negative signed zero', 'PRAGMA foreign_keys = -0;'],
+    ['hexadecimal zero', 'PRAGMA foreign_keys = 0x0;'],
+    ['decimal zero', 'PRAGMA foreign_keys = 0.0;'],
+    ['sub-one fraction', 'PRAGMA foreign_keys = 0.1;'],
+    ['negative integer', 'PRAGMA foreign_keys = -1;'],
+    ['zero mantissa', 'PRAGMA foreign_keys = 0e1;'],
+  ])('blocks the %s foreign-key disabling PRAGMA form', (_name, sql) => {
+    expectBlocked(sql, 'PRAGMA foreign_keys = OFF');
+  });
+
+  it.each([
+    ['decimal one', 'PRAGMA foreign_keys = 1;'],
+    ['hexadecimal one', 'PRAGMA foreign_keys = 0x1;'],
+    ['positive one', 'PRAGMA foreign_keys = +1;'],
+    ['decimal one', 'PRAGMA foreign_keys = 1.0;'],
+    ['positive exponent', 'PRAGMA foreign_keys = 1e-1;'],
+  ])('allows the non-disabling %s PRAGMA form', (_name, sql) => {
+    expect(checkDangerous(sql).newViolations).toEqual([]);
+  });
+
+  it('does not let a WHERE in a comment, string, subquery, or later statement mask unscoped DML', () => {
+    expectBlocked(
+      'DELETE FROM parent_table /* WHERE id = 1 */;',
+      'DELETE FROM without WHERE on CASCADE parent'
+    );
+    expectBlocked(
+      `UPDATE parent_table SET note = 'WHERE id = 1';`,
+      'UPDATE without WHERE on CASCADE parent'
+    );
+    expectBlocked(
+      'UPDATE parent_table SET note = (SELECT note FROM parent_table WHERE id = 1);',
+      'UPDATE without WHERE on CASCADE parent'
+    );
+    expectBlocked(
+      'DELETE FROM parent_table; SELECT 1 WHERE 1 = 1;',
+      'DELETE FROM without WHERE on CASCADE parent'
+    );
+  });
+});
+
+describe('D1 migration safety — tokenized FK discovery', () => {
+  it('uses multiline quoted ALTER TABLE foreign keys in the CASCADE map', () => {
+    const setup = `
+CREATE TABLE "Parent_Table" (id TEXT PRIMARY KEY);
+CREATE TABLE "Child_Table" (id TEXT PRIMARY KEY);
+ALTER
+TABLE "Child_Table"
+ADD COLUMN parent_id TEXT
+REFERENCES
+main."Parent_Table"(id)
+ON DELETE CASCADE;
+`;
+    const report = expectBlocked(
+      'DROP\nTABLE main.[parent_table];',
+      'DROP TABLE on CASCADE parent',
+      setup
+    );
+
+    expect(report.cascadeMap.get('parent_table')).toEqual([
+      { childTable: 'child_table', migrationFile: '0001_setup.sql' },
+    ]);
+  });
+
+  it('does not truncate CREATE TABLE parsing at destructive-looking strings', () => {
+    const setup = `
+CREATE TABLE parent_table (id TEXT PRIMARY KEY);
 CREATE TABLE child_table (
   id TEXT PRIMARY KEY,
-  parent_id TEXT NOT NULL REFERENCES parent_table(id) ON DELETE CASCADE
-);`
-      );
-
-      // Second migration: the dangerous pattern
-      writeFileSync(join(tmpDir, '0100_dangerous.sql'), sql);
-
-      // Run the check script with the temp directory as an additional
-      // migration dir. We do this by creating a wrapper script.
-      const wrapperScript = `
-import { readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
-
-const MIGRATIONS_DIR = '${tmpDir.replace(/\\/g, '\\\\')}';
-
-// Inline the core detection logic from check-migration-safety.ts
-function extractForeignKeys(dir) {
-  const fks = [];
-  const files = readdirSync(dir).filter(f => f.endsWith('.sql')).sort();
-  for (const file of files) {
-    const content = readFileSync(join(dir, file), 'utf-8');
-    const createTableRegex = /CREATE\\s+TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?(\\w+)\\s*\\(([\\s\\S]*?)\\);/gi;
-    let match;
-    while ((match = createTableRegex.exec(content)) !== null) {
-      const tableName = match[1];
-      if (tableName.endsWith('_new') || tableName.endsWith('_tmp')) continue;
-      const body = match[2];
-      const fkRegex = /REFERENCES\\s+(\\w+)\\s*\\([^)]+\\)\\s+ON\\s+DELETE\\s+(CASCADE|SET\\s+NULL|RESTRICT)/gi;
-      let fkMatch;
-      while ((fkMatch = fkRegex.exec(body)) !== null) {
-        fks.push({ childTable: tableName, parentTable: fkMatch[1], onDelete: fkMatch[2].toUpperCase() });
-      }
-    }
-  }
-  return fks;
-}
-
-const fks = extractForeignKeys(MIGRATIONS_DIR);
-const cascadeMap = new Map();
-for (const fk of fks) {
-  if (fk.onDelete === 'CASCADE') {
-    const existing = cascadeMap.get(fk.parentTable) ?? [];
-    existing.push({ childTable: fk.childTable });
-    cascadeMap.set(fk.parentTable, existing);
-  }
-}
-
-// Check for violations
-const files = readdirSync(MIGRATIONS_DIR).filter(f => f.endsWith('.sql')).sort();
-let violations = 0;
-for (const file of files) {
-  const content = readFileSync(join(MIGRATIONS_DIR, file), 'utf-8');
-  const lines = content.split('\\n');
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (line.trim().startsWith('--')) continue;
-
-    // DROP TABLE on CASCADE parent
-    const dropMatch = line.match(/DROP\\s+TABLE\\s+(?:IF\\s+EXISTS\\s+)?(\\w+)/i);
-    if (dropMatch && !dropMatch[1].endsWith('_new') && !dropMatch[1].endsWith('_tmp')) {
-      if (cascadeMap.has(dropMatch[1])) {
-        console.log('VIOLATION: DROP TABLE on CASCADE parent ' + dropMatch[1]);
-        violations++;
-      }
-    }
-
-    // DELETE FROM without WHERE
-    const deleteMatch = line.match(/DELETE\\s+FROM\\s+(\\w+)/i);
-    if (deleteMatch) {
-      const ctx = lines.slice(i, Math.min(i+3, lines.length)).join(' ');
-      if (cascadeMap.has(deleteMatch[1]) && !/WHERE/i.test(ctx)) {
-        console.log('VIOLATION: DELETE FROM without WHERE on ' + deleteMatch[1]);
-        violations++;
-      }
-    }
-
-    // UPDATE without WHERE on CASCADE parent
-    const updateMatch = line.match(/UPDATE\\s+(\\w+)\\s+SET\\b/i);
-    if (updateMatch) {
-      const ctx = lines.slice(i, Math.min(i+3, lines.length)).join(' ');
-      if (cascadeMap.has(updateMatch[1]) && !/WHERE/i.test(ctx)) {
-        console.log('VIOLATION: UPDATE without WHERE on ' + updateMatch[1]);
-        violations++;
-      }
-    }
-
-    // PRAGMA foreign_keys = OFF
-    if (/PRAGMA\\s+foreign_keys\\s*=\\s*(OFF|0|FALSE)/i.test(line)) {
-      console.log('VIOLATION: PRAGMA foreign_keys = OFF');
-      violations++;
-    }
-  }
-}
-
-if (violations > 0) {
-  process.exit(1);
-} else {
-  console.log('PASS');
-}
+  note TEXT DEFAULT '); DROP TABLE parent_table;',
+  parent_id TEXT REFERENCES parent_table(id) ON DELETE CASCADE
+);
 `;
+    expectBlocked('DROP TABLE parent_table;', 'DROP TABLE on CASCADE parent', setup);
+  });
+});
 
-      const wrapperPath = join(tmpDir, '_test_runner.mjs');
-      writeFileSync(wrapperPath, wrapperScript);
+describe('D1 migration safety — comments, strings, identifiers, and triggers', () => {
+  it('allows a broad safe upgrade-style SQL corpus', () => {
+    const report = checkMigrationSafety([
+      makeCorpus({
+        '0001_setup.sql': CASCADE_SETUP,
+        '0100_safe_upgrade.sql': `
+-- DROP TABLE parent_table;
+/* DELETE FROM parent_table; */
+SELECT 'DROP TABLE parent_table; semicolon ; and escaped '' quote';
+CREATE INDEX IF NOT EXISTS idx_parent_note ON parent_table(note);
+DROP INDEX IF EXISTS idx_parent_note;
+INSERT INTO parent_table (id, note) VALUES ('safe', 'UPDATE parent_table SET note = 1');
+ALTER
+TABLE "parent_table"
+ADD COLUMN extra_note TEXT;
+UPDATE parent_table
+SET note = 'scoped'
+WHERE id = 'safe';
+DELETE FROM parent_table
+WHERE id = 'missing';
+PRAGMA foreign_keys = ON;
+CREATE TABLE cleanup_tmp (id TEXT PRIMARY KEY);
+DROP TABLE cleanup_tmp;
+CREATE TABLE rename_new (id TEXT PRIMARY KEY);
+ALTER TABLE rename_new RENAME TO renamed_table;
+`,
+      }),
+    ]);
 
-      try {
-        const result = execSync(`node ${wrapperPath}`, {
-          encoding: 'utf-8',
-          timeout: 10_000,
-        });
-        // If we get here, no violation was detected — test fails
-        throw new Error(
-          `Expected violation "${expectedViolation}" but check passed.\nOutput: ${result}`
-        );
-      } catch (err: unknown) {
-        const error = err as { status?: number; stdout?: string; stderr?: string; message?: string };
-        if (error.status === 1) {
-          // Check exited with code 1 — violation was detected
-          expect(error.stdout).toContain('VIOLATION');
-        } else {
-          throw err;
-        }
-      }
-    } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
-    }
-  }
+    expect(report.newViolations).toEqual([]);
+  });
 
-  it('catches DROP TABLE on a CASCADE parent table', () => {
-    testPatternDetection(
-      'DROP TABLE parent_table;',
+  it('ignores destructive decoys but still blocks the next real statement', () => {
+    const report = expectBlocked(
+      `SELECT 'DROP TABLE parent_table;';
+SELECT "DELETE FROM parent_table;";
+/* PRAGMA foreign_keys = OFF; */
+DROP
+TABLE parent_table;`,
+      'DROP TABLE on CASCADE parent'
+    );
+    expect(report.newViolations).toHaveLength(1);
+    expect(report.newViolations[0]?.line).toBe(4);
+  });
+
+  it('keeps a trigger together while checking each logical body statement', () => {
+    const safe = checkDangerous(`
+CREATE TRIGGER parent_cleanup AFTER UPDATE ON child_table
+BEGIN
+  UPDATE parent_table
+  SET note = CASE WHEN NEW.id = 'END; DROP TABLE parent_table;' THEN 'x' ELSE 'y' END
+  WHERE id = OLD.parent_id;
+  DELETE FROM parent_table WHERE id = 'missing; DELETE FROM parent_table;';
+END;
+`);
+    expect(safe.newViolations).toEqual([]);
+
+    const unsafe = expectBlocked(
+      `CREATE TRIGGER parent_cleanup AFTER UPDATE ON child_table
+BEGIN
+  UPDATE parent_table SET note = 'first';
+  DELETE FROM parent_table WHERE id = 'later';
+END;`,
+      'UPDATE without WHERE on CASCADE parent'
+    );
+    expect(unsafe.newViolations[0]?.line).toBe(3);
+  });
+
+  it('treats valid qualified begin/end words as trigger identifiers', () => {
+    const triggerSql = `
+CREATE TRIGGER qualified_keyword_columns
+AFTER UPDATE ON child_table
+WHEN NEW.begin IS NOT NULL
+BEGIN
+  UPDATE parent_table
+  SET note = NEW.end
+  WHERE id = NEW.end;
+END;
+`;
+    const parsed = splitSqlStatements(
+      tokenizeSql(triggerSql, 'qualified-keyword-trigger.sql'),
+      'qualified-keyword-trigger.sql'
+    );
+    const report = checkDangerous(triggerSql);
+
+    expect(parsed).toHaveLength(1);
+    expect(report.newViolations).toEqual([]);
+  });
+
+  it('does not hide a destructive statement after a trigger body', () => {
+    expectBlocked(
+      `CREATE TRIGGER safe_trigger AFTER UPDATE ON child_table
+BEGIN
+  SELECT CASE WHEN NEW.id = 'END;' THEN 1 ELSE 0 END;
+END;
+DROP TABLE parent_table;`,
       'DROP TABLE on CASCADE parent'
     );
   });
+});
 
-  it('catches DELETE FROM without WHERE on CASCADE parent', () => {
-    testPatternDetection(
-      'DELETE FROM parent_table;',
-      'DELETE FROM without WHERE'
+describe('D1 migration safety — fail-closed lexical diagnostics', () => {
+  it.each([
+    ['single-quoted string', "SELECT 'unterminated;"],
+    ['double-quoted identifier', 'SELECT "unterminated;'],
+    ['backtick-quoted identifier', 'SELECT `unterminated;'],
+    ['bracket-quoted identifier', 'SELECT [unterminated;'],
+    ['block comment', 'SELECT 1; /* unterminated'],
+  ])('rejects an unterminated %s', (construct, sql) => {
+    expect(() => checkDangerous(sql)).toThrowError(
+      new RegExp(`0100_dangerous\\.sql:1:.*unterminated ${construct}`, 'i')
     );
   });
+});
 
-  it('catches UPDATE without WHERE on CASCADE parent', () => {
-    testPatternDetection(
-      'UPDATE parent_table SET name = "test";',
-      'UPDATE without WHERE'
-    );
-  });
-
-  it('catches PRAGMA foreign_keys = OFF', () => {
-    testPatternDetection(
-      'PRAGMA foreign_keys = OFF;',
-      'PRAGMA foreign_keys = OFF'
-    );
-  });
-
-  it('catches PRAGMA foreign_keys = 0', () => {
-    testPatternDetection(
-      'PRAGMA foreign_keys = 0;',
-      'PRAGMA foreign_keys = OFF'
-    );
-  });
-
-  it('does NOT flag safe ALTER TABLE ADD COLUMN', () => {
-    const tmpDir = mkdtempSync(join(tmpdir(), 'migration-safe-'));
-    try {
-      writeFileSync(
-        join(tmpDir, '0001_setup.sql'),
-        `CREATE TABLE parent_table (id TEXT PRIMARY KEY);
-CREATE TABLE child_table (
-  id TEXT PRIMARY KEY,
-  parent_id TEXT NOT NULL REFERENCES parent_table(id) ON DELETE CASCADE
-);`
-      );
-      writeFileSync(
-        join(tmpDir, '0100_safe.sql'),
-        `ALTER TABLE parent_table ADD COLUMN new_col TEXT;`
-      );
-
-      const wrapperScript = `
-import { readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
-const dir = '${tmpDir.replace(/\\/g, '\\\\')}';
-const files = readdirSync(dir).filter(f => f.endsWith('.sql'));
-for (const file of files) {
-  const content = readFileSync(join(dir, file), 'utf-8');
-  if (/DROP\\s+TABLE/i.test(content) || /DELETE\\s+FROM/i.test(content) || /TRUNCATE/i.test(content)) {
-    console.log('VIOLATION');
-    process.exit(1);
-  }
-}
-console.log('PASS');
-`;
-      const wrapperPath = join(tmpDir, '_test.mjs');
-      writeFileSync(wrapperPath, wrapperScript);
-      const result = execSync(`node ${wrapperPath}`, {
-        encoding: 'utf-8',
-        timeout: 10_000,
+describe('D1 migration safety CLI', () => {
+  it(
+    'fails a supplied bypass corpus and prints actionable diagnostics',
+    { timeout: 30_000 },
+    () => {
+      const dir = makeCorpus({
+        '0001_setup.sql': CASCADE_SETUP,
+        '0100_dangerous.sql': '-- heading\nDROP\nTABLE parent_table;',
       });
-      expect(result).toContain('PASS');
-    } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
+      const result = spawnSync('pnpm', ['exec', 'tsx', SCRIPT, dir], {
+        cwd: ROOT,
+        encoding: 'utf8',
+        timeout: 30_000,
+      });
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('0100_dangerous.sql:2');
+      expect(result.stderr).toContain('DROP TABLE on CASCADE parent');
+      expect(result.stderr).toContain('parent_table');
+      expect(result.stderr).toContain('child_table');
+      expect(result.stderr).toContain('.claude/rules/31-migration-safety.md');
     }
-  });
+  );
 });

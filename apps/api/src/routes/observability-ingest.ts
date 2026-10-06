@@ -69,7 +69,17 @@ observabilityIngestRoutes.post('/', async (c) => {
     body,
   }));
 
-  return new Response(response.body, { status: response.status });
+  // Buffer the DO response body rather than re-streaming it. The Tail Worker
+  // awaits this fetch but does not consume a streamed body, so re-streaming
+  // (`new Response(response.body, ...)`) caused the upstream invocation to be
+  // torn down and recorded as `canceled`/clientDisconnected. Reading the body
+  // to completion here lets the Tail Worker receive a fully-buffered response
+  // (carrying the `subscribers` count) without a dangling stream.
+  const responseText = await response.text();
+  return new Response(responseText, {
+    status: response.status,
+    headers: { 'Content-Type': 'application/json' },
+  });
 });
 
 export { observabilityIngestRoutes };

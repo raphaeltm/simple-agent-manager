@@ -13,7 +13,10 @@
  * activity.
  */
 
-import { DEFAULT_MCP_TOKEN_MAX_LIFETIME_SECONDS, DEFAULT_MCP_TOKEN_TTL_SECONDS } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_MCP_TOKEN_MAX_LIFETIME_SECONDS,
+  DEFAULT_MCP_TOKEN_TTL_SECONDS,
+} from '@simple-agent-manager/shared';
 
 /** KV key prefix for MCP tokens */
 const MCP_TOKEN_PREFIX = 'mcp:';
@@ -24,12 +27,25 @@ export interface McpTokenEnv {
   MCP_TOKEN_MAX_LIFETIME_SECONDS?: string;
 }
 
+export type McpInstructionContextType = 'task' | 'conversation' | 'trial' | 'direct-workspace';
+
+export type McpTaskMode = 'task' | 'conversation';
+
 /** Data stored alongside each MCP token in KV */
 export interface McpTokenData {
+  /**
+   * Task ID for task-runner dispatched sessions. Empty string for direct
+   * project-chat sessions (no task row exists). Tools that require a real
+   * task guard on `!tokenData.taskId` which correctly rejects empty strings.
+   */
   taskId: string;
+  contextType?: McpInstructionContextType;
+  taskMode?: McpTaskMode;
   projectId: string;
   userId: string;
   workspaceId: string;
+  chatSessionId?: string;
+  agentSessionId?: string;
   createdAt: string;
   /** ISO timestamp of last sliding window refresh (set on first refresh) */
   lastRefreshedAt?: string;
@@ -63,9 +79,9 @@ export function getMcpTokenMaxLifetime(env?: McpTokenEnv): number {
 export function generateMcpToken(): string {
   const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);
-  // base64url encode without padding (explicit loop matches smoke-test-tokens.ts pattern)
+  // base64url encode without padding (explicit loop matches API token generation pattern)
   let binary = '';
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]!);
+  for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
@@ -77,7 +93,7 @@ export async function storeMcpToken(
   kv: KVNamespace,
   token: string,
   data: McpTokenData,
-  env?: McpTokenEnv,
+  env?: McpTokenEnv
 ): Promise<void> {
   const ttl = getMcpTokenTTL(env);
   await kv.put(`${MCP_TOKEN_PREFIX}${token}`, JSON.stringify(data), {
@@ -102,7 +118,7 @@ export async function storeMcpToken(
 export async function validateMcpToken(
   kv: KVNamespace,
   token: string,
-  env?: McpTokenEnv,
+  env?: McpTokenEnv
 ): Promise<McpTokenData | null> {
   const key = `${MCP_TOKEN_PREFIX}${token}`;
   const data = await kv.get<McpTokenData>(key, { type: 'json' });
@@ -152,9 +168,6 @@ export async function validateMcpToken(
 /**
  * Revoke an MCP token (e.g., when task completes or fails).
  */
-export async function revokeMcpToken(
-  kv: KVNamespace,
-  token: string,
-): Promise<void> {
+export async function revokeMcpToken(kv: KVNamespace, token: string): Promise<void> {
   await kv.delete(`${MCP_TOKEN_PREFIX}${token}`);
 }

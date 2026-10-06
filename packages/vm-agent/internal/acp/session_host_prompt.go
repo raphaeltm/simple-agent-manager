@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
+	"sync/atomic"
 	"time"
 
 	acpsdk "github.com/coder/acp-go-sdk"
@@ -13,47 +15,307 @@ import (
 
 // HandlePrompt routes a session/prompt request through the ACP SDK.
 // Only one prompt runs at a time — concurrent requests are serialized.
-func (h *SessionHost) HandlePrompt(ctx context.Context, reqID json.RawMessage, params json.RawMessage, viewerID string) {
-	promptReq, ok := h.preparePromptRequest(params, viewerID, reqID)
+//
+// trustedSource distinguishes a SAM control-plane prompt (the initial task
+// prompt / injected instructions built server-side) from a browser viewer
+// prompt relayed over the WebSocket gateway. The SAM system-origin marker
+// (_meta["sam.origin"]="system") is only honored from a trusted source; an
+// untrusted browser prompt must not be able to mark its own content as
+// origin=system (which would hide it from search, dedup, topic, and attention).
+func (h *SessionHost) HandlePrompt(ctx context.Context, reqID json.RawMessage, params json.RawMessage, viewerID string, trustedSource bool) {
+	accepted, ok := h.AcceptPrompt(ctx, reqID, params, viewerID, trustedSource, "", nil)
 	if !ok {
 		return
 	}
+	accepted.Run()
+}
+
+// AcceptedPrompt is a synchronously reserved prompt that has not yet invoked
+// the ACP agent. The HTTP delivery path uses this boundary to durably claim a
+// receipt after admission but immediately before Run performs the invocation.
+type AcceptedPrompt struct {
+	host          *SessionHost
+	ctx           context.Context
+	cancel        context.CancelFunc
+	reqID         json.RawMessage
+	request       preparedPromptRequest
+	viewerID      string
+	timeout       time.Duration
+	attempt       *promptAttempt
+	trustedSource bool
+}
+
+// AcceptPrompt validates and reserves one prompt without invoking the agent.
+// It returns false after emitting the legacy JSON-RPC error when admission
+// fails. Only an accepted prompt creates a new prompt epoch.
+func (h *SessionHost) AcceptPrompt(
+	ctx context.Context,
+	reqID json.RawMessage,
+	params json.RawMessage,
+	viewerID string,
+	trustedSource bool,
+	deliveryID string,
+	observer PromptTerminalObserver,
+) (*AcceptedPrompt, bool) {
+	if h.Status() != HostReady {
+		h.sendJSONRPCErrorToViewer(viewerID, reqID, -32603, "Agent is not ready for prompts")
+		return nil, false
+	}
+	promptReq, ok := h.preparePromptRequest(params, viewerID, reqID, trustedSource)
+	if !ok {
+		return nil, false
+	}
+
+	promptCtx, promptCancel, promptTimeout := h.newPromptContext(ctx)
+	messageID := ""
+	if viewerID == "control-plane" || viewerID == "server" {
+		messageID = promptReq.messageID
+	}
+	attempt, ok := h.beginPromptForDeliveryWithMessageID(promptCtx, promptCancel, deliveryID, messageID, observer)
+	if !ok {
+		promptCancel()
+		h.sendJSONRPCErrorToViewer(viewerID, reqID, -32603, "Prompt already in progress")
+		return nil, false
+	}
+
+	// These side effects occur only after the serialization gate accepts the
+	// prompt. A rejected concurrent delivery therefore cannot be persisted or
+	// mirrored as if the agent had consumed it.
 	h.persistLastPrompt(promptReq.firstTextContent)
 	h.injectUserMessageNotifications(promptReq.sessionID, promptReq.blocks, promptReq.messageID)
 	h.cancelAutoSuspendTimer()
 
-	promptCtx, promptCancel, promptTimeout := h.newPromptContext(ctx)
-	promptID, ok := h.beginPrompt(promptCancel)
-	if !ok {
-		promptCancel()
-		h.sendJSONRPCErrorToViewer(viewerID, reqID, -32603, "Prompt already in progress")
-		return
-	}
-	defer func() {
-		h.endPrompt(promptID)
-		promptCancel()
-	}()
+	return &AcceptedPrompt{
+		host:          h,
+		ctx:           promptCtx,
+		cancel:        promptCancel,
+		reqID:         append(json.RawMessage(nil), reqID...),
+		request:       promptReq,
+		viewerID:      viewerID,
+		timeout:       promptTimeout,
+		attempt:       attempt,
+		trustedSource: trustedSource,
+	}, true
+}
 
-	promptDone := h.startPromptWatchdog(promptID, promptCtx, viewerID, reqID, promptTimeout)
+// Abort releases an accepted prompt before ACP invocation. It is used only
+// when the durable receipt claim fails closed.
+func (p *AcceptedPrompt) Abort(err error) {
+	if err == nil {
+		err = errors.New("prompt admission aborted")
+	}
+	p.attempt.completeWith(p.host, "error", err, p.host.stopPromptActivityRereport)
+	p.cancel()
+}
+
+// Run invokes an already accepted prompt and blocks until ACP returns or crash
+// recovery takes ownership of the terminal outcome.
+func (p *AcceptedPrompt) Run() {
+	h := p.host
+	promptDone := h.startPromptWatchdog(p.attempt, p.ctx, p.viewerID, p.reqID, p.timeout)
 	defer close(promptDone)
+	defer p.cancel()
+	defer close(p.attempt.rpcDone)
 
-	promptStart := time.Now()
-	h.markPromptStarted(promptReq.sessionID, len(promptReq.blocks), viewerID)
-	resp, err := promptReq.acpConn.Prompt(promptCtx, acpsdk.PromptRequest{
-		SessionId: promptReq.sessionID,
-		Prompt:    promptReq.blocks,
-	})
+	// Capture recovery prerequisites (session ID, agent type, LoadSession
+	// capability, process) BEFORE dispatching the prompt. If the agent process
+	// exits mid-prompt, a concurrent monitorProcessExit can clear these live
+	// fields before the blocked Prompt returns "peer disconnected"; the captured
+	// snapshot lets finishPromptWithError still begin LoadSession recovery.
+	recovery := h.captureCrashRecoveryPrerequisites()
+	h.markPromptStarted(p.attempt, p.request.sessionID, len(p.request.blocks), p.viewerID)
+	resp, err := h.promptWithTransientRetry(p.ctx, p.request, p.attempt.startedAt)
 
-	if !h.isPromptActive(promptID) {
+	if !h.isPromptActive(p.attempt.id) {
 		return
 	}
-	cancelRequested := h.isPromptCancelRequested(promptID)
-	h.markPromptDone()
-	h.finishPrompt(promptCtx, reqID, promptStartInfo{
-		startedAt: promptStart,
-		timeout:   promptTimeout,
-		viewerID:  viewerID,
+	cancelRequested := h.isPromptCancelRequested(p.attempt.id)
+	if p.attempt.checkpointRequested.Load() && !cancelRequested && err != nil {
+		// Checkpoint rollover owns this cancellation. The terminal arbiter is
+		// completed only after strict same-session LoadSession succeeds or fails.
+		return
+	}
+	h.finishPrompt(p.attempt, p.ctx, p.reqID, promptStartInfo{
+		startedAt: p.attempt.startedAt,
+		timeout:   p.timeout,
+		viewerID:  p.viewerID,
+		recovery:  recovery,
 	}, resp, err, cancelRequested)
+}
+
+func (h *SessionHost) promptWithTransientRetry(
+	promptCtx context.Context,
+	promptReq preparedPromptRequest,
+	startedAt time.Time,
+) (acpsdk.PromptResponse, error) {
+	// Retrying is limited to hard Prompt() errors before an ACP response is
+	// accepted. User-message persistence and synthetic broadcasts happen once
+	// before this loop, so retries do not duplicate the user's prompt locally.
+	maxRetries := h.config.PromptRetryMaxRetries
+	if maxRetries < 0 {
+		maxRetries = 0
+	}
+	totalAttempts := maxRetries + 1
+	delay := h.config.PromptRetryInitialDelay
+	if delay <= 0 {
+		delay = DefaultPromptRetryInitialDelay
+	}
+	maxDelay := h.config.PromptRetryMaxDelay
+	if maxDelay <= 0 {
+		maxDelay = DefaultPromptRetryMaxDelay
+	}
+	if maxDelay < delay {
+		maxDelay = delay
+	}
+
+	var resp acpsdk.PromptResponse
+	var err error
+	for attempt := 1; attempt <= totalAttempts; attempt++ {
+		resp, err = promptReq.acpConn.Prompt(promptCtx, acpsdk.PromptRequest{
+			SessionId: promptReq.sessionID,
+			Prompt:    promptReq.blocks,
+		})
+		if err == nil {
+			return resp, nil
+		}
+		if !h.shouldRetryPromptError(promptCtx, err, attempt, totalAttempts) {
+			return resp, err
+		}
+
+		h.reportPromptRetry(promptReq.sessionID, attempt, totalAttempts, delay, startedAt, err)
+		if sleepErr := h.sleepBeforePromptRetry(promptCtx, delay); sleepErr != nil {
+			return resp, sleepErr
+		}
+		delay = nextPromptRetryDelay(delay, maxDelay)
+	}
+	return resp, err
+}
+
+func (h *SessionHost) shouldRetryPromptError(promptCtx context.Context, err error, attempt, totalAttempts int) bool {
+	if attempt >= totalAttempts {
+		return false
+	}
+	if err == nil || promptCtx.Err() != nil {
+		return false
+	}
+	if isCrashPromptError(err) {
+		return false
+	}
+	return isTransientProviderPromptError(err)
+}
+
+func (h *SessionHost) sleepBeforePromptRetry(ctx context.Context, delay time.Duration) error {
+	if h.config.PromptRetrySleeper != nil {
+		return h.config.PromptRetrySleeper(ctx, delay)
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func (h *SessionHost) reportPromptRetry(
+	sessionID acpsdk.SessionId,
+	attempt, totalAttempts int,
+	delay time.Duration,
+	startedAt time.Time,
+	err error,
+) {
+	errText := redactAgentDiagnosticText(err.Error())
+	retryAttempt := attempt + 1
+	maxRetries := totalAttempts - 1
+	detail := map[string]interface{}{
+		"acpSessionId":  string(sessionID),
+		"failedAttempt": attempt,
+		"retryAttempt":  retryAttempt,
+		"totalAttempts": totalAttempts,
+		"maxRetries":    maxRetries,
+		"delay":         delay.String(),
+		"duration":      time.Since(startedAt).String(),
+		"error":         errText,
+	}
+	slog.Warn("ACP Prompt transient provider error; retrying",
+		"attempt", attempt,
+		"retryAttempt", retryAttempt,
+		"totalAttempts", totalAttempts,
+		"delay", delay,
+		"error", errText,
+	)
+	h.reportLifecycle("warn", "ACP Prompt transient provider error; retrying", detail)
+	h.reportEvent("warn", "agent_session.prompt_retry", "Retrying ACP prompt after transient provider error", detail)
+}
+
+func nextPromptRetryDelay(current, maxDelay time.Duration) time.Duration {
+	if current <= 0 {
+		current = DefaultPromptRetryInitialDelay
+	}
+	next := current * 2
+	if next < current || next > maxDelay {
+		return maxDelay
+	}
+	return next
+}
+
+func isTransientProviderPromptError(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	signals := []string{
+		"api error: 529",
+		"http 529",
+		"status 529",
+		"status_code\":529",
+		"statuscode\":529",
+		"overloaded_error",
+		"overloaded",
+		"api error: 500",
+		"http 500",
+		"status 500",
+		"status_code\":500",
+		"statuscode\":500",
+		"api error: 502",
+		"http 502",
+		"status 502",
+		"status_code\":502",
+		"statuscode\":502",
+		"rate_limit_error",
+		"rate limit",
+		"rate-limit",
+		"too many requests",
+		"api error: 429",
+		"http 429",
+		"status 429",
+		"status_code\":429",
+		"statuscode\":429",
+		"api error: 503",
+		"http 503",
+		"status 503",
+		"status_code\":503",
+		"statuscode\":503",
+		"api error: 504",
+		"http 504",
+		"status 504",
+		"status_code\":504",
+		"statuscode\":504",
+		"service unavailable",
+		"bad gateway",
+		"gateway timeout",
+		"temporarily unavailable",
+		"temporarily_unavailable",
+		"temporary unavailable",
+		"temporary_unavailable",
+	}
+	for _, signal := range signals {
+		if strings.Contains(msg, signal) {
+			return true
+		}
+	}
+	return false
 }
 
 type preparedPromptRequest struct {
@@ -68,9 +330,10 @@ type promptStartInfo struct {
 	startedAt time.Time
 	timeout   time.Duration
 	viewerID  string
+	recovery  crashRecoveryPrerequisites
 }
 
-func (h *SessionHost) preparePromptRequest(params json.RawMessage, viewerID string, reqID json.RawMessage) (preparedPromptRequest, bool) {
+func (h *SessionHost) preparePromptRequest(params json.RawMessage, viewerID string, reqID json.RawMessage, trustedSource bool) (preparedPromptRequest, bool) {
 	acpConn, sessionID := h.currentACPSession()
 	if acpConn == nil || sessionID == acpsdk.SessionId("") {
 		slog.Warn("Prompt request received but no ACP session active")
@@ -89,6 +352,13 @@ func (h *SessionHost) preparePromptRequest(params json.RawMessage, viewerID stri
 		h.sendJSONRPCErrorToViewer(viewerID, reqID, -32602, "Empty prompt")
 		return preparedPromptRequest{}, false
 	}
+	// Defense-in-depth: only a trusted control-plane prompt may carry the SAM
+	// system-origin marker. Strip it from any untrusted (browser viewer) prompt
+	// so a viewer cannot mark their own content as origin=system to evade
+	// search/dedup/topic/attention.
+	if !trustedSource {
+		stripInjectedOriginMarker(blocks)
+	}
 	return preparedPromptRequest{
 		acpConn:          acpConn,
 		sessionID:        sessionID,
@@ -105,11 +375,28 @@ func (h *SessionHost) currentACPSession() (*acpsdk.ClientSideConnection, acpsdk.
 }
 
 func parsePromptBlocks(params json.RawMessage) ([]acpsdk.ContentBlock, string, string, error) {
+	// `_meta` and `annotations` are ACP-standard, optional fields on a text content
+	// block (see agentclientprotocol.com/protocol/extensibility). They can carry
+	// implementation-specific metadata (e.g. a SAM "this block is system-injected"
+	// marker, or `annotations.audience: ["assistant"]`). We preserve them here so the
+	// marker is available IN-PROCESS on the returned blocks slice for a future consumer
+	// (mirror/persistence origin-tagging); `acpsdk.TextBlock(text)` would drop them (it
+	// only sets Text+Type).
+	//
+	// IMPORTANT: these fields do NOT survive OUTWARD over either ACP transport. Both
+	// `acpConn.Prompt` (to the agent CLI) and the mirror broadcast serialize each block
+	// via `acpsdk.ContentBlock.MarshalJSON`, whose text variant re-emits only {type,text}
+	// — stripping `_meta`/`annotations`. So the marker cannot ride the ACP block to the
+	// agent or to viewers; a consumer must propagate origin via the vm-agent's own
+	// fields. See TestContentBlockMarshal_DropsMetaAndAnnotations and
+	// TestInjectUserMessageNotifications_SDKMarshalStripsMarker.
 	var promptParams struct {
 		MessageID string `json:"messageId"`
 		Prompt    []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
+			Type        string              `json:"type"`
+			Text        string              `json:"text"`
+			Meta        map[string]any      `json:"_meta,omitempty"`
+			Annotations *acpsdk.Annotations `json:"annotations,omitempty"`
 		} `json:"prompt"`
 	}
 	if err := json.Unmarshal(params, &promptParams); err != nil {
@@ -122,7 +409,12 @@ func parsePromptBlocks(params json.RawMessage) ([]acpsdk.ContentBlock, string, s
 		if p.Type != "text" || p.Text == "" {
 			continue
 		}
-		blocks = append(blocks, acpsdk.TextBlock(p.Text))
+		blocks = append(blocks, acpsdk.ContentBlock{Text: &acpsdk.ContentBlockText{
+			Type:        "text",
+			Text:        p.Text,
+			Meta:        p.Meta,
+			Annotations: p.Annotations,
+		}})
 		if firstTextContent == "" {
 			firstTextContent = p.Text
 		}
@@ -137,10 +429,17 @@ func (h *SessionHost) injectUserMessageNotifications(sessionID acpsdk.SessionId,
 			SessionId: sessionID,
 			Update:    acpsdk.UpdateUserMessage(block),
 		}
-		data, marshalErr := json.Marshal(map[string]interface{}{
+		params := map[string]any{
+			"sessionId": sessionID,
+			"update":    notif.Update,
+		}
+		if origin := contentBlockOrigin(block); origin != "" {
+			params["origin"] = origin
+		}
+		data, marshalErr := json.Marshal(map[string]any{
 			"jsonrpc": "2.0",
 			"method":  "session/update",
-			"params":  notif,
+			"params":  params,
 		})
 		if marshalErr != nil {
 			slog.Error("Failed to marshal synthetic user_message_chunk", "error", marshalErr)
@@ -160,6 +459,7 @@ func (h *SessionHost) injectUserMessageNotifications(sessionID acpsdk.SessionId,
 					Role:         m.Role,
 					Content:      m.Content,
 					ToolMetadata: m.ToolMetadata,
+					Origin:       m.Origin,
 				}); err != nil {
 					slog.Warn("messagereport: enqueue synthetic user message failed (non-blocking)",
 						"messageId", m.MessageID, "error", err)
@@ -190,7 +490,7 @@ func (h *SessionHost) newPromptContext(ctx context.Context) (context.Context, co
 }
 
 func (h *SessionHost) startPromptWatchdog(
-	promptID uint64,
+	attempt *promptAttempt,
 	promptCtx context.Context,
 	viewerID string,
 	reqID json.RawMessage,
@@ -198,31 +498,81 @@ func (h *SessionHost) startPromptWatchdog(
 ) chan struct{} {
 	promptDone := make(chan struct{})
 	if promptTimeout > 0 {
-		go h.watchPromptTimeout(promptID, promptCtx, promptDone, viewerID, reqID, promptTimeout)
+		go h.watchPromptTimeout(attempt, promptCtx, promptDone, viewerID, reqID, promptTimeout)
 	}
 	return promptDone
 }
 
-func (h *SessionHost) markPromptStarted(sessionID acpsdk.SessionId, blockCount int, viewerID string) {
+func (h *SessionHost) markPromptStarted(attempt *promptAttempt, sessionID acpsdk.SessionId, blockCount int, viewerID string) {
 	h.setStatus(HostPrompting, "")
 	h.broadcastControl(MsgSessionPrompting, nil)
 	h.reportActivity("prompting")
+	h.startPromptActivityRereport()
 
-	slog.Info("ACP: sending Prompt", "sessionID", string(sessionID), "blockCount", blockCount)
-	h.reportLifecycle("info", "ACP Prompt started", map[string]interface{}{
+	fields := attempt.logFields(map[string]interface{}{
 		"acpSessionId": string(sessionID),
 		"blockCount":   blockCount,
 		"viewerId":     viewerID,
 	})
+	if attempt != nil {
+		fields["promptId"] = attempt.id
+	}
+	slog.Info("ACP: sending Prompt", "sessionID", string(sessionID), "blockCount", blockCount, "promptId", fields["promptId"])
+	h.reportLifecycle("info", "ACP Prompt started", fields)
 }
 
+// markPromptDone is the single turn-end hook shared by normal completion,
+// cancellation, and error (see finishPrompt / finishPromptCancelled /
+// finishPromptAttemptWithError).
 func (h *SessionHost) markPromptDone() {
 	h.setStatus(HostReady, "")
 	h.broadcastControl(MsgSessionPromptDone, nil)
+	h.stopPromptActivityRereport()
+	// Must run before the report below so the settling downgrade rides along on
+	// the same activity callback instead of waiting for the next edge.
+	h.reconcileHarnessWorkAtPromptTurnEnd()
 	h.reportActivity("idle")
 }
 
+func (h *SessionHost) startPromptActivityRereport() {
+	interval := h.config.ActivityRereportInterval
+	if interval <= 0 {
+		return
+	}
+	ctx, cancel := context.WithCancel(h.lifecycleContext())
+	h.promptCancelMu.Lock()
+	if h.promptActivityCancel != nil {
+		h.promptActivityCancel()
+	}
+	h.promptActivityCancel = cancel
+	h.promptCancelMu.Unlock()
+
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				h.reportActivity("prompting")
+			}
+		}
+	}()
+}
+
+func (h *SessionHost) stopPromptActivityRereport() {
+	h.promptCancelMu.Lock()
+	cancel := h.promptActivityCancel
+	h.promptActivityCancel = nil
+	h.promptCancelMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
 func (h *SessionHost) finishPrompt(
+	attempt *promptAttempt,
 	promptCtx context.Context,
 	reqID json.RawMessage,
 	info promptStartInfo,
@@ -231,35 +581,86 @@ func (h *SessionHost) finishPrompt(
 	cancelRequested bool,
 ) {
 	if cancelRequested {
-		h.finishPromptCancelled(reqID, info)
+		h.finishPromptCancelled(attempt, reqID, info)
 		return
 	}
 	if err != nil {
-		h.finishPromptWithError(promptCtx, reqID, info, err)
+		h.finishPromptAttemptWithError(attempt, promptCtx, reqID, info, err)
+		return
+	}
+	if !attempt.completeWith(h, string(resp.StopReason), nil, h.markPromptDone) {
 		return
 	}
 
-	slog.Info("ACP: Prompt completed", "stopReason", string(resp.StopReason))
-	h.reportLifecycle("info", "ACP Prompt completed", map[string]interface{}{
+	slog.Info("ACP: Prompt completed", "stopReason", string(resp.StopReason), "promptId", attempt.id)
+	h.reportLifecycle("info", "ACP Prompt completed", attempt.logFields(map[string]interface{}{
 		"stopReason": string(resp.StopReason),
 		"duration":   time.Since(info.startedAt).String(),
-	})
+		"promptId":   attempt.id,
+	}))
 	h.checkStderrForSilentErrors(resp.StopReason)
 	h.broadcastPromptResponse(reqID, resp)
-	h.notifyPromptComplete(string(resp.StopReason), nil)
+	// Codex and OpenCode expose their plan usage only outside the ACP stream;
+	// sample it once per completed turn (session_host_usage_probe.go).
+	h.scheduleProviderUsageProbe()
 }
 
-func (h *SessionHost) finishPromptCancelled(reqID json.RawMessage, info promptStartInfo) {
-	slog.Info("ACP: Prompt cancelled")
-	h.reportLifecycle("info", "ACP Prompt cancelled", map[string]interface{}{
+func (h *SessionHost) finishPromptCancelled(attempt *promptAttempt, reqID json.RawMessage, info promptStartInfo) {
+	if !attempt.completeWith(h, "cancelled", context.Canceled, h.markPromptDone) {
+		return
+	}
+	slog.Info("ACP: Prompt cancelled", "promptId", attempt.id)
+	h.reportLifecycle("info", "ACP Prompt cancelled", attempt.logFields(map[string]interface{}{
 		"duration": time.Since(info.startedAt).String(),
-	})
+		"promptId": attempt.id,
+	}))
 	h.broadcastMessage(h.marshalJSONRPCError(reqID, -32800, "Prompt cancelled"))
-	h.notifyPromptComplete("cancelled", context.Canceled)
 }
 
-func (h *SessionHost) finishPromptWithError(promptCtx context.Context, reqID json.RawMessage, info promptStartInfo, err error) {
-	errMsg := fmt.Sprintf("Prompt failed: %v", err)
+func (h *SessionHost) finishPromptAttemptWithError(attempt *promptAttempt, promptCtx context.Context, reqID json.RawMessage, info promptStartInfo, err error) {
+	if errors.Is(promptCtx.Err(), context.DeadlineExceeded) {
+		errMsg := "Prompt cancelled (context deadline exceeded)"
+		if info.timeout > 0 {
+			errMsg = fmt.Sprintf("Prompt timed out after %s", info.timeout)
+		}
+		slog.Warn("ACP Prompt timed out", "error", err)
+		h.reportLifecycle("warn", "ACP Prompt timed out", map[string]interface{}{
+			"error":    errMsg,
+			"duration": time.Since(info.startedAt).String(),
+		})
+		h.broadcastMessage(h.marshalJSONRPCError(reqID, -32603, errMsg))
+		attempt.completeWith(h, fatalErrorStopReason, err, func() {
+			h.setStatus(HostError, errMsg)
+			h.stopPromptActivityRereport()
+			h.reportActivity("error")
+		})
+		return
+	}
+
+	if isCrashPromptError(err) && !errors.Is(promptCtx.Err(), context.DeadlineExceeded) {
+		agentType, stderr, proc, missing, _, ok := h.beginCrashRecoveryWithPrerequisites(reqID, info.viewerID, info.recovery)
+		if ok {
+			slog.Warn("ACP Prompt failed because agent disconnected; deferring to crash recovery", "error", err, "agentType", agentType)
+			h.reportLifecycle("warn", "ACP agent crashed during prompt; attempting LoadSession recovery", map[string]interface{}{
+				"agentType": agentType,
+				"duration":  time.Since(info.startedAt).String(),
+				"error":     err.Error(),
+			})
+			h.broadcastAgentStatus(StatusRecovering, agentType, "")
+			h.reportActivity("recovering")
+			if proc != nil {
+				go h.stopCrashedProcessForRecovery(proc)
+			}
+			return
+		}
+		h.finishUnrecoverableCrashPrompt(attempt, reqID, info, agentType, stderr, missing, err)
+		return
+	}
+
+	errMsg := "agent_prompt_failed"
+	if reasonCode := ClassifyPromptError(err); reasonCode != "" {
+		errMsg = reasonCode
+	}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(promptCtx.Err(), context.DeadlineExceeded) {
 		if info.timeout > 0 {
 			errMsg = fmt.Sprintf("Prompt timed out after %s", info.timeout)
@@ -267,13 +668,61 @@ func (h *SessionHost) finishPromptWithError(promptCtx context.Context, reqID jso
 			errMsg = "Prompt cancelled (context deadline exceeded)"
 		}
 	}
-	slog.Warn("ACP Prompt failed (non-fatal)", "error", err)
+	slog.Warn("ACP Prompt failed (non-fatal)", "reason", errMsg)
 	h.reportLifecycle("warn", "ACP Prompt failed", map[string]interface{}{
 		"error":    errMsg,
 		"duration": time.Since(info.startedAt).String(),
 	})
 	h.broadcastMessage(h.marshalJSONRPCError(reqID, -32603, errMsg))
-	h.notifyPromptComplete("error", err)
+	attempt.completeWith(h, "error", err, h.markPromptDone)
+}
+
+// finishPromptWithError preserves the focused-test seam used by the crash
+// recovery suite. Production prompt execution always supplies the accepted
+// attempt explicitly through finishPromptAttemptWithError.
+func (h *SessionHost) finishPromptWithError(promptCtx context.Context, reqID json.RawMessage, info promptStartInfo, err error) {
+	h.promptMu.Lock()
+	attempt := h.promptAttempt
+	if attempt == nil {
+		attempt = &promptAttempt{
+			id:        atomic.AddUint64(&h.promptSeq, 1),
+			startedAt: info.startedAt,
+			done:      make(chan struct{}),
+			rpcDone:   make(chan struct{}),
+		}
+		h.promptAttempt = attempt
+	}
+	h.promptMu.Unlock()
+	h.finishPromptAttemptWithError(attempt, promptCtx, reqID, info, err)
+}
+
+func (h *SessionHost) finishUnrecoverableCrashPrompt(attempt *promptAttempt, reqID json.RawMessage, info promptStartInfo, agentType, stderr string, missing []string, err error) {
+	if agentType == "" {
+		agentType = "unknown"
+	}
+	message := "Agent process disconnected during prompt and cannot be recovered automatically"
+	slog.Warn("ACP Prompt failed because agent disconnected and recovery is unavailable",
+		"error", err, "agentType", agentType)
+	h.reportLifecycle("warn", "ACP agent disconnected during prompt without LoadSession recovery", map[string]interface{}{
+		"agentType":                    agentType,
+		"duration":                     time.Since(info.startedAt).String(),
+		"error":                        err.Error(),
+		"missingRecoveryPrerequisites": missing,
+	})
+	// promptReqID gets a defensive copy because crashRecoverySnapshot stores the slice;
+	// marshalJSONRPCError serialises reqID immediately so no copy needed.
+	h.broadcastAgentCrashReport(h.crashReport(crashRecoverySnapshot{
+		stderr:      stderr,
+		agentType:   agentType,
+		promptReqID: append(json.RawMessage(nil), reqID...),
+	}, false, fmt.Sprintf("LoadSession recovery is unavailable; missing prerequisites: %s", strings.Join(missing, ", "))))
+	h.broadcastMessage(h.marshalJSONRPCError(reqID, -32603, message))
+	h.setStatus(HostError, message)
+	h.broadcastAgentStatus(StatusError, agentType, message)
+	attempt.completeWith(h, fatalErrorStopReason, fmt.Errorf("%s: %w", message, err), func() {
+		h.stopPromptActivityRereport()
+		h.reportActivity("error")
+	})
 }
 
 func (h *SessionHost) broadcastPromptResponse(reqID json.RawMessage, resp acpsdk.PromptResponse) {
@@ -288,6 +737,13 @@ func (h *SessionHost) broadcastPromptResponse(reqID json.RawMessage, resp acpsdk
 }
 
 func (h *SessionHost) notifyPromptComplete(stopReason string, err error) {
+	h.promptMu.Lock()
+	attempt := h.promptAttempt
+	h.promptMu.Unlock()
+	if attempt != nil {
+		attempt.complete(h, stopReason, err)
+		return
+	}
 	if cb := h.config.OnPromptComplete; cb != nil {
 		go cb(stopReason, err)
 	}

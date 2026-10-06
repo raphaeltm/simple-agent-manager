@@ -6,11 +6,14 @@ import {
   DELIVERY_STATES,
   DELIVERY_TERMINAL_STATES,
   DURABLE_MESSAGE_CLASSES,
+  isUrgentMessageClass,
   MAILBOX_DEFAULTS,
+  MESSAGE_CLASS_URGENCY,
   MESSAGE_CLASSES,
   SENDER_TYPES,
+  TURN_STOP_URGENCY_THRESHOLD,
 } from '@simple-agent-manager/shared';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { MIGRATIONS } from '../../../src/durable-objects/migrations';
 
@@ -25,12 +28,21 @@ describe('Mailbox Types and Constants', () => {
     ]);
   });
 
-  it('defines 4 delivery states', () => {
-    expect(DELIVERY_STATES).toEqual(['queued', 'delivered', 'acked', 'expired']);
+  it('defines durable delivery and reconciliation states', () => {
+    expect(DELIVERY_STATES).toEqual([
+      'queued',
+      'delivering',
+      'retry_wait',
+      'delivered',
+      'acked',
+      'failed',
+      'ambiguous',
+      'expired',
+    ]);
   });
 
-  it('defines terminal states as acked and expired', () => {
-    expect(DELIVERY_TERMINAL_STATES).toEqual(['acked', 'expired']);
+  it('defines all explicit terminal delivery outcomes', () => {
+    expect(DELIVERY_TERMINAL_STATES).toEqual(['acked', 'failed', 'ambiguous', 'expired']);
   });
 
   it('defines durable classes as all except notify', () => {
@@ -52,8 +64,10 @@ describe('Mailbox Types and Constants', () => {
     expect(DELIVERY_STATE_TRANSITIONS.delivered).toContain('expired');
     expect(DELIVERY_STATE_TRANSITIONS.delivered).toContain('queued');
 
-    // acked and expired are terminal — no transitions allowed
+    // Every terminal outcome is immutable.
     expect(DELIVERY_STATE_TRANSITIONS.acked).toEqual([]);
+    expect(DELIVERY_STATE_TRANSITIONS.failed).toEqual([]);
+    expect(DELIVERY_STATE_TRANSITIONS.ambiguous).toEqual([]);
     expect(DELIVERY_STATE_TRANSITIONS.expired).toEqual([]);
   });
 
@@ -110,5 +124,37 @@ describe('Migration 017 Safety', () => {
     const source = m017!.run.toString();
     expect(source).toContain('idx_inbox_delivery_sweep');
     expect(source).toContain('idx_inbox_target_state');
+  });
+});
+
+describe('Migration 025 mailbox TTL backfill', () => {
+  it('backfills only NULL expiries with the default finite TTL', () => {
+    const migration = MIGRATIONS.find((m) => m.name === '025-mailbox-null-ttl-backfill');
+    expect(migration).toBeDefined();
+    const exec = vi.fn(() => ({ toArray: () => [] }));
+
+    migration!.run({ exec } as unknown as SqlStorage);
+
+    expect(exec).toHaveBeenCalledWith(
+      expect.stringMatching(/UPDATE session_inbox[\s\S]*WHERE expires_at IS NULL/i),
+      MAILBOX_DEFAULTS.TTL_MS,
+    );
+  });
+});
+
+describe('Urgent message classes (stop-and-deliver)', () => {
+  it('ranks every class in escalating urgency order', () => {
+    expect(MESSAGE_CLASSES.map((messageClass) => MESSAGE_CLASS_URGENCY[messageClass])).toEqual([
+      1, 2, 3, 4, 5,
+    ]);
+  });
+
+  it('treats interrupt and above as urgent and never the informational classes', () => {
+    expect(TURN_STOP_URGENCY_THRESHOLD).toBe(MESSAGE_CLASS_URGENCY.interrupt);
+    expect(isUrgentMessageClass('notify')).toBe(false);
+    expect(isUrgentMessageClass('deliver')).toBe(false);
+    expect(isUrgentMessageClass('interrupt')).toBe(true);
+    expect(isUrgentMessageClass('preempt_and_replan')).toBe(true);
+    expect(isUrgentMessageClass('shutdown_with_final_prompt')).toBe(true);
   });
 });

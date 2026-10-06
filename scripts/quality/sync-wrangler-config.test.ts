@@ -1,0 +1,998 @@
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import * as TOML from '@iarna/toml';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import {
+  assertWorkerTextBindingLimit,
+  checkTailWorkerExists,
+  CLOUDFLARE_WORKER_TEXT_BINDING_GUARD_LIMIT,
+  countWorkerTextBindings,
+  detectArtifactsAvailable,
+  encodeWorkflowCommandData,
+  ensureTomlMap,
+  generateApiWorkerEnv,
+  listEnvironmentVarOverrides,
+  reportEnvironmentVarOverrides,
+  resolveArtifactsBindingEnabled,
+  writeDeploymentMarkers,
+} from '../deploy/sync-wrangler-config.js';
+import type { PulumiOutputs, WranglerToml } from '../deploy/types.js';
+
+const outputs: PulumiOutputs = {
+  d1DatabaseId: 'd1-id',
+  d1DatabaseName: 'prefix-prod',
+  observabilityD1DatabaseId: 'obs-d1-id',
+  observabilityD1DatabaseName: 'prefix-observability-prod',
+  kvId: 'kv-id',
+  kvName: 'prefix-prod-sessions',
+  r2Name: 'prefix-prod-assets',
+  dnsIds: {
+    api: 'api-dns-id',
+    app: 'app-dns-id',
+    wildcard: 'wildcard-dns-id',
+  },
+  hostnames: {
+    api: 'api.example.com',
+    app: 'app.example.com',
+  },
+  stackSummary: {
+    stack: 'prod',
+    baseDomain: 'example.com',
+    resources: {
+      d1: 'prefix-prod',
+      kv: 'prefix-prod-sessions',
+      r2: 'prefix-prod-assets',
+    },
+  },
+  cloudflareAccountId: 'account-id',
+  pagesName: 'prefix-web-prod',
+  installationId: '0123456789abcdef0123456789abcdef',
+};
+
+// GitHub Actions sets GITHUB_ACTIONS=true and a real GITHUB_STEP_SUMMARY for every step, and
+// `generateApiWorkerEnv` reaches `reportEnvironmentVarOverrides`, which reads both from the
+// ambient environment. Without this, running this suite in CI would write fabricated override
+// rows into the real job summary and raise a `::warning::` for fixture data — a quality test
+// forging the very signal it exists to check. Tests that want the Actions path opt in explicitly.
+beforeEach(() => {
+  vi.stubEnv('GITHUB_ACTIONS', '');
+  vi.stubEnv('GITHUB_STEP_SUMMARY', '');
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+});
+
+describe('sync wrangler config', () => {
+  it('keeps the checked-in staging Worker under the text-binding guard', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    const checkedIn = TOML.parse(
+      readFileSync(join(import.meta.dirname, '../../apps/api/wrangler.toml'), 'utf-8')
+    ) as WranglerToml;
+
+    const generated = generateApiWorkerEnv(checkedIn, outputs, 'staging', false, false, null);
+    expect(countWorkerTextBindings(generated)).toBeLessThanOrEqual(
+      CLOUDFLARE_WORKER_TEXT_BINDING_GUARD_LIMIT
+    );
+  });
+
+  it('forwards configurable deployment reservation defaults to the Worker', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    vi.stubEnv('DEPLOYMENT_DEFAULT_CPU_LIMIT_MILLIS', '400');
+    vi.stubEnv('DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB', '640');
+    vi.stubEnv('DEPLOYMENT_DEFAULT_ROOT_DISK_MB', '2048');
+
+    expect(generateApiWorkerEnv({}, outputs, 'prod', false, false, null).vars).toMatchObject({
+      DEPLOYMENT_DEFAULT_CPU_LIMIT_MILLIS: '400',
+      DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB: '640',
+      DEPLOYMENT_DEFAULT_ROOT_DISK_MB: '2048',
+    });
+  });
+
+  it.each([
+    { migrationTag: null, tailExists: false, bootstrap: true, tailSync: true },
+    { migrationTag: null, tailExists: true, bootstrap: true, tailSync: false },
+    { migrationTag: 'v1', tailExists: false, bootstrap: false, tailSync: true },
+    { migrationTag: 'v1', tailExists: true, bootstrap: false, tailSync: false },
+  ])('separates API bootstrap from Tail repair: %j', (state) => {
+    const directory = mkdtempSync(join(tmpdir(), 'sam-deploy-markers-'));
+    try {
+      // Prior failed runs must not leave bootstrap markers for an existing API.
+      writeDeploymentMarkers(null, false, directory);
+      writeDeploymentMarkers(state.migrationTag, state.tailExists, directory);
+      expect(existsSync(join(directory, 'api-worker-first-deploy'))).toBe(state.bootstrap);
+      expect(existsSync(join(directory, 'tail-worker-first-deploy'))).toBe(state.tailSync);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('omits an empty VM-agent release from the generated Worker configuration', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    vi.stubEnv('VM_AGENT_REQUIRED_VERSION', '');
+
+    const vars = generateApiWorkerEnv({}, outputs, 'prod', false, false, null).vars;
+
+    expect(vars).not.toHaveProperty('VM_AGENT_REQUIRED_VERSION');
+  });
+
+  it('passes deployment image-resolution limits into generated deployments', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    vi.stubEnv('DEPLOYMENT_IMAGE_RESOLVE_REQUEST_TIMEOUT_MS', '1000');
+    vi.stubEnv('DEPLOYMENT_IMAGE_RESOLVE_TOTAL_TIMEOUT_MS', '2000');
+    vi.stubEnv('DEPLOYMENT_IMAGE_RESOLVE_MAX_FETCH_ATTEMPTS', '3');
+    vi.stubEnv('DEPLOYMENT_IMAGE_RESOLVE_MAX_REDIRECTS', '1');
+    vi.stubEnv('DEPLOYMENT_IMAGE_RESOLVE_TOKEN_RESPONSE_MAX_BYTES', '4096');
+    vi.stubEnv('DEPLOYMENT_IMAGE_RESOLVE_MAX_CONCURRENT_FETCHES', '2');
+    vi.stubEnv('DEPLOYMENT_IMAGE_RESOLVE_MAX_SERVICES', '1');
+
+    expect(generateApiWorkerEnv({}, outputs, 'prod', false, false, null).vars).toMatchObject({
+      DEPLOYMENT_IMAGE_RESOLVE_REQUEST_TIMEOUT_MS: '1000',
+      DEPLOYMENT_IMAGE_RESOLVE_TOTAL_TIMEOUT_MS: '2000',
+      DEPLOYMENT_IMAGE_RESOLVE_MAX_FETCH_ATTEMPTS: '3',
+      DEPLOYMENT_IMAGE_RESOLVE_MAX_REDIRECTS: '1',
+      DEPLOYMENT_IMAGE_RESOLVE_TOKEN_RESPONSE_MAX_BYTES: '4096',
+      DEPLOYMENT_IMAGE_RESOLVE_MAX_CONCURRENT_FETCHES: '2',
+      DEPLOYMENT_IMAGE_RESOLVE_MAX_SERVICES: '1',
+    });
+  });
+
+  it('logs every GitHub Environment override that differs from the checked-in wrangler.toml value', () => {
+    // PR #2023 flipped this var to "true" in wrangler.toml while the production Environment
+    // still pinned "false"; the Worker shipped "false" and nothing in the deploy log said so.
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    vi.stubEnv('PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED', 'false');
+    vi.stubEnv('PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS', '10');
+    vi.stubEnv('PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS', '3600000');
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const topLevel: WranglerToml = {
+      vars: {
+        PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '10',
+      },
+    };
+
+    const envConfig = generateApiWorkerEnv(topLevel, outputs, 'prod', false, false, null);
+
+    // The override still wins (that is the designed emergency-brake path)...
+    expect(envConfig.vars).toMatchObject({
+      PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'false',
+      PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '10',
+      PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS: '3600000',
+    });
+    // ...but it is now visible in the deploy log, and only when it actually differs.
+    const lines = log.mock.calls.map((call) => call.map(String).join(' '));
+    expect(lines).toContainEqual(
+      expect.stringContaining(
+        'Environment override: PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED="false" replaces wrangler.toml "true"'
+      )
+    );
+    expect(lines.filter((line) => line.includes('PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS'))).toEqual(
+      []
+    );
+    // A var absent from wrangler.toml is an addition, not an override.
+    expect(
+      lines.filter((line) => line.includes('PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS'))
+    ).toEqual([]);
+    expect(
+      listEnvironmentVarOverrides({ A: 'true', B: 'same' }, { A: 'false', B: 'same', C: 'added' })
+    ).toEqual([{ name: 'A', checkedIn: 'true', override: 'false' }]);
+    expect(listEnvironmentVarOverrides(undefined, { A: 'false' })).toEqual([]);
+  });
+
+  it('annotates only overrides this repository does not already explain', () => {
+    // The noise bound. Without it, the SAM production Environment's 19 live overrides would each
+    // raise an annotation on every deploy and a genuinely accidental one would have to be spotted
+    // among them — the same "signal buried in volume" failure this report exists to fix, moved up
+    // one layer.
+    const logged: string[] = [];
+    const log = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      logged.push(args.map(String).join(' '));
+    });
+    const summaryPath = join(tmpdir(), `override-summary-${Date.now()}-${Math.random()}.md`);
+    vi.stubEnv('GITHUB_ACTIONS', 'true');
+    vi.stubEnv('GITHUB_STEP_SUMMARY', summaryPath);
+
+    try {
+      reportEnvironmentVarOverrides([
+        // Known operator state — recorded, not annotated.
+        {
+          name: 'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_KEY',
+          checkedIn: '',
+          override: 'project-data/tool-payloads/approved-plans/p/root.abc.json',
+        },
+        // A flag. Deliberately absent from the allowlist, so it must still annotate.
+        {
+          name: 'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED',
+          checkedIn: 'true',
+          override: 'false',
+        },
+      ]);
+      const summary = readFileSync(summaryPath, 'utf-8');
+      // The flag annotates...
+      expect(logged).toContainEqual(
+        expect.stringContaining(
+          '::warning title=Unexpected environment override::Environment override: PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED='
+        )
+      );
+      // ...and the known operator override does NOT.
+      expect(
+        logged.filter(
+          (line) => line.startsWith('::warning') && line.includes('CLEANUP_MANIFEST_KEY')
+        )
+      ).toEqual([]);
+      // Liveness beside the absence assertion: the quiet one is still recorded, with its reason,
+      // so a stale allowlist entry stays visible instead of silently swallowing a signal.
+      expect(summary).toContain('Unexpected GitHub Environment overrides');
+      expect(summary).toContain('Expected GitHub Environment overrides');
+      expect(summary).toContain('approved cleanup plan identity');
+      expect(summary).toContain('**not in EXPECTED_ENVIRONMENT_VAR_OVERRIDES**');
+    } finally {
+      log.mockRestore();
+      rmSync(summaryPath, { force: true });
+    }
+  });
+
+  it('never fails a deploy when the step summary cannot be written', () => {
+    // Drives the REAL default path (process.env + appendFileSync), not an injected stub, because
+    // the property under test is precisely that the real file write is wrapped. A test that
+    // supplies its own `appendSummary` could not observe this.
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.stubEnv('GITHUB_ACTIONS', 'true');
+    vi.stubEnv('GITHUB_STEP_SUMMARY', join(tmpdir(), 'no-such-dir-for-sam-test', 'summary.md'));
+    try {
+      expect(() =>
+        reportEnvironmentVarOverrides([{ name: 'A', checkedIn: 'true', override: 'false' }])
+      ).not.toThrow();
+    } finally {
+      log.mockRestore();
+    }
+
+    // Control: with GITHUB_STEP_SUMMARY unset there is nothing to write and still no throw,
+    // and the annotation is unaffected either way.
+    const log2 = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.stubEnv('GITHUB_ACTIONS', 'true');
+    vi.stubEnv('GITHUB_STEP_SUMMARY', '');
+    try {
+      expect(() =>
+        reportEnvironmentVarOverrides([{ name: 'A', checkedIn: 'true', override: 'false' }])
+      ).not.toThrow();
+      expect(log2.mock.calls.map((call) => call.map(String).join(' '))).toContainEqual(
+        expect.stringContaining('::warning title=Unexpected environment override::')
+      );
+    } finally {
+      log2.mockRestore();
+    }
+  });
+
+  it('escapes workflow-command characters that would truncate the annotation', () => {
+    // An unescaped newline ends the `::warning::` command and drops everything after it, so a var
+    // value containing one would silently truncate the very warning that exists to stop a silent
+    // override.
+    expect(encodeWorkflowCommandData('a%b\nc\rd')).toBe('a%25b%0Ac%0Dd');
+    expect(encodeWorkflowCommandData('ordinary value')).toBe('ordinary value');
+  });
+
+  it('annotates and summarises overrides inside GitHub Actions so they are not buried in logs', () => {
+    // A plain log line did not work: `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED` was "true" in
+    // wrangler.toml from 2026-09-03 and "false" in the production Environment, and the
+    // resulting deployed no-op went unnoticed for eleven days. An Actions `::warning::`
+    // annotation surfaces on the run page and in the checks list; the step summary keeps a
+    // durable table of what actually shipped.
+    const lines: string[] = [];
+    const log = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      lines.push(args.map(String).join(' '));
+    });
+    const summaryPath = join(tmpdir(), `override-annotation-${Date.now()}-${Math.random()}.md`);
+    vi.stubEnv('GITHUB_ACTIONS', 'true');
+    vi.stubEnv('GITHUB_STEP_SUMMARY', summaryPath);
+
+    try {
+      reportEnvironmentVarOverrides([
+        { name: 'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED', checkedIn: 'true', override: 'false' },
+      ]);
+      expect(lines).toContainEqual(
+        expect.stringContaining(
+          '::warning title=Unexpected environment override::Environment override: PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED="false" replaces wrangler.toml "true"'
+        )
+      );
+      expect(readFileSync(summaryPath, 'utf-8')).toContain(
+        '| `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED` | `true` | `false` |'
+      );
+    } finally {
+      log.mockRestore();
+      rmSync(summaryPath, { force: true });
+    }
+  });
+
+  it('keeps local runs quiet and writes no summary when there is nothing to report', () => {
+    // Two controls for the annotation above. Outside Actions the plain line is all a developer
+    // gets (no `::warning::` syntax leaking into terminal output), and a deploy whose config
+    // agrees must produce no annotation at all — otherwise "no warning" would carry no
+    // information (`.claude/rules/62`: an absence assertion needs a positive one beside it).
+    const localLines: string[] = [];
+    const localLog = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      localLines.push(args.map(String).join(' '));
+    });
+    try {
+      // GITHUB_ACTIONS is '' from the suite-wide beforeEach: a developer's terminal.
+      reportEnvironmentVarOverrides([{ name: 'A', checkedIn: 'true', override: 'false' }]);
+    } finally {
+      localLog.mockRestore();
+    }
+    expect(localLines).toEqual(['  Environment override: A="false" replaces wrangler.toml "true"']);
+    expect(localLines.filter((line) => line.startsWith('::'))).toEqual([]);
+
+    const agreedLines: string[] = [];
+    const agreedLog = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      agreedLines.push(args.map(String).join(' '));
+    });
+    const summaryPath = join(tmpdir(), `override-quiet-${Date.now()}-${Math.random()}.md`);
+    vi.stubEnv('GITHUB_ACTIONS', 'true');
+    vi.stubEnv('GITHUB_STEP_SUMMARY', summaryPath);
+    try {
+      reportEnvironmentVarOverrides([]);
+    } finally {
+      agreedLog.mockRestore();
+      rmSync(summaryPath, { force: true });
+    }
+    expect(agreedLines).toEqual([]);
+    expect(existsSync(summaryPath)).toBe(false);
+  });
+
+  it('propagates the top-level CPU limit into generated deployment environments', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+
+    const envConfig = generateApiWorkerEnv(
+      { limits: { cpu_ms: 30_000 } },
+      outputs,
+      'prod',
+      false,
+      false,
+      null
+    );
+
+    expect(envConfig.limits).toEqual({ cpu_ms: 30_000 });
+  });
+
+  it('keeps Analytics Engine binding dataset aligned with generated query dataset', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+
+    const topLevel: WranglerToml = {
+      analytics_engine_datasets: [{ binding: 'ANALYTICS', dataset: 'legacy_analytics' }],
+    };
+
+    const envConfig = generateApiWorkerEnv(topLevel, outputs, 'prod', false, false, null);
+
+    expect(envConfig.vars).toMatchObject({
+      ANALYTICS_DATASET: 's123abc_analytics',
+      AI_GATEWAY_ID: 's123abc',
+      WWW_PAGES_PROJECT_NAME: 's123abc-www',
+      BASE_DOMAIN: 'example.com',
+      PAGES_PROJECT_NAME: 'prefix-web-prod',
+      SAM_INSTALLATION_ID: '0123456789abcdef0123456789abcdef',
+    });
+    expect(envConfig.analytics_engine_datasets).toEqual([
+      { binding: 'ANALYTICS', dataset: 's123abc_analytics' },
+    ]);
+  });
+
+  it('fails instead of falling back to sam when deployment identity is missing', () => {
+    expect(() => generateApiWorkerEnv({}, outputs, 'prod', false, false, null)).toThrow(
+      'RESOURCE_PREFIX or BASE_DOMAIN is required'
+    );
+  });
+
+  it('derives deployment identity from BASE_DOMAIN when RESOURCE_PREFIX is not explicit', () => {
+    vi.stubEnv('BASE_DOMAIN', 'example.com');
+
+    const envConfig = generateApiWorkerEnv({}, outputs, 'prod', false, false, null);
+
+    expect(envConfig.name).toBe('sa379a6-api-prod');
+    expect(envConfig.vars).toMatchObject({
+      AI_GATEWAY_ID: 'sa379a6',
+      ANALYTICS_DATASET: 'sa379a6_analytics',
+      WWW_PAGES_PROJECT_NAME: 'sa379a6-www',
+    });
+  });
+
+  it('keeps exact installation identity independent from shared or different resource prefixes', () => {
+    const installationA = { ...outputs, installationId: 'a'.repeat(32) };
+    const installationB = { ...outputs, installationId: 'b'.repeat(32) };
+
+    vi.stubEnv('RESOURCE_PREFIX', 'shared-prefix');
+    expect(generateApiWorkerEnv({}, installationA, 'prod', false, false, null).vars).toMatchObject({
+      SAM_INSTALLATION_ID: 'a'.repeat(32),
+    });
+    expect(generateApiWorkerEnv({}, installationB, 'prod', false, false, null).vars).toMatchObject({
+      SAM_INSTALLATION_ID: 'b'.repeat(32),
+    });
+
+    vi.stubEnv('RESOURCE_PREFIX', 'different-prefix');
+    expect(generateApiWorkerEnv({}, installationA, 'prod', false, false, null).vars).toMatchObject({
+      SAM_INSTALLATION_ID: 'a'.repeat(32),
+    });
+  });
+
+  it('overrides checked-in identity with the Pulumi-owned generated value', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    const envConfig = generateApiWorkerEnv(
+      { vars: { SAM_INSTALLATION_ID: 'f'.repeat(32) } },
+      outputs,
+      'prod',
+      false,
+      false,
+      null
+    );
+    expect(envConfig.vars).toMatchObject({ SAM_INSTALLATION_ID: outputs.installationId });
+  });
+
+  it('enables Cloudflare Container runtime by default and allows explicit opt-out', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+
+    expect(generateApiWorkerEnv({}, outputs, 'prod', false, false, null).vars).toMatchObject({
+      CF_CONTAINER_ENABLED: 'true',
+    });
+
+    expect(
+      generateApiWorkerEnv(
+        { vars: { CF_CONTAINER_ENABLED: 'false' } },
+        outputs,
+        'prod',
+        false,
+        false,
+        null
+      ).vars
+    ).toMatchObject({
+      CF_CONTAINER_ENABLED: 'false',
+    });
+
+    vi.stubEnv('CF_CONTAINER_ENABLED', 'false');
+    expect(generateApiWorkerEnv({}, outputs, 'prod', false, false, null).vars).toMatchObject({
+      CF_CONTAINER_ENABLED: 'false',
+    });
+  });
+
+  it('passes cf-container lifecycle and clone tunables through from process env when set', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+
+    const unset = generateApiWorkerEnv({}, outputs, 'prod', false, false, null).vars;
+    expect(unset).not.toHaveProperty('CF_CONTAINER_ACTIVE_WORK_MAX_MS');
+    expect(unset).not.toHaveProperty('CF_CONTAINER_KEEPALIVE_RENEW_INTERVAL_MS');
+    expect(unset).not.toHaveProperty('CF_CONTAINER_RECOVERY_MAX_ATTEMPTS');
+    expect(unset).not.toHaveProperty('CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS');
+    expect(unset).not.toHaveProperty('CF_CONTAINER_CLONE_FILTER');
+    for (const name of [
+      'ACP_ACTIVITY_ADMISSION_ENABLED',
+      'ACP_ACTIVITY_COALESCE_WINDOW_MS',
+      'ACP_ACTIVITY_COALESCE_TTL_MS',
+      'ACP_ACTIVITY_COALESCE_MAX_PENDING',
+      'ACP_ACTIVITY_BINDING_CACHE_TTL_MS',
+      'ACP_ACTIVITY_BINDING_CACHE_MAX_ENTRIES',
+    ])
+      expect(unset).not.toHaveProperty(name);
+    expect(unset).not.toHaveProperty('PLATFORM_FEEDBACK_PROJECT_ID');
+    for (const name of [
+      'REPORT_ISSUE_TITLE_MAX_LENGTH',
+      'REPORT_ISSUE_DESCRIPTION_MAX_LENGTH',
+      'REPORT_ISSUE_CONTENT_MAX_LENGTH',
+      'RATE_LIMIT_REPORT_ISSUE_POST',
+    ])
+      expect(unset).not.toHaveProperty(name);
+    for (const name of [
+      'DEBUG_AGENT_MODEL',
+      'DEBUG_AGENT_MAX_TURNS',
+      'DEBUG_AGENT_RUN_TOKEN_LIMIT',
+      'DEBUG_AGENT_MODEL_OUTPUT_TOKENS',
+      'DEBUG_AGENT_DAILY_TOKEN_LIMIT',
+      'DEBUG_AGENT_TOOL_RESULT_LIMIT',
+      'DEBUG_AGENT_TOOL_RESULT_BYTES',
+      'DEBUG_AGENT_MAX_WINDOW_HOURS',
+      'DEBUG_AGENT_TIMEOUT_MS',
+      'DEBUG_AGENT_HARD_DEADLINE_MS',
+      'DEBUG_AGENT_STALE_HEARTBEAT_MS',
+      'DEBUG_AGENT_RETRY_BASE_DELAY_MS',
+      'DEBUG_AGENT_RETRY_MAX_DELAY_MS',
+      'DEBUG_AGENT_STEP_MAX_RETRIES',
+    ])
+      expect(unset).not.toHaveProperty(name);
+    for (const name of [
+      'PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES',
+      'PLATFORM_FEEDBACK_TRIAGE_ERROR_LIMIT',
+      'PLATFORM_FEEDBACK_TRIAGE_GROUP_LIMIT',
+      'PLATFORM_FEEDBACK_TRIAGE_EVIDENCE_LIMIT',
+      'PLATFORM_FEEDBACK_TRIAGE_CLAIM_TTL_MS',
+      'PLATFORM_FEEDBACK_TRIAGE_MAX_FAILURES',
+      'PLATFORM_FEEDBACK_TRIAGE_FAILURE_REASON_MAX_LENGTH',
+      'PLATFORM_FEEDBACK_TRIAGE_BUDGET_DEFER_MS',
+      'PLATFORM_FEEDBACK_INCIDENT_DISPATCH_LEASE_TTL_MS',
+      'PLATFORM_FEEDBACK_INCIDENT_AGENT_LEASE_TTL_MS',
+      'PLATFORM_FEEDBACK_INCIDENT_MAX_DISPATCH_ATTEMPTS',
+      'PLATFORM_FEEDBACK_INCIDENT_REOPEN_COOLDOWN_MS',
+      'PLATFORM_FEEDBACK_INCIDENT_RECLAIM_LIMIT',
+      'PLATFORM_FEEDBACK_INCIDENT_MAX_AGE_MS',
+      'PLATFORM_FEEDBACK_INCIDENT_STALE_SINGLETON_MAX_AGE_MS',
+      'PLATFORM_FEEDBACK_INCIDENT_STALE_SINGLETON_EXPIRY_BATCH_SIZE',
+      'PLATFORM_FEEDBACK_INCIDENT_MIN_DISPATCH_SEVERITY',
+      'PLATFORM_FEEDBACK_INCIDENT_MIN_DISPATCH_BATCH_SIZE',
+      'PLATFORM_FEEDBACK_INCIDENT_MIN_PENDING_AGE_MS',
+      'PLATFORM_FEEDBACK_INCIDENT_DISPATCH_RATE_WINDOW_MS',
+      'PLATFORM_FEEDBACK_INCIDENT_MAX_DISPATCHES_PER_TRIGGER_WINDOW',
+      'PLATFORM_FEEDBACK_INCIDENT_TRIGGER_LIMIT',
+      'PLATFORM_FEEDBACK_INCIDENT_SUMMARY_LIMIT',
+      'PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_REF_LIMIT',
+      'PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_MAX_BYTES',
+      'PLATFORM_FEEDBACK_INCIDENT_RESOLUTION_NOTE_MAX_LENGTH',
+      'PLATFORM_FEEDBACK_INCIDENT_AUTO_TRIGGER_ENABLED',
+      'PLATFORM_FEEDBACK_INCIDENT_TRIGGER_NAME',
+      'PLATFORM_FEEDBACK_INCIDENT_TRIGGER_TEMPLATE',
+    ])
+      expect(unset).not.toHaveProperty(name);
+
+    vi.stubEnv('CF_CONTAINER_ACTIVE_WORK_MAX_MS', '7200000');
+    vi.stubEnv('CF_CONTAINER_KEEPALIVE_RENEW_INTERVAL_MS', '300000');
+    vi.stubEnv('CF_CONTAINER_RECOVERY_MAX_ATTEMPTS', '3');
+    vi.stubEnv('CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS', '180000');
+    vi.stubEnv('CF_CONTAINER_CLONE_FILTER', 'off');
+    vi.stubEnv('ACP_ACTIVITY_ADMISSION_ENABLED', 'false');
+    vi.stubEnv('ACP_ACTIVITY_COALESCE_WINDOW_MS', '1500');
+    vi.stubEnv('ACP_ACTIVITY_COALESCE_TTL_MS', '45000');
+    vi.stubEnv('ACP_ACTIVITY_COALESCE_MAX_PENDING', '123');
+    vi.stubEnv('ACP_ACTIVITY_BINDING_CACHE_TTL_MS', '9000');
+    vi.stubEnv('ACP_ACTIVITY_BINDING_CACHE_MAX_ENTRIES', '456');
+    vi.stubEnv('PLATFORM_FEEDBACK_PROJECT_ID', '01KXN5YQ9TGN29ZZ8DP2DKAKHN');
+    vi.stubEnv('REPORT_ISSUE_TITLE_MAX_LENGTH', '200');
+    vi.stubEnv('REPORT_ISSUE_DESCRIPTION_MAX_LENGTH', '5000');
+    vi.stubEnv('REPORT_ISSUE_CONTENT_MAX_LENGTH', '65536');
+    vi.stubEnv('RATE_LIMIT_REPORT_ISSUE_POST', '20');
+    vi.stubEnv('DEBUG_AGENT_MODEL', '@cf/zai-org/glm-5.2');
+    vi.stubEnv('DEBUG_AGENT_MAX_TURNS', '6');
+    vi.stubEnv('DEBUG_AGENT_RUN_TOKEN_LIMIT', '96000');
+    vi.stubEnv('DEBUG_AGENT_MODEL_OUTPUT_TOKENS', '4096');
+    vi.stubEnv('DEBUG_AGENT_DAILY_TOKEN_LIMIT', '480000');
+    vi.stubEnv('DEBUG_AGENT_TOOL_RESULT_LIMIT', '50');
+    vi.stubEnv('DEBUG_AGENT_TOOL_RESULT_BYTES', '32768');
+    vi.stubEnv('DEBUG_AGENT_MAX_WINDOW_HOURS', '24');
+    vi.stubEnv('DEBUG_AGENT_TIMEOUT_MS', '120000');
+    vi.stubEnv('DEBUG_AGENT_HARD_DEADLINE_MS', '900000');
+    vi.stubEnv('DEBUG_AGENT_STALE_HEARTBEAT_MS', '120000');
+    vi.stubEnv('DEBUG_AGENT_RETRY_BASE_DELAY_MS', '2000');
+    vi.stubEnv('DEBUG_AGENT_RETRY_MAX_DELAY_MS', '60000');
+    vi.stubEnv('DEBUG_AGENT_STEP_MAX_RETRIES', '3');
+    vi.stubEnv('PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES', '120');
+    vi.stubEnv('PLATFORM_FEEDBACK_TRIAGE_ERROR_LIMIT', '80');
+    vi.stubEnv('PLATFORM_FEEDBACK_TRIAGE_GROUP_LIMIT', '4');
+    vi.stubEnv('PLATFORM_FEEDBACK_TRIAGE_EVIDENCE_LIMIT', '8');
+    vi.stubEnv('PLATFORM_FEEDBACK_TRIAGE_CLAIM_TTL_MS', '900000');
+    vi.stubEnv('PLATFORM_FEEDBACK_TRIAGE_MAX_FAILURES', '2');
+    vi.stubEnv('PLATFORM_FEEDBACK_INCIDENT_REOPEN_COOLDOWN_MS', '1800000');
+    vi.stubEnv('PLATFORM_FEEDBACK_TRIAGE_FAILURE_REASON_MAX_LENGTH', '120');
+    vi.stubEnv('PLATFORM_FEEDBACK_TRIAGE_BUDGET_DEFER_MS', '43200000');
+    vi.stubEnv('PLATFORM_FEEDBACK_INCIDENT_DISPATCH_LEASE_TTL_MS', '7200000');
+    vi.stubEnv('PLATFORM_FEEDBACK_INCIDENT_AGENT_LEASE_TTL_MS', '3600000');
+    vi.stubEnv('PLATFORM_FEEDBACK_INCIDENT_MAX_DISPATCH_ATTEMPTS', '2');
+    vi.stubEnv('PLATFORM_FEEDBACK_INCIDENT_RECLAIM_LIMIT', '7');
+    vi.stubEnv('PLATFORM_FEEDBACK_INCIDENT_MAX_AGE_MS', '86400000');
+    vi.stubEnv('PLATFORM_FEEDBACK_INCIDENT_STALE_SINGLETON_MAX_AGE_MS', '21600000');
+    vi.stubEnv('PLATFORM_FEEDBACK_INCIDENT_STALE_SINGLETON_EXPIRY_BATCH_SIZE', '10');
+    vi.stubEnv('PLATFORM_FEEDBACK_INCIDENT_MIN_DISPATCH_SEVERITY', 'error');
+    vi.stubEnv('PLATFORM_FEEDBACK_INCIDENT_MIN_DISPATCH_BATCH_SIZE', '2');
+    vi.stubEnv('PLATFORM_FEEDBACK_INCIDENT_MIN_PENDING_AGE_MS', '1800000');
+    vi.stubEnv('PLATFORM_FEEDBACK_INCIDENT_DISPATCH_RATE_WINDOW_MS', '3600000');
+    vi.stubEnv('PLATFORM_FEEDBACK_INCIDENT_MAX_DISPATCHES_PER_TRIGGER_WINDOW', '1');
+    vi.stubEnv('PLATFORM_FEEDBACK_INCIDENT_TRIGGER_LIMIT', '3');
+    vi.stubEnv('PLATFORM_FEEDBACK_INCIDENT_SUMMARY_LIMIT', '5');
+    vi.stubEnv('PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_REF_LIMIT', '6');
+    vi.stubEnv('PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_MAX_BYTES', '16384');
+    vi.stubEnv('PLATFORM_FEEDBACK_INCIDENT_RESOLUTION_NOTE_MAX_LENGTH', '1000');
+    vi.stubEnv('PLATFORM_FEEDBACK_INCIDENT_AUTO_TRIGGER_ENABLED', 'true');
+    vi.stubEnv('PLATFORM_FEEDBACK_INCIDENT_TRIGGER_NAME', 'Private incidents');
+    vi.stubEnv(
+      'PLATFORM_FEEDBACK_INCIDENT_TRIGGER_TEMPLATE',
+      'Investigate {{incident.backlogSummary}}'
+    );
+    expect(generateApiWorkerEnv({}, outputs, 'prod', false, false, null).vars).toMatchObject({
+      CF_CONTAINER_ACTIVE_WORK_MAX_MS: '7200000',
+      CF_CONTAINER_KEEPALIVE_RENEW_INTERVAL_MS: '300000',
+      CF_CONTAINER_RECOVERY_MAX_ATTEMPTS: '3',
+      CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS: '180000',
+      CF_CONTAINER_CLONE_FILTER: 'off',
+      ACP_ACTIVITY_ADMISSION_ENABLED: 'false',
+      ACP_ACTIVITY_COALESCE_WINDOW_MS: '1500',
+      ACP_ACTIVITY_COALESCE_TTL_MS: '45000',
+      ACP_ACTIVITY_COALESCE_MAX_PENDING: '123',
+      ACP_ACTIVITY_BINDING_CACHE_TTL_MS: '9000',
+      ACP_ACTIVITY_BINDING_CACHE_MAX_ENTRIES: '456',
+      PLATFORM_FEEDBACK_PROJECT_ID: '01KXN5YQ9TGN29ZZ8DP2DKAKHN',
+      REPORT_ISSUE_TITLE_MAX_LENGTH: '200',
+      REPORT_ISSUE_DESCRIPTION_MAX_LENGTH: '5000',
+      REPORT_ISSUE_CONTENT_MAX_LENGTH: '65536',
+      RATE_LIMIT_REPORT_ISSUE_POST: '20',
+      DEBUG_AGENT_MODEL: '@cf/zai-org/glm-5.2',
+      DEBUG_AGENT_MAX_TURNS: '6',
+      DEBUG_AGENT_RUN_TOKEN_LIMIT: '96000',
+      DEBUG_AGENT_MODEL_OUTPUT_TOKENS: '4096',
+      DEBUG_AGENT_DAILY_TOKEN_LIMIT: '480000',
+      DEBUG_AGENT_TOOL_RESULT_LIMIT: '50',
+      DEBUG_AGENT_TOOL_RESULT_BYTES: '32768',
+      DEBUG_AGENT_MAX_WINDOW_HOURS: '24',
+      DEBUG_AGENT_TIMEOUT_MS: '120000',
+      DEBUG_AGENT_HARD_DEADLINE_MS: '900000',
+      DEBUG_AGENT_STALE_HEARTBEAT_MS: '120000',
+      DEBUG_AGENT_RETRY_BASE_DELAY_MS: '2000',
+      DEBUG_AGENT_RETRY_MAX_DELAY_MS: '60000',
+      DEBUG_AGENT_STEP_MAX_RETRIES: '3',
+      PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES: '120',
+      PLATFORM_FEEDBACK_TRIAGE_ERROR_LIMIT: '80',
+      PLATFORM_FEEDBACK_TRIAGE_GROUP_LIMIT: '4',
+      PLATFORM_FEEDBACK_TRIAGE_EVIDENCE_LIMIT: '8',
+      PLATFORM_FEEDBACK_TRIAGE_CLAIM_TTL_MS: '900000',
+      PLATFORM_FEEDBACK_TRIAGE_MAX_FAILURES: '2',
+      PLATFORM_FEEDBACK_TRIAGE_FAILURE_REASON_MAX_LENGTH: '120',
+      PLATFORM_FEEDBACK_TRIAGE_BUDGET_DEFER_MS: '43200000',
+      PLATFORM_FEEDBACK_INCIDENT_DISPATCH_LEASE_TTL_MS: '7200000',
+      PLATFORM_FEEDBACK_INCIDENT_AGENT_LEASE_TTL_MS: '3600000',
+      PLATFORM_FEEDBACK_INCIDENT_MAX_DISPATCH_ATTEMPTS: '2',
+      PLATFORM_FEEDBACK_INCIDENT_REOPEN_COOLDOWN_MS: '1800000',
+      PLATFORM_FEEDBACK_INCIDENT_RECLAIM_LIMIT: '7',
+      PLATFORM_FEEDBACK_INCIDENT_MAX_AGE_MS: '86400000',
+      PLATFORM_FEEDBACK_INCIDENT_STALE_SINGLETON_MAX_AGE_MS: '21600000',
+      PLATFORM_FEEDBACK_INCIDENT_STALE_SINGLETON_EXPIRY_BATCH_SIZE: '10',
+      PLATFORM_FEEDBACK_INCIDENT_MIN_DISPATCH_SEVERITY: 'error',
+      PLATFORM_FEEDBACK_INCIDENT_MIN_DISPATCH_BATCH_SIZE: '2',
+      PLATFORM_FEEDBACK_INCIDENT_MIN_PENDING_AGE_MS: '1800000',
+      PLATFORM_FEEDBACK_INCIDENT_DISPATCH_RATE_WINDOW_MS: '3600000',
+      PLATFORM_FEEDBACK_INCIDENT_MAX_DISPATCHES_PER_TRIGGER_WINDOW: '1',
+      PLATFORM_FEEDBACK_INCIDENT_TRIGGER_LIMIT: '3',
+      PLATFORM_FEEDBACK_INCIDENT_SUMMARY_LIMIT: '5',
+      PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_REF_LIMIT: '6',
+      PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_MAX_BYTES: '16384',
+      PLATFORM_FEEDBACK_INCIDENT_RESOLUTION_NOTE_MAX_LENGTH: '1000',
+      PLATFORM_FEEDBACK_INCIDENT_AUTO_TRIGGER_ENABLED: 'true',
+      PLATFORM_FEEDBACK_INCIDENT_TRIGGER_NAME: 'Private incidents',
+      PLATFORM_FEEDBACK_INCIDENT_TRIGGER_TEMPLATE: 'Investigate {{incident.backlogSummary}}',
+    });
+  });
+
+  it('passes durable execution rollout configuration through only when explicitly set', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+
+    const unset = generateApiWorkerEnv({}, outputs, 'prod', false, false, null).vars;
+    expect(unset).not.toHaveProperty('DURABLE_PROMPT_DELIVERY_ENABLED');
+    expect(unset).not.toHaveProperty('PROMPT_DELIVERY_MAX_ATTEMPTS');
+    expect(unset).not.toHaveProperty('ACP_LONG_TURN_SUPERVISOR_ENABLED');
+
+    vi.stubEnv('DURABLE_PROMPT_DELIVERY_ENABLED', 'true');
+    vi.stubEnv('PROMPT_DELIVERY_MAX_ATTEMPTS', '7');
+    vi.stubEnv('ACP_LONG_TURN_SUPERVISOR_ENABLED', 'false');
+
+    expect(generateApiWorkerEnv({}, outputs, 'prod', false, false, null).vars).toMatchObject({
+      DURABLE_PROMPT_DELIVERY_ENABLED: 'true',
+      PROMPT_DELIVERY_MAX_ATTEMPTS: '7',
+      ACP_LONG_TURN_SUPERVISOR_ENABLED: 'false',
+    });
+  });
+
+  it('generates Cloudflare container max_instances with unchanged safe defaults', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    vi.stubEnv('VM_AGENT_REQUIRED_VERSION', 'deploy-sha');
+
+    const containers = [
+      {
+        class_name: 'SandboxDO',
+        image: './Dockerfile.sandbox',
+        instance_type: 'standard-1',
+        max_instances: 999,
+      },
+      {
+        class_name: 'VmAgentContainer',
+        image: './Dockerfile.vm-agent-container',
+        instance_type: 'standard-1',
+        max_instances: 999,
+      },
+    ];
+
+    const envConfig = generateApiWorkerEnv({ containers }, outputs, 'prod', false, false, null);
+
+    expect(envConfig.vars?.VM_AGENT_REQUIRED_VERSION).toBe('deploy-sha');
+
+    expect(envConfig.containers).toEqual([
+      {
+        class_name: 'SandboxDO',
+        image: './Dockerfile.sandbox',
+        instance_type: 'standard-1',
+        max_instances: 6,
+      },
+      {
+        class_name: 'VmAgentContainer',
+        image: './Dockerfile.vm-agent-container',
+        instance_type: 'standard-1',
+        max_instances: 3,
+      },
+    ]);
+  });
+
+  it('respects deployment overrides for Cloudflare container max_instances', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    vi.stubEnv('SANDBOX_CONTAINER_MAX_INSTANCES', '8');
+    vi.stubEnv('VM_AGENT_CONTAINER_MAX_INSTANCES', '5');
+    vi.stubEnv('VM_AGENT_REQUIRED_VERSION', 'deploy-sha');
+
+    const containers = [
+      {
+        class_name: 'SandboxDO',
+        image: './Dockerfile.sandbox',
+        instance_type: 'standard-1',
+        max_instances: 6,
+      },
+      {
+        class_name: 'VmAgentContainer',
+        image: './Dockerfile.vm-agent-container',
+        instance_type: 'standard-1',
+        max_instances: 3,
+      },
+      {
+        class_name: 'OtherContainer',
+        image: './Dockerfile.other',
+        instance_type: 'standard-1',
+        max_instances: 2,
+      },
+    ];
+
+    const envConfig = generateApiWorkerEnv({ containers }, outputs, 'prod', false, false, null);
+
+    expect(envConfig.containers).toEqual([
+      {
+        class_name: 'SandboxDO',
+        image: './Dockerfile.sandbox',
+        instance_type: 'standard-1',
+        max_instances: 8,
+      },
+      {
+        class_name: 'VmAgentContainer',
+        image: './Dockerfile.vm-agent-container',
+        instance_type: 'standard-1',
+        max_instances: 5,
+      },
+      {
+        class_name: 'OtherContainer',
+        image: './Dockerfile.other',
+        instance_type: 'standard-1',
+        max_instances: 2,
+      },
+    ]);
+  });
+
+  it('fails closed for invalid Cloudflare container max_instances overrides', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    vi.stubEnv('SANDBOX_CONTAINER_MAX_INSTANCES', '0');
+
+    const topLevel: WranglerToml = {
+      containers: [
+        {
+          class_name: 'SandboxDO',
+          image: './Dockerfile.sandbox',
+          instance_type: 'standard-1',
+          max_instances: 6,
+        },
+      ],
+    };
+
+    expect(() => generateApiWorkerEnv(topLevel, outputs, 'prod', false, false, null)).toThrow(
+      'SANDBOX_CONTAINER_MAX_INSTANCES must be greater than or equal to 1'
+    );
+
+    vi.stubEnv('SANDBOX_CONTAINER_MAX_INSTANCES', '1.5');
+    expect(() => generateApiWorkerEnv(topLevel, outputs, 'prod', false, false, null)).toThrow(
+      'SANDBOX_CONTAINER_MAX_INSTANCES must be a positive safe integer'
+    );
+  });
+
+  it('passes Worker ingestion and VM reporter bounds into generated deployments', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    vi.stubEnv('MAX_VM_AGENT_ERROR_BODY_BYTES', '24576');
+    vi.stubEnv('MAX_VM_AGENT_ERROR_BATCH_SIZE', '7');
+    vi.stubEnv('ERROR_REPORT_FLUSH_INTERVAL', '45s');
+    vi.stubEnv('ERROR_REPORT_EVENT_LIMIT', '75');
+    vi.stubEnv('ERROR_REPORT_RESPONSE_MAX_BYTES', '2048');
+    vi.stubEnv('ERROR_REPORT_STORED_ERROR_MAX_BYTES', '256');
+    vi.stubEnv('ERROR_REPORT_COLLECTOR_CONCURRENCY', '2');
+
+    expect(generateApiWorkerEnv({}, outputs, 'prod', false, false, null).vars).toMatchObject({
+      MAX_VM_AGENT_ERROR_BODY_BYTES: '24576',
+      MAX_VM_AGENT_ERROR_BATCH_SIZE: '7',
+      ERROR_REPORT_FLUSH_INTERVAL: '45s',
+      ERROR_REPORT_EVENT_LIMIT: '75',
+      ERROR_REPORT_RESPONSE_MAX_BYTES: '2048',
+      ERROR_REPORT_STORED_ERROR_MAX_BYTES: '256',
+      ERROR_REPORT_COLLECTOR_CONCURRENCY: '2',
+    });
+  });
+
+  it('omits Artifacts binding and disables runtime flag when Artifacts is not enabled', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+
+    const topLevel: WranglerToml = {
+      vars: { ARTIFACTS_ENABLED: 'true' },
+      artifacts: [{ binding: 'ARTIFACTS', namespace: 'default' }],
+    };
+
+    const envConfig = generateApiWorkerEnv(topLevel, outputs, 'prod', false, false, null);
+
+    expect(envConfig.artifacts).toBeUndefined();
+    expect(envConfig.vars).toMatchObject({ ARTIFACTS_ENABLED: 'false' });
+  });
+
+  it('copies Artifacts binding and enables runtime flag when Artifacts is enabled', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+
+    const artifacts = [{ binding: 'ARTIFACTS', namespace: 'default' }];
+    const envConfig = generateApiWorkerEnv({ artifacts }, outputs, 'prod', false, true, null);
+
+    expect(envConfig.artifacts).toEqual(artifacts);
+    expect(envConfig.vars).toMatchObject({ ARTIFACTS_ENABLED: 'true' });
+  });
+
+  it('generates a plaintext setup token var without requiring an input secret', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+
+    const envConfig = generateApiWorkerEnv({}, outputs, 'prod', false, false, null);
+
+    expect(envConfig.vars?.SETUP_TOKEN).toEqual(expect.any(String));
+    expect(String(envConfig.vars?.SETUP_TOKEN).length).toBeGreaterThan(20);
+  });
+
+  it('includes SETUP_FORCE only when explicitly requested', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+
+    expect(generateApiWorkerEnv({}, outputs, 'prod', false, false, null).vars).not.toHaveProperty(
+      'SETUP_FORCE'
+    );
+
+    vi.stubEnv('SETUP_FORCE', 'true');
+    expect(generateApiWorkerEnv({}, outputs, 'prod', false, false, null).vars).toMatchObject({
+      SETUP_FORCE: 'true',
+    });
+  });
+
+  it('fails when Artifacts is enabled without a top-level binding declaration', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+
+    expect(() => generateApiWorkerEnv({}, outputs, 'prod', false, true, null)).toThrow(
+      'Artifacts is enabled but no top-level [[artifacts]] binding exists in wrangler.toml'
+    );
+  });
+
+  it('fails when generated Worker text bindings exceed the guard limit', () => {
+    const existingTextBindings = countWorkerTextBindings({ vars: {} });
+    const vars = Object.fromEntries(
+      Array.from(
+        {
+          length: CLOUDFLARE_WORKER_TEXT_BINDING_GUARD_LIMIT - existingTextBindings + 1,
+        },
+        (_, index) => [`TEST_TEXT_BINDING_${index}`, 'value']
+      )
+    );
+
+    expect(countWorkerTextBindings({ vars })).toBe(CLOUDFLARE_WORKER_TEXT_BINDING_GUARD_LIMIT + 1);
+    expect(() => assertWorkerTextBindingLimit({ vars })).toThrow(
+      'Generated Cloudflare Worker text bindings (341) exceed the 340 guard limit (350 Cloudflare max with 10 headroom)'
+    );
+  });
+
+  it('distinguishes a missing tail worker from Cloudflare API failures', async () => {
+    vi.stubEnv('CF_API_TOKEN', 'token');
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('{}', { status: 200 }))
+      .mockResolvedValueOnce(new Response('{}', { status: 404 }))
+      .mockResolvedValueOnce(new Response('forbidden', { status: 403 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(checkTailWorkerExists('account-id', 'tail-worker')).resolves.toBe(true);
+    await expect(checkTailWorkerExists('account-id', 'tail-worker')).resolves.toBe(false);
+    await expect(checkTailWorkerExists('account-id', 'tail-worker')).rejects.toThrow('HTTP 403');
+  });
+
+  it('requires a Cloudflare API token before checking tail worker status', async () => {
+    vi.stubEnv('CF_API_TOKEN', '');
+    vi.stubEnv('CLOUDFLARE_API_TOKEN', '');
+    const fetchMock = vi.fn().mockRejectedValue(new Error('network must not be reached'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(checkTailWorkerExists('account-id', 'tail-worker')).rejects.toThrow(
+      'CF_API_TOKEN or CLOUDFLARE_API_TOKEN is required'
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('detectArtifactsAvailable (Artifacts REST probe)', () => {
+  it('returns true and hits the namespace list-repos endpoint when the probe returns 200', async () => {
+    vi.stubEnv('CF_API_TOKEN', 'token');
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response('{"success":true,"result":[]}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(detectArtifactsAvailable('account-id', 'default')).resolves.toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.cloudflare.com/client/v4/accounts/account-id/artifacts/namespaces/default/repos?limit=1',
+      { headers: { Authorization: 'Bearer token' } }
+    );
+  });
+
+  it('fails closed when the token lacks the Artifacts permission (401/403)', async () => {
+    vi.stubEnv('CF_API_TOKEN', 'token');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('nope', { status: 403 })));
+    await expect(detectArtifactsAvailable('account-id', 'default')).resolves.toBe(false);
+  });
+
+  it('fails closed when the account has no Artifacts access (404)', async () => {
+    vi.stubEnv('CF_API_TOKEN', 'token');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('not found', { status: 404 })));
+    await expect(detectArtifactsAvailable('account-id', 'default')).resolves.toBe(false);
+  });
+
+  it('fails closed on a network error', async () => {
+    vi.stubEnv('CF_API_TOKEN', 'token');
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('boom')));
+    await expect(detectArtifactsAvailable('account-id', 'default')).resolves.toBe(false);
+  });
+
+  it('fails closed when no deploy token is available', async () => {
+    await expect(detectArtifactsAvailable('account-id', 'default')).resolves.toBe(false);
+  });
+});
+
+describe('resolveArtifactsBindingEnabled (auto-detect + override)', () => {
+  it('auto-detects true from a 200 probe when no override is set', async () => {
+    vi.stubEnv('CF_API_TOKEN', 'token');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 200 })));
+    await expect(resolveArtifactsBindingEnabled('account-id', 'default')).resolves.toBe(true);
+  });
+
+  it('auto-detects false from a failing probe when no override is set', async () => {
+    vi.stubEnv('CF_API_TOKEN', 'token');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 403 })));
+    await expect(resolveArtifactsBindingEnabled('account-id', 'default')).resolves.toBe(false);
+  });
+
+  it('honors an explicit ARTIFACTS_BINDING_ENABLED=true override even when the probe fails', async () => {
+    vi.stubEnv('CF_API_TOKEN', 'token');
+    vi.stubEnv('ARTIFACTS_BINDING_ENABLED', 'true');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 403 })));
+    await expect(resolveArtifactsBindingEnabled('account-id', 'default')).resolves.toBe(true);
+  });
+
+  it('honors an explicit ARTIFACTS_BINDING_ENABLED=false override even when the probe succeeds', async () => {
+    vi.stubEnv('CF_API_TOKEN', 'token');
+    vi.stubEnv('ARTIFACTS_BINDING_ENABLED', 'false');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 200 })));
+    await expect(resolveArtifactsBindingEnabled('account-id', 'default')).resolves.toBe(false);
+  });
+});
+
+describe('ensureTomlMap', () => {
+  it('returns the original TOML map so generated env sections are persisted', () => {
+    const config: { env: Record<string, unknown> } = { env: {} };
+
+    const envConfig = ensureTomlMap(config.env, 'tail worker env config');
+    envConfig.staging = { name: 'sam-tail-worker-staging' };
+
+    expect(config.env).toEqual({
+      staging: { name: 'sam-tail-worker-staging' },
+    });
+  });
+
+  it('rejects non-table values', () => {
+    expect(() => ensureTomlMap([], 'tail worker env config')).toThrow(
+      'tail worker env config must be a TOML table'
+    );
+  });
+});

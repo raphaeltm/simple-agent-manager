@@ -22,6 +22,10 @@ export const PROVIDER_VM_SIZE_VCPUS: Record<string, Record<VMSize, number>> = {
   hetzner: { small: 2, medium: 4, large: 8 },
   scaleway: { small: 3, medium: 4, large: 8 },
   gcp: { small: 1, medium: 2, large: 4 },
+  vultr: { small: 2, medium: 4, large: 6 },
+  infomaniak: { small: 2, medium: 4, large: 8 },
+  digitalocean: { small: 2, medium: 4, large: 8 },
+  upcloud: { small: 2, medium: 4, large: 8 },
 };
 
 /** Default vCPU counts when provider is unknown. Uses Hetzner as the reference. */
@@ -61,4 +65,30 @@ export function canSatisfyVmSize(
   if (!isKnownVmSize(candidateSize)) return false;
 
   return DEFAULT_VM_SIZE_VCPUS[candidateSize] >= DEFAULT_VM_SIZE_VCPUS[requestedSize];
+}
+
+// =============================================================================
+// VM Size Fallback Chain (largest → smallest)
+// =============================================================================
+
+/** VM sizes ordered from largest to smallest abstract capacity. */
+const VM_SIZE_DESCENDING: readonly VMSize[] = ['large', 'medium', 'small'];
+
+/**
+ * Build the descending size-fallback chain starting at `start`.
+ *
+ * Returns the slice of `['large', 'medium', 'small']` from `start` down to the
+ * smallest size. Used when auto-provisioning a brand-new node hits transient
+ * capacity exhaustion and the requested size is default-derived (no explicit
+ * requirement), so the scheduler may try progressively smaller sizes.
+ *
+ * Examples:
+ * - `'large'`  → `['large', 'medium', 'small']`
+ * - `'medium'` → `['medium', 'small']`
+ * - `'small'`  → `['small']`
+ */
+export function vmSizeFallbackChain(start: VMSize): VMSize[] {
+  const startIndex = VM_SIZE_DESCENDING.indexOf(start);
+  if (startIndex === -1) return [start];
+  return VM_SIZE_DESCENDING.slice(startIndex);
 }

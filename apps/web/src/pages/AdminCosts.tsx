@@ -14,6 +14,7 @@ import {
 
 import type { CostByModel, CostSummaryResponse } from '../lib/api';
 import { fetchAdminCosts } from '../lib/api';
+import { adminChartSeries, chartGridStroke, chartTick, chartTooltipStyle } from './admin-analytics/chartTokens';
 
 // ---------------------------------------------------------------------------
 // Formatters
@@ -81,15 +82,6 @@ function PeriodSelector({
 // ---------------------------------------------------------------------------
 // KPI Card
 // ---------------------------------------------------------------------------
-
-const BAR_COLORS = [
-  'var(--sam-color-accent-primary, #16a34a)',
-  'var(--sam-color-info, #60a5fa)',
-  'var(--sam-color-purple, #a78bfa)',
-  'var(--sam-color-warning, #f59e0b)',
-  'var(--sam-color-pink, #ec4899)',
-  'var(--sam-color-teal, #14b8a6)',
-];
 
 function KpiCard({
   label,
@@ -240,33 +232,30 @@ export function AdminCosts() {
                 >
                   <CartesianGrid
                     strokeDasharray="3 3"
-                    stroke="var(--sam-color-border-default)"
+                    stroke={chartGridStroke}
                     strokeOpacity={0.3}
                   />
                   <XAxis
                     dataKey="date"
-                    tick={{ fontSize: 11, fill: 'var(--sam-color-fg-muted)' }}
+                    tick={chartTick}
                     tickFormatter={(d: string) => d.slice(5)}
                   />
                   <YAxis
-                    tick={{ fontSize: 11, fill: 'var(--sam-color-fg-muted)' }}
+                    tick={chartTick}
                     tickFormatter={(v: number) => formatCost(v)}
                   />
                   <Tooltip
                     formatter={(value) => [formatCost(Number(value)), 'Cost']}
                     labelFormatter={(label) => String(label)}
                     contentStyle={{
-                      background: 'var(--sam-color-surface-primary)',
-                      border: '1px solid var(--sam-color-border-default)',
-                      borderRadius: 6,
-                      fontSize: 12,
+                      ...chartTooltipStyle,
                     }}
                   />
                   <Area
                     type="monotone"
                     dataKey="costUsd"
-                    stroke="var(--sam-color-accent-primary, #16a34a)"
-                    fill="var(--sam-color-accent-primary, #16a34a)"
+                    stroke={adminChartSeries[0]}
+                    fill={adminChartSeries[0]}
                     fillOpacity={0.15}
                   />
                 </AreaChart>
@@ -293,30 +282,27 @@ export function AdminCosts() {
                   >
                     <CartesianGrid
                       strokeDasharray="3 3"
-                      stroke="var(--sam-color-border-default)"
+                      stroke={chartGridStroke}
                       strokeOpacity={0.3}
                     />
                     <XAxis
                       type="number"
-                      tick={{ fontSize: 11, fill: 'var(--sam-color-fg-muted)' }}
+                      tick={chartTick}
                       tickFormatter={(v: number) => formatCost(v)}
                     />
                     <YAxis
                       type="category"
                       dataKey="label"
                       width={80}
-                      tick={{ fontSize: 10, fill: 'var(--sam-color-fg-muted)' }}
+                      tick={{ ...chartTick, fontSize: 10 }}
                     />
                     <Tooltip
                       formatter={(value) => [formatCost(Number(value)), 'Cost']}
                       contentStyle={{
-                        background: 'var(--sam-color-surface-primary)',
-                        border: '1px solid var(--sam-color-border-default)',
-                        borderRadius: 6,
-                        fontSize: 12,
+                        ...chartTooltipStyle,
                       }}
                     />
-                    <Bar dataKey="costUsd" fill={BAR_COLORS[0]} name="Cost" />
+                    <Bar dataKey="costUsd" fill={adminChartSeries[0]} name="Cost" />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -337,7 +323,7 @@ export function AdminCosts() {
                         <td className="py-2 pr-3">
                           <span
                             className="inline-block w-2 h-2 rounded-full mr-2"
-                            style={{ backgroundColor: BAR_COLORS[i % BAR_COLORS.length] }}
+                            style={{ backgroundColor: adminChartSeries[i % adminChartSeries.length] }}
                             aria-hidden="true"
                           />
                           <span className="text-fg-primary text-xs" title={m.model}>

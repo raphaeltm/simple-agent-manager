@@ -1,66 +1,82 @@
 /**
- * Admin Sandbox SDK prototype routes.
+ * Admin Sandbox SDK debugging routes.
  *
  * Experimental admin-only endpoints for prototyping Cloudflare Sandbox SDK
  * capabilities (exec, file I/O, git checkout, backup/restore, streaming).
  * NOT exposed to regular users — gated behind requireSuperadmin().
  *
- * These routes exist solely to measure and evaluate whether the Sandbox SDK
- * is viable for SAM project-level and top-level agents.
+ * The user-facing instant-session launch lives in services/instant-session.ts
+ * plus the project chat start endpoint.
  *
  * Kill switch: SANDBOX_ENABLED env var (default: false).
  */
 import { Hono } from 'hono';
+import * as v from 'valibot';
 
 import type { Env } from '../env';
 import { requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
 import { errors } from '../middleware/error';
+import { jsonValidator } from '../schemas';
+import { getSandboxConfig, getSandboxInstance, requireSandbox } from '../services/sandbox';
+
+// All fields below are validated loosely (v.unknown(), wrapped in
+// v.optional() so an entirely-missing key doesn't trip Valibot's own
+// "Invalid key" rejection) so each handler's existing manual checks — which
+// produce specific error messages — remain in control of the accepted
+// domain. This is an experimental superadmin-only debug tool; the schemas
+// only guarantee a JSON object with these keys.
+const ExecCommandSchema = v.object({
+  command: v.optional(v.unknown()),
+  sandboxId: v.optional(v.unknown()),
+});
+
+const GitCheckoutSchema = v.object({
+  repoUrl: v.optional(v.unknown()),
+  branch: v.optional(v.unknown()),
+  depth: v.optional(v.unknown()),
+  sandboxId: v.optional(v.unknown()),
+});
+
+const SandboxFilesSchema = v.object({
+  action: v.optional(v.unknown()),
+  path: v.optional(v.unknown()),
+  content: v.optional(v.unknown()),
+  sandboxId: v.optional(v.unknown()),
+});
+
+const SandboxBackupSchema = v.object({
+  action: v.optional(v.unknown()),
+  dir: v.optional(v.unknown()),
+  backupId: v.optional(v.unknown()),
+  backupDir: v.optional(v.unknown()),
+  sandboxId: v.optional(v.unknown()),
+});
 
 const adminSandboxRoutes = new Hono<{ Bindings: Env }>();
 
 adminSandboxRoutes.use('/*', requireAuth(), requireApproved(), requireSuperadmin());
 
-/** Resolve sandbox configuration from env vars with defaults. */
-function getSandboxConfig(env: Env) {
-  return {
-    enabled: env.SANDBOX_ENABLED === 'true',
-    execTimeoutMs: parseInt(env.SANDBOX_EXEC_TIMEOUT_MS || '30000', 10),
-    gitTimeoutMs: parseInt(env.SANDBOX_GIT_TIMEOUT_MS || '120000', 10),
-    sleepAfter: env.SANDBOX_SLEEP_AFTER || '10m',
-  };
-}
-
-/** Guard: check that sandbox is enabled and binding exists. */
-function requireSandbox(env: Env): void {
-  const config = getSandboxConfig(env);
-  if (!config.enabled) {
-    throw errors.badRequest('Sandbox prototype is disabled. Set SANDBOX_ENABLED=true to enable.');
-  }
-  if (!env.SANDBOX) {
-    throw errors.badRequest(
-      'SANDBOX binding not available. The Containers binding may not be configured on this environment.'
-    );
-  }
+/** Resolve a sandboxId field (validated loosely as unknown) to a definite string, falling back to the shared prototype sandbox — mirrors the original `body.sandboxId || 'sam-prototype'` for every real string input. */
+function resolveSandboxId(value: unknown): string {
+  return typeof value === 'string' && value ? value : 'sam-prototype';
 }
 
 /**
- * Helper to get a sandbox instance via the SDK.
- *
- * The Sandbox SDK uses `getSandbox(env.Sandbox, id)` to obtain a proxy.
- * Since the SDK may not be available in all environments (e.g., Miniflare),
- * we dynamically import it and handle failures gracefully.
+ * Reject admin-toolbox access to any sandbox that belongs to a guided
+ * credential-setup session. Those containers transit a live OpenAI/ChatGPT
+ * credential (auth.json read server-side), and this superadmin debug tool shares
+ * the same `SANDBOX` namespace — without this guard it could read or overwrite
+ * an in-flight user credential (cross-feature isolation).
  */
-async function getSandboxInstance(env: Env, sandboxId: string) {
-  try {
-    // Dynamic import — @cloudflare/sandbox may not be available in all envs
-    const { getSandbox } = await import('@cloudflare/sandbox');
-    if (!env.SANDBOX) {
-      throw errors.badRequest('SANDBOX binding not available.');
-    }
-    return getSandbox(env.SANDBOX, sandboxId);
-  } catch (err) {
-    throw errors.internal(
-      `Failed to initialize Sandbox SDK: ${err instanceof Error ? err.message : String(err)}`
+async function assertNotCredentialSetupSandbox(env: Env, sandboxId: string): Promise<void> {
+  const row = await env.DATABASE.prepare(
+    'SELECT 1 FROM agent_credential_setup_sessions WHERE sandbox_id = ? LIMIT 1'
+  )
+    .bind(sandboxId)
+    .first();
+  if (row) {
+    throw errors.forbidden(
+      'This sandbox belongs to a guided credential-setup session and cannot be accessed via the admin toolbox.'
     );
   }
 }
@@ -87,20 +103,22 @@ adminSandboxRoutes.get('/status', async (c) => {
  * Body: { command: string, sandboxId?: string }
  * Returns: { stdout, stderr, exitCode, success, durationMs }
  */
-adminSandboxRoutes.post('/exec', async (c) => {
+adminSandboxRoutes.post('/exec', jsonValidator(ExecCommandSchema), async (c) => {
   requireSandbox(c.env);
   const config = getSandboxConfig(c.env);
 
-  const body = await c.req.json<{ command: string; sandboxId?: string }>();
-  if (!body.command || typeof body.command !== 'string') {
+  const body = c.req.valid('json');
+  const { command } = body;
+  if (!command || typeof command !== 'string') {
     throw errors.badRequest('command is required and must be a string');
   }
 
-  const sandboxId = body.sandboxId || 'sam-prototype';
+  const sandboxId = resolveSandboxId(body.sandboxId);
+  await assertNotCredentialSetupSandbox(c.env, sandboxId);
   const sandbox = await getSandboxInstance(c.env, sandboxId);
 
   const start = Date.now();
-  const result = await sandbox.exec(body.command, {
+  const result = await sandbox.exec(command, {
     timeout: config.execTimeoutMs,
   });
   const durationMs = Date.now() - start;
@@ -121,28 +139,28 @@ adminSandboxRoutes.post('/exec', async (c) => {
  * Body: { repoUrl: string, branch?: string, depth?: number, sandboxId?: string }
  * Returns: { durationMs, sandboxId }
  */
-adminSandboxRoutes.post('/git-checkout', async (c) => {
+adminSandboxRoutes.post('/git-checkout', jsonValidator(GitCheckoutSchema), async (c) => {
   requireSandbox(c.env);
   const config = getSandboxConfig(c.env);
 
-  const body = await c.req.json<{
-    repoUrl: string;
-    branch?: string;
-    depth?: number;
-    sandboxId?: string;
-  }>();
-  if (!body.repoUrl || typeof body.repoUrl !== 'string') {
+  const body = c.req.valid('json');
+  const { repoUrl } = body;
+  if (!repoUrl || typeof repoUrl !== 'string') {
     throw errors.badRequest('repoUrl is required and must be a string');
   }
 
-  const sandboxId = body.sandboxId || 'sam-prototype';
+  const sandboxId = resolveSandboxId(body.sandboxId);
+  await assertNotCredentialSetupSandbox(c.env, sandboxId);
   const sandbox = await getSandboxInstance(c.env, sandboxId);
 
+  const branch = typeof body.branch === 'string' ? body.branch : undefined;
+  const depth = typeof body.depth === 'number' ? body.depth : undefined;
+
   const start = Date.now();
-  await sandbox.gitCheckout(body.repoUrl, {
-    branch: body.branch,
+  await sandbox.gitCheckout(repoUrl, {
+    branch,
     targetDir: '/workspace',
-    depth: body.depth || 1,
+    depth: depth || 1,
   });
   const durationMs = Date.now() - start;
 
@@ -164,41 +182,42 @@ adminSandboxRoutes.post('/git-checkout', async (c) => {
  * Body: { action: 'read' | 'write' | 'exists', path: string, content?: string, sandboxId?: string }
  * Returns: { content?, exists?, durationMs }
  */
-adminSandboxRoutes.post('/files', async (c) => {
+adminSandboxRoutes.post('/files', jsonValidator(SandboxFilesSchema), async (c) => {
   requireSandbox(c.env);
 
-  const body = await c.req.json<{
-    action: 'read' | 'write' | 'exists';
-    path: string;
-    content?: string;
-    sandboxId?: string;
-  }>();
-  if (!body.action || !body.path) {
+  const body = c.req.valid('json');
+  const { action, path } = body;
+  // `path` also requires a string-type check (the original cast trusted the
+  // caller-declared type); any other truthy `path` could never have
+  // succeeded against the SDK's `string`-typed file methods either.
+  if (!action || !path || typeof path !== 'string') {
     throw errors.badRequest('action and path are required');
   }
 
-  const sandboxId = body.sandboxId || 'sam-prototype';
+  const sandboxId = resolveSandboxId(body.sandboxId);
+  await assertNotCredentialSetupSandbox(c.env, sandboxId);
   const sandbox = await getSandboxInstance(c.env, sandboxId);
 
   const start = Date.now();
 
-  if (body.action === 'write') {
-    if (typeof body.content !== 'string') {
+  if (action === 'write') {
+    const { content } = body;
+    if (typeof content !== 'string') {
       throw errors.badRequest('content is required for write action');
     }
-    await sandbox.writeFile(body.path, body.content);
+    await sandbox.writeFile(path, content);
     const durationMs = Date.now() - start;
     return c.json({ success: true, durationMs, sandboxId });
   }
 
-  if (body.action === 'read') {
-    const file = await sandbox.readFile(body.path);
+  if (action === 'read') {
+    const file = await sandbox.readFile(path);
     const durationMs = Date.now() - start;
     return c.json({ content: file.content, durationMs, sandboxId });
   }
 
-  if (body.action === 'exists') {
-    const result = await sandbox.exists(body.path);
+  if (action === 'exists') {
+    const result = await sandbox.exists(path);
     const durationMs = Date.now() - start;
     return c.json({ exists: result.exists, durationMs, sandboxId });
   }
@@ -212,39 +231,43 @@ adminSandboxRoutes.post('/files', async (c) => {
  * Body: { action: 'create' | 'restore', dir?: string, backupId?: string, sandboxId?: string }
  * Returns: { backupId?, success?, durationMs }
  */
-adminSandboxRoutes.post('/backup', async (c) => {
+adminSandboxRoutes.post('/backup', jsonValidator(SandboxBackupSchema), async (c) => {
   requireSandbox(c.env);
 
-  const body = await c.req.json<{
-    action: 'create' | 'restore';
-    dir?: string;
-    backupId?: string;
-    backupDir?: string;
-    sandboxId?: string;
-  }>();
-  if (!body.action) {
+  const body = c.req.valid('json');
+  const { action } = body;
+  if (!action) {
     throw errors.badRequest('action is required');
   }
 
-  const sandboxId = body.sandboxId || 'sam-prototype';
+  const sandboxId = resolveSandboxId(body.sandboxId);
+  await assertNotCredentialSetupSandbox(c.env, sandboxId);
   const sandbox = await getSandboxInstance(c.env, sandboxId);
 
   const start = Date.now();
 
-  if (body.action === 'create') {
-    const dir = body.dir || '/workspace';
+  if (action === 'create') {
+    const rawDir = body.dir;
+    const dir = typeof rawDir === 'string' && rawDir ? rawDir : '/workspace';
     const backup = await sandbox.createBackup({ dir, name: 'sam-prototype-backup' });
     const durationMs = Date.now() - start;
     return c.json({ backupId: backup.id, dir: backup.dir, durationMs, sandboxId });
   }
 
-  if (body.action === 'restore') {
-    if (!body.backupId) {
+  if (action === 'restore') {
+    const { backupId } = body;
+    // `backupId` also requires a string-type check (the original cast
+    // trusted the caller-declared type); any other truthy `backupId` could
+    // never have succeeded against the SDK's `string`-typed `id` field either.
+    if (!backupId || typeof backupId !== 'string') {
       throw errors.badRequest('backupId is required for restore action');
     }
+    const rawBackupDir = body.backupDir;
+    const backupDir =
+      typeof rawBackupDir === 'string' && rawBackupDir ? rawBackupDir : '/workspace';
     const result = await sandbox.restoreBackup({
-      id: body.backupId,
-      dir: body.backupDir || '/workspace',
+      id: backupId,
+      dir: backupDir,
     });
     const durationMs = Date.now() - start;
     return c.json({ success: result.success, durationMs, sandboxId });
@@ -269,6 +292,7 @@ adminSandboxRoutes.get('/exec-stream', async (c) => {
   }
 
   const sandboxId = c.req.query('sandboxId') || 'sam-prototype';
+  await assertNotCredentialSetupSandbox(c.env, sandboxId);
   const sandbox = await getSandboxInstance(c.env, sandboxId);
 
   const stream = await sandbox.execStream(command, {

@@ -31,9 +31,32 @@ export interface TokenBudget {
   outputTokens: number;
 }
 
+export interface AiProviderUsageAttribution {
+  providerId: string;
+  providerName: string;
+  dialect: string;
+}
+
+export interface AiProviderUsageEntry extends AiProviderUsageAttribution {
+  requests: number;
+  inputTokens: number;
+  outputTokens: number;
+  estimatedCostUsd: number;
+}
+
 interface AiTokenBudgetCounterStub extends DurableObjectStub {
   get(dateKey: string): Promise<TokenBudget>;
+  consumeTotal(dateKey: string, tokenLimit: number, tokens: number): Promise<{ allowed: boolean; usedTokens: number }>;
+  releaseTotal(dateKey: string, tokens: number): Promise<number>;
   increment(dateKey: string, inputTokens: number, outputTokens: number): Promise<TokenBudget>;
+  incrementProviderUsage(
+    dateKey: string,
+    attribution: AiProviderUsageAttribution,
+    inputTokens: number,
+    outputTokens: number,
+    estimatedCostUsd: number
+  ): Promise<void>;
+  getProviderUsage(startDateKey: string): Promise<AiProviderUsageEntry[]>;
 }
 
 export interface AiBudgetLimits {
@@ -41,6 +64,11 @@ export interface AiBudgetLimits {
   minDailyTokens: number;
   maxMonthlyCostCapUsd: number;
   minMonthlyCostCapUsd: number;
+}
+
+export interface PlatformDailyTokenLimits {
+  dailyInputTokenLimit: number;
+  dailyOutputTokenLimit: number;
 }
 
 function buildBudgetDateKey(date?: Date): string {
@@ -59,20 +87,59 @@ export function buildBudgetKey(userId: string, date?: Date): string {
 function getBudgetCounter(env: Env | undefined, userId: string) {
   if (!env?.AI_TOKEN_BUDGET_COUNTER) return null;
   return env.AI_TOKEN_BUDGET_COUNTER.get(
-    env.AI_TOKEN_BUDGET_COUNTER.idFromName(userId),
+    env.AI_TOKEN_BUDGET_COUNTER.idFromName(userId)
   ) as AiTokenBudgetCounterStub;
 }
 
 export function getAiBudgetLimits(env: Env): AiBudgetLimits {
   return {
-    maxDailyTokens: Number.parseInt(env.AI_USAGE_MAX_DAILY_TOKEN_LIMIT || '', 10)
-      || DEFAULT_AI_USAGE_MAX_DAILY_TOKEN_LIMIT,
-    minDailyTokens: Number.parseInt(env.AI_USAGE_MIN_DAILY_TOKEN_LIMIT || '', 10)
-      || DEFAULT_AI_USAGE_MIN_DAILY_TOKEN_LIMIT,
-    maxMonthlyCostCapUsd: Number(env.AI_USAGE_MAX_MONTHLY_COST_CAP_USD)
-      || DEFAULT_AI_USAGE_MAX_MONTHLY_COST_CAP_USD,
-    minMonthlyCostCapUsd: Number(env.AI_USAGE_MIN_MONTHLY_COST_CAP_USD)
-      || DEFAULT_AI_USAGE_MIN_MONTHLY_COST_CAP_USD,
+    maxDailyTokens:
+      Number.parseInt(env.AI_USAGE_MAX_DAILY_TOKEN_LIMIT || '', 10) ||
+      DEFAULT_AI_USAGE_MAX_DAILY_TOKEN_LIMIT,
+    minDailyTokens:
+      Number.parseInt(env.AI_USAGE_MIN_DAILY_TOKEN_LIMIT || '', 10) ||
+      DEFAULT_AI_USAGE_MIN_DAILY_TOKEN_LIMIT,
+    maxMonthlyCostCapUsd:
+      Number(env.AI_USAGE_MAX_MONTHLY_COST_CAP_USD) || DEFAULT_AI_USAGE_MAX_MONTHLY_COST_CAP_USD,
+    minMonthlyCostCapUsd:
+      Number(env.AI_USAGE_MIN_MONTHLY_COST_CAP_USD) || DEFAULT_AI_USAGE_MIN_MONTHLY_COST_CAP_USD,
+  };
+}
+
+function parsePositiveIntegerEnv(
+  value: string | undefined,
+  name: string,
+  defaultValue: number
+): number {
+  if (value === undefined) {
+    return defaultValue;
+  }
+
+  const normalized = value.trim();
+  if (!/^[1-9]\d*$/.test(normalized)) {
+    throw new Error(`${name} must be a positive integer when configured`);
+  }
+
+  const parsed = Number(normalized);
+  if (!Number.isSafeInteger(parsed)) {
+    throw new Error(`${name} must be a safe positive integer when configured`);
+  }
+
+  return parsed;
+}
+
+export function resolvePlatformDailyTokenLimits(env: Env): PlatformDailyTokenLimits {
+  return {
+    dailyInputTokenLimit: parsePositiveIntegerEnv(
+      env.AI_PROXY_DAILY_INPUT_TOKEN_LIMIT,
+      'AI_PROXY_DAILY_INPUT_TOKEN_LIMIT',
+      DEFAULT_AI_PROXY_DAILY_INPUT_TOKEN_LIMIT
+    ),
+    dailyOutputTokenLimit: parsePositiveIntegerEnv(
+      env.AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT,
+      'AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT',
+      DEFAULT_AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT
+    ),
   };
 }
 
@@ -83,7 +150,7 @@ export function getAiBudgetLimits(env: Env): AiBudgetLimits {
 export async function getTokenUsage(
   kv: KVNamespace,
   userId: string,
-  env?: Env,
+  env?: Env
 ): Promise<TokenBudget> {
   const counter = getBudgetCounter(env, userId);
   if (counter) {
@@ -93,6 +160,81 @@ export async function getTokenUsage(
   const key = buildBudgetKey(userId);
   const existing = await kv.get<TokenBudget>(key, 'json');
   return existing ?? { inputTokens: 0, outputTokens: 0 };
+}
+
+
+
+export interface FeatureTokenBudgetResult {
+  allowed: boolean;
+  usedTokens: number;
+  tokenLimit: number;
+}
+
+/** Build an isolated per-deployment feature budget key. */
+export function buildFeatureBudgetKey(feature: string, date?: Date): string {
+  return `ai-feature-budget:${feature}:${buildBudgetDateKey(date)}`;
+}
+
+/** Atomically consume a feature-scoped daily token allowance when the DO is available. */
+export async function consumeFeatureTokenBudget(
+  kv: KVNamespace,
+  feature: string,
+  tokens: number,
+  tokenLimit: number,
+  env?: Env,
+): Promise<FeatureTokenBudgetResult> {
+  const normalizedTokens = Math.max(0, Math.floor(tokens));
+  const counter = getBudgetCounter(env, `feature:${feature}`);
+  if (counter) {
+    const result = await counter.consumeTotal(buildBudgetDateKey(), tokenLimit, normalizedTokens);
+    return { ...result, tokenLimit };
+  }
+
+  const key = buildFeatureBudgetKey(feature);
+  const existing = Number(await kv.get(key)) || 0;
+  if (existing + normalizedTokens > tokenLimit) {
+    return { allowed: false, usedTokens: existing, tokenLimit };
+  }
+  const usedTokens = existing + normalizedTokens;
+  const ttl = parseInt(env?.AI_USAGE_BUDGET_TTL_SECONDS || '', 10) || DEFAULT_AI_USAGE_BUDGET_TTL_SECONDS;
+  await kv.put(key, String(usedTokens), { expirationTtl: ttl });
+  return { allowed: true, usedTokens, tokenLimit };
+}
+
+/** Release an unused feature budget reservation. */
+export async function releaseFeatureTokenBudget(
+  kv: KVNamespace,
+  feature: string,
+  tokens: number,
+  tokenLimit: number,
+  env?: Env,
+): Promise<FeatureTokenBudgetResult> {
+  const normalizedTokens = Math.max(0, Math.floor(tokens));
+  const counter = getBudgetCounter(env, `feature:${feature}`);
+  if (counter) {
+    const usedTokens = await counter.releaseTotal(buildBudgetDateKey(), normalizedTokens);
+    return { allowed: usedTokens < tokenLimit, usedTokens, tokenLimit };
+  }
+
+  const key = buildFeatureBudgetKey(feature);
+  const existing = Number(await kv.get(key)) || 0;
+  const usedTokens = Math.max(0, existing - normalizedTokens);
+  const ttl = parseInt(env?.AI_USAGE_BUDGET_TTL_SECONDS || '', 10) || DEFAULT_AI_USAGE_BUDGET_TTL_SECONDS;
+  await kv.put(key, String(usedTokens), { expirationTtl: ttl });
+  return { allowed: usedTokens < tokenLimit, usedTokens, tokenLimit };
+}
+
+export async function getFeatureTokenBudget(
+  kv: KVNamespace,
+  feature: string,
+  tokenLimit: number,
+  env?: Env,
+): Promise<FeatureTokenBudgetResult> {
+  const counter = getBudgetCounter(env, `feature:${feature}`);
+  const usedTokens = counter
+    ? (await counter.get(buildBudgetDateKey())).inputTokens
+    : Number(await kv.get(buildFeatureBudgetKey(feature))) || 0;
+  return { allowed: usedTokens < tokenLimit, usedTokens, tokenLimit };
 }
 
 // =============================================================================
@@ -107,7 +249,7 @@ export function buildBudgetSettingsKey(userId: string): string {
 /** Get a user's custom budget settings, or null if none set. */
 export async function getUserBudgetSettings(
   kv: KVNamespace,
-  userId: string,
+  userId: string
 ): Promise<UserAiBudgetSettings | null> {
   const key = buildBudgetSettingsKey(userId);
   return kv.get<UserAiBudgetSettings>(key, 'json');
@@ -117,17 +259,14 @@ export async function getUserBudgetSettings(
 export async function saveUserBudgetSettings(
   kv: KVNamespace,
   userId: string,
-  settings: UserAiBudgetSettings,
+  settings: UserAiBudgetSettings
 ): Promise<void> {
   const key = buildBudgetSettingsKey(userId);
   await kv.put(key, JSON.stringify(settings));
 }
 
 /** Delete a user's custom budget settings (revert to platform defaults). */
-export async function deleteUserBudgetSettings(
-  kv: KVNamespace,
-  userId: string,
-): Promise<void> {
+export async function deleteUserBudgetSettings(kv: KVNamespace, userId: string): Promise<void> {
   const key = buildBudgetSettingsKey(userId);
   await kv.delete(key);
 }
@@ -135,7 +274,7 @@ export async function deleteUserBudgetSettings(
 /** Get a user's admin-managed AI allowance ceiling from KV. */
 export async function getAdminAiAllowance(
   kv: KVNamespace,
-  userId: string,
+  userId: string
 ): Promise<AdminAiAllowance | null> {
   return kv.get<AdminAiAllowance>(`${AI_ADMIN_ALLOWANCE_KV_PREFIX}:${userId}`, 'json');
 }
@@ -149,7 +288,7 @@ export async function getAdminAiAllowance(
 export function validateBudgetUpdate(
   body: unknown,
   env: Env,
-  adminAllowance?: AdminAiAllowance | null,
+  adminAllowance?: AdminAiAllowance | null
 ): UserAiBudgetSettings {
   const request = expectJsonRecord(body, 'usage.ai.budget');
   const {
@@ -173,8 +312,14 @@ export function validateBudgetUpdate(
 
   if (request.dailyInputTokenLimit !== undefined) {
     if (request.dailyInputTokenLimit !== null) {
-      if (typeof request.dailyInputTokenLimit !== 'number' || request.dailyInputTokenLimit < minDailyTokens || request.dailyInputTokenLimit > maxDailyInputTokens) {
-        throw new Error(`dailyInputTokenLimit must be between ${minDailyTokens} and ${maxDailyInputTokens}`);
+      if (
+        typeof request.dailyInputTokenLimit !== 'number' ||
+        request.dailyInputTokenLimit < minDailyTokens ||
+        request.dailyInputTokenLimit > maxDailyInputTokens
+      ) {
+        throw new Error(
+          `dailyInputTokenLimit must be between ${minDailyTokens} and ${maxDailyInputTokens}`
+        );
       }
       settings.dailyInputTokenLimit = Math.floor(request.dailyInputTokenLimit);
     }
@@ -182,8 +327,14 @@ export function validateBudgetUpdate(
 
   if (request.dailyOutputTokenLimit !== undefined) {
     if (request.dailyOutputTokenLimit !== null) {
-      if (typeof request.dailyOutputTokenLimit !== 'number' || request.dailyOutputTokenLimit < minDailyTokens || request.dailyOutputTokenLimit > maxDailyOutputTokens) {
-        throw new Error(`dailyOutputTokenLimit must be between ${minDailyTokens} and ${maxDailyOutputTokens}`);
+      if (
+        typeof request.dailyOutputTokenLimit !== 'number' ||
+        request.dailyOutputTokenLimit < minDailyTokens ||
+        request.dailyOutputTokenLimit > maxDailyOutputTokens
+      ) {
+        throw new Error(
+          `dailyOutputTokenLimit must be between ${minDailyTokens} and ${maxDailyOutputTokens}`
+        );
       }
       settings.dailyOutputTokenLimit = Math.floor(request.dailyOutputTokenLimit);
     }
@@ -191,7 +342,11 @@ export function validateBudgetUpdate(
 
   if (request.monthlyCostCapUsd !== undefined) {
     if (request.monthlyCostCapUsd !== null) {
-      if (typeof request.monthlyCostCapUsd !== 'number' || request.monthlyCostCapUsd < minMonthlyCap || request.monthlyCostCapUsd > maxMonthlyCap) {
+      if (
+        typeof request.monthlyCostCapUsd !== 'number' ||
+        request.monthlyCostCapUsd < minMonthlyCap ||
+        request.monthlyCostCapUsd > maxMonthlyCap
+      ) {
         throw new Error(`monthlyCostCapUsd must be between ${minMonthlyCap} and ${maxMonthlyCap}`);
       }
       settings.monthlyCostCapUsd = Math.round(request.monthlyCostCapUsd * 100) / 100;
@@ -199,7 +354,11 @@ export function validateBudgetUpdate(
   }
 
   if (request.alertThresholdPercent !== undefined) {
-    if (typeof request.alertThresholdPercent !== 'number' || request.alertThresholdPercent < 1 || request.alertThresholdPercent > 100) {
+    if (
+      typeof request.alertThresholdPercent !== 'number' ||
+      request.alertThresholdPercent < 1 ||
+      request.alertThresholdPercent > 100
+    ) {
       throw new Error('alertThresholdPercent must be between 1 and 100');
     }
     settings.alertThresholdPercent = Math.floor(request.alertThresholdPercent);
@@ -213,12 +372,10 @@ export function validateBudgetUpdate(
  */
 export function resolveEffectiveLimits(
   userSettings: UserAiBudgetSettings | null,
-  env: Env,
+  env: Env
 ): { dailyInputTokenLimit: number; dailyOutputTokenLimit: number } {
-  const platformInputLimit = parseInt(env.AI_PROXY_DAILY_INPUT_TOKEN_LIMIT || '', 10)
-    || DEFAULT_AI_PROXY_DAILY_INPUT_TOKEN_LIMIT;
-  const platformOutputLimit = parseInt(env.AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT || '', 10)
-    || DEFAULT_AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT;
+  const { dailyInputTokenLimit: platformInputLimit, dailyOutputTokenLimit: platformOutputLimit } =
+    resolvePlatformDailyTokenLimits(env);
 
   return {
     dailyInputTokenLimit: userSettings?.dailyInputTokenLimit ?? platformInputLimit,
@@ -233,7 +390,7 @@ export function resolveEffectiveLimits(
 export async function checkTokenBudget(
   kv: KVNamespace,
   userId: string,
-  env: Env,
+  env: Env
 ): Promise<{ allowed: boolean; usage: TokenBudget; inputLimit: number; outputLimit: number }> {
   // Load user budget settings (may be null)
   const userSettings = await getUserBudgetSettings(kv, userId);
@@ -254,15 +411,11 @@ export async function incrementTokenUsage(
   userId: string,
   inputTokens: number,
   outputTokens: number,
-  env?: Env,
+  env?: Env
 ): Promise<TokenBudget> {
   const counter = getBudgetCounter(env, userId);
   if (counter) {
-    const updated = await counter.increment(
-      buildBudgetDateKey(),
-      inputTokens,
-      outputTokens,
-    );
+    const updated = await counter.increment(buildBudgetDateKey(), inputTokens, outputTokens);
 
     log.info('ai_proxy.token_usage_updated', {
       userId,
@@ -284,8 +437,8 @@ export async function incrementTokenUsage(
     outputTokens: existing.outputTokens + outputTokens,
   };
 
-  const ttl = parseInt(env?.AI_USAGE_BUDGET_TTL_SECONDS || '', 10)
-    || DEFAULT_AI_USAGE_BUDGET_TTL_SECONDS;
+  const ttl =
+    parseInt(env?.AI_USAGE_BUDGET_TTL_SECONDS || '', 10) || DEFAULT_AI_USAGE_BUDGET_TTL_SECONDS;
 
   await kv.put(key, JSON.stringify(updated), {
     expirationTtl: ttl,
@@ -303,6 +456,118 @@ export async function incrementTokenUsage(
   return updated;
 }
 
+/** Build the KV key for a user's provider-scoped AI usage on one UTC day. */
+export function buildProviderUsageKey(userId: string, date?: Date): string {
+  return `ai-provider-usage:${userId}:${buildBudgetDateKey(date)}`;
+}
+
+export async function incrementProviderUsage(
+  kv: KVNamespace,
+  userId: string,
+  attribution: AiProviderUsageAttribution,
+  inputTokens: number,
+  outputTokens: number,
+  env?: Env,
+  estimatedCostUsd = 0
+): Promise<void> {
+  const counter = getBudgetCounter(env, userId);
+  if (counter) {
+    await counter.incrementProviderUsage(
+      buildBudgetDateKey(),
+      attribution,
+      inputTokens,
+      outputTokens,
+      estimatedCostUsd
+    );
+    return;
+  }
+
+  const key = buildProviderUsageKey(userId);
+  const existing = (await kv.get<Record<string, AiProviderUsageEntry>>(key, 'json')) ?? {};
+  const usageKey = providerUsageKey(attribution.providerId, attribution.dialect);
+  const current = existing[usageKey] ?? {
+    ...attribution,
+    requests: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    estimatedCostUsd: 0,
+  };
+
+  existing[usageKey] = {
+    ...current,
+    providerName: attribution.providerName,
+    requests: current.requests + 1,
+    inputTokens: current.inputTokens + inputTokens,
+    outputTokens: current.outputTokens + outputTokens,
+    estimatedCostUsd: current.estimatedCostUsd + estimatedCostUsd,
+  };
+
+  const ttl =
+    parseInt(env?.AI_USAGE_BUDGET_TTL_SECONDS || '', 10) || DEFAULT_AI_USAGE_BUDGET_TTL_SECONDS;
+  await kv.put(key, JSON.stringify(existing), { expirationTtl: ttl });
+}
+
+export async function getProviderUsage(
+  kv: KVNamespace,
+  userId: string,
+  startDate: Date,
+  env?: Env,
+  endDate = new Date()
+): Promise<AiProviderUsageEntry[]> {
+  const counter = getBudgetCounter(env, userId);
+  const startDateKey = buildBudgetDateKey(startDate);
+  if (counter) {
+    return counter.getProviderUsage(startDateKey);
+  }
+
+  const combined = new Map<string, AiProviderUsageEntry>();
+  for (const date of eachUtcDate(startDate, endDate)) {
+    const entries = await kv.get<Record<string, AiProviderUsageEntry>>(
+      buildProviderUsageKey(userId, date),
+      'json'
+    );
+    if (!entries) continue;
+    for (const entry of Object.values(entries)) {
+      mergeProviderUsageEntry(combined, entry);
+    }
+  }
+  return Array.from(combined.values());
+}
+
+function providerUsageKey(providerId: string, dialect: string): string {
+  return `${providerId}:${dialect}`;
+}
+
+function mergeProviderUsageEntry(
+  map: Map<string, AiProviderUsageEntry>,
+  entry: AiProviderUsageEntry
+): void {
+  const key = providerUsageKey(entry.providerId, entry.dialect);
+  const existing = map.get(key);
+  if (existing) {
+    existing.requests += entry.requests;
+    existing.inputTokens += entry.inputTokens;
+    existing.outputTokens += entry.outputTokens;
+    existing.estimatedCostUsd += entry.estimatedCostUsd;
+  } else {
+    map.set(key, { ...entry });
+  }
+}
+
+function* eachUtcDate(startDate: Date, endDate: Date): Generator<Date> {
+  const current = new Date(
+    Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth(), startDate.getUTCDate())
+  );
+  const end = new Date(
+    Date.UTC(endDate.getUTCFullYear(), endDate.getUTCMonth(), endDate.getUTCDate())
+  );
+
+  while (current <= end) {
+    yield new Date(current);
+    current.setUTCDate(current.getUTCDate() + 1);
+  }
+}
+
 // =============================================================================
 // Monthly Cost Cap Enforcement (KV-cached, written by cron)
 // =============================================================================
@@ -317,7 +582,7 @@ export function buildMonthlyCostCacheKey(userId: string): string {
 /** Read a user's cached monthly AI cost from KV. Returns null if not cached yet. */
 export async function getCachedMonthlyCost(
   kv: KVNamespace,
-  userId: string,
+  userId: string
 ): Promise<number | null> {
   const key = buildMonthlyCostCacheKey(userId);
   const raw = await kv.get(key);
@@ -336,7 +601,7 @@ export async function getCachedMonthlyCost(
  */
 export async function checkMonthlyCostCap(
   kv: KVNamespace,
-  userId: string,
+  userId: string
 ): Promise<{ allowed: boolean; costUsd: number; capUsd: number | null }> {
   const userSettings = await getUserBudgetSettings(kv, userId);
   const capUsd = userSettings?.monthlyCostCapUsd ?? null;
@@ -361,21 +626,21 @@ export async function checkMonthlyCostCap(
 export type AiUsageGateResult =
   | { allowed: true }
   | {
-    allowed: false;
-    reason: 'daily-token-budget';
-    budget: Awaited<ReturnType<typeof checkTokenBudget>>;
-  }
+      allowed: false;
+      reason: 'daily-token-budget';
+      budget: Awaited<ReturnType<typeof checkTokenBudget>>;
+    }
   | {
-    allowed: false;
-    reason: 'monthly-cost-cap';
-    monthlyCap: Awaited<ReturnType<typeof checkMonthlyCostCap>>;
-  };
+      allowed: false;
+      reason: 'monthly-cost-cap';
+      monthlyCap: Awaited<ReturnType<typeof checkMonthlyCostCap>>;
+    };
 
 /** Check all pre-request AI usage limits shared by proxy routes. */
 export async function checkAiUsageGate(
   kv: KVNamespace,
   userId: string,
-  env: Env,
+  env: Env
 ): Promise<AiUsageGateResult> {
   const budget = await checkTokenBudget(kv, userId, env);
   if (!budget.allowed) {

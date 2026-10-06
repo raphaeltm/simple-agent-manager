@@ -1,0 +1,131 @@
+import { describe, expect, it } from 'vitest';
+
+import { getModelGroupsForAgent, getModelsForAgent, isKnownModel } from '../../src/model-catalog';
+
+const OPENCODE_CONSUMERS = ['opencode'] as const;
+
+const EXPECTED_OPENCODE_MODELS = [
+  'opencode/claude-fable-5-1',
+  'opencode/claude-fable-5',
+  'opencode/claude-opus-5-5',
+  'opencode/claude-opus-5',
+  'opencode/claude-sonnet-5',
+  'opencode/claude-sonnet-5-5',
+  'opencode/gemini-3.8-flash',
+  'opencode/gemini-3.7-flash',
+  'opencode/gemini-3.6-flash',
+  'opencode/gpt-6-astra',
+  'opencode/gpt-6.1-sol',
+  'opencode/gpt-6-sol',
+  'opencode/gpt-6-luna',
+  'opencode/gpt-5.6-sol',
+  'opencode/grok-4.7',
+  'opencode/kimi-k3',
+  'opencode/minimax-m3',
+  'opencode/muse-spark-1.3',
+  'opencode/muse-spark-1.3-contributor-free',
+  'opencode/ling-3.0-flash-fin-free',
+  'opencode-go/deepseek-v4-flash-vision-exp',
+  'opencode-go/glm-5.2',
+  'opencode-go/glm-5.3',
+  'opencode-go/gpt-6-luna',
+  'opencode-go/grok-4.7',
+  'opencode-go/gpt-5.6-luna',
+  'opencode-go/hy3',
+  'opencode-go/kimi-k3',
+  'opencode-go/muse-spark-1.3-contributor',
+  'opencode-go/qwen3.8-max',
+] as const;
+
+const EXPECTED_GROUP_LABELS = ['OpenCode Zen', 'OpenCode Go'] as const;
+
+describe('OpenCode model catalog entries', () => {
+  it('keys suggested OpenCode models as provider-qualified IDs', () => {
+    for (const agentType of OPENCODE_CONSUMERS) {
+      const models = getModelsForAgent(agentType);
+
+      for (const modelId of EXPECTED_OPENCODE_MODELS) {
+        expect(
+          models.some((model) => model.id === modelId),
+          `${agentType} is missing ${modelId}`
+        ).toBe(true);
+        expect(isKnownModel(agentType, modelId), `${agentType} should know ${modelId}`).toBe(true);
+      }
+    }
+  });
+
+  it('keeps changed Models.dev display names in sync', () => {
+    const namesById = new Map(
+      getModelsForAgent('opencode').map((model) => [model.id, model.name])
+    );
+
+    expect(namesById.get('opencode/deepseek-v4-flash')).toBe('DeepSeek V4 Flash');
+    expect(namesById.get('opencode/claude-sonnet-5-5')).toBe('Claude Sonnet 5.5');
+    expect(namesById.get('opencode/gpt-6-astra')).toBe('GPT-6 Astra');
+    expect(namesById.get('opencode/gpt-6.1-sol')).toBe('GPT-6.1 Sol');
+    expect(namesById.get('opencode/gpt-5.6-sol')).toBe('GPT-5.6 Sol');
+    expect(namesById.get('opencode/grok-4.7')).toBe('Grok 4.7');
+    expect(namesById.get('opencode/muse-spark-1.3-contributor-free')).toBe('Muse Spark 1.3 Free');
+    expect(namesById.get('opencode-go/deepseek-v4-flash')).toBe('DeepSeek V4 Flash');
+    expect(namesById.get('opencode-go/deepseek-v4-pro')).toBe('DeepSeek V4 Pro (New)');
+    expect(namesById.get('opencode-go/gpt-6-luna')).toBe('GPT-6 Luna');
+    expect(namesById.has('opencode-go/gpt-6.1-sol')).toBe(false);
+    expect(namesById.get('opencode-go/gpt-5.6-luna')).toBe('GPT-5.6 Luna');
+    expect(namesById.get('opencode-go/hy3')).toBe('Hy3');
+    expect(namesById.get('opencode-go/kimi-k3')).toBe('Kimi K3');
+  });
+
+  it('keeps OpenCode groups discoverable by provider label', () => {
+    for (const agentType of OPENCODE_CONSUMERS) {
+      const labels = getModelGroupsForAgent(agentType).map((group) => group.label);
+
+      for (const label of EXPECTED_GROUP_LABELS) {
+        expect(labels).toContain(label);
+      }
+    }
+  });
+
+  it('uses valid model definition fields consistent with catalog conventions', () => {
+    for (const agentType of OPENCODE_CONSUMERS) {
+      for (const group of getModelGroupsForAgent(agentType)) {
+        expect(group.label.trim()).toBe(group.label);
+        expect(group.label.length).toBeGreaterThan(0);
+        expect(group.models.length).toBeGreaterThan(0);
+
+        for (const model of group.models) {
+          expect(model.id).toMatch(/^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*$/);
+          expect(model.name.trim()).toBe(model.name);
+          expect(model.name.length).toBeGreaterThan(0);
+          expect(model.group).toBe(group.label);
+        }
+      }
+    }
+  });
+
+  it('excludes inactive Models.dev records from the static fallback', () => {
+    for (const inactiveModelId of [
+      'opencode/claude-opus-4-1',
+      'opencode/deepseek-v4-flash-free',
+      'opencode/laguna-s-2.1-free',
+      'opencode/ling-3.0-flash-free',
+      'opencode/ling-3.0-tiny-free',
+      'opencode/longcat-2.0-free',
+      'opencode/north-mini-code-free',
+      'opencode/x-preview-f-free',
+      'opencode-go/ox-alpha-free',
+      'opencode/qwen3.7-plus',
+    ]) {
+      expect(
+        isKnownModel('opencode', inactiveModelId),
+        inactiveModelId + ' should be inactive'
+      ).toBe(false);
+    }
+  });
+
+  it('does not duplicate model IDs within each OpenCode consumer catalog', () => {
+    for (const agentType of OPENCODE_CONSUMERS) {
+      const ids = getModelsForAgent(agentType).map((model) => model.id);
+      expect(new Set(ids).size, `${agentType} has duplicate model ids`).toBe(ids.length);
+    }
+  });
+});

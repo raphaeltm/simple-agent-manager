@@ -21,7 +21,6 @@ import { describe, expect, it } from 'vitest';
 
 import type { ChatSessionListItem, ChatSessionResponse } from '../../../src/lib/api';
 import { SessionItem } from '../../../src/pages/project-chat/SessionItem';
-import type { SessionTreeNode } from '../../../src/pages/project-chat/sessionTree';
 import { SessionTreeItem } from '../../../src/pages/project-chat/SessionTreeItem';
 import type { TaskInfo } from '../../../src/pages/project-chat/useTaskGroups';
 
@@ -55,18 +54,6 @@ function makeDetailSession(overrides: Partial<ChatSessionResponse> = {}): ChatSe
   return { ...SESSION_DEFAULTS, ...overrides };
 }
 
-/** Wrap a session in a minimal SessionTreeNode. */
-function makeTreeNode(session: ChatSessionListItem): SessionTreeNode {
-  return {
-    session,
-    children: [],
-    depth: 0,
-    isContextAnchor: false,
-    totalDescendants: 0,
-    completedDescendants: 0,
-  };
-}
-
 // ---------------------------------------------------------------------------
 // 1. Pure data flow: getAttentionState sees task status through enrichment
 // ---------------------------------------------------------------------------
@@ -83,6 +70,7 @@ describe('Session icon data flow: list session + task status → correct icon', 
     taskStatus: string;
     sessionStatus: string;
     expectedTitle: string;
+    errorMessage?: string;
   }> = [
     {
       label: 'completed task shows checkmark',
@@ -95,6 +83,13 @@ describe('Session icon data flow: list session + task status → correct icon', 
       taskStatus: 'failed',
       sessionStatus: 'stopped',
       expectedTitle: 'Failed',
+    },
+    {
+      label: 'input expiry shows neutral stopped icon',
+      taskStatus: 'failed',
+      sessionStatus: 'stopped',
+      expectedTitle: 'Stopped',
+      errorMessage: 'Human input request expired after timeout',
     },
     {
       label: 'cancelled task shows pause',
@@ -110,48 +105,45 @@ describe('Session icon data flow: list session + task status → correct icon', 
     },
   ];
 
-  for (const { label, taskStatus, sessionStatus, expectedTitle } of cases) {
+  for (const { label, taskStatus, sessionStatus, expectedTitle, errorMessage } of cases) {
     it(label, () => {
-      // Simulate API: session has taskId but NO task embed (list endpoint)
       const session = makeListSession({
         taskId: 'task-1',
         status: sessionStatus,
-        // Importantly: no `task` field — this is what the list API returns
       });
 
-      // Simulate API: task list returns status separately
       const taskInfoMap = new Map<string, TaskInfo>([
-        ['task-1', {
-          id: 'task-1',
-          title: 'Test task',
-          parentTaskId: null,
-          status: taskStatus as TaskInfo['status'],
-          blocked: false,
-          triggeredBy: 'user',
-          dispatchDepth: 0,
-          taskMode: 'task',
-        }],
+        [
+          'task-1',
+          {
+            id: 'task-1',
+            title: 'Test task',
+            parentTaskId: null,
+            status: taskStatus as TaskInfo['status'],
+            errorMessage,
+            blocked: false,
+            triggeredBy: 'user',
+            dispatchDepth: 0,
+            taskMode: 'task',
+          },
+        ],
       ]);
-
-      const node = makeTreeNode(session);
 
       const { container } = render(
         <SessionTreeItem
-          node={node}
+          session={session}
           selectedSessionId={null}
           onSelect={() => {}}
           taskInfoMap={taskInfoMap}
-        />,
+        />
       );
 
-      // The status icon has a title attribute set to the attention state label
       const iconSpan = container.querySelector(`[title="${expectedTitle}"]`);
       expect(iconSpan, `Expected icon with title="${expectedTitle}" for ${label}`).toBeTruthy();
     });
   }
 
   it('session without task shows correct lifecycle icon', () => {
-    // Conversation session (no task) that is idle
     const session = makeListSession({
       status: 'active',
       isIdle: true,
@@ -160,11 +152,11 @@ describe('Session icon data flow: list session + task status → correct icon', 
 
     const { container } = render(
       <SessionTreeItem
-        node={makeTreeNode(session)}
+        session={session}
         selectedSessionId={null}
         onSelect={() => {}}
         taskInfoMap={new Map()}
-      />,
+      />
     );
 
     const iconSpan = container.querySelector('[title="Idle"]');
@@ -175,29 +167,37 @@ describe('Session icon data flow: list session + task status → correct icon', 
     const session = makeListSession({
       taskId: 'task-1',
       status: 'active',
-      attention: { kind: 'needs_input', createdAt: Date.now(), expiresAt: null, reason: 'Waiting for approval' },
+      attention: {
+        kind: 'needs_input',
+        createdAt: Date.now(),
+        expiresAt: null,
+        reason: 'Waiting for approval',
+      },
     });
 
     const taskInfoMap = new Map<string, TaskInfo>([
-      ['task-1', {
-        id: 'task-1',
-        title: 'Test task',
-        parentTaskId: null,
-        status: 'in_progress',
-        blocked: false,
-        triggeredBy: 'user',
-        dispatchDepth: 0,
-        taskMode: 'task',
-      }],
+      [
+        'task-1',
+        {
+          id: 'task-1',
+          title: 'Test task',
+          parentTaskId: null,
+          status: 'in_progress',
+          blocked: false,
+          triggeredBy: 'user',
+          dispatchDepth: 0,
+          taskMode: 'task',
+        },
+      ],
     ]);
 
     const { container } = render(
       <SessionTreeItem
-        node={makeTreeNode(session)}
+        session={session}
         selectedSessionId={null}
         onSelect={() => {}}
         taskInfoMap={taskInfoMap}
-      />,
+      />
     );
 
     const iconSpan = container.querySelector('[title="Needs input"]');
@@ -211,8 +211,6 @@ describe('Session icon data flow: list session + task status → correct icon', 
 
 describe('Session with existing task embed (detail endpoint)', () => {
   it('preserves task data from detail endpoint without overwriting', () => {
-    // When a session is loaded from the detail endpoint, it already has
-    // the full task embed. The enrichment should NOT overwrite it.
     const session = makeDetailSession({
       taskId: 'task-1',
       status: 'stopped',
@@ -225,25 +223,28 @@ describe('Session with existing task embed (detail endpoint)', () => {
     });
 
     const taskInfoMap = new Map<string, TaskInfo>([
-      ['task-1', {
-        id: 'task-1',
-        title: 'Test task',
-        parentTaskId: null,
-        status: 'completed',
-        blocked: false,
-        triggeredBy: 'user',
-        dispatchDepth: 0,
-        taskMode: 'task',
-      }],
+      [
+        'task-1',
+        {
+          id: 'task-1',
+          title: 'Test task',
+          parentTaskId: null,
+          status: 'completed',
+          blocked: false,
+          triggeredBy: 'user',
+          dispatchDepth: 0,
+          taskMode: 'task',
+        },
+      ],
     ]);
 
     const { container } = render(
       <SessionTreeItem
-        node={makeTreeNode(session)}
+        session={session}
         selectedSessionId={null}
         onSelect={() => {}}
         taskInfoMap={taskInfoMap}
-      />,
+      />
     );
 
     const iconSpan = container.querySelector('[title="Completed"]');
@@ -262,22 +263,37 @@ describe('SessionItem renders correct icon for each attention state', () => {
     expectedTitle: string;
   }> = [
     { label: 'active', session: { status: 'active' }, expectedTitle: 'Running' },
-    { label: 'idle', session: { status: 'active', isIdle: true, agentCompletedAt: Date.now() }, expectedTitle: 'Idle' },
-    { label: 'completed', session: { status: 'stopped', task: { id: 't', status: 'completed' } }, expectedTitle: 'Completed' },
-    { label: 'failed', session: { status: 'stopped', task: { id: 't', status: 'failed' } }, expectedTitle: 'Failed' },
+    {
+      label: 'idle',
+      session: { status: 'active', isIdle: true, agentCompletedAt: Date.now() },
+      expectedTitle: 'Idle',
+    },
+    {
+      label: 'completed',
+      session: { status: 'stopped', task: { id: 't', status: 'completed' } },
+      expectedTitle: 'Completed',
+    },
+    {
+      label: 'failed',
+      session: { status: 'stopped', task: { id: 't', status: 'failed' } },
+      expectedTitle: 'Failed',
+    },
     { label: 'stopped', session: { status: 'stopped' }, expectedTitle: 'Stopped' },
     { label: 'error', session: { status: 'failed' }, expectedTitle: 'Error' },
-    { label: 'needs_input', session: { status: 'active', attention: { kind: 'needs_input', createdAt: Date.now(), expiresAt: null, reason: null } }, expectedTitle: 'Needs input' },
+    {
+      label: 'needs_input',
+      session: {
+        status: 'active',
+        attention: { kind: 'needs_input', createdAt: Date.now(), expiresAt: null, reason: null },
+      },
+      expectedTitle: 'Needs input',
+    },
   ];
 
   for (const { label, session, expectedTitle } of iconCases) {
     it(`renders "${expectedTitle}" icon for ${label} state`, () => {
       const { container } = render(
-        <SessionItem
-          session={makeDetailSession(session)}
-          isSelected={false}
-          onSelect={() => {}}
-        />,
+        <SessionItem session={makeDetailSession(session)} isSelected={false} onSelect={() => {}} />
       );
 
       const iconSpan = container.querySelector(`[title="${expectedTitle}"]`);
@@ -292,37 +308,36 @@ describe('SessionItem renders correct icon for each attention state', () => {
 
 describe('Session mode enrichment: conversation vs task', () => {
   it('conversation-mode session shows MessageSquare icon, not ListTodo', () => {
-    // List endpoint returns a session with taskId but no task embed.
-    // Without enrichment, getSessionMode falls back to "if taskId, return task"
-    // which is wrong for conversation-mode sessions.
     const session = makeListSession({
       taskId: 'task-conv',
       status: 'active',
     });
 
     const taskInfoMap = new Map<string, TaskInfo>([
-      ['task-conv', {
-        id: 'task-conv',
-        title: 'Conversation task',
-        parentTaskId: null,
-        status: 'in_progress',
-        blocked: false,
-        triggeredBy: 'user',
-        dispatchDepth: 0,
-        taskMode: 'conversation',
-      }],
+      [
+        'task-conv',
+        {
+          id: 'task-conv',
+          title: 'Conversation task',
+          parentTaskId: null,
+          status: 'in_progress',
+          blocked: false,
+          triggeredBy: 'user',
+          dispatchDepth: 0,
+          taskMode: 'conversation',
+        },
+      ],
     ]);
 
     const { container } = render(
       <SessionTreeItem
-        node={makeTreeNode(session)}
+        session={session}
         selectedSessionId={null}
         onSelect={() => {}}
         taskInfoMap={taskInfoMap}
-      />,
+      />
     );
 
-    // SessionItem renders a mode badge with title="Task" or title="Conversation"
     const modeLabel = container.querySelector('[title="Conversation"]');
     expect(modeLabel, 'Conversation-mode session should have title="Conversation"').toBeTruthy();
   });
@@ -334,25 +349,28 @@ describe('Session mode enrichment: conversation vs task', () => {
     });
 
     const taskInfoMap = new Map<string, TaskInfo>([
-      ['task-auto', {
-        id: 'task-auto',
-        title: 'Autonomous task',
-        parentTaskId: null,
-        status: 'in_progress',
-        blocked: false,
-        triggeredBy: 'user',
-        dispatchDepth: 0,
-        taskMode: 'task',
-      }],
+      [
+        'task-auto',
+        {
+          id: 'task-auto',
+          title: 'Autonomous task',
+          parentTaskId: null,
+          status: 'in_progress',
+          blocked: false,
+          triggeredBy: 'user',
+          dispatchDepth: 0,
+          taskMode: 'task',
+        },
+      ],
     ]);
 
     const { container } = render(
       <SessionTreeItem
-        node={makeTreeNode(session)}
+        session={session}
         selectedSessionId={null}
         onSelect={() => {}}
         taskInfoMap={taskInfoMap}
-      />,
+      />
     );
 
     const modeLabel = container.querySelector('[title="Task"]');

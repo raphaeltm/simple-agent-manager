@@ -1,30 +1,36 @@
 import {
-  Activity,
   ArrowLeft,
   ArrowRight,
   Bell,
-  Bot,
   Brain,
   ChevronDown,
   ChevronRight,
   Clock,
+  FileCode,
   FolderKanban,
   FolderOpen,
   Home,
   Lightbulb,
   Map,
   MessageSquare,
+  MessageSquareQuote,
   Monitor,
+  PlayCircle,
+  Radio,
+  Rocket,
   Server,
   Settings,
   Shield,
   UserCog,
+  Wrench,
+  Zap,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router';
 
 import { useAuth } from './AuthProvider';
+import { useOnboarding } from './onboarding';
 
 export interface NavItem {
   label: string;
@@ -35,24 +41,32 @@ export interface NavItem {
 /** Global nav items shown when NOT inside a project */
 export const GLOBAL_NAV_ITEMS: NavItem[] = [
   { label: 'Home', path: '/dashboard', icon: <Home size={18} /> },
-  { label: 'SAM', path: '/sam', icon: <Bot size={18} /> },
+  // { label: 'SAM', path: '/sam', icon: <Bot size={18} /> }, // Hidden — experimental, not ready for users yet
   { label: 'Chats', path: '/chats', icon: <MessageSquare size={18} /> },
   { label: 'Projects', path: '/projects', icon: <FolderKanban size={18} /> },
   { label: 'Map', path: '/account-map', icon: <Map size={18} /> },
+  { label: 'Tools', path: '/tools', icon: <Wrench size={18} /> },
   { label: 'Settings', path: '/settings', icon: <Settings size={18} /> },
 ];
 
 /** Project sub-nav items — paths are relative to /projects/:id/ */
 export const PROJECT_NAV_ITEMS: NavItem[] = [
   { label: 'Chat', path: 'chat', icon: <MessageSquare size={18} /> },
-  { label: 'Agent', path: 'agent', icon: <Bot size={18} /> },
+  // { label: 'Agent', path: 'agent', icon: <Bot size={18} /> }, // Hidden — experimental, not ready for users yet
+  // MessageSquareQuote, not MessageSquare: Chat already owns the plain speech
+  // bubble, and two bubbles side by side in the same rail are indistinguishable
+  // at 18px. The quote marks are what make this read as "annotation".
+  { label: 'Comments', path: 'comments', icon: <MessageSquareQuote size={18} /> },
+  { label: 'Files', path: 'files', icon: <FileCode size={18} /> },
   { label: 'Library', path: 'library', icon: <FolderOpen size={18} /> },
   { label: 'Ideas', path: 'ideas', icon: <Lightbulb size={18} /> },
-  { label: 'Knowledge', path: 'knowledge', icon: <Brain size={18} /> },
+  { label: 'Deployments', path: 'deployments', icon: <Rocket size={18} /> },
+  { label: 'Agent Context', path: 'agent-context', icon: <Brain size={18} /> },
   { label: 'Notifications', path: 'notifications', icon: <Bell size={18} /> },
+  { label: 'Events', path: 'events', icon: <Radio size={18} /> },
   { label: 'Triggers', path: 'triggers', icon: <Clock size={18} /> },
   { label: 'Profiles', path: 'profiles', icon: <UserCog size={18} /> },
-  { label: 'Activity', path: 'activity', icon: <Activity size={18} /> },
+  { label: 'Skills', path: 'skills', icon: <Zap size={18} /> },
   { label: 'Settings', path: 'settings', icon: <Settings size={18} /> },
 ];
 
@@ -77,11 +91,15 @@ function isProjectSubActive(subPath: string, projectId: string, pathname: string
   return pathname === fullPath || pathname.startsWith(`${fullPath}/`);
 }
 
-const FOCUS_RING = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
+const FOCUS_RING =
+  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
 const NAV_ITEM_BASE = `flex items-center gap-3 pl-[10px] pr-3 py-2 rounded-sm no-underline text-sm font-medium border-l-2 transition-all duration-150 ${FOCUS_RING}`;
-const NAV_ITEM_ACTIVE = 'text-accent border-l-accent bg-[rgba(34,197,94,0.08)]';
-const NAV_ITEM_INACTIVE = 'text-fg-muted border-l-transparent hover:text-fg-primary hover:bg-[rgba(34,197,94,0.04)]';
-const SECTION_DIVIDER = 'mt-2 pt-2 before:content-[\'\'] before:block before:h-px before:mb-2 before:bg-[linear-gradient(90deg,transparent,rgba(34,197,94,0.18),transparent)]';
+const NAV_ITEM_BASE_ICON = `flex items-center justify-center px-0 py-2 rounded-sm no-underline text-sm font-medium border-l-2 transition-all duration-150 ${FOCUS_RING}`;
+const NAV_ITEM_ACTIVE = 'text-accent border-l-accent bg-[var(--sam-chrome-accent-active-subtle)]';
+const NAV_ITEM_INACTIVE =
+  'text-fg-muted border-l-transparent hover:text-fg-primary hover:bg-[var(--sam-chrome-accent-hover-subtle)]';
+const SECTION_DIVIDER =
+  "mt-2 pt-2 before:content-[''] before:block before:h-px before:mb-2 before:bg-[linear-gradient(90deg,transparent,var(--sam-chrome-accent-divider),transparent)]";
 
 interface NavSidebarProps {
   className?: string;
@@ -90,15 +108,105 @@ interface NavSidebarProps {
   onToggleGlobalNav?: () => void;
   /** Rendered below Infrastructure in global nav views */
   projectListSection?: ReactNode;
+  projectHealthElement?: ReactNode;
+  /** Collapse to a 56px icon rail (Focus Mode) — hides labels, centers icons */
+  iconOnly?: boolean;
 }
 
-export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlobalNav, projectListSection }: NavSidebarProps) {
+export function NavSidebar({
+  className,
+  projectName,
+  showGlobalNav,
+  onToggleGlobalNav,
+  projectListSection,
+  projectHealthElement,
+  iconOnly,
+}: NavSidebarProps) {
   const location = useLocation();
   const { isSuperadmin } = useAuth();
+  const { needsOnboarding, openOnboarding } = useOnboarding();
   const [infraOpen, setInfraOpen] = useState(false);
 
   const projectId = extractProjectId(location.pathname);
   const insideProject = Boolean(projectId);
+
+  // Shared item class: centered icon-only in Focus rail, full label otherwise.
+  const itemClass = (active: boolean) =>
+    `${iconOnly ? NAV_ITEM_BASE_ICON : NAV_ITEM_BASE} ${active ? NAV_ITEM_ACTIVE : NAV_ITEM_INACTIVE}`;
+
+  // Collapsible Infrastructure section — identical in the project-context global
+  // panel and the standalone global sidebar. Extracted so the markup lives once.
+  const infraItems = [
+    { label: 'Nodes', path: '/nodes', icon: <Server size={18} /> },
+    { label: 'Workspaces', path: '/workspaces', icon: <Monitor size={18} /> },
+  ];
+
+  // In the Focus icon rail there is no room for a collapsible header — render
+  // the infra destinations directly as icon links so they remain reachable.
+  const infraSection = iconOnly ? (
+    <div className={SECTION_DIVIDER}>
+      {infraItems.map((item) => {
+        const active = isActive(item.path, location.pathname);
+        return (
+          <Link
+            key={item.path}
+            to={item.path}
+            aria-current={active ? 'page' : undefined}
+            aria-label={item.label}
+            title={item.label}
+            className={itemClass(active)}
+          >
+            {item.icon}
+          </Link>
+        );
+      })}
+    </div>
+  ) : (
+    <div className={SECTION_DIVIDER}>
+      <button
+        onClick={() => setInfraOpen(!infraOpen)}
+        className={`flex items-center gap-2 w-full px-3 py-2 rounded-sm bg-transparent border-none text-xs font-semibold text-fg-muted uppercase tracking-wider cursor-pointer hover:text-fg-primary hover:bg-[var(--sam-chrome-accent-hover-subtle)] transition-all duration-150 ${FOCUS_RING}`}
+        aria-expanded={infraOpen}
+        aria-controls="infra-nav-panel"
+      >
+        {infraOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        Infrastructure
+      </button>
+      {infraOpen && (
+        <div id="infra-nav-panel" className="flex flex-col gap-1">
+          {infraItems.map((item) => {
+            const active = isActive(item.path, location.pathname);
+            return (
+              <Link
+                key={item.path}
+                to={item.path}
+                aria-current={active ? 'page' : undefined}
+                className={`${NAV_ITEM_BASE} ml-2 ${active ? NAV_ITEM_ACTIVE : NAV_ITEM_INACTIVE}`}
+              >
+                {item.icon}
+                {item.label}
+              </Link>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+
+  // Onboarding resume — shown in both nav layouts when setup is incomplete.
+  const onboardingResume = needsOnboarding && (
+    <div className={SECTION_DIVIDER}>
+      <button
+        onClick={openOnboarding}
+        aria-label="Complete Setup"
+        title={iconOnly ? 'Complete Setup' : undefined}
+        className={`${iconOnly ? NAV_ITEM_BASE_ICON : NAV_ITEM_BASE} text-accent border-l-accent bg-[var(--sam-chrome-accent-soft)] hover:bg-[var(--sam-chrome-accent-active)]`}
+      >
+        <PlayCircle size={18} />
+        {!iconOnly && 'Complete Setup'}
+      </button>
+    </div>
+  );
 
   // When inside a project, we can toggle between project nav and global nav
   if (insideProject && projectId) {
@@ -107,33 +215,54 @@ export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlob
       : GLOBAL_NAV_ITEMS;
 
     return (
-      <div className={`relative overflow-hidden ${className ?? ''}`}>
+      /* `data-intentional-clip`: this is a two-panel carousel — both panels sit
+         side by side (2x width) and are translated into view, so its content is
+         deliberately wider than its box. Marks it as intentional for the
+         `assertNoClippedOverflow` audit guard.
+
+         `flex-1 min-h-0`: `overflow: hidden` resolves this flex item's automatic
+         minimum size to 0, so without `flex-1` it collapses to the leftover space
+         and silently clips the bottom nav items — with no scrollbar, because the
+         `aside` then never overflows either. Claiming the leftover space and
+         letting each panel scroll (below) is what makes them reachable. */
+      <div
+        data-intentional-clip
+        className={`relative flex-1 min-h-0 overflow-hidden ${className ?? ''}`}
+      >
         {/* Sliding container — holds both panels side by side */}
         <div
-          className="flex transition-transform duration-200 ease-out motion-reduce:transition-none"
+          className="flex h-full transition-transform duration-200 ease-out motion-reduce:transition-none"
           style={{ transform: showGlobalNav ? 'translateX(-100%)' : 'translateX(0)' }}
         >
           {/* Panel 1: Project nav */}
           <nav
             aria-label="Project navigation"
-            className="flex flex-col gap-1 p-2 w-full shrink-0"
+            className="flex flex-col gap-1 p-2 w-full shrink-0 h-full overflow-y-auto"
             aria-hidden={showGlobalNav || undefined}
             inert={showGlobalNav ? true : undefined}
           >
             {/* Toggle to global nav */}
             <button
               onClick={onToggleGlobalNav}
-              className={`flex items-center gap-2 px-3 py-2.5 rounded-sm bg-transparent border-none text-sm text-fg-muted hover:text-fg-primary hover:bg-[rgba(34,197,94,0.04)] cursor-pointer transition-all duration-150 ${FOCUS_RING}`}
+              className={`flex items-center gap-2 ${iconOnly ? 'justify-center px-0' : 'px-3'} py-2.5 rounded-sm bg-transparent border-none text-sm text-fg-muted hover:text-fg-primary hover:bg-[var(--sam-chrome-accent-hover-subtle)] cursor-pointer transition-all duration-150 ${FOCUS_RING}`}
               aria-label="Show global navigation"
+              title={iconOnly ? 'Back to Projects' : undefined}
             >
               <ArrowLeft size={16} />
-              <span>Back to Projects</span>
+              {!iconOnly && <span>Back to Projects</span>}
             </button>
 
             {/* Project name header */}
-            <div className="px-3 py-2 text-xs font-semibold text-fg-muted uppercase tracking-wider truncate" title={projectName}>
-              {projectName || 'Project'}
-            </div>
+            {!iconOnly && (
+              <div
+                className="px-3 py-2 text-xs font-semibold text-fg-muted uppercase tracking-wider truncate"
+                title={projectName}
+              >
+                {projectName || 'Project'}
+              </div>
+            )}
+
+            {projectHealthElement && <div className="px-1 pb-1">{projectHealthElement}</div>}
 
             {/* Project sub-nav */}
             {PROJECT_NAV_ITEMS.map((item) => {
@@ -143,12 +272,12 @@ export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlob
                   key={item.path}
                   to={`/projects/${projectId}/${item.path}`}
                   aria-current={active ? 'page' : undefined}
-                  className={`${NAV_ITEM_BASE} ${
-                    active ? NAV_ITEM_ACTIVE : NAV_ITEM_INACTIVE
-                  }`}
+                  aria-label={iconOnly ? item.label : undefined}
+                  title={iconOnly ? item.label : undefined}
+                  className={itemClass(active)}
                 >
                   {item.icon}
-                  {item.label}
+                  {!iconOnly && item.label}
                 </Link>
               );
             })}
@@ -157,18 +286,19 @@ export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlob
           {/* Panel 2: Global nav (shown when toggled) */}
           <nav
             aria-label="Primary navigation"
-            className="flex flex-col gap-1 p-2 w-full shrink-0"
+            className="flex flex-col gap-1 p-2 w-full shrink-0 h-full overflow-y-auto"
             aria-hidden={!showGlobalNav || undefined}
             inert={!showGlobalNav ? true : undefined}
           >
             {/* Toggle back to project nav */}
             <button
               onClick={onToggleGlobalNav}
-              className={`flex items-center gap-2 px-3 py-2.5 rounded-sm bg-transparent border-none text-sm text-fg-muted hover:text-fg-primary hover:bg-[rgba(34,197,94,0.04)] cursor-pointer transition-all duration-150 ${FOCUS_RING}`}
+              className={`flex items-center gap-2 ${iconOnly ? 'justify-center px-0' : 'px-3'} py-2.5 rounded-sm bg-transparent border-none text-sm text-fg-muted hover:text-fg-primary hover:bg-[var(--sam-chrome-accent-hover-subtle)] cursor-pointer transition-all duration-150 ${FOCUS_RING}`}
               aria-label={`Back to ${projectName || 'project'} navigation`}
+              title={iconOnly ? `Back to ${projectName || 'Project'}` : undefined}
             >
               <ArrowRight size={16} />
-              <span className="truncate">Back to {projectName || 'Project'}</span>
+              {!iconOnly && <span className="truncate">Back to {projectName || 'Project'}</span>}
             </button>
 
             {/* Global nav items */}
@@ -179,53 +309,22 @@ export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlob
                   key={item.path}
                   to={item.path}
                   aria-current={active ? 'page' : undefined}
-                  className={`${NAV_ITEM_BASE} ${
-                    active ? NAV_ITEM_ACTIVE : NAV_ITEM_INACTIVE
-                  }`}
+                  aria-label={iconOnly ? item.label : undefined}
+                  title={iconOnly ? item.label : undefined}
+                  className={itemClass(active)}
                 >
                   {item.icon}
-                  {item.label}
+                  {!iconOnly && item.label}
                 </Link>
               );
             })}
 
-            <div className={SECTION_DIVIDER}>
-              <button
-                onClick={() => setInfraOpen(!infraOpen)}
-                className={`flex items-center gap-2 w-full px-3 py-2 rounded-sm bg-transparent border-none text-xs font-semibold text-fg-muted uppercase tracking-wider cursor-pointer hover:text-fg-primary hover:bg-[rgba(34,197,94,0.04)] transition-all duration-150 ${FOCUS_RING}`}
-                aria-expanded={infraOpen}
-                aria-controls="infra-nav-panel"
-              >
-                {infraOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                Infrastructure
-              </button>
-              {infraOpen && (
-                <div id="infra-nav-panel" className="flex flex-col gap-1">
-                  {[
-                    { label: 'Nodes', path: '/nodes', icon: <Server size={18} /> },
-                    { label: 'Workspaces', path: '/workspaces', icon: <Monitor size={18} /> },
-                  ].map((item) => {
-                    const active = isActive(item.path, location.pathname);
-                    return (
-                      <Link
-                        key={item.path}
-                        to={item.path}
-                        aria-current={active ? 'page' : undefined}
-                        className={`${NAV_ITEM_BASE} ml-2 ${
-                          active ? NAV_ITEM_ACTIVE : NAV_ITEM_INACTIVE
-                        }`}
-                      >
-                        {item.icon}
-                        {item.label}
-                      </Link>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
+            {infraSection}
 
-            {/* Project list — in global panel within project context */}
-            {projectListSection}
+            {onboardingResume}
+
+            {/* Project list — hidden in the Focus rail (too wide for 56px) */}
+            {!iconOnly && projectListSection}
           </nav>
         </div>
       </div>
@@ -238,7 +337,13 @@ export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlob
     : GLOBAL_NAV_ITEMS;
 
   return (
-    <nav aria-label="Primary navigation" className={`flex flex-col gap-1 p-2 ${className ?? ''}`}>
+    // `flex-1 min-h-0 overflow-y-auto`: same reason as the project carousel above
+    // — the list must own the leftover column space and scroll itself, so the
+    // `aside`'s header and user footer stay pinned on short viewports.
+    <nav
+      aria-label="Primary navigation"
+      className={`flex flex-col gap-1 p-2 flex-1 min-h-0 overflow-y-auto ${className ?? ''}`}
+    >
       {globalItems.map((item) => {
         const active = isActive(item.path, location.pathname);
         return (
@@ -246,53 +351,22 @@ export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlob
             key={item.path}
             to={item.path}
             aria-current={active ? 'page' : undefined}
-            className={`${NAV_ITEM_BASE} ${
-              active ? NAV_ITEM_ACTIVE : NAV_ITEM_INACTIVE
-            }`}
+            aria-label={iconOnly ? item.label : undefined}
+            title={iconOnly ? item.label : undefined}
+            className={itemClass(active)}
           >
             {item.icon}
-            {item.label}
+            {!iconOnly && item.label}
           </Link>
         );
       })}
 
-      <div className={SECTION_DIVIDER}>
-        <button
-          onClick={() => setInfraOpen(!infraOpen)}
-          className={`flex items-center gap-2 w-full px-3 py-2 rounded-sm bg-transparent border-none text-xs font-semibold text-fg-muted uppercase tracking-wider cursor-pointer hover:text-fg-primary hover:bg-[rgba(34,197,94,0.04)] transition-all duration-150 ${FOCUS_RING}`}
-          aria-expanded={infraOpen}
-          aria-controls="infra-nav-panel"
-        >
-          {infraOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-          Infrastructure
-        </button>
-        {infraOpen && (
-          <div id="infra-nav-panel" className="flex flex-col gap-1">
-            {[
-              { label: 'Nodes', path: '/nodes', icon: <Server size={18} /> },
-              { label: 'Workspaces', path: '/workspaces', icon: <Monitor size={18} /> },
-            ].map((item) => {
-              const active = isActive(item.path, location.pathname);
-              return (
-                <Link
-                  key={item.path}
-                  to={item.path}
-                  aria-current={active ? 'page' : undefined}
-                  className={`${NAV_ITEM_BASE} ml-2 ${
-                    active ? NAV_ITEM_ACTIVE : NAV_ITEM_INACTIVE
-                  }`}
-                >
-                  {item.icon}
-                  {item.label}
-                </Link>
-              );
-            })}
-          </div>
-        )}
-      </div>
+      {infraSection}
 
-      {/* Project list — in standalone global nav */}
-      {projectListSection}
+      {onboardingResume}
+
+      {/* Project list — hidden in the Focus rail (too wide for 56px) */}
+      {!iconOnly && projectListSection}
     </nav>
   );
 }

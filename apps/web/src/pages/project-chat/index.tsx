@@ -1,14 +1,21 @@
-import { Spinner } from '@simple-agent-manager/ui';
-import { ChevronDown, ChevronRight, LayoutGrid, List, Search, Settings, X } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { Alert, Spinner } from '@simple-agent-manager/ui';
+import { ChevronDown, ChevronRight, List, Search, Settings, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router';
 
+import { useAppShell } from '../../components/AppShell';
 import { BootLogPanel } from '../../components/chat/BootLogPanel';
 import { ProjectMessageView } from '../../components/project-message-view';
+import { HierarchyModal } from '../../components/task-hierarchy';
 import { TriggerDropdown } from '../../components/triggers/TriggerDropdown';
+import { ZenPeekRail } from '../../components/ZenPeekRail';
 import { useIsMobile } from '../../hooks/useIsMobile';
+import { resolveAttentionAnswer } from '../../lib/api';
+import { sessionWidthForMode } from '../../lib/focus-mode';
 import { ChatInput } from './ChatInput';
 import { DerivedSessionBanner } from './DerivedSessionBanner';
-import { getLineageText } from './lineageUtils';
+import { FocusStrip } from './FocusStrip';
+import { getSessionSourceContext } from './lineageUtils';
 import { MobileSessionDrawer } from './MobileSessionDrawer';
 import { ProvisioningIndicator } from './ProvisioningIndicator';
 import { SessionList } from './SessionList';
@@ -17,8 +24,121 @@ import { useProjectChatState } from './useProjectChatState';
 
 export function ProjectChat() {
   const isMobile = useIsMobile();
+  const { focusMode, setFocusMode } = useAppShell();
+  const location = useLocation();
+  const navigate = useNavigate();
   const state = useProjectChatState();
   const [triggerDropdownOpen, setTriggerDropdownOpen] = useState(false);
+  const [attentionAnswerStatus, setAttentionAnswerStatus] = useState<{
+    variant: 'success' | 'error';
+    message: string;
+  } | null>(null);
+  const [pendingAttentionAnswer, setPendingAttentionAnswer] = useState<{
+    markerId: string;
+    answer: string;
+  } | null>(null);
+  const processedAttentionAction = useRef<string | null>(null);
+  const { loadSessions, projectId, sessionId } = state;
+
+  const submitAttentionAnswer = useCallback(
+    async (markerId: string, answer: string) => {
+      if (!sessionId) return;
+      setAttentionAnswerStatus(null);
+      try {
+        const result = await resolveAttentionAnswer(projectId, sessionId, markerId, answer);
+        setPendingAttentionAnswer(null);
+        setAttentionAnswerStatus({
+          variant: 'success',
+          message: result.resolved ? `Answered: ${answer}` : `Answer is being sent: ${answer}`,
+        });
+        void loadSessions();
+      } catch (cause) {
+        setPendingAttentionAnswer({ markerId, answer });
+        setAttentionAnswerStatus({
+          variant: 'error',
+          message: cause instanceof Error ? cause.message : 'Could not send this answer',
+        });
+      }
+    },
+    [loadSessions, projectId, sessionId]
+  );
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const attentionHash = location.hash.startsWith('#attentionMarker=')
+      ? new URLSearchParams(location.hash.slice(1))
+      : null;
+    const markerId = attentionHash?.get('attentionMarker') ?? params.get('attentionMarker');
+    const answer = attentionHash?.get('attentionAnswer') ?? params.get('attentionAnswer');
+    if (!markerId || !answer || !sessionId) return;
+    const key = `${sessionId}:${markerId}:${answer}`;
+    if (processedAttentionAction.current === key) return;
+    processedAttentionAction.current = key;
+
+    params.delete('attentionMarker');
+    params.delete('attentionAnswer');
+    const nextSearch = params.toString();
+    const nextHash = attentionHash ? '' : location.hash;
+    navigate(`${location.pathname}${nextSearch ? `?${nextSearch}` : ''}${nextHash}`, {
+      replace: true,
+    });
+    void submitAttentionAnswer(markerId, answer).finally(() => {
+      processedAttentionAction.current = null;
+    });
+  }, [
+    location.hash,
+    location.pathname,
+    location.search,
+    navigate,
+    sessionId,
+    submitAttentionAnswer,
+  ]);
+
+  // Derive hierarchy modal state from URL hash (#hierarchy-<taskId>)
+  const hierarchyTaskId = useMemo(() => {
+    const hash = location.hash;
+    if (hash.startsWith('#hierarchy-')) return hash.slice('#hierarchy-'.length);
+    return null;
+  }, [location.hash]);
+
+  const handleShowHierarchy = useCallback(
+    (taskId: string) => {
+      navigate(location.pathname + location.search + `#hierarchy-${taskId}`);
+    },
+    [navigate, location.pathname, location.search]
+  );
+
+  const handleHierarchyClose = useCallback(() => {
+    navigate(-1);
+  }, [navigate]);
+
+  const handleHierarchyNavigate = useCallback(
+    (sessionId: string) => {
+      navigate(`/projects/${state.projectId}/chat/${sessionId}`, { replace: true });
+    },
+    [navigate, state.projectId]
+  );
+  const commentMessageTarget = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    const messageId = params.get('commentMessage');
+    if (!messageId) return null;
+    const timestampRaw = params.get('commentAt');
+    const timestamp = timestampRaw ? Number(timestampRaw) : null;
+    return {
+      messageId,
+      timestamp: Number.isFinite(timestamp) ? timestamp : null,
+    };
+  }, [location.search]);
+  const handleCommentMessageTargetConsumed = useCallback(() => {
+    const params = new URLSearchParams(location.search);
+    if (!params.has('commentMessage') && !params.has('commentAt')) return;
+    params.delete('commentMessage');
+    params.delete('commentAt');
+    const nextSearch = params.toString();
+    navigate(`${location.pathname}${nextSearch ? `?${nextSearch}` : ''}${location.hash}`, {
+      replace: true,
+    });
+  }, [location.hash, location.pathname, location.search, navigate]);
   const activeSessionId = state.sessionId ?? '';
   const starterPrompts = useMemo(() => {
     const repoLabel = state.project?.repository || state.project?.name || 'this repo';
@@ -30,12 +150,44 @@ export function ProjectChat() {
     ];
   }, [state.project?.name, state.project?.repository]);
 
-  // Compute lineage text for the selected session (for header display)
-  const selectedLineageText = useMemo(() => {
+  /**
+   * Stable identities for the session-tool handlers.
+   *
+   * These feed `useSessionTools`' memoized action array. As inline arrows they were
+   * rebuilt on every `ProjectChat` render — and this page re-renders on the session-sync
+   * poll plus the faster provisioning poll — so the memo they gate never actually held
+   * and `buildSessionToolActions` re-ran on every tick (rule 64).
+   */
+  // Destructured so the dependency arrays name the exact values used. Depending on the
+  // whole `state` object would invalidate these on every render and defeat the point.
+  // `loadSessions`/`sessionId` are already destructured above.
+  const { sessions: chatSessions, handleRetry, handleFork } = state;
+  const permissionRefreshSignal = useMemo(() => {
+    const attention = chatSessions.find((session) => session.id === sessionId)?.attention;
+    if (!attention) return null;
+    return `${attention.markerId}:${attention.reason ?? ''}`;
+  }, [chatSessions, sessionId]);
+
+  const handleRetryActiveSession = useCallback(() => {
+    const session = chatSessions.find((sess) => sess.id === sessionId);
+    if (session?.taskId) handleRetry(session);
+  }, [chatSessions, sessionId, handleRetry]);
+
+  const handleForkActiveSession = useCallback(() => {
+    const session = chatSessions.find((sess) => sess.id === sessionId);
+    if (session) handleFork(session);
+  }, [chatSessions, sessionId, handleFork]);
+
+  const handleSessionMutated = useCallback(() => {
+    void loadSessions();
+  }, [loadSessions]);
+
+  // Compute source context for the selected retry/fork session (for header display).
+  const selectedSourceContext = useMemo(() => {
     if (!state.sessionId) return undefined;
     const session = state.sessions.find((s) => s.id === state.sessionId);
     if (!session?.taskId) return undefined;
-    return getLineageText(session.taskId, state.taskInfoMap, state.sessions);
+    return getSessionSourceContext(session.taskId, state.taskInfoMap, state.sessions);
   }, [state.sessionId, state.sessions, state.taskInfoMap]);
 
   // Loading state
@@ -47,150 +199,193 @@ export function ProjectChat() {
     );
   }
 
+  // Full session-sidebar content. Reused verbatim by the default-mode panel
+  // and the Zen peek panel so the two never drift.
+  const sidebarInner = (
+    <>
+      {/* Sidebar header: project name + action buttons */}
+      <div className="shrink-0 px-3 py-2.5 border-b border-[rgba(34,197,94,0.08)] flex items-center gap-2">
+        <span className="text-sm font-semibold text-fg-primary truncate flex-1">
+          {state.project?.name || 'Project'}
+        </span>
+        {state.realtimeDegraded && (
+          <button
+            type="button"
+            onClick={() => void state.loadSessions()}
+            title="Realtime updates paused. Click to refresh."
+            aria-label="Realtime updates paused. Click to refresh session list."
+            className="shrink-0 p-1 bg-transparent border-none cursor-pointer rounded-sm transition-colors"
+            style={{ color: 'var(--sam-color-warning, #f59e0b)' }}
+          >
+            <span
+              aria-hidden="true"
+              className="inline-block w-2 h-2 rounded-full"
+              style={{ backgroundColor: 'var(--sam-color-warning, #f59e0b)' }}
+            />
+          </button>
+        )}
+        <TriggerDropdown
+          projectId={state.projectId}
+          open={triggerDropdownOpen}
+          onToggle={() => setTriggerDropdownOpen((prev) => !prev)}
+        />
+        <button
+          type="button"
+          onClick={() => navigate(`/projects/${state.projectId}/settings`)}
+          title="Project settings"
+          aria-label="Project settings"
+          className="shrink-0 p-1 bg-transparent border-none cursor-pointer text-fg-muted rounded-sm hover:text-fg-primary transition-colors"
+        >
+          <Settings size={15} />
+        </button>
+      </div>
+
+      {/* New chat button */}
+      <div className="shrink-0 p-2 border-b border-[rgba(34,197,94,0.08)]">
+        <button
+          type="button"
+          onClick={state.handleNewChat}
+          className="w-full py-1.5 px-3 rounded-md border border-[rgba(34,197,94,0.15)] bg-transparent cursor-pointer text-fg-primary text-xs font-medium hover:bg-[rgba(34,197,94,0.06)] hover:border-[rgba(34,197,94,0.25)] hover:shadow-[0_0_12px_rgba(22,163,74,0.08)] transition-all"
+        >
+          + New Chat
+        </button>
+      </div>
+
+      {/* Subtle refresh indicator */}
+      {state.isRefreshing && (
+        <div
+          className="h-0.5 bg-accent animate-pulse"
+          role="status"
+          aria-label="Refreshing sessions"
+        />
+      )}
+
+      {/* Search */}
+      {state.hasSessions && (
+        <div className="shrink-0 px-2 py-1.5 border-b border-[rgba(34,197,94,0.08)] space-y-1.5">
+          <div className="relative flex items-center">
+            <Search size={13} className="absolute left-2 text-fg-muted pointer-events-none" />
+            <input
+              type="text"
+              value={state.searchQuery}
+              onChange={(e) => state.setSearchQuery(e.target.value)}
+              placeholder="Search chats..."
+              className="w-full pl-7 pr-7 py-1 text-xs rounded-md border border-[rgba(34,197,94,0.1)] bg-[var(--sam-form-bg)] text-fg-primary placeholder:text-fg-muted focus:outline-none focus:border-[rgba(34,197,94,0.3)] focus:shadow-[0_0_12px_rgba(22,163,74,0.06)] transition-all"
+            />
+            {state.searchQuery && (
+              <button
+                type="button"
+                onClick={() => state.setSearchQuery('')}
+                className="absolute right-1.5 p-0.5 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary"
+                aria-label="Clear search"
+              >
+                <X size={12} />
+              </button>
+            )}
+          </div>
+          {state.multiplayerActive && (
+            <div
+              className="grid grid-cols-2 gap-1 rounded-md border border-border-default bg-surface/40 p-0.5"
+              aria-label="Session ownership filter"
+            >
+              {(['my', 'all'] as const).map((scope) => (
+                <button
+                  key={scope}
+                  type="button"
+                  onClick={() => state.setSessionScope(scope)}
+                  aria-pressed={state.sessionScope === scope}
+                  className={`rounded-sm px-2 py-1 text-[11px] font-medium transition-colors ${
+                    state.sessionScope === scope
+                      ? 'bg-accent/15 text-accent'
+                      : 'bg-transparent text-fg-muted hover:text-fg-primary'
+                  }`}
+                >
+                  {scope === 'my' ? 'My sessions' : 'All sessions'}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Session list — scrollable */}
+      {state.hasSessions ? (
+        <nav aria-label="Chat sessions" className="flex-1 overflow-y-auto min-h-0">
+          <SessionList
+            sessions={state.filteredRecent}
+            selectedSessionId={state.sessionId ?? null}
+            onSelect={state.handleSelect}
+            taskInfoMap={state.taskInfoMap}
+            onShowHierarchy={handleShowHierarchy}
+            showOwnership={state.multiplayerActive}
+          />
+          {state.filteredStale.length > 0 && (
+            <>
+              <button
+                type="button"
+                onClick={() => state.setShowStale(!state.effectiveShowStale)}
+                className="w-full flex items-center gap-1.5 px-3 py-2 text-xs text-fg-muted bg-transparent border-none border-b border-[rgba(34,197,94,0.06)] cursor-pointer hover:bg-[rgba(34,197,94,0.04)] transition-colors"
+              >
+                {state.effectiveShowStale ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                <span>Older ({state.filteredStale.length})</span>
+              </button>
+              {state.effectiveShowStale && (
+                <SessionList
+                  sessions={state.filteredStale}
+                  selectedSessionId={state.sessionId ?? null}
+                  onSelect={state.handleSelect}
+                  taskInfoMap={state.taskInfoMap}
+                  onShowHierarchy={handleShowHierarchy}
+                  showOwnership={state.multiplayerActive}
+                />
+              )}
+            </>
+          )}
+          {state.filteredRecent.length === 0 && !state.effectiveShowStale && (
+            <div className="flex items-center justify-center p-4">
+              <span className="text-xs text-fg-muted text-center">
+                {state.searchQuery ? 'No matching chats' : 'No recent chats'}
+              </span>
+            </div>
+          )}
+        </nav>
+      ) : (
+        <div className="flex-1 flex items-center justify-center p-4">
+          <span className="text-xs text-fg-muted text-center">
+            No chats yet. Start a new one above.
+          </span>
+        </div>
+      )}
+    </>
+  );
+
   return (
     <div className="flex flex-1 min-h-0">
       {/* ================================================================== */}
-      {/* Desktop sidebar                                                    */}
+      {/* Desktop session sidebar — collapses with Focus Mode                */}
+      {/* default: 288px full panel · focus: 64px status strip · zen: seam   */}
       {/* ================================================================== */}
-      {!isMobile && (
-        <div className="w-72 shrink-0 glass-chrome glass-panel-container glass-composited border-y-0 border-l-0 flex flex-col">
-          {/* Sidebar header: project name + action buttons */}
-          <div className="shrink-0 px-3 py-2.5 border-b border-[rgba(34,197,94,0.08)] flex items-center gap-2">
-            <span className="text-sm font-semibold text-fg-primary truncate flex-1">
-              {state.project?.name || 'Project'}
-            </span>
-            {state.realtimeDegraded && (
-              <button
-                type="button"
-                onClick={() => void state.loadSessions()}
-                title="Realtime updates paused. Click to refresh."
-                aria-label="Realtime updates paused. Click to refresh session list."
-                className="shrink-0 p-1 bg-transparent border-none cursor-pointer rounded-sm transition-colors"
-                style={{ color: 'var(--sam-color-warning, #f59e0b)' }}
-              >
-                <span
-                  aria-hidden="true"
-                  className="inline-block w-2 h-2 rounded-full"
-                  style={{ backgroundColor: 'var(--sam-color-warning, #f59e0b)' }}
-                />
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => state.setInfoPanelOpen(!state.infoPanelOpen)}
-              title="Project status"
-              aria-label="Project status"
-              className="shrink-0 p-1 bg-transparent border-none cursor-pointer text-fg-muted rounded-sm hover:text-fg-primary transition-colors"
-            >
-              <LayoutGrid size={15} />
-            </button>
-            <TriggerDropdown
-              projectId={state.projectId}
-              open={triggerDropdownOpen}
-              onToggle={() => setTriggerDropdownOpen((prev) => !prev)}
+      {!isMobile && focusMode === 'zen' && (
+        <ZenPeekRail edge="sessions" label="Chats" onExpand={() => setFocusMode('default')}>
+          {sidebarInner}
+        </ZenPeekRail>
+      )}
+      {!isMobile && focusMode !== 'zen' && (
+        <div
+          style={{ width: sessionWidthForMode(focusMode) }}
+          className="relative z-20 shrink-0 overflow-hidden glass-chrome glass-panel-container glass-composited border-y-0 border-l-0 flex flex-col transition-[width] duration-200 ease-out motion-reduce:transition-none"
+        >
+          {focusMode === 'focus' ? (
+            <FocusStrip
+              sessions={state.filteredRecent}
+              selectedSessionId={state.sessionId ?? null}
+              onSelect={state.handleSelect}
+              taskInfoMap={state.taskInfoMap}
+              onShowHierarchy={handleShowHierarchy}
+              onNewChat={state.handleNewChat}
             />
-            <button
-              type="button"
-              onClick={() => state.setSettingsOpen(!state.settingsOpen)}
-              title="Project settings"
-              aria-label="Project settings"
-              className="shrink-0 p-1 bg-transparent border-none cursor-pointer text-fg-muted rounded-sm hover:text-fg-primary transition-colors"
-            >
-              <Settings size={15} />
-            </button>
-          </div>
-
-          {/* New chat button */}
-          <div className="shrink-0 p-2 border-b border-[rgba(34,197,94,0.08)]">
-            <button
-              type="button"
-              onClick={state.handleNewChat}
-              className="w-full py-1.5 px-3 rounded-md border border-[rgba(34,197,94,0.15)] bg-transparent cursor-pointer text-fg-primary text-xs font-medium hover:bg-[rgba(34,197,94,0.06)] hover:border-[rgba(34,197,94,0.25)] hover:shadow-[0_0_12px_rgba(22,163,74,0.08)] transition-all"
-            >
-              + New Chat
-            </button>
-          </div>
-
-          {/* Subtle refresh indicator */}
-          {state.isRefreshing && (
-            <div className="h-0.5 bg-accent animate-pulse" role="status" aria-label="Refreshing sessions" />
-          )}
-
-          {/* Search */}
-          {state.hasSessions && (
-            <div className="shrink-0 px-2 py-1.5 border-b border-[rgba(34,197,94,0.08)]">
-              <div className="relative flex items-center">
-                <Search size={13} className="absolute left-2 text-fg-muted pointer-events-none" />
-                <input
-                  type="text"
-                  value={state.searchQuery}
-                  onChange={(e) => state.setSearchQuery(e.target.value)}
-                  placeholder="Search chats..."
-                  className="w-full pl-7 pr-7 py-1 text-xs rounded-md border border-[rgba(34,197,94,0.1)] bg-[rgba(10,15,13,0.4)] text-fg-primary placeholder:text-fg-muted focus:outline-none focus:border-[rgba(34,197,94,0.3)] focus:shadow-[0_0_12px_rgba(22,163,74,0.06)] transition-all"
-                />
-                {state.searchQuery && (
-                  <button
-                    type="button"
-                    onClick={() => state.setSearchQuery('')}
-                    className="absolute right-1.5 p-0.5 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary"
-                    aria-label="Clear search"
-                  >
-                    <X size={12} />
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Session list — scrollable */}
-          {state.hasSessions ? (
-            <nav aria-label="Chat sessions" className="flex-1 overflow-y-auto min-h-0">
-              <SessionList
-                sessions={state.filteredRecent}
-                allSessions={state.sessions}
-                selectedSessionId={state.sessionId ?? null}
-                onSelect={state.handleSelect}
-                onFork={state.handleFork}
-                taskTitleMap={state.taskTitleMap}
-                taskInfoMap={state.taskInfoMap}
-                searchQuery={state.searchQuery}
-              />
-              {state.filteredStale.length > 0 && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => state.setShowStale(!state.effectiveShowStale)}
-                    className="w-full flex items-center gap-1.5 px-3 py-2 text-xs text-fg-muted bg-transparent border-none border-b border-[rgba(34,197,94,0.06)] cursor-pointer hover:bg-[rgba(34,197,94,0.04)] transition-colors"
-                  >
-                    {state.effectiveShowStale ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                    <span>Older ({state.filteredStale.length})</span>
-                  </button>
-                  {state.effectiveShowStale && (
-                    <SessionList
-                      sessions={state.filteredStale}
-                      allSessions={state.sessions}
-                      selectedSessionId={state.sessionId ?? null}
-                      onSelect={state.handleSelect}
-                      onFork={state.handleFork}
-                      taskTitleMap={state.taskTitleMap}
-                      taskInfoMap={state.taskInfoMap}
-                      searchQuery={state.searchQuery}
-                    />
-                  )}
-                </>
-              )}
-              {state.filteredRecent.length === 0 && !state.effectiveShowStale && (
-                <div className="flex items-center justify-center p-4">
-                  <span className="text-xs text-fg-muted text-center">
-                    {state.searchQuery ? 'No matching chats' : 'No recent chats'}
-                  </span>
-                </div>
-              )}
-            </nav>
           ) : (
-            <div className="flex-1 flex items-center justify-center p-4">
-              <span className="text-xs text-fg-muted text-center">No chats yet. Start a new one above.</span>
-            </div>
+            sidebarInner
           )}
         </div>
       )}
@@ -201,10 +396,10 @@ export function ProjectChat() {
       <div className="flex-1 flex flex-col min-h-0 min-w-0">
         {/* Mobile header bar */}
         {isMobile && (
-          <div className="shrink-0 flex items-center gap-2 px-3 py-2 glass-chrome border-x-0 border-t-0">
+          <div className="relative z-20 shrink-0 flex items-center gap-2 px-3 py-2 glass-chrome border-x-0 border-t-0">
             <button
               type="button"
-              onClick={() => state.setSettingsOpen(!state.settingsOpen)}
+              onClick={() => navigate(`/projects/${state.projectId}/settings`)}
               aria-label="Project settings"
               className="shrink-0 p-1.5 bg-transparent border-none cursor-pointer text-fg-muted"
             >
@@ -229,9 +424,15 @@ export function ProjectChat() {
         {state.showNewChatInput ? (
           /* New chat / empty state */
           <div className="flex-1 flex flex-col min-h-0">
-            <div className={`flex-1 flex flex-col items-center gap-3 ${isMobile ? 'p-4 justify-end pb-8' : 'p-8 justify-center'}`}>
+            <div
+              className={`flex-1 flex flex-col items-center gap-3 ${isMobile ? 'p-4 justify-end pb-8' : 'p-8 justify-center'}`}
+            >
               {state.provisioning ? (
-                <ProvisioningIndicator state={state.provisioning} bootLogCount={state.bootLogs.length} onViewLogs={() => state.setBootLogPanelOpen(true)} />
+                <ProvisioningIndicator
+                  state={state.provisioning}
+                  bootLogCount={state.bootLogs.length}
+                  onViewLogs={() => state.setBootLogPanelOpen(true)}
+                />
               ) : (
                 <>
                   <span className="text-base font-semibold text-fg-primary">
@@ -271,18 +472,23 @@ export function ProjectChat() {
               transcribeApiUrl={state.transcribeApiUrl}
               projectId={state.projectId}
               agents={state.configuredAgents}
-              selectedAgentType={state.selectedAgentType}
-              onAgentTypeChange={state.setSelectedAgentType}
               agentProfiles={state.agentProfiles}
               selectedProfileId={state.selectedProfileId}
               onProfileChange={state.setSelectedProfileId}
+              skills={state.skills}
+              selectedSkillId={state.selectedSkillId}
+              onSkillChange={state.setSelectedSkillId}
               onUpdateProfile={state.handleUpdateProfile}
-              selectedWorkspaceProfile={state.selectedWorkspaceProfile}
-              onWorkspaceProfileChange={state.setSelectedWorkspaceProfile}
-              selectedDevcontainerConfigName={state.selectedDevcontainerConfigName}
-              onDevcontainerConfigNameChange={state.setSelectedDevcontainerConfigName}
-              selectedTaskMode={state.selectedTaskMode}
-              onTaskModeChange={state.handleTaskModeChange}
+              taskResourceReqs={state.taskResourceReqs}
+              onTaskResourceReqsChange={state.setTaskResourceReqs}
+              taskResourceErrors={state.taskResourceErrors}
+              onTaskResourceErrorsClear={() => state.setTaskResourceErrors({})}
+              profileWizard={state.profileWizard}
+              onOpenProfileWizard={state.openProfileWizard}
+              onCloseProfileWizard={state.closeProfileWizard}
+              onUpdateProfileWizard={state.updateProfileWizard}
+              onCreateProfileFromWizard={state.createProfileFromWizard}
+              suggestProfileName={state.suggestProfileName}
               slashCommands={state.slashCommands}
               attachments={state.chatAttachments}
               onFilesSelected={state.handleChatFilesSelected}
@@ -294,29 +500,68 @@ export function ProjectChat() {
         ) : (
           /* Active session view */
           <div className="flex-1 flex flex-col min-h-0">
-            {state.provisioning && state.sessionId === state.provisioning.sessionId && !isTerminal(state.provisioning.status) && (
-              <ProvisioningIndicator state={state.provisioning} bootLogCount={state.bootLogs.length} onViewLogs={() => state.setBootLogPanelOpen(true)} />
+            {attentionAnswerStatus && (
+              <Alert
+                variant={attentionAnswerStatus.variant}
+                onDismiss={() => setAttentionAnswerStatus(null)}
+                className="m-3 mb-0"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span>{attentionAnswerStatus.message}</span>
+                  {attentionAnswerStatus.variant === 'error' && pendingAttentionAnswer && (
+                    <button
+                      type="button"
+                      className="min-h-11 rounded-md border border-current px-3 py-2 text-sm font-medium"
+                      onClick={() =>
+                        void submitAttentionAnswer(
+                          pendingAttentionAnswer.markerId,
+                          pendingAttentionAnswer.answer
+                        )
+                      }
+                    >
+                      Retry answer
+                    </button>
+                  )}
+                </div>
+              </Alert>
             )}
+            {state.provisioning &&
+              state.sessionId === state.provisioning.sessionId &&
+              !isTerminal(state.provisioning.status) && (
+                <ProvisioningIndicator
+                  state={state.provisioning}
+                  bootLogCount={state.bootLogs.length}
+                  onViewLogs={() => state.setBootLogPanelOpen(true)}
+                />
+              )}
             <ProjectMessageView
-              key={state.sessionId}
               projectId={state.projectId}
               sessionId={activeSessionId}
-              isProvisioning={!!(state.provisioning && state.sessionId === state.provisioning.sessionId && !isTerminal(state.provisioning.status))}
-              onSessionMutated={() => { void state.loadSessions(); }}
-              onRetry={() => {
-                const s = state.sessions.find((sess) => sess.id === state.sessionId);
-                if (s?.taskId) state.handleRetry(s);
-              }}
-              onFork={() => {
-                const s = state.sessions.find((sess) => sess.id === state.sessionId);
-                if (s?.taskId) state.handleFork(s);
-              }}
-              lineageText={selectedLineageText}
+              isProvisioning={
+                !!(
+                  state.provisioning &&
+                  state.sessionId === state.provisioning.sessionId &&
+                  !isTerminal(state.provisioning.status)
+                )
+              }
+              onSessionMutated={handleSessionMutated}
+              onRetry={handleRetryActiveSession}
+              onFork={handleForkActiveSession}
+              sourceContext={selectedSourceContext}
+              onSleepConversation={state.handleSleepConversation}
+              sleepingConversation={state.sleepingConversation}
+              sleepError={state.sleepError}
               onCloseConversation={state.handleCloseConversation}
               closingConversation={state.closingConversation}
               closeError={state.closeError}
               agentProfiles={state.agentProfiles}
               slashCommands={state.slashCommands}
+              onShowHierarchy={handleShowHierarchy}
+              onNewChat={state.handleNewChat}
+              targetMessageId={commentMessageTarget?.messageId ?? null}
+              targetMessageTimestamp={commentMessageTarget?.timestamp ?? null}
+              onTargetMessageConsumed={handleCommentMessageTargetConsumed}
+              permissionRefreshSignal={permissionRefreshSignal}
             />
           </div>
         )}
@@ -330,22 +575,36 @@ export function ProjectChat() {
           sessions={state.sessions}
           selectedSessionId={state.sessionId ?? null}
           onSelect={state.handleSelect}
-          onFork={(session) => { state.setSidebarOpen(false); state.handleFork(session); }}
-          onNewChat={() => { state.setSidebarOpen(false); state.handleNewChat(); }}
+          onNewChat={() => {
+            state.setSidebarOpen(false);
+            state.handleNewChat();
+          }}
           onClose={() => state.setSidebarOpen(false)}
           realtimeDegraded={state.realtimeDegraded}
           isRefreshing={state.isRefreshing}
           onRefresh={() => void state.loadSessions()}
-          taskTitleMap={state.taskTitleMap}
           taskInfoMap={state.taskInfoMap}
+          onShowHierarchy={handleShowHierarchy}
+          sessionScope={state.sessionScope}
+          onSessionScopeChange={state.setSessionScope}
+          showOwnership={state.multiplayerActive}
         />
       )}
 
       {/* Boot log panel */}
       {state.bootLogPanelOpen && (
-        <BootLogPanel
-          logs={state.bootLogs}
-          onClose={() => state.setBootLogPanelOpen(false)}
+        <BootLogPanel logs={state.bootLogs} onClose={() => state.setBootLogPanelOpen(false)} />
+      )}
+
+      {/* Task hierarchy modal */}
+      {hierarchyTaskId && (
+        <HierarchyModal
+          isOpen
+          onClose={handleHierarchyClose}
+          focusTaskId={hierarchyTaskId}
+          taskInfoMap={state.taskInfoMap}
+          sessions={state.sessions}
+          onNavigate={handleHierarchyNavigate}
         />
       )}
     </div>

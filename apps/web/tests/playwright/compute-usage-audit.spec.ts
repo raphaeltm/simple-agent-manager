@@ -62,6 +62,11 @@ function makeNodeUsageRecord(overrides: {
   name?: string;
   vmSize?: string;
   vcpuCount?: number;
+  providerInstanceType?: string | null;
+  providerInstanceVcpuCount?: number | null;
+  providerInstanceMemoryMb?: number | null;
+  providerInstanceDiskGb?: number | null;
+  providerInstancePriceDisplay?: string | null;
   vmLocation?: string;
   cloudProvider?: string | null;
   credentialSource?: string;
@@ -75,6 +80,11 @@ function makeNodeUsageRecord(overrides: {
     name: overrides.name ?? `node-${overrides.nodeId.slice(0, 6)}`,
     vmSize: overrides.vmSize ?? 'cpx21',
     vcpuCount: overrides.vcpuCount ?? 2,
+    providerInstanceType: overrides.providerInstanceType ?? overrides.vmSize ?? 'cpx21',
+    providerInstanceVcpuCount: overrides.providerInstanceVcpuCount ?? overrides.vcpuCount ?? 2,
+    providerInstanceMemoryMb: overrides.providerInstanceMemoryMb ?? 4096,
+    providerInstanceDiskGb: overrides.providerInstanceDiskGb ?? 80,
+    providerInstancePriceDisplay: overrides.providerInstancePriceDisplay ?? '€7.59/mo',
     vmLocation: overrides.vmLocation ?? 'hel1',
     cloudProvider: overrides.cloudProvider ?? 'hetzner',
     credentialSource: overrides.credentialSource ?? 'platform',
@@ -192,6 +202,11 @@ function makeActiveNode(overrides: {
   name?: string;
   vmSize?: string;
   vcpuCount?: number;
+  providerInstanceType?: string | null;
+  providerInstanceVcpuCount?: number | null;
+  providerInstanceMemoryMb?: number | null;
+  providerInstanceDiskGb?: number | null;
+  providerInstancePriceDisplay?: string | null;
   credentialSource?: string;
   createdAt?: string;
   status?: string;
@@ -206,6 +221,11 @@ function makeActiveNode(overrides: {
     serverType: vmSize,
     vmSize,
     vcpuCount: overrides.vcpuCount ?? 4,
+    providerInstanceType: overrides.providerInstanceType ?? vmSize,
+    providerInstanceVcpuCount: overrides.providerInstanceVcpuCount ?? overrides.vcpuCount ?? 4,
+    providerInstanceMemoryMb: overrides.providerInstanceMemoryMb ?? 8192,
+    providerInstanceDiskGb: overrides.providerInstanceDiskGb ?? 160,
+    providerInstancePriceDisplay: overrides.providerInstancePriceDisplay ?? '€13.10/mo',
     credentialSource: overrides.credentialSource ?? 'platform',
     startedAt: createdAt,
     createdAt,
@@ -272,6 +292,9 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
   const adminUsageData = makeAdminNodeUsageResponse(options.adminUsers ?? USERS_NORMAL);
   const userDetailData = options.userDetailedUsage ?? makeDetailedNodeUsage();
   const computeUsageData = options.computeUsage ?? makeComputeUsageResponse({ activeSessions: ACTIVE_NODES_NORMAL });
+  await page.addInitScript((userId) => {
+    window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
+  }, MOCK_USER.user.id);
 
   await page.route('**/api/**', async (route: Route) => {
     const url = new URL(route.request().url());
@@ -635,7 +658,7 @@ test.describe('AdminComputeUsage — Desktop (1280x800)', () => {
     await page.locator('button:has-text("Alice Johnson")').click();
     // Column headers from the new node-centric table
     await expect(page.locator('th:has-text("Node")')).toBeVisible();
-    await expect(page.locator('th:has-text("Size")')).toBeVisible();
+    await expect(page.locator('th:has-text("Provider instance")')).toBeVisible();
     await expect(page.locator('th:has-text("vCPUs")')).toBeVisible();
     await expect(page.locator('th:has-text("Location")')).toBeVisible();
     await expect(page.locator('th:has-text("Source")')).toBeVisible();
@@ -747,7 +770,7 @@ test.describe('SettingsComputeUsage — Mobile (375x667)', () => {
       computeUsage: makeComputeUsageResponse({ activeSessions: ACTIVE_NODES_NORMAL }),
     });
     await goToSettingsUsage(page);
-    // Server type text should be visible
+    // Provider-native instance text should be visible
     await expect(page.locator('text=cpx31').first()).toBeVisible();
     await screenshot(page, 'settings-usage-session-details-mobile');
     await assertNoOverflow(page);

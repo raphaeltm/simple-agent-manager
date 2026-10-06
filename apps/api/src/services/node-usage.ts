@@ -6,12 +6,12 @@ import type {
   CredentialSource,
   NodeUsageRecord,
 } from '@simple-agent-manager/shared';
-import { getVcpuCount } from '@simple-agent-manager/shared';
+import { isUserOwnedNodeClass } from '@simple-agent-manager/shared';
 import { and, eq, inArray, notInArray, or, sql } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
-import { getCurrentPeriodBounds } from './compute-usage';
+import { getCurrentPeriodBounds, resolveComputeVcpuCount } from './compute-usage';
 
 // =============================================================================
 // Node status helpers
@@ -19,6 +19,12 @@ import { getCurrentPeriodBounds } from './compute-usage';
 
 const ENDED_STATUSES_ARRAY = ['destroyed', 'destroying', 'deleted', 'error'] as const;
 const ENDED_STATUSES = new Set<string>(ENDED_STATUSES_ARRAY);
+
+/**
+ * Sentinel credential source for user-owned (BYO) nodes. SAM provisioned nothing for these, so they
+ * cost SAM $0 and must be excluded from all vCPU-hour metering, admin cost, and quota accounting.
+ */
+const SELF_HOSTED_CREDENTIAL_SOURCE: CredentialSource = 'self-hosted';
 
 function isNodeEnded(status: string): boolean {
   return ENDED_STATUSES.has(status);
@@ -41,7 +47,7 @@ function calculateNodeHoursInPeriod(
   endedAt: string | null,
   periodStart: Date,
   periodEnd: Date,
-  now: Date,
+  now: Date
 ): number {
   const start = new Date(createdAt);
   const end = endedAt ? new Date(endedAt) : now;
@@ -56,7 +62,23 @@ function calculateNodeHoursInPeriod(
 export interface NodeUsageCalculationRow {
   vmSize: string;
   cloudProvider: string | null;
+  providerInstanceType?: string | null;
+  providerInstanceVcpuCount?: number | null;
+  providerInstanceMemoryMb?: number | null;
+  providerInstanceDiskGb?: number | null;
+  providerInstanceBootDiskSizeGb?: number | null;
+  providerInstanceImage?: string | null;
+  providerInstanceArchitecture?: string | null;
+  observedProviderInstanceType?: string | null;
+  observedProviderInstanceVcpuCount?: number | null;
+  observedProviderInstanceMemoryMb?: number | null;
+  observedProviderInstanceDiskGb?: number | null;
+  observedHardwareJson?: string | null;
+  observedHardwareSource?: string | null;
+  providerInstancePriceDisplay?: string | null;
   credentialSource: string | null;
+  /** Ownership class; user-owned (BYO) nodes accrue $0 regardless of credentialSource. */
+  nodeClass: string | null;
   status: string;
   createdAt: string;
   updatedAt: string;
@@ -96,15 +118,31 @@ function createEmptyTotals(): NodeUsageTotals {
 
 function addNodeToTotals(
   totals: NodeUsageTotals,
-  node: Pick<NodeUsageRow, 'vmSize' | 'cloudProvider' | 'credentialSource' | 'status' | 'createdAt' | 'updatedAt'>,
+  node: NodeUsageCalculationRow,
   periodStart: Date,
   periodEnd: Date,
-  now: Date,
+  now: Date
 ): void {
+  // User-owned (BYO) nodes cost SAM $0 — exclude them from every node-hour, vCPU-hour, and
+  // active-node total so metering, admin cost (getAllUsersNodeUsageSummary → here), and quota
+  // reflect only SAM-paid compute. Single chokepoint. See architecture-critique #9.
+  //
+  // Keyed on BOTH the canonical ownership axis (nodeClass='user-owned') AND the credentialSource
+  // sentinel ('self-hosted'): every other Phase-0 guard uses nodeClass, so excluding on it here too
+  // means billing can't silently re-include a BYO node if a future enrollment path sets nodeClass
+  // but forgets the credentialSource sentinel (or vice-versa). See cloudflare/security review.
+  if (
+    isUserOwnedNodeClass(node.nodeClass) ||
+    node.credentialSource === SELF_HOSTED_CREDENTIAL_SOURCE
+  ) {
+    return;
+  }
   const endedAt = getNodeEndedAt(node.status, node.updatedAt);
   const hours = calculateNodeHoursInPeriod(node.createdAt, endedAt, periodStart, periodEnd, now);
-  const vcpus = getVcpuCount(node.vmSize, node.cloudProvider);
-  const vcpuHours = hours * vcpus;
+  const { vcpuCount } = resolveComputeVcpuCount(node, { legacyNode: node });
+  // Unknown CPU contributes no invented charge; node uptime remains accounted
+  // and its active/detail record exposes null with source="unknown".
+  const vcpuHours = vcpuCount === null ? 0 : hours * vcpuCount;
   const isPlatform = node.credentialSource === 'platform';
 
   totals.totalNodeHours += hours;
@@ -125,7 +163,7 @@ export function calculateNodeUsageTotalsForRows(
   rows: NodeUsageCalculationRow[],
   periodStart: Date,
   periodEnd: Date,
-  now: Date = new Date(),
+  now: Date = new Date()
 ): NodeUsageTotals {
   const totals = createEmptyTotals();
   for (const node of rows) {
@@ -149,13 +187,13 @@ function roundUsageTotals(totals: NodeUsageTotals): NodeUsageTotals {
 function getOverlappingNodeConditions(
   periodStartIso: string,
   periodEndIso: string,
-  opts?: { userId?: string; credentialSource?: CredentialSource },
+  opts?: { userId?: string; credentialSource?: CredentialSource }
 ) {
   const conditions = [
     sql`${schema.nodes.createdAt} < ${periodEndIso}`,
     or(
       notInArray(schema.nodes.status, [...ENDED_STATUSES_ARRAY]),
-      sql`${schema.nodes.updatedAt} > ${periodStartIso}`,
+      sql`${schema.nodes.updatedAt} > ${periodStartIso}`
     ),
   ];
 
@@ -174,7 +212,7 @@ async function getUserOverlappingNodeRows(
   userId: string,
   periodStartIso: string,
   periodEndIso: string,
-  credentialSource?: CredentialSource,
+  credentialSource?: CredentialSource
 ): Promise<NodeUsageRow[]> {
   return db
     .select({
@@ -183,20 +221,39 @@ async function getUserOverlappingNodeRows(
       vmSize: schema.nodes.vmSize,
       vmLocation: schema.nodes.vmLocation,
       cloudProvider: schema.nodes.cloudProvider,
+      providerInstanceType: schema.nodes.providerInstanceType,
+      providerInstanceVcpuCount: schema.nodes.providerInstanceVcpuCount,
+      providerInstanceMemoryMb: schema.nodes.providerInstanceMemoryMb,
+      providerInstanceDiskGb: schema.nodes.providerInstanceDiskGb,
+      providerInstanceBootDiskSizeGb: schema.nodes.providerInstanceBootDiskSizeGb,
+      providerInstanceImage: schema.nodes.providerInstanceImage,
+      providerInstanceArchitecture: schema.nodes.providerInstanceArchitecture,
+      observedProviderInstanceType: schema.nodes.observedProviderInstanceType,
+      observedProviderInstanceVcpuCount: schema.nodes.observedProviderInstanceVcpuCount,
+      observedProviderInstanceMemoryMb: schema.nodes.observedProviderInstanceMemoryMb,
+      observedProviderInstanceDiskGb: schema.nodes.observedProviderInstanceDiskGb,
+      observedHardwareJson: schema.nodes.observedHardwareJson,
+      observedHardwareSource: schema.nodes.observedHardwareSource,
+      providerInstancePriceDisplay: schema.nodes.providerInstancePriceDisplay,
       credentialSource: schema.nodes.credentialSource,
+      nodeClass: schema.nodes.nodeClass,
       status: schema.nodes.status,
       createdAt: schema.nodes.createdAt,
       updatedAt: schema.nodes.updatedAt,
     })
     .from(schema.nodes)
-    .where(and(...getOverlappingNodeConditions(periodStartIso, periodEndIso, { userId, credentialSource })))
+    .where(
+      and(
+        ...getOverlappingNodeConditions(periodStartIso, periodEndIso, { userId, credentialSource })
+      )
+    )
     .orderBy(sql`${schema.nodes.createdAt} DESC`);
 }
 
 async function getAllOverlappingNodeRows(
   db: DrizzleD1Database<typeof schema>,
   periodStartIso: string,
-  periodEndIso: string,
+  periodEndIso: string
 ): Promise<UserNodeUsageRow[]> {
   return db
     .select({
@@ -206,7 +263,22 @@ async function getAllOverlappingNodeRows(
       vmSize: schema.nodes.vmSize,
       vmLocation: schema.nodes.vmLocation,
       cloudProvider: schema.nodes.cloudProvider,
+      providerInstanceType: schema.nodes.providerInstanceType,
+      providerInstanceVcpuCount: schema.nodes.providerInstanceVcpuCount,
+      providerInstanceMemoryMb: schema.nodes.providerInstanceMemoryMb,
+      providerInstanceDiskGb: schema.nodes.providerInstanceDiskGb,
+      providerInstanceBootDiskSizeGb: schema.nodes.providerInstanceBootDiskSizeGb,
+      providerInstanceImage: schema.nodes.providerInstanceImage,
+      providerInstanceArchitecture: schema.nodes.providerInstanceArchitecture,
+      observedProviderInstanceType: schema.nodes.observedProviderInstanceType,
+      observedProviderInstanceVcpuCount: schema.nodes.observedProviderInstanceVcpuCount,
+      observedProviderInstanceMemoryMb: schema.nodes.observedProviderInstanceMemoryMb,
+      observedProviderInstanceDiskGb: schema.nodes.observedProviderInstanceDiskGb,
+      observedHardwareJson: schema.nodes.observedHardwareJson,
+      observedHardwareSource: schema.nodes.observedHardwareSource,
+      providerInstancePriceDisplay: schema.nodes.providerInstancePriceDisplay,
       credentialSource: schema.nodes.credentialSource,
+      nodeClass: schema.nodes.nodeClass,
       status: schema.nodes.status,
       createdAt: schema.nodes.createdAt,
       updatedAt: schema.nodes.updatedAt,
@@ -227,7 +299,21 @@ function toActiveComputeSession(node: NodeUsageRow): ActiveComputeSession | null
     workspaceId: node.id,
     serverType: node.vmSize,
     vmSize: node.vmSize,
-    vcpuCount: getVcpuCount(node.vmSize, node.cloudProvider),
+    ...resolveComputeVcpuCount(node, { legacyNode: node }),
+    providerInstanceType: node.providerInstanceType,
+    providerInstanceVcpuCount: node.providerInstanceVcpuCount,
+    providerInstanceMemoryMb: node.providerInstanceMemoryMb,
+    providerInstanceDiskGb: node.providerInstanceDiskGb,
+    providerInstanceBootDiskSizeGb: node.providerInstanceBootDiskSizeGb,
+    providerInstanceImage: node.providerInstanceImage,
+    providerInstanceArchitecture: node.providerInstanceArchitecture,
+    observedProviderInstanceType: node.observedProviderInstanceType,
+    observedProviderInstanceVcpuCount: node.observedProviderInstanceVcpuCount,
+    observedProviderInstanceMemoryMb: node.observedProviderInstanceMemoryMb,
+    observedProviderInstanceDiskGb: node.observedProviderInstanceDiskGb,
+    observedHardwareJson: node.observedHardwareJson,
+    observedHardwareSource: node.observedHardwareSource,
+    providerInstancePriceDisplay: node.providerInstancePriceDisplay,
     startedAt: node.createdAt,
     createdAt: node.createdAt,
     credentialSource,
@@ -235,12 +321,29 @@ function toActiveComputeSession(node: NodeUsageRow): ActiveComputeSession | null
   };
 }
 
-function toNodeUsageRecord(node: NodeUsageRow, workspaceCounts: Map<string, number>): NodeUsageRecord {
+function toNodeUsageRecord(
+  node: NodeUsageRow,
+  workspaceCounts: Map<string, number>
+): NodeUsageRecord {
   return {
     nodeId: node.id,
     name: node.name,
     vmSize: node.vmSize,
-    vcpuCount: getVcpuCount(node.vmSize, node.cloudProvider),
+    ...resolveComputeVcpuCount(node, { legacyNode: node }),
+    providerInstanceType: node.providerInstanceType,
+    providerInstanceVcpuCount: node.providerInstanceVcpuCount,
+    providerInstanceMemoryMb: node.providerInstanceMemoryMb,
+    providerInstanceDiskGb: node.providerInstanceDiskGb,
+    providerInstanceBootDiskSizeGb: node.providerInstanceBootDiskSizeGb,
+    providerInstanceImage: node.providerInstanceImage,
+    providerInstanceArchitecture: node.providerInstanceArchitecture,
+    observedProviderInstanceType: node.observedProviderInstanceType,
+    observedProviderInstanceVcpuCount: node.observedProviderInstanceVcpuCount,
+    observedProviderInstanceMemoryMb: node.observedProviderInstanceMemoryMb,
+    observedProviderInstanceDiskGb: node.observedProviderInstanceDiskGb,
+    observedHardwareJson: node.observedHardwareJson,
+    observedHardwareSource: node.observedHardwareSource,
+    providerInstancePriceDisplay: node.providerInstancePriceDisplay,
     vmLocation: node.vmLocation,
     cloudProvider: node.cloudProvider,
     credentialSource: (node.credentialSource ?? 'user') as CredentialSource,
@@ -257,14 +360,14 @@ export async function calculateNodeVcpuHoursForPeriod(
   userId: string,
   periodStart: Date,
   periodEnd: Date,
-  credentialSource?: CredentialSource,
+  credentialSource?: CredentialSource
 ): Promise<number> {
   const rows = await getUserOverlappingNodeRows(
     db,
     userId,
     periodStart.toISOString(),
     periodEnd.toISOString(),
-    credentialSource,
+    credentialSource
   );
   const totals = calculateNodeUsageTotalsForRows(rows, periodStart, periodEnd);
 
@@ -274,7 +377,7 @@ export async function calculateNodeVcpuHoursForPeriod(
 /** Get the current user's node-based compute usage summary for the current period. */
 export async function getUserNodeUsageSummary(
   db: DrizzleD1Database<typeof schema>,
-  userId: string,
+  userId: string
 ): Promise<{ period: ComputeUsagePeriod; activeSessions: ActiveComputeSession[] }> {
   const { start, end } = getCurrentPeriodBounds();
   const periodStart = new Date(start);
@@ -312,7 +415,7 @@ export async function getUserNodeUsageSummary(
 
 /** Get all users' node usage summary for the current period. */
 export async function getAllUsersNodeUsageSummary(
-  db: DrizzleD1Database<typeof schema>,
+  db: DrizzleD1Database<typeof schema>
 ): Promise<{ period: { start: string; end: string }; users: AdminUserNodeUsageSummary[] }> {
   const { start, end } = getCurrentPeriodBounds();
   const periodStart = new Date(start);
@@ -376,7 +479,7 @@ export async function getAllUsersNodeUsageSummary(
 export async function getUserNodeDetailedUsage(
   db: DrizzleD1Database<typeof schema>,
   userId: string,
-  recentLimit = 50,
+  recentLimit = 50
 ): Promise<AdminUserNodeDetailedUsage> {
   const { start, end } = getCurrentPeriodBounds();
   const periodStart = new Date(start);
@@ -405,7 +508,9 @@ export async function getUserNodeDetailedUsage(
     }
   }
 
-  const totals = roundUsageTotals(calculateNodeUsageTotalsForRows(allNodeRows, periodStart, periodEnd, now));
+  const totals = roundUsageTotals(
+    calculateNodeUsageTotalsForRows(allNodeRows, periodStart, periodEnd, now)
+  );
   const nodes = nodeRows.map((node) => toNodeUsageRecord(node, workspaceCounts));
 
   return {

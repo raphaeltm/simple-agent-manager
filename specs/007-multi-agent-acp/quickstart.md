@@ -1,5 +1,7 @@
 # Quickstart: Multi-Agent ACP Development
 
+> Spec validation artifact only. This is not canonical setup documentation; use `apps/www/src/content/docs/docs/` for public docs.
+
 **Feature**: 007-multi-agent-acp
 
 ## Prerequisites

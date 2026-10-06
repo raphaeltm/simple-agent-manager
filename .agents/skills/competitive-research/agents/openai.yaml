@@ -1,4 +1,0 @@
-interface:
-  display_name: "Competitive Research"
-  short_description: "Competitor profiles, feature matrices, SWOT"
-  default_prompt: "Use $competitive-research to build competitor profiles, feature matrices, SWOT analyses, and positioning maps."

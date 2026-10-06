@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 )
@@ -38,13 +39,27 @@ func (t *ReadFile) Execute(_ context.Context, params map[string]any) (string, er
 		return "", fmt.Errorf("parameter 'path' must be a string")
 	}
 
-	resolved, err := safePath(t.WorkDir, path)
+	boundary, err := newWorkspaceBoundary(t.WorkDir)
 	if err != nil {
 		return "", err
 	}
-	data, err := os.ReadFile(resolved)
+	resolved, err := boundary.existingFile(path)
+	if err != nil {
+		return "", err
+	}
+	f, err := os.Open(resolved)
 	if err != nil {
 		return "", fmt.Errorf("reading %s: %w", path, err)
+	}
+	defer f.Close()
+
+	data, err := io.ReadAll(io.LimitReader(f, MaxReadFileBytes+1))
+	if err != nil {
+		return "", fmt.Errorf("reading %s: %w", path, err)
+	}
+	truncated := len(data) > MaxReadFileBytes
+	if truncated {
+		data = data[:MaxReadFileBytes]
 	}
 
 	lines := strings.Split(string(data), "\n")
@@ -52,6 +67,8 @@ func (t *ReadFile) Execute(_ context.Context, params map[string]any) (string, er
 	for i, line := range lines {
 		fmt.Fprintf(&b, "%4d\t%s\n", i+1, line)
 	}
+	if truncated {
+		fmt.Fprintf(&b, "\n(truncated: showing first %d bytes)", MaxReadFileBytes)
+	}
 	return b.String(), nil
 }
-

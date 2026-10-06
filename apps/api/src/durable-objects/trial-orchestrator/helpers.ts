@@ -26,9 +26,8 @@ import { emitTrialEvent } from '../../services/trial/trial-runner';
  * per-user query scope (e.g., `WHERE userId = ?`) does NOT isolate one trial
  * from another. Downstream code that acts on trial-owned rows MUST additionally
  * scope by `projectId` (or trialId) to prevent one trial's logic from observing
- * or mutating another trial's state. Platform-level IDOR enforcement lives in
- * `requireOwnedProject` (`apps/api/src/middleware/require-owned-project.ts`)
- * and is not bypassed by trial code — but trial-internal loops (e.g.,
+ * or mutating another trial's state. Platform-level IDOR enforcement is not
+ * bypassed by trial code — but trial-internal loops (e.g.,
  * `handleNodeSelection` scanning all sentinel-owned nodes) rely on the D1
  * query filtering by projectId/nodeId where applicable.
  */

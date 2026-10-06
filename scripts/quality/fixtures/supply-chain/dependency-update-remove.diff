@@ -1,0 +1,9 @@
+diff --git a/apps/api/package.json b/apps/api/package.json
+--- a/apps/api/package.json
++++ b/apps/api/package.json
+@@ -8,2 +8,2 @@
+   "dependencies": {
+-    "changed-lib": "1.0.0",
+-    "old-lib": "1.0.0"
++    "changed-lib": "1.1.0"
+   }

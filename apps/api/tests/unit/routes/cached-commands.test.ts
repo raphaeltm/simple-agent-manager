@@ -17,7 +17,8 @@ vi.mock('../../../src/middleware/auth', () => ({
   getUserId: () => 'test-user-id',
 }));
 vi.mock('../../../src/middleware/project-auth', () => ({
-  requireOwnedProject: vi.fn().mockResolvedValue(undefined),
+  requireProjectAccess: vi.fn().mockResolvedValue(undefined),
+  requireProjectCapability: vi.fn().mockResolvedValue(undefined),
 }));
 
 const mockGetCachedCommands = vi.fn();

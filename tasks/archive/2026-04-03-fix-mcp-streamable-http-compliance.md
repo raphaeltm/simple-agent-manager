@@ -49,4 +49,4 @@ SAM's `/mcp` endpoint treats all JSON-RPC messages as requests. When Codex sends
 
 - `apps/api/src/routes/mcp/index.ts`
 - `apps/api/src/routes/mcp/_helpers.ts`
-- `tasks/backlog/2026-04-02-fix-codex-mcp-streamable-http-compliance.md`
+- `tasks/archive/2026-04-02-fix-codex-mcp-streamable-http-compliance.md`

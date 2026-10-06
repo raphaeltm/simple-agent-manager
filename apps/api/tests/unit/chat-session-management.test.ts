@@ -12,14 +12,8 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-const taskSubmitSource = readFileSync(
-  resolve(process.cwd(), 'src/routes/tasks/submit.ts'),
-  'utf8'
-);
-const taskRunsSource = readFileSync(
-  resolve(process.cwd(), 'src/routes/tasks/run.ts'),
-  'utf8'
-);
+const taskSubmitSource = readFileSync(resolve(process.cwd(), 'src/routes/tasks/submit.ts'), 'utf8');
+const taskRunsSource = readFileSync(resolve(process.cwd(), 'src/routes/tasks/run.ts'), 'utf8');
 const taskRunnerDoSource = [
   'index.ts',
   'types.ts',
@@ -27,8 +21,12 @@ const taskRunnerDoSource = [
   'workspace-steps.ts',
   'agent-session-step.ts',
   'state-machine.ts',
+  'session-linking.ts',
+  'workspace-reserved-allocation.ts',
   'helpers.ts',
-].map(f => readFileSync(resolve(process.cwd(), 'src/durable-objects/task-runner', f), 'utf8')).join('\n');
+]
+  .map((f) => readFileSync(resolve(process.cwd(), 'src/durable-objects/task-runner', f), 'utf8'))
+  .join('\n');
 const projectDataDoSource = [
   readFileSync(resolve(process.cwd(), 'src/durable-objects/project-data/sessions.ts'), 'utf8'),
   readFileSync(resolve(process.cwd(), 'src/durable-objects/project-data/messages.ts'), 'utf8'),
@@ -42,6 +40,16 @@ const taskRunnerDoServiceSource = readFileSync(
   resolve(process.cwd(), 'src/services/task-runner-do.ts'),
   'utf8'
 );
+
+function getWorkspaceCreationSection(): string {
+  const wsCreationStart = taskRunnerDoSource.indexOf(
+    'export async function handleWorkspaceCreation('
+  );
+  const wsCreationEnd = taskRunnerDoSource.indexOf(
+    'export async function handleWorkspaceDispatch('
+  );
+  return taskRunnerDoSource.slice(wsCreationStart, wsCreationEnd);
+}
 
 // =========================================================================
 // Fix 1: Single session creation — no duplicate sessions per task
@@ -59,27 +67,14 @@ describe('TDF-6 Fix 1: Single session creation point', () => {
   });
 
   it('TaskRunner DO does NOT call createSession in handleWorkspaceCreation', () => {
-    // Extract the handleWorkspaceCreation method
-    const wsCreationStart = taskRunnerDoSource.indexOf(
-      'export async function handleWorkspaceCreation('
-    );
-    const wsCreationEnd = taskRunnerDoSource.indexOf(
-      'export async function handleWorkspaceReady('
-    );
-    const wsCreationSection = taskRunnerDoSource.slice(wsCreationStart, wsCreationEnd);
+    const wsCreationSection = getWorkspaceCreationSection();
 
     expect(wsCreationSection).not.toContain('createSession(');
     expect(wsCreationSection).not.toContain('projectDataService.createSession');
   });
 
   it('TaskRunner DO calls ensureSessionLinked (which calls linkSessionToWorkspace)', () => {
-    const wsCreationStart = taskRunnerDoSource.indexOf(
-      'export async function handleWorkspaceCreation('
-    );
-    const wsCreationEnd = taskRunnerDoSource.indexOf(
-      'export async function handleWorkspaceReady('
-    );
-    const wsCreationSection = taskRunnerDoSource.slice(wsCreationStart, wsCreationEnd);
+    const wsCreationSection = getWorkspaceCreationSection();
 
     // handleWorkspaceCreation delegates to ensureSessionLinked
     expect(wsCreationSection).toContain('ensureSessionLinked');
@@ -96,9 +91,7 @@ describe('TDF-6 Fix 1: Single session creation point', () => {
   });
 
   it('TaskRunner DO initializes stepResults.chatSessionId from config', () => {
-    expect(taskRunnerDoSource).toContain(
-      'chatSessionId: input.config.chatSessionId ?? null'
-    );
+    expect(taskRunnerDoSource).toContain('chatSessionId: input.config.chatSessionId ?? null');
   });
 });
 
@@ -114,7 +107,8 @@ describe('TDF-6 Fix 2: No fallback session IDs', () => {
   it('task-submit wraps session creation in try-catch that fails the task on error', () => {
     // Session creation failure should mark the task as failed (not orphan it)
     expect(taskSubmitSource).toContain('Session creation failed:');
-    expect(taskSubmitSource).toContain("status: 'failed'");
+    expect(taskSubmitSource).toContain('markTaskFailedIfNonTerminal(');
+    expect(taskSubmitSource).toContain("from '../../services/task-failure'");
   });
 
   it('session creation uses let with try-catch for error cleanup', () => {
@@ -149,9 +143,7 @@ describe('TDF-6 Fix 2: No fallback session IDs', () => {
 
 describe('TDF-6 Fix 3: Workspace-session linking', () => {
   it('ProjectData DO has linkSessionToWorkspace method', () => {
-    expect(projectDataDoSource).toContain(
-      'async linkSessionToWorkspace('
-    );
+    expect(projectDataDoSource).toContain('async linkSessionToWorkspace(');
   });
 
   it('linkSessionToWorkspace accepts sessionId and workspaceId', () => {
@@ -165,7 +157,7 @@ describe('TDF-6 Fix 3: Workspace-session linking', () => {
   });
 
   it('linkSessionToWorkspace updates workspace_id on the session', () => {
-    expect(projectDataDoSource).toContain('UPDATE chat_sessions SET workspace_id = ?');
+    expect(projectDataDoSource).toContain('SET workspace_id = ?');
   });
 
   it('linkSessionToWorkspace broadcasts session.updated event', () => {
@@ -173,14 +165,12 @@ describe('TDF-6 Fix 3: Workspace-session linking', () => {
   });
 
   it('project-data service exports linkSessionToWorkspace wrapper', () => {
-    expect(projectDataServiceSource).toContain(
-      'export async function linkSessionToWorkspace('
-    );
+    expect(projectDataServiceSource).toContain('export async function linkSessionToWorkspace(');
   });
 
   it('service wrapper calls DO stub.linkSessionToWorkspace', () => {
     expect(projectDataServiceSource).toContain(
-      'stub.linkSessionToWorkspace(sessionId, workspaceId)'
+      'stub.linkSessionToWorkspace(sessionId, workspaceId, guard ?? null)'
     );
   });
 
@@ -190,13 +180,7 @@ describe('TDF-6 Fix 3: Workspace-session linking', () => {
     expect(taskRunnerDoSource).toContain('state.stepResults.chatSessionId');
 
     // handleWorkspaceCreation calls ensureSessionLinked
-    const wsCreationStart = taskRunnerDoSource.indexOf(
-      'export async function handleWorkspaceCreation('
-    );
-    const wsCreationEnd = taskRunnerDoSource.indexOf(
-      'export async function handleWorkspaceReady('
-    );
-    const wsCreationSection = taskRunnerDoSource.slice(wsCreationStart, wsCreationEnd);
+    const wsCreationSection = getWorkspaceCreationSection();
     expect(wsCreationSection).toContain('ensureSessionLinked(');
   });
 
@@ -211,17 +195,14 @@ describe('TDF-6 Fix 3: Workspace-session linking', () => {
   });
 
   it('handleWorkspaceCreation calls ensureSessionLinked', () => {
-    const wsCreationStart = taskRunnerDoSource.indexOf(
-      'export async function handleWorkspaceCreation('
-    );
-    const wsCreationEnd = taskRunnerDoSource.indexOf(
-      'export async function handleWorkspaceReady('
-    );
-    const wsCreationSection = taskRunnerDoSource.slice(wsCreationStart, wsCreationEnd);
+    const wsCreationSection = getWorkspaceCreationSection();
 
-    // Both fresh creation and crash recovery call ensureSessionLinked
-    const calls = wsCreationSection.split('ensureSessionLinked').length - 1;
-    expect(calls).toBeGreaterThanOrEqual(2); // once in recovery, once in fresh creation
+    // Both fresh creation and crash recovery route through bookkeeping, which
+    // performs the session link before dispatch acknowledgement.
+    const bookkeepingCalls = wsCreationSection.split('ensureWorkspaceBookkeeping').length - 1;
+    expect(bookkeepingCalls).toBeGreaterThanOrEqual(2);
+    expect(taskRunnerDoSource).toContain('async function ensureWorkspaceBookkeeping(');
+    expect(taskRunnerDoSource).toContain('await ensureSessionLinked(state, workspaceId, rc)');
   });
 });
 
@@ -231,10 +212,11 @@ describe('TDF-6 Fix 3: Workspace-session linking', () => {
 
 describe('TDF-6 Fix 4: Required session and message persistence', () => {
   it('task-submit persists initial message as REQUIRED', () => {
-    const messageArea = taskSubmitSource.slice(
-      taskSubmitSource.indexOf('Persist initial user message'),
-      taskSubmitSource.indexOf('Record activity event')
-    );
+    const messageStart = taskSubmitSource.indexOf('Persist initial user message');
+    const backgroundWorkStart = taskSubmitSource.indexOf('schedulePostSubmitWork(', messageStart);
+    expect(messageStart).toBeGreaterThanOrEqual(0);
+    expect(backgroundWorkStart).toBeGreaterThan(messageStart);
+    const messageArea = taskSubmitSource.slice(messageStart, backgroundWorkStart);
     expect(messageArea).toContain('REQUIRED');
     expect(messageArea).not.toContain('best-effort');
   });
@@ -262,7 +244,9 @@ describe('TDF-6 Fix 4: Required session and message persistence', () => {
 
 describe('TDF-6 Fix 5: task-runs route creates session (no regression)', () => {
   it('task-runs imports projectDataService', () => {
-    expect(taskRunsSource).toContain("import * as projectDataService from '../../services/project-data'");
+    expect(taskRunsSource).toContain(
+      "import * as projectDataService from '../../services/project-data'"
+    );
   });
 
   it('task-runs creates a session via projectDataService.createSession', () => {
@@ -304,9 +288,7 @@ describe('TDF-6: TaskRunner DO service chatSessionId passthrough', () => {
   });
 
   it('startTaskRunnerDO passes chatSessionId in config', () => {
-    expect(taskRunnerDoServiceSource).toContain(
-      'chatSessionId: input.chatSessionId ?? null'
-    );
+    expect(taskRunnerDoServiceSource).toContain('chatSessionId: input.chatSessionId ?? null');
   });
 
   it('TaskRunConfig interface includes chatSessionId field', () => {

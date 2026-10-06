@@ -1,0 +1,449 @@
+import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/d1';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import * as schema from '../../../src/db/schema';
+import {
+  assertAgentDeploymentAllowed,
+  assertAgentDeploymentAllowedForProfile,
+  buildObservedDeploymentUpdate,
+  encodeAllowedDeployProfileIds,
+  parseAllowedDeployProfileIds,
+  reconcileDeploymentReleaseStatuses,
+  toDeploymentAgentPolicy,
+  toObservedDeploymentState,
+} from '../../../src/services/deployment-control';
+import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
+
+function tokenData(
+  overrides: Partial<import('../../../src/services/mcp-token').McpTokenData> = {}
+) {
+  return {
+    taskId: 'task-1',
+    projectId: 'proj-1',
+    userId: 'user-1',
+    workspaceId: 'ws-1',
+    createdAt: '2026-06-18T00:00:00Z',
+    ...overrides,
+  };
+}
+
+function createPolicyDb(opts: {
+  envRows?: Array<{
+    id: string;
+    agentDeployEnabled: boolean;
+    agentDeployEnabledBy: string | null;
+    agentDeployEnabledAt: string | null;
+    agentDeployDisabledAt: string | null;
+    allowedDeployProfileIdsJson: string | null;
+  }>;
+  taskRows?: Array<{ agentProfileHint: string | null }>;
+}) {
+  return {
+    select: vi.fn().mockImplementation(() => ({
+      from: vi.fn().mockImplementation((table: unknown) => ({
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockImplementation(() => {
+            if (table === schema.deploymentEnvironments) {
+              return Promise.resolve(opts.envRows ?? []);
+            }
+            if (table === schema.tasks) {
+              return Promise.resolve(opts.taskRows ?? []);
+            }
+            return Promise.resolve([]);
+          }),
+        }),
+      })),
+    })),
+  };
+}
+
+function createReleaseDb(releaseRows: Array<{ id: string; version: number; status: string }>) {
+  const updates: Array<{ values: Record<string, unknown>; where: unknown }> = [];
+  const sortedLatest = [...releaseRows].sort((a, b) => b.version - a.version);
+  const sortedFailedCandidates = [...releaseRows].sort((a, b) => a.version - b.version);
+  return {
+    updates,
+    select: vi.fn().mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          orderBy: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue(sortedLatest.slice(0, 1)),
+          }),
+          limit: vi.fn().mockResolvedValue(sortedFailedCandidates.slice(0, 1)),
+        }),
+      }),
+    }),
+    update: vi.fn().mockReturnValue({
+      set: vi.fn().mockImplementation((values: Record<string, unknown>) => {
+        return {
+          where: vi.fn().mockImplementation((where: unknown) => {
+            updates.push({ values, where });
+            return Promise.resolve();
+          }),
+        };
+      }),
+    }),
+  };
+}
+
+describe('deployment-control observed state helpers', () => {
+  it('normalizes deployment heartbeat state into bounded DB fields', () => {
+    const update = buildObservedDeploymentUpdate(
+      {
+        appliedSeq: 2.8,
+        status: ' APPLIED ',
+        errorMessage: 'x'.repeat(5000),
+        services: [{ name: 'web', status: 'running', health: 'healthy' }],
+        deployStatus: { appHealth: 'healthy' },
+        diskTelemetry: { rootDisk: { usedPercent: 42 } },
+      },
+      '2026-06-18T10:00:00Z'
+    );
+
+    expect(update.observedAppliedSeq).toBe(2);
+    expect(update.observedStatus).toBe('applied');
+    expect(update.observedErrorMessage).toHaveLength(4096);
+    expect(update.observedServicesJson).toContain('"web"');
+    expect(update.observedDeployStatusJson).toContain('appHealth');
+    expect(update.observedDiskTelemetryJson).toContain('rootDisk');
+    expect(update.observedAt).toBe('2026-06-18T10:00:00Z');
+  });
+
+  it('hydrates observed state and agent policy from environment rows', () => {
+    const row = {
+      observedAppliedSeq: 7,
+      observedStatus: 'applied',
+      observedErrorMessage: null,
+      observedServicesJson: '[{"name":"web"}]',
+      observedDeployStatusJson: '{"appHealth":"healthy"}',
+      observedDiskTelemetryJson: '{"rootDisk":{"usedPercent":40}}',
+      observedAt: '2026-06-18T10:00:00Z',
+      agentDeployEnabled: true,
+      agentDeployEnabledBy: 'user-1',
+      agentDeployEnabledAt: '2026-06-18T10:01:00Z',
+      agentDeployDisabledAt: null,
+      allowedDeployProfileIdsJson: '["profile-a","profile-a","profile-b"]',
+    };
+
+    expect(toObservedDeploymentState(row)).toMatchObject({
+      appliedSeq: 7,
+      status: 'applied',
+      services: [{ name: 'web' }],
+      deployStatus: { appHealth: 'healthy' },
+    });
+    expect(toDeploymentAgentPolicy(row)).toMatchObject({
+      agentDeployEnabled: true,
+      allowedDeployProfileIds: ['profile-a', 'profile-b'],
+    });
+  });
+
+  it('encodes allowed profile IDs as unique trimmed JSON', () => {
+    const encoded = encodeAllowedDeployProfileIds([' profile-a ', 'profile-a', 'profile-b']);
+    expect(encoded).toBe('["profile-a","profile-b"]');
+    expect(parseAllowedDeployProfileIds(encoded)).toEqual(['profile-a', 'profile-b']);
+  });
+});
+
+describe('assertAgentDeploymentAllowed', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('denies when the environment is missing or inactive', async () => {
+    const db = createPolicyDb({ envRows: [] });
+    const result = await assertAgentDeploymentAllowed(db as any, 'proj-1', 'staging', tokenData());
+    expect(result).toEqual({
+      error:
+        "Deployment environment 'staging' not found for this project, or its status does not allow agent deployment (must be active or error).",
+    });
+  });
+
+  it('denies by default until the user enables agent deployment', async () => {
+    const db = createPolicyDb({
+      envRows: [
+        {
+          id: 'env-1',
+          agentDeployEnabled: false,
+          agentDeployEnabledBy: null,
+          agentDeployEnabledAt: null,
+          agentDeployDisabledAt: null,
+          allowedDeployProfileIdsJson: null,
+        },
+      ],
+    });
+
+    const result = await assertAgentDeploymentAllowed(db as any, 'proj-1', 'staging', tokenData());
+    expect('error' in result ? result.error : '').toContain('Agent deployment is disabled');
+  });
+
+  it('allows when enabled and no profile restriction is configured', async () => {
+    const db = createPolicyDb({
+      envRows: [
+        {
+          id: 'env-1',
+          agentDeployEnabled: true,
+          agentDeployEnabledBy: 'user-1',
+          agentDeployEnabledAt: '2026-06-18T10:01:00Z',
+          agentDeployDisabledAt: null,
+          allowedDeployProfileIdsJson: null,
+        },
+      ],
+    });
+
+    const result = await assertAgentDeploymentAllowed(db as any, 'proj-1', 'staging', tokenData());
+    expect(result).toMatchObject({ environmentId: 'env-1' });
+  });
+
+  it('enforces allowed agent profile IDs when configured', async () => {
+    const db = createPolicyDb({
+      envRows: [
+        {
+          id: 'env-1',
+          agentDeployEnabled: true,
+          agentDeployEnabledBy: 'user-1',
+          agentDeployEnabledAt: '2026-06-18T10:01:00Z',
+          agentDeployDisabledAt: null,
+          allowedDeployProfileIdsJson: '["profile-allowed"]',
+        },
+      ],
+      taskRows: [{ agentProfileHint: 'profile-other' }],
+    });
+
+    const result = await assertAgentDeploymentAllowed(db as any, 'proj-1', 'staging', tokenData());
+    expect('error' in result ? result.error : '').toContain('not allowed to deploy');
+  });
+
+  it('allows callback flows to validate a direct agent profile id', async () => {
+    const db = createPolicyDb({
+      envRows: [
+        {
+          id: 'env-1',
+          agentDeployEnabled: true,
+          agentDeployEnabledBy: 'user-1',
+          agentDeployEnabledAt: '2026-06-18T10:01:00Z',
+          agentDeployDisabledAt: null,
+          allowedDeployProfileIdsJson: '["profile-allowed"]',
+        },
+      ],
+    });
+
+    const result = await assertAgentDeploymentAllowedForProfile(
+      db as any,
+      'proj-1',
+      'staging',
+      'profile-allowed',
+      { taskId: 'task-1' }
+    );
+
+    expect(result).toMatchObject({
+      environmentId: 'env-1',
+      taskAgentProfileId: 'profile-allowed',
+    });
+  });
+});
+
+describe('reconcileDeploymentReleaseStatuses', () => {
+  it('marks the latest pending release as applying while the node applies it', async () => {
+    const db = createReleaseDb([{ id: 'rel-3', version: 3, status: 'created' }]);
+
+    const transitions = await reconcileDeploymentReleaseStatuses(db as any, 'env-1', {
+      appliedSeq: 2,
+      status: 'applying',
+    });
+
+    expect(db.updates.map((update) => update.values)).toEqual([
+      expect.objectContaining({ status: 'applying', statusUpdatedAt: expect.any(String) }),
+    ]);
+    expect(transitions).toEqual([
+      expect.objectContaining({
+        releaseId: 'rel-3',
+        environmentId: 'env-1',
+        version: 3,
+        fromStatus: 'created',
+        toStatus: 'applying',
+        occurredAt: expect.any(String),
+      }),
+    ]);
+  });
+
+  it('returns no release lifecycle transition for duplicate applying heartbeat state', async () => {
+    const db = createReleaseDb([{ id: 'rel-3', version: 3, status: 'applying' }]);
+
+    const transitions = await reconcileDeploymentReleaseStatuses(db as any, 'env-1', {
+      appliedSeq: 2,
+      status: 'applying',
+    });
+
+    expect(db.updates.map((update) => update.values)).toEqual([
+      expect.objectContaining({ status: 'applying', statusUpdatedAt: expect.any(String) }),
+    ]);
+    expect(transitions).toEqual([]);
+  });
+
+  it('marks applied release applied and newer failed release failed after revert', async () => {
+    const db = createReleaseDb([{ id: 'rel-3', version: 3, status: 'applying' }]);
+
+    const transitions = await reconcileDeploymentReleaseStatuses(db as any, 'env-1', {
+      appliedSeq: 2,
+      status: 'reverted',
+    });
+
+    expect(db.updates.map((update) => update.values)).toEqual([
+      expect.objectContaining({ status: 'applied', statusUpdatedAt: expect.any(String) }),
+      expect.objectContaining({ status: 'failed', statusUpdatedAt: expect.any(String) }),
+    ]);
+    expect(transitions).toEqual([
+      expect.objectContaining({
+        releaseId: 'rel-3',
+        environmentId: 'env-1',
+        version: 3,
+        fromStatus: 'applying',
+        toStatus: 'failed',
+      }),
+    ]);
+  });
+
+  it('marks only the reported failed release and does not sweep newer releases', async () => {
+    const db = createReleaseDb([
+      { id: 'rel-2', version: 2, status: 'created' },
+      { id: 'rel-1', version: 1, status: 'applying' },
+    ]);
+
+    await reconcileDeploymentReleaseStatuses(db as any, 'env-1', {
+      appliedSeq: 0,
+      status: 'failed-initial',
+    });
+
+    expect(db.updates.map((update) => update.values)).toEqual([
+      expect.objectContaining({ status: 'failed', statusUpdatedAt: expect.any(String) }),
+    ]);
+  });
+});
+
+/**
+ * The agent gate is a SQL `WHERE` predicate, so these cases drive the real
+ * statement against a real SQL engine (`.claude/rules/28` §5). `createPolicyDb`
+ * above returns canned rows from a `.where()` that ignores its arguments, so it
+ * would pass identically with the status predicate deleted.
+ */
+describe('assertAgentDeploymentAllowedForProfile — status gate against real SQL', () => {
+  let sqlite: Database.Database;
+
+  const PROJECT_ID = 'proj-sql';
+  const ENV_NAME = 'production';
+  const ENV_ID = 'env-sql-1';
+  const ALLOWED_PROFILE = 'profile-allowed';
+  const NOT_FOUND_ERROR = `Deployment environment '${ENV_NAME}' not found for this project, or its status does not allow agent deployment (must be active or error).`;
+
+  function db() {
+    return drizzle(createSqliteD1(sqlite), { schema });
+  }
+
+  function seedEnvironment(overrides: Record<string, unknown> = {}): void {
+    const row: Record<string, unknown> = {
+      id: ENV_ID,
+      project_id: PROJECT_ID,
+      name: ENV_NAME,
+      status: 'active',
+      agent_deploy_enabled: 1,
+      agent_deploy_enabled_by: 'user-1',
+      agent_deploy_enabled_at: '2026-09-01T00:00:00.000Z',
+      agent_deploy_disabled_at: null,
+      allowed_deploy_profile_ids_json: JSON.stringify([ALLOWED_PROFILE]),
+      created_at: '2026-09-01T00:00:00.000Z',
+      updated_at: '2026-09-01T00:00:00.000Z',
+      ...overrides,
+    };
+    const columns = Object.keys(row);
+    sqlite
+      .prepare(
+        `INSERT INTO deployment_environments (${columns.map((c) => `"${c}"`).join(', ')})
+         VALUES (${columns.map(() => '?').join(', ')})`
+      )
+      .run(...columns.map((c) => row[c] as never));
+  }
+
+  beforeEach(() => {
+    sqlite = new Database(':memory:');
+    createAllSchemaTables(sqlite, schema);
+  });
+
+  // 'error' is admitted because a new release IS the recovery path for a parked
+  // environment; the lifecycle-transition statuses stay excluded so an agent can
+  // neither restart a user-stopped environment nor race an in-flight operation.
+  const cases: Array<{ status: string; allowed: boolean }> = [
+    { status: 'active', allowed: true },
+    { status: 'error', allowed: true },
+    { status: 'stopped', allowed: false },
+    { status: 'starting', allowed: false },
+    { status: 'stopping', allowed: false },
+    { status: 'deleting', allowed: false },
+    { status: 'deleted', allowed: false },
+  ];
+
+  for (const { status, allowed } of cases) {
+    it(`${allowed ? 'admits' : 'denies'} an environment with status '${status}'`, async () => {
+      seedEnvironment({ status });
+
+      const result = await assertAgentDeploymentAllowedForProfile(
+        db(),
+        PROJECT_ID,
+        ENV_NAME,
+        ALLOWED_PROFILE
+      );
+
+      if (allowed) {
+        expect(result).toMatchObject({
+          environmentId: ENV_ID,
+          taskAgentProfileId: ALLOWED_PROFILE,
+        });
+      } else {
+        expect(result).toEqual({ error: NOT_FOUND_ERROR });
+      }
+    });
+  }
+
+  // Controls: widening the status set must not have deleted the policy checks
+  // that sit behind it.
+  it('denies an errored environment whose owner disabled agent deployment', async () => {
+    seedEnvironment({ status: 'error', agent_deploy_enabled: 0 });
+
+    const result = await assertAgentDeploymentAllowedForProfile(
+      db(),
+      PROJECT_ID,
+      ENV_NAME,
+      ALLOWED_PROFILE
+    );
+
+    expect('error' in result ? result.error : '').toContain('Agent deployment is disabled');
+  });
+
+  it('denies an errored environment for a profile outside the allowlist', async () => {
+    seedEnvironment({ status: 'error' });
+
+    const result = await assertAgentDeploymentAllowedForProfile(
+      db(),
+      PROJECT_ID,
+      ENV_NAME,
+      'profile-other'
+    );
+
+    expect('error' in result ? result.error : '').toContain('not allowed to deploy');
+  });
+
+  it('denies an errored environment belonging to a different project', async () => {
+    seedEnvironment({ status: 'error' });
+
+    const result = await assertAgentDeploymentAllowedForProfile(
+      db(),
+      'proj-other',
+      ENV_NAME,
+      ALLOWED_PROFILE
+    );
+
+    expect(result).toEqual({
+      error: `Deployment environment '${ENV_NAME}' not found for this project, or its status does not allow agent deployment (must be active or error).`,
+    });
+  });
+});

@@ -1,9 +1,9 @@
 package server
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"path/filepath"
@@ -11,10 +11,7 @@ import (
 	"time"
 
 	"github.com/workspace/vm-agent/internal/agentsessions"
-	"github.com/workspace/vm-agent/internal/container"
 	"github.com/workspace/vm-agent/internal/eventstore"
-	"github.com/workspace/vm-agent/internal/persistence"
-	"github.com/workspace/vm-agent/internal/pty"
 )
 
 // firstNonEmpty returns the first non-empty string argument, or "".
@@ -30,14 +27,36 @@ func firstNonEmpty(vals ...string) string {
 // workspaceRuntimeOpts holds optional fields for upsertWorkspaceRuntime that
 // must be set under the workspace mutex to avoid data races with concurrent
 // goroutines reading the runtime struct.
+//
+// Every string field uses its zero value to mean "not supplied", so a caller
+// that only refreshes status or a callback token leaves the rest untouched.
+// Lightweight is a pointer for the same reason: a plain bool cannot express
+// "not supplied", and the flag gates cf-container runtime-asset injection
+// (agent_ws.go) plus devcontainer recovery (workspace_provisioning.go), so an
+// unrelated caller must not be able to clear it. Use lightweightOpt to set it.
 type workspaceRuntimeOpts struct {
 	GitUserName            string
 	GitUserEmail           string
 	GitHubID               string
-	Lightweight            bool
+	RepoProvider           string
+	BaseBranch             string
+	CloneURL               string
+	RepositoryHost         string
+	RepositoryPath         string
+	Lightweight            *bool // nil leaves the runtime's existing flag unchanged
 	DevcontainerConfigName string
 	DevcontainerCache      DevcontainerCacheCredentials
+	DefaultBranch          string // project's actual default branch; used by the push guard
+	ProjectID              string
+	ChatSessionID          string
+	EvictionGeneration     string // Initial hydration only; existing runs advance through explicit restart CAS.
+	TaskID                 string
 }
+
+// lightweightOpt returns an explicit override for workspaceRuntimeOpts.Lightweight.
+// "Not supplied" is expressed by omitting this call entirely, leaving the struct
+// field at its nil zero value.
+func lightweightOpt(v bool) *bool { return &v }
 
 func (s *Server) routedNodeID(r *http.Request) string {
 	return strings.TrimSpace(r.Header.Get("X-SAM-Node-Id"))
@@ -154,6 +173,25 @@ func (s *Server) checkWorkspaceRequestAuth(r *http.Request, workspaceID string) 
 	return err == nil
 }
 
+func (s *Server) requireWorkspaceReconnectState(w http.ResponseWriter, r *http.Request, runtime *WorkspaceRuntime) bool {
+	lock := s.workspaceLifecycleLock(runtime.ID)
+	if err := lock.Lock(r.Context()); err != nil {
+		writeError(w, http.StatusRequestTimeout, "workspace lifecycle operation canceled")
+		return false
+	}
+	defer lock.Unlock()
+	snapshot, err := s.refreshWorkspaceEvictionState(runtime)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, err.Error())
+		return false
+	}
+	if snapshot.Status == "evicted" {
+		writeError(w, http.StatusConflict, "workspace was evicted; restart it before reconnecting")
+		return false
+	}
+	return true
+}
+
 func (s *Server) getWorkspaceRuntime(workspaceID string) (*WorkspaceRuntime, bool) {
 	s.workspaceMu.RLock()
 	defer s.workspaceMu.RUnlock()
@@ -167,7 +205,15 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 		opt = opts[0]
 	}
 	s.workspaceMu.Lock()
-	defer s.workspaceMu.Unlock()
+	var resourceHistorySnapshot *WorkspaceRuntime
+	var adoptedCallbackToken string // persisted under the lock, published after it
+	defer func() {
+		s.workspaceMu.Unlock()
+		s.propagateWorkspaceCallbackToken(workspaceID, adoptedCallbackToken)
+		if resourceHistorySnapshot != nil {
+			s.ensureResourceHistoryForRuntime(resourceHistorySnapshot)
+		}
+	}()
 
 	if s.workspaces == nil {
 		s.workspaces = make(map[string]*WorkspaceRuntime)
@@ -190,11 +236,11 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 			runtime.Branch = branch
 			metadataChanged = true
 		}
-		if status != "" {
+		if status != "" && runtime.Status != "evicted" && !runtime.ProvisioningActive && !runtime.MetadataUnavailable {
 			runtime.Status = status
 		}
-		if callbackToken != "" {
-			runtime.CallbackToken = strings.TrimSpace(callbackToken)
+		if adoptWorkspaceCallbackTokenLocked(runtime, callbackToken) {
+			adoptedCallbackToken, metadataChanged = runtime.CallbackToken, true
 		}
 		if runtime.WorkspaceDir == "" {
 			runtime.WorkspaceDir = s.workspaceDirForRepo(workspaceID, runtime.Repository)
@@ -205,7 +251,7 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 			metadataChanged = true
 		}
 		if runtime.ContainerWorkDir == "" {
-			runtime.ContainerWorkDir = deriveContainerWorkDirForRepo(runtime.WorkspaceDir, runtime.Repository)
+			runtime.ContainerWorkDir = s.defaultContainerWorkDir(runtime.WorkspaceDir, runtime.Repository)
 			metadataChanged = true
 		}
 		if runtime.ContainerUser == "" {
@@ -221,18 +267,57 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 		if opt.GitHubID != "" {
 			runtime.GitHubID = opt.GitHubID
 		}
-		runtime.Lightweight = opt.Lightweight
+		if opt.BaseBranch != "" {
+			runtime.BaseBranch = opt.BaseBranch
+			metadataChanged = true
+		}
+		if opt.RepoProvider != "" {
+			runtime.RepoProvider = opt.RepoProvider
+			metadataChanged = true
+		}
+		if opt.CloneURL != "" {
+			runtime.CloneURL = opt.CloneURL
+			metadataChanged = true
+		}
+		if opt.RepositoryHost != "" {
+			runtime.RepositoryHost = opt.RepositoryHost
+			metadataChanged = true
+		}
+		if opt.RepositoryPath != "" {
+			runtime.RepositoryPath = opt.RepositoryPath
+			metadataChanged = true
+		}
+		if opt.Lightweight != nil {
+			runtime.Lightweight = *opt.Lightweight
+		}
 		if opt.DevcontainerConfigName != "" {
 			runtime.DevcontainerConfigName = opt.DevcontainerConfigName
 		}
 		if opt.DevcontainerCache.Ref != "" {
 			runtime.DevcontainerCache = opt.DevcontainerCache
 		}
+		if opt.DefaultBranch != "" {
+			runtime.DefaultBranch = opt.DefaultBranch
+			metadataChanged = true
+		}
+		if opt.ProjectID != "" && runtime.ProjectID == "" {
+			runtime.ProjectID = opt.ProjectID
+			metadataChanged = true
+		}
+		if opt.ChatSessionID != "" {
+			runtime.ChatSessionID = opt.ChatSessionID
+			metadataChanged = true
+		}
+		if opt.TaskID != "" {
+			runtime.TaskID = opt.TaskID
+		}
 		runtime.UpdatedAt = time.Now().UTC()
 
-		if metadataChanged && runtime.Repository != "" {
+		if metadataChanged && runtime.Repository != "" && !runtime.MetadataUnavailable {
 			s.persistWorkspaceMetadata(runtime)
 		}
+		runtimeCopy := *runtime
+		resourceHistorySnapshot = &runtimeCopy
 		return runtime
 	}
 
@@ -242,13 +327,18 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 	effectiveBranch := branch
 	var persistedWorkspaceDir, persistedContainerWorkDir, persistedContainerLabelValue, persistedContainerUser string
 	var persistedCallbackToken string
-	var persistedLightweight bool
+	var persistedProjectID, persistedChatSessionID, persistedEvictionGeneration string
+	var persistedBaseBranch, persistedDefaultBranch string
+	var persistedRepoProvider, persistedCloneURL, persistedRepositoryHost, persistedRepositoryPath string
+	var persistedLightweight, metadataUnavailable bool
 	var persistedDevcontainerConfigName string
 
 	if s.store != nil {
 		meta, err := s.store.GetWorkspaceMetadata(workspaceID)
 		if err != nil {
 			slog.Warn("Failed to read persisted workspace metadata", "workspace", workspaceID, "error", err)
+			metadataUnavailable = true
+			status = "error"
 		} else if meta != nil {
 			slog.Info("Hydrated workspace metadata from SQLite",
 				"workspace", workspaceID, "repository", meta.Repository,
@@ -264,6 +354,18 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 			persistedContainerLabelValue = meta.ContainerLabelVal
 			persistedContainerUser = meta.ContainerUser
 			persistedCallbackToken = meta.CallbackToken
+			persistedRepoProvider = meta.RepoProvider
+			persistedBaseBranch = meta.BaseBranch
+			persistedDefaultBranch = meta.DefaultBranch
+			persistedCloneURL = meta.CloneURL
+			persistedRepositoryHost = meta.RepositoryHost
+			persistedRepositoryPath = meta.RepositoryPath
+			persistedProjectID = meta.ProjectID
+			persistedChatSessionID = meta.ChatSessionID
+			persistedEvictionGeneration = meta.EvictionGeneration
+			if meta.Evicted {
+				status = "evicted"
+			}
 			persistedLightweight = meta.Lightweight
 			persistedDevcontainerConfigName = meta.DevcontainerConfigName
 		}
@@ -279,7 +381,7 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 	}
 	containerWorkDir := persistedContainerWorkDir
 	if containerWorkDir == "" {
-		containerWorkDir = deriveContainerWorkDirForRepo(workspaceDir, effectiveRepo)
+		containerWorkDir = s.defaultContainerWorkDir(workspaceDir, effectiveRepo)
 	}
 	containerUser := persistedContainerUser
 	if containerUser == "" {
@@ -292,6 +394,11 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 		ID:                     workspaceID,
 		Repository:             effectiveRepo,
 		Branch:                 effectiveBranch,
+		BaseBranch:             firstNonEmpty(opt.BaseBranch, persistedBaseBranch),
+		RepoProvider:           firstNonEmpty(opt.RepoProvider, persistedRepoProvider),
+		CloneURL:               firstNonEmpty(opt.CloneURL, persistedCloneURL),
+		RepositoryHost:         firstNonEmpty(opt.RepositoryHost, persistedRepositoryHost),
+		RepositoryPath:         firstNonEmpty(opt.RepositoryPath, persistedRepositoryPath),
 		Status:                 status,
 		CreatedAt:              time.Now().UTC(),
 		UpdatedAt:              time.Now().UTC(),
@@ -300,117 +407,29 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 		ContainerWorkDir:       containerWorkDir,
 		ContainerUser:          containerUser,
 		CallbackToken:          firstNonEmpty(strings.TrimSpace(callbackToken), strings.TrimSpace(persistedCallbackToken)),
+		ProjectID:              firstNonEmpty(persistedProjectID, opt.ProjectID),
+		ChatSessionID:          firstNonEmpty(opt.ChatSessionID, persistedChatSessionID),
+		EvictionGeneration:     firstNonEmpty(persistedEvictionGeneration, opt.EvictionGeneration),
+		MetadataUnavailable:    metadataUnavailable,
+		TaskID:                 opt.TaskID,
 		GitUserName:            opt.GitUserName,
 		GitUserEmail:           opt.GitUserEmail,
 		GitHubID:               opt.GitHubID,
-		Lightweight:            opt.Lightweight || persistedLightweight,
+		Lightweight:            (opt.Lightweight != nil && *opt.Lightweight) || persistedLightweight,
 		DevcontainerConfigName: firstNonEmpty(opt.DevcontainerConfigName, persistedDevcontainerConfigName),
+		DefaultBranch:          firstNonEmpty(opt.DefaultBranch, persistedDefaultBranch),
 		DevcontainerCache:      opt.DevcontainerCache,
 		PTY:                    manager,
 	}
 	s.workspaces[workspaceID] = runtime
+	adoptedCallbackToken = runtime.CallbackToken
+	runtimeCopy := *runtime
+	resourceHistorySnapshot = &runtimeCopy
 
-	if effectiveRepo != "" {
+	if effectiveRepo != "" && !metadataUnavailable {
 		s.persistWorkspaceMetadata(runtime)
 	}
 	return runtime
-}
-
-func (s *Server) newPTYManagerForWorkspace(
-	workspaceID,
-	workspaceDir,
-	containerWorkDir,
-	containerLabelValue,
-	containerUser string,
-) *pty.Manager {
-	workDir := workspaceDir
-	if s.config.ContainerMode {
-		workDir = containerWorkDir
-	}
-	resolvedContainerUser := strings.TrimSpace(containerUser)
-	if resolvedContainerUser == "" {
-		resolvedContainerUser = strings.TrimSpace(s.config.ContainerUser)
-	}
-
-	config := pty.ManagerConfig{
-		DefaultShell:      s.config.DefaultShell,
-		DefaultRows:       s.config.DefaultRows,
-		DefaultCols:       s.config.DefaultCols,
-		WorkDir:           workDir,
-		ContainerResolver: s.ptyManagerContainerResolverForLabel(containerLabelValue),
-		ContainerUser:     resolvedContainerUser,
-		GracePeriod:       s.config.PTYOrphanGracePeriod,
-		BufferSize:        s.config.PTYOutputBufferSize,
-	}
-
-	manager := pty.NewManager(config)
-	if s.shouldReusePrimaryPTYManager(workspaceID, workspaceDir, containerWorkDir, containerLabelValue) {
-		return s.ptyManager
-	}
-
-	return manager
-}
-
-func (s *Server) shouldReusePrimaryPTYManager(workspaceID, workspaceDir, containerWorkDir, containerLabelValue string) bool {
-	if s == nil || s.ptyManager == nil {
-		return false
-	}
-
-	// Preserve compatibility with legacy single-workspace host mode.
-	if !s.config.ContainerMode && len(s.workspaces) == 0 {
-		return true
-	}
-
-	configuredWorkspaceID := strings.TrimSpace(s.config.WorkspaceID)
-	if configuredWorkspaceID == "" || strings.TrimSpace(workspaceID) != configuredWorkspaceID {
-		return false
-	}
-
-	expectedWorkspaceDir := strings.TrimSpace(s.workspaceDirForRuntime(configuredWorkspaceID))
-	if expectedWorkspaceDir == "" {
-		expectedWorkspaceDir = "/workspace"
-	}
-	if strings.TrimSpace(workspaceDir) != expectedWorkspaceDir {
-		return false
-	}
-
-	if !s.config.ContainerMode {
-		return true
-	}
-
-	expectedContainerLabel := strings.TrimSpace(s.config.ContainerLabelValue)
-	if expectedContainerLabel == "" {
-		expectedContainerLabel = expectedWorkspaceDir
-	}
-	if strings.TrimSpace(containerLabelValue) != expectedContainerLabel {
-		return false
-	}
-
-	expectedContainerWorkDir := strings.TrimSpace(s.config.ContainerWorkDir)
-	if expectedContainerWorkDir == "" {
-		expectedContainerWorkDir = deriveContainerWorkDirForRepo(expectedWorkspaceDir, s.config.Repository)
-	}
-	if strings.TrimSpace(containerWorkDir) != expectedContainerWorkDir {
-		return false
-	}
-
-	return true
-}
-
-func (s *Server) rebuildWorkspacePTYManager(runtime *WorkspaceRuntime) {
-	if runtime == nil {
-		return
-	}
-	if runtime.PTY != nil && runtime.PTY.SessionCount() > 0 {
-		return
-	}
-	runtime.PTY = s.newPTYManagerForWorkspace(
-		runtime.ID,
-		strings.TrimSpace(runtime.WorkspaceDir),
-		strings.TrimSpace(runtime.ContainerWorkDir),
-		strings.TrimSpace(runtime.ContainerLabelValue),
-		strings.TrimSpace(runtime.ContainerUser),
-	)
 }
 
 // casWorkspaceStatus performs a compare-and-swap status transition.
@@ -436,8 +455,12 @@ func (s *Server) casWorkspaceStatus(workspaceID string, expectedStatuses []strin
 }
 
 func (s *Server) removeWorkspaceRuntime(workspaceID string) {
+	s.stopResourceHistoryForWorkspace(workspaceID, context.Background())
 	s.workspaceMu.Lock()
-	defer s.workspaceMu.Unlock()
+	defer func() {
+		s.workspaceMu.Unlock()
+		s.clearRemovedWorkspaceRestores(workspaceID)
+	}()
 
 	if runtime, ok := s.workspaces[workspaceID]; ok {
 		runtime.PTY.CloseAllSessions()
@@ -450,29 +473,6 @@ func (s *Server) removeWorkspaceRuntime(workspaceID string) {
 		if err := s.store.DeleteWorkspaceMetadata(workspaceID); err != nil {
 			slog.Warn("Failed to delete persisted workspace metadata", "workspace", workspaceID, "error", err)
 		}
-	}
-}
-
-// persistWorkspaceMetadata writes workspace runtime state to SQLite for
-// recovery after agent restarts. Called outside the workspace mutex since
-// the store has its own locking.
-func (s *Server) persistWorkspaceMetadata(runtime *WorkspaceRuntime) {
-	if s.store == nil || runtime == nil {
-		return
-	}
-	if err := s.store.UpsertWorkspaceMetadata(persistence.WorkspaceMetadata{
-		WorkspaceID:            runtime.ID,
-		Repository:             runtime.Repository,
-		Branch:                 runtime.Branch,
-		ContainerWorkDir:       runtime.ContainerWorkDir,
-		ContainerUser:          runtime.ContainerUser,
-		ContainerLabelVal:      runtime.ContainerLabelValue,
-		WorkspaceDir:           runtime.WorkspaceDir,
-		CallbackToken:          runtime.CallbackToken,
-		Lightweight:            runtime.Lightweight,
-		DevcontainerConfigName: runtime.DevcontainerConfigName,
-	}); err != nil {
-		slog.Warn("Failed to persist workspace metadata", "workspace", runtime.ID, "error", err)
 	}
 }
 
@@ -529,6 +529,15 @@ func deriveContainerWorkDirForRepo(workspaceDir, repository string) string {
 		return filepath.Join("/workspaces", repoDir)
 	}
 	return deriveContainerWorkDir(workspaceDir)
+}
+
+func (s *Server) defaultContainerWorkDir(workspaceDir, repository string) string {
+	if s != nil && s.config != nil && s.config.IsStandaloneMode() {
+		if configured := strings.TrimSpace(s.config.ContainerWorkDir); configured != "" {
+			return configured
+		}
+	}
+	return deriveContainerWorkDirForRepo(workspaceDir, repository)
 }
 
 func deriveContainerWorkDir(workspaceDir string) string {
@@ -591,80 +600,4 @@ func randomEventID() string {
 	buf := make([]byte, 8)
 	_, _ = rand.Read(buf)
 	return hex.EncodeToString(buf)
-}
-
-// pty.Manager does not expose its resolver, so we derive from config.
-func (s *Server) ptyManagerContainerResolver() pty.ContainerResolver {
-	if !s.config.ContainerMode {
-		return nil
-	}
-	return s.ptyManagerContainerResolverFromConfig()
-}
-
-func (s *Server) ptyManagerContainerResolverFromConfig() pty.ContainerResolver {
-	return s.ptyManagerContainerResolverForLabel(s.config.ContainerLabelValue)
-}
-
-func (s *Server) ptyManagerContainerResolverForLabel(labelValue string) pty.ContainerResolver {
-	if !s.config.ContainerMode {
-		return nil
-	}
-
-	requestedLabel := strings.TrimSpace(labelValue)
-	labelCandidates := []string{}
-	if requestedLabel != "" {
-		// Workspace-scoped lookups must be strict to avoid cross-workspace routing
-		// when multiple containers share repo-derived or legacy label values.
-		labelCandidates = containerLabelCandidates(requestedLabel)
-	} else {
-		labelCandidates = containerLabelCandidates(
-			s.config.ContainerLabelValue,
-			s.config.WorkspaceDir,
-			"/workspace",
-		)
-	}
-	if len(labelCandidates) == 0 {
-		return nil
-	}
-
-	discoveries := make([]*container.Discovery, 0, len(labelCandidates))
-	for _, candidate := range labelCandidates {
-		discoveries = append(discoveries, container.NewDiscovery(container.Config{
-			LabelKey:   s.config.ContainerLabelKey,
-			LabelValue: candidate,
-			CacheTTL:   s.config.ContainerCacheTTL,
-		}))
-	}
-
-	return func() (string, error) {
-		var lastErr error
-		for _, discovery := range discoveries {
-			containerID, err := discovery.GetContainerID()
-			if err == nil {
-				return containerID, nil
-			}
-			lastErr = err
-		}
-		if lastErr != nil {
-			return "", lastErr
-		}
-		return "", fmt.Errorf("no container label candidates configured")
-	}
-}
-
-func containerLabelCandidates(values ...string) []string {
-	candidates := make([]string, 0, len(values))
-	seen := make(map[string]struct{}, len(values))
-	for _, value := range values {
-		trimmed := strings.TrimSpace(value)
-		if trimmed == "" {
-			continue
-		}
-		if _, ok := seen[trimmed]; ok {
-			continue
-		}
-		seen[trimmed] = struct{}{}
-		candidates = append(candidates, trimmed)
-	}
-	return candidates
 }

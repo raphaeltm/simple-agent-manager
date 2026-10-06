@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face {
+    font-family: 'Chillax';
+    src: url('./assets/Chillax-Variable.woff2') format('woff2');
+    font-weight: 200 700;
+  }
+  :root {
+    --bg: #070d0b;
+    --fg: #e6f2ee;
+    --muted: #9fb7ae;
+    --dim: #6b8a7f;
+    --accent: #16a34a;
+    --accent-strong: #22c55e;
+    --font-display: 'Chillax', system-ui, sans-serif;
+    --font-body: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    --font-mono: 'SF Mono', 'Fira Code', Consolas, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1200px; height: 675px;
+    background: var(--bg); color: var(--fg);
+    font-family: var(--font-body);
+    overflow: hidden; position: relative;
+  }
+  .hero { position: absolute; inset: 0; }
+  .hero img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 74%; }
+  .hero::after {
+    content: ''; position: absolute; inset: 0;
+    background:
+      linear-gradient(90deg, rgba(7,13,11,0.94) 0%, rgba(7,13,11,0.75) 34%, rgba(7,13,11,0.15) 62%, rgba(7,13,11,0.35) 100%),
+      linear-gradient(0deg, rgba(7,13,11,0.9) 0%, transparent 38%);
+  }
+  .content { position: absolute; inset: 0; padding: 46px 48px; display: flex; flex-direction: column; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--font-mono); font-size: 12.5px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted);
+    padding: 6px 15px;
+    background: rgba(19,32,29,0.5); backdrop-filter: blur(14px);
+    border: 1px solid rgba(255,255,255,0.1); border-radius: 100px;
+    align-self: flex-start; margin-bottom: 24px;
+  }
+  .badge-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent-strong); box-shadow: 0 0 8px var(--accent-strong); }
+  h1 {
+    font-family: var(--font-display); font-size: 47px; font-weight: 600;
+    line-height: 1.08; letter-spacing: -0.02em; max-width: 560px;
+    text-shadow: 0 2px 24px rgba(7,13,11,0.6);
+  }
+  h1 .grad {
+    background: linear-gradient(135deg, #22c55e 0%, #4ade80 100%);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .sub {
+    margin-top: 18px; font-size: 17.5px; color: var(--muted); max-width: 460px; line-height: 1.55;
+    text-shadow: 0 1px 12px rgba(7,13,11,0.8);
+  }
+  .sub b { color: var(--fg); }
+  .map-inset {
+    position: absolute; top: 42px; right: 46px;
+    width: 200px; height: 200px; border-radius: 18px; overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.16);
+    box-shadow: 0 14px 44px rgba(0,0,0,0.65), 0 0 26px rgba(34,197,94,0.14);
+  }
+  .map-inset img { width: 300px; height: 300px; object-fit: cover; margin: -50px 0 0 -50px; }
+  .cards {
+    margin-top: auto;
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px;
+  }
+  .card {
+    background: rgba(11,17,16,0.62); backdrop-filter: blur(18px);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 14px;
+    padding: 16px 18px 15px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.35);
+  }
+  .card-head { display: flex; align-items: center; gap: 9px; margin-bottom: 8px; }
+  .card-n {
+    width: 22px; height: 22px; border-radius: 50%; flex: none;
+    background: var(--accent); border: 2px solid var(--accent-strong);
+    box-shadow: 0 0 10px rgba(34,197,94,0.55);
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-display); font-weight: 600; font-size: 12px;
+  }
+  .card-meta {
+    font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.05em;
+    text-transform: uppercase; color: var(--accent-strong);
+  }
+  .card-text { font-size: 13.5px; color: var(--muted); line-height: 1.4; }
+  .card-text b { color: var(--fg); font-weight: 600; }
+  .brand {
+    position: absolute; bottom: 46px; right: 46px;
+    display: none;
+  }
+  .topbrand {
+    position: absolute; top: 258px; right: 46px;
+    width: 200px;
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    background: rgba(11,17,16,0.62); backdrop-filter: blur(18px);
+    border: 1px solid rgba(255,255,255,0.1); border-radius: 12px;
+    padding: 10px 0 9px;
+  }
+  .topbrand .brand-row { display: flex; align-items: center; gap: 8px; }
+  .topbrand img { width: 22px; height: 22px; }
+  .topbrand .wordmark { font-family: var(--font-display); font-weight: 600; font-size: 16px; }
+  .topbrand .url { font-family: var(--font-mono); font-size: 10.5px; color: var(--dim); }
+</style>
+</head>
+<body>
+  <div class="hero"><img src="./assets/20260704_131201.jpg"></div>
+  <div class="content">
+    <div class="badge"><span class="badge-dot"></span>Field notes &middot; Paris &middot; Jul 4</div>
+    <h1>The office today: <span class="grad">a walk along the Seine</span></h1>
+    <div class="sub">My SAM agents merged <b>4 pull requests</b> while I crossed Paris on foot — each one running in its own cloud sandbox.</div>
+    <div class="cards">
+      <div class="card">
+        <div class="card-head"><div class="card-n">1</div><div class="card-meta">13:12 &middot; Pont Neuf</div></div>
+        <div class="card-text"><b>Chat performance</b> — full-conversation load &amp; timeline jumps</div>
+      </div>
+      <div class="card">
+        <div class="card-head"><div class="card-n">2</div><div class="card-meta">14:19 &middot; La Rap&eacute;e</div></div>
+        <div class="card-text"><b>Flaky CI test hunt</b> + message-history fixes</div>
+      </div>
+      <div class="card">
+        <div class="card-head"><div class="card-n">3</div><div class="card-meta">15:25 &middot; J. des Plantes</div></div>
+        <div class="card-text"><b>3 agents in parallel</b> on project-sharing auth</div>
+      </div>
+      <div class="card">
+        <div class="card-head"><div class="card-n">4</div><div class="card-meta">16:46 &middot; Coul&eacute;e Verte</div></div>
+        <div class="card-text"><b>Prod deploy verified</b> — green from a rose trellis</div>
+      </div>
+    </div>
+  </div>
+  <div class="map-inset"><img src="./assets/map.png"></div>
+  <div class="topbrand">
+    <div class="brand-row">
+      <img src="./assets/favicon.png">
+      <span class="wordmark">SAM</span>
+    </div>
+    <span class="url">simple-agent-manager.org</span>
+  </div>
+</body>
+</html>

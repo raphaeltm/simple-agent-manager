@@ -5,9 +5,10 @@ import type { NavigateFunction } from 'react-router';
 
 import type { ChatSessionHandle } from '../../components/ChatSession';
 import type { SessionTokenUsage } from '../../components/WorkspaceSidebar';
+import { useAgentCatalog } from '../../hooks/useAgentCatalog';
+import { useQueryScope } from '../../hooks/useQueryScope';
 import {
   createAgentSession,
-  listAgents,
   listAgentSessions,
   resumeAgentSession,
   stopAgentSession,
@@ -53,28 +54,21 @@ export function useSessionState(
   loadWorkspaceState: () => Promise<void>,
   activeWorktree: string | null,
   chatSessionRefs: React.RefObject<Map<string, ChatSessionHandle>>,
-  tabOrderAssignOrder: (tabId: string) => void,
+  tabOrderAssignOrder: (tabId: string) => void
 ): UseSessionStateResult {
   const sessionIdParam = searchParams.get('sessionId');
   const [sessionsLoading, setSessionsLoading] = useState(false);
-  const [agentOptions, setAgentOptions] = useState<AgentInfo[]>([]);
-  const [preferredAgentsBySession, setPreferredAgentsBySession] = useState<Record<string, AgentInfo['id']>>({});
+  const [preferredAgentsBySession, setPreferredAgentsBySession] = useState<
+    Record<string, AgentInfo['id']>
+  >({});
   const [sessionTokenUsages, setSessionTokenUsages] = useState<SessionTokenUsage[]>([]);
   const [recentlyStopped, setRecentlyStopped] = useState<Set<string>>(new Set());
   const [dismissedOrphans, setDismissedOrphans] = useState(false);
 
-  // Load agent options
-  useEffect(() => {
-    if (!isRunning) { setAgentOptions([]); return; }
-    let cancelled = false;
-    void (async () => {
-      try {
-        const data = await listAgents();
-        if (!cancelled) setAgentOptions(data.agents || []);
-      } catch { if (!cancelled) setAgentOptions([]); }
-    })();
-    return () => { cancelled = true; };
-  }, [isRunning]);
+  // Agent catalog, shared with project chat and the settings pages. Only fetched once
+  // the workspace is running, matching the previous effect's precondition.
+  const queryScope = useQueryScope();
+  const { agents: agentOptions } = useAgentCatalog(isRunning ? queryScope : '');
 
   const configuredAgents = useMemo(
     () => agentOptions.filter((a) => a.configured && a.supportsAcp),
@@ -84,12 +78,16 @@ export function useSessionState(
     () => new Map(configuredAgents.map((a) => [a.id, a.name])),
     [configuredAgents]
   );
-  const defaultAgentId: AgentType | null = configuredAgents.length === 1 ? configuredAgents[0]!.id : null;
+  const defaultAgentId: AgentType | null =
+    configuredAgents.length === 1 ? (configuredAgents.at(0)?.id ?? null) : null;
   const defaultAgentName = defaultAgentId ? (agentNameById.get(defaultAgentId) ?? null) : null;
 
-  const activeChatSessionId = viewMode === 'conversation'
-    ? sessionIdParam || agentSessions.find((s) => isSessionActive(s) && !recentlyStopped.has(s.id))?.id || null
-    : null;
+  const activeChatSessionId =
+    viewMode === 'conversation'
+      ? sessionIdParam ||
+        agentSessions.find((s) => isSessionActive(s) && !recentlyStopped.has(s.id))?.id ||
+        null
+      : null;
 
   // Derived session lists
   const runningChatSessions = useMemo(
@@ -101,9 +99,10 @@ export function useSessionState(
     [agentSessions, recentlyStopped]
   );
   const historySessions = useMemo(
-    () => agentSessions
-      .filter((s) => s.status === 'stopped' && !recentlyStopped.has(s.id))
-      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
+    () =>
+      agentSessions
+        .filter((s) => s.status === 'stopped' && !recentlyStopped.has(s.id))
+        .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
     [agentSessions, recentlyStopped]
   );
 
@@ -115,7 +114,11 @@ export function useSessionState(
         const session = agentSessions.find((s) => s.id === sessionId);
         const label = session?.label ?? `Chat ${sessionId.slice(-4)}`;
         const entry: SessionTokenUsage = { sessionId, label, usage };
-        if (idx >= 0) { const next = [...prev]; next[idx] = entry; return next; }
+        if (idx >= 0) {
+          const next = [...prev];
+          next[idx] = entry;
+          return next;
+        }
         return [...prev, entry];
       });
     },
@@ -136,15 +139,22 @@ export function useSessionState(
     if (!id) return;
     try {
       setSessionsLoading(true);
-      const preferredAgent = preferredAgentId ? configuredAgents.find((a) => a.id === preferredAgentId) : undefined;
+      const preferredAgent = preferredAgentId
+        ? configuredAgents.find((a) => a.id === preferredAgentId)
+        : undefined;
       const runningCount = agentSessions.filter((s) => s.status === 'running').length;
-      const label = preferredAgent ? `${preferredAgent.name} ${runningCount + 1}` : `Chat ${runningCount + 1}`;
+      const label = preferredAgent
+        ? `${preferredAgent.name} ${runningCount + 1}`
+        : `Chat ${runningCount + 1}`;
       const created = await createAgentSession(id, {
-        label, agentType: preferredAgentId, worktreePath: activeWorktree ?? undefined,
+        label,
+        agentType: preferredAgentId,
+        worktreePath: activeWorktree ?? undefined,
       });
       setAgentSessions((prev) => [...prev.filter((s) => s.id !== created.id), created]);
       tabOrderAssignOrder(`chat:${created.id}`);
-      if (preferredAgentId) setPreferredAgentsBySession((prev) => ({ ...prev, [created.id]: preferredAgentId }));
+      if (preferredAgentId)
+        setPreferredAgentsBySession((prev) => ({ ...prev, [created.id]: preferredAgentId }));
       const params = new URLSearchParams(searchParams);
       params.set('view', 'conversation');
       params.set('sessionId', created.id);
@@ -167,7 +177,9 @@ export function useSessionState(
       chatSessionRefs.current.delete(sessionId);
       setPreferredAgentsBySession((prev) => {
         if (!prev[sessionId]) return prev;
-        const next = { ...prev }; delete next[sessionId]; return next;
+        const next = { ...prev };
+        delete next[sessionId];
+        return next;
       });
       setSessionTokenUsages((prev) => prev.filter((s) => s.sessionId !== sessionId));
       if (sessionIdParam === sessionId) {

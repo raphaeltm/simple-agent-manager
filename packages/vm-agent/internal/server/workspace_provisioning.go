@@ -26,20 +26,42 @@ type workspaceRuntimeMetadataResponse struct {
 }
 
 func (s *Server) callbackTokenForWorkspace(workspaceID string) string {
-	if runtime, ok := s.getWorkspaceRuntime(workspaceID); ok {
-		if token := strings.TrimSpace(runtime.CallbackToken); token != "" {
-			return token
-		}
+	if token := s.workspaceCallbackToken(workspaceID); token != "" {
+		return token
 	}
 
 	return strings.TrimSpace(s.config.CallbackToken)
 }
 
+// Renewal and control-plane delivery replace runtime.CallbackToken while the
+// workspace runs (workspace_callback_token_renewal.go), always under
+// workspaceMu, so every read takes the lock too (rule 46). Callers must not hold
+// workspaceMu.
+
 func (s *Server) workspaceCallbackToken(workspaceID string) string {
-	if runtime, ok := s.getWorkspaceRuntime(workspaceID); ok {
-		return strings.TrimSpace(runtime.CallbackToken)
+	token, _ := s.lookupWorkspaceCallbackToken(workspaceID)
+	return token
+}
+
+// lookupWorkspaceCallbackToken also reports whether the workspace exists.
+func (s *Server) lookupWorkspaceCallbackToken(workspaceID string) (string, bool) {
+	s.workspaceMu.RLock()
+	defer s.workspaceMu.RUnlock()
+	runtime, ok := s.workspaces[workspaceID]
+	if !ok || runtime == nil {
+		return "", false
 	}
-	return ""
+	return strings.TrimSpace(runtime.CallbackToken), true
+}
+
+// runtimeCallbackToken reads the token of a runtime the caller already holds.
+func (s *Server) runtimeCallbackToken(runtime *WorkspaceRuntime) string {
+	if runtime == nil {
+		return ""
+	}
+	s.workspaceMu.RLock()
+	defer s.workspaceMu.RUnlock()
+	return strings.TrimSpace(runtime.CallbackToken)
 }
 
 func (s *Server) applyDetectedContainerUser(runtime *WorkspaceRuntime, detected string) {
@@ -59,12 +81,31 @@ func (s *Server) applyDetectedContainerUser(runtime *WorkspaceRuntime, detected 
 	s.rebuildWorkspacePTYManager(runtime)
 }
 
+func workspaceRuntimeRequiresGitToken(runtime *WorkspaceRuntime) bool {
+	if runtime == nil {
+		return false
+	}
+	if strings.TrimSpace(runtime.Repository) == "" && strings.TrimSpace(runtime.CloneURL) == "" {
+		return false
+	}
+
+	switch strings.ToLower(strings.TrimSpace(runtime.RepoProvider)) {
+	case "", "github", "gitlab", "artifacts":
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *WorkspaceRuntime) (bool, error) {
 	if runtime == nil {
 		return false, fmt.Errorf("workspace runtime is required")
 	}
+	if err := s.waitForSystemProvisioning(ctx); err != nil {
+		return false, err
+	}
 
-	callbackToken := strings.TrimSpace(runtime.CallbackToken)
+	callbackToken := s.runtimeCallbackToken(runtime)
 	if callbackToken == "" {
 		callbackToken = strings.TrimSpace(s.config.CallbackToken)
 	}
@@ -73,6 +114,11 @@ func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *Workspa
 	cfg.WorkspaceID = runtime.ID
 	cfg.Repository = strings.TrimSpace(runtime.Repository)
 	cfg.Branch = strings.TrimSpace(runtime.Branch)
+	cfg.BaseBranch = strings.TrimSpace(runtime.BaseBranch)
+	cfg.RepoProvider = strings.TrimSpace(runtime.RepoProvider)
+	cfg.CloneURL = strings.TrimSpace(runtime.CloneURL)
+	cfg.RepositoryHost = strings.TrimSpace(runtime.RepositoryHost)
+	cfg.RepositoryPath = strings.TrimSpace(runtime.RepositoryPath)
 	cfg.WorkspaceDir = strings.TrimSpace(runtime.WorkspaceDir)
 	cfg.ContainerLabelValue = strings.TrimSpace(runtime.ContainerLabelValue)
 	cfg.ContainerWorkDir = strings.TrimSpace(runtime.ContainerWorkDir)
@@ -92,10 +138,13 @@ func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *Workspa
 
 	gitToken, err := s.fetchGitTokenForWorkspace(provisionCtx, runtime.ID, callbackToken)
 	if err != nil {
+		if workspaceRuntimeRequiresGitToken(runtime) {
+			return false, fmt.Errorf("failed to fetch git token: %w", err)
+		}
 		slog.Warn("Proceeding without git token", "workspace", runtime.ID, "error", err)
 	}
 
-	runtimeAssets, err := s.fetchProjectRuntimeAssetsForWorkspace(provisionCtx, runtime.ID, callbackToken)
+	runtimeAssets, err := s.fetchProjectRuntimeAssetsForWorkspace(provisionCtx, runtime.ID, callbackToken, "")
 	if err != nil {
 		return false, fmt.Errorf("failed to fetch project runtime assets: %w", err)
 	}
@@ -113,6 +162,10 @@ func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *Workspa
 		GitUserName:            runtime.GitUserName,
 		GitUserEmail:           runtime.GitUserEmail,
 		GitHubID:               runtime.GitHubID,
+		RepoProvider:           runtime.RepoProvider,
+		CloneURL:               runtime.CloneURL,
+		RepositoryHost:         runtime.RepositoryHost,
+		RepositoryPath:         runtime.RepositoryPath,
 		ProjectEnvVars:         runtimeAssets.EnvVars,
 		ProjectFiles:           runtimeAssets.Files,
 		Lightweight:            runtime.Lightweight,
@@ -125,6 +178,15 @@ func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *Workspa
 	return recoveryMode, nil
 }
 
+// isContainerUnavailableError reports whether err means the devcontainer could not be
+// resolved and a workspace recovery attempt is therefore worth making.
+//
+// This is a TRIGGER, not a classifier: every caller reacts by calling
+// recoverWorkspaceRuntime (websocket.go terminal + multi-terminal create, agent_ws.go
+// SessionHost start). Do not widen it to make some other code path treat an error as
+// expected — that silently adds a recovery attempt at all three call sites. Compose a
+// separate named predicate instead, as isSnapshotTeardownRaceError does.
+// See .claude/rules/67-shared-predicates-that-trigger-actions.md.
 func isContainerUnavailableError(err error) bool {
 	if err == nil {
 		return false
@@ -138,8 +200,23 @@ func (s *Server) recoverWorkspaceRuntime(ctx context.Context, runtime *Workspace
 	if runtime == nil {
 		return fmt.Errorf("workspace runtime is required")
 	}
+	lock := s.workspaceLifecycleLock(runtime.ID)
+	if err := lock.Lock(ctx); err != nil {
+		return err
+	}
+	defer lock.Unlock()
+	snapshot, stateErr := s.refreshWorkspaceEvictionState(runtime)
+	if stateErr != nil {
+		return stateErr
+	}
+	if snapshot.Status == "evicted" {
+		return &workspaceNotRunningError{status: "evicted"}
+	}
 	if !s.config.ContainerMode {
 		return nil
+	}
+	if err := s.waitForSystemProvisioning(ctx); err != nil {
+		return err
 	}
 
 	callbackToken := s.callbackTokenForWorkspace(runtime.ID)
@@ -156,6 +233,11 @@ func (s *Server) recoverWorkspaceRuntime(ctx context.Context, runtime *Workspace
 	cfg.WorkspaceID = runtime.ID
 	cfg.Repository = strings.TrimSpace(runtime.Repository)
 	cfg.Branch = strings.TrimSpace(runtime.Branch)
+	cfg.BaseBranch = strings.TrimSpace(runtime.BaseBranch)
+	cfg.RepoProvider = strings.TrimSpace(runtime.RepoProvider)
+	cfg.CloneURL = strings.TrimSpace(runtime.CloneURL)
+	cfg.RepositoryHost = strings.TrimSpace(runtime.RepositoryHost)
+	cfg.RepositoryPath = strings.TrimSpace(runtime.RepositoryPath)
 	cfg.WorkspaceDir = strings.TrimSpace(runtime.WorkspaceDir)
 	cfg.ContainerLabelValue = strings.TrimSpace(runtime.ContainerLabelValue)
 	cfg.ContainerWorkDir = strings.TrimSpace(runtime.ContainerWorkDir)
@@ -176,7 +258,7 @@ func (s *Server) recoverWorkspaceRuntime(ctx context.Context, runtime *Workspace
 		}
 	}
 
-	runtimeAssets, assetsErr := s.fetchProjectRuntimeAssetsForWorkspace(recoveryCtx, runtime.ID, callbackToken)
+	runtimeAssets, assetsErr := s.fetchProjectRuntimeAssetsForWorkspace(recoveryCtx, runtime.ID, callbackToken, "")
 	if assetsErr != nil {
 		return fmt.Errorf("failed to fetch project runtime assets: %w", assetsErr)
 	}
@@ -184,6 +266,10 @@ func (s *Server) recoverWorkspaceRuntime(ctx context.Context, runtime *Workspace
 	state.ProjectFiles = runtimeAssets.Files
 	state.Lightweight = runtime.Lightweight
 	state.DevcontainerConfigName = runtime.DevcontainerConfigName
+	state.RepoProvider = runtime.RepoProvider
+	state.CloneURL = runtime.CloneURL
+	state.RepositoryHost = runtime.RepositoryHost
+	state.RepositoryPath = runtime.RepositoryPath
 
 	_, err := prepareWorkspaceForRuntime(recoveryCtx, &cfg, state, nil)
 	if err != nil {

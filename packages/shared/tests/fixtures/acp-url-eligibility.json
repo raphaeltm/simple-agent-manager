@@ -1,0 +1,19 @@
+[
+  {"url":"https://auth.example.com/approve?state=opaque","eligible":true},
+  {"url":"HTTPS://auth.example.com/approve","eligible":true},
+  {"url":"https://auth.example.com:443/approve","eligible":true},
+  {"url":"https://auth.example.com/approve?redirect_uri=https%3A%2F%2Fdone.example.com%2Fcb","eligible":true},
+  {"url":"http://auth.example.com/approve","eligible":false},
+  {"url":"https://localhost/approve","eligible":false},
+  {"url":"https://127.0.0.1/approve","eligible":false},
+  {"url":"https://[::1]/approve","eligible":false},
+  {"url":"https://auth.example.com:8443/approve","eligible":false},
+  {"url":"https://user:pass@auth.example.com/approve","eligible":false},
+  {"url":"https://xn--e1afmkfd.example/approve","eligible":false},
+  {"url":"https://auth.example.com/approve?redirect_uri=http%3A%2F%2Flocalhost%2Fcallback","eligible":false},
+  {"url":"https://auth.example.com/approve?next=https%3A%2F%2Fdone.example.com%2F%3Fnext%3Dhttp%253A%252F%252Flocalhost","eligible":false},
+  {"url":"https://auth.example.com/approve?redirect_uri=%ZZ","eligible":false},
+  {"url":"https://auth.example.com/approve?x=1;y=2","eligible":false},
+  {"url":"https://auth.example.com/approve\u0000","eligible":false},
+  {"url":"https://auth.example.com/approve\\x","eligible":false}
+]

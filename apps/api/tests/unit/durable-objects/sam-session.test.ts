@@ -27,15 +27,34 @@ import {
   resolveSamConfig,
   SAM_ANTHROPIC_VERSION,
 } from '@simple-agent-manager/shared';
+import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { runAgentLoop } from '../../../src/durable-objects/sam-session/agent-loop';
-import { buildFtsQuery, extractSnippet } from '../../../src/durable-objects/sam-session/index';
+import {
+  appendMessageLikeSearchResults,
+  buildFtsQuery,
+  extractSnippet,
+} from '../../../src/durable-objects/sam-session/index';
 import { executeTool } from '../../../src/durable-objects/sam-session/tools';
 import { searchConversationHistory } from '../../../src/durable-objects/sam-session/tools/search-conversation-history';
 import type { CollectedToolCall, MessageRow, ToolContext } from '../../../src/durable-objects/sam-session/types';
+import {
+  DEFAULT_SEARCH_QUERY_MAX_LENGTH,
+  DEFAULT_SEARCH_QUERY_MAX_TERM_LENGTH,
+  DEFAULT_SEARCH_QUERY_MAX_TERMS,
+} from '../../../src/lib/search-query-limits';
+import { createSqlStorage } from './sql-storage-test-utils';
 
 // Mock cloudflare:workers (vitest hoists vi.mock calls automatically)
+
+function makeBudgetKv(): KVNamespace {
+  return {
+    get: vi.fn().mockResolvedValue(null),
+    put: vi.fn().mockResolvedValue(undefined),
+  } as unknown as KVNamespace;
+}
+
 vi.mock('cloudflare:workers', () => ({
   DurableObject: class {
     ctx: unknown;
@@ -59,7 +78,7 @@ vi.mock('../../../src/services/platform-credentials', () => ({
 
 describe('SAM Constants and Config', () => {
   it('has correct default values', () => {
-    expect(DEFAULT_SAM_MODEL).toBe('claude-sonnet-4-20250514');
+    expect(DEFAULT_SAM_MODEL).toBe('claude-sonnet-5');
     expect(DEFAULT_SAM_MAX_TOKENS).toBe(4096);
     expect(DEFAULT_SAM_MAX_TURNS).toBe(20);
     expect(DEFAULT_SAM_RATE_LIMIT_RPM).toBe(30);
@@ -228,7 +247,7 @@ describe('SAM Tool Definitions', () => {
   it('exports tool definitions in Anthropic native format', async () => {
     const { SAM_TOOLS } = await import('../../../src/durable-objects/sam-session/tools');
 
-    expect(SAM_TOOLS).toHaveLength(30);
+    expect(SAM_TOOLS).toHaveLength(32);
 
     for (const tool of SAM_TOOLS) {
       expect(tool).toHaveProperty('name');
@@ -243,6 +262,7 @@ describe('SAM Tool Definitions', () => {
     expect(names).toContain('get_project_status');
     expect(names).toContain('search_tasks');
     expect(names).toContain('search_conversation_history');
+    expect(names).toContain('get_archived_tool_payloads');
     expect(names).toContain('get_account_setup_status');
   });
 
@@ -315,6 +335,60 @@ describe('extractSnippet', () => {
 });
 
 describe('search_conversation_history tool', () => {
+  it('searches every retained term in the shared message LIKE fallback', () => {
+    const db = new Database(':memory:');
+    const storage = createSqlStorage(db);
+    const terms = [
+      '😀',
+      '😃',
+      '😄',
+      '😁',
+      '😆',
+      '😅',
+      '😂',
+      '🤣',
+      '😊',
+      '😇',
+      '🙂',
+      '🙃',
+      '😉',
+      '😌',
+      '😍',
+      '🥰',
+      '😘',
+      '😗',
+      '😙',
+      '😚',
+    ];
+    try {
+      storage.exec(`CREATE TABLE messages (
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        sequence INTEGER NOT NULL,
+        created_at TEXT NOT NULL
+      )`);
+      storage.exec(
+        `INSERT INTO messages (role, content, sequence, created_at) VALUES
+          ('user', ?, 1, '2026-01-01T00:00:00.000Z'),
+          ('user', ?, 2, '2026-01-02T00:00:00.000Z')`,
+        terms.slice(0, 10).join(' '),
+        terms.join(' ')
+      );
+      const results: Array<{
+        snippet: string;
+        role: string;
+        sequence: number;
+        createdAt: string;
+      }> = [];
+
+      appendMessageLikeSearchResults(storage, terms.join(' '), 10, results);
+
+      expect(results.map((result) => result.sequence)).toEqual([2]);
+    } finally {
+      db.close();
+    }
+  });
+
   it('returns error for empty query', async () => {
     const ctx: ToolContext = { env: {} as Record<string, unknown>, userId: 'u1' };
     const result = await searchConversationHistory({ query: '' }, ctx);
@@ -338,7 +412,17 @@ describe('search_conversation_history tool', () => {
     };
     const result = await searchConversationHistory({ query: 'test', limit: 5 }, ctx);
     expect(ctx.searchMessages).toHaveBeenCalledWith('test', 5);
-    expect(result).toEqual({ results: mockResults, count: 1, query: 'test' });
+    expect(result).toEqual({
+      results: mockResults,
+      count: 1,
+      query: 'test',
+      queryTruncated: false,
+      queryLimits: {
+        maxLength: DEFAULT_SEARCH_QUERY_MAX_LENGTH,
+        maxTermLength: DEFAULT_SEARCH_QUERY_MAX_TERM_LENGTH,
+        maxTerms: DEFAULT_SEARCH_QUERY_MAX_TERMS,
+      },
+    });
   });
 
   it('caps limit at DEFAULT_SAM_SEARCH_MAX_LIMIT', async () => {
@@ -459,6 +543,7 @@ describe('Agent Loop — Anthropic Streaming', () => {
       DATABASE: {},
       AI_GATEWAY_ID: '',
       CF_ACCOUNT_ID: '',
+      KV: makeBudgetKv(),
     } as unknown as Parameters<typeof runAgentLoop>[4];
 
     await runAgentLoop(
@@ -531,6 +616,7 @@ describe('Agent Loop — Anthropic Streaming', () => {
       DATABASE: {},
       AI_GATEWAY_ID: '',
       CF_ACCOUNT_ID: '',
+      KV: makeBudgetKv(),
     } as unknown as Parameters<typeof runAgentLoop>[4];
 
     await runAgentLoop(
@@ -582,6 +668,7 @@ describe('Agent Loop — Anthropic Streaming', () => {
       DATABASE: {},
       AI_GATEWAY_ID: '',
       CF_ACCOUNT_ID: '',
+      KV: makeBudgetKv(),
     } as unknown as Parameters<typeof runAgentLoop>[4];
 
     await runAgentLoop(
@@ -629,6 +716,7 @@ describe('Agent Loop — Anthropic Streaming', () => {
       DATABASE: {},
       AI_GATEWAY_ID: '',
       CF_ACCOUNT_ID: '',
+      KV: makeBudgetKv(),
     } as unknown as Parameters<typeof runAgentLoop>[4];
 
     await runAgentLoop(
@@ -686,6 +774,7 @@ describe('Agent Loop — Anthropic Streaming', () => {
       DATABASE: {},
       AI_GATEWAY_ID: '',
       CF_ACCOUNT_ID: '',
+      KV: makeBudgetKv(),
     } as unknown as Parameters<typeof runAgentLoop>[4];
 
     await runAgentLoop('conv-hist', history, 'New question', config, mockEnv, 'user-1', writer, () => {});
@@ -735,6 +824,7 @@ describe('Agent Loop — OpenAI (Workers AI) Streaming', () => {
       DATABASE: {},
       AI_GATEWAY_ID: 'test-gw',
       CF_ACCOUNT_ID: 'test-acct',
+      KV: makeBudgetKv(),
       CF_API_TOKEN: 'test-token',
     } as unknown as Parameters<typeof runAgentLoop>[4];
 
@@ -784,6 +874,7 @@ describe('Agent Loop — OpenAI (Workers AI) Streaming', () => {
       DATABASE: {},
       AI_GATEWAY_ID: 'my-gateway',
       CF_ACCOUNT_ID: 'my-account',
+      KV: makeBudgetKv(),
       CF_API_TOKEN: 'my-token',
     } as unknown as Parameters<typeof runAgentLoop>[4];
 
@@ -837,6 +928,7 @@ describe('Agent Loop — OpenAI (Workers AI) Streaming', () => {
       DATABASE: {},
       AI_GATEWAY_ID: 'gw',
       CF_ACCOUNT_ID: 'acct',
+      KV: makeBudgetKv(),
       CF_API_TOKEN: 'tok',
     } as unknown as Parameters<typeof runAgentLoop>[4];
 
@@ -887,6 +979,7 @@ describe('Agent Loop — Fetch Error Handling', () => {
       DATABASE: {},
       AI_GATEWAY_ID: '',
       CF_ACCOUNT_ID: '',
+      KV: makeBudgetKv(),
     } as unknown as Parameters<typeof runAgentLoop>[4];
 
     await runAgentLoop('conv-err', [], 'Hello', config, mockEnv, 'user-1', writer, () => {});
@@ -908,6 +1001,7 @@ describe('Agent Loop — Fetch Error Handling', () => {
       DATABASE: {},
       AI_GATEWAY_ID: '',
       CF_ACCOUNT_ID: '',
+      KV: makeBudgetKv(),
       SAM_LLM_TIMEOUT_MS: '100',
     } as unknown as Parameters<typeof runAgentLoop>[4];
 

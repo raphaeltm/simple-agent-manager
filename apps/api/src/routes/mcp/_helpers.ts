@@ -3,6 +3,8 @@
  *
  * Used across all MCP tool handler files (instruction-tools, task-tools, session-tools, idea-tools).
  */
+import { DEFAULT_PROJECT_EVENT_LIMITS } from '@simple-agent-manager/shared';
+
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
@@ -35,7 +37,7 @@ export function jsonRpcError(
   id: string | number | null,
   code: number,
   message: string,
-  data?: unknown,
+  data?: unknown
 ): JsonRpcResponse {
   return { jsonrpc: '2.0', id, error: { code, message, ...(data !== undefined ? { data } : {}) } };
 }
@@ -55,12 +57,21 @@ const DEFAULT_LOG_MESSAGE_MAX_LENGTH = 1000;
 const DEFAULT_OUTPUT_SUMMARY_MAX_LENGTH = 10000;
 
 /** Valid message roles for filtering in get_session_messages and search_messages. */
-export const VALID_MESSAGE_ROLES = ['user', 'assistant', 'system', 'tool', 'thinking', 'plan'] as const;
-export type MessageRole = typeof VALID_MESSAGE_ROLES[number];
+export const VALID_MESSAGE_ROLES = [
+  'user',
+  'assistant',
+  'system',
+  'tool',
+  'thinking',
+  'plan',
+] as const;
+export type MessageRole = (typeof VALID_MESSAGE_ROLES)[number];
 
 /** Default HTTP-level rate limit for the /mcp endpoint (per token, per minute). Override via MCP_RATE_LIMIT env var. */
 const DEFAULT_MCP_RATE_LIMIT = 120;
 const DEFAULT_MCP_RATE_LIMIT_WINDOW_SECONDS = 60;
+const DEFAULT_MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT = 10;
+const DEFAULT_MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX = 50;
 
 /** Default dispatch limits for agent-to-agent task spawning. */
 const DEFAULT_MCP_DISPATCH_MAX_DEPTH = 3;
@@ -80,6 +91,14 @@ const DEFAULT_MCP_SESSION_LIST_MAX = 50;
 const DEFAULT_MCP_MESSAGE_LIST_LIMIT = 50;
 const DEFAULT_MCP_MESSAGE_LIST_MAX = 200;
 const DEFAULT_MCP_MESSAGE_SEARCH_MAX = 20;
+/** Default page size for list_triggers. Override via MCP_TRIGGER_LIST_LIMIT env var. */
+const DEFAULT_MCP_TRIGGER_LIST_LIMIT = 20;
+/** Max page size for list_triggers. Override via MCP_TRIGGER_LIST_MAX env var. */
+const DEFAULT_MCP_TRIGGER_LIST_MAX = 100;
+/** Default page size for list_incident_queue. Override via MCP_INCIDENT_LIST_LIMIT env var. */
+const DEFAULT_MCP_INCIDENT_LIST_LIMIT = 10;
+/** Max page size for list_incident_queue. Override via MCP_INCIDENT_LIST_MAX env var. */
+const DEFAULT_MCP_INCIDENT_LIST_MAX = 50;
 /** Max length for task description in list/search results. Override via MCP_TASK_DESCRIPTION_SNIPPET_LENGTH env var. */
 const DEFAULT_MCP_TASK_DESCRIPTION_SNIPPET_LENGTH = 200;
 /** Max length for idea link context string. Override via MCP_IDEA_CONTEXT_MAX_LENGTH env var. */
@@ -102,6 +121,8 @@ const DEFAULT_ORCHESTRATOR_MAX_RETRIES_PER_TASK = 3;
 const DEFAULT_ORCHESTRATOR_DEPENDENCY_MAX_EDGES = 50;
 /** Grace period in ms before hard stop after warning message. Override via ORCHESTRATOR_STOP_GRACE_MS env var. */
 const DEFAULT_ORCHESTRATOR_STOP_GRACE_MS = 5000;
+/** Max task-status CAS attempts after a hard stop. Override via ORCHESTRATOR_STOP_CAS_MAX_ATTEMPTS env var. */
+const DEFAULT_ORCHESTRATOR_STOP_CAS_MAX_ATTEMPTS = 2;
 /** Max length for injected messages to child agents. Override via ORCHESTRATOR_MESSAGE_MAX_LENGTH env var. */
 const DEFAULT_ORCHESTRATOR_MESSAGE_MAX_LENGTH = 32_768;
 /** Agent mailbox defaults (durable messaging). Override via MAILBOX_* env vars. */
@@ -122,9 +143,18 @@ const DEFAULT_KNOWLEDGE_DESCRIPTION_MAX_LENGTH = 2000;
 
 export function getMcpLimits(env: Env) {
   return {
-    activityMessageMaxLength: parsePositiveInt(env.MAX_ACTIVITY_MESSAGE_LENGTH, DEFAULT_ACTIVITY_MESSAGE_MAX_LENGTH),
-    logMessageMaxLength: parsePositiveInt(env.MAX_LOG_MESSAGE_LENGTH, DEFAULT_LOG_MESSAGE_MAX_LENGTH),
-    outputSummaryMaxLength: parsePositiveInt(env.MAX_OUTPUT_SUMMARY_LENGTH, DEFAULT_OUTPUT_SUMMARY_MAX_LENGTH),
+    activityMessageMaxLength: parsePositiveInt(
+      env.MAX_ACTIVITY_MESSAGE_LENGTH,
+      DEFAULT_ACTIVITY_MESSAGE_MAX_LENGTH
+    ),
+    logMessageMaxLength: parsePositiveInt(
+      env.MAX_LOG_MESSAGE_LENGTH,
+      DEFAULT_LOG_MESSAGE_MAX_LENGTH
+    ),
+    outputSummaryMaxLength: parsePositiveInt(
+      env.MAX_OUTPUT_SUMMARY_LENGTH,
+      DEFAULT_OUTPUT_SUMMARY_MAX_LENGTH
+    ),
     taskListLimit: DEFAULT_MCP_TASK_LIST_LIMIT,
     taskListMax: DEFAULT_MCP_TASK_LIST_MAX,
     taskSearchMax: DEFAULT_MCP_TASK_SEARCH_MAX,
@@ -133,50 +163,155 @@ export function getMcpLimits(env: Env) {
     messageListLimit: parsePositiveInt(env.MCP_MESSAGE_LIST_LIMIT, DEFAULT_MCP_MESSAGE_LIST_LIMIT),
     messageListMax: parsePositiveInt(env.MCP_MESSAGE_LIST_MAX, DEFAULT_MCP_MESSAGE_LIST_MAX),
     messageSearchMax: parsePositiveInt(env.MCP_MESSAGE_SEARCH_MAX, DEFAULT_MCP_MESSAGE_SEARCH_MAX),
+    archivedToolPayloadListLimit: parsePositiveInt(
+      env.MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT,
+      DEFAULT_MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT
+    ),
+    archivedToolPayloadListMax: parsePositiveInt(
+      env.MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX,
+      DEFAULT_MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX
+    ),
+    projectEventListLimit: parsePositiveInt(
+      env.PROJECT_EVENT_LIST_LIMIT,
+      DEFAULT_PROJECT_EVENT_LIMITS.listLimitDefault
+    ),
+    projectEventListMax: parsePositiveInt(
+      env.PROJECT_EVENT_LIST_MAX,
+      DEFAULT_PROJECT_EVENT_LIMITS.listLimitMax
+    ),
+    projectEventCursorMaxLength: parsePositiveInt(
+      env.PROJECT_EVENT_SUBSCRIPTION_EVENT_CURSOR_MAX_LENGTH,
+      DEFAULT_PROJECT_EVENT_LIMITS.subscriptionEventCursorMaxLength
+    ),
+    triggerListLimit: parsePositiveInt(env.MCP_TRIGGER_LIST_LIMIT, DEFAULT_MCP_TRIGGER_LIST_LIMIT),
+    triggerListMax: parsePositiveInt(env.MCP_TRIGGER_LIST_MAX, DEFAULT_MCP_TRIGGER_LIST_MAX),
+    incidentListLimit: parsePositiveInt(
+      env.MCP_INCIDENT_LIST_LIMIT,
+      DEFAULT_MCP_INCIDENT_LIST_LIMIT
+    ),
+    incidentListMax: parsePositiveInt(env.MCP_INCIDENT_LIST_MAX, DEFAULT_MCP_INCIDENT_LIST_MAX),
     taskDescriptionSnippetLength: parsePositiveInt(
       env.MCP_TASK_DESCRIPTION_SNIPPET_LENGTH,
-      DEFAULT_MCP_TASK_DESCRIPTION_SNIPPET_LENGTH,
+      DEFAULT_MCP_TASK_DESCRIPTION_SNIPPET_LENGTH
     ),
     dispatchMaxDepth: parsePositiveInt(env.MCP_DISPATCH_MAX_DEPTH, DEFAULT_MCP_DISPATCH_MAX_DEPTH),
-    dispatchMaxPerTask: parsePositiveInt(env.MCP_DISPATCH_MAX_PER_TASK, DEFAULT_MCP_DISPATCH_MAX_PER_TASK),
-    dispatchMaxActivePerProject: parsePositiveInt(env.MCP_DISPATCH_MAX_ACTIVE_PER_PROJECT, DEFAULT_MCP_DISPATCH_MAX_ACTIVE_PER_PROJECT),
-    dispatchDescriptionMaxLength: parsePositiveInt(env.MCP_DISPATCH_DESCRIPTION_MAX_LENGTH, DEFAULT_MCP_DISPATCH_DESCRIPTION_MAX_LENGTH),
-    dispatchMaxReferences: parsePositiveInt(env.MCP_DISPATCH_MAX_REFERENCES, DEFAULT_MCP_DISPATCH_MAX_REFERENCES),
-    dispatchMaxReferenceLength: parsePositiveInt(env.MCP_DISPATCH_MAX_REFERENCE_LENGTH, DEFAULT_MCP_DISPATCH_MAX_REFERENCE_LENGTH),
-    dispatchMaxPriority: parsePositiveInt(env.MCP_DISPATCH_MAX_PRIORITY, DEFAULT_MCP_DISPATCH_MAX_PRIORITY),
-    ideaContextMaxLength: parsePositiveInt(env.MCP_IDEA_CONTEXT_MAX_LENGTH, DEFAULT_MCP_IDEA_CONTEXT_MAX_LENGTH),
-    ideaContentMaxLength: parsePositiveInt(env.MCP_IDEA_CONTENT_MAX_LENGTH, DEFAULT_MCP_IDEA_CONTENT_MAX_LENGTH),
+    dispatchMaxPerTask: parsePositiveInt(
+      env.MCP_DISPATCH_MAX_PER_TASK,
+      DEFAULT_MCP_DISPATCH_MAX_PER_TASK
+    ),
+    dispatchMaxActivePerProject: parsePositiveInt(
+      env.MCP_DISPATCH_MAX_ACTIVE_PER_PROJECT,
+      DEFAULT_MCP_DISPATCH_MAX_ACTIVE_PER_PROJECT
+    ),
+    dispatchDescriptionMaxLength: parsePositiveInt(
+      env.MCP_DISPATCH_DESCRIPTION_MAX_LENGTH,
+      DEFAULT_MCP_DISPATCH_DESCRIPTION_MAX_LENGTH
+    ),
+    dispatchMaxReferences: parsePositiveInt(
+      env.MCP_DISPATCH_MAX_REFERENCES,
+      DEFAULT_MCP_DISPATCH_MAX_REFERENCES
+    ),
+    dispatchMaxReferenceLength: parsePositiveInt(
+      env.MCP_DISPATCH_MAX_REFERENCE_LENGTH,
+      DEFAULT_MCP_DISPATCH_MAX_REFERENCE_LENGTH
+    ),
+    dispatchMaxPriority: parsePositiveInt(
+      env.MCP_DISPATCH_MAX_PRIORITY,
+      DEFAULT_MCP_DISPATCH_MAX_PRIORITY
+    ),
+    ideaContextMaxLength: parsePositiveInt(
+      env.MCP_IDEA_CONTEXT_MAX_LENGTH,
+      DEFAULT_MCP_IDEA_CONTEXT_MAX_LENGTH
+    ),
+    ideaContentMaxLength: parsePositiveInt(
+      env.MCP_IDEA_CONTENT_MAX_LENGTH,
+      DEFAULT_MCP_IDEA_CONTENT_MAX_LENGTH
+    ),
     ideaListLimit: parsePositiveInt(env.MCP_IDEA_LIST_LIMIT, DEFAULT_MCP_IDEA_LIST_LIMIT),
     ideaListMax: parsePositiveInt(env.MCP_IDEA_LIST_MAX, DEFAULT_MCP_IDEA_LIST_MAX),
     ideaSearchMax: parsePositiveInt(env.MCP_IDEA_SEARCH_MAX, DEFAULT_MCP_IDEA_SEARCH_MAX),
-    ideaTitleMaxLength: parsePositiveInt(env.MCP_IDEA_TITLE_MAX_LENGTH, DEFAULT_MCP_IDEA_TITLE_MAX_LENGTH),
-    sessionTopicMaxLength: parsePositiveInt(env.MCP_SESSION_TOPIC_MAX_LENGTH, DEFAULT_MCP_SESSION_TOPIC_MAX_LENGTH),
-    orchestratorMaxRetriesPerTask: parsePositiveInt(env.ORCHESTRATOR_MAX_RETRIES_PER_TASK, DEFAULT_ORCHESTRATOR_MAX_RETRIES_PER_TASK),
-    orchestratorDependencyMaxEdges: parsePositiveInt(env.ORCHESTRATOR_DEPENDENCY_MAX_EDGES, DEFAULT_ORCHESTRATOR_DEPENDENCY_MAX_EDGES),
-    orchestratorStopGraceMs: parsePositiveInt(env.ORCHESTRATOR_STOP_GRACE_MS, DEFAULT_ORCHESTRATOR_STOP_GRACE_MS),
-    orchestratorMessageMaxLength: parsePositiveInt(env.ORCHESTRATOR_MESSAGE_MAX_LENGTH, DEFAULT_ORCHESTRATOR_MESSAGE_MAX_LENGTH),
-    knowledgeMaxEntities: parsePositiveInt(env.KNOWLEDGE_MAX_ENTITIES_PER_PROJECT, DEFAULT_KNOWLEDGE_MAX_ENTITIES),
-    knowledgeMaxObservations: parsePositiveInt(env.KNOWLEDGE_MAX_OBSERVATIONS_PER_ENTITY, DEFAULT_KNOWLEDGE_MAX_OBSERVATIONS),
-    knowledgeSearchLimit: parsePositiveInt(env.KNOWLEDGE_SEARCH_LIMIT, DEFAULT_KNOWLEDGE_SEARCH_LIMIT),
-    knowledgeAutoRetrieveLimit: parsePositiveInt(env.KNOWLEDGE_AUTO_RETRIEVE_LIMIT, DEFAULT_KNOWLEDGE_AUTO_RETRIEVE_LIMIT),
-    knowledgeObservationMaxLength: parsePositiveInt(env.KNOWLEDGE_OBSERVATION_MAX_LENGTH, DEFAULT_KNOWLEDGE_OBSERVATION_MAX_LENGTH),
-    knowledgeEntityNameMaxLength: parsePositiveInt(env.KNOWLEDGE_ENTITY_NAME_MAX_LENGTH, DEFAULT_KNOWLEDGE_ENTITY_NAME_MAX_LENGTH),
-    knowledgeDescriptionMaxLength: parsePositiveInt(env.KNOWLEDGE_DESCRIPTION_MAX_LENGTH, DEFAULT_KNOWLEDGE_DESCRIPTION_MAX_LENGTH),
+    ideaTitleMaxLength: parsePositiveInt(
+      env.MCP_IDEA_TITLE_MAX_LENGTH,
+      DEFAULT_MCP_IDEA_TITLE_MAX_LENGTH
+    ),
+    sessionTopicMaxLength: parsePositiveInt(
+      env.MCP_SESSION_TOPIC_MAX_LENGTH,
+      DEFAULT_MCP_SESSION_TOPIC_MAX_LENGTH
+    ),
+    orchestratorMaxRetriesPerTask: parsePositiveInt(
+      env.ORCHESTRATOR_MAX_RETRIES_PER_TASK,
+      DEFAULT_ORCHESTRATOR_MAX_RETRIES_PER_TASK
+    ),
+    orchestratorDependencyMaxEdges: parsePositiveInt(
+      env.ORCHESTRATOR_DEPENDENCY_MAX_EDGES,
+      DEFAULT_ORCHESTRATOR_DEPENDENCY_MAX_EDGES
+    ),
+    orchestratorStopGraceMs: parsePositiveInt(
+      env.ORCHESTRATOR_STOP_GRACE_MS,
+      DEFAULT_ORCHESTRATOR_STOP_GRACE_MS
+    ),
+    orchestratorStopCasMaxAttempts: parsePositiveInt(
+      env.ORCHESTRATOR_STOP_CAS_MAX_ATTEMPTS,
+      DEFAULT_ORCHESTRATOR_STOP_CAS_MAX_ATTEMPTS
+    ),
+    orchestratorMessageMaxLength: parsePositiveInt(
+      env.ORCHESTRATOR_MESSAGE_MAX_LENGTH,
+      DEFAULT_ORCHESTRATOR_MESSAGE_MAX_LENGTH
+    ),
+    knowledgeMaxEntities: parsePositiveInt(
+      env.KNOWLEDGE_MAX_ENTITIES_PER_PROJECT,
+      DEFAULT_KNOWLEDGE_MAX_ENTITIES
+    ),
+    knowledgeMaxObservations: parsePositiveInt(
+      env.KNOWLEDGE_MAX_OBSERVATIONS_PER_ENTITY,
+      DEFAULT_KNOWLEDGE_MAX_OBSERVATIONS
+    ),
+    knowledgeSearchLimit: parsePositiveInt(
+      env.KNOWLEDGE_SEARCH_LIMIT,
+      DEFAULT_KNOWLEDGE_SEARCH_LIMIT
+    ),
+    knowledgeAutoRetrieveLimit: parsePositiveInt(
+      env.KNOWLEDGE_AUTO_RETRIEVE_LIMIT,
+      DEFAULT_KNOWLEDGE_AUTO_RETRIEVE_LIMIT
+    ),
+    knowledgeObservationMaxLength: parsePositiveInt(
+      env.KNOWLEDGE_OBSERVATION_MAX_LENGTH,
+      DEFAULT_KNOWLEDGE_OBSERVATION_MAX_LENGTH
+    ),
+    knowledgeEntityNameMaxLength: parsePositiveInt(
+      env.KNOWLEDGE_ENTITY_NAME_MAX_LENGTH,
+      DEFAULT_KNOWLEDGE_ENTITY_NAME_MAX_LENGTH
+    ),
+    knowledgeDescriptionMaxLength: parsePositiveInt(
+      env.KNOWLEDGE_DESCRIPTION_MAX_LENGTH,
+      DEFAULT_KNOWLEDGE_DESCRIPTION_MAX_LENGTH
+    ),
     // Mailbox (durable messaging)
-    mailboxAckTimeoutMs: parsePositiveInt(env.MAILBOX_ACK_TIMEOUT_MS, DEFAULT_MAILBOX_ACK_TIMEOUT_MS),
-    mailboxRedeliveryMaxAttempts: parsePositiveInt(env.MAILBOX_REDELIVERY_MAX_ATTEMPTS, DEFAULT_MAILBOX_REDELIVERY_MAX_ATTEMPTS),
+    mailboxAckTimeoutMs: parsePositiveInt(
+      env.MAILBOX_ACK_TIMEOUT_MS,
+      DEFAULT_MAILBOX_ACK_TIMEOUT_MS
+    ),
+    mailboxRedeliveryMaxAttempts: parsePositiveInt(
+      env.MAILBOX_REDELIVERY_MAX_ATTEMPTS,
+      DEFAULT_MAILBOX_REDELIVERY_MAX_ATTEMPTS
+    ),
     mailboxTtlMs: parsePositiveInt(env.MAILBOX_TTL_MS, DEFAULT_MAILBOX_TTL_MS),
-    mailboxDeliveryPollIntervalMs: parsePositiveInt(env.MAILBOX_DELIVERY_POLL_INTERVAL_MS, DEFAULT_MAILBOX_DELIVERY_POLL_INTERVAL_MS),
-    mailboxMaxMessagesPerProject: parsePositiveInt(env.MAILBOX_MAX_MESSAGES_PER_PROJECT, DEFAULT_MAILBOX_MAX_MESSAGES_PER_PROJECT),
-    mailboxMessageMaxLength: parsePositiveInt(env.MAILBOX_MESSAGE_MAX_LENGTH, DEFAULT_MAILBOX_MESSAGE_MAX_LENGTH),
+    mailboxDeliveryPollIntervalMs: parsePositiveInt(
+      env.MAILBOX_DELIVERY_POLL_INTERVAL_MS,
+      DEFAULT_MAILBOX_DELIVERY_POLL_INTERVAL_MS
+    ),
+    mailboxMaxMessagesPerProject: parsePositiveInt(
+      env.MAILBOX_MAX_MESSAGES_PER_PROJECT,
+      DEFAULT_MAILBOX_MAX_MESSAGES_PER_PROJECT
+    ),
+    mailboxMessageMaxLength: parsePositiveInt(
+      env.MAILBOX_MESSAGE_MAX_LENGTH,
+      DEFAULT_MAILBOX_MESSAGE_MAX_LENGTH
+    ),
   };
 }
 
-/** Strip null bytes, Unicode bidi overrides, and C0/C1 control chars (except \n, \t) from user/agent input. */
-export function sanitizeUserInput(str: string): string {
-  // eslint-disable-next-line no-control-regex
-  return str.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F\u200B-\u200F\u202A-\u202E\u2066-\u2069]/g, '');
-}
+export { sanitizeUserInput } from '../../lib/sanitize-user-input';
 
 // MCP protocol constants
 export const MCP_PROTOCOL_VERSION = '2025-03-26';
@@ -186,6 +321,10 @@ export const MCP_SERVER_VERSION = '1.0.0';
 // Task status sets
 export const ACTIVE_STATUSES = ['queued', 'in_progress', 'delegated', 'awaiting_followup'];
 
+// Sleeping agents retain their task/chat identity and can receive durable wakes
+// or parent cancellation. They cannot act as live callers or consume dispatch slots.
+export const AGENT_TARGET_STATUSES = [...ACTIVE_STATUSES, 'sleeping'];
+
 /**
  * Validate and filter a roles array against the allowlist.
  * Returns null if any role is invalid (caller should return 400).
@@ -193,7 +332,7 @@ export const ACTIVE_STATUSES = ['queued', 'in_progress', 'delegated', 'awaiting_
  */
 export function validateRoles(
   input: unknown,
-  defaultRoles: MessageRole[] = ['user', 'assistant'],
+  defaultRoles: MessageRole[] = ['user', 'assistant']
 ): { valid: true; roles: MessageRole[] } | { valid: false; invalid: string[] } {
   if (!Array.isArray(input)) {
     return { valid: true, roles: defaultRoles };
@@ -203,7 +342,10 @@ export function validateRoles(
   if (invalid.length > 0) {
     return { valid: false, invalid };
   }
-  const roles = strings.length > 0 ? (strings as MessageRole[]) : defaultRoles;
+  // Repeated roles do not change the filter semantics, but every retained value becomes a
+  // SQLite bind parameter. De-duplicate here so a valid duplicate-heavy request cannot exhaust
+  // the 100-parameter ceiling when search also expands one bind per retained query term.
+  const roles = strings.length > 0 ? ([...new Set(strings)] as MessageRole[]) : defaultRoles;
   return { valid: true, roles };
 }
 
@@ -215,7 +357,10 @@ export function getMcpRateLimit(env: Env): number {
 }
 
 function getMcpRateLimitWindow(env: Env): number {
-  const val = parsePositiveInt(env.MCP_RATE_LIMIT_WINDOW_SECONDS as string, DEFAULT_MCP_RATE_LIMIT_WINDOW_SECONDS);
+  const val = parsePositiveInt(
+    env.MCP_RATE_LIMIT_WINDOW_SECONDS as string,
+    DEFAULT_MCP_RATE_LIMIT_WINDOW_SECONDS
+  );
   return val;
 }
 
@@ -233,8 +378,11 @@ function getMcpRateLimitWindow(env: Env): number {
 export async function checkMcpRateLimit(
   kv: KVNamespace,
   taskId: string,
-  env: Env,
-): Promise<{ allowed: true; remaining: number; resetAt: number } | { allowed: false; remaining: 0; resetAt: number; retryAfter: number }> {
+  env: Env
+): Promise<
+  | { allowed: true; remaining: number; resetAt: number }
+  | { allowed: false; remaining: 0; resetAt: number; retryAfter: number }
+> {
   const limit = getMcpRateLimit(env);
   const windowSeconds = getMcpRateLimitWindow(env);
   const now = Math.floor(Date.now() / 1000);
@@ -277,7 +425,7 @@ export async function checkMcpRateLimit(
 export async function authenticateMcpRequest(
   authHeader: string | undefined,
   kv: KVNamespace,
-  env?: McpTokenEnv,
+  env?: McpTokenEnv
 ): Promise<[McpTokenData, string] | [null, null]> {
   if (!authHeader?.startsWith('Bearer ') || authHeader.length <= 7) {
     return [null, null];
@@ -303,6 +451,43 @@ export async function resolveSessionId(env: Env, workspaceId: string): Promise<s
     log.error('mcp.resolve_session_id_failed', { workspaceId, error: String(err) });
     return null;
   }
+}
+
+// ─── Shared CRUD error mapping ──────────────────────────────────────────────
+
+/**
+ * Map service-layer errors to JSON-RPC responses. Shared by profile-tools and skill-tools
+ * to avoid duplicating the same status-code switch in every handler.
+ *
+ * @param notFoundMessage - message returned for 404 errors
+ * @param fallbackPrefix - prefix for the generic error message (e.g., "Failed to get skill")
+ * @param logTag - structured log tag (e.g., "mcp.get_skill_failed")
+ * @param logCtx - extra fields for the structured log entry
+ */
+export function mapServiceError(
+  requestId: string | number | null,
+  err: unknown,
+  opts: {
+    notFoundMessage?: string;
+    fallbackPrefix: string;
+    logTag: string;
+    logCtx?: Record<string, unknown>;
+    clientErrorCodes?: number[];
+  }
+): JsonRpcResponse {
+  const status = (err as { statusCode?: number }).statusCode;
+  const message = (err as Error).message;
+
+  if (opts.notFoundMessage && status === 404) {
+    return jsonRpcError(requestId, INVALID_PARAMS, opts.notFoundMessage);
+  }
+  const clientCodes = opts.clientErrorCodes ?? [400, 403, 409];
+  if (status && clientCodes.includes(status)) {
+    return jsonRpcError(requestId, INVALID_PARAMS, message);
+  }
+
+  log.error(opts.logTag, { ...opts.logCtx, error: String(err) });
+  return jsonRpcError(requestId, INTERNAL_ERROR, `${opts.fallbackPrefix}: ${message}`);
 }
 
 // Re-export tool definitions from dedicated file

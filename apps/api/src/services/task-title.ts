@@ -1,20 +1,18 @@
 /**
- * AI-powered task title generation using Mastra + Cloudflare Workers AI.
+ * AI-powered task title generation using Cloudflare AI Gateway + Workers AI.
  *
  * Uses a small LLM to generate concise, descriptive task titles from
  * long-form chat messages. Falls back to naive truncation on failure.
  *
  * Architecture:
- *   Workers AI binding (env.AI)
- *     → workers-ai-provider (Vercel AI SDK bridge)
- *       → Mastra Agent (structured AI interaction)
- *         → concise task title
+ *   Direct fetch to Cloudflare AI Gateway Workers AI endpoint
+ *     → OpenAI-compatible chat completion
+ *       → concise task title
  *
- * Design decision: the AI call is synchronous (awaited before DB insert)
- * rather than async via waitUntil. This keeps the title consistent across
- * the task record, session label, and activity event, and avoids a second
- * DB write. The per-attempt timeout (configurable, default 5s) bounds
- * individual AI call latency.
+ * The task submit path starts with a deterministic truncated title and runs
+ * this AI refinement asynchronously via waitUntil, then updates the task record
+ * and session topic. The per-attempt timeout (configurable, default 5s) bounds
+ * individual AI call latency without blocking submission.
  *
  * Retry: Under burst load (multiple concurrent tasks), Workers AI may
  * rate-limit requests. Retry with exponential backoff (configurable,
@@ -24,8 +22,8 @@
  * 30-second wall-clock budget.
  */
 
-import { Agent } from '@mastra/core/agent';
 import {
+  DEFAULT_TASK_TITLE_ERROR_DIAGNOSTIC_MAX_LENGTH,
   DEFAULT_TASK_TITLE_MAX_LENGTH,
   DEFAULT_TASK_TITLE_MAX_RETRIES,
   DEFAULT_TASK_TITLE_MODEL,
@@ -33,10 +31,13 @@ import {
   DEFAULT_TASK_TITLE_RETRY_MAX_DELAY_MS,
   DEFAULT_TASK_TITLE_SHORT_MESSAGE_THRESHOLD,
   DEFAULT_TASK_TITLE_TIMEOUT_MS,
+  MAX_TASK_TITLE_ERROR_DIAGNOSTIC_MAX_LENGTH,
+  MIN_TASK_TITLE_ERROR_DIAGNOSTIC_MAX_LENGTH,
 } from '@simple-agent-manager/shared';
-import { createWorkersAI } from 'workers-ai-provider';
 
+import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { fetchWorkersAIChatCompletion, WorkersAIGatewayError } from './ai-proxy-shared';
 
 /**
  * Build the system instructions for the title generation agent.
@@ -128,6 +129,7 @@ export interface TaskTitleConfig {
   maxRetries?: number;
   retryDelayMs?: number;
   retryMaxDelayMs?: number;
+  errorDiagnosticMaxLength?: number;
 }
 
 /** Narrow interface for the env vars read by getTaskTitleConfig. */
@@ -140,6 +142,15 @@ export interface TaskTitleEnvVars {
   TASK_TITLE_MAX_RETRIES?: string;
   TASK_TITLE_RETRY_DELAY_MS?: string;
   TASK_TITLE_RETRY_MAX_DELAY_MS?: string;
+  TASK_TITLE_ERROR_DIAGNOSTIC_MAX_LENGTH?: string;
+}
+
+export function resolveTaskTitleErrorDiagnosticMaxLength(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_TASK_TITLE_ERROR_DIAGNOSTIC_MAX_LENGTH;
+  return Math.min(
+    MAX_TASK_TITLE_ERROR_DIAGNOSTIC_MAX_LENGTH,
+    Math.max(MIN_TASK_TITLE_ERROR_DIAGNOSTIC_MAX_LENGTH, Math.floor(value))
+  );
 }
 
 /**
@@ -153,11 +164,20 @@ export function getTaskTitleConfig(env: TaskTitleEnvVars): TaskTitleConfig {
     enabled: env.TASK_TITLE_GENERATION_ENABLED !== 'false',
     shortMessageThreshold: parseInt(
       env.TASK_TITLE_SHORT_MESSAGE_THRESHOLD || String(DEFAULT_TASK_TITLE_SHORT_MESSAGE_THRESHOLD),
-      10,
+      10
     ),
     maxRetries: parseInt(env.TASK_TITLE_MAX_RETRIES || String(DEFAULT_TASK_TITLE_MAX_RETRIES), 10),
-    retryDelayMs: parseInt(env.TASK_TITLE_RETRY_DELAY_MS || String(DEFAULT_TASK_TITLE_RETRY_DELAY_MS), 10),
-    retryMaxDelayMs: parseInt(env.TASK_TITLE_RETRY_MAX_DELAY_MS || String(DEFAULT_TASK_TITLE_RETRY_MAX_DELAY_MS), 10),
+    retryDelayMs: parseInt(
+      env.TASK_TITLE_RETRY_DELAY_MS || String(DEFAULT_TASK_TITLE_RETRY_DELAY_MS),
+      10
+    ),
+    retryMaxDelayMs: parseInt(
+      env.TASK_TITLE_RETRY_MAX_DELAY_MS || String(DEFAULT_TASK_TITLE_RETRY_MAX_DELAY_MS),
+      10
+    ),
+    errorDiagnosticMaxLength: resolveTaskTitleErrorDiagnosticMaxLength(
+      Number(env.TASK_TITLE_ERROR_DIAGNOSTIC_MAX_LENGTH)
+    ),
   };
 }
 
@@ -165,9 +185,20 @@ export function getTaskTitleConfig(env: TaskTitleEnvVars): TaskTitleConfig {
  * Classify an error for logging purposes.
  * Helps operators distinguish between timeout, rate limit, and other failures.
  */
-export function classifyError(err: unknown): { category: 'timeout' | 'rate_limit' | 'error'; message: string } {
+export function classifyError(err: unknown): {
+  category: 'timeout' | 'rate_limit' | 'request' | 'error';
+  message: string;
+} {
   if (!(err instanceof Error)) {
     return { category: 'error', message: String(err) };
+  }
+
+  if (err instanceof WorkersAIGatewayError) {
+    if (err.status === 429) return { category: 'rate_limit', message: err.message };
+    if (err.status >= 400 && err.status < 500 && ![408, 425].includes(err.status)) {
+      return { category: 'request', message: err.message };
+    }
+    return { category: 'error', message: err.message };
   }
 
   const msg = err.message.toLowerCase();
@@ -204,8 +235,51 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+interface TaskTitleModelControls {
+  reasoningEffort?: string | null;
+  chatTemplateKwargs?: Record<string, unknown>;
+}
+
+/** Keep provider/model quirks inside an explicit capability boundary. */
+export function getTaskTitleModelControls(modelId: string): TaskTitleModelControls {
+  switch (modelId) {
+    case '@cf/zai-org/glm-5.2':
+      return { chatTemplateKwargs: { enable_thinking: false } };
+    case '@cf/zai-org/glm-4.7-flash':
+    case '@cf/google/gemma-4-26b-a4b-it':
+      return { reasoningEffort: null, chatTemplateKwargs: { enable_thinking: false } };
+    default:
+      return {};
+  }
+}
+
+async function fetchTaskTitle(
+  env: Env,
+  modelId: string,
+  message: string,
+  maxLength: number,
+  timeoutMs: number,
+  errorDiagnosticMaxLength: number
+): Promise<string | null> {
+  const controls = getTaskTitleModelControls(modelId);
+  return fetchWorkersAIChatCompletion(env, {
+    modelId,
+    maxTokens: maxLength,
+    timeoutMs,
+    metadata: { source: 'task-title', modelId },
+    responseLabel: 'task_title.gateway_response',
+    reasoningEffort: controls.reasoningEffort,
+    chatTemplateKwargs: controls.chatTemplateKwargs,
+    errorDiagnosticMaxLength,
+    messages: [
+      { role: 'system', content: buildSystemInstructions(maxLength) },
+      { role: 'user', content: message },
+    ],
+  });
+}
+
 /**
- * Generate a concise task title from a message using Workers AI via Mastra.
+ * Generate a concise task title from a message using Workers AI via AI Gateway.
  *
  * - Short messages (≤ threshold) are returned as-is
  * - If AI generation is disabled or fails, falls back to truncation
@@ -213,9 +287,9 @@ function sleep(ms: number): Promise<void> {
  * - Retries with exponential backoff on rate-limit and generic errors (NOT timeouts)
  */
 export async function generateTaskTitle(
-  ai: Ai,
+  env: Env,
   message: string,
-  config: TaskTitleConfig = {},
+  config: TaskTitleConfig = {}
 ): Promise<string> {
   const maxLength = config.maxLength ?? DEFAULT_TASK_TITLE_MAX_LENGTH;
   const timeoutMs = config.timeoutMs ?? DEFAULT_TASK_TITLE_TIMEOUT_MS;
@@ -225,6 +299,9 @@ export async function generateTaskTitle(
   const maxRetries = config.maxRetries ?? DEFAULT_TASK_TITLE_MAX_RETRIES;
   const retryDelayMs = config.retryDelayMs ?? DEFAULT_TASK_TITLE_RETRY_DELAY_MS;
   const retryMaxDelayMs = config.retryMaxDelayMs ?? DEFAULT_TASK_TITLE_RETRY_MAX_DELAY_MS;
+  const errorDiagnosticMaxLength = resolveTaskTitleErrorDiagnosticMaxLength(
+    config.errorDiagnosticMaxLength ?? DEFAULT_TASK_TITLE_ERROR_DIAGNOSTIC_MAX_LENGTH
+  );
 
   // Short messages don't need AI generation
   if (message.length <= shortThreshold) {
@@ -236,53 +313,44 @@ export async function generateTaskTitle(
     return truncateTitle(message, maxLength);
   }
 
-  // Construct agent once outside the retry loop — no per-attempt state to reset
-  const workersAi = createWorkersAI({ binding: ai });
-  const model = workersAi(modelId as Parameters<typeof workersAi>[0]);
-  const agent = new Agent({
-    id: 'task-title-generator',
-    name: 'Task Title Generator',
-    instructions: buildSystemInstructions(maxLength),
-    model,
-  });
-
   const totalAttempts = 1 + maxRetries;
   let lastError: { category: string; message: string } | undefined;
 
   for (let attempt = 1; attempt <= totalAttempts; attempt++) {
     try {
-      // Use AbortSignal.timeout for clean cancellation without timer leaks.
-      // Supported in Workers runtime since compatibility_date 2023-03-14.
-      const result = await agent.generate(message, {
-        abortSignal: AbortSignal.timeout(timeoutMs),
-      });
-
-      const rawTitle = result.text?.trim();
+      const rawTitle = await fetchTaskTitle(
+        env,
+        modelId,
+        message,
+        maxLength,
+        timeoutMs,
+        errorDiagnosticMaxLength
+      );
       if (!rawTitle) {
         log.warn('task_title.empty_response', { modelId, messageLength: message.length, attempt });
         return truncateTitle(message, maxLength);
       }
 
-      // Strip markdown formatting that the LLM may have included despite instructions
       const title = stripMarkdown(rawTitle);
       if (!title) {
-        log.warn('task_title.empty_after_strip', { modelId, rawTitle, messageLength: message.length, attempt });
+        log.warn('task_title.empty_after_strip', {
+          modelId,
+          rawTitle,
+          messageLength: message.length,
+          attempt,
+        });
         return truncateTitle(message, maxLength);
       }
 
-      // Enforce max length on LLM output (models sometimes exceed the limit)
       return truncateTitle(title, maxLength);
     } catch (err) {
       const classified = classifyError(err);
       lastError = classified;
 
-      // Timeouts are not retried — if Workers AI is already slow, retrying
-      // immediately wastes more of the Worker's 30-second wall-clock budget.
-      // Only rate-limit and generic errors are worth retrying.
-      const shouldRetry = attempt < totalAttempts && classified.category !== 'timeout';
+      const shouldRetry =
+        attempt < totalAttempts && !['timeout', 'request'].includes(classified.category);
 
       if (shouldRetry) {
-        // Exponential backoff with cap: min(baseDelay * 2^(attempt-1), maxDelay)
         const delay = Math.min(retryDelayMs * Math.pow(2, attempt - 1), retryMaxDelayMs);
         log.warn('task_title.retrying', {
           error: classified.message,
@@ -303,7 +371,7 @@ export async function generateTaskTitle(
           attempt,
           totalAttempts,
         });
-        break; // No more retries — exit loop
+        break;
       }
     }
   }

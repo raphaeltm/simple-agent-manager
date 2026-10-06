@@ -1,290 +1,1267 @@
+import { WORKSPACE_IDLE_CHECK_INTERVAL_MS } from '@simple-agent-manager/shared';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const loggerMocks = vi.hoisted(() => ({
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  debug: vi.fn(),
+}));
+vi.mock('../../src/lib/logger', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/lib/logger')>()),
+  createModuleLogger: () => loggerMocks,
+}));
+
+import { runMigrations } from '../../src/durable-objects/migrations';
+import { updateMessageActivity } from '../../src/durable-objects/project-data/activity';
+import {
+  computeProjectDataAlarmSectionTimes,
+  computeProjectDataAlarmTime,
+} from '../../src/durable-objects/project-data/alarm-schedule';
+import { processExpiredCleanups } from '../../src/durable-objects/project-data/idle-cleanup';
+import { terminalizeIdleTaskInD1 } from '../../src/durable-objects/project-data/idle-cleanup-terminalization';
+import {
+  sleepSession,
+  stopSessionInternal,
+  updateSessionTopic,
+  wakeSession,
+} from '../../src/durable-objects/project-data/sessions';
+import {
+  getLocalTaskRuntimeLiveness,
+  readTaskAcpLivenessSignals,
+} from '../../src/durable-objects/project-data/task-runtime-liveness';
+import type { Env as ProjectDataEnv } from '../../src/durable-objects/project-data/types';
+import { checkWorkspaceIdleTimeouts } from '../../src/durable-objects/project-data/workspace-idle-timeouts';
+import type { Env } from '../../src/env';
+import { getTaskRuntimeLiveness } from '../../src/scheduled/stuck-tasks';
+import { createSqliteD1 } from '../helpers/sqlite-d1';
+import { createSqlStorage } from './durable-objects/sql-storage-test-utils';
+
+const NOW = Date.parse('2026-08-06T12:00:00.000Z');
+const PROJECT_ID = 'project-1';
+const TIMEOUT_MS = 60 * 60 * 1000;
+
 /**
- * Tests for conversation-mode workspace idle timeout task completion.
+ * Hand-written D1 schema.
  *
- * Root cause (2026-05-13): checkWorkspaceIdleTimeouts stopped the workspace
- * and session but did NOT complete the associated task in D1. Conversation-mode
- * tasks are excluded from the 15-min session idle cleanup (by design), so the
- * workspace idle timeout is their only cleanup path. Without task completion,
- * conversation-mode tasks stayed in_progress until the 8-hour hard timeout.
+ * It drifts: adding `w.created_at` to `loadRuntimeWorkspaceSnapshot` and a
+ * `session_snapshots` lookup to the terminal-verdict path made every query in
+ * this file throw, and the resulting `workspaceProbeOutcome: 'error'` /
+ * withheld-verdict fail-safes turned six assertions red for the wrong reason.
  *
- * Bug: idle-cleanup.ts:checkWorkspaceIdleTimeouts → no call to completeTaskInD1
- * Fix: added D1 task query + completeTaskInD1 after deleteWorkspaceInD1
+ * Prefer `createSchemaTables(sqlite, [schema.workspaces, ...])` from
+ * `tests/helpers/sqlite-d1.ts` for new files — it builds the tables from the
+ * drizzle definitions so this cannot happen (`.claude/rules/28`). Kept inline
+ * here because this file also hand-builds a ProjectData SqlStorage and the two
+ * are seeded together.
  */
-import { describe, expect, it, vi } from 'vitest';
+const D1_SCHEMA = `
+  CREATE TABLE projects (
+    id TEXT PRIMARY KEY,
+    workspace_idle_timeout_ms INTEGER
+  );
+  CREATE TABLE nodes (
+    id TEXT PRIMARY KEY,
+    status TEXT NOT NULL,
+    health_status TEXT,
+    last_heartbeat_at TEXT,
+    runtime TEXT
+  );
+  CREATE TABLE workspaces (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    chat_session_id TEXT,
+    node_id TEXT,
+    status TEXT NOT NULL,
+    created_at TEXT,
+    updated_at TEXT NOT NULL
+  );
+  -- Read by the terminal-verdict sleep guard in services/task-sleep-preservation.ts.
+  -- Left empty by seed(): these fixtures are NOT sleeping, so the guard must find
+  -- no row and allow terminalization, which is what the 'failed' assertions below
+  -- depend on.
+  CREATE TABLE session_snapshots (
+    id TEXT PRIMARY KEY,
+    project_id TEXT,
+    workspace_id TEXT,
+    chat_session_id TEXT,
+    status TEXT,
+    degradation TEXT,
+    expires_at TEXT,
+    sleeping_at TEXT,
+    sleep_status TEXT,
+    sleep_after TEXT,
+    sleep_attempts INTEGER NOT NULL DEFAULT 0,
+    sleep_claimed_at TEXT,
+    sleep_stopping_since TEXT,
+    capture_generation TEXT,
+    recovery_attempts INTEGER NOT NULL DEFAULT 0,
+    recovery_failed_at TEXT,
+    created_at TEXT,
+    updated_at TEXT
+  );
+  CREATE TABLE trigger_executions (
+    id TEXT PRIMARY KEY,
+    status TEXT NOT NULL,
+    completed_at TEXT,
+    error_message TEXT
+  );
+  CREATE TABLE tasks (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    workspace_id TEXT,
+    chat_session_id TEXT,
+    status TEXT NOT NULL,
+    execution_step TEXT,
+    completed_at TEXT,
+    updated_at TEXT NOT NULL,
+    error_message TEXT,
+    output_summary TEXT,
+    trigger_execution_id TEXT,
+    created_at TEXT NOT NULL
+  );
+  CREATE UNIQUE INDEX idx_tasks_chat_session ON tasks(chat_session_id)
+    WHERE chat_session_id IS NOT NULL;
+  CREATE TABLE task_status_events (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    from_status TEXT,
+    to_status TEXT NOT NULL,
+    actor_type TEXT NOT NULL,
+    actor_id TEXT,
+    reason TEXT,
+    created_at TEXT NOT NULL
+  );
+`;
 
-import { checkWorkspaceIdleTimeouts, completeTaskInD1 } from '../../src/durable-objects/project-data/idle-cleanup';
+interface SeedOptions {
+  taskId?: string;
+  workspaceId?: string;
+  sessionId?: string;
+  projectId?: string;
+  workspaceStatus?: string;
+  nodeStatus?: string;
+  nodeHealthStatus?: string;
+  nodeRuntime?: string;
+  taskChatSessionId?: string | null;
+  acpStatus?: 'pending' | 'assigned' | 'running' | 'completed' | 'failed' | 'interrupted';
+  withTrigger?: boolean;
+  lastActivityAt?: number;
+  scheduleExpired?: boolean;
+  scheduleRetryCount?: number;
+}
 
-// ---------------------------------------------------------------------------
-// Mock factories
-// ---------------------------------------------------------------------------
+describe('ProjectData idle cleanup runtime liveness contract', () => {
+  let projectDb: Database.Database;
+  let d1Db: Database.Database;
+  let sql: SqlStorage;
+  let env: ProjectDataEnv;
 
-function createMockSql(
-  workspaceActivityRows: Array<{
-    workspace_id: string;
-    session_id: string | null;
-    last_terminal_activity_at: number;
-    last_message_at: number;
-    session_updated_at: number;
-  }>
-) {
-  return {
-    exec: vi.fn().mockImplementation((query: string, ..._args: unknown[]) => {
-      // workspace_activity + chat_sessions join
-      if (query.includes('FROM workspace_activity wa') && query.includes('INNER JOIN chat_sessions')) {
-        return {
-          toArray: () => workspaceActivityRows,
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    projectDb = new Database(':memory:');
+    d1Db = new Database(':memory:');
+    sql = createSqlStorage(projectDb);
+    runMigrations(sql);
+    d1Db.exec(D1_SCHEMA);
+    d1Db
+      .prepare('INSERT INTO projects (id, workspace_idle_timeout_ms) VALUES (?, NULL)')
+      .run(PROJECT_ID);
+    env = {
+      DATABASE: createSqliteD1(d1Db),
+      SESSION_IDLE_TIMEOUT_MINUTES: '60',
+      IDLE_CLEANUP_RETRY_DELAY_MS: '300000',
+      IDLE_CLEANUP_MAX_RETRIES: '1',
+      IDLE_CLEANUP_MAX_CANDIDATES_PER_SWEEP: '5',
+      WORKSPACE_IDLE_BACKOFF_BASE_MS: '600000',
+      WORKSPACE_IDLE_BACKOFF_MAX_MS: '1800000',
+      WORKSPACE_IDLE_TIMEOUT_MS: String(2 * TIMEOUT_MS),
+      NODE_HEARTBEAT_STALE_SECONDS: '180',
+      TASK_LIVENESS_MAX_ACP_SESSIONS: '5',
+      TASK_LIVENESS_PROBE_TIMEOUT_MS: '5000',
+      MAX_MESSAGES_PER_SESSION: '100000',
+    } as ProjectDataEnv;
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    projectDb.close();
+    d1Db.close();
+    vi.useRealTimers();
+  });
+
+  function seed(
+    options: SeedOptions = {}
+  ): Required<Pick<SeedOptions, 'taskId' | 'workspaceId' | 'sessionId' | 'projectId'>> {
+    const taskId = options.taskId ?? 'task-1';
+    const workspaceId = options.workspaceId ?? 'workspace-1';
+    const sessionId = options.sessionId ?? 'session-1';
+    const projectId = options.projectId ?? PROJECT_ID;
+    const nodeId = `node-${workspaceId}`;
+    const triggerId = options.withTrigger ? `trigger-${taskId}` : null;
+    const lastActivityAt = options.lastActivityAt ?? NOW - 3 * TIMEOUT_MS;
+
+    d1Db
+      .prepare(
+        `INSERT OR IGNORE INTO nodes
+       (id, status, health_status, last_heartbeat_at, runtime)
+       VALUES (?, ?, ?, ?, ?)`
+      )
+      .run(
+        nodeId,
+        options.nodeStatus ?? 'running',
+        options.nodeHealthStatus ?? 'healthy',
+        new Date(NOW).toISOString(),
+        options.nodeRuntime ?? 'vm'
+      );
+    d1Db
+      .prepare(
+        `INSERT OR IGNORE INTO workspaces
+       (id, project_id, user_id, chat_session_id, node_id, status, updated_at)
+       VALUES (?, ?, 'user-1', ?, ?, ?, ?)`
+      )
+      .run(
+        workspaceId,
+        projectId,
+        sessionId,
+        nodeId,
+        options.workspaceStatus ?? 'running',
+        new Date(NOW).toISOString()
+      );
+    if (triggerId) {
+      d1Db
+        .prepare(`INSERT INTO trigger_executions (id, status) VALUES (?, 'running')`)
+        .run(triggerId);
+    }
+    d1Db
+      .prepare(
+        `INSERT INTO tasks
+       (id, project_id, user_id, workspace_id, chat_session_id, status,
+        execution_step, updated_at, output_summary, trigger_execution_id, created_at)
+       VALUES (?, ?, 'user-1', ?, ?, 'in_progress', 'running', ?, NULL, ?, ?)`
+      )
+      .run(
+        taskId,
+        projectId,
+        workspaceId,
+        options.taskChatSessionId === undefined ? sessionId : options.taskChatSessionId,
+        new Date(NOW - TIMEOUT_MS).toISOString(),
+        triggerId,
+        new Date(NOW - TIMEOUT_MS).toISOString()
+      );
+
+    projectDb
+      .prepare(
+        `INSERT INTO chat_sessions
+       (id, workspace_id, task_id, topic, status, message_count, started_at, created_at, updated_at)
+       VALUES (?, ?, ?, 'Idle cleanup test', 'active', 0, ?, ?, ?)`
+      )
+      .run(sessionId, workspaceId, taskId, lastActivityAt, lastActivityAt, lastActivityAt);
+    projectDb
+      .prepare(
+        `INSERT OR IGNORE INTO workspace_activity
+       (workspace_id, session_id, last_message_at, last_terminal_activity_at, created_at)
+       VALUES (?, ?, ?, ?, ?)`
+      )
+      .run(workspaceId, sessionId, lastActivityAt, lastActivityAt, lastActivityAt);
+    projectDb
+      .prepare(
+        `INSERT INTO acp_sessions
+       (id, chat_session_id, workspace_id, node_id, status, agent_type,
+        last_heartbeat_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 'openai-codex', ?, ?, ?)`
+      )
+      .run(
+        `acp-${taskId}`,
+        sessionId,
+        workspaceId,
+        nodeId,
+        options.acpStatus ?? 'running',
+        NOW,
+        NOW - TIMEOUT_MS,
+        NOW
+      );
+    if (options.scheduleExpired) {
+      projectDb
+        .prepare(
+          `INSERT INTO idle_cleanup_schedule
+         (session_id, workspace_id, task_id, cleanup_at, created_at, retry_count)
+         VALUES (?, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          sessionId,
+          workspaceId,
+          taskId,
+          NOW - 1,
+          NOW - TIMEOUT_MS - 1,
+          options.scheduleRetryCount ?? 0
+        );
+    }
+    return { taskId, workspaceId, sessionId, projectId };
+  }
+
+  function task(taskId: string): Record<string, unknown> {
+    return d1Db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as Record<string, unknown>;
+  }
+
+  function workspaceActivity(workspaceId: string): Record<string, unknown> | undefined {
+    return projectDb
+      .prepare('SELECT * FROM workspace_activity WHERE workspace_id = ?')
+      .get(workspaceId) as Record<string, unknown> | undefined;
+  }
+
+  async function runPathA(
+    stopWorkspace = vi.fn().mockResolvedValue(undefined)
+  ): Promise<typeof stopWorkspace> {
+    await processExpiredCleanups(sql, env, PROJECT_ID, stopWorkspace, vi.fn(), vi.fn());
+    return stopWorkspace;
+  }
+
+  it('preserves a live task and defers its expired schedule across two sweeps', async () => {
+    const { taskId, sessionId } = seed({ scheduleExpired: true });
+    const stopWorkspace = vi.fn().mockResolvedValue(undefined);
+
+    await runPathA(stopWorkspace);
+    await runPathA(stopWorkspace);
+
+    expect(task(taskId).status).toBe('in_progress');
+    expect(stopWorkspace).not.toHaveBeenCalled();
+    expect(
+      projectDb
+        .prepare('SELECT COUNT(*) FROM idle_cleanup_schedule WHERE session_id = ?')
+        .pluck()
+        .get(sessionId)
+    ).toBe(1);
+    expect(
+      projectDb
+        .prepare('SELECT cleanup_at FROM idle_cleanup_schedule WHERE session_id = ?')
+        .pluck()
+        .get(sessionId)
+    ).toBeGreaterThan(NOW);
+    expect(d1Db.prepare('SELECT COUNT(*) FROM task_status_events').pluck().get()).toBe(0);
+  });
+
+  it('preserves recovery as inconclusive', async () => {
+    const { taskId } = seed({ workspaceStatus: 'recovery', scheduleExpired: true });
+    const stopWorkspace = await runPathA();
+
+    expect(task(taskId).status).toBe('in_progress');
+    expect(stopWorkspace).not.toHaveBeenCalled();
+  });
+
+  it('fails a conclusively dead task with diagnostics, event, trigger sync, and one-sweep escape', async () => {
+    const { taskId, workspaceId, sessionId, projectId } = seed({
+      nodeStatus: 'stopped',
+      withTrigger: true,
+      scheduleExpired: true,
+    });
+    const stopWorkspace = vi.fn().mockResolvedValue(undefined);
+
+    await runPathA(stopWorkspace);
+    await runPathA(stopWorkspace);
+
+    const failed = task(taskId);
+    expect(failed).toMatchObject({
+      status: 'failed',
+      execution_step: null,
+      output_summary: null,
+    });
+    expect(failed.error_message).toContain('session_idle_cleanup');
+    expect(failed.error_message).toContain(`configured timeout ${TIMEOUT_MS}ms`);
+    expect(failed.error_message).toContain('node_not_live');
+    expect(stopWorkspace).toHaveBeenCalledTimes(1);
+    expect(stopWorkspace).toHaveBeenCalledWith(workspaceId, projectId);
+    expect(
+      projectDb
+        .prepare('SELECT COUNT(*) FROM idle_cleanup_schedule WHERE session_id = ?')
+        .pluck()
+        .get(sessionId)
+    ).toBe(0);
+    expect(
+      d1Db
+        .prepare(
+          `SELECT from_status, to_status, actor_type, reason
+       FROM task_status_events WHERE task_id = ?`
+        )
+        .get(taskId)
+    ).toMatchObject({
+      from_status: 'in_progress',
+      to_status: 'failed',
+      actor_type: 'system',
+      reason: failed.error_message,
+    });
+    expect(
+      d1Db
+        .prepare('SELECT status, error_message FROM trigger_executions WHERE id = ?')
+        .get(`trigger-${taskId}`)
+    ).toMatchObject({
+      status: 'failed',
+      error_message: failed.error_message,
+    });
+    expect(
+      d1Db.prepare('SELECT COUNT(*) FROM task_status_events WHERE task_id = ?').pluck().get(taskId)
+    ).toBe(1);
+  });
+
+  it('terminalizes and reaps a task-mode session whose task link is NULL but workspace binding matches', async () => {
+    const { taskId, workspaceId, sessionId, projectId } = seed({
+      nodeStatus: 'stopped',
+      scheduleExpired: true,
+      taskChatSessionId: null,
+    });
+    const stopWorkspace = vi.fn().mockResolvedValue(undefined);
+
+    await runPathA(stopWorkspace);
+
+    expect(task(taskId)).toMatchObject({
+      status: 'failed',
+      chat_session_id: sessionId,
+    });
+    expect(stopWorkspace).toHaveBeenCalledWith(workspaceId, projectId);
+    expect(
+      projectDb
+        .prepare('SELECT COUNT(*) FROM idle_cleanup_schedule WHERE session_id = ?')
+        .pluck()
+        .get(sessionId)
+    ).toBe(0);
+  });
+
+  it('honors the configured candidate bound with deterministic Path A ordering', async () => {
+    env.IDLE_CLEANUP_MAX_CANDIDATES_PER_SWEEP = '1';
+    const first = seed({
+      taskId: 'task-a',
+      workspaceId: 'workspace-a',
+      sessionId: 'session-a',
+      nodeStatus: 'stopped',
+      scheduleExpired: true,
+    });
+    const second = seed({
+      taskId: 'task-b',
+      workspaceId: 'workspace-b',
+      sessionId: 'session-b',
+      nodeStatus: 'stopped',
+      scheduleExpired: true,
+    });
+
+    await runPathA();
+
+    expect(task(first.taskId).status).toBe('failed');
+    expect(task(second.taskId).status).toBe('in_progress');
+    expect(
+      projectDb.prepare('SELECT session_id FROM idle_cleanup_schedule ORDER BY session_id').all()
+    ).toEqual([{ session_id: second.sessionId }]);
+  });
+
+  it('scopes Path B to the reporter session and preserves an unrelated same-workspace task', async () => {
+    const reporter = seed({
+      taskId: 'task-reporter',
+      sessionId: 'session-reporter',
+      nodeStatus: 'stopped',
+    });
+    const unrelated = seed({
+      taskId: 'task-unrelated',
+      workspaceId: reporter.workspaceId,
+      sessionId: 'session-unrelated',
+      nodeStatus: 'stopped',
+    });
+    const deleteWorkspace = vi.fn().mockResolvedValue(undefined);
+
+    await checkWorkspaceIdleTimeouts(sql, env, PROJECT_ID, deleteWorkspace, vi.fn(), vi.fn());
+
+    expect(task(reporter.taskId).status).toBe('failed');
+    expect(task(unrelated.taskId).status).toBe('in_progress');
+    expect(deleteWorkspace).toHaveBeenCalledWith(reporter.workspaceId, PROJECT_ID);
+    expect(d1Db.prepare('SELECT task_id FROM task_status_events').all()).toEqual([
+      { task_id: reporter.taskId },
+    ]);
+  });
+
+  describe('workspace idle timeouts', () => {
+    const QUIET_ACTIVE_MS = 10 * 60_000;
+
+    function workspaceIdleAlarmAt(): number | null {
+      return computeProjectDataAlarmSectionTimes(
+        sql,
+        { ...env, PROJECT_DATA_STORAGE_TELEMETRY_ENABLED: 'false' },
+        Date.now()
+      ).workspace_idle_timeouts;
+    }
+
+    function sweepWorkspaceIdle(deleteWorkspace = vi.fn().mockResolvedValue(undefined)) {
+      return checkWorkspaceIdleTimeouts(sql, env, PROJECT_ID, deleteWorkspace, vi.fn(), vi.fn());
+    }
+
+    /** Fire the workspace idle section each time its own schedule says, as `ProjectData.alarm()` does. */
+    async function runWorkspaceIdleAlarms(
+      deleteWorkspace: ReturnType<typeof vi.fn>,
+      maxAlarms = 20
+    ): Promise<number[]> {
+      const firedAt: number[] = [];
+      for (let alarm = 0; alarm < maxAlarms; alarm += 1) {
+        const alarmAt = workspaceIdleAlarmAt();
+        if (alarmAt === null) break;
+        vi.setSystemTime(alarmAt);
+        firedAt.push(alarmAt);
+        await sweepWorkspaceIdle(deleteWorkspace);
+      }
+      return firedAt;
+    }
+
+    function seedDeadRuntime(options: SeedOptions = {}) {
+      const seeded = seed({ nodeStatus: 'stopped', ...options });
+      projectDb.prepare('DELETE FROM acp_sessions WHERE chat_session_id = ?').run(seeded.sessionId);
+      return seeded;
+    }
+
+    it.each([
+      { label: 'installation default', projectTimeoutMs: null, timeoutMs: 2 * TIMEOUT_MS },
+      { label: 'project override', projectTimeoutMs: 30 * 60_000, timeoutMs: 30 * 60_000 },
+    ])(
+      'checks a quiet active workspace once, then only at its $label idle deadline',
+      async ({ projectTimeoutMs, timeoutMs }) => {
+        d1Db
+          .prepare('UPDATE projects SET workspace_idle_timeout_ms = ? WHERE id = ?')
+          .run(projectTimeoutMs, PROJECT_ID);
+        const quietSince = NOW - QUIET_ACTIVE_MS;
+        const seeded = seedDeadRuntime({ lastActivityAt: quietSince });
+        const deleteWorkspace = vi.fn().mockResolvedValue(undefined);
+
+        const firedAt = await runWorkspaceIdleAlarms(deleteWorkspace);
+
+        expect(firedAt).toEqual([NOW + 60_000, quietSince + timeoutMs]);
+        expect(task(seeded.taskId).status).toBe('failed');
+        expect(deleteWorkspace).toHaveBeenCalledWith(seeded.workspaceId, PROJECT_ID);
+        expect(workspaceActivity(seeded.workspaceId)).toBeUndefined();
+      }
+    );
+
+    it('does not arm the alarm for activity whose session is sleeping or stopped', () => {
+      const sleeping = seed();
+      const stopped = seed({
+        taskId: 'task-stopped',
+        workspaceId: 'workspace-stopped',
+        sessionId: 'session-stopped',
+      });
+      expect(workspaceIdleAlarmAt()).toBe(NOW + 60_000);
+
+      expect(sleepSession(sql, sleeping.sessionId)).toBe(true);
+      stopSessionInternal(sql, stopped.sessionId);
+
+      expect(workspaceIdleAlarmAt()).toBeNull();
+      expect(workspaceActivity(sleeping.workspaceId)).toBeDefined();
+      expect(workspaceActivity(stopped.workspaceId)).toBeDefined();
+    });
+
+    it('checks the most overdue workspace first when a full page is due', async () => {
+      for (const n of [1, 2, 3, 4, 5]) {
+        seed({
+          taskId: `task-busy-${n}`,
+          workspaceId: `workspace-a-busy-${n}`,
+          sessionId: `session-busy-${n}`,
+          lastActivityAt: NOW - QUIET_ACTIVE_MS,
+        });
+      }
+      const idle = seedDeadRuntime({
+        taskId: 'task-idle',
+        workspaceId: 'workspace-z-idle',
+        sessionId: 'session-idle',
+      });
+      const deleteWorkspace = vi.fn().mockResolvedValue(undefined);
+
+      await sweepWorkspaceIdle(deleteWorkspace);
+
+      expect(task(idle.taskId).status).toBe('failed');
+      expect(deleteWorkspace).toHaveBeenCalledWith(idle.workspaceId, PROJECT_ID);
+    });
+
+    it('records the idle deadline of every busy workspace it checks, so a full page keeps moving', async () => {
+      const retryAt = NOW;
+      const idle = seedDeadRuntime({
+        taskId: 'task-idle',
+        workspaceId: 'workspace-z-idle',
+        sessionId: 'session-idle',
+      });
+      projectDb
+        .prepare(
+          'UPDATE workspace_activity SET idle_check_retry_count = 1, next_idle_check_at = ? WHERE workspace_id = ?'
+        )
+        .run(retryAt, idle.workspaceId);
+      for (const n of [1, 2, 3, 4, 5]) {
+        seed({
+          taskId: `task-busy-${n}`,
+          workspaceId: `workspace-a-busy-${n}`,
+          sessionId: `session-busy-${n}`,
+          lastActivityAt: NOW - QUIET_ACTIVE_MS,
+        });
+      }
+      const deleteWorkspace = vi.fn().mockResolvedValue(undefined);
+
+      const firedAt = await runWorkspaceIdleAlarms(deleteWorkspace, 2);
+
+      expect(firedAt).toEqual([NOW + 60_000, NOW + 120_000]);
+      expect(task(idle.taskId).status).toBe('failed');
+      for (const n of [1, 2, 3, 4, 5]) {
+        expect(task(`task-busy-${n}`).status).toBe('in_progress');
+        expect(workspaceActivity(`workspace-a-busy-${n}`)).toMatchObject({
+          idle_check_retry_count: 0,
+          next_idle_check_at: NOW - QUIET_ACTIVE_MS + 2 * TIMEOUT_MS,
+        });
+      }
+    });
+
+    it('moves a page of permanently failing checks aside so the work behind them is reached', async () => {
+      for (const n of [1, 2, 3, 4, 5]) {
+        seedDeadRuntime({
+          taskId: `task-fail-${n}`,
+          workspaceId: `workspace-a-fail-${n}`,
+          sessionId: `session-fail-${n}`,
+        });
+      }
+      const reachable = seedDeadRuntime({
+        taskId: 'task-reachable',
+        workspaceId: 'workspace-z-reachable',
+        sessionId: 'session-reachable',
+      });
+      d1Db.exec(`
+        CREATE TRIGGER failing_task_writes BEFORE UPDATE ON tasks
+        WHEN OLD.id LIKE 'task-fail-%'
+        BEGIN SELECT RAISE(ABORT, 'D1_ERROR: overloaded'); END;
+      `);
+      const deleteWorkspace = vi.fn().mockResolvedValue(undefined);
+
+      const firedAt = await runWorkspaceIdleAlarms(deleteWorkspace, 2);
+
+      expect(task(reachable.taskId).status).toBe('failed');
+      expect(deleteWorkspace).toHaveBeenCalledWith(reachable.workspaceId, PROJECT_ID);
+      for (const n of [1, 2, 3, 4, 5]) {
+        expect(task(`task-fail-${n}`).status).toBe('in_progress');
+        expect(workspaceActivity(`workspace-a-fail-${n}`)).toMatchObject({
+          idle_check_retry_count: 1,
+          next_idle_check_at: firedAt[0]! + 600_000,
+        });
+      }
+      expect(workspaceIdleAlarmAt()).toBe(firedAt[0]! + 600_000);
+    });
+
+    it('backs off an overdue workspace with inconclusive candidates through the shared alarm path', async () => {
+      const seeded = seed();
+      d1Db.prepare('DELETE FROM tasks WHERE id = ?').run(seeded.taskId);
+      projectDb.prepare('DELETE FROM acp_sessions').run();
+      const deleteWorkspace = vi.fn().mockResolvedValue(undefined);
+
+      await sweepWorkspaceIdle(deleteWorkspace);
+
+      expect(deleteWorkspace).not.toHaveBeenCalled();
+      expect(workspaceActivity(seeded.workspaceId)).toMatchObject({
+        idle_check_retry_count: 1,
+        next_idle_check_at: NOW + 600_000,
+      });
+      expect(
+        computeProjectDataAlarmTime(sql, {
+          ...env,
+          PROJECT_DATA_STORAGE_TELEMETRY_ENABLED: 'false',
+        })
+      ).toBe(NOW + 600_000);
+    });
+
+    it('grows the retry delay up to its cap while an idle runtime is preserved, and forgets it after cleanup', async () => {
+      env.WORKSPACE_IDLE_BACKOFF_BASE_MS = '300000';
+      env.WORKSPACE_IDLE_BACKOFF_MAX_MS = '900000';
+      const seeded = seed();
+      const deleteWorkspace = vi.fn().mockResolvedValue(undefined);
+
+      const firedAt = await runWorkspaceIdleAlarms(deleteWorkspace, 4);
+
+      const delays = firedAt.slice(1).map((at, index) => at - firedAt[index]!);
+      expect(delays).toEqual([300_000, 600_000, 900_000]);
+      expect(workspaceActivity(seeded.workspaceId)).toMatchObject({
+        idle_check_retry_count: 4,
+        next_idle_check_at: firedAt[3]! + 900_000,
+      });
+
+      projectDb.prepare('DELETE FROM acp_sessions WHERE chat_session_id = ?').run(seeded.sessionId);
+      d1Db
+        .prepare(`UPDATE nodes SET status = 'stopped', health_status = 'unhealthy' WHERE id = ?`)
+        .run(`node-${seeded.workspaceId}`);
+      await runWorkspaceIdleAlarms(deleteWorkspace, 1);
+
+      expect(task(seeded.taskId).status).toBe('failed');
+      expect(deleteWorkspace).toHaveBeenCalledWith(seeded.workspaceId, PROJECT_ID);
+      expect(workspaceActivity(seeded.workspaceId)).toBeUndefined();
+    });
+
+    it('restarts the backoff once new activity ends an idle cycle', async () => {
+      const seeded = seed();
+      await sweepWorkspaceIdle();
+      expect(workspaceActivity(seeded.workspaceId)).toMatchObject({ idle_check_retry_count: 1 });
+
+      vi.setSystemTime(NOW + 60_000);
+      expect(updateSessionTopic(sql, seeded.sessionId, 'Renamed while idle')).toBe(true);
+      vi.setSystemTime(NOW + 600_000);
+      await sweepWorkspaceIdle();
+
+      expect(workspaceActivity(seeded.workspaceId)).toMatchObject({
+        idle_check_retry_count: 0,
+        next_idle_check_at: NOW + 60_000 + 2 * TIMEOUT_MS,
+      });
+    });
+
+    it('still cleans up a genuinely idle workspace on its first due alarm', async () => {
+      const seeded = seedDeadRuntime();
+      const deleteWorkspace = vi.fn().mockResolvedValue(undefined);
+
+      expect(workspaceIdleAlarmAt()).toBe(NOW + 60_000);
+
+      await sweepWorkspaceIdle(deleteWorkspace);
+
+      expect(task(seeded.taskId).status).toBe('failed');
+      expect(deleteWorkspace).toHaveBeenCalledWith(seeded.workspaceId, PROJECT_ID);
+      expect(workspaceActivity(seeded.workspaceId)).toBeUndefined();
+    });
+
+    it('starts a new idle cycle when a sleeping session wakes in place', async () => {
+      env.WORKSPACE_IDLE_BACKOFF_BASE_MS = String(6 * TIMEOUT_MS);
+      env.WORKSPACE_IDLE_BACKOFF_MAX_MS = String(6 * TIMEOUT_MS);
+      const seeded = seed();
+      const deleteWorkspace = vi.fn().mockResolvedValue(undefined);
+      await sweepWorkspaceIdle(deleteWorkspace);
+      expect(workspaceActivity(seeded.workspaceId)).toMatchObject({
+        idle_check_retry_count: 1,
+        next_idle_check_at: NOW + 6 * TIMEOUT_MS,
+      });
+
+      expect(sleepSession(sql, seeded.sessionId)).toBe(true);
+      expect(workspaceIdleAlarmAt()).toBeNull();
+      vi.setSystemTime(NOW + QUIET_ACTIVE_MS);
+      const wokeAt = Date.now();
+      expect(wakeSession(sql, seeded.sessionId, seeded.workspaceId, seeded.taskId)).toBe(true);
+      // The woken runtime then dies without doing any work.
+      projectDb.prepare('DELETE FROM acp_sessions WHERE chat_session_id = ?').run(seeded.sessionId);
+      d1Db
+        .prepare(`UPDATE nodes SET status = 'stopped', health_status = 'unhealthy' WHERE id = ?`)
+        .run(`node-${seeded.workspaceId}`);
+
+      const firedAt = await runWorkspaceIdleAlarms(deleteWorkspace);
+
+      expect(firedAt).toEqual([wokeAt + WORKSPACE_IDLE_CHECK_INTERVAL_MS, wokeAt + 2 * TIMEOUT_MS]);
+      expect(task(seeded.taskId).status).toBe('failed');
+      expect(deleteWorkspace).toHaveBeenCalledWith(seeded.workspaceId, PROJECT_ID);
+    });
+
+    it('lets activity that lands mid-check clear the retry the check recorded', async () => {
+      env.WORKSPACE_IDLE_BACKOFF_BASE_MS = String(6 * TIMEOUT_MS);
+      env.WORKSPACE_IDLE_BACKOFF_MAX_MS = String(6 * TIMEOUT_MS);
+      const seeded = seed();
+      const database = env.DATABASE;
+      let messageAt: number | null = null;
+      env.DATABASE = {
+        ...database,
+        prepare: (query: string) => {
+          // A message persisted while the check awaits its reporter-scoped task lookup.
+          if (messageAt === null && query.includes('FROM tasks t')) {
+            messageAt = Date.now();
+            updateMessageActivity(sql, seeded.workspaceId, seeded.sessionId);
+          }
+          return database.prepare(query);
+        },
+      };
+
+      await sweepWorkspaceIdle();
+
+      expect(messageAt).toBe(NOW);
+      expect(workspaceActivity(seeded.workspaceId)).toMatchObject({
+        idle_check_retry_count: 0,
+        next_idle_check_at: null,
+      });
+      expect(workspaceIdleAlarmAt()).toBe(NOW + WORKSPACE_IDLE_CHECK_INTERVAL_MS);
+    });
+
+    it('records no verdict when the project timeout cannot be read', async () => {
+      d1Db
+        .prepare('UPDATE projects SET workspace_idle_timeout_ms = ? WHERE id = ?')
+        .run(6 * TIMEOUT_MS, PROJECT_ID);
+      const seeded = seedDeadRuntime();
+      d1Db.exec('ALTER TABLE projects RENAME TO projects_unavailable');
+      const deleteWorkspace = vi.fn().mockResolvedValue(undefined);
+
+      await sweepWorkspaceIdle(deleteWorkspace);
+
+      expect(task(seeded.taskId).status).toBe('in_progress');
+      expect(deleteWorkspace).not.toHaveBeenCalled();
+      expect(workspaceActivity(seeded.workspaceId)).toMatchObject({
+        idle_check_retry_count: 1,
+        next_idle_check_at: NOW + 600_000,
+      });
+    });
+
+    it('drains more idle workspaces than one pass takes, a page per alarm', async () => {
+      const seeded = [1, 2, 3, 4, 5, 6, 7].map((n) =>
+        seedDeadRuntime({
+          taskId: `task-idle-${n}`,
+          workspaceId: `workspace-idle-${n}`,
+          sessionId: `session-idle-${n}`,
+        })
+      );
+      const deleteWorkspace = vi.fn().mockResolvedValue(undefined);
+
+      const firedAt = await runWorkspaceIdleAlarms(deleteWorkspace);
+
+      expect(firedAt).toEqual([NOW + 60_000, NOW + 120_000]);
+      for (const { taskId } of seeded) expect(task(taskId).status).toBe('failed');
+      expect(deleteWorkspace).toHaveBeenCalledTimes(seeded.length);
+      expect(workspaceIdleAlarmAt()).toBeNull();
+    });
+
+    it.each([
+      {
+        window: 'during the project timeout lookup',
+        hookedQuery: 'FROM projects',
+        activeWorkspaceId: 'workspace-a',
+        checkedWorkspaceId: 'workspace-b',
+      },
+      {
+        window: 'while an earlier workspace is being checked',
+        hookedQuery: 'FROM tasks t',
+        activeWorkspaceId: 'workspace-b',
+        checkedWorkspaceId: 'workspace-a',
+      },
+    ])(
+      'does not act on a stale read of a workspace whose activity landed $window',
+      async ({ hookedQuery, activeWorkspaceId, checkedWorkspaceId }) => {
+        const workspaces = ['a', 'b'].map((id) =>
+          seed({ taskId: `task-${id}`, workspaceId: `workspace-${id}`, sessionId: `session-${id}` })
+        );
+        const active = workspaces.find(({ workspaceId }) => workspaceId === activeWorkspaceId)!;
+        const database = env.DATABASE;
+        let activityLanded = false;
+        env.DATABASE = {
+          ...database,
+          prepare: (query: string) => {
+            if (!activityLanded && query.includes(hookedQuery)) {
+              activityLanded = true;
+              updateMessageActivity(sql, active.workspaceId, active.sessionId);
+            }
+            return database.prepare(query);
+          },
         };
-      }
-      // stopSessionInternal: UPDATE chat_sessions SET status = 'stopped'
-      if (query.includes('UPDATE chat_sessions SET status')) {
-        return { rowsWritten: 1 };
-      }
-      // SELECT workspace_id, message_count FROM chat_sessions (for stopSession return)
-      if (query.includes('SELECT workspace_id, message_count FROM chat_sessions')) {
-        return { toArray: () => [{ workspace_id: null, message_count: 0 }] };
-      }
-      // DELETE FROM workspace_activity
-      if (query.includes('DELETE FROM workspace_activity')) {
-        return { rowsWritten: 1 };
-      }
-      // INSERT INTO activity_events (recordActivityEventInternal)
-      if (query.includes('INSERT INTO activity_events')) {
-        return { rowsWritten: 1 };
-      }
-      // materializeSession queries
-      if (query.includes('chat_messages_grouped')) {
-        return { toArray: () => [] };
-      }
-      if (query.includes('UPDATE chat_sessions SET materialized_at')) {
-        return { rowsWritten: 0 };
-      }
-      return { toArray: () => [], rowsWritten: 0 };
-    }),
-  } as unknown as SqlStorage;
-}
 
-function createMockEnv(opts: {
-  projectTimeoutMs?: number | null;
-  taskForWorkspace?: { id: string } | null;
-}) {
-  return {
-    WORKSPACE_IDLE_TIMEOUT_MS: undefined,
-    DATABASE: {
-      prepare: vi.fn().mockImplementation((query: string) => ({
-        bind: vi.fn().mockReturnValue({
-          first: vi.fn().mockImplementation(async () => {
-            if (query.includes('workspace_idle_timeout_ms FROM projects')) {
-              return opts.projectTimeoutMs != null
-                ? { workspace_idle_timeout_ms: opts.projectTimeoutMs }
-                : null;
-            }
-            if (query.includes('SELECT id FROM tasks WHERE workspace_id')) {
-              return opts.taskForWorkspace ?? null;
-            }
-            return null;
-          }),
-          run: vi.fn().mockResolvedValue({ meta: { changes: 1 } }),
-        }),
-      })),
-    } as unknown as D1Database,
-  } as unknown as import('../../src/durable-objects/project-data/types').Env;
-}
+        await sweepWorkspaceIdle();
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
+        expect(activityLanded).toBe(true);
+        expect(workspaceActivity(activeWorkspaceId)).toMatchObject({
+          idle_check_retry_count: 0,
+          next_idle_check_at: null,
+        });
+        expect(workspaceActivity(checkedWorkspaceId)).toMatchObject({ idle_check_retry_count: 1 });
+      }
+    );
 
-describe('checkWorkspaceIdleTimeouts: conversation-mode task completion', () => {
-  const TWO_HOURS_AGO = Date.now() - 3 * 60 * 60 * 1000; // 3h ago — safely past 2h threshold
+    it('sets an unreadable check aside instead of letting it wedge the pass', async () => {
+      const unreadable = seedDeadRuntime({
+        taskId: 'task-unreadable',
+        workspaceId: 'workspace-a-unreadable',
+        sessionId: 'session-unreadable',
+      });
+      projectDb
+        .prepare(
+          `UPDATE workspace_activity SET last_message_at = 'not a timestamp' WHERE workspace_id = ?`
+        )
+        .run(unreadable.workspaceId);
+      const readable = seedDeadRuntime({
+        taskId: 'task-readable',
+        workspaceId: 'workspace-z-readable',
+        sessionId: 'session-readable',
+      });
+      const deleteWorkspace = vi.fn().mockResolvedValue(undefined);
 
-  it('completes the task in D1 when workspace idle timeout fires', async () => {
-    const mockSql = createMockSql([
-      {
-        workspace_id: 'ws-conv-1',
-        session_id: 'sess-1',
-        last_terminal_activity_at: TWO_HOURS_AGO,
-        last_message_at: TWO_HOURS_AGO,
-        session_updated_at: TWO_HOURS_AGO,
-      },
-    ]);
-    const mockEnv = createMockEnv({ taskForWorkspace: { id: 'task-conv-1' } });
+      await sweepWorkspaceIdle(deleteWorkspace);
+
+      expect(task(readable.taskId).status).toBe('failed');
+      expect(task(unreadable.taskId).status).toBe('in_progress');
+      expect(workspaceActivity(unreadable.workspaceId)).toMatchObject({
+        next_idle_check_at: NOW + 1_800_000,
+      });
+      expect(loggerMocks.error).toHaveBeenCalledWith(
+        'workspace_idle_check_unreadable',
+        expect.objectContaining({ workspaceId: unreadable.workspaceId })
+      );
+      expect(workspaceIdleAlarmAt()).toBe(NOW + 1_800_000);
+    });
+
+    it('skips the project timeout lookup until a check is due', async () => {
+      const seeded = seed({ lastActivityAt: NOW });
+      const queries: string[] = [];
+      const database = env.DATABASE;
+      env.DATABASE = {
+        ...database,
+        prepare: (query: string) => {
+          queries.push(query);
+          return database.prepare(query);
+        },
+      };
+
+      await sweepWorkspaceIdle();
+      expect(queries).toEqual([]);
+
+      vi.setSystemTime(NOW + WORKSPACE_IDLE_CHECK_INTERVAL_MS);
+      await sweepWorkspaceIdle();
+      expect(queries).toEqual([expect.stringContaining('FROM projects')]);
+      expect(workspaceActivity(seeded.workspaceId)).toMatchObject({
+        next_idle_check_at: NOW + 2 * TIMEOUT_MS,
+      });
+    });
+  });
+
+  it('Path B terminalizes a legacy NULL-linked reporter task through the workspace binding', async () => {
+    const reporter = seed({
+      taskId: 'task-null-link-reporter',
+      sessionId: 'session-null-link-reporter',
+      taskChatSessionId: null,
+      nodeStatus: 'stopped',
+    });
     const deleteWorkspace = vi.fn().mockResolvedValue(undefined);
-    const broadcastEvent = vi.fn();
-    const scheduleSummarySync = vi.fn();
 
-    await checkWorkspaceIdleTimeouts(
-      mockSql,
-      mockEnv,
-      'project-1',
-      deleteWorkspace,
-      broadcastEvent,
-      scheduleSummarySync
-    );
+    await checkWorkspaceIdleTimeouts(sql, env, PROJECT_ID, deleteWorkspace, vi.fn(), vi.fn());
 
-    // Workspace should have been deleted
-    expect(deleteWorkspace).toHaveBeenCalledWith('ws-conv-1');
+    expect(task(reporter.taskId)).toMatchObject({
+      status: 'failed',
+      chat_session_id: reporter.sessionId,
+    });
+    expect(deleteWorkspace).toHaveBeenCalledWith(reporter.workspaceId, PROJECT_ID);
+  });
 
-    // Task query should have been made
-    const taskQuery = mockEnv.DATABASE.prepare as ReturnType<typeof vi.fn>;
-    const taskQueryCalls = taskQuery.mock.calls.filter(
-      (call: unknown[]) => typeof call[0] === 'string' && call[0].includes('SELECT id FROM tasks WHERE workspace_id')
-    );
-    expect(taskQueryCalls.length).toBe(1);
+  it('rejects a cross-project reporter with structured scope context and no mutation', async () => {
+    const seeded = seed();
 
-    // Task completion query should have been made
-    const completionCalls = taskQuery.mock.calls.filter(
-      (call: unknown[]) => typeof call[0] === 'string' && call[0].includes("UPDATE tasks SET status = 'completed'")
-    );
-    expect(completionCalls.length).toBe(1);
+    const result = await terminalizeIdleTaskInD1(sql, env, {
+      sweep: 'workspace_idle_timeout',
+      projectId: 'project-other',
+      taskId: seeded.taskId,
+      workspaceId: seeded.workspaceId,
+      sessionId: seeded.sessionId,
+      idleDurationMs: 3 * TIMEOUT_MS,
+      timeoutMs: TIMEOUT_MS,
+    });
 
-    // Broadcast should include taskId
-    expect(broadcastEvent).toHaveBeenCalledWith(
-      'workspace.idle_timeout',
-      expect.objectContaining({
-        workspaceId: 'ws-conv-1',
-        taskId: 'task-conv-1',
-      })
+    expect(result.outcome).toBe('rejected');
+    expect(task(seeded.taskId).status).toBe('in_progress');
+    expect(d1Db.prepare('SELECT COUNT(*) FROM task_status_events').pluck().get()).toBe(0);
+    expect(loggerMocks.warn).toHaveBeenCalledWith(
+      'scope_rejected',
+      expect.objectContaining({ mismatch: 'project_id', action: 'rejected' })
     );
   });
 
-  it('handles workspace with no linked task gracefully', async () => {
-    const mockSql = createMockSql([
-      {
-        workspace_id: 'ws-no-task',
-        session_id: 'sess-2',
-        last_terminal_activity_at: TWO_HOURS_AGO,
-        last_message_at: TWO_HOURS_AGO,
-        session_updated_at: TWO_HOURS_AGO,
-      },
-    ]);
-    const mockEnv = createMockEnv({ taskForWorkspace: null });
-    const deleteWorkspace = vi.fn().mockResolvedValue(undefined);
-    const broadcastEvent = vi.fn();
-    const scheduleSummarySync = vi.fn();
+  it('rejects a non-null task/session mismatch and leaves the pair discriminating', async () => {
+    const seeded = seed({ taskChatSessionId: 'session-other' });
 
-    // Should not throw
-    await checkWorkspaceIdleTimeouts(
-      mockSql,
-      mockEnv,
-      'project-2',
-      deleteWorkspace,
-      broadcastEvent,
-      scheduleSummarySync
-    );
+    const result = await terminalizeIdleTaskInD1(sql, env, {
+      sweep: 'session_idle_cleanup',
+      projectId: PROJECT_ID,
+      taskId: seeded.taskId,
+      workspaceId: seeded.workspaceId,
+      sessionId: seeded.sessionId,
+      idleDurationMs: 2 * TIMEOUT_MS,
+      timeoutMs: TIMEOUT_MS,
+    });
 
-    expect(deleteWorkspace).toHaveBeenCalledWith('ws-no-task');
-
-    // Broadcast should have null taskId
-    expect(broadcastEvent).toHaveBeenCalledWith(
-      'workspace.idle_timeout',
-      expect.objectContaining({
-        workspaceId: 'ws-no-task',
-        taskId: null,
-      })
-    );
+    expect(result.outcome).toBe('rejected');
+    expect(task(seeded.taskId)).toMatchObject({
+      status: 'in_progress',
+      chat_session_id: 'session-other',
+    });
+    expect(d1Db.prepare('SELECT COUNT(*) FROM task_status_events').pluck().get()).toBe(0);
   });
 
-  it('does not clean up workspaces that are still active (within timeout)', async () => {
-    const RECENT = Date.now() - 30 * 60 * 1000; // 30 min ago — within 2h threshold
-    const mockSql = createMockSql([
-      {
-        workspace_id: 'ws-active',
-        session_id: 'sess-3',
-        last_terminal_activity_at: RECENT,
-        last_message_at: RECENT,
-        session_updated_at: RECENT,
-      },
-    ]);
-    const mockEnv = createMockEnv({ taskForWorkspace: { id: 'task-active' } });
-    const deleteWorkspace = vi.fn();
-    const broadcastEvent = vi.fn();
-    const scheduleSummarySync = vi.fn();
+  it('moves permanently preserved idle cleanup rows out of the active candidate set after max residence', async () => {
+    env.IDLE_CLEANUP_MAX_RESIDENCE_MS = '1';
+    const { taskId, sessionId } = seed({ scheduleExpired: true });
+    const stopWorkspace = vi.fn().mockResolvedValue(undefined);
+    const broadcast = vi.fn();
 
-    await checkWorkspaceIdleTimeouts(
-      mockSql,
-      mockEnv,
-      'project-3',
-      deleteWorkspace,
-      broadcastEvent,
-      scheduleSummarySync
-    );
+    await processExpiredCleanups(sql, env, PROJECT_ID, stopWorkspace, broadcast, vi.fn());
+    await processExpiredCleanups(sql, env, PROJECT_ID, stopWorkspace, broadcast, vi.fn());
 
-    // Should NOT have been called — workspace is still active
-    expect(deleteWorkspace).not.toHaveBeenCalled();
-    expect(broadcastEvent).not.toHaveBeenCalled();
+    expect(task(taskId).status).toBe('in_progress');
+    expect(stopWorkspace).not.toHaveBeenCalled();
+    expect(
+      projectDb
+        .prepare(
+          `SELECT terminal_state, failure_notified_at
+           FROM idle_cleanup_schedule WHERE session_id = ?`
+        )
+        .get(sessionId)
+    ).toMatchObject({
+      terminal_state: 'preserved_max_residence_exceeded',
+      failure_notified_at: expect.any(Number),
+    });
+    expect(
+      projectDb
+        .prepare(
+          `SELECT COUNT(*) FROM idle_cleanup_schedule
+           WHERE cleanup_at <= ? AND terminal_state IS NULL`
+        )
+        .pluck()
+        .get(NOW)
+    ).toBe(0);
+    expect(
+      projectDb
+        .prepare(
+          `SELECT COUNT(*) FROM session_attention_markers
+           WHERE session_id = ? AND kind = 'idle_cleanup_failed' AND resolved_at IS NULL`
+        )
+        .pluck()
+        .get(sessionId)
+    ).toBe(1);
+    expect(
+      projectDb
+        .prepare(
+          `SELECT COUNT(*) FROM chat_messages
+           WHERE session_id = ? AND role = 'system'
+             AND content LIKE 'Idle cleanup could not complete%'`
+        )
+        .pluck()
+        .get(sessionId)
+    ).toBe(1);
   });
 
-  it('continues cleanup if task completion fails', async () => {
-    const mockSql = createMockSql([
-      {
-        workspace_id: 'ws-fail-task',
-        session_id: 'sess-4',
-        last_terminal_activity_at: TWO_HOURS_AGO,
-        last_message_at: TWO_HOURS_AGO,
-        session_updated_at: TWO_HOURS_AGO,
-      },
-    ]);
+  it('keeps retry exhaustion visible without deleting the schedule or duplicating the toast', async () => {
+    const { sessionId } = seed({
+      scheduleExpired: true,
+      scheduleRetryCount: 1,
+      taskChatSessionId: 'session-other',
+    });
+    const broadcast = vi.fn();
 
-    // Create env where task query throws
-    const mockEnv = createMockEnv({ taskForWorkspace: null });
-    const taskPrepare = mockEnv.DATABASE.prepare as ReturnType<typeof vi.fn>;
-    taskPrepare.mockImplementation((query: string) => ({
-      bind: vi.fn().mockReturnValue({
-        first: vi.fn().mockImplementation(async () => {
-          if (query.includes('SELECT id FROM tasks WHERE workspace_id')) {
-            throw new Error('D1 query failed');
+    await processExpiredCleanups(sql, env, PROJECT_ID, vi.fn(), broadcast, vi.fn());
+    await processExpiredCleanups(sql, env, PROJECT_ID, vi.fn(), broadcast, vi.fn());
+
+    expect(
+      projectDb
+        .prepare(
+          `SELECT terminal_state, terminal_reason, failure_notified_at
+           FROM idle_cleanup_schedule WHERE session_id = ?`
+        )
+        .get(sessionId)
+    ).toMatchObject({
+      terminal_state: 'retry_exhausted',
+      terminal_reason: 'Idle cleanup reporter scope did not match the task',
+      failure_notified_at: expect.any(Number),
+    });
+    expect(
+      projectDb
+        .prepare(
+          `SELECT COUNT(*) FROM chat_messages
+           WHERE session_id = ? AND role = 'system'
+             AND content = 'Idle cleanup failed after retries. Your work has been preserved — please check the workspace manually.'`
+        )
+        .pluck()
+        .get(sessionId)
+    ).toBe(1);
+    expect(
+      projectDb
+        .prepare(
+          `SELECT COUNT(*) FROM session_attention_markers
+           WHERE session_id = ? AND kind = 'idle_cleanup_failed' AND resolved_at IS NULL`
+        )
+        .pluck()
+        .get(sessionId)
+    ).toBe(1);
+  });
+
+  it('preserves the task when the D1 runtime snapshot probe errors', async () => {
+    const seeded = seed();
+    const baseDatabase = env.DATABASE;
+    env = {
+      ...env,
+      DATABASE: {
+        ...baseDatabase,
+        prepare: vi.fn((query: string) => {
+          if (query.includes('FROM workspaces w')) {
+            return {
+              bind: vi.fn().mockReturnValue({
+                first: vi.fn().mockRejectedValue(new Error('D1 unavailable')),
+              }),
+            } as unknown as D1PreparedStatement;
           }
-          if (query.includes('workspace_idle_timeout_ms FROM projects')) {
-            return null;
-          }
-          return null;
+          return baseDatabase.prepare(query);
         }),
-        run: vi.fn().mockResolvedValue({ meta: { changes: 1 } }),
-      }),
-    }));
+      } as D1Database,
+    };
 
-    const deleteWorkspace = vi.fn().mockResolvedValue(undefined);
-    const broadcastEvent = vi.fn();
-    const scheduleSummarySync = vi.fn();
+    const result = await terminalizeIdleTaskInD1(sql, env, {
+      sweep: 'session_idle_cleanup',
+      projectId: PROJECT_ID,
+      taskId: seeded.taskId,
+      workspaceId: seeded.workspaceId,
+      sessionId: seeded.sessionId,
+      idleDurationMs: 2 * TIMEOUT_MS,
+      timeoutMs: TIMEOUT_MS,
+    });
 
-    // Should not throw — task completion failure is caught
-    await checkWorkspaceIdleTimeouts(
-      mockSql,
-      mockEnv,
-      'project-4',
-      deleteWorkspace,
-      broadcastEvent,
-      scheduleSummarySync
-    );
-
-    // Workspace should still have been deleted despite task completion failure
-    expect(deleteWorkspace).toHaveBeenCalledWith('ws-fail-task');
-
-    // Broadcast should still fire with null taskId (task completion failed)
-    expect(broadcastEvent).toHaveBeenCalled();
+    expect(result).toMatchObject({
+      outcome: 'preserved',
+      liveness: { live: false, conclusive: false, reason: 'task_liveness_unknown' },
+    });
+    expect(task(seeded.taskId).status).toBe('in_progress');
   });
-});
 
-describe('completeTaskInD1 trigger sync', () => {
-  it('calls syncTriggerExecutionStatus after completing task', async () => {
-    const mockDb = {
-      prepare: vi.fn().mockReturnValue({
-        bind: vi.fn().mockReturnValue({
-          run: vi.fn().mockResolvedValue({ meta: { changes: 1 } }),
-          first: vi.fn().mockResolvedValue(null),
-          all: vi.fn().mockResolvedValue({ results: [] }),
+  it('preserves the task when the bounded container lifecycle probe times out', async () => {
+    const seeded = seed({ nodeRuntime: 'cf-container' });
+    env = {
+      ...env,
+      CF_CONTAINER_ENABLED: 'true',
+      VM_AGENT_CONTAINER: {
+        idFromName: vi.fn().mockReturnValue('container-do-id'),
+        get: vi.fn().mockReturnValue({
+          inspectLifecycle: vi.fn().mockReturnValue(new Promise(() => undefined)),
         }),
+      } as unknown as ProjectDataEnv['VM_AGENT_CONTAINER'],
+    };
+
+    const pending = terminalizeIdleTaskInD1(sql, env, {
+      sweep: 'workspace_idle_timeout',
+      projectId: PROJECT_ID,
+      taskId: seeded.taskId,
+      workspaceId: seeded.workspaceId,
+      sessionId: seeded.sessionId,
+      idleDurationMs: 3 * TIMEOUT_MS,
+      timeoutMs: TIMEOUT_MS,
+    });
+    await vi.advanceTimersByTimeAsync(5_001);
+
+    await expect(pending).resolves.toMatchObject({
+      outcome: 'preserved',
+      liveness: {
+        live: false,
+        conclusive: false,
+        reason: 'cf_container_lifecycle_timeout',
+      },
+    });
+    expect(task(seeded.taskId).status).toBe('in_progress');
+  });
+
+  /**
+   * `.claude/rules/61` + `.claude/rules/62`: the ProjectData idle-cleanup runtime
+   * has NO terminal choke point of its own — it goes from
+   * `getLocalTaskRuntimeLiveness` straight to its own D1 batch write. So the
+   * classifier's sleep escape is the only thing standing between a slept
+   * conversation and a `failed` verdict here, and it must be proven through the
+   * REAL trigger (`terminalizeIdleTaskInD1` via `processExpiredCleanups`), not
+   * through the adapter.
+   *
+   * `nodeStatus: 'stopped'` with the workspace still `running` is the shape the
+   * cron sweep's `node_not_live` tests use, and the one production carried with a
+   * `scheduled` snapshot twice in 30 days.
+   */
+  function seedSleepingSnapshot(
+    seeded: { sessionId: string; workspaceId: string; projectId: string },
+    o: { sleepStatus?: string; sleepingAt?: string | null; expiresAt?: string } = {}
+  ): void {
+    d1Db
+      .prepare(
+        `INSERT INTO session_snapshots (id, project_id, workspace_id, chat_session_id, status,
+                                     degradation, expires_at, sleeping_at, sleep_status,
+                                     sleep_claimed_at, sleep_attempts, recovery_attempts,
+                                     created_at, updated_at)
+       VALUES ('snapshot-1', ?, ?, ?, 'available', 'none', ?, ?, ?, NULL, 0, 0, ?, ?)`
+      )
+      .run(
+        seeded.projectId,
+        seeded.workspaceId,
+        seeded.sessionId,
+        o.expiresAt ?? new Date(NOW + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        o.sleepingAt === undefined ? new Date(NOW - 60_000).toISOString() : o.sleepingAt,
+        o.sleepStatus ?? 'sleeping',
+        new Date(NOW - 3_600_000).toISOString(),
+        new Date(NOW).toISOString()
+      );
+  }
+
+  it('does not terminalize a sleeping session through the real idle-cleanup trigger', async () => {
+    const seeded = seed({ nodeStatus: 'stopped', withTrigger: true, scheduleExpired: true });
+    seedSleepingSnapshot(seeded);
+    const stopWorkspace = vi.fn().mockResolvedValue(undefined);
+
+    await runPathA(stopWorkspace);
+    await runPathA(stopWorkspace);
+
+    // Preserved with no status change and, critically, no error_message — the
+    // column that paints the red failure banner.
+    expect(task(seeded.taskId)).toMatchObject({
+      status: 'in_progress',
+      error_message: null,
+    });
+    expect(stopWorkspace).not.toHaveBeenCalled();
+    expect(d1Db.prepare('SELECT COUNT(*) FROM task_status_events').pluck().get()).toBe(0);
+  });
+
+  /**
+   * The discriminating control for the test above, on the same runtime: identical
+   * fixture with no snapshot row still terminalizes. Without this, "preserved"
+   * would also be satisfied by idle cleanup being broken outright.
+   */
+  it('still terminalizes through the real idle-cleanup trigger when no snapshot exists', async () => {
+    const seeded = seed({ nodeStatus: 'stopped', withTrigger: true, scheduleExpired: true });
+
+    await runPathA();
+    await runPathA();
+
+    expect(task(seeded.taskId).status).toBe('failed');
+  });
+
+  /** An expired snapshot must not preserve — the bound (`.claude/rules/58` req 3). */
+  it('terminalizes through the real idle-cleanup trigger once the snapshot expired', async () => {
+    const seeded = seed({ nodeStatus: 'stopped', withTrigger: true, scheduleExpired: true });
+    seedSleepingSnapshot(seeded, { expiresAt: new Date(NOW - 60_000).toISOString() });
+
+    await runPathA();
+    await runPathA();
+
+    expect(task(seeded.taskId).status).toBe('failed');
+  });
+
+  it('keeps cron and DO-local adapters in parity on the shared classifier', async () => {
+    const seeded = seed();
+    // The cron adapter reaches the same ProjectData reader over RPC. Route the
+    // stub to the real reader rather than a hand-built payload, so parity covers
+    // everything the DO returns, work evidence included (`.claude/rules/62`).
+    const cronEnv = {
+      ...env,
+      PROJECT_DATA: {
+        idFromName: vi.fn().mockReturnValue('project-do-id'),
+        get: vi.fn().mockReturnValue({
+          ensureProjectId: vi.fn().mockResolvedValue(undefined),
+          getTaskAcpLivenessSignals: vi.fn(
+            async (opts: Parameters<typeof readTaskAcpLivenessSignals>[2]) =>
+              readTaskAcpLivenessSignals(sql, env as unknown as ProjectDataEnv, opts)
+          ),
+        }),
+      },
+    } as unknown as Env;
+
+    const [cron, local] = await Promise.all([
+      getTaskRuntimeLiveness(cronEnv, {
+        project_id: PROJECT_ID,
+        workspace_id: seeded.workspaceId,
       }),
-    } as unknown as D1Database;
+      getLocalTaskRuntimeLiveness(sql, env, {
+        projectId: PROJECT_ID,
+        workspaceId: seeded.workspaceId,
+      }),
+    ]);
 
-    await completeTaskInD1(mockDb, 'task-sync-test');
-
-    const prepareCalls = (mockDb.prepare as ReturnType<typeof vi.fn>).mock.calls;
-
-    // Should have called: UPDATE tasks + trigger execution sync query
-    const taskUpdateCall = prepareCalls.find(
-      (call: unknown[]) => typeof call[0] === 'string' && call[0].includes("UPDATE tasks SET status = 'completed'")
-    );
-    expect(taskUpdateCall).toBeTruthy();
+    expect(cron).toEqual(local);
+    expect(local).toMatchObject({
+      live: true,
+      conclusive: true,
+      reason: 'task_acp_session_live',
+      // The fixture has no session_state row, so neither side may claim work.
+      evidence: { workState: 'unknown', acpHeartbeatAgeMs: expect.any(Number) },
+    });
   });
 });

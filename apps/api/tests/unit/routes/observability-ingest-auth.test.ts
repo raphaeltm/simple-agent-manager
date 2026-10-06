@@ -96,12 +96,13 @@ vi.mock('../../../src/services/limits', () => ({
 }));
 
 // --- Schemas mock ---
-vi.mock('../../../src/schemas', () => ({
-  AdminUserActionSchema: {},
-  AdminUserRoleSchema: {},
-  AdminLogQuerySchema: {},
-  jsonValidator: () => vi.fn((_c: any, next: any) => next()),
-}));
+vi.mock('../../../src/schemas', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../src/schemas')>();
+  return {
+    ...actual,
+    jsonValidator: () => vi.fn((_c: any, next: any) => next()),
+  };
+});
 
 // Import routes after mocks
 const { adminRoutes } = await import('../../../src/routes/admin');
@@ -165,6 +166,35 @@ describe('Observability ingest auth regression', () => {
 
       expect(res.status).toBe(200);
       expect(mockDoFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('passes the AdminLogs DO subscriber count back to the caller (Tail Worker contract)', async () => {
+      // DO reports how many admin WebSocket clients are connected; the Tail
+      // Worker reads this to gate forwarding. The ingest endpoint must return
+      // the body fully buffered (not re-streamed) so the Tail Worker can read
+      // it without the upstream invocation being canceled.
+      mockDoFetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ ok: true, subscribers: 3 }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+      const env = createEnv();
+      const res = await app.request(
+        'https://internal/api/admin/observability/logs/ingest',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ logs: [{ type: 'log', entry: { level: 'info', message: 'test' } }] }),
+        },
+        env,
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('Content-Type')).toBe('application/json');
+      const body = await res.json() as { ok: boolean; subscribers: number };
+      expect(body.subscribers).toBe(3);
     });
 
     it('rejects other dotless hostnames that are not in the allow-list', async () => {

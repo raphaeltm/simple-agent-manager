@@ -55,6 +55,7 @@ describe('chats routes', () => {
     message_count: 5,
     started_at: Date.now() - 60_000,
     last_message_at: Date.now() - 30_000,
+    created_at: Date.now() - 60_000,
     agent_completed_at: null,
     ended_at: null,
     updated_at: Date.now(),
@@ -84,6 +85,7 @@ describe('chats routes', () => {
       expect(session.status).toBe('active');
       expect(session.topic).toBe('Test chat');
       expect(session.messageCount).toBe(5);
+      expect(session.lastMessageAt).toBe(baseSummaryRow.last_message_at);
     });
 
     it('returns empty when no sessions', async () => {

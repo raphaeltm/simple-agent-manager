@@ -9,6 +9,7 @@
 - [ ] `pnpm typecheck`
 - [ ] `pnpm test`
 - [ ] Additional validation run (if applicable)
+- [ ] If this PR changes candidate selection for a sweep/cron/alarm loop (WHERE clause, status set, join, or equivalent), expected candidate volume and worst-case per-candidate cost are stated in the summary or validation notes (see `.claude/rules/47-control-loop-io-budget.md`)
 
 ## Staging Verification (REQUIRED for all code changes — merge-blocking)
 
@@ -31,7 +32,28 @@ All checkboxes below are mandatory for any PR that changes runtime code (`.ts`, 
 - [ ] Mobile-first layout verified
 - [ ] Accessibility checks completed
 - [ ] Shared UI components used or exception documented
-- [ ] Playwright visual audit run locally — mock data scenarios (normal, long text, empty, many items, error, special chars) tested at mobile (375x667) and desktop (1280x800); no horizontal overflow; screenshots in `.codex/tmp/playwright-screenshots/` (see `.claude/rules/17-ui-visual-testing.md`)
+- [ ] Playwright visual audit run locally — mock data scenarios that push the changed UI surface (normal, long text, empty, many items, error, special chars) tested at mobile (375x667) and desktop (1280x800); no horizontal overflow; screenshots in `.tmp/playwright-screenshots/` (see `.claude/rules/17-ui-visual-testing.md`)
+- [ ] Desktop and mobile screenshots for every changed UI surface are posted in a PR comment and linked below
+- [ ] Agent/human reviewed the posted screenshots for quality control and found no visual issues, or fixed/documented every issue found
+
+### UI Screenshot Evidence
+
+<!-- Required when `ui-change` is checked in Agent Preflight. -->
+<!-- List EVERY changed UI surface below. Each changed surface gets its own repeated
+     `#### Surface: <name>` block with desktop evidence, mobile evidence, mock/stress
+     data, and a quality-control attestation for that surface.
+     Evidence may be an embedded/direct image link or a GitHub PR comment URL
+     (`#issuecomment-...`). The preflight checker REJECTS global-only desktop/mobile
+     links that do not enumerate surfaces. -->
+
+#### Surface: <name of the changed UI surface>
+
+- Desktop evidence: <!-- image link or PR comment #issuecomment-... -->
+- Mobile evidence: <!-- image link or PR comment #issuecomment-... -->
+- Mock/stress data used: <!-- Playwright mock data that pushed this surface (long text, many items, empty, error, special characters, etc.) -->
+- Screenshot quality review: <!-- attest each screenshot was reviewed for layout quality, overflow, clipping, readability, and responsive behavior; state result: no issues found, or issues found and fixed/documented -->
+
+<!-- Copy the block above for EVERY changed surface (one `#### Surface:` block per surface). -->
 
 ## End-to-End Verification (Required for multi-component changes)
 
@@ -76,30 +98,42 @@ All checkboxes below are mandatory for any PR that changes runtime code (`.ts`, 
 
 ### Post-mortem file
 
-<!-- Link to docs/notes/YYYY-MM-DD-*-postmortem.md created in this PR -->
+<!-- Link to the task, issue, PR comment, or www docs page created for the post-mortem -->
 
 ## Specialist Review Evidence (Required for agent-authored PRs)
 
-If review agents were dispatched during Phase 5, list every reviewer below. **Do NOT merge until every row shows PASS or ADDRESSED.** If any reviewer could not complete (timeout, workspace killed, error), you MUST add the `needs-human-review` label and stop — do not self-merge. See `.claude/rules/25-review-merge-gate.md`.
+If local subagents were used during Phase 5, list every reviewer below. **Do NOT merge until every row shows PASS or ADDRESSED.** If any reviewer could not complete (timeout, workspace killed, error), you MUST add the `needs-human-review` label and stop — do not self-merge. CodeRabbit is not a local reviewer: record it in the CodeRabbit section below, not in this table. See `.claude/rules/25-review-merge-gate.md`.
 
-- [ ] **All dispatched reviewers completed and findings addressed before merge**
+- [ ] **All local reviewers completed and findings addressed before merge**
 - [ ] **If any reviewer did NOT complete: `needs-human-review` label added and merge deferred to human**
 
-| Reviewer | Status | Outcome |
-|----------|--------|---------|
-| <!-- e.g. go-specialist --> | <!-- PASS / ADDRESSED / DISPATCHED / FAILED --> | <!-- summary of findings or "no critical findings" --> |
+| Reviewer                    | Status                                       | Outcome                                                |
+| --------------------------- | -------------------------------------------- | ------------------------------------------------------ |
+| <!-- e.g. go-specialist --> | <!-- PASS / ADDRESSED / PENDING / FAILED --> | <!-- summary of findings or "no critical findings" --> |
 
 <!--
 Status values:
 - PASS: Reviewer completed, no critical/high findings
 - ADDRESSED: Reviewer completed, findings fixed in commit <hash>
-- DISPATCHED: Reviewer launched but has NOT returned results — BLOCKS MERGE
+- PENDING: Reviewer started but has NOT returned results — BLOCKS MERGE
 - FAILED: Reviewer errored or timed out — REQUIRES HUMAN REVIEW
 - DEFERRED: Findings deferred to backlog task <link> — requires justification
 
-If this table is empty or missing rows for dispatched reviewers, the PR is NOT ready to merge.
+If this table is empty or missing rows for local reviewers, the PR is NOT ready to merge.
 If this is not an agent-authored PR, write `N/A: human-authored PR`.
 -->
+
+## CodeRabbit Review Evidence (Required for agent-authored PRs)
+
+Once every other gate is satisfied and the PR is not a draft, the agent applies the `coderabbit-review` label (or dispatches the trusted workflow) and waits about 15 minutes. A CodeRabbit review is **not** required. **If CodeRabbit reviews, its feedback blocks merge** until every finding is implemented or explicitly resolved with a reason. **If it does not review** (silence, `Review skipped`, rate limit), record what you observed below and merge on the remaining gates. A missing review never calls for `needs-human-review` or a waiver. See `.claude/rules/25-review-merge-gate.md`.
+
+- [ ] CodeRabbit requested after local review, staging if applicable, and CI gates passed
+- [ ] Waited about 15 minutes, or up to about 45 minutes in total while a review CodeRabbit had started was still in progress
+- [ ] Either CodeRabbit reviewed and no CodeRabbit feedback is unresolved, or it did not review and the observed outcome is recorded below
+
+### CodeRabbit Notes
+
+<!-- Record when and how CodeRabbit was requested, then what happened: either a review (findings addressed, fix commits, incremental review status) or no review (how long you waited and the exact status, skip reason, or rate-limit message). If this is not an agent-authored PR, write `N/A: human-authored PR`. -->
 
 ## Exceptions (If any)
 
@@ -136,7 +170,7 @@ If not applicable, write `N/A: <reason>`.
 
 ### Documentation & Specs
 
-List docs/spec files updated, or write `N/A: <reason for no updates>`.
+List www docs/spec files updated, or write `N/A: <reason for no updates>`.
 
 ### Constitution & Risk Check
 

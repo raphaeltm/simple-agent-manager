@@ -1,10 +1,10 @@
 /**
  * Cloud-init template for node provisioning.
  *
- * ULTRA-MINIMAL: Cloud-init ONLY downloads and starts the VM agent.
- * The agent handles ALL other provisioning (Docker, Node.js, firewall, etc.)
- * and heartbeats immediately on start, giving the control plane visibility
- * within seconds of boot.
+ * ULTRA-MINIMAL: Cloud-init downloads and starts the VM agent, then performs
+ * role-specific bootstrap. For deployment nodes, that includes installing and
+ * enabling Caddy. Starting the agent first keeps provisioning observable while
+ * release-apply retry semantics handle dependencies that are still converging.
  *
  * SECURITY: No provider/user credentials are embedded. The node agent receives
  * a callback token for authenticated control-plane check-ins and requests.
@@ -25,10 +25,11 @@ users:
 
 runcmd:
   # =====================================================================
-  # Cloud-init does ONE thing: download and start the VM agent.
-  # The agent handles ALL provisioning (Docker, firewall, Node.js, etc.)
-  # and starts heartbeating immediately. No packages section — curl is
-  # pre-installed on all Hetzner Ubuntu images.
+  # Cloud-init keeps bootstrap minimal: download vm-agent, perform
+  # start vm-agent, then perform role-specific service setup required before
+  # traffic can be served. The agent handles Docker, firewall, Node.js, release
+  # apply, and heartbeats; release apply remains retryable while role-specific
+  # dependencies are still converging.
   # =====================================================================
 
   # Disable automatic OS upgrades — ephemeral VMs gain nothing from them
@@ -37,6 +38,24 @@ runcmd:
   - systemctl disable --now apt-daily.timer apt-daily-upgrade.timer || true
   - systemctl disable --now unattended-upgrades || true
   - chage -E -1 -M -1 -d "$(date +%Y-%m-%d)" root || true
+
+  - 'logger -t sam-boot "PHASE START: swap-setup"'
+  - |
+    SWAP_SIZE_MB="{{ swap_size_mb }}"
+    SWAP_SWAPPINESS="{{ swap_swappiness }}"
+    if [ "$SWAP_SIZE_MB" -gt 0 ] 2>/dev/null; then
+      logger -t sam-boot "Configuring \${SWAP_SIZE_MB}MB swap file"
+      fallocate -l "\${SWAP_SIZE_MB}M" /swapfile
+      chmod 600 /swapfile
+      mkswap /swapfile
+      swapon /swapfile
+      echo '/swapfile none swap sw 0 0' >> /etc/fstab
+      sysctl -w "vm.swappiness=\${SWAP_SWAPPINESS}"
+      logger -t sam-boot "Swap configured: \${SWAP_SIZE_MB}MB, swappiness=\${SWAP_SWAPPINESS}"
+    else
+      logger -t sam-boot "Swap disabled (SWAP_SIZE_MB=0)"
+    fi
+  - 'logger -t sam-boot "PHASE END: swap-setup"'
 
   - 'logger -t sam-boot "PHASE START: vm-agent-download"'
   - mkdir -p /var/lib/vm-agent /etc/sam/tls /etc/sam/firewall
@@ -47,16 +66,104 @@ runcmd:
       aarch64) ARCH="arm64" ;;
     esac
     logger -t sam-boot "Downloading vm-agent for arch=$ARCH"
-    curl -fLo /usr/local/bin/vm-agent "{{ control_plane_url }}/api/agent/download?arch=\${ARCH}" 2>&1 | logger -t sam-boot
+    curl_output=$(mktemp)
+    if curl -fLo /usr/local/bin/vm-agent "{{ control_plane_url }}/api/agent/download?arch=\${ARCH}{{ vm_agent_release_query }}" >"$curl_output" 2>&1; then
+      cat "$curl_output" | logger -t sam-boot
+      rm -f "$curl_output"
+    else
+      curl_status=$?
+      cat "$curl_output" | logger -t sam-boot
+      rm -f "$curl_output"
+      logger -t sam-boot "vm-agent download failed status=$curl_status"
+      exit "$curl_status"
+    fi
     chmod +x /usr/local/bin/vm-agent
     logger -t sam-boot "vm-agent binary downloaded, size=$(stat -c%s /usr/local/bin/vm-agent 2>/dev/null || echo unknown)"
   - 'logger -t sam-boot "PHASE END: vm-agent-download"'
+
+  - 'logger -t sam-boot "PHASE START: origin-ca-bootstrap"'
+  - |
+    ORIGIN_CA_CERTIFICATE_URL="{{ origin_ca_certificate_url }}"
+    TLS_CERT_PATH="/etc/sam/tls/origin-ca.pem"
+    TLS_KEY_PATH="/etc/sam/tls/origin-ca-key.pem"
+    TLS_CSR_PATH="/etc/sam/tls/origin-ca.csr"
+    if [ -n "$ORIGIN_CA_CERTIFICATE_URL" ]; then
+      logger -t sam-boot "Generating node-local Origin CA private key and CSR"
+      ORIGIN_CA_OK=true
+      if [ ! -s "$TLS_KEY_PATH" ]; then
+        if openssl genrsa -out "$TLS_KEY_PATH" 2048 >/dev/null 2>&1; then
+          chmod 600 "$TLS_KEY_PATH"
+          logger -t sam-boot "RSA key generated"
+        else
+          logger -t sam-boot "ERROR: openssl genrsa failed"
+          ORIGIN_CA_OK=false
+        fi
+      fi
+      if [ "$ORIGIN_CA_OK" = true ]; then
+        if openssl req -new -key "$TLS_KEY_PATH" -out "$TLS_CSR_PATH" -subj "/CN={{ node_id }}" >/dev/null 2>&1; then
+          logger -t sam-boot "CSR generated"
+        else
+          logger -t sam-boot "ERROR: openssl req (CSR generation) failed"
+          ORIGIN_CA_OK=false
+        fi
+      fi
+      if [ "$ORIGIN_CA_OK" = true ]; then
+        CURL_EXIT=0
+        HTTP_CODE=$(curl -sS -o "$TLS_CERT_PATH" -w '%{http_code}' -X POST \
+          -H "Authorization: Bearer {{ callback_token }}" \
+          -H "Content-Type: text/plain" \
+          --data-binary "@$TLS_CSR_PATH" \
+          "$ORIGIN_CA_CERTIFICATE_URL" 2>/tmp/origin-ca-curl-err) || {
+          CURL_EXIT=$?
+          HTTP_CODE="000"
+        }
+        CURL_ERR=$(cat /tmp/origin-ca-curl-err 2>/dev/null)
+        rm -f /tmp/origin-ca-curl-err
+        logger -t sam-boot "Origin CA cert request: HTTP=$HTTP_CODE curl_exit=$CURL_EXIT"
+        if [ -n "$CURL_ERR" ]; then
+          logger -t sam-boot "Origin CA curl stderr: $CURL_ERR"
+        fi
+        if [ "$CURL_EXIT" -ne 0 ] || { [ "$HTTP_CODE" != "200" ] && [ "$HTTP_CODE" != "201" ]; }; then
+          logger -t sam-boot "ERROR: Origin CA certificate request failed (HTTP $HTTP_CODE curl_exit=$CURL_EXIT)"
+          ORIGIN_CA_OK=false
+        fi
+      fi
+      rm -f "$TLS_CSR_PATH"
+      if [ "$ORIGIN_CA_OK" = true ] && [ -s "$TLS_CERT_PATH" ]; then
+        chmod 0644 "$TLS_CERT_PATH"
+        logger -t sam-boot "Node-local Origin CA certificate installed"
+      else
+        logger -t sam-boot "ERROR: Origin CA bootstrap failed — refusing to start vm-agent without TLS"
+        rm -f "$TLS_CERT_PATH" "$TLS_KEY_PATH" "$TLS_CSR_PATH"
+        exit 1
+      fi
+    else
+      logger -t sam-boot "Skipping Origin CA bootstrap; TLS disabled"
+    fi
+  - 'logger -t sam-boot "PHASE END: origin-ca-bootstrap"'
+
+  - 'logger -t sam-boot "PHASE START: resource-headroom"'
+  - /usr/local/sbin/sam-configure-docker-memory.sh || exit $?
+  - 'logger -t sam-boot "PHASE END: resource-headroom"'
 
   - 'logger -t sam-boot "PHASE START: vm-agent-start"'
   - systemctl daemon-reload
   - systemctl enable vm-agent
   - systemctl start vm-agent
   - 'logger -t sam-boot "PHASE END: vm-agent-start"'
+
+  - 'logger -t sam-boot "PHASE START: caddy-setup"'
+  - |
+    set -eu
+    ROLE="{{ role }}"
+    if [ "$ROLE" = "deployment" ]; then
+      logger -t sam-boot "Preparing Caddy paths for deployment node routing"
+      mkdir -p /etc/caddy /var/lib/caddy /var/log/caddy
+      logger -t sam-boot "Caddy paths ready; vm-agent owns Caddy install/start"
+    else
+      logger -t sam-boot "Skipping Caddy setup for ROLE=$ROLE"
+    fi
+  - 'logger -t sam-boot "PHASE END: caddy-setup"'
   - 'logger -t sam-boot "ALL PHASES COMPLETE"'
 
 write_files:
@@ -73,7 +180,7 @@ write_files:
       Environment=NODE_ID={{ node_id }}
       Environment=CONTROL_PLANE_URL={{ control_plane_url }}
       Environment=JWKS_ENDPOINT={{ jwks_url }}
-      Environment=CALLBACK_TOKEN={{ callback_token }}
+      Environment=CALLBACK_TOKEN_FILE=/etc/sam/callback-token
       Environment=PROJECT_ID={{ project_id }}
       Environment=CHAT_SESSION_ID={{ chat_session_id }}
       Environment=TASK_ID={{ task_id }}
@@ -83,12 +190,346 @@ write_files:
       Environment=TLS_KEY_PATH={{ tls_key_path }}
       Environment=PROVIDER={{ provider }}
       Environment=DEVCONTAINER_CACHE_ENABLED={{ devcontainer_cache_enabled }}
+      Environment=WORKSPACE_BUILD_QUEUE_DEPTH={{ workspace_build_queue_depth }}
+      Environment=ROLE={{ role }}
+      Environment=NODE_ROLE={{ role }}
+      Environment=ENVIRONMENT_ID={{ environment_id }}
+      Environment=DEPLOY_SIGNING_PUB_KEY={{ deploy_signing_pub_key }}
+      Environment=DEPLOY_ACME_EMAIL={{ deploy_acme_email }}
+      Environment=DEPLOY_ACME_CA={{ deploy_acme_ca }}
+      Environment="DEPLOY_COMPOSE_CMD={{ deploy_compose_cmd }}"
+      Environment=DEPLOY_HEALTH_TIMEOUT={{ deploy_health_timeout }}
+      Environment=SESSION_SNAPSHOT_OPERATION_TIMEOUT={{ session_snapshot_operation_timeout }}
+      Environment=SESSION_SNAPSHOT_PROGRESS_REPORT_INTERVAL={{ session_snapshot_progress_report_interval }}
+      Environment=SESSION_SNAPSHOT_PROGRESS_REPORT_TIMEOUT={{ session_snapshot_progress_report_timeout }}
+      Environment=ERROR_REPORT_FLUSH_INTERVAL={{ error_report_flush_interval }}
+      Environment=ERROR_REPORT_MAX_BATCH_SIZE={{ error_report_max_batch_size }}
+      Environment=ERROR_REPORT_MAX_BATCH_BYTES={{ error_report_max_batch_bytes }}
+      Environment=ERROR_REPORT_MAX_QUEUE_SIZE={{ error_report_max_queue_size }}
+      Environment=ERROR_REPORT_HTTP_TIMEOUT={{ error_report_http_timeout }}
+      Environment=ERROR_REPORT_RETRY_INITIAL={{ error_report_retry_initial }}
+      Environment=ERROR_REPORT_RETRY_MAX={{ error_report_retry_max }}
+      Environment=ERROR_REPORT_MAX_ATTEMPTS={{ error_report_max_attempts }}
+      Environment=ERROR_REPORT_DB_PATH={{ error_report_db_path }}
+      Environment=ERROR_REPORT_DB_BUSY_TIMEOUT={{ error_report_db_busy_timeout }}
+      Environment=ERROR_REPORT_SPOOL_DIR={{ error_report_spool_dir }}
+      Environment=ERROR_REPORT_ARTIFACT_MAX_BYTES={{ error_report_artifact_max_bytes }}
+      Environment=ERROR_REPORT_SPOOL_MAX_BYTES={{ error_report_spool_max_bytes }}
+      Environment=ERROR_REPORT_RETENTION={{ error_report_retention }}
+      Environment=ERROR_REPORT_COLLECTOR_TIMEOUT={{ error_report_collector_timeout }}
+      Environment=ERROR_REPORT_MAX_COLLECTOR_DOCS={{ error_report_max_collector_docs }}
+      Environment=ERROR_REPORT_MAX_DOCUMENT_BYTES={{ error_report_max_document_bytes }}
+      Environment=ERROR_REPORT_MAX_VALUE_DEPTH={{ error_report_max_value_depth }}
+      Environment=ERROR_REPORT_MAX_VALUE_ITEMS={{ error_report_max_value_items }}
+      Environment=ERROR_REPORT_MAX_STRING_BYTES={{ error_report_max_string_bytes }}
+      Environment=ERROR_REPORT_EVENT_LIMIT={{ error_report_event_limit }}
+      Environment=ERROR_REPORT_RESPONSE_MAX_BYTES={{ error_report_response_max_bytes }}
+      Environment=ERROR_REPORT_STORED_ERROR_MAX_BYTES={{ error_report_stored_error_max_bytes }}
+      Environment=ERROR_REPORT_COLLECTOR_CONCURRENCY={{ error_report_collector_concurrency }}
+      Environment=HEARTBEAT_DOCKER_STATS_TIMEOUT={{ heartbeat_docker_stats_timeout }}
+      Environment=HEARTBEAT_WORKSPACE_METRICS_MAX_CONTAINERS={{ heartbeat_workspace_metrics_max_containers }}
+      Environment=HEARTBEAT_WORKSPACE_METRICS_MAX_OUTPUT_BYTES={{ heartbeat_workspace_metrics_max_output_bytes }}
+      Slice=sam-infra.slice
+      MemoryAccounting=yes
+      OOMScoreAdjust=-900
       ExecStart=/usr/local/bin/vm-agent
       Restart=always
       RestartSec=5
 
       [Install]
       WantedBy=multi-user.target
+
+  - path: /etc/systemd/system/sam.slice
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=SAM managed services and workload hierarchy
+      Before=slices.target
+
+      [Slice]
+      MemoryAccounting=yes
+      MemoryMin={{ sam_infra_slice_memory_min_mb }}M
+
+  - path: /etc/systemd/system/sam-infra.slice
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=SAM infrastructure services
+      Before=slices.target
+
+      [Slice]
+      MemoryAccounting=yes
+      MemoryMin={{ sam_infra_slice_memory_min_mb }}M
+      CPUAccounting=yes
+      CPUWeight={{ sam_infra_slice_cpu_weight }}
+
+  - path: /etc/systemd/system/sam-workload.slice
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=SAM Docker workload containers
+      Before=slices.target
+
+      [Slice]
+      MemoryAccounting=yes
+      CPUAccounting=yes
+      CPUWeight={{ sam_workload_slice_cpu_weight }}
+
+  - path: /usr/local/sbin/sam-configure-docker-memory.sh
+    permissions: '0755'
+    content: |
+      #!/bin/sh
+      set -eu
+
+      RESERVE_MB="{{ vm_agent_memory_reserve_mb }}"
+      SYSTEMD_SYSTEM_DIR="\${SAM_SYSTEMD_SYSTEM_DIR:-/etc/systemd/system}"
+      if [ "$RESERVE_MB" = "0" ]; then
+        rm -f "$SYSTEMD_SYSTEM_DIR/sam-workload.slice.d/50-headroom.conf"
+        systemctl daemon-reload
+        logger -t sam-headroom "SAM workload MemoryMax reserve disabled"
+        exit 0
+      fi
+
+      MIN_DOCKER_MB="{{ docker_memory_min_mb }}"
+      PROC_MEMINFO="\${SAM_PROC_MEMINFO:-/proc/meminfo}"
+      TOTAL_KB="$(awk '/MemTotal:/ { print $2; exit }' "$PROC_MEMINFO")"
+      case "$TOTAL_KB" in
+        ''|*[!0-9]*)
+          echo "cannot determine host memory from $PROC_MEMINFO" >&2
+          logger -t sam-headroom "Cannot determine host memory from $PROC_MEMINFO"
+          exit 78
+          ;;
+      esac
+      TOTAL_MB="$((TOTAL_KB / 1024))"
+      DOCKER_MEMORY_MAX_MB="$((TOTAL_MB - RESERVE_MB))"
+
+      if [ "$DOCKER_MEMORY_MAX_MB" -lt "$MIN_DOCKER_MB" ]; then
+        echo "refusing to run without SAM workload MemoryMax: total=\${TOTAL_MB}M reserve=\${RESERVE_MB}M leaves \${DOCKER_MEMORY_MAX_MB}M below minimum \${MIN_DOCKER_MB}M" >&2
+        logger -t sam-headroom "Refusing to run without SAM workload MemoryMax: total=\${TOTAL_MB}M reserve=\${RESERVE_MB}M leaves \${DOCKER_MEMORY_MAX_MB}M below minimum \${MIN_DOCKER_MB}M"
+        exit 78
+      fi
+
+      mkdir -p "$SYSTEMD_SYSTEM_DIR/sam-workload.slice.d"
+      cat >"$SYSTEMD_SYSTEM_DIR/sam-workload.slice.d/50-headroom.conf" <<EOF
+      [Slice]
+      MemoryAccounting=yes
+      MemoryMax=\${DOCKER_MEMORY_MAX_MB}M
+      EOF
+      systemctl daemon-reload
+      if systemctl is-active --quiet docker; then
+        systemctl restart docker
+      fi
+      logger -t sam-headroom "Configured sam-workload.slice MemoryMax=\${DOCKER_MEMORY_MAX_MB}M with reserve=\${RESERVE_MB}M"
+
+  - path: /usr/local/sbin/sam-verify-workload-cgroup.sh
+    permissions: '0755'
+    content: |
+      #!/bin/sh
+      set -eu
+
+      CONTAINER_ID="\${1:-}"
+      if [ -z "$CONTAINER_ID" ]; then
+        echo "usage: $0 <container-id-or-name>" >&2
+        exit 64
+      fi
+
+      RESERVE_MB="{{ vm_agent_memory_reserve_mb }}"
+      INFRA_MIN_MB="{{ sam_infra_slice_memory_min_mb }}"
+      MIN_DOCKER_MB="{{ docker_memory_min_mb }}"
+      INFRA_CPU_WEIGHT_EXPECTED="{{ sam_infra_slice_cpu_weight }}"
+      WORKLOAD_CPU_WEIGHT_EXPECTED="{{ sam_workload_slice_cpu_weight }}"
+      PROC_ROOT="\${SAM_PROC_ROOT:-/proc}"
+      CGROUP_ROOT="\${SAM_CGROUP_ROOT:-/sys/fs/cgroup}"
+      PROC_MEMINFO="\${SAM_PROC_MEMINFO:-/proc/meminfo}"
+
+      PID="$(docker inspect -f '{{.State.Pid}}' "$CONTAINER_ID")"
+      if [ -z "$PID" ] || [ "$PID" = "0" ]; then
+        echo "container $CONTAINER_ID is not running" >&2
+        exit 65
+      fi
+
+      CGROUP_FILE="$PROC_ROOT/$PID/cgroup"
+      if [ ! -r "$CGROUP_FILE" ]; then
+        echo "cannot read cgroup for container $CONTAINER_ID pid $PID at $CGROUP_FILE" >&2
+        exit 66
+      fi
+
+      CGROUP="$(cat "$CGROUP_FILE")"
+      CGROUP_PATH="$(awk -F: '$1 == "0" && $2 == "" { print $3; found = 1 } END { if (!found) exit 1 }' "$CGROUP_FILE")" || {
+        echo "container $CONTAINER_ID pid $PID has no cgroup v2 entry" >&2
+        echo "$CGROUP" >&2
+        exit 66
+      }
+
+      find_cgroup_ancestor() {
+        target="$1"
+        path="$2"
+        while [ "$path" != "/" ] && [ "$path" != "." ] && [ -n "$path" ]; do
+          if [ "$(basename "$path")" = "$target" ]; then
+            printf '%s\\n' "$path"
+            return 0
+          fi
+          path="$(dirname "$path")"
+        done
+        return 1
+      }
+
+      SAM_CGROUP="$(find_cgroup_ancestor sam.slice "$CGROUP_PATH")" || {
+        echo "container $CONTAINER_ID pid $PID is outside sam.slice" >&2
+        echo "$CGROUP" >&2
+        exit 66
+      }
+      WORKLOAD_CGROUP="$(find_cgroup_ancestor sam-workload.slice "$CGROUP_PATH")" || {
+        echo "container $CONTAINER_ID pid $PID is outside sam-workload.slice" >&2
+        echo "$CGROUP" >&2
+        exit 66
+      }
+      if [ "$SAM_CGROUP" != "/sam.slice" ] || [ "$WORKLOAD_CGROUP" != "/sam.slice/sam-workload.slice" ]; then
+        echo "container $CONTAINER_ID pid $PID has unexpected SAM cgroup ancestry: $CGROUP_PATH" >&2
+        exit 66
+      fi
+
+      read_cgroup_value() {
+        name="$1"
+        rel_path="$2"
+        file="$CGROUP_ROOT$rel_path/$name"
+        if [ ! -r "$file" ]; then
+          echo "missing cgroup $name at $file" >&2
+          exit 67
+        fi
+        tr -d '\\n' < "$file"
+      }
+
+      require_bytes_equal() {
+        name="$1"
+        actual="$2"
+        expected="$3"
+        case "$actual" in
+          ''|*[!0-9]*)
+            echo "$name expected $expected bytes, got $actual" >&2
+            exit 67
+            ;;
+        esac
+        if [ "$actual" -ne "$expected" ]; then
+          echo "$name expected $expected bytes, got $actual" >&2
+          exit 67
+        fi
+      }
+
+      require_bytes_at_least() {
+        name="$1"
+        actual="$2"
+        minimum="$3"
+        case "$actual" in
+          ''|*[!0-9]*)
+            echo "$name expected at least $minimum bytes, got $actual" >&2
+            exit 67
+            ;;
+        esac
+        if [ "$actual" -lt "$minimum" ]; then
+          echo "$name expected at least $minimum bytes, got $actual" >&2
+          exit 67
+        fi
+      }
+
+      require_int_equal() {
+        name="$1"
+        actual="$2"
+        expected="$3"
+        case "$actual" in
+          ''|*[!0-9]*)
+            echo "$name is not an integer: $actual" >&2
+            exit 67
+            ;;
+        esac
+        if [ "$actual" != "$expected" ]; then
+          echo "$name expected $expected, got $actual" >&2
+          exit 67
+        fi
+      }
+
+      prop_value() {
+        props="$1"
+        key="$2"
+        printf '%s\\n' "$props" | awk -F= -v key="$key" '$1 == key { print $2; found = 1; exit } END { if (!found) exit 1 }'
+      }
+
+      # CPU weights are verified BEFORE the memory-reserve early return on
+      # purpose: disabling the memory reserve must not silently disable the CPU
+      # check too. Memory starvation kills the agent and CPU starvation only
+      # delays its heartbeat, but a delayed heartbeat is what gets a healthy node
+      # declared dead, so both are load-bearing.
+      INFRA_CPU_WEIGHT="$(read_cgroup_value cpu.weight /sam.slice/sam-infra.slice)"
+      WORKLOAD_CPU_WEIGHT="$(read_cgroup_value cpu.weight "$WORKLOAD_CGROUP")"
+      require_int_equal "sam-infra.slice cgroup cpu.weight" "$INFRA_CPU_WEIGHT" "$INFRA_CPU_WEIGHT_EXPECTED"
+      require_int_equal "sam-workload.slice cgroup cpu.weight" "$WORKLOAD_CPU_WEIGHT" "$WORKLOAD_CPU_WEIGHT_EXPECTED"
+      if [ "$INFRA_CPU_WEIGHT" -le "$WORKLOAD_CPU_WEIGHT" ]; then
+        echo "vm-agent slice cpu.weight $INFRA_CPU_WEIGHT does not outrank workload $WORKLOAD_CPU_WEIGHT" >&2
+        exit 67
+      fi
+
+      if [ "$RESERVE_MB" = "0" ]; then
+        echo "SAM workload MemoryMax reserve disabled; verified cgroup ancestry and CPU weights only"
+        systemctl show sam.slice sam-infra.slice sam-workload.slice \
+          -p MemoryMin -p MemoryMax -p EffectiveMemoryMax -p CPUWeight --no-pager
+        echo "$CGROUP"
+        exit 0
+      fi
+
+      TOTAL_KB="$(awk '/MemTotal:/ { print $2; exit }' "$PROC_MEMINFO")"
+      case "$TOTAL_KB" in
+        ''|*[!0-9]*)
+          echo "cannot determine host memory from $PROC_MEMINFO" >&2
+          exit 67
+          ;;
+      esac
+      TOTAL_MB="$((TOTAL_KB / 1024))"
+      DOCKER_MEMORY_MAX_MB="$((TOTAL_MB - RESERVE_MB))"
+      if [ "$DOCKER_MEMORY_MAX_MB" -lt "$MIN_DOCKER_MB" ]; then
+        echo "SAM workload MemoryMax is not enforceable: total=\${TOTAL_MB}M reserve=\${RESERVE_MB}M leaves \${DOCKER_MEMORY_MAX_MB}M below minimum \${MIN_DOCKER_MB}M" >&2
+        exit 67
+      fi
+
+      EXPECTED_WORKLOAD_MAX_BYTES="$((DOCKER_MEMORY_MAX_MB * 1024 * 1024))"
+      EXPECTED_INFRA_MIN_BYTES="$((INFRA_MIN_MB * 1024 * 1024))"
+      WORKLOAD_MEMORY_MAX="$(read_cgroup_value memory.max "$WORKLOAD_CGROUP")"
+      SAM_MEMORY_MIN="$(read_cgroup_value memory.min "$SAM_CGROUP")"
+      INFRA_MEMORY_MIN="$(read_cgroup_value memory.min /sam.slice/sam-infra.slice)"
+
+      require_bytes_equal "sam-workload.slice cgroup memory.max" "$WORKLOAD_MEMORY_MAX" "$EXPECTED_WORKLOAD_MAX_BYTES"
+      require_bytes_at_least "sam.slice cgroup memory.min" "$SAM_MEMORY_MIN" "$EXPECTED_INFRA_MIN_BYTES"
+      require_bytes_at_least "sam-infra.slice cgroup memory.min" "$INFRA_MEMORY_MIN" "$EXPECTED_INFRA_MIN_BYTES"
+
+      WORKLOAD_PROPS="$(systemctl show sam-workload.slice -p MemoryMax -p EffectiveMemoryMax --no-pager)"
+      SAM_PROPS="$(systemctl show sam.slice -p MemoryMin --no-pager)"
+      INFRA_PROPS="$(systemctl show sam-infra.slice -p MemoryMin --no-pager)"
+
+      require_bytes_equal "sam-workload.slice MemoryMax" "$(prop_value "$WORKLOAD_PROPS" MemoryMax)" "$EXPECTED_WORKLOAD_MAX_BYTES"
+      require_bytes_equal "sam-workload.slice EffectiveMemoryMax" "$(prop_value "$WORKLOAD_PROPS" EffectiveMemoryMax)" "$EXPECTED_WORKLOAD_MAX_BYTES"
+      require_bytes_at_least "sam.slice MemoryMin" "$(prop_value "$SAM_PROPS" MemoryMin)" "$EXPECTED_INFRA_MIN_BYTES"
+      require_bytes_at_least "sam-infra.slice MemoryMin" "$(prop_value "$INFRA_PROPS" MemoryMin)" "$EXPECTED_INFRA_MIN_BYTES"
+
+      printf '%s\\n' "$SAM_PROPS" "$INFRA_PROPS" "$WORKLOAD_PROPS"
+      echo "$CGROUP"
+
+  - path: /etc/caddy/Caddyfile
+    permissions: '0644'
+    content: |
+      # Managed by SAM deployment agent.
+      # Release applies replace this file and run caddy reload.
+      {
+        auto_https off
+      }
+
+      :80 {
+        respond "SAM deployment node awaiting release" 200
+      }
+
+  - path: /etc/sam/callback-token
+    permissions: '0600'
+    owner: root:root
+    content: |
+      {{ callback_token }}
 
   - path: /etc/workspace/config.json
     content: |
@@ -280,6 +721,11 @@ write_files:
       MaxRetentionSec={{ log_journal_max_retention }}
     permissions: '0644'
 
+  - path: /etc/sysctl.d/99-sam-swap.conf
+    content: |
+      vm.swappiness={{ swap_swappiness }}
+    permissions: '0644'
+
   - path: /etc/docker/daemon.json
     content: |
       {
@@ -287,19 +733,11 @@ write_files:
         "log-opts": {
           "tag": "docker/{{ docker_name_tag }}"
         },
-        "dns": [{{ docker_dns_servers }}]
+        "cgroup-parent": "sam-workload.slice",
+        "dns": [{{ docker_dns_servers }}],
+        "live-restore": true
       }
     permissions: '0644'
-
-  - path: /etc/sam/tls/origin-ca.pem
-    content: |
-      {{ origin_ca_cert }}
-    permissions: '0644'
-
-  - path: /etc/sam/tls/origin-ca-key.pem
-    content: |
-      {{ origin_ca_key }}
-    permissions: '0600'
 
   - path: /etc/apt/apt.conf.d/80-retries
     content: |

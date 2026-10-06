@@ -1,10 +1,10 @@
-import type { AdminUser, UserStatus } from '@simple-agent-manager/shared';
+import type { AdminUser, SignupApprovalConfig, UserStatus } from '@simple-agent-manager/shared';
 import { Body,Button, Card, Spinner, StatusBadge } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useRef,useState } from 'react';
 
 import { useAuth } from '../components/AuthProvider';
 import { useIsMobile } from '../hooks/useIsMobile';
-import { approveOrSuspendUser, changeUserRole,listAdminUsers } from '../lib/api';
+import { approveOrSuspendUser, changeUserRole,fetchSignupApprovalConfig, listAdminUsers, updateSignupApprovalConfig } from '../lib/api';
 
 type StatusFilter = 'all' | UserStatus;
 
@@ -17,6 +17,9 @@ export function AdminUsers() {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<StatusFilter>('all');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [signupApprovalConfig, setSignupApprovalConfig] = useState<SignupApprovalConfig | null>(null);
+  const [signupConfigLoading, setSignupConfigLoading] = useState(true);
+  const [signupConfigSaving, setSignupConfigSaving] = useState(false);
   const hasLoadedRef = useRef(false);
 
   const fetchUsers = useCallback(async () => {
@@ -44,6 +47,31 @@ export function AdminUsers() {
     fetchUsers();
   }, [fetchUsers]);
 
+  useEffect(() => {
+    let active = true;
+    async function loadConfig() {
+      try {
+        setSignupConfigLoading(true);
+        const res = await fetchSignupApprovalConfig();
+        if (active) {
+          setSignupApprovalConfig(res.config);
+        }
+      } catch (err) {
+        if (active) {
+          setError(err instanceof Error ? err.message : 'Failed to load signup approval setting');
+        }
+      } finally {
+        if (active) {
+          setSignupConfigLoading(false);
+        }
+      }
+    }
+    loadConfig();
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const handleAction = async (userId: string, action: 'approve' | 'suspend') => {
     setActionLoading(userId);
     try {
@@ -68,6 +96,23 @@ export function AdminUsers() {
     }
   };
 
+  const handleSignupApprovalToggle = async () => {
+    if (!signupApprovalConfig || signupConfigSaving) {
+      return;
+    }
+    const nextRequireApproval = !signupApprovalConfig.requireApproval;
+    setSignupConfigSaving(true);
+    try {
+      setError(null);
+      const res = await updateSignupApprovalConfig({ requireApproval: nextRequireApproval });
+      setSignupApprovalConfig(res.config);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update signup approval setting');
+    } finally {
+      setSignupConfigSaving(false);
+    }
+  };
+
   const filters: { label: string; value: StatusFilter }[] = [
     { label: 'All', value: 'all' },
     { label: 'Pending', value: 'pending' },
@@ -84,6 +129,13 @@ export function AdminUsers() {
           {error}
         </div>
       )}
+
+      <SignupApprovalPanel
+        config={signupApprovalConfig}
+        loading={signupConfigLoading}
+        saving={signupConfigSaving}
+        onToggle={handleSignupApprovalToggle}
+      />
 
       {/* Filter tabs */}
       <div className="flex gap-2 mb-4 items-center">
@@ -236,6 +288,67 @@ export function AdminUsers() {
         </Card>
       )}
     </div>
+  );
+}
+
+function SignupApprovalPanel({
+  config,
+  loading,
+  saving,
+  onToggle,
+}: {
+  config: SignupApprovalConfig | null;
+  loading: boolean;
+  saving: boolean;
+  onToggle: () => void;
+}) {
+  const requireApproval = config?.requireApproval ?? false;
+  const sourceLabel = config?.source === 'runtime' ? 'Runtime override' : 'Environment default';
+  const updatedAt = config?.updatedAt ? new Date(config.updatedAt).toLocaleString() : null;
+
+  return (
+    <Card className="mb-4">
+      <div className="p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="text-sm font-semibold text-fg-primary m-0">Signup approval</h2>
+            {config && (
+              <span className="text-xs text-fg-muted">
+                {sourceLabel}{updatedAt ? `, updated ${updatedAt}` : ''}
+              </span>
+            )}
+          </div>
+          <Body className="text-fg-muted text-sm mt-1">
+            {requireApproval
+              ? 'New users wait for admin approval before using SAM.'
+              : 'New and pending users can use SAM while approval is off. Stored pending users are not changed to active.'}
+          </Body>
+        </div>
+        <div className="flex items-center gap-3 shrink-0">
+          {loading && <Spinner size="sm" />}
+          <span className="text-sm font-medium text-fg-primary">
+            {requireApproval ? 'Approval on' : 'Approval off'}
+          </span>
+          <button
+            onClick={onToggle}
+            disabled={loading || saving || !config}
+            className={`relative w-11 h-6 rounded-full transition-colors border-none ${
+              requireApproval ? 'bg-accent' : 'bg-border-default'
+            } ${loading || saving || !config ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
+            role="switch"
+            aria-checked={requireApproval}
+            aria-busy={saving}
+            aria-label={requireApproval ? 'Turn signup approval off' : 'Turn signup approval on'}
+          >
+            <span
+              className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${
+                requireApproval ? 'translate-x-5' : 'translate-x-0'
+              }`}
+            />
+          </button>
+        </div>
+      </div>
+    </Card>
   );
 }
 

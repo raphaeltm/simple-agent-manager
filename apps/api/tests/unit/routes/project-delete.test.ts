@@ -1,12 +1,12 @@
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import { projectsRoutes } from '../../../src/routes/projects';
 
 const mocks = vi.hoisted(() => ({
-  requireOwnedProject: vi.fn(),
+  requireProjectCapability: vi.fn(),
 }));
 
 vi.mock('drizzle-orm/d1');
@@ -16,7 +16,7 @@ vi.mock('../../../src/middleware/auth', () => ({
   getUserId: () => 'user-1',
 }));
 vi.mock('../../../src/middleware/project-auth', () => ({
-  requireOwnedProject: mocks.requireOwnedProject,
+  requireProjectCapability: mocks.requireProjectCapability,
 }));
 vi.mock('../../../src/services/encryption', () => ({
   encrypt: vi.fn().mockResolvedValue({ ciphertext: 'enc', iv: 'iv' }),
@@ -29,6 +29,7 @@ describe('DELETE /api/projects/:id', () => {
   let selectResults: any[][];
   /** Statements collected by db.batch() */
   let batchedStatements: any[];
+  let consoleWarnSpy: ReturnType<typeof vi.spyOn>;
 
   function buildMockDB() {
     operations = [];
@@ -92,17 +93,20 @@ describe('DELETE /api/projects/:id', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     selectResults = [];
+    consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     const mockDB = buildMockDB();
     (drizzle as any).mockReturnValue(mockDB);
 
-    mocks.requireOwnedProject.mockResolvedValue({
+    mocks.requireProjectCapability.mockResolvedValue({
       id: 'proj-1',
       userId: 'user-1',
       name: 'Test Project',
       installationId: 'inst-1',
       repository: 'acme/repo',
       defaultBranch: 'main',
+      repoProvider: 'github',
+      artifactsRepoId: null,
     });
 
     app = new Hono<{ Bindings: Env }>();
@@ -116,15 +120,33 @@ describe('DELETE /api/projects/:id', () => {
     app.route('/api/projects', projectsRoutes);
   });
 
-  const env = { DATABASE: {} as any } as Env;
+  afterEach(() => {
+    consoleWarnSpy.mockRestore();
+  });
+
+  const env = {
+    DATABASE: {} as any,
+    R2: {
+      list: vi.fn().mockResolvedValue({ objects: [], truncated: false }),
+      delete: vi.fn().mockResolvedValue(undefined),
+    } as any,
+    PROJECT_DATA_ARCHIVE_R2: {
+      list: vi.fn().mockResolvedValue({ objects: [], truncated: false }),
+      delete: vi.fn().mockResolvedValue(undefined),
+    } as any,
+  } as Env;
 
   it('returns 200 and success when project is deleted', async () => {
     // select: tasks for project → no tasks
     selectResults.push([]);
 
-    const response = await app.request('/api/projects/proj-1', {
-      method: 'DELETE',
-    }, env);
+    const response = await app.request(
+      '/api/projects/proj-1',
+      {
+        method: 'DELETE',
+      },
+      env
+    );
 
     expect(response.status).toBe(200);
     const body = await response.json<{ success: boolean }>();
@@ -138,40 +160,55 @@ describe('DELETE /api/projects/:id', () => {
     // select: tasks for project → 2 task IDs
     selectResults.push([{ id: 'task-1' }, { id: 'task-2' }]);
 
-    const response = await app.request('/api/projects/proj-1', {
-      method: 'DELETE',
-    }, env);
+    const response = await app.request(
+      '/api/projects/proj-1',
+      {
+        method: 'DELETE',
+      },
+      env
+    );
 
     expect(response.status).toBe(200);
 
     // With tasks: taskStatusEvents(1) + taskDependencies(2) + tasks(1) +
-    // runtimeEnvVars(1) + runtimeFiles(1) + agentProfiles(1) + update:workspaces(1) + projects(1) = 9
-    // (9 statements because update is also in batch now)
+    // runtimeEnvVars(1) + runtimeFiles(1) + agentProfiles(1) +
+    // projectGithubRepositories(1) + projectGitlabRepositories(1) +
+    // projectFileTags(1) + projectFiles(1) + projects(1) = 12
     const deleteOps = operations.filter((o) => o.startsWith('delete:'));
-    expect(deleteOps.length).toBe(8);
+    expect(deleteOps.length).toBe(12);
   });
 
   it('skips task grandchild cleanup when no tasks exist', async () => {
     // select: tasks for project → empty
     selectResults.push([]);
 
-    const response = await app.request('/api/projects/proj-1', {
-      method: 'DELETE',
-    }, env);
+    const response = await app.request(
+      '/api/projects/proj-1',
+      {
+        method: 'DELETE',
+      },
+      env
+    );
 
     expect(response.status).toBe(200);
 
-    // Without tasks: tasks(1) + runtimeEnvVars(1) + runtimeFiles(1) + agentProfiles(1) + projects(1) = 5
+    // Without tasks: tasks(1) + runtimeEnvVars(1) + runtimeFiles(1) + agentProfiles(1) +
+    // projectGithubRepositories(1) + projectGitlabRepositories(1) +
+    // projectFileTags(1) + projectFiles(1) + projects(1) = 9
     const deleteOps = operations.filter((o) => o.startsWith('delete:'));
-    expect(deleteOps.length).toBe(5);
+    expect(deleteOps.length).toBe(9);
   });
 
   it('nullifies workspace project_id in the batch', async () => {
     selectResults.push([]);
 
-    const response = await app.request('/api/projects/proj-1', {
-      method: 'DELETE',
-    }, env);
+    const response = await app.request(
+      '/api/projects/proj-1',
+      {
+        method: 'DELETE',
+      },
+      env
+    );
 
     expect(response.status).toBe(200);
 
@@ -193,27 +230,32 @@ describe('DELETE /api/projects/:id', () => {
   it('executes all mutations via db.batch()', async () => {
     selectResults.push([{ id: 'task-1' }]);
 
-    const response = await app.request('/api/projects/proj-1', {
-      method: 'DELETE',
-    }, env);
+    const response = await app.request(
+      '/api/projects/proj-1',
+      {
+        method: 'DELETE',
+      },
+      env
+    );
 
     expect(response.status).toBe(200);
 
     // All mutations should be collected and passed to batch
-    // With 1 task: 3 grandchild + 4 child + 1 update + 1 project = 9
-    expect(batchedStatements.length).toBe(9);
+    // With 1 task: 3 grandchild + 6 child (tasks, env, files, profiles, githubRepos, gitlabRepos)
+    // + 2 library deletes + 1 update + 1 project = 13
+    expect(batchedStatements.length).toBe(13);
   });
 
-  it('calls requireOwnedProject for authorization', async () => {
+  it('calls requireProjectCapability for authorization', async () => {
     selectResults.push([]);
 
     await app.request('/api/projects/proj-1', { method: 'DELETE' }, env);
 
-    expect(mocks.requireOwnedProject).toHaveBeenCalledTimes(1);
+    expect(mocks.requireProjectCapability).toHaveBeenCalledTimes(1);
   });
 
-  it('returns error when requireOwnedProject rejects (not owner)', async () => {
-    mocks.requireOwnedProject.mockRejectedValueOnce(
+  it('returns error when requireProjectCapability rejects (not owner)', async () => {
+    mocks.requireProjectCapability.mockRejectedValueOnce(
       Object.assign(new Error('Project not found'), {
         statusCode: 404,
         error: 'NOT_FOUND',
@@ -221,9 +263,13 @@ describe('DELETE /api/projects/:id', () => {
       })
     );
 
-    const response = await app.request('/api/projects/proj-1', {
-      method: 'DELETE',
-    }, env);
+    const response = await app.request(
+      '/api/projects/proj-1',
+      {
+        method: 'DELETE',
+      },
+      env
+    );
 
     expect(response.status).toBe(404);
     const body = await response.json<{ error: string }>();
@@ -241,15 +287,151 @@ describe('DELETE /api/projects/:id', () => {
     // 3. taskDependencies where dependsOnTaskId IN taskIds (cross-project)
     selectResults.push([{ id: 'task-1' }]);
 
-    const response = await app.request('/api/projects/proj-1', {
-      method: 'DELETE',
-    }, env);
+    const response = await app.request(
+      '/api/projects/proj-1',
+      {
+        method: 'DELETE',
+      },
+      env
+    );
 
     expect(response.status).toBe(200);
 
     // With 1 task: taskStatusEvents(1) + taskDependencies(2) + tasks(1) +
-    // runtimeEnvVars(1) + runtimeFiles(1) + agentProfiles(1) + projects(1) = 8
+    // runtimeEnvVars(1) + runtimeFiles(1) + agentProfiles(1) +
+    // projectGithubRepositories(1) + projectGitlabRepositories(1) +
+    // projectFileTags(1) + projectFiles(1) + projects(1) = 12
     const deleteOps = operations.filter((o) => o.startsWith('delete:'));
-    expect(deleteOps.length).toBe(8);
+    expect(deleteOps.length).toBe(12);
+  });
+
+  it('deletes the Artifacts repo after project rows are deleted', async () => {
+    const artifactsDelete = vi.fn().mockResolvedValue(true);
+    mocks.requireProjectCapability.mockResolvedValueOnce({
+      id: 'proj-1',
+      userId: 'user-1',
+      name: 'Artifacts Project',
+      installationId: 'system_anonymous_trials_installation',
+      repository: 'https://acct123.artifacts.cloudflare.net/git/default/artifacts-repo-1.git',
+      defaultBranch: 'main',
+      repoProvider: 'artifacts',
+      artifactsRepoId: 'artifacts-repo-1',
+    });
+    selectResults.push([]);
+
+    const response = await app.request(
+      '/api/projects/proj-1',
+      {
+        method: 'DELETE',
+      },
+      {
+        ...env,
+        ARTIFACTS: {
+          delete: artifactsDelete,
+        } as any,
+      }
+    );
+
+    expect(response.status).toBe(200);
+    expect(artifactsDelete).toHaveBeenCalledWith('artifacts-repo-1');
+    expect(artifactsDelete).toHaveBeenCalledTimes(1);
+    expect(consoleWarnSpy).not.toHaveBeenCalled();
+  });
+
+  it('logs an orphan and still deletes the project when the Artifacts binding is unavailable', async () => {
+    mocks.requireProjectCapability.mockResolvedValueOnce({
+      id: 'proj-1',
+      userId: 'user-1',
+      name: 'Artifacts Project',
+      installationId: 'system_anonymous_trials_installation',
+      repository: 'https://acct123.artifacts.cloudflare.net/git/default/artifacts-repo-1.git',
+      defaultBranch: 'main',
+      repoProvider: 'artifacts',
+      artifactsRepoId: 'artifacts-repo-1',
+    });
+    selectResults.push([]);
+
+    const response = await app.request(
+      '/api/projects/proj-1',
+      {
+        method: 'DELETE',
+      },
+      env
+    );
+
+    expect(response.status).toBe(200);
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('"event":"project_delete.artifacts_delete_unavailable"')
+    );
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('"action":"orphaned_artifacts_repo_on_delete"')
+    );
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('"repoName":"artifacts-repo-1"')
+    );
+  });
+
+  it('logs an orphan and still returns success when Artifacts repo deletion fails', async () => {
+    const artifactsDelete = vi
+      .fn()
+      .mockRejectedValue(new Error('Cloudflare Artifacts unavailable'));
+    mocks.requireProjectCapability.mockResolvedValueOnce({
+      id: 'proj-1',
+      userId: 'user-1',
+      name: 'Artifacts Project',
+      installationId: 'system_anonymous_trials_installation',
+      repository: 'https://acct123.artifacts.cloudflare.net/git/default/artifacts-repo-1.git',
+      defaultBranch: 'main',
+      repoProvider: 'artifacts',
+      artifactsRepoId: 'artifacts-repo-1',
+    });
+    selectResults.push([]);
+
+    const response = await app.request(
+      '/api/projects/proj-1',
+      {
+        method: 'DELETE',
+      },
+      {
+        ...env,
+        ARTIFACTS: {
+          delete: artifactsDelete,
+        } as any,
+      }
+    );
+
+    expect(response.status).toBe(200);
+    expect(artifactsDelete).toHaveBeenCalledWith('artifacts-repo-1');
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('"event":"project_delete.artifacts_delete_failed"')
+    );
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('"action":"orphaned_artifacts_repo_on_delete"')
+    );
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('"error":"Cloudflare Artifacts unavailable"')
+    );
+  });
+
+  it('does not call Artifacts for GitHub-backed project deletes', async () => {
+    const artifactsDelete = vi.fn().mockResolvedValue(true);
+    selectResults.push([]);
+
+    const response = await app.request(
+      '/api/projects/proj-1',
+      {
+        method: 'DELETE',
+      },
+      {
+        ...env,
+        ARTIFACTS: {
+          delete: artifactsDelete,
+        } as any,
+      }
+    );
+
+    expect(response.status).toBe(200);
+    expect(artifactsDelete).not.toHaveBeenCalled();
+    expect(consoleWarnSpy).not.toHaveBeenCalled();
   });
 });

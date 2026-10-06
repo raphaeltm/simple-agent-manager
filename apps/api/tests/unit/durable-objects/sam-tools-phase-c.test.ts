@@ -17,7 +17,10 @@ import { addPolicy } from '../../../src/durable-objects/sam-session/tools/add-po
 import { getProjectKnowledge } from '../../../src/durable-objects/sam-session/tools/get-project-knowledge';
 import { listPolicies } from '../../../src/durable-objects/sam-session/tools/list-policies';
 import { searchKnowledge } from '../../../src/durable-objects/sam-session/tools/search-knowledge';
-import type { CollectedToolCall, ToolContext } from '../../../src/durable-objects/sam-session/types';
+import type {
+  CollectedToolCall,
+  ToolContext,
+} from '../../../src/durable-objects/sam-session/types';
 
 // Mock cloudflare:workers
 vi.mock('cloudflare:workers', () => ({
@@ -63,10 +66,12 @@ vi.mock('../../../src/services/project-data', () => ({
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Create a mock D1Database with `.raw()` support for drizzle ORM compatibility. */
-function mockD1(options: {
-  /** Results for single-row queries (drizzle .get()). Each call shifts one result. */
-  rawResults?: unknown[][][];
-} = {}) {
+function mockD1(
+  options: {
+    /** Results for single-row queries (drizzle .get()). Each call shifts one result. */
+    rawResults?: unknown[][][];
+  } = {}
+) {
   const rawQueue = [...(options.rawResults ?? [])];
 
   const mockStatement = {
@@ -85,14 +90,15 @@ function mockD1(options: {
   };
 }
 
-function buildCtx(overrides: {
-  ownedProject?: { id: string } | null;
-  allProjects?: Array<{ id: string; name: string }>;
-  userId?: string;
-} = {}): ToolContext {
-  const ownedProject = overrides.ownedProject === undefined
-    ? { id: 'proj-1' }
-    : overrides.ownedProject;
+function buildCtx(
+  overrides: {
+    ownedProject?: { id: string } | null;
+    allProjects?: Array<{ id: string; name: string }>;
+    userId?: string;
+  } = {}
+): ToolContext {
+  const ownedProject =
+    overrides.ownedProject === undefined ? { id: 'proj-1' } : overrides.ownedProject;
   const allProjects = overrides.allProjects ?? [{ id: 'proj-1', name: 'Project 1' }];
 
   // Build raw results queue: drizzle calls raw() for each query.
@@ -100,7 +106,7 @@ function buildCtx(overrides: {
   // Cross-project tools: user projects (.all()) -> [['proj-1', 'Project 1'], ...]
   // Repeat ownership result several times to handle multiple tool calls in tests.
   const ownershipRow = ownedProject ? [[ownedProject.id]] : [];
-  const allProjectsRows = allProjects.map(p => [p.id, p.name]);
+  const allProjectsRows = allProjects.map((p) => [p.id, p.name]);
   const rawResults: unknown[][][] = [
     ownershipRow,
     allProjectsRows,
@@ -155,10 +161,19 @@ describe('search_knowledge', () => {
   it('searches single project when projectId provided', async () => {
     const ctx = buildCtx({ ownedProject: { id: 'proj-1' } });
     mockSearchKnowledgeObservations.mockResolvedValue([
-      { id: 'obs-1', content: 'test fact', confidence: 0.9, entityName: 'User', entityType: 'preference' },
+      {
+        id: 'obs-1',
+        content: 'test fact',
+        confidence: 0.9,
+        entityName: 'User',
+        entityType: 'preference',
+      },
     ]);
 
-    const result = await searchKnowledge({ query: 'test', projectId: 'proj-1' }, ctx) as Record<string, unknown>;
+    const result = (await searchKnowledge({ query: 'test', projectId: 'proj-1' }, ctx)) as Record<
+      string,
+      unknown
+    >;
     expect(result.projectId).toBe('proj-1');
     expect(result.total).toBe(1);
     expect(mockSearchKnowledgeObservations).toHaveBeenCalled();
@@ -170,9 +185,7 @@ describe('search_knowledge', () => {
       { id: 'proj-2', name: 'Project 2' },
     ];
     const db = mockD1({
-      rawResults: [
-        projects.map(p => [p.id, p.name]),
-      ],
+      rawResults: [projects.map((p) => [p.id, p.name])],
     });
     const ctx: ToolContext = {
       env: {
@@ -188,10 +201,26 @@ describe('search_knowledge', () => {
     };
 
     mockSearchKnowledgeObservations
-      .mockResolvedValueOnce([{ id: 'obs-1', content: 'from proj-1', confidence: 0.9, entityName: 'E1', entityType: 'context' }])
-      .mockResolvedValueOnce([{ id: 'obs-2', content: 'from proj-2', confidence: 0.5, entityName: 'E2', entityType: 'preference' }]);
+      .mockResolvedValueOnce([
+        {
+          id: 'obs-1',
+          content: 'from proj-1',
+          confidence: 0.9,
+          entityName: 'E1',
+          entityType: 'context',
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 'obs-2',
+          content: 'from proj-2',
+          confidence: 0.5,
+          entityName: 'E2',
+          entityType: 'preference',
+        },
+      ]);
 
-    const result = await searchKnowledge({ query: 'test' }, ctx) as Record<string, unknown>;
+    const result = (await searchKnowledge({ query: 'test' }, ctx)) as Record<string, unknown>;
     expect(result.projectsSearched).toBe(2);
     expect(mockSearchKnowledgeObservations).toHaveBeenCalledTimes(2);
 
@@ -215,9 +244,7 @@ describe('search_knowledge', () => {
       { id: 'proj-fail', name: 'Failing Project' },
     ];
     const db = mockD1({
-      rawResults: [
-        projects.map(p => [p.id, p.name]),
-      ],
+      rawResults: [projects.map((p) => [p.id, p.name])],
     });
     const ctx: ToolContext = {
       env: {
@@ -233,10 +260,18 @@ describe('search_knowledge', () => {
     };
 
     mockSearchKnowledgeObservations
-      .mockResolvedValueOnce([{ id: 'obs-1', content: 'good result', confidence: 0.8, entityName: 'E1', entityType: 'context' }])
+      .mockResolvedValueOnce([
+        {
+          id: 'obs-1',
+          content: 'good result',
+          confidence: 0.8,
+          entityName: 'E1',
+          entityType: 'context',
+        },
+      ])
       .mockRejectedValueOnce(new Error('DO unavailable'));
 
-    const result = await searchKnowledge({ query: 'test' }, ctx) as Record<string, unknown>;
+    const result = (await searchKnowledge({ query: 'test' }, ctx)) as Record<string, unknown>;
     expect(result.projectsSearched).toBe(2);
     const results = result.results as unknown[];
     expect(results.length).toBe(1);
@@ -284,7 +319,10 @@ describe('get_project_knowledge', () => {
       total: 1,
     });
 
-    const result = await getProjectKnowledge({ projectId: 'proj-1' }, ctx) as Record<string, unknown>;
+    const result = (await getProjectKnowledge({ projectId: 'proj-1' }, ctx)) as Record<
+      string,
+      unknown
+    >;
     expect(result.projectId).toBe('proj-1');
     expect(result.total).toBe(1);
     expect(mockListKnowledgeEntities).toHaveBeenCalled();
@@ -310,7 +348,7 @@ describe('add_knowledge', () => {
     const ctx = buildCtx();
     const result = await addKnowledge(
       { projectId: '', entityName: 'Test', entityType: 'preference', observations: ['fact'] },
-      ctx,
+      ctx
     );
     expect(result).toEqual({ error: 'projectId is required.' });
   });
@@ -319,7 +357,7 @@ describe('add_knowledge', () => {
     const ctx = buildCtx();
     const result = await addKnowledge(
       { projectId: 'proj-1', entityName: '', entityType: 'preference', observations: ['fact'] },
-      ctx,
+      ctx
     );
     expect(result).toEqual({ error: 'entityName is required.' });
   });
@@ -328,7 +366,7 @@ describe('add_knowledge', () => {
     const ctx = buildCtx();
     const result = await addKnowledge(
       { projectId: 'proj-1', entityName: 'Test', entityType: 'invalid', observations: ['fact'] },
-      ctx,
+      ctx
     );
     const r = result as { error?: string };
     expect(r.error).toContain('entityType must be one of');
@@ -338,7 +376,7 @@ describe('add_knowledge', () => {
     const ctx = buildCtx();
     const result = await addKnowledge(
       { projectId: 'proj-1', entityName: 'Test', entityType: 'preference', observations: [] },
-      ctx,
+      ctx
     );
     expect(result).toEqual({ error: 'observations must be a non-empty array of strings.' });
   });
@@ -348,7 +386,12 @@ describe('add_knowledge', () => {
     const toolCall: CollectedToolCall = {
       id: 'call-ak-1',
       name: 'add_knowledge',
-      input: { projectId: 'not-owned', entityName: 'Test', entityType: 'preference', observations: ['fact'] },
+      input: {
+        projectId: 'not-owned',
+        entityName: 'Test',
+        entityType: 'preference',
+        observations: ['fact'],
+      },
     };
     const result = await executeTool(toolCall, ctx);
     const r = result as { error?: string };
@@ -362,10 +405,15 @@ describe('add_knowledge', () => {
     mockCreateKnowledgeEntity.mockResolvedValue({ id: 'ent-new', createdAt: 1234 });
     mockAddKnowledgeObservation.mockResolvedValue({ id: 'obs-1', createdAt: 1234 });
 
-    const result = await addKnowledge(
-      { projectId: 'proj-1', entityName: 'TestEntity', entityType: 'context', observations: ['fact one', 'fact two'] },
-      ctx,
-    ) as Record<string, unknown>;
+    const result = (await addKnowledge(
+      {
+        projectId: 'proj-1',
+        entityName: 'TestEntity',
+        entityType: 'context',
+        observations: ['fact one', 'fact two'],
+      },
+      ctx
+    )) as Record<string, unknown>;
 
     expect(result.entityId).toBe('ent-new');
     expect(result.observationsAdded).toBe(2);
@@ -379,16 +427,22 @@ describe('add_knowledge', () => {
     mockCreateKnowledgeEntity.mockResolvedValue({ id: 'ent-1', createdAt: 1234 });
     mockAddKnowledgeObservation.mockResolvedValue({ id: 'obs-1', createdAt: 1234 });
 
-    const result = await addKnowledge(
+    const result = (await addKnowledge(
       { projectId: 'proj-1', entityName: 'Test', entityType: 'context', observations: ['fact'] },
-      ctx,
-    ) as Record<string, unknown>;
+      ctx
+    )) as Record<string, unknown>;
 
     expect(result.sourceType).toBe('explicit');
     expect(result.confidence).toBe(0.9);
     // Verify the observation was created with correct confidence and sourceType
     expect(mockAddKnowledgeObservation).toHaveBeenCalledWith(
-      expect.anything(), 'proj-1', 'ent-1', 'fact', 0.9, 'explicit', null,
+      expect.anything(),
+      'proj-1',
+      'ent-1',
+      'fact',
+      0.9,
+      'explicit',
+      null
     );
   });
 
@@ -398,10 +452,16 @@ describe('add_knowledge', () => {
     mockCreateKnowledgeEntity.mockResolvedValue({ id: 'ent-1', createdAt: 1234 });
     mockAddKnowledgeObservation.mockResolvedValue({ id: 'obs-1', createdAt: 1234 });
 
-    const result = await addKnowledge(
-      { projectId: 'proj-1', entityName: 'Test', entityType: 'context', observations: ['inferred fact'], sourceType: 'inferred' },
-      ctx,
-    ) as Record<string, unknown>;
+    const result = (await addKnowledge(
+      {
+        projectId: 'proj-1',
+        entityName: 'Test',
+        entityType: 'context',
+        observations: ['inferred fact'],
+        sourceType: 'inferred',
+      },
+      ctx
+    )) as Record<string, unknown>;
 
     expect(result.sourceType).toBe('inferred');
     expect(result.confidence).toBe(0.7);
@@ -413,10 +473,15 @@ describe('add_knowledge', () => {
     mockCreateKnowledgeEntity.mockResolvedValue({ id: 'ent-1', createdAt: 1234 });
     mockAddKnowledgeObservation.mockResolvedValue({ id: 'obs-1', createdAt: 1234 });
 
-    const result = await addKnowledge(
-      { projectId: 'proj-1', entityName: 'Test', entityType: 'context', observations: ['   ', 'real fact', ''] },
-      ctx,
-    ) as Record<string, unknown>;
+    const result = (await addKnowledge(
+      {
+        projectId: 'proj-1',
+        entityName: 'Test',
+        entityType: 'context',
+        observations: ['   ', 'real fact', ''],
+      },
+      ctx
+    )) as Record<string, unknown>;
 
     expect(result.observationsAdded).toBe(1);
     expect(mockAddKnowledgeObservation).toHaveBeenCalledTimes(1);
@@ -427,10 +492,15 @@ describe('add_knowledge', () => {
     mockGetKnowledgeEntityByName.mockResolvedValue({ id: 'ent-existing' });
     mockAddKnowledgeObservation.mockResolvedValue({ id: 'obs-1', createdAt: 1234 });
 
-    const result = await addKnowledge(
-      { projectId: 'proj-1', entityName: 'ExistingEntity', entityType: 'preference', observations: ['fact'] },
-      ctx,
-    ) as Record<string, unknown>;
+    const result = (await addKnowledge(
+      {
+        projectId: 'proj-1',
+        entityName: 'ExistingEntity',
+        entityType: 'preference',
+        observations: ['fact'],
+      },
+      ctx
+    )) as Record<string, unknown>;
 
     expect(result.entityId).toBe('ent-existing');
     expect(mockCreateKnowledgeEntity).not.toHaveBeenCalled();
@@ -478,7 +548,7 @@ describe('list_policies', () => {
       total: 1,
     });
 
-    const result = await listPolicies({ projectId: 'proj-1' }, ctx) as Record<string, unknown>;
+    const result = (await listPolicies({ projectId: 'proj-1' }, ctx)) as Record<string, unknown>;
     expect(result.projectId).toBe('proj-1');
     expect(result.total).toBe(1);
     expect(mockListPoliciesFn).toHaveBeenCalled();
@@ -522,7 +592,7 @@ describe('add_policy', () => {
     const ctx = buildCtx();
     const result = await addPolicy(
       { projectId: '', title: 'Test', content: 'Content', category: 'rule' },
-      ctx,
+      ctx
     );
     expect(result).toEqual({ error: 'projectId is required.' });
   });
@@ -531,7 +601,7 @@ describe('add_policy', () => {
     const ctx = buildCtx();
     const result = await addPolicy(
       { projectId: 'proj-1', title: '', content: 'Content', category: 'rule' },
-      ctx,
+      ctx
     );
     expect(result).toEqual({ error: 'title is required.' });
   });
@@ -540,7 +610,7 @@ describe('add_policy', () => {
     const ctx = buildCtx();
     const result = await addPolicy(
       { projectId: 'proj-1', title: 'Test', content: '', category: 'rule' },
-      ctx,
+      ctx
     );
     expect(result).toEqual({ error: 'content is required.' });
   });
@@ -549,9 +619,11 @@ describe('add_policy', () => {
     const ctx = buildCtx();
     const result = await addPolicy(
       { projectId: 'proj-1', title: 'Test', content: 'Content', category: 'invalid' },
-      ctx,
+      ctx
     );
-    expect(result).toEqual({ error: 'category must be one of: rule, constraint, delegation, preference' });
+    expect(result).toEqual({
+      error: 'category must be one of: rule, constraint, delegation, preference',
+    });
   });
 
   it('rejects unowned project via executeTool', async () => {
@@ -571,21 +643,133 @@ describe('add_policy', () => {
     const ctx = buildCtx({ ownedProject: { id: 'proj-1' } });
     mockCreatePolicy.mockResolvedValue({ id: 'pol-new', now: '2026-04-27T00:00:00Z' });
 
-    const result = await addPolicy(
-      { projectId: 'proj-1', title: 'No force push', content: 'Never force push to main', category: 'rule' },
-      ctx,
-    ) as Record<string, unknown>;
+    const result = (await addPolicy(
+      {
+        projectId: 'proj-1',
+        title: 'No force push',
+        content: 'Never force push to main',
+        category: 'rule',
+      },
+      ctx
+    )) as Record<string, unknown>;
 
     expect(result.id).toBe('pol-new');
     expect(result.category).toBe('rule');
     expect(result.title).toBe('No force push');
     expect(result.createdAt).toBe('2026-04-27T00:00:00Z');
     // H-3 fix: verify createPolicy called with correct positional args
-    // createPolicy(env, projectId, category, title, content, source, sourceSessionId, confidence)
+    // createPolicy(env, projectId, category, title, content, source, sourceSessionId,
+    //              confidence, scope, expiresAt)
+    // Omitting scope/expiresAt yields a standing policy — the pre-lifecycle behavior.
     expect(mockCreatePolicy).toHaveBeenCalledWith(
-      expect.anything(), 'proj-1', 'rule', 'No force push', 'Never force push to main',
-      'explicit', null, expect.any(Number),
+      expect.anything(),
+      'proj-1',
+      'rule',
+      'No force push',
+      'Never force push to main',
+      'explicit',
+      null,
+      expect.any(Number),
+      'always',
+      null
     );
+  });
+
+  it('forwards a task-scoped policy with its expiry', async () => {
+    const ctx = buildCtx({ ownedProject: { id: 'proj-1' } });
+    mockCreatePolicy.mockResolvedValue({ id: 'pol-scoped', now: '2026-04-27T00:00:00Z' });
+    const expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000;
+
+    await addPolicy(
+      {
+        projectId: 'proj-1',
+        title: 'Wave profile',
+        content: 'Applies to the 2026-08-21 wave.',
+        category: 'constraint',
+        scope: 'task',
+        expiresAt,
+      },
+      ctx
+    );
+
+    expect(mockCreatePolicy).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'constraint',
+      'Wave profile',
+      'Applies to the 2026-08-21 wave.',
+      'explicit',
+      null,
+      expect.any(Number),
+      'task',
+      expiresAt
+    );
+  });
+
+  it('rejects a task-scoped policy with no expiry before writing', async () => {
+    // This orchestrator surface is the one most likely to capture dated workflow
+    // constraints, so it has to enforce the same invariant as the MCP and REST
+    // boundaries — otherwise policies created here are permanently non-expiring,
+    // which is exactly the failure the lifecycle feature exists to prevent.
+    const ctx = buildCtx({ ownedProject: { id: 'proj-1' } });
+
+    const result = (await addPolicy(
+      {
+        projectId: 'proj-1',
+        title: 'Wave profile',
+        content: 'Applies to one wave.',
+        category: 'constraint',
+        scope: 'task',
+      },
+      ctx
+    )) as Record<string, unknown>;
+
+    expect(String(result.error)).toMatch(/task-scoped policy must set expiresAt/);
+    expect(mockCreatePolicy).not.toHaveBeenCalled();
+  });
+
+  // The MCP and REST boundaries each cover these branches for their own inline
+  // parser. This writer has a third, separate parser, so "the shared validator is
+  // well tested" does not prove THIS boundary reaches it — rule 61 wants every
+  // runtime that performs the operation covered, not just the busiest one. Each
+  // case must fail closed WITHOUT writing.
+  it.each([
+    {
+      label: 'an expiry in the past',
+      overrides: { scope: 'task' as const, expiresAt: Date.now() - 60_000 },
+      expected: /expiresAt must be in the future/,
+    },
+    {
+      label: 'an expiry beyond the max horizon',
+      overrides: { scope: 'task' as const, expiresAt: Date.now() + 400 * 24 * 60 * 60 * 1000 },
+      expected: /expiresAt must be within/,
+    },
+    {
+      label: 'an unknown scope',
+      overrides: { scope: 'forever', expiresAt: Date.now() + 60_000 },
+      expected: /scope must be one of/,
+    },
+    {
+      label: 'a non-numeric expiry',
+      overrides: { scope: 'task' as const, expiresAt: 'next tuesday' as unknown as number },
+      expected: /expiresAt must be a number/,
+    },
+  ])('rejects $label before writing', async ({ overrides, expected }) => {
+    const ctx = buildCtx({ ownedProject: { id: 'proj-1' } });
+
+    const result = (await addPolicy(
+      {
+        projectId: 'proj-1',
+        title: 'Wave profile',
+        content: 'Applies to one wave.',
+        category: 'constraint',
+        ...overrides,
+      },
+      ctx
+    )) as Record<string, unknown>;
+
+    expect(String(result.error)).toMatch(expected);
+    expect(mockCreatePolicy).not.toHaveBeenCalled();
   });
 
   it('is registered in toolHandlers via executeTool', async () => {

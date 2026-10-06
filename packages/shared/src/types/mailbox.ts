@@ -25,12 +25,41 @@ export const DURABLE_MESSAGE_CLASSES: readonly MessageClass[] = [
   'shutdown_with_final_prompt',
 ];
 
+/**
+ * Numeric urgency rank per message class. Mirrors the SQL CASE ordering used by
+ * the delivery claim engine (`prompt-delivery.ts` / `mailbox.ts`) so TypeScript
+ * callers and SQL ordering can never drift apart.
+ */
+export const MESSAGE_CLASS_URGENCY: Record<MessageClass, number> = {
+  notify: 1,
+  deliver: 2,
+  interrupt: 3,
+  preempt_and_replan: 4,
+  shutdown_with_final_prompt: 5,
+};
+
+/**
+ * The lowest urgency rank that authorizes stop-and-deliver: a message of this
+ * class or above may cancel the target's in-flight turn so it is delivered as
+ * the very next prompt instead of parking in `retry_wait` behind the busy turn.
+ */
+export const TURN_STOP_URGENCY_THRESHOLD = MESSAGE_CLASS_URGENCY.interrupt;
+
+/** True when a message class is urgent enough to trigger stop-and-deliver. */
+export function isUrgentMessageClass(messageClass: MessageClass): boolean {
+  return MESSAGE_CLASS_URGENCY[messageClass] >= TURN_STOP_URGENCY_THRESHOLD;
+}
+
 // ─── Delivery State Machine ────────────────────────────────────────────────
 
 export const DELIVERY_STATES = [
   'queued',
+  'delivering',
+  'retry_wait',
   'delivered',
   'acked',
+  'failed',
+  'ambiguous',
   'expired',
 ] as const;
 
@@ -38,13 +67,77 @@ export type DeliveryState = (typeof DELIVERY_STATES)[number];
 
 /** Valid state transitions for the delivery state machine. */
 export const DELIVERY_STATE_TRANSITIONS: Record<DeliveryState, DeliveryState[]> = {
-  queued: ['delivered', 'expired'],
+  queued: ['delivering', 'delivered', 'failed', 'ambiguous', 'expired'],
+  delivering: ['retry_wait', 'delivered', 'failed', 'ambiguous', 'expired'],
+  retry_wait: ['delivering', 'failed', 'ambiguous', 'expired'],
   delivered: ['acked', 'expired', 'queued'],
   acked: [],
+  failed: [],
+  ambiguous: [],
   expired: [],
 };
 
-export const DELIVERY_TERMINAL_STATES: readonly DeliveryState[] = ['acked', 'expired'];
+export const DELIVERY_TERMINAL_STATES: readonly DeliveryState[] = [
+  'acked',
+  'failed',
+  'ambiguous',
+  'expired',
+];
+
+export const PROMPT_DELIVERY_SOURCES = [
+  'user_followup',
+  'comment_directive',
+  'agent_mailbox',
+  'orchestration_handoff',
+  'checkpoint_continuation',
+  'parent_wakeup',
+  'project_event_wake',
+  'scheduled_action',
+] as const;
+
+export type PromptDeliverySource = (typeof PROMPT_DELIVERY_SOURCES)[number];
+
+export const VM_PROMPT_RECEIPT_STATES = [
+  'accepted',
+  'in_flight',
+  'completed',
+  'not_found',
+  'ambiguous',
+] as const;
+
+export type VmPromptReceiptState = (typeof VM_PROMPT_RECEIPT_STATES)[number];
+
+export interface VmPromptDeliveryCapabilities {
+  protocolVersion: number;
+  runtimeIdentity: string;
+  promptReceipts: {
+    supported: boolean;
+    lookup: boolean;
+    states: readonly VmPromptReceiptState[];
+  };
+  checkpointRollover: {
+    supported: boolean;
+    automatic: boolean;
+    states: readonly string[];
+    defaultGraceMs: number;
+    maxGraceMs: number;
+    operationTimeoutMs: number;
+  };
+}
+
+export interface VmPromptDeliveryReceipt {
+  deliveryId: string;
+  state: VmPromptReceiptState;
+  runtimeIdentity: string;
+  acceptedAt: number | null;
+  completedAt: number | null;
+}
+
+export interface VmPromptDeliveryResponse {
+  status: 'accepted' | 'duplicate' | 'not_ready' | 'conflict';
+  sessionId: string;
+  receipt: VmPromptDeliveryReceipt;
+}
 
 // ─── Sender identity ──────────────────────────────────────────────────────
 
@@ -71,6 +164,20 @@ export interface AgentMailboxMessage {
   createdAt: number;
   deliveredAt: number | null;
   ackedAt: number | null;
+  sourceKind: PromptDeliverySource;
+  promptMessageId: string;
+  nextAttemptAt: number | null;
+  lastError: string | null;
+  terminalReason: string | null;
+  attemptId: string | null;
+  attemptStartedAt: number | null;
+  runtimeIdentity: string | null;
+  receiptState: VmPromptReceiptState | null;
+  receiptRuntimeIdentity: string | null;
+  receiptCheckedAt: number | null;
+  acceptedAt: number | null;
+  adapterProtocolVersion: number | null;
+  receiptSupported: boolean | null;
 }
 
 // ─── API request/response shapes ───────────────────────────────────────────

@@ -1,0 +1,754 @@
+/**
+ * Durable Object Wall-Time Regression Check
+ *
+ * Queries Cloudflare GraphQL Analytics for Durable Object invocation P99 wall
+ * time, compares a recent window against a prior baseline window, and fails
+ * when a per-script/namespace/object series regresses beyond the configured
+ * threshold.
+ *
+ * Configuration:
+ *   CF_TOKEN                         Cloudflare API token (required)
+ *   CF_ACCOUNT_ID                    Cloudflare account ID (required)
+ *   DO_WALL_TIME_RECENT_HOURS        Recent window length (default: 24)
+ *   DO_WALL_TIME_BASELINE_HOURS      Baseline window before recent (default: 168)
+ *   DO_WALL_TIME_REGRESSION_RATIO    Failure ratio (default: 2)
+ *   DO_INVOCATION_RATE_REGRESSION_RATIO Invocation-rate failure ratio (default: 2)
+ *   DO_WALL_TIME_MIN_REQUESTS        Minimum recent+baseline requests (default: 10)
+ *   DO_WALL_TIME_LIMIT               GraphQL row limit per query (default: 10000)
+ *   DO_WALL_TIME_SCRIPT_NAMES        Optional comma-separated scriptName filter
+ *   DO_WALL_TIME_NAMESPACE_IDS       Optional comma-separated namespaceId filter
+ *   DO_WALL_TIME_OBJECT_NAMES        Optional comma-separated Durable Object name filter
+ *   DO_WALL_TIME_INVOCATION_TYPES    Optional comma-separated type filter (default: alarm; use all to disable)
+ *   DO_WALL_TIME_GRAPHQL_ENDPOINT    Optional GraphQL endpoint override
+ *   DO_CRON_LIVENESS_MAX_AGE_HOURS   Maximum cron.completed age (default: 3)
+ *   DO_CRON_LIVENESS_SCRIPT_NAMES    Cron service filter (falls back to DO_WALL_TIME_SCRIPT_NAMES; one is required)
+ *   DO_CRON_LIVENESS_ENDPOINT        Optional Workers telemetry endpoint override
+ *
+ * Exit codes:
+ *   0 — No regression detected, or insufficient data
+ *   1 — Wall-time regression detected
+ *   2 — Configuration/API error
+ */
+import { pathToFileURL } from 'node:url';
+
+export const DEFAULT_RECENT_WINDOW_HOURS = 24;
+export const DEFAULT_BASELINE_WINDOW_HOURS = 168;
+export const DEFAULT_REGRESSION_RATIO = 2;
+export const DEFAULT_INVOCATION_RATE_REGRESSION_RATIO = 2;
+export const DEFAULT_MIN_REQUESTS = 10;
+export const DEFAULT_QUERY_LIMIT = 10_000;
+export const DEFAULT_GRAPHQL_ENDPOINT = 'https://api.cloudflare.com/client/v4/graphql';
+export const DEFAULT_CRON_LIVENESS_MAX_AGE_HOURS = 3;
+export const DEFAULT_INVOCATION_TYPES = ['alarm'];
+export const DEFAULT_CRON_LIVENESS_QUERY_ID = 'sam-cron-liveness';
+const WALL_TIME_MICROSECONDS_PER_MILLISECOND = 1_000;
+
+interface Config {
+  cfToken: string;
+  cfAccountId: string;
+  recentHours: number;
+  baselineHours: number;
+  regressionRatio: number;
+  invocationRateRegressionRatio: number;
+  minRequests: number;
+  queryLimit: number;
+  scriptNames: string[];
+  namespaceIds: string[];
+  objectNames: string[];
+  invocationTypes: string[];
+  graphqlEndpoint: string;
+  cronLivenessMaxAgeHours: number;
+  cronLivenessScriptNames: string[];
+  cronLivenessEndpoint: string;
+  now: Date;
+}
+
+export interface DurableObjectWallTimeRow {
+  dimensions: {
+    datetimeHour?: string;
+    scriptName?: string;
+    namespaceId?: string;
+    name?: string;
+    type?: string;
+  };
+  quantiles?: {
+    wallTimeP99?: number | null;
+    wallTimeP999?: number | null;
+  };
+  sum?: {
+    requests?: number | null;
+  };
+}
+
+interface GraphQLResponse {
+  data?: {
+    viewer?: {
+      accounts?: Array<{
+        durableObjectsInvocationsAdaptiveGroups?: DurableObjectWallTimeRow[];
+      }>;
+    };
+  };
+  errors?: Array<{ message: string }>;
+}
+
+export interface SeriesSummary {
+  key: string;
+  scriptName: string;
+  namespaceId: string;
+  objectName: string;
+  invocationType: string;
+  bucketCount: number;
+  requestCount: number;
+  averageP99Ms: number;
+  maxP99Ms: number;
+  maxP999Ms: number;
+}
+
+export interface WallTimeFinding {
+  key: string;
+  scriptName: string;
+  namespaceId: string;
+  objectName: string;
+  invocationType: string;
+  recentAverageP99Ms: number;
+  baselineAverageP99Ms: number;
+  recentMaxP99Ms: number;
+  baselineMaxP99Ms: number;
+  recentRequests: number;
+  baselineRequests: number;
+  ratio: number;
+}
+
+export interface AnalysisResult {
+  findings: WallTimeFinding[];
+  skipped: string[];
+  recentSeries: SeriesSummary[];
+  baselineSeries: SeriesSummary[];
+}
+
+export interface InvocationRateSummary {
+  key: string;
+  scriptName: string;
+  namespaceId: string;
+  requestCount: number;
+  requestsPerHour: number;
+}
+
+export interface InvocationRateFinding {
+  key: string;
+  scriptName: string;
+  namespaceId: string;
+  recentRequests: number;
+  baselineRequests: number;
+  recentRequestsPerHour: number;
+  baselineRequestsPerHour: number;
+  ratio: number;
+}
+
+export interface InvocationRateAnalysisResult {
+  findings: InvocationRateFinding[];
+  skipped: string[];
+  recentSeries: InvocationRateSummary[];
+  baselineSeries: InvocationRateSummary[];
+}
+
+interface WindowRange {
+  start: Date;
+  end: Date;
+}
+
+function parseNumberEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === '') return fallback;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(`${name} must be a positive number`);
+  }
+  return parsed;
+}
+
+function parseCsvEnv(name: string): string[] {
+  return (process.env[name] ?? '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
+function parseInvocationTypesEnv(): string[] {
+  const configured = parseCsvEnv('DO_WALL_TIME_INVOCATION_TYPES');
+  if (configured.length === 0) return DEFAULT_INVOCATION_TYPES;
+  if (configured.some((item) => item.toLowerCase() === 'all')) return [];
+  return configured;
+}
+
+function resolveOptionalEndpoint(name: string, fallback: string): string {
+  return process.env[name]?.trim() || fallback;
+}
+
+export function getConfig(now = new Date()): Config {
+  const cfToken = process.env.CF_TOKEN;
+  const cfAccountId = process.env.CF_ACCOUNT_ID;
+  if (!cfToken) throw new Error('CF_TOKEN environment variable is required');
+  if (!cfAccountId) throw new Error('CF_ACCOUNT_ID environment variable is required');
+
+  const scriptNames = parseCsvEnv('DO_WALL_TIME_SCRIPT_NAMES');
+  const cronLivenessScriptNames = resolveCronLivenessScriptNames(
+    scriptNames,
+    parseCsvEnv('DO_CRON_LIVENESS_SCRIPT_NAMES')
+  );
+
+  return {
+    cfToken,
+    cfAccountId,
+    recentHours: parseNumberEnv('DO_WALL_TIME_RECENT_HOURS', DEFAULT_RECENT_WINDOW_HOURS),
+    baselineHours: parseNumberEnv('DO_WALL_TIME_BASELINE_HOURS', DEFAULT_BASELINE_WINDOW_HOURS),
+    regressionRatio: parseNumberEnv('DO_WALL_TIME_REGRESSION_RATIO', DEFAULT_REGRESSION_RATIO),
+    invocationRateRegressionRatio: parseNumberEnv(
+      'DO_INVOCATION_RATE_REGRESSION_RATIO',
+      DEFAULT_INVOCATION_RATE_REGRESSION_RATIO
+    ),
+    minRequests: parseNumberEnv('DO_WALL_TIME_MIN_REQUESTS', DEFAULT_MIN_REQUESTS),
+    queryLimit: parseNumberEnv('DO_WALL_TIME_LIMIT', DEFAULT_QUERY_LIMIT),
+    scriptNames,
+    namespaceIds: parseCsvEnv('DO_WALL_TIME_NAMESPACE_IDS'),
+    objectNames: parseCsvEnv('DO_WALL_TIME_OBJECT_NAMES'),
+    invocationTypes: parseInvocationTypesEnv(),
+    graphqlEndpoint: resolveOptionalEndpoint(
+      'DO_WALL_TIME_GRAPHQL_ENDPOINT',
+      DEFAULT_GRAPHQL_ENDPOINT
+    ),
+    cronLivenessMaxAgeHours: parseNumberEnv(
+      'DO_CRON_LIVENESS_MAX_AGE_HOURS',
+      DEFAULT_CRON_LIVENESS_MAX_AGE_HOURS
+    ),
+    cronLivenessScriptNames,
+    cronLivenessEndpoint: resolveOptionalEndpoint(
+      'DO_CRON_LIVENESS_ENDPOINT',
+      `https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/workers/observability/telemetry/query`
+    ),
+    now,
+  };
+}
+
+export function resolveCronLivenessScriptNames(
+  wallTimeScriptNames: string[],
+  configuredCronScriptNames: string[]
+): string[] {
+  const resolved =
+    configuredCronScriptNames.length > 0 ? configuredCronScriptNames : wallTimeScriptNames;
+  if (resolved.length === 0) {
+    throw new Error(
+      'DO_CRON_LIVENESS_SCRIPT_NAMES or DO_WALL_TIME_SCRIPT_NAMES must target the API Worker'
+    );
+  }
+  return resolved;
+}
+
+export function getWindows(
+  now: Date,
+  recentHours: number,
+  baselineHours: number
+): {
+  recent: WindowRange;
+  baseline: WindowRange;
+} {
+  const recentEnd = now;
+  const recentStart = new Date(recentEnd.getTime() - recentHours * 60 * 60 * 1000);
+  const baselineEnd = recentStart;
+  const baselineStart = new Date(baselineEnd.getTime() - baselineHours * 60 * 60 * 1000);
+  return {
+    recent: { start: recentStart, end: recentEnd },
+    baseline: { start: baselineStart, end: baselineEnd },
+  };
+}
+
+function buildFilter(config: Config, range: WindowRange): Record<string, unknown> {
+  const filter: Record<string, unknown> = {
+    datetime_geq: range.start.toISOString(),
+    datetime_lt: range.end.toISOString(),
+  };
+  if (config.scriptNames.length === 1) filter.scriptName = config.scriptNames[0];
+  if (config.scriptNames.length > 1) filter.scriptName_in = config.scriptNames;
+  if (config.namespaceIds.length === 1) filter.namespaceId = config.namespaceIds[0];
+  if (config.namespaceIds.length > 1) filter.namespaceId_in = config.namespaceIds;
+  if (config.objectNames.length === 1) filter.name = config.objectNames[0];
+  if (config.objectNames.length > 1) filter.name_in = config.objectNames;
+  if (config.invocationTypes.length === 1) filter.type = config.invocationTypes[0];
+  if (config.invocationTypes.length > 1) filter.type_in = config.invocationTypes;
+  return filter;
+}
+
+const DURABLE_OBJECT_WALL_TIME_QUERY = `
+query DurableObjectWallTime(
+  $accountTag: string!
+  $filter: AccountDurableObjectsInvocationsAdaptiveGroupsFilter_InputObject!
+  $limit: uint64!
+) {
+  viewer {
+    accounts(filter: { accountTag: $accountTag }) {
+      durableObjectsInvocationsAdaptiveGroups(
+        filter: $filter
+        limit: $limit
+        orderBy: [datetimeHour_ASC, scriptName_ASC, namespaceId_ASC, name_ASC, type_ASC]
+      ) {
+        dimensions {
+          datetimeHour
+          scriptName
+          namespaceId
+          name
+          type
+        }
+        quantiles {
+          wallTimeP99
+          wallTimeP999
+        }
+        sum {
+          requests
+        }
+      }
+    }
+  }
+}`;
+
+function parseGraphQLResponse(payload: unknown): DurableObjectWallTimeRow[] {
+  const payloadIsObject =
+    typeof payload === 'object' && payload !== null && !Array.isArray(payload);
+  if (!payloadIsObject) throw new Error('GraphQL response must be an object');
+  const response = payload as GraphQLResponse;
+  if (response.errors?.length) {
+    throw new Error(
+      `Cloudflare GraphQL error: ${response.errors.map((error) => error.message).join('; ')}`
+    );
+  }
+  const accounts = response.data?.viewer?.accounts;
+  if (!accounts?.length) return [];
+  return accounts.flatMap((account) => account.durableObjectsInvocationsAdaptiveGroups ?? []);
+}
+
+async function queryWallTimeRows(
+  config: Config,
+  range: WindowRange
+): Promise<DurableObjectWallTimeRow[]> {
+  const resp = await fetch(config.graphqlEndpoint, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${config.cfToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      query: DURABLE_OBJECT_WALL_TIME_QUERY,
+      variables: {
+        accountTag: config.cfAccountId,
+        filter: buildFilter(config, range),
+        limit: config.queryLimit,
+      },
+    }),
+  });
+
+  if (!resp.ok) {
+    throw new Error(`Cloudflare GraphQL request failed: ${resp.status} ${resp.statusText}`);
+  }
+
+  return parseGraphQLResponse(await resp.json());
+}
+
+function seriesKey(row: DurableObjectWallTimeRow): string {
+  const scriptName = row.dimensions.scriptName ?? 'unknown-script';
+  const namespaceId = row.dimensions.namespaceId ?? 'unknown-namespace';
+  const objectName = row.dimensions.name ?? 'all-objects';
+  const invocationType = row.dimensions.type ?? 'unknown-type';
+  return `${scriptName}::${namespaceId}::${objectName}::${invocationType}`;
+}
+
+function rawWallTimeToMs(rawValue: number): number {
+  return rawValue / WALL_TIME_MICROSECONDS_PER_MILLISECOND;
+}
+
+export function summarizeRows(rows: DurableObjectWallTimeRow[]): SeriesSummary[] {
+  const groups = new Map<string, DurableObjectWallTimeRow[]>();
+  for (const row of rows) {
+    const p99 = row.quantiles?.wallTimeP99;
+    if (typeof p99 !== 'number' || !Number.isFinite(p99)) continue;
+    const key = seriesKey(row);
+    const existing = groups.get(key) ?? [];
+    existing.push(row);
+    groups.set(key, existing);
+  }
+
+  return Array.from(groups.entries())
+    .map(([key, groupRows]) => {
+      const first = groupRows[0];
+      const p99Values = groupRows.map((row) => rawWallTimeToMs(row.quantiles?.wallTimeP99 ?? 0));
+      const p999Values = groupRows.map((row) => rawWallTimeToMs(row.quantiles?.wallTimeP999 ?? 0));
+      const requestCount = groupRows.reduce((sum, row) => sum + Number(row.sum?.requests ?? 0), 0);
+      return {
+        key,
+        scriptName: first?.dimensions.scriptName ?? 'unknown-script',
+        namespaceId: first?.dimensions.namespaceId ?? 'unknown-namespace',
+        objectName: first?.dimensions.name ?? 'all-objects',
+        invocationType: first?.dimensions.type ?? 'unknown-type',
+        bucketCount: groupRows.length,
+        requestCount,
+        averageP99Ms: p99Values.reduce((sum, value) => sum + value, 0) / p99Values.length,
+        maxP99Ms: Math.max(...p99Values),
+        maxP999Ms: Math.max(...p999Values),
+      };
+    })
+    .sort((a, b) => b.averageP99Ms - a.averageP99Ms);
+}
+
+function invocationRateKey(row: DurableObjectWallTimeRow): string {
+  const scriptName = row.dimensions.scriptName ?? 'unknown-script';
+  const namespaceId = row.dimensions.namespaceId ?? 'unknown-namespace';
+  return `${scriptName}::${namespaceId}`;
+}
+
+export function summarizeInvocationRates(
+  rows: DurableObjectWallTimeRow[],
+  windowHours: number
+): InvocationRateSummary[] {
+  const groups = new Map<string, InvocationRateSummary>();
+  for (const row of rows) {
+    const key = invocationRateKey(row);
+    const requestCount = Number(row.sum?.requests ?? 0);
+    const existing = groups.get(key);
+    if (existing) {
+      existing.requestCount += requestCount;
+      existing.requestsPerHour = existing.requestCount / windowHours;
+      continue;
+    }
+    groups.set(key, {
+      key,
+      scriptName: row.dimensions.scriptName ?? 'unknown-script',
+      namespaceId: row.dimensions.namespaceId ?? 'unknown-namespace',
+      requestCount,
+      requestsPerHour: requestCount / windowHours,
+    });
+  }
+  return Array.from(groups.values()).sort((a, b) => b.requestsPerHour - a.requestsPerHour);
+}
+
+export function analyzeInvocationRateRegression(
+  recentRows: DurableObjectWallTimeRow[],
+  baselineRows: DurableObjectWallTimeRow[],
+  options: {
+    recentHours: number;
+    baselineHours: number;
+    regressionRatio: number;
+    minRequests: number;
+  }
+): InvocationRateAnalysisResult {
+  const recentSeries = summarizeInvocationRates(recentRows, options.recentHours);
+  const baselineSeries = summarizeInvocationRates(baselineRows, options.baselineHours);
+  const baselineByKey = new Map(baselineSeries.map((summary) => [summary.key, summary]));
+  const findings: InvocationRateFinding[] = [];
+  const skipped: string[] = [];
+
+  for (const recent of recentSeries) {
+    const baseline = baselineByKey.get(recent.key);
+    if (!baseline) {
+      skipped.push(`${recent.key}: no baseline data`);
+      continue;
+    }
+    const totalRequests = recent.requestCount + baseline.requestCount;
+    if (totalRequests < options.minRequests) {
+      skipped.push(`${recent.key}: ${totalRequests} requests below minimum ${options.minRequests}`);
+      continue;
+    }
+    if (baseline.requestsPerHour <= 0) {
+      skipped.push(`${recent.key}: baseline request rate is zero or missing`);
+      continue;
+    }
+    const ratio = recent.requestsPerHour / baseline.requestsPerHour;
+    if (ratio >= options.regressionRatio) {
+      findings.push({
+        key: recent.key,
+        scriptName: recent.scriptName,
+        namespaceId: recent.namespaceId,
+        recentRequests: recent.requestCount,
+        baselineRequests: baseline.requestCount,
+        recentRequestsPerHour: recent.requestsPerHour,
+        baselineRequestsPerHour: baseline.requestsPerHour,
+        ratio,
+      });
+    }
+  }
+
+  findings.sort((a, b) => b.ratio - a.ratio);
+  return { findings, skipped, recentSeries, baselineSeries };
+}
+
+export function analyzeWallTimeRegression(
+  recentRows: DurableObjectWallTimeRow[],
+  baselineRows: DurableObjectWallTimeRow[],
+  options: { regressionRatio: number; minRequests: number }
+): AnalysisResult {
+  const recentSeries = summarizeRows(recentRows);
+  const baselineSeries = summarizeRows(baselineRows);
+  const baselineByKey = new Map(baselineSeries.map((summary) => [summary.key, summary]));
+  const findings: WallTimeFinding[] = [];
+  const skipped: string[] = [];
+
+  for (const recent of recentSeries) {
+    const baseline = baselineByKey.get(recent.key);
+    if (!baseline) {
+      skipped.push(`${recent.key}: no baseline data`);
+      continue;
+    }
+    const totalRequests = recent.requestCount + baseline.requestCount;
+    if (totalRequests < options.minRequests) {
+      skipped.push(`${recent.key}: ${totalRequests} requests below minimum ${options.minRequests}`);
+      continue;
+    }
+    if (baseline.averageP99Ms <= 0) {
+      skipped.push(`${recent.key}: baseline P99 is zero or missing`);
+      continue;
+    }
+
+    const ratio = recent.averageP99Ms / baseline.averageP99Ms;
+    if (ratio >= options.regressionRatio) {
+      findings.push({
+        key: recent.key,
+        scriptName: recent.scriptName,
+        namespaceId: recent.namespaceId,
+        objectName: recent.objectName,
+        invocationType: recent.invocationType,
+        recentAverageP99Ms: recent.averageP99Ms,
+        baselineAverageP99Ms: baseline.averageP99Ms,
+        recentMaxP99Ms: recent.maxP99Ms,
+        baselineMaxP99Ms: baseline.maxP99Ms,
+        recentRequests: recent.requestCount,
+        baselineRequests: baseline.requestCount,
+        ratio,
+      });
+    }
+  }
+
+  findings.sort((a, b) => b.ratio - a.ratio);
+  return { findings, skipped, recentSeries, baselineSeries };
+}
+
+function formatMs(value: number): string {
+  return `${Math.round(value).toLocaleString('en-US')}ms`;
+}
+
+export function formatReport(result: AnalysisResult, threshold: number): string {
+  const lines: string[] = [];
+  lines.push(`Recent series: ${result.recentSeries.length}`);
+  lines.push(`Baseline series: ${result.baselineSeries.length}`);
+  if (result.skipped.length > 0) {
+    lines.push(`Skipped series: ${result.skipped.length}`);
+  }
+
+  if (result.findings.length === 0) {
+    lines.push(`No Durable Object wall-time regressions detected at ${threshold}x threshold.`);
+    return lines.join('\n');
+  }
+
+  lines.push(`Durable Object wall-time regressions detected: ${result.findings.length}`);
+  for (const finding of result.findings) {
+    lines.push('');
+    lines.push(
+      `- ${finding.scriptName} / ${finding.namespaceId} / ${finding.objectName} / ${finding.invocationType}`
+    );
+    lines.push(`  ratio: ${finding.ratio.toFixed(2)}x`);
+    lines.push(
+      `  recent avg P99: ${formatMs(finding.recentAverageP99Ms)} ` +
+        `(max ${formatMs(finding.recentMaxP99Ms)}, requests ${finding.recentRequests})`
+    );
+    lines.push(
+      `  baseline avg P99: ${formatMs(finding.baselineAverageP99Ms)} ` +
+        `(max ${formatMs(finding.baselineMaxP99Ms)}, requests ${finding.baselineRequests})`
+    );
+  }
+  return lines.join('\n');
+}
+
+export function formatInvocationRateReport(
+  result: InvocationRateAnalysisResult,
+  threshold: number
+): string {
+  const lines = [
+    `Recent invocation-rate series: ${result.recentSeries.length}`,
+    `Baseline invocation-rate series: ${result.baselineSeries.length}`,
+  ];
+  if (result.skipped.length > 0)
+    lines.push(`Skipped invocation-rate series: ${result.skipped.length}`);
+  if (result.findings.length === 0) {
+    lines.push(
+      `No Durable Object invocation-rate regressions detected at ${threshold}x threshold.`
+    );
+    return lines.join('\n');
+  }
+  lines.push(`Durable Object invocation-rate regressions detected: ${result.findings.length}`);
+  for (const finding of result.findings) {
+    lines.push('');
+    lines.push(`- ${finding.scriptName} / ${finding.namespaceId}`);
+    lines.push(`  ratio: ${finding.ratio.toFixed(2)}x`);
+    lines.push(
+      `  recent: ${finding.recentRequestsPerHour.toFixed(2)} requests/hour (${finding.recentRequests} requests)`
+    );
+    lines.push(
+      `  baseline: ${finding.baselineRequestsPerHour.toFixed(2)} requests/hour (${finding.baselineRequests} requests)`
+    );
+  }
+  return lines.join('\n');
+}
+
+export function hasCronCompletedEvent(payload: unknown): boolean {
+  const payloadIsObject =
+    typeof payload === 'object' && payload !== null && !Array.isArray(payload);
+  if (!payloadIsObject || (payload as { success?: unknown }).success !== true) {
+    throw new Error('Workers telemetry cron-liveness query was unsuccessful');
+  }
+  const result = (payload as { result?: unknown }).result;
+  const resultIsObject = typeof result === 'object' && result !== null && !Array.isArray(result);
+  if (!resultIsObject) return false;
+  const { calculations, data } = result as { calculations?: unknown; data?: unknown };
+
+  if (Array.isArray(calculations)) {
+    return calculations.some((calculation: unknown) => {
+      const calculationIsObject =
+        typeof calculation === 'object' && calculation !== null && !Array.isArray(calculation);
+      if (!calculationIsObject) return false;
+      const { aggregates } = calculation as { aggregates?: unknown };
+      if (!Array.isArray(aggregates)) return false;
+      return aggregates.some((aggregate: unknown) => {
+        const aggregateIsObject =
+          typeof aggregate === 'object' && aggregate !== null && !Array.isArray(aggregate);
+        if (!aggregateIsObject) return false;
+        const { value, count } = aggregate as { value?: unknown; count?: unknown };
+        return Number(value ?? count ?? 0) > 0;
+      });
+    });
+  }
+
+  return (
+    Array.isArray(data) &&
+    data.some((row: unknown) => {
+      const rowIsObject = typeof row === 'object' && row !== null && !Array.isArray(row);
+      return rowIsObject && Number((row as { cnt?: unknown }).cnt ?? 0) > 0;
+    })
+  );
+}
+
+export function buildCronLivenessQuery(
+  now: Date,
+  maxAgeHours: number,
+  scriptNames: string[]
+): Record<string, unknown> {
+  const to = now.getTime();
+  const from = to - maxAgeHours * 60 * 60 * 1_000;
+  return {
+    queryId: DEFAULT_CRON_LIVENESS_QUERY_ID,
+    timeframe: { from, to },
+    dry: true,
+    chart: false,
+    ignoreSeries: true,
+    view: 'calculations',
+    parameters: {
+      calculations: [{ operator: 'count', alias: 'cron_completed_count' }],
+      filterCombination: 'and',
+      filters: [
+        {
+          key: '$metadata.service',
+          operation: 'in',
+          type: 'string',
+          value: scriptNames.join(','),
+        },
+      ],
+      needle: { value: 'cron.completed', matchCase: true, isRegex: false },
+      limit: 1,
+    },
+  };
+}
+
+async function queryCronLiveness(config: Config): Promise<boolean> {
+  const response = await fetch(config.cronLivenessEndpoint, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${config.cfToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(
+      buildCronLivenessQuery(
+        config.now,
+        config.cronLivenessMaxAgeHours,
+        config.cronLivenessScriptNames
+      )
+    ),
+  });
+  if (!response.ok) {
+    throw new Error(`Workers telemetry query failed: ${response.status} ${response.statusText}`);
+  }
+  return hasCronCompletedEvent(await response.json());
+}
+
+async function main(): Promise<void> {
+  console.log('Durable Object Wall-Time Regression Check');
+  console.log('='.repeat(52));
+
+  const config = getConfig();
+  const windows = getWindows(config.now, config.recentHours, config.baselineHours);
+  console.log(
+    `Recent window: ${windows.recent.start.toISOString()} to ${windows.recent.end.toISOString()}`
+  );
+  console.log(
+    `Baseline window: ${windows.baseline.start.toISOString()} to ${windows.baseline.end.toISOString()}`
+  );
+  console.log(
+    `Wall-time threshold: ${config.regressionRatio}x | Rate threshold: ${config.invocationRateRegressionRatio}x | Minimum requests: ${config.minRequests} | Limit: ${config.queryLimit}`
+  );
+  console.log(`Cron liveness maximum age: ${config.cronLivenessMaxAgeHours}h`);
+  console.log(`Cron liveness service filter: ${config.cronLivenessScriptNames.join(', ')}`);
+  if (config.scriptNames.length > 0) console.log(`Script filter: ${config.scriptNames.join(', ')}`);
+  if (config.namespaceIds.length > 0)
+    console.log(`Namespace filter: ${config.namespaceIds.join(', ')}`);
+  if (config.objectNames.length > 0)
+    console.log(`Object-name filter: ${config.objectNames.join(', ')}`);
+  if (config.invocationTypes.length > 0) {
+    console.log(`Invocation type filter: ${config.invocationTypes.join(', ')}`);
+  } else {
+    console.log('Invocation type filter: all');
+  }
+  console.log('');
+
+  const [recentRows, baselineRows] = await Promise.all([
+    queryWallTimeRows(config, windows.recent),
+    queryWallTimeRows(config, windows.baseline),
+  ]);
+
+  const result = analyzeWallTimeRegression(recentRows, baselineRows, {
+    regressionRatio: config.regressionRatio,
+    minRequests: config.minRequests,
+  });
+  console.log(formatReport(result, config.regressionRatio));
+
+  const rateResult = analyzeInvocationRateRegression(recentRows, baselineRows, {
+    recentHours: config.recentHours,
+    baselineHours: config.baselineHours,
+    regressionRatio: config.invocationRateRegressionRatio,
+    minRequests: config.minRequests,
+  });
+  console.log('');
+  console.log(formatInvocationRateReport(rateResult, config.invocationRateRegressionRatio));
+
+  const cronIsLive = await queryCronLiveness(config);
+  console.log('');
+  console.log(
+    cronIsLive
+      ? `Cron liveness: cron.completed observed within ${config.cronLivenessMaxAgeHours}h.`
+      : `Cron liveness failure: no cron.completed event observed within ${config.cronLivenessMaxAgeHours}h.`
+  );
+
+  if (result.findings.length > 0 || rateResult.findings.length > 0 || !cronIsLive) {
+    process.exit(1);
+  }
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err) => {
+    console.error('Fatal error:', err instanceof Error ? err.message : String(err));
+    process.exit(2);
+  });
+}

@@ -110,7 +110,7 @@ describe('parseReviewTable', () => {
     const section = `
 | Reviewer | Status | Outcome |
 |----------|--------|---------|
-| <!-- e.g. go-specialist --> | <!-- PASS / ADDRESSED / DISPATCHED / FAILED --> | <!-- summary --> |
+| <!-- e.g. go-specialist --> | <!-- PASS / ADDRESSED / PENDING / FAILED --> | <!-- summary --> |
 `;
     const rows = parseReviewTable(section);
     expect(rows).toHaveLength(0);
@@ -281,18 +281,18 @@ describe('validateReviewEvidence', () => {
 
   // --- FAIL cases ---
 
-  it('fails when any reviewer shows DISPATCHED', () => {
+  it('fails when any reviewer shows PENDING', () => {
     const body = buildBody({
       agentAuthored: true,
       rows: [
         '| go-specialist | PASS | no findings |',
-        '| security-auditor | DISPATCHED | launched but not returned |',
+        '| security-auditor | PENDING | started but not returned |',
       ],
     });
     const result = validateReviewEvidence(body, []);
     expect(result.pass).toBe(false);
     expect(result.failures).toHaveLength(1);
-    expect(result.failures[0]).toContain('DISPATCHED');
+    expect(result.failures[0]).toContain('PENDING');
     expect(result.failures[0]).toContain('security-auditor');
   });
 
@@ -346,7 +346,7 @@ describe('validateReviewEvidence', () => {
       rows: [
         '| go-specialist | PASS | ok |',
         '| security-auditor | PASS | ok |',
-        '| cloudflare-specialist | DISPATCHED | pending |',
+        '| cloudflare-specialist | PENDING | still running |',
       ],
     });
     const result = validateReviewEvidence(body, []);
@@ -387,11 +387,11 @@ Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>`;
   it('handles case-insensitive status matching', () => {
     const body = buildBody({
       agentAuthored: true,
-      rows: ['| test | dispatched | still running |'],
+      rows: ['| test | pending | still running |'],
     });
     const result = validateReviewEvidence(body, []);
     expect(result.pass).toBe(false);
-    expect(result.failures[0]).toContain('DISPATCHED');
+    expect(result.failures[0]).toContain('PENDING');
   });
 
   // --- Reviewer-requested edge cases (C1, H1, H2, H3, M1) ---
@@ -417,7 +417,7 @@ Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>`;
     const body = buildBody({
       agentAuthored: true,
       humanNA: true,
-      rows: ['| go-specialist | DISPATCHED | still running |'],
+      rows: ['| go-specialist | PENDING | still running |'],
     });
     const result = validateReviewEvidence(body, []);
     expect(result.pass).toBe(true);

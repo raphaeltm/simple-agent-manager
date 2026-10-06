@@ -4,7 +4,14 @@
  * Extracted from task-runner.ts for modularity.
  */
 import type {
+  AgentEffort,
+  CapacityPlacementSnapshot,
   CredentialProvider,
+  CredentialSource,
+  PlacementDecisionDiagnostics,
+  ResolvedResourceReservation,
+  ResourceRequirements,
+  ResourceRequirementsSource,
   TaskAttachment,
   TaskExecutionStep,
   TaskMode,
@@ -14,20 +21,35 @@ import type {
 } from '@simple-agent-manager/shared';
 
 import type { Env } from '../../env';
+import type { TaskStartCapacityPoolSelection } from '../../services/placement-resolver';
+import type { ProjectEventWakeRecoveryGuard } from '../../services/session-recovery-authority';
+import type { TaskRunnerStartGuard } from '../../services/task-runner-start-guard';
 
 // TaskRunner uses the full Env type because it delegates to service functions
 // (createNodeRecord, provisionNode, createWorkspaceOnNode, etc.) that expect
 // the complete Worker Env interface. DOs receive the full env at runtime.
 
 export interface StepResults {
+  placementDiagnostics?: PlacementDecisionDiagnostics;
   nodeId: string | null;
   autoProvisioned: boolean;
+  /** Proven pre-identity rejection awaiting crash-safe node/claim cleanup. */
+  providerRejectedNodeId?: string | null;
+  /** Exact warm-pool claim owned by this task until workspace activation or release. */
+  claimedWarmNodeId?: string | null;
   workspaceId: string | null;
   chatSessionId: string | null;
   agentSessionId: string | null;
   agentStarted: boolean;
+  /** First restore RPC operation deadline plus one request window to retrieve its result. */
+  snapshotRestoreDeadlineAt?: number | null;
   /** Opaque MCP token for agent platform awareness (stored in KV) */
   mcpToken: string | null;
+  /** VM size actually provisioned for an auto-provisioned node. May be smaller
+   *  than the requested size when size-fallback descended on capacity exhaustion. */
+  provisionedVmSize: VMSize | null;
+  /** Capacity pool/source/candidate audit snapshot selected for this run placement. */
+  capacityPlacementSnapshot?: CapacityPlacementSnapshot | null;
 }
 
 export interface TaskRunConfig {
@@ -35,6 +57,8 @@ export interface TaskRunConfig {
   vmLocation: VMLocation;
   branch: string;
   preferredNodeId: string | null;
+  /** Node that must not be reused for this run, e.g. the source of a resource eviction. */
+  excludedNodeId?: string | null;
   userName: string | null;
   userEmail: string | null;
   githubId: string | null;
@@ -43,6 +67,8 @@ export interface TaskRunConfig {
   repository: string;
   installationId: string;
   outputBranch: string | null;
+  /** Project's default branch (e.g. 'main'). Used to skip branch-exists check when cloning the default branch. */
+  defaultBranch: string;
   projectDefaultVmSize: VMSize | null;
   /** Chat session ID created at task submit time (TDF-6: single session per task) */
   chatSessionId: string | null;
@@ -55,28 +81,76 @@ export interface TaskRunConfig {
   devcontainerConfigName: string | null;
   /** Cloud provider for auto-provisioned nodes. Null means system picks any available credential. */
   cloudProvider: CredentialProvider | null;
+  /** Provider-native instance type/SKU selected from a compute pool. Null preserves legacy size mapping. */
+  providerInstanceType?: string | null;
+  providerInstanceBootDiskSizeGb?: number | null;
+  providerInstanceImage?: string | null;
+  providerInstanceArchitecture?: 'x86_64' | 'arm64' | null;
+  /** Root-pinned credential attribution user for this task tree. */
+  credentialAttributionUserId: string;
+  /** Project scope when credentialAttributionSource is 'project'. */
+  credentialAttributionProjectId: string | null;
+  /** Root-pinned credential attribution source. */
+  credentialAttributionSource: CredentialSource;
   /** Task execution mode. 'task' = push/PR/complete lifecycle. 'conversation' = human-controlled. */
   taskMode: TaskMode;
   /** Model override from agent profile (forwarded to VM agent). Null = use agent default. */
   model: string | null;
+  /** Reasoning effort override from agent profile (forwarded to VM agent). Null = use agent default. */
+  effort: AgentEffort | null;
   /** Permission mode override from agent profile (forwarded to VM agent). Null = use agent default. */
   permissionMode: string | null;
-  /** OpenCode inference provider override (forwarded to VM agent). Null = use agent default. */
+  /** OpenCode inference provider override ('opencode-zen', 'opencode-go', or 'custom'). Null = use agent default. */
   opencodeProvider: string | null;
-  /** OpenCode base URL override for custom/openai-compatible providers. Null = use agent default. */
+  /** OpenCode base URL override for the 'custom' provider. Null = use agent default. */
   opencodeBaseUrl: string | null;
   /** System prompt text to append to the initial prompt (from agent profile). Null = no append. */
   systemPromptAppend: string | null;
+  /** Agent profile ID — stored on workspace for GitHub CLI policy enforcement. */
+  agentProfileHint: string | null;
   /** File attachments uploaded to R2 before task submission. Null = no attachments. */
   attachments: TaskAttachment[] | null;
   /** Per-project scaling overrides. Null values mean "use platform default". */
   projectScaling?: {
     taskExecutionTimeoutMs?: number | null;
-    maxWorkspacesPerNode?: number | null;
     nodeCpuThresholdPercent?: number | null;
     nodeMemoryThresholdPercent?: number | null;
+    nodeCpuShareBudgetPercent?: number | null;
+    nodeHostMemoryReserveMb?: number | null;
+    nodeDiskPressureThresholdPercent?: number | null;
+    nodeMetricsTtlMs?: number | null;
+    nodeCpuScoreWeightPercent?: number | null;
+    nodeMemoryScoreWeightPercent?: number | null;
     warmNodeTimeoutMs?: number | null;
   } | null;
+  /** Raw resolved inputs retained for audit and provenance. */
+  resourceRequirements?: ResourceRequirements | null;
+  /** Immutable scheduler reservation used for node selection and final workspace placement. */
+  resolvedReservation?: ResolvedResourceReservation | null;
+  /** Effective one-pool placement selection for VM tasks. Null preserves legacy placement. */
+  capacityPoolSelection?: TaskStartCapacityPoolSelection | null;
+  /** Where the VM size came from in the precedence chain. */
+  vmSizeSource?: ResourceRequirementsSource | 'explicit' | null;
+  /** Existing sleeping chat whose R2 snapshot must be strictly restored instead of starting fresh. */
+  resumeSnapshotChatSessionId?: string | null;
+  /** Resource-eviction identity that must remain current through replacement allocation. */
+  evictionFence?: {
+    workspaceId: string;
+    nodeId: string;
+    generation: string | null;
+  } | null;
+  /** Live source parent that revocably authorizes a snapshot-recovery TaskRunner. */
+  recoverySourceTaskId?: string | null;
+  /** Unique claim identity; distinguishes wake initialization from an earlier run. */
+  recoveryAttemptId?: string | null;
+  /** Failed/stopped predecessor whose workspace deletion must be confirmed before replacement. */
+  retrySourceTaskId?: string | null;
+  /** Optional durable lifecycle guard for reserved first-start submissions. */
+  startGuard?: TaskRunnerStartGuard | null;
+  /** Event wake batch/subscription identity that must still authorize guarded recovery. */
+  projectEventWakeGuard?: ProjectEventWakeRecoveryGuard | null;
+  /** Member whose continued write permission authorizes a scheduled wake. */
+  recoveryRequiredProjectMemberId?: string | null;
 }
 
 export interface TaskRunnerState {
@@ -93,10 +167,28 @@ export interface TaskRunnerState {
   workspaceErrorMessage: string | null;
   createdAt: number;
   lastStepAt: number;
+  /** Set when we started waiting for node provisioning — used for timeout detection */
+  provisioningStartedAt: number | null;
+  /** VM admission lease scope currently owned by this runner, if any. */
+  admissionScopeKey?: string | null;
+  /** Fencing token for the VM admission provisioning lease. */
+  admissionLeaseToken?: number | null;
   /** Set when we started waiting for agent ready — used for timeout detection */
   agentReadyStartedAt: number | null;
   /** Set when we started waiting for workspace ready — used for timeout detection */
   workspaceReadyStartedAt: number | null;
+  /** Set when we started trying to dispatch workspace creation to the VM agent */
+  workspaceDispatchStartedAt: number | null;
+  /** Number of VM-agent workspace dispatch attempts made by the dispatch step */
+  workspaceDispatchAttempts: number;
+  /** Last VM-agent workspace dispatch attempt time */
+  workspaceDispatchLastAttemptAt: number | null;
+  /** Last VM-agent workspace dispatch error, for admin/debug visibility */
+  workspaceDispatchLastError: string | null;
+  /** Set after VM-agent workspace dispatch acknowledgement is durably recorded */
+  workspaceDispatchAckedAt: number | null;
+  /** Last D1 execution step written — idempotent guard to skip redundant D1 writes */
+  lastD1Step: TaskExecutionStep | null;
   /** Terminal — DO has completed or failed, no more alarms */
   completed: boolean;
 }
@@ -116,14 +208,21 @@ export interface StartTaskInput {
 export interface TaskRunnerContext {
   env: Env;
   ctx: DurableObjectState;
+  /** Fail closed when a guarded snapshot recovery has lost its live source authority. */
+  assertRecoveryAuthority: (state: TaskRunnerState) => Promise<void>;
   /** Advance to next step: persist state, reset retries, schedule alarm */
   advanceToStep: (state: TaskRunnerState, nextStep: TaskExecutionStep) => Promise<void>;
   /** Get configurable timeout/interval values */
   getAgentPollIntervalMs: () => number;
   getAgentReadyTimeoutMs: () => number;
+  getAgentReadyFreshnessSkewMs: () => number;
+  getWorkspaceDispatchTimeoutMs: () => number;
+  getWorkspaceDispatchBaseDelayMs: () => number;
+  getWorkspaceDispatchMaxDelayMs: () => number;
   getWorkspaceReadyTimeoutMs: () => number;
   getWorkspaceReadyPollIntervalMs: () => number;
   getProvisionPollIntervalMs: () => number;
+  getProvisionTimeoutMs: () => number;
   /** Update D1 execution step */
   updateD1ExecutionStep: (taskId: string, step: TaskExecutionStep) => Promise<void>;
 }

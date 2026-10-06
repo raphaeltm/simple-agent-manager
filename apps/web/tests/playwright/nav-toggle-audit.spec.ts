@@ -56,6 +56,10 @@ async function setupApiMocks(
 ) {
   const project = options.project ?? SHORT_PROJECT;
 
+  await page.addInitScript(() => {
+    window.localStorage.setItem('sam-onboarding-wizard-dismissed-user-test-1', 'true');
+  });
+
   await page.route('**/api/**', async (route: Route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;

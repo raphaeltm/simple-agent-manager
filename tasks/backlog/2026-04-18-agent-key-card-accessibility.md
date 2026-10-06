@@ -1,5 +1,27 @@
 # AgentKeyCard accessibility refactor
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** none of the accessibility items. The delete-scope fix shipped earlier (see
+>   Moot/dropped).
+> - **Still open:** (all in `apps/web/src/components/AgentKeyCard.tsx`)
+>   - A-1: Update and Remove are ~20px text buttons with no `aria-label` or design-system
+>     focus ring (`:151–163`).
+>   - A-2: `window.confirm()` in `handleDelete` (`:122`).
+>   - A-3: the credential-type buttons have no `role="group"` or `aria-pressed` (`:172–205`).
+>   - From the merged file: disclosure semantics (`aria-expanded`, `aria-controls`, a labelled
+>     region) for the Update button that reveals the form; re-check the colour/emoji-only
+>     status finding (the standalone card now shows a text `StatusBadge`); unit tests for the
+>     new ARIA; Playwright (375px, 1280px) and axe checks.
+> - **Moot/dropped:**
+>   - Delete-scope decision: already shipped in PR #1027 (95049646b, 2026-05-16) before it was
+>     carried in here. The card passes the kind (`AgentKeyCard.tsx:130`); user scope calls
+>     `deleteAgentCredentialByKind` (`AgentsSection.tsx:94`) and project scope calls
+>     `deleteProjectAgentCredential(projectId, agentType, kind)` (`ProjectAgentsSection.tsx:92`).
+>   - Show/hide toggle ARIA: the card has no reveal toggle now (plain `type="password"` inputs).
+>   - Memoizing credential-kind select options: the kind is chosen with two buttons, not a
+>     select.
+
 **Created**: 2026-04-18
 **Priority**: HIGH
 **Source**: ui-ux-specialist review of PR `sam/project-credential-overrides`
@@ -9,6 +31,7 @@
 `apps/web/src/components/AgentKeyCard.tsx` has three pre-existing accessibility issues flagged HIGH by the ui-ux-specialist during the project-credential-overrides review. These are shared-component issues that affect both user settings (`/settings/agents`) and project settings (`/projects/:id/settings`), so fixing them cross-cuts multiple surfaces and warrants a dedicated PR with focused a11y testing.
 
 The project-credential-overrides PR defers these to this task because:
+
 - Not introduced by that PR (pre-existing in the shared component)
 - Fixing requires coordinated a11y test pass across user + project contexts
 - A focused PR is cheaper to review than bundling unrelated a11y work
@@ -71,6 +94,28 @@ Only `apps/web/src/components/AgentKeyCard.tsx`. Do not change the API, the cred
 - [ ] Credential-type toggle wrapped in `role="group"` with `aria-pressed` on each button
 - [ ] Playwright visual audit at 375px and 1280px passes for both user settings and project settings contexts
 - [ ] axe-core or similar accessibility scan passes
+
+## Merged findings from `2026-04-18-agent-key-card-a11y.md` (consolidated 2026-09-23)
+
+The two 2026-04-18 AgentKeyCard files came out of the same review cycle on the same component
+and were being worked as if independent. The a11y-scoped file is folded in here; its distinct
+items are below. `AgentKeyCard` is shared by user scope (`AgentsSection`) and project scope
+(`ProjectAgentsSection` -> `ProjectAgentCard`), so one fix covers both.
+
+- [ ] `aria-pressed` + `aria-controls` on the show/hide toggle, with the label switching between
+      "Show value" and "Hide value"
+- [ ] Turn the Add-credential affordance into a real disclosure: `aria-expanded`, `aria-controls`,
+      and `role="region"` + `aria-labelledby` on the revealed form
+- [ ] Visually-hidden text on the active-credential status (currently colour + emoji only)
+- [ ] Memoize credential-kind options / stabilize handlers so the select does not rebuild every
+      render and re-announce to assistive tech
+- [ ] **Delete-scope decision (correctness, pre-existing).** `deleteAgentCredential(agentType)`
+      deletes ALL credentials for the agent, while `deleteAgentCredentialByKind(agentType, kind)`
+      exists. The UI always calls the broad delete even when one kind is shown active. Either
+      switch Remove to the kind-specific call, or keep the broad behaviour and change the confirm
+      copy to say so.
+- [ ] Update unit tests for the new ARIA attributes and the chosen delete behaviour. Existing
+      tests select via `button.text-danger`; do not break that selector without updating them.
 
 ## References
 

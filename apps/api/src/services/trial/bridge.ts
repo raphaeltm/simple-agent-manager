@@ -39,9 +39,43 @@ export async function bridgeAcpSessionTransition(
     if (!record) return;
 
     if (toStatus === 'running') {
+      const now = Date.now();
       const workspaceUrl =
         opts.workspaceUrl ??
         (record.workspaceId ? `https://ws-${record.workspaceId}.${env.BASE_DOMAIN}` : '');
+      const updateResult = await env.DATABASE.prepare(
+        `UPDATE trials
+         SET status = 'ready',
+             project_id = COALESCE(project_id, ?)
+         WHERE id = ?
+           AND status = 'pending'
+           AND claimed_by_user_id IS NULL
+           AND expires_at > ?`
+      ).bind(projectId, record.trialId, now).run().catch((err) => {
+        log.warn('trial_bridge.ready_d1_update_failed', {
+          trialId: record.trialId,
+          projectId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        throw err;
+      });
+      if (getD1Changes(updateResult) === 0) {
+        const current = await env.DATABASE.prepare(
+          `SELECT status, expires_at, claimed_by_user_id
+           FROM trials
+           WHERE id = ?`
+        ).bind(record.trialId).first<{ status: string; expires_at: number; claimed_by_user_id: string | null }>();
+        if (current?.status !== 'ready' || current.expires_at <= now || current.claimed_by_user_id !== null) {
+          log.warn('trial_bridge.ready_transition_skipped', {
+            trialId: record.trialId,
+            projectId,
+            status: current?.status ?? null,
+            expiresAt: current?.expires_at ?? null,
+            claimedByUserId: current?.claimed_by_user_id ?? null,
+          });
+          return;
+        }
+      }
       await emitTrialEventForProject(env, projectId, {
         type: 'trial.ready',
         trialId: record.trialId,
@@ -69,6 +103,11 @@ export async function bridgeAcpSessionTransition(
       error: err instanceof Error ? err.message : String(err),
     });
   }
+}
+
+function getD1Changes(result: unknown): number {
+  const meta = (result as { meta?: { changes?: number } } | null | undefined)?.meta;
+  return typeof meta?.changes === 'number' ? meta.changes : 0;
 }
 
 /**

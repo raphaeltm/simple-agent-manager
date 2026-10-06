@@ -11,6 +11,8 @@
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { mcpRoutes } from '../../../src/routes/mcp';
+
 // Mock KV namespace
 const mockKV = {
   put: vi.fn(),
@@ -126,7 +128,7 @@ async function mcpPost(
 describe('MCP Streamable HTTP Compliance', () => {
   let app: Hono;
 
-  beforeEach(async () => {
+  beforeEach(() => {
     vi.clearAllMocks();
     mockD1 = createMockD1();
     mockEnv.DATABASE = mockD1;
@@ -134,7 +136,6 @@ describe('MCP Streamable HTTP Compliance', () => {
     // Valid token by default
     mockKV.get.mockResolvedValue(validTokenData);
 
-    const { mcpRoutes } = await import('../../../src/routes/mcp');
     app = new Hono();
     app.route('/mcp', mcpRoutes);
   });

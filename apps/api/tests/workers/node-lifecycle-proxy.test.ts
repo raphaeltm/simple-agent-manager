@@ -9,14 +9,18 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
-import type { NodeLifecycle } from '../../src/durable-objects/node-lifecycle';
 import {
+  finalizeDeletion,
   getStatus,
   markActive,
   markIdle,
   tryClaim,
 } from '../../src/services/node-lifecycle';
-import { seedNode, seedUser } from './helpers/seed-d1';
+import { seedInstallation, seedNode, seedProject, seedTask, seedUser } from './helpers/seed-d1';
+import {
+  captureNodeLifecycleExpectedError,
+  type NodeLifecycleTestDouble,
+} from './support/expected-error-doubles';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -24,14 +28,37 @@ import { seedNode, seedUser } from './helpers/seed-d1';
 
 const TEST_USER_ID = 'user-nlp-test-001';
 
-function getStub(nodeId: string): DurableObjectStub<NodeLifecycle> {
+interface StoredNodeLifecycleState {
+  nodeId: string;
+  userId: string;
+  status: 'active' | 'warm' | 'destroying';
+  warmSince: number | null;
+  claimedByTask: string | null;
+  warmTimeoutOverrideMs?: number | null;
+}
+
+function getStub(nodeId: string): DurableObjectStub<NodeLifecycleTestDouble> {
   const id = env.NODE_LIFECYCLE.idFromName(nodeId);
-  return env.NODE_LIFECYCLE.get(id) as DurableObjectStub<NodeLifecycle>;
+  return env.NODE_LIFECYCLE.get(id) as DurableObjectStub<NodeLifecycleTestDouble>;
 }
 
 async function seedTestNode(nodeId: string, userId: string = TEST_USER_ID): Promise<void> {
   await seedUser(userId);
   await seedNode(nodeId, userId);
+}
+
+async function seedTestTask(taskId: string): Promise<void> {
+  const installationId = 'installation-nlp-test-001';
+  const projectId = 'project-nlp-test-001';
+  await seedInstallation(installationId, TEST_USER_ID);
+  await seedProject(projectId, TEST_USER_ID, installationId);
+  await seedTask(taskId, projectId, TEST_USER_ID);
+}
+
+async function getStoredState(nodeId: string): Promise<StoredNodeLifecycleState | null> {
+  return await runInDurableObject(getStub(nodeId), async (instance) => {
+    return (await instance.ctx.storage.get<StoredNodeLifecycleState>('state')) ?? null;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -49,10 +76,20 @@ describe('node-lifecycle proxy — Worker→DO contract', () => {
     expect(result.warmSince).toBeTruthy();
     expect(result.nodeId).toBe(nodeId);
 
+    const stored = await getStoredState(nodeId);
+    expect(stored).toMatchObject({
+      nodeId,
+      userId: TEST_USER_ID,
+      status: 'warm',
+      claimedByTask: null,
+      warmTimeoutOverrideMs: 120_000,
+    });
+    expect(stored?.warmSince).toBeTypeOf('number');
+
     // Verify D1 was updated
-    const dbNode = await env.DATABASE.prepare(
-      'SELECT warm_since FROM nodes WHERE id = ?',
-    ).bind(nodeId).first<{ warm_since: string | null }>();
+    const dbNode = await env.DATABASE.prepare('SELECT warm_since FROM nodes WHERE id = ?')
+      .bind(nodeId)
+      .first<{ warm_since: string | null }>();
     expect(dbNode!.warm_since).toBeTruthy();
   });
 
@@ -70,7 +107,6 @@ describe('node-lifecycle proxy — Worker→DO contract', () => {
     const nodeId = 'nlp-idle-destroying-001';
     await seedTestNode(nodeId);
 
-    // Manually set destroying state
     const stub = getStub(nodeId);
     await runInDurableObject(stub, async (instance) => {
       await instance.ctx.storage.put('state', {
@@ -82,9 +118,18 @@ describe('node-lifecycle proxy — Worker→DO contract', () => {
       });
     });
 
-    await expect(markIdle(env, nodeId, TEST_USER_ID)).rejects.toThrow(
-      'node_lifecycle_conflict: node is being destroyed',
-    );
+    const rejection = await captureNodeLifecycleExpectedError(stub, {
+      operation: 'markIdle',
+      args: [nodeId, TEST_USER_ID],
+    });
+    expect(rejection).toEqual({
+      threw: true,
+      name: 'Error',
+      message: 'node_lifecycle_conflict: node is being destroyed',
+    });
+
+    const stored = await getStoredState(nodeId);
+    expect(stored).toMatchObject({ nodeId, userId: TEST_USER_ID, status: 'destroying' });
   });
 
   it('markActive transitions from warm to active and clears warm_since', async () => {
@@ -100,10 +145,19 @@ describe('node-lifecycle proxy — Worker→DO contract', () => {
     expect(result.status).toBe('active');
     expect(result.warmSince).toBeNull();
 
+    const stored = await getStoredState(nodeId);
+    expect(stored).toMatchObject({
+      nodeId,
+      userId: TEST_USER_ID,
+      status: 'active',
+      warmSince: null,
+      claimedByTask: null,
+    });
+
     // Verify D1 warm_since is cleared
-    const dbNode = await env.DATABASE.prepare(
-      'SELECT warm_since FROM nodes WHERE id = ?',
-    ).bind(nodeId).first<{ warm_since: string | null }>();
+    const dbNode = await env.DATABASE.prepare('SELECT warm_since FROM nodes WHERE id = ?')
+      .bind(nodeId)
+      .first<{ warm_since: string | null }>();
     expect(dbNode!.warm_since).toBeNull();
   });
 
@@ -111,15 +165,23 @@ describe('node-lifecycle proxy — Worker→DO contract', () => {
     const nodeId = 'nlp-active-no-state-001';
     await seedTestNode(nodeId);
 
-    // Never called markIdle — DO has no stored state
-    await expect(markActive(env, nodeId)).rejects.toThrow(
-      'node_lifecycle_not_found',
-    );
+    const rejection = await captureNodeLifecycleExpectedError(getStub(nodeId), {
+      operation: 'markActive',
+    });
+    expect(rejection).toEqual({
+      threw: true,
+      name: 'Error',
+      message: 'node_lifecycle_not_found: no state stored',
+    });
+
+    const stored = await getStoredState(nodeId);
+    expect(stored).toBeNull();
   });
 
   it('tryClaim on warm node succeeds', async () => {
     const nodeId = 'nlp-claim-warm-001';
     await seedTestNode(nodeId);
+    await seedTestTask('task-claim-001');
 
     await markIdle(env, nodeId, TEST_USER_ID);
 
@@ -129,10 +191,19 @@ describe('node-lifecycle proxy — Worker→DO contract', () => {
     expect(state.status).toBe('active');
     expect(state.claimedByTask).toBe('task-claim-001');
 
+    const stored = await getStoredState(nodeId);
+    expect(stored).toMatchObject({
+      nodeId,
+      userId: TEST_USER_ID,
+      status: 'active',
+      warmSince: null,
+      claimedByTask: 'task-claim-001',
+    });
+
     // D1 warm_since should be cleared
-    const dbNode = await env.DATABASE.prepare(
-      'SELECT warm_since FROM nodes WHERE id = ?',
-    ).bind(nodeId).first<{ warm_since: string | null }>();
+    const dbNode = await env.DATABASE.prepare('SELECT warm_since FROM nodes WHERE id = ?')
+      .bind(nodeId)
+      .first<{ warm_since: string | null }>();
     expect(dbNode!.warm_since).toBeNull();
   });
 
@@ -175,7 +246,12 @@ describe('node-lifecycle proxy — Worker→DO contract', () => {
 
     // Before any state is set, default is active
     const initial = await getStatus(env, nodeId);
-    expect(initial.status).toBe('active');
+    expect(initial).toEqual({
+      nodeId: '',
+      status: 'active',
+      warmSince: null,
+      claimedByTask: null,
+    });
 
     // After markIdle
     await markIdle(env, nodeId, TEST_USER_ID);
@@ -200,9 +276,25 @@ describe('node-lifecycle proxy — Worker→DO contract', () => {
     expect(proxyStatus.warmSince).toBe(directStatus.warmSince);
   });
 
+  it('finalizeDeletion clears lifecycle state and alarms after the API deletes D1 state', async () => {
+    const nodeId = 'nlp-finalize-delete-001';
+    await seedTestNode(nodeId);
+    await markIdle(env, nodeId, TEST_USER_ID, 30_000);
+
+    await env.DATABASE.prepare('DELETE FROM nodes WHERE id = ?').bind(nodeId).run();
+    await finalizeDeletion(env, nodeId, TEST_USER_ID);
+
+    expect(await getStoredState(nodeId)).toBeNull();
+    const alarm = await runInDurableObject(getStub(nodeId), async (instance) => {
+      return instance.ctx.storage.getAlarm();
+    });
+    expect(alarm).toBeNull();
+  });
+
   it('full lifecycle: idle → claim → active → idle', async () => {
     const nodeId = 'nlp-lifecycle-001';
     await seedTestNode(nodeId);
+    await seedTestTask('task-lc-001');
 
     // 1. Mark idle
     const idle = await markIdle(env, nodeId, TEST_USER_ID);

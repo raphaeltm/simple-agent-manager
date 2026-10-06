@@ -844,7 +844,7 @@ describe('getTTSConfig', () => {
     expect(config.model).toBe('@cf/deepgram/aura-2-en');
     expect(config.speaker).toBe('luna');
     expect(config.encoding).toBe('mp3');
-    expect(config.cleanupModel).toBe('@cf/google/gemma-3-12b-it');
+    expect(config.cleanupModel).toBe('@cf/google/gemma-4-26b-a4b-it');
     expect(config.cleanupMaxTokens).toBe(4096);
     expect(config.maxTextLength).toBe(100000);
     expect(config.timeoutMs).toBe(60000);
@@ -863,7 +863,7 @@ describe('getTTSConfig', () => {
       TTS_MODEL: '@cf/myshell-ai/melotts',
       TTS_SPEAKER: 'asteria',
       TTS_ENCODING: 'wav',
-      TTS_CLEANUP_MODEL: '@cf/meta/llama-3.1-8b-instruct',
+      TTS_CLEANUP_MODEL: '@cf/google/gemma-4-26b-a4b-it',
       TTS_CLEANUP_MAX_TOKENS: '8192',
       TTS_MAX_TEXT_LENGTH: '200000',
       TTS_TIMEOUT_MS: '90000',
@@ -878,7 +878,7 @@ describe('getTTSConfig', () => {
     expect(config.model).toBe('@cf/myshell-ai/melotts');
     expect(config.speaker).toBe('asteria');
     expect(config.encoding).toBe('wav');
-    expect(config.cleanupModel).toBe('@cf/meta/llama-3.1-8b-instruct');
+    expect(config.cleanupModel).toBe('@cf/google/gemma-4-26b-a4b-it');
     expect(config.cleanupMaxTokens).toBe(8192);
     expect(config.maxTextLength).toBe(200000);
     expect(config.timeoutMs).toBe(90000);

@@ -1,5 +1,7 @@
 # Multi-Terminal UI Quickstart
 
+> Spec validation artifact only. This is not canonical user documentation; use `apps/www/src/content/docs/docs/` for public docs.
+
 ## Overview
 The multi-terminal feature allows you to run multiple independent terminal sessions within a single browser tab, similar to tabs in modern terminal applications.
 

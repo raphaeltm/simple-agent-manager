@@ -5,20 +5,35 @@
   "type": "module",
   "scripts": {
     "dev": "pnpm build:assets && astro dev",
-    "build:assets": "pnpm build:tracker && pnpm build:blog-mermaid",
+    "build:assets": "pnpm build:tracker && pnpm build:blog-mermaid && pnpm build:docs-mermaid",
     "build:blog-mermaid": "pnpm exec esbuild src/scripts/blog-mermaid.ts --bundle --format=esm --platform=browser --target=es2022 --outfile=public/scripts/blog-mermaid.js",
+    "build:docs-mermaid": "pnpm exec esbuild src/scripts/docs-mermaid.ts --bundle --format=esm --platform=browser --target=es2022 --outfile=public/scripts/docs-mermaid.js",
     "build:tracker": "npx tsx scripts/build-tracker.ts",
+    "test": "pnpm build:tracker && vitest run --exclude=tests/playwright/**",
+    "test:coverage": "pnpm build:tracker && vitest run --coverage --exclude=tests/playwright/**",
+    "test:browser": "playwright test",
+    "lint": "eslint 'astro.config.ts' 'playwright.config.ts' 'scripts/**/*.ts' 'src/**/*.{ts,astro}' 'tests/**/*.ts' --rule 'simple-import-sort/imports: off' --rule 'simple-import-sort/exports: off'",
+    "typecheck": "tsx ../../scripts/quality/check-astro-templates.ts",
     "build": "pnpm build:assets && astro build",
-    "preview": "astro preview"
+    "preview": "astro preview",
+    "check:links": "python3 scripts/check-doc-links.py",
+    "optimize:features": "tsx scripts/optimize-feature-images.ts"
   },
   "dependencies": {
-    "@astrojs/sitemap": "3.7.2",
-    "@astrojs/starlight": "0.37.7",
-    "astro": "5.17.3",
+    "@astrojs/sitemap": "3.7.4",
+    "@astrojs/starlight": "0.40.0",
+    "astro": "6.4.8",
     "mermaid": "11.14.0"
   },
   "devDependencies": {
-    "esbuild": "0.25.12",
-    "typescript": "catalog:"
+    "@astrojs/check": "catalog:",
+    "@axe-core/playwright": "4.12.1",
+    "@playwright/test": "1.62.1",
+    "@vitest/coverage-v8": "catalog:",
+    "esbuild": "0.28.1",
+    "sharp": "0.35.2",
+    "tsx": "catalog:",
+    "typescript": "catalog:",
+    "wrangler": "catalog:"
   }
 }

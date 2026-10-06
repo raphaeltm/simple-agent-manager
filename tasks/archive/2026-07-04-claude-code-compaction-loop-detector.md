@@ -1,0 +1,83 @@
+# Claude Code Compaction Loop Detector MVP
+
+## Problem
+
+SAM-managed Claude Code sessions can enter repeated `Compacting...` / `Compacting completed` loops. These sessions continue spending tokens while making little or no useful progress and can end in usage-limit or disconnect failures. The MVP should detect the loop from recent message evidence and stop/fail the affected task visibly with diagnostic context. It must not auto-fork or resume sessions in this phase.
+
+## Research Findings
+
+- `apps/api/src/scheduled/stuck-tasks.ts` is the right detector-first insertion point. It already runs from cron, enumerates active tasks, gathers diagnostics, persists observability events, writes `task_status_events`, syncs trigger execution status, and calls `cleanupTaskRun`.
+- Existing stuck recovery is timeout-based. The new detector must run independently of elapsed-time thresholds and only trip on recent message evidence.
+- ProjectData access patterns:
+  - `apps/api/src/services/project-data.ts#getMessages` can read recent messages from the per-project `ProjectData` Durable Object with role filters and `order`.
+  - `apps/api/src/durable-objects/sam-session/tools/get-session-messages.ts` uses `getMessages` and groups tokens for user-facing tools.
+  - `apps/api/src/durable-objects/sam-session/tools/search-task-messages.ts` resolves a session from a task via `listSessions`.
+- Session linkage:
+  - Task sessions are represented by `chat_sessions.task_id` in ProjectData and also commonly by `workspaces.chat_session_id` in D1.
+  - `projectDataService.listSessions(env, projectId, null, 1, 0, taskId)` is the established task-to-session lookup when only task ID is known.
+- Cancellation/status patterns:
+  - `apps/api/src/durable-objects/sam-session/tools/stop-subtask.ts` stops the latest running `agent_sessions` row on the workspace via `stopAgentSessionOnNode`, marks the task `cancelled`, and stops the chat session.
+  - `apps/api/src/scheduled/stuck-tasks.ts` marks system-detected failures as `failed`, records a system `task_status_events` row, persists observability evidence, syncs trigger execution, and invokes `cleanupTaskRun`.
+  - For this detector, `failed` is preferable to user `cancelled` because this is a system-detected reliability failure.
+- `apps/api/src/services/node-agent.ts#stopAgentSessionOnNode` performs the VM agent stop call. `cleanupTaskRun` is already the stuck-task path for best-effort workspace/node cleanup after a visible failure.
+- Tests exist for this area:
+  - `apps/api/tests/unit/stuck-tasks.test.ts` mocks D1 and verifies recovery decisions.
+  - `apps/api/tests/workers/scheduled-stuck-tasks.test.ts` provides Miniflare vertical-slice tests for status events and observability.
+- The referenced report `/engineering/research/claude-code-compaction-loop-report-2026-07-04.md` was not present in this container or repository when checked with `find`.
+
+## Implementation Checklist
+
+- [x] Add configurable compaction-loop thresholds to the API env shape and defaults local to the detector:
+  - enable flag: `CLAUDE_CODE_COMPACTION_LOOP_DETECTOR_ENABLED`
+  - recent message limit/window: `CLAUDE_CODE_COMPACTION_LOOP_RECENT_MESSAGE_LIMIT`
+  - minimum marker pairs: `CLAUDE_CODE_COMPACTION_LOOP_MIN_PAIRS`
+  - maximum messages between markers if needed: `CLAUDE_CODE_COMPACTION_LOOP_WINDOW_MESSAGES`
+- [x] Add pure detector logic in `apps/api/src/scheduled/stuck-tasks.ts` or a small sibling module so tests can cover marker matching without D1/DO setup.
+- [x] In `recoverStuckTasks`, for active `in_progress` Claude Code tasks, resolve the task session and inspect recent text messages via ProjectData.
+- [x] Detect repeated `Compacting...` / `Compacting completed` marker evidence in a rolling recent-message window.
+- [x] On detection, fail the task visibly with a diagnostic reason, observability context containing marker counts/snippets/session ID, a system `task_status_events` row, trigger execution sync, and cleanup.
+- [x] Avoid duplicate spending by stopping/cleaning up via the existing stuck-task recovery path; do not auto-fork/retry/resume.
+- [x] Add focused unit tests for detector logic and recovery behavior.
+- [x] Add or update env documentation only where repo conventions require operational env examples.
+- [x] Run focused tests and the required quality checks.
+- [x] Run specialist validation: task completion, Cloudflare/API, env/config, constitution, and test review.
+- [ ] Open a PR on `sam/implement-first-sam-compaction-01kwpw`.
+
+## Validation Notes
+
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/stuck-tasks.test.ts` passed.
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/recovery-resilience.test.ts` passed.
+- `pnpm --filter @simple-agent-manager/api typecheck` passed.
+- `pnpm --filter @simple-agent-manager/api lint` passed with existing warnings.
+- `pnpm test` passed.
+- `pnpm build` passed.
+- `pnpm --filter @simple-agent-manager/api test:workers -- tests/workers/scheduled-stuck-tasks.test.ts` did not run tests because the Cloudflare worker pool crashed repeatedly with `workerd` signal 11 / worker exited unexpectedly errors.
+- Staging deploy run `28711899218` passed, including Cloudflare deploy health check and smoke tests.
+
+## Specialist Validation
+
+- Task completion validator: PASS. Research findings, checklist items, and acceptance criteria are covered by the diff and validation notes. The only gap is worker vertical-slice execution, documented as an infrastructure crash before test execution.
+- Cloudflare specialist: PASS with warning. No wrangler, D1 schema, migration, KV, or R2 changes. The scheduled Worker path uses existing D1 and ProjectData DO service boundaries. Miniflare worker-pool validation is blocked by `workerd` signal 11.
+- Env validator: PASS. New optional Worker env vars are in `Env`, `.env.example`, and the public configuration reference. No GitHub `GH_*` / Worker `GITHUB_*` prefix issue applies.
+- Constitution validator: PASS. Detector thresholds and limits use env overrides with defaults. Marker literals and bounded evidence snippet constants are protocol/evidence constants, not deployment-specific config.
+- Test engineer: PASS with warning. Pure detector tests and a cron recovery test cover positive, partial-evidence negative, and non-Claude/non-running negative paths; the positive recovery test asserts ProjectData reads, task/session failure, trigger sync, cleanup, and observability evidence. Worker-pool scheduled test could not execute due the `workerd` crash noted above.
+- Doc sync validator: PASS. New user-tunable task recovery env vars are documented where matching task runtime settings already live: `.env.example` and `apps/www/src/content/docs/docs/reference/configuration.md`.
+
+## Acceptance Criteria
+
+- Active Claude Code task sessions with repeated recent compaction markers are failed/stopped by the scheduled job before normal elapsed-time stuck thresholds.
+- Long-running tasks without matching compaction-loop message evidence are not stopped by the detector.
+- Thresholds are configurable through environment variables with safe defaults.
+- Failure is visible in task status, task error message, status events, logs, and observability diagnostics.
+- Evidence persisted for debugging includes task ID, project ID, session ID if resolved, marker counts, configured thresholds, and bounded recent snippets.
+- No auto-fork/resume behavior is implemented.
+- Tests cover both positive detection and negative/non-Claude/non-loop cases.
+
+## References
+
+- `apps/api/src/scheduled/stuck-tasks.ts`
+- `apps/api/src/services/project-data.ts`
+- `apps/api/src/durable-objects/sam-session/tools/get-session-messages.ts`
+- `apps/api/src/durable-objects/sam-session/tools/search-task-messages.ts`
+- `apps/api/src/durable-objects/sam-session/tools/stop-subtask.ts`
+- `apps/api/src/services/node-agent.ts`

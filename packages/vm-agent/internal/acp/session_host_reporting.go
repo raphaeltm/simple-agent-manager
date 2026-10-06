@@ -13,8 +13,12 @@ import (
 	"time"
 )
 
+var errAgentCredentialMissing = errors.New("agent credential missing")
+
 // reportAgentError sends an agent error to boot-log and error reporter.
 func (h *SessionHost) reportAgentError(agentType, step, message, detail string) {
+	message = redactAgentDiagnosticText(message)
+	detail = redactAgentDiagnosticText(detail)
 	if h.config.BootLog != nil {
 		h.config.BootLog.Log(step, "failed", fmt.Sprintf("[%s] %s", agentType, message), detail)
 	}
@@ -58,7 +62,13 @@ func (h *SessionHost) reportEvent(level, eventType, message string, detail map[s
 func (h *SessionHost) fetchAgentKey(ctx context.Context, agentType string) (*agentCredential, error) {
 	url := fmt.Sprintf("%s/api/workspaces/%s/agent-key", h.config.ControlPlaneURL, h.config.WorkspaceID)
 
-	body, err := json.Marshal(map[string]string{"agentType": agentType})
+	body, err := json.Marshal(struct {
+		AgentType      string `json:"agentType"`
+		AgentSessionID string `json:"agentSessionId,omitempty"`
+	}{
+		AgentType:      agentType,
+		AgentSessionID: h.config.SessionID,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
@@ -68,7 +78,7 @@ func (h *SessionHost) fetchAgentKey(ctx context.Context, agentType string) (*age
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+h.config.CallbackToken)
+	req.Header.Set("Authorization", "Bearer "+h.callbackToken())
 
 	resp, err := h.httpClient().Do(req)
 	if err != nil {
@@ -77,16 +87,29 @@ func (h *SessionHost) fetchAgentKey(ctx context.Context, agentType string) (*age
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("no credential configured for %s", agentType)
+		var apiError struct {
+			Code    string `json:"error"`
+			Message string `json:"message"`
+		}
+		if err := json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&apiError); err == nil &&
+			apiError.Code == "NOT_FOUND" && apiError.Message == "Agent credential not found" {
+			return nil, fmt.Errorf("%w for %s", errAgentCredentialMissing, agentType)
+		}
+		return nil, fmt.Errorf("control plane returned status %d", resp.StatusCode)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("control plane returned status %d", resp.StatusCode)
 	}
 
 	var result struct {
-		APIKey          string           `json:"apiKey"`
-		CredentialKind  string           `json:"credentialKind"`
-		InferenceConfig *inferenceConfig `json:"inferenceConfig,omitempty"`
+		APIKey               string           `json:"apiKey"`
+		CredentialKind       string           `json:"credentialKind"`
+		CredentialSource     string           `json:"credentialSource"`
+		CredentialReference  string           `json:"credentialReference"`
+		CredentialGeneration int64            `json:"credentialGeneration"`
+		CredentialProvider   string           `json:"credentialProvider"`
+		ProviderMode         string           `json:"providerMode"`
+		InferenceConfig      *inferenceConfig `json:"inferenceConfig,omitempty"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
@@ -94,7 +117,7 @@ func (h *SessionHost) fetchAgentKey(ctx context.Context, agentType string) (*age
 
 	// Allow empty APIKey when inferenceConfig is present (platform AI proxy path).
 	if result.APIKey == "" && result.InferenceConfig == nil {
-		return nil, fmt.Errorf("empty credential returned for %s", agentType)
+		return nil, fmt.Errorf("control plane returned an incomplete agent credential response")
 	}
 
 	if result.CredentialKind == "" {
@@ -102,9 +125,14 @@ func (h *SessionHost) fetchAgentKey(ctx context.Context, agentType string) (*age
 	}
 
 	return &agentCredential{
-		credential:      result.APIKey,
-		credentialKind:  result.CredentialKind,
-		inferenceConfig: result.InferenceConfig,
+		credential:           result.APIKey,
+		credentialKind:       result.CredentialKind,
+		credentialSource:     result.CredentialSource,
+		credentialReference:  result.CredentialReference,
+		credentialGeneration: result.CredentialGeneration,
+		credentialProvider:   result.CredentialProvider,
+		providerMode:         result.ProviderMode,
+		inferenceConfig:      result.InferenceConfig,
 	}, nil
 }
 
@@ -124,7 +152,7 @@ func (h *SessionHost) fetchAgentSettings(ctx context.Context, agentType string) 
 		return nil
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+h.config.CallbackToken)
+	req.Header.Set("Authorization", "Bearer "+h.callbackToken())
 
 	resp, err := h.httpClient().Do(req)
 	if err != nil {
@@ -162,23 +190,99 @@ func (h *SessionHost) fetchAgentSettings(ctx context.Context, agentType string) 
 
 // activityPayload is the enhanced JSON body sent to the control plane.
 type activityPayload struct {
-	Activity       string  `json:"activity"`
-	NodeID         string  `json:"nodeId"`
-	PromptStartedAt *int64 `json:"promptStartedAt,omitempty"`
-	AgentType      string  `json:"agentType,omitempty"`
-	RestartCount   int     `json:"restartCount"`
-	StatusError    *string `json:"statusError,omitempty"`
+	Activity              string  `json:"activity"`
+	NodeID                string  `json:"nodeId"`
+	PromptStartedAt       *int64  `json:"promptStartedAt,omitempty"`
+	AgentType             string  `json:"agentType,omitempty"`
+	RestartCount          int     `json:"restartCount"`
+	StatusError           *string `json:"statusError,omitempty"`
+	RuntimeWorkState      string  `json:"runtimeWorkState,omitempty"`
+	RuntimeWorkCount      *int    `json:"runtimeWorkCount,omitempty"`
+	RuntimeWorkSource     string  `json:"runtimeWorkSource,omitempty"`
+	RuntimeWorkProgressAt *int64  `json:"runtimeWorkProgressAt,omitempty"`
+}
+
+type activityReportRequest struct {
+	activity      string
+	url           string
+	callbackToken string
+	payload       activityPayload
+}
+
+type activityReportSnapshot struct {
+	Activity                 string
+	NodeID                   string
+	PromptStartedAt          int64
+	HasPromptStartedAt       bool
+	AgentType                string
+	RestartCount             int
+	StatusError              string
+	HasStatusError           bool
+	RuntimeWorkState         string
+	RuntimeWorkCount         int
+	HasRuntimeWorkCount      bool
+	RuntimeWorkSource        string
+	RuntimeWorkProgressAt    int64
+	HasRuntimeWorkProgressAt bool
+}
+
+func activityReportSnapshotFromPayload(payload activityPayload) activityReportSnapshot {
+	snapshot := activityReportSnapshot{
+		Activity:          payload.Activity,
+		NodeID:            payload.NodeID,
+		AgentType:         payload.AgentType,
+		RestartCount:      payload.RestartCount,
+		RuntimeWorkState:  payload.RuntimeWorkState,
+		RuntimeWorkSource: payload.RuntimeWorkSource,
+	}
+	if payload.PromptStartedAt != nil {
+		snapshot.PromptStartedAt = *payload.PromptStartedAt
+		snapshot.HasPromptStartedAt = true
+	}
+	if payload.StatusError != nil {
+		snapshot.StatusError = *payload.StatusError
+		snapshot.HasStatusError = true
+	}
+	if payload.RuntimeWorkCount != nil {
+		snapshot.RuntimeWorkCount = *payload.RuntimeWorkCount
+		snapshot.HasRuntimeWorkCount = true
+	}
+	if payload.RuntimeWorkProgressAt != nil {
+		snapshot.RuntimeWorkProgressAt = *payload.RuntimeWorkProgressAt
+		snapshot.HasRuntimeWorkProgressAt = true
+	}
+	return snapshot
 }
 
 // reportActivity sends a durable activity signal to the control plane.
-// Includes one retry with backoff to tolerate transient failures.
-// activity should be "prompting" or "idle".
+// Prompting reports stay cheap because the periodic re-report loop self-heals
+// missed starts; terminal/error reports use a larger retry budget.
+// activity should be "prompting", "idle", "recovering", or "error".
 func (h *SessionHost) reportActivity(activity string) {
+	request, ok := h.prepareActivityReport(activity)
+	if !ok {
+		return
+	}
+	go h.sendActivityReport(request)
+}
+
+func (h *SessionHost) reportCoalescedHarnessActivity() {
+	request, ok := h.prepareActivityReport(h.activityForHarnessWork())
+	if !ok {
+		return
+	}
+	if h.successfulActivityReportMatches(request.payload) {
+		return
+	}
+	h.sendActivityReport(request)
+}
+
+func (h *SessionHost) prepareActivityReport(activity string) (activityReportRequest, bool) {
 	// h.config fields are immutable after construction — no lock needed.
 	projectID := h.config.ProjectID
 	nodeID := h.config.NodeID
 	controlPlaneURL := h.config.ControlPlaneURL
-	callbackToken := h.config.CallbackToken
+	callbackToken := h.callbackToken()
 	sessionID := h.config.SessionID
 
 	if projectID == "" || nodeID == "" || controlPlaneURL == "" || sessionID == "" {
@@ -187,7 +291,7 @@ func (h *SessionHost) reportActivity(activity string) {
 			"hasNodeID", nodeID != "",
 			"hasControlPlaneURL", controlPlaneURL != "",
 			"hasSessionID", sessionID != "")
-		return
+		return activityReportRequest{}, false
 	}
 
 	// Snapshot state under read lock for the enhanced payload.
@@ -203,55 +307,115 @@ func (h *SessionHost) reportActivity(activity string) {
 		AgentType:    agentType,
 		RestartCount: restartCount,
 	}
-	if activity == "prompting" {
-		now := time.Now().UnixMilli()
-		payload.PromptStartedAt = &now
-	}
-	// Attach statusErr when prompting and an error is recorded (e.g., from a prior restart).
-	if statusErr != "" && activity == "prompting" {
-		payload.StatusError = &statusErr
-	}
-
-	go func() {
-		url := strings.TrimRight(controlPlaneURL, "/") +
-			"/api/projects/" + projectID + "/acp-sessions/" + sessionID + "/activity"
-
-		body, err := json.Marshal(payload)
-		if err != nil {
-			slog.Warn("reportActivity: marshal failed", "error", err)
-			return
+	runtimeWork := h.harnessWorkSnapshot()
+	if runtimeWork.Source != "" {
+		payload.RuntimeWorkState = string(runtimeWork.State)
+		payload.RuntimeWorkSource = runtimeWork.Source
+		count := runtimeWork.Count
+		payload.RuntimeWorkCount = &count
+		if !runtimeWork.ProgressAt.IsZero() {
+			progressAt := runtimeWork.ProgressAt.UnixMilli()
+			payload.RuntimeWorkProgressAt = &progressAt
 		}
+	}
+	if activity == "prompting" {
+		if startedAt, ok := h.activePromptStartedAt(); ok {
+			epoch := startedAt.UnixMilli()
+			payload.PromptStartedAt = &epoch
+		}
+	}
+	// Attach a redacted status error for prompting/error states so the control
+	// plane can persist a useful failure reason without leaking credentials.
+	if statusErr != "" && (activity == "prompting" || activity == "error") {
+		redactedStatusErr := truncateString(redactAgentDiagnosticText(statusErr), 2048)
+		payload.StatusError = &redactedStatusErr
+	}
 
-		// Attempt with one retry on failure.
-		const maxAttempts = 2
-		for attempt := 1; attempt <= maxAttempts; attempt++ {
-			statusCode, doErr := h.doActivityRequest(url, body, callbackToken)
-			if doErr != nil {
-				if attempt < maxAttempts {
-					slog.Debug("reportActivity: attempt failed, retrying", "attempt", attempt, "error", doErr)
-					time.Sleep(500 * time.Millisecond)
-					continue
-				}
-				slog.Debug("reportActivity: all attempts failed", "error", doErr)
-				return
-			}
-			if statusCode >= 500 && attempt < maxAttempts {
-				slog.Debug("reportActivity: server error, retrying", "status", statusCode)
-				time.Sleep(500 * time.Millisecond)
+	return activityReportRequest{
+		activity: activity,
+		url: strings.TrimRight(controlPlaneURL, "/") +
+			"/api/projects/" + projectID + "/acp-sessions/" + sessionID + "/activity",
+		callbackToken: callbackToken,
+		payload:       payload,
+	}, true
+}
+
+func (h *SessionHost) sendActivityReport(request activityReportRequest) bool {
+	body, err := json.Marshal(request.payload)
+	if err != nil {
+		slog.Warn("reportActivity: marshal failed", "error", err)
+		return false
+	}
+
+	maxAttempts, retryBackoff := h.activityReportRetryPolicy(request.activity)
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		statusCode, doErr := h.doActivityRequest(request.url, body, request.callbackToken)
+		if doErr != nil {
+			if attempt < maxAttempts {
+				slog.Info("reportActivity: attempt failed, retrying", "attempt", attempt, "error", doErr)
+				time.Sleep(retryBackoff)
 				continue
 			}
-			if statusCode >= 400 {
-				slog.Debug("reportActivity: non-2xx response", "status", statusCode)
-			}
-			return
+			slog.Warn("reportActivity: all attempts failed", "error", doErr)
+			return false
 		}
-	}()
+		if statusCode >= 500 && attempt < maxAttempts {
+			slog.Info("reportActivity: server error, retrying", "status", statusCode)
+			time.Sleep(retryBackoff)
+			continue
+		}
+		if statusCode >= 400 {
+			slog.Warn("reportActivity: non-2xx response", "status", statusCode)
+			return false
+		}
+		h.recordSuccessfulActivityReport(request.payload)
+		return true
+	}
+	return false
+}
+
+func (h *SessionHost) successfulActivityReportMatches(payload activityPayload) bool {
+	snapshot := activityReportSnapshotFromPayload(payload)
+	h.lastActivityReportMu.Lock()
+	defer h.lastActivityReportMu.Unlock()
+	return h.lastActivityReportSet && h.lastActivityReport == snapshot
+}
+
+func (h *SessionHost) recordSuccessfulActivityReport(payload activityPayload) {
+	snapshot := activityReportSnapshotFromPayload(payload)
+	h.lastActivityReportMu.Lock()
+	h.lastActivityReport = snapshot
+	h.lastActivityReportSet = true
+	h.lastActivityReportMu.Unlock()
+}
+
+func (h *SessionHost) activityReportRetryPolicy(activity string) (int, time.Duration) {
+	if activity == "prompting" {
+		return 2, 500 * time.Millisecond
+	}
+	attempts := h.config.TerminalActivityReportAttempts
+	if attempts <= 0 {
+		attempts = 2
+	}
+	backoff := h.config.TerminalActivityReportBackoff
+	if backoff <= 0 {
+		backoff = 500 * time.Millisecond
+	}
+	return attempts, backoff
+}
+
+func (h *SessionHost) activityReportTimeout() time.Duration {
+	timeout := h.config.ActivityReportTimeout
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	return timeout
 }
 
 // doActivityRequest performs a single HTTP POST attempt to the activity endpoint.
 // Returns the HTTP status code on success, or an error on network/request failure.
 func (h *SessionHost) doActivityRequest(url string, body []byte, callbackToken string) (int, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), h.activityReportTimeout())
 	defer cancel()
 
 	// bytes.NewReader is created fresh each call so the body is correctly

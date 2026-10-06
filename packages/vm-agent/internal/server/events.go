@@ -10,8 +10,6 @@ import (
 )
 
 func (s *Server) handleListNodeEvents(w http.ResponseWriter, r *http.Request) {
-	// Accept browser-facing auth: workspace request auth (any workspace on this node
-	// proves node ownership) or management token via Authorization header / ?token= query param.
 	if !s.requireNodeEventAuth(w, r) {
 		return
 	}
@@ -64,46 +62,58 @@ func (s *Server) handleListWorkspaceEvents(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-// requireNodeEventAuth authenticates node-level event requests.
-// Accepts:
-// 1. Node management token via Authorization header (control-plane proxy)
-// 2. Node management token via ?token= query parameter (browser direct call)
-// 3. Any valid workspace session cookie for a workspace on this node (browser)
+// requireNodeEventAuth authenticates node-wide diagnostic requests.
+//
+// These routes expose node-wide observability state and raw diagnostic artifacts
+// for every workspace on a node. They must therefore require a node-scoped
+// management token minted by the control plane/operator. Workspace browser
+// cookies and workspace-scoped management tokens are intentionally rejected.
 func (s *Server) requireNodeEventAuth(w http.ResponseWriter, r *http.Request) bool {
-	// Try management token from Authorization header first (existing pattern).
+	// Authorization takes precedence. A malformed/replayed bearer token must not
+	// silently fall through to any weaker credential on the same request.
 	authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-	if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
-		token := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
-		if token != "" {
-			claims, err := s.jwtValidator.ValidateNodeManagementToken(token, "")
-			if err == nil {
-				routedNode := s.routedNodeID(r)
-				if routedNode == "" || routedNode == s.config.NodeID {
-					_ = claims
-					return true
-				}
-			}
+	if authHeader != "" {
+		if !strings.HasPrefix(authHeader, "Bearer ") {
+			writeError(w, http.StatusUnauthorized, "invalid Authorization header")
+			return false
 		}
+		token := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+		if token == "" {
+			writeError(w, http.StatusUnauthorized, "missing bearer token")
+			return false
+		}
+		return s.requireNodeScopedManagementToken(w, r, token)
 	}
 
-	// Try management token from ?token= query parameter (browser direct call).
+	// WebSocket control-plane proxying uses ?token= because browsers cannot set
+	// custom Authorization headers during a WebSocket upgrade.
 	queryToken := strings.TrimSpace(r.URL.Query().Get("token"))
 	if queryToken != "" {
-		claims, err := s.jwtValidator.ValidateNodeManagementToken(queryToken, "")
-		if err == nil {
-			_ = claims
-			return true
-		}
-	}
-
-	// Try workspace session cookie — any valid workspace session for this node proves access.
-	session := s.sessionManager.GetSessionFromRequest(r)
-	if session != nil && session.Claims != nil && session.Claims.Workspace != "" {
-		return true
+		return s.requireNodeScopedManagementToken(w, r, queryToken)
 	}
 
 	writeError(w, http.StatusUnauthorized, "authentication required")
 	return false
+}
+
+func (s *Server) requireNodeScopedManagementToken(w http.ResponseWriter, r *http.Request, token string) bool {
+	claims, err := s.jwtValidator.ValidateNodeManagementToken(token, "")
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "invalid management token")
+		return false
+	}
+	if claims.Workspace != "" {
+		writeError(w, http.StatusForbidden, "node-scoped management token required")
+		return false
+	}
+
+	routedNode := s.routedNodeID(r)
+	if routedNode != "" && routedNode != s.config.NodeID {
+		writeError(w, http.StatusForbidden, "node route mismatch")
+		return false
+	}
+
+	return true
 }
 
 func parseEventLimit(raw string) int {

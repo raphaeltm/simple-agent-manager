@@ -67,16 +67,18 @@ function getAttachmentTransferTimeout(value: string | undefined): number {
  */
 function setupNodeAgentMocks(
   responseInit?: { status: number; body?: string | null },
-  signTokenOverride?: ReturnType<typeof vi.fn>,
+  signTokenOverride?: ReturnType<typeof vi.fn>
 ): MockFetchCapture {
   const capture: MockFetchCapture = { url: null, body: null, headers: null, method: null };
   const response = responseInit ?? DEFAULT_NODE_AGENT_RESPONSE;
 
   vi.doMock('../../src/services/jwt', () => ({
-    signNodeManagementToken: signTokenOverride ?? vi.fn().mockResolvedValue({
-      token: 'mock-jwt',
-      expiresAt: new Date().toISOString(),
-    }),
+    signNodeManagementToken:
+      signTokenOverride ??
+      vi.fn().mockResolvedValue({
+        token: 'mock-jwt',
+        expiresAt: new Date().toISOString(),
+      }),
   }));
 
   vi.doMock('../../src/services/telemetry', () => ({
@@ -94,7 +96,7 @@ function setupNodeAgentMocks(
         new Response(resBody, {
           status: response.status,
           headers: resBody ? { 'Content-Type': 'application/json' } : undefined,
-        }),
+        })
       );
     }),
     getTimeoutMs: vi.fn().mockReturnValue(30000),
@@ -130,39 +132,44 @@ function setupNodeAgentMocksWithError(errorMessage: string): void {
 
 describe('Contract 1: Attachment Transfer (TaskRunner → VM Agent)', () => {
   describe('URL construction', () => {
-    it('uses ws-* subdomain routing, NOT {nodeId}.vm.* routing', () => {
-      // The attachment transfer uses workspace-scoped routing:
-      //   ws-${workspaceId}.${baseDomain}:${port}
-      // NOT the node-management routing used by other calls:
+    it('uses {nodeId}.vm.* backend routing, NOT browser ws-* proxy routing', () => {
+      // The attachment transfer is an internal Worker → VM-agent call. It must
+      // use the two-level backend hostname so browser workspace-proxy session
+      // liveness gates do not apply to control-plane attachment uploads:
       //   ${nodeId}.vm.${baseDomain}:${port}
+      // NOT browser proxy routing:
+      //   ws-${workspaceId}.${baseDomain}:${port}
       const protocol = 'https';
       const port = '8443';
       // Workspace IDs are ULIDs (e.g., '01HXYZ...'), NOT ws-prefixed strings.
       // The ws- prefix is added by the URL construction, not stored in the ID.
       const workspaceId = '01HXYZ789DEF';
+      const nodeId = 'node-01HXYZ789DEF';
       const baseDomain = 'example.com';
 
-      // Reproduce URL construction from workspace-steps.ts:374
-      const vmUrl = `${protocol}://ws-${workspaceId}.${baseDomain}:${port}`;
+      // Reproduce URL construction from workspace-steps.ts
+      const vmUrl = `${protocol}://${nodeId.toLowerCase()}.vm.${baseDomain}:${port}`;
       const uploadUrl = `${vmUrl}/workspaces/${workspaceId}/files/upload`;
 
-      expect(uploadUrl).toBe('https://ws-01HXYZ789DEF.example.com:8443/workspaces/01HXYZ789DEF/files/upload');
-      // ws- prefix appears exactly once in subdomain (not doubled)
-      expect(uploadUrl).toMatch(/^https:\/\/ws-[^.]+\.example\.com/);
-      expect(uploadUrl).not.toContain('.vm.');
+      expect(uploadUrl).toBe(
+        'https://node-01hxyz789def.vm.example.com:8443/workspaces/01HXYZ789DEF/files/upload'
+      );
+      expect(uploadUrl).toMatch(/^https:\/\/[^.]+\.vm\.example\.com/);
+      expect(uploadUrl).not.toContain('://ws-');
     });
 
     it('constructs correct URL with default protocol and port', () => {
       const protocol = 'https';
       const port = '8443';
       const workspaceId = 'test-workspace';
+      const nodeId = 'node-test-workspace';
       const baseDomain = 'sammy.party';
 
-      const vmUrl = `${protocol}://ws-${workspaceId}.${baseDomain}:${port}`;
+      const vmUrl = `${protocol}://${nodeId}.vm.${baseDomain}:${port}`;
       const uploadUrl = `${vmUrl}/workspaces/${workspaceId}/files/upload`;
 
       expect(uploadUrl).toBe(
-        'https://ws-test-workspace.sammy.party:8443/workspaces/test-workspace/files/upload',
+        'https://node-test-workspace.vm.sammy.party:8443/workspaces/test-workspace/files/upload'
       );
     });
   });
@@ -310,8 +317,13 @@ describe('Contract 2: Agent Activity Callback (VM Agent → API Worker)', () => 
       const projectID = 'proj-abc';
       const sessionID = 'sess-xyz';
 
-      const goUrl = trimTrailingSlashes(controlPlaneURL) +
-        '/api/projects/' + projectID + '/acp-sessions/' + sessionID + '/activity';
+      const goUrl =
+        trimTrailingSlashes(controlPlaneURL) +
+        '/api/projects/' +
+        projectID +
+        '/acp-sessions/' +
+        sessionID +
+        '/activity';
 
       // The API route is mounted at:
       //   app.route('/api/projects', agentActivityCallbackRoute);
@@ -319,7 +331,9 @@ describe('Contract 2: Agent Activity Callback (VM Agent → API Worker)', () => 
       //   '/:id/acp-sessions/:sessionId/activity'
       // So the full path is:
       //   /api/projects/:id/acp-sessions/:sessionId/activity
-      expect(goUrl).toBe('https://api.example.com/api/projects/proj-abc/acp-sessions/sess-xyz/activity');
+      expect(goUrl).toBe(
+        'https://api.example.com/api/projects/proj-abc/acp-sessions/sess-xyz/activity'
+      );
     });
 
     it('handles trailing slash in controlPlaneURL', () => {
@@ -327,10 +341,17 @@ describe('Contract 2: Agent Activity Callback (VM Agent → API Worker)', () => 
       const projectID = 'proj-abc';
       const sessionID = 'sess-xyz';
 
-      const goUrl = trimTrailingSlashes(controlPlaneURL) +
-        '/api/projects/' + projectID + '/acp-sessions/' + sessionID + '/activity';
+      const goUrl =
+        trimTrailingSlashes(controlPlaneURL) +
+        '/api/projects/' +
+        projectID +
+        '/acp-sessions/' +
+        sessionID +
+        '/activity';
 
-      expect(goUrl).toBe('https://api.example.com/api/projects/proj-abc/acp-sessions/sess-xyz/activity');
+      expect(goUrl).toBe(
+        'https://api.example.com/api/projects/proj-abc/acp-sessions/sess-xyz/activity'
+      );
     });
   });
 
@@ -433,8 +454,11 @@ describe('Contract 3: Credential Sync Callback (VM Agent → API Worker)', () =>
       const controlPlaneURL = 'https://api.example.com';
       const workspaceID = 'ws-abc-123';
 
-      const goUrl = trimTrailingSlashes(controlPlaneURL) +
-        '/api/workspaces/' + encodeURIComponent(workspaceID) + '/agent-credential-sync';
+      const goUrl =
+        trimTrailingSlashes(controlPlaneURL) +
+        '/api/workspaces/' +
+        encodeURIComponent(workspaceID) +
+        '/agent-credential-sync';
 
       // The API route is mounted at:
       //   app.route('/api/workspaces', runtimeRoutes);  (inside workspacesRoutes)
@@ -447,8 +471,11 @@ describe('Contract 3: Credential Sync Callback (VM Agent → API Worker)', () =>
       const controlPlaneURL = 'https://api.example.com';
       const workspaceID = 'ws-abc/123';
 
-      const goUrl = trimTrailingSlashes(controlPlaneURL) +
-        '/api/workspaces/' + encodeURIComponent(workspaceID) + '/agent-credential-sync';
+      const goUrl =
+        trimTrailingSlashes(controlPlaneURL) +
+        '/api/workspaces/' +
+        encodeURIComponent(workspaceID) +
+        '/agent-credential-sync';
 
       expect(goUrl).toContain('ws-abc%2F123');
     });
@@ -490,7 +517,7 @@ describe('Contract 4: Send Prompt to Agent (API Worker → VM Agent)', () => {
         'sess-xyz',
         'Fix the bug in auth.ts',
         env,
-        'user-123',
+        'user-123'
       );
 
       // Verify URL path
@@ -527,13 +554,42 @@ describe('Contract 4: Send Prompt to Agent (API Worker → VM Agent)', () => {
         'Follow up',
         env,
         'user-123',
-        'msg-prepersisted-001',
+        'msg-prepersisted-001'
       );
 
       const parsedBody = JSON.parse(capture.body!);
       expect(parsedBody).toEqual({
         prompt: 'Follow up',
         messageId: 'msg-prepersisted-001',
+      });
+    });
+
+    it('sendPromptToAgentOnNode serializes the negotiated protocol and delivery identity', async () => {
+      vi.resetModules();
+      const capture = setupNodeAgentMocks();
+      const { sendPromptToAgentOnNode } = await import('../../src/services/node-agent');
+
+      const env = {
+        BASE_DOMAIN: 'example.com',
+        NODE_AGENT_REQUEST_TIMEOUT_MS: '30000',
+      } as any;
+
+      await sendPromptToAgentOnNode(
+        'node-abc',
+        'ws-test',
+        'sess-xyz',
+        'Continue durably',
+        env,
+        'user-123',
+        'msg-prepersisted-002',
+        { requestTimeoutMs: 1_234, protocolVersion: 1, deliveryId: 'delivery-002' }
+      );
+
+      expect(JSON.parse(capture.body!)).toEqual({
+        prompt: 'Continue durably',
+        messageId: 'msg-prepersisted-002',
+        protocolVersion: 1,
+        deliveryId: 'delivery-002',
       });
     });
   });
@@ -557,14 +613,17 @@ describe('Contract 4: Send Prompt to Agent (API Worker → VM Agent)', () => {
         'Fix the bug',
         env,
         'user-123',
-        { url: 'https://mcp.example.com', token: 'mcp-token' },
+        [
+          { url: 'https://mcp.example.com', token: 'mcp-token', name: 'sam-mcp' },
+          { url: 'https://mcp.zapier.com/x', token: 'zap-token', name: 'zapier' },
+        ],
         {
           model: 'claude-sonnet-4-6',
           permissionMode: 'auto-edit',
           opencodeProvider: 'scaleway',
           opencodeBaseUrl: 'https://api.scaleway.ai/v1',
         },
-        { projectId: 'proj-abc', taskId: 'task-xyz', taskMode: 'task' },
+        { projectId: 'proj-abc', taskId: 'task-xyz', taskMode: 'task' }
       );
 
       // Verify URL path
@@ -577,7 +636,8 @@ describe('Contract 4: Send Prompt to Agent (API Worker → VM Agent)', () => {
 
       // MCP servers array
       expect(parsedBody.mcpServers).toEqual([
-        { url: 'https://mcp.example.com', token: 'mcp-token' },
+        { url: 'https://mcp.example.com', token: 'mcp-token', name: 'sam-mcp' },
+        { url: 'https://mcp.zapier.com/x', token: 'zap-token', name: 'zapier' },
       ]);
 
       // Model overrides
@@ -590,6 +650,14 @@ describe('Contract 4: Send Prompt to Agent (API Worker → VM Agent)', () => {
       expect(parsedBody.projectId).toBe('proj-abc');
       expect(parsedBody.taskId).toBe('task-xyz');
       expect(parsedBody.taskMode).toBe('task');
+      expect(parsedBody.acpInteractions).toEqual(
+        expect.objectContaining({
+          enabled: false,
+          protocolVersion: 1,
+          permissionDeadlineMs: 30 * 60 * 1000,
+          receiptLimit: 256,
+        })
+      );
     });
 
     it('omits optional fields when not provided', async () => {
@@ -604,7 +672,7 @@ describe('Contract 4: Send Prompt to Agent (API Worker → VM Agent)', () => {
         'claude-code',
         'Hello',
         {} as any,
-        'user-123',
+        'user-123'
         // No MCP server, no overrides, no task context
       );
 
@@ -618,6 +686,36 @@ describe('Contract 4: Send Prompt to Agent (API Worker → VM Agent)', () => {
       expect(parsedBody.opencodeBaseUrl).toBeUndefined();
       expect(parsedBody.projectId).toBeUndefined();
       expect(parsedBody.taskId).toBeUndefined();
+      expect(parsedBody.acpInteractions).toEqual(
+        expect.objectContaining({ enabled: false, permissionDeadlineMs: 30 * 60 * 1000 })
+      );
+    });
+
+    it('preserves OpenCode Go provider and GLM 5.2 model overrides', async () => {
+      vi.resetModules();
+      const capture = setupNodeAgentMocks();
+      const { startAgentSessionOnNode } = await import('../../src/services/node-agent');
+
+      await startAgentSessionOnNode(
+        'node-abc',
+        'ws-test',
+        'sess-xyz',
+        'opencode',
+        'Use GLM 5.2',
+        {} as any,
+        'user-123',
+        undefined,
+        {
+          model: 'opencode-go/glm-5.2',
+          opencodeProvider: 'opencode-go',
+        }
+      );
+
+      const parsedBody = JSON.parse(capture.body!);
+      expect(parsedBody.agentType).toBe('opencode');
+      expect(parsedBody.model).toBe('opencode-go/glm-5.2');
+      expect(parsedBody.opencodeProvider).toBe('opencode-go');
+      expect(parsedBody.opencodeBaseUrl).toBeUndefined();
     });
   });
 });
@@ -639,7 +737,7 @@ describe('Contract 5: Cancel/Stop Agent Session (API Worker → VM Agent)', () =
         'ws-test',
         'sess-xyz',
         {} as any,
-        'user-123',
+        'user-123'
       );
 
       // cancelAgentSessionOnNode normalizes any 2xx to { success: true, status: 200 }
@@ -660,7 +758,7 @@ describe('Contract 5: Cancel/Stop Agent Session (API Worker → VM Agent)', () =
         'ws-test',
         'sess-xyz',
         {} as any,
-        'user-123',
+        'user-123'
       );
 
       expect(result.success).toBe(false);
@@ -677,7 +775,7 @@ describe('Contract 5: Cancel/Stop Agent Session (API Worker → VM Agent)', () =
         'ws-test',
         'sess-xyz',
         {} as any,
-        'user-123',
+        'user-123'
       );
 
       expect(result.success).toBe(false);
@@ -694,7 +792,7 @@ describe('Contract 5: Cancel/Stop Agent Session (API Worker → VM Agent)', () =
         'ws-test',
         'sess-xyz',
         { BASE_DOMAIN: 'example.com' } as any,
-        'user-123',
+        'user-123'
       );
 
       expect(capture.method).toBe('POST');
@@ -713,7 +811,7 @@ describe('Contract 5: Cancel/Stop Agent Session (API Worker → VM Agent)', () =
         'ws-test',
         'sess-xyz',
         { BASE_DOMAIN: 'example.com' } as any,
-        'user-123',
+        'user-123'
       );
 
       expect(capture.method).toBe('POST');
@@ -727,13 +825,7 @@ describe('Contract 5: Cancel/Stop Agent Session (API Worker → VM Agent)', () =
 
       // stop THROWS on error (unlike cancel which returns { success: false })
       await expect(
-        stopAgentSessionOnNode(
-          'node-abc',
-          'ws-test',
-          'sess-xyz',
-          {} as any,
-          'user-123',
-        ),
+        stopAgentSessionOnNode('node-abc', 'ws-test', 'sess-xyz', {} as any, 'user-123')
       ).rejects.toThrow('Node Agent request failed: 404');
     });
   });
@@ -755,11 +847,16 @@ describe('Contract 5: Cancel/Stop Agent Session (API Worker → VM Agent)', () =
         'ws-test',
         'sess-xyz',
         { BASE_DOMAIN: 'example.com' } as any,
-        'user-123',
+        'user-123'
       );
 
       // Verify it used signNodeManagementToken (not signCallbackToken or signTerminalToken)
-      expect(mockSignToken).toHaveBeenCalledWith('user-123', 'node-abc', 'ws-test', expect.anything());
+      expect(mockSignToken).toHaveBeenCalledWith(
+        'user-123',
+        'node-abc',
+        'ws-test',
+        expect.anything()
+      );
       expect(capture.headers!.get('Authorization')).toBe('Bearer mgmt-jwt');
     });
   });

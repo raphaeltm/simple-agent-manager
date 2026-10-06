@@ -7,9 +7,20 @@
  * in Miniflare adds complexity without proportional value.
  */
 import { env, SELF } from 'cloudflare:test';
-import { describe, expect,it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 describe('Worker smoke tests (workerd runtime)', () => {
+  it('exposes only the runtime VAPID public key', async () => {
+    const response = await SELF.fetch('https://api.test.example.com/api/config/vapid-public-key');
+    expect(response.status).toBe(200);
+    const body = await response.json<{ publicKey: string | null }>();
+    expect(body).toEqual({
+      publicKey:
+        'BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8',
+    });
+    expect(JSON.stringify(body)).not.toContain('yfWPiYE');
+  });
+
   describe('health check', () => {
     it('returns healthy status', async () => {
       const response = await SELF.fetch('https://api.test.example.com/health');
@@ -17,32 +28,47 @@ describe('Worker smoke tests (workerd runtime)', () => {
 
       const body = await response.json<{
         status: string;
-        version: string;
         timestamp: string;
-        limits: Record<string, number>;
       }>();
       expect(body.status).toBe('healthy');
-      expect(body.version).toBe('0.1.0-test');
       expect(body.timestamp).toBeTruthy();
-      expect(body.limits).toBeDefined();
+      expect(body).not.toHaveProperty('version');
+      expect(body).not.toHaveProperty('limits');
     });
 
-    it('returns runtime limits from env bindings', async () => {
+    it('reports healthy when critical bindings are present', async () => {
       const response = await SELF.fetch('https://api.test.example.com/health');
-      const body = await response.json<{
-        limits: Record<string, number>;
-      }>();
+      expect(response.status).toBe(200);
 
-      expect(body.limits.maxNodesPerUser).toBe(10);
-      expect(body.limits.maxProjectsPerUser).toBe(50);
+      const body = await response.json<{ status: string }>();
+      expect(body.status).toBe('healthy');
+    });
+  });
+
+  describe('isolated interactive preview host', () => {
+    it('fails closed with sandbox headers and no cookie for malformed links', async () => {
+      const response = await SELF.fetch('https://preview.test.example.com/p/not-valid');
+      expect(response.status).toBe(403);
+      expect(response.headers.get('content-security-policy')).toContain('sandbox allow-scripts');
+      expect(response.headers.get('content-security-policy')).toContain("connect-src 'none'");
+      expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+      expect(response.headers.get('referrer-policy')).toBe('no-referrer');
+      expect(response.headers.get('cache-control')).toBe('private, no-store');
+      expect(response.headers.get('set-cookie')).toBeNull();
+      expect(await response.text()).toContain('Preview link expired');
+    });
+
+    it('never sets cookies on unsupported methods either', async () => {
+      const response = await SELF.fetch('https://preview.test.example.com/', { method: 'POST' });
+      expect(response.status).toBe(403);
+      expect(response.headers.get('content-security-policy')).toContain('sandbox allow-scripts');
+      expect(response.headers.get('set-cookie')).toBeNull();
     });
   });
 
   describe('404 handler', () => {
     it('returns NOT_FOUND for unknown routes', async () => {
-      const response = await SELF.fetch(
-        'https://api.test.example.com/api/nonexistent'
-      );
+      const response = await SELF.fetch('https://api.test.example.com/api/nonexistent');
       expect(response.status).toBe(404);
 
       const body = await response.json<{ error: string; message: string }>();
@@ -58,6 +84,17 @@ describe('Worker smoke tests (workerd runtime)', () => {
       expect(response.status).toBe(200);
       expect(response.headers.get('access-control-allow-origin')).toBe(
         'https://app.test.example.com'
+      );
+      expect(response.headers.get('access-control-allow-credentials')).toBe('true');
+    });
+
+    it('includes CORS headers for docs origins', async () => {
+      const response = await SELF.fetch('https://api.test.example.com/health', {
+        headers: { Origin: 'https://docs.test.example.com' },
+      });
+      expect(response.status).toBe(200);
+      expect(response.headers.get('access-control-allow-origin')).toBe(
+        'https://docs.test.example.com'
       );
       expect(response.headers.get('access-control-allow-credentials')).toBe('true');
     });
@@ -92,48 +129,111 @@ describe('Worker smoke tests (workerd runtime)', () => {
       expect(response.headers.get('access-control-allow-origin')).toBeNull();
     });
 
-    it('allows localhost origins for development', async () => {
+    it('rejects workspace and port origins for credentialed CORS', async () => {
+      for (const origin of [
+        'https://ws-abc123.test.example.com',
+        'https://ws-abc123--5173.test.example.com',
+        'https://customer-controlled.test.example.com',
+      ]) {
+        const response = await SELF.fetch('https://api.test.example.com/health', {
+          headers: { Origin: origin },
+        });
+        expect(response.status).toBe(200);
+        expect(response.headers.get('access-control-allow-origin')).toBeNull();
+      }
+    });
+
+    it('rejects localhost origins when BASE_DOMAIN is a real domain', async () => {
       const response = await SELF.fetch('https://api.test.example.com/health', {
         headers: { Origin: 'http://localhost:5173' },
       });
       expect(response.status).toBe(200);
-      expect(response.headers.get('access-control-allow-origin')).toBe('http://localhost:5173');
+      expect(response.headers.get('access-control-allow-origin')).toBeNull();
     });
   });
 
   describe('authenticated routes require auth', () => {
     it('returns 401 for /api/projects without auth', async () => {
-      const response = await SELF.fetch(
-        'https://api.test.example.com/api/projects'
-      );
+      const response = await SELF.fetch('https://api.test.example.com/api/projects');
       expect(response.status).toBe(401);
     });
 
     it('returns 401 for /api/workspaces without auth', async () => {
-      const response = await SELF.fetch(
-        'https://api.test.example.com/api/workspaces'
-      );
+      const response = await SELF.fetch('https://api.test.example.com/api/workspaces');
       expect(response.status).toBe(401);
     });
 
     it('returns 401 for /api/nodes without auth', async () => {
-      const response = await SELF.fetch(
-        'https://api.test.example.com/api/nodes'
-      );
+      const response = await SELF.fetch('https://api.test.example.com/api/nodes');
       expect(response.status).toBe(401);
+    });
+  });
+
+  describe('response cache headers', () => {
+    // These endpoints are unauthenticated and byte-identical for every caller,
+    // which is the only condition under which `public` is safe (the API runs CORS
+    // with credentials: true — see src/lib/cache-headers.ts).
+    const PUBLIC_CONFIG_PATHS = [
+      '/api/config/artifacts-enabled',
+      '/api/config/vapid-public-key',
+      '/api/config/login-providers',
+    ];
+
+    it.each(PUBLIC_CONFIG_PATHS)('serves %s with a public SWR policy', async (path) => {
+      const response = await SELF.fetch(`https://api.test.example.com${path}`);
+      expect(response.status).toBe(200);
+      expect(response.headers.get('cache-control')).toBe(
+        'public, max-age=60, stale-while-revalidate=300'
+      );
+      // The global CORS middleware contributes `Vary: Origin`. What matters is
+      // that we do NOT add `Cookie`: fragmenting a shared cache per session for a
+      // body that does not depend on the caller would defeat the point.
+      const vary = response.headers.get('vary') ?? '';
+      expect(vary.split(',').map((v) => v.trim())).not.toContain('Cookie');
+    });
+
+    // Discriminating controls: caching is opt-in per handler, so nothing else may
+    // pick it up. If someone converts this to blanket middleware, these fail.
+    it.each([
+      ['a real-time authenticated list', '/api/projects'],
+      ['workspace runtime state', '/api/workspaces'],
+      ['node runtime state', '/api/nodes'],
+    ])('does not cache %s', async (_label, path) => {
+      const response = await SELF.fetch(`https://api.test.example.com${path}`);
+      expect(response.status).toBe(401);
+      expect(response.headers.get('cache-control')).toBeNull();
+    });
+
+    it('does not cache the health endpoint', async () => {
+      const response = await SELF.fetch('https://api.test.example.com/health');
+      expect(response.headers.get('cache-control')).toBeNull();
+    });
+
+    it('never marks an authenticated response public', async () => {
+      // The invariant that matters most: a `public` directive on a credentialed
+      // response would let a shared cache serve one user's body to another.
+      for (const path of [
+        '/api/projects',
+        '/api/workspaces',
+        '/api/nodes',
+        '/api/model-catalog/opencode',
+      ]) {
+        const response = await SELF.fetch(`https://api.test.example.com${path}`);
+        expect(response.headers.get('cache-control') ?? '').not.toContain('public');
+      }
     });
   });
 
   describe('Anthropic proxy route', () => {
     it('returns 401 for /ai/anthropic/v1/messages without x-api-key', async () => {
-      const response = await SELF.fetch(
-        'https://api.test.example.com/ai/anthropic/v1/messages',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: 'claude-sonnet-4-20250514', messages: [{ role: 'user', content: 'hi' }] }),
-        },
-      );
+      const response = await SELF.fetch('https://api.test.example.com/ai/anthropic/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-5',
+          messages: [{ role: 'user', content: 'hi' }],
+        }),
+      });
       expect(response.status).toBe(401);
       const body = await response.json<{ type: string; error: { type: string } }>();
       expect(body.type).toBe('error');
@@ -144,10 +244,9 @@ describe('Worker smoke tests (workerd runtime)', () => {
       // The test env has AI_PROXY_ENABLED unset (not 'false'), so route is enabled by default.
       // We test the kill switch via a direct route that checks the config.
       // This test just confirms the route is mounted and reachable.
-      const response = await SELF.fetch(
-        'https://api.test.example.com/ai/anthropic/v1/messages',
-        { method: 'POST' },
-      );
+      const response = await SELF.fetch('https://api.test.example.com/ai/anthropic/v1/messages', {
+        method: 'POST',
+      });
       // Without Content-Type header or body, still reaches our handler (not 404)
       expect(response.status).not.toBe(404);
     });
@@ -158,8 +257,8 @@ describe('Worker smoke tests (workerd runtime)', () => {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: 'claude-sonnet-4-20250514', messages: [] }),
-        },
+          body: JSON.stringify({ model: 'claude-sonnet-5', messages: [] }),
+        }
       );
       expect(response.status).toBe(401);
     });

@@ -1,0 +1,29 @@
+---
+import Base from '../../layouts/Base.astro';
+import Header from '../../components/Header.astro';
+import FeatureDetailPage from '../../components/FeatureDetailPage.astro';
+import { featureSections } from '../../data/features';
+
+export function getStaticPaths() {
+  return featureSections.map((feature, i) => ({
+    params: { slug: feature.slug },
+    props: {
+      feature,
+      prevFeature: i > 0 ? { slug: featureSections[i - 1].slug, label: featureSections[i - 1].label } : null,
+      nextFeature: i < featureSections.length - 1 ? { slug: featureSections[i + 1].slug, label: featureSections[i + 1].label } : null,
+    },
+  }));
+}
+
+const { feature, prevFeature, nextFeature } = Astro.props;
+---
+
+<Base
+  title={`${feature.label} — SAM Features`}
+  description={feature.subtitle}
+>
+  <Header />
+  <main>
+    <FeatureDetailPage feature={feature} prevFeature={prevFeature} nextFeature={nextFeature} />
+  </main>
+</Base>

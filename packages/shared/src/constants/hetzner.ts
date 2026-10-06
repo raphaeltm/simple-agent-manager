@@ -26,6 +26,25 @@ export const DEFAULT_SCALEWAY_ZONE = 'fr-par-1';
 /** Default Scaleway image name for label-based lookup. Override via SCALEWAY_IMAGE_NAME env var. */
 export const DEFAULT_SCALEWAY_IMAGE_NAME = 'ubuntu_noble';
 
+/** Default Vultr region. Override via VULTR_REGION env var. */
+export const DEFAULT_VULTR_REGION = 'fra';
+
+/**
+ * Default Vultr OS name used to resolve the numeric os_id dynamically via `GET /v2/os`.
+ * Vultr os_ids are mutable integers, so SAM matches by name instead. Override via VULTR_OS_NAME env var.
+ */
+export const DEFAULT_VULTR_OS_NAME = 'Ubuntu 24.04 LTS x64';
+
+/** Default DigitalOcean region. Override via DIGITALOCEAN_REGION env var. */
+export const DEFAULT_DIGITALOCEAN_REGION = 'fra1';
+
+/**
+ * Default DigitalOcean image slug. Unlike Vultr, DO image slugs are stable, so no
+ * dynamic id resolution is needed. A numeric `config.image` is accepted as an explicit
+ * image-id override. Override via DIGITALOCEAN_IMAGE env var.
+ */
+export const DEFAULT_DIGITALOCEAN_IMAGE = 'ubuntu-24-04-x64';
+
 /** Default GCP zone. Override via GCP_DEFAULT_ZONE env var. */
 export const DEFAULT_GCP_ZONE = 'us-central1-a';
 

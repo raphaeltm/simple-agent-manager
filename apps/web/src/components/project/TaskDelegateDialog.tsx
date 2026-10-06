@@ -87,7 +87,7 @@ export function TaskDelegateDialog({
 
         {/* Selected workspace preview */}
         {selectedWorkspace && (
-          <div className="py-2 px-3 rounded-md border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)] flex items-center gap-2 flex-wrap text-sm">
+          <div className="py-2 px-3 rounded-md border border-[var(--sam-form-border)] bg-[var(--sam-glass-nested-bg)] flex items-center gap-2 flex-wrap text-sm">
             <StatusBadge status={selectedWorkspace.status} />
             <span className="font-semibold text-fg-primary">
               {selectedWorkspace.displayName ?? selectedWorkspace.name}

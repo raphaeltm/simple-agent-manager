@@ -334,7 +334,8 @@ The deploy script creates these automatically:
 
 ### Required Secrets
 
-Set via `wrangler secret put` or the setup wizard:
+Set through the setup wizard or the bounded deploy-secret workflow
+(`scripts/deploy/configure-secrets.sh`, backed by `wrangler secret bulk`):
 - `GITHUB_CLIENT_ID` - GitHub OAuth App client ID
 - `GITHUB_CLIENT_SECRET` - GitHub OAuth App client secret
 - `GITHUB_APP_ID` - GitHub App ID

@@ -1,5 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { TabBar } from '../../../src/components/TabBar';
 import type { TerminalSession } from '../../../src/types/multi-terminal';
 
@@ -81,8 +82,8 @@ describe('TabBar', () => {
         status: 'connected' as const,
         createdAt: new Date(),
         lastActivityAt: new Date(),
-      isActive: false,
-      order: 0,
+        isActive: false,
+        order: 0,
         workingDirectory: '/workspace',
       }));
       render(<TabBar {...defaultProps} sessions={maxedSessions} maxTabs={10} />);
@@ -205,7 +206,7 @@ describe('TabBar', () => {
       const tab = screen.getByText('Terminal 1');
       fireEvent.doubleClick(tab);
 
-      const input = await screen.findByDisplayValue('Terminal 1') as HTMLInputElement;
+      const input = (await screen.findByDisplayValue('Terminal 1')) as HTMLInputElement;
       expect(input.selectionStart).toBe(0);
       expect(input.selectionEnd).toBe('Terminal 1'.length);
     });
@@ -225,9 +226,7 @@ describe('TabBar', () => {
         workingDirectory: '/workspace',
       }));
 
-      const { container } = render(
-        <TabBar {...defaultProps} sessions={manySessions} />
-      );
+      const { container } = render(<TabBar {...defaultProps} sessions={manySessions} />);
 
       // Mock scrollWidth > clientWidth
       const tabContainer = container.querySelector('.tab-container');
@@ -303,15 +302,139 @@ describe('TabBar', () => {
       expect(newTabButton).toBeDefined();
     });
 
-    it('should support keyboard navigation', () => {
+    it('uses roving tabindex so only the active tab is tabbable', () => {
+      render(<TabBar {...defaultProps} />);
+
+      const firstTab = screen.getByRole('tab', { name: 'Terminal tab: Terminal 1' });
+      const secondTab = screen.getByRole('tab', { name: 'Terminal tab: Terminal 2' });
+      const thirdTab = screen.getByRole('tab', { name: 'Terminal tab: Terminal 3' });
+
+      expect(firstTab.getAttribute('tabIndex')).toBe('0');
+      expect(secondTab.getAttribute('tabIndex')).toBe('-1');
+      expect(thirdTab.getAttribute('tabIndex')).toBe('-1');
+    });
+
+    it('moves focus with ArrowRight and wraps from the last tab', async () => {
+      render(<TabBar {...defaultProps} />);
+
+      const firstTab = screen.getByRole('tab', { name: 'Terminal tab: Terminal 1' });
+      const secondTab = screen.getByRole('tab', { name: 'Terminal tab: Terminal 2' });
+      const thirdTab = screen.getByRole('tab', { name: 'Terminal tab: Terminal 3' });
+
+      firstTab.focus();
+      fireEvent.keyDown(firstTab, { key: 'ArrowRight' });
+      await waitFor(() => expect(document.activeElement).toBe(secondTab));
+      expect(secondTab.getAttribute('tabIndex')).toBe('0');
+
+      fireEvent.keyDown(secondTab, { key: 'ArrowRight' });
+      await waitFor(() => expect(document.activeElement).toBe(thirdTab));
+
+      fireEvent.keyDown(thirdTab, { key: 'ArrowRight' });
+      await waitFor(() => expect(document.activeElement).toBe(firstTab));
+    });
+
+    it('moves focus with ArrowLeft and wraps from the first tab', async () => {
+      render(<TabBar {...defaultProps} />);
+
+      const firstTab = screen.getByRole('tab', { name: 'Terminal tab: Terminal 1' });
+      const thirdTab = screen.getByRole('tab', { name: 'Terminal tab: Terminal 3' });
+
+      firstTab.focus();
+      fireEvent.keyDown(firstTab, { key: 'ArrowLeft' });
+
+      await waitFor(() => expect(document.activeElement).toBe(thirdTab));
+      expect(thirdTab.getAttribute('tabIndex')).toBe('0');
+    });
+
+    it('moves focus to first and last tabs with Home and End', async () => {
+      render(<TabBar {...defaultProps} />);
+
+      const firstTab = screen.getByRole('tab', { name: 'Terminal tab: Terminal 1' });
+      const secondTab = screen.getByRole('tab', { name: 'Terminal tab: Terminal 2' });
+      const thirdTab = screen.getByRole('tab', { name: 'Terminal tab: Terminal 3' });
+
+      secondTab.focus();
+      fireEvent.keyDown(secondTab, { key: 'End' });
+      await waitFor(() => expect(document.activeElement).toBe(thirdTab));
+
+      fireEvent.keyDown(thirdTab, { key: 'Home' });
+      await waitFor(() => expect(document.activeElement).toBe(firstTab));
+    });
+
+    it('updates the tabbable and focused tab when the active session changes while focus is in the tablist', async () => {
+      const { rerender } = render(<TabBar {...defaultProps} />);
+
+      const firstTab = screen.getByRole('tab', { name: 'Terminal tab: Terminal 1' });
+      firstTab.focus();
+
+      rerender(<TabBar {...defaultProps} activeSessionId="session-2" />);
+
+      const secondTab = screen.getByRole('tab', { name: 'Terminal tab: Terminal 2' });
+      await waitFor(() => expect(document.activeElement).toBe(secondTab));
+      expect(firstTab.getAttribute('tabIndex')).toBe('-1');
+      expect(secondTab.getAttribute('tabIndex')).toBe('0');
+      expect(secondTab.getAttribute('aria-selected')).toBe('true');
+    });
+
+    it('falls back to a remaining tab when the focused tab is removed', async () => {
+      const { rerender } = render(<TabBar {...defaultProps} activeSessionId="session-2" />);
+
+      const secondTab = screen.getByRole('tab', { name: 'Terminal tab: Terminal 2' });
+      secondTab.focus();
+
+      rerender(
+        <TabBar
+          {...defaultProps}
+          sessions={[mockSessions[0]!, mockSessions[2]!]}
+          activeSessionId="session-1"
+        />
+      );
+
+      const firstTab = screen.getByRole('tab', { name: 'Terminal tab: Terminal 1' });
+      await waitFor(() => expect(firstTab.getAttribute('tabIndex')).toBe('0'));
+      await waitFor(() => expect(document.activeElement).toBe(firstTab));
+      expect(screen.queryByRole('tab', { name: 'Terminal tab: Terminal 2' })).toBeNull();
+    });
+
+    it('should activate tab on Enter key', () => {
       const { container } = render(<TabBar {...defaultProps} />);
 
-      const firstTab = container.querySelector('[role="tab"]') as HTMLElement;
-      firstTab?.focus();
+      const tabs = container.querySelectorAll('[role="tab"]');
+      const secondTab = tabs[1] as HTMLElement;
+      fireEvent.keyDown(secondTab, { key: 'Enter' });
 
-      // Arrow right should move focus
-      fireEvent.keyDown(firstTab, { key: 'ArrowRight' });
-      // Implementation would handle focus management
+      expect(defaultProps.onTabActivate).toHaveBeenCalledWith('session-2');
+    });
+
+    it('should activate tab on Space key', () => {
+      const { container } = render(<TabBar {...defaultProps} />);
+
+      const tabs = container.querySelectorAll('[role="tab"]');
+      const secondTab = tabs[1] as HTMLElement;
+      fireEvent.keyDown(secondTab, { key: ' ' });
+
+      expect(defaultProps.onTabActivate).toHaveBeenCalledWith('session-2');
+    });
+
+    it('should not activate already-active tab on Enter', () => {
+      const { container } = render(<TabBar {...defaultProps} />);
+
+      const tabs = container.querySelectorAll('[role="tab"]');
+      const firstTab = tabs[0] as HTMLElement;
+      fireEvent.keyDown(firstTab, { key: 'Enter' });
+
+      // Already active tab should not trigger onTabActivate
+      expect(defaultProps.onTabActivate).not.toHaveBeenCalled();
+    });
+
+    it('should have keyboard-accessible close buttons', () => {
+      render(<TabBar {...defaultProps} />);
+
+      const closeButtons = screen.getAllByLabelText(/Close Terminal/);
+      // Close buttons should be focusable (tabIndex >= 0)
+      for (const btn of closeButtons) {
+        expect(btn.tabIndex).toBeGreaterThanOrEqual(0);
+      }
     });
   });
 

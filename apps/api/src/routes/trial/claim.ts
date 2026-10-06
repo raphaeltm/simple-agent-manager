@@ -18,11 +18,8 @@ import {
   TRIAL_COOKIE_CLAIM_NAME,
   type TrialClaimResponse,
 } from '@simple-agent-manager/shared';
-import { and, eq } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
-import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { getUserId, requireAuth } from '../../middleware/auth';
@@ -72,31 +69,95 @@ claimRoutes.post('/claim', requireAuth(), async (c) => {
   if (record.claimed) {
     throw errors.conflict('Trial has already been claimed');
   }
-
-  const db = drizzle(c.env.DATABASE, { schema });
+  if (typeof record.expiresAt !== 'number' || record.expiresAt <= Date.now()) {
+    throw errors.conflict('Trial has expired');
+  }
 
   // Atomic re-parent — the AND clause is the precondition that protects against
   // double-claim / race conditions. If anyone else already re-parented this
   // project, `update()` returns 0 rows and we surface a 409.
   const anonymousUserId = c.env.TRIAL_ANONYMOUS_USER_ID ?? TRIAL_ANONYMOUS_USER_ID;
-  const updateResult = await db
-    .update(schema.projects)
-    .set({ userId, updatedAt: new Date().toISOString() })
-    .where(
-      and(
-        eq(schema.projects.id, projectId),
-        eq(schema.projects.userId, anonymousUserId)
-      )
-    )
-    .run();
+  const claimedAt = Date.now();
+  const updatedAt = new Date(claimedAt).toISOString();
+  let projectChanges = 0;
+  let trialChanges = 0;
+  try {
+    const projectReparent = c.env.DATABASE.prepare(
+      `UPDATE projects
+       SET user_id = ?,
+           updated_at = ?
+       WHERE id = ?
+         AND user_id = ?
+         AND EXISTS (
+           SELECT 1
+           FROM trials
+           WHERE id = ?
+             AND claimed_by_user_id IS NULL
+             AND status IN ('pending', 'ready')
+             AND expires_at > ?
+             AND (project_id IS NULL OR project_id = ?)
+         )`
+    ).bind(userId, updatedAt, projectId, anonymousUserId, trialId, claimedAt, projectId);
 
-  // D1 meta.changes: canonical way to detect how many rows the update hit
-  const meta = (updateResult as unknown as { meta?: { changes?: number } }).meta;
-  const changes = meta?.changes ?? 0;
-  if (changes === 0) {
+    const trialClaim = c.env.DATABASE.prepare(
+      `UPDATE trials
+       SET status = 'claimed',
+           claimed_by_user_id = ?,
+           claimed_at = ?,
+           project_id = COALESCE(project_id, ?)
+       WHERE id = ?
+         AND claimed_by_user_id IS NULL
+         AND status IN ('pending', 'ready')
+         AND expires_at > ?
+         AND (project_id IS NULL OR project_id = ?)
+         AND EXISTS (
+           SELECT 1
+           FROM projects
+           WHERE id = ?
+             AND user_id = ?
+         )`
+    ).bind(userId, claimedAt, projectId, trialId, claimedAt, projectId, projectId, userId);
+
+    const [projectResult, trialResult] = await c.env.DATABASE.batch([projectReparent, trialClaim]);
+    projectChanges = getD1Changes(projectResult);
+    trialChanges = getD1Changes(trialResult);
+  } catch (err) {
+    log.error('trial_claim.d1_batch_failed', {
+      trialId,
+      projectId,
+      userId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw errors.internal('Trial claim could not be recorded');
+  }
+
+  if (projectChanges === 0) {
     // Project either doesn't exist or was already claimed by a different user
     log.warn('trial_claim.reparent_no_rows', { trialId, projectId, userId });
     throw errors.conflict('Trial project is no longer available to claim');
+  }
+
+  if (trialChanges === 0) {
+    log.error('trial_claim.d1_mark_claimed_no_rows_after_reparent', {
+      trialId,
+      projectId,
+      userId,
+    });
+    await c.env.DATABASE.prepare(
+      `UPDATE projects
+       SET user_id = ?,
+           updated_at = ?
+       WHERE id = ?
+         AND user_id = ?`
+    ).bind(anonymousUserId, updatedAt, projectId, userId).run().catch((err) => {
+      log.error('trial_claim.reparent_rollback_failed', {
+        trialId,
+        projectId,
+        userId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+    throw errors.internal('Trial claim could not be recorded');
   }
 
   // Mark trial as claimed in KV (best-effort — the D1 write is the source of truth)
@@ -109,7 +170,6 @@ claimRoutes.post('/claim', requireAuth(), async (c) => {
     });
   }
 
-  const claimedAt = Date.now();
   log.info('trial_claim.success', { trialId, projectId, userId, claimedAt });
 
   // Clear the claim cookie. Domain attribute MUST match what was set when the
@@ -136,6 +196,11 @@ function parseCookie(header: string, name: string): string | null {
     }
   }
   return null;
+}
+
+function getD1Changes(result: unknown): number {
+  const meta = (result as { meta?: { changes?: number } } | null | undefined)?.meta;
+  return typeof meta?.changes === 'number' ? meta.changes : 0;
 }
 
 export { claimRoutes };

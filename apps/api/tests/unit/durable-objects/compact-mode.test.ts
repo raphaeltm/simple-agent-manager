@@ -87,6 +87,125 @@ describe('stripToolMetadataContent', () => {
     expect(result.contentSize).toBeGreaterThan(100_000);
     expect(result.toolCallId).toBe('tc-big');
   });
+
+  it('preserves a document-card rawOutput payload while stripping compact content', () => {
+    const payload = {
+      fileId: '01KWV8QZ0PM59JS9YQSPVTCMCJ',
+      filename: 'sam-architecture-comprehensive.html',
+      mimeType: 'text/html; charset=utf-8',
+      sizeBytes: 51849,
+      caption: 'Newest comprehensive SAM architecture webpage.',
+    };
+    const meta = {
+      toolCallId: 'tc-display',
+      title: 'sam-mcp/display_from_library',
+      kind: 'other',
+      status: 'completed',
+      content: [
+        {
+          type: 'content',
+          content: { type: 'text', text: JSON.stringify(payload, null, 2) },
+        },
+      ],
+    };
+
+    const result = stripToolMetadataContent(meta) as Record<string, unknown>;
+
+    expect(result.content).toBeUndefined();
+    expect(result.contentSize).toBeGreaterThan(0);
+    expect(result.title).toBe('sam-mcp/display_from_library');
+    const rawOutput = result.rawOutput as Array<{ type: string; text: string }>;
+    expect(rawOutput).toHaveLength(1);
+    expect(rawOutput[0]?.type).toBe('text');
+    expect(JSON.parse(rawOutput[0]?.text ?? '{}')).toEqual(payload);
+  });
+
+  it('treats an array-valued existingFile as a valid document payload (array-accepting record-guard parity)', () => {
+    // findDocumentPayload/isDocumentResultPayload used a local `isRecord`
+    // guard that (unlike the array-rejecting expectJsonRecord) ACCEPTS
+    // arrays, matching JS's `typeof [] === 'object'`. It was replaced with
+    // the shared `maybeJsonRecord`, which — per valibot's record schema
+    // (numeric indices are valid string keys) — has the identical
+    // array-accepting behavior. This pins that parity: an `existingFile`
+    // that is a JSON array must still be recognized as present.
+    const payload = { existingFile: [1, 2, 3], caption: 'array existingFile edge case' };
+    const meta = {
+      toolCallId: 'tc-display-array',
+      title: 'sam-mcp/display_from_library',
+      kind: 'other',
+      status: 'completed',
+      content: [
+        {
+          type: 'content',
+          content: { type: 'text', text: JSON.stringify(payload) },
+        },
+      ],
+    };
+
+    const result = stripToolMetadataContent(meta) as Record<string, unknown>;
+
+    expect(result.content).toBeUndefined();
+    const rawOutput = result.rawOutput as Array<{ type: string; text: string }>;
+    expect(rawOutput).toHaveLength(1);
+    expect(JSON.parse(rawOutput[0]?.text ?? '{}')).toEqual(payload);
+  });
+
+  it('does not treat a bare top-level JSON array as a document payload (arrays never carry named fields)', () => {
+    // A top-level JSON array can never satisfy isDocumentResultPayload's
+    // named-key checks (fileId/id/existingFile/error), regardless of whether
+    // the record guard accepts or rejects arrays — proving the guard swap
+    // does not introduce a false-positive document-card match.
+    const meta = {
+      toolCallId: 'tc-shell-array',
+      title: 'sam-mcp/display_from_library',
+      kind: 'other',
+      status: 'completed',
+      content: [{ type: 'content', text: '[1,2,3]' }],
+    };
+
+    const result = stripToolMetadataContent(meta) as Record<string, unknown>;
+
+    expect(result.content).toBeUndefined();
+    expect(result.rawOutput).toBeUndefined();
+  });
+
+  it('does not synthesize rawOutput for non-document tool content', () => {
+    const meta = {
+      toolCallId: 'tc-shell',
+      title: 'exec_command',
+      kind: 'other',
+      status: 'completed',
+      content: [{ type: 'content', text: '{"fileId":"not-a-library-card"}' }],
+    };
+
+    const result = stripToolMetadataContent(meta) as Record<string, unknown>;
+
+    expect(result.content).toBeUndefined();
+    expect(result.contentSize).toBeGreaterThan(0);
+    expect(result.rawOutput).toBeUndefined();
+  });
+
+  it('honors the document-card rawOutput byte budget', () => {
+    const meta = {
+      toolCallId: 'tc-display',
+      title: 'sam-mcp/display_from_library',
+      status: 'completed',
+      content: [
+        {
+          type: 'content',
+          text: '{"fileId":"01KWV8QZ0PM59JS9YQSPVTCMCJ","filename":"sam-architecture-comprehensive.html"}',
+        },
+      ],
+    };
+
+    const result = stripToolMetadataContent(meta, {
+      documentCardRawOutputMaxBytes: 16,
+    }) as Record<string, unknown>;
+
+    expect(result.content).toBeUndefined();
+    expect(result.contentSize).toBeGreaterThan(0);
+    expect(result.rawOutput).toBeUndefined();
+  });
 });
 
 describe('parseChatMessageRowCompact', () => {
@@ -164,9 +283,50 @@ describe('getMessageToolContent', () => {
 
   it('returns content array for a valid message with tool_metadata', () => {
     const content = [{ type: 'content', text: 'hello' }];
-    const sql = makeSql([{ tool_metadata: JSON.stringify({ toolCallId: 'tc-1', content }) }]);
+    const sql = makeSql([
+      { role: 'tool', tool_metadata: JSON.stringify({ toolCallId: 'tc-1', content }) },
+    ]);
     const result = getMessageToolContent(sql, 'sess-1', 'msg-1');
     expect(result).toEqual(content);
+  });
+
+  it('round-trips normalized Codex output through compact metadata and lazy reload', () => {
+    const content = [
+      {
+        type: 'terminal',
+        output: 'SAM_DURABLE_COMMAND_OUTPUT_112',
+        exitCode: 0,
+      },
+    ];
+    const toolMetadata = {
+      toolCallId: 'codex-command-1',
+      title: 'Run shell command',
+      status: 'completed',
+      content,
+    };
+    const row = {
+      id: 'msg-codex-command',
+      session_id: 'sess-1',
+      role: 'tool',
+      content: 'SAM_DURABLE_COMMAND_OUTPUT_112',
+      tool_metadata: JSON.stringify(toolMetadata),
+      created_at: 1234567890,
+      sequence: 2,
+    };
+
+    const compact = parseChatMessageRowCompact(row);
+    const compactMeta = compact.toolMetadata as Record<string, unknown>;
+    expect(compactMeta).toMatchObject({
+      toolCallId: 'codex-command-1',
+      title: 'Run shell command',
+      status: 'completed',
+    });
+    expect(compactMeta.content).toBeUndefined();
+    expect(compactMeta.rawOutput).toBeUndefined();
+    expect(compactMeta.contentSize).toBeGreaterThan(0);
+
+    const sql = makeSql([{ role: 'tool', tool_metadata: JSON.stringify(toolMetadata) }]);
+    expect(getMessageToolContent(sql, 'sess-1', 'msg-codex-command')).toEqual(content);
   });
 
   it('returns null when message is not found', () => {
@@ -175,28 +335,41 @@ describe('getMessageToolContent', () => {
     expect(result).toBeNull();
   });
 
-  it('returns null when tool_metadata is not a string', () => {
-    const sql = makeSql([{ tool_metadata: 42 }]);
+  it('returns null when message is not a tool message', () => {
+    const sql = makeSql([
+      {
+        role: 'assistant',
+        tool_metadata: JSON.stringify({ content: [{ type: 'content', text: 'ignored' }] }),
+      },
+    ]);
     const result = getMessageToolContent(sql, 'sess-1', 'msg-1');
     expect(result).toBeNull();
   });
 
-  it('returns null when tool_metadata has no content array', () => {
-    const sql = makeSql([{ tool_metadata: JSON.stringify({ toolCallId: 'tc-1', title: 'Read' }) }]);
+  it('returns empty content when tool_metadata is not a string', () => {
+    const sql = makeSql([{ role: 'tool', tool_metadata: 42 }]);
     const result = getMessageToolContent(sql, 'sess-1', 'msg-1');
-    expect(result).toBeNull();
+    expect(result).toEqual([]);
   });
 
-  it('returns null when tool_metadata is malformed JSON', () => {
-    const sql = makeSql([{ tool_metadata: '{bad json' }]);
+  it('returns empty content when tool_metadata has no content array', () => {
+    const sql = makeSql([
+      { role: 'tool', tool_metadata: JSON.stringify({ toolCallId: 'tc-1', title: 'Read' }) },
+    ]);
     const result = getMessageToolContent(sql, 'sess-1', 'msg-1');
-    expect(result).toBeNull();
+    expect(result).toEqual([]);
   });
 
-  it('returns null when tool_metadata is null string', () => {
-    const sql = makeSql([{ tool_metadata: null }]);
+  it('returns empty content when tool_metadata is malformed JSON', () => {
+    const sql = makeSql([{ role: 'tool', tool_metadata: '{bad json' }]);
     const result = getMessageToolContent(sql, 'sess-1', 'msg-1');
-    expect(result).toBeNull();
+    expect(result).toEqual([]);
+  });
+
+  it('returns empty content when tool_metadata is null', () => {
+    const sql = makeSql([{ role: 'tool', tool_metadata: null }]);
+    const result = getMessageToolContent(sql, 'sess-1', 'msg-1');
+    expect(result).toEqual([]);
   });
 });
 

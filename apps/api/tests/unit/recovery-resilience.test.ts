@@ -14,22 +14,30 @@ const stuckTasksSource = readFileSync(
   resolve(process.cwd(), 'src/scheduled/stuck-tasks.ts'),
   'utf8'
 );
-const nodeCleanupSource = readFileSync(
-  resolve(process.cwd(), 'src/scheduled/node-cleanup.ts'),
+// node-cleanup.ts was split into a directory (rule 18). These structural assertions
+// apply to the sweep as a whole, so read every module and concatenate.
+const nodeCleanupSource = [
+  'index.ts',
+  'shared.ts',
+  'result.ts',
+  'node-phases.ts',
+  'terminal-cf-container-phase.ts',
+  'workspace-phases.ts',
+]
+  .map((file) => readFileSync(resolve(process.cwd(), `src/scheduled/node-cleanup/${file}`), 'utf8'))
+  .join('\n');
+// The live-runtime preservation record was split out of stuck-tasks.ts (rule 18).
+const stuckTaskLiveRuntimeSource = readFileSync(
+  resolve(process.cwd(), 'src/scheduled/stuck-task-live-runtime.ts'),
   'utf8'
 );
-const timeoutSource = readFileSync(
-  resolve(process.cwd(), 'src/services/timeout.ts'),
-  'utf8'
-);
+const timeoutSource = readFileSync(resolve(process.cwd(), 'src/services/timeout.ts'), 'utf8');
 const taskRunnerSource = readFileSync(
   resolve(process.cwd(), 'src/services/task-runner.ts'),
   'utf8'
 );
-const indexSource = readFileSync(
-  resolve(process.cwd(), 'src/index.ts'),
-  'utf8'
-);
+const scheduledSource = readFileSync(resolve(process.cwd(), 'src/scheduled/handler.ts'), 'utf8');
+const adminSource = readFileSync(resolve(process.cwd(), 'src/routes/admin.ts'), 'utf8');
 
 // =========================================================================
 // Stuck Tasks — OBSERVABILITY_DATABASE Recording
@@ -41,7 +49,7 @@ describe('stuck-tasks OBSERVABILITY_DATABASE recording (TDF-7)', () => {
   });
 
   it('records stuck task recovery in OBSERVABILITY_DATABASE', () => {
-    expect(stuckTasksSource).toContain('persistError(env.OBSERVABILITY_DATABASE');
+    expect(stuckTasksSource).toMatch(/persistError\(\s*env\.OBSERVABILITY_DATABASE/);
   });
 
   it('uses "warn" level for recovery events', () => {
@@ -59,15 +67,15 @@ describe('stuck-tasks OBSERVABILITY_DATABASE recording (TDF-7)', () => {
       startIdx,
       stuckTasksSource.indexOf('switch (task.status)', startIdx)
     );
-    expect(cleanupSection).toContain('persistError(env.OBSERVABILITY_DATABASE');
+    expect(cleanupSection).toMatch(/persistError\(\s*env\.OBSERVABILITY_DATABASE/);
     expect(cleanupSection).toContain("level: 'error'");
   });
 
   it('records recovery failures in OBSERVABILITY_DATABASE', () => {
     const failureSection = stuckTasksSource.slice(
-      stuckTasksSource.indexOf('// Record recovery failure'),
+      stuckTasksSource.indexOf('// Record recovery failure')
     );
-    expect(failureSection).toContain('persistError(env.OBSERVABILITY_DATABASE');
+    expect(failureSection).toMatch(/persistError\(\s*env\.OBSERVABILITY_DATABASE/);
     expect(failureSection).toContain("level: 'error'");
   });
 
@@ -112,8 +120,9 @@ describe('stuck-tasks diagnostic context capture (TDF-7)', () => {
       stuckTasksSource.indexOf('async function gatherDiagnostics('),
       stuckTasksSource.indexOf('export async function recoverStuckTasks(')
     );
-    expect(diagSection).toContain('env.TASK_RUNNER.idFromName(task.id)');
-    expect(diagSection).toContain('stub.getStatus()');
+    expect(diagSection).toContain('probeTaskRunnerStatus(env, task.id)');
+    expect(stuckTasksSource).toContain('env.TASK_RUNNER.idFromName(taskId)');
+    expect(stuckTasksSource).toContain('stub.getStatus()');
   });
 
   it('includes workspace and node status in persistError context', () => {
@@ -150,12 +159,14 @@ describe('stuck-tasks diagnostic context capture (TDF-7)', () => {
 
 describe('stuck-tasks DO health checks (TDF-7)', () => {
   it('imports TaskRunner type for typed DO stub', () => {
-    expect(stuckTasksSource).toContain("import type { TaskRunner } from '../durable-objects/task-runner'");
+    expect(stuckTasksSource).toContain(
+      "import type { TaskRunner } from '../durable-objects/task-runner'"
+    );
   });
 
   it('checks DO health for non-stuck tasks at half threshold', () => {
     expect(stuckTasksSource).toContain('halfThreshold');
-    expect(stuckTasksSource).toContain('timeForCheck > halfThreshold');
+    expect(stuckTasksSource).toContain('timeForCheck > Math.min(halfThreshold, mismatchGraceMs)');
   });
 
   it('uses started_at for in_progress tasks (consistent time base)', () => {
@@ -168,19 +179,22 @@ describe('stuck-tasks DO health checks (TDF-7)', () => {
     expect(healthCheckSection).toContain('timeForCheck');
   });
 
-  it('detects DO-completed-but-task-active mismatch', () => {
-    expect(stuckTasksSource).toContain('stuck_task.do_completed_but_task_active');
-    expect(stuckTasksSource).toContain('doStatus.completed');
+  it('detects completed-DO active-state mismatches while recognizing normal handoff', () => {
+    expect(stuckTasksSource).toContain('stuck_task.do_completed_handoff_active');
+    expect(stuckTasksSource).toContain('stuck_task.do_completed_active_state_mismatch');
+    expect(stuckTasksSource).toContain('doStatus?.completed');
   });
 
   it('records DO mismatch in OBSERVABILITY_DATABASE', () => {
-    expect(stuckTasksSource).toContain("recoveryType: 'do_task_status_mismatch'");
+    expect(stuckTasksSource).toContain('TASK_RUNNER_MISMATCH_RECOVERY_TYPE');
+    expect(stuckTasksSource).toContain("'do_task_status_mismatch'");
   });
 
-  it('deduplicates DO mismatch records (30 min window)', () => {
-    expect(stuckTasksSource).toContain('recentMismatch');
+  it('deduplicates DO mismatch records once per task', () => {
+    expect(stuckTasksSource).toContain('existingMismatch');
     expect(stuckTasksSource).toContain('do_task_status_mismatch');
-    expect(stuckTasksSource).toContain('30 * 60 * 1000');
+    expect(stuckTasksSource).toContain('One durable diagnostic per task is enough');
+    expect(stuckTasksSource).not.toContain('30 * 60 * 1000');
   });
 
   it('tracks doHealthChecked count in result', () => {
@@ -189,7 +203,48 @@ describe('stuck-tasks DO health checks (TDF-7)', () => {
   });
 
   it('cron handler logs doHealthChecked count', () => {
-    expect(indexSource).toContain('stuckTaskDoHealthChecked: stuckTasks.doHealthChecked');
+    // Optional-chained: a sweep that threw yields undefined rather than a zero
+    // result, so a crashed sweep stays distinguishable from an empty one.
+    expect(scheduledSource).toContain('stuckTaskDoHealthChecked: stuckTasks?.doHealthChecked');
+  });
+
+  it('isolates every sweep so a cleanup failure cannot suppress the others', () => {
+    // This replaces an ordering assertion ("recover stuck tasks FIRST so unrelated
+    // cleanup failures cannot suppress lifecycle repair"). Ordering was only ever a
+    // workaround: it protects whatever runs earliest and nothing else. In production
+    // it did exactly that -- stuck-task recovery kept running while every sweep after
+    // runNodeCleanupSweep stayed dead for ~13 hours, including user cron triggers.
+    //
+    // Isolation is the real property, so assert it directly: no sweep in the
+    // 5-minute branch may be awaited outside the isolator.
+    const sweepStart = scheduledSource.indexOf('const sweeps = createSweepIsolator(env)');
+    const sweepEnd = scheduledSource.indexOf("log.info('cron.completed'", sweepStart);
+    const sweepBody = scheduledSource.slice(sweepStart, sweepEnd);
+
+    expect(sweepBody).toContain('const sweeps = createSweepIsolator(env)');
+
+    for (const sweepFn of [
+      'recoverStuckTasks(env)',
+      'runNodeCleanupSweep(env)',
+      'runCronTriggerSweep(env)',
+      'runTrialExpireSweep(env)',
+      'runObservabilityPurge(env)',
+    ]) {
+      const idx = sweepBody.indexOf(sweepFn);
+      expect(idx).toBeGreaterThan(-1);
+      // Each call must be wrapped in `sweeps.isolate(...)`, i.e. preceded by an
+      // isolate() opener on the same statement rather than a bare `await`.
+      const statementStart = sweepBody.lastIndexOf('await ', idx);
+      expect(sweepBody.slice(statementStart, idx)).toContain('sweeps.isolate(');
+    }
+  });
+
+  it('exposes read-only reconciliation diagnostics behind the superadmin router', () => {
+    expect(adminSource).toContain(
+      "adminRoutes.use('/*', requireAuth(), requireApproved(), requireSuperadmin())"
+    );
+    expect(adminSource).toContain("adminRoutes.get('/tasks/:taskId/reconciliation-diagnostics'");
+    expect(adminSource).toContain('getTaskReconciliationDiagnostics(c.env, taskId)');
   });
 });
 
@@ -199,7 +254,9 @@ describe('stuck-tasks DO health checks (TDF-7)', () => {
 
 describe('node-cleanup OBSERVABILITY_DATABASE recording (TDF-7)', () => {
   it('imports persistError from observability service', () => {
-    expect(nodeCleanupSource).toContain("import { persistError } from '../services/observability'");
+    expect(nodeCleanupSource).toContain(
+      "import { persistError } from '../../services/observability'"
+    );
   });
 
   it('records stale warm node destruction in OBSERVABILITY_DATABASE', () => {
@@ -207,19 +264,20 @@ describe('node-cleanup OBSERVABILITY_DATABASE recording (TDF-7)', () => {
   });
 
   it('writes success records AFTER deleteNodeResources (M1 fix)', () => {
-    // Stale warm: success record comes after deleteNodeResources
-    const staleSection = nodeCleanupSource.slice(
-      nodeCleanupSource.indexOf('destroying_stale_warm'),
-      nodeCleanupSource.indexOf('staleDestroyed++')
+    // All destroy phases share one helper now, so the ordering is asserted once
+    // against destroyNodeForCleanup rather than per-phase.
+    const helper = nodeCleanupSource.slice(
+      nodeCleanupSource.indexOf('export async function destroyNodeForCleanup'),
+      nodeCleanupSource.indexOf('return true;')
     );
-    const deleteIdx = staleSection.indexOf('deleteNodeResources');
-    const recordIdx = staleSection.indexOf("recoveryType: 'stale_warm_node_cleanup'");
+    const deleteIdx = helper.indexOf('deleteNodeResources');
+    const recordIdx = helper.indexOf('await persistError(');
     expect(deleteIdx).toBeGreaterThan(-1);
     expect(recordIdx).toBeGreaterThan(deleteIdx);
   });
 
   it('records stale warm node destruction failure in OBSERVABILITY_DATABASE', () => {
-    expect(nodeCleanupSource).toContain("recoveryType: 'stale_warm_node_cleanup_failure'");
+    expect(nodeCleanupSource).toContain("failureRecoveryType: 'stale_warm_node_cleanup_failure'");
   });
 
   it('records max lifetime destruction in OBSERVABILITY_DATABASE', () => {
@@ -228,22 +286,29 @@ describe('node-cleanup OBSERVABILITY_DATABASE recording (TDF-7)', () => {
   });
 
   it('records max lifetime destruction failure in OBSERVABILITY_DATABASE', () => {
-    expect(nodeCleanupSource).toContain("recoveryType: 'max_lifetime_node_cleanup_failure'");
+    expect(nodeCleanupSource).toContain("'max_lifetime_node_cleanup_failure'");
   });
 
   it('uses "info" for successful cleanups and "error" for failures', () => {
-    // The success record (with recoveryType: 'stale_warm_node_cleanup') uses info level.
-    // Slice backward 100 chars to capture the level field.
-    const idx = nodeCleanupSource.indexOf("recoveryType: 'stale_warm_node_cleanup'");
-    const staleRecordSection = nodeCleanupSource.slice(Math.max(0, idx - 200), idx + 50);
+    // Stale-warm destruction is routine, so its success record is info level; it opts
+    // in explicitly because the shared helper defaults to warn. Scoped to the
+    // stale-warm call's own options object rather than a fixed character window.
+    const start = nodeCleanupSource.indexOf("logEvent: 'node_cleanup.destroying_stale_warm'");
+    const staleRecordSection = nodeCleanupSource.slice(
+      start,
+      nodeCleanupSource.indexOf('});', start)
+    );
+    expect(staleRecordSection).toContain("recoveryType: 'stale_warm_node_cleanup'");
     expect(staleRecordSection).toContain("level: 'info'");
+
+    // Failures always persist at error level, regardless of the success level.
+    expect(nodeCleanupSource).toContain("level: 'error'");
   });
 
   it('uses warn level for max lifetime destruction', () => {
-    // Max lifetime destruction uses warn level (absolute ceiling was removed)
-    const idx = nodeCleanupSource.indexOf("recoveryType: 'max_lifetime_node_cleanup'");
-    const section = nodeCleanupSource.slice(Math.max(0, idx - 200), idx + 50);
-    expect(section).toContain("level: 'warn'");
+    // Max lifetime destruction goes through the shared auto-provisioned cleanup helper.
+    expect(nodeCleanupSource).toContain("level: 'warn'");
+    expect(nodeCleanupSource).toContain("'max_lifetime_node_cleanup'");
   });
 });
 
@@ -253,9 +318,18 @@ describe('node-cleanup OBSERVABILITY_DATABASE recording (TDF-7)', () => {
 
 describe('node-cleanup orphan detection (TDF-7)', () => {
   it('detects orphaned task-created workspaces (running after task ended)', () => {
-    expect(nodeCleanupSource).toContain("w.status = 'running'");
-    // Must have been associated with a completed/failed/cancelled task
+    // Every live-workspace guard now uses the canonical active set. Phase 1 alone
+    // used to count only 'running', so a node holding a 'creating' workspace could
+    // be destroyed by phase 1 while phases 2/3 correctly skipped it.
+    expect(nodeCleanupSource).toContain("w.status IN ('running', 'creating', 'recovery')");
+    // Terminal work is reaped unless the session-sleep lifecycle owns the
+    // workspace; the behavioural proof against real SQL lives in
+    // tests/workers/scheduled-node-cleanup.test.ts.
     expect(nodeCleanupSource).toContain("t.status IN ('completed', 'failed', 'cancelled')");
+    expect(nodeCleanupSource).toContain(
+      "AND NOT ${sleepLifecycleOwnsTerminalTaskWorkspaceSql('t', 'w', sessionSleepMaxAttempts(env))}"
+    );
+    expect(nodeCleanupSource).not.toContain("t.status IN ('failed', 'cancelled')");
     // Must NOT have any active task still referencing it
     expect(nodeCleanupSource).toContain('NOT EXISTS');
     expect(nodeCleanupSource).toContain("t.status IN ('queued', 'delegated', 'in_progress')");
@@ -273,32 +347,35 @@ describe('node-cleanup orphan detection (TDF-7)', () => {
     expect(nodeCleanupSource).toContain("w.status IN ('running', 'creating', 'recovery')");
   });
 
-  it('records orphaned nodes in OBSERVABILITY_DATABASE', () => {
-    expect(nodeCleanupSource).toContain("recoveryType: 'orphaned_node'");
-    expect(nodeCleanupSource).toContain('orphaned_node_detected');
+  it('records idle orphan node DESTRUCTION in OBSERVABILITY_DATABASE', () => {
+    // Was 'orphaned_node' + 'orphaned_node_detected' when the phase only flagged.
+    // It now destroys, so both the recovery type and the log event changed.
+    expect(nodeCleanupSource).toContain("recoveryType: 'idle_orphan_node_cleanup'");
+    expect(nodeCleanupSource).toContain('destroying_idle_orphan');
   });
 
   it('tracks orphan counts in result', () => {
     expect(nodeCleanupSource).toContain('orphanedWorkspacesFlagged: number');
-    expect(nodeCleanupSource).toContain('orphanedNodesFlagged: number');
+    expect(nodeCleanupSource).toContain('orphanedNodesDestroyed: number');
     expect(nodeCleanupSource).toContain('result.orphanedWorkspacesFlagged++');
-    expect(nodeCleanupSource).toContain('result.orphanedNodesFlagged++');
+    expect(nodeCleanupSource).toContain('result.orphanedNodesDestroyed++');
   });
 
   it('cron handler logs orphan counts', () => {
-    expect(indexSource).toContain('orphanedWorkspacesFlagged');
-    expect(indexSource).toContain('orphanedNodesFlagged');
+    expect(scheduledSource).toContain('orphanedWorkspacesFlagged');
+    expect(scheduledSource).toContain('orphanedNodesDestroyed');
   });
 
-  it('uses grace period to avoid flagging recently created resources', () => {
-    // Both orphan queries filter by created_at/updated_at to avoid false positives
-    const orphanSection = nodeCleanupSource.slice(
-      nodeCleanupSource.indexOf('// 3. Orphan cleanup:'),
-    );
-    // Orphan workspace query uses gracePeriodMs cutoff on created_at
-    expect(orphanSection).toContain('w.created_at < ?');
-    // Orphan node query uses gracePeriodMs cutoff on updated_at
-    expect(orphanSection).toContain('n.updated_at < ?');
+  it('uses an idleness signal that heartbeats cannot defeat', () => {
+    // The orphan-node query MUST NOT key off n.updated_at: heartbeats write it on
+    // every beat, so `n.updated_at < now - grace` is unsatisfiable for a healthy
+    // idle node. Production recorded zero 'orphaned_node' events for the entire
+    // lifetime of that predicate.
+    expect(nodeCleanupSource).not.toContain('AND n.updated_at < ?');
+    expect(nodeCleanupSource).toContain('COALESCE(MAX(w.updated_at), n.created_at)');
+
+    // The orphaned-workspace query still uses a created_at grace cutoff.
+    expect(nodeCleanupSource).toContain('w.created_at < ?');
   });
 });
 
@@ -331,7 +408,9 @@ describe('timeout service OBSERVABILITY_DATABASE recording (TDF-7)', () => {
   });
 
   it('cron handler passes OBSERVABILITY_DATABASE to checkProvisioningTimeouts', () => {
-    expect(indexSource).toContain('checkProvisioningTimeouts(env.DATABASE, env, env.OBSERVABILITY_DATABASE)');
+    expect(scheduledSource).toContain(
+      'checkProvisioningTimeouts(env.DATABASE, env, env.OBSERVABILITY_DATABASE)'
+    );
   });
 });
 
@@ -372,7 +451,7 @@ describe('cleanup idempotency (TDF-7)', () => {
       taskRunnerSource.indexOf('// Count active workspaces')
     );
     expect(cleanupSection).toContain('schema.nodes.warmSince');
-    expect(cleanupSection).toContain("eq(schema.nodes.id, nodeId)");
+    expect(cleanupSection).toContain('eq(schema.nodes.id, nodeId)');
   });
 
   it('only calls markIdle if node is running and not warm', () => {
@@ -414,7 +493,8 @@ describe('recovery type consistency (TDF-7)', () => {
 
   for (const recoveryType of allRecoveryTypes) {
     it(`uses recoveryType: '${recoveryType}'`, () => {
-      const allSources = stuckTasksSource + nodeCleanupSource + timeoutSource;
+      const allSources =
+        stuckTasksSource + stuckTaskLiveRuntimeSource + nodeCleanupSource + timeoutSource;
       // Recovery types may appear in ternary expressions, so check for the string literal
       expect(allSources).toContain(`'${recoveryType}'`);
     });
@@ -443,8 +523,8 @@ describe('three-layer node defense integration (TDF-7)', () => {
   });
 
   it('Layer 3 (max lifetime): hard cap on auto-provisioned node age', () => {
-    expect(nodeCleanupSource).toContain('Max lifetime');
-    expect(nodeCleanupSource).toContain('hard cap on auto-provisioned node age');
+    expect(nodeCleanupSource).toContain('Absolute lifetime ceiling');
+    expect(nodeCleanupSource).toContain('hard cap so no auto-provisioned node is immortal');
   });
 
   it('stuck-tasks cron serves as outer safety net for task orchestration', () => {

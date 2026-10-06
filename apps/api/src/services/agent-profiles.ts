@@ -1,10 +1,17 @@
 import type {
   AgentProfile,
   CreateAgentProfileRequest,
+  GitHubCliPolicy,
   ResolvedAgentProfile,
   UpdateAgentProfileRequest,
 } from '@simple-agent-manager/shared';
-import { isValidAgentType } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_AGENT_EFFORT,
+  isAgentEffort,
+  isAgentEffortSupported,
+  isAgentProfileRuntime,
+  isValidAgentType,
+} from '@simple-agent-manager/shared';
 import { and, eq, isNull, or } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
@@ -12,155 +19,121 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';
+import { parseGitHubCliPolicyJson } from './github-cli-policy';
+import {
+  applyBaseProfileUpdates,
+  baseProfileInsertValues,
+  toBaseProfileFields,
+} from './profile-fields';
+import {
+  ResourceRequirementsValidationError,
+  serializeResourceRequirementsInput,
+} from './resource-requirements-input';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
 /** Env vars used by agent profile service */
-type ProfileEnv = Pick<Env,
-  | 'DEFAULT_TASK_AGENT_TYPE'
-  | 'BUILTIN_PROFILE_SONNET_MODEL'
-  | 'BUILTIN_PROFILE_OPUS_MODEL'
->;
+type ProfileEnv = Pick<Env, 'DEFAULT_TASK_AGENT_TYPE'>;
 
-const DEFAULT_SONNET_MODEL = 'claude-sonnet-4-5-20250929';
-const DEFAULT_OPUS_MODEL = 'claude-opus-4-6';
+/**
+ * Parse a stored `github_cli_policy` column value for API response display.
+ * Unlike `resolveWorkspaceGitHubTokenOptions` (github-cli-policy.ts), this
+ * accepts either policy mode ('inherit' or 'custom') and never throws —
+ * malformed or missing data degrades to `null` so a corrupted row cannot
+ * break profile listing/resolution.
+ */
+function parseGitHubCliPolicy(raw: string | null): GitHubCliPolicy | null {
+  if (!raw) return null;
+  const result = parseGitHubCliPolicyJson(raw);
+  return result.kind === 'ok' ? result.policy : null;
+}
 
-/** Built-in profile definitions seeded on first access. Models are configurable via env vars. */
-function getBuiltinProfiles(env: ProfileEnv) {
-  const sonnetModel = env.BUILTIN_PROFILE_SONNET_MODEL || DEFAULT_SONNET_MODEL;
-  const opusModel = env.BUILTIN_PROFILE_OPUS_MODEL || DEFAULT_OPUS_MODEL;
+function serializeGitHubCliPolicy(policy: GitHubCliPolicy | null | undefined): string | null {
+  if (!policy || policy.mode === 'inherit') return null;
+  return JSON.stringify(policy);
+}
 
-  return [
-    {
-      name: 'default',
-      description: 'General-purpose coding agent',
-      agentType: 'claude-code',
-      model: sonnetModel,
-      permissionMode: 'acceptEdits',
-    },
-    {
-      name: 'planner',
-      description: 'Task decomposition and architecture planning',
-      agentType: 'claude-code',
-      model: opusModel,
-      permissionMode: 'plan',
-      systemPromptAppend: 'Decompose tasks. Do not write code directly.',
-    },
-    {
-      name: 'implementer',
-      description: 'Feature implementation with tests',
-      agentType: 'claude-code',
-      model: sonnetModel,
-      permissionMode: 'acceptEdits',
-      systemPromptAppend: 'Focus on implementation. Write tests for all changes.',
-    },
-    {
-      name: 'reviewer',
-      description: 'Code review for correctness, security, and style',
-      agentType: 'claude-code',
-      model: opusModel,
-      permissionMode: 'plan',
-      systemPromptAppend: 'Review code for correctness, security, and style.',
-    },
-  ];
+function serializeProfileResourceRequirements(body: {
+  resourceRequirements?: unknown;
+  resourceRequirementsJson?: string | null;
+}): string | null {
+  try {
+    if (body.resourceRequirements !== undefined) {
+      return serializeResourceRequirementsInput(body.resourceRequirements);
+    }
+    if (body.resourceRequirementsJson !== undefined) {
+      return serializeResourceRequirementsInput(
+        body.resourceRequirementsJson,
+        'resourceRequirementsJson'
+      );
+    }
+    return null;
+  } catch (err) {
+    if (err instanceof ResourceRequirementsValidationError) {
+      throw errors.badRequest(err.message);
+    }
+    throw err;
+  }
+}
+
+function applyProfileResourceRequirementsUpdate(
+  updates: Partial<schema.NewAgentProfileRow>,
+  body: UpdateAgentProfileRequest
+): void {
+  try {
+    if (body.resourceRequirements !== undefined) {
+      updates.resourceRequirementsJson = serializeResourceRequirementsInput(
+        body.resourceRequirements
+      );
+    } else if (body.resourceRequirementsJson !== undefined) {
+      updates.resourceRequirementsJson = serializeResourceRequirementsInput(
+        body.resourceRequirementsJson,
+        'resourceRequirementsJson'
+      );
+    }
+  } catch (err) {
+    if (err instanceof ResourceRequirementsValidationError) {
+      throw errors.badRequest(err.message);
+    }
+    throw err;
+  }
+}
+
+function validateProfileEffort(agentType: string, effort: unknown): void {
+  if (effort == null) return;
+  if (!isAgentEffort(effort)) {
+    throw errors.badRequest('Invalid effort value');
+  }
+  if (!isAgentEffortSupported(agentType, effort)) {
+    throw errors.badRequest(`Effort '${effort}' is not supported for agent type '${agentType}'`);
+  }
 }
 
 /** Convert a DB row to an API response */
 function toAgentProfile(row: schema.AgentProfileRow): AgentProfile {
   return {
-    id: row.id,
-    projectId: row.projectId,
-    userId: row.userId,
-    name: row.name,
-    description: row.description,
-    agentType: row.agentType,
-    model: row.model,
-    permissionMode: row.permissionMode,
-    systemPromptAppend: row.systemPromptAppend,
-    maxTurns: row.maxTurns,
-    timeoutMinutes: row.timeoutMinutes,
-    vmSizeOverride: row.vmSizeOverride,
-    provider: row.provider,
-    vmLocation: row.vmLocation,
-    workspaceProfile: row.workspaceProfile,
-    devcontainerConfigName: row.devcontainerConfigName,
-    taskMode: row.taskMode,
-    isBuiltin: row.isBuiltin === 1,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
+    ...toBaseProfileFields(row),
+    effort: isAgentEffort(row.effort) ? row.effort : DEFAULT_AGENT_EFFORT,
+    githubCliPolicy: parseGitHubCliPolicy(row.githubCliPolicy),
   };
 }
 
 /**
- * Seed built-in profiles for a project if they don't already exist.
- * Built-in profiles have is_builtin = 1 and are owned by the project owner.
- */
-export async function seedBuiltinProfiles(
-  db: Db,
-  projectId: string,
-  userId: string,
-  env: ProfileEnv
-): Promise<void> {
-  // Check if any built-in profiles already exist for this project.
-  // If ANY exist, skip all seeding — built-ins are a one-time seed per project.
-  // This allows users to rename or delete individual built-ins without
-  // triggering re-creation. If all built-ins are deleted, they will be
-  // re-seeded on next access.
-  const existing = await db
-    .select({ id: schema.agentProfiles.id })
-    .from(schema.agentProfiles)
-    .where(
-      and(
-        eq(schema.agentProfiles.projectId, projectId),
-        eq(schema.agentProfiles.isBuiltin, 1)
-      )
-    );
-
-  if (existing.length > 0) {
-    return;
-  }
-
-  const builtinProfiles = getBuiltinProfiles(env);
-
-  for (const profile of builtinProfiles) {
-    await db.insert(schema.agentProfiles).values({
-      id: ulid(),
-      projectId,
-      userId,
-      name: profile.name,
-      description: profile.description,
-      agentType: profile.agentType,
-      model: profile.model,
-      permissionMode: profile.permissionMode,
-      systemPromptAppend: 'systemPromptAppend' in profile ? profile.systemPromptAppend : null,
-      isBuiltin: 1,
-    });
-  }
-}
-
-/**
  * List all profiles for a project (project-scoped + global).
- * Seeds built-in profiles on first access if none exist.
  */
 export async function listProfiles(
   db: Db,
   projectId: string,
   userId: string,
-  env: ProfileEnv
+  _env: ProfileEnv
 ): Promise<AgentProfile[]> {
-  // Seed built-in profiles on first access
-  await seedBuiltinProfiles(db, projectId, userId, env);
-
   const rows = await db
     .select()
     .from(schema.agentProfiles)
     .where(
       or(
         eq(schema.agentProfiles.projectId, projectId),
-        and(
-          isNull(schema.agentProfiles.projectId),
-          eq(schema.agentProfiles.userId, userId)
-        )
+        and(isNull(schema.agentProfiles.projectId), eq(schema.agentProfiles.userId, userId))
       )
     )
     .orderBy(schema.agentProfiles.name);
@@ -183,10 +156,7 @@ export async function getProfile(
         eq(schema.agentProfiles.id, profileId),
         or(
           eq(schema.agentProfiles.projectId, projectId),
-          and(
-            isNull(schema.agentProfiles.projectId),
-            eq(schema.agentProfiles.userId, userId)
-          )
+          and(isNull(schema.agentProfiles.projectId), eq(schema.agentProfiles.userId, userId))
         )
       )
     )
@@ -216,17 +186,13 @@ export async function createProfile(
   if (body.agentType && !isValidAgentType(body.agentType)) {
     throw errors.badRequest(`Invalid agent type: ${body.agentType}`);
   }
+  validateProfileEffort(body.agentType ?? env.DEFAULT_TASK_AGENT_TYPE ?? 'opencode', body.effort);
 
   // Check for duplicate name in this project
   const existing = await db
     .select({ id: schema.agentProfiles.id })
     .from(schema.agentProfiles)
-    .where(
-      and(
-        eq(schema.agentProfiles.projectId, projectId),
-        eq(schema.agentProfiles.name, name)
-      )
-    )
+    .where(and(eq(schema.agentProfiles.projectId, projectId), eq(schema.agentProfiles.name, name)))
     .limit(1);
 
   if (existing.length > 0) {
@@ -239,19 +205,10 @@ export async function createProfile(
     projectId,
     userId,
     name,
-    description: body.description ?? null,
-    agentType: body.agentType ?? env.DEFAULT_TASK_AGENT_TYPE ?? 'opencode',
-    model: body.model ?? null,
-    permissionMode: body.permissionMode ?? null,
-    systemPromptAppend: body.systemPromptAppend ?? null,
-    maxTurns: body.maxTurns ?? null,
-    timeoutMinutes: body.timeoutMinutes ?? null,
-    vmSizeOverride: body.vmSizeOverride ?? null,
-    provider: body.provider ?? null,
-    vmLocation: body.vmLocation ?? null,
-    workspaceProfile: body.workspaceProfile ?? null,
-    devcontainerConfigName: body.devcontainerConfigName ?? null,
+    ...baseProfileInsertValues(body, env),
+    resourceRequirementsJson: serializeProfileResourceRequirements(body),
     taskMode: body.taskMode ?? null,
+    githubCliPolicy: serializeGitHubCliPolicy(body.githubCliPolicy),
     isBuiltin: 0,
   });
 
@@ -272,6 +229,7 @@ export async function updateProfile(
   if (body.agentType && !isValidAgentType(body.agentType)) {
     throw errors.badRequest(`Invalid agent type: ${body.agentType}`);
   }
+  validateProfileEffort(body.agentType ?? profile.agentType, body.effort ?? profile.effort);
 
   // If renaming, check for duplicate in the same project scope
   if (body.name !== undefined) {
@@ -285,10 +243,7 @@ export async function updateProfile(
         .select({ id: schema.agentProfiles.id })
         .from(schema.agentProfiles)
         .where(
-          and(
-            eq(schema.agentProfiles.projectId, projectId),
-            eq(schema.agentProfiles.name, name)
-          )
+          and(eq(schema.agentProfiles.projectId, projectId), eq(schema.agentProfiles.name, name))
         )
         .limit(1);
 
@@ -302,29 +257,16 @@ export async function updateProfile(
     updatedAt: new Date().toISOString(),
   };
 
-  if (body.name !== undefined) updates.name = body.name.trim();
-  if (body.description !== undefined) updates.description = body.description;
-  if (body.agentType !== undefined) updates.agentType = body.agentType;
-  if (body.model !== undefined) updates.model = body.model;
-  if (body.permissionMode !== undefined) updates.permissionMode = body.permissionMode;
-  if (body.systemPromptAppend !== undefined) updates.systemPromptAppend = body.systemPromptAppend;
-  if (body.maxTurns !== undefined) updates.maxTurns = body.maxTurns;
-  if (body.timeoutMinutes !== undefined) updates.timeoutMinutes = body.timeoutMinutes;
-  if (body.vmSizeOverride !== undefined) updates.vmSizeOverride = body.vmSizeOverride;
-  if (body.provider !== undefined) updates.provider = body.provider;
-  if (body.vmLocation !== undefined) updates.vmLocation = body.vmLocation;
-  if (body.workspaceProfile !== undefined) updates.workspaceProfile = body.workspaceProfile;
-  if (body.devcontainerConfigName !== undefined) updates.devcontainerConfigName = body.devcontainerConfigName;
-  if (body.taskMode !== undefined) updates.taskMode = body.taskMode;
+  applyBaseProfileUpdates(updates, body);
+  applyProfileResourceRequirementsUpdate(updates, body);
+  if (body.githubCliPolicy !== undefined)
+    updates.githubCliPolicy = serializeGitHubCliPolicy(body.githubCliPolicy);
 
   await db
     .update(schema.agentProfiles)
     .set(updates)
     .where(
-      and(
-        eq(schema.agentProfiles.id, profileId),
-        eq(schema.agentProfiles.projectId, projectId)
-      )
+      and(eq(schema.agentProfiles.id, profileId), eq(schema.agentProfiles.projectId, projectId))
     );
 
   return getProfile(db, projectId, profileId, userId);
@@ -343,10 +285,7 @@ export async function deleteProfile(
   await db
     .delete(schema.agentProfiles)
     .where(
-      and(
-        eq(schema.agentProfiles.id, profileId),
-        eq(schema.agentProfiles.projectId, projectId)
-      )
+      and(eq(schema.agentProfiles.id, profileId), eq(schema.agentProfiles.projectId, projectId))
     );
 }
 
@@ -372,16 +311,20 @@ export async function resolveAgentProfile(
       profileName: p.name,
       agentType: p.agentType,
       model: p.model,
+      effort: isAgentEffort(p.effort) ? p.effort : DEFAULT_AGENT_EFFORT,
       permissionMode: p.permissionMode,
       systemPromptAppend: p.systemPromptAppend,
       maxTurns: p.maxTurns,
       timeoutMinutes: p.timeoutMinutes,
       vmSizeOverride: p.vmSizeOverride,
+      resourceRequirementsJson: p.resourceRequirementsJson,
       provider: p.provider,
       vmLocation: p.vmLocation,
       workspaceProfile: p.workspaceProfile,
+      runtime: isAgentProfileRuntime(p.runtime) ? p.runtime : null,
       devcontainerConfigName: p.devcontainerConfigName,
       taskMode: p.taskMode,
+      githubCliPolicy: parseGitHubCliPolicy(p.githubCliPolicy),
     };
   }
 
@@ -392,21 +335,22 @@ export async function resolveAgentProfile(
       profileName: null,
       agentType: env.DEFAULT_TASK_AGENT_TYPE || 'opencode',
       model: null,
+      effort: DEFAULT_AGENT_EFFORT,
       permissionMode: null,
       systemPromptAppend: null,
       maxTurns: null,
       timeoutMinutes: null,
       vmSizeOverride: null,
+      resourceRequirementsJson: null,
       provider: null,
       vmLocation: null,
       workspaceProfile: null,
+      runtime: null,
       devcontainerConfigName: null,
       taskMode: null,
+      githubCliPolicy: null,
     };
   }
-
-  // Seed built-in profiles to ensure they're available for resolution
-  await seedBuiltinProfiles(db, projectId, userId, env);
 
   // Try by ID first
   const byId = await db
@@ -417,10 +361,7 @@ export async function resolveAgentProfile(
         eq(schema.agentProfiles.id, profileNameOrId),
         or(
           eq(schema.agentProfiles.projectId, projectId),
-          and(
-            isNull(schema.agentProfiles.projectId),
-            eq(schema.agentProfiles.userId, userId)
-          )
+          and(isNull(schema.agentProfiles.projectId), eq(schema.agentProfiles.userId, userId))
         )
       )
     )
@@ -473,15 +414,19 @@ export async function resolveAgentProfile(
     profileName: null,
     agentType,
     model: null,
+    effort: DEFAULT_AGENT_EFFORT,
     permissionMode: null,
     systemPromptAppend: null,
     maxTurns: null,
     timeoutMinutes: null,
     vmSizeOverride: null,
+    resourceRequirementsJson: null,
     provider: null,
     vmLocation: null,
     workspaceProfile: null,
+    runtime: null,
     devcontainerConfigName: null,
     taskMode: null,
+    githubCliPolicy: null,
   };
 }

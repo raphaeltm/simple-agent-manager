@@ -6,7 +6,8 @@ export type TelemetryMetricName =
   | 'node_agent_response'
   | 'ws_proxy_route'
   | 'sc_002_workspace_creation_flow'
-  | 'sc_006_node_efficiency';
+  | 'sc_006_node_efficiency'
+  | 'acp_activity_callback';
 
 export interface NodeRoutingMetric {
   metric: TelemetryMetricName;
@@ -89,7 +90,11 @@ function updateAggregate(metric: NodeRoutingMetric): MetricAggregate {
     aggregate.statusCodeCounts[key] = (aggregate.statusCodeCounts[key] || 0) + 1;
   }
 
-  if (typeof metric.durationMs === 'number' && Number.isFinite(metric.durationMs) && metric.durationMs >= 0) {
+  if (
+    typeof metric.durationMs === 'number' &&
+    Number.isFinite(metric.durationMs) &&
+    metric.durationMs >= 0
+  ) {
     aggregate.duration.sampleCount += 1;
     aggregate.duration.totalMs += metric.durationMs;
     aggregate.duration.maxMs = Math.max(aggregate.duration.maxMs, metric.durationMs);
@@ -127,4 +132,57 @@ export function recordNodeRoutingMetric(metric: NodeRoutingMetric, _env: Env): v
     ...metric,
     aggregate,
   });
+}
+
+export type DurableExecutionMetricName =
+  | 'prompt_delivery_attempt'
+  | 'prompt_delivery_accepted'
+  | 'prompt_delivery_retry'
+  | 'prompt_delivery_failed'
+  | 'prompt_delivery_ambiguous'
+  | 'checkpoint_episode_transition';
+
+export interface DurableExecutionMetric {
+  metric: DurableExecutionMetricName;
+  projectId: string | null;
+  sessionId: string | null;
+  deliveryId?: string | null;
+  checkpointEpisodeId?: string | null;
+  attemptCount?: number;
+  durationMs?: number;
+  reason?: string | null;
+}
+
+export function recordDurableExecutionMetric(metric: DurableExecutionMetric, _env: Env): void {
+  log.info('durable_execution.telemetry', { ...metric });
+}
+
+export type AcpActivityCallbackOutcome = 'admitted' | 'coalesced' | 'healed' | 'rejected';
+
+export interface AcpActivityCallbackMetric {
+  metric: 'acp_activity_callback';
+  outcome: AcpActivityCallbackOutcome;
+  projectId: string | null;
+  sessionId: string | null;
+  nodeId?: string | null;
+  workspaceId?: string | null;
+  activity?: string | null;
+  reason?: string | null;
+  source?: 'callback' | 'coalesced_flush' | 'reconciliation_probe' | 'admission_control';
+  coalescedCount?: number;
+  pendingCount?: number;
+  durationMs?: number;
+  classification?: string | null;
+  runtimeWorkState?: string | null;
+  runtimeWorkCount?: number | null;
+  runtimeWorkSource?: string | null;
+  runtimeWorkObservedAt?: number | null;
+  runtimeWorkProgressAt?: number | null;
+}
+
+export function recordAcpActivityCallbackMetric(
+  metric: AcpActivityCallbackMetric,
+  _env: Env
+): void {
+  log.info('acp_activity.telemetry', { ...metric });
 }

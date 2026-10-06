@@ -4,22 +4,41 @@
  * Runs inside the workerd runtime via @cloudflare/vitest-pool-workers,
  * exercising real SQLite storage, DO lifecycle, and migrations.
  *
- * BLOCKED: These tests cannot run due to a pre-existing Mastra/workerd
- * incompatibility ("No such module" for @mastra/core/dist/fs/promises).
- * Same issue blocks existing project-data-do.test.ts.
- *
- * DOCUMENTED COVERAGE GAPS (to add when workerd issue is resolved):
- * - alarm() / checkHeartbeatTimeouts: stale session → interrupted transition
+ * DOCUMENTED COVERAGE GAPS:
  * - listAcpSessionsByNode: reconciliation filtering by node + statuses
  * - forkAcpSession: max depth rejection, fork from failed session
  * - updateHeartbeat: silent ignore for terminal sessions
  * - transitionAcpSession: nonexistent session error
  * - listAcpSessions: chatSessionId filter, pagination, total count
  */
-import { env } from 'cloudflare:test';
-import { describe, expect,it } from 'vitest';
+import { env, runInDurableObject } from 'cloudflare:test';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ProjectData } from '../../src/durable-objects/project-data';
+import { shouldDeferRuntimeHeartbeatTimeout } from '../../src/durable-objects/project-data/runtime-heartbeat-policy';
+import type { VmAgentContainerLifecycleStatus } from '../../src/durable-objects/vm-agent-container-lifecycle';
+import type { Env } from '../../src/env';
+import {
+  seedInstallation,
+  seedNode,
+  seedProject,
+  seedUser,
+  seedWorkspace,
+} from './helpers/seed-d1';
+import { alarmCompletions, letHeartbeatDeadlinePass } from './support/project-data-alarm';
+import type { VmAgentContainerTestDouble } from './support/vm-agent-container-double';
+
+/** Seed the bound VM_AGENT_CONTAINER double's lifecycle status for a node. */
+function seedContainerLifecycle(
+  nodeId: string,
+  status: VmAgentContainerLifecycleStatus
+): Promise<void> {
+  const ns = env.VM_AGENT_CONTAINER!;
+  const stub = ns.get(
+    ns.idFromName(nodeId.toLowerCase())
+  ) as unknown as DurableObjectStub<VmAgentContainerTestDouble>;
+  return stub.__seedLifecycle(status);
+}
 
 function getStub(projectId: string): DurableObjectStub<ProjectData> {
   const id = env.PROJECT_DATA.idFromName(projectId);
@@ -63,13 +82,19 @@ describe('ACP Session Lifecycle (Spec 027)', () => {
 
     it('rejects creation with invalid chat session ID', async () => {
       const stub = getStub('acp-create-invalid');
-      await expect(
-        stub.createAcpSession({
-          chatSessionId: 'nonexistent',
-          initialPrompt: 'test',
-          agentType: null,
-        })
-      ).rejects.toThrow('Chat session nonexistent not found');
+
+      await runInDurableObject(stub, async (instance) => {
+        await expect(
+          instance.createAcpSession({
+            chatSessionId: 'nonexistent',
+            initialPrompt: 'test',
+            agentType: null,
+          })
+        ).rejects.toThrow('Chat session nonexistent not found');
+      });
+
+      const sessions = await stub.listAcpSessions({ limit: 10 });
+      expect(sessions.sessions).toHaveLength(0);
     });
   });
 
@@ -225,16 +250,151 @@ describe('ACP Session Lifecycle (Spec 027)', () => {
     });
   });
 
+  describe('heartbeat timeout alarm — Instant container lifecycle', () => {
+    // Seed a cf-container node + non-terminal workspace + a running ACP session
+    // whose heartbeat is stale, so the alarm's heartbeat-timeout path fires and
+    // the container-lifecycle policy decides preserve vs terminalize.
+    async function setupInstantSession(prefix: string) {
+      const userId = `${prefix}-user`;
+      const installationId = `${prefix}-install`;
+      const projectId = `${prefix}-project`;
+      const nodeId = `${prefix}-node`;
+      const workspaceId = `${prefix}-workspace`;
+      const stub = getStub(projectId);
+      await stub.ensureProjectId(projectId);
+      const { acpSession, chatSessionId } = await createSessionPair(stub);
+
+      await seedUser(userId);
+      await seedInstallation(installationId, userId, { installationIdValue: `${prefix}-ext` });
+      await seedProject(projectId, userId, installationId);
+      await seedNode(nodeId, userId);
+      await env.DATABASE.prepare(`UPDATE nodes SET runtime = 'cf-container' WHERE id = ?`)
+        .bind(nodeId)
+        .run();
+      // Workspace stays non-terminal ('sleeping') so the policy does NOT
+      // short-circuit on workspace status and actually reaches the container RPC.
+      await seedWorkspace(workspaceId, nodeId, userId, {
+        projectId,
+        status: 'sleeping',
+        chatSessionId,
+      });
+      await stub.transitionAcpSession(acpSession.id, 'assigned', {
+        actorType: 'system',
+        workspaceId,
+        nodeId,
+      });
+      await stub.transitionAcpSession(acpSession.id, 'running', {
+        actorType: 'vm-agent',
+        actorId: nodeId,
+        acpSdkSessionId: `${prefix}-sdk`,
+      });
+      return { stub, acpSession, workspaceId, nodeId, projectId };
+    }
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    /** Returns the next alarm and whether a tick after the deadline ran the heartbeat section. */
+    async function staleHeartbeat(
+      stub: DurableObjectStub<ProjectData>,
+      projectId: string,
+      acpSessionId: string,
+      passes: number
+    ) {
+      const logSpy = vi.spyOn(console, 'log');
+      const nextAlarm = await runInDurableObject(stub, async (instance, state) => {
+        await letHeartbeatDeadlinePass(instance, state.storage, acpSessionId);
+        for (let i = 0; i < passes; i++) await instance.alarm();
+        return state.storage.getAlarm();
+      });
+      const heartbeatSectionRan = alarmCompletions(logSpy, projectId).some((completion) =>
+        completion.ranSections.includes('runtime_heartbeat_timeouts')
+      );
+      return { nextAlarm, heartbeatSectionRan };
+    }
+
+    it('preserves a sleeping Instant session across repeated stale-heartbeat alarms', async () => {
+      const prefix = `acp-instant-sleep-${Date.now()}-${crypto.randomUUID()}`;
+      const { stub, acpSession, workspaceId, nodeId, projectId } =
+        await setupInstantSession(prefix);
+
+      // The real container is asleep (idle handback), not terminated.
+      await seedContainerLifecycle(nodeId, 'sleeping');
+
+      // Direct policy assertion proves the binding is wired and the REAL
+      // inspectLifecycle RPC + classifier ran — the reason is lifecycle-based,
+      // NOT the 'cf_container_lifecycle_binding_unavailable' short-circuit that
+      // masked this path when VM_AGENT_CONTAINER was unbound.
+      const decision = await shouldDeferRuntimeHeartbeatTimeout(
+        env as unknown as Env,
+        {
+          workspaceId,
+          nodeId,
+        },
+        projectId
+      );
+      expect(decision).toEqual({ defer: true, reason: 'cf_container_sleeping' });
+
+      const { nextAlarm, heartbeatSectionRan } = await staleHeartbeat(
+        stub,
+        projectId,
+        acpSession.id,
+        2
+      );
+
+      // End-to-end: the session survives repeated alarms and stays scheduled — and the heartbeat
+      // section really did examine it, so survival is the policy's decision, not a skipped section.
+      expect(heartbeatSectionRan).toBe(true);
+      expect((await stub.getAcpSession(acpSession.id))?.status).toBe('running');
+      expect(nextAlarm).not.toBeNull();
+      expect(nextAlarm!).toBeGreaterThan(Date.now());
+    });
+
+    it('terminalizes an Instant session when the container lifecycle is terminal', async () => {
+      const prefix = `acp-instant-stopped-${Date.now()}-${crypto.randomUUID()}`;
+      const { stub, acpSession, workspaceId, nodeId, projectId } =
+        await setupInstantSession(prefix);
+
+      // The real container is terminated ('stopped') — the classifier treats
+      // this as conclusively dead, so the heartbeat timeout must NOT be deferred.
+      await seedContainerLifecycle(nodeId, 'stopped');
+
+      const decision = await shouldDeferRuntimeHeartbeatTimeout(
+        env as unknown as Env,
+        {
+          workspaceId,
+          nodeId,
+        },
+        projectId
+      );
+      expect(decision).toEqual({ defer: false, reason: 'cf_container_stopped' });
+
+      const { heartbeatSectionRan } = await staleHeartbeat(stub, projectId, acpSession.id, 1);
+      expect(heartbeatSectionRan).toBe(true);
+
+      // End-to-end: with a dead container the stale session is interrupted.
+      // This pairing is what makes the sleeping test discriminating — moving
+      // 'sleeping' into TERMINAL_LIFECYCLE_STATUSES would flip both outcomes.
+      expect((await stub.getAcpSession(acpSession.id))?.status).toBe('interrupted');
+    });
+  });
+
   describe('transitionAcpSession — invalid transitions', () => {
     it('rejects pending → running (must go through assigned)', async () => {
       const stub = getStub('acp-invalid-pending-running');
       const { acpSession } = await createSessionPair(stub);
 
-      await expect(
-        stub.transitionAcpSession(acpSession.id, 'running', {
-          actorType: 'vm-agent',
-        })
-      ).rejects.toThrow('Invalid ACP session transition: pending → running');
+      await runInDurableObject(stub, async (instance) => {
+        await expect(
+          instance.transitionAcpSession(acpSession.id, 'running', {
+            actorType: 'vm-agent',
+          })
+        ).rejects.toThrow('Invalid ACP session transition: pending → running');
+      });
+
+      expect(acpSession.status).toBe('pending');
+      expect((await stub.getAcpSession(acpSession.id))?.status).toBe('pending');
     });
 
     it('rejects completed → running (terminal state)', async () => {
@@ -254,11 +414,15 @@ describe('ACP Session Lifecycle (Spec 027)', () => {
         actorType: 'vm-agent',
       });
 
-      await expect(
-        stub.transitionAcpSession(acpSession.id, 'running', {
-          actorType: 'vm-agent',
-        })
-      ).rejects.toThrow('Invalid ACP session transition: completed → running');
+      await runInDurableObject(stub, async (instance) => {
+        await expect(
+          instance.transitionAcpSession(acpSession.id, 'running', {
+            actorType: 'vm-agent',
+          })
+        ).rejects.toThrow('Invalid ACP session transition: completed → running');
+      });
+
+      expect((await stub.getAcpSession(acpSession.id))?.status).toBe('completed');
     });
 
     it('rejects running → assigned (no backward transitions)', async () => {
@@ -275,11 +439,66 @@ describe('ACP Session Lifecycle (Spec 027)', () => {
         acpSdkSessionId: 'sdk-back',
       });
 
-      await expect(
-        stub.transitionAcpSession(acpSession.id, 'assigned', {
-          actorType: 'system',
-        })
-      ).rejects.toThrow('Invalid ACP session transition: running → assigned');
+      await runInDurableObject(stub, async (instance) => {
+        await expect(
+          instance.transitionAcpSession(acpSession.id, 'assigned', {
+            actorType: 'system',
+          })
+        ).rejects.toThrow('Invalid ACP session transition: running → assigned');
+      });
+
+      expect((await stub.getAcpSession(acpSession.id))?.status).toBe('running');
+    });
+  });
+
+  describe('prepareAcpSessionForFreshStart', () => {
+    it('recovers a failed strict-restore row under the same vm-agent callback session ID', async () => {
+      const stub = getStub('acp-prepare-fresh-start');
+      const { acpSession } = await createSessionPair(stub);
+
+      await stub.transitionAcpSession(acpSession.id, 'assigned', {
+        actorType: 'system',
+        workspaceId: 'ws-before',
+        nodeId: 'node-before',
+      });
+      await stub.transitionAcpSession(acpSession.id, 'running', {
+        actorType: 'vm-agent',
+        acpSdkSessionId: acpSession.id,
+      });
+      const failed = await stub.transitionAcpSession(acpSession.id, 'failed', {
+        actorType: 'vm-agent',
+        errorMessage: 'Strict restore failed',
+      });
+      expect(failed.status).toBe('failed');
+      expect(failed.errorMessage).toBe('Strict restore failed');
+      expect(failed.completedAt).toBeTruthy();
+
+      const prepared = await stub.prepareAcpSessionForFreshStart(acpSession.id, {
+        actorType: 'system',
+        actorId: 'task-runner',
+        reason: 'Degraded snapshot restore fallback',
+        workspaceId: 'ws-after',
+        nodeId: 'node-after',
+      });
+
+      expect(prepared.id).toBe(acpSession.id);
+      expect(prepared.status).toBe('assigned');
+      expect(prepared.workspaceId).toBe('ws-after');
+      expect(prepared.nodeId).toBe('node-after');
+      expect(prepared.acpSdkSessionId).toBeNull();
+      expect(prepared.errorMessage).toBeNull();
+      expect(prepared.completedAt).toBeNull();
+      expect(prepared.startedAt).toBeNull();
+      expect(prepared.lastHeartbeatAt).toBeTruthy();
+
+      const running = await stub.transitionAcpSession(acpSession.id, 'running', {
+        actorType: 'vm-agent',
+        actorId: 'node-after',
+        acpSdkSessionId: acpSession.id,
+      });
+      expect(running.id).toBe(acpSession.id);
+      expect(running.status).toBe('running');
+      expect(running.acpSdkSessionId).toBe(acpSession.id);
     });
   });
 
@@ -315,9 +534,15 @@ describe('ACP Session Lifecycle (Spec 027)', () => {
         nodeId: 'node-hb2',
       });
 
-      await expect(
-        stub.updateHeartbeat(acpSession.id, 'wrong-node')
-      ).rejects.toThrow('Node mismatch');
+      await runInDurableObject(stub, async (instance) => {
+        await expect(instance.updateHeartbeat(acpSession.id, 'wrong-node')).rejects.toThrow(
+          'Node mismatch'
+        );
+      });
+
+      const before = await stub.getAcpSession(acpSession.id);
+      expect(before?.nodeId).toBe('node-hb2');
+      expect(before?.status).toBe('assigned');
     });
   });
 
@@ -367,9 +592,15 @@ describe('ACP Session Lifecycle (Spec 027)', () => {
         acpSdkSessionId: 'sdk-fr',
       });
 
-      await expect(
-        stub.forkAcpSession(acpSession.id, 'Context')
-      ).rejects.toThrow('Cannot fork session in "running" state');
+      await runInDurableObject(stub, async (instance) => {
+        await expect(instance.forkAcpSession(acpSession.id, 'Context')).rejects.toThrow(
+          'Cannot fork session in "running" state'
+        );
+      });
+
+      const lineage = await stub.getAcpSessionLineage(acpSession.id);
+      expect(lineage).toHaveLength(1);
+      expect(lineage[0]?.status).toBe('running');
     });
   });
 
@@ -503,10 +734,7 @@ describe('ACP Session Lifecycle (Spec 027)', () => {
       expect(completed.completedAt).toBeTruthy();
 
       // 6. Fork the completed session
-      const forked = await stub.forkAcpSession(
-        acpSession.id,
-        'Continue from where we left off'
-      );
+      const forked = await stub.forkAcpSession(acpSession.id, 'Continue from where we left off');
       expect(forked.status).toBe('pending');
       expect(forked.parentSessionId).toBe(acpSession.id);
       expect(forked.forkDepth).toBe(1);

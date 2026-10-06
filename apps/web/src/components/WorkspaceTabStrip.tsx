@@ -151,8 +151,8 @@ export function WorkspaceTabStrip({
       style={{
         display: 'flex',
         alignItems: 'stretch',
-        backgroundColor: 'var(--sam-color-tn-bg-dark)',
-        borderBottom: '1px solid var(--sam-color-tn-border)',
+        backgroundColor: 'var(--sam-workspace-tab-bg)',
+        borderBottom: '1px solid var(--sam-workspace-tab-border)',
         height: isMobile ? 42 : 38,
         flexShrink: 0,
       }}
@@ -318,12 +318,12 @@ function SortableTabWrapper({
         fontSize: isMobile ? 12 : 13,
         fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
         border: 'none',
-        borderRight: '1px solid var(--sam-color-tn-border)',
+        borderRight: '1px solid var(--sam-workspace-tab-border)',
         position: 'relative',
         flexShrink: 0,
         whiteSpace: 'nowrap',
-        backgroundColor: active ? 'var(--sam-color-tn-bg)' : hovered ? 'var(--sam-color-tn-surface)' : 'transparent',
-        color: active || hovered ? 'var(--sam-color-tn-fg)' : 'var(--sam-color-tn-fg-muted)',
+        backgroundColor: active ? 'var(--sam-workspace-tab-active-bg)' : hovered ? 'var(--sam-workspace-tab-hover-bg)' : 'transparent',
+        color: active || hovered ? 'var(--sam-workspace-tab-fg)' : 'var(--sam-workspace-tab-muted)',
       }}
       onClick={() => {
         if (!isEditing && !isDragging) onSelect();
@@ -362,7 +362,7 @@ function SortableTabWrapper({
             left: 0,
             right: 0,
             height: 2,
-            backgroundColor: 'var(--sam-color-tn-blue)',
+            backgroundColor: 'var(--sam-workspace-tab-accent)',
           }}
         />
       )}
@@ -397,13 +397,13 @@ function SortableTabWrapper({
           style={{
             flex: 1,
             minWidth: 0,
-            background: 'var(--sam-color-tn-surface)',
-            border: '1px solid var(--sam-color-tn-blue)',
+            background: 'var(--sam-workspace-tab-hover-bg)',
+            border: '1px solid var(--sam-workspace-tab-accent)',
             borderRadius: 2,
             padding: '1px 4px',
             fontSize: 'inherit',
             fontFamily: 'inherit',
-            color: 'var(--sam-color-tn-fg)',
+            color: 'var(--sam-workspace-tab-fg)',
             outline: 'none',
           }}
           aria-label="Rename tab"
@@ -433,10 +433,10 @@ function SortableTabWrapper({
               style={{
                 fontSize: 10,
                 lineHeight: 1,
-                border: '1px solid var(--sam-color-tn-active)',
+                border: '1px solid var(--sam-workspace-tab-badge-border)',
                 borderRadius: 6,
                 padding: '2px 5px',
-                color: 'var(--sam-color-tn-blue)',
+                color: 'var(--sam-workspace-tab-accent)',
                 whiteSpace: 'nowrap',
                 flexShrink: 0,
               }}
@@ -454,7 +454,7 @@ function SortableTabWrapper({
             onClose();
           }}
           onPointerDown={(event) => event.stopPropagation()}
-          className="hover:bg-tn-active hover:text-tn-fg"
+          className="hover:bg-surface-hover hover:text-fg-primary"
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -464,7 +464,7 @@ function SortableTabWrapper({
             borderRadius: 4,
             border: 'none',
             background: 'none',
-            color: 'var(--sam-color-tn-fg-muted)',
+            color: 'var(--sam-workspace-tab-muted)',
             cursor: 'pointer',
             fontSize: 14,
             lineHeight: 1,
@@ -497,10 +497,10 @@ function DragOverlayTab({ tab, isMobile }: { tab: WorkspaceTabItem; isMobile: bo
         height: isMobile ? 42 : 38,
         fontSize: isMobile ? 12 : 13,
         fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-        backgroundColor: 'var(--sam-color-tn-surface)',
-        border: '1px solid var(--sam-color-tn-blue)',
+        backgroundColor: 'var(--sam-workspace-tab-hover-bg)',
+        border: '1px solid var(--sam-workspace-tab-accent)',
         borderRadius: 4,
-        color: 'var(--sam-color-tn-fg)',
+        color: 'var(--sam-workspace-tab-fg)',
         whiteSpace: 'nowrap',
         boxShadow: '0 4px 12px rgba(0, 0, 0, 0.4)',
         cursor: 'grabbing',

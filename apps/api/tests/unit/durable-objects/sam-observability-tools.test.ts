@@ -20,7 +20,15 @@ import { parseRepository } from '../../../src/durable-objects/sam-session/tools/
 import { listSessions } from '../../../src/durable-objects/sam-session/tools/list-sessions';
 import { searchCode } from '../../../src/durable-objects/sam-session/tools/search-code';
 import { searchTaskMessages } from '../../../src/durable-objects/sam-session/tools/search-task-messages';
-import type { CollectedToolCall, ToolContext } from '../../../src/durable-objects/sam-session/types';
+import type {
+  CollectedToolCall,
+  ToolContext,
+} from '../../../src/durable-objects/sam-session/types';
+import {
+  DEFAULT_SEARCH_QUERY_MAX_LENGTH,
+  DEFAULT_SEARCH_QUERY_MAX_TERM_LENGTH,
+  DEFAULT_SEARCH_QUERY_MAX_TERMS,
+} from '../../../src/lib/search-query-limits';
 
 // Mock cloudflare:workers
 vi.mock('cloudflare:workers', () => ({
@@ -47,12 +55,35 @@ const mockListSessions = vi.fn();
 const mockGetSession = vi.fn();
 const mockGetMessages = vi.fn();
 const mockSearchMessages = vi.fn();
+const mockRootSearch = vi.fn((): unknown => null);
 
 vi.mock('../../../src/services/project-data', () => ({
   listSessions: (...args: unknown[]) => mockListSessions(...args),
   getSession: (...args: unknown[]) => mockGetSession(...args),
   getMessages: (...args: unknown[]) => mockGetMessages(...args),
-  searchMessages: (...args: unknown[]) => mockSearchMessages(...args),
+  searchMessagesWithArchiveMetadata: async (...args: unknown[]) => ({
+    results: await mockSearchMessages(...args),
+    query: {
+      query: String(args[2] ?? ''),
+      queryTruncated: false,
+      queryLimits: {
+        maxLength: DEFAULT_SEARCH_QUERY_MAX_LENGTH,
+        maxTermLength: DEFAULT_SEARCH_QUERY_MAX_TERM_LENGTH,
+        maxTerms: DEFAULT_SEARCH_QUERY_MAX_TERMS,
+      },
+    },
+    rootSearch: mockRootSearch(),
+    archiveSearch: {
+      partial: false,
+      reason: null,
+      rootQueried: true,
+      archiveOwnersAvailable: 0,
+      archiveOwnersQueried: 0,
+      archiveOwnersFailed: 0,
+      archiveOwnersOmitted: 0,
+      archiveOwnerLimit: 4,
+    },
+  }),
 }));
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -71,10 +102,12 @@ const GITHUB_CREDENTIAL = {
   iv: 'test-iv',
 };
 
-function mockD1(options: {
-  firstResults?: (Record<string, unknown> | null)[];
-  allResults?: Record<string, unknown>[];
-} = {}) {
+function mockD1(
+  options: {
+    firstResults?: (Record<string, unknown> | null)[];
+    allResults?: Record<string, unknown>[];
+  } = {}
+) {
   const firstQueue = [...(options.firstResults ?? [null])];
   const mockStatement = {
     bind: vi.fn().mockReturnThis(),
@@ -95,14 +128,17 @@ function mockD1(options: {
   };
 }
 
-function buildCtx(overrides: {
-  dbFirstResult?: Record<string, unknown> | null;
-  dbFirstResults?: (Record<string, unknown> | null)[];
-  dbAllResults?: Record<string, unknown>[];
-  userId?: string;
-} = {}): ToolContext {
-  const firstResults = overrides.dbFirstResults
-    ?? (overrides.dbFirstResult !== undefined ? [overrides.dbFirstResult] : [null]);
+function buildCtx(
+  overrides: {
+    dbFirstResult?: Record<string, unknown> | null;
+    dbFirstResults?: (Record<string, unknown> | null)[];
+    dbAllResults?: Record<string, unknown>[];
+    userId?: string;
+  } = {}
+): ToolContext {
+  const firstResults =
+    overrides.dbFirstResults ??
+    (overrides.dbFirstResult !== undefined ? [overrides.dbFirstResult] : [null]);
   const db = mockD1({
     firstResults,
     allResults: overrides.dbAllResults,
@@ -164,7 +200,10 @@ describe('list_sessions', () => {
   it('returns sessions for owned project', async () => {
     mockListSessions.mockResolvedValueOnce({ sessions: [{ id: 's1', topic: 'Test' }], total: 1 });
     const ctx = buildCtx({ dbFirstResult: OWNED_PROJECT });
-    const result = await listSessions({ projectId: 'proj-1' }, ctx) as { sessions: unknown[]; total: number };
+    const result = (await listSessions({ projectId: 'proj-1' }, ctx)) as {
+      sessions: unknown[];
+      total: number;
+    };
     expect(result.sessions).toHaveLength(1);
     expect(result.total).toBe(1);
   });
@@ -205,7 +244,12 @@ describe('get_session_messages', () => {
   });
 
   it('returns messages for owned project session', async () => {
-    mockGetSession.mockResolvedValueOnce({ id: 's1', topic: 'Test', taskId: 't1', status: 'running' });
+    mockGetSession.mockResolvedValueOnce({
+      id: 's1',
+      topic: 'Test',
+      taskId: 't1',
+      status: 'running',
+    });
     mockGetMessages.mockResolvedValueOnce({
       messages: [
         { id: 'm1', role: 'user', content: 'hello', createdAt: 1 },
@@ -214,7 +258,7 @@ describe('get_session_messages', () => {
       hasMore: false,
     });
     const ctx = buildCtx({ dbFirstResult: OWNED_PROJECT });
-    const result = await getSessionMessages({ projectId: 'proj-1', sessionId: 's1' }, ctx) as {
+    const result = (await getSessionMessages({ projectId: 'proj-1', sessionId: 's1' }, ctx)) as {
       sessionId: string;
       messages: unknown[];
       messageCount: number;
@@ -267,17 +311,57 @@ describe('search_task_messages', () => {
 
   it('searches messages for owned project', async () => {
     mockSearchMessages.mockResolvedValueOnce([
-      { id: 'm1', sessionId: 's1', sessionTopic: 'Topic', sessionTaskId: 't1', role: 'assistant', snippet: 'found it', createdAt: '2026-01-01' },
+      {
+        id: 'm1',
+        sessionId: 's1',
+        sessionTopic: 'Topic',
+        sessionTaskId: 't1',
+        role: 'assistant',
+        snippet: 'found it',
+        createdAt: '2026-01-01',
+      },
     ]);
     const ctx = buildCtx({ dbFirstResult: OWNED_PROJECT });
-    const result = await searchTaskMessages({ projectId: 'proj-1', query: 'test query' }, ctx) as {
+    const result = (await searchTaskMessages(
+      { projectId: 'proj-1', query: 'test query' },
+      ctx
+    )) as {
       results: unknown[];
       count: number;
       query: string;
+      rootSearch: unknown;
+      coverageNotes: string[];
     };
     expect(result.count).toBe(1);
     expect(result.query).toBe('test query');
     expect(result.results).toHaveLength(1);
+    // Root coverage is always surfaced, even when nothing was truncated.
+    expect(result).toHaveProperty('rootSearch', null);
+    expect(result.coverageNotes).toEqual([]);
+  });
+
+  it('tells the agent when the root search only reached its newest matches', async () => {
+    mockSearchMessages.mockResolvedValueOnce([]);
+    mockRootSearch.mockReturnValueOnce({
+      ftsCandidateLimit: 2000,
+      ftsCandidatesTruncated: true,
+      keywordScanRowLimit: 50000,
+      keywordFallbackRan: true,
+      keywordScanTruncated: true,
+    });
+    const ctx = buildCtx({ dbFirstResult: OWNED_PROJECT });
+    const result = (await searchTaskMessages(
+      { projectId: 'proj-1', query: 'old decision' },
+      ctx
+    )) as { count: number; rootSearch: unknown; coverageNotes: string[] };
+
+    // An empty result that is not proof of absence says so, in words the agent reads.
+    expect(result.count).toBe(0);
+    expect(result.rootSearch).toMatchObject({ ftsCandidatesTruncated: true });
+    expect(result.coverageNotes).toEqual([
+      expect.stringContaining('newest 2000 matching messages'),
+      expect.stringContaining('newest 50000 raw messages'),
+    ]);
   });
 
   it('resolves taskId to sessionId before searching', async () => {
@@ -287,9 +371,54 @@ describe('search_task_messages', () => {
     await searchTaskMessages({ projectId: 'proj-1', query: 'test', taskId: 'task-123' }, ctx);
     expect(mockListSessions).toHaveBeenCalled();
     expect(mockSearchMessages).toHaveBeenCalledWith(
-      expect.anything(), 'proj-1', 'test', 'resolved-session', null, expect.any(Number),
+      expect.anything(),
+      'proj-1',
+      'test',
+      'resolved-session',
+      null,
+      expect.any(Number),
+      null
     );
   });
+
+  it('forwards the signed archive continuation', async () => {
+    mockSearchMessages.mockResolvedValueOnce([]);
+    const ctx = buildCtx({ dbFirstResult: OWNED_PROJECT });
+    await searchTaskMessages(
+      { projectId: 'proj-1', query: 'test', continuation: 'signed-continuation' },
+      ctx
+    );
+    expect(mockSearchMessages).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'test',
+      null,
+      null,
+      expect.any(Number),
+      'signed-continuation'
+    );
+  });
+
+  it.each([{ sessionId: 'session-one' }, { taskId: 'task-one' }])(
+    'rejects a continuation combined with exact scope $sessionId$taskId',
+    async (scope) => {
+      const callsBefore = mockSearchMessages.mock.calls.length;
+      const result = await searchTaskMessages(
+        {
+          projectId: 'proj-1',
+          query: 'test',
+          continuation: 'signed-project-wide-cursor',
+          ...scope,
+        },
+        buildCtx({ dbFirstResult: OWNED_PROJECT })
+      );
+
+      expect(result).toEqual({
+        error: 'continuation cannot be combined with sessionId or taskId.',
+      });
+      expect(mockSearchMessages).toHaveBeenCalledTimes(callsBefore);
+    }
+  );
 
   it('dispatches via executeTool', async () => {
     const ctx = buildCtx();
@@ -329,7 +458,9 @@ describe('search_code', () => {
   it('returns no_credentials when GitHub token unavailable', async () => {
     // First call: ownership check passes. Second call: credential query returns null.
     const ctx = buildCtx({ dbFirstResults: [OWNED_PROJECT, null] });
-    const result = await searchCode({ projectId: 'proj-1', query: 'test' }, ctx) as { status: string };
+    const result = (await searchCode({ projectId: 'proj-1', query: 'test' }, ctx)) as {
+      status: string;
+    };
     expect(result.status).toBe('no_credentials');
   });
 
@@ -370,7 +501,9 @@ describe('get_file_content', () => {
 
   it('returns no_credentials when GitHub token unavailable', async () => {
     const ctx = buildCtx({ dbFirstResults: [OWNED_PROJECT, null] });
-    const result = await getFileContent({ projectId: 'proj-1', path: 'README.md' }, ctx) as { status: string };
+    const result = (await getFileContent({ projectId: 'proj-1', path: 'README.md' }, ctx)) as {
+      status: string;
+    };
     expect(result.status).toBe('no_credentials');
   });
 
@@ -405,18 +538,21 @@ describe('SAM_TOOLS registration', () => {
     expect(found?.input_schema).toBeDefined();
   });
 
-  it.each(expectedTools)('dispatches %s via executeTool without Unknown tool error', async (toolName) => {
-    const ctx = buildCtx();
-    const toolCall: CollectedToolCall = {
-      id: `call-${toolName}`,
-      name: toolName,
-      input: {},
-    };
-    const result = await executeTool(toolCall, ctx);
-    const r = result as { error?: string };
-    // Should get a validation error (missing params), NOT "Unknown tool"
-    if (r.error) {
-      expect(r.error).not.toContain('Unknown tool');
+  it.each(expectedTools)(
+    'dispatches %s via executeTool without Unknown tool error',
+    async (toolName) => {
+      const ctx = buildCtx();
+      const toolCall: CollectedToolCall = {
+        id: `call-${toolName}`,
+        name: toolName,
+        input: {},
+      };
+      const result = await executeTool(toolCall, ctx);
+      const r = result as { error?: string };
+      // Should get a validation error (missing params), NOT "Unknown tool"
+      if (r.error) {
+        expect(r.error).not.toContain('Unknown tool');
+      }
     }
-  });
+  );
 });

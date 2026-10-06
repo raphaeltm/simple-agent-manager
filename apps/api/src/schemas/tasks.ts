@@ -1,18 +1,37 @@
-import { DEVCONTAINER_CONFIG_NAME_MAX_LENGTH, DEVCONTAINER_CONFIG_NAME_REGEX } from '@simple-agent-manager/shared';
+import {
+  DEVCONTAINER_CONFIG_NAME_MAX_LENGTH,
+  DEVCONTAINER_CONFIG_NAME_REGEX,
+  TASK_EXECUTION_STEPS,
+} from '@simple-agent-manager/shared';
 import * as v from 'valibot';
+
+import { ResourceRequirementsSchema } from './resource-requirements';
 
 const VMSizeSchema = v.picklist(['small', 'medium', 'large']);
 const VMLocationSchema = v.string();
 const WorkspaceProfileSchema = v.picklist(['full', 'lightweight']);
-const CredentialProviderSchema = v.picklist(['hetzner', 'scaleway', 'gcp']);
+const CredentialProviderSchema = v.picklist([
+  'hetzner',
+  'scaleway',
+  'gcp',
+  'vultr',
+  'infomaniak',
+  'digitalocean',
+  'upcloud',
+]);
 const TaskModeSchema = v.picklist(['task', 'conversation']);
 const TaskStatusSchema = v.picklist([
-  'draft', 'ready', 'queued', 'delegated', 'in_progress', 'completed', 'failed', 'cancelled',
+  'draft',
+  'ready',
+  'queued',
+  'delegated',
+  'in_progress',
+  'sleeping',
+  'completed',
+  'failed',
+  'cancelled',
 ]);
-const TaskExecutionStepSchema = v.picklist([
-  'node_selection', 'node_provisioning', 'node_agent_ready', 'workspace_creation',
-  'workspace_ready', 'attachment_transfer', 'agent_session', 'running', 'awaiting_followup',
-]);
+const TaskExecutionStepSchema = v.picklist(TASK_EXECUTION_STEPS);
 
 const GitPushResultSchema = v.object({
   pushed: v.boolean(),
@@ -34,8 +53,14 @@ const TaskAttachmentSchema = v.object({
 /** Devcontainer config name — alphanumeric, hyphens, underscores, max length from shared constants. */
 const DevcontainerConfigNameSchema = v.pipe(
   v.string(),
-  v.regex(DEVCONTAINER_CONFIG_NAME_REGEX, 'Config name must be alphanumeric with hyphens/underscores'),
-  v.maxLength(DEVCONTAINER_CONFIG_NAME_MAX_LENGTH, `Config name must be at most ${DEVCONTAINER_CONFIG_NAME_MAX_LENGTH} characters`),
+  v.regex(
+    DEVCONTAINER_CONFIG_NAME_REGEX,
+    'Config name must be alphanumeric with hyphens/underscores'
+  ),
+  v.maxLength(
+    DEVCONTAINER_CONFIG_NAME_MAX_LENGTH,
+    `Config name must be at most ${DEVCONTAINER_CONFIG_NAME_MAX_LENGTH} characters`
+  )
 );
 
 export const SubmitTaskSchema = v.object({
@@ -51,7 +76,9 @@ export const SubmitTaskSchema = v.object({
   contextSummary: v.optional(v.string()),
   taskMode: v.optional(TaskModeSchema),
   agentProfileId: v.optional(v.string()),
+  skillId: v.optional(v.string()),
   attachments: v.optional(v.array(TaskAttachmentSchema)),
+  resourceRequirements: v.optional(v.nullable(ResourceRequirementsSchema)),
 });
 
 export const CreateTaskSchema = v.object({
@@ -95,6 +122,7 @@ export const RunTaskSchema = v.object({
   devcontainerConfigName: v.optional(v.nullable(DevcontainerConfigNameSchema)),
   nodeId: v.optional(v.string()),
   branch: v.optional(v.string()),
+  resourceRequirements: v.optional(v.nullable(ResourceRequirementsSchema)),
 });
 
 export const RequestAttachmentUploadSchema = v.object({

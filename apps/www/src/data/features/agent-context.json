@@ -1,0 +1,50 @@
+{
+  "slug": "agent-context",
+  "label": "Agents That Learn",
+  "title": "Agents that remember\nyour preferences.",
+  "subtitle": "Build a project knowledge base that agents receive as context. Set policies that are injected into every session. Review a full log of agent activity.",
+  "summary": "A project knowledge base agents receive as context, plus policies and a full activity log.",
+  "highlights": [
+    "Project memory entries carry a confidence score, a source, and a confirmation date",
+    "Policies are injected into every agent session as instruction-only context",
+    "A full activity log of every task, session, and execution event"
+  ],
+  "docsHref": "/docs/guides/agents/",
+  "group": "govern",
+  "screenshots": [
+    {
+      "src": "/images/features/sam-context-overview.png",
+      "alt": "Agent Context overview showing 25 memory entities, 12 active policies, and 50 recent actions, with the context stack agents receive: repository instructions, memory, policies, and profiles",
+      "caption": "Overview of the context stack — repo instructions, memory, policies, and profiles"
+    }
+  ],
+  "details": [
+    {
+      "headline": "Persistent project memory",
+      "body": "Store observations about your architecture, conventions, and preferences. Each entry has a confidence score, a source (explicit or inferred), and a confirmation date so you can see what the knowledge base contains.",
+      "screenshot": {
+        "src": "/images/features/sam-context-memory.png",
+        "alt": "Memory tab listing knowledge entities such as Architecture and Code Quality, each with observations showing a confidence percentage, an explicit or inferred source, and a confirmation date",
+        "caption": "Each observation shows confidence, source, and when it was last confirmed"
+      }
+    },
+    {
+      "headline": "Project policies",
+      "body": "Define project-level instructions like \"use portals for modals\" or \"CLI packages must meet QA standards.\" Policies are tagged as preferences or rules and injected into every agent session as context.",
+      "screenshot": {
+        "src": "/images/features/sam-context-policies.png",
+        "alt": "Policies tab listing project policies such as Never push to main and Refund changes require a Stripe replay test, each tagged rule, constraint, or delegation with a confidence and marked instruction-only",
+        "caption": "Policies are instruction-only — injected into agent context, not programmatically enforced"
+      }
+    },
+    {
+      "headline": "Activity log",
+      "body": "A timestamped feed of every task submission, execution step, session start/stop, and agent completion event. Filter to find specific activity across the project.",
+      "screenshot": {
+        "src": "/images/features/sam-context-actions.png",
+        "alt": "Agent actions tab showing a timestamped feed of task.agent_completed, task.execution_step, session.started, comment.created, and session.stopped events with their session topics",
+        "caption": "Every event type — task completions, execution steps, session lifecycle changes"
+      }
+    }
+  ]
+}

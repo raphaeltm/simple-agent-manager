@@ -1,0 +1,235 @@
+import { and, eq, gt, isNull, lte, sql } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
+
+import * as schema from '../db/schema';
+import type { Env } from '../env';
+import { log } from '../lib/logger';
+import { parsePositiveInt } from '../lib/route-helpers';
+import * as projectDataService from '../services/project-data';
+import {
+  finishSleepingWorkspaceComputeCleanup,
+  markWorkspaceNodeWarmIfEmpty,
+} from '../services/session-sleep';
+import { chatSessionTaskOwnerJoins } from '../services/session-sleep-task-owner';
+import { verifySessionSnapshotArtifactsForSleep } from '../services/session-snapshot-artifacts';
+import { getRestorableSessionSnapshot } from '../services/session-snapshot-persistence';
+import { markSessionSnapshotSleeping } from '../services/session-snapshot-sleep-lifecycle';
+import { sessionSleepInFlightMaxAgeMs } from '../services/session-snapshot-sleep-predicate';
+
+export const DEFAULT_SESSION_SLEEP_IN_FLIGHT_REPAIR_BATCH_SIZE = 25;
+export const MAX_SESSION_SLEEP_IN_FLIGHT_REPAIR_BATCH_SIZE = 100;
+
+export interface SessionSleepLifecycleRepairStats {
+  selected: number;
+  repaired: number;
+  skipped: number;
+  projectDataErrors: number;
+  errors: number;
+}
+
+async function projectDataSessionAlreadyClosedForSleep(
+  env: Env,
+  projectId: string,
+  chatSessionId: string,
+  taskStatus: string | null
+): Promise<boolean> {
+  const session = await projectDataService
+    .getSession(env, projectId, chatSessionId)
+    .catch((error) => {
+      log.warn('session_sleep_lifecycle_repair.project_data_status_failed', {
+        projectId,
+        chatSessionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    });
+  const status = typeof session?.status === 'string' ? session.status : null;
+  // A failed task's failed session is closed too: a terminal reconciler can fail
+  // it after its preservation sleep passed the point of no return, and the sleep
+  // must still finish its teardown rather than hold the runtime at `stopping`.
+  // Scoped to failed tasks: any other task's failed session keeps its handling.
+  return (
+    status === 'sleeping' ||
+    status === 'stopped' ||
+    (status === 'failed' && taskStatus === 'failed')
+  );
+}
+
+function repairBatchSize(env: Env): number {
+  return Math.min(
+    MAX_SESSION_SLEEP_IN_FLIGHT_REPAIR_BATCH_SIZE,
+    Math.max(
+      1,
+      parsePositiveInt(
+        env.SESSION_SLEEP_IN_FLIGHT_REPAIR_BATCH_SIZE,
+        DEFAULT_SESSION_SLEEP_IN_FLIGHT_REPAIR_BATCH_SIZE
+      )
+    )
+  );
+}
+
+/**
+ * Complete stale post-capture sleep rows that already hold restorable snapshot
+ * data. This is the bounded escape for a worker crash after the snapshot was
+ * captured but before the durable sleeping transition finished. It never wakes
+ * or replays agent work, and it intentionally ignores pre-capture rows.
+ */
+export async function runSessionSleepLifecycleRepair(
+  env: Env,
+  now = new Date()
+): Promise<SessionSleepLifecycleRepairStats> {
+  const db = drizzle(env.DATABASE, { schema });
+  const cutoff = new Date(now.getTime() - sessionSleepInFlightMaxAgeMs(env)).toISOString();
+  const snapshotChatOwner = chatSessionTaskOwnerJoins(schema.sessionSnapshots.chatSessionId);
+  const rows = await db
+    .select({
+      snapshotId: schema.sessionSnapshots.id,
+      workspaceId: schema.sessionSnapshots.workspaceId,
+      userId: schema.sessionSnapshots.userId,
+      projectId: schema.sessionSnapshots.projectId,
+      chatSessionId: schema.sessionSnapshots.chatSessionId,
+      nodeId: schema.sessionSnapshots.nodeId,
+      nodeRole: schema.nodes.nodeRole,
+      runtime: schema.sessionSnapshots.runtime,
+      taskId: schema.tasks.id,
+      taskStatus: schema.tasks.status,
+      warmNodeTimeoutMs: schema.projects.warmNodeTimeoutMs,
+    })
+    .from(schema.sessionSnapshots)
+    .leftJoin(schema.workspaces, eq(schema.workspaces.id, schema.sessionSnapshots.workspaceId))
+    .leftJoin(schema.nodes, eq(schema.nodes.id, schema.sessionSnapshots.nodeId))
+    .leftJoin(schema.projects, eq(schema.projects.id, schema.sessionSnapshots.projectId))
+    .leftJoin(schema.sessionSummaries, snapshotChatOwner.summary)
+    .leftJoin(schema.tasks, snapshotChatOwner.task)
+    .where(
+      and(
+        isNull(schema.sessionSnapshots.sleepingAt),
+        eq(schema.sessionSnapshots.sleepStatus, 'stopping'),
+        eq(schema.workspaces.status, 'sleeping'),
+        lte(
+          sql`COALESCE(${schema.sessionSnapshots.sleepStoppingSince}, ${schema.sessionSnapshots.sleepClaimedAt}, ${schema.sessionSnapshots.updatedAt}, ${schema.sessionSnapshots.createdAt})`,
+          cutoff
+        ),
+        gt(schema.sessionSnapshots.expiresAt, now.toISOString()),
+        eq(schema.sessionSnapshots.status, 'available'),
+        eq(schema.sessionSnapshots.degradation, 'none'),
+        isNull(schema.sessionSnapshots.captureGeneration)
+      )
+    )
+    .orderBy(schema.sessionSnapshots.sleepClaimedAt, schema.sessionSnapshots.id)
+    .limit(repairBatchSize(env));
+
+  const stats: SessionSleepLifecycleRepairStats = {
+    selected: rows.length,
+    repaired: 0,
+    skipped: 0,
+    projectDataErrors: 0,
+    errors: 0,
+  };
+
+  for (const row of rows) {
+    try {
+      if (!row.projectId || !row.chatSessionId || !row.workspaceId) {
+        stats.skipped++;
+        continue;
+      }
+      const snapshot = await getRestorableSessionSnapshot(db, row.chatSessionId, now);
+      if (
+        !snapshot ||
+        snapshot.workspaceId !== row.workspaceId ||
+        snapshot.status !== 'available' ||
+        snapshot.degradation !== 'none' ||
+        !snapshot.snapshotGeneration ||
+        snapshot.captureGeneration ||
+        !(await verifySessionSnapshotArtifactsForSleep(env, snapshot))
+      ) {
+        stats.skipped++;
+        continue;
+      }
+      const projectDataSlept = await projectDataService
+        .sleepSession(env, row.projectId, row.chatSessionId)
+        .catch((error) => {
+          log.warn('session_sleep_lifecycle_repair.project_data_sleep_failed', {
+            snapshotId: row.snapshotId,
+            workspaceId: row.workspaceId,
+            chatSessionId: row.chatSessionId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return false;
+        });
+      if (!projectDataSlept) {
+        const alreadyClosed = await projectDataSessionAlreadyClosedForSleep(
+          env,
+          row.projectId,
+          row.chatSessionId,
+          row.taskStatus
+        );
+        if (!alreadyClosed) {
+          stats.projectDataErrors++;
+          log.warn('session_sleep_lifecycle_repair.project_data_sleep_not_applied', {
+            snapshotId: row.snapshotId,
+            workspaceId: row.workspaceId,
+            chatSessionId: row.chatSessionId,
+          });
+          continue;
+        }
+        log.info('session_sleep_lifecycle_repair.project_data_already_closed', {
+          snapshotId: row.snapshotId,
+          workspaceId: row.workspaceId,
+          chatSessionId: row.chatSessionId,
+        });
+      }
+      const marked = await markSessionSnapshotSleeping(
+        db,
+        env,
+        row.chatSessionId,
+        now,
+        snapshot.snapshotGeneration
+      );
+      if (!marked) {
+        stats.skipped++;
+        continue;
+      }
+      const nowIso = now.toISOString();
+      await db.batch([
+        db
+          .update(schema.workspaces)
+          .set({ status: 'sleeping', errorMessage: null, updatedAt: nowIso })
+          .where(eq(schema.workspaces.id, row.workspaceId)),
+        db
+          .update(schema.agentSessions)
+          .set({ status: 'sleeping', errorMessage: null, updatedAt: nowIso })
+          .where(eq(schema.agentSessions.workspaceId, row.workspaceId)),
+      ]);
+      await finishSleepingWorkspaceComputeCleanup(db, env, {
+        workspaceId: row.workspaceId,
+        taskId: row.taskId ?? null,
+        warmNodeTimeoutMs: row.warmNodeTimeoutMs ?? null,
+      });
+      if (row.nodeId) {
+        await markWorkspaceNodeWarmIfEmpty(db, env, {
+          nodeId: row.nodeId,
+          nodeRole: row.nodeRole ?? '',
+          runtime: row.runtime ?? 'vm',
+          userId: row.userId,
+          warmNodeTimeoutMs: row.warmNodeTimeoutMs ?? null,
+        });
+      }
+      stats.repaired++;
+    } catch (error) {
+      stats.errors++;
+      log.warn('session_sleep_lifecycle_repair.row_failed', {
+        snapshotId: row.snapshotId,
+        workspaceId: row.workspaceId,
+        chatSessionId: row.chatSessionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  if (stats.repaired > 0 || stats.errors > 0 || stats.projectDataErrors > 0) {
+    log.info('session_sleep_lifecycle_repair.completed', { ...stats });
+  }
+
+  return stats;
+}

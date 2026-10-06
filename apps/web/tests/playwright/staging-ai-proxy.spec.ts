@@ -8,7 +8,7 @@ const STAGING_API = 'https://api.sammy.party';
 const SCREENSHOT_DIR = '../../.codex/tmp/playwright-screenshots';
 
 test.beforeEach(async ({ page }) => {
-  // Authenticate via smoke test token
+  // Authenticate via API token
   const token = process.env.SAM_PLAYWRIGHT_PRIMARY_USER;
   if (!token) throw new Error('SAM_PLAYWRIGHT_PRIMARY_USER env var not set');
 

@@ -50,3 +50,27 @@ export function formatDuration(startedAt: number, endedAt: number | null): strin
   const remainingMinutes = minutes % 60;
   return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
 }
+
+const MS_PER_MINUTE = 60_000;
+const MS_PER_HOUR = 60 * MS_PER_MINUTE;
+const MS_PER_DAY = 24 * MS_PER_HOUR;
+
+/**
+ * Format a span in milliseconds as a short label with at most two units:
+ * "2d 3h", "2h 10m", "35m". Sub-minute spans round up to "1m". Used for both
+ * countdowns ("resets in …") and ages ("sampled … ago").
+ */
+export function formatMsSpan(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return '0m';
+  if (ms >= MS_PER_DAY) {
+    const days = Math.floor(ms / MS_PER_DAY);
+    const hours = Math.floor((ms % MS_PER_DAY) / MS_PER_HOUR);
+    return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
+  }
+  if (ms >= MS_PER_HOUR) {
+    const hours = Math.floor(ms / MS_PER_HOUR);
+    const minutes = Math.floor((ms % MS_PER_HOUR) / MS_PER_MINUTE);
+    return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+  }
+  return `${Math.max(1, Math.ceil(ms / MS_PER_MINUTE))}m`;
+}

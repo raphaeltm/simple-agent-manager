@@ -15,15 +15,60 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import type {
+  TaskRunnerContext,
+  TaskRunnerState,
+} from '../../src/durable-objects/task-runner/types';
+import { handleWorkspaceReady } from '../../src/durable-objects/task-runner/workspace-steps';
+
+function makeWorkspaceReadyState(overrides: Partial<TaskRunnerState> = {}): TaskRunnerState {
+  return {
+    taskId: 'task-ready-1',
+    projectId: 'project-1',
+    userId: 'user-1',
+    completed: false,
+    currentStep: 'workspace_ready',
+    stepResults: { workspaceId: 'workspace-1', nodeId: 'node-1' },
+    retryCount: 0,
+    config: { attachments: [] },
+    ...overrides,
+  } as TaskRunnerState;
+}
+
+function makeWorkspaceReadyContext(options?: {
+  timeoutMs?: number;
+  workspaceRow?: { status: string; error_message: string | null };
+}): TaskRunnerContext {
+  const prepare = (query: string) => ({
+    bind: () => ({
+      first: async () =>
+        query.includes('SELECT dispatched_at')
+          ? { dispatched_at: '2026-07-29T00:00:00.000Z' }
+          : (options?.workspaceRow ?? { status: 'creating', error_message: null }),
+    }),
+  });
+  return {
+    env: { DATABASE: { prepare } },
+    ctx: { storage: { put: async () => undefined, setAlarm: async () => undefined } },
+    updateD1ExecutionStep: async () => undefined,
+    advanceToStep: async () => undefined,
+    getWorkspaceReadyTimeoutMs: () => options?.timeoutMs ?? 30_000,
+    getWorkspaceReadyPollIntervalMs: () => 1_000,
+  } as unknown as TaskRunnerContext;
+}
+
 const doSource = [
   'index.ts',
   'types.ts',
   'node-steps.ts',
   'workspace-steps.ts',
+  'workspace-ready-steps.ts',
   'agent-session-step.ts',
   'state-machine.ts',
   'helpers.ts',
-].map(f => readFileSync(resolve(process.cwd(), 'src/durable-objects/task-runner', f), 'utf8')).join('\n');
+]
+  .map((f) => readFileSync(resolve(process.cwd(), 'src/durable-objects/task-runner', f), 'utf8'))
+  .join('\n');
 const routeSource = [
   readFileSync(resolve(process.cwd(), 'src/routes/workspaces/lifecycle.ts'), 'utf8'),
   readFileSync(resolve(process.cwd(), 'src/routes/workspaces/runtime.ts'), 'utf8'),
@@ -62,20 +107,30 @@ describe('handleWorkspaceReady — callback-driven with D1 polling safety net', 
     expect(wsReadySection).toContain("state.workspaceReadyStatus === 'recovery'");
   });
 
-  it('throws permanent error on error status', () => {
-    expect(wsReadySection).toContain("state.workspaceReadyStatus === 'error'");
-    expect(wsReadySection).toContain('{ permanent: true }');
-    expect(wsReadySection).toContain('Workspace creation failed');
+  it('throws permanent error on error status', async () => {
+    const state = makeWorkspaceReadyState({
+      workspaceReadyReceived: true,
+      workspaceReadyStatus: 'error',
+      workspaceErrorMessage: 'provisioning failed',
+    });
+    await expect(handleWorkspaceReady(state, makeWorkspaceReadyContext())).rejects.toMatchObject({
+      message: 'provisioning failed',
+      permanent: true,
+    });
   });
 
   it('uses workspace error message when available', () => {
     expect(wsReadySection).toContain('state.workspaceErrorMessage');
   });
 
-  it('checks timeout when no callback received', () => {
-    expect(wsReadySection).toContain('rc.getWorkspaceReadyTimeoutMs()');
-    expect(wsReadySection).toContain('Workspace did not become ready within');
-    expect(wsReadySection).toContain('{ permanent: true }');
+  it('checks timeout when no callback received', async () => {
+    const state = makeWorkspaceReadyState({ workspaceReadyStartedAt: Date.now() - 100 });
+    await expect(
+      handleWorkspaceReady(state, makeWorkspaceReadyContext({ timeoutMs: 1 }))
+    ).rejects.toMatchObject({
+      message: 'Workspace did not become ready within 1ms',
+      permanent: true,
+    });
   });
 
   it('initializes timeout tracking on first entry', () => {
@@ -98,6 +153,12 @@ describe('handleWorkspaceReady — callback-driven with D1 polling safety net', 
     expect(wsReadySection).toContain("updateD1ExecutionStep(state.taskId, 'workspace_ready')");
   });
 
+  it('does not wait for ready before VM-agent dispatch acknowledgement exists', () => {
+    expect(wsReadySection).toContain('SELECT dispatched_at FROM workspaces WHERE id = ?');
+    expect(wsReadySection).toContain('workspace_ready_without_dispatch_ack');
+    expect(wsReadySection).toContain("advanceToStep(state, 'workspace_dispatch')");
+  });
+
   it('explains periodic polling as a safety net in comments', () => {
     expect(wsReadySection).toContain('safety net');
     expect(wsReadySection).toContain('heartbeat');
@@ -115,7 +176,9 @@ describe('advanceWorkspaceReady — callback signal handling', () => {
   );
 
   it('returns early if state is null', () => {
-    expect(advanceSection).toContain('if (!state || state.completed) return');
+    expect(advanceSection).toContain(
+      'if (!state || state.completed || state.stepResults.workspaceId !== workspaceId) return'
+    );
   });
 
   it('returns early if DO is completed', () => {
@@ -135,7 +198,7 @@ describe('advanceWorkspaceReady — callback signal handling', () => {
   });
 
   it('persists state after storing callback signal', () => {
-    expect(advanceSection).toContain("this.ctx.storage.put('state', state)");
+    expect(advanceSection).toContain('putTaskRunnerState(this.ctx.storage, state)');
   });
 
   it('fires immediate alarm when DO is at workspace_ready step', () => {
@@ -147,7 +210,7 @@ describe('advanceWorkspaceReady — callback signal handling', () => {
     // The alarm is only set when currentStep === 'workspace_ready'.
     // For other steps, the signal is just persisted and the existing
     // alarm flow will pick it up when it reaches workspace_ready.
-    const alarmSetLine = advanceSection.indexOf("setAlarm(Date.now())");
+    const alarmSetLine = advanceSection.indexOf('setAlarm(Date.now())');
     const conditionalCheck = advanceSection.indexOf("state.currentStep === 'workspace_ready'");
     // The alarm set should appear AFTER the conditional check
     expect(conditionalCheck).toBeLessThan(alarmSetLine);
@@ -180,9 +243,7 @@ describe('advanceWorkspaceReady — callback signal handling', () => {
 describe('/ready route — inline DO notification (TDF-5)', () => {
   // Extract the /ready handler
   const readyHandlerStart = routeSource.indexOf("lifecycleRoutes.post('/:id/ready'");
-  const readyHandlerEnd = routeSource.indexOf(
-    "lifecycleRoutes.post('/:id/provisioning-failed'"
-  );
+  const readyHandlerEnd = routeSource.indexOf("lifecycleRoutes.post('/:id/provisioning-failed'");
   const readyHandler = routeSource.slice(readyHandlerStart, readyHandlerEnd);
 
   it('calls advanceTaskRunnerWorkspaceReady inline (not in waitUntil)', () => {
@@ -207,11 +268,13 @@ describe('/ready route — inline DO notification (TDF-5)', () => {
   });
 
   it('maps running status correctly', () => {
-    expect(readyHandler).toContain("nextStatus === 'running' ? 'running'");
+    expect(readyHandler).toContain('getTaskRunnerReadyStatus(nextStatus)');
+    expect(routeSource).toContain("if (status === 'running') return 'running'");
   });
 
   it('maps recovery status correctly', () => {
-    expect(readyHandler).toContain("nextStatus === 'recovery' ? 'recovery'");
+    expect(readyHandler).toContain('getTaskRunnerReadyStatus(nextStatus)');
+    expect(routeSource).toContain("if (status === 'recovery') return 'recovery'");
   });
 
   it('references TDF-5 in comment', () => {
@@ -223,7 +286,7 @@ describe('/ready route — inline DO notification (TDF-5)', () => {
   });
 
   it('updates D1 workspace status before notifying DO', () => {
-    const updateIdx = readyHandler.indexOf('.update(schema.workspaces)');
+    const updateIdx = readyHandler.indexOf('transitionWorkspaceFromCallback');
     const doNotifyIdx = readyHandler.indexOf('advanceTaskRunnerWorkspaceReady');
     expect(updateIdx).toBeGreaterThan(-1);
     expect(doNotifyIdx).toBeGreaterThan(updateIdx);
@@ -233,13 +296,43 @@ describe('/ready route — inline DO notification (TDF-5)', () => {
     expect(readyHandler).toContain('verifyWorkspaceCallbackAuth');
   });
 
-  it('returns 404 if workspace not found', () => {
-    expect(readyHandler).toContain("errors.notFound('Workspace')");
+  it('returns terminal gone if the callback workspace is missing or inactive', () => {
+    expect(readyHandler).toContain('assertWorkspaceCallbackResourceById');
+    expect(readyHandler).toContain('transitionWorkspaceFromCallback');
+  });
+});
+
+// ============================================================================
+// /restart and /rebuild Routes — GitHub Owner Access Preflight
+// ============================================================================
+
+describe('/restart and /rebuild routes — GitHub owner access preflight', () => {
+  const restartHandlerStart = routeSource.indexOf("lifecycleRoutes.post('/:id/restart'");
+  const restartHandlerEnd = routeSource.indexOf("lifecycleRoutes.post('/:id/rebuild'");
+  const restartHandler = routeSource.slice(restartHandlerStart, restartHandlerEnd);
+
+  const rebuildHandlerStart = routeSource.indexOf("lifecycleRoutes.post('/:id/rebuild'");
+  const rebuildHandlerEnd = routeSource.indexOf("lifecycleRoutes.get('/:id/events'");
+  const rebuildHandler = routeSource.slice(rebuildHandlerStart, rebuildHandlerEnd);
+
+  it('checks GitHub owner access before restart provisioning reaches the VM agent', () => {
+    const preflightIdx = restartHandler.indexOf('requireWorkspaceRestartGitHubAccess');
+    const nodeAgentIdx = restartHandler.indexOf('restartWorkspaceOnNode');
+
+    expect(preflightIdx).toBeGreaterThan(-1);
+    expect(nodeAgentIdx).toBeGreaterThan(-1);
+    expect(preflightIdx).toBeLessThan(nodeAgentIdx);
+    expect(restartHandler).toContain("'workspace-restart'");
   });
 
-  it('skips notification if workspace is stopping/stopped', () => {
-    expect(readyHandler).toContain("workspace.status === 'stopping'");
-    expect(readyHandler).toContain("workspace.status === 'stopped'");
+  it('checks GitHub owner access before rebuild provisioning reaches the VM agent', () => {
+    const preflightIdx = rebuildHandler.indexOf('requireWorkspaceRestartGitHubAccess');
+    const nodeAgentIdx = rebuildHandler.indexOf('rebuildWorkspaceOnNode');
+
+    expect(preflightIdx).toBeGreaterThan(-1);
+    expect(nodeAgentIdx).toBeGreaterThan(-1);
+    expect(preflightIdx).toBeLessThan(nodeAgentIdx);
+    expect(rebuildHandler).toContain("'workspace-rebuild'");
   });
 });
 
@@ -249,12 +342,12 @@ describe('/ready route — inline DO notification (TDF-5)', () => {
 
 describe('/provisioning-failed route — inline DO notification (TDF-5)', () => {
   // Extract the /provisioning-failed handler
-  const failedHandlerStart = routeSource.indexOf(
-    "lifecycleRoutes.post('/:id/provisioning-failed'"
-  );
-  const failedHandlerEnd = routeSource.indexOf(
-    "runtimeRoutes.post('/:id/agent-key'"
-  );
+  const failedHandlerStart = routeSource.indexOf("lifecycleRoutes.post('/:id/provisioning-failed'");
+  // End at the close of lifecycle.ts (the provisioning-failed handler is the
+  // last route in that file). Using a runtime.ts route as the boundary would
+  // wrongly pull unrelated runtime.ts code (e.g. waitUntil helpers) into the
+  // slice and break this structural assertion.
+  const failedHandlerEnd = routeSource.indexOf('export { lifecycleRoutes }');
   const failedHandler = routeSource.slice(failedHandlerStart, failedHandlerEnd);
 
   it('calls advanceTaskRunnerWorkspaceReady with error status inline', () => {
@@ -294,8 +387,8 @@ describe('/provisioning-failed route — inline DO notification (TDF-5)', () => 
 
   it('only processes workspaces in creating or error status (allows retries)', () => {
     expect(failedHandler).toContain("workspace.status === 'creating'");
-    expect(failedHandler).toContain("workspace.status !== 'error'");
-    expect(failedHandler).toContain("reason: 'workspace_not_creating'");
+    expect(failedHandler).toContain('WORKSPACE_CALLBACK_PROVISIONING_FAILURE_STATUSES');
+    expect(failedHandler).toContain('transitionWorkspaceFromCallback');
   });
 
   it('uses provided error message or default', () => {
@@ -414,8 +507,16 @@ describe('workspace ready timeout and polling alarm strategy', () => {
     expect(wsReadySection).toContain('Math.max(timeoutMs - elapsed, 0)');
   });
 
-  it('uses permanent error flag for timeout', () => {
-    expect(wsReadySection).toContain("{ permanent: true }");
+  it('uses permanent error flag for D1 provisioning failures', async () => {
+    const state = makeWorkspaceReadyState();
+    await expect(
+      handleWorkspaceReady(
+        state,
+        makeWorkspaceReadyContext({
+          workspaceRow: { status: 'error', error_message: 'D1 provisioning failure' },
+        })
+      )
+    ).rejects.toMatchObject({ message: 'D1 provisioning failure', permanent: true });
   });
 
   it('includes timeout duration in error message', () => {
@@ -446,7 +547,9 @@ describe('task-runner-do service bridge', () => {
   });
 
   it('calls stub.advanceWorkspaceReady', () => {
-    expect(serviceSource).toContain('stub.advanceWorkspaceReady(status, errorMessage)');
+    expect(serviceSource).toContain(
+      'stub.advanceWorkspaceReady(status, errorMessage, workspaceId)'
+    );
   });
 
   it('looks up DO by taskId using idFromName', () => {

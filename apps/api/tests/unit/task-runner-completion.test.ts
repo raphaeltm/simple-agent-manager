@@ -1,81 +1,198 @@
 /**
- * Source contract tests for task completion callback handling (T033).
+ * Behavioral tests for task completion callback handling (T033).
  *
- * Verifies that the task status callback endpoint:
- * - On 'completed': triggers cleanupTaskRun (destroy workspace + optionally node)
- * - On 'completed'/'failed'/'cancelled': stops the chat session in ProjectData DO
- * - On 'failed'/'cancelled': does NOT trigger cleanupTaskRun (keep workspace alive)
- * - Handles concurrent/idempotent callbacks gracefully
- *
- * Note: The callback route was extracted from crud.ts to callback.ts to avoid
- * session auth middleware leak (see docs/notes/2026-05-12-task-callback-middleware-leak-postmortem.md).
+ * Replaces the prior source-contract tests (readFileSync + toContain) with
+ * behavioral assertions that exercise the real callback route and the real
+ * terminal cleanup service, proving the contracts hold at runtime.
  */
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { describe, expect, it } from 'vitest';
+import type { Env } from '../../src/env';
 
-describe('task completion callback handling source contract', () => {
-  const callbackRouteFile = readFileSync(resolve(process.cwd(), 'src/routes/tasks/callback.ts'), 'utf8');
-  const crudRouteFile = readFileSync(resolve(process.cwd(), 'src/routes/tasks/crud.ts'), 'utf8');
-  const taskRunnerFile = readFileSync(resolve(process.cwd(), 'src/services/task-runner.ts'), 'utf8');
+const mocks = vi.hoisted(() => ({
+  drizzle: vi.fn(),
+  cleanupTaskRun: vi.fn(),
+  stopSession: vi.fn(),
+  failSession: vi.fn(),
+  queueWorkspaceSessionSleep: vi.fn(),
+  preserveFailedTaskWork: vi.fn(),
+  surfaceFailedTaskWorkLoss: vi.fn(),
+  log: {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  },
+}));
 
-  it('imports cleanupTaskRun in callback route', () => {
-    expect(callbackRouteFile).toContain("import { cleanupTaskRun } from '../../services/task-runner'");
+vi.mock('drizzle-orm/d1', () => ({
+  drizzle: (...args: unknown[]) => mocks.drizzle(...args),
+}));
+
+vi.mock('../../src/services/task-runner', () => ({
+  cleanupTaskRun: (...args: unknown[]) => mocks.cleanupTaskRun(...args),
+}));
+
+vi.mock('../../src/services/project-data', () => ({
+  stopSession: (...args: unknown[]) => mocks.stopSession(...args),
+  failSession: (...args: unknown[]) => mocks.failSession(...args),
+}));
+
+vi.mock('../../src/services/session-sleep', () => ({
+  queueWorkspaceSessionSleep: (...args: unknown[]) => mocks.queueWorkspaceSessionSleep(...args),
+}));
+
+vi.mock('../../src/lib/logger', () => ({
+  log: mocks.log,
+  createModuleLogger: () => mocks.log,
+}));
+
+// The preservation decision has its own real-SQL suites
+// (tests/unit/services/failed-task-preservation.test.ts, the vertical slice in
+// tests/integration/failed-task-preservation.test.ts); here it is a collaborator.
+vi.mock('../../src/services/failed-task-preservation', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/services/failed-task-preservation')>()),
+  preserveFailedTaskWork: (...args: unknown[]) => mocks.preserveFailedTaskWork(...args),
+  surfaceFailedTaskWorkLoss: (...args: unknown[]) => mocks.surfaceFailedTaskWorkLoss(...args),
+}));
+
+function buildDb(selectRows: unknown[][]) {
+  const select = vi.fn(() => {
+    const rows = selectRows.shift() ?? [];
+    const chain = {
+      from: vi.fn(() => chain),
+      where: vi.fn(() => chain),
+      limit: vi.fn(() => Promise.resolve(rows)),
+      then: (resolve: (value: unknown[]) => unknown, reject?: (reason: unknown) => unknown) =>
+        Promise.resolve(rows).then(resolve, reject),
+    };
+    return chain;
   });
 
-  it('callback endpoint triggers cleanupTaskRun on completed status', () => {
-    expect(callbackRouteFile).toContain('cleanupTaskRun(taskId, c.env)');
-    expect(callbackRouteFile).toContain("if (body.toStatus === 'completed')");
+  return { select };
+}
+
+describe('cleanupTerminalTaskResources behavioral tests', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    mocks.stopSession.mockResolvedValue(undefined);
+    mocks.failSession.mockResolvedValue(undefined);
+    mocks.cleanupTaskRun.mockResolvedValue(undefined);
+    mocks.queueWorkspaceSessionSleep.mockResolvedValue(undefined);
   });
 
-  it('stops chat session in ProjectData DO on terminal states', () => {
-    expect(callbackRouteFile).toContain('projectDataService.stopSession');
-    expect(callbackRouteFile).toContain("body.toStatus === 'completed' || body.toStatus === 'failed' || body.toStatus === 'cancelled'");
+  it('queues terminal sleep without tearing down the still-running completing prompt', async () => {
+    const order: string[] = [];
+    const db = buildDb([
+      [
+        {
+          id: 'task-1',
+          projectId: 'proj-1',
+          workspaceId: 'ws-1',
+          errorMessage: null,
+        },
+      ],
+      [{ chatSessionId: 'session-1', userId: 'user-1' }],
+    ]);
+    mocks.drizzle.mockReturnValue(db);
+    mocks.queueWorkspaceSessionSleep.mockImplementation(async () => {
+      order.push('queueWorkspaceSessionSleep');
+    });
+    mocks.cleanupTaskRun.mockImplementation(async () => {
+      order.push('cleanupTaskRun');
+    });
+
+    const { cleanupTerminalTaskResources } =
+      await import('../../src/services/task-terminal-cleanup');
+    const env = { DATABASE: {} } as Env;
+
+    await cleanupTerminalTaskResources(env, 'task-1', { status: 'completed' });
+
+    expect(mocks.queueWorkspaceSessionSleep).toHaveBeenCalledWith(env, {
+      workspaceId: 'ws-1',
+      userId: 'user-1',
+      reason: 'Task completed',
+      sleepAfterMs: 0,
+    });
+    expect(mocks.stopSession).not.toHaveBeenCalled();
+    expect(mocks.cleanupTaskRun).not.toHaveBeenCalled();
+    expect(order).toEqual(['queueWorkspaceSessionSleep']);
   });
 
-  it('looks up chatSessionId from workspace record (not task)', () => {
-    expect(callbackRouteFile).toContain('schema.workspaces.chatSessionId');
-    expect(callbackRouteFile).toContain('schema.workspaces.id');
+  it('fails the chat session for unpreservable failed tasks and propagates error message', async () => {
+    mocks.preserveFailedTaskWork.mockResolvedValue({
+      outcome: 'not_preservable',
+      gap: 'workspace_not_live',
+    });
+    const db = buildDb([
+      [
+        {
+          id: 'task-2',
+          projectId: 'proj-2',
+          workspaceId: 'ws-2',
+          errorMessage: 'agent crashed',
+        },
+      ],
+      [{ chatSessionId: 'session-2' }],
+    ]);
+    mocks.drizzle.mockReturnValue(db);
+
+    const { cleanupTerminalTaskResources } =
+      await import('../../src/services/task-terminal-cleanup');
+    const env = { DATABASE: {} } as Env;
+
+    await cleanupTerminalTaskResources(env, 'task-2', { status: 'failed' });
+
+    expect(mocks.failSession).toHaveBeenCalledWith(env, 'proj-2', 'session-2', 'agent crashed');
+    expect(mocks.cleanupTaskRun).toHaveBeenCalledWith('task-2', env, undefined, undefined);
   });
 
-  it('failed/cancelled callbacks do NOT trigger workspace cleanup', () => {
-    const terminalCheck = "body.toStatus === 'completed' || body.toStatus === 'failed' || body.toStatus === 'cancelled'";
-    const completedOnly = "if (body.toStatus === 'completed')";
+  it('threads requiredUserId through to cleanupTaskRun for caller-scoped cleanup', async () => {
+    const db = buildDb([
+      [
+        {
+          id: 'task-3',
+          projectId: 'proj-3',
+          workspaceId: 'ws-3',
+          errorMessage: null,
+        },
+      ],
+      [{ chatSessionId: 'session-3' }],
+    ]);
+    mocks.drizzle.mockReturnValue(db);
 
-    expect(callbackRouteFile).toContain(terminalCheck);
-    expect(callbackRouteFile).toContain(completedOnly);
+    const { cleanupTerminalTaskResources } =
+      await import('../../src/services/task-terminal-cleanup');
+    const env = { DATABASE: {} } as Env;
 
-    const callbackSection = callbackRouteFile.slice(
-      callbackRouteFile.indexOf("status/callback'"),
-    );
-    const completedCheckIdx = callbackSection.indexOf(completedOnly);
-    const cleanupIdx = callbackSection.indexOf('cleanupTaskRun(taskId');
-    expect(completedCheckIdx).toBeGreaterThan(-1);
-    expect(cleanupIdx).toBeGreaterThan(-1);
-    expect(cleanupIdx).toBeGreaterThan(completedCheckIdx);
+    await cleanupTerminalTaskResources(env, 'task-3', {
+      status: 'cancelled',
+      requiredUserId: 'cancelling-user',
+    });
+
+    expect(mocks.cleanupTaskRun).toHaveBeenCalledWith('task-3', env, undefined, 'cancelling-user');
   });
 
-  it('cleanupTaskRun stops workspace via stopWorkspaceOnNode', () => {
-    expect(taskRunnerFile).toContain('stopWorkspaceOnNode');
-  });
+  it('skips cleanup when task has no workspace', async () => {
+    const db = buildDb([
+      [
+        {
+          id: 'task-4',
+          projectId: null,
+          workspaceId: null,
+          errorMessage: null,
+        },
+      ],
+    ]);
+    mocks.drizzle.mockReturnValue(db);
 
-  it('cleanupTaskRun handles auto-provisioned node cleanup', () => {
-    expect(taskRunnerFile).toContain('autoProvisionedNodeId');
-    expect(taskRunnerFile).toContain('cleanupAutoProvisionedNode');
-  });
+    const { cleanupTerminalTaskResources } =
+      await import('../../src/services/task-terminal-cleanup');
+    const env = { DATABASE: {} } as Env;
 
-  it('completion flow is best-effort (wrapped in catch with logging)', () => {
-    const callbackSection = callbackRouteFile.slice(
-      callbackRouteFile.indexOf("status/callback'"),
-    );
-    expect(callbackSection).toContain('.catch((e) =>');
-    expect(callbackSection).toContain('cleanupTaskRun(taskId, c.env).catch');
-  });
+    await cleanupTerminalTaskResources(env, 'task-4', { status: 'completed' });
 
-  it('user-initiated status change also stops chat session on terminal states', () => {
-    // The user-facing CRUD status endpoint should also stop chat session
-    expect(crudRouteFile).toContain('projectDataService.stopSession');
-    expect(crudRouteFile).toContain("body.toStatus === 'completed' || body.toStatus === 'failed' || body.toStatus === 'cancelled'");
+    expect(mocks.stopSession).not.toHaveBeenCalled();
+    expect(mocks.cleanupTaskRun).not.toHaveBeenCalled();
   });
 });

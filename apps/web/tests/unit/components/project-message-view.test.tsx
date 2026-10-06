@@ -8,7 +8,21 @@
  * Fix: Added AbortController to the polling useEffect so in-flight requests
  * are cancelled when the session changes.
  */
-import { act, fireEvent,render, screen, waitFor } from '@testing-library/react';
+import {
+  DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
+  DEFAULT_CHAT_SESSION_MESSAGE_MAX,
+} from '@simple-agent-manager/shared';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import {
+  act,
+  fireEvent,
+  render as rtlRender,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
+import type { ReactElement, ReactNode } from 'react';
+import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // jsdom doesn't support scrollIntoView
@@ -26,6 +40,17 @@ const mocks = vi.hoisted(() => ({
   getNode: vi.fn(),
   updateProjectTaskStatus: vi.fn(),
   deleteWorkspace: vi.fn(),
+  listMessageComments: vi.fn().mockResolvedValue({ comments: [] }),
+  createMessageCommentThread: vi.fn(),
+  createMessageCommentReply: vi.fn(),
+  resolveMessageCommentThread: vi.fn(),
+  reopenMessageCommentThread: vi.fn(),
+  sendMessageCommentThreadToAgent: vi.fn(),
+  // Timeline data sources (useSessionTimeline)
+  listChatMessages: vi.fn(),
+  listActivityEvents: vi.fn(),
+  listNotifications: vi.fn(),
+  listAcpInteractions: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
@@ -42,21 +67,50 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   deleteWorkspace: mocks.deleteWorkspace,
 }));
 
+vi.mock('../../../src/lib/api/comments', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api/comments')>()),
+  listMessageComments: mocks.listMessageComments,
+  createMessageCommentThread: mocks.createMessageCommentThread,
+  createMessageCommentReply: mocks.createMessageCommentReply,
+  resolveMessageCommentThread: mocks.resolveMessageCommentThread,
+  reopenMessageCommentThread: mocks.reopenMessageCommentThread,
+  sendMessageCommentThreadToAgent: mocks.sendMessageCommentThreadToAgent,
+}));
+
 // Captured WebSocket onMessage callback — tests can call this to inject messages
 let capturedWsOnMessage: ((msg: ReturnType<typeof makeMessage>) => void) | null = null;
 // Captured onCatchUp callback — tests can call this to simulate catch-up after reconnect
-let capturedWsOnCatchUp: ((msgs: ReturnType<typeof makeMessage>[], session: ReturnType<typeof makeSession>) => void) | null = null;
+let capturedWsOnCatchUp:
+  | ((msgs: ReturnType<typeof makeMessage>[], session: ReturnType<typeof makeSession>) => void)
+  | null = null;
+let capturedWsOnCommentEvent:
+  ((event: import('../../../src/lib/api/comments').MessageCommentRealtimeEvent) => void) | null =
+  null;
+let mockWsConnectionState: 'connecting' | 'connected' | 'reconnecting' | 'disconnected' =
+  'connected';
 
 vi.mock('../../../src/hooks/useChatWebSocket', () => ({
-  useChatWebSocket: (opts: { onMessage?: (msg: unknown) => void; onCatchUp?: (msgs: unknown[], session: unknown) => void }) => {
+  useChatWebSocket: (opts: {
+    onMessage?: (msg: unknown) => void;
+    onCatchUp?: (msgs: unknown[], session: unknown) => void;
+    onCommentEvent?: (event: unknown) => void;
+  }) => {
     capturedWsOnMessage = (opts.onMessage ?? null) as typeof capturedWsOnMessage;
     capturedWsOnCatchUp = (opts.onCatchUp ?? null) as typeof capturedWsOnCatchUp;
+    capturedWsOnCommentEvent = (opts.onCommentEvent ?? null) as typeof capturedWsOnCommentEvent;
     return {
-      connectionState: 'connected' as const,
+      connectionState: mockWsConnectionState,
       wsRef: { current: null },
       retry: vi.fn(),
     };
   },
+}));
+
+// The FailureCard inside the floating header reads auth state for the
+// superadmin-only admin-errors deep link.
+vi.mock('../../../src/components/AuthProvider', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/components/AuthProvider')>()),
+  useAuth: () => ({ user: { id: 'user-1' }, isSuperadmin: false, isLoading: false }),
 }));
 
 vi.mock('@simple-agent-manager/acp-client', async (importOriginal) => {
@@ -70,43 +124,155 @@ vi.mock('@simple-agent-manager/acp-client', async (importOriginal) => {
     ToolCallCard: ({ toolCall }: { toolCall: { title: string } }) => (
       <div data-testid="acp-tool-call">{toolCall.title}</div>
     ),
-    ThinkingBlock: ({ text }: { text: string }) => (
-      <div data-testid="acp-thinking">{text}</div>
-    ),
+    ThinkingBlock: ({ text }: { text: string }) => <div data-testid="acp-thinking">{text}</div>,
     TypewriterText: ({ text }: { text: string }) => <span>{text}</span>,
   };
 });
 
 // Mock react-virtuoso — JSDOM has no layout engine, so Virtuoso can't measure items.
 // Uses vi.hoisted to ensure the mock factory runs before imports.
-const virtuosoMock = vi.hoisted(() => {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-explicit-any
-  const React = require('react') as typeof import('react');
-  return {
-    Virtuoso: React.forwardRef(function MockVirtuoso(
-      props: {
-        data?: unknown[];
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        itemContent?: (index: number, item: any) => React.ReactNode;
-        style?: React.CSSProperties;
-        components?: { Header?: React.ComponentType };
-      },
-      _ref: React.Ref<unknown>,
-    ) {
-      const { data, itemContent, style, components } = props;
-      const HeaderComponent = components?.Header;
-      return React.createElement('div', { 'data-testid': 'virtuoso-scroller', style },
-        HeaderComponent ? React.createElement(HeaderComponent) : null,
-        data?.map((item, index) =>
-          React.createElement('div', { key: index }, itemContent?.(index, item))
-        )
-      );
-    }),
-  };
+//
+// The mock exposes `scrollToIndex` via useImperativeHandle so tests can assert the
+// EXACT index the component asks Virtuoso to scroll to. This is critical: real
+// Virtuoso's `scrollToIndex` uses the 0-based data-array coordinate, while
+// `itemContent`'s `index` arg is the `firstItemIndex`-offset absolute coordinate.
+// Passing the absolute value (~VIRTUAL_START) is out of range and silently does
+// nothing — a dead click on virtualized sessions. The mock renders every row, so
+// a highlight-presence assertion alone would NOT catch that; the scrollToIndex
+// argument assertion does.
+vi.mock('react-virtuoso', async () => {
+  const { createVirtuosoModuleMock } = await import('../../helpers/virtuoso-mock');
+  return createVirtuosoModuleMock();
 });
-vi.mock('react-virtuoso', () => virtuosoMock);
 
-import { chatMessagesToConversationItems,ProjectMessageView } from '../../../src/components/project-message-view';
+// Recorded `scrollToIndex` arguments from the shared mock, so the jump tests can
+// assert the exact coordinate the component asked for.
+const virtuosoMock = {
+  scrollToIndexCalls: (await import('../../helpers/virtuoso-mock')).scrollToIndexCalls,
+  lastProps: (await import('../../helpers/virtuoso-mock')).virtuosoLastProps,
+  reset: (await import('../../helpers/virtuoso-mock')).resetVirtuosoMock,
+};
+
+function setMediaMatches({
+  commentsRail = false,
+  coarsePointer = false,
+}: {
+  commentsRail?: boolean;
+  coarsePointer?: boolean;
+} = {}) {
+  vi.mocked(window.matchMedia).mockImplementation((query: string) => ({
+    matches: query.includes('min-width: 1024px')
+      ? commentsRail
+      : query.includes('pointer: coarse')
+        ? coarsePointer
+        : false,
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  }));
+}
+
+// Timeline data sources — useSessionTimeline fetches these when the drawer opens.
+vi.mock('../../../src/lib/api/sessions', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api/sessions')>()),
+  listChatMessages: mocks.listChatMessages,
+  listActivityEvents: mocks.listActivityEvents,
+}));
+vi.mock('../../../src/lib/api/notifications', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api/notifications')>()),
+  listNotifications: mocks.listNotifications,
+}));
+
+vi.mock('../../../src/lib/api/acp-interactions', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api/acp-interactions')>()),
+  listAcpInteractions: mocks.listAcpInteractions,
+}));
+
+// Safe defaults so any expanded-header / timeline fetch resolves to empty rather
+// than `undefined` (SessionHeader chains `.then()` on listChatMessages). These
+// implementations survive `vi.clearAllMocks()` (which clears calls, not impls),
+// so unrelated tests that expand the header keep working.
+mocks.listChatMessages.mockResolvedValue({ messages: [], hasMore: false });
+mocks.listActivityEvents.mockResolvedValue({ events: [] });
+mocks.listNotifications.mockResolvedValue({ notifications: [], nextCursor: null });
+
+import {
+  chatMessagesToConversationItems,
+  ProjectMessageView,
+} from '../../../src/components/project-message-view';
+import { VIRTUAL_START } from '../../../src/components/project-message-view/types';
+
+beforeEach(() => {
+  mockWsConnectionState = 'connected';
+  setMediaMatches();
+  capturedWsOnMessage = null;
+  capturedWsOnCatchUp = null;
+  capturedWsOnCommentEvent = null;
+  mocks.listMessageComments.mockResolvedValue({ comments: [] });
+  mocks.createMessageCommentThread.mockImplementation(
+    async (
+      projectId: string,
+      sessionId: string,
+      input: import('../../../src/lib/api/comments').CreateMessageCommentThreadRequest
+    ) => ({
+      comment: makeCommentThread({
+        id: 'server-comment-1',
+        clientId: input.clientId,
+        projectId,
+        sessionId,
+        messageId: input.anchor.messageId,
+        quote: input.anchor.quote,
+        body: input.body,
+        status: input.action === 'send_to_agent' ? 'sent' : 'open',
+      }),
+    })
+  );
+  mocks.createMessageCommentReply.mockImplementation(
+    async (
+      _projectId: string,
+      _sessionId: string,
+      commentId: string,
+      input: import('../../../src/lib/api/comments').CreateMessageCommentReplyRequest
+    ) => ({
+      comment: makeCommentThread({
+        id: commentId,
+        body: 'Existing body',
+        replies: [
+          {
+            id: 'reply-server-1',
+            clientId: input.clientId,
+            author: testAuthor,
+            body: input.body,
+            createdAt: 1_700_000_100_000,
+            updatedAt: 1_700_000_100_000,
+            sentToAgent: input.action === 'send_to_agent',
+          },
+        ],
+        status: input.action === 'send_to_agent' ? 'sent' : 'open',
+      }),
+    })
+  );
+  mocks.resolveMessageCommentThread.mockImplementation(
+    async (_projectId, _sessionId, commentId) => ({
+      comment: makeCommentThread({ id: commentId, status: 'resolved' }),
+    })
+  );
+  mocks.reopenMessageCommentThread.mockImplementation(
+    async (_projectId, _sessionId, commentId) => ({
+      comment: makeCommentThread({ id: commentId, status: 'open' }),
+    })
+  );
+  mocks.sendMessageCommentThreadToAgent.mockImplementation(
+    async (_projectId, _sessionId, commentId) => ({
+      comment: makeCommentThread({ id: commentId, status: 'sent' }),
+    })
+  );
+  mocks.listAcpInteractions.mockResolvedValue({ pending: [], settled: [], cursor: null });
+});
 
 // --- Test helpers ---
 
@@ -123,15 +289,53 @@ function makeSession(id: string, status = 'active') {
   };
 }
 
-function makeMessage(id: string, sessionId: string, content: string) {
+function makeMessage(
+  id: string,
+  sessionId: string,
+  content: string,
+  role: 'assistant' | 'user' | 'system' | 'tool' = 'assistant'
+) {
+  const createdAt = Date.now();
   return {
     id,
     sessionId,
-    role: 'assistant' as const,
+    role,
     content,
     toolMetadata: null,
-    createdAt: Date.now(),
-    sequence: null,
+    createdAt,
+    sequence: createdAt,
+  };
+}
+
+const testAuthor = {
+  id: 'user-1',
+  name: 'Test User',
+  email: 'test@example.com',
+  avatarUrl: null,
+  kind: 'human' as const,
+};
+
+function makeCommentThread(
+  overrides: Partial<import('../../../src/lib/api/comments').MessageCommentThread> & {
+    messageId?: string;
+    quote?: string;
+  } = {}
+): import('../../../src/lib/api/comments').MessageCommentThread {
+  const messageId = overrides.messageId ?? overrides.anchor?.messageId ?? 'msg-1';
+  const quote = overrides.quote ?? overrides.anchor?.quote ?? 'Selected quote';
+
+  return {
+    id: overrides.id ?? 'comment-1',
+    clientId: overrides.clientId ?? null,
+    projectId: overrides.projectId ?? 'proj-1',
+    sessionId: overrides.sessionId ?? 'session-1',
+    anchor: overrides.anchor ?? { kind: 'message', messageId, quote },
+    author: overrides.author ?? testAuthor,
+    body: overrides.body ?? 'Needs a follow-up check.',
+    createdAt: overrides.createdAt ?? 1_700_000_000_000,
+    updatedAt: overrides.updatedAt ?? 1_700_000_000_000,
+    status: overrides.status ?? 'open',
+    replies: overrides.replies ?? [],
   };
 }
 
@@ -141,6 +345,47 @@ function makeSessionResponse(sessionId: string, messages: ReturnType<typeof make
     messages,
     hasMore: false,
   };
+}
+
+function render(ui: ReactElement) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  const Wrapper = ({ children }: { children: ReactNode }) => (
+    <MemoryRouter>
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    </MemoryRouter>
+  );
+
+  return rtlRender(ui, { wrapper: Wrapper });
+}
+
+async function selectPhraseInMessage(fullText: string, selectedPhrase: string) {
+  const message = await screen.findByText(fullText);
+  const textNode = message.firstChild;
+  expect(textNode).toBeTruthy();
+
+  const range = document.createRange();
+  range.setStart(textNode!, 0);
+  range.setEnd(textNode!, selectedPhrase.length);
+  range.getBoundingClientRect = () =>
+    ({
+      left: 96,
+      right: 260,
+      top: 120,
+      bottom: 140,
+      width: 164,
+      height: 20,
+      x: 96,
+      y: 120,
+      toJSON: () => ({}),
+    }) as DOMRect;
+
+  await act(async () => {
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+    document.dispatchEvent(new Event('mouseup'));
+  });
 }
 
 type WorkspaceBadgeFixture = {
@@ -164,7 +409,7 @@ function renderWorkspaceBadgeFixture(sessionId: string, workspace: WorkspaceBadg
     healthStatus: 'healthy',
   });
   mocks.getChatSession.mockResolvedValue({
-    session: makeSession(sessionId, 'active'),
+    session: { ...makeSession(sessionId, 'active'), workspaceId: workspace.id },
     messages: [makeMessage('m1', sessionId, 'Hello')],
     hasMore: false,
   });
@@ -172,17 +417,93 @@ function renderWorkspaceBadgeFixture(sessionId: string, workspace: WorkspaceBadg
   render(<ProjectMessageView projectId="proj-1" sessionId={sessionId} />);
 }
 
+describe('ProjectMessageView — ACP permission refresh signal', () => {
+  it('refetches the snapshot through the real message view when its attention signal changes', async () => {
+    const pending = {
+      interactionId: '11111111-1111-4111-8111-111111111111',
+      kind: 'permission' as const,
+      state: 'pending' as const,
+      createdAt: Date.now(),
+      deadlineAt: Date.now() + 60_000,
+    };
+    mocks.getChatSession.mockResolvedValue({
+      ...makeSessionResponse('session-1', [makeMessage('m1', 'session-1', 'Hello')]),
+      session: { ...makeSession('session-1'), isMine: false },
+    });
+    mocks.listAcpInteractions
+      .mockResolvedValueOnce({ pending: [], settled: [], cursor: null })
+      .mockResolvedValueOnce({ pending: [pending], settled: [], cursor: null });
+
+    const { rerender } = render(
+      <ProjectMessageView projectId="proj-1" sessionId="session-1" permissionRefreshSignal={null} />
+    );
+    await waitFor(() => expect(mocks.listAcpInteractions).toHaveBeenCalledTimes(1));
+
+    rerender(
+      <ProjectMessageView
+        projectId="proj-1"
+        sessionId="session-1"
+        permissionRefreshSignal="permission-marker-1:ACP permission required"
+      />
+    );
+
+    await waitFor(() => expect(mocks.listAcpInteractions).toHaveBeenCalledTimes(2));
+    expect(mocks.listAcpInteractions).toHaveBeenLastCalledWith('proj-1', 'session-1');
+  });
+});
+
 describe('ProjectMessageView — session isolation', () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.clearAllMocks();
+    mockWsConnectionState = 'connected';
     // Default workspace/node mocks — return pending promises to avoid side effects
-    mocks.getWorkspace.mockResolvedValue({ id: 'ws-test', name: 'test', status: 'running', vmSize: 'medium', vmLocation: 'fsn1' });
-    mocks.getNode.mockResolvedValue({ id: 'node-test', name: 'node-test', status: 'active', healthStatus: 'healthy' });
+    mocks.getWorkspace.mockResolvedValue({
+      id: 'ws-test',
+      name: 'test',
+      status: 'running',
+      vmSize: 'medium',
+      vmLocation: 'fsn1',
+    });
+    mocks.getNode.mockResolvedValue({
+      id: 'node-test',
+      name: 'node-test',
+      status: 'active',
+      healthStatus: 'healthy',
+    });
   });
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it('opens on the newest page and polls with the same small window', async () => {
+    // The fallback poll only runs while the WebSocket is not connected.
+    mockWsConnectionState = 'reconnecting';
+    const limits: Array<number | undefined> = [];
+    mocks.getChatSession.mockImplementation(
+      async (_p: string, _s: string, params?: { limit?: number }) => {
+        limits.push(params?.limit);
+        return makeSessionResponse('session-A', [makeMessage('m1', 'session-A', 'Hi')]);
+      }
+    );
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-A" />);
+
+    // Initial load requests only the newest page — never the ceiling.
+    await waitFor(() => expect(limits.length).toBeGreaterThanOrEqual(1));
+    expect(limits[0]).toBe(DEFAULT_CHAT_SESSION_MESSAGE_LIMIT);
+    // The fallback poll must request only the small recent window — never the ceiling.
+    // Under full coverage load, React may commit the polling effect after the
+    // first timer advance, so advance multiple intervals until it fires.
+    for (let attempts = 0; attempts < 3 && limits.length < 2; attempts += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_500);
+      });
+    }
+    await waitFor(() => expect(limits.length).toBeGreaterThanOrEqual(2));
+    expect(limits.slice(1)).toContain(DEFAULT_CHAT_SESSION_MESSAGE_LIMIT);
+    expect(limits.slice(1)).not.toContain(DEFAULT_CHAT_SESSION_MESSAGE_MAX);
   });
 
   it('does not apply polling response from a different session', async () => {
@@ -199,17 +520,13 @@ describe('ProjectMessageView — session isolation', () => {
       throw new Error(`Unexpected session: ${sessionId}`);
     });
 
-    const { rerender } = render(
-      <ProjectMessageView projectId="proj-1" sessionId="session-A" />
-    );
+    const { rerender } = render(<ProjectMessageView projectId="proj-1" sessionId="session-A" />);
 
     await waitFor(() => {
       expect(screen.getByText('Hello from A')).toBeTruthy();
     });
 
-    rerender(
-      <ProjectMessageView projectId="proj-1" sessionId="session-B" />
-    );
+    rerender(<ProjectMessageView projectId="proj-1" sessionId="session-B" />);
 
     await waitFor(() => {
       expect(screen.getByText('Hello from B')).toBeTruthy();
@@ -219,6 +536,7 @@ describe('ProjectMessageView — session isolation', () => {
   });
 
   it('aborts in-flight polling requests on session switch', async () => {
+    mockWsConnectionState = 'reconnecting';
     let pollSignal: AbortSignal | undefined;
 
     const sessionAResponse = makeSessionResponse('session-A', [
@@ -228,29 +546,25 @@ describe('ProjectMessageView — session isolation', () => {
     // Initial load — no signal capture (initial load effect is separate)
     mocks.getChatSession.mockResolvedValue(sessionAResponse);
 
-    const { rerender } = render(
-      <ProjectMessageView projectId="proj-1" sessionId="session-A" />
-    );
+    const { rerender } = render(<ProjectMessageView projectId="proj-1" sessionId="session-A" />);
 
     await waitFor(() => {
       expect(screen.getByText('Data from A')).toBeTruthy();
     });
 
-    // Now capture the signal from the polling interval (fires every 3s)
-    mocks.getChatSession.mockImplementation(async (
-      _projectId: string,
-      _sessionId: string,
-      params?: { signal?: AbortSignal }
-    ) => {
-      pollSignal = params?.signal;
-      return sessionAResponse;
-    });
+    // Now capture the signal from the degraded fallback polling interval.
+    mocks.getChatSession.mockImplementation(
+      async (_projectId: string, _sessionId: string, params?: { signal?: AbortSignal }) => {
+        pollSignal = params?.signal;
+        return sessionAResponse;
+      }
+    );
 
-    // Advance past the 3s poll interval. Use advanceTimersByTimeAsync to
-    // properly process microtasks (the polling effect starts asynchronously
+    // Advance past the fallback poll interval. Use advanceTimersByTimeAsync to
+    // properly process microtasks (the fallback effect starts asynchronously
     // after session state is committed to the DOM).
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(3100);
+      await vi.advanceTimersByTimeAsync(10_100);
     });
 
     // Verify the poll fired and we captured a signal. CI can schedule the
@@ -266,9 +580,7 @@ describe('ProjectMessageView — session isolation', () => {
     mocks.getChatSession.mockResolvedValue(sessionBResponse);
 
     // Switch sessions — cleanup should abort the poll signal
-    rerender(
-      <ProjectMessageView projectId="proj-1" sessionId="session-B" />
-    );
+    rerender(<ProjectMessageView projectId="proj-1" sessionId="session-B" />);
 
     await waitFor(() => {
       expect(pollSignal!.aborted).toBe(true);
@@ -276,6 +588,7 @@ describe('ProjectMessageView — session isolation', () => {
   });
 
   it('discards stale poll response that resolves after session switch', async () => {
+    mockWsConnectionState = 'reconnecting';
     // This is the definitive regression test: a poll for session A is
     // held in-flight while the user switches to session B. When the
     // signal is aborted, the mock rejects with AbortError (matching
@@ -290,42 +603,42 @@ describe('ProjectMessageView — session isolation', () => {
     // Track call count to distinguish initial load from poll
     let callIndex = 0;
 
-    mocks.getChatSession.mockImplementation((_projectId: string, sessionId: string, params?: { signal?: AbortSignal }) => {
-      callIndex++;
-      if (sessionId === 'session-A') {
-        if (callIndex <= 1) {
-          // First call: initial load — resolve immediately
-          return Promise.resolve(sessionAResponse);
+    mocks.getChatSession.mockImplementation(
+      (_projectId: string, sessionId: string, params?: { signal?: AbortSignal }) => {
+        callIndex++;
+        if (sessionId === 'session-A') {
+          if (callIndex <= 1) {
+            // First call: initial load — resolve immediately
+            return Promise.resolve(sessionAResponse);
+          }
+          // Second call (poll): simulate real fetch behavior — return a
+          // promise that rejects with AbortError when the signal fires.
+          const signal = params?.signal;
+          if (signal?.aborted) {
+            return Promise.reject(new DOMException('Aborted', 'AbortError'));
+          }
+          return new Promise((resolve, reject) => {
+            const onAbort = () => {
+              reject(new DOMException('Aborted', 'AbortError'));
+            };
+            signal?.addEventListener('abort', onAbort, { once: true });
+          });
         }
-        // Second call (poll): simulate real fetch behavior — return a
-        // promise that rejects with AbortError when the signal fires.
-        const signal = params?.signal;
-        if (signal?.aborted) {
-          return Promise.reject(new DOMException('Aborted', 'AbortError'));
-        }
-        return new Promise((resolve, reject) => {
-          const onAbort = () => {
-            reject(new DOMException('Aborted', 'AbortError'));
-          };
-          signal?.addEventListener('abort', onAbort, { once: true });
-        });
+        if (sessionId === 'session-B') return Promise.resolve(sessionBResponse);
+        return Promise.reject(new Error(`Unexpected session: ${sessionId}`));
       }
-      if (sessionId === 'session-B') return Promise.resolve(sessionBResponse);
-      return Promise.reject(new Error(`Unexpected session: ${sessionId}`));
-    });
-
-    const { rerender } = render(
-      <ProjectMessageView projectId="proj-1" sessionId="session-A" />
     );
+
+    const { rerender } = render(<ProjectMessageView projectId="proj-1" sessionId="session-A" />);
 
     // Wait for initial session A load
     await waitFor(() => {
       expect(screen.getByText('Hello from A')).toBeTruthy();
     });
 
-    // Trigger a poll for session A (3s interval)
+    // Trigger a fallback poll for session A.
     await act(async () => {
-      vi.advanceTimersByTime(3100);
+      vi.advanceTimersByTime(10_100);
     });
 
     // Switch to session B while the poll is in-flight.
@@ -334,9 +647,7 @@ describe('ProjectMessageView — session isolation', () => {
     mocks.getChatSession.mockImplementation(async () => sessionBResponse);
 
     await act(async () => {
-      rerender(
-        <ProjectMessageView projectId="proj-1" sessionId="session-B" />
-      );
+      rerender(<ProjectMessageView projectId="proj-1" sessionId="session-B" />);
     });
 
     // Wait for session B to load
@@ -353,8 +664,19 @@ describe('ProjectMessageView — message rendering', () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.clearAllMocks();
-    mocks.getWorkspace.mockResolvedValue({ id: 'ws-test', name: 'test', status: 'running', vmSize: 'medium', vmLocation: 'fsn1' });
-    mocks.getNode.mockResolvedValue({ id: 'node-test', name: 'node-test', status: 'active', healthStatus: 'healthy' });
+    mocks.getWorkspace.mockResolvedValue({
+      id: 'ws-test',
+      name: 'test',
+      status: 'running',
+      vmSize: 'medium',
+      vmLocation: 'fsn1',
+    });
+    mocks.getNode.mockResolvedValue({
+      id: 'node-test',
+      name: 'node-test',
+      status: 'active',
+      healthStatus: 'healthy',
+    });
   });
 
   afterEach(() => {
@@ -362,18 +684,21 @@ describe('ProjectMessageView — message rendering', () => {
   });
 
   it('renders system messages as preformatted text (not markdown)', async () => {
-    const errorLog = '# Step 1/23 : FROM node:18\n* Installing dependencies...\nhttps://example.com';
+    const errorLog =
+      '# Step 1/23 : FROM node:18\n* Installing dependencies...\nhttps://example.com';
     mocks.getChatSession.mockResolvedValue({
       session: makeSession('session-1', 'stopped'),
-      messages: [{
-        id: 'sys-1',
-        sessionId: 'session-1',
-        role: 'system',
-        content: errorLog,
-        toolMetadata: null,
-        createdAt: Date.now(),
-        sequence: null,
-      }],
+      messages: [
+        {
+          id: 'sys-1',
+          sessionId: 'session-1',
+          role: 'system',
+          content: errorLog,
+          toolMetadata: null,
+          createdAt: Date.now(),
+          sequence: 1,
+        },
+      ],
       hasMore: false,
     });
 
@@ -397,9 +722,7 @@ describe('ProjectMessageView — message rendering', () => {
 
   it('renders DO messages using ACP components', async () => {
     mocks.getChatSession.mockResolvedValue(
-      makeSessionResponse('session-1', [
-        makeMessage('msg-1', 'session-1', 'Agent response'),
-      ]),
+      makeSessionResponse('session-1', [makeMessage('msg-1', 'session-1', 'Agent response')])
     );
 
     render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
@@ -412,12 +735,17 @@ describe('ProjectMessageView — message rendering', () => {
   });
 });
 
-
 describe('chatMessagesToConversationItems', () => {
-
   it('converts user messages', () => {
     const items = chatMessagesToConversationItems([
-      { id: 'u1', sessionId: 's1', role: 'user', content: 'Hello', toolMetadata: null, createdAt: 1000 },
+      {
+        id: 'u1',
+        sessionId: 's1',
+        role: 'user',
+        content: 'Hello',
+        toolMetadata: null,
+        createdAt: 1000,
+      },
     ]);
     expect(items).toHaveLength(1);
     expect(items[0].kind).toBe('user_message');
@@ -426,8 +754,22 @@ describe('chatMessagesToConversationItems', () => {
 
   it('merges consecutive assistant messages', () => {
     const items = chatMessagesToConversationItems([
-      { id: 'a1', sessionId: 's1', role: 'assistant', content: 'Part 1', toolMetadata: null, createdAt: 1000 },
-      { id: 'a2', sessionId: 's1', role: 'assistant', content: ' Part 2', toolMetadata: null, createdAt: 1001 },
+      {
+        id: 'a1',
+        sessionId: 's1',
+        role: 'assistant',
+        content: 'Part 1',
+        toolMetadata: null,
+        createdAt: 1000,
+      },
+      {
+        id: 'a2',
+        sessionId: 's1',
+        role: 'assistant',
+        content: ' Part 2',
+        toolMetadata: null,
+        createdAt: 1001,
+      },
     ]);
     expect(items).toHaveLength(1);
     expect(items[0].kind).toBe('agent_message');
@@ -437,7 +779,10 @@ describe('chatMessagesToConversationItems', () => {
   it('converts tool messages with metadata', () => {
     const items = chatMessagesToConversationItems([
       {
-        id: 't1', sessionId: 's1', role: 'tool', content: 'file contents',
+        id: 't1',
+        sessionId: 's1',
+        role: 'tool',
+        content: 'file contents',
         toolMetadata: { kind: 'read', locations: [{ path: '/src/index.ts' }] },
         createdAt: 1000,
       },
@@ -451,7 +796,14 @@ describe('chatMessagesToConversationItems', () => {
 
   it('skips placeholder content in tool messages', () => {
     const items = chatMessagesToConversationItems([
-      { id: 't1', sessionId: 's1', role: 'tool', content: '(tool call)', toolMetadata: null, createdAt: 1000 },
+      {
+        id: 't1',
+        sessionId: 's1',
+        role: 'tool',
+        content: '(tool call)',
+        toolMetadata: null,
+        createdAt: 1000,
+      },
     ]);
     expect(items).toHaveLength(1);
     const tool = items[0] as { content: Array<unknown> };
@@ -460,7 +812,14 @@ describe('chatMessagesToConversationItems', () => {
 
   it('converts system messages as system_message kind', () => {
     const items = chatMessagesToConversationItems([
-      { id: 's1', sessionId: 's1', role: 'system', content: 'Session started', toolMetadata: null, createdAt: 1000 },
+      {
+        id: 's1',
+        sessionId: 's1',
+        role: 'system',
+        content: 'Session started',
+        toolMetadata: null,
+        createdAt: 1000,
+      },
     ]);
     expect(items).toHaveLength(1);
     expect(items[0].kind).toBe('system_message');
@@ -470,7 +829,14 @@ describe('chatMessagesToConversationItems', () => {
   it('preserves raw content in system messages without markdown prefix', () => {
     const errorLog = '# Step 1/23 : FROM node:18\n* Installing dependencies...';
     const items = chatMessagesToConversationItems([
-      { id: 's1', sessionId: 's1', role: 'system', content: errorLog, toolMetadata: null, createdAt: 1000 },
+      {
+        id: 's1',
+        sessionId: 's1',
+        role: 'system',
+        content: errorLog,
+        toolMetadata: null,
+        createdAt: 1000,
+      },
     ]);
     expect(items).toHaveLength(1);
     expect(items[0].kind).toBe('system_message');
@@ -480,7 +846,14 @@ describe('chatMessagesToConversationItems', () => {
 
   it('converts empty system message', () => {
     const items = chatMessagesToConversationItems([
-      { id: 's1', sessionId: 's1', role: 'system', content: '', toolMetadata: null, createdAt: 1000 },
+      {
+        id: 's1',
+        sessionId: 's1',
+        role: 'system',
+        content: '',
+        toolMetadata: null,
+        createdAt: 1000,
+      },
     ]);
     expect(items).toHaveLength(1);
     expect(items[0].kind).toBe('system_message');
@@ -489,8 +862,22 @@ describe('chatMessagesToConversationItems', () => {
 
   it('does not merge consecutive system messages', () => {
     const items = chatMessagesToConversationItems([
-      { id: 's1', sessionId: 's1', role: 'system', content: 'Task started', toolMetadata: null, createdAt: 1000 },
-      { id: 's2', sessionId: 's1', role: 'system', content: 'Task failed', toolMetadata: null, createdAt: 2000 },
+      {
+        id: 's1',
+        sessionId: 's1',
+        role: 'system',
+        content: 'Task started',
+        toolMetadata: null,
+        createdAt: 1000,
+      },
+      {
+        id: 's2',
+        sessionId: 's1',
+        role: 'system',
+        content: 'Task failed',
+        toolMetadata: null,
+        createdAt: 2000,
+      },
     ]);
     expect(items).toHaveLength(2);
     expect(items[0].kind).toBe('system_message');
@@ -501,10 +888,38 @@ describe('chatMessagesToConversationItems', () => {
 
   it('handles system message in mixed-role sequence', () => {
     const items = chatMessagesToConversationItems([
-      { id: 'u1', sessionId: 's1', role: 'user', content: 'Run this task', toolMetadata: null, createdAt: 1000 },
-      { id: 'a1', sessionId: 's1', role: 'assistant', content: 'Working on it', toolMetadata: null, createdAt: 2000 },
-      { id: 's1', sessionId: 's1', role: 'system', content: 'Build failed: exit code 1', toolMetadata: null, createdAt: 3000 },
-      { id: 'a2', sessionId: 's1', role: 'assistant', content: 'The build failed', toolMetadata: null, createdAt: 4000 },
+      {
+        id: 'u1',
+        sessionId: 's1',
+        role: 'user',
+        content: 'Run this task',
+        toolMetadata: null,
+        createdAt: 1000,
+      },
+      {
+        id: 'a1',
+        sessionId: 's1',
+        role: 'assistant',
+        content: 'Working on it',
+        toolMetadata: null,
+        createdAt: 2000,
+      },
+      {
+        id: 's1',
+        sessionId: 's1',
+        role: 'system',
+        content: 'Build failed: exit code 1',
+        toolMetadata: null,
+        createdAt: 3000,
+      },
+      {
+        id: 'a2',
+        sessionId: 's1',
+        role: 'assistant',
+        content: 'The build failed',
+        toolMetadata: null,
+        createdAt: 4000,
+      },
     ]);
     expect(items).toHaveLength(4);
     expect(items[0].kind).toBe('user_message');
@@ -517,8 +932,15 @@ describe('chatMessagesToConversationItems', () => {
   it('uses title from toolMetadata when available', () => {
     const items = chatMessagesToConversationItems([
       {
-        id: 't1', sessionId: 's1', role: 'tool', content: 'file contents',
-        toolMetadata: { title: 'Read file /src/index.ts', kind: 'read', locations: [{ path: '/src/index.ts' }] },
+        id: 't1',
+        sessionId: 's1',
+        role: 'tool',
+        content: 'file contents',
+        toolMetadata: {
+          title: 'Read file /src/index.ts',
+          kind: 'read',
+          locations: [{ path: '/src/index.ts' }],
+        },
         createdAt: 1000,
       },
     ]);
@@ -531,7 +953,10 @@ describe('chatMessagesToConversationItems', () => {
   it('falls back to kind when title is not in metadata', () => {
     const items = chatMessagesToConversationItems([
       {
-        id: 't1', sessionId: 's1', role: 'tool', content: '(tool call)',
+        id: 't1',
+        sessionId: 's1',
+        role: 'tool',
+        content: '(tool call)',
         toolMetadata: { kind: 'bash' },
         createdAt: 1000,
       },
@@ -542,31 +967,37 @@ describe('chatMessagesToConversationItems', () => {
     expect(tool.toolKind).toBe('bash');
   });
 
-  it('uses structured content from metadata when available', () => {
+  it('uses lazy-load metadata for structured tool content', () => {
     const items = chatMessagesToConversationItems([
       {
-        id: 't1', sessionId: 's1', role: 'tool', content: 'diff: /src/main.go',
+        id: 't1',
+        sessionId: 's1',
+        role: 'tool',
+        content: 'diff: /src/main.go',
         toolMetadata: {
           title: 'Edit file /src/main.go',
           kind: 'edit',
-          content: [
-            { type: 'diff', text: '/src/main.go' },
-          ],
+          content: [{ type: 'diff', text: '/src/main.go' }],
         },
         createdAt: 1000,
       },
     ]);
     expect(items).toHaveLength(1);
-    const tool = items[0] as { content: Array<{ type: string; text: string }> };
-    expect(tool.content).toHaveLength(1);
-    expect(tool.content[0].type).toBe('diff');
-    expect(tool.content[0].text).toBe('/src/main.go');
+    expect(items[0]).toMatchObject({
+      content: [],
+      contentLoaded: false,
+      messageId: 't1',
+      contentSize: expect.any(Number),
+    });
   });
 
   it('uses status from metadata when available', () => {
     const items = chatMessagesToConversationItems([
       {
-        id: 't1', sessionId: 's1', role: 'tool', content: '(tool update)',
+        id: 't1',
+        sessionId: 's1',
+        role: 'tool',
+        content: '(tool update)',
         toolMetadata: { kind: 'bash', status: 'failed' },
         createdAt: 1000,
       },
@@ -576,25 +1007,33 @@ describe('chatMessagesToConversationItems', () => {
     expect(tool.status).toBe('failed');
   });
 
-  it('falls back to raw content when metadata has no structured content', () => {
+  it('uses lazy-load metadata for raw tool content when metadata has no structured content', () => {
     const items = chatMessagesToConversationItems([
       {
-        id: 't1', sessionId: 's1', role: 'tool', content: 'some output',
+        id: 't1',
+        sessionId: 's1',
+        role: 'tool',
+        content: 'some output',
         toolMetadata: { kind: 'bash' },
         createdAt: 1000,
       },
     ]);
     expect(items).toHaveLength(1);
-    const tool = items[0] as { content: Array<{ type: string; text: string }> };
-    expect(tool.content).toHaveLength(1);
-    expect(tool.content[0].type).toBe('content');
-    expect(tool.content[0].text).toBe('some output');
+    expect(items[0]).toMatchObject({
+      content: [],
+      contentLoaded: false,
+      messageId: 't1',
+      contentSize: 'some output'.length,
+    });
   });
 
   it('preserves in_progress status from metadata', () => {
     const items = chatMessagesToConversationItems([
       {
-        id: 't1', sessionId: 's1', role: 'tool', content: '(tool update)',
+        id: 't1',
+        sessionId: 's1',
+        role: 'tool',
+        content: '(tool update)',
         toolMetadata: { kind: 'bash', status: 'in_progress' },
         createdAt: 1000,
       },
@@ -607,47 +1046,91 @@ describe('chatMessagesToConversationItems', () => {
   it('handles null toolMetadata with real content', () => {
     const items = chatMessagesToConversationItems([
       {
-        id: 't1', sessionId: 's1', role: 'tool', content: 'stdout: build succeeded',
+        id: 't1',
+        sessionId: 's1',
+        role: 'tool',
+        content: 'stdout: build succeeded',
         toolMetadata: null,
         createdAt: 1000,
       },
     ]);
     expect(items).toHaveLength(1);
-    const tool = items[0] as { title: string; content: Array<{ type: string; text: string }> };
+    const tool = items[0] as {
+      title: string;
+      content: Array<unknown>;
+      contentLoaded?: boolean;
+      messageId?: string;
+      contentSize?: number;
+    };
     expect(tool.title).toBe('Tool Call');
-    expect(tool.content).toHaveLength(1);
-    expect(tool.content[0].text).toBe('stdout: build succeeded');
+    expect(tool.content).toHaveLength(0);
+    expect(tool.contentLoaded).toBe(false);
+    expect(tool.messageId).toBe('t1');
+    expect(tool.contentSize).toBe('stdout: build succeeded'.length);
   });
 
   it('skips placeholder content for tool-update string', () => {
     const items = chatMessagesToConversationItems([
-      { id: 't1', sessionId: 's1', role: 'tool', content: '(tool update)', toolMetadata: null, createdAt: 1000 },
+      {
+        id: 't1',
+        sessionId: 's1',
+        role: 'tool',
+        content: '(tool update)',
+        toolMetadata: null,
+        createdAt: 1000,
+      },
     ]);
     expect(items).toHaveLength(1);
     const tool = items[0] as { content: Array<unknown> };
     expect(tool.content).toHaveLength(0);
   });
 
-  it('handles terminal content type from metadata', () => {
+  it('uses lazy-load metadata for terminal content from metadata', () => {
     const items = chatMessagesToConversationItems([
       {
-        id: 't1', sessionId: 's1', role: 'tool', content: '(tool call)',
+        id: 't1',
+        sessionId: 's1',
+        role: 'tool',
+        content: '(tool call)',
         toolMetadata: { kind: 'bash', content: [{ type: 'terminal', text: 'term-1' }] },
         createdAt: 1000,
       },
     ]);
     expect(items).toHaveLength(1);
-    const tool = items[0] as { content: Array<{ type: string; text: string }> };
-    expect(tool.content).toHaveLength(1);
-    expect(tool.content[0].type).toBe('terminal');
-    expect(tool.content[0].text).toBe('term-1');
+    expect(items[0]).toMatchObject({
+      content: [],
+      contentLoaded: false,
+      messageId: 't1',
+      contentSize: expect.any(Number),
+    });
   });
 
   it('does not merge assistant followed by user followed by assistant', () => {
     const items = chatMessagesToConversationItems([
-      { id: 'a1', sessionId: 's1', role: 'assistant', content: 'Hello', toolMetadata: null, createdAt: 1000 },
-      { id: 'u1', sessionId: 's1', role: 'user', content: 'Hi', toolMetadata: null, createdAt: 1001 },
-      { id: 'a2', sessionId: 's1', role: 'assistant', content: 'World', toolMetadata: null, createdAt: 1002 },
+      {
+        id: 'a1',
+        sessionId: 's1',
+        role: 'assistant',
+        content: 'Hello',
+        toolMetadata: null,
+        createdAt: 1000,
+      },
+      {
+        id: 'u1',
+        sessionId: 's1',
+        role: 'user',
+        content: 'Hi',
+        toolMetadata: null,
+        createdAt: 1001,
+      },
+      {
+        id: 'a2',
+        sessionId: 's1',
+        role: 'assistant',
+        content: 'World',
+        toolMetadata: null,
+        createdAt: 1002,
+      },
     ]);
     expect(items).toHaveLength(3);
     expect(items[0].kind).toBe('agent_message');
@@ -666,8 +1149,19 @@ describe('ProjectMessageView — collapsible session header', () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.clearAllMocks();
-    mocks.getWorkspace.mockResolvedValue({ id: 'ws-test', name: 'test', status: 'running', vmSize: 'medium', vmLocation: 'fsn1' });
-    mocks.getNode.mockResolvedValue({ id: 'node-test', name: 'node-test', status: 'active', healthStatus: 'healthy' });
+    mocks.getWorkspace.mockImplementation(async (id: string) => ({
+      id,
+      name: 'test',
+      status: 'running',
+      vmSize: 'medium',
+      vmLocation: 'fsn1',
+    }));
+    mocks.getNode.mockResolvedValue({
+      id: 'node-test',
+      name: 'node-test',
+      status: 'active',
+      healthStatus: 'healthy',
+    });
   });
 
   afterEach(() => {
@@ -761,21 +1255,22 @@ describe('ProjectMessageView — collapsible session header', () => {
       expect(screen.getByText('Session sess-3')).toBeTruthy();
     });
 
-    // Expand
-    const expandButton = screen.getByRole('button', { name: /show session details/i });
-    fireEvent.click(expandButton);
+    // The details control is a toggle in the tool rail. Its accessible NAME is stable
+    // and the open/closed state rides on `aria-expanded`, so both directions use the
+    // same button rather than a name that flips between "Show" and "Hide".
+    const detailsToggle = screen.getByRole('button', { name: /show session details/i });
 
+    fireEvent.click(detailsToggle);
     await waitFor(() => {
       expect(screen.getByText('sam/collapse-test')).toBeTruthy();
     });
 
-    // Collapse
-    const collapseButton = screen.getByRole('button', { name: /hide session details/i });
-    fireEvent.click(collapseButton);
-
+    fireEvent.click(detailsToggle);
     await waitFor(() => {
       expect(screen.queryByText('sam/collapse-test')).toBeNull();
     });
+    // Liveness beside the absence assertion: the session is still rendered.
+    expect(screen.getByText('Session sess-3')).toBeTruthy();
   });
 
   it('sets aria-expanded attribute correctly on toggle', async () => {
@@ -805,14 +1300,13 @@ describe('ProjectMessageView — collapsible session header', () => {
       expect(screen.getByText('Session sess-aria')).toBeTruthy();
     });
 
-    const expandButton = screen.getByRole('button', { name: /show session details/i });
-    expect(expandButton.getAttribute('aria-expanded')).toBe('false');
+    const detailsToggle = screen.getByRole('button', { name: /show session details/i });
+    expect(detailsToggle.getAttribute('aria-expanded')).toBe('false');
 
-    fireEvent.click(expandButton);
+    fireEvent.click(detailsToggle);
 
     await waitFor(() => {
-      const collapseButton = screen.getByRole('button', { name: /hide session details/i });
-      expect(collapseButton.getAttribute('aria-expanded')).toBe('true');
+      expect(detailsToggle.getAttribute('aria-expanded')).toBe('true');
     });
   });
 
@@ -888,7 +1382,7 @@ describe('ProjectMessageView — session context dropdown', () => {
       cloudProvider: 'hetzner',
     });
 
-    const session = makeSession('sess-ctx', 'active');
+    const session = { ...makeSession('sess-ctx', 'active'), workspaceId: 'ws-ctx-1' };
     mocks.getChatSession.mockResolvedValue({
       session,
       messages: [makeMessage('m1', 'sess-ctx', 'Hello')],
@@ -915,9 +1409,10 @@ describe('ProjectMessageView — session context dropdown', () => {
     // Workspace status "(running)" may appear alongside timing "(running)" — check at least one exists
     expect(screen.getAllByText('(running)').length).toBeGreaterThanOrEqual(1);
 
-    // Should show VM size
-    expect(screen.getByText('VM Size:')).toBeTruthy();
-    expect(screen.getByText('Medium')).toBeTruthy();
+    // Requested resources and reported hardware must remain distinct.
+    expect(screen.getByText('Requested:')).toBeTruthy();
+    expect(screen.getByText('Unknown — no saved resource request')).toBeTruthy();
+    expect(screen.getByText('Unknown — no hardware report')).toBeTruthy();
 
     // Should show node info
     expect(screen.getByText('Node:')).toBeTruthy();
@@ -1049,7 +1544,7 @@ describe('ProjectMessageView — session context dropdown', () => {
       healthStatus: 'healthy',
     });
 
-    const session = makeSession('sess-dn', 'active');
+    const session = { ...makeSession('sess-dn', 'active'), workspaceId: 'ws-nodn' };
     mocks.getChatSession.mockResolvedValue({
       session,
       messages: [makeMessage('m1', 'sess-dn', 'Hello')],
@@ -1081,7 +1576,7 @@ describe('ProjectMessageView — session context dropdown', () => {
       // no nodeId
     });
 
-    const session = makeSession('sess-nonode', 'active');
+    const session = { ...makeSession('sess-nonode', 'active'), workspaceId: 'ws-nonode' };
     mocks.getChatSession.mockResolvedValue({
       session,
       messages: [makeMessage('m1', 'sess-nonode', 'Hello')],
@@ -1120,7 +1615,7 @@ describe('ProjectMessageView — session context dropdown', () => {
     });
     mocks.getNode.mockRejectedValue(new Error('Node not found'));
 
-    const session = makeSession('sess-partial', 'active');
+    const session = { ...makeSession('sess-partial', 'active'), workspaceId: 'ws-partial' };
     mocks.getChatSession.mockResolvedValue({
       session,
       messages: [makeMessage('m1', 'sess-partial', 'Hello')],
@@ -1141,7 +1636,7 @@ describe('ProjectMessageView — session context dropdown', () => {
       expect(screen.getByText('partial-ws')).toBeTruthy();
     });
     expect(screen.getByText('Workspace:')).toBeTruthy();
-    expect(screen.getByText('VM Size:')).toBeTruthy();
+    expect(screen.getByText('Requested:')).toBeTruthy();
 
     // Node details should NOT appear
     await waitFor(() => {
@@ -1153,8 +1648,19 @@ describe('ProjectMessageView — session context dropdown', () => {
 describe('ProjectMessageView — virtual scroll', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.getWorkspace.mockResolvedValue({ id: 'ws-test', name: 'test', status: 'running', vmSize: 'medium', vmLocation: 'fsn1' });
-    mocks.getNode.mockResolvedValue({ id: 'node-test', name: 'node-test', status: 'active', healthStatus: 'healthy' });
+    mocks.getWorkspace.mockResolvedValue({
+      id: 'ws-test',
+      name: 'test',
+      status: 'running',
+      vmSize: 'medium',
+      vmLocation: 'fsn1',
+    });
+    mocks.getNode.mockResolvedValue({
+      id: 'node-test',
+      name: 'node-test',
+      status: 'active',
+      healthStatus: 'healthy',
+    });
   });
 
   it('renders messages via Virtuoso mock', async () => {
@@ -1162,7 +1668,7 @@ describe('ProjectMessageView — virtual scroll', () => {
       makeSessionResponse('session-1', [
         makeMessage('msg-1', 'session-1', 'First message'),
         makeMessage('msg-2', 'session-1', 'Second message'),
-      ]),
+      ])
     );
 
     render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
@@ -1180,9 +1686,7 @@ describe('ProjectMessageView — virtual scroll', () => {
 
   it('renders new WebSocket messages inside Virtuoso', async () => {
     mocks.getChatSession.mockResolvedValue(
-      makeSessionResponse('session-1', [
-        makeMessage('msg-1', 'session-1', 'First message'),
-      ]),
+      makeSessionResponse('session-1', [makeMessage('msg-1', 'session-1', 'First message')])
     );
 
     render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
@@ -1218,11 +1722,40 @@ describe('ProjectMessageView — virtual scroll', () => {
     expect(screen.getByText('Load earlier messages')).toBeTruthy();
   });
 
+  // Regression: `components={{ Header: () => (...) }}` written inline creates a new
+  // component TYPE on every parent render. React unmounts and remounts a subtree
+  // whose type changed, so the spacer and the "Load earlier messages" button were
+  // being destroyed and rebuilt on every render — during streaming, once per token.
+  //
+  // DOM node identity is the discriminating signal: a re-render that only updates
+  // props keeps the same element instance, while a remount produces a new one.
+  // Asserting the button is merely "still present" passes either way.
+  it('does not remount the list header subtree when the parent re-renders', async () => {
+    mocks.getChatSession.mockResolvedValue({
+      session: makeSession('session-1'),
+      messages: [makeMessage('msg-1', 'session-1', 'Recent message')],
+      hasMore: true,
+    });
+
+    const { rerender } = render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Recent message')).toBeTruthy();
+    });
+
+    const buttonBefore = screen.getByText('Load earlier messages');
+
+    // Force parent re-renders without changing anything the header reads.
+    rerender(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+    rerender(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    const buttonAfter = screen.getByText('Load earlier messages');
+    expect(buttonAfter).toBe(buttonBefore);
+  });
+
   it('does not render "Load earlier messages" button when hasMore is false', async () => {
     mocks.getChatSession.mockResolvedValue(
-      makeSessionResponse('session-1', [
-        makeMessage('msg-1', 'session-1', 'Only message'),
-      ]),
+      makeSessionResponse('session-1', [makeMessage('msg-1', 'session-1', 'Only message')])
     );
 
     render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
@@ -1269,9 +1802,7 @@ describe('ProjectMessageView — virtual scroll', () => {
 
   it('renders messages from new session after session switch', async () => {
     mocks.getChatSession.mockResolvedValue(
-      makeSessionResponse('session-A', [
-        makeMessage('msg-a1', 'session-A', 'Session A message'),
-      ]),
+      makeSessionResponse('session-A', [makeMessage('msg-a1', 'session-A', 'Session A message')])
     );
 
     const { rerender } = render(<ProjectMessageView projectId="proj-1" sessionId="session-A" />);
@@ -1282,14 +1813,343 @@ describe('ProjectMessageView — virtual scroll', () => {
 
     // Switch to a new session
     mocks.getChatSession.mockResolvedValue(
-      makeSessionResponse('session-B', [
-        makeMessage('msg-b1', 'session-B', 'Session B message'),
-      ]),
+      makeSessionResponse('session-B', [makeMessage('msg-b1', 'session-B', 'Session B message')])
     );
     rerender(<ProjectMessageView projectId="proj-1" sessionId="session-B" />);
 
     await waitFor(() => {
       expect(screen.getByText('Session B message')).toBeTruthy();
+    });
+  });
+});
+
+describe('ProjectMessageView — message anchored comments', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.clearAllMocks();
+    virtuosoMock.reset();
+    mocks.getWorkspace.mockResolvedValue({
+      id: 'ws-test',
+      name: 'test',
+      status: 'running',
+      vmSize: 'medium',
+      vmLocation: 'fsn1',
+    });
+    mocks.getNode.mockResolvedValue({
+      id: 'node-test',
+      name: 'node-test',
+      status: 'active',
+      healthStatus: 'healthy',
+    });
+    mocks.listMessageComments.mockResolvedValue({ comments: [] });
+  });
+
+  afterEach(() => {
+    window.getSelection()?.removeAllRanges();
+    vi.useRealTimers();
+  });
+
+  it('renders a data-backed comments drawer entry and jumps using the 0-based Virtuoso index', async () => {
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [
+        makeMessage('msg-1', 'session-1', 'User prompt', 'user'),
+        makeMessage('msg-2', 'session-1', 'Agent answer'),
+        makeMessage('msg-3', 'session-1', 'User clarification', 'user'),
+      ])
+    );
+    mocks.listMessageComments.mockResolvedValue({
+      comments: [
+        makeCommentThread({
+          id: 'comment-msg-3',
+          messageId: 'msg-3',
+          body: 'This comment belongs to the later message.',
+        }),
+      ],
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    const openComments = await screen.findByRole('button', { name: /1 unresolved comment/i });
+    fireEvent.click(openComments);
+
+    const drawerRow = await screen.findByRole('button', {
+      name: /This comment belongs to the later message\./i,
+    });
+    fireEvent.click(drawerRow);
+    fireEvent.click(screen.getByRole('button', { name: /show in conversation/i }));
+
+    expect(virtuosoMock.scrollToIndexCalls.at(-1)).toMatchObject({
+      index: 2,
+      behavior: 'smooth',
+      align: 'center',
+    });
+  });
+
+  it('opens an on-demand desktop comments rail from the header chip without rendering the modal drawer', async () => {
+    setMediaMatches({ commentsRail: true });
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [
+        makeMessage('msg-1', 'session-1', 'User prompt', 'user'),
+        makeMessage('msg-2', 'session-1', 'Agent answer'),
+      ])
+    );
+    mocks.listMessageComments.mockResolvedValue({
+      comments: [
+        makeCommentThread({
+          id: 'comment-msg-2',
+          messageId: 'msg-2',
+          body: 'This desktop rail comment should be readable beside the chat.',
+        }),
+      ],
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await screen.findByText('Agent answer');
+    expect(screen.queryByRole('complementary', { name: 'Session comments' })).toBeNull();
+
+    fireEvent.click(await screen.findByRole('button', { name: /1 unresolved comment/i }));
+
+    const rail = await screen.findByRole('complementary', { name: 'Session comments' });
+    expect(
+      within(rail).getByText('This desktop rail comment should be readable beside the chat.')
+    ).toBeTruthy();
+    expect(screen.queryByRole('dialog', { name: 'Session comments' })).toBeNull();
+  });
+
+  it('opens the desktop comments rail from the always-visible header Comments chip even with no threads', async () => {
+    setMediaMatches({ commentsRail: true });
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [makeMessage('msg-1', 'session-1', 'Agent answer')])
+    );
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await screen.findByText('Agent answer');
+    expect(screen.queryByRole('complementary', { name: 'Session comments' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Comments' }));
+
+    const rail = await screen.findByRole('complementary', { name: 'Session comments' });
+    expect(
+      within(rail).getByText(
+        'Select text in a user or agent message, or use a message Comment button to start a thread.'
+      )
+    ).toBeTruthy();
+  });
+
+  it('opens a desktop rail composer from the message-level Comment button', async () => {
+    setMediaMatches({ commentsRail: true });
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [makeMessage('msg-1', 'session-1', 'Agent answer')])
+    );
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await screen.findByText('Agent answer');
+    fireEvent.click(screen.getByRole('button', { name: /add comment on message msg-1/i }));
+
+    const rail = await screen.findByRole('complementary', { name: 'Session comments' });
+    expect(within(rail).getByRole('region', { name: 'New message comment' })).toBeTruthy();
+    const textarea = within(rail).getByLabelText('Add a comment…') as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: ' Desktop message-level comment. ' } });
+    fireEvent.click(within(textarea.closest('form')!).getByRole('button', { name: 'Comment' }));
+
+    await waitFor(() => {
+      expect(mocks.createMessageCommentThread).toHaveBeenCalledWith(
+        'proj-1',
+        'session-1',
+        expect.objectContaining({
+          anchor: { kind: 'message', messageId: 'msg-1', quote: undefined },
+          body: 'Desktop message-level comment.',
+          action: 'note',
+        })
+      );
+    });
+  });
+
+  it('opens a quoted desktop rail composer from the selected-text Comment popover', async () => {
+    setMediaMatches({ commentsRail: true });
+    const selectedPhrase = 'Select this exact phrase';
+    const fullText = `${selectedPhrase} for a desktop rail comment.`;
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [makeMessage('msg-1', 'session-1', fullText)])
+    );
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await selectPhraseInMessage(fullText, selectedPhrase);
+    const popover = await screen.findByRole('dialog', { name: 'Comment on selection' });
+    const commentButton = within(popover).getByRole('button', { name: 'Comment' });
+    fireEvent.mouseDown(commentButton);
+    expect(window.getSelection()?.toString()).toBe(selectedPhrase);
+    fireEvent.click(commentButton);
+
+    const rail = await screen.findByRole('complementary', { name: 'Session comments' });
+    expect(within(rail).getByRole('region', { name: 'New comment on selected text' })).toBeTruthy();
+    expect(within(rail).getByText(selectedPhrase)).toBeTruthy();
+    expect(within(rail).getByLabelText('Add a comment…')).toBeTruthy();
+  });
+
+  it('creates an optimistic thread from a message action without changing chat rendering', async () => {
+    mocks.listMessageComments.mockResolvedValueOnce({ comments: [] }).mockResolvedValue({
+      comments: [
+        makeCommentThread({
+          id: 'server-comment-1',
+          messageId: 'msg-1',
+          body: 'Please check this edge case.',
+        }),
+      ],
+    });
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [makeMessage('msg-1', 'session-1', 'Agent answer')])
+    );
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Agent answer')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /add comment on message msg-1/i }));
+    const textarea = screen.getAllByLabelText('Add a comment…')[0] as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: ' Please check this edge case. ' } });
+    fireEvent.click(within(textarea.closest('form')!).getByRole('button', { name: 'Comment' }));
+
+    await waitFor(() => {
+      expect(mocks.createMessageCommentThread).toHaveBeenCalledWith(
+        'proj-1',
+        'session-1',
+        expect.objectContaining({
+          anchor: { kind: 'message', messageId: 'msg-1', quote: undefined },
+          body: 'Please check this edge case.',
+          action: 'note',
+        })
+      );
+    });
+    expect(screen.getByTestId('virtuoso-scroller').textContent).toContain('Agent answer');
+    await waitFor(() => {
+      expect(screen.getAllByText('Please check this edge case.').length).toBeGreaterThan(0);
+    });
+  });
+
+  it('uses real DOM selection to open a quoted composer while preserving native selection', async () => {
+    const selectedPhrase = 'Select this exact phrase';
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [
+        makeMessage('msg-1', 'session-1', `${selectedPhrase} for a review comment.`),
+      ])
+    );
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    const message = await screen.findByText(`${selectedPhrase} for a review comment.`);
+    const textNode = message.firstChild;
+    expect(textNode).toBeTruthy();
+
+    const range = document.createRange();
+    range.setStart(textNode!, 0);
+    range.setEnd(textNode!, selectedPhrase.length);
+    range.getBoundingClientRect = () =>
+      ({
+        left: 96,
+        right: 260,
+        top: 120,
+        bottom: 140,
+        width: 164,
+        height: 20,
+        x: 96,
+        y: 120,
+        toJSON: () => ({}),
+      }) as DOMRect;
+
+    await act(async () => {
+      window.getSelection()?.removeAllRanges();
+      window.getSelection()?.addRange(range);
+      document.dispatchEvent(new Event('mouseup'));
+    });
+
+    const popover = await screen.findByRole('dialog', { name: 'Comment on selection' });
+    const commentButton = within(popover).getByRole('button', { name: 'Comment' });
+    fireEvent.mouseDown(commentButton);
+    expect(window.getSelection()?.toString()).toBe(selectedPhrase);
+    fireEvent.click(commentButton);
+
+    expect(screen.getAllByText(selectedPhrase).length).toBeGreaterThan(0);
+    expect(screen.getAllByLabelText('Add a comment…').length).toBeGreaterThan(0);
+  });
+
+  it('moves mobile selected-text drafts into a bottom composer overlay', async () => {
+    setMediaMatches({ coarsePointer: true });
+    const selectedPhrase = 'Select this mobile phrase';
+    const fullText = `${selectedPhrase} while keeping chat scroll context.`;
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [makeMessage('msg-1', 'session-1', fullText)])
+    );
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await selectPhraseInMessage(fullText, selectedPhrase);
+    const actionBar = await screen.findByRole('dialog', { name: 'Comment on selection' });
+    fireEvent.click(within(actionBar).getByRole('button', { name: 'Comment on selection' }));
+
+    const overlay = await screen.findByRole('region', {
+      name: 'Selected text comment composer',
+    });
+    expect(within(overlay).getByText(selectedPhrase)).toBeTruthy();
+    const textarea = within(overlay).getByLabelText('Add a comment…') as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: ' Mobile selected text comment. ' } });
+    fireEvent.click(within(textarea.closest('form')!).getByRole('button', { name: 'Comment' }));
+
+    await waitFor(() => {
+      expect(mocks.createMessageCommentThread).toHaveBeenCalledWith(
+        'proj-1',
+        'session-1',
+        expect.objectContaining({
+          anchor: { kind: 'message', messageId: 'msg-1', quote: selectedPhrase },
+          body: 'Mobile selected text comment.',
+        })
+      );
+    });
+  });
+
+  it('applies realtime comment events to the comment cache for the active session', async () => {
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [makeMessage('msg-1', 'session-1', 'Agent answer')])
+    );
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Agent answer')).toBeTruthy();
+      expect(capturedWsOnCommentEvent).toBeTruthy();
+    });
+
+    await act(async () => {
+      capturedWsOnCommentEvent!({
+        type: 'comment.thread.created',
+        payload: {
+          projectId: 'proj-1',
+          sessionId: 'session-1',
+          comment: makeCommentThread({
+            id: 'comment-live-1',
+            messageId: 'msg-1',
+            body: 'Realtime comment body',
+          }),
+        },
+      });
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: /1 comment on this message, 1 unresolved/i })
+      ).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /1 unresolved comment/i }));
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Realtime comment body').length).toBeGreaterThan(0);
     });
   });
 });
@@ -1304,8 +2164,19 @@ describe('ProjectMessageView — catch-up race regression', () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.clearAllMocks();
-    mocks.getWorkspace.mockResolvedValue({ id: 'ws-test', name: 'test', status: 'running', vmSize: 'medium', vmLocation: 'fsn1' });
-    mocks.getNode.mockResolvedValue({ id: 'node-test', name: 'node-test', status: 'active', healthStatus: 'healthy' });
+    mocks.getWorkspace.mockResolvedValue({
+      id: 'ws-test',
+      name: 'test',
+      status: 'running',
+      vmSize: 'medium',
+      vmLocation: 'fsn1',
+    });
+    mocks.getNode.mockResolvedValue({
+      id: 'node-test',
+      name: 'node-test',
+      status: 'active',
+      healthStatus: 'healthy',
+    });
   });
 
   afterEach(() => {
@@ -1343,10 +2214,7 @@ describe('ProjectMessageView — catch-up race regression', () => {
     // data survive the 'replace' merge strategy
     expect(capturedWsOnCatchUp).not.toBeNull();
     act(() => {
-      capturedWsOnCatchUp!(
-        fullMessages,
-        makeSession('session-1'),
-      );
+      capturedWsOnCatchUp!(fullMessages, makeSession('session-1'));
     });
 
     // Messages must still be visible after catch-up with same data
@@ -1359,9 +2227,7 @@ describe('ProjectMessageView — catch-up race regression', () => {
     // After the fix for the load-more regression, the replace strategy
     // preserves messages older than the incoming window. When incoming
     // is empty (oldest = Infinity), all existing messages are preserved.
-    const fullMessages = [
-      makeMessage('msg-1', 'session-1', 'Important conversation'),
-    ];
+    const fullMessages = [makeMessage('msg-1', 'session-1', 'Important conversation')];
 
     mocks.getChatSession.mockResolvedValue({
       session: makeSession('session-1'),
@@ -1378,10 +2244,7 @@ describe('ProjectMessageView — catch-up race regression', () => {
     // Simulate onCatchUp with EMPTY messages
     expect(capturedWsOnCatchUp).not.toBeNull();
     act(() => {
-      capturedWsOnCatchUp!(
-        [],
-        makeSession('session-1'),
-      );
+      capturedWsOnCatchUp!([], makeSession('session-1'));
     });
 
     // Messages are preserved — empty incoming does not wipe earlier messages
@@ -1397,9 +2260,23 @@ describe('ProjectMessageView — cancel button', () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.clearAllMocks();
-    mocks.getWorkspace.mockResolvedValue({ id: 'ws-test', name: 'test', status: 'running', vmSize: 'medium', vmLocation: 'fsn1' });
-    mocks.getNode.mockResolvedValue({ id: 'node-test', name: 'node-test', status: 'active', healthStatus: 'healthy' });
-    mocks.cancelAgentPrompt.mockResolvedValue({ status: 'cancelled', message: 'Prompt cancel signal sent' });
+    mocks.getWorkspace.mockResolvedValue({
+      id: 'ws-test',
+      name: 'test',
+      status: 'running',
+      vmSize: 'medium',
+      vmLocation: 'fsn1',
+    });
+    mocks.getNode.mockResolvedValue({
+      id: 'node-test',
+      name: 'node-test',
+      status: 'active',
+      healthStatus: 'healthy',
+    });
+    mocks.cancelAgentPrompt.mockResolvedValue({
+      status: 'cancelled',
+      message: 'Prompt cancel signal sent',
+    });
   });
 
   afterEach(() => {
@@ -1408,9 +2285,7 @@ describe('ProjectMessageView — cancel button', () => {
 
   it('shows cancel button when agent is working and calls cancelAgentPrompt on click', async () => {
     mocks.getChatSession.mockResolvedValue(
-      makeSessionResponse('session-1', [
-        makeMessage('msg-1', 'session-1', 'Working on it'),
-      ]),
+      makeSessionResponse('session-1', [makeMessage('msg-1', 'session-1', 'Working on it')])
     );
 
     render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
@@ -1419,8 +2294,8 @@ describe('ProjectMessageView — cancel button', () => {
       expect(screen.getByText('Working on it')).toBeTruthy();
     });
 
-    // Initially no "Agent is working" indicator
-    expect(screen.queryByText('Agent is working...')).toBeNull();
+    // Initially no working morph — the dock's Interrupt control is absent
+    expect(screen.queryByRole('button', { name: 'Interrupt agent' })).toBeNull();
 
     // Inject an assistant message via WebSocket to trigger 'responding' state
     expect(capturedWsOnMessage).toBeTruthy();
@@ -1428,14 +2303,14 @@ describe('ProjectMessageView — cancel button', () => {
       capturedWsOnMessage!(makeMessage('msg-2', 'session-1', 'Still working'));
     });
 
-    // Now the "Agent is working" indicator should appear with a Cancel button
+    // Now the dock morphs to the working state — a red Interrupt control appears
     await waitFor(() => {
-      expect(screen.getByText('Agent is working...')).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Interrupt agent' })).toBeTruthy();
     });
-    const cancelButton = screen.getByRole('button', { name: /cancel/i });
+    const cancelButton = screen.getByRole('button', { name: 'Interrupt agent' });
     expect(cancelButton).toBeTruthy();
 
-    // Click cancel
+    // Click interrupt
     await act(async () => {
       fireEvent.click(cancelButton);
     });
@@ -1443,10 +2318,102 @@ describe('ProjectMessageView — cancel button', () => {
     // Verify cancelAgentPrompt was called with the right args
     expect(mocks.cancelAgentPrompt).toHaveBeenCalledWith('proj-1', 'session-1');
 
-    // After successful cancel, the indicator should disappear (agent goes idle)
+    // After successful cancel, the working morph disappears (agent goes idle)
     await waitFor(() => {
-      expect(screen.queryByText('Agent is working...')).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Interrupt agent' })).toBeNull();
     });
+  });
+
+  /**
+   * Drive the working state the way production does — an assistant message over
+   * the WebSocket — then return the Interrupt control.
+   */
+  async function renderWorkingSessionAndGetInterrupt() {
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [makeMessage('msg-1', 'session-1', 'Working on it')])
+    );
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+    await waitFor(() => {
+      expect(screen.getByText('Working on it')).toBeTruthy();
+    });
+    await act(async () => {
+      capturedWsOnMessage!(makeMessage('msg-2', 'session-1', 'Still working'));
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Interrupt agent' })).toBeTruthy();
+    });
+    return screen.getByRole('button', { name: 'Interrupt agent' });
+  }
+
+  it('shows a disabled interrupting state while the cancel is in flight', async () => {
+    // A deferred promise lets the test stop at the load-bearing midpoint — the
+    // request in flight — and assert the intermediate UI before releasing it.
+    // `mockResolvedValue` would settle before React could commit that state
+    // (.claude/rules/62, asynchronous ordering).
+    let release!: () => void;
+    mocks.cancelAgentPrompt.mockReturnValue(
+      new Promise<{ status: string; message: string }>((resolve) => {
+        release = () => resolve({ status: 'cancelled', message: 'Prompt cancel signal sent' });
+      })
+    );
+
+    const interrupt = await renderWorkingSessionAndGetInterrupt();
+    await act(async () => {
+      fireEvent.click(interrupt);
+    });
+
+    // Mid-flight: the control must say so and refuse further presses, instead of
+    // silently swallowing them behind a ref.
+    const busy = await screen.findByRole('button', { name: 'Interrupting agent' });
+    expect(busy).toBeDisabled();
+    expect(busy).toHaveAttribute('aria-busy', 'true');
+
+    await act(async () => {
+      fireEvent.click(busy);
+    });
+    expect(mocks.cancelAgentPrompt).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      release();
+    });
+  });
+
+  it('surfaces a failed interrupt and leaves the control usable for a retry', async () => {
+    let reject!: (err: Error) => void;
+    mocks.cancelAgentPrompt.mockReturnValue(
+      new Promise<{ status: string; message: string }>((_resolve, rejectFn) => {
+        reject = rejectFn;
+      })
+    );
+
+    const interrupt = await renderWorkingSessionAndGetInterrupt();
+    await act(async () => {
+      fireEvent.click(interrupt);
+    });
+    await screen.findByRole('button', { name: 'Interrupting agent' });
+
+    await act(async () => {
+      reject(new Error('Failed to cancel prompt on agent'));
+    });
+
+    // The failure must be visible. It used to vanish into an empty `.catch()`.
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent('Failed to cancel prompt on agent');
+    });
+
+    // And the user must be able to try again — the activity state is left alone
+    // on failure precisely so the control stays available.
+    const retryable = screen.getByRole('button', { name: 'Interrupt agent' });
+    expect(retryable).toBeEnabled();
+
+    mocks.cancelAgentPrompt.mockResolvedValue({
+      status: 'cancelled',
+      message: 'Prompt cancel signal sent',
+    });
+    await act(async () => {
+      fireEvent.click(retryable);
+    });
+    expect(mocks.cancelAgentPrompt).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -1454,15 +2421,26 @@ describe('ProjectMessageView — inline idle indicator', () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.clearAllMocks();
-    mocks.getWorkspace.mockResolvedValue({ id: 'ws-test', name: 'test', status: 'running', vmSize: 'medium', vmLocation: 'fsn1' });
-    mocks.getNode.mockResolvedValue({ id: 'node-test', name: 'node-test', status: 'active', healthStatus: 'healthy' });
+    mocks.getWorkspace.mockResolvedValue({
+      id: 'ws-test',
+      name: 'test',
+      status: 'running',
+      vmSize: 'medium',
+      vmLocation: 'fsn1',
+    });
+    mocks.getNode.mockResolvedValue({
+      id: 'node-test',
+      name: 'node-test',
+      status: 'active',
+      healthStatus: 'healthy',
+    });
   });
 
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  it('shows "End session" for idle conversation-mode session with onCloseConversation', async () => {
+  it('shows Sleep control for awake idle conversation-mode session with onSleepConversation', async () => {
     const session = {
       ...makeSession('sess-idle', 'active'),
       isIdle: true,
@@ -1484,22 +2462,136 @@ describe('ProjectMessageView — inline idle indicator', () => {
       hasMore: false,
     });
 
+    const onSleep = vi.fn();
     const onClose = vi.fn();
     render(
       <ProjectMessageView
         projectId="proj-1"
         sessionId="sess-idle"
+        onSleepConversation={onSleep}
         onCloseConversation={onClose}
-      />,
+      />
+    );
+
+    // Awake idle conversation-mode dock morphs to the reversible Sleep control.
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Sleep session' })).toBeTruthy();
+    });
+    expect(screen.queryByRole('button', { name: 'Archive conversation' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Interrupt agent' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sleep session' }));
+    expect(onSleep).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog', { name: 'Archive conversation?' })).toBeNull();
+  });
+
+  it('shows Archive confirmation for sleeping conversation-mode session', async () => {
+    const session = {
+      ...makeSession('sess-sleeping', 'sleeping'),
+      isIdle: true,
+      task: {
+        id: 'task-conv-sleeping',
+        status: 'in_progress',
+        taskMode: 'conversation' as const,
+        executionStep: null,
+        errorMessage: null,
+        outputBranch: null,
+        outputPrUrl: null,
+        outputSummary: null,
+        finalizedAt: null,
+      },
+    };
+    mocks.getChatSession.mockResolvedValue({
+      session,
+      messages: [makeMessage('m1', 'sess-sleeping', 'Hello')],
+      hasMore: false,
+    });
+
+    const onSleep = vi.fn();
+    const onClose = vi.fn();
+    render(
+      <ProjectMessageView
+        projectId="proj-1"
+        sessionId="sess-sleeping"
+        onSleepConversation={onSleep}
+        onCloseConversation={onClose}
+      />
     );
 
     await waitFor(() => {
-      expect(screen.getByText('Agent idle')).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Archive conversation' })).toBeTruthy();
     });
-    expect(screen.getByText('End session')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Sleep session' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Archive conversation' }));
+    expect(screen.getByRole('dialog', { name: 'Archive conversation?' })).toBeTruthy();
+    expect(onSleep).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Archive Conversation' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('does NOT show "End session" for idle task-mode session', async () => {
+  it('keeps non-destructive completion behind confirmation and surfaces completion errors', async () => {
+    const session = {
+      ...makeSession('sess-complete-error', 'active'),
+      task: {
+        id: 'task-complete-error',
+        status: 'in_progress',
+        taskMode: 'task' as const,
+        executionStep: null,
+        errorMessage: null,
+        outputBranch: null,
+        outputPrUrl: null,
+        outputSummary: null,
+        finalizedAt: null,
+      },
+    };
+    mocks.getChatSession.mockResolvedValue({
+      session,
+      messages: [makeMessage('m1', 'sess-complete-error', 'Working summary')],
+      hasMore: false,
+    });
+    mocks.updateProjectTaskStatus.mockRejectedValueOnce(new Error('Task transition denied'));
+    const onSessionMutated = vi.fn();
+
+    render(
+      <ProjectMessageView
+        projectId="proj-1"
+        sessionId="sess-complete-error"
+        onSessionMutated={onSessionMutated}
+      />
+    );
+
+    // Complete is in the tool rail now — reachable without opening any disclosure.
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Mark this task complete' })).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mark this task complete' }));
+    expect(screen.getByRole('dialog', { name: 'Mark task as complete?' })).toBeTruthy();
+    expect(mocks.updateProjectTaskStatus).not.toHaveBeenCalled();
+
+    expect(
+      screen.getByText(
+        'SAM will preserve this session so you can continue it later. Use archive or delete only when you want to remove the saved workspace state.'
+      )
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Mark Complete' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Task transition denied')).toBeTruthy();
+    });
+    expect(mocks.updateProjectTaskStatus).toHaveBeenCalledWith('proj-1', 'task-complete-error', {
+      toStatus: 'completed',
+    });
+    expect(mocks.deleteWorkspace).not.toHaveBeenCalled();
+    expect(onSessionMutated).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog', { name: 'Mark task as complete?' })).toBeNull();
+  });
+
+  it('does NOT show Archive control for idle task-mode session', async () => {
     const session = {
       ...makeSession('sess-task', 'active'),
       isIdle: true,
@@ -1522,11 +2614,7 @@ describe('ProjectMessageView — inline idle indicator', () => {
     });
 
     render(
-      <ProjectMessageView
-        projectId="proj-1"
-        sessionId="sess-task"
-        onCloseConversation={vi.fn()}
-      />,
+      <ProjectMessageView projectId="proj-1" sessionId="sess-task" onCloseConversation={vi.fn()} />
     );
 
     // Wait for session to load
@@ -1534,12 +2622,13 @@ describe('ProjectMessageView — inline idle indicator', () => {
       expect(screen.getByText('Session sess-task')).toBeTruthy();
     });
 
-    // The idle indicator should NOT appear for task-mode
-    expect(screen.queryByText('End session')).toBeNull();
-    expect(screen.queryByText('Agent idle')).toBeNull();
+    // The dock's lifecycle controls must never appear for task-mode idle sessions.
+    expect(screen.queryByRole('button', { name: 'Sleep session' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Archive conversation' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Interrupt agent' })).toBeNull();
   });
 
-  it('does NOT show "End session" for active conversation-mode session', async () => {
+  it('shows Sleep control for active conversation-mode session (always-mounted morph)', async () => {
     const session = {
       ...makeSession('sess-active', 'active'),
       isIdle: false,
@@ -1565,17 +2654,20 @@ describe('ProjectMessageView — inline idle indicator', () => {
       <ProjectMessageView
         projectId="proj-1"
         sessionId="sess-active"
+        onSleepConversation={vi.fn()}
         onCloseConversation={vi.fn()}
-      />,
+      />
     );
 
     await waitFor(() => {
       expect(screen.getByText('Session sess-active')).toBeTruthy();
     });
 
-    // Active session should NOT show the idle indicator
-    expect(screen.queryByText('End session')).toBeNull();
-    expect(screen.queryByText('Agent idle')).toBeNull();
+    // The dock stays mounted for conversation-mode while active; with the agent
+    // idle it shows the reversible Sleep morph (not Archive or working Interrupt).
+    expect(screen.getByRole('button', { name: 'Sleep session' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Archive conversation' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Interrupt agent' })).toBeNull();
   });
 
   it('renders error banner with glass-chrome styling when task has errorMessage', async () => {
@@ -1600,23 +2692,603 @@ describe('ProjectMessageView — inline idle indicator', () => {
     };
     mocks.getChatSession.mockResolvedValue(response);
 
-    const { container } = render(
-      <ProjectMessageView projectId="proj-1" sessionId="sess-err" />,
-    );
+    const { container } = render(<ProjectMessageView projectId="proj-1" sessionId="sess-err" />);
 
+    // The failure card classifies "Node provisioning failed" and renders the
+    // classification summary in the floating header.
     await waitFor(() => {
-      expect(screen.getByText('Task failed:')).toBeTruthy();
+      expect(screen.getByText('Provisioning failed')).toBeTruthy();
     });
 
-    // Error banner should have glass-chrome styling
-    const errorBanner = screen.getByText('Node provisioning failed').closest('div');
-    expect(errorBanner).toBeTruthy();
-    expect(errorBanner!.className).toContain('glass-chrome');
-    // glass-composited removed — its transform: translateZ(0) broke backdrop-filter blur
+    // The failure card wrapper keeps the glass-chrome header treatment
+    const errorWrapper = screen.getByText('Provisioning failed').closest('.glass-chrome');
+    expect(errorWrapper).toBeTruthy();
+
+    // Expanding the card reveals the raw error message
+    fireEvent.click(screen.getByRole('button', { name: /Provisioning failed/ }));
+    await waitFor(() => {
+      expect(screen.getByText('Node provisioning failed')).toBeTruthy();
+    });
 
     // SessionHeader should have hasContentBelow (no rounded-b-2xl)
     const headerEl = container.querySelector('.glass-chrome.border-t-0');
     expect(headerEl).toBeTruthy();
     expect(headerEl!.className).not.toContain('rounded-b-2xl');
+  });
+});
+
+describe('ProjectMessageView — timeline jump-to-message', () => {
+  function makeUserMessage(id: string, sessionId: string, content: string, createdAt: number) {
+    return {
+      id,
+      sessionId,
+      role: 'user' as const,
+      content,
+      toolMetadata: null,
+      createdAt,
+      sequence: createdAt,
+    };
+  }
+  function makeAgentMessage(id: string, sessionId: string, content: string, createdAt: number) {
+    return {
+      id,
+      sessionId,
+      role: 'assistant' as const,
+      content,
+      toolMetadata: null,
+      createdAt,
+      sequence: createdAt,
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    virtuosoMock.scrollToIndexCalls.length = 0;
+    mocks.getWorkspace.mockResolvedValue({
+      id: 'ws-test',
+      name: 'test',
+      status: 'running',
+      vmSize: 'medium',
+      vmLocation: 'fsn1',
+    });
+    mocks.getNode.mockResolvedValue({
+      id: 'node-test',
+      name: 'node-test',
+      status: 'active',
+      healthStatus: 'healthy',
+    });
+    mocks.listActivityEvents.mockResolvedValue({ events: [] });
+    mocks.listNotifications.mockResolvedValue({ notifications: [], nextCursor: null });
+  });
+
+  // Regression: clicking a timeline entry must scroll the chat to that message.
+  // itemIndexById previously stored `firstItemIndex + i` (absolute ≈ VIRTUAL_START
+  // + i ≈ 100000) and passed it to Virtuoso's scrollToIndex, which expects the
+  // 0-BASED data index. The out-of-range value never scrolled, so on a real
+  // virtualized session the target row stayed unmounted and the highlight never
+  // rendered — a dead click. jsdom renders every row, so a highlight-presence
+  // assertion would pass despite the bug; asserting the scrollToIndex ARGUMENT is
+  // what catches it.
+  it('scrolls Virtuoso to the target message using its 0-based index (not the firstItemIndex offset)', async () => {
+    const sid = 'session-jump';
+    // Order matters: user message sits at 0-based conversation index 1 (between two
+    // agent messages), so the correct index (1) is unambiguously different from the
+    // buggy absolute value (VIRTUAL_START + 1 = 100001).
+    const messages = [
+      makeAgentMessage('a0', sid, 'agent intro', 1000),
+      makeUserMessage('user-jump-1', sid, 'JUMPME', 2000),
+      makeAgentMessage('a2', sid, 'agent reply', 3000),
+    ];
+    mocks.getChatSession.mockResolvedValue({
+      session: makeSession(sid, 'active'),
+      messages,
+      hasMore: false,
+    });
+    // Timeline fetches user messages independently (roles=['user']).
+    mocks.listChatMessages.mockResolvedValue({
+      messages: [makeUserMessage('user-jump-1', sid, 'JUMPME', 2000)],
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId={sid} />);
+
+    // Wait for the conversation to load.
+    await waitFor(() => {
+      expect(screen.getByTestId('virtuoso-scroller').textContent).toContain('JUMPME');
+    });
+
+    // Timeline is in the tool rail now — no disclosure to open first.
+    fireEvent.click(screen.getByRole('button', { name: 'Jump through session history' }));
+
+    const drawer = await screen.findByRole('dialog', { name: 'Session timeline' });
+
+    // The user-message timeline entry.
+    const entry = await waitFor(() => {
+      const btn = within(drawer)
+        .getAllByRole('button')
+        .find((b) => /JUMPME/.test(b.textContent ?? ''));
+      expect(btn).toBeTruthy();
+      return btn!;
+    });
+
+    fireEvent.click(entry);
+
+    // The component must ask Virtuoso to scroll to the 0-based data index (1),
+    // NOT the firstItemIndex-offset absolute value.
+    await waitFor(() => {
+      expect(virtuosoMock.scrollToIndexCalls.length).toBeGreaterThan(0);
+    });
+    const indices = virtuosoMock.scrollToIndexCalls.map((c) =>
+      typeof c === 'number' ? c : c.index
+    );
+    expect(indices).toContain(1);
+    // Guard against the regression: no call may use the absolute VIRTUAL_START coordinate.
+    for (const idx of indices) {
+      expect(typeof idx === 'number' ? idx : Number(idx)).toBeLessThan(1000);
+    }
+  });
+});
+
+describe('ProjectMessageView — prepend anchors on rendered rows, not messages', () => {
+  /*
+   * Virtuoso's `firstItemIndex` must move by the number of rows added at the
+   * FRONT of the data array, and with grouping that is not the message count.
+   * Two consumers depend on it: the list itself (a wrong delta shifts every
+   * existing row's absolute index and jumps the reader's scroll position) and
+   * `CommentableConversationItem`'s `index - firstItemIndex === animationTargetIdx`,
+   * which compares against a 0-based DISPLAY index.
+   *
+   * Entered through the real "Load earlier messages" control (rule 62), so the
+   * whole `loadMore` -> `mergeMessages` -> `countDisplayRows` path runs.
+   */
+  function toolRow(id: string, title: string, createdAt: number) {
+    return {
+      id,
+      sessionId: 'session-prepend',
+      role: 'tool' as const,
+      content: '(tool call)',
+      toolMetadata: { toolCallId: `tc-${id}`, title, kind: 'execute', status: 'completed' },
+      createdAt,
+      sequence: createdAt,
+    };
+  }
+  function textRow(id: string, role: 'user' | 'assistant', content: string, createdAt: number) {
+    return {
+      id,
+      sessionId: 'session-prepend',
+      role,
+      content,
+      toolMetadata: null,
+      createdAt,
+      sequence: createdAt,
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    virtuosoMock.reset();
+    mocks.getWorkspace.mockResolvedValue({
+      id: 'ws-test',
+      name: 'test',
+      status: 'running',
+      vmSize: 'medium',
+      vmLocation: 'fsn1',
+    });
+    mocks.getNode.mockResolvedValue({
+      id: 'node-test',
+      name: 'node-test',
+      status: 'active',
+      healthStatus: 'healthy',
+    });
+    mocks.listMessageComments.mockResolvedValue({ comments: [] });
+  });
+
+  async function loadEarlier() {
+    fireEvent.click(await screen.findByText('Load earlier messages'));
+  }
+
+  it('decrements firstItemIndex by the ROW delta, not the message count', async () => {
+    const sid = 'session-prepend';
+    // Existing window: a user message then an agent message -> 2 rows.
+    mocks.getChatSession.mockResolvedValueOnce({
+      session: makeSession(sid, 'stopped'),
+      messages: [
+        textRow('u1', 'user', 'What did you do?', 2_000),
+        textRow('m1', 'assistant', 'Quite a lot.', 2_100),
+      ],
+      hasMore: true,
+    });
+    // Older page: 3 assistant tokens fold into ONE bubble and 6 tool calls fold
+    // into ONE group -> 9 messages, 2 rows. The trailing tool row is adjacent to
+    // the existing USER message, so nothing merges across the boundary.
+    mocks.getChatSession.mockResolvedValueOnce({
+      session: makeSession(sid, 'stopped'),
+      messages: [
+        textRow('a1', 'assistant', 'Starting. ', 1_000),
+        textRow('a2', 'assistant', 'Still going. ', 1_100),
+        textRow('a3', 'assistant', 'Nearly there.', 1_200),
+        toolRow('t1', 'Bash: one', 1_300),
+        toolRow('t2', 'Bash: two', 1_400),
+        toolRow('t3', 'Bash: three', 1_500),
+        toolRow('t4', 'Bash: four', 1_600),
+        toolRow('t5', 'Bash: five', 1_700),
+        toolRow('t6', 'Bash: six', 1_800),
+      ],
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId={sid} />);
+    await waitFor(() => {
+      expect(virtuosoMock.lastProps.dataLength).toBe(2);
+    });
+    const before = virtuosoMock.lastProps.firstItemIndex!;
+    expect(before).toBe(VIRTUAL_START);
+
+    await loadEarlier();
+
+    // 4 rows now: [agent bubble][tool group][user][agent bubble].
+    await waitFor(() => {
+      expect(virtuosoMock.lastProps.dataLength).toBe(4);
+    });
+    // Exactly 2 — the rows actually added. NOT 9, the messages added.
+    expect(before - virtuosoMock.lastProps.firstItemIndex!).toBe(2);
+    expect(virtuosoMock.lastProps.firstItemIndex).toBe(VIRTUAL_START - 2);
+    // Liveness: the older page really did render, so the delta is not 2 because
+    // the prepend silently failed.
+    expect(await screen.findByRole('button', { name: /6 tool calls/ })).toBeTruthy();
+  });
+
+  it('leaves firstItemIndex untouched when the older page merges into the first group', async () => {
+    const sid = 'session-prepend';
+    // Existing window is a single group of 2 tool calls -> 1 row.
+    mocks.getChatSession.mockResolvedValueOnce({
+      session: makeSession(sid, 'stopped'),
+      messages: [toolRow('tA', 'Bash: alpha', 2_000), toolRow('tB', 'Bash: bravo', 2_100)],
+      hasMore: true,
+    });
+    // Older page is one more tool call, which joins that same run: still 1 row.
+    mocks.getChatSession.mockResolvedValueOnce({
+      session: makeSession(sid, 'stopped'),
+      messages: [toolRow('tC', 'Bash: charlie', 1_000)],
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId={sid} />);
+    await screen.findByRole('button', { name: /2 tool calls/ });
+    const before = virtuosoMock.lastProps.firstItemIndex!;
+
+    await loadEarlier();
+
+    // The group absorbed the older call, so the row count is unchanged...
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /3 tool calls/ })).toBeTruthy();
+    });
+    expect(virtuosoMock.lastProps.dataLength).toBe(1);
+    // ...and therefore the anchor must not move at all. The message-count version
+    // decrements by 1 here and shifts a row that was never added.
+    expect(virtuosoMock.lastProps.firstItemIndex).toBe(before);
+  });
+});
+
+describe('ProjectMessageView — tool call activity groups', () => {
+  function makeToolMessage(
+    id: string,
+    sessionId: string,
+    createdAt: number,
+    metadata: Record<string, unknown>
+  ) {
+    return {
+      id,
+      sessionId,
+      role: 'tool' as const,
+      content: '(tool call)',
+      toolMetadata: {
+        toolCallId: `tc-${id}`,
+        kind: 'execute',
+        status: 'completed',
+        contentSize: 64,
+        ...metadata,
+      },
+      createdAt,
+      sequence: createdAt,
+    };
+  }
+
+  function makeTypedMessage(id: string, sessionId: string, createdAt: number) {
+    return {
+      id,
+      sessionId,
+      role: 'tool' as const,
+      content: '(tool call)',
+      toolMetadata: {
+        toolCallId: `tc-${id}`,
+        title: 'display_from_library',
+        toolName: 'mcp__sam-mcp__display_from_library',
+        kind: 'fetch',
+        status: 'completed',
+        rawInput: { fileId: 'file-1' },
+        rawOutput: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              id: 'file-1',
+              filename: 'design-notes.pdf',
+              mimeType: 'application/pdf',
+              sizeBytes: 2048,
+            }),
+          },
+        ],
+      },
+      createdAt,
+      sequence: createdAt,
+    };
+  }
+
+  function makeTextMessage(
+    id: string,
+    sessionId: string,
+    role: 'user' | 'assistant',
+    content: string,
+    createdAt: number
+  ) {
+    return { id, sessionId, role, content, toolMetadata: null, createdAt, sequence: createdAt };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    virtuosoMock.reset();
+    mocks.getWorkspace.mockResolvedValue({
+      id: 'ws-test',
+      name: 'test',
+      status: 'running',
+      vmSize: 'medium',
+      vmLocation: 'fsn1',
+    });
+    mocks.getNode.mockResolvedValue({
+      id: 'node-test',
+      name: 'node-test',
+      status: 'active',
+      healthStatus: 'healthy',
+    });
+    mocks.listChatMessages.mockResolvedValue({ messages: [], hasMore: false });
+    mocks.listActivityEvents.mockResolvedValue({ events: [] });
+    mocks.listNotifications.mockResolvedValue({ notifications: [], nextCursor: null });
+    mocks.listMessageComments.mockResolvedValue({ comments: [] });
+  });
+
+  /** user → tool ×3 → assistant, entered through the real `messages` payload. */
+  function threeCallSession(sid: string) {
+    return [
+      makeTextMessage('msg-user-1', sid, 'user', 'Run the checks please.', 1_000),
+      makeToolMessage('msg-tool-1', sid, 2_000, { title: 'Bash: pnpm lint' }),
+      makeToolMessage('msg-tool-2', sid, 3_000, { title: 'Bash: pnpm typecheck' }),
+      makeToolMessage('msg-tool-3', sid, 4_000, { title: 'Bash: pnpm test' }),
+      makeTextMessage('msg-assistant-1', sid, 'assistant', 'All three checks passed.', 5_000),
+    ];
+  }
+
+  it('collapses a run of tool calls into one card and keeps the assistant text visible', async () => {
+    const sid = 'session-groups';
+    mocks.getChatSession.mockResolvedValue({
+      session: makeSession(sid, 'stopped'),
+      messages: threeCallSession(sid),
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId={sid} />);
+
+    const groupButton = await screen.findByRole('button', { name: /3 tool calls/ });
+    expect(groupButton).toHaveAttribute('aria-expanded', 'false');
+
+    // The prose on both sides of the run is what this feature exists to surface.
+    expect(screen.getByText('Run the checks please.')).toBeTruthy();
+    expect(screen.getByText('All three checks passed.')).toBeTruthy();
+
+    // Exactly one card between them — no per-call titles until it is expanded.
+    expect(screen.queryAllByTestId('acp-tool-call')).toHaveLength(0);
+    expect(screen.queryByText('Bash: pnpm typecheck')).toBeNull();
+
+    fireEvent.click(groupButton);
+
+    expect(groupButton).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getAllByTestId('acp-tool-call')).toHaveLength(3);
+    expect(screen.getByText('Bash: pnpm typecheck')).toBeTruthy();
+  });
+
+  it('leaves a document card standalone between two runs', async () => {
+    const sid = 'session-groups-doc';
+    mocks.getChatSession.mockResolvedValue({
+      session: makeSession(sid, 'stopped'),
+      messages: [
+        makeTextMessage('msg-user-1', sid, 'user', 'Show me the notes.', 1_000),
+        makeToolMessage('msg-tool-1', sid, 2_000, { title: 'Bash: ls' }),
+        makeTypedMessage('msg-doc-1', sid, 3_000),
+        makeToolMessage('msg-tool-2', sid, 4_000, { title: 'Bash: cat' }),
+        makeTextMessage('msg-assistant-1', sid, 'assistant', 'Here they are.', 5_000),
+      ],
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId={sid} />);
+
+    // Two single-call groups, one on each side of the document card.
+    await waitFor(() => {
+      expect(screen.getAllByRole('button', { name: /1 tool call/ })).toHaveLength(2);
+    });
+    // The document card was never swallowed — it renders outside any group.
+    const docCard = screen.getByText('design-notes.pdf');
+    expect(docCard.closest('[data-testid="tool-call-group"]')).toBeNull();
+  });
+
+  it('renders no comment anchor or comment action row for a group row', async () => {
+    const sid = 'session-groups-comments';
+    mocks.getChatSession.mockResolvedValue({
+      session: makeSession(sid, 'active'),
+      messages: threeCallSession(sid),
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId={sid} />);
+
+    const groupButton = await screen.findByRole('button', { name: /3 tool calls/ });
+    const groupRow = groupButton.closest('.sam-message-entry');
+    expect(groupRow).toBeTruthy();
+    expect(groupRow!.querySelector('[data-comment-anchor]')).toBeNull();
+    expect(within(groupRow as HTMLElement).queryByRole('button', { name: /comment/i })).toBeNull();
+
+    // Liveness control: commentable rows still get their anchor, so the
+    // assertions above cannot pass because comments stopped rendering entirely.
+    expect(document.querySelector('[data-comment-anchor="msg-assistant-1"]')).toBeTruthy();
+  });
+
+  /*
+   * F5b, through the REAL trigger (rule 62).
+   *
+   * Statuses flip per call, so between "call A completed" and the next row every
+   * call in the tail group reads `completed`. The only thing that can keep the
+   * motion indicator on is the session's working signal — and the production way
+   * that signal moves is the DO WebSocket: `useSessionLifecycle`'s `onMessage`
+   * sets `agentActivity = 'responding'` for every non-user row.
+   *
+   * The pushed row is a status-only `tool_call_update` that stays `completed`, so
+   * nothing in the group's own statuses can produce the running glyph. If the
+   * `live` predicate is wrong, the glyph stays settled and this fails.
+   */
+  it('keeps the tail group in motion while the agent is mid-turn, and settles when idle', async () => {
+    const sid = 'session-live-group';
+    mocks.getChatSession.mockResolvedValue({
+      session: makeSession(sid, 'active'),
+      messages: [
+        makeTextMessage('msg-user-1', sid, 'user', 'Run the checks please.', 1_000),
+        makeToolMessage('msg-tool-1', sid, 2_000, { title: 'Bash: pnpm lint' }),
+        makeToolMessage('msg-tool-2', sid, 3_000, { title: 'Bash: pnpm typecheck' }),
+        makeToolMessage('msg-tool-3', sid, 4_000, { title: 'Bash: pnpm test' }),
+      ],
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId={sid} />);
+
+    // Control: the group is the tail row, every call has settled, and the agent
+    // is idle — so the glyph must read settled. Without this the "running"
+    // assertion below could pass for a component that is always in motion.
+    const glyph = await waitFor(() => screen.getByTestId('tool-group-glyph'));
+    expect(glyph).toHaveAttribute('data-state', 'done');
+    expect(screen.queryByText('· working')).toBeNull();
+
+    // The real trigger: a status-only tool update arriving over the DO socket.
+    await act(async () => {
+      capturedWsOnMessage!(
+        makeToolMessage('msg-tool-3-update', sid, 5_000, {
+          toolCallId: 'tc-msg-tool-3',
+          status: 'completed',
+        }) as unknown as ReturnType<typeof makeMessage>
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('tool-group-glyph')).toHaveAttribute('data-state', 'running');
+    });
+    expect(screen.getByText('· working')).toBeTruthy();
+  });
+
+  /*
+   * The staging deep-link failure (round 3c).
+   *
+   * A merged tool call answers to more than one message id: `item.id` stays the
+   * FIRST row's id while `messageId` is repointed at whichever row carries the
+   * content — the `tool_call_update` row, here. A deep link (or an MCP-created
+   * comment thread, which has no role restriction) can anchor on exactly that
+   * update row, and before the fix it resolved to nothing and fell through to
+   * `nearestItemId(…, Date.now())`.
+   *
+   * The group sits at 0-based index 1 and the trailing assistant row at 2, so the
+   * fallback's answer (2) is unambiguously different from the correct one (1).
+   */
+  it('jumps to the GROUP row when the deep-link target is a tool call UPDATE row', async () => {
+    const sid = 'session-groups-update-jump';
+    mocks.getChatSession.mockResolvedValue({
+      session: makeSession(sid, 'stopped'),
+      messages: [
+        makeTextMessage('msg-user-1', sid, 'user', 'Run the checks please.', 1_000),
+        makeToolMessage('msg-tool-1', sid, 2_000, { title: 'Bash: pnpm lint' }),
+        makeToolMessage('msg-tool-2', sid, 3_000, { title: 'Bash: pnpm typecheck' }),
+        makeToolMessage('msg-tool-3', sid, 4_000, { title: 'Bash: pnpm test' }),
+        // Status-only update: merges into msg-tool-3's item and becomes its
+        // `messageId`, so this id is the item's *content* row, not its `id`.
+        makeToolMessage('msg-tool-3-update', sid, 5_000, {
+          toolCallId: 'tc-msg-tool-3',
+          status: 'completed',
+        }),
+        makeTextMessage('msg-assistant-1', sid, 'assistant', 'All three checks passed.', 6_000),
+      ],
+      hasMore: false,
+    });
+
+    render(
+      <ProjectMessageView projectId="proj-1" sessionId={sid} targetMessageId="msg-tool-3-update" />
+    );
+
+    await waitFor(() => {
+      expect(virtuosoMock.scrollToIndexCalls.length).toBeGreaterThan(0);
+    });
+
+    const indices = virtuosoMock.scrollToIndexCalls.map((c) =>
+      typeof c === 'number' ? c : c.index
+    );
+    expect(indices).toContain(1);
+    // Not the nearest-by-timestamp fallback (the trailing assistant row), and not
+    // a firstItemIndex-offset value.
+    expect(indices).not.toContain(2);
+    for (const idx of indices) {
+      expect(typeof idx === 'number' ? idx : Number(idx)).toBeLessThan(1000);
+    }
+
+    const groupButton = await screen.findByRole('button', { name: /3 tool calls/ });
+    const groupRow = groupButton.closest('.sam-message-entry');
+    await waitFor(() => {
+      expect(groupRow!.className).toContain('sam-message-highlight');
+    });
+  });
+
+  // A deep link (Project → Comments, or any URL target) can point at a tool
+  // message id that is now absorbed into a group. `itemIndexById` registers
+  // every absorbed id against its GROUP's row index, so the jump lands on a row
+  // that exists instead of dead-clicking.
+  //
+  // The group sits at 0-based index 1 (user 0, group 1, assistant 2), and no
+  // `targetMessageTimestamp` is supplied — so the nearest-by-timestamp fallback
+  // would resolve to the LAST row (index 2). Asserting index 1 (and NOT 2) is
+  // what discriminates the inner-id registration from the fallback.
+  it('jumps to the GROUP row when the deep-link target is an absorbed tool message', async () => {
+    const sid = 'session-groups-jump';
+    mocks.getChatSession.mockResolvedValue({
+      session: makeSession(sid, 'stopped'),
+      messages: threeCallSession(sid),
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId={sid} targetMessageId="msg-tool-3" />);
+
+    await waitFor(() => {
+      expect(virtuosoMock.scrollToIndexCalls.length).toBeGreaterThan(0);
+    });
+
+    const indices = virtuosoMock.scrollToIndexCalls.map((c) =>
+      typeof c === 'number' ? c : c.index
+    );
+    expect(indices).toContain(1);
+    // Not the timestamp fallback's answer, and not a firstItemIndex-offset value.
+    expect(indices).not.toContain(2);
+    for (const idx of indices) {
+      expect(typeof idx === 'number' ? idx : Number(idx)).toBeLessThan(1000);
+    }
+
+    // The highlight lands on the group row, not on a virtualized-out tool row.
+    const groupButton = await screen.findByRole('button', { name: /3 tool calls/ });
+    const groupRow = groupButton.closest('.sam-message-entry');
+    await waitFor(() => {
+      expect(groupRow!.className).toContain('sam-message-highlight');
+    });
   });
 });

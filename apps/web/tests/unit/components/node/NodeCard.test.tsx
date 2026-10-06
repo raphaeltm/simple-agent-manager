@@ -2,7 +2,7 @@ import type { NodeResponse, WorkspaceResponse } from '@simple-agent-manager/shar
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { NodeCard } from '../../../../src/components/node/NodeCard';
 
@@ -109,6 +109,37 @@ describe('NodeCard', () => {
       expect(screen.getByText(/medium/i)).toBeInTheDocument();
     });
 
+    it('does not reinterpret an existing legacy node through today’s provider catalog', () => {
+      const node = createNode({ vmSize: 'medium', vmLocation: 'nbg1', cloudProvider: 'hetzner' });
+
+      const { container } = render(
+        <MemoryRouter>
+          <NodeCard
+            node={node}
+            workspaces={[]}
+            {...defaultHandlers}
+            catalogs={[
+              {
+                provider: 'hetzner',
+                defaultLocation: 'nbg1',
+                locations: [{ id: 'nbg1', name: 'Nuremberg', country: 'DE' }],
+                sizes: {
+                  small: { type: 'cx22', vcpu: 2, ramGb: 4, storageGb: 40, price: '€4.35/mo' },
+                  medium: { type: 'cx32', vcpu: 4, ramGb: 8, storageGb: 80, price: '€7.69/mo' },
+                  large: { type: 'cx42', vcpu: 8, ramGb: 16, storageGb: 160, price: '€14.51/mo' },
+                },
+              },
+            ]}
+          />
+        </MemoryRouter>
+      );
+
+      expect(container.textContent).not.toContain('cx32');
+      expect(container.textContent).not.toContain('4 vCPU');
+      expect(container.textContent).toContain('Compatibility estimate');
+      expect(container.textContent).toContain('Unknown — no hardware report');
+    });
+
     it('renders error message when present', () => {
       const node = createNode({ errorMessage: 'Failed to provision server' });
 
@@ -211,10 +242,7 @@ describe('NodeCard', () => {
   describe('Workspaces section', () => {
     it('shows workspace count', () => {
       const node = createNode();
-      const workspaces = [
-        createWorkspace({ id: 'ws-1' }),
-        createWorkspace({ id: 'ws-2' }),
-      ];
+      const workspaces = [createWorkspace({ id: 'ws-1' }), createWorkspace({ id: 'ws-2' })];
 
       render(
         <MemoryRouter>
@@ -334,8 +362,8 @@ describe('NodeCard', () => {
       );
 
       // Find button by text content
-      const button = Array.from(container.querySelectorAll('button')).find(
-        (btn) => btn.textContent?.includes('Create Workspace')
+      const button = Array.from(container.querySelectorAll('button')).find((btn) =>
+        btn.textContent?.includes('Create Workspace')
       );
       expect(button).toBeInTheDocument();
       fireEvent.click(button!);
@@ -350,14 +378,14 @@ describe('NodeCard', () => {
 
       const { container } = render(
         <MemoryRouter>
-          <div onClick={onCardClick}>
+          <div role="presentation" onClick={onCardClick}>
             <NodeCard node={node} workspaces={[]} {...defaultHandlers} />
           </div>
         </MemoryRouter>
       );
 
-      const button = Array.from(container.querySelectorAll('button')).find(
-        (btn) => btn.textContent?.includes('Create Workspace')
+      const button = Array.from(container.querySelectorAll('button')).find((btn) =>
+        btn.textContent?.includes('Create Workspace')
       );
       fireEvent.click(button!);
 
@@ -564,7 +592,7 @@ describe('NodeCard', () => {
 
       render(
         <MemoryRouter>
-          <div onClick={onCardClick}>
+          <div role="presentation" onClick={onCardClick}>
             <NodeCard node={node} workspaces={[]} {...defaultHandlers} />
           </div>
         </MemoryRouter>
@@ -600,7 +628,9 @@ describe('NodeCard', () => {
         </MemoryRouter>
       );
 
-      expect(screen.getByRole('button', { name: /actions for production node/i })).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: /actions for production node/i })
+      ).toBeInTheDocument();
     });
   });
 });

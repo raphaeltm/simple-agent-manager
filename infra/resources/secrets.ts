@@ -16,9 +16,20 @@
  * - Note: Migration creates NEW keys, invalidating old encrypted data
  */
 
-import * as pulumi from "@pulumi/pulumi";
-import * as random from "@pulumi/random";
-import * as tls from "@pulumi/tls";
+import * as pulumi from '@pulumi/pulumi';
+import * as random from '@pulumi/random';
+import * as tls from '@pulumi/tls';
+
+/**
+ * Stable exact-installation identity for ownership labels on external resources.
+ * It is intentionally non-secret, but protected because rotation would make an
+ * existing fleet safely unattributable to destructive reconciliation.
+ */
+const installationIdResource = new random.RandomId(
+  'installation-id',
+  { byteLength: 16 },
+  { protect: true }
+);
 
 /**
  * Encryption key for user credentials stored in D1.
@@ -26,7 +37,7 @@ import * as tls from "@pulumi/tls";
  * Output is base64-encoded.
  */
 const encryptionKeyResource = new random.RandomId(
-  "encryption-key",
+  'encryption-key',
   {
     byteLength: 32,
   },
@@ -38,10 +49,24 @@ const encryptionKeyResource = new random.RandomId(
  * Used by the API to issue and validate authentication tokens.
  */
 const jwtKeyResource = new tls.PrivateKey(
-  "jwt-signing-key",
+  'jwt-signing-key',
   {
-    algorithm: "RSA",
+    algorithm: 'RSA',
     rsaBits: 2048,
+  },
+  { protect: true }
+);
+
+/**
+ * P-256 key pair for RFC 8292 VAPID authorization.
+ * The deploy script converts the persisted PKCS#8 PEM into the raw base64url
+ * private/public values consumed by Web Push implementations.
+ */
+const vapidKeyResource = new tls.PrivateKey(
+  'vapid-key',
+  {
+    algorithm: 'ECDSA',
+    ecdsaCurve: 'P256',
   },
   { protect: true }
 );
@@ -55,15 +80,44 @@ const jwtKeyResource = new tls.PrivateKey(
  * Rotating this invalidates all in-flight trials.
  */
 const trialClaimTokenResource = new random.RandomId(
-  "trial-claim-token-secret",
+  'trial-claim-token-secret',
   {
     byteLength: 32,
   },
   { protect: true }
 );
 
-// Export as secret outputs (Pulumi redacts secrets in logs and state output)
+/**
+ * Ed25519 seed for signing deployment apply payloads.
+ * 32 bytes (256 bits), base64-encoded.
+ *
+ * The VM agent verifier consumes the derived raw 32-byte public key, also
+ * base64-encoded. The seed persists in Pulumi state; deployment secret
+ * configuration derives the public key so fresh deployments do not need manual
+ * GitHub Environment secrets for platform-owned signing keys.
+ */
+const deploySigningPrivateKeyResource = new random.RandomId(
+  'deploy-signing-private-key',
+  {
+    byteLength: 32,
+  },
+  { protect: true }
+);
+
+const previewSigningKeyResource = new random.RandomId(
+  'preview-signing-key',
+  { byteLength: 32 },
+  { protect: true }
+);
+
+const deploySigningPrivateKeySeed = pulumi.secret(deploySigningPrivateKeyResource.b64Std);
+
+// Export secret key material plus the deliberately non-secret installation id.
 export const encryptionKey = pulumi.secret(encryptionKeyResource.b64Std);
+export const installationId = installationIdResource.hex;
 export const jwtPrivateKey = pulumi.secret(jwtKeyResource.privateKeyPemPkcs8);
 export const jwtPublicKey = pulumi.secret(jwtKeyResource.publicKeyPem);
 export const trialClaimTokenSecret = pulumi.secret(trialClaimTokenResource.b64Std);
+export const deploySigningPrivateKey = deploySigningPrivateKeySeed;
+export const previewSigningKey = pulumi.secret(previewSigningKeyResource.b64Std);
+export const vapidPrivateKeyPem = pulumi.secret(vapidKeyResource.privateKeyPemPkcs8);

@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../../src/hooks/useToast', () => ({
-  useToast: () => ({ success: vi.fn(), error: vi.fn(), info: vi.fn() }),
+  useToast: () => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn(), addToast: vi.fn() }),
 }));
 
 import { AgentCard } from '../../../src/components/AgentCard';
@@ -34,7 +34,6 @@ function makeSettings(
     additionalEnv: null,
     opencodeProvider: null,
     opencodeBaseUrl: null,
-    opencodeProviderName: null,
     providerMode: null,
     createdAt: null,
     updatedAt: null,
@@ -109,29 +108,27 @@ describe('AgentCard', () => {
     expect(screen.queryByText('Not Configured')).not.toBeInTheDocument();
   });
 
-  it('shows platform OpenCode availability without implying a user key exists', () => {
+  it('shows Not Configured for OpenCode without a credential', () => {
     const agent = makeAgent({
       id: 'opencode',
       name: 'OpenCode',
       description: 'OpenCode agent',
-      configured: true,
-      fallbackCredentialSource: 'platform-opencode',
+      configured: false,
+      fallbackCredentialSource: null,
     });
 
     renderCard(agent, null, makeSettings('opencode'));
 
-    expect(screen.getByText('Platform AI')).toBeInTheDocument();
-    expect(screen.getByText(/No API key needed/i)).toBeInTheDocument();
-    expect(screen.queryByText(/not configured/i)).not.toBeInTheDocument();
+    expect(screen.getByText('Not Configured')).toBeInTheDocument();
   });
 
   it('saves configuration via onSaveSettings when Save Settings is clicked', async () => {
     renderCard(makeAgent(), null, makeSettings());
     await waitFor(() => {
-      const defaultRadio = screen.getByTestId(
-        'permission-mode-claude-code-default',
+      const bypassRadio = screen.getByTestId(
+        'permission-mode-claude-code-bypassPermissions',
       ) as HTMLInputElement;
-      expect(defaultRadio.checked).toBe(true);
+      expect(bypassRadio.checked).toBe(true);
     });
 
     fireEvent.click(screen.getByTestId('permission-mode-claude-code-acceptEdits'));

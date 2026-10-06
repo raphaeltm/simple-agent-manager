@@ -2,8 +2,10 @@ package logreader
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -13,61 +15,46 @@ func TestBuildFollowArgs_AllCases(t *testing.T) {
 	tests := []struct {
 		name   string
 		filter LogFilter
-		check  func(t *testing.T, args []string)
+		want   []string
 	}{
 		{
 			name:   "default all source",
 			filter: LogFilter{},
-			check: func(t *testing.T, args []string) {
-				assertContains(t, args, "--follow")
-				assertContains(t, args, "--output=json")
-				assertContains(t, args, "-n")
-				assertContains(t, args, "0")
-				// Should NOT contain -u for all source
-				for _, a := range args {
-					if a == "-u" {
-						t.Error("should not have -u for all source")
-					}
-				}
-			},
+			want:   []string{"--follow", "--output=json", "--no-pager", "-n", "0"},
 		},
 		{
-			name:   "systemd source",
+			name:   "agent source",
+			filter: LogFilter{Source: "agent"},
+			want:   []string{"--follow", "--output=json", "--no-pager", "-n", "0", "-u", "vm-agent.service"},
+		},
+		{
+			name:   "systemd source uses vm agent unit",
 			filter: LogFilter{Source: "systemd"},
-			check: func(t *testing.T, args []string) {
-				assertContains(t, args, "-u")
-				assertContains(t, args, "vm-agent.service")
-			},
+			want:   []string{"--follow", "--output=json", "--no-pager", "-n", "0", "-u", "vm-agent.service"},
 		},
 		{
 			name:   "docker source no container",
 			filter: LogFilter{Source: "docker"},
-			check: func(t *testing.T, args []string) {
-				assertContains(t, args, "_TRANSPORT=journal")
-				assertContains(t, args, "CONTAINER_NAME")
-			},
+			want:   []string{"--follow", "--output=json", "--no-pager", "-n", "0", "_TRANSPORT=journal", "CONTAINER_NAME"},
 		},
 		{
 			name:   "docker source with container",
 			filter: LogFilter{Source: "docker", Container: "my-app"},
-			check: func(t *testing.T, args []string) {
-				assertContains(t, args, "CONTAINER_NAME=my-app")
-			},
+			want:   []string{"--follow", "--output=json", "--no-pager", "-n", "0", "_TRANSPORT=journal", "CONTAINER_NAME=my-app"},
 		},
 		{
 			name:   "level filter",
 			filter: LogFilter{Level: "error"},
-			check: func(t *testing.T, args []string) {
-				assertContains(t, args, "-p")
-				assertContains(t, args, "err")
-			},
+			want:   []string{"--follow", "--output=json", "--no-pager", "-n", "0", "-p", "err"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			args := buildFollowArgs(tt.filter)
-			tt.check(t, args)
+			if !reflect.DeepEqual(args, tt.want) {
+				t.Fatalf("args mismatch\ngot:  %v\nwant: %v", args, tt.want)
+			}
 		})
 	}
 }
@@ -142,9 +129,8 @@ func TestStreamLogs_FollowWithCancellation(t *testing.T) {
 	}
 
 	err := reader.StreamLogs(ctx, LogFilter{Source: "agent"}, send)
-	// Should return context error
-	if err != nil && err != context.Canceled && err != context.DeadlineExceeded {
-		t.Logf("StreamLogs returned: %v (acceptable for test)", err)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("StreamLogs error = %v, want context.Canceled", err)
 	}
 
 	if len(received) > 0 && received[0] != "streamed line" {
@@ -175,7 +161,10 @@ func TestRunFollowProcess_LevelFilter(t *testing.T) {
 	}
 
 	// Filter at warn level — should only get warn + error
-	_ = reader.runFollowProcess(ctx, LogFilter{Level: "warn"}, send)
+	err := reader.runFollowProcess(ctx, LogFilter{Level: "warn"}, send)
+	if !errors.Is(err, ErrFollowCleanExit) {
+		t.Fatalf("runFollowProcess error = %v, want ErrFollowCleanExit", err)
+	}
 
 	if len(received) != 2 {
 		t.Errorf("expected 2 entries at warn level, got %d: %v", len(received), received)
@@ -207,7 +196,10 @@ func TestRunFollowProcess_SearchFilter(t *testing.T) {
 		return nil
 	}
 
-	_ = reader.runFollowProcess(ctx, LogFilter{Search: "connection"}, send)
+	err := reader.runFollowProcess(ctx, LogFilter{Search: "connection"}, send)
+	if !errors.Is(err, ErrFollowCleanExit) {
+		t.Fatalf("runFollowProcess error = %v, want ErrFollowCleanExit", err)
+	}
 
 	if len(received) != 2 {
 		t.Errorf("expected 2 entries matching 'connection', got %d: %v", len(received), received)
@@ -236,8 +228,10 @@ func TestRunFollowProcess_SendError(t *testing.T) {
 		return nil
 	}
 
-	// Should stop after send error
-	_ = reader.runFollowProcess(ctx, LogFilter{}, send)
+	err := reader.runFollowProcess(ctx, LogFilter{}, send)
+	if !errors.Is(err, ErrStreamSend) {
+		t.Fatalf("runFollowProcess error = %v, want ErrStreamSend", err)
+	}
 
 	if sendCount != 1 {
 		t.Errorf("send called %d times, want 1 (stop on error)", sendCount)
@@ -260,7 +254,10 @@ func TestRunFollowProcess_SkipsInvalidJSON(t *testing.T) {
 		return nil
 	}
 
-	_ = reader.runFollowProcess(ctx, LogFilter{}, send)
+	err := reader.runFollowProcess(ctx, LogFilter{}, send)
+	if !errors.Is(err, ErrFollowCleanExit) {
+		t.Fatalf("runFollowProcess error = %v, want ErrFollowCleanExit", err)
+	}
 
 	if len(received) != 1 {
 		t.Errorf("expected 1 valid entry, got %d", len(received))
@@ -277,12 +274,172 @@ func TestStreamBufferSizeDefault(t *testing.T) {
 	}
 }
 
-func assertContains(t *testing.T, args []string, want string) {
-	t.Helper()
-	for _, a := range args {
-		if a == want {
-			return
-		}
+func TestFollowLogs_SendErrorReturnsWithoutRetry(t *testing.T) {
+	lines := `{"__REALTIME_TIMESTAMP":"1708700000000000","MESSAGE":"line1","PRIORITY":"6","_SYSTEMD_UNIT":"vm-agent.service"}`
+	calls := 0
+	mockExec := func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		calls++
+		return exec.CommandContext(ctx, "printf", "%s", lines)
 	}
-	t.Errorf("args %v does not contain %q", args, want)
+
+	reader := NewReaderWithExecutor(mockExec)
+	err := reader.followLogs(context.Background(), LogFilter{Source: "agent"}, func(entry LogEntry) error {
+		return fmt.Errorf("client write failed")
+	})
+
+	if !errors.Is(err, ErrStreamSend) {
+		t.Fatalf("followLogs error = %v, want ErrStreamSend", err)
+	}
+	if calls != 1 {
+		t.Fatalf("follow process calls = %d, want 1", calls)
+	}
+}
+
+func TestRunFollowProcess_ScannerTooLongLine(t *testing.T) {
+	mockExec := func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "sh", "-c", "head -c 262145 /dev/zero | tr '\\000' x")
+	}
+
+	reader := NewReaderWithExecutor(mockExec)
+	err := reader.runFollowProcess(context.Background(), LogFilter{}, func(entry LogEntry) error {
+		t.Fatalf("send should not be called for oversized scanner token")
+		return nil
+	})
+
+	if !errors.Is(err, ErrStreamScanner) {
+		t.Fatalf("runFollowProcess error = %v, want ErrStreamScanner", err)
+	}
+}
+
+func TestFollowLogs_CleanExitRetriesWithDelayUntilContext(t *testing.T) {
+	origDelay := FollowRestartDelay
+	FollowRestartDelay = 30 * time.Millisecond
+	defer func() { FollowRestartDelay = origDelay }()
+
+	calls := 0
+	mockExec := func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		calls++
+		return exec.CommandContext(ctx, "true")
+	}
+
+	reader := NewReaderWithExecutor(mockExec)
+	ctx, cancel := context.WithTimeout(context.Background(), 95*time.Millisecond)
+	defer cancel()
+
+	err := reader.followLogs(ctx, LogFilter{}, func(entry LogEntry) error {
+		t.Fatalf("send should not be called for empty clean exits")
+		return nil
+	})
+
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("followLogs error = %v, want context deadline", err)
+	}
+	if calls < 2 {
+		t.Fatalf("follow process calls = %d, want at least 2 retries", calls)
+	}
+	if calls > 5 {
+		t.Fatalf("follow process calls = %d, want bounded retries with delay", calls)
+	}
+}
+
+func TestFollowLogs_ProcessFailureRetriesUntilContext(t *testing.T) {
+	origDelay := FollowRestartDelay
+	FollowRestartDelay = 20 * time.Millisecond
+	defer func() { FollowRestartDelay = origDelay }()
+
+	calls := 0
+	mockExec := func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		calls++
+		return exec.CommandContext(ctx, "sh", "-c", "exit 7")
+	}
+
+	reader := NewReaderWithExecutor(mockExec)
+	ctx, cancel := context.WithTimeout(context.Background(), 70*time.Millisecond)
+	defer cancel()
+
+	err := reader.followLogs(ctx, LogFilter{}, func(entry LogEntry) error {
+		t.Fatalf("send should not be called for failed process")
+		return nil
+	})
+
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("followLogs error = %v, want context deadline", err)
+	}
+	if calls < 2 {
+		t.Fatalf("follow process calls = %d, want retry after process failure", calls)
+	}
+	if calls > 6 {
+		t.Fatalf("follow process calls = %d, want retry delay to prevent spin", calls)
+	}
+}
+
+func TestRunFollowProcess_ContextCancellation(t *testing.T) {
+	mockExec := func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "sleep", "10")
+	}
+
+	reader := NewReaderWithExecutor(mockExec)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := reader.runFollowProcess(ctx, LogFilter{}, func(entry LogEntry) error {
+		t.Fatalf("send should not be called after context cancellation")
+		return nil
+	})
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("runFollowProcess error = %v, want context.Canceled", err)
+	}
+}
+
+func TestJournalEntryToLogEntry_AllSourceDerivation(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  map[string]interface{}
+		want string
+	}{
+		{
+			name: "agent unit",
+			raw: map[string]interface{}{
+				"MESSAGE":       "agent",
+				"_SYSTEMD_UNIT": "vm-agent.service",
+			},
+			want: "agent",
+		},
+		{
+			name: "systemd unit",
+			raw: map[string]interface{}{
+				"MESSAGE":       "unit",
+				"_SYSTEMD_UNIT": "ssh.service",
+			},
+			want: "systemd",
+		},
+		{
+			name: "docker container",
+			raw: map[string]interface{}{
+				"MESSAGE":        "container",
+				"CONTAINER_NAME": "workspace",
+			},
+			want: "docker:workspace",
+		},
+		{
+			name: "journald entry without source hints defaults to systemd",
+			raw: map[string]interface{}{
+				"MESSAGE": "generic",
+			},
+			want: "systemd",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := journalEntryToLogEntry(tt.raw, "all")
+			if got == nil {
+				t.Fatal("expected entry")
+			}
+			if got.Source != tt.want {
+				t.Fatalf("Source = %q, want %q", got.Source, tt.want)
+			}
+		})
+	}
 }

@@ -4,17 +4,585 @@
  * Runs inside the workerd runtime via @cloudflare/vitest-pool-workers,
  * exercising real SQLite storage, DO lifecycle, and migrations.
  */
-import { env } from 'cloudflare:test';
-import { describe, expect,it } from 'vitest';
+import { env, runInDurableObject } from 'cloudflare:test';
+import { describe, expect, it, vi } from 'vitest';
 
-import type { ProjectData } from '../../src/durable-objects/project-data';
+import { seedInstallation, seedProject, seedTask, seedUser, seedWorkspace } from './helpers/seed-d1';
+import {
+  captureProjectDataExpectedError,
+  type ProjectDataTestDouble,
+} from './support/expected-error-doubles';
 
-function getStub(projectId: string): DurableObjectStub<ProjectData> {
+function getStub(projectId: string): DurableObjectStub<ProjectDataTestDouble> {
   const id = env.PROJECT_DATA.idFromName(projectId);
-  return env.PROJECT_DATA.get(id) as DurableObjectStub<ProjectData>;
+  return env.PROJECT_DATA.get(id) as DurableObjectStub<ProjectDataTestDouble>;
 }
 
 describe('ProjectData Durable Object', () => {
+  describe('durability foundation', () => {
+    it('atomically persists and idempotently rereads accepted prompt intent', async () => {
+      const stub = getStub('project-durable-accept');
+      const sessionId = await stub.createSession('workspace-1', 'Durable prompt');
+
+      const first = await stub.acceptPromptDelivery({
+        deliveryId: 'delivery-stable-1',
+        targetSessionId: sessionId,
+        displayContent: 'visible prompt',
+        deliveryContent: 'enriched prompt',
+        senderType: 'human',
+        senderId: 'user-1',
+        messageClass: 'deliver',
+        sourceKind: 'user_followup',
+        ttlMs: 60_000,
+      });
+      const duplicate = await stub.acceptPromptDelivery({
+        deliveryId: 'delivery-stable-1',
+        targetSessionId: sessionId,
+        displayContent: 'visible prompt',
+        deliveryContent: 'enriched prompt',
+        senderType: 'human',
+        senderId: 'user-1',
+        messageClass: 'deliver',
+        sourceKind: 'user_followup',
+        ttlMs: 60_000,
+      });
+
+      expect(first.transcriptInserted).toBe(true);
+      expect(duplicate.transcriptInserted).toBe(false);
+      expect(first.message.id).toBe('delivery-stable-1');
+      const { messages } = await stub.getMessages(sessionId, 10);
+      expect(messages).toHaveLength(1);
+      expect(messages[0]).toMatchObject({ role: 'user', content: 'visible prompt' });
+      const snapshot = await stub.getDurableExecutionSnapshot(sessionId);
+      expect(snapshot.deliveries).toHaveLength(1);
+      expect(snapshot.deliveries[0]).toMatchObject({
+        id: 'delivery-stable-1',
+        deliveryState: 'queued',
+        promptMessageId: 'delivery-stable-1',
+      });
+    });
+
+    it('preserves prompt start rereports and stores checkpoint episodes by epoch', async () => {
+      const stub = getStub('project-durable-checkpoint');
+      const sessionId = await stub.createSession(null, 'Checkpoint');
+      await stub.reportActivity('acp-1', 'prompting', { promptStartedAt: 1_000 });
+      await stub.reportActivity('acp-1', 'recovering', { promptStartedAt: 5_000 });
+      expect((await stub.getSessionState('acp-1'))?.promptStartedAt).toBe(1_000);
+
+      const first = await stub.createCheckpointEpisode({
+        sessionId,
+        acpSessionId: 'acp-1',
+        promptEpoch: 1_000,
+        reason: 'long productive turn',
+      });
+      const duplicate = await stub.createCheckpointEpisode({
+        sessionId,
+        acpSessionId: 'acp-1',
+        promptEpoch: 1_000,
+        reason: 'duplicate alarm',
+      });
+      expect(first.created).toBe(true);
+      expect(duplicate.created).toBe(false);
+      expect(duplicate.episode.id).toBe(first.episode.id);
+      const transitioned = await stub.transitionCheckpointEpisode(first.episode.id, {
+        expectedState: 'planned',
+        toState: 'preempt_requested',
+        incrementAttempt: true,
+      });
+      expect(transitioned).toMatchObject({ state: 'preempt_requested', attemptCount: 1 });
+    });
+
+    it('rejects stale cross-isolate activity reports through the DO RPC surface', async () => {
+      const stub = getStub('project-durable-activity-cas');
+
+      await expect(
+        stub.reportActivity('acp-cas', 'prompting', {
+          observedAt: 1_000,
+          runtimeWorkState: 'active',
+          runtimeWorkCount: 1,
+          runtimeWorkSource: 'claude_sdk',
+          runtimeWorkProgressAt: 1_000,
+        })
+      ).resolves.toBe(true);
+      await expect(
+        stub.reportActivity('acp-cas', 'idle', {
+          observedAt: 2_000,
+          runtimeWorkState: 'inactive',
+          runtimeWorkCount: 0,
+          runtimeWorkSource: 'claude_sdk',
+          runtimeWorkProgressAt: 2_000,
+        })
+      ).resolves.toBe(true);
+
+      // Simulates a delayed coalesced intermediate from another Worker isolate.
+      // The stale write must not resurrect a working state or active harness work.
+      await expect(
+        stub.reportActivity('acp-cas', 'prompting', {
+          observedAt: 1_500,
+          promptStartedAt: 1_000,
+          runtimeWorkState: 'active',
+          runtimeWorkCount: 1,
+          runtimeWorkSource: 'claude_sdk',
+          runtimeWorkProgressAt: 1_500,
+        })
+      ).resolves.toBe(false);
+
+      expect(await stub.getSessionState('acp-cas')).toMatchObject({
+        activity: 'idle',
+        activityAt: 2_000,
+        runtimeWorkState: 'inactive',
+        runtimeWorkCount: 0,
+      });
+
+      await expect(
+        stub.reportActivity('acp-cas', 'prompting', {
+          observedAt: 2_000,
+          promptStartedAt: 2_000,
+        })
+      ).resolves.toBe(false);
+      expect(await stub.getSessionState('acp-cas')).toMatchObject({
+        activity: 'idle',
+        activityAt: 2_000,
+      });
+
+      await expect(
+        stub.reportActivity('acp-cas', 'error', {
+          observedAt: 2_000,
+          statusError: 'terminal error wins same millisecond',
+        })
+      ).resolves.toBe(true);
+      expect(await stub.getSessionState('acp-cas')).toMatchObject({
+        activity: 'error',
+        activityAt: 2_000,
+        statusError: 'terminal error wins same millisecond',
+      });
+    });
+
+    it('lets the durable receipt alarm own terminal expiry instead of the legacy sweep', async () => {
+      const stub = getStub('project-durable-alarm-expiry');
+      const sessionId = await stub.createSession('workspace-1', 'Durable alarm expiry');
+      await stub.acceptPromptDelivery({
+        deliveryId: 'delivery-expired-1',
+        targetSessionId: sessionId,
+        displayContent: 'visible prompt',
+        deliveryContent: 'enriched prompt',
+        senderType: 'human',
+        senderId: 'user-1',
+        messageClass: 'deliver',
+        sourceKind: 'agent_mailbox',
+        ttlMs: 60_000,
+      });
+
+      await runInDurableObject(stub, async (instance, state) => {
+        state.storage.sql.exec(
+          `UPDATE session_inbox SET expires_at = 0 WHERE id = 'delivery-expired-1'`
+        );
+        await instance.alarmWithDurablePromptDelivery();
+      });
+
+      const snapshot = await stub.getDurableExecutionSnapshot(sessionId);
+      expect(snapshot.deliveries).toContainEqual(
+        expect.objectContaining({
+          id: 'delivery-expired-1',
+          deliveryState: 'expired',
+          terminalReason: 'ttl_expired',
+          lastError: 'Prompt delivery TTL expired',
+        })
+      );
+    });
+
+    it('records and shows a refused wake after a sleeping Instant workspace is deleted', async () => {
+      const suffix = crypto.randomUUID();
+      const projectId = `wake-failure-project-${suffix}`;
+      const userId = `wake-failure-user-${suffix}`;
+      const installationId = `wake-failure-installation-${suffix}`;
+      const workspaceId = `wake-failure-workspace-${suffix}`;
+      const deliveryId = `wake-failure-delivery-${suffix}`;
+      await seedUser(userId);
+      await seedInstallation(installationId, userId);
+      await seedProject(projectId, userId, installationId);
+      await seedWorkspace(workspaceId, null, userId, { projectId, status: 'sleeping' });
+
+      const stub = getStub(projectId);
+      await stub.ensureProjectId(projectId);
+      const sessionId = await stub.createSession(workspaceId, 'Deleted Instant wake');
+      expect(await stub.sleepSession(sessionId)).toBe(true);
+      await env.DATABASE.prepare(
+        `INSERT INTO session_snapshots
+           (id, project_id, workspace_id, user_id, chat_session_id, runtime, status,
+            degradation, manifest_r2_key, expires_at, sleeping_at, sleep_status,
+            created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'cf-container', 'available', 'none', ?, ?, ?, 'sleeping', ?, ?)`
+      )
+        .bind(
+          `wake-failure-snapshot-${suffix}`,
+          projectId,
+          workspaceId,
+          userId,
+          sessionId,
+          `snapshots/${sessionId}/manifest.json`,
+          '2099-01-01T00:00:00.000Z',
+          new Date().toISOString(),
+          new Date().toISOString(),
+          new Date().toISOString()
+        )
+        .run();
+      await env.DATABASE.prepare('DELETE FROM workspaces WHERE id = ?').bind(workspaceId).run();
+
+      await stub.acceptPromptDelivery({
+        deliveryId,
+        targetSessionId: sessionId,
+        displayContent: 'Wake this conversation',
+        deliveryContent: 'Wake this conversation',
+        senderType: 'human',
+        senderId: userId,
+        messageClass: 'deliver',
+        sourceKind: 'user_followup',
+        ttlMs: 60_000,
+      });
+      await runInDurableObject(stub, async (instance) => {
+        await instance.alarmWithDurablePromptDelivery();
+      });
+
+      await vi.waitFor(async () => {
+        const snapshot = await stub.getDurableExecutionSnapshot(sessionId);
+        expect(snapshot.deliveries).toContainEqual(
+          expect.objectContaining({
+            id: deliveryId,
+            deliveryState: 'failed',
+            terminalReason: 'wake_refused',
+          })
+        );
+      });
+      const snapshot = await env.DATABASE.prepare(
+        'SELECT recovery_error FROM session_snapshots WHERE chat_session_id = ?'
+      )
+        .bind(sessionId)
+        .first<{ recovery_error: string | null }>();
+      expect(snapshot?.recovery_error).toContain('sleeping container runtime is gone');
+      expect(await stub.getSessionAttentionSummary(sessionId)).toMatchObject({
+        kind: 'wake_failed',
+        reason: 'wake_refused',
+      });
+      const { messages } = await stub.getMessages(sessionId, 10);
+      expect(messages.filter((message) => message.role === 'system')).toEqual([
+        expect.objectContaining({ content: expect.stringContaining('Wake failed:') }),
+      ]);
+    });
+  });
+
+  describe('durable task waits', () => {
+    it('wakes a parent exactly once after every selected child becomes terminal', async () => {
+      const suffix = crypto.randomUUID();
+      const userId = `wait-user-${suffix}`;
+      const installationId = `wait-installation-${suffix}`;
+      const projectId = `wait-project-${suffix}`;
+      const parentTaskId = `wait-parent-${suffix}`;
+      const childOneId = `wait-child-one-${suffix}`;
+      const childTwoId = `wait-child-two-${suffix}`;
+
+      await seedUser(userId);
+      await seedInstallation(installationId, userId, {
+        installationIdValue: `wait-external-${suffix}`,
+      });
+      await seedProject(projectId, userId, installationId);
+      await seedTask(parentTaskId, projectId, userId, { status: 'in_progress' });
+      await seedTask(childOneId, projectId, userId, { status: 'in_progress' });
+      await seedTask(childTwoId, projectId, userId, { status: 'in_progress' });
+      await env.DATABASE.prepare(`UPDATE tasks SET parent_task_id = ? WHERE id IN (?, ?)`)
+        .bind(parentTaskId, childOneId, childTwoId)
+        .run();
+
+      const stub = getStub(projectId);
+      await stub.ensureProjectId(projectId);
+      const parentSessionId = await stub.createSession(null, 'Durable parent wait', parentTaskId);
+      await env.DATABASE.prepare(`UPDATE tasks SET chat_session_id = ? WHERE id = ?`)
+        .bind(parentSessionId, parentTaskId)
+        .run();
+      const registered = await stub.registerTaskWait({
+        parentTaskId,
+        parentSessionId,
+        idempotencyKey: 'review-round-1',
+        condition: 'all',
+        childTaskIds: [childOneId, childTwoId],
+        wakeDeadline: Date.now() + 60_000,
+      });
+      expect(registered).toMatchObject({
+        created: true,
+        subscription: { state: 'active', condition: 'all' },
+      });
+
+      await env.DATABASE.prepare(
+        `UPDATE tasks SET status = 'completed', output_summary = ? WHERE id = ?`
+      )
+        .bind('First child finished', childOneId)
+        .run();
+      const firstResult = await stub.reconcileTaskWaits(childOneId);
+      expect(firstResult).toMatchObject({ resolved: 0, pending: 1 });
+
+      await env.DATABASE.prepare(
+        `UPDATE tasks SET status = 'failed', error_message = ? WHERE id = ?`
+      )
+        .bind('Second child failed safely', childTwoId)
+        .run();
+      await runInDurableObject(stub, async (instance, state) => {
+        state.storage.sql.exec(
+          `UPDATE task_wait_subscriptions SET next_reconcile_at = 0 WHERE id = ?`,
+          registered.subscription!.id
+        );
+        await instance.alarmWithDurablePromptDelivery();
+      });
+
+      const wait = await stub.getTaskWait(registered.subscription!.id);
+      expect(wait).toMatchObject({ state: 'resolved', resolutionReason: 'condition_met' });
+      const { messages } = await stub.getMessages(parentSessionId, 10);
+      const wakeMessages = messages.filter((message) =>
+        message.content.includes('wait_for_subtasks subscription resolved')
+      );
+      expect(wakeMessages).toHaveLength(1);
+      expect(wakeMessages[0]!.content).not.toContain('First child finished');
+      expect(wakeMessages[0]!.content).not.toContain('Second child failed safely');
+      await vi.waitFor(async () => {
+        const latest = await stub.getMessages(parentSessionId, 10);
+        expect(latest.messages.some((message) => message.content.includes('Wake failed:'))).toBe(
+          true
+        );
+      });
+      const snapshot = await stub.getDurableExecutionSnapshot(parentSessionId);
+      expect(snapshot.deliveries).toHaveLength(1);
+      expect(snapshot.deliveries[0]).toMatchObject({ sourceKind: 'parent_wakeup' });
+
+      await stub.reconcileTaskWaits(childTwoId);
+      expect(
+        (await stub.getMessages(parentSessionId, 10)).messages.filter((message) =>
+          message.content.includes('wait_for_subtasks subscription resolved')
+        )
+      ).toHaveLength(1);
+      expect((await stub.getDurableExecutionSnapshot(parentSessionId)).deliveries).toHaveLength(1);
+
+      const lostResponseRetry = await stub.registerTaskWait({
+        parentTaskId,
+        parentSessionId,
+        idempotencyKey: 'review-round-1',
+        condition: 'all',
+        childTaskIds: [childOneId, childTwoId],
+        wakeDeadline: Date.now() + 120_000,
+      });
+      expect(lostResponseRetry).toMatchObject({
+        created: false,
+        subscription: { id: registered.subscription!.id, state: 'resolved' },
+      });
+      expect(
+        (await stub.getMessages(parentSessionId, 10)).messages.filter((message) =>
+          message.content.includes('wait_for_subtasks subscription resolved')
+        )
+      ).toHaveLength(1);
+      expect((await stub.getDurableExecutionSnapshot(parentSessionId)).deliveries).toHaveLength(1);
+
+      await env.DATABASE.prepare(`UPDATE tasks SET status = 'completed' WHERE id = ?`)
+        .bind(parentTaskId)
+        .run();
+      await stub.reconcileTaskWaits(parentTaskId);
+      expect((await stub.getDurableExecutionSnapshot(parentSessionId)).deliveries[0]).toMatchObject(
+        {
+          deliveryState: 'failed',
+          terminalReason: 'wake_refused',
+          lastError: expect.stringContaining('sleeping_snapshot_missing'),
+        }
+      );
+    });
+
+    it('cancels a terminal parent wait without waking or resurrecting its session', async () => {
+      const suffix = crypto.randomUUID();
+      const userId = `wait-cancel-user-${suffix}`;
+      const installationId = `wait-cancel-installation-${suffix}`;
+      const projectId = `wait-cancel-project-${suffix}`;
+      const parentTaskId = `wait-cancel-parent-${suffix}`;
+      const childTaskId = `wait-cancel-child-${suffix}`;
+
+      await seedUser(userId);
+      await seedInstallation(installationId, userId, {
+        installationIdValue: `wait-cancel-external-${suffix}`,
+      });
+      await seedProject(projectId, userId, installationId);
+      await seedTask(parentTaskId, projectId, userId, { status: 'in_progress' });
+      await seedTask(childTaskId, projectId, userId, { status: 'in_progress' });
+      await env.DATABASE.prepare(`UPDATE tasks SET parent_task_id = ? WHERE id = ?`)
+        .bind(parentTaskId, childTaskId)
+        .run();
+
+      const stub = getStub(projectId);
+      await stub.ensureProjectId(projectId);
+      const parentSessionId = await stub.createSession(null, 'Cancelled parent wait', parentTaskId);
+      await env.DATABASE.prepare(`UPDATE tasks SET chat_session_id = ? WHERE id = ?`)
+        .bind(parentSessionId, parentTaskId)
+        .run();
+      const registered = await stub.registerTaskWait({
+        parentTaskId,
+        parentSessionId,
+        idempotencyKey: 'cancel-round-1',
+        condition: 'all',
+        childTaskIds: [childTaskId],
+        wakeDeadline: Date.now() + 60_000,
+      });
+
+      await env.DATABASE.prepare(`UPDATE tasks SET status = 'completed' WHERE id = ?`)
+        .bind(parentTaskId)
+        .run();
+      const cancellation = await stub.reconcileTaskWaits(parentTaskId);
+      expect(cancellation).toMatchObject({ cancelled: 1, resolved: 0 });
+      expect(await stub.getTaskWait(registered.subscription!.id)).toMatchObject({
+        state: 'cancelled',
+        resolutionReason: 'parent_completed',
+      });
+
+      await env.DATABASE.prepare(`UPDATE tasks SET status = 'completed' WHERE id = ?`)
+        .bind(childTaskId)
+        .run();
+      await stub.reconcileTaskWaits(childTaskId);
+      expect((await stub.getMessages(parentSessionId, 10)).messages).toHaveLength(0);
+      expect((await stub.getDurableExecutionSnapshot(parentSessionId)).deliveries).toHaveLength(0);
+    });
+
+    it('backs off a permanent wake conflict and terminalizes after bounded attempts', async () => {
+      const suffix = crypto.randomUUID();
+      const userId = `wait-failure-user-${suffix}`;
+      const installationId = `wait-failure-installation-${suffix}`;
+      const projectId = `wait-failure-project-${suffix}`;
+      const parentTaskId = `wait-failure-parent-${suffix}`;
+      const childTaskId = `wait-failure-child-${suffix}`;
+
+      await seedUser(userId);
+      await seedInstallation(installationId, userId, {
+        installationIdValue: `wait-failure-external-${suffix}`,
+      });
+      await seedProject(projectId, userId, installationId);
+      await seedTask(parentTaskId, projectId, userId, { status: 'in_progress' });
+      await seedTask(childTaskId, projectId, userId, { status: 'in_progress' });
+      await env.DATABASE.prepare(`UPDATE tasks SET parent_task_id = ? WHERE id = ?`)
+        .bind(parentTaskId, childTaskId)
+        .run();
+
+      const stub = getStub(projectId);
+      await stub.ensureProjectId(projectId);
+      const parentSessionId = await stub.createSession(null, 'Failed parent wake', parentTaskId);
+      await env.DATABASE.prepare(`UPDATE tasks SET chat_session_id = ? WHERE id = ?`)
+        .bind(parentSessionId, parentTaskId)
+        .run();
+      const registered = await stub.registerTaskWait({
+        parentTaskId,
+        parentSessionId,
+        idempotencyKey: 'wait-registration',
+        condition: 'all',
+        childTaskIds: [childTaskId],
+        wakeDeadline: Date.now() + 60_000,
+      });
+
+      await stub.acceptPromptDelivery({
+        deliveryId: registered.subscription!.wakeDeliveryId,
+        targetSessionId: parentSessionId,
+        displayContent: 'conflicting intent',
+        deliveryContent: 'conflicting intent',
+        senderType: 'system',
+        sourceKind: 'agent_mailbox',
+        ttlMs: 60_000,
+      });
+      await runInDurableObject(stub, async (_instance, state) => {
+        state.storage.sql.exec(
+          `UPDATE session_inbox SET delivery_state = 'failed' WHERE id = ?`,
+          registered.subscription!.wakeDeliveryId
+        );
+      });
+      await env.DATABASE.prepare(`UPDATE tasks SET status = 'completed' WHERE id = ?`)
+        .bind(childTaskId)
+        .run();
+
+      const first = await stub.reconcileTaskWaits(childTaskId);
+      expect(first).toMatchObject({ failed: 1, resolved: 0 });
+      const afterFirst = await stub.getTaskWait(registered.subscription!.id);
+      expect(afterFirst).toMatchObject({ state: 'active', wakeAttempts: 1 });
+      expect(afterFirst!.nextReconcileAt).toBeGreaterThan(Date.now());
+
+      for (let attempt = 1; attempt < 5; attempt++) {
+        await stub.reconcileTaskWaits(childTaskId);
+      }
+      expect(await stub.getTaskWait(registered.subscription!.id)).toMatchObject({
+        state: 'cancelled',
+        resolutionReason: 'wake_delivery_failed',
+        wakeAttempts: 5,
+      });
+    });
+
+    it('reconciles the maximum default batch without exceeding D1 bind limits', async () => {
+      const suffix = crypto.randomUUID();
+      const userId = `wait-scale-user-${suffix}`;
+      const installationId = `wait-scale-installation-${suffix}`;
+      const projectId = `wait-scale-project-${suffix}`;
+
+      await seedUser(userId);
+      await seedInstallation(installationId, userId, {
+        installationIdValue: `wait-scale-external-${suffix}`,
+      });
+      await seedProject(projectId, userId, installationId);
+
+      const parentIds = Array.from({ length: 10 }, (_, index) => `wait-parent-${index}-${suffix}`);
+      const childIds = parentIds.map((_, parentIndex) =>
+        Array.from(
+          { length: 20 },
+          (_, childIndex) => `wait-child-${parentIndex}-${childIndex}-${suffix}`
+        )
+      );
+      const statements = parentIds.flatMap((parentId, parentIndex) => [
+        env.DATABASE.prepare(
+          `INSERT INTO tasks
+             (id, project_id, user_id, title, status, task_mode, created_by, created_at, updated_at)
+           VALUES (?, ?, ?, ?, 'in_progress', 'task', ?, datetime('now'), datetime('now'))`
+        ).bind(parentId, projectId, userId, parentId, userId),
+        ...childIds[parentIndex]!.map((childId) =>
+          env.DATABASE.prepare(
+            `INSERT INTO tasks
+               (id, project_id, user_id, title, status, task_mode, parent_task_id, created_by, created_at, updated_at)
+             VALUES (?, ?, ?, ?, 'in_progress', 'task', ?, ?, datetime('now'), datetime('now'))`
+          ).bind(childId, projectId, userId, childId, parentId, userId)
+        ),
+      ]);
+      for (let offset = 0; offset < statements.length; offset += 100) {
+        await env.DATABASE.batch(statements.slice(offset, offset + 100));
+      }
+
+      const stub = getStub(projectId);
+      await stub.ensureProjectId(projectId);
+      for (let index = 0; index < parentIds.length; index++) {
+        const parentTaskId = parentIds[index]!;
+        const parentSessionId = await stub.createSession(
+          null,
+          `Scaled parent ${index}`,
+          parentTaskId
+        );
+        await env.DATABASE.prepare(`UPDATE tasks SET chat_session_id = ? WHERE id = ?`)
+          .bind(parentSessionId, parentTaskId)
+          .run();
+        await stub.registerTaskWait({
+          parentTaskId,
+          parentSessionId,
+          idempotencyKey: `scale-round-${index}`,
+          condition: 'all',
+          childTaskIds: childIds[index]!,
+          wakeDeadline: Date.now() + 60_000,
+        });
+      }
+
+      await runInDurableObject(stub, async (_instance, state) => {
+        state.storage.sql.exec(`UPDATE task_wait_subscriptions SET next_reconcile_at = 0`);
+      });
+      await expect(stub.reconcileTaskWaits()).resolves.toMatchObject({
+        checked: 10,
+        pending: 10,
+        failed: 0,
+      });
+    });
+  });
+
   // =========================================================================
   // Session CRUD
   // =========================================================================
@@ -180,7 +748,12 @@ describe('ProjectData Durable Object', () => {
       const s2 = await stub.createSession(null, 'Stopped task', 'task-combo');
       await stub.stopSession(s2);
 
-      const { sessions: activeTaskCombo, total } = await stub.listSessions('active', 20, 0, 'task-combo');
+      const { sessions: activeTaskCombo, total } = await stub.listSessions(
+        'active',
+        20,
+        0,
+        'task-combo'
+      );
       expect(total).toBe(1);
       expect(activeTaskCombo).toHaveLength(1);
       expect(activeTaskCombo[0]!.id).toBe(s1);
@@ -389,7 +962,11 @@ describe('ProjectData Durable Object', () => {
       const sessionId = await stub.createSession('ws-cleanup', 'Cleanup session');
 
       const before = Date.now();
-      const { cleanupAt: scheduled } = await stub.scheduleIdleCleanup(sessionId, 'ws-cleanup', null);
+      const { cleanupAt: scheduled } = await stub.scheduleIdleCleanup(
+        sessionId,
+        'ws-cleanup',
+        null
+      );
 
       const cleanupAt = await stub.getCleanupAt(sessionId);
       expect(cleanupAt).toBeTruthy();
@@ -415,14 +992,54 @@ describe('ProjectData Durable Object', () => {
   // =========================================================================
 
   describe('batch message persistence', () => {
+    it('preserves structural loopback attribution on a delayed system row', async () => {
+      const stub = getStub('project-batch-loopback-attribution');
+      const sessionId = await stub.createSession(null, null);
+      const timestamp = new Date().toISOString();
+      const promptId = crypto.randomUUID();
+      const retryId = crypto.randomUUID();
+      const diagnosticId = crypto.randomUUID();
+      await stub.persistMessageBatch(sessionId, [
+        { messageId: promptId, role: 'user', content: 'start sign-in', toolMetadata: null, timestamp },
+        { messageId: retryId, role: 'user', content: 'try another method', toolMetadata: null, timestamp },
+      ]);
+      await stub.persistMessageBatch(sessionId, [
+        { messageId: diagnosticId, role: 'system',
+          content: 'This sign-in flow requires a local callback that this session cannot complete.',
+          toolMetadata: JSON.stringify({ promptMessageId: promptId }), timestamp },
+      ]);
+      const { messages } = await stub.getMessages(sessionId);
+      expect(messages.map((message) => message.id)).toEqual([promptId, retryId, diagnosticId]);
+      expect(messages[2]?.toolMetadata).toEqual({ promptMessageId: promptId });
+      expect(messages[2]?.sequence).toBeGreaterThan(messages[1]!.sequence);
+    });
+
     it('persists a batch of messages', async () => {
       const stub = getStub('project-batch-basic');
       const sessionId = await stub.createSession(null, null);
 
       const messages = [
-        { messageId: crypto.randomUUID(), role: 'user', content: 'Hello', toolMetadata: null, timestamp: new Date().toISOString() },
-        { messageId: crypto.randomUUID(), role: 'assistant', content: 'Hi there', toolMetadata: null, timestamp: new Date().toISOString() },
-        { messageId: crypto.randomUUID(), role: 'user', content: 'How are you?', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'user',
+          content: 'Hello',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'assistant',
+          content: 'Hi there',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'user',
+          content: 'How are you?',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ];
 
       const result = await stub.persistMessageBatch(sessionId, messages);
@@ -433,6 +1050,60 @@ describe('ProjectData Durable Object', () => {
       expect(stored).toHaveLength(3);
     });
 
+    it('persists and returns the origin marker for SAM-injected messages', async () => {
+      const stub = getStub('project-batch-origin');
+      const sessionId = await stub.createSession(null, null);
+
+      const injectedId = crypto.randomUUID();
+      const normalId = crypto.randomUUID();
+      const result = await stub.persistMessageBatch(sessionId, [
+        {
+          messageId: normalId,
+          role: 'user',
+          content: 'my task',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+        {
+          messageId: injectedId,
+          role: 'user',
+          content: 'call get_instructions',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+          origin: 'system',
+        },
+      ]);
+      expect(result.persisted).toBe(2);
+
+      const parity = await stub.persistMessageBatch(sessionId, [
+        {
+          messageId: injectedId,
+          role: 'user',
+          content: 'status-only retry',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'user',
+          content: 'call get_instructions',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+          origin: 'system',
+        },
+      ]);
+      expect(parity).toMatchObject({ persisted: 1, duplicates: 1 });
+
+      const { messages: stored } = await stub.getMessages(sessionId);
+      const injected = stored.find((m) => m.id === injectedId);
+      const normal = stored.find((m) => m.id === normalId);
+      expect(injected?.origin).toBe('system');
+      expect(injected?.content).toBe('call get_instructions');
+      expect(stored.filter((m) => m.origin === 'system')).toHaveLength(2);
+      // A normal user message has no system origin (null/undefined/"user").
+      expect(normal?.origin ?? null).not.toBe('system');
+    });
+
     it('deduplicates messages by messageId', async () => {
       const stub = getStub('project-batch-dedup');
       const sessionId = await stub.createSession(null, null);
@@ -440,14 +1111,32 @@ describe('ProjectData Durable Object', () => {
 
       // First batch with a unique messageId
       await stub.persistMessageBatch(sessionId, [
-        { messageId: sharedId, role: 'user', content: 'Original', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: sharedId,
+          role: 'user',
+          content: 'Original',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       // Second batch with the same messageId + a new one
       const newId = crypto.randomUUID();
       const result = await stub.persistMessageBatch(sessionId, [
-        { messageId: sharedId, role: 'user', content: 'Duplicate attempt', toolMetadata: null, timestamp: new Date().toISOString() },
-        { messageId: newId, role: 'assistant', content: 'New message', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: sharedId,
+          role: 'user',
+          content: 'Duplicate attempt',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+        {
+          messageId: newId,
+          role: 'assistant',
+          content: 'New message',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       expect(result.persisted).toBe(1);
@@ -466,8 +1155,20 @@ describe('ProjectData Durable Object', () => {
       const id1 = crypto.randomUUID();
 
       await stub.persistMessageBatch(sessionId, [
-        { messageId: id1, role: 'user', content: 'First', toolMetadata: null, timestamp: new Date().toISOString() },
-        { messageId: crypto.randomUUID(), role: 'assistant', content: 'Second', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: id1,
+          role: 'user',
+          content: 'First',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'assistant',
+          content: 'Second',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       let session = await stub.getSession(sessionId);
@@ -475,8 +1176,20 @@ describe('ProjectData Durable Object', () => {
 
       // Batch with 1 duplicate and 1 new
       await stub.persistMessageBatch(sessionId, [
-        { messageId: id1, role: 'user', content: 'Dup', toolMetadata: null, timestamp: new Date().toISOString() },
-        { messageId: crypto.randomUUID(), role: 'user', content: 'Third', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: id1,
+          role: 'user',
+          content: 'Dup',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'user',
+          content: 'Third',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       session = await stub.getSession(sessionId);
@@ -488,12 +1201,58 @@ describe('ProjectData Durable Object', () => {
       const sessionId = await stub.createSession(null, null);
 
       await stub.persistMessageBatch(sessionId, [
-        { messageId: crypto.randomUUID(), role: 'assistant', content: 'System init', toolMetadata: null, timestamp: new Date().toISOString() },
-        { messageId: crypto.randomUUID(), role: 'user', content: 'Deploy my app to staging', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'assistant',
+          content: 'System init',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'user',
+          content: 'Deploy my app to staging',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       const session = await stub.getSession(sessionId);
       expect(session!.topic).toBe('Deploy my app to staging');
+    });
+
+    it('does not auto-capture topic from a SAM-injected (origin=system) user message', async () => {
+      const stub = getStub('project-batch-topic-system-excluded');
+      const sessionId = await stub.createSession(null, null);
+
+      // A batch whose only user message is system-injected must NOT set the topic —
+      // the injected get_instructions reminder is not the user's conversation subject.
+      await stub.persistMessageBatch(sessionId, [
+        {
+          messageId: crypto.randomUUID(),
+          role: 'user',
+          content: 'IMPORTANT: you MUST call get_instructions before starting',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+          origin: 'system',
+        },
+      ]);
+
+      const session = await stub.getSession(sessionId);
+      expect(session!.topic ?? null).toBeNull();
+
+      // A subsequent real user message DOES set the topic.
+      await stub.persistMessageBatch(sessionId, [
+        {
+          messageId: crypto.randomUUID(),
+          role: 'user',
+          content: 'Refactor the auth module',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+      ]);
+      const after = await stub.getSession(sessionId);
+      expect(after!.topic).toBe('Refactor the auth module');
     });
 
     it('does not overwrite existing topic', async () => {
@@ -501,7 +1260,13 @@ describe('ProjectData Durable Object', () => {
       const sessionId = await stub.createSession(null, 'Existing topic');
 
       await stub.persistMessageBatch(sessionId, [
-        { messageId: crypto.randomUUID(), role: 'user', content: 'New content', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'user',
+          content: 'New content',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       const session = await stub.getSession(sessionId);
@@ -515,22 +1280,45 @@ describe('ProjectData Durable Object', () => {
       const toolMeta = JSON.stringify({ tool: 'bash', target: 'ls -la', status: 'success' });
 
       await stub.persistMessageBatch(sessionId, [
-        { messageId: msgId, role: 'assistant', content: 'Running command', toolMetadata: toolMeta, timestamp: new Date().toISOString() },
+        {
+          messageId: msgId,
+          role: 'assistant',
+          content: 'Running command',
+          toolMetadata: toolMeta,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       const { messages } = await stub.getMessages(sessionId);
       expect(messages).toHaveLength(1);
-      expect(messages[0]!.toolMetadata).toEqual({ tool: 'bash', target: 'ls -la', status: 'success' });
+      expect(messages[0]!.toolMetadata).toEqual({
+        tool: 'bash',
+        target: 'ls -la',
+        status: 'success',
+      });
     });
 
     it('throws for non-existent session', async () => {
       const stub = getStub('project-batch-nosession');
+      const rejection = await captureProjectDataExpectedError(stub, {
+        operation: 'persistMessageBatch',
+        args: [
+          'non-existent-session',
+          [
+            {
+              messageId: crypto.randomUUID(),
+              role: 'user',
+              content: 'Hello',
+              toolMetadata: null,
+              timestamp: new Date().toISOString(),
+            },
+          ],
+        ],
+      });
 
-      await expect(
-        stub.persistMessageBatch('non-existent-session', [
-          { messageId: crypto.randomUUID(), role: 'user', content: 'Hello', toolMetadata: null, timestamp: new Date().toISOString() },
-        ])
-      ).rejects.toThrow(/not found/i);
+      expect(rejection).toMatchObject({ threw: true });
+      expect(rejection.message).toMatch(/not found/i);
+      expect(await stub.getSession('non-existent-session')).toBeNull();
     });
 
     it('rejects messages to stopped sessions', async () => {
@@ -539,13 +1327,27 @@ describe('ProjectData Durable Object', () => {
 
       // Stop the session
       await stub.stopSession(sessionId);
+      const rejection = await captureProjectDataExpectedError(stub, {
+        operation: 'persistMessageBatch',
+        args: [
+          sessionId,
+          [
+            {
+              messageId: crypto.randomUUID(),
+              role: 'user',
+              content: 'Late message',
+              toolMetadata: null,
+              timestamp: new Date().toISOString(),
+            },
+          ],
+        ],
+      });
 
-      // Attempting to persist messages to a stopped session should throw
-      await expect(
-        stub.persistMessageBatch(sessionId, [
-          { messageId: crypto.randomUUID(), role: 'user', content: 'Late message', toolMetadata: null, timestamp: new Date().toISOString() },
-        ])
-      ).rejects.toThrow(/stopped/i);
+      expect(rejection).toMatchObject({ threw: true });
+      expect(rejection.message).toMatch(/stopped/i);
+      const session = await stub.getSession(sessionId);
+      expect(session!.status).toBe('stopped');
+      expect((await stub.getMessages(sessionId)).messages).toHaveLength(0);
     });
 
     it('handles empty batch gracefully', async () => {
@@ -568,12 +1370,54 @@ describe('ProjectData Durable Object', () => {
       // arriving within the same millisecond
       const sameTimestamp = new Date().toISOString();
       const messages = [
-        { messageId: crypto.randomUUID(), role: 'assistant' as const, content: 'Hello', toolMetadata: null, timestamp: sameTimestamp, sequence: 1 },
-        { messageId: crypto.randomUUID(), role: 'assistant' as const, content: ' world', toolMetadata: null, timestamp: sameTimestamp, sequence: 2 },
-        { messageId: crypto.randomUUID(), role: 'assistant' as const, content: '!', toolMetadata: null, timestamp: sameTimestamp, sequence: 3 },
-        { messageId: crypto.randomUUID(), role: 'assistant' as const, content: ' How', toolMetadata: null, timestamp: sameTimestamp, sequence: 4 },
-        { messageId: crypto.randomUUID(), role: 'assistant' as const, content: ' are', toolMetadata: null, timestamp: sameTimestamp, sequence: 5 },
-        { messageId: crypto.randomUUID(), role: 'assistant' as const, content: ' you?', toolMetadata: null, timestamp: sameTimestamp, sequence: 6 },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'assistant' as const,
+          content: 'Hello',
+          toolMetadata: null,
+          timestamp: sameTimestamp,
+          sequence: 1,
+        },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'assistant' as const,
+          content: ' world',
+          toolMetadata: null,
+          timestamp: sameTimestamp,
+          sequence: 2,
+        },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'assistant' as const,
+          content: '!',
+          toolMetadata: null,
+          timestamp: sameTimestamp,
+          sequence: 3,
+        },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'assistant' as const,
+          content: ' How',
+          toolMetadata: null,
+          timestamp: sameTimestamp,
+          sequence: 4,
+        },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'assistant' as const,
+          content: ' are',
+          toolMetadata: null,
+          timestamp: sameTimestamp,
+          sequence: 5,
+        },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'assistant' as const,
+          content: ' you?',
+          toolMetadata: null,
+          timestamp: sameTimestamp,
+          sequence: 6,
+        },
       ];
 
       await stub.persistMessageBatch(sessionId, messages);
@@ -599,8 +1443,20 @@ describe('ProjectData Durable Object', () => {
 
       // No sequence field — DO should auto-assign
       await stub.persistMessageBatch(sessionId, [
-        { messageId: crypto.randomUUID(), role: 'user', content: 'First', toolMetadata: null, timestamp: new Date().toISOString() },
-        { messageId: crypto.randomUUID(), role: 'assistant', content: 'Second', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'user',
+          content: 'First',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'assistant',
+          content: 'Second',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       const { messages: stored } = await stub.getMessages(sessionId);
@@ -609,7 +1465,7 @@ describe('ProjectData Durable Object', () => {
       expect(stored[0]!.sequence).toBeTruthy();
       expect(stored[1]!.sequence).toBeTruthy();
       // Second should have a higher sequence than first
-      expect((stored[1]!.sequence as number)).toBeGreaterThan(stored[0]!.sequence as number);
+      expect(stored[1]!.sequence as number).toBeGreaterThan(stored[0]!.sequence as number);
     });
 
     it('all-duplicate batch does not update session timestamp', async () => {
@@ -618,7 +1474,13 @@ describe('ProjectData Durable Object', () => {
       const msgId = crypto.randomUUID();
 
       await stub.persistMessageBatch(sessionId, [
-        { messageId: msgId, role: 'user', content: 'Original', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: msgId,
+          role: 'user',
+          content: 'Original',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       const sessionBefore = await stub.getSession(sessionId);
@@ -627,7 +1489,13 @@ describe('ProjectData Durable Object', () => {
       await new Promise((r) => setTimeout(r, 10));
 
       const result = await stub.persistMessageBatch(sessionId, [
-        { messageId: msgId, role: 'user', content: 'Duplicate', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: msgId,
+          role: 'user',
+          content: 'Duplicate',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       expect(result.persisted).toBe(0);
@@ -647,8 +1515,20 @@ describe('ProjectData Durable Object', () => {
 
       // Simulate: VM agent batch includes same user message with a different ID
       const result = await stub.persistMessageBatch(sessionId, [
-        { messageId: crypto.randomUUID(), role: 'user', content: 'Fix the login bug', toolMetadata: null, timestamp: new Date().toISOString() },
-        { messageId: crypto.randomUUID(), role: 'assistant', content: 'Looking into it...', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'user',
+          content: 'Fix the login bug',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'assistant',
+          content: 'Looking into it...',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       // User message should be skipped (content duplicate), assistant should be persisted
@@ -670,7 +1550,13 @@ describe('ProjectData Durable Object', () => {
 
       // Batch includes assistant message with same content — should NOT be skipped
       const result = await stub.persistMessageBatch(sessionId, [
-        { messageId: crypto.randomUUID(), role: 'assistant', content: 'I can help with that', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'assistant',
+          content: 'I can help with that',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       expect(result.persisted).toBe(1);
@@ -683,12 +1569,24 @@ describe('ProjectData Durable Object', () => {
 
       // First batch includes user message
       await stub.persistMessageBatch(sessionId, [
-        { messageId: crypto.randomUUID(), role: 'user', content: 'Fix the bug', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'user',
+          content: 'Fix the bug',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       // Second batch (VM agent retry) includes the same user content with a different ID
       const result = await stub.persistMessageBatch(sessionId, [
-        { messageId: crypto.randomUUID(), role: 'user', content: 'Fix the bug', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'user',
+          content: 'Fix the bug',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       expect(result.persisted).toBe(0);
@@ -790,14 +1688,14 @@ describe('ProjectData Durable Object', () => {
 
     it('throws on message to non-existent session', async () => {
       const stub = getStub('project-msg-no-session');
-      let error: Error | null = null;
-      try {
-        await stub.persistMessage('fake-session', 'user', 'hello', null);
-      } catch (e) {
-        error = e as Error;
-      }
-      expect(error).not.toBeNull();
-      expect(error!.message).toContain('not found');
+      const rejection = await captureProjectDataExpectedError(stub, {
+        operation: 'persistMessage',
+        args: ['fake-session', 'user', 'hello', null],
+      });
+
+      expect(rejection).toMatchObject({ threw: true });
+      expect(rejection.message).toMatch(/not found/i);
+      expect(await stub.getSession('fake-session')).toBeNull();
     });
 
     it('paginates messages with before cursor', async () => {
@@ -832,6 +1730,49 @@ describe('ProjectData Durable Object', () => {
       const { messages, hasMore } = await stub.getMessages(sessionId, 3);
       expect(messages).toHaveLength(3);
       expect(hasMore).toBe(true);
+    });
+
+    it('can return the oldest user message with ascending order and role filtering', async () => {
+      const stub = getStub('project-msg-oldest-user');
+      const sessionId = await stub.createSession(null, null);
+
+      await stub.persistMessage(sessionId, 'user', 'Initial prompt', null);
+      await stub.persistMessage(sessionId, 'assistant', 'Working on it', null);
+      await stub.persistMessage(sessionId, 'user', 'Follow-up prompt', null);
+
+      const { messages, hasMore } = await stub.getMessages(
+        sessionId,
+        1,
+        null,
+        null,
+        ['user'],
+        true,
+        'asc'
+      );
+
+      expect(messages).toHaveLength(1);
+      expect(messages[0]!.content).toBe('Initial prompt');
+      expect(hasMore).toBe(true);
+    });
+
+    it('reconstructs the current plan from the latest durable plan message', async () => {
+      const stub = getStub('project-msg-plan-source');
+      const sessionId = await stub.createSession(null, null);
+      const stalePlan = [{ content: 'Old cached step', status: 'pending' }];
+      const latestPlan = [
+        { content: 'Inspect persisted plan rows', status: 'completed' },
+        { content: 'Render the restored plan', status: 'in_progress' },
+      ];
+
+      await stub.persistMessage(sessionId, 'plan', JSON.stringify(stalePlan), null, 'plan-old');
+      await stub.persistMessage(sessionId, 'assistant', 'Working between plan updates', null);
+      await stub.persistMessage(sessionId, 'plan', JSON.stringify(latestPlan), null, 'plan-new');
+
+      const persistedPlan = await stub.getLatestPersistedPlan(sessionId);
+
+      expect(persistedPlan).not.toBeNull();
+      expect(persistedPlan!.currentPlan).toEqual(latestPlan);
+      expect(persistedPlan!.planUpdatedAt).toEqual(expect.any(Number));
     });
   });
 
@@ -907,6 +1848,29 @@ describe('ProjectData Durable Object', () => {
 
       const { events } = await stub.listActivityEvents('session.stopped');
       expect(events.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('filters activity events by sessionId', async () => {
+      const stub = getStub('project-activity-session');
+
+      await stub.recordActivityEvent('task.started', 'system', null, null, 'sess-A', null, null);
+      await stub.recordActivityEvent('task.completed', 'system', null, null, 'sess-A', null, null);
+      await stub.recordActivityEvent('task.started', 'system', null, null, 'sess-B', null, null);
+      await stub.recordActivityEvent('workspace.created', 'user', null, null, null, null, null);
+
+      const { events: sessA } = await stub.listActivityEvents(null, 50, null, 'sess-A');
+      expect(sessA).toHaveLength(2);
+      for (const e of sessA) {
+        expect(e.sessionId).toBe('sess-A');
+      }
+
+      const { events: sessB } = await stub.listActivityEvents(null, 50, null, 'sess-B');
+      expect(sessB).toHaveLength(1);
+      expect(sessB[0]!.sessionId).toBe('sess-B');
+
+      // Without sessionId filter, returns all events
+      const { events: all } = await stub.listActivityEvents(null, 50);
+      expect(all).toHaveLength(4);
     });
 
     it('paginates activity events with before cursor', async () => {
@@ -1097,7 +2061,7 @@ describe('ProjectData Durable Object', () => {
         {
           messageId: crypto.randomUUID(),
           role: 'assistant',
-          content: 'I\'ll investigate the authentication flow in auth.ts.',
+          content: "I'll investigate the authentication flow in auth.ts.",
           toolMetadata: null,
           timestamp: new Date().toISOString(),
         },
@@ -1164,14 +2128,38 @@ describe('ProjectData Durable Object', () => {
 
       // First batch: 2 messages
       await stub.persistMessageBatch(sessionId, [
-        { messageId: msgId1, role: 'user', content: 'Hello', toolMetadata: null, timestamp: new Date().toISOString() },
-        { messageId: msgId2, role: 'assistant', content: 'Hi', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: msgId1,
+          role: 'user',
+          content: 'Hello',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+        {
+          messageId: msgId2,
+          role: 'assistant',
+          content: 'Hi',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       // Simulated crash recovery: reporter re-sends msgId2 (already persisted) + new msgId3
       const result = await stub.persistMessageBatch(sessionId, [
-        { messageId: msgId2, role: 'assistant', content: 'Hi', toolMetadata: null, timestamp: new Date().toISOString() },
-        { messageId: msgId3, role: 'user', content: 'Thanks', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: msgId2,
+          role: 'assistant',
+          content: 'Hi',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+        {
+          messageId: msgId3,
+          role: 'user',
+          content: 'Thanks',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       expect(result.persisted).toBe(1);
@@ -1189,8 +2177,20 @@ describe('ProjectData Durable Object', () => {
       const sessionId = await stub.createSession('ws-stop', null, 'task-stop');
 
       await stub.persistMessageBatch(sessionId, [
-        { messageId: crypto.randomUUID(), role: 'user', content: 'Build the project', toolMetadata: null, timestamp: new Date().toISOString() },
-        { messageId: crypto.randomUUID(), role: 'assistant', content: 'Building...', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'user',
+          content: 'Build the project',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'assistant',
+          content: 'Building...',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       // Stop session (simulates workspace destruction)
@@ -1239,7 +2239,13 @@ describe('ProjectData Durable Object', () => {
 
       // Persist batch — should also update workspace_activity.last_message_at
       await stub.persistMessageBatch(sessionId, [
-        { messageId: crypto.randomUUID(), role: 'assistant', content: 'Hi there', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'assistant',
+          content: 'Hi there',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       const session = await stub.getSession(sessionId);
@@ -1250,7 +2256,11 @@ describe('ProjectData Durable Object', () => {
       const stub = getStub('project-msg-activity-idle-reset');
       const sessionId = await stub.createSession('ws-msg-idle', 'Message idle reset test');
 
-      const { cleanupAt: firstCleanupAt } = await stub.scheduleIdleCleanup(sessionId, 'ws-msg-idle', null);
+      const { cleanupAt: firstCleanupAt } = await stub.scheduleIdleCleanup(
+        sessionId,
+        'ws-msg-idle',
+        null
+      );
       await new Promise((resolve) => setTimeout(resolve, 5));
 
       await stub.persistMessageBatch(sessionId, [
@@ -1387,11 +2397,22 @@ describe('ProjectData Durable Object', () => {
       await stub.persistMessage(sessionId, 'assistant', 'I will fix the auth', null);
       await stub.persistMessage(sessionId, 'assistant', 'entication middleware now.', null);
       await stub.persistMessage(sessionId, 'assistant', ' Let me look at the code.', null);
+      await stub.persistMessageBatch(sessionId, [
+        {
+          messageId: crypto.randomUUID(),
+          role: 'user',
+          content: 'private injected sentinel',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+          origin: 'system',
+        },
+      ]);
 
       // Before stop: search should use LIKE on raw tokens
-      const beforeResults = stub.searchMessages('authentication middleware');
+      const beforeResults = await stub.searchMessages('authentication middleware');
       // LIKE on individual tokens may or may not find this — the user message has it
       expect(beforeResults.length).toBeGreaterThanOrEqual(1);
+      expect(await stub.searchMessages('private injected sentinel')).toEqual([]);
 
       // Stop session — triggers materialization
       await stub.stopSession(sessionId);
@@ -1401,12 +2422,13 @@ describe('ProjectData Durable Object', () => {
       expect(session!.status).toBe('stopped');
 
       // FTS5 search should find "authentication middleware" even though it spans tokens
-      const afterResults = stub.searchMessages('authentication middleware');
+      const afterResults = await stub.searchMessages('authentication middleware');
       expect(afterResults.length).toBeGreaterThanOrEqual(1);
       // The grouped assistant message should contain the full phrase
       const assistantResult = afterResults.find((r) => r.role === 'assistant');
       expect(assistantResult).toBeDefined();
       expect(assistantResult!.snippet).toContain('auth');
+      expect(await stub.searchMessages('private injected sentinel')).toEqual([]);
     });
 
     it('materializeSession is idempotent', async () => {
@@ -1419,14 +2441,14 @@ describe('ProjectData Durable Object', () => {
       await stub.stopSession(sessionId);
 
       // Calling materializeSession again should be a no-op (no error)
-      stub.materializeSession(sessionId);
+      await stub.materializeSession(sessionId);
 
       // Search should still work
-      const results = stub.searchMessages('Hello');
+      const results = await stub.searchMessages('Hello');
       expect(results.length).toBeGreaterThanOrEqual(1);
     });
 
-    it('materializeAllStopped backfills existing sessions', async () => {
+    it('materializePendingSessions backfills existing sessions', async () => {
       const stub = getStub('project-fts5-backfill');
 
       // Create and stop multiple sessions
@@ -1442,14 +2464,15 @@ describe('ProjectData Durable Object', () => {
       const s3 = await stub.createSession(null, 'Active session');
       await stub.persistMessage(s3, 'user', 'Active session content', null);
 
-      // materializeAllStopped should report already-materialized sessions as no-ops
-      const result = stub.materializeAllStopped();
+      // Already-materialized sessions have nothing past their watermark, so the
+      // sweep must not re-select them.
+      const result = await stub.materializePendingSessions();
       expect(result.errors).toBe(0);
 
       // Both stopped sessions should be searchable
-      const r1 = stub.searchMessages('First session');
+      const r1 = await stub.searchMessages('First session');
       expect(r1.length).toBeGreaterThanOrEqual(1);
-      const r2 = stub.searchMessages('unique text');
+      const r2 = await stub.searchMessages('unique text');
       expect(r2.length).toBeGreaterThanOrEqual(1);
     });
 
@@ -1460,7 +2483,7 @@ describe('ProjectData Durable Object', () => {
       await stub.persistMessage(sessionId, 'user', 'searchable keyword here', null);
 
       // Session is still active — should fall back to LIKE
-      const results = stub.searchMessages('searchable');
+      const results = await stub.searchMessages('searchable');
       expect(results.length).toBeGreaterThanOrEqual(1);
       expect(results[0]!.snippet).toContain('searchable');
     });
@@ -1475,12 +2498,12 @@ describe('ProjectData Durable Object', () => {
       await stub.stopSession(sessionId);
 
       // Search with role filter — only user messages
-      const userResults = stub.searchMessages('database query', null, ['user']);
+      const userResults = await stub.searchMessages('database query', null, ['user']);
       expect(userResults.length).toBe(1);
       expect(userResults[0]!.role).toBe('user');
 
       // Search with role filter — only assistant messages
-      const assistantResults = stub.searchMessages('database query', null, ['assistant']);
+      const assistantResults = await stub.searchMessages('database query', null, ['assistant']);
       expect(assistantResults.length).toBe(1);
       expect(assistantResults[0]!.role).toBe('assistant');
     });
@@ -1497,7 +2520,7 @@ describe('ProjectData Durable Object', () => {
       await stub.stopSession(sessionId);
 
       // Search for a term that spans token boundaries
-      const results = stub.searchMessages('analyze the');
+      const results = await stub.searchMessages('analyze the');
       expect(results.length).toBe(1);
       expect(results[0]!.snippet).toContain('analyze');
     });
@@ -1512,9 +2535,9 @@ describe('ProjectData Durable Object', () => {
       const stub = getStub('project-idea-link');
       const sessionId = await stub.createSession(null, 'Idea discussion');
 
-      stub.linkSessionIdea(sessionId, 'task-001', 'discussing auth flow');
+      await stub.linkSessionIdea(sessionId, 'task-001', 'discussing auth flow');
 
-      const ideas = stub.getIdeasForSession(sessionId);
+      const ideas = await stub.getIdeasForSession(sessionId);
       expect(ideas).toHaveLength(1);
       expect(ideas[0]!.taskId).toBe('task-001');
       expect(ideas[0]!.context).toBe('discussing auth flow');
@@ -1525,23 +2548,27 @@ describe('ProjectData Durable Object', () => {
       const stub = getStub('project-idea-multi-link');
       const sessionId = await stub.createSession(null, 'Multi-idea session');
 
-      stub.linkSessionIdea(sessionId, 'task-a', 'first idea');
-      stub.linkSessionIdea(sessionId, 'task-b', 'second idea');
-      stub.linkSessionIdea(sessionId, 'task-c', null);
+      await stub.linkSessionIdea(sessionId, 'task-a', 'first idea');
+      await stub.linkSessionIdea(sessionId, 'task-b', 'second idea');
+      await stub.linkSessionIdea(sessionId, 'task-c', null);
 
-      const ideas = stub.getIdeasForSession(sessionId);
+      const ideas = await stub.getIdeasForSession(sessionId);
       expect(ideas).toHaveLength(3);
-      expect(ideas.map((i: { taskId: string }) => i.taskId)).toEqual(['task-a', 'task-b', 'task-c']);
+      expect(ideas.map((i: { taskId: string }) => i.taskId)).toEqual([
+        'task-a',
+        'task-b',
+        'task-c',
+      ]);
     });
 
     it('is idempotent — duplicate links are silently ignored', async () => {
       const stub = getStub('project-idea-idempotent');
       const sessionId = await stub.createSession(null, 'Idempotent test');
 
-      stub.linkSessionIdea(sessionId, 'task-dup', 'first link');
-      stub.linkSessionIdea(sessionId, 'task-dup', 'second link attempt');
+      await stub.linkSessionIdea(sessionId, 'task-dup', 'first link');
+      await stub.linkSessionIdea(sessionId, 'task-dup', 'second link attempt');
 
-      const ideas = stub.getIdeasForSession(sessionId);
+      const ideas = await stub.getIdeasForSession(sessionId);
       expect(ideas).toHaveLength(1);
       // First context wins (INSERT OR IGNORE)
       expect(ideas[0]!.context).toBe('first link');
@@ -1551,10 +2578,10 @@ describe('ProjectData Durable Object', () => {
       const stub = getStub('project-idea-unlink');
       const sessionId = await stub.createSession(null, 'Unlink test');
 
-      stub.linkSessionIdea(sessionId, 'task-rm', 'to be removed');
-      stub.unlinkSessionIdea(sessionId, 'task-rm');
+      await stub.linkSessionIdea(sessionId, 'task-rm', 'to be removed');
+      await stub.unlinkSessionIdea(sessionId, 'task-rm');
 
-      const ideas = stub.getIdeasForSession(sessionId);
+      const ideas = await stub.getIdeasForSession(sessionId);
       expect(ideas).toHaveLength(0);
     });
 
@@ -1563,9 +2590,9 @@ describe('ProjectData Durable Object', () => {
       const sessionId = await stub.createSession(null, 'No-op test');
 
       // Should not throw
-      stub.unlinkSessionIdea(sessionId, 'nonexistent-task');
+      await stub.unlinkSessionIdea(sessionId, 'nonexistent-task');
 
-      const ideas = stub.getIdeasForSession(sessionId);
+      const ideas = await stub.getIdeasForSession(sessionId);
       expect(ideas).toHaveLength(0);
     });
 
@@ -1574,10 +2601,10 @@ describe('ProjectData Durable Object', () => {
       const s1 = await stub.createSession(null, 'Session one');
       const s2 = await stub.createSession(null, 'Session two');
 
-      stub.linkSessionIdea(s1, 'shared-task', 'context 1');
-      stub.linkSessionIdea(s2, 'shared-task', 'context 2');
+      await stub.linkSessionIdea(s1, 'shared-task', 'context 1');
+      await stub.linkSessionIdea(s2, 'shared-task', 'context 2');
 
-      const sessions = stub.getSessionsForIdea('shared-task');
+      const sessions = await stub.getSessionsForIdea('shared-task');
       expect(sessions).toHaveLength(2);
       expect(sessions[0]!.sessionId).toBe(s1);
       expect(sessions[0]!.topic).toBe('Session one');
@@ -1589,7 +2616,7 @@ describe('ProjectData Durable Object', () => {
     it('returns empty array for idea with no linked sessions', async () => {
       const stub = getStub('project-idea-no-sessions');
 
-      const sessions = stub.getSessionsForIdea('orphan-task');
+      const sessions = await stub.getSessionsForIdea('orphan-task');
       expect(sessions).toHaveLength(0);
     });
 
@@ -1597,32 +2624,34 @@ describe('ProjectData Durable Object', () => {
       const stub = getStub('project-idea-bad-session');
       await stub.ensureProjectId('project-idea-bad-session');
 
-      expect(() => {
-        stub.linkSessionIdea('nonexistent-session', 'task-x', null);
-      }).toThrow('Session not found: nonexistent-session');
+      await runInDurableObject(stub, async (instance) => {
+        await expect(
+          instance.linkSessionIdea('nonexistent-session', 'task-x', null)
+        ).rejects.toThrow('Session not found: nonexistent-session');
+      });
     });
 
     it('cascade deletes links when session is deleted', async () => {
       const stub = getStub('project-idea-cascade');
       const sessionId = await stub.createSession(null, 'Cascade test');
 
-      stub.linkSessionIdea(sessionId, 'task-cascade', 'will be deleted');
+      await stub.linkSessionIdea(sessionId, 'task-cascade', 'will be deleted');
 
       // Verify link exists
-      expect(stub.getIdeasForSession(sessionId)).toHaveLength(1);
+      expect(await stub.getIdeasForSession(sessionId)).toHaveLength(1);
 
       // Stop session (does not delete in current schema, just changes status)
       await stub.stopSession(sessionId);
 
       // Links should still exist since session is stopped, not deleted
-      expect(stub.getIdeasForSession(sessionId)).toHaveLength(1);
+      expect(await stub.getIdeasForSession(sessionId)).toHaveLength(1);
     });
 
     it('returns empty ideas for a session with no links', async () => {
       const stub = getStub('project-idea-empty-session');
       const sessionId = await stub.createSession(null, 'No links');
 
-      const ideas = stub.getIdeasForSession(sessionId);
+      const ideas = await stub.getIdeasForSession(sessionId);
       expect(ideas).toHaveLength(0);
       expect(ideas).toEqual([]);
     });
@@ -1631,9 +2660,9 @@ describe('ProjectData Durable Object', () => {
       const stub = getStub('project-idea-null-ctx');
       const sessionId = await stub.createSession(null, 'Null context');
 
-      stub.linkSessionIdea(sessionId, 'task-null', null);
+      await stub.linkSessionIdea(sessionId, 'task-null', null);
 
-      const ideas = stub.getIdeasForSession(sessionId);
+      const ideas = await stub.getIdeasForSession(sessionId);
       expect(ideas).toHaveLength(1);
       expect(ideas[0]!.context).toBeNull();
     });
@@ -1642,9 +2671,9 @@ describe('ProjectData Durable Object', () => {
       const stub = getStub('project-idea-linked-at');
       const sessionId = await stub.createSession(null, 'LinkedAt test');
 
-      stub.linkSessionIdea(sessionId, 'task-la', 'test');
+      await stub.linkSessionIdea(sessionId, 'task-la', 'test');
 
-      const sessions = stub.getSessionsForIdea('task-la');
+      const sessions = await stub.getSessionsForIdea('task-la');
       expect(sessions).toHaveLength(1);
       expect(sessions[0]!.linkedAt).toBeGreaterThan(0);
       expect(typeof sessions[0]!.linkedAt).toBe('number');
@@ -1672,13 +2701,9 @@ describe('ProjectData Durable Object', () => {
 
     it('replaces commands on re-cache', async () => {
       const stub = getStub('project-cache-cmds-2');
-      await stub.cacheCommands('claude-code', [
-        { name: 'old-cmd', description: 'Old' },
-      ]);
+      await stub.cacheCommands('claude-code', [{ name: 'old-cmd', description: 'Old' }]);
 
-      await stub.cacheCommands('claude-code', [
-        { name: 'new-cmd', description: 'New' },
-      ]);
+      await stub.cacheCommands('claude-code', [{ name: 'new-cmd', description: 'New' }]);
 
       const result = await stub.getCachedCommands('claude-code');
       expect(result).toHaveLength(1);

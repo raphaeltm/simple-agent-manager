@@ -14,14 +14,15 @@ This document defines the Pulumi resource definitions and TypeScript interfaces 
 
 ```typescript
 // infra/resources/database.ts
-import * as cloudflare from "@pulumi/cloudflare";
-import * as pulumi from "@pulumi/pulumi";
+import * as cloudflare from '@pulumi/cloudflare';
+import * as pulumi from '@pulumi/pulumi';
 
 const config = new pulumi.Config();
+const prefix = config.require('resourcePrefix');
 
-export const database = new cloudflare.D1Database("sam-database", {
-  accountId: config.require("cloudflareAccountId"),
-  name: `sam-${pulumi.getStack()}`,  // e.g., sam-prod
+export const database = new cloudflare.D1Database(`${prefix}-database`, {
+  accountId: config.require('cloudflareAccountId'),
+  name: `${prefix}-${pulumi.getStack()}`, // e.g., sa379a6-prod
 });
 
 // Export outputs for wrangler.toml
@@ -49,14 +50,15 @@ export const databaseName = database.name;
 
 ```typescript
 // infra/resources/kv.ts
-import * as cloudflare from "@pulumi/cloudflare";
-import * as pulumi from "@pulumi/pulumi";
+import * as cloudflare from '@pulumi/cloudflare';
+import * as pulumi from '@pulumi/pulumi';
 
 const config = new pulumi.Config();
+const prefix = config.require('resourcePrefix');
 
-export const kvNamespace = new cloudflare.WorkersKvNamespace("sam-kv", {
-  accountId: config.require("cloudflareAccountId"),
-  title: `sam-${pulumi.getStack()}-sessions`,  // e.g., sam-prod-sessions
+export const kvNamespace = new cloudflare.WorkersKvNamespace(`${prefix}-kv`, {
+  accountId: config.require('cloudflareAccountId'),
+  title: `${prefix}-${pulumi.getStack()}-sessions`, // e.g., sa379a6-prod-sessions
 });
 
 // Export outputs for wrangler.toml
@@ -84,15 +86,16 @@ export const kvNamespaceName = kvNamespace.title;
 
 ```typescript
 // infra/resources/storage.ts
-import * as cloudflare from "@pulumi/cloudflare";
-import * as pulumi from "@pulumi/pulumi";
+import * as cloudflare from '@pulumi/cloudflare';
+import * as pulumi from '@pulumi/pulumi';
 
 const config = new pulumi.Config();
+const prefix = config.require('resourcePrefix');
 
-export const r2Bucket = new cloudflare.R2Bucket("sam-r2", {
-  accountId: config.require("cloudflareAccountId"),
-  name: `sam-${pulumi.getStack()}-assets`,  // e.g., sam-prod-assets
-  location: "auto",  // Auto-select based on user location
+export const r2Bucket = new cloudflare.R2Bucket(`${prefix}-r2`, {
+  accountId: config.require('cloudflareAccountId'),
+  name: `${prefix}-${pulumi.getStack()}-assets`, // e.g., sa379a6-prod-assets
+  location: 'auto', // Auto-select based on user location
 });
 
 // Export outputs for wrangler.toml
@@ -119,44 +122,44 @@ export const r2BucketName = r2Bucket.name;
 
 ```typescript
 // infra/resources/dns.ts
-import * as cloudflare from "@pulumi/cloudflare";
-import * as pulumi from "@pulumi/pulumi";
+import * as cloudflare from '@pulumi/cloudflare';
+import * as pulumi from '@pulumi/pulumi';
 
 const config = new pulumi.Config();
-const zoneId = config.require("cloudflareZoneId");
-const baseDomain = config.require("baseDomain");
+const zoneId = config.require('cloudflareZoneId');
+const baseDomain = config.require('baseDomain');
 
 // API subdomain (api.example.com → Worker)
-export const apiDnsRecord = new cloudflare.DnsRecord("sam-dns-api", {
+export const apiDnsRecord = new cloudflare.DnsRecord('sam-dns-api', {
   zoneId: zoneId,
   name: `api.${baseDomain}`,
-  type: "CNAME",
-  content: "workspaces-api.workers.dev",  // Updated after Worker deploy
+  type: 'CNAME',
+  content: 'workspaces-api.workers.dev', // Updated after Worker deploy
   proxied: true,
-  ttl: 1,  // Auto TTL when proxied
-  comment: "SAM API - managed by Pulumi",
+  ttl: 1, // Auto TTL when proxied
+  comment: 'SAM API - managed by Pulumi',
 });
 
 // App subdomain (app.example.com → Pages)
-export const appDnsRecord = new cloudflare.DnsRecord("sam-dns-app", {
+export const appDnsRecord = new cloudflare.DnsRecord('sam-dns-app', {
   zoneId: zoneId,
   name: `app.${baseDomain}`,
-  type: "CNAME",
-  content: "workspaces-web.pages.dev",  // Updated after Pages deploy
+  type: 'CNAME',
+  content: 'workspaces-web.pages.dev', // Updated after Pages deploy
   proxied: true,
   ttl: 1,
-  comment: "SAM Web UI - managed by Pulumi",
+  comment: 'SAM Web UI - managed by Pulumi',
 });
 
 // Wildcard subdomain (*.example.com → Worker for workspace routing)
-export const wildcardDnsRecord = new cloudflare.DnsRecord("sam-dns-wildcard", {
+export const wildcardDnsRecord = new cloudflare.DnsRecord('sam-dns-wildcard', {
   zoneId: zoneId,
   name: `*.${baseDomain}`,
-  type: "CNAME",
-  content: "workspaces-api.workers.dev",
+  type: 'CNAME',
+  content: 'workspaces-api.workers.dev',
   proxied: true,
   ttl: 1,
-  comment: "SAM Workspaces - managed by Pulumi",
+  comment: 'SAM Workspaces - managed by Pulumi',
 });
 
 // Export record IDs for teardown
@@ -247,31 +250,31 @@ User-provided deployment configuration:
 export interface DeploymentConfig {
   // Pulumi backend (R2)
   pulumiStateBucket: string;
-  pulumiConfigPassphrase: string;  // Sensitive
+  pulumiConfigPassphrase: string; // Sensitive
 
   // Cloudflare
   cloudflare: {
     accountId: string;
-    apiToken: string;  // Sensitive
+    apiToken: string; // Sensitive
     zoneId: string;
   };
 
   // R2 credentials (for Pulumi backend)
   r2: {
-    accessKeyId: string;  // Sensitive
-    secretAccessKey: string;  // Sensitive
+    accessKeyId: string; // Sensitive
+    secretAccessKey: string; // Sensitive
   };
 
   // Application
   baseDomain: string;
-  environment: "production" | "staging";
+  environment: 'production' | 'staging';
 
   // Optional: GitHub App
   github?: {
     clientId: string;
-    clientSecret: string;  // Sensitive
+    clientSecret: string; // Sensitive
     appId: string;
-    appPrivateKey: string;  // Sensitive
+    appPrivateKey: string; // Sensitive
   };
 }
 ```
@@ -309,7 +312,7 @@ export interface WranglerTomlBindings {
 State is stored in user's R2 bucket:
 
 ```
-s3://sam-pulumi-state/
+s3://{prefix}-pulumi-state/
 ├── .pulumi/
 │   ├── stacks/
 │   │   └── prod.json       # Production stack state
@@ -319,6 +322,7 @@ s3://sam-pulumi-state/
 ```
 
 **State File Contents** (encrypted):
+
 - Resource definitions and their IDs
 - Output values
 - Dependency graph
@@ -378,12 +382,12 @@ s3://sam-pulumi-state/
 
 ### Resource Naming
 
-| Resource | Pattern | Constraints |
-|----------|---------|-------------|
-| D1 | `sam-{stack}` | 1-64 chars, alphanumeric + hyphen |
-| KV | `sam-{stack}-sessions` | 1-512 chars |
-| R2 | `sam-{stack}-assets` | 3-63 chars, lowercase + hyphen |
-| DNS | `{subdomain}.{baseDomain}` | Valid hostname |
+| Resource | Pattern                    | Constraints                       |
+| -------- | -------------------------- | --------------------------------- |
+| D1       | `sam-{stack}`              | 1-64 chars, alphanumeric + hyphen |
+| KV       | `sam-{stack}-sessions`     | 1-512 chars                       |
+| R2       | `sam-{stack}-assets`       | 3-63 chars, lowercase + hyphen    |
+| DNS      | `{subdomain}.{baseDomain}` | Valid hostname                    |
 
 ### Configuration Validation
 
@@ -393,22 +397,22 @@ export function validateConfig(config: DeploymentConfig): ValidationResult {
 
   // Account ID format
   if (!/^[a-f0-9]{32}$/.test(config.cloudflare.accountId)) {
-    errors.push("Invalid Cloudflare account ID format");
+    errors.push('Invalid Cloudflare account ID format');
   }
 
   // Zone ID format
   if (!/^[a-f0-9]{32}$/.test(config.cloudflare.zoneId)) {
-    errors.push("Invalid Cloudflare zone ID format");
+    errors.push('Invalid Cloudflare zone ID format');
   }
 
   // Domain format
   if (!/^[a-z0-9][a-z0-9.-]+\.[a-z]{2,}$/i.test(config.baseDomain)) {
-    errors.push("Invalid base domain format");
+    errors.push('Invalid base domain format');
   }
 
   // R2 bucket name
   if (!/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(config.pulumiStateBucket)) {
-    errors.push("Invalid R2 bucket name format");
+    errors.push('Invalid R2 bucket name format');
   }
 
   return { valid: errors.length === 0, errors };
@@ -442,6 +446,7 @@ This allows adopting Pulumi without recreating resources.
 ## Summary
 
 The Pulumi data model provides:
+
 1. **Declarative resources** with clear inputs/outputs
 2. **Type-safe configuration** via TypeScript
 3. **State management** in user's R2 bucket

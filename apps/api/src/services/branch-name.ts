@@ -2,7 +2,12 @@
  * Branch name generation service.
  *
  * Generates human-readable git branch names from user messages.
- * Uses task ID suffix for guaranteed uniqueness (no TOCTOU race).
+ * Appends the RANDOM tail of the task ULID for uniqueness (no TOCTOU race).
+ *
+ * NOTE: the suffix must come from the random portion of the ULID, not its
+ * timestamp prefix. A ULID is 10 timestamp chars + 16 random chars; the first
+ * chars carry only coarse time bits, so two tasks created in the same window
+ * would share them and collide. Slicing from the END keeps real entropy.
  *
  * See: specs/022-simplified-chat-ux/research.md (R6)
  */
@@ -99,7 +104,7 @@ interface BranchNameOptions {
  * 3. Split into words, filter stop words
  * 4. Take first N meaningful words
  * 5. Join with hyphens
- * 6. Append short task ID suffix (first 6 chars, lowercased)
+ * 6. Append short task ID suffix (last 6 chars of the ULID random tail, lowercased)
  * 7. Prefix with configurable prefix
  * 8. Truncate to max length
  * 9. Ensure valid git ref name
@@ -112,8 +117,10 @@ export function generateBranchName(
   const prefix = options.prefix ?? DEFAULT_PREFIX;
   const maxLength = options.maxLength ?? DEFAULT_MAX_LENGTH;
 
-  // Short task ID suffix (first 6 chars of ULID, lowercased)
-  const idSuffix = taskId.slice(0, 6).toLowerCase();
+  // Short task ID suffix (last 6 chars of the ULID random tail, lowercased).
+  // Must slice from the END: the leading ULID chars are timestamp bits with no
+  // entropy, so tasks created close in time would collide (see file header).
+  const idSuffix = taskId.slice(-6).toLowerCase();
 
   // Step 1: Lowercase
   let text = message.toLowerCase();
@@ -177,4 +184,34 @@ function sanitizeGitRef(ref: string, maxLength: number): string {
   result = result.replace(/-{2,}/g, '-');
 
   return result;
+}
+
+/**
+ * Whether a string is a branch name git would accept, per
+ * https://git-scm.com/docs/git-check-ref-format.
+ *
+ * Deliberately conservative: it rejects only what git definitely rejects, so an
+ * unusual-but-legal branch a user genuinely wants to continue from is never
+ * refused. A name that fails this check cannot exist on any remote, which is why
+ * `services/workspace-branch.ts` can treat it as `missing` without a lookup --
+ * and, more importantly, must never hand it to a ref-CREATE API.
+ */
+export function isValidGitRefName(ref: string): boolean {
+  if (!ref || ref !== ref.trim()) return false;
+  if (ref === '@') return false;
+
+  // ASCII control characters, DEL, space, and the characters git names explicitly.
+  for (const char of ref) {
+    const code = char.codePointAt(0) ?? 0;
+    if (code < 0x20 || code === 0x7f) return false;
+  }
+  if (/[ ~^:?*[\\]/.test(ref)) return false;
+
+  if (ref.includes('..') || ref.includes('@{')) return false;
+  if (ref.startsWith('/') || ref.endsWith('/') || ref.includes('//')) return false;
+  if (ref.startsWith('-')) return false;
+  if (ref.endsWith('.')) return false;
+
+  // Per-component rules: no empty component, no leading dot, no `.lock` suffix.
+  return ref.split('/').every((part) => Boolean(part) && !part.startsWith('.') && !part.endsWith('.lock'));
 }

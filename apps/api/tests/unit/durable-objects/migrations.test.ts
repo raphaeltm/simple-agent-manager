@@ -1,6 +1,8 @@
+import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 
 import { MIGRATIONS, runMigrations } from '../../../src/durable-objects/migrations';
+import { createSqlStorage } from './sql-storage-test-utils';
 
 /**
  * In-memory mock of SqlStorage for testing migration logic.
@@ -9,6 +11,7 @@ import { MIGRATIONS, runMigrations } from '../../../src/durable-objects/migratio
 class MockSqlStorage {
   private tables = new Map<string, Record<string, unknown>[]>();
   private execLog: string[] = [];
+  private toolPayloadArchiveColumns = new Set(['message_id']);
 
   exec(query: string, ...params: unknown[]): { toArray: () => Record<string, unknown>[] } {
     this.execLog.push(query.trim());
@@ -30,6 +33,17 @@ class MockSqlStorage {
         this.tables.set(tableMatch[1], []);
       }
       return { toArray: () => [] };
+    }
+
+    if (normalized.startsWith('ALTER TABLE TOOL_PAYLOAD_ARCHIVES ADD COLUMN')) {
+      const column = query.match(/ADD COLUMN\s+(\w+)/i)?.[1];
+      if (column) this.toolPayloadArchiveColumns.add(column);
+      return { toArray: () => [] };
+    }
+
+    if (normalized.startsWith('PRAGMA TABLE_INFO(TOOL_PAYLOAD_ARCHIVES)')) {
+      const columns = [...this.toolPayloadArchiveColumns].map((name) => ({ name }));
+      return { toArray: () => columns };
     }
 
     // Handle SELECT name FROM migrations
@@ -59,6 +73,34 @@ class MockSqlStorage {
 }
 
 describe('DO Migrations', () => {
+  it('adds the submission checkpoint without reclassifying an existing in-flight prompt', () => {
+    const db = new Database(':memory:');
+    try {
+      const sql = createSqlStorage(db);
+      sql.exec(`CREATE TABLE session_inbox (
+        id TEXT PRIMARY KEY, delivery_state TEXT, attempt_id TEXT, runtime_identity TEXT
+      )`);
+      sql.exec(
+        `INSERT INTO session_inbox VALUES ('existing', 'delivering', 'attempt-before-deploy', 'runtime-before-deploy')`
+      );
+      const migration = MIGRATIONS.find(
+        (entry) => entry.name === '046-prompt-delivery-submit-phase'
+      );
+      expect(migration).toBeDefined();
+      migration!.run(sql);
+      migration!.run(sql);
+      expect(db.prepare('SELECT * FROM session_inbox').get()).toEqual({
+        id: 'existing',
+        delivery_state: 'delivering',
+        attempt_id: 'attempt-before-deploy',
+        runtime_identity: 'runtime-before-deploy',
+        prompt_delivery_phase: null,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   describe('MIGRATIONS array', () => {
     it('has at least one migration defined', () => {
       expect(MIGRATIONS.length).toBeGreaterThanOrEqual(1);
@@ -80,6 +122,48 @@ describe('DO Migrations', () => {
         expect(migration.name.length).toBeGreaterThan(0);
         expect(typeof migration.run).toBe('function');
       }
+    });
+  });
+
+  describe('044-tool-payload-archive-verification-proof migration', () => {
+    const migration = MIGRATIONS.find(
+      (candidate) => candidate.name === '044-tool-payload-archive-verification-proof'
+    );
+
+    it('is idempotent only for exact duplicate-column errors', () => {
+      expect(migration).toBeDefined();
+      const db = new Database(':memory:');
+      try {
+        const sql = createSqlStorage(db);
+        db.exec('CREATE TABLE tool_payload_archives (message_id TEXT PRIMARY KEY)');
+        migration!.run(sql);
+        expect(() => migration!.run(sql)).not.toThrow();
+        const columns = db.prepare('PRAGMA table_info(tool_payload_archives)').all() as Array<{
+          name: string;
+        }>;
+        expect(columns.map((column) => column.name)).toEqual(
+          expect.arrayContaining([
+            'archive_body_bytes',
+            'archive_body_sha256',
+            'root_object_bytes',
+            'root_object_sha256',
+            'verified_object_count',
+            'source_tool_metadata_sha256',
+          ])
+        );
+      } finally {
+        db.close();
+      }
+    });
+
+    it('rethrows unrelated ALTER TABLE failures', () => {
+      expect(migration).toBeDefined();
+      const sql = {
+        exec: () => {
+          throw new Error('database or disk is full');
+        },
+      } as unknown as SqlStorage;
+      expect(() => migration!.run(sql)).toThrow('database or disk is full');
     });
   });
 
@@ -130,6 +214,245 @@ describe('DO Migrations', () => {
 
       expect(sql1.getMigrationsTable().length).toBe(sql2.getMigrationsTable().length);
     });
+
+    it('applies the full SQLite chain on a clean install', () => {
+      const db = new Database(':memory:');
+      try {
+        const sql = createSqlStorage(db);
+        runMigrations(sql);
+
+        const applied = db.prepare('SELECT name FROM migrations ORDER BY rowid').all() as Array<{
+          name: string;
+        }>;
+        expect(applied.map((row) => row.name)).toEqual(
+          MIGRATIONS.map((migration) => migration.name)
+        );
+        expect(
+          db
+            .prepare(
+              "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'checkpoint_episodes'"
+            )
+            .get()
+        ).toEqual({ name: 'checkpoint_episodes' });
+        const inboxColumns = db.prepare('PRAGMA table_info(session_inbox)').all() as Array<{
+          name: string;
+        }>;
+        expect(inboxColumns.map((column) => column.name)).toContain('receipt_state');
+        expect(inboxColumns.map((column) => column.name)).toContain('next_attempt_at');
+        const idleCleanupColumns = db
+          .prepare('PRAGMA table_info(idle_cleanup_schedule)')
+          .all() as Array<{ name: string }>;
+        expect(idleCleanupColumns.map((column) => column.name)).toEqual(
+          expect.arrayContaining([
+            'terminal_state',
+            'terminal_reason',
+            'terminal_at',
+            'last_error',
+            'failure_notified_at',
+            'attention_marker_id',
+          ])
+        );
+        const sessionStateColumns = db.prepare('PRAGMA table_info(session_state)').all() as Array<{
+          name: string;
+        }>;
+        expect(sessionStateColumns.map((column) => column.name)).toEqual(
+          expect.arrayContaining([
+            'runtime_work_state',
+            'runtime_work_count',
+            'runtime_work_source',
+            'runtime_work_updated_at',
+            'runtime_work_progress_at',
+          ])
+        );
+        expect(
+          db
+            .prepare(
+              "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'task_wait_subscriptions'"
+            )
+            .get()
+        ).toEqual({ name: 'task_wait_subscriptions' });
+        for (const table of [
+          'project_events',
+          'project_event_subscriptions',
+          'project_event_subscription_match_keys',
+          'project_event_matches',
+          'project_event_delivery_batches',
+          'project_event_delivery_attempts',
+          'project_event_storage_accounting',
+          'project_data_archive_source_intents',
+          'project_data_archive_target_sessions',
+          'project_data_archive_target_chunks',
+        ]) {
+          expect(
+            db
+              .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+              .get(table)
+          ).toEqual({ name: table });
+        }
+        for (const index of [
+          'idx_project_events_project_received',
+          'idx_project_event_subscriptions_project_state',
+          'idx_project_event_subscription_match_keys_lookup',
+          'idx_project_event_matches_project_event',
+          'idx_project_event_matches_project_subscription_replay',
+          'idx_project_event_delivery_batches_project_state',
+          'idx_project_event_delivery_attempts_project_batch',
+          'idx_project_event_storage_accounting_project_measured',
+        ]) {
+          expect(
+            db
+              .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?")
+              .get(index)
+          ).toEqual({ name: index });
+        }
+        const deliveryBatchColumns = db
+          .prepare('PRAGMA table_info(project_event_delivery_batches)')
+          .all() as Array<{ name: string }>;
+        expect(deliveryBatchColumns.map((column) => column.name)).toContain(
+          'adapter_decision_json'
+        );
+        expect(deliveryBatchColumns.map((column) => column.name)).toEqual(
+          expect.arrayContaining([
+            'ack_required',
+            'delivered_at',
+            'acked_at',
+            'acked_by_type',
+            'acked_by_id',
+            'acked_by_name',
+          ])
+        );
+        const chatSessionColumns = db.prepare('PRAGMA table_info(chat_sessions)').all() as Array<{
+          name: string;
+        }>;
+        expect(chatSessionColumns.map((column) => column.name)).toEqual(
+          expect.arrayContaining([
+            'archive_last_message_at',
+            'archive_owner_name',
+            'archive_generation',
+            'archive_migration_id',
+            'archive_state',
+          ])
+        );
+      } finally {
+        db.close();
+      }
+    });
+
+    it('upgrades a migration-025 database without replacing ProjectData parent tables', () => {
+      const db = new Database(':memory:');
+      try {
+        const sql = createSqlStorage(db);
+        sql.exec(`CREATE TABLE migrations (name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)`);
+        const promptDeliveryMigrationIndex = MIGRATIONS.findIndex(
+          (migration) => migration.name === '027-durable-prompt-delivery-checkpoints'
+        );
+        expect(promptDeliveryMigrationIndex).toBeGreaterThan(0);
+        for (const migration of MIGRATIONS.slice(0, promptDeliveryMigrationIndex)) {
+          migration.run(sql);
+          sql.exec('INSERT INTO migrations (name, applied_at) VALUES (?, ?)', migration.name, 1);
+        }
+        sql.exec(
+          `INSERT INTO chat_sessions
+           (id, topic, status, message_count, started_at, created_at, updated_at)
+           VALUES ('chat-upgrade', 'Existing', 'active', 0, 1, 1, 1)`
+        );
+        sql.exec(
+          `INSERT INTO session_state
+           (session_id, activity, activity_at, prompt_started_at, restart_count)
+           VALUES ('acp-upgrade', 'prompting', 2, 1, 0)`
+        );
+        sql.exec(
+          `INSERT INTO session_inbox
+           (id, target_session_id, message_type, content, priority, created_at,
+            message_class, delivery_state, sender_type, ack_required, delivery_attempts,
+            expires_at)
+           VALUES ('mail-upgrade', 'chat-upgrade', 'deliver', 'existing', 'high', 2,
+                   'deliver', 'queued', 'agent', 1, 0, 60002)`
+        );
+
+        runMigrations(sql);
+
+        expect(
+          db
+            .prepare(
+              "SELECT content, prompt_message_id, next_attempt_at FROM session_inbox WHERE id = 'mail-upgrade'"
+            )
+            .get()
+        ).toEqual({
+          content: 'existing',
+          prompt_message_id: 'mail-upgrade',
+          next_attempt_at: 2,
+        });
+        expect(
+          db
+            .prepare(
+              "SELECT prompt_started_at, prompt_epoch FROM session_state WHERE session_id = 'acp-upgrade'"
+            )
+            .get()
+        ).toEqual({
+          prompt_started_at: 1,
+          prompt_epoch: null,
+        });
+        expect(
+          db.prepare("SELECT COUNT(*) AS count FROM chat_sessions WHERE id = 'chat-upgrade'").get()
+        ).toEqual({ count: 1 });
+        expect(
+          db
+            .prepare(
+              "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'task_wait_children'"
+            )
+            .get()
+        ).toEqual({ name: 'task_wait_children' });
+      } finally {
+        db.close();
+      }
+    });
+
+    it('upgrades the originally recorded base task-wait shape additively', () => {
+      const db = new Database(':memory:');
+      try {
+        const sql = createSqlStorage(db);
+        sql.exec(`CREATE TABLE migrations (name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)`);
+        const hardeningIndex = MIGRATIONS.findIndex(
+          (migration) => migration.name === '031-task-wait-replay-hardening'
+        );
+        expect(hardeningIndex).toBeGreaterThan(0);
+        for (const migration of MIGRATIONS.slice(0, hardeningIndex)) {
+          migration.run(sql);
+          sql.exec('INSERT INTO migrations (name, applied_at) VALUES (?, ?)', migration.name, 1);
+        }
+        sql.exec(
+          `INSERT INTO task_wait_subscriptions
+           (id, parent_task_id, parent_session_id, wait_condition, state, child_count,
+            wake_deadline, next_reconcile_at, wake_delivery_id, created_at, updated_at)
+           VALUES ('wait-legacy', 'parent-1', 'chat-1', 'all', 'active', 1,
+                   10000, 9000, 'wake-legacy', 1, 1)`
+        );
+
+        runMigrations(sql);
+
+        const columns = db.prepare('PRAGMA table_info(task_wait_subscriptions)').all() as Array<{
+          name: string;
+        }>;
+        expect(columns.map((column) => column.name)).toEqual(
+          expect.arrayContaining(['idempotency_key', 'wake_content', 'wake_attempts'])
+        );
+        expect(
+          db
+            .prepare(
+              `SELECT idempotency_key, wake_content, wake_attempts
+               FROM task_wait_subscriptions WHERE id = 'wait-legacy'`
+            )
+            .get()
+        ).toEqual({
+          idempotency_key: 'legacy-wait-legacy',
+          wake_content: null,
+          wake_attempts: 0,
+        });
+      } finally {
+        db.close();
+      }
+    });
   });
 
   describe('001-initial-schema migration', () => {
@@ -152,7 +475,9 @@ describe('DO Migrations', () => {
       const createStatements = log.filter((q) => {
         const upper = q.toUpperCase();
         // Match "CREATE TABLE chat_messages" but not "CREATE TABLE chat_messages_grouped"
-        return upper.includes('CREATE TABLE CHAT_MESSAGES') && !upper.includes('CHAT_MESSAGES_GROUPED');
+        return (
+          upper.includes('CREATE TABLE CHAT_MESSAGES') && !upper.includes('CHAT_MESSAGES_GROUPED')
+        );
       });
       expect(createStatements.length).toBe(1);
     });
@@ -207,7 +532,39 @@ describe('DO Migrations', () => {
       // handoff_packets: 3 (mission_id, from_task_id, to_task_id) from migration 018
       // project_policies: 2 (active, category+active) from migration 019
       // session_attention_markers: 2 (active, expiry) from migration 020
-      expect(indexes.length).toBe(39);
+      // activity_events: 1 (session_id, created_at partial) from migration 022
+      // chat_sessions: 1 (created_by_user_id) from migration 023
+      // session_attention_markers: 1 (next_escalation_at partial) from migration 026
+      // delivery-aware attention expiry: 1 from migration 026
+      // session_inbox: 2 (durable delivery due + claims) from migration 027
+      // checkpoint_episodes: 2 (session + state) from migration 027
+      // idle_cleanup_schedule: 2 (active cleanup_at + terminal marker) from migration 028
+      // session_state: 1 (working-activity staleness scan) from migration 029
+      // durable task waits: 2 (due + child) from migration 030; the
+      // active-parent (030) and idempotency (031) indexes are CREATE UNIQUE
+      // INDEX and are counted separately
+      // message-anchored comments: 6 from migration 032
+      // library-file comments: 4 from migration 033 (2 threads, 1 replies,
+      // 1 status_mutations)
+      // project-wide comment activity: 4 from migration 035 (chat/library
+      // updated_at + status/updated_at)
+      // tool payload archives: 3 from migration 036 (session+created,
+      // created_at, archived_at)
+      // tool payload cleanup attempts: 1 from migration 037 (retry sweep)
+      // project event subscriptions: 15 from migration 038
+      // project event delivery decisions: 0 from migration 039 (additive column only)
+      // project event pull ack: 1 replay index from migration 040
+      // terminal session reconcile marker: 1 from migration 041
+      // chat search materialization state: 1 from migration 042
+      // terminal archive sharding bridge: 3 from migration 043
+      // compact raw chunk time ranges: 1 from migration 045
+      // project event wake delivery: 6 from migration 047
+      // project event wake retention repair indexes: 9 from migration 048
+      // Additive audience/channel/schedule/wake-seek indexes (049–054): 18.
+      // Active mailbox capacity index (055): 1.
+      // Complete archive-search projection: 1 session seek index (058).
+      expect(indexes).toHaveLength(126);
+      expect(indexes.some((query) => query.includes('idx_archive_raw_chunk_time'))).toBe(true);
     });
   });
 });

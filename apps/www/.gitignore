@@ -7,3 +7,6 @@ public/scripts/tracker.js
 
 # Compiled from src/scripts/blog-mermaid.ts by build:blog-mermaid script
 public/scripts/blog-mermaid.js
+
+# Compiled from src/scripts/docs-mermaid.ts by build:docs-mermaid script
+public/scripts/docs-mermaid.js

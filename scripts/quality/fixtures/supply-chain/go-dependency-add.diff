@@ -1,0 +1,5 @@
+diff --git a/packages/vm-agent/go.mod b/packages/vm-agent/go.mod
+--- a/packages/vm-agent/go.mod
++++ b/packages/vm-agent/go.mod
+@@ -3,0 +4 @@
++require golang.org/x/crypto v0.40.0

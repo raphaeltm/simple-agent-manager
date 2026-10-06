@@ -1,8 +1,9 @@
-import type { AgentProfile, Task } from '@simple-agent-manager/shared';
+import type { Task } from '@simple-agent-manager/shared';
 import { Button, Input } from '@simple-agent-manager/ui';
-import { type FormEvent,useEffect, useState } from 'react';
+import { type FormEvent, useState } from 'react';
 
-import { listAgentProfiles } from '../../lib/api';
+import { useAgentProfiles } from '../../hooks/useAgentProfiles';
+import { useQueryScope } from '../../hooks/useQueryScope';
 import { ProfileSelector } from '../agent-profiles/ProfileSelector';
 
 export interface TaskFormValues {
@@ -44,16 +45,8 @@ export function TaskForm({
     agentProfileId: initialValues?.agentProfileId ?? '',
   });
   const [error, setError] = useState<string | null>(null);
-  const [profiles, setProfiles] = useState<AgentProfile[]>([]);
-
-  // Load profiles
-  useEffect(() => {
-    let cancelled = false;
-    void listAgentProfiles(projectId)
-      .then((data) => { if (!cancelled) setProfiles(data); })
-      .catch(() => { /* best-effort */ });
-    return () => { cancelled = true; };
-  }, [projectId]);
+  const queryScope = useQueryScope();
+  const { profiles } = useAgentProfiles(projectId, queryScope);
 
   const candidateParents = tasks.filter((task) => task.id !== currentTaskId);
   const updateField = <K extends keyof TaskFormValues>(field: K, value: TaskFormValues[K]) => {

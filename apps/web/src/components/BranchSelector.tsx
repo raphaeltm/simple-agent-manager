@@ -1,5 +1,6 @@
 import { Input, Spinner } from '@simple-agent-manager/ui';
-import { useEffect, useMemo,useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 interface BranchSelectorProps {
   id?: string;
@@ -30,6 +31,7 @@ export function BranchSelector({
   const [highlightIndex, setHighlightIndex] = useState(-1);
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const filteredBranches = useMemo(() => {
     if (!value) {
@@ -43,9 +45,7 @@ export function BranchSelector({
     }
 
     const searchTerm = value.toLowerCase();
-    const matching = branches.filter((b) =>
-      b.name.toLowerCase().includes(searchTerm)
-    );
+    const matching = branches.filter((b) => b.name.toLowerCase().includes(searchTerm));
 
     // Pin default branch to top if it matches
     if (defaultBranch) {
@@ -109,15 +109,11 @@ export function BranchSelector({
     switch (e.key) {
       case 'ArrowDown':
         e.preventDefault();
-        setHighlightIndex((i) =>
-          i < filteredBranches.length - 1 ? i + 1 : 0
-        );
+        setHighlightIndex((i) => (i < filteredBranches.length - 1 ? i + 1 : 0));
         break;
       case 'ArrowUp':
         e.preventDefault();
-        setHighlightIndex((i) =>
-          i > 0 ? i - 1 : filteredBranches.length - 1
-        );
+        setHighlightIndex((i) => (i > 0 ? i - 1 : filteredBranches.length - 1));
         break;
       case 'Enter':
         e.preventDefault();
@@ -137,7 +133,7 @@ export function BranchSelector({
   const inputHeight = compact ? 36 : undefined;
 
   return (
-    <div className="relative">
+    <div ref={containerRef} className="relative">
       <div className="flex items-center">
         <Input
           ref={inputRef}
@@ -159,106 +155,133 @@ export function BranchSelector({
           style={compact ? { minHeight: inputHeight, fontSize: 13 } : undefined}
         />
         {loading && (
-          <div style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)' }}>
+          <div
+            style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)' }}
+          >
             <Spinner size="sm" />
           </div>
         )}
       </div>
 
-      {showDropdown && filteredBranches.length > 0 && (
-        <div
-          ref={dropdownRef}
-          style={{
-            position: 'absolute',
-            zIndex: 'var(--sam-z-dropdown)' as unknown as number,
-            width: '100%',
-            marginTop: '4px',
-            backgroundColor: 'var(--sam-color-bg-surface)',
-            border: '1px solid var(--sam-color-border-default)',
-            borderRadius: 'var(--sam-radius-md)',
-            boxShadow: 'var(--sam-shadow-overlay)',
-            maxHeight: compact ? '12rem' : '15rem',
-            overflowY: 'auto',
-          }}
-        >
-          {filteredBranches.map((branch, index) => {
-            const isDefault = branch.name === defaultBranch;
-            const isHighlighted = index === highlightIndex;
-            return (
-              <button
-                key={branch.name}
-                type="button"
-                data-branch-item
-                onClick={() => handleSelect(branch.name)}
-                className="sam-hover-surface"
-                style={{
-                  width: '100%',
-                  padding: compact ? '0.375rem 0.625rem' : '0.5rem 0.75rem',
-                  textAlign: 'left',
-                  background: isHighlighted
-                    ? 'var(--sam-color-bg-surface-hover, rgba(255,255,255,0.06))'
-                    : 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  color: 'var(--sam-color-fg-primary)',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-2)' }}>
-                  <span
-                    style={{
-                      fontWeight: isDefault ? 600 : 500,
-                      fontSize: compact ? '12px' : 'var(--sam-type-secondary-size)',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {branch.name}
-                  </span>
-                  {isDefault && (
+      {showDropdown &&
+        filteredBranches.length > 0 &&
+        createPortal(
+          <div
+            ref={dropdownRef}
+            className="glass-surface"
+            style={{
+              position: 'fixed',
+              zIndex: 'var(--sam-z-dropdown)' as unknown as number,
+              ...(() => {
+                const container = containerRef.current;
+                if (!container) return {};
+                const r = container.getBoundingClientRect();
+                return { top: r.bottom + 4, left: r.left, width: r.width };
+              })(),
+              borderRadius: 'var(--sam-radius-md)',
+              boxShadow: 'var(--sam-shadow-overlay)',
+              maxHeight: compact ? '12rem' : '15rem',
+              overflowY: 'auto',
+            }}
+          >
+            {filteredBranches.map((branch, index) => {
+              const isDefault = branch.name === defaultBranch;
+              const isHighlighted = index === highlightIndex;
+              return (
+                <button
+                  key={branch.name}
+                  type="button"
+                  data-branch-item
+                  onClick={() => handleSelect(branch.name)}
+                  className="sam-hover-surface"
+                  style={{
+                    width: '100%',
+                    padding: compact ? '0.375rem 0.625rem' : '0.5rem 0.75rem',
+                    textAlign: 'left',
+                    background: isHighlighted
+                      ? 'var(--sam-color-bg-surface-hover, rgba(255,255,255,0.06))'
+                      : 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: 'var(--sam-color-fg-primary)',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-2)' }}>
                     <span
                       style={{
-                        padding: '1px 6px',
-                        fontSize: '0.7rem',
-                        backgroundColor: 'var(--sam-color-accent-primary)',
-                        color: '#fff',
-                        borderRadius: 'var(--sam-radius-sm)',
-                        flexShrink: 0,
+                        fontWeight: isDefault ? 600 : 500,
+                        fontSize: compact ? '12px' : 'var(--sam-type-secondary-size)',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
                       }}
                     >
-                      default
+                      {branch.name}
                     </span>
-                  )}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      )}
+                    {isDefault && (
+                      <span
+                        style={{
+                          padding: '1px 6px',
+                          fontSize: '0.7rem',
+                          backgroundColor: 'var(--sam-color-accent-primary)',
+                          color: '#fff',
+                          borderRadius: 'var(--sam-radius-sm)',
+                          flexShrink: 0,
+                        }}
+                      >
+                        default
+                      </span>
+                    )}
+                  </div>
+                </button>
+              );
+            })}
+          </div>,
+          document.body
+        )}
 
-      {showDropdown && value && filteredBranches.length === 0 && branches.length > 0 && (
-        <div
-          ref={dropdownRef}
-          style={{
-            position: 'absolute',
-            zIndex: 'var(--sam-z-dropdown)' as unknown as number,
-            width: '100%',
-            marginTop: '4px',
-            backgroundColor: 'var(--sam-color-bg-surface)',
-            border: '1px solid var(--sam-color-border-default)',
-            borderRadius: 'var(--sam-radius-md)',
-            boxShadow: 'var(--sam-shadow-overlay)',
-            padding: '0.5rem 0.75rem',
-          }}
-        >
-          <span style={{ fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
-            No matching branches
-          </span>
-        </div>
-      )}
+      {showDropdown &&
+        value &&
+        filteredBranches.length === 0 &&
+        branches.length > 0 &&
+        createPortal(
+          <div
+            ref={dropdownRef}
+            className="glass-surface"
+            style={{
+              position: 'fixed',
+              zIndex: 'var(--sam-z-dropdown)' as unknown as number,
+              ...(() => {
+                const container = containerRef.current;
+                if (!container) return {};
+                const r = container.getBoundingClientRect();
+                return { top: r.bottom + 4, left: r.left, width: r.width };
+              })(),
+              borderRadius: 'var(--sam-radius-md)',
+              boxShadow: 'var(--sam-shadow-overlay)',
+              padding: '0.5rem 0.75rem',
+            }}
+          >
+            <span
+              style={{
+                fontSize: 'var(--sam-type-caption-size)',
+                color: 'var(--sam-color-fg-muted)',
+              }}
+            >
+              No matching branches
+            </span>
+          </div>,
+          document.body
+        )}
 
       {error && (
-        <p style={{ marginTop: 'var(--sam-space-1)', fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
+        <p
+          style={{
+            marginTop: 'var(--sam-space-1)',
+            fontSize: 'var(--sam-type-caption-size)',
+            color: 'var(--sam-color-fg-muted)',
+          }}
+        >
           {error}
         </p>
       )}

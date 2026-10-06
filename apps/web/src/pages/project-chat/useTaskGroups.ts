@@ -1,4 +1,4 @@
-import type { Task, TaskMode, TaskStatus } from '@simple-agent-manager/shared';
+import type { Task, TaskExecutionStep, TaskMode, TaskStatus } from '@simple-agent-manager/shared';
 
 /**
  * Per-task metadata needed for rendering the session tree.
@@ -13,6 +13,8 @@ export interface TaskInfo {
   title: string;
   parentTaskId: string | null;
   status: TaskStatus;
+  errorMessage?: string | null;
+  executionStep?: TaskExecutionStep | null;
   blocked: boolean;
   /** What created this task (user, cron, webhook, mcp). */
   triggeredBy: string;
@@ -33,6 +35,8 @@ export function buildTaskInfoMap(tasks: Task[]): Map<string, TaskInfo> {
       title: t.title,
       parentTaskId: t.parentTaskId,
       status: t.status,
+      errorMessage: t.errorMessage,
+      executionStep: t.executionStep,
       blocked: t.blocked ?? false,
       triggeredBy: t.triggeredBy ?? 'user',
       dispatchDepth: t.dispatchDepth ?? 0,

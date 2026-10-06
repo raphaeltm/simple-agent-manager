@@ -1,0 +1,405 @@
+import { drizzle } from 'drizzle-orm/d1';
+
+import * as schema from '../db/schema';
+import type { Env } from '../env';
+import { log } from '../lib/logger';
+import { reconcileDiagnosisRuns } from '../services/diagnosis-runner';
+import { reconcileDiagnosticIncidents } from '../services/diagnostic-incident-reconciliation';
+import { isOperationalLoopEnabled } from '../services/operational-kill-switch';
+import { checkProvisioningTimeouts } from '../services/timeout';
+import { migrateOrphanedWorkspaces } from '../services/workspace-migration';
+import { runWorkspaceResourceHistoryCleanup } from '../services/workspace-resource-history';
+import { runAnalyticsForwardJob } from './analytics-forward';
+import { runScheduledCapacityPoolReconciliation } from './capacity-pool-reconciliation';
+import { runScheduledComposeImageArtifactCleanup } from './compose-image-artifact-cleanup';
+import { runComputeUsageCleanup } from './compute-usage-cleanup';
+import { runCronTriggerSweep } from './cron-triggers';
+import { runScheduledDeploymentReleaseRetention } from './d1-retention';
+import { notifyFailedSweeps } from './failed-sweep-notifications';
+import { runIncidentTriggerSweep } from './incident-triggers';
+import { runNodeCleanupSweep } from './node-cleanup';
+import { runObservabilityPurge } from './observability-purge';
+import {
+  isHourlyPlatformMaintenanceCron,
+  scheduleHourlyPlatformMaintenance,
+} from './platform-feedback-hourly';
+import { runProjectDataArchiveSharding } from './project-data-archive-sharding';
+import { runProjectDataStorageReliefPreflight } from './project-data-storage-relief-preflight';
+import { runProviderOrphanReconciliation } from './provider-orphan-reconciliation';
+import { runSessionSleepSweep } from './session-sleep';
+import { runSessionSleepLifecycleRepair } from './session-sleep-lifecycle-repair';
+import { runScheduledSessionSnapshotPurge } from './session-snapshot-purge';
+import { runSessionTaskReconciliation } from './session-task-reconciliation';
+import { runSetupSessionSweep } from './setup-session-sweep';
+import { recoverStuckTasks } from './stuck-tasks';
+import { createSweepIsolator } from './sweep-isolation';
+import { runTerminalNodeLifecycleRepair } from './terminal-node-lifecycle-repair';
+import { runTerminalSessionLedgerReconciliation } from './terminal-session-ledger-reconciliation';
+import { runTrialExpireSweep } from './trial-expire';
+import { runTrialRolloverAudit } from './trial-rollover';
+import { runTrialWaitlistCleanup } from './trial-waitlist-cleanup';
+import { runTriggerExecutionCleanup } from './trigger-execution-cleanup';
+
+/** Cloudflare scheduled entry point. Special cron jobs are not part of the operational sweep brake. */
+export async function scheduled(
+  controller: ScheduledController,
+  env: Env,
+  ctx: ExecutionContext
+): Promise<void> {
+  const rolloverCron = env.TRIAL_CRON_ROLLOVER_CRON ?? '0 5 1 * *';
+  const waitlistCleanupCron = env.TRIAL_CRON_WAITLIST_CLEANUP ?? '0 4 * * *';
+
+  const isDailyForward = controller.cron === '0 3 * * *';
+  const isMonthlyCostAggregation = isHourlyPlatformMaintenanceCron(controller.cron);
+  const isTrialRollover = controller.cron === rolloverCron;
+  const isTrialWaitlistCleanup = controller.cron === waitlistCleanupCron;
+
+  const cronType = isDailyForward
+    ? 'daily-forward'
+    : isMonthlyCostAggregation
+      ? 'monthly-cost-aggregation'
+      : isTrialRollover
+        ? 'trial-rollover'
+        : isTrialWaitlistCleanup
+          ? 'trial-waitlist-cleanup'
+          : 'sweep';
+
+  log.info('cron.started', { cron: controller.cron, type: cronType });
+
+  if (scheduleHourlyPlatformMaintenance(controller.cron, env, ctx.waitUntil.bind(ctx))) return;
+
+  if (isDailyForward) {
+    ctx.waitUntil(
+      (async () => {
+        const forward = await runAnalyticsForwardJob(env);
+        log.info('cron.completed', {
+          cron: controller.cron,
+          type: 'daily-forward',
+          forwardEnabled: forward.enabled,
+          forwardEventsQueried: forward.eventsQueried,
+          forwardSegmentSent: forward.segment.sent,
+          forwardGA4Sent: forward.ga4.sent,
+          forwardCursorUpdated: forward.cursorUpdated,
+        });
+      })()
+    );
+    return;
+  }
+
+  if (isTrialRollover) {
+    ctx.waitUntil(
+      (async () => {
+        const rollover = await runTrialRolloverAudit(env);
+        log.info('cron.completed', {
+          cron: controller.cron,
+          type: 'trial-rollover',
+          trialRolloverMonthKey: rollover.monthKey,
+          trialRolloverPruned: rollover.pruned,
+        });
+      })()
+    );
+    return;
+  }
+
+  if (isTrialWaitlistCleanup) {
+    ctx.waitUntil(
+      (async () => {
+        const waitlist = await runTrialWaitlistCleanup(env);
+        log.info('cron.completed', {
+          cron: controller.cron,
+          type: 'trial-waitlist-cleanup',
+          trialWaitlistPurged: waitlist.purged,
+        });
+      })()
+    );
+    return;
+  }
+
+  if (!(await isOperationalLoopEnabled(env, 'cron'))) {
+    log.info('cron.skipped_disabled', { cron: controller.cron, type: 'sweep', switch: 'cron' });
+    return;
+  }
+
+  // Every sweep is isolated so one failure cannot suppress later recovery work.
+  const sweeps = createSweepIsolator(env);
+  const diagnosisRecovery = await sweeps.isolate('diagnosis_reconcile', () =>
+    reconcileDiagnosisRuns(env)
+  );
+  const incidentRecovery = await sweeps.isolate('diagnostic_incident_reconciliation', () =>
+    reconcileDiagnosticIncidents(env)
+  );
+  const stuckTasks = await sweeps.isolate('stuck_tasks', () => recoverStuckTasks(env));
+  const timedOut = await sweeps.isolate('provisioning_timeouts', () =>
+    checkProvisioningTimeouts(env.DATABASE, env, env.OBSERVABILITY_DATABASE)
+  );
+
+  const db = drizzle(env.DATABASE, { schema });
+  const migrated = await sweeps.isolate('orphaned_workspace_migration', () =>
+    migrateOrphanedWorkspaces(db)
+  );
+  const sessionSleepLifecycleRepair = await sweeps.isolate('session_sleep_lifecycle_repair', () =>
+    runSessionSleepLifecycleRepair(env, new Date())
+  );
+  const nodeCleanup = await sweeps.isolate('node_cleanup', () => runNodeCleanupSweep(env));
+  const terminalNodeLifecycleRepair = await sweeps.isolate('terminal_node_lifecycle_repair', () =>
+    runTerminalNodeLifecycleRepair(env)
+  );
+  const providerOrphans = await sweeps.isolate('provider_orphan_reconciliation', () =>
+    runProviderOrphanReconciliation(env)
+  );
+  const capacityPools = await sweeps.isolate('capacity_pool_reconciliation', () =>
+    runScheduledCapacityPoolReconciliation(env)
+  );
+  const observabilityPurge = await sweeps.isolate('observability_purge', () =>
+    runObservabilityPurge(env)
+  );
+  const cronTriggers = await sweeps.isolate('cron_triggers', () => runCronTriggerSweep(env));
+  const incidentTriggers = await sweeps.isolate('incident_triggers', () =>
+    runIncidentTriggerSweep(env)
+  );
+  const triggerCleanup = await sweeps.isolate('trigger_execution_cleanup', () =>
+    runTriggerExecutionCleanup(env)
+  );
+  const sessionTaskRepair = await sweeps.isolate('session_task_reconciliation', () =>
+    runSessionTaskReconciliation(env)
+  );
+  const terminalSessionLedger = await sweeps.isolate('terminal_session_ledger_reconciliation', () =>
+    runTerminalSessionLedgerReconciliation(env)
+  );
+  const sessionSleep = await sweeps.isolate('session_sleep', () =>
+    runSessionSleepSweep(env, new Date(), ctx)
+  );
+  const setupSessionSweep = await sweeps.isolate('setup_session_sweep', () =>
+    runSetupSessionSweep(env, ctx)
+  );
+  // Retire superseded releases before compose cleanup re-derives referenced artifacts.
+  const deploymentReleaseRetention = await sweeps.isolate('deployment_release_retention', () =>
+    runScheduledDeploymentReleaseRetention(env)
+  );
+  // The D1 sweep owns exact snapshot expiry and deletes the matching R2 objects.
+  const sessionSnapshotPurge = await sweeps.isolate('session_snapshot_purge', () =>
+    runScheduledSessionSnapshotPurge(env)
+  );
+  const workspaceResourceHistoryCleanup = await sweeps.isolate(
+    'workspace_resource_history_cleanup',
+    () => runWorkspaceResourceHistoryCleanup(env)
+  );
+  const composeArtifactCleanup = await sweeps.isolate('compose_artifact_cleanup', () =>
+    runScheduledComposeImageArtifactCleanup(env)
+  );
+  const computeUsageClosed = await sweeps.isolate('compute_usage_cleanup', () =>
+    runComputeUsageCleanup(env)
+  );
+  const trialExpire = await sweeps.isolate('trial_expire', () => runTrialExpireSweep(env));
+
+  // Runs after every lifecycle sweep on purpose. When its persisted cadence is due it copies
+  // whole terminal sessions between ProjectData objects under PROJECT_DATA_ARCHIVE_WALL_TIME_MS
+  // (checked only between candidates, so one large session can run well past it). Earlier in
+  // the chain that budget would delay session_sleep and the other lifecycle sweeps on every
+  // tick the cadence fires (`.claude/rules/47`); on the ticks it is not due it costs two D1
+  // statements.
+  const projectDataArchiveSharding = await sweeps.isolate('project_data_archive_sharding', () =>
+    runProjectDataArchiveSharding(env)
+  );
+
+  // Runs LAST on purpose. The relief preflight is read-only, but it is the only
+  // sweep whose run budget is operator-tuned into the minutes
+  // (PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_RUN_WALL_TIME_MS / _SLICES_PER_RUN) while an
+  // emergency plan is converging. Anywhere earlier in the chain it would push every
+  // later lifecycle sweep — session_sleep above all — back by its whole run budget on
+  // every tick (`.claude/rules/47`).
+  const projectDataStorageReliefPreflight = await sweeps.isolate(
+    'project_data_storage_relief_preflight',
+    () => runProjectDataStorageReliefPreflight(env)
+  );
+
+  const failedSweeps = sweeps.failedSweeps();
+  const failureNotifications = await notifyFailedSweeps(env, failedSweeps).catch((err) => {
+    log.error('cron.failed_sweep_notifications_failed', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return { notifiedSweeps: 0, notificationsSent: 0 };
+  });
+  log.info('cron.completed', {
+    cron: controller.cron,
+    type: 'sweep',
+    failedSweeps,
+    failedSweepCount: failedSweeps.length,
+    failedSweepNotifications: failureNotifications.notificationsSent,
+    failedSweepNamesNotified: failureNotifications.notifiedSweeps,
+    diagnosisRunsRestarted: diagnosisRecovery?.restarted,
+    diagnosisRunsTerminalized: diagnosisRecovery?.terminalized,
+    diagnosticIncidentsChecked: incidentRecovery?.checked,
+    diagnosticIncidentsRepaired: incidentRecovery?.repaired,
+    diagnosticIncidentsFailed: incidentRecovery?.failed,
+    diagnosticIncidentsExpired: incidentRecovery?.expired,
+    diagnosticIncidentsDeleted: incidentRecovery?.deleted,
+    diagnosticIncidentMetadataRepaired: incidentRecovery?.incidentMetadataRepaired,
+    provisioningTimedOut: timedOut,
+    workspacesMigrated: migrated,
+    sleepLifecycleRepairSelected: sessionSleepLifecycleRepair?.selected,
+    sleepLifecycleRepairRepaired: sessionSleepLifecycleRepair?.repaired,
+    sleepLifecycleRepairSkipped: sessionSleepLifecycleRepair?.skipped,
+    sleepLifecycleRepairProjectDataErrors: sessionSleepLifecycleRepair?.projectDataErrors,
+    sleepLifecycleRepairErrors: sessionSleepLifecycleRepair?.errors,
+    staleNodesDestroyed: nodeCleanup?.staleDestroyed,
+    lifetimeNodesDestroyed: nodeCleanup?.lifetimeDestroyed,
+    lifetimeNodesSkipped: nodeCleanup?.lifetimeSkipped,
+    nodeCleanupErrors: nodeCleanup?.errors,
+    orphanedWorkspacesFlagged: nodeCleanup?.orphanedWorkspacesFlagged,
+    orphanedNodesDestroyed: nodeCleanup?.orphanedNodesDestroyed,
+    orphanedNodesSkipped: nodeCleanup?.orphanedNodesSkipped,
+    stoppedWorkspacesQueued: nodeCleanup?.stoppedWorkspacesQueued,
+    stoppedWorkspacesDeleted: nodeCleanup?.stoppedWorkspacesDeleted,
+    cfContainersDestroyed: nodeCleanup?.cfContainersDestroyed,
+    providerOrphansScanned: providerOrphans?.scanned,
+    providerOrphansDestroyed: providerOrphans?.destroyed,
+    providerOrphansSkippedUnlabeled: providerOrphans?.skippedUnlabeled,
+    providerOrphansSkippedForeignManaged: providerOrphans?.skippedForeignManaged,
+    providerOrphansSkippedForeignEnvironment: providerOrphans?.skippedForeignEnv,
+    providerOrphansSkippedForeignInstallation: providerOrphans?.skippedForeignInstallation,
+    providerOrphansSkippedUnattributedInstallation:
+      providerOrphans?.skippedUnattributedInstallation,
+    providerOrphansSkippedAmbiguousOwnership: providerOrphans?.skippedAmbiguousOwnership,
+    providerOrphansSkippedYoung: providerOrphans?.skippedYoung,
+    providerOrphansSkippedClaimed: providerOrphans?.skippedClaimed,
+    providerOrphansSkippedAmbiguousClaim: providerOrphans?.skippedAmbiguousClaim,
+    providerOrphanSkipReason: providerOrphans?.skipReason,
+    providerOrphanErrors: providerOrphans?.errors,
+    capacityPoolInstallationEnsured: capacityPools?.installationEnsured,
+    capacityPoolUsersEnsured: capacityPools?.usersEnsured,
+    capacityPoolProjectsEnsured: capacityPools?.projectsEnsured,
+    capacityPoolReconciliationSkipped: capacityPools?.skipped,
+    capacityPoolReconciliationSkipReason: capacityPools?.skipReason,
+    capacityPoolReconciliationNextEligibleAt: capacityPools?.nextEligibleAt,
+    stuckTasksFailedQueued: stuckTasks?.failedQueued,
+    stuckTasksFailedDelegated: stuckTasks?.failedDelegated,
+    stuckTasksFailedInProgress: stuckTasks?.failedInProgress,
+    stuckTasksHeartbeatSkipped: stuckTasks?.heartbeatSkipped,
+    stuckTaskErrors: stuckTasks?.errors,
+    stuckTaskDoHealthChecked: stuckTasks?.doHealthChecked,
+    observabilityPurgedByAge: observabilityPurge?.deletedByAge,
+    observabilityPurgedByCount: observabilityPurge?.deletedByCount,
+    cronTriggersChecked: cronTriggers?.checked,
+    cronTriggersFired: cronTriggers?.fired,
+    cronTriggersSkipped: cronTriggers?.skipped,
+    cronTriggersFailed: cronTriggers?.failed,
+    incidentTriggersEnabled: incidentTriggers?.enabled,
+    incidentTriggersChecked: incidentTriggers?.checked,
+    incidentTriggersFired: incidentTriggers?.fired,
+    incidentTriggersSkipped: incidentTriggers?.skipped,
+    incidentTriggersFailed: incidentTriggers?.failed,
+    incidentTriggersPendingIncidents: incidentTriggers?.pendingIncidents,
+    incidentTriggersRequeuedDispatches: incidentTriggers?.requeuedDispatches,
+    incidentTriggersRejectedDispatches: incidentTriggers?.rejectedDispatches,
+    incidentTriggersExpiredIncidents: incidentTriggers?.expiredIncidents,
+    triggerExecStaleRecovered: triggerCleanup?.staleRecovered,
+    triggerExecStaleQueuedRecovered: triggerCleanup?.staleQueuedRecovered,
+    triggerExecRetentionPurged: triggerCleanup?.retentionPurged,
+    webhookDeliveriesPurged: triggerCleanup?.webhookDeliveriesPurged,
+    projectEventSourceOutboxAdmitted: triggerCleanup?.projectEventSourceOutboxAdmitted,
+    credentialLimitWindowsPurged: triggerCleanup?.credentialLimitWindowsPurged,
+    triggerExecCleanupErrors: triggerCleanup?.errors,
+    sessionTaskRepairScanned: sessionTaskRepair?.scanned,
+    sessionTaskRepairRepaired: sessionTaskRepair?.repaired,
+    sessionTaskRepairReused: sessionTaskRepair?.reused,
+    sessionTaskRepairErrors: sessionTaskRepair?.errors,
+    sessionTaskRepairResidual: sessionTaskRepair?.residual,
+    terminalSessionLedgerProjectsScanned: terminalSessionLedger?.projectsScanned,
+    terminalSessionLedgerProjectsReconciled: terminalSessionLedger?.projectsReconciled,
+    terminalSessionLedgerProjectErrors: terminalSessionLedger?.projectErrors,
+    terminalSessionLedgerSelected: terminalSessionLedger?.selected,
+    terminalSessionLedgerStopped: terminalSessionLedger?.stopped,
+    terminalSessionLedgerFailed: terminalSessionLedger?.failed,
+    terminalSessionLedgerDeferred: terminalSessionLedger?.deferred,
+    terminalSessionLedgerSkipped: terminalSessionLedger?.skipped,
+    terminalSessionLedgerErrors: terminalSessionLedger?.errors,
+    terminalNodeLifecycleRepairSelected: terminalNodeLifecycleRepair?.selected,
+    terminalNodeLifecycleRepairSkippedProtectedSleep:
+      terminalNodeLifecycleRepair?.skippedProtectedSleep,
+    terminalNodeLifecycleRepairWorkspacesTerminalized:
+      terminalNodeLifecycleRepair?.workspacesTerminalized,
+    terminalNodeLifecycleRepairAgentSessionsClosed:
+      terminalNodeLifecycleRepair?.agentSessionsClosed,
+    terminalNodeLifecycleRepairComputeUsageClosed: terminalNodeLifecycleRepair?.computeUsageClosed,
+    terminalNodeLifecycleRepairProjectSessionsClosed:
+      terminalNodeLifecycleRepair?.projectSessionsClosed,
+    terminalNodeLifecycleRepairErrors: terminalNodeLifecycleRepair?.errors,
+    terminalSessionLedgerRemainingProjects: terminalSessionLedger?.remainingCandidateProjects,
+    terminalSessionSummarySelected: terminalSessionLedger?.summarySelected,
+    terminalSessionSummaryStopped: terminalSessionLedger?.summaryStopped,
+    terminalSessionSummaryFailed: terminalSessionLedger?.summaryFailed,
+    terminalSessionSummaryDeferred: terminalSessionLedger?.summaryDeferred,
+    terminalSessionSummarySkipped: terminalSessionLedger?.summarySkipped,
+    terminalSessionSummaryErrors: terminalSessionLedger?.summaryErrors,
+    terminalSessionSummaryRemaining: terminalSessionLedger?.remainingCandidateSummaries,
+    projectDataStorageReliefPreflightEnabled: projectDataStorageReliefPreflight?.enabled,
+    projectDataStorageReliefPreflightSkipped: projectDataStorageReliefPreflight?.skipped,
+    projectDataStorageReliefPreflightSkipReason: projectDataStorageReliefPreflight?.skipReason,
+    projectDataStorageReliefPreflightPlanId: projectDataStorageReliefPreflight?.planId,
+    projectDataStorageReliefPreflightStatus: projectDataStorageReliefPreflight?.status,
+    projectDataStorageReliefPreflightRowsExamined: projectDataStorageReliefPreflight?.rowsExamined,
+    projectDataStorageReliefPreflightEligibleRows: projectDataStorageReliefPreflight?.eligibleRows,
+    projectDataStorageReliefPreflightEligibleBytes:
+      projectDataStorageReliefPreflight?.eligibleBytes,
+    projectDataStorageReliefPreflightSessionCount: projectDataStorageReliefPreflight?.sessionCount,
+    projectDataStorageReliefPreflightSessionManifestSha256:
+      projectDataStorageReliefPreflight?.sessionManifestSha256,
+    projectDataArchiveShardingEnabled: projectDataArchiveSharding?.enabled,
+    projectDataArchiveShardingSkipped: projectDataArchiveSharding?.skipped,
+    projectDataArchiveShardingSkipReason: projectDataArchiveSharding?.skipReason,
+    projectDataArchiveShardingSelected: projectDataArchiveSharding?.selected,
+    projectDataArchiveShardingMigrated: projectDataArchiveSharding?.migrated,
+    projectDataArchiveShardingRecoveredCrashGaps: projectDataArchiveSharding?.recoveredCrashGaps,
+    projectDataArchiveShardingRefused: projectDataArchiveSharding?.refused,
+    projectDataArchiveShardingFailed: projectDataArchiveSharding?.failed,
+    projectDataArchiveShardingChunksCopied: projectDataArchiveSharding?.chunksCopied,
+    projectDataArchiveShardingRowsCopied: projectDataArchiveSharding?.rowsCopied,
+    sessionSleepSelected: sessionSleep?.selected,
+    sessionSleepReconciled: sessionSleep?.reconciled,
+    sessionSleepClaimed: sessionSleep?.claimed,
+    sessionSleepDispatched: sessionSleep?.dispatched,
+    sessionSleepCompleted: sessionSleep?.slept,
+    sessionSleepDeferred: sessionSleep?.deferred,
+    sessionSleepFailed: sessionSleep?.failed,
+    sessionSleepExhausted: sessionSleep?.exhausted,
+    sessionSleepFallbacks: sessionSleep?.fallbacks,
+    sessionSleepBlocked: sessionSleep?.blocked,
+    sessionSleepRetired: sessionSleep?.retired,
+    sessionSleepBudgetExhausted: sessionSleep?.budgetExhausted,
+    deploymentReleaseRetentionSkipped: deploymentReleaseRetention?.skipped,
+    deploymentReleaseRetentionSkipReason: deploymentReleaseRetention?.skipReason,
+    deploymentReleaseRetentionDeleted: deploymentReleaseRetention?.deletedReleases,
+    sessionSnapshotPurgeSkipped: sessionSnapshotPurge?.skipped,
+    sessionSnapshotPurgeSkipReason: sessionSnapshotPurge?.skipReason,
+    sessionSnapshotPurgeDeleted: sessionSnapshotPurge?.deletedSnapshots,
+    sessionSnapshotObjectsDeleted: sessionSnapshotPurge?.deletedObjects,
+    sessionSnapshotPurgeErrors: sessionSnapshotPurge?.errors,
+    workspaceResourceHistoryExpiredChunksSelected:
+      workspaceResourceHistoryCleanup?.expiredChunksSelected,
+    workspaceResourceHistoryExpiredChunksDeleted:
+      workspaceResourceHistoryCleanup?.expiredChunksDeleted,
+    workspaceResourceHistoryExpiredChunkDeleteErrors:
+      workspaceResourceHistoryCleanup?.expiredChunkDeleteErrors,
+    workspaceResourceHistorySummariesSelected: workspaceResourceHistoryCleanup?.summariesSelected,
+    workspaceResourceHistorySummariesDeleted: workspaceResourceHistoryCleanup?.summariesDeleted,
+    composeArtifactCleanupSkipped: composeArtifactCleanup?.skipped,
+    composeArtifactCleanupSkipReason: composeArtifactCleanup?.skipReason,
+    composeArtifactCleanupScanned: composeArtifactCleanup?.scannedObjects,
+    composeArtifactCleanupReferencedKeys: composeArtifactCleanup?.referencedKeys,
+    composeArtifactCleanupRetainedReferenced: composeArtifactCleanup?.retainedReferenced,
+    composeArtifactCleanupRetainedYoung: composeArtifactCleanup?.retainedYoung,
+    composeArtifactCleanupDeleted: composeArtifactCleanup?.deletedObjects,
+    composeArtifactCleanupDeletedBytes: composeArtifactCleanup?.deletedBytes,
+    composeArtifactCleanupErrors: composeArtifactCleanup?.errors,
+    computeUsageOrphansClosed: computeUsageClosed,
+    trialExpired: trialExpire?.expired,
+    trialProjectsLinked: trialExpire?.projectsLinked,
+    trialWorkspacesDeleted: trialExpire?.workspacesDeleted,
+    trialNodesDeleted: trialExpire?.nodesDeleted,
+    trialCleanupErrors: trialExpire?.cleanupErrors,
+    setupSessionsSwept: setupSessionSweep?.toreDown,
+    setupSessionOrphansForced: setupSessionSweep?.orphansForced,
+    setupSessionSweepErrors: setupSessionSweep?.errors,
+  });
+}

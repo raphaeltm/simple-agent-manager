@@ -32,7 +32,7 @@ vi.mock('../../../src/hooks/useProjectData', () => ({
       projects: result?.projects ?? [],
       loading: false,
       isRefreshing: false,
-      error: null,
+      error: result?.error ?? null,
       refresh: vi.fn(),
     };
   },
@@ -47,6 +47,7 @@ vi.mock('../../../src/components/ProjectSummaryCard', () => ({
 
 import { ToastProvider } from '../../../src/hooks/useToast';
 import { Dashboard } from '../../../src/pages/Dashboard';
+import { QueryTestWrapper } from '../../test-utils/query-test-utils';
 
 const sampleProject = {
   id: 'proj-1',
@@ -66,7 +67,7 @@ function renderDashboard() {
         <Dashboard />
       </MemoryRouter>
     </ToastProvider>
-  );
+  , { wrapper: QueryTestWrapper });
 }
 
 describe('Dashboard page', () => {
@@ -94,6 +95,13 @@ describe('Dashboard page', () => {
   it('shows empty state when no projects', () => {
     renderDashboard();
     expect(screen.getByText('Import your first project')).toBeInTheDocument();
+  });
+
+  it('does not present a failed project request as an empty account', () => {
+    mocks.listProjects.mockReturnValue({ projects: [], error: 'Network error' });
+    renderDashboard();
+    expect(screen.getByText('Network error')).toBeInTheDocument();
+    expect(screen.queryByText('Import your first project')).not.toBeInTheDocument();
   });
 
   it('renders project cards when projects exist', () => {

@@ -1,0 +1,220 @@
+import { eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
+import type { Context } from 'hono';
+
+import * as schema from '../../db/schema';
+import type { Env } from '../../env';
+import { extractBearerToken } from '../../lib/auth-helpers';
+import { log } from '../../lib/logger';
+import { errors } from '../../middleware/error';
+import { verifyCallbackToken } from '../../services/jwt';
+import { nodeStatusTerminatesCallbacks } from '../../services/node-callback-auth';
+import {
+  signalWorkspaceDeletionUnconfirmedCallback,
+  type WorkspaceDeletionCallbackKind,
+} from '../../services/workspace-deletion-callback-signal';
+
+const WORKSPACE_STATUSES_ACCEPTING_PUBLISH_CALLBACKS = new Set(['creating', 'running', 'recovery']);
+
+/**
+ * Verified result of the shared workspace-scoped publish callback auth preamble.
+ */
+export interface VerifiedWorkspacePublishCallback {
+  projectId: string;
+  workspaceId: string;
+  userId: string;
+  db: ReturnType<typeof drizzle<typeof schema>>;
+  assertCurrent(): Promise<void>;
+}
+
+interface WorkspacePublishCallbackIdentity {
+  projectId: string | null;
+  userId: string;
+  chatSessionId: string | null;
+  status: string;
+  nodeId: string | null;
+  nodeStatus: string | null;
+}
+
+async function loadWorkspacePublishCallbackIdentity(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  workspaceId: string
+): Promise<WorkspacePublishCallbackIdentity | null> {
+  const rows = await db
+    .select({
+      projectId: schema.workspaces.projectId,
+      userId: schema.workspaces.userId,
+      chatSessionId: schema.workspaces.chatSessionId,
+      status: schema.workspaces.status,
+      nodeId: schema.workspaces.nodeId,
+      nodeStatus: schema.nodes.status,
+    })
+    .from(schema.workspaces)
+    .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
+    .where(eq(schema.workspaces.id, workspaceId))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+function sameWorkspacePublishCallbackIdentity(
+  current: WorkspacePublishCallbackIdentity,
+  expected: WorkspacePublishCallbackIdentity
+): boolean {
+  return (
+    current.projectId === expected.projectId &&
+    current.userId === expected.userId &&
+    current.chatSessionId === expected.chatSessionId &&
+    current.status === expected.status &&
+    current.nodeId === expected.nodeId &&
+    current.nodeStatus === expected.nodeStatus
+  );
+}
+
+async function assertWorkspacePublishCallbackCurrent(
+  env: Env,
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  workspaceId: string,
+  expected: WorkspacePublishCallbackIdentity,
+  logPrefix: WorkspaceDeletionCallbackKind
+): Promise<void> {
+  const current = await loadWorkspacePublishCallbackIdentity(db, workspaceId);
+  if (!current || !WORKSPACE_STATUSES_ACCEPTING_PUBLISH_CALLBACKS.has(current.status)) {
+    await signalWorkspaceDeletionUnconfirmedCallback(env, workspaceId, logPrefix);
+    throw errors.gone(`Workspace is ${current?.status ?? 'missing'}; callback resource is gone`);
+  }
+  if (!current.nodeId || !current.nodeStatus || nodeStatusTerminatesCallbacks(current.nodeStatus)) {
+    throw errors.gone(
+      `Workspace node is ${current.nodeStatus ?? 'missing'}; callback resource is gone`
+    );
+  }
+  if (!sameWorkspacePublishCallbackIdentity(current, expected)) {
+    log.info(`${logPrefix}.workspace_incarnation_changed`, {
+      workspaceId,
+      expectedUserId: expected.userId,
+      currentUserId: current.userId,
+      expectedProjectId: expected.projectId,
+      currentProjectId: current.projectId,
+      expectedChatSessionId: expected.chatSessionId,
+      currentChatSessionId: current.chatSessionId,
+      expectedNodeId: expected.nodeId,
+      currentNodeId: current.nodeId,
+      expectedWorkspaceStatus: expected.status,
+      currentWorkspaceStatus: current.status,
+      expectedNodeStatus: expected.nodeStatus,
+      currentNodeStatus: current.nodeStatus,
+      action: 'terminal_gone',
+    });
+    throw errors.gone('Workspace callback identity changed; callback resource is gone');
+  }
+}
+
+/**
+ * Shared auth preamble for VM-agent workspace-scoped publish callbacks
+ * (compose-publish release ingestion, registry push-credential minting).
+ *
+ * Verifies the callback JWT (NOT a BetterAuth session cookie), rejects
+ * non-workspace token scopes, resolves the workspace's owning project + user,
+ * and verifies the workspace's project matches the `:id` route param so a
+ * workspace token cannot act on another project. Throws an AppError (caught by
+ * the global `app.onError`) on any failure.
+ *
+ * `logPrefix` namespaces the structured rejection events per route
+ * (e.g. 'compose_publish_release', 'registry_push_cred').
+ *
+ * Kept in its own module (not `_helpers.ts`) so these lightweight callback
+ * routes do not drag the GitHub OAuth/installation machinery into their module
+ * graph.
+ *
+ * See: .claude/rules/06-api-patterns.md (Hono middleware scoping)
+ * See: .claude/rules/34-vm-agent-callback-auth.md
+ */
+export async function verifyWorkspacePublishCallback(
+  c: Context<{ Bindings: Env }>,
+  logPrefix: WorkspaceDeletionCallbackKind,
+  scopeErrorMessage: string
+): Promise<VerifiedWorkspacePublishCallback> {
+  // Verify callback JWT (not BetterAuth session cookie)
+  const token = extractBearerToken(c.req.header('Authorization'));
+  const payload = await verifyCallbackToken(token, c.env);
+
+  if (payload.scope !== undefined && payload.scope !== 'workspace') {
+    log.warn(`${logPrefix}.invalid_token_scope`, {
+      scope: payload.scope,
+      action: 'rejected',
+    });
+    throw errors.forbidden(scopeErrorMessage);
+  }
+
+  const projectId = c.req.param('id');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  // The callback JWT carries only a workspaceId. Node-scoped heartbeat tokens
+  // carry a node ID in the same claim, so they are rejected above before this
+  // lookup. Resolve the owning project + user, then verify the workspace's
+  // project matches the route param so a workspace token cannot act on another
+  // project.
+  const workspace = await loadWorkspacePublishCallbackIdentity(db, payload.workspace);
+  if (!workspace) {
+    log.info(`${logPrefix}.terminal_workspace`, {
+      workspaceId: payload.workspace,
+      status: 'missing',
+      action: 'terminal_gone',
+    });
+    throw errors.gone('Workspace is missing; callback resource is gone');
+  }
+
+  if (!workspace.projectId) {
+    log.warn(`${logPrefix}.workspace_not_linked`, {
+      workspaceId: payload.workspace,
+      action: 'rejected',
+    });
+    throw errors.forbidden('Workspace is not linked to a project');
+  }
+
+  if (!WORKSPACE_STATUSES_ACCEPTING_PUBLISH_CALLBACKS.has(workspace.status)) {
+    await signalWorkspaceDeletionUnconfirmedCallback(c.env, payload.workspace, logPrefix);
+    log.info(`${logPrefix}.terminal_workspace`, {
+      workspaceId: payload.workspace,
+      projectId: workspace.projectId,
+      status: workspace.status,
+      action: 'terminal_gone',
+    });
+    throw errors.gone(`Workspace is ${workspace.status}; callback resource is gone`);
+  }
+
+  if (
+    !workspace.nodeId ||
+    !workspace.nodeStatus ||
+    nodeStatusTerminatesCallbacks(workspace.nodeStatus)
+  ) {
+    log.info(`${logPrefix}.terminal_node`, {
+      workspaceId: payload.workspace,
+      projectId: workspace.projectId,
+      nodeId: workspace.nodeId ?? null,
+      nodeStatus: workspace.nodeStatus ?? 'missing',
+      action: 'terminal_gone',
+    });
+    throw errors.gone(
+      `Workspace node is ${workspace.nodeStatus ?? 'missing'}; callback resource is gone`
+    );
+  }
+
+  if (workspace.projectId !== projectId) {
+    log.warn(`${logPrefix}.project_mismatch`, {
+      workspaceId: payload.workspace,
+      expectedProjectId: workspace.projectId,
+      receivedProjectId: projectId,
+      action: 'rejected',
+    });
+    throw errors.forbidden('Project identity verification failed');
+  }
+
+  return {
+    projectId,
+    workspaceId: payload.workspace,
+    userId: workspace.userId,
+    db,
+    assertCurrent: () =>
+      assertWorkspacePublishCallbackCurrent(c.env, db, payload.workspace, workspace, logPrefix),
+  };
+}

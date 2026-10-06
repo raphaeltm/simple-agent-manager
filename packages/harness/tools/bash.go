@@ -4,8 +4,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -46,6 +47,10 @@ func (t *Bash) Execute(ctx context.Context, params map[string]any) (string, erro
 	if err != nil {
 		return "", err
 	}
+	boundary, err := newWorkspaceBoundary(t.WorkDir)
+	if err != nil {
+		return "", err
+	}
 
 	timeout := t.Timeout
 	if timeout == 0 {
@@ -56,24 +61,27 @@ func (t *Bash) Execute(ctx context.Context, params map[string]any) (string, erro
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "bash", "-c", command)
-	cmd.Dir = filepath.Clean(t.WorkDir)
+	cmd.Dir = boundary.root
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.WaitDelay = 2 * time.Second
+	cmd.Cancel = func() error {
+		return killProcessGroup(cmd.Process)
+	}
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	stdout := &limitedBuffer{Limit: MaxBashOutputBytes}
+	stderr := &limitedBuffer{Limit: MaxBashOutputBytes}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 
 	err = cmd.Run()
-
-	// Kill the entire process group on context cancellation to prevent orphans.
-	if ctx.Err() != nil && cmd.Process != nil {
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-	}
+	_ = killProcessGroup(cmd.Process)
 
 	var result strings.Builder
 	if stdout.Len() > 0 {
 		result.WriteString(stdout.String())
+		if stdout.Truncated {
+			fmt.Fprintf(&result, "\n(truncated stdout: showing first %d bytes)", MaxBashOutputBytes)
+		}
 	}
 	if stderr.Len() > 0 {
 		if result.Len() > 0 {
@@ -81,6 +89,9 @@ func (t *Bash) Execute(ctx context.Context, params map[string]any) (string, erro
 		}
 		result.WriteString("STDERR:\n")
 		result.WriteString(stderr.String())
+		if stderr.Truncated {
+			fmt.Fprintf(&result, "\n(truncated stderr: showing first %d bytes)", MaxBashOutputBytes)
+		}
 	}
 
 	if err != nil {
@@ -101,3 +112,50 @@ func (t *Bash) Execute(ctx context.Context, params map[string]any) (string, erro
 	}
 	return result.String(), nil
 }
+
+func killProcessGroup(process *os.Process) error {
+	if process == nil {
+		return nil
+	}
+	err := syscall.Kill(-process.Pid, syscall.SIGKILL)
+	if err == nil || err == syscall.ESRCH {
+		return nil
+	}
+	return err
+}
+
+type limitedBuffer struct {
+	Limit     int
+	buf       bytes.Buffer
+	Truncated bool
+}
+
+func (b *limitedBuffer) Write(p []byte) (int, error) {
+	if b.Limit <= 0 {
+		return len(p), nil
+	}
+	remaining := b.Limit - b.buf.Len()
+	if remaining > 0 {
+		toWrite := len(p)
+		if toWrite > remaining {
+			toWrite = remaining
+		}
+		if _, err := b.buf.Write(p[:toWrite]); err != nil {
+			return 0, err
+		}
+	}
+	if len(p) > remaining {
+		b.Truncated = true
+	}
+	return len(p), nil
+}
+
+func (b *limitedBuffer) Len() int {
+	return b.buf.Len()
+}
+
+func (b *limitedBuffer) String() string {
+	return b.buf.String()
+}
+
+var _ io.Writer = (*limitedBuffer)(nil)

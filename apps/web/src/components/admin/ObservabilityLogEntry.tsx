@@ -1,20 +1,41 @@
 import type { PlatformError } from '@simple-agent-manager/shared';
-import { type FC,useState } from 'react';
+import { Button } from '@simple-agent-manager/ui';
+import { Check, Copy } from 'lucide-react';
+import { type FC, useCallback, useState } from 'react';
 
-interface ObservabilityLogEntryProps {
+import { CopyableIdPill } from './CopyableIdPill';
+
+export interface ObservabilityLogEntryProps {
   error: PlatformError;
+  onDiagnose?: (error: PlatformError) => void;
+  diagnosed?: boolean;
 }
 
+const DEFAULT_SOURCE_COLOR = {
+  bg: 'var(--sam-color-warning-tint)',
+  text: 'var(--sam-color-warning-fg)',
+};
+const DEFAULT_LEVEL_COLOR = {
+  bg: 'var(--sam-color-danger-tint)',
+  text: 'var(--sam-color-danger-fg)',
+};
+
 const SOURCE_COLORS: Record<string, { bg: string; text: string }> = {
-  client: { bg: 'rgba(59, 130, 246, 0.15)', text: '#60a5fa' },
-  'vm-agent': { bg: 'rgba(168, 85, 247, 0.15)', text: '#c084fc' },
-  api: { bg: 'rgba(245, 158, 11, 0.15)', text: '#fbbf24' },
+  client: {
+    bg: 'var(--sam-color-info-tint)',
+    text: 'var(--sam-admin-chart-series-2, var(--sam-color-info-fg))',
+  },
+  'vm-agent': {
+    bg: 'var(--sam-color-info-tint)',
+    text: 'var(--sam-admin-chart-series-3, var(--sam-color-purple))',
+  },
+  api: DEFAULT_SOURCE_COLOR,
 };
 
 const LEVEL_COLORS: Record<string, { bg: string; text: string }> = {
-  error: { bg: 'rgba(239, 68, 68, 0.15)', text: '#f87171' },
-  warn: { bg: 'rgba(245, 158, 11, 0.15)', text: '#fbbf24' },
-  info: { bg: 'rgba(59, 130, 246, 0.15)', text: '#60a5fa' },
+  error: DEFAULT_LEVEL_COLOR,
+  warn: { bg: 'var(--sam-color-warning-tint)', text: 'var(--sam-color-warning-fg)' },
+  info: { bg: 'var(--sam-color-info-tint)', text: 'var(--sam-color-info-fg)' },
 };
 
 function formatTimestamp(iso: string): string {
@@ -28,65 +49,203 @@ function formatTimestamp(iso: string): string {
   });
 }
 
-export const ObservabilityLogEntry: FC<ObservabilityLogEntryProps> = ({ error: entry }) => {
-  const [expanded, setExpanded] = useState(false);
+function buildMarkdownReport(entry: PlatformError): string {
+  // Plain markdown document — only stack and context are fenced, so the
+  // report renders correctly when pasted (no nested-fence breakage).
+  const lines: string[] = [`## SAM Error Report`, ''];
+  lines.push(`**Timestamp:** ${entry.timestamp}`);
+  lines.push(`**Source:** ${entry.source}`);
+  lines.push(`**Level:** ${entry.level}`);
+  lines.push(`**ID:** ${entry.id}`);
+  lines.push('');
+  lines.push(`**Message:**`);
+  lines.push(entry.message);
 
-  const sourceColor = SOURCE_COLORS[entry.source] ?? SOURCE_COLORS.api!;
-  const levelColor = LEVEL_COLORS[entry.level] ?? LEVEL_COLORS.error!;
+  const ids: string[] = [];
+  if (entry.userId) ids.push(`- User: ${entry.userId}`);
+  if (entry.nodeId) ids.push(`- Node: ${entry.nodeId}`);
+  if (entry.workspaceId) ids.push(`- Workspace: ${entry.workspaceId}`);
+  if (entry.taskId) ids.push(`- Task: ${entry.taskId}`);
+  if (entry.sessionId) ids.push(`- Session: ${entry.sessionId}`);
+  if (ids.length > 0) {
+    lines.push('');
+    lines.push('**IDs:**');
+    lines.push(...ids);
+  }
+
+  if (entry.stack) {
+    lines.push('');
+    lines.push('**Stack:**');
+    lines.push('```');
+    lines.push(entry.stack);
+    lines.push('```');
+  }
+
+  if (entry.context) {
+    lines.push('');
+    lines.push('**Context:**');
+    lines.push('```json');
+    lines.push(JSON.stringify(entry.context, null, 2));
+    lines.push('```');
+  }
+
+  if (entry.incident) {
+    lines.push('');
+    lines.push(`**Incident:** ${entry.incident.status}`);
+    if (entry.incident.artifacts?.length) {
+      lines.push(`  Artifacts: ${entry.incident.artifacts.length}`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
+function deriveProjectId(entry: PlatformError): string | null {
+  const ctx = entry.context;
+  if (!ctx) return null;
+  if (typeof ctx.projectId === 'string' && ctx.projectId) return ctx.projectId;
+  return null;
+}
+
+export const ObservabilityLogEntry: FC<ObservabilityLogEntryProps> = ({
+  error: entry,
+  onDiagnose,
+  diagnosed,
+}) => {
+  const [expanded, setExpanded] = useState(false);
+  const [incidentExpanded, setIncidentExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const sourceColor = SOURCE_COLORS[entry.source] ?? DEFAULT_SOURCE_COLOR;
+  const levelColor = LEVEL_COLORS[entry.level] ?? DEFAULT_LEVEL_COLOR;
   const hasDetails = entry.stack || entry.context;
+  const projectId = deriveProjectId(entry);
+
+  const handleCopyMarkdown = useCallback(() => {
+    const text = buildMarkdownReport(entry);
+    void navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }, [entry]);
 
   return (
     <div
-      className="border-b border-border-default px-4 py-3 transition-colors duration-150"
-      style={{ cursor: hasDetails ? 'pointer' : 'default' }}
-      onClick={() => hasDetails && setExpanded(!expanded)}
-      onKeyDown={(e) => {
-        if (hasDetails && (e.key === 'Enter' || e.key === ' ')) {
-          e.preventDefault();
-          setExpanded(!expanded);
-        }
-      }}
-      role={hasDetails ? 'button' : undefined}
-      tabIndex={hasDetails ? 0 : undefined}
-      aria-expanded={hasDetails ? expanded : undefined}
+      data-testid="observability-log-entry"
+      className="min-w-0 border-b border-border-default px-4 py-3 transition-colors duration-150"
     >
       {/* Main row */}
-      <div className="flex items-center gap-2 min-w-0">
-        <span
-          className="inline-flex items-center px-2 rounded-full text-[0.7rem] font-semibold uppercase tracking-tight"
-          style={{ backgroundColor: levelColor.bg, color: levelColor.text, padding: '1px 8px' }}
-        >
-          {entry.level}
-        </span>
-        <span
-          className="inline-flex items-center px-2 rounded-full text-[0.7rem] font-semibold uppercase tracking-tight"
-          style={{ backgroundColor: sourceColor.bg, color: sourceColor.text, padding: '1px 8px' }}
-        >
-          {entry.source}
-        </span>
-        <span className="text-xs text-fg-muted whitespace-nowrap shrink-0">
-          {formatTimestamp(entry.timestamp)}
-        </span>
-        {hasDetails && (
+      <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           <span
-            className="text-[0.7rem] text-fg-muted shrink-0 ml-auto transition-transform duration-150"
-            style={{ transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
+            className="inline-flex items-center rounded-full px-2 text-[0.7rem] font-semibold uppercase tracking-tight"
+            style={{ backgroundColor: levelColor.bg, color: levelColor.text, padding: '1px 8px' }}
           >
-            ▶
+            {entry.level}
           </span>
-        )}
+          <span
+            className="inline-flex items-center rounded-full px-2 text-[0.7rem] font-semibold uppercase tracking-tight"
+            style={{ backgroundColor: sourceColor.bg, color: sourceColor.text, padding: '1px 8px' }}
+          >
+            {entry.source}
+          </span>
+          {diagnosed && (
+            <span
+              className="inline-flex items-center rounded-full px-2 py-0.5 text-[0.65rem] font-medium"
+              style={{
+                backgroundColor: 'var(--sam-color-success-tint)',
+                color: 'var(--sam-color-success)',
+              }}
+            >
+              diagnosed
+            </span>
+          )}
+          {entry.incident && (
+            <button
+              type="button"
+              className="inline-flex items-center rounded-full bg-surface px-2 py-0.5 text-[0.7rem] font-medium text-fg-muted hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent transition-colors cursor-pointer"
+              aria-label={`Toggle incident details: ${entry.incident.status}`}
+              aria-expanded={incidentExpanded}
+              onClick={() => setIncidentExpanded(!incidentExpanded)}
+            >
+              evidence {entry.incident.status}
+              <span
+                aria-hidden="true"
+                className="ml-1 text-[0.6rem] transition-transform duration-150"
+                style={{ transform: incidentExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
+              >
+                ▶
+              </span>
+            </button>
+          )}
+          <span className="min-w-0 text-xs text-fg-muted">{formatTimestamp(entry.timestamp)}</span>
+        </div>
+        <div className="flex shrink-0 items-center gap-1 self-end sm:ml-auto sm:self-auto">
+          <button
+            type="button"
+            className="flex min-h-8 min-w-8 shrink-0 items-center justify-center rounded-sm text-fg-muted transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            aria-label={copied ? 'Copied error as markdown' : 'Copy error as markdown'}
+            title="Copy as markdown"
+            onClick={handleCopyMarkdown}
+            data-testid="copy-markdown-btn"
+          >
+            {copied ? <Check size={14} style={{ color: 'var(--sam-color-success)' }} /> : <Copy size={14} />}
+          </button>
+          {onDiagnose && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={(event) => {
+                event.stopPropagation();
+                onDiagnose(entry);
+              }}
+            >
+              Diagnose
+            </Button>
+          )}
+          {hasDetails && (
+            <button
+              type="button"
+              className="flex min-h-8 min-w-8 shrink-0 items-center justify-center rounded-sm text-[0.7rem] text-fg-muted transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              aria-label={expanded ? 'Hide error details' : 'Show error details'}
+              aria-expanded={expanded}
+              onClick={() => setExpanded(!expanded)}
+            >
+              <span
+                aria-hidden="true"
+                className="transition-transform duration-150"
+                style={{ transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
+              >
+                ▶
+              </span>
+            </button>
+          )}
+        </div>
       </div>
-      {/* Message on its own line for better mobile readability */}
-      <div className="text-sm text-fg-primary mt-1 overflow-hidden text-ellipsis whitespace-nowrap">
+
+      {/* Message */}
+      <div className="mt-1 min-w-0 whitespace-normal break-words text-sm text-fg-primary">
         {entry.message}
       </div>
 
-      {/* Metadata row */}
-      {(entry.userId || entry.nodeId || entry.workspaceId) && (
-        <div className="flex gap-3 mt-1 text-xs text-fg-muted">
-          {entry.userId && <span>user: {entry.userId}</span>}
-          {entry.nodeId && <span>node: {entry.nodeId}</span>}
-          {entry.workspaceId && <span>ws: {entry.workspaceId}</span>}
+      {/* ID pills row */}
+      <ErrorIdPills entry={entry} projectId={projectId} />
+
+      {/* Incident details (expandable) */}
+      {incidentExpanded && entry.incident && (
+        <div className="mt-2 rounded-sm border border-border-default bg-surface p-3">
+          <div className="text-xs font-medium text-fg-primary">Automatic VM evidence</div>
+          <div className="mt-1 text-xs text-fg-muted">
+            Status: {entry.incident.status}
+            {entry.incident.createdAt && ` · Captured: ${formatTimestamp(entry.incident.createdAt)}`}
+          </div>
+          {entry.incident.artifacts && entry.incident.artifacts.length > 0 && (
+            <div className="mt-2">
+              <div className="text-xs text-fg-muted">
+                {entry.incident.artifacts.length} artifact{entry.incident.artifacts.length !== 1 ? 's' : ''} available
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -94,19 +253,61 @@ export const ObservabilityLogEntry: FC<ObservabilityLogEntryProps> = ({ error: e
       {expanded && hasDetails && (
         <div className="mt-3">
           {entry.stack && (
-            <pre className="p-3 rounded-sm bg-inset text-fg-muted text-xs leading-normal overflow-auto m-0 whitespace-pre-wrap break-all" style={{ maxHeight: 200 }}>
+            <pre
+              className="m-0 overflow-auto whitespace-pre-wrap break-all rounded-sm bg-inset p-3 text-xs leading-normal text-fg-muted"
+              style={{ maxHeight: 200 }}
+            >
               {entry.stack}
             </pre>
           )}
           {entry.context && (
             <pre
-              className="p-3 rounded-sm bg-inset text-fg-muted text-xs leading-normal overflow-auto whitespace-pre-wrap break-all"
+              className="overflow-auto whitespace-pre-wrap break-all rounded-sm bg-inset p-3 text-xs leading-normal text-fg-muted"
               style={{ maxHeight: 200, margin: entry.stack ? 'var(--sam-space-2) 0 0' : 0 }}
             >
               {JSON.stringify(entry.context, null, 2)}
             </pre>
           )}
         </div>
+      )}
+    </div>
+  );
+};
+
+const ErrorIdPills: FC<{ entry: PlatformError; projectId: string | null }> = ({
+  entry,
+  projectId,
+}) => {
+  const hasIds =
+    entry.userId || entry.nodeId || entry.workspaceId || entry.taskId || entry.sessionId;
+  if (!hasIds) return null;
+
+  return (
+    <div className="mt-1.5 flex min-w-0 flex-wrap gap-1.5">
+      {entry.userId && <CopyableIdPill label="user" value={entry.userId} />}
+      {entry.nodeId && (
+        <CopyableIdPill label="node" value={entry.nodeId} href={`/nodes/${entry.nodeId}`} />
+      )}
+      {entry.workspaceId && (
+        <CopyableIdPill
+          label="ws"
+          value={entry.workspaceId}
+          href={projectId ? `/projects/${projectId}/workspace/${entry.workspaceId}` : undefined}
+        />
+      )}
+      {entry.taskId && (
+        <CopyableIdPill
+          label="task"
+          value={entry.taskId}
+          href={projectId ? `/projects/${projectId}` : undefined}
+        />
+      )}
+      {entry.sessionId && (
+        <CopyableIdPill
+          label="session"
+          value={entry.sessionId}
+          href={projectId ? `/projects/${projectId}?sessionId=${entry.sessionId}` : undefined}
+        />
       )}
     </div>
   );

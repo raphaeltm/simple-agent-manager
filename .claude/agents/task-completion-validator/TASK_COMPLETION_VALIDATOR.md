@@ -14,7 +14,7 @@ You are a task completion validator for the Simple Agent Manager project. Your j
 
 ## Why This Agent Exists
 
-This agent was created after a production bug where two merged PRs each implemented half of a feature (Scaleway node creation). The task file's research section identified the gap — `getUserCloudProviderConfig()` needed provider selection — but that finding never became a checklist item. The UI added a provider dropdown that was never wired to the backend. The task was archived as "complete" with the bug shipped. See `docs/notes/2026-03-14-scaleway-node-creation-failure-postmortem.md`.
+This agent was created after a production bug where two merged PRs each implemented half of a feature (Scaleway node creation). The task file's research section identified the gap — `getUserCloudProviderConfig()` needed provider selection — but that finding never became a checklist item. The UI added a provider dropdown that was never wired to the backend. The task was archived as "complete" with the bug shipped. See the retained incident lesson in this rule.
 
 ## Inputs
 

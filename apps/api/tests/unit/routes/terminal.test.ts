@@ -10,6 +10,21 @@ import { updateTerminalActivity } from '../../../src/services/project-data';
 
 vi.mock('drizzle-orm/d1');
 vi.mock('../../../src/middleware/auth', () => ({
+  getAuth: () => ({
+    user: {
+      id: 'user-1',
+      email: 'user@example.com',
+      name: 'Test User',
+      avatarUrl: null,
+      role: 'user',
+      status: 'active',
+    },
+    session: {
+      id: 'session-1',
+      token: 'token-session-1',
+      expiresAt: new Date(Date.now() + 60_000),
+    },
+  }),
   requireAuth: () =>
     vi.fn((c: { set: (key: string, value: unknown) => void }, next: () => Promise<void>) => {
       c.set('auth', {
@@ -23,13 +38,13 @@ vi.mock('../../../src/middleware/auth', () => ({
         },
         session: {
           id: 'session-1',
+          token: 'token-session-1',
           expiresAt: new Date(Date.now() + 60_000),
         },
       });
       return next();
     }),
   requireApproved: () => vi.fn((_c: unknown, next: () => Promise<void>) => next()),
-  getUserId: () => 'user-1',
 }));
 vi.mock('../../../src/services/jwt', () => ({
   signTerminalToken: vi.fn(),
@@ -160,7 +175,9 @@ describe('terminal routes', () => {
       expiresAt: '2026-05-10T03:00:00.000Z',
       workspaceUrl: 'https://ws-ws-123.sammy.party',
     });
-    expect(signTerminalToken).toHaveBeenCalledWith('user-1', 'ws-123', env);
+    expect(signTerminalToken).toHaveBeenCalledWith('user-1', 'ws-123', env, {
+      sessionToken: 'token-session-1',
+    });
     expect(updateTerminalActivity).not.toHaveBeenCalled();
   });
 

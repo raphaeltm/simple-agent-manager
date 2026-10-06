@@ -1,0 +1,8 @@
+{
+  "name": "astro-tsc-only",
+  "private": true,
+  "scripts": {
+    "lint": "eslint 'src/**/*.ts'",
+    "typecheck": "tsc --noEmit"
+  }
+}

@@ -22,7 +22,77 @@ read_pulumi_secret() {
   ) || true
 }
 
-# Function to set a secret with proper error handling
+derive_deploy_signing_public_key() {
+  local private_key_b64="$1"
+
+  DEPLOY_SIGNING_PRIVATE_KEY_INPUT="$private_key_b64" pnpm exec tsx scripts/deploy/deploy-signing-keys.ts derive-public
+}
+
+derive_vapid_public_key_from_raw() {
+  local private_key_b64url="$1"
+  VAPID_PRIVATE_KEY_INPUT="$private_key_b64url" pnpm exec tsx scripts/deploy/vapid-keys.ts derive-public-from-raw
+}
+
+derive_vapid_key_from_pem() {
+  local private_key_pem="$1"
+  local component="$2"
+  VAPID_PRIVATE_KEY_PEM_INPUT="$private_key_pem" pnpm exec tsx scripts/deploy/vapid-keys.ts "$component"
+}
+
+# Cloudflare's bulk secrets API accepts up to 100 create/update/delete operations
+# per request. Keep this configurable so operators can lower the per-request
+# budget if the API or account policy changes.
+DEFAULT_WORKER_SECRET_BULK_MAX_OPS=100
+WORKER_SECRET_BULK_MAX_OPS="${WORKER_SECRET_BULK_MAX_OPS:-$DEFAULT_WORKER_SECRET_BULK_MAX_OPS}"
+if ! [[ "$WORKER_SECRET_BULK_MAX_OPS" =~ ^[0-9]+$ ]] ||
+  [ "$WORKER_SECRET_BULK_MAX_OPS" -lt 1 ] ||
+  [ "$WORKER_SECRET_BULK_MAX_OPS" -gt "$DEFAULT_WORKER_SECRET_BULK_MAX_OPS" ]; then
+  echo -e "${RED}ERROR: WORKER_SECRET_BULK_MAX_OPS must be between 1 and $DEFAULT_WORKER_SECRET_BULK_MAX_OPS${NC}" >&2
+  exit 1
+fi
+
+WORKER_SECRET_BULK_PAYLOAD="$(mktemp)"
+chmod 600 "$WORKER_SECRET_BULK_PAYLOAD"
+printf '{' >"$WORKER_SECRET_BULK_PAYLOAD"
+WORKER_SECRET_BULK_HAS_ENTRIES=false
+WORKER_SECRET_BULK_COUNT=0
+WORKER_SECRET_BULK_SET_COUNT=0
+WORKER_SECRET_BULK_DELETE_COUNT=0
+
+cleanup_worker_secret_bulk_payload() {
+  if [ -n "${WORKER_SECRET_BULK_PAYLOAD:-}" ]; then
+    rm -f "$WORKER_SECRET_BULK_PAYLOAD"
+  fi
+}
+trap cleanup_worker_secret_bulk_payload EXIT
+
+json_escape_stdin() {
+  node -e 'let input = ""; process.stdin.setEncoding("utf8"); process.stdin.on("data", (chunk) => { input += chunk; }); process.stdin.on("end", () => { process.stdout.write(JSON.stringify(input)); });'
+}
+
+append_worker_secret_bulk_entry() {
+  local secret_name="$1"
+  local encoded_secret_value="$2"
+  local encoded_secret_name
+
+  encoded_secret_name="$(printf '%s' "$secret_name" | json_escape_stdin)"
+
+  if [ "$WORKER_SECRET_BULK_HAS_ENTRIES" = "true" ]; then
+    printf ',' >>"$WORKER_SECRET_BULK_PAYLOAD"
+  fi
+  printf '\n  %s: %s' "$encoded_secret_name" "$encoded_secret_value" >>"$WORKER_SECRET_BULK_PAYLOAD"
+  WORKER_SECRET_BULK_HAS_ENTRIES=true
+  WORKER_SECRET_BULK_COUNT=$((WORKER_SECRET_BULK_COUNT + 1))
+
+  if [ "$WORKER_SECRET_BULK_COUNT" -gt "$WORKER_SECRET_BULK_MAX_OPS" ]; then
+    echo -e "${RED}ERROR: queued $WORKER_SECRET_BULK_COUNT Worker secret operations, exceeding WORKER_SECRET_BULK_MAX_OPS=$WORKER_SECRET_BULK_MAX_OPS${NC}" >&2
+    exit 1
+  fi
+}
+
+# Function to queue a secret with proper error handling. The call sites stay
+# named set_worker_secret so scripts/quality/check-wrangler-bindings.ts can keep
+# comparing this script to the wrangler.toml secret inventory.
 set_worker_secret() {
   local secret_name="$1"
   local secret_value="$2"
@@ -31,7 +101,7 @@ set_worker_secret() {
 
   if [ -z "$secret_value" ]; then
     if [ "$is_required" = "true" ]; then
-      echo -e "${RED}❌ Required secret $secret_name is not set${NC}"
+      echo -e "${RED}❌ Required secret $secret_name is not set${NC}" >&2
       return 1
     else
       echo -e "${YELLOW}⚠️  Optional secret $secret_name is not set, skipping${NC}"
@@ -39,42 +109,89 @@ set_worker_secret() {
     fi
   fi
 
-  echo -n "Setting $secret_name... "
-
-  # Try to set the secret and capture the output
-  if output=$(echo "$secret_value" | pnpm --filter @simple-agent-manager/api exec wrangler secret put "$secret_name" --env "$environment" 2>&1); then
-    echo -e "${GREEN}✅${NC}"
-    return 0
-  else
-    # Check if it's an "already exists" error
-    if echo "$output" | grep -q "already exists\|already set"; then
-      echo -e "${GREEN}✅ (already exists)${NC}"
-      return 0
-    else
-      echo -e "${RED}❌${NC}"
-      echo "Error: $output"
-      return 1
-    fi
+  if [ "$environment" != "${ENVIRONMENT:-}" ]; then
+    echo -e "${RED}❌ Secret $secret_name was queued for unexpected environment $environment${NC}" >&2
+    return 1
   fi
+
+  echo -n "Queueing $secret_name... "
+
+  local encoded_secret_value
+  encoded_secret_value="$(printf '%s' "$secret_value" | json_escape_stdin)"
+  append_worker_secret_bulk_entry "$secret_name" "$encoded_secret_value"
+  WORKER_SECRET_BULK_SET_COUNT=$((WORKER_SECRET_BULK_SET_COUNT + 1))
+  echo -e "${GREEN}✅${NC}"
+}
+
+queue_stale_worker_secret_delete() {
+  local secret_name="$1"
+
+  echo -n "Queueing stale secret deletion for $secret_name... "
+  append_worker_secret_bulk_entry "$secret_name" "null"
+  WORKER_SECRET_BULK_DELETE_COUNT=$((WORKER_SECRET_BULK_DELETE_COUNT + 1))
+  echo -e "${GREEN}✅${NC}"
+}
+
+flush_worker_secret_bulk() {
+  if [ "$WORKER_SECRET_BULK_HAS_ENTRIES" != "true" ]; then
+    echo "No Worker secret changes queued."
+    return 0
+  fi
+
+  printf '\n}\n' >>"$WORKER_SECRET_BULK_PAYLOAD"
+  echo "Applying $WORKER_SECRET_BULK_COUNT Worker secret operations via wrangler secret bulk ($WORKER_SECRET_BULK_SET_COUNT set/update, $WORKER_SECRET_BULK_DELETE_COUNT delete)..."
+
+  if pnpm --filter @simple-agent-manager/api exec wrangler secret bulk "$WORKER_SECRET_BULK_PAYLOAD" --env "$ENVIRONMENT" >/dev/null 2>&1; then
+    echo -e "${GREEN}✅ Worker secrets configured in bulk${NC}"
+    return 0
+  fi
+
+  echo -e "${RED}❌ Worker secret bulk configuration failed${NC}" >&2
+  echo "Wrangler returned a non-zero status. Secret values were not logged; rerun locally with Wrangler diagnostics if needed." >&2
+  return 1
 }
 
 # Parse arguments
-ENVIRONMENT="${1:-production}"
+if [ $# -lt 1 ] || [ -z "${1:-}" ]; then
+  echo -e "${RED}ERROR: deployment environment argument is required${NC}" >&2
+  echo "Usage: bash scripts/deploy/configure-secrets.sh <environment>" >&2
+  exit 1
+fi
+
+ENVIRONMENT="$1"
 
 # Security keys from different sources
 # Priority: GitHub secrets (backwards compat) > Pulumi state (primary) > Generated (legacy)
 PULUMI_ENCRYPTION_KEY="${PULUMI_ENCRYPTION_KEY:-}"
 PULUMI_JWT_PRIVATE_KEY="${PULUMI_JWT_PRIVATE_KEY:-}"
 PULUMI_JWT_PUBLIC_KEY="${PULUMI_JWT_PUBLIC_KEY:-}"
+PULUMI_DEPLOY_SIGNING_PRIVATE_KEY="${PULUMI_DEPLOY_SIGNING_PRIVATE_KEY:-}"
+PULUMI_PREVIEW_SIGNING_KEY="${PULUMI_PREVIEW_SIGNING_KEY:-}"
+PULUMI_VAPID_PRIVATE_KEY_PEM="${PULUMI_VAPID_PRIVATE_KEY_PEM:-}"
 SECRET_ENCRYPTION_KEY="${SECRET_ENCRYPTION_KEY:-}"
 SECRET_JWT_PRIVATE_KEY="${SECRET_JWT_PRIVATE_KEY:-}"
 SECRET_JWT_PUBLIC_KEY="${SECRET_JWT_PUBLIC_KEY:-}"
 
-if [ -z "$PULUMI_ENCRYPTION_KEY" ] && [ -n "${PULUMI_STACK:-}" ]; then
+if [[ -n "${PULUMI_STACK:-}" ]]; then
   echo "Reading Pulumi-managed security keys from stack: $PULUMI_STACK"
-  PULUMI_ENCRYPTION_KEY="$(read_pulumi_secret encryptionKey)"
-  PULUMI_JWT_PRIVATE_KEY="$(read_pulumi_secret jwtPrivateKey)"
-  PULUMI_JWT_PUBLIC_KEY="$(read_pulumi_secret jwtPublicKey)"
+  if [[ -z "$PULUMI_ENCRYPTION_KEY" ]]; then
+    PULUMI_ENCRYPTION_KEY="$(read_pulumi_secret encryptionKey)"
+  fi
+  if [[ -z "$PULUMI_JWT_PRIVATE_KEY" ]]; then
+    PULUMI_JWT_PRIVATE_KEY="$(read_pulumi_secret jwtPrivateKey)"
+  fi
+  if [[ -z "$PULUMI_JWT_PUBLIC_KEY" ]]; then
+    PULUMI_JWT_PUBLIC_KEY="$(read_pulumi_secret jwtPublicKey)"
+  fi
+  if [[ -z "$PULUMI_DEPLOY_SIGNING_PRIVATE_KEY" ]]; then
+    PULUMI_DEPLOY_SIGNING_PRIVATE_KEY="$(read_pulumi_secret deploySigningPrivateKey)"
+  fi
+  if [[ -z "$PULUMI_PREVIEW_SIGNING_KEY" ]]; then
+    PULUMI_PREVIEW_SIGNING_KEY="$(read_pulumi_secret previewSigningKey)"
+  fi
+  if [[ -z "$PULUMI_VAPID_PRIVATE_KEY_PEM" ]]; then
+    PULUMI_VAPID_PRIVATE_KEY_PEM="$(read_pulumi_secret vapidPrivateKeyPem)"
+  fi
 fi
 
 echo "Configuring secrets for environment: $ENVIRONMENT"
@@ -98,6 +215,58 @@ else
   echo "This should not happen - Pulumi should have created the keys."
   exit 1
 fi
+
+# Deployment apply signing keys use a separate Ed25519 keypair from JWTs.
+# Existing GitHub secrets remain supported as explicit overrides. Fresh installs
+# use the Pulumi-persisted seed generated with the rest of the platform-owned
+# security material, deriving the public key when configuring Worker secrets.
+if [[ -n "${DEPLOY_SIGNING_PRIVATE_KEY:-}" ]]; then
+  echo "Using deploy signing key from GitHub Secrets (backwards compatibility)"
+  DERIVED_DEPLOY_SIGNING_PUBLIC_KEY="$(derive_deploy_signing_public_key "$DEPLOY_SIGNING_PRIVATE_KEY")"
+  if [[ -z "${DEPLOY_SIGNING_PUBLIC_KEY:-}" ]]; then
+    DEPLOY_SIGNING_PUBLIC_KEY="$DERIVED_DEPLOY_SIGNING_PUBLIC_KEY"
+  elif [[ "$DEPLOY_SIGNING_PUBLIC_KEY" != "$DERIVED_DEPLOY_SIGNING_PUBLIC_KEY" ]]; then
+    echo -e "${RED}ERROR: DEPLOY_SIGNING_PUBLIC_KEY does not match DEPLOY_SIGNING_PRIVATE_KEY${NC}" >&2
+    exit 1
+  fi
+elif [[ -n "$PULUMI_DEPLOY_SIGNING_PRIVATE_KEY" ]]; then
+  echo "Using deploy signing keys from Pulumi state (auto-persisted)"
+  DEPLOY_SIGNING_PRIVATE_KEY="$PULUMI_DEPLOY_SIGNING_PRIVATE_KEY"
+  DEPLOY_SIGNING_PUBLIC_KEY="$(derive_deploy_signing_public_key "$DEPLOY_SIGNING_PRIVATE_KEY")"
+else
+  echo -e "${RED}ERROR: No deploy signing key available from GitHub Secrets or Pulumi state${NC}" >&2
+  echo "This should not happen - Pulumi should have created the key." >&2
+  exit 1
+fi
+echo ""
+
+# Web Push VAPID uses a Pulumi-persisted P-256 PKCS#8 key on fresh installs.
+# Raw base64url values remain supported as an explicit operator override.
+if [[ -n "${VAPID_PRIVATE_KEY:-}" ]]; then
+  echo "Using Web Push VAPID key from explicit environment override"
+  DERIVED_VAPID_PUBLIC_KEY="$(derive_vapid_public_key_from_raw "$VAPID_PRIVATE_KEY")"
+  if [[ -z "${VAPID_PUBLIC_KEY:-}" ]]; then
+    VAPID_PUBLIC_KEY="$DERIVED_VAPID_PUBLIC_KEY"
+  elif [[ "$VAPID_PUBLIC_KEY" != "$DERIVED_VAPID_PUBLIC_KEY" ]]; then
+    echo -e "${RED}ERROR: VAPID_PUBLIC_KEY does not match VAPID_PRIVATE_KEY${NC}" >&2
+    exit 1
+  fi
+elif [[ -n "$PULUMI_VAPID_PRIVATE_KEY_PEM" ]]; then
+  echo "Using Web Push VAPID key from Pulumi state (auto-persisted)"
+  VAPID_PRIVATE_KEY="$(derive_vapid_key_from_pem "$PULUMI_VAPID_PRIVATE_KEY_PEM" derive-private-from-pem)"
+  VAPID_PUBLIC_KEY="$(derive_vapid_key_from_pem "$PULUMI_VAPID_PRIVATE_KEY_PEM" derive-public-from-pem)"
+else
+  echo -e "${RED}ERROR: No Web Push VAPID key available from an explicit override or Pulumi state${NC}" >&2
+  echo "This should not happen - Pulumi should have created the key." >&2
+  exit 1
+fi
+if [[ -z "${VAPID_SUBJECT:-}" ]]; then
+  if [[ -z "${BASE_DOMAIN:-}" ]]; then
+    echo -e "${RED}ERROR: BASE_DOMAIN is required to derive VAPID_SUBJECT${NC}" >&2
+    exit 1
+  fi
+  VAPID_SUBJECT="https://app.${BASE_DOMAIN}"
+fi
 echo ""
 
 # Track if any required secrets fail
@@ -107,42 +276,46 @@ FAILED=false
 set_worker_secret "ENCRYPTION_KEY" "$ENCRYPTION_KEY" "$ENVIRONMENT" "true" || FAILED=true
 set_worker_secret "JWT_PRIVATE_KEY" "$JWT_PRIVATE_KEY" "$ENVIRONMENT" "true" || FAILED=true
 set_worker_secret "JWT_PUBLIC_KEY" "$JWT_PUBLIC_KEY" "$ENVIRONMENT" "true" || FAILED=true
+set_worker_secret "PREVIEW_SIGNING_KEY" "$PULUMI_PREVIEW_SIGNING_KEY" "$ENVIRONMENT" "true" || FAILED=true
+set_worker_secret "VAPID_PRIVATE_KEY" "$VAPID_PRIVATE_KEY" "$ENVIRONMENT" "true" || FAILED=true
+set_worker_secret "VAPID_PUBLIC_KEY" "$VAPID_PUBLIC_KEY" "$ENVIRONMENT" "true" || FAILED=true
+set_worker_secret "VAPID_SUBJECT" "$VAPID_SUBJECT" "$ENVIRONMENT" "true" || FAILED=true
 
 # Configure purpose-specific secret overrides.
 # BETTER_AUTH_SECRET and CREDENTIAL_ENCRYPTION_KEY fall back to ENCRYPTION_KEY.
-# GITHUB_WEBHOOK_SECRET is required by the self-hosted GitHub App webhook setup.
+# GITHUB_WEBHOOK_SECRET is optional. If absent, admins can set it in first-run setup/admin UI.
 set_worker_secret "BETTER_AUTH_SECRET" "${BETTER_AUTH_SECRET:-}" "$ENVIRONMENT" "false"
 set_worker_secret "CREDENTIAL_ENCRYPTION_KEY" "${CREDENTIAL_ENCRYPTION_KEY:-}" "$ENVIRONMENT" "false"
 # GitHub Actions secret names cannot start with GITHUB_, so CI passes GH_WEBHOOK_SECRET.
-set_worker_secret "GITHUB_WEBHOOK_SECRET" "${GH_WEBHOOK_SECRET:-${GITHUB_WEBHOOK_SECRET:-}}" "$ENVIRONMENT" "true" || FAILED=true
+set_worker_secret "GITHUB_WEBHOOK_SECRET" "${GH_WEBHOOK_SECRET:-${GITHUB_WEBHOOK_SECRET:-}}" "$ENVIRONMENT" "false"
 
 # Configure Cloudflare secrets (required for DNS and observability operations)
 set_worker_secret "CF_API_TOKEN" "${CF_API_TOKEN:-}" "$ENVIRONMENT" "true" || FAILED=true
 set_worker_secret "CF_ZONE_ID" "${CF_ZONE_ID:-}" "$ENVIRONMENT" "true" || FAILED=true
 set_worker_secret "CF_ACCOUNT_ID" "${CF_ACCOUNT_ID:-}" "$ENVIRONMENT" "true" || FAILED=true
+set_worker_secret "CF_AIG_TOKEN" "${CF_AIG_TOKEN:-}" "$ENVIRONMENT" "false"
+
+# Configure deployment apply signing keys. Deployment nodes only apply releases
+# signed by this keypair; missing keys make the deploy-release callback unusable.
+set_worker_secret "DEPLOY_SIGNING_PRIVATE_KEY" "${DEPLOY_SIGNING_PRIVATE_KEY:-}" "$ENVIRONMENT" "true" || FAILED=true
+set_worker_secret "DEPLOY_SIGNING_PUBLIC_KEY" "${DEPLOY_SIGNING_PUBLIC_KEY:-}" "$ENVIRONMENT" "true" || FAILED=true
+
 # Optional: use a narrower Cloudflare token/account for managed Containers Registry
 # devcontainer cache credentials. Falls back to CF_API_TOKEN/CF_ACCOUNT_ID when unset.
 set_worker_secret "DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN" "${DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN:-}" "$ENVIRONMENT" "false"
 set_worker_secret "DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID" "${DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID:-}" "$ENVIRONMENT" "false"
 
-# Configure GitHub secrets (required - platform is useless without authentication)
+# Configure GitHub secrets (optional compatibility path).
+# Fresh forks can deploy with Cloudflare credentials only, then configure GitHub
+# through /setup or the superadmin platform config UI. Existing deployments keep
+# working because runtime config falls back to these Worker secrets when present.
 # GH_* env vars (GitHub Actions does not allow GITHUB_* secret names) are mapped to GITHUB_* Worker secrets.
 # See CLAUDE.md "Env Var Naming: GH_ vs GITHUB_" and .claude/rules/07-env-and-urls.md.
-set_worker_secret "GITHUB_CLIENT_ID" "${GH_CLIENT_ID:-}" "$ENVIRONMENT" "true" || FAILED=true
-set_worker_secret "GITHUB_CLIENT_SECRET" "${GH_CLIENT_SECRET:-}" "$ENVIRONMENT" "true" || FAILED=true
-set_worker_secret "GITHUB_APP_ID" "${GH_APP_ID:-}" "$ENVIRONMENT" "true" || FAILED=true
-set_worker_secret "GITHUB_APP_PRIVATE_KEY" "${GH_APP_PRIVATE_KEY:-}" "$ENVIRONMENT" "true" || FAILED=true
-set_worker_secret "GITHUB_APP_SLUG" "${GH_APP_SLUG:-}" "$ENVIRONMENT" "true" || FAILED=true
-
-# Configure Origin CA certificate/key (required for TLS between CF edge and VM agents)
-PULUMI_ORIGIN_CA_CERT="${PULUMI_ORIGIN_CA_CERT:-}"
-PULUMI_ORIGIN_CA_KEY="${PULUMI_ORIGIN_CA_KEY:-}"
-if [ -z "$PULUMI_ORIGIN_CA_CERT" ] && [ -n "${PULUMI_STACK:-}" ]; then
-  PULUMI_ORIGIN_CA_CERT="$(read_pulumi_secret originCaCertPem)"
-  PULUMI_ORIGIN_CA_KEY="$(read_pulumi_secret originCaKeyPem)"
-fi
-set_worker_secret "ORIGIN_CA_CERT" "$PULUMI_ORIGIN_CA_CERT" "$ENVIRONMENT" "true" || FAILED=true
-set_worker_secret "ORIGIN_CA_KEY" "$PULUMI_ORIGIN_CA_KEY" "$ENVIRONMENT" "true" || FAILED=true
+set_worker_secret "GITHUB_CLIENT_ID" "${GH_CLIENT_ID:-}" "$ENVIRONMENT" "false"
+set_worker_secret "GITHUB_CLIENT_SECRET" "${GH_CLIENT_SECRET:-}" "$ENVIRONMENT" "false"
+set_worker_secret "GITHUB_APP_ID" "${GH_APP_ID:-}" "$ENVIRONMENT" "false"
+set_worker_secret "GITHUB_APP_PRIVATE_KEY" "${GH_APP_PRIVATE_KEY:-}" "$ENVIRONMENT" "false"
+set_worker_secret "GITHUB_APP_SLUG" "${GH_APP_SLUG:-}" "$ENVIRONMENT" "false"
 
 # Configure trial onboarding claim/fingerprint HMAC secret (Pulumi-managed, persists across deploys).
 # Required when trials are enabled; harmless when trials are disabled (cookies just aren't issued).
@@ -152,14 +325,38 @@ if [ -z "$PULUMI_TRIAL_CLAIM_TOKEN_SECRET" ] && [ -n "${PULUMI_STACK:-}" ]; then
 fi
 set_worker_secret "TRIAL_CLAIM_TOKEN_SECRET" "$PULUMI_TRIAL_CLAIM_TOKEN_SECRET" "$ENVIRONMENT" "true" || FAILED=true
 
-# Configure Google OAuth secrets (optional — only needed for GCP OIDC integration)
+# Configure Google INFRA OAuth secrets (optional — only needed for GCP OIDC integration)
 GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-}"
 GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET:-}"
 if [ -n "$GOOGLE_CLIENT_ID" ] && [ -n "$GOOGLE_CLIENT_SECRET" ]; then
   set_worker_secret "GOOGLE_CLIENT_ID" "$GOOGLE_CLIENT_ID" "$ENVIRONMENT" "true" || FAILED=true
   set_worker_secret "GOOGLE_CLIENT_SECRET" "$GOOGLE_CLIENT_SECRET" "$ENVIRONMENT" "true" || FAILED=true
 else
-  echo -e "${YELLOW}ℹ  Skipping Google OAuth secrets (GOOGLE_CLIENT_ID/SECRET not set — GCP OIDC integration disabled)${NC}"
+  echo -e "${YELLOW}ℹ  Skipping Google infra OAuth secrets (GOOGLE_CLIENT_ID/SECRET not set — GCP OIDC integration disabled)${NC}"
+fi
+
+# Configure Google LOGIN OAuth secrets (optional env fallback — the setup wizard is the
+# primary path; these are a separate OAuth client from the infra one above)
+GOOGLE_LOGIN_CLIENT_ID="${GOOGLE_LOGIN_CLIENT_ID:-}"
+GOOGLE_LOGIN_CLIENT_SECRET="${GOOGLE_LOGIN_CLIENT_SECRET:-}"
+if [ -n "$GOOGLE_LOGIN_CLIENT_ID" ] && [ -n "$GOOGLE_LOGIN_CLIENT_SECRET" ]; then
+  set_worker_secret "GOOGLE_LOGIN_CLIENT_ID" "$GOOGLE_LOGIN_CLIENT_ID" "$ENVIRONMENT" "true" || FAILED=true
+  set_worker_secret "GOOGLE_LOGIN_CLIENT_SECRET" "$GOOGLE_LOGIN_CLIENT_SECRET" "$ENVIRONMENT" "true" || FAILED=true
+else
+  echo -e "${YELLOW}ℹ  Skipping Google login OAuth secrets (GOOGLE_LOGIN_CLIENT_ID/SECRET not set — configure Google sign-in via /setup)${NC}"
+fi
+
+# Configure GitLab OAuth secrets (optional env fallback — the setup wizard is the
+# primary path; use https://gitlab.com for the public service)
+GITLAB_HOST="${GITLAB_HOST:-}"
+GITLAB_CLIENT_ID="${GITLAB_CLIENT_ID:-}"
+GITLAB_CLIENT_SECRET="${GITLAB_CLIENT_SECRET:-}"
+if [ -n "$GITLAB_HOST" ] && [ -n "$GITLAB_CLIENT_ID" ] && [ -n "$GITLAB_CLIENT_SECRET" ]; then
+  set_worker_secret "GITLAB_HOST" "$GITLAB_HOST" "$ENVIRONMENT" "true" || FAILED=true
+  set_worker_secret "GITLAB_CLIENT_ID" "$GITLAB_CLIENT_ID" "$ENVIRONMENT" "true" || FAILED=true
+  set_worker_secret "GITLAB_CLIENT_SECRET" "$GITLAB_CLIENT_SECRET" "$ENVIRONMENT" "true" || FAILED=true
+else
+  echo -e "${YELLOW}ℹ  Skipping GitLab OAuth secrets (GITLAB_HOST/CLIENT_ID/CLIENT_SECRET not set — configure GitLab via /setup)${NC}"
 fi
 
 # Configure R2 S3-compatible API credentials (optional — only needed for task attachment uploads)
@@ -221,22 +418,20 @@ STALE_SECRETS=(
 echo ""
 echo "Cleaning up stale secrets (migrated to wrangler.toml vars)..."
 for secret_name in "${STALE_SECRETS[@]}"; do
-  if output=$(echo "y" | pnpm --filter @simple-agent-manager/api exec wrangler secret delete "$secret_name" --env "$ENVIRONMENT" 2>&1); then
-    echo -e "${GREEN}  Deleted stale secret: $secret_name${NC}"
-  else
-    # Wrangler exits non-zero if the secret doesn't exist — that's fine
-    if echo "$output" | grep -qi "not found\|does not exist\|couldn't find"; then
-      echo -e "  $secret_name not present (OK)"
-    else
-      # Unexpected error — log but don't fail the deploy
-      echo -e "${YELLOW}  Could not delete $secret_name: $output${NC}"
-    fi
-  fi
+  queue_stale_worker_secret_delete "$secret_name"
 done
 
 echo ""
 if [ "$FAILED" = "true" ]; then
-  echo -e "${RED}❌ Some required secrets failed to configure${NC}"
+  echo -e "${RED}❌ Some required secrets failed to configure${NC}" >&2
+  exit 1
+fi
+
+flush_worker_secret_bulk || FAILED=true
+
+echo ""
+if [ "$FAILED" = "true" ]; then
+  echo -e "${RED}❌ Some secrets failed to configure${NC}" >&2
   exit 1
 else
   echo -e "${GREEN}✅ All secrets configured successfully${NC}"

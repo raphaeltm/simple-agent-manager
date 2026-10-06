@@ -1,4 +1,8 @@
 import '@testing-library/jest-dom/vitest';
+// jsdom does not implement IndexedDB. The query-cache persister
+// (src/lib/query-persistence.ts) is IDB-backed, and AuthProvider drives it on
+// every identity transition, so any test that mounts AuthProvider touches it.
+import 'fake-indexeddb/auto';
 
 import { vi } from 'vitest';
 
@@ -16,3 +20,10 @@ Object.defineProperty(window, 'matchMedia', {
     dispatchEvent: vi.fn(),
   })),
 });
+
+// jsdom does not implement ResizeObserver — stub it globally for width-measuring components
+globalThis.ResizeObserver = class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+};

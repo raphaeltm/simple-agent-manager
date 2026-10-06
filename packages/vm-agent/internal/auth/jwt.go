@@ -4,6 +4,9 @@ package auth
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/MicahParks/keyfunc/v3"
@@ -12,14 +15,20 @@ import (
 
 const nodeManagementAudience = "node-management"
 const workspaceCallbackAudience = "workspace-callback"
+const localForwardAudience = "local-forward"
+const nodeIDMismatchFormat = "node ID mismatch: expected %s, got %s"
 
 // Claims represents JWT claims accepted by the node agent.
 type Claims struct {
 	jwt.RegisteredClaims
-	Workspace string `json:"workspace,omitempty"`
-	Node      string `json:"node,omitempty"`
-	Type      string `json:"type,omitempty"`
-	Scope     string `json:"scope,omitempty"`
+	Workspace      string `json:"workspace,omitempty"`
+	Node           string `json:"node,omitempty"`
+	Type           string `json:"type,omitempty"`
+	Scope          string `json:"scope,omitempty"`
+	UserID         string `json:"userId,omitempty"`
+	RemotePort     int    `json:"remotePort,omitempty"`
+	Mode           string `json:"mode,omitempty"`
+	LocalAuthority string `json:"localAuthority,omitempty"`
 }
 
 // JWTValidator validates JWTs using a remote JWKS endpoint.
@@ -32,7 +41,19 @@ type JWTValidator struct {
 
 // NewJWTValidator creates a new JWT validator that fetches keys from the JWKS endpoint.
 func NewJWTValidator(jwksURL, nodeID, issuer, audience string) (*JWTValidator, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	return NewJWTValidatorWithTimeout(jwksURL, nodeID, issuer, audience, 10*time.Second)
+}
+
+// NewJWTValidatorWithTimeout creates a new JWT validator with an explicit JWKS fetch timeout.
+func NewJWTValidatorWithTimeout(jwksURL, nodeID, issuer, audience string, timeout time.Duration) (*JWTValidator, error) {
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	if err := ValidateJWKSURL(jwksURL); err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	k, err := keyfunc.NewDefaultCtx(ctx, []string{jwksURL})
@@ -46,6 +67,58 @@ func NewJWTValidator(jwksURL, nodeID, issuer, audience string) (*JWTValidator, e
 		issuer:   issuer,
 		nodeID:   nodeID,
 	}, nil
+}
+
+// ValidateJWKSURL requires HTTPS for remote JWKS endpoints while preserving
+// explicit local-development HTTP endpoints used by tests and local wrangler.
+func ValidateJWKSURL(rawURL string) error {
+	return validateHTTPSOrLocalHTTPURL(rawURL, "JWKS endpoint")
+}
+
+// ValidateIssuerURL requires HTTPS for URL-form issuers while preserving
+// local-development HTTP issuers. Non-URL issuer strings are accepted for
+// compatibility with existing token issuers such as "test-issuer".
+func ValidateIssuerURL(issuer string) error {
+	trimmed := strings.TrimSpace(issuer)
+	if trimmed == "" {
+		return fmt.Errorf("JWT issuer is required")
+	}
+	u, err := url.Parse(trimmed)
+	if err != nil || u.Scheme == "" {
+		return nil
+	}
+	return validateHTTPSOrLocalHTTPURL(trimmed, "JWT issuer")
+}
+
+func validateHTTPSOrLocalHTTPURL(rawURL, label string) error {
+	trimmed := strings.TrimSpace(rawURL)
+	if trimmed == "" {
+		return fmt.Errorf("%s is required", label)
+	}
+	u, err := url.Parse(trimmed)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return fmt.Errorf("%s must be an absolute URL", label)
+	}
+	switch u.Scheme {
+	case "https":
+		return nil
+	case "http":
+		if isLocalDevelopmentHost(u.Hostname()) {
+			return nil
+		}
+		return fmt.Errorf("%s must use https for remote hosts; http is allowed only for localhost or loopback development hosts", label)
+	default:
+		return fmt.Errorf("%s must use http or https scheme, got %q", label, u.Scheme)
+	}
+}
+
+func isLocalDevelopmentHost(host string) bool {
+	normalized := strings.TrimSuffix(strings.ToLower(host), ".")
+	if normalized == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(normalized)
+	return ip != nil && ip.IsLoopback()
 }
 
 func (v *JWTValidator) parse(tokenString string) (*Claims, error) {
@@ -73,7 +146,7 @@ func (v *JWTValidator) parse(tokenString string) (*Claims, error) {
 	}
 
 	if claims.Node != "" && claims.Node != v.nodeID {
-		return nil, fmt.Errorf("node ID mismatch: expected %s, got %s", v.nodeID, claims.Node)
+		return nil, fmt.Errorf(nodeIDMismatchFormat, v.nodeID, claims.Node)
 	}
 
 	return claims, nil
@@ -175,7 +248,7 @@ func (v *JWTValidator) ValidateNodeManagementToken(tokenString, workspaceID stri
 	}
 
 	if claims.Node != v.nodeID {
-		return nil, fmt.Errorf("node ID mismatch: expected %s, got %s", v.nodeID, claims.Node)
+		return nil, fmt.Errorf(nodeIDMismatchFormat, v.nodeID, claims.Node)
 	}
 
 	// When a specific workspace is requested, the token MUST carry a matching
@@ -185,6 +258,42 @@ func (v *JWTValidator) ValidateNodeManagementToken(tokenString, workspaceID stri
 		return nil, fmt.Errorf("workspace ID mismatch: expected %s, got %s", workspaceID, claims.Workspace)
 	}
 
+	return claims, nil
+}
+
+// ValidateLocalForwardToken validates a non-writing local HTTP forwarding token.
+func (v *JWTValidator) ValidateLocalForwardToken(tokenString, workspaceID string, remotePort int) (*Claims, error) {
+	claims, err := v.parse(tokenString)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateAudience(claims, localForwardAudience); err != nil {
+		return nil, err
+	}
+	if err := validateWorkspaceClaim(claims, workspaceID); err != nil {
+		return nil, err
+	}
+	if claims.ExpiresAt == nil {
+		return nil, fmt.Errorf("expiration claim is required")
+	}
+	if claims.Type != "local-forward" {
+		return nil, fmt.Errorf("local forward token type is required")
+	}
+	if claims.Subject == "" || claims.UserID == "" || claims.Subject != claims.UserID {
+		return nil, fmt.Errorf("local forward user claim is invalid")
+	}
+	if claims.Node != v.nodeID {
+		return nil, fmt.Errorf(nodeIDMismatchFormat, v.nodeID, claims.Node)
+	}
+	if claims.RemotePort != remotePort {
+		return nil, fmt.Errorf("remote port mismatch: expected %d, got %d", remotePort, claims.RemotePort)
+	}
+	if claims.Mode != "http" {
+		return nil, fmt.Errorf("local forward mode must be http")
+	}
+	if claims.LocalAuthority == "" {
+		return nil, fmt.Errorf("local authority claim is required")
+	}
 	return claims, nil
 }
 

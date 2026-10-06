@@ -4,7 +4,7 @@ import type { TaskExecutionStep, TaskMode, TaskStatus } from './task';
 // Chat Sessions
 // =============================================================================
 
-export type ChatSessionStatus = 'active' | 'stopped' | 'error';
+export type ChatSessionStatus = 'active' | 'sleeping' | 'stopped' | 'error';
 
 export interface ChatSession {
   id: string;
@@ -33,6 +33,8 @@ export interface ChatSession {
 
 export interface ChatSessionTaskEmbed {
   id: string;
+  /** Canonical, user-safe saved placement diagnostics, including queued runs. */
+  placementExplanationJson?: string | null;
   status: TaskStatus;
   executionStep: TaskExecutionStep | null;
   errorMessage: string | null;
@@ -144,7 +146,13 @@ export interface ProjectWebSocketEvent {
 // Agent Sessions
 // =============================================================================
 
-export type AgentSessionStatus = 'running' | 'suspended' | 'stopped' | 'error';
+export type AgentSessionStatus =
+  | 'running'
+  | 'recovery'
+  | 'sleeping'
+  | 'suspended'
+  | 'stopped'
+  | 'error';
 
 /** Live host status from the VM Agent's SessionHost (more granular than AgentSessionStatus). */
 export type AgentHostStatus = 'idle' | 'starting' | 'ready' | 'prompting' | 'error' | 'stopped';
@@ -256,14 +264,15 @@ export const ACP_SESSION_TERMINAL_STATUSES: readonly AcpSessionStatus[] = [
 ] as const;
 
 /** Valid state machine transitions for ACP sessions. */
-export const ACP_SESSION_VALID_TRANSITIONS: Record<AcpSessionStatus, readonly AcpSessionStatus[]> = {
-  pending: ['assigned'],
-  assigned: ['running', 'failed', 'interrupted'],
-  running: ['completed', 'failed', 'interrupted'],
-  completed: [],
-  failed: [],
-  interrupted: [],
-} as const;
+export const ACP_SESSION_VALID_TRANSITIONS: Record<AcpSessionStatus, readonly AcpSessionStatus[]> =
+  {
+    pending: ['assigned'],
+    assigned: ['running', 'failed', 'interrupted'],
+    running: ['completed', 'failed', 'interrupted'],
+    completed: [],
+    failed: [],
+    interrupted: [],
+  } as const;
 
 export interface AcpSession {
   id: string;
@@ -304,7 +313,10 @@ export interface AcpSessionEvent {
 export const ACP_SESSION_DEFAULTS = {
   /** VM agent heartbeat frequency (ms). Env: ACP_SESSION_HEARTBEAT_INTERVAL_MS */
   HEARTBEAT_INTERVAL_MS: 60_000,
-  /** DO heartbeat timeout before marking interrupted (ms). Env: ACP_SESSION_DETECTION_WINDOW_MS */
+  /**
+   * ProjectData heartbeat stale window (ms). Env: ACP_SESSION_DETECTION_WINDOW_MS.
+   * VM-backed sessions require conclusive runtime/workspace evidence before interruption.
+   */
   DETECTION_WINDOW_MS: 300_000,
   /** VM agent startup reconciliation timeout (ms). Env: ACP_SESSION_RECONCILIATION_TIMEOUT_MS */
   RECONCILIATION_TIMEOUT_MS: 30_000,
@@ -330,7 +342,7 @@ export interface PlanEntry {
  * waiting for the next WebSocket broadcast.
  */
 export interface SessionStateSnapshot {
-  activity: 'idle' | 'prompting' | 'error' | 'stopped';
+  activity: 'idle' | 'prompting' | 'recovering' | 'error' | 'stopped';
   activityAt: number;
   statusError: string | null;
   currentPlan: PlanEntry[] | null;
@@ -338,7 +350,47 @@ export interface SessionStateSnapshot {
   promptStartedAt: number | null;
   agentType: string | null;
   lastStopReason: string | null;
+  /** Which end wrote the current activity value. */
+  activitySource?: SessionActivitySource | null;
+  /**
+   * Why the session left its last working state. Present on reconciled
+   * terminal transitions; null while a prompt is in flight.
+   */
+  activityReason?: SessionActivityTerminalReason | null;
+  /** Normalized harness-owned work state. Raw harness lifecycle payloads are never persisted. */
+  runtimeWorkState: 'inactive' | 'active' | 'settling' | null;
+  runtimeWorkCount: number | null;
+  runtimeWorkSource: string | null;
+  /** Control-plane receipt time for the latest work-state report. */
+  runtimeWorkUpdatedAt: number | null;
+  /** Harness lifecycle progress time reported by the VM Agent. */
+  runtimeWorkProgressAt: number | null;
+  /** D1-sourced recovery status from session_snapshots (sleep/wake lifecycle). */
+  recoveryStatus?: 'waking' | 'restored' | 'failed' | null;
+  /**
+   * Execution step of the replacement TaskRunner currently waking this session,
+   * resolved from `session_snapshots.recovery_task_id` -> `tasks.execution_step`.
+   * Drives phase-level wake progress in the UI. Null when no wake is in flight or
+   * the recovery task has not reported a step yet.
+   */
+  wakePhase?: TaskExecutionStep | null;
 }
+
+/** Which end of the system produced the authoritative activity value. */
+export type SessionActivitySource = 'vm_report' | 'control_plane' | 'probe';
+
+/**
+ * Explicit terminal transitions out of a working ("prompting"/"recovering")
+ * state. The activity itself lands on `idle`; the reason carries the identity
+ * of the transition so divergence stays diagnosable after the fact.
+ */
+export type SessionActivityTerminalReason =
+  | 'completed'
+  | 'cancelled'
+  | 'force_stopped'
+  | 'dead'
+  | 'probe_reconciled'
+  | 'stale_no_evidence';
 
 export interface AcpSessionForkRequest {
   contextSummary: string;

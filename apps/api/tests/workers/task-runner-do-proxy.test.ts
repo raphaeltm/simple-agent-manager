@@ -7,19 +7,33 @@
  * Uses Miniflare with real DOs — no vi.mock().
  */
 import { env, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import type { ProjectData } from '../../src/durable-objects/project-data';
 import type { TaskRunner } from '../../src/durable-objects/task-runner';
 import type { TaskRunnerState } from '../../src/durable-objects/task-runner/types';
+import type { TaskStartCapacityPoolSelection } from '../../src/services/placement-resolver';
 import {
   advanceTaskRunnerWorkspaceReady,
+  ensureTaskRunnerStarted,
   getTaskRunnerStatus,
   startTaskRunnerDO,
 } from '../../src/services/task-runner-do';
+import { seedInstallation, seedNode, seedProject, seedTask, seedUser } from './helpers/seed-d1';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+const RESOLVED_RESERVATION = {
+  cpuMillis: 2_000,
+  memoryMb: 4_096,
+  diskMb: 40_960,
+  exclusiveNode: false,
+  source: 'task' as const,
+  sourceId: 'task-start-001',
+  version: 1,
+};
 
 function getStub(taskId: string): DurableObjectStub<TaskRunner> {
   const id = env.TASK_RUNNER.idFromName(taskId);
@@ -27,6 +41,14 @@ function getStub(taskId: string): DurableObjectStub<TaskRunner> {
 }
 
 /** Full realistic input for startTaskRunnerDO */
+async function bindWorkspace(taskId: string, workspaceId: string): Promise<void> {
+  await runInDurableObject(getStub(taskId), async (instance) => {
+    const state = (await instance.ctx.storage.get<TaskRunnerState>('state'))!;
+    state.stepResults.workspaceId = workspaceId;
+    await instance.ctx.storage.put('state', state);
+  });
+}
+
 function makeStartInput(taskId: string) {
   return {
     taskId,
@@ -51,23 +73,158 @@ function makeStartInput(taskId: string) {
     devcontainerConfigName: 'default',
     cloudProvider: 'hetzner' as const,
     taskMode: 'task' as const,
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-5',
     permissionMode: 'auto-edit',
     opencodeProvider: null,
     opencodeBaseUrl: null,
     systemPromptAppend: 'Always run tests before committing.',
+    agentProfileHint: 'profile-release-001',
     attachments: [
-      { id: 'att-001', filename: 'spec.md', r2Key: 'attachments/att-001', contentType: 'text/markdown', sizeBytes: 1024 },
+      {
+        id: 'att-001',
+        filename: 'spec.md',
+        r2Key: 'attachments/att-001',
+        contentType: 'text/markdown',
+        sizeBytes: 1024,
+      },
     ],
     projectScaling: {
       taskExecutionTimeoutMs: 7200000,
-      maxWorkspacesPerNode: 3,
       nodeCpuThresholdPercent: 80,
       nodeMemoryThresholdPercent: 85,
       warmNodeTimeoutMs: 60000,
     },
+    resolvedReservation: RESOLVED_RESERVATION,
   };
 }
+
+function makeCapacityPoolSelection(
+  overrides: { provider?: 'hetzner' | 'scaleway'; location?: 'nbg1' | 'fsn1' | 'fr-par-1' } = {}
+): TaskStartCapacityPoolSelection {
+  const provider = overrides.provider ?? 'hetzner';
+  const location = overrides.location ?? 'fsn1';
+  const snapshot = {
+    capacityPoolId: 'pool-task-runner-start',
+    capacityPoolScope: 'user' as const,
+    capacityPoolRevision: 1,
+    capacitySourceId: 'source-task-runner-start',
+    capacityPoolCandidateId: 'candidate-task-runner-start',
+    placementCredentialSource: 'user' as const,
+    placementCredentialReference: 'credentials:user-cloud-start',
+    placementCredentialVersion: 1,
+    capacityPoolProjectId: null,
+    workloadRole: 'workspace' as const,
+    placementExplanationJson: JSON.stringify({
+      poolId: 'pool-task-runner-start',
+      capacitySourceId: 'source-task-runner-start',
+      capacityPoolCandidateId: 'candidate-task-runner-start',
+    }),
+  };
+
+  return {
+    poolId: snapshot.capacityPoolId,
+    scope: 'user',
+    revision: snapshot.capacityPoolRevision,
+    strategy: 'balanced',
+    capacityPoolProjectId: null,
+    workloadRole: 'workspace',
+    poolSnapshot: { ...snapshot, capacitySourceId: null, capacityPoolCandidateId: null },
+    candidates: [
+      {
+        id: snapshot.capacityPoolCandidateId,
+        poolId: snapshot.capacityPoolId,
+        capacitySourceId: snapshot.capacitySourceId,
+        provider,
+        location,
+        workloadRole: 'workspace',
+        runtime: 'vm',
+        machineClass: 'shared-vm',
+        machineSize: 'medium',
+        priority: 0,
+        candidateOrder: 0,
+        credentialAttributionSource: 'user',
+        placementCredentialSource: 'user',
+        placementCredentialReference: snapshot.placementCredentialReference,
+        placementCredentialVersion: snapshot.placementCredentialVersion,
+        capacityPoolProjectId: null,
+        snapshot,
+      },
+    ],
+  };
+}
+
+// ---------------------------------------------------------------------------
+// D1 fixtures
+// ---------------------------------------------------------------------------
+
+const TASK_IDS = [
+  'task-start-001',
+  'task-start-defaults-001',
+  'task-start-idempotent-001',
+  'task-advance-running-001',
+  'task-advance-recovery-001',
+  'task-advance-error-001',
+  'task-ensure-alarm-001',
+  'task-status-init-001',
+  'task-redact-mcp-001',
+  'task-deterministic-001',
+  'task-start-guard-001',
+  'task-capacity-explicit-guard-001',
+  'task-capacity-flexible-location-001',
+];
+
+beforeEach(async () => {
+  await seedUser('user-tr-001', { githubId: 'gh-12345', email: 'test@example.com' });
+  await seedUser('user-tr-002', { githubId: 'gh-67890', email: 'minimal@example.com' });
+  await seedInstallation('inst-001', 'user-tr-001', { installationIdValue: 'inst-001-ext' });
+  await seedInstallation('inst-002', 'user-tr-002', { installationIdValue: 'inst-002-ext' });
+  await seedProject('proj-tr-001', 'user-tr-001', 'inst-001');
+  await seedProject('proj-tr-002', 'user-tr-002', 'inst-002');
+  await seedNode('node-warm-001', 'user-tr-001', {
+    status: 'warm',
+    warmSince: new Date().toISOString(),
+  });
+
+  for (const taskId of TASK_IDS) {
+    const projectId = taskId === 'task-start-defaults-001' ? 'proj-tr-002' : 'proj-tr-001';
+    const userId = taskId === 'task-start-defaults-001' ? 'user-tr-002' : 'user-tr-001';
+    await seedTask(taskId, projectId, userId, {
+      status: 'delegated',
+      executionStep: 'node_selection',
+    });
+  }
+
+  const projectDataStub = env.PROJECT_DATA.get(
+    env.PROJECT_DATA.idFromName('proj-tr-001')
+  ) as DurableObjectStub<ProjectData>;
+  await runInDurableObject(projectDataStub, async (_instance, state) => {
+    const now = Date.now();
+    state.storage.sql.exec(
+      'INSERT OR IGNORE INTO chat_sessions (id, workspace_id, topic, status, started_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      'chat-sess-001',
+      'ws-tr-chat-001',
+      'Task runner proxy fixture',
+      'active',
+      now,
+      now,
+      now
+    );
+  });
+});
+
+afterEach(async () => {
+  // startTaskRunnerDO intentionally schedules an immediate alarm. These proxy
+  // contract tests inspect the initialized state but do not own orchestration,
+  // so leaving those alarms armed races vitest-pool-workers environment
+  // teardown and can strand a pending DO RPC after every assertion passed.
+  await Promise.all(
+    TASK_IDS.map((taskId) =>
+      runInDurableObject(getStub(taskId), async (_instance, state) => {
+        await state.storage.deleteAlarm();
+      })
+    )
+  );
+});
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -112,14 +269,89 @@ describe('task-runner-do proxy — Worker→DO contract', () => {
     expect(config.devcontainerConfigName).toBe('default');
     expect(config.cloudProvider).toBe('hetzner');
     expect(config.taskMode).toBe('task');
-    expect(config.model).toBe('claude-sonnet-4-20250514');
+    expect(config.model).toBe('claude-sonnet-5');
     expect(config.permissionMode).toBe('auto-edit');
     expect(config.systemPromptAppend).toBe('Always run tests before committing.');
+    expect(config.agentProfileHint).toBe('profile-release-001');
     expect(config.attachments).toHaveLength(1);
     expect(config.attachments![0]!.id).toBe('att-001');
     expect(config.attachments![0]!.filename).toBe('spec.md');
     expect(config.projectScaling?.taskExecutionTimeoutMs).toBe(7200000);
-    expect(config.projectScaling?.maxWorkspacesPerNode).toBe(3);
+    expect(config.projectScaling?.nodeCpuThresholdPercent).toBe(80);
+    expect(config.resolvedReservation).toEqual(RESOLVED_RESERVATION);
+  });
+
+  it('startTaskRunnerDO forwards reserved submission startGuard to the DO', async () => {
+    const taskId = 'task-start-guard-001';
+    const chatSessionId = 'chat-start-guard-001';
+    const initialStatusEventId = 'status-start-guard-001';
+    const intentFingerprint = `sha256:${'a'.repeat(64)}`;
+    const now = new Date().toISOString();
+
+    await env.DATABASE.prepare(
+      `UPDATE tasks SET status = 'queued', chat_session_id = ?, updated_at = ? WHERE id = ?`
+    )
+      .bind(chatSessionId, now, taskId)
+      .run();
+    await env.DATABASE.prepare(
+      `INSERT INTO task_status_events
+         (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)
+       VALUES (?, ?, NULL, 'queued', 'system', NULL, 'reserved start guard test', ?)`
+    )
+      .bind(initialStatusEventId, taskId, now)
+      .run();
+    await env.DATABASE.prepare(
+      `INSERT INTO task_submission_checkpoints
+         (task_id, project_id, user_id, chat_session_id, initial_message_id,
+          initial_status_event_id, source_kind, source_id, source_execution_id,
+          triggered_by, intent_fingerprint, accepted_snapshot_json, branch_name,
+          task_title, checkpoint_state, project_data_committed_at, created_at, updated_at)
+       VALUES (?, 'proj-tr-001', 'user-tr-001', ?, 'msg-start-guard-001', ?,
+          'trigger', 'trigger-start-guard-001', 'exec-start-guard-001', 'cron',
+          ?, '{}', 'task/start-guard', 'Start guard task', 'project_data_committed', ?, ?, ?)`
+    )
+      .bind(taskId, chatSessionId, initialStatusEventId, intentFingerprint, now, now, now)
+      .run();
+
+    const projectDataStub = env.PROJECT_DATA.get(env.PROJECT_DATA.idFromName('proj-tr-001'));
+    await runInDurableObject(projectDataStub, async (_instance, state) => {
+      const timestamp = Date.now();
+      state.storage.sql.exec(
+        `INSERT OR REPLACE INTO chat_sessions
+           (id, workspace_id, task_id, created_by_user_id, topic, status,
+            message_count, started_at, created_at, updated_at)
+         VALUES (?, NULL, ?, ?, 'Start guard task', 'active', 1, ?, ?, ?)`,
+        chatSessionId,
+        taskId,
+        'user-tr-001',
+        timestamp,
+        timestamp,
+        timestamp
+      );
+    });
+
+    await startTaskRunnerDO(env, {
+      ...makeStartInput(taskId),
+      chatSessionId,
+      startGuard: {
+        kind: 'reserved_submission',
+        taskId,
+        projectId: 'proj-tr-001',
+        userId: 'user-tr-001',
+        chatSessionId,
+        intentFingerprint,
+      },
+    });
+
+    const status = (await getStub(taskId).getStatus()) as TaskRunnerState;
+    expect(status.config.startGuard).toEqual({
+      kind: 'reserved_submission',
+      taskId,
+      projectId: 'proj-tr-001',
+      userId: 'user-tr-001',
+      chatSessionId,
+      intentFingerprint,
+    });
   });
 
   it('startTaskRunnerDO defaults optional fields to null', async () => {
@@ -135,6 +367,7 @@ describe('task-runner-do proxy — Worker→DO contract', () => {
       taskTitle: 'Minimal task',
       repository: 'test-org/test-repo',
       installationId: 'inst-002',
+      resolvedReservation: RESOLVED_RESERVATION,
     });
 
     const stub = getStub(taskId);
@@ -161,6 +394,55 @@ describe('task-runner-do proxy — Worker→DO contract', () => {
     expect(status.config.systemPromptAppend).toBeNull();
     expect(status.config.attachments).toBeNull();
     expect(status.config.projectScaling).toBeNull();
+    expect(status.config.resolvedReservation).toEqual(RESOLVED_RESERVATION);
+  });
+
+  it('does not let a mismatched capacity candidate override explicit provider or location', async () => {
+    const taskId = 'task-capacity-explicit-guard-001';
+
+    await startTaskRunnerDO(env, {
+      ...makeStartInput(taskId),
+      preferredNodeId: null,
+      cloudProvider: 'hetzner',
+      vmLocation: 'nbg1',
+      explicitVmLocation: true,
+      capacityPoolSelection: makeCapacityPoolSelection({
+        provider: 'scaleway',
+        location: 'fr-par-1',
+      }),
+    });
+
+    const status = (await getStub(taskId).getStatus()) as TaskRunnerState;
+    expect(status.config.cloudProvider).toBe('hetzner');
+    expect(status.config.vmLocation).toBe('nbg1');
+    expect(status.config.capacityPoolSelection).toBeNull();
+    expect(status.stepResults.capacityPlacementSnapshot).toBeNull();
+  });
+
+  it('preserves flexible location choice when no explicit vmLocation was requested', async () => {
+    const taskId = 'task-capacity-flexible-location-001';
+
+    await startTaskRunnerDO(env, {
+      ...makeStartInput(taskId),
+      preferredNodeId: null,
+      cloudProvider: 'hetzner',
+      vmLocation: 'nbg1',
+      explicitVmLocation: false,
+      capacityPoolSelection: makeCapacityPoolSelection({ provider: 'hetzner', location: 'fsn1' }),
+    });
+
+    const status = (await getStub(taskId).getStatus()) as TaskRunnerState;
+    expect(status.config.cloudProvider).toBe('hetzner');
+    expect(status.config.vmLocation).toBe('fsn1');
+    expect(status.config.capacityPoolSelection?.candidates[0]).toMatchObject({
+      provider: 'hetzner',
+      location: 'fsn1',
+    });
+    expect(status.stepResults.capacityPlacementSnapshot).toMatchObject({
+      capacityPoolId: 'pool-task-runner-start',
+      capacitySourceId: 'source-task-runner-start',
+      capacityPoolCandidateId: 'candidate-task-runner-start',
+    });
   });
 
   it('startTaskRunnerDO is idempotent — second call is a no-op', async () => {
@@ -179,8 +461,10 @@ describe('task-runner-do proxy — Worker→DO contract', () => {
   it('advanceTaskRunnerWorkspaceReady forwards running status', async () => {
     const taskId = 'task-advance-running-001';
     await startTaskRunnerDO(env, makeStartInput(taskId));
+    const workspaceId = 'workspace-advance-running';
+    await bindWorkspace(taskId, workspaceId);
 
-    await advanceTaskRunnerWorkspaceReady(env, taskId, 'running', null);
+    await advanceTaskRunnerWorkspaceReady(env, taskId, 'running', null, workspaceId);
 
     const stub = getStub(taskId);
     const status = (await stub.getStatus()) as TaskRunnerState;
@@ -192,8 +476,10 @@ describe('task-runner-do proxy — Worker→DO contract', () => {
   it('advanceTaskRunnerWorkspaceReady forwards recovery status', async () => {
     const taskId = 'task-advance-recovery-001';
     await startTaskRunnerDO(env, makeStartInput(taskId));
+    const workspaceId = 'workspace-advance-recovery';
+    await bindWorkspace(taskId, workspaceId);
 
-    await advanceTaskRunnerWorkspaceReady(env, taskId, 'recovery', null);
+    await advanceTaskRunnerWorkspaceReady(env, taskId, 'recovery', null, workspaceId);
 
     const stub = getStub(taskId);
     const status = (await stub.getStatus()) as TaskRunnerState;
@@ -204,8 +490,10 @@ describe('task-runner-do proxy — Worker→DO contract', () => {
   it('advanceTaskRunnerWorkspaceReady forwards error status with message', async () => {
     const taskId = 'task-advance-error-001';
     await startTaskRunnerDO(env, makeStartInput(taskId));
+    const workspaceId = 'workspace-advance-error';
+    await bindWorkspace(taskId, workspaceId);
 
-    await advanceTaskRunnerWorkspaceReady(env, taskId, 'error', 'Container build failed: OOM');
+    await advanceTaskRunnerWorkspaceReady(env, taskId, 'error', 'Container build failed: OOM', workspaceId);
 
     const stub = getStub(taskId);
     const status = (await stub.getStatus()) as TaskRunnerState;
@@ -217,7 +505,7 @@ describe('task-runner-do proxy — Worker→DO contract', () => {
   it('advanceTaskRunnerWorkspaceReady is a no-op on uninitialized DO', async () => {
     // Calling advance on a DO that was never started should not throw
     await expect(
-      advanceTaskRunnerWorkspaceReady(env, 'task-advance-noop-001', 'running', null),
+      advanceTaskRunnerWorkspaceReady(env, 'task-advance-noop-001', 'running', null, 'workspace-noop')
     ).resolves.toBeUndefined();
 
     // Verify DO remains uninitialized
@@ -228,6 +516,25 @@ describe('task-runner-do proxy — Worker→DO contract', () => {
   it('getTaskRunnerStatus returns null for uninitialized DO', async () => {
     const status = await getTaskRunnerStatus(env, 'task-status-none-001');
     expect(status).toBeNull();
+  });
+
+  it('ensureTaskRunnerStarted distinguishes an uninitialized DO', async () => {
+    await expect(ensureTaskRunnerStarted(env, 'task-ensure-none-001')).resolves.toBe(false);
+  });
+
+  it('ensureTaskRunnerStarted repairs a missing alarm for durable work', async () => {
+    const taskId = 'task-ensure-alarm-001';
+    await startTaskRunnerDO(env, makeStartInput(taskId));
+    const stub = getStub(taskId);
+    await runInDurableObject(stub, async (instance) => {
+      const state = await instance.ctx.storage.get<TaskRunnerState>('state');
+      expect(state).toBeTruthy();
+      await instance.ctx.storage.deleteAlarm();
+    });
+
+    await expect(ensureTaskRunnerStarted(env, taskId)).resolves.toBe(true);
+    const alarm = await runInDurableObject(stub, (instance) => instance.ctx.storage.getAlarm());
+    expect(alarm).not.toBeNull();
   });
 
   it('getTaskRunnerStatus returns state for initialized DO', async () => {

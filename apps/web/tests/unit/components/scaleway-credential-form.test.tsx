@@ -13,7 +13,7 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
 }));
 
 vi.mock('../../../src/hooks/useToast', () => ({
-  useToast: () => ({ success: vi.fn(), error: vi.fn() }),
+  useToast: () => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn(), addToast: vi.fn() }),
 }));
 
 import { ScalewayCredentialForm } from '../../../src/components/ScalewayCredentialForm';
@@ -24,6 +24,18 @@ const credential = {
   connected: true,
   createdAt: '2026-03-13T00:00:00.000Z',
 };
+
+function submitScalewayForm(secretKey = 'my-secret', projectId = 'proj-abc') {
+  fireEvent.change(screen.getByLabelText('API Secret Key'), { target: { value: secretKey } });
+  fireEvent.change(screen.getByLabelText('Project ID'), { target: { value: projectId } });
+  fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+}
+
+async function expectAlertText(text: string) {
+  await waitFor(() => {
+    expect(screen.getByText(text)).toBeInTheDocument();
+  });
+}
 
 describe('ScalewayCredentialForm', () => {
   const onUpdate = vi.fn();
@@ -62,9 +74,7 @@ describe('ScalewayCredentialForm', () => {
   it('calls createCredential with correct payload on submit', async () => {
     render(<ScalewayCredentialForm onUpdate={onUpdate} />);
 
-    fireEvent.change(screen.getByLabelText('API Secret Key'), { target: { value: 'my-secret' } });
-    fireEvent.change(screen.getByLabelText('Project ID'), { target: { value: 'proj-abc' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    submitScalewayForm();
 
     await waitFor(() => {
       expect(mocks.createCredential).toHaveBeenCalledWith({
@@ -76,17 +86,46 @@ describe('ScalewayCredentialForm', () => {
     expect(onUpdate).toHaveBeenCalled();
   });
 
+  it('shows validation success when save validation passes', async () => {
+    mocks.createCredential.mockResolvedValue({
+      validation: {
+        valid: true,
+        message: 'Scaleway credential validated.',
+        validationMode: 'provider',
+      },
+    });
+    render(<ScalewayCredentialForm onUpdate={onUpdate} />);
+
+    submitScalewayForm('good-key');
+
+    await expectAlertText('Scaleway credential validated.');
+    expect(onUpdate).toHaveBeenCalled();
+  });
+
+  it('shows a saved warning when save validation fails', async () => {
+    mocks.createCredential.mockResolvedValue({
+      validation: {
+        valid: false,
+        message: 'Token rejected by Scaleway API (401 Unauthorized)',
+        error: 'Token rejected by Scaleway API (401 Unauthorized)',
+        validationMode: 'provider',
+      },
+    });
+    render(<ScalewayCredentialForm onUpdate={onUpdate} />);
+
+    submitScalewayForm('bad-key');
+
+    await expectAlertText('Saved, but Token rejected by Scaleway API (401 Unauthorized)');
+    expect(onUpdate).toHaveBeenCalled();
+  });
+
   it('shows error alert on submit failure', async () => {
     mocks.createCredential.mockRejectedValue(new Error('Invalid key'));
     render(<ScalewayCredentialForm onUpdate={onUpdate} />);
 
-    fireEvent.change(screen.getByLabelText('API Secret Key'), { target: { value: 'bad' } });
-    fireEvent.change(screen.getByLabelText('Project ID'), { target: { value: 'proj' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    submitScalewayForm('bad', 'proj');
 
-    await waitFor(() => {
-      expect(screen.getByText('Invalid key')).toBeInTheDocument();
-    });
+    await expectAlertText('Invalid key');
     expect(onUpdate).not.toHaveBeenCalled();
   });
 

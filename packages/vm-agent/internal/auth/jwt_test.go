@@ -15,6 +15,83 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+func TestValidateJWKSURLRequiresHTTPSForRemoteHosts(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		url     string
+		wantErr bool
+	}{
+		{name: "remote https", url: "https://api.example.com/.well-known/jwks.json"},
+		{name: "localhost http", url: "http://localhost:8787/.well-known/jwks.json"},
+		{name: "loopback ipv4 http", url: "http://127.0.0.1:8787/.well-known/jwks.json"},
+		{name: "loopback ipv6 http", url: "http://[::1]:8787/.well-known/jwks.json"},
+		{name: "remote http rejected", url: "http://api.example.com/.well-known/jwks.json", wantErr: true},
+		{name: "private lan http rejected", url: "http://192.168.1.20/.well-known/jwks.json", wantErr: true},
+		{name: "invalid scheme rejected", url: "ftp://api.example.com/.well-known/jwks.json", wantErr: true},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := ValidateJWKSURL(tc.url)
+			if tc.wantErr && err == nil {
+				t.Fatal("expected error")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateIssuerURLAllowsNonURLIssuersAndLocalHTTP(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		issuer  string
+		wantErr bool
+	}{
+		{name: "plain issuer", issuer: "test-issuer"},
+		{name: "remote https", issuer: "https://api.example.com"},
+		{name: "localhost http", issuer: "http://localhost:8787"},
+		{name: "loopback http", issuer: "http://127.0.0.1:8787"},
+		{name: "remote http rejected", issuer: "http://api.example.com", wantErr: true},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := ValidateIssuerURL(tc.issuer)
+			if tc.wantErr && err == nil {
+				t.Fatal("expected error")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestNewJWTValidatorRejectsRemoteHTTPJWKSBeforeFetch(t *testing.T) {
+	t.Parallel()
+
+	validator, err := NewJWTValidator("http://api.example.com/.well-known/jwks.json", "node-1", "https://api.example.com", "workspace-terminal")
+	if err == nil {
+		if validator != nil {
+			validator.Close()
+		}
+		t.Fatal("expected remote http JWKS error")
+	}
+	if !strings.Contains(err.Error(), "JWKS endpoint must use https") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 // testJWKS sets up a local JWKS server and returns a JWTValidator for testing.
 func testJWKS(t *testing.T, nodeID string) (*JWTValidator, *rsa.PrivateKey) {
 	t.Helper()

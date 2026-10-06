@@ -1,0 +1,965 @@
+import { Hono } from 'hono';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { AppError } from '../../../src/middleware/error';
+
+const WORKSPACES = {
+  __table: 'workspaces',
+  id: 'workspaces.id',
+  status: 'workspaces.status',
+  nodeId: 'workspaces.node_id',
+};
+const DEPLOYMENT_RELEASES = {
+  __table: 'deployment_releases',
+  environmentId: 'deployment_releases.environmentId',
+  version: 'deployment_releases.version',
+};
+const DEPLOYMENT_ENVIRONMENTS = {
+  __table: 'deployment_environments',
+  id: 'deployment_environments.id',
+  projectId: 'deployment_environments.projectId',
+  name: 'deployment_environments.name',
+  status: 'deployment_environments.status',
+  nodeId: 'deployment_environments.nodeId',
+  agentDeployEnabled: 'deployment_environments.agentDeployEnabled',
+  agentDeployEnabledBy: 'deployment_environments.agentDeployEnabledBy',
+  agentDeployEnabledAt: 'deployment_environments.agentDeployEnabledAt',
+  agentDeployDisabledAt: 'deployment_environments.agentDeployDisabledAt',
+  allowedDeployProfileIdsJson: 'deployment_environments.allowedDeployProfileIdsJson',
+  requiresVolumes: 'deployment_environments.requiresVolumes',
+  resolvedReservationJson: 'deployment_environments.resolvedReservationJson',
+  updatedAt: 'deployment_environments.updatedAt',
+};
+const NODES = {
+  __table: 'nodes',
+  id: 'nodes.id',
+  nodeMode: 'nodes.nodeMode',
+  status: 'nodes.status',
+  providerInstanceId: 'nodes.providerInstanceId',
+};
+
+let workspaceRows: Array<{
+  projectId: string | null;
+  userId: string;
+  status: string;
+  nodeId?: string | null;
+  nodeStatus?: string | null;
+}> = [];
+let workspaceReadResponses: Array<typeof workspaceRows> = [];
+let latestVersionRows: Array<{ version: number }> = [];
+let environmentRows: Array<{
+  id: string;
+  nodeId: string | null;
+  status: string;
+  agentDeployEnabled: boolean;
+  agentDeployEnabledBy?: string | null;
+  agentDeployEnabledAt?: string | null;
+  agentDeployDisabledAt?: string | null;
+  allowedDeployProfileIdsJson?: string | null;
+  resolvedReservationJson?: string | null;
+}> = [];
+let nodeRows: Array<{
+  nodeMode: string | null;
+  status: string | null;
+  providerInstanceId: string | null;
+}> = [];
+const inserted: Array<Record<string, unknown>> = [];
+const updated: Array<Record<string, unknown>> = [];
+const mockProvisionDeploymentNode = vi.hoisted(() => vi.fn(async () => null));
+const mockResolveDeploymentPlacement = vi.hoisted(() => vi.fn());
+const mockClaimDeploymentEnvironmentRelocation = vi.hoisted(() => vi.fn());
+const mockCompleteDeploymentEnvironmentRelocation = vi.hoisted(() => vi.fn());
+const mockRestoreDeploymentEnvironmentRelocation = vi.hoisted(() => vi.fn());
+const mockCreateMissingDeclaredVolumes = vi.hoisted(() => vi.fn(async () => []));
+const mockAttachEnvironmentVolumesToLinkedNode = vi.hoisted(() => vi.fn(async () => []));
+const mockMarkDeploymentReleaseVolumeAttachFailed = vi.hoisted(() => vi.fn(async () => undefined));
+const mockListEnvironmentVolumes = vi.hoisted(() => vi.fn(async () => []));
+const mockDetachEnvironmentVolumes = vi.hoisted(() => vi.fn(async () => undefined));
+const mockTeardownDeploymentEnvironmentOnNode = vi.hoisted(() => vi.fn(async () => undefined));
+const recordDeploymentReleaseLifecycleEventBestEffort = vi.hoisted(() =>
+  vi.fn(async () => undefined)
+);
+const signalCallbackMock = vi.hoisted(() => vi.fn(async () => undefined));
+let verifiedPayload: { workspace: string; type: string; scope?: string } = {
+  workspace: 'ws-1',
+  type: 'callback',
+  scope: 'workspace',
+};
+let waitUntilMock = vi.fn();
+
+vi.mock('drizzle-orm', () => ({
+  and: (...conds: unknown[]) => ({ op: 'and', conds }),
+  desc: (col: unknown) => col,
+  eq: (col: unknown, val: unknown) => ({ op: 'eq', col, val }),
+  inArray: (col: unknown, vals: unknown[]) => ({ op: 'inArray', col, vals }),
+  // The provisioning import chain (deployment-provisioning -> observability)
+  // pulls observability-schema.ts, which uses sql`...` at module load time.
+  sql: (strings: TemplateStringsArray, ...exprs: unknown[]) => ({ strings, exprs }),
+}));
+
+vi.mock('../../../src/db/schema', () => ({
+  workspaces: WORKSPACES,
+  deploymentReleases: DEPLOYMENT_RELEASES,
+  deploymentEnvironments: DEPLOYMENT_ENVIRONMENTS,
+  nodes: NODES,
+}));
+
+// Node provisioning is best-effort and must never fail the durable release.
+// Stub it so the release-recording slice stays focused; nodeId resolves to null.
+vi.mock('../../../src/services/deployment-provisioning', () => ({
+  DEPLOYMENT_MODEL_RUNNER_VM_SIZE: 'medium',
+  provisionDeploymentNode: (...args: unknown[]) => mockProvisionDeploymentNode(...args),
+  resolveDeploymentPlacement: (...args: unknown[]) => mockResolveDeploymentPlacement(...args),
+  claimDeploymentEnvironmentRelocation: (...args: unknown[]) =>
+    mockClaimDeploymentEnvironmentRelocation(...args),
+  completeDeploymentEnvironmentRelocation: (...args: unknown[]) =>
+    mockCompleteDeploymentEnvironmentRelocation(...args),
+  restoreDeploymentEnvironmentRelocation: (...args: unknown[]) =>
+    mockRestoreDeploymentEnvironmentRelocation(...args),
+}));
+
+vi.mock('../../../src/services/deployment-volumes', () => ({
+  createMissingDeclaredVolumes: (...args: unknown[]) => mockCreateMissingDeclaredVolumes(...args),
+  attachEnvironmentVolumesToLinkedNode: (...args: unknown[]) =>
+    mockAttachEnvironmentVolumesToLinkedNode(...args),
+  markDeploymentReleaseVolumeAttachFailed: (...args: unknown[]) =>
+    mockMarkDeploymentReleaseVolumeAttachFailed(...args),
+  listEnvironmentVolumes: (...args: unknown[]) => mockListEnvironmentVolumes(...args),
+  detachEnvironmentVolumes: (...args: unknown[]) => mockDetachEnvironmentVolumes(...args),
+}));
+
+vi.mock('../../../src/services/node-agent', () => ({
+  teardownDeploymentEnvironmentOnNode: (...args: unknown[]) =>
+    mockTeardownDeploymentEnvironmentOnNode(...args),
+}));
+vi.mock('../../../src/services/project-lifecycle-events', () => ({
+  recordDeploymentReleaseLifecycleEventBestEffort,
+}));
+vi.mock('../../../src/services/workspace-deletion-callback-signal', () => ({
+  signalWorkspaceDeletionUnconfirmedCallback: signalCallbackMock,
+}));
+
+function createMockDb() {
+  return {
+    select: vi.fn().mockImplementation(() => ({
+      from: vi.fn().mockImplementation((table: unknown) => {
+        if (table === WORKSPACES) {
+          return {
+            leftJoin: vi.fn().mockReturnValue({
+              where: vi.fn().mockReturnValue({
+                limit: vi.fn(async () => workspaceReadResponses.shift() ?? workspaceRows),
+              }),
+            }),
+            where: vi.fn().mockReturnValue({
+              limit: vi.fn(async () => workspaceReadResponses.shift() ?? workspaceRows),
+            }),
+          };
+        }
+        if (table === DEPLOYMENT_ENVIRONMENTS) {
+          return {
+            where: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue(environmentRows),
+            }),
+          };
+        }
+        if (table === NODES) {
+          return {
+            where: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue(nodeRows),
+            }),
+          };
+        }
+        // deployment_releases latest-version lookup
+        return {
+          where: vi.fn().mockReturnValue({
+            orderBy: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue(latestVersionRows),
+            }),
+          }),
+        };
+      }),
+    })),
+    insert: vi.fn().mockImplementation(() => ({
+      values: vi.fn().mockImplementation((values: Record<string, unknown>) => {
+        inserted.push(values);
+        return Promise.resolve();
+      }),
+    })),
+    update: vi.fn().mockImplementation(() => ({
+      set: vi.fn().mockImplementation((values: Record<string, unknown>) => {
+        updated.push(values);
+        return {
+          where: vi.fn().mockResolvedValue(undefined),
+        };
+      }),
+    })),
+  };
+}
+
+vi.mock('drizzle-orm/d1', () => ({
+  drizzle: () => createMockDb(),
+}));
+
+vi.mock('../../../src/services/jwt', () => ({
+  verifyCallbackToken: vi.fn(async () => verifiedPayload),
+}));
+
+vi.mock('../../../src/lib/ulid', () => ({
+  ulid: () => 'release-ulid-1',
+}));
+
+vi.mock('../../../src/lib/logger', () => ({
+  log: { debug: vi.fn(), error: vi.fn(), info: vi.fn(), warn: vi.fn() },
+  serializeError: vi.fn((err: unknown) => ({
+    error: err instanceof Error ? err.message : String(err),
+  })),
+}));
+
+async function buildApp() {
+  const { composePublishReleaseCallbackRoute } =
+    await import('../../../src/routes/projects/compose-publish-release-callback');
+  const app = new Hono();
+  app.onError((err, c) => {
+    if (err instanceof AppError) {
+      return c.json(err.toJSON(), err.statusCode as 400);
+    }
+    return c.json({ error: 'INTERNAL_ERROR', message: (err as Error).message }, 500);
+  });
+  app.route('/api/projects', composePublishReleaseCallbackRoute);
+  return app;
+}
+
+function request(app: Hono, projectId: string, body: unknown, env: Record<string, unknown> = {}) {
+  return app.request(
+    `/api/projects/${projectId}/compose-publish-release`,
+    {
+      method: 'POST',
+      headers: { Authorization: 'Bearer cb-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+    { DATABASE: {}, ...env },
+    { waitUntil: waitUntilMock, passThroughOnException: vi.fn() }
+  );
+}
+
+const validSubmission = {
+  environment: 'staging',
+  environmentId: 'env-1',
+  reference: 'sam-registry.local:5050/test-one',
+  composeYaml: 'services:\n  web:\n    build: .\n',
+  services: [{ serviceName: 'web', sourceRef: 'a', pushedRef: 'b', digest: 'sha256:abc' }],
+  submittedBy: {
+    taskId: 'task-1',
+    agentProfileId: 'profile-1',
+  },
+};
+
+describe('compose-publish-release callback (vertical slice)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockResolveDeploymentPlacement.mockResolvedValue({
+      provider: 'hetzner',
+      location: 'fsn1',
+      vmSize: 'small',
+    });
+    mockClaimDeploymentEnvironmentRelocation.mockResolvedValue('relocation-claim');
+    mockCompleteDeploymentEnvironmentRelocation.mockResolvedValue(true);
+    mockRestoreDeploymentEnvironmentRelocation.mockResolvedValue(undefined);
+    inserted.length = 0;
+    updated.length = 0;
+    nodeRows = [];
+    workspaceRows = [
+      {
+        projectId: 'proj-1',
+        userId: 'user-1',
+        status: 'running',
+        nodeId: 'node-1',
+        nodeStatus: 'running',
+      },
+    ];
+    workspaceReadResponses = [];
+    latestVersionRows = [{ version: 4 }];
+    environmentRows = [
+      {
+        id: 'env-1',
+        nodeId: null,
+        status: 'active',
+        agentDeployEnabled: true,
+        agentDeployEnabledBy: 'user-1',
+        agentDeployEnabledAt: '2026-06-21T00:00:00.000Z',
+        agentDeployDisabledAt: null,
+        allowedDeployProfileIdsJson: null,
+      },
+    ];
+    verifiedPayload = { workspace: 'ws-1', type: 'callback', scope: 'workspace' };
+    waitUntilMock = vi.fn();
+  });
+
+  it('records a compose-publish release with the next version and source discriminator', async () => {
+    const app = await buildApp();
+    const res = await request(app, 'proj-1', validSubmission);
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    // nodeId is null here: the stubbed provisioner returns null (no node linked),
+    // which is the best-effort path that never fails the durable release.
+    expect(body).toEqual({
+      releaseId: 'release-ulid-1',
+      version: 5,
+      status: 'created',
+      nodeId: null,
+    });
+
+    expect(inserted).toHaveLength(1);
+    const row = inserted[0];
+    expect(row.environmentId).toBe('env-1');
+    expect(row.version).toBe(5);
+    expect(row.status).toBe('created');
+    expect(row.source).toBe('compose-publish');
+    expect(row.createdBy).toBe('user-1');
+    // Only the allowlisted submission fields are persisted in the manifest
+    // column (see composePublishReleaseSubmissionSchema) — not a verbatim
+    // spread of the raw request body.
+    expect(JSON.parse(row.manifest as string)).toMatchObject({
+      environment: 'staging',
+      environmentId: 'env-1',
+      reference: validSubmission.reference,
+      services: validSubmission.services,
+      submittedBy: {
+        userId: 'user-1',
+        workspaceId: 'ws-1',
+        taskId: 'task-1',
+        agentProfileId: 'profile-1',
+      },
+    });
+    expect(recordDeploymentReleaseLifecycleEventBestEffort).toHaveBeenCalledWith(
+      { DATABASE: {} },
+      expect.objectContaining({
+        projectId: 'proj-1',
+        releaseId: 'release-ulid-1',
+        environmentId: 'env-1',
+        status: 'created',
+        version: 5,
+        workspaceId: 'ws-1',
+        taskId: 'task-1',
+        source: 'compose_publish_release_callback.create',
+      })
+    );
+    expect(waitUntilMock).toHaveBeenCalled();
+  });
+
+  it('uses explicit Compose limits and configured root disk for placement and provisioning', async () => {
+    const app = await buildApp();
+    const response = await request(
+      app,
+      'proj-1',
+      {
+        ...validSubmission,
+        composeYaml: `services:
+  web:
+    image: nginx:latest
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 768M
+`,
+      },
+      {
+        DEPLOYMENT_DEFAULT_CPU_LIMIT_MILLIS: '400',
+        DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB: '640',
+        DEPLOYMENT_DEFAULT_ROOT_DISK_MB: '2048',
+      }
+    );
+
+    expect(response.status).toBe(200);
+    const expectedReservation = expect.objectContaining({
+      cpuMillis: 1500,
+      memoryMb: 768,
+      diskMb: 2048,
+      exclusiveNode: false,
+      sourceId: 'env-1',
+    });
+    expect(mockResolveDeploymentPlacement).toHaveBeenCalledWith(
+      'user-1',
+      expect.anything(),
+      'proj-1',
+      expect.objectContaining({ reservation: expectedReservation })
+    );
+    expect(mockProvisionDeploymentNode).toHaveBeenCalledWith(
+      'env-1',
+      'proj-1',
+      'user-1',
+      expect.anything(),
+      expect.objectContaining({ reservation: expectedReservation })
+    );
+  });
+
+  it('rejects a volume-free release when placement cannot be resolved for its existing node', async () => {
+    environmentRows = [
+      {
+        id: 'env-1',
+        nodeId: 'node-shared-1',
+        status: 'active',
+        agentDeployEnabled: true,
+        agentDeployEnabledBy: 'user-1',
+        agentDeployEnabledAt: '2026-06-21T00:00:00.000Z',
+        agentDeployDisabledAt: null,
+        allowedDeployProfileIdsJson: null,
+        resolvedReservationJson: JSON.stringify({
+          version: 3,
+          source: 'deployment-manifest',
+          sourceId: 'env-1',
+          cpuMillis: 250,
+          memoryMb: 256,
+          diskMb: 1024,
+          exclusiveNode: false,
+        }),
+      },
+    ];
+    mockResolveDeploymentPlacement.mockResolvedValueOnce(null);
+
+    const app = await buildApp();
+    const response = await request(app, 'proj-1', validSubmission);
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      message:
+        'No cloud provider credential found. Connect a cloud provider before deploying applications.',
+    });
+    expect(inserted).toHaveLength(0);
+    expect(mockProvisionDeploymentNode).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['deletion', { status: 'stopping' }],
+    ['node reassignment', { nodeId: 'node-2' }],
+  ])('does not record or provision a release when %s wins after auth', async (_case, change) => {
+    const active = workspaceRows;
+    workspaceReadResponses = [active, [{ ...active[0]!, ...change }]];
+    const app = await buildApp();
+    const res = await request(app, 'proj-1', {
+      ...validSubmission,
+      secretPayload: 'must-not-be-telemetry',
+    });
+
+    expect(res.status).toBe(410);
+    expect(inserted).toHaveLength(0);
+    expect(updated).toHaveLength(0);
+    expect(mockProvisionDeploymentNode).not.toHaveBeenCalled();
+    expect(recordDeploymentReleaseLifecycleEventBestEffort).not.toHaveBeenCalled();
+    expect(JSON.stringify(signalCallbackMock.mock.calls)).not.toContain('must-not-be-telemetry');
+  });
+
+  it('records a stopped environment release without provisioning a node', async () => {
+    environmentRows = [
+      {
+        id: 'env-1',
+        nodeId: null,
+        status: 'stopped',
+        agentDeployEnabled: true,
+        agentDeployEnabledBy: 'user-1',
+        agentDeployEnabledAt: '2026-06-21T00:00:00.000Z',
+        agentDeployDisabledAt: null,
+        allowedDeployProfileIdsJson: null,
+      },
+    ];
+
+    const app = await buildApp();
+    const res = await request(app, 'proj-1', validSubmission);
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.nodeId).toBeNull();
+    expect(mockProvisionDeploymentNode).not.toHaveBeenCalled();
+  });
+
+  it('provisions volume releases with the resolved provider and volume location', async () => {
+    mockProvisionDeploymentNode.mockResolvedValueOnce({
+      nodeId: 'node-volume-1',
+      provisioningPromise: Promise.resolve(),
+    });
+    const app = await buildApp();
+    const res = await request(app, 'proj-1', {
+      ...validSubmission,
+      composeYaml: `services:
+  web:
+    image: nginx:latest
+    volumes:
+      - data:/usr/share/nginx/html
+volumes:
+  data:
+    x-sam-size-hint-mb: 1024
+`,
+    });
+
+    const body = await res.json();
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(body).toMatchObject({ nodeId: 'node-volume-1' });
+    expect(mockCreateMissingDeclaredVolumes).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      'user-1',
+      expect.objectContaining({
+        environmentId: 'env-1',
+        location: 'fsn1',
+        targetProvider: 'hetzner',
+      })
+    );
+    expect(mockProvisionDeploymentNode).toHaveBeenCalledWith(
+      'env-1',
+      'proj-1',
+      'user-1',
+      expect.anything(),
+      {
+        providerOverride: 'hetzner',
+        vmLocationOverride: 'fsn1',
+        vmSizeOverride: 'small',
+        requiresVolumes: true,
+        releaseId: 'release-ulid-1',
+        reservation: expect.objectContaining({
+          cpuMillis: 250,
+          memoryMb: 256,
+          diskMb: 2048,
+          exclusiveNode: true,
+        }),
+      }
+    );
+  });
+
+  it('does not 500 when the shared→exclusive migration fails after the release is durable', async () => {
+    // Regression (cloudflare-specialist HIGH): the release is inserted durably
+    // BEFORE the shared→exclusive migration. If the migration (teardown +
+    // volume detach) throws, the route MUST still return the recorded release
+    // (200). Returning a 5xx makes the VM agent retry the whole publish, which
+    // inserts a SECOND release with the next version number (duplicate version
+    // records). The migration is deferred to the deploy verb / next release.
+    environmentRows = [
+      {
+        id: 'env-1',
+        nodeId: 'node-shared-1',
+        status: 'active',
+        agentDeployEnabled: true,
+        agentDeployEnabledBy: 'user-1',
+        agentDeployEnabledAt: '2026-06-21T00:00:00.000Z',
+        agentDeployDisabledAt: null,
+        allowedDeployProfileIdsJson: null,
+      },
+    ];
+    // The linked node is a running SHARED node, so the migration path runs.
+    nodeRows = [{ nodeMode: 'shared', status: 'running', providerInstanceId: 'srv-old' }];
+    // The teardown call that begins the migration fails.
+    mockTeardownDeploymentEnvironmentOnNode.mockRejectedValueOnce(
+      new Error('vm agent unreachable')
+    );
+
+    const app = await buildApp();
+    const res = await request(app, 'proj-1', {
+      ...validSubmission,
+      composeYaml: `services:
+  web:
+    image: nginx:latest
+    volumes:
+      - data:/usr/share/nginx/html
+volumes:
+  data:
+    x-sam-size-hint-mb: 1024
+`,
+    });
+
+    const body = await res.json();
+    // The durable release is returned, NOT a 500.
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(body).toMatchObject({
+      releaseId: 'release-ulid-1',
+      version: 5,
+      status: 'created',
+      nodeId: 'node-shared-1',
+    });
+    // The release was inserted durably before the migration failed.
+    expect(inserted).toHaveLength(1);
+    expect(inserted[0].version).toBe(5);
+    // The failure was recorded for diagnosis.
+    expect(mockMarkDeploymentReleaseVolumeAttachFailed).toHaveBeenCalledWith(
+      expect.anything(),
+      'env-1',
+      'release-ulid-1',
+      expect.any(Error),
+      expect.anything()
+    );
+    // The migration returns early — provisioning is NOT triggered on the failed tick.
+    expect(mockProvisionDeploymentNode).not.toHaveBeenCalled();
+  });
+
+  it('validates and records artifact-backed service descriptors', async () => {
+    const headCalls: string[] = [];
+    const r2 = {
+      head: vi.fn(async (key: string) => {
+        headCalls.push(key);
+        return { size: 42 };
+      }),
+    };
+    const artifactSubmission = {
+      ...validSubmission,
+      services: [
+        {
+          serviceName: 'web',
+          sourceRef: 'workspace-web',
+          localImageRef: 'workspace-web',
+          r2Key: 'compose-image-artifacts/proj-1/env-1/ws-1/upload-1/web.docker-save.tar',
+          sizeBytes: 42,
+          archiveSha256: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          archiveType: 'docker-save',
+          mediaType: 'application/vnd.docker.image.rootfs.diff.tar',
+        },
+      ],
+    };
+
+    const app = await buildApp();
+    const res = await request(app, 'proj-1', artifactSubmission, { R2: r2 });
+
+    expect(res.status).toBe(200);
+    expect(headCalls).toEqual([
+      'compose-image-artifacts/proj-1/env-1/ws-1/upload-1/web.docker-save.tar',
+    ]);
+    const manifest = JSON.parse(inserted[0].manifest as string);
+    expect(manifest.services[0]).toMatchObject({
+      serviceName: 'web',
+      r2Key: 'compose-image-artifacts/proj-1/env-1/ws-1/upload-1/web.docker-save.tar',
+      archiveSha256: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    });
+  });
+
+  it('rejects artifact descriptors outside the workspace-scoped key prefix', async () => {
+    const app = await buildApp();
+    const res = await request(
+      app,
+      'proj-1',
+      {
+        ...validSubmission,
+        services: [
+          {
+            serviceName: 'web',
+            sourceRef: 'workspace-web',
+            localImageRef: 'workspace-web',
+            r2Key: 'compose-image-artifacts/proj-1/env-1/other-ws/upload-1/web.docker-save.tar',
+            sizeBytes: 42,
+            archiveSha256:
+              'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            archiveType: 'docker-save',
+            mediaType: 'application/vnd.docker.image.rootfs.diff.tar',
+          },
+        ],
+      },
+      { R2: { head: vi.fn() } }
+    );
+
+    expect(res.status).toBe(400);
+    expect(inserted).toHaveLength(0);
+  });
+
+  it('does not create provider volumes when artifact validation fails', async () => {
+    const app = await buildApp();
+    const res = await request(
+      app,
+      'proj-1',
+      {
+        ...validSubmission,
+        composeYaml: `services:
+  web:
+    image: nginx:latest
+    volumes:
+      - data:/usr/share/nginx/html
+volumes:
+  data:
+`,
+        services: [
+          {
+            serviceName: 'web',
+            sourceRef: 'workspace-web',
+            localImageRef: 'workspace-web',
+            r2Key: 'compose-image-artifacts/proj-1/env-1/other-ws/upload-1/web.docker-save.tar',
+            sizeBytes: 42,
+            archiveSha256:
+              'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            archiveType: 'docker-save',
+            mediaType: 'application/vnd.docker.image.rootfs.diff.tar',
+          },
+        ],
+      },
+      { R2: { head: vi.fn() } }
+    );
+
+    expect(res.status).toBe(400);
+    expect(inserted).toHaveLength(0);
+    expect(mockCreateMissingDeclaredVolumes).not.toHaveBeenCalled();
+  });
+
+  it('starts at version 1 when the environment has no prior releases', async () => {
+    latestVersionRows = [];
+    const app = await buildApp();
+    const res = await request(app, 'proj-1', validSubmission);
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).version).toBe(1);
+    expect(inserted[0].version).toBe(1);
+  });
+
+  it('rejects when the workspace project does not match the route param', async () => {
+    workspaceRows = [
+      {
+        projectId: 'proj-OTHER',
+        userId: 'user-1',
+        status: 'running',
+        nodeId: 'node-1',
+        nodeStatus: 'running',
+      },
+    ];
+    const app = await buildApp();
+    const res = await request(app, 'proj-1', validSubmission);
+
+    expect(res.status).toBe(403);
+    expect(inserted).toHaveLength(0);
+  });
+
+  it('rejects when the workspace is not linked to a project', async () => {
+    workspaceRows = [
+      {
+        projectId: null,
+        userId: 'user-1',
+        status: 'running',
+        nodeId: 'node-1',
+        nodeStatus: 'running',
+      },
+    ];
+    const app = await buildApp();
+    const res = await request(app, 'proj-1', validSubmission);
+
+    expect(res.status).toBe(403);
+    expect(inserted).toHaveLength(0);
+  });
+
+  it('rejects when the requested target environment is not enabled for agent deployment', async () => {
+    environmentRows = [{ id: 'env-1', nodeId: null, agentDeployEnabled: false }];
+    const app = await buildApp();
+    const res = await request(app, 'proj-1', validSubmission);
+
+    expect(res.status).toBe(403);
+    expect(inserted).toHaveLength(0);
+  });
+
+  it('rejects when the submitted agent profile is not allowed for the environment', async () => {
+    environmentRows = [
+      {
+        id: 'env-1',
+        nodeId: null,
+        agentDeployEnabled: true,
+        allowedDeployProfileIdsJson: JSON.stringify(['profile-allowed']),
+      },
+    ];
+    const app = await buildApp();
+    const res = await request(app, 'proj-1', validSubmission);
+
+    expect(res.status).toBe(403);
+    expect(inserted).toHaveLength(0);
+  });
+
+  it('rejects a submission missing agentProfileId', async () => {
+    const app = await buildApp();
+    const res = await request(app, 'proj-1', {
+      ...validSubmission,
+      submittedBy: { taskId: 'task-1' },
+    });
+
+    expect(res.status).toBe(400);
+    expect(inserted).toHaveLength(0);
+  });
+
+  it('rejects a submission missing the target environment', async () => {
+    const app = await buildApp();
+    const res = await request(app, 'proj-1', { ...validSubmission, environment: undefined });
+
+    expect(res.status).toBe(400);
+    expect(inserted).toHaveLength(0);
+  });
+
+  it('rejects a token whose scope is neither workspace nor node', async () => {
+    verifiedPayload = { workspace: 'ws-1', type: 'callback', scope: 'ai-proxy' };
+    const app = await buildApp();
+    const res = await request(app, 'proj-1', validSubmission);
+
+    expect(res.status).toBe(403);
+    expect(inserted).toHaveLength(0);
+  });
+
+  it('rejects node-scoped tokens because the workspace claim is a node id', async () => {
+    verifiedPayload = { workspace: 'node-1', type: 'callback', scope: 'node' };
+    const app = await buildApp();
+    const res = await request(app, 'proj-1', validSubmission);
+
+    expect(res.status).toBe(403);
+    expect(inserted).toHaveLength(0);
+  });
+
+  it('rejects a submission missing composeYaml', async () => {
+    const app = await buildApp();
+    const res = await request(app, 'proj-1', { ...validSubmission, composeYaml: '   ' });
+
+    expect(res.status).toBe(400);
+    expect(inserted).toHaveLength(0);
+  });
+
+  it('rejects a submission with no services', async () => {
+    const app = await buildApp();
+    const res = await request(app, 'proj-1', { ...validSubmission, services: [] });
+
+    expect(res.status).toBe(400);
+    expect(inserted).toHaveLength(0);
+  });
+
+  it('rejects a malformed (non-JSON) release submission body', async () => {
+    const app = await buildApp();
+    const res = await app.request(
+      '/api/projects/proj-1/compose-publish-release',
+      {
+        method: 'POST',
+        headers: { Authorization: 'Bearer cb-token', 'Content-Type': 'application/json' },
+        body: '{not valid json',
+      },
+      { DATABASE: {} }
+    );
+
+    expect(res.status).toBe(400);
+    expect(inserted).toHaveLength(0);
+  });
+
+  // Security regression (idea: route-claim smuggling via compose-publish
+  // release ingestion). A compromised/misbehaving VM agent could previously
+  // inject a top-level `routes` array into an otherwise-valid submission. The
+  // raw request body was spread verbatim into the stored manifest, and
+  // services/deployment-routing.ts's buildReleaseRouteDiscovery decided
+  // "normalized build-on-node manifest vs. compose-publish submission" purely
+  // by checking `Array.isArray(manifest.routes)` — so the smuggled array was
+  // later treated as authoritative route/hostname/port claims, regardless of
+  // what the agent's own compose file actually declared.
+  it('strips an unauthorized top-level routes array from the stored manifest so route discovery never sees it', async () => {
+    const app = await buildApp();
+    // validSubmission.composeYaml declares no ports/routes at all, so a
+    // legitimate publish of this exact body would discover ZERO public
+    // routes. Any route discovered below can only have come from the
+    // smuggled field.
+    const res = await request(app, 'proj-1', {
+      ...validSubmission,
+      routes: [{ service: 'evil-service', port: 9999, mode: 'public' }],
+    });
+
+    // The legitimate parts of the submission still succeed — unknown fields
+    // are stripped, not used to reject the whole publish.
+    const body = await res.json();
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(inserted).toHaveLength(1);
+
+    const storedManifest = JSON.parse(inserted[0].manifest as string);
+    // The smuggled field never reaches storage at all.
+    expect(storedManifest).not.toHaveProperty('routes');
+
+    // Defense-in-depth: even feeding the stored manifest through the REAL
+    // route-discovery function must never surface the smuggled route.
+    const { buildReleaseRouteDiscovery } = await import('../../../src/services/deployment-routing');
+    const discovery = buildReleaseRouteDiscovery(inserted[0].manifest as string, {
+      environmentId: 'env-1',
+      baseDomain: 'sammy.party',
+    });
+    expect(discovery?.publicRoutes ?? []).toEqual([]);
+  });
+
+  // Owner-path control for the regression above: a legitimate compose-publish
+  // release that DOES declare a real route (via standard compose `ports:`,
+  // the only supported mechanism — see extractComposeRouteHints) must still
+  // flow through to route discovery. This proves the fix strips unauthorized
+  // fields without breaking the real publish/route-discovery flow.
+  it('still discovers a legitimate compose-publish route declared via compose ports', async () => {
+    const app = await buildApp();
+    const res = await request(app, 'proj-1', {
+      ...validSubmission,
+      composeYaml: `services:
+  web:
+    image: example/web
+    ports:
+      - "8000:8000"
+`,
+    });
+
+    const body = await res.json();
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(inserted).toHaveLength(1);
+
+    const { buildReleaseRouteDiscovery } = await import('../../../src/services/deployment-routing');
+    const discovery = buildReleaseRouteDiscovery(inserted[0].manifest as string, {
+      environmentId: 'env-1',
+      baseDomain: 'sammy.party',
+    });
+    expect(discovery?.publicRoutes).toHaveLength(1);
+    expect(discovery?.publicRoutes[0]).toMatchObject({ service: 'web', containerPort: 8000 });
+  });
+
+  // Security regression (nested smuggling, defense-in-depth for the
+  // top-level routes-smuggling fix above): a compromised/misbehaving VM
+  // agent could instead smuggle a foreign field one level deeper — directly
+  // on a `services[]` entry, or nested inside that entry's `platform` object
+  // — rather than at the submission's top level. Both nesting levels are
+  // protected today by TWO independent layers: (1) Valibot's
+  // `composePublishServiceSchema` / `composePublishPlatformSchema` are plain
+  // `v.object(...)` schemas, which build a fresh output object and copy only
+  // declared keys — an unrecognized key is never assigned into the parsed
+  // output; and (2) the manifest reconstruction lists each service's fields
+  // explicitly (`services.map((svc) => ({ serviceName: svc.serviceName, ... }))`)
+  // rather than spreading `svc`. This test guards against a future `...svc`
+  // spread silently replacing that explicit field list — a regression that
+  // would only be caught here, via Valibot's own key-stripping (layer 1),
+  // once layer 2's protection was gone.
+  it('strips foreign fields smuggled inside a service entry and its nested platform object from the stored manifest', async () => {
+    const app = await buildApp();
+    const res = await request(app, 'proj-1', {
+      ...validSubmission,
+      services: [
+        {
+          serviceName: 'web',
+          sourceRef: 'a',
+          pushedRef: 'b',
+          digest: 'sha256:abc',
+          // Foreign field smuggled directly on the service entry.
+          routes: [{ service: 'evil-service', port: 9999, mode: 'public' }],
+          platform: {
+            architecture: 'amd64',
+            os: 'linux',
+            // Foreign field smuggled one level deeper, inside `platform`.
+            routes: [{ service: 'evil-platform', port: 8888, mode: 'public' }],
+          },
+        },
+      ],
+    });
+
+    // The legitimate parts of the submission still succeed — unknown nested
+    // fields are stripped, not used to reject the whole publish.
+    const body = await res.json();
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(inserted).toHaveLength(1);
+
+    const storedManifest = JSON.parse(inserted[0].manifest as string);
+    const storedService = storedManifest.services[0];
+    // The field smuggled directly on the service entry never reaches storage.
+    expect(storedService).not.toHaveProperty('routes');
+    // The field smuggled inside `platform` never reaches storage either.
+    expect(storedService.platform).not.toHaveProperty('routes');
+    // Every legitimate field at both levels survived intact, and nothing
+    // else did — proving the stripping isn't accidentally over-broad either.
+    expect(storedService).toEqual({
+      serviceName: 'web',
+      sourceRef: 'a',
+      pushedRef: 'b',
+      digest: 'sha256:abc',
+      platform: { architecture: 'amd64', os: 'linux' },
+    });
+  });
+});

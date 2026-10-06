@@ -140,7 +140,7 @@ export interface WebGLBackgroundOptions {
 export function useWebGLBackground(
   canvasRef: React.RefObject<HTMLCanvasElement | null>,
   amplitudeRef: React.RefObject<number>,
-  options?: WebGLBackgroundOptions,
+  options?: WebGLBackgroundOptions
 ) {
   const speed = options?.speed ?? 0.4;
   const noiseSize = options?.noiseSize ?? 1.02;
@@ -152,7 +152,10 @@ export function useWebGLBackground(
     if (!gl) return;
 
     function createShader(gl: WebGLRenderingContext, type: number, source: string) {
-      const shader = gl.createShader(type)!;
+      const shader = gl.createShader(type);
+      if (!shader) {
+        throw new Error(`useWebGLBackground: gl.createShader(${type}) returned null`);
+      }
       gl.shaderSource(shader, source);
       gl.compileShader(shader);
       return shader;
@@ -161,7 +164,10 @@ export function useWebGLBackground(
     const vs = createShader(gl, gl.VERTEX_SHADER, VERTEX_SHADER);
     const fs = createShader(gl, gl.FRAGMENT_SHADER, FRAGMENT_SHADER);
 
-    const program = gl.createProgram()!;
+    const program = gl.createProgram();
+    if (!program) {
+      throw new Error('useWebGLBackground: gl.createProgram() returned null');
+    }
     gl.attachShader(program, vs);
     gl.attachShader(program, fs);
     gl.linkProgram(program);
@@ -181,6 +187,11 @@ export function useWebGLBackground(
     const ampLoc = gl.getUniformLocation(program, 'u_amplitude');
     const scaleLoc = gl.getUniformLocation(program, 'u_scale');
 
+    // Stable non-null bindings for use inside the nested resize/render closures below,
+    // where TypeScript cannot re-narrow the outer `canvas`/`gl` locals.
+    const canvasEl = canvas;
+    const glContext = gl;
+
     let animId: number;
     let prevTimestamp = performance.now();
     // Accumulated time — JS controls speed so the shader pattern never jumps
@@ -190,9 +201,9 @@ export function useWebGLBackground(
 
     function resize() {
       const dpr = Math.min(window.devicePixelRatio, 1.5);
-      canvas!.width = canvas!.clientWidth * dpr;
-      canvas!.height = canvas!.clientHeight * dpr;
-      gl!.viewport(0, 0, canvas!.width, canvas!.height);
+      canvasEl.width = canvasEl.clientWidth * dpr;
+      canvasEl.height = canvasEl.clientHeight * dpr;
+      glContext.viewport(0, 0, canvasEl.width, canvasEl.height);
     }
 
     function render() {
@@ -213,11 +224,11 @@ export function useWebGLBackground(
       const ampBoost = smoothedAmp * 0.24 * speed;
       accumulatedTime += deltaSeconds * (baseSpeed + ampBoost);
 
-      gl!.uniform1f(timeLoc, accumulatedTime);
-      gl!.uniform2f(resLoc, canvas!.width, canvas!.height);
-      gl!.uniform1f(ampLoc, smoothedAmp);
-      gl!.uniform1f(scaleLoc, noiseSize);
-      gl!.drawArrays(gl!.TRIANGLE_STRIP, 0, 4);
+      glContext.uniform1f(timeLoc, accumulatedTime);
+      glContext.uniform2f(resLoc, canvasEl.width, canvasEl.height);
+      glContext.uniform1f(ampLoc, smoothedAmp);
+      glContext.uniform1f(scaleLoc, noiseSize);
+      glContext.drawArrays(glContext.TRIANGLE_STRIP, 0, 4);
       animId = requestAnimationFrame(render);
     }
 

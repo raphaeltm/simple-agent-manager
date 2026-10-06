@@ -32,13 +32,13 @@
 - **Replace chat_sessions with acp_sessions**: Would break existing UI, message flow, and idle cleanup. Too disruptive.
 - **Merge into one table**: Conflates conversation (user-facing) with execution (system-facing). Different lifecycles.
 
-## Decision 3: VM Failure Detection Strategy
+## Decision 3: Runtime Failure Detection Strategy
 
-**Decision**: Heartbeat-based detection via DO alarm. VM agent sends periodic heartbeats to the ProjectData DO. If no heartbeat received within configurable window (default: 5 min), DO marks session as "interrupted."
+**Decision**: ProjectData records VM agent heartbeats as durable session history, but ProjectData heartbeat age is not sole VM runtime authority. If no ProjectData heartbeat is received within the configurable window (default: 5 min), the DO marks the data stale/suspect. VM-backed session interruption requires explicit terminal ACP evidence, terminal owning workspace/node state, cf-container terminal lifecycle, or another authoritative runtime signal.
 
 **Rationale**:
 - NodeLifecycle DO already uses alarm-based timeout patterns
-- Heartbeats are simple to implement (periodic POST from VM agent)
+- Heartbeats are simple to implement (periodic POST from VM agent), but stale ProjectData heartbeat data can also mean ProjectData storage or alarm work is delayed
 - Detection window is configurable per constitution Principle XI
 - No new infrastructure needed — reuses existing DO alarm mechanism
 
@@ -50,7 +50,7 @@
 **Implementation**:
 - VM agent POSTs heartbeat every `ACP_SESSION_HEARTBEAT_INTERVAL` (default: 60s) to `POST /api/projects/:id/sessions/:id/heartbeat`
 - ProjectData DO stores `last_heartbeat_at` and sets alarm for `last_heartbeat_at + DETECTION_WINDOW`
-- If alarm fires without fresh heartbeat, transition session to "interrupted"
+- If alarm fires without fresh heartbeat, classify the ProjectData heartbeat data as stale/suspect; only transition VM-backed sessions to "interrupted" when the stale heartbeat is paired with conclusive runtime/workspace evidence
 
 ## Decision 4: Session Forking Strategy
 
@@ -117,7 +117,7 @@
 | Value | Env Var | Default | Context |
 |-------|---------|---------|---------|
 | Heartbeat interval | `ACP_SESSION_HEARTBEAT_INTERVAL_MS` | `60000` (60s) | VM agent → control plane |
-| Detection window | `ACP_SESSION_DETECTION_WINDOW_MS` | `300000` (5 min) | DO alarm timeout |
+| Detection window | `ACP_SESSION_DETECTION_WINDOW_MS` | `300000` (5 min) | ProjectData heartbeat stale window; VM-backed interruption needs conclusive runtime/workspace evidence |
 | Reconciliation timeout | `ACP_SESSION_RECONCILIATION_TIMEOUT_MS` | `30000` (30s) | VM agent startup |
 | Fork context messages | `ACP_SESSION_FORK_CONTEXT_MESSAGES` | `20` | Messages to include in fork summary |
 | Max fork depth | `ACP_SESSION_MAX_FORK_DEPTH` | `10` | Prevent infinite fork chains |

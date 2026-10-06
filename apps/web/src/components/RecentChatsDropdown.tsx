@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router';
 
+import { useQueryScope } from '../hooks/useQueryScope';
 import { useRecentChats } from '../hooks/useRecentChats';
 import {
   formatRelativeTime,
@@ -19,7 +20,8 @@ export function RecentChatsDropdown() {
   const buttonRef = useRef<HTMLButtonElement>(null);
   const navigate = useNavigate();
 
-  const { chats, activeCount, loading, error, refresh } = useRecentChats(isOpen);
+  const queryScope = useQueryScope();
+  const { chats, activeCount, loading, error, refresh } = useRecentChats(isOpen, queryScope);
 
   // Position the panel relative to the trigger button
   useEffect(() => {

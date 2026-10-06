@@ -1,5 +1,29 @@
 # SAM Tools Post-Review Improvements
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** the dynamic import in `retry_subtask` is gone (static imports at
+>   `apps/api/src/durable-objects/sam-session/tools/retry-subtask.ts:7-32`).
+> - **Still open:** files are under `apps/api/src/durable-objects/sam-session/tools/`.
+>   - Session lookup by recency, not canonical ID: `stop-subtask.ts:92-100`,
+>     `send-message-to-subtask.ts:117-127`.
+>   - No `projectId` check on the workspace query: `stop-subtask.ts:81-87`,
+>     `send-message-to-subtask.ts:92-101`.
+>   - `errorMessage.includes('409')`: `send-message-to-subtask.ts:173`.
+>   - `newDescription` has no length limit: `retry-subtask.ts:139`.
+>   - `list_ideas` still accepts `completed` and `cancelled`: `list-ideas.ts:53`.
+>   - `get_ci_status`: overall status still scans every run (`get-ci-status.ts:117-123`), and the
+>     `api_error` response still includes `repository` (`:99-101`).
+>   - `find_related_ideas` searches drafts only and its description does not say so
+>     (`find-related-ideas.ts:88`).
+>   - The listed test gaps. `apps/api/tests/unit/durable-objects/sam-tools-phase-b.test.ts` has
+>     only rejection tests plus stop-without-workspace; `sam-tools-phase-d.test.ts` has no success
+>     tests for `list_ideas` or `find_related_ideas`. Phase B tool registration is checked, but
+>     through `executeTool` (`sam-tools-phase-b.test.ts:571`), not a `SAM_TOOLS` array check.
+>   - Not re-checked: the tighter ownership-rejection assertions.
+> - **Moot/dropped:** the null-`installationId` guard. `projects.installation_id` is NOT NULL
+>   (`apps/api/src/db/schema.ts:409-411`); Artifacts projects use a sentinel installation.
+
 **Created**: 2026-04-27
 **Source**: Late-arriving cloudflare-specialist, security-auditor, and test-engineer reviews on PR #832 (already merged)
 

@@ -15,7 +15,12 @@ export {
 
 // Project schemas
 export {
+  AddProjectRepositorySchema,
+  ApplyProjectMemberOffboardingSchema,
+  CreateProjectInviteSchema,
   CreateProjectSchema,
+  DecideProjectAccessRequestSchema,
+  TransferProjectOwnershipSchema,
   UpdateProjectSchema,
   UpsertProjectRuntimeEnvVarSchema,
   UpsertProjectRuntimeFileSchema,
@@ -26,14 +31,11 @@ export {
   CreateCredentialSchema,
   CredentialKindBodySchema,
   SaveAgentCredentialSchema,
+  SaveGcpServiceAccountCredentialSchema,
 } from './credentials';
 
 // Node schemas
-export {
-  CreateNodeSchema,
-  PatchNodeSchema,
-  UpdateNodeLabelSchema,
-} from './nodes';
+export { CreateNodeSchema, PatchNodeSchema, UpdateNodeLabelSchema } from './nodes';
 
 // Workspace schemas
 export {
@@ -45,13 +47,18 @@ export {
   CredentialInjectionSchema,
   MessageBatchSchema,
   UpdateAgentSessionSchema,
+  UpdateWorkspacePortsPublicSchema,
   UpdateWorkspaceSchema,
   WorkspaceErrorSchema,
   WorkspaceStatusUpdateSchema,
 } from './workspaces';
 
 // Notification schemas
-export { UpdateNotificationPreferenceSchema } from './notifications';
+export {
+  DeleteWebPushSubscriptionSchema,
+  UpdateNotificationPreferenceSchema,
+  WebPushSubscriptionSchema,
+} from './notifications';
 
 // Agent profile schemas
 export {
@@ -59,6 +66,38 @@ export {
   SetProjectDefaultProfileSchema,
   UpdateAgentProfileSchema,
 } from './agent-profiles';
+
+// Skill schemas
+export { CreateSkillSchema, UpdateSkillSchema } from './skills';
+
+// Bring-your-own MCP server schemas
+export { CreateMcpConnectionSchema, UpdateMcpConnectionSchema } from './mcp-connections';
+
+// Knowledge graph schemas
+export {
+  AddObservationSchema,
+  CreateKnowledgeEntitySchema,
+  UpdateKnowledgeEntitySchema,
+  UpdateObservationSchema,
+} from './knowledge';
+
+// Project file library schemas
+export { MoveFileSchema, UpdateTagsSchema } from './library';
+
+// Project policy schemas
+export { CreatePolicySchema, UpdatePolicySchema } from './policies';
+
+// Orchestrator schemas
+export { OverrideTaskStateSchema } from './orchestrator';
+
+// SAM / project agent chat schema (shared by routes/sam.ts and routes/project-agent.ts)
+export { AgentChatRequestSchema } from './agent-chat';
+
+// Guided agent-credential setup session schema
+export { CreateAgentCredentialSetupSessionSchema } from './agent-credential-setup';
+
+// MCP JSON-RPC envelope schema
+export { JsonRpcEnvelopeSchema } from './mcp';
 
 // Agent settings schemas
 export type { AgentSettingsValidationLimits } from './agent-settings';
@@ -75,8 +114,20 @@ export {
   AcpSessionForkSchema,
   AcpSessionHeartbeatSchema,
   AcpSessionStatusReportSchema,
+  AcpSessionUsageReportSchema,
   CreateAcpSessionSchema,
 } from './acp-sessions';
+
+// Workspace resource history schemas
+export { WorkspaceResourceUploadSchema } from './workspace-resource-history';
+
+// Message-anchored comment schemas
+export {
+  CommentStatusMutationSchema,
+  CreateCommentReplySchema,
+  CreateCommentThreadSchema,
+  SendCommentDirectiveSchema,
+} from './comments';
 
 // Admin schemas
 export {
@@ -84,23 +135,39 @@ export {
   AdminUserRoleSchema,
   AnalyticsForwardSchema,
   CreatePlatformCredentialSchema,
+  ProjectDataArchiveCanaryControlSchema,
+  ProjectDataArchiveCircuitBreakerSchema,
+  ProjectDataArchiveFreezeProjectSchema,
+  ProjectDataArchiveRecoveryControlSchema,
+  ProjectDataGroupedFtsWallRecoverySchema,
+  ProjectDataManualToolPayloadCleanupSchema,
+  ProjectDataStorageEmergencyPurgeSchema,
+  ProjectDataStorageReliefMeasureSchema,
   UpdatePlatformCredentialSchema,
+  UpdatePlatformIntegrationConfigSchema,
+  UpdateSignupApprovalConfigSchema,
 } from './admin';
 
 // Trigger schemas
 export {
   CreateTriggerSchema,
+  TriggerPreviewSchema,
   UpdateTriggerSchema,
+  WebhookConfigValueSchema,
 } from './triggers';
 
 // Miscellaneous schemas
 export {
   AdminLogQuerySchema,
+  ApiTokenCreateSchema,
+  ApiTokenRedeemSchema,
   ClientErrorBatchSchema,
   ComplianceRunCreateSchema,
   ComponentDefinitionCreateSchema,
   ComponentDefinitionUpdateSchema,
   CreateChatSessionSchema,
+  DeviceApproveSchema,
+  DeviceTokenSchema,
   ExceptionRequestCreateSchema,
   GcpOAuthHandleSchema,
   GcpSetupSchema,
@@ -110,10 +177,12 @@ export {
   NodeErrorBatchSchema,
   NodeHeartbeatSchema,
   ProjectDeploymentSetupSchema,
+  ResolveAttentionAnswerSchema,
+  RunDebugDiagnosisSchema,
   SaveCachedCommandsSchema,
+  SaveDebugDiagnosisIdeaSchema,
   SendChatMessageSchema,
-  SmokeTestCreateSchema,
-  SmokeTestRedeemSchema,
+  StartChatSessionSchema,
   TerminalRequestSchema,
   TtsRequestSchema,
   UIStandardUpsertSchema,

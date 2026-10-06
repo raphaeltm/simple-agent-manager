@@ -23,6 +23,10 @@ const PROVIDER_LABELS: Record<string, string> = {
   hetzner: 'Hetzner',
   scaleway: 'Scaleway',
   gcp: 'GCP',
+  vultr: 'Vultr',
+  infomaniak: 'Infomaniak Public Cloud',
+  digitalocean: 'DigitalOcean',
+  upcloud: 'UpCloud',
 };
 
 const AGENT_TYPE_LABELS: Record<string, string> = {
@@ -111,18 +115,16 @@ export function AdminPlatformCredentials() {
         </Button>
       </div>
 
-      {error && (
-        <div className="rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">
-          {error}
-        </div>
-      )}
+      {error && <div className="rounded-md bg-danger-tint p-3 text-sm text-danger-fg">{error}</div>}
 
-      {showForm && <AddCredentialForm onCreated={handleCreated} onCancel={() => setShowForm(false)} />}
+      {showForm && (
+        <AddCredentialForm onCreated={handleCreated} onCancel={() => setShowForm(false)} />
+      )}
 
       {credentials.length === 0 ? (
         <Card>
           <div className="py-8 text-center">
-            <Body className="text-[var(--sam-text-secondary)]">
+            <Body className="text-fg-muted">
               No platform credentials configured. Add one to enable fallback credentials for users.
             </Body>
           </div>
@@ -138,16 +140,18 @@ export function AdminPlatformCredentials() {
                     <span
                       className={`inline-block rounded-full px-2 py-0.5 text-xs ${
                         cred.isEnabled
-                          ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                          : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
+                          ? 'bg-success-tint text-success-fg'
+                          : 'bg-surface-secondary text-fg-muted'
                       }`}
                     >
                       {cred.isEnabled ? 'Enabled' : 'Disabled'}
                     </span>
                   </div>
-                  <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--sam-text-secondary)]">
+                  <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-fg-muted">
                     <span>{CREDENTIAL_TYPE_LABELS[cred.credentialType]}</span>
-                    {cred.provider && <span>{PROVIDER_LABELS[cred.provider] || cred.provider}</span>}
+                    {cred.provider && (
+                      <span>{PROVIDER_LABELS[cred.provider] || cred.provider}</span>
+                    )}
                     {cred.agentType && (
                       <span>{AGENT_TYPE_LABELS[cred.agentType] || cred.agentType}</span>
                     )}
@@ -169,6 +173,11 @@ export function AdminPlatformCredentials() {
                     size="sm"
                     onClick={() => handleDelete(cred.id)}
                     disabled={actionLoading === cred.id}
+                    aria-label={
+                      deleteConfirm === cred.id
+                        ? 'Confirm deletion of ' + cred.label
+                        : 'Delete ' + cred.label
+                    }
                   >
                     {deleteConfirm === cred.id ? 'Confirm' : <Trash2 size={14} />}
                   </Button>
@@ -228,11 +237,14 @@ function AddCredentialForm({
       <form onSubmit={handleSubmit} className="space-y-4 p-4">
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
-            <label className="mb-1 block text-sm font-medium">Type</label>
+            <label htmlFor="platform-credential-type" className="mb-1 block text-sm font-medium">
+              Type
+            </label>
             <select
+              id="platform-credential-type"
               value={credentialType}
               onChange={(e) => setCredentialType(e.target.value as PlatformCredentialType)}
-              className="w-full rounded-md border border-[var(--sam-border)] bg-[var(--sam-bg-primary)] px-3 py-2 text-sm"
+              className="w-full rounded-md border border-border-default bg-surface-secondary px-3 py-2 text-sm text-fg-primary"
             >
               <option value="cloud-provider">Cloud Provider</option>
               <option value="agent-api-key">Agent API Key</option>
@@ -241,24 +253,37 @@ function AddCredentialForm({
 
           {credentialType === 'cloud-provider' ? (
             <div>
-              <label className="mb-1 block text-sm font-medium">Provider</label>
+              <label
+                htmlFor="platform-credential-provider"
+                className="mb-1 block text-sm font-medium"
+              >
+                Provider
+              </label>
               <select
+                id="platform-credential-provider"
                 value={provider}
                 onChange={(e) => setProvider(e.target.value)}
-                className="w-full rounded-md border border-[var(--sam-border)] bg-[var(--sam-bg-primary)] px-3 py-2 text-sm"
+                className="w-full rounded-md border border-border-default bg-surface-secondary px-3 py-2 text-sm text-fg-primary"
               >
                 <option value="hetzner">Hetzner</option>
                 <option value="scaleway">Scaleway</option>
+                <option value="vultr">Vultr</option>
+                <option value="infomaniak">Infomaniak Public Cloud</option>
+                <option value="digitalocean">DigitalOcean</option>
+                <option value="upcloud">UpCloud</option>
                 <option value="gcp">GCP</option>
               </select>
             </div>
           ) : (
             <div>
-              <label className="mb-1 block text-sm font-medium">Agent Type</label>
+              <label htmlFor="platform-credential-agent" className="mb-1 block text-sm font-medium">
+                Agent Type
+              </label>
               <select
+                id="platform-credential-agent"
                 value={agentType}
                 onChange={(e) => setAgentType(e.target.value)}
-                className="w-full rounded-md border border-[var(--sam-border)] bg-[var(--sam-bg-primary)] px-3 py-2 text-sm"
+                className="w-full rounded-md border border-border-default bg-surface-secondary px-3 py-2 text-sm text-fg-primary"
               >
                 <option value="claude-code">Claude Code (Anthropic)</option>
                 <option value="openai-codex">OpenAI Codex</option>
@@ -268,23 +293,27 @@ function AddCredentialForm({
         </div>
 
         <div>
-          <label className="mb-1 block text-sm font-medium">Label</label>
+          <label htmlFor="platform-credential-label" className="mb-1 block text-sm font-medium">
+            Label
+          </label>
           <input
+            id="platform-credential-label"
             type="text"
             value={label}
             onChange={(e) => setLabel(e.target.value)}
             placeholder="e.g., Team Hetzner, Shared Anthropic Key"
-            className="w-full rounded-md border border-[var(--sam-border)] bg-[var(--sam-bg-primary)] px-3 py-2 text-sm"
+            className="w-full rounded-md border border-border-default bg-surface-secondary px-3 py-2 text-sm text-fg-primary"
             required
             maxLength={100}
           />
         </div>
 
         <div>
-          <label className="mb-1 block text-sm font-medium">
+          <label htmlFor="platform-credential-secret" className="mb-1 block text-sm font-medium">
             {credentialType === 'cloud-provider' ? 'API Token' : 'API Key'}
           </label>
           <input
+            id="platform-credential-secret"
             type="password"
             value={credential}
             onChange={(e) => setCredential(e.target.value)}
@@ -293,15 +322,13 @@ function AddCredentialForm({
                 ? 'Paste your provider API token...'
                 : 'Paste your agent API key...'
             }
-            className="w-full rounded-md border border-[var(--sam-border)] bg-[var(--sam-bg-primary)] px-3 py-2 text-sm font-mono"
+            className="w-full rounded-md border border-border-default bg-surface-secondary px-3 py-2 text-sm font-mono text-fg-primary"
             required
           />
         </div>
 
         {formError && (
-          <div className="rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">
-            {formError}
-          </div>
+          <div className="rounded-md bg-danger-tint p-3 text-sm text-danger-fg">{formError}</div>
         )}
 
         <div className="flex gap-2">

@@ -83,7 +83,7 @@ function makeAiUsageResponse(options: {
     errorRequests: options.errorRequests ?? 1,
     byModel: options.byModel ?? [
       makeAiModel({ model: 'gpt-4o', costUsd: 0.80, requests: 30, cachedRequests: 2, errorRequests: 1 }),
-      makeAiModel({ model: '@cf/meta/llama-3.1-8b-instruct', costUsd: 0.25, requests: 10 }),
+      makeAiModel({ model: '@cf/google/gemma-4-26b-a4b-it', costUsd: 0.25, requests: 10 }),
       makeAiModel({ model: 'claude-3-5-sonnet-20241022', costUsd: 0.18, requests: 5 }),
     ],
     byDay: options.byDay ?? [
@@ -101,7 +101,7 @@ function makeAiUsageResponse(options: {
 // Long model names for overflow testing
 const LONG_MODELS = [
   makeAiModel({
-    model: '@cf/meta/llama-3.1-70b-instruct-awq-with-a-very-long-suffix-that-might-overflow',
+    model: '@cf/google/gemma-4-26b-a4b-it-with-a-very-long-suffix-that-might-overflow',
     costUsd: 0.50,
     requests: 20,
     inputTokens: 100000,

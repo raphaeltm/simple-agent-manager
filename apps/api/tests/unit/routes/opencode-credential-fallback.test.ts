@@ -1,16 +1,18 @@
 /**
- * Tests for OpenCode agent key fallback to Scaleway cloud provider credential.
+ * Tests for OpenCode agent key provider resolution.
  *
- * When agentType === 'opencode' and no dedicated agent-api-key exists,
- * the agent-key endpoint falls back to the Scaleway cloud-provider credential,
- * extracting the secretKey from the JSON-serialized token.
+ * OpenCode is a bring-your-own-key agent. The default provider is Zen and every
+ * OpenCode provider (Zen, Go, custom) requires a dedicated OpenCode API key —
+ * there is no Scaleway reuse and no platform-proxy fallback. When no dedicated
+ * key exists the agent-key endpoint returns 404.
  */
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import { workspacesRoutes } from '../../../src/routes/workspaces';
+import { createAgentCredentialAttributionFixture } from '../../helpers/agent-credential-attribution-fixture';
 
 vi.mock('drizzle-orm/d1');
 vi.mock('../../../src/middleware/auth', () => ({
@@ -20,21 +22,30 @@ vi.mock('../../../src/middleware/auth', () => ({
   getAuth: () => ({ userId: 'test-user-id' }),
 }));
 vi.mock('../../../src/services/jwt', () => ({
-  verifyCallbackToken: vi.fn().mockResolvedValue({ workspace: 'ws-123', type: 'callback', scope: 'workspace' }),
+  verifyCallbackToken: vi
+    .fn()
+    .mockResolvedValue({ workspace: 'ws-123', type: 'callback', scope: 'workspace' }),
   signCallbackToken: vi.fn(),
 }));
 vi.mock('../../../src/services/encryption', () => ({
   encrypt: vi.fn(),
   decrypt: vi.fn(),
 }));
+vi.mock('../../../src/services/composable-credentials/resolve', () => ({
+  resolveForConsumer: vi.fn().mockResolvedValue(null),
+}));
+vi.mock('../../../src/services/composable-credentials/lazy-backfill', () => ({
+  lazyBackfillIfNeeded: vi.fn().mockResolvedValue(false),
+}));
 
 const { decrypt } = await import('../../../src/services/encryption');
 const mockDecrypt = vi.mocked(decrypt);
 
-describe('POST /workspaces/:id/agent-key — OpenCode Scaleway fallback', () => {
+describe('POST /workspaces/:id/agent-key — OpenCode provider resolution', () => {
   let app: Hono<{ Bindings: Env }>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let mockDB: any;
+  let attribution: Awaited<ReturnType<typeof createAgentCredentialAttributionFixture>>;
 
   const mockEnv = {
     DATABASE: {} as D1Database,
@@ -55,12 +66,23 @@ describe('POST /workspaces/:id/agent-key — OpenCode Scaleway fallback', () => 
           Authorization: 'Bearer test-callback-token',
         },
       },
-      mockEnv,
+      mockEnv
     );
   }
 
-  beforeEach(() => {
+  // The workspace row carries no projectId, so the project-scoped credential
+  // query is skipped. The user-scoped credential query consumes response #1
+  // (after the workspace lookup) and the platform credential query consumes #2.
+  function queueLimitResponses(...responses: unknown[][]): void {
+    const queued = [...responses];
+    mockDB.limit.mockImplementation(() => queued.shift() ?? []);
+  }
+
+  beforeEach(async () => {
     vi.clearAllMocks();
+    mockDecrypt.mockReset();
+    attribution = await createAgentCredentialAttributionFixture('ws-123', 'user-1');
+    mockEnv.DATABASE = attribution.database;
 
     app = new Hono<{ Bindings: Env }>();
     app.onError((err, c) => {
@@ -69,13 +91,10 @@ describe('POST /workspaces/:id/agent-key — OpenCode Scaleway fallback', () => 
         error?: string;
         message?: string;
       };
-      if (
-        typeof appError.statusCode === 'number' &&
-        typeof appError.error === 'string'
-      ) {
+      if (typeof appError.statusCode === 'number' && typeof appError.error === 'string') {
         return c.json(
           { error: appError.error, message: appError.message },
-          appError.statusCode as 400 | 401 | 403 | 404 | 500,
+          appError.statusCode as 400 | 401 | 403 | 404 | 410 | 500
         );
       }
       return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
@@ -85,62 +104,42 @@ describe('POST /workspaces/:id/agent-key — OpenCode Scaleway fallback', () => 
     mockDB = {
       select: vi.fn().mockReturnThis(),
       from: vi.fn().mockReturnThis(),
+      leftJoin: vi.fn().mockReturnThis(),
       where: vi.fn().mockReturnThis(),
       limit: vi.fn(),
     };
     vi.mocked(drizzle).mockReturnValue(mockDB as ReturnType<typeof drizzle>);
   });
+  afterEach(() => attribution?.sqlite.close());
 
-  it('returns Scaleway cloud credential when no dedicated opencode agent key exists', async () => {
-    let queryCount = 0;
-    mockDB.limit.mockImplementation(() => {
-      queryCount++;
-      if (queryCount === 1) {
-        return [{ userId: 'user-1' }];
-      }
-      if (queryCount === 2) {
-        // agent-api-key for 'opencode' → not found
-        return [];
-      }
-      if (queryCount === 3) {
-        // platform credential → not found
-        return [];
-      }
-      if (queryCount === 4) {
-        // cloud-provider for 'scaleway' → found
-        return [{ encryptedToken: 'encrypted-scw', iv: 'iv-scw' }];
-      }
-      return [];
-    });
-
-    mockDecrypt.mockResolvedValueOnce(JSON.stringify({ secretKey: 'scw-secret-key-123', projectId: 'scw-proj-1' }));
+  it('returns 404 for default OpenCode Zen when no dedicated OpenCode key exists', async () => {
+    queueLimitResponses(
+      [{ userId: 'user-1', status: 'running', nodeId: 'node-1', nodeStatus: 'running' }],
+      [],
+      []
+    );
 
     const resp = await postAgentKey({ agentType: 'opencode' });
-    expect(resp.status).toBe(200);
-
-    const json = await resp.json();
-    expect(json.apiKey).toBe('scw-secret-key-123');
-    expect(json.credentialKind).toBe('api-key');
+    expect(resp.status).toBe(404);
+    const body = await resp.json();
+    expect(body.message).toBe('Agent credential not found');
   });
 
-  it('prefers dedicated opencode agent key over Scaleway cloud credential', async () => {
-    let queryCount = 0;
-    mockDB.limit.mockImplementation(() => {
-      queryCount++;
-      if (queryCount === 1) {
-        return [{ userId: 'user-1' }];
-      }
-      if (queryCount === 2) {
-        // agent-api-key for 'opencode' → found
-        return [{
+  it('returns the dedicated opencode key without any proxy fallback', async () => {
+    queueLimitResponses(
+      [{ userId: 'user-1', status: 'running', nodeId: 'node-1', nodeStatus: 'running' }],
+      [
+        {
           encryptedToken: 'encrypted-dedicated',
           iv: 'iv-dedicated',
           credentialKind: 'api-key',
           isActive: true,
-        }];
-      }
-      return [];
-    });
+        },
+      ],
+      // Attribution persistence and response delivery each revalidate ownership.
+      [{ userId: 'user-1', status: 'running', nodeId: 'node-1', nodeStatus: 'running' }],
+      [{ userId: 'user-1', status: 'running', nodeId: 'node-1', nodeStatus: 'running' }]
+    );
 
     mockDecrypt.mockResolvedValueOnce('dedicated-opencode-key');
 
@@ -150,30 +149,32 @@ describe('POST /workspaces/:id/agent-key — OpenCode Scaleway fallback', () => 
     const json = await resp.json();
     expect(json.apiKey).toBe('dedicated-opencode-key');
     expect(json.credentialKind).toBe('api-key');
+    expect(json.inferenceConfig).toBeUndefined();
+    expect(json.credentialGeneration).toBe(8);
   });
 
-  it('returns platform proxy fallback when no opencode key AND no Scaleway cloud credential', async () => {
-    let queryCount = 0;
-    mockDB.limit.mockImplementation(() => {
-      queryCount++;
-      if (queryCount === 1) {
-        return [{ userId: 'user-1' }];
-      }
-      return [];
-    });
+  it('does not return a decrypted key when deletion starts before delivery', async () => {
+    queueLimitResponses(
+      [{ userId: 'user-1', status: 'running', nodeId: 'node-1', nodeStatus: 'running' }],
+      [
+        {
+          encryptedToken: 'encrypted-dedicated',
+          iv: 'iv-dedicated',
+          credentialKind: 'api-key',
+          isActive: true,
+        },
+      ],
+      [{ userId: 'user-1', status: 'stopping', nodeId: 'node-1', nodeStatus: 'running' }]
+    );
+    mockDecrypt.mockResolvedValueOnce('must-not-be-returned');
 
     const resp = await postAgentKey({ agentType: 'opencode' });
-    // With AI proxy enabled (default), opencode falls back to platform proxy
-    expect(resp.status).toBe(200);
-    const body = await resp.json();
-    expect(body.apiKey).toBe('__platform_proxy__');
-    expect(body.credentialSource).toBe('platform');
-    expect(body.inferenceConfig).toBeDefined();
-    expect(body.inferenceConfig.provider).toBe('openai-compatible');
-    expect(body.inferenceConfig.apiKeySource).toBe('callback-token');
+
+    expect(resp.status).toBe(410);
+    expect(await resp.text()).not.toContain('must-not-be-returned');
   });
 
-  it('returns 404 when no opencode key AND no Scaleway credential AND AI proxy disabled', async () => {
+  it('returns 404 for default OpenCode Zen when AI proxy is enabled or disabled', async () => {
     // Override env to disable AI proxy
     const disabledEnv = { ...mockEnv, AI_PROXY_ENABLED: 'false' } as unknown as Env;
     const disabledApp = new Hono<{ Bindings: Env }>();
@@ -186,51 +187,62 @@ describe('POST /workspaces/:id/agent-key — OpenCode Scaleway fallback', () => 
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test-token' },
         body: JSON.stringify({ agentType: 'opencode' }),
       },
-      disabledEnv,
+      disabledEnv
     );
     expect(resp.status).toBe(404);
   });
 
-  it('does not use Scaleway fallback for non-opencode agents', async () => {
-    let queryCount = 0;
-    mockDB.limit.mockImplementation(() => {
-      queryCount++;
-      if (queryCount === 1) {
-        return [{ userId: 'user-1' }];
-      }
-      return [];
-    });
+  it('does not resolve a key for non-opencode agents without a credential', async () => {
+    queueLimitResponses([
+      { userId: 'user-1', status: 'running', nodeId: 'node-1', nodeStatus: 'running' },
+    ]);
 
     const resp = await postAgentKey({ agentType: 'google-gemini' });
     expect(resp.status).toBe(404);
   });
 
-  it('handles malformed Scaleway credential JSON gracefully and falls back to platform proxy', async () => {
-    let queryCount = 0;
-    mockDB.limit.mockImplementation(() => {
-      queryCount++;
-      if (queryCount === 1) {
-        return [{ userId: 'user-1' }];
-      }
-      if (queryCount === 2) {
-        return []; // no dedicated user agent key
-      }
-      if (queryCount === 3) {
-        return []; // no platform credential
-      }
-      if (queryCount === 4) {
-        return [{ encryptedToken: 'encrypted-scw', iv: 'iv-scw' }]; // scaleway cloud provider
-      }
-      return [];
-    });
+  it.each([
+    ['OpenCode Zen', 'encrypted-zen-key', 'iv-zen', 'opencode-zen-api-key'],
+    ['OpenCode Go', 'encrypted-go-key', 'iv-go', 'opencode-go-api-key'],
+  ])(
+    'returns the dedicated key directly for %s instead of routing through any proxy',
+    async (_label, encryptedToken, iv, decryptedKey) => {
+      queueLimitResponses(
+        [{ userId: 'user-1', status: 'running', nodeId: 'node-1', nodeStatus: 'running' }],
+        [
+          {
+            encryptedToken,
+            iv,
+            credentialKind: 'api-key',
+            isActive: true,
+          },
+        ],
+        [{ userId: 'user-1', status: 'running', nodeId: 'node-1', nodeStatus: 'running' }],
+        [{ userId: 'user-1', status: 'running', nodeId: 'node-1', nodeStatus: 'running' }]
+      );
+      mockDecrypt.mockResolvedValueOnce(decryptedKey);
 
-    mockDecrypt.mockResolvedValueOnce('not-valid-json');
+      const resp = await postAgentKey({ agentType: 'opencode' });
+      expect(resp.status).toBe(200);
+      const body = await resp.json();
+      expect(body.apiKey).toBe(decryptedKey);
+      expect(body.credentialKind).toBe('api-key');
+      expect(body.inferenceConfig).toBeUndefined();
+    }
+  );
+
+  it('returns 404 and does not fall back to any platform/cloud credential when no key exists', async () => {
+    queueLimitResponses(
+      [{ userId: 'user-1', status: 'running', nodeId: 'node-1', nodeStatus: 'running' }],
+      [],
+      []
+    );
 
     const resp = await postAgentKey({ agentType: 'opencode' });
-    // Malformed Scaleway credential is skipped, falls through to platform proxy
-    expect(resp.status).toBe(200);
+    expect(resp.status).toBe(404);
     const body = await resp.json();
-    expect(body.apiKey).toBe('__platform_proxy__');
-    expect(body.credentialSource).toBe('platform');
+    expect(body.message).toBe('Agent credential not found');
+    // Workspace lookup + user-scoped credential query + platform credential query.
+    expect(mockDB.limit).toHaveBeenCalledTimes(3);
   });
 });

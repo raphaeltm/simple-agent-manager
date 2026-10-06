@@ -1,4 +1,5 @@
 import { act,fireEvent, render, screen } from '@testing-library/react';
+import { useEffect, useRef } from 'react';
 import { afterEach,describe, expect, it, vi } from 'vitest';
 
 import { ToastProvider, useToast } from '../../../src/hooks/useToast';
@@ -108,5 +109,44 @@ describe('useToast', () => {
     );
 
     spy.mockRestore();
+  });
+
+  it('context value identity is stable across toast additions (no spurious effect refires)', () => {
+    // Regression: before useMemo, adding a toast re-rendered ToastProvider
+    // which created a fresh context value object, invalidating every
+    // useCallback/useEffect that depended on the toast context.
+    const effectFireCount = vi.fn();
+
+    function StabilityProbe() {
+      const toast = useToast();
+      const toastRef = useRef(toast);
+
+      useEffect(() => {
+        effectFireCount();
+        toastRef.current = toast;
+      }, [toast]);
+
+      return (
+        <button onClick={() => toast.success('ping')}>Trigger</button>
+      );
+    }
+
+    render(
+      <ToastProvider>
+        <StabilityProbe />
+      </ToastProvider>
+    );
+
+    // Initial mount fires the effect once
+    expect(effectFireCount).toHaveBeenCalledTimes(1);
+
+    // Show a toast — this causes ToastProvider to re-render (toast list
+    // state changes), but the context value object should remain the same
+    // reference because all five callbacks are useCallback-stable and the
+    // value is useMemo'd.
+    fireEvent.click(screen.getByText('Trigger'));
+
+    // The effect must NOT have refired — the toast context identity is stable.
+    expect(effectFireCount).toHaveBeenCalledTimes(1);
   });
 });

@@ -11,7 +11,7 @@
  *
  * Mocking strategy:
  * - drizzle-orm/d1 is mocked so DB calls are controlled per test
- * - @simple-agent-manager/providers is mocked so validateToken() is controlled
+ * - global fetch is mocked so upstream validation responses are controlled
  * - serializeCredentialToken/buildProviderConfig are exercised through the
  *   route handler (not mocked) so the full path is covered
  * - encrypt is mocked to avoid requiring a real WebCrypto environment
@@ -40,23 +40,23 @@ vi.mock('../../../src/services/encryption', () => ({
   decrypt: vi.fn().mockResolvedValue('decrypted-value'),
 }));
 
-// Mock the providers package so validateToken() is controlled per test
-const mockValidateToken = vi.fn();
-const mockProvider = { validateToken: mockValidateToken };
-vi.mock('@simple-agent-manager/providers', async (importOriginal) => {
-  const original = await importOriginal<typeof import('@simple-agent-manager/providers')>();
-  return {
-    ...original,
-    createProvider: vi.fn(() => mockProvider),
-  };
-});
-
 // ============================================================================
 // Test Setup
 // ============================================================================
 
+const preparedStmt = {
+  bind: vi.fn().mockReturnThis(),
+  run: vi.fn().mockResolvedValue({ success: true, meta: { changes: 1 } }),
+};
+
 const mockEnv = {
-  DATABASE: {} as any,
+  DATABASE: {
+    prepare: vi.fn().mockReturnValue(preparedStmt),
+    batch: vi.fn().mockResolvedValue([
+      { success: true, meta: { changes: 1 } },
+      { success: true, meta: { changes: 1 } },
+    ]),
+  } as unknown as Env['DATABASE'],
   ENCRYPTION_KEY: 'test-encryption-key',
 } as Env;
 
@@ -66,7 +66,9 @@ async function expectCredentialValidationFailure(
   body: unknown,
   expectedProvider: string
 ) {
-  mockValidateToken.mockRejectedValueOnce(new Error('Unauthorized'));
+  vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+    new Response(JSON.stringify({ error: 'bad key' }), { status: 401, statusText: 'Unauthorized' })
+  );
 
   const res = await app.request(
     path,
@@ -80,7 +82,9 @@ async function expectCredentialValidationFailure(
 
   expect(res.status).toBe(400);
   const responseBody = await res.json();
-  expect(responseBody.message).toContain(`Invalid or unauthorized ${expectedProvider} credentials`);
+  expect(responseBody.message).toContain(
+    `Token rejected by ${expectedProvider} API (401 Unauthorized)`
+  );
 }
 
 // ============================================================================
@@ -99,7 +103,10 @@ describe('POST /api/credentials — cloud-provider credentials', () => {
     mockDB.limit.mockResolvedValue([]);
 
     (drizzle as any).mockReturnValue(mockDB);
-    mockValidateToken.mockResolvedValue(true);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response(JSON.stringify({ servers: [] }), { status: 200 }))
+    );
   });
 
   it('creates a hetzner credential and returns 201', async () => {
@@ -139,6 +146,153 @@ describe('POST /api/credentials — cloud-provider credentials', () => {
     const body = await res.json();
     expect(body.provider).toBe('scaleway');
     expect(body.connected).toBe(true);
+  });
+
+  it('validates, serializes, encrypts, and stores explicit Infomaniak application credentials', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          token: {
+            project: { id: 'project-1' },
+            catalog: [
+              {
+                type: 'compute',
+                endpoints: [
+                  {
+                    region: 'dc4-a',
+                    interface: 'public',
+                    url: 'https://compute.test/v2.1/project-1',
+                  },
+                ],
+              },
+              {
+                type: 'volumev3',
+                endpoints: [
+                  { region: 'dc4-a', interface: 'public', url: 'https://volume.test/v3/project-1' },
+                ],
+              },
+              {
+                type: 'image',
+                endpoints: [{ region: 'dc4-a', interface: 'public', url: 'https://image.test' }],
+              },
+              {
+                type: 'network',
+                endpoints: [{ region: 'dc4-a', interface: 'public', url: 'https://network.test' }],
+              },
+            ],
+          },
+        }),
+        { status: 201, headers: { 'X-Subject-Token': 'subject-token' } }
+      )
+    );
+    const res = await app.request(
+      '/api/credentials',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'infomaniak',
+          applicationCredentialId: 'application-id',
+          applicationCredentialSecret: 'one-time-secret',
+        }),
+      },
+      mockEnv
+    );
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({ provider: 'infomaniak', connected: true });
+    const { encrypt } = await import('../../../src/services/encryption');
+    expect(encrypt).toHaveBeenCalledWith(
+      JSON.stringify({
+        applicationCredentialId: 'application-id',
+        applicationCredentialSecret: 'one-time-secret',
+      }),
+      expect.anything()
+    );
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'https://api.pub1.infomaniak.cloud/identity/v3/auth/tokens',
+      expect.objectContaining({ method: 'POST' })
+    );
+  });
+
+  it('rejects Infomaniak credentials unless both explicit fields are supplied', async () => {
+    const res = await app.request(
+      '/api/credentials',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'infomaniak', applicationCredentialId: 'id-only' }),
+      },
+      mockEnv
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).message).toContain('applicationCredentialSecret');
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('creates a vultr credential (raw token) and returns 201', async () => {
+    const res = await app.request(
+      '/api/credentials',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'vultr', token: 'vultr-api-key' }),
+      },
+      mockEnv
+    );
+
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.provider).toBe('vultr');
+    expect(body.connected).toBe(true);
+    // The stored credential is the RAW token (like hetzner) — encrypt receives it verbatim.
+    const { encrypt } = await import('../../../src/services/encryption');
+    expect(encrypt).toHaveBeenCalledWith('vultr-api-key', expect.anything());
+  });
+
+  it('returns 400 when vultr token field is missing', async () => {
+    const res = await app.request(
+      '/api/credentials',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'vultr' }),
+      },
+      mockEnv
+    );
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.message).toContain('token');
+  });
+
+  it('creates a digitalocean credential as a raw token', async () => {
+    const res = await app.request(
+      '/api/credentials',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'digitalocean', token: 'do-api-key' }),
+      },
+      mockEnv
+    );
+    expect(res.status).toBe(201);
+    expect((await res.json()).provider).toBe('digitalocean');
+    const { encrypt } = await import('../../../src/services/encryption');
+    expect(encrypt).toHaveBeenCalledWith('do-api-key', expect.anything());
+  });
+
+  it('rejects a digitalocean credential without a token', async () => {
+    const res = await app.request(
+      '/api/credentials',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'digitalocean' }),
+      },
+      mockEnv
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).message).toContain('token');
   });
 
   it('upserts when a credential for the same provider already exists, returning 200', async () => {
@@ -191,7 +345,7 @@ describe('POST /api/credentials — cloud-provider credentials', () => {
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider: 'digitalocean', token: 'do-token' }),
+        body: JSON.stringify({ provider: 'unsupported-cloud', token: 'token' }),
       },
       mockEnv
     );
@@ -251,23 +405,16 @@ describe('POST /api/credentials — cloud-provider credentials', () => {
     expect(body.message).toContain('projectId');
   });
 
-  it('returns 400 (not 500) when validateToken throws (invalid credentials)', async () => {
-    // validateToken() throws when credentials are rejected by the provider API.
-    // The route must translate this into a user-facing 400, not an unhandled 500.
-    await expectCredentialValidationFailure(
-      app,
-      '/api/credentials',
-      { provider: 'hetzner', token: 'bad-token' },
-      'hetzner'
-    );
-  });
-
-  it('calls validateToken before encrypting or storing the credential', async () => {
+  it('saves and returns a validation warning when Hetzner rejects the token', async () => {
     const { encrypt } = await import('../../../src/services/encryption');
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: 'bad key' }), {
+        status: 401,
+        statusText: 'Unauthorized',
+      })
+    );
 
-    mockValidateToken.mockRejectedValueOnce(new Error('Invalid'));
-
-    await app.request(
+    const res = await app.request(
       '/api/credentials',
       {
         method: 'POST',
@@ -277,14 +424,18 @@ describe('POST /api/credentials — cloud-provider credentials', () => {
       mockEnv
     );
 
-    // encrypt must not be called when validation fails — credentials should
-    // never be stored if they are invalid.
-    expect(encrypt).not.toHaveBeenCalled();
-    expect(mockDB.insert).not.toHaveBeenCalled();
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.validation.valid).toBe(false);
+    expect(body.validation.error).toContain('Token rejected by Hetzner API (401 Unauthorized)');
+    expect(encrypt).toHaveBeenCalled();
+    expect(mockDB.insert).toHaveBeenCalled();
   });
 
-  it('provider name appears in the 400 error message for scaleway validation failure', async () => {
-    mockValidateToken.mockRejectedValueOnce(new Error('Forbidden'));
+  it('saves and returns provider-specific validation warning for Scaleway failure', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: 'forbidden' }), { status: 403, statusText: 'Forbidden' })
+    );
 
     const res = await app.request(
       '/api/credentials',
@@ -300,9 +451,10 @@ describe('POST /api/credentials — cloud-provider credentials', () => {
       mockEnv
     );
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(201);
     const body = await res.json();
-    expect(body.message).toContain('scaleway');
+    expect(body.validation.valid).toBe(false);
+    expect(body.validation.error).toContain('Token rejected by Scaleway API (403 Forbidden)');
   });
 });
 
@@ -312,7 +464,10 @@ describe('POST /api/credentials/validate — cloud-provider validation', () => {
   beforeEach(() => {
     app = createCredentialsTestApp();
     vi.clearAllMocks();
-    mockValidateToken.mockResolvedValue(true);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response(JSON.stringify({ servers: [] }), { status: 200 }))
+    );
   });
 
   it('validates a Hetzner token without encrypting or storing it', async () => {
@@ -332,7 +487,12 @@ describe('POST /api/credentials/validate — cloud-provider validation', () => {
     const body = await res.json();
     expect(body.valid).toBe(true);
     expect(body.provider).toBe('hetzner');
-    expect(mockValidateToken).toHaveBeenCalledOnce();
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'https://api.hetzner.cloud/v1/servers',
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer htz-api-token' }),
+      })
+    );
     expect(encrypt).not.toHaveBeenCalled();
   });
 
@@ -341,8 +501,80 @@ describe('POST /api/credentials/validate — cloud-provider validation', () => {
       app,
       '/api/credentials/validate',
       { provider: 'hetzner', token: 'bad-token' },
-      'hetzner'
+      'Hetzner'
     );
+  });
+
+  it('validates a Vultr token against GET /v2/account without storing it', async () => {
+    const { encrypt } = await import('../../../src/services/encryption');
+
+    const res = await app.request(
+      '/api/credentials/validate',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'vultr', token: 'vultr-api-key' }),
+      },
+      mockEnv
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.valid).toBe(true);
+    expect(body.provider).toBe('vultr');
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'https://api.vultr.com/v2/account',
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer vultr-api-key' }),
+      })
+    );
+    expect(encrypt).not.toHaveBeenCalled();
+  });
+
+  it('returns a clean sanitized 400 when Vultr rejects a bogus key (nothing stored)', async () => {
+    const { encrypt } = await import('../../../src/services/encryption');
+    await expectCredentialValidationFailure(
+      app,
+      '/api/credentials/validate',
+      { provider: 'vultr', token: 'bogus-key' },
+      'Vultr'
+    );
+    expect(encrypt).not.toHaveBeenCalled();
+  });
+
+  it('validates a DigitalOcean token against GET /v2/account without storing it', async () => {
+    const { encrypt } = await import('../../../src/services/encryption');
+    const res = await app.request(
+      '/api/credentials/validate',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'digitalocean', token: 'digitalocean-api-key' }),
+      },
+      mockEnv
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.valid).toBe(true);
+    expect(body.provider).toBe('digitalocean');
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'https://api.digitalocean.com/v2/account',
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer digitalocean-api-key' }),
+      })
+    );
+    expect(encrypt).not.toHaveBeenCalled();
+  });
+
+  it('returns a clean sanitized 400 when DigitalOcean rejects a bogus key (nothing stored)', async () => {
+    const { encrypt } = await import('../../../src/services/encryption');
+    await expectCredentialValidationFailure(
+      app,
+      '/api/credentials/validate',
+      { provider: 'digitalocean', token: 'bogus-key' },
+      'DigitalOcean'
+    );
+    expect(encrypt).not.toHaveBeenCalled();
   });
 });
 
@@ -428,6 +660,77 @@ describe('GET /api/credentials', () => {
     expect(body[0].encryptedToken).toBeUndefined();
     expect(body[0].iv).toBeUndefined();
   });
+
+  it('returns safe GCP metadata while isolating a malformed encrypted row', async () => {
+    const { decrypt } = await import('../../../src/services/encryption');
+    mockDB.where.mockResolvedValueOnce([
+      {
+        id: 'gcp-good',
+        provider: 'gcp',
+        encryptedToken: 'encrypted-good',
+        iv: 'iv-good',
+        createdAt: '2026-07-16T00:00:00.000Z',
+      },
+      {
+        id: 'gcp-bad',
+        provider: 'gcp',
+        encryptedToken: 'encrypted-bad',
+        iv: 'iv-bad',
+        createdAt: '2026-07-16T00:01:00.000Z',
+      },
+      {
+        id: 'hetzner-good',
+        provider: 'hetzner',
+        encryptedToken: 'encrypted-hetzner',
+        iv: 'iv-hetzner',
+        createdAt: '2026-07-16T00:02:00.000Z',
+      },
+    ]);
+    vi.mocked(decrypt)
+      .mockResolvedValueOnce(
+        JSON.stringify({
+          version: 1,
+          provider: 'gcp',
+          authType: 'service-account-key',
+          gcpProjectId: 'gcp-project-1',
+          serviceAccountEmail: 'sam-agent@gcp-project-1.iam.gserviceaccount.com',
+          privateKeyId: 'safe-key-id',
+          privateKey: 'never-return-private-key',
+          defaultZone: 'us-central1-a',
+        })
+      )
+      .mockRejectedValueOnce(new Error('malformed encrypted row'));
+
+    const res = await app.request('/api/credentials', { method: 'GET' }, mockEnv);
+
+    expect(res.status).toBe(200);
+    const responseText = await res.text();
+    expect(responseText).not.toContain('never-return-private-key');
+    const body = JSON.parse(responseText);
+    expect(body).toHaveLength(3);
+    expect(body[0]).toMatchObject({
+      id: 'gcp-good',
+      connected: true,
+      gcp: {
+        authType: 'service-account-key',
+        gcpProjectId: 'gcp-project-1',
+        serviceAccountEmail: 'sam-agent@gcp-project-1.iam.gserviceaccount.com',
+        privateKeyId: 'safe-key-id',
+        defaultZone: 'us-central1-a',
+      },
+    });
+    expect(body[1]).toEqual({
+      id: 'gcp-bad',
+      provider: 'gcp',
+      connected: true,
+      createdAt: '2026-07-16T00:01:00.000Z',
+    });
+    expect(body[2]).toMatchObject({
+      id: 'hetzner-good',
+      provider: 'hetzner',
+      connected: true,
+    });
+  });
 });
 
 // ============================================================================
@@ -491,5 +794,37 @@ describe('DELETE /api/credentials/:provider', () => {
     // but we verify delete + where were both called to confirm the query is scoped.
     expect(mockDB.delete).toHaveBeenCalled();
     expect(mockDB.where).toHaveBeenCalled();
+  });
+  it('creates an UpCloud credential as encrypted structured JSON', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ account: { username: 'api-user' } }), { status: 200 })
+    );
+    const res = await app.request(
+      '/api/credentials',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'upcloud', username: 'api-user', password: 'secret' }),
+      },
+      mockEnv
+    );
+    expect(res.status).toBe(201);
+    const { encrypt } = await import('../../../src/services/encryption');
+    expect(encrypt).toHaveBeenCalledWith(
+      JSON.stringify({ username: 'api-user', password: 'secret' }),
+      expect.anything()
+    );
+  });
+  it('rejects bogus UpCloud credentials without encryption or persistence', async () => {
+    const { encrypt } = await import('../../../src/services/encryption');
+    vi.mocked(encrypt).mockClear();
+    await expectCredentialValidationFailure(
+      app,
+      '/api/credentials/validate',
+      { provider: 'upcloud', username: 'bad', password: 'bad' },
+      'UpCloud'
+    );
+    expect(encrypt).not.toHaveBeenCalled();
+    expect(mockDB.insert).not.toHaveBeenCalled();
   });
 });

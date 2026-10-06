@@ -8,10 +8,12 @@
  * Source: apps/api/src/scheduled/trigger-execution-cleanup.ts
  */
 import { env } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
+import type * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { runTriggerExecutionCleanup } from '../../src/scheduled/trigger-execution-cleanup';
+import { admitAndSubmitTriggerExecution } from '../../src/services/trigger-admission';
 import {
   seedInstallation,
   seedProject,
@@ -50,10 +52,15 @@ function buildEnv(overrides: Partial<Env> = {}): Env {
 /** Query a trigger execution row by ID. */
 async function getExecution(id: string) {
   const result = await env.DATABASE.prepare(
-    'SELECT id, status, error_message, completed_at FROM trigger_executions WHERE id = ?',
+    'SELECT id, status, error_message, completed_at FROM trigger_executions WHERE id = ?'
   )
     .bind(id)
-    .first<{ id: string; status: string; error_message: string | null; completed_at: string | null }>();
+    .first<{
+      id: string;
+      status: string;
+      error_message: string | null;
+      completed_at: string | null;
+    }>();
   return result;
 }
 
@@ -86,6 +93,9 @@ describe('trigger execution cleanup (vertical slice, real D1)', () => {
         staleRecovered: 0,
         staleQueuedRecovered: 0,
         retentionPurged: 0,
+        webhookDeliveriesPurged: 0,
+        projectEventSourceOutboxAdmitted: 0,
+        credentialLimitWindowsPurged: 0,
         errors: 0,
       });
     });
@@ -116,7 +126,7 @@ describe('trigger execution cleanup (vertical slice, real D1)', () => {
       expect(exec?.completed_at).toBeTruthy();
     });
 
-    it('recovers execution where task is in terminal state (sync missed)', async () => {
+    it('syncs execution to completed where task is in terminal completed state', async () => {
       await seedBaseData();
 
       // Create a completed task
@@ -135,30 +145,50 @@ describe('trigger execution cleanup (vertical slice, real D1)', () => {
       expect(stats.staleRecovered).toBeGreaterThanOrEqual(1);
 
       const exec = await getExecution('exec-term-001');
-      expect(exec?.status).toBe('failed');
-      expect(exec?.error_message).toContain('is completed (sync missed)');
+      expect(exec?.status).toBe('completed');
+      expect(exec?.error_message).toBeNull();
     });
 
-    it('recovers execution where task is stuck in non-terminal state', async () => {
+    it('preserves execution where linked task is in_progress past the old stale threshold', async () => {
       await seedBaseData();
 
-      // Task still in 'queued' state — stuck
-      await seedTask('task-stuck-001', PROJECT_ID, USER_ID, { status: 'queued' });
+      await seedTask('task-live-001', PROJECT_ID, USER_ID, { status: 'in_progress' });
 
-      await seedTriggerExecution('exec-stuck-001', TRIGGER_ID, PROJECT_ID, {
+      await seedTriggerExecution('exec-live-001', TRIGGER_ID, PROJECT_ID, {
         status: 'running',
-        taskId: 'task-stuck-001',
+        taskId: 'task-live-001',
         startedAt: TWO_HOURS_AGO,
         createdAt: TWO_HOURS_AGO,
       });
 
-      const stats = await runTriggerExecutionCleanup(buildEnv());
+      await runTriggerExecutionCleanup(buildEnv());
+      await runTriggerExecutionCleanup(buildEnv());
 
-      expect(stats.staleRecovered).toBeGreaterThanOrEqual(1);
+      const exec = await getExecution('exec-live-001');
+      expect(exec?.status).toBe('running');
+      expect(exec?.error_message).toBeNull();
+      expect(exec?.completed_at).toBeNull();
+    });
 
-      const exec = await getExecution('exec-stuck-001');
+    it('uses the hard residence backstop for a non-terminal task after the configured hours', async () => {
+      await seedBaseData();
+
+      await seedTask('task-hard-max-001', PROJECT_ID, USER_ID, { status: 'in_progress' });
+
+      await seedTriggerExecution('exec-hard-max-001', TRIGGER_ID, PROJECT_ID, {
+        status: 'running',
+        taskId: 'task-hard-max-001',
+        startedAt: TWO_HOURS_AGO,
+        createdAt: TWO_HOURS_AGO,
+      });
+
+      await runTriggerExecutionCleanup(
+        buildEnv({ TRIGGER_EXECUTION_HARD_MAX_RESIDENCE_HOURS: '1' })
+      );
+
+      const exec = await getExecution('exec-hard-max-001');
       expect(exec?.status).toBe('failed');
-      expect(exec?.error_message).toContain("stuck in 'queued'");
+      expect(exec?.error_message).toContain('exceeded hard maximum residence of 1 hours');
     });
 
     it('recovers execution with no linked task (submission failed)', async () => {
@@ -236,6 +266,59 @@ describe('trigger execution cleanup (vertical slice, real D1)', () => {
   // Stale queued recovery
   // -------------------------------------------------------------------------
   describe('stale queued execution recovery', () => {
+    it('preserves a stale execution while its webhook delivery lease is active', async () => {
+      await seedBaseData();
+      const executionId = 'exec-q-webhook-active-001';
+      const taskId = 'task-q-webhook-active-001';
+      const now = new Date().toISOString();
+
+      await seedTask(taskId, PROJECT_ID, USER_ID, { status: 'queued' });
+      await seedTriggerExecution(executionId, TRIGGER_ID, PROJECT_ID, {
+        status: 'queued',
+        taskId,
+        startedAt: TWO_HOURS_AGO,
+        createdAt: TWO_HOURS_AGO,
+      });
+      await env.DATABASE.prepare('UPDATE tasks SET trigger_execution_id = ? WHERE id = ?')
+        .bind(executionId, taskId)
+        .run();
+      await env.DATABASE.prepare(
+        `INSERT INTO webhook_deliveries
+          (id, trigger_id, request_fingerprint, outcome, http_status, body_bytes,
+           processing_token, processing_heartbeat_at, execution_id, received_at, expires_at)
+         VALUES (?, ?, ?, 'processing', 0, 42, ?, ?, ?, ?, ?)`
+      )
+        .bind(
+          'delivery-q-webhook-active-001',
+          TRIGGER_ID,
+          'active-fingerprint',
+          'active-processing-token',
+          now,
+          executionId,
+          now,
+          new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+        )
+        .run();
+
+      await runTriggerExecutionCleanup(
+        buildEnv({
+          TASK_RUNNER: {
+            idFromName: () => taskId,
+            get: () => ({
+              getStatus: async () => ({ taskId, currentStep: 'node_selection' }),
+            }),
+          } as Env['TASK_RUNNER'],
+        })
+      );
+
+      expect((await getExecution(executionId))?.status).toBe('queued');
+      expect(
+        await env.DATABASE.prepare('SELECT outcome FROM webhook_deliveries WHERE id = ?')
+          .bind('delivery-q-webhook-active-001')
+          .first()
+      ).toEqual({ outcome: 'processing' });
+    });
+
     it('recovers queued execution with no linked task', async () => {
       await seedBaseData();
 
@@ -256,7 +339,7 @@ describe('trigger execution cleanup (vertical slice, real D1)', () => {
       expect(exec?.error_message).toContain('never started');
     });
 
-    it('recovers queued execution with linked task', async () => {
+    it('preserves queued execution with a non-terminal linked task', async () => {
       await seedBaseData();
 
       await seedTask('task-q-linked-001', PROJECT_ID, USER_ID, { status: 'queued' });
@@ -268,13 +351,78 @@ describe('trigger execution cleanup (vertical slice, real D1)', () => {
         createdAt: TWO_HOURS_AGO,
       });
 
-      const stats = await runTriggerExecutionCleanup(buildEnv());
-
-      expect(stats.staleQueuedRecovered).toBeGreaterThanOrEqual(1);
+      await runTriggerExecutionCleanup(buildEnv());
 
       const exec = await getExecution('exec-q-linked-001');
-      expect(exec?.status).toBe('failed');
-      expect(exec?.error_message).toContain('Queued execution stale');
+      expect(exec?.status).toBe('queued');
+      expect(exec?.error_message).toBeNull();
+    });
+  });
+
+  describe('admission guard after legacy or backstop execution failure', () => {
+    it('counts a failed execution with a live linked task as active for skipIfRunning', async () => {
+      await seedBaseData();
+      const triggerId = 'trigger-failed-live-slot-001';
+      const taskId = 'task-failed-live-slot-001';
+      const executionId = 'exec-failed-live-slot-001';
+      await seedTrigger(triggerId, PROJECT_ID, USER_ID, {
+        skipIfRunning: true,
+        maxConcurrent: 1,
+      });
+      await seedTask(taskId, PROJECT_ID, USER_ID, { status: 'in_progress' });
+      await seedTriggerExecution(executionId, triggerId, PROJECT_ID, {
+        status: 'failed',
+        taskId,
+        errorMessage: 'legacy stale cleanup failure while task was live',
+        completedAt: TWO_HOURS_AGO,
+        createdAt: TWO_HOURS_AGO,
+      });
+      const submitter = vi.fn(async () => ({
+        taskId: 'should-not-submit',
+        sessionId: 'should-not-submit-session',
+        branchName: 'sam/should-not-submit',
+      }));
+      const trigger = {
+        id: triggerId,
+        projectId: PROJECT_ID,
+        userId: USER_ID,
+        name: 'Failed Live Slot Trigger',
+        description: null,
+        status: 'active',
+        sourceType: 'cron',
+        cronExpression: '0 9 * * *',
+        cronTimezone: 'UTC',
+        skipIfRunning: true,
+        promptTemplate: 'run',
+        agentProfileId: null,
+        skillId: null,
+        taskMode: 'task',
+        vmSizeOverride: null,
+        maxConcurrent: 1,
+        lastTriggeredAt: null,
+        triggerCount: 0,
+        nextExecutionSequence: 2,
+        nextFireAt: null,
+        credentialBlockedReason: null,
+        credentialBlockedAt: null,
+        credentialBlockedBy: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      } satisfies schema.TriggerRow;
+
+      const result = await admitAndSubmitTriggerExecution(
+        buildEnv(),
+        {
+          trigger,
+          eventType: 'cron',
+          triggeredBy: 'cron',
+          renderPrompt: () => 'run',
+        },
+        submitter
+      );
+
+      expect(result).toMatchObject({ outcome: 'skipped', reason: 'still_running' });
+      expect(submitter).not.toHaveBeenCalled();
     });
   });
 
@@ -282,6 +430,60 @@ describe('trigger execution cleanup (vertical slice, real D1)', () => {
   // Retention purge
   // -------------------------------------------------------------------------
   describe('retention purge', () => {
+    it('purges expired webhook delivery metadata without removing recent records', async () => {
+      await seedBaseData();
+      const now = new Date().toISOString();
+      await env.DATABASE.prepare(
+        `INSERT OR IGNORE INTO webhook_trigger_configs
+          (trigger_id, token_hash, token_last_four, token_created_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      )
+        .bind(TRIGGER_ID, 'cleanup-token-hash', 'hash', now, now, now)
+        .run();
+      await env.DATABASE.batch([
+        env.DATABASE.prepare(
+          `INSERT INTO webhook_deliveries
+            (id, trigger_id, request_fingerprint, outcome, http_status, body_bytes,
+             received_at, processed_at, expires_at)
+           VALUES (?, ?, ?, 'accepted', 202, 42, ?, ?, ?)`
+        ).bind(
+          'delivery-expired-001',
+          TRIGGER_ID,
+          'expired-fingerprint',
+          NINETY_ONE_DAYS_AGO,
+          NINETY_ONE_DAYS_AGO,
+          NINETY_ONE_DAYS_AGO
+        ),
+        env.DATABASE.prepare(
+          `INSERT INTO webhook_deliveries
+            (id, trigger_id, request_fingerprint, outcome, http_status, body_bytes,
+             received_at, processed_at, expires_at)
+           VALUES (?, ?, ?, 'accepted', 202, 42, ?, ?, ?)`
+        ).bind(
+          'delivery-recent-001',
+          TRIGGER_ID,
+          'recent-fingerprint',
+          now,
+          now,
+          new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString()
+        ),
+      ]);
+
+      const stats = await runTriggerExecutionCleanup(buildEnv());
+
+      expect(stats.webhookDeliveriesPurged).toBeGreaterThanOrEqual(1);
+      expect(
+        await env.DATABASE.prepare('SELECT id FROM webhook_deliveries WHERE id = ?')
+          .bind('delivery-expired-001')
+          .first()
+      ).toBeNull();
+      expect(
+        await env.DATABASE.prepare('SELECT id FROM webhook_deliveries WHERE id = ?')
+          .bind('delivery-recent-001')
+          .first()
+      ).not.toBeNull();
+    });
+
     it('purges old completed/failed/skipped executions by created_at', async () => {
       await seedBaseData();
 
@@ -372,7 +574,7 @@ describe('trigger execution cleanup (vertical slice, real D1)', () => {
 
       // Set retention to 7 days — the 10-day-old execution should be purged
       const stats = await runTriggerExecutionCleanup(
-        buildEnv({ TRIGGER_EXECUTION_LOG_RETENTION_DAYS: '7' }),
+        buildEnv({ TRIGGER_EXECUTION_LOG_RETENTION_DAYS: '7' })
       );
 
       expect(stats.retentionPurged).toBeGreaterThanOrEqual(1);

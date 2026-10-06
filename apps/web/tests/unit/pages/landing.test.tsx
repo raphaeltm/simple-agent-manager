@@ -12,6 +12,8 @@ vi.mock('../../../src/components/AuthProvider', () => ({
 
 vi.mock('../../../src/lib/auth', () => ({
   signInWithGitHub: vi.fn(),
+  signInWithGitLab: vi.fn(),
+  signInWithGoogle: vi.fn(),
 }));
 
 vi.mock('@simple-agent-manager/ui', () => ({

@@ -38,6 +38,10 @@ async function setupMocks(
 ) {
   const { chatResponse = 'text' } = opts;
 
+  await page.addInitScript(() => {
+    window.localStorage.setItem('sam-onboarding-wizard-dismissed-test-user', 'true');
+  });
+
   // Auth mock
   await page.route('**/api/auth/get-session', (route: Route) =>
     route.fulfill({

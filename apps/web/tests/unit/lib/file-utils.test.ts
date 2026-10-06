@@ -5,6 +5,7 @@ import {
   FILE_PREVIEW_INLINE_MAX_BYTES,
   FILE_PREVIEW_LOAD_MAX_BYTES,
   formatFileSize,
+  isHtmlMime,
   isImageFile,
   isMarkdownMime,
   isPdfMime,
@@ -96,6 +97,11 @@ describe('isPreviewableMime', () => {
     expect(isPreviewableMime('text/markdown')).toBe(true);
   });
 
+  it('returns true for HTML', () => {
+    expect(isPreviewableMime('text/html')).toBe(true);
+    expect(isPreviewableMime('Text/HTML; charset=utf-8')).toBe(true);
+  });
+
   it('handles MIME types with charset parameters', () => {
     expect(isPreviewableMime('text/markdown; charset=utf-8')).toBe(true);
     expect(isPreviewableMime('image/png; charset=utf-8')).toBe(true);
@@ -109,7 +115,6 @@ describe('isPreviewableMime', () => {
 
   it('returns false for non-previewable types', () => {
     expect(isPreviewableMime('text/plain')).toBe(false);
-    expect(isPreviewableMime('text/html')).toBe(false);
     expect(isPreviewableMime('application/json')).toBe(false);
     expect(isPreviewableMime('application/javascript')).toBe(false);
     expect(isPreviewableMime('application/zip')).toBe(false);
@@ -120,6 +125,31 @@ describe('isPreviewableMime', () => {
   it('is case-insensitive', () => {
     expect(isPreviewableMime('IMAGE/PNG')).toBe(true);
     expect(isPreviewableMime('Application/PDF')).toBe(true);
+  });
+
+  it('recovers previewability from the filename when the stored type is octet-stream', () => {
+    // The agent-upload bug: files land as application/octet-stream. With a
+    // filename, the effective type is recovered from the extension.
+    expect(isPreviewableMime('application/octet-stream', 'notes.md')).toBe(true);
+    expect(isPreviewableMime('application/octet-stream', 'page.html')).toBe(true);
+    expect(isPreviewableMime('application/octet-stream', 'diagram.png')).toBe(true);
+    expect(isPreviewableMime('', 'notes.md')).toBe(true);
+  });
+
+  it('does not preview octet-stream files with no known extension', () => {
+    expect(isPreviewableMime('application/octet-stream', 'blob.bin')).toBe(false);
+    expect(isPreviewableMime('application/octet-stream', 'Makefile')).toBe(false);
+    expect(isPreviewableMime('application/octet-stream')).toBe(false);
+    // Non-previewable text extensions stay non-previewable even via the filename.
+    expect(isPreviewableMime('application/octet-stream', 'log.txt')).toBe(false);
+    // SVG resolves from the extension but remains non-previewable (iframe script risk).
+    expect(isPreviewableMime('application/octet-stream', 'icon.svg')).toBe(false);
+  });
+
+  it('never lets the filename override a meaningful stored type', () => {
+    // A file explicitly stored as text/plain stays non-previewable even if the
+    // name looks like markdown.
+    expect(isPreviewableMime('text/plain', 'actually.md')).toBe(false);
   });
 });
 
@@ -166,6 +196,43 @@ describe('isMarkdownMime', () => {
     expect(isMarkdownMime('text/html')).toBe(false);
     expect(isMarkdownMime('application/pdf')).toBe(false);
     expect(isMarkdownMime('image/png')).toBe(false);
+  });
+
+  it('recovers markdown from the filename for octet-stream/empty stored types', () => {
+    expect(isMarkdownMime('application/octet-stream', 'foo.md')).toBe(true);
+    expect(isMarkdownMime('application/octet-stream', 'foo.markdown')).toBe(true);
+    expect(isMarkdownMime('', 'foo.md')).toBe(true);
+    // No filename, or a non-markdown extension → not markdown.
+    expect(isMarkdownMime('application/octet-stream')).toBe(false);
+    expect(isMarkdownMime('application/octet-stream', 'foo.bin')).toBe(false);
+    // A real binary with a markdown-looking name is NOT treated as markdown.
+    expect(isMarkdownMime('image/png', 'foo.md')).toBe(false);
+  });
+});
+
+describe('isHtmlMime', () => {
+  it('returns true for HTML', () => {
+    expect(isHtmlMime('text/html')).toBe(true);
+    expect(isHtmlMime('Text/HTML')).toBe(true);
+  });
+
+  it('returns true for HTML with charset parameter', () => {
+    expect(isHtmlMime('text/html; charset=utf-8')).toBe(true);
+    expect(isHtmlMime('Text/HTML; charset=UTF-8')).toBe(true);
+  });
+
+  it('returns false for non-HTML', () => {
+    expect(isHtmlMime('text/plain')).toBe(false);
+    expect(isHtmlMime('text/markdown')).toBe(false);
+    expect(isHtmlMime('application/pdf')).toBe(false);
+    expect(isHtmlMime('image/png')).toBe(false);
+  });
+
+  it('recovers HTML from the filename for octet-stream/empty stored types', () => {
+    expect(isHtmlMime('application/octet-stream', 'page.html')).toBe(true);
+    expect(isHtmlMime('application/octet-stream', 'page.htm')).toBe(true);
+    expect(isHtmlMime('', 'page.html')).toBe(true);
+    expect(isHtmlMime('application/octet-stream', 'notes.md')).toBe(false);
   });
 });
 

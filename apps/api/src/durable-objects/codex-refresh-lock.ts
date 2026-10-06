@@ -26,124 +26,74 @@
  *    every other project inheriting it.
  *  - Rate limiting (MEDIUM #5): token-bucket state is held in DO storage (strongly consistent,
  *    atomic increments). KV read-modify-write is not safe for enforcement under concurrency.
- *  - Scope validation (MEDIUM #6): enabled by default with a conservative allowlist of Codex
- *    OAuth scopes. Unexpected scopes block the refresh with 502 instead of a warn-only log.
+ *  - Scope validation (MEDIUM #6): unexpected upstream scopes are checked against a conservative
+ *    allowlist of Codex OAuth scopes. Unexpected scopes block the refresh with 502 by default.
+ *    Disable with CODEX_EXPECTED_SCOPES="" to explicitly opt out of validation.
  */
 import { DurableObject } from 'cloudflare:workers';
 import * as v from 'valibot';
 
 import { log } from '../lib/logger';
-import { readResponseJson } from '../lib/runtime-validation';
+import { maybeJsonRecord, readResponseJson } from '../lib/runtime-validation';
 import { getCredentialEncryptionKey } from '../lib/secrets';
+import { syncActiveAgentCredentialSecret } from '../services/composable-credentials/agent-sync';
 import { decrypt, encrypt } from '../services/encryption';
-
-interface RefreshRequestPayload {
-  /** The refresh token sent by Codex. */
-  refreshToken: string;
-  /** The userId to look up credentials for. */
-  userId: string;
-  /**
-   * Optional projectId — when set, the DO prefers the project-scoped credential
-   * row. Preserves scope when rotating OAuth tokens so a project-scoped credential
-   * doesn't collapse to user-scoped.
-   */
-  projectId?: string | null;
-}
-
-interface CodexRefreshEnv {
-  DATABASE: D1Database;
-  ENCRYPTION_KEY: string;
-  CREDENTIAL_ENCRYPTION_KEY?: string;
-  CODEX_REFRESH_UPSTREAM_URL?: string;
-  CODEX_REFRESH_UPSTREAM_TIMEOUT_MS?: string;
-  CODEX_REFRESH_LOCK_TIMEOUT_MS?: string;
-  CODEX_CLIENT_ID?: string;
-  /**
-   * Comma-separated OAuth scopes that the Codex refresh upstream is allowed to return.
-   * Empty string disables scope validation. Unset uses DEFAULT_EXPECTED_SCOPES.
-   */
-  CODEX_EXPECTED_SCOPES?: string;
-  /**
-   * 'warn' (default) or 'block'. Controls whether unexpected scopes block
-   * the refresh (502) or just log a warning and allow it to proceed.
-   */
-  CODEX_SCOPE_VALIDATION_MODE?: string;
-  /**
-   * Rate limit: max refresh requests per user per window. Defaults to 30.
-   */
-  RATE_LIMIT_CODEX_REFRESH_PER_HOUR?: string;
-  /**
-   * Rate limit window in seconds. Defaults to 3600 (1 hour).
-   */
-  RATE_LIMIT_CODEX_REFRESH_WINDOW_SECONDS?: string;
-  /**
-   * Grace window (ms) during which a recently-rotated refresh token is still
-   * accepted and receives the full token response (including the current
-   * refresh_token). Handles the race where Session A rotates the token while
-   * Session B still holds the previous one. Defaults to 300000 (5 minutes).
-   */
-  CODEX_REFRESH_GRACE_WINDOW_MS?: string;
-}
-
-const DEFAULT_UPSTREAM_URL = 'https://auth.openai.com/oauth/token';
-const DEFAULT_UPSTREAM_TIMEOUT_MS = 10_000;
-const DEFAULT_LOCK_TIMEOUT_MS = 30_000;
-/**
- * Default OpenAI OAuth client_id for Codex.
- * Override via CODEX_CLIENT_ID Worker secret.
- * This is a public client_id registered with OpenAI — not a secret.
- */
-const DEFAULT_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
-/**
- * Default expected scopes for the Codex OAuth refresh flow. OpenAI's Codex
- * OAuth grants typically include `openid profile email offline_access` — any
- * upstream response containing additional/unknown scopes is treated as a
- * potential scope escalation or provider drift and blocked with 502.
- *
- * Override via CODEX_EXPECTED_SCOPES (comma-separated). Setting the env var
- * to an empty string disables validation.
- */
-const DEFAULT_EXPECTED_SCOPES = 'openid,profile,email,offline_access';
-const DEFAULT_RATE_LIMIT = 30;
-const DEFAULT_RATE_WINDOW_SECONDS = 3600;
-/**
- * Default grace window: 5 minutes. During this window, a refresh token that
- * was recently rotated out (by another session's successful refresh) will still
- * receive the full token response including the current refresh_token. This
- * prevents the race condition where Session B starts with valid tokens, but
- * Session A rotates them before B's first refresh attempt.
- */
-const DEFAULT_GRACE_WINDOW_MS = 300_000;
-/**
- * Maximum number of recently-rotated token hashes to track in DO storage.
- * Keeps storage bounded even under pathological refresh patterns.
- */
-const MAX_ROTATED_TOKEN_ENTRIES = 5;
-
-/**
- * A recently-rotated refresh token entry stored in DO storage.
- * We store a SHA-256 hex digest of the old token (not the token itself) so that
- * even if DO storage is compromised, the old tokens cannot be extracted.
- */
-interface RotatedTokenEntry {
-  /** SHA-256 hex digest of the old refresh token. */
-  tokenHash: string;
-  /** Unix timestamp (ms) when the token was rotated out. */
-  rotatedAt: number;
-}
-
-interface RateLimitState {
-  /** Start of the current window in unix seconds. */
-  windowStart: number;
-  /** Count of requests in the current window. */
-  count: number;
-}
+import {
+  type CodexRefreshEnv,
+  DEFAULT_CLIENT_ID,
+  DEFAULT_EXPECTED_SCOPES,
+  DEFAULT_GRACE_WINDOW_MS,
+  DEFAULT_LOCK_TIMEOUT_MS,
+  DEFAULT_RATE_LIMIT,
+  DEFAULT_RATE_WINDOW_SECONDS,
+  DEFAULT_UPSTREAM_TIMEOUT_MS,
+  DEFAULT_UPSTREAM_URL,
+  MAX_ROTATED_TOKEN_ENTRIES,
+  type RateLimitState,
+  type RefreshRequestPayload,
+  type RotatedTokenEntry,
+} from './codex-refresh-lock-config';
 
 export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
   /**
-   * Handle an incoming refresh request. The DO's single-threaded execution model
-   * guarantees that only one request is processed at a time per userId instance,
-   * providing the per-user lock without explicit mutex logic.
+   * In-memory mutex (promise chain) serializing the read→refresh→write critical
+   * section within a single DO instance.
+   *
+   * IMPORTANT: a Durable Object does NOT serialize concurrent `async fetch()`
+   * handlers across `await` points. When a handler awaits an external `fetch()`
+   * to OpenAI, the DO is free to start processing the next queued request. Two
+   * concurrent refreshes for the same user could therefore both read the same
+   * stored refresh_token, both pass the match check, and both POST it to OpenAI.
+   * OpenAI rotates the one-time-use refresh_token on first use and revokes the
+   * whole token family when the now-consumed token is replayed — which breaks
+   * every subsequent refresh (401 → re-refresh loop → 429). The AbortController
+   * timeout is NOT a mutex; only this promise chain provides real serialization.
+   *
+   * The credential read MUST happen inside the lock so that a queued second
+   * request re-reads the post-rotation token and takes the grace-window path
+   * instead of replaying the consumed token against OpenAI.
+   */
+  private refreshLock: Promise<unknown> = Promise.resolve();
+
+  /**
+   * Run `fn` exclusively with respect to other refreshes in this DO instance.
+   * Each call chains onto the previous one so the critical sections execute
+   * strictly one-at-a-time, even across `await` boundaries.
+   */
+  private withRefreshLock<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.refreshLock.then(() => fn());
+    // Keep the chain alive even if this run rejects, so a failed refresh does
+    // not permanently wedge the lock for subsequent requests.
+    this.refreshLock = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
+  }
+
+  /**
+   * Handle an incoming refresh request. The actual refresh runs inside
+   * `withRefreshLock` so concurrent requests for the same user are serialized.
    *
    * An AbortController enforces the lock timeout — if the overall operation
    * exceeds the limit, the upstream fetch is aborted and no background writes occur.
@@ -156,7 +106,8 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
       });
     }
 
-    const lockTimeout = parseInt(this.env.CODEX_REFRESH_LOCK_TIMEOUT_MS || '', 10) || DEFAULT_LOCK_TIMEOUT_MS;
+    const lockTimeout =
+      parseInt(this.env.CODEX_REFRESH_LOCK_TIMEOUT_MS || '', 10) || DEFAULT_LOCK_TIMEOUT_MS;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), lockTimeout);
 
@@ -170,10 +121,10 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
         );
       }
       // Do not expose internal error details to caller.
-      return new Response(
-        JSON.stringify({ error: 'internal_error' }),
-        { status: 500, headers: { 'Content-Type': 'application/json' } }
-      );
+      return new Response(JSON.stringify({ error: 'internal_error' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      });
     } finally {
       clearTimeout(timeoutId);
     }
@@ -190,34 +141,37 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
       );
     }
 
-    // Atomic per-user rate limit (MEDIUM #5) — DO state is strongly consistent,
-    // so increments cannot race the way KV read-modify-write can.
-    const rateLimitResult = await this.enforceRateLimit();
-    if (!rateLimitResult.allowed) {
-      const retryAfter = Math.max(1, rateLimitResult.resetAt - Math.floor(Date.now() / 1000));
-      log.warn('codex_refresh.rate_limited', { userId });
-      return new Response(
-        JSON.stringify({ error: 'rate_limit_exceeded', message: 'Too many refresh requests' }),
-        {
-          status: 429,
-          headers: {
-            'Content-Type': 'application/json',
-            'Retry-After': retryAfter.toString(),
-          },
-        }
-      );
-    }
+    // Serialize the read→refresh→write critical section so concurrent refreshes
+    // for the same user cannot both consume the same one-time-use refresh token.
+    return this.withRefreshLock(() =>
+      this.runRefresh(refreshToken, userId, projectId ?? null, signal)
+    );
+  }
 
+  /**
+   * The serialized critical section. Reads the stored credential, decides
+   * grace/stale/match, optionally refreshes against OpenAI, and persists the
+   * rotated tokens. MUST run under `withRefreshLock` — reading the credential
+   * here (rather than before acquiring the lock) is what lets a queued
+   * concurrent request observe the rotated token and take the grace-window path
+   * instead of replaying the consumed token against OpenAI.
+   */
+  private async runRefresh(
+    refreshToken: string,
+    userId: string,
+    projectId: string | null,
+    signal: AbortSignal
+  ): Promise<Response> {
     // Derive encryption key from DO env (not from caller).
     const encryptionKey = getCredentialEncryptionKey(this.env);
 
     // Look up the stored credential — prefer project-scoped when projectId is set.
     const credential = await this.getStoredCredential(userId, projectId ?? null);
     if (!credential) {
-      return new Response(
-        JSON.stringify({ error: 'refresh_token_invalidated' }),
-        { status: 401, headers: { 'Content-Type': 'application/json' } }
-      );
+      return new Response(JSON.stringify({ error: 'refresh_token_invalidated' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
 
     // Decrypt the stored credential to get the current auth.json.
@@ -255,6 +209,15 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
         // The caller's token was valid recently — this is a legitimate concurrent
         // session that started before the rotation. Return the full token set
         // so the session can continue operating without re-auth.
+        //
+        // Deliberately NOT rate-limited: reaching here requires presenting a
+        // refresh_token that was valid within the grace window, so the successor
+        // token returned is the legitimate rotation handoff the caller is already
+        // entitled to — not an escalation. Counting these calls would re-consume
+        // the OpenAI-refresh budget for responses that never hit OpenAI, which is
+        // exactly the multi-workspace concurrent re-sync path whose budget
+        // exhaustion produced the original 429. The enforceRateLimit() below
+        // guards only the real upstream-refresh path.
         log.info('codex_refresh.grace_window_hit', {
           userId,
           graceWindowMs,
@@ -281,9 +244,32 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
       });
     }
 
+    // Atomic per-credential rate limit (MEDIUM #5) — DO state is strongly
+    // consistent, so increments cannot race the way KV read-modify-write can.
+    // Enforced HERE (only on the real-refresh path) so cached grace-window and
+    // stale-credential responses above do NOT consume budget — those never hit
+    // OpenAI and must not contribute to the rate limit that guards real upstream
+    // refreshes.
+    const rateLimitResult = await this.enforceRateLimit(credential.id);
+    if (!rateLimitResult.allowed) {
+      const retryAfter = Math.max(1, rateLimitResult.resetAt - Math.floor(Date.now() / 1000));
+      log.warn('codex_refresh.rate_limited', { userId });
+      return new Response(
+        JSON.stringify({ error: 'rate_limit_exceeded', message: 'Too many refresh requests' }),
+        {
+          status: 429,
+          headers: {
+            'Content-Type': 'application/json',
+            'Retry-After': retryAfter.toString(),
+          },
+        }
+      );
+    }
+
     // Token matches — forward to OpenAI for a real refresh.
     const upstreamUrl = this.env.CODEX_REFRESH_UPSTREAM_URL || DEFAULT_UPSTREAM_URL;
-    const upstreamTimeout = parseInt(this.env.CODEX_REFRESH_UPSTREAM_TIMEOUT_MS || '', 10) || DEFAULT_UPSTREAM_TIMEOUT_MS;
+    const upstreamTimeout =
+      parseInt(this.env.CODEX_REFRESH_UPSTREAM_TIMEOUT_MS || '', 10) || DEFAULT_UPSTREAM_TIMEOUT_MS;
 
     // Use the lock-level signal for the upstream fetch, with a tighter upstream-specific timeout.
     const upstreamController = new AbortController();
@@ -322,16 +308,63 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     if (!upstreamResponse.ok) {
       // Parse and filter upstream error — only forward safe fields to prevent
       // information leakage (e.g., if OpenAI echoes back the refresh token).
-      let safeError: Record<string, string> = { error: 'upstream_error' };
+      // OpenAI returns errors in TWO shapes: the flat OAuth2 form
+      // `{ error, error_description }` and a nested form
+      // `{ error: { code, message, type } }`. Parse both so the structured
+      // diagnostic captures the rejection reason (e.g. `refresh_token_invalidated`,
+      // which means the stored token was revoked at OpenAI — log out / re-login /
+      // a sibling refresh consumed it — versus a transient upstream fault).
+      const safeError: Record<string, string> = { error: 'upstream_error' };
+      let upstreamErrorCode: string | null = null;
+      let upstreamErrorMessage: string | null = null;
+      const upstreamContentType = upstreamResponse.headers.get('Content-Type');
+      let rawBody = '';
       try {
-        const parsed = await readResponseJson(upstreamResponse, v.record(v.string(), v.unknown()), 'codex-refresh.upstream_error');
-        if (typeof parsed.error === 'string') safeError.error = parsed.error;
-        if (typeof parsed.error_description === 'string') {
-          safeError = { ...safeError, error_description: parsed.error_description };
+        rawBody = await upstreamResponse.text();
+      } catch {
+        // Body unreadable — leave rawBody empty.
+      }
+      try {
+        const parsedRaw = JSON.parse(rawBody) as unknown;
+        const parsed = maybeJsonRecord(parsedRaw);
+        if (parsed && typeof parsed.error === 'string') {
+          // Flat OAuth2 form.
+          safeError.error = parsed.error;
+          upstreamErrorCode = parsed.error;
+          if (typeof parsed.error_description === 'string') {
+            safeError.error_description = parsed.error_description;
+            upstreamErrorMessage = parsed.error_description;
+          }
+        } else if (parsed && parsed.error && typeof parsed.error === 'object') {
+          // OpenAI nested form: { error: { code, message, type } }.
+          const nested = maybeJsonRecord(parsed.error);
+          if (nested) {
+            if (typeof nested.code === 'string') {
+              safeError.error = nested.code;
+              upstreamErrorCode = nested.code;
+            }
+            if (typeof nested.message === 'string') {
+              safeError.error_description = nested.message;
+              upstreamErrorMessage = nested.message;
+            }
+          }
         }
       } catch {
-        // Non-JSON upstream response — use generic error
+        // Non-JSON upstream response — use generic error.
       }
+      // Diagnostic: log OpenAI's structured rejection reason so we can
+      // distinguish a revoked/expired/consumed refresh_token (e.g.
+      // `refresh_token_invalidated`) from a transient upstream fault or an
+      // edge/WAF block. Only the parsed OAuth/OpenAI error code + message are
+      // logged — never the raw body — so a refresh token can never leak.
+      log.warn('codex_refresh.upstream_rejected', {
+        userId,
+        credentialId: credential.id,
+        status: upstreamResponse.status,
+        upstreamContentType,
+        upstreamErrorCode,
+        upstreamErrorMessage,
+      });
       return new Response(JSON.stringify(safeError), {
         status: upstreamResponse.status,
         headers: { 'Content-Type': 'application/json' },
@@ -344,37 +377,29 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     }
 
     // Parse new tokens from OpenAI response.
-    const newTokens = await readResponseJson(upstreamResponse, v.record(v.string(), v.unknown()), 'codex-refresh.tokens');
+    const newTokens = await readResponseJson(
+      upstreamResponse,
+      v.record(v.string(), v.unknown()),
+      'codex-refresh.tokens'
+    );
 
-    // Scope validation (MEDIUM #6) — warn-only mode.
-    // Previously this blocked with 502 when upstream returned unexpected scopes,
-    // but we don't yet know the full set of scopes OpenAI returns in practice.
-    // If the allowlist was incomplete, every refresh would silently fail, leaving
-    // Codex with expired tokens and "Authentication required" errors.
-    // Demoted to warn-only until we capture real-world scope data from logs.
-    // Re-enable blocking by setting CODEX_SCOPE_VALIDATION_MODE=block.
+    // Scope validation (MEDIUM #6) — fail closed by default. Disable with
+    // CODEX_EXPECTED_SCOPES="" only when explicitly opting out of validation.
     const scopeResult = this.validateUpstreamScopes(newTokens, userId);
     if (!scopeResult.ok) {
-      const validationMode = this.env.CODEX_SCOPE_VALIDATION_MODE ?? 'warn';
-      if (validationMode === 'block') {
-        return new Response(
-          JSON.stringify({ error: 'upstream_unexpected_scope', message: scopeResult.reason }),
-          { status: 502, headers: { 'Content-Type': 'application/json' } }
-        );
-      }
-      // Warn-only: log the unexpected scopes but allow the refresh to proceed.
-      // This lets us discover what scopes OpenAI actually returns without
-      // breaking token refresh for all users.
-      log.warn('codex_refresh.unexpected_scopes_allowed', {
-        userId,
-        reason: scopeResult.reason,
-        validationMode,
-      });
+      return new Response(
+        JSON.stringify({ error: 'upstream_unexpected_scope', message: scopeResult.reason }),
+        { status: 502, headers: { 'Content-Type': 'application/json' } }
+      );
     }
 
     // Before updating tokens, record the old refresh_token in the grace window
     // so concurrent sessions holding it can still refresh successfully.
-    if (storedRefreshToken && typeof newTokens.refresh_token === 'string' && newTokens.refresh_token !== storedRefreshToken) {
+    if (
+      storedRefreshToken &&
+      typeof newTokens.refresh_token === 'string' &&
+      newTokens.refresh_token !== storedRefreshToken
+    ) {
       await this.recordRotatedToken(storedRefreshToken);
     }
 
@@ -383,8 +408,10 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
       storedAuth.tokens = {};
     }
     const authTokens = storedAuth.tokens as Record<string, string>;
-    if (typeof newTokens.access_token === 'string') authTokens.access_token = newTokens.access_token;
-    if (typeof newTokens.refresh_token === 'string') authTokens.refresh_token = newTokens.refresh_token;
+    if (typeof newTokens.access_token === 'string')
+      authTokens.access_token = newTokens.access_token;
+    if (typeof newTokens.refresh_token === 'string')
+      authTokens.refresh_token = newTokens.refresh_token;
     if (typeof newTokens.id_token === 'string') authTokens.id_token = newTokens.id_token;
     authTokens.last_refresh = new Date().toISOString();
 
@@ -394,9 +421,51 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
 
     const db = this.env.DATABASE;
     await db
-      .prepare('UPDATE credentials SET encrypted_token = ?, iv = ?, updated_at = datetime(\'now\') WHERE id = ?')
+      .prepare(
+        "UPDATE credentials SET encrypted_token = ?, iv = ?, updated_at = datetime('now') WHERE id = ?"
+      )
       .bind(ciphertext, iv, credential.id)
       .run();
+
+    // CORE FIX (dual-write): mirror the rotated token into the composable-
+    // credentials store. The legacy UPDATE above only touches the `credentials`
+    // table; workspaces seed ~/.codex/auth.json from the `cc_credentials`
+    // snapshot. Without this sync, cc_credentials stays frozen at backfill time,
+    // fresh workspaces present a stale refresh_token, and Codex enters a
+    // 401 → re-refresh loop that exceeds the rate limit → 429.
+    //
+    // Reuse the same ciphertext/iv just persisted to the legacy row, and pass
+    // the credential row's OWN scope (scopeProjectId) — NOT the workspace's —
+    // so the matching active cc_credentials row is updated (mirrors runtime.ts).
+    try {
+      const ccRowsUpdated = await syncActiveAgentCredentialSecret(db, {
+        userId,
+        projectId: credential.scopeProjectId ?? undefined,
+        agentType: 'openai-codex',
+        credentialKind: 'oauth-token',
+        encryptedToken: ciphertext,
+        iv,
+      });
+      if (ccRowsUpdated === 0) {
+        // The legacy row rotated but no matching active cc_credentials row was
+        // found to mirror into. This is the exact silent desync this fix exists
+        // to prevent, so surface it (no token material) for diagnosis.
+        log.warn('codex_refresh.cc_sync_no_row', {
+          userId,
+          credentialId: credential.id,
+          scopeProjectId: credential.scopeProjectId ?? null,
+        });
+      }
+    } catch (err) {
+      // Never let a cc_credentials sync failure break the refresh — the legacy
+      // row is already updated and the caller has working tokens. Log without
+      // any token material so the desync is diagnosable.
+      log.error('codex_refresh.cc_sync_failed', {
+        userId,
+        credentialId: credential.id,
+        message: err instanceof Error ? err.message : 'unknown',
+      });
+    }
 
     // Return the new tokens to Codex.
     return this.createTokenResponse({
@@ -407,18 +476,29 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
   }
 
   /**
-   * Atomically increment the per-user rate limit counter in DO storage.
+   * Atomically increment the per-credential rate limit counter in DO storage.
    * Returns `{ allowed: false }` once the configured limit for the current
    * window is exceeded.
+   *
+   * Keyed by credential ID (not userId) so distinct credentials owned by the
+   * same user — e.g. a project-scoped override and the user-scoped default —
+   * have independent budgets. A loop on one credential must not exhaust the
+   * budget for the user's other credentials.
    */
-  private async enforceRateLimit(): Promise<{ allowed: boolean; resetAt: number }> {
-    const limit = parseInt(this.env.RATE_LIMIT_CODEX_REFRESH_PER_HOUR || '', 10) || DEFAULT_RATE_LIMIT;
-    const windowSeconds = parseInt(this.env.RATE_LIMIT_CODEX_REFRESH_WINDOW_SECONDS || '', 10) || DEFAULT_RATE_WINDOW_SECONDS;
+  private async enforceRateLimit(
+    credentialId: string
+  ): Promise<{ allowed: boolean; resetAt: number }> {
+    const limit =
+      parseInt(this.env.RATE_LIMIT_CODEX_REFRESH_PER_HOUR || '', 10) || DEFAULT_RATE_LIMIT;
+    const windowSeconds =
+      parseInt(this.env.RATE_LIMIT_CODEX_REFRESH_WINDOW_SECONDS || '', 10) ||
+      DEFAULT_RATE_WINDOW_SECONDS;
     const now = Math.floor(Date.now() / 1000);
     const currentWindowStart = Math.floor(now / windowSeconds) * windowSeconds;
     const resetAt = currentWindowStart + windowSeconds;
 
-    const stored = (await this.ctx.storage.get<RateLimitState>('rate-limit')) ?? null;
+    const storageKey = `rate-limit:${credentialId}`;
+    const stored = (await this.ctx.storage.get<RateLimitState>(storageKey)) ?? null;
     const state: RateLimitState =
       stored && stored.windowStart === currentWindowStart
         ? stored
@@ -429,16 +509,15 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     }
 
     state.count += 1;
-    await this.ctx.storage.put('rate-limit', state);
+    await this.ctx.storage.put(storageKey, state);
     return { allowed: true, resetAt };
   }
 
   /**
    * Validate scopes in the upstream token response.
    *
-   * Returns { ok: false } when scopes don't match the allowlist. The caller
-   * decides whether to block (502) or warn based on CODEX_SCOPE_VALIDATION_MODE.
-   * Default mode is 'warn' — unexpected scopes are logged but refresh proceeds.
+   * Returns { ok: false } when scopes don't match the allowlist. The caller blocks
+   * by default.
    *
    * Override allowlist with CODEX_EXPECTED_SCOPES (comma-separated). Empty
    * string disables validation entirely.
@@ -464,16 +543,18 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     // Read configured scopes. Distinguish "env var unset" (use default) from
     // "env var set to empty string" (validation disabled).
     const expectedScopesEnv = this.env.CODEX_EXPECTED_SCOPES;
-    const rawScopes =
-      expectedScopesEnv === undefined
-        ? DEFAULT_EXPECTED_SCOPES
-        : expectedScopesEnv;
+    const rawScopes = expectedScopesEnv === undefined ? DEFAULT_EXPECTED_SCOPES : expectedScopesEnv;
     if (rawScopes === '') {
       // Explicitly disabled.
       return { ok: true };
     }
 
-    const expectedScopes = new Set(rawScopes.split(',').map((s) => s.trim()).filter(Boolean));
+    const expectedScopes = new Set(
+      rawScopes
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+    );
     const returnedScopes = scope.split(' ').filter(Boolean);
     const unexpected = returnedScopes.filter((s) => !expectedScopes.has(s));
 
@@ -530,26 +611,18 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
    * Check whether the given refresh token was rotated out within the grace window.
    * Returns true if the token hash matches a recently-rotated entry.
    */
-  private async isWithinGraceWindow(
-    refreshToken: string,
-    graceWindowMs: number
-  ): Promise<boolean> {
+  private async isWithinGraceWindow(refreshToken: string, graceWindowMs: number): Promise<boolean> {
     const entries = await this.getRotatedTokenEntries();
     if (entries.length === 0) return false;
 
     const hash = await this.hashToken(refreshToken);
     const now = Date.now();
 
-    return entries.some(
-      (e) => e.tokenHash === hash && now - e.rotatedAt < graceWindowMs
-    );
+    return entries.some((e) => e.tokenHash === hash && now - e.rotatedAt < graceWindowMs);
   }
 
   private getGraceWindowMs(): number {
-    return (
-      parseInt(this.env.CODEX_REFRESH_GRACE_WINDOW_MS || '', 10) ||
-      DEFAULT_GRACE_WINDOW_MS
-    );
+    return parseInt(this.env.CODEX_REFRESH_GRACE_WINDOW_MS || '', 10) || DEFAULT_GRACE_WINDOW_MS;
   }
 
   private async getRotatedTokenEntries(): Promise<RotatedTokenEntry[]> {
@@ -594,7 +667,12 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
   private async getStoredCredential(
     userId: string,
     projectId: string | null
-  ): Promise<{ id: string; encryptedToken: string; iv: string } | null> {
+  ): Promise<{
+    id: string;
+    encryptedToken: string;
+    iv: string;
+    scopeProjectId: string | null;
+  } | null> {
     const db = this.env.DATABASE;
 
     if (projectId) {
@@ -615,6 +693,9 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
             id: projectAny.id,
             encryptedToken: projectAny.encrypted_token,
             iv: projectAny.iv,
+            // Scope of the matched row — used to mirror the rotation into the
+            // correct cc_credentials row (project-scoped, not workspace-scoped).
+            scopeProjectId: projectId,
           };
         }
         // Project-scoped row exists but is inactive — do NOT fall back.
@@ -639,6 +720,12 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
       .first<{ id: string; encrypted_token: string; iv: string }>();
 
     if (!result) return null;
-    return { id: result.id, encryptedToken: result.encrypted_token, iv: result.iv };
+    // User-scoped fallback row — its scope is null (no project override).
+    return {
+      id: result.id,
+      encryptedToken: result.encrypted_token,
+      iv: result.iv,
+      scopeProjectId: null,
+    };
   }
 }

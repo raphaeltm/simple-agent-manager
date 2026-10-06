@@ -89,18 +89,24 @@ describe('buildAIGatewayMetadata', () => {
       workspaceId: 'ws1',
       projectId: 'p1',
       trialId: 't1',
-      modelId: 'claude-sonnet-4-20250514',
+      modelId: 'claude-sonnet-5',
       stream: true,
       hasTools: true,
+      providerId: 'deepseek-anthropic',
+      providerName: 'DeepSeek Anthropic API',
+      providerDialect: 'anthropic',
     }));
     expect(meta).toEqual({
       userId: 'u1',
       workspaceId: 'ws1',
       projectId: 'p1',
       trialId: 't1',
-      modelId: 'claude-sonnet-4-20250514',
+      modelId: 'claude-sonnet-5',
       stream: true,
       hasTools: true,
+      providerId: 'deepseek-anthropic',
+      providerName: 'DeepSeek Anthropic API',
+      providerDialect: 'anthropic',
     });
   });
 
@@ -109,7 +115,7 @@ describe('buildAIGatewayMetadata', () => {
       userId: 'u1',
       workspaceId: 'ws1',
       projectId: null,
-      modelId: 'claude-sonnet-4-20250514',
+      modelId: 'claude-sonnet-5',
       stream: false,
     }));
     expect(meta.projectId).toBeUndefined();
@@ -136,7 +142,7 @@ describe('AIProxyAuthError', () => {
 
 describe('Anthropic model validation', () => {
   it('accepts claude-* models', () => {
-    expect(isAnthropicModel('claude-sonnet-4-20250514')).toBe(true);
+    expect(isAnthropicModel('claude-sonnet-5')).toBe(true);
     expect(isAnthropicModel('claude-haiku-4-5-20251001')).toBe(true);
     expect(isAnthropicModel('claude-opus-4-6')).toBe(true);
   });
@@ -144,6 +150,6 @@ describe('Anthropic model validation', () => {
   it('rejects non-Anthropic models', () => {
     expect(isAnthropicModel('@cf/meta/llama-4-scout-17b-16e-instruct')).toBe(false);
     expect(isAnthropicModel('gpt-4')).toBe(false);
-    expect(isAnthropicModel('gemma-3-12b-it')).toBe(false);
+    expect(isAnthropicModel('@cf/qwen/qwen3-30b-a3b-fp8')).toBe(false);
   });
 });

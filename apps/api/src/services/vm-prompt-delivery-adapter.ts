@@ -1,0 +1,448 @@
+import {
+  isUrgentMessageClass,
+  VM_PROMPT_DELIVERY_PROTOCOL_VERSION,
+  type VmPromptDeliveryCapabilities,
+  type VmPromptDeliveryResponse,
+} from '@simple-agent-manager/shared';
+import * as v from 'valibot';
+
+import type {
+  PromptDeliveryClaim,
+  PromptDeliveryResult,
+} from '../durable-objects/project-data/prompt-delivery';
+import type { Env } from '../env';
+import { createModuleLogger } from '../lib/logger';
+import { commitContainerWake } from './container-wake-commit';
+import { NodeAgentHttpError, sendPromptToAgentOnNode } from './node-agent';
+import { SubmitResponseSchema } from './vm-prompt-delivery-adapter-schemas';
+import {
+  checkpointVmPromptSubmission,
+  prepareVmPromptDelivery,
+  PromptDeliveryGuardError,
+} from './vm-prompt-delivery-preparation';
+import {
+  errorMessage,
+  getDeliveryCapabilities,
+  httpStatus,
+  lookupDeliveryReceipt,
+} from './vm-prompt-delivery-runtime-queries';
+import {
+  resolveVmPromptDeliveryTarget,
+  type TargetResolution,
+  type VmPromptDeliverySourceTaskGuard,
+  type VmPromptDeliveryTarget,
+} from './vm-prompt-delivery-target';
+
+export type { VmPromptDeliverySourceTaskGuard, VmPromptDeliveryTarget };
+
+const log = createModuleLogger('vm_prompt_delivery_adapter');
+
+export interface VmPromptDeliveryAdapterInput {
+  projectId: string;
+  claim: PromptDeliveryClaim;
+  allowLegacyVm: boolean;
+  requestTimeoutMs: number;
+  /**
+   * Authoritative target already resolved by a shared runtime-liveness adapter.
+   * This is used by reconciliation so a suspect D1 health mirror cannot undo
+   * the probe-backed delivery verdict by being interpreted a second time here.
+   */
+  resolvedTarget?: VmPromptDeliveryTarget;
+  /** Revalidates a parent wake immediately before recovery/container/VM mutations. */
+  beforeSideEffect?: () => Promise<PromptDeliveryResult | null>;
+  /** Synchronous durable claim fence after preparation, immediately before possible prompt submission. */
+  beforeSubmit?: (capabilities: VmPromptDeliveryCapabilities) => boolean;
+  /** Makes snapshot recovery's D1 claim conditional on the source parent. */
+  sourceTaskGuard?: VmPromptDeliverySourceTaskGuard;
+  /**
+   * Stop-and-deliver hook, invoked (best-effort) when the target rejects the
+   * submit because a prompt turn is already in flight AND the claim's message
+   * class is urgent (`interrupt` or above). The adapter supplies the resolved
+   * target; the caller owns the cancel + turn-end bookkeeping. A hook failure
+   * never changes the busy retry result — it only degrades to parking in
+   * `retry_wait` behind the busy turn, which is today's behaviour.
+   */
+  onBusyTurn?: (target: VmPromptDeliveryTarget) => Promise<void>;
+}
+
+export interface VmPromptDeliveryAdapter {
+  submit(input: VmPromptDeliveryAdapterInput): Promise<PromptDeliveryResult>;
+  reconcile(input: VmPromptDeliveryAdapterInput): Promise<PromptDeliveryResult>;
+}
+
+function isMissingActiveAgentSession(error: unknown): boolean {
+  return (
+    error instanceof NodeAgentHttpError &&
+    error.statusCode === 404 &&
+    error.responseBody.toLowerCase().includes('no active agent session found')
+  );
+}
+
+export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
+  constructor(private readonly env: Env) {}
+
+  private async prepareSubmit(input: VmPromptDeliveryAdapterInput): Promise<
+    | PromptDeliveryResult
+    | {
+        kind: 'prepared';
+        target: VmPromptDeliveryTarget;
+        capabilities: VmPromptDeliveryCapabilities;
+      }
+  > {
+    const resolution: TargetResolution = input.resolvedTarget
+      ? { kind: 'ready', target: input.resolvedTarget }
+      : await this.resolveTarget(input.projectId, input.claim.message.targetSessionId, input);
+    if (resolution.kind === 'guarded') return resolution.result;
+    if (resolution.kind === 'failed') {
+      return {
+        kind: 'failed',
+        reason: resolution.reason,
+        error: resolution.error,
+        runtimeIdentity: null,
+        capabilities: null,
+      };
+    }
+    if (resolution.kind === 'retry') {
+      return {
+        kind: 'retry',
+        reason: 'not_ready',
+        error: resolution.reason,
+        runtimeIdentity: null,
+        capabilities: null,
+      };
+    }
+    const { target } = resolution;
+    // A Cloudflare Container capability request may wake the container while
+    // preparing the proxied request. Revalidate before the probe, not only
+    // before the later prompt/wake mutations.
+    const guardedBeforeProbe = await this.runSideEffectGuard(input);
+    if (guardedBeforeProbe) return guardedBeforeProbe;
+    const capabilities = await getDeliveryCapabilities(
+      this.env,
+      target,
+      input.requestTimeoutMs,
+      input.sourceTaskGuard
+    );
+    if (!capabilities) {
+      return {
+        kind: 'retry',
+        reason: 'not_ready',
+        error: 'Target VM capability probe did not complete',
+        runtimeIdentity: null,
+        capabilities: null,
+      };
+    }
+    if (target.runtime === 'cf-container') {
+      const guarded = await commitContainerWake(this.env, target, () =>
+        this.runSideEffectGuard(input)
+      );
+      if (guarded) return guarded;
+    }
+    if (!capabilities.promptReceipts.supported && !input.allowLegacyVm) {
+      return {
+        kind: 'failed',
+        reason: 'unsupported_capability',
+        error: 'Target VM does not advertise stable prompt delivery receipts',
+        runtimeIdentity: target.runtimeIdentity,
+        capabilities,
+      };
+    }
+
+    const guarded = await this.runSideEffectGuard(input);
+    return guarded ?? { kind: 'prepared', target, capabilities };
+  }
+
+  async submit(input: VmPromptDeliveryAdapterInput): Promise<PromptDeliveryResult> {
+    const prepared = await prepareVmPromptDelivery(input.requestTimeoutMs, () =>
+      this.prepareSubmit(input)
+    );
+    if (prepared.kind !== 'prepared') return prepared;
+    const { target, capabilities } = prepared;
+    const checkpointFailure = checkpointVmPromptSubmission(input.beforeSubmit, capabilities);
+    if (checkpointFailure) return checkpointFailure;
+    try {
+      const raw = await sendPromptToAgentOnNode(
+        target.nodeId,
+        target.workspaceId,
+        target.agentSessionId,
+        input.claim.message.content,
+        this.env,
+        target.userId,
+        input.claim.message.promptMessageId,
+        {
+          requestTimeoutMs: input.requestTimeoutMs,
+          ...(capabilities.protocolVersion === VM_PROMPT_DELIVERY_PROTOCOL_VERSION
+            ? {
+                protocolVersion: VM_PROMPT_DELIVERY_PROTOCOL_VERSION,
+                deliveryId: input.claim.message.id,
+              }
+            : {}),
+          ...(input.sourceTaskGuard ? { sourceTaskGuard: input.sourceTaskGuard } : {}),
+          beforeExternalMutation: async () => {
+            const denied = await this.runSideEffectGuard(input);
+            if (denied) throw new PromptDeliveryGuardError(denied);
+          },
+        }
+      );
+      if (capabilities.protocolVersion === 0 && input.allowLegacyVm) {
+        return {
+          kind: 'accepted',
+          acpSessionId: target.agentSessionId,
+          promptEpoch: Date.now(),
+          runtimeIdentity: capabilities.runtimeIdentity,
+          capabilities,
+          receipt: null,
+        };
+      }
+      const parsed = v.safeParse(SubmitResponseSchema, raw);
+      if (!parsed.success) {
+        return this.reconcileAfterAmbiguousSubmit(
+          target,
+          input,
+          capabilities,
+          new Error('Target VM returned an invalid versioned prompt response')
+        );
+      }
+      const response: VmPromptDeliveryResponse = parsed.output;
+      const receipt = response.receipt;
+      if (
+        response.sessionId !== target.agentSessionId ||
+        receipt.deliveryId !== input.claim.message.id ||
+        receipt.runtimeIdentity !== capabilities.runtimeIdentity ||
+        !['accepted', 'duplicate'].includes(response.status) ||
+        !['accepted', 'in_flight', 'completed'].includes(receipt.state) ||
+        receipt.acceptedAt === null
+      ) {
+        const runtimeChanged = receipt.runtimeIdentity !== capabilities.runtimeIdentity;
+        return {
+          kind: 'ambiguous',
+          reason: runtimeChanged ? 'runtime_changed' : 'receipt_unavailable',
+          error:
+            'Target VM versioned prompt response did not match the negotiated delivery/runtime/session',
+          runtimeIdentity: capabilities.runtimeIdentity,
+          capabilities,
+          receipt,
+        };
+      }
+      return {
+        kind: 'accepted',
+        acpSessionId: target.agentSessionId,
+        promptEpoch: receipt.acceptedAt,
+        runtimeIdentity: capabilities.runtimeIdentity,
+        capabilities,
+        receipt,
+      };
+    } catch (error) {
+      if (error instanceof PromptDeliveryGuardError) return error.result;
+      const status = httpStatus(error);
+      const conflict = this.parseConflictResponse(error);
+      if (
+        status === 409 &&
+        conflict?.status === 'not_ready' &&
+        conflict.sessionId === target.agentSessionId &&
+        conflict.receipt.deliveryId === input.claim.message.id &&
+        conflict.receipt.runtimeIdentity === capabilities.runtimeIdentity
+      ) {
+        // Urgent classes are allowed to stop the busy turn so they are
+        // delivered as the very next prompt instead of parking in retry_wait.
+        // The VM's 409 is the only authoritative "turn in flight" evidence —
+        // never gate this on the session_state mirror.
+        if (isUrgentMessageClass(input.claim.message.messageClass) && input.onBusyTurn) {
+          try {
+            await input.onBusyTurn(target);
+          } catch (error) {
+            log.warn('prompt_delivery.urgent_busy_turn_stop_failed', {
+              deliveryId: input.claim.message.id,
+              targetSessionId: input.claim.message.targetSessionId,
+              workspaceId: target.workspaceId,
+              agentSessionId: target.agentSessionId,
+              error: errorMessage(error),
+            });
+          }
+        }
+        return {
+          kind: 'retry',
+          reason: 'busy',
+          error: 'Target VM is currently processing a prompt',
+          runtimeIdentity: capabilities.runtimeIdentity,
+          capabilities,
+        };
+      }
+      if (
+        status === 409 &&
+        conflict?.status === 'conflict' &&
+        conflict.sessionId === target.agentSessionId &&
+        conflict.receipt.deliveryId === input.claim.message.id &&
+        conflict.receipt.runtimeIdentity === capabilities.runtimeIdentity
+      ) {
+        return {
+          kind: 'failed',
+          reason: 'delivery_conflict',
+          error: 'deliveryId already belongs to a different prompt intent',
+          runtimeIdentity: capabilities.runtimeIdentity,
+          capabilities,
+        };
+      }
+      // During cold restore, D1 can expose the replacement agent-session row
+      // just before the VM has registered its in-memory SessionHost. The VM's
+      // narrow 404 means "not ready yet", not that this durable chat target is
+      // permanently gone. Keep retrying until the delivery TTL; other 404s and
+      // 410s still fail closed below.
+      if (isMissingActiveAgentSession(error)) {
+        return {
+          kind: 'retry',
+          reason: 'not_ready',
+          error: errorMessage(error),
+          runtimeIdentity: capabilities.runtimeIdentity,
+          capabilities,
+        };
+      }
+      if (status === 404 || status === 410) {
+        return {
+          kind: 'failed',
+          reason: 'terminal_target',
+          error: errorMessage(error),
+          runtimeIdentity: capabilities.runtimeIdentity,
+          capabilities,
+        };
+      }
+      return this.reconcileAfterAmbiguousSubmit(target, input, capabilities, error);
+    }
+  }
+
+  async reconcile(input: VmPromptDeliveryAdapterInput): Promise<PromptDeliveryResult> {
+    const resolution: TargetResolution = input.resolvedTarget
+      ? { kind: 'ready', target: input.resolvedTarget }
+      : await this.resolveTarget(input.projectId, input.claim.message.targetSessionId, input);
+    if (resolution.kind === 'guarded') return resolution.result;
+    if (resolution.kind === 'failed') {
+      return {
+        kind: 'ambiguous',
+        reason: 'receipt_unavailable',
+        error: `Prior delivery cannot be reconciled after target loss: ${resolution.error}`,
+        runtimeIdentity: null,
+        capabilities: null,
+        receipt: null,
+      };
+    }
+    if (resolution.kind === 'retry') {
+      return {
+        kind: 'ambiguous',
+        reason: 'receipt_unavailable',
+        error: `Prior delivery cannot be reconciled while target is unavailable: ${resolution.reason}`,
+        runtimeIdentity: null,
+        capabilities: null,
+        receipt: null,
+      };
+    }
+    const { target } = resolution;
+    const guardedBeforeProbe = await this.runSideEffectGuard(input);
+    if (guardedBeforeProbe) return guardedBeforeProbe;
+    const capabilities = await getDeliveryCapabilities(
+      this.env,
+      target,
+      input.requestTimeoutMs,
+      input.sourceTaskGuard
+    );
+    if (!capabilities) {
+      return {
+        kind: 'ambiguous',
+        reason: 'receipt_unavailable',
+        error: 'Target VM capability probe failed during receipt reconciliation',
+        runtimeIdentity: null,
+        capabilities: null,
+        receipt: null,
+      };
+    }
+    if (
+      input.claim.message.runtimeIdentity &&
+      input.claim.message.runtimeIdentity !== capabilities.runtimeIdentity
+    ) {
+      return {
+        kind: 'ambiguous',
+        reason: 'runtime_changed',
+        error: 'Runtime identity changed before the prior delivery could be reconciled',
+        runtimeIdentity: capabilities.runtimeIdentity,
+        capabilities,
+        receipt: null,
+      };
+    }
+    if (!capabilities.promptReceipts.supported || !capabilities.promptReceipts.lookup) {
+      return {
+        kind: 'ambiguous',
+        reason: 'receipt_unavailable',
+        error: 'Target VM cannot reconcile the prior delivery receipt',
+        runtimeIdentity: capabilities.runtimeIdentity,
+        capabilities,
+        receipt: null,
+      };
+    }
+    const guardedBeforeReceipt = await this.runSideEffectGuard(input);
+    if (guardedBeforeReceipt) return guardedBeforeReceipt;
+    return lookupDeliveryReceipt(
+      this.env,
+      target,
+      input.claim,
+      capabilities,
+      input.requestTimeoutMs,
+      input.sourceTaskGuard
+    );
+  }
+
+  private async resolveTarget(
+    projectId: string,
+    chatSessionId: string,
+    input: VmPromptDeliveryAdapterInput
+  ): Promise<TargetResolution> {
+    return resolveVmPromptDeliveryTarget(
+      this.env,
+      projectId,
+      chatSessionId,
+      input.sourceTaskGuard,
+      () => this.runSideEffectGuard(input)
+    );
+  }
+
+  private async runSideEffectGuard(
+    input: VmPromptDeliveryAdapterInput
+  ): Promise<PromptDeliveryResult | null> {
+    return input.beforeSideEffect ? input.beforeSideEffect() : null;
+  }
+
+  private async reconcileAfterAmbiguousSubmit(
+    target: VmPromptDeliveryTarget,
+    input: VmPromptDeliveryAdapterInput,
+    capabilities: VmPromptDeliveryCapabilities,
+    submitError: unknown
+  ): Promise<PromptDeliveryResult> {
+    if (!capabilities.promptReceipts.supported || !capabilities.promptReceipts.lookup) {
+      return {
+        kind: 'ambiguous',
+        reason: 'lost_response',
+        error: errorMessage(submitError),
+        runtimeIdentity: capabilities.runtimeIdentity,
+        capabilities,
+        receipt: null,
+      };
+    }
+    const guarded = await this.runSideEffectGuard(input);
+    if (guarded) return guarded;
+    return lookupDeliveryReceipt(
+      this.env,
+      target,
+      input.claim,
+      capabilities,
+      input.requestTimeoutMs,
+      input.sourceTaskGuard
+    );
+  }
+
+  private parseConflictResponse(error: unknown): VmPromptDeliveryResponse | null {
+    if (!(error instanceof NodeAgentHttpError)) return null;
+    try {
+      return v.parse(SubmitResponseSchema, JSON.parse(error.responseBody));
+    } catch {
+      return null;
+    }
+  }
+}

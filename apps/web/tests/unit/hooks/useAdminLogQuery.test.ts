@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useAdminLogQuery } from '../../../src/hooks/useAdminLogQuery';
 
@@ -31,7 +31,7 @@ describe('useAdminLogQuery', () => {
     expect(result.current.error).toBeNull();
   });
 
-  it('should fetch logs on mount', async () => {
+  it('should fetch logs once on mount', async () => {
     const mockLogs = [
       { timestamp: '2026-02-14T12:00:00Z', level: 'info', event: 'http.request', message: 'test', details: {} },
     ];
@@ -51,13 +51,14 @@ describe('useAdminLogQuery', () => {
     expect(mockQueryAdminLogs).toHaveBeenCalledTimes(1);
   });
 
-  it('should have default filter state', async () => {
+  it('should have default filter state', () => {
     const { result } = renderHook(() => useAdminLogQuery());
 
     expect(result.current.filter).toEqual({
       levels: [],
       search: '',
       timeRange: '1h',
+      scriptName: '',
     });
   });
 
@@ -77,59 +78,55 @@ describe('useAdminLogQuery', () => {
     expect(end - start).toBeLessThanOrEqual(60 * 60 * 1000 + 1000); // 1h + tolerance
   });
 
-  it('should update levels filter and re-fetch', async () => {
+  it('does NOT auto-fetch when a filter changes (rate-limit protection)', async () => {
     const { result } = renderHook(() => useAdminLogQuery());
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
     });
+    expect(mockQueryAdminLogs).toHaveBeenCalledTimes(1);
 
-    const callsBefore = mockQueryAdminLogs.mock.calls.length;
-
-    await act(async () => {
+    act(() => {
       result.current.setLevels(['error', 'warn']);
-    });
-
-    await waitFor(() => {
-      expect(mockQueryAdminLogs.mock.calls.length).toBeGreaterThan(callsBefore);
-    });
-
-    const lastCall = mockQueryAdminLogs.mock.calls[mockQueryAdminLogs.mock.calls.length - 1][0];
-    expect(lastCall.levels).toEqual(['error', 'warn']);
-  });
-
-  it('should update search filter', async () => {
-    const { result } = renderHook(() => useAdminLogQuery());
-
-    await waitFor(() => {
-      expect(result.current.loading).toBe(false);
-    });
-
-    await act(async () => {
       result.current.setSearch('timeout');
+      result.current.setTimeRange('24h');
+      result.current.setScriptName('sam-api-staging');
     });
 
-    await waitFor(() => {
-      const calls = mockQueryAdminLogs.mock.calls;
-      const lastCall = calls[calls.length - 1][0];
-      expect(lastCall.search).toBe('timeout');
-    });
+    // Filter state updated locally...
+    expect(result.current.filter.levels).toEqual(['error', 'warn']);
+    expect(result.current.filter.search).toBe('timeout');
+    expect(result.current.filter.timeRange).toBe('24h');
+    expect(result.current.filter.scriptName).toBe('sam-api-staging');
+    // ...but no additional CF API query was fired.
+    expect(mockQueryAdminLogs).toHaveBeenCalledTimes(1);
   });
 
-  it('should update timeRange filter', async () => {
+  it('fetches with the staged filters when applyFilters is called', async () => {
     const { result } = renderHook(() => useAdminLogQuery());
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
     });
 
+    act(() => {
+      result.current.setLevels(['error']);
+      result.current.setSearch('timeout');
+      result.current.setScriptName('sam-api-staging');
+    });
+
     await act(async () => {
-      result.current.setTimeRange('24h');
+      result.current.applyFilters();
     });
 
     await waitFor(() => {
-      expect(result.current.filter.timeRange).toBe('24h');
+      expect(mockQueryAdminLogs).toHaveBeenCalledTimes(2);
     });
+    const lastCall = mockQueryAdminLogs.mock.calls[1][0];
+    expect(lastCall.levels).toEqual(['error']);
+    expect(lastCall.search).toBe('timeout');
+    expect(lastCall.scriptName).toBe('sam-api-staging');
+    expect(lastCall.cursor).toBeUndefined();
   });
 
   it('should handle API errors', async () => {
@@ -193,5 +190,16 @@ describe('useAdminLogQuery', () => {
       const lastCall = mockQueryAdminLogs.mock.calls[mockQueryAdminLogs.mock.calls.length - 1][0];
       expect(lastCall.cursor).toBeUndefined();
     });
+  });
+
+  it('omits scriptName from the query when not set', async () => {
+    const { result } = renderHook(() => useAdminLogQuery());
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    const call = mockQueryAdminLogs.mock.calls[0][0];
+    expect(call.scriptName).toBeUndefined();
   });
 });

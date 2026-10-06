@@ -1,3 +1,4 @@
+// FILE SIZE EXCEPTION: Append-only migration ledger must preserve one auditable execution order. See .claude/rules/18-file-size-limits.md
 /**
  * Durable Object SQLite migration runner and migration definitions.
  *
@@ -7,13 +8,327 @@
  *
  * See: specs/018-project-first-architecture/research.md (Decision 6)
  */
+import { MAILBOX_DEFAULTS } from '@simple-agent-manager/shared';
 
 import { log } from '../lib/logger';
+import { migrateProjectSchedules } from './project-data/project-event-schedules-schema';
 import { parseMigrationName } from './project-data/row-schemas';
 
 export interface Migration {
   name: string;
   run: (sql: SqlStorage) => void;
+}
+
+type MigrationTableSchema = {
+  name: string;
+  columns: Readonly<Record<string, string>>;
+  constraints?: readonly string[];
+};
+
+type MigrationIndexSchema = {
+  name: string;
+  table: string;
+  columns: string;
+  where?: string;
+};
+
+const MIGRATION_IDENTIFIER_PATTERN = /^[a-z][a-z0-9_]*$/;
+const MIGRATION_INDEX_COLUMN_LIST_PATTERN =
+  /^[a-z][a-z0-9_]*(?:\s+(?:ASC|DESC))?(?:,\s*[a-z][a-z0-9_]*(?:\s+(?:ASC|DESC))?)*$/;
+
+function createTable(sql: SqlStorage, schema: MigrationTableSchema): void {
+  assertMigrationIdentifier(schema.name, 'table name');
+  for (const column of Object.keys(schema.columns)) {
+    assertMigrationIdentifier(column, `${schema.name} column`);
+  }
+  const definitions = [
+    ...Object.entries(schema.columns).map(([name, definition]) => `${name} ${definition}`),
+    ...(schema.constraints ?? []),
+  ];
+  const statement = `
+    CREATE TABLE IF NOT EXISTS ${schema.name} (
+      ${definitions.join(',\n      ')}
+    )
+  `;
+  sql.exec(statement);
+}
+
+function createIndex(sql: SqlStorage, schema: MigrationIndexSchema): void {
+  assertMigrationIdentifier(schema.name, 'index name');
+  assertMigrationIdentifier(schema.table, `${schema.name} table`);
+  assertMigrationIndexColumnList(schema.columns, `${schema.name} columns`);
+  const where = schema.where ? ` WHERE ${schema.where}` : '';
+  const statement = `CREATE INDEX IF NOT EXISTS ${schema.name} ON ${schema.table}(${schema.columns})${where}`;
+  sql.exec(statement);
+}
+
+function assertMigrationIdentifier(value: string, label: string): void {
+  if (!MIGRATION_IDENTIFIER_PATTERN.test(value)) {
+    throw new Error(`Invalid migration ${label}: ${value}`);
+  }
+}
+
+function assertMigrationIndexColumnList(value: string, label: string): void {
+  if (!MIGRATION_INDEX_COLUMN_LIST_PATTERN.test(value)) {
+    throw new Error(`Invalid migration ${label}: ${value}`);
+  }
+}
+
+const PROJECT_EVENT_TABLE_SCHEMAS: readonly MigrationTableSchema[] = [
+  {
+    name: 'project_events',
+    columns: {
+      id: 'TEXT PRIMARY KEY',
+      project_id: 'TEXT NOT NULL',
+      contract_version: 'INTEGER NOT NULL DEFAULT 1',
+      source: 'TEXT NOT NULL',
+      event_type: 'TEXT NOT NULL',
+      subject_type: 'TEXT NOT NULL',
+      subject_id: 'TEXT NOT NULL',
+      severity:
+        "TEXT NOT NULL CHECK (severity IN ('debug', 'info', 'notice', 'warning', 'error', 'critical'))",
+      delivery_key: 'TEXT NOT NULL',
+      payload_fingerprint: 'TEXT NOT NULL',
+      metadata_json: 'TEXT NOT NULL',
+      metadata_bytes: 'INTEGER NOT NULL',
+      display_json: 'TEXT NOT NULL',
+      display_bytes: 'INTEGER NOT NULL',
+      raw_payload_ref_json: 'TEXT',
+      raw_payload_ref_bytes: 'INTEGER NOT NULL DEFAULT 0',
+      occurred_at: 'INTEGER NOT NULL',
+      received_at: 'INTEGER NOT NULL',
+      updated_at: 'INTEGER NOT NULL',
+      state: "TEXT NOT NULL CHECK (state IN ('recorded', 'conflicted'))",
+      duplicate_count: 'INTEGER NOT NULL DEFAULT 0',
+      conflict_count: 'INTEGER NOT NULL DEFAULT 0',
+      conflict_fingerprint: 'TEXT',
+      conflict_detected_at: 'INTEGER',
+    },
+    constraints: ['UNIQUE(project_id, source, delivery_key)'],
+  },
+  {
+    name: 'project_event_subscriptions',
+    columns: {
+      id: 'TEXT PRIMARY KEY',
+      project_id: 'TEXT NOT NULL',
+      contract_version: 'INTEGER NOT NULL DEFAULT 1',
+      owner_type:
+        "TEXT NOT NULL CHECK (owner_type IN ('human', 'agent', 'system', 'policy', 'standing_watch'))",
+      owner_id: 'TEXT NOT NULL',
+      owner_name: 'TEXT',
+      idempotency_key: 'TEXT NOT NULL',
+      idempotency_fingerprint: 'TEXT NOT NULL',
+      filter_version: 'INTEGER NOT NULL DEFAULT 1',
+      filter_json: 'TEXT NOT NULL',
+      filter_fingerprint: 'TEXT NOT NULL',
+      match_key_count: 'INTEGER NOT NULL',
+      requested_delivery:
+        "TEXT NOT NULL CHECK (requested_delivery IN ('record_only', 'existing_session_prompt', 'runtime_steer', 'runtime_interrupt', 'spawn_task'))",
+      resolved_delivery:
+        "TEXT NOT NULL CHECK (resolved_delivery IN ('record_only', 'recorded_not_injected', 'queued_for_prompt_delivery', 'runtime_steer', 'runtime_interrupt', 'spawn_task', 'unsupported', 'unauthorized'))",
+      target_session_id: 'TEXT',
+      target_task_id: 'TEXT',
+      target_runtime_id: 'TEXT',
+      target_agent_id: 'TEXT',
+      lifecycle_state:
+        "TEXT NOT NULL CHECK (lifecycle_state IN ('active', 'cancelled', 'expired'))",
+      reason: 'TEXT',
+      created_at: 'INTEGER NOT NULL',
+      updated_at: 'INTEGER NOT NULL',
+      expires_at: 'INTEGER',
+      cancelled_at: 'INTEGER',
+      cancelled_by_type:
+        "TEXT CHECK (cancelled_by_type IS NULL OR cancelled_by_type IN ('human', 'agent', 'system', 'policy', 'standing_watch'))",
+      cancelled_by_id: 'TEXT',
+      cancelled_by_name: 'TEXT',
+      cancel_reason: 'TEXT',
+      last_matched_at: 'INTEGER',
+    },
+    constraints: ['UNIQUE(project_id, owner_type, owner_id, idempotency_key)'],
+  },
+  {
+    name: 'project_event_subscription_match_keys',
+    columns: {
+      project_id: 'TEXT NOT NULL',
+      subscription_id: 'TEXT NOT NULL REFERENCES project_event_subscriptions(id) ON DELETE CASCADE',
+      field_name:
+        "TEXT NOT NULL CHECK (field_name IN ('source', 'eventType', 'subjectType', 'subjectId', 'severity'))",
+      field_value: 'TEXT NOT NULL',
+      match_key: 'TEXT NOT NULL',
+      created_at: 'INTEGER NOT NULL',
+    },
+    constraints: ['PRIMARY KEY (subscription_id, match_key)'],
+  },
+  {
+    name: 'project_event_matches',
+    columns: {
+      id: 'TEXT PRIMARY KEY',
+      project_id: 'TEXT NOT NULL',
+      event_id: 'TEXT NOT NULL REFERENCES project_events(id) ON DELETE CASCADE',
+      subscription_id: 'TEXT NOT NULL REFERENCES project_event_subscriptions(id) ON DELETE CASCADE',
+      state:
+        "TEXT NOT NULL CHECK (state IN ('matched', 'batch_created', 'recorded_not_injected', 'expired', 'cancelled'))",
+      matched_at: 'INTEGER NOT NULL',
+      lifecycle_checked_at: 'INTEGER NOT NULL',
+      batch_id: 'TEXT',
+      reason: 'TEXT',
+    },
+    constraints: ['UNIQUE(project_id, event_id, subscription_id)'],
+  },
+  {
+    name: 'project_event_delivery_batches',
+    columns: {
+      id: 'TEXT PRIMARY KEY',
+      project_id: 'TEXT NOT NULL',
+      subscription_id: 'TEXT NOT NULL REFERENCES project_event_subscriptions(id) ON DELETE CASCADE',
+      idempotency_key: 'TEXT NOT NULL',
+      idempotency_fingerprint: 'TEXT NOT NULL',
+      state:
+        "TEXT NOT NULL CHECK (state IN ('pending', 'recorded_not_injected', 'delivered', 'acked', 'failed', 'ambiguous', 'expired', 'cancelled'))",
+      requested_delivery:
+        "TEXT NOT NULL CHECK (requested_delivery IN ('record_only', 'existing_session_prompt', 'runtime_steer', 'runtime_interrupt', 'spawn_task'))",
+      resolved_delivery:
+        "TEXT NOT NULL CHECK (resolved_delivery IN ('record_only', 'recorded_not_injected', 'queued_for_prompt_delivery', 'runtime_steer', 'runtime_interrupt', 'spawn_task', 'unsupported', 'unauthorized'))",
+      adapter_decision_json: 'TEXT',
+      target_session_id: 'TEXT',
+      target_task_id: 'TEXT',
+      target_runtime_id: 'TEXT',
+      target_agent_id: 'TEXT',
+      match_ids_json: 'TEXT NOT NULL',
+      event_count: 'INTEGER NOT NULL',
+      created_at: 'INTEGER NOT NULL',
+      updated_at: 'INTEGER NOT NULL',
+      terminal_at: 'INTEGER',
+      terminal_reason: 'TEXT',
+    },
+    constraints: ['UNIQUE(project_id, subscription_id, idempotency_key)'],
+  },
+  {
+    name: 'project_event_delivery_attempts',
+    columns: {
+      id: 'TEXT PRIMARY KEY',
+      project_id: 'TEXT NOT NULL',
+      batch_id: 'TEXT NOT NULL REFERENCES project_event_delivery_batches(id) ON DELETE CASCADE',
+      idempotency_key: 'TEXT NOT NULL',
+      idempotency_fingerprint: 'TEXT NOT NULL',
+      attempt_number: 'INTEGER NOT NULL',
+      state:
+        "TEXT NOT NULL CHECK (state IN ('recorded_not_injected', 'accepted', 'retry', 'failed', 'ambiguous'))",
+      adapter: 'TEXT',
+      protocol_version: 'TEXT',
+      runtime_id: 'TEXT',
+      receipt_id: 'TEXT',
+      error_code: 'TEXT',
+      error_message: 'TEXT',
+      started_at: 'INTEGER NOT NULL',
+      completed_at: 'INTEGER',
+      created_at: 'INTEGER NOT NULL',
+    },
+    constraints: [
+      'UNIQUE(project_id, batch_id, idempotency_key)',
+      'UNIQUE(project_id, batch_id, attempt_number)',
+    ],
+  },
+  {
+    name: 'project_event_storage_accounting',
+    columns: {
+      project_id: 'TEXT NOT NULL',
+      category: 'TEXT NOT NULL',
+      record_count: 'INTEGER NOT NULL',
+      estimated_bytes: 'INTEGER NOT NULL',
+      oldest_created_at: 'INTEGER',
+      newest_created_at: 'INTEGER',
+      measured_at: 'INTEGER NOT NULL',
+    },
+    constraints: ['PRIMARY KEY (project_id, category)'],
+  },
+];
+
+const PROJECT_EVENT_INDEX_SCHEMAS: readonly MigrationIndexSchema[] = [
+  {
+    name: 'idx_project_events_project_received',
+    table: 'project_events',
+    columns: 'project_id, received_at DESC, id',
+  },
+  {
+    name: 'idx_project_events_project_source_type',
+    table: 'project_events',
+    columns: 'project_id, source, event_type, received_at DESC, id',
+  },
+  {
+    name: 'idx_project_events_project_subject',
+    table: 'project_events',
+    columns: 'project_id, subject_type, subject_id, received_at DESC, id',
+  },
+  {
+    name: 'idx_project_events_project_severity',
+    table: 'project_events',
+    columns: 'project_id, severity, received_at DESC, id',
+  },
+  {
+    name: 'idx_project_event_subscriptions_project_state',
+    table: 'project_event_subscriptions',
+    columns: 'project_id, lifecycle_state, updated_at DESC, id',
+  },
+  {
+    name: 'idx_project_event_subscriptions_project_expiry',
+    table: 'project_event_subscriptions',
+    columns: 'project_id, lifecycle_state, expires_at, id',
+  },
+  {
+    name: 'idx_project_event_subscriptions_project_owner',
+    table: 'project_event_subscriptions',
+    columns: 'project_id, owner_type, owner_id, updated_at DESC, id',
+  },
+  {
+    name: 'idx_project_event_subscription_match_keys_lookup',
+    table: 'project_event_subscription_match_keys',
+    columns: 'project_id, match_key, subscription_id',
+  },
+  {
+    name: 'idx_project_event_matches_project_event',
+    table: 'project_event_matches',
+    columns: 'project_id, event_id, matched_at DESC, id',
+  },
+  {
+    name: 'idx_project_event_matches_project_subscription',
+    table: 'project_event_matches',
+    columns: 'project_id, subscription_id, matched_at DESC, id',
+  },
+  {
+    name: 'idx_project_event_delivery_batches_project_state',
+    table: 'project_event_delivery_batches',
+    columns: 'project_id, state, updated_at DESC, id',
+  },
+  {
+    name: 'idx_project_event_delivery_batches_project_subscription',
+    table: 'project_event_delivery_batches',
+    columns: 'project_id, subscription_id, updated_at DESC, id',
+  },
+  {
+    name: 'idx_project_event_delivery_attempts_project_batch',
+    table: 'project_event_delivery_attempts',
+    columns: 'project_id, batch_id, attempt_number, id',
+  },
+  {
+    name: 'idx_project_event_delivery_attempts_project_state',
+    table: 'project_event_delivery_attempts',
+    columns: 'project_id, state, created_at DESC, id',
+  },
+  {
+    name: 'idx_project_event_storage_accounting_project_measured',
+    table: 'project_event_storage_accounting',
+    columns: 'project_id, measured_at DESC, category',
+  },
+];
+
+function runProjectEventSubscriptionMigration(sql: SqlStorage): void {
+  for (const schema of PROJECT_EVENT_TABLE_SCHEMAS) {
+    createTable(sql, schema);
+  }
+  for (const schema of PROJECT_EVENT_INDEX_SCHEMAS) {
+    createIndex(sql, schema);
+  }
 }
 
 /**
@@ -130,13 +445,17 @@ export const MIGRATIONS: Migration[] = [
           created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
         )
       `);
-      sql.exec(`CREATE INDEX idx_idle_cleanup_schedule_cleanup_at ON idle_cleanup_schedule(cleanup_at)`);
+      sql.exec(
+        `CREATE INDEX idx_idle_cleanup_schedule_cleanup_at ON idle_cleanup_schedule(cleanup_at)`
+      );
     },
   },
   {
     name: '006-idle-cleanup-retry-count',
     run: (sql) => {
-      sql.exec(`ALTER TABLE idle_cleanup_schedule ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0`);
+      sql.exec(
+        `ALTER TABLE idle_cleanup_schedule ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0`
+      );
     },
   },
   {
@@ -436,32 +755,82 @@ export const MIGRATIONS: Migration[] = [
     run: (sql) => {
       // Extend the existing session_inbox table (migration 015) into a full
       // durable mailbox with message classes, delivery state machine, and ack tracking.
-      // Uses ALTER TABLE ADD COLUMN — safe, no DROP TABLE.
+      // Uses ALTER TABLE ADD COLUMN so existing mailbox rows are preserved.
 
       // message_class: escalating urgency (notify, deliver, interrupt, preempt_and_replan, shutdown_with_final_prompt)
-      try { sql.exec(`ALTER TABLE session_inbox ADD COLUMN message_class TEXT NOT NULL DEFAULT 'notify'`); } catch { /* already exists */ }
+      try {
+        sql.exec(
+          `ALTER TABLE session_inbox ADD COLUMN message_class TEXT NOT NULL DEFAULT 'notify'`
+        );
+      } catch {
+        /* already exists */
+      }
 
       // delivery_state: queued → delivered → acked → expired
-      try { sql.exec(`ALTER TABLE session_inbox ADD COLUMN delivery_state TEXT NOT NULL DEFAULT 'queued'`); } catch { /* already exists */ }
+      try {
+        sql.exec(
+          `ALTER TABLE session_inbox ADD COLUMN delivery_state TEXT NOT NULL DEFAULT 'queued'`
+        );
+      } catch {
+        /* already exists */
+      }
 
       // Sender identity
-      try { sql.exec(`ALTER TABLE session_inbox ADD COLUMN sender_type TEXT NOT NULL DEFAULT 'system'`); } catch { /* already exists */ }
-      try { sql.exec(`ALTER TABLE session_inbox ADD COLUMN sender_id TEXT`); } catch { /* already exists */ }
+      try {
+        sql.exec(`ALTER TABLE session_inbox ADD COLUMN sender_type TEXT NOT NULL DEFAULT 'system'`);
+      } catch {
+        /* already exists */
+      }
+      try {
+        sql.exec(`ALTER TABLE session_inbox ADD COLUMN sender_id TEXT`);
+      } catch {
+        /* already exists */
+      }
 
       // Ack tracking
-      try { sql.exec(`ALTER TABLE session_inbox ADD COLUMN ack_required INTEGER NOT NULL DEFAULT 0`); } catch { /* already exists */ }
-      try { sql.exec(`ALTER TABLE session_inbox ADD COLUMN acked_at INTEGER`); } catch { /* already exists */ }
-      try { sql.exec(`ALTER TABLE session_inbox ADD COLUMN ack_timeout_ms INTEGER`); } catch { /* already exists */ }
+      try {
+        sql.exec(`ALTER TABLE session_inbox ADD COLUMN ack_required INTEGER NOT NULL DEFAULT 0`);
+      } catch {
+        /* already exists */
+      }
+      try {
+        sql.exec(`ALTER TABLE session_inbox ADD COLUMN acked_at INTEGER`);
+      } catch {
+        /* already exists */
+      }
+      try {
+        sql.exec(`ALTER TABLE session_inbox ADD COLUMN ack_timeout_ms INTEGER`);
+      } catch {
+        /* already exists */
+      }
 
       // Expiry
-      try { sql.exec(`ALTER TABLE session_inbox ADD COLUMN expires_at INTEGER`); } catch { /* already exists */ }
+      try {
+        sql.exec(`ALTER TABLE session_inbox ADD COLUMN expires_at INTEGER`);
+      } catch {
+        /* already exists */
+      }
 
       // Delivery tracking
-      try { sql.exec(`ALTER TABLE session_inbox ADD COLUMN delivery_attempts INTEGER NOT NULL DEFAULT 0`); } catch { /* already exists */ }
-      try { sql.exec(`ALTER TABLE session_inbox ADD COLUMN last_delivery_at INTEGER`); } catch { /* already exists */ }
+      try {
+        sql.exec(
+          `ALTER TABLE session_inbox ADD COLUMN delivery_attempts INTEGER NOT NULL DEFAULT 0`
+        );
+      } catch {
+        /* already exists */
+      }
+      try {
+        sql.exec(`ALTER TABLE session_inbox ADD COLUMN last_delivery_at INTEGER`);
+      } catch {
+        /* already exists */
+      }
 
       // Structured metadata (JSON)
-      try { sql.exec(`ALTER TABLE session_inbox ADD COLUMN metadata TEXT`); } catch { /* already exists */ }
+      try {
+        sql.exec(`ALTER TABLE session_inbox ADD COLUMN metadata TEXT`);
+      } catch {
+        /* already exists */
+      }
 
       // Indexes for efficient delivery sweep queries
       sql.exec(`
@@ -621,6 +990,1406 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    name: '022-activity-session-index',
+    run: (sql) => {
+      sql.exec(
+        `CREATE INDEX IF NOT EXISTS idx_activity_events_session ON activity_events(session_id, created_at DESC) WHERE session_id IS NOT NULL`
+      );
+    },
+  },
+  {
+    name: '023-session-creator',
+    run: (sql) => {
+      sql.exec(`ALTER TABLE chat_sessions ADD COLUMN created_by_user_id TEXT`);
+      sql.exec(
+        `CREATE INDEX IF NOT EXISTS idx_chat_sessions_created_by ON chat_sessions(created_by_user_id)`
+      );
+    },
+  },
+  {
+    // Origin tag for SAM-injected messages (e.g. the get_instructions reminder)
+    // so the UI can collapse them. Additive column; NULL/absent = normal user
+    // message. No DROP/recreate (rule 31 — chat_messages is a CASCADE parent).
+    name: '024-chat-message-origin',
+    run: (sql) => {
+      sql.exec(`ALTER TABLE chat_messages ADD COLUMN origin TEXT`);
+    },
+  },
+  {
+    // Legacy messages could be inserted with NULL expiry when callers omitted
+    // ttlMs. Backfill in place; the WHERE clause is mandatory for DO migration
+    // safety and leaves finite caller-provided expiries untouched.
+    name: '025-mailbox-null-ttl-backfill',
+    run: (sql) => {
+      sql.exec(
+        `UPDATE session_inbox
+         SET expires_at = created_at + ?
+         WHERE expires_at IS NULL`,
+        MAILBOX_DEFAULTS.TTL_MS
+      );
+    },
+  },
+  {
+    name: '026-delivery-aware-attention-expiry',
+    run: (sql) => {
+      sql.exec(`ALTER TABLE session_attention_markers ADD COLUMN notification_user_id TEXT`);
+      sql.exec(`ALTER TABLE session_attention_markers ADD COLUMN next_escalation_at INTEGER`);
+      sql.exec(
+        `ALTER TABLE session_attention_markers ADD COLUMN escalation_count INTEGER NOT NULL DEFAULT 0`
+      );
+      sql.exec(`ALTER TABLE session_attention_markers ADD COLUMN max_expires_at INTEGER`);
+      sql.exec(`ALTER TABLE session_attention_markers ADD COLUMN resolved_answer TEXT`);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_attention_escalation
+          ON session_attention_markers(next_escalation_at)
+          WHERE resolved_at IS NULL AND next_escalation_at IS NOT NULL
+        `);
+    },
+  },
+  {
+    // Worker-owned durable prompt delivery and checkpoint episode foundation.
+    // session_inbox remains the only queue; these columns add attempt/receipt
+    // reconciliation without creating a competing delivery store.
+    name: '027-durable-prompt-delivery-checkpoints',
+    run: (sql) => {
+      sql.exec(`ALTER TABLE session_state ADD COLUMN prompt_epoch INTEGER`);
+
+      sql.exec(
+        `ALTER TABLE session_inbox ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'agent_mailbox'`
+      );
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN prompt_message_id TEXT`);
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN next_attempt_at INTEGER`);
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN last_error TEXT`);
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN terminal_reason TEXT`);
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN attempt_id TEXT`);
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN attempt_started_at INTEGER`);
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN runtime_identity TEXT`);
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN receipt_state TEXT`);
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN receipt_runtime_identity TEXT`);
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN receipt_checked_at INTEGER`);
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN accepted_at INTEGER`);
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN adapter_protocol_version INTEGER`);
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN receipt_supported INTEGER`);
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN durable_delivery INTEGER NOT NULL DEFAULT 0`);
+
+      sql.exec(`
+        UPDATE session_inbox
+        SET prompt_message_id = id
+        WHERE prompt_message_id IS NULL
+      `);
+      sql.exec(`
+        UPDATE session_inbox
+        SET next_attempt_at = created_at
+        WHERE next_attempt_at IS NULL AND delivery_state = 'queued'
+      `);
+
+      sql.exec(`
+        CREATE INDEX idx_inbox_delivery_due
+        ON session_inbox(delivery_state, next_attempt_at, created_at)
+        WHERE delivery_state IN ('queued', 'retry_wait')
+      `);
+      sql.exec(`
+        CREATE INDEX idx_inbox_delivery_claims
+        ON session_inbox(delivery_state, attempt_started_at)
+        WHERE delivery_state = 'delivering'
+      `);
+
+      sql.exec(`
+        CREATE TABLE checkpoint_episodes (
+          id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL,
+          task_id TEXT,
+          workspace_id TEXT,
+          acp_session_id TEXT NOT NULL,
+          prompt_epoch INTEGER NOT NULL,
+          reason TEXT NOT NULL,
+          state TEXT NOT NULL,
+          progress_envelope_json TEXT,
+          mailbox_message_id TEXT,
+          prompt_delivery_id TEXT,
+          preempt_requested_at INTEGER,
+          preempt_accepted_at INTEGER,
+          ready_observed_at INTEGER,
+          resume_accepted_at INTEGER,
+          completed_at INTEGER,
+          failed_at INTEGER,
+          attempt_count INTEGER NOT NULL DEFAULT 0,
+          last_error TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          UNIQUE(acp_session_id, prompt_epoch)
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX idx_checkpoint_episodes_session
+        ON checkpoint_episodes(session_id, created_at DESC)
+      `);
+      sql.exec(`
+        CREATE INDEX idx_checkpoint_episodes_state
+        ON checkpoint_episodes(state, updated_at)
+      `);
+    },
+  },
+  {
+    name: '028-idle-cleanup-attention-state',
+    run: (sql) => {
+      sql.exec(`ALTER TABLE idle_cleanup_schedule ADD COLUMN terminal_state TEXT`);
+      sql.exec(`ALTER TABLE idle_cleanup_schedule ADD COLUMN terminal_reason TEXT`);
+      sql.exec(`ALTER TABLE idle_cleanup_schedule ADD COLUMN terminal_at INTEGER`);
+      sql.exec(`ALTER TABLE idle_cleanup_schedule ADD COLUMN last_error TEXT`);
+      sql.exec(`ALTER TABLE idle_cleanup_schedule ADD COLUMN failure_notified_at INTEGER`);
+      sql.exec(`ALTER TABLE idle_cleanup_schedule ADD COLUMN attention_marker_id TEXT`);
+      sql.exec(`
+        CREATE INDEX idx_idle_cleanup_schedule_active_cleanup_at
+        ON idle_cleanup_schedule(cleanup_at)
+        WHERE terminal_state IS NULL
+      `);
+      sql.exec(`
+        CREATE INDEX idx_idle_cleanup_schedule_terminal
+        ON idle_cleanup_schedule(terminal_state, terminal_at)
+        WHERE terminal_state IS NOT NULL
+      `);
+    },
+  },
+  {
+    // Reconciled session-activity state: provenance + terminal-transition
+    // reason on the authoritative row, plus bounded probe accounting so a
+    // stale working state can be reconciled against the vm-agent instead of
+    // trusted indefinitely. Additive columns only (.claude/rules/31).
+    name: '029-session-activity-reconciliation',
+    run: (sql) => {
+      sql.exec(`ALTER TABLE session_state ADD COLUMN activity_source TEXT`);
+      sql.exec(`ALTER TABLE session_state ADD COLUMN activity_reason TEXT`);
+      sql.exec(`ALTER TABLE session_state ADD COLUMN activity_probe_at INTEGER`);
+      sql.exec(
+        `ALTER TABLE session_state ADD COLUMN activity_probe_attempts INTEGER NOT NULL DEFAULT 0`
+      );
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_session_state_working_activity
+        ON session_state(activity, activity_at)
+      `);
+    },
+  },
+  {
+    // Normalize harness-owned work into bounded metadata. Raw harness payloads
+    // intentionally have no persistence column.
+    //
+    // Numbered 030 (not 029) because PR #1840's
+    // `029-session-activity-reconciliation` landed on main first and is already
+    // applied in production. This ledger is keyed by NAME
+    // (`runMigrations` skips already-applied names), and this migration has
+    // never been applied in any environment — the authoring branch never
+    // deployed — so appending it after 029 is safe for both a clean bootstrap
+    // and an existing deployment. See .claude/rules/07-env-and-urls.md.
+    name: '030-harness-work-and-task-waits',
+    run: (sql) => {
+      // Each ADD COLUMN is individually guarded so a partial previous run — or a
+      // Durable Object that somehow recorded this migration under its
+      // pre-renumber name — cannot wedge the DO constructor with a
+      // `duplicate column name` error on every subsequent RPC. Same pattern as
+      // migrations 011 and 017.
+      for (const statement of [
+        `ALTER TABLE session_state ADD COLUMN runtime_work_state TEXT CHECK (runtime_work_state IN ('inactive', 'active', 'settling'))`,
+        `ALTER TABLE session_state ADD COLUMN runtime_work_count INTEGER CHECK (runtime_work_count IS NULL OR runtime_work_count >= 0)`,
+        `ALTER TABLE session_state ADD COLUMN runtime_work_source TEXT`,
+        `ALTER TABLE session_state ADD COLUMN runtime_work_updated_at INTEGER`,
+        `ALTER TABLE session_state ADD COLUMN runtime_work_progress_at INTEGER`,
+      ]) {
+        try {
+          sql.exec(statement);
+        } catch {
+          // Column already exists from a partial previous run — safe to ignore.
+        }
+      }
+
+      sql.exec(`
+				CREATE TABLE IF NOT EXISTS task_wait_subscriptions (
+					id TEXT PRIMARY KEY,
+					parent_task_id TEXT NOT NULL,
+					parent_session_id TEXT NOT NULL,
+					wait_condition TEXT NOT NULL CHECK (wait_condition IN ('all', 'any')),
+					state TEXT NOT NULL CHECK (state IN ('active', 'resolved', 'cancelled')),
+					child_count INTEGER NOT NULL CHECK (child_count > 0),
+					wake_deadline INTEGER NOT NULL,
+					next_reconcile_at INTEGER NOT NULL,
+					wake_delivery_id TEXT NOT NULL UNIQUE,
+					resolution_reason TEXT,
+					created_at INTEGER NOT NULL,
+					updated_at INTEGER NOT NULL,
+					resolved_at INTEGER
+				)
+			`);
+      sql.exec(`
+			CREATE UNIQUE INDEX IF NOT EXISTS idx_task_wait_active_parent
+				ON task_wait_subscriptions(parent_task_id)
+				WHERE state = 'active'
+			`);
+      sql.exec(`
+				CREATE INDEX IF NOT EXISTS idx_task_wait_due
+				ON task_wait_subscriptions(next_reconcile_at, wake_deadline)
+				WHERE state = 'active'
+			`);
+      sql.exec(`
+				CREATE TABLE IF NOT EXISTS task_wait_children (
+					subscription_id TEXT NOT NULL REFERENCES task_wait_subscriptions(id) ON DELETE CASCADE,
+					child_task_id TEXT NOT NULL,
+					observed_status TEXT,
+					observed_at INTEGER,
+					PRIMARY KEY (subscription_id, child_task_id)
+				)
+			`);
+      sql.exec(`
+				CREATE INDEX IF NOT EXISTS idx_task_wait_child
+				ON task_wait_children(child_task_id, subscription_id)
+      `);
+    },
+  },
+  {
+    // Replay hardening for the task-wait tables created in 030. Kept as a
+    // separate additive migration (rather than folded into 030) so any
+    // Durable Object that recorded 030 still receives these columns.
+    //
+    // Numbered 031 for the same reason 030 was renumbered: PR #1840's
+    // `029-session-activity-reconciliation` claimed 029 on main first.
+    name: '031-task-wait-replay-hardening',
+    run: (sql) => {
+      for (const statement of [
+        `ALTER TABLE task_wait_subscriptions ADD COLUMN idempotency_key TEXT NOT NULL DEFAULT ''`,
+        `ALTER TABLE task_wait_subscriptions ADD COLUMN wake_content TEXT`,
+        `ALTER TABLE task_wait_subscriptions ADD COLUMN wake_attempts INTEGER NOT NULL DEFAULT 0 CHECK (wake_attempts >= 0)`,
+      ]) {
+        try {
+          sql.exec(statement);
+        } catch {
+          // Column already exists from a partial previous run — safe to ignore.
+        }
+      }
+      sql.exec(`
+        UPDATE task_wait_subscriptions
+        SET idempotency_key = 'legacy-' || id
+        WHERE idempotency_key = ''
+      `);
+      sql.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_task_wait_idempotency
+        ON task_wait_subscriptions(parent_task_id, idempotency_key)
+      `);
+    },
+  },
+  {
+    name: '032-message-comment-threads',
+    run: (sql) => {
+      sql.exec(`
+        CREATE TABLE comment_threads (
+          id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+          anchor_kind TEXT NOT NULL DEFAULT 'message' CHECK (anchor_kind = 'message'),
+          message_id TEXT NOT NULL REFERENCES chat_messages(id) ON DELETE CASCADE,
+          quote TEXT,
+          body TEXT NOT NULL,
+          author_type TEXT NOT NULL CHECK (author_type IN ('human', 'agent')),
+          author_id TEXT NOT NULL,
+          author_name TEXT,
+          status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'sent', 'resolved')),
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          sequence INTEGER NOT NULL,
+          version INTEGER NOT NULL DEFAULT 1,
+          client_mutation_id TEXT,
+          client_mutation_fingerprint TEXT,
+          sent_at INTEGER,
+          sent_by_type TEXT CHECK (sent_by_type IS NULL OR sent_by_type IN ('human', 'agent')),
+          sent_by_id TEXT,
+          sent_by_name TEXT,
+          resolved_at INTEGER,
+          resolved_by_type TEXT CHECK (resolved_by_type IS NULL OR resolved_by_type IN ('human', 'agent')),
+          resolved_by_id TEXT,
+          resolved_by_name TEXT,
+          reopened_at INTEGER,
+          reopened_by_type TEXT CHECK (reopened_by_type IS NULL OR reopened_by_type IN ('human', 'agent')),
+          reopened_by_id TEXT,
+          reopened_by_name TEXT,
+          UNIQUE(session_id, client_mutation_id)
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX idx_comment_threads_session_sequence
+        ON comment_threads(session_id, sequence)
+      `);
+      sql.exec(`
+        CREATE INDEX idx_comment_threads_message
+        ON comment_threads(session_id, message_id, sequence)
+      `);
+      sql.exec(`
+        CREATE INDEX idx_comment_threads_status
+        ON comment_threads(session_id, status, sequence)
+      `);
+
+      sql.exec(`
+        CREATE TABLE comment_replies (
+          id TEXT PRIMARY KEY,
+          thread_id TEXT NOT NULL REFERENCES comment_threads(id) ON DELETE CASCADE,
+          session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+          body TEXT NOT NULL,
+          author_type TEXT NOT NULL CHECK (author_type IN ('human', 'agent')),
+          author_id TEXT NOT NULL,
+          author_name TEXT,
+          created_at INTEGER NOT NULL,
+          sequence INTEGER NOT NULL,
+          client_mutation_id TEXT,
+          client_mutation_fingerprint TEXT,
+          UNIQUE(thread_id, client_mutation_id)
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX idx_comment_replies_thread_sequence
+        ON comment_replies(thread_id, sequence)
+      `);
+      sql.exec(`
+        CREATE INDEX idx_comment_replies_session
+        ON comment_replies(session_id, thread_id)
+      `);
+
+      sql.exec(`
+        CREATE TABLE comment_status_mutations (
+          thread_id TEXT NOT NULL REFERENCES comment_threads(id) ON DELETE CASCADE,
+          session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+          client_mutation_id TEXT NOT NULL,
+          target_status TEXT NOT NULL CHECK (target_status IN ('open', 'sent', 'resolved')),
+          thread_version INTEGER NOT NULL,
+          created_at INTEGER NOT NULL,
+          PRIMARY KEY (thread_id, client_mutation_id)
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX idx_comment_status_mutations_session
+        ON comment_status_mutations(session_id, created_at)
+      `);
+    },
+  },
+  {
+    name: '033-library-file-comment-threads',
+    run: (sql) => {
+      // Library file comments live in their OWN tables, entirely separate from the
+      // message comment tables created in migration 032.
+      //
+      // The obvious alternative — widening `comment_threads` to allow a
+      // `library_file` anchor — cannot be done additively: SQLite cannot change a
+      // CHECK constraint or remove a NOT NULL in place, so it would require recreating
+      // `comment_threads` and its two CASCADE children. Durable Object SQLite has no
+      // point-in-time recovery, so dropping a table here is unrecoverable
+      // (.claude/rules/31-migration-safety.md, `pnpm quality:do-migration-safety`).
+      //
+      // Separate tables also keep message-comment session isolation intact by
+      // construction: a file thread simply cannot be reached by a session-scoped
+      // query, so no message-comment code path needs to learn about nullable
+      // session_id. The two anchor kinds are joined at the type layer
+      // (`CommentAnchor` in packages/shared/src/types/comments.ts), not in storage.
+      //
+      // Phase 2 anchor kinds for other file types extend `library_file_comment_threads`
+      // additively (new nullable columns), never by widening the message tables.
+
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS library_file_comment_threads (
+          id TEXT PRIMARY KEY,
+          file_id TEXT NOT NULL,
+          anchor_kind TEXT NOT NULL DEFAULT 'library_file' CHECK (anchor_kind = 'library_file'),
+          quote TEXT,
+          body TEXT NOT NULL,
+          author_type TEXT NOT NULL CHECK (author_type IN ('human', 'agent')),
+          author_id TEXT NOT NULL,
+          author_name TEXT,
+          status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'sent', 'resolved')),
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          sequence INTEGER NOT NULL,
+          version INTEGER NOT NULL DEFAULT 1,
+          client_mutation_id TEXT,
+          client_mutation_fingerprint TEXT,
+          resolved_at INTEGER,
+          resolved_by_type TEXT CHECK (resolved_by_type IS NULL OR resolved_by_type IN ('human', 'agent')),
+          resolved_by_id TEXT,
+          resolved_by_name TEXT,
+          reopened_at INTEGER,
+          reopened_by_type TEXT CHECK (reopened_by_type IS NULL OR reopened_by_type IN ('human', 'agent')),
+          reopened_by_id TEXT,
+          reopened_by_name TEXT,
+          UNIQUE(file_id, client_mutation_id)
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_library_file_comment_threads_file_sequence
+        ON library_file_comment_threads(file_id, sequence)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_library_file_comment_threads_status
+        ON library_file_comment_threads(file_id, status, sequence)
+      `);
+
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS library_file_comment_replies (
+          id TEXT PRIMARY KEY,
+          thread_id TEXT NOT NULL REFERENCES library_file_comment_threads(id) ON DELETE CASCADE,
+          file_id TEXT NOT NULL,
+          body TEXT NOT NULL,
+          author_type TEXT NOT NULL CHECK (author_type IN ('human', 'agent')),
+          author_id TEXT NOT NULL,
+          author_name TEXT,
+          created_at INTEGER NOT NULL,
+          sequence INTEGER NOT NULL,
+          client_mutation_id TEXT,
+          client_mutation_fingerprint TEXT,
+          UNIQUE(thread_id, client_mutation_id)
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_library_file_comment_replies_thread_sequence
+        ON library_file_comment_replies(thread_id, sequence)
+      `);
+
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS library_file_comment_status_mutations (
+          thread_id TEXT NOT NULL REFERENCES library_file_comment_threads(id) ON DELETE CASCADE,
+          file_id TEXT NOT NULL,
+          client_mutation_id TEXT NOT NULL,
+          target_status TEXT NOT NULL CHECK (target_status IN ('open', 'sent', 'resolved')),
+          thread_version INTEGER NOT NULL,
+          created_at INTEGER NOT NULL,
+          PRIMARY KEY (thread_id, client_mutation_id)
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_library_file_comment_status_mutations_file
+        ON library_file_comment_status_mutations(file_id, created_at)
+      `);
+    },
+  },
+  {
+    name: '034-policy-lifecycle-controls',
+    run: (sql) => {
+      // Policy lifecycle controls — give policies a shelf life and a scope so
+      // one-shot workflow policies stop being injected into every session forever.
+      //
+      // STRICTLY ADDITIVE (rules 31 / 63): two ALTER TABLE ADD COLUMN statements, no
+      // table recreation, no DROP. A Durable Object has no D1-style time-travel
+      // recovery, so a drop-and-restore here would be unrecoverable.
+      //
+      // Do not put quoted SQL fragments in these comments: the migration safety
+      // scanner extracts every quoted literal in this file — backtick, single AND
+      // double — and validates each as a statement, so inline-code prose is checked
+      // as if it were real SQL.
+      //
+      // Both defaults reproduce the pre-migration behavior exactly, so every policy
+      // that already exists keeps applying unchanged:
+      //   expires_at NULL     -> never expires (what every policy does today)
+      //   scope 'always'      -> standing project policy
+      //
+      // `scope` gets no CHECK constraint, matching `category` / `source` in
+      // migration 019 — SQLite cannot add a CHECK via ALTER TABLE, and the value is
+      // validated at the write boundary by `validatePolicyLifecycle` in
+      // packages/shared/src/constants/policies.ts.
+      sql.exec('ALTER TABLE project_policies ADD COLUMN expires_at INTEGER');
+      sql.exec("ALTER TABLE project_policies ADD COLUMN scope TEXT NOT NULL DEFAULT 'always'");
+    },
+  },
+  {
+    name: '035-comment-thread-activity-indexes',
+    run: (sql) => {
+      // Indexes for the project-wide comment inbox (GET /projects/:id/comments).
+      //
+      // STRICTLY ADDITIVE (rule 31): CREATE INDEX only — no table recreation, no
+      // DROP, no ALTER. A Durable Object has no D1-style time-travel recovery, so
+      // anything destructive here would be unrecoverable.
+      //
+      // Why these are needed: every index migrations 032/033 created leads with the
+      // scope column, session_id or file_id. The project-wide read deliberately has
+      // no such predicate — the Durable Object IS the project — and ranks by
+      // updated_at, which appeared in no index at all. Verified with EXPLAIN QUERY
+      // PLAN against the real schema, both reads degraded to a full table scan plus
+      // a temp B-tree sort, so their cost grew with total project comment volume
+      // rather than with the page size and the LIMIT bought nothing.
+      //
+      // Column order matters: updated_at leads because it is the ranking key, and id
+      // follows so the sort has a total order and the ranking pass can be answered
+      // from the index without touching the table. The status-prefixed variants
+      // serve the filtered reads and let their counts run covered.
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_comment_threads_updated_at
+        ON comment_threads(updated_at DESC, id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_comment_threads_status_updated_at
+        ON comment_threads(status, updated_at DESC, id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_library_file_comment_threads_updated_at
+        ON library_file_comment_threads(updated_at DESC, id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_library_file_comment_threads_status_updated_at
+        ON library_file_comment_threads(status, updated_at DESC, id)
+      `);
+    },
+  },
+  {
+    name: '036-tool-payload-archives',
+    run: (sql) => {
+      // Additive-only (rule 31): this table records the private R2 object that
+      // owns an archived `chat_messages.tool_metadata.content` payload after the
+      // payload has been removed from DO SQLite.
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS tool_payload_archives (
+          message_id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL,
+          r2_key TEXT NOT NULL,
+          content_bytes INTEGER NOT NULL,
+          tool_metadata_bytes INTEGER NOT NULL,
+          archived_at INTEGER NOT NULL,
+          message_created_at INTEGER NOT NULL,
+          message_sequence INTEGER NOT NULL,
+          archive_version INTEGER NOT NULL DEFAULT 1
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_tool_payload_archives_session_created
+        ON tool_payload_archives(session_id, message_created_at, message_sequence, message_id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_tool_payload_archives_created
+        ON tool_payload_archives(message_created_at, message_sequence, message_id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_tool_payload_archives_archived_at
+        ON tool_payload_archives(archived_at)
+      `);
+    },
+  },
+  {
+    name: '037-tool-payload-cleanup-attempts',
+    run: (sql) => {
+      // Durable per-message cleanup disposition. This prevents non-reclaimable
+      // or retry-deferred candidates from being rediscovered on every
+      // retention sweep while preserving the original message row and payload
+      // unless archive+strip succeeds.
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS tool_payload_cleanup_attempts (
+          message_id TEXT PRIMARY KEY,
+          status TEXT NOT NULL,
+          failure_count INTEGER NOT NULL DEFAULT 0,
+          next_attempt_at INTEGER,
+          last_attempt_at INTEGER NOT NULL,
+          last_error TEXT,
+          message_created_at INTEGER NOT NULL,
+          message_sequence INTEGER NOT NULL
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_tool_payload_cleanup_attempts_retry
+        ON tool_payload_cleanup_attempts(status, next_attempt_at, message_created_at, message_sequence, message_id)
+      `);
+    },
+  },
+  {
+    name: '038-project-event-subscriptions',
+    run: (sql) => {
+      runProjectEventSubscriptionMigration(sql);
+    },
+  },
+  {
+    name: '039-project-event-delivery-decisions',
+    run: (sql) => {
+      try {
+        sql.exec(
+          `ALTER TABLE project_event_delivery_batches ADD COLUMN adapter_decision_json TEXT`
+        );
+      } catch {
+        // Column already exists when migration 038 created the current draft schema.
+      }
+    },
+  },
+  {
+    name: '040-project-event-pull-ack',
+    run: (sql) => {
+      for (const statement of [
+        `ALTER TABLE project_event_delivery_batches ADD COLUMN ack_required INTEGER NOT NULL DEFAULT 0`,
+        `ALTER TABLE project_event_delivery_batches ADD COLUMN delivered_at INTEGER`,
+        `ALTER TABLE project_event_delivery_batches ADD COLUMN acked_at INTEGER`,
+        `ALTER TABLE project_event_delivery_batches ADD COLUMN acked_by_type TEXT`,
+        `ALTER TABLE project_event_delivery_batches ADD COLUMN acked_by_id TEXT`,
+        `ALTER TABLE project_event_delivery_batches ADD COLUMN acked_by_name TEXT`,
+      ]) {
+        try {
+          sql.exec(statement);
+        } catch {
+          // Additive compatibility: local/dev databases may already have a draft column.
+        }
+      }
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_matches_project_subscription_replay
+        ON project_event_matches(project_id, subscription_id, matched_at ASC, id ASC)
+      `);
+    },
+  },
+  {
+    name: '041-terminal-session-reconcile-marker',
+    run: (sql) => {
+      sql.exec('ALTER TABLE chat_sessions ADD COLUMN terminal_reconcile_deferred_until INTEGER');
+      sql.exec('ALTER TABLE chat_sessions ADD COLUMN terminal_reconcile_defer_reason TEXT');
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_chat_sessions_terminal_reconcile
+        ON chat_sessions(status, terminal_reconcile_deferred_until, updated_at, id)
+      `);
+    },
+  },
+  {
+    name: '042-chat-search-materialization-state',
+    run: (sql) => {
+      for (const statement of [
+        `ALTER TABLE chat_sessions ADD COLUMN search_index_state TEXT`,
+        `ALTER TABLE chat_sessions ADD COLUMN search_index_updated_at INTEGER`,
+        `ALTER TABLE chat_sessions ADD COLUMN search_index_degradation_reason TEXT`,
+      ]) {
+        try {
+          sql.exec(statement);
+        } catch {
+          // Additive compatibility: a partially migrated object may already have the column.
+        }
+      }
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_chat_sessions_search_index_state
+        ON chat_sessions(search_index_state, updated_at, id)
+      `);
+    },
+  },
+  {
+    name: '043-project-data-terminal-archive-bridge',
+    run: (sql) => {
+      for (const statement of [
+        `ALTER TABLE chat_sessions ADD COLUMN archive_last_message_at INTEGER`,
+        `ALTER TABLE chat_sessions ADD COLUMN archive_owner_name TEXT`,
+        `ALTER TABLE chat_sessions ADD COLUMN archive_generation INTEGER`,
+        `ALTER TABLE chat_sessions ADD COLUMN archive_migration_id TEXT`,
+        `ALTER TABLE chat_sessions ADD COLUMN archive_state TEXT`,
+      ]) {
+        try {
+          sql.exec(statement);
+        } catch {
+          // Additive compatibility: a partially migrated object may already have the column.
+        }
+      }
+
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS project_data_archive_source_intents (
+          session_id TEXT PRIMARY KEY REFERENCES chat_sessions(id) ON DELETE CASCADE,
+          project_id TEXT NOT NULL,
+          migration_id TEXT NOT NULL,
+          source_owner_name TEXT NOT NULL,
+          target_owner_name TEXT NOT NULL,
+          target_generation INTEGER NOT NULL CHECK (target_generation > 0),
+          source_intent_token TEXT NOT NULL,
+          state TEXT NOT NULL CHECK (state IN (
+            'intent_prepared',
+            'target_prepared',
+            'copying',
+            'target_sealed',
+            'recovery_manifest_persisted',
+            'source_deleted',
+            'rehome_exported'
+          )),
+          terminal_version_sha256 TEXT NOT NULL,
+          target_aggregate_sha256 TEXT,
+          recovery_manifest_key TEXT,
+          last_message_at INTEGER,
+          message_count INTEGER NOT NULL DEFAULT 0,
+          prepared_at INTEGER NOT NULL,
+          target_sealed_at INTEGER,
+          recovery_manifest_persisted_at INTEGER,
+          source_deleted_at INTEGER,
+          source_database_size_before INTEGER,
+          source_database_size_after INTEGER,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )
+      `);
+      sql.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_project_data_archive_source_migration
+        ON project_data_archive_source_intents(project_id, migration_id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_data_archive_source_state
+        ON project_data_archive_source_intents(state, updated_at)
+      `);
+
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS project_data_archive_target_sessions (
+          session_id TEXT PRIMARY KEY REFERENCES chat_sessions(id) ON DELETE CASCADE,
+          project_id TEXT NOT NULL,
+          migration_id TEXT NOT NULL,
+          owner_name TEXT NOT NULL,
+          generation INTEGER NOT NULL CHECK (generation > 0),
+          source_owner_name TEXT NOT NULL,
+          source_intent_token TEXT NOT NULL,
+          state TEXT NOT NULL CHECK (state IN (
+            'prepared',
+            'copying',
+            'sealed',
+            'published',
+            'rehome_exported'
+          )),
+          terminal_version_sha256 TEXT NOT NULL,
+          aggregate_sha256 TEXT,
+          expected_message_count INTEGER NOT NULL DEFAULT 0,
+          received_message_count INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          sealed_at INTEGER
+        )
+      `);
+      sql.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_project_data_archive_target_owner
+        ON project_data_archive_target_sessions(project_id, owner_name, generation, session_id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_data_archive_target_state
+        ON project_data_archive_target_sessions(state, updated_at)
+      `);
+
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS project_data_archive_target_chunks (
+          chunk_id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+          project_id TEXT NOT NULL,
+          migration_id TEXT NOT NULL,
+          owner_name TEXT NOT NULL,
+          generation INTEGER NOT NULL CHECK (generation > 0),
+          table_name TEXT NOT NULL CHECK (table_name IN (
+            'chat_messages',
+            'chat_messages_grouped',
+            'tool_payload_archives'
+          )),
+          ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
+          row_count INTEGER NOT NULL CHECK (row_count >= 0),
+          byte_count INTEGER NOT NULL CHECK (byte_count >= 0),
+          sha256 TEXT NOT NULL,
+          committed_at INTEGER NOT NULL,
+          UNIQUE(session_id, table_name, ordinal)
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_data_archive_target_chunks_session
+        ON project_data_archive_target_chunks(session_id, table_name, ordinal)
+      `);
+    },
+  },
+  {
+    name: '044-tool-payload-archive-verification-proof',
+    run: (sql) => {
+      const columns = [
+        [
+          'archive_body_bytes',
+          'ALTER TABLE tool_payload_archives ADD COLUMN archive_body_bytes INTEGER',
+        ],
+        [
+          'archive_body_sha256',
+          'ALTER TABLE tool_payload_archives ADD COLUMN archive_body_sha256 TEXT',
+        ],
+        [
+          'root_object_bytes',
+          'ALTER TABLE tool_payload_archives ADD COLUMN root_object_bytes INTEGER',
+        ],
+        [
+          'root_object_sha256',
+          'ALTER TABLE tool_payload_archives ADD COLUMN root_object_sha256 TEXT',
+        ],
+        [
+          'verified_object_count',
+          'ALTER TABLE tool_payload_archives ADD COLUMN verified_object_count INTEGER',
+        ],
+        [
+          'source_tool_metadata_sha256',
+          'ALTER TABLE tool_payload_archives ADD COLUMN source_tool_metadata_sha256 TEXT',
+        ],
+      ] as const;
+      for (const [column, statement] of columns) {
+        try {
+          sql.exec(statement);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (!new RegExp(String.raw`duplicate column name:\s*${column}`, 'i').test(message))
+            throw error;
+        }
+      }
+      // SQLite resolves every selected identifier before executing the query, so
+      // this static zero-row projection fails the migration if any proof column
+      // is absent without interpolating identifiers into SQL.
+      sql.exec(`
+        SELECT
+          archive_body_bytes,
+          archive_body_sha256,
+          root_object_bytes,
+          root_object_sha256,
+          verified_object_count,
+          source_tool_metadata_sha256
+        FROM tool_payload_archives
+        LIMIT 0
+      `);
+    },
+  },
+  {
+    name: '045-project-data-compact-archive',
+    run: (sql) => {
+      const columns = sql.exec('PRAGMA table_info(project_data_archive_target_sessions)').toArray();
+      if (!columns.some((column) => column.name === 'storage_format')) {
+        sql.exec(
+          "ALTER TABLE project_data_archive_target_sessions ADD COLUMN storage_format TEXT NOT NULL DEFAULT 'sqlite-v1'"
+        );
+      }
+      sql.exec(`CREATE TABLE IF NOT EXISTS project_data_archive_raw_chunks (
+        session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+        ordinal INTEGER NOT NULL,
+        r2_key TEXT NOT NULL,
+        compressed_bytes INTEGER NOT NULL,
+        body_bytes INTEGER NOT NULL,
+        body_sha256 TEXT NOT NULL,
+        first_created_at INTEGER,
+        last_created_at INTEGER,
+        role_counts_json TEXT NOT NULL,
+        row_ids_json TEXT NOT NULL,
+        PRIMARY KEY (session_id, ordinal)
+      )`);
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_archive_raw_chunk_time
+        ON project_data_archive_raw_chunks(session_id, first_created_at, last_created_at)`);
+    },
+  },
+  {
+    name: '046-prompt-delivery-submit-phase',
+    run: (sql) => {
+      const columns = sql.exec('PRAGMA table_info(session_inbox)').toArray();
+      if (!columns.some((column) => column.name === 'prompt_delivery_phase')) {
+        // Existing claims remain NULL: they may have sent a prompt before this
+        // checkpoint existed, so deployment must not turn them into safe retries.
+        sql.exec('ALTER TABLE session_inbox ADD COLUMN prompt_delivery_phase TEXT');
+      }
+    },
+  },
+  {
+    name: '047-project-event-wake-delivery',
+    run: (sql) => {
+      const additiveColumns = [
+        [
+          'project_event_subscriptions',
+          'owner_version',
+          'ALTER TABLE project_event_subscriptions ADD COLUMN owner_version INTEGER NOT NULL DEFAULT 1',
+        ],
+        [
+          'project_event_subscriptions',
+          'owner_project_id',
+          'ALTER TABLE project_event_subscriptions ADD COLUMN owner_project_id TEXT',
+        ],
+        [
+          'project_event_subscriptions',
+          'owner_chat_session_id',
+          'ALTER TABLE project_event_subscriptions ADD COLUMN owner_chat_session_id TEXT',
+        ],
+        [
+          'project_event_subscriptions',
+          'owner_task_id',
+          'ALTER TABLE project_event_subscriptions ADD COLUMN owner_task_id TEXT',
+        ],
+        [
+          'project_event_subscriptions',
+          'owner_runtime_id',
+          'ALTER TABLE project_event_subscriptions ADD COLUMN owner_runtime_id TEXT',
+        ],
+        [
+          'project_event_subscriptions',
+          'recovery_lineage_json',
+          'ALTER TABLE project_event_subscriptions ADD COLUMN recovery_lineage_json TEXT',
+        ],
+        [
+          'project_event_subscriptions',
+          'prompt_delivery_count',
+          'ALTER TABLE project_event_subscriptions ADD COLUMN prompt_delivery_count INTEGER NOT NULL DEFAULT 0',
+        ],
+        [
+          'project_event_subscriptions',
+          'prompt_delivery_last_at',
+          'ALTER TABLE project_event_subscriptions ADD COLUMN prompt_delivery_last_at INTEGER',
+        ],
+        [
+          'project_event_subscriptions',
+          'delivery_cooldown_until',
+          'ALTER TABLE project_event_subscriptions ADD COLUMN delivery_cooldown_until INTEGER',
+        ],
+        [
+          'project_event_subscriptions',
+          'delivery_lifetime_expires_at',
+          'ALTER TABLE project_event_subscriptions ADD COLUMN delivery_lifetime_expires_at INTEGER',
+        ],
+        [
+          'project_event_delivery_batches',
+          'delivery_channel',
+          "ALTER TABLE project_event_delivery_batches ADD COLUMN delivery_channel TEXT NOT NULL DEFAULT 'pull'",
+        ],
+        [
+          'project_event_delivery_batches',
+          'delivered_via',
+          'ALTER TABLE project_event_delivery_batches ADD COLUMN delivered_via TEXT',
+        ],
+        [
+          'project_event_delivery_batches',
+          'delivery_expires_at',
+          'ALTER TABLE project_event_delivery_batches ADD COLUMN delivery_expires_at INTEGER',
+        ],
+        [
+          'project_event_delivery_batches',
+          'readable_until',
+          'ALTER TABLE project_event_delivery_batches ADD COLUMN readable_until INTEGER',
+        ],
+        [
+          'project_event_delivery_attempts',
+          'transport_state',
+          'ALTER TABLE project_event_delivery_attempts ADD COLUMN transport_state TEXT',
+        ],
+      ] as const;
+
+      for (const [, column, statement] of additiveColumns) {
+        try {
+          sql.exec(statement);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (!new RegExp(String.raw`duplicate column name:\s*${column}`, 'i').test(message))
+            throw error;
+        }
+      }
+      // Static projections verify every added column, following migration 044.
+      sql.exec(`SELECT owner_version, owner_project_id, owner_chat_session_id,
+        owner_task_id, owner_runtime_id, recovery_lineage_json, prompt_delivery_count,
+        prompt_delivery_last_at, delivery_cooldown_until, delivery_lifetime_expires_at
+        FROM project_event_subscriptions LIMIT 0`);
+      sql.exec(`SELECT delivery_channel, delivered_via, delivery_expires_at, readable_until
+        FROM project_event_delivery_batches LIMIT 0`);
+      sql.exec('SELECT transport_state FROM project_event_delivery_attempts LIMIT 0');
+
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS project_event_wake_scheduler_state (
+          project_id TEXT PRIMARY KEY,
+          next_attempt_at INTEGER,
+          next_retention_at INTEGER,
+          materialization_failures INTEGER NOT NULL DEFAULT 0,
+          retention_failures INTEGER NOT NULL DEFAULT 0,
+          last_materialization_error_code TEXT,
+          last_retention_error_code TEXT,
+          last_materialization_failed_at INTEGER,
+          last_retention_failed_at INTEGER,
+          last_materialization_succeeded_at INTEGER,
+          last_retention_succeeded_at INTEGER,
+          updated_at INTEGER NOT NULL
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_matches_project_batch
+        ON project_event_matches(project_id, batch_id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_matches_materialization
+        ON project_event_matches(project_id, state, matched_at, subscription_id, id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_batches_prompt_target
+        ON project_event_delivery_batches(project_id, delivery_channel, target_session_id, state, updated_at, id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_batches_readable
+        ON project_event_delivery_batches(project_id, id, readable_until)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_attempts_transport
+        ON project_event_delivery_attempts(project_id, batch_id, transport_state, attempt_number)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_wake_scheduler_retention
+        ON project_event_wake_scheduler_state(next_retention_at, project_id)
+      `);
+    },
+  },
+  {
+    name: '048-project-event-wake-retention-indexes',
+    run: (sql) => {
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_subscriptions_wake_candidates
+        ON project_event_subscriptions(
+          project_id,
+          lifecycle_state,
+          requested_delivery,
+          resolved_delivery,
+          target_session_id,
+          last_matched_at,
+          id
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_subscriptions_wake_expiry
+        ON project_event_subscriptions(project_id, lifecycle_state, expires_at, id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_matches_subscription_due
+        ON project_event_matches(project_id, subscription_id, state, batch_id, matched_at, id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_matches_event_retention
+        ON project_event_matches(project_id, event_id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_matches_orphan_retention
+        ON project_event_matches(project_id, state, batch_id, matched_at, id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_attempts_retention
+        ON project_event_delivery_attempts(project_id, state, created_at, id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_attempts_synthetic_retention
+        ON project_event_delivery_attempts(project_id, attempt_number, state, transport_state, created_at, id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_batches_retention
+        ON project_event_delivery_batches(project_id, state, updated_at, id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_scheduler_attempt
+        ON project_event_wake_scheduler_state(next_attempt_at, project_id)
+      `);
+    },
+  },
+  {
+    name: '049-project-event-server-derived-audience',
+    run: (sql) => {
+      const additiveColumns = [
+        [
+          'audience_scope',
+          "ALTER TABLE project_events ADD COLUMN audience_scope TEXT NOT NULL DEFAULT 'project' CHECK (audience_scope IN ('project', 'user'))",
+        ],
+        ['audience_project_id', 'ALTER TABLE project_events ADD COLUMN audience_project_id TEXT'],
+        ['audience_user_id', 'ALTER TABLE project_events ADD COLUMN audience_user_id TEXT'],
+      ] as const;
+      for (const [column, statement] of additiveColumns) {
+        try {
+          sql.exec(statement);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (!new RegExp(String.raw`duplicate column name:\s*${column}`, 'i').test(message))
+            throw error;
+        }
+      }
+      sql.exec('SELECT audience_scope, audience_project_id, audience_user_id FROM project_events LIMIT 0');
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_events_audience
+        ON project_events(project_id, audience_scope, audience_user_id, received_at DESC, id)
+      `);
+    },
+  },
+  {
+    name: '050-project-event-channel-member-surfaces',
+    run: (sql) => {
+      sql.exec(`CREATE TABLE IF NOT EXISTS project_event_channels (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        lifetime_count INTEGER NOT NULL DEFAULT 0,
+        last_published_at INTEGER NOT NULL,
+        UNIQUE(project_id, name)
+      )`);
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_project_event_channels_empty
+        ON project_event_channels(project_id, last_published_at, id)`);
+      sql.exec(`ALTER TABLE project_events ADD COLUMN channel_id TEXT`);
+      sql.exec(`ALTER TABLE project_events ADD COLUMN channel_sequence INTEGER`);
+      sql.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_project_events_channel_sequence
+        ON project_events(channel_id, channel_sequence) WHERE channel_id IS NOT NULL`);
+      sql.exec(`CREATE TABLE IF NOT EXISTS project_event_channel_publish_rate (
+        project_id TEXT PRIMARY KEY,
+        window_started_at INTEGER NOT NULL,
+        publish_count INTEGER NOT NULL,
+        catalog_after_time INTEGER NOT NULL DEFAULT 0,
+        catalog_after_id TEXT NOT NULL DEFAULT ''
+      )`);
+      sql.exec(`ALTER TABLE project_event_subscriptions ADD COLUMN channel_id TEXT`);
+      sql.exec(`ALTER TABLE project_event_subscriptions ADD COLUMN channel_after_sequence INTEGER`);
+      sql.exec(`ALTER TABLE project_event_subscriptions ADD COLUMN channel_watermark INTEGER`);
+      sql.exec(
+        `ALTER TABLE project_event_subscriptions ADD COLUMN channel_catchup_expires_at INTEGER`
+      );
+      sql.exec(`ALTER TABLE project_event_subscriptions ADD COLUMN channel_start_fingerprint TEXT`);
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_project_event_channel_catchup_live
+        ON project_event_subscriptions(channel_id, channel_catchup_expires_at)
+        WHERE lifecycle_state = 'active' AND channel_after_sequence < channel_watermark`);
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_project_event_subscriptions_member_session_state
+        ON project_event_subscriptions(project_id, target_session_id, lifecycle_state, updated_at DESC, id)`);
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_project_event_subscriptions_member_session
+        ON project_event_subscriptions(project_id, target_session_id, updated_at DESC, id)`);
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_project_event_subscriptions_member_recent
+        ON project_event_subscriptions(project_id, updated_at DESC, id)`);
+    },
+  },
+  { name: '051-project-schedules-standing-watches', run: migrateProjectSchedules },
+  {
+    name: '052-project-event-wake-due-index',
+    run: (sql) => {
+      try {
+        sql.exec(`ALTER TABLE project_event_subscriptions ADD COLUMN wake_due_at INTEGER`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (!/duplicate column name:\s*wake_due_at/i.test(message)) throw error;
+      }
+      sql.exec(`SELECT wake_due_at FROM project_event_subscriptions LIMIT 0`);
+      sql.exec(`
+        UPDATE project_event_subscriptions
+           SET wake_due_at = (
+             SELECT MIN(m.matched_at)
+               FROM project_event_matches m
+              WHERE m.project_id = project_event_subscriptions.project_id
+                AND m.subscription_id = project_event_subscriptions.id
+                AND m.state = 'matched'
+                AND m.batch_id IS NULL
+           )
+         WHERE contract_version >= 2
+           AND owner_version >= 2
+           AND lifecycle_state = 'active'
+           AND requested_delivery = 'existing_session_prompt'
+           AND resolved_delivery = 'queued_for_prompt_delivery'
+           AND wake_due_at IS NULL
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_subscriptions_wake_due
+        ON project_event_subscriptions(
+          project_id,
+          lifecycle_state,
+          requested_delivery,
+          resolved_delivery,
+          wake_due_at,
+          delivery_cooldown_until,
+          id
+        )
+      `);
+    },
+  },
+  {
+    name: '053-project-event-retention-lifecycle-index',
+    run: (sql) => {
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_project_event_subscriptions_wake_due_order
+        ON project_event_subscriptions(project_id, lifecycle_state, requested_delivery,
+          resolved_delivery, wake_due_at, id)`);
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_project_event_matches_orphan_lifecycle
+        ON project_event_matches(project_id, state, lifecycle_checked_at, id)
+        WHERE batch_id IS NOT NULL`);
+    },
+  },
+  {
+    name: '054-project-event-credential-window-index',
+    run: (sql) => {
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_project_events_credential_window
+        ON project_events(project_id, source, subject_type, subject_id,
+          json_extract(metadata_json, '$.windowType'),
+          json_extract(metadata_json, '$.observedAt') DESC, id DESC)
+        WHERE state = 'recorded'`);
+    },
+  },
+  {
+    name: '055-mailbox-active-capacity-index',
+    run: (sql) => {
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_session_inbox_active_capacity
+        ON session_inbox(id)
+        WHERE delivery_state NOT IN ('acked', 'failed', 'ambiguous', 'expired')`);
+    },
+  },
+  {
+    name: '056-project-event-orphan-retention-cursor',
+    run: (sql) => {
+      for (const [column, statement] of [
+        ['orphan_scan_lifecycle_at',
+          'ALTER TABLE project_event_wake_scheduler_state ADD COLUMN orphan_scan_lifecycle_at INTEGER'],
+        ['orphan_scan_match_id',
+          'ALTER TABLE project_event_wake_scheduler_state ADD COLUMN orphan_scan_match_id TEXT'],
+      ] as const) {
+        try {
+          sql.exec(statement);
+        } catch (error) {
+          if (
+            !(error instanceof Error) ||
+            !error.message.toLowerCase().includes(`duplicate column name: ${column}`)
+          )
+            throw error;
+        }
+      }
+      sql.exec(`SELECT orphan_scan_lifecycle_at, orphan_scan_match_id
+        FROM project_event_wake_scheduler_state LIMIT 0`);
+    },
+  },
+  {
+    // Incremental search materialization. `materialized_at` is a wall-clock stamp
+    // of when the last pass ran, which cannot say WHICH tokens that pass covered —
+    // so re-materializing a woken session had to rebuild from token zero, and the
+    // boolean `materialized_at IS NOT NULL` gate suppressed the rebuild entirely.
+    // These columns record the exact last token folded into chat_messages_grouped,
+    // so each pass reads only what arrived since. Additive only (rule 31).
+    name: '057-chat-search-incremental-watermark',
+    run: (sql) => {
+      for (const [column, statement] of [
+        ['materialized_through_created_at',
+          'ALTER TABLE chat_sessions ADD COLUMN materialized_through_created_at INTEGER'],
+        ['materialized_through_sequence',
+          'ALTER TABLE chat_sessions ADD COLUMN materialized_through_sequence INTEGER'],
+      ] as const) {
+        try {
+          sql.exec(statement);
+        } catch (error) {
+          if (
+            !(error instanceof Error) ||
+            !error.message.toLowerCase().includes(`duplicate column name: ${column}`)
+          )
+            throw error;
+        }
+      }
+      sql.exec(`SELECT materialized_through_created_at, materialized_through_sequence
+        FROM chat_sessions LIMIT 0`);
+    },
+  },
+  {
+    // Archive copy receipts carry the exact source continuation that produced an
+    // immutable ordinal. Search coverage is separate derived evidence: transcript
+    // hashes stay byte-compatible with r2-gzip-v1 while incomplete/pruned indexes
+    // can be repaired and verified independently before source deletion.
+    name: '058-archive-copy-receipts-and-search-coverage',
+    run: (sql) => {
+      for (const [column, statement] of [
+        [
+          'source_cursor',
+          'ALTER TABLE project_data_archive_target_chunks ADD COLUMN source_cursor TEXT',
+        ],
+        [
+          'source_has_more',
+          'ALTER TABLE project_data_archive_target_chunks ADD COLUMN source_has_more INTEGER CHECK (source_has_more IS NULL OR source_has_more IN (0, 1))',
+        ],
+      ] as const) {
+        try {
+          sql.exec(statement);
+        } catch (error) {
+          if (
+            !(error instanceof Error) ||
+            !error.message.toLowerCase().includes(`duplicate column name: ${column}`)
+          )
+            throw error;
+        }
+      }
+      for (const [column, statement] of [
+        [
+          'search_index_version',
+          'ALTER TABLE project_data_archive_target_sessions ADD COLUMN search_index_version INTEGER',
+        ],
+        [
+          'search_index_state',
+          'ALTER TABLE project_data_archive_target_sessions ADD COLUMN search_index_state TEXT',
+        ],
+        [
+          'search_index_message_count',
+          'ALTER TABLE project_data_archive_target_sessions ADD COLUMN search_index_message_count INTEGER',
+        ],
+        [
+          'search_index_document_count',
+          'ALTER TABLE project_data_archive_target_sessions ADD COLUMN search_index_document_count INTEGER',
+        ],
+        [
+          'search_index_sha256',
+          'ALTER TABLE project_data_archive_target_sessions ADD COLUMN search_index_sha256 TEXT',
+        ],
+        [
+          'search_indexed_at',
+          'ALTER TABLE project_data_archive_target_sessions ADD COLUMN search_indexed_at INTEGER',
+        ],
+        [
+          'search_repair_next_ordinal',
+          'ALTER TABLE project_data_archive_target_sessions ADD COLUMN search_repair_next_ordinal INTEGER',
+        ],
+        [
+          'search_repair_pending_json',
+          'ALTER TABLE project_data_archive_target_sessions ADD COLUMN search_repair_pending_json TEXT',
+        ],
+        [
+          'search_repair_message_count',
+          'ALTER TABLE project_data_archive_target_sessions ADD COLUMN search_repair_message_count INTEGER',
+        ],
+        [
+          'search_repair_phase',
+          'ALTER TABLE project_data_archive_target_sessions ADD COLUMN search_repair_phase TEXT',
+        ],
+        [
+          'search_repair_raw_cursor',
+          'ALTER TABLE project_data_archive_target_sessions ADD COLUMN search_repair_raw_cursor TEXT',
+        ],
+        [
+          'search_repair_grouped_cursor',
+          'ALTER TABLE project_data_archive_target_sessions ADD COLUMN search_repair_grouped_cursor TEXT',
+        ],
+        [
+          'search_repair_projection_sha256',
+          'ALTER TABLE project_data_archive_target_sessions ADD COLUMN search_repair_projection_sha256 TEXT',
+        ],
+        [
+          'search_repair_document_count',
+          'ALTER TABLE project_data_archive_target_sessions ADD COLUMN search_repair_document_count INTEGER',
+        ],
+      ] as const) {
+        try {
+          sql.exec(statement);
+        } catch (error) {
+          if (
+            !(error instanceof Error) ||
+            !error.message.toLowerCase().includes(`duplicate column name: ${column}`)
+          )
+            throw error;
+        }
+      }
+      sql.exec(`SELECT source_cursor, source_has_more
+        FROM project_data_archive_target_chunks LIMIT 0`);
+      sql.exec(`SELECT search_index_version, search_index_state,
+          search_index_message_count, search_index_document_count,
+          search_index_sha256, search_indexed_at, search_repair_next_ordinal,
+          search_repair_pending_json, search_repair_message_count, search_repair_phase,
+          search_repair_raw_cursor, search_repair_grouped_cursor,
+          search_repair_projection_sha256, search_repair_document_count
+        FROM project_data_archive_target_sessions LIMIT 0`);
+      sql.exec(`CREATE TABLE IF NOT EXISTS project_data_archive_search_documents (
+        rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+        projection_id TEXT NOT NULL UNIQUE,
+        document_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      )`);
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_project_data_archive_search_documents_session
+        ON project_data_archive_search_documents(session_id, created_at DESC, projection_id DESC)`);
+      sql.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS project_data_archive_search_documents_fts
+        USING fts5(content, content='project_data_archive_search_documents', content_rowid='rowid')`);
+    },
+  },
+  {
+    // The staging-only first version of this migration also created
+    // `idx_workspace_activity_next_idle_check`. No query can use it (the sweep filters on a
+    // computed next-check time), so it was dropped before release; objects that ran that version
+    // keep the unused index, so the index name may not be reused.
+    name: '060-workspace-idle-backoff',
+    run: (sql) => {
+      sql.exec(
+        `ALTER TABLE workspace_activity
+         ADD COLUMN idle_check_retry_count INTEGER NOT NULL DEFAULT 0`
+      );
+      sql.exec(`ALTER TABLE workspace_activity ADD COLUMN next_idle_check_at INTEGER`);
+    },
+  },
+  // Retired before release: `059-message-upload-parts` ran on staging only. Objects
+  // that ran it keep an unused `message_upload_parts` table, since DO migrations
+  // never drop tables, so neither that migration name nor that table name may be reused.
 ];
 
 /**

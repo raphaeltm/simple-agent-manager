@@ -1,0 +1,142 @@
+import type { DetectedPort, NodeResponse, WorkspaceResponse } from '@simple-agent-manager/shared';
+import { Box, Cloud, Cpu, GitBranch, MapPin, Server } from 'lucide-react';
+
+import type { ChatSessionResponse } from '../../lib/api';
+import { EffectivePoolSummary } from '../hardware/EffectivePoolSummary';
+import { HardwareDetails, requestedResources } from '../hardware/HardwareDetails';
+import { PlacementDecisionSummary } from '../hardware/PlacementDecisionSummary';
+import { PortsContextItem } from './SessionHeaderBadges';
+
+function ContextItem({
+  icon,
+  label,
+  children,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-center gap-1.5 text-xs text-fg-muted min-w-0">
+      <span className="shrink-0 opacity-60" aria-hidden="true">
+        {icon}
+      </span>
+      <span className="font-medium shrink-0">{label}:</span>
+      <span className="text-fg-primary [overflow-wrap:anywhere] min-w-0">{children}</span>
+    </div>
+  );
+}
+
+export function SessionHeaderInfrastructure({
+  session,
+  workspace,
+  node,
+  taskEmbed,
+  detectedPorts,
+  getWorkspacePortHref,
+}: {
+  session: ChatSessionResponse;
+  workspace: WorkspaceResponse | null;
+  node: NodeResponse | null;
+  taskEmbed: ChatSessionResponse['task'] | null;
+  detectedPorts: DetectedPort[];
+  getWorkspacePortHref: (port: DetectedPort) => string;
+}) {
+  return (
+    <>
+      {!workspace && taskEmbed?.placementExplanationJson && (
+        <PlacementDecisionSummary explanationJson={taskEmbed.placementExplanationJson} />
+      )}
+      {session.workspaceId && (workspace || node) && (
+        <div className="flex flex-col gap-1.5 pt-1 border-t border-border-default">
+          {workspace && (
+            <>
+              {/*
+                Plain text, deliberately. Workspaces are an implementation detail —
+                `/workspaces/:id` survives for debugging but nothing in the chat routes a
+                user there. The name and status still earn their place here because they
+                are what you quote when something is wrong; the Node row below is the
+                link worth having, since that is the machine you would actually go look at.
+              */}
+              <ContextItem icon={<Box size={12} />} label="Workspace">
+                {workspace.displayName || workspace.name}
+                <span className="text-fg-muted ml-1">({workspace.status})</span>
+              </ContextItem>
+              <ContextItem icon={<Cpu size={12} />} label="Requested">
+                {requestedResources(workspace)}
+              </ContextItem>
+              <HardwareDetails
+                hardware={node ?? workspace.hardware ?? workspace}
+                showProvider={!node}
+              />
+              <EffectivePoolSummary projectId={workspace.projectId} />
+              <PlacementDecisionSummary
+                explanationJson={workspace.placementExplanationJson}
+                showRequested={false}
+              />
+            </>
+          )}
+          {node && (
+            <>
+              <ContextItem icon={<Server size={12} />} label="Node">
+                <a
+                  href={`/nodes/${node.id}`}
+                  className="no-underline hover:underline"
+                  style={{ color: 'var(--sam-color-accent-primary)' }}
+                >
+                  {node.name}
+                </a>
+                {node.healthStatus && (
+                  <span
+                    className="ml-1"
+                    style={{
+                      color:
+                        node.healthStatus === 'healthy'
+                          ? 'var(--sam-color-success)'
+                          : node.healthStatus === 'stale'
+                            ? 'var(--sam-color-warning, #f59e0b)'
+                            : 'var(--sam-color-danger)',
+                    }}
+                  >
+                    ({node.healthStatus})
+                  </span>
+                )}
+              </ContextItem>
+              {node.cloudProvider && (
+                <ContextItem icon={<Cloud size={12} />} label="Provider">
+                  {node.cloudProvider.charAt(0).toUpperCase() + node.cloudProvider.slice(1)}
+                  {workspace?.vmLocation && (
+                    <span className="text-fg-muted ml-1">— {workspace.vmLocation}</span>
+                  )}
+                </ContextItem>
+              )}
+            </>
+          )}
+          {!node && workspace?.vmLocation && (
+            <ContextItem icon={<MapPin size={12} />} label="Location">
+              {workspace.vmLocation}
+            </ContextItem>
+          )}
+          {taskEmbed?.outputBranch && (
+            <ContextItem icon={<GitBranch size={12} />} label="Branch">
+              <span className="font-mono text-[11px]">{taskEmbed.outputBranch}</span>
+            </ContextItem>
+          )}
+          {detectedPorts.length > 0 && (
+            <PortsContextItem ports={detectedPorts} getHref={getWorkspacePortHref} />
+          )}
+        </div>
+      )}
+      {detectedPorts.length > 0 && !(session.workspaceId && (workspace || node)) && (
+        <div className="flex flex-col gap-1.5 pt-1 border-t border-border-default">
+          <PortsContextItem ports={detectedPorts} getHref={getWorkspacePortHref} />
+        </div>
+      )}
+      {session.workspaceId && !workspace && !node && (
+        <div className="pt-1 border-t border-border-default">
+          <span className="text-xs text-fg-muted">Loading infrastructure details...</span>
+        </div>
+      )}
+    </>
+  );
+}

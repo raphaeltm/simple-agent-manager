@@ -1,0 +1,446 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+/**
+ * Behavioral coverage for the cf-container create-workspace timeout plumbing.
+ *
+ * Regression context (2026-07-18 instant-container outage): the standalone
+ * vm-agent clones the repository synchronously inside POST /workspaces, so the
+ * control-plane request must run under the configurable cf-container create
+ * budget. These tests prove the `requestTimeoutMs` option actually bounds the
+ * container fetch race in both directions (short budget times out, sufficient
+ * budget succeeds) and that the interactive 30s default still applies when no
+ * override is passed.
+ */
+
+const mocks = vi.hoisted(() => ({
+  jwt: {
+    signNodeManagementToken: vi.fn(),
+    signTerminalToken: vi.fn(),
+  },
+  telemetry: {
+    recordNodeRoutingMetric: vi.fn(),
+  },
+  container: {
+    fetchVmAgentContainer: vi.fn(),
+    getVmAgentContainerConfig: vi.fn(),
+    markVmAgentContainerActiveWorkEndedBestEffort: vi.fn(),
+    markVmAgentContainerActiveWorkStarted: vi.fn(),
+    markVmAgentContainerRequestInterrupted: vi.fn(),
+  },
+  drizzle: vi.fn(),
+}));
+
+vi.mock('../../../src/services/jwt', () => mocks.jwt);
+vi.mock('../../../src/services/telemetry', () => mocks.telemetry);
+vi.mock('../../../src/services/vm-agent-container', () => mocks.container);
+vi.mock('drizzle-orm/d1', () => ({ drizzle: mocks.drizzle }));
+
+import {
+  createAgentSessionOnNode,
+  createWorkspaceOnNode,
+  deleteWorkspaceOnNode,
+  getCfContainerCreateWorkspaceTimeoutMs,
+  NodeAgentRequestError,
+  sendPromptToAgentOnNode,
+  startAgentSessionOnNode,
+} from '../../../src/services/node-agent';
+import { restoreAgentSessionOnNode } from '../../../src/services/node-agent-session-snapshots';
+
+const cfContainerEnv = {
+  BASE_DOMAIN: 'example.com',
+  CF_CONTAINER_ENABLED: 'true',
+  VM_AGENT_CONTAINER: {},
+  DATABASE: { prepare: () => ({}) },
+} as never;
+
+const workspacePayload = {
+  workspaceId: 'ws-1',
+  repository: 'owner/repo',
+  branch: 'main',
+  callbackToken: 'callback-token',
+  lightweight: true,
+};
+
+function pendingResponse(delayMs: number): Promise<Response> {
+  return new Promise((resolve) => {
+    setTimeout(() => resolve(new Response('{"workspaceId":"ws-1"}', { status: 200 })), delayMs);
+  });
+}
+
+describe('getCfContainerCreateWorkspaceTimeoutMs', () => {
+  it('defaults to 120s and honors env overrides with safe fallbacks', () => {
+    expect(getCfContainerCreateWorkspaceTimeoutMs({})).toBe(120_000);
+    expect(
+      getCfContainerCreateWorkspaceTimeoutMs({ CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS: '45000' })
+    ).toBe(45_000);
+    expect(
+      getCfContainerCreateWorkspaceTimeoutMs({ CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS: '0' })
+    ).toBe(120_000);
+    expect(
+      getCfContainerCreateWorkspaceTimeoutMs({ CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS: 'nope' })
+    ).toBe(120_000);
+  });
+});
+
+describe('createWorkspaceOnNode cf-container timeout plumbing', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mocks.jwt.signNodeManagementToken.mockResolvedValue({ token: 'mgmt-token' });
+    mocks.container.getVmAgentContainerConfig.mockReturnValue({
+      enabled: true,
+      vmAgentPort: 8080,
+      sleepAfter: '10m',
+    });
+    mocks.container.markVmAgentContainerRequestInterrupted.mockResolvedValue(null);
+    mocks.drizzle.mockReturnValue({
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            get: () => Promise.resolve({ runtime: 'cf-container' }),
+          }),
+        }),
+      }),
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  it('times out with the provided budget when the container request stalls', async () => {
+    mocks.container.fetchVmAgentContainer.mockImplementation(() => pendingResponse(60_000));
+
+    const createPromise = createWorkspaceOnNode(
+      'node-1',
+      cfContainerEnv,
+      'user-1',
+      workspacePayload,
+      {
+        requestTimeoutMs: 50,
+      }
+    );
+    const rejection = expect(createPromise).rejects.toThrow('Request timed out after 50ms');
+    await vi.advanceTimersByTimeAsync(60);
+    await rejection;
+  });
+
+  it('completes when the container responds within the provided budget', async () => {
+    mocks.container.fetchVmAgentContainer.mockImplementation(() => pendingResponse(40_000));
+
+    const createPromise = createWorkspaceOnNode(
+      'node-1',
+      cfContainerEnv,
+      'user-1',
+      workspacePayload,
+      {
+        requestTimeoutMs: 120_000,
+      }
+    );
+    await vi.advanceTimersByTimeAsync(40_500);
+    await expect(createPromise).resolves.toEqual({ workspaceId: 'ws-1' });
+  });
+
+  it('keeps the interactive 30s default when no override is provided', async () => {
+    mocks.container.fetchVmAgentContainer.mockImplementation(() => pendingResponse(60_000));
+
+    const createPromise = createWorkspaceOnNode(
+      'node-1',
+      cfContainerEnv,
+      'user-1',
+      workspacePayload
+    );
+    const rejection = expect(createPromise).rejects.toThrow('Request timed out after 30000ms');
+    await vi.advanceTimersByTimeAsync(30_100);
+    await rejection;
+  });
+
+  it('does not start cf-container recovery when a deletion request times out', async () => {
+    mocks.container.fetchVmAgentContainer.mockImplementation(() => pendingResponse(60_000));
+
+    const deletionPromise = deleteWorkspaceOnNode('node-1', 'ws-1', cfContainerEnv, 'user-1', {
+      requestTimeoutMs: 50,
+    });
+    const rejection = expect(deletionPromise).rejects.toThrow('Request timed out after 50ms');
+    await vi.advanceTimersByTimeAsync(60);
+    await rejection;
+
+    expect(mocks.container.markVmAgentContainerRequestInterrupted).not.toHaveBeenCalled();
+  });
+
+  it('classifies a timed-out prompt before returning and never replays it', async () => {
+    mocks.container.fetchVmAgentContainer.mockImplementation(() => pendingResponse(60_000));
+    mocks.container.markVmAgentContainerRequestInterrupted.mockResolvedValue({
+      ok: false,
+      status: 'recovering',
+      code: 'RUNTIME_REQUEST_INTERRUPTED',
+      message: 'internal transport detail: bearer should-not-leak',
+    });
+
+    const promptPromise = sendPromptToAgentOnNode(
+      'node-1',
+      'ws-1',
+      'agent-1',
+      'continue',
+      cfContainerEnv,
+      'user-1',
+      'message-1',
+      { requestTimeoutMs: 50 }
+    ).catch((error) => error);
+    await vi.advanceTimersByTimeAsync(60);
+    const error = await promptPromise;
+
+    expect(error).toBeInstanceOf(NodeAgentRequestError);
+    expect(error).toMatchObject({
+      statusCode: 409,
+      error: 'RUNTIME_REQUEST_INTERRUPTED',
+      message: expect.stringContaining('execution outcome is unknown'),
+    });
+    expect(mocks.container.fetchVmAgentContainer).toHaveBeenCalledTimes(1);
+    expect(mocks.container.markVmAgentContainerRequestInterrupted).toHaveBeenCalledWith(
+      cfContainerEnv,
+      'node-1',
+      { method: 'POST', errorName: 'request_timeout' }
+    );
+  });
+
+  it('preserves a stable interruption response returned directly by the Durable Object', async () => {
+    mocks.container.fetchVmAgentContainer.mockResolvedValue(
+      Response.json(
+        {
+          error: 'RUNTIME_REQUEST_INTERRUPTED',
+          message: 'internal transport detail: bearer should-not-leak',
+        },
+        { status: 500 }
+      )
+    );
+
+    const error = await sendPromptToAgentOnNode(
+      'node-1',
+      'ws-1',
+      'agent-1',
+      'continue',
+      cfContainerEnv,
+      'user-1'
+    ).catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(NodeAgentRequestError);
+    expect(error).toMatchObject({
+      statusCode: 409,
+      error: 'RUNTIME_REQUEST_INTERRUPTED',
+      message: expect.stringContaining('execution outcome is unknown'),
+    });
+    expect(error.message).not.toContain('bearer should-not-leak');
+    expect(mocks.container.fetchVmAgentContainer).toHaveBeenCalledTimes(1);
+    expect(mocks.container.markVmAgentContainerRequestInterrupted).not.toHaveBeenCalled();
+  });
+
+  it('carries an internal source-task guard to the cf-container request boundary', async () => {
+    mocks.container.fetchVmAgentContainer.mockImplementation(async () =>
+      Response.json({ status: 'accepted' }, { status: 200 })
+    );
+    const sourceTaskGuard = {
+      taskId: 'parent-task-1',
+      projectId: 'project-1',
+      chatSessionId: 'chat-1',
+    };
+
+    await sendPromptToAgentOnNode(
+      'node-1',
+      'ws-1',
+      'agent-1',
+      'continue',
+      cfContainerEnv,
+      'user-1',
+      'message-1',
+      { sourceTaskGuard }
+    );
+
+    expect(mocks.container.fetchVmAgentContainer).toHaveBeenCalledWith(
+      cfContainerEnv,
+      'node-1',
+      expect.any(Request),
+      8080,
+      sourceTaskGuard
+    );
+    const proxiedRequest = mocks.container.fetchVmAgentContainer.mock.calls[0]?.[2] as Request;
+    expect(proxiedRequest).toBeInstanceOf(Request);
+    expect((proxiedRequest as unknown as Record<string, unknown>).sourceTaskGuard).toBeUndefined();
+  });
+
+  it('revalidates and carries the guard through agent create/start physical boundaries', async () => {
+    mocks.container.fetchVmAgentContainer.mockImplementation(async () =>
+      Response.json({ status: 'accepted' }, { status: 200 })
+    );
+    const sourceTaskGuard = {
+      taskId: 'parent-task-agent',
+      projectId: 'project-1',
+      chatSessionId: 'chat-1',
+    };
+    const beforeExternalMutation = vi.fn().mockResolvedValue(undefined);
+
+    await createAgentSessionOnNode(
+      'node-1',
+      'ws-1',
+      'agent-1',
+      'Recovered agent',
+      cfContainerEnv,
+      'user-1',
+      'chat-1',
+      'project-1',
+      undefined,
+      { sourceTaskGuard, beforeExternalMutation }
+    );
+    await startAgentSessionOnNode(
+      'node-1',
+      'ws-1',
+      'agent-1',
+      'claude-code',
+      'Continue recovered work',
+      cfContainerEnv,
+      'user-1',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { sourceTaskGuard, beforeExternalMutation }
+    );
+    await restoreAgentSessionOnNode(
+      'node-1',
+      'ws-1',
+      'agent-1',
+      cfContainerEnv,
+      'user-1',
+      { chatSessionId: 'chat-1', runtime: 'cf-container', agentType: 'claude-code' },
+      { sourceTaskGuard, beforeExternalMutation }
+    );
+
+    expect(beforeExternalMutation).toHaveBeenCalledTimes(4);
+    expect(mocks.container.fetchVmAgentContainer).toHaveBeenNthCalledWith(
+      1,
+      cfContainerEnv,
+      'node-1',
+      expect.any(Request),
+      8080,
+      sourceTaskGuard
+    );
+    expect(mocks.container.fetchVmAgentContainer).toHaveBeenNthCalledWith(
+      2,
+      cfContainerEnv,
+      'node-1',
+      expect.any(Request),
+      8080,
+      sourceTaskGuard
+    );
+    expect(mocks.container.fetchVmAgentContainer).toHaveBeenNthCalledWith(
+      3,
+      cfContainerEnv,
+      'node-1',
+      expect.any(Request),
+      8080,
+      sourceTaskGuard
+    );
+  });
+
+  it('withholds cf-container workspace creation when authority is revoked at the physical boundary', async () => {
+    const beforeExternalMutation = vi.fn().mockRejectedValue(new Error('source authority revoked'));
+
+    await expect(
+      createWorkspaceOnNode('node-1', cfContainerEnv, 'user-1', workspacePayload, {
+        sourceTaskGuard: {
+          taskId: 'source-task-workspace',
+          projectId: 'project-1',
+          chatSessionId: 'chat-1',
+        },
+        beforeExternalMutation,
+      })
+    ).rejects.toThrow('source authority revoked');
+
+    expect(beforeExternalMutation).toHaveBeenCalledOnce();
+    expect(mocks.container.fetchVmAgentContainer).not.toHaveBeenCalled();
+  });
+
+  it.each(['vm', 'cf-container'])('withholds a %s prompt when authority is revoked during token signing', async (runtime) => {
+    let releaseSigning!: () => void;
+    let signingStarted!: () => void;
+    const started = new Promise<void>((resolve) => { signingStarted = resolve; });
+    const barrier = new Promise<void>((resolve) => { releaseSigning = resolve; });
+    mocks.jwt.signNodeManagementToken.mockImplementationOnce(async () => {
+      signingStarted();
+      await barrier;
+      return { token: 'mgmt-token' };
+    });
+    mocks.drizzle.mockReturnValue({
+      select: () => ({ from: () => ({ where: () => ({ get: async () => ({ runtime }) }) }) }),
+    });
+    const directFetch = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', directFetch);
+    mocks.container.fetchVmAgentContainer.mockResolvedValue(new Response('{}', { status: 200 }));
+    let authorized = true;
+    const beforeExternalMutation = async () => {
+      if (!authorized) throw new Error('source authority revoked');
+    };
+    const pending = sendPromptToAgentOnNode('node-1', 'ws-1', 'session-1', 'wake', cfContainerEnv,
+      'user-1', 'message-1', { beforeExternalMutation });
+    await started;
+    authorized = false;
+    const rejection = expect(pending).rejects.toThrow('source authority revoked');
+    releaseSigning();
+    await rejection;
+    expect(directFetch).not.toHaveBeenCalled();
+    expect(mocks.container.fetchVmAgentContainer).not.toHaveBeenCalled();
+  });
+
+  it('withholds direct VM workspace creation when authority is revoked at the physical boundary', async () => {
+    mocks.drizzle.mockReturnValue({
+      select: () => ({
+        from: () => ({
+          where: () => ({ get: () => Promise.resolve({ runtime: 'vm' }) }),
+        }),
+      }),
+    });
+    const directFetch = vi.fn();
+    vi.stubGlobal('fetch', directFetch);
+    const beforeExternalMutation = vi.fn().mockRejectedValue(new Error('source authority revoked'));
+
+    await expect(
+      createWorkspaceOnNode('node-1', cfContainerEnv, 'user-1', workspacePayload, {
+        beforeExternalMutation,
+      })
+    ).rejects.toThrow('source authority revoked');
+
+    expect(beforeExternalMutation).toHaveBeenCalledOnce();
+    expect(directFetch).not.toHaveBeenCalled();
+    expect(mocks.container.fetchVmAgentContainer).not.toHaveBeenCalled();
+  });
+
+  it('ends active work and withholds agent start when the physical-boundary recheck revokes', async () => {
+    const beforeExternalMutation = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('source authority revoked'));
+
+    await expect(
+      startAgentSessionOnNode(
+        'node-1',
+        'ws-1',
+        'agent-1',
+        'claude-code',
+        'Continue recovered work',
+        cfContainerEnv,
+        'user-1',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { beforeExternalMutation }
+      )
+    ).rejects.toThrow('source authority revoked');
+
+    expect(beforeExternalMutation).toHaveBeenCalledTimes(2);
+    expect(mocks.container.markVmAgentContainerActiveWorkStarted).toHaveBeenCalledOnce();
+    expect(mocks.container.markVmAgentContainerActiveWorkEndedBestEffort).toHaveBeenCalledOnce();
+    expect(mocks.container.fetchVmAgentContainer).not.toHaveBeenCalled();
+  });
+});

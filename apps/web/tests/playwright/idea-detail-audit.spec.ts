@@ -367,6 +367,10 @@ async function setupMocks(
     serverError = false,
   } = options;
 
+  await page.addInitScript((userId) => {
+    window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
+  }, MOCK_USER.user.id);
+
   await page.route('**/api/**', async (route: Route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
@@ -378,7 +382,8 @@ async function setupMocks(
     if (path === '/api/github/installations') return respond(200, []);
     if (path.startsWith('/api/notifications')) return respond(200, { notifications: [], unreadCount: 0 });
     if (path === '/api/agents') return respond(200, []);
-    if (path.startsWith('/api/credentials')) return respond(200, { credentials: [] });
+    if (path === '/api/credentials/agent') return respond(200, { credentials: [] });
+    if (path === '/api/credentials') return respond(200, []);
     if (path.startsWith('/api/workspaces')) return respond(200, []);
     if (path === '/api/projects') return respond(200, { projects: [] });
     if (path.endsWith('/health')) return respond(200, { status: 'ok' });
