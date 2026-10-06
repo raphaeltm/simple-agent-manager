@@ -7,8 +7,8 @@ import { TASK_EXECUTION_STATUSES } from '../../services/task-status';
 import { releaseVmProvisioningLease } from '../../services/vm-admission-control';
 import { boundedWarmPlacementClaimGuardSql } from '../../services/warm-placement-claims';
 import { ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL } from '../../services/workspace-resource-capacity';
-import type { StartTaskInput, TaskRunnerContext, TaskRunnerState } from './types';
 import { putTaskRunnerState } from './attempt-storage';
+import type { StartTaskInput, TaskRunnerContext, TaskRunnerState } from './types';
 
 export class TaskExecutionAuthorityRevokedError extends Error {
   readonly permanent = true;
