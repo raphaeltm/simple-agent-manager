@@ -221,7 +221,9 @@ before some actions even when SAM sets Bypass Permissions.
 #### After a chat wakes from sleep
 
 A chat woken from sleep usually doesn't re-apply its profile's mode: it takes its mode from **Agent
-Overrides**, then **Settings → Agents**, and uses Bypass Permissions if neither sets one. Its model
+Overrides**, then **Settings → Agents**, and uses Bypass Permissions if neither sets one. So a chat
+whose profile is set to **Manual** or **Plan Mode** usually goes ahead without asking once it wakes,
+unless one of those places also sets an asking mode. Its model
 usually stays the same, but changes if one of those places sets a model. It also can't ask you
 anything yet — SAM refuses its requests without showing a card. (The exception is a wake where SAM
 has to start the agent fresh: that uses the profile and can ask.) To get the profile's settings

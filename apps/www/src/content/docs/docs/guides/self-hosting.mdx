@@ -109,10 +109,8 @@ default **Bypass Permissions** mode rarely ask, so most users won't notice, but 
 **Manual**, **Accept Edits**, or **Plan Mode** — or Amp or Gemini CLI, which ask on their own, or
 Claude Code in a devcontainer that
 [runs as `root`](/docs/guides/agents/#claude-code-asks-even-in-bypass-permissions) — is told no
-every time it asks to make a change. A mode can be set in a profile, a project's **Agent
-Overrides**, or a user's **Settings → Agents**; saving that page on a release before v2026.10.05
-stored the old always-ask default, now shown as **Manual**. Run the newest release: v2026.10.05 is
-the first where Claude Code agents with no mode set start in Bypass Permissions.
+every time it asks to make a change. Release-specific steps are in the self-hoster notes of
+[Recent Product Changes](/docs/guides/recent-product-changes/).
 
 We recommend turning it on; the hosted service has it on. Agents set to ask then wait for an
 answer — a permission request for up to 30 minutes in a task and 2 hours in a chat — and only the

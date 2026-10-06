@@ -40,11 +40,6 @@ For every kind of request:
   answer later or from another device until its deadline, which the card shows. If nobody answers in
   time, the request ends — the card says it expired or was cancelled — and the agent is told no, so
   the action it asked about does not happen. Send a message to tell the agent how to carry on.
-- **On long-running VM work, answer within an hour.** Once a VM chat or task has been awake for
-  four hours, SAM's check for
-  [stalled turns](/docs/guides/session-troubleshooting/#sam-ended-a-stalled-turn) can end it when a
-  card has waited over an hour — the check can't yet tell that the agent is waiting for you — and
-  changes the agent hasn't pushed are lost.
 - **Answer on the card, not in the message box.** A message you type waits until the agent's turn
   ends, and the turn can't end until the card is answered or expires. To stop the agent instead,
   select **Interrupt** (the red button above the message box); the card then says **Request
@@ -55,9 +50,24 @@ For every kind of request:
   unconfirmed, or that the request was interrupted because the agent stopped first, check whether
   the agent carried on. If it's still waiting, select **Interrupt** first, then send your decision as
   a message.
-- **A chat that has slept and woken usually can't ask yet.** SAM refuses its requests without
-  showing a card, so the agent is told no. When you need to approve something, [fork](#conversation-forking) the
-  chat or start a new one.
+
+:::caution[Current limitations]
+
+- **A chat that has slept and woken usually can't ask.** SAM refuses its requests without showing a
+  card, and the chat usually drops its profile's permission mode, so a **Manual** profile may go
+  ahead without asking. Chats sleep on their own when idle — by default after 15 minutes on a VM and
+  an hour on Instant — and the session list then shows **Sleeping**. To approve the agent's work
+  again, [fork](#conversation-forking) the chat or start a new one; a fork carries a summary of the
+  chat, not its files. See
+  [The agent stops for approval and no card appears](/docs/guides/session-troubleshooting/#the-agent-stops-for-approval-and-no-card-appears)
+  for a way to keep them.
+- **On long-running VM work, answer within an hour.** Once a VM chat or task has been awake for four
+  hours, SAM's check for
+  [stalled turns](/docs/guides/session-troubleshooting/#sam-ended-a-stalled-turn) can end it when a
+  card has waited over an hour — the check can't yet tell that the agent is waiting for you — and
+  changes the agent hasn't pushed are lost.
+
+:::
 
 :::note[Self-hosted instances]
 These requests are off until an operator turns them on — see
@@ -111,22 +121,8 @@ own. **Decline** tells the agent you're skipping the question. A question waits 
   />
 </picture>
 
-Questions appear only in sessions labelled **Chat** in the session list. A **Task** can ask for
-permission, but not ask questions or send links. Which you get depends on what you start the chat
-with:
-
-- An [agent profile](/docs/guides/agents/#agent-profiles) whose runtime is
-  [Instant](/docs/guides/instant-sessions/) gives a **Chat** (unless you attach a file and also pick
-  a skill set to **Task**).
-- On a VM, a profile whose **Task Mode** is **Conversation** gives a **Chat**; profiles you create
-  with **Chat and explore** in the chat input are set that way. With **Task Mode** left at
-  **Default**, a profile whose **Workspace Profile** is **Lightweight** does too. If you also pick a
-  skill, the skill's **Task Mode** decides instead, and new skills are set to **Task**.
-- Anything else gives a **Task**.
-
-A **Chat** doesn't commit, push, or open a pull request for you, so keep **Task Mode** at **Task**
-for work you want delivered as a pull request — see
-[What happens to your work](/docs/guides/instant-sessions/#what-happens-to-your-work).
+Questions appear only in sessions labelled **Chat** in the session list — see
+[Chat or Task](#chat-or-task).
 
 ### Links to open
 
@@ -156,6 +152,24 @@ A tool whose sign-in has to return to `localhost` can't finish from a SAM sessio
 it and the chat says **This sign-in flow requires a local callback that this session cannot
 complete**. Connect that service another way — see
 [When a server needs sign-in](/docs/guides/mcp-servers/#when-a-server-needs-sign-in).
+
+### Chat or Task
+
+Each session is labelled **Chat** or **Task** in the session list. A **Task** can ask for
+permission, but not ask questions or send links. Which you get depends on what you start it with:
+
+- An [agent profile](/docs/guides/agents/#agent-profiles) whose runtime is
+  [Instant](/docs/guides/instant-sessions/) gives a **Chat** (unless you attach a file and also pick
+  a skill set to **Task**).
+- On a VM, a profile whose **Task Mode** is **Conversation** gives a **Chat**; profiles you create
+  with **Chat and explore** in the chat input are set that way. With **Task Mode** left at
+  **Default**, a profile whose **Workspace Profile** is **Lightweight** does too. If you also pick a
+  skill, the skill's **Task Mode** decides instead, and new skills are set to **Task**.
+- Anything else gives a **Task**.
+
+A **Chat** doesn't commit, push, or open a pull request for you, so set **Task Mode** to **Task** for
+work you want delivered as a pull request — see
+[What happens to your work](/docs/guides/instant-sessions/#what-happens-to-your-work).
 
 ## Message Actions
 

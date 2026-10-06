@@ -235,3 +235,19 @@ since (#2180–#2240).
     - LOW: query owners and who can change what (a skill's mode only via `update_skill` or the API).
     - LOW: concepts wording.
     - LOW: an Instant chat with an attachment and a Task skill becomes a Task.
+- **Round 6**, same two lenses on b6ab2b1d4.
+  - User reviewer, 2 HIGH, 3 MEDIUM and 4 LOW. All verified and fixed:
+    - HIGH: a woken chat with a **Manual** or **Plan Mode** profile usually runs without asking.
+      `/agent-settings` falls back to Bypass. agents.md and the changelog now say so plainly.
+    - HIGH: the lasting fix for woken chats that stop is to set Bypass Permissions (or Inherit)
+      in **Agent Overrides** or **Settings → Agents**; it applies on the next wake (Sleep, then
+      send a message). Troubleshooting now says this, and its mode paragraph is cut to one link.
+    - MEDIUM: forks carry a summary, not files. The default auto-sleep times (15 min VM, 1 h
+      Instant) and the **Sleeping** label are now stated.
+    - MEDIUM: quickstart says "Build and open PRs, then Cloud VM". Picking Instant in the wizard
+      forces conversation mode (`ChatInput.tsx`).
+    - MEDIUM: chat-features now has a "Current limitations" caution box (woken chats, 4-hour
+      stall) separate from the how-to bullets.
+    - LOW: a new "Chat or Task" heading, with the concepts and MCP links pointing to it. Also:
+      "set Task Mode to Task", the changelog sentence order, the MCP woken-chat caveat, and the
+      release history cut from the self-hosting intro.
