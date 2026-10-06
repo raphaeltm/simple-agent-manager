@@ -102,3 +102,11 @@ Related, tracked elsewhere:
 - Full root test:20/21 tasks PASS; API816/817 filesPASS with8 failures confined to old mocked session-sleep fixture missing db.insert. Corrected that fixture to model event insert-select without consuming workspace query responses; all43 tests pass on targeted rerun. Full API11387 passing tests plus targeted43/43 after correction; whole suite was not rerun yet. Runtime source unchanged.
 
 - Sonar reported205 copied fixture lines. Extracted shared SQLite/boundary fixture used by consumer and lifecycle suites;27/27 targetedPASS, eslint/format/diffPASS. Independent API reviewer confirms flattened else-if is behaviorally equivalent, preserving all predicates and D1 batch order. No new admission/telemetry scope.
+
+
+## Coordinated live verification (2026-10-06)
+
+- Full serial repository rerun passed 21/21 tasks: API 817 files / 11,395 tests; web 336 files / 4,023 tests. Full build, lint and typecheck passed. PR #2240 CI and Sonar passed.
+- Coordinator deployed integration `2613b82d02afe0c10a229b236055adcb979085c7`; replacement VM reported reviewed Go `4f83d6a7287c4c34fff480dc78cf9cac269840aa` with real healthy heartbeats. Live sleeping dashboard/activity/account-map visibility and reviewed mobile/desktop screenshots passed.
+- Real child `01M47BRJVHCQHKTFHSNYA8TEDY` slept at 01:05:25 UTC, with available snapshot and one status event. Parent handoff message `01M47BYWX4W9H26KPDSJTBENVB` accepted at 01:06:30 recovered the same task on the same VM. Assistant replied `HANDOFF_WAKE_OK` at 01:12:28.984 and returned to idle. Durable ledger confirmed acked delivery, runtime receipt support and no final error. Recovery creates workspace `01M47C7AHNC0N40N8HKQ16K1WF`; stream sequence restarts, so reply chunks were verified by creation time.
+- Draft hold: durable-mailbox wake, sleeping parent cancellation and terminal refusal remain unexecuted. Released all fixture writes to resource-history coordinator at 01:12:30 to preserve telemetry and 01:20 cleanup deadline. No gate waiver, independent deployment, extra VM, manual resume or repeated accepted message. Capacity owns final runtime/node/provider cleanup after coordinator release; retain history and snapshots under existing expiry.

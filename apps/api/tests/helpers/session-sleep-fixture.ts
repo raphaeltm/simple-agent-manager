@@ -157,49 +157,59 @@ export function createSessionSleepFixture(taskStatus: string, getActivity: () =>
     .run(START.toISOString(), START.toISOString());
 
   const order: string[] = [];
-  mocks.getSessionState.mockImplementation(async () => getActivity());
+  mocks.getSessionState.mockImplementation(() => Promise.resolve(getActivity()));
   let sessionStatus = 'active';
-  mocks.getSession.mockImplementation(async () => ({
-    id: 'chat-1',
-    status: sessionStatus,
-    taskId: 'task-1',
-    workspaceId: 'workspace-1',
-  }));
-  mocks.sleepSession.mockImplementation(async () => {
+  mocks.getSession.mockImplementation(() =>
+    Promise.resolve({
+      id: 'chat-1',
+      status: sessionStatus,
+      taskId: 'task-1',
+      workspaceId: 'workspace-1',
+    })
+  );
+  mocks.sleepSession.mockImplementation(() => {
     sessionStatus = 'sleeping';
-    return true;
+    return Promise.resolve(true);
   });
-  mocks.stopSession.mockImplementation(async () => {
+  mocks.stopSession.mockImplementation(() => {
     sessionStatus = 'stopped';
+    return Promise.resolve();
   });
   mocks.getAcpSession.mockResolvedValue(null);
-  mocks.stopWorkspaceOnNode.mockImplementation(async () => {
+  mocks.stopWorkspaceOnNode.mockImplementation(() => {
     order.push('stop-workspace');
+    return Promise.resolve();
   });
-  mocks.sleepVmAgentContainer.mockImplementation(async (_env: Env, nodeId: string) => {
+  mocks.sleepVmAgentContainer.mockImplementation((_env: Env, nodeId: string) => {
     order.push(`sleep-container:${nodeId}`);
+    return Promise.resolve();
   });
-  mocks.stopComputeTracking.mockImplementation(async () => {
+  mocks.stopComputeTracking.mockImplementation(() => {
     order.push('stop-compute-tracking');
-    return 1;
+    return Promise.resolve(1);
   });
-  mocks.cleanupTaskRun.mockImplementation(async () => {
+  mocks.cleanupTaskRun.mockImplementation(() => {
     order.push('task-cleanup');
+    return Promise.resolve();
   });
-  mocks.scheduleWorkspaceDeletion.mockImplementation(async () => {
+  mocks.scheduleWorkspaceDeletion.mockImplementation(() => {
     order.push('schedule-deletion');
+    return Promise.resolve();
   });
-  mocks.markIdle.mockImplementation(async () => {
+  mocks.markIdle.mockImplementation(() => {
     order.push('mark-node-warm');
+    return Promise.resolve();
   });
-  mocks.r2Head.mockImplementation(async (key: string) => {
+  mocks.r2Head.mockImplementation((key: string) => {
     order.push(`r2-head:${key}`);
-    return key.endsWith('/home.tar')
-      ? { size: 4, checksums: { sha256: checksumBytes(HOME_SHA256) } }
-      : { size: 128, checksums: {} };
+    return Promise.resolve(
+      key.endsWith('/home.tar')
+        ? { size: 4, checksums: { sha256: checksumBytes(HOME_SHA256) } }
+        : { size: 128, checksums: {} }
+    );
   });
   mocks.hibernateAgentSessionOnNode.mockImplementation(
-    async (
+    (
       _nodeId: string,
       workspaceId: string,
       agentSessionId: string,
@@ -236,7 +246,7 @@ export function createSessionSleepFixture(taskStatus: string, getActivity: () =>
           chatSessionId
         );
       order.push(`final-snapshot:${chatSessionId}`);
-      return { status: 'pending', accepted: true };
+      return Promise.resolve({ status: 'pending', accepted: true });
     }
   );
 
