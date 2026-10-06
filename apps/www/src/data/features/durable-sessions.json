@@ -2,10 +2,10 @@
   "slug": "durable-sessions",
   "label": "Durable Sessions & Orchestration",
   "title": "Agents that sleep,\nwake, and coordinate.",
-  "subtitle": "A session sleeps and wakes from a 7-day snapshot without losing context. Agents dispatch subtasks to each other and can interrupt a busy peer. App deployments turn a Compose release into a running, configurable app.",
+  "subtitle": "Sessions normally sleep and wake from a 7-day snapshot. After repeated snapshot failures, idle VM sessions can fall back to the transcript and a verified Git recovery point, with a notice. Agents dispatch subtasks to each other and can interrupt a busy peer. App deployments turn a Compose release into a running, configurable app.",
   "summary": "Sessions survive runtime teardown, agents coordinate with each other, and Compose releases deploy straight from the project.",
   "highlights": [
-    "Sessions sleep and wake from a 7-day snapshot of the agent’s home directory and repository state",
+    "Sessions normally restore home and repository state from a 7-day snapshot; VM fallback preserves the transcript and a verified Git recovery point",
     "Agents dispatch subtasks to peers and send durable messages that can interrupt a busy agent",
     "Missions coordinate multi-agent work toward a shared goal",
     "App deployments run Compose releases with environments, configuration, and logs",
@@ -23,11 +23,11 @@
   "details": [
     {
       "headline": "Close the tab. The session waits.",
-      "body": "SAM checkpoints a session after idle turns and requires a verified final checkpoint before it sleeps. A replacement runtime restores the agent’s home directory and repository work in progress from that snapshot — for up to seven days — instead of starting blank.",
+      "body": "SAM normally restores the agent’s home directory and repository work from a verified snapshot for up to seven days. After repeated snapshot failures, an idle VM session can sleep with its transcript and a verified Git recovery point instead. SAM shows a notice, and the agent starts fresh on wake. Without a safe recovery point, sleep is blocked.",
       "screenshot": {
         "src": "/images/features/sam-session-sleeping.png",
         "alt": "A finished chat session in the Sleeping state, with the full transcript still visible and a composer that reads Send a message to wake the agent",
-        "caption": "Sessions sleep after idle turns and wake from a seven-day snapshot"
+        "caption": "Sessions normally sleep after idle turns and wake from a seven-day snapshot"
       }
     },
     {

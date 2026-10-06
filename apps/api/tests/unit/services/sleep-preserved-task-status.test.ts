@@ -75,14 +75,22 @@ describe('sleep-preserved task status authority', () => {
         { sleepStatus: 'failed', sleepAfter: NOW, sleepAttempts: spent },
         false,
       ],
+      // No longer exempt: a degraded or in-flight capture with no retry left has given
+      // up like any other. Inside a bounded episode such a row keeps a due retry instead
+      // (next case), so the sweep still falls back or ends it blocked.
       [
-        'a degraded capture the sweep keeps retrying',
+        'a degraded capture with no retry left',
         { sleepStatus: 'failed', status: 'degraded', sleepAttempts: spent },
-        false,
+        true,
       ],
       [
-        'a capture still in progress',
+        'a capture in progress with no retry left',
         { sleepStatus: 'failed', captureGeneration: 'g-2', sleepAttempts: spent },
+        true,
+      ],
+      [
+        'a degraded capture inside its bounded episode',
+        { sleepStatus: 'failed', status: 'degraded', sleepAfter: NOW, sleepAttempts: spent },
         false,
       ],
       ['scheduled', { sleepStatus: 'scheduled', sleepAfter: NOW }, false],
@@ -180,8 +188,15 @@ describe('sleep-preserved task status authority', () => {
         { snapshot: { sleepStatus: 'failed', sleepAfter: NOW } },
       ],
       [
-        'a degraded capture the sweep still retries',
-        { snapshot: { sleepStatus: 'failed', status: 'degraded', sleepAttempts: 9 } },
+        'a degraded capture its bounded episode still retries',
+        {
+          snapshot: {
+            sleepStatus: 'failed',
+            status: 'degraded',
+            sleepAfter: NOW,
+            sleepAttempts: 9,
+          },
+        },
       ],
       [
         'a failed attempt re-armed by a raised budget',
@@ -209,6 +224,10 @@ describe('sleep-preserved task status authority', () => {
       ['a stopped workspace', { workspaceStatus: 'stopped' }],
       ['a workspace still creating', { workspaceStatus: 'creating' }],
       ['a sleep with its budget spent', { snapshot: { sleepStatus: 'failed', sleepAttempts: 9 } }],
+      [
+        'a degraded capture with its budget spent and no retry',
+        { snapshot: { sleepStatus: 'failed', status: 'degraded', sleepAttempts: 9 } },
+      ],
       ['a terminally refused sleep', { snapshot: { sleepStatus: 'terminal_failed' } }],
     ])('releases a failed task with %s to the reapers', (_label, fixture) => {
       expect(owned(fixture)).toBe(false);

@@ -1,5 +1,14 @@
 # A `stopping` sleep whose ProjectData session is already `failed` retries forever
 
+> **Reconciliation 2026-10-05:** Still open; pointer correction. The failed-session predicate
+> is now `apps/api/src/scheduled/session-sleep-lifecycle-repair.ts:51-55` (the `failed` arm at
+> `:54`), and the retry when the session is not already closed is at `:167`. The recovery-workspace
+> finalize with `agentSessionStatus: 'failed'` moved to
+> `apps/api/src/durable-objects/task-runner/state-machine.ts:641-648`. #2223's bounded sleep
+> episode does not cover a sleep stuck in `stopping`. Since #2230 a failed VM wake also fails the
+> conversation's own task (`state-machine.ts:305`); see SAM idea `01M3MFDMZ5AS0BXPHZWS3CRFED` and
+> `2026-10-05-sleeping-task-status-follow-ups.md`.
+
 > **Reconciliation 2026-09-30:** still open (`session-sleep-lifecycle-repair.ts:48,171` unchanged).
 > Same class as SAM idea `01M3MFDMZ5AS0BXPHZWS3CRFED`, also unfixed:
 > `apps/api/src/durable-objects/task-runner/state-machine.ts:582-589` finalizes recovery workspaces

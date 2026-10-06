@@ -116,7 +116,7 @@ Permanently stop a running workspace and delete any retained persistent-session 
 
 ### `POST /api/workspaces/:id/sleep`
 
-Checkpoint the workspace's agent HOME, harness identity, exact Git checkout, and repository work in progress, verify the snapshot, and put the session to sleep. Git state includes the saved `HEAD`, branch or detached state, canonical upstream metadata, clean local-only commits, working tree, and index. VM compute is stopped only after SAM re-verifies the durable manifest and every artifact the manifest still claims. A complete snapshot restores and validates that state; if the saved Git state cannot be recreated, wake reports explicit degraded recovery instead of success on a different commit. Sleep requires a complete final snapshot (`verifyAndBeginSleepTeardown` in `apps/api/src/services/session-sleep-execution.ts`). If the final checkpoint is degraded, or stops reporting progress and is recorded as degraded, the sleep request fails and the workspace stays awake. A session that already sleeps on an older degraded snapshot still wakes and reports the reduced restore state. Sending a follow-up in the same chat wakes the session during the seven-day retention window.
+Checkpoint the workspace's agent HOME, harness identity, exact Git checkout, and repository work in progress, verify the snapshot, and put the session to sleep. Git state includes the saved `HEAD`, branch or detached state, canonical upstream metadata, clean local-only commits, working tree, and index. VM compute is stopped only after SAM re-verifies the durable manifest and every artifact the manifest still claims. A complete snapshot restores and validates that state; if the saved Git state cannot be recreated, wake reports explicit degraded recovery instead of success on a different commit. Sleep requires a complete final snapshot (`verifyAndBeginSleepTeardown` in `apps/api/src/services/session-sleep-execution.ts`). If the final checkpoint is degraded, or stops reporting progress and is recorded as degraded, the sleep request fails and the workspace stays awake. SAM then retries automatically, within the bounded sleep-failure budget (`SESSION_SLEEP_FAILURE_MAX_ATTEMPTS`, `SESSION_SLEEP_FAILURE_MAX_ELAPSED_MS`); after that an idle VM session may sleep on a Git recovery point instead ([SAM could not save a complete snapshot](/docs/guides/session-troubleshooting/#sam-could-not-save-a-complete-snapshot)). A session that already sleeps on an older degraded snapshot still wakes and reports the reduced restore state. Sending a follow-up in the same chat wakes the session during the seven-day retention window.
 
 ### `POST /api/workspaces/:id/restart`
 
@@ -233,6 +233,22 @@ List all credentials for the authenticated user (tokens are not returned).
 ### `DELETE /api/credentials/:provider`
 
 Delete a stored cloud-provider credential.
+
+### `GET /api/credentials/limits`
+
+Latest provider usage windows for the authenticated user's personal credentials, across projects
+(newest sample per credential and window). Each credential carries `credentialId` (for
+`cc_credentials:<id>` references), `level` (`ok`, `warning`, `critical`, `rejected`) and its
+`windows` (`windowType`, `utilizationPercent`, `windowMinutes`, `resetsAt`, `observedAt`, `source`).
+Rows come from `credential_limit_windows`; the response is capped by `CREDENTIAL_LIMIT_READ_MAX_ROWS`.
+
+### `GET /api/projects/:id/credential-limits`
+
+Usage windows visible to the caller inside a project: the caller's own credentials plus project-
+and platform-shared ones, never another member's personal credential. Requires `project:read`.
+Optional `agentSessionId` narrows the result to the credential that agent session is attributed to,
+resolved server-side from `agent_sessions`. The MCP tool `get_credential_limits` exposes the same
+view to agents (`scope: "session" | "project"`).
 
 ### `GET /api/providers/catalog`
 

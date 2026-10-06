@@ -119,6 +119,11 @@ function createDbMock(opts: DbMockOptions) {
           return this;
         },
         first() {
+          if (
+            sql.includes('SELECT id FROM tasks WHERE id = ? AND project_id = ? AND user_id = ?')
+          ) {
+            return Promise.resolve({ id: bound[0] });
+          }
           if (opts.firstResolver) {
             const resolved = opts.firstResolver(sql, bound);
             if (resolved !== FALLTHROUGH) return Promise.resolve(resolved);
@@ -139,7 +144,7 @@ function createDbMock(opts: DbMockOptions) {
         },
         run() {
           runCalls.push({ sql, args: bound });
-          return Promise.resolve({ success: true });
+          return Promise.resolve({ success: true, meta: { changes: 1 } });
         },
       };
     },

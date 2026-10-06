@@ -2,6 +2,7 @@ import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
+import { blockedSleepEpisodeSql } from './session-sleep-episode';
 import { SLEEP_PRESERVED_TERMINAL_TASK_STATUS_SQL } from './sleep-preserved-task-status';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
@@ -37,16 +38,29 @@ export async function cancelScheduledSessionSleep(
       )
   )`;
   const nowIso = new Date().toISOString();
+  const snapshots = schema.sessionSnapshots;
+  const preserve = options.preserveCompletedTaskIntent === true;
+  // A human follow-up is new activity: it ends the bounded sleep-failure episode,
+  // including one that ended blocked, so the next idle period gets a fresh budget
+  // (`session-sleep-episode.ts`). A VM activity report ends the episode only where it
+  // releases the intent; a re-reported stale turn of a finished task keeps the intent
+  // and therefore the budget, or a stale report could reset it forever.
+  const blockedEpisode = sql`${sql.raw(blockedSleepEpisodeSql('session_snapshots'))}`;
   await db
-    .update(schema.sessionSnapshots)
+    .update(snapshots)
     .set({
-      sleepStatus: options.preserveCompletedTaskIntent
-        ? sql`CASE WHEN ${completing} THEN 'scheduled' ELSE NULL END`
-        : null,
+      sleepStatus: preserve ? sql`CASE WHEN ${completing} THEN 'scheduled' ELSE NULL END` : null,
       // Once present, keep the same intent clock across heartbeat re-reports.
-      sleepAfter: options.preserveCompletedTaskIntent
-        ? sql`CASE WHEN ${completing} THEN COALESCE(${schema.sessionSnapshots.sleepAfter}, ${nowIso}) ELSE NULL END`
+      sleepAfter: preserve
+        ? sql`CASE WHEN ${completing} THEN COALESCE(${snapshots.sleepAfter}, ${nowIso}) ELSE NULL END`
         : null,
+      sleepEpisodeStartedAt: preserve
+        ? sql`CASE WHEN ${completing} THEN ${snapshots.sleepEpisodeStartedAt} ELSE NULL END`
+        : null,
+      sleepEpisodeFailures: preserve
+        ? sql`CASE WHEN ${completing} THEN ${snapshots.sleepEpisodeFailures} ELSE 0 END`
+        : 0,
+      sleepFallbackJson: preserve ? sql`${snapshots.sleepFallbackJson}` : null,
       sleepError: null,
       sleepClaimId: null,
       sleepClaimedAt: null,
@@ -55,11 +69,12 @@ export async function cancelScheduledSessionSleep(
     })
     .where(
       and(
-        eq(schema.sessionSnapshots.chatSessionId, chatSessionId),
-        isNull(schema.sessionSnapshots.sleepingAt),
+        eq(snapshots.chatSessionId, chatSessionId),
+        isNull(snapshots.sleepingAt),
         or(
-          isNull(schema.sessionSnapshots.sleepStatus),
-          inArray(schema.sessionSnapshots.sleepStatus, ['scheduled', 'failed', 'preparing'])
+          isNull(snapshots.sleepStatus),
+          inArray(snapshots.sleepStatus, ['scheduled', 'failed', 'preparing']),
+          ...(preserve ? [] : [blockedEpisode])
         )
       )
     );

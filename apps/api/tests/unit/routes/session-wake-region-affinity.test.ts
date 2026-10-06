@@ -59,7 +59,14 @@ async function sleepingConversation(f: Fixture, sleptIn: string, rootExplicit = 
 async function wake(f: Fixture) {
   await expect(ensureSessionRecovery(f.env, 'project-1', 'chat-1')).resolves.toMatchObject({
     status: 'waking',
+    taskId: 'task-1',
   });
+  expect(f.reactivate).toHaveBeenCalledWith(
+    expect.objectContaining({
+      taskId: 'task-1',
+      config: expect.objectContaining({ recoveryAttemptId: expect.any(String) }),
+    })
+  );
   expect(f.starts).toHaveLength(2);
   return f.starts[1]!;
 }

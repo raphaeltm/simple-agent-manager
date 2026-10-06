@@ -291,6 +291,8 @@ type Config struct {
 	ACPCredentialSyncTimeout          time.Duration // Timeout for auth-file sync-back during shutdown (default: 10s, env: ACP_CREDENTIAL_SYNC_TIMEOUT)
 	ACPRestartAttemptTimeout          time.Duration // Bounds one process-monitor agent restart attempt (default: 5m, env: ACP_RESTART_ATTEMPT_TIMEOUT)
 	ACPActivityReportTimeout          time.Duration // Timeout for each ACP activity callback attempt (default: 10s, env: ACP_ACTIVITY_REPORT_TIMEOUT)
+	ACPUsageProbeTimeout              time.Duration // Timeout for one post-turn provider usage probe (default: 10s, env: ACP_USAGE_PROBE_TIMEOUT)
+	OpenCodeGoUsageURL                string        // OpenCode Go usage endpoint probed after each turn (default: https://opencode.ai/zen/go/v1/usage, env: OPENCODE_GO_USAGE_URL)
 	ACPCheckpointPreemptGrace         time.Duration // Graceful cancel/close wait before force fallback (default: 30s, env: ACP_CHECKPOINT_PREEMPT_GRACE)
 	ACPCheckpointPreemptMaxGrace      time.Duration // Maximum caller-selected grace (default: 2m, env: ACP_CHECKPOINT_PREEMPT_MAX_GRACE)
 	ACPCheckpointRolloverTimeout      time.Duration // Full strict rollover operation deadline (default: 2m, env: ACP_CHECKPOINT_ROLLOVER_TIMEOUT)
@@ -401,6 +403,12 @@ type Config struct {
 
 	// Callback retry settings - configurable per constitution principle XI
 	WorkspaceReadyCallbackTimeout time.Duration // HTTP timeout for workspace-ready retry callbacks (env: WORKSPACE_READY_CALLBACK_TIMEOUT, default: 30s)
+
+	// Workspace callback token renewal (see callback_token_renewal.go for defaults and env vars)
+	WorkspaceCallbackTokenRefreshRatio        float64
+	WorkspaceCallbackTokenRenewalTimeout      time.Duration
+	WorkspaceCallbackTokenRenewalRetryInitial time.Duration
+	WorkspaceCallbackTokenRenewalRetryMax     time.Duration
 
 	// Error reporting settings - configurable per constitution principle XI
 	ErrorReportFlushInterval  time.Duration // Background flush interval (default: 30s)

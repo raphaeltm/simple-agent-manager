@@ -600,6 +600,9 @@ func (h *SessionHost) finishPrompt(
 	}))
 	h.checkStderrForSilentErrors(resp.StopReason)
 	h.broadcastPromptResponse(reqID, resp)
+	// Codex and OpenCode expose their plan usage only outside the ACP stream;
+	// sample it once per completed turn (session_host_usage_probe.go).
+	h.scheduleProviderUsageProbe()
 }
 
 func (h *SessionHost) finishPromptCancelled(attempt *promptAttempt, reqID json.RawMessage, info promptStartInfo) {

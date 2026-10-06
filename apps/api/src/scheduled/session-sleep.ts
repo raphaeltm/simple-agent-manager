@@ -1,4 +1,3 @@
-import { and, eq, inArray, isNotNull, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -14,8 +13,21 @@ import {
   sleepWorkspaceSession,
 } from '../services/session-sleep';
 import {
+  sessionSleepEpisodeConfig,
+  sessionSleepEpisodePhase,
+  sessionSleepEpisodeTrigger,
+} from '../services/session-sleep-episode';
+import {
+  endSessionSleepEpisodeBlocked,
+  runSessionSleepFallback,
+  type SessionSleepFallbackOutcome,
+} from '../services/session-sleep-fallback';
+import {
+  isDeadSleepIntentWorkspace,
+  retireDeadWorkspaceSleepIntent,
+} from '../services/session-sleep-fallback-state';
+import {
   claimSessionSnapshotSleep,
-  DEFAULT_SESSION_SLEEP_CLAIM_LEASE_MS,
   DEFAULT_SESSION_SLEEP_MAX_ATTEMPTS,
   DEFAULT_SESSION_SLEEP_RETRY_DELAY_MS,
   deferSessionSnapshotSleepBeforeClaim,
@@ -24,6 +36,7 @@ import {
   sessionLifecycleError,
 } from '../services/session-snapshots';
 import { sessionSleepMaxAttempts } from '../services/sleep-preserved-task-status';
+import { selectSweepCandidates } from './session-sleep-candidates';
 import { reconcileUnscheduledSessionSleeps } from './session-sleep-intent-reconciliation';
 import { terminalizeMissingSleepSource } from './session-sleep-terminal';
 
@@ -40,7 +53,14 @@ export interface SessionSleepSweepStats {
   slept: number;
   deferred: number;
   failed: number;
+  /** Sleep episodes that ended this sweep: blocked, or a missing source retired. */
   exhausted: number;
+  /** Bounded fallback attempts started (`runSessionSleepFallback`). */
+  fallbacks: number;
+  /** Episodes that ended blocked without a recovery point. */
+  blocked: number;
+  /** Intents retired because their workspace is gone. */
+  retired: number;
   budgetExhausted: boolean;
 }
 
@@ -81,15 +101,9 @@ async function settleFailedTaskPreservation(
 async function sleepClaimedSession(
   env: Env,
   db: ReturnType<typeof drizzle<typeof schema>>,
-  candidate: {
-    snapshotId: string;
-    workspaceId: string;
-    userId: string;
-    chatSessionId: string;
-    sleepAttempts: number;
-  },
+  candidate: SweepCandidate & { workspaceId: string },
   claimId: string,
-  maxAttempts: number
+  now: Date
 ): Promise<{ status: 'slept' | 'failed'; exhausted: boolean }> {
   try {
     await sleepWorkspaceSession(env, {
@@ -100,8 +114,15 @@ async function sleepClaimedSession(
     });
     return { status: 'slept', exhausted: false };
   } catch (error) {
-    const attempts = candidate.sleepAttempts + 1;
-    const exhausted = attempts >= maxAttempts;
+    const failures = (candidate.sleepEpisodeFailures ?? 0) + 1;
+    // Whether this failure ends the full-snapshot phase of the bounded episode; the
+    // next sweep then falls back or ends it blocked (`session-sleep-episode.ts`).
+    const exhausted =
+      sessionSleepEpisodePhase(
+        { ...candidate, sleepEpisodeFailures: failures },
+        now,
+        sessionSleepEpisodeConfig(env)
+      ) !== 'full';
     const lifecycleError = sessionLifecycleError(env, error);
     await failSessionSnapshotSleepBeforeTeardown(
       db,
@@ -121,7 +142,9 @@ async function sleepClaimedSession(
       snapshotId: candidate.snapshotId,
       workspaceId: candidate.workspaceId,
       chatSessionId: candidate.chatSessionId,
-      attempts,
+      attempts: candidate.sleepAttempts + 1,
+      episodeFailures: failures,
+      episodeStartedAt: candidate.sleepEpisodeStartedAt,
       exhausted,
       error: lifecycleError,
     });
@@ -130,9 +153,14 @@ async function sleepClaimedSession(
   }
 }
 
+type SweepCandidate = Awaited<ReturnType<typeof selectSweepCandidates>>[number];
+
 /**
  * Claim and sleep a bounded page of idle sessions. The claim is a D1 CAS so
- * overlapping cron invocations cannot tear down the same runtime twice.
+ * overlapping cron invocations cannot tear down the same runtime twice. Each
+ * candidate's bounded sleep-failure episode (`session-sleep-episode.ts`) decides
+ * whether it gets a full-snapshot attempt, the transcript-and-Git fallback
+ * (`runSessionSleepFallback`), or ends blocked.
  */
 export async function runSessionSleepSweep(
   env: Env,
@@ -147,6 +175,7 @@ export async function runSessionSleepSweep(
   );
   // The same resolver the reapers' "gave up" predicate reads, so the two agree.
   const maxAttempts = sessionSleepMaxAttempts(env);
+  const episodeConfig = sessionSleepEpisodeConfig(env);
   const wallBudgetMs = parsePositiveInt(
     env.SESSION_SLEEP_SWEEP_WALL_BUDGET_MS,
     DEFAULT_SESSION_SLEEP_SWEEP_WALL_BUDGET_MS
@@ -160,92 +189,15 @@ export async function runSessionSleepSweep(
     deferred: 0,
     failed: 0,
     exhausted: 0,
+    fallbacks: 0,
+    blocked: 0,
+    retired: 0,
     budgetExhausted: false,
   };
 
   stats.reconciled = await reconcileUnscheduledSessionSleeps(env, db, batchSize, now);
 
-  const candidates = await db
-    .select({
-      snapshotId: schema.sessionSnapshots.id,
-      workspaceId: schema.sessionSnapshots.workspaceId,
-      userId: schema.sessionSnapshots.userId,
-      chatSessionId: schema.sessionSnapshots.chatSessionId,
-      sleepAttempts: schema.sessionSnapshots.sleepAttempts,
-      sleepStatus: schema.sessionSnapshots.sleepStatus,
-      sleepAfter: schema.sessionSnapshots.sleepAfter,
-      sleepClaimId: schema.sessionSnapshots.sleepClaimId,
-      sleepClaimedAt: schema.sessionSnapshots.sleepClaimedAt,
-      updatedAt: schema.sessionSnapshots.updatedAt,
-      status: schema.sessionSnapshots.status,
-      captureGeneration: schema.sessionSnapshots.captureGeneration,
-    })
-    .from(schema.sessionSnapshots)
-    .where(
-      and(
-        inArray(schema.sessionSnapshots.status, ['pending', 'available', 'degraded', 'failed']),
-        isNull(schema.sessionSnapshots.sleepingAt),
-        or(
-          and(
-            inArray(schema.sessionSnapshots.sleepStatus, ['scheduled', 'failed']),
-            lte(schema.sessionSnapshots.sleepAfter, now.toISOString())
-          ),
-          and(
-            eq(schema.sessionSnapshots.sleepStatus, 'failed'),
-            isNull(schema.sessionSnapshots.sleepAfter),
-            lt(schema.sessionSnapshots.sleepAttempts, maxAttempts)
-          ),
-          and(
-            eq(schema.sessionSnapshots.sleepStatus, 'failed'),
-            or(
-              isNull(schema.sessionSnapshots.sleepAfter),
-              lte(schema.sessionSnapshots.sleepAfter, now.toISOString())
-            ),
-            or(
-              eq(schema.sessionSnapshots.status, 'degraded'),
-              isNotNull(schema.sessionSnapshots.captureGeneration)
-            )
-          ),
-          and(
-            eq(schema.sessionSnapshots.sleepStatus, 'preparing'),
-            or(
-              isNull(schema.sessionSnapshots.sleepClaimedAt),
-              lte(
-                schema.sessionSnapshots.sleepClaimedAt,
-                new Date(
-                  now.getTime() -
-                    parsePositiveInt(
-                      (env as Env & { SESSION_SLEEP_CLAIM_LEASE_MS?: string })
-                        .SESSION_SLEEP_CLAIM_LEASE_MS,
-                      DEFAULT_SESSION_SLEEP_CLAIM_LEASE_MS
-                    )
-                ).toISOString()
-              )
-            )
-          ),
-          and(
-            eq(schema.sessionSnapshots.sleepStatus, 'stopping'),
-            or(
-              lte(schema.sessionSnapshots.sleepAfter, now.toISOString()),
-              isNull(schema.sessionSnapshots.sleepClaimedAt),
-              lte(
-                schema.sessionSnapshots.sleepClaimedAt,
-                new Date(
-                  now.getTime() -
-                    parsePositiveInt(
-                      (env as Env & { SESSION_SLEEP_CLAIM_LEASE_MS?: string })
-                        .SESSION_SLEEP_CLAIM_LEASE_MS,
-                      DEFAULT_SESSION_SLEEP_CLAIM_LEASE_MS
-                    )
-                ).toISOString()
-              )
-            )
-          )
-        )
-      )
-    )
-    .orderBy(schema.sessionSnapshots.sleepAfter, schema.sessionSnapshots.id)
-    .limit(batchSize);
+  const candidates = await selectSweepCandidates(env, db, now, batchSize, maxAttempts);
   stats.selected = candidates.length;
 
   // Releases do network I/O (chat notice, teardown): keep them off the sweep's
@@ -264,9 +216,10 @@ export async function runSessionSleepSweep(
       stats.budgetExhausted = true;
       break;
     }
+    const workspaceId = candidate.workspaceId;
     let claimId: string;
     try {
-      if (!candidate.workspaceId) {
+      if (!workspaceId) {
         if (await terminalizeMissingSleepSource(db, candidate, now)) {
           stats.exhausted++;
           await settleInBackground(candidate, 'failed');
@@ -274,46 +227,55 @@ export async function runSessionSleepSweep(
         continue;
       }
       if (
-        candidate.sleepStatus !== 'stopping' &&
-        candidate.sleepAttempts >= maxAttempts &&
-        !(
-          candidate.sleepStatus === 'failed' &&
-          (candidate.sleepAfter === null || candidate.sleepAfter <= now.toISOString()) &&
-          (candidate.status === 'degraded' || candidate.captureGeneration)
-        )
+        candidate.workspaceStatus &&
+        isDeadSleepIntentWorkspace(candidate.sleepStatus, candidate.workspaceStatus)
       ) {
-        const exhaustion = await db
-          .update(schema.sessionSnapshots)
-          .set({
-            sleepStatus: 'failed',
-            sleepAfter: null,
-            sleepError: candidate.workspaceId
-              ? 'Automatic sleep retry budget exhausted'
-              : 'Snapshot has no source workspace',
-            updatedAt: new Date().toISOString(),
-          })
-          .where(
-            and(
-              eq(schema.sessionSnapshots.id, candidate.snapshotId),
-              // Only the row this sweep selected: a sleep episode restarted since
-              // (a new failure resets the budget), or a stale claim whose owner has
-              // since moved it on (`preparing` -> `stopping`), is left alone. A
-              // re-claim always spends an attempt, so the attempts cover it.
-              eq(schema.sessionSnapshots.sleepAttempts, candidate.sleepAttempts),
-              sql`${schema.sessionSnapshots.sleepStatus} IS ${candidate.sleepStatus}`,
-              isNull(schema.sessionSnapshots.sleepingAt)
-            )
-          );
-        if ((exhaustion.meta.changes ?? 0) > 0) {
-          stats.exhausted++;
-          await settleInBackground(candidate, 'failed');
+        const retired = await retireDeadWorkspaceSleepIntent(db, {
+          snapshotId: candidate.snapshotId,
+          workspaceId,
+          workspaceStatus: candidate.workspaceStatus,
+          sleepStatus: candidate.sleepStatus,
+          sleepAttempts: candidate.sleepAttempts,
+          now,
+        });
+        if (retired) {
+          stats.retired++;
+          log.info('session_sleep_sweep.dead_workspace_intent_retired', {
+            snapshotId: candidate.snapshotId,
+            workspaceId,
+            chatSessionId: candidate.chatSessionId,
+            workspaceStatus: candidate.workspaceStatus,
+            sleepStatus: candidate.sleepStatus,
+          });
+          // A failed task whose workspace is gone still gets its release and notice.
+          await settleInBackground(candidate, 'deferred');
         }
         continue;
       }
-      claimId = crypto.randomUUID();
       if (candidate.sleepStatus !== 'stopping') {
+        const phase = sessionSleepEpisodePhase(candidate, now, episodeConfig);
+        if (phase === 'blocked') {
+          const blocked = await endSessionSleepEpisodeBlocked(env, {
+            chatSessionId: candidate.chatSessionId,
+            reason: 'retry_ceiling',
+            trigger: 'retry_ceiling',
+            lastError: candidate.sleepError,
+            expected: {
+              kind: 'observed',
+              sleepStatus: candidate.sleepStatus,
+              sleepEpisodeFailures: candidate.sleepEpisodeFailures ?? 0,
+            },
+            now,
+          });
+          if (blocked) {
+            stats.blocked++;
+            stats.exhausted++;
+            await settleInBackground(candidate, 'failed');
+          }
+          continue;
+        }
         const eligibility = await checkAutomaticSessionSleepEligibility(env, {
-          workspaceId: candidate.workspaceId,
+          workspaceId,
           userId: candidate.userId,
           sleepStatus: candidate.sleepStatus,
           sleepClaimId: candidate.sleepClaimId,
@@ -330,7 +292,53 @@ export async function runSessionSleepSweep(
           }
           continue;
         }
+        if (phase === 'fallback') {
+          stats.fallbacks++;
+          const fallback = runSessionSleepFallback(env, {
+            workspaceId,
+            userId: candidate.userId,
+            chatSessionId: candidate.chatSessionId,
+            claimId: crypto.randomUUID(),
+            trigger: sessionSleepEpisodeTrigger(candidate, now, episodeConfig) ?? 'attempt_budget',
+            lastError: candidate.sleepError,
+            now,
+          })
+            .catch((error: unknown): SessionSleepFallbackOutcome => {
+              log.warn('session_sleep_sweep.fallback_failed', {
+                snapshotId: candidate.snapshotId,
+                workspaceId,
+                chatSessionId: candidate.chatSessionId,
+                error: sessionLifecycleError(env, error),
+              });
+              return 'retry';
+            })
+            .then(async (outcome) => {
+              log.info('session_sleep_sweep.fallback_completed', {
+                snapshotId: candidate.snapshotId,
+                workspaceId,
+                chatSessionId: candidate.chatSessionId,
+                outcome,
+              });
+              if (outcome === 'blocked')
+                await settleFailedTaskPreservation(env, candidate, 'failed');
+              return outcome;
+            });
+          if (context) {
+            stats.dispatched++;
+            context.waitUntil(fallback);
+          } else {
+            const outcome = await fallback;
+            if (outcome === 'slept') stats.slept++;
+            else if (outcome === 'blocked') {
+              stats.blocked++;
+              stats.exhausted++;
+            } else if (outcome === 'retry') stats.failed++;
+            else if (outcome === 'deferred') stats.deferred++;
+          }
+          continue;
+        }
       }
+      claimId = crypto.randomUUID();
       const claim = await claimSessionSnapshotSleep(db, env, {
         chatSessionId: candidate.chatSessionId,
         claimId,
@@ -365,14 +373,14 @@ export async function runSessionSleepSweep(
       await deferral.catch((persistenceError) => {
         log.error('session_sleep_sweep.candidate_deferral_failed', {
           snapshotId: candidate.snapshotId,
-          workspaceId: candidate.workspaceId,
+          workspaceId,
           chatSessionId: candidate.chatSessionId,
           error: sessionLifecycleError(env, persistenceError),
         });
       });
       log.warn('session_sleep_sweep.candidate_failed', {
         snapshotId: candidate.snapshotId,
-        workspaceId: candidate.workspaceId,
+        workspaceId,
         chatSessionId: candidate.chatSessionId,
         error: lifecycleError,
       });
@@ -384,26 +392,14 @@ export async function runSessionSleepSweep(
       continue;
     }
 
-    const operation = sleepClaimedSession(
-      env,
-      db,
-      {
-        snapshotId: candidate.snapshotId,
-        workspaceId: candidate.workspaceId,
-        userId: candidate.userId,
-        chatSessionId: candidate.chatSessionId,
-        sleepAttempts: candidate.sleepAttempts,
-      },
-      claimId,
-      maxAttempts
-    );
+    const operation = sleepClaimedSession(env, db, { ...candidate, workspaceId }, claimId, now);
     if (context) {
       stats.dispatched++;
       context.waitUntil(
         operation.then((result) => {
           log.info('session_sleep_sweep.dispatched_completed', {
             snapshotId: candidate.snapshotId,
-            workspaceId: candidate.workspaceId,
+            workspaceId,
             status: result.status,
             exhausted: result.exhausted,
           });

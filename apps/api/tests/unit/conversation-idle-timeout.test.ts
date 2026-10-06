@@ -27,7 +27,10 @@ import {
   updateSessionTopic,
   wakeSession,
 } from '../../src/durable-objects/project-data/sessions';
-import { getLocalTaskRuntimeLiveness } from '../../src/durable-objects/project-data/task-runtime-liveness';
+import {
+  getLocalTaskRuntimeLiveness,
+  readTaskAcpLivenessSignals,
+} from '../../src/durable-objects/project-data/task-runtime-liveness';
 import type { Env as ProjectDataEnv } from '../../src/durable-objects/project-data/types';
 import { checkWorkspaceIdleTimeouts } from '../../src/durable-objects/project-data/workspace-idle-timeouts';
 import type { Env } from '../../src/env';
@@ -1224,38 +1227,19 @@ describe('ProjectData idle cleanup runtime liveness contract', () => {
 
   it('keeps cron and DO-local adapters in parity on the shared classifier', async () => {
     const seeded = seed();
-    const sessions = projectDb
-      .prepare('SELECT * FROM acp_sessions WHERE chat_session_id = ?')
-      .all(seeded.sessionId)
-      .map((row) => ({
-        id: row.id as string,
-        chatSessionId: row.chat_session_id as string,
-        workspaceId: row.workspace_id as string,
-        nodeId: row.node_id as string,
-        acpSdkSessionId: null,
-        parentSessionId: null,
-        status: row.status as 'running',
-        agentType: row.agent_type as string,
-        initialPrompt: null,
-        errorMessage: null,
-        lastHeartbeatAt: row.last_heartbeat_at as number,
-        forkDepth: 0,
-        createdAt: row.created_at as number,
-        updatedAt: row.updated_at as number,
-        assignedAt: null,
-        startedAt: null,
-        completedAt: null,
-        interruptedAt: null,
-      }));
+    // The cron adapter reaches the same ProjectData reader over RPC. Route the
+    // stub to the real reader rather than a hand-built payload, so parity covers
+    // everything the DO returns, work evidence included (`.claude/rules/62`).
     const cronEnv = {
       ...env,
       PROJECT_DATA: {
         idFromName: vi.fn().mockReturnValue('project-do-id'),
         get: vi.fn().mockReturnValue({
           ensureProjectId: vi.fn().mockResolvedValue(undefined),
-          getTaskAcpLivenessSignals: vi
-            .fn()
-            .mockResolvedValue({ sessions, total: sessions.length, sessionWork: null }),
+          getTaskAcpLivenessSignals: vi.fn(
+            async (opts: Parameters<typeof readTaskAcpLivenessSignals>[2]) =>
+              readTaskAcpLivenessSignals(sql, env as unknown as ProjectDataEnv, opts)
+          ),
         }),
       },
     } as unknown as Env;
@@ -1276,6 +1260,8 @@ describe('ProjectData idle cleanup runtime liveness contract', () => {
       live: true,
       conclusive: true,
       reason: 'task_acp_session_live',
+      // The fixture has no session_state row, so neither side may claim work.
+      evidence: { workState: 'unknown', acpHeartbeatAgeMs: expect.any(Number) },
     });
   });
 });

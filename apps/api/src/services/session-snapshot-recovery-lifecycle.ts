@@ -189,6 +189,7 @@ export async function claimSessionSnapshotRecovery(
     chatSessionId: string;
     userId: string;
     taskId: string;
+    recoveryAttemptId?: string;
     now?: Date;
     sourceTaskGuard?: SessionRecoverySourceTaskGuard;
   }
@@ -221,6 +222,7 @@ export async function claimSessionSnapshotRecovery(
     .set({
       recoveryStatus: 'waking',
       recoveryTaskId: input.taskId,
+      recoveryAttemptId: input.recoveryAttemptId ?? null,
       // A claim taken under the decayed budget starts a NEW burst rather than
       // continuing the spent one, so the cap still bounds `maxAttempts` failures
       // per window. `recovery_failed_at` is cleared in the same statement: leaving
@@ -319,6 +321,7 @@ export async function claimSessionSnapshotRecovery(
         .update(schema.sessionSnapshots)
         .set({
           recoveryTaskId: input.taskId,
+          recoveryAttemptId: input.recoveryAttemptId ?? null,
           recoveryAttempts: sessionRecoveryAttemptsAfterClaim(decayCutoff),
           recoveryClaimedAt: nowIso,
           recoveryError: null,
@@ -429,9 +432,7 @@ export async function hasAuthorizedRestorableSnapshotWakeClaim(
            ON recovery.id = ?
           AND recovery.project_id = snapshot.project_id
           AND recovery.user_id = snapshot.user_id
-          AND recovery.chat_session_id = snapshot.chat_session_id
           AND recovery.workspace_id = ?
-          AND recovery.triggered_by = 'session-recovery'
           AND recovery.status NOT IN ('completed', 'failed', 'cancelled')
          JOIN workspaces replacement
            ON replacement.id = ?

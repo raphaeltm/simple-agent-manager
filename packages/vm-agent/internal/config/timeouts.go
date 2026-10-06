@@ -49,6 +49,11 @@ const (
 	// ACP_ACTIVITY_REPORT_TIMEOUT.
 	DefaultACPActivityReportTimeout = 10 * time.Second
 
+	// DefaultACPUsageProbeTimeout bounds one post-turn provider usage probe (Codex
+	// rollout read or OpenCode Go usage request). Derived downward from the host
+	// lifecycle context. Override via ACP_USAGE_PROBE_TIMEOUT.
+	DefaultACPUsageProbeTimeout = 10 * time.Second
+
 	// DefaultDevcontainerCachePushTimeout bounds best-effort devcontainer cache pushes.
 	// Override via DEVCONTAINER_CACHE_PUSH_TIMEOUT.
 	DefaultDevcontainerCachePushTimeout = 10 * time.Minute

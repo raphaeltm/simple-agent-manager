@@ -26,6 +26,11 @@ const nodeCleanupSource = [
 ]
   .map((file) => readFileSync(resolve(process.cwd(), `src/scheduled/node-cleanup/${file}`), 'utf8'))
   .join('\n');
+// The live-runtime preservation record was split out of stuck-tasks.ts (rule 18).
+const stuckTaskLiveRuntimeSource = readFileSync(
+  resolve(process.cwd(), 'src/scheduled/stuck-task-live-runtime.ts'),
+  'utf8'
+);
 const timeoutSource = readFileSync(resolve(process.cwd(), 'src/services/timeout.ts'), 'utf8');
 const taskRunnerSource = readFileSync(
   resolve(process.cwd(), 'src/services/task-runner.ts'),
@@ -488,7 +493,8 @@ describe('recovery type consistency (TDF-7)', () => {
 
   for (const recoveryType of allRecoveryTypes) {
     it(`uses recoveryType: '${recoveryType}'`, () => {
-      const allSources = stuckTasksSource + nodeCleanupSource + timeoutSource;
+      const allSources =
+        stuckTasksSource + stuckTaskLiveRuntimeSource + nodeCleanupSource + timeoutSource;
       // Recovery types may appear in ternary expressions, so check for the string literal
       expect(allSources).toContain(`'${recoveryType}'`);
     });

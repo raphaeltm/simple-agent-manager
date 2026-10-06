@@ -25,6 +25,7 @@ import { getPortAccessUrl, getProjectTask, listChatMessages } from '../../lib/ap
 import { stripMarkdown } from '../../lib/text-utils';
 import { sanitizeUrl } from '../../lib/url-utils';
 import type { SessionSourceContext } from '../../pages/project-chat/lineageUtils';
+import { SessionCredentialLimitChip } from '../credential-limits/SessionCredentialLimitChip';
 import { CopyableId } from './CopyableId';
 import { PublicPortsToggleRow } from './PublicPortsToggleRow';
 import { SessionCommentChip } from './SessionCommentChip';
@@ -258,6 +259,11 @@ export function SessionHeader({
           </span>
 
           {workspace && <WorkspaceProfileBadge workspace={workspace} />}
+
+          <SessionCredentialLimitChip
+            projectId={projectId}
+            agentSessionId={session.agentSessionId ?? null}
+          />
 
           {creatorLabel && (
             <span

@@ -10,7 +10,7 @@ import { pathToFileURL } from 'node:url';
 
 const claudeDir = process.env.CLAUDE_ACP_PACKAGE_DIR;
 const codexDir = process.env.CODEX_ACP_PACKAGE_DIR;
-for (const [dir, version] of [[claudeDir, '0.81.2'], [codexDir, '1.13.1']]) {
+for (const [dir, version] of [[claudeDir, '0.81.2'], [codexDir, '2.1.1']]) {
   assert.ok(dir && isAbsolute(dir) && statSync(dir).isDirectory(), 'installed adapter path required');
   assert.equal(JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')).version, version);
 }

@@ -1,5 +1,7 @@
 # Instant-Session Launch Leaves Task Stuck `queued` When the Client Disconnects
 
+> **Reconciliation 2026-10-05:** The "confirm cleanup of the two July tasks" sub-item can be dropped: production D1 shows both tasks `failed` by the stuck-queued sweep at 2026-07-19T01:20Z, with their workspaces and nodes `deleted`. Everything else is unchanged; still no test drives the `instant_persistence` branch (`apps/api/src/scheduled/stuck-tasks.ts:906,1277`).
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:**

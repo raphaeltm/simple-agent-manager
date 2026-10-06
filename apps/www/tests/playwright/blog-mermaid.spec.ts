@@ -86,6 +86,11 @@ const mermaidPosts = [
     path: '/blog/sams-journal-chats-follow-the-latest-message/',
     screenshotName: 'conversation-ordering',
   },
+  {
+    name: 'the stable-task-identity journal',
+    path: '/blog/sams-journal-one-task-through-every-wake/',
+    screenshotName: 'stable-task-identity',
+  },
 ];
 
 for (const post of mermaidPosts) {

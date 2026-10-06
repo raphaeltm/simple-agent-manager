@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-[[ $# -eq 1 ]] || { echo "usage: $0 <reviewed-archive.tar>" >&2; exit 2; }
+[[ $# -ge 1 && $# -le 2 ]] || { echo "usage: $0 <reviewed-archive.tar> [previous-reviewed-archive.tar]" >&2; exit 2; }
 archive=$(realpath -- "$1")
 scripts=$(cd -- "$(dirname -- "$0")" && pwd -P)
 test_dir=$(mktemp -d)
@@ -17,8 +17,8 @@ fi
 # Production installs as root but launches agents as an unprivileged user.
 # mktemp-created release directories must not retain owner-only traversal.
 if [[ "$EUID" == 0 ]]; then
-  [[ $(runuser -u nobody -- "$root/current/bin/codex" --version) == 'codex-cli 0.156.1-sam-c2.1' ]]
-  [[ $(runuser -u nobody -- "$root/current/bin/codex-acp" --version) == '@agentclientprotocol/codex-acp 1.13.1-sam-c2.1' ]]
+  [[ $(runuser -u nobody -- "$root/current/bin/codex" --version) == 'codex-cli 0.160.0-sam-c2.2' ]]
+  [[ $(runuser -u nobody -- "$root/current/bin/codex-acp" --version) == '@agentclientprotocol/codex-acp 2.1.1-sam-c2.2' ]]
 fi
 current=$(readlink -- "$root/current")
 [[ "$current" == releases/* ]]
@@ -136,4 +136,42 @@ second_pid=$!
 wait "$first_pid"
 wait "$second_pid"
 [[ $(readlink -- "$root/current") == "$current" ]]
+if [[ $# -eq 2 ]]; then
+  prior_archive=$(realpath -- "$2")
+  printf '%s  %s\n' e85e7bfee875bb0bc0397a546073b324258d4cba2c0e54cb3808c3596825b292 "$prior_archive" | sha256sum --check --status
+  upgrade_root="$test_dir/upgrade"
+  mkdir "$upgrade_root"
+  tar --extract --file "$prior_archive" --directory "$upgrade_root" --no-same-owner
+  prior='sam-codex-acp-1.13.1-sam-c2.1+cli-0.156.1-sam-c2.1-codemode2'
+  find "$upgrade_root" -type d -exec chmod 755 -- {} +
+  [[ $(readlink -- "$upgrade_root/current") == "releases/$prior" ]]
+  # Every rejected predecessor leaves the active link and new publication alone.
+  for target in "releases/$prior/bin/codex-acp" "catalog/$prior.sha256" "notices/$prior/CLI-LICENSE" "catalog/$prior.notices.sha256"; do
+    cp -- "$upgrade_root/$target" "$test_dir/prior-original"
+    printf '\n# tampered predecessor\n' >> "$upgrade_root/$target"
+    if "$installer" "$archive" "$upgrade_root" >/dev/null 2>&1; then
+      echo 'tampered predecessor accepted' >&2; exit 1
+    fi
+    [[ $(readlink -- "$upgrade_root/current") == "releases/$prior" && ! -e "$upgrade_root/$current" ]]
+    cp -- "$test_dir/prior-original" "$upgrade_root/$target"
+  done
+  for target in "releases/$prior/bin/codex-acp" "catalog/$prior.sha256" "catalog/$prior.notices.sha256"; do
+    prior_mode=$(stat -c %a -- "$upgrade_root/$target")
+    chmod o+w "$upgrade_root/$target"
+    if "$installer" "$archive" "$upgrade_root" >/dev/null 2>&1; then
+      echo 'writable predecessor accepted' >&2; exit 1
+    fi
+    [[ $(readlink -- "$upgrade_root/current") == "releases/$prior" ]]
+    chmod "$prior_mode" "$upgrade_root/$target"
+  done
+  "$installer" "$archive" "$upgrade_root" >/dev/null
+  [[ $(readlink -- "$upgrade_root/current") == "$current" ]]
+  [[ $(readlink -- "$upgrade_root/previous") == "releases/$prior" ]]
+  (cd "$upgrade_root/previous" && sha256sum --check --status "$upgrade_root/catalog/$prior.sha256")
+  (cd "$upgrade_root/notices/$prior" && sha256sum --check --status "$upgrade_root/catalog/$prior.notices.sha256")
+  [[ $("$upgrade_root/previous/bin/codex" --version) == 'codex-cli 0.156.1-sam-c2.1' ]]
+  "$installer" "$archive" "$upgrade_root" >/dev/null
+  [[ $(readlink -- "$upgrade_root/previous") == "releases/$prior" ]]
+  echo 'reviewed predecessor upgrade, tamper rejection and rollback preservation passed'
+fi
 echo 'runtime install, tamper rejection, lock safety, archive race and concurrent install passed'

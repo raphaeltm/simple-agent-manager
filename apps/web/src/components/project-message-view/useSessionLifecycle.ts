@@ -227,7 +227,7 @@ export function useSessionLifecycle(
       [startVerifyDecayTimer, stopVerifyDecayTimer]
     ),
     onSessionUpdated: useCallback(
-      (updates: Partial<Pick<ChatSessionResponse, 'topic' | 'workspaceId'>>) => {
+      (updates: Partial<Pick<ChatSessionResponse, 'topic' | 'workspaceId' | 'agentSessionId'>>) => {
         setSession((prev) => (prev ? { ...prev, ...updates } : prev));
       },
       []

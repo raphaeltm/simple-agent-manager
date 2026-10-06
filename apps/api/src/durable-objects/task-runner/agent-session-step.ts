@@ -80,6 +80,8 @@ export async function handleAgentSession(
       userId: state.userId,
       chatSessionId: state.stepResults.chatSessionId,
       agentSessionId: sessionId,
+      // Dispatch resolves the profile hint to its ID before persisting runner state.
+      agentProfileId: state.config.agentProfileHint,
       label: buildTaskAgentSessionLabel(state.config.taskTitle),
       agentType,
       visibleInitialPrompt: buildVisibleTaskInitialPrompt(state),
@@ -168,13 +170,16 @@ export async function handleAgentSession(
           state.config.resumeSnapshotChatSessionId,
           state.taskId,
           state.stepResults.workspaceId,
-          state.config.recoverySourceTaskId
+          state.config.recoverySourceTaskId,
+          state.config.recoveryAttemptId ?? undefined
         )
       : await completeSessionSnapshotRecovery(
           snapshotDb,
           state.config.resumeSnapshotChatSessionId,
           state.taskId,
-          state.stepResults.workspaceId
+          state.stepResults.workspaceId,
+          undefined,
+          state.config.recoveryAttemptId ?? undefined
         );
     if (!recoveryCompleted) {
       throw new Error('Strict session restore succeeded but lifecycle recovery commit failed');

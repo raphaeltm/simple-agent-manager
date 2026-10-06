@@ -30,13 +30,26 @@ export function settleInteraction(env: Env, input: InteractionStoreSettleInput) 
   return getInteractionStore(env, input.projectId, input.chatSessionId).settle(input);
 }
 
-export function completeUrlInteraction(env: Env, projectId: string, chatSessionId: string,
-  input: AcpInteractionRuntimeCompleteUrl) {
+export function completeUrlInteraction(
+  env: Env,
+  projectId: string,
+  chatSessionId: string,
+  input: AcpInteractionRuntimeCompleteUrl
+) {
   return getInteractionStore(env, projectId, chatSessionId).completeURL(input);
 }
 
 export function answerInteraction(env: Env, input: InteractionStoreAnswerInput) {
   return getInteractionStore(env, input.projectId, input.chatSessionId).answer(input);
+}
+
+export function hasUnexpiredHumanInput(
+  env: Env,
+  projectId: string,
+  chatSessionId: string,
+  now: number
+) {
+  return getInteractionStore(env, projectId, chatSessionId).hasUnexpiredHumanInput(now);
 }
 
 export function snapshotInteractions(

@@ -4,6 +4,7 @@ import {
   type AIProxyConfig,
   type BootstrapTokenData,
   type CredentialSource,
+  DEFAULT_AGENT_PERMISSION_MODE,
   DEFAULT_AI_PROXY_ANTHROPIC_MODEL,
   DEFAULT_AI_PROXY_MODEL,
   DEFAULT_AI_PROXY_OPENAI_MODEL,
@@ -1449,11 +1450,14 @@ runtimeRoutes.post('/:id/agent-settings', jsonValidator(AgentTypeBodySchema), as
     }
   }
 
-  // Resolution: project.agentDefaults[agentType] > user agent_settings > null.
+  // Resolution: project.agentDefaults[agentType] > user agent_settings > platform default
+  // (permission mode only; model stays null so the agent picks its own). An agent profile's
+  // permission mode is applied on top of this by the VM agent (PermissionModeOverride).
   // OpenCode-specific provider/baseUrl stay user-scoped (phase 1 does not include them).
   return callbackJsonWithJit(c, workspace, 'agent_settings', {
     model: projectDefaults.model ?? userRow?.model ?? null,
-    permissionMode: projectDefaults.permissionMode ?? userRow?.permissionMode ?? null,
+    permissionMode:
+      projectDefaults.permissionMode ?? userRow?.permissionMode ?? DEFAULT_AGENT_PERMISSION_MODE,
     opencodeProvider: userRow?.opencodeProvider ?? null,
     opencodeBaseUrl: userRow?.opencodeBaseUrl ?? null,
   });

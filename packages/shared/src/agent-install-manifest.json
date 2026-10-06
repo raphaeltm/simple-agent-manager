@@ -14,11 +14,11 @@
     "agentType": "openai-codex",
     "method": "npm",
     "package": "@agentclientprotocol/codex-acp",
-    "version": "1.13.1",
+    "version": "2.1.1",
     "bin": "codex-acp",
     "npmCompanion": {
       "package": "@openai/codex",
-      "version": "0.156.1"
+      "version": "0.160.0"
     }
   },
   {

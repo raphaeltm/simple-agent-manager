@@ -26,20 +26,42 @@ type workspaceRuntimeMetadataResponse struct {
 }
 
 func (s *Server) callbackTokenForWorkspace(workspaceID string) string {
-	if runtime, ok := s.getWorkspaceRuntime(workspaceID); ok {
-		if token := strings.TrimSpace(runtime.CallbackToken); token != "" {
-			return token
-		}
+	if token := s.workspaceCallbackToken(workspaceID); token != "" {
+		return token
 	}
 
 	return strings.TrimSpace(s.config.CallbackToken)
 }
 
+// Renewal and control-plane delivery replace runtime.CallbackToken while the
+// workspace runs (workspace_callback_token_renewal.go), always under
+// workspaceMu, so every read takes the lock too (rule 46). Callers must not hold
+// workspaceMu.
+
 func (s *Server) workspaceCallbackToken(workspaceID string) string {
-	if runtime, ok := s.getWorkspaceRuntime(workspaceID); ok {
-		return strings.TrimSpace(runtime.CallbackToken)
+	token, _ := s.lookupWorkspaceCallbackToken(workspaceID)
+	return token
+}
+
+// lookupWorkspaceCallbackToken also reports whether the workspace exists.
+func (s *Server) lookupWorkspaceCallbackToken(workspaceID string) (string, bool) {
+	s.workspaceMu.RLock()
+	defer s.workspaceMu.RUnlock()
+	runtime, ok := s.workspaces[workspaceID]
+	if !ok || runtime == nil {
+		return "", false
 	}
-	return ""
+	return strings.TrimSpace(runtime.CallbackToken), true
+}
+
+// runtimeCallbackToken reads the token of a runtime the caller already holds.
+func (s *Server) runtimeCallbackToken(runtime *WorkspaceRuntime) string {
+	if runtime == nil {
+		return ""
+	}
+	s.workspaceMu.RLock()
+	defer s.workspaceMu.RUnlock()
+	return strings.TrimSpace(runtime.CallbackToken)
 }
 
 func (s *Server) applyDetectedContainerUser(runtime *WorkspaceRuntime, detected string) {
@@ -83,7 +105,7 @@ func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *Workspa
 		return false, err
 	}
 
-	callbackToken := strings.TrimSpace(runtime.CallbackToken)
+	callbackToken := s.runtimeCallbackToken(runtime)
 	if callbackToken == "" {
 		callbackToken = strings.TrimSpace(s.config.CallbackToken)
 	}

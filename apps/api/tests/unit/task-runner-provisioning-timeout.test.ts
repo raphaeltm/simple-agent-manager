@@ -89,13 +89,19 @@ function makeContext(overrides: Partial<TaskRunnerContext> = {}): TaskRunnerCont
   return {
     env: {
       DATABASE: {
-        prepare: vi.fn().mockReturnValue({
+        prepare: vi.fn().mockImplementation((sql: string) => ({
           bind: vi.fn().mockReturnValue({
-            first: vi.fn().mockResolvedValue(null),
+            first: vi
+              .fn()
+              .mockResolvedValue(
+                sql.includes('SELECT id FROM tasks WHERE id = ? AND project_id = ? AND user_id = ?')
+                  ? { id: 'task-1' }
+                  : null
+              ),
             all: vi.fn().mockResolvedValue({ results: [] }),
             run: vi.fn().mockResolvedValue({ meta: { changes: 1 } }),
           }),
-        }),
+        })),
       },
     } as unknown as TaskRunnerContext['env'],
     ctx: {

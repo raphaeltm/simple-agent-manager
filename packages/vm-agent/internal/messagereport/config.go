@@ -13,6 +13,12 @@ import (
 
 const DefaultResponseMaxBytes = 2048
 
+// DefaultAuthRenewalWait is the default for Config.AuthRenewalWait. A healthy agent
+// renews its workspace token halfway through the token's lifetime, so a rejected
+// token that no renewal or control-plane delivery replaces within this window is
+// worth surfacing. Override via MSG_AUTH_RENEWAL_WAIT.
+const DefaultAuthRenewalWait = 15 * time.Minute
+
 // Config holds tunable parameters for the message reporter.
 // All values have sensible defaults; override via MSG_* environment variables.
 type Config struct {
@@ -50,6 +56,16 @@ type Config struct {
 	// diagnostics when the control plane rejects a batch.
 	ResponseMaxBytes int
 
+	// AuthRenewalWait is how long delivery may stay paused on a rejected (401)
+	// callback token before the pause is surfaced through OnAuthRenewalWaitExceeded.
+	// Queued rows are kept either way; see credential.go.
+	AuthRenewalWait time.Duration
+
+	// OnAuthRenewalWaitExceeded, when set, is called once per pause that outlasts
+	// AuthRenewalWait, so the owner can report it on a channel that does not depend
+	// on the rejected workspace token.
+	OnAuthRenewalWaitExceeded func(AuthRenewalWaitExceeded)
+
 	// Endpoint is the control plane URL (without trailing slash).
 	// The batch endpoint will be: {Endpoint}/api/workspaces/{workspaceId}/messages
 	Endpoint string
@@ -80,6 +96,7 @@ func DefaultConfig() Config {
 		RetryMaxElapsed:        5 * time.Minute,
 		HTTPTimeout:            10 * time.Second,
 		ResponseMaxBytes:       DefaultResponseMaxBytes,
+		AuthRenewalWait:        DefaultAuthRenewalWait,
 	}
 }
 
@@ -98,6 +115,7 @@ func LoadConfigFromEnv() Config {
 	cfg.RetryMaxElapsed = envDuration("MSG_RETRY_MAX_ELAPSED", cfg.RetryMaxElapsed)
 	cfg.HTTPTimeout = envDuration("MSG_HTTP_TIMEOUT", cfg.HTTPTimeout)
 	cfg.ResponseMaxBytes = envInt("MSG_RESPONSE_MAX_BYTES", cfg.ResponseMaxBytes)
+	cfg.AuthRenewalWait = envDuration("MSG_AUTH_RENEWAL_WAIT", cfg.AuthRenewalWait)
 
 	cfg.Endpoint = os.Getenv("CONTROL_PLANE_URL")
 	cfg.WorkspaceID = os.Getenv("WORKSPACE_ID")

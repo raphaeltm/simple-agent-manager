@@ -78,7 +78,7 @@ func (h *SessionHost) fetchAgentKey(ctx context.Context, agentType string) (*age
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+h.config.CallbackToken)
+	req.Header.Set("Authorization", "Bearer "+h.callbackToken())
 
 	resp, err := h.httpClient().Do(req)
 	if err != nil {
@@ -152,7 +152,7 @@ func (h *SessionHost) fetchAgentSettings(ctx context.Context, agentType string) 
 		return nil
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+h.config.CallbackToken)
+	req.Header.Set("Authorization", "Bearer "+h.callbackToken())
 
 	resp, err := h.httpClient().Do(req)
 	if err != nil {
@@ -282,7 +282,7 @@ func (h *SessionHost) prepareActivityReport(activity string) (activityReportRequ
 	projectID := h.config.ProjectID
 	nodeID := h.config.NodeID
 	controlPlaneURL := h.config.ControlPlaneURL
-	callbackToken := h.config.CallbackToken
+	callbackToken := h.callbackToken()
 	sessionID := h.config.SessionID
 
 	if projectID == "" || nodeID == "" || controlPlaneURL == "" || sessionID == "" {

@@ -13,6 +13,7 @@ export const TASK_STATUSES = [
   'queued',
   'delegated',
   'in_progress',
+  'sleeping',
   'completed',
   'failed',
   'cancelled',

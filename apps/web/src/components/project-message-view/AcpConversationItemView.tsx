@@ -5,7 +5,6 @@ import {
   PlanView,
   RawFallbackView,
   ThinkingBlock as AcpThinkingBlock,
-  UserMessageFade,
 } from '@simple-agent-manager/acp-client';
 import { memo, useCallback } from 'react';
 
@@ -161,18 +160,16 @@ function AcpConversationItemViewImpl({
       if (item.origin === 'system') {
         return <CollapsedInjectedMessage text={item.text} />;
       }
-      if (animateUserMessage) {
-        return (
-          <div className="flex justify-end mb-4">
-            <div className="max-w-[80%] min-w-0 rounded-lg px-4 py-3 glass-msg-user">
-              <div className="prose prose-sm max-w-none overflow-x-auto break-words">
-                <UserMessageFade text={item.text} />
-              </div>
-            </div>
-          </div>
-        );
-      }
-      return <AcpMessageBubble text={item.text} role="user" bubbleClassName="glass-msg-user" />;
+      // The timestamp is what turns on the bubble's Info + Copy actions.
+      return (
+        <AcpMessageBubble
+          text={item.text}
+          role="user"
+          animated={animateUserMessage}
+          timestamp={item.timestamp}
+          bubbleClassName="glass-msg-user"
+        />
+      );
     case 'agent_message':
       return (
         <AcpMessageBubble

@@ -14,10 +14,7 @@ import { runScheduledCapacityPoolReconciliation } from './capacity-pool-reconcil
 import { runScheduledComposeImageArtifactCleanup } from './compose-image-artifact-cleanup';
 import { runComputeUsageCleanup } from './compute-usage-cleanup';
 import { runCronTriggerSweep } from './cron-triggers';
-import {
-  runScheduledDeploymentReleaseRetention,
-  runScheduledSessionSnapshotPurge,
-} from './d1-retention';
+import { runScheduledDeploymentReleaseRetention } from './d1-retention';
 import { notifyFailedSweeps } from './failed-sweep-notifications';
 import { runIncidentTriggerSweep } from './incident-triggers';
 import { runNodeCleanupSweep } from './node-cleanup';
@@ -31,6 +28,7 @@ import { runProjectDataStorageReliefPreflight } from './project-data-storage-rel
 import { runProviderOrphanReconciliation } from './provider-orphan-reconciliation';
 import { runSessionSleepSweep } from './session-sleep';
 import { runSessionSleepLifecycleRepair } from './session-sleep-lifecycle-repair';
+import { runScheduledSessionSnapshotPurge } from './session-snapshot-purge';
 import { runSessionTaskReconciliation } from './session-task-reconciliation';
 import { runSetupSessionSweep } from './setup-session-sweep';
 import { recoverStuckTasks } from './stuck-tasks';
@@ -365,6 +363,9 @@ export async function scheduled(
     sessionSleepDeferred: sessionSleep?.deferred,
     sessionSleepFailed: sessionSleep?.failed,
     sessionSleepExhausted: sessionSleep?.exhausted,
+    sessionSleepFallbacks: sessionSleep?.fallbacks,
+    sessionSleepBlocked: sessionSleep?.blocked,
+    sessionSleepRetired: sessionSleep?.retired,
     sessionSleepBudgetExhausted: sessionSleep?.budgetExhausted,
     deploymentReleaseRetentionSkipped: deploymentReleaseRetention?.skipped,
     deploymentReleaseRetentionSkipReason: deploymentReleaseRetention?.skipReason,

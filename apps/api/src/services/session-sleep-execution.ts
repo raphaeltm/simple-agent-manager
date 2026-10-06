@@ -1,139 +1,38 @@
-import { and, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
-import { log } from '../lib/logger';
-import { parsePositiveInt } from '../lib/route-helpers';
 import { ulid } from '../lib/ulid';
-import { stopWorkspaceOnNode } from './node-agent';
 import * as projectDataService from './project-data';
 import {
-  classifySessionIdleness,
-  parseHarnessWorkConfig,
-  type SessionIdlenessActivityState,
-} from './session-idleness';
-import {
-  finishSleepingWorkspaceComputeCleanup,
-  markWorkspaceNodeWarmIfEmpty,
-} from './session-sleep-cleanup';
-import { idlenessStateChanged, sessionSleepDeferralReason } from './session-sleep-eligibility';
+  idlenessStateChanged,
+  sessionSleepDeferralReason,
+  sleepTeardownSafetyGate,
+} from './session-sleep-eligibility';
+import { persistSessionSleepFallbackNotice } from './session-sleep-fallback-notices';
+import { confirmSessionSleepFallbackStopping } from './session-sleep-recovery-point';
 import { waitForFinalSessionSnapshot } from './session-sleep-snapshot-wait';
+import {
+  completeSleepTeardown,
+  finishAlreadySleeping,
+  finishSleepCleanup,
+  loadResumableAgentSession,
+  loadSleepWorkspace,
+  type SleepWorkspace,
+  type SleepWorkspaceSessionResult,
+} from './session-sleep-teardown';
 import {
   beginSessionSnapshotStopping,
   claimSessionSnapshotSleep,
-  DEFAULT_SESSION_SLEEP_AFTER_MS,
   deferSessionSnapshotStopping,
   ensureSessionSnapshotForSleep,
   failSessionSnapshotSleepBeforeTeardown,
-  finalizeSessionSnapshotSleeping,
   getRestorableSessionSnapshot,
   isSessionSnapshotSleepReleasable,
   verifySessionSnapshotArtifactsForSleep,
 } from './session-snapshots';
-import { sleepVmAgentContainer } from './vm-agent-container';
 
-export interface SleepWorkspaceSessionResult {
-  status: 'sleeping';
-  workspaceId: string;
-  chatSessionId: string;
-  snapshotExpiresAt: string;
-}
-
-async function loadSleepWorkspace(env: Env, workspaceId: string, userId: string) {
-  const db = drizzle(env.DATABASE, { schema });
-  const [workspace] = await db
-    .select({
-      id: schema.workspaces.id,
-      userId: schema.workspaces.userId,
-      projectId: schema.workspaces.projectId,
-      chatSessionId: schema.workspaces.chatSessionId,
-      status: schema.workspaces.status,
-      nodeId: schema.workspaces.nodeId,
-      nodeRuntime: schema.nodes.runtime,
-      nodeRole: schema.nodes.nodeRole,
-      taskId: schema.tasks.id,
-      taskStatus: schema.tasks.status,
-      taskCompletedAt: sql<
-        string | null
-      >`COALESCE(${schema.tasks.completedAt}, ${schema.tasks.updatedAt})`,
-      warmNodeTimeoutMs: schema.projects.warmNodeTimeoutMs,
-    })
-    .from(schema.workspaces)
-    .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
-    .leftJoin(
-      schema.sessionSummaries,
-      eq(schema.sessionSummaries.id, schema.workspaces.chatSessionId)
-    )
-    .leftJoin(
-      schema.tasks,
-      or(
-        eq(schema.tasks.id, schema.sessionSummaries.taskId),
-        and(
-          isNull(schema.sessionSummaries.taskId),
-          eq(schema.tasks.chatSessionId, schema.workspaces.chatSessionId)
-        )
-      )
-    )
-    .leftJoin(schema.projects, eq(schema.projects.id, schema.workspaces.projectId))
-    .where(and(eq(schema.workspaces.id, workspaceId), eq(schema.workspaces.userId, userId)))
-    .limit(1);
-  if (
-    !workspace?.projectId ||
-    !workspace.chatSessionId ||
-    !workspace.nodeId ||
-    !workspace.nodeRuntime
-  ) {
-    throw new Error('Workspace is missing persistent-session ownership metadata');
-  }
-
-  return {
-    ...workspace,
-    projectId: workspace.projectId,
-    chatSessionId: workspace.chatSessionId,
-    nodeId: workspace.nodeId,
-    nodeRuntime: workspace.nodeRuntime,
-  };
-}
-
-type SleepWorkspace = Awaited<ReturnType<typeof loadSleepWorkspace>>;
-
-async function scheduleSleepingWorkspaceDeletion(
-  env: Env,
-  workspace: SleepWorkspace,
-  logEvent: string
-): Promise<void> {
-  if (workspace.nodeRuntime === 'cf-container') return;
-  const stub = env.NODE_LIFECYCLE.get(env.NODE_LIFECYCLE.idFromName(workspace.nodeId));
-  await (stub as unknown as import('../durable-objects/node-lifecycle').NodeLifecycle)
-    .scheduleWorkspaceDeletion(workspace.nodeId, workspace.id, workspace.userId)
-    .catch((error) => {
-      log.warn(logEvent, {
-        workspaceId: workspace.id,
-        nodeId: workspace.nodeId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    });
-}
-
-async function finishSleepComputeCleanup(
-  db: ReturnType<typeof drizzle<typeof schema>>,
-  env: Env,
-  workspace: SleepWorkspace
-): Promise<void> {
-  await finishSleepingWorkspaceComputeCleanup(db, env, {
-    workspaceId: workspace.id,
-    taskId: workspace.taskId ?? null,
-    warmNodeTimeoutMs: workspace.warmNodeTimeoutMs ?? null,
-  });
-  await markWorkspaceNodeWarmIfEmpty(db, env, {
-    nodeId: workspace.nodeId,
-    nodeRole: workspace.nodeRole ?? '',
-    runtime: workspace.nodeRuntime,
-    userId: workspace.userId,
-    warmNodeTimeoutMs: workspace.warmNodeTimeoutMs ?? null,
-  });
-}
+export type { SleepWorkspaceSessionResult } from './session-sleep-teardown';
 
 async function verifyAndBeginSleepTeardown(
   env: Env,
@@ -147,23 +46,7 @@ async function verifyAndBeginSleepTeardown(
     workspace.projectId,
     agentSession.id
   );
-  const idleAfterMs = parsePositiveInt(env.SESSION_SLEEP_AFTER_MS, DEFAULT_SESSION_SLEEP_AFTER_MS);
-  const harnessWorkConfig = parseHarnessWorkConfig(env);
-  // Point-of-no-return gates ask the SAFETY question only. Whoever called
-  // `sleepWorkspaceSession` has already decided this session should sleep —
-  // including the user pressing Sleep on a session that just went idle — so
-  // re-imposing the unattended scheduler's idle interval here would reject
-  // an explicit request for up to SESSION_SLEEP_AFTER_MS.
-  const classifyGate = (state: SessionIdlenessActivityState | null) =>
-    classifySessionIdleness({
-      taskStatus: workspace.taskStatus,
-      taskCompletedAt: workspace.taskCompletedAt,
-      state,
-      now: new Date(),
-      idleAfterMs,
-      harnessWorkConfig,
-      policy: 'prompt-turn-ended',
-    });
+  const classifyGate = sleepTeardownSafetyGate(env, workspace);
   const idlenessBefore = classifyGate(stateBefore);
   if (!stateBefore || !idlenessBefore.idle) {
     throw new Error(sessionSleepDeferralReason(idlenessBefore, stateBefore));
@@ -238,185 +121,6 @@ async function verifyAndBeginSleepTeardown(
   return verified;
 }
 
-async function ensureProjectDataSleeping(env: Env, workspace: SleepWorkspace): Promise<void> {
-  const chatSession = await projectDataService.getSession(
-    env,
-    workspace.projectId,
-    workspace.chatSessionId
-  );
-  if (!chatSession) throw new Error('ProjectData chat session is missing');
-  if (chatSession.status === 'sleeping') return;
-  const slept = await projectDataService.sleepSession(
-    env,
-    workspace.projectId,
-    workspace.chatSessionId
-  );
-  if (slept) return;
-  const repaired = await projectDataService.getSession(
-    env,
-    workspace.projectId,
-    workspace.chatSessionId
-  );
-  if (repaired?.status !== 'sleeping') {
-    throw new Error('ProjectData refused the durable sleeping transition');
-  }
-}
-
-async function completeSleepTeardown(
-  env: Env,
-  workspace: SleepWorkspace,
-  agentSession: { id: string },
-  claimId: string,
-  verified: Awaited<ReturnType<typeof getRestorableSessionSnapshot>>
-) {
-  const db = drizzle(env.DATABASE, { schema });
-  await ensureProjectDataSleeping(env, workspace);
-
-  // `stopping` is durable before this I/O. An interrupted or ambiguous stop
-  // is retried forward; it is never rolled back to a deliverable active chat.
-  if (workspace.nodeRuntime === 'cf-container') {
-    await sleepVmAgentContainer(env, workspace.nodeId);
-  } else {
-    await stopWorkspaceOnNode(workspace.nodeId, workspace.id, env, workspace.userId);
-  }
-
-  const now = new Date().toISOString();
-  const workspaceSleeping = db
-    .update(schema.workspaces)
-    .set({ status: 'sleeping', errorMessage: null, updatedAt: now })
-    .where(
-      and(
-        eq(schema.workspaces.id, workspace.id),
-        inArray(schema.workspaces.status, ['running', 'recovery', 'sleeping'])
-      )
-    );
-  const agentSleeping = db
-    .update(schema.agentSessions)
-    .set({ status: 'sleeping', errorMessage: null, updatedAt: now })
-    .where(eq(schema.agentSessions.id, agentSession.id));
-  if (workspace.nodeRuntime === 'cf-container') {
-    await db.batch([
-      workspaceSleeping,
-      agentSleeping,
-      db
-        .update(schema.nodes)
-        .set({
-          status: 'sleeping',
-          healthStatus: 'unhealthy',
-          errorMessage: null,
-          updatedAt: now,
-        })
-        .where(eq(schema.nodes.id, workspace.nodeId)),
-    ]);
-  } else {
-    await db.batch([workspaceSleeping, agentSleeping]);
-  }
-  const sleepWarning =
-    verified?.status === 'degraded'
-      ? `Workspace slept with degraded snapshot (${verified.degradation})`
-      : null;
-  const finalized = await finalizeSessionSnapshotSleeping(
-    db,
-    env,
-    workspace.chatSessionId,
-    claimId,
-    new Date(),
-    { sleepWarning, expectedGeneration: verified?.snapshotGeneration ?? undefined }
-  );
-  if (!finalized) {
-    const snapshot = await getRestorableSessionSnapshot(db, workspace.chatSessionId);
-    if (!snapshot?.sleepingAt || snapshot.sleepStatus !== 'sleeping') {
-      throw new Error('Verified snapshot lost availability before sleep commit');
-    }
-  }
-  const completed = await getRestorableSessionSnapshot(db, workspace.chatSessionId);
-  if (!completed?.sleepingAt || completed.sleepStatus !== 'sleeping') {
-    throw new Error('Workspace sleep finalization was not durably verified');
-  }
-  return completed;
-}
-
-async function finishAlreadySleeping(
-  db: ReturnType<typeof drizzle<typeof schema>>,
-  env: Env,
-  workspace: SleepWorkspace,
-  snapshot: Awaited<ReturnType<typeof getRestorableSessionSnapshot>>
-): Promise<SleepWorkspaceSessionResult | null> {
-  if (
-    workspace.status === 'sleeping' &&
-    isSessionSnapshotSleepReleasable(snapshot) &&
-    snapshot.sleepStatus === 'sleeping' &&
-    snapshot.sleepingAt
-  ) {
-    await projectDataService.sleepSession(env, workspace.projectId, workspace.chatSessionId);
-    await scheduleSleepingWorkspaceDeletion(
-      env,
-      workspace,
-      'session_sleep.workspace_deletion_reschedule_failed'
-    );
-    await finishSleepComputeCleanup(db, env, workspace);
-    return {
-      status: 'sleeping',
-      workspaceId: workspace.id,
-      chatSessionId: workspace.chatSessionId,
-      snapshotExpiresAt: snapshot.expiresAt,
-    };
-  }
-  return null;
-}
-
-async function finishSleepCleanup(
-  db: ReturnType<typeof drizzle<typeof schema>>,
-  env: Env,
-  workspace: SleepWorkspace,
-  agentSession: { id: string },
-  verified: NonNullable<Awaited<ReturnType<typeof getRestorableSessionSnapshot>>>,
-  reason: string
-): Promise<SleepWorkspaceSessionResult> {
-  const acpSession = await projectDataService
-    .getAcpSession(env, workspace.projectId, agentSession.id)
-    .catch(() => null);
-  if (acpSession?.status === 'running') {
-    await projectDataService
-      .transitionAcpSession(env, workspace.projectId, agentSession.id, 'interrupted', {
-        actorType: 'system',
-        actorId: null,
-        reason: `Session sleeping: ${reason}`,
-      })
-      .catch((error) => {
-        log.warn('session_sleep.acp_transition_failed', {
-          workspaceId: workspace.id,
-          agentSessionId: agentSession.id,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      });
-  }
-
-  await scheduleSleepingWorkspaceDeletion(
-    env,
-    workspace,
-    'session_sleep.workspace_deletion_schedule_failed'
-  );
-  await finishSleepComputeCleanup(db, env, workspace);
-
-  log.info('session_sleep.completed', {
-    workspaceId: workspace.id,
-    chatSessionId: workspace.chatSessionId,
-    nodeId: workspace.nodeId,
-    runtime: workspace.nodeRuntime,
-    expiresAt: verified.expiresAt,
-    snapshotStatus: verified.status,
-    snapshotDegradation: verified.degradation,
-    reason: reason,
-  });
-  return {
-    status: 'sleeping',
-    workspaceId: workspace.id,
-    chatSessionId: workspace.chatSessionId,
-    snapshotExpiresAt: verified.expiresAt,
-  };
-}
-
 /**
  * Persist a sleep intent without touching the live runtime. Terminal completion
  * uses a zero delay while it is still inside the final ACP prompt; the scheduled
@@ -436,20 +140,7 @@ export async function sleepWorkspaceSession(
     throw new Error(`Workspace cannot sleep from status ${workspace.status}`);
   }
 
-  const [agentSession] = await db
-    .select({ id: schema.agentSessions.id, agentType: schema.agentSessions.agentType })
-    .from(schema.agentSessions)
-    .where(
-      and(
-        eq(schema.agentSessions.workspaceId, workspace.id),
-        inArray(schema.agentSessions.status, ['running', 'recovery', 'sleeping'])
-      )
-    )
-    .orderBy(desc(schema.agentSessions.createdAt))
-    .limit(1);
-  if (!agentSession) {
-    throw new Error('Workspace has no resumable agent session');
-  }
+  const agentSession = await loadResumableAgentSession(db, workspace.id);
 
   await ensureSessionSnapshotForSleep(db, env, {
     workspaceId: workspace.id,
@@ -462,10 +153,13 @@ export async function sleepWorkspaceSession(
   });
 
   const claimId = input.sleepClaimId ?? ulid();
+  // Only the explicit sleep route (the Sleep button) calls without a claim id.
+  const requestedByPerson = !input.sleepClaimId;
   const claim = await claimSessionSnapshotSleep(db, env, {
     chatSessionId: workspace.chatSessionId,
     claimId,
-    force: !input.sleepClaimId,
+    force: requestedByPerson,
+    reopenBlockedEpisode: requestedByPerson,
   });
   if (claim.status === 'unavailable') {
     throw new Error(`Workspace sleep claim unavailable: ${claim.reason}`);
@@ -473,6 +167,7 @@ export async function sleepWorkspaceSession(
 
   let pointOfNoReturn = claim.phase === 'stopping';
   let verified = snapshot;
+  let fallback = false;
   try {
     if (!pointOfNoReturn) {
       verified = await verifyAndBeginSleepTeardown(env, workspace, agentSession, claimId);
@@ -481,23 +176,42 @@ export async function sleepWorkspaceSession(
       // A stopping claim can survive a Worker crash or an older deployment.
       // Recheck it before retrying the runtime stop; a legacy degraded claim
       // must not become an authority to discard the still-live agent home.
+      // A bounded fallback's claim carries its own recorded recovery point,
+      // which is re-verified instead (`confirmSessionSleepFallbackStopping`).
       verified = await getRestorableSessionSnapshot(db, workspace.chatSessionId);
-      if (
+      const identityMatches =
+        Boolean(verified) &&
+        verified?.workspaceId === workspace.id &&
+        verified.agentSessionId === agentSession.id &&
+        verified.nodeId === workspace.nodeId &&
+        verified.runtime === workspace.nodeRuntime &&
+        !verified.captureGeneration;
+      const fallbackRecord =
+        identityMatches && verified?.sleepFallbackJson
+          ? await confirmSessionSleepFallbackStopping(env, verified, new Date())
+          : null;
+      if (fallbackRecord && verified) {
+        // The notice may not have landed before the crash; the write is idempotent.
+        await persistSessionSleepFallbackNotice(env, {
+          projectId: workspace.projectId,
+          chatSessionId: workspace.chatSessionId,
+          record: fallbackRecord,
+        });
+        fallback = true;
+      } else if (
+        !identityMatches ||
         !verified ||
         verified.status !== 'available' ||
         verified.degradation !== 'none' ||
-        verified.workspaceId !== workspace.id ||
-        verified.agentSessionId !== agentSession.id ||
-        verified.nodeId !== workspace.nodeId ||
-        verified.runtime !== workspace.nodeRuntime ||
-        verified.captureGeneration ||
         !(await verifySessionSnapshotArtifactsForSleep(env, verified))
       ) {
         throw new Error('Stopping claim lacks a complete verified workspace snapshot');
       }
     }
 
-    verified = await completeSleepTeardown(env, workspace, agentSession, claimId, verified);
+    verified = await completeSleepTeardown(env, workspace, agentSession, claimId, verified, {
+      fallback,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (pointOfNoReturn) {

@@ -605,3 +605,137 @@ export async function setupProjectChatMocks(page: Page, options: ProjectChatMock
     route.fulfill({ status: 200, json: { commands: [] } })
   );
 }
+
+// ---------------------------------------------------------------------------
+// Sleeping / waking project chat mocks
+// ---------------------------------------------------------------------------
+
+/** A project row with the fields the project chat route reads. */
+export function makeMockProject(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'proj-test-1',
+    name: 'Test Project',
+    repository: 'testuser/test-repo',
+    defaultBranch: 'main',
+    userId: 'user-test-1',
+    githubInstallationId: 'inst-1',
+    defaultVmSize: null,
+    defaultAgentType: null,
+    defaultProvider: null,
+    workspaceIdleTimeoutMs: null,
+    nodeIdleTimeoutMs: null,
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+    ...overrides,
+  };
+}
+
+/** The `SessionStateSnapshot` shape `routes/chat/wake-state.ts` returns for an idle session. */
+export function makeIdleSessionState(overrides: Record<string, unknown> = {}) {
+  return {
+    activity: 'idle',
+    activityAt: 0,
+    statusError: null,
+    currentPlan: null,
+    planUpdatedAt: null,
+    promptStartedAt: null,
+    agentType: null,
+    lastStopReason: null,
+    runtimeWorkState: null,
+    runtimeWorkCount: null,
+    runtimeWorkSource: null,
+    runtimeWorkUpdatedAt: null,
+    runtimeWorkProgressAt: null,
+    recoveryStatus: null,
+    wakePhase: null,
+    ...overrides,
+  };
+}
+
+export interface SleepingChatMockOptions {
+  user: unknown;
+  project: unknown;
+  session: { id: string } & Record<string, unknown>;
+  messages: unknown[];
+  /** Session detail `state`; see `makeIdleSessionState`. */
+  state: Record<string, unknown>;
+  /** The session's OWN task row, the one `useProvisioningTracker` reads. */
+  ownTask: Record<string, unknown>;
+}
+
+/**
+ * Registers every API route the project chat page touches when it opens a
+ * sleeping or waking session. Shared by `wake-progress-audit.spec.ts` and
+ * `sleeping-session-audit.spec.ts`, which differ only in the session `state`
+ * and the own-task shape they feed in.
+ *
+ * Envelope shapes matter: the client reads `.sessions`, `.items`, `.commands`
+ * and `.messages`. Returning a bare array crashes the app into its
+ * ErrorBoundary, where an absence-only assertion would still pass.
+ */
+export async function setupSleepingChatMocks(page: Page, options: SleepingChatMockOptions) {
+  const { user, project, session, messages, state, ownTask } = options;
+  await page.route('**/api/**', async (route: Route) => {
+    const path = new URL(route.request().url()).pathname;
+    const respond = (status: number, body: unknown) =>
+      route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+
+    if (path.includes('/api/auth/')) return respond(200, user);
+    if (path.startsWith('/api/notifications/preferences')) return respond(200, {});
+    if (path.startsWith('/api/notifications')) {
+      return respond(200, { notifications: [], unreadCount: 0 });
+    }
+    if (path.startsWith('/api/credentials')) return respond(200, []);
+    if (path.startsWith('/api/provider-catalog')) return respond(200, { catalogs: [] });
+    if (path.startsWith('/api/github/installations')) return respond(200, []);
+    if (path.startsWith('/api/report-issue/config')) return respond(200, { enabled: false });
+    if (path === '/api/trial-status') return respond(200, {});
+    if (path === '/api/agents') return respond(200, []);
+
+    const projectMatch = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
+    if (projectMatch) {
+      const subPath = projectMatch[2] || '';
+      if (subPath === '/sessions') return respond(200, { sessions: [session], total: 1 });
+      if (subPath === '/agent-profiles') return respond(200, { items: [] });
+      if (subPath === '/cached-commands') return respond(200, { commands: [] });
+      if (subPath === '/credential-attribution-health') return respond(200, {});
+      if (subPath.match(/^\/sessions\/[^/]+$/)) {
+        return respond(200, { session, messages, hasMore: false, state });
+      }
+      if (subPath.match(/\/sessions\/[^/]+\/messages/)) {
+        return respond(200, { messages, hasMore: false });
+      }
+      if (subPath === '/tasks') return respond(200, []);
+      if (subPath.match(/^\/tasks\/[^/]+$/)) return respond(200, ownTask);
+      if (subPath === '/agents') return respond(200, []);
+      if (subPath === '/skills') return respond(200, []);
+      if (subPath === '') return respond(200, project);
+      return respond(200, {});
+    }
+
+    if (path === '/api/projects') return respond(200, [project]);
+    return respond(200, {});
+  });
+}
+
+/**
+ * Resolves `'fetched'` when the page fetches the session's own task (the path
+ * that restores ProvisioningIndicator) and `'not-fetched'` once a bounded window
+ * passes without it. Await this before asserting the provisioning block is
+ * absent, so the assertion observes the restore effect's outcome instead of a
+ * moment before it ran.
+ */
+export function awaitOwnTaskFetchOutcome(
+  page: Page,
+  taskId: string,
+  windowMs = 1_500
+): Promise<'fetched' | 'not-fetched'> {
+  return page
+    .waitForResponse((response) => new URL(response.url()).pathname.endsWith(`/tasks/${taskId}`), {
+      timeout: windowMs,
+    })
+    .then(
+      () => 'fetched' as const,
+      () => 'not-fetched' as const
+    );
+}

@@ -64,7 +64,7 @@ func (h *SessionHost) requestForm(ctx context.Context, generation string,
 		!config.Enabled || !config.FormsEnabled ||
 		config.validate() != nil || generation == "" || h.config.ProjectID == "" ||
 		h.config.WorkspaceID == "" || h.config.SessionID == "" || h.config.RuntimeIdentity == "" ||
-		h.config.CallbackToken == "" || h.config.ControlPlaneURL == "" {
+		h.callbackToken() == "" || h.config.ControlPlaneURL == "" {
 		slog.Info("acp_interaction.form_cancelled", "reason", "unsupported")
 		return cancelledFormResponse(), nil
 	}

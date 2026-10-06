@@ -216,6 +216,10 @@ type SessionHost struct {
 	// credentialAttribution stores non-secret server-selected credential identity
 	// for usage callbacks. It is lock-free so SessionUpdate never waits on h.mu.
 	credentialAttribution atomic.Value
+	// renewedCallbackToken holds a workspace callback token delivered after the
+	// host was created (SetCallbackToken). Lock-free like the fields above:
+	// control-plane reporting runs on the ACP notification goroutine.
+	renewedCallbackToken atomic.Value // string
 
 	// Credential injection metadata (set during startAgent, read during stop).
 	// These track whether the agent used file-based credential injection so
@@ -236,6 +240,14 @@ type SessionHost struct {
 	usageReportClosed       bool
 	usageReportCloseGrace   bool
 	usageReportCallbacks    sync.WaitGroup
+
+	// Post-turn provider usage probes (session_host_usage_probe.go).
+	// usageProbeInFlight makes probes single-flight per host; opencodeUsageKey
+	// holds the OpenCode Go API key only while an opencode-go session runs and
+	// is cleared on agent stop; codexRolloutReader is a test seam (nil = real).
+	usageProbeInFlight atomic.Bool
+	opencodeUsageKey   atomic.Value // string
+	codexRolloutReader codexRolloutTailReader
 
 	// Viewers (guarded by viewerMu)
 	viewerMu sync.RWMutex
@@ -672,6 +684,7 @@ func (h *SessionHost) stopCurrentAgentLocked() {
 	h.credInjectionMode = ""
 	h.credAuthFilePath = ""
 	h.credKind = ""
+	h.clearOpencodeUsageProbeKey()
 }
 
 // persistAcpSessionID saves the ACP session ID for reconnection support.

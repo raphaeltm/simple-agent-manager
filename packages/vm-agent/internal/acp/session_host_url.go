@@ -173,7 +173,7 @@ func (h *SessionHost) requestURL(ctx context.Context, generation string,
 	if params.Url == nil || params.Form != nil || len(params.Url.Meta) != 0 ||
 		!config.Enabled || !config.URLsEnabled || config.validate() != nil ||
 		h.config.ProjectID == "" || h.config.WorkspaceID == "" || h.config.SessionID == "" ||
-		h.config.RuntimeIdentity == "" || h.config.CallbackToken == "" || h.config.ControlPlaneURL == "" ||
+		h.config.RuntimeIdentity == "" || h.callbackToken() == "" || h.config.ControlPlaneURL == "" ||
 		len(params.Url.ElicitationId) == 0 || len(utf16.Encode([]rune(params.Url.ElicitationId))) > config.URLElicitationIDMaxChars ||
 		len(params.Url.Message) > config.RequestMaxBytes {
 		return acpsdk.NewUnstableCreateElicitationResponseCancel(), nil
@@ -347,7 +347,7 @@ func (h *SessionHost) completeURLInteraction(entry acpUrlElicitation, elicitatio
 		if err != nil {
 			return
 		}
-		req.Header.Set("Authorization", "Bearer "+h.config.CallbackToken)
+		req.Header.Set("Authorization", "Bearer "+h.callbackToken())
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := h.httpClient().Do(req)
 		if err != nil {

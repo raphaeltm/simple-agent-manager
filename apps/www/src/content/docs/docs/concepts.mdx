@@ -13,7 +13,7 @@ Every workspace has one or more agent chat sessions and its own lifecycle: `pend
 
 A **VM workspace** additionally gives the agent a full Linux toolchain, Docker, and your `.devcontainer`; a browser-based terminal for hands-on work; and automatic port detection for dev servers (see below). An **Instant** workspace trades all of that for a start measured in seconds.
 
-Workspace compute is **ephemeral**. Persistent sessions preserve the home directory and uncommitted repository state while sleeping, but that snapshot expires after seven days, so push anything you need to keep longer.
+Workspace compute is **ephemeral**. Persistent sessions preserve the home directory and uncommitted repository state while sleeping. If snapshots keep failing, SAM may keep only the repository state and the conversation instead. Either way the snapshot expires after seven days, so push anything you need to keep longer.
 
 ### Runtimes: Instant vs VM
 

@@ -343,6 +343,29 @@ export function listActiveAttentionMarkers(sql: SqlStorage, sessionId: string) {
   return rows.map((r) => parseAttentionMarkerRow(r));
 }
 
+/** Cheap watchdog guard; the attention expiry owner handles elapsed deadlines. */
+export function hasPendingHumanInput(
+  sql: SqlStorage,
+  sessionId: string,
+  taskId: string,
+  now: number
+): boolean {
+  return (
+    sql
+      .exec(
+        `SELECT 1 FROM session_attention_markers
+     WHERE session_id = ? AND resolved_at IS NULL AND kind = 'needs_input'
+       AND (task_id IS NULL OR task_id = ?)
+       AND expires_at > ?
+     LIMIT 1`,
+        sessionId,
+        taskId,
+        now
+      )
+      .toArray().length > 0
+  );
+}
+
 /**
  * Get a lightweight attention summary for session list enrichment.
  * Returns the most recent active marker, or null if none.

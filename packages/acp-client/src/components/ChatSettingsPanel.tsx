@@ -13,6 +13,11 @@ export interface ChatSettingsPanelProps {
   loading?: boolean;
   /** Valid permission mode options */
   permissionModes: { value: string; label: string }[];
+  /**
+   * Mode the agent runs in when no permission mode is saved. Hosts with a
+   * platform default should pass it; otherwise the agent's own `default` mode applies.
+   */
+  defaultPermissionMode?: string;
   /** Called when user saves settings */
   onSave: (data: { model?: string | null; permissionMode?: string | null }) => Promise<void>;
   /** Called to close the panel */
@@ -27,11 +32,14 @@ export function ChatSettingsPanel({
   settings,
   loading,
   permissionModes,
+  defaultPermissionMode = 'default',
   onSave,
   onClose,
 }: ChatSettingsPanelProps) {
   const [model, setModel] = useState(settings?.model ?? '');
-  const [permissionMode, setPermissionMode] = useState(settings?.permissionMode ?? 'default');
+  const [permissionMode, setPermissionMode] = useState(
+    settings?.permissionMode ?? defaultPermissionMode
+  );
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -43,9 +51,9 @@ export function ChatSettingsPanel({
   useEffect(() => {
     if (settings) {
       setModel(settings.model ?? '');
-      setPermissionMode(settings.permissionMode ?? 'default');
+      setPermissionMode(settings.permissionMode ?? defaultPermissionMode);
     }
-  }, [settings]);
+  }, [settings, defaultPermissionMode]);
 
   // Focus management: capture previous focus, focus panel on mount, restore on close
   useEffect(() => {
@@ -67,7 +75,7 @@ export function ChatSettingsPanel({
 
   const hasChanges =
     (model.trim() || null) !== (settings?.model ?? null) ||
-    permissionMode !== (settings?.permissionMode ?? 'default');
+    permissionMode !== (settings?.permissionMode ?? defaultPermissionMode);
 
   const handleSave = async () => {
     setSaving(true);

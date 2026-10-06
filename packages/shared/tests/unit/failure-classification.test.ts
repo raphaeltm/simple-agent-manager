@@ -32,6 +32,9 @@ describe('classifyFailure', () => {
   it.each([
     'Task runtime is conclusively gone after reconciliation grace (workspace_missing)',
     'Task runtime is no longer live after 240 minutes. Last liveness result: workspace_missing',
+    // Current wording (2026-10-04): the liveness reason and the observed age.
+    'Task runtime is no longer live (workspace_deleted); task started 1433 minutes ago. Last step: awaiting_followup.',
+    'Task runtime is no longer live (node_not_live); task started 300 minutes ago.',
   ])('classifies real reconciliation-sweep messages as runtime-lost: %s', (message) => {
     expect(classifyFailure(message).code).toBe('runtime-lost');
   });

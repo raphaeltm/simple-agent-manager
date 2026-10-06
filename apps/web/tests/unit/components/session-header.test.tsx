@@ -21,6 +21,11 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   updateWorkspacePortsPublic: mocks.updateWorkspacePortsPublic,
 }));
 
+// The usage chip owns a TanStack query; it has its own tests (credential-limit-chip.test.tsx).
+// A spy (not a bare stub) so the header's wiring to it is asserted, not assumed.
+const chipMock = vi.hoisted(() => ({ SessionCredentialLimitChip: vi.fn(() => null) }));
+vi.mock('../../../src/components/credential-limits/SessionCredentialLimitChip', () => chipMock);
+
 vi.mock('../../../src/lib/text-utils', () => ({
   stripMarkdown: (s: string) => s,
 }));
@@ -241,6 +246,14 @@ describe('SessionHeader', () => {
     mocks.deleteWorkspace.mockResolvedValue({});
     mocks.listChatMessages.mockResolvedValue({ messages: [], hasMore: false });
     mocks.updateWorkspacePortsPublic.mockResolvedValue(makeWorkspace({ portsPublicEnabled: true }));
+  });
+
+  it('mounts the usage chip for the session\'s project and agent session', () => {
+    renderHeader({ session: makeSession({ agentSessionId: 'agent-123' }) });
+    expect(chipMock.SessionCredentialLimitChip).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: 'proj-1', agentSessionId: 'agent-123' }),
+      undefined
+    );
   });
 
   it('renders session topic', () => {

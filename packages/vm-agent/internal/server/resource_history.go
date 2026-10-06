@@ -71,7 +71,20 @@ func (s *Server) ensureResourceHistoryForRuntime(runtime *WorkspaceRuntime) {
 		ProfileID: "",
 	}
 
+	// Check authoritative status under the lifecycle lock order (workspace then
+	// telemetry). A stale runtime snapshot must not recreate a stopped collector.
+	s.workspaceMu.RLock()
+	current := s.workspaces[workspaceID]
+	inactive := current == nil
+	if current != nil {
+		inactive = current.Status == "stopped" || current.Status == "evicted" || current.Status == "stopping"
+	}
 	s.resourceHistoryMu.Lock()
+	s.workspaceMu.RUnlock()
+	if inactive || s.historyShutdown || s.resourceHistoryStops[workspaceID] != nil {
+		s.resourceHistoryMu.Unlock()
+		return
+	}
 	if s.resourceHistories == nil {
 		s.resourceHistories = make(map[string]*resourcehistory.Collector)
 	}
@@ -164,9 +177,30 @@ func (s *Server) stopResourceHistoryForWorkspace(workspaceID string, ctx context
 		return
 	}
 	s.resourceHistoryMu.Lock()
+	if done := s.resourceHistoryStops[workspaceID]; done != nil {
+		s.resourceHistoryMu.Unlock()
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		select {
+		case <-done:
+		case <-ctx.Done():
+		}
+		return
+	}
+	if s.resourceHistoryStops == nil {
+		s.resourceHistoryStops = make(map[string]chan struct{})
+	}
+	done := make(chan struct{})
+	s.resourceHistoryStops[workspaceID] = done
 	collector := s.resourceHistories[workspaceID]
-	delete(s.resourceHistories, workspaceID)
 	s.resourceHistoryMu.Unlock()
+	defer func() {
+		s.resourceHistoryMu.Lock()
+		delete(s.resourceHistories, workspaceID)
+		close(done)
+		s.resourceHistoryMu.Unlock()
+	}()
 	if collector != nil {
 		if ctx == nil {
 			ctx = context.Background()
@@ -182,6 +216,9 @@ func (s *Server) stopResourceHistoryForWorkspace(workspaceID string, ctx context
 }
 
 func (s *Server) startAllResourceHistoryCollectors() {
+	s.resourceHistoryMu.Lock()
+	s.historyShutdown = false
+	s.resourceHistoryMu.Unlock()
 	s.workspaceMu.RLock()
 	runtimes := make([]*WorkspaceRuntime, 0, len(s.workspaces))
 	for _, rt := range s.workspaces {
@@ -196,6 +233,7 @@ func (s *Server) startAllResourceHistoryCollectors() {
 
 func (s *Server) stopAllResourceHistoryCollectors(ctx context.Context) {
 	s.resourceHistoryMu.Lock()
+	s.historyShutdown = true
 	collectors := s.resourceHistories
 	s.resourceHistories = make(map[string]*resourcehistory.Collector)
 	s.resourceHistoryMu.Unlock()
@@ -203,6 +241,20 @@ func (s *Server) stopAllResourceHistoryCollectors(ctx context.Context) {
 		if collector != nil {
 			collector.Stop(ctx)
 			slog.Info("Resource history collector stopped", "workspace", workspaceID)
+		}
+	}
+}
+
+// resetResourceHistoryAfterReprovision is called only after an explicit restart
+// has been admitted. Never clear ownership while a final flush is still running.
+func (s *Server) resetResourceHistoryAfterReprovision(workspaceID string) {
+	s.resourceHistoryMu.Lock()
+	defer s.resourceHistoryMu.Unlock()
+	if done := s.resourceHistoryStops[workspaceID]; done != nil {
+		select {
+		case <-done:
+			delete(s.resourceHistoryStops, workspaceID)
+		default:
 		}
 	}
 }

@@ -6,6 +6,34 @@ Codex hosts select it when trusted forms/URL configuration is enabled. Existing
 hosts retain their executable; permissions-only and disabled fresh hosts use stock.
 All ACP defaults remain false. Production activation is a separate release step.
 
+## October 5: Sol 6.1 runtime upgrade
+
+The current distribution pairs Codex CLI `0.160.0-sam-c2.2` with ACP adapter
+`2.1.1-sam-c2.2` and the official `rust-v0.160.0` Code Mode host. The CLI includes
+`gpt-6.1-sol` metadata. SAM's explicit MCP capability, ownership, cancellation,
+and URL completion patches remain applied; the profile's model is unchanged.
+
+The immutable archive is 136245837 bytes, SHA-256
+`1fd3c07846581888284ed9c9d02bc1f51e3673610c3688d8da98db47030bfb95`.
+Its GitHub asset is under `acp-codex-runtime-c2.2-codemode2`. The Ubuntu 22.04
+review build is [run 37237755537](https://github.com/raphaeltm/simple-agent-manager/actions/runs/37237755537).
+It passed adapter typechecking and all 1,088 adapter tests (33 skipped).
+The helper binary signature was verified with Cosign against the exact
+`rust-release.yml@refs/tags/rust-v0.160.0` certificate identity and GitHub Actions
+OIDC issuer; its upstream legacy bundle signs the extracted binary.
+SAM's real Go-to-ACP process tests cover forms and URL interactions in direct
+and Code Mode operation, including denial, cancellation, and completion ordering.
+These use a local model fixture and do not prove production provider acceptance.
+
+The download endpoint retains the preceding approved digest for existing VM
+agents. The new installer verifies the preceding release's catalog, files,
+permissions and notices before atomically activating this release; it preserves
+previous bytes and a `previous` link. Unknown or modified predecessors fail
+closed. Existing running processes retain their executable; verify upgrades with
+a fresh session using the newly deployed VM agent or Instant image.
+
+The sections below record the preceding C2.1 rollout and its historical evidence.
+
 ## Offline installer
 
 `install-pinned-codex-runtime.sh <archive> <root>` installs only the reviewed
@@ -181,7 +209,6 @@ scrolled to the answer controls; the floating session header remains above them.
 - [Desktop form](../../docs/notes/acp-runtime-screenshots/acp-form-empty-desktop-1280x800.png)
 - [Live VM continuation](../../docs/notes/acp-runtime-screenshots/vm-form-continuation.png)
 
-
 ## Automatic selection, URL completion and Instant permissions (2026-10-03)
 
 Full CI `37098949903` and staging deployment `37099713242` succeeded at
@@ -228,7 +255,6 @@ flags were read false during rollback. Later staging deployments belong to
 separate verification work; obtain a new serialized slot before further testing.
 Production and the shared Sol profile were unchanged.
 
-
 ## Permission command wrapping
 
 Live Instant screenshots exposed an unbroken command extending beyond its mobile
@@ -238,7 +264,6 @@ permission scope. The exact Node command regression failed before the fix
 on mobile and desktop after it. Text-range bounds and card bounds are asserted;
 web typecheck and changed-file lint passed. The coordinator personally reviewed
 both replacement screenshots: full command and answer controls are readable.
-
 
 ## Bounded artifact and executable hardening
 
@@ -255,7 +280,6 @@ is byte-identical to the reviewed artifact. A broad upstream suite and its
 one-worker retry were killed by workspace OOM; neither is reported as passing.
 Further local checks use explicit test files, bounded memory and one process at
 a time. No Rust rebuild or runtime archive change was required.
-
 
 ## Final Instant matrix and rollback (2026-10-03)
 

@@ -17,6 +17,7 @@ const TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
   queued: ['delegated', 'failed', 'cancelled'],
   delegated: ['in_progress', 'failed', 'cancelled'],
   in_progress: ['completed', 'failed', 'cancelled'],
+  sleeping: ['queued', 'delegated', 'in_progress', 'cancelled'],
   completed: [],
   failed: ['ready', 'cancelled'],
   cancelled: ['ready'],
@@ -53,17 +54,17 @@ export function TaskList({
   }
 
   return (
-    <div className="grid gap-2">
+    <div className="grid min-w-0 grid-cols-1 gap-2">
       {tasks.map((task) => {
         const options = TRANSITIONS[task.status] ?? [];
 
         return (
           <article
             key={task.id}
-            className="border border-border-default rounded-md bg-surface p-3 grid gap-2"
+            className="border border-border-default rounded-md bg-surface p-3 grid min-w-0 grid-cols-1 gap-2"
           >
             {/* Row 1: status + title + priority + blocked */}
-            <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex min-w-0 items-center gap-2 flex-wrap">
               <StatusBadge status={task.status} />
               <Link
                 to={`/projects/${projectId}/tasks/${task.id}`}
@@ -94,7 +95,7 @@ export function TaskList({
             )}
 
             {/* Row 2: quick actions */}
-            <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex min-w-0 items-center gap-2 flex-wrap">
               {options.length > 0 && (
                 <select
                   aria-label={`Transition ${task.title}`}

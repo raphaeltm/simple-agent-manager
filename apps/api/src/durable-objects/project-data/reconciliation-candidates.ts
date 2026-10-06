@@ -16,6 +16,7 @@ import {
   resetReconciliationCursor,
   writeReconciliationCursor,
 } from './reconciliation-candidate-state';
+import { RECONCILIATION_EPISODE_PREFIX } from './reconciliation-episode';
 import {
   maxCandidatesPerSweep,
   promptHardStallMs,
@@ -93,6 +94,10 @@ function selectLocalCandidatePage(
          WHERE cs.status = 'active'
            AND COALESCE(ics.task_id, cs.task_id) IS NOT NULL
            AND COALESCE(ics.workspace_id, cs.workspace_id) IS NOT NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM do_meta episode WHERE episode.key = ? || cs.id
+           AND json_valid(episode.value) AND json_extract(episode.value, '$.paused') = 1
+       )
            AND CASE
              WHEN gate.value IS NULL OR json_valid(gate.value) = 0 THEN 1
              ELSE COALESCE(
@@ -118,6 +123,7 @@ function selectLocalCandidatePage(
        ORDER BY last_activity_at ASC, session_id ASC
        LIMIT ?`,
       CANDIDATE_GATE_META_PREFIX,
+      RECONCILIATION_EPISODE_PREFIX,
       idleThreshold,
       cursorActivity,
       cursorActivity,

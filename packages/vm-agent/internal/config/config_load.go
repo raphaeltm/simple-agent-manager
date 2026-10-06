@@ -173,6 +173,8 @@ func Load() (*Config, error) {
 		ACPCredentialSyncTimeout:          getEnvDuration("ACP_CREDENTIAL_SYNC_TIMEOUT", DefaultACPCredentialSyncTimeout),
 		ACPRestartAttemptTimeout:          getEnvDuration("ACP_RESTART_ATTEMPT_TIMEOUT", DefaultACPRestartAttemptTimeout),
 		ACPActivityReportTimeout:          getEnvDuration("ACP_ACTIVITY_REPORT_TIMEOUT", DefaultACPActivityReportTimeout),
+		ACPUsageProbeTimeout:              getEnvDuration("ACP_USAGE_PROBE_TIMEOUT", DefaultACPUsageProbeTimeout),
+		OpenCodeGoUsageURL:                getEnv("OPENCODE_GO_USAGE_URL", DefaultOpenCodeGoUsageURL),
 		ACPCheckpointPreemptGrace:         getEnvDuration("ACP_CHECKPOINT_PREEMPT_GRACE", DefaultACPCheckpointPreemptGrace),
 		ACPCheckpointPreemptMaxGrace:      getEnvDuration("ACP_CHECKPOINT_PREEMPT_MAX_GRACE", DefaultACPCheckpointPreemptMaxGrace),
 		ACPCheckpointRolloverTimeout:      getEnvDuration("ACP_CHECKPOINT_ROLLOVER_TIMEOUT", DefaultACPCheckpointRolloverTimeout),
@@ -278,6 +280,11 @@ func Load() (*Config, error) {
 
 		// Callback retry settings - configurable per constitution principle XI
 		WorkspaceReadyCallbackTimeout: getEnvDuration("WORKSPACE_READY_CALLBACK_TIMEOUT", DefaultWorkspaceReadyCallbackTimeout),
+
+		WorkspaceCallbackTokenRefreshRatio:        clampWorkspaceCallbackTokenRefreshRatio(getEnvFloat("WORKSPACE_CALLBACK_TOKEN_REFRESH_RATIO", DefaultWorkspaceCallbackTokenRefreshRatio)),
+		WorkspaceCallbackTokenRenewalTimeout:      positiveDurationOr(getEnvDuration("WORKSPACE_CALLBACK_TOKEN_RENEWAL_TIMEOUT", DefaultWorkspaceCallbackTokenRenewalTimeout), DefaultWorkspaceCallbackTokenRenewalTimeout),
+		WorkspaceCallbackTokenRenewalRetryInitial: positiveDurationOr(getEnvDuration("WORKSPACE_CALLBACK_TOKEN_RENEWAL_RETRY_INITIAL", DefaultWorkspaceCallbackTokenRenewalRetryInitial), DefaultWorkspaceCallbackTokenRenewalRetryInitial),
+		WorkspaceCallbackTokenRenewalRetryMax:     positiveDurationOr(getEnvDuration("WORKSPACE_CALLBACK_TOKEN_RENEWAL_RETRY_MAX", DefaultWorkspaceCallbackTokenRenewalRetryMax), DefaultWorkspaceCallbackTokenRenewalRetryMax),
 
 		// Error reporting settings - configurable per constitution principle XI
 		ErrorReportFlushInterval:  getEnvDuration("ERROR_REPORT_FLUSH_INTERVAL", 30*time.Second),

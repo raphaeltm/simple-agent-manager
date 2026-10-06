@@ -71,4 +71,37 @@ describe('ProjectData session summary sync', () => {
       d1.db.close();
     }
   });
+
+  it('keeps a newer live message ahead of the physical archive timestamp', async () => {
+    const source = makeDoSql();
+    const d1 = makeD1Env();
+    try {
+      source.sql.exec(
+        `INSERT INTO chat_sessions
+           (id, workspace_id, created_by_user_id, topic, status, message_count,
+            started_at, ended_at, created_at, updated_at, agent_completed_at,
+            materialized_at, archive_last_message_at, archive_state)
+         VALUES ('session-newer-inline-message', 'workspace-sync', 'user-sync', 'New activity',
+                 'stopped', 2, 1000, 5000, 1000, 5000, 5000, 5000, 2000,
+                 'source_deleted')`
+      );
+      source.sql.exec(
+        `INSERT INTO chat_messages
+           (id, session_id, role, content, tool_metadata, created_at, sequence, origin)
+         VALUES ('message-after-archive', 'session-newer-inline-message', 'user',
+                 'newer real conversation activity', NULL, 4000, 2, NULL)`
+      );
+
+      await syncSessionSummariesToD1(source.sql, d1.env, 'project-sync');
+
+      expect(
+        d1.db
+          .prepare('SELECT last_message_at FROM session_summaries WHERE id = ?')
+          .get('session-newer-inline-message')
+      ).toEqual({ last_message_at: 4000 });
+    } finally {
+      source.db.close();
+      d1.db.close();
+    }
+  });
 });

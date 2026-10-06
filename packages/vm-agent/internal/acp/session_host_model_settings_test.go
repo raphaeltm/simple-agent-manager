@@ -4,10 +4,75 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestCodexRequestedModelIsSeededBeforeACPProcessStart(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("CODEX_HOME", "")
+
+	process, agentStdin, agentStdout := newFakeAgentProcess(time.Now(), true)
+	t.Cleanup(func() {
+		_ = process.Stop()
+		_ = agentStdin.Close()
+		_ = agentStdout.Close()
+	})
+
+	setModelRequests := make(chan map[string]any, 1)
+	serveCodexModelACP(agentStdin, agentStdout, false, false, setModelRequests)
+
+	const requestedModel = "gpt-6.1-sol"
+	var startupModel string
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			ContainerWorkDir:    tmpDir,
+			InitTimeoutMs:       2000,
+			NewSessionTimeoutMs: 2000,
+		},
+		StartProcess: func(startup *agentStartup) (agentProcess, error) {
+			for _, envVar := range startup.envVars {
+				if !strings.HasPrefix(envVar, "CODEX_CONFIG=") {
+					continue
+				}
+				var config map[string]string
+				if err := json.Unmarshal([]byte(strings.TrimPrefix(envVar, "CODEX_CONFIG=")), &config); err != nil {
+					return nil, fmt.Errorf("decode CODEX_CONFIG: %w", err)
+				}
+				startupModel = config["model"]
+			}
+			return process, nil
+		},
+	})
+	host.agentType = "openai-codex"
+
+	err := host.startSelectedAgent(
+		context.Background(),
+		"openai-codex",
+		&agentCredential{credential: "test-key", credentialKind: "api-key"},
+		&agentSettingsPayload{Model: requestedModel, Effort: "medium"},
+		"",
+		false,
+	)
+	if err != nil {
+		t.Fatalf("Codex startup failed: %v", err)
+	}
+	if startupModel != requestedModel {
+		t.Fatalf("startup CODEX_CONFIG model = %q, want %q", startupModel, requestedModel)
+	}
+
+	select {
+	case params := <-setModelRequests:
+		if got := params["value"]; got != requestedModel {
+			t.Fatalf("post-handshake model selection = %v, want %q", got, requestedModel)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("post-handshake exact model selection request was not sent")
+	}
+}
 
 // TestCodexAstraModelSelectionIsAppliedOrFailsClosed exercises the production
 // ACP handshake over in-memory pipes. It is deliberately discriminating in both

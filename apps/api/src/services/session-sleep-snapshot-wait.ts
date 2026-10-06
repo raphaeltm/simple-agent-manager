@@ -4,7 +4,7 @@ import type * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
-import { hibernateAgentSessionOnNode } from './node-agent';
+import { hibernateAgentSessionOnNode, type HibernateCallbackTokenDelivery } from './node-agent';
 import {
   completeActiveSessionSnapshotAsDegraded,
   getSessionSnapshotCaptureState,
@@ -67,6 +67,8 @@ export async function waitForFinalSessionSnapshot(
   let activeCaptureGeneration: string | null = null;
   let lastProgressAt = Date.now();
   let lastProgressToken = '';
+  // One delivered workspace token for every poll of this request, not one per poll.
+  const tokenDelivery: HibernateCallbackTokenDelivery = {};
 
   while (Date.now() < requestDeadline) {
     const current = await getSessionSnapshotCaptureState(db, input.chatSessionId);
@@ -90,7 +92,8 @@ export async function waitForFinalSessionSnapshot(
         runtime: input.runtime,
         agentType: input.agentType,
         background: true,
-      }
+      },
+      tokenDelivery
     )) as SnapshotResult & { accepted?: unknown };
     if (result.status !== 'pending') {
       throw new Error(`Workspace snapshot request was not accepted (${String(result.status)})`);
@@ -117,7 +120,7 @@ export async function waitForFinalSessionSnapshot(
     }
     activeCaptureGeneration = current?.captureGeneration ?? activeCaptureGeneration;
     if (current?.captureGeneration && current.captureError) {
-      const degraded = await completeActiveSessionSnapshotAsDegraded(db, env, {
+      const outcome = await completeActiveSessionSnapshotAsDegraded(db, env, {
         workspaceId: input.workspaceId,
         chatSessionId: input.chatSessionId,
         agentSessionId: input.agentSessionId,
@@ -127,7 +130,12 @@ export async function waitForFinalSessionSnapshot(
         acpSessionId: input.acpSessionId,
         reason: current.captureError,
       });
-      if (degraded) {
+      if (outcome === 'abandoned') {
+        throw new Error(
+          `Workspace snapshot capture failed; the previous snapshot generation was kept (${current.captureError})`
+        );
+      }
+      if (outcome === 'degraded') {
         log.warn('session_sleep.snapshot_degraded_after_capture_failure', {
           workspaceId: input.workspaceId,
           chatSessionId: input.chatSessionId,
@@ -156,7 +164,7 @@ export async function waitForFinalSessionSnapshot(
     if (now - lastProgressAt >= progressIdleTimeoutMs) {
       const reason = `Workspace snapshot made no progress for ${progressIdleTimeoutMs}ms`;
       if (activeCaptureGeneration) {
-        const degraded = await completeActiveSessionSnapshotAsDegraded(db, env, {
+        const outcome = await completeActiveSessionSnapshotAsDegraded(db, env, {
           workspaceId: input.workspaceId,
           chatSessionId: input.chatSessionId,
           agentSessionId: input.agentSessionId,
@@ -166,7 +174,10 @@ export async function waitForFinalSessionSnapshot(
           acpSessionId: input.acpSessionId,
           reason,
         });
-        if (degraded) {
+        if (outcome === 'abandoned') {
+          throw new Error(`${reason}; the previous snapshot generation was kept`);
+        }
+        if (outcome === 'degraded') {
           const terminal = await getSessionSnapshotCaptureState(db, input.chatSessionId);
           if (
             terminal?.status === 'degraded' &&

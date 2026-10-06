@@ -105,7 +105,9 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `FAILED_TASK_PRESERVATION_MAX_WAIT_MS` — Longest a failed task's runtime waits for its work-preservation sleep, from the latest of the failure, an in-place wake and the agent's current turn start, before the sweep tears it down with a chat notice (default: `28800000`)
 - `SESSION_SLEEP_SWEEP_BATCH_SIZE` — Maximum due VM sleeps atomically claimed by one scheduled sweep (default: `10`)
 - `SESSION_SLEEP_RETRY_DELAY_MS` — Delay after a fail-closed automatic sleep attempt (default: `300000`)
-- `SESSION_SLEEP_MAX_ATTEMPTS` — Maximum automatic sleep attempts; exhaustion preserves compute and records the error, except a failed task's preservation, which then tears the runtime down and says so (default: `9`)
+- `SESSION_SLEEP_MAX_ATTEMPTS` — Failed-attempt ceiling of a bounded sleep-failure episode: at it the episode ends blocked (no teardown, chat notice), except a failed task's preservation, which then tears the runtime down and says so; also re-arms legacy rows exhausted below a raised value (default: `9`, clamped above `SESSION_SLEEP_FAILURE_MAX_ATTEMPTS`)
+- `SESSION_SLEEP_FAILURE_MAX_ATTEMPTS` — Failed full-snapshot sleep attempts in one episode before the transcript-and-Git fallback is tried (default: `3`)
+- `SESSION_SLEEP_FAILURE_MAX_ELAPSED_MS` — Time since the sleep episode began (with at least one failure) before the transcript-and-Git fallback is tried (default: `900000`, 15 min)
 - `SESSION_SLEEP_CLAIM_LEASE_MS` — Reclaim timeout for an interrupted automatic-sleep claim (default: `600000`)
 - `HARNESS_BACKGROUND_WORK_LEASE_MS` — Finite sleep-protection lease renewed by normalized harness background-work lifecycle signals (default: `300000`)
 - `HARNESS_BACKGROUND_WORK_MAX_DURATION_MS` — Absolute ceiling, measured from the last harness lifecycle progress edge, on how long background work may defer sleep (default: `1800000`)
@@ -532,6 +534,13 @@ by the read-only cron-liveness check.
 - `MCP_INCIDENT_LIST_MAX` — Maximum result count accepted by the private `list_incident_queue` MCP tool (default: 50)
 - `HETZNER_MAX_LIST_PAGES` — Maximum pages per Hetzner list request (default: 100)
 
+### Callback Tokens
+
+- `CALLBACK_TOKEN_EXPIRY_MS` — Lifetime of node- and workspace-scoped VM callback JWTs (default: `86400000` / 24h). Changing it does not extend tokens already issued.
+- `CALLBACK_TOKEN_REFRESH_THRESHOLD_RATIO` — Fraction of a callback token's lifetime after which it may be renewed (default: `0.5`, clamped to `0.1`–`0.9`). Gates both the node token refresh in `POST /api/nodes/:id/heartbeat` and workspace token renewal in `POST /api/workspaces/:id/callback-token/renew`; a token younger than this is not re-minted.
+- `RATE_LIMIT_CALLBACK_TOKEN_RENEWAL` — Authenticated workspace callback-token renewal attempts allowed per workspace per window (default: `12`). Counted atomically in D1 (`workspace_callback_token_renewal_rate_limits`) only after both proofs and the node binding pass; a healthy agent asks about once per half token lifetime.
+- `RATE_LIMIT_CALLBACK_TOKEN_RENEWAL_WINDOW_SECONDS` — Window for `RATE_LIMIT_CALLBACK_TOKEN_RENEWAL` (default: `3600`).
+
 ### Timeouts
 
 - `ORCHESTRATOR_STOP_CAS_MAX_ATTEMPTS` — Maximum task-status compare-and-set attempts after a parent hard-stops a child runtime (default: 2)
@@ -556,7 +565,8 @@ by the read-only cron-liveness check.
 - `TERMINAL_SESSION_RECONCILE_BATCH_SIZE` — Maximum active ProjectData `chat_sessions` candidates reconciled per project per 5-minute sweep (default: 25; capped at 200)
 - `TERMINAL_SESSION_SUMMARY_RECONCILE_BATCH_SIZE` — Maximum active D1 `session_summaries` candidates reconciled globally per 5-minute sweep (default: 25; capped at 200)
 - `TERMINAL_SESSION_RECONCILE_DEFER_MS` — Retry delay for live-head, snapshot-protected, or temporarily ineligible terminal-session ledger candidates (default: 3600000; capped at 86400000)
-- `TASK_RUN_ABSOLUTE_CEILING_MS` — Absolute runaway-cost ceiling that fails even a demonstrably live task (default: 86400000 / 24h). Aged from the current runtime generation (`workspaces.created_at`), not `tasks.started_at`, and skipped entirely when no runtime generation is allocated or the chat session holds a restorable/in-flight sleep record
+- `TASK_RUN_ABSOLUTE_CEILING_MS` — Absolute runaway-cost ceiling that fails even a demonstrably live task (default: 86400000 / 24h). Aged from the current runtime generation (`workspaces.created_at`), not `tasks.started_at`. Skipped when no runtime generation is allocated or the chat session holds a restorable sleep record; a sleep that is only in flight defers it for at most `TASK_RUN_ABSOLUTE_CEILING_SLEEP_GRACE_MS`
+- `TASK_RUN_ABSOLUTE_CEILING_SLEEP_GRACE_MS` — Longest the absolute ceiling defers to a sleep still in flight (scheduled, capturing, stopping or retrying) once passed, measured on runtime-generation age so sleep retries cannot renew it; keep it above `SESSION_SLEEP_IN_FLIGHT_MAX_AGE_MS` (default: 3600000 / 1h)
 - `SESSION_ACTIVITY_STALE_THRESHOLD_MS` — Threshold before stale working activity is checked against authoritative SessionHost inventory (default: 300000)
 - `NODE_HEARTBEAT_STALE_SECONDS` — Staleness threshold for node health
 - `TASK_LIVENESS_PROBE_TIMEOUT_MS` — Per-candidate timeout for ACP and Instant lifecycle probes used by ProjectData heartbeat deferral, idle cleanup, and stuck-task reconciliation; timeout is inconclusive (default: 5000)
@@ -724,6 +734,16 @@ Generated deployments validate and pass these values through cloud-init to newly
 - `SESSION_SNAPSHOT_PROGRESS_REPORT_INTERVAL` — Minimum interval between progress callbacks while a checkpoint continues making progress (default: `15s`)
 - `SESSION_SNAPSHOT_PROGRESS_REPORT_TIMEOUT` — Timeout for each best-effort progress callback to the control plane (default: `5s`)
 
+### Workspace Callback Token Renewal
+
+The agent renews each workspace callback token after a successful node heartbeat once the token is past the refresh ratio (`internal/server/workspace_callback_token_renewal.go`). These use their defaults unless set in the agent service environment.
+
+- `WORKSPACE_CALLBACK_TOKEN_REFRESH_RATIO` — Fraction of a workspace token's lifetime after which the agent renews it (default: `0.5`, clamped to `0.1`–`0.9`; the control plane's `CALLBACK_TOKEN_REFRESH_THRESHOLD_RATIO` still decides)
+- `WORKSPACE_CALLBACK_TOKEN_RENEWAL_TIMEOUT` — Timeout for one renewal request (default: `15s`)
+- `WORKSPACE_CALLBACK_TOKEN_RENEWAL_RETRY_INITIAL` — First backoff after a transient renewal failure (default: `1m`)
+- `WORKSPACE_CALLBACK_TOKEN_RENEWAL_RETRY_MAX` — Backoff ceiling, also the wait after a "not yet due" answer (default: `30m`)
+- `MSG_AUTH_RENEWAL_WAIT` — How long chat-message delivery may stay paused on a rejected (401) workspace token before the pause is reported as an error (default: `15m`). Held messages are kept either way.
+
 ### File Operations
 
 - `FILE_LIST_TIMEOUT` — Timeout for file listing commands (default: 10s)
@@ -813,3 +833,7 @@ Generated deployments validate and pass these values through cloud-init to newly
 - `DEFAULT_EVICTION_DOCKER_STOP_TIMEOUT_SECONDS` — Grace period passed to `docker stop --time` during eviction, in seconds (default: 10)
 - `DEFAULT_EVICTION_CALLBACK_RETRY_MAX_SECONDS` — Durable callback backoff cap, in seconds (default: 300). Retry eligibility also respects the complete operation lease (default: 60 seconds), which can exceed the cap; delivery is heartbeat-paced
 - `DEFAULT_EVICTION_RESOLVE_TIMEOUT_SECONDS` — Deadline for resolving a pressured Docker container to a workspace before eviction, in seconds (default: 5)
+
+### Repeated agent check-ins
+
+`TASK_RECONCILIATION_MAX_CHECKINS` (default `3`) caps automatic check-ins per durable no-progress episode. Human input or a newly completed tool call resets the budget; assistant error/text and system messages do not. A recognized unsupported-model runtime error pauses check-ins before another delivery. At the cap, SAM pauses nudges and asks Clef once using the existing `STALLED_TASK_CLASSIFIER_*` model, timeout, confidence, and transcript limits (without the long-turn age gate). Disabled/unavailable/uncertain classification never grants additional retries. The session/work remains intact; the attention notice explains how to retry.

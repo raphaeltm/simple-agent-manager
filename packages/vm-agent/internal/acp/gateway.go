@@ -28,9 +28,9 @@ const claudeACPInstallPackage = "@agentclientprotocol/claude-agent-acp@0.81.2"
 const claudeCodeMinVersion = "2.1.280"
 const claudeCodeInstallPackage = "@anthropic-ai/claude-code@2.1.281"
 const claudeCodeInstallCommand = "npm install -g " + claudeACPInstallPackage + " " + claudeCodeInstallPackage
-const codexACPInstallPackage = "@agentclientprotocol/codex-acp@1.13.1"
-const codexCLIInstallPackage = "@openai/codex@0.156.1"
-const codexACPInstallCommand = "npm install -g @agentclientprotocol/codex-acp@1.13.1 @openai/codex@0.156.1"
+const codexACPInstallPackage = "@agentclientprotocol/codex-acp@2.1.1"
+const codexCLIInstallPackage = "@openai/codex@0.160.0"
+const codexACPInstallCommand = "npm install -g " + codexACPInstallPackage + " " + codexCLIInstallPackage
 
 // BootLogReporter sends structured log entries to the control plane.
 // It must be non-nil and have a valid token for logging to work.
@@ -225,6 +225,13 @@ type GatewayConfig struct {
 	TerminalActivityReportBackoff time.Duration
 	// ActivityReportTimeout bounds each activity callback request.
 	ActivityReportTimeout time.Duration
+	// UsageProbeTimeout bounds one post-turn provider usage probe (Codex rollout
+	// read or OpenCode Go usage request). Zero selects the package default.
+	UsageProbeTimeout time.Duration
+	// OpenCodeGoUsageURL is the OpenCode Go usage endpoint probed after each
+	// turn of an OpenCode session that uses the opencode-go provider. Empty
+	// selects the package default.
+	OpenCodeGoUsageURL string
 	// CredentialSyncTimeout bounds auth-file sync-back during shutdown.
 	CredentialSyncTimeout time.Duration
 
@@ -1016,7 +1023,7 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 		}
 	case "openai-codex":
 		// Sandbox and approval overrides are injected through CODEX_CONFIG by
-		// writeCodexStartupConfig. codex-acp (verified through 1.13.1) does not parse Codex CLI -c
+		// writeCodexStartupConfig. codex-acp (verified through 2.1.1) does not parse Codex CLI -c
 		// arguments; its supported config channel is CODEX_CONFIG JSON, which it
 		// forwards to every app-server thread (including spawned subagents).
 		if credentialKind == "oauth-token" {

@@ -102,6 +102,7 @@ describe('model-catalog', () => {
       expect(allModels.some((m) => m.id === 'gemini-3.5-flash-lite')).toBe(true);
       expect(allModels.some((m) => m.id === 'gemini-2.5-flash-lite')).toBe(true);
       expect(allModels.some((m) => m.id === 'gemini-3.1-pro-preview')).toBe(true);
+      expect(allModels.some((m) => m.id === 'gemini-3-flash-preview')).toBe(true);
       expect(allModels.some((m) => m.id === 'gemini-3.1-flash-lite')).toBe(true);
       expect(allModels.some((m) => m.id === 'gemini-3.1-pro')).toBe(false);
       expect(allModels.some((m) => m.id === 'gemini-2.0-flash')).toBe(false);
@@ -140,6 +141,8 @@ describe('model-catalog', () => {
         true
       );
       expect(allModels.some((m) => m.id === 'opencode/ling-3.0-flash-fin-free')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode/fledge-alpha-free')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode/ling-3.1-flash-free')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode/longcat-2.5-preview-free')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode/qwen3.8-max')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode/muse-spark-1.2-contributor-free')).toBe(false);
@@ -169,6 +172,7 @@ describe('model-catalog', () => {
       expect(models.some((m) => m.id === 'claude-fable-5-1')).toBe(true);
       expect(models.some((m) => m.id === 'claude-fable-5')).toBe(true);
       expect(models.some((m) => m.id === 'claude-opus-5-5')).toBe(true);
+      expect(models.some((m) => m.id === 'claude-sonnet-5-5')).toBe(true);
       expect(models.some((m) => m.id === 'claude-opus-5')).toBe(true);
       expect(models.some((m) => m.id === 'claude-sonnet-5')).toBe(true);
       expect(models.some((m) => m.id === 'claude-opus-4-8')).toBe(true);
@@ -187,6 +191,7 @@ describe('model-catalog', () => {
         'claude-fable-5',
         'claude-opus-5-5',
         'claude-opus-5',
+        'claude-sonnet-5-5',
         'claude-sonnet-5',
         'claude-opus-4-8[1m]',
         'claude-opus-4-7[1m]',
@@ -266,6 +271,7 @@ describe('model-catalog', () => {
     it('returns true for a known claude model', () => {
       expect(isKnownModel('claude-code', 'claude-fable-5-1')).toBe(true);
       expect(isKnownModel('claude-code', 'claude-opus-5-5')).toBe(true);
+      expect(isKnownModel('claude-code', 'claude-sonnet-5-5')).toBe(true);
       expect(isKnownModel('claude-code', 'claude-opus-5')).toBe(true);
       expect(isKnownModel('claude-code', 'claude-opus-4-7')).toBe(true);
     });

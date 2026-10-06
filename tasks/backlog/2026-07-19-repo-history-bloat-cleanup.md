@@ -1,5 +1,7 @@
 # Repo History Bloat: Purge Accidentally-Committed Agent State + Add Size Guard
 
+> **Reconciliation 2026-10-05:** A new instance of the auto-commit problem, this time a behavior change rather than bloat. The vm-agent rewrites a SAM-managed block inside the tracked `.codex/config.toml` (`packages/vm-agent/internal/acp/codex_config.go:240-244`), and "chore: save agent work" auto-commits carried that rewrite to `main` inside #2217: `c9316fb3f` set `model_reasoning_effort` back to `"low"`, undoing the deliberate `2f78efcff` ("preserve shared Codex reasoning setting", `"medium"`). Four auto-commits on 2026-10-01 touched only that file, and `main` still says `"low"`. The blob guard and the rewrite decision are still open.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:**

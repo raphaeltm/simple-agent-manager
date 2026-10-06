@@ -5,7 +5,10 @@
  * This module defines the shared JSON Schema properties and valid-values
  * hint so they are written once and imported by both tool-definition files.
  */
-import { AGENT_PROFILE_RUNTIMES } from '@simple-agent-manager/shared';
+import {
+  AGENT_PROFILE_RUNTIMES,
+  DEFAULT_AGENT_PERMISSION_MODE,
+} from '@simple-agent-manager/shared';
 
 export const RESOURCE_REQUIREMENTS_FIELD_PROPERTIES = {
   minVcpu: { type: 'number', exclusiveMinimum: 0 },
@@ -47,7 +50,7 @@ export const SHARED_CONFIG_FIELD_PROPERTIES = {
   },
   permissionMode: {
     type: 'string',
-    description: 'Permission mode: default, acceptEdits, plan, dontAsk, bypassPermissions',
+    description: `Permission mode: default, acceptEdits, plan, dontAsk, bypassPermissions. Omit to inherit project and user agent settings, which fall back to ${DEFAULT_AGENT_PERMISSION_MODE}.`,
   },
   systemPromptAppend: {
     type: 'string',

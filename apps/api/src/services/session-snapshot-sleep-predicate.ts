@@ -45,6 +45,15 @@ export function sessionSleepInFlightMaxAgeMs(env: SleepPredicateEnv): number {
   );
 }
 
+/**
+ * Restorable sleeping snapshot, or a sleep still in flight. A `failed` sleep is in
+ * flight while the sweep will act on it: inside a bounded sleep-failure episode every
+ * failure keeps a due retry (`sleep_after`) until the sweep retries it, falls back to a
+ * transcript-and-Git sleep, or ends the episode blocked (`session-sleep-episode.ts`).
+ * A degraded or in-flight capture is no longer in flight on its own. Legacy rows that
+ * were exhausted without a retry stay in flight below the attempt budget, mirroring the
+ * sweep's re-arm clause.
+ */
 export function restorableOrInFlightSleepSnapshotPredicateSql(alias = 'snapshot'): string {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(alias)) {
     throw new Error('Invalid SQL alias for sleep snapshot predicate');
@@ -78,11 +87,7 @@ export function restorableOrInFlightSleepSnapshotPredicateSql(alias = 'snapshot'
         ${s}.sleep_status IN ('scheduled', 'preparing', 'stopping')
         OR (
           ${s}.sleep_status = 'failed'
-          AND (
-            ${s}.sleep_attempts < ?
-            OR ${s}.status = 'degraded'
-            OR ${s}.capture_generation IS NOT NULL
-          )
+          AND (${s}.sleep_after IS NOT NULL OR ${s}.sleep_attempts < ?)
         )
       )
     )

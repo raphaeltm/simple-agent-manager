@@ -2040,6 +2040,10 @@ export class ProjectData extends DurableObject<Env> {
     return count;
   }
 
+  hasPendingSessionHumanInput(sessionId: string, taskId: string, now: number) {
+    return attention.hasPendingHumanInput(this.sql, sessionId, taskId, now);
+  }
+
   getSessionAttentionSummary(sessionId: string) {
     return attention.getAttentionSummary(this.sql, sessionId);
   }
@@ -2065,6 +2069,14 @@ export class ProjectData extends DurableObject<Env> {
       parentSessionId: opts.parentSessionId ?? null,
       forkDepth: opts.forkDepth ?? 0,
     });
+    // A chat page opened before the agent session existed only learns
+    // `agentSessionId` from the initial fetch, so push it: the usage-limit chip,
+    // the ACP id in the header, and resume/recovery all key on it.
+    this.broadcastEvent(
+      'session.updated',
+      { sessionId: opts.chatSessionId, agentSessionId: result.id },
+      opts.chatSessionId
+    );
     return result;
   }
 

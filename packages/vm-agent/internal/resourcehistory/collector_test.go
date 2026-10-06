@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -405,5 +406,123 @@ func BenchmarkReadCgroupCounters(b *testing.B) {
 		if _, err := readCgroupCounters(path); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+func TestConcurrentSpoolRetriesUploadOnce(t *testing.T) {
+	for _, separate := range []bool{false, true} {
+		t.Run(strconv.FormatBool(separate), func(t *testing.T) {
+			entered := make(chan struct{}, 2)
+			release := make(chan struct{})
+			var uploads atomic.Int32
+			httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				uploads.Add(1)
+				entered <- struct{}{}
+				<-release
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer httpServer.Close()
+			cfg := Config{ControlPlaneURL: httpServer.URL, ProjectID: "project-1", WorkspaceID: "workspace-1",
+				SpoolDir: t.TempDir(), CallbackToken: func() string { return "test-token" }, UploadTimeout: time.Second}
+			collector := New(cfg)
+			collector.samples = []Sample{{T: 1, CPUMillis: 1}}
+			body, ok := collector.buildUpload(true)
+			if !ok {
+				t.Fatal("final upload missing")
+			}
+			if err := collector.writeSpool(body); err != nil {
+				t.Fatal(err)
+			}
+			firstDone := make(chan struct{})
+			go func() { collector.retrySpool(context.Background()); close(firstDone) }()
+			<-entered
+			secondDone := make(chan struct{})
+			other := collector
+			if separate {
+				other = New(cfg)
+			}
+			go func() { other.retrySpool(context.Background()); close(secondDone) }()
+			select {
+			case <-entered:
+				close(release)
+				<-firstDone
+				<-secondDone
+				t.Fatal("same spool file uploaded concurrently")
+			case <-time.After(50 * time.Millisecond):
+			}
+			close(release)
+			<-firstDone
+			<-secondDone
+			if uploads.Load() != 1 {
+				t.Fatalf("uploads = %d", uploads.Load())
+			}
+			assertSpoolDrained(t, cfg.SpoolDir)
+		})
+	}
+}
+
+func assertSpoolDrained(t *testing.T, dir string) {
+	t.Helper()
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("spool read failed: %v", err)
+	}
+	for _, file := range files {
+		if strings.HasSuffix(file.Name(), ".json") {
+			t.Fatalf("spool not drained: %v", files)
+		}
+	}
+}
+
+func TestStartAfterStopDoesNotRestartCollector(t *testing.T) {
+	collector := New(Config{ControlPlaneURL: "http://unused", ProjectID: "project-1", WorkspaceID: "workspace-1",
+		SpoolDir: t.TempDir(), CallbackToken: func() string { return "" }})
+	collector.Stop(context.Background())
+	collector.Start(context.Background())
+	if collector.started {
+		t.Fatal("closed collector restarted")
+	}
+}
+
+func TestStopJoinsSamplerAndConcurrentFinalFlush(t *testing.T) {
+	sampling := make(chan struct{})
+	uploaded := make(chan struct{})
+	releaseUpload := make(chan struct{})
+	var calls atomic.Int32
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		close(uploaded)
+		<-releaseUpload
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer api.Close()
+	collector := New(Config{ControlPlaneURL: api.URL, ProjectID: "project-1", WorkspaceID: "workspace-1",
+		SpoolDir: t.TempDir(), CallbackToken: func() string { return "token" }, SampleInterval: time.Hour,
+		ContainerID: func(ctx context.Context) (string, error) { close(sampling); <-ctx.Done(); return "", ctx.Err() },
+	})
+	collector.Start(context.Background())
+	<-sampling
+	first := make(chan struct{})
+	go func() { collector.Stop(context.Background()); close(first) }()
+	<-uploaded
+	second := make(chan struct{})
+	go func() { collector.Stop(context.Background()); close(second) }()
+	select {
+	case <-second:
+		close(releaseUpload)
+		<-first
+		t.Fatal("concurrent Stop returned before final flush")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(releaseUpload)
+	<-first
+	<-second
+	if calls.Load() != 1 {
+		t.Fatalf("uploads = %d", calls.Load())
+	}
+	collector.mu.Lock()
+	defer collector.mu.Unlock()
+	if len(collector.samples) != 0 {
+		t.Fatal("sampler left data after final flush")
 	}
 }

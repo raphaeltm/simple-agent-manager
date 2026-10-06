@@ -117,8 +117,7 @@ function workspaceStatus(): string {
 
 function workspaceNode(): string | null {
   return sqlite.prepare(`SELECT node_id FROM workspaces WHERE id = ?`).pluck().get(WORKSPACE_ID) as
-    | string
-    | null;
+    string | null;
 }
 
 function taskStatus(): string {
@@ -173,7 +172,6 @@ beforeEach(() => {
     BASE_DOMAIN: 'example.test',
     TASK_RUN_CLEANUP_DELAY_MS: '0',
     TASK_RUN_MAX_EXECUTION_MS: '60000',
-    TASK_RUN_HARD_TIMEOUT_MS: '120000',
     TASK_RUN_ABSOLUTE_CEILING_MS: '180000',
     TASK_STUCK_QUEUED_TIMEOUT_MS: '600000',
     TASK_STUCK_DELEGATED_TIMEOUT_MS: '1800000',

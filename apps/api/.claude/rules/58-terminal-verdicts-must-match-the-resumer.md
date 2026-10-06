@@ -91,6 +91,15 @@ Tells:
    recoverable so a malformed row cannot pin work open forever. The bound must be
    env-configurable with a `DEFAULT_*` constant.
 
+   **The bound must be measured from a timestamp that no retry or deferral writer can
+   re-stamp.** The shared in-flight sleep arm ages from the latest claim or retry stamp,
+   so a sleep that kept failing every few minutes stayed "in flight" forever. On
+   2026-10-04 that held the 24h runaway-cost ceiling off until a runtime generation was
+   35.3 hours old (task `01M3Z4CCZH5N22754V7CVVN9WR`). A cost backstop that defers to a
+   preserve verdict needs its own bound on a clock it owns (`TASK_RUN_ABSOLUTE_CEILING_SLEEP_GRACE_MS`
+   on runtime-generation age, `stuck-task-ceiling.ts`), and the terminal gate after it
+   must not re-defer to the same record (`honorInFlightSleep: false`).
+
 4. **A failed recoverability lookup withholds the terminal verdict.** The destructive action
    is the irreversible one, so an unknown answer must not resolve to "destroy".
 
@@ -195,6 +204,7 @@ running agent session, and the container DO tests mocked `loadRuntimeRecoveryCon
 
 - Task: `tasks/archive/2026-08-17-fix-slept-session-classified-as-dead.md`
 - Task (the round trip): `tasks/archive/2026-09-28-instant-idle-sleep-wake.md`
+- Task (retry-renewed bound): `tasks/archive/2026-10-04-task-recovery-liveness-signal-audit.md`
 - `.claude/rules/02-quality-gates.md` — "sleep, wake, restore, replacement, probe failure,
   and unknown state are inconclusive"; one shared lifecycle classifier
 - `.claude/rules/47-control-loop-io-budget.md` — bounded escape paths, I/O budget

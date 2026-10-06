@@ -11,11 +11,11 @@ import { describe, expect, it } from 'vitest';
 
 const taskRunnerIndexSource = readFileSync(
   resolve(process.cwd(), 'src/durable-objects/task-runner/index.ts'),
-  'utf8',
+  'utf8'
 );
 const taskRunnerTypesSource = readFileSync(
   resolve(process.cwd(), 'src/durable-objects/task-runner/types.ts'),
-  'utf8',
+  'utf8'
 );
 
 describe('TaskRunner static public contract', () => {
@@ -23,7 +23,9 @@ describe('TaskRunner static public contract', () => {
     expect(taskRunnerIndexSource).toContain('async start(input: StartTaskInput): Promise<void>');
     expect(taskRunnerIndexSource).toContain('async advanceWorkspaceReady(');
     expect(taskRunnerIndexSource).toContain('async getStatus(): Promise<TaskRunnerState | null>');
-    expect(taskRunnerIndexSource).toContain('async ensureStarted(): Promise<boolean>');
+    expect(taskRunnerIndexSource).toContain(
+      'async ensureStarted(recoveryAttemptId?: string): Promise<boolean>'
+    );
   });
 
   it('commits initial state and the first alarm atomically', () => {

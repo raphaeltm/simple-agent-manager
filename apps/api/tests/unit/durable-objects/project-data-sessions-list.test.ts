@@ -197,9 +197,10 @@ describe('ProjectData getSession resilience', () => {
   });
 
   it('returns the session on the happy path', () => {
-    const sql = makeSql([makeSessionRow({ id: 'ok-1' })], 1);
+    const sql = makeSql([makeSessionRow({ id: 'ok-1', last_message_at: 7000 })], 1);
     const result = getSession(sql, 'ok-1');
     expect(result?.id).toBe('ok-1');
+    expect(result?.lastMessageAt).toBe(7000);
   });
 
   it('returns null for a missing session', () => {

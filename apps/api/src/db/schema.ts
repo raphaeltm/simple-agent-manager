@@ -161,6 +161,20 @@ export const aiSpendRateLimits = sqliteTable(
 );
 
 // =============================================================================
+// Workspace Callback Token Renewal Rate Limits
+// =============================================================================
+export const workspaceCallbackTokenRenewalRateLimits = sqliteTable(
+  'workspace_callback_token_renewal_rate_limits',
+  {
+    workspaceId: text('workspace_id')
+      .primaryKey()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    windowStart: integer('window_start').notNull(),
+    count: integer('count').notNull(),
+  }
+);
+
+// =============================================================================
 // Sessions (BetterAuth)
 // =============================================================================
 export const sessions = sqliteTable(
@@ -1789,6 +1803,11 @@ export const credentialLimitWindows = sqliteTable(
       table.agentSessionId
     ),
     observedAtIdx: index('idx_credential_limit_windows_observed_at').on(table.observedAt),
+    userSourceObservedIdx: index('idx_credential_limit_windows_user_source_observed').on(
+      table.userId,
+      table.credentialSource,
+      table.observedAt
+    ),
     projectUpdatedIdx: index('idx_credential_limit_windows_project_updated').on(
       table.projectId,
       table.updatedAt,
@@ -1837,6 +1856,7 @@ export const sessionSnapshots = sqliteTable(
     sleepingAt: text('sleeping_at'),
     recoveryStatus: text('recovery_status'),
     recoveryTaskId: text('recovery_task_id'),
+    recoveryAttemptId: text('recovery_attempt_id'),
     recoveryWorkspaceId: text('recovery_workspace_id').references(() => workspaces.id, {
       onDelete: 'set null',
     }),
@@ -1864,6 +1884,16 @@ export const sessionSnapshots = sqliteTable(
     sleepClaimId: text('sleep_claim_id'),
     sleepClaimedAt: text('sleep_claimed_at'),
     sleepStoppingSince: text('sleep_stopping_since'),
+    /**
+     * Bounded sleep-failure episode (`services/session-sleep-episode.ts`): when the
+     * current sleep episode first claimed the session, and how many attempts in it
+     * failed. Neither is reset by a capture generation; only a finished sleep, a wake,
+     * or a human follow-up ends the episode (migration 0179).
+     */
+    sleepEpisodeStartedAt: text('sleep_episode_started_at'),
+    sleepEpisodeFailures: integer('sleep_episode_failures').notNull().default(0),
+    /** The bounded-failure decision record (`SessionSleepFallbackRecord`), or NULL. */
+    sleepFallbackJson: text('sleep_fallback_json'),
     snapshotGeneration: text('snapshot_generation'),
     captureGeneration: text('capture_generation'),
     captureError: text('capture_error'),

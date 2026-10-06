@@ -14,10 +14,10 @@ if "$script_dir/install-pinned-codex-local.sh" install "$1" "$2" "$3" "$tmp/tamp
 fi
 [[ ! -e "$tmp/install/current" ]] || { echo "failed install changed current" >&2; exit 1; }
 "$script_dir/install-pinned-codex-local.sh" install "$1" "$2" "$3" "$4" "$5" "$tmp/install" "$tmp/catalog" >/dev/null
-[[ "$("$tmp/install/current/bin/codex" --version)" == "codex-cli 0.156.1-sam-c2.1" ]]
-[[ "$("$tmp/install/current/bin/codex-acp" --version)" == "@agentclientprotocol/codex-acp 1.13.1-sam-c2.1" ]]
-[[ "$("$tmp/install/current/bin/codex" --version)" != "codex-cli 0.156.1" ]]
-[[ "$("$tmp/install/current/bin/codex-acp" --version)" != "@agentclientprotocol/codex-acp 1.13.1" ]]
+[[ "$("$tmp/install/current/bin/codex" --version)" == "codex-cli 0.160.0-sam-c2.2" ]]
+[[ "$("$tmp/install/current/bin/codex-acp" --version)" == "@agentclientprotocol/codex-acp 2.1.1-sam-c2.2" ]]
+[[ "$("$tmp/install/current/bin/codex" --version)" != "codex-cli 0.160.0" ]]
+[[ "$("$tmp/install/current/bin/codex-acp" --version)" != "@agentclientprotocol/codex-acp 2.1.1" ]]
 current=$(readlink -f -- "$tmp/install/current")
 for wrapper in codex codex-acp; do
   printf '\n# tampered\n' >> "$current/bin/$wrapper"

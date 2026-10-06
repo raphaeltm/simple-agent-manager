@@ -270,7 +270,11 @@ describe('cf-container runtime spike contracts', () => {
       join(apiPackageRoot, '../../packages/vm-agent/internal/acp/gateway.go'),
       'utf8'
     );
-    expect(vmGateway).toContain(`npm install -g ${codexACPWrapperPackage}`);
+    expect(vmGateway).toContain(`const codexACPInstallPackage = "${codexACPWrapperPackage}"`);
+    expect(vmGateway).toContain(`const codexCLIInstallPackage = "${codexCliPackage}"`);
+    expect(vmGateway).toContain(
+      'const codexACPInstallCommand = "npm install -g " + codexACPInstallPackage + " " + codexCLIInstallPackage'
+    );
     expect(dockerfile).toContain('USER node');
     expect(dockerfile).toContain('chown -R node:node /workspaces /var/lib/vm-agent');
     expect(bootstrap).toContain('agent_bin="${VM_AGENT_BIN:-/usr/local/bin/vm-agent}"');

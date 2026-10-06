@@ -709,13 +709,13 @@ export async function storeWorkspaceResourceChunk(
   const summaryId = summaryIdFor({ projectId, workspaceId, sessionId, taskId });
   const chunkScope = scopeKey.replaceAll('/', ':');
   const chunkId = `wrchunk:${projectId}:${workspaceId}:${chunkScope}:${body.sourceVersion}:${body.chunkSequence}`;
-  const r2Key = buildR2Key({
+  const r2Key = `${buildR2Key({
     projectId,
     workspaceId,
     scopeKey,
     sourceVersion: body.sourceVersion,
     chunkSequence: body.chunkSequence,
-  });
+  })}.${crypto.randomUUID()}`;
   const existing = await db
     .select({
       id: schema.workspaceResourceChunks.id,
@@ -749,6 +749,8 @@ export async function storeWorkspaceResourceChunk(
   });
 
   let r2ObjectIndexed = false;
+  let batchAttempted = false;
+  let batchCompleted = false;
   try {
     const maxMetadataBytes = metadataMaxBytes(env);
     const completenessJson = boundedJsonStringify(
@@ -819,11 +821,15 @@ export async function storeWorkspaceResourceChunk(
       updatedAt: now,
     };
 
-    await db
+    // Both statements run in one D1 transaction. The summary delta is gated
+    // on the chunk identity being absent, including the UPSERT conflict path.
+    // Summary first preserves the chunk's immediate foreign-key constraint.
+    const summaryWrite = db
       .insert(schema.workspaceResourceSummaries)
       .values(values)
       .onConflictDoUpdate({
         target: schema.workspaceResourceSummaries.id,
+        setWhere: sql`NOT EXISTS (SELECT 1 FROM ${schema.workspaceResourceChunks} WHERE ${schema.workspaceResourceChunks.id} = ${chunkId})`,
         set: {
           sessionId,
           taskId,
@@ -892,44 +898,73 @@ export async function storeWorkspaceResourceChunk(
         },
       });
 
-    await db.insert(schema.workspaceResourceChunks).values({
-      id: chunkId,
-      projectId,
-      workspaceId,
-      summaryId,
-      sessionId,
-      taskId,
-      nodeId,
-      chunkSequence: body.chunkSequence,
-      sourceVersion: body.sourceVersion,
-      r2Key,
-      storageFormat: WORKSPACE_RESOURCE_STORAGE_FORMAT,
-      compressedBytes,
-      uncompressedBytes,
-      sha256: actualSha,
-      startedAt: body.startedAt,
-      endedAt: body.endedAt,
-      sampleCount: body.sampleCount,
-      gapCount: body.gapCount ?? 0,
-      toolSpanCount: body.toolSpanCount ?? 0,
-      completenessJson,
-      summaryJson,
-      rollupJson: buildStoredRollupJson(env, payload, body, {
+    const chunkWrite = db
+      .insert(schema.workspaceResourceChunks)
+      .values({
+        id: chunkId,
         projectId,
         workspaceId,
+        summaryId,
+        sessionId,
+        taskId,
+        nodeId,
         chunkSequence: body.chunkSequence,
-      }),
-      createdAt: now,
-      expiresAt,
-      uploadedByNodeId,
-    });
+        sourceVersion: body.sourceVersion,
+        r2Key,
+        storageFormat: WORKSPACE_RESOURCE_STORAGE_FORMAT,
+        compressedBytes,
+        uncompressedBytes,
+        sha256: actualSha,
+        startedAt: body.startedAt,
+        endedAt: body.endedAt,
+        sampleCount: body.sampleCount,
+        gapCount: body.gapCount ?? 0,
+        toolSpanCount: body.toolSpanCount ?? 0,
+        completenessJson,
+        summaryJson,
+        rollupJson: buildStoredRollupJson(env, payload, body, {
+          projectId,
+          workspaceId,
+          chunkSequence: body.chunkSequence,
+        }),
+        createdAt: now,
+        expiresAt,
+        uploadedByNodeId,
+      })
+      .onConflictDoNothing({ target: schema.workspaceResourceChunks.id });
 
+    batchAttempted = true;
+    const [, inserted] = await db.batch([summaryWrite, chunkWrite]);
+    batchCompleted = true;
+    if (inserted.meta.changes === 0) {
+      const committed = await db
+        .select()
+        .from(schema.workspaceResourceChunks)
+        .where(eq(schema.workspaceResourceChunks.id, chunkId))
+        .get();
+      if (!committed) throw new Error('Resource history chunk disappeared after conflict');
+      if (committed.sha256 !== actualSha) {
+        throw errors.conflict(
+          'Resource history chunk identity already exists with a different checksum'
+        );
+      }
+      return { summaryId: committed.summaryId ?? summaryId, chunkId, idempotent: true };
+    }
     r2ObjectIndexed = true;
     return { summaryId, chunkId, idempotent: false };
   } finally {
-    if (!r2ObjectIndexed) {
+    // A thrown batch may still be in flight. Retain its attempt object until
+    // explicit orphan or workspace-prefix cleanup, rather than risk a late commit.
+    if (!r2ObjectIndexed && (!batchAttempted || batchCompleted)) {
       try {
-        await env.PROJECT_DATA_ARCHIVE_R2.delete(r2Key);
+        // A response can fail after D1 committed. Verify ownership before cleanup;
+        // if the read fails, retain the object rather than risk deleting history.
+        const committed = await db
+          .select({ id: schema.workspaceResourceChunks.id })
+          .from(schema.workspaceResourceChunks)
+          .where(eq(schema.workspaceResourceChunks.r2Key, r2Key))
+          .get();
+        if (!committed) await env.PROJECT_DATA_ARCHIVE_R2.delete(r2Key);
       } catch (deleteError) {
         log.warn('workspace_resource_history.orphan_cleanup_failed', {
           projectId,

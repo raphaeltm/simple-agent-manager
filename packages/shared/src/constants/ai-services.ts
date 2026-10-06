@@ -1,3 +1,4 @@
+// FILE SIZE EXCEPTION: Keep platform model routing metadata in one auditable registry.
 // =============================================================================
 // AI Task Title Generation
 // =============================================================================
@@ -22,6 +23,13 @@ export const DEFAULT_DEBUG_AGENT_RETRY_MAX_DELAY_MS = 60_000;
 export const DEFAULT_DEBUG_AGENT_STEP_MAX_RETRIES = 3;
 export const DEFAULT_DEBUG_DIAGNOSIS_POLL_INTERVAL_MS = 2_000;
 export const DEFAULT_DEBUG_DIAGNOSIS_EVENT_MAX_PAGES = 100;
+export const DEFAULT_STALLED_TASK_CLASSIFIER_MODEL = '@cf/cloudflare/clef';
+export const DEFAULT_STALLED_TASK_CLASSIFIER_SELECTOR = 'clef';
+export const DEFAULT_STALLED_TASK_CLASSIFIER_TIMEOUT_MS = 10_000;
+export const DEFAULT_STALLED_TASK_CLASSIFIER_MIN_ACTIVITY_AGE_MS = 60 * 60_000;
+export const DEFAULT_STALLED_TASK_CLASSIFIER_MESSAGE_LIMIT = 200;
+export const DEFAULT_STALLED_TASK_CLASSIFIER_TRANSCRIPT_MAX_CHARS = 24_000;
+export const DEFAULT_STALLED_TASK_CLASSIFIER_CONFIDENCE_THRESHOLD = 0.8;
 /** Minimum delay before revisiting an already-completed diagnosis step. */
 export const DEFAULT_DIAGNOSIS_COMPLETED_STEP_MIN_DELAY_MS = 1_000;
 export const DEFAULT_PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES = 60;
@@ -452,6 +460,17 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     id: 'claude-opus-4-6',
     label: 'Claude Opus 4.6',
     ...ANTHROPIC_OPUS_PREMIUM_PROFILE,
+  }),
+  anthropicModel({
+    id: 'claude-sonnet-5-5',
+    label: 'Claude Sonnet 5.5',
+    tier: 'standard',
+    costPer1kInputTokens: 0.002,
+    costPer1kOutputTokens: 0.01,
+    contextWindow: 1000000,
+    toolCallSupport: 'excellent',
+    intendedRole: 'any',
+    fallbackGroup: 'anthropic-standard',
   }),
   anthropicModel({
     id: 'claude-sonnet-5',

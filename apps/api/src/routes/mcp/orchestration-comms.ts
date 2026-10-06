@@ -19,6 +19,7 @@ import { cleanupTerminalTaskResources } from '../../services/task-terminal-clean
 import { syncTriggerExecutionStatus } from '../../services/trigger-execution-sync';
 import {
   ACTIVE_STATUSES,
+  AGENT_TARGET_STATUSES,
   getMcpLimits,
   INTERNAL_ERROR,
   INVALID_PARAMS,
@@ -143,7 +144,7 @@ async function resolveAgentTarget(
   }
 
   // 4. Verify target is in an active status
-  if (!ACTIVE_STATUSES.includes(targetTask.status)) {
+  if (!AGENT_TARGET_STATUSES.includes(targetTask.status)) {
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
@@ -179,7 +180,7 @@ async function resolveAgentTarget(
     )
     .limit(1);
 
-  if (!workspace || !workspace.nodeId) {
+  if (!workspace || (!workspace.nodeId && targetTask.status !== 'sleeping')) {
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
@@ -189,11 +190,11 @@ async function resolveAgentTarget(
 
   // Verify node is reachable — D1 nodes.status uses 'running' for healthy nodes
   // (not 'active'/'warm', which are NodeLifecycle DO states, not D1 column values)
-  if (workspace.nodeStatus !== 'running') {
+  if (targetTask.status !== 'sleeping' && workspace.nodeStatus !== 'running') {
     log.warn('mcp.orchestration.node_not_running', {
       childTaskId: targetTaskId,
       workspaceId: targetTask.workspaceId,
-      nodeId: workspace.nodeId,
+      nodeId: workspace.nodeId ?? '',
       nodeStatus: workspace.nodeStatus,
     });
     return jsonRpcError(
@@ -210,13 +211,16 @@ async function resolveAgentTarget(
     .where(
       and(
         eq(schema.agentSessions.workspaceId, workspace.id),
-        eq(schema.agentSessions.status, 'running')
+        inArray(
+          schema.agentSessions.status,
+          targetTask.status === 'sleeping' ? ['sleeping'] : ['running']
+        )
       )
     )
     .orderBy(desc(schema.agentSessions.createdAt))
     .limit(1);
 
-  if (!agentSession) {
+  if (!agentSession && targetTask.status !== 'sleeping') {
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
@@ -233,12 +237,12 @@ async function resolveAgentTarget(
     },
     workspace: {
       id: workspace.id,
-      nodeId: workspace.nodeId,
+      nodeId: workspace.nodeId ?? '',
       nodeStatus: workspace.nodeStatus,
       chatSessionId: workspace.chatSessionId,
     },
     agentSession: {
-      id: agentSession.id,
+      id: agentSession?.id ?? '',
     },
   };
 }
@@ -319,6 +323,14 @@ export async function handleSendMessageToSubtask(
         },
       ],
     });
+  }
+
+  if (resolution.task.status === 'sleeping') {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'Sleeping targets require durable prompt delivery to be enabled'
+    );
   }
 
   const messageId = await persistOrchestrationPrompt({
@@ -492,7 +504,7 @@ export async function handleStopSubtask(
   const { task, workspace, agentSession } = resolution;
 
   // If reason provided, inject a final warning message (best-effort)
-  if (reason) {
+  if (reason && task.status !== 'sleeping') {
     try {
       await sendPromptToAgentOnNode(
         workspace.nodeId,
@@ -516,15 +528,18 @@ export async function handleStopSubtask(
     await new Promise((resolve) => setTimeout(resolve, gracePeriodMs));
   }
 
-  // Hard stop the agent session
+  // A sleeping VM has already released its runtime; cancellation must not wake
+  // it or call a deleted node. Live targets still require a successful stop.
   try {
-    await stopAgentSessionOnNode(
-      workspace.nodeId,
-      workspace.id,
-      agentSession.id,
-      env,
-      tokenData.userId
-    );
+    if (task.status !== 'sleeping') {
+      await stopAgentSessionOnNode(
+        workspace.nodeId,
+        workspace.id,
+        agentSession.id,
+        env,
+        tokenData.userId
+      );
+    }
   } catch (err) {
     log.error('mcp.stop_subtask.stop_failed', {
       parentTaskId: tokenData.taskId,
@@ -594,7 +609,7 @@ export async function handleStopSubtask(
         preservedTerminalStatus = current.status;
         break;
       }
-      if (!ACTIVE_STATUSES.includes(current.status)) {
+      if (!AGENT_TARGET_STATUSES.includes(current.status)) {
         throw new Error(
           `Child task entered unexpected status '${current.status}' during cancellation`
         );

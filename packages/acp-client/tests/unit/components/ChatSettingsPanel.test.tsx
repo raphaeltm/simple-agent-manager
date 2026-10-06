@@ -96,6 +96,28 @@ describe('ChatSettingsPanel', () => {
     expect(screen.getByText(/auto-approve all actions/i)).not.toBeNull();
   });
 
+  it('selects the host default mode when no permission mode is saved', () => {
+    renderPanel({
+      settings: { model: null, permissionMode: null },
+      defaultPermissionMode: 'bypassPermissions',
+    });
+    expect(
+      screen.getByRole('radio', { name: 'Bypass Permissions' }).getAttribute('aria-checked')
+    ).toBe('true');
+    expect(screen.getByRole('radio', { name: 'Default' }).getAttribute('aria-checked')).toBe(
+      'false'
+    );
+    expect(screen.getByText(/auto-approve all actions/i)).not.toBeNull();
+    expect((screen.getByText('Save') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("falls back to the agent's own default mode when the host gives no default", () => {
+    renderPanel({ settings: { model: null, permissionMode: null } });
+    expect(screen.getByRole('radio', { name: 'Default' }).getAttribute('aria-checked')).toBe(
+      'true'
+    );
+  });
+
   it('disables Save button when no changes are made', () => {
     renderPanel();
     const saveBtn = screen.getByText('Save') as HTMLButtonElement;

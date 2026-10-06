@@ -39,6 +39,9 @@ export * from './composable-credentials';
 // MIME-type helpers (extension fallback for library preview)
 export * from './mime';
 
+// Credential usage-limit presentation helpers
+export * from './credential-limits';
+
 // Failure classification (display-time taxonomy for task/session errors)
 export * from './failure-classification';
 

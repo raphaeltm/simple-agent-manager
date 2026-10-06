@@ -275,6 +275,11 @@ function createContext(options: { failBatch?: boolean } = {}) {
           return this;
         },
         first() {
+          if (
+            sql.includes('SELECT id FROM tasks WHERE id = ? AND project_id = ? AND user_id = ?')
+          ) {
+            return Promise.resolve({ id: bound[0] });
+          }
           if (sql.includes('SELECT COUNT(*) as c FROM nodes')) return Promise.resolve({ c: 0 });
           if (sql.includes('SELECT status, error_message FROM nodes')) {
             return Promise.resolve({ status: 'running', error_message: null });

@@ -14,6 +14,7 @@ describe('StatusBadge', () => {
       ['evicted', 'Evicted'],
       ['paused', 'Paused'],
       ['disabled', 'Disabled'],
+      ['sleeping', 'Sleeping'],
     ])('renders %s as "%s"', (status, label) => {
       render(<StatusBadge status={status} />);
       expect(screen.getByText(label)).toBeInTheDocument();
