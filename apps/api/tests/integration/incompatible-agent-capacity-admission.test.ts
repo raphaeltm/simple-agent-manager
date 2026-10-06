@@ -290,6 +290,75 @@ function alarmRunner() {
   };
 }
 
+describe('advisory drain failures during actual admission alarms', () => {
+  it.each(['candidate-select', 'drain-diagnostics'])(
+    'keeps the capacity wait and retry budget when %s fails',
+    async (boundary) => {
+      const prepare = fixture.database.prepare.bind(fixture.database);
+      let failDrainDiagnostics = false;
+      let failures = 0;
+      vi.spyOn(fixture.database, 'prepare').mockImplementation((sql: string) => {
+        if (
+          boundary === 'candidate-select' &&
+          sql.includes('ORDER BY n.created_at, w.id LIMIT ?')
+        ) {
+          failures++;
+          throw new Error('D1_ERROR: database is overloaded');
+        }
+        if (boundary === 'drain-diagnostics') {
+          if (sql.includes("UPDATE session_snapshots SET sleep_status = 'scheduled'")) {
+            failDrainDiagnostics = true;
+          } else if (
+            failDrainDiagnostics &&
+            sql.includes('UPDATE tasks SET placement_explanation_json')
+          ) {
+            failDrainDiagnostics = false;
+            failures++;
+            throw new Error('D1_ERROR: database is overloaded');
+          }
+        }
+        return prepare(sql);
+      });
+      const provider = vi.spyOn(nodesService, 'provisionNode');
+      const create = vi.spyOn(nodesService, 'createNodeRecord');
+      const run = alarmRunner();
+      let deadline: string | undefined;
+      for (let attempt = 0; attempt < 4; attempt++) {
+        await run.runner.alarm();
+        const admission = fixture.sqlite
+          .prepare(
+            "SELECT state,reason,wait_deadline_at FROM vm_task_admissions WHERE task_id='task-1'"
+          )
+          .get() as { state: string; reason: string; wait_deadline_at: string };
+        expect(admission).toMatchObject({ state: 'waiting', reason: 'capacity_pool_node_limit' });
+        deadline ??= admission.wait_deadline_at;
+        expect(admission.wait_deadline_at).toBe(deadline);
+        expect(run.state()).toMatchObject({
+          completed: false,
+          retryCount: 0,
+          currentStep: 'node_provisioning',
+        });
+        expect(run.alarm()).toBe(Date.now() + 1000);
+        expect(
+          fixture.sqlite.prepare("SELECT status,execution_step FROM tasks WHERE id='task-1'").get()
+        ).toEqual({ status: 'queued', execution_step: 'waiting_for_node_capacity' });
+        vi.advanceTimersByTime(1001);
+      }
+      expect(failures).toBe(boundary === 'candidate-select' ? 4 : 1);
+      expect(provider).not.toHaveBeenCalled();
+      expect(create).not.toHaveBeenCalled();
+      expect(fixture.sqlite.prepare('SELECT COUNT(*) AS count FROM nodes').get()).toEqual({
+        count: 1,
+      });
+      expect(fixture.sqlite.prepare('SELECT status FROM workspaces').get()).toEqual({
+        status: 'running',
+      });
+      if (boundary === 'candidate-select') expect(snapshot()).toBeUndefined();
+      else expect(snapshot()).toMatchObject({ sleep_status: 'scheduled' });
+    }
+  );
+});
+
 describe('cancelled admission alarms', () => {
   it('stops a cancelled pool-full waiter before a freed slot can allocate replacement compute', async () => {
     fixture.sqlite.exec("UPDATE nodes SET agent_version='current-agent'");

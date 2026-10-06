@@ -266,12 +266,10 @@ export async function completeSleepTeardown(
       })
       .where(eq(schema.nodes.id, workspace.nodeId));
     await db.batch([workspaceSleeping, agentSleeping, nodeSleeping]);
+  } else if (taskSleeping && taskSleepEvent) {
+    await db.batch([workspaceSleeping, agentSleeping, taskSleepEvent, taskSleeping]);
   } else {
-    if (taskSleeping && taskSleepEvent) {
-      await db.batch([workspaceSleeping, agentSleeping, taskSleepEvent, taskSleeping]);
-    } else {
-      await db.batch([workspaceSleeping, agentSleeping]);
-    }
+    await db.batch([workspaceSleeping, agentSleeping]);
   }
   const sleepWarning = options.fallback
     ? `Workspace slept through the bounded sleep fallback (transcript and Git recovery point, snapshot ${verified?.status ?? 'unknown'}/${verified?.degradation ?? 'unknown'})`
