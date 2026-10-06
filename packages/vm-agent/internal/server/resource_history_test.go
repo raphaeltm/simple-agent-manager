@@ -38,7 +38,7 @@ func TestResourceHistoryFinalFlushCannotRestartWhileStopping(t *testing.T) {
 	<-entered
 	s.resourceHistoryStarted.Store(true)
 	s.ensureResourceHistoryForRuntime(runtime)
-	if got := s.resourceHistoryCollector(runtime.ID); got != original {
+	if s.resourceHistoryCollector(runtime.ID) != original {
 		close(release)
 		<-done
 		t.Fatal("stopping collector replaced before its final flush completed")

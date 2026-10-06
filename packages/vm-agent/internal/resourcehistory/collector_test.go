@@ -456,17 +456,21 @@ func TestConcurrentSpoolRetriesUploadOnce(t *testing.T) {
 			if uploads.Load() != 1 {
 				t.Fatalf("uploads = %d", uploads.Load())
 			}
-			files, err := os.ReadDir(cfg.SpoolDir)
-			if err != nil {
-				t.Fatalf("spool read failed: %v", err)
-			}
-			for _, file := range files {
-				if strings.HasSuffix(file.Name(), ".json") {
-					t.Fatalf("spool not drained: %v", files)
-				}
-			}
-
+			assertSpoolDrained(t, cfg.SpoolDir)
 		})
+	}
+}
+
+func assertSpoolDrained(t *testing.T, dir string) {
+	t.Helper()
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("spool read failed: %v", err)
+	}
+	for _, file := range files {
+		if strings.HasSuffix(file.Name(), ".json") {
+			t.Fatalf("spool not drained: %v", files)
+		}
 	}
 }
 
