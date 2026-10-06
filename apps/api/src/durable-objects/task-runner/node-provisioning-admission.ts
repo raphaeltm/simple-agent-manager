@@ -88,7 +88,14 @@ export async function waitOrThrowForCapacityPoolNodeLimit(
   admissionIdentity: VmTaskAdmissionIdentity | null,
   poolMaxNodes: number
 ): Promise<'waiting'> {
-  await requestIncompatiblePoolNodeDrain(state, rc);
+  try {
+    await requestIncompatiblePoolNodeDrain(state, rc);
+  } catch (error) {
+    log.warn('task_runner_do.incompatible_node_drain_failed', {
+      taskId: state.taskId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
   if (admissionIdentity) {
     const waitResult = await waitForVmAdmissionCapacity(
       rc.env,
