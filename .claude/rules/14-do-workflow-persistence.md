@@ -6,7 +6,7 @@ During long `/do` executions, context compaction drops earlier phases from the c
 
 ## Mandatory: Use the State File
 
-When executing the `/do` workflow, you MUST maintain a `.do-state.md` file in the repository root (gitignored). This file is your **external memory** — it survives context compaction because you re-read it.
+When executing the `/do` workflow, you MUST maintain a `.do-state.md` file in the repository root (local-only, snapshot-visible; never commit). This file is your **external memory** — it survives context compaction because you re-read it.
 
 ### Create It at Phase 1 Start
 
@@ -123,7 +123,7 @@ fallback bounded and record it in the workflow state file.
 
 ## Cleanup
 
-Delete `.do-state.md` at the end of Phase 7 (after the CodeRabbit request-and-wait step, PR merge, deploy monitoring, and worktree cleanup). It's gitignored, so even if you forget, it won't pollute the repo.
+Delete `.do-state.md` at the end of Phase 7 (after the CodeRabbit request-and-wait step, PR merge, deploy monitoring, and worktree cleanup). It is untracked; `quality:runtime-state-files` rejects accidental staging or tracking.
 
 ## Phase 5 → Phase 6 Transition Guard
 
@@ -165,7 +165,7 @@ When the reviewer finds issues deferred to backlog:
 
 ## PR Description Is the Durable Source of Truth
 
-`.do-state.md` is gitignored and lives in the worktree. It is destroyed when the workspace is killed. The PR description, by contrast, is durable — it lives on GitHub and is visible to humans.
+`.do-state.md` is local-only and snapshot-visible. A successful snapshot can preserve it, but failed capture or workspace deletion can still lose it. The PR description, by contrast, is durable — it lives on GitHub and is visible to humans.
 
 **When you create the PR in Phase 7, you MUST copy the Review Tracker into the PR description's "Specialist Review Evidence" table and maintain the PR template's "CodeRabbit Review Evidence" section.** This is the authoritative record. If `.do-state.md` is lost (workspace killed, worktree removed), the PR description is what humans will use to verify whether reviews were actually completed.
 

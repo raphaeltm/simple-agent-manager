@@ -29,7 +29,7 @@ SAM owns child task state and can durably wake a parent session after selected c
    - Dependencies between steps (what must finish before what can start)
    - Success criteria for the overall workflow
 
-2. **Create a workflow state file** at `.workflow-state.md` (gitignored) to survive context compaction:
+2. **Create a workflow state file** at `.workflow-state.md` (local-only, snapshot-visible; never commit) to survive context compaction:
 
    ```markdown
    # Workflow State

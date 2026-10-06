@@ -1,8 +1,8 @@
 import { execFileSync } from 'node:child_process';
 
-const GIT_BIN = '/usr/bin/git';
+const GIT_BIN = 'git';
 
-const forbiddenRuntimeStatePaths = ['.do-state.md', '.workflow-state.md'];
+const forbiddenRuntimeStatePaths = [':(glob)**/.do-state.md', ':(glob)**/.workflow-state.md'];
 
 function gitLines(args: string[]): string[] {
   return execFileSync(GIT_BIN, args, { encoding: 'utf8' })
@@ -11,12 +11,19 @@ function gitLines(args: string[]): string[] {
     .filter(Boolean);
 }
 
-const tracked = new Set(gitLines(['ls-files', ...forbiddenRuntimeStatePaths]));
+const tracked = new Set(gitLines(['ls-files', '--cached', '--', ...forbiddenRuntimeStatePaths]));
 const staged = new Set(
-  gitLines(['diff', '--cached', '--name-only', '--', ...forbiddenRuntimeStatePaths])
+  gitLines([
+    'diff',
+    '--cached',
+    '--diff-filter=ACMR',
+    '--name-only',
+    '--',
+    ...forbiddenRuntimeStatePaths,
+  ])
 );
 
-const violations = [...new Set([...tracked, ...staged])].sort();
+const violations = [...new Set([...tracked, ...staged])].sort((a, b) => a.localeCompare(b));
 
 if (violations.length > 0) {
   console.error(

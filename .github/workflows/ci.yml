@@ -265,6 +265,9 @@ jobs:
       - name: Enforce type-boundary ratchet
         run: pnpm quality:type-boundaries
 
+      - name: Keep runtime workflow state out of commits
+        run: pnpm quality:runtime-state-files
+
       - name: Run SAM RuleTester fixtures
         run: pnpm --filter @simple-agent-manager/eslint-plugin-sam test
 

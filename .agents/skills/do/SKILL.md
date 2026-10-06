@@ -22,4 +22,4 @@ Read the full workflow from `.claude/commands/do.md` and execute it. Use `.claud
 
 ## ⚠️ Anti-Compaction: State File
 
-Long `/do` runs lose context to compaction. You MUST maintain `.do-state.md` (gitignored) as external memory. Re-read it before every phase. See `.claude/rules/14-do-workflow-persistence.md`.
+Long `/do` runs lose context to compaction. You MUST maintain `.do-state.md` (local-only, snapshot-visible; never commit) as external memory. Re-read it before every phase. See `.claude/rules/14-do-workflow-persistence.md`.

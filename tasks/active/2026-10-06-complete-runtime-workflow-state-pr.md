@@ -1,0 +1,36 @@
+# Complete runtime workflow state PR #2227
+
+## Problem and scope
+
+Complete the existing draft PR without changing its intent: make `.do-state.md` and `.workflow-state.md` visible to Git-based session snapshots while keeping them out of commits. Merge only after quality, Sonar, specialist review, and best-effort CodeRabbit gates are complete. The original PR body records the workflow-loss incident.
+
+## Research
+
+- `check:fast` gained a guard but CI lint steps and `ci-quality-program.test.ts` did not: quality job failed its wiring contract.
+- Sonar `typescript:S2871` flagged the guard's default string sort.
+- Specialist evidence had a `PENDING` placeholder.
+- Workflow guidance still described state as gitignored.
+- Standalone snapshot capture uses `git add -A` with a temporary index (`session_snapshot_wip.go`); container capture mirrors that contract (`session_snapshot_container_wip.go`). Both restore worktree and saved index separately. Removing ignore entries includes ordinary-sized local state without tracking it.
+- The original guard missed nested paths and rejected staged deletions; PATH-resolved Git improves portability.
+
+## Implementation and acceptance
+
+- [x] Wire the guard into blocking CI lint and update its contract test.
+- [x] Supply explicit string comparator for Sonar.
+- [x] Cover root and nested runtime paths; reject tracking/staging and allow staged removal.
+- [x] Use PATH-resolved Git and fail closed when Git fails.
+- [x] Update both agent workflow instructions to describe local-only, snapshot-visible state.
+- [x] Add real-Git tests for snapshot tree capture/restore, tracking/staging rejection, removal, and Git failure.
+- [ ] Validate lint, types, build, quality tests and existing Go snapshot regressions.
+- [ ] Complete independent specialist reviews and record findings/evidence in PR.
+- [ ] Ready PR after validation; request CodeRabbit and complete required wait.
+- [ ] Merge only after all required checks pass; monitor production deployment.
+
+## Staging decision
+
+No deployable API, web, or VM-agent source changes. Local tests exercise the changed repository Git visibility and quality-script behavior, and existing Go snapshot tests cover capture/restore mechanics. Under the user's instruction to stage only if needed and staging is free, no staging deployment is needed for this patch.
+
+## Evidence
+
+PR: https://github.com/raphaeltm/simple-agent-manager/pull/2227
+Local and CI results, specialist reports, and CodeRabbit outcome are recorded in the PR body. Workflow state remains local and is never included in commits.
