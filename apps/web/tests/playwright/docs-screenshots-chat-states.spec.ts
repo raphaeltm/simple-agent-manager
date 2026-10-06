@@ -17,6 +17,7 @@
 import { expect, type Page, type Route, test } from '@playwright/test';
 
 import { makeMockUser, seedTheme } from './audit-helpers';
+import { fulfillDocsChatRoute, neighboringDocsSessions } from './docs-chat-fixtures';
 import { docsShot } from './docs-shot';
 
 const PROJECT_ID = 'proj-docs-states';
@@ -88,24 +89,7 @@ const DIAGRAM: SessionFixture = {
 };
 
 /** Neighbouring rows so the list shows Wake failed among the states it is compared with. */
-const OTHER_SESSIONS: SessionFixture[] = [
-  {
-    id: 'sess-sleeping',
-    topic: 'Move invoice rendering to a queue',
-    status: 'sleeping',
-    taskStatus: 'in_progress',
-    taskMode: 'conversation',
-    lastMessageAt: NOW - 3 * HOUR,
-  },
-  {
-    id: 'sess-completed',
-    topic: 'Add retries to the webhook sender',
-    status: 'stopped',
-    taskStatus: 'completed',
-    taskMode: 'task',
-    lastMessageAt: NOW - 26 * HOUR,
-  },
-];
+const OTHER_SESSIONS: SessionFixture[] = neighboringDocsSessions(NOW);
 
 function sessionPayload(fixture: SessionFixture) {
   const taskId = `task-${fixture.id}`;
@@ -257,56 +241,16 @@ async function setupMocks(page: Page) {
   await page.route('**/api/**', async (route: Route) => {
     const url = route.request().url();
     const { pathname } = new URL(url);
-    const json = (body: unknown) => route.fulfill({ status: 200, json: body });
 
     if (pathname.endsWith('/ws') || url.includes('websocket')) return route.abort();
-    if (pathname.startsWith('/api/auth')) return json(MOCK_USER);
-    if (pathname === '/api/projects') return json({ projects: [MOCK_PROJECT], nextCursor: null });
-    if (pathname === `/api/projects/${PROJECT_ID}`) return json(MOCK_PROJECT);
-    if (pathname === `/api/projects/${PROJECT_ID}/sessions`) {
-      return json({ sessions, total: sessions.length });
-    }
 
-    const detail = pathname.match(
-      new RegExp(`^/api/projects/${PROJECT_ID}/sessions/([^/]+)(/messages|/state)?$`)
-    );
-    if (detail) {
-      const [, sessionId, suffix] = detail;
-      const session = sessions.find((s) => s.id === sessionId);
-      const messages = MESSAGES[sessionId ?? ''] ?? [];
-      if (suffix === '/state') return json(sessionState());
-      if (suffix === '/messages') return json({ messages, hasMore: false });
-      if (session) return json({ session, messages, hasMore: false, state: sessionState() });
-    }
-
-    // The chat re-reads its task on open; an unrecognised status is treated as still
-    // provisioning, so the task must come back with the status the session list shows.
-    const taskMatch = pathname.match(new RegExp(`^/api/projects/${PROJECT_ID}/tasks/([^/]+)$`));
-    if (taskMatch) {
-      const session = sessions.find((s) => s.task.id === taskMatch[1]);
-      if (session) {
-        return json({
-          ...session.task,
-          title: session.topic,
-          projectId: PROJECT_ID,
-          workspaceId: session.workspaceId,
-          startedAt: new Date(session.startedAt).toISOString(),
-        });
-      }
-    }
-
-    if (pathname === '/api/report-issue/config') return json({ enabled: false });
-    if (pathname === `/api/projects/${PROJECT_ID}/comment-threads`) {
-      return json({ threads: [], total: 0 });
-    }
-    if (pathname === `/api/projects/${PROJECT_ID}/members`) return json({ members: [] });
-    if (pathname === `/api/projects/${PROJECT_ID}/agent-profiles`) return json({ items: [] });
-    if (pathname === `/api/projects/${PROJECT_ID}/tasks`) return json({ tasks: [], total: 0 });
-    if (pathname === '/api/agents') return json({ agents: [] });
-    if (pathname.startsWith('/api/notifications')) return json([]);
-    if (pathname.startsWith('/api/credentials')) return json([]);
-    if (pathname === '/api/github/installations') return json([]);
-    return json({});
+    return fulfillDocsChatRoute(route, {
+      project: MOCK_PROJECT,
+      user: MOCK_USER,
+      sessions,
+      messages: MESSAGES,
+      state: sessionState(),
+    });
   });
 }
 

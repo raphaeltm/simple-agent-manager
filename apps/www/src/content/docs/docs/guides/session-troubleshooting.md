@@ -39,8 +39,8 @@ your work is safe and what to do next. Everything here applies to both
 - **A system message starting "Wake failed:"**, and **Wake failed** in the session list. SAM could
   not wake the sleeping chat. → [Read the reason, then act on it](#wake-failed)
 - **A failure card whose error says "SAM detected a stalled agent turn…"** (VM). SAM ended
-  long-running work it judged stuck, and changes the agent hadn't pushed were not saved.
-  → [Check what was pushed](#sam-ended-a-stalled-turn)
+  long-running work it judged stuck and tries to preserve its workspace.
+  → [Check what was kept](#sam-ended-a-stalled-turn)
 - **Any other failure card under the chat header.** The task failed; its work may have been kept.
   → [See whether it was](#when-a-task-fails)
 - **A system message starting "SAM lost contact with node"** (VM). The machine behind the chat
@@ -72,9 +72,8 @@ there too. Open the chat and look for one of these:
 - **A card in the chat** — a permission request, under the step it's about, or a question or a link
   to open, at the end of the chat. Answer it there; the agent carries on once it has your answer. If
   the card says the request expired or was cancelled, the agent was told no, so send a message
-  saying how to continue. On long-running VM work, answer within an hour: once a VM chat or task has
-  been awake for four hours, a card left waiting over an hour can get it
-  [ended as stalled](#sam-ended-a-stalled-turn), losing changes the agent hasn't pushed. See
+  saying how to continue. SAM respects pending requests until their response deadline; waiting for
+  your answer is not treated as a stall. See
   [When the Agent Needs You](/docs/guides/chat-features/#when-the-agent-needs-you).
 - **A question the agent asked with its `request_human_input` tool.** It shows as that tool's step
   in the chat, and as a notification — with answer buttons if the agent offered choices. Reply in
@@ -371,8 +370,7 @@ If a reason isn't in this list, or a fixable one keeps coming back after you fix
 
 A task can fail for reasons that have nothing to do with its work — the provider's usage limit ran
 out, or nobody answered a question the agent asked with its `request_human_input` tool. (A card in
-the chat that nobody answers doesn't fail the task when it expires; it only tells the agent no. On
-long-running work, though, see [SAM ended a stalled turn](#sam-ended-a-stalled-turn).) When that
+the chat that nobody answers doesn't fail the task when it expires; it only tells the agent no.) When that
 happens while the workspace is still running, SAM tries to keep the workspace: it lets the agent's current turn end, snapshots the
 workspace, and puts the chat to sleep. That usually takes a few minutes, but if the agent was in the
 middle of a turn SAM waits for it to end, for up to eight hours. Until then the chat stays awake with
@@ -406,8 +404,8 @@ kept:
   gone; commits the agent pushed are safe. Check GitHub for what was pushed, then use **Retry** or
   [Fork](/docs/guides/chat-features/#conversation-forking).
 
-A task that fails while its workspace is still starting, on a machine SAM lost contact with
-(below), or because its turn stalled (next), is not saved this way. A kept chat stays wakeable for
+A task that fails while its workspace is still starting, or on a machine SAM lost contact with
+(below), is not saved this way. A kept chat stays wakeable for
 seven days, like any sleeping chat.
 
 ### SAM ended a stalled turn
@@ -417,12 +415,12 @@ If expanding the failure card shows **SAM detected a stalled agent turn after N 
 for more than four hours when the agent's current turn has been open for over an hour and nothing
 new has appeared in the chat for an hour. (Instant sessions aren't checked.) An AI check reads the end of the conversation, and if it is
 confident the turn is wedged — the last step should have finished by now — SAM fails the task
-instead of letting it run until SAM's 24-hour limit. That check can't yet tell when the agent is
-waiting for you to answer a card, so on long-running work, answer cards within an hour.
+instead of letting it run until SAM's 24-hour limit. Before checking, SAM looks for pending
+permission requests and questions and leaves them waiting until their response deadline.
 
-**This failure does not save the workspace:** uncommitted and unpushed changes are lost. Check
-GitHub for what was pushed, then use **Retry** or
-[Fork](/docs/guides/chat-features/#conversation-forking). If the agent was really busy with
+**SAM tries to preserve the workspace before removing it.** Wait for the chat to sleep and check
+its messages to see what was saved, as described in [When a task fails](#when-a-task-fails). If the
+agent was really busy with
 something long and quiet, such as a slow build, ask it to report progress as it goes, or split the
 work into smaller tasks.
 

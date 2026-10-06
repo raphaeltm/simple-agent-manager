@@ -58,8 +58,8 @@ Also changed this week:
   → [SAM paused automatic check-ins](/docs/guides/session-troubleshooting/#sam-paused-automatic-check-ins)
 - **A turn that hangs for hours is ended.** When a VM task or chat has been awake for more than four
   hours and the agent's turn has shown nothing for an hour, SAM checks it, and fails the task if the
-  turn is clearly wedged. Work that wasn't pushed is lost, and the check can't yet tell when the
-  agent is waiting on a card for you, so answer cards within an hour on long-running work.
+  turn is clearly wedged. Pending requests are protected until their response deadline, and SAM
+  tries to save a stalled task's workspace before removing it.
   → [SAM ended a stalled turn](/docs/guides/session-troubleshooting/#sam-ended-a-stalled-turn)
 - **A message sent right after you stop the agent goes through.** A follow-up sent within about five
   seconds of stopping a prompt could be killed along with it, failing the task.
@@ -105,9 +105,9 @@ installations alike.
   waits for a sleep that keeps retrying.
 - **Failed snapshot uploads are cleaned up.** Uploads from snapshot attempts that can never finish
   are deleted from R2 instead of piling up. Ones already left behind are not removed.
-- **A project at the 10 GiB storage cap can be recovered.** A superadmin API frees space by removing
+- **A project at the 10 GB storage cap can be recovered.** A superadmin API frees space by removing
   the search index of old, finished sessions.
-  → [When a project reaches the 10 GiB storage cap](/docs/guides/self-hosting/#when-a-project-reaches-the-10-gib-storage-cap)
+  → [When a project reaches the 10 GB storage cap](/docs/guides/self-hosting/#when-a-project-reaches-the-10-gb-storage-cap)
 
 Otherwise, updating needs no action: there are no new secrets, and the new database migrations run
 in the deploy pipeline. `TASK_RUN_HARD_TIMEOUT_MS` is gone (it had no effect); if you set it, you can

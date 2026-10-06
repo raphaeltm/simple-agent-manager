@@ -53,8 +53,8 @@ since (#2180–#2240).
 - [x] `recent-product-changes.md`: new 29 Sep – 6 Oct cycle; roll previous cycles.
 - [x] Screenshots via a new Playwright spec (real components, mock data): permission request with the
       Needs input list label; agent question form; external-link request; usage chip + details dialog.
-- [ ] Local sub-agent review loop until no actionable feedback
-- [ ] `pnpm --filter @simple-agent-manager/www build` + link check; PR; CI green; merge
+- [x] Local sub-agent review loop until no actionable feedback — fresh doc-sync/user-journey and UI reviews on 6 Oct replaced the lost round-10 runs; final PASS.
+- [x] `pnpm --filter @simple-agent-manager/www build` + link check; PR created. Local implementation validated; CI, CodeRabbit request/wait, and merge remain Phase 7 gates tracked in PR #2243.
 
 ## Verified facts (code-cited)
 
@@ -215,7 +215,7 @@ since (#2180–#2240).
     - MEDIUM: Permission mode section reordered (table first, then where to set, then `####`
       subsections for woken chats, unexpected asking, and root).
     - LOW: composer Instant chats always start as Chat via `/sessions/start` (`taskMode:
-      'conversation'`), so skills decide only on a VM; "anything else gives a Task".
+'conversation'`), so skills decide only on a VM; "anything else gives a Task".
     - LOW: check-in pause model wording ("while it's awake").
     - LOW: concepts and quickstart PR promises ("Build and open PRs" vs "Chat and explore").
     - LOW: self-hosting recommends turning requests on, says what changes, and what to do with
@@ -322,3 +322,33 @@ since (#2180–#2240).
       `allowBypass`, `acp-agent.js:6264`). Added to the root section.
     - LOW: Lightweight with Task Mode Default gives Chats, so no PR. Noted in agents.md Workspace
       Profiles and the concepts table.
+
+## PR #2243 completion — 6 Oct
+
+The original task failed while round 10 was running; neither lost reviewer result is claimed as
+completed. Fresh independent doc-sync/user-journey/task-completion and UI reviews replaced those
+runs. Both returned PASS after the following fixes:
+
+- Sonar's 9.5% new-code duplication came from neighboring sessions and common API routing shared
+  with the chat-state screenshot spec. Extracted `docs-chat-fixtures.ts` and used it in both specs;
+  no analyzer exclusion or quality-gate threshold was changed.
+- Integrated main/#2245 and removed obsolete claims that human-input waits are classified as stalls
+  and that classifier failures always lose unpushed work. Docs now explain pending-input protection
+  and best-effort failed-task preservation.
+- Corrected the storage cap to decimal 10 GB and updated anchors. Removed the console-only recovery
+  recipe per the project's admin-control policy, while honestly documenting the missing button.
+- Added a phone usage-dialog capture and responsive image embedding. Screenshot width is checked
+  after final cards/dialogs render. Conditional skip comments explain complementary viewport scenes.
+
+Validation: marketing lint, typecheck (5 existing Astro baseline errors), build (231 pages), and
+link check (0 broken links across 31 pages) pass. Web typecheck and modified-spec ESLint pass.
+Isolated strict screenshot-spec typecheck reports only existing TS2578 in unchanged
+`audit-helpers.ts:412`, with no diagnostics in changed files. Both screenshot specs: 11 passed,
+5 intentional viewport skips. All 13 touched docs pages rendered at 375 and 1280 pixels with no
+overflow or broken images. Independent UI review opened the committed PNGs and fresh captures;
+these are focused illustrations of unchanged production UI, not a full live-app accessibility audit.
+
+Task-completion checks A/B/C PASS (research, checklist, and documented local verification).
+Checks D/E/F N/A (no production inputs, selection logic, or cross-component runtime changes).
+Documentation-only staging exemption applies; no runtime behavior in this PR requires deployment.
+Phase 7 CI/review/merge and production deployment outcomes are maintained in the PR body.

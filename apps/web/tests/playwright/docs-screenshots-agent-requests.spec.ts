@@ -24,6 +24,7 @@
 import { expect, type Page, type Route, test } from '@playwright/test';
 
 import { makeMockUser, seedTheme } from './audit-helpers';
+import { fulfillDocsChatRoute, neighboringDocsSessions } from './docs-chat-fixtures';
 import { docsShot, opaqueBackdrop } from './docs-shot';
 
 const PROJECT_ID = 'proj-docs-requests';
@@ -102,24 +103,7 @@ const USAGE: SessionFixture = {
 };
 
 /** Neighbouring rows, so the list shows Needs input beside chats that are not waiting. */
-const OTHER_SESSIONS: SessionFixture[] = [
-  {
-    id: 'sess-sleeping',
-    topic: 'Move invoice rendering to a queue',
-    status: 'sleeping',
-    taskStatus: 'in_progress',
-    taskMode: 'conversation',
-    lastMessageAt: NOW - 3 * HOUR,
-  },
-  {
-    id: 'sess-completed',
-    topic: 'Add retries to the webhook sender',
-    status: 'stopped',
-    taskStatus: 'completed',
-    taskMode: 'task',
-    lastMessageAt: NOW - 26 * HOUR,
-  },
-];
+const OTHER_SESSIONS: SessionFixture[] = neighboringDocsSessions(NOW);
 
 /** The permission screenshot's list shows only the waiting chat among ordinary ones. */
 const PERMISSION_LIST = [PERMISSION, USAGE, ...OTHER_SESSIONS];
@@ -485,12 +469,6 @@ async function setupMocks(page: Page, listed: SessionFixture[]) {
     const json = (body: unknown) => route.fulfill({ status: 200, json: body });
 
     if (pathname.endsWith('/ws') || url.href.includes('websocket')) return route.abort();
-    if (pathname.startsWith('/api/auth')) return json(MOCK_USER);
-    if (pathname === '/api/projects') return json({ projects: [MOCK_PROJECT], nextCursor: null });
-    if (pathname === `/api/projects/${PROJECT_ID}`) return json(MOCK_PROJECT);
-    if (pathname === `/api/projects/${PROJECT_ID}/sessions`) {
-      return json({ sessions, total: sessions.length });
-    }
 
     // The usage chip reads the credential the chat's agent session is attributed to.
     if (pathname === `/api/projects/${PROJECT_ID}/credential-limits`) {
@@ -517,46 +495,13 @@ async function setupMocks(page: Page, listed: SessionFixture[]) {
       return route.fulfill({ status: 404, json: { error: 'NOT_FOUND', message: 'Not found' } });
     }
 
-    const detail = pathname.match(
-      new RegExp(`^/api/projects/${PROJECT_ID}/sessions/([^/]+)(/messages|/state)?$`)
-    );
-    if (detail) {
-      const [, sessionId, suffix] = detail;
-      const session = sessions.find((s) => s.id === sessionId);
-      const messages = MESSAGES[sessionId ?? ''] ?? [];
-      if (suffix === '/state') return json(sessionState());
-      if (suffix === '/messages') return json({ messages, hasMore: false });
-      if (session) return json({ session, messages, hasMore: false, state: sessionState() });
-    }
-
-    // The chat re-reads its task on open; an unrecognised status is treated as still
-    // provisioning, so the task must come back with the status the session list shows.
-    const taskMatch = pathname.match(new RegExp(`^/api/projects/${PROJECT_ID}/tasks/([^/]+)$`));
-    if (taskMatch) {
-      const session = sessions.find((s) => s.task.id === taskMatch[1]);
-      if (session) {
-        return json({
-          ...session.task,
-          title: session.topic,
-          projectId: PROJECT_ID,
-          workspaceId: session.workspaceId,
-          startedAt: new Date(session.startedAt).toISOString(),
-        });
-      }
-    }
-
-    if (pathname === '/api/report-issue/config') return json({ enabled: false });
-    if (pathname === `/api/projects/${PROJECT_ID}/comment-threads`) {
-      return json({ threads: [], total: 0 });
-    }
-    if (pathname === `/api/projects/${PROJECT_ID}/members`) return json({ members: [] });
-    if (pathname === `/api/projects/${PROJECT_ID}/agent-profiles`) return json({ items: [] });
-    if (pathname === `/api/projects/${PROJECT_ID}/tasks`) return json({ tasks: [], total: 0 });
-    if (pathname === '/api/agents') return json({ agents: [] });
-    if (pathname.startsWith('/api/notifications')) return json([]);
-    if (pathname.startsWith('/api/credentials')) return json([]);
-    if (pathname === '/api/github/installations') return json([]);
-    return json({});
+    return fulfillDocsChatRoute(route, {
+      project: MOCK_PROJECT,
+      user: MOCK_USER,
+      sessions,
+      messages: MESSAGES,
+      state: sessionState(),
+    });
   });
 }
 
@@ -570,6 +515,13 @@ async function openChat(page: Page, fixture: SessionFixture, listed: SessionFixt
   // The provisioning banner belongs to starting work, not to a running conversation.
   await expect(page.getByText('Starting...')).toHaveCount(0);
   await expect(page.getByText('Reconnecting...')).toHaveCount(0);
+  await expectNoOverflow(page);
+}
+
+async function expectNoOverflow(page: Page) {
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+    page.viewportSize()!.width
+  );
 }
 
 function isMobile(page: Page): boolean {
@@ -619,6 +571,7 @@ async function expectPermissionCard(page: Page) {
 // ---------------------------------------------------------------------------
 
 test('docs: permission request in the session list and the chat', async ({ page }) => {
+  // Only the desktop project captures this scene; phone coverage uses the dedicated capture.
   test.skip(isMobile(page), 'desktop capture');
   // Narrowest desktop layout (lg starts at 1024px): the docs column scales this image down,
   // and a narrower capture keeps the list label and the buttons legible there. Tall enough to
@@ -643,6 +596,7 @@ test('docs: permission request in the session list and the chat', async ({ page 
   const listBox = await page.getByRole('navigation', { name: 'Chat sessions' }).boundingBox();
   const viewport = page.viewportSize();
   if (!listBox || !viewport) throw new Error('session list or viewport has no geometry');
+  await expectNoOverflow(page);
   await docsShot(page, 'chat-permission-request', {
     clip: { x: listBox.x, y: 0, width: viewport.width - listBox.x, height: viewport.height },
   });
@@ -655,11 +609,13 @@ test('docs: permission request in the session list and the chat', async ({ page 
  * which reads as a rendering bug in a still image.
  */
 test('docs: permission request on a phone', async ({ page }) => {
+  // Only phone projects capture this scene; desktop coverage uses the session-list capture.
   test.skip(!isMobile(page), 'phone capture');
   await page.setViewportSize({ width: 375, height: 812 });
   await openChat(page, PERMISSION, PERMISSION_LIST);
   const card = await expectPermissionCard(page);
   await card.scrollIntoViewIfNeeded();
+  await expectNoOverflow(page);
   await docsShot(page, 'chat-permission-request-mobile');
 });
 
@@ -686,6 +642,7 @@ test('docs: agent question card', async ({ page }) => {
 
   await card.scrollIntoViewIfNeeded();
   await hideCompletionDock(page);
+  await expectNoOverflow(page);
   await docsShot(page, isMobile(page) ? 'chat-agent-question-mobile' : 'chat-agent-question', card);
 });
 
@@ -704,6 +661,7 @@ test('docs: external link request card', async ({ page }) => {
 
   await card.scrollIntoViewIfNeeded();
   await hideCompletionDock(page);
+  await expectNoOverflow(page);
   await docsShot(
     page,
     isMobile(page) ? 'chat-external-link-request-mobile' : 'chat-external-link-request',
@@ -716,7 +674,6 @@ test('docs: external link request card', async ({ page }) => {
 // ---------------------------------------------------------------------------
 
 test('docs: usage limits dialog from the chat header', async ({ page }) => {
-  test.skip(isMobile(page), 'desktop capture');
   await openChat(page, USAGE, [USAGE, ...OTHER_SESSIONS]);
 
   const chip = page.getByTestId('credential-limit-chip');
@@ -739,5 +696,10 @@ test('docs: usage limits dialog from the chat header', async ({ page }) => {
 
   await opaqueBackdrop(page);
   const panel = page.locator('.glass-panel-container').filter({ has: details });
-  await docsShot(page, 'credential-usage-limits', panel);
+  await expectNoOverflow(page);
+  await docsShot(
+    page,
+    isMobile(page) ? 'credential-usage-limits-mobile' : 'credential-usage-limits',
+    panel
+  );
 });

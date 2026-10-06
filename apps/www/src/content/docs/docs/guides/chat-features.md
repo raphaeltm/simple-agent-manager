@@ -68,11 +68,9 @@ For every kind of request:
   on without approvals — see
   [The agent stops for approval and no card appears](/docs/guides/session-troubleshooting/#the-agent-stops-for-approval-and-no-card-appears)
   if its requests are being refused.
-- **On long-running VM work, answer within an hour.** Once a VM chat or task has been awake for four
-  hours, SAM's check for
-  [stalled turns](/docs/guides/session-troubleshooting/#sam-ended-a-stalled-turn) can end it when a
-  card has waited over an hour — the check can't yet tell that the agent is waiting for you — and
-  changes the agent hasn't pushed are lost.
+- **Answer before the deadline on the card.** SAM's stalled-turn check respects pending requests
+  until their response deadline; waiting for your answer is not treated as a stall. If the request
+  expires, the agent is told no — send a message saying how to continue.
 
 :::
 
@@ -506,7 +504,7 @@ Persistent chat sessions can sleep and recover on both [Instant and VM-backed ru
 - **Snapshots that keep failing.** If SAM cannot save a complete snapshot after a few tries (three, or 15 minutes, by default), it stops retrying. A VM session whose earlier snapshot saved its exact Git commit sleeps anyway, keeping the conversation and the repository but not every file, and the chat says what was kept. Otherwise the chat says SAM could not put the session to sleep, and the workspace keeps running. [SAM could not save a complete snapshot](/docs/guides/session-troubleshooting/#sam-could-not-save-a-complete-snapshot) explains both.
 - **Recovery.** SAM is rebuilding the session's runtime and restoring its saved state. Wait for it to finish instead of resending.
 - **Wake failed.** SAM could not safely wake the sleeping session or the queued wake prompt expired before delivery. The session is marked **Wake failed** in the list and a system message in the chat explains the reason, so the failure is visible instead of hidden in retry state. [Wake failed](/docs/guides/session-troubleshooting/#wake-failed) lists the reasons and what to do about each.
-- **Failed tasks.** When a task fails while its workspace is still running, SAM snapshots the workspace and puts the conversation to sleep instead of deleting it. That covers a provider usage limit, a question the agent sent with its `request_human_input` tool that nobody answered, and an agent that went quiet after a SAM check-in. If the agent is still working when the task fails, SAM waits for its turn to end first (up to 8 hours by default). The failure banner stays, and sending a message wakes the same chat with its files restored. If SAM could not save the workspace, or the snapshot is incomplete, the chat says so. An agent that crashed, timed out, or hung mid-turn has no session SAM can safely snapshot, so its uncommitted changes are lost and the chat says that too. **Archive** still deletes it right away. [When a task fails](/docs/guides/session-troubleshooting/#when-a-task-fails) shows how to tell which happened.
+- **Failed tasks.** When a task fails while its workspace is still running, SAM snapshots the workspace and puts the conversation to sleep instead of deleting it. That covers a provider usage limit, a question the agent sent with its `request_human_input` tool that nobody answered, and an agent that went quiet after a SAM check-in. If the agent is still working when the task fails, SAM waits for its turn to end first (up to 8 hours by default). The failure banner stays, and sending a message wakes the same chat with its files restored. If SAM could not save the workspace, or the snapshot is incomplete, the chat says so. If SAM cannot safely snapshot the failed runtime, uncommitted changes may be lost; the chat explains what could not be saved. **Archive** still deletes it right away. [When a task fails](/docs/guides/session-troubleshooting/#when-a-task-fails) shows how to tell which happened.
 
 You may also see a banner telling you a message was saved but its delivery was interrupted. **That one needs a decision from you** — SAM will not replay the message automatically, because replaying a prompt that already half-ran duplicates commits and pull requests. See [Your prompt may or may not have run](/docs/guides/session-troubleshooting/#your-prompt-may-or-may-not-have-run).
 

@@ -479,42 +479,19 @@ What to do, by what the card shows:
   width="375"
 />
 
-### When a project reaches the 10 GiB storage cap
+### When a project reaches the 10 GB storage cap
 
-Cloudflare limits each project's storage object to 10 GiB. **Admin → Storage** shows how close each
+Cloudflare limits each project's storage object to 10 GB. **Admin → Storage** shows how close each
 project is. At the cap every write to that project fails: new tasks and chat messages get
 `PROJECT_DATA_STORAGE_FULL` (_"ProjectData storage is full; storage recovery is required before this
 write can complete."_), and putting sessions to sleep fails too. So do the archive drain and
 **Abandon**, because each has to write something before it can free space, and the routine search
 cleanup switches itself off just before the cap.
 
-To get out of that state, a superadmin can call
-`POST /api/admin/project-data/storage/:projectId/grouped-fts-wall-recovery`, which deletes the
-search index of finished (stopped or failed) sessions at least a week old, largest first. Messages are not deleted: searches that cover those
-sessions still work, but find less, because they fall back to scanning recent messages. There is no
-button for it yet. Sign in to SAM as a superadmin, open `https://api.yourdomain.com/health` in the
-same browser, and run this in that tab's developer console, with the project's ID (the part after
-`/projects/` in the project's address in SAM) in place of `<projectId>`:
-
-```js
-await fetch('/api/admin/project-data/storage/<projectId>/grouped-fts-wall-recovery', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    reason: 'Project storage at the 10 GiB cap',
-    dryRun: true,
-    maxSessions: 10,
-    maxRows: 5000,
-    maxBytes: 33554432,
-  }),
-}).then((response) => response.json());
-```
-
-Every call needs a `reason`, `dryRun`, and the three limits `maxSessions`, `maxRows`, and `maxBytes`,
-each capped by a `PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_*` setting. The dry run reports what a real call would
-remove. Then set `dryRun: false` and start small — one session, 500 rows, 4 MiB (`4194304`) — and
-raise the limits while each response's `result` shows `error: null` and `afterBytes` below
-`beforeBytes`.
+A superadmin recovery endpoint can remove the search index of older finished sessions without
+removing their messages, but it does not yet have a control in **Admin → Storage**. There is
+currently no supported recovery button for a project already at the cap. Monitor storage and
+resolve stuck archive migrations through **Admin → Storage** before writes stop working.
 
 ## Teardown
 
@@ -623,8 +600,8 @@ requests on or fix the devcontainer user.
 ### "ProjectData storage is full"
 
 If writes to one project fail with _"ProjectData storage is full; storage recovery is required
-before this write can complete."_, that project has reached Cloudflare's 10 GiB limit. See
-[When a project reaches the 10 GiB storage cap](#when-a-project-reaches-the-10-gib-storage-cap).
+before this write can complete."_, that project has reached Cloudflare's 10 GB limit. See
+[When a project reaches the 10 GB storage cap](#when-a-project-reaches-the-10-gb-storage-cap).
 
 ### "error: failed to decrypt state"
 
