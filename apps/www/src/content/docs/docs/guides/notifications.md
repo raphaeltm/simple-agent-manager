@@ -17,6 +17,10 @@ SAM combines an in-app notification center with optional Web Push delivery for a
 | **pr_created**    | Medium  | An agent creates a pull request                                          |
 | **cron_failure**  | High    | A five-minute operational recovery sweep fails (active superadmins only) |
 
+A permission request, question, or link card that an agent puts in the chat while it waits does
+**not** send a notification. Those show up as **Needs input** beside the chat in the project's chat
+list — see [When the Agent Needs You](/docs/guides/chat-features/#when-the-agent-needs-you).
+
 ## Delivery Channels
 
 Notifications are delivered via WebSocket for instant updates. The notification bell in the UI header shows the unread count and updates in real-time without page refresh.

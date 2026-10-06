@@ -1,6 +1,6 @@
 ---
 title: Session Troubleshooting
-description: What to do when a chat can't wake, a task fails, the machine behind a session goes silent, or a message's delivery is interrupted — on Instant and VM sessions.
+description: What to do when an agent is waiting for you or can't sign in, a chat can't wake, a task fails, the machine behind a session goes silent, or a message's delivery is interrupted — on Instant and VM sessions.
 ---
 
 When a chat stops behaving normally, it tells you what happened: a banner, a system message, or a
@@ -8,6 +8,12 @@ label in the session list. Find what you are seeing below. The section it points
 your work is safe and what to do next. Everything here applies to both
 [Instant and VM sessions](/docs/guides/instant-sessions/) unless it says otherwise.
 
+- **Needs input** in the session list. The agent, or SAM, is waiting for an answer from you.
+  → [Find what it's waiting for](#the-agent-is-waiting-for-you)
+- **"SAM paused automatic check-ins…"** (tasks). The agent kept stopping without finishing, so SAM
+  stopped nudging it. → [Look, then reply](#sam-paused-automatic-check-ins)
+- **A card or strip saying the agent's connection is missing or was rejected**, or that a tool
+  connection needs sign-in. → [Fix the connection](#the-agent-or-a-tool-cant-sign-in)
 - **A strip with a spinner**, such as **Waking and restoring session...** or, on a VM, a step like
   **Finding a server...** or **Waiting for server capacity...**. A wake or a recovery is in
   progress. → [Wait](#recovery-is-in-progress)
@@ -39,6 +45,62 @@ Several sections below say to check GitHub for anything the agent pushed. Work s
 runs on its own `sam/…` [output branch](/docs/guides/idea-execution/#where-the-work-lands), and the
 project **Files** tab shows its diff without opening a workspace. A chat started in the composer on
 an Instant profile has no branch of its own, and pushes only what you ask the agent to push.
+
+## The agent is waiting for you
+
+**Needs input** beside a chat in the session list means it is waiting for you. Open the chat and
+look for one of these:
+
+- **A card under one of the agent's steps** — a permission request, a question, or a link to open.
+  Answer it there; the agent carries on once it has your answer. If the card already says **Request
+  expired**, the agent was told no, so send a message saying how to continue. See
+  [When the Agent Needs You](/docs/guides/chat-features/#when-the-agent-needs-you).
+- **A question in the agent's last message.** Reply in the composer as usual.
+- **SAM's notice that it paused check-ins.** See the next section.
+
+Only the person who started the chat can answer a card. If you're someone else in a
+[shared project](/docs/guides/collaboration/), the card says it is waiting for the session creator:
+ask them.
+
+## SAM paused automatic check-ins
+
+When an agent working on a task goes quiet without finishing, SAM checks in after about five minutes
+with a message asking it to report progress and carry on (it starts **[SAM Orchestrator
+Check-In]**). An agent that keeps stopping without making progress — often because the same error
+keeps coming back — would otherwise be nudged forever, so after three check-ins in a row with no
+progress, SAM stops and posts one of these in the chat:
+
+- **"SAM paused automatic check-ins after repeated attempts without confirmed progress."** Read the
+  last few messages for the error or the step the agent keeps getting stuck on. Fix what you can —
+  a missing credential, a failing service — then send a message telling the agent how to continue.
+- **"SAM paused automatic check-ins because the runtime rejected the selected model."** The agent's
+  model doesn't work with that agent or your account. Choose a model the agent supports in its
+  [profile](/docs/guides/agents/#choosing-a-model), then send a message to retry.
+
+Pausing doesn't stop anything: the task, the workspace, and anything the agent left running keep
+going, and the chat is marked **Needs input**. Your next message, or the agent finishing a tool
+step, starts the check-ins again with a fresh count. Self-hosters can change the count with
+`TASK_RECONCILIATION_MAX_CHECKINS`.
+
+## The agent or a tool can't sign in
+
+When an agent can't use its provider account, or a tool server rejects it, the failure card under the
+chat header — or a strip above the conversation — names the problem. Expand the card for the next
+step; if you started the chat, it also has a button to the right settings page.
+
+- **Agent connection missing.** The agent has no credential it can use for this chat. Connect it
+  under **Settings → Connections** (the card's **Open agent connections** button goes there), then
+  send a message or **Retry**.
+- **Agent connection rejected.** The provider refused the credential — usually an expired
+  subscription sign-in or a revoked API key. Reconnect it under **Settings → Connections**, then
+  retry.
+- **Model unavailable for this account.** The credential works, but your plan or account can't use
+  that model. Pick another model in the agent's profile, or check model access with the provider.
+- **Tool connection needs sign-in** or **Sign-in flow unavailable.** An MCP server refused the
+  agent, or wants a sign-in SAM can't complete. See
+  [When a server needs sign-in](/docs/guides/mcp-servers/#when-a-server-needs-sign-in).
+
+In a shared project, only the person who started the chat sees the settings button.
 
 ## Recovery is in progress
 
@@ -249,6 +311,14 @@ kept:
   "This session has ended."** The message names the reason. Uncommitted or unpushed changes are
   gone; commits the agent pushed are safe. Check GitHub for what was pushed, then use **Retry** or
   [Fork](/docs/guides/chat-features/#conversation-forking).
+
+On a long task, expanding the card may show **SAM detected a stalled agent turn after N minutes**
+under **Error**. SAM looks closer at a task that has run for more than four hours when the agent's
+turn is still open but nothing new has appeared in the chat for an hour. An AI check reads the end
+of the conversation, and if it is confident the agent is stuck — repeating the same error, or making
+no progress — SAM fails the task instead of letting it hold a machine indefinitely. The list above
+tells you whether its work was kept. If the agent was really busy with something long and quiet,
+such as a slow build, ask it to report progress as it goes, or split the work into smaller tasks.
 
 A task that fails while its workspace is still starting, or on a machine SAM lost contact with
 (below), is not saved this way. A kept chat stays wakeable for seven days, like any sleeping chat.

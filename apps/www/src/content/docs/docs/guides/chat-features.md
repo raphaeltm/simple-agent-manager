@@ -1,6 +1,6 @@
 ---
 title: Chat Features
-description: The session tool rail, file browsing, tool activity cards, diagrams, conversation forking, finding past conversations, voice input, and text-to-speech in SAM's chat interface.
+description: Answering an agent's permission requests and questions, message actions, the session tool rail, file browsing, tool activity cards, diagrams, conversation forking, finding past conversations, voice input, and text-to-speech in SAM's chat interface.
 ---
 
 SAM's project pages are chat-first interfaces where you interact with AI coding agents in real-time.
@@ -11,15 +11,93 @@ Recent chat updates make the workspace feel more like a persistent work surface:
 
 Agent output streams directly to your browser via WebSocket. You see code being written, terminal commands executing, and the agent's thought process as it happens — no waiting for a complete response.
 
-## Agent Questions
+## Message Actions
 
-When an ACP agent asks for structured input in a conversation session, the question appears as a form in the chat. The session creator can select choices, enter supported short values, send an answer, or decline. Other project members see that the agent is waiting, without seeing the question or its answers. The card shows when an answer is saved, delivered, interrupted, or expired, including after reconnecting to the chat.
+Once a message has finished arriving, small buttons appear under it:
 
-Form questions are available when the operator enables `ACP_INTERACTIONS_ENABLED` and `ACP_INTERACTION_FORMS_ENABLED`. Unsupported form schemas are cancelled explicitly. Task-mode forms are unavailable.
+- **Info** shows when the message was sent and how many words and characters it has.
+- **Copy** copies the message as written, Markdown included.
+- **Read aloud** plays an agent reply as audio — see [Text-to-Speech Playback](#text-to-speech-playback).
 
-Remote HTTPS URL requests have a separate `ACP_INTERACTION_URLS_ENABLED` switch, off by default. Once enabled on a verified runtime, the session creator sees the destination host and must choose to open the link, then separately tell the agent to continue or decline. Opening the link is consent to navigate; only a later completion notification from the external service confirms its flow completed. URL requests and answers are encrypted in Cloudflare storage and never sent through a direct browser-to-VM channel. Other project members see generic request state.
+Your own messages have **Info** and **Copy** too, so you can pick up a prompt you wrote earlier and
+reuse it.
 
-SAM declines HTTP URLs, local or loopback destinations, explicit local callback and redirect parameters, embedded credentials, IP literal destinations, and unsupported request shapes. A structurally valid request rejected for an explicit loopback callback shows fixed guidance in the chat; the session creator can review existing MCP settings for a supported connection method. The redirect check covers explicit known query parameters; it cannot prove every provider-specific redirect behavior. SAM does not fetch links or follow redirect chains, so a remote service must own its own externally reachable callback and completion. Claude's localhost MCP OAuth startup, arbitrary provider account login, callback tunnels, and token custody are unsupported. Use existing credential settings or guided provider login for native model access.
+## When the Agent Needs You
+
+Sometimes an agent stops and waits for you. It wants permission before it runs a command or edits a
+file, it has a question only you can answer, or a tool it uses wants you to open a page in your
+browser. Each request appears as a card in the chat, under the step it belongs to, and the chat is
+marked **Needs input** in the session list. The agent is paused until you answer.
+
+![A chat where the agent is waiting for permission. In the session list on the left, the chat reads "Needs input" in amber. In the conversation, under the agent's "npm test" step, a card titled "npm test" has a "Permission needed" badge and a countdown, and three buttons supplied by the agent: "Yes", "Yes, and don't ask again for npm commands", and "No".](/images/docs/chat-permission-request.png)
+
+For every kind of request:
+
+- **Only the person who started the chat can answer.** In a
+  [shared project](/docs/guides/collaboration/), other members see that the agent is waiting, but
+  not what it asked or what you answered.
+- **No notification is sent.** Watch the session list for **Needs input**. (A notification arrives
+  only when an agent asks with its `request_human_input` tool, which is a different, message-style
+  question — see [Notifications](/docs/guides/notifications/).)
+- **Requests expire.** The card shows how long you have. If nobody answers in time, the card changes
+  to **Request expired**, the agent is told the request was cancelled, and the action it asked
+  about does not happen. Send a message to tell the agent how to carry on.
+- **Once you've answered, you can close the tab.** **Answer saved** means SAM has your answer and is
+  delivering it; the card then changes to **Delivered to agent**. If the agent stopped before it
+  could take the answer, the card says **Request interrupted** instead — send your decision as a
+  message.
+
+:::note[Self-hosted instances]
+These requests are off until an operator turns them on — see
+[Let agents ask in chat](/docs/guides/self-hosting/#let-agents-ask-in-chat). Until then, an
+agent that asks for permission is told no automatically, so the action it wanted does not happen.
+:::
+
+### Permission requests
+
+Whether an agent asks before acting depends on its
+[permission mode](/docs/guides/agents/#permission-mode). Agents start in **Bypass Permissions**,
+which rarely asks. In **Manual** mode the agent asks before it runs commands or changes files, and
+in **Plan Mode** Claude Code asks you to approve its plan before it changes anything.
+
+The card is titled with what the agent wants to do — for a command, the command itself — and its
+buttons are the agent's own choices. For a Claude Code command they are usually **Yes**; **Yes, and
+don't ask again for …**, naming the kind of command it will stop asking about; and **No**. A plan
+approval asks how to continue — for example **Yes, auto-accept edits** — or offers **No, keep
+planning**. A permission request waits up to two hours in a conversation and 30 minutes in a task.
+
+### Questions
+
+When an agent needs a decision — which of two designs to build, say — it can ask with a short form:
+choices to pick from, short text, numbers, or yes/no. Fill it in and select **Send answer**. Claude
+Code's multiple-choice questions arrive this way, each with an **Other** box for an answer of your
+own. **Decline** tells the agent you're skipping the question.
+
+![An "Agent question" card in the chat. The agent asks where to store uploaded receipts. A "Storage" dropdown has "R2 bucket (Recommended)" selected, with the option's description below it, and an empty "Other" box follows. Below the field are "Send answer" and "Decline" buttons.](/images/docs/chat-agent-question.png)
+
+Questions appear only in conversation-mode chats, which include every
+[Instant](/docs/guides/instant-sessions/) chat. A task can't stop to ask this way.
+
+### Links to open
+
+Some tools — usually an [MCP server](/docs/guides/mcp-servers/) you connected — need you to sign in
+or approve something on their own website. The card, titled **External service request**, shows
+where the link goes. Select the **Open …** link to visit it in a new tab and finish there, then
+come back and select **Continue after opening** so the agent carries on; that button only becomes
+available once you have opened the link. **Decline** tells the agent you won't.
+
+![An "External service request" card. It explains that the Linear MCP server needs you to approve access, shows "Destination: mcp.linear.app", an "Open mcp.linear.app" link, and the buttons "Continue after opening" (not yet available) and "Decline".](/images/docs/chat-external-link-request.png)
+
+SAM never opens a link by itself, and it shows only links to public `https://` addresses. Opening
+the link doesn't prove the sign-in worked. If the service reports back, the card says **The external
+service reported completion**; many services don't, so the card can say completion is unconfirmed
+even when it succeeded. A link request waits up to 10 minutes, and like questions it appears only in
+conversation-mode chats.
+
+A tool whose sign-in has to return to `localhost` can't finish from a SAM session, so SAM refuses
+it and the chat says **This sign-in flow needs a local callback that this session cannot
+complete**. Connect that service another way — see
+[When a server needs sign-in](/docs/guides/mcp-servers/#when-a-server-needs-sign-in).
 
 ## The Session Tool Rail
 
@@ -342,6 +420,11 @@ When you open a new chat, SAM offers a few repo-aware **starter prompts** (for e
 To send on a desktop keyboard, press **Cmd+Enter** on Mac or **Ctrl+Enter** on Windows/Linux — plain **Enter** inserts a new line so you can write multi-line prompts. The composer shows the correct shortcut for your platform as a hint. On mobile, tap the send button; **Enter** always inserts a new line.
 
 ## Switching Between Chats
+
+The session list puts the chat with the most recent message first. Only a new message moves a chat
+up — from you, the agent, or SAM itself, such as a wake-failure notice. Sleeping, waking, stopping,
+or archiving a chat leaves it where it is, so an old chat you archive doesn't jump to the top. A
+chat with no messages yet is placed by when it was created.
 
 A chat you opened in the last 24 hours opens at once from a cache in your browser, then refreshes in the background. A thin bar at the top of the page shows while the refresh runs, and messages that arrived while you were away appear when it finishes. A chat that is not cached shows a loading indicator until its newest messages arrive. The previous chat never stays on screen while the next one loads.
 

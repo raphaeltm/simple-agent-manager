@@ -56,7 +56,26 @@ If a project server and a personal server share a name, the project one wins. Ad
 
 Use the **Disable** toggle to stop injecting a server without deleting it and losing the credential.
 
-If a chat says a **tool connection needs sign-in**, review its entry under **Settings → MCP Servers** (or ask a project administrator to check **Project Settings → Runtime** for a shared server). A bearer token works only when that service accepts bearer authentication; some services require a separate browser sign-in. A service that requires a callback to `localhost` cannot complete that callback through the remote SAM session. Use an authentication method the service supports for remote clients. The chat's personal-settings shortcut appears for its creator; project administrators manage shared server settings according to their project permissions.
+## When a server needs sign-in
+
+There are three ways a chat tells you an MCP server isn't signed in:
+
+- **The server sends you a link.** Some servers ask you to approve access on their own website. The
+  chat shows an **External service request** card with the destination; open the link, finish
+  there, then select **Continue after opening**. See
+  [Links to open](/docs/guides/chat-features/#links-to-open).
+- **A failure card reads "Tool connection needs sign-in".** The server refused the credential SAM
+  sent. Review its entry under **Settings → MCP Servers**, or ask a project administrator to check
+  **Project Settings → Runtime** for a shared server. A bearer token works only if that service
+  accepts bearer authentication; some services need an API-key header instead (see
+  [Adding a server](#adding-a-server)), and some need a browser sign-in.
+- **The chat says "This sign-in flow needs a local callback that this session cannot complete".**
+  The service wants to finish its sign-in by redirecting to `localhost`, which can't work from a
+  remote SAM session. Use another authentication method the service supports for remote clients,
+  usually a token or API key from its dashboard.
+
+The chat's shortcut to personal MCP settings appears only for the person who started it; shared
+servers are managed by project administrators.
 
 ## Security
 
