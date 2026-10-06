@@ -40,10 +40,11 @@ For every kind of request:
   answer later or from another device until its deadline, which the card shows. If nobody answers in
   time, the request ends — the card says it expired or was cancelled — and the agent is told no, so
   the action it asked about does not happen. Send a message to tell the agent how to carry on.
-- **On a chat or task that has been awake for more than four hours, answer within an hour.** SAM's
-  check for [stalled turns](/docs/guides/session-troubleshooting/#sam-ended-a-stalled-turn) can't
-  yet tell that the agent is waiting for you, so SAM may end it — and changes the agent hasn't
-  pushed are lost.
+- **On long-running VM work, answer within an hour.** Once a VM chat or task has been awake for
+  four hours, SAM's check for
+  [stalled turns](/docs/guides/session-troubleshooting/#sam-ended-a-stalled-turn) can end it when a
+  card has waited over an hour — the check can't yet tell that the agent is waiting for you — and
+  changes the agent hasn't pushed are lost.
 - **Answer on the card, not in the message box.** A message you type waits until the agent's turn
   ends, and the turn can't end until the card is answered or expires. To stop the agent instead,
   select **Interrupt** (the red button above the message box); the card then says **Request
@@ -105,12 +106,21 @@ own. **Decline** tells the agent you're skipping the question. A question waits 
   />
 </picture>
 
-Questions appear only in sessions labelled **Chat** in the session list — which includes every
-[Instant](/docs/guides/instant-sessions/) session you start yourself. A **Task** can ask for
-permission, but not ask questions or send links. On a VM, a chat is a **Chat** when its
-[agent profile](/docs/guides/agents/#agent-profiles) has **Task Mode** set to **Conversation**, as
-profiles you create with **Chat and explore** in the chat input do. With **Task Mode** left at
-**Default**, a profile whose **Workspace Profile** is **Lightweight** also gives a **Chat**.
+Questions appear only in sessions labelled **Chat** in the session list. A **Task** can ask for
+permission, but not ask questions or send links. Which you get depends on what you start the chat
+with:
+
+- An [agent profile](/docs/guides/agents/#agent-profiles) whose runtime is
+  [Instant](/docs/guides/instant-sessions/) gives a **Chat**.
+- On a VM, a profile whose **Task Mode** is **Conversation** gives a **Chat**; profiles you create
+  with **Chat and explore** in the chat input are set that way. With **Task Mode** left at
+  **Default**, a profile whose **Workspace Profile** is **Lightweight** does too.
+- If you also pick a skill, the skill's **Task Mode** decides instead, and new skills are set to
+  **Task**.
+
+A **Chat** doesn't commit, push, or open a pull request for you, so keep **Task Mode** at **Task**
+for work you want delivered as a pull request — see
+[What happens to your work](/docs/guides/instant-sessions/#what-happens-to-your-work).
 
 ### Links to open
 

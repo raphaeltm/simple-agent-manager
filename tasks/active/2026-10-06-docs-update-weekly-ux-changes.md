@@ -176,3 +176,30 @@ since (#2180–#2240).
       "Sleep, then message" after changing a model. The VM restore path (`restoreAgentSessionOnNode`)
       doesn't pass the new model override, so it's unverified; Fork is offered instead. Kept the usage
       "how SAM reads these numbers" sentence because it explains differences from provider pages.
+- **Round 4**, same two lenses on 5f991962a. All findings were verified in code and fixed; none
+  pushed back.
+  - Fact-checker, 2 MEDIUM and 4 LOW:
+    - A chat woken from sleep doesn't re-apply its profile's mode or model. Profile overrides are
+      only stored by `handleStartAgentSession` (`workspaces.go:1345`), and a wake restores instead,
+      so it follows `/agent-settings`: Agent Overrides, then Settings → Agents, then Bypass. Filed as
+      idea `01M47WCAGF4A18CC0DCHYFK6CP`; docs corrected.
+    - The stalled-turn check is VM-only. Instant liveness reasons are `cf_container_*`, which
+      `longTurnAge` ignores. Fixed in all four places.
+    - Lightweight follows a `devcontainer.json` that names `root`.
+    - A skill's Task Mode and permission mode override the profile's (`resolveSkillProfile`).
+    - `TASK_RECONCILIATION_MAX_CHECKINS` must be added under `[vars]`.
+    - Check `sync-wrangler-config.ts`, not the workflow, for Environment overrides. The workflow
+      passes `MCP_ARCHIVED_TOOL_PAYLOAD_LIST_*`, which never reach the Worker; noted on idea
+      `01M47V0101CAM43ZNZN4JHB4AK`.
+  - User reviewer, 3 MEDIUM and 6 LOW:
+    - The 4-hour warning now reads "on long-running VM work, answer within an hour". A card raised at
+      3 h can be checked at 4 h.
+    - A **Chat** doesn't commit, push, or open a PR (`skipGit` in conversation mode), so keep Task
+      Mode at Task for PR work.
+    - Stale composer claims in concepts.mdx.
+    - The D1 query now covers skills and returns owner emails and project IDs. Re-tested against all
+      migrations.
+    - Self-hoster steps reordered so requests are on before the update deploy.
+    - The 4 October date now notes the self-hosted equivalent.
+    - Accept Edits approves only commands.
+    - Sleep is the moon button.

@@ -192,13 +192,18 @@ ID is refused.
 Agents start in **Bypass Permissions** mode, so they edit files and run commands without stopping to
 ask. Each workspace is its own isolated VM or container. To make an agent more careful, choose another
 mode in a profile, in the project's **Agent Overrides** (project settings), or in **Settings → Agents**.
-SAM uses the first of these that sets a mode, in that order, and a change applies to chats started,
-or woken from sleep, after you save it — not to a chat that is already running.
+When a chat starts, SAM uses the first of these that sets a mode, in that order; a change applies to
+chats started after you save it, not to one already running. (A skill created with SAM's
+`create_skill` tool can set a mode too, and it wins over the profile's.)
+
+A chat woken from sleep doesn't re-apply its profile's mode or model. It takes them from **Agent
+Overrides**, then **Settings → Agents**, and uses Bypass Permissions if neither sets a mode — so a
+woken chat can start or stop asking, or change model, when those places differ from its profile.
 
 A mode saved earlier still applies. If an agent asks when you don't expect it, check all three
 places: older built-in profiles were set to **Accept Edits** or **Plan Mode**, and saving
-**Settings → Agents** on or before 4 October stored the old default, now shown as **Manual**, even if
-you only changed the model. To stop the questions, set **Bypass Permissions** where the mode is set,
+**Settings → Agents** on or before 4 October (on a self-hosted instance, before it ran v2026.10.05)
+stored the old default, now shown as **Manual**, even if you only changed the model. To stop the questions, set **Bypass Permissions** where the mode is set,
 or clear it there so the next place decides: **No override** in a profile, **Inherit from user
 settings** in **Agent Overrides**.
 
@@ -227,9 +232,10 @@ Permissions when it runs as `root` — see below.
 
 Claude Code won't use Bypass Permissions when it runs as `root`, so it asks as in **Manual** instead.
 On a VM the agent runs as your devcontainer's user, so this happens when the project's devcontainer
-runs as `root`. SAM's own devcontainer — used by the **Lightweight** workspace profile and for
-repositories without a `.devcontainer` — and [Instant](/docs/guides/instant-sessions/) sessions run
-as a non-root user, so they aren't affected.
+runs as `root`. Repositories without a `.devcontainer`, the **Lightweight** workspace profile, and
+[Instant](/docs/guides/instant-sessions/) sessions use SAM's own images, which run as a non-root
+user — though Lightweight still follows a `devcontainer.json` that sets `remoteUser` or
+`containerUser` to `root`.
 
 To check, ask the agent to run `whoami`, or run it yourself in the workspace's
 [terminal](/docs/guides/creating-workspaces/#terminal). If it prints `root`, set `"remoteUser"` in

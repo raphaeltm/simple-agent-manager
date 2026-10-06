@@ -54,7 +54,7 @@ Also changed this week:
 - **SAM stops nudging a stuck agent.** After three check-ins with no progress, SAM pauses its
   check-ins and posts what to look at, instead of nudging the agent all day.
   → [SAM paused automatic check-ins](/docs/guides/session-troubleshooting/#sam-paused-automatic-check-ins)
-- **A turn that hangs for hours is ended.** When a task or chat has been awake for more than four
+- **A turn that hangs for hours is ended.** When a VM task or chat has been awake for more than four
   hours and the agent's turn has shown nothing for an hour, SAM checks it, and fails the task if the
   turn is clearly wedged. Work that wasn't pushed is lost, and the check can't yet tell when the
   agent is waiting on a card for you, so answer cards within an hour on long-running work.
@@ -73,18 +73,17 @@ request automatically, whatever mode an agent was in. From v2026.10.01 each requ
 person running the chat — or, unless you turn agent requests on, it is refused, on new and updated
 installations alike.
 
-1. **Update to the newest release**
+1. **Turn agent requests on first**, with three GitHub Environment variables
+   ([Let agents ask in chat](/docs/guides/self-hosting/#let-agents-ask-in-chat)), so the update's
+   deploy picks them up. If you leave them off, agents need **Bypass Permissions**, and Amp, Gemini
+   CLI, and Claude Code in a devcontainer that
+   [runs as `root`](/docs/guides/agents/#claude-code-asks-even-in-bypass-permissions) ask even then.
+2. **Update to the newest release**
    ([Updating an existing instance](/docs/guides/self-hosting/#updating-an-existing-self-hosted-instance)).
-   v2026.10.05 is the first where Claude Code agents with no mode
-   set start in Bypass Permissions; on v2026.10.01 to v2026.10.04 they ask, and with requests off are
-   refused every time. The check-in cap, usage chips, the Codex upgrade for GPT-6.1 Sol, and sleeping
+   v2026.10.05 is the first where Claude Code agents with no mode set start in Bypass Permissions; on
+   v2026.10.01 to v2026.10.04 they ask, and with requests off are refused every time. The check-in cap, usage chips, the Codex upgrade for GPT-6.1 Sol, and sleeping
    tasks on Active Tasks arrive in the release after v2026.10.05.
-2. **Turn agent requests on**, with three GitHub Environment variables
-   ([Let agents ask in chat](/docs/guides/self-hosting/#let-agents-ask-in-chat)), or make sure agents
-   run in **Bypass Permissions**. Amp and Gemini CLI ask on their own even then, and so does Claude
-   Code in a devcontainer that
-   [runs as `root`](/docs/guides/agents/#claude-code-asks-even-in-bypass-permissions).
-3. **If you leave requests off, find the saved modes that will be refused** — in profiles,
+3. **If you left requests off, find the saved modes that will be refused** — in profiles, skills,
    projects' **Agent Overrides**, and users' **Settings → Agents**, where saving on a release before
    v2026.10.05 stored the old always-ask default, now shown as **Manual**.
    [Let agents ask in chat](/docs/guides/self-hosting/#let-agents-ask-in-chat) has a query that
@@ -126,8 +125,8 @@ an unanswered request counts as a no. No notification is sent: watch for **Needs
 session list.
 
 Because asking is now real, a Claude Code agent with no mode chosen starts in **Bypass
-Permissions**. Pick **Manual**, **Accept Edits**, or **Plan Mode** when you want to approve its
-changes. See
+Permissions**. Pick **Manual** or **Plan Mode** to approve its changes yourself, or **Accept Edits** to
+approve only the commands it runs. See
 [When the Agent Needs You](/docs/guides/chat-features/#when-the-agent-needs-you) and
 [Permission mode](/docs/guides/agents/#permission-mode).
 

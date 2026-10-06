@@ -33,8 +33,8 @@ your work is safe and what to do next. Everything here applies to both
   recovery point, so the workspace keeps running. → [Decide what to do](#sam-could-not-save-a-complete-snapshot)
 - **A system message starting "Wake failed:"**, and **Wake failed** in the session list. SAM could
   not wake the sleeping chat. → [Read the reason, then act on it](#wake-failed)
-- **A failure card whose error says "SAM detected a stalled agent turn…"**. SAM ended long-running
-  work it judged stuck, and changes the agent hadn't pushed were not saved.
+- **A failure card whose error says "SAM detected a stalled agent turn…"** (VM). SAM ended
+  long-running work it judged stuck, and changes the agent hadn't pushed were not saved.
   → [Check what was pushed](#sam-ended-a-stalled-turn)
 - **Any other failure card under the chat header.** The task failed; its work may have been kept.
   → [See whether it was](#when-a-task-fails)
@@ -63,9 +63,9 @@ there too. Open the chat and look for one of these:
 - **A card in the chat** — a permission request, under the step it's about, or a question or a link
   to open, at the end of the chat. Answer it there; the agent carries on once it has your answer. If
   the card says the request expired or was cancelled, the agent was told no, so send a message
-  saying how to continue. On a chat or task that has been awake for more than four hours, answer
-  within an hour, or SAM may [end it as stalled](#sam-ended-a-stalled-turn) and changes the agent
-  hasn't pushed are lost. See
+  saying how to continue. On long-running VM work, answer within an hour: once a VM chat or task has
+  been awake for four hours, a card left waiting over an hour can get it
+  [ended as stalled](#sam-ended-a-stalled-turn), losing changes the agent hasn't pushed. See
   [When the Agent Needs You](/docs/guides/chat-features/#when-the-agent-needs-you).
 - **A question the agent asked with its `request_human_input` tool.** It shows as that tool's step
   in the chat, and as a notification — with answer buttons if the agent offered choices. Reply in
@@ -81,9 +81,10 @@ ask them (the session list shows who started it).
 
 If an agent keeps asking about every command when you don't want it to, its permission mode is set
 to ask — often **Manual**, saved earlier without anyone choosing it. See
-[Permission mode](/docs/guides/agents/#permission-mode) for where to change it; the change applies to
-new chats and to chats woken from sleep. One exception: if the project's devcontainer runs as
-`root`, Claude Code refuses Bypass Permissions and asks anyway — see
+[Permission mode](/docs/guides/agents/#permission-mode) for where to change it. A change applies to
+new chats; a chat woken from sleep follows **Agent Overrides** and **Settings → Agents**, not its
+profile. And if the project's devcontainer runs as `root`, Claude Code refuses Bypass Permissions
+and asks anyway — see
 [Claude Code asks even in Bypass Permissions](/docs/guides/agents/#claude-code-asks-even-in-bypass-permissions)
 to check and fix it.
 
@@ -112,7 +113,8 @@ keeps coming back — would otherwise be nudged forever. SAM pauses and posts on
 
 The chat is marked **Needs input** until someone replies. Your next message, or a new tool step
 finishing successfully, starts the check-ins again with a fresh count. (On a self-hosted instance
-the count is `TASK_RECONCILIATION_MAX_CHECKINS`, set in `apps/api/wrangler.toml`.)
+the limit is 3; to change it, add `TASK_RECONCILIATION_MAX_CHECKINS` under `[vars]` in
+`apps/api/wrangler.toml`.)
 
 ## The agent or a tool can't sign in
 
@@ -128,8 +130,8 @@ or in the failure card under the chat header (expand the card for the next step)
   expired subscription sign-in or a revoked API key. Reconnect it under **Settings → Connections**
   (the card's **Open agent connections** button, for the person who started the chat). The agent
   picks up the new connection only when it starts again: in a **Task**, wait for the chat to go to
-  sleep, then reply to wake it; in a **Chat**, select **Sleep** and then send a message, or start a
-  new chat.
+  sleep, then reply to wake it; in a **Chat**, select **Sleep** (the moon button above the message
+  box) and then send a message, or start a new chat.
 - **A failure card: "Model unavailable for this account."** The credential works, but your plan or
   account can't use that model — or the model ID is mistyped. Pick another model in the agent's
   profile, the project's **Agent Overrides**, or **Settings → Agents**, then start a new chat, or
@@ -380,9 +382,9 @@ seven days, like any sleeping chat.
 ### SAM ended a stalled turn
 
 If expanding the failure card shows **SAM detected a stalled agent turn after N minutes** under
-**Error**, SAM ended work it judged stuck. It looks closer at a task or chat that has been awake for
-more than four hours when the agent's current turn has been open for over an hour and nothing new
-has appeared in the chat for an hour. An AI check reads the end of the conversation, and if it is
+**Error**, SAM ended work it judged stuck. It looks closer at a VM task or chat that has been awake
+for more than four hours when the agent's current turn has been open for over an hour and nothing
+new has appeared in the chat for an hour. (Instant sessions aren't checked.) An AI check reads the end of the conversation, and if it is
 confident the turn is wedged — the last step should have finished by now — SAM fails the task
 instead of letting it run until SAM's 24-hour limit. That check can't yet tell when the agent is
 waiting for you to answer a card, so on long-running work, answer cards within an hour.

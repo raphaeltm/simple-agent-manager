@@ -115,7 +115,7 @@ stored the old always-ask default, now shown as **Manual**. Run the newest relea
 the first where Claude Code agents with no mode set start in Bypass Permissions.
 
 To turn it on, add these GitHub Environment **variables** (not secrets) to your `production`
-environment, each set to `true`, then run **Deploy Production**:
+environment, each set to `true`:
 
 | Variable                        | What it turns on                                                      |
 | ------------------------------- | --------------------------------------------------------------------- |
@@ -123,8 +123,9 @@ environment, each set to `true`, then run **Deploy Production**:
 | `ACP_INTERACTION_FORMS_ENABLED` | Questions, in conversation-mode chats                                 |
 | `ACP_INTERACTION_URLS_ENABLED`  | Links to open (external service requests), in conversation-mode chats |
 
-Turning a switch on applies to chats started after the deploy. To check that it works, start a new
-chat with a Claude Code profile set to **Manual** and ask the agent to create a file: a card with a
+They take effect at the next deploy: run **Deploy Production**, or set them before you
+[update](#updating-an-existing-self-hosted-instance) so the update's deploy picks them up. Turning a
+switch on applies to chats started after that deploy. To check that it works, start a new chat with a Claude Code profile set to **Manual** and ask the agent to create a file: a card with a
 **Permission needed** badge should appear. Turning a switch off refuses new requests straight away,
 even in running chats; any already waiting can still be answered until they expire. Deadlines and
 size limits are in the
@@ -135,25 +136,30 @@ that build to your R2 bucket, and new sessions use it when these variables are o
 nothing else to set up.
 
 If you leave requests off, this query finds the saved Claude Code modes whose requests will be
-refused, in user settings, profiles, and projects' **Agent Overrides**. Run it in the console of
-your SAM D1 database (the one bound as `DATABASE`; its name is in the deploy workflow's Pulumi stack
-output) in the Cloudflare dashboard:
+refused, in user settings, profiles, skills, and projects' **Agent Overrides**. Run it in the
+console of your SAM D1 database (the one bound as `DATABASE`; its name is in the deploy workflow's
+Pulumi stack output) in the Cloudflare dashboard:
 
 ```sql
-SELECT 'user setting' AS place, user_id AS owner, permission_mode AS mode
-  FROM agent_settings
- WHERE agent_type = 'claude-code' AND permission_mode NOT IN ('bypassPermissions', 'dontAsk')
+SELECT 'user setting' AS place, NULL AS project_id, u.email AS owner, s.permission_mode AS mode
+  FROM agent_settings s LEFT JOIN users u ON u.id = s.user_id
+ WHERE s.agent_type = 'claude-code' AND s.permission_mode NOT IN ('bypassPermissions', 'dontAsk')
 UNION ALL
-SELECT 'profile: ' || name, user_id, permission_mode
-  FROM agent_profiles
- WHERE agent_type = 'claude-code' AND permission_mode NOT IN ('bypassPermissions', 'dontAsk')
+SELECT 'profile: ' || p.name, p.project_id, u.email, p.permission_mode
+  FROM agent_profiles p LEFT JOIN users u ON u.id = p.user_id
+ WHERE p.agent_type = 'claude-code' AND p.permission_mode NOT IN ('bypassPermissions', 'dontAsk')
 UNION ALL
-SELECT 'project: ' || name, user_id, agent_defaults
-  FROM projects
- WHERE agent_defaults LIKE '%"permissionMode":"%';
+SELECT 'skill: ' || k.name, k.project_id, u.email, k.permission_mode
+  FROM skills k LEFT JOIN users u ON u.id = k.user_id
+ WHERE k.agent_type = 'claude-code' AND k.permission_mode NOT IN ('bypassPermissions', 'dontAsk')
+UNION ALL
+SELECT 'project: ' || pr.name, pr.id, u.email, pr.agent_defaults
+  FROM projects pr LEFT JOIN users u ON u.id = pr.user_id
+ WHERE pr.agent_defaults LIKE '%"permissionMode":"%';
 ```
 
-A project row lists every agent the project sets a mode for; read its JSON to see which.
+`owner` is the user who saved the setting, or who owns the project. A project row lists every
+agent the project sets a mode for; read its JSON to see which.
 
 ## GCP provisioning credentials
 
