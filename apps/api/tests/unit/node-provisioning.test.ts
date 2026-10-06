@@ -146,7 +146,7 @@ beforeEach(() => {
   sqlite = new Database(':memory:');
   createAllSchemaTables(sqlite, schema);
   sqlite.exec(
-    `INSERT INTO tasks (id, project_id, user_id) VALUES ('task-1', 'project-1', 'user-1')`
+    `INSERT INTO tasks (id, project_id, user_id, status) VALUES ('task-1', 'project-1', 'user-1', 'queued')`
   );
   createNodeRecord.mockImplementation(async () => {
     seedNode('new-node', 'creating');

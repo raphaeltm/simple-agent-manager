@@ -60,6 +60,11 @@ import { handleNodeAgentReady, handleNodeProvisioning, handleNodeSelection } fro
 import { hasTaskStepRetryBudget } from './snapshot-restore-retry';
 import { failTask } from './state-machine';
 import { redactTaskRunnerStatus } from './status';
+import {
+  assertTaskExecutionAuthority,
+  retireRevokedTaskRunner,
+  TaskExecutionAuthorityRevokedError,
+} from './task-execution-authority';
 import type { StartTaskInput, TaskRunnerContext, TaskRunnerState } from './types';
 import { notifyWakeProgress } from './wake-progress-notifier';
 import {
@@ -419,6 +424,10 @@ export class TaskRunner extends DurableObject<Env> {
           return;
       }
     } catch (err) {
+      if (err instanceof TaskExecutionAuthorityRevokedError) {
+        if (await this.isCurrentRecoveryAttempt(state)) await retireRevokedTaskRunner(state, rc);
+        return;
+      }
       // A superseded alarm must not fail or overwrite the stable task's newer
       // wake. The snapshot claim, rather than the task ID, owns these effects.
       if (!(await this.isCurrentRecoveryAttempt(state))) return;
@@ -671,6 +680,7 @@ export class TaskRunner extends DurableObject<Env> {
             : input.config.chatSessionId,
       },
     });
+    await assertTaskExecutionAuthority(this.env, input);
   }
 
   // =========================================================================

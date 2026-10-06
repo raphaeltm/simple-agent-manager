@@ -85,6 +85,11 @@ function createDbMock() {
           return this;
         },
         first() {
+          if (
+            sql.includes('SELECT id FROM tasks WHERE id = ? AND project_id = ? AND user_id = ?')
+          ) {
+            return Promise.resolve({ id: bound[0] });
+          }
           if (sql.includes('SELECT COUNT(*) as c FROM nodes')) return Promise.resolve({ c: 0 });
           if (sql.includes('status, error_message FROM nodes')) {
             return Promise.resolve({ id: bound[0], status: 'running', error_message: null });
@@ -92,7 +97,7 @@ function createDbMock() {
           return Promise.resolve(null);
         },
         all: () => Promise.resolve({ results: [] }),
-        run: () => Promise.resolve({ success: true }),
+        run: () => Promise.resolve({ success: true, meta: { changes: 1 } }),
       };
     },
     // D1 runs a batch as one transaction; this mock only needs each statement to run.

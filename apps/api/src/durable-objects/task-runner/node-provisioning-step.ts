@@ -50,12 +50,18 @@ import {
 import { trySelectReusableNodeForProvisioning } from './node-provisioning-reuse';
 import { applyCapacityCandidateProvisioningTarget } from './node-provisioning-target';
 import { persistPlacementDiagnostics } from './placement-diagnostics';
+import {
+  assertTaskExecutionAuthority,
+  TASK_EXECUTION_AUTHORITY_STATUS_SQL,
+  TaskExecutionAuthorityRevokedError,
+} from './task-execution-authority';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
 export async function handleNodeProvisioning(
   state: TaskRunnerState,
   rc: TaskRunnerContext
 ): Promise<void> {
+  await assertTaskExecutionAuthority(rc.env, state);
   await rc.updateD1ExecutionStep(state.taskId, 'node_provisioning');
   const requestedSizeBeforeProvisioning: VMSize = state.config.vmSize;
 
@@ -312,26 +318,29 @@ export async function handleNodeProvisioning(
       return;
     }
 
-    // Store autoProvisionedNodeId on the task
-    await rc.env.DATABASE.prepare(
+    // Persist the new-node identity before the fenced task write: cancellation
+    // after record creation must still clean up this runner's empty allocation.
+    state.stepResults.nodeId = createdNode.id;
+    state.stepResults.autoProvisioned = true;
+    state.stepResults.provisionedVmSize = size;
+    await rc.ctx.storage.put('state', state);
+    const allocated = await rc.env.DATABASE.prepare(
       `UPDATE tasks
        SET auto_provisioned_node_id = ?, ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS}, updated_at = ?
-       WHERE id = ?`
+       WHERE id = ? AND project_id = ? AND user_id = ?
+         AND status IN (${TASK_EXECUTION_AUTHORITY_STATUS_SQL})`
     )
       .bind(
         createdNode.id,
         ...capacityPlacementSnapshotSqlValues(state.stepResults.capacityPlacementSnapshot),
         new Date().toISOString(),
-        state.taskId
+        state.taskId,
+        state.projectId,
+        state.userId
       )
       .run();
+    if ((allocated.meta.changes ?? 0) === 0) throw new TaskExecutionAuthorityRevokedError();
 
-    // Persist ownership before the provider call so a revocation or crash
-    // after record creation still drives ordinary resource cleanup.
-    state.stepResults.nodeId = createdNode.id;
-    state.stepResults.autoProvisioned = true;
-    state.stepResults.provisionedVmSize = size;
-    await rc.ctx.storage.put('state', state);
     const markedInflight = await markVmProvisioningLeaseInflightNode(
       rc.env,
       state.admissionScopeKey,
@@ -399,6 +408,7 @@ export async function handleNodeProvisioning(
         state.admissionLeaseToken
       );
     } catch (err) {
+      if (err instanceof TaskExecutionAuthorityRevokedError) throw err;
       if (state.stepResults.providerRejectedNodeId) {
         await discardProviderRejectedNode(state, rc, state.stepResults.providerRejectedNodeId);
       }

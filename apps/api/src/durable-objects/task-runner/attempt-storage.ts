@@ -4,7 +4,8 @@ import type { TaskRunnerState } from './types';
 /** Commit only to the run that produced this state, even across an awaited RPC. */
 export async function putTaskRunnerState(
   storage: DurableObjectStorage,
-  state: TaskRunnerState
+  state: TaskRunnerState,
+  options: { deleteAlarm?: boolean } = {}
 ): Promise<void> {
   await storage.transaction(async (transaction) => {
     const current = await transaction.get<TaskRunnerState>('state');
@@ -15,6 +16,7 @@ export async function putTaskRunnerState(
       throw new SessionRecoveryAuthorityRevokedError();
     }
     await transaction.put('state', state);
+    if (options.deleteAlarm) await transaction.deleteAlarm();
   });
 }
 
