@@ -2,14 +2,30 @@ import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
+import { TaskRunner } from '../../src/durable-objects/task-runner';
 import { requestIncompatiblePoolNodeDrain } from '../../src/durable-objects/task-runner/incompatible-node-drain';
 import { findNodeWithCapacity } from '../../src/durable-objects/task-runner/node-selection';
 import { handleNodeProvisioning } from '../../src/durable-objects/task-runner/node-steps';
+import type { TaskRunnerState } from '../../src/durable-objects/task-runner/types';
+import type { Env } from '../../src/env';
+import { sweepDestroyingHandoffNodes } from '../../src/scheduled/node-cleanup/node-phases';
+import { emptyResult, resolveCleanupConfig } from '../../src/scheduled/node-cleanup/shared';
 import { claimNodeForCleanup } from '../../src/scheduled/node-cleanup/shared';
 import * as nodesService from '../../src/services/nodes';
 import { filterReusableNodesByCurrentAuthority } from '../../src/services/reusable-node-authority';
 import { markSessionSnapshotSleeping } from '../../src/services/session-snapshots';
 import { createIncompatibleCapacityFixture } from '../helpers/incompatible-agent-capacity-fixture';
+
+// Only the Workers runtime base/storage boundary is simulated. The real alarm,
+// authority checks, admission SQL, pool trigger and node creation execute.
+vi.mock('cloudflare:workers', () => ({
+  DurableObject: class {
+    constructor(
+      public ctx: DurableObjectState,
+      public env: Env
+    ) {}
+  },
+}));
 
 let fixture: ReturnType<typeof createIncompatibleCapacityFixture>;
 beforeEach(() => {
@@ -241,4 +257,466 @@ describe('incompatible occupied host capacity admission', () => {
     await requestIncompatiblePoolNodeDrain(fixture.state, fixture.rc);
     expect(snapshot()).toBeUndefined();
   });
+});
+
+function alarmRunner() {
+  let persisted = structuredClone(fixture.state);
+  let alarm: number | null = null;
+  const storage = {
+    get: vi.fn(async () => structuredClone(persisted)),
+    put: vi.fn(async (_key: string, value: TaskRunnerState) => {
+      persisted = structuredClone(value);
+    }),
+    setAlarm: vi.fn(async (value: number | Date) => {
+      alarm = Number(value);
+    }),
+    getAlarm: vi.fn(async () => alarm),
+    deleteAlarm: vi.fn(async () => {
+      alarm = null;
+    }),
+    transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(storage)),
+  };
+  const ctx = { storage, waitUntil: vi.fn() } as unknown as DurableObjectState;
+  fixture.rc.env.KV = { get: vi.fn(async () => null) } as unknown as KVNamespace;
+  return {
+    runner: new TaskRunner(ctx, fixture.rc.env),
+    storage,
+    state: () => persisted,
+    replaceState: (value: TaskRunnerState) => {
+      persisted = structuredClone(value);
+    },
+    alarm: () => alarm,
+  };
+}
+
+describe('cancelled admission alarms', () => {
+  it('stops a cancelled pool-full waiter before a freed slot can allocate replacement compute', async () => {
+    fixture.sqlite.exec("UPDATE nodes SET agent_version='current-agent'");
+    fixture.sqlite.prepare('UPDATE workspaces SET resolved_reservation_json=?').run(
+      JSON.stringify({
+        version: 3,
+        cpuMillis: 1000,
+        memoryMb: 15872,
+        diskMb: 2048,
+        exclusiveNode: false,
+        source: 'task',
+        sourceId: 'old-task',
+      })
+    );
+    const provider = vi.spyOn(nodesService, 'provisionNode');
+    const createNode = vi.spyOn(nodesService, 'createNodeRecord');
+    const run = alarmRunner();
+    await run.runner.alarm();
+    expect(
+      fixture.sqlite.prepare("SELECT state FROM vm_task_admissions WHERE task_id='task-1'").get()
+    ).toEqual({ state: 'waiting' });
+    expect(run.alarm()).toBe(Date.now() + 1000);
+    expect(snapshot()).toBeUndefined();
+    fixture.sqlite.exec(
+      "UPDATE tasks SET status='cancelled', error_message='CANCELLED' WHERE id='task-1'; UPDATE nodes SET status='deleted',runtime_termination_confirmed_at='2026-10-05T12:00:00.000Z' WHERE id='existing-node'"
+    );
+    vi.advanceTimersByTime(1001);
+    await run.runner.alarm();
+    expect(createNode).not.toHaveBeenCalled();
+    expect(provider).not.toHaveBeenCalled();
+    expect(fixture.sqlite.prepare('SELECT COUNT(*) AS count FROM nodes').get()).toEqual({
+      count: 1,
+    });
+    expect(
+      fixture.sqlite.prepare("SELECT status,error_message FROM tasks WHERE id='task-1'").get()
+    ).toEqual({ status: 'cancelled', error_message: 'CANCELLED' });
+    expect(run.state().completed).toBe(true);
+    expect(run.alarm()).toBeNull();
+    expect(run.storage.deleteAlarm).toHaveBeenCalled();
+  });
+  it.each(['allocation-write', 'provider-boundary'])(
+    'preserves cancellation racing at %s and deletes only its newly allocated empty host',
+    async (boundary) => {
+      fixture.sqlite.exec(
+        "UPDATE nodes SET status='deleted',runtime_termination_confirmed_at='2026-10-05T12:00:00.000Z' WHERE id='existing-node'"
+      );
+      const provider = vi.spyOn(nodesService, 'provisionNode');
+      const deleted: string[] = [];
+      const cleanup = vi
+        .spyOn(nodesService, 'deleteNodeResourcesStrict')
+        .mockImplementation(async (nodeId) => {
+          expect(fixture.sqlite.prepare('SELECT status FROM nodes WHERE id=?').get(nodeId)).toEqual(
+            { status: 'destroying' }
+          );
+          deleted.push(nodeId);
+          // Confirmed external deletion receipt; the cleanup ownership SQL stays real.
+          fixture.sqlite
+            .prepare(
+              "UPDATE nodes SET status='deleted',runtime_termination_confirmed_at=? WHERE id=?"
+            )
+            .run(new Date().toISOString(), nodeId);
+          return {
+            providerVm: 'deleted',
+            runtimeTerminationConfirmedAt: new Date().toISOString(),
+            runtimeIncarnationId: (
+              fixture.sqlite
+                .prepare('SELECT runtime_incarnation_id AS id FROM nodes WHERE id=?')
+                .get(nodeId) as { id: string | null }
+            ).id,
+            providerInstanceId: null,
+          };
+        });
+      let raced = false;
+      const prepare = fixture.database.prepare.bind(fixture.database);
+      vi.spyOn(fixture.database, 'prepare').mockImplementation((sql: string) => {
+        const matches =
+          boundary === 'allocation-write'
+            ? sql.includes('SET auto_provisioned_node_id = ?')
+            : sql.includes('SET inflight_node_id = ?');
+        if (matches && !raced) {
+          raced = true;
+          fixture.sqlite.exec(
+            "UPDATE tasks SET status='cancelled',error_message='CANCELLED' WHERE id='task-1'"
+          );
+        }
+        return prepare(sql);
+      });
+      const run = alarmRunner();
+      await run.runner.alarm();
+      expect(raced).toBe(true);
+      expect(provider).not.toHaveBeenCalled();
+      expect(cleanup).toHaveBeenCalledTimes(1);
+      expect(deleted).toEqual([run.state().stepResults.nodeId]);
+      expect(deleted[0]).not.toBe('existing-node');
+      expect(
+        fixture.sqlite
+          .prepare(
+            "SELECT status,error_message,auto_provisioned_node_id FROM tasks WHERE id='task-1'"
+          )
+          .get()
+      ).toEqual({
+        status: 'cancelled',
+        error_message: 'CANCELLED',
+        auto_provisioned_node_id: boundary === 'allocation-write' ? null : deleted[0],
+      });
+      expect(
+        fixture.sqlite
+          .prepare(
+            "SELECT COUNT(*) AS count FROM nodes WHERE status IN ('creating','running','destroying')"
+          )
+          .get()
+      ).toEqual({ count: 0 });
+      expect(
+        fixture.sqlite.prepare('SELECT COUNT(*) AS count FROM vm_provisioning_leases').get()
+      ).toEqual({ count: 0 });
+      expect(run.state().completed).toBe(true);
+      expect(run.alarm()).toBeNull();
+    }
+  );
+
+  it('honors another live warm placement claim before its workspace exists and preserves its lease', async () => {
+    fixture.sqlite.exec(
+      "DELETE FROM workspaces; UPDATE tasks SET auto_provisioned_node_id=NULL WHERE id='old-task'; UPDATE tasks SET status='cancelled',error_message='CANCELLED',auto_provisioned_node_id='existing-node' WHERE id='task-1'; UPDATE tasks SET status='queued',claimed_warm_node_id='existing-node' WHERE id='old-task'"
+    );
+    fixture.sqlite
+      .prepare("UPDATE tasks SET claimed_warm_node_at=? WHERE id='old-task'")
+      .run(new Date().toISOString());
+    fixture.sqlite.exec(
+      "INSERT INTO vm_provisioning_leases(scope_key,owner_task_id,fencing_token,provider,credential_domain_key,provider_domain_key,requested_vm_size,expires_at) VALUES ('shared-scope','old-task',2,'hetzner','credential-1','domain','large','2026-10-06T00:00:00.000Z')"
+    );
+    fixture.state.stepResults.nodeId = 'existing-node';
+    fixture.state.stepResults.autoProvisioned = true;
+    fixture.state.admissionScopeKey = 'shared-scope';
+    fixture.state.admissionLeaseToken = 1;
+    const cleanup = vi.spyOn(nodesService, 'deleteNodeResourcesStrict');
+    const leaseBefore = fixture.sqlite.prepare('SELECT * FROM vm_provisioning_leases').get();
+    const run = alarmRunner();
+    await run.runner.alarm();
+    expect(cleanup).not.toHaveBeenCalled();
+    expect(
+      fixture.sqlite.prepare("SELECT status FROM nodes WHERE id='existing-node'").get()
+    ).toEqual({ status: 'running' });
+    expect(fixture.sqlite.prepare('SELECT * FROM vm_provisioning_leases').get()).toEqual(
+      leaseBefore
+    );
+    expect(
+      fixture.sqlite.prepare("SELECT claimed_warm_node_id FROM tasks WHERE id='old-task'").get()
+    ).toEqual({ claimed_warm_node_id: 'existing-node' });
+    expect(run.state().completed).toBe(true);
+    expect(run.alarm()).toBeNull();
+  });
+
+  it.each(['running', 'creating', 'recovery'])(
+    'does not delete a host with an active %s workspace reservation on cancellation',
+    async (status) => {
+      fixture.sqlite.prepare('UPDATE workspaces SET status=?').run(status);
+      fixture.sqlite.exec(
+        "UPDATE tasks SET auto_provisioned_node_id=NULL WHERE id='old-task'; UPDATE tasks SET status='cancelled',error_message='CANCELLED',auto_provisioned_node_id='existing-node' WHERE id='task-1'"
+      );
+      fixture.state.stepResults.nodeId = 'existing-node';
+      fixture.state.stepResults.autoProvisioned = true;
+      const cleanup = vi.spyOn(nodesService, 'deleteNodeResourcesStrict');
+      await alarmRunner().runner.alarm();
+      expect(cleanup).not.toHaveBeenCalled();
+      expect(
+        fixture.sqlite.prepare("SELECT status FROM nodes WHERE id='existing-node'").get()
+      ).toEqual({ status: 'running' });
+      expect(fixture.sqlite.prepare('SELECT status FROM workspaces').get()).toEqual({ status });
+    }
+  );
+
+  it.each([
+    "DELETE FROM tasks WHERE id='task-1'",
+    "UPDATE tasks SET user_id='another-user' WHERE id='task-1'",
+    "UPDATE tasks SET project_id='another-project' WHERE id='task-1'",
+    "UPDATE tasks SET status='sleeping' WHERE id='task-1'",
+  ])(
+    'does not allocate when current task identity/execution authority is revoked: %s',
+    async (sql) => {
+      fixture.sqlite.exec(sql);
+      const provider = vi.spyOn(nodesService, 'provisionNode');
+      const create = vi.spyOn(nodesService, 'createNodeRecord');
+      const run = alarmRunner();
+      await run.runner.alarm();
+      expect(provider).not.toHaveBeenCalled();
+      expect(create).not.toHaveBeenCalled();
+      expect(run.state().completed).toBe(true);
+      expect(run.alarm()).toBeNull();
+    }
+  );
+
+  it.each([false, true])(
+    'retires paid compute after cancellation races provider success (delete fails=%s)',
+    async (deleteFails) => {
+      fixture.sqlite.exec(
+        "UPDATE nodes SET status='deleted',runtime_termination_confirmed_at='2026-10-05T12:00:00.000Z' WHERE id='existing-node'"
+      );
+      const provider = vi
+        .spyOn(nodesService, 'provisionNode')
+        .mockImplementation(async (nodeId) => {
+          fixture.sqlite
+            .prepare(
+              "UPDATE nodes SET status='running',provider_instance_id='paid-provider-instance' WHERE id=?"
+            )
+            .run(nodeId);
+          fixture.sqlite.exec(
+            "UPDATE tasks SET status='cancelled',error_message='CANCELLED' WHERE id='task-1'"
+          );
+        });
+      const cleanup = vi
+        .spyOn(nodesService, 'deleteNodeResourcesStrict')
+        .mockImplementation(async (nodeId) => {
+          expect(
+            fixture.sqlite
+              .prepare('SELECT status,provider_instance_id FROM nodes WHERE id=?')
+              .get(nodeId)
+          ).toEqual({ status: 'destroying', provider_instance_id: 'paid-provider-instance' });
+          if (deleteFails) throw new Error('provider delete temporarily unavailable');
+          fixture.sqlite
+            .prepare(
+              "UPDATE nodes SET status='deleted',runtime_termination_confirmed_at=? WHERE id=?"
+            )
+            .run(new Date().toISOString(), nodeId);
+          return {
+            providerVm: 'deleted',
+            runtimeTerminationConfirmedAt: new Date().toISOString(),
+            runtimeIncarnationId: (
+              fixture.sqlite
+                .prepare('SELECT runtime_incarnation_id AS id FROM nodes WHERE id=?')
+                .get(nodeId) as { id: string | null }
+            ).id,
+            providerInstanceId: 'paid-provider-instance',
+          };
+        });
+      const run = alarmRunner();
+      if (deleteFails)
+        await expect(run.runner.alarm()).rejects.toThrow('provider delete temporarily unavailable');
+      else await run.runner.alarm();
+      expect(provider).toHaveBeenCalledTimes(1);
+      expect(cleanup).toHaveBeenCalledTimes(1);
+      expect(
+        fixture.sqlite.prepare("SELECT status,error_message FROM tasks WHERE id='task-1'").get()
+      ).toEqual({ status: 'cancelled', error_message: 'CANCELLED' });
+      expect(
+        fixture.sqlite
+          .prepare('SELECT status FROM nodes WHERE id=?')
+          .get(run.state().stepResults.nodeId)
+      ).toEqual({ status: deleteFails ? 'destroying' : 'deleted' });
+      expect(
+        fixture.sqlite.prepare('SELECT COUNT(*) AS count FROM vm_provisioning_leases').get()
+      ).toEqual({ count: 0 });
+      expect(run.state().completed).toBe(true);
+      expect(run.alarm()).toBeNull();
+      if (deleteFails) {
+        cleanup.mockImplementation(async (nodeId) => {
+          const now = new Date().toISOString();
+          fixture.sqlite
+            .prepare('UPDATE nodes SET runtime_termination_confirmed_at=? WHERE id=?')
+            .run(now, nodeId);
+          return {
+            providerVm: 'deleted',
+            runtimeTerminationConfirmedAt: now,
+            runtimeIncarnationId: (
+              fixture.sqlite
+                .prepare('SELECT runtime_incarnation_id AS id FROM nodes WHERE id=?')
+                .get(nodeId) as { id: string | null }
+            ).id,
+            providerInstanceId: 'paid-provider-instance',
+          };
+        });
+        vi.advanceTimersByTime(30 * 60 * 1000 + 1);
+        const result = emptyResult();
+        await sweepDestroyingHandoffNodes(
+          drizzle(fixture.database, { schema }),
+          fixture.rc.env,
+          new Date(),
+          resolveCleanupConfig(fixture.rc.env),
+          result
+        );
+        expect(result.lifetimeDestroyed).toBe(1);
+        expect(cleanup).toHaveBeenCalledTimes(2);
+        expect(
+          fixture.sqlite
+            .prepare('SELECT status FROM nodes WHERE id=?')
+            .get(run.state().stepResults.nodeId)
+        ).toEqual({ status: 'deleted' });
+        expect(
+          fixture.sqlite.prepare("SELECT status,error_message FROM tasks WHERE id='task-1'").get()
+        ).toEqual({ status: 'cancelled', error_message: 'CANCELLED' });
+      }
+    }
+  );
+
+  it.each(['reused', 'foreign-owner', 'user-owned', 'deployment', 'other-task-owner'])(
+    'does not delete protected %s host on cancellation',
+    async (kind) => {
+      fixture.sqlite.exec(
+        "DELETE FROM workspaces; UPDATE tasks SET auto_provisioned_node_id=NULL WHERE id='old-task'; UPDATE tasks SET status='cancelled',error_message='CANCELLED' WHERE id='task-1'"
+      );
+      fixture.state.stepResults.nodeId = 'existing-node';
+      fixture.state.stepResults.autoProvisioned = kind !== 'reused';
+      if (kind === 'foreign-owner') fixture.sqlite.exec("UPDATE nodes SET user_id='another-user'");
+      if (kind === 'user-owned') fixture.sqlite.exec("UPDATE nodes SET node_class='user-owned'");
+      if (kind === 'deployment') fixture.sqlite.exec("UPDATE nodes SET node_role='deployment'");
+      if (kind === 'other-task-owner')
+        fixture.sqlite.exec(
+          "UPDATE tasks SET auto_provisioned_node_id='existing-node' WHERE id='old-task'"
+        );
+      const cleanup = vi.spyOn(nodesService, 'deleteNodeResourcesStrict');
+      const run = alarmRunner();
+      await run.runner.alarm();
+      expect(cleanup).not.toHaveBeenCalled();
+      expect(
+        fixture.sqlite.prepare("SELECT status FROM nodes WHERE id='existing-node'").get()
+      ).toEqual({ status: 'running' });
+      expect(run.state().completed).toBe(true);
+    }
+  );
+
+  it('does not retire or delete resources owned by a newer wake when old alarm authority is revoked', async () => {
+    const run = alarmRunner();
+    const newer = structuredClone(fixture.state);
+    newer.config.recoveryAttemptId = 'newer-wake-attempt';
+    newer.stepResults.nodeId = 'newer-wake-node';
+    const cleanup = vi.spyOn(nodesService, 'deleteNodeResourcesStrict');
+    const create = vi.spyOn(nodesService, 'createNodeRecord');
+    const prepare = fixture.database.prepare.bind(fixture.database);
+    let superseded = false;
+    vi.spyOn(fixture.database, 'prepare').mockImplementation((sql: string) => {
+      if (
+        !superseded &&
+        sql.includes('SELECT id FROM tasks WHERE id = ? AND project_id = ? AND user_id = ?')
+      ) {
+        superseded = true;
+        run.replaceState(newer);
+        fixture.sqlite.exec(
+          "UPDATE tasks SET status='cancelled',error_message='CANCELLED' WHERE id='task-1'"
+        );
+      }
+      return prepare(sql);
+    });
+    await run.storage.setAlarm(Date.now() + 5000);
+    await run.runner.alarm();
+    expect(superseded).toBe(true);
+    expect(run.state()).toEqual(newer);
+    expect(run.alarm()).toBe(Date.now() + 5000);
+    expect(run.storage.deleteAlarm).not.toHaveBeenCalled();
+    expect(cleanup).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+  it.each(['lease-release', 'node-claim'])(
+    'retries cancellation cleanup after transient %s D1 failure without allocating again',
+    async (failureBoundary) => {
+      fixture.sqlite.exec(
+        "DELETE FROM workspaces; UPDATE tasks SET auto_provisioned_node_id=NULL WHERE id='old-task'; UPDATE tasks SET status='cancelled',error_message='CANCELLED',auto_provisioned_node_id='existing-node' WHERE id='task-1'; UPDATE nodes SET provider_instance_id='paid-existing-instance' WHERE id='existing-node'"
+      );
+      fixture.sqlite.exec(
+        "INSERT INTO vm_provisioning_leases(scope_key,owner_task_id,fencing_token,provider,credential_domain_key,provider_domain_key,requested_vm_size,expires_at) VALUES ('owned-scope','task-1',1,'hetzner','credential-1','domain','large','2026-10-06T00:00:00.000Z')"
+      );
+      fixture.state.stepResults.nodeId = 'existing-node';
+      fixture.state.stepResults.autoProvisioned = true;
+      fixture.state.admissionScopeKey = 'owned-scope';
+      fixture.state.admissionLeaseToken = 1;
+      const provider = vi.spyOn(nodesService, 'provisionNode');
+      const create = vi.spyOn(nodesService, 'createNodeRecord');
+      const cleanup = vi
+        .spyOn(nodesService, 'deleteNodeResourcesStrict')
+        .mockImplementation(async (nodeId) => {
+          expect(fixture.sqlite.prepare('SELECT status FROM nodes WHERE id=?').get(nodeId)).toEqual(
+            { status: 'destroying' }
+          );
+          const now = new Date().toISOString();
+          fixture.sqlite
+            .prepare(
+              "UPDATE nodes SET status='deleted',runtime_termination_confirmed_at=? WHERE id=?"
+            )
+            .run(now, nodeId);
+          return {
+            providerVm: 'deleted',
+            runtimeTerminationConfirmedAt: now,
+            runtimeIncarnationId: (
+              fixture.sqlite
+                .prepare('SELECT runtime_incarnation_id AS id FROM nodes WHERE id=?')
+                .get(nodeId) as { id: string | null }
+            ).id,
+            providerInstanceId: 'paid-existing-instance',
+          };
+        });
+      const prepare = fixture.database.prepare.bind(fixture.database);
+      let faulted = false;
+      vi.spyOn(fixture.database, 'prepare').mockImplementation((sql: string) => {
+        const matches =
+          failureBoundary === 'lease-release'
+            ? sql.includes('DELETE FROM vm_provisioning_leases')
+            : sql.includes("UPDATE nodes SET status = 'destroying'");
+        if (matches && !faulted) {
+          faulted = true;
+          throw new Error('transient cleanup D1 failure');
+        }
+        return prepare(sql);
+      });
+      const run = alarmRunner();
+      await run.storage.setAlarm(Date.now() + 1000);
+      await expect(run.runner.alarm()).rejects.toThrow('transient cleanup D1 failure');
+      expect(faulted).toBe(true);
+      expect(run.state().completed).toBe(false);
+      expect(run.storage.deleteAlarm).not.toHaveBeenCalled();
+      expect(cleanup).not.toHaveBeenCalled();
+      expect(
+        fixture.sqlite
+          .prepare("SELECT status,provider_instance_id FROM nodes WHERE id='existing-node'")
+          .get()
+      ).toEqual({ status: 'running', provider_instance_id: 'paid-existing-instance' });
+      await run.runner.alarm();
+      expect(provider).not.toHaveBeenCalled();
+      expect(create).not.toHaveBeenCalled();
+      expect(cleanup).toHaveBeenCalledExactlyOnceWith('existing-node', 'user-1', fixture.rc.env);
+      expect(
+        fixture.sqlite.prepare("SELECT status FROM nodes WHERE id='existing-node'").get()
+      ).toEqual({ status: 'deleted' });
+      expect(
+        fixture.sqlite.prepare('SELECT COUNT(*) AS count FROM vm_provisioning_leases').get()
+      ).toEqual({ count: 0 });
+      expect(
+        fixture.sqlite.prepare("SELECT status,error_message FROM tasks WHERE id='task-1'").get()
+      ).toEqual({ status: 'cancelled', error_message: 'CANCELLED' });
+      expect(run.state().completed).toBe(true);
+      expect(run.alarm()).toBeNull();
+    }
+  );
 });

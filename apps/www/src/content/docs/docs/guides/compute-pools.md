@@ -247,6 +247,10 @@ normal retention and cleanup free its slot so queued work can use a current mach
 not raise the pool limit or rent an extra replacement while the old machine still holds the slot.
 If a session cannot safely sleep, it stays awake and the capacity wait can still expire.
 
+Cancelling queued work revokes its admission authority. A later free slot cannot restart that
+task or provision a machine for it. If cancellation races a new allocation, SAM retires only
+that newly allocated empty machine, preserving occupied hosts and other placement claims.
+
 ## Exhaustion policy: what happens when nothing is available
 
 Providers run out of capacity, regions sell out, and accounts hit server limits. **Exhaustion
