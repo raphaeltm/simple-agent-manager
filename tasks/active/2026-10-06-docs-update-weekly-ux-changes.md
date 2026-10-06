@@ -314,3 +314,11 @@ since (#2180–#2240).
     - "Profile or skill sets a mode".
   - Declined: noting that a degraded-snapshot fresh start gives a **Task** conversation-mode
     requests while it keeps the Task label. It's rare, and readers can't detect or act on it.
+  - User reviewer: 1 MEDIUM, 2 LOW, all verified and fixed.
+    - MEDIUM: replies that wake a slept Task (check-in pause, expired card) don't push to its PR.
+      Fixed with a general note in the troubleshooting intro and a pointer in chat-features.
+    - LOW: `.claude/settings.json` / `.claude/settings.local.json` with
+      `permissions.disableBypassPermissionsMode: "disable"` also blocks Bypass (adapter
+      `allowBypass`, `acp-agent.js:6264`). Added to the root section.
+    - LOW: Lightweight with Task Mode Default gives Chats, so no PR. Noted in agents.md Workspace
+      Profiles and the concepts table.

@@ -58,6 +58,10 @@ runs on its own `sam/…` [output branch](/docs/guides/idea-execution/#where-the
 project **Files** tab shows its diff without opening a workspace. A chat started in the composer on
 an Instant profile has no branch of its own, and pushes only what you ask the agent to push.
 
+Several sections also tell you to reply to wake a chat. A **Task** woken this way
+[works like a Chat](/docs/guides/agents/#after-a-chat-wakes-from-sleep): SAM won't push its new work,
+so ask the agent to commit and push to its branch.
+
 ## The agent is waiting for you
 
 **Needs input** beside a chat in the session list means it is waiting for an answer. On a phone,

@@ -266,12 +266,16 @@ To check, ask the agent to run `whoami`, or run it yourself in the workspace's
 image has none, create one in its Dockerfile. Then push the change to your default branch and start
 a new chat.
 
+Claude Code also refuses Bypass Permissions when the repository's `.claude/settings.json` or
+`.claude/settings.local.json` sets `permissions.disableBypassPermissionsMode` to `"disable"`. Remove
+that setting if you want Bypass Permissions.
+
 ## Workspace Profiles
 
 An agent profile's **Workspace Profile** setting chooses how much environment its chats get:
 
 - **Full** (default) — builds your project's `.devcontainer` so the agent can run your stack, tests, and services. Best when the work depends on your real environment.
-- **Lightweight** — starts faster with a minimal environment. Best for quick questions, planning, and code exploration.
+- **Lightweight** — starts faster with a minimal environment. Best for quick questions, planning, and code exploration. With **Task Mode** left at **Default**, a Lightweight profile's sessions are Chats, so SAM doesn't commit, push, or open a pull request — see [Chat or Task](/docs/guides/chat-features/#chat-or-task).
 
 ## Agent Session Features
 
