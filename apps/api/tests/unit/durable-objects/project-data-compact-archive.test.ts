@@ -112,6 +112,22 @@ describe('compact raw transcript chunks', () => {
     expect(bucket.put).toHaveBeenCalledTimes(1);
   });
 
+  it('gives each R2 operation its own timeout so slow compression cannot starve HEAD/PUT', async () => {
+    const { bucket } = memoryR2();
+    const chunk = await fixture();
+    // Slow HEAD: resolves after 80ms, but the full timeout is 200ms.
+    // With the old shared-deadline code, compression + sha256 would eat most
+    // of the budget and the HEAD would time out on the scraps. With per-op
+    // deadlines each operation gets the full 200ms.
+    const realHead = vi.mocked(bucket.head).getMockImplementation()!;
+    vi.mocked(bucket.head).mockImplementation(
+      (key: string) => new Promise((resolve) => setTimeout(() => resolve(realHead(key)), 80))
+    );
+    await expect(writeCompactChunk(bucket, 'per-op', chunk, 200)).resolves.toBeDefined();
+    expect(bucket.head).toHaveBeenCalled();
+    expect(bucket.put).toHaveBeenCalled();
+  });
+
   it('adds compact storage metadata to an existing database without rewriting messages', () => {
     const db = new Database(':memory:');
     try {

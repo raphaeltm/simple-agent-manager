@@ -327,23 +327,25 @@ export async function writeCompactChunk(
   chunk: ProjectDataArchiveChunk,
   timeoutMs = COMPACT_ARCHIVE_DEFAULT_TIMEOUT_MS
 ): Promise<CompactChunkRef> {
-  const deadline = Date.now() + timeoutMs;
   assertIdentity(chunk, chunk);
   const text = JSON.stringify(chunk);
   const bodyBytes = new TextEncoder().encode(text).byteLength;
   if (bodyBytes > COMPACT_ARCHIVE_MAX_OBJECT_BYTES)
     throw new Error('Compact archive exceeds object byte limit');
   const key = `${prefix}/${encodeURIComponent(chunk.projectId)}/${encodeURIComponent(chunk.sessionId)}/${encodeURIComponent(chunk.migrationId)}/raw/${chunk.ordinal}.json.gz`;
+  // Compression is CPU-bound local work — give it its own budget so it cannot
+  // starve the R2 operations that follow. PR #2094 fixed the identical
+  // shared-deadline bug on the reader side; this is the writer-side counterpart.
   const compressed = await readBounded(
     responseBody(text).pipeThrough(new CompressionStream('gzip')),
     COMPACT_ARCHIVE_MAX_OBJECT_BYTES,
-    deadline
+    Date.now() + timeoutMs
   );
   const ref = { key, bytes: compressed.byteLength, bodyBytes, bodySha256: await sha256Hex(text) };
-  const existing = await timedR2(r2, key, deadline, 'head', () => r2.head(key));
+  // Each R2 operation gets the full configured timeout.
+  const existing = await timedR2(r2, key, Date.now() + timeoutMs, 'head', () => r2.head(key));
   if (!existing) {
-    // Immutable publication: concurrent retries may only win creation, never overwrite.
-    await timedR2(r2, key, deadline, 'put', () =>
+    await timedR2(r2, key, Date.now() + timeoutMs, 'put', () =>
       r2.put(key, compressed, {
         onlyIf: { etagDoesNotMatch: '*' },
         httpMetadata: { contentType: 'application/gzip' },
@@ -351,21 +353,15 @@ export async function writeCompactChunk(
       })
     );
   } else {
-    // Compression implementations may emit different gzip headers for the same input.
     ref.bytes = existing.size;
     const storedBodySha256 = existing.customMetadata?.archiveBodySha256;
     if (storedBodySha256 && storedBodySha256 !== ref.bodySha256) {
       throw new Error('Compact archive immutable object conflicts with retry payload');
     }
-    // Objects written before body hashes were added to HEAD metadata still need
-    // one compatibility read on retry. New objects never repeat decompression.
     if (!storedBodySha256) {
-      await readCompactChunk(r2, ref, chunk, Math.max(1, deadline - Date.now()));
+      await readCompactChunk(r2, ref, chunk, timeoutMs);
     }
   }
-  // The target commit immediately performs the authoritative GET/decompress/hash
-  // verification before it records a durable receipt. Re-reading here doubled
-  // every fresh copy without adding a durable boundary.
   return ref;
 }
 
@@ -375,7 +371,6 @@ export async function writeImmutableJson(
   value: unknown,
   timeoutMs = COMPACT_ARCHIVE_DEFAULT_TIMEOUT_MS
 ): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
   const text = JSON.stringify(value);
   const bytes = new TextEncoder().encode(text);
   if (bytes.byteLength > ARCHIVE_IMMUTABLE_JSON_MAX_OBJECT_BYTES) {
@@ -393,14 +388,14 @@ export async function writeImmutableJson(
       }
       return;
     }
-    const existing = await timedR2(r2, key, deadline, 'get', () => r2.get(key));
+    const existing = await timedR2(r2, key, Date.now() + timeoutMs, 'get', () => r2.get(key));
     if (!existing || existing.size !== bytes.byteLength) {
       throw new Error(`ProjectData archive immutable R2 object conflict at ${key}`);
     }
     const existingBytes = await readBounded(
       existing.body,
       ARCHIVE_IMMUTABLE_JSON_MAX_OBJECT_BYTES,
-      deadline
+      Date.now() + timeoutMs
     );
     if (
       new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(existingBytes) !== text
@@ -409,12 +404,12 @@ export async function writeImmutableJson(
     }
   };
 
-  const existing = await timedR2(r2, key, deadline, 'head', () => r2.head(key));
+  const existing = await timedR2(r2, key, Date.now() + timeoutMs, 'head', () => r2.head(key));
   if (existing) {
     await verifyExisting(existing);
     return;
   }
-  const created = await timedR2(r2, key, deadline, 'put', () =>
+  const created = await timedR2(r2, key, Date.now() + timeoutMs, 'put', () =>
     r2.put(key, bytes, {
       onlyIf: { etagDoesNotMatch: '*' },
       httpMetadata: { contentType: 'application/json' },
@@ -422,7 +417,7 @@ export async function writeImmutableJson(
     })
   );
   if (!created) {
-    const raced = await timedR2(r2, key, deadline, 'head', () => r2.head(key));
+    const raced = await timedR2(r2, key, Date.now() + timeoutMs, 'head', () => r2.head(key));
     if (!raced) throw new Error(`ProjectData archive immutable R2 object missing at ${key}`);
     await verifyExisting(raced);
   }
