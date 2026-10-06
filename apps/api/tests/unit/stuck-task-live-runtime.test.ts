@@ -486,7 +486,7 @@ describe('live-runtime record: what kept the task, and why', () => {
     expect(row.message).toContain('(now 540 min)');
   });
 
-  it('fails a real stalled turn but queues snapshot-backed sleep instead of tearing down work', async () => {
+  function seedOldActivePrompt() {
     seedTask({ startedAt: T0 - 9 * HOUR });
     seedLiveRuntime({ generationStartedAt: T0 - 9 * HOUR, nodeHeartbeatAt: T0 - 30_000 });
     seedAcpSession({ heartbeatAt: T0 - 20_000 });
@@ -500,6 +500,10 @@ describe('live-runtime record: what kept the task, and why', () => {
       observedAt: T0 - 2 * MINUTE,
       now: T0 - 2 * MINUTE,
     });
+  }
+
+  it('fails a real stalled turn but queues snapshot-backed sleep instead of tearing down work', async () => {
+    seedOldActivePrompt();
     projectDataRpc.messages = [
       {
         id: 'msg-1',
@@ -546,19 +550,7 @@ describe('live-runtime record: what kept the task, and why', () => {
 
   describe('human input is not a stalled agent', () => {
     function quietPrompt() {
-      seedTask({ startedAt: T0 - 9 * HOUR });
-      seedLiveRuntime({ generationStartedAt: T0 - 9 * HOUR, nodeHeartbeatAt: T0 - 30_000 });
-      seedAcpSession({ heartbeatAt: T0 - 20_000 });
-      upsertActivityState(doSql, ACP_ID, {
-        activity: 'prompting',
-        observedAt: T0 - 90 * MINUTE,
-        now: T0 - 90 * MINUTE,
-      });
-      upsertActivityState(doSql, ACP_ID, {
-        activity: 'prompting',
-        observedAt: T0 - 2 * MINUTE,
-        now: T0 - 2 * MINUTE,
-      });
+      seedOldActivePrompt();
       projectDataRpc.messages = [
         {
           id: 'quiet',
@@ -694,19 +686,7 @@ describe('live-runtime record: what kept the task, and why', () => {
   });
 
   it('keeps a long live prompt when transcript output is recent', async () => {
-    seedTask({ startedAt: T0 - 9 * HOUR });
-    seedLiveRuntime({ generationStartedAt: T0 - 9 * HOUR, nodeHeartbeatAt: T0 - 30_000 });
-    seedAcpSession({ heartbeatAt: T0 - 20_000 });
-    upsertActivityState(doSql, ACP_ID, {
-      activity: 'prompting',
-      observedAt: T0 - 90 * MINUTE,
-      now: T0 - 90 * MINUTE,
-    });
-    upsertActivityState(doSql, ACP_ID, {
-      activity: 'prompting',
-      observedAt: T0 - 2 * MINUTE,
-      now: T0 - 2 * MINUTE,
-    });
+    seedOldActivePrompt();
     projectDataRpc.messages = [
       {
         id: 'msg-1',
