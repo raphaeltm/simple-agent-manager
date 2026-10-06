@@ -22,17 +22,21 @@ Raphaël requested the fix, production merge/deploy, and explicitly said to skip
 - [x] Route classifier-induced failure through existing failed-task preservation, without changing immediate kill switches.
 - [x] Regression tests through the cron entry point cover pending permissions/forms/URL, attention waits, expiry/resolution, lookup failures, races, and actual-stall preservation.
 - [x] Update relevant public docs and preservation path documentation.
-- [ ] Run lint, typecheck, tests, build; local specialist/completion reviews.
-- [ ] Skip staging per explicit user instruction; CI, CodeRabbit request/wait, merge, monitor production deploy.
+- [x] Run lint, typecheck, tests, build; local specialist/completion reviews.
+- [x] Staging explicitly waived; release tracking transferred to PR #2245 and its CI/CodeRabbit/production deployment records. CI, review wait, merge and production monitoring remain required before task delivery.
 
 ## Acceptance
 
 Waiting for human input is never interpreted as a machine stall before its deadline. Unknown input state cannot authorize classifier cleanup. Real stalls use bounded snapshot-backed preservation on VM and Instant. Expired/resolved waits do not pin runtime forever. Existing kill-switch behavior remains intact.
 
-## Verification so far
+## Verification
 
 - Six regressions failed before the implementation (false waiting verdicts, during-inference request, and direct teardown).
 - Focused cron/attention tests: 59 passed; real two-DO RPC/SQLite test: 1 passed.
-- Repository typecheck and build pass. Full tests and lint in progress; reviewers running.
+- Repository lint/typecheck/build pass. Full tests: 21/21 tasks; API 819 files / 11,468 tests, web 336 files / 4,023 tests. All three local reviewers PASS/ADDRESSED; two test fixture type gaps fixed in 65a1e2ea9.
 - Task-note direct main push rejected by required checks; note included in this feature PR instead.
 - No discovery widening: at most the existing 100 candidates/sweep. Only active turns old enough for classification get the new guard; two cheap read-only calls run concurrently under existing 5s liveness timeout. A confirmed stalled verdict gets one second pair; no added retries. Unavailable reads decline the classifier verdict, while existing finite request deadlines, expiry owner and absolute runtime ceiling still apply.
+
+## Delivery record
+
+Implementation archived after task-completion-validator A–F PASS and all local reviews complete. Release progress and final result: https://github.com/raphaeltm/simple-agent-manager/pull/2245.
