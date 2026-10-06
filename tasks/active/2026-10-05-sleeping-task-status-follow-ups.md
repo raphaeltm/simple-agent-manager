@@ -98,3 +98,5 @@ Related, tracked elsewhere:
 
 - Full repository lint: 13/13 tasks PASS; full repository typecheck: 19/19 tasks PASS. Full test/build remains running with one worker/task.
 - The failed-task-preservation realistic fixture also declares taskStatusEvents; its 21 regression tests pass. This is test setup only, runtime candidate remains reviewed `7041c6a4d`.
+
+- Full root test:20/21 tasks PASS; API816/817 filesPASS with8 failures confined to old mocked session-sleep fixture missing db.insert. Corrected that fixture to model event insert-select without consuming workspace query responses; all43 tests pass on targeted rerun. Full API11387 passing tests plus targeted43/43 after correction; whole suite was not rerun yet. Runtime source unchanged.
