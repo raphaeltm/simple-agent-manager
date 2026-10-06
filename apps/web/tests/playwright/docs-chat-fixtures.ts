@@ -39,56 +39,52 @@ interface DocsChatRoutes {
   state: unknown;
 }
 
+function sessionResponse(pathname: string, data: DocsChatRoutes): unknown {
+  const detail = new RegExp(
+    `^/api/projects/${data.project.id}/sessions/([^/]+)(/messages|/state)?$`
+  ).exec(pathname);
+  if (!detail) return undefined;
+  const [, sessionId, suffix] = detail;
+  const messages = data.messages[sessionId ?? ''] ?? [];
+  if (suffix === '/state') return data.state;
+  if (suffix === '/messages') return { messages, hasMore: false };
+  const session = data.sessions.find((item) => item.id === sessionId);
+  return session ? { session, messages, hasMore: false, state: data.state } : undefined;
+}
+
+function taskResponse(pathname: string, data: DocsChatRoutes): unknown {
+  const taskMatch = new RegExp(`^/api/projects/${data.project.id}/tasks/([^/]+)$`).exec(pathname);
+  if (!taskMatch) return undefined;
+  const session = data.sessions.find((item) => item.task.id === taskMatch[1]);
+  if (!session) return undefined;
+  return {
+    ...session.task,
+    title: session.topic,
+    projectId: data.project.id,
+    workspaceId: session.workspaceId,
+    startedAt: new Date(session.startedAt).toISOString(),
+  };
+}
+
 /** Called after scene-specific routes, preserving their priority over common responses. */
-export async function fulfillDocsChatRoute(route: Route, data: DocsChatRoutes): Promise<void> {
+export function fulfillDocsChatRoute(route: Route, data: DocsChatRoutes): Promise<void> {
   const { pathname } = new URL(route.request().url());
-  const projectId = data.project.id;
-  const json = (body: unknown) => route.fulfill({ status: 200, json: body });
-
-  if (pathname.startsWith('/api/auth')) return json(data.user);
-  if (pathname === '/api/projects') return json({ projects: [data.project], nextCursor: null });
-  if (pathname === `/api/projects/${projectId}`) return json(data.project);
-  if (pathname === `/api/projects/${projectId}/sessions`) {
-    return json({ sessions: data.sessions, total: data.sessions.length });
-  }
-
-  const detail = pathname.match(
-    new RegExp(`^/api/projects/${projectId}/sessions/([^/]+)(/messages|/state)?$`)
-  );
-  if (detail) {
-    const [, sessionId, suffix] = detail;
-    const session = data.sessions.find((item) => item.id === sessionId);
-    const messages = data.messages[sessionId ?? ''] ?? [];
-    if (suffix === '/state') return json(data.state);
-    if (suffix === '/messages') return json({ messages, hasMore: false });
-    if (session) return json({ session, messages, hasMore: false, state: data.state });
-  }
-
-  // The chat re-reads its task on open; return its real status to avoid a starting banner.
-  const taskMatch = pathname.match(new RegExp(`^/api/projects/${projectId}/tasks/([^/]+)$`));
-  if (taskMatch) {
-    const session = data.sessions.find((item) => item.task.id === taskMatch[1]);
-    if (session) {
-      return json({
-        ...session.task,
-        title: session.topic,
-        projectId,
-        workspaceId: session.workspaceId,
-        startedAt: new Date(session.startedAt).toISOString(),
-      });
-    }
-  }
-
-  if (pathname === '/api/report-issue/config') return json({ enabled: false });
-  if (pathname === `/api/projects/${projectId}/comment-threads`) {
-    return json({ threads: [], total: 0 });
-  }
-  if (pathname === `/api/projects/${projectId}/members`) return json({ members: [] });
-  if (pathname === `/api/projects/${projectId}/agent-profiles`) return json({ items: [] });
-  if (pathname === `/api/projects/${projectId}/tasks`) return json({ tasks: [], total: 0 });
-  if (pathname === '/api/agents') return json({ agents: [] });
-  if (pathname.startsWith('/api/notifications')) return json([]);
-  if (pathname.startsWith('/api/credentials')) return json([]);
-  if (pathname === '/api/github/installations') return json([]);
-  return json({});
+  const projectPath = `/api/projects/${data.project.id}`;
+  const responses: Record<string, unknown> = {
+    '/api/projects': { projects: [data.project], nextCursor: null },
+    [projectPath]: data.project,
+    [`${projectPath}/sessions`]: { sessions: data.sessions, total: data.sessions.length },
+    '/api/report-issue/config': { enabled: false },
+    [`${projectPath}/comment-threads`]: { threads: [], total: 0 },
+    [`${projectPath}/members`]: { members: [] },
+    [`${projectPath}/agent-profiles`]: { items: [] },
+    [`${projectPath}/tasks`]: { tasks: [], total: 0 },
+    '/api/agents': { agents: [] },
+    '/api/github/installations': [],
+  };
+  let body: unknown;
+  if (pathname.startsWith('/api/auth')) body = data.user;
+  else if (pathname.startsWith('/api/notifications') || pathname.startsWith('/api/credentials')) body = [];
+  else body = responses[pathname] ?? sessionResponse(pathname, data) ?? taskResponse(pathname, data) ?? {};
+  return route.fulfill({ status: 200, json: body });
 }
