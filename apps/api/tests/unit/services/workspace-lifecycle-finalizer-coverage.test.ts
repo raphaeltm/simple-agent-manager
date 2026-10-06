@@ -63,6 +63,8 @@ const SHARED_FINALIZER_ROUTE_SYMBOLS = [
  * decision that future deletion writers must not copy blindly.
  */
 const ALLOWLIST: Record<string, string> = {
+  'durable-objects/task-runner/task-execution-authority.ts':
+    'Cancelled allocation compensation claims only this runner’s newly allocated empty managed host, excluding active reservations, other task ownership and live placement claims. Strict teardown closes no active workspace; the destroying-node handoff sweep owns final D1 node closure. This exception permits only the strict external-delete primitive, not terminal row writes.',
   'durable-objects/task-runner/node-provisioning-rejected-node.ts':
     'Deletes a freshly-created D1 node row only after the provider rejected its create (capacity or account quota) and only while provider_instance_id IS NULL, before any workspace or agent_session exists.',
   'scheduled/session-snapshot-purge.ts':
@@ -82,6 +84,7 @@ const ALLOWLIST: Record<string, string> = {
 // Extraction must not turn provisioning compensation into a blanket exemption
 // for future terminal workspace writes in either module.
 const PROVISIONING_COMPENSATION_KINDS: Record<string, ReadonlySet<string>> = {
+  'durable-objects/task-runner/task-execution-authority.ts': new Set(['strict_node_delete_helper']),
   'durable-objects/task-runner/node-provisioning-rejected-node.ts': new Set([
     'workspace_or_node_sql_delete',
   ]),
@@ -229,6 +232,24 @@ describe('workspace/node terminal writers route through shared lifecycle finaliz
       for (const relative of Object.keys(PROVISIONING_COMPENSATION_KINDS)) {
         expect(isAllowlistedWriter(relative, evidence)).toBe(false);
       }
+    }
+  });
+
+  it('limits cancelled allocation compensation to strict external teardown and rejects terminal node writes', () => {
+    const relative = 'durable-objects/task-runner/task-execution-authority.ts';
+    const teardown = 'await deleteNodeResourcesStrict(nodeId, userId, env);';
+    expect(isAllowlistedWriter(relative, findTerminalWriterEvidence(teardown))).toBe(true);
+    for (const terminalWrite of [
+      "await db.update(schema.nodes).set({ status: 'deleted' });",
+      'await db.delete(schema.nodes);',
+      "await env.DATABASE.prepare('DELETE FROM nodes WHERE id = ?').bind(id).run();",
+      'await env.DATABASE.prepare("UPDATE nodes SET status=\'deleted\' WHERE id=?").bind(id).run();',
+      'await deleteNodeResources(nodeId, userId, env);',
+      'await cleanupWorkspaceForDeletion(env, workspaceId);',
+    ]) {
+      const evidence = findTerminalWriterEvidence(`${teardown} ${terminalWrite}`);
+      expect(evidence.length).toBeGreaterThanOrEqual(2);
+      expect(isAllowlistedWriter(relative, evidence)).toBe(false);
     }
   });
 
