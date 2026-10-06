@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
-  DEFAULT_D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT,
   type D1MigrationSafetyRunner,
   type D1TableCount,
+  DEFAULT_D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT,
   discoverProtectedTables,
   parseAllowlist,
   parseChurningTableMaxDecreasePercent,
@@ -16,17 +16,24 @@ import {
 class FakeRunner implements D1MigrationSafetyRunner {
   public readonly commands: string[] = [];
   private readonly migrationCountsByDb = new Map<string, number>();
+  private readonly migrationNamesByDb: Record<string, Set<string>>;
 
   constructor(
     private readonly tablesByDb: Record<string, string[] | string[][]>,
     private readonly countsByDbAndTable: Record<string, number[]>,
-    private readonly pendingMigrationsByDb: Record<string, number> = {}
+    private readonly pendingMigrationsByDb: Record<string, number> = {},
+    migrationNamesByDb: Record<string, string[]> = {},
+    private readonly columnsByDbAndTable: Record<string, string[]> = {}
   ) {
+    this.migrationNamesByDb = Object.fromEntries(
+      Object.entries(migrationNamesByDb).map(([db, names]) => [db, new Set(names)])
+    );
     for (const [database, configuredTables] of Object.entries(tablesByDb)) {
       const firstTables = Array.isArray(configuredTables[0])
         ? (configuredTables[0] as string[])
         : (configuredTables as string[]);
       this.migrationCountsByDb.set(database, firstTables.includes('d1_migrations') ? 100 : 0);
+      this.migrationNamesByDb[database] ??= new Set();
     }
   }
 
@@ -41,6 +48,24 @@ class FakeRunner implements D1MigrationSafetyRunner {
         ? ((configured as string[][]).shift() ?? [])
         : (configured as string[]);
       return [{ results: tables.map((name) => ({ name })) }];
+    }
+
+    if (sql.includes('FROM "d1_migrations"') && sql.includes('WHERE name IN')) {
+      const requestedNames = [...sql.matchAll(/'([^']+)'/g)].map((match) => match[1]);
+      const appliedNames = this.migrationNamesByDb[dbName] ?? new Set<string>();
+      return [
+        {
+          results: requestedNames
+            .filter((name) => appliedNames.has(name))
+            .map((name) => ({ name })),
+        },
+      ];
+    }
+
+    const tableInfoMatch = sql.match(/PRAGMA table_info\("([^"]+)"\)/);
+    if (tableInfoMatch) {
+      const key = `${dbName}:${tableInfoMatch[1]}`;
+      return [{ results: (this.columnsByDbAndTable[key] ?? []).map((name) => ({ name })) }];
     }
 
     const countMatch = sql.match(/SELECT COUNT\(\*\) as count FROM "([^"]+)"/);
@@ -59,6 +84,20 @@ class FakeRunner implements D1MigrationSafetyRunner {
 
   execute(command: string, args: string[]): void {
     this.commands.push([command, ...args].join(' '));
+    if (args.includes('execute')) {
+      const dbName = args[4];
+      const sql = args.at(-2) ?? '';
+      const insertMatch = sql.match(
+        /INSERT INTO "d1_migrations" \(name, applied_at\)[\s\S]*SELECT '([^']+)'/
+      );
+      if (insertMatch && !(this.migrationNamesByDb[dbName] ?? new Set()).has(insertMatch[1])) {
+        this.migrationNamesByDb[dbName] ??= new Set();
+        this.migrationNamesByDb[dbName].add(insertMatch[1]);
+        this.migrationCountsByDb.set(dbName, (this.migrationCountsByDb.get(dbName) ?? 0) + 1);
+      }
+      return;
+    }
+
     if (args.includes('migrations') && args.includes('apply')) {
       const dbName = args[5];
       const applied = this.pendingMigrationsByDb[dbName] ?? 1;
@@ -195,6 +234,82 @@ describe('D1 migration safety gates', () => {
     );
   });
 
+  it('records the corrected workspace eviction migration when staging already has the old filename and columns', () => {
+    const runner = new FakeRunner(
+      { main: ['d1_migrations', 'workspaces'] },
+      { 'main:workspaces': [2] },
+      { main: 0 },
+      { main: ['0157_workspace_eviction_fencing.sql'] },
+      {
+        'main:workspaces': [
+          'id',
+          'eviction_generation',
+          'eviction_finalized_at',
+          'stop_runtime_confirmed_at',
+        ],
+      }
+    );
+
+    runSafeRemoteMigrations({
+      environment: 'staging',
+      databases: [{ binding: 'DATABASE', name: 'main' }],
+      runner,
+    });
+
+    expect(runner.commands.join('\n')).toContain('INSERT INTO "d1_migrations" (name, applied_at)');
+    expect(runner.commands.join('\n')).toContain('0164_workspace_eviction_fencing.sql');
+    expect(runner.commands.filter((command) => command.includes('migrations apply'))).toHaveLength(
+      1
+    );
+  });
+
+  it('does not record the corrected workspace eviction migration without the legacy ledger entry', () => {
+    const runner = new FakeRunner(
+      { main: ['d1_migrations', 'workspaces'] },
+      { 'main:workspaces': [2] },
+      { main: 0 },
+      {},
+      {
+        'main:workspaces': [
+          'id',
+          'eviction_generation',
+          'eviction_finalized_at',
+          'stop_runtime_confirmed_at',
+        ],
+      }
+    );
+
+    runSafeRemoteMigrations({
+      environment: 'staging',
+      databases: [{ binding: 'DATABASE', name: 'main' }],
+      runner,
+    });
+
+    expect(runner.commands.join('\n')).not.toContain(
+      'INSERT INTO "d1_migrations" (name, applied_at)'
+    );
+  });
+
+  it('does not record the corrected workspace eviction migration when a required column is missing', () => {
+    const runner = new FakeRunner(
+      { main: ['d1_migrations', 'workspaces'] },
+      { 'main:workspaces': [2] },
+      { main: 0 },
+      { main: ['0157_workspace_eviction_fencing.sql'] },
+      { 'main:workspaces': ['id', 'eviction_generation', 'eviction_finalized_at'] }
+    );
+
+    runSafeRemoteMigrations({
+      environment: 'staging',
+      databases: [{ binding: 'DATABASE', name: 'main' }],
+      runner,
+    });
+
+    expect(runner.commands.join('\n')).not.toContain(
+      'INSERT INTO "d1_migrations" (name, applied_at)'
+    );
+  });
+
   it('parses only JSON arrays for CLI decrease allowlists', () => {
     expect(parseAllowlist(undefined)).toEqual([]);
     expect(() => parseAllowlist('{"database":"main"}')).toThrow(/must be a JSON array/);
@@ -205,8 +320,10 @@ describe('D1 migration safety gates', () => {
     expect(parseChurningTableSelectors(undefined)).toEqual(
       expect.arrayContaining([
         'DATABASE.deployment_releases',
+        'DATABASE.diagnostic_reconciliation_state',
         'DATABASE.session_snapshots',
         'DATABASE.project_files',
+        'DATABASE.vm_provisioning_leases',
       ])
     );
     expect(parseChurningTableSelectors(undefined)).toContain(
@@ -232,20 +349,23 @@ describe('D1 migration safety gates', () => {
     expect(() => parseChurningTableMaxDecreasePercent('not-a-number')).toThrow(/between 0 and 100/);
   });
 
-  it.each(['deployment_releases', 'session_snapshots', 'project_files'])(
-    'accepts routine retention churn for reviewed DATABASE.%s',
-    (table) => {
-      expect(() =>
-        verifyNoUnexpectedProtectedTableDecrease(
-          [count('main', 'DATABASE', table, 10)],
-          [count('main', 'DATABASE', table, 5)],
-          [],
-          [`DATABASE.${table}`],
-          50
-        )
-      ).not.toThrow();
-    }
-  );
+  it.each([
+    'deployment_releases',
+    'diagnostic_reconciliation_state',
+    'session_snapshots',
+    'project_files',
+    'vm_provisioning_leases',
+  ])('accepts routine retention churn for reviewed DATABASE.%s', (table) => {
+    expect(() =>
+      verifyNoUnexpectedProtectedTableDecrease(
+        [count('main', 'DATABASE', table, 10)],
+        [count('main', 'DATABASE', table, 5)],
+        [],
+        [`DATABASE.${table}`],
+        50
+      )
+    ).not.toThrow();
+  });
 
   it('blocks a churning-table decrease above the configured percentage limit', () => {
     expect(() =>

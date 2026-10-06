@@ -1,5 +1,22 @@
 # Simplify Deploy Scripts and Infrastructure
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:**
+>   - Naming source of truth: `DEPLOYMENT_CONFIG` in `scripts/deploy/config.ts:39-108`.
+>   - The tail-worker first-deploy marker moved off `/tmp` into an injectable `.wrangler/` state
+>     dir (`scripts/deploy/sync-wrangler-config.ts:51,141-155`).
+>   - Deploy scripts have unit tests (`scripts/quality/sync-wrangler-config.test.ts` and
+>     siblings); `setup-local-dev.ts` uses `--json` for its list calls (lines 55, 84).
+> - **Still open:**
+>   - Split `sync-wrangler-config.ts` (now 1,444 lines, was 274; its FILE SIZE EXCEPTION points
+>     at `2026-04-03-split-oversized-files.md`, which does not list it), `types.ts` (526 lines)
+>     and `utils/github.ts` (465 lines).
+>   - Trim the logger (30 exports); replace the four cloned validators
+>     (`utils/config.ts:125-182`) with one Zod wrapper; stop regex-parsing create output
+>     (`setup-local-dev.ts:48,77`).
+>   - DNS record factory (`infra/resources/dns.ts:9,19,34,45`); a shared `AppError` class.
+
 **Status:** backlog
 **Priority:** low
 **Estimated Effort:** 3 days

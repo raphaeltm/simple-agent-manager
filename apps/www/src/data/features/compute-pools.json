@@ -1,0 +1,61 @@
+{
+  "slug": "compute-pools",
+  "label": "Compute Pools & Cost Reporting",
+  "title": "Pick your clouds.\nSee what they cost.",
+  "subtitle": "Build a compute pool from real, provider-native machines across seven clouds. Track token and compute usage per user, with budgets and quotas that keep spend predictable.",
+  "summary": "Real multi-cloud machines with a placement strategy, plus per-user token and compute usage reporting.",
+  "highlights": [
+    "Pools are built from each connected credential’s live catalog — concrete SKUs like cx33 or PRO2-S with real vCPU, RAM, disk, and price",
+    "Project, user, and installation scopes, resolved in that order",
+    "Strategy (Balanced, Pack, Spread, Smallest fit) and exhaustion policy (Queue, Fail, Fallback chain) per pool",
+    "Nodes are reused when they fit and stay warm for 30 minutes",
+    "Settings → Usage tracks token spend by model and day against a monthly budget; Admin → Costs and Admin → Usage cover the whole installation"
+  ],
+  "docsHref": "/docs/guides/compute-pools/",
+  "group": "run",
+  "screenshots": [
+    {
+      "src": "/images/features/sam-compute-pool-editor.png",
+      "alt": "Project Infrastructure compute pool editor showing a pool with strategy Pack, exhaustion policy Fallback Chain, three sources and seven allowed instances, with allowed offerings from Hetzner, Scaleway, and Vultr listing vCPU, RAM, disk, location, and monthly price, and a sold-out Hetzner offering marked unavailable",
+      "caption": "Choose exactly which machines SAM may rent, from every connected provider’s real catalog"
+    }
+  ],
+  "details": [
+    {
+      "headline": "Real machines, not size labels",
+      "body": "A compute pool lists the actual provider-native offerings it is allowed to rent — cx33, PRO2-S, vc2-4c-8gb, and more — across Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, and GCP, each with its real vCPU, RAM, disk, and price. Browse each provider’s full catalog, filter by provider, region, vCPU, RAM, or price, and add a machine type without leaving the page. You choose the strategy (Balanced, Pack, Spread, Smallest fit) and what happens when a provider runs out (Queue, Fail, Fallback chain).",
+      "screenshot": {
+        "src": "/images/features/sam-compute-offerings-manager.png",
+        "alt": "Catalog filters for provider, region, minimum vCPU, minimum RAM, maximum price, and availability above the Add instances from catalog list, where Hetzner offerings are marked Already allowed, Region sold out, Catalog only with an Add button, or Not selected",
+        "caption": "Filter a provider’s live catalog and add the exact instance types you want in the pool"
+      }
+    },
+    {
+      "headline": "See why a node was chosen",
+      "body": "Resource requirements resolve from task, trigger, skill, and agent profile down to project and platform defaults. The chat’s infrastructure panel shows the resolved requirement alongside the placement decision — which node won, and why.",
+      "screenshot": {
+        "src": "/images/features/sam-compute-placement-decision.png",
+        "alt": "Chat session details showing the requested vCPU, memory, and disk, the observed and configured hardware, the current compute pool with its strategy, and a saved placement decision explaining why a warm Hetzner node was reused",
+        "caption": "Every placement decision is explained, not just made"
+      }
+    },
+    {
+      "headline": "One fleet, every provider",
+      "body": "The Nodes page lists every machine across every connected provider side by side, with health, CPU/memory/disk usage, and price. Follow-up work reuses a warm node instead of waiting on a fresh boot.",
+      "screenshot": {
+        "src": "/images/features/sam-nodes-multi-provider.png",
+        "alt": "Nodes page listing Hetzner, Scaleway, and Vultr machines side by side with status, health, observed and configured hardware, offering price, CPU, memory, and disk usage, and the workspaces on each",
+        "caption": "One fleet view across every connected cloud provider"
+      }
+    },
+    {
+      "headline": "Token and compute usage, per user",
+      "body": "Settings → Usage shows your AI usage by model and by day, against a monthly budget, for traffic routed through the SAM AI proxy. It also tracks your compute usage in node-hours against your quota. Admins get the installation-wide view — LLM spend by model, day, and user with a projection, plus per-user node usage — in Admin → Costs and Admin → Usage.",
+      "screenshot": {
+        "src": "/images/features/sam-usage-tokens.png",
+        "alt": "Settings → Usage page showing total cost, requests, and input and output tokens, a per-model breakdown, a daily cost trend, and budget controls with daily token limits and a monthly cost cap",
+        "caption": "Token usage by model and by day, against a monthly budget"
+      }
+    }
+  ]
+}

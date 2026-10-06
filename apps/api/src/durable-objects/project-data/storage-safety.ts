@@ -9,14 +9,8 @@
  * - a bounded, explicit emergency purge of low-value event logs.
  */
 import { createModuleLogger, serializeError } from '../../lib/logger';
-import {
-  type ProjectDataEventLogCleanupResult,
-  readProjectDataEventLogCleanupRecheckAt,
-} from './event-log-cleanup';
-import {
-  type ProjectDataGroupedFtsCleanupResult,
-  readProjectDataGroupedFtsCleanupRecheckAt,
-} from './grouped-fts-cleanup';
+import type { ProjectDataEventLogCleanupResult } from './event-log-cleanup';
+import type { ProjectDataGroupedFtsCleanupResult } from './grouped-fts-cleanup';
 import { runProjectDataStorageSafetyAlarmCore } from './storage-alarm';
 import {
   type ProjectDataStorageCategoryBreakdown,
@@ -41,8 +35,6 @@ import {
 import {
   DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX,
   type ProjectDataToolPayloadCleanupResult,
-  readProjectDataToolPayloadArchiveLastRunAt,
-  readProjectDataToolPayloadCleanupRecheckAt,
 } from './tool-payload-cleanup';
 import {
   DEFAULT_TOOL_PAYLOAD_CLEANUP_BATCH_MANIFEST_MAX_BYTES,
@@ -638,43 +630,6 @@ async function buildTelemetry(
   return enrichProjectDataStorageTelemetry(sql, env, baseTelemetry, config, options);
 }
 
-export function computeStorageSafetyAlarmTime(
-  sql: SqlStorage,
-  env: Env,
-  now: number = Date.now()
-): number | null {
-  const config = resolveStorageSafetyConfig(env);
-  if (!config.enabled) return null;
-  if (!readMeta(sql, 'projectId')) return null;
-  const lastMeasuredAt = readMetaNumber(sql, META_LAST_MEASURED_AT);
-  const measureAt = lastMeasuredAt === null ? now : lastMeasuredAt + config.measureIntervalMs;
-  const cleanupRecheckAt = config.toolPayloadCleanupEnabled
-    ? readProjectDataToolPayloadCleanupRecheckAt(sql)
-    : null;
-  const archiveLastRunAt = config.toolPayloadCleanupEnabled
-    ? readProjectDataToolPayloadArchiveLastRunAt(sql)
-    : null;
-  let archiveRunAt: number | null = null;
-  if (config.toolPayloadCleanupEnabled) {
-    archiveRunAt =
-      archiveLastRunAt === null ? now : archiveLastRunAt + config.toolPayloadArchiveIntervalMs;
-  }
-  const groupedFtsCleanupRecheckAt = config.groupedFtsCleanupEnabled
-    ? readProjectDataGroupedFtsCleanupRecheckAt(sql)
-    : null;
-  const eventLogCleanupRecheckAt = config.eventLogCleanupEnabled
-    ? readProjectDataEventLogCleanupRecheckAt(sql)
-    : null;
-  return Math.min(
-    measureAt,
-    ...[
-      cleanupRecheckAt,
-      archiveRunAt,
-      groupedFtsCleanupRecheckAt,
-      eventLogCleanupRecheckAt,
-    ].filter((value): value is number => value !== null)
-  );
-}
 
 export function shouldMeasureProjectDataStorage(
   sql: SqlStorage,
@@ -763,3 +718,7 @@ export async function runProjectDataStorageEmergencyPurge(
     buildTelemetry,
   });
 }
+
+// `computeStorageSafetyAlarmTime` lives in `./storage-safety-alarm-time`. It is deliberately NOT
+// re-exported here: that module imports `resolveStorageSafetyConfig` from this file, so a
+// re-export would close an import cycle for the sake of saving two consumers an import path.

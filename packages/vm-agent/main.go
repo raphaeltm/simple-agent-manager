@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/workspace/vm-agent/internal/bootlog"
-	"github.com/workspace/vm-agent/internal/bootstrap"
 	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/deploy"
 	"github.com/workspace/vm-agent/internal/errorreport"
@@ -62,10 +61,10 @@ func runStandaloneMode(cfg *config.Config) {
 		os.Exit(1)
 	}
 
-	// Configure git to authenticate GitHub operations using the per-session
-	// GH_TOKEN injected into the agent environment. Without this, the agent's
-	// `git` commands prompt for a username and fail in the non-interactive
-	// container. Non-fatal — the agent can still run without git access.
+	// Configure git and gh to authenticate by exchanging through the local
+	// vm-agent endpoint. Without this, the agent's `git` commands prompt for a username
+	// and fail in the non-interactive container. Non-fatal — the agent can still
+	// run without git access.
 	server.ConfigureStandaloneGitCredentialHelper(cfg.GitCredentialTimeout)
 
 	sigCh := make(chan os.Signal, 1)
@@ -204,8 +203,9 @@ func runDeploymentMode(cfg *config.Config) {
 	srv.SendNodeReady()
 
 	// Wait for shutdown signal or fatal server error.
-	// The heartbeat loop (started by the server) checks for pendingReleaseSeq
-	// and triggers FetchAndApply via the deploy engine.
+	// The heartbeat loop (started by the server) checks for pending releases
+	// advertised in the heartbeat response and triggers FetchAndApply via the
+	// deploy engine.
 	select {
 	case err := <-errCh:
 		slog.Error("Server error", "error", err)
@@ -247,7 +247,9 @@ func runWorkspaceMode(cfg *config.Config) {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	// Start server in goroutine — HTTP is available immediately.
+	// Register the build barrier before HTTP can accept dynamic workspaces.
+	finishSystemProvisioning := srv.BeginSystemProvisioning()
+	// Start server in goroutine — HTTP liveness and boot logs are available immediately.
 	errCh := make(chan error, 1)
 	go func() {
 		if err := srv.Start(); err != nil {
@@ -262,6 +264,7 @@ func runWorkspaceMode(cfg *config.Config) {
 		CFIPFetchTimeout: fmt.Sprintf("%.0f", cfg.CFIPFetchTimeout.Seconds()),
 	}, srv.GetEventStore())
 	provisionCancel()
+	finishSystemProvisioning(provisionErr)
 
 	if provisionErr != nil {
 		slog.Error("System provisioning failed", "error", provisionErr,
@@ -272,20 +275,21 @@ func runWorkspaceMode(cfg *config.Config) {
 			"duration", provisionStatus.CompletedAt.Sub(provisionStatus.StartedAt).Round(time.Millisecond))
 	}
 
-	// Send node-ready callback AFTER provisioning.
-	srv.SendNodeReady()
-
-	// Run bootstrap (blocks until workspace is provisioned).
-	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), cfg.BootstrapTimeout)
-	defer bootstrapCancel()
-
-	if err := bootstrap.Run(bootstrapCtx, cfg, reporter); err != nil {
-		slog.Error("Bootstrap failed", "error", err)
-		os.Exit(1)
+	// Failed host setup must not advertise readiness for workspace builds.
+	if provisionErr == nil {
+		srv.SendNodeReady()
 	}
 
-	// Propagate callback token (obtained during bootstrap) to all subsystems
-	srv.UpdateAfterBootstrap(cfg)
+	// Legacy token bootstrap performs Docker work too. Keep failed hosts available
+	// for diagnostics without letting that path bypass the dynamic-workspace gate.
+	if provisionErr == nil {
+		bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), cfg.BootstrapTimeout)
+		defer bootstrapCancel()
+		if err := srv.BootstrapWorkspace(bootstrapCtx, cfg, reporter); err != nil {
+			slog.Error("Bootstrap failed", "error", err)
+			os.Exit(1)
+		}
+	}
 
 	// Wait for shutdown signal or fatal server error.
 	select {

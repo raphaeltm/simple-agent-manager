@@ -12,7 +12,7 @@ Report Issue redaction also uses a local pattern set that misses bare underscore
 - `sanitizeUserInput()` can preserve backticks and newlines, so it is insufficient for values placed outside the untrusted evidence fence.
 - `apps/api/src/services/observability.ts` has a reusable `redactSensitiveData()` helper with stronger PAT redaction than the local Report Issue helper, but it does not yet cover bare `ghp_...` tokens shorter than GitHub's current full token length.
 - `apps/api/src/services/platform-feedback-triage.ts` currently pins `group.summary` to `Recurring <source> platform error`; this is safe outside the fence only if it remains attacker-independent.
-- `tasks/active/2026-07-30-harden-feedback-idea-boundaries.md` remains active on main with validation/review/PR items unchecked even though PR #1702 merged.
+- `tasks/archive/2026-07-30-harden-feedback-idea-boundaries.md` remains active on main with validation/review/PR items unchecked even though PR #1702 merged.
 
 ## Implementation Checklist
 

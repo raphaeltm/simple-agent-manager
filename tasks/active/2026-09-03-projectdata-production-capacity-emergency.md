@@ -155,10 +155,13 @@ uncertain states must fail closed.
 - [ ] Coordinate a successful staging deployment, exercise the real preflight
       and archival path end to end, prove fail-closed behavior, and return staging
       to zero VMs at rest.
-- [ ] Open the PR, converge CI and CodeRabbit, merge, deploy production, and
+- [x] Open the PR, converge CI and CodeRabbit, merge, deploy production, and
       verify the exact deployed version before asking for mutation approval.
-- [ ] Present the exact production mutation plan and obtain Raphaël's explicit
+      (PR #2014 merged 2026-09-04.)
+- [x] Present the exact production mutation plan and obtain Raphaël's explicit
       approval before any destructive production operation.
+      (Plan `prod-p0-projectdata-01khrjganbbwgdy1nz0kvf0d4j-20260904` is armed in the
+      GitHub `production` Environment with its approved manifest SHA and bounded caps.)
 - [ ] Execute only the approved bounded plan, verify every archive before source
       deletion, stop at or below 90%, and abort on any uncertainty or stop trigger.
 - [ ] Observe storage/growth, archive integrity, errors/overload/CPU, and rows
@@ -544,12 +547,12 @@ catches before any structural assertion runs, so the parsers were never reached.
 
 ## References
 
-- `tasks/active/2026-08-31-projectdata-terminal-archive-sharding.md`
-- `tasks/active/2026-09-01-archive-sharding-rollout-controls.md`
-- `tasks/active/2026-09-02-manual-projectdata-cleanup-and-sharding-cadence.md`
-- `tasks/active/2026-08-26-projectdata-tool-payload-r2-archival.md`
-- `tasks/active/2026-08-27-projectdata-retention-convergence.md`
-- `tasks/active/2026-08-31-projectdata-pre-wall-storage-relief.md`
+- `tasks/archive/2026-08-31-projectdata-terminal-archive-sharding.md`
+- `tasks/archive/2026-09-01-archive-sharding-rollout-controls.md`
+- `tasks/archive/2026-09-02-manual-projectdata-cleanup-and-sharding-cadence.md`
+- `tasks/archive/2026-08-26-projectdata-tool-payload-r2-archival.md`
+- `tasks/archive/2026-08-27-projectdata-retention-convergence.md`
+- `tasks/archive/2026-08-31-projectdata-pre-wall-storage-relief.md`
 - `tasks/archive/2026-07-02-institutionalize-projectdata-wall-time-prevention.md`
 - `apps/api/src/scheduled/project-data-archive-sharding.ts`
 - `apps/api/src/services/project-data-archive-rollout-controls.ts`
@@ -561,3 +564,146 @@ catches before any structural assertion runs, so the parsers were never reached.
 - `.claude/rules/31-migration-safety.md`
 - `.claude/rules/47-control-loop-io-budget.md`
 - `.claude/rules/60-request-io-and-bundle-budgets.md`
+
+---
+
+## Reconciliation — 2026-09-23 (weekly queue audit)
+
+**Verdict: stays active.** This is the only task file left in `tasks/active/`. Everything else
+was archived because its work shipped; this one has not met its own headline acceptance
+criterion.
+
+Proven done (evidence gathered 2026-09-23):
+
+- PR #2014 merged 2026-09-04 and deployed. The relief/preflight code path is live.
+- The GitHub `production` Environment carries the full approved plan:
+  `PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_ENABLED=true`,
+  `…_PLAN_ID=prod-p0-projectdata-01khrjganbbwgdy1nz0kvf0d4j-20260904`,
+  `…_PROJECT_ID=01KHRJGANBBWGDY1NZ0KVF0D4J`, plus every bounded cap
+  (`MAX_ROWS=10000000`, `MAX_BYTES=1250000000`, `MAX_BATCHES=3000`).
+  Read via `gh api repos/raphaeltm/simple-agent-manager/environments/production/variables`,
+  not from `wrangler.toml` — per `.claude/rules/70`, the Environment value is what ships.
+
+Still open — this is why the file stays here:
+
+- Headline acceptance is `sql.databaseSize` **≤ 9,000,000,000 bytes**. The production root
+  ProjectData DO measured **10,103,668,736 bytes** at 2026-09-23 21:48Z, status `degraded`.
+  It is _above_ the configured 10^10 limit, not below the 9 GB target — the gap has widened
+  since this task was written.
+- The post-operation observation window has therefore never been satisfied.
+
+Current live threads that will actually move this number (do not duplicate them here):
+
+- Archive copy reliability **Slice A** — PR #2133, merged 2026-09-23 (`f5ff1e662`).
+- Exhaustive archive search **Slice B** — PR #2136, open as of 2026-09-23.
+- **Slice C** (bounded root history indexing) — queued behind B.
+- Two poisoned SAM migrations (`67927ce6`, `6d6f3099`) are excluded from the drain until
+  abandoned via `POST …/archive-sharding/migrations/:id/abandon`. There is no Admin UI
+  button for abandon yet (the _close breaker_ button shipped in PR #2135).
+- Drain rate after the breaker was closed on 2026-09-23 is roughly **1 session/hour**
+  (sweep budget 8 sessions / 10k messages per hour) against 3,751 remaining terminal
+  sessions. At that rate the backlog does not clear on its own.
+
+Close this task when production `sql.databaseSize` is measured at or below 9 GB and the
+observation window in the acceptance criteria above has been recorded.
+
+## Reconciliation — 2026-09-30 (weekly queue audit)
+
+**Verdict: stays active.** The headline criterion is further from met than a week ago, and the
+drain that was supposed to move it has been stopped since 2026-09-27.
+
+Measured 2026-09-30 (read-only production D1):
+
+- `project_data_storage_telemetry` for `01KHRJGANBBWGDY1NZ0KVF0D4J`: **10,297,155,584 bytes**
+  (usage ratio 1.0297, status `degraded`) at 05:34Z. That is up from 10,103,668,736 at the
+  2026-09-23 audit and 10,124 MB on the morning of 2026-09-29.
+- `project_data_archive_circuit_breakers`: SAM's breaker is **`open`** with reason
+  `attempts_exhausted:CompactArchiveTimeoutError`, opened 2026-09-27 16:47:58Z and never closed.
+  The last SAM archive publish was 2026-09-27 14:08:35Z. Other projects had published 172
+  archives since the breaker opened (as of about 05:40Z), so the sweep itself is healthy.
+- SAM archive migrations: 322 `published`, 23 `frozen`, 3 `failed` (`156046f1`, `5ed87b67`,
+  `ff721a49`, all 2026-09-27) and 2 `poisoned` (`6d6f3099` since 2026-09-15, and `5f82299c`, the
+  one that opened the breaker).
+
+What changed since the last audit:
+
+- Slice B, exhaustive archive search: PR #2136, merged 2026-09-27.
+- Abandon-migration control in Admin → Storage: PR #2140, merged 2026-09-24.
+- Drain tripled (18-minute sweep cadence, 2.4M daily write budget): PR #2161, merged 2026-09-27
+  05:12Z. Its own 48-hour rollback trigger includes "the breaker opening"; the breaker opened
+  eleven hours later and the trigger was never acted on.
+- Slice C (bounded root history indexing): no PR yet. Its code already exists as commit
+  `7868bc894` ("fix(search): complete bounded root history indexing", 2026-09-22) on the unmerged
+  parent branch `sam/implement-reliable-projectdata-archiving-tc49jm`, the same branch Slices A and
+  B were carved from. The plan lives in idea `01M0YZNBKSKQZ47NC0K7M8N5AX`.
+
+Next actions, in order. These are human-gated production operations, not code:
+
+1. Decide on the #2161 rollback trigger (revert the interval to 3600000, or keep 18 minutes).
+   Status 2026-10-03: the nightly billing agent set it to 3600000 (#2216) and it was reverted to
+   1080000 the same day; the 18-minute cadence stays.
+2. Abandon or retry the failed/poisoned migrations first. Closing the breaker while `156046f1`,
+   `5ed87b67` and `ff721a49` are still failed risks re-poisoning it at once.
+3. Close SAM's breaker from Admin → Storage (phone-usable, PR #2135).
+   Status 2026-10-03 (prod D1, read-only): `156046f1` and `6d6f3099` were operator-abandoned
+   2026-10-02 16:28Z and the breaker was closed 16:29Z; SAM archives resumed at 16:33Z.
+
+## Incident — 2026-10-02: the root object hit the hard 10 GiB cap
+
+Read-only production D1 evidence:
+
+- `project_data_storage_telemetry`: `database_size_bytes = 10,737,418,240` (exactly 10 GiB) at
+  09:34:29Z, still exactly that at 10:04:17Z. Daily growth after the breaker opened on 09-27:
+  +218, +171, +210 MB/day (10.03 GB at 09-28 16:37Z, 10.63 GB at 10-01 16:39Z).
+- First `PROJECT_DATA_STORAGE_FULL` 507 at 09:28:58Z (`GET .../sessions/ws`), then
+  `tasks/submit` (507), workspace sleep (500), `GET .../sessions/:id/state` (507), and the
+  admin abandon of `6d6f3099` (500, `Exceeded the maximum database size.`).
+- Breaker closed from the admin UI at 09:35:34Z; the 09:51:50Z sweep picked `156046f1`, failed
+  on the full object, poisoned it, and re-opened the breaker.
+
+Why nothing in-app could recover it: the archive drain, migration abandon and tool-payload
+cleanup all insert bookkeeping before freeing anything, and the alarm grouped/FTS cleanup
+refuses at >= `PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_UNSAFE_RATIO` (0.98) of the configured
+10^10 limit, i.e. since about Sep 3, at 91% of the real cap.
+
+Relief shipped: superadmin `POST /api/admin/project-data/storage/:projectId/grouped-fts-wall-recovery`
+(branch `claude/friendly-planck-qziggg`), which prunes grouped/FTS search rows delete-first.
+Staging verification was skipped on Raphaël's explicit instruction for this emergency; the
+at-cap behaviour is proven by the first bounded production call.
+
+## Reconciliation — 2026-10-05 (weekly queue audit)
+
+**Verdict: stays active, now recovering on its own.** The headline criterion (at or below
+9,000,000,000 bytes) is still unmet, but the size is falling for the first time since the breaker
+opened on 2026-09-27, and none of the 2026-09-30 next actions is still waiting on a human.
+
+Measured 2026-10-05 (read-only production D1 `sam-prod`):
+
+- `project_data_storage_telemetry`: **9,719,410,688 bytes** at 05:15Z (usage ratio 0.9719, status
+  `degraded`). That is 90.5% of the hard 10 GiB cap.
+- Daily 16:40Z samples from `project_data_storage_telemetry_history`: 10.627 GB (10-01),
+  10.267 GB (10-02), 10.213 GB (10-03), 9.842 GB (10-04). Overnight 10-05 the hourly samples fall
+  by 12 to 15 MB an hour. At 250 to 370 MB a day, the 9.0 GB target is about two to three days out.
+- `project_data_archive_circuit_breakers`: SAM's breaker is **`closed`** ("Closed from admin UI",
+  updated 2026-10-02 16:29Z).
+- SAM archive migrations: 452 `published`, 47 `frozen`, and **0** `failed`, `poisoned` or in
+  flight. Publishes per day: 14 (10-02), 40 (10-03), 59 (10-04), 17 by 05:52Z on 10-05. The global
+  sweep (`archive_sharding_global_sweep`) last finished `succeeded`, with 0 budget stalls.
+
+What changed since 2026-09-30:
+
+- The root object hit the hard cap on 10-02 (see the incident section above). #2215 shipped the
+  superadmin grouped-FTS wall recovery and freed about 464 MB.
+- The failed and poisoned migrations were abandoned from Admin → Storage and the breaker was
+  closed (10-02 16:28Z to 16:29Z). SAM archives resumed at 16:33Z.
+- #2216 slowed the archive sweep to one hour on 10-03 02:50Z. #2220 restored the 18-minute
+  cadence the same day at 13:27Z, so the #2161 rollback question is settled: keep 18 minutes.
+
+Still open:
+
+1. The headline criterion. Re-measure around 2026-10-08. If the drain flattens before 9.0 GB, the
+   next lever is Slice C below, not another manual relief call.
+2. Slice C (bounded root history indexing) is still unmerged: commit `7868bc894` on
+   `sam/implement-reliable-projectdata-archiving-tc49jm`, now 217 commits behind `main`.
+3. Rebuild grouped FTS rows after the wall recovery:
+   `tasks/backlog/2026-10-02-rebuild-grouped-fts-after-wall-recovery.md`.

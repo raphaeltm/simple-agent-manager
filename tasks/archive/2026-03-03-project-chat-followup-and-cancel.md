@@ -156,4 +156,4 @@ Browser: sendFollowUpPrompt() → POST /api/projects/:id/sessions/:id/prompt
 
 - `specs/022-simplified-chat-ux/spec.md` — FR-024 (follow-up routing), FR-025 (cancel/pause), FR-026 (idle follow-up)
 - `specs/022-simplified-chat-ux/tasks.md` — T020 marked complete but cancel not implemented in project chat
-- `tasks/backlog/2026-03-02-chat-message-flow-bugs.md` — BUG-1 (WebSocket message drop) fixed; remaining UX issues overlap
+- `tasks/archive/2026-03-02-chat-message-flow-bugs.md` — BUG-1 (WebSocket message drop) fixed; remaining UX issues overlap

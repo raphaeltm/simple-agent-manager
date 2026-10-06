@@ -6,6 +6,7 @@ import { KNOWLEDGE_DEFAULTS } from '@simple-agent-manager/shared';
 
 import { buildSafeFtsQuery } from '../../lib/fts5';
 import { createModuleLogger } from '../../lib/logger';
+import { getSearchQueryLikePatterns } from '../../lib/search-query-limits';
 import {
   parseCountCnt,
   parseKnowledgeEntityIndexRow,
@@ -391,8 +392,12 @@ function searchObservationsLike(
   minConfidence: number | null,
   limit: number,
 ) {
-  const conditions: string[] = ['o.is_active = 1', 'o.content LIKE ?'];
-  const params: (string | number)[] = [`%${query}%`];
+  const likePatterns = getSearchQueryLikePatterns(query);
+  const conditions: string[] = [
+    'o.is_active = 1',
+    ...likePatterns.map(() => String.raw`o.content LIKE ? ESCAPE '\'`),
+  ];
+  const params: (string | number)[] = [...likePatterns];
 
   if (entityType) {
     conditions.push('e.entity_type = ?');

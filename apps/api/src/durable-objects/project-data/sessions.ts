@@ -1,16 +1,185 @@
 /**
- * Chat session CRUD, state machine, listing, and search.
+ * Chat session creation and state machine. Listing and lookups live in `session-reads.ts`.
  */
-import { log } from '../../lib/logger';
-import { getAttentionSummary } from './attention';
-import {
-  parseChatSessionListRow,
-  parseCountCnt,
-  parseSessionStatus,
-  parseSessionStop,
-} from './row-schemas';
+import { clearWorkspaceIdleCheck } from './activity';
+import { parseCountCnt, parseSessionStatus, parseSessionStop } from './row-schemas';
 import type { Env } from './types';
 import { generateId } from './types';
+
+export type ReservedTaskSessionConflictReason =
+  | 'session_identity_conflict'
+  | 'session_terminal'
+  | 'session_capacity_exceeded';
+
+export class ReservedTaskSessionConflictError extends Error {
+  constructor(
+    readonly reason: ReservedTaskSessionConflictReason,
+    message: string
+  ) {
+    super(message);
+    this.name = 'ReservedTaskSessionConflictError';
+  }
+}
+
+export interface CreateReservedTaskSessionInput {
+  sessionId: string;
+  workspaceId: string | null;
+  topic: string | null;
+  taskId: string;
+  createdByUserId: string | null;
+}
+
+export interface CreateReservedTaskSessionResult {
+  id: string;
+  now: number;
+  inserted: boolean;
+}
+
+export interface SessionIdentityGuard {
+  taskId?: string | null;
+  createdByUserId?: string | null;
+  workspaceId?: string | null;
+}
+
+export interface CreateReservedTaskSessionWithInitialMessageInput extends CreateReservedTaskSessionInput {
+  initialMessageId: string;
+  initialMessageRole: string;
+  initialMessageContent: string;
+  initialMessageToolMetadata: string | null;
+}
+
+export type CreateReservedTaskSessionWithInitialMessageResult =
+  | {
+      outcome: 'created';
+      sessionId: string;
+      initialMessageId: string;
+      sessionInserted: boolean;
+      initialMessageInserted: boolean;
+    }
+  | {
+      outcome: 'conflict';
+      reason: ReservedTaskSessionConflictReason | 'initial_message_conflict';
+      message: string;
+    };
+
+function readReservedSession(sql: SqlStorage, sessionId: string): Record<string, unknown> | null {
+  return (
+    sql
+      .exec(
+        `SELECT id, workspace_id, task_id, created_by_user_id, topic, status, updated_at
+         FROM chat_sessions WHERE id = ? LIMIT 1`,
+        sessionId
+      )
+      .toArray()[0] ?? null
+  );
+}
+
+function readSessionForGuard(sql: SqlStorage, sessionId: string): Record<string, unknown> | null {
+  return (
+    sql
+      .exec(
+        `SELECT id, workspace_id, task_id, created_by_user_id, status, message_count
+           FROM chat_sessions WHERE id = ? LIMIT 1`,
+        sessionId
+      )
+      .toArray()[0] ?? null
+  );
+}
+
+function guardHasField(guard: SessionIdentityGuard, field: keyof SessionIdentityGuard): boolean {
+  return Object.prototype.hasOwnProperty.call(guard, field);
+}
+
+function guardFieldValue(
+  guard: SessionIdentityGuard,
+  field: keyof SessionIdentityGuard,
+  sessionId: string,
+  operation: string
+): string | null | undefined {
+  if (!guardHasField(guard, field)) return undefined;
+  const value = guard[field];
+  if (typeof value === 'string' || value === null) return value;
+  throw new Error(`Session ${sessionId} ${operation} guard has invalid ${field}: ${typeof value}`);
+}
+
+function assertGuardField(
+  row: Record<string, unknown>,
+  field: string,
+  expected: string | null | undefined,
+  sessionId: string,
+  operation: string
+): void {
+  if (expected === undefined) return;
+  if (row[field] === expected) return;
+  throw new Error(
+    `Session ${sessionId} cannot ${operation}: expected ${field} ${expected ?? 'null'}`
+  );
+}
+
+export function assertSessionIdentityGuard(
+  sql: SqlStorage,
+  sessionId: string,
+  operation: string,
+  guard?: SessionIdentityGuard | null,
+  options: { allowNullWorkspace?: boolean } = {}
+): Record<string, unknown> | null {
+  if (!guard) return null;
+  const row = readSessionForGuard(sql, sessionId);
+  if (!row) {
+    throw new Error(`Session ${sessionId} not found`);
+  }
+
+  assertGuardField(
+    row,
+    'task_id',
+    guardFieldValue(guard, 'taskId', sessionId, operation),
+    sessionId,
+    operation
+  );
+  assertGuardField(
+    row,
+    'created_by_user_id',
+    guardFieldValue(guard, 'createdByUserId', sessionId, operation),
+    sessionId,
+    operation
+  );
+  const expectedWorkspaceId = guardFieldValue(guard, 'workspaceId', sessionId, operation);
+  if (
+    expectedWorkspaceId !== undefined &&
+    row.workspace_id !== expectedWorkspaceId &&
+    !(options.allowNullWorkspace && row.workspace_id === null)
+  ) {
+    throw new Error(
+      `Session ${sessionId} cannot ${operation}: expected workspace_id ${expectedWorkspaceId ?? 'null'}`
+    );
+  }
+  return row;
+}
+
+function assertReservedSessionMatches(
+  row: Record<string, unknown>,
+  input: CreateReservedTaskSessionInput
+): number {
+  const status = typeof row.status === 'string' ? row.status : null;
+  if (status === 'stopped' || status === 'failed') {
+    throw new ReservedTaskSessionConflictError(
+      'session_terminal',
+      `Session ${input.sessionId} is ${status} and cannot be reused for reserved task submission`
+    );
+  }
+  if (
+    row.task_id !== input.taskId ||
+    row.created_by_user_id !== input.createdByUserId ||
+    row.topic !== input.topic ||
+    (input.workspaceId !== null && row.workspace_id !== input.workspaceId)
+  ) {
+    throw new ReservedTaskSessionConflictError(
+      'session_identity_conflict',
+      `Session ${input.sessionId} already belongs to a different task submission`
+    );
+  }
+  return typeof row.updated_at === 'number' ? row.updated_at : Date.now();
+}
 
 export function createSession(
   sql: SqlStorage,
@@ -56,6 +225,57 @@ export function createSession(
   return { id, now };
 }
 
+export function createReservedTaskSession(
+  sql: SqlStorage,
+  env: Env,
+  input: CreateReservedTaskSessionInput
+): CreateReservedTaskSessionResult {
+  const existing = readReservedSession(sql, input.sessionId);
+  if (existing) {
+    return {
+      id: input.sessionId,
+      now: assertReservedSessionMatches(existing, input),
+      inserted: false,
+    };
+  }
+
+  const maxSessions = parseInt(env.MAX_SESSIONS_PER_PROJECT || '10000', 10);
+  const countRow = sql.exec('SELECT COUNT(*) as cnt FROM chat_sessions').toArray()[0];
+  if (countRow && parseCountCnt(countRow, 'sessions.create_reserved_count') >= maxSessions) {
+    throw new ReservedTaskSessionConflictError(
+      'session_capacity_exceeded',
+      `Maximum ${maxSessions} sessions per project exceeded`
+    );
+  }
+
+  const now = Date.now();
+  sql.exec(
+    `INSERT INTO chat_sessions (id, workspace_id, task_id, created_by_user_id, topic, status, message_count, started_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 'active', 0, ?, ?, ?)`,
+    input.sessionId,
+    input.workspaceId,
+    input.taskId,
+    input.createdByUserId,
+    input.topic,
+    now,
+    now,
+    now
+  );
+
+  if (input.workspaceId) {
+    sql.exec(
+      `INSERT OR IGNORE INTO workspace_activity (workspace_id, session_id, last_message_at, created_at)
+       VALUES (?, ?, ?, ?)`,
+      input.workspaceId,
+      input.sessionId,
+      now,
+      now
+    );
+  }
+
+  return { id: input.sessionId, now, inserted: true };
+}
+
 export function linkSessionToTask(sql: SqlStorage, sessionId: string, taskId: string): boolean {
   const cursor = sql.exec(
     'UPDATE chat_sessions SET task_id = ?, updated_at = ? WHERE id = ? AND (task_id IS NULL OR task_id = ?)',
@@ -70,9 +290,11 @@ export function linkSessionToTask(sql: SqlStorage, sessionId: string, taskId: st
 function terminateSession(
   sql: SqlStorage,
   sessionId: string,
-  terminalStatus: 'stopped' | 'failed'
+  terminalStatus: 'stopped' | 'failed',
+  guard?: SessionIdentityGuard | null
 ): { workspaceId: string | null; messageCount: number; rowsWritten: number } | null {
   const now = Date.now();
+  assertSessionIdentityGuard(sql, sessionId, terminalStatus, guard);
   const cursor = sql.exec(
     `UPDATE chat_sessions SET status = ?, ended_at = ?, updated_at = ? WHERE id = ? AND status IN ('active', 'sleeping')`,
     terminalStatus,
@@ -108,33 +330,35 @@ export function wakeSession(
   sql: SqlStorage,
   sessionId: string,
   workspaceId: string,
-  taskId: string,
+  _taskId: string,
   options: WakeSessionOptions = {}
 ): boolean {
   const now = Date.now();
   const cursor = sql.exec(
     `UPDATE chat_sessions
-     SET status = 'active', workspace_id = ?, task_id = ?, ended_at = NULL,
+     SET status = 'active', workspace_id = ?, ended_at = NULL,
          agent_completed_at = NULL, updated_at = ?
      WHERE id = ? AND (
        status = 'sleeping' OR (status IN ('active', 'failed') AND workspace_id = ?)
        OR (? = 1 AND status = 'stopped')
      )`,
     workspaceId,
-    taskId,
     now,
     sessionId,
     workspaceId,
     options.allowStopped ? 1 : 0
   );
-  return cursor.rowsWritten > 0;
+  if (cursor.rowsWritten === 0) return false;
+  clearWorkspaceIdleCheck(sql, workspaceId, sessionId);
+  return true;
 }
 
 export function stopSession(
   sql: SqlStorage,
-  sessionId: string
+  sessionId: string,
+  guard?: SessionIdentityGuard | null
 ): { workspaceId: string | null; messageCount: number } | null {
-  const result = terminateSession(sql, sessionId, 'stopped');
+  const result = terminateSession(sql, sessionId, 'stopped', guard);
   // If no rows were updated, session was already stopped/failed — skip
   if (!result || result.rowsWritten === 0) return null;
   return result;
@@ -146,9 +370,10 @@ export function stopSessionInternal(sql: SqlStorage, sessionId: string): void {
 
 export function failSession(
   sql: SqlStorage,
-  sessionId: string
+  sessionId: string,
+  guard?: SessionIdentityGuard | null
 ): { workspaceId: string | null; messageCount: number } | null {
-  const result = terminateSession(sql, sessionId, 'failed');
+  const result = terminateSession(sql, sessionId, 'failed', guard);
   // If no rows were updated, session was already stopped/failed — skip
   if (!result || result.rowsWritten === 0) return null;
   return result;
@@ -157,19 +382,28 @@ export function failSession(
 export function linkSessionToWorkspace(
   sql: SqlStorage,
   sessionId: string,
-  workspaceId: string
+  workspaceId: string,
+  guard?: SessionIdentityGuard | null
 ): void {
-  const session = sql
-    .exec('SELECT id, status FROM chat_sessions WHERE id = ?', sessionId)
-    .toArray()[0];
+  const session =
+    assertSessionIdentityGuard(sql, sessionId, 'link workspace', guard, {
+      allowNullWorkspace: true,
+    }) ?? readSessionForGuard(sql, sessionId);
 
   if (!session) {
     throw new Error(`Session ${sessionId} not found`);
   }
+  const status = typeof session.status === 'string' ? session.status : null;
+  if (status !== 'active' && status !== 'sleeping') {
+    throw new Error(`Session ${sessionId} is ${status ?? 'unknown'} and cannot be linked`);
+  }
 
   const now = Date.now();
   sql.exec(
-    'UPDATE chat_sessions SET workspace_id = ?, updated_at = ? WHERE id = ?',
+    `UPDATE chat_sessions
+        SET workspace_id = ?, updated_at = ?
+      WHERE id = ?
+        AND status IN ('active', 'sleeping')`,
     workspaceId,
     now,
     sessionId
@@ -184,151 +418,6 @@ export function linkSessionToWorkspace(
     now,
     now
   );
-}
-
-export function listSessions(
-  sql: SqlStorage,
-  status: string | null,
-  limit: number = 20,
-  offset: number = 0,
-  taskId: string | null = null,
-  createdByUserId: string | null = null
-): { sessions: Record<string, unknown>[]; total: number; hasMore: boolean } {
-  const conditions: string[] = [];
-  const params: (string | number)[] = [];
-
-  if (status) {
-    conditions.push('status = ?');
-    params.push(status);
-  }
-  if (taskId) {
-    conditions.push('task_id = ?');
-    params.push(taskId);
-  }
-  if (createdByUserId) {
-    conditions.push('created_by_user_id = ?');
-    params.push(createdByUserId);
-  }
-
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-
-  const totalRow = sql
-    .exec(`SELECT COUNT(*) as cnt FROM chat_sessions ${whereClause}`, ...params)
-    .toArray()[0];
-  const total = totalRow ? parseCountCnt(totalRow, 'sessions.list_total') : 0;
-
-  const rows = sql
-    .exec(
-      `SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count, started_at, ended_at, created_at, updated_at, agent_completed_at FROM chat_sessions ${whereClause} ORDER BY updated_at DESC LIMIT ? OFFSET ?`,
-      ...params,
-      limit,
-      offset
-    )
-    .toArray();
-
-  // Fault-isolated enrichment. A single malformed row (e.g. a legacy row that
-  // fails the valibot schema) must NEVER throw and 500 the whole list — it is
-  // skipped and logged so the offending field is diagnosable in prod. See
-  // .claude/rules/50 (list reads tolerate a single bad row) and .claude/rules/41.
-  const { sessions, skipped } = enrichSessionRows(sql, rows, 'sessions.list');
-
-  // Offset-paginated: there are more sessions beyond this page whenever the
-  // offset window has not reached the total row count. `rows.length` is the raw
-  // SQL-fetched count, unaffected by post-fetch skips, so this stays correct.
-  const hasMore = offset + rows.length < total;
-
-  if (skipped > 0) {
-    log.warn('sessions.list_degraded', {
-      status,
-      taskId,
-      createdByUserId,
-      total,
-      fetched: rows.length,
-      returned: sessions.length,
-      skipped,
-    });
-  }
-
-  return { sessions, total, hasMore };
-}
-
-/**
- * Map + attention-enrich a set of raw session rows without ever throwing for a
- * single bad row. A row that fails to parse/enrich is skipped and logged with a
- * best-effort id + the parser error so the offending field is diagnosable.
- * Returns the successfully-enriched sessions plus the skipped count.
- */
-function enrichSessionRows(
-  sql: SqlStorage,
-  rows: Record<string, unknown>[],
-  context: string
-): { sessions: Record<string, unknown>[]; skipped: number } {
-  const sessions: Record<string, unknown>[] = [];
-  let skipped = 0;
-
-  for (const row of rows) {
-    try {
-      sessions.push(enrichWithAttention(sql, mapSessionRow(row)));
-    } catch (e) {
-      skipped++;
-      // Extract a best-effort id for diagnosis without re-triggering the parse.
-      const rawId = typeof row.id === 'string' ? row.id : null;
-      log.warn(`${context}_row_skipped`, { rowId: rawId, error: String(e) });
-    }
-  }
-
-  return { sessions, skipped };
-}
-
-export function getSessionsByTaskIds(
-  sql: SqlStorage,
-  taskIds: string[]
-): Array<Record<string, unknown>> {
-  if (taskIds.length === 0) return [];
-
-  const placeholders = taskIds.map(() => '?').join(', ');
-  const rows = sql
-    .exec(
-      `SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count, started_at, ended_at, created_at, updated_at, agent_completed_at
-       FROM chat_sessions
-       WHERE task_id IN (${placeholders})
-       ORDER BY updated_at DESC`,
-      ...taskIds
-    )
-    .toArray();
-
-  // Tolerate a single malformed row rather than throwing the whole lookup.
-  return enrichSessionRows(sql, rows, 'sessions.by_task_ids').sessions;
-}
-
-export function getSession(sql: SqlStorage, sessionId: string): Record<string, unknown> | null {
-  const rows = sql
-    .exec(
-      `SELECT cs.id, cs.workspace_id, cs.task_id, cs.topic, cs.status,
-              cs.created_by_user_id, cs.message_count, cs.started_at, cs.ended_at, cs.created_at,
-              cs.updated_at, cs.agent_completed_at,
-              ics.cleanup_at
-       FROM chat_sessions cs
-       LEFT JOIN idle_cleanup_schedule ics ON ics.session_id = cs.id
-       WHERE cs.id = ?`,
-      sessionId
-    )
-    .toArray();
-
-  const row = rows[0];
-  if (!row) return null;
-  // A malformed row must NOT 500 this hot single-session path (chat-state
-  // polling, deep links, task repair) — the same class of bad row the list read
-  // now tolerates. Degrade to null (caller returns a clean 404) and log the
-  // offending field for repair, rather than throwing INTERNAL_ERROR. See
-  // .claude/rules/50.
-  try {
-    return enrichWithAttention(sql, mapSessionRow(row));
-  } catch (e) {
-    const rawId = typeof row.id === 'string' ? row.id : sessionId;
-    log.warn('sessions.get_row_skipped', { rowId: rawId, error: String(e) });
-    return null;
-  }
 }
 
 export function updateSessionTopic(sql: SqlStorage, sessionId: string, topic: string): boolean {
@@ -357,20 +446,4 @@ export function markAgentCompleted(sql: SqlStorage, sessionId: string): number {
     sessionId
   );
   return now;
-}
-
-export function mapSessionRow(
-  row: Record<string, unknown>,
-  _baseDomain?: string
-): Record<string, unknown> {
-  return parseChatSessionListRow(row);
-}
-
-function enrichWithAttention(
-  sql: SqlStorage,
-  session: Record<string, unknown>
-): Record<string, unknown> {
-  const sessionId = session.id as string;
-  const summary = getAttentionSummary(sql, sessionId);
-  return { ...session, attention: summary };
 }

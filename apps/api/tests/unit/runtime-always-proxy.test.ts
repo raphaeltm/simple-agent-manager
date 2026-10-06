@@ -10,8 +10,11 @@
  * - Claude/Codex explicit SAM provider or OpenCode explicit platform provider
  *   with no user credential → platform proxy
  */
+import type Database from 'better-sqlite3';
 import { Hono } from 'hono';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { createAgentCredentialAttributionFixture } from '../helpers/agent-credential-attribution-fixture';
 
 // --- Mock dependencies ---
 
@@ -143,8 +146,30 @@ vi.mock('../../src/schemas', async (importOriginal) => {
 });
 
 vi.mock('../../src/routes/workspaces/_helpers', () => ({
-  assertWorkspaceAcceptsCallback: vi.fn(),
-  assertWorkspaceCallbackResourceById: vi.fn().mockResolvedValue(undefined),
+  assertWorkspaceAcceptsCallback: vi.fn(async (_env: unknown, workspace: unknown) => workspace),
+  assertWorkspaceCallbackResourceById: vi.fn(async () => ({
+    workspaceId: 'test-workspace',
+    userId: 'user1',
+    projectId: 'proj1',
+    chatSessionId: 'session1',
+    status: 'running',
+    nodeId: 'node1',
+    nodeStatus: 'running',
+    ...(mockDbLimit()[0] ?? {}),
+  })),
+  assertWorkspaceCallbackIdentityCurrent: vi.fn(async (_env: unknown, workspace: unknown) =>
+    Promise.resolve(workspace)
+  ),
+  sameWorkspaceCallbackIdentity: vi.fn(
+    (current: Record<string, unknown>, expected: Record<string, unknown>) =>
+      current.workspaceId === expected.workspaceId &&
+      current.userId === expected.userId &&
+      current.projectId === expected.projectId &&
+      current.chatSessionId === expected.chatSessionId &&
+      current.status === expected.status &&
+      current.nodeId === expected.nodeId &&
+      current.nodeStatus === expected.nodeStatus
+  ),
   verifyWorkspaceCallbackAuth: vi.fn().mockResolvedValue(undefined),
   getWorkspaceRuntimeAssets: vi.fn(),
   safeParseJson: vi.fn(),
@@ -273,12 +298,21 @@ async function readAgentKey(agentType: string) {
 
 // Track query count across DB calls
 let queryCount = 0;
+let attributionSqlite: Database.Database;
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
+  mockGetDecryptedAgentKey.mockReset();
+  mockDbLimit.mockReset();
+  mockKvGet.mockReset();
   queryCount = 0;
   mockKvGet.mockResolvedValue(null);
+  const attribution = await createAgentCredentialAttributionFixture('test-workspace', 'user1');
+  attributionSqlite = attribution.sqlite;
+  mockEnv.DATABASE = attribution.database;
 });
+
+afterEach(() => attributionSqlite?.close());
 
 describe('runtime.ts always-proxy', () => {
   it('authenticates message persistence before reading or validating the JSON body', async () => {
@@ -297,7 +331,7 @@ describe('runtime.ts always-proxy', () => {
     expect(projectDataService.persistMessageBatch).not.toHaveBeenCalled();
   });
 
-  it('rejects oversized message payloads with a bounded body read before persistence', async () => {
+  it('rejects oversized message payloads after terminal-state preflight and before persistence', async () => {
     mockDbLimit.mockImplementation(() => [
       {
         projectId: 'proj1',
@@ -329,7 +363,7 @@ describe('runtime.ts always-proxy', () => {
       error: 'BAD_REQUEST',
       message: 'Payload exceeds 64 byte limit',
     });
-    expect(mockDbLimit).not.toHaveBeenCalled();
+    expect(mockDbLimit).toHaveBeenCalledTimes(1);
     expect(projectDataService.persistMessageBatch).not.toHaveBeenCalled();
   });
 
@@ -354,6 +388,38 @@ describe('runtime.ts always-proxy', () => {
       },
     ]);
     expect(response.status).toBe(204);
+    expect(projectDataService.persistMessageBatch).not.toHaveBeenCalled();
+  });
+
+  it('drops a batch when deletion starts while the request body is read', async () => {
+    let workspaceRead = 0;
+    mockDbLimit.mockImplementation(() => {
+      workspaceRead += 1;
+      return [
+        {
+          workspaceId: 'test-workspace',
+          userId: 'user1',
+          projectId: 'proj1',
+          chatSessionId: 'sess1',
+          status: workspaceRead === 1 ? 'running' : 'stopping',
+          nodeId: 'node1',
+          nodeStatus: 'running',
+        },
+      ];
+    });
+
+    const response = await postMessages([
+      {
+        messageId: 'msg-race',
+        sessionId: 'sess1',
+        role: 'assistant',
+        content: 'must not persist',
+        timestamp: '2026-06-18T14:18:22.000Z',
+      },
+    ]);
+
+    expect(response.status).toBe(204);
+    expect(mockDbLimit).toHaveBeenCalledTimes(2);
     expect(projectDataService.persistMessageBatch).not.toHaveBeenCalled();
   });
 
@@ -524,6 +590,19 @@ describe('runtime.ts always-proxy', () => {
     expect(json.inferenceConfig.provider).toBe('anthropic-passthrough');
     expect(json.inferenceConfig.apiKeySource).toBe('callback-token');
     expect(json.inferenceConfig.baseURL).toContain('/ai/proxy/{wstoken}/anthropic');
+    expect(json).toMatchObject({ credentialGeneration: 8 });
+    expect(
+      attributionSqlite
+        .prepare(
+          `SELECT id, agent_credential_generation AS generation
+      FROM agent_sessions ORDER BY id`
+        )
+        .all()
+    ).toEqual([
+      { id: 'foreign-user', generation: 17 },
+      { id: 'foreign-workspace', generation: 13 },
+      { id: 'owned-agent', generation: 8 },
+    ]);
   });
 
   it('returns direct credential when user has claude-code OAuth token and proxy enabled', async () => {

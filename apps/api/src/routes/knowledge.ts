@@ -18,6 +18,7 @@ import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { normalizeSearchQuery } from '../lib/search-query-limits';
 import { getAuth, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
@@ -98,8 +99,9 @@ knowledgeRoutes.get('/search', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
   await requireProjectAccess(db, projectId, auth.user.id);
 
-  const query = c.req.query('q') || '';
-  if (!query.trim()) throw errors.badRequest('Query parameter "q" is required');
+  const inputQuery = c.req.query('q') || '';
+  if (!inputQuery.trim()) throw errors.badRequest('Query parameter "q" is required');
+  const normalizedQuery = normalizeSearchQuery(inputQuery, c.env);
 
   const entityType = c.req.query('entityType') || null;
   const minConfidenceRaw = c.req.query('minConfidence');
@@ -118,13 +120,13 @@ knowledgeRoutes.get('/search', async (c) => {
   const results = await projectDataService.searchKnowledgeObservations(
     c.env,
     projectId,
-    query,
+    normalizedQuery.query,
     entityType,
     minConfidence,
     limit
   );
 
-  return c.json({ results, total: results.length });
+  return c.json({ results, total: results.length, ...normalizedQuery });
 });
 
 // ─── GET /:entityId — get entity with observations ──────────────────────────

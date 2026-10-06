@@ -1,6 +1,8 @@
-import type { ConversationItem, ToolCallContentItem } from '@simple-agent-manager/acp-client';
+import type { ToolCallContentItem } from '@simple-agent-manager/acp-client';
+import type { ReactNode } from 'react';
 
 import { AcpConversationItemView } from '../AcpConversationItemView';
+import type { DisplayItem } from '../tool-call-groups';
 import type { MessageCommentDraft, UiMessageCommentThread } from './comment-utils';
 import {
   type CommentActions,
@@ -37,10 +39,14 @@ export function CommentableConversationItem({
   agentActivity,
   animationTargetIdx,
   commentState,
+  groupExpanded,
+  onToggleGroup,
+  groupLive,
+  afterContent,
 }: {
   index: number;
   firstItemIndex: number;
-  item: ConversationItem;
+  item: DisplayItem;
   projectId: string;
   highlighted: boolean;
   onFileClick?: (path: string, line?: number | null) => void;
@@ -51,6 +57,14 @@ export function CommentableConversationItem({
   agentActivity: string;
   animationTargetIdx: number;
   commentState: MessageCommentRowState;
+  /** Controlled expansion for a `tool_call_group` row; undefined for other kinds. */
+  groupExpanded?: boolean;
+  /** Stable toggle callback — keeps `AcpConversationItemView`'s memo intact. */
+  onToggleGroup?: (groupId: string) => void;
+  /** True when this group is the tail row and the agent is mid-turn. */
+  groupLive?: boolean;
+  /** Durable interaction UI anchored directly after the message/tool row. */
+  afterContent?: ReactNode;
 }) {
   const isCommentableMessage =
     item.kind === 'agent_message' || (item.kind === 'user_message' && item.origin !== 'system');
@@ -74,6 +88,7 @@ export function CommentableConversationItem({
     <div
       className={`sam-message-entry px-4 pb-3${highlighted ? ' sam-message-highlight' : ''}${commentAccentClass}`}
       data-commented={itemComments.length > 0 ? 'true' : undefined}
+      data-conversation-item-id={item.id}
     >
       <div data-comment-anchor={isCommentableMessage ? item.id : undefined}>
         <AcpConversationItemView
@@ -88,7 +103,11 @@ export function CommentableConversationItem({
             agentActivity === 'responding'
           }
           animateUserMessage={animateUserMessage}
+          groupExpanded={groupExpanded}
+          onToggleGroup={onToggleGroup}
+          groupLive={groupLive}
         />
+        {afterContent}
       </div>
 
       {isCommentableMessage && (canWriteSession || itemComments.length > 0) && (

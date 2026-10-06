@@ -32,7 +32,7 @@ Rewrite the installation, user, and project compute-pool surfaces so users manag
 - `apps/web/tests/unit/components/default-capacity-pools-panel.test.tsx` currently asserts small/medium/large display/edit behavior and scope-specific API routing. These tests need to assert provider-native SKU/spec display, add/remove payloads, blocked credential setup states, and no secret leakage.
 - `apps/web/tests/playwright/default-capacity-pools-scopes-audit.spec.ts` currently visits `/settings/cloud-provider` and `/admin/credentials` and removes “Small”/“Medium” candidates. This must move to user/admin Infrastructure URLs and use stress catalog data.
 - `apps/web/tests/playwright/project-settings-subpages-audit.spec.ts` covers the project Infrastructure tab and default pool edit flow. Its compute-pool assertions and screenshots need to switch from t-shirt-size candidate removals to provider-native offering add/remove with stress catalog data.
-- `tasks/active/2026-08-28-repair-compute-pool-default-editing.md` documents the existing default-pool editing repair and confirms hidden scope placeholders must not render, reconciliation must not undo user-removed candidates, and desktop/mobile screenshots are required per changed surface.
+- `tasks/archive/2026-08-28-repair-compute-pool-default-editing.md` documents the existing default-pool editing repair and confirms hidden scope placeholders must not render, reconciliation must not undo user-removed candidates, and desktop/mobile screenshots are required per changed surface.
 - `tasks/archive/2026-08-28-per-surface-ui-screenshot-evidence.md` documents the PR gate requiring `UI Screenshot Evidence` to enumerate each changed surface with desktop and mobile links, stress data, and QC attestation.
 - `.claude/rules/24-no-duplicate-ui-controls.md` applies: moving pool controls off credentials pages must remove the old controls, not add duplicate controls.
 - `.claude/rules/48-stale-while-revalidate-ui.md` applies: new/modified data surfaces should use TanStack Query and avoid unmounting existing content during background refetch.
@@ -136,7 +136,7 @@ QC result: manually reviewed representative desktop and mobile screenshots for a
 - `apps/web/tests/unit/components/default-capacity-pools-panel.test.tsx`
 - `apps/web/tests/playwright/default-capacity-pools-scopes-audit.spec.ts`
 - `apps/web/tests/playwright/project-settings-subpages-audit.spec.ts`
-- `tasks/active/2026-08-28-repair-compute-pool-default-editing.md`
+- `tasks/archive/2026-08-28-repair-compute-pool-default-editing.md`
 - `tasks/archive/2026-08-28-per-surface-ui-screenshot-evidence.md`
 - `specs/028-provider-infrastructure/spec.md`
 - `apps/www/src/content/docs/docs/guides/creating-workspaces.md`

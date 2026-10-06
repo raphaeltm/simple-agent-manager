@@ -34,6 +34,7 @@ import (
 	"github.com/workspace/vm-agent/internal/ports"
 	"github.com/workspace/vm-agent/internal/pty"
 	"github.com/workspace/vm-agent/internal/publish"
+	"github.com/workspace/vm-agent/internal/resourcehistory"
 	"github.com/workspace/vm-agent/internal/resourcemon"
 	"github.com/workspace/vm-agent/internal/sysinfo"
 )
@@ -63,77 +64,116 @@ const fatalErrorStopReason = acp.FatalErrorStopReason
 var taskCallbackDiagnosticRedactionPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)(bearer\s+)[A-Za-z0-9._~+/=-]{16,}`),
 	regexp.MustCompile(`(?i)((?:api[_-]?key|token|secret|password|authorization)\s*[:=]\s*)("[^"]+"|'[^']+'|[^\s,;]+)`),
+	regexp.MustCompile(`(?i)(https?://)([^/\s@]+)@`),
+	regexp.MustCompile(`(?i)([?&](?:access[_-]?token|api[_-]?key|token|secret|password)=)([^&\s]+)`),
 	regexp.MustCompile(`\b(sk-[A-Za-z0-9_-]{12,})\b`),
 	regexp.MustCompile(`\b(gh[pousr]_[A-Za-z0-9_]{12,})\b`),
 	regexp.MustCompile(`\b(github_pat_[A-Za-z0-9_]{12,})\b`),
 	regexp.MustCompile(`\b(sam_test_[A-Za-z0-9_-]{12,})\b`),
 }
 
+var safePromptTimeoutMessage = regexp.MustCompile(`^Prompt timed out after [0-9hms.µ]+$`)
+
 // Server is the HTTP server for the VM Agent.
 type Server struct {
-	config                *config.Config
-	httpServer            *http.Server
-	jwtValidator          *auth.JWTValidator
-	sessionManager        *auth.SessionManager
-	ptyManager            *pty.Manager
-	sysInfoCollector      *sysinfo.Collector
-	workspaceMu           sync.RWMutex
-	workspaces            map[string]*WorkspaceRuntime
-	buildQueue            chan struct{}
-	readyRetryMu          sync.Mutex // guards retryPendingReadyCallbacks — only one run at a time
-	eventMu               sync.RWMutex
-	nodeEvents            []EventRecord
-	workspaceEvents       map[string][]EventRecord
-	eventStore            *eventstore.Store
-	resourceMonitor       *resourcemon.Monitor
-	agentSessions         *agentsessions.Manager
-	acpConfig             acp.GatewayConfig
-	sessionHostMu         sync.Mutex
-	sessionHosts          map[string]*acp.SessionHost
-	sessionMcpServers     map[string][]acp.McpServerEntry // hostKey → MCP servers for ACP injection
-	sessionProfileOvr     map[string]profileOverrides     // hostKey → model/permissionMode/effort overrides from agent profiles
-	sessionTaskCtx        map[string]taskCallbackContext  // hostKey → task callback ownership context
-	store                 *persistence.Store
-	executionRuntimeID    string
-	errorReporter         *errorreport.Reporter
-	messageReportersMu    sync.RWMutex
-	messageReporters      map[string]*messagereport.Reporter // keyed by workspaceID
-	worktreeCacheMu       sync.RWMutex
-	worktreeCache         map[string]cachedWorktreeList
-	logReader             *logreader.Reader
-	bootLogBroadcasters   *BootLogBroadcasterManager
-	containerDiscovery    *container.Discovery
-	portScannerMu         sync.RWMutex
-	portScanners          map[string]*ports.Scanner
-	portDiscoveries       map[string]*container.Discovery // per-workspace container discovery
-	bootstrapComplete     atomic.Bool
-	callbackTokenMu       sync.RWMutex
-	callbackToken         string
-	callbacksTerminal     atomic.Bool
-	httpClient            *http.Client // shared HTTP client with timeout for control-plane callbacks
-	done                  chan struct{}
-	stopOnce              sync.Once
-	stopErrMu             sync.Mutex
-	stopErr               error
-	publishJobsMu         sync.Mutex
-	publishJobs           map[string]publishJobState
-	buildPublishRunner    func(context.Context, *preparedBuildPublish, publish.EventSink) (*publish.ReleaseResult, error)
-	applyWatchdogMu       sync.Mutex
-	applyWatchdogs        map[string]chan struct{}
-	sessionSnapshotMu     sync.Mutex
-	sessionSnapshotLocks  map[string]*sync.Mutex
-	sessionSnapshotRunner func(context.Context, *sessionSnapshotHandlerInput) (map[string]interface{}, error)
+	systemProvisioning     *systemProvisioningBarrier
+	config                 *config.Config
+	httpServer             *http.Server
+	jwtValidator           *auth.JWTValidator
+	sessionManager         *auth.SessionManager
+	ptyManager             *pty.Manager
+	sysInfoCollector       *sysinfo.Collector
+	workspaceMu            sync.RWMutex
+	workspaces             map[string]*WorkspaceRuntime
+	buildQueue             chan struct{}
+	readyRetryMu           sync.Mutex // guards retryPendingReadyCallbacks — only one run at a time
+	evictionDeliveryMu     sync.Mutex // One bounded eviction callback delivery at a time.
+	eventMu                sync.RWMutex
+	nodeEvents             []EventRecord
+	workspaceEvents        map[string][]EventRecord
+	eventStore             *eventstore.Store
+	resourceMonitor        *resourcemon.Monitor
+	resourceGuard          *resourcemon.ResourceGuard
+	resourceEviction       *resourcemon.EvictionController
+	resourceHistoryMu      sync.Mutex
+	resourceHistories      map[string]*resourcehistory.Collector
+	resourceHistoryStarted atomic.Bool
+	resourceHistoryStops   map[string]chan struct{}
+	historyShutdown        bool
+	agentSessions          *agentsessions.Manager
+	acpConfig              acp.GatewayConfig
+	sessionHostMu          sync.Mutex
+	sessionHosts           map[string]*acp.SessionHost
+	sessionRestores        map[string]*sessionRestoreAttempt // guarded by sessionHostMu
+	sessionCreations       map[string]chan struct{}          // guarded by sessionHostMu
+	sessionMcpServers      map[string][]acp.McpServerEntry   // hostKey → MCP servers for ACP injection
+	sessionProfileOvr      map[string]profileOverrides       // hostKey → model/permissionMode/effort overrides from agent profiles
+	sessionTaskCtx         map[string]taskCallbackContext    // hostKey → task callback ownership context
+	store                  *persistence.Store
+	executionRuntimeID     string
+	errorReporter          *errorreport.Reporter
+	messageReportersMu     sync.RWMutex
+	messageReporters       map[string]*messagereport.Reporter // keyed by workspaceID
+	worktreeCacheMu        sync.RWMutex
+	worktreeCache          map[string]cachedWorktreeList
+	logReader              *logreader.Reader
+	bootLogBroadcasters    *BootLogBroadcasterManager
+	containerDiscovery     *container.Discovery
+	portScannerMu          sync.RWMutex
+	portScanners           map[string]*ports.Scanner
+	portDiscoveries        map[string]*container.Discovery // per-workspace container discovery
+	bootstrapComplete      atomic.Bool
+	callbackTokenMu        sync.RWMutex
+	callbackToken          string
+	tokenRenewal           workspaceTokenRenewal // workspace callback token renewal (workspace_callback_token_renewal.go)
+	callbacksTerminal      atomic.Bool
+	httpClient             *http.Client // shared HTTP client with timeout for control-plane callbacks
+	done                   chan struct{}
+	stopOnce               sync.Once
+	stopErrMu              sync.Mutex
+	stopErr                error
+	publishJobsMu          sync.Mutex
+	publishJobs            map[string]publishJobState
+	buildPublishRunner     func(context.Context, *preparedBuildPublish, publish.EventSink) (*publish.ReleaseResult, error)
+	applyWatchdogMu        sync.Mutex
+	applyWatchdogs         map[string]chan struct{}
+	sessionSnapshotMu      sync.Mutex
+	sessionSnapshotLocks   map[string]sessionSnapshotLock
+	sessionSnapshotRunner  func(context.Context, *sessionSnapshotHandlerInput) (map[string]interface{}, error)
+
+	workspaceLifecycleMu    sync.Mutex
+	workspaceLifecycleLocks map[string]*workspaceLifecycleEntry
+
+	// inFlightJobs dedupes detached deployment work by job id. The heartbeat
+	// re-advertises a pending release on every tick until observed.AppliedSeq
+	// catches up, and that only happens after a full successful apply — so
+	// without this, any release slower than one heartbeat interval spawns another
+	// concurrent apply per tick, each re-running the whole control-plane fetch.
+	inFlightJobsMu sync.Mutex
+	inFlightJobs   map[string]struct{}
 
 	// Deployment mode — one Engine per placed deployment environment.
 	deployMu       sync.Mutex
 	deployEngines  map[string]*deploy.Engine
 	deployRetiring map[string]bool
 	deployVerifier *deploy.Verifier
+
+	// Trusted interaction config from an authenticated manual session create.
+	sessionManualInteractionConfig map[string]acp.AcpInteractionRuntimeConfig
 }
 
 type cachedWorktreeList struct {
 	worktrees []WorktreeInfo
 	expiresAt time.Time
+}
+
+func configuredWorkspaceBuildQueueDepth(cfg *config.Config) int {
+	if cfg == nil ||
+		cfg.WorkspaceBuildQueueDepth < 1 ||
+		cfg.WorkspaceBuildQueueDepth > config.MaxWorkspaceBuildQueueDepth {
+		return config.DefaultWorkspaceBuildQueueDepth
+	}
+	return cfg.WorkspaceBuildQueueDepth
 }
 
 func (s *Server) controlPlaneHTTPClient(timeout time.Duration) *http.Client {
@@ -169,6 +209,9 @@ type WorkspaceRuntime struct {
 	ContainerUser          string
 	CallbackToken          string
 	ProjectID              string
+	ChatSessionID          string
+	EvictionGeneration     string // Durable fence for callbacks from a previous workspace run.
+	MetadataUnavailable    bool   // Refuse recovery when the durable eviction state could not be read.
 	TaskID                 string
 	GitUserName            string
 	GitUserEmail           string
@@ -394,6 +437,7 @@ func New(cfg *config.Config) (*Server, error) {
 	if cfg.IsStandaloneMode() {
 		processLauncher = acp.LocalLauncher{}
 	}
+	executionRuntimeID := uuid.NewString()
 
 	// Build ACP gateway configuration
 	acpGatewayConfig := acp.GatewayConfig{
@@ -405,6 +449,7 @@ func New(cfg *config.Config) (*Server, error) {
 		ControlPlaneURL:                  cfg.ControlPlaneURL,
 		ProjectID:                        cfg.ProjectID,
 		NodeID:                           cfg.NodeID,
+		RuntimeIdentity:                  executionRuntimeID,
 		WorkspaceID:                      defaultWorkspaceScope(cfg.WorkspaceID, cfg.NodeID),
 		CallbackToken:                    cfg.CallbackToken,
 		ContainerResolver:                containerResolver,
@@ -412,6 +457,8 @@ func New(cfg *config.Config) (*Server, error) {
 		ContainerWorkDir:                 containerWorkDir,
 		ProcessLauncher:                  processLauncher,
 		GitTokenFetcher:                  nil, // set below after server construction
+		CodexRuntimeInstallTimeout:       cfg.CodexRuntimeInstallTimeout,
+		CodexRuntimeInstallKillGrace:     cfg.CodexRuntimeInstallKillGrace,
 		FileExecTimeout:                  cfg.GitExecTimeout,
 		FileMaxSize:                      cfg.GitFileMaxSize,
 		ErrorReporter:                    errorReporter,
@@ -430,7 +477,10 @@ func New(cfg *config.Config) (*Server, error) {
 		TerminalActivityReportAttempts:   cfg.ACPTerminalActivityReportAttempts,
 		TerminalActivityReportBackoff:    cfg.ACPTerminalActivityReportBackoff,
 		ActivityReportTimeout:            cfg.ACPActivityReportTimeout,
+		UsageProbeTimeout:                cfg.ACPUsageProbeTimeout,
+		OpenCodeGoUsageURL:               cfg.OpenCodeGoUsageURL,
 		CredentialSyncTimeout:            cfg.ACPCredentialSyncTimeout,
+		RestartAttemptTimeout:            cfg.ACPRestartAttemptTimeout,
 		RecoveryWatchdogTimeout:          cfg.ACPRecoveryWatchdog,
 		RestartDecayWindow:               cfg.ACPRestartDecayWindow,
 		SAMEnvFallback:                   cfg.BuildSAMEnvFallback(),
@@ -520,6 +570,23 @@ func New(cfg *config.Config) (*Server, error) {
 		slog.Error("Failed to start resource monitor", "error", err)
 	}
 
+	resourceGuard, err := resourcemon.NewResourceGuard(resourcemon.ResourceGuardConfig{
+		EventBuffer:            cfg.ResourceEventBufferSize,
+		PSIPollInterval:        cfg.PSIPollInterval,
+		ContainerStatsInterval: cfg.ContainerStatsInterval,
+		DockerStatsTimeout:     cfg.SysInfoDockerTimeout,
+		PSIThresholds: resourcemon.PSIThresholds{
+			MemorySomeWarningThreshold:  cfg.PSIMemorySomeWarningThreshold,
+			MemorySomeCriticalThreshold: cfg.PSIMemorySomeCriticalThreshold,
+			MemoryFullWarningThreshold:  cfg.PSIMemoryFullWarningThreshold,
+			MemoryFullCriticalThreshold: cfg.PSIMemoryFullCriticalThreshold,
+		},
+		Logger: slog.Default(),
+	})
+	if err != nil {
+		slog.Error("Failed to configure resource guard", "error", err)
+	}
+
 	s := &Server{
 		config:              cfg,
 		jwtValidator:        jwtValidator,
@@ -527,11 +594,13 @@ func New(cfg *config.Config) (*Server, error) {
 		ptyManager:          ptyManager,
 		sysInfoCollector:    sysInfoCollector,
 		workspaces:          make(map[string]*WorkspaceRuntime),
-		buildQueue:          make(chan struct{}, 1),
+		buildQueue:          make(chan struct{}, configuredWorkspaceBuildQueueDepth(cfg)),
 		nodeEvents:          make([]EventRecord, 0, 512),
 		workspaceEvents:     make(map[string][]EventRecord),
 		eventStore:          evStore,
 		resourceMonitor:     resMon,
+		resourceGuard:       resourceGuard,
+		resourceHistories:   make(map[string]*resourcehistory.Collector),
 		agentSessions:       agentsessions.NewManager(),
 		acpConfig:           acpGatewayConfig,
 		sessionHosts:        make(map[string]*acp.SessionHost),
@@ -539,7 +608,7 @@ func New(cfg *config.Config) (*Server, error) {
 		sessionProfileOvr:   make(map[string]profileOverrides),
 		sessionTaskCtx:      make(map[string]taskCallbackContext),
 		store:               store,
-		executionRuntimeID:  uuid.NewString(),
+		executionRuntimeID:  executionRuntimeID,
 		errorReporter:       errorReporter,
 		messageReporters:    messageReporters,
 		worktreeCache:       make(map[string]cachedWorktreeList),
@@ -553,8 +622,18 @@ func New(cfg *config.Config) (*Server, error) {
 		done:                make(chan struct{}),
 		publishJobs:         make(map[string]publishJobState),
 		applyWatchdogs:      make(map[string]chan struct{}),
+		inFlightJobs:        make(map[string]struct{}),
 		deployEngines:       make(map[string]*deploy.Engine),
 		deployRetiring:      make(map[string]bool),
+	}
+	s.sessionManualInteractionConfig = make(map[string]acp.AcpInteractionRuntimeConfig)
+	if resourceGuard != nil {
+		evictionController, evictionErr := s.newResourceEvictionController()
+		if evictionErr != nil {
+			slog.Error("Failed to configure resource eviction controller", "error", evictionErr)
+		} else {
+			s.resourceEviction = evictionController
+		}
 	}
 
 	// GitTokenFetcher is intentionally left nil at the server level.
@@ -577,25 +656,8 @@ func New(cfg *config.Config) (*Server, error) {
 		)
 	}
 
-	if cfg.WorkspaceID != "" {
-		s.workspaces[cfg.WorkspaceID] = &WorkspaceRuntime{
-			ID:                  cfg.WorkspaceID,
-			Repository:          strings.TrimSpace(cfg.Repository),
-			Branch:              strings.TrimSpace(cfg.Branch),
-			BaseBranch:          strings.TrimSpace(cfg.BaseBranch),
-			Status:              "running",
-			CreatedAt:           time.Now().UTC(),
-			UpdatedAt:           time.Now().UTC(),
-			WorkspaceDir:        strings.TrimSpace(cfg.WorkspaceDir),
-			ContainerLabelValue: strings.TrimSpace(cfg.ContainerLabelValue),
-			ContainerWorkDir:    strings.TrimSpace(cfg.ContainerWorkDir),
-			ContainerUser:       strings.TrimSpace(cfg.ContainerUser),
-			CallbackToken:       strings.TrimSpace(cfg.CallbackToken),
-			ProjectID:           strings.TrimSpace(cfg.ProjectID),
-			TaskID:              strings.TrimSpace(cfg.TaskID),
-			Lightweight:         cfg.IsStandaloneMode(),
-			PTY:                 ptyManager,
-		}
+	if err := s.initializeBootWorkspace(cfg, ptyManager); err != nil {
+		return nil, err
 	}
 	s.configureIncidentCollectors()
 
@@ -686,10 +748,12 @@ func (s *Server) ensureDeployEngine(environmentID string) *deploy.Engine {
 			TLSHandshakeTimeout:   s.config.DeployArtifactTLSHandshakeTimeout,
 			ResponseHeaderTimeout: s.config.DeployArtifactResponseHeaderTimeout,
 		}),
-		ArtifactIdleTimeout: s.config.DeployArtifactIdleTimeout,
-		ApplyProgress:       s.persistApplyProgress,
-		ACMEEmail:           s.config.DeployACMEEmail,
-		ACMECA:              s.config.DeployACMECA,
+		ArtifactIdleTimeout:         s.config.DeployArtifactIdleTimeout,
+		ApplyProgress:               s.persistApplyProgress,
+		ApplyLiveness:               s.signalApplyLiveness,
+		ComposeOutputRetentionBytes: s.config.ComposeOutputRetentionBytes,
+		ACMEEmail:                   s.config.DeployACMEEmail,
+		ACMECA:                      s.config.DeployACMECA,
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -968,6 +1032,9 @@ func (s *Server) stopAllPortScanners() {
 func (s *Server) Start() error {
 	s.startNodeHealthReporter()
 	s.startAcpHeartbeatReporter()
+	s.startResourceGuard()
+	s.resourceHistoryStarted.Store(true)
+	s.startAllResourceHistoryCollectors()
 
 	// Start error reporter background flush
 	s.errorReporter.Start()
@@ -979,6 +1046,62 @@ func (s *Server) Start() error {
 
 	slog.Info("Starting VM Agent", "addr", s.httpServer.Addr)
 	return s.httpServer.ListenAndServe()
+}
+
+func (s *Server) startResourceGuard() {
+	// Workspace eviction observes host PSI and Docker. Standalone/Instant
+	// runtimes have no Docker daemon; deployment nodes have a separate lifecycle.
+	if s.config == nil || s.config.Role != config.RoleWorkspace || s.resourceGuard == nil {
+		return
+	}
+	if err := s.resourceGuard.Start(context.Background()); err != nil {
+		slog.Warn("Resource guard failed to start", "error", err)
+		return
+	}
+	if s.resourceEviction != nil {
+		if err := s.resourceEviction.Start(context.Background()); err != nil {
+			slog.Warn("Resource eviction controller failed to start", "error", err)
+		}
+		return
+	}
+	go func() {
+		for {
+			select {
+			case <-s.done:
+				return
+			case event, ok := <-s.resourceGuard.PressureEvents():
+				if !ok {
+					return
+				}
+				s.logResourcePressureEvent(event)
+			}
+		}
+	}()
+}
+
+func (s *Server) logResourcePressureEvent(event resourcemon.PressureEvent) {
+	attrs := []any{
+		"type", event.Type,
+		"level", event.Level,
+		"workspaceId", event.WorkspaceID,
+		"containerId", event.ContainerID,
+		"containerName", event.ContainerName,
+	}
+	if event.Memory != nil {
+		attrs = append(attrs,
+			"someAvg10", event.Memory.Some.Avg10,
+			"someAvg60", event.Memory.Some.Avg60,
+			"fullAvg10", event.Memory.Full.Avg10,
+			"fullAvg60", event.Memory.Full.Avg60,
+		)
+	}
+	if event.Level == resourcemon.PressureLevelCritical {
+		slog.Warn(event.Message, attrs...)
+		return
+	}
+	if event.Level == resourcemon.PressureLevelWarning {
+		slog.Info(event.Message, attrs...)
+	}
 }
 
 // StopAllWorkspacesAndSessions transitions all local workloads to stopped state.
@@ -1010,61 +1133,6 @@ func (s *Server) StopAllWorkspacesAndSessions() {
 	}
 }
 
-// Stop gracefully stops the server.
-func (s *Server) Stop(ctx context.Context) error {
-	s.stopOnce.Do(func() {
-		// Signal background goroutines to stop.
-		close(s.done)
-
-		// Stop all port scanners
-		s.stopAllPortScanners()
-
-		// Stop browser auth session cleanup.
-		s.sessionManager.Stop()
-
-		// Close JWT validator
-		s.jwtValidator.Close()
-
-		s.sessionHostMu.Lock()
-		for key, host := range s.sessionHosts {
-			if host != nil {
-				host.Stop()
-			}
-			delete(s.sessionHosts, key)
-		}
-		s.sessionHostMu.Unlock()
-
-		// Close all workspace PTY sessions.
-		s.workspaceMu.Lock()
-		for _, runtime := range s.workspaces {
-			runtime.PTY.CloseAllSessions()
-		}
-		s.workspaceMu.Unlock()
-
-		// Flush and stop error reporter
-		s.errorReporter.Shutdown()
-
-		// Flush and stop all per-workspace message reporters
-		s.shutdownAllReporters()
-
-		// Close persistence store
-		if s.store != nil {
-			if err := s.store.Close(); err != nil {
-				slog.Warn("Failed to close persistence store", "error", err)
-			}
-		}
-
-		// Shutdown HTTP server
-		stopErr := s.httpServer.Shutdown(ctx)
-		s.stopErrMu.Lock()
-		s.stopErr = stopErr
-		s.stopErrMu.Unlock()
-	})
-	s.stopErrMu.Lock()
-	defer s.stopErrMu.Unlock()
-	return s.stopErr
-}
-
 // setupRoutes configures the HTTP routes.
 func (s *Server) setupRoutes(mux *http.ServeMux) {
 	// Health check
@@ -1093,6 +1161,7 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/resume", s.handleResumeAgentSession)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/prompt", s.handleSendPrompt)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/agent-sessions/{sessionId}/prompt-receipts/{deliveryId}", s.handleGetPromptReceipt)
+	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/interactions/{interactionId}/answer", s.handleAcpInteractionAnswer)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/checkpoint-rollovers", s.handleCheckpointRollover)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/agent-sessions/{sessionId}/checkpoint-rollovers/{operationId}", s.handleGetCheckpointRollover)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/agent-capabilities", s.handleAgentCapabilities)
@@ -1228,6 +1297,7 @@ func (s *Server) getOrCreateReporter(workspaceID, projectID, chatSessionID strin
 
 	// Slow path: create reporter outside the lock (disk I/O).
 	cfg := messagereport.LoadConfigFromEnv()
+	cfg.OnAuthRenewalWaitExceeded = s.reportMessagePersistencePaused
 	cfg.ProjectID = projectID
 	cfg.SessionID = chatSessionID
 	cfg.WorkspaceID = workspaceID
@@ -1477,7 +1547,13 @@ func taskCallbackErrorMessage(promptErr error) string {
 	if promptErr == nil {
 		return ""
 	}
-	return redactTaskCallbackDiagnosticText(promptErr.Error())
+	if reasonCode := acp.ClassifyPromptError(promptErr); reasonCode != "" {
+		return reasonCode
+	}
+	if safePromptTimeoutMessage.MatchString(promptErr.Error()) {
+		return promptErr.Error()
+	}
+	return "agent_prompt_failed"
 }
 
 func redactTaskCallbackDiagnosticText(text string) string {
@@ -1549,13 +1625,14 @@ func (s *Server) postTaskCallback(callbackURL, taskID, token string, body map[st
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		slog.Info("Task callback sent", "taskId", taskID, "body", string(payload))
 	} else if isTerminalControlPlaneCallbackStatus(resp.StatusCode) {
-		slog.Warn("Task callback: terminal status",
+		// The task is gone, reassigned, or its workspace ended. That is final
+		// for this task only; the node's other tasks keep reporting.
+		slog.Warn("Task callback: terminal status for this task",
 			"statusCode", resp.StatusCode,
 			"taskId", taskID,
 			"callbackURL", callbackURL,
 			"responseBody", responseBody,
 		)
-		s.markControlPlaneCallbacksTerminal("task_callback", resp.StatusCode, responseBody)
 	} else {
 		slog.Error("Task callback: unexpected status",
 			"statusCode", resp.StatusCode,

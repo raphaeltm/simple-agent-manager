@@ -246,6 +246,24 @@ describe('getAttentionState', () => {
     ).toBe('needs_input');
   });
 
+  it('returns wake_failed when a wake failure marker is present', () => {
+    expect(
+      getAttentionState(
+        makeSession({
+          status: 'sleeping',
+          attention: {
+            markerId: 'marker-1',
+            kind: 'wake_failed',
+            createdAt: Date.now(),
+            expiresAt: null,
+            reason: 'wake_refused',
+            options: [],
+          },
+        })
+      )
+    ).toBe('wake_failed');
+  });
+
   it('needs_input attention marker takes precedence over idle state', () => {
     expect(
       getAttentionState(
@@ -330,7 +348,7 @@ describe('getAttentionState', () => {
     ).toBe('stopped');
   });
 
-  it('non-needs_input attention marker falls through to lifecycle state', () => {
+  it('unknown attention marker falls through to lifecycle state', () => {
     // Backend only creates needs_input markers today. Other kinds (if added)
     // fall through to lifecycle-based derivation, not the marker kind.
     expect(
@@ -362,6 +380,7 @@ describe('getAttentionState', () => {
 describe('isHighPriorityAttention', () => {
   it.each([
     ['needs_input', true],
+    ['wake_failed', true],
     ['error', true],
     ['active', false],
     ['idle', false],

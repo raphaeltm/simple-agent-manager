@@ -296,6 +296,130 @@ describe('D1 session index sync', () => {
     }
   });
 
+  it('keeps project and user activity pages on their migration-backed expression indexes', async () => {
+    await seed(projectId);
+
+    const plans = await Promise.all([
+      env.DATABASE.prepare(
+        `EXPLAIN QUERY PLAN
+         SELECT id FROM session_summaries
+         WHERE project_id = ?
+         ORDER BY COALESCE(last_message_at, created_at, started_at) DESC, id DESC
+         LIMIT ?`
+      )
+        .bind(projectId, 20)
+        .all<{ detail: string }>(),
+      env.DATABASE.prepare(
+        `EXPLAIN QUERY PLAN
+         SELECT id FROM session_summaries
+         WHERE user_id = ?
+           AND COALESCE(last_message_at, created_at, started_at) > ?
+         ORDER BY COALESCE(last_message_at, created_at, started_at) DESC, id DESC
+         LIMIT ?`
+      )
+        .bind(OWNER, 0, 20)
+        .all<{ detail: string }>(),
+      env.DATABASE.prepare(
+        `EXPLAIN QUERY PLAN
+         SELECT id FROM session_summaries
+         WHERE project_id = ? AND created_by_user_id = ?
+         ORDER BY COALESCE(last_message_at, created_at, started_at) DESC, id DESC
+         LIMIT ?`
+      )
+        .bind(projectId, OWNER, 20)
+        .all<{ detail: string }>(),
+    ]);
+
+    const planTexts = plans.map((plan) => (plan.results ?? []).map((row) => row.detail).join('\n'));
+    expect(planTexts[0]).toContain('idx_session_summaries_project_activity');
+    expect(planTexts[1]).toContain('idx_session_summaries_user_activity');
+    expect(planTexts[2]).toContain('idx_session_summaries_project_creator_activity');
+    for (const planText of planTexts) {
+      expect(planText).not.toContain('USE TEMP B-TREE FOR ORDER BY');
+    }
+  });
+
+  it('orders sessions by conversation activity across live and compact-archive messages', async () => {
+    await seed(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const compacted = await stub.createSession('workspace-a', 'Compacted history');
+    const live = await stub.createSession('workspace-b', 'Live history');
+    const empty = await stub.createSession('workspace-c', 'No messages');
+
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `UPDATE chat_sessions
+         SET status = 'stopped', ended_at = 90000, updated_at = 90000,
+             created_at = 1000, started_at = 1000, archive_last_message_at = 2000,
+             archive_state = 'source_deleted'
+         WHERE id = ?`,
+        compacted
+      );
+      state.storage.sql.exec(
+        `INSERT INTO chat_messages
+           (id, session_id, role, content, tool_metadata, created_at, sequence, origin)
+         VALUES (?, ?, 'user', 'newer than the archived transcript', NULL, 4000, 2, NULL)`,
+        `message-${compacted}`,
+        compacted
+      );
+      state.storage.sql.exec(
+        `UPDATE chat_sessions
+         SET status = 'stopped', ended_at = 80000, updated_at = 80000,
+             created_at = 1000, started_at = 1000
+         WHERE id = ?`,
+        live
+      );
+      state.storage.sql.exec(
+        `INSERT INTO chat_messages
+           (id, session_id, role, content, tool_metadata, created_at, sequence, origin)
+         VALUES (?, ?, 'user', 'the next most recent message', NULL, 3500, 1, NULL)`,
+        `message-${live}`,
+        live
+      );
+      state.storage.sql.exec(
+        `UPDATE chat_sessions
+         SET status = 'stopped', ended_at = 100000, updated_at = 100000,
+             created_at = 3000, started_at = 1000
+         WHERE id = ?`,
+        empty
+      );
+    });
+
+    await stub.runSummarySyncForTest();
+    const fromDo = await stub.listSessions(null, 20, 0, null, null);
+    const fromIndex = await listSessionsFromIndex(env as unknown as WorkerEnv, {
+      projectId,
+      status: null,
+      limit: 20,
+      offset: 0,
+      createdByUserId: null,
+    });
+    if (!('result' in fromIndex)) throw new Error(`index read missed: ${fromIndex.missReason}`);
+
+    const expected = [
+      [compacted, 4000],
+      [live, 3500],
+      [empty, 3000],
+    ];
+    expect(fromDo.sessions.map((session) => [session.id, session.lastMessageAt])).toEqual(expected);
+    expect(fromIndex.result.sessions.map((session) => [session.id, session.lastMessageAt])).toEqual(
+      expected
+    );
+
+    // Offset pages remain stable across repeated reads while there is no new
+    // conversation activity; a new message may legitimately shift later pages.
+    const firstPage = await stub.listSessions(null, 2, 0, null, null);
+    const secondPage = await stub.listSessions(null, 2, 2, null, null);
+    expect(firstPage.sessions.map((session) => session.id)).toEqual([compacted, live]);
+    expect(secondPage.sessions.map((session) => session.id)).toEqual([empty]);
+
+    await stub.persistMessage(live, 'user', 'new message should move this session first', null);
+    await stub.runSummarySyncForTest();
+    const afterMessage = await stub.listSessions(null, 20, 0, null, null);
+    expect(afterMessage.sessions[0]?.id).toBe(live);
+  });
+
   it('mirrors the unresolved attention marker so the sidebar badge survives', async () => {
     await seed(projectId);
     const stub = getStub(projectId);

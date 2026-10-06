@@ -1,5 +1,10 @@
 # Fix colon refspec injection in git show
 
+> **Reconciliation 2026-09-30:** still open, but likely not exploitable. `sanitizeGitRef` /
+> `isValidRefChar` (`packages/vm-agent/internal/server/git.go:355–385`) ban `:` and `{` in the
+> ref, so git always splits `ref:path` at the first colon and a colon in the path cannot change
+> the ref. A candidate for a human won't-fix decision (or a cheap guard plus a test).
+
 ## Problem
 
 In `packages/vm-agent/internal/server/git.go`, the `git show` command constructs a refspec via string concatenation: `ref + ":" + filePath`. If `filePath` contains a colon, an attacker could manipulate the refspec to access arbitrary refs/paths in the git repository.

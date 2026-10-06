@@ -3,15 +3,12 @@
  * ownership (chat-session creation or runner/instant startup failures).
  * Used by the MCP dispatch and trigger submission paths.
  */
-import { and, eq } from 'drizzle-orm';
-import type { DrizzleD1Database } from 'drizzle-orm/d1';
-
-import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { ulid } from '../lib/ulid';
 import { recordTaskLifecycleEventBestEffort } from './project-lifecycle-events';
+import { isTaskStatus, taskStatusIsNonTerminalSql, TERMINAL_STATUS_VALUES } from './task-status';
 
-export interface MarkQueuedTaskFailedEventContext {
+export interface MarkTaskFailedEventContext {
   env: Env;
   projectId: string;
   source: string;
@@ -20,52 +17,84 @@ export interface MarkQueuedTaskFailedEventContext {
   nodeId?: string | null;
 }
 
+export interface MarkTaskFailedOptions {
+  actorType?: 'agent' | 'system';
+  actorId?: string | null;
+  completedAt?: string | null;
+  executionStep?: string | null;
+}
+
 /**
- * Marks a still-queued task as failed and records the queued→failed status
- * event. The reason is stored as both the task error message and the event
- * reason.
+ * Marks a non-terminal task as failed and records its observed prior status.
+ * The reason is stored as both the task error message and the event reason.
  *
- * The update is optimistically locked on `status = 'queued'` so a concurrent
- * handler that already advanced or terminally transitioned the task (e.g.
- * `launchInstantSession`'s own failure path, or a TaskRunner DO that started
- * despite a thrown ack) is never clobbered. Returns true when this call
- * performed the transition.
+ * The terminal-state exclusion lives in the UPDATE predicate so a concurrent
+ * completion or cancellation that lands after the status read wins atomically.
+ * Returns true when this call performed the transition.
  */
-export async function markQueuedTaskFailed(
-  db: DrizzleD1Database<typeof schema>,
+export async function markTaskFailedIfNonTerminal(
+  database: D1Database,
   taskId: string,
   reason: string,
-  eventContext?: MarkQueuedTaskFailedEventContext
+  eventContext?: MarkTaskFailedEventContext,
+  options: MarkTaskFailedOptions = {}
 ): Promise<boolean> {
   const failedAt = new Date().toISOString();
-  const result = await db
-    .update(schema.tasks)
-    .set({ status: 'failed', errorMessage: reason, updatedAt: failedAt })
-    .where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.status, 'queued')));
-  if (!result.meta.changes) {
-    return false;
-  }
-  await db.insert(schema.taskStatusEvents).values({
-    id: ulid(),
-    taskId,
-    fromStatus: 'queued',
-    toStatus: 'failed',
-    actorType: 'system',
-    actorId: null,
-    reason,
-    createdAt: failedAt,
-  });
+  const actorType = options.actorType ?? 'system';
+  const actorId = options.actorId ?? null;
+  const results = await database.batch([
+    database.prepare('SELECT status FROM tasks WHERE id = ?').bind(taskId),
+    database
+      .prepare(
+        `INSERT INTO task_status_events
+         (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)
+         SELECT ?, id, status, 'failed', ?, ?, ?, ? FROM tasks
+         WHERE id = ? AND ${taskStatusIsNonTerminalSql()}`
+      )
+      .bind(
+        ulid(),
+        actorType,
+        actorId,
+        reason,
+        failedAt,
+        taskId,
+        ...TERMINAL_STATUS_VALUES
+      ),
+    database
+      .prepare(
+        `UPDATE tasks SET status = 'failed', error_message = ?, updated_at = ?,
+           completed_at = CASE WHEN ? = 1 THEN ? ELSE completed_at END,
+           execution_step = CASE WHEN ? = 1 THEN ? ELSE execution_step END
+         WHERE id = ? AND ${taskStatusIsNonTerminalSql()}`
+      )
+      .bind(
+        reason,
+        failedAt,
+        options.completedAt !== undefined ? 1 : 0,
+        options.completedAt ?? null,
+        options.executionStep !== undefined ? 1 : 0,
+        options.executionStep ?? null,
+        taskId,
+        ...TERMINAL_STATUS_VALUES
+      ),
+  ]);
+  const observedRow: unknown = results[0]?.results[0];
+  const observedStatus =
+    typeof observedRow === 'object' && observedRow !== null && 'status' in observedRow
+      ? observedRow.status
+      : undefined;
+  if (!isTaskStatus(observedStatus) || !(results[2]?.meta.changes ?? 0)) return false;
   if (eventContext) {
     await recordTaskLifecycleEventBestEffort(eventContext.env, {
       projectId: eventContext.projectId,
       taskId,
       status: 'failed',
-      fromStatus: 'queued',
+      fromStatus: observedStatus,
       workspaceId: eventContext.workspaceId,
       sessionId: eventContext.sessionId,
       nodeId: eventContext.nodeId,
-      actorType: 'system',
-      actorId: null,
+      actorType,
+      actorId,
       reason,
       source: eventContext.source,
       occurredAt: failedAt,

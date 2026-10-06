@@ -13,6 +13,10 @@ import {
   sendMessageCommentDirective,
 } from '../../../src/services/message-comments';
 import * as projectDataService from '../../../src/services/project-data';
+import {
+  credentialTokenCanaries,
+  expectCredentialTokensAbsent,
+} from '../../helpers/credential-token-canaries';
 
 const projectDataMocks = vi.hoisted(() => ({
   acceptPromptDelivery: vi.fn(),
@@ -154,6 +158,38 @@ function makeStorage(threads: Record<string, MessageCommentThread>): MessageComm
 describe('message comment directive service', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('strips credential tokens from the directive a human comment delivers to the agent', async () => {
+    const { openaiProjectKey, anthropicApiKey, githubFineGrainedPat, samPersonalAccessToken } =
+      credentialTokenCanaries;
+    const thread = makeThread({
+      anchor: { kind: 'message', messageId: 'message-1', quote: `use ${openaiProjectKey}` },
+      body: `Rotate ${anthropicApiKey}, ${githubFineGrainedPat} and ${samPersonalAccessToken} now.`,
+    });
+    projectDataMocks.acceptPromptDelivery.mockResolvedValue(
+      makeAcceptedDelivery('comment-directive-thread-1', true)
+    );
+
+    await sendMessageCommentDirective({
+      env: makeEnv(),
+      storage: makeStorage({ 'thread-1': thread }),
+      projectId: 'project-1',
+      sessionId: 'session-1',
+      threadId: 'thread-1',
+      humanUserId: 'human-1',
+      now: 3000,
+    });
+
+    const deliveryInput = projectDataMocks.acceptPromptDelivery.mock.calls[0]?.[2] as {
+      deliveryContent: string;
+    };
+    expectCredentialTokensAbsent(deliveryInput.deliveryContent);
+    // Liveness: the feedback itself still reaches the agent.
+    expect(deliveryInput.deliveryContent).toContain(
+      'Rotate [redacted], [redacted] and [redacted] now.'
+    );
+    expect(deliveryInput.deliveryContent).toContain('use [redacted]');
   });
 
   it('enqueues a minimal comment directive through prompt delivery', async () => {

@@ -62,6 +62,7 @@ const doSource = [
   'types.ts',
   'node-steps.ts',
   'workspace-steps.ts',
+  'workspace-ready-steps.ts',
   'agent-session-step.ts',
   'state-machine.ts',
   'helpers.ts',
@@ -175,7 +176,9 @@ describe('advanceWorkspaceReady — callback signal handling', () => {
   );
 
   it('returns early if state is null', () => {
-    expect(advanceSection).toContain('if (!state || state.completed) return');
+    expect(advanceSection).toContain(
+      'if (!state || state.completed || state.stepResults.workspaceId !== workspaceId) return'
+    );
   });
 
   it('returns early if DO is completed', () => {
@@ -195,7 +198,7 @@ describe('advanceWorkspaceReady — callback signal handling', () => {
   });
 
   it('persists state after storing callback signal', () => {
-    expect(advanceSection).toContain("this.ctx.storage.put('state', state)");
+    expect(advanceSection).toContain('putTaskRunnerState(this.ctx.storage, state)');
   });
 
   it('fires immediate alarm when DO is at workspace_ready step', () => {
@@ -283,7 +286,7 @@ describe('/ready route — inline DO notification (TDF-5)', () => {
   });
 
   it('updates D1 workspace status before notifying DO', () => {
-    const updateIdx = readyHandler.indexOf('.update(schema.workspaces)');
+    const updateIdx = readyHandler.indexOf('transitionWorkspaceFromCallback');
     const doNotifyIdx = readyHandler.indexOf('advanceTaskRunnerWorkspaceReady');
     expect(updateIdx).toBeGreaterThan(-1);
     expect(doNotifyIdx).toBeGreaterThan(updateIdx);
@@ -294,7 +297,8 @@ describe('/ready route — inline DO notification (TDF-5)', () => {
   });
 
   it('returns terminal gone if the callback workspace is missing or inactive', () => {
-    expect(readyHandler).toContain('assertWorkspaceAcceptsCallback');
+    expect(readyHandler).toContain('assertWorkspaceCallbackResourceById');
+    expect(readyHandler).toContain('transitionWorkspaceFromCallback');
   });
 });
 
@@ -383,8 +387,8 @@ describe('/provisioning-failed route — inline DO notification (TDF-5)', () => 
 
   it('only processes workspaces in creating or error status (allows retries)', () => {
     expect(failedHandler).toContain("workspace.status === 'creating'");
-    expect(failedHandler).toContain("workspace.status !== 'error'");
-    expect(failedHandler).toContain("reason: 'workspace_not_creating'");
+    expect(failedHandler).toContain('WORKSPACE_CALLBACK_PROVISIONING_FAILURE_STATUSES');
+    expect(failedHandler).toContain('transitionWorkspaceFromCallback');
   });
 
   it('uses provided error message or default', () => {
@@ -543,7 +547,9 @@ describe('task-runner-do service bridge', () => {
   });
 
   it('calls stub.advanceWorkspaceReady', () => {
-    expect(serviceSource).toContain('stub.advanceWorkspaceReady(status, errorMessage)');
+    expect(serviceSource).toContain(
+      'stub.advanceWorkspaceReady(status, errorMessage, workspaceId)'
+    );
   });
 
   it('looks up DO by taskId using idFromName', () => {

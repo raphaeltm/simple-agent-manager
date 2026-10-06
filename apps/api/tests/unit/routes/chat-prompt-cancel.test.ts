@@ -16,34 +16,25 @@ const mocks = vi.hoisted(() => ({
   enrichMessageWithMentions: vi.fn(),
   parseOptionalBody: vi.fn(),
   cancelScheduledSessionSleep: vi.fn(),
+  answerInteraction: vi.fn(),
+  deliverAcpInteractionAnswer: vi.fn(),
+  getInteractionDetail: vi.fn(),
+  recordInteractionDelivery: vi.fn(),
+  resolveAcpInteractionDeliveryTarget: vi.fn(),
+  snapshotInteractions: vi.fn(),
 }));
 
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: mocks.drizzle,
 }));
 
-vi.mock('@simple-agent-manager/shared', () => ({
-  COMMENT_STATUSES: ['open', 'sent', 'resolved'],
-  DEFAULT_CHAT_SESSION_MESSAGE_LIMIT: 500,
-  DEFAULT_CHAT_SESSION_MESSAGE_MAX: 50000,
-  DEFAULT_CHAT_COMPACT_MODE: true,
-  DEFAULT_WORKSPACE_PROFILE: 'full',
-  DEFAULT_DURABLE_PROMPT_DELIVERY_ENABLED: true,
-  DEFAULT_PROMPT_DELIVERY_LEGACY_VM_COMPAT_ENABLED: false,
-  DEFAULT_ACP_LONG_TURN_SUPERVISOR_ENABLED: false,
-  DEFAULT_ACP_LONG_TURN_CHECKPOINT_MS: 18_000_000,
-  DEFAULT_ACP_CHECKPOINT_PREEMPT_GRACE_MS: 30_000,
-  DEFAULT_PROMPT_DELIVERY_MAX_CANDIDATES_PER_ALARM: 5,
-  DEFAULT_PROMPT_DELIVERY_MAX_ATTEMPTS: 5,
-  DEFAULT_PROMPT_DELIVERY_RETRY_BASE_MS: 5_000,
-  DEFAULT_PROMPT_DELIVERY_RETRY_MAX_MS: 300_000,
-  DEFAULT_PROMPT_DELIVERY_TTL_MS: 3_600_000,
-  DEFAULT_PROMPT_DELIVERY_RECEIPT_TIMEOUT_MS: 30_000,
-  DEFAULT_PROMPT_DELIVERY_BACKGROUND_TIMEOUT_MS: 5_000,
-  DEFAULT_PROMPT_DELIVERY_MIN_ALARM_DELAY_MS: 1_000,
-  isTaskExecutionStep: () => true,
-  isTaskMode: (v: unknown) => v === 'task' || v === 'conversation',
-}));
+vi.mock('@simple-agent-manager/shared', async (importActual) => {
+  const actual = await importActual<typeof import('@simple-agent-manager/shared')>();
+  return {
+    ...actual,
+    isTaskExecutionStep: () => true,
+  };
+});
 
 vi.mock('../../../src/middleware/auth', () => ({
   requireAuth: () => vi.fn((_c: unknown, next: () => Promise<void>) => next()),
@@ -115,6 +106,18 @@ vi.mock('../../../src/services/session-snapshots', () => ({
   cancelScheduledSessionSleep: (...args: unknown[]) => mocks.cancelScheduledSessionSleep(...args),
 }));
 
+vi.mock('../../../src/services/acp-interaction-store', () => ({
+  answerInteraction: mocks.answerInteraction,
+  getInteractionDetail: mocks.getInteractionDetail,
+  recordInteractionDelivery: mocks.recordInteractionDelivery,
+  snapshotInteractions: mocks.snapshotInteractions,
+}));
+
+vi.mock('../../../src/services/acp-interaction-delivery', () => ({
+  deliverAcpInteractionAnswer: mocks.deliverAcpInteractionAnswer,
+  resolveAcpInteractionDeliveryTarget: mocks.resolveAcpInteractionDeliveryTarget,
+}));
+
 /** Helper to build a drizzle mock that returns workspace + agent session rows. */
 function setupDrizzle(opts: {
   workspace?: {
@@ -171,6 +174,40 @@ beforeEach(() => {
     createdByUserId: 'user-1',
     status: 'active',
   });
+  mocks.snapshotInteractions.mockResolvedValue({
+    pending: [
+      {
+        interactionId: '11111111-1111-4111-8111-111111111111',
+        kind: 'permission',
+        state: 'pending',
+        createdAt: 1,
+        deadlineAt: 2,
+        safeSummary: { toolCallId: 'tool-1' },
+      },
+    ],
+    settled: [],
+    cursor: null,
+  });
+  mocks.getInteractionDetail.mockResolvedValue({
+    interactionId: '11111111-1111-4111-8111-111111111111',
+    kind: 'permission',
+    state: 'pending',
+    detail: { permissionName: 'SECRET_CANARY_PERMISSION' },
+  });
+  mocks.answerInteraction.mockResolvedValue({
+    status: 'answered',
+    summary: { state: 'answered' },
+    delivery: { generation: '22222222-2222-4222-8222-222222222222', runtimeIdentity: 'runtime-1' },
+  });
+  mocks.resolveAcpInteractionDeliveryTarget.mockResolvedValue({
+    status: 'interrupted',
+    reason: 'no runtime',
+  });
+  mocks.deliverAcpInteractionAnswer.mockResolvedValue({
+    outcome: 'confirmed',
+    runtimeStatus: 'consumed',
+  });
+  mocks.recordInteractionDelivery.mockResolvedValue(undefined);
 
   app = new Hono<{ Bindings: Env }>();
   app.onError((err, c) => {
@@ -609,6 +646,19 @@ describe('POST /sessions/:sessionId/attention/:markerId/resolve', () => {
     expect(projectDataService.completeAttentionAnswer).not.toHaveBeenCalled();
   });
 
+  it('rejects ACP projection markers without forwarding them as chat prompts', async () => {
+    vi.mocked(projectDataService.prepareAttentionAnswer).mockResolvedValue({
+      status: 'unsupported_source',
+      source: 'acp_interaction',
+    });
+
+    const response = await postAnswer();
+
+    expect(response.status).toBe(400);
+    expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+    expect(projectDataService.completeAttentionAnswer).not.toHaveBeenCalled();
+  });
+
   it('preserves the claim when delivery to the agent has an ambiguous generic failure', async () => {
     mocks.sendPromptToAgentOnNode.mockRejectedValue(new Error('runtime unavailable'));
 
@@ -898,5 +948,137 @@ describe('POST /sessions/:sessionId/cancel', () => {
 
     expect(response.status).toBe(404);
     expect(mocks.cancelAgentSessionOnNode).not.toHaveBeenCalled();
+  });
+});
+
+describe('ACP interaction browser routes', () => {
+  const interactionId = '11111111-1111-4111-8111-111111111111';
+  const answerBody = {
+    answerKey: 'answer-key-1',
+    decision: { kind: 'accepted', answerHash: 'a'.repeat(64) },
+  };
+  const env = { DATABASE: {} as D1Database, BASE_DOMAIN: 'example.test' } as Env;
+
+  it('requires exact configured browser Origin before accepting a human answer', async () => {
+    const response = await app.request(
+      `/api/projects/proj-1/sessions/chat-1/interactions/${interactionId}/answer`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: 'https://evil.example.test' },
+        body: JSON.stringify(answerBody),
+      },
+      env
+    );
+
+    expect(response.status).toBe(403);
+    expect(mocks.answerInteraction).not.toHaveBeenCalled();
+  });
+
+  it('answers only through task:write plus session-creator authorization', async () => {
+    const response = await app.request(
+      `/api/projects/proj-1/sessions/chat-1/interactions/${interactionId}/answer`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: 'https://app.example.test' },
+        body: JSON.stringify(answerBody),
+      },
+      env
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.requireProjectCapability).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'user-1',
+      'task:write'
+    );
+    expect(projectDataService.getSession).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'chat-1'
+    );
+    expect(mocks.answerInteraction).toHaveBeenCalledWith(expect.anything(), {
+      projectId: 'proj-1',
+      chatSessionId: 'chat-1',
+      interactionId,
+      answerKey: 'answer-key-1',
+      answerBodyHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      decision: answerBody.decision,
+    });
+    expect(mocks.answerInteraction.mock.calls.at(-1)?.[1].answerBodyHash).not.toBe(
+      answerBody.decision.answerHash
+    );
+  });
+
+  it('rejects a project writer who did not create the session', async () => {
+    vi.mocked(projectDataService.getSession).mockResolvedValueOnce({
+      id: 'chat-1',
+      createdByUserId: 'other-user',
+      status: 'active',
+    });
+
+    const response = await app.request(
+      `/api/projects/proj-1/sessions/chat-1/interactions/${interactionId}/answer`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: 'https://app.example.test' },
+        body: JSON.stringify(answerBody),
+      },
+      env
+    );
+
+    expect(response.status).toBe(403);
+    expect(mocks.answerInteraction).not.toHaveBeenCalled();
+  });
+
+  it('returns decrypted detail only to the creator with no-store caching', async () => {
+    const response = await app.request(
+      `/api/projects/proj-1/sessions/chat-1/interactions/${interactionId}`,
+      { method: 'GET' },
+      env
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Cache-Control')).toBe('private, no-store');
+    expect(mocks.requireProjectCapability).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'user-1',
+      'task:read'
+    );
+    await expect(response.json()).resolves.toMatchObject({
+      detail: { permissionName: 'SECRET_CANARY_PERMISSION' },
+    });
+  });
+
+  it('keeps noncreator snapshots generic and omits settled history', async () => {
+    vi.mocked(projectDataService.getSession).mockResolvedValueOnce({
+      id: 'chat-1',
+      createdByUserId: 'other-user',
+      status: 'active',
+    });
+
+    const response = await app.request(
+      '/api/projects/proj-1/sessions/chat-1/interactions',
+      { method: 'GET' },
+      env
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toEqual({
+      pending: [
+        {
+          interactionId,
+          kind: 'permission',
+          state: 'pending',
+          createdAt: 1,
+          deadlineAt: 2,
+        },
+      ],
+      settled: [],
+      cursor: null,
+    });
+    expect(JSON.stringify(body)).not.toContain('tool-1');
   });
 });

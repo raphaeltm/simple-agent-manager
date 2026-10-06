@@ -1,5 +1,23 @@
 # Deployment Provisioning Route-Level Behavioral Tests + Resilience
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:**
+>   - Gap 1: route-level tests for first release, existing node, null return and throw
+>     (`apps/api/tests/unit/routes/deployment-release-provisioning.test.ts:389,446,709,728`,
+>     PR #1312). No `readFileSync` remains in `deployment-provisioning.test.ts`.
+>   - Gap 4: `nodeId` rolls back when provisioning fails, with tests
+>     (`apps/api/tests/unit/deployment-provisioning.test.ts:541,561`).
+> - **Still open:**
+>   - Gap 3: the workspace-creation quota check is still a `readFileSync` source-contract test
+>     (`apps/api/tests/unit/node-role-exemption.test.ts:174-190`, also `:114-160`).
+>   - Gap 5: credential-tier tests. Provisioning now goes through
+>     `resolveCanonicalVmAllocationPlan` and shared tier tests exist
+>     (`resolve-credential-source.test.ts:150-245`); confirm the deployment path is covered.
+> - **Moot/dropped:** Gap 2 (DNS skip). PR #1356 removed the skip, so deployment nodes now
+>   create backend DNS records (`apps/api/src/services/node-provisioning.ts:620-626`). The test
+>   named "…triggers DNS skip" (`deployment-provisioning.test.ts:688`) is now misnamed.
+
 **Created**: 2026-06-12
 **Source**: Late-arriving test-engineer, security-auditor, cloudflare-specialist, and task-completion-validator reviews on PR #1302 (deployment node provisioning)
 **Priority**: MEDIUM

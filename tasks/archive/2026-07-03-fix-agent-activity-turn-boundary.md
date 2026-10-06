@@ -11,7 +11,7 @@ Long silent tool calls can make the project chat activity indicator decay to idl
 - `apps/api/src/schemas/acp-sessions.ts` only accepts `prompting` and `idle`, while VM agent code can send `recovering` and `error`.
 - `apps/api/src/durable-objects/project-data/session-state.ts` reconciles stale activity from a one-shot `activity_at` timestamp. The comment mentions message evidence, but the SQL does not check messages.
 - `apps/web/src/components/project-message-view/useSessionLifecycle.ts` verifies before decay in one path, but fetch failures still clear activity and the polling fallback does not rehydrate from `data.state.activity`.
-- `tasks/backlog/2026-06-20-hydratestate-arm-verify-timer-on-reconnect.md` is the reconnect counterpart and should be folded into this work.
+- `tasks/archive/2026-06-20-hydratestate-arm-verify-timer-on-reconnect.md` is the reconnect counterpart and should be folded into this work.
 - Rule 34 requires keeping VM agent activity callback routes outside session-auth middleware.
 - Rule 47 requires a control-loop load review and a two-sweep zombie regression test for reconciler changes.
 

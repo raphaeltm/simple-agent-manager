@@ -10,7 +10,7 @@ import {
   DIALECT_VALUES,
   resolveHarnessDialect,
 } from '@simple-agent-manager/shared';
-import { and,eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -21,6 +21,7 @@ import { ulid } from '../lib/ulid';
 import { requireApproved, requireAuth } from '../middleware/auth';
 import { getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
+import { reconcileCapacityPoolsForCredentialMutation } from '../services/capacity-pool-credential-lifecycle';
 import { encrypt } from '../services/encryption';
 
 const ccRoutes = new Hono<{ Bindings: Env }>();
@@ -44,7 +45,9 @@ function requireHttpsBaseUrl(value: unknown): string {
 
 function requireDialect(value: unknown): Dialect {
   if (typeof value !== 'string' || !(DIALECT_VALUES as readonly string[]).includes(value)) {
-    throw errors.badRequest(`provider dialect is required and must be one of: ${DIALECT_VALUES.join(', ')}`);
+    throw errors.badRequest(
+      `provider dialect is required and must be one of: ${DIALECT_VALUES.join(', ')}`
+    );
   }
   return value as Dialect;
 }
@@ -80,9 +83,54 @@ function validateConfigurationSettings(input: {
   if (settings.dialect !== undefined || settings.baseUrl !== undefined) {
     const dialect = requireDialect(settings.dialect);
     if (!resolveHarnessDialect(input.consumerTarget, dialect)) {
-      throw errors.badRequest(`Agent ${input.consumerTarget} does not support provider dialect ${dialect}`);
+      throw errors.badRequest(
+        `Agent ${input.consumerTarget} does not support provider dialect ${dialect}`
+      );
     }
   }
+}
+
+async function listAffectedConfigurationProjectIds(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  userId: string,
+  configurationId: string
+): Promise<string[]> {
+  const rows = await db
+    .select({ projectId: schema.ccAttachments.projectId })
+    .from(schema.ccAttachments)
+    .where(
+      and(
+        eq(schema.ccAttachments.configurationId, configurationId),
+        eq(schema.ccAttachments.userId, userId)
+      )
+    );
+  return uniqueProjectIds(rows.map((row) => row.projectId));
+}
+
+async function listAffectedCredentialProjectIds(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  userId: string,
+  credentialId: string
+): Promise<string[]> {
+  const rows = await db
+    .select({ projectId: schema.ccAttachments.projectId })
+    .from(schema.ccAttachments)
+    .innerJoin(
+      schema.ccConfigurations,
+      eq(schema.ccAttachments.configurationId, schema.ccConfigurations.id)
+    )
+    .where(
+      and(
+        eq(schema.ccConfigurations.credentialId, credentialId),
+        eq(schema.ccConfigurations.ownerId, userId),
+        eq(schema.ccAttachments.userId, userId)
+      )
+    );
+  return uniqueProjectIds(rows.map((row) => row.projectId));
+}
+
+function uniqueProjectIds(projectIds: Array<string | null>): string[] {
+  return [...new Set(projectIds.filter((projectId): projectId is string => !!projectId))];
 }
 
 // =============================================================================
@@ -115,7 +163,13 @@ ccRoutes.post('/credentials', async (c) => {
   const userId = getUserId(c);
   const body = await c.req.json();
 
-  const VALID_KINDS: CCCredentialKind[] = ['api-key', 'oauth-token', 'openai-compatible', 'cloud-provider', 'auth-json'];
+  const VALID_KINDS: CCCredentialKind[] = [
+    'api-key',
+    'oauth-token',
+    'openai-compatible',
+    'cloud-provider',
+    'auth-json',
+  ];
   const { name, kind, secret } = body;
   if (!name || !kind || !secret) {
     throw errors.badRequest('name, kind, and secret are required');
@@ -168,6 +222,7 @@ ccRoutes.patch('/credentials/:id', async (c) => {
     .returning({ id: schema.ccCredentials.id });
 
   if (result.length === 0) throw errors.notFound('Credential');
+  await reconcileCapacityPoolsForCredentialMutation(c.env, { scope: 'user', userId });
   return c.json({ success: true });
 });
 
@@ -177,12 +232,19 @@ ccRoutes.delete('/credentials/:id', async (c) => {
   const userId = getUserId(c);
   const { id } = c.req.param();
 
+  const affectedProjectIds = await listAffectedCredentialProjectIds(db, userId, id);
+
   const result = await db
     .delete(schema.ccCredentials)
     .where(and(eq(schema.ccCredentials.id, id), eq(schema.ccCredentials.ownerId, userId)))
     .returning({ id: schema.ccCredentials.id });
 
   if (result.length === 0) throw errors.notFound('Credential');
+  await reconcileCapacityPoolsForCredentialMutation(c.env, {
+    scope: 'user',
+    userId,
+    projectIds: affectedProjectIds,
+  });
   return c.json({ success: true });
 });
 
@@ -227,7 +289,9 @@ ccRoutes.post('/configurations', async (c) => {
     throw errors.badRequest('name, consumerKind, and consumerTarget are required');
   }
   if (!VALID_CONSUMER_KINDS.includes(consumerKind)) {
-    throw errors.badRequest(`Invalid consumerKind. Must be one of: ${VALID_CONSUMER_KINDS.join(', ')}`);
+    throw errors.badRequest(
+      `Invalid consumerKind. Must be one of: ${VALID_CONSUMER_KINDS.join(', ')}`
+    );
   }
   validateConfigurationSettings({ consumerKind, consumerTarget, settings });
 
@@ -236,7 +300,9 @@ ccRoutes.post('/configurations', async (c) => {
     const [cred] = await db
       .select({ id: schema.ccCredentials.id })
       .from(schema.ccCredentials)
-      .where(and(eq(schema.ccCredentials.id, credentialId), eq(schema.ccCredentials.ownerId, userId)))
+      .where(
+        and(eq(schema.ccCredentials.id, credentialId), eq(schema.ccCredentials.ownerId, userId))
+      )
       .limit(1);
     if (!cred) throw errors.badRequest('Credential not found or not owned by user');
   }
@@ -270,7 +336,12 @@ ccRoutes.patch('/configurations/:id', async (c) => {
     const [cred] = await db
       .select({ id: schema.ccCredentials.id })
       .from(schema.ccCredentials)
-      .where(and(eq(schema.ccCredentials.id, body.credentialId), eq(schema.ccCredentials.ownerId, userId)))
+      .where(
+        and(
+          eq(schema.ccCredentials.id, body.credentialId),
+          eq(schema.ccCredentials.ownerId, userId)
+        )
+      )
       .limit(1);
     if (!cred) throw errors.badRequest('Credential not found or not owned by user');
     updates.credentialId = body.credentialId;
@@ -308,6 +379,7 @@ ccRoutes.patch('/configurations/:id', async (c) => {
     .returning({ id: schema.ccConfigurations.id });
 
   if (result.length === 0) throw errors.notFound('Configuration');
+  await reconcileCapacityPoolsForCredentialMutation(c.env, { scope: 'user', userId });
   return c.json({ success: true });
 });
 
@@ -317,12 +389,19 @@ ccRoutes.delete('/configurations/:id', async (c) => {
   const userId = getUserId(c);
   const { id } = c.req.param();
 
+  const affectedProjectIds = await listAffectedConfigurationProjectIds(db, userId, id);
+
   const result = await db
     .delete(schema.ccConfigurations)
     .where(and(eq(schema.ccConfigurations.id, id), eq(schema.ccConfigurations.ownerId, userId)))
     .returning({ id: schema.ccConfigurations.id });
 
   if (result.length === 0) throw errors.notFound('Configuration');
+  await reconcileCapacityPoolsForCredentialMutation(c.env, {
+    scope: 'user',
+    userId,
+    projectIds: affectedProjectIds,
+  });
   return c.json({ success: true });
 });
 
@@ -369,7 +448,12 @@ ccRoutes.post('/attachments', async (c) => {
   const [cfg] = await db
     .select()
     .from(schema.ccConfigurations)
-    .where(and(eq(schema.ccConfigurations.id, configurationId), eq(schema.ccConfigurations.ownerId, userId)))
+    .where(
+      and(
+        eq(schema.ccConfigurations.id, configurationId),
+        eq(schema.ccConfigurations.ownerId, userId)
+      )
+    )
     .limit(1);
   if (!cfg) throw errors.badRequest('Configuration not found or not owned by user');
 
@@ -393,6 +477,10 @@ ccRoutes.post('/attachments', async (c) => {
     projectId: projectId ?? null,
     isActive: true,
   });
+  await reconcileCapacityPoolsForCredentialMutation(
+    c.env,
+    projectId ? { scope: 'project', userId, projectId } : { scope: 'user', userId }
+  );
 
   return c.json({ id, configurationId, projectId: projectId ?? null }, 201);
 });
@@ -416,9 +504,14 @@ ccRoutes.patch('/attachments/:id', async (c) => {
     .update(schema.ccAttachments)
     .set(updates)
     .where(and(eq(schema.ccAttachments.id, id), eq(schema.ccAttachments.userId, userId)))
-    .returning({ id: schema.ccAttachments.id });
+    .returning({ id: schema.ccAttachments.id, projectId: schema.ccAttachments.projectId });
 
   if (result.length === 0) throw errors.notFound('Attachment');
+  await reconcileCapacityPoolsForCredentialMutation(c.env, {
+    scope: 'user',
+    userId,
+    projectIds: uniqueProjectIds(result.map((row) => row.projectId)),
+  });
   return c.json({ success: true });
 });
 
@@ -431,9 +524,14 @@ ccRoutes.delete('/attachments/:id', async (c) => {
   const result = await db
     .delete(schema.ccAttachments)
     .where(and(eq(schema.ccAttachments.id, id), eq(schema.ccAttachments.userId, userId)))
-    .returning({ id: schema.ccAttachments.id });
+    .returning({ id: schema.ccAttachments.id, projectId: schema.ccAttachments.projectId });
 
   if (result.length === 0) throw errors.notFound('Attachment');
+  await reconcileCapacityPoolsForCredentialMutation(c.env, {
+    scope: 'user',
+    userId,
+    projectIds: uniqueProjectIds(result.map((row) => row.projectId)),
+  });
   return c.json({ success: true });
 });
 

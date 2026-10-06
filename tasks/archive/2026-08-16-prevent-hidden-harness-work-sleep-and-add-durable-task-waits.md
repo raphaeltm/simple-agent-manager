@@ -188,7 +188,7 @@ Update `/workflow` to persist its state, call `wait_for_subtasks`, and end the c
 - SAM parent session `36a5bb77-2746-43c1-8669-030b51b8f36d`
 - SAM parent task `01M03VFVP79GR882BJMPKZV58V`
 - Ready idea `01KZK586BN98BRDGKC44V12HT0`
-- Durable execution foundation task `tasks/active/2026-08-09-integrate-durable-execution-foundations.md`
+- Durable execution foundation task `tasks/archive/2026-08-09-integrate-durable-execution-foundations.md`
 - ACP extensibility: https://agentclientprotocol.com/protocol/v1/extensibility
 - `acp-go-sdk` extension handler: https://github.com/coder/acp-go-sdk/blob/v0.13.5/extensions.go
 - Claude ACP raw lifecycle option: https://github.com/agentclientprotocol/claude-agent-acp/blob/v0.58.1/src/acp-agent.ts

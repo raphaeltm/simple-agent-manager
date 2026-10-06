@@ -30,6 +30,8 @@ export interface FeedbackErrorEvidence extends IncidentReopenEvidence {
 }
 export interface FeedbackErrorGroup {
   signature: string;
+  canonicalSignature?: string;
+  legacySignatures?: string[];
   source: string;
   severity: FeedbackSeverity;
   summary: string;
@@ -40,6 +42,7 @@ export interface FeedbackErrorGroup {
 }
 export interface ExistingTriagePriorityRow {
   signature: string;
+  canonical_signature?: string | null;
   source: string | null;
   diagnosis_id: string | null;
   idea_id: string | null;

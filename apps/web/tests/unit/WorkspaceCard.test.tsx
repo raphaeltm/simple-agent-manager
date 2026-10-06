@@ -2,7 +2,7 @@ import type { WorkspaceResponse } from '@simple-agent-manager/shared';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { WorkspaceCard } from '../../src/components/WorkspaceCard';
 
@@ -38,7 +38,7 @@ function renderCard(
     onStop?: (id: string) => void;
     onRestart?: (id: string) => void;
     onDelete?: (id: string) => void;
-  } = {},
+  } = {}
 ) {
   return render(
     <MemoryRouter>
@@ -48,7 +48,7 @@ function renderCard(
         onRestart={handlers.onRestart}
         onDelete={handlers.onDelete}
       />
-    </MemoryRouter>,
+    </MemoryRouter>
   );
 }
 
@@ -81,7 +81,20 @@ describe('WorkspaceCard', () => {
 
   it('shows "Start" primary action for stopped workspace', () => {
     renderCard(makeWorkspace({ status: 'stopped' }), { onRestart, onDelete });
-    expect(screen.getByRole('button', { name: 'Start' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start' })).toHaveClass('min-h-14');
+  });
+
+  it('lets an evicted workspace restart without opening its stopped runtime', async () => {
+    const user = userEvent.setup();
+    renderCard(
+      makeWorkspace({ status: 'evicted', errorMessage: 'Stopped after memory pressure' }),
+      { onRestart, onDelete }
+    );
+    expect(screen.queryByRole('button', { name: 'Open' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Start' }));
+    expect(onRestart).toHaveBeenCalledWith('ws-1');
+    await user.click(screen.getByRole('button', { name: /actions for/i }));
+    expect(screen.getByRole('menuitem', { name: 'Restart' })).toBeInTheDocument();
   });
 
   it('shows "Please wait..." for transitional states', () => {

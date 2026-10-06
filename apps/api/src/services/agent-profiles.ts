@@ -25,6 +25,10 @@ import {
   baseProfileInsertValues,
   toBaseProfileFields,
 } from './profile-fields';
+import {
+  ResourceRequirementsValidationError,
+  serializeResourceRequirementsInput,
+} from './resource-requirements-input';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -47,6 +51,52 @@ function parseGitHubCliPolicy(raw: string | null): GitHubCliPolicy | null {
 function serializeGitHubCliPolicy(policy: GitHubCliPolicy | null | undefined): string | null {
   if (!policy || policy.mode === 'inherit') return null;
   return JSON.stringify(policy);
+}
+
+function serializeProfileResourceRequirements(body: {
+  resourceRequirements?: unknown;
+  resourceRequirementsJson?: string | null;
+}): string | null {
+  try {
+    if (body.resourceRequirements !== undefined) {
+      return serializeResourceRequirementsInput(body.resourceRequirements);
+    }
+    if (body.resourceRequirementsJson !== undefined) {
+      return serializeResourceRequirementsInput(
+        body.resourceRequirementsJson,
+        'resourceRequirementsJson'
+      );
+    }
+    return null;
+  } catch (err) {
+    if (err instanceof ResourceRequirementsValidationError) {
+      throw errors.badRequest(err.message);
+    }
+    throw err;
+  }
+}
+
+function applyProfileResourceRequirementsUpdate(
+  updates: Partial<schema.NewAgentProfileRow>,
+  body: UpdateAgentProfileRequest
+): void {
+  try {
+    if (body.resourceRequirements !== undefined) {
+      updates.resourceRequirementsJson = serializeResourceRequirementsInput(
+        body.resourceRequirements
+      );
+    } else if (body.resourceRequirementsJson !== undefined) {
+      updates.resourceRequirementsJson = serializeResourceRequirementsInput(
+        body.resourceRequirementsJson,
+        'resourceRequirementsJson'
+      );
+    }
+  } catch (err) {
+    if (err instanceof ResourceRequirementsValidationError) {
+      throw errors.badRequest(err.message);
+    }
+    throw err;
+  }
 }
 
 function validateProfileEffort(agentType: string, effort: unknown): void {
@@ -156,6 +206,7 @@ export async function createProfile(
     userId,
     name,
     ...baseProfileInsertValues(body, env),
+    resourceRequirementsJson: serializeProfileResourceRequirements(body),
     taskMode: body.taskMode ?? null,
     githubCliPolicy: serializeGitHubCliPolicy(body.githubCliPolicy),
     isBuiltin: 0,
@@ -207,6 +258,7 @@ export async function updateProfile(
   };
 
   applyBaseProfileUpdates(updates, body);
+  applyProfileResourceRequirementsUpdate(updates, body);
   if (body.githubCliPolicy !== undefined)
     updates.githubCliPolicy = serializeGitHubCliPolicy(body.githubCliPolicy);
 
@@ -265,6 +317,7 @@ export async function resolveAgentProfile(
       maxTurns: p.maxTurns,
       timeoutMinutes: p.timeoutMinutes,
       vmSizeOverride: p.vmSizeOverride,
+      resourceRequirementsJson: p.resourceRequirementsJson,
       provider: p.provider,
       vmLocation: p.vmLocation,
       workspaceProfile: p.workspaceProfile,
@@ -288,6 +341,7 @@ export async function resolveAgentProfile(
       maxTurns: null,
       timeoutMinutes: null,
       vmSizeOverride: null,
+      resourceRequirementsJson: null,
       provider: null,
       vmLocation: null,
       workspaceProfile: null,
@@ -366,6 +420,7 @@ export async function resolveAgentProfile(
     maxTurns: null,
     timeoutMinutes: null,
     vmSizeOverride: null,
+    resourceRequirementsJson: null,
     provider: null,
     vmLocation: null,
     workspaceProfile: null,

@@ -1,5 +1,9 @@
 # Push parent branch before dispatching child tasks
 
+> **Reconciliation 2026-09-30:** still open, but only for the auto-push or hybrid approach. The
+> no-clone-failure and clear-semantics criteria are already met by `ensureWorkspaceBranchOnRemote`
+> (PR #1863) and the `branch` hint "Only set this if you have already pushed" (`53f1e86d2`).
+
 ## Problem
 
 When an agent dispatches a child task, the child might benefit from starting on the parent's branch (to build on in-progress work). Currently we default to `main` because the parent's output branch may not be pushed yet.

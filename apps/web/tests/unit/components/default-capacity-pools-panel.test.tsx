@@ -65,9 +65,9 @@ vi.mock('../../../src/lib/api/capacity-pools', () => ({
 
 function renderPanel(
   props:
-    | { scope?: 'project'; projectId: string }
-    | { scope: 'user' }
-    | { scope: 'installation' } = { projectId: 'project-1' }
+    { scope?: 'project'; projectId: string } | { scope: 'user' } | { scope: 'installation' } = {
+    projectId: 'project-1',
+  }
 ) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -255,6 +255,7 @@ function summary(scope: CapacityPoolScope): DefaultCapacityPoolSummary {
       revision: 3,
       status: 'active',
       strategy: 'balanced',
+      deploymentStrategy: 'smallest-fit',
       exhaustionPolicy: 'queue',
       createdAt: '2026-08-28T00:00:00.000Z',
       updatedAt: '2026-08-28T00:00:00.000Z',
@@ -376,6 +377,41 @@ describe('DefaultCapacityPoolsPanel', () => {
     rendered.unmount();
   });
 
+  it.each([
+    {
+      props: { projectId: 'project-1' } as const,
+      setup: () =>
+        mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(
+          response('project', summary('project'))
+        ),
+      assertFetch: () =>
+        expect(mocks.fetchProjectDefaultCapacityPools).toHaveBeenCalledWith('project-1'),
+    },
+    {
+      props: { scope: 'user' } as const,
+      setup: () =>
+        mocks.fetchUserDefaultCapacityPools.mockResolvedValue(response('user', summary('user'))),
+      assertFetch: () => expect(mocks.fetchUserDefaultCapacityPools).toHaveBeenCalledWith(),
+    },
+    {
+      props: { scope: 'installation' } as const,
+      setup: () =>
+        mocks.fetchInstallationDefaultCapacityPools.mockResolvedValue(
+          response('installation', summary('installation'))
+        ),
+      assertFetch: () => expect(mocks.fetchInstallationDefaultCapacityPools).toHaveBeenCalledWith(),
+    },
+  ])(
+    'loads $props.scope defaults without forcing reconciliation',
+    async ({ props, setup, assertFetch }) => {
+      setup();
+
+      renderPanel(props);
+
+      await waitFor(assertFetch);
+    }
+  );
+
   it('renders effective pool policy, sources, and provider-native allowed instances without secret fields', async () => {
     mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(
       response('project', summary('project'))
@@ -471,7 +507,11 @@ describe('DefaultCapacityPoolsPanel', () => {
     expect(await screen.findByText('No visible active default pool')).toBeInTheDocument();
     expect(
       screen.getAllByText((_, element) =>
-        Boolean(element?.textContent?.includes('0 allowed instances · Balanced'))
+        Boolean(
+          element?.textContent?.includes(
+            '0 allowed instances · workspaces Balanced · deployments Smallest Fit'
+          )
+        )
       ).length
     ).toBeGreaterThan(0);
     expect(
@@ -523,7 +563,12 @@ describe('DefaultCapacityPoolsPanel', () => {
     mocks.updateProjectDefaultCapacityPools.mockResolvedValue(
       response('project', {
         ...current,
-        pool: { ...current.pool, strategy: 'pack', revision: 4 },
+        pool: {
+          ...current.pool,
+          strategy: 'pack',
+          deploymentStrategy: 'balanced',
+          revision: 4,
+        },
         candidates: current.candidates.map((candidateItem) =>
           candidateItem.id === 'candidate-project-ash-cpx31'
             ? { ...candidateItem, status: 'deleted' }
@@ -538,14 +583,20 @@ describe('DefaultCapacityPoolsPanel', () => {
     renderPanel();
 
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
-    fireEvent.change(screen.getByLabelText('Strategy'), { target: { value: 'pack' } });
+    fireEvent.change(screen.getByLabelText('Workspace strategy'), { target: { value: 'pack' } });
+    fireEvent.change(screen.getByLabelText('Deployment strategy'), {
+      target: { value: 'balanced' },
+    });
+    fireEvent.change(screen.getByRole('spinbutton', { name: /Maximum nodes/ }), {
+      target: { value: '5' },
+    });
     fireEvent.click(screen.getByRole('button', { name: /Remove Hetzner ash cpx31/ }));
     fireEvent.click(screen.getByRole('button', { name: /Add back Hetzner hil ccx33/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
     await waitFor(() =>
       expect(mocks.updateProjectDefaultCapacityPools).toHaveBeenCalledWith('project-1', {
-        policy: { strategy: 'pack' },
+        policy: { strategy: 'pack', deploymentStrategy: 'balanced', maxNodes: 5 },
         candidates: [
           { id: 'candidate-project-ash-cpx31', status: 'deleted' },
           { id: 'candidate-project-hil-ccx33', status: 'active' },
@@ -553,6 +604,30 @@ describe('DefaultCapacityPoolsPanel', () => {
       })
     );
     expect(mocks.toast.success).toHaveBeenCalledWith('Project default compute pool updated');
+  });
+
+  it('updates the deployment strategy independently from workspace placement', async () => {
+    const current = summary('project');
+    mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(response('project', current));
+    mocks.updateProjectDefaultCapacityPools.mockResolvedValue(
+      response('project', {
+        ...current,
+        pool: { ...current.pool, deploymentStrategy: 'balanced', revision: 4 },
+      })
+    );
+
+    renderPanel();
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.change(screen.getByLabelText('Deployment strategy'), {
+      target: { value: 'balanced' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() =>
+      expect(mocks.updateProjectDefaultCapacityPools).toHaveBeenCalledWith('project-1', {
+        policy: { deploymentStrategy: 'balanced' },
+      })
+    );
   });
 
   it('filters catalog offerings and applies bulk add/remove through candidate statuses', async () => {

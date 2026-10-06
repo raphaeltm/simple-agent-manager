@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -45,6 +46,49 @@ func TestCreateCheckoutBranchKeepsExistingExplicitBranch(t *testing.T) {
 	}
 	if got := runCheckoutBranchGit(t, repo, "branch", "--show-current"); got != "feature/existing" {
 		t.Fatalf("current branch = %q, want feature/existing", got)
+	}
+}
+
+func TestCreateCheckoutBranchTracksExistingRemoteBranch(t *testing.T) {
+	t.Parallel()
+
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	runCheckoutBranchGit(t, filepath.Dir(remote), "init", "--bare", remote)
+	seed := t.TempDir()
+	runCheckoutBranchGit(t, seed, "init", "--initial-branch=main")
+	runCheckoutBranchGit(t, seed, "config", "user.name", "SAM Test")
+	runCheckoutBranchGit(t, seed, "config", "user.email", "sam@example.invalid")
+	runCheckoutBranchGit(t, seed, "commit", "--allow-empty", "-m", "main")
+	runCheckoutBranchGit(t, seed, "remote", "add", "origin", remote)
+	runCheckoutBranchGit(t, seed, "push", "-u", "origin", "main")
+	runCheckoutBranchGit(t, seed, "checkout", "-b", "sam/saved-task")
+	if err := os.WriteFile(filepath.Join(seed, "saved.txt"), []byte("saved"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runCheckoutBranchGit(t, seed, "add", "saved.txt")
+	runCheckoutBranchGit(t, seed, "commit", "-m", "saved task state")
+	savedCommit := runCheckoutBranchGit(t, seed, "rev-parse", "HEAD")
+	runCheckoutBranchGit(t, seed, "push", "-u", "origin", "sam/saved-task")
+
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	runCheckoutBranchGit(t, filepath.Dir(workspace), "clone", "--branch", "main", remote, workspace)
+	if err := createCheckoutBranch(context.Background(), workspace, "main", "sam/saved-task"); err != nil {
+		t.Fatalf("create checkout branch: %v", err)
+	}
+
+	if got := runCheckoutBranchGit(t, workspace, "rev-parse", "HEAD"); got != savedCommit {
+		t.Fatalf("checkout branch commit = %q, want saved remote commit %q", got, savedCommit)
+	}
+	if got := runCheckoutBranchGit(t, workspace, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"); got != "origin/sam/saved-task" {
+		t.Fatalf("checkout upstream = %q, want origin/sam/saved-task", got)
+	}
+}
+
+func TestCreateCheckoutBranchDoesNotTreatInspectionFailureAsMissingBranch(t *testing.T) {
+	workspace := t.TempDir()
+	err := createCheckoutBranch(context.Background(), workspace, "main", "sam/saved-task")
+	if err == nil || !strings.Contains(err.Error(), "failed to inspect remote checkout branch") {
+		t.Fatalf("createCheckoutBranch() error = %v, want remote inspection failure", err)
 	}
 }
 

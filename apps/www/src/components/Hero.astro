@@ -1,6 +1,7 @@
 ---
 import NodeGrid from './NodeGrid.astro';
 import OptimizedFeatureImage from './OptimizedFeatureImage.astro';
+import { proofStrip } from '../data/proof-strip';
 ---
 
 <section class="hero">
@@ -17,8 +18,9 @@ import OptimizedFeatureImage from './OptimizedFeatureImage.astro';
     </h1>
 
     <p class="hero-subtitle animate-on-scroll">
-      Every agent runs in its own isolated container on your cloud.
-      Run 5 or 500 in parallel — SAM handles provisioning, scheduling, and cleanup.
+      Use coding agents as a team, with shared context, and collaborative tools and controls.
+      Agents run in isolated Instant containers or VM workspaces, with hosted compute and BYOC
+      options. SAM handles provisioning, scheduling, and cleanup.
     </p>
 
     <div class="hero-actions animate-on-scroll">
@@ -32,11 +34,20 @@ import OptimizedFeatureImage from './OptimizedFeatureImage.astro';
       </a>
     </div>
 
+    <div class="hero-proof animate-on-scroll">
+      {proofStrip.map((item, i) => (
+        <>
+          {i > 0 && <span class="hero-proof-dot" aria-hidden="true">·</span>}
+          <span class="hero-proof-item">{item}</span>
+        </>
+      ))}
+    </div>
+
     <!-- App screenshot -->
     <div class="screenshot-preview animate-on-scroll">
       <OptimizedFeatureImage
-        src="/images/features/live-session.png"
-        alt="SAM project chat showing an agent working on a task — tool calls, code execution, and real-time progress"
+        src="/images/features/sam-hero-live-session.png"
+        alt="A busy SAM project chat showing a user prompt, the agent’s plan, grouped tool calls, header chips for comments, infrastructure, and task status, a profile bar, and a session sidebar with several topics"
         loading="eager"
       />
     </div>
@@ -131,7 +142,27 @@ import OptimizedFeatureImage from './OptimizedFeatureImage.astro';
     flex-wrap: wrap;
     justify-content: center;
     gap: 12px;
-    margin-bottom: 64px;
+    margin-bottom: 28px;
+  }
+
+  .hero-proof {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--color-fg-dim);
+    margin-bottom: 56px;
+  }
+
+  .hero-proof-item {
+    white-space: nowrap;
+  }
+
+  .hero-proof-dot {
+    color: var(--color-accent);
   }
 
   .btn-hero {

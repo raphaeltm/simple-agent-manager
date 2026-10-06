@@ -130,11 +130,10 @@ func (s *Server) sendAcpHeartbeatForProject(projectID, nodeID, token string) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
+		// Even a terminal status here describes one project on this node, not
+		// the node: only the node's own heartbeat can disown it
+		// (callback_terminal.go).
 		body := readAcpHeartbeatErrorBody(resp.Body)
-		if isTerminalControlPlaneCallbackStatus(resp.StatusCode) {
-			s.markControlPlaneCallbacksTerminal("node_acp_heartbeat", resp.StatusCode, body)
-			return
-		}
 		level := slog.LevelWarn
 		if isTransientAcpHeartbeatResponse(resp.StatusCode, body) {
 			level = slog.LevelInfo

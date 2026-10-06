@@ -1,0 +1,283 @@
+---
+import Base from '../../layouts/Base.astro';
+import Header from '../../components/Header.astro';
+import CtaFooter from '../../components/CtaFooter.astro';
+import OptimizedFeatureImage from '../../components/OptimizedFeatureImage.astro';
+import { featureGroups, featureSections } from '../../data/features';
+import { proofStrip } from '../../data/proof-strip';
+---
+
+<Base
+  title="All Features — SAM"
+  description="Everything SAM does for teams running AI coding agents in production: shared projects, comments, multi-cloud compute pools, cost reporting, and event-driven automation."
+>
+  <Header />
+  <main>
+    <section class="idx-hero">
+      <div class="idx-hero-glow" aria-hidden="true"></div>
+      <div class="container idx-hero-content">
+        <span class="section-label animate-on-scroll">All Features</span>
+        <h1 class="idx-hero-title animate-on-scroll">
+          Everything your team needs to<br />
+          <span class="gradient-text">run agents in production</span>
+        </h1>
+        <p class="idx-hero-subtitle animate-on-scroll">
+          An open-source control plane for coding agents: shared projects, comments that feed
+          agents, multi-cloud compute pools with cost reporting, and event-driven automation.
+        </p>
+        <div class="idx-proof animate-on-scroll">
+          {proofStrip.map((item, i) => (
+            <>
+              {i > 0 && <span class="idx-proof-dot" aria-hidden="true">·</span>}
+              <span class="idx-proof-item">{item}</span>
+            </>
+          ))}
+        </div>
+      </div>
+    </section>
+
+    <hr class="divider" />
+
+    {featureGroups.map((group) => {
+      const sections = featureSections.filter((section) => section.group === group.id);
+      if (sections.length === 0) return null;
+      return (
+        <section class="idx-group" id={`group-${group.id}`}>
+          <div class="container">
+            <h2 class="idx-group-title animate-on-scroll">{group.label}</h2>
+            <div class="idx-card-grid">
+              {sections.map((section) => (
+                <a href={`/features/${section.slug}/`} class="idx-card animate-on-scroll">
+                  <span class="idx-card-glow" aria-hidden="true"></span>
+                  <div class="idx-card-image">
+                    <OptimizedFeatureImage
+                      src={section.screenshots[0].src}
+                      alt={section.screenshots[0].alt}
+                      loading="lazy"
+                    />
+                  </div>
+                  <div class="idx-card-body">
+                    <span class="idx-card-label">{section.label}</span>
+                    <p class="idx-card-summary">{section.summary}</p>
+                  </div>
+                  <span class="idx-card-arrow" aria-hidden="true">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+                  </span>
+                </a>
+              ))}
+            </div>
+          </div>
+        </section>
+      );
+    })}
+
+    <hr class="divider" />
+    <CtaFooter />
+  </main>
+</Base>
+
+<style>
+  .idx-hero {
+    position: relative;
+    padding: 140px 0 60px;
+    overflow: hidden;
+    text-align: center;
+  }
+
+  @media (min-width: 768px) {
+    .idx-hero {
+      padding: 160px 0 80px;
+    }
+  }
+
+  .idx-hero-glow {
+    position: absolute;
+    top: -160px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 900px;
+    height: 600px;
+    background: radial-gradient(ellipse at center, rgba(22, 163, 74, 0.18) 0%, rgba(22, 163, 74, 0.05) 45%, transparent 72%);
+    pointer-events: none;
+  }
+
+  :global(html[data-theme='light']) .idx-hero-glow {
+    background: radial-gradient(ellipse at center, rgba(21, 128, 61, 0.1) 0%, rgba(21, 128, 61, 0.04) 45%, transparent 72%);
+  }
+
+  .idx-hero-content {
+    position: relative;
+    max-width: 760px;
+    margin: 0 auto;
+  }
+
+  .idx-hero-title {
+    font-family: var(--font-display);
+    font-size: clamp(2rem, 5vw, 3.25rem);
+    font-weight: 600;
+    line-height: 1.15;
+    letter-spacing: -0.03em;
+    color: var(--color-fg-primary);
+    margin: 16px 0 20px;
+  }
+
+  .gradient-text {
+    background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-success) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .idx-hero-subtitle {
+    font-size: clamp(1rem, 2vw, 1.1875rem);
+    color: var(--color-fg-muted);
+    line-height: 1.7;
+    max-width: 620px;
+    margin: 0 auto 28px;
+  }
+
+  .idx-proof {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--color-fg-dim);
+  }
+
+  .idx-proof-item {
+    white-space: nowrap;
+  }
+
+  .idx-proof-dot {
+    color: var(--color-accent);
+  }
+
+  /* ---- Groups ---- */
+  .idx-group {
+    padding: 56px 0;
+  }
+
+  @media (min-width: 768px) {
+    .idx-group {
+      padding: 72px 0;
+    }
+  }
+
+  .idx-group + .idx-group {
+    border-top: 1px solid var(--glass-border);
+  }
+
+  .idx-group-title {
+    font-family: var(--font-display);
+    font-size: clamp(1.375rem, 2.5vw, 1.75rem);
+    font-weight: 600;
+    color: var(--color-fg-primary);
+    margin-bottom: 28px;
+  }
+
+  .idx-card-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+
+  @media (min-width: 640px) {
+    .idx-card-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .idx-card-grid {
+      grid-template-columns: repeat(3, 1fr);
+    }
+  }
+
+  .idx-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    isolation: isolate;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--glass-border);
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    overflow: hidden;
+    color: inherit;
+    transition: border-color 0.25s ease, transform 0.25s ease, box-shadow 0.25s ease;
+  }
+
+  .idx-card:hover {
+    border-color: var(--glass-border-hover);
+    transform: translateY(-3px);
+    box-shadow: var(--glass-shadow), 0 0 50px rgba(22, 163, 74, 0.12);
+    color: inherit;
+  }
+
+  .idx-card-glow {
+    position: absolute;
+    inset: -20% -10% auto -10%;
+    height: 60%;
+    z-index: -1;
+    background: radial-gradient(ellipse at center, rgba(22, 163, 74, 0.2) 0%, transparent 70%);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+  }
+
+  .idx-card:hover .idx-card-glow {
+    opacity: 1;
+  }
+
+  .idx-card-image {
+    display: block;
+    border-bottom: 1px solid var(--glass-border);
+  }
+
+  .idx-card-image :global(picture),
+  .idx-card-image :global(img) {
+    display: block;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 16 / 10;
+    object-fit: cover;
+  }
+
+  .idx-card-body {
+    padding: 20px 22px 16px;
+    flex: 1;
+  }
+
+  .idx-card-label {
+    display: block;
+    font-family: var(--font-display);
+    font-size: 1.0625rem;
+    font-weight: 600;
+    color: var(--color-fg-primary);
+    margin-bottom: 8px;
+  }
+
+  .idx-card-summary {
+    font-size: 0.9375rem;
+    color: var(--color-fg-muted);
+    line-height: 1.6;
+  }
+
+  .idx-card-arrow {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding: 0 22px 20px;
+    color: var(--color-fg-dim);
+    transition: color 0.2s ease, transform 0.2s ease;
+  }
+
+  .idx-card:hover .idx-card-arrow {
+    color: var(--color-accent);
+    transform: translateX(4px);
+  }
+</style>

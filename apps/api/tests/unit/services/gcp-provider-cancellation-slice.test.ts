@@ -43,6 +43,16 @@ const GCP_TOKEN = JSON.stringify({
 function makeCredentialDbMock(row?: Record<string, unknown>) {
   let credentialLimitCount = 0;
   function rowsFor(table: unknown, limited: boolean): unknown[] {
+    if (table === schema.ccCredentials && limited) {
+      return [
+        {
+          encryptedToken: 'ciphertext',
+          iv: 'iv',
+          createdAt: '2026-09-04T00:00:00.000Z',
+          updatedAt: '2026-09-04T00:00:00.000Z',
+        },
+      ];
+    }
     if (table !== schema.credentials || !limited || !row) return [];
     const queryIndex = credentialLimitCount++;
     const isProjectCredential = row.projectId != null;

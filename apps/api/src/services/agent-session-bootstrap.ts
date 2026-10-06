@@ -153,6 +153,17 @@ async function prepareAcpSessionForFreshStart(
   agentSessionId: string
 ): Promise<string> {
   try {
+    if (input.chatSessionId) {
+      await projectDataService.persistMessage(
+        env,
+        input.projectId,
+        input.chatSessionId,
+        'system',
+        'SAM restored this sleeping conversation from a degraded snapshot, so the agent is starting fresh and will read the persisted transcript before continuing.',
+        null,
+        `degraded-wake-${agentSessionId}`
+      );
+    }
     const session = await runMaybePhased(input, 'prepare_acp_session_fresh_start', () =>
       projectDataService.prepareAcpSessionForFreshStart(env, input.projectId, agentSessionId, {
         actorType: input.actor.type,
@@ -222,6 +233,7 @@ export async function startSamAwareAgentSession(
   const agentSessionId = input.agentSessionId || ulid();
   const generatedMcpToken = !input.existingMcpToken;
   const mcpToken = input.existingMcpToken || generateMcpToken();
+  let mcpTokenHandedOff = false;
   const guardedMutationOptions =
     input.sourceTaskGuard || input.beforeExternalMutation
       ? {
@@ -257,7 +269,10 @@ export async function startSamAwareAgentSession(
           env
         )
       );
-      await input.onMcpToken?.(mcpToken);
+      if (input.onMcpToken) {
+        await input.onMcpToken(mcpToken);
+        mcpTokenHandedOff = true;
+      }
     }
 
     // Resolved once and reused by both the create and start calls below. This is the single
@@ -379,7 +394,8 @@ export async function startSamAwareAgentSession(
       agentStarted: true,
     };
   } catch (err) {
-    if (generatedMcpToken) {
+    // Once persisted by the caller, the token belongs to its retry lifecycle.
+    if (generatedMcpToken && !mcpTokenHandedOff) {
       await revokeMcpToken(env.KV, mcpToken).catch(() => {});
     }
     await db

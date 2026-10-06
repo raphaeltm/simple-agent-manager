@@ -1,5 +1,25 @@
 # Instant-Session Capacity Controls: Per-User Quota + Real Request Cancellation
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:**
+>   - `max_instances` is deploy-configurable: `VM_AGENT_CONTAINER_MAX_INSTANCES` (default 3) in
+>     `scripts/deploy/sync-wrangler-config.ts:54,163`, wired at
+>     `.github/workflows/deploy-reusable.yml:838`, tested at
+>     `scripts/quality/sync-wrangler-config.test.ts:710` (PR #1697, 4f7f4dd1a).
+>   - The "or document why" branch of the cancellation item:
+>     `apps/api/src/services/node-agent.ts:317-328` explains why an `AbortSignal` cannot cross
+>     the DO RPC boundary (regression proven by PR #1544).
+> - **Still open:**
+>   - Per-user Instant quota. `acceptInstantSession` (`instant-session.ts:246-370`) has no
+>     per-user gate, and the capacity-pool node trigger (migration 0167) skips Instant nodes
+>     because their `capacity_pool_id` is null. The stale-row escape this needed now exists
+>     (the `instant_persistence` sweep in `apps/api/src/scheduled/stuck-tasks.ts`).
+>   - Rule-47 load review in the PR.
+> - **Moot/dropped:** real cancellation of the container request moves to
+>   `2026-07-21-instant-container-request-timeout-cancellation.md`, which has the workable design
+>   (timeout inside `proxyHttp`).
+
 ## Problem
 
 Security review of the 2026-07-19 instant-container clone fix (branch `sam/looks-instant-containers-no-p29hx9`) confirmed two pre-existing capacity gaps on the instant (cf-container) path:

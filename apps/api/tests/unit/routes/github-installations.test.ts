@@ -33,6 +33,7 @@ const mocks = vi.hoisted(() => ({
   },
   insertError: null as unknown,
   insertErrorTable: 'all' as 'all' | 'githubInstallations' | 'githubInstallationAccounts',
+  betterAuthAccountId: 'github-account-row' as string | null,
   log: {
     debug: vi.fn(),
     info: vi.fn(),
@@ -97,7 +98,15 @@ describe('GitHub App installation sharing', () => {
   let deleteResponses: unknown[][];
   let deletedTables: unknown[];
   const mockEnv = {
-    DATABASE: {} as D1Database,
+    DATABASE: {
+      prepare: vi.fn(() => ({
+        bind: vi.fn(() => ({
+          first: vi.fn(async () =>
+            mocks.betterAuthAccountId ? { id: mocks.betterAuthAccountId } : null
+          ),
+        })),
+      })),
+    } as unknown as D1Database,
     BASE_DOMAIN: 'example.com',
     GITHUB_CLIENT_ID: 'client',
     GITHUB_CLIENT_SECRET: 'secret',
@@ -117,6 +126,7 @@ describe('GitHub App installation sharing', () => {
     mocks.optionalAuthUser = { id: 'user-1', role: 'user', status: 'active', email: 'u@example.com', name: 'User', avatarUrl: null };
     mocks.insertError = null;
     mocks.insertErrorTable = 'all';
+    mocks.betterAuthAccountId = 'github-account-row';
     mocks.getAccessToken.mockResolvedValue({ accessToken: 'github-user-token' });
     mocks.getAuthenticatedGitHubUser.mockResolvedValue({ id: 591860, login: 'lionello' });
     mocks.getAuthenticatedUserOrganizations.mockResolvedValue([]);
@@ -1224,6 +1234,26 @@ describe('GitHub App installation sharing', () => {
       scopes: ['read:user', 'repo'],
       flow: 'request',
     });
+    expect(mocks.getAccessToken).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: { accountId: 'github-account-row', userId: 'user-1' },
+      })
+    );
     expectTokenNotLogged('github-user-token');
+  });
+
+  it('skips BetterAuth token lookup when no linked GitHub account row exists', async () => {
+    mocks.betterAuthAccountId = null;
+
+    const res = await app.request('/api/github/installations', {}, mockEnv);
+
+    expect(res.status).toBe(200);
+    expect(mocks.getAccessToken).not.toHaveBeenCalled();
+    expect(mocks.log.warn).toHaveBeenCalledWith('github.user_access_token_account_missing', {
+      userId: 'user-1',
+      tokenPresent: false,
+      flow: 'request',
+    });
+    expect(mocks.getUserAccessibleInstallations).not.toHaveBeenCalled();
   });
 });

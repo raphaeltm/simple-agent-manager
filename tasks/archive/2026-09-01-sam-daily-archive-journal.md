@@ -47,6 +47,6 @@ or unmerged work as a live feature.
 ## References
 
 - `apps/www/src/content/CLAUDE.md`
-- `tasks/active/2026-08-31-projectdata-terminal-archive-sharding.md` on
+- `tasks/archive/2026-08-31-projectdata-terminal-archive-sharding.md` on
   `sam/execute-task-using-skill-3bd8hd`
 - PR #1984: ProjectData terminal archive-sharding bridge

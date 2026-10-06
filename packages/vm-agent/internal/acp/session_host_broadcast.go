@@ -173,7 +173,7 @@ func (h *SessionHost) viewerWritePump(viewer *Viewer) {
 			}
 		case <-viewer.done:
 			return
-		case <-h.ctx.Done():
+		case <-h.lifecycleContext().Done():
 			return
 		}
 	}

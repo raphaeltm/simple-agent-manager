@@ -43,6 +43,7 @@ export interface Project {
   /** Cloudflare Artifacts repo ID. Null for GitHub/GitLab-backed projects. */
   artifactsRepoId?: string | null;
   defaultVmSize?: VMSize | null;
+  resourceRequirementsJson?: string | null;
   defaultAgentType?: string | null;
   defaultWorkspaceProfile?: WorkspaceProfile | null;
   /** Default devcontainer config name. null = auto-discover default. */
@@ -60,7 +61,6 @@ export interface Project {
   maxDispatchDepth?: number | null;
   maxSubTasksPerTask?: number | null;
   warmNodeTimeoutMs?: number | null;
-  maxWorkspacesPerNode?: number | null;
   nodeCpuThresholdPercent?: number | null;
   nodeMemoryThresholdPercent?: number | null;
   /** Per-project max triggers override. null = use platform default (MAX_TRIGGERS_PER_PROJECT). */
@@ -127,6 +127,7 @@ export interface UpdateProjectRequest {
   description?: string;
   defaultBranch?: string;
   defaultVmSize?: VMSize | null;
+  resourceRequirementsJson?: string | null;
   defaultAgentType?: string | null;
   defaultWorkspaceProfile?: WorkspaceProfile | null;
   /** Default devcontainer config name. null = reset to auto-discover. */
@@ -144,7 +145,6 @@ export interface UpdateProjectRequest {
   maxDispatchDepth?: number | null;
   maxSubTasksPerTask?: number | null;
   warmNodeTimeoutMs?: number | null;
-  maxWorkspacesPerNode?: number | null;
   nodeCpuThresholdPercent?: number | null;
   nodeMemoryThresholdPercent?: number | null;
   /** Per-project max triggers override. null = reset to platform default. */

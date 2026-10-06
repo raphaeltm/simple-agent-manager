@@ -1,6 +1,8 @@
+import { getTableColumns } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import * as schema from '../../../src/db/schema';
 import { groupTokensIntoMessages } from '../../../src/routes/mcp';
 import * as projectHelpers from '../../../src/routes/projects/_helpers';
 import * as agentProfileService from '../../../src/services/agent-profiles';
@@ -84,7 +86,13 @@ function createMockD1() {
       currentSql = sql;
       return stmt;
     }),
-    batch: vi.fn(),
+    batch: vi.fn(async (statements: unknown[]) =>
+      statements.map(() => ({
+        success: true,
+        results: [{ status: 'queued' }],
+        meta: { changes: 1 },
+      }))
+    ),
     _stmt: stmt,
     _currentSql: () => currentSql,
   };
@@ -97,6 +105,47 @@ function isCapacityPoolSql(sql: string): boolean {
     normalized.includes('capacity_pool_candidates') ||
     normalized.includes('capacity_sources')
   );
+}
+
+// Dispatch checks current project membership before reading the parent task.
+// Keep those rows independent of the task/count result queues below, and map
+// full Drizzle rows in schema order rather than object insertion order.
+function mockDispatchProjectAccess(
+  options: { projectExists?: boolean; memberRole?: string | null } = {}
+) {
+  const prepare = mockD1.prepare.getMockImplementation()!;
+  mockD1.prepare.mockImplementation((sql: string) => {
+    const projectQuery = sql.includes('from "projects"');
+    const memberQuery = sql.includes('from "project_members"');
+    if (!projectQuery && !memberQuery) return prepare(sql);
+
+    const read = async () => {
+      if (projectQuery && options.projectExists === false) return [];
+      if (memberQuery && options.memberRole === null) return [];
+      const configured = (await mockD1._stmt.all()).results.find(
+        (row: Record<string, unknown>) => row.id === 'proj-456'
+      );
+      const row: Record<string, unknown> = memberQuery
+        ? {
+            projectId: 'proj-456',
+            userId: 'user-789',
+            role: options.memberRole ?? 'owner',
+            status: 'active',
+          }
+        : {
+            id: 'proj-456',
+            userId: 'user-789',
+            name: 'Test Project',
+            repository: 'user/repo',
+            defaultBranch: 'main',
+            installationId: 'inst-1',
+            ...configured,
+          };
+      const table = memberQuery ? schema.projectMembers : schema.projects;
+      return [Object.keys(getTableColumns(table)).map((key) => row[key] ?? null)];
+    };
+    return { ...mockD1._stmt, bind: vi.fn().mockReturnThis(), raw: vi.fn(read) };
+  });
 }
 
 /**
@@ -167,8 +216,15 @@ function createStatefulTaskD1(task: StatefulTaskRow) {
         }),
         run: vi.fn(async () => {
           if (sql.includes('UPDATE tasks') && sql.includes("status = 'completed'")) {
-            const [completedAt, outputSummary, completionEvidence, updatedAt, taskId, projectId] =
-              statement.params;
+            const [
+              completedAt,
+              outputSummary,
+              outputPrUrl,
+              completionEvidence,
+              updatedAt,
+              taskId,
+              projectId,
+            ] = statement.params;
             const canComplete =
               task.id === taskId &&
               task.project_id === projectId &&
@@ -179,6 +235,7 @@ function createStatefulTaskD1(task: StatefulTaskRow) {
             task.status = 'completed';
             task.completed_at = completedAt as string;
             task.output_summary = (outputSummary as string | null) ?? task.output_summary;
+            task.output_pr_url = (outputPrUrl as string | null) ?? task.output_pr_url;
             task.completion_evidence =
               (completionEvidence as string | null) ?? task.completion_evidence;
             task.updated_at = updatedAt as string;
@@ -245,6 +302,14 @@ function makeStatefulTaskRow(overrides: Partial<StatefulTaskRow> = {}): Stateful
 }
 
 // Mock DO namespace — includes RPC methods used by project-data service
+let mockRootSearchCoverage = {
+  ftsCandidateLimit: 2000,
+  ftsCandidatesTruncated: false,
+  keywordScanRowLimit: 50000,
+  keywordFallbackRan: true,
+  keywordScanTruncated: false,
+};
+
 const mockDoStub = {
   fetch: vi.fn().mockResolvedValue(new Response('ok')),
   ensureProjectId: vi.fn(),
@@ -290,9 +355,17 @@ const mockDoStub = {
   archiveSourceGetMessageCount: vi.fn().mockReturnValue(0),
   archiveTargetGetMessageCount: vi.fn().mockReturnValue(0),
   searchMessages: vi.fn().mockReturnValue([]),
-  archiveSourceSearchMessages: vi.fn(
-    (owner: { sessionId: string }, query: string, roles: string[] | null, limit: number) =>
-      mockDoStub.searchMessages(query, owner.sessionId, roles, limit)
+  searchMessagesWithCoverage: vi.fn(
+    async (query: string, sessionId: string | null, roles: string[] | null, limit: number) => ({
+      results: await mockDoStub.searchMessages(query, sessionId, roles, limit),
+      coverage: mockRootSearchCoverage,
+    })
+  ),
+  archiveSourceSearchMessagesWithCoverage: vi.fn(
+    (owner: { sessionId: string }, query: string, roles: string[] | null, limit: number) => ({
+      results: mockDoStub.searchMessages(query, owner.sessionId, roles, limit),
+      coverage: mockRootSearchCoverage,
+    })
   ),
   archiveTargetSearchMessages: vi.fn(
     (owner: { sessionId: string }, query: string, roles: string[] | null, limit: number) =>
@@ -408,6 +481,8 @@ describe('MCP Routes', () => {
     mockD1 = createMockD1();
     mockEnv.DATABASE = mockD1;
     mockEnv.CF_CONTAINER_ENABLED = 'false';
+    delete (mockEnv as Record<string, unknown>).ENCRYPTION_KEY;
+    delete (mockEnv as Record<string, unknown>).PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS;
     providerCredentialMocks.resolveCredentialSource.mockResolvedValue({
       credentialSource: 'user',
       providerName: 'hetzner',
@@ -579,6 +654,16 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('get_session_messages');
       expect(toolNames).toContain('get_archived_tool_payloads');
       expect(toolNames).toContain('search_messages');
+      const searchMessages = body.result.tools.find(
+        (tool: { name: string }) => tool.name === 'search_messages'
+      );
+      expect(searchMessages.inputSchema.properties.continuation).toMatchObject({
+        type: 'string',
+      });
+      const searchTasks = body.result.tools.find(
+        (tool: { name: string }) => tool.name === 'search_tasks'
+      );
+      expect(searchTasks.inputSchema.properties.continuation).toBeUndefined();
       expect(toolNames).toContain('update_session_topic');
       expect(toolNames).toContain('dispatch_task');
       // Message-comment tools
@@ -684,7 +769,21 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('list_subscription_events');
       expect(toolNames).toContain('get_event');
       expect(toolNames).toContain('ack_event_delivery');
-      expect(body.result.tools).toHaveLength(121);
+      for (const name of [
+        'publish_channel_event',
+        'list_event_channels',
+        'get_channel_history',
+        'follow_event_channel',
+        'catch_up_event_channel',
+        'create_project_schedule',
+        'list_project_schedules',
+        'get_project_schedule',
+        'reschedule_project_schedule',
+        'cancel_project_schedule',
+      ]) {
+        expect(toolNames).toContain(name);
+      }
+      expect(new Set(toolNames).size).toBe(toolNames.length);
     });
 
     it('should include MUST call directive in get_instructions description', async () => {
@@ -940,53 +1039,28 @@ describe('MCP Routes', () => {
     });
 
     function mockInstructionRows(taskMode: 'task' | 'conversation') {
+      const taskRow: Record<string, unknown> = {
+        id: 'task-123',
+        projectId: 'proj-456',
+        userId: 'user-789',
+        workspaceId: 'ws-abc',
+        title: 'Test task',
+        description: 'A test task',
+        status: 'in_progress',
+        priority: 0,
+        outputBranch: 'sam/test',
+        taskMode,
+        dispatchDepth: 0,
+        triggeredBy: 'user',
+        agentCredentialSource: 'user',
+        credentialAttributionSource: 'user',
+        createdBy: 'user-789',
+        createdAt: '2026-07-04T00:00:00.000Z',
+        updatedAt: '2026-07-04T00:00:00.000Z',
+      };
       mockD1._stmt.raw
         .mockResolvedValueOnce([
-          [
-            'task-123',
-            'proj-456',
-            'user-789',
-            null,
-            null,
-            null,
-            null,
-            'ws-abc',
-            'Test task',
-            'A test task',
-            'in_progress',
-            null,
-            0,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            'sam/test',
-            null,
-            null,
-            null,
-            taskMode,
-            0,
-            null,
-            'user',
-            null,
-            null,
-            'user',
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            'user-789',
-            '2026-07-04T00:00:00.000Z',
-            '2026-07-04T00:00:00.000Z',
-          ],
+          Object.keys(getTableColumns(schema.tasks)).map((key) => taskRow[key] ?? null),
         ])
         .mockResolvedValueOnce([
           [
@@ -1884,6 +1958,7 @@ describe('MCP Routes', () => {
   describe('search_messages', () => {
     beforeEach(() => {
       mockKV.get.mockResolvedValue(validTokenData);
+      mockDispatchProjectAccess();
     });
 
     it('should search messages across sessions', async () => {
@@ -1913,6 +1988,143 @@ describe('MCP Routes', () => {
       expect(data.results).toHaveLength(1);
       expect(data.results[0].snippet).toContain('authentication');
       expect(data.query).toBe('authentication');
+      expect(data.rootSearch).toEqual(mockRootSearchCoverage);
+      expect(data.coverageNotes).toEqual([]);
+    });
+
+    it('discloses a truncated root search so an empty result is not read as absence', async () => {
+      const complete = mockRootSearchCoverage;
+      mockRootSearchCoverage = {
+        ...complete,
+        ftsCandidatesTruncated: true,
+        keywordScanTruncated: true,
+      };
+      try {
+        mockDoStub.searchMessages.mockReturnValue([]);
+        const res = await mcpRequest(
+          app,
+          jsonRpcRequest('tools/call', {
+            name: 'search_messages',
+            arguments: { query: 'authentication' },
+          })
+        );
+
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        const data = JSON.parse(body.result.content[0].text);
+        expect(data.count).toBe(0);
+        expect(data.rootSearch).toMatchObject({
+          ftsCandidatesTruncated: true,
+          keywordScanTruncated: true,
+        });
+        expect(data.coverageNotes).toHaveLength(2);
+        expect(data.coverageNotes.join(' ')).toContain('newest 50000 raw messages');
+      } finally {
+        mockRootSearchCoverage = complete;
+      }
+    });
+
+    it('carries an authorized continuation through inventory and every archive owner', async () => {
+      mockD1._stmt.all.mockResolvedValue({
+        results: [
+          { owner_name: 'proj-456:archive:g1:s0', generation: 1 },
+          { owner_name: 'proj-456:archive:g1:s1', generation: 1 },
+        ],
+      });
+      Object.assign(mockEnv, {
+        ENCRYPTION_KEY: 'mcp-archive-search-test-key',
+        PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS: '1',
+      });
+      mockDoStub.searchMessages.mockResolvedValueOnce([
+        {
+          id: 'root-message',
+          sessionId: 'root-session',
+          role: 'assistant',
+          snippet: 'root result',
+          createdAt: 100,
+          sessionTopic: 'Root',
+          sessionTaskId: null,
+        },
+      ]);
+      for (const [id, sessionId, createdAt] of [
+        ['archive-a', 'archive-session-a', 200],
+        ['archive-b', 'archive-session-b', 300],
+      ] as const) {
+        mockDoStub.archiveTargetSearchProjectMessages.mockResolvedValueOnce({
+          results: [
+            {
+              id,
+              sessionId,
+              role: 'assistant',
+              snippet: `result ${id}`,
+              createdAt,
+              sessionTopic: 'Archive',
+              sessionTaskId: null,
+            },
+          ],
+          coverage: {
+            sessionsAvailable: 1,
+            sessionsIndexed: 1,
+            sessionsIncomplete: 0,
+            repairAttempts: 0,
+            sessionsRepaired: 0,
+            errors: [],
+          },
+        });
+      }
+
+      const firstResponse = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'search_messages',
+          arguments: { query: 'archive' },
+        })
+      );
+      const firstBody = await firstResponse.json();
+      const first = JSON.parse(firstBody.result.content[0].text);
+      expect(first.archiveSearch).toMatchObject({
+        complete: false,
+        archiveOwnersAvailable: 2,
+        archiveOwnersQueried: 1,
+      });
+      expect(first.archiveSearch.continuation).toEqual(expect.any(String));
+
+      const secondResponse = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'search_messages',
+          arguments: { query: 'archive', continuation: first.archiveSearch.continuation },
+        })
+      );
+      const secondBody = await secondResponse.json();
+      const second = JSON.parse(secondBody.result.content[0].text);
+      expect(second.archiveSearch).toMatchObject({
+        complete: true,
+        continuation: null,
+        archiveOwnersAvailable: 2,
+        archiveOwnersQueried: 2,
+      });
+      expect(second.results.map((result: { messageId: string }) => result.messageId)).toEqual([
+        'archive-b',
+        'archive-a',
+        'root-message',
+      ]);
+      expect(mockDoStub.archiveTargetSearchProjectMessages).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({ ownerName: 'proj-456:archive:g1:s0' }),
+        'archive',
+        ['user', 'assistant'],
+        10
+      );
+      expect(mockDoStub.archiveTargetSearchProjectMessages).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ ownerName: 'proj-456:archive:g1:s1' }),
+        'archive',
+        ['user', 'assistant'],
+        10
+      );
+      delete (mockEnv as Record<string, unknown>).ENCRYPTION_KEY;
+      delete (mockEnv as Record<string, unknown>).PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS;
     });
 
     it('should reject empty query', async () => {
@@ -1963,6 +2175,74 @@ describe('MCP Routes', () => {
         expect.any(Number)
       );
     });
+
+    it('rechecks active project membership before accepting a continuation', async () => {
+      mockD1._stmt.all.mockResolvedValue({
+        results: [
+          { owner_name: 'proj-456:archive:g1:s0', generation: 1 },
+          { owner_name: 'proj-456:archive:g1:s1', generation: 1 },
+        ],
+      });
+      Object.assign(mockEnv, {
+        ENCRYPTION_KEY: 'mcp-archive-search-test-key',
+        PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS: '1',
+      });
+      mockDoStub.archiveTargetSearchProjectMessages.mockResolvedValue({
+        results: [],
+        coverage: {
+          sessionsAvailable: 0,
+          sessionsIndexed: 0,
+          sessionsIncomplete: 0,
+          errors: [],
+        },
+      });
+      const first = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'search_messages',
+          arguments: { query: 'test' },
+        })
+      );
+      const firstBody = await first.json();
+      const continuation = JSON.parse(firstBody.result.content[0].text).archiveSearch.continuation;
+      expect(continuation).toEqual(expect.any(String));
+
+      mockDoStub.searchMessages.mockClear();
+      mockDoStub.archiveTargetSearchProjectMessages.mockClear();
+      mockDispatchProjectAccess({ memberRole: null });
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'search_messages',
+          arguments: { query: 'test', continuation },
+        })
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(mockDoStub.searchMessages).not.toHaveBeenCalled();
+      expect(mockDoStub.archiveTargetSearchProjectMessages).not.toHaveBeenCalled();
+    });
+
+    it('rejects a continuation combined with a session-scoped search', async () => {
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'search_messages',
+          arguments: {
+            query: 'test',
+            sessionId: 'session-one',
+            continuation: 'signed-project-wide-cursor',
+          },
+        })
+      );
+
+      const body = await res.json();
+      expect(body.error).toMatchObject({ code: -32602 });
+      expect(body.error.message).toContain('cannot be combined');
+      expect(mockDoStub.searchMessages).not.toHaveBeenCalled();
+    });
   });
 
   // ─── dispatch_task ──────────────────────────────────────────────────
@@ -1970,6 +2250,28 @@ describe('MCP Routes', () => {
   describe('dispatch_task', () => {
     beforeEach(() => {
       mockKV.get.mockResolvedValue(validTokenData);
+      mockDispatchProjectAccess();
+    });
+
+    it.each([
+      { memberRole: null, error: 'Project not found' },
+      { memberRole: 'viewer', error: 'Project capability is required' },
+    ])('rejects dispatch without current task-write membership ($memberRole)', async (input) => {
+      mockDispatchProjectAccess({ memberRole: input.memberRole });
+      mockDoStub.createSession = vi.fn();
+      const response = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: { description: 'Build feature X' },
+        })
+      );
+      const body = await response.json();
+      expect(body.error.message).toContain(input.error);
+      expect(mockD1.prepare.mock.calls.some(([sql]) => sql.includes('from "tasks"'))).toBe(false);
+      expect(mockDoStub.createSession).not.toHaveBeenCalled();
+      expect(mockTaskRunnerStub.start).not.toHaveBeenCalled();
+      expect(instantSessionMocks.launchInstantSession).not.toHaveBeenCalled();
     });
 
     it('should reject empty description', async () => {
@@ -2433,6 +2735,7 @@ describe('MCP Routes', () => {
             description: 'Contradictory runtime',
             runtime: 'cf-container',
             vmSize: 'large',
+            resourceRequirements: { minVcpu: 4, exclusiveNode: false },
           },
         })
       );
@@ -2848,7 +3151,8 @@ describe('MCP Routes', () => {
     });
 
     it('should return error when project is not found', async () => {
-      // Promise.all: child count, active dispatched, project (no credential in parallel anymore)
+      mockDispatchProjectAccess({ projectExists: false });
+      // Missing project is rejected before reading the parent or admission counts.
       mockD1._stmt.all.mockResolvedValue({ results: [] }); // no project
       mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
 
@@ -2917,6 +3221,9 @@ describe('MCP Routes', () => {
       expect(props.provider.type).toBe('string');
       expect(props.vmLocation).toBeDefined();
       expect(props.vmLocation.type).toBe('string');
+      expect(props.resourceRequirements).toBeDefined();
+      expect(props.resourceRequirements.type).toContain('object');
+      expect(props.vmSize.description).toContain('Deprecated');
     });
 
     it('should reject invalid taskMode', async () => {
@@ -3155,6 +3462,34 @@ describe('MCP Routes', () => {
       expect(startInput.config.agentType).toBe('claude-code');
       expect(startInput.config.cloudProvider).toBe('hetzner');
       expect(startInput.config.vmLocation).toBe('fsn1');
+    });
+
+    it('should pass modern resource requirements to TaskRunner DO with legacy vmSize kept', async () => {
+      setupHappyPathMocks();
+
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: {
+            description: 'Provision explicit resources',
+            vmSize: 'small',
+            resourceRequirements: { minVcpu: 8, minMemoryGb: 32, exclusiveNode: false },
+          },
+        })
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+
+      const startInput = mockTaskRunnerStub.start.mock.calls[0][0];
+      expect(startInput.config.vmSize).toBe('small');
+      expect(startInput.config.resourceRequirements).toEqual({
+        minVcpu: 8,
+        minMemoryGb: 32,
+        exclusiveNode: false,
+      });
     });
 
     it('should dispatch with minimal args (backward compatibility)', async () => {
@@ -3640,6 +3975,7 @@ describe('MCP Routes', () => {
   describe('Atomic dispatch rate limiting', () => {
     beforeEach(() => {
       mockKV.get.mockResolvedValue(validTokenData);
+      mockDispatchProjectAccess();
     });
 
     it('should use conditional INSERT for atomic rate-limit enforcement', async () => {
@@ -3949,6 +4285,7 @@ describe('MCP Routes', () => {
       expect(completeRes.status).toBe(200);
       expect(task.status).toBe('completed');
       expect(task.output_summary).toBe('Done with proof');
+      expect(task.output_pr_url).toBe(evidence.prUrl);
       expect(task.completion_evidence).toBe(JSON.stringify(evidence));
 
       const detailsRes = await mcpRequest(
@@ -3963,6 +4300,7 @@ describe('MCP Routes', () => {
       const detailsBody = await detailsRes.json();
       const details = JSON.parse(detailsBody.result.content[0].text);
       expect(details.completionEvidence).toEqual(evidence);
+      expect(details.outputPrUrl).toBe(evidence.prUrl);
       expect(details.outputSummary).toBe('Done with proof');
     });
 

@@ -47,8 +47,11 @@ export type {
   CapacityPlacementSnapshot,
   CapacityPool,
   CapacityPoolCandidate,
+  CapacityPoolConfigurationState,
   CapacityPoolFallback,
+  CapacityPoolPlacementSettings,
   CapacityPoolScope,
+  CapacityPoolSelectionWeights,
   CapacityPoolStatus,
   CapacityPoolStrategy,
   CapacitySourceIdentity,
@@ -56,30 +59,57 @@ export type {
   CapacityWorkloadRole,
   DefaultCapacityPoolCandidateCatalogAddition,
   DefaultCapacityPoolCandidateStatusUpdate,
+  DefaultCapacityPoolEffectiveState,
   DefaultCapacityPoolPolicyUpdate,
   DefaultCapacityPoolScopeSummary,
   DefaultCapacityPoolSummary,
   DefaultCapacityPoolUpdateRequest,
   ProjectDefaultCapacityPoolsResponse,
+  SafeCapacityPoolPlacementSettingsSummary,
+  SafeEffectiveCapacityPoolReason,
+  SafeEffectiveCapacityPoolSummary,
 } from './capacity-pool';
 export {
   CAPACITY_CREDENTIAL_SOURCES,
   CAPACITY_EXHAUSTION_POLICIES,
   CAPACITY_PLACEMENT_CREDENTIAL_SOURCES,
+  CAPACITY_POOL_CONFIGURATION_STATES,
   CAPACITY_POOL_SCOPES,
   CAPACITY_POOL_STATUSES,
   CAPACITY_POOL_STRATEGIES,
   CAPACITY_SOURCE_KINDS,
   CAPACITY_WORKLOAD_ROLES,
+  DEFAULT_CAPACITY_POOL_DEPLOYMENT_STRATEGY,
+  DEFAULT_CAPACITY_POOL_EFFECTIVE_STATES,
+  DEFAULT_CAPACITY_POOL_MAX_NODES,
   isCapacityCredentialSource,
   isCapacityExhaustionPolicy,
   isCapacityPlacementCredentialSource,
+  isCapacityPoolConfigurationState,
   isCapacityPoolScope,
   isCapacityPoolStatus,
   isCapacityPoolStrategy,
   isCapacitySourceKind,
   isCapacityWorkloadRole,
+  SAFE_EFFECTIVE_CAPACITY_POOL_REASONS,
 } from './capacity-pool';
+
+// Placement diagnostics (why-this-node / why-queued / why-rejected)
+export type {
+  PlacementAttemptDiagnostic,
+  PlacementAuthorityDiagnostic,
+  PlacementDecisionDiagnostics,
+  PlacementHostDiagnostic,
+  PlacementQueueDiagnostic,
+  PlacementResourceEvidence,
+  PlacementResourceFacts,
+  PlacementRolloutDiagnostic,
+} from './placement-diagnostics';
+export {
+  assertPlacementDiagnosticsAreUserSafe,
+  PLACEMENT_DIAGNOSTICS_FORBIDDEN_KEYS,
+  PLACEMENT_DIAGNOSTICS_VERSION,
+} from './placement-diagnostics';
 
 // GitHub
 export type {
@@ -158,12 +188,18 @@ export type {
   LocationInfo,
   ProviderCatalog,
   ProviderCatalogOfferingInfo,
+  ProviderCatalogRefreshOrigin,
+  ProviderCatalogRefreshStatus,
   ProviderCatalogResponse,
   ProviderInstanceCatalogSource,
   ProviderInstanceOffering,
   SizeInfo,
 } from './provider';
-export { isProviderInstanceCatalogSource, PROVIDER_INSTANCE_CATALOG_SOURCES } from './provider';
+export {
+  isProviderInstanceCatalogSource,
+  PROVIDER_CATALOG_REFRESH_ORIGINS,
+  PROVIDER_INSTANCE_CATALOG_SOURCES,
+} from './provider';
 
 // Project
 export type {
@@ -224,6 +260,16 @@ export type {
   UpsertProjectRuntimeFileRequest,
 } from './project';
 export { ARTIFACTS_DEFAULTS, VALID_REPO_PROVIDERS } from './project';
+
+// Credential usage limits
+export type {
+  CredentialLimitCredentialSource,
+  CredentialLimitCredentialSummary,
+  CredentialLimitLevel,
+  CredentialLimitsResponse,
+  CredentialLimitStatus,
+  CredentialLimitWindowSummary,
+} from './credential-limits';
 
 // Deployment
 export type {
@@ -321,13 +367,13 @@ export {
 
 // ProjectData event subscription core
 // prettier-ignore
-export type { AckProjectEventDeliveryInput, AdmitProjectEventInput, CancelProjectEventSubscriptionInput, CreateProjectEventDeliveryBatchInput, CreateProjectEventSubscriptionInput, ExpireProjectEventSubscriptionsInput, GetProjectEventInput, GetProjectEventRecentStatusInput, GetProjectEventSubscriptionInput, ListProjectEventDeliveryAttemptsInput, ListProjectEventDeliveryBatchesInput, ListProjectEventSubscriptionEventsInput, ListProjectEventSubscriptionsInput, ProjectEventAdmissionOutcome, ProjectEventAdmissionResult, ProjectEventAgentVisibility, ProjectEventDeliveryAckResult, ProjectEventDeliveryAdapterAction, ProjectEventDeliveryAdapterCapability, ProjectEventDeliveryAdapterDecision, ProjectEventDeliveryAdapterKind, ProjectEventDeliveryAdapterVersionGate, ProjectEventDeliveryAttemptListResult, ProjectEventDeliveryAttemptMutationResult, ProjectEventDeliveryAttemptRecord, ProjectEventDeliveryAttemptState, ProjectEventDeliveryAuthorization, ProjectEventDeliveryBatchListResult, ProjectEventDeliveryBatchMutationResult, ProjectEventDeliveryBatchRecord, ProjectEventDeliveryBatchState, ProjectEventDeliveryCapabilityMode, ProjectEventDeliveryModelSummary, ProjectEventDeliveryPreference, ProjectEventDeliveryResolution, ProjectEventDeliveryResolutionReason, ProjectEventDeliverySummaryEvent, ProjectEventDeliveryTargetState, ProjectEventDisplayData, ProjectEventExpireSubscriptionsResult, ProjectEventFilterField, ProjectEventFilterV1, ProjectEventJsonPrimitive, ProjectEventJsonValue, ProjectEventLimits, ProjectEventMatchRecord, ProjectEventMatchState, ProjectEventMetadata, ProjectEventPullDeliveryInfo, ProjectEventPullDeliveryRecord, ProjectEventRawPayloadRef, ProjectEventRecentStatus, ProjectEventRecord, ProjectEventRecordState, ProjectEventRequestedDeliveryMode, ProjectEventResolvedDeliveryMode, ProjectEventRetentionResult, ProjectEventSeverity, ProjectEventStorageAccountingRecord, ProjectEventSubject, ProjectEventSubscriptionEvent, ProjectEventSubscriptionEventListResult, ProjectEventSubscriptionEventSummary, ProjectEventSubscriptionListResult, ProjectEventSubscriptionMutationResult, ProjectEventSubscriptionOwner, ProjectEventSubscriptionOwnerType, ProjectEventSubscriptionRecord, ProjectEventSubscriptionState, RecordProjectEventDeliveryAttemptInput, RunProjectEventRetentionInput } from './project-events';
+export type { AckProjectEventDeliveryInput, AdmitProjectEventInput, CancelProjectEventSubscriptionInput, CreateProjectEventDeliveryBatchInput, CreateProjectEventSubscriptionInput, ExpireProjectEventSubscriptionsInput, GetProjectEventInput, GetProjectEventRecentStatusInput, GetProjectEventSubscriptionInput, ListProjectEventDeliveryAttemptsInput, ListProjectEventDeliveryBatchesInput, ListProjectEventSubscriptionEventsInput, ListProjectEventSubscriptionsInput, ProjectEventAdmissionOutcome, ProjectEventAdmissionResult, ProjectEventAgentVisibility, ProjectEventAudience, ProjectEventAudienceScope, ProjectEventDeliveryAckResult, ProjectEventDeliveryAdapterAction, ProjectEventDeliveryAdapterCapability, ProjectEventDeliveryAdapterDecision, ProjectEventDeliveryAdapterKind, ProjectEventDeliveryAdapterVersionGate, ProjectEventDeliveryAttemptListResult, ProjectEventDeliveryAttemptMutationResult, ProjectEventDeliveryAttemptRecord, ProjectEventDeliveryAttemptState, ProjectEventDeliveryAuthorization, ProjectEventDeliveryBatchListResult, ProjectEventDeliveryBatchMutationResult, ProjectEventDeliveryBatchRecord, ProjectEventDeliveryBatchState, ProjectEventDeliveryCapabilityMode, ProjectEventDeliveryModelSummary, ProjectEventDeliveryPreference, ProjectEventDeliveryResolution, ProjectEventDeliveryResolutionReason, ProjectEventDeliverySummaryEvent, ProjectEventDeliveryTargetState, ProjectEventDisplayData, ProjectEventExpireSubscriptionsResult, ProjectEventFilterField, ProjectEventFilterV1, ProjectEventJsonPrimitive, ProjectEventJsonValue, ProjectEventLimits, ProjectEventMatchRecord, ProjectEventMatchState, ProjectEventMetadata, ProjectEventPullDeliveryInfo, ProjectEventPullDeliveryRecord, ProjectEventRawPayloadRef, ProjectEventRecentStatus, ProjectEventRecord, ProjectEventRecordState, ProjectEventRequestedDeliveryMode, ProjectEventResolvedDeliveryMode, ProjectEventRetentionResult, ProjectEventSeverity, ProjectEventStorageAccountingRecord, ProjectEventSubject, ProjectEventSubscriptionEvent, ProjectEventSubscriptionEventListResult, ProjectEventSubscriptionEventSummary, ProjectEventSubscriptionListResult, ProjectEventSubscriptionMutationResult, ProjectEventSubscriptionOwner, ProjectEventSubscriptionOwnerType, ProjectEventSubscriptionRecord, ProjectEventSubscriptionState, RecordProjectEventDeliveryAttemptInput, RunProjectEventRetentionInput } from './project-events';
 // prettier-ignore
-export type { ProjectEventSubscriptionAgentCaller, ProjectEventSubscriptionCaller, ProjectEventSubscriptionCallerKind, ProjectEventSubscriptionCancelRequest, ProjectEventSubscriptionCancelResponse, ProjectEventSubscriptionCreateRequest, ProjectEventSubscriptionCreateResponse, ProjectEventSubscriptionExpireRequest, ProjectEventSubscriptionExpireResponse, ProjectEventSubscriptionGetRequest, ProjectEventSubscriptionGetResponse, ProjectEventSubscriptionListRequest, ProjectEventSubscriptionListResponse, ProjectEventSubscriptionOwnerScope, ProjectEventSubscriptionPlatformCaller, ProjectEventSubscriptionPlatformPermissions } from './project-event-subscriptions';
+export type { ProjectEventSubscriptionAgentCaller, ProjectEventSubscriptionCaller, ProjectEventSubscriptionCallerKind, ProjectEventSubscriptionCancelRequest, ProjectEventSubscriptionCancelResponse, ProjectEventSubscriptionCreateRequest, ProjectEventSubscriptionCreateResponse, ProjectEventSubscriptionExpireRequest, ProjectEventSubscriptionExpireResponse, ProjectEventSubscriptionGetRequest, ProjectEventSubscriptionGetResponse, ProjectEventSubscriptionListRequest, ProjectEventSubscriptionListResponse, ProjectEventSubscriptionOwnerScope, ProjectEventSubscriptionPlatformCaller, ProjectEventSubscriptionPlatformPermissions, ProjectEventWakeInstructions } from './project-event-subscriptions';
 // prettier-ignore
 export { PROJECT_EVENT_SUBSCRIPTION_CALLER_KINDS, PROJECT_EVENT_SUBSCRIPTION_OWNER_SCOPES } from './project-event-subscriptions';
 // prettier-ignore
-export { PROJECT_EVENT_CONTRACT_VERSION, PROJECT_EVENT_DELIVERY_ADAPTER_ACTIONS, PROJECT_EVENT_DELIVERY_ADAPTER_KINDS, PROJECT_EVENT_DELIVERY_ATTEMPT_STATES, PROJECT_EVENT_DELIVERY_BATCH_STATES, PROJECT_EVENT_DELIVERY_CAPABILITY_MODES, PROJECT_EVENT_DELIVERY_RESOLUTION_REASONS, PROJECT_EVENT_DELIVERY_TARGET_STATES, PROJECT_EVENT_FILTER_FIELDS, PROJECT_EVENT_FILTER_VERSION, PROJECT_EVENT_REQUESTED_DELIVERY_MODES, PROJECT_EVENT_RESOLVED_DELIVERY_MODES, PROJECT_EVENT_SEVERITIES, PROJECT_EVENT_SUBSCRIPTION_OWNER_TYPES, PROJECT_EVENT_SUBSCRIPTION_STATES } from './project-events';
+export { PROJECT_EVENT_AUDIENCE_SCOPES, PROJECT_EVENT_CONTRACT_VERSION, PROJECT_EVENT_DELIVERY_ADAPTER_ACTIONS, PROJECT_EVENT_DELIVERY_ADAPTER_KINDS, PROJECT_EVENT_DELIVERY_ATTEMPT_STATES, PROJECT_EVENT_DELIVERY_BATCH_STATES, PROJECT_EVENT_DELIVERY_CAPABILITY_MODES, PROJECT_EVENT_DELIVERY_RESOLUTION_REASONS, PROJECT_EVENT_DELIVERY_TARGET_STATES, PROJECT_EVENT_FILTER_FIELDS, PROJECT_EVENT_FILTER_VERSION, PROJECT_EVENT_REQUESTED_DELIVERY_MODES, PROJECT_EVENT_RESOLVED_DELIVERY_MODES, PROJECT_EVENT_SEVERITIES, PROJECT_EVENT_SUBSCRIPTION_OWNER_TYPES, PROJECT_EVENT_SUBSCRIPTION_STATES } from './project-events';
 export {
   AGENT_ACTIVITY_STATES,
   ATTACHMENT_DEFAULTS,
@@ -426,6 +472,16 @@ export type {
   AdminLogEntry,
   AdminNodesResponse,
   AdminNodeSummary,
+  AdminProjectDataArchiveCircuitBreaker,
+  AdminProjectDataArchiveCircuitBreakerControlResponse,
+  AdminProjectDataArchiveCircuitBreakerControlResult,
+  AdminProjectDataArchiveCircuitBreakersResponse,
+  AdminProjectDataArchiveCircuitBreakerState,
+  AdminProjectDataArchiveMigrationAbandonResponse,
+  AdminProjectDataArchiveProblemMigration,
+  AdminProjectDataArchiveProblemMigrationsResponse,
+  AdminProjectDataStorageTelemetryResponse,
+  AdminProjectDataStorageTelemetryRow,
   AdminProjectEventInspectorAdapterDecision,
   AdminProjectEventInspectorAttempt,
   AdminProjectEventInspectorBatch,
@@ -594,6 +650,7 @@ export type {
   ComputeUsagePeriod,
   ComputeUsageRecord,
   ComputeUsageResponse,
+  ComputeVcpuCountSource,
   NodeUsageRecord,
 } from './compute-usage';
 
@@ -653,10 +710,13 @@ export {
   DELIVERY_STATES,
   DELIVERY_TERMINAL_STATES,
   DURABLE_MESSAGE_CLASSES,
+  isUrgentMessageClass,
   MAILBOX_DEFAULTS,
+  MESSAGE_CLASS_URGENCY,
   MESSAGE_CLASSES,
   PROMPT_DELIVERY_SOURCES,
   SENDER_TYPES,
+  TURN_STOP_URGENCY_THRESHOLD,
   VM_PROMPT_RECEIPT_STATES,
 } from './mailbox';
 
@@ -779,8 +839,12 @@ export type {
 
 // Resource Requirements & Reservations
 export type {
+  LegacyVmSizeResolutionInput,
   PlacementExplanation,
   ResolvedResourceReservation,
+  ResourceRequirementField,
+  ResourceRequirementFieldProvenance,
+  ResourceRequirementProvenance,
   ResourceRequirements,
   ResourceRequirementsSource,
   ResourceResolutionInput,
@@ -799,13 +863,25 @@ export type {
   CreateMcpConnectionRequest,
   McpConnection,
   McpConnectionAuthType,
+  McpConnectionHeader,
+  McpConnectionHeaderUpdate,
   McpConnectionListResponse,
   McpConnectionScope,
   UpdateMcpConnectionRequest,
 } from './mcp-connection';
 export {
   MCP_CONNECTION_AUTH_TYPES,
+  MCP_CONNECTION_HEADER_NAME_MAX_LENGTH,
+  MCP_CONNECTION_HEADER_NAME_PATTERN,
+  MCP_CONNECTION_HEADER_NAME_RULE,
   MCP_CONNECTION_NAME_PATTERN,
   MCP_CONNECTION_NAME_RULE,
+  MCP_CONNECTION_RESERVED_HEADER_NAMES,
   SAM_MCP_SERVER_NAME,
 } from './mcp-connection';
+export * from './project-event-channels';
+export * from './project-event-schedules';
+export type {
+  ProjectEventDeliveryOutcome,
+  ProjectEventDeliveryOutcomeList,
+} from './project-events';

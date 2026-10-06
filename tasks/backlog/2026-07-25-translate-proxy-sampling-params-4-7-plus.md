@@ -13,7 +13,7 @@ upstream even though the request is otherwise valid.
 ## Context (where/when discovered)
 
 Found 2026-07-25 by the cross-file review pass on the Claude Opus 5 catalog PR
-(`tasks/active/2026-07-25-add-claude-opus-5-model-catalog.md`). Pre-existing behavior —
+(`tasks/archive/2026-07-25-add-claude-opus-5-model-catalog.md`). Pre-existing behavior —
 reachability unchanged by that PR (explicitly selecting `claude-sonnet-5` already hit
 this path before it), so it was filed rather than fixed in-branch. The SAM agent loop is
 unaffected (it sends no sampling params — verified in `callAnthropicLLM`).

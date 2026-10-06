@@ -96,4 +96,4 @@ A helper `buildProviderConfig(providerName, decryptedToken)` will parse the decr
 - `apps/api/src/services/nodes.ts` — node provisioning/lifecycle
 - `apps/api/src/routes/tasks/submit.ts` — task submission credential check
 - `apps/api/src/routes/tasks/run.ts` — task run credential check
-- `tasks/backlog/2026-02-16-provider-scaleway.md` — Scaleway API research
+- `tasks/archive/2026-02-16-provider-scaleway.md` — Scaleway API research

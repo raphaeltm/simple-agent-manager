@@ -1,5 +1,26 @@
 # VM Agent Session-Snapshot Degradation Value Missing From API Union/Allowlist
 
+> **Reconciliation 2026-10-05:** #2208 (7a9782c90) removed the usable-degraded allowlist from `scheduled/session-sleep-lifecycle-repair.ts`. Repair now selects and re-checks only `status='available'` with `degradation='none'` (`:114-115,140-141`), so leaving out `agent-context-skipped` and `wip-only` there no longer matters. The route allowlist (`routes/workspaces/session-snapshots.ts:49-57`) still covers every degradation value the vm-agent sends. Still open:
+>
+> - Decide `FILE_LOSS_DEGRADATIONS` (`services/failed-task-preservation.ts:449`) and record the decision in a comment. It omits `agent-context-skipped`, which keeps its file artifacts, so that is probably intended.
+> - The cross-boundary search for other vm-agent-emitted enum/string literals whose allowlists have drifted.
+
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** the four checked items, in 00169b016 (PR #1785).
+>   - `agent-context-skipped` is in the route's `DEGRADATIONS` set and manifest picklist
+>     (`apps/api/src/routes/workspaces/session-snapshots.ts:47-55,85-93`) and in the
+>     `SessionSnapshotDegradation` union, now at `services/session-snapshot-artifacts.ts:64-71`.
+>   - The regression test posts it at both levels and expects 200
+>     (`apps/api/tests/unit/routes/workspaces-session-snapshots.test.ts:799-818`).
+> - **Still open:**
+>   - The consumer audit. The web UI shows no degradation value, so it needs no label. Two API
+>     consumers need a decision:
+>     - `scheduled/session-sleep-lifecycle-repair.ts:125-130`: its usable-degraded list omits
+>       `agent-context-skipped` (and `wip-only`). Confirm that is intended.
+>     - `services/failed-task-preservation.ts:445`: `FILE_LOSS_DEGRADATIONS`.
+>   - The cross-boundary search for other vm-agent-emitted literals with allowlist drift.
+
 ## Problem
 
 The vm-agent can submit a session-snapshot completion with

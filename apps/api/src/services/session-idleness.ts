@@ -1,4 +1,5 @@
 import { parsePositiveInt } from '../lib/route-helpers';
+import { isSleepPreservedTerminalTaskStatus } from './sleep-preserved-task-status';
 
 export const DEFAULT_HARNESS_BACKGROUND_WORK_LEASE_MS = 5 * 60 * 1000;
 
@@ -132,13 +133,14 @@ export function getFreshHarnessWorkLeaseExpiry(
  * ProjectData parent-wake delivery path when its children finish, so keeping it
  * awake merely to hold a place in the lineage burns compute for no benefit.
  *
- * Only the sleep reader calls this today. Converting the remaining shutdown
+ * Sleep and completed/failed-task ledger cleanup use this predicate. Converting the remaining shutdown
  * timers (ProjectData idle cleanup, workspace idle timeout) onto it is tracked
  * as a follow-up in idea `01M08VJDHK3MNYMZCQF5AJC17P`; they still use
  * schedule/workspace-activity candidate selection plus `classifyTaskRuntimeLiveness()`.
  */
 export function classifySessionIdleness(input: {
   taskStatus: string | null;
+  taskCompletedAt?: string | null;
   state: SessionIdlenessActivityState | null;
   now: Date;
   idleAfterMs: number;
@@ -177,11 +179,23 @@ export function classifySessionIdleness(input: {
       ? input.state.activityAt
       : null;
 
-  // Terminal tasks can retain a stale `prompting` transition forever. Treat
-  // that state as idle only after the normal idle interval has elapsed, so a
-  // final response is preserved but old terminal sessions cannot strand compute.
-  if (input.taskStatus === 'completed' && activity !== 'idle') {
-    if (!activityAt) {
+  // Terminal tasks whose conversation is kept by sleep (completed, and failed —
+  // see `SLEEP_PRESERVED_TERMINAL_TASK_STATUSES`) can retain a stale `prompting`
+  // transition forever. Treat that state as idle only after the normal idle
+  // interval has elapsed, so a final response is preserved but old terminal
+  // sessions cannot strand compute.
+  const sleepPreservedTerminalTask = isSleepPreservedTerminalTaskStatus(input.taskStatus);
+  if (sleepPreservedTerminalTask && activity !== 'idle') {
+    // complete_task runs inside the prompt: an hours-old prompting transition
+    // does not mean the response following that tool has already drained. The
+    // drain follows activity for a failed task too: an agent still working after
+    // the failure would otherwise be slept mid-turn, and `sleepWorkspaceSession`
+    // aborts on every activity change, spending the retry budget. A HUNG failed
+    // prompt is bounded elsewhere: the check-in watchdog releases it, and failed
+    // preservation has its own maximum wait (`failed-task-preservation-release.ts`).
+    const completedAt = Date.parse(input.taskCompletedAt ?? '');
+    const drainAnchor = Math.max(activityAt ?? 0, Number.isFinite(completedAt) ? completedAt : 0);
+    if (!drainAnchor) {
       return {
         idle: false,
         conclusive: false,
@@ -189,7 +203,7 @@ export function classifySessionIdleness(input: {
         activity,
       };
     }
-    const eligibleAt = activityAt + input.idleAfterMs;
+    const eligibleAt = drainAnchor + input.idleAfterMs;
     if (eligibleAt > input.now.getTime()) {
       return {
         idle: false,
@@ -218,8 +232,10 @@ export function classifySessionIdleness(input: {
 
   // The prompt turn has ended and no runtime work holds a lease. That is the
   // whole safety question, so a teardown gate or an explicit user-initiated
-  // sleep stops here. A terminal task is also always immediately reclaimable.
-  if (input.policy === 'prompt-turn-ended' || input.taskStatus === 'completed') {
+  // sleep stops here. A sleep-preserved terminal task is also always
+  // immediately reclaimable. `cancelled` is not: its runtime is torn down
+  // directly by the terminal cleanup, never slept.
+  if (input.policy === 'prompt-turn-ended' || sleepPreservedTerminalTask) {
     return {
       idle: true,
       conclusive: true,

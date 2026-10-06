@@ -18,9 +18,9 @@ export interface ResourceRequirements {
   minDiskGb?: number;
   /** If true, the task must have a node to itself (no co-tenants). */
   exclusiveNode?: boolean;
-  /** Maximum number of workspaces sharing a node (1 = exclusive). */
-  maxCoTenants?: number;
 }
+
+export type ResourceRequirementField = keyof ResourceRequirements;
 
 // =============================================================================
 // Resource Requirements Source (provenance tracking)
@@ -28,13 +28,22 @@ export interface ResourceRequirements {
 
 /** Where the resolved resource requirements came from. */
 export type ResourceRequirementsSource =
-  | 'task'
-  | 'trigger'
-  | 'skill'
-  | 'agent-profile'
-  | 'project'
-  | 'user'
-  | 'platform';
+  'task' | 'trigger' | 'skill' | 'agent-profile' | 'project' | 'user' | 'platform';
+
+export interface ResourceRequirementFieldProvenance {
+  source: ResourceRequirementsSource;
+  sourceId: string;
+  value: number | boolean;
+  compatibility?: {
+    adapter: string;
+    version: number;
+    legacyVmSize: VMSize;
+  };
+}
+
+export type ResourceRequirementProvenance = Partial<
+  Record<ResourceRequirementField, ResourceRequirementFieldProvenance>
+>;
 
 // =============================================================================
 // Resolved Resource Reservation (scheduler-facing)
@@ -53,14 +62,16 @@ export interface ResolvedResourceReservation {
   diskMb: number;
   /** Whether this task requires exclusive node access. */
   exclusiveNode: boolean;
-  /** Max co-tenants allowed on the same node. */
-  maxCoTenants: number;
   /** Which level in the precedence chain provided the requirements. */
   source: ResourceRequirementsSource;
   /** ID of the source entity (profile ID, project ID, 'platform', etc.). */
   sourceId: string;
   /** Schema version for forward compatibility. */
   version: number;
+  /** Per-field provenance, including compatibility translations where used. */
+  fieldProvenance?: ResourceRequirementProvenance;
+  /** Non-secret diagnostics for rollout/shadow comparison. */
+  diagnostics?: string[];
 }
 
 // =============================================================================
@@ -100,3 +111,5 @@ export interface ResourceResolutionInput {
   /** User-level default (future). */
   user?: ResourceRequirements;
 }
+
+export type LegacyVmSizeResolutionInput = Partial<Record<ResourceRequirementsSource, VMSize>>;

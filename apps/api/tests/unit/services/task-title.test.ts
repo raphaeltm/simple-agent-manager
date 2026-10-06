@@ -69,7 +69,7 @@ describe('stripMarkdown', () => {
 describe('getTaskTitleConfig', () => {
   it('returns defaults when no env vars set', () => {
     const config = getTaskTitleConfig({});
-    expect(config.model).toBe('@cf/zai-org/glm-5.2');
+    expect(config.model).toBe('@cf/google/gemma-4-26b-a4b-it');
     expect(config.maxLength).toBe(100);
     expect(config.timeoutMs).toBe(5000);
     expect(config.enabled).toBe(true);
@@ -139,7 +139,6 @@ describe('generateTaskTitle', () => {
     const long =
       'I need you to refactor the authentication module to use JWT tokens. ' + 'a'.repeat(100);
     const result = await generateTaskTitle(env, long, {
-      model: '@cf/zai-org/glm-5.2',
       maxLength: 80,
     });
 
@@ -152,14 +151,17 @@ describe('generateTaskTitle', () => {
     expect(init.headers).toMatchObject({
       Authorization: 'Bearer cf-token',
       'Content-Type': 'application/json',
-      'cf-aig-metadata': JSON.stringify({ source: 'task-title', modelId: '@cf/zai-org/glm-5.2' }),
+      'cf-aig-metadata': JSON.stringify({
+        source: 'task-title',
+        modelId: '@cf/google/gemma-4-26b-a4b-it',
+      }),
     });
     expect(parseGatewayRequestBody(init)).toMatchObject({
-      model: '@cf/zai-org/glm-5.2',
+      model: '@cf/google/gemma-4-26b-a4b-it',
       max_tokens: 80,
+      reasoning_effort: null,
       chat_template_kwargs: { enable_thinking: false },
     });
-    expect(parseGatewayRequestBody(init)).not.toHaveProperty('reasoning_effort');
   });
 
   it('strips markdown and truncates Gateway output', async () => {
@@ -198,6 +200,13 @@ describe('generateTaskTitle', () => {
 
   it('uses the GLM-5.2 non-thinking capability without a null reasoning field', () => {
     expect(getTaskTitleModelControls('@cf/zai-org/glm-5.2')).toEqual({
+      chatTemplateKwargs: { enable_thinking: false },
+    });
+  });
+
+  it('uses the Gemma non-thinking capability with a null reasoning field', () => {
+    expect(getTaskTitleModelControls('@cf/google/gemma-4-26b-a4b-it')).toEqual({
+      reasoningEffort: null,
       chatTemplateKwargs: { enable_thinking: false },
     });
   });

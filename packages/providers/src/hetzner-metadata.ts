@@ -1,5 +1,6 @@
 import type { VMSize } from '@simple-agent-manager/shared';
 
+import { observedHardware } from './native-vm-config';
 import type {
   LocationMeta,
   ProviderErrorCategory,
@@ -88,6 +89,25 @@ export const HETZNER_VOLUME_CAPABILITIES: VolumeCapabilities = {
   },
 };
 
+export function validateHetznerVolumeSize(sizeGb: number): void {
+  if (!Number.isInteger(sizeGb) || sizeGb < HETZNER_VOLUME_MIN_SIZE_GB) {
+    throw new ProviderError(
+      'hetzner',
+      undefined,
+      `Hetzner volume size must be an integer >= ${HETZNER_VOLUME_MIN_SIZE_GB}GB`,
+      { category: 'invalid_config' }
+    );
+  }
+  if (sizeGb > HETZNER_VOLUME_MAX_SIZE_GB) {
+    throw new ProviderError(
+      'hetzner',
+      undefined,
+      `Hetzner volume size must be <= ${HETZNER_VOLUME_MAX_SIZE_GB}GB`,
+      { category: 'invalid_config' }
+    );
+  }
+}
+
 export interface HetznerProviderRuntimeOptions {
   capacityRetryMaxAttempts?: number;
   capacityRetryBudgetMs?: number;
@@ -119,6 +139,69 @@ const TRANSIENT_CAPACITY_PATTERNS: RegExp[] = [
 const INVALID_INPUT_CAPACITY_PATTERNS: RegExp[] = [UNSUPPORTED_LOCATION_CAPACITY_PATTERN];
 
 /**
+ * Hetzner 412 placement failures. Observed in production as
+ * `hetzner API error (412): error during placement`.
+ *
+ * A placement failure says Hetzner cannot place THIS server type in THIS location right now.
+ * Nothing about the request is invalid, so it is capacity scarcity, not `invalid_config`.
+ * Used as the message fallback for a 412 whose structured `error.code` is absent or unrecognized.
+ */
+const PLACEMENT_CAPACITY_PATTERNS: RegExp[] = [/placement/i];
+
+/**
+ * Hetzner's structured error code for a placement failure.
+ *
+ * CAUTION: Hetzner uses this ONE code for two different causes — "no physical host available for
+ * this server type here" (transient scarcity, what we map it to) and "the placement GROUP
+ * constraint cannot be satisfied" (a hard configuration limit that no amount of retrying or
+ * trying other offerings will fix). The mapping below is only safe because SAM never sends a
+ * `placement_group` on server creation — grep confirms the field appears nowhere in this repo,
+ * and `createVM`'s request body carries only name/server_type/image/location/user_data/labels/
+ * start_after_create. If placement-group support is ever added, this classification must
+ * distinguish the two causes first, or a group-full error will silently burn the whole fallback
+ * chain and report it as scarcity.
+ */
+const HETZNER_PLACEMENT_ERROR_CODE = 'placement_error';
+
+/** HTTP status Hetzner returns for a placement failure. */
+const HETZNER_PLACEMENT_STATUS_CODE = 412;
+
+/**
+ * Hetzner's documented account-quota code: `403 resource_limit_exceeded`, "Error when exceeding
+ * the maximum quantity of a resource for an account" (error table in
+ * https://docs.hetzner.cloud/cloud.spec.json). One code covers every per-account limit — servers,
+ * shared vCPU cores, dedicated vCPU cores, primary IPs — and only the message says which.
+ */
+const HETZNER_RESOURCE_LIMIT_ERROR_CODE = 'resource_limit_exceeded';
+
+/**
+ * The server-count code SAM has always matched. It is NOT in Hetzner's documented error table.
+ * Production persists only the message text ("server limit reached"), never the code, so which
+ * code those 403s actually carried is unrecorded; kept so a response shaped this way still
+ * classifies as the quota it names.
+ */
+export const HETZNER_LEGACY_SERVER_LIMIT_ERROR_CODE = 'server_limit_exceeded';
+
+/** HTTP status Hetzner returns for an account quota. */
+const HETZNER_RESOURCE_LIMIT_STATUS_CODE = 403;
+
+/**
+ * Message fallback for an account quota whose structured code is absent or unrecognized.
+ * Production has recorded exactly two texts, both 403s: "server limit reached" (66 tasks,
+ * 2026-03..08) and "shared core limit exceeded" (2026-09-25).
+ */
+const ACCOUNT_LIMIT_MESSAGE_PATTERN = /\blimit (?:reached|exceeded)\b/i;
+
+/**
+ * Credential vocabulary that vetoes the message fallback above. A 403 whose text is about the
+ * token or its permissions stays `auth_error` even if it also mentions a limit: a revoked or
+ * read-only token must fail fast and say so, not park the task behind an account-capacity wait
+ * whose message blames the quota. No recorded quota text contains these words.
+ */
+const CREDENTIAL_MESSAGE_PATTERN =
+  /\b(?:permissions?|token|forbidden|unauthori[sz]ed|credentials?)\b/i;
+
+/**
  * Classify a Hetzner API error into a normalized ProviderErrorCategory.
  *
  * Primary signal: structured `error.code` from the JSON response, except for a
@@ -133,8 +216,13 @@ const INVALID_INPUT_CAPACITY_PATTERNS: RegExp[] = [UNSUPPORTED_LOCATION_CAPACITY
  * - unauthorized → auth_error
  * - rate_limit_exceeded → rate_limited
  * - conflict → invalid_config
- * - server_limit_exceeded → quota_exceeded
- * - placement_error → invalid_config (handled separately as 412)
+ * - resource_limit_exceeded (and the legacy server_limit_exceeded) → quota_exceeded (an account
+ *   quota rejected the create before any server existed; the same server type cannot succeed
+ *   until capacity is freed, so the caller must never retry it — whether a SMALLER offering can
+ *   escape the quota depends on what it counts, see `classifyHetznerAccountLimit`)
+ * - placement_error → transient_capacity (Hetzner cannot place that server type in that
+ *   location right now; the request itself is valid, so the caller should try another
+ *   offering rather than give up)
  */
 export function classifyHetznerError(
   statusCode: number | undefined,
@@ -154,12 +242,21 @@ export function classifyHetznerError(
     switch (providerCode) {
       case 'resource_unavailable':
         return 'transient_capacity';
-      case 'server_limit_exceeded':
+      // A placement failure is capacity scarcity for one server type in one location, NOT a
+      // config error. Classifying it `invalid_config` made `node-provisioning-step` take its
+      // "any non-capacity provider failure fails fast — never descend" branch, so a pool with
+      // `exhaustionPolicy: fallback-chain` terminalized on its first offering and never tried
+      // the rest. See tasks/archive/2026-09-09-hetzner-412-placement-blocks-fallback-chain.md.
+      case HETZNER_PLACEMENT_ERROR_CODE:
+        return 'transient_capacity';
+      // Never `transient_capacity`: that would send the quota into `createVM`'s 300 s same-SKU
+      // retry loop, which cannot succeed while the account is at its limit.
+      case HETZNER_RESOURCE_LIMIT_ERROR_CODE:
+      case HETZNER_LEGACY_SERVER_LIMIT_ERROR_CODE:
         return 'quota_exceeded';
       case 'uniqueness_error':
       case 'invalid_input':
       case 'conflict':
-      case 'placement_error':
         return 'invalid_config';
       case 'forbidden':
       case 'unauthorized':
@@ -169,6 +266,16 @@ export function classifyHetznerError(
     }
   }
 
+  // A 403 that names a limit is the account quota even when the structured code is missing or
+  // unrecognized. Before 2026-09-25 it fell through to `auth_error` below: the shared-core quota
+  // read as a credential failure, so the wake failed fast on its first offering (rule 72).
+  if (
+    statusCode === HETZNER_RESOURCE_LIMIT_STATUS_CODE &&
+    ACCOUNT_LIMIT_MESSAGE_PATTERN.test(message) &&
+    !CREDENTIAL_MESSAGE_PATTERN.test(message)
+  ) {
+    return 'quota_exceeded';
+  }
   if (statusCode === 401 || statusCode === 403) return 'auth_error';
   if (statusCode === 429) return 'rate_limited';
 
@@ -176,7 +283,52 @@ export function classifyHetznerError(
     return 'transient_capacity';
   }
 
+  // Production only proves the status code and message for this case: the observability record
+  // for the 2026-09-09 incident carried `statusCode: 412` and "error during placement" but no
+  // structured code. Do not rely on `placement_error` being present.
+  if (
+    statusCode === HETZNER_PLACEMENT_STATUS_CODE &&
+    PLACEMENT_CAPACITY_PATTERNS.some((pattern) => pattern.test(message))
+  ) {
+    return 'transient_capacity';
+  }
+
   return 'unknown';
+}
+
+/**
+ * A Hetzner placement failure specifically, as opposed to capacity scarcity in general.
+ *
+ * Composed as its own predicate rather than reusing `isTransientCapacityError` because the two
+ * answer different questions and drive different actions (`.claude/rules/67`):
+ *
+ *   isTransientCapacityError  "should the CONTROL PLANE try a different offering?"  -> yes
+ *   isHetznerPlacementCapacityError  "should the PROVIDER retry this same SKU?"     -> no
+ *
+ * `createVM`'s outer capacity loop waits up to `DEFAULT_CAPACITY_RETRY_BUDGET_MS` (300 s) on the
+ * requested server type. That is right for a generic capacity error and wrong for a placement
+ * failure: the pool already holds other offerings, and choosing between them is a control-plane
+ * decision (see `attemptCreateWithPlacementFallback`'s "Cross-location fallback must be a new
+ * control-plane placement decision"). Before this change a 412 escaped that loop immediately, so
+ * excluding it here keeps provisioning latency exactly as it is today.
+ *
+ * THREE 412 CHECKS, THREE PRECISIONS — keep them in mind together:
+ *   - `attemptCreateWithPlacementFallback` (hetzner-server-create.ts): any 412 retries another
+ *     location. Deliberately broad; being wrong costs one extra create attempt.
+ *   - `providerAllocationRejected` (node-provisioning.ts): any 412 means "Hetzner definitely
+ *     rejected the allocation". Also broad, and safe in that direction.
+ *   - this predicate: gates a 300 s retry budget, so it must be precise.
+ */
+export function isHetznerPlacementCapacityError(err: ProviderError): boolean {
+  if (err.providerName !== 'hetzner') return false;
+  if (err.statusCode !== HETZNER_PLACEMENT_STATUS_CODE) return false;
+  if (err.providerCode === HETZNER_PLACEMENT_ERROR_CODE) return true;
+  // Mirrors `classifyHetznerError`'s message fallback exactly, INCLUDING for an unrecognized
+  // provider code. The classifier's `switch` has no `default`, so an unmatched code falls through
+  // to the same message check. An earlier cut of this returned false whenever any code was
+  // present, which let a 412 be `transient_capacity` everywhere else while still entering the
+  // 300 s same-SKU retry loop here — the two predicates must agree on what a placement failure is.
+  return PLACEMENT_CAPACITY_PATTERNS.some((pattern) => pattern.test(err.message));
 }
 
 /**
@@ -186,7 +338,31 @@ export function classifyHetznerError(
  */
 export function isTransientCapacityError(err: ProviderError): boolean {
   if (err.category === 'transient_capacity') return true;
-  if (err.statusCode === 422 && err.category === 'unknown') {
+  // `providerFetch` constructs every HTTP ProviderError with `{ providerCode }` and no
+  // `category`, so the create path always arrives here as 'unknown' and the classifier is the
+  // only thing that can answer. Without the 412 arm, fixing `classifyHetznerError` alone changes
+  // nothing in production while its unit tests go green (`.claude/rules/62`).
+  //
+  // Per-status justification for this allowlist (`.claude/rules/72` requirement 4):
+  //   422 — Hetzner's observed status for server-type scarcity (`resource_unavailable`, and the
+  //         `invalid_input` + "unsupported location" conflicting-signal case).
+  //   412 — Hetzner's status for `placement_error`, the 2026-09-09 incident.
+  //
+  // The `providerName` guard matters as much as the status list. `node-provisioning-step.ts` and
+  // `node-provisioning.ts` call this on ANY `ProviderError` without checking which provider
+  // raised it, and `classifyHetznerError` is a Hetzner-specific heuristic. GCP is the concrete
+  // hazard: `classifyGcpError` has no call sites at all, so every GCP error also arrives here as
+  // 'unknown', and GCP uses 412 for ETag/precondition mismatches while using "placement policy"
+  // in its own vocabulary. Without this guard a GCP precondition failure whose message happened
+  // to say "placement" would be read as Hetzner capacity scarcity — deleting the node row and
+  // silently descending to another offering instead of surfacing a real conflict.
+  // `providerAllocationRejected` in node-provisioning.ts already guards this way; this matches it.
+  // Wiring up `classifyGcpError` is tracked in idea 01M236QPGGC6B150FG4QHT17MW.
+  if (
+    err.providerName === 'hetzner' &&
+    (err.statusCode === 422 || err.statusCode === HETZNER_PLACEMENT_STATUS_CODE) &&
+    err.category === 'unknown'
+  ) {
     return (
       classifyHetznerError(err.statusCode, err.providerCode, err.message) === 'transient_capacity'
     );
@@ -223,12 +399,29 @@ export const HETZNER_SIZE_CONFIGS: Record<VMSize, SizeConfig> = {
 };
 
 export function mapHetznerServerToVMInstance(server: HetznerServerPayload): VMInstance {
+  const resources =
+    server.server_type.cores !== undefined &&
+    server.server_type.memory !== undefined &&
+    server.server_type.disk !== undefined
+      ? {
+          vcpuCount: server.server_type.cores,
+          memoryMb: server.server_type.memory * 1024,
+          diskGb: server.server_type.disk,
+        }
+      : null;
+
   return {
     id: String(server.id),
     name: server.name,
+    ...(server.location ? { location: server.location.name } : {}),
     ip: server.public_net.ipv4.ip,
     status: mapHetznerStatus(server.status),
     serverType: server.server_type.name,
+    observedHardware: observedHardware({
+      serverType: server.server_type.name,
+      resources,
+      unknownResourcesReason: 'Hetzner response omitted server_type resource fields',
+    }),
     createdAt: server.created,
     labels: server.labels,
   };
@@ -274,11 +467,23 @@ function mapHetznerStatus(status: string): VMStatus {
   }
 }
 
+/**
+ * Give a Hetzner error its category at construction (`.claude/rules/72` requirement 3), so
+ * consumers read `category` instead of re-running a classifier behind a status allowlist.
+ *
+ * An error that already carries a category keeps it. `createVM`'s budget-exhausted wrapper
+ * deliberately says `transient_capacity` about an inner error whose own text would classify
+ * differently, and re-deriving it here would undo that decision. An error the classifier cannot
+ * place stays exactly as thrown.
+ */
 export function mapHetznerProviderError(err: unknown): unknown {
-  if (!(err instanceof ProviderError)) return err;
+  if (!(err instanceof ProviderError) || err.category !== 'unknown') return err;
+  const category = classifyHetznerError(err.statusCode, err.providerCode, err.message);
+  if (category === 'unknown') return err;
   return new ProviderError('hetzner', err.statusCode, err.message, {
     cause: err,
+    context: err.context,
     providerCode: err.providerCode,
-    category: classifyHetznerError(err.statusCode, err.providerCode, err.message),
+    category,
   });
 }

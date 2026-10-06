@@ -9,15 +9,19 @@ import type {
   VMSize,
   WorkspaceProfile,
 } from '@simple-agent-manager/shared';
-import {
-  DEFAULT_VM_SIZE,
-  DEFAULT_WORKSPACE_PROFILE,
-  hasByocComputeCredential,
-} from '@simple-agent-manager/shared';
+import { DEFAULT_WORKSPACE_PROFILE, hasByocComputeCredential } from '@simple-agent-manager/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 
+import {
+  EMPTY_RESOURCE_STATE as EMPTY_RESOURCE_STATE_IMPORT,
+  hasAnyResourceValue,
+  hasValidationErrors,
+  serializeResourceRequirements,
+  toResourceRequirements,
+  validateResourceState,
+} from '../../components/resource-requirements';
 import { useAgentCatalog } from '../../hooks/useAgentCatalog';
 import { useAgentProfiles } from '../../hooks/useAgentProfiles';
 import { useAvailableCommands } from '../../hooks/useAvailableCommands';
@@ -27,13 +31,12 @@ import { type RawSessionEvent, useProjectWebSocket } from '../../hooks/useProjec
 import { useProviderCatalog } from '../../hooks/useProviderCatalog';
 import { useQueryScope } from '../../hooks/useQueryScope';
 import { useTrialStatus } from '../../hooks/useTrialStatus';
-import { useDocumentVisible, useVisibilityAwarePoll } from '../../hooks/useVisibilityAwarePoll';
+import { useVisibilityAwarePoll } from '../../hooks/useVisibilityAwarePoll';
 import type { ChatSessionListItem, ChatSessionResponse } from '../../lib/api';
 import {
   closeConversationTask,
   getProjectTask,
   getTranscribeApiUrl,
-  getWorkspace,
   linkSessionIdea,
   listChatSessions,
   listProjectTasks,
@@ -54,7 +57,6 @@ import { useProjectContext } from '../ProjectContext';
 import { isRetryOrFork } from './lineageUtils';
 import {
   FORK_MESSAGE_TEMPLATE,
-  resolveInitialVmSize,
   resolveWizardRuntime,
   resolveWizardTaskMode,
   resolveWizardWorkspaceProfile,
@@ -70,13 +72,12 @@ import {
   CHAT_SESSION_LIST_LIMIT,
   CHAT_TASK_LIST_LIMIT,
   EXECUTE_IDEA_PROMPT_TEMPLATE,
-  isTerminal,
   SESSION_RECONCILE_INTERVAL_MS,
   SESSION_SYNC_INTERVAL_MS,
-  TASK_STATUS_POLL_MS,
 } from './types';
 import { useAttachments } from './useAttachments';
 import { useProjectSkills } from './useProjectSkills';
+import { useProvisioningTracker } from './useProvisioningTracker';
 import { useSessionReducer } from './useSessionReducer';
 import { rawToSessionEvent } from './useSessionReducer';
 import { useStableTaskInfoMap } from './useStableTaskInfoMap';
@@ -93,7 +94,7 @@ export interface PendingDerived {
   summaryLoading: boolean;
 }
 
-export type ProfileWizardStep = 'agent' | 'work-type' | 'runtime' | 'vm-size' | 'name';
+export type ProfileWizardStep = 'agent' | 'work-type' | 'runtime' | 'resources' | 'name';
 export type SessionScope = 'my' | 'all';
 
 export interface ProfileWizardState {
@@ -103,6 +104,7 @@ export interface ProfileWizardState {
   workType: TaskMode | null;
   runtime: AgentProfileRuntime | null;
   vmSize: VMSize | null;
+  resourceReqs: import('../../components/resource-requirements').ResourceRequirementsFormState;
   profileName: string;
   saving: boolean;
   error: string | null;
@@ -193,6 +195,7 @@ export function useProjectChatState() {
     workType: null,
     runtime: null,
     vmSize: null,
+    resourceReqs: { ...EMPTY_RESOURCE_STATE_IMPORT },
     profileName: '',
     saving: false,
     error: null,
@@ -210,9 +213,6 @@ export function useProjectChatState() {
   const [selectedWorkspaceProfile, setSelectedWorkspaceProfile] = useState<WorkspaceProfile>(
     (project?.defaultWorkspaceProfile as WorkspaceProfile | null) ?? DEFAULT_WORKSPACE_PROFILE
   );
-  const [selectedVmSizeOverride, setSelectedVmSizeOverride] = useState<VMSize | null>(null);
-  const selectedVmSize = selectedVmSizeOverride ?? resolveInitialVmSize(project?.defaultVmSize);
-
   // Devcontainer config name — empty string means auto-detect
   const [selectedDevcontainerConfigName, setSelectedDevcontainerConfigName] = useState(
     project?.defaultDevcontainerConfigName ?? ''
@@ -226,6 +226,24 @@ export function useProjectChatState() {
       : 'task'
   );
   const userSetTaskModeRef = useRef(false);
+
+  // Per-task resource override — blank fields inherit from profile/project
+  const [taskResourceReqs, setTaskResourceReqs] = useState<
+    import('../../components/resource-requirements').ResourceRequirementsFormState
+  >({ ...EMPTY_RESOURCE_STATE_IMPORT });
+  const [taskResourceErrors, setTaskResourceErrors] = useState<
+    import('../../components/resource-requirements').ResourceValidationErrors
+  >({});
+
+  // Reset per-task resource overrides and errors on project switch
+  const prevProjectIdRef = useRef(projectId);
+  useEffect(() => {
+    if (prevProjectIdRef.current !== projectId) {
+      prevProjectIdRef.current = projectId;
+      setTaskResourceReqs({ ...EMPTY_RESOURCE_STATE_IMPORT });
+      setTaskResourceErrors({});
+    }
+  }, [projectId]);
 
   // Provisioning tracking
   const [provisioning, setProvisioning] = useState<ProvisioningState | null>(null);
@@ -439,103 +457,16 @@ export function useProjectChatState() {
     paused: !wsConnected,
   });
 
-  // Poll task status during provisioning
-  const provisioningVisible = useDocumentVisible();
-  useEffect(() => {
-    if (!provisioning || isTerminal(provisioning.status)) return;
-    // Provisioning polls every 2s and can run for minutes — by far the hottest
-    // poll on this page. Suspend it in a hidden tab; re-running this effect on
-    // the visibility transition refreshes once immediately on return, which is
-    // what a 2s progress poll wants.
-    if (!provisioningVisible) return;
-    const poll = async () => {
-      try {
-        const task = await getProjectTask(projectId, provisioning.taskId);
-        setProvisioning((prev) => {
-          if (!prev) return null;
-          const next = {
-            ...prev,
-            status: task.status,
-            executionStep: task.executionStep ?? null,
-            errorMessage: task.errorMessage ?? null,
-            requestedVmSize: task.requestedVmSize ?? prev.requestedVmSize,
-            provisionedVmSize: task.provisionedVmSize ?? prev.provisionedVmSize,
-          };
-          if (task.workspaceId && !prev.workspaceId) next.workspaceId = task.workspaceId;
-          return next;
-        });
-        if (task.workspaceId && !provisioning.workspaceUrl) {
-          try {
-            const ws = await getWorkspace(task.workspaceId);
-            if (ws.url)
-              setProvisioning((prev) => (prev ? { ...prev, workspaceUrl: ws.url ?? null } : null));
-          } catch {
-            /* Workspace may not be ready yet */
-          }
-        }
-        if (
-          task.status === 'in_progress' &&
-          (task.workspaceId || task.executionStep === 'running')
-        ) {
-          navigate(`/projects/${projectId}/chat/${provisioning.sessionId}`, { replace: true });
-          setProvisioning(null);
-        }
-        if (isTerminal(task.status)) {
-          navigate(`/projects/${projectId}/chat/${provisioning.sessionId}`, { replace: true });
-          setProvisioning(null);
-          void loadSessions();
-        }
-      } catch {
-        /* Continue polling on transient errors */
-      }
-    };
-    void poll();
-    const interval = setInterval(() => void poll(), TASK_STATUS_POLL_MS);
-    return () => clearInterval(interval);
-  }, [
-    provisioning?.taskId,
-    provisioning?.status,
+  // Provisioning poll + restore (see useProvisioningTracker for the gates)
+  useProvisioningTracker({
     projectId,
+    sessionId,
+    sessions,
+    provisioning,
+    setProvisioning,
     navigate,
     loadSessions,
-    provisioning?.sessionId,
-    provisioningVisible,
-  ]);
-
-  // Restore provisioning state when navigating to a session with an active task
-  useEffect(() => {
-    if (!sessionId || provisioning) return;
-    const selectedSession = sessions.find((s) => s.id === sessionId);
-    if (!selectedSession?.taskId) return;
-    const selectedTaskId = selectedSession.taskId;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const task = await getProjectTask(projectId, selectedTaskId);
-        if (cancelled) return;
-        if (!isTerminal(task.status) && task.status !== 'in_progress') {
-          setProvisioning({
-            taskId: task.id,
-            sessionId,
-            branchName: task.outputBranch ?? '',
-            status: task.status,
-            executionStep: task.executionStep ?? null,
-            errorMessage: task.errorMessage ?? null,
-            startedAt: task.startedAt ? new Date(task.startedAt).getTime() : Date.now(),
-            workspaceId: task.workspaceId ?? null,
-            workspaceUrl: null,
-            requestedVmSize: task.requestedVmSize ?? null,
-            provisionedVmSize: task.provisionedVmSize ?? null,
-          });
-        }
-      } catch {
-        /* Best-effort */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [sessionId, sessions, projectId, provisioning]);
+  });
 
   // ---------------------------------------------------------------------------
   // Handlers
@@ -560,6 +491,7 @@ export function useProjectChatState() {
       workType: null,
       runtime: null,
       vmSize: null,
+      resourceReqs: { ...EMPTY_RESOURCE_STATE_IMPORT },
       profileName: '',
       saving: false,
       error: null,
@@ -606,9 +538,12 @@ export function useProjectChatState() {
     }
     const workType = profileWizard.workType ?? 'conversation';
     const runtime = resolveWizardRuntime(workType, profileWizard.runtime);
-    const vmSize = profileWizard.vmSize ?? DEFAULT_VM_SIZE;
     setProfileWizard((current) => ({ ...current, saving: true, error: null }));
     try {
+      const resourceJson =
+        runtime === 'cf-container'
+          ? null
+          : serializeResourceRequirements(profileWizard.resourceReqs);
       const profile = await createProfile({
         name,
         description:
@@ -617,7 +552,7 @@ export function useProjectChatState() {
             : 'Chat and explore with a lightweight workspace',
         agentType,
         runtime,
-        vmSizeOverride: runtime === 'cf-container' ? null : vmSize,
+        resourceRequirementsJson: resourceJson,
         workspaceProfile: resolveWizardWorkspaceProfile(runtime, workType),
         taskMode: resolveWizardTaskMode(runtime, workType),
       });
@@ -638,7 +573,7 @@ export function useProjectChatState() {
     profileWizard.profileName,
     profileWizard.runtime,
     profileWizard.selectedAgentType,
-    profileWizard.vmSize,
+    profileWizard.resourceReqs,
     profileWizard.workType,
   ]);
 
@@ -663,6 +598,19 @@ export function useProjectChatState() {
       return;
     }
     setSubmitError(null);
+
+    // Fix 4: validate resource overrides before dispatch and surface per-field errors
+    const hasResources = hasAnyResourceValue(taskResourceReqs);
+    if (hasResources) {
+      const resErrors = validateResourceState(taskResourceReqs);
+      if (hasValidationErrors(resErrors)) {
+        setTaskResourceErrors(resErrors);
+        setSubmitError('Fix resource requirement errors before sending');
+        return;
+      }
+    }
+    setTaskResourceErrors({});
+
     setSubmitting(true);
     try {
       const submitProfileId = await resolveProfileIdForSubmit();
@@ -676,7 +624,10 @@ export function useProjectChatState() {
       const attachmentRefs = getCompletedAttachmentRefs(attachments.chatAttachments);
       const selectedRuntime = selectedSkill?.runtime ?? selectedProfile?.runtime ?? null;
       const requiresTaskSubmission = attachmentRefs.length > 0 || executeIdeaIdRef.current !== null;
-      const useInstantSession = selectedRuntime === 'cf-container' && !requiresTaskSubmission;
+      // Fix 2: when task has explicit resource overrides, route through submitTask
+      // so the backend can honor them; Instant cannot carry resource requirements.
+      const useInstantSession =
+        selectedRuntime === 'cf-container' && !requiresTaskSubmission && !hasResources;
 
       if (useInstantSession) {
         const result = await startInstantChatSession(projectId, {
@@ -689,13 +640,14 @@ export function useProjectChatState() {
         setMessage('');
         setPendingDerived(null);
         attachments.clearAttachments();
+        setTaskResourceReqs({ ...EMPTY_RESOURCE_STATE_IMPORT });
         newChatIntentRef.current = false;
         navigate(`/projects/${projectId}/chat/${result.sessionId}`, { replace: true });
         loadSessions().catch(() => undefined);
         return;
       }
 
-      if (!hasCloudCredentials) {
+      if (selectedRuntime !== 'cf-container' && !hasCloudCredentials) {
         setSubmitError(
           'Cloud credentials required. Connect a cloud provider in Settings, or ask your admin to enable platform trial.'
         );
@@ -707,7 +659,7 @@ export function useProjectChatState() {
         agentProfileId: submitProfileId,
         skillId: selectedSkillId,
         selectedAgentType,
-        selectedVmSize,
+        selectedResourceRequirements: toResourceRequirements(taskResourceReqs),
         selectedWorkspaceProfile,
         selectedDevcontainerConfigName,
         selectedTaskMode,
@@ -717,6 +669,8 @@ export function useProjectChatState() {
       setMessage('');
       setPendingDerived(null);
       attachments.clearAttachments();
+      // Fix 3: reset per-task resource overrides after successful submit
+      setTaskResourceReqs({ ...EMPTY_RESOURCE_STATE_IMPORT });
       setProvisioning({
         taskId: result.taskId,
         sessionId: result.sessionId,
@@ -760,6 +714,8 @@ export function useProjectChatState() {
     setMessage('');
     setSubmitError(null);
     setProvisioning(null);
+    setTaskResourceReqs({ ...EMPTY_RESOURCE_STATE_IMPORT });
+    setTaskResourceErrors({});
   }, [navigate, projectId]);
 
   const handleSelect = useCallback(
@@ -939,10 +895,6 @@ export function useProjectChatState() {
     setSelectedTaskMode(mode);
   }, []);
 
-  const handleVmSizeChange = useCallback((size: VMSize) => {
-    setSelectedVmSizeOverride(size);
-  }, []);
-
   // ---------------------------------------------------------------------------
   // Derived state
   // ---------------------------------------------------------------------------
@@ -1001,14 +953,16 @@ export function useProjectChatState() {
     suggestProfileName,
     handleUpdateProfile,
     slashCommands,
-    selectedVmSize,
-    handleVmSizeChange,
     selectedWorkspaceProfile,
     setSelectedWorkspaceProfile,
     selectedDevcontainerConfigName,
     setSelectedDevcontainerConfigName,
     selectedTaskMode,
     handleTaskModeChange,
+    taskResourceReqs,
+    setTaskResourceReqs,
+    taskResourceErrors,
+    setTaskResourceErrors,
     ...attachments,
     provisioning,
     bootLogs,

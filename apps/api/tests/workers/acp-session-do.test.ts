@@ -12,7 +12,7 @@
  * - listAcpSessions: chatSessionId filter, pagination, total count
  */
 import { env, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ProjectData } from '../../src/durable-objects/project-data';
 import { shouldDeferRuntimeHeartbeatTimeout } from '../../src/durable-objects/project-data/runtime-heartbeat-policy';
@@ -25,6 +25,7 @@ import {
   seedUser,
   seedWorkspace,
 } from './helpers/seed-d1';
+import { alarmCompletions, letHeartbeatDeadlinePass } from './support/project-data-alarm';
 import type { VmAgentContainerTestDouble } from './support/vm-agent-container-double';
 
 /** Seed the bound VM_AGENT_CONTAINER double's lifecycle status for a node. */
@@ -290,20 +291,27 @@ describe('ACP Session Lifecycle (Spec 027)', () => {
       return { stub, acpSession, workspaceId, nodeId, projectId };
     }
 
-    function staleHeartbeat(
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    /** Returns the next alarm and whether a tick after the deadline ran the heartbeat section. */
+    async function staleHeartbeat(
       stub: DurableObjectStub<ProjectData>,
+      projectId: string,
       acpSessionId: string,
       passes: number
     ) {
-      return runInDurableObject(stub, async (instance, state) => {
-        state.storage.sql.exec(
-          `UPDATE acp_sessions SET last_heartbeat_at = ? WHERE id = ?`,
-          Date.now() - 10 * 60 * 1000,
-          acpSessionId
-        );
+      const logSpy = vi.spyOn(console, 'log');
+      const nextAlarm = await runInDurableObject(stub, async (instance, state) => {
+        await letHeartbeatDeadlinePass(instance, state.storage, acpSessionId);
         for (let i = 0; i < passes; i++) await instance.alarm();
         return state.storage.getAlarm();
       });
+      const heartbeatSectionRan = alarmCompletions(logSpy, projectId).some((completion) =>
+        completion.ranSections.includes('runtime_heartbeat_timeouts')
+      );
+      return { nextAlarm, heartbeatSectionRan };
     }
 
     it('preserves a sleeping Instant session across repeated stale-heartbeat alarms', async () => {
@@ -328,9 +336,16 @@ describe('ACP Session Lifecycle (Spec 027)', () => {
       );
       expect(decision).toEqual({ defer: true, reason: 'cf_container_sleeping' });
 
-      const nextAlarm = await staleHeartbeat(stub, acpSession.id, 2);
+      const { nextAlarm, heartbeatSectionRan } = await staleHeartbeat(
+        stub,
+        projectId,
+        acpSession.id,
+        2
+      );
 
-      // End-to-end: the session survives repeated alarms and stays scheduled.
+      // End-to-end: the session survives repeated alarms and stays scheduled — and the heartbeat
+      // section really did examine it, so survival is the policy's decision, not a skipped section.
+      expect(heartbeatSectionRan).toBe(true);
       expect((await stub.getAcpSession(acpSession.id))?.status).toBe('running');
       expect(nextAlarm).not.toBeNull();
       expect(nextAlarm!).toBeGreaterThan(Date.now());
@@ -355,7 +370,8 @@ describe('ACP Session Lifecycle (Spec 027)', () => {
       );
       expect(decision).toEqual({ defer: false, reason: 'cf_container_stopped' });
 
-      await staleHeartbeat(stub, acpSession.id, 1);
+      const { heartbeatSectionRan } = await staleHeartbeat(stub, projectId, acpSession.id, 1);
+      expect(heartbeatSectionRan).toBe(true);
 
       // End-to-end: with a dead container the stale session is interrupted.
       // This pairing is what makes the sleeping test discriminating — moving

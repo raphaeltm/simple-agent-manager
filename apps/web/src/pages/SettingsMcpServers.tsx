@@ -28,26 +28,28 @@ export function SettingsMcpServers() {
         <h3 className="text-sm font-medium text-fg-primary">Where do I get an MCP endpoint?</h3>
         <ul className="mt-2 space-y-1 text-xs text-fg-muted">
           <li>
-            <strong className="text-fg-primary">Zapier MCP</strong> — broadest catalog (~9,000 apps).
-            Do the OAuth in Zapier, copy the endpoint and its bearer token.
+            <strong className="text-fg-primary">Zapier MCP</strong> — broadest catalog (~9,000
+            apps). Do the OAuth in Zapier, copy the endpoint and its bearer token.
           </li>
           <li>
             <strong className="text-fg-primary">executor.sh</strong> — open source (MIT); run it
             yourself or use their hosted endpoint.
           </li>
           <li>
-            <strong className="text-fg-primary">Composio / Rube</strong> — issues a pre-signed URL, so
-            choose &ldquo;None&rdquo; for authentication.
+            <strong className="text-fg-primary">Composio / Rube</strong> — choose &ldquo;None&rdquo;
+            for authentication and add your API key as an{' '}
+            <code className="font-mono">x-api-key</code> header (older pre-signed URLs need no
+            header).
           </li>
           <li>
-            <strong className="text-fg-primary">Official service endpoints</strong> — GitHub, Notion,
-            Linear, Sentry and Stripe all publish remote MCP servers that take a personal
+            <strong className="text-fg-primary">Official service endpoints</strong> — GitHub,
+            Notion, Linear, Sentry and Stripe all publish remote MCP servers that take a personal
             access token as the bearer.
           </li>
         </ul>
         <p className="mt-2 text-xs text-fg-muted break-words">
-          Tools from an MCP server run with your agent&apos;s full repository and shell access,
-          and their descriptions enter the agent&apos;s context. Only add endpoints you trust.
+          Tools from an MCP server run with your agent&apos;s full repository and shell access, and
+          their descriptions enter the agent&apos;s context. Only add endpoints you trust.
         </p>
       </div>
     </div>

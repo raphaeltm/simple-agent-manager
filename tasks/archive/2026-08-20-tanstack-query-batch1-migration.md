@@ -202,8 +202,8 @@ Specialist review outcomes:
 - SAM idea `01M0E14DMF42M4RGYEE3RXMA03`
 - `tasks/archive/2026-08-19-tanstack-query-migration-high-impact-hooks.md`
 - `tasks/archive/2026-08-07-frontend-query-cache-and-rotation-resilience.md`
-- `tasks/active/2026-08-19-server-side-kv-caching.md`
-- `tasks/active/2026-08-19-browser-side-conversation-caching.md`
+- `tasks/archive/2026-08-19-server-side-kv-caching.md`
+- `tasks/archive/2026-08-19-browser-side-conversation-caching.md`
 - `.claude/rules/48-stale-while-revalidate-ui.md`
 - `.claude/rules/60-request-io-and-bundle-budgets.md`
 - `.claude/rules/16-no-page-reload-on-mutation.md`

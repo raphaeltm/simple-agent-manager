@@ -27,13 +27,24 @@ import {
   resolveSamConfig,
   SAM_ANTHROPIC_VERSION,
 } from '@simple-agent-manager/shared';
+import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { runAgentLoop } from '../../../src/durable-objects/sam-session/agent-loop';
-import { buildFtsQuery, extractSnippet } from '../../../src/durable-objects/sam-session/index';
+import {
+  appendMessageLikeSearchResults,
+  buildFtsQuery,
+  extractSnippet,
+} from '../../../src/durable-objects/sam-session/index';
 import { executeTool } from '../../../src/durable-objects/sam-session/tools';
 import { searchConversationHistory } from '../../../src/durable-objects/sam-session/tools/search-conversation-history';
 import type { CollectedToolCall, MessageRow, ToolContext } from '../../../src/durable-objects/sam-session/types';
+import {
+  DEFAULT_SEARCH_QUERY_MAX_LENGTH,
+  DEFAULT_SEARCH_QUERY_MAX_TERM_LENGTH,
+  DEFAULT_SEARCH_QUERY_MAX_TERMS,
+} from '../../../src/lib/search-query-limits';
+import { createSqlStorage } from './sql-storage-test-utils';
 
 // Mock cloudflare:workers (vitest hoists vi.mock calls automatically)
 
@@ -236,7 +247,7 @@ describe('SAM Tool Definitions', () => {
   it('exports tool definitions in Anthropic native format', async () => {
     const { SAM_TOOLS } = await import('../../../src/durable-objects/sam-session/tools');
 
-    expect(SAM_TOOLS).toHaveLength(31);
+    expect(SAM_TOOLS).toHaveLength(32);
 
     for (const tool of SAM_TOOLS) {
       expect(tool).toHaveProperty('name');
@@ -324,6 +335,60 @@ describe('extractSnippet', () => {
 });
 
 describe('search_conversation_history tool', () => {
+  it('searches every retained term in the shared message LIKE fallback', () => {
+    const db = new Database(':memory:');
+    const storage = createSqlStorage(db);
+    const terms = [
+      '😀',
+      '😃',
+      '😄',
+      '😁',
+      '😆',
+      '😅',
+      '😂',
+      '🤣',
+      '😊',
+      '😇',
+      '🙂',
+      '🙃',
+      '😉',
+      '😌',
+      '😍',
+      '🥰',
+      '😘',
+      '😗',
+      '😙',
+      '😚',
+    ];
+    try {
+      storage.exec(`CREATE TABLE messages (
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        sequence INTEGER NOT NULL,
+        created_at TEXT NOT NULL
+      )`);
+      storage.exec(
+        `INSERT INTO messages (role, content, sequence, created_at) VALUES
+          ('user', ?, 1, '2026-01-01T00:00:00.000Z'),
+          ('user', ?, 2, '2026-01-02T00:00:00.000Z')`,
+        terms.slice(0, 10).join(' '),
+        terms.join(' ')
+      );
+      const results: Array<{
+        snippet: string;
+        role: string;
+        sequence: number;
+        createdAt: string;
+      }> = [];
+
+      appendMessageLikeSearchResults(storage, terms.join(' '), 10, results);
+
+      expect(results.map((result) => result.sequence)).toEqual([2]);
+    } finally {
+      db.close();
+    }
+  });
+
   it('returns error for empty query', async () => {
     const ctx: ToolContext = { env: {} as Record<string, unknown>, userId: 'u1' };
     const result = await searchConversationHistory({ query: '' }, ctx);
@@ -347,7 +412,17 @@ describe('search_conversation_history tool', () => {
     };
     const result = await searchConversationHistory({ query: 'test', limit: 5 }, ctx);
     expect(ctx.searchMessages).toHaveBeenCalledWith('test', 5);
-    expect(result).toEqual({ results: mockResults, count: 1, query: 'test' });
+    expect(result).toEqual({
+      results: mockResults,
+      count: 1,
+      query: 'test',
+      queryTruncated: false,
+      queryLimits: {
+        maxLength: DEFAULT_SEARCH_QUERY_MAX_LENGTH,
+        maxTermLength: DEFAULT_SEARCH_QUERY_MAX_TERM_LENGTH,
+        maxTerms: DEFAULT_SEARCH_QUERY_MAX_TERMS,
+      },
+    });
   });
 
   it('caps limit at DEFAULT_SAM_SEARCH_MAX_LIMIT', async () => {

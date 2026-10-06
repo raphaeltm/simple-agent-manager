@@ -156,8 +156,9 @@ describe('sam-session search_tasks contract', () => {
     const result = await searchTasks({ query: 'oauth' }, ctx) as { count: number };
 
     expect(result.count).toBe(1);
-    expect(preparedSql(ctx)).toContain('"tasks"."title" like ?');
-    expect(preparedSql(ctx)).toContain('"tasks"."description" like ?');
+    const sql = preparedSql(ctx).toLowerCase();
+    expect(sql).toContain('"tasks"."title" like ? escape');
+    expect(sql).toContain('"tasks"."description" like ? escape');
     expect(bindArgs(ctx).filter((arg) => arg === '%oauth%')).toHaveLength(2);
   });
 

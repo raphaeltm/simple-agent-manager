@@ -1,13 +1,15 @@
-// FILE SIZE EXCEPTION: Durable Object recovery state machine — method groups are already extracted into vm-agent-container-{recovery,runtime,lifecycle,active-work}.ts; the remaining class body is the interlocking mutex-guarded lifecycle critical sections (rule 45), which must stay reviewable as one unit. See .claude/rules/18-file-size-limits.md
+// FILE SIZE EXCEPTION: Durable Object recovery state machine — method groups are already extracted into vm-agent-container-{recovery,recovery-failure,runtime,lifecycle,active-work}.ts; the remaining class body is the interlocking mutex-guarded lifecycle critical sections (rule 45), which must stay reviewable as one unit. See .claude/rules/18-file-size-limits.md
 import { Container, switchPort } from '@cloudflare/containers';
+import { and, eq } from 'drizzle-orm';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { maybeJsonRecord } from '../lib/runtime-validation';
+import { commitContainerWakeFromSleep } from '../services/container-wake-commit';
 import { signCallbackToken, signNodeCallbackToken, signNodeManagementToken } from '../services/jwt';
 import {
-  isSessionRecoverySourceTaskGuardValid,
+  isSessionRecoverySourceTaskGuardFullyValidForEnv,
   SessionRecoveryAuthorityRevokedError,
   type SessionRecoverySourceTaskGuard,
 } from '../services/session-recovery-authority';
@@ -28,7 +30,6 @@ import {
   loadRuntimeRecoveryContext,
   persistRuntimeRecovered,
   persistRuntimeRecovering,
-  persistRuntimeRecoveryFailed,
   RUNTIME_RECOVERING_MESSAGE,
   RUNTIME_RECOVERY_DEGRADED_MESSAGE,
   RUNTIME_REQUEST_INTERRUPTED_MESSAGE,
@@ -40,6 +41,7 @@ import {
   type RuntimeRecoveryTrigger,
   toRuntimeRecoveryTarget,
 } from './vm-agent-container-recovery';
+import { persistRuntimeRecoveryFailed } from './vm-agent-container-recovery-failure';
 import {
   interruptedRuntimeRequestResponse as interruptedRequestResponse,
   isMissingSessionHostResponse,
@@ -95,7 +97,11 @@ function sameSourceTaskGuard(
     right &&
     left.taskId === right.taskId &&
     left.projectId === right.projectId &&
-    left.chatSessionId === right.chatSessionId
+    left.chatSessionId === right.chatSessionId &&
+    (left.requiredProjectMemberId ?? null) === (right.requiredProjectMemberId ?? null) &&
+    (left.projectEventWake?.batchId ?? null) === (right.projectEventWake?.batchId ?? null) &&
+    (left.projectEventWake?.subscriptionId ?? null) ===
+      (right.projectEventWake?.subscriptionId ?? null)
   );
 }
 function stoppedRecoveryResult(): VmAgentContainerRecoveryResult {
@@ -162,6 +168,29 @@ export class VmAgentContainer extends Container<Env> {
 
   async proxyHttp(request: Request, port?: number): Promise<Response> {
     return this.proxyHttpAuthorized(request, port);
+  }
+
+  /** Forward only to an already-running runtime; never wake or start recovery. */
+  async proxyHttpNoWake(request: Request, port?: number): Promise<Response> {
+    const status = await this.ctx.storage.get<LifecycleStatus>('lifecycleStatus');
+    if (status !== 'running') {
+      return recoveryResponse('RUNTIME_STOPPED', RUNTIME_STOPPED_MESSAGE, 410);
+    }
+    const container = this.ctx.container;
+    if (!container?.running) {
+      return recoveryResponse('RUNTIME_STOPPED', RUNTIME_STOPPED_MESSAGE, 410);
+    }
+    try {
+      // Container.containerFetch() is intentionally forbidden here: the pinned
+      // SDK starts compute when either the real runtime is stopped or its own
+      // persisted health state is stale. The direct port primitive never starts
+      // a container; if stop/crash wins after the running check, fetch rejects.
+      const tcpPort = container.getTcpPort(port ?? this.defaultPort);
+      const containerUrl = request.url.replace('https:', 'http:');
+      return await tcpPort.fetch(containerUrl, request);
+    } catch {
+      return interruptedRequestResponse(request);
+    }
   }
 
   private async proxyHttpAuthorized(
@@ -241,7 +270,7 @@ export class VmAgentContainer extends Container<Env> {
     // before proxyHttp() reaches prepareForRequest()/ensureAwake(). A caller-
     // side check alone leaves a network-RPC window where a terminal parent can
     // still cold-start compute.
-    if (!(await isSessionRecoverySourceTaskGuardValid(this.env.DATABASE, sourceTaskGuard))) {
+    if (!(await isSessionRecoverySourceTaskGuardFullyValidForEnv(this.env, sourceTaskGuard))) {
       await this.abortRevokedSourceTaskWake(sourceTaskGuard);
       return revokedSourceTaskResponse();
     }
@@ -309,15 +338,16 @@ export class VmAgentContainer extends Container<Env> {
           const reconciled = await this.withLifecycleLock(async () => {
             const current = await this.ctx.storage.get<LifecycleStatus>('lifecycleStatus');
             if (current !== 'running') return false;
-            await persistRuntimeRecovered(
+            const persisted = await persistRuntimeRecovered(
               this.env,
               toRuntimeRecoveryTarget(config, context),
               'none'
             );
-            return true;
+            return persisted !== false;
           });
           if (reconciled) return { ok: true, status: 'running' };
-          return this.ensureAwake();
+          await this.stop().catch(() => undefined);
+          return stoppedRecoveryResult();
         }
         await this.beginUnexpectedRecovery({
           trigger: 'request',
@@ -471,9 +501,8 @@ export class VmAgentContainer extends Container<Env> {
       const config = await this.ctx.storage.get<VmAgentContainerLaunchConfig>('launchConfig');
       if (config) {
         try {
-          const { isHarnessWorkLeaseActive, parseHarnessWorkConfig } = await import(
-            '../services/session-idleness'
-          );
+          const { isHarnessWorkLeaseActive, parseHarnessWorkConfig } =
+            await import('../services/session-idleness');
           const projectDataService = await import('../services/project-data');
           const timeoutMs = parsePositiveInt(
             this.env.CF_CONTAINER_HARNESS_LEASE_CHECK_TIMEOUT_MS,
@@ -489,7 +518,10 @@ export class VmAgentContainer extends Container<Env> {
               setTimeout(() => reject(new Error('harness lease check timed out')), timeoutMs)
             ),
           ]);
-          if (state && isHarnessWorkLeaseActive(state, new Date(), parseHarnessWorkConfig(this.env))) {
+          if (
+            state &&
+            isHarnessWorkLeaseActive(state, new Date(), parseHarnessWorkConfig(this.env))
+          ) {
             log.info('vm_agent_container_sleep_deferred_harness_work', {
               nodeId: config.nodeId,
               workspaceId: config.workspaceId,
@@ -577,7 +609,7 @@ export class VmAgentContainer extends Container<Env> {
   ): Promise<void> {
     if (
       sourceTaskGuard &&
-      !(await isSessionRecoverySourceTaskGuardValid(this.env.DATABASE, sourceTaskGuard))
+      !(await isSessionRecoverySourceTaskGuardFullyValidForEnv(this.env, sourceTaskGuard))
     ) {
       throw new SessionRecoveryAuthorityRevokedError();
     }
@@ -773,6 +805,12 @@ export class VmAgentContainer extends Container<Env> {
       });
       if (!context) return null;
 
+      const persistedTarget = await persistRuntimeRecovering(
+        this.env,
+        toRuntimeRecoveryTarget(config, context)
+      );
+      if (persistedTarget === null) return null;
+
       const now = Date.now();
       const recovery: RuntimeRecoveryState = {
         version: 1,
@@ -788,7 +826,6 @@ export class VmAgentContainer extends Container<Env> {
       await this.ctx.storage.put(RECOVERY_STATE_KEY, recovery);
       await this.ctx.storage.put('lifecycleStatus', 'recovering' satisfies LifecycleStatus);
       await this.clearKeepaliveSchedule();
-      await persistRuntimeRecovering(this.env, toRuntimeRecoveryTarget(config, context));
       log.warn('vm_agent_container_recovery_started', {
         nodeId: config.nodeId,
         workspaceId: config.workspaceId,
@@ -902,8 +939,17 @@ export class VmAgentContainer extends Container<Env> {
         // The lock may have been queued behind a stop or another lifecycle
         // operation. Revalidate after entering it and after the D1 commit.
         await this.assertSourceTaskGuard(sourceTaskGuard);
-        await persistRuntimeRecovered(this.env, target, restoring.promptDisposition);
+        const persisted = await persistRuntimeRecovered(
+          this.env,
+          target,
+          restoring.promptDisposition
+        );
+        if (persisted === false) return false;
         await this.assertSourceTaskGuard(sourceTaskGuard);
+        // Under the lock, so an explicit stop queued behind this wake lands after the commit. A
+        // guarded wake is committed by the durable delivery that carries the guard, after its own
+        // revalidation; a guard revoked before then re-sleeps the runtime onto intact markers.
+        if (!sourceTaskGuard) await commitContainerWakeFromSleep(this.env, target);
         await this.ctx.storage.delete(RECOVERY_STATE_KEY);
         await this.ctx.storage.put('lifecycleStatus', 'running' satisfies LifecycleStatus);
         return true;
@@ -997,7 +1043,10 @@ export class VmAgentContainer extends Container<Env> {
       const exhausted = { ...recovery, phase: 'exhausted' as const, updatedAt: Date.now() };
       await this.ctx.storage.put(RECOVERY_STATE_KEY, exhausted);
       await this.ctx.storage.put('lifecycleStatus', 'error' satisfies LifecycleStatus);
-      if (target) await persistRuntimeRecoveryFailed(this.env, target);
+      if (target) {
+        const persisted = await persistRuntimeRecoveryFailed(this.env, target);
+        if (persisted === false) return false;
+      }
       return true;
     });
     if (!applied) {
@@ -1126,9 +1175,32 @@ export class VmAgentContainer extends Container<Env> {
     } = await import('../services/session-snapshots');
     const db = drizzle(this.env.DATABASE, { schema });
     const snapshot = await getRestorableSessionSnapshot(db, config.chatSessionId);
+    const liveAgentSession = snapshot?.agentSessionId
+      ? await db
+          .select({ id: schema.agentSessions.id })
+          .from(schema.agentSessions)
+          .where(
+            and(
+              eq(schema.agentSessions.id, snapshot.agentSessionId),
+              eq(schema.agentSessions.workspaceId, config.workspaceId),
+              eq(schema.agentSessions.status, 'running')
+            )
+          )
+          .get()
+      : null;
     const snapshotStatus = snapshot?.status ?? null;
     const snapshotDegradation = snapshot?.degradation ?? null;
-    if (!isSessionSnapshotSleepReleasable(snapshot)) {
+    if (
+      !isSessionSnapshotSleepReleasable(snapshot) ||
+      snapshot.status !== 'available' ||
+      snapshot.degradation !== 'none' ||
+      snapshot.captureGeneration !== null ||
+      !snapshot.snapshotGeneration ||
+      !liveAgentSession ||
+      snapshot.workspaceId !== config.workspaceId ||
+      snapshot.nodeId !== config.nodeId ||
+      snapshot.runtime !== 'cf-container'
+    ) {
       log.warn('vm_agent_container_sleep_preserved_without_snapshot', {
         nodeId: config.nodeId,
         workspaceId: config.workspaceId,
@@ -1137,6 +1209,7 @@ export class VmAgentContainer extends Container<Env> {
       });
       return 'aborted';
     }
+    const snapshotGeneration = snapshot.snapshotGeneration;
     const claimId = crypto.randomUUID();
     let pointOfNoReturn = snapshot.sleepStatus === 'sleeping' && Boolean(snapshot.sleepingAt);
     if (!pointOfNoReturn) {
@@ -1162,7 +1235,14 @@ export class VmAgentContainer extends Container<Env> {
         if (!(await verifySessionSnapshotArtifactsForSleep(this.env, snapshot))) {
           throw new Error('Container snapshot artifacts failed durable R2 verification');
         }
-        if (!(await beginSessionSnapshotStopping(db, config.chatSessionId, claimId))) {
+        if (
+          !(await beginSessionSnapshotStopping(
+            db,
+            config.chatSessionId,
+            claimId,
+            snapshotGeneration
+          ))
+        ) {
           throw new Error('Container sleep claim was cancelled before teardown');
         }
         pointOfNoReturn = true;
@@ -1174,10 +1254,6 @@ export class VmAgentContainer extends Container<Env> {
       await projectDataService.sleepSession(this.env, config.projectId, config.chatSessionId);
       await persistRuntimeSleeping(this.env, config);
       if (!(snapshot.sleepStatus === 'sleeping' && snapshot.sleepingAt)) {
-        const sleepWarning =
-          snapshot.status === 'degraded'
-            ? `Workspace slept with degraded snapshot (${snapshot.degradation})`
-            : null;
         if (
           !(await finalizeSessionSnapshotSleeping(
             db,
@@ -1185,7 +1261,7 @@ export class VmAgentContainer extends Container<Env> {
             config.chatSessionId,
             claimId,
             new Date(),
-            { sleepWarning }
+            { expectedGeneration: snapshotGeneration }
           ))
         ) {
           throw new Error('Container sleep finalization lost its durable claim');

@@ -14,6 +14,7 @@ import {
   getAllUsersNodeUsageSummary,
   getUserNodeUsageSummary,
 } from '../../../src/services/node-usage';
+import { createSchemaTables } from '../../helpers/sqlite-d1';
 
 const MS_PER_HOUR = 60 * 60 * 1000;
 let sqlite: Database.Database | null = null;
@@ -24,27 +25,10 @@ function isoAt(ms: number): string {
 
 function createDb() {
   sqlite = new Database(':memory:');
-  sqlite.exec(`
-    CREATE TABLE users (
-      id TEXT PRIMARY KEY, email TEXT NOT NULL, name TEXT, avatar_url TEXT,
-      created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
-    );
-    CREATE TABLE nodes (
-      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, status TEXT NOT NULL,
-      vm_size TEXT NOT NULL, vm_location TEXT NOT NULL, cloud_provider TEXT, credential_source TEXT,
-      node_class TEXT NOT NULL DEFAULT 'managed',
-      provider_instance_type TEXT,
-      provider_instance_vcpu_count INTEGER,
-      provider_instance_memory_mb INTEGER,
-      provider_instance_disk_gb INTEGER,
-      provider_instance_price_display TEXT,
-      provider_instance_price_currency TEXT,
-      provider_instance_price_monthly_cents INTEGER,
-      provider_instance_price_hourly_micros INTEGER,
-      created_at TEXT NOT NULL, updated_at TEXT NOT NULL
-    );
-    CREATE TABLE workspaces (id TEXT PRIMARY KEY, node_id TEXT REFERENCES nodes(id));
-  `);
+  // Built from the drizzle definitions so the fixture cannot drift from the
+  // columns production usage queries actually select (native offering identity
+  // now includes boot disk / image / architecture).
+  createSchemaTables(sqlite, [schema.users, schema.nodes, schema.workspaces]);
   return drizzle(sqlite, { schema });
 }
 

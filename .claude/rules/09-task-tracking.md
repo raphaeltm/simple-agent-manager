@@ -84,6 +84,16 @@ Do **not** start the dispatched task description with `/do` or any other slash c
 
 The receiving agent will then follow the full `/do` workflow: research, task file creation, worktree setup, implementation, quality checks, specialist review, staging deployment, and PR merge.
 
+### Right-Size Dispatched Workspaces
+
+Oversized dispatches are not free. The Hetzner account has 10 servers shared by production and staging, and a dedicated large node recreates the one-node-per-agent problem the scheduler work exists to remove. Placement also subtracts the 512 MB host reserve before matching an offering, so a request of exactly 8 GB excludes every 8 GB machine and lands on 16 GB, and a request of exactly 4 GB lands on 8 GB. Observed 2026-09-13: a 4 vCPU / 8 GB `resourceRequirements` request placed a branch-reconciliation task on a dedicated cx43 (8 vCPU / 16 GB).
+
+1. **Prefer omitting `resourceRequirements` and `vmSize`.** The profile, skill, or project default applies and the pool can pack the task onto an existing node.
+2. **Look for prior signals before setting anything.** Read the previous attempt's task file or handoff notes, look for recorded OOM kills or "serialize heavy validation" remarks, check what comparable tasks ran on (`nodes.provider_instance_memory_mb` for their workspaces), and check the profile defaults.
+3. **If no signal exists, estimate, cite the source in the dispatch description, and cap the request at 2 vCPU and a 4 GB machine.** In `resourceRequirements` terms that is `minVcpu: 2` and `minMemoryGb` at most `3.5`, because of the host reserve.
+4. **Exceed the cap only for an out-of-memory failure actually observed at that size for this kind of work**, and say so in the dispatch. "The test suite is big" is a guess, not an observation.
+5. **Never combine `resourceRequirements` with `runtime: "cf-container"`**; the dispatch is rejected.
+
 ### Verify Dispatch Succeeded
 
 After calling `dispatch_task`, wait a few seconds and then check the task status (via `get_task_details` or `list_tasks`) to confirm it was properly dispatched and picked up. The dispatch system can occasionally fail silently — catching this early avoids wasted time waiting for work that never started.
@@ -135,8 +145,8 @@ When Raphaël asks for status, open PRs, task history, deployment state, or a si
 When a task asks you to review a previous session or recover context from recent conversations, keep the search bounded and evidence-driven:
 
 - If the prompt names a parent/target session, task, PR, or branch, inspect that object directly first with the relevant SAM MCP or GitHub tool instead of starting with broad global searches.
-- Keep `search_messages` queries short and focused. If a broad query fails with `LIKE or GLOB pattern too complex`, retry with fewer terms or read known sessions directly via `get_session_messages`.
-- Do not create a duplicate robustness idea for that search failure; the existing follow-up is `tasks/backlog/2026-05-06-search-messages-pattern-too-complex.md`.
+- Search tools keep normal long multi-word queries searchable by matching retained terms separately. Generous byte/term guardrails still disclose any trimming through `queryTruncated`, the effective `query`, and `queryLimits`. Callers that require exact coverage should refine an over-limit query or read known sessions directly via `get_session_messages`.
+- Do not create a duplicate robustness idea for historical SQLite pattern-complexity failures unless the bounded search path still reproduces the error.
 - Update the current or resumed session topic when it is stale and the available SAM tool supports it. Do not rewrite unrelated historical session titles unless the task explicitly includes durable state cleanup.
 - A context-resume review remains read-only by default. Only create task files, branches, commits, PRs, or dispatched work when the user asks for implementation, durable artifacts, or delegation.
 

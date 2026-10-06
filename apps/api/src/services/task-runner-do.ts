@@ -26,6 +26,9 @@ import type {
   TaskStartCapacityCandidate,
   TaskStartCapacityPoolSelection,
 } from './placement-resolver';
+import { assertReplacementDeletionConfirmed } from './replacement-deletion-fence';
+import type { ProjectEventWakeRecoveryGuard } from './session-recovery-authority';
+import type { TaskRunnerStartGuard } from './task-runner-start-guard';
 
 const TASK_RUNNER_COMPACT_SELECTION_MAX_BYTES = 96 * 1024;
 
@@ -97,21 +100,11 @@ function compactCapacityCandidateForTaskRunner(
 ): TaskStartCapacityCandidate {
   const rest = { ...candidate };
   delete rest.snapshot;
-  const {
-    machineClass,
-    providerInstancePriceDisplay,
-    providerInstancePriceCurrency,
-    providerInstancePriceMonthlyCents,
-    providerInstancePriceHourlyMicros,
-  } = candidate;
-
+  // Any candidate may become the selected reuse/provisioning target. Its prices
+  // remain part of placement diagnostics and ranking after snapshot compaction.
   return {
     ...rest,
-    machineClass: options.primary ? machineClass : null,
-    providerInstancePriceDisplay: options.primary ? providerInstancePriceDisplay : null,
-    providerInstancePriceCurrency: options.primary ? providerInstancePriceCurrency : null,
-    providerInstancePriceMonthlyCents: options.primary ? providerInstancePriceMonthlyCents : null,
-    providerInstancePriceHourlyMicros: options.primary ? providerInstancePriceHourlyMicros : null,
+    machineClass: options.primary ? candidate.machineClass : null,
   };
 }
 
@@ -130,6 +123,7 @@ export async function startTaskRunnerDO(
     branch: string;
     defaultBranch?: string;
     preferredNodeId?: string | null;
+    excludedNodeId?: string | null;
     userName?: string | null;
     userEmail?: string | null;
     githubId?: string | null;
@@ -178,25 +172,54 @@ export async function startTaskRunnerDO(
     /** Per-project scaling overrides. */
     projectScaling?: {
       taskExecutionTimeoutMs?: number | null;
-      maxWorkspacesPerNode?: number | null;
       nodeCpuThresholdPercent?: number | null;
       nodeMemoryThresholdPercent?: number | null;
+      nodeCpuShareBudgetPercent?: number | null;
+      nodeHostMemoryReserveMb?: number | null;
+      nodeDiskPressureThresholdPercent?: number | null;
+      nodeMetricsTtlMs?: number | null;
+      nodeCpuScoreWeightPercent?: number | null;
+      nodeMemoryScoreWeightPercent?: number | null;
       warmNodeTimeoutMs?: number | null;
     } | null;
-    /** Resolved resource requirements (audit-only, Phase 0). */
+    /** Raw resolved inputs retained for audit and provenance. */
     resourceRequirements?: ResourceRequirements | null;
-    /** Resolved reservation in scheduler units (audit-only, Phase 0). */
-    resolvedReservation?: ResolvedResourceReservation | null;
+    /** Immutable scheduler reservation used for node selection and final workspace placement. */
+    resolvedReservation: ResolvedResourceReservation;
     /** Effective one-pool capacity selection for VM task placement. */
     capacityPoolSelection?: TaskStartCapacityPoolSelection | null;
     /** Where the VM size came from in the precedence chain. */
     vmSizeSource?: ResourceRequirementsSource | 'explicit' | null;
     /** Existing sleeping chat whose snapshot is restored before queued prompt delivery. */
     resumeSnapshotChatSessionId?: string | null;
+    /** Resource-eviction identity that must remain current through replacement allocation. */
+    evictionFence?: {
+      workspaceId: string;
+      nodeId: string;
+      generation: string | null;
+    } | null;
     /** Original parent whose live status authorizes this snapshot-recovery runner. */
     recoverySourceTaskId?: string | null;
-  }
+    recoveryAttemptId?: string | null;
+    /** Original attempt whose runtime deletion fences this replacement. */
+    retrySourceTaskId?: string | null;
+    /** Optional durable lifecycle guard for reserved first-start submissions. */
+    startGuard?: TaskRunnerStartGuard | null;
+    /** Event wake batch/subscription identity that must still authorize guarded recovery. */
+    projectEventWakeGuard?: ProjectEventWakeRecoveryGuard | null;
+    /** Member whose continued write permission authorizes a scheduled wake. */
+    recoveryRequiredProjectMemberId?: string | null;
+  },
+  options: { reactivate?: boolean } = {}
 ): Promise<void> {
+  const deletionSourceTaskId = input.retrySourceTaskId ?? input.recoverySourceTaskId ?? null;
+  if (deletionSourceTaskId && deletionSourceTaskId !== input.taskId) {
+    await assertReplacementDeletionConfirmed(env, {
+      sourceTaskId: deletionSourceTaskId,
+      projectId: input.projectId,
+      userId: input.userId,
+    });
+  }
   const stub = getStub(env, input.taskId);
   const capacityPoolSelection = capacityPoolSelectionForStart(input);
   const initialCapacityCandidate = capacityPoolSelection?.candidates[0] ?? null;
@@ -211,6 +234,7 @@ export async function startTaskRunnerDO(
       branch: input.branch,
       defaultBranch: input.defaultBranch ?? input.branch,
       preferredNodeId: input.preferredNodeId ?? null,
+      excludedNodeId: input.excludedNodeId ?? null,
       userName: input.userName ?? null,
       userEmail: input.userEmail ?? null,
       githubId: input.githubId ?? null,
@@ -249,20 +273,35 @@ export async function startTaskRunnerDO(
       attachments: input.attachments ?? null,
       projectScaling: input.projectScaling ?? null,
       resourceRequirements: input.resourceRequirements ?? null,
-      resolvedReservation: input.resolvedReservation ?? null,
+      resolvedReservation: input.resolvedReservation,
       capacityPoolSelection,
       vmSizeSource: input.vmSizeSource ?? null,
       resumeSnapshotChatSessionId: input.resumeSnapshotChatSessionId ?? null,
+      evictionFence: input.evictionFence ?? null,
       recoverySourceTaskId: input.recoverySourceTaskId ?? null,
+      recoveryAttemptId: input.recoveryAttemptId ?? null,
+      retrySourceTaskId: input.retrySourceTaskId ?? null,
+      startGuard: input.startGuard ?? null,
+      projectEventWakeGuard: input.projectEventWakeGuard ?? null,
+      recoveryRequiredProjectMemberId: input.recoveryRequiredProjectMemberId ?? null,
     },
   };
 
-  await stub.start(startInput);
+  if (options.reactivate === true) {
+    await stub.reactivate(startInput);
+  } else {
+    await stub.start(startInput);
+  }
 
-  log.info('task_runner_do_service.started', {
-    taskId: input.taskId,
-    projectId: input.projectId,
-  });
+  log.info(
+    options.reactivate === true
+      ? 'task_runner_do_service.reactivated'
+      : 'task_runner_do_service.started',
+    {
+      taskId: input.taskId,
+      projectId: input.projectId,
+    }
+  );
 }
 
 /**
@@ -273,11 +312,12 @@ export async function advanceTaskRunnerWorkspaceReady(
   env: Env,
   taskId: string,
   status: 'running' | 'recovery' | 'error',
-  errorMessage: string | null
+  errorMessage: string | null,
+  workspaceId: string
 ): Promise<void> {
   const stub = getStub(env, taskId);
 
-  await stub.advanceWorkspaceReady(status, errorMessage);
+  await stub.advanceWorkspaceReady(status, errorMessage, workspaceId);
 
   log.info('task_runner_do_service.workspace_ready_advanced', {
     taskId,
@@ -316,9 +356,13 @@ export async function getTaskRunnerStatus(env: Env, taskId: string): Promise<unk
 /**
  * Confirm that TaskRunner initialization committed and repair a missing alarm.
  */
-export async function ensureTaskRunnerStarted(env: Env, taskId: string): Promise<boolean> {
+export async function ensureTaskRunnerStarted(
+  env: Env,
+  taskId: string,
+  recoveryAttemptId?: string
+): Promise<boolean> {
   const stub = getStub(env, taskId);
-  return stub.ensureStarted();
+  return recoveryAttemptId ? stub.ensureStarted(recoveryAttemptId) : stub.ensureStarted();
 }
 
 /**

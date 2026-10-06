@@ -76,7 +76,7 @@ describe('DeploymentVolumesPanel', () => {
       makeVolume({
         attachedServerId: 'server-1234567890',
         linuxDevice: '/dev/disk/by-id/scsi-0HC_Volume_123',
-        status: 'in-use',
+        status: 'attached',
       }),
     ]);
 
@@ -84,6 +84,7 @@ describe('DeploymentVolumesPanel', () => {
     const row = screen.getByText('data').closest('article');
     expect(row).not.toBeNull();
     expect(within(row as HTMLElement).getByText('Attached')).toBeInTheDocument();
+    expect(within(row as HTMLElement).queryByText('Unknown')).not.toBeInTheDocument();
     expect(screen.getByText('hetzner / fsn1 / 10 GB')).toBeInTheDocument();
     expect(screen.getByText('provider-volume-1')).toBeInTheDocument();
     expect(screen.getAllByText('Jul 2 10:00 UTC').length).toBeGreaterThan(0);

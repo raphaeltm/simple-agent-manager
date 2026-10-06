@@ -39,6 +39,7 @@ function makeMessage(id: string, createdAt: number): ChatMessageResponse {
     content: `Message ${id}`,
     toolMetadata: null,
     createdAt,
+    sequence: createdAt,
   };
 }
 
@@ -180,7 +181,7 @@ describe('useSessionTimeline', () => {
     });
 
     expect(mockListChatMessages).toHaveBeenNthCalledWith(2, 'proj-1', 'sess-1', {
-      before: 2000,
+      before: '[2000,2000,"newer"]',
       roles: ['user'],
       compact: true,
     });

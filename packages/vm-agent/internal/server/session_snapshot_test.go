@@ -67,18 +67,7 @@ func TestCreateHomeTarExcludesCachesAndRecordsOversizedFiles(t *testing.T) {
 }
 
 func TestCreateWIPBundleDegradesDuringMerge(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not available")
-	}
-	repo := t.TempDir()
-	runGit(t, repo, "init")
-	runGit(t, repo, "config", "user.email", "sam@example.test")
-	runGit(t, repo, "config", "user.name", "SAM")
-	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("base"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	runGit(t, repo, "add", "README.md")
-	runGit(t, repo, "commit", "-m", "base")
+	repo := initSnapshotTestRepo(t)
 	if err := os.WriteFile(filepath.Join(repo, ".git", "MERGE_HEAD"), []byte("deadbeef"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -190,6 +179,33 @@ func TestSnapshotHarnessResumeIdentity(t *testing.T) {
 				t.Fatalf("identity = (%q, %q), want (%q, %q)", acpSessionID, agentType, tt.wantACP, tt.wantAgentType)
 			}
 		})
+	}
+}
+
+func TestPopulateSnapshotHarnessIdentityUsesCapturedFallback(t *testing.T) {
+	workspaceID := "workspace-1"
+	sessionID := "agent-session-1"
+	s := &Server{agentSessions: agentsessions.NewManager()}
+	if _, _, err := s.agentSessions.Create(workspaceID, sessionID, "Agent", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.agentSessions.UpdateAcpSessionID(workspaceID, sessionID, "live-acp", "live-agent"); err != nil {
+		t.Fatal(err)
+	}
+
+	manifest := snapshotManifest{}
+	s.populateSnapshotHarnessIdentity(&manifest, workspaceID, sessionID, "captured-acp", "captured-agent")
+	if manifest.AcpSessionID != "live-acp" || manifest.AgentType != "live-agent" {
+		t.Fatalf("identity = (%q, %q), want live values", manifest.AcpSessionID, manifest.AgentType)
+	}
+
+	if _, err := s.agentSessions.PrepareDegradedRestoreFallback(workspaceID, sessionID); err != nil {
+		t.Fatal(err)
+	}
+	manifest = snapshotManifest{}
+	s.populateSnapshotHarnessIdentity(&manifest, workspaceID, sessionID, "captured-acp", "captured-agent")
+	if manifest.AcpSessionID != "captured-acp" || manifest.AgentType != "captured-agent" {
+		t.Fatalf("identity = (%q, %q), want captured fallback", manifest.AcpSessionID, manifest.AgentType)
 	}
 }
 

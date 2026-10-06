@@ -1,9 +1,10 @@
+// FILE SIZE EXCEPTION: Keep platform model routing metadata in one auditable registry.
 // =============================================================================
 // AI Task Title Generation
 // =============================================================================
 
 /** Default Workers AI model for task title generation. Override via TASK_TITLE_MODEL env var. */
-export const DEFAULT_TASK_TITLE_MODEL = '@cf/zai-org/glm-5.2';
+export const DEFAULT_TASK_TITLE_MODEL = '@cf/google/gemma-4-26b-a4b-it';
 
 /** Defaults for the tightly scoped deployment debugging agent. */
 export const DEFAULT_DEBUG_AGENT_MODEL = '@cf/zai-org/glm-5.2';
@@ -22,6 +23,13 @@ export const DEFAULT_DEBUG_AGENT_RETRY_MAX_DELAY_MS = 60_000;
 export const DEFAULT_DEBUG_AGENT_STEP_MAX_RETRIES = 3;
 export const DEFAULT_DEBUG_DIAGNOSIS_POLL_INTERVAL_MS = 2_000;
 export const DEFAULT_DEBUG_DIAGNOSIS_EVENT_MAX_PAGES = 100;
+export const DEFAULT_STALLED_TASK_CLASSIFIER_MODEL = '@cf/cloudflare/clef';
+export const DEFAULT_STALLED_TASK_CLASSIFIER_SELECTOR = 'clef';
+export const DEFAULT_STALLED_TASK_CLASSIFIER_TIMEOUT_MS = 10_000;
+export const DEFAULT_STALLED_TASK_CLASSIFIER_MIN_ACTIVITY_AGE_MS = 60 * 60_000;
+export const DEFAULT_STALLED_TASK_CLASSIFIER_MESSAGE_LIMIT = 200;
+export const DEFAULT_STALLED_TASK_CLASSIFIER_TRANSCRIPT_MAX_CHARS = 24_000;
+export const DEFAULT_STALLED_TASK_CLASSIFIER_CONFIDENCE_THRESHOLD = 0.8;
 /** Minimum delay before revisiting an already-completed diagnosis step. */
 export const DEFAULT_DIAGNOSIS_COMPLETED_STEP_MIN_DELAY_MS = 1_000;
 export const DEFAULT_PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES = 60;
@@ -238,6 +246,8 @@ export interface PlatformAIModel {
   contextWindow: number;
   /** Tool-call reliability for agent loop suitability. */
   toolCallSupport: ToolCallSupport;
+  /** Whether tool calls are supported through the Chat Completions API. Defaults to true. */
+  supportsChatCompletionsToolCalls?: boolean;
   /** Primary intended role in the SAM agent hierarchy. */
   intendedRole: ModelIntendedRole;
   /** Fallback group — models in the same group can substitute for each other. */
@@ -334,11 +344,20 @@ const OPENAI_GPT56_PREVIEW_PROFILE = {
   intendedRole: 'workspace-agent',
 } satisfies Pick<ModelDefinition, 'contextWindow' | 'toolCallSupport' | 'intendedRole'>;
 
+type OpenAIModelTuple = readonly [string, string, PlatformAIModelTier, number, number, string];
+
+const OPENAI_GPT6_MODELS = [
+  ['gpt-6-astra', 'GPT-6 Astra', 'premium', 0.01, 0.05, 'openai-premium'],
+  ['gpt-6.1-sol', 'GPT-6.1 Sol', 'premium', 0.002, 0.01, 'openai-premium'],
+  ['gpt-6-sol', 'GPT-6 Sol', 'premium', 0.002, 0.01, 'openai-premium'],
+  ['gpt-6-luna', 'GPT-6 Luna', 'standard', 0.0001, 0.0005, 'openai-standard'],
+] as const satisfies readonly OpenAIModelTuple[];
+
 const OPENAI_GPT56_PREVIEW_MODELS = [
   ['gpt-5.6-sol', 'GPT-5.6 Sol', 'premium', 0.005, 0.03, 'openai-premium'],
   ['gpt-5.6-terra', 'GPT-5.6 Terra', 'premium', 0.0025, 0.015, 'openai-premium'],
   ['gpt-5.6-luna', 'GPT-5.6 Luna', 'standard', 0.001, 0.006, 'openai-standard'],
-] as const satisfies readonly [string, string, PlatformAIModelTier, number, number, string][];
+] as const satisfies readonly OpenAIModelTuple[];
 
 /** Models available through the SAM Platform AI proxy.
  * This is the single source of truth — the DEFAULT_AI_PROXY_ALLOWED_MODELS
@@ -443,6 +462,17 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     ...ANTHROPIC_OPUS_PREMIUM_PROFILE,
   }),
   anthropicModel({
+    id: 'claude-sonnet-5-5',
+    label: 'Claude Sonnet 5.5',
+    tier: 'standard',
+    costPer1kInputTokens: 0.002,
+    costPer1kOutputTokens: 0.01,
+    contextWindow: 1000000,
+    toolCallSupport: 'excellent',
+    intendedRole: 'any',
+    fallbackGroup: 'anthropic-standard',
+  }),
+  anthropicModel({
     id: 'claude-sonnet-5',
     label: 'Claude Sonnet 5',
     tier: 'standard',
@@ -476,6 +506,11 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     fallbackGroup: 'anthropic-premium',
   }),
   anthropicModel({
+    id: 'claude-opus-5-5',
+    label: 'Claude Opus 5.5',
+    ...ANTHROPIC_OPUS_PREMIUM_PROFILE,
+  }),
+  anthropicModel({
     id: 'claude-opus-5',
     label: 'Claude Opus 5',
     ...ANTHROPIC_OPUS_PREMIUM_PROFILE,
@@ -502,7 +537,24 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     fallbackGroup: 'anthropic-premium',
   }),
   // --- OpenAI (via AI Gateway) ---
-  // GPT-5.6 preview series
+  // GPT-6 series
+  ...OPENAI_GPT6_MODELS.map(
+    ([id, label, tier, costPer1kInputTokens, costPer1kOutputTokens, fallbackGroup]) =>
+      openAIModel({
+        id,
+        label,
+        tier,
+        costPer1kInputTokens,
+        costPer1kOutputTokens,
+        contextWindow: 1050000,
+        toolCallSupport: 'excellent',
+        intendedRole: 'workspace-agent',
+        // GPT-6.1 Sol supports tool calls through Responses, but not Chat Completions.
+        supportsChatCompletionsToolCalls: id === 'gpt-6.1-sol' ? false : undefined,
+        fallbackGroup,
+      })
+  ),
+  // GPT-5.6 previous series
   ...OPENAI_GPT56_PREVIEW_MODELS.map(
     ([id, label, tier, costPer1kInputTokens, costPer1kOutputTokens, fallbackGroup]) =>
       openAIModel({
@@ -515,7 +567,7 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
         fallbackGroup,
       })
   ),
-  // GPT-5.5 series (current flagship)
+  // GPT-5.5 / GPT-5.2 previous series
   openAIModel({
     id: 'gpt-5.5-pro',
     label: 'GPT-5.5 Pro',
@@ -538,7 +590,12 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     intendedRole: 'workspace-agent',
     fallbackGroup: 'openai-premium',
   }),
-  // GPT-5.4 series (current)
+  openAIModel({
+    id: 'gpt-5.2',
+    label: 'GPT-5.2',
+    ...OPENAI_CODEX_PREMIUM_PROFILE,
+  }),
+  // GPT-5.4 legacy series
   openAIModel({
     id: 'gpt-5.4-pro',
     label: 'GPT-5.4 Pro',
@@ -693,6 +750,9 @@ export const DEFAULT_AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT = 200_000;
 /** Default max input tokens per request. Override via AI_PROXY_MAX_INPUT_TOKENS_PER_REQUEST env var. */
 export const DEFAULT_AI_PROXY_MAX_INPUT_TOKENS_PER_REQUEST = 32_000;
 
+/** Default max raw JSON request body bytes. Override via AI_PROXY_REQUEST_BODY_MAX_BYTES env var. */
+export const DEFAULT_AI_PROXY_REQUEST_BODY_MAX_BYTES = 1_048_576;
+
 /** Default rate limit in requests per minute per user. Override via AI_PROXY_RATE_LIMIT_RPM env var. */
 export const DEFAULT_AI_PROXY_RATE_LIMIT_RPM = 30;
 
@@ -746,27 +806,4 @@ export const DEFAULT_SANDBOX_MODEL = '@cf/google/gemma-4-26b-a4b-it';
 /** Default max turns for sandbox agent loop. Override via SANDBOX_AGENT_MAX_TURNS env var. */
 export const DEFAULT_SANDBOX_AGENT_MAX_TURNS = 20;
 
-/** Minimum tool-call support level required for agent loop participation. */
-export const AGENT_LOOP_MIN_TOOL_CALL_SUPPORT: ToolCallSupport = 'good';
-
-/**
- * Filter models suitable for agent loop execution.
- *
- * Returns models with tool-call reliability greater than or equal to `minSupport`
- * and optionally filters by allowed execution scope.
- */
-export function filterModelsForAgentLoop(
-  models: PlatformAIModel[],
-  options?: { scope?: ModelAllowedScope; minSupport?: ToolCallSupport }
-): PlatformAIModel[] {
-  const minSupport = options?.minSupport ?? AGENT_LOOP_MIN_TOOL_CALL_SUPPORT;
-  const supportLevels: ToolCallSupport[] = ['excellent', 'good', 'limited', 'none'];
-  const minIndex = supportLevels.indexOf(minSupport);
-
-  return models.filter((model) => {
-    const modelIndex = supportLevels.indexOf(model.toolCallSupport);
-    if (modelIndex > minIndex) return false;
-    if (options?.scope && !model.allowedScopes.includes(options.scope)) return false;
-    return true;
-  });
-}
+export { AGENT_LOOP_MIN_TOOL_CALL_SUPPORT, filterModelsForAgentLoop } from './ai-model-filtering';

@@ -61,7 +61,7 @@ SAM app deployments need provider-native block volumes as first-class resources 
 
 ## Task Completion Validation Report
 
-**Task**: `tasks/active/2026-06-11-provider-volume-operations.md`  
+**Task**: `tasks/archive/2026-06-11-provider-volume-operations.md`  
 **Branch**: `sam/implement-first-class-provider-01ktwd`  
 **Date**: 2026-06-11
 

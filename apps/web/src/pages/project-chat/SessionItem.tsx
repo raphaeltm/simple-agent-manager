@@ -20,7 +20,6 @@ function getCreatorLabel(session: ChatSessionResponse): string | null {
   return creator?.name?.trim() || creator?.email?.split('@')[0] || 'Member';
 }
 
-
 export function SessionItem({
   session,
   isSelected,
@@ -82,9 +81,7 @@ export function SessionItem({
               borderLeft: isSelected
                 ? '3px solid var(--sam-color-accent-primary)'
                 : '3px solid transparent',
-              boxShadow: isSelected
-                ? 'inset 3px 0 8px -3px rgba(34, 197, 94, 0.3)'
-                : undefined,
+              boxShadow: isSelected ? 'inset 3px 0 8px -3px rgba(34, 197, 94, 0.3)' : undefined,
             }
       }
     >
@@ -110,7 +107,9 @@ export function SessionItem({
           <span
             className={`overflow-hidden text-ellipsis whitespace-nowrap flex-1 ${
               !isChild
-                ? isSelected ? 'font-semibold text-fg-primary' : 'font-medium text-fg-primary'
+                ? isSelected
+                  ? 'font-semibold text-fg-primary'
+                  : 'font-medium text-fg-primary'
                 : ''
             }`}
             style={titleStyle}
@@ -119,7 +118,15 @@ export function SessionItem({
           </span>
           {badge}
           {blockedBadge && (
-            <span className="px-1 rounded-full text-danger-fg bg-danger-tint" style={{ fontSize: 9, fontWeight: 600, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+            <span
+              className="px-1 rounded-full text-danger-fg bg-danger-tint"
+              style={{
+                fontSize: 9,
+                fontWeight: 600,
+                textTransform: 'uppercase',
+                whiteSpace: 'nowrap',
+              }}
+            >
               BLOCKED
             </span>
           )}
@@ -129,13 +136,14 @@ export function SessionItem({
           style={{ fontSize: 10, paddingLeft: 20 }}
         >
           {blockedBadge && blockedByTitle ? (
-            <span className="truncate text-danger-fg">
-              Waiting on: {blockedByTitle}
-            </span>
+            <span className="truncate text-danger-fg">Waiting on: {blockedByTitle}</span>
           ) : (
             <>
               {/* Mode icon + label */}
-              <span className="flex items-center gap-0.5 shrink-0" title={mode === 'task' ? 'Task' : 'Conversation'}>
+              <span
+                className="flex items-center gap-0.5 shrink-0"
+                title={mode === 'task' ? 'Task' : 'Conversation'}
+              >
                 <ModeIcon size={10} />
                 <span>{mode === 'task' ? 'Task' : 'Chat'}</span>
               </span>
@@ -155,13 +163,18 @@ export function SessionItem({
               {attentionState === 'needs_input' && (
                 <span className="text-warning-fg font-medium">Needs input</span>
               )}
+              {attentionState === 'wake_failed' && (
+                <span className="text-danger-fg font-medium">Wake failed</span>
+              )}
               {lineageText && (
                 <>
                   <span>&middot;</span>
                   <span className="truncate">{lineageText}</span>
                 </>
               )}
-              <span className="ml-auto shrink-0">{formatRelativeTime(getLastActivity(session))}</span>
+              <span className="ml-auto shrink-0">
+                {formatRelativeTime(getLastActivity(session))}
+              </span>
             </>
           )}
         </div>

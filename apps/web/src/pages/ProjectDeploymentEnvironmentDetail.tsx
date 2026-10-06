@@ -30,6 +30,7 @@ import {
   type DeploymentMetricsState,
 } from '../components/deployments/DeploymentMetricsPanel';
 import { DeploymentVolumesPanel } from '../components/deployments/DeploymentVolumesPanel';
+import { HardwareDetails } from '../components/hardware/HardwareDetails';
 import { useAgentProfiles } from '../hooks/useAgentProfiles';
 import { useQueryScope } from '../hooks/useQueryScope';
 import { useToast } from '../hooks/useToast';
@@ -600,7 +601,7 @@ export function ProjectDeploymentEnvironmentDetail() {
   );
 }
 
-function NodeSection({ env }: { env: DeploymentEnvironment }) {
+export function NodeSection({ env }: { env: DeploymentEnvironment }) {
   return (
     <section className="rounded-md border border-border-default bg-inset px-3 py-3 grid gap-2">
       <div className="flex items-center gap-2 text-fg-primary font-semibold text-sm">
@@ -620,9 +621,9 @@ function NodeSection({ env }: { env: DeploymentEnvironment }) {
             <StatusBadge status={env.node.healthStatus || 'stale'} />
           </div>
           <div className="text-xs text-fg-muted break-words">
-            {env.node.cloudProvider ?? 'Unknown provider'} / {env.node.vmSize} /{' '}
-            {env.node.vmLocation}
+            {env.node.cloudProvider ?? 'Unknown provider'} / {env.node.vmLocation}
           </div>
+          <HardwareDetails hardware={env.node} />
         </div>
       ) : (
         <p className="m-0 text-xs text-fg-muted">No deployment node has been provisioned yet.</p>

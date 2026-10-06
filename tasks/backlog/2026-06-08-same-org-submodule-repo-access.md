@@ -1,5 +1,19 @@
 # Same-org GitHub submodules under tightly scoped workspace tokens
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** the whole feature, in PR #1253 (`626d7c786`, merged 2026-06-09): migration
+>   `0065_project_github_repositories.sql`, `apps/api/src/db/schema.ts:736`,
+>   `apps/api/src/routes/projects/repository-access.ts`, delete cleanup (`crud.ts:521`), scoped
+>   token minting (`apps/api/src/routes/workspaces/runtime.ts:787,1774-1792`), `initSubmodules`
+>   (`packages/vm-agent/internal/bootstrap/bootstrap.go:844-897`), the Repository Access UI and
+>   Platform Policy copy, and API/web tests (`workspace-git-token.test.ts:869-937`).
+> - **Still open:** a Go unit test for `initSubmodules`: no `.gitmodules` is a no-op, the token
+>   never reaches `.git/config`, and a failure is non-fatal with the token redacted. No Go test
+>   mentions submodules today.
+> - **Moot/dropped:** the "DO NOT MERGE" header and the stacked draft-PR plan below are stale.
+>   The work merged to `main` as PR #1253.
+
 **Idea:** 01KTHVE80Q4BVJYRG7D23A6WPY
 **Task ID:** 01KTJWXTDN9T4QZV3PZED0DPA3
 **Branch:** sam/implement-idea-01kthve80q4bvjyrg7d23a6wpy-support-01ktjw

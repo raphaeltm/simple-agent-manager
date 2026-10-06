@@ -13,6 +13,7 @@ export const TASK_STATUSES = [
   'queued',
   'delegated',
   'in_progress',
+  'sleeping',
   'completed',
   'failed',
   'cancelled',
@@ -25,9 +26,11 @@ export type TaskTerminalStatus = (typeof TASK_TERMINAL_STATUSES)[number];
 
 /** Stable event contract for subscribers that react after a task wins a terminal transition. */
 export interface TaskTerminalTransitionEvent {
+  transitionId?: string | null;
   taskId: string;
   projectId: string;
   parentTaskId: string | null;
+  projectEventSourceIntentId?: string | null;
   status: TaskTerminalStatus;
   reason: string | null;
   occurredAt: string;
@@ -649,6 +652,8 @@ export interface RunTaskRequest {
   workspaceProfile?: WorkspaceProfile;
   nodeId?: string;
   branch?: string;
+  /** Explicit resource requirements for this run. Overrides lower configuration layers. */
+  resourceRequirements?: ResourceRequirements;
 }
 
 export interface RunTaskResponse {
@@ -694,5 +699,6 @@ export interface DashboardTask {
 }
 
 export interface DashboardActiveTasksResponse {
+  /** The most recently active tasks, newest first, capped at `DASHBOARD_ACTIVE_TASK_LIMIT`. */
   tasks: DashboardTask[];
 }

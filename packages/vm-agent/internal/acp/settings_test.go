@@ -2,8 +2,52 @@ package acp
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 )
+
+func TestBuildCodexACPManagedConfigEnv(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		settings  *agentSettingsPayload
+		wantModel string
+	}{
+		{name: "nil settings"},
+		{name: "empty model", settings: &agentSettingsPayload{}},
+		{name: "GPT-6.1 Sol", settings: &agentSettingsPayload{Model: "gpt-6.1-sol"}, wantModel: "gpt-6.1-sol"},
+		{name: "JSON special characters", settings: &agentSettingsPayload{Model: `custom\"model\\variant`}, wantModel: `custom\"model\\variant`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			envVar, err := buildCodexACPManagedConfigEnv(tc.settings)
+			if err != nil {
+				t.Fatalf("buildCodexACPManagedConfigEnv failed: %v", err)
+			}
+			const prefix = "CODEX_CONFIG="
+			if !strings.HasPrefix(envVar, prefix) {
+				t.Fatalf("managed config env = %q, want %q prefix", envVar, prefix)
+			}
+			var config map[string]string
+			if err := json.Unmarshal([]byte(strings.TrimPrefix(envVar, prefix)), &config); err != nil {
+				t.Fatalf("managed config is not valid JSON: %v", err)
+			}
+			if got := config["sandbox_mode"]; got != "danger-full-access" {
+				t.Fatalf("sandbox_mode = %q, want danger-full-access", got)
+			}
+			if got := config["approval_policy"]; got != "never" {
+				t.Fatalf("approval_policy = %q, want never", got)
+			}
+			if got := config["model"]; got != tc.wantModel {
+				t.Fatalf("model = %q, want %q", got, tc.wantModel)
+			}
+			if tc.wantModel == "" {
+				if _, ok := config["model"]; ok {
+					t.Fatalf("empty model should be omitted: %#v", config)
+				}
+			}
+		})
+	}
+}
 
 func TestGetModelEnvVar(t *testing.T) {
 	tests := []struct {
@@ -165,13 +209,13 @@ func TestApplySessionSettingsNilSafety(t *testing.T) {
 	h := &SessionHost{}
 
 	// nil settings — should not panic
-	h.applySessionSettings(context.Background(), nil)
+	_ = h.applySessionSettings(context.Background(), nil)
 
 	// non-nil settings but no acpConn — should not panic
-	h.applySessionSettings(context.Background(), &agentSettingsPayload{Model: "sonnet"})
+	_ = h.applySessionSettings(context.Background(), &agentSettingsPayload{Model: "sonnet"})
 
 	// non-nil settings with empty sessionID — should not panic
-	h.applySessionSettings(context.Background(), &agentSettingsPayload{PermissionMode: "plan"})
+	_ = h.applySessionSettings(context.Background(), &agentSettingsPayload{PermissionMode: "plan"})
 }
 
 func TestApplySessionSettingsSkipsDefault(t *testing.T) {
@@ -185,5 +229,5 @@ func TestApplySessionSettingsSkipsDefault(t *testing.T) {
 		PermissionMode: "default",
 	}
 	// Should not panic or attempt any ACP calls
-	h.applySessionSettings(context.Background(), settings)
+	_ = h.applySessionSettings(context.Background(), settings)
 }

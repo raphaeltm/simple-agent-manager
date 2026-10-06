@@ -12,21 +12,38 @@
  * ON DELETE SET NULL — the workspace row survives as history when its node dies).
  * A workspace with no node has no owning machine to protect, so it stays eligible.
  */
-import { and, eq } from 'drizzle-orm';
+import { DEFAULT_WORKSPACE_DELETION_RETRY_BASE_MS } from '@simple-agent-manager/shared';
+import { eq } from 'drizzle-orm';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
-import { deleteWorkspaceOnNode, stopWorkspaceOnNode } from '../../services/node-agent';
+import { stopWorkspaceOnNode } from '../../services/node-agent';
 import { persistError } from '../../services/observability';
+import {
+  sessionSleepMaxAttempts,
+  sleepLifecycleOwnsTerminalTaskWorkspaceSql,
+} from '../../services/sleep-preserved-task-status';
+import { loadWorkspaceDeletionIdentity } from '../../services/workspace-deletion';
 import { finalizeWorkspaceLifecycleClosure } from '../../services/workspace-lifecycle-finalizer';
 import type { CleanupConfig, CleanupDb, NodeCleanupResult } from './shared';
+
+function deletionRetryBaseMs(env: Env): number {
+  const parsed = Number.parseInt(env.WORKSPACE_DELETION_RETRY_BASE_MS ?? '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_WORKSPACE_DELETION_RETRY_BASE_MS;
+}
 
 /**
  * Phase 4 — task-created workspaces still active after their task ended.
  *
  * Only workspaces that were EVER associated with a task are considered. User-created
  * workspaces (never referenced by any task) are intentionally long-lived.
+ *
+ * A terminal task whose workspace the session-sleep lifecycle owns
+ * (`sleepLifecycleOwnsTerminalTaskWorkspaceSql`) is NOT an orphan: the sleep
+ * sweep snapshots it, then stops it. This sweep runs before `session_sleep` in
+ * every tick, so reaping it here would destroy a failed task's unpushed work
+ * before its preservation snapshot could be taken.
  */
 export async function sweepOrphanedWorkspaces(
   db: CleanupDb,
@@ -44,10 +61,8 @@ export async function sweepOrphanedWorkspaces(
        AND EXISTS (
          SELECT 1 FROM tasks t
          WHERE t.workspace_id = w.id
-           AND (
-             t.status IN ('failed', 'cancelled')
-             OR (t.status = 'completed' AND w.chat_session_id IS NULL)
-           )
+           AND t.status IN ('completed', 'failed', 'cancelled')
+           AND NOT ${sleepLifecycleOwnsTerminalTaskWorkspaceSql('t', 'w', sessionSleepMaxAttempts(env))}
        )
        AND NOT EXISTS (
          SELECT 1 FROM tasks t
@@ -145,7 +160,7 @@ export async function sweepOrphanedWorkspaces(
  * Phase 6 — safety net for stopped workspaces the DO alarm never deleted.
  */
 export async function sweepStaleStoppedWorkspaces(
-  db: CleanupDb,
+  _db: CleanupDb,
   env: Env,
   now: Date,
   config: CleanupConfig,
@@ -155,7 +170,7 @@ export async function sweepStaleStoppedWorkspaces(
   const threshold = new Date(now.getTime() - config.stoppedTtlMs * 2).toISOString();
 
   const candidates = await env.DATABASE.prepare(
-    `SELECT w.id, w.node_id, w.user_id
+    `SELECT w.id, w.node_id, w.user_id, w.project_id, w.chat_session_id
      FROM workspaces w
      LEFT JOIN nodes n ON n.id = w.node_id
      WHERE w.status = 'stopped'
@@ -169,38 +184,58 @@ export async function sweepStaleStoppedWorkspaces(
       id: string;
       node_id: string | null;
       user_id: string;
+      project_id: string | null;
+      chat_session_id: string | null;
     }>();
 
   for (const ws of candidates.results) {
     try {
-      if (ws.node_id) {
-        await deleteWorkspaceOnNode(ws.node_id, ws.id, env, ws.user_id, {
-          requestTimeoutMs: config.agentTimeoutMs,
-        }).catch((e) => {
-          log.warn('node_cleanup.stale_stopped_delete_on_node_failed', {
-            workspaceId: ws.id,
-            error: String(e),
-          });
-        });
-      }
-
-      // Status guard prevents a TOCTOU race if the workspace was restarted. Also
-      // the escape path: on success the row no longer matches `status='stopped'`.
-      const deleted = await db
-        .update(schema.workspaces)
-        .set({ status: 'deleted', updatedAt: new Date().toISOString() })
-        .where(and(eq(schema.workspaces.id, ws.id), eq(schema.workspaces.status, 'stopped')));
-
-      if ((deleted.meta?.changes ?? 0) > 0) {
-        await finalizeWorkspaceLifecycleClosure(env, {
-          workspaceIds: [ws.id],
+      if (!ws.node_id) {
+        await persistError(env.OBSERVABILITY_DATABASE, {
+          source: 'api',
+          level: 'error',
+          message: 'Stopped workspace cannot be queued for runtime deletion without a node',
+          workspaceId: ws.id,
           userId: ws.user_id,
-          agentSessionStatus: 'completed',
-          reason: 'node_cleanup_stale_stopped_workspace_deleted',
         });
+        result.errors++;
+        continue;
       }
-
-      result.stoppedWorkspacesDeleted++;
+      const expected = await loadWorkspaceDeletionIdentity(env.DATABASE, ws.id);
+      if (!expected || expected.nodeId !== ws.node_id || expected.userId !== ws.user_id) {
+        result.errors++;
+        continue;
+      }
+      const lifecycleStub = env.NODE_LIFECYCLE.get(
+        env.NODE_LIFECYCLE.idFromName(ws.node_id)
+      ) as DurableObjectStub<import('../../durable-objects/node-lifecycle').NodeLifecycle>;
+      // Rule 47: cron is a bounded durable-enqueue safety net. The DO alarm claims
+      // the exact incarnation and moves VM I/O behind waitUntil.
+      const scheduled = await lifecycleStub.scheduleWorkspaceDeletion(
+        ws.node_id,
+        ws.id,
+        ws.user_id,
+        {
+          retryAfterMs: deletionRetryBaseMs(env),
+          lastError: 'scheduled by stopped-workspace cleanup safety net',
+          expected,
+        }
+      );
+      if (!scheduled) {
+        log.info('node_cleanup.stale_stopped_workspace_schedule_fenced', {
+          workspaceId: ws.id,
+          nodeId: ws.node_id,
+          userId: ws.user_id,
+          action: 'not_queued',
+        });
+        continue;
+      }
+      result.stoppedWorkspacesQueued++;
+      log.info('node_cleanup.stale_stopped_workspace_queued', {
+        workspaceId: ws.id,
+        nodeId: ws.node_id,
+        userId: ws.user_id,
+      });
     } catch (e) {
       log.error('node_cleanup.stale_stopped_workspace_delete_failed', {
         workspaceId: ws.id,

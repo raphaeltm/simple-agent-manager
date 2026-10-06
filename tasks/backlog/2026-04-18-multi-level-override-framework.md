@@ -1,5 +1,29 @@
 # Multi-Level Override Framework (Meta-Spec)
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:**
+>   - Phase 1, per-project `model` + `permissionMode`: PR #748 (`apps/api/src/db/schema.ts:434`).
+>     Its task file `2026-04-18-multi-level-configuration-override.md` is being removed from the
+>     backlog as shipped.
+>   - Phase 2, per-project agent credentials: PR #753.
+>   - Phase 7, per-project compute credentials (`apps/api/src/routes/projects/credentials.ts:284`,
+>     archived `tasks/archive/2026-07-05-compute-credential-overrides.md`).
+>   - MCP servers per project, with project over user
+>     (`apps/api/src/services/mcp-connection-resolution.ts:9-16`).
+>   - Env vars and files per project, profile and skill (`schema.ts:662,2150,2210`).
+>   - Project-scoped agent profiles (`agent_profiles.project_id`, `schema.ts:1966`).
+> - **Still open:**
+>   - Phase 3: prompt-append and max turns per project (today only on profiles and skills).
+>   - Phase 4: a session override panel that shows where each value came from. The chat composer
+>     only picks or creates a profile (`apps/web/src/pages/project-chat/ChatInput.tsx`).
+>   - Phase 5: model and permission overrides on triggers. Triggers carry only profile, skill,
+>     VM size and resource overrides (`schema.ts:2604`).
+>   - Phase 6: whether profiles inherit from projects, and precedence per parameter.
+>   - Phase 8: MCP servers per profile, skill and session (not implemented yet, per
+>     `mcp-connection-resolution.ts:12`).
+>   - The audit-trail question, and a refresh of the parameter table below.
+
 **Priority:** MEDIUM (strategic framing — feeds follow-up phases)
 **Parent idea:** `01KNKRCS8DSX8FREC02AJV23QH`
 **Related phases:**

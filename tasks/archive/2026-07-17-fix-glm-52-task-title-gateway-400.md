@@ -86,5 +86,5 @@ Scope is limited to the production `task-title` utility request path. The separa
 - `.claude/rules/02-quality-gates.md`
 - `.claude/rules/13-staging-verification.md`
 - `.claude/rules/32-cf-api-debugging.md`
-- `tasks/active/2026-06-01-fix-task-title-generation-reasoning-output.md`
+- `tasks/archive/2026-06-01-fix-task-title-generation-reasoning-output.md`
 - `tasks/archive/2026-03-05-inconsistent-task-title-generation.md`

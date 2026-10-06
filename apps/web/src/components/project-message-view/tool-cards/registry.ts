@@ -1,7 +1,11 @@
 import type { ToolCallItem } from '@simple-agent-manager/acp-client';
 import type { FC } from 'react';
 
-import { DOCUMENT_CARD_TOOLS, extractDocumentCardData, normalizeToolName } from './document-card-data';
+import {
+  DOCUMENT_CARD_TOOLS,
+  extractDocumentCardData,
+  normalizeToolName,
+} from './document-card-data';
 import { DocumentCard } from './DocumentCard';
 
 /** Props every typed tool-call card receives. */
@@ -25,7 +29,33 @@ export interface ToolCardProps {
  *     This makes recognition resilient to new agents (any separator works) AND
  *     to bad data (the failure mode is always the generic card).
  */
+/**
+ * Per-item-object memo.
+ *
+ * `matchToolCard` is now on two hot paths for the SAME item object on every
+ * streamed token: `groupToolCallItems`' absorbability check and
+ * `AcpConversationItemView`'s `tool_call` case. For a library tool the payload
+ * branch `JSON.parse`s `rawOutput`, so the unmemoized version paid that twice
+ * per item per token.
+ *
+ * A `WeakMap` is the right cache here precisely BECAUSE
+ * `chatMessagesToConversationItems` rebuilds every item object on every call:
+ * each render pass gets fresh keys, the previous pass's entries become
+ * unreachable and are collected, and a mutated item can never be served a stale
+ * verdict. Do not replace it with a keyed cache on `toolCallId` — statuses and
+ * payloads change in place, and that cache would go stale.
+ */
+const matchCache = new WeakMap<ToolCallItem, FC<ToolCardProps> | null>();
+
 export function matchToolCard(item: ToolCallItem): FC<ToolCardProps> | null {
+  const cached = matchCache.get(item);
+  if (cached !== undefined) return cached;
+  const matched = resolveToolCard(item);
+  matchCache.set(item, matched);
+  return matched;
+}
+
+function resolveToolCard(item: ToolCallItem): FC<ToolCardProps> | null {
   const base = normalizeToolName(item.toolName ?? item.title);
   if (!base || !DOCUMENT_CARD_TOOLS.has(base)) {
     return null;

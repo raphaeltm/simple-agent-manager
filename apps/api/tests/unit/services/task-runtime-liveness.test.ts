@@ -13,6 +13,7 @@ const NOW = Date.parse('2026-08-06T12:00:00.000Z');
 const STALE_MS = 5 * 60 * 1000;
 /** Mirrors `DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS`. */
 const MAX_RECOVERY_ATTEMPTS = 3;
+const RECOVERY_ATTEMPT_DECAY_MS = 15 * 60 * 1000;
 
 function signals(overrides: Partial<TaskRuntimeLivenessSignals> = {}): TaskRuntimeLivenessSignals {
   return {
@@ -30,6 +31,7 @@ function signals(overrides: Partial<TaskRuntimeLivenessSignals> = {}): TaskRunti
       nodeHealthStatus: 'healthy',
       nodeHeartbeatAt: NOW,
       runningWorkspacesOnNode: 1,
+      createdAtMs: NOW - 60_000,
     },
     nowMs: NOW,
     heartbeatStaleMs: STALE_MS,
@@ -54,10 +56,14 @@ function signals(overrides: Partial<TaskRuntimeLivenessSignals> = {}): TaskRunti
     resumabilityProbeOutcome: 'not_run',
     sessionResumability: null,
     resumabilityMaxRecoveryAttempts: MAX_RECOVERY_ATTEMPTS,
+    resumabilityRecoveryAttemptDecayMs: RECOVERY_ATTEMPT_DECAY_MS,
     // Same back-compat proof for the supersession signals: `not_run` / `none`
     // must leave every pre-existing verdict in this file untouched.
     supersessionProbeOutcome: 'not_run',
     supersession: 'none',
+    // Same back-compat proof for the task-scoped sleep signal: `not_run` must
+    // leave every pre-existing verdict in this file untouched.
+    taskSessionSleep: 'not_run',
     ...overrides,
   };
 }
@@ -77,6 +83,16 @@ describe('classifyTaskRuntimeLiveness', () => {
       nodeId: 'node-1',
       activeAcpSessionId: 'acp-1',
       deliveryTarget: { nodeId: 'node-1', userId: 'user-1' },
+      // No ProjectData work evidence was read, so the work state is unknown (null),
+      // never assumed idle or working.
+      evidence: {
+        workState: null,
+        activity: null,
+        lastActivityAgeMs: null,
+        promptStartedAgeMs: null,
+        runtimeWorkProgressAgeMs: null,
+        acpHeartbeatAgeMs: 0,
+      },
     });
   });
 
@@ -484,6 +500,141 @@ describe('classifyTaskRuntimeLiveness', () => {
   });
 });
 
+describe('classifyTaskRuntimeLiveness — verdict evidence', () => {
+  const HOUR = 60 * 60 * 1000;
+
+  /** Two ACP sessions on the task's workspace: a fresh owner and an older sibling. */
+  function twoSessionSignals(
+    workEvidence: TaskRuntimeLivenessSignals['workEvidence']
+  ): TaskRuntimeLivenessSignals {
+    return signals({
+      acpSessions: [
+        {
+          id: 'acp-1',
+          status: 'running',
+          workspaceId: 'workspace-1',
+          lastHeartbeatAt: NOW - 20_000,
+          updatedAt: NOW - 20_000,
+          startedAt: NOW - HOUR,
+          createdAt: NOW - HOUR,
+        },
+        {
+          id: 'acp-old',
+          status: 'running',
+          workspaceId: 'workspace-1',
+          lastHeartbeatAt: NOW - 2 * HOUR,
+          updatedAt: NOW - 2 * HOUR,
+          startedAt: NOW - 3 * HOUR,
+          createdAt: NOW - 3 * HOUR,
+        },
+      ],
+      workEvidence,
+    });
+  }
+
+  it("reports the verdict's own ACP session, never a sibling's", () => {
+    const verdict = classifyTaskRuntimeLiveness(
+      twoSessionSignals([
+        {
+          acpSessionId: 'acp-old',
+          state: 'prompt_turn_active',
+          activity: 'prompting',
+          activityAt: NOW - 1_000,
+          promptStartedAt: NOW - 5_000,
+          runtimeWorkProgressAt: null,
+        },
+        {
+          acpSessionId: 'acp-1',
+          state: 'idle',
+          activity: 'idle',
+          activityAt: NOW - 2 * HOUR,
+          promptStartedAt: null,
+          runtimeWorkProgressAt: null,
+        },
+      ])
+    );
+
+    expect(verdict).toMatchObject({ live: true, reason: 'task_acp_session_live' });
+    expect(verdict.activeAcpSessionId).toBe('acp-1');
+    expect(verdict.evidence).toEqual({
+      workState: 'idle',
+      activity: 'idle',
+      lastActivityAgeMs: 2 * HOUR,
+      promptStartedAgeMs: null,
+      runtimeWorkProgressAgeMs: null,
+      acpHeartbeatAgeMs: 20_000,
+    });
+  });
+
+  /**
+   * Evidence describes a verdict and must never feed one. A work-evidence entry
+   * claiming an active prompt does not rescue a session whose heartbeat is stale
+   * and whose verdict input (`sessionWork`) says nothing is in flight.
+   */
+  it('never changes the verdict', () => {
+    const verdict = classifyTaskRuntimeLiveness(
+      signals({
+        acpSessions: [
+          {
+            id: 'acp-1',
+            status: 'running',
+            workspaceId: 'workspace-1',
+            lastHeartbeatAt: NOW - STALE_MS - 1,
+            updatedAt: NOW - STALE_MS - 1,
+            startedAt: NOW - HOUR,
+            createdAt: NOW - HOUR,
+          },
+        ],
+        sessionWork: null,
+        workEvidence: [
+          {
+            acpSessionId: 'acp-1',
+            state: 'prompt_turn_active',
+            activity: 'prompting',
+            activityAt: NOW,
+            promptStartedAt: NOW,
+            runtimeWorkProgressAt: null,
+          },
+        ],
+      })
+    );
+
+    expect(verdict).toMatchObject({
+      live: false,
+      conclusive: false,
+      reason: 'task_acp_session_stale',
+      evidence: { workState: 'prompt_turn_active', acpHeartbeatAgeMs: STALE_MS + 1 },
+    });
+  });
+
+  it('reports a timestamp ahead of the classifier clock as age zero', () => {
+    const verdict = classifyTaskRuntimeLiveness(
+      twoSessionSignals([
+        {
+          acpSessionId: 'acp-1',
+          state: 'idle',
+          activity: 'idle',
+          activityAt: NOW + 30_000,
+          promptStartedAt: null,
+          runtimeWorkProgressAt: null,
+        },
+      ])
+    );
+
+    expect(verdict.evidence?.lastActivityAgeMs).toBe(0);
+  });
+
+  it('omits evidence from verdicts that name no ACP session', () => {
+    const base = signals();
+    const verdict = classifyTaskRuntimeLiveness(
+      signals({ workspace: { ...workspaceFrom(base), nodeStatus: 'destroyed' } })
+    );
+
+    expect(verdict).toMatchObject({ conclusive: true, reason: 'node_not_live' });
+    expect(verdict.evidence).toBeUndefined();
+  });
+});
+
 describe('classifyTaskRuntimeDelivery', () => {
   const target = { nodeId: 'node-1', userId: 'user-1' };
 
@@ -576,6 +727,7 @@ describe('classifyTaskRuntimeLiveness — slept sessions are not dead', () => {
       status: 'available',
       degradation: 'none',
       recoveryAttempts: 0,
+      recoveryFailedAtMs: null,
       ...overrides,
     } satisfies SessionResumabilitySnapshot;
   }
@@ -677,6 +829,30 @@ describe('classifyTaskRuntimeLiveness — slept sessions are not dead', () => {
       conclusive: true,
       reason: 'workspace_deleted',
     });
+  });
+
+  // Through the REAL wiring: `classifyTaskRuntimeLiveness` reads both budget
+  // signals off `TaskRuntimeLivenessSignals` and hands them to
+  // `isSessionResumable`. The dedicated budget suite proves the primitive; this
+  // proves the struct -> call seam production actually uses (`.claude/rules/62`).
+  // Both cases sit one millisecond either side of the cutoff.
+  it.each([
+    ['decayed', -1, false, 'workspace_deleted_snapshot_resumable'],
+    ['undecayed', 1, true, 'workspace_deleted'],
+  ])('%s exhausted budget', (_label, cutoffOffsetMs, conclusive, reason) => {
+    const base = signals();
+    expect(
+      classifyTaskRuntimeLiveness(
+        signals({
+          workspace: sleptWorkspace(base),
+          resumabilityProbeOutcome: 'ok',
+          sessionResumability: resumable({
+            recoveryAttempts: MAX_RECOVERY_ATTEMPTS,
+            recoveryFailedAtMs: base.nowMs - RECOVERY_ATTEMPT_DECAY_MS + cutoffOffsetMs,
+          }),
+        })
+      )
+    ).toMatchObject({ conclusive, reason });
   });
 
   it('still preserves on the last remaining wake attempt', () => {

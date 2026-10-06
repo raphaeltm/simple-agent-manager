@@ -135,6 +135,9 @@ export function parsePositiveRuntimeSetting(raw: string | undefined, fallback: n
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+/** Two deployment revisions must leave one launch after the final Durable Object reset. */
+export const MIN_CF_CONTAINER_RECOVERY_MAX_ATTEMPTS = 2;
+
 export function resolveRuntimeSettings(
   env: Env,
   defaults: {
@@ -157,9 +160,12 @@ export function resolveRuntimeSettings(
       env.CF_CONTAINER_KEEPALIVE_RENEW_INTERVAL_MS,
       defaults.keepaliveRenewIntervalMs
     ),
-    recoveryMaxAttempts: parsePositiveRuntimeSetting(
-      env.CF_CONTAINER_RECOVERY_MAX_ATTEMPTS,
-      defaults.recoveryMaxAttempts
+    recoveryMaxAttempts: Math.max(
+      MIN_CF_CONTAINER_RECOVERY_MAX_ATTEMPTS,
+      parsePositiveRuntimeSetting(
+        env.CF_CONTAINER_RECOVERY_MAX_ATTEMPTS,
+        defaults.recoveryMaxAttempts
+      )
     ),
   };
 }
@@ -199,7 +205,7 @@ export async function persistRuntimeSleepingAfterRevokedWake(
     SELECT 1 FROM workspaces live_workspace
      WHERE live_workspace.id = ?
        AND live_workspace.node_id = ?
-       AND live_workspace.status NOT IN ('stopped', 'deleted', 'error')
+       AND live_workspace.status NOT IN ('stopped', 'evicted', 'deleted', 'error')
   )`;
   await env.DATABASE.batch([
     env.DATABASE.prepare(
@@ -214,7 +220,7 @@ export async function persistRuntimeSleepingAfterRevokedWake(
           SET status = 'sleeping', error_message = NULL, updated_at = ?
         WHERE id = ?
           AND node_id = ?
-          AND status NOT IN ('stopped', 'deleted', 'error')
+          AND status NOT IN ('stopped', 'evicted', 'deleted', 'error')
           AND ${liveNode}`
     ).bind(now, identity.workspaceId, identity.nodeId, identity.nodeId),
     env.DATABASE.prepare(

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
 import { runMigrations } from '../../src/durable-objects/migrations';
+import { upsertActivityState } from '../../src/durable-objects/project-data/session-state';
 import { getLocalTaskRuntimeLiveness } from '../../src/durable-objects/project-data/task-runtime-liveness';
 import type { Env as ProjectDataEnv } from '../../src/durable-objects/project-data/types';
 import type { Env } from '../../src/env';
@@ -91,6 +92,7 @@ function seedSnapshot(
     status?: string;
     degradation?: string;
     recoveryAttempts?: number;
+    recoveryFailedAt?: string | null;
   } = {}
 ): void {
   sqlite
@@ -98,8 +100,8 @@ function seedSnapshot(
       `INSERT INTO session_snapshots (id, project_id, workspace_id, node_id, user_id, chat_session_id,
                                     runtime, status, degradation, manifest_r2_key, home_r2_key,
                                     expires_at, sleeping_at, sleep_status, recovery_attempts,
-                                    sleep_attempts, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'user-1', ?, 'vm', ?, ?, 'manifest-key', 'home-key', ?, ?, ?, ?, 0, ?, ?)`
+                                    recovery_failed_at, sleep_attempts, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'user-1', ?, 'vm', ?, ?, 'manifest-key', 'home-key', ?, ?, ?, ?, ?, 0, ?, ?)`
     )
     .run(
       'snapshot-1',
@@ -113,6 +115,7 @@ function seedSnapshot(
       overrides.sleepingAt === undefined ? iso(-9 * 60 * 1000) : overrides.sleepingAt,
       overrides.sleepStatus === undefined ? 'sleeping' : overrides.sleepStatus,
       overrides.recoveryAttempts ?? 0,
+      overrides.recoveryFailedAt ?? null,
       iso(-3_600_000),
       iso(0)
     );
@@ -288,6 +291,24 @@ describe('stuck-task liveness for a slept session', () => {
     });
   });
 
+  // The 2026-09-09 incident, through the REAL cron adapter: a spent budget whose
+  // last clean failure has aged out is still wakeable by the resumer, so the
+  // destroyer must not terminalize it (`.claude/rules/58`). Exercises the D1 read
+  // and the row->classifier mapping of `recovery_failed_at`, which the pure
+  // classifier test cannot. The undecayed row is the discriminating control.
+  it.each([
+    ['decayed', -60 * 60 * 1000, false, 'workspace_deleted_snapshot_resumable'],
+    ['undecayed', -60 * 1000, true, 'workspace_deleted'],
+  ])('cron adapter: %s spent budget', async (_label, failedAtOffsetMs, conclusive, reason) => {
+    seedWorkspace('deleted');
+    seedSnapshot({ recoveryAttempts: 3, recoveryFailedAt: iso(failedAtOffsetMs) });
+
+    await expect(getTaskRuntimeLiveness(env, task)).resolves.toMatchObject({
+      conclusive,
+      reason,
+    });
+  });
+
   it('withholds a death verdict when the cron adapter snapshot read fails', async () => {
     // Rule 44 symmetry: the cron adapter has its own try/catch, so it needs its
     // own error-path proof rather than inheriting the DO adapter's.
@@ -361,6 +382,7 @@ describe('stuck-task liveness for a slept session', () => {
           nodeHealthStatus: 'healthy',
           nodeHeartbeatAt: Date.now(),
           runningWorkspacesOnNode: 1,
+          createdAtMs: Date.now() - 60_000,
         },
         'ok'
       )
@@ -408,6 +430,23 @@ describe('ProjectData idle-cleanup liveness for a slept session', () => {
     });
   });
 
+  // `.claude/rules/61`: the DO destroyer is a separate entry point from the cron
+  // one and needs its own proof that the decayed budget reaches it.
+  it.each([
+    ['decayed', -60 * 60 * 1000, false, 'workspace_deleted_snapshot_resumable'],
+    ['undecayed', -60 * 1000, true, 'workspace_deleted'],
+  ])('DO adapter: %s spent budget', async (_label, failedAtOffsetMs, conclusive, reason) => {
+    seedWorkspace('deleted');
+    seedSnapshot({ recoveryAttempts: 3, recoveryFailedAt: iso(failedAtOffsetMs) });
+    const sql = createSqlStorage(new Database(':memory:'));
+
+    await expect(getLocalTaskRuntimeLiveness(sql, doEnv(), doTask)).resolves.toMatchObject({
+      live: false,
+      conclusive,
+      reason,
+    });
+  });
+
   it('withholds a death verdict when the snapshot read fails', async () => {
     seedWorkspace('deleted');
     const sql = createSqlStorage(new Database(':memory:'));
@@ -417,6 +456,68 @@ describe('ProjectData idle-cleanup liveness for a slept session', () => {
       live: false,
       conclusive: false,
       reason: 'workspace_deleted_resumability_unknown',
+    });
+  });
+
+  /**
+   * The `node_not_live` window, on the runtime that has NO terminal choke point.
+   *
+   * `NodeLifecycle` destroys the node at sleep and rewrites `workspaces.status` to
+   * `deleted` about five minutes later, so inside that gap the workspace still
+   * reads `running`. `needsSessionResumabilityProbe` and
+   * `needsTaskSupersessionProbe` both decline for a running workspace, so the only
+   * thing that can preserve the session here is the deferred task-scoped sleep
+   * lookup. This is the case that proves the classifier's own escape discriminating
+   * — the cron sweep's choke point cannot mask it, because this test never touches
+   * the sweep (`.claude/rules/61`).
+   *
+   * Production carried the shape: `node_not_live` with a `scheduled` snapshot,
+   * twice in the 30 days to 2026-09-14.
+   */
+  it('preserves a slept session whose node is destroyed while the workspace still reads running', async () => {
+    seedWorkspace('running');
+    sqlite.prepare(`UPDATE nodes SET status = 'destroyed' WHERE id = ?`).run(NODE_ID);
+    seedSnapshot();
+    const sql = createSqlStorage(new Database(':memory:'));
+
+    await expect(
+      getLocalTaskRuntimeLiveness(sql, doEnv(), { ...doTask, chatSessionId: CHAT_SESSION_ID })
+    ).resolves.toMatchObject({
+      live: false,
+      conclusive: false,
+      reason: 'node_not_live_session_sleeping',
+    });
+  });
+
+  /** The discriminating control: the same destroyed node with no snapshot still dies. */
+  it('still terminalizes a destroyed node when no snapshot row exists', async () => {
+    seedWorkspace('running');
+    sqlite.prepare(`UPDATE nodes SET status = 'destroyed' WHERE id = ?`).run(NODE_ID);
+    const sql = createSqlStorage(new Database(':memory:'));
+
+    await expect(
+      getLocalTaskRuntimeLiveness(sql, doEnv(), { ...doTask, chatSessionId: CHAT_SESSION_ID })
+    ).resolves.toMatchObject({
+      live: false,
+      conclusive: true,
+      reason: 'node_not_live',
+    });
+  });
+
+  /** `.claude/rules/58` requirement 4, on the deferred lookup specifically. */
+  it('withholds the node_not_live verdict when the deferred sleep lookup fails', async () => {
+    seedWorkspace('running');
+    sqlite.prepare(`UPDATE nodes SET status = 'destroyed' WHERE id = ?`).run(NODE_ID);
+    seedSnapshot();
+    const sql = createSqlStorage(new Database(':memory:'));
+    const broken = brokenSnapshotDb() as unknown as ProjectDataEnv;
+
+    await expect(
+      getLocalTaskRuntimeLiveness(sql, broken, { ...doTask, chatSessionId: CHAT_SESSION_ID })
+    ).resolves.toMatchObject({
+      live: false,
+      conclusive: false,
+      reason: 'node_not_live_session_sleep_unknown',
     });
   });
 });
@@ -579,7 +680,14 @@ describe('ProjectData idle-cleanup liveness for a stale VM node heartbeat', () =
       conclusive: true,
       reason: 'task_prompt_turn_active',
       activeAcpSessionId: 'acp-live',
+      evidence: {
+        workState: 'prompt_turn_active',
+        activity: 'prompting',
+        lastActivityAgeMs: expect.any(Number),
+        promptStartedAgeMs: expect.any(Number),
+      },
     });
+    expect(verdict.evidence?.lastActivityAgeMs).toBeLessThan(60_000);
   });
 
   it('uses fresh runtime-work state when ACP heartbeat writes are absent', async () => {
@@ -608,7 +716,12 @@ describe('ProjectData idle-cleanup liveness for a stale VM node heartbeat', () =
       conclusive: true,
       reason: 'task_runtime_work_active',
       activeAcpSessionId: 'acp-live',
+      // The agent's prompt turn ended; its harness work is what is in flight.
+      evidence: { workState: 'runtime_work_active', activity: 'idle' },
     });
+    expect(verdict.evidence?.runtimeWorkProgressAgeMs).toBeGreaterThanOrEqual(60_000);
+    // The age reported is the one the verdict judged: no heartbeat, so `updated_at`.
+    expect(verdict.evidence?.acpHeartbeatAgeMs).toBeGreaterThanOrEqual(10 * 60 * 1000);
   });
 
   it('treats stale prompt-turn ProjectData state as suspect instead of terminal death', async () => {
@@ -635,6 +748,86 @@ describe('ProjectData idle-cleanup liveness for a stale VM node heartbeat', () =
       conclusive: false,
       reason: 'task_acp_session_stale',
       activeAcpSessionId: null,
+      // The stale verdict names its session, so the diagnosis carries both ages.
+      evidence: { workState: 'prompt_turn_unproven', activity: 'prompting' },
+    });
+    expect(verdict.evidence?.acpHeartbeatAgeMs).toBeGreaterThanOrEqual(10 * 60 * 1000);
+  });
+
+  /**
+   * The 2026-10-04 production shape: an idle conversation, awaiting its user,
+   * whose agent process is alive. It is live (never fail it), and the evidence
+   * must say idle so nobody reads the heartbeat as work. Driven through the real
+   * activity writer, not a seeded column (`.claude/rules/62`).
+   */
+  it('reports a live but idle agent as idle with its last-activity age', async () => {
+    const sql = sqlWithAcpSession();
+    const now = Date.now();
+    const turnStartedAt = now - 13 * 60 * 60 * 1000;
+    upsertActivityState(sql, 'acp-live', {
+      activity: 'prompting',
+      observedAt: turnStartedAt,
+      now: turnStartedAt,
+    });
+    upsertActivityState(sql, 'acp-live', {
+      activity: 'idle',
+      observedAt: turnStartedAt + 60_000,
+      now: turnStartedAt + 60_000,
+    });
+
+    const verdict = await getLocalTaskRuntimeLiveness(sql, doEnv(), doTask);
+
+    expect(verdict).toMatchObject({
+      live: true,
+      conclusive: true,
+      reason: 'task_acp_session_live',
+      activeAcpSessionId: 'acp-live',
+      evidence: { workState: 'idle', activity: 'idle', promptStartedAgeMs: null },
+    });
+    expect(verdict.evidence?.lastActivityAgeMs).toBeGreaterThan(12 * 60 * 60 * 1000);
+    expect(verdict.evidence?.acpHeartbeatAgeMs).toBeLessThan(60_000);
+  });
+
+  /**
+   * A prompt turn that reported `prompting` hours ago and nothing since, on an
+   * agent whose ACP heartbeat is fresh (an OOM-killed tool leaves exactly this).
+   * Liveness keeps the runtime: the heartbeat proves the process is alive, and
+   * the sweep cannot tell a wedged prompt from a long tool call. The evidence
+   * must flag the turn as unproven so the stall is visible.
+   */
+  it('flags a long-silent prompt turn as unproven while the heartbeat keeps it live', async () => {
+    const sql = sqlWithAcpSession();
+    const turnStartedAt = Date.now() - 3 * 60 * 60 * 1000;
+    upsertActivityState(sql, 'acp-live', {
+      activity: 'prompting',
+      observedAt: turnStartedAt,
+      now: turnStartedAt,
+    });
+
+    const verdict = await getLocalTaskRuntimeLiveness(sql, doEnv(), doTask);
+
+    expect(verdict).toMatchObject({
+      live: true,
+      reason: 'task_acp_session_live',
+      evidence: { workState: 'prompt_turn_unproven', activity: 'prompting' },
+    });
+    expect(verdict.evidence?.promptStartedAgeMs).toBeGreaterThanOrEqual(3 * 60 * 60 * 1000);
+  });
+
+  /** Only known activity labels are echoed into logs; anything else reads as unknown. */
+  it('never echoes an unrecognised activity label', async () => {
+    const verdict = await getLocalTaskRuntimeLiveness(
+      sqlWithAcpSession({
+        sessionState: { activity: 'not-a-real-state', activityAt: Date.now() - 1_000 },
+      }),
+      doEnv(),
+      doTask
+    );
+
+    expect(verdict).toMatchObject({
+      live: true,
+      reason: 'task_acp_session_live',
+      evidence: { workState: 'unknown', activity: null },
     });
   });
 });
@@ -917,6 +1110,7 @@ describe('task supersession — a successful wake must not fail its predecessor'
           nodeHealthStatus: 'healthy',
           nodeHeartbeatAt: Date.now(),
           runningWorkspacesOnNode: 1,
+          createdAtMs: Date.now() - 60_000,
         },
         'ok'
       )

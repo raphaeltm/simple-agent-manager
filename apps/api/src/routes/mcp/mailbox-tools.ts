@@ -7,6 +7,7 @@
  */
 import type { MessageClass } from '@simple-agent-manager/shared';
 import { MESSAGE_CLASSES } from '@simple-agent-manager/shared';
+import { isUrgentMessageClass } from '@simple-agent-manager/shared';
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import { drizzle } from 'drizzle-orm/d1';
@@ -18,8 +19,10 @@ import { expectJsonRecord } from '../../lib/runtime-validation';
 import { sendPromptToAgentOnNode } from '../../services/node-agent';
 import { persistOrchestrationPrompt } from '../../services/orchestration-prompts';
 import * as projectDataService from '../../services/project-data';
+import { composeUrgentDeliveryContent } from '../../services/urgent-delivery-content';
 import {
   ACTIVE_STATUSES,
+  AGENT_TARGET_STATUSES,
   getMcpLimits,
   INTERNAL_ERROR,
   INVALID_PARAMS,
@@ -90,10 +93,21 @@ export async function handleSendDurableMessage(
   const durableConfig = resolveDurableExecutionConfig(env);
   if (durableConfig.deliveryEnabled) {
     try {
+      // Stop-and-deliver: urgent classes (interrupt and above) may cancel the
+      // target's in-flight turn so the message is delivered as the very next
+      // prompt. The submitted prompt carries stop context; the transcript row
+      // keeps the sender's raw message.
+      const urgent = isUrgentMessageClass(messageClass as MessageClass);
       const accepted = await projectDataService.acceptPromptDelivery(env, resolution.projectId, {
         targetSessionId: resolution.chatSessionId,
         displayContent: message,
-        deliveryContent: message,
+        deliveryContent: urgent
+          ? composeUrgentDeliveryContent({
+              messageClass: messageClass as MessageClass,
+              message,
+              senderTaskId: tokenData.taskId,
+            })
+          : message,
         sourceTaskId: tokenData.taskId,
         senderType: 'agent',
         senderId: tokenData.workspaceId,
@@ -125,6 +139,14 @@ export async function handleSendDurableMessage(
       });
       return jsonRpcError(requestId, INTERNAL_ERROR, 'Failed to durably accept message');
     }
+  }
+
+  if (resolution.taskStatus === 'sleeping') {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'Sleeping targets require durable prompt delivery to be enabled'
+    );
   }
 
   // Enqueue the message in the target project's DO
@@ -301,6 +323,7 @@ export async function handleAckMessage(
 // ─── Internal helpers ────────────────────────────────────────────────────────
 
 interface ResolvedMailboxTarget {
+  taskStatus: string;
   projectId: string;
   chatSessionId: string;
   nodeId: string;
@@ -362,7 +385,7 @@ async function resolveProjectAgentForMailbox(
   }
 
   // Verify target is in an active status
-  if (!ACTIVE_STATUSES.includes(targetTask.status)) {
+  if (!AGENT_TARGET_STATUSES.includes(targetTask.status)) {
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
@@ -391,7 +414,7 @@ async function resolveProjectAgentForMailbox(
     )
     .limit(1);
 
-  if (!workspace || !workspace.nodeId) {
+  if (!workspace || (!workspace.nodeId && targetTask.status !== 'sleeping')) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'Target workspace or node not found');
   }
 
@@ -419,9 +442,10 @@ async function resolveProjectAgentForMailbox(
     .limit(1);
 
   return {
+    taskStatus: targetTask.status,
     projectId: targetTask.projectId,
     chatSessionId,
-    nodeId: workspace.nodeId,
+    nodeId: workspace.nodeId ?? '',
     workspaceId: workspace.id,
     agentSessionId: agentSession?.id ?? '',
   };

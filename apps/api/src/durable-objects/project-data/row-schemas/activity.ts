@@ -53,29 +53,26 @@ export function parseIdleCleanupSchedule(row: unknown): {
   };
 }
 
-/** Workspace activity row with session join for idle timeout checks */
-const WorkspaceActivitySchema = v.object({
+/** A workspace idle check: a tracked `workspace_activity` row and its latest activity. */
+const WorkspaceIdleCheckSchema = v.object({
   workspace_id: v.string(),
-  session_id: v.nullable(v.string()),
-  last_terminal_activity_at: v.nullable(v.number()),
-  last_message_at: v.nullable(v.number()),
-  session_updated_at: v.nullable(v.number()),
+  session_id: v.string(),
+  idle_check_retry_count: v.number(),
+  last_activity_at: v.number(),
 });
 
-export function parseWorkspaceActivity(row: unknown): {
+export function parseWorkspaceIdleCheck(row: unknown): {
   workspaceId: string;
-  sessionId: string | null;
-  lastTerminalActivityAt: number;
-  lastMessageAt: number;
-  sessionUpdatedAt: number;
+  sessionId: string;
+  idleCheckRetryCount: number;
+  lastActivityAt: number;
 } {
-  const r = parseRow(WorkspaceActivitySchema, row, 'workspace_activity');
+  const r = parseRow(WorkspaceIdleCheckSchema, row, 'workspace_idle_check');
   return {
     workspaceId: r.workspace_id,
     sessionId: r.session_id,
-    lastTerminalActivityAt: r.last_terminal_activity_at ?? 0,
-    lastMessageAt: r.last_message_at ?? 0,
-    sessionUpdatedAt: r.session_updated_at ?? 0,
+    idleCheckRetryCount: r.idle_check_retry_count,
+    lastActivityAt: r.last_activity_at,
   };
 }
 

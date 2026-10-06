@@ -1,3 +1,7 @@
+import {
+  SEARCH_INDEX_STATE_COMPLETE,
+  SEARCH_INDEX_STATE_PRUNED,
+} from './materialization';
 import type { StorageSafetyConfig } from './storage-safety';
 import { projectToolPayloadArchiveRelief } from './tool-payload-archive';
 import type { Env } from './types';
@@ -159,7 +163,7 @@ function measureGroupedSlice(
          length(CAST(g.content AS BLOB)) AS content_bytes,
          CASE WHEN s.status IN ('stopped', 'failed')
                 AND s.updated_at <= ?
-                AND COALESCE(s.search_index_state, 'complete') != 'grouped_fts_pruned'
+                AND COALESCE(s.search_index_state, ?) != ?
               THEN 1 ELSE 0 END AS eligible,
          CASE WHEN f.rowid IS NULL THEN 0 ELSE 1 END AS fts_present
        FROM chat_messages_grouped g
@@ -179,6 +183,8 @@ function measureGroupedSlice(
        ORDER BY g.session_id ASC, g.created_at ASC, g.id ASC
        LIMIT ?`,
       cutoff,
+      SEARCH_INDEX_STATE_COMPLETE,
+      SEARCH_INDEX_STATE_PRUNED,
       cursor?.sessionId ?? null,
       cursor?.sessionId ?? '',
       cursor?.sessionId ?? '',

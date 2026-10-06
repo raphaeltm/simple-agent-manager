@@ -29,7 +29,7 @@ pnpm --filter @simple-agent-manager/www preview   # Preview production build
 
 ## Conventions
 
-- Blog posts use MDX with YAML frontmatter (`title`, `date`, `description`, `author`)
+- Blog posts use MDX with YAML frontmatter (`title`, `date`, `author`, `category`, `tags`, `excerpt`; optional `draft`)
 - Documentation lives in `src/content/docs/` following Starlight conventions
 - Assets are pre-built via `build:assets` (tracker script + blog Mermaid bundle)
 - Diagrams in content use Mermaid code fences (rendered client-side via `blog-mermaid.js`)

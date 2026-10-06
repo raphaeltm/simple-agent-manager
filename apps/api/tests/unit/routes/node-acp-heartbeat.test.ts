@@ -72,6 +72,9 @@ vi.mock('drizzle-orm/d1', () => ({
               return Promise.resolve(null);
             }),
           }),
+          orderBy: vi.fn().mockImplementation(function orderBy(this: unknown) {
+            return this;
+          }),
         }),
       }),
     }),
@@ -261,7 +264,9 @@ describe('node ACP heartbeat callback-token binding', () => {
     expect(mocks.projectData.updateNodeHeartbeats).toHaveBeenCalledWith(env, 'project-1', 'node-1');
   });
 
-  it('returns terminal gone for a node-scoped token bound only to a stopped project workspace', async () => {
+  // 2026-09-25: a 410 here told a live node's vm-agent it was gone and silenced all
+  // fourteen of its workspaces. A drained project on a live node has nothing to refresh.
+  it('answers a live node whose project has only inactive workspaces with nothing to refresh', async () => {
     mocks.jwt.verifyCallbackToken.mockResolvedValue({
       workspace: 'node-1',
       type: 'callback',
@@ -272,8 +277,12 @@ describe('node ACP heartbeat callback-token binding', () => {
 
     const response = await postHeartbeat(app, 'node-1');
 
-    expect(response.status).toBe(410);
+    expect(response.status).toBe(204);
     expect(mocks.projectData.updateNodeHeartbeats).not.toHaveBeenCalled();
+    expect(mocks.log.info).toHaveBeenCalledWith(
+      'acp_heartbeat.no_active_workspace',
+      expect.objectContaining({ projectId: 'project-1', nodeId: 'node-1' })
+    );
   });
 
   it('returns terminal gone for a node-scoped token bound to a deleted node', async () => {

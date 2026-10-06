@@ -9,6 +9,7 @@ import { getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectCapability } from '../middleware/project-auth';
 import * as projectDataService from '../services/project-data';
+import { isSleepingContainerRuntime } from '../services/sleeping-container-runtime';
 import { requireSessionCreator } from './chat-session-ownership';
 import { resolveLiveAgentSessionForChat } from './chat-workspace-resolver';
 
@@ -41,15 +42,18 @@ export function registerChatCancelRoute(chatRoutes: Hono<{ Bindings: Env }>): vo
     // this cancel's own result (.claude/rules/49).
     const observedAt = Date.now();
 
-    // Forward the cancel to the VM agent
+    // Forward the cancel to the VM agent. A sleeping Instant runtime has no prompt in
+    // flight, and forwarding would wake it, so answer as the agent's 409 would.
     const { cancelAgentSessionOnNode } = await import('../services/node-agent');
-    const result = await cancelAgentSessionOnNode(
-      workspace.nodeId,
-      workspace.id,
-      agentSession.id,
-      c.env,
-      userId
-    );
+    const result = isSleepingContainerRuntime(workspace)
+      ? { success: false, status: 409 }
+      : await cancelAgentSessionOnNode(
+          workspace.nodeId,
+          workspace.id,
+          agentSession.id,
+          c.env,
+          userId
+        );
 
     // 409 means no prompt in flight — not an error from the user's perspective
     if (!result.success && result.status !== 409) {

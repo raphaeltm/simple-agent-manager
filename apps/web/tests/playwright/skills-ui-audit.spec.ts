@@ -214,28 +214,6 @@ test.describe('Skills List audit', () => {
     await assertNoOverflow(page);
   });
 
-  test('exclusive node checkbox disables max co-tenants', async ({ page }) => {
-    await openSkillsPage(page, { skills: [] });
-    await page.getByRole('button', { name: 'New Skill' }).click();
-    await expect(page.getByRole('heading', { name: 'Create Skill' })).toBeVisible();
-
-    const maxCoTenants = page.getByLabel('Max Co-tenants');
-    const exclusiveNode = page.getByLabel('Exclusive Node');
-
-    // Initially enabled with "Default" placeholder
-    await expect(maxCoTenants).toBeEnabled();
-    await maxCoTenants.fill('3');
-    expect(await maxCoTenants.inputValue()).toBe('3');
-
-    // Check exclusive node — max co-tenants becomes disabled and cleared
-    await exclusiveNode.check();
-    await expect(maxCoTenants).toBeDisabled();
-
-    // Uncheck exclusive node — max co-tenants re-enabled
-    await exclusiveNode.uncheck();
-    await expect(maxCoTenants).toBeEnabled();
-  });
-
   test('edit dialog populates structured fields from existing skill JSON', async ({ page }) => {
     await setupApiMocks(page, { skills: NORMAL_SKILLS });
     // Navigate directly with ?edit= param to open the edit dialog
@@ -272,7 +250,7 @@ test.describe('Skills List audit', () => {
     await page.getByLabel('Name').fill('Test Skill');
     await page.getByLabel('Min vCPUs').fill('2');
     await page.getByLabel('Min Memory (GB)').fill('4');
-    // Min Disk left empty, Exclusive Node unchecked, Max Co-tenants left empty
+    // Min Disk left empty, Exclusive Node unchecked
 
     await page.getByRole('button', { name: 'Create Skill' }).click();
 
@@ -284,13 +262,13 @@ test.describe('Skills List audit', () => {
     expect(resourceJson).toBeTruthy();
     const parsed = JSON.parse(resourceJson);
     expect(parsed).toEqual({ minVcpu: 2, minMemoryGb: 4 });
-    // Verify no extra keys (minDiskGb, exclusiveNode, maxCoTenants should be absent)
+    // Verify no extra keys (minDiskGb and exclusiveNode absent; the retired maxCoTenants never appears)
     expect(parsed).not.toHaveProperty('minDiskGb');
     expect(parsed).not.toHaveProperty('exclusiveNode');
     expect(parsed).not.toHaveProperty('maxCoTenants');
   });
 
-  test('submit with exclusive node omits maxCoTenants from JSON', async ({ page }) => {
+  test('submit with exclusive node sends only the filled fields', async ({ page }) => {
     let capturedPayload: Record<string, unknown> | null = null;
 
     await setupApiMocks(page, { skills: [] });

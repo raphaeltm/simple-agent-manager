@@ -21,6 +21,7 @@ export {
   extractContainerPort,
   extractPortRouteHint,
   parseComposeRouteHints,
+  parseResources,
   parseServiceVolumes,
   parseVolumes,
 } from './parse-fields';

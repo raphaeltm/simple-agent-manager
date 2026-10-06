@@ -22,7 +22,9 @@ import {
   DEFAULT_TRIAL_KNOWLEDGE_GITHUB_TIMEOUT_MS,
   DEFAULT_VM_LOCATION,
   DEFAULT_VM_SIZE,
+  type VMSize,
 } from '@simple-agent-manager/shared';
+import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
@@ -30,6 +32,12 @@ import { log } from '../../lib/logger';
 import { expectJsonRecord } from '../../lib/runtime-validation';
 import { ulid } from '../../lib/ulid';
 import { createOwnerProjectMembership } from '../../middleware/project-auth';
+import {
+  type CanonicalVmAllocationPlan,
+  placementProjectDefaultsFromRow,
+  resolveCanonicalVmAllocationPlan,
+} from '../../services/canonical-vm-allocation';
+import { toCapacityPlacementSnapshot } from '../../services/capacity-pools';
 import { signCallbackToken } from '../../services/jwt';
 import { getRuntimeLimits } from '../../services/limits';
 import { buildSamMcpEntry } from '../../services/mcp-connection-resolution';
@@ -40,11 +48,23 @@ import {
   startAgentSessionOnNode,
 } from '../../services/node-agent';
 import { createNodeRecord, provisionNode } from '../../services/nodes';
+import { buildPlacementAuthoritySqlPredicate } from '../../services/placement-authority';
 import * as projectDataService from '../../services/project-data';
+import {
+  assertTrialProvisioningAuthority,
+  cleanupFreshProvisioningNode,
+} from '../../services/provisioning-authority';
 import { DISCOVERY_PROMPT } from '../../services/trial/discovery-prompt';
 import { startDiscoveryAgent } from '../../services/trial/trial-runner';
 import { readTrial, writeTrial } from '../../services/trial/trial-store';
 import { resolveUniqueWorkspaceDisplayName } from '../../services/workspace-names';
+import { reserveWorkspacePlacement } from '../../services/workspace-placement';
+import {
+  evaluateWorkspaceReservationCapacity,
+  loadActiveWorkspaceReservationUsage,
+  resolveWorkspaceAdmissionPolicy,
+  type WorkspaceResourceNode,
+} from '../../services/workspace-resource-capacity';
 import { verifyNodeAgentHealthy } from '../task-runner/node-steps';
 import { isNodeAgentReadyForWorkspaceDispatch } from '../task-runner/readiness';
 import {
@@ -53,15 +73,94 @@ import {
   resolveAnonymousUserId,
   safeEmitTrialEvent,
 } from './helpers';
-import type {
-  TrialOrchestratorContext,
-  TrialOrchestratorState,
-} from './types';
+import type { TrialOrchestratorContext, TrialOrchestratorState } from './types';
 
 /** Default trial workspace profile when TRIAL_DEFAULT_WORKSPACE_PROFILE is unset. */
 const DEFAULT_TRIAL_WORKSPACE_PROFILE = 'lightweight';
 /** Fallback branch when the GitHub default-branch probe fails or times out. */
 const TRIAL_FALLBACK_BRANCH = 'main';
+
+function resolveTrialVmSize(env: TrialOrchestratorContext['env']): VMSize {
+  return env.TRIAL_VM_SIZE === 'small' ||
+    env.TRIAL_VM_SIZE === 'medium' ||
+    env.TRIAL_VM_SIZE === 'large'
+    ? env.TRIAL_VM_SIZE
+    : DEFAULT_VM_SIZE;
+}
+
+function resolveTrialWorkspaceProfile(
+  env: TrialOrchestratorContext['env']
+): 'full' | 'lightweight' {
+  return env.TRIAL_DEFAULT_WORKSPACE_PROFILE === 'full' ? 'full' : DEFAULT_TRIAL_WORKSPACE_PROFILE;
+}
+
+async function resolveTrialVmAllocation(
+  state: TrialOrchestratorState,
+  rc: TrialOrchestratorContext
+): Promise<CanonicalVmAllocationPlan> {
+  const userId = resolveAnonymousUserId(rc.env);
+  const db = drizzle(rc.env.DATABASE, { schema });
+  if (!state.projectId) {
+    throw Object.assign(new Error('Trial project is missing'), { permanent: true });
+  }
+  const [project] = await db
+    .select()
+    .from(schema.projects)
+    .where(eq(schema.projects.id, state.projectId))
+    .limit(1);
+  if (!project) {
+    throw Object.assign(new Error('Trial project is missing'), { permanent: true });
+  }
+
+  const allocation = await resolveCanonicalVmAllocationPlan(db, rc.env, {
+    entryPoint: 'trial-orchestrator',
+    taskId: state.trialId,
+    userId,
+    projectId: state.projectId,
+    project: placementProjectDefaultsFromRow(project),
+    explicit: {
+      vmSize: resolveTrialVmSize(rc.env),
+      vmLocation: rc.env.TRIAL_VM_LOCATION ?? DEFAULT_VM_LOCATION,
+    },
+    credentialProjectPolicy: 'current-project',
+    taskModeDefault: 'task',
+    workloadRole: 'workspace',
+    requiredCredentialSource: 'platform',
+    credentialsRequiredMessage:
+      'Platform cloud provider credentials required for trial allocation.',
+  });
+
+  if ('error' in allocation) {
+    throw Object.assign(new Error(allocation.error), { permanent: true });
+  }
+
+  return allocation;
+}
+
+async function failIfTrialNodeProvisioningTerminal(
+  rc: TrialOrchestratorContext,
+  nodeId: string
+): Promise<void> {
+  const node = await rc.env.DATABASE.prepare(
+    `SELECT status, error_message AS errorMessage
+       FROM nodes
+      WHERE id = ?
+      LIMIT 1`
+  )
+    .bind(nodeId)
+    .first<{ status: string; errorMessage: string | null }>();
+  if (!node) {
+    throw Object.assign(new Error('Trial node disappeared during provisioning'), {
+      permanent: true,
+    });
+  }
+  if (node.status === 'error' || node.status === 'stopped' || node.status === 'deleted') {
+    throw Object.assign(
+      new Error(node.errorMessage || `Trial node provisioning ended with status ${node.status}`),
+      { permanent: true }
+    );
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Helpers — trial KV upkeep
@@ -84,7 +183,9 @@ async function syncTrialRecord(
          SET project_id = ?
          WHERE id = ?
            AND project_id IS NULL`
-      ).bind(patch.projectId, state.trialId).run();
+      )
+        .bind(patch.projectId, state.trialId)
+        .run();
     } catch (err) {
       log.warn('trial_orchestrator.trial_d1_project_sync_failed', {
         trialId: state.trialId,
@@ -123,11 +224,11 @@ async function syncTrialRecord(
 async function fetchDefaultBranch(
   owner: string,
   repo: string,
-  env: TrialOrchestratorContext['env'],
+  env: TrialOrchestratorContext['env']
 ): Promise<string> {
   const timeoutMs = parseEnvInt(
     env.TRIAL_GITHUB_TIMEOUT_MS,
-    DEFAULT_TRIAL_KNOWLEDGE_GITHUB_TIMEOUT_MS,
+    DEFAULT_TRIAL_KNOWLEDGE_GITHUB_TIMEOUT_MS
   );
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -193,9 +294,9 @@ export async function handleProjectCreation(
 
   // Idempotency — a retry after partial progress should pick up the existing row.
   if (state.projectId) {
-    const existing = await rc.env.DATABASE.prepare(
-      `SELECT id FROM projects WHERE id = ?`
-    ).bind(state.projectId).first<{ id: string }>();
+    const existing = await rc.env.DATABASE.prepare(`SELECT id FROM projects WHERE id = ?`)
+      .bind(state.projectId)
+      .first<{ id: string }>();
     if (existing) {
       await rc.advanceToStep(state, 'node_selection');
       return;
@@ -217,8 +318,8 @@ export async function handleProjectCreation(
   // Probe GitHub for the real default branch — falls back to 'main' on any
   // failure so master-default repos (e.g. octocat/Hello-World) clone correctly
   // without breaking main-default repos when GitHub is unreachable.
-  const defaultBranch = state.defaultBranch
-    ?? (await fetchDefaultBranch(state.repoOwner, state.repoName, rc.env));
+  const defaultBranch =
+    state.defaultBranch ?? (await fetchDefaultBranch(state.repoOwner, state.repoName, rc.env));
   // Persist the resolved branch BEFORE the D1 insert so a crash between here
   // and the project persist (line ~222) does not cause a retry to re-probe
   // GitHub and potentially resolve a different value than what is about to
@@ -283,7 +384,12 @@ export async function handleNodeSelection(
   // skip ahead. If a preferred-node survived but isn't healthy anymore we
   // fall back to provisioning (trials never pin a specific node).
   if (state.nodeId) {
-    if (await verifyNodeAgentHealthy(state.nodeId, rc as unknown as import('../task-runner/types').TaskRunnerContext)) {
+    if (
+      await verifyNodeAgentHealthy(
+        state.nodeId,
+        rc as unknown as import('../task-runner/types').TaskRunnerContext
+      )
+    ) {
       await rc.advanceToStep(state, 'workspace_creation');
       return;
     }
@@ -300,17 +406,82 @@ export async function handleNodeSelection(
   // trial fleets always auto-provision on platform credentials. We still try
   // reuse first because warm/multi-trial scenarios benefit from it.
   const userId = resolveAnonymousUserId(rc.env);
+  const allocation = await resolveTrialVmAllocation(state, rc);
+  const authority = buildPlacementAuthoritySqlPredicate({
+    nodeAlias: 'n',
+    userId,
+    projectId: state.projectId,
+    nodeRole: 'workspace',
+    workloadRole: 'workspace',
+    capacityPlacementSnapshot: allocation.capacityPlacementSnapshot,
+    requireProjectMembership: true,
+  });
   const requiredAgentVersion = rc.env.VM_AGENT_REQUIRED_VERSION || null;
   const existing = await rc.env.DATABASE.prepare(
-    `SELECT id FROM nodes
-     WHERE user_id = ? AND status = 'running' AND health_status = 'healthy'
-       AND (? IS NULL OR agent_version = ?)
-     LIMIT 1`
-  ).bind(userId, requiredAgentVersion, requiredAgentVersion).first<{ id: string }>();
+    `SELECT
+        n.id,
+        n.node_class AS nodeClass,
+        n.provider_instance_id AS providerInstanceId,
+        n.provider_instance_vcpu_count AS providerInstanceVcpuCount,
+        n.provider_instance_memory_mb AS providerInstanceMemoryMb,
+        n.provider_instance_disk_gb AS providerInstanceDiskGb,
+        n.observed_provider_instance_vcpu_count AS observedProviderInstanceVcpuCount,
+        n.observed_provider_instance_memory_mb AS observedProviderInstanceMemoryMb,
+        n.observed_provider_instance_disk_gb AS observedProviderInstanceDiskGb,
+        n.observed_hardware_source AS observedHardwareSource,
+        n.last_metrics AS lastMetrics,
+        n.last_heartbeat_at AS lastHeartbeatAt
+     FROM nodes n
+     WHERE n.user_id = ? AND n.status = 'running' AND n.health_status = 'healthy'
+        AND (? IS NULL OR n.agent_version = ?)
+        AND n.cloud_provider = ?
+        AND n.vm_location = ?
+        AND n.provider_instance_type = ?
+        AND n.provider_instance_boot_disk_size_gb IS ?
+        AND n.provider_instance_image IS ?
+        AND n.provider_instance_architecture IS ?
+        ${authority.sql}
+      ORDER BY n.id ASC`
+  )
+    .bind(
+      userId,
+      requiredAgentVersion,
+      requiredAgentVersion,
+      allocation.effectiveProvider,
+      allocation.vmLocation,
+      allocation.providerInstanceType,
+      allocation.providerInstanceBootDiskSizeGb,
+      allocation.providerInstanceImage,
+      allocation.providerInstanceArchitecture,
+      ...authority.binds
+    )
+    .all<WorkspaceResourceNode>();
 
-  if (existing?.id) {
-    if (await verifyNodeAgentHealthy(existing.id, rc as unknown as import('../task-runner/types').TaskRunnerContext)) {
-      state.nodeId = existing.id;
+  const candidates = existing.results ?? [];
+  const usage = await loadActiveWorkspaceReservationUsage(
+    rc.env.DATABASE,
+    candidates.map((node) => node.id)
+  );
+  const admissionPolicy = resolveWorkspaceAdmissionPolicy(rc.env);
+
+  for (const candidate of candidates) {
+    if (
+      !evaluateWorkspaceReservationCapacity(
+        candidate,
+        usage.get(candidate.id),
+        allocation.placement.resolvedReservation,
+        admissionPolicy
+      ).admitted
+    ) {
+      continue;
+    }
+    if (
+      await verifyNodeAgentHealthy(
+        candidate.id,
+        rc as unknown as import('../task-runner/types').TaskRunnerContext
+      )
+    ) {
+      state.nodeId = candidate.id;
       await rc.ctx.storage.put('state', state);
       await rc.advanceToStep(state, 'workspace_creation');
       return;
@@ -339,17 +510,18 @@ export async function handleNodeProvisioning(
   if (state.nodeId) {
     const node = await rc.env.DATABASE.prepare(
       `SELECT status, error_message FROM nodes WHERE id = ?`
-    ).bind(state.nodeId).first<{ status: string; error_message: string | null }>();
+    )
+      .bind(state.nodeId)
+      .first<{ status: string; error_message: string | null }>();
 
     if (node?.status === 'running') {
       await rc.advanceToStep(state, 'node_agent_ready');
       return;
     }
     if (node?.status === 'error' || node?.status === 'stopped') {
-      throw Object.assign(
-        new Error(node.error_message || 'Trial node provisioning failed'),
-        { permanent: true },
-      );
+      throw Object.assign(new Error(node.error_message || 'Trial node provisioning failed'), {
+        permanent: true,
+      });
     }
     // Still creating — retry via backoff (caller's alarm loop handles the delay).
     throw new Error('Node still provisioning — will retry');
@@ -357,16 +529,35 @@ export async function handleNodeProvisioning(
 
   const userId = resolveAnonymousUserId(rc.env);
   const limits = getRuntimeLimits(rc.env);
-
-  const vmSize = (rc.env.TRIAL_VM_SIZE as never) ?? DEFAULT_VM_SIZE;
-  const vmLocation = rc.env.TRIAL_VM_LOCATION ?? DEFAULT_VM_LOCATION;
+  const allocation = await resolveTrialVmAllocation(state, rc);
+  const projectId = state.projectId;
+  if (!projectId) {
+    throw Object.assign(new Error('Trial project is missing'), { permanent: true });
+  }
+  const assertExternalMutationAuthority = async () => {
+    await assertTrialProvisioningAuthority(rc.env, {
+      trialId: state.trialId,
+      projectId,
+      userId,
+    });
+  };
+  await assertExternalMutationAuthority();
 
   const createdNode = await createNodeRecord(rc.env, {
     userId,
+    credentialAttributionUserId: allocation.credentialAttributionUserId,
+    credentialAttributionProjectId: allocation.credentialAttributionProjectId,
+    credentialAttributionSource: allocation.credentialAttributionSource,
     name: `trial-${state.trialId.slice(-8)}`,
-    vmSize,
-    vmLocation,
+    vmSize: allocation.vmSize,
+    vmLocation: allocation.vmLocation,
+    cloudProvider: allocation.effectiveProvider,
+    providerInstanceType: allocation.providerInstanceType,
+    providerInstanceBootDiskSizeGb: allocation.providerInstanceBootDiskSizeGb,
+    providerInstanceImage: allocation.providerInstanceImage,
+    providerInstanceArchitecture: allocation.providerInstanceArchitecture,
     heartbeatStaleAfterSeconds: limits.nodeHeartbeatStaleSeconds,
+    capacityPlacementSnapshot: allocation.capacityPlacementSnapshot,
   });
 
   state.nodeId = createdNode.id;
@@ -376,8 +567,8 @@ export async function handleNodeProvisioning(
   log.info('trial_orchestrator.step.node_provisioning_started', {
     trialId: state.trialId,
     nodeId: createdNode.id,
-    vmSize,
-    vmLocation,
+    vmSize: allocation.vmSize,
+    vmLocation: allocation.vmLocation,
   });
 
   // Kick provisioning. We omit taskContext — trial agents don't need the
@@ -389,7 +580,11 @@ export async function handleNodeProvisioning(
   // first heartbeat backfill. Do NOT synchronously require status='running'
   // here; the next step (node_agent_ready) polls heartbeat freshness, which
   // correctly waits for the VM to boot + heartbeat regardless of provider.
-  await provisionNode(createdNode.id, rc.env);
+  await provisionNode(createdNode.id, rc.env, undefined, {
+    authorityProjectId: projectId,
+    assertExternalMutationAuthority,
+  });
+  await failIfTrialNodeProvisioningTerminal(rc, createdNode.id);
 
   await rc.advanceToStep(state, 'node_agent_ready');
 }
@@ -403,10 +598,7 @@ export async function handleNodeAgentReady(
   rc: TrialOrchestratorContext
 ): Promise<void> {
   if (!state.nodeId) {
-    throw Object.assign(
-      new Error('node_agent_ready entered without nodeId'),
-      { permanent: true },
-    );
+    throw Object.assign(new Error('node_agent_ready entered without nodeId'), { permanent: true });
   }
 
   if (!state.nodeAgentReadyStartedAt) {
@@ -417,21 +609,22 @@ export async function handleNodeAgentReady(
   const timeoutMs = rc.getNodeReadyTimeoutMs();
   const elapsed = Date.now() - state.nodeAgentReadyStartedAt;
   if (elapsed > timeoutMs) {
-    throw Object.assign(
-      new Error(`Trial node agent not ready within ${timeoutMs}ms`),
-      { permanent: true },
-    );
+    throw Object.assign(new Error(`Trial node agent not ready within ${timeoutMs}ms`), {
+      permanent: true,
+    });
   }
 
   const node = await rc.env.DATABASE.prepare(
     `SELECT status, health_status, last_heartbeat_at, agent_ready_at, agent_version FROM nodes WHERE id = ?`
-  ).bind(state.nodeId).first<{
-    status: string | null;
-    health_status: string | null;
-    last_heartbeat_at: string | null;
-    agent_ready_at: string | null;
-    agent_version: string | null;
-  }>();
+  )
+    .bind(state.nodeId)
+    .first<{
+      status: string | null;
+      health_status: string | null;
+      last_heartbeat_at: string | null;
+      agent_ready_at: string | null;
+      agent_version: string | null;
+    }>();
 
   if (
     isNodeAgentReadyForWorkspaceDispatch(
@@ -469,17 +662,16 @@ export async function handleWorkspaceCreation(
   });
 
   if (!state.projectId || !state.nodeId) {
-    throw Object.assign(
-      new Error('workspace_creation requires projectId and nodeId'),
-      { permanent: true },
-    );
+    throw Object.assign(new Error('workspace_creation requires projectId and nodeId'), {
+      permanent: true,
+    });
   }
 
   // Idempotency — if workspace row already exists, just move on.
   if (state.workspaceId) {
-    const existing = await rc.env.DATABASE.prepare(
-      `SELECT id FROM workspaces WHERE id = ?`
-    ).bind(state.workspaceId).first<{ id: string }>();
+    const existing = await rc.env.DATABASE.prepare(`SELECT id FROM workspaces WHERE id = ?`)
+      .bind(state.workspaceId)
+      .first<{ id: string }>();
     if (existing) {
       await rc.advanceToStep(state, 'workspace_ready');
       return;
@@ -497,29 +689,62 @@ export async function handleWorkspaceCreation(
   const unique = await resolveUniqueWorkspaceDisplayName(db, state.nodeId, displayName);
   const now = new Date().toISOString();
 
-  const profile = rc.env.TRIAL_DEFAULT_WORKSPACE_PROFILE ?? DEFAULT_TRIAL_WORKSPACE_PROFILE;
-  const vmSize = (rc.env.TRIAL_VM_SIZE as never) ?? DEFAULT_VM_SIZE;
-  const vmLocation = rc.env.TRIAL_VM_LOCATION ?? DEFAULT_VM_LOCATION;
+  const profile = resolveTrialWorkspaceProfile(rc.env);
+  const allocation = await resolveTrialVmAllocation(state, rc);
   const branch = state.defaultBranch ?? TRIAL_FALLBACK_BRANCH;
+  const [node] = await db
+    .select()
+    .from(schema.nodes)
+    .where(eq(schema.nodes.id, state.nodeId))
+    .limit(1);
+  if (!node) {
+    state.nodeId = null;
+    await rc.ctx.storage.put('state', state);
+    await rc.advanceToStep(state, 'node_selection');
+    return;
+  }
+  const nodeSnapshot = toCapacityPlacementSnapshot(node);
+  const capacityPlacementSnapshot = nodeSnapshot.capacityPoolId ? nodeSnapshot : null;
 
-  await db.insert(schema.workspaces).values({
-    id: workspaceId,
-    nodeId: state.nodeId,
-    projectId: state.projectId,
-    userId,
-    installationId,
-    name: displayName,
-    displayName: unique.displayName,
-    normalizedDisplayName: unique.normalizedDisplayName,
-    repository,
-    branch,
-    status: 'creating',
-    vmSize,
-    vmLocation,
-    workspaceProfile: profile,
-    createdAt: now,
-    updatedAt: now,
-  });
+  const placementReserved = await reserveWorkspacePlacement(
+    rc.env.DATABASE,
+    {
+      id: workspaceId,
+      nodeId: state.nodeId,
+      projectId: state.projectId,
+      userId,
+      installationId,
+      name: displayName,
+      displayName: unique.displayName,
+      normalizedDisplayName: unique.normalizedDisplayName,
+      repository,
+      branch,
+      vmSize: allocation.vmSize,
+      vmLocation: allocation.vmLocation,
+      workspaceProfile: profile,
+      devcontainerConfigName: null,
+      agentProfileHint: null,
+      capacityPlacementSnapshot,
+      resolvedReservation: allocation.placement.resolvedReservation,
+      createdAt: now,
+    },
+    resolveWorkspaceAdmissionPolicy(rc.env)
+  );
+  if (!placementReserved) {
+    if (state.autoProvisionedNode) {
+      await cleanupFreshProvisioningNode(rc.env, {
+        nodeId: state.nodeId,
+        userId,
+        nodeRole: 'workspace',
+        reason: 'trial_workspace_final_admission_failed',
+      });
+    }
+    state.nodeId = null;
+    state.autoProvisionedNode = false;
+    await rc.ctx.storage.put('state', state);
+    await rc.advanceToStep(state, 'node_selection');
+    return;
+  }
 
   state.workspaceId = workspaceId;
   await rc.ctx.storage.put('state', state);
@@ -561,10 +786,7 @@ export async function handleWorkspaceReady(
   });
 
   if (!state.workspaceId) {
-    throw Object.assign(
-      new Error('workspace_ready without workspaceId'),
-      { permanent: true },
-    );
+    throw Object.assign(new Error('workspace_ready without workspaceId'), { permanent: true });
   }
 
   if (!state.workspaceReadyStartedAt) {
@@ -574,26 +796,26 @@ export async function handleWorkspaceReady(
 
   const ws = await rc.env.DATABASE.prepare(
     `SELECT status, error_message FROM workspaces WHERE id = ?`
-  ).bind(state.workspaceId).first<{ status: string; error_message: string | null }>();
+  )
+    .bind(state.workspaceId)
+    .first<{ status: string; error_message: string | null }>();
 
   if (ws?.status === 'running' || ws?.status === 'recovery') {
     await rc.advanceToStep(state, 'discovery_agent_start');
     return;
   }
   if (ws?.status === 'error') {
-    throw Object.assign(
-      new Error(ws.error_message || 'Trial workspace creation failed'),
-      { permanent: true },
-    );
+    throw Object.assign(new Error(ws.error_message || 'Trial workspace creation failed'), {
+      permanent: true,
+    });
   }
 
   const timeoutMs = rc.getWorkspaceReadyTimeoutMs();
   const elapsed = Date.now() - state.workspaceReadyStartedAt;
   if (elapsed > timeoutMs) {
-    throw Object.assign(
-      new Error(`Trial workspace did not become ready within ${timeoutMs}ms`),
-      { permanent: true },
-    );
+    throw Object.assign(new Error(`Trial workspace did not become ready within ${timeoutMs}ms`), {
+      permanent: true,
+    });
   }
 
   const pollIntervalMs = rc.getWorkspaceReadyPollIntervalMs();
@@ -619,7 +841,7 @@ export async function handleDiscoveryAgentStart(
   if (!state.projectId || !state.workspaceId || !state.nodeId) {
     throw Object.assign(
       new Error('discovery_agent_start requires projectId, workspaceId, and nodeId'),
-      { permanent: true },
+      { permanent: true }
     );
   }
 
@@ -650,12 +872,14 @@ export async function handleDiscoveryAgentStart(
     try {
       await rc.env.DATABASE.prepare(
         `UPDATE workspaces SET chat_session_id = ?, updated_at = ? WHERE id = ?`
-      ).bind(chatSessionId, new Date().toISOString(), workspaceId).run();
+      )
+        .bind(chatSessionId, new Date().toISOString(), workspaceId)
+        .run();
       await projectDataService.linkSessionToWorkspace(
         rc.env,
         projectId,
         chatSessionId,
-        workspaceId,
+        workspaceId
       );
     } catch (err) {
       log.warn('trial_orchestrator.session_link_failed', {
@@ -685,10 +909,9 @@ export async function handleDiscoveryAgentStart(
   }
 
   if (!acpSessionId || !chatSessionId) {
-    throw Object.assign(
-      new Error('discovery_agent_start lost session ids after creation'),
-      { permanent: true },
-    );
+    throw Object.assign(new Error('discovery_agent_start lost session ids after creation'), {
+      permanent: true,
+    });
   }
   const resolvedAcpSessionId: string = acpSessionId;
   const resolvedChatSessionId: string = chatSessionId;
@@ -703,7 +926,7 @@ export async function handleDiscoveryAgentStart(
       rc.env,
       userId,
       resolvedChatSessionId,
-      projectId,
+      projectId
     );
     state.agentSessionCreatedOnVm = true;
     await rc.ctx.storage.put('state', state);
@@ -733,7 +956,7 @@ export async function handleDiscoveryAgentStart(
         agentSessionId: resolvedAcpSessionId,
         createdAt: new Date().toISOString(),
       },
-      rc.env,
+      rc.env
     );
     state.mcpToken = token;
     await rc.ctx.storage.put('state', state);
@@ -765,7 +988,7 @@ export async function handleDiscoveryAgentStart(
       initialPrompt,
       rc.env,
       userId,
-      [buildSamMcpEntry(rc.env.BASE_DOMAIN, state.mcpToken)],
+      [buildSamMcpEntry(rc.env.BASE_DOMAIN, state.mcpToken)]
     );
     state.agentStartedOnVm = true;
     await rc.ctx.storage.put('state', state);
@@ -794,7 +1017,7 @@ export async function handleDiscoveryAgentStart(
           reason: 'trial_orchestrator.agent_subprocess_started',
           workspaceId,
           nodeId,
-        },
+        }
       );
       state.acpAssignedOnVm = true;
       await rc.ctx.storage.put('state', state);
@@ -820,7 +1043,7 @@ export async function handleDiscoveryAgentStart(
           reason: 'trial_orchestrator.agent_subprocess_running',
           workspaceId,
           nodeId,
-        },
+        }
       );
       state.acpRunningOnVm = true;
       await rc.ctx.storage.put('state', state);

@@ -61,6 +61,9 @@ describe('listSessionsFromIndex', () => {
       projectId?: string;
       status?: string;
       updatedAt?: number;
+      lastMessageAt?: number | null;
+      createdAt?: number | null;
+      startedAt?: number;
       createdByUserId?: string | null;
       agentCompletedAt?: number | null;
       workspaceId?: string | null;
@@ -83,15 +86,14 @@ describe('listSessionsFromIndex', () => {
         `Topic ${id}`,
         opts.workspaceId ?? null,
         5,
-        1000,
-        // last_message_at deliberately DIFFERENT from updated_at — the mapper
-        // must read `lastMessageAt` from updated_at (matching the DO), and this
-        // value exists to make a mix-up visible.
-        999_999,
+        opts.startedAt ?? 1000,
+        opts.lastMessageAt === undefined
+          ? (opts.updatedAt ?? 5000)
+          : opts.lastMessageAt,
         opts.agentCompletedAt ?? null,
         opts.updatedAt ?? 5000,
         opts.createdByUserId === undefined ? OWNER : opts.createdByUserId,
-        900,
+        opts.createdAt === undefined ? 900 : opts.createdAt,
         opts.attentionJson ?? null,
         now
       );
@@ -242,10 +244,10 @@ describe('listSessionsFromIndex', () => {
   });
 
   describe('filters and ordering', () => {
-    it('orders by updated_at descending', async () => {
-      addSession('old', { updatedAt: 1000 });
-      addSession('newest', { updatedAt: 9000 });
-      addSession('middle', { updatedAt: 5000 });
+    it('orders by conversation activity, ignoring lifecycle-only updated_at bumps', async () => {
+      addSession('old', { lastMessageAt: 1000, updatedAt: 9000 });
+      addSession('newest', { lastMessageAt: 9000, updatedAt: 9000 });
+      addSession('middle', { lastMessageAt: 5000, updatedAt: 5000 });
       setCoverage(PROJECT, { sessionCount: 3 });
 
       const out = await listSessionsFromIndex(env, {
@@ -324,15 +326,42 @@ describe('listSessionsFromIndex', () => {
       expect(page2.result.sessions.map((s) => s.id)).toEqual(['c']);
       expect(page2.result.hasMore).toBe(false);
     });
+
+    it('keeps equal-activity offset pages deterministic while no messages arrive', async () => {
+      for (const id of ['a', 'b', 'c', 'd']) {
+        addSession(id, { lastMessageAt: 2000, updatedAt: 9000 });
+      }
+      setCoverage(PROJECT, { sessionCount: 4 });
+
+      const read = (offset: number) =>
+        listSessionsFromIndex(env, {
+          projectId: PROJECT,
+          status: null,
+          limit: 2,
+          offset,
+          createdByUserId: null,
+        });
+      const first = await read(0);
+      const second = await read(2);
+
+      if (!('result' in first) || !('result' in second)) throw new Error('expected index reads');
+      expect(first.result.sessions.map((s) => s.id)).toEqual(['d', 'c']);
+      expect(second.result.sessions.map((s) => s.id)).toEqual(['b', 'a']);
+      expect(new Set([...first.result.sessions, ...second.result.sessions].map((s) => s.id)).size)
+        .toBe(4);
+    });
   });
 
   describe('row shape parity with the DO', () => {
-    it('derives lastMessageAt from updated_at, not the last_message_at column', async () => {
-      // The DO's row mapper sets `lastMessageAt: r.updated_at`. session_summaries
-      // carries BOTH columns, so reading the intuitively-named one would silently
-      // reorder the sidebar relative to the DO path.
-      addSession('s-1', { updatedAt: 5000 });
-      setCoverage(PROJECT, { sessionCount: 1 });
+    it('reports the real message time and uses creation time for empty sessions', async () => {
+      addSession('message-session', { lastMessageAt: 2000, updatedAt: 5000 });
+      addSession('empty-session', {
+        lastMessageAt: null,
+        createdAt: 3000,
+        startedAt: 1000,
+        updatedAt: 9000,
+      });
+      setCoverage(PROJECT, { sessionCount: 2 });
 
       const out = await listSessionsFromIndex(env, {
         projectId: PROJECT,
@@ -343,8 +372,11 @@ describe('listSessionsFromIndex', () => {
       });
 
       if (!('result' in out)) throw new Error('expected a result');
-      expect(out.result.sessions[0]?.lastMessageAt).toBe(5000);
-      expect(out.result.sessions[0]?.lastMessageAt).not.toBe(999_999);
+      expect(out.result.sessions.map((session) => session.id)).toEqual([
+        'empty-session',
+        'message-session',
+      ]);
+      expect(out.result.sessions.map((session) => session.lastMessageAt)).toEqual([3000, 2000]);
     });
 
     it('derives isIdle, isTerminated, workspaceUrl and cleanupAt like the DO', async () => {

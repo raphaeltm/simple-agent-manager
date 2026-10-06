@@ -1,7 +1,7 @@
 # Collapse chat agent state into a single ProjectData DO RPC
 
 **Created**: 2026-08-18
-**Source**: performance review finding on PR for `tasks/active/2026-08-18-do-roundtrip-ensure-project-id-and-chat-agent-state.md`
+**Source**: performance review finding on PR for `tasks/archive/2026-08-18-do-roundtrip-ensure-project-id-and-chat-agent-state.md`
 
 ## Problem
 

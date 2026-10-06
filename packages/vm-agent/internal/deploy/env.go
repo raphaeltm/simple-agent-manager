@@ -55,6 +55,16 @@ func (r envRedactor) redact(value string) string {
 	return result
 }
 
+func (r envRedactor) maxValueLen() int {
+	maxLen := 0
+	for _, value := range r.values {
+		if len(value) > maxLen {
+			maxLen = len(value)
+		}
+	}
+	return maxLen
+}
+
 func (r envRedactor) redactError(err error) error {
 	if err == nil {
 		return nil

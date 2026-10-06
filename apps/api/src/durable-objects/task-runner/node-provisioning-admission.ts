@@ -1,10 +1,14 @@
 import { log } from '../../lib/logger';
+import { SessionRecoveryAuthorityRevokedError } from '../../services/session-recovery-authority';
 import {
   resolveVmAdmissionScope,
   type VmAdmissionWait,
   type VmProvisioningLeaseResult,
   type VmTaskAdmissionIdentity,
+  waitForVmAdmissionCapacity,
 } from '../../services/vm-admission-control';
+import { requestIncompatiblePoolNodeDrain } from './incompatible-node-drain';
+import { persistPlacementDiagnostics } from './placement-diagnostics';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
 export async function scheduleAdmissionWait(
@@ -12,6 +16,15 @@ export async function scheduleAdmissionWait(
   rc: TaskRunnerContext,
   result: VmAdmissionWait
 ): Promise<void> {
+  await persistPlacementDiagnostics(state, rc, {
+    selectedNodeId: null,
+    queue: {
+      state: 'waiting',
+      reason: result.reason,
+      nextRetryAt: result.nextRetryAt,
+      waitDeadlineAt: result.waitDeadlineAt,
+    },
+  });
   await rc.updateD1ExecutionStep(state.taskId, 'waiting_for_node_capacity');
   await rc.ctx.storage.put('state', state);
   const nextRetryMs = Date.parse(result.nextRetryAt);
@@ -30,6 +43,10 @@ export async function handleLeaseResult(
   result: VmProvisioningLeaseResult
 ): Promise<'granted' | 'waiting'> {
   if (result.kind === 'expired') {
+    await persistPlacementDiagnostics(state, rc, {
+      selectedNodeId: null,
+      queue: { state: 'expired', reason: result.reason, waitDeadlineAt: result.waitDeadlineAt },
+    });
     throw Object.assign(new Error('Timed out waiting for VM capacity'), { permanent: true });
   }
   if (result.kind === 'waiting') {
@@ -64,4 +81,38 @@ export async function buildAdmissionIdentity(
     requestedVmLocation: state.config.vmLocation,
     preferredNodeId: state.config.preferredNodeId,
   };
+}
+
+export async function waitOrThrowForCapacityPoolNodeLimit(
+  state: TaskRunnerState,
+  rc: TaskRunnerContext,
+  admissionIdentity: VmTaskAdmissionIdentity | null,
+  poolMaxNodes: number
+): Promise<'waiting'> {
+  try {
+    await requestIncompatiblePoolNodeDrain(state, rc);
+  } catch (error) {
+    if (error instanceof SessionRecoveryAuthorityRevokedError) throw error;
+    log.warn('task_runner_do.incompatible_node_drain_failed', {
+      taskId: state.taskId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  if (admissionIdentity) {
+    const waitResult = await waitForVmAdmissionCapacity(
+      rc.env,
+      admissionIdentity,
+      'capacity_pool_node_limit'
+    );
+    if (waitResult.kind !== 'expired') {
+      await scheduleAdmissionWait(state, rc, waitResult);
+      return 'waiting';
+    }
+  }
+  throw Object.assign(
+    new Error(
+      `Capacity pool node limit (${poolMaxNodes}) reached and no node can fit the request.`
+    ),
+    { permanent: true }
+  );
 }

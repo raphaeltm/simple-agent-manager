@@ -269,7 +269,6 @@ function createMockEnv(
       prepare: vi.fn().mockReturnValue(mockPreparedStatement()),
     } as unknown as D1Database,
     TASK_RUN_MAX_EXECUTION_MS: '14400000', // 4 hours
-    TASK_RUN_HARD_TIMEOUT_MS: '28800000', // 8 hours
     TASK_STUCK_QUEUED_TIMEOUT_MS: '600000', // 10 min
     TASK_STUCK_DELEGATED_TIMEOUT_MS: '1860000', // 31 min
     NODE_HEARTBEAT_STALE_SECONDS: '180', // 3 min
@@ -673,7 +672,7 @@ describe('recoverStuckTasks', () => {
       expect(result.errors).toBe(0);
     });
 
-    it('skips in_progress tasks when node heartbeat is recent', async () => {
+    it('skips in_progress tasks whose own ACP session heartbeat is fresh', async () => {
       const now = Date.now();
       // Task started 5 hours ago (past 4h limit)
       const startedAt = new Date(now - 5 * 60 * 60 * 1000).toISOString();
@@ -1186,10 +1185,13 @@ describe('recoverStuckTasks', () => {
     });
   });
 
-  describe('hard timeout enforcement', () => {
-    it('preserves a genuinely live task past the hard timeout', async () => {
+  // There is no 8-hour hard kill for a live runtime (removed in PR #1567, its
+  // knob removed with the 2026-10-04 recovery audit): only the absolute ceiling
+  // bounds one. These pin that a live task survives well past the old 480 minutes.
+  describe('live runtimes between the recovery check and the absolute ceiling', () => {
+    it('preserves a genuinely live task nine hours in', async () => {
       const now = Date.now();
-      // Task started 9 hours ago (past 8h hard timeout)
+      // Task started 9 hours ago (past the removed 8h hard timeout)
       const startedAt = new Date(now - 9 * 60 * 60 * 1000).toISOString();
       const updatedAt = new Date(now - 9 * 60 * 60 * 1000).toISOString();
       // Heartbeat 30 seconds ago (recent — would normally cause a skip)
@@ -1211,11 +1213,10 @@ describe('recoverStuckTasks', () => {
           },
         ],
       });
-      // Workspace lookup — should NOT be called because hard timeout short-circuits
+      // Legacy node-heartbeat fixtures: liveness never reads them
       responses.set('node_id FROM workspaces', {
         results: [{ node_id: 'node-1' }],
       });
-      // Heartbeat check — should NOT be reached
       responses.set('last_heartbeat_at FROM nodes', {
         results: [{ last_heartbeat_at: recentHeartbeat }],
       });
@@ -1253,9 +1254,9 @@ describe('recoverStuckTasks', () => {
       expect(projectDataMocks.getTaskAcpLivenessSignals).toHaveBeenCalled();
     });
 
-    it('preserves heartbeat grace between soft and hard timeout', async () => {
+    it('preserves a live task five hours in', async () => {
       const now = Date.now();
-      // Task started 5 hours ago (past 4h soft, before 8h hard)
+      // Task started 5 hours ago (past the 4h recovery check)
       const startedAt = new Date(now - 5 * 60 * 60 * 1000).toISOString();
       const updatedAt = new Date(now - 5 * 60 * 60 * 1000).toISOString();
       // Heartbeat 30 seconds ago (recent)
@@ -1299,14 +1300,14 @@ describe('recoverStuckTasks', () => {
       const env = createMockEnv(responses);
       const result = await recoverStuckTasks(env);
 
-      // In the 4h-8h window with fresh heartbeat, task should be skipped (grace period)
+      // Past the recovery check with a live runtime: preserved
       expect(result.heartbeatSkipped).toBe(1);
       expect(result.failedInProgress).toBe(0);
     });
 
-    it('preserves tasks in the soft-hard window after a failed node health probe', async () => {
+    it('preserves a task past the recovery check after a failed node health probe', async () => {
       const now = Date.now();
-      // Task started 5 hours ago (past 4h soft, before 8h hard)
+      // Task started 5 hours ago (past the 4h recovery check)
       const startedAt = new Date(now - 5 * 60 * 60 * 1000).toISOString();
       const updatedAt = new Date(now - 5 * 60 * 60 * 1000).toISOString();
       // Heartbeat 10 minutes ago (stale, > 180 seconds)
@@ -1369,12 +1370,14 @@ describe('recoverStuckTasks', () => {
       );
     });
 
-    it('respects custom hard timeout from env var in the failure threshold', async () => {
+    /**
+     * The failure records what was observed, not a configured label. Before the
+     * 2026-10-04 audit this read "no longer live after 480 minutes" whatever the
+     * task's real age, which sent investigators looking for a timeout.
+     */
+    it('records the observed age and liveness reason when a runtime is gone', async () => {
       const now = Date.now();
-      // Custom hard timeout: 2 hours (7200000ms → 120 min).
-      // Task started 3 hours ago — past custom hard timeout, with a dead runtime
-      // (no workspace). The custom hard-timeout value must surface as the
-      // threshold in the sanitized failure reason (would be 480 min on default).
+      // Task started 3 hours ago, past a 1-hour recovery check, with no workspace.
       const startedAt = new Date(now - 3 * 60 * 60 * 1000).toISOString();
       const updatedAt = new Date(now - 3 * 60 * 60 * 1000).toISOString();
 
@@ -1399,22 +1402,18 @@ describe('recoverStuckTasks', () => {
         changes: 1,
       });
 
-      // Override hard timeout to 2 hours and soft timeout to 1 hour
-      const env = createMockEnv(responses, {
-        TASK_RUN_HARD_TIMEOUT_MS: '7200000',
-        TASK_RUN_MAX_EXECUTION_MS: '3600000',
-      });
+      const env = createMockEnv(responses, { TASK_RUN_MAX_EXECUTION_MS: '3600000' });
       const result = await recoverStuckTasks(env);
 
-      // 3h task > 2h custom hard timeout, no live runtime → failed.
       expect(result.failedInProgress).toBe(1);
       expect(result.heartbeatSkipped).toBe(0);
-      // The custom 2h ceiling (120 min) is honored in the reason, not the 480 default.
       expect(syncTriggerExecutionMock).toHaveBeenCalledWith(
         env.DATABASE,
         'task-custom',
         'failed',
-        expect.stringContaining('120 minutes')
+        expect.stringContaining(
+          'Task runtime is no longer live (workspace_missing); task started 180 minutes ago.'
+        )
       );
     });
   });

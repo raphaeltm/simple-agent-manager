@@ -108,7 +108,7 @@ SAM deploys through the **Deploy Production** GitHub Actions workflow in your fo
 3. **Add the required secrets** (Cloudflare API token with `Containers: Edit`, GitHub App credentials, etc. — see the [Self-Hosting Guide](https://simple-agent-manager.org/docs/guides/self-hosting/) for the full list)
 4. **Run Actions → Deploy Production → Run workflow** on `main` — GitHub Actions provisions all infrastructure, deploys the API + UI, runs migrations, and verifies health
 
-To update an existing self-hosted instance, sync upstream changes into your fork's `main` branch, then manually run **Deploy Production** again.
+To update an existing self-hosted instance, run the **Update Self-Hosted Instance** workflow to sync the latest upstream release and deploy automatically, or manually sync your fork and run **Deploy Production** (SHA is optional and must be the current `main` tip when supplied).
 
 Your instance is live at `app.{your-domain}`. Users sign in with GitHub and provide their own cloud provider API token (Hetzner, Scaleway, GCP, Vultr, or UpCloud) to create workspaces.
 

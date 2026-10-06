@@ -35,8 +35,7 @@ const ROLE_CAPABILITIES: Record<ProjectMemberRole, ReadonlySet<ProjectCapability
   owner: new Set(PROJECT_CAPABILITIES),
   admin: new Set(
     PROJECT_CAPABILITIES.filter(
-      (capability) =>
-        capability !== 'project:delete' && capability !== 'project:transfer_ownership'
+      (capability) => capability !== 'project:delete' && capability !== 'project:transfer_ownership'
     )
   ),
   maintainer: new Set([
@@ -89,12 +88,7 @@ function assertActiveMembership(
   projectId: string,
   userId: string
 ): schema.ProjectMember {
-  if (
-    !row ||
-    row.projectId !== projectId ||
-    row.userId !== userId ||
-    row.status !== 'active'
-  ) {
+  if (!row || row.projectId !== projectId || row.userId !== userId || row.status !== 'active') {
     throw errors.notFound('Project');
   }
   return row;
@@ -106,35 +100,64 @@ function parseProjectMemberRole(role: string): ProjectMemberRole | null {
     : null;
 }
 
-function roleHasCapability(role: string, capability: ProjectCapability): boolean {
+/**
+ * Single source of truth for role -> capability. Exported so callers that
+ * already hold membership rows (offboarding principal selection) rank them
+ * against the same table the request-time guards use, instead of duplicating it.
+ */
+export function projectRoleHasCapability(role: string, capability: ProjectCapability): boolean {
   const parsedRole = parseProjectMemberRole(role);
   if (!parsedRole) return false;
   return ROLE_CAPABILITIES[parsedRole].has(capability);
 }
 
+export function projectMemberRolesWithCapability(
+  capability: ProjectCapability
+): ProjectMemberRole[] {
+  return PROJECT_MEMBER_ROLES.filter((role) => ROLE_CAPABILITIES[role].has(capability));
+}
+
+/**
+ * Runs on every project-scoped request.
+ *
+ * The two lookups have no data dependency on each other, so they go out CONCURRENTLY rather
+ * than one after the other — the request waits for the slower of the two instead of their sum.
+ *
+ * `db.batch()` would be one statement rather than two concurrent ones, and was tried first,
+ * but it is not worth its cost here: `lib/d1-session.ts` anchors each request `first-primary`,
+ * so by the time this runs the session is already open (the auth preamble issued the request's
+ * first query) and BOTH of these are replica-eligible. Batching would therefore save the
+ * overhead of one extra hop between two already-cheap reads, while forcing seven unrelated
+ * authorization test doubles to grow `batch` support — including one whose D1-level double
+ * shares a single statement object across every `prepare()` and so cannot distinguish batched
+ * statements at all. `Promise.all` gets the concurrency without any of that.
+ *
+ * Both guards are unchanged and still evaluated on the rows that come back: a missing or
+ * mismatched project, and a missing / non-active / wrong-tenant membership, both still surface
+ * as `notFound('Project')`. Order matters for the error a caller sees — the project assertion
+ * is evaluated first, exactly as when these ran sequentially.
+ */
 async function requireActiveProjectMembership(
   db: AppDb,
   projectId: string,
   userId: string
 ): Promise<{ project: schema.Project; membership: schema.ProjectMember }> {
-  const projectRows = await db
-    .select()
-    .from(schema.projects)
-    .where(eq(schema.projects.id, projectId))
-    .limit(1);
-  const project = assertProject(projectRows[0], projectId, 'Project');
-
-  const memberRows = await db
-    .select()
-    .from(schema.projectMembers)
-    .where(
-      and(
-        eq(schema.projectMembers.projectId, projectId),
-        eq(schema.projectMembers.userId, userId),
-        eq(schema.projectMembers.status, 'active')
+  const [projectRows, memberRows] = await Promise.all([
+    db.select().from(schema.projects).where(eq(schema.projects.id, projectId)).limit(1),
+    db
+      .select()
+      .from(schema.projectMembers)
+      .where(
+        and(
+          eq(schema.projectMembers.projectId, projectId),
+          eq(schema.projectMembers.userId, userId),
+          eq(schema.projectMembers.status, 'active')
+        )
       )
-    )
-    .limit(1);
+      .limit(1),
+  ]);
+
+  const project = assertProject(projectRows[0], projectId, 'Project');
   const membership = assertActiveMembership(memberRows[0], projectId, userId);
 
   return { project, membership };
@@ -185,7 +208,7 @@ export async function requireProjectCapability(
   capability: ProjectCapability
 ): Promise<schema.Project> {
   const { project, membership } = await requireActiveProjectMembership(db, projectId, userId);
-  if (!roleHasCapability(membership.role, capability)) {
+  if (!projectRoleHasCapability(membership.role, capability)) {
     throw errors.forbidden('Project capability is required');
   }
   return project;
@@ -209,7 +232,7 @@ export async function hasProjectCapability(
     )
     .limit(1);
   const membership = memberRows[0];
-  return membership ? roleHasCapability(membership.role, capability) : false;
+  return membership ? projectRoleHasCapability(membership.role, capability) : false;
 }
 
 export async function requireOwnedProject(

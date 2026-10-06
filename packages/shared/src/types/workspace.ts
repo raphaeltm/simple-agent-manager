@@ -24,6 +24,7 @@ export type WorkspaceStatus =
   | 'sleeping'
   | 'stopping'
   | 'stopped'
+  | 'evicted'
   | 'deleted'
   | 'error';
 
@@ -92,6 +93,15 @@ export interface Node {
   providerInstanceVcpuCount?: number | null;
   providerInstanceMemoryMb?: number | null;
   providerInstanceDiskGb?: number | null;
+  providerInstanceBootDiskSizeGb?: number | null;
+  providerInstanceImage?: string | null;
+  providerInstanceArchitecture?: string | null;
+  observedProviderInstanceType?: string | null;
+  observedProviderInstanceVcpuCount?: number | null;
+  observedProviderInstanceMemoryMb?: number | null;
+  observedProviderInstanceDiskGb?: number | null;
+  observedHardwareJson?: string | null;
+  observedHardwareSource?: string | null;
   providerInstancePriceDisplay?: string | null;
   providerInstancePriceCurrency?: string | null;
   providerInstancePriceMonthlyCents?: number | null;
@@ -125,6 +135,15 @@ export interface NodeResponse {
   providerInstanceVcpuCount?: number | null;
   providerInstanceMemoryMb?: number | null;
   providerInstanceDiskGb?: number | null;
+  providerInstanceBootDiskSizeGb?: number | null;
+  providerInstanceImage?: string | null;
+  providerInstanceArchitecture?: string | null;
+  observedProviderInstanceType?: string | null;
+  observedProviderInstanceVcpuCount?: number | null;
+  observedProviderInstanceMemoryMb?: number | null;
+  observedProviderInstanceDiskGb?: number | null;
+  observedHardwareJson?: string | null;
+  observedHardwareSource?: string | null;
   providerInstancePriceDisplay?: string | null;
   providerInstancePriceCurrency?: string | null;
   providerInstancePriceMonthlyCents?: number | null;
@@ -209,6 +228,11 @@ export interface CreateNodeRequest {
   vmSize?: VMSize;
   vmLocation?: VMLocation;
   provider?: CredentialProvider;
+  providerInstanceType?: string;
+  nativeOffering?: string;
+  bootDiskSizeGb?: number;
+  image?: string;
+  architecture?: 'x86_64' | 'arm64';
 }
 
 export interface Workspace {
@@ -245,6 +269,22 @@ export interface BootLogEntry {
 
 /** API response (includes computed URL) */
 export interface WorkspaceResponse {
+  /** Safe current host hardware; never includes credentials or allocation authority. */
+  hardware?: Pick<
+    NodeResponse,
+    | 'cloudProvider'
+    | 'vmSize'
+    | 'providerInstanceType'
+    | 'providerInstanceVcpuCount'
+    | 'providerInstanceMemoryMb'
+    | 'providerInstanceDiskGb'
+    | 'providerInstanceBootDiskSizeGb'
+    | 'providerInstanceArchitecture'
+    | 'observedProviderInstanceType'
+    | 'observedProviderInstanceVcpuCount'
+    | 'observedProviderInstanceMemoryMb'
+    | 'observedProviderInstanceDiskGb'
+  >;
   id: string;
   nodeId?: string;
   projectId?: string | null;
@@ -255,6 +295,13 @@ export interface WorkspaceResponse {
   status: WorkspaceStatus;
   vmSize: VMSize;
   vmLocation: VMLocation;
+  providerInstanceType?: string | null;
+  providerInstanceBootDiskSizeGb?: number | null;
+  providerInstanceImage?: string | null;
+  providerInstanceArchitecture?: string | null;
+  resourceRequirementsJson?: string | null;
+  resolvedReservationJson?: string | null;
+  placementExplanationJson?: string | null;
   workspaceProfile?: WorkspaceProfile | null;
   /** Selected devcontainer config name (subdirectory under .devcontainer/). null = auto-discover default. */
   devcontainerConfigName?: string | null;
@@ -281,6 +328,17 @@ export interface CreateWorkspaceRequest {
   vmLocation?: VMLocation;
   installationId?: string;
   provider?: CredentialProvider;
+  providerInstanceType?: string;
+  nativeOffering?: string;
+  bootDiskSizeGb?: number;
+  image?: string;
+  architecture?: 'x86_64' | 'arm64';
+  resourceRequirements?: {
+    minVcpu?: number;
+    minMemoryGb?: number;
+    minDiskGb?: number;
+    exclusiveNode?: boolean;
+  };
   /** Devcontainer config name (subdirectory under .devcontainer/). null/undefined = auto-discover default. */
   devcontainerConfigName?: string | null;
 }
@@ -316,6 +374,7 @@ export type WorkspacePortsState =
   | 'not_ready'
   | 'sleeping'
   | 'stopped'
+  | 'evicted'
   | 'deleted'
   | 'gone'
   | 'error';

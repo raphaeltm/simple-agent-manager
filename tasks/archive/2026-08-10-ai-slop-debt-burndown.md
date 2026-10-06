@@ -60,7 +60,7 @@ Raphaël's instruction: single PR; all code production dispatched to smaller mod
 
 - [x] `eslint --fix` 61 `no-var` in apps/www; hand-fix 7 `no-unused-vars` + 2 `no-empty` + the 1 production `any`
 - [x] Delete dead root `.eslintrc.cjs` (verify flat-config parity for `react/jsx-no-constructed-context-values` first); update `.claude/rules/48` reference
-- [x] a11y: fix all 64 jsx-a11y warnings; promote `jsx-a11y/*` to error; archive `tasks/backlog/2026-04-01-promote-a11y-eslint-to-errors.md`
+- [x] a11y: fix all 64 jsx-a11y warnings; promote `jsx-a11y/*` to error; archive `tasks/archive/2026-04-01-promote-a11y-eslint-to-errors.md`
 - [x] Production `no-non-null-assertion` burn-down (256 src sites; top `services/cron-utils.ts` 31) with real narrowing, no new suppressions
 - [x] Scope `no-non-null-assertion`/`no-explicit-any` warn to non-test files; document decision
 - [x] Review 35 `react-hooks/exhaustive-deps` suppressions against rule 48; fix unsafe ones, document safe ones
@@ -88,4 +88,4 @@ Raphaël's instruction: single PR; all code production dispatched to smaller mod
 - SAM idea `01KZPZCG3CP9XFGH5PRXE58Q6Y` (cleanup plan, full site lists)
 - SAM idea `01KZK7TFEX05MVMDKZWKABBNS7` (prevention program)
 - `.claude/rules/51-runtime-boundary-validation.md`, `02-quality-gates.md`, `17-ui-visual-testing.md`, `28-credential-resolution-fallback-tests.md`, `50-list-read-row-fault-isolation.md`
-- `tasks/active/2026-08-09-deterministic-runtime-boundary-quality.md` (prevention task; this is its reduction companion)
+- `tasks/archive/2026-08-09-deterministic-runtime-boundary-quality.md` (prevention task; this is its reduction companion)

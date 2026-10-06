@@ -11,6 +11,7 @@ import {
 } from '@simple-agent-manager/shared';
 
 import type { Env } from '../../env';
+import { normalizeSearchQuery } from '../../lib/search-query-limits';
 import * as projectDataService from '../../services/project-data';
 import {
   getMcpLimits,
@@ -281,8 +282,9 @@ export async function handleSearchKnowledge(
   env: Env,
 ): Promise<JsonRpcResponse> {
   const limits = getMcpLimits(env);
-  const query = typeof params.query === 'string' ? params.query.trim() : '';
-  if (!query) return jsonRpcError(requestId, INVALID_PARAMS, 'query is required');
+  const inputQuery = typeof params.query === 'string' ? params.query.trim() : '';
+  if (!inputQuery) return jsonRpcError(requestId, INVALID_PARAMS, 'query is required');
+  const normalizedQuery = normalizeSearchQuery(inputQuery, env);
 
   let entityType: KnowledgeEntityType | null = null;
   if (params.entityType !== undefined) {
@@ -300,11 +302,11 @@ export async function handleSearchKnowledge(
 
   try {
     const results = await projectDataService.searchKnowledgeObservations(
-      env, tokenData.projectId, query, entityType, minConfidence, limit,
+      env, tokenData.projectId, normalizedQuery.query, entityType, minConfidence, limit,
     );
 
     return jsonRpcSuccess(requestId, {
-      content: [{ type: 'text', text: JSON.stringify({ results, count: results.length }, null, 2) }],
+      content: [{ type: 'text', text: JSON.stringify({ results, count: results.length, ...normalizedQuery }, null, 2) }],
     });
   } catch (err) {
     return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to search knowledge: ${(err as Error).message}`);

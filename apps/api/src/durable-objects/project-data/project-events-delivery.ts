@@ -34,6 +34,7 @@ import {
   getRequiredBatch,
   getRequiredSubscription,
   mapRows,
+  nextPhysicalAttemptNumber,
   normalizeAttemptState,
   readAttemptById,
   readAttemptByIdempotencyKey,
@@ -52,6 +53,7 @@ import {
   normalizeTimestamp,
   stableStringify,
 } from './project-events-values';
+import { subscriptionCanMatchProjectEvent } from './project-events-visibility';
 import type { Env } from './types';
 import { generateId } from './types';
 
@@ -123,6 +125,12 @@ export function createProjectEventDeliveryBatch(
     normalized.matchIds,
     limits.maxDeliveryBatchEvents
   );
+  const unauthorizedEvent = events.find(
+    (event) => !subscriptionCanMatchProjectEvent(subscription, event)
+  );
+  if (unauthorizedEvent) {
+    throw new ProjectEventValidationError('Event match is not authorized for this subscription');
+  }
   const resolution = resolveProjectEventDelivery({
     subscription,
     requestedDelivery: normalized.requestedDelivery,
@@ -316,7 +324,7 @@ export function recordProjectEventDeliveryAttempt(
     }
   }
 
-  const attemptNumber = existingAttemptCount + 1;
+  const attemptNumber = nextPhysicalAttemptNumber(sql, projectId, batchId);
   const attemptId = generateId();
   sql.exec(
     `INSERT INTO project_event_delivery_attempts

@@ -426,9 +426,10 @@ func TestFlush_PermanentError_Discards(t *testing.T) {
 	}
 }
 
+// 401 is deliberately absent: a rejected token pauses delivery instead
+// (TestCredentialRejection_* in credential_test.go).
 func TestFlush_TerminalStatusesDisableFutureMessages(t *testing.T) {
 	for _, status := range []int{
-		http.StatusUnauthorized,
 		http.StatusForbidden,
 		http.StatusNotFound,
 		http.StatusGone,
@@ -994,8 +995,8 @@ func TestFlush_SizeFallbackPermanentErrorDiscardsBatch(t *testing.T) {
 			return
 		}
 		if ids[0] == "m1" {
-			w.WriteHeader(http.StatusUnauthorized)
-			_, _ = w.Write([]byte(`{"error":"UNAUTHORIZED"}`))
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"error":"FORBIDDEN"}`))
 			return
 		}
 
@@ -1159,8 +1160,8 @@ func TestFlush_IndividualThreshold400PersistsOmittedMarker(t *testing.T) {
 	if msg.Content != omittedMessageMarker {
 		t.Fatalf("content = %q, want omitted marker", msg.Content)
 	}
-	if msg.ToolMetadata != "" {
-		t.Fatalf("expected oversized tool metadata omitted, got %q", msg.ToolMetadata)
+	if msg.ToolMetadata != truncationRecord(2048) {
+		t.Fatalf("tool metadata = %q, want the record of its removal", msg.ToolMetadata)
 	}
 }
 

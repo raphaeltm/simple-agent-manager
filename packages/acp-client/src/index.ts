@@ -37,7 +37,6 @@ export type { MessageActionsProps } from './components/MessageActions';
 export { MessageActions } from './components/MessageActions';
 export { MessageBubble } from './components/MessageBubble';
 export { ModeSelector } from './components/ModeSelector';
-export { PermissionDialog } from './components/PermissionDialog';
 export type { PlanModalProps } from './components/PlanModal';
 export { PlanModal } from './components/PlanModal';
 export { PlanView } from './components/PlanView';
@@ -59,6 +58,3 @@ export type { UserMessageFadeProps } from './components/UserMessageFade';
 export { UserMessageFade } from './components/UserMessageFade';
 export type { VoiceButtonProps, VoiceButtonState } from './components/VoiceButton';
 export { appendDictatedText, VoiceButton } from './components/VoiceButton';
-
-// Mermaid utilities
-export { MERMAID_SVG_SANITIZE_CONFIG } from './mermaid';

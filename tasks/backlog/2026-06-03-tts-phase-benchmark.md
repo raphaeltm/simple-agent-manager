@@ -1,5 +1,10 @@
 # TTS Phase Benchmark Harness
 
+> **Reconciliation 2026-09-30:** still open. Draft PR #1225 was closed on 2026-06-07 without the
+> benchmark ever running: it was blocked on the staging D1 superadmin check, and the closing note
+> says "Reopen if the benchmark needs to be re-run". The harness code is on
+> `origin/sam/build-run-throwaway-tts-01kt7b`. The measurement has never been taken.
+
 ## Problem
 
 TTS generation is reliable but slow. We need a measured phase-by-phase breakdown of the cold staging path to determine whether latency is dominated by the upfront LLM cleanup/summary pass or by sequential per-chunk TTS generation. MP3 concatenation is expected to be near-zero but must be measured.

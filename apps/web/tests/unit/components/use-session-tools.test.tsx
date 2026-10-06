@@ -3,7 +3,9 @@
  * tool rail: strip-mode persistence, the report-issue gate, action dispatch, and the
  * mark-complete flow (dialog → mutation → error), which used to live in the header.
  */
-import { act, renderHook, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { act, renderHook as rtlRenderHook, waitFor } from '@testing-library/react';
+import { createElement, type ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ChatSessionResponse } from '../../../src/lib/api';
@@ -19,6 +21,9 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   updateProjectTaskStatus: mocks.updateProjectTaskStatus,
   deleteWorkspace: mocks.deleteWorkspace,
   getReportIssueConfig: mocks.getReportIssueConfig,
+}));
+vi.mock('../../../src/hooks/useQueryScope', () => ({
+  useQueryScope: () => 'user-1',
 }));
 
 import { TOOL_STRIP_MODE_STORAGE_KEY } from '../../../src/components/project-message-view/session-tool-actions';
@@ -43,6 +48,21 @@ function makeSession(overrides: Partial<ChatSessionResponse> = {}): ChatSessionR
   } as ChatSessionResponse;
 }
 
+/**
+ * Renders with a fresh query client per hook, like a freshly loaded page: the
+ * report-issue config is a cached query, so sharing a client across renders
+ * would let one test's config answer the next.
+ */
+function renderHook<Result, Props>(
+  render: (props: Props) => Result,
+  options: { initialProps?: Props } = {}
+) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const wrapper = ({ children }: { children: ReactNode }) =>
+    createElement(QueryClientProvider, { client }, children);
+  return rtlRenderHook(render, { ...options, wrapper });
+}
+
 function inputFor(overrides: Partial<UseSessionToolsInput> = {}): UseSessionToolsInput {
   const session = overrides.session ?? makeSession();
   return {
@@ -55,6 +75,7 @@ function inputFor(overrides: Partial<UseSessionToolsInput> = {}): UseSessionTool
     onOpenFiles: vi.fn(),
     onOpenGit: vi.fn(),
     onOpenTimeline: vi.fn(),
+    onOpenEvents: vi.fn(),
     onOpenComments: vi.fn(),
     onRetry: vi.fn(),
     onFork: vi.fn(),
@@ -116,6 +137,7 @@ describe('useSessionTools', () => {
       act(() => result.current.selectTool('files'));
       act(() => result.current.selectTool('git'));
       act(() => result.current.selectTool('timeline'));
+      act(() => result.current.selectTool('events'));
       act(() => result.current.selectTool('comments'));
       act(() => result.current.selectTool('retry'));
       act(() => result.current.selectTool('fork'));
@@ -123,6 +145,7 @@ describe('useSessionTools', () => {
       expect(input.onOpenFiles).toHaveBeenCalledTimes(1);
       expect(input.onOpenGit).toHaveBeenCalledTimes(1);
       expect(input.onOpenTimeline).toHaveBeenCalledTimes(1);
+      expect(input.onOpenEvents).toHaveBeenCalledTimes(1);
       expect(input.onOpenComments).toHaveBeenCalledTimes(1);
       expect(input.onRetry).toHaveBeenCalledTimes(1);
       expect(input.onFork).toHaveBeenCalledTimes(1);
@@ -249,6 +272,7 @@ describe('useSessionTools', () => {
       onOpenFiles: vi.fn(),
       onOpenGit: vi.fn(),
       onOpenTimeline: vi.fn(),
+      onOpenEvents: vi.fn(),
       onOpenComments: vi.fn(),
       onRetry: vi.fn(),
       onFork: vi.fn(),

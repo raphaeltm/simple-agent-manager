@@ -30,7 +30,7 @@ In the same change, make the existing infrastructure/GCP OAuth client configurab
 
 ### Prior incidents and guardrails
 
-- `tasks/active/2026-07-07-first-run-admin-setup-wizard.md` records the production-relevant `redirect_uri_mismatch` found when login and infrastructure Google clients shared one resolver. Regression coverage must prove runtime or environment configuration of either family cannot enable or alter the other.
+- `tasks/archive/2026-07-07-first-run-admin-setup-wizard.md` records the production-relevant `redirect_uri_mismatch` found when login and infrastructure Google clients shared one resolver. Regression coverage must prove runtime or environment configuration of either family cannot enable or alter the other.
 - `tasks/archive/2026-03-24-fix-gcp-oauth-static-callback.md` records that per-project Google redirect URIs made GCP setup unusable. Both infrastructure callbacks remain static: `/auth/google/callback` and `/api/deployment/gcp/callback`; entity context stays in OAuth state.
 - `.claude/rules/19-external-service-integration.md` requires a self-hoster walkthrough, exact callback/scopes, multi-tenant threat model, and official external constraints.
 - `.claude/rules/28-credential-resolution-fallback-tests.md` requires branch-complete credential fallback/rotation tests and an atomic per-principal rotation limiter. New service-account and infrastructure-secret mutation paths must not use KV read-modify-write as their security boundary.

@@ -3,7 +3,9 @@ import * as activity from './activity';
 import * as attention from './attention';
 import * as idleCleanup from './idle-cleanup';
 import * as messages from './messages';
+import { observeReconciliationMessage } from './reconciliation-episode';
 import * as sessionState from './session-state';
+import type { SessionIdentityGuard } from './sessions';
 import type { Env } from './types';
 
 const log = createModuleLogger('project_data.messages');
@@ -40,7 +42,8 @@ export async function persistMessageWithSideEffects(
   role: string,
   content: string,
   toolMetadata: string | null,
-  messageId?: string
+  messageId?: string,
+  guard?: SessionIdentityGuard | null
 ): Promise<string> {
   const result = messages.persistMessage(
     sql,
@@ -49,10 +52,41 @@ export async function persistMessageWithSideEffects(
     role,
     content,
     toolMetadata,
-    messageId
+    messageId,
+    guard
   );
   if (!result.inserted) return result.id;
 
+  await runPersistedMessageSideEffects(sql, env, hooks, sessionId, role, content, result);
+  return result.id;
+}
+
+export async function runPersistedMessageSideEffects(
+  sql: SqlStorage,
+  env: Env,
+  hooks: MessagePersistenceHooks,
+  sessionId: string,
+  role: string,
+  content: string,
+  result: {
+    id: string;
+    now: number;
+    sequence: number;
+    workspaceId: string | null;
+    toolMetadata: string | null;
+  }
+): Promise<void> {
+  const attentionResolution = resolveAttentionForRoles(sql, hooks, sessionId, [
+    { id: result.id, role },
+  ]);
+  observeReconciliationMessage(
+    sql,
+    env,
+    sessionId,
+    { id: result.id, role, content, toolMetadata: result.toolMetadata },
+    hooks.broadcastEvent
+  );
+  await attentionResolution;
   const idleReset = idleCleanup.resetIdleCleanup(sql, env, sessionId);
   if (idleReset.cleanupAt > 0) await hooks.recalculateAlarm();
 
@@ -66,7 +100,6 @@ export async function persistMessageWithSideEffects(
   }
 
   sessionState.refreshWorkingActivityForChatSession(sql, sessionId, result.now);
-  await resolveAttentionForRoles(sql, hooks, sessionId, [{ id: result.id, role }]);
 
   if (result.workspaceId) activity.updateMessageActivity(sql, result.workspaceId, sessionId);
   hooks.scheduleSummarySync();
@@ -88,7 +121,6 @@ export async function persistMessageWithSideEffects(
     },
     sessionId
   );
-  return result.id;
 }
 
 export async function persistMessageBatchWithSideEffects(
@@ -109,6 +141,15 @@ export async function persistMessageBatchWithSideEffects(
     };
   }
 
+  const attentionResolution = resolveAttentionForRoles(
+    sql,
+    hooks,
+    sessionId,
+    result.persistedMessages
+  );
+  for (const message of result.persistedMessages) {
+    observeReconciliationMessage(sql, env, sessionId, message, hooks.broadcastEvent);
+  }
   const idleReset = idleCleanup.resetIdleCleanup(sql, env, sessionId);
   if (idleReset.cleanupAt > 0) await hooks.recalculateAlarm();
 
@@ -130,7 +171,7 @@ export async function persistMessageBatchWithSideEffects(
     sessionState.refreshWorkingActivityForChatSession(sql, sessionId, latestMessageAt);
   }
 
-  await resolveAttentionForRoles(sql, hooks, sessionId, result.persistedMessages);
+  await attentionResolution;
 
   if (result.workspaceId) activity.updateMessageActivity(sql, result.workspaceId, sessionId);
   hooks.scheduleSummarySync();

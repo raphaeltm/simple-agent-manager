@@ -33,6 +33,14 @@ From the **Dashboard**, click **Import Project** and pick a repository that has 
 
 Open your project and type what you want done in the chat — for example, "add input validation to the signup form and write tests." SAM automatically provisions a workspace, runs your chosen agent, streams its progress back to you in real time, and opens a pull request when it's done.
 
+### 6. Come Back Later
+
+You don't have to watch the chat while the agent works. The **Dashboard** keeps an **Active Tasks** list across all your projects: your six most recently active tasks — ranked by their latest message, or by when they started if they have none yet — refreshed automatically.
+
+Each card shows the task's status, the project it belongs to, when you submitted it, and when its last message arrived. A dot shows where the task stands: **Active** or **Working** means it is starting up or its machine is running (Active if there was a message in the last 15 minutes), **Sleeping** means it is asleep and can be woken, and **Idle** means nothing is running for it right now. A running task isn't necessarily busy — a line below the project name shows its current step, such as **Waiting for follow-up...** when it's your turn. Select a card to open its chat.
+
+A sleeping conversation still counts as active — you can wake it for up to a week — which is why the list is ranked by recent messages rather than by start time: whatever you touched most recently stays on top, and dormant work drops off. The list only includes your own tasks that are queued or in progress: finished, cancelled, and failed tasks are left out (even a failed task whose chat you can still wake), and so are teammates' tasks in a shared project. Find those in the project's chat list. To hear when a task finishes or needs you, see [Notifications](/docs/guides/notifications/).
+
 That's the whole loop: **import → chat → review the PR.** No terminal or server setup required.
 
 ## Self-Hosting
@@ -50,7 +58,7 @@ To deploy your own SAM instance:
 1. **Fork** the [SAM repository](https://github.com/raphaeltm/simple-agent-manager)
 2. **Create a GitHub Environment** named `production` in your fork's Settings, then restrict its deployment branches and tags to the selected branch `main` only
 3. **Add the required secrets** — see the [Self-Hosting Guide](/docs/guides/self-hosting/) for the full list
-4. **Run Deploy Production** — in your fork, go to Actions → Deploy Production → Run workflow, choose `main`, and enter the exact 40-character commit SHA at that branch tip
+4. **Run Deploy Production** — in your fork, go to Actions → Deploy Production → Run workflow, choose `main`, and leave `target_commit_sha` empty (it deploys the current `main` tip)
 
 The deployment workflow:
 
@@ -60,7 +68,7 @@ The deployment workflow:
 - Runs database migrations
 - Verifies with a health check
 
-For future updates, sync upstream changes into your fork's `main` branch, then run **Deploy Production** again with the exact synced commit SHA. Pushing to `main` alone does not update a self-hosted instance.
+For future updates, run the **Update Self-Hosted Instance** workflow to automatically sync the latest upstream release and deploy, or manually sync your fork's `main` branch and run **Deploy Production** (SHA is optional and must be the current `main` tip when supplied). Pushing to `main` alone does not update a self-hosted instance.
 
 For detailed step-by-step instructions, see the [Self-Hosting Guide](/docs/guides/self-hosting/).
 

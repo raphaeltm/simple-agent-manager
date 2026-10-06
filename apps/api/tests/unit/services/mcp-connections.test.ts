@@ -21,7 +21,13 @@ import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 // 32 random bytes, base64 — the shape getCredentialEncryptionKey returns.
 const ENCRYPTION_KEY = Buffer.alloc(32, 7).toString('base64');
 
-const LIMITS = { maxPerScope: 25, urlMaxBytes: 2048, tokenMaxBytes: 8192 };
+const LIMITS = {
+  maxPerScope: 25,
+  urlMaxBytes: 2048,
+  tokenMaxBytes: 8192,
+  maxHeaders: 10,
+  headerValueMaxBytes: 8192,
+};
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -90,17 +96,12 @@ describe('createMcpConnection', () => {
     expect(created.name).toBe(expected);
   });
 
-  it.each([
-    'has space',
-    'has.dot',
-    'has/slash',
-    '-leading',
-    'trailing-',
-    'a'.repeat(33),
-    '',
-  ])('rejects unsafe name %j', async (name) => {
-    await expect(createMcpConnection(db, baseInput({ name }))).rejects.toThrow();
-  });
+  it.each(['has space', 'has.dot', 'has/slash', '-leading', 'trailing-', 'a'.repeat(33), ''])(
+    'rejects unsafe name %j',
+    async (name) => {
+      await expect(createMcpConnection(db, baseInput({ name }))).rejects.toThrow();
+    }
+  );
 
   it.each([
     ['plain http on a public host', 'http://evil.example.com/mcp'],
@@ -155,9 +156,7 @@ describe('createMcpConnection', () => {
       createMcpConnection(db, baseInput({ projectId: 'proj-2' }))
     ).resolves.toBeDefined();
     // A different user's personal scope is also independent.
-    await expect(
-      createMcpConnection(db, baseInput({ userId: 'user-2' }))
-    ).resolves.toBeDefined();
+    await expect(createMcpConnection(db, baseInput({ userId: 'user-2' }))).resolves.toBeDefined();
   });
 });
 
@@ -209,7 +208,9 @@ describe('scope isolation', () => {
       deleteMcpConnection(db, { userId: 'attacker', projectId: 'proj-attacker' }, victim.id)
     ).rejects.toThrow();
 
-    const count = sqlite.prepare('SELECT COUNT(*) AS n FROM mcp_connections').get() as { n: number };
+    const count = sqlite.prepare('SELECT COUNT(*) AS n FROM mcp_connections').get() as {
+      n: number;
+    };
     expect(count.n).toBe(1);
   });
 
@@ -240,14 +241,19 @@ describe('scope isolation', () => {
     expect(updated.enabled).toBe(false);
 
     await deleteMcpConnection(db, { userId: 'user-1', projectId: 'proj-1' }, mine.id);
-    const count = sqlite.prepare('SELECT COUNT(*) AS n FROM mcp_connections').get() as { n: number };
+    const count = sqlite.prepare('SELECT COUNT(*) AS n FROM mcp_connections').get() as {
+      n: number;
+    };
     expect(count.n).toBe(0);
   });
 
   // Project rows are shared project resources: any member's session must see them, not only
   // the member who created them.
   it('a project row created by one member is visible to another member', async () => {
-    await createMcpConnection(db, baseInput({ userId: 'creator', projectId: 'proj-1', name: 'shared' }));
+    await createMcpConnection(
+      db,
+      baseInput({ userId: 'creator', projectId: 'proj-1', name: 'shared' })
+    );
 
     const asOtherMember = await listMcpConnections(db, {
       userId: 'other-member',

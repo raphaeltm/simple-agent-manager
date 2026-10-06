@@ -61,6 +61,7 @@ Multiple cloud providers and UX improvements:
 - Voice input and text-to-speech playback.
 - Conversation forking.
 - Warm node pooling for fast workspace reuse.
+- Provider-native [compute pools](/docs/guides/compute-pools/) with per-pool placement strategy and exhaustion policy.
 - Custom devcontainer support.
 - File browsing, upload, and download.
 - Usage visibility for compute and SAM-managed AI.
@@ -89,6 +90,22 @@ Agent-first deployment environments:
 - Docker Compose release submission with SAM extensions and server-side image publishing.
 - Deployment logs, status, environment config, secrets, and safe named volume management.
 
+## Complete: Comments
+
+Threads that become agent context:
+
+- Comments on chat messages and project library files.
+- Comment inboxes for project-wide and session-scoped follow-up.
+- Agent replies and resolution through MCP tools.
+
+## Complete: Event Streams & Triggers
+
+Visible project automation:
+
+- Cron, GitHub, and authenticated webhook triggers.
+- One-off schedules and standing watches.
+- Agent event subscriptions and project activity streams.
+
 ## Planned: More Providers
 
 - AWS and expanded provider coverage.
@@ -98,6 +115,7 @@ Agent-first deployment environments:
 Shared project collaboration:
 
 - Project members with owner and admin roles.
+- Maintainer and viewer role enforcement foundation.
 - Invite links and access requests.
 - Member removal and ownership transfer flows with credential impact handling.
 
@@ -105,10 +123,14 @@ Shared project collaboration:
 
 - Billing integration.
 
+## Planned: Role Assignment for Project Members
+
+- User-facing controls for assigning maintainer and viewer roles.
+
 ## Future Considerations
 
 - VS Code Remote integration.
 - Collaborative editing.
-- Workspace snapshots and restore.
+- Longer-lived workspace snapshots and restore controls.
 - GPU instances for AI workloads.
 - Kubernetes-based workspaces.

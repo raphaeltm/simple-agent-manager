@@ -151,12 +151,7 @@ async function seedTheme(page: Page, theme: 'dark' | 'light') {
   }, theme);
 }
 
-async function gotoSession(
-  page: Page,
-  sessionId: string,
-  messages: unknown[],
-  topic: string,
-) {
+async function gotoSession(page: Page, sessionId: string, messages: unknown[], topic: string) {
   await setupProjectChatMocks(page, {
     projectId: PROJECT_ID,
     project: MOCK_PROJECT,
@@ -169,8 +164,10 @@ async function gotoSession(
     (route: Route) =>
       route.fulfill({
         status: 200,
-        json: { content: [{ type: 'content', content: { type: 'text', text: 'all tests passed' } }] },
-      }),
+        json: {
+          content: [{ type: 'content', content: { type: 'text', text: 'all tests passed' } }],
+        },
+      })
   );
   await page.goto(`/projects/${PROJECT_ID}/chat/${sessionId}`);
   await page.waitForTimeout(1200);
@@ -190,6 +187,9 @@ function runAudit(label: string, viewport: { width: number; height: number }, is
         await seedTheme(page, theme);
         await gotoSession(page, RICH_SESSION_ID, RICH_MESSAGES, 'Slice B rich conversation');
         await expectTheme(page, theme);
+        // Tool calls collapse into one activity card, so expand the group first
+        // to reach the per-call disclosure.
+        await page.getByRole('button', { name: /1 tool call/ }).click();
         await expect(page.getByText(TOOL_TITLE)).toBeVisible();
         // Expand the tool call to exercise the lazy-loaded content + gray ramp.
         const toolButton = page.getByRole('button', { name: TOOL_BUTTON_NAME });

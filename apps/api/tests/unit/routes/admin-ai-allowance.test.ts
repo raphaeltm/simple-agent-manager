@@ -69,7 +69,7 @@ describe('admin AI allowance routes — PUT /:userId', () => {
         body: JSON.stringify({
           maxDailyInputTokens: 1000,
           maxMonthlyCostCapUsd: 5,
-          allowedModelTiers: ['fast'],
+          allowedModelTiers: ['low-cost', 'standard'],
         }),
       },
       env
@@ -81,7 +81,7 @@ describe('admin AI allowance routes — PUT /:userId', () => {
       maxDailyInputTokens: 1000,
       maxDailyOutputTokens: null,
       maxMonthlyCostCapUsd: 5,
-      allowedModelTiers: ['fast'],
+      allowedModelTiers: ['low-cost', 'standard'],
       updatedBy: 'admin-1',
     });
 
@@ -142,20 +142,45 @@ describe('admin AI allowance routes — PUT /:userId', () => {
     expect(body.message).toBe('maxMonthlyCostCapUsd must be a non-negative number or null');
   });
 
-  it('rejects a non-array allowedModelTiers with the original message', async () => {
+  it.each([
+    ['a non-array', 'standard'],
+    ['an unknown tier name', ['frontier']],
+    ['a tier name with the wrong case', ['Premium']],
+    ['a mix of known and unknown names', ['standard', 'fast']],
+  ])('rejects %s allowedModelTiers without storing anything', async (_case, allowedModelTiers) => {
+    const env = bindings();
     const res = await app.request(
       '/api/admin/ai-allowance/user-1',
       {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ allowedModelTiers: 'fast' }),
+        body: JSON.stringify({ allowedModelTiers }),
       },
-      bindings()
+      env
     );
 
     expect(res.status).toBe(400);
     const body = (await res.json()) as { message: string };
-    expect(body.message).toBe('allowedModelTiers must be an array of strings or null');
+    expect(body.message).toBe(
+      'allowedModelTiers must be null or an array of: low-cost, standard, premium'
+    );
+    await expect(env.KV.get('ai-admin-allowance:user-1')).resolves.toBeNull();
+  });
+
+  it('accepts an empty tier list, which allows no platform model at all', async () => {
+    const res = await app.request(
+      '/api/admin/ai-allowance/user-1',
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ allowedModelTiers: [] }),
+      },
+      bindings()
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { allowance: { allowedModelTiers: string[] | null } };
+    expect(body.allowance.allowedModelTiers).toEqual([]);
   });
 
   it('accepts an explicit null for a nullable numeric field (unchanged edge case)', async () => {

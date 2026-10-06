@@ -66,6 +66,7 @@ interface MockTaskRow {
   started_at?: string | null;
   completed_at?: string | null;
   execution_step?: string | null;
+  terminal_transition_id?: string | null;
 }
 
 interface MockWorkspaceRow {
@@ -82,7 +83,19 @@ interface MockWorkspaceRow {
 
 function createMockD1(
   taskRows: Record<string, MockTaskRow> = {},
-  workspaceRows: Record<string, MockWorkspaceRow> = {}
+  workspaceRows: Record<string, MockWorkspaceRow> = {},
+  /**
+   * When set, the terminal-verdict sleep guard's `session_snapshots` lookup
+   * (`task-sleep-preservation.ts`) resolves to a preserving row.
+   *
+   * This is a WIRING fixture, not a predicate fixture: it deliberately ignores the
+   * query's `WHERE`, so it proves only that this runtime honours an inconclusive
+   * `_session_sleeping` verdict. The predicate itself — scoping, expiry, budget,
+   * the in-flight arm — is proven against a real SQL engine in
+   * `stuck-task-sleeping-conversation.test.ts` and `conversation-idle-timeout.test.ts`
+   * (`.claude/rules/28`).
+   */
+  sleepSnapshotRow: Record<string, unknown> | null = null
 ) {
   const runCalls: Array<{ query: string; args: unknown[] }> = [];
   const statusEvents: Array<Record<string, unknown>> = [];
@@ -130,12 +143,12 @@ function createMockD1(
   }
   async function runStatement(query: string, args: unknown[]) {
     runCalls.push({ query, args });
-    if (query.includes('UPDATE tasks') && query.includes('execution_step = NULL')) {
-      const taskId = args[6] as string;
-      const projectId = args[7] as string;
-      const fromStatus = args[8] as string;
-      const workspaceId = args[9] as string | null;
-      const chatSessionId = args[11] as string | null;
+    if (query.includes('UPDATE tasks') && query.includes('execution_step = ?')) {
+      const taskId = args[8] as string;
+      const projectId = args[9] as string;
+      const fromStatus = args[10] as string;
+      const workspaceId = args[11] as string | null;
+      const chatSessionId = args[13] as string | null;
       const row = richTaskRow(taskId);
       if (
         row &&
@@ -147,10 +160,12 @@ function createMockD1(
         taskRows[taskId] = {
           ...row,
           status: args[0] as string,
-          error_message: args[1] as string | null,
-          started_at: (row.started_at ?? args[3]) as string | null,
-          completed_at: args[4] as string,
-          execution_step: null,
+          error_message: args[2] as string | null,
+          started_at: (args[3] === 1 ? (row.started_at ?? args[4]) : (row.started_at ?? null)) as
+            string | null,
+          completed_at: args[5] as string,
+          execution_step: args[1] as string | null,
+          terminal_transition_id: args[6] as string,
         };
         return { success: true, meta: { changes: 1 } };
       }
@@ -159,7 +174,11 @@ function createMockD1(
     if (query.includes('INSERT INTO task_status_events')) {
       const taskId = args[7] as string;
       const row = richTaskRow(taskId);
-      if (row?.status === args[9] && row.completed_at === args[10]) {
+      if (
+        row?.status === args[9] &&
+        row.completed_at === args[10] &&
+        row.terminal_transition_id === args[11]
+      ) {
         statusEvents.push({
           task_id: taskId,
           from_status: args[1],
@@ -171,6 +190,17 @@ function createMockD1(
         return { success: true, meta: { changes: 1 } };
       }
       return { success: true, meta: { changes: 0 } };
+    }
+    if (query.includes('INSERT OR IGNORE INTO project_event_source_outbox')) {
+      const [taskId, projectId, transitionId] = args.slice(-3);
+      const row = richTaskRow(String(taskId));
+      return {
+        success: true,
+        meta: {
+          changes:
+            row?.project_id === projectId && row.terminal_transition_id === transitionId ? 1 : 0,
+        },
+      };
     }
     if (query.includes('UPDATE workspaces')) {
       const workspaceId = args[1] as string;
@@ -214,6 +244,9 @@ function createMockD1(
           }
           if (query.includes('FROM acp_sessions')) {
             return { id: `acp-${args[0]}` };
+          }
+          if (query.includes('FROM session_snapshots')) {
+            return sleepSnapshotRow;
           }
           return null;
         }),
@@ -325,9 +358,12 @@ describe('Task Reconciliation Module', () => {
 
   function envWithRows(
     taskRows: Record<string, MockTaskRow> = {},
-    workspaceRows: Record<string, MockWorkspaceRow> = {}
+    workspaceRows: Record<string, MockWorkspaceRow> = {},
+    sleepSnapshotRow: Record<string, unknown> | null = null
   ): ProjectDataEnv {
-    return { DATABASE: createMockD1(taskRows, workspaceRows) } as unknown as ProjectDataEnv;
+    return {
+      DATABASE: createMockD1(taskRows, workspaceRows, sleepSnapshotRow),
+    } as unknown as ProjectDataEnv;
   }
 
   async function candidatesForTask(taskMode: string, status: string) {
@@ -718,6 +754,23 @@ describe('Task Reconciliation Module', () => {
         action: 'cancel_prompt',
         promptStartedAt: now - TWO_HOURS - 1000,
       });
+    });
+
+    it('keeps a long prompt running while its runtime work is making progress', async () => {
+      setupTaskSession({ lastActivityAt: now - FIVE_MINUTES - 1000 });
+      setSessionActivity({ promptStartedAt: now - TWO_HOURS - 1000 });
+      db.prepare(
+        `UPDATE session_state SET runtime_work_state = 'active',
+          runtime_work_progress_at = ? WHERE session_id = 'acp-1'`
+      ).run(now - 6000);
+
+      const candidates = await getReconciliationCandidates(sql, {
+        ...envWithRows({ 'task-1': { task_mode: 'task', status: 'in_progress' } }),
+        TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS: String(THIRTY_MINUTES),
+        TASK_RECONCILIATION_PROMPT_HARD_STALL_MS: String(TWO_HOURS),
+      } as ProjectDataEnv);
+
+      expect(candidates[0]?.action).toBe('observe_prompt');
     });
 
     // REGRESSION (rule 50): session_state.activity_at has INTEGER affinity but
@@ -1214,6 +1267,53 @@ describe('Task Reconciliation Module', () => {
           .get<{ count: number }>()!.count
       ).toBe(1);
       expect(broadcastEvent.mock.calls.filter(([type]) => type === 'message.new')).toHaveLength(1);
+    });
+
+    /**
+     * `.claude/rules/61`: reconciliation is the THIRD terminalization runtime for
+     * the shared liveness verdict, and it has no choke point of its own — a
+     * conclusive-death verdict goes straight to `terminallyFailDeadTarget`. It
+     * needed no source change in this fix, inheriting the classifier's sleep
+     * escape through `getLocalTaskRuntimeLiveness`; this proves that inheritance
+     * rather than assuming it.
+     *
+     * Same fixture as the dead-node test below, plus a preserving sleep row.
+     */
+    it('preserves a sleeping session instead of failing a dead-node candidate', async () => {
+      setupTaskSession();
+      const env = envWithRows(
+        { 'task-1': { task_mode: 'task', status: 'in_progress' } },
+        {
+          'ws-1': {
+            node_id: 'node-1',
+            user_id: 'user-1',
+            project_id: 'project-1',
+            node_status: 'destroyed',
+            health_status: 'unhealthy',
+            last_heartbeat_at: null,
+          },
+        },
+        {
+          expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+          sleep_status: 'sleeping',
+          sleep_claimed_at: null,
+          sleep_stopping_since: null,
+          sleep_after: null,
+          updated_at: new Date().toISOString(),
+          created_at: new Date(Date.now() - 3_600_000).toISOString(),
+        }
+      );
+
+      const processed = await processReconciliationCandidates(sql, env, vi.fn(), {
+        projectId: 'project-1',
+      });
+
+      expect(processed).toBe(0);
+      // Liveness pairing: the session must still be there and untouched, not
+      // missing because the sweep never ran.
+      expect(
+        db.prepare(`SELECT status FROM chat_sessions WHERE id = 'session-1'`).get()
+      ).toMatchObject({ status: 'active' });
     });
 
     it('fails dead-node candidates without attempting VM delivery', async () => {

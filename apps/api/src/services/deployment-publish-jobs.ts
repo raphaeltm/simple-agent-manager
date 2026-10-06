@@ -2,6 +2,7 @@ import { and, asc, desc, eq, gt, sql } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
+import { redactCredentialTokens } from '../lib/credential-token-redaction';
 import { ulid } from '../lib/ulid';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
@@ -32,7 +33,10 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 export function sanitizePublishEventText(value: unknown, maxLength = MAX_MESSAGE_LENGTH): string {
-  let text = typeof value === 'string' ? value : String(value ?? '');
+  let text = redactCredentialTokens(
+    typeof value === 'string' ? value : String(value ?? ''),
+    '[redacted]'
+  );
   for (const pattern of SENSITIVE_PATTERNS) {
     text = text.replace(pattern, (_match, prefix, suffix) => {
       if (typeof prefix === 'string' && typeof suffix === 'string') {

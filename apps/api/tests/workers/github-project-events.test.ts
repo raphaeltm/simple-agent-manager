@@ -333,9 +333,9 @@ describe('GitHub ProjectData event producer', () => {
     });
   });
 
-  it('does not invent ProjectData producers for unsupported GitHub webhook events', async () => {
-    const { projectId } = await seedProjectGraph('unsupported', {
-      repository: 'acme/unsupported',
+  it('admits CI check run webhooks with commit and check correlation', async () => {
+    const { projectId } = await seedProjectGraph('check-run', {
+      repository: 'acme/check-run',
       githubRepoId: 9003,
     });
 
@@ -344,16 +344,192 @@ describe('GitHub ProjectData event producer', () => {
       eventType: 'check_run',
       payload: {
         action: 'completed',
-        repository: { id: 9003, full_name: 'acme/unsupported' },
+        sender: { id: 101, login: 'octocat', type: 'User' },
+        repository: {
+          id: 9003,
+          full_name: 'acme/check-run',
+          default_branch: 'main',
+          html_url: 'https://github.com/acme/check-run',
+        },
+        check_run: {
+          id: 123456,
+          name: 'ci / test',
+          status: 'completed',
+          conclusion: 'failure',
+          head_sha: 'abc123def456abc123def456abc123def456abcd',
+          html_url: 'https://github.com/acme/check-run/runs/123456',
+          details_url: 'https://github.com/acme/check-run/actions/runs/123456',
+          check_suite: { id: 78910 },
+          pull_requests: [
+            {
+              number: 42,
+              head: { ref: 'feature/checks', sha: 'abc123def456abc123def456abc123def456abcd' },
+              base: { ref: 'main' },
+              html_url: 'https://github.com/acme/check-run/pull/42',
+            },
+          ],
+          completed_at: '2026-08-28T13:00:00.000Z',
+        },
+      },
+      receivedAt: Date.parse('2026-08-28T13:00:01.000Z'),
+    });
+
+    expect(result.admittedEvents).toEqual([
+      expect.objectContaining({
+        projectId,
+        eventType: 'check_run.completed',
+        outcome: 'created',
+      }),
+    ]);
+    const status = await projectDataService.getProjectEventRecentStatus(testEnv, projectId);
+    expect(status.events[0]).toMatchObject({
+      source: 'github',
+      eventType: 'check_run.completed',
+      subject: { type: 'commit', id: 'abc123def456abc123def456abc123def456abcd' },
+      metadata: {
+        deliveryId: 'delivery-check-run',
+        repository: {
+          id: '9003',
+          fullName: 'acme/check-run',
+        },
+        checkRun: {
+          id: '123456',
+          name: 'ci / test',
+          status: 'completed',
+          conclusion: 'failure',
+          headSha: 'abc123def456abc123def456abc123def456abcd',
+          checkSuiteId: '78910',
+          pullRequests: ['42'],
+        },
+      },
+    });
+    expect(status.events[0]?.metadata).not.toHaveProperty('pullRequest');
+  });
+
+  it('distinguishes workflow run results for older and newer commit heads', async () => {
+    const { projectId } = await seedProjectGraph('workflow-run', {
+      repository: 'acme/workflow-run',
+      githubRepoId: 9004,
+    });
+
+    const workflowPayload = (headSha: string, runId: number) => ({
+      action: 'completed',
+      sender: { id: 101, login: 'octocat', type: 'User' },
+      repository: { id: 9004, full_name: 'acme/workflow-run', default_branch: 'main' },
+      workflow_run: {
+        id: runId,
+        name: 'CI',
+        run_number: runId - 1000,
+        run_attempt: 1,
+        status: 'completed',
+        conclusion: 'success',
+        event: 'pull_request',
+        head_branch: 'feature/workflows',
+        head_sha: headSha,
+        html_url: `https://github.com/acme/workflow-run/actions/runs/${runId}`,
+        workflow_id: 99,
+        check_suite_id: runId + 5000,
+        updated_at: '2026-08-28T14:00:00.000Z',
+      },
+      pull_request: {
+        number: 42,
+        head: { ref: 'feature/workflows', sha: headSha },
+        base: { ref: 'main' },
+      },
+    });
+
+    await admitGitHubWebhookProjectEvents(testEnv, {
+      deliveryId: 'delivery-workflow-old',
+      eventType: 'workflow_run',
+      payload: workflowPayload('oldsha0000000000000000000000000000000000', 2001),
+    });
+    await admitGitHubWebhookProjectEvents(testEnv, {
+      deliveryId: 'delivery-workflow-new',
+      eventType: 'workflow_run',
+      payload: workflowPayload('newsha0000000000000000000000000000000000', 2002),
+    });
+
+    const status = await projectDataService.getProjectEventRecentStatus(testEnv, projectId);
+    expect(status.events.map((event) => event.subject)).toEqual(
+      expect.arrayContaining([
+        { type: 'commit', id: 'oldsha0000000000000000000000000000000000' },
+        { type: 'commit', id: 'newsha0000000000000000000000000000000000' },
+      ])
+    );
+  });
+
+  it('admits pull request review comments with review commit correlation', async () => {
+    const { projectId } = await seedProjectGraph('review-comment', {
+      repository: 'acme/review-comment',
+      githubRepoId: 9005,
+    });
+
+    await admitGitHubWebhookProjectEvents(testEnv, {
+      deliveryId: 'delivery-review-comment',
+      eventType: 'pull_request_review_comment',
+      payload: {
+        action: 'created',
+        sender: { id: 101, login: 'octocat', type: 'User' },
+        repository: { id: 9005, full_name: 'acme/review-comment', default_branch: 'main' },
+        pull_request: {
+          number: 42,
+          state: 'open',
+          draft: false,
+          head: { ref: 'feature/review', sha: 'reviewheadsha' },
+          base: { ref: 'main' },
+          html_url: 'https://github.com/acme/review-comment/pull/42',
+        },
+        comment: {
+          id: 555,
+          path: 'src/app.ts',
+          commit_id: 'reviewcommitsha',
+          original_commit_id: 'originalcommitsha',
+          line: 12,
+          html_url: 'https://github.com/acme/review-comment/pull/42#discussion_r555',
+          body: 'SECURITY_CANARY_DO_NOT_PERSIST',
+          updated_at: '2026-08-28T15:00:00.000Z',
+        },
+      },
+    });
+
+    const status = await projectDataService.getProjectEventRecentStatus(testEnv, projectId);
+    expect(status.events[0]).toMatchObject({
+      eventType: 'pull_request_review_comment.created',
+      subject: { type: 'pull_request', id: '42' },
+      metadata: {
+        reviewComment: {
+          id: '555',
+          path: 'src/app.ts',
+          commitId: 'reviewcommitsha',
+          originalCommitId: 'originalcommitsha',
+          line: '12',
+        },
+      },
+    });
+    expect(JSON.stringify(status.events[0])).not.toContain('SECURITY_CANARY_DO_NOT_PERSIST');
+  });
+
+  it('does not invent ProjectData producers for unsupported GitHub webhook events', async () => {
+    const { projectId } = await seedProjectGraph('unsupported', {
+      repository: 'acme/unsupported',
+      githubRepoId: 9006,
+    });
+
+    const result = await admitGitHubWebhookProjectEvents(testEnv, {
+      deliveryId: 'delivery-deployment-status',
+      eventType: 'deployment_status',
+      payload: {
+        action: 'created',
+        repository: { id: 9006, full_name: 'acme/unsupported' },
       },
     });
 
     expect(result).toEqual({
       processed: false,
-      deliveryId: 'delivery-check-run',
-      eventType: 'check_run',
+      deliveryId: 'delivery-deployment-status',
+      eventType: 'deployment_status',
       admittedEvents: [],
-      reason: 'unsupported_event_type:check_run',
+      reason: 'unsupported_event_type:deployment_status',
     });
     const status = await projectDataService.getProjectEventRecentStatus(testEnv, projectId);
     expect(status.events).toHaveLength(0);

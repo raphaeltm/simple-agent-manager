@@ -13,6 +13,7 @@ const MINIMAL_TOOL_METADATA_KEYS = [
   'title',
   'kind',
   'status',
+  'toolName',
   'name',
   'tool',
   'exitCode',
@@ -81,6 +82,7 @@ function serializeWithinLimit(value: unknown, maxBytes: number): string {
     title: isScalarJsonValue(record.title) ? record.title : undefined,
     kind: isScalarJsonValue(record.kind) ? record.kind : undefined,
     status: isScalarJsonValue(record.status) ? record.status : undefined,
+    toolName: isScalarJsonValue(record.toolName) ? record.toolName : undefined,
     contentSize: isScalarJsonValue(record.contentSize) ? record.contentSize : undefined,
   });
   return utf8Bytes(serialized) <= maxBytes

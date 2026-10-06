@@ -1,5 +1,23 @@
 # Pre-existing credential-route hardening (surfaced during Vultr review)
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:**
+>   - The five hardcoded has-cloud-provider chains now share one helper,
+>     `hasByocComputeCredential` (`packages/shared/src/constants/providers.ts:189`), used by
+>     `OnboardingChecklist.tsx:49`, `CreateWorkspace.tsx:166`, `useProjectChatState.ts:139` and
+>     `useSetupStatus.ts:48` (PR #1670, b012fb838).
+>   - `AdminPlatformCredentials` form labels now use `htmlFor`/`id`
+>     (`AdminPlatformCredentials.tsx:240-312`; PR #1670).
+> - **Still open:**
+>   - Rate limiting: `POST /api/credentials/validate` and `POST /api/credentials` are still not
+>     wrapped in `rateLimitCredentialUpdate` (`apps/api/src/routes/credentials.ts:294,309`).
+>   - GCP gate: the helper still excludes GCP by design, and `providers.ts:169-172` points to this
+>     file for that decision.
+>   - LOWs: `v.maxLength` on the raw-token schemas (`apps/api/src/schemas/credentials.ts:8-22`);
+>     the local `PROVIDER_LABELS` copy (`AdminPlatformCredentials.tsx:22`, still `gcp: 'GCP'`);
+>     the "Testing..." label during save (`SingleTokenCredentialForm.tsx:60` and siblings).
+
 **Filed by:** the Vultr provider PR (`sam/implement-vultr-fourth-cloud-qf96ez`). These are **pre-existing, cross-provider** findings from the Vultr specialist review — NOT regressions introduced by Vultr. Vultr just extended the same (unchanged) code paths, so the reviewers flagged them at the natural moment. Deferred per rule 25 (MEDIUM, pre-existing) to keep the Vultr PR scoped; captured here so they aren't lost.
 
 ## Findings to address

@@ -237,6 +237,34 @@ describe('SamSession DO — Search', () => {
     expect(body.results[0]!.role).toBe('user');
   });
 
+  it('keeps LIKE escape expansion within SQLite pattern limits', async () => {
+    const stub = getSamSession('test-user-search-like-escape-budget');
+    const literalPrefix = '%'.repeat(24);
+    const chatResp = await stub.fetch('https://sam-session/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        message: `${literalPrefix} literal percent signs`,
+        userId: 'test-user-search-like-escape-budget',
+      }),
+    });
+    expect(chatResp.status).toBe(200);
+    await chatResp.text();
+
+    const searchResp = await stub.fetch(
+      `https://sam-session/search?query=${encodeURIComponent('%'.repeat(100))}`
+    );
+    expect(searchResp.status).toBe(200);
+    const body = (await searchResp.json()) as {
+      results: Array<{ snippet: string }>;
+      query: string;
+      queryTruncated: boolean;
+    };
+    expect(body.query).toBe(literalPrefix);
+    expect(body.queryTruncated).toBe(true);
+    expect(body.results[0]?.snippet).toContain(literalPrefix);
+  });
+
   it('respects search limit parameter', async () => {
     const stub = getSamSession('test-user-search-limit');
 

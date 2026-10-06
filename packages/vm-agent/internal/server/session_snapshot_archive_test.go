@@ -495,15 +495,7 @@ func TestCreateWIPBundleFiltersOversizedStagedIndex(t *testing.T) {
 	}
 
 	runGit(t, repo, "reset", "--hard", base)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		f, openErr := os.Open(bundlePath)
-		if openErr != nil {
-			http.Error(w, openErr.Error(), http.StatusInternalServerError)
-			return
-		}
-		defer f.Close()
-		_, _ = io.Copy(w, f)
-	}))
+	server := serveSnapshotBundle(t, bundlePath)
 	defer server.Close()
 
 	s := &Server{config: &config.Config{ControlPlaneURL: server.URL}}
@@ -555,15 +547,7 @@ func TestDownloadAndRestoreWIPRestoresLegacySingleRefBundle(t *testing.T) {
 	runGit(t, repo, "reset", "--hard", base)
 	_ = os.Remove(filepath.Join(repo, "new.txt"))
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		f, openErr := os.Open(bundlePath)
-		if openErr != nil {
-			http.Error(w, openErr.Error(), http.StatusInternalServerError)
-			return
-		}
-		defer f.Close()
-		_, _ = io.Copy(w, f)
-	}))
+	server := serveSnapshotBundle(t, bundlePath)
 	defer server.Close()
 
 	s := &Server{config: &config.Config{ControlPlaneURL: server.URL}}

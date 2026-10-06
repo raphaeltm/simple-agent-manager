@@ -39,8 +39,13 @@ describe('compute quota pipeline', () => {
     resolve(process.cwd(), 'src/services/placement-resolver.ts'),
     'utf8'
   );
+  // Per-field resolvers (credential lookup policy included) split out of placement-resolver.ts.
+  const placementFieldResolution = readFileSync(
+    resolve(process.cwd(), 'src/services/placement-field-resolution.ts'),
+    'utf8'
+  );
   const nodeStepsFile = readFileSync(
-    resolve(process.cwd(), 'src/durable-objects/task-runner/node-steps.ts'),
+    resolve(process.cwd(), 'src/durable-objects/task-runner/node-provisioning-gates.ts'),
     'utf8'
   );
   const nodesRoute = readFileSync(resolve(process.cwd(), 'src/routes/nodes.ts'), 'utf8');
@@ -285,7 +290,7 @@ describe('compute quota pipeline', () => {
       expect(placementResolver).toContain('credentialLookup.userId');
       expect(placementResolver).toContain('credentialLookup.provider');
       expect(placementResolver).toContain('credentialLookup.projectId');
-      expect(placementResolver).toContain("'current-project-unless-inherited'");
+      expect(placementFieldResolution).toContain("'current-project-unless-inherited'");
     });
 
     it('enforces quota only when credential source is platform', () => {
@@ -346,17 +351,17 @@ describe('compute quota pipeline', () => {
   // Quota Enforcement: Manual Node Creation
   // ===========================================================================
   describe('quota enforcement at manual node creation', () => {
-    it('uses resolveCredentialSource for credential resolution', () => {
-      expect(nodesRoute).toContain('resolveCredentialSource');
+    it('uses canonical allocation credential attribution', () => {
+      expect(nodesRoute).toContain('resolveCanonicalVmAllocationPlan');
     });
 
     it('enforces quota when credential source is platform', () => {
-      expect(nodesRoute).toContain("credResult.credentialSource === 'platform'");
+      expect(nodesRoute).toContain("allocation.quotaCredentialSource === 'platform'");
     });
 
     it('checks quota before creating node record', () => {
       // resolveCredentialSource and checkQuotaForUser appear before createNodeRecord
-      const resolveIdx = nodesRoute.indexOf('resolveCredentialSource');
+      const resolveIdx = nodesRoute.indexOf('await resolveCanonicalVmAllocationPlan');
       const quotaIdx = nodesRoute.indexOf('checkQuotaForUser');
       const createIdx = nodesRoute.indexOf('createNodeRecord(c.env');
       expect(resolveIdx).toBeLessThan(createIdx);
@@ -451,7 +456,7 @@ describe('compute quota pipeline', () => {
       expect(submitRoute).toContain('resolveTaskStartPlacementCredentialAttributionFromPlacement');
       expect(placementResolver).toContain('resolveCredentialSource');
       expect(nodeStepsFile).toContain('resolveCredentialSource');
-      expect(nodesRoute).toContain('resolveCredentialSource');
+      expect(nodesRoute).toContain('resolveCanonicalVmAllocationPlan');
       expect(dispatchToolFile).toContain(
         'resolveTaskStartPlacementCredentialAttributionFromPlacement'
       );

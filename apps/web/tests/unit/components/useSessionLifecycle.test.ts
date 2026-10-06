@@ -1,12 +1,15 @@
 /**
  * Behavioral tests for useSessionLifecycle loading semantics:
- * - Initial load requests the FULL conversation (CHAT_SESSION_MESSAGE_MAX ceiling).
- * - The 3s poll requests only the small recent window (CHAT_SESSION_MESSAGE_LIMIT).
- * - loadUntil() pages backward until a target timestamp is covered (the timeline
- *   jump fallback for oversized/guard-trimmed sessions), and short-circuits when
- *   the target is already loaded or there is no more history.
+ * - Initial load requests only the newest page (CHAT_SESSION_MESSAGE_LIMIT), never
+ *   the CHAT_SESSION_MESSAGE_MAX ceiling; older history pages in on demand.
+ * - The fallback poll requests the same small newest window.
+ * - loadUntil() pages backward until a jump target is loaded, and short-circuits
+ *   when the target is already loaded or there is no more history.
  */
-import { DEFAULT_CHAT_SESSION_MESSAGE_MAX } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
+  DEFAULT_CHAT_SESSION_MESSAGE_MAX,
+} from '@simple-agent-manager/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
@@ -26,7 +29,12 @@ const mocks = vi.hoisted(() => ({
   startVerifyDecayTimer: vi.fn(),
   stopVerifyDecayTimer: vi.fn(),
   connectionState: 'connected' as 'connected' | 'disconnected',
-  wsOptions: [] as Array<{ enabled: boolean }>,
+  wsOptions: [] as Array<{
+    enabled: boolean;
+    onMessage?: (msg: Msg) => void;
+    onAgentActivity?: (activity: 'prompting' | 'idle', promptStartedAt?: number | null) => void;
+    onCatchUp?: (messages: Msg[], session: unknown, state?: unknown) => void;
+  }>,
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
@@ -43,7 +51,7 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
 }));
 
 vi.mock('../../../src/hooks/useChatWebSocket', () => ({
-  useChatWebSocket: (options: { enabled: boolean }) => {
+  useChatWebSocket: (options: { enabled: boolean; onMessage?: (msg: Msg) => void }) => {
     // Capture the options so tests can assert on `enabled`. The socket gate is
     // production behavior worth pinning: it decides whether wake-progress
     // broadcasts can reach the client at all.
@@ -91,6 +99,7 @@ vi.mock('../../../src/components/project-message-view/types', async (importOrigi
 
 import { useSessionLifecycle } from '../../../src/components/project-message-view/useSessionLifecycle';
 import { chatQueryKeys } from '../../../src/lib/query-options';
+import { CHAT_TRANSCRIPT_CACHE_MAX_SESSIONS } from '../../../src/lib/query-persist-config';
 
 type Msg = {
   id: string;
@@ -99,8 +108,10 @@ type Msg = {
   content: string;
   toolMetadata: null;
   createdAt: number;
+  sequence?: number;
 };
 
+/** A server-persisted row; the server always assigns a sequence. */
 function msg(id: string, createdAt: number): Msg {
   return {
     id,
@@ -109,7 +120,13 @@ function msg(id: string, createdAt: number): Msg {
     content: `m-${id}`,
     toolMetadata: null,
     createdAt,
+    sequence: createdAt,
   };
+}
+
+/** A row the client appended before the server echoed it: no sequence, client-clock time. */
+function optimisticMsg(id: string, createdAt: number): Msg {
+  return { ...msg(id, createdAt), sequence: undefined };
 }
 
 function sessionResponse(status: string) {
@@ -157,6 +174,16 @@ function detailWithWorkspace() {
       workspaceId: 'ws-1',
     },
   };
+}
+
+function deferred<T>() {
+  let resolve: (value: T) => void = () => {};
+  let reject: (reason?: unknown) => void = () => {};
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
 }
 
 function workspaceResponse(nodeId: string | null = 'node-1') {
@@ -219,17 +246,22 @@ describe('useSessionLifecycle loading semantics', () => {
     expect(mocks.wsOptions.every((o) => o.enabled === false)).toBe(true);
   });
 
-  it('requests the FULL conversation (max ceiling) on initial load', async () => {
-    mocks.getChatSession.mockResolvedValue(detail([msg('a', 1000)], false));
+  it('requests only the newest page on initial load, never the ceiling', async () => {
+    mocks.getChatSession.mockResolvedValue(detail([msg('a', 1000)], true));
 
-    renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), { wrapper });
-
-    await waitFor(() => {
-      expect(mocks.getChatSession).toHaveBeenCalledWith('proj-1', 'sess-1', {
-        signal: expect.any(AbortSignal),
-        limit: DEFAULT_CHAT_SESSION_MESSAGE_MAX,
-      });
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
     });
+
+    await waitFor(() => expect(result.current.messages.map((m) => m.id)).toEqual(['a']));
+    expect(mocks.getChatSession).toHaveBeenCalledTimes(1);
+    expect(mocks.getChatSession).toHaveBeenCalledWith('proj-1', 'sess-1', {
+      signal: expect.any(AbortSignal),
+      limit: DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
+    });
+    expect(DEFAULT_CHAT_SESSION_MESSAGE_LIMIT).toBeLessThan(DEFAULT_CHAT_SESSION_MESSAGE_MAX);
+    // Older history is still there to page in.
+    expect(result.current.hasMore).toBe(true);
   });
 
   it('delta-fetches after the newest cached message and merges cached plus new rows', async () => {
@@ -246,8 +278,139 @@ describe('useSessionLifecycle loading semantics', () => {
     );
     expect(mocks.getChatSession).toHaveBeenCalledWith('proj-1', 'sess-1', {
       signal: expect.any(AbortSignal),
-      after: 1000,
+      after: '[1000,1000,"cached"]',
     });
+  });
+
+  it('refreshes a fresh cached transcript on mount within query staleTime', async () => {
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 15_000 } },
+    });
+    const queryKey = chatQueryKeys.sessionMessages('user-1', 'proj-1', 'sess-1');
+    queryClient.setQueryData(queryKey, detail([msg('cached', 1000)], false));
+    mocks.getChatSession.mockResolvedValue(detail([msg('persisted-while-closed', 2000)], false));
+
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+
+    expect(result.current.messages.map((m) => m.id)).toEqual(['cached']);
+    await waitFor(() =>
+      expect(result.current.messages.map((m) => m.id)).toEqual(['cached', 'persisted-while-closed'])
+    );
+    expect(mocks.getChatSession).toHaveBeenCalledWith('proj-1', 'sess-1', {
+      signal: expect.any(AbortSignal),
+      after: '[1000,1000,"cached"]',
+    });
+  });
+
+  it('keeps a WebSocket message that arrives while the mount refresh is in flight', async () => {
+    const queryKey = chatQueryKeys.sessionMessages('user-1', 'proj-1', 'sess-1');
+    queryClient.setQueryData(queryKey, detail([msg('cached', 1000)], false));
+    const refresh = deferred<ReturnType<typeof detail>>();
+    mocks.getChatSession.mockReturnValueOnce(refresh.promise);
+
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+
+    await waitFor(() => expect(mocks.getChatSession).toHaveBeenCalled());
+    act(() => {
+      mocks.wsOptions.at(-1)?.onMessage?.(msg('ws-during-refresh', 2500));
+    });
+    await waitFor(() =>
+      expect(result.current.messages.map((m) => m.id)).toEqual(['cached', 'ws-during-refresh'])
+    );
+
+    await act(async () => {
+      refresh.resolve(detail([msg('server-refresh', 2000)], false));
+      await refresh.promise;
+    });
+
+    await waitFor(() =>
+      expect(result.current.messages.map((m) => m.id)).toEqual([
+        'cached',
+        'server-refresh',
+        'ws-during-refresh',
+      ])
+    );
+  });
+
+  it('anchors the refresh on the newest persisted row, never on a trailing optimistic one', async () => {
+    const queryKey = chatQueryKeys.sessionMessages('user-1', 'proj-1', 'sess-1');
+    // The optimistic row carries the client's clock, which runs ahead of the server's.
+    queryClient.setQueryData(
+      queryKey,
+      detail([msg('cached', 1000), optimisticMsg('optimistic-sent', 9000)], false)
+    );
+    mocks.getChatSession.mockResolvedValue(detail([msg('persisted-before-clock', 2000)], false));
+
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+
+    await waitFor(() =>
+      expect(result.current.messages.map((m) => m.id)).toContain('persisted-before-clock')
+    );
+    expect(mocks.getChatSession).toHaveBeenCalledWith('proj-1', 'sess-1', {
+      signal: expect.any(AbortSignal),
+      after: '[1000,1000,"cached"]',
+    });
+  });
+
+  it('keeps a working agent working when a streamed row lands after the load-time snapshot', async () => {
+    // The chat loaded while the agent was idle. Every streamed row rewrites the
+    // transcript's cache entry; re-applying that load-time `idle` snapshot on each
+    // one knocked a working agent back to idle mid-turn.
+    const idleAtLoad = detail([msg('a', 1000)], false, 'active');
+    mocks.getChatSession.mockResolvedValue(idleAtLoad);
+    const queryKey = chatQueryKeys.sessionMessages('user-1', 'proj-1', 'sess-1');
+
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+    await waitFor(() => expect(result.current.session?.status).toBe('active'));
+    expect(result.current.agentActivity).toBe('idle');
+
+    const socket = mocks.wsOptions.at(-1)!;
+    act(() => socket.onAgentActivity?.('prompting', Date.now()));
+    act(() => socket.onMessage?.({ ...msg('streamed', 2000), role: 'assistant' }));
+    await waitFor(() =>
+      expect(queryClient.getQueryData<{ messages: Msg[] }>(queryKey)?.messages).toHaveLength(2)
+    );
+    await waitFor(() => expect(result.current.messages.map((m) => m.id)).toContain('streamed'));
+    expect(result.current.agentActivity).toBe('responding');
+
+    // Control: a snapshot the SERVER reports is still applied.
+    mocks.getChatSession.mockResolvedValue({
+      ...detail([], false, 'active'),
+      state: { ...idleAtLoad.state, activityAt: idleAtLoad.state.activityAt + 1 },
+    });
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey });
+    });
+    await waitFor(() => expect(result.current.agentActivity).toBe('idle'));
+  });
+
+  it('drains every newer page before merging, keeping hasMore for older history', async () => {
+    const queryKey = chatQueryKeys.sessionMessages('user-1', 'proj-1', 'sess-1');
+    queryClient.setQueryData(queryKey, detail([msg('cached', 1000)], true));
+    mocks.getChatSession
+      .mockResolvedValueOnce(detail([msg('first', 2000)], true))
+      .mockResolvedValueOnce(detail([msg('second', 3000)], false));
+
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+
+    await waitFor(() =>
+      expect(result.current.messages.map((m) => m.id)).toEqual(['cached', 'first', 'second'])
+    );
+    expect(mocks.getChatSession).toHaveBeenNthCalledWith(2, 'proj-1', 'sess-1', {
+      signal: expect.any(AbortSignal),
+      after: '[2000,2000,"first"]',
+    });
+    expect(result.current.hasMore).toBe(true);
   });
 
   describe('fallback poll visibility gating', () => {
@@ -303,6 +466,134 @@ describe('useSessionLifecycle loading semantics', () => {
         expect(mocks.getChatSession.mock.calls.length).toBeGreaterThan(callsWhenHidden)
       );
     });
+  });
+
+  it('drains forward instead of leaving a gap when fallback poll recent window starts after the loaded tail', async () => {
+    mocks.connectionState = 'disconnected';
+    const initial = detail([msg('loaded-tail', 1000)], false, 'active');
+    const recentWindow = detail([msg('recent-window', 4000)], false, 'active');
+    const drainedForward = detail(
+      [msg('gap-1', 2000), msg('gap-2', 3000), msg('recent-window', 4000)],
+      false,
+      'active'
+    );
+    mocks.getChatSession
+      .mockResolvedValueOnce(initial)
+      .mockResolvedValueOnce(recentWindow)
+      .mockResolvedValue(drainedForward);
+
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+
+    await waitFor(() =>
+      expect(result.current.messages.map((m) => m.id)).toEqual([
+        'loaded-tail',
+        'gap-1',
+        'gap-2',
+        'recent-window',
+      ])
+    );
+    expect(mocks.getChatSession).toHaveBeenCalledWith('proj-1', 'sess-1', {
+      signal: expect.any(AbortSignal),
+      after: '[1000,1000,"loaded-tail"]',
+    });
+  });
+
+  it('keeps a socket row that lands while a reconnect catch-up drains a gap', async () => {
+    mocks.getChatSession.mockResolvedValueOnce(detail([msg('loaded-tail', 1000)], false, 'active'));
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+    await waitFor(() => expect(result.current.messages.map((m) => m.id)).toEqual(['loaded-tail']));
+
+    // The socket reconnects. Its catch-up window starts after the loaded tail, so
+    // the gap between them drains forward first — and that read is still out.
+    const drain = deferred<ReturnType<typeof detail>>();
+    mocks.getChatSession.mockReturnValueOnce(drain.promise);
+    const socket = mocks.wsOptions.at(-1)!;
+    act(() => {
+      socket.onCatchUp?.([msg('recent-window', 4000)], sessionResponse('active'), null);
+    });
+    await waitFor(() =>
+      expect(mocks.getChatSession).toHaveBeenLastCalledWith('proj-1', 'sess-1', {
+        signal: undefined,
+        after: '[1000,1000,"loaded-tail"]',
+      })
+    );
+
+    act(() => socket.onMessage?.(msg('live', 5000)));
+    await waitFor(() => expect(result.current.messages.map((m) => m.id)).toContain('live'));
+
+    await act(async () => {
+      drain.resolve(
+        detail(
+          [msg('gap-1', 2000), msg('gap-2', 3000), msg('recent-window', 4000)],
+          false,
+          'active'
+        )
+      );
+      await drain.promise;
+    });
+    await waitFor(() =>
+      expect(result.current.messages.map((m) => m.id)).toEqual([
+        'loaded-tail',
+        'gap-1',
+        'gap-2',
+        'recent-window',
+        'live',
+      ])
+    );
+  });
+
+  it('trims the cached transcripts to the most recently used when a chat opens', async () => {
+    const otherChat = (n: number) => chatQueryKeys.sessionMessages('user-1', 'proj-1', `other-${n}`);
+    for (let n = 1; n <= CHAT_TRANSCRIPT_CACHE_MAX_SESSIONS + 1; n += 1) {
+      queryClient.setQueryData(otherChat(n), detail([msg(`o${n}`, n)], false), { updatedAt: n });
+    }
+    mocks.getChatSession.mockResolvedValue(detail([msg('a', 1000)], false, 'active'));
+
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+    await waitFor(() => expect(result.current.messages.map((m) => m.id)).toEqual(['a']));
+
+    // One chat over the limit: the least recently used goes, the rest and the
+    // chat being opened stay.
+    expect(queryClient.getQueryData(otherChat(1))).toBeUndefined();
+    for (let n = 2; n <= CHAT_TRANSCRIPT_CACHE_MAX_SESSIONS + 1; n += 1) {
+      expect(queryClient.getQueryData(otherChat(n))).toBeDefined();
+    }
+    expect(
+      queryClient.getQueryData(chatQueryKeys.sessionMessages('user-1', 'proj-1', 'sess-1'))
+    ).toBeDefined();
+  });
+
+  it('recovers from a failed older-page load, so the reader can try again', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mocks.getChatSession.mockResolvedValueOnce(
+      detail([msg('b', 2000), msg('c', 3000)], true, 'active')
+    );
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+    await waitFor(() => expect(result.current.messages.map((m) => m.id)).toEqual(['b', 'c']));
+
+    mocks.getChatSession.mockRejectedValueOnce(new Error('network down'));
+    await act(async () => {
+      await result.current.loadMore();
+    });
+    expect(result.current.loadingMore).toBe(false);
+    expect(result.current.hasMore).toBe(true);
+    expect(result.current.messages.map((m) => m.id)).toEqual(['b', 'c']);
+
+    mocks.getChatSession.mockResolvedValueOnce(detail([msg('a', 1000)], false, 'active'));
+    await act(async () => {
+      await result.current.loadMore();
+    });
+    await waitFor(() => expect(result.current.messages.map((m) => m.id)).toEqual(['a', 'b', 'c']));
+    expect(result.current.hasMore).toBe(false);
+    warn.mockRestore();
   });
 
   it('rehydrates a plan-only state change between fallback polls', async () => {
@@ -392,9 +683,13 @@ describe('useSessionLifecycle loading semantics', () => {
       ...sleeping,
       session: {
         ...sleeping.session,
-        task: {
-          id: 'recovery-task-1',
-          status: 'failed' as const,
+        attention: {
+          markerId: 'marker-1',
+          kind: 'wake_failed',
+          createdAt: Date.now(),
+          expiresAt: null,
+          reason: 'wake_refused',
+          options: [],
         },
       },
     };
@@ -528,7 +823,7 @@ describe('useSessionLifecycle loading semantics', () => {
       mocks.getChatSession.mockClear();
 
       await act(async () => {
-        await result.current.loadUntil(700);
+        await result.current.loadUntil({ timestamp: 700 });
       });
 
       // Oldest loaded is 500 <= 700 → nothing to fetch.
@@ -544,7 +839,7 @@ describe('useSessionLifecycle loading semantics', () => {
       mocks.getChatSession.mockClear();
 
       await act(async () => {
-        await result.current.loadUntil(200);
+        await result.current.loadUntil({ timestamp: 200 });
       });
 
       // Target (200) predates the loaded window, but hasMore=false → no fetch.

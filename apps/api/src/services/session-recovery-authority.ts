@@ -1,12 +1,33 @@
+import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { taskStatusIsNonTerminalSql, TERMINAL_STATUS_VALUES } from './task-status';
 
 const TERMINAL_TASK_STATUSES_SQL = "'completed', 'failed', 'cancelled'";
 const LIVE_TASK_STATUSES_SQL = "'queued', 'delegated', 'in_progress', 'awaiting_followup'";
+
+export interface ProjectEventWakeRecoveryGuard {
+  batchId: string;
+  subscriptionId: string;
+}
 
 export interface SessionRecoverySourceTaskGuard {
   taskId: string;
   projectId: string;
   chatSessionId: string;
+  projectEventWake?: ProjectEventWakeRecoveryGuard | null;
+  /** Pre-materialization event guard; after admission projectEventWake supplies this requirement. */
+  requireSourceProjectMember?: boolean;
+  requiredProjectMemberId?: string | null;
+}
+
+/** Event subscriptions retain source task identity, never a caller-supplied user identity. */
+export function sourceProjectMemberAuthoritySql(): string {
+  return `AND EXISTS (
+    SELECT 1 FROM project_members event_member JOIN users event_user ON event_user.id = event_member.user_id
+    WHERE event_member.project_id = source.project_id AND event_member.user_id = source.user_id
+      AND event_member.status = 'active' AND event_user.status = 'active'
+      AND event_member.role IN ('owner','admin','maintainer')
+  )`;
 }
 
 export class SessionRecoveryAuthorityRevokedError extends Error {
@@ -61,6 +82,21 @@ export async function isSessionRecoverySourceTaskGuardValid(
                  AND owner.status NOT IN (${TERMINAL_TASK_STATUSES_SQL})
             )
           )
+          ${
+            guard.requireSourceProjectMember || guard.projectEventWake
+              ? sourceProjectMemberAuthoritySql()
+              : ''
+          }
+          ${
+            guard.requiredProjectMemberId
+              ? `AND EXISTS (
+            SELECT 1 FROM project_members m JOIN users u ON u.id = m.user_id
+            WHERE m.project_id = source.project_id AND m.user_id = ?
+              AND m.status = 'active' AND u.status = 'active'
+              AND m.role IN ('owner','admin','maintainer')
+          )`
+              : ''
+          }
         LIMIT 1`
     )
     .bind(
@@ -68,7 +104,8 @@ export async function isSessionRecoverySourceTaskGuardValid(
       guard.projectId,
       guard.chatSessionId,
       guard.chatSessionId,
-      guard.chatSessionId
+      guard.chatSessionId,
+      ...(guard.requiredProjectMemberId ? [guard.requiredProjectMemberId] : [])
     )
     .first<{ id: string }>();
   return Boolean(row);
@@ -84,9 +121,12 @@ export async function isSessionRecoveryTaskAuthorized(
   database: D1Database,
   input: {
     recoveryTaskId: string;
+    recoveryAttemptId?: string | null;
     sourceTaskId: string;
     projectId: string;
     chatSessionId: string;
+    requiredProjectMemberId?: string | null;
+    projectEventWake?: ProjectEventWakeRecoveryGuard | null;
   }
 ): Promise<boolean> {
   const row = await database
@@ -94,30 +134,135 @@ export async function isSessionRecoveryTaskAuthorized(
       `SELECT recovery.id
          FROM tasks recovery
          JOIN tasks source
-           ON source.id = recovery.recovery_source_task_id
+           ON source.id = ?
+          AND (source.id = recovery.id OR source.id = recovery.recovery_source_task_id)
           AND source.project_id = recovery.project_id
          JOIN session_snapshots snapshot
            ON snapshot.chat_session_id = recovery.chat_session_id
           AND snapshot.project_id = recovery.project_id
           AND snapshot.recovery_task_id = recovery.id
         WHERE recovery.id = ?
-          AND recovery.recovery_source_task_id = ?
           AND recovery.project_id = ?
           AND recovery.chat_session_id = ?
-          AND recovery.triggered_by = 'session-recovery'
+          AND (source.id = recovery.id OR recovery.triggered_by = 'session-recovery')
           AND recovery.status NOT IN (${TERMINAL_TASK_STATUSES_SQL})
+          AND (? IS NULL OR snapshot.recovery_attempt_id = ?)
           AND (
             (recovery.status = 'in_progress' AND snapshot.recovery_status = 'restored')
             OR (
-              source.status NOT IN (${TERMINAL_TASK_STATUSES_SQL})
-              AND snapshot.recovery_status IN ('waking', 'restored')
+              snapshot.recovery_status IN ('waking', 'restored')
+              AND (
+                source.status NOT IN (${TERMINAL_TASK_STATUSES_SQL})
+                OR (
+                  source.status = 'cancelled'
+                  AND source.superseded_by_task_id = recovery.id
+                )
+              )
             )
           )
+          ${input.projectEventWake ? sourceProjectMemberAuthoritySql() : ''}
+          ${
+            input.requiredProjectMemberId
+              ? `AND EXISTS (
+            SELECT 1 FROM project_members m JOIN users u ON u.id = m.user_id
+            WHERE m.project_id = recovery.project_id AND m.user_id = ?
+              AND m.status = 'active' AND u.status = 'active'
+              AND m.role IN ('owner','admin','maintainer')
+          )`
+              : ''
+          }
         LIMIT 1`
     )
-    .bind(input.recoveryTaskId, input.sourceTaskId, input.projectId, input.chatSessionId)
+    .bind(
+      input.sourceTaskId,
+      input.recoveryTaskId,
+      input.projectId,
+      input.chatSessionId,
+      input.recoveryAttemptId ?? null,
+      input.recoveryAttemptId ?? null,
+      ...(input.requiredProjectMemberId ? [input.requiredProjectMemberId] : [])
+    )
     .first<{ id: string }>();
   return Boolean(row);
+}
+
+/** A stable task ID cannot distinguish old alarms from the current wake claim. */
+export async function isSessionRecoveryAttemptCurrent(
+  database: D1Database,
+  input: { taskId: string; projectId: string; chatSessionId: string; recoveryAttemptId: string }
+): Promise<boolean> {
+  const row = await database
+    .prepare(
+      `SELECT id FROM session_snapshots
+      WHERE chat_session_id = ? AND project_id = ?
+        AND recovery_task_id = ? AND recovery_attempt_id = ?
+      LIMIT 1`
+    )
+    .bind(input.chatSessionId, input.projectId, input.taskId, input.recoveryAttemptId)
+    .first<{ id: string }>();
+  return Boolean(row);
+}
+
+export interface SessionRecoveryTaskAuthorityInput {
+  recoveryAttemptId?: string | null;
+  requiredProjectMemberId?: string | null;
+  recoveryTaskId: string;
+  sourceTaskId: string;
+  projectId: string;
+  chatSessionId: string;
+  projectEventWake?: ProjectEventWakeRecoveryGuard | null;
+}
+
+export interface ProjectEventWakeAuthorityInput extends ProjectEventWakeRecoveryGuard {
+  projectId: string;
+  chatSessionId: string;
+  sourceTaskId: string;
+}
+
+type ValidateProjectEventWakeAuthority = (
+  input: ProjectEventWakeAuthorityInput
+) => Promise<boolean>;
+
+/** A successful event RPC cannot preserve a D1 claim revoked while it awaited. */
+export async function isSessionRecoveryTaskAndEventAuthorized(
+  database: D1Database,
+  input: SessionRecoveryTaskAuthorityInput,
+  validateEvent?: ValidateProjectEventWakeAuthority
+): Promise<boolean> {
+  if (!(await isSessionRecoveryTaskAuthorized(database, input))) return false;
+  if (!input.projectEventWake) return true;
+  if (!validateEvent) return false;
+  const eventAuthorized = await validateEvent({
+    projectId: input.projectId,
+    chatSessionId: input.chatSessionId,
+    sourceTaskId: input.sourceTaskId,
+    batchId: input.projectEventWake.batchId,
+    subscriptionId: input.projectEventWake.subscriptionId,
+  });
+  if (!eventAuthorized) return false;
+  return isSessionRecoveryTaskAuthorized(database, input);
+}
+
+/** Check both durable authorities inside the container before starting or submitting. */
+export async function isSessionRecoverySourceTaskGuardFullyValidForEnv(
+  env: Env,
+  guard: SessionRecoverySourceTaskGuard
+): Promise<boolean> {
+  if (!(await isSessionRecoverySourceTaskGuardValid(env.DATABASE, guard))) return false;
+  if (!guard.projectEventWake) return true;
+  const projectData = await import('./project-data');
+  const eventAuthorized = await projectData.validateProjectEventWakeRecoveryAuthority(
+    env,
+    guard.projectId,
+    {
+      chatSessionId: guard.chatSessionId,
+      sourceTaskId: guard.taskId,
+      batchId: guard.projectEventWake.batchId,
+      subscriptionId: guard.projectEventWake.subscriptionId,
+    }
+  );
+  if (!eventAuthorized) return false;
+  return isSessionRecoverySourceTaskGuardValid(env.DATABASE, guard);
 }
 
 /**
@@ -211,12 +356,41 @@ export async function failAndRestoreSessionRecoveryHandoff(
   const results = await database.batch([
     database
       .prepare(
+        `INSERT INTO task_status_events
+           (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)
+         SELECT ?, task.id, task.status, 'failed', 'system', NULL, ?, ?
+           FROM tasks task
+          WHERE task.id = ?
+            AND task.recovery_source_task_id IS NOT NULL
+            AND ${taskStatusIsNonTerminalSql('task.status')}
+            AND EXISTS (
+              SELECT 1 FROM session_snapshots snapshot
+               WHERE snapshot.chat_session_id = ?
+                 AND snapshot.recovery_task_id = task.id
+                 AND snapshot.recovery_status = 'waking'
+            )`
+      )
+      .bind(
+        input.statusEventId,
+        input.error,
+        now,
+        input.recoveryTaskId,
+        ...TERMINAL_STATUS_VALUES,
+        input.chatSessionId
+      ),
+    database
+      .prepare(
         `UPDATE tasks
             SET status = 'failed', execution_step = NULL, chat_session_id = NULL,
                 error_message = ?, completed_at = ?, updated_at = ?
           WHERE id = ?
             AND recovery_source_task_id IS NOT NULL
-            AND status NOT IN ('completed', 'cancelled')
+            AND ${taskStatusIsNonTerminalSql()}
+            AND EXISTS (
+              SELECT 1 FROM task_status_events event
+               WHERE event.id = ? AND event.task_id = tasks.id
+                 AND event.to_status = 'failed'
+            )
             AND EXISTS (
               SELECT 1 FROM session_snapshots snapshot
                WHERE snapshot.chat_session_id = ?
@@ -224,7 +398,16 @@ export async function failAndRestoreSessionRecoveryHandoff(
                  AND snapshot.recovery_status = 'waking'
             )`
       )
-      .bind(input.error, now, now, input.recoveryTaskId, input.chatSessionId, input.recoveryTaskId),
+      .bind(
+        input.error,
+        now,
+        now,
+        input.recoveryTaskId,
+        ...TERMINAL_STATUS_VALUES,
+        input.statusEventId,
+        input.chatSessionId,
+        input.recoveryTaskId
+      ),
     database
       .prepare(
         `UPDATE tasks
@@ -233,6 +416,11 @@ export async function failAndRestoreSessionRecoveryHandoff(
                 updated_at = ?
           WHERE id = (SELECT recovery_source_task_id FROM tasks WHERE id = ?)
             AND chat_session_id IS NULL
+            AND EXISTS (
+              SELECT 1 FROM task_status_events event
+               WHERE event.id = ? AND event.task_id = ?
+                 AND event.to_status = 'failed'
+            )
             AND EXISTS (
               SELECT 1 FROM tasks recovery
                WHERE recovery.id = ?
@@ -246,6 +434,8 @@ export async function failAndRestoreSessionRecoveryHandoff(
       .bind(
         input.chatSessionId,
         now,
+        input.recoveryTaskId,
+        input.statusEventId,
         input.recoveryTaskId,
         input.recoveryTaskId,
         input.chatSessionId
@@ -262,6 +452,11 @@ export async function failAndRestoreSessionRecoveryHandoff(
           )
             AND chat_session_id IS NULL
             AND EXISTS (
+              SELECT 1 FROM task_status_events event
+               WHERE event.id = ? AND event.task_id = ?
+                 AND event.to_status = 'failed'
+            )
+            AND EXISTS (
               SELECT 1 FROM tasks recovery
                WHERE recovery.id = ?
                  AND recovery.status = 'failed'
@@ -276,37 +471,34 @@ export async function failAndRestoreSessionRecoveryHandoff(
         now,
         input.chatSessionId,
         input.recoveryTaskId,
+        input.statusEventId,
+        input.recoveryTaskId,
         input.recoveryTaskId,
         input.chatSessionId
       ),
     database
       .prepare(
+        // `recovery_failed_at` is the anchor the wake attempt budget decays from
+        // (`session-snapshot-recovery-budget.ts`). This is the SECOND writer of
+        // `recovery_status = 'failed'`; omitting it here would leave the anchor
+        // NULL, which the budget predicate deliberately fails closed on, and a
+        // session that failed three kickoffs through this path would be stranded
+        // exactly as the 2026-09-09 incident stranded four.
         `UPDATE session_snapshots
             SET recovery_status = 'failed', recovery_error = ?,
-                recovery_claimed_at = NULL, updated_at = ?
+                recovery_claimed_at = NULL, recovery_failed_at = ?, updated_at = ?
           WHERE chat_session_id = ?
             AND recovery_task_id = ?
+            AND EXISTS (
+              SELECT 1 FROM task_status_events event
+               WHERE event.id = ? AND event.task_id = recovery_task_id
+                 AND event.to_status = 'failed'
+            )
             AND recovery_status = 'waking'`
       )
-      .bind(input.error, now, input.chatSessionId, input.recoveryTaskId),
-    database
-      .prepare(
-        `INSERT INTO task_status_events
-           (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)
-         SELECT ?, task.id, 'queued', 'failed', 'system', NULL, ?, ?
-           FROM tasks task
-          WHERE task.id = ?
-            AND task.status = 'failed'
-            AND NOT EXISTS (
-              SELECT 1 FROM task_status_events event
-               WHERE event.task_id = task.id
-                 AND event.to_status = 'failed'
-                 AND event.reason = ?
-            )`
-      )
-      .bind(input.statusEventId, input.error, now, input.recoveryTaskId, input.error),
+      .bind(input.error, now, now, input.chatSessionId, input.recoveryTaskId, input.statusEventId),
   ]);
-  if ((results[0]?.meta.changes ?? 0) === 0) {
+  if ((results[0]?.meta.changes ?? 0) === 0 || (results[1]?.meta.changes ?? 0) === 0) {
     throw new Error('Recovery start failure lost its authoritative snapshot claim');
   }
   log.warn('session_recovery.start_failure_restored', {

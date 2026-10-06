@@ -169,8 +169,8 @@ func TestPromptTimeoutConvergesToErrorAndSingleFatalCallback(t *testing.T) {
 		t.Fatal("prompt was not accepted")
 	}
 	host.setStatus(HostPrompting, "")
-	host.triggerPromptForceStopIfStuck(attempt.id, "hard deadline")
-	host.triggerPromptForceStopIfStuck(attempt.id, "late process exit")
+	host.triggerPromptForceStopIfStuck(attempt, "hard deadline")
+	host.triggerPromptForceStopIfStuck(attempt, "late process exit")
 	if host.Status() != HostError {
 		t.Fatalf("status = %s, want error", host.Status())
 	}
@@ -228,7 +228,7 @@ func TestCheckpointRolloverGracefulAndForcedStrictResume(t *testing.T) {
 			host.setSessionIDLocked("acp-session-1")
 			host.agentSupportsLoadSession = true
 			host.mu.Unlock()
-			go host.monitorProcessExit(context.Background(), oldProc, "openai-codex", &agentCredential{credentialKind: "api-key"}, nil)
+			go host.monitorProcessExit(oldProc, "openai-codex", &agentCredential{credentialKind: "api-key"}, nil)
 
 			grace := 50 * time.Millisecond
 			if tc.forced {
@@ -288,7 +288,7 @@ func TestCheckpointRolloverStrictResumeFailureIsExplicit(t *testing.T) {
 	host.process, host.acpConn, host.status = oldProc, conn, HostPrompting
 	host.agentType, host.sessionID, host.agentSupportsLoadSession = "openai-codex", "same-session", true
 	host.mu.Unlock()
-	go host.monitorProcessExit(context.Background(), oldProc, "openai-codex", &agentCredential{credentialKind: "api-key"}, nil)
+	go host.monitorProcessExit(oldProc, "openai-codex", &agentCredential{credentialKind: "api-key"}, nil)
 
 	ctx, deadlineCancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer deadlineCancel()
@@ -344,7 +344,7 @@ func TestCheckpointTerminalOwnershipSuppressesDelayedProcessExitRestart(t *testi
 			host.process, host.acpConn, host.status = oldProc, conn, HostPrompting
 			host.agentType, host.sessionID, host.agentSupportsLoadSession = "openai-codex", "same-session", true
 			host.mu.Unlock()
-			go host.monitorProcessExit(context.Background(), oldProc, "openai-codex", &agentCredential{credentialKind: "api-key"}, nil)
+			go host.monitorProcessExit(oldProc, "openai-codex", &agentCredential{credentialKind: "api-key"}, nil)
 
 			ctx, cancel := context.WithTimeout(context.Background(), tc.deadline)
 			defer cancel()

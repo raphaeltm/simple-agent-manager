@@ -1,5 +1,10 @@
 # Instant chat start renders as "Provisioning VM (1/4)"
 
+> **Reconciliation 2026-09-30:** still open; the symptom changed. The API maps the unknown
+> `instant_persistence` step to null (`apps/api/src/lib/mappers.ts:230`), so the header now reads
+> "Starting..." while the stage grid still marks "Provisioning VM" as the current stage
+> (`ProvisioningIndicator.tsx:30-35`; restore effect at `useProjectChatState.ts:525-558`).
+
 ## Problem
 
 `POST /api/projects/:projectId/sessions/start` writes `executionStep: 'instant_persistence'`

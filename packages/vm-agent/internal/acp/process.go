@@ -11,6 +11,8 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -401,18 +403,20 @@ func startDockerExecProcess(cfg ProcessConfig) (*AgentProcess, error) {
 }
 
 func startLocalProcess(cfg ProcessConfig) (*AgentProcess, error) {
-	cmd := exec.Command(cfg.AcpCommand, cfg.AcpArgs...)
-	cmd.Env = mergeProcessEnv(os.Environ(), cfg.EnvVars)
 	if cfg.WorkDir != "" {
 		// In standalone (cf-container) mode the vm-agent owns the local
 		// filesystem and there is no devcontainer to create the workspace
 		// mount, so the configured work dir (derived as /workspaces/<repo>)
-		// may not exist. Create it before exec — otherwise Go's forkExec
-		// chdir fails with ENOENT, which is misreported as
-		// "fork/exec <binary>: no such file or directory" (the binary is fine).
+		// may not exist. Create it before resolving or starting the adapter.
 		if err := os.MkdirAll(cfg.WorkDir, 0o755); err != nil {
 			return nil, fmt.Errorf("failed to ensure local work dir %q: %w", cfg.WorkDir, err)
 		}
+	}
+	processEnv := mergeProcessEnv(os.Environ(), cfg.EnvVars)
+	command := resolveLocalProcessCommand(cfg.AcpCommand, processEnv)
+	cmd := exec.Command(command, cfg.AcpArgs...)
+	cmd.Env = processEnv
+	if cfg.WorkDir != "" {
 		cmd.Dir = cfg.WorkDir
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -464,6 +468,32 @@ func startLocalProcess(cfg ProcessConfig) (*AgentProcess, error) {
 		stopTimeout:     stopTimeout,
 		waitDone:        make(chan struct{}),
 	}, nil
+}
+
+func resolveLocalProcessCommand(command string, envVars []string) string {
+	if command == "" || strings.ContainsRune(command, os.PathSeparator) {
+		return command
+	}
+	pathValue := ""
+	for _, entry := range envVars {
+		if key, value, ok := strings.Cut(entry, "="); ok && key == "PATH" {
+			pathValue = value
+		}
+	}
+	for _, dir := range filepath.SplitList(pathValue) {
+		// Keep Go's ErrDot protection: profile runtime environments may select
+		// an explicit absolute adapter directory, but an empty or relative PATH
+		// entry must never make a repository executable implicit authority.
+		if !filepath.IsAbs(dir) {
+			continue
+		}
+		candidate := filepath.Join(dir, command)
+		info, err := os.Stat(candidate)
+		if err == nil && !info.IsDir() && info.Mode().Perm()&0o111 != 0 {
+			return candidate
+		}
+	}
+	return command
 }
 
 func mergeProcessEnv(ambient, overrides []string) []string {
@@ -625,18 +655,31 @@ func (p *AgentProcess) killContainerProcesses(sig syscall.Signal) {
 
 	// Kill the ACP adapter process and all its children inside the container.
 	// Using pkill with -f matches the full command line.
-	cmd := exec.CommandContext(ctx, "docker", "exec", p.containerID,
-		"pkill", fmt.Sprintf("-%s", sigName), "-f", p.agentType)
-	if err := cmd.Run(); err != nil {
-		// Exit code 1 means no processes matched — that's fine, they already exited.
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
-			slog.Debug("No container processes matched for kill", "signal", sigName, "pattern", p.agentType)
+	patterns := containerProcessKillPatterns(p.agentType)
+	for _, pattern := range patterns {
+		cmd := exec.CommandContext(ctx, "docker", "exec", p.containerID,
+			"pkill", fmt.Sprintf("-%s", sigName), "-f", pattern)
+		if err := cmd.Run(); err != nil {
+			// Exit code 1 means no processes matched — that's fine, they already exited.
+			if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+				slog.Debug("No container processes matched for kill", "signal", sigName, "pattern", pattern)
+			} else {
+				slog.Warn("Failed to kill container processes", "signal", sigName, "pattern", pattern, "error", err)
+			}
 		} else {
-			slog.Warn("Failed to kill container processes", "signal", sigName, "pattern", p.agentType, "error", err)
+			slog.Info("Sent signal to container processes", "signal", sigName, "pattern", pattern, "container", p.containerID)
 		}
-	} else {
-		slog.Info("Sent signal to container processes", "signal", sigName, "pattern", p.agentType, "container", p.containerID)
 	}
+}
+
+func containerProcessKillPatterns(command string) []string {
+	if command == codexC2ReleaseRoot+"/current/bin/codex-acp" {
+		// The reviewed wrapper execs Node and its paired CLI through the real
+		// release directory, so neither process retains the wrapper path.
+		base := codexC2ReleaseRoot + "/releases/" + codexC2ReleaseIdentity + "/payload/"
+		return []string{regexp.QuoteMeta(base + "adapter.js"), regexp.QuoteMeta(base + "codex")}
+	}
+	return []string{command}
 }
 
 // Wait waits for the agent process to exit and returns the error (if any).

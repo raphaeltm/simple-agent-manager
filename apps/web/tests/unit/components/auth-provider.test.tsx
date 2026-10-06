@@ -2,15 +2,26 @@ import type { ProjectSummary } from '@simple-agent-manager/shared';
 import { QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { clear as idbClear, get as idbGet, keys as idbKeys, set as idbSet } from 'idb-keyval';
+import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AuthProvider, useAuth } from '../../../src/components/AuthProvider';
+import {
+  SessionDraftsProvider,
+  useSessionDraft,
+} from '../../../src/components/project-message-view/session-drafts';
+import { ProtectedRoute } from '../../../src/components/ProtectedRoute';
 import { GITHUB_REAUTH_REQUIRED_EVENT } from '../../../src/lib/api/client';
 import { queryClient } from '../../../src/lib/query-client';
-import { projectQueryKeys } from '../../../src/lib/query-options';
+import {
+  chatQueryKeys,
+  chatSessionMessagesQueryOptions,
+  projectQueryKeys,
+} from '../../../src/lib/query-options';
 import {
   buildQueryPersistStorageKey,
   QUERY_PERSIST_SCHEMA_VERSION,
+  RESTORED_QUERY_GC_TIME_MS,
 } from '../../../src/lib/query-persistence';
 
 const {
@@ -113,12 +124,28 @@ function ScopedProjectCacheConsumer() {
   );
 }
 
+const PERSISTED_ROW = 'Persisted transcript row';
+const transcriptRenderLog: string[] = [];
+
+/** Reads a chat transcript from the query cache the way the chat view does, minus the network. */
+function TranscriptCacheConsumer() {
+  const { user } = useAuth();
+  const { data } = useQuery({
+    ...chatSessionMessagesQueryOptions(user?.id ?? '', 'project-1', 'session-1'),
+    enabled: false,
+  });
+  const text = data?.messages[0]?.content ?? 'none';
+  transcriptRenderLog.push(text);
+  return <span data-testid="transcript">{text}</span>;
+}
+
 describe('AuthProvider', () => {
   beforeEach(() => {
     queryClient.clear();
     clearQueryCacheSpy.mockClear();
     vi.clearAllMocks();
     cacheRenderLog.length = 0;
+    transcriptRenderLog.length = 0;
   });
 
   // NOTE: an authenticated render is asynchronous. AuthProvider gates children
@@ -391,6 +418,60 @@ describe('AuthProvider', () => {
     expect(mockResetAuthRevoked).toHaveBeenCalledOnce();
   });
 
+  it("discards one account's unsent chat drafts before the next account renders", async () => {
+    // Drafts live in memory inside the signed-in subtree (`SessionDraftsProvider`
+    // sits in the chat view, under `ProtectedRoute`), which an account switch
+    // unmounts.
+    function DraftComposer() {
+      const draft = useSessionDraft('session-1');
+      return (
+        <textarea
+          aria-label="Chat draft"
+          value={draft.text}
+          onChange={(event) => draft.setText(event.target.value)}
+        />
+      );
+    }
+    const tree = () => (
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <AuthProvider>
+            <ProtectedRoute>
+              <SessionDraftsProvider>
+                <DraftComposer />
+              </SessionDraftsProvider>
+            </ProtectedRoute>
+          </AuthProvider>
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+    mockUseSession.mockReturnValue({
+      data: validSession,
+      isPending: false,
+      error: null,
+      isRefetching: false,
+    });
+    const { rerender } = render(tree());
+    fireEvent.change(await screen.findByLabelText('Chat draft'), {
+      target: { value: 'u1 private plan' },
+    });
+    expect(screen.getByLabelText('Chat draft')).toHaveValue('u1 private plan');
+
+    mockUseSession.mockReturnValue({
+      data: {
+        ...validSession,
+        user: { ...validSession.user, id: 'u2', email: 'other@test.com', name: 'Other User' },
+      },
+      isPending: false,
+      error: null,
+      isRefetching: false,
+    });
+    rerender(tree());
+
+    // The composer is back for the next account, and empty.
+    await waitFor(() => expect(screen.getByLabelText('Chat draft')).toHaveValue(''));
+  });
+
   it('never renders the previous user query cache during a direct account switch', async () => {
     mockUseSession.mockReturnValue({
       data: validSession,
@@ -558,6 +639,107 @@ describe('AuthProvider', () => {
       // `u1:none` frame.
       expect(cacheRenderLog[0]).toBe(`u1:${PRIVATE_PROJECT.name}`);
       expect(cacheRenderLog).not.toContain('u1:none');
+    });
+
+    it('shows a persisted chat transcript only once the session check has resolved', async () => {
+      const transcriptKey = chatQueryKeys.sessionMessages('u1', 'project-1', 'session-1');
+      // A second chat the user has not reopened since the reload.
+      const unopenedKey = chatQueryKeys.sessionMessages('u1', 'project-1', 'session-2');
+      const persistedTranscript = (
+        key: readonly unknown[],
+        sessionId: string,
+        content: string
+      ) => ({
+        queryKey: key,
+        queryHash: JSON.stringify(key),
+        state: {
+          data: {
+            session: { id: sessionId, topic: 'Cached chat', status: 'active' },
+            messages: [
+              {
+                id: `${sessionId}-m1`,
+                sessionId,
+                role: 'user',
+                content,
+                toolMetadata: null,
+                createdAt: 1,
+                sequence: 1,
+              },
+            ],
+            hasMore: false,
+            state: null,
+          },
+          dataUpdateCount: 1,
+          dataUpdatedAt: Date.now(),
+          error: null,
+          errorUpdateCount: 0,
+          errorUpdatedAt: 0,
+          fetchFailureCount: 0,
+          fetchFailureReason: null,
+          fetchMeta: null,
+          isInvalidated: false,
+          status: 'success',
+          fetchStatus: 'idle',
+        },
+      });
+      await idbSet(buildQueryPersistStorageKey('user:u1')!, {
+        timestamp: Date.now(),
+        buster: QUERY_PERSIST_SCHEMA_VERSION,
+        clientState: {
+          mutations: [],
+          queries: [
+            persistedTranscript(transcriptKey, 'session-1', PERSISTED_ROW),
+            persistedTranscript(unopenedKey, 'session-2', 'A chat not reopened yet'),
+          ],
+        },
+      });
+      const tree = () => (
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <AuthProvider>
+              <ProtectedRoute>
+                <TranscriptCacheConsumer />
+              </ProtectedRoute>
+            </AuthProvider>
+          </MemoryRouter>
+        </QueryClientProvider>
+      );
+
+      // A slow cold start: the session check has not answered yet.
+      mockUseSession.mockReturnValue({
+        data: null,
+        isPending: true,
+        error: null,
+        isRefetching: false,
+      });
+      const { rerender } = render(tree());
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+      expect(screen.getByRole('status', { name: 'Verifying your session' })).toBeInTheDocument();
+      expect(screen.queryByText(PERSISTED_ROW)).not.toBeInTheDocument();
+      expect(transcriptRenderLog).not.toContain(PERSISTED_ROW);
+
+      mockUseSession.mockReturnValue({
+        data: validSession,
+        isPending: false,
+        error: null,
+        isRefetching: false,
+      });
+      rerender(tree());
+
+      // Once it answers, the cached transcript is there on the chat's first frame.
+      expect(await screen.findByText(PERSISTED_ROW)).toBeInTheDocument();
+      expect(transcriptRenderLog[0]).toBe(PERSISTED_ROW);
+      // A restored chat nobody has reopened yet keeps the retention window. The
+      // five-minute default would drop it from memory, and then from disk, before
+      // the user came back to it.
+      expect(queryClient.getQueryCache().find({ queryKey: unopenedKey })?.getObserversCount()).toBe(
+        0
+      );
+      expect(queryClient.getQueryCache().find({ queryKey: unopenedKey })?.gcTime).toBe(
+        RESTORED_QUERY_GC_TIME_MS
+      );
     });
 
     it("never hydrates one user's persisted record into another user's session", async () => {

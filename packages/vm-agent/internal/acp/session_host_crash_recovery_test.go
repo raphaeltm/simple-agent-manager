@@ -294,7 +294,7 @@ func TestSessionHost_RecoveryNotifyOnceDoesNotWrapLaterNormalPrompt(t *testing.T
 		if err == nil || err.Error() != "rapid exit" {
 			t.Fatalf("first recovery err = %v, want rapid exit", err)
 		}
-	default:
+	case <-time.After(time.Second):
 		t.Fatal("missing recovery error")
 	}
 	assertNoSecondCompletion(t, completed)
@@ -444,7 +444,7 @@ func startRecoveryMonitor(t *testing.T, host *SessionHost, oldProc *fakeAgentPro
 	host.config.StartProcess = startProcess
 	completed := make(chan string, 2)
 	host.config.OnPromptComplete = func(stopReason string, _ error) { completed <- stopReason }
-	go host.monitorProcessExit(context.Background(), oldProc, agentType, &agentCredential{credentialKind: "api-key"}, nil)
+	go host.monitorProcessExit(oldProc, agentType, &agentCredential{credentialKind: "api-key"}, nil)
 	return completed
 }
 

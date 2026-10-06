@@ -1,4 +1,9 @@
+import { createHash } from 'node:crypto';
+
 const encoder = new TextEncoder();
+
+/** Separator `canonicalizeArchiveRows` joins rows with; the streaming hasher must emit the same byte. */
+const ARCHIVE_ROW_SEPARATOR = '\u001d';
 
 export function compareArchiveStrings(left: string, right: string): number {
   if (left < right) return -1;
@@ -45,13 +50,17 @@ export function canonicalizeArchiveRows(
   columns: readonly string[],
   rows: readonly Record<string, unknown>[]
 ): string {
-  return rows.map((row) => canonicalizeArchiveRow(columns, row)).join('\u001d');
+  return rows.map((row) => canonicalizeArchiveRow(columns, row)).join(ARCHIVE_ROW_SEPARATOR);
 }
 
 export function byteLength(value: string): number {
   return encoder.encode(value).byteLength;
 }
 
+/**
+ * One-shot SHA-256 over a whole string. `createCanonicalRowsHasher` below must stay
+ * byte-identical to `sha256Hex(canonicalizeArchiveRows(...))`; change them together.
+ */
 export async function sha256Hex(value: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', encoder.encode(value));
   return Array.from(new Uint8Array(digest))
@@ -63,5 +72,83 @@ export async function canonicalRowsSha256(
   columns: readonly string[],
   rows: readonly Record<string, unknown>[]
 ): Promise<string> {
-  return sha256Hex(canonicalizeArchiveRows(columns, rows));
+  const hasher = createCanonicalRowsHasher(columns);
+  for (const row of rows) hasher.update(row);
+  return hasher.digestHex();
+}
+
+export type CanonicalRowsHasher = {
+  /** Feed one row. Rows must arrive in the table's total `orderBy` order. */
+  update(row: Record<string, unknown>): void;
+  /** Rows fed so far. */
+  readonly rowCount: number;
+  /** Finalize. The hasher cannot be reused afterwards. */
+  digestHex(): string;
+};
+
+export type CanonicalRowsChainHasher = {
+  update(row: Record<string, unknown>): void;
+  readonly rowCount: number;
+  readonly digestHex: string;
+};
+
+const CANONICAL_CHAIN_SEED = createHash('sha256')
+  .update('project-data-archive-canonical-chain-v1', 'utf8')
+  .digest('hex');
+
+/**
+ * A resumable canonical-row commitment. Each row replaces the persisted digest
+ * with SHA-256(previous hex + row separator + canonical row). Unlike a native
+ * streaming hash, the current digest can be stored at a durable page boundary.
+ */
+export function createCanonicalRowsChainHasher(
+  columns: readonly string[],
+  state: { digestHex?: string | null; rowCount?: number | null } = {}
+): CanonicalRowsChainHasher {
+  let digestHex = state.digestHex ?? CANONICAL_CHAIN_SEED;
+  let rowCount = state.rowCount ?? 0;
+  return {
+    get rowCount() {
+      return rowCount;
+    },
+    get digestHex() {
+      return digestHex;
+    },
+    update(row) {
+      digestHex = createHash('sha256')
+        .update(digestHex, 'utf8')
+        .update(ARCHIVE_ROW_SEPARATOR, 'utf8')
+        .update(canonicalizeArchiveRow(columns, row), 'utf8')
+        .digest('hex');
+      rowCount++;
+    },
+  };
+}
+
+/**
+ * Incremental equivalent of `canonicalRowsSha256`.
+ *
+ * Produces the byte-identical SHA-256 of `canonicalizeArchiveRows(columns, rows)` while
+ * holding only one canonical row in memory at a time. `canonicalRowsSha256` encodes the
+ * joined string with `TextEncoder` (UTF-8); `Hash.update(string, 'utf8')` encodes the
+ * same code points the same way, so feeding each row plus the join separator yields the
+ * same digest. Terminal-version proofs recorded by the one-shot definition therefore stay
+ * valid for sessions hashed page by page (see `computeTerminalVersion`).
+ */
+export function createCanonicalRowsHasher(columns: readonly string[]): CanonicalRowsHasher {
+  const hash = createHash('sha256');
+  let rowCount = 0;
+  return {
+    get rowCount() {
+      return rowCount;
+    },
+    update(row) {
+      if (rowCount > 0) hash.update(ARCHIVE_ROW_SEPARATOR, 'utf8');
+      hash.update(canonicalizeArchiveRow(columns, row), 'utf8');
+      rowCount++;
+    },
+    digestHex() {
+      return hash.digest('hex');
+    },
+  };
 }

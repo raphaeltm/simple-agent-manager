@@ -79,7 +79,7 @@ describe('cf-container runtime spike contracts', () => {
     const libraryTools = read('routes/mcp/library-tools.ts');
     const projectFiles = read('routes/projects/files.ts');
     const localForward = read('routes/workspaces/local-forward.ts');
-    const nodesRoute = read('routes/nodes.ts');
+    const nodesRoute = read('routes/nodes/diagnostics.ts');
 
     expect(nodeAgent).toContain("node?.runtime !== 'cf-container'");
     expect(nodeAgent).toContain('getVmAgentContainerConfig(env)');
@@ -102,7 +102,7 @@ describe('cf-container runtime spike contracts', () => {
       "import { fetchNodeAgent, getNodeAgentRequestTimeoutMs } from '../../services/node-agent'"
     );
     expect(localForward).toContain('fetchNodeAgent(');
-    expect(nodesRoute).toMatch(/fetchNodeAgent\(\s*nodeId,\s*c\.env,\s*vmUrl\.toString\(\)/);
+    expect(nodesRoute).toMatch(/fetchNodeAgent\(\s*nodeId,\s*c\.env,\s*vmUrl\.toString\(\),/);
   });
 
   it('launches instant chat sessions through the authenticated start route and raw Container substrate', () => {
@@ -270,7 +270,11 @@ describe('cf-container runtime spike contracts', () => {
       join(apiPackageRoot, '../../packages/vm-agent/internal/acp/gateway.go'),
       'utf8'
     );
-    expect(vmGateway).toContain(`npm install -g ${codexACPWrapperPackage}`);
+    expect(vmGateway).toContain(`const codexACPInstallPackage = "${codexACPWrapperPackage}"`);
+    expect(vmGateway).toContain(`const codexCLIInstallPackage = "${codexCliPackage}"`);
+    expect(vmGateway).toContain(
+      'const codexACPInstallCommand = "npm install -g " + codexACPInstallPackage + " " + codexCLIInstallPackage'
+    );
     expect(dockerfile).toContain('USER node');
     expect(dockerfile).toContain('chown -R node:node /workspaces /var/lib/vm-agent');
     expect(bootstrap).toContain('agent_bin="${VM_AGENT_BIN:-/usr/local/bin/vm-agent}"');
@@ -278,6 +282,24 @@ describe('cf-container runtime spike contracts', () => {
     expect(bootstrap).toContain('baked_artifact_missing');
     expect(bootstrap).not.toContain('/api/agent/download');
     expect(bootstrap).not.toContain('curl ');
+  });
+
+  it('puts the vm-agent gh shim directory first on the instant image PATH', () => {
+    // The standalone vm-agent runs as `node` and installs its gh shim into this
+    // directory. The shim only shadows the system gh because the image lists
+    // the directory first on PATH and lets `node` write to it.
+    const dockerfile = readPackage('Dockerfile.vm-agent-container');
+    const shimSource = readFileSync(
+      join(apiPackageRoot, '../../packages/vm-agent/internal/server/standalone_gh_shim.go'),
+      'utf8'
+    );
+    const shimDir = shimSource.match(/const standaloneGhShimDir = "([^"]+)"/)?.[1];
+    const imagePath = dockerfile.match(/\bPATH=(\S+)/)?.[1];
+
+    expect(shimDir).toMatch(/^\/var\/lib\/vm-agent\//);
+    expect(imagePath?.split(':')[0]).toBe(shimDir);
+    expect(dockerfile).toMatch(new RegExp(`mkdir -p [^\\n]*${shimDir}(\\s|$)`));
+    expect(dockerfile).toContain('chown -R node:node /workspaces /var/lib/vm-agent');
   });
 
   it('bakes no secrets into the container image (no ARG or secret-bearing ENV)', () => {

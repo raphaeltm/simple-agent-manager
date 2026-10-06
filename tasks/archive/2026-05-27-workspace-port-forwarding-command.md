@@ -73,7 +73,7 @@ sam workspace <workspaceId> ports                 # list detected ports
   - Log proxied requests to stderr
   - Handle SIGINT/SIGTERM for graceful shutdown
 - [x] Implement `runWorkspacePorts()` — list detected ports (text + JSON output)
-- [ ] ~~Add `--local` flag support for port remapping~~ — deferred to `tasks/backlog/2026-05-27-workspace-forward-local-port-remap.md`
+- [ ] ~~Add `--local` flag support for port remapping~~ — deferred to `tasks/archive/2026-05-27-workspace-forward-local-port-remap.md`
 
 ### CLI: Help Text & Output
 - [x] Update `helpText()` in `run.go` to include workspace commands

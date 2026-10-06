@@ -20,6 +20,7 @@ export const WorkspaceStatusSchema = z.enum([
   'running',
   'recovery',
   'stopped',
+  'evicted',
   'error',
 ]);
 
@@ -108,6 +109,11 @@ export const McpServerEntrySchema = z.object({
   token: z.string(),
   /** Agent-visible server name. Tools are namespaced by it. */
   name: z.string().optional(),
+  /**
+   * Custom HTTP headers sent alongside the bearer token. Additive for the same reason as
+   * `name`: the control plane sends it only when non-empty, and an older vm-agent ignores it.
+   */
+  headers: z.array(z.object({ name: z.string(), value: z.string() })).optional(),
 });
 
 export type McpServerEntry = z.infer<typeof McpServerEntrySchema>;
@@ -118,6 +124,15 @@ export const CreateAgentSessionAgentRequestSchema = z.object({
   chatSessionId: z.string().optional(),
   projectId: z.string().optional(),
   mcpServers: z.array(McpServerEntrySchema).optional(),
+  acpInteractions: z
+    .object({
+      protocolVersion: z.number(),
+      enabled: z.boolean(),
+      formsEnabled: z.boolean(),
+      urlsEnabled: z.boolean(),
+    })
+    .passthrough()
+    .optional(),
 });
 
 export type CreateAgentSessionAgentRequest = z.infer<typeof CreateAgentSessionAgentRequestSchema>;

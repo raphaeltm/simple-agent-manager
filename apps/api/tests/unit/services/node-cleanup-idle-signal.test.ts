@@ -23,11 +23,17 @@ import { deleteNodeResourcesStrict } from '../../../src/services/nodes';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const deleteCalls: string[] = [];
+const RUNTIME_TERMINATION_CONFIRMED_AT = '2026-09-04T00:00:00.000Z';
 
 vi.mock('../../../src/services/nodes', () => ({
   deleteNodeResourcesStrict: vi.fn(async (nodeId: string) => {
     deleteCalls.push(nodeId);
-    return { providerVm: 'deleted' as const };
+    return {
+      providerVm: 'deleted' as const,
+      runtimeTerminationConfirmedAt: RUNTIME_TERMINATION_CONFIRMED_AT,
+      runtimeIncarnationId: null,
+      providerInstanceId: null,
+    };
   }),
   stopNodeResources: vi.fn().mockResolvedValue(undefined),
 }));
@@ -36,14 +42,22 @@ vi.mock('../../../src/services/node-agent', () => ({
   stopWorkspaceOnNode: vi.fn().mockResolvedValue(undefined),
   getNodeAgentBackgroundRequestTimeoutMs: vi.fn().mockReturnValue(5_000),
 }));
-vi.mock('../../../src/services/project-data', () => ({
+vi.mock('../../../src/services/project-data', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/services/project-data')>()),
   stopSession: vi.fn().mockResolvedValue(undefined),
   cleanupWorkspaceActivity: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock('../../../src/scheduled/node-cleanup/unhealthy-nodes', () => ({
+  sweepUnhealthyNodes: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('../../../src/services/observability', () => ({
   persistError: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock('../../../src/lib/logger', () => ({
+vi.mock('../../../src/services/workspace-lifecycle-finalizer', () => ({
+  finalizeWorkspaceLifecycleClosure: vi.fn().mockResolvedValue({}),
+}));
+vi.mock('../../../src/lib/logger', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/logger')>()),
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
@@ -104,7 +118,23 @@ beforeEach(() => {
   deleteCalls.length = 0;
   vi.mocked(deleteNodeResourcesStrict).mockImplementation(async (nodeId: string) => {
     deleteCalls.push(nodeId);
-    return { providerVm: 'deleted' };
+    sqlite
+      ?.prepare('UPDATE nodes SET runtime_termination_confirmed_at = ? WHERE id = ?')
+      .run(RUNTIME_TERMINATION_CONFIRMED_AT, nodeId);
+    sqlite
+      ?.prepare(
+        `UPDATE workspaces
+            SET status = 'deleted', runtime_deletion_confirmed_at = ?,
+                runtime_deletion_proof = 'node_runtime_terminated'
+          WHERE node_id = ?`
+      )
+      .run(RUNTIME_TERMINATION_CONFIRMED_AT, nodeId);
+    return {
+      providerVm: 'deleted',
+      runtimeTerminationConfirmedAt: RUNTIME_TERMINATION_CONFIRMED_AT,
+      runtimeIncarnationId: null,
+      providerInstanceId: null,
+    };
   });
   sqlite = new Database(':memory:');
   sqlite.exec(`
@@ -113,11 +143,20 @@ beforeEach(() => {
       warm_since TEXT, node_role TEXT NOT NULL DEFAULT 'workspace',
       node_class TEXT NOT NULL DEFAULT 'managed', runtime TEXT NOT NULL DEFAULT 'vm',
       health_status TEXT NOT NULL DEFAULT 'unhealthy', agent_version TEXT,
-      created_at TEXT NOT NULL, updated_at TEXT NOT NULL, cleanup_backoff_until TEXT
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL, cleanup_backoff_until TEXT,
+      runtime_termination_confirmed_at TEXT, runtime_incarnation_id TEXT,
+      capacity_pool_id TEXT, capacity_source_id TEXT, capacity_pool_candidate_id TEXT,
+      capacity_pool_scope TEXT, capacity_pool_project_id TEXT, capacity_pool_revision INTEGER,
+      capacity_source_generation INTEGER, placement_credential_source TEXT,
+      placement_credential_reference TEXT, placement_credential_fingerprint TEXT,
+      placement_credential_version INTEGER, workload_role TEXT, cloud_provider TEXT,
+      provider_instance_id TEXT, provider_instance_type TEXT,
+      provider_instance_vcpu_count INTEGER, provider_instance_memory_mb INTEGER
     );
     CREATE TABLE workspaces (
       id TEXT PRIMARY KEY, node_id TEXT, user_id TEXT, status TEXT NOT NULL,
-      project_id TEXT, chat_session_id TEXT, created_at TEXT, updated_at TEXT
+      project_id TEXT, chat_session_id TEXT, created_at TEXT, updated_at TEXT,
+      runtime_deletion_confirmed_at TEXT, runtime_deletion_proof TEXT
     );
     CREATE TABLE tasks (
       id TEXT PRIMARY KEY, workspace_id TEXT, status TEXT,
@@ -128,13 +167,24 @@ beforeEach(() => {
       id TEXT PRIMARY KEY, workspace_id TEXT, user_id TEXT, status TEXT,
       stopped_at TEXT, error_message TEXT, updated_at TEXT
     );
+    -- Read by the terminal-task ownership predicate
+    -- (sleepLifecycleOwnsTerminalTaskWorkspaceSql).
+    CREATE TABLE session_snapshots (
+      chat_session_id TEXT PRIMARY KEY, status TEXT NOT NULL DEFAULT 'pending',
+      sleeping_at TEXT, sleep_status TEXT, sleep_after TEXT, capture_generation TEXT,
+      sleep_attempts INTEGER NOT NULL DEFAULT 0
+    );
     CREATE TABLE compute_usage (
       id TEXT PRIMARY KEY, workspace_id TEXT, user_id TEXT, ended_at TEXT
     );
   `);
 });
 
-function seedAutoProvisionedTask(nodeId: string, status = 'completed', updatedAt = ago(HOUR)): void {
+function seedAutoProvisionedTask(
+  nodeId: string,
+  status = 'completed',
+  updatedAt = ago(HOUR)
+): void {
   sqlite
     ?.prepare(
       `INSERT INTO tasks (id, workspace_id, status, auto_provisioned_node_id, updated_at)
@@ -228,7 +278,7 @@ describe('idle reaping is immune to heartbeat activity', () => {
     expect(deleteCalls).toContain('past-max-lifetime');
   });
 
-  it('uses stale workspace activity to discriminate the 24h active-row backstop', async () => {
+  it('preserves active workspace rows at the 24h ceiling regardless of stale activity', async () => {
     seedNode({ id: 'absolute-stale', createdAt: ago(25 * HOUR), updatedAt: ago(1000) });
     seedAutoProvisionedTask('absolute-stale', 'in_progress', ago(25 * HOUR));
     seedWorkspace({
@@ -253,9 +303,9 @@ describe('idle reaping is immune to heartbeat activity', () => {
 
     const result = await runNodeCleanupSweep(env);
 
-    expect(result.lifetimeDestroyed).toBe(1);
+    expect(result.lifetimeDestroyed).toBe(0);
     expect(result.lifetimeSkipped).toBeGreaterThanOrEqual(1);
-    expect(deleteCalls).toContain('absolute-stale');
+    expect(deleteCalls).not.toContain('absolute-stale');
     expect(deleteCalls).not.toContain('absolute-recent');
   });
 

@@ -11,7 +11,11 @@ import type {
   AdminAiAllowanceResponse,
   UpdateAdminAiAllowanceRequest,
 } from '@simple-agent-manager/shared';
-import { AI_ADMIN_ALLOWANCE_KV_PREFIX } from '@simple-agent-manager/shared';
+import {
+  AI_ADMIN_ALLOWANCE_KV_PREFIX,
+  isPlatformAIModelTier,
+  PLATFORM_AI_MODEL_TIERS,
+} from '@simple-agent-manager/shared';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -22,7 +26,7 @@ import type { Env } from '../env';
 import { getUserId, requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { jsonValidator } from '../schemas';
-import { getAiBudgetLimits } from '../services/ai-token-budget';
+import { getAdminAiAllowance, getAiBudgetLimits } from '../services/ai-token-budget';
 
 // Fields are validated loosely (v.unknown()) so the handler's existing manual
 // checks below — which produce specific error messages — remain in control of
@@ -39,14 +43,9 @@ const adminAiAllowanceRoutes = new Hono<{ Bindings: Env }>();
 
 adminAiAllowanceRoutes.use('/*', requireAuth(), requireApproved(), requireSuperadmin());
 
-/** Build the KV key for a user's admin-managed AI allowance. */
+/** Build the KV key for a user's admin-managed AI allowance (read back by `getAdminAiAllowance`). */
 function buildAllowanceKey(userId: string): string {
   return `${AI_ADMIN_ALLOWANCE_KV_PREFIX}:${userId}`;
-}
-
-/** Read admin allowance from KV. Returns null if not set. */
-async function getAllowance(kv: KVNamespace, userId: string): Promise<AdminAiAllowance | null> {
-  return kv.get<AdminAiAllowance>(buildAllowanceKey(userId), 'json');
 }
 
 /** Resolve effective ceilings: admin allowance → platform defaults. */
@@ -91,10 +90,14 @@ function validateAllowanceBody(body: UpdateAdminAiAllowanceBody): void {
   validateNullableNumber(body, 'maxDailyOutputTokens');
   validateNullableNumber(body, 'maxMonthlyCostCapUsd');
 
+  // Unknown tier names are rejected rather than stored: the AI proxy enforces this list
+  // (`services/ai-model-tier-gate.ts`), and a typo such as "frontier" would block every model.
   const tiers = body.allowedModelTiers;
   if (tiers === undefined || tiers === null) return;
-  if (!Array.isArray(tiers) || tiers.some((tier) => typeof tier !== 'string')) {
-    throw errors.badRequest('allowedModelTiers must be an array of strings or null');
+  if (!Array.isArray(tiers) || !tiers.every(isPlatformAIModelTier)) {
+    throw errors.badRequest(
+      `allowedModelTiers must be null or an array of: ${PLATFORM_AI_MODEL_TIERS.join(', ')}`
+    );
   }
 }
 
@@ -144,7 +147,7 @@ adminAiAllowanceRoutes.get('/:userId', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
   await requireUserExists(db, targetUserId);
 
-  const allowance = await getAllowance(c.env.KV, targetUserId);
+  const allowance = await getAdminAiAllowance(c.env.KV, targetUserId);
   return c.json(toResponse(targetUserId, allowance, c.env));
 });
 
@@ -164,7 +167,7 @@ adminAiAllowanceRoutes.put(
     const body = c.req.valid('json');
     validateAllowanceBody(body);
 
-    const existing = await getAllowance(c.env.KV, targetUserId);
+    const existing = await getAdminAiAllowance(c.env.KV, targetUserId);
     const allowance = buildAllowance(body, existing, adminUserId);
 
     await c.env.KV.put(buildAllowanceKey(targetUserId), JSON.stringify(allowance));

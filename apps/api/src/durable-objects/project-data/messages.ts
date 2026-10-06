@@ -1,12 +1,15 @@
 /**
- * Message storage, retrieval, batch persistence, search, and sequencing.
+ * Message storage, retrieval, batch persistence, and sequencing. Search lives in
+ * `message-search.ts`; its DO-facing entry points are re-exported here.
  */
-import { buildSafeFtsQuery } from '../../lib/fts5';
+import type { MessageCursor } from '@simple-agent-manager/shared';
+
 import { log } from '../../lib/logger';
 import {
   PROJECT_DATA_ARCHIVE_SOURCE_INTENT_STATES,
   type ProjectDataArchiveSourceIntentState,
 } from '../../project-data-archive/contract';
+import { messageBoundsClause } from './message-cursor';
 import {
   insertNewMessage,
   nextSequence,
@@ -20,14 +23,21 @@ import {
   parseChatMessageRowCompact,
   parseCount,
   parseMessageCount,
-  parseSearchResultRow,
   parseWorkspaceId,
-  type SearchResultParsed,
 } from './row-schemas';
+import { assertSessionIdentityGuard, type SessionIdentityGuard } from './sessions';
 import { boundToolMetadataForStorage } from './tool-metadata-storage';
 import type { Env } from './types';
 import { generateId } from './types';
 
+export type { MessageSearchBounds, MessageSearchWithCoverage } from './message-search';
+export {
+  buildFtsQuery,
+  extractSnippet,
+  getSearchQueryLikePatterns,
+  resolveMessageSearchBounds,
+  searchMessagesWithCoverage,
+} from './message-search';
 export {
   DEFAULT_MAX_MESSAGES_PER_SESSION,
   nextSequence,
@@ -93,7 +103,8 @@ export function persistMessage(
   role: string,
   content: string,
   toolMetadata: string | null,
-  messageId?: string
+  messageId?: string,
+  guard?: SessionIdentityGuard | null
 ): {
   id: string;
   now: number;
@@ -103,6 +114,7 @@ export function persistMessage(
   toolMetadata: string | null;
 } {
   assertTranscriptWriteAllowed(sql, sessionId, 'persistMessage');
+  assertSessionIdentityGuard(sql, sessionId, 'persist message', guard);
   const id = messageId ?? generateId();
   const existing = sql
     .exec(
@@ -230,6 +242,8 @@ export function persistMessageBatch(
       break;
     }
 
+    // Rows without a usable timestamp share `now`; reads page on (created_at, sequence, id),
+    // so ties are safe (see message-cursor.ts).
     const createdAt = new Date(msg.timestamp).getTime() || now;
     const sequence = msg.sequence ?? nextSeq++;
     const boundedToolMetadata = boundToolMetadataForStorage(msg.toolMetadata, env);
@@ -325,9 +339,9 @@ export function persistMessageBatch(
  * We leave a 2 MiB margin for the session envelope, pagination metadata,
  * and JSON structural overhead.
  */
-const RPC_SIZE_BUDGET_BYTES = 30 * 1024 * 1024; // 30 MiB
+export const RPC_SIZE_BUDGET_BYTES = 30 * 1024 * 1024; // 30 MiB
 
-function estimateRowBytes(row: Record<string, unknown>): number {
+export function estimateRowBytes(row: Record<string, unknown>): number {
   let size = 64; // object overhead + fixed fields (id, role, created_at, sequence)
   const content = row.content;
   if (typeof content === 'string') size += content.length * 2; // UTF-16 chars
@@ -340,8 +354,8 @@ export function getMessages(
   sql: SqlStorage,
   sessionId: string,
   limit: number = 1000,
-  before: number | null = null,
-  after: number | null = null,
+  before: MessageCursor | null = null,
+  after: MessageCursor | null = null,
   roles?: string[],
   compact: boolean = false,
   order: 'asc' | 'desc' = 'desc',
@@ -351,15 +365,9 @@ export function getMessages(
     'SELECT id, session_id, role, content, tool_metadata, created_at, sequence, origin FROM chat_messages WHERE session_id = ?';
   const params: (string | number)[] = [sessionId];
 
-  if (before !== null) {
-    query += ' AND created_at < ?';
-    params.push(before);
-  }
-
-  if (after !== null) {
-    query += ' AND created_at > ?';
-    params.push(after);
-  }
+  const bounds = messageBoundsClause({ before, after });
+  query += bounds.sql;
+  params.push(...bounds.values);
 
   if (roles && roles.length > 0) {
     const placeholders = roles.map(() => '?').join(', ');
@@ -368,10 +376,34 @@ export function getMessages(
   }
 
   const orderDirection = order === 'asc' ? 'ASC' : 'DESC';
-  query += ` ORDER BY created_at ${orderDirection}, sequence ${orderDirection} LIMIT ?`;
+  query += ` ORDER BY created_at ${orderDirection}, sequence ${orderDirection}, id ${orderDirection} LIMIT ?`;
   params.push(limit + 1);
 
   const rows = sql.exec(query, ...params).toArray();
+  return formatMessageRows(rows, sessionId, limit, compact, order, compactOptions);
+}
+
+function parseListedMessage(
+  row: Record<string, unknown>, sessionId: string, compact: boolean, compactOptions?: CompactMessageOptions
+): Record<string, unknown> | null {
+  try {
+    return compact ? parseChatMessageRowCompact(row, compactOptions) : parseChatMessageRow(row);
+  } catch (e) {
+    log.warn('messages.list_row_skipped', {
+      rowId: typeof row.id === 'string' ? row.id : null,
+      rowSessionId: typeof row.session_id === 'string' ? row.session_id : null,
+      requestedSessionId: sessionId,
+      compact,
+      error: String(e),
+    });
+  }
+  return null;
+}
+
+export function formatMessageRows(
+  rows: Record<string, unknown>[], sessionId: string, limit: number,
+  compact: boolean, order: 'asc' | 'desc', compactOptions?: CompactMessageOptions
+): { messages: Record<string, unknown>[]; hasMore: boolean } {
   let hasMore = rows.length > limit;
   const candidateRows = hasMore ? rows.slice(0, limit) : rows;
 
@@ -400,25 +432,15 @@ export function getMessages(
 
   const trimmedRows = candidateRows.slice(0, safeCount);
 
-  const orderedRows = order === 'desc' ? trimmedRows.reverse() : trimmedRows;
+  const orderedRows = trimmedRows;
+  if (order === 'desc') orderedRows.reverse();
   const messages: Record<string, unknown>[] = [];
   let skipped = 0;
 
   for (const row of orderedRows) {
-    try {
-      messages.push(
-        compact ? parseChatMessageRowCompact(row, compactOptions) : parseChatMessageRow(row)
-      );
-    } catch (e) {
-      skipped++;
-      log.warn('messages.list_row_skipped', {
-        rowId: typeof row.id === 'string' ? row.id : null,
-        rowSessionId: typeof row.session_id === 'string' ? row.session_id : null,
-        requestedSessionId: sessionId,
-        compact,
-        error: String(e),
-      });
-    }
+    const message = parseListedMessage(row, sessionId, compact, compactOptions);
+    if (message) messages.push(message);
+    else skipped++;
   }
 
   if (skipped > 0) {
@@ -450,163 +472,6 @@ export function getMessageCount(sql: SqlStorage, sessionId: string, roles?: stri
 
   const row = sql.exec(query, ...params).toArray()[0];
   return row ? parseCount(row, 'messages.count') : 0;
-}
-
-type SearchResult = {
-  id: string;
-  sessionId: string;
-  role: string;
-  snippet: string;
-  createdAt: number;
-  sessionTopic: string | null;
-  sessionTaskId: string | null;
-};
-
-export function searchMessages(
-  sql: SqlStorage,
-  query: string,
-  sessionId: string | null = null,
-  roles: string[] | null = null,
-  limit: number = 10
-): SearchResult[] {
-  const results: SearchResult[] = [];
-
-  results.push(...searchMessagesFts(sql, query, sessionId, roles, limit));
-
-  if (results.length < limit) {
-    const fallbackResults = searchMessagesLike(
-      sql,
-      query,
-      sessionId,
-      roles,
-      limit - results.length,
-      true
-    );
-    results.push(...fallbackResults);
-  }
-
-  results.sort((a, b) => b.createdAt - a.createdAt);
-  return results.slice(0, limit);
-}
-
-function mapSearchResultToSearchResult(parsed: SearchResultParsed, query: string): SearchResult {
-  return {
-    id: parsed.id,
-    sessionId: parsed.sessionId,
-    role: parsed.role,
-    snippet: extractSnippet(parsed.content, query),
-    createdAt: parsed.createdAt,
-    sessionTopic: parsed.sessionTopic,
-    sessionTaskId: parsed.sessionTaskId,
-  };
-}
-
-function searchMessagesFts(
-  sql: SqlStorage,
-  query: string,
-  sessionId: string | null,
-  roles: string[] | null,
-  limit: number
-): SearchResult[] {
-  const ftsQuery = buildFtsQuery(query);
-  if (!ftsQuery) return [];
-
-  const conditions: string[] = ['f.chat_messages_grouped_fts MATCH ?'];
-  const params: (string | number)[] = [ftsQuery];
-
-  if (sessionId) {
-    conditions.push('m.session_id = ?');
-    params.push(sessionId);
-  }
-
-  if (roles && roles.length > 0) {
-    const placeholders = roles.map(() => '?').join(', ');
-    conditions.push(`m.role IN (${placeholders})`);
-    params.push(...roles);
-  }
-
-  const whereClause = conditions.join(' AND ');
-  const sqlQuery = `
-    SELECT m.id, m.session_id, m.role, m.content, m.created_at,
-           s.topic AS session_topic, s.task_id AS session_task_id
-    FROM chat_messages_grouped_fts f
-    JOIN chat_messages_grouped m ON m.rowid = f.rowid
-    JOIN chat_sessions s ON s.id = m.session_id
-    WHERE ${whereClause}
-    ORDER BY rank
-    LIMIT ?
-  `;
-  params.push(limit);
-
-  try {
-    const rows = sql.exec(sqlQuery, ...params).toArray();
-    return rows.map((row) => mapSearchResultToSearchResult(parseSearchResultRow(row), query));
-  } catch (e) {
-    log.error('messages.fts5_search_failed', { error: String(e) });
-    return [];
-  }
-}
-
-function searchMessagesLike(
-  sql: SqlStorage,
-  query: string,
-  sessionId: string | null,
-  roles: string[] | null,
-  limit: number,
-  onlyNonMaterialized: boolean = false
-): SearchResult[] {
-  const escapedQuery = query.replace(/[%_\\]/g, '\\$&');
-  const conditions: string[] = [
-    "m.content LIKE ? ESCAPE '\\'",
-    "COALESCE(m.origin, 'user') != 'system'",
-  ];
-  const params: (string | number)[] = [`%${escapedQuery}%`];
-
-  if (sessionId) {
-    conditions.push('m.session_id = ?');
-    params.push(sessionId);
-  }
-
-  if (roles && roles.length > 0) {
-    const placeholders = roles.map(() => '?').join(', ');
-    conditions.push(`m.role IN (${placeholders})`);
-    params.push(...roles);
-  }
-
-  if (onlyNonMaterialized) {
-    conditions.push('s.materialized_at IS NULL');
-  }
-
-  const whereClause = conditions.join(' AND ');
-  const sqlQuery = `
-    SELECT m.id, m.session_id, m.role, m.content, m.created_at,
-           s.topic AS session_topic, s.task_id AS session_task_id
-    FROM chat_messages m
-    JOIN chat_sessions s ON s.id = m.session_id
-    WHERE ${whereClause}
-    ORDER BY m.created_at DESC
-    LIMIT ?
-  `;
-  params.push(limit);
-
-  const rows = sql.exec(sqlQuery, ...params).toArray();
-
-  return rows.map((row) => mapSearchResultToSearchResult(parseSearchResultRow(row), query));
-}
-
-export function buildFtsQuery(query: string): string | null {
-  return buildSafeFtsQuery(query);
-}
-
-export function extractSnippet(content: string, query: string): string {
-  const lowerContent = content.toLowerCase();
-  const matchIdx = lowerContent.indexOf(query.toLowerCase());
-  if (matchIdx === -1) {
-    return content.slice(0, 200) + (content.length > 200 ? '...' : '');
-  }
-  const start = Math.max(0, matchIdx - 80);
-  const end = Math.min(content.length, matchIdx + query.length + 120);
-  return (start > 0 ? '...' : '') + content.slice(start, end) + (end < content.length ? '...' : '');
 }
 
 /**

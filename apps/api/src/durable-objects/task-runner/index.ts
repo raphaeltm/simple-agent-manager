@@ -45,15 +45,26 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { deferAlarmWhenDisabled } from '../../services/operational-kill-switch';
 import { capacityPlacementSnapshotForTaskStart } from '../../services/placement-resolver';
+import { assertReplacementDeletionConfirmed } from '../../services/replacement-deletion-fence';
 import {
-  isSessionRecoveryTaskAuthorized,
+  isSessionRecoveryAttemptCurrent,
+  isSessionRecoveryTaskAndEventAuthorized,
   SessionRecoveryAuthorityRevokedError,
 } from '../../services/session-recovery-authority';
+import { evictionRecoveryFenceMatches } from '../../services/session-recovery-eviction';
+import { assertTaskRunnerStartGuard } from '../../services/task-runner-start-guard';
 import { handleAgentSession } from './agent-session-step';
+import { putTaskRunnerState, taskRunnerAttemptContext } from './attempt-storage';
 import { computeBackoffMs, isTransientError, parseEnvInt } from './helpers';
 import { handleNodeAgentReady, handleNodeProvisioning, handleNodeSelection } from './node-steps';
+import { hasTaskStepRetryBudget } from './snapshot-restore-retry';
 import { failTask } from './state-machine';
 import { redactTaskRunnerStatus } from './status';
+import {
+  assertTaskExecutionAuthority,
+  retireRevokedTaskRunner,
+  TaskExecutionAuthorityRevokedError,
+} from './task-execution-authority';
 import type { StartTaskInput, TaskRunnerContext, TaskRunnerState } from './types';
 import { notifyWakeProgress } from './wake-progress-notifier';
 import {
@@ -89,7 +100,7 @@ export class TaskRunner extends DurableObject<Env> {
       return;
     }
 
-    await this.assertRecoveryAuthority(input);
+    await this.assertRecoveryAuthority(input, { requireStartGuardQueued: true });
 
     const now = Date.now();
     const state: TaskRunnerState = {
@@ -133,17 +144,118 @@ export class TaskRunner extends DurableObject<Env> {
       completed: false,
     };
 
-    // Commit the state and first alarm together. A readable state must prove
-    // that the orchestration wake-up was durably scheduled as well.
+    let initialized = false;
+    let concurrentState: TaskRunnerState | null = null;
+    // Commit the state and first alarm together. Re-read inside the transaction:
+    // concurrent first-start RPCs can both pass the preflight guard before one
+    // commits, and the loser must not overwrite progressed state from the
+    // winner or its first alarm.
     await this.ctx.storage.transaction(async (transaction) => {
+      concurrentState = (await transaction.get<TaskRunnerState>('state')) ?? null;
+      if (concurrentState) return;
       await transaction.put('state', state);
       await transaction.setAlarm(now);
+      initialized = true;
     });
+
+    if (!initialized) {
+      const existingState = (await this.getState()) ?? concurrentState;
+      if (existingState) {
+        await this.assertRecoveryAuthority(existingState);
+        await this.ensureAlarm(existingState);
+        log.warn('task_runner_do.start.already_initialized', {
+          taskId: input.taskId,
+          currentStep: existingState.currentStep,
+        });
+      }
+      return;
+    }
 
     log.info('task_runner_do.started', {
       taskId: input.taskId,
       projectId: input.projectId,
     });
+  }
+
+  /**
+   * Reactivate an existing conversation task after its runtime slept.
+   *
+   * Unlike start(), this is intentionally re-entrant for an existing task id:
+   * sleep keeps the task row and TaskRunner DO identity stable, while wake needs
+   * fresh runtime bindings and placement state.
+   */
+  async reactivate(input: StartTaskInput): Promise<void> {
+    if (!input.config.recoveryAttemptId) {
+      throw new Error('Snapshot recovery requires a wake attempt identity');
+    }
+    await this.assertRecoveryAuthority(input);
+
+    const now = Date.now();
+    const capacityPlacementSnapshot = capacityPlacementSnapshotForTaskStart(
+      input.config.capacityPoolSelection
+    );
+    let reactivated = false;
+    let missingState = false;
+    await this.ctx.storage.transaction(async (transaction) => {
+      const existing = (await transaction.get<TaskRunnerState>('state')) ?? null;
+      if (!existing) {
+        missingState = true;
+        return;
+      }
+      // A retried RPC must not discard placement or runtime bindings already
+      // acquired by the first call for this wake.
+      if (existing.config.recoveryAttemptId === input.config.recoveryAttemptId) return;
+      const state: TaskRunnerState = {
+        ...existing,
+        projectId: input.projectId,
+        userId: input.userId,
+        currentStep: 'node_selection',
+        stepResults: {
+          nodeId: null,
+          autoProvisioned: false,
+          claimedWarmNodeId: null,
+          workspaceId: null,
+          chatSessionId: input.config.chatSessionId ?? null,
+          agentSessionId: null,
+          agentStarted: false,
+          mcpToken: null,
+          provisionedVmSize: null,
+          capacityPlacementSnapshot,
+        },
+        config: input.config,
+        retryCount: 0,
+        workspaceReadyReceived: false,
+        workspaceReadyStatus: null,
+        workspaceErrorMessage: null,
+        lastStepAt: now,
+        provisioningStartedAt: null,
+        admissionScopeKey: null,
+        admissionLeaseToken: null,
+        agentReadyStartedAt: null,
+        workspaceReadyStartedAt: null,
+        workspaceDispatchStartedAt: null,
+        workspaceDispatchAttempts: 0,
+        workspaceDispatchLastAttemptAt: null,
+        workspaceDispatchLastError: null,
+        workspaceDispatchAckedAt: null,
+        lastD1Step: null,
+        completed: false,
+      };
+      await transaction.put('state', state);
+      await transaction.setAlarm(now);
+      reactivated = true;
+    });
+
+    if (missingState) {
+      await this.start(input);
+      return;
+    }
+    if (reactivated) {
+      log.info('task_runner_do.reactivated', {
+        taskId: input.taskId,
+        projectId: input.projectId,
+      });
+    }
   }
 
   /**
@@ -153,15 +265,16 @@ export class TaskRunner extends DurableObject<Env> {
    */
   async advanceWorkspaceReady(
     status: 'running' | 'recovery' | 'error',
-    errorMessage: string | null
+    errorMessage: string | null,
+    workspaceId: string
   ): Promise<void> {
     const state = await this.getState();
-    if (!state || state.completed) return;
+    if (!state || state.completed || state.stepResults.workspaceId !== workspaceId) return;
 
     state.workspaceReadyReceived = true;
     state.workspaceReadyStatus = status;
     state.workspaceErrorMessage = errorMessage;
-    await this.ctx.storage.put('state', state);
+    await putTaskRunnerState(this.ctx.storage, state);
 
     log.info('task_runner_do.workspace_ready_received', {
       taskId: state.taskId,
@@ -194,7 +307,7 @@ export class TaskRunner extends DurableObject<Env> {
     }
 
     state.workspaceReadyStartedAt = Date.now();
-    await this.ctx.storage.put('state', state);
+    await putTaskRunnerState(this.ctx.storage, state);
 
     log.info('task_runner_do.workspace_build_started', {
       taskId: state.taskId,
@@ -219,9 +332,12 @@ export class TaskRunner extends DurableObject<Env> {
    * Confirm that a task run was initialized and repair a missing wake-up.
    * Used after an ambiguous start RPC and by webhook reconciliation.
    */
-  async ensureStarted(): Promise<boolean> {
+  async ensureStarted(recoveryAttemptId?: string): Promise<boolean> {
     const state = await this.getState();
-    if (!state) return false;
+    if (!state || (recoveryAttemptId && state.config.recoveryAttemptId !== recoveryAttemptId)) {
+      return false;
+    }
+    if (recoveryAttemptId && !(await this.isCurrentRecoveryAttempt(state))) return false;
     await this.ensureAlarm(state);
     return true;
   }
@@ -265,14 +381,11 @@ export class TaskRunner extends DurableObject<Env> {
     const state = await this.getState();
     if (!state || state.completed) return;
 
-    const rc = this.buildContext();
+    const rc = this.buildContext(state);
     const stepStartMs = Date.now();
 
     try {
-      if (!(await this.hasRecoveryAuthority(state))) {
-        await failTask(state, new SessionRecoveryAuthorityRevokedError().message, rc);
-        return;
-      }
+      await this.assertRecoveryAuthority(state);
       switch (state.currentStep) {
         case 'node_selection':
           await handleNodeSelection(state, rc);
@@ -311,6 +424,13 @@ export class TaskRunner extends DurableObject<Env> {
           return;
       }
     } catch (err) {
+      if (err instanceof TaskExecutionAuthorityRevokedError) {
+        if (await this.isCurrentRecoveryAttempt(state)) await retireRevokedTaskRunner(state, rc);
+        return;
+      }
+      // A superseded alarm must not fail or overwrite the stable task's newer
+      // wake. The snapshot claim, rather than the task ID, owns these effects.
+      if (!(await this.isCurrentRecoveryAttempt(state))) return;
       const errorMessage = err instanceof Error ? err.message : String(err);
       const durationMs = Date.now() - stepStartMs;
 
@@ -322,16 +442,16 @@ export class TaskRunner extends DurableObject<Env> {
         durationMs,
       });
 
-      if (isTransientError(err) && state.retryCount < this.getMaxRetries()) {
+      if (isTransientError(err) && hasTaskStepRetryBudget(state, this.getMaxRetries())) {
         // Transient failure — retry with backoff
         state.retryCount++;
-        await this.ctx.storage.put('state', state);
+        await putTaskRunnerState(this.ctx.storage, state);
         const backoff = computeBackoffMs(
           state.retryCount,
           this.getRetryBaseDelayMs(),
           this.getRetryMaxDelayMs()
         );
-        await this.ctx.storage.setAlarm(Date.now() + backoff);
+        await rc.ctx.storage.setAlarm(Date.now() + backoff);
 
         log.info('task_runner_do.step_retry_scheduled', {
           taskId: state.taskId,
@@ -340,7 +460,7 @@ export class TaskRunner extends DurableObject<Env> {
           backoffMs: backoff,
         });
       } else {
-        // Permanent failure or max retries exceeded
+        // Permanent failure or retry budget exhausted
         await failTask(state, errorMessage, rc);
       }
     }
@@ -350,20 +470,23 @@ export class TaskRunner extends DurableObject<Env> {
   // Context builder
   // =========================================================================
 
-  private buildContext(): TaskRunnerContext {
+  private buildContext(state: TaskRunnerState): TaskRunnerContext {
+    const attemptCtx = taskRunnerAttemptContext(this.ctx, state);
     return {
       env: this.env,
-      ctx: this.ctx,
+      ctx: attemptCtx,
       assertRecoveryAuthority: async (state: TaskRunnerState) => {
         await this.assertRecoveryAuthority(state);
       },
       advanceToStep: async (state: TaskRunnerState, nextStep: TaskExecutionStep) => {
+        if (!(await this.isCurrentRecoveryAttempt(state)))
+          throw new SessionRecoveryAuthorityRevokedError();
         state.currentStep = nextStep;
         state.retryCount = 0;
         state.lastStepAt = Date.now();
-        await this.ctx.storage.put('state', state);
+        await putTaskRunnerState(this.ctx.storage, state);
         // Schedule alarm immediately for next step
-        await this.ctx.storage.setAlarm(Date.now());
+        await attemptCtx.storage.setAlarm(Date.now());
       },
       getAgentPollIntervalMs: () => this.getAgentPollIntervalMs(),
       getAgentReadyTimeoutMs: () => this.getAgentReadyTimeoutMs(),
@@ -376,20 +499,33 @@ export class TaskRunner extends DurableObject<Env> {
       getProvisionPollIntervalMs: () => this.getProvisionPollIntervalMs(),
       getProvisionTimeoutMs: () => this.getProvisionTimeoutMs(),
       updateD1ExecutionStep: async (taskId: string, step: TaskExecutionStep) => {
+        if (!(await this.isCurrentRecoveryAttempt(state)))
+          throw new SessionRecoveryAuthorityRevokedError();
         // Idempotent guard: skip redundant D1 writes when the step hasn't changed.
         // This prevents updated_at from being refreshed on every poll cycle,
         // which was defeating the stuck-tasks cron's staleness detection.
         // Persisted in DO state so the guard survives DO eviction/reload.
         const currentState = await this.ctx.storage.get<TaskRunnerState>('state');
+        if (
+          currentState &&
+          (currentState.config.recoveryAttemptId ?? null) !==
+            (state.config.recoveryAttemptId ?? null)
+        )
+          throw new SessionRecoveryAuthorityRevokedError();
         if (currentState && step === currentState.lastD1Step) return;
         if (currentState) {
           currentState.lastD1Step = step;
-          await this.ctx.storage.put('state', currentState);
+          await putTaskRunnerState(this.ctx.storage, currentState);
         }
         await this.env.DATABASE.prepare(
-          `UPDATE tasks SET execution_step = ?, updated_at = ? WHERE id = ?`
+          `UPDATE tasks SET execution_step = ?, updated_at = ? WHERE id = ?
+            AND NOT EXISTS (
+              SELECT 1 FROM session_snapshots snapshot
+               WHERE snapshot.recovery_task_id = tasks.id
+                 AND snapshot.recovery_attempt_id IS NOT ?
+            )`
         )
-          .bind(step, new Date().toISOString(), taskId)
+          .bind(step, new Date().toISOString(), taskId, state.config.recoveryAttemptId ?? null)
           .run();
 
         // Push the phase to anyone watching the sleeping conversation this task is
@@ -434,14 +570,43 @@ export class TaskRunner extends DurableObject<Env> {
     raw.workspaceDispatchLastError ??= null;
     raw.workspaceDispatchAckedAt ??= null;
     raw.config.resumeSnapshotChatSessionId ??= null;
+    raw.config.evictionFence ??= null;
     raw.config.recoverySourceTaskId ??= null;
+    raw.config.retrySourceTaskId ??= null;
+    raw.config.startGuard ??= null;
+    raw.config.projectEventWakeGuard ??= null;
+    raw.config.recoveryRequiredProjectMemberId ??= null;
     raw.stepResults.claimedWarmNodeId ??= null;
     raw.stepResults.capacityPlacementSnapshot ??= null;
     raw.lastD1Step ??= null;
     return raw;
   }
 
+  private async isCurrentRecoveryAttempt(
+    input: StartTaskInput | TaskRunnerState
+  ): Promise<boolean> {
+    if ('stepResults' in input) {
+      const persisted = await this.ctx.storage.get<TaskRunnerState>('state');
+      if (
+        persisted &&
+        (persisted.config.recoveryAttemptId ?? null) !== (input.config.recoveryAttemptId ?? null)
+      )
+        return false;
+    }
+    const recoveryAttemptId = input.config.recoveryAttemptId;
+    if (!recoveryAttemptId) return true; // Runners persisted before stable wake identities.
+    const chatSessionId = input.config.resumeSnapshotChatSessionId ?? input.config.chatSessionId;
+    if (!chatSessionId) return false;
+    return isSessionRecoveryAttemptCurrent(this.env.DATABASE, {
+      taskId: input.taskId,
+      projectId: input.projectId,
+      chatSessionId,
+      recoveryAttemptId,
+    });
+  }
+
   private async hasRecoveryAuthority(input: StartTaskInput | TaskRunnerState): Promise<boolean> {
+    if (!(await this.isCurrentRecoveryAttempt(input))) return false;
     const sourceTaskId = input.config.recoverySourceTaskId ?? null;
     const chatSessionId = input.config.resumeSnapshotChatSessionId ?? null;
     // A human follow-up may recover a completed conversation without a live
@@ -449,18 +614,73 @@ export class TaskRunner extends DurableObject<Env> {
     // recoverySourceTaskId and require revocable authorization.
     if (!sourceTaskId) return true;
     if (!chatSessionId) return false;
-    return isSessionRecoveryTaskAuthorized(this.env.DATABASE, {
-      recoveryTaskId: input.taskId,
-      sourceTaskId,
-      projectId: input.projectId,
-      chatSessionId,
-    });
+    const eventGuard = input.config.projectEventWakeGuard ?? null;
+    const projectDataService = eventGuard ? await import('../../services/project-data') : null;
+    return isSessionRecoveryTaskAndEventAuthorized(
+      this.env.DATABASE,
+      {
+        recoveryTaskId: input.taskId,
+        recoveryAttemptId: input.config.recoveryAttemptId,
+        sourceTaskId,
+        projectId: input.projectId,
+        chatSessionId,
+        projectEventWake: eventGuard,
+        requiredProjectMemberId: input.config.recoveryRequiredProjectMemberId ?? null,
+      },
+      projectDataService
+        ? (eventInput) =>
+            projectDataService.validateProjectEventWakeRecoveryAuthority(
+              this.env as unknown as Env,
+              eventInput.projectId,
+              {
+                chatSessionId: eventInput.chatSessionId,
+                sourceTaskId: eventInput.sourceTaskId,
+                batchId: eventInput.batchId,
+                subscriptionId: eventInput.subscriptionId,
+              }
+            )
+        : undefined
+    );
   }
 
-  private async assertRecoveryAuthority(input: StartTaskInput | TaskRunnerState): Promise<void> {
+  private async assertRecoveryAuthority(
+    input: StartTaskInput | TaskRunnerState,
+    options: { requireStartGuardQueued?: boolean } = {}
+  ): Promise<void> {
+    const evictionFence = input.config.evictionFence ?? null;
+    if (
+      evictionFence &&
+      !(await evictionRecoveryFenceMatches(this.env as unknown as Env, evictionFence))
+    ) {
+      throw Object.assign(new Error('Eviction generation changed before replacement allocation'), {
+        permanent: true,
+      });
+    }
+    const deletionSourceTaskId =
+      input.config.retrySourceTaskId ?? input.config.recoverySourceTaskId ?? null;
+    if (deletionSourceTaskId && deletionSourceTaskId !== input.taskId) {
+      await assertReplacementDeletionConfirmed(this.env as unknown as Env, {
+        sourceTaskId: deletionSourceTaskId,
+        projectId: input.projectId,
+        userId: input.userId,
+      });
+    }
     if (!(await this.hasRecoveryAuthority(input))) {
       throw new SessionRecoveryAuthorityRevokedError();
     }
+    await assertTaskRunnerStartGuard(this.env, input.config.startGuard, {
+      requireQueuedTask: options.requireStartGuardQueued === true,
+      expectedRunner: {
+        taskId: input.taskId,
+        projectId: input.projectId,
+        userId: input.userId,
+        chatSessionId:
+          'stepResults' in input
+            ? (input.stepResults.chatSessionId ?? input.config.chatSessionId)
+            : input.config.chatSessionId,
+      },
+    });
+    await assertTaskExecutionAuthority(this.env, input);
   }
 
   // =========================================================================

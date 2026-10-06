@@ -7,7 +7,7 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { parseWithSchema, readRequestJsonRecord } from '../../lib/runtime-validation';
 import { ulid } from '../../lib/ulid';
-import { errors } from '../../middleware/error';
+import { AppError, errors } from '../../middleware/error';
 import {
   type ComposeImageArtifactRequest,
   createComposeImageArtifactUploads,
@@ -16,6 +16,7 @@ import {
   validateComposeImageArtifactDescriptor,
 } from '../../services/compose-image-artifacts';
 import { assertAgentDeploymentAllowedForProfile } from '../../services/deployment-control';
+import type { WorkspaceDeletionCallbackKind } from '../../services/workspace-deletion-callback-signal';
 import { verifyWorkspacePublishCallback } from './_callback-auth';
 
 const composeImageArtifactsCallbackRoute = new Hono<{ Bindings: Env }>();
@@ -75,7 +76,10 @@ const artifactCompleteRequestSchema = v.object({
   artifacts: v.optional(v.array(artifactCompleteItemSchema)),
 });
 
-async function verifyArtifactPolicy(c: Context<{ Bindings: Env }>, logPrefix: string) {
+async function verifyArtifactPolicy(
+  c: Context<{ Bindings: Env }>,
+  logPrefix: WorkspaceDeletionCallbackKind
+) {
   const verified = await verifyWorkspacePublishCallback(
     c,
     logPrefix,
@@ -149,6 +153,7 @@ composeImageArtifactsCallbackRoute.post('/:id/compose-image-artifacts/init', asy
   }
   const uploadId = ulid();
 
+  await verified.assertCurrent();
   const uploads = await createComposeImageArtifactUploads(c.env, {
     projectId: verified.projectId,
     workspaceId: verified.workspaceId,
@@ -157,6 +162,7 @@ composeImageArtifactsCallbackRoute.post('/:id/compose-image-artifacts/init', asy
     services,
   });
 
+  await verified.assertCurrent();
   log.info('compose_image_artifact_init.created', {
     projectId: verified.projectId,
     workspaceId: verified.workspaceId,
@@ -200,13 +206,16 @@ composeImageArtifactsCallbackRoute.post('/:id/compose-image-artifacts/complete',
         maxBytes,
       })
     );
+    await verified.assertCurrent();
     await validateCompletedComposeImageArtifacts(c.env, artifacts);
   } catch (error) {
+    if (error instanceof AppError) throw error;
     throw errors.badRequest(
       error instanceof Error ? error.message : 'Artifact completion validation failed'
     );
   }
 
+  await verified.assertCurrent();
   log.info('compose_image_artifact_complete.validated', {
     projectId: verified.projectId,
     workspaceId: verified.workspaceId,

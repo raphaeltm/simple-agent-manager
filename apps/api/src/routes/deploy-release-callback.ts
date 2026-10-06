@@ -132,8 +132,9 @@ deployReleaseCallbackRoute.get('/:id/deployment-env', async (c) => {
  * GET /api/nodes/:id/deploy-release?seq=N&environmentId=E
  *
  * Returns a signed apply payload for the requested release sequence.
- * The node calls this when the heartbeat response includes a
- * pendingReleaseSeq greater than the node's current applied seq.
+ * The node calls this when the heartbeat response advertises a
+ * `deployment.pendingReleases` entry whose seq is greater than the node's
+ * current applied seq.
  */
 deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
   const nodeId = c.req.param('id');
@@ -363,6 +364,10 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
       routeTargets: routes,
       resolvedSecrets,
       baseInterpolationEnv: environmentConfig.values,
+      defaultMemoryLimitMb: parsePositiveInt(
+        c.env.DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB,
+        DEFAULT_COMPOSE_PUBLISH_MEMORY_LIMIT_MB
+      ),
     });
     composeYaml = rendered.composeYaml;
     interpolationEnv = rendered.interpolationEnv;

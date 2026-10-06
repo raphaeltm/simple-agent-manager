@@ -18,6 +18,11 @@ import {
   type ToolPayloadCleanupCursor,
 } from './tool-payload-cleanup-candidates';
 import {
+  describeToolPayloadCleanupConfigRefusal,
+  isProjectInToolPayloadCleanupScope,
+  shouldReportToolPayloadCleanupConfigRefusal,
+} from './tool-payload-cleanup-config-refusal';
+import {
   readToolPayloadCleanupManifestBatch,
   readToolPayloadCleanupManifestRoot,
 } from './tool-payload-cleanup-manifest';
@@ -125,40 +130,39 @@ function createToolPayloadCleanupPlan(
 ): ToolPayloadCleanupPlan | null {
   if (!config.enabled || !config.toolPayloadCleanupEnabled || !projectId) return null;
   const fixedCutoffConfigured = config.toolPayloadCleanupCutoffCreatedAt !== null;
-  // An approved-manifest plan is ONLY ever entered through the fixed-cutoff gate
-  // below. Without this guard, half-applied operator config — manifest key/hash and
-  // ceilings set, but `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_CUTOFF_CREATED_AT` dropped —
-  // would skip the strict block entirely (including the exact single-project
-  // allowlist match) and still take the manifest branch for EVERY project, with only
-  // an incidental cutoff-timestamp mismatch standing between it and a strip.
-  if (
-    (config.toolPayloadCleanupManifestKey || config.toolPayloadCleanupManifestSha256) &&
-    !fixedCutoffConfigured
-  ) {
+  // The two configuration gates live in `describeToolPayloadCleanupConfigRefusal` so the refusal
+  // and its explanation cannot drift apart. Refusing here used to be silent, which meant an
+  // operator could set PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED=true, read `true` back from the
+  // deployed Worker, and get no cleanup and no signal — see that module's header.
+  const configRefusal = describeToolPayloadCleanupConfigRefusal(
+    projectId,
+    config,
+    Boolean(options.transactionSync)
+  );
+  if (configRefusal) {
+    if (
+      shouldReportToolPayloadCleanupConfigRefusal(
+        projectId,
+        config.toolPayloadCleanupProjectIds,
+        options
+      )
+    ) {
+      log.warn('config_refused', {
+        projectId,
+        gate: configRefusal.gate,
+        unmet: configRefusal.unmet,
+        planId: config.toolPayloadCleanupPlanId,
+        cutoffCreatedAt: config.toolPayloadCleanupCutoffCreatedAt,
+      });
+    }
     return null;
   }
   if (
-    fixedCutoffConfigured &&
-    (!config.toolPayloadCleanupExactConfigValid ||
-      config.toolPayloadCleanupCutoffCreatedAt === -1 ||
-      !config.toolPayloadCleanupPlanId ||
-      !config.toolPayloadCleanupManifestKey ||
-      !config.toolPayloadCleanupManifestSha256 ||
-      !/^[a-f0-9]{64}$/.test(config.toolPayloadCleanupManifestSha256) ||
-      config.toolPayloadCleanupMaxTotalRows === null ||
-      config.toolPayloadCleanupMaxTotalBytes === null ||
-      config.toolPayloadCleanupMaxTotalR2Operations === null ||
-      config.toolPayloadCleanupMaxTotalWallTimeMs === null ||
-      !options.transactionSync ||
-      config.toolPayloadCleanupProjectIds?.length !== 1 ||
-      config.toolPayloadCleanupProjectIds[0] !== projectId)
-  ) {
-    return null;
-  }
-  if (
-    !options.forceStart &&
-    config.toolPayloadCleanupProjectIds !== null &&
-    !config.toolPayloadCleanupProjectIds.includes(projectId)
+    !isProjectInToolPayloadCleanupScope(
+      projectId,
+      config.toolPayloadCleanupProjectIds,
+      options.forceStart === true
+    )
   ) {
     return null;
   }

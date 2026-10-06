@@ -113,4 +113,4 @@ During brainstorming, agents can produce artifacts — Playwright screenshots, r
 
 - `tasks/backlog/2026-03-19-graph-execution-model.md` — longer-term task decomposition and graph execution
 - `tasks/backlog/2026-03-18-code-context-for-task-submission.md` — complementary: how context flows into task submission
-- `tasks/backlog/2026-03-09-quick-chat-mode-design.md` — serverless chat was considered and deferred in favor of VM-backed brainstorming
+- `tasks/archive/2026-03-09-quick-chat-mode-design.md` — serverless chat was considered and deferred in favor of VM-backed brainstorming

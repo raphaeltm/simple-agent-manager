@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   nodeAgentRequest: vi.fn(),
   sendPromptToAgentOnNode: vi.fn(),
   ensureSessionRecovery: vi.fn(),
+  reportSessionRecoveryRefusal: vi.fn(),
   wakeSession: vi.fn(),
   markSessionSnapshotAwakeInPlace: vi.fn(),
   NodeAgentHttpError: class NodeAgentHttpError extends Error {
@@ -32,6 +33,7 @@ vi.mock('../../../src/services/node-agent', () => ({
 
 vi.mock('../../../src/services/session-recovery', () => ({
   ensureSessionRecovery: mocks.ensureSessionRecovery,
+  reportSessionRecoveryRefusal: mocks.reportSessionRecoveryRefusal,
 }));
 
 vi.mock('../../../src/services/project-data', () => ({
@@ -56,19 +58,43 @@ const protocolFixture = JSON.parse(
   notReadyPrompt: Record<string, unknown>;
   notFoundReceipt: Record<string, unknown>;
 };
-
+const promptProtocolCapabilities = {
+  ...protocolFixture.capabilities,
+  interactions: {
+    supported: true,
+    version: 1,
+    answerEndpoint: true,
+    permissionBridge: true,
+    formBridge: true,
+    urlBridge: true,
+  },
+};
 const targetRow = {
   workspace_id: 'workspace-1',
   user_id: 'user-1',
   workspace_status: 'running',
   node_id: 'node-1',
-  node_status: 'running',
+  node_status: 'running' as string | null,
   node_health_status: 'healthy',
   agent_version: 'v1',
-  node_runtime: 'vm',
+  node_runtime: 'vm' as string | null,
   agent_session_id: 'acp-1',
   agent_session_status: 'running',
   agent_session_updated_at: '2026-08-09T00:00:00Z',
+  snapshot_sleep_status: null as string | null,
+  snapshot_runtime: null as string | null,
+};
+
+/** The rows the sleep writers leave behind for an idle-slept Instant runtime. */
+const sleptContainerRow = {
+  ...targetRow,
+  workspace_status: 'sleeping',
+  node_status: 'sleeping',
+  node_health_status: 'unhealthy',
+  node_runtime: 'cf-container',
+  agent_session_status: 'sleeping',
+  snapshot_sleep_status: 'sleeping',
+  snapshot_runtime: 'cf-container',
 };
 
 function envWithTarget(row: typeof targetRow | null = targetRow): Env {
@@ -135,6 +161,50 @@ describe('VM prompt delivery adapter', () => {
       status: 'unavailable',
       reason: 'snapshot_missing',
     });
+    mocks.reportSessionRecoveryRefusal.mockResolvedValue({
+      status: 'unavailable',
+      reason: 'container_runtime_unavailable',
+    });
+  });
+
+  it('returns a terminal denial when source authority is revoked during transport preparation', async () => {
+    mocks.nodeAgentRequest.mockResolvedValue(protocolFixture.capabilities);
+    let transportStarted!: () => void;
+    let releaseTransport!: () => void;
+    const started = new Promise<void>((resolve) => {
+      transportStarted = resolve;
+    });
+    const barrier = new Promise<void>((resolve) => {
+      releaseTransport = resolve;
+    });
+    const injected = vi.fn();
+    mocks.sendPromptToAgentOnNode.mockImplementationOnce(async (...args: unknown[]) => {
+      transportStarted();
+      await barrier;
+      const options = args[7] as { beforeExternalMutation?: () => Promise<void> };
+      await options.beforeExternalMutation?.();
+      injected();
+      return protocolFixture.newPrompt;
+    });
+    let authorized = true;
+    const adapterInput = input(false);
+    adapterInput.beforeSideEffect = async () =>
+      authorized
+        ? null
+        : {
+            kind: 'failed',
+            reason: 'terminal_target',
+            error: 'Source membership revoked',
+            runtimeIdentity: 'vm-01',
+            capabilities: null,
+          };
+    const pending = new DefaultVmPromptDeliveryAdapter(envWithTarget()).submit(adapterInput);
+    await started;
+    authorized = false;
+    releaseTransport();
+    expect(await pending).toMatchObject({ kind: 'failed', reason: 'terminal_target' });
+    expect(injected).not.toHaveBeenCalled();
+    expect(mocks.nodeAgentRequest).toHaveBeenCalledOnce();
   });
 
   it('fails closed for an old VM unless compatibility is explicitly enabled', async () => {
@@ -156,6 +226,24 @@ describe('VM prompt delivery adapter', () => {
     expect(result).toMatchObject({ kind: 'retry', reason: 'not_ready' });
     expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
   });
+
+  it.each(['replaced', 'storage_failure'])(
+    'never sends when the submission checkpoint is %s',
+    async (failure) => {
+      mocks.nodeAgentRequest.mockResolvedValue(protocolFixture.capabilities);
+      const beforeSubmit = vi.fn(() => {
+        if (failure === 'storage_failure') throw new Error('SQLite temporarily unavailable');
+        return false;
+      });
+      const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
+      await expect(adapter.submit({ ...input(false), beforeSubmit })).resolves.toMatchObject({
+        kind: 'retry',
+        reason: 'not_ready',
+      });
+      expect(beforeSubmit).toHaveBeenCalledWith(promptProtocolCapabilities);
+      expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+    }
+  );
 
   it('uses a probe-resolved target without reinterpreting a suspect D1 health mirror', async () => {
     const adapterEnv = envWithTarget({
@@ -256,6 +344,156 @@ describe('VM prompt delivery adapter', () => {
       request.sourceTaskGuard
     );
     expect(mocks.nodeAgentRequest).not.toHaveBeenCalled();
+  });
+
+  // A user who replies right after a session slept meets a replaced workspace
+  // whose deletion still awaits its proof. That refusal clears on its own, so the
+  // delivery must wait for it rather than drop the reply (`.claude/rules/72`).
+  it.each([
+    ['a sleeping workspace', { ...targetRow, workspace_status: 'sleeping' }],
+    ['a deleted workspace row', null],
+  ])(
+    'retries delivery to %s while recovery refuses for a reason that clears on its own',
+    async (_label, row) => {
+      for (const reason of [
+        'workspace_deletion_unconfirmed',
+        'session_recovery_placement_lookup_failed',
+        'session_recovery_placement_transient',
+      ]) {
+        mocks.ensureSessionRecovery.mockResolvedValueOnce({ status: 'unavailable', reason });
+        const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget(row));
+
+        await expect(adapter.submit(input(false))).resolves.toMatchObject({
+          kind: 'retry',
+          reason: 'not_ready',
+          error: `Session cannot wake yet (${reason})`,
+        });
+      }
+      expect(mocks.nodeAgentRequest).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(['sleeping_snapshot_missing', 'source_task_not_wakeable', 'recovery_start_failed:boom'])(
+    'ends delivery when recovery refuses for good (%s)',
+    async (reason) => {
+      mocks.ensureSessionRecovery.mockResolvedValue({ status: 'unavailable', reason });
+      const adapter = new DefaultVmPromptDeliveryAdapter(
+        envWithTarget({ ...targetRow, workspace_status: 'sleeping' })
+      );
+
+      await expect(adapter.submit(input(false))).resolves.toMatchObject({
+        kind: 'failed',
+        reason: 'wake_refused',
+        error: expect.stringContaining(reason),
+      });
+    }
+  );
+
+  it('probes a slept container marked unhealthy, since the probe is what wakes it', async () => {
+    mocks.nodeAgentRequest.mockRejectedValue(new Error('connection timeout'));
+    const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget(sleptContainerRow));
+
+    await expect(adapter.submit(input(false))).resolves.toMatchObject({
+      kind: 'retry',
+      reason: 'not_ready',
+    });
+    expect(mocks.nodeAgentRequest).toHaveBeenCalledOnce();
+    expect(mocks.reportSessionRecoveryRefusal).not.toHaveBeenCalled();
+  });
+
+  // Control (`.claude/rules/61`): only the slept-container verdict stopped reading the health
+  // mirror. A live VM target on an unhealthy node is still refused before any probe.
+  it('still refuses a live VM target whose node is unhealthy, without probing it', async () => {
+    const adapter = new DefaultVmPromptDeliveryAdapter(
+      envWithTarget({ ...targetRow, node_health_status: 'unhealthy' })
+    );
+
+    await expect(adapter.submit(input(false))).resolves.toMatchObject({
+      kind: 'failed',
+      reason: 'dead_target',
+    });
+    expect(mocks.nodeAgentRequest).not.toHaveBeenCalled();
+    expect(mocks.reportSessionRecoveryRefusal).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['deleted workspace', { workspace_status: 'deleted' }],
+    ['deleted node', { node_status: 'deleted' }],
+    ['node that is not a container', { node_runtime: 'vm' }],
+    ['stopped agent session', { agent_session_status: 'stopped' }],
+  ])('reports a failed wake for a sleeping container with a %s', async (_label, overrides) => {
+    const adapter = new DefaultVmPromptDeliveryAdapter(
+      envWithTarget({ ...sleptContainerRow, ...overrides })
+    );
+
+    await expect(adapter.submit(input(false))).resolves.toMatchObject({
+      kind: 'failed',
+      reason: 'wake_refused',
+    });
+    expect(mocks.ensureSessionRecovery).not.toHaveBeenCalled();
+    expect(mocks.reportSessionRecoveryRefusal).toHaveBeenCalledWith(
+      expect.anything(),
+      'chat-1',
+      'container_runtime_unavailable',
+      expect.any(String)
+    );
+    expect(mocks.nodeAgentRequest).not.toHaveBeenCalled();
+  });
+
+  it('reports a sleeping container whose node row was deleted', async () => {
+    const adapter = new DefaultVmPromptDeliveryAdapter(
+      envWithTarget({
+        ...targetRow,
+        node_runtime: null,
+        snapshot_runtime: 'cf-container',
+        snapshot_sleep_status: 'sleeping',
+        workspace_status: 'deleted',
+        node_status: null,
+      })
+    );
+
+    await expect(adapter.submit(input(false))).resolves.toMatchObject({
+      kind: 'failed',
+      reason: 'wake_refused',
+    });
+    expect(mocks.reportSessionRecoveryRefusal).toHaveBeenCalledOnce();
+    expect(mocks.ensureSessionRecovery).not.toHaveBeenCalled();
+  });
+
+  it('reports a sleeping container whose workspace row was deleted', async () => {
+    const database = {
+      prepare: vi
+        .fn()
+        .mockReturnValueOnce({ bind: () => ({ first: async () => null }) })
+        .mockReturnValueOnce({
+          bind: () => ({
+            first: async () => ({ runtime: 'cf-container', sleep_status: 'sleeping' }),
+          }),
+        }),
+    } as unknown as D1Database;
+    const adapter = new DefaultVmPromptDeliveryAdapter({ DATABASE: database } as Env);
+
+    await expect(adapter.submit(input(false))).resolves.toMatchObject({
+      kind: 'failed',
+      reason: 'wake_refused',
+    });
+    expect(mocks.reportSessionRecoveryRefusal).toHaveBeenCalledOnce();
+    expect(mocks.ensureSessionRecovery).not.toHaveBeenCalled();
+  });
+
+  it('does not report a terminal container session as a failed wake', async () => {
+    const adapter = new DefaultVmPromptDeliveryAdapter(
+      envWithTarget({
+        ...targetRow,
+        node_runtime: 'cf-container',
+        workspace_status: 'deleted',
+      })
+    );
+
+    await expect(adapter.submit(input(false))).resolves.toMatchObject({
+      kind: 'failed',
+      reason: 'terminal_target',
+    });
   });
 
   it('revalidates a guarded parent before creating sleeping-session recovery', async () => {
@@ -445,7 +683,7 @@ describe('VM prompt delivery adapter', () => {
       expect.anything(),
       'user-1',
       'delivery-1',
-      { requestTimeoutMs: 1_234 }
+      { requestTimeoutMs: 1_234, beforeExternalMutation: expect.any(Function) }
     );
   });
 
@@ -502,7 +740,12 @@ describe('VM prompt delivery adapter', () => {
       expect.anything(),
       'user-1',
       'delivery-1',
-      { requestTimeoutMs: 1_234, protocolVersion: 1, deliveryId: 'delivery-1' }
+      {
+        requestTimeoutMs: 1_234,
+        protocolVersion: 1,
+        deliveryId: 'delivery-1',
+        beforeExternalMutation: expect.any(Function),
+      }
     );
   });
 
@@ -760,5 +1003,114 @@ describe('VM prompt delivery adapter', () => {
       );
     const unproven = await adapter.reconcile(input(false));
     expect(unproven).toMatchObject({ kind: 'ambiguous', reason: 'receipt_unavailable' });
+  });
+});
+
+describe('VM prompt delivery adapter — urgent busy-turn stop hook', () => {
+  function urgentInput(messageClass: 'interrupt' | 'deliver'): VmPromptDeliveryAdapterInput {
+    const base = input(false);
+    base.claim.message.messageClass = messageClass;
+    return base;
+  }
+
+  function busyRejection(): Error {
+    return new mocks.NodeAgentHttpError(
+      409,
+      JSON.stringify({
+        ...protocolFixture.notReadyPrompt,
+        sessionId: 'acp-1',
+        receipt: {
+          ...(protocolFixture.notReadyPrompt.receipt as Record<string, unknown>),
+          deliveryId: 'delivery-1',
+        },
+      })
+    );
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.ensureSessionRecovery.mockResolvedValue({
+      status: 'unavailable',
+      reason: 'snapshot_missing',
+    });
+    mocks.nodeAgentRequest.mockResolvedValue(protocolFixture.capabilities);
+    mocks.sendPromptToAgentOnNode.mockRejectedValue(busyRejection());
+  });
+
+  it('invokes onBusyTurn with the resolved target for an interrupt-class claim', async () => {
+    const onBusyTurn = vi.fn(async () => {});
+    const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
+
+    const result = await adapter.submit({ ...urgentInput('interrupt'), onBusyTurn });
+
+    expect(result).toMatchObject({ kind: 'retry', reason: 'busy' });
+    expect(onBusyTurn).toHaveBeenCalledTimes(1);
+    expect(onBusyTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        nodeId: 'node-1',
+        workspaceId: 'workspace-1',
+        agentSessionId: 'acp-1',
+        userId: 'user-1',
+      })
+    );
+  });
+
+  it('invokes onBusyTurn for every urgent class', async () => {
+    for (const messageClass of ['preempt_and_replan', 'shutdown_with_final_prompt'] as const) {
+      const onBusyTurn = vi.fn(async () => {});
+      const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
+
+      const result = await adapter.submit({ ...urgentInput(messageClass), onBusyTurn });
+
+      expect(result).toMatchObject({ kind: 'retry', reason: 'busy' });
+      expect(onBusyTurn).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it('never invokes onBusyTurn for informational classes', async () => {
+    const onBusyTurn = vi.fn(async () => {});
+    const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
+
+    const result = await adapter.submit({ ...urgentInput('deliver'), onBusyTurn });
+
+    expect(result).toMatchObject({ kind: 'retry', reason: 'busy' });
+    expect(onBusyTurn).not.toHaveBeenCalled();
+  });
+
+  it('never invokes onBusyTurn when no hook is supplied', async () => {
+    const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
+
+    const result = await adapter.submit(urgentInput('interrupt'));
+
+    expect(result).toMatchObject({ kind: 'retry', reason: 'busy' });
+  });
+
+  it('keeps the busy retry result even when the hook throws', async () => {
+    const onBusyTurn = vi.fn(async () => {
+      throw new Error('stop-and-deliver bookkeeping failed');
+    });
+    const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
+
+    const result = await adapter.submit({ ...urgentInput('interrupt'), onBusyTurn });
+
+    expect(result).toMatchObject({ kind: 'retry', reason: 'busy' });
+    expect(onBusyTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('never invokes onBusyTurn while reconciling an urgent claim', async () => {
+    // Reconcile mode re-reads receipts for an attempt that may already have
+    // sent; it must never gain stop powers, so a busy classification there
+    // would be a bug. Pin the invariant.
+    const onBusyTurn = vi.fn(async () => {});
+    const claim = urgentInput('interrupt');
+    claim.claim.mode = 'reconcile';
+    claim.claim.message.runtimeIdentity = 'runtime-vm-01';
+    mocks.nodeAgentRequest.mockResolvedValue(protocolFixture.capabilities);
+    const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
+
+    const result = await adapter.reconcile({ ...claim, onBusyTurn });
+
+    expect(result.kind).toBeOneOf(['accepted', 'ambiguous', 'retry']);
+    expect(onBusyTurn).not.toHaveBeenCalled();
   });
 });

@@ -19,8 +19,37 @@ cpu_ms = 30000
 "unicorn-magic" = "./src/shims/unicorn-magic.ts"
 
 [vars]
+# WARNING: a value here is only the DEFAULT. Every name listed in the `getOptionalProcessEnvVars`
+# call in `scripts/deploy/sync-wrangler-config.ts` is REPLACED by a GitHub Environment variable of
+# the same name when that variable is non-empty, so editing this file can ship nothing. Always
+# confirm the deployed value from the Cloudflare API after a flag change
+# (.claude/rules/70-flag-flips-must-verify-the-deployed-value.md). The deploy log and the job
+# summary now list every Environment override that disagrees with this file.
+#
+# Known non-flag overrides are enumerated by exact name in `EXPECTED_ENVIRONMENT_VAR_OVERRIDES`
+# (`scripts/deploy/sync-wrangler-config.ts`), each with the reason it exists. That list is the
+# machine-readable source of truth and is deliberately NOT restated here — two hand-maintained
+# copies of the same list is the drift this whole change exists to stop. Anything outside it
+# raises a deploy-time warning annotation.
+#
+# FLAG divergences are deliberately excluded from that list, so they annotate on every deploy.
+# Two exist today and both are intentional:
+#   PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED   here "true", production "false".
+#       Event-log cleanup is proven on staging (which takes this file's value) but stays GATED in
+#       production until Raphaël approves it separately. Do not "reconcile" by flipping this to
+#       "false" — that would also disable it on staging and for self-hosters.
+#   PROJECT_DATA_ARCHIVE_COMPACT_ENABLED     here "false", production "true".
+#       Compact archive shards were approved for production on 2026-09-08. This default is
+#       deliberately conservative for fresh self-host installs.
 BASE_DOMAIN = "workspaces.example.com"
 VERSION = "0.1.0"
+# D1 Sessions API anchor for the Worker fetch handler. "first-primary" routes the first query
+# of each request to the primary and lets the rest be served by any replica caught up to that
+# bookmark: one trans-Atlantic round trip per request instead of N, with every query in the
+# request served at or after the primary's state at request start. It does NOT promise that a
+# write landing mid-request is visible to the rest of that request — see the precise statement
+# in apps/api/src/lib/d1-session.ts. Set to "disabled" to send every query at the primary.
+D1_SESSION_MODE = "first-primary"
 CRON_SWEEPS_ENABLED_KV_KEY = "control-loops:cron-enabled"
 DO_ALARMS_ENABLED_KV_KEY = "control-loops:alarms-enabled"
 CONTROL_LOOP_KILL_SWITCH_CACHE_MS = "30000"
@@ -44,7 +73,6 @@ HUMAN_INPUT_ESCALATION_FRACTIONS = "0.25,0.75"
 HUMAN_INPUT_UNDELIVERED_GRACE_MS = "7200000"
 HUMAN_INPUT_MAX_WAIT_MS = "86400000"
 MAX_NODES_PER_USER = "10"
-MAX_WORKSPACES_PER_NODE = "3"
 MAX_AGENT_SESSIONS_PER_WORKSPACE = "10"
 NODE_HEARTBEAT_STALE_SECONDS = "180"
 MAX_PROJECTS_PER_USER = "100"
@@ -128,7 +156,7 @@ PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_RETURN_MARGIN_MS = "500"
 PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MEASUREMENT_WALL_TIME_MS = "10000"
 PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_STATE_BYTES = "1750000"
 PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_ERROR_MAX_LENGTH = "1000"
-PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED = "false"
+PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED = "true"
 PROJECT_DATA_GROUPED_FTS_CLEANUP_TRIGGER_RATIO = "0.9"
 PROJECT_DATA_GROUPED_FTS_CLEANUP_TARGET_RATIO = "0.85"
 PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_SESSIONS = "2"
@@ -139,17 +167,123 @@ PROJECT_DATA_GROUPED_FTS_CLEANUP_RECHECK_MS = "300000"
 PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_TIME_MS = "5000"
 PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_UNSAFE_RATIO = "0.98"
 PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES = "1"
-PROJECT_DATA_ARCHIVE_SHARDING_ENABLED = "false"
-PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED = "false"
-PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS = "86400000"
+PROJECT_DATA_ARCHIVE_SHARDING_ENABLED = "true"
+# Compact format stays off until the staged rollout and production mutation approval.
+PROJECT_DATA_ARCHIVE_COMPACT_ENABLED = "false"
+# Tripled with the sweep cadence on 2026-09-27 (was 800000): the same ~33k estimate units per
+# tick at 3x the ticks. Real candidates reserve ~21.5k units (six production samples, 17.8k-27.1k),
+# so 72 ticks/day use ~1.55M; 800000 would have stopped the drain at ~37/day. Cost
+# (`pnpm quality:cloudflare-cost`, rule 76): DO rows written were projected at 32.8M of the 50M/month
+# included allowance, and the extra ticks add ~0.4-0.6M billed rows/day, so the expected cost is
+# $0; spending the whole allowance at the worst measured ratio would be ~$13/month over it.
+# The GitHub `production` Environment pins this var and must be changed in lockstep; the deploy
+# log prints any override that differs (.claude/rules/70).
+PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET = "2400000"
+# Safety multiplier applied to the row inventory `estimateArchiveWrites` already counts, NOT
+# an independent amplification factor. MEASURED 2026-09-14 in production two ways:
+#   - `project_data_archive_write_budget` sampled an hour apart: 726,408 reserved across 11
+#     publishes at 11:29Z, 780,016 across 12 at 12:15Z => ~65,001 writes/migration, i.e.
+#     ~8,000 inventory units at the then-shipped factor of 8.
+#   - Cloudflare `durableObjectsPeriodicGroups` 5-minute buckets isolating four archive ticks
+#     in namespace fb36fe21: 5,950 / 6,436 / 7,942 / 9,823 rowsWritten actually billed.
+# Billed rows per inventory unit therefore spans 0.74-1.23. At factor 8 the budget charged ~8x
+# what the work costs, capping production at 800000/65001 = 12 migrations/day while the hourly
+# cadence allows 24 — so half the ticks ran and reclaimed nothing.
+#
+# 2 exceeds the worst observed ratio of 1.23 by ~63%. Under the 800000 allowance and hourly
+# cadence of 2026-09-14 that moved the budget's ceiling to ~47/day, so the one-candidate-per-tick
+# limit (~4,849 messages each) was the binding constraint at 24/day. Since 2026-09-27 the same factor
+# against ~10,250-unit candidates and the 2400000 allowance gives ~111/day, above the 72 ticks the
+# cadence claims, so the cadence still binds. Two caveats before trusting this number further: n
+# is small (2 budget samples, 4 telemetry buckets), and largest-first selection keeps pulling
+# differently-shaped candidates as the backlog drains, so the ratio can move. Re-measure before
+# changing this again — the condition it stands for is "rows this migration will actually
+# write", and only telemetry says what that is (.claude/rules/74).
+PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR = "2"
+PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS = "10000"
+PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_RETENTION_MS = "604800000"
+PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_CLEANUP_LIMIT = "100"
+PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED = "true"
+# This interval IS the drain rate: a tick archives exactly one session, because
+# PROJECT_DATA_ARCHIVE_WALL_TIME_MS is checked only between candidates and a real candidate takes
+# 43-83 s. 18 min (was one hour until 2026-09-27) triples it to one claim every 20 minutes. It is
+# deliberately short of 20: the */5 cron reaches the archive step 1m15s-3m30s into each invocation,
+# and at a whole-hour interval claims kept missing their tick by seconds (37 claims averaged 62.7 min
+# apart). 18 is never due on the third five-minute tick and is due on the fourth unless the archive
+# step starts over two minutes earlier than at the previous claim (the observed spread is 2m15s),
+# which pushes that one claim to 25 minutes. Per-tick copy work
+# stays bounded by _WALL_TIME_MS, _SWEEP_SESSIONS and _SWEEP_MESSAGE_BUDGET; daily volume by
+# _DAILY_WRITE_BUDGET. Load review: tasks/archive/2026-09-27-triple-archive-drain-speed.md and the
+# archive-sharding notes in apps/www/src/content/docs/docs/reference/configuration.md.
+# 2026-10-03: a billing firebreak (#2216) set this back to one hour and was reverted the same day.
+# The cost spike it reacted to came from Containers, Workers AI and R2 snapshot uploads, not from
+# this sweep, while the SAM root ProjectData DO sat ~550 MB under Cloudflare's hard 10 GiB cap
+# (it hit the cap on 2026-10-02). This drain is storage protection, not a cost lever: do not slow
+# it to save money.
+PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS = "1080000"
 PROJECT_DATA_ARCHIVE_SHARD_COUNT = "128"
 PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS = "1"
-PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS = "1"
+# Only `migrating` fences per tick; the real throughput bound is _DAILY_WRITE_BUDGET. Each
+# fenced session costs ~3 D1 writes plus an unbounded chunk copy, and the tick's wall-time
+# gate is only checked BETWEEN candidates. A refused candidate opens no fence and consumes
+# no slot.
+#
+# This is NOT a throughput lever while _WALL_TIME_MS is below one candidate's real duration:
+# largest-first selection under a cumulative message budget fences ONE candidate that consumes
+# nearly the whole budget, the wall gate is only checked BETWEEN candidates, and a single
+# candidate already exceeds it. What this value does bind is the reclaimable-migration limit
+# and the candidate over-fetch LIMIT (min(limit, _SWEEP_PROJECTS * this) + _FALLTHROUGH_DEPTH),
+# i.e. how much in-flight work one tick can resume. Code default is 10. Do not raise it
+# expecting more drain without first raising _WALL_TIME_MS past a candidate's real duration.
+PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS = "8"
+# Cumulative message_count of NEW candidates one tick may journal. This is a selector
+# ceiling, not an exact throughput promise: reserveArchiveWrites reserves the
+# estimateArchiveWrites result, computed as 1000 + factor * inventory units per session.
+# Inventory units include raw messages, tool-payload rows, grouped rows, and grouped FTS bytes.
+# This budget is ALSO the per-candidate ceiling (`sweepMessageCeiling` = min(this, the ceiling
+# derived from _DAILY_WRITE_BUDGET)), and when _COMPACT_ENABLED is true selectCandidates binds
+# it into `AND ss.message_count <= ?`. A session larger than this is therefore not deferred —
+# it is INVISIBLE to every tick until the budget is raised. Treat a change here as a change to
+# WHICH sessions can ever be archived, not only to how fast.
+#
+# 2026-09-20: 10000 (was 5000). Step 1 of a staged raise toward the code default of 20000;
+# promote only on staged evidence, never as a routine bump. MAX is 5_000_000.
+# Two constraints to keep in mind when changing it:
+#   - Bigger candidates are the better buy per write (the fixed 1000-unit per-session
+#     reservation amortises further), but the allowance then admits fewer sessions per UTC
+#     window than the cadence has ticks, so _DAILY_WRITE_BUDGET becomes the binding
+#     constraint and later ticks report `window_exhausted` — normal backpressure, not an alert.
+#   - Per-candidate risk scales with the candidate: chunk count, seal read-back, lease headroom
+#     against _LEASE_MS, and the cost of a failed attempt (copySourceChunks restarts at ordinal
+#     0 and re-reserves the full estimate; _POISON_AFTER_ATTEMPTS failures strand the session).
+# Sizing evidence, rollout stages and the production measurements behind this value live in
+# tasks/archive/2026-09-20-archive-sweep-throughput-step3.md and PR #2109. Behaviour is pinned by
+# tests/unit/project-data-archive/sweep-message-budget-shipped.test.ts and
+# tests/workers/project-data-archive-sweep-throughput.test.ts.
+PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET = "10000"
+# Assumed percentage by which a session's write estimate exceeds its message_count (archived
+# tool payloads, grouped rows and FTS units). Reserved as headroom when the per-candidate
+# selection ceiling is derived from _DAILY_WRITE_BUDGET; 100 means "units may be up to 2x
+# message_count", the conservative side of the 1.9x measured in production on 2026-09-08.
+PROJECT_DATA_ARCHIVE_SWEEP_UNIT_OVERHEAD_PERCENT = "100"
+# Spare candidates read beyond the tick's session slots, so a session the write budget refuses
+# can descend to a smaller one rather than ending the tick with nothing migrated.
+PROJECT_DATA_ARCHIVE_SWEEP_FALLTHROUGH_DEPTH = "4"
+# Consecutive sweeps that may migrate nothing because EVERY candidate cost more than the whole
+# daily allowance before the cadence row reports `partial` instead of `succeeded`.
+PROJECT_DATA_ARCHIVE_BUDGET_STALL_ALERT_SWEEPS = "3"
 PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS = "604800000"
+PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS = "604800000"
+# Failed journals wait this long before a sweep retries them, so three faults poison a row over
+# hours, not three consecutive sweep cadence ticks.
+PROJECT_DATA_ARCHIVE_FAILED_RETRY_DELAY_MS = "3600000"
 PROJECT_DATA_ARCHIVE_CHUNK_ROWS = "500"
 PROJECT_DATA_ARCHIVE_CHUNK_BYTES = "16777216"
+PROJECT_DATA_ARCHIVE_HASH_PAGE_ROWS = "500"
 PROJECT_DATA_ARCHIVE_LEASE_MS = "300000"
-PROJECT_DATA_ARCHIVE_WALL_TIME_MS = "5000"
+# Soft budget checked between candidates; 10 s allows one ordinary candidate while limiting
+# tail draining in a single cron tick (code fallback stays 5 s).
+PROJECT_DATA_ARCHIVE_WALL_TIME_MS = "10000"
 PROJECT_DATA_ARCHIVE_ROLLOUT_LIST_LIMIT_DEFAULT = "25"
 PROJECT_DATA_ARCHIVE_ROLLOUT_LIST_LIMIT_MAX = "100"
 PROJECT_DATA_ARCHIVE_FROZEN_INTENT_INSPECTION_LIMIT_DEFAULT = "5"
@@ -161,30 +295,20 @@ PROJECT_DATA_ARCHIVE_ROLLOUT_WARNING_REASON_MAX_LENGTH = "300"
 PROJECT_DATA_ARCHIVE_POISON_AFTER_ATTEMPTS = "3"
 PROJECT_DATA_ARCHIVE_R2_PREFIX = "project-data/session-archives"
 PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS = "4"
+PROJECT_DATA_ARCHIVE_SEARCH_CONCURRENCY = "4"
+PROJECT_DATA_ARCHIVE_SEARCH_REPAIR_SESSIONS = "1"
+PROJECT_DATA_ARCHIVE_SEARCH_REPAIR_CHUNKS = "1"
+PROJECT_DATA_ARCHIVE_SEARCH_CONTINUATION_TTL_MS = "900000"
+PROJECT_DATA_ARCHIVE_SEARCH_CURSOR_MAX_BYTES = "1048576"
+PROJECT_DATA_ARCHIVE_SEARCH_ERROR_LIMIT = "20"
+SEARCH_QUERY_MAX_LENGTH = "4096"
+SEARCH_QUERY_MAX_TERM_LENGTH = "48"
+SEARCH_QUERY_MAX_TERMS = "40"
 PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED = "true"
 PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS = "500"
 PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS = "7"
 PROJECT_DATA_EVENT_LOG_CLEANUP_RECHECK_MS = "86400000"
-PROJECT_EVENT_MAX_ACTIVE_SUBSCRIPTIONS_PER_PROJECT = "200"
-PROJECT_EVENT_FILTER_MAX_VALUES_PER_FIELD = "20"
-PROJECT_EVENT_FILTER_MAX_MATCH_KEYS = "100"
-PROJECT_EVENT_FILTER_MAX_STRING_BYTES = "160"
-PROJECT_EVENT_METADATA_MAX_BYTES = "8192"
-PROJECT_EVENT_METADATA_MAX_DEPTH = "4"
-PROJECT_EVENT_METADATA_MAX_KEYS = "64"
-PROJECT_EVENT_METADATA_MAX_ARRAY_ITEMS = "64"
-PROJECT_EVENT_DISPLAY_MAX_BYTES = "4096"
-PROJECT_EVENT_DISPLAY_MAX_LABELS = "12"
-PROJECT_EVENT_RAW_PAYLOAD_REF_MAX_BYTES = "512"
-PROJECT_EVENT_REASON_MAX_BYTES = "1024"
-PROJECT_EVENT_MAX_MATCHES_PER_EVENT = "100"
-PROJECT_EVENT_DELIVERY_BATCH_MAX_EVENTS = "50"
-PROJECT_EVENT_DELIVERY_ATTEMPT_MAX_PER_BATCH = "10"
-PROJECT_EVENT_LIST_LIMIT = "50"
-PROJECT_EVENT_LIST_MAX = "200"
-PROJECT_EVENT_RECENT_STATUS_LIMIT = "50"
-PROJECT_EVENT_RETENTION_DAYS = "30"
-PROJECT_EVENT_RETENTION_BATCH_ROWS = "500"
+PROJECT_EVENT_WAKE_ENABLED = "true"
 MESSAGE_SIZE_THRESHOLD = "102400"
 ACTIVITY_RETENTION_DAYS = "90"
 SESSION_IDLE_TIMEOUT_MINUTES = "60"
@@ -235,7 +359,9 @@ ERROR_REPORT_STORED_ERROR_MAX_BYTES = "512"
 ERROR_REPORT_COLLECTOR_CONCURRENCY = "1"
 VM_AGENT_PROTOCOL = "https"
 VM_AGENT_PORT = "8443"
+VM_ADMISSION_BUSY_BUILD_WAIT_TIMEOUT_MS = "1200000"
 DEVCONTAINER_CACHE_ENABLED = "true"
+WORKSPACE_BUILD_QUEUE_DEPTH = "1"
 DEVCONTAINER_CACHE_REGISTRY_HOST = "registry.cloudflare.com"
 DEVCONTAINER_CACHE_REPOSITORY_PREFIX = "sam-"
 DEVCONTAINER_CACHE_CREDENTIAL_EXPIRATION_MINUTES = "120"
@@ -251,10 +377,8 @@ DIAGNOSIS_COMPLETED_STEP_MIN_DELAY_MS = "1000"
 ORCHESTRATOR_ZERO_TASK_GRACE_MS = "600000"
 ORCHESTRATOR_MAX_MISSION_LIFETIME_MS = "86400000"
 # Task reconciliation — inactivity check-in for silent task agents
-TASK_RECONCILIATION_IDLE_MS = "300000"
-TASK_RECONCILIATION_RESPONSE_DEADLINE_MS = "60000"
-TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS = "1800000"
-TASK_RECONCILIATION_PROMPT_HARD_STALL_MS = "7200000"
+# Common timing defaults live in packages/shared constants. Keep them out of
+# Worker text bindings unless an environment intentionally overrides them.
 TASK_RECONCILIATION_ACTIVE_WORK_HARD_STALL_MS = "7200000"
 TASK_RECONCILIATION_MIN_ALARM_DELAY_MS = "10000"
 TASK_RECONCILIATION_MAX_CANDIDATES_PER_SWEEP = "5"
@@ -262,9 +386,18 @@ TASK_RECONCILIATION_NODE_CALL_TIMEOUT_MS = "5000"
 TASK_RECONCILIATION_CANDIDATE_LEASE_MS = "30000"
 TASK_RECONCILIATION_PROBE_MAX_ATTEMPTS = "3"
 TASK_RECONCILIATION_QUARANTINE_MS = "300000"
+# Reviewed permission creation requires an explicit deployment override after
+# compatible-runtime verification. Pending requests remain answerable when
+# creation is disabled. Forms have a separate opt-in switch.
+ACP_INTERACTIONS_ENABLED = "false"
+ACP_INTERACTION_FORMS_ENABLED = "false"
+ACP_INTERACTION_URLS_ENABLED = "false"
+# URL bounds use shared defaults unless a deployment sets an explicit override.
+# Keeping default values out of [vars] preserves Worker text-binding headroom.
 # AI Inference Proxy (Cloudflare AI Gateway for trial/zero-config users)
 AI_PROXY_ENABLED = "true"
 AI_PROXY_DEFAULT_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8"
+AI_PROXY_REQUEST_BODY_MAX_BYTES = "1048576"
 AI_GATEWAY_ID = "sam"
 # SAM Agent — set model to Workers AI for zero-config usage (no API key needed)
 SAM_MODEL = "@cf/google/gemma-4-26b-a4b-it"
@@ -425,6 +558,11 @@ class_name = "SamSession"
 name = "PROJECT_AGENT"
 class_name = "ProjectAgent"
 
+# Durable Object for per-chat dormant ACP interaction state and answer outbox
+[[durable_objects.bindings]]
+name = "INTERACTION_STORE"
+class_name = "InteractionStore"
+
 # Durable Object for atomic per-user AI token budget accounting
 [[durable_objects.bindings]]
 name = "AI_TOKEN_BUDGET_COUNTER"
@@ -544,6 +682,10 @@ new_sqlite_classes = ["SetupSessionPool"]  # Singleton concurrency gate for guid
 [[migrations]]
 tag = "v20"
 new_sqlite_classes = ["DiagnosisRunner"]
+
+[[migrations]]
+tag = "v21"
+new_sqlite_classes = ["InteractionStore"]
 
 # Analytics Engine for usage tracking (Phase 1 — server-side analytics)
 [[analytics_engine_datasets]]

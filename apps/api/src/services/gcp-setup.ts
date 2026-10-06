@@ -11,10 +11,11 @@ import * as v from 'valibot';
 import type { Env } from '../env';
 import { readResponseJson } from '../lib/runtime-validation';
 import { GcpApiError } from './gcp-errors';
+import { fetchWithTimeout, IAM_URL, pollOperation, SERVICE_USAGE_URL } from './gcp-setup-transport';
+
+export { fetchWithTimeout, pollOperation } from './gcp-setup-transport';
 
 const RESOURCE_MANAGER_URL = 'https://cloudresourcemanager.googleapis.com/v1';
-const SERVICE_USAGE_URL = 'https://serviceusage.googleapis.com/v1';
-const IAM_URL = 'https://iam.googleapis.com/v1';
 
 interface GcpProject {
   projectId: string;
@@ -65,11 +66,6 @@ const projectPolicySchema = v.object({
   version: v.optional(v.number()),
 });
 
-const pollOperationSchema = v.object({
-  done: v.optional(v.boolean()),
-  error: v.optional(v.object({ message: v.string() })),
-});
-
 function requireOperationName(op: { name?: string }, context: string): string {
   if (!op.name) {
     throw new GcpApiError({ step: context, message: 'GCP operation response missing name' });
@@ -89,33 +85,45 @@ function assertSafeCelValue(value: string, fieldName: string): void {
 }
 
 /** Status callback for setup progress reporting */
-export type SetupProgressCallback = (step: string, status: 'pending' | 'in_progress' | 'done' | 'error') => void;
+export type SetupProgressCallback = (
+  step: string,
+  status: 'pending' | 'in_progress' | 'done' | 'error'
+) => void;
 
 /**
  * List the user's GCP projects using their OAuth access token.
  */
 export async function listGcpProjects(
   oauthToken: string,
-  timeoutMs: number,
+  timeoutMs: number
 ): Promise<Array<{ projectId: string; name: string; projectNumber: string }>> {
   const projects: Array<{ projectId: string; name: string; projectNumber: string }> = [];
   let pageToken: string | undefined;
 
   do {
     const url = `${RESOURCE_MANAGER_URL}/projects?filter=lifecycleState:ACTIVE${pageToken ? `&pageToken=${pageToken}` : ''}`;
-    const res = await fetchWithTimeout(url, {
-      headers: { Authorization: `Bearer ${oauthToken}` },
-    }, timeoutMs);
+    const res = await fetchWithTimeout(
+      url,
+      {
+        headers: { Authorization: `Bearer ${oauthToken}` },
+      },
+      timeoutMs
+    );
 
     if (!res.ok) {
       const body = await res.text();
-      throw new GcpApiError({ step: 'list_projects', message: `Failed to list GCP projects (${res.status})`, statusCode: res.status, rawBody: body });
+      throw new GcpApiError({
+        step: 'list_projects',
+        message: `Failed to list GCP projects (${res.status})`,
+        statusCode: res.status,
+        rawBody: body,
+      });
     }
 
     const data: GcpProjectListResponse = await readResponseJson(
       res,
       gcpProjectListResponseSchema,
-      'gcp.resource_manager.list_projects',
+      'gcp.resource_manager.list_projects'
     );
     if (data.projects) {
       for (const p of data.projects) {
@@ -138,22 +146,31 @@ export async function listGcpProjects(
 export async function getProjectNumber(
   oauthToken: string,
   projectId: string,
-  timeoutMs: number,
+  timeoutMs: number
 ): Promise<string> {
   const url = `${RESOURCE_MANAGER_URL}/projects/${projectId}`;
-  const res = await fetchWithTimeout(url, {
-    headers: { Authorization: `Bearer ${oauthToken}` },
-  }, timeoutMs);
+  const res = await fetchWithTimeout(
+    url,
+    {
+      headers: { Authorization: `Bearer ${oauthToken}` },
+    },
+    timeoutMs
+  );
 
   if (!res.ok) {
     const body = await res.text();
-    throw new GcpApiError({ step: 'get_project_number', message: `Failed to get project info (${res.status})`, statusCode: res.status, rawBody: body });
+    throw new GcpApiError({
+      step: 'get_project_number',
+      message: `Failed to get project info (${res.status})`,
+      statusCode: res.status,
+      rawBody: body,
+    });
   }
 
   const data = await readResponseJson(
     res,
     gcpProjectNumberResponseSchema,
-    'gcp.resource_manager.project',
+    'gcp.resource_manager.project'
   );
   return data.projectNumber;
 }
@@ -175,21 +192,30 @@ export async function enableApis(
   oauthToken: string,
   projectNumber: string,
   timeoutMs: number,
-  serviceIds: string[] = VM_APIS,
+  serviceIds: string[] = VM_APIS
 ): Promise<void> {
   const url = `${SERVICE_USAGE_URL}/projects/${projectNumber}/services:batchEnable`;
-  const res = await fetchWithTimeout(url, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${oauthToken}`,
-      'Content-Type': 'application/json',
+  const res = await fetchWithTimeout(
+    url,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${oauthToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ serviceIds }),
     },
-    body: JSON.stringify({ serviceIds }),
-  }, timeoutMs);
+    timeoutMs
+  );
 
   if (!res.ok) {
     const body = await res.text();
-    throw new GcpApiError({ step: 'enable_apis', message: `Failed to enable APIs (${res.status})`, statusCode: res.status, rawBody: body });
+    throw new GcpApiError({
+      step: 'enable_apis',
+      message: `Failed to enable APIs (${res.status})`,
+      statusCode: res.status,
+      rawBody: body,
+    });
   }
 
   // Poll the long-running operation
@@ -207,20 +233,24 @@ export async function createWifPool(
   oauthToken: string,
   projectNumber: string,
   poolId: string,
-  timeoutMs: number,
+  timeoutMs: number
 ): Promise<string> {
   const url = `${IAM_URL}/projects/${projectNumber}/locations/global/workloadIdentityPools?workloadIdentityPoolId=${poolId}`;
-  const res = await fetchWithTimeout(url, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${oauthToken}`,
-      'Content-Type': 'application/json',
+  const res = await fetchWithTimeout(
+    url,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${oauthToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        displayName: 'Simple Agent Manager',
+        description: 'Workload identity pool for SAM platform',
+      }),
     },
-    body: JSON.stringify({
-      displayName: 'Simple Agent Manager',
-      description: 'Workload identity pool for SAM platform',
-    }),
-  }, timeoutMs);
+    timeoutMs
+  );
 
   if (res.status === 409) {
     // Already exists — reuse
@@ -229,7 +259,12 @@ export async function createWifPool(
 
   if (!res.ok) {
     const body = await res.text();
-    throw new GcpApiError({ step: 'create_wif_pool', message: `Failed to create WIF pool (${res.status})`, statusCode: res.status, rawBody: body });
+    throw new GcpApiError({
+      step: 'create_wif_pool',
+      message: `Failed to create WIF pool (${res.status})`,
+      statusCode: res.status,
+      rawBody: body,
+    });
   }
 
   const op = await readResponseJson(res, gcpOperationSchema, 'gcp.iam.create_wif_pool');
@@ -250,7 +285,7 @@ export async function createOidcProvider(
   providerId: string,
   issuerUri: string,
   timeoutMs: number,
-  samProjectId?: string,
+  samProjectId?: string
 ): Promise<void> {
   // The OIDC provider's allowedAudiences must match the JWT aud claim (https:// scheme).
   // GCP STS uses the protocol-relative format (//iam.googleapis.com/...) separately in gcp-sts.ts.
@@ -266,37 +301,54 @@ export async function createOidcProvider(
     : `assertion.iss == '${issuerUri}'`;
 
   const url = `${IAM_URL}/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/providers?workloadIdentityPoolProviderId=${providerId}`;
-  const res = await fetchWithTimeout(url, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${oauthToken}`,
-      'Content-Type': 'application/json',
+  const res = await fetchWithTimeout(
+    url,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${oauthToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        displayName: 'SAM OIDC Provider',
+        description: 'OIDC provider for Simple Agent Manager',
+        attributeMapping: {
+          'google.subject': 'assertion.sub',
+          'attribute.sam_user': 'assertion.user_id',
+          'attribute.sam_project': 'assertion.project_id',
+        },
+        attributeCondition,
+        oidc: {
+          issuerUri,
+          allowedAudiences: [wifAudience],
+        },
+      }),
     },
-    body: JSON.stringify({
-      displayName: 'SAM OIDC Provider',
-      description: 'OIDC provider for Simple Agent Manager',
-      attributeMapping: {
-        'google.subject': 'assertion.sub',
-        'attribute.sam_user': 'assertion.user_id',
-        'attribute.sam_project': 'assertion.project_id',
-      },
-      attributeCondition,
-      oidc: {
-        issuerUri,
-        allowedAudiences: [wifAudience],
-      },
-    }),
-  }, timeoutMs);
+    timeoutMs
+  );
 
   if (res.status === 409) {
     // Already exists — update instead
-    await updateOidcProvider(oauthToken, projectNumber, poolId, providerId, issuerUri, timeoutMs, samProjectId);
+    await updateOidcProvider(
+      oauthToken,
+      projectNumber,
+      poolId,
+      providerId,
+      issuerUri,
+      timeoutMs,
+      samProjectId
+    );
     return;
   }
 
   if (!res.ok) {
     const body = await res.text();
-    throw new GcpApiError({ step: 'create_oidc_provider', message: `Failed to create OIDC provider (${res.status})`, statusCode: res.status, rawBody: body });
+    throw new GcpApiError({
+      step: 'create_oidc_provider',
+      message: `Failed to create OIDC provider (${res.status})`,
+      statusCode: res.status,
+      rawBody: body,
+    });
   }
 
   const op = await readResponseJson(res, gcpOperationSchema, 'gcp.iam.create_oidc_provider');
@@ -315,7 +367,7 @@ export async function updateOidcProvider(
   providerId: string,
   issuerUri: string,
   timeoutMs: number,
-  samProjectId?: string,
+  samProjectId?: string
 ): Promise<void> {
   const wifAudience = `https://iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/providers/${providerId}`;
 
@@ -328,29 +380,38 @@ export async function updateOidcProvider(
 
   const name = `projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/providers/${providerId}`;
   const url = `${IAM_URL}/${name}?updateMask=attributeMapping,attributeCondition,oidc`;
-  const res = await fetchWithTimeout(url, {
-    method: 'PATCH',
-    headers: {
-      Authorization: `Bearer ${oauthToken}`,
-      'Content-Type': 'application/json',
+  const res = await fetchWithTimeout(
+    url,
+    {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${oauthToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        attributeMapping: {
+          'google.subject': 'assertion.sub',
+          'attribute.sam_user': 'assertion.user_id',
+          'attribute.sam_project': 'assertion.project_id',
+        },
+        attributeCondition,
+        oidc: {
+          issuerUri,
+          allowedAudiences: [wifAudience],
+        },
+      }),
     },
-    body: JSON.stringify({
-      attributeMapping: {
-        'google.subject': 'assertion.sub',
-        'attribute.sam_user': 'assertion.user_id',
-        'attribute.sam_project': 'assertion.project_id',
-      },
-      attributeCondition,
-      oidc: {
-        issuerUri,
-        allowedAudiences: [wifAudience],
-      },
-    }),
-  }, timeoutMs);
+    timeoutMs
+  );
 
   if (!res.ok) {
     const body = await res.text();
-    throw new GcpApiError({ step: 'update_oidc_provider', message: `Failed to update OIDC provider (${res.status})`, statusCode: res.status, rawBody: body });
+    throw new GcpApiError({
+      step: 'update_oidc_provider',
+      message: `Failed to update OIDC provider (${res.status})`,
+      statusCode: res.status,
+      rawBody: body,
+    });
   }
 
   const op = await readResponseJson(res, gcpOperationSchema, 'gcp.iam.update_oidc_provider');
@@ -368,20 +429,24 @@ export async function createServiceAccount(
   accountId: string,
   timeoutMs: number,
   displayName = 'SAM VM Manager',
-  description = 'Service account for SAM to manage Compute Engine VMs',
+  description = 'Service account for SAM to manage Compute Engine VMs'
 ): Promise<string> {
   const url = `${IAM_URL}/projects/${projectId}/serviceAccounts`;
-  const res = await fetchWithTimeout(url, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${oauthToken}`,
-      'Content-Type': 'application/json',
+  const res = await fetchWithTimeout(
+    url,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${oauthToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        accountId,
+        serviceAccount: { displayName, description },
+      }),
     },
-    body: JSON.stringify({
-      accountId,
-      serviceAccount: { displayName, description },
-    }),
-  }, timeoutMs);
+    timeoutMs
+  );
 
   const email = `${accountId}@${projectId}.iam.gserviceaccount.com`;
 
@@ -392,7 +457,12 @@ export async function createServiceAccount(
 
   if (!res.ok) {
     const body = await res.text();
-    throw new GcpApiError({ step: 'create_service_account', message: `Failed to create service account (${res.status})`, statusCode: res.status, rawBody: body });
+    throw new GcpApiError({
+      step: 'create_service_account',
+      message: `Failed to create service account (${res.status})`,
+      statusCode: res.status,
+      rawBody: body,
+    });
   }
 
   return email;
@@ -408,7 +478,7 @@ export async function grantWifUserOnSa(
   saEmail: string,
   poolId: string,
   timeoutMs: number,
-  samProjectId?: string,
+  samProjectId?: string
 ): Promise<void> {
   // Validate early, before any network calls (fail-fast pattern).
   if (samProjectId) {
@@ -419,24 +489,33 @@ export async function grantWifUserOnSa(
 
   // Read current policy
   const getUrl = `${IAM_URL}/${saResource}:getIamPolicy`;
-  const getRes = await fetchWithTimeout(getUrl, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${oauthToken}`,
-      'Content-Type': 'application/json',
+  const getRes = await fetchWithTimeout(
+    getUrl,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${oauthToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: '{}',
     },
-    body: '{}',
-  }, timeoutMs);
+    timeoutMs
+  );
 
   if (!getRes.ok) {
     const body = await getRes.text();
-    throw new GcpApiError({ step: 'grant_wif_user', message: `Failed to get SA IAM policy (${getRes.status})`, statusCode: getRes.status, rawBody: body });
+    throw new GcpApiError({
+      step: 'grant_wif_user',
+      message: `Failed to get SA IAM policy (${getRes.status})`,
+      statusCode: getRes.status,
+      rawBody: body,
+    });
   }
 
   const policy = await readResponseJson(
     getRes,
     serviceAccountPolicySchema,
-    'gcp.iam.service_account_policy',
+    'gcp.iam.service_account_policy'
   );
 
   // Use subject-scoped principal to prevent cross-project impersonation.
@@ -463,18 +542,27 @@ export async function grantWifUserOnSa(
 
   // Write updated policy
   const setUrl = `${IAM_URL}/${saResource}:setIamPolicy`;
-  const setRes = await fetchWithTimeout(setUrl, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${oauthToken}`,
-      'Content-Type': 'application/json',
+  const setRes = await fetchWithTimeout(
+    setUrl,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${oauthToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ policy: { bindings, etag: policy.etag } }),
     },
-    body: JSON.stringify({ policy: { bindings, etag: policy.etag } }),
-  }, timeoutMs);
+    timeoutMs
+  );
 
   if (!setRes.ok) {
     const body = await setRes.text();
-    throw new GcpApiError({ step: 'grant_wif_user', message: `Failed to set SA IAM policy (${setRes.status})`, statusCode: setRes.status, rawBody: body });
+    throw new GcpApiError({
+      step: 'grant_wif_user',
+      message: `Failed to set SA IAM policy (${setRes.status})`,
+      statusCode: setRes.status,
+      rawBody: body,
+    });
   }
 }
 
@@ -484,8 +572,8 @@ export async function grantWifUserOnSa(
 /** Roles granted to the SAM service account on the user's GCP project. */
 const SA_PROJECT_ROLES = [
   'roles/compute.instanceAdmin.v1', // VM lifecycle management
-  'roles/compute.securityAdmin',    // Firewall rule management (not included in instanceAdmin)
-  'roles/aiplatform.user',          // Vertex AI access (e.g. Gemini CLI)
+  'roles/compute.securityAdmin', // Firewall rule management (not included in instanceAdmin)
+  'roles/aiplatform.user', // Vertex AI access (e.g. Gemini CLI)
 ];
 
 export async function grantProjectRoles(
@@ -493,22 +581,31 @@ export async function grantProjectRoles(
   projectId: string,
   saEmail: string,
   timeoutMs: number,
-  roles: string[] = SA_PROJECT_ROLES,
+  roles: string[] = SA_PROJECT_ROLES
 ): Promise<void> {
   // Read current project IAM policy
   const getUrl = `${RESOURCE_MANAGER_URL}/projects/${projectId}:getIamPolicy`;
-  const getRes = await fetchWithTimeout(getUrl, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${oauthToken}`,
-      'Content-Type': 'application/json',
+  const getRes = await fetchWithTimeout(
+    getUrl,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${oauthToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: '{}',
     },
-    body: '{}',
-  }, timeoutMs);
+    timeoutMs
+  );
 
   if (!getRes.ok) {
     const body = await getRes.text();
-    throw new GcpApiError({ step: 'grant_project_roles', message: `Failed to get project IAM policy (${getRes.status})`, statusCode: getRes.status, rawBody: body });
+    throw new GcpApiError({
+      step: 'grant_project_roles',
+      message: `Failed to get project IAM policy (${getRes.status})`,
+      statusCode: getRes.status,
+      rawBody: body,
+    });
   }
 
   const policy = await readResponseJson(getRes, projectPolicySchema, 'gcp.resource_manager.policy');
@@ -536,20 +633,29 @@ export async function grantProjectRoles(
 
   // Write updated policy with version 3 for conditional bindings support
   const setUrl = `${RESOURCE_MANAGER_URL}/projects/${projectId}:setIamPolicy`;
-  const setRes = await fetchWithTimeout(setUrl, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${oauthToken}`,
-      'Content-Type': 'application/json',
+  const setRes = await fetchWithTimeout(
+    setUrl,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${oauthToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        policy: { bindings, etag: policy.etag, version: 3 },
+      }),
     },
-    body: JSON.stringify({
-      policy: { bindings, etag: policy.etag, version: 3 },
-    }),
-  }, timeoutMs);
+    timeoutMs
+  );
 
   if (!setRes.ok) {
     const body = await setRes.text();
-    throw new GcpApiError({ step: 'grant_project_roles', message: `Failed to set project IAM policy (${setRes.status})`, statusCode: setRes.status, rawBody: body });
+    throw new GcpApiError({
+      step: 'grant_project_roles',
+      message: `Failed to set project IAM policy (${setRes.status})`,
+      statusCode: setRes.status,
+      rawBody: body,
+    });
   }
 }
 
@@ -563,7 +669,7 @@ export async function runGcpSetup(
   defaultZone: string,
   env: Env,
   onProgress?: SetupProgressCallback,
-  samProjectId?: string,
+  samProjectId?: string
 ): Promise<GcpOidcCredential> {
   const timeoutMs = env.GCP_API_TIMEOUT_MS
     ? parseInt(env.GCP_API_TIMEOUT_MS, 10)
@@ -590,7 +696,15 @@ export async function runGcpSetup(
 
   // Step 4: Create OIDC provider
   onProgress?.('create_oidc_provider', 'in_progress');
-  await createOidcProvider(oauthToken, projectNumber, poolId, providerId, issuerUri, timeoutMs, samProjectId);
+  await createOidcProvider(
+    oauthToken,
+    projectNumber,
+    poolId,
+    providerId,
+    issuerUri,
+    timeoutMs,
+    samProjectId
+  );
   onProgress?.('create_oidc_provider', 'done');
 
   // Step 5: Create service account
@@ -600,7 +714,15 @@ export async function runGcpSetup(
 
   // Step 6: Grant WIF user on SA
   onProgress?.('grant_wif_user', 'in_progress');
-  await grantWifUserOnSa(oauthToken, gcpProjectId, projectNumber, saEmail, poolId, timeoutMs, samProjectId);
+  await grantWifUserOnSa(
+    oauthToken,
+    gcpProjectId,
+    projectNumber,
+    saEmail,
+    poolId,
+    timeoutMs,
+    samProjectId
+  );
   onProgress?.('grant_wif_user', 'done');
 
   // Step 7: Grant project roles (compute admin + Vertex AI)
@@ -619,63 +741,4 @@ export async function runGcpSetup(
     wifProviderId: providerId,
     defaultZone,
   };
-}
-
-/**
- * Poll a GCP long-running operation until complete.
- */
-export async function pollOperation(
-  oauthToken: string,
-  operationName: string,
-  timeoutMs: number,
-): Promise<void> {
-  const deadline = Date.now() + 5 * 60 * 1000; // 5 min max
-  let delayMs = 2000;
-
-  while (Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, delayMs));
-
-    // Some operations use different base URLs depending on the API
-    let url: string;
-    if (operationName.startsWith('operations/')) {
-      url = `${SERVICE_USAGE_URL}/${operationName}`;
-    } else {
-      url = `${IAM_URL}/${operationName}`;
-    }
-
-    const res = await fetchWithTimeout(url, {
-      headers: { Authorization: `Bearer ${oauthToken}` },
-    }, timeoutMs);
-
-    if (!res.ok) {
-      const body = await res.text();
-      throw new GcpApiError({ step: 'poll_operation', message: `Failed to poll operation (${res.status})`, statusCode: res.status, rawBody: body });
-    }
-
-    const op = await readResponseJson(res, pollOperationSchema, 'gcp.operation.poll');
-    if (op.error) {
-      throw new GcpApiError({ step: 'poll_operation', message: 'GCP operation failed', rawBody: op.error.message });
-    }
-    if (op.done) {
-      return;
-    }
-
-    delayMs = Math.min(delayMs * 1.5, 10_000);
-  }
-
-  throw new GcpApiError({ step: 'poll_operation', message: 'GCP operation timed out' });
-}
-
-export async function fetchWithTimeout(
-  url: string,
-  init: RequestInit,
-  timeoutMs: number,
-): Promise<Response> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timeoutId);
-  }
 }

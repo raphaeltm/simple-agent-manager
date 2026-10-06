@@ -38,14 +38,37 @@ export function makeMockUser({ email, name, role = 'user', sessionId, userId }: 
   };
 }
 
-export async function screenshot(page: Page, name: string) {
+/** `iPhone SE (375x667)` -> `iphone-se-375x667`. */
+function slugifyProjectName(projectName: string): string {
+  return projectName
+    .replace(/[^a-zA-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase();
+}
+
+/**
+ * `scopeToProject` prefixes the Playwright project name.
+ *
+ * The `-{width}x{height}` suffix alone does NOT make a filename unique: a
+ * `test.use`-pinned describe renders at the same size under every project, so
+ * running one spec on two projects has them overwrite each other's captures and
+ * a screenshot review silently inspects only whichever ran last. Opt-in rather
+ * than automatic, because the existing audit specs' filenames are referenced
+ * from PR evidence.
+ */
+export async function screenshot(
+  page: Page,
+  name: string,
+  options: { scopeToProject?: boolean } = {}
+) {
   await page.waitForTimeout(600);
   const viewport = page.viewportSize();
   const suffix = viewport ? `-${viewport.width}x${viewport.height}` : '';
+  const prefix = options.scopeToProject ? `${slugifyProjectName(test.info().project.name)}-` : '';
   const screenshotDir = resolve(process.cwd(), DEFAULT_SCREENSHOT_DIR);
   mkdirSync(screenshotDir, { recursive: true });
   await page.screenshot({
-    path: `${screenshotDir}/${name}${suffix}.png`,
+    path: `${screenshotDir}/${prefix}${name}${suffix}.png`,
     fullPage: true,
   });
 }
@@ -65,6 +88,7 @@ type MutableCapacitySummary = {
     id: string;
     strategy: string;
     exhaustionPolicy: string;
+    maxNodes?: number;
     revision: number;
   };
   candidates: MutableCapacityCandidate[];
@@ -77,7 +101,7 @@ type MutableCapacityDefaultsResponse = {
 };
 
 export type MockCapacityDefaultsUpdate = {
-  policy?: { strategy?: string; exhaustionPolicy?: string };
+  policy?: { strategy?: string; exhaustionPolicy?: string; maxNodes?: number };
   candidates?: MutableCapacityCandidate[];
   catalogAdditions?: Array<{
     sourceId: string;
@@ -100,6 +124,7 @@ export function applyMockCapacityDefaultsUpdate<T extends MutableCapacityDefault
   if (update.policy?.exhaustionPolicy) {
     summary.pool.exhaustionPolicy = update.policy.exhaustionPolicy;
   }
+  if (update.policy?.maxNodes) summary.pool.maxNodes = update.policy.maxNodes;
   for (const candidateUpdate of update.candidates ?? []) {
     const candidate = summary.candidates.find((item) => item.id === candidateUpdate.id);
     if (candidate) candidate.status = candidateUpdate.status;
@@ -155,10 +180,7 @@ export async function screenshotNearHeading(
   await page.waitForTimeout(600);
   const viewport = page.viewportSize();
   const suffix = viewport ? `-${viewport.width}x${viewport.height}` : '';
-  const screenshotDir = resolve(
-    process.cwd(),
-    options.outputDir ?? DEFAULT_SCREENSHOT_DIR
-  );
+  const screenshotDir = resolve(process.cwd(), options.outputDir ?? DEFAULT_SCREENSHOT_DIR);
   mkdirSync(screenshotDir, { recursive: true });
   await page.screenshot({
     path: `${screenshotDir}/${name}${suffix}.png`,
@@ -177,10 +199,7 @@ export async function screenshotSectionNearHeading(
   await page.waitForTimeout(600);
   const viewport = page.viewportSize();
   const suffix = viewport ? `-${viewport.width}x${viewport.height}` : '';
-  const screenshotDir = resolve(
-    process.cwd(),
-    options.outputDir ?? DEFAULT_SCREENSHOT_DIR
-  );
+  const screenshotDir = resolve(process.cwd(), options.outputDir ?? DEFAULT_SCREENSHOT_DIR);
   mkdirSync(screenshotDir, { recursive: true });
   const section = headingLocator.locator('xpath=ancestor::section[1]').first();
   const target = (await section.count()) > 0 ? section : headingLocator;
@@ -275,8 +294,56 @@ export async function findClippedOverflow(page: Page): Promise<string[]> {
 /** Blocking form. Use on surfaces that are already clean. */
 export async function assertNoClippedOverflow(page: Page) {
   const offenders = await findClippedOverflow(page);
-  expect(offenders, `Horizontally clipped content (invisible to the user):\n${offenders.join('\n')}`)
-    .toEqual([]);
+  expect(
+    offenders,
+    `Horizontally clipped content (invisible to the user):\n${offenders.join('\n')}`
+  ).toEqual([]);
+}
+
+/**
+ * The VERTICAL counterpart to `findClippedOverflow`.
+ *
+ * That function deliberately looks only at `overflow-x`, which left the
+ * identical vertical condition with no detector at all — and that blind spot is
+ * why the project sidebar shipped with its bottom nav items sheared off and
+ * unreachable on short laptops. The `aside` never overflowed (so its
+ * `overflow-y-auto` never engaged) while the carousel root clipped 280px of nav
+ * behind `overflow: hidden`, and ~40 green audit specs could not see it.
+ *
+ * Walks the ancestors of `selector` and reports any that clip vertically while
+ * holding content taller than their box. Unlike the horizontal sweep this is
+ * ancestor-scoped rather than document-wide: promoting it to a repo-wide
+ * blocking sweep on day one would fail unrelated specs, which the progressive
+ * quality-tool rollout policy forbids. Point it at the subtree you changed.
+ */
+export async function findVerticalClipping(page: Page, selector: string): Promise<string[]> {
+  return page.evaluate((sel) => {
+    const found: string[] = [];
+    let el = document.querySelector(sel)?.parentElement ?? null;
+    while (el && el !== document.documentElement) {
+      const style = getComputedStyle(el);
+      const clips = style.overflowY === 'hidden' || style.overflowY === 'clip';
+      // +1 absorbs sub-pixel layout rounding.
+      if (clips && el.scrollHeight > el.clientHeight + 1) {
+        const cls = (el.getAttribute('class') ?? '').slice(0, 90);
+        found.push(
+          `<${el.tagName.toLowerCase()} class="${cls}"> content ${el.scrollHeight}px ` +
+            `clipped to ${el.clientHeight}px with overflow-y:${style.overflowY}`
+        );
+      }
+      el = el.parentElement;
+    }
+    return found;
+  }, selector);
+}
+
+/** Blocking form. Pair it with a positive-render assertion in the same test. */
+export async function assertNoVerticalClipping(page: Page, selector: string): Promise<void> {
+  const offenders = await findVerticalClipping(page, selector);
+  expect(
+    offenders,
+    `Vertically clipped content the user cannot scroll to:\n${offenders.join('\n')}`
+  ).toEqual([]);
 }
 
 /**
@@ -330,7 +397,7 @@ export async function assertThemeButtonsNotClipped(page: Page) {
 export async function seedTheme(
   page: Page,
   theme: 'dark' | 'light' | 'system',
-  prefersDark = true,
+  prefersDark = true
 ) {
   await page.addInitScript(
     ({ value, dark }) => {
@@ -360,7 +427,7 @@ export async function seedTheme(
         };
       }
     },
-    { value: theme, dark: prefersDark },
+    { value: theme, dark: prefersDark }
   );
 }
 
@@ -371,9 +438,7 @@ export async function seedTheme(
  */
 export async function expectTheme(page: Page, effective: 'dark' | 'light') {
   const expected = effective === 'dark' ? 'sam' : 'sam-light';
-  const attr = await page.evaluate(() =>
-    document.documentElement.getAttribute('data-ui-theme')
-  );
+  const attr = await page.evaluate(() => document.documentElement.getAttribute('data-ui-theme'));
   expect(attr).toBe(expected);
 }
 
@@ -409,7 +474,7 @@ export async function visitAndCapture(
   page: Page,
   path: string,
   name: string,
-  theme: 'dark' | 'light',
+  theme: 'dark' | 'light'
 ) {
   await page.goto(path);
   await expectThemePoll(page, theme);
@@ -430,7 +495,7 @@ export type AuditResponder = (status: number, body: unknown) => Promise<void>;
 export function describeThemeAudit(
   label: string,
   setupMocks: (page: Page) => Promise<void>,
-  run: (page: Page, theme: 'dark' | 'light', suffix: string) => Promise<void>,
+  run: (page: Page, theme: 'dark' | 'light', suffix: string) => Promise<void>
 ) {
   for (const theme of ['dark', 'light'] as const) {
     test.describe(`${label} — ${theme}`, () => {
@@ -452,7 +517,7 @@ export function describeThemeAudit(
  */
 export async function setupAuditRoutes(
   page: Page,
-  handler: (path: string, respond: AuditResponder, route: Route) => Promise<void> | undefined,
+  handler: (path: string, respond: AuditResponder, route: Route) => Promise<void> | undefined
 ) {
   await page.route('**/api/**', async (route: Route) => {
     const path = new URL(route.request().url()).pathname;
@@ -493,11 +558,11 @@ export async function setupProjectChatMocks(page: Page, options: ProjectChatMock
   }, user.id);
 
   await page.route('**/api/auth/get-session', (route: Route) =>
-    route.fulfill({ status: 200, json: { user } }),
+    route.fulfill({ status: 200, json: { user } })
   );
 
   await page.route('**/api/github/installations', (route: Route) =>
-    route.fulfill({ status: 200, json: [] }),
+    route.fulfill({ status: 200, json: [] })
   );
 
   await page.route(new RegExp(`/api/projects/${projectId}(?:\\?.*)?$`), (route: Route) => {
@@ -507,35 +572,170 @@ export async function setupProjectChatMocks(page: Page, options: ProjectChatMock
     return route.continue();
   });
 
-  await page.route(new RegExp(`/api/projects/${projectId}/sessions/[^/]+(?:\\?.*)?$`), (route: Route) =>
-    route.fulfill({ status: 200, json: { session, messages, hasMore: false } }),
+  await page.route(
+    new RegExp(`/api/projects/${projectId}/sessions/[^/]+(?:\\?.*)?$`),
+    (route: Route) => route.fulfill({ status: 200, json: { session, messages, hasMore: false } })
   );
 
   await page.route(`**/api/projects/${projectId}/sessions*`, (route: Route) =>
-    route.fulfill({ status: 200, json: { sessions: [session], total: 1 } }),
+    route.fulfill({ status: 200, json: { sessions: [session], total: 1 } })
   );
 
   await page.route(`**/api/projects/${projectId}/tasks*`, (route: Route) =>
-    route.fulfill({ status: 200, json: { tasks: [], total: 0 } }),
+    route.fulfill({ status: 200, json: { tasks: [], total: 0 } })
   );
 
   await page.route(`**/api/projects/${projectId}/agent-profiles`, (route: Route) =>
-    route.fulfill({ status: 200, json: { items: [] } }),
+    route.fulfill({ status: 200, json: { items: [] } })
   );
 
   await page.route('**/api/credentials', (route: Route) =>
-    route.fulfill({ status: 200, json: [{ provider: 'hetzner', status: 'valid' }] }),
+    route.fulfill({ status: 200, json: [{ provider: 'hetzner', status: 'valid' }] })
   );
 
   await page.route('**/api/trial/status', (route: Route) =>
-    route.fulfill({ status: 200, json: { available: false } }),
+    route.fulfill({ status: 200, json: { available: false } })
   );
 
   await page.route('**/api/agents', (route: Route) =>
-    route.fulfill({ status: 200, json: { agents: [] } }),
+    route.fulfill({ status: 200, json: { agents: [] } })
   );
 
   await page.route(`**/api/projects/${projectId}/commands*`, (route: Route) =>
-    route.fulfill({ status: 200, json: { commands: [] } }),
+    route.fulfill({ status: 200, json: { commands: [] } })
   );
+}
+
+// ---------------------------------------------------------------------------
+// Sleeping / waking project chat mocks
+// ---------------------------------------------------------------------------
+
+/** A project row with the fields the project chat route reads. */
+export function makeMockProject(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'proj-test-1',
+    name: 'Test Project',
+    repository: 'testuser/test-repo',
+    defaultBranch: 'main',
+    userId: 'user-test-1',
+    githubInstallationId: 'inst-1',
+    defaultVmSize: null,
+    defaultAgentType: null,
+    defaultProvider: null,
+    workspaceIdleTimeoutMs: null,
+    nodeIdleTimeoutMs: null,
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+    ...overrides,
+  };
+}
+
+/** The `SessionStateSnapshot` shape `routes/chat/wake-state.ts` returns for an idle session. */
+export function makeIdleSessionState(overrides: Record<string, unknown> = {}) {
+  return {
+    activity: 'idle',
+    activityAt: 0,
+    statusError: null,
+    currentPlan: null,
+    planUpdatedAt: null,
+    promptStartedAt: null,
+    agentType: null,
+    lastStopReason: null,
+    runtimeWorkState: null,
+    runtimeWorkCount: null,
+    runtimeWorkSource: null,
+    runtimeWorkUpdatedAt: null,
+    runtimeWorkProgressAt: null,
+    recoveryStatus: null,
+    wakePhase: null,
+    ...overrides,
+  };
+}
+
+export interface SleepingChatMockOptions {
+  user: unknown;
+  project: unknown;
+  session: { id: string } & Record<string, unknown>;
+  messages: unknown[];
+  /** Session detail `state`; see `makeIdleSessionState`. */
+  state: Record<string, unknown>;
+  /** The session's OWN task row, the one `useProvisioningTracker` reads. */
+  ownTask: Record<string, unknown>;
+}
+
+/**
+ * Registers every API route the project chat page touches when it opens a
+ * sleeping or waking session. Shared by `wake-progress-audit.spec.ts` and
+ * `sleeping-session-audit.spec.ts`, which differ only in the session `state`
+ * and the own-task shape they feed in.
+ *
+ * Envelope shapes matter: the client reads `.sessions`, `.items`, `.commands`
+ * and `.messages`. Returning a bare array crashes the app into its
+ * ErrorBoundary, where an absence-only assertion would still pass.
+ */
+export async function setupSleepingChatMocks(page: Page, options: SleepingChatMockOptions) {
+  const { user, project, session, messages, state, ownTask } = options;
+  await page.route('**/api/**', async (route: Route) => {
+    const path = new URL(route.request().url()).pathname;
+    const respond = (status: number, body: unknown) =>
+      route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+
+    if (path.includes('/api/auth/')) return respond(200, user);
+    if (path.startsWith('/api/notifications/preferences')) return respond(200, {});
+    if (path.startsWith('/api/notifications')) {
+      return respond(200, { notifications: [], unreadCount: 0 });
+    }
+    if (path.startsWith('/api/credentials')) return respond(200, []);
+    if (path.startsWith('/api/provider-catalog')) return respond(200, { catalogs: [] });
+    if (path.startsWith('/api/github/installations')) return respond(200, []);
+    if (path.startsWith('/api/report-issue/config')) return respond(200, { enabled: false });
+    if (path === '/api/trial-status') return respond(200, {});
+    if (path === '/api/agents') return respond(200, []);
+
+    const projectMatch = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
+    if (projectMatch) {
+      const subPath = projectMatch[2] || '';
+      if (subPath === '/sessions') return respond(200, { sessions: [session], total: 1 });
+      if (subPath === '/agent-profiles') return respond(200, { items: [] });
+      if (subPath === '/cached-commands') return respond(200, { commands: [] });
+      if (subPath === '/credential-attribution-health') return respond(200, {});
+      if (subPath.match(/^\/sessions\/[^/]+$/)) {
+        return respond(200, { session, messages, hasMore: false, state });
+      }
+      if (subPath.match(/\/sessions\/[^/]+\/messages/)) {
+        return respond(200, { messages, hasMore: false });
+      }
+      if (subPath === '/tasks') return respond(200, []);
+      if (subPath.match(/^\/tasks\/[^/]+$/)) return respond(200, ownTask);
+      if (subPath === '/agents') return respond(200, []);
+      if (subPath === '/skills') return respond(200, []);
+      if (subPath === '') return respond(200, project);
+      return respond(200, {});
+    }
+
+    if (path === '/api/projects') return respond(200, [project]);
+    return respond(200, {});
+  });
+}
+
+/**
+ * Resolves `'fetched'` when the page fetches the session's own task (the path
+ * that restores ProvisioningIndicator) and `'not-fetched'` once a bounded window
+ * passes without it. Await this before asserting the provisioning block is
+ * absent, so the assertion observes the restore effect's outcome instead of a
+ * moment before it ran.
+ */
+export function awaitOwnTaskFetchOutcome(
+  page: Page,
+  taskId: string,
+  windowMs = 1_500
+): Promise<'fetched' | 'not-fetched'> {
+  return page
+    .waitForResponse((response) => new URL(response.url()).pathname.endsWith(`/tasks/${taskId}`), {
+      timeout: windowMs,
+    })
+    .then(
+      () => 'fetched' as const,
+      () => 'not-fetched' as const
+    );
 }

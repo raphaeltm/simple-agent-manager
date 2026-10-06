@@ -41,6 +41,7 @@ export interface SubmitTaskRequest {
   vmLocation?: string;
   nodeId?: string;
   agentType?: string;
+  resourceRequirements?: import('@simple-agent-manager/shared').ResourceRequirements;
   workspaceProfile?: 'full' | 'lightweight';
   devcontainerConfigName?: string | null;
   parentTaskId?: string;

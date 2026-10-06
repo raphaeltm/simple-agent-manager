@@ -66,6 +66,10 @@ export const DEFAULT_NODE_CLEANUP_SWEEP_LIMIT = 25;
 /** Backoff after a node cleanup candidate fails permanently or transiently. */
 export const DEFAULT_NODE_CLEANUP_FAILURE_BACKOFF_MS = 60 * 60 * 1000; // 1 hour
 
+/** Wall-time and per-candidate network budgets for stopped VM handoff cleanup. */
+export const DEFAULT_NODE_STOPPED_HANDOFF_SWEEP_BUDGET_MS = 20_000;
+export const DEFAULT_NODE_STOPPED_HANDOFF_REQUEST_TIMEOUT_MS = 5_000;
+
 /**
  * Default maximum workspace candidates processed per cleanup phase per sweep (rule 47).
  * Override via WORKSPACE_CLEANUP_SWEEP_LIMIT env var.
@@ -106,6 +110,30 @@ export const DEFAULT_PROVIDER_ORPHAN_RECONCILE_INTERVAL_MS = 60 * 60 * 1000; // 
 /** Default TTL (ms) before a stopped workspace is automatically deleted. Override via WORKSPACE_STOPPED_TTL_MS env var. */
 export const DEFAULT_WORKSPACE_STOPPED_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
+/** Initial delay before retrying an unconfirmed VM workspace deletion. */
+export const DEFAULT_WORKSPACE_DELETION_RETRY_BASE_MS = 60 * 1000; // 1 minute
+
+/** Maximum exponential backoff for an unconfirmed VM workspace deletion. */
+export const DEFAULT_WORKSPACE_DELETION_RETRY_MAX_MS = 60 * 60 * 1000; // 1 hour
+
+/**
+ * Maximum time an unconfirmed deletion remains on the hot retry alarm before it is retained as
+ * an operator-visible dead letter. The workspace remains quarantined and replacement-fenced.
+ */
+export const DEFAULT_WORKSPACE_DELETION_MAX_RESIDENCE_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+/** Maximum due workspace deletions processed by one NodeLifecycle alarm. */
+export const DEFAULT_WORKSPACE_DELETION_ALARM_BATCH_SIZE = 3;
+
+/** Per-workspace/callback throttle for deletion-unconfirmed telemetry. */
+export const DEFAULT_WORKSPACE_DELETION_CALLBACK_SIGNAL_TTL_SECONDS = 5 * 60;
+
+/** Maximum expired callback throttle claims pruned by one signal attempt. */
+export const DEFAULT_WORKSPACE_DELETION_CALLBACK_SIGNAL_CLEANUP_LIMIT = 25;
+
+/** Maximum sanitized diagnostic length stored on a stopping workspace. */
+export const DEFAULT_WORKSPACE_DELETION_DIAGNOSTIC_MAX_LENGTH = 500;
+
 // =============================================================================
 // Workspace Idle Timeout (Compute Lifecycle Management)
 // =============================================================================
@@ -122,8 +150,15 @@ export const DEFAULT_IDLE_CLEANUP_MAX_RETRIES = 1;
 /** Default maximum age for an idle-cleanup schedule before it becomes attention-required. */
 export const DEFAULT_IDLE_CLEANUP_MAX_RESIDENCE_MS = 2 * 60 * 60 * 1000; // 2 hours
 
-/** Minimum delay before rescheduling a workspace-idle alarm. */
+/** Minimum delay before rescheduling a workspace-idle alarm for an overdue check. A hot-loop floor,
+ * deliberately not env-configurable, like `PROJECT_DATA_ALARM_FAILED_SECTION_RETRY_MS`. */
 export const DEFAULT_WORKSPACE_IDLE_MIN_ALARM_DELAY_MS = 60 * 1000;
+
+/** First retry delay after a workspace-idle check finds an idle workspace it cannot retire yet. */
+export const DEFAULT_WORKSPACE_IDLE_BACKOFF_BASE_MS = 10 * 60 * 1000; // 10 minutes
+
+/** Maximum retry delay after repeated workspace-idle checks that cannot retire an idle workspace. */
+export const DEFAULT_WORKSPACE_IDLE_BACKOFF_MAX_MS = 6 * 60 * 60 * 1000; // 6 hours
 
 /** Default workspace idle timeout (ms). Workspaces with no messages AND no terminal activity
  * for this duration are auto-deleted. Override per-project via project settings or via
@@ -142,7 +177,8 @@ export const MIN_NODE_IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 /** Maximum node idle timeout (ms). */
 export const MAX_NODE_IDLE_TIMEOUT_MS = 4 * 60 * 60 * 1000; // 4 hours
 
-/** Interval (ms) at which the ProjectData DO checks workspace idle state. */
+/** Delay (ms) after a workspace's latest activity before the ProjectData DO first checks it and
+ * records when it will become idle. */
 export const WORKSPACE_IDLE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
 /** Minimum interval (ms) between terminal activity updates to the DO to avoid write amplification.

@@ -4,7 +4,6 @@ import { type drizzle } from 'drizzle-orm/d1';
 import { type Context } from 'hono';
 import * as v from 'valibot';
 
-import { createAuth } from '../auth';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
@@ -12,6 +11,13 @@ import { readResponseJson } from '../lib/runtime-validation';
 import { AppError, errors } from '../middleware/error';
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 import { getGitLabOAuthConfig } from './platform-config';
+import {
+  availableUserAccessToken,
+  getBetterAuthAccessTokenForProvider,
+  requestLockedUserAccessToken,
+  userAccessTokenExpiryIso,
+  type UserAccessTokenResult,
+} from './user-access-token';
 
 const MIN_GITLAB_WRITE_ACCESS_LEVEL = 30; // Developer
 
@@ -103,68 +109,47 @@ export type GitLabAccessTokenResult = {
   accessTokenExpiresAt: string | null;
 };
 
-type TokenResult = {
-  accessToken: string | null | undefined;
-  accessTokenExpiresAt?: Date | string | null;
-  scopes?: string[];
-};
-
-function isExpired(expiresAt: Date | string | null | undefined): boolean {
-  if (!expiresAt) {
-    return false;
-  }
-  const expiresAtMs = new Date(expiresAt).getTime();
-  return Number.isFinite(expiresAtMs) && expiresAtMs <= Date.now();
-}
-
-function availableAccessToken(
-  token: TokenResult,
+function availableGitLabAccessToken(
+  token: UserAccessTokenResult,
   flow: string,
   userId: string
 ): GitLabAccessTokenResult | null {
-  if (!token.accessToken) {
-    return null;
-  }
-  const expiresAtIso = token.accessTokenExpiresAt
-    ? new Date(token.accessTokenExpiresAt).toISOString()
-    : null;
-  if (isExpired(token.accessTokenExpiresAt)) {
+  const accessToken = availableUserAccessToken(token, (accessTokenExpiresAt) => {
     log.warn('gitlab.user_access_token_expired', {
       flow,
       userId,
       tokenPresent: true,
-      accessTokenExpiresAt: expiresAtIso,
+      accessTokenExpiresAt,
     });
-    return null;
-  }
-  return { accessToken: token.accessToken, accessTokenExpiresAt: expiresAtIso };
+  });
+  return accessToken
+    ? { accessToken, accessTokenExpiresAt: userAccessTokenExpiryIso(token.accessTokenExpiresAt) }
+    : null;
 }
-
-const lockedTokenResponseSchema = v.object({
-  accessToken: v.nullable(v.string()),
-  accessTokenExpiresAt: v.nullable(v.string()),
-  scopes: v.optional(v.array(v.string())),
-});
 
 async function getDirectGitLabUserAccessTokenResultWithHeaders(
   env: Env,
-  headers: Headers,
+  headers: Headers | undefined,
   userId: string,
   flow: string
 ): Promise<GitLabAccessTokenResult | null> {
   try {
-    const auth = await createAuth(env);
-    const token = await auth.api.getAccessToken({
-      headers,
-      body: { providerId: 'gitlab', userId },
-    });
+    const token = await getBetterAuthAccessTokenForProvider(env, headers, userId, 'gitlab');
+    if (!token) {
+      log.warn('gitlab.user_access_token_account_missing', {
+        flow,
+        userId,
+        tokenPresent: false,
+      });
+      return null;
+    }
     log.info('gitlab.user_access_token.lookup', {
       flow,
       userId,
       tokenPresent: Boolean(token.accessToken),
       scopes: token.scopes,
     });
-    return availableAccessToken(token, flow, userId);
+    return availableGitLabAccessToken(token, flow, userId);
   } catch (err) {
     log.warn('gitlab.user_access_token_unavailable', {
       flow,
@@ -187,7 +172,7 @@ async function getDirectGitLabUserAccessTokenResultWithHeaders(
  */
 export async function getGitLabUserAccessTokenResultWithHeaders(
   env: Env,
-  headers: Headers,
+  headers: Headers | undefined,
   userId: string,
   flow: string
 ): Promise<GitLabAccessTokenResult | null> {
@@ -203,38 +188,30 @@ export async function getGitLabUserAccessTokenResultWithHeaders(
     return getDirectGitLabUserAccessTokenResultWithHeaders(env, headers, userId, flow);
   }
   try {
-    const id = env.GITLAB_USER_ACCESS_TOKEN_LOCK.idFromName(userId);
-    const stub = env.GITLAB_USER_ACCESS_TOKEN_LOCK.get(id);
-    const response = await stub.fetch('https://gitlab-user-access-token-lock/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        userId,
-        flow,
-        headers: Array.from(headers.entries()),
-      }),
-    });
-    if (!response.ok) {
+    const { token, status } = await requestLockedUserAccessToken(
+      env.GITLAB_USER_ACCESS_TOKEN_LOCK,
+      'https://gitlab-user-access-token-lock/token',
+      headers,
+      userId,
+      flow,
+      'gitlab.user_access_token.locked'
+    );
+    if (!token) {
       log.warn('gitlab.user_access_token_unavailable', {
         flow,
         userId,
         tokenPresent: false,
-        status: response.status,
+        status,
       });
       return null;
     }
-    const token = await readResponseJson(
-      response,
-      lockedTokenResponseSchema,
-      'gitlab.user_access_token.locked'
-    );
     log.info('gitlab.user_access_token.lookup', {
       flow,
       userId,
       tokenPresent: Boolean(token.accessToken),
       scopes: token.scopes,
     });
-    return availableAccessToken(token, flow, userId);
+    return availableGitLabAccessToken(token, flow, userId);
   } catch (err) {
     log.warn('gitlab.user_access_token_unavailable', {
       flow,
@@ -248,7 +225,7 @@ export async function getGitLabUserAccessTokenResultWithHeaders(
 
 export async function getGitLabUserAccessTokenWithHeaders(
   env: Env,
-  headers: Headers,
+  headers: Headers | undefined,
   userId: string,
   flow: string
 ): Promise<string | null> {
@@ -268,7 +245,7 @@ export async function getGitLabUserAccessTokenForOwner(
   userId: string,
   flow = 'owner-callback'
 ): Promise<string | null> {
-  return getGitLabUserAccessTokenWithHeaders(env, new Headers(), userId, flow);
+  return getGitLabUserAccessTokenWithHeaders(env, undefined, userId, flow);
 }
 
 export async function requireGitLabUserAccessToken(
@@ -300,7 +277,7 @@ export async function requireGitLabUserAccessTokenResultForOwner(
   userId: string,
   flow = 'owner-callback'
 ): Promise<GitLabAccessTokenResult> {
-  const result = await getGitLabUserAccessTokenResultWithHeaders(env, new Headers(), userId, flow);
+  const result = await getGitLabUserAccessTokenResultWithHeaders(env, undefined, userId, flow);
   if (!result) {
     throw new AppError(
       401,

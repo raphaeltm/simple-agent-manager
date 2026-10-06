@@ -1,5 +1,5 @@
 import type { AgentProfile } from '@simple-agent-manager/shared';
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { McpTokenData } from '../../../src/routes/mcp/_helpers';
 import {
@@ -82,6 +82,7 @@ function makeProfile(overrides: Partial<AgentProfile> = {}): AgentProfile {
     maxTurns: null,
     timeoutMinutes: null,
     vmSizeOverride: null,
+    resourceRequirementsJson: null,
     provider: null,
     vmLocation: null,
     workspaceProfile: null,
@@ -120,7 +121,9 @@ describe('MCP Profile Tools', () => {
       expect(result.id).toBe(1);
       expect(result.error).toBeUndefined();
 
-      const content = JSON.parse((result.result as { content: Array<{ text: string }> }).content[0].text);
+      const content = JSON.parse(
+        (result.result as { content: Array<{ text: string }> }).content[0].text
+      );
       expect(content.count).toBe(2);
       expect(content.profiles[0]).toEqual({
         id: 'prof-1',
@@ -140,7 +143,10 @@ describe('MCP Profile Tools', () => {
       vi.mocked(agentProfileService.listProfiles).mockResolvedValue([]);
       await handleListAgentProfiles(1, {}, tokenData, mockEnv);
       expect(agentProfileService.listProfiles).toHaveBeenCalledWith(
-        expect.anything(), 'proj-456', 'user-789', mockEnv,
+        expect.anything(),
+        'proj-456',
+        'user-789',
+        mockEnv
       );
     });
 
@@ -148,7 +154,9 @@ describe('MCP Profile Tools', () => {
       vi.mocked(agentProfileService.listProfiles).mockResolvedValue([]);
 
       const result = await handleListAgentProfiles(1, {}, tokenData, mockEnv);
-      const content = JSON.parse((result.result as { content: Array<{ text: string }> }).content[0].text);
+      const content = JSON.parse(
+        (result.result as { content: Array<{ text: string }> }).content[0].text
+      );
       expect(content.count).toBe(0);
       expect(content.profiles).toEqual([]);
     });
@@ -169,7 +177,9 @@ describe('MCP Profile Tools', () => {
       const result = await handleGetAgentProfile(1, { profileId: 'prof-1' }, tokenData, mockEnv);
 
       expect(result.error).toBeUndefined();
-      const content = JSON.parse((result.result as { content: Array<{ text: string }> }).content[0].text);
+      const content = JSON.parse(
+        (result.result as { content: Array<{ text: string }> }).content[0].text
+      );
       expect(content.id).toBe('prof-1');
       expect(content.systemPromptAppend).toBe('Focus on tests.');
       expect(content.maxTurns).toBe(50);
@@ -183,7 +193,10 @@ describe('MCP Profile Tools', () => {
       vi.mocked(agentProfileService.getProfile).mockResolvedValue(makeProfile());
       await handleGetAgentProfile(1, { profileId: 'prof-1' }, tokenData, mockEnv);
       expect(agentProfileService.getProfile).toHaveBeenCalledWith(
-        expect.anything(), 'proj-456', 'prof-1', 'user-789',
+        expect.anything(),
+        'proj-456',
+        'prof-1',
+        'user-789'
       );
     });
 
@@ -204,13 +217,20 @@ describe('MCP Profile Tools', () => {
       err.statusCode = 404;
       vi.mocked(agentProfileService.getProfile).mockRejectedValue(err);
 
-      const result = await handleGetAgentProfile(1, { profileId: 'nonexistent' }, tokenData, mockEnv);
+      const result = await handleGetAgentProfile(
+        1,
+        { profileId: 'nonexistent' },
+        tokenData,
+        mockEnv
+      );
       expect(result.error).toBeDefined();
       expect(result.error!.message).toContain('Agent profile not found');
     });
 
     it('returns INTERNAL_ERROR for unexpected service failures', async () => {
-      vi.mocked(agentProfileService.getProfile).mockRejectedValue(new Error('DB connection failed'));
+      vi.mocked(agentProfileService.getProfile).mockRejectedValue(
+        new Error('DB connection failed')
+      );
       const result = await handleGetAgentProfile(1, { profileId: 'prof-1' }, tokenData, mockEnv);
       expect(result.error!.code).toBe(-32603);
       expect(result.error!.message).toContain('Failed to get profile');
@@ -224,25 +244,34 @@ describe('MCP Profile Tools', () => {
       const created = makeProfile({ id: 'prof-new', name: 'my-agent' });
       vi.mocked(agentProfileService.createProfile).mockResolvedValue(created);
 
-      const result = await handleCreateAgentProfile(1, {
-        name: 'my-agent',
-        description: 'Custom agent',
-        agentType: 'claude-code',
-        model: 'claude-opus-4-6',
-        permissionMode: 'plan',
-        systemPromptAppend: 'Be thorough.',
-        maxTurns: 100,
-        timeoutMinutes: 60,
-        vmSizeOverride: 'large',
-        provider: 'hetzner',
-        vmLocation: 'fsn1',
-        workspaceProfile: 'full',
-        devcontainerConfigName: 'python-dev',
-        taskMode: 'task',
-      }, tokenData, mockEnv);
+      const result = await handleCreateAgentProfile(
+        1,
+        {
+          name: 'my-agent',
+          description: 'Custom agent',
+          agentType: 'claude-code',
+          model: 'claude-opus-4-6',
+          permissionMode: 'plan',
+          systemPromptAppend: 'Be thorough.',
+          maxTurns: 100,
+          timeoutMinutes: 60,
+          vmSizeOverride: 'large',
+          provider: 'hetzner',
+          vmLocation: 'fsn1',
+          workspaceProfile: 'full',
+          runtime: 'vm',
+          devcontainerConfigName: 'python-dev',
+          taskMode: 'task',
+          resourceRequirements: { minVcpu: 4, exclusiveNode: false },
+        },
+        tokenData,
+        mockEnv
+      );
 
       expect(result.error).toBeUndefined();
-      const content = JSON.parse((result.result as { content: Array<{ text: string }> }).content[0].text);
+      const content = JSON.parse(
+        (result.result as { content: Array<{ text: string }> }).content[0].text
+      );
       expect(content.id).toBe('prof-new');
       expect(content.name).toBe('my-agent');
       expect(content.message).toContain('created');
@@ -258,8 +287,9 @@ describe('MCP Profile Tools', () => {
           model: 'claude-opus-4-6',
           permissionMode: 'plan',
           devcontainerConfigName: 'python-dev',
+          resourceRequirements: { minVcpu: 4, exclusiveNode: false },
         }),
-        mockEnv,
+        mockEnv
       );
     });
 
@@ -275,7 +305,7 @@ describe('MCP Profile Tools', () => {
         'proj-456',
         'user-789',
         { name: 'minimal' },
-        mockEnv,
+        mockEnv
       );
     });
 
@@ -292,13 +322,28 @@ describe('MCP Profile Tools', () => {
     });
 
     it('returns conflict error for duplicate name', async () => {
-      const err = new Error('Profile "default" already exists in this project') as Error & { statusCode: number };
+      const err = new Error('Profile "default" already exists in this project') as Error & {
+        statusCode: number;
+      };
       err.statusCode = 409;
       vi.mocked(agentProfileService.createProfile).mockRejectedValue(err);
 
       const result = await handleCreateAgentProfile(1, { name: 'default' }, tokenData, mockEnv);
       expect(result.error).toBeDefined();
       expect(result.error!.message).toContain('already exists');
+    });
+
+    it('rejects malformed supplied resourceRequirements before service call', async () => {
+      const result = await handleCreateAgentProfile(
+        1,
+        { name: 'bad-resources', resourceRequirements: [] },
+        tokenData,
+        mockEnv
+      );
+
+      expect(result.error!.code).toBe(-32602);
+      expect(result.error!.message).toContain('resourceRequirements must be an object or null');
+      expect(agentProfileService.createProfile).not.toHaveBeenCalled();
     });
   });
 
@@ -309,14 +354,21 @@ describe('MCP Profile Tools', () => {
       const updated = makeProfile({ id: 'prof-1', name: 'renamed', model: 'claude-opus-4-6' });
       vi.mocked(agentProfileService.updateProfile).mockResolvedValue(updated);
 
-      const result = await handleUpdateAgentProfile(1, {
-        profileId: 'prof-1',
-        name: 'renamed',
-        model: 'claude-opus-4-6',
-      }, tokenData, mockEnv);
+      const result = await handleUpdateAgentProfile(
+        1,
+        {
+          profileId: 'prof-1',
+          name: 'renamed',
+          model: 'claude-opus-4-6',
+        },
+        tokenData,
+        mockEnv
+      );
 
       expect(result.error).toBeUndefined();
-      const content = JSON.parse((result.result as { content: Array<{ text: string }> }).content[0].text);
+      const content = JSON.parse(
+        (result.result as { content: Array<{ text: string }> }).content[0].text
+      );
       expect(content.updated).toBe(true);
       expect(content.updatedFields).toContain('name');
       expect(content.updatedFields).toContain('model');
@@ -335,7 +387,12 @@ describe('MCP Profile Tools', () => {
     });
 
     it('returns error when profileId is whitespace only', async () => {
-      const result = await handleUpdateAgentProfile(1, { profileId: '  ', name: 'x' }, tokenData, mockEnv);
+      const result = await handleUpdateAgentProfile(
+        1,
+        { profileId: '  ', name: 'x' },
+        tokenData,
+        mockEnv
+      );
       expect(result.error).toBeDefined();
       expect(result.error!.message).toContain('profileId is required');
     });
@@ -345,10 +402,15 @@ describe('MCP Profile Tools', () => {
       err.statusCode = 404;
       vi.mocked(agentProfileService.updateProfile).mockRejectedValue(err);
 
-      const result = await handleUpdateAgentProfile(1, {
-        profileId: 'nonexistent',
-        name: 'new-name',
-      }, tokenData, mockEnv);
+      const result = await handleUpdateAgentProfile(
+        1,
+        {
+          profileId: 'nonexistent',
+          name: 'new-name',
+        },
+        tokenData,
+        mockEnv
+      );
       expect(result.error).toBeDefined();
       expect(result.error!.message).toContain('Agent profile not found');
     });
@@ -358,10 +420,15 @@ describe('MCP Profile Tools', () => {
       err.statusCode = 409;
       vi.mocked(agentProfileService.updateProfile).mockRejectedValue(err);
 
-      const result = await handleUpdateAgentProfile(1, {
-        profileId: 'prof-1',
-        name: 'default',
-      }, tokenData, mockEnv);
+      const result = await handleUpdateAgentProfile(
+        1,
+        {
+          profileId: 'prof-1',
+          name: 'default',
+        },
+        tokenData,
+        mockEnv
+      );
       expect(result.error!.code).toBe(-32602);
       expect(result.error!.message).toContain('already exists');
     });
@@ -371,22 +438,45 @@ describe('MCP Profile Tools', () => {
       err.statusCode = 400;
       vi.mocked(agentProfileService.updateProfile).mockRejectedValue(err);
 
-      const result = await handleUpdateAgentProfile(1, {
-        profileId: 'prof-1',
-        agentType: 'bad-type',
-      }, tokenData, mockEnv);
+      const result = await handleUpdateAgentProfile(
+        1,
+        {
+          profileId: 'prof-1',
+          agentType: 'bad-type',
+        },
+        tokenData,
+        mockEnv
+      );
       expect(result.error!.code).toBe(-32602);
       expect(result.error!.message).toContain('Invalid agent type');
     });
 
     it('returns INTERNAL_ERROR for unexpected service failures', async () => {
       vi.mocked(agentProfileService.updateProfile).mockRejectedValue(new Error('DB timeout'));
-      const result = await handleUpdateAgentProfile(1, {
-        profileId: 'prof-1',
-        name: 'new-name',
-      }, tokenData, mockEnv);
+      const result = await handleUpdateAgentProfile(
+        1,
+        {
+          profileId: 'prof-1',
+          name: 'new-name',
+        },
+        tokenData,
+        mockEnv
+      );
       expect(result.error!.code).toBe(-32603);
       expect(result.error!.message).toContain('Failed to update profile');
+    });
+
+    it('rejects unsupported runtime before service call', async () => {
+      const result = await handleUpdateAgentProfile(
+        1,
+        { profileId: 'prof-1', runtime: 'worker-thread' },
+        tokenData,
+        mockEnv
+      );
+
+      expect(result.error!.code).toBe(-32602);
+      expect(result.error!.message).toContain('runtime must be one of');
+      expect(agentProfileService.updateProfile).not.toHaveBeenCalled();
     });
   });
 
@@ -399,7 +489,9 @@ describe('MCP Profile Tools', () => {
       const result = await handleDeleteAgentProfile(1, { profileId: 'prof-1' }, tokenData, mockEnv);
 
       expect(result.error).toBeUndefined();
-      const content = JSON.parse((result.result as { content: Array<{ text: string }> }).content[0].text);
+      const content = JSON.parse(
+        (result.result as { content: Array<{ text: string }> }).content[0].text
+      );
       expect(content.deleted).toBe(true);
       expect(content.profileId).toBe('prof-1');
     });
@@ -415,7 +507,12 @@ describe('MCP Profile Tools', () => {
       err.statusCode = 404;
       vi.mocked(agentProfileService.deleteProfile).mockRejectedValue(err);
 
-      const result = await handleDeleteAgentProfile(1, { profileId: 'nonexistent' }, tokenData, mockEnv);
+      const result = await handleDeleteAgentProfile(
+        1,
+        { profileId: 'nonexistent' },
+        tokenData,
+        mockEnv
+      );
       expect(result.error).toBeDefined();
       expect(result.error!.message).toContain('Agent profile not found');
     });
@@ -434,7 +531,7 @@ describe('MCP Profile Tools', () => {
         expect.anything(), // db
         tokenData.projectId,
         'prof-1',
-        tokenData.userId,
+        tokenData.userId
       );
     });
 
@@ -470,27 +567,34 @@ describe('MCP Profile Tools', () => {
       expect(profileRuntimeService.requireProjectScopedProfile).toHaveBeenCalledWith(
         expect.anything(),
         'proj-456',
-        'prof-1',
+        'prof-1'
       );
-      const content = JSON.parse((result.result as { content: Array<{ text: string }> }).content[0].text);
+      const content = JSON.parse(
+        (result.result as { content: Array<{ text: string }> }).content[0].text
+      );
       expect(content.envVars).toEqual([
         expect.objectContaining({ key: 'API_TOKEN', value: null, isSecret: true, hasValue: true }),
       ]);
     });
 
     it('adds a profile env var after validating membership, key, size, and secret flag', async () => {
-      const result = await handleAddProfileEnvVar(1, {
-        profileId: 'prof-1',
-        key: 'API_TOKEN',
-        value: 'plain-secret',
-        isSecret: true,
-      }, tokenData, mockEnv);
+      const result = await handleAddProfileEnvVar(
+        1,
+        {
+          profileId: 'prof-1',
+          key: 'API_TOKEN',
+          value: 'plain-secret',
+          isSecret: true,
+        },
+        tokenData,
+        mockEnv
+      );
 
       expect(result.error).toBeUndefined();
       expect(profileRuntimeService.requireProjectScopedProfile).toHaveBeenCalledWith(
         expect.anything(),
         'proj-456',
-        'prof-1',
+        'prof-1'
       );
       expect(profileRuntimeService.upsertProfileRuntimeEnvVar).toHaveBeenCalledWith(
         expect.anything(),
@@ -502,42 +606,61 @@ describe('MCP Profile Tools', () => {
           isSecret: true,
           maxCount: 10,
           encryptionKey: 'test-encryption-key',
-        }),
+        })
       );
-      const content = JSON.parse((result.result as { content: Array<{ text: string }> }).content[0].text);
-      expect(content).toEqual({ updated: true, profileId: 'prof-1', key: 'API_TOKEN', isSecret: true });
+      const content = JSON.parse(
+        (result.result as { content: Array<{ text: string }> }).content[0].text
+      );
+      expect(content).toEqual({
+        updated: true,
+        profileId: 'prof-1',
+        key: 'API_TOKEN',
+        isSecret: true,
+      });
     });
 
     it('rejects invalid profile env var keys before writing', async () => {
-      const result = await handleAddProfileEnvVar(1, {
-        profileId: 'prof-1',
-        key: 'bad-key',
-        value: 'value',
-      }, tokenData, mockEnv);
+      const result = await handleAddProfileEnvVar(
+        1,
+        {
+          profileId: 'prof-1',
+          key: 'bad-key',
+          value: 'value',
+        },
+        tokenData,
+        mockEnv
+      );
 
       expect(result.error!.code).toBe(-32602);
       expect(profileRuntimeService.upsertProfileRuntimeEnvVar).not.toHaveBeenCalled();
     });
 
     it('removes a profile env var after validating project membership and profile scope', async () => {
-      const result = await handleRemoveProfileEnvVar(1, {
-        profileId: 'prof-1',
-        key: 'API_TOKEN',
-      }, tokenData, mockEnv);
+      const result = await handleRemoveProfileEnvVar(
+        1,
+        {
+          profileId: 'prof-1',
+          key: 'API_TOKEN',
+        },
+        tokenData,
+        mockEnv
+      );
 
       expect(result.error).toBeUndefined();
       expect(profileRuntimeService.requireProjectScopedProfile).toHaveBeenCalledWith(
         expect.anything(),
         'proj-456',
-        'prof-1',
+        'prof-1'
       );
       expect(profileRuntimeService.deleteProfileRuntimeEnvVar).toHaveBeenCalledWith(
         expect.anything(),
         'prof-1',
         'user-789',
-        'API_TOKEN',
+        'API_TOKEN'
       );
-      const content = JSON.parse((result.result as { content: Array<{ text: string }> }).content[0].text);
+      const content = JSON.parse(
+        (result.result as { content: Array<{ text: string }> }).content[0].text
+      );
       expect(content).toEqual({ deleted: true, profileId: 'prof-1', key: 'API_TOKEN' });
     });
   });
@@ -558,8 +681,11 @@ describe('MCP Profile Tools', () => {
         provider: 'hetzner',
         vmLocation: 'fsn1',
         workspaceProfile: 'full',
+        runtime: 'cf-container',
         devcontainerConfigName: 'python-dev',
         taskMode: 'task',
+        resourceRequirements: { minVcpu: 4, exclusiveNode: false },
+        resourceRequirementsJson: null,
       };
       const fields = extractProfileFields(params);
       expect(fields).toEqual(params);
@@ -572,6 +698,25 @@ describe('MCP Profile Tools', () => {
         model: null, // wrong type
       });
       expect(fields).toEqual({});
+    });
+
+    it('rejects wrong-typed supplied resource requirement fields', () => {
+      expect(() => extractProfileFields({ resourceRequirements: 'bad' })).toThrow(
+        /resourceRequirements must be an object or null/
+      );
+      expect(() => extractProfileFields({ resourceRequirements: [] })).toThrow(
+        /resourceRequirements must be an object or null/
+      );
+      expect(() => extractProfileFields({ resourceRequirementsJson: 42 })).toThrow(
+        /resourceRequirementsJson must be a JSON string or null/
+      );
+    });
+
+    it('rejects runtime values outside the REST enum', () => {
+      expect(() => extractProfileFields({ runtime: 'worker-thread' })).toThrow(
+        /runtime must be one of/
+      );
+      expect(extractProfileFields({ runtime: null })).toEqual({ runtime: null });
     });
 
     it('ignores unknown fields', () => {

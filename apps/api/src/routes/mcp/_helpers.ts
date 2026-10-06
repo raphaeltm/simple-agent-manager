@@ -321,6 +321,10 @@ export const MCP_SERVER_VERSION = '1.0.0';
 // Task status sets
 export const ACTIVE_STATUSES = ['queued', 'in_progress', 'delegated', 'awaiting_followup'];
 
+// Sleeping agents retain their task/chat identity and can receive durable wakes
+// or parent cancellation. They cannot act as live callers or consume dispatch slots.
+export const AGENT_TARGET_STATUSES = [...ACTIVE_STATUSES, 'sleeping'];
+
 /**
  * Validate and filter a roles array against the allowlist.
  * Returns null if any role is invalid (caller should return 400).
@@ -338,7 +342,10 @@ export function validateRoles(
   if (invalid.length > 0) {
     return { valid: false, invalid };
   }
-  const roles = strings.length > 0 ? (strings as MessageRole[]) : defaultRoles;
+  // Repeated roles do not change the filter semantics, but every retained value becomes a
+  // SQLite bind parameter. De-duplicate here so a valid duplicate-heavy request cannot exhaust
+  // the 100-parameter ceiling when search also expands one bind per retained query term.
+  const roles = strings.length > 0 ? ([...new Set(strings)] as MessageRole[]) : defaultRoles;
   return { valid: true, roles };
 }
 

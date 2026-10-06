@@ -48,7 +48,6 @@ function makeProject(overrides: Partial<schema.Project> = {}): schema.Project {
     maxDispatchDepth: null,
     maxSubTasksPerTask: null,
     warmNodeTimeoutMs: null,
-    maxWorkspacesPerNode: null,
     nodeCpuThresholdPercent: null,
     nodeMemoryThresholdPercent: null,
     status: 'active',

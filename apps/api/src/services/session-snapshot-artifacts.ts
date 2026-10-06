@@ -5,7 +5,6 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { maybeJsonRecord, parseJsonRecord } from '../lib/runtime-validation';
-import { ulid } from '../lib/ulid';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -77,6 +76,12 @@ export interface SessionSnapshotManifest {
   acpSessionId?: string;
   agentType?: string;
   baseCommit?: string;
+  git?: {
+    branch?: string;
+    upstream?: string;
+    remote?: string;
+    detached: boolean;
+  };
   status: SessionSnapshotStatus;
   degradation: SessionSnapshotDegradation;
   skipped: Array<{
@@ -232,33 +237,6 @@ function manifestArtifactSize(
   }
 }
 
-function manifestArtifact(
-  manifestJson: string | null,
-  artifact: 'home' | 'wip'
-): { sizeBytes: number; sha256: string } | null {
-  if (!manifestJson) return null;
-  try {
-    const manifest = parseJsonRecord(manifestJson, 'session snapshot manifest');
-    const artifacts = maybeJsonRecord(manifest.artifacts);
-    const artifactEntry = maybeJsonRecord(artifacts?.[artifact]);
-    if (!artifactEntry) return null;
-    const sizeBytes = artifactEntry.sizeBytes;
-    const sha256 = artifactEntry.sha256;
-    if (
-      typeof sizeBytes !== 'number' ||
-      !Number.isSafeInteger(sizeBytes) ||
-      sizeBytes < 0 ||
-      typeof sha256 !== 'string' ||
-      !/^[a-f0-9]{64}$/i.test(sha256)
-    ) {
-      return null;
-    }
-    return { sizeBytes, sha256: sha256.toLowerCase() };
-  } catch {
-    return null;
-  }
-}
-
 export function buildSessionSnapshotR2Key(
   env: Env,
   chatSessionId: string,
@@ -350,36 +328,63 @@ export async function verifyRestorableSessionSnapshotArtifacts(
 }
 
 /**
+ * Re-certify every artifact a completed generation records, whatever its status: each
+ * recorded HOME archive and WIP bundle must sit at its canonical key for that generation,
+ * with the size the manifest declares and a matching SHA-256 where R2 reports one. A
+ * restore downloads every recorded artifact and aborts on the first missing one, so a
+ * recovery point is only as good as all of them. Used by the bounded sleep fallback
+ * (`session-sleep-recovery-point.ts`), which may release compute with a degraded
+ * generation; a full sleep keeps the stricter `verifySessionSnapshotArtifactsForSleep`.
+ */
+export async function verifySessionSnapshotRecordedArtifacts(
+  env: Env,
+  snapshot: schema.SessionSnapshot
+): Promise<boolean> {
+  const generation = snapshot.snapshotGeneration;
+  if (!generation) return false;
+  const checks: Array<{ key: string; size: number; sha256: string }> = [];
+  for (const artifact of ['home', 'wip'] as const) {
+    const key = artifact === 'home' ? snapshot.homeR2Key : snapshot.wipR2Key;
+    const sha256 = artifact === 'home' ? snapshot.homeSha256 : snapshot.wipSha256;
+    if (!key && !sha256) continue;
+    if (!key || !sha256) return false;
+    if (key !== buildSessionSnapshotR2Key(env, snapshot.chatSessionId, generation, artifact)) {
+      return false;
+    }
+    const size = manifestArtifactSize(snapshot.manifestJson, artifact);
+    if (size === null) return false;
+    checks.push({ key, size, sha256 });
+  }
+  const objects = await Promise.all(checks.map((check) => env.R2.head(check.key)));
+  return checks.every((check, index) => {
+    const object = objects[index];
+    return (
+      Boolean(object) &&
+      object?.size === check.size &&
+      objectChecksumMatchesOrIsAbsent(object, check.sha256)
+    );
+  });
+}
+
+/**
  * Re-certify a snapshot generation that is safe to release compute for sleep.
  *
- * `available/none` keeps the stricter restorable contract: HOME must exist and
- * match the manifest. Degraded snapshots can release compute only after the
- * manifest is durable and every artifact still claimed by the manifest is
- * present with the expected key, size, and checksum. Transcript-only degraded
- * snapshots therefore verify the manifest and intentionally have no artifacts.
+ * Only a complete `available/none` capture can release live compute. HOME
+ * must exist and match the manifest; degraded captures remain wakeable but do
+ * not prove that the live agent home was preserved.
  */
 export async function verifySessionSnapshotArtifactsForSleep(
   env: Env,
   snapshot: schema.SessionSnapshot
 ): Promise<boolean> {
-  if (!isSessionSnapshotSleepReleasable(snapshot) || !snapshot.snapshotGeneration) return false;
-  if (snapshot.status === 'available' && snapshot.degradation === 'none') {
-    return verifyRestorableSessionSnapshotArtifacts(env, snapshot);
-  }
-
-  const expectedManifestKey = buildSessionSnapshotR2Key(
-    env,
-    snapshot.chatSessionId,
-    snapshot.snapshotGeneration,
-    'manifest'
-  );
-  if (snapshot.manifestR2Key !== expectedManifestKey) return false;
-
-  const manifestJson = snapshot.manifestJson;
-  if (!manifestJson) return false;
+  // Releasing a live runtime requires its complete agent home. A degraded
+  // snapshot remains useful for explicit recovery, but cannot authorize the
+  // irreversible stop/sleep that would discard an uncaptured home.
+  if (snapshot.status !== 'available' || snapshot.degradation !== 'none') return false;
+  if (!snapshot.manifestJson) return false;
   let manifest: Record<string, unknown>;
   try {
-    manifest = parseJsonRecord(manifestJson, 'session snapshot manifest');
+    manifest = parseJsonRecord(snapshot.manifestJson, 'session snapshot manifest');
   } catch {
     return false;
   }
@@ -387,211 +392,20 @@ export async function verifySessionSnapshotArtifactsForSleep(
     manifest.version !== 1 ||
     manifest.chatSessionId !== snapshot.chatSessionId ||
     manifest.workspaceId !== snapshot.workspaceId ||
-    manifest.status !== snapshot.status ||
-    manifest.degradation !== snapshot.degradation
+    manifest.status !== 'available' ||
+    manifest.degradation !== 'none' ||
+    (manifest.agentSessionId !== undefined && manifest.agentSessionId !== snapshot.agentSessionId)
   ) {
     return false;
   }
-
-  const manifestHead = await env.R2.head(snapshot.manifestR2Key);
-  if (!manifestHead) return false;
-
-  for (const artifact of ['home', 'wip'] as const) {
-    const claimed = manifestArtifact(snapshot.manifestJson, artifact);
-    const key = artifact === 'home' ? snapshot.homeR2Key : snapshot.wipR2Key;
-    const sha256 = artifact === 'home' ? snapshot.homeSha256 : snapshot.wipSha256;
-    if (!claimed) {
-      if (key || sha256) return false;
-      continue;
-    }
-    if (!key || !sha256 || sha256.toLowerCase() !== claimed.sha256) return false;
-    const expectedKey = buildSessionSnapshotR2Key(
-      env,
-      snapshot.chatSessionId,
-      snapshot.snapshotGeneration,
-      artifact
-    );
-    if (key !== expectedKey) return false;
-    const object = await env.R2.head(key);
-    if (
-      !object ||
-      object.size !== claimed.sizeBytes ||
-      !objectChecksumMatchesOrIsAbsent(object, claimed.sha256)
-    ) {
-      return false;
-    }
+  const artifacts = maybeJsonRecord(manifest.artifacts);
+  const home = maybeJsonRecord(artifacts?.home);
+  const wip = maybeJsonRecord(artifacts?.wip);
+  if (
+    home?.sha256 !== snapshot.homeSha256 ||
+    (snapshot.wipR2Key ? wip?.sha256 !== snapshot.wipSha256 : wip !== null)
+  ) {
+    return false;
   }
-
-  return true;
-}
-
-function snapshotExpiry(now: Date, ttlDays: number): string {
-  return new Date(now.getTime() + ttlDays * 24 * 60 * 60 * 1000).toISOString();
-}
-
-export async function prepareSessionSnapshot(
-  db: Db,
-  env: Env,
-  input: PrepareSessionSnapshotInput
-): Promise<{
-  snapshotId: string;
-  generation: string;
-  expiresAt: string;
-  keys: Record<SessionSnapshotArtifact, string>;
-  config: SessionSnapshotConfig;
-}> {
-  const config = getSessionSnapshotConfig(env);
-  const now = new Date();
-  const expiresAt = snapshotExpiry(now, config.ttlDays);
-  const generation = ulid();
-  const keys = {
-    home: buildSessionSnapshotR2Key(env, input.chatSessionId, generation, 'home'),
-    wip: buildSessionSnapshotR2Key(env, input.chatSessionId, generation, 'wip'),
-    manifest: buildSessionSnapshotR2Key(env, input.chatSessionId, generation, 'manifest'),
-  };
-
-  const existing = await db
-    .select({
-      id: schema.sessionSnapshots.id,
-      status: schema.sessionSnapshots.status,
-      sleepStatus: schema.sessionSnapshots.sleepStatus,
-      sleepingAt: schema.sessionSnapshots.sleepingAt,
-    })
-    .from(schema.sessionSnapshots)
-    .where(eq(schema.sessionSnapshots.chatSessionId, input.chatSessionId))
-    .limit(1);
-
-  const snapshotId = existing[0]?.id || ulid();
-  const row = {
-    id: snapshotId,
-    projectId: input.projectId,
-    workspaceId: input.workspaceId,
-    nodeId: input.nodeId,
-    userId: input.userId,
-    chatSessionId: input.chatSessionId,
-    agentSessionId: input.agentSessionId,
-    runtime: input.runtime,
-    status: 'pending',
-    degradation: 'none',
-    homeR2Key: keys.home,
-    wipR2Key: keys.wip,
-    manifestR2Key: keys.manifest,
-    baseCommit: null,
-    expiresAt,
-    manifestJson: null,
-    restoreStatus: null,
-    restoreMessage: null,
-    restoredAt: null,
-    sleepingAt: null,
-    recoveryStatus: null,
-    recoveryTaskId: null,
-    recoveryWorkspaceId: null,
-    recoveryAttempts: 0,
-    recoveryError: null,
-    recoveryClaimedAt: null,
-    snapshotGeneration: null,
-    captureGeneration: generation,
-    captureError: null,
-    authorizedHomeBytes: null,
-    authorizedHomeSha256: null,
-    authorizedWipBytes: null,
-    authorizedWipSha256: null,
-    homeSha256: null,
-    wipSha256: null,
-    updatedAt: now.toISOString(),
-  } satisfies schema.NewSessionSnapshot;
-
-  if (existing[0]) {
-    const current = existing[0];
-    if (current.sleepingAt || current.sleepStatus === 'sleeping') {
-      // A background capture can outlive the sleep operation that requested it.
-      // Once the session is durably sleeping, a stale prepare must not overwrite
-      // the terminal restorable generation or re-open capture_generation.
-    } else if (current.status === 'available' || current.status === 'degraded') {
-      // A checkpoint upload is not the current snapshot until completion
-      // certifies it. Preserve the last complete generation and lifecycle state
-      // so an interrupted capture cannot make a sleeping session unwakeable.
-      await db
-        .update(schema.sessionSnapshots)
-        .set({
-          workspaceId: input.workspaceId,
-          nodeId: input.nodeId,
-          projectId: input.projectId,
-          userId: input.userId,
-          agentSessionId: input.agentSessionId,
-          runtime: input.runtime,
-          captureGeneration: generation,
-          captureError: null,
-          authorizedHomeBytes: null,
-          authorizedHomeSha256: null,
-          authorizedWipBytes: null,
-          authorizedWipSha256: null,
-          updatedAt: now.toISOString(),
-        })
-        .where(eq(schema.sessionSnapshots.id, snapshotId));
-    } else {
-      await db
-        .update(schema.sessionSnapshots)
-        .set(row)
-        .where(eq(schema.sessionSnapshots.id, snapshotId));
-    }
-  } else {
-    await db.insert(schema.sessionSnapshots).values({ ...row, createdAt: now.toISOString() });
-  }
-
-  return { snapshotId, generation, expiresAt, keys, config };
-}
-
-/**
- * Establishes the D1 lifecycle lock row before a first checkpoint exists.
- * Explicit/task-completion sleep can therefore claim the session while an
- * idle checkpoint is still running (or before the idle callback arrives).
- * The placeholder generation is never restorable and writes no R2 objects.
- */
-export async function ensureSessionSnapshotForSleep(
-  db: Db,
-  env: Env,
-  input: PrepareSessionSnapshotInput
-): Promise<void> {
-  const now = new Date();
-  const placeholderGeneration = ulid();
-  await db
-    .insert(schema.sessionSnapshots)
-    .values({
-      id: ulid(),
-      projectId: input.projectId,
-      workspaceId: input.workspaceId,
-      nodeId: input.nodeId,
-      userId: input.userId,
-      chatSessionId: input.chatSessionId,
-      agentSessionId: input.agentSessionId,
-      runtime: input.runtime,
-      status: 'pending',
-      degradation: 'none',
-      manifestR2Key: buildSessionSnapshotR2Key(
-        env,
-        input.chatSessionId,
-        placeholderGeneration,
-        'manifest'
-      ),
-      expiresAt: snapshotExpiry(now, getSessionSnapshotConfig(env).ttlDays),
-      createdAt: now.toISOString(),
-      updatedAt: now.toISOString(),
-    })
-    .onConflictDoUpdate({
-      target: schema.sessionSnapshots.chatSessionId,
-      // Recovery can move a conversation to a replacement workspace. Refresh
-      // only ownership/routing metadata here: the last verified generation and
-      // all sleep/recovery lifecycle state remain authoritative until the final
-      // capture replaces them.
-      set: {
-        projectId: input.projectId,
-        workspaceId: input.workspaceId,
-        nodeId: input.nodeId,
-        userId: input.userId,
-        agentSessionId: input.agentSessionId,
-        runtime: input.runtime,
-        updatedAt: now.toISOString(),
-      },
-    });
+  return verifyRestorableSessionSnapshotArtifacts(env, snapshot);
 }

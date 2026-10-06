@@ -28,6 +28,7 @@
  */
 
 import type { Env } from '../env';
+import { redactCredentialTokens } from './credential-token-redaction';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -50,12 +51,13 @@ const REDACTED = '[REDACTED]';
 const REDACTED_MESSAGE = '[REDACTED_ERROR_MESSAGE]';
 const SENSITIVE_KEY_RE =
   /(?:^|[_-])(authorization|cookie|token|secret|password|passwd|credential|api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|session|set[_-]?cookie)(?:$|[_-])/i;
-const SENSITIVE_VALUE_RE =
-  /\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+/-]+=*|\b(?:sam_[A-Za-z0-9_]*|gh[oprsu]_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]+)\b/gi;
+const SENSITIVE_VALUE_RE = /\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+/-]+=*|\bsam_[A-Za-z0-9_]*\b/gi;
 
 function sanitizeString(value: string, redactWholeValue: boolean): string {
   if (redactWholeValue) return REDACTED;
-  return value.replace(SENSITIVE_VALUE_RE, REDACTED);
+  // Credential tokens first: `sam_[A-Za-z0-9_]*` stops at a `-`, so on its own it would leave the
+  // tail of a base64url `sam_pat_…` token in the log line.
+  return redactCredentialTokens(value, REDACTED).replace(SENSITIVE_VALUE_RE, REDACTED);
 }
 
 function sanitizeLogValue(value: unknown, key?: string): unknown {

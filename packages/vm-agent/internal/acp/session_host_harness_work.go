@@ -288,22 +288,41 @@ func (h *SessionHost) applyACPToolCallLifecycle(notification acpsdk.SessionNotif
 	update := notification.Update
 	switch {
 	case update.ToolCall != nil:
-		return h.applyACPToolCallStatus(string(update.ToolCall.ToolCallId), &update.ToolCall.Status)
+		return h.applyACPToolCallStatus(
+			string(update.ToolCall.ToolCallId),
+			&update.ToolCall.Status,
+			string(update.ToolCall.Kind),
+			extractToolNameFromMeta(update.ToolCall.Meta),
+		)
 	case update.ToolCallUpdate != nil:
 		// Status is a patch field. Absent means "unchanged", which for lease
 		// purposes is treated the same as a non-terminal update.
+		kind := ""
+		if update.ToolCallUpdate.Kind != nil {
+			kind = string(*update.ToolCallUpdate.Kind)
+		}
 		return h.applyACPToolCallStatus(
 			string(update.ToolCallUpdate.ToolCallId),
 			update.ToolCallUpdate.Status,
+			kind,
+			extractToolNameFromMeta(update.ToolCallUpdate.Meta),
 		)
 	default:
 		return false
 	}
 }
 
-func (h *SessionHost) applyACPToolCallStatus(toolCallID string, status *acpsdk.ToolCallStatus) bool {
+func (h *SessionHost) applyACPToolCallStatus(toolCallID string, status *acpsdk.ToolCallStatus, kind string, toolName string) bool {
 	if toolCallID == "" {
 		return false
+	}
+	now := h.now()
+	if h.config.ToolLifecycleObserver != nil {
+		statusText := ""
+		if status != nil {
+			statusText = string(*status)
+		}
+		h.config.ToolLifecycleObserver.RecordACPToolCall(toolCallID, statusText, kind, toolName, now)
 	}
 
 	h.harnessWorkMu.Lock()
@@ -344,7 +363,7 @@ func (h *SessionHost) applyACPToolCallStatus(toolCallID string, status *acpsdk.T
 
 	h.harnessWork.State = state
 	h.harnessWork.Count = count
-	h.harnessWork.ProgressAt = h.nextHarnessWorkProgressAtLocked()
+	h.harnessWork.ProgressAt = h.nextHarnessWorkProgressAtLockedAt(now)
 	if state == harnessWorkActive {
 		h.startHarnessWorkRereportLocked()
 	} else {
@@ -390,7 +409,11 @@ func (h *SessionHost) reconcileHarnessWorkAtPromptTurnEnd() {
 	h.harnessTaskIDs = nil
 	h.harnessWork.State = harnessWorkSettling
 	h.harnessWork.Count = 0
-	h.harnessWork.ProgressAt = h.nextHarnessWorkProgressAtLocked()
+	now := h.now()
+	if h.config.ToolLifecycleObserver != nil {
+		h.config.ToolLifecycleObserver.ReconcileACPToolCalls(now)
+	}
+	h.harnessWork.ProgressAt = h.nextHarnessWorkProgressAtLockedAt(now)
 }
 
 // addHarnessTaskLocked bounds cumulative edge messages as well as the
@@ -415,7 +438,10 @@ func (h *SessionHost) addHarnessTaskLocked(taskID string) bool {
 // this value to reject an older runtime-work snapshot while accepting same-
 // version heartbeat rereports that refresh the finite lease.
 func (h *SessionHost) nextHarnessWorkProgressAtLocked() time.Time {
-	now := h.now()
+	return h.nextHarnessWorkProgressAtLockedAt(h.now())
+}
+
+func (h *SessionHost) nextHarnessWorkProgressAtLockedAt(now time.Time) time.Time {
 	if !h.harnessWork.ProgressAt.IsZero() && !now.After(h.harnessWork.ProgressAt) {
 		return h.harnessWork.ProgressAt.Add(time.Millisecond)
 	}
@@ -455,7 +481,7 @@ func (h *SessionHost) startHarnessWorkRereportLocked() {
 	if h.harnessActivityCancel != nil || h.config.ActivityRereportInterval <= 0 {
 		return
 	}
-	ctx, cancel := context.WithCancel(h.ctx)
+	ctx, cancel := context.WithCancel(h.lifecycleContext())
 	h.harnessActivityCancel = cancel
 	interval := h.config.ActivityRereportInterval
 	go func() {
@@ -502,7 +528,7 @@ func (h *SessionHost) stopHarnessWorkRereportLocked() {
 // prompting after markPromptDone's authoritative idle report.
 func (h *SessionHost) nudgeHarnessActivityReport() {
 	select {
-	case <-h.ctx.Done():
+	case <-h.lifecycleContext().Done():
 		return
 	default:
 	}

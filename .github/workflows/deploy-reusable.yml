@@ -129,6 +129,13 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.target_commit_sha || github.sha }}
+          # resolve-vm-agent-release.sh needs real history to find the last commit
+          # that changed packages/vm-agent, and fails closed on a shallow clone.
+          # blob:none keeps the commit and tree graph that a path-limited rev-list
+          # walks while leaving blob transfer at working-tree size, so the full
+          # history costs little more than the previous depth-1 clone.
+          fetch-depth: 0
+          filter: blob:none
 
       - name: Resolve and Verify Deployment SHA
         id: deploy-sha
@@ -142,14 +149,31 @@ jobs:
             exit 1
           fi
           echo "value=$ACTUAL_DEPLOY_SHA" >> "$GITHUB_OUTPUT"
+          # The VM-agent release tracks agent CONTENT, not the deployment commit:
+          # a Worker-only deploy must not make every running node ineligible for
+          # reuse. `release` and `build_date` come from the same commit so an
+          # unchanged agent rebuilds byte-identically under one immutable key.
+          # Explicit rather than relying on the runner's default `bash -e`, so the
+          # step aborts identically however it is invoked. A silent fallback to
+          # the deployment commit would restore the bug this resolver removes.
+          if ! AGENT_RELEASE_OUTPUT=$(bash scripts/deploy/resolve-vm-agent-release.sh "$ACTUAL_DEPLOY_SHA"); then
+            echo "::error::Could not resolve the VM-agent release for $ACTUAL_DEPLOY_SHA"
+            exit 1
+          fi
+          printf '%s\n' "$AGENT_RELEASE_OUTPUT" >> "$GITHUB_OUTPUT"
+          AGENT_RELEASE=$(printf '%s\n' "$AGENT_RELEASE_OUTPUT" | sed -n 's/^release=//p')
+          if [ -z "$AGENT_RELEASE" ]; then
+            echo "::error::VM-agent release resolver returned no release line"
+            exit 1
+          fi
           if [ "$SKIP_AGENT" = "true" ]; then
             echo "agent_version=" >> "$GITHUB_OUTPUT"
           else
-            echo "agent_version=$ACTUAL_DEPLOY_SHA" >> "$GITHUB_OUTPUT"
+            echo "agent_version=$AGENT_RELEASE" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -376,6 +400,7 @@ jobs:
           BASE_DOMAIN: ${{ steps.deploy_resources.outputs.base_domain }}
           RESOURCE_PREFIX: ${{ steps.deploy_resources.outputs.prefix }}
           VM_AGENT_REQUIRED_VERSION: ${{ steps.deploy-sha.outputs.agent_version }}
+          D1_SESSION_MODE: ${{ vars.D1_SESSION_MODE }}
           REQUIRE_APPROVAL: ${{ vars.REQUIRE_APPROVAL }}
           CRON_SWEEPS_ENABLED_KV_KEY: ${{ vars.CRON_SWEEPS_ENABLED_KV_KEY }}
           DO_ALARMS_ENABLED_KV_KEY: ${{ vars.DO_ALARMS_ENABLED_KV_KEY }}
@@ -386,6 +411,21 @@ jobs:
           NODE_LIFECYCLE_MAX_DESTROYING_AGE_MS: ${{ vars.NODE_LIFECYCLE_MAX_DESTROYING_AGE_MS }}
           NODE_WORKSPACE_IDLE_TIMEOUT_MS: ${{ vars.NODE_WORKSPACE_IDLE_TIMEOUT_MS }}
           NODE_CLEANUP_FAILURE_BACKOFF_MS: ${{ vars.NODE_CLEANUP_FAILURE_BACKOFF_MS }}
+          NODE_UNHEALTHY_DRAIN_AFTER_MS: ${{ vars.NODE_UNHEALTHY_DRAIN_AFTER_MS }}
+          NODE_UNHEALTHY_RELEASE_AFTER_MS: ${{ vars.NODE_UNHEALTHY_RELEASE_AFTER_MS }}
+          NODE_UNHEALTHY_FLEET_MAX_FRACTION: ${{ vars.NODE_UNHEALTHY_FLEET_MAX_FRACTION }}
+          NODE_UNHEALTHY_FLEET_MIN_NODES: ${{ vars.NODE_UNHEALTHY_FLEET_MIN_NODES }}
+          NODE_UNHEALTHY_RETRY_MS: ${{ vars.NODE_UNHEALTHY_RETRY_MS }}
+          NODE_UNHEALTHY_PRESERVATION_TIMEOUT_MS: ${{ vars.NODE_UNHEALTHY_PRESERVATION_TIMEOUT_MS }}
+          NODE_AGENT_REQUEST_TIMEOUT_MS: ${{ vars.NODE_AGENT_REQUEST_TIMEOUT_MS }}
+          NODE_AGENT_BACKGROUND_REQUEST_TIMEOUT_MS: ${{ vars.NODE_AGENT_BACKGROUND_REQUEST_TIMEOUT_MS }}
+          WORKSPACE_DELETION_RETRY_BASE_MS: ${{ vars.WORKSPACE_DELETION_RETRY_BASE_MS }}
+          WORKSPACE_DELETION_RETRY_MAX_MS: ${{ vars.WORKSPACE_DELETION_RETRY_MAX_MS }}
+          WORKSPACE_DELETION_MAX_RESIDENCE_MS: ${{ vars.WORKSPACE_DELETION_MAX_RESIDENCE_MS }}
+          WORKSPACE_DELETION_ALARM_BATCH_SIZE: ${{ vars.WORKSPACE_DELETION_ALARM_BATCH_SIZE }}
+          WORKSPACE_DELETION_CALLBACK_SIGNAL_TTL_SECONDS: ${{ vars.WORKSPACE_DELETION_CALLBACK_SIGNAL_TTL_SECONDS }}
+          WORKSPACE_DELETION_CALLBACK_SIGNAL_CLEANUP_LIMIT: ${{ vars.WORKSPACE_DELETION_CALLBACK_SIGNAL_CLEANUP_LIMIT }}
+          WORKSPACE_DELETION_DIAGNOSTIC_MAX_LENGTH: ${{ vars.WORKSPACE_DELETION_DIAGNOSTIC_MAX_LENGTH }}
           DIAGNOSIS_COMPLETED_STEP_MIN_DELAY_MS: ${{ vars.DIAGNOSIS_COMPLETED_STEP_MIN_DELAY_MS }}
           ORCHESTRATOR_ZERO_TASK_GRACE_MS: ${{ vars.ORCHESTRATOR_ZERO_TASK_GRACE_MS }}
           ORCHESTRATOR_MAX_MISSION_LIFETIME_MS: ${{ vars.ORCHESTRATOR_MAX_MISSION_LIFETIME_MS }}
@@ -396,6 +436,9 @@ jobs:
           ORCHESTRATOR_WAIT_MAX_CANDIDATES_PER_ALARM: ${{ vars.ORCHESTRATOR_WAIT_MAX_CANDIDATES_PER_ALARM }}
           SETUP_FORCE: ${{ vars.SETUP_FORCE }}
           HETZNER_BASE_IMAGE: ${{ vars.HETZNER_BASE_IMAGE }}
+          DEPLOYMENT_DEFAULT_CPU_LIMIT_MILLIS: ${{ vars.DEPLOYMENT_DEFAULT_CPU_LIMIT_MILLIS }}
+          DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB: ${{ vars.DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB }}
+          DEPLOYMENT_DEFAULT_ROOT_DISK_MB: ${{ vars.DEPLOYMENT_DEFAULT_ROOT_DISK_MB }}
           DEPLOYMENT_RELEASE_RETENTION_ENABLED: ${{ vars.DEPLOYMENT_RELEASE_RETENTION_ENABLED }}
           DEPLOYMENT_RELEASE_RETENTION_COUNT: ${{ vars.DEPLOYMENT_RELEASE_RETENTION_COUNT }}
           DEPLOYMENT_RELEASE_RETENTION_BATCH_SIZE: ${{ vars.DEPLOYMENT_RELEASE_RETENTION_BATCH_SIZE }}
@@ -428,7 +471,10 @@ jobs:
           SESSION_SLEEP_SWEEP_WALL_BUDGET_MS: ${{ vars.SESSION_SLEEP_SWEEP_WALL_BUDGET_MS }}
           SESSION_SLEEP_RETRY_DELAY_MS: ${{ vars.SESSION_SLEEP_RETRY_DELAY_MS }}
           SESSION_SLEEP_MAX_ATTEMPTS: ${{ vars.SESSION_SLEEP_MAX_ATTEMPTS }}
+          SESSION_SLEEP_FAILURE_MAX_ATTEMPTS: ${{ vars.SESSION_SLEEP_FAILURE_MAX_ATTEMPTS }}
+          SESSION_SLEEP_FAILURE_MAX_ELAPSED_MS: ${{ vars.SESSION_SLEEP_FAILURE_MAX_ELAPSED_MS }}
           SESSION_SLEEP_CLAIM_LEASE_MS: ${{ vars.SESSION_SLEEP_CLAIM_LEASE_MS }}
+          FAILED_TASK_PRESERVATION_MAX_WAIT_MS: ${{ vars.FAILED_TASK_PRESERVATION_MAX_WAIT_MS }}
           HARNESS_BACKGROUND_WORK_LEASE_MS: ${{ vars.HARNESS_BACKGROUND_WORK_LEASE_MS }}
           HARNESS_BACKGROUND_WORK_MAX_DURATION_MS: ${{ vars.HARNESS_BACKGROUND_WORK_MAX_DURATION_MS }}
           ACP_ACTIVITY_ADMISSION_ENABLED: ${{ vars.ACP_ACTIVITY_ADMISSION_ENABLED }}
@@ -437,6 +483,41 @@ jobs:
           ACP_ACTIVITY_COALESCE_MAX_PENDING: ${{ vars.ACP_ACTIVITY_COALESCE_MAX_PENDING }}
           ACP_ACTIVITY_BINDING_CACHE_TTL_MS: ${{ vars.ACP_ACTIVITY_BINDING_CACHE_TTL_MS }}
           ACP_ACTIVITY_BINDING_CACHE_MAX_ENTRIES: ${{ vars.ACP_ACTIVITY_BINDING_CACHE_MAX_ENTRIES }}
+          ACP_INTERACTIONS_ENABLED: ${{ vars.ACP_INTERACTIONS_ENABLED }}
+          ACP_INTERACTION_FORMS_ENABLED: ${{ vars.ACP_INTERACTION_FORMS_ENABLED }}
+          ACP_INTERACTION_URLS_ENABLED: ${{ vars.ACP_INTERACTION_URLS_ENABLED }}
+          ACP_INTERACTION_URL_DEADLINE_MS: ${{ vars.ACP_INTERACTION_URL_DEADLINE_MS }}
+          ACP_INTERACTION_URL_MAX_CHARS: ${{ vars.ACP_INTERACTION_URL_MAX_CHARS }}
+          ACP_INTERACTION_URL_ELICITATION_ID_MAX_CHARS: ${{ vars.ACP_INTERACTION_URL_ELICITATION_ID_MAX_CHARS }}
+          ACP_INTERACTION_URL_REDIRECT_DEPTH: ${{ vars.ACP_INTERACTION_URL_REDIRECT_DEPTH }}
+          ACP_INTERACTION_PERMISSION_TASK_DEADLINE_MS: ${{ vars.ACP_INTERACTION_PERMISSION_TASK_DEADLINE_MS }}
+          ACP_INTERACTION_PERMISSION_CONVERSATION_DEADLINE_MS: ${{ vars.ACP_INTERACTION_PERMISSION_CONVERSATION_DEADLINE_MS }}
+          ACP_INTERACTION_MAX_DEADLINE_MS: ${{ vars.ACP_INTERACTION_MAX_DEADLINE_MS }}
+          ACP_INTERACTION_DEADLINE_MARGIN_MS: ${{ vars.ACP_INTERACTION_DEADLINE_MARGIN_MS }}
+          ACP_INTERACTION_MAX_PENDING_PER_SESSION: ${{ vars.ACP_INTERACTION_MAX_PENDING_PER_SESSION }}
+          ACP_INTERACTION_REQUEST_MAX_BYTES: ${{ vars.ACP_INTERACTION_REQUEST_MAX_BYTES }}
+          ACP_INTERACTION_OPTIONS_MAX_COUNT: ${{ vars.ACP_INTERACTION_OPTIONS_MAX_COUNT }}
+          ACP_INTERACTION_OPTION_ID_MAX_CHARS: ${{ vars.ACP_INTERACTION_OPTION_ID_MAX_CHARS }}
+          ACP_INTERACTION_OPTION_NAME_MAX_CHARS: ${{ vars.ACP_INTERACTION_OPTION_NAME_MAX_CHARS }}
+          ACP_INTERACTION_RUNTIME_RECEIPT_LIMIT: ${{ vars.ACP_INTERACTION_RUNTIME_RECEIPT_LIMIT }}
+          ACP_INTERACTION_RUNTIME_RESPONSE_MAX_BYTES: ${{ vars.ACP_INTERACTION_RUNTIME_RESPONSE_MAX_BYTES }}
+          ACP_INTERACTION_FORM_SCHEMA_MAX_BYTES: ${{ vars.ACP_INTERACTION_FORM_SCHEMA_MAX_BYTES }}
+          ACP_INTERACTION_FORM_SCHEMA_MAX_PROPERTIES: ${{ vars.ACP_INTERACTION_FORM_SCHEMA_MAX_PROPERTIES }}
+          ACP_INTERACTION_FORM_SCHEMA_MAX_ENUM: ${{ vars.ACP_INTERACTION_FORM_SCHEMA_MAX_ENUM }}
+          ACP_INTERACTION_ANSWER_MAX_BYTES: ${{ vars.ACP_INTERACTION_ANSWER_MAX_BYTES }}
+          ACP_INTERACTION_ANSWER_STRING_MAX_BYTES: ${{ vars.ACP_INTERACTION_ANSWER_STRING_MAX_BYTES }}
+          ACP_INTERACTION_RETRY_DELAYS_MS: ${{ vars.ACP_INTERACTION_RETRY_DELAYS_MS }}
+          ACP_INTERACTION_RETRY_STEADY_MS: ${{ vars.ACP_INTERACTION_RETRY_STEADY_MS }}
+          ACP_INTERACTION_DELIVERY_WINDOW_MS: ${{ vars.ACP_INTERACTION_DELIVERY_WINDOW_MS }}
+          ACP_INTERACTION_SENSITIVE_PURGE_MS: ${{ vars.ACP_INTERACTION_SENSITIVE_PURGE_MS }}
+          ACP_INTERACTION_SUMMARY_RETENTION_MS: ${{ vars.ACP_INTERACTION_SUMMARY_RETENTION_MS }}
+          ACP_INTERACTION_SUMMARY_LAST_SETTLED: ${{ vars.ACP_INTERACTION_SUMMARY_LAST_SETTLED }}
+          ACP_INTERACTION_SNAPSHOT_LAST_SETTLED: ${{ vars.ACP_INTERACTION_SNAPSHOT_LAST_SETTLED }}
+          ACP_INTERACTION_EXPIRY_BATCH_SIZE: ${{ vars.ACP_INTERACTION_EXPIRY_BATCH_SIZE }}
+          ACP_INTERACTION_OUTBOX_BATCH_SIZE: ${{ vars.ACP_INTERACTION_OUTBOX_BATCH_SIZE }}
+          ACP_INTERACTION_DELIVERY_BATCH_SIZE: ${{ vars.ACP_INTERACTION_DELIVERY_BATCH_SIZE }}
+          ACP_INTERACTION_ALARM_WALL_TIME_MS: ${{ vars.ACP_INTERACTION_ALARM_WALL_TIME_MS }}
+          ACP_INTERACTION_ALARM_REARM_DELAY_MS: ${{ vars.ACP_INTERACTION_ALARM_REARM_DELAY_MS }}
           SESSION_SNAPSHOT_RECOVERY_CLAIM_LEASE_MS: ${{ vars.SESSION_SNAPSHOT_RECOVERY_CLAIM_LEASE_MS }}
           SESSION_LIFECYCLE_ERROR_MAX_LENGTH: ${{ vars.SESSION_LIFECYCLE_ERROR_MAX_LENGTH }}
           LIBRARY_PROJECT_DELETE_CLEANUP_BATCH_SIZE: ${{ vars.LIBRARY_PROJECT_DELETE_CLEANUP_BATCH_SIZE }}
@@ -504,15 +585,33 @@ jobs:
           PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_TIME_MS: ${{ vars.PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_TIME_MS }}
           PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_UNSAFE_RATIO: ${{ vars.PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_UNSAFE_RATIO }}
           PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES: ${{ vars.PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES }}
+          PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_MAX_ROWS: ${{ vars.PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_MAX_ROWS }}
+          PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_MAX_BYTES: ${{ vars.PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_MAX_BYTES }}
+          PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_MAX_SESSIONS: ${{ vars.PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_MAX_SESSIONS }}
+          PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_TRANSACTION_ROWS: ${{ vars.PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_TRANSACTION_ROWS }}
+          PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_TRANSACTION_BYTES: ${{ vars.PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_TRANSACTION_BYTES }}
           PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: ${{ vars.PROJECT_DATA_ARCHIVE_SHARDING_ENABLED }}
+          PROJECT_DATA_ARCHIVE_COMPACT_ENABLED: ${{ vars.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED }}
+          PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: ${{ vars.PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET }}
+          PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR: ${{ vars.PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR }}
+          PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS: ${{ vars.PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS }}
+          PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_RETENTION_MS: ${{ vars.PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_RETENTION_MS }}
+          PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_CLEANUP_LIMIT: ${{ vars.PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_CLEANUP_LIMIT }}
           PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: ${{ vars.PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED }}
           PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS: ${{ vars.PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS }}
           PROJECT_DATA_ARCHIVE_SHARD_COUNT: ${{ vars.PROJECT_DATA_ARCHIVE_SHARD_COUNT }}
           PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS: ${{ vars.PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS }}
           PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: ${{ vars.PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS }}
+          PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET: ${{ vars.PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET }}
+          PROJECT_DATA_ARCHIVE_SWEEP_UNIT_OVERHEAD_PERCENT: ${{ vars.PROJECT_DATA_ARCHIVE_SWEEP_UNIT_OVERHEAD_PERCENT }}
+          PROJECT_DATA_ARCHIVE_SWEEP_FALLTHROUGH_DEPTH: ${{ vars.PROJECT_DATA_ARCHIVE_SWEEP_FALLTHROUGH_DEPTH }}
+          PROJECT_DATA_ARCHIVE_BUDGET_STALL_ALERT_SWEEPS: ${{ vars.PROJECT_DATA_ARCHIVE_BUDGET_STALL_ALERT_SWEEPS }}
           PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS: ${{ vars.PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS }}
+          PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS: ${{ vars.PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS }}
+          PROJECT_DATA_ARCHIVE_FAILED_RETRY_DELAY_MS: ${{ vars.PROJECT_DATA_ARCHIVE_FAILED_RETRY_DELAY_MS }}
           PROJECT_DATA_ARCHIVE_CHUNK_ROWS: ${{ vars.PROJECT_DATA_ARCHIVE_CHUNK_ROWS }}
           PROJECT_DATA_ARCHIVE_CHUNK_BYTES: ${{ vars.PROJECT_DATA_ARCHIVE_CHUNK_BYTES }}
+          PROJECT_DATA_ARCHIVE_HASH_PAGE_ROWS: ${{ vars.PROJECT_DATA_ARCHIVE_HASH_PAGE_ROWS }}
           PROJECT_DATA_ARCHIVE_LEASE_MS: ${{ vars.PROJECT_DATA_ARCHIVE_LEASE_MS }}
           PROJECT_DATA_ARCHIVE_WALL_TIME_MS: ${{ vars.PROJECT_DATA_ARCHIVE_WALL_TIME_MS }}
           PROJECT_DATA_ARCHIVE_ROLLOUT_LIST_LIMIT_DEFAULT: ${{ vars.PROJECT_DATA_ARCHIVE_ROLLOUT_LIST_LIMIT_DEFAULT }}
@@ -526,10 +625,104 @@ jobs:
           PROJECT_DATA_ARCHIVE_POISON_AFTER_ATTEMPTS: ${{ vars.PROJECT_DATA_ARCHIVE_POISON_AFTER_ATTEMPTS }}
           PROJECT_DATA_ARCHIVE_R2_PREFIX: ${{ vars.PROJECT_DATA_ARCHIVE_R2_PREFIX }}
           PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS: ${{ vars.PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS }}
+          PROJECT_DATA_ARCHIVE_SEARCH_CONCURRENCY: ${{ vars.PROJECT_DATA_ARCHIVE_SEARCH_CONCURRENCY }}
+          PROJECT_DATA_ARCHIVE_SEARCH_REPAIR_SESSIONS: ${{ vars.PROJECT_DATA_ARCHIVE_SEARCH_REPAIR_SESSIONS }}
+          PROJECT_DATA_ARCHIVE_SEARCH_REPAIR_CHUNKS: ${{ vars.PROJECT_DATA_ARCHIVE_SEARCH_REPAIR_CHUNKS }}
+          PROJECT_DATA_ARCHIVE_SEARCH_CONTINUATION_TTL_MS: ${{ vars.PROJECT_DATA_ARCHIVE_SEARCH_CONTINUATION_TTL_MS }}
+          PROJECT_DATA_ARCHIVE_SEARCH_CURSOR_MAX_BYTES: ${{ vars.PROJECT_DATA_ARCHIVE_SEARCH_CURSOR_MAX_BYTES }}
+          PROJECT_DATA_ARCHIVE_SEARCH_ERROR_LIMIT: ${{ vars.PROJECT_DATA_ARCHIVE_SEARCH_ERROR_LIMIT }}
+          PROJECT_DATA_SEARCH_FTS_CANDIDATE_LIMIT: ${{ vars.PROJECT_DATA_SEARCH_FTS_CANDIDATE_LIMIT }}
+          PROJECT_DATA_SEARCH_FTS_SCAN_LIMIT: ${{ vars.PROJECT_DATA_SEARCH_FTS_SCAN_LIMIT }}
+          PROJECT_DATA_SEARCH_KEYWORD_SCAN_ROW_LIMIT: ${{ vars.PROJECT_DATA_SEARCH_KEYWORD_SCAN_ROW_LIMIT }}
+          SEARCH_QUERY_MAX_LENGTH: ${{ vars.SEARCH_QUERY_MAX_LENGTH }}
+          SEARCH_QUERY_MAX_TERM_LENGTH: ${{ vars.SEARCH_QUERY_MAX_TERM_LENGTH }}
+          SEARCH_QUERY_MAX_TERMS: ${{ vars.SEARCH_QUERY_MAX_TERMS }}
+          PROJECT_DATA_ALARM_SECTION_GATING_ENABLED: ${{ vars.PROJECT_DATA_ALARM_SECTION_GATING_ENABLED }}
+          PROJECT_DATA_ALARM_FULL_RUN_INTERVAL_MS: ${{ vars.PROJECT_DATA_ALARM_FULL_RUN_INTERVAL_MS }}
+          PROJECT_DATA_ALARM_DUE_TOLERANCE_MS: ${{ vars.PROJECT_DATA_ALARM_DUE_TOLERANCE_MS }}
+          PROJECT_DATA_ALARM_SLOW_SECTION_MS: ${{ vars.PROJECT_DATA_ALARM_SLOW_SECTION_MS }}
           PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED: ${{ vars.PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED }}
           PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS: ${{ vars.PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS }}
           PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS: ${{ vars.PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS }}
           PROJECT_DATA_EVENT_LOG_CLEANUP_RECHECK_MS: ${{ vars.PROJECT_DATA_EVENT_LOG_CLEANUP_RECHECK_MS }}
+          PROJECT_EVENT_MAX_ACTIVE_SUBSCRIPTIONS_PER_PROJECT: ${{ vars.PROJECT_EVENT_MAX_ACTIVE_SUBSCRIPTIONS_PER_PROJECT }}
+          PROJECT_EVENT_FILTER_MAX_VALUES_PER_FIELD: ${{ vars.PROJECT_EVENT_FILTER_MAX_VALUES_PER_FIELD }}
+          PROJECT_EVENT_FILTER_MAX_MATCH_KEYS: ${{ vars.PROJECT_EVENT_FILTER_MAX_MATCH_KEYS }}
+          PROJECT_EVENT_FILTER_MAX_STRING_BYTES: ${{ vars.PROJECT_EVENT_FILTER_MAX_STRING_BYTES }}
+          PROJECT_EVENT_METADATA_MAX_BYTES: ${{ vars.PROJECT_EVENT_METADATA_MAX_BYTES }}
+          PROJECT_EVENT_METADATA_MAX_DEPTH: ${{ vars.PROJECT_EVENT_METADATA_MAX_DEPTH }}
+          PROJECT_EVENT_METADATA_MAX_KEYS: ${{ vars.PROJECT_EVENT_METADATA_MAX_KEYS }}
+          PROJECT_EVENT_METADATA_MAX_ARRAY_ITEMS: ${{ vars.PROJECT_EVENT_METADATA_MAX_ARRAY_ITEMS }}
+          PROJECT_EVENT_DISPLAY_MAX_BYTES: ${{ vars.PROJECT_EVENT_DISPLAY_MAX_BYTES }}
+          PROJECT_EVENT_DISPLAY_MAX_LABELS: ${{ vars.PROJECT_EVENT_DISPLAY_MAX_LABELS }}
+          PROJECT_EVENT_RAW_PAYLOAD_REF_MAX_BYTES: ${{ vars.PROJECT_EVENT_RAW_PAYLOAD_REF_MAX_BYTES }}
+          PROJECT_EVENT_REASON_MAX_BYTES: ${{ vars.PROJECT_EVENT_REASON_MAX_BYTES }}
+          PROJECT_EVENT_MAX_MATCHES_PER_EVENT: ${{ vars.PROJECT_EVENT_MAX_MATCHES_PER_EVENT }}
+          PROJECT_EVENT_DELIVERY_BATCH_MAX_EVENTS: ${{ vars.PROJECT_EVENT_DELIVERY_BATCH_MAX_EVENTS }}
+          PROJECT_EVENT_DELIVERY_ATTEMPT_MAX_PER_BATCH: ${{ vars.PROJECT_EVENT_DELIVERY_ATTEMPT_MAX_PER_BATCH }}
+          PROJECT_EVENT_SCHEDULE_MAX_SCHEDULES: ${{ vars.PROJECT_EVENT_SCHEDULE_MAX_SCHEDULES }}
+          PROJECT_EVENT_SCHEDULE_MAX_WATCHES: ${{ vars.PROJECT_EVENT_SCHEDULE_MAX_WATCHES }}
+          PROJECT_EVENT_SCHEDULE_MAX_RETAINED_SCHEDULES: ${{ vars.PROJECT_EVENT_SCHEDULE_MAX_RETAINED_SCHEDULES }}
+          PROJECT_EVENT_SCHEDULE_MAX_RETAINED_WATCHES: ${{ vars.PROJECT_EVENT_SCHEDULE_MAX_RETAINED_WATCHES }}
+          PROJECT_EVENT_SCHEDULE_PROMPT_MAX_BYTES: ${{ vars.PROJECT_EVENT_SCHEDULE_PROMPT_MAX_BYTES }}
+          PROJECT_EVENT_SCHEDULE_MAX_HORIZON_MS: ${{ vars.PROJECT_EVENT_SCHEDULE_MAX_HORIZON_MS }}
+          PROJECT_EVENT_SCHEDULE_LATE_GRACE_MS: ${{ vars.PROJECT_EVENT_SCHEDULE_LATE_GRACE_MS }}
+          PROJECT_EVENT_SCHEDULE_DELIVERY_TTL_MS: ${{ vars.PROJECT_EVENT_SCHEDULE_DELIVERY_TTL_MS }}
+          PROJECT_EVENT_SCHEDULE_SWEEP_BATCH_SIZE: ${{ vars.PROJECT_EVENT_SCHEDULE_SWEEP_BATCH_SIZE }}
+          PROJECT_EVENT_SCHEDULE_CLAIM_LEASE_MS: ${{ vars.PROJECT_EVENT_SCHEDULE_CLAIM_LEASE_MS }}
+          PROJECT_EVENT_SCHEDULE_RETRY_BASE_MS: ${{ vars.PROJECT_EVENT_SCHEDULE_RETRY_BASE_MS }}
+          PROJECT_EVENT_SCHEDULE_MAX_ATTEMPTS: ${{ vars.PROJECT_EVENT_SCHEDULE_MAX_ATTEMPTS }}
+          PROJECT_EVENT_SCHEDULE_MAX_DEFERRAL_MS: ${{ vars.PROJECT_EVENT_SCHEDULE_MAX_DEFERRAL_MS }}
+          PROJECT_EVENT_WATCH_COOLDOWN_MIN_MS: ${{ vars.PROJECT_EVENT_WATCH_COOLDOWN_MIN_MS }}
+          PROJECT_EVENT_WATCH_MAX_EXECUTIONS: ${{ vars.PROJECT_EVENT_WATCH_MAX_EXECUTIONS }}
+          PROJECT_EVENT_WATCH_MAX_CONCURRENT: ${{ vars.PROJECT_EVENT_WATCH_MAX_CONCURRENT }}
+          PROJECT_EVENT_CHANNEL_MAX_CHANNELS: ${{ vars.PROJECT_EVENT_CHANNEL_MAX_CHANNELS }}
+          PROJECT_EVENT_CHANNEL_MESSAGE_MAX_BYTES: ${{ vars.PROJECT_EVENT_CHANNEL_MESSAGE_MAX_BYTES }}
+          PROJECT_EVENT_CHANNEL_NAME_MAX_BYTES: ${{ vars.PROJECT_EVENT_CHANNEL_NAME_MAX_BYTES }}
+          PROJECT_EVENT_CHANNEL_PUBLISH_WINDOW_MS: ${{ vars.PROJECT_EVENT_CHANNEL_PUBLISH_WINDOW_MS }}
+          PROJECT_EVENT_CHANNEL_PUBLISH_MAX_PER_WINDOW: ${{ vars.PROJECT_EVENT_CHANNEL_PUBLISH_MAX_PER_WINDOW }}
+          PROJECT_EVENT_CHANNEL_CURSOR_TTL_MS: ${{ vars.PROJECT_EVENT_CHANNEL_CURSOR_TTL_MS }}
+          PROJECT_EVENT_CHANNEL_CATALOG_IDLE_TTL_MS: ${{ vars.PROJECT_EVENT_CHANNEL_CATALOG_IDLE_TTL_MS }}
+          PROJECT_EVENT_LIST_LIMIT: ${{ vars.PROJECT_EVENT_LIST_LIMIT }}
+          PROJECT_EVENT_LIST_MAX: ${{ vars.PROJECT_EVENT_LIST_MAX }}
+          PROJECT_EVENT_RECENT_STATUS_LIMIT: ${{ vars.PROJECT_EVENT_RECENT_STATUS_LIMIT }}
+          PROJECT_EVENT_RETENTION_DAYS: ${{ vars.PROJECT_EVENT_RETENTION_DAYS }}
+          PROJECT_EVENT_RETENTION_BATCH_ROWS: ${{ vars.PROJECT_EVENT_RETENTION_BATCH_ROWS }}
+          PROJECT_EVENT_SOURCE_OUTBOX_BATCH_ROWS: ${{ vars.PROJECT_EVENT_SOURCE_OUTBOX_BATCH_ROWS }}
+          PROJECT_EVENT_SOURCE_OUTBOX_MAX_ATTEMPTS: ${{ vars.PROJECT_EVENT_SOURCE_OUTBOX_MAX_ATTEMPTS }}
+          PROJECT_EVENT_SOURCE_OUTBOX_TTL_MS: ${{ vars.PROJECT_EVENT_SOURCE_OUTBOX_TTL_MS }}
+          PROJECT_EVENT_SOURCE_OUTBOX_RETRY_BASE_MS: ${{ vars.PROJECT_EVENT_SOURCE_OUTBOX_RETRY_BASE_MS }}
+          PROJECT_EVENT_SOURCE_OUTBOX_RETRY_MAX_MS: ${{ vars.PROJECT_EVENT_SOURCE_OUTBOX_RETRY_MAX_MS }}
+          PROJECT_EVENT_SOURCE_OUTBOX_PROCESSING_LEASE_MS: ${{ vars.PROJECT_EVENT_SOURCE_OUTBOX_PROCESSING_LEASE_MS }}
+          PROJECT_EVENT_RETENTION_INTERVAL_MS: ${{ vars.PROJECT_EVENT_RETENTION_INTERVAL_MS }}
+          PROJECT_EVENT_RETENTION_MIN_ALARM_DELAY_MS: ${{ vars.PROJECT_EVENT_RETENTION_MIN_ALARM_DELAY_MS }}
+          PROJECT_EVENT_WAKE_ENABLED: ${{ vars.PROJECT_EVENT_WAKE_ENABLED }}
+          PROJECT_EVENT_WAKE_MATERIALIZATION_MIN_ALARM_DELAY_MS: ${{ vars.PROJECT_EVENT_WAKE_MATERIALIZATION_MIN_ALARM_DELAY_MS }}
+          PROJECT_EVENT_WAKE_MATERIALIZATION_BACKOFF_BASE_MS: ${{ vars.PROJECT_EVENT_WAKE_MATERIALIZATION_BACKOFF_BASE_MS }}
+          PROJECT_EVENT_WAKE_MATERIALIZATION_BACKOFF_MAX_MS: ${{ vars.PROJECT_EVENT_WAKE_MATERIALIZATION_BACKOFF_MAX_MS }}
+          PROJECT_EVENT_WAKE_PROMPT_TTL_MS: ${{ vars.PROJECT_EVENT_WAKE_PROMPT_TTL_MS }}
+          PROJECT_EVENT_WAKE_READ_GRACE_MS: ${{ vars.PROJECT_EVENT_WAKE_READ_GRACE_MS }}
+          PROJECT_EVENT_WAKE_TARGET_COOLDOWN_MS: ${{ vars.PROJECT_EVENT_WAKE_TARGET_COOLDOWN_MS }}
+          PROJECT_EVENT_WAKE_SUBSCRIPTION_COOLDOWN_MS: ${{ vars.PROJECT_EVENT_WAKE_SUBSCRIPTION_COOLDOWN_MS }}
+          PROJECT_EVENT_WAKE_SUBSCRIPTION_LIFETIME_MS: ${{ vars.PROJECT_EVENT_WAKE_SUBSCRIPTION_LIFETIME_MS }}
+          PROJECT_EVENT_WAKE_MAX_PER_SUBSCRIPTION: ${{ vars.PROJECT_EVENT_WAKE_MAX_PER_SUBSCRIPTION }}
+          CREDENTIAL_LIMIT_WARNING_PERCENT: ${{ vars.CREDENTIAL_LIMIT_WARNING_PERCENT }}
+          CREDENTIAL_LIMIT_CRITICAL_PERCENT: ${{ vars.CREDENTIAL_LIMIT_CRITICAL_PERCENT }}
+          CREDENTIAL_LIMIT_MAX_OBSERVATIONS_PER_REPORT: ${{ vars.CREDENTIAL_LIMIT_MAX_OBSERVATIONS_PER_REPORT }}
+          CREDENTIAL_LIMIT_TRANSITION_RECOMPUTE_ATTEMPTS: ${{ vars.CREDENTIAL_LIMIT_TRANSITION_RECOMPUTE_ATTEMPTS }}
+          CREDENTIAL_LIMIT_USAGE_CALLBACK_MAX_BODY_BYTES: ${{ vars.CREDENTIAL_LIMIT_USAGE_CALLBACK_MAX_BODY_BYTES }}
+          CREDENTIAL_LIMIT_USAGE_CALLBACK_RATE_LIMIT_RPM: ${{ vars.CREDENTIAL_LIMIT_USAGE_CALLBACK_RATE_LIMIT_RPM }}
+          CREDENTIAL_LIMIT_USAGE_CALLBACK_RATE_LIMIT_WINDOW_SECONDS: ${{ vars.CREDENTIAL_LIMIT_USAGE_CALLBACK_RATE_LIMIT_WINDOW_SECONDS }}
+          CREDENTIAL_LIMIT_OBSERVATION_MAX_AGE_MS: ${{ vars.CREDENTIAL_LIMIT_OBSERVATION_MAX_AGE_MS }}
+          CREDENTIAL_LIMIT_OBSERVATION_FUTURE_SKEW_MS: ${{ vars.CREDENTIAL_LIMIT_OBSERVATION_FUTURE_SKEW_MS }}
+          CREDENTIAL_LIMIT_RESET_MAX_FUTURE_MS: ${{ vars.CREDENTIAL_LIMIT_RESET_MAX_FUTURE_MS }}
+          CREDENTIAL_LIMIT_SUPPORTED_PROVIDERS: ${{ vars.CREDENTIAL_LIMIT_SUPPORTED_PROVIDERS }}
+          CREDENTIAL_LIMIT_SUPPORTED_SOURCES: ${{ vars.CREDENTIAL_LIMIT_SUPPORTED_SOURCES }}
+          CREDENTIAL_LIMIT_SUPPORTED_WINDOW_TYPES: ${{ vars.CREDENTIAL_LIMIT_SUPPORTED_WINDOW_TYPES }}
+          CREDENTIAL_LIMIT_READ_MAX_ROWS: ${{ vars.CREDENTIAL_LIMIT_READ_MAX_ROWS }}
+          PROJECT_EVENT_SOURCE_OUTBOX_SWEEP_WALL_MS: ${{ vars.PROJECT_EVENT_SOURCE_OUTBOX_SWEEP_WALL_MS }}
+          PROJECT_EVENT_SOURCE_OUTBOX_ADMISSION_TIMEOUT_MS: ${{ vars.PROJECT_EVENT_SOURCE_OUTBOX_ADMISSION_TIMEOUT_MS }}
+          PROJECT_EVENT_SOURCE_OUTBOX_TERMINAL_RETENTION_MS: ${{ vars.PROJECT_EVENT_SOURCE_OUTBOX_TERMINAL_RETENTION_MS }}
           MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT: ${{ vars.MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT }}
           MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX: ${{ vars.MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX }}
           MAX_VM_AGENT_ERROR_BODY_BYTES: ${{ vars.MAX_VM_AGENT_ERROR_BODY_BYTES }}
@@ -697,15 +890,50 @@ jobs:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           AI_GATEWAY_ID: ${{ steps.deploy_resources.outputs.ai_gateway }}
 
+      # D1 primaries are pinned to the region they were created in, while Workers run at the
+      # edge. Read replication lets the Sessions API in apps/api/src/lib/d1-session.ts serve a
+      # request's queries from a nearby replica instead of crossing to the primary each time.
+      # Idempotent, and a no-op for queries that do not open a session — see the script header
+      # for why this is a deploy step rather than a Pulumi property.
+      - name: Configure D1 Read Replication
+        if: ${{ inputs.dry_run != true }}
+        env:
+          # AWS_* for Pulumi R2 backend (pulumi stack output)
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          D1_READ_REPLICATION_MODE: ${{ vars.D1_READ_REPLICATION_MODE }}
+        run: |
+          set -euo pipefail
+          PRIMARY_D1_ID=$(cd infra && pulumi stack output d1DatabaseId)
+          OBSERVABILITY_D1_ID=$(cd infra && pulumi stack output observabilityD1DatabaseId)
+          # Guard each output individually. Word-splitting in the script's loop would silently
+          # drop an empty token, so a single missing output would configure one database and
+          # still report success ("silence is not success", .claude/rules/53).
+          if [ -z "$PRIMARY_D1_ID" ] || [ -z "$OBSERVABILITY_D1_ID" ]; then
+            echo "::error::Pulumi did not resolve both D1 database IDs (primary='${PRIMARY_D1_ID}', observability='${OBSERVABILITY_D1_ID}')"
+            exit 1
+          fi
+          D1_DATABASE_IDS="${PRIMARY_D1_ID} ${OBSERVABILITY_D1_ID}"
+          export D1_DATABASE_IDS
+          bash scripts/deploy/configure-d1-read-replication.sh
+
       - name: Check First Deploy Status
         id: first_deploy
         if: ${{ inputs.dry_run != true }}
         run: |
-          if [ -f .wrangler/tail-worker-first-deploy ]; then
+          if [ -f .wrangler/api-worker-first-deploy ]; then
             echo "is_first=true" >> $GITHUB_OUTPUT
             echo "First deploy detected -- will do two-pass deployment"
           else
             echo "is_first=false" >> $GITHUB_OUTPUT
+          fi
+          if [ -f .wrangler/tail-worker-first-deploy ]; then
+            echo "needs_tail_sync=true" >> $GITHUB_OUTPUT
+          else
+            echo "needs_tail_sync=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Ensure workers.dev Subdomain
@@ -769,6 +997,9 @@ jobs:
           VITE_WORKSPACE_PORTS_CIRCUIT_RESET_MS: ${{ vars.VITE_WORKSPACE_PORTS_CIRCUIT_RESET_MS || '300000' }}
           VITE_PROJECT_PREFETCH_DELAY_MS: ${{ vars.VITE_PROJECT_PREFETCH_DELAY_MS || '120' }}
           VITE_BACKGROUND_FETCH_DELAY_MS: ${{ vars.VITE_BACKGROUND_FETCH_DELAY_MS || '150' }}
+          VITE_ACP_PERMISSION_POLL_MS: ${{ vars.VITE_ACP_PERMISSION_POLL_MS || '2000' }}
+          VITE_ACP_PERMISSION_RECOVERY_POLL_MS: ${{ vars.VITE_ACP_PERMISSION_RECOVERY_POLL_MS || '30000' }}
+          VITE_ACP_PERMISSION_QUERY_RETRY_COUNT: ${{ vars.VITE_ACP_PERMISSION_QUERY_RETRY_COUNT || '3' }}
 
       # Bake the deployment-built vm-agent before Wrangler builds the raw container.
       - name: Setup Go for Container Runtime
@@ -783,16 +1014,19 @@ jobs:
 
       - name: Prepare Versioned VM Agent Container Artifact
         if: ${{ inputs.dry_run != true }}
+        # The container-baked binary must report the same version as the R2
+        # release, so both take VERSION/BUILD_DATE from the VM-agent release
+        # commit rather than from the deployment commit.
         run: |
-          BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          make -C packages/vm-agent prepare-container VERSION="$DEPLOY_SHA" BUILD_DATE="$BUILD_DATE"
+          make -C packages/vm-agent prepare-container VERSION="$VM_AGENT_RELEASE" BUILD_DATE="$VM_AGENT_BUILD_DATE"
           cat apps/api/container-artifacts/vm-agent-version.json
           echo "### CF Container runtime artifact" >> "$GITHUB_STEP_SUMMARY"
           echo '```json' >> "$GITHUB_STEP_SUMMARY"
           cat apps/api/container-artifacts/vm-agent-version.json >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
         env:
-          DEPLOY_SHA: ${{ steps.deploy-sha.outputs.value }}
+          VM_AGENT_RELEASE: ${{ steps.deploy-sha.outputs.release }}
+          VM_AGENT_BUILD_DATE: ${{ steps.deploy-sha.outputs.build_date }}
 
       - name: Run Database Migrations With Safety Gates
         if: ${{ inputs.dry_run != true }}
@@ -838,22 +1072,39 @@ jobs:
       # not drained for binaries this deployment intentionally did not publish.
       - name: Build VM Agent
         if: ${{ inputs.dry_run != true && inputs.skip_agent != true }}
-        # Pin VERSION to the deploy commit so R2 binaries report the same
-        # version string as the container-baked binary (prepare-container above).
+        # Pin VERSION to the VM-agent release commit so R2 binaries report the
+        # same version string as the container-baked binary (prepare-container
+        # above), and so unchanged agent source rebuilds byte-identically under
+        # the immutable release key that publish-vm-agent-artifacts.sh enforces.
         run: |
-          BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          make -C packages/vm-agent build-all VERSION="$DEPLOY_SHA" BUILD_DATE="$BUILD_DATE"
+          make -C packages/vm-agent build-all VERSION="$VM_AGENT_RELEASE" BUILD_DATE="$VM_AGENT_BUILD_DATE"
         env:
-          DEPLOY_SHA: ${{ steps.deploy-sha.outputs.value }}
+          VM_AGENT_RELEASE: ${{ steps.deploy-sha.outputs.release }}
+          VM_AGENT_BUILD_DATE: ${{ steps.deploy-sha.outputs.build_date }}
 
       - name: Upload VM Agent Binaries
         if: ${{ inputs.dry_run != true && inputs.skip_agent != true }}
         working-directory: infra
         run: |
           R2_BUCKET=$(pulumi stack output r2Name)
-          # Wrangler v4: R2 commands default to local; --remote required for deployed R2.
-          pnpm --filter @simple-agent-manager/api exec wrangler r2 object put $R2_BUCKET/agents/vm-agent-linux-amd64 --file $GITHUB_WORKSPACE/packages/vm-agent/bin/vm-agent-linux-amd64 --remote
-          pnpm --filter @simple-agent-manager/api exec wrangler r2 object put $R2_BUCKET/agents/vm-agent-linux-arm64 --file $GITHUB_WORKSPACE/packages/vm-agent/bin/vm-agent-linux-arm64 --remote
+          R2_BUCKET="$R2_BUCKET" bash ../scripts/deploy/publish-vm-agent-artifacts.sh
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          VM_AGENT_RELEASE: ${{ steps.deploy-sha.outputs.release }}
+
+      # Publish the exact archive baked into Instant before any Worker revision
+      # can serve candidate VM bootstrap requests. Clean installations need no
+      # pre-existing Worker route or operator-owned artifact secret.
+      - name: Publish Pinned Codex Runtime
+        if: ${{ inputs.dry_run != true }}
+        working-directory: infra
+        run: |
+          R2_BUCKET=$(pulumi stack output r2Name)
+          R2_BUCKET="$R2_BUCKET" bash ../scripts/deploy/publish-codex-runtime-artifact.sh ../apps/api/container-artifacts/codex-runtime-linux-amd64.tar.gz
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -861,10 +1112,11 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
-      # Deploy API worker after D1 migrations so new code never serves against old schema.
-      # On first deploy this still runs before the tail worker because the API service binding is required.
-      - name: Deploy API Worker
-        if: ${{ inputs.dry_run != true }}
+      # A first installation needs an API service for the tail Worker's service binding.
+      # Established installations defer API code publication until after secrets so an
+      # active Instant container sees at most the secret revision plus the final revision.
+      - name: Bootstrap API Worker
+        if: ${{ inputs.dry_run != true && steps.first_deploy.outputs.is_first == 'true' }}
         run: |
           OUTPUT=$(pnpm --filter @simple-agent-manager/api exec wrangler deploy --env "$DEPLOY_ENV" 2>&1) || {
             echo "$OUTPUT"
@@ -887,7 +1139,7 @@ jobs:
           DEPLOY_ENV: ${{ steps.deploy_resources.outputs.environment }}
           ARTIFACTS_BINDING_ENABLED: ${{ vars.ARTIFACTS_BINDING_ENABLED }}
 
-      # Tail Worker must deploy AFTER API Worker (service binding dependency)
+      # The Tail Worker service binding requires the API Worker on first installation.
       - name: Deploy Tail Worker
         if: ${{ inputs.dry_run != true }}
         run: pnpm --filter @simple-agent-manager/tail-worker exec wrangler deploy --env "$DEPLOY_ENV"
@@ -896,9 +1148,9 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           DEPLOY_ENV: ${{ steps.deploy_resources.outputs.environment }}
 
-      # On first deploy: tail worker now exists, re-sync to add tail_consumers and re-deploy API
+      # Newly created or repaired Tail Workers need their binding in final API config.
       - name: Re-sync Wrangler Config (add tail_consumers)
-        if: ${{ inputs.dry_run != true && steps.first_deploy.outputs.is_first == 'true' }}
+        if: ${{ inputs.dry_run != true && steps.first_deploy.outputs.needs_tail_sync == 'true' }}
         run: |
           rm -f .wrangler/tail-worker-first-deploy
           pnpm tsx scripts/deploy/sync-wrangler-config.ts
@@ -912,6 +1164,7 @@ jobs:
           BASE_DOMAIN: ${{ steps.deploy_resources.outputs.base_domain }}
           RESOURCE_PREFIX: ${{ steps.deploy_resources.outputs.prefix }}
           VM_AGENT_REQUIRED_VERSION: ${{ steps.deploy-sha.outputs.agent_version }}
+          D1_SESSION_MODE: ${{ vars.D1_SESSION_MODE }}
           REQUIRE_APPROVAL: ${{ vars.REQUIRE_APPROVAL }}
           CRON_SWEEPS_ENABLED_KV_KEY: ${{ vars.CRON_SWEEPS_ENABLED_KV_KEY }}
           DO_ALARMS_ENABLED_KV_KEY: ${{ vars.DO_ALARMS_ENABLED_KV_KEY }}
@@ -922,6 +1175,21 @@ jobs:
           NODE_LIFECYCLE_MAX_DESTROYING_AGE_MS: ${{ vars.NODE_LIFECYCLE_MAX_DESTROYING_AGE_MS }}
           NODE_WORKSPACE_IDLE_TIMEOUT_MS: ${{ vars.NODE_WORKSPACE_IDLE_TIMEOUT_MS }}
           NODE_CLEANUP_FAILURE_BACKOFF_MS: ${{ vars.NODE_CLEANUP_FAILURE_BACKOFF_MS }}
+          NODE_UNHEALTHY_DRAIN_AFTER_MS: ${{ vars.NODE_UNHEALTHY_DRAIN_AFTER_MS }}
+          NODE_UNHEALTHY_RELEASE_AFTER_MS: ${{ vars.NODE_UNHEALTHY_RELEASE_AFTER_MS }}
+          NODE_UNHEALTHY_FLEET_MAX_FRACTION: ${{ vars.NODE_UNHEALTHY_FLEET_MAX_FRACTION }}
+          NODE_UNHEALTHY_FLEET_MIN_NODES: ${{ vars.NODE_UNHEALTHY_FLEET_MIN_NODES }}
+          NODE_UNHEALTHY_RETRY_MS: ${{ vars.NODE_UNHEALTHY_RETRY_MS }}
+          NODE_UNHEALTHY_PRESERVATION_TIMEOUT_MS: ${{ vars.NODE_UNHEALTHY_PRESERVATION_TIMEOUT_MS }}
+          NODE_AGENT_REQUEST_TIMEOUT_MS: ${{ vars.NODE_AGENT_REQUEST_TIMEOUT_MS }}
+          NODE_AGENT_BACKGROUND_REQUEST_TIMEOUT_MS: ${{ vars.NODE_AGENT_BACKGROUND_REQUEST_TIMEOUT_MS }}
+          WORKSPACE_DELETION_RETRY_BASE_MS: ${{ vars.WORKSPACE_DELETION_RETRY_BASE_MS }}
+          WORKSPACE_DELETION_RETRY_MAX_MS: ${{ vars.WORKSPACE_DELETION_RETRY_MAX_MS }}
+          WORKSPACE_DELETION_MAX_RESIDENCE_MS: ${{ vars.WORKSPACE_DELETION_MAX_RESIDENCE_MS }}
+          WORKSPACE_DELETION_ALARM_BATCH_SIZE: ${{ vars.WORKSPACE_DELETION_ALARM_BATCH_SIZE }}
+          WORKSPACE_DELETION_CALLBACK_SIGNAL_TTL_SECONDS: ${{ vars.WORKSPACE_DELETION_CALLBACK_SIGNAL_TTL_SECONDS }}
+          WORKSPACE_DELETION_CALLBACK_SIGNAL_CLEANUP_LIMIT: ${{ vars.WORKSPACE_DELETION_CALLBACK_SIGNAL_CLEANUP_LIMIT }}
+          WORKSPACE_DELETION_DIAGNOSTIC_MAX_LENGTH: ${{ vars.WORKSPACE_DELETION_DIAGNOSTIC_MAX_LENGTH }}
           DIAGNOSIS_COMPLETED_STEP_MIN_DELAY_MS: ${{ vars.DIAGNOSIS_COMPLETED_STEP_MIN_DELAY_MS }}
           ORCHESTRATOR_ZERO_TASK_GRACE_MS: ${{ vars.ORCHESTRATOR_ZERO_TASK_GRACE_MS }}
           ORCHESTRATOR_MAX_MISSION_LIFETIME_MS: ${{ vars.ORCHESTRATOR_MAX_MISSION_LIFETIME_MS }}
@@ -932,6 +1200,9 @@ jobs:
           ORCHESTRATOR_WAIT_MAX_CANDIDATES_PER_ALARM: ${{ vars.ORCHESTRATOR_WAIT_MAX_CANDIDATES_PER_ALARM }}
           SETUP_FORCE: ${{ vars.SETUP_FORCE }}
           HETZNER_BASE_IMAGE: ${{ vars.HETZNER_BASE_IMAGE }}
+          DEPLOYMENT_DEFAULT_CPU_LIMIT_MILLIS: ${{ vars.DEPLOYMENT_DEFAULT_CPU_LIMIT_MILLIS }}
+          DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB: ${{ vars.DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB }}
+          DEPLOYMENT_DEFAULT_ROOT_DISK_MB: ${{ vars.DEPLOYMENT_DEFAULT_ROOT_DISK_MB }}
           DEPLOYMENT_RELEASE_RETENTION_ENABLED: ${{ vars.DEPLOYMENT_RELEASE_RETENTION_ENABLED }}
           DEPLOYMENT_RELEASE_RETENTION_COUNT: ${{ vars.DEPLOYMENT_RELEASE_RETENTION_COUNT }}
           DEPLOYMENT_RELEASE_RETENTION_BATCH_SIZE: ${{ vars.DEPLOYMENT_RELEASE_RETENTION_BATCH_SIZE }}
@@ -964,7 +1235,10 @@ jobs:
           SESSION_SLEEP_SWEEP_WALL_BUDGET_MS: ${{ vars.SESSION_SLEEP_SWEEP_WALL_BUDGET_MS }}
           SESSION_SLEEP_RETRY_DELAY_MS: ${{ vars.SESSION_SLEEP_RETRY_DELAY_MS }}
           SESSION_SLEEP_MAX_ATTEMPTS: ${{ vars.SESSION_SLEEP_MAX_ATTEMPTS }}
+          SESSION_SLEEP_FAILURE_MAX_ATTEMPTS: ${{ vars.SESSION_SLEEP_FAILURE_MAX_ATTEMPTS }}
+          SESSION_SLEEP_FAILURE_MAX_ELAPSED_MS: ${{ vars.SESSION_SLEEP_FAILURE_MAX_ELAPSED_MS }}
           SESSION_SLEEP_CLAIM_LEASE_MS: ${{ vars.SESSION_SLEEP_CLAIM_LEASE_MS }}
+          FAILED_TASK_PRESERVATION_MAX_WAIT_MS: ${{ vars.FAILED_TASK_PRESERVATION_MAX_WAIT_MS }}
           HARNESS_BACKGROUND_WORK_LEASE_MS: ${{ vars.HARNESS_BACKGROUND_WORK_LEASE_MS }}
           HARNESS_BACKGROUND_WORK_MAX_DURATION_MS: ${{ vars.HARNESS_BACKGROUND_WORK_MAX_DURATION_MS }}
           ACP_ACTIVITY_ADMISSION_ENABLED: ${{ vars.ACP_ACTIVITY_ADMISSION_ENABLED }}
@@ -973,6 +1247,41 @@ jobs:
           ACP_ACTIVITY_COALESCE_MAX_PENDING: ${{ vars.ACP_ACTIVITY_COALESCE_MAX_PENDING }}
           ACP_ACTIVITY_BINDING_CACHE_TTL_MS: ${{ vars.ACP_ACTIVITY_BINDING_CACHE_TTL_MS }}
           ACP_ACTIVITY_BINDING_CACHE_MAX_ENTRIES: ${{ vars.ACP_ACTIVITY_BINDING_CACHE_MAX_ENTRIES }}
+          ACP_INTERACTIONS_ENABLED: ${{ vars.ACP_INTERACTIONS_ENABLED }}
+          ACP_INTERACTION_FORMS_ENABLED: ${{ vars.ACP_INTERACTION_FORMS_ENABLED }}
+          ACP_INTERACTION_URLS_ENABLED: ${{ vars.ACP_INTERACTION_URLS_ENABLED }}
+          ACP_INTERACTION_URL_DEADLINE_MS: ${{ vars.ACP_INTERACTION_URL_DEADLINE_MS }}
+          ACP_INTERACTION_URL_MAX_CHARS: ${{ vars.ACP_INTERACTION_URL_MAX_CHARS }}
+          ACP_INTERACTION_URL_ELICITATION_ID_MAX_CHARS: ${{ vars.ACP_INTERACTION_URL_ELICITATION_ID_MAX_CHARS }}
+          ACP_INTERACTION_URL_REDIRECT_DEPTH: ${{ vars.ACP_INTERACTION_URL_REDIRECT_DEPTH }}
+          ACP_INTERACTION_PERMISSION_TASK_DEADLINE_MS: ${{ vars.ACP_INTERACTION_PERMISSION_TASK_DEADLINE_MS }}
+          ACP_INTERACTION_PERMISSION_CONVERSATION_DEADLINE_MS: ${{ vars.ACP_INTERACTION_PERMISSION_CONVERSATION_DEADLINE_MS }}
+          ACP_INTERACTION_MAX_DEADLINE_MS: ${{ vars.ACP_INTERACTION_MAX_DEADLINE_MS }}
+          ACP_INTERACTION_DEADLINE_MARGIN_MS: ${{ vars.ACP_INTERACTION_DEADLINE_MARGIN_MS }}
+          ACP_INTERACTION_MAX_PENDING_PER_SESSION: ${{ vars.ACP_INTERACTION_MAX_PENDING_PER_SESSION }}
+          ACP_INTERACTION_REQUEST_MAX_BYTES: ${{ vars.ACP_INTERACTION_REQUEST_MAX_BYTES }}
+          ACP_INTERACTION_OPTIONS_MAX_COUNT: ${{ vars.ACP_INTERACTION_OPTIONS_MAX_COUNT }}
+          ACP_INTERACTION_OPTION_ID_MAX_CHARS: ${{ vars.ACP_INTERACTION_OPTION_ID_MAX_CHARS }}
+          ACP_INTERACTION_OPTION_NAME_MAX_CHARS: ${{ vars.ACP_INTERACTION_OPTION_NAME_MAX_CHARS }}
+          ACP_INTERACTION_RUNTIME_RECEIPT_LIMIT: ${{ vars.ACP_INTERACTION_RUNTIME_RECEIPT_LIMIT }}
+          ACP_INTERACTION_RUNTIME_RESPONSE_MAX_BYTES: ${{ vars.ACP_INTERACTION_RUNTIME_RESPONSE_MAX_BYTES }}
+          ACP_INTERACTION_FORM_SCHEMA_MAX_BYTES: ${{ vars.ACP_INTERACTION_FORM_SCHEMA_MAX_BYTES }}
+          ACP_INTERACTION_FORM_SCHEMA_MAX_PROPERTIES: ${{ vars.ACP_INTERACTION_FORM_SCHEMA_MAX_PROPERTIES }}
+          ACP_INTERACTION_FORM_SCHEMA_MAX_ENUM: ${{ vars.ACP_INTERACTION_FORM_SCHEMA_MAX_ENUM }}
+          ACP_INTERACTION_ANSWER_MAX_BYTES: ${{ vars.ACP_INTERACTION_ANSWER_MAX_BYTES }}
+          ACP_INTERACTION_ANSWER_STRING_MAX_BYTES: ${{ vars.ACP_INTERACTION_ANSWER_STRING_MAX_BYTES }}
+          ACP_INTERACTION_RETRY_DELAYS_MS: ${{ vars.ACP_INTERACTION_RETRY_DELAYS_MS }}
+          ACP_INTERACTION_RETRY_STEADY_MS: ${{ vars.ACP_INTERACTION_RETRY_STEADY_MS }}
+          ACP_INTERACTION_DELIVERY_WINDOW_MS: ${{ vars.ACP_INTERACTION_DELIVERY_WINDOW_MS }}
+          ACP_INTERACTION_SENSITIVE_PURGE_MS: ${{ vars.ACP_INTERACTION_SENSITIVE_PURGE_MS }}
+          ACP_INTERACTION_SUMMARY_RETENTION_MS: ${{ vars.ACP_INTERACTION_SUMMARY_RETENTION_MS }}
+          ACP_INTERACTION_SUMMARY_LAST_SETTLED: ${{ vars.ACP_INTERACTION_SUMMARY_LAST_SETTLED }}
+          ACP_INTERACTION_SNAPSHOT_LAST_SETTLED: ${{ vars.ACP_INTERACTION_SNAPSHOT_LAST_SETTLED }}
+          ACP_INTERACTION_EXPIRY_BATCH_SIZE: ${{ vars.ACP_INTERACTION_EXPIRY_BATCH_SIZE }}
+          ACP_INTERACTION_OUTBOX_BATCH_SIZE: ${{ vars.ACP_INTERACTION_OUTBOX_BATCH_SIZE }}
+          ACP_INTERACTION_DELIVERY_BATCH_SIZE: ${{ vars.ACP_INTERACTION_DELIVERY_BATCH_SIZE }}
+          ACP_INTERACTION_ALARM_WALL_TIME_MS: ${{ vars.ACP_INTERACTION_ALARM_WALL_TIME_MS }}
+          ACP_INTERACTION_ALARM_REARM_DELAY_MS: ${{ vars.ACP_INTERACTION_ALARM_REARM_DELAY_MS }}
           SESSION_SNAPSHOT_RECOVERY_CLAIM_LEASE_MS: ${{ vars.SESSION_SNAPSHOT_RECOVERY_CLAIM_LEASE_MS }}
           SESSION_LIFECYCLE_ERROR_MAX_LENGTH: ${{ vars.SESSION_LIFECYCLE_ERROR_MAX_LENGTH }}
           LIBRARY_PROJECT_DELETE_CLEANUP_BATCH_SIZE: ${{ vars.LIBRARY_PROJECT_DELETE_CLEANUP_BATCH_SIZE }}
@@ -1040,15 +1349,33 @@ jobs:
           PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_TIME_MS: ${{ vars.PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_TIME_MS }}
           PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_UNSAFE_RATIO: ${{ vars.PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_UNSAFE_RATIO }}
           PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES: ${{ vars.PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES }}
+          PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_MAX_ROWS: ${{ vars.PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_MAX_ROWS }}
+          PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_MAX_BYTES: ${{ vars.PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_MAX_BYTES }}
+          PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_MAX_SESSIONS: ${{ vars.PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_MAX_SESSIONS }}
+          PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_TRANSACTION_ROWS: ${{ vars.PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_TRANSACTION_ROWS }}
+          PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_TRANSACTION_BYTES: ${{ vars.PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_TRANSACTION_BYTES }}
           PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: ${{ vars.PROJECT_DATA_ARCHIVE_SHARDING_ENABLED }}
+          PROJECT_DATA_ARCHIVE_COMPACT_ENABLED: ${{ vars.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED }}
+          PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: ${{ vars.PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET }}
+          PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR: ${{ vars.PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR }}
+          PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS: ${{ vars.PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS }}
+          PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_RETENTION_MS: ${{ vars.PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_RETENTION_MS }}
+          PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_CLEANUP_LIMIT: ${{ vars.PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_CLEANUP_LIMIT }}
           PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: ${{ vars.PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED }}
           PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS: ${{ vars.PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS }}
           PROJECT_DATA_ARCHIVE_SHARD_COUNT: ${{ vars.PROJECT_DATA_ARCHIVE_SHARD_COUNT }}
           PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS: ${{ vars.PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS }}
           PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: ${{ vars.PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS }}
+          PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET: ${{ vars.PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET }}
+          PROJECT_DATA_ARCHIVE_SWEEP_UNIT_OVERHEAD_PERCENT: ${{ vars.PROJECT_DATA_ARCHIVE_SWEEP_UNIT_OVERHEAD_PERCENT }}
+          PROJECT_DATA_ARCHIVE_SWEEP_FALLTHROUGH_DEPTH: ${{ vars.PROJECT_DATA_ARCHIVE_SWEEP_FALLTHROUGH_DEPTH }}
+          PROJECT_DATA_ARCHIVE_BUDGET_STALL_ALERT_SWEEPS: ${{ vars.PROJECT_DATA_ARCHIVE_BUDGET_STALL_ALERT_SWEEPS }}
           PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS: ${{ vars.PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS }}
+          PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS: ${{ vars.PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS }}
+          PROJECT_DATA_ARCHIVE_FAILED_RETRY_DELAY_MS: ${{ vars.PROJECT_DATA_ARCHIVE_FAILED_RETRY_DELAY_MS }}
           PROJECT_DATA_ARCHIVE_CHUNK_ROWS: ${{ vars.PROJECT_DATA_ARCHIVE_CHUNK_ROWS }}
           PROJECT_DATA_ARCHIVE_CHUNK_BYTES: ${{ vars.PROJECT_DATA_ARCHIVE_CHUNK_BYTES }}
+          PROJECT_DATA_ARCHIVE_HASH_PAGE_ROWS: ${{ vars.PROJECT_DATA_ARCHIVE_HASH_PAGE_ROWS }}
           PROJECT_DATA_ARCHIVE_LEASE_MS: ${{ vars.PROJECT_DATA_ARCHIVE_LEASE_MS }}
           PROJECT_DATA_ARCHIVE_WALL_TIME_MS: ${{ vars.PROJECT_DATA_ARCHIVE_WALL_TIME_MS }}
           PROJECT_DATA_ARCHIVE_ROLLOUT_LIST_LIMIT_DEFAULT: ${{ vars.PROJECT_DATA_ARCHIVE_ROLLOUT_LIST_LIMIT_DEFAULT }}
@@ -1062,10 +1389,104 @@ jobs:
           PROJECT_DATA_ARCHIVE_POISON_AFTER_ATTEMPTS: ${{ vars.PROJECT_DATA_ARCHIVE_POISON_AFTER_ATTEMPTS }}
           PROJECT_DATA_ARCHIVE_R2_PREFIX: ${{ vars.PROJECT_DATA_ARCHIVE_R2_PREFIX }}
           PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS: ${{ vars.PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS }}
+          PROJECT_DATA_ARCHIVE_SEARCH_CONCURRENCY: ${{ vars.PROJECT_DATA_ARCHIVE_SEARCH_CONCURRENCY }}
+          PROJECT_DATA_ARCHIVE_SEARCH_REPAIR_SESSIONS: ${{ vars.PROJECT_DATA_ARCHIVE_SEARCH_REPAIR_SESSIONS }}
+          PROJECT_DATA_ARCHIVE_SEARCH_REPAIR_CHUNKS: ${{ vars.PROJECT_DATA_ARCHIVE_SEARCH_REPAIR_CHUNKS }}
+          PROJECT_DATA_ARCHIVE_SEARCH_CONTINUATION_TTL_MS: ${{ vars.PROJECT_DATA_ARCHIVE_SEARCH_CONTINUATION_TTL_MS }}
+          PROJECT_DATA_ARCHIVE_SEARCH_CURSOR_MAX_BYTES: ${{ vars.PROJECT_DATA_ARCHIVE_SEARCH_CURSOR_MAX_BYTES }}
+          PROJECT_DATA_ARCHIVE_SEARCH_ERROR_LIMIT: ${{ vars.PROJECT_DATA_ARCHIVE_SEARCH_ERROR_LIMIT }}
+          PROJECT_DATA_SEARCH_FTS_CANDIDATE_LIMIT: ${{ vars.PROJECT_DATA_SEARCH_FTS_CANDIDATE_LIMIT }}
+          PROJECT_DATA_SEARCH_FTS_SCAN_LIMIT: ${{ vars.PROJECT_DATA_SEARCH_FTS_SCAN_LIMIT }}
+          PROJECT_DATA_SEARCH_KEYWORD_SCAN_ROW_LIMIT: ${{ vars.PROJECT_DATA_SEARCH_KEYWORD_SCAN_ROW_LIMIT }}
+          SEARCH_QUERY_MAX_LENGTH: ${{ vars.SEARCH_QUERY_MAX_LENGTH }}
+          SEARCH_QUERY_MAX_TERM_LENGTH: ${{ vars.SEARCH_QUERY_MAX_TERM_LENGTH }}
+          SEARCH_QUERY_MAX_TERMS: ${{ vars.SEARCH_QUERY_MAX_TERMS }}
+          PROJECT_DATA_ALARM_SECTION_GATING_ENABLED: ${{ vars.PROJECT_DATA_ALARM_SECTION_GATING_ENABLED }}
+          PROJECT_DATA_ALARM_FULL_RUN_INTERVAL_MS: ${{ vars.PROJECT_DATA_ALARM_FULL_RUN_INTERVAL_MS }}
+          PROJECT_DATA_ALARM_DUE_TOLERANCE_MS: ${{ vars.PROJECT_DATA_ALARM_DUE_TOLERANCE_MS }}
+          PROJECT_DATA_ALARM_SLOW_SECTION_MS: ${{ vars.PROJECT_DATA_ALARM_SLOW_SECTION_MS }}
           PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED: ${{ vars.PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED }}
           PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS: ${{ vars.PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS }}
           PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS: ${{ vars.PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS }}
           PROJECT_DATA_EVENT_LOG_CLEANUP_RECHECK_MS: ${{ vars.PROJECT_DATA_EVENT_LOG_CLEANUP_RECHECK_MS }}
+          PROJECT_EVENT_MAX_ACTIVE_SUBSCRIPTIONS_PER_PROJECT: ${{ vars.PROJECT_EVENT_MAX_ACTIVE_SUBSCRIPTIONS_PER_PROJECT }}
+          PROJECT_EVENT_FILTER_MAX_VALUES_PER_FIELD: ${{ vars.PROJECT_EVENT_FILTER_MAX_VALUES_PER_FIELD }}
+          PROJECT_EVENT_FILTER_MAX_MATCH_KEYS: ${{ vars.PROJECT_EVENT_FILTER_MAX_MATCH_KEYS }}
+          PROJECT_EVENT_FILTER_MAX_STRING_BYTES: ${{ vars.PROJECT_EVENT_FILTER_MAX_STRING_BYTES }}
+          PROJECT_EVENT_METADATA_MAX_BYTES: ${{ vars.PROJECT_EVENT_METADATA_MAX_BYTES }}
+          PROJECT_EVENT_METADATA_MAX_DEPTH: ${{ vars.PROJECT_EVENT_METADATA_MAX_DEPTH }}
+          PROJECT_EVENT_METADATA_MAX_KEYS: ${{ vars.PROJECT_EVENT_METADATA_MAX_KEYS }}
+          PROJECT_EVENT_METADATA_MAX_ARRAY_ITEMS: ${{ vars.PROJECT_EVENT_METADATA_MAX_ARRAY_ITEMS }}
+          PROJECT_EVENT_DISPLAY_MAX_BYTES: ${{ vars.PROJECT_EVENT_DISPLAY_MAX_BYTES }}
+          PROJECT_EVENT_DISPLAY_MAX_LABELS: ${{ vars.PROJECT_EVENT_DISPLAY_MAX_LABELS }}
+          PROJECT_EVENT_RAW_PAYLOAD_REF_MAX_BYTES: ${{ vars.PROJECT_EVENT_RAW_PAYLOAD_REF_MAX_BYTES }}
+          PROJECT_EVENT_REASON_MAX_BYTES: ${{ vars.PROJECT_EVENT_REASON_MAX_BYTES }}
+          PROJECT_EVENT_MAX_MATCHES_PER_EVENT: ${{ vars.PROJECT_EVENT_MAX_MATCHES_PER_EVENT }}
+          PROJECT_EVENT_DELIVERY_BATCH_MAX_EVENTS: ${{ vars.PROJECT_EVENT_DELIVERY_BATCH_MAX_EVENTS }}
+          PROJECT_EVENT_DELIVERY_ATTEMPT_MAX_PER_BATCH: ${{ vars.PROJECT_EVENT_DELIVERY_ATTEMPT_MAX_PER_BATCH }}
+          PROJECT_EVENT_SCHEDULE_MAX_SCHEDULES: ${{ vars.PROJECT_EVENT_SCHEDULE_MAX_SCHEDULES }}
+          PROJECT_EVENT_SCHEDULE_MAX_WATCHES: ${{ vars.PROJECT_EVENT_SCHEDULE_MAX_WATCHES }}
+          PROJECT_EVENT_SCHEDULE_MAX_RETAINED_SCHEDULES: ${{ vars.PROJECT_EVENT_SCHEDULE_MAX_RETAINED_SCHEDULES }}
+          PROJECT_EVENT_SCHEDULE_MAX_RETAINED_WATCHES: ${{ vars.PROJECT_EVENT_SCHEDULE_MAX_RETAINED_WATCHES }}
+          PROJECT_EVENT_SCHEDULE_PROMPT_MAX_BYTES: ${{ vars.PROJECT_EVENT_SCHEDULE_PROMPT_MAX_BYTES }}
+          PROJECT_EVENT_SCHEDULE_MAX_HORIZON_MS: ${{ vars.PROJECT_EVENT_SCHEDULE_MAX_HORIZON_MS }}
+          PROJECT_EVENT_SCHEDULE_LATE_GRACE_MS: ${{ vars.PROJECT_EVENT_SCHEDULE_LATE_GRACE_MS }}
+          PROJECT_EVENT_SCHEDULE_DELIVERY_TTL_MS: ${{ vars.PROJECT_EVENT_SCHEDULE_DELIVERY_TTL_MS }}
+          PROJECT_EVENT_SCHEDULE_SWEEP_BATCH_SIZE: ${{ vars.PROJECT_EVENT_SCHEDULE_SWEEP_BATCH_SIZE }}
+          PROJECT_EVENT_SCHEDULE_CLAIM_LEASE_MS: ${{ vars.PROJECT_EVENT_SCHEDULE_CLAIM_LEASE_MS }}
+          PROJECT_EVENT_SCHEDULE_RETRY_BASE_MS: ${{ vars.PROJECT_EVENT_SCHEDULE_RETRY_BASE_MS }}
+          PROJECT_EVENT_SCHEDULE_MAX_ATTEMPTS: ${{ vars.PROJECT_EVENT_SCHEDULE_MAX_ATTEMPTS }}
+          PROJECT_EVENT_SCHEDULE_MAX_DEFERRAL_MS: ${{ vars.PROJECT_EVENT_SCHEDULE_MAX_DEFERRAL_MS }}
+          PROJECT_EVENT_WATCH_COOLDOWN_MIN_MS: ${{ vars.PROJECT_EVENT_WATCH_COOLDOWN_MIN_MS }}
+          PROJECT_EVENT_WATCH_MAX_EXECUTIONS: ${{ vars.PROJECT_EVENT_WATCH_MAX_EXECUTIONS }}
+          PROJECT_EVENT_WATCH_MAX_CONCURRENT: ${{ vars.PROJECT_EVENT_WATCH_MAX_CONCURRENT }}
+          PROJECT_EVENT_CHANNEL_MAX_CHANNELS: ${{ vars.PROJECT_EVENT_CHANNEL_MAX_CHANNELS }}
+          PROJECT_EVENT_CHANNEL_MESSAGE_MAX_BYTES: ${{ vars.PROJECT_EVENT_CHANNEL_MESSAGE_MAX_BYTES }}
+          PROJECT_EVENT_CHANNEL_NAME_MAX_BYTES: ${{ vars.PROJECT_EVENT_CHANNEL_NAME_MAX_BYTES }}
+          PROJECT_EVENT_CHANNEL_PUBLISH_WINDOW_MS: ${{ vars.PROJECT_EVENT_CHANNEL_PUBLISH_WINDOW_MS }}
+          PROJECT_EVENT_CHANNEL_PUBLISH_MAX_PER_WINDOW: ${{ vars.PROJECT_EVENT_CHANNEL_PUBLISH_MAX_PER_WINDOW }}
+          PROJECT_EVENT_CHANNEL_CURSOR_TTL_MS: ${{ vars.PROJECT_EVENT_CHANNEL_CURSOR_TTL_MS }}
+          PROJECT_EVENT_CHANNEL_CATALOG_IDLE_TTL_MS: ${{ vars.PROJECT_EVENT_CHANNEL_CATALOG_IDLE_TTL_MS }}
+          PROJECT_EVENT_LIST_LIMIT: ${{ vars.PROJECT_EVENT_LIST_LIMIT }}
+          PROJECT_EVENT_LIST_MAX: ${{ vars.PROJECT_EVENT_LIST_MAX }}
+          PROJECT_EVENT_RECENT_STATUS_LIMIT: ${{ vars.PROJECT_EVENT_RECENT_STATUS_LIMIT }}
+          PROJECT_EVENT_RETENTION_DAYS: ${{ vars.PROJECT_EVENT_RETENTION_DAYS }}
+          PROJECT_EVENT_RETENTION_BATCH_ROWS: ${{ vars.PROJECT_EVENT_RETENTION_BATCH_ROWS }}
+          PROJECT_EVENT_SOURCE_OUTBOX_BATCH_ROWS: ${{ vars.PROJECT_EVENT_SOURCE_OUTBOX_BATCH_ROWS }}
+          PROJECT_EVENT_SOURCE_OUTBOX_MAX_ATTEMPTS: ${{ vars.PROJECT_EVENT_SOURCE_OUTBOX_MAX_ATTEMPTS }}
+          PROJECT_EVENT_SOURCE_OUTBOX_TTL_MS: ${{ vars.PROJECT_EVENT_SOURCE_OUTBOX_TTL_MS }}
+          PROJECT_EVENT_SOURCE_OUTBOX_RETRY_BASE_MS: ${{ vars.PROJECT_EVENT_SOURCE_OUTBOX_RETRY_BASE_MS }}
+          PROJECT_EVENT_SOURCE_OUTBOX_RETRY_MAX_MS: ${{ vars.PROJECT_EVENT_SOURCE_OUTBOX_RETRY_MAX_MS }}
+          PROJECT_EVENT_SOURCE_OUTBOX_PROCESSING_LEASE_MS: ${{ vars.PROJECT_EVENT_SOURCE_OUTBOX_PROCESSING_LEASE_MS }}
+          PROJECT_EVENT_RETENTION_INTERVAL_MS: ${{ vars.PROJECT_EVENT_RETENTION_INTERVAL_MS }}
+          PROJECT_EVENT_RETENTION_MIN_ALARM_DELAY_MS: ${{ vars.PROJECT_EVENT_RETENTION_MIN_ALARM_DELAY_MS }}
+          PROJECT_EVENT_WAKE_ENABLED: ${{ vars.PROJECT_EVENT_WAKE_ENABLED }}
+          PROJECT_EVENT_WAKE_MATERIALIZATION_MIN_ALARM_DELAY_MS: ${{ vars.PROJECT_EVENT_WAKE_MATERIALIZATION_MIN_ALARM_DELAY_MS }}
+          PROJECT_EVENT_WAKE_MATERIALIZATION_BACKOFF_BASE_MS: ${{ vars.PROJECT_EVENT_WAKE_MATERIALIZATION_BACKOFF_BASE_MS }}
+          PROJECT_EVENT_WAKE_MATERIALIZATION_BACKOFF_MAX_MS: ${{ vars.PROJECT_EVENT_WAKE_MATERIALIZATION_BACKOFF_MAX_MS }}
+          PROJECT_EVENT_WAKE_PROMPT_TTL_MS: ${{ vars.PROJECT_EVENT_WAKE_PROMPT_TTL_MS }}
+          PROJECT_EVENT_WAKE_READ_GRACE_MS: ${{ vars.PROJECT_EVENT_WAKE_READ_GRACE_MS }}
+          PROJECT_EVENT_WAKE_TARGET_COOLDOWN_MS: ${{ vars.PROJECT_EVENT_WAKE_TARGET_COOLDOWN_MS }}
+          PROJECT_EVENT_WAKE_SUBSCRIPTION_COOLDOWN_MS: ${{ vars.PROJECT_EVENT_WAKE_SUBSCRIPTION_COOLDOWN_MS }}
+          PROJECT_EVENT_WAKE_SUBSCRIPTION_LIFETIME_MS: ${{ vars.PROJECT_EVENT_WAKE_SUBSCRIPTION_LIFETIME_MS }}
+          PROJECT_EVENT_WAKE_MAX_PER_SUBSCRIPTION: ${{ vars.PROJECT_EVENT_WAKE_MAX_PER_SUBSCRIPTION }}
+          CREDENTIAL_LIMIT_WARNING_PERCENT: ${{ vars.CREDENTIAL_LIMIT_WARNING_PERCENT }}
+          CREDENTIAL_LIMIT_CRITICAL_PERCENT: ${{ vars.CREDENTIAL_LIMIT_CRITICAL_PERCENT }}
+          CREDENTIAL_LIMIT_MAX_OBSERVATIONS_PER_REPORT: ${{ vars.CREDENTIAL_LIMIT_MAX_OBSERVATIONS_PER_REPORT }}
+          CREDENTIAL_LIMIT_TRANSITION_RECOMPUTE_ATTEMPTS: ${{ vars.CREDENTIAL_LIMIT_TRANSITION_RECOMPUTE_ATTEMPTS }}
+          CREDENTIAL_LIMIT_USAGE_CALLBACK_MAX_BODY_BYTES: ${{ vars.CREDENTIAL_LIMIT_USAGE_CALLBACK_MAX_BODY_BYTES }}
+          CREDENTIAL_LIMIT_USAGE_CALLBACK_RATE_LIMIT_RPM: ${{ vars.CREDENTIAL_LIMIT_USAGE_CALLBACK_RATE_LIMIT_RPM }}
+          CREDENTIAL_LIMIT_USAGE_CALLBACK_RATE_LIMIT_WINDOW_SECONDS: ${{ vars.CREDENTIAL_LIMIT_USAGE_CALLBACK_RATE_LIMIT_WINDOW_SECONDS }}
+          CREDENTIAL_LIMIT_OBSERVATION_MAX_AGE_MS: ${{ vars.CREDENTIAL_LIMIT_OBSERVATION_MAX_AGE_MS }}
+          CREDENTIAL_LIMIT_OBSERVATION_FUTURE_SKEW_MS: ${{ vars.CREDENTIAL_LIMIT_OBSERVATION_FUTURE_SKEW_MS }}
+          CREDENTIAL_LIMIT_RESET_MAX_FUTURE_MS: ${{ vars.CREDENTIAL_LIMIT_RESET_MAX_FUTURE_MS }}
+          CREDENTIAL_LIMIT_SUPPORTED_PROVIDERS: ${{ vars.CREDENTIAL_LIMIT_SUPPORTED_PROVIDERS }}
+          CREDENTIAL_LIMIT_SUPPORTED_SOURCES: ${{ vars.CREDENTIAL_LIMIT_SUPPORTED_SOURCES }}
+          CREDENTIAL_LIMIT_SUPPORTED_WINDOW_TYPES: ${{ vars.CREDENTIAL_LIMIT_SUPPORTED_WINDOW_TYPES }}
+          CREDENTIAL_LIMIT_READ_MAX_ROWS: ${{ vars.CREDENTIAL_LIMIT_READ_MAX_ROWS }}
+          PROJECT_EVENT_SOURCE_OUTBOX_SWEEP_WALL_MS: ${{ vars.PROJECT_EVENT_SOURCE_OUTBOX_SWEEP_WALL_MS }}
+          PROJECT_EVENT_SOURCE_OUTBOX_ADMISSION_TIMEOUT_MS: ${{ vars.PROJECT_EVENT_SOURCE_OUTBOX_ADMISSION_TIMEOUT_MS }}
+          PROJECT_EVENT_SOURCE_OUTBOX_TERMINAL_RETENTION_MS: ${{ vars.PROJECT_EVENT_SOURCE_OUTBOX_TERMINAL_RETENTION_MS }}
           MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT: ${{ vars.MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT }}
           MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX: ${{ vars.MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX }}
           MAX_VM_AGENT_ERROR_BODY_BYTES: ${{ vars.MAX_VM_AGENT_ERROR_BODY_BYTES }}
@@ -1301,10 +1722,10 @@ jobs:
           WORKER_SECRET_BULK_MAX_OPS: ${{ vars.WORKER_SECRET_BULK_MAX_OPS }}
           DEPLOY_ENV: ${{ steps.deploy_resources.outputs.environment }}
 
-      # Secret writes create fresh Worker deployments. Re-deploy once after all
-      # secrets are configured so routes serving the web app keep the current
-      # Worker asset bundle instead of regressing to a previous deployment.
-      - name: Re-deploy API Worker (after secrets)
+      # Secret writes create one fresh Worker deployment. Publish code once after all
+      # secrets are configured. On established installations this bounds API revisions
+      # to two, so the last Instant recovery attempt starts after the final revision.
+      - name: Deploy API Worker
         if: ${{ inputs.dry_run != true }}
         run: |
           OUTPUT=$(pnpm --filter @simple-agent-manager/api exec wrangler deploy --env "$DEPLOY_ENV" 2>&1) || {

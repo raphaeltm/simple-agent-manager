@@ -1,4 +1,5 @@
 // FILE SIZE EXCEPTION: Cross-boundary node-agent request layer marginally over the limit; interactive/background timeout tiers and cf-container interruption classification are one cohesive concern. Split candidate if it grows further. See .claude/rules/18-file-size-limits.md
+import type { McpServerEntry } from '@simple-agent-manager/shared';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -11,6 +12,7 @@ import {
 import type { Env } from '../env';
 import { expectJsonRecord, maybeJsonRecord } from '../lib/runtime-validation';
 import { AppError } from '../middleware/error';
+import { buildAcpInteractionRuntimeConfig } from './acp-interaction-runtime-config';
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 import { signNodeManagementToken, signTerminalToken } from './jwt';
 import {
@@ -22,6 +24,7 @@ import {
 import { recordNodeRoutingMetric } from './telemetry';
 import {
   fetchVmAgentContainer,
+  fetchVmAgentContainerNoWake,
   getVmAgentContainerConfig,
   markVmAgentContainerActiveWorkEndedBestEffort,
   markVmAgentContainerActiveWorkStarted,
@@ -50,6 +53,17 @@ interface NodeAgentRequestOptions extends RequestInit {
   sourceTaskGuard?: VmAgentContainerRequestGuard;
   /** Caller-side fail-closed check repeated at the physical fetch boundary. */
   beforeExternalMutation?: () => Promise<void>;
+  /** Whether a cf-container timeout may initiate normal runtime recovery. */
+  recoverContainerOnTimeout?: boolean;
+  /** Route an Instant request only to an already-running container. */
+  noWakeContainer?: boolean;
+}
+
+interface FetchNodeAgentControls {
+  sourceTaskGuard?: VmAgentContainerRequestGuard;
+  beforeExternalMutation?: () => Promise<void>;
+  recoverContainerOnTimeout?: boolean;
+  noWakeContainer?: boolean;
 }
 
 export interface GuardedNodeAgentMutationOptions {
@@ -172,6 +186,8 @@ export async function nodeAgentRequest(
     requestTimeoutMs: configuredRequestTimeoutMs,
     sourceTaskGuard,
     beforeExternalMutation,
+    recoverContainerOnTimeout = true,
+    noWakeContainer = false,
     ...requestOptions
   } = options;
   const { token } = await signNodeManagementToken(userId, nodeId, workspaceId, env);
@@ -205,8 +221,7 @@ export async function nodeAgentRequest(
     url,
     { ...requestOptions, headers },
     requestTimeoutMs,
-    sourceTaskGuard,
-    beforeExternalMutation
+    { sourceTaskGuard, beforeExternalMutation, recoverContainerOnTimeout, noWakeContainer }
   );
 
   recordNodeRoutingMetric(
@@ -271,9 +286,14 @@ export async function fetchNodeAgent(
   url: string,
   options: RequestInit,
   requestTimeoutMs: number,
-  sourceTaskGuard?: VmAgentContainerRequestGuard,
-  beforeExternalMutation?: () => Promise<void>
+  controls: FetchNodeAgentControls = {}
 ): Promise<Response> {
+  const {
+    sourceTaskGuard,
+    beforeExternalMutation,
+    recoverContainerOnTimeout = true,
+    noWakeContainer = false,
+  } = controls;
   if (!env.DATABASE || typeof env.DATABASE.prepare !== 'function') {
     await beforeExternalMutation?.();
     return fetchWithTimeout(url, options, requestTimeoutMs);
@@ -321,13 +341,20 @@ export async function fetchNodeAgent(
   try {
     await beforeExternalMutation?.();
     const response = await Promise.race([
-      fetchVmAgentContainer(
-        env,
-        nodeId,
-        new Request(containerUrl.toString(), requestInitWithoutSignal(options)),
-        vmAgentPort,
-        sourceTaskGuard
-      ),
+      noWakeContainer
+        ? fetchVmAgentContainerNoWake(
+            env,
+            nodeId,
+            new Request(containerUrl.toString(), requestInitWithoutSignal(options)),
+            vmAgentPort
+          )
+        : fetchVmAgentContainer(
+            env,
+            nodeId,
+            new Request(containerUrl.toString(), requestInitWithoutSignal(options)),
+            vmAgentPort,
+            sourceTaskGuard
+          ),
       new Promise<Response>((_resolve, reject) => {
         timeoutHandle = setTimeout(
           () => reject(new Error(`Request timed out after ${requestTimeoutMs}ms`)),
@@ -339,6 +366,11 @@ export async function fetchNodeAgent(
   } catch (error) {
     const timedOut = error instanceof Error && error.message.startsWith('Request timed out after ');
     if (!timedOut) throw error;
+
+    // A delete timeout is deliberately ambiguous: the container request keeps
+    // running after the caller stops waiting, so starting recovery could revive
+    // or rotate the exact runtime that deletion has quarantined as `stopping`.
+    if (!recoverContainerOnTimeout) throw error;
 
     const recovery = await markVmAgentContainerRequestInterrupted(env, nodeId, {
       method: options.method ?? 'GET',
@@ -417,13 +449,37 @@ export async function stopWorkspaceOnNode(
   workspaceId: string,
   env: Env,
   userId: string,
-  options?: { requestTimeoutMs?: number }
+  options?: {
+    requestTimeoutMs?: number;
+    expectedEvictionGeneration?: string;
+  } & GuardedNodeAgentMutationOptions
 ): Promise<unknown> {
+  let expectedEvictionGeneration = options?.expectedEvictionGeneration;
+  if (expectedEvictionGeneration === undefined) {
+    // Snapshot before network dispatch for older internal callers. This guards
+    // in-flight transport delay; callers with an earlier lifecycle claim must
+    // pass that claim's generation explicitly, as the Stop route does.
+    const workspace = await env.DATABASE.prepare(
+      `SELECT w.eviction_generation, n.runtime
+      FROM workspaces w JOIN nodes n ON n.id = w.node_id
+      WHERE w.id = ? AND w.node_id = ? AND w.user_id = ? AND n.user_id = ?`
+    )
+      .bind(workspaceId, nodeId, userId, userId)
+      .first<{ eviction_generation: string | null; runtime: string | null }>();
+    if (!workspace) throw new AppError(409, 'CONFLICT', 'Workspace stop identity changed');
+    if (workspace.runtime !== 'cf-container') {
+      expectedEvictionGeneration = workspace.eviction_generation ?? '';
+    }
+  }
   return nodeAgentRequest(nodeId, env, `/workspaces/${workspaceId}/stop`, {
     method: 'POST',
+    ...(expectedEvictionGeneration !== undefined
+      ? { body: JSON.stringify({ expectedEvictionGeneration }) }
+      : {}),
     userId,
     workspaceId,
     requestTimeoutMs: options?.requestTimeoutMs,
+    beforeExternalMutation: options?.beforeExternalMutation,
   });
 }
 
@@ -431,12 +487,25 @@ export async function restartWorkspaceOnNode(
   nodeId: string,
   workspaceId: string,
   env: Env,
-  userId: string
+  userId: string,
+  options?: GuardedNodeAgentMutationOptions & {
+    evictionGeneration?: string;
+    expectedEvictionGeneration?: string;
+  }
 ): Promise<unknown> {
   return nodeAgentRequest(nodeId, env, `/workspaces/${workspaceId}/restart`, {
     method: 'POST',
+    ...(options?.evictionGeneration
+      ? {
+          body: JSON.stringify({
+            evictionGeneration: options.evictionGeneration,
+            expectedEvictionGeneration: options.expectedEvictionGeneration ?? '',
+          }),
+        }
+      : {}),
     userId,
     workspaceId,
+    beforeExternalMutation: options?.beforeExternalMutation,
   });
 }
 
@@ -445,13 +514,15 @@ export async function deleteWorkspaceOnNode(
   workspaceId: string,
   env: Env,
   userId: string,
-  options?: { requestTimeoutMs?: number }
+  options?: { requestTimeoutMs?: number } & GuardedNodeAgentMutationOptions
 ): Promise<unknown> {
   return nodeAgentRequest(nodeId, env, `/workspaces/${workspaceId}`, {
     method: 'DELETE',
     userId,
     workspaceId,
     requestTimeoutMs: options?.requestTimeoutMs,
+    beforeExternalMutation: options?.beforeExternalMutation,
+    recoverContainerOnTimeout: false,
   });
 }
 
@@ -482,7 +553,8 @@ export async function createAgentSessionOnNode(
   chatSessionId?: string | null,
   projectId?: string | null,
   mcpServers?: McpServerConfig[],
-  options?: GuardedNodeAgentMutationOptions
+  options?: GuardedNodeAgentMutationOptions,
+  interactionTaskMode?: string | null
 ): Promise<unknown> {
   const body: Record<string, unknown> = {
     sessionId,
@@ -491,6 +563,9 @@ export async function createAgentSessionOnNode(
     projectId: projectId ?? undefined,
   };
   const serializedMcpServers = serializeMcpServers(mcpServers);
+  if (interactionTaskMode) {
+    body.acpInteractions = buildAcpInteractionRuntimeConfig(env, interactionTaskMode);
+  }
   if (serializedMcpServers) {
     body.mcpServers = serializedMcpServers;
   }
@@ -505,19 +580,11 @@ export async function createAgentSessionOnNode(
   });
 }
 
-/** MCP server configuration passed to the VM agent for ACP session injection */
-export interface McpServerConfig {
-  url: string;
-  token: string;
-  /**
-   * Agent-visible server name. Tools are namespaced by it.
-   *
-   * Optional for rollout compatibility (rule 54): a vm-agent built before this field existed
-   * ignores it and falls back to its legacy positional naming, so a new control plane still
-   * works against an old agent.
-   */
-  name?: string;
-}
+/**
+ * MCP server configuration passed to the VM agent for ACP session injection. The wire contract,
+ * including why `name` and `headers` are optional (rule 54), is `McpServerEntrySchema`.
+ */
+export type McpServerConfig = McpServerEntry;
 
 /**
  * Serializes MCP servers for the vm-agent request body.
@@ -528,14 +595,17 @@ export interface McpServerConfig {
  */
 function serializeMcpServers(
   mcpServers: McpServerConfig[] | undefined
-): Array<{ url: string; token: string; name?: string }> | undefined {
+): McpServerConfig[] | undefined {
   if (!mcpServers || mcpServers.length === 0) {
     return undefined;
   }
+  // Optional fields are sent only when set, so a server without them serializes byte-for-byte
+  // as it did before they existed.
   return mcpServers.map((server) => ({
     url: server.url,
     token: server.token,
     ...(server.name ? { name: server.name } : {}),
+    ...(server.headers?.length ? { headers: server.headers } : {}),
   }));
 }
 
@@ -570,7 +640,11 @@ export async function startAgentSessionOnNode(
   injectedInstructions?: string,
   options?: GuardedNodeAgentMutationOptions
 ): Promise<unknown> {
-  const body: Record<string, unknown> = { agentType, initialPrompt };
+  const body: Record<string, unknown> = {
+    agentType,
+    initialPrompt,
+    acpInteractions: buildAcpInteractionRuntimeConfig(env, taskContext?.taskMode),
+  };
   if (injectedInstructions != null && injectedInstructions !== '') {
     // SAM-injected system instructions delivered as a separate origin="system"
     // prompt block (see buildInjectedInstructions). The agent reads it as model
@@ -642,6 +716,7 @@ export async function sendPromptToAgentOnNode(
     protocolVersion?: number;
     deliveryId?: string;
     sourceTaskGuard?: VmAgentContainerRequestGuard;
+    beforeExternalMutation?: () => Promise<void>;
   }
 ): Promise<unknown> {
   const body: {
@@ -670,6 +745,7 @@ export async function sendPromptToAgentOnNode(
         workspaceId,
         requestTimeoutMs: options?.requestTimeoutMs,
         sourceTaskGuard: options?.sourceTaskGuard,
+        beforeExternalMutation: options?.beforeExternalMutation,
         body: JSON.stringify(body),
       }
     );
@@ -679,6 +755,7 @@ export async function sendPromptToAgentOnNode(
   }
 }
 
+export type { HibernateCallbackTokenDelivery } from './node-agent-session-snapshots';
 export {
   hibernateAgentSessionOnNode,
   restoreAgentSessionOnNode,
@@ -732,7 +809,8 @@ export async function stopAgentSessionOnNode(
   workspaceId: string,
   sessionId: string,
   env: Env,
-  userId: string
+  userId: string,
+  options?: { requestTimeoutMs?: number }
 ): Promise<unknown> {
   try {
     return await nodeAgentRequest(
@@ -743,6 +821,7 @@ export async function stopAgentSessionOnNode(
         method: 'POST',
         userId,
         workspaceId,
+        requestTimeoutMs: options?.requestTimeoutMs,
       }
     );
   } finally {
@@ -925,11 +1004,24 @@ export async function rebuildWorkspaceOnNode(
   nodeId: string,
   workspaceId: string,
   env: Env,
-  userId: string
+  userId: string,
+  options?: GuardedNodeAgentMutationOptions & {
+    evictionGeneration?: string;
+    expectedEvictionGeneration?: string;
+  }
 ): Promise<unknown> {
   return nodeAgentRequest(nodeId, env, `/workspaces/${workspaceId}/rebuild`, {
     method: 'POST',
+    ...(options?.evictionGeneration
+      ? {
+          body: JSON.stringify({
+            evictionGeneration: options.evictionGeneration,
+            expectedEvictionGeneration: options.expectedEvictionGeneration ?? '',
+          }),
+        }
+      : {}),
     userId,
     workspaceId,
+    beforeExternalMutation: options?.beforeExternalMutation,
   });
 }

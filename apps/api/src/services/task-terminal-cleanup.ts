@@ -4,6 +4,12 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { purgeInteractionStore } from './acp-interaction-store';
+import {
+  preserveFailedTaskWork,
+  surfaceFailedTaskWorkLoss,
+  withholdsFailedTaskTeardown,
+} from './failed-task-preservation';
 import * as projectDataService from './project-data';
 import { queueWorkspaceSessionSleep } from './session-sleep';
 import { deleteSessionSnapshotState } from './session-snapshots';
@@ -19,6 +25,8 @@ export interface TerminalTaskCleanupOptions {
   logContext?: Record<string, unknown>;
   /** Archive/delete intent: discard the seven-day restore state. */
   destructiveSessionEnd?: boolean;
+  /** Callback paths revalidate the exact workspace immediately before each side effect. */
+  beforeSideEffect?: () => Promise<unknown>;
 }
 
 export interface TerminalTaskCleanupOrThrowOptions extends TerminalTaskCleanupOptions {
@@ -48,6 +56,10 @@ export async function cleanupTerminalTaskResourcesOrThrow(
 // authorized project member may mark a shared session terminal. Compute
 // cleanup (cleanupTaskRun) is caller-scoped via options.requiredUserId so
 // only the workspace owner's resources are torn down.
+//
+// A `failed` task without destructive intent is preserved rather than torn down
+// whenever its work can be (`failed-task-preservation.ts`): the session is NOT
+// failed, because snapshot recovery can only wake a `sleeping` session.
 export async function cleanupTerminalTaskResources(
   env: Env,
   taskId: string,
@@ -59,12 +71,14 @@ export async function cleanupTerminalTaskResources(
       id: schema.tasks.id,
       projectId: schema.tasks.projectId,
       workspaceId: schema.tasks.workspaceId,
+      chatSessionId: schema.tasks.chatSessionId,
       errorMessage: schema.tasks.errorMessage,
     })
     .from(schema.tasks)
     .where(eq(schema.tasks.id, taskId))
     .limit(1);
 
+  await options.beforeSideEffect?.();
   await cancelVmTaskAdmission(
     env,
     taskId,
@@ -87,7 +101,11 @@ export async function cleanupTerminalTaskResources(
   }
 
   const [workspace] = await db
-    .select({ chatSessionId: schema.workspaces.chatSessionId, userId: schema.workspaces.userId })
+    .select({
+      chatSessionId: schema.workspaces.chatSessionId,
+      userId: schema.workspaces.userId,
+      projectId: schema.workspaces.projectId,
+    })
     .from(schema.workspaces)
     .where(eq(schema.workspaces.id, task.workspaceId))
     .limit(1);
@@ -97,6 +115,7 @@ export async function cleanupTerminalTaskResources(
     workspace?.chatSessionId &&
     !options.destructiveSessionEnd
   ) {
+    await options.beforeSideEffect?.();
     await queueWorkspaceSessionSleep(env, {
       workspaceId: task.workspaceId,
       userId: workspace.userId,
@@ -106,12 +125,41 @@ export async function cleanupTerminalTaskResources(
     return;
   }
 
-  if (workspace?.chatSessionId && options.destructiveSessionEnd) {
-    await deleteSessionSnapshotState(db, env, workspace.chatSessionId);
+  if (options.status === 'failed' && !options.destructiveSessionEnd) {
+    await options.beforeSideEffect?.();
+    const source =
+      typeof options.logContext?.source === 'string' ? options.logContext.source : null;
+    const preservation = await preserveFailedTaskWork(env, {
+      taskId,
+      projectId: task.projectId,
+      workspaceId: task.workspaceId,
+      chatSessionId: task.chatSessionId ?? workspace?.chatSessionId ?? null,
+      source: source ?? 'task.terminal_cleanup',
+    });
+    if (withholdsFailedTaskTeardown(preservation)) return;
+    await options.beforeSideEffect?.();
+    await surfaceFailedTaskWorkLoss(env, {
+      taskId,
+      projectId: task.projectId,
+      chatSessionId: task.chatSessionId ?? workspace?.chatSessionId ?? null,
+      reason: preservation.gap,
+      source: source ?? 'task.terminal_cleanup',
+    });
+  }
+
+  const cleanupProjectId = workspace?.projectId ?? task.projectId;
+  if (workspace?.chatSessionId && cleanupProjectId && options.destructiveSessionEnd) {
+    const chatSessionId = workspace.chatSessionId;
+    await options.beforeSideEffect?.();
+    await Promise.all([
+      deleteSessionSnapshotState(db, env, chatSessionId),
+      purgeInteractionStore(env, cleanupProjectId, chatSessionId),
+    ]);
   }
 
   if (workspace?.chatSessionId) {
     try {
+      await options.beforeSideEffect?.();
       if (options.status === 'failed') {
         await projectDataService.failSession(
           env,
@@ -135,5 +183,6 @@ export async function cleanupTerminalTaskResources(
     }
   }
 
+  await options.beforeSideEffect?.();
   await cleanupTaskRun(taskId, env, undefined, options.requiredUserId);
 }

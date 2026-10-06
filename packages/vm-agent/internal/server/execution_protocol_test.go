@@ -8,9 +8,11 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/workspace/vm-agent/internal/acp"
 	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/persistence"
 )
@@ -28,6 +30,68 @@ func TestLegacyPromptRequestRemainsCompatibleWithoutDeliveryFields(t *testing.T)
 	}
 }
 
+func TestAgentStartDeliveryFingerprintFencesInteractionContractChanges(t *testing.T) {
+	disabled := acp.AcpInteractionRuntimeConfig{ProtocolVersion: 1}
+	enabled := disabled
+	enabled.Enabled = true
+	if agentStartDeliveryFingerprint(1, "message", "prompt", "instructions", disabled) ==
+		agentStartDeliveryFingerprint(1, "message", "prompt", "instructions", enabled) {
+		t.Fatal("ACP interaction contract change did not change delivery fingerprint")
+	}
+}
+
+func TestStartAgentSessionDuplicateDoesNotMutateInteractionContract(t *testing.T) {
+	s, _ := newRestoreRetryTestServer(t)
+	validator, privateKey := newWorkspaceCreateJWTValidator(t, "node-test")
+	s.jwtValidator = validator
+	s.executionRuntimeID = "runtime-1"
+	host := acp.NewSessionHost(acp.SessionHostConfig{})
+	t.Cleanup(host.Stop)
+	s.sessionHosts["ws:session"] = host
+
+	interactionConfig := acp.AcpInteractionRuntimeConfig{
+		Enabled: true, ProtocolVersion: 1,
+		PermissionDeadlineMs: 1_000, MaxDeadlineMs: 2_000, DeadlineMarginMs: 100,
+		RequestMaxBytes: 32 * 1024, OptionsMaxCount: 16, OptionIDMaxChars: 128,
+		OptionNameMaxChars: 200, ReceiptLimit: 16, ResponseMaxBytes: 64 * 1024,
+		SettleRetryDelaysMs: []int{10}, SettleRetrySteadyMs: 100,
+	}
+	hash := agentStartDeliveryFingerprint(1, "message-1", "prompt", "", interactionConfig)
+	if _, _, conflict, err := s.store.AcceptPromptDelivery("ws", "session", "delivery-1", 1, hash); err != nil || conflict {
+		t.Fatalf("seed prompt delivery: conflict=%v err=%v", conflict, err)
+	}
+	if _, claimed, err := s.store.ClaimPromptDelivery("ws", "session", "delivery-1", s.executionRuntimeID); err != nil || !claimed {
+		t.Fatalf("claim prompt delivery: claimed=%v err=%v", claimed, err)
+	}
+
+	body, err := json.Marshal(map[string]any{
+		"protocolVersion": 1,
+		"deliveryId":      "delivery-1",
+		"messageId":       "message-1",
+		"agentType":       "claude-code",
+		"initialPrompt":   "prompt",
+		"acpInteractions": interactionConfig,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/workspaces/ws/agent-sessions/session/start", strings.NewReader(string(body)))
+	req.SetPathValue("workspaceId", "ws")
+	req.SetPathValue("sessionId", "session")
+	req.Header.Set("Authorization", "Bearer "+signWorkspaceCreateNodeToken(t, privateKey, "node-test", "ws"))
+	req.Header.Set("X-SAM-Node-Id", "node-test")
+	req.Header.Set("X-SAM-Workspace-Id", "ws")
+	rec := httptest.NewRecorder()
+	s.handleStartAgentSession(rec, req)
+
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"duplicate"`) {
+		t.Fatalf("duplicate response = %d %s", rec.Code, rec.Body.String())
+	}
+	if host.AcpInteractionBridgeEnabled() {
+		t.Fatal("duplicate delivery mutated the live SessionHost interaction contract")
+	}
+}
+
 func TestExecutionProtocolRoutesRequireNodeManagementBearerToken(t *testing.T) {
 	s := newContractTestServer()
 	tests := []struct {
@@ -38,6 +102,7 @@ func TestExecutionProtocolRoutesRequireNodeManagementBearerToken(t *testing.T) {
 	}{
 		{name: "capabilities", method: http.MethodGet, target: "/workspaces/ws-existing/agent-capabilities", handler: s.handleAgentCapabilities},
 		{name: "receipt", method: http.MethodGet, target: "/workspaces/ws-existing/agent-sessions/session/prompt-receipts/delivery", handler: s.handleGetPromptReceipt},
+		{name: "interaction answer", method: http.MethodPost, target: "/workspaces/ws-existing/agent-sessions/session/interactions/11111111-1111-4111-8111-111111111111/answer", handler: s.handleAcpInteractionAnswer},
 		{name: "rollover submit", method: http.MethodPost, target: "/workspaces/ws-existing/agent-sessions/session/checkpoint-rollovers", handler: s.handleCheckpointRollover},
 		{name: "rollover lookup", method: http.MethodGet, target: "/workspaces/ws-existing/agent-sessions/session/checkpoint-rollovers/op", handler: s.handleGetCheckpointRollover},
 	}
@@ -48,12 +113,123 @@ func TestExecutionProtocolRoutesRequireNodeManagementBearerToken(t *testing.T) {
 			req.SetPathValue("sessionId", "session")
 			req.SetPathValue("deliveryId", "delivery")
 			req.SetPathValue("operationId", "op")
+			req.SetPathValue("interactionId", "11111111-1111-4111-8111-111111111111")
 			rec := httptest.NewRecorder()
 			tc.handler(rec, req)
 			if rec.Code != http.StatusUnauthorized {
 				t.Fatalf("status = %d, want 401", rec.Code)
 			}
 		})
+	}
+}
+
+func TestAcpInteractionAnswerEndpointReturnsNoWaiterForDormantRuntime(t *testing.T) {
+	validator, privateKey := newWorkspaceCreateJWTValidator(t, "node-1")
+	s := newContractTestServer()
+	s.config.NodeID = "node-1"
+	s.jwtValidator = validator
+	s.executionRuntimeID = "runtime-vm-01"
+	s.sessionHosts["ws-existing:session"] = acp.NewSessionHost(acp.SessionHostConfig{})
+	token := signWorkspaceCreateNodeToken(t, privateKey, "node-1", "ws-existing")
+
+	body := `{"protocolVersion":1,"interactionId":"11111111-1111-4111-8111-111111111111","generation":"22222222-2222-4222-8222-222222222222","runtimeIdentity":"runtime-vm-01","decision":{"kind":"selected_option","optionId":"allow","answerHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}`
+	req := httptest.NewRequest(http.MethodPost, "/workspaces/ws-existing/agent-sessions/session/interactions/11111111-1111-4111-8111-111111111111/answer", strings.NewReader(body))
+	req.SetPathValue("workspaceId", "ws-existing")
+	req.SetPathValue("sessionId", "session")
+	req.SetPathValue("interactionId", "11111111-1111-4111-8111-111111111111")
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-SAM-Node-Id", "node-1")
+	req.Header.Set("X-SAM-Workspace-Id", "ws-existing")
+
+	rec := httptest.NewRecorder()
+	s.handleAcpInteractionAnswer(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var response acpInteractionAnswerResponse
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Status != "no_waiter" || response.RuntimeIdentity != "runtime-vm-01" {
+		t.Fatalf("response = %+v", response)
+	}
+}
+
+func TestAcpInteractionAnswerEndpointRejectsWrongWorkspaceJWT(t *testing.T) {
+	validator, privateKey := newWorkspaceCreateJWTValidator(t, "node-1")
+	s := newContractTestServer()
+	s.config.NodeID = "node-1"
+	s.jwtValidator = validator
+	s.executionRuntimeID = "runtime-vm-01"
+	token := signWorkspaceCreateNodeToken(t, privateKey, "node-1", "ws-other")
+	body := `{"protocolVersion":1,"interactionId":"11111111-1111-4111-8111-111111111111","generation":"22222222-2222-4222-8222-222222222222","runtimeIdentity":"runtime-vm-01","decision":{"kind":"selected_option","optionId":"allow","answerHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}`
+	req := httptest.NewRequest(http.MethodPost, "/workspaces/ws-existing/agent-sessions/session/interactions/11111111-1111-4111-8111-111111111111/answer", strings.NewReader(body))
+	req.SetPathValue("workspaceId", "ws-existing")
+	req.SetPathValue("sessionId", "session")
+	req.SetPathValue("interactionId", "11111111-1111-4111-8111-111111111111")
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-SAM-Node-Id", "node-1")
+	req.Header.Set("X-SAM-Workspace-Id", "ws-existing")
+
+	rec := httptest.NewRecorder()
+	s.handleAcpInteractionAnswer(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAcpInteractionAnswerEndpointRequiresActiveSessionHost(t *testing.T) {
+	validator, privateKey := newWorkspaceCreateJWTValidator(t, "node-1")
+	s := newContractTestServer()
+	s.config.NodeID = "node-1"
+	s.jwtValidator = validator
+	s.executionRuntimeID = "runtime-vm-01"
+	token := signWorkspaceCreateNodeToken(t, privateKey, "node-1", "ws-existing")
+	body := `{"protocolVersion":1,"interactionId":"11111111-1111-4111-8111-111111111111","generation":"22222222-2222-4222-8222-222222222222","runtimeIdentity":"runtime-vm-01","decision":{"kind":"selected_option","optionId":"allow","answerHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}`
+	req := httptest.NewRequest(http.MethodPost, "/workspaces/ws-existing/agent-sessions/missing/interactions/11111111-1111-4111-8111-111111111111/answer", strings.NewReader(body))
+	req.SetPathValue("workspaceId", "ws-existing")
+	req.SetPathValue("sessionId", "missing")
+	req.SetPathValue("interactionId", "11111111-1111-4111-8111-111111111111")
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-SAM-Node-Id", "node-1")
+	req.Header.Set("X-SAM-Workspace-Id", "ws-existing")
+
+	rec := httptest.NewRecorder()
+	s.handleAcpInteractionAnswer(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAcpInteractionAnswerEndpointRejectsStaleRuntimeIdentity(t *testing.T) {
+	validator, privateKey := newWorkspaceCreateJWTValidator(t, "node-1")
+	s := newContractTestServer()
+	s.config.NodeID = "node-1"
+	s.jwtValidator = validator
+	s.executionRuntimeID = "runtime-current"
+	s.sessionHosts["ws-existing:session"] = acp.NewSessionHost(acp.SessionHostConfig{})
+	token := signWorkspaceCreateNodeToken(t, privateKey, "node-1", "ws-existing")
+
+	body := `{"protocolVersion":1,"interactionId":"11111111-1111-4111-8111-111111111111","generation":"22222222-2222-4222-8222-222222222222","runtimeIdentity":"runtime-old","decision":{"kind":"selected_option","optionId":"allow","answerHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}`
+	req := httptest.NewRequest(http.MethodPost, "/workspaces/ws-existing/agent-sessions/session/interactions/11111111-1111-4111-8111-111111111111/answer", strings.NewReader(body))
+	req.SetPathValue("workspaceId", "ws-existing")
+	req.SetPathValue("sessionId", "session")
+	req.SetPathValue("interactionId", "11111111-1111-4111-8111-111111111111")
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-SAM-Node-Id", "node-1")
+	req.Header.Set("X-SAM-Workspace-Id", "ws-existing")
+
+	rec := httptest.NewRecorder()
+	s.handleAcpInteractionAnswer(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var response acpInteractionAnswerResponse
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Status != "stale_generation" || response.RuntimeIdentity != "runtime-current" {
+		t.Fatalf("response = %+v", response)
 	}
 }
 
@@ -97,6 +273,10 @@ func TestAgentCapabilitiesAdvertiseVersionedInertExecutionFeatures(t *testing.T)
 	receipts := capabilities["promptReceipts"].(map[string]interface{})
 	if receipts["supported"] != true {
 		t.Fatalf("prompt receipts = %#v", receipts)
+	}
+	interactions := capabilities["interactions"].(map[string]interface{})
+	if interactions["supported"] != true || interactions["version"] != acpInteractionCapabilityVersion {
+		t.Fatalf("interactions = %#v", interactions)
 	}
 	rollover := capabilities["checkpointRollover"].(map[string]interface{})
 	if rollover["supported"] != true || rollover["automatic"] != false {

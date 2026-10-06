@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -172,7 +171,7 @@ func (s *Server) handleMcpBuildAndPublishJobStart(w http.ResponseWriter, r *http
 	s.publishJobsMu.Unlock()
 	s.persistVMJobStart(jobID, vmJobKindPublish, prepared.WorkspaceID, vmJobStatusStarting, "starting")
 
-	controlPlaneReporter := newPublishJobReporter(s.config.ControlPlaneURL, prepared.ProjectID, jobID, prepared.Token, s.controlPlaneHTTPClient(publishTimeout), prepared.Log)
+	controlPlaneReporter := newPublishJobReporter(s.config.ControlPlaneURL, prepared.ProjectID, jobID, s.publishCallbackToken(prepared), s.controlPlaneHTTPClient(publishTimeout), prepared.Log)
 	reporter := publish.EventFunc(func(ctx context.Context, event publish.Event) {
 		s.persistPublishEvent(jobID, event)
 		controlPlaneReporter.Event(ctx, event)
@@ -236,7 +235,7 @@ func (s *Server) prepareMcpBuildAndPublish(w http.ResponseWriter, r *http.Reques
 		return nil, false
 	}
 
-	token := strings.TrimSpace(runtime.CallbackToken)
+	token := s.workspaceCallbackToken(workspaceID)
 	if token == "" {
 		writeError(w, http.StatusInternalServerError, "workspace has no callback token for publishing")
 		return nil, false
@@ -340,10 +339,11 @@ func (s *Server) runPreparedBuildAndPublish(ctx context.Context, prepared *prepa
 
 	orch := publish.New(publish.Options{
 		ControlPlane: publish.NewHTTPControlPlane(publish.HTTPControlPlaneOptions{
-			BaseURL: s.config.ControlPlaneURL,
-			Token:   prepared.Token,
-			Client:  s.controlPlaneHTTPClient(s.deployBuildPublishTimeout()),
-			Logger:  log,
+			BaseURL:     s.config.ControlPlaneURL,
+			Token:       prepared.Token,
+			TokenSource: s.publishCallbackToken(prepared),
+			Client:      s.controlPlaneHTTPClient(s.deployBuildPublishTimeout()),
+			Logger:      log,
 		}),
 		Docker: publish.NewHostDocker(),
 		Events: events,
@@ -361,58 +361,6 @@ func (s *Server) runPreparedBuildAndPublish(ctx context.Context, prepared *prepa
 		"version", result.Version,
 		"status", result.Status)
 	return result, nil
-}
-
-type publishJobReporter struct {
-	baseURL   string
-	projectID string
-	jobID     string
-	token     string
-	client    *http.Client
-	log       *slog.Logger
-}
-
-func newPublishJobReporter(baseURL, projectID, jobID, token string, client *http.Client, log *slog.Logger) *publishJobReporter {
-	return &publishJobReporter{
-		baseURL:   strings.TrimRight(baseURL, "/"),
-		projectID: projectID,
-		jobID:     jobID,
-		token:     token,
-		client:    client,
-		log:       log.With("component", "publish-job-reporter", "publishJobId", jobID),
-	}
-}
-
-func (r *publishJobReporter) Event(ctx context.Context, event publish.Event) {
-	if r == nil || r.client == nil {
-		return
-	}
-	if event.Level == "" {
-		event.Level = "info"
-	}
-	raw, err := json.Marshal(event)
-	if err != nil {
-		r.log.Warn("marshal publish job event failed", "error", err)
-		return
-	}
-	url := r.baseURL + "/api/projects/" + r.projectID + "/deployment-publish-jobs/" + r.jobID + "/events"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(raw))
-	if err != nil {
-		r.log.Warn("create publish job event request failed", "error", err)
-		return
-	}
-	req.Header.Set("Authorization", "Bearer "+r.token)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := r.client.Do(req)
-	if err != nil {
-		r.log.Warn("send publish job event failed", "eventType", event.EventType, "error", err)
-		return
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		r.log.Warn("publish job event rejected", "eventType", event.EventType, "status", resp.StatusCode, "body", string(body))
-	}
 }
 
 // resolveBuildSourceDir returns the host filesystem path of the agent's actual

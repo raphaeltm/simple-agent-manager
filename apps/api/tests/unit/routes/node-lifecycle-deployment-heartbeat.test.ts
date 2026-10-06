@@ -294,9 +294,9 @@ describe('node lifecycle deployment heartbeat contract', () => {
     });
 
     expect(ready.status).toBe(200);
-    expect((await ready.json()).deployment.pendingReleases).toEqual([
-      { environmentId: 'env-a', seq: 5 },
-    ]);
+    const readyBody = await ready.json();
+    expect(readyBody.deployment.pendingReleases).toEqual([{ environmentId: 'env-a', seq: 5 }]);
+    expect(readyBody.pendingReleaseSeq).toBeUndefined();
   });
 
   it('does not treat volumes attached to a stale provider server as ready', async () => {
@@ -340,6 +340,10 @@ describe('node lifecycle deployment heartbeat contract', () => {
     ]);
     expect(body.deployment.retireEnvironments).toEqual([{ environmentId: 'env-evil' }]);
     expect(body.deployment.pendingReleases).toEqual([{ environmentId: 'env-a', seq: 5 }]);
+    // Exactly one advertisement. The legacy top-level `pendingReleaseSeq` used to
+    // carry a duplicate of the lone entry, and the VM agent appended that copy to
+    // the list above, so one heartbeat tick spawned two apply goroutines.
+    expect(body.pendingReleaseSeq).toBeUndefined();
     expect(body.deployment.deployPubKey).toBe('pub-key');
 
     const deploymentUpdates = updates.filter(
@@ -522,6 +526,7 @@ describe('node lifecycle deployment heartbeat contract', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.deployment.pendingReleases).toEqual([{ environmentId: 'env-a', seq: 6 }]);
+    expect(body.pendingReleaseSeq).toBeUndefined();
   });
 
   it('ignores legacy top-level deployment state without an environment id', async () => {

@@ -20,6 +20,9 @@ const mocks = vi.hoisted(() => ({
   log: { debug: vi.fn(), error: vi.fn(), info: vi.fn(), warn: vi.fn() },
   markIdle: vi.fn(async () => {}),
   persistError: vi.fn(async () => {}),
+  claimWorkspaceDeletionAttempt: vi.fn(async () => 'claimed' as const),
+  confirmWorkspaceDeletion: vi.fn(async () => {}),
+  scheduleWorkspaceDeletion: vi.fn(async () => {}),
   stopSession: vi.fn(async () => {}),
   stopWorkspaceOnNode: vi.fn(async () => {}),
 }));
@@ -56,6 +59,7 @@ vi.mock('../../../src/lib/logger', () => ({
 
 const NOW = new Date('2026-08-26T21:10:00.000Z');
 const NOW_ISO = NOW.toISOString();
+const RUNTIME_TERMINATION_CONFIRMED_AT = '2026-09-04T00:00:00.000Z';
 const PROJECT_ID = 'project-finalizer';
 const USER_ID = 'user-finalizer';
 const WORKSPACE_ID = 'workspace-finalizer';
@@ -181,6 +185,7 @@ function seedRestorableSnapshot(
     sleepStatus?: string | null;
     sleepingAt?: string | null;
     recoveryAttempts?: number;
+    recoveryFailedAt?: string | null;
     sleepClaimedAt?: string | null;
     sleepStoppingSince?: string | null;
     updatedAt?: string;
@@ -192,8 +197,9 @@ function seedRestorableSnapshot(
       `INSERT INTO session_snapshots
         (id, project_id, workspace_id, node_id, user_id, chat_session_id, runtime, status,
          degradation, manifest_r2_key, home_r2_key, expires_at, sleeping_at, sleep_status,
-         sleep_claimed_at, sleep_stopping_since, recovery_attempts, sleep_attempts, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'vm', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
+         sleep_claimed_at, sleep_stopping_since, recovery_attempts, recovery_failed_at,
+         sleep_attempts, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'vm', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
     )
     .run(
       overrides.id ?? `snapshot-${chatSessionId}`,
@@ -212,6 +218,7 @@ function seedRestorableSnapshot(
       overrides.sleepClaimedAt ?? null,
       overrides.sleepStoppingSince ?? null,
       overrides.recoveryAttempts ?? 0,
+      overrides.recoveryFailedAt ?? null,
       iso(-60 * 60 * 1000),
       overrides.updatedAt ?? iso(-5 * 60 * 1000)
     );
@@ -247,11 +254,38 @@ beforeEach(() => {
   env = {
     DATABASE: createSqliteD1(sqlite),
     OBSERVABILITY_DATABASE: createSqliteD1(new Database(':memory:')),
+    NODE_LIFECYCLE: {
+      idFromName: vi.fn(() => 'node-lifecycle-id'),
+      get: vi.fn(() => ({
+        claimWorkspaceDeletionAttempt: mocks.claimWorkspaceDeletionAttempt,
+        confirmWorkspaceDeletion: mocks.confirmWorkspaceDeletion,
+        scheduleWorkspaceDeletion: mocks.scheduleWorkspaceDeletion,
+      })),
+    },
     R2: { delete: vi.fn(async () => {}) },
     SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS: '3',
     TASK_RUN_CLEANUP_DELAY_MS: '0',
   } as unknown as Env;
   vi.clearAllMocks();
+  mocks.deleteNodeResourcesStrict.mockImplementation(async (nodeId: string) => {
+    sqlite
+      .prepare('UPDATE nodes SET runtime_termination_confirmed_at = ? WHERE id = ?')
+      .run(RUNTIME_TERMINATION_CONFIRMED_AT, nodeId);
+    sqlite
+      .prepare(
+        `UPDATE workspaces
+            SET status = 'deleted', runtime_deletion_confirmed_at = ?,
+                runtime_deletion_proof = 'node_runtime_terminated'
+          WHERE node_id = ?`
+      )
+      .run(RUNTIME_TERMINATION_CONFIRMED_AT, nodeId);
+    return {
+      providerVm: 'deleted',
+      runtimeTerminationConfirmedAt: RUNTIME_TERMINATION_CONFIRMED_AT,
+      runtimeIncarnationId: null,
+      providerInstanceId: null,
+    };
+  });
 });
 
 describe('finalizeWorkspaceLifecycleClosure ProjectData session finalization', () => {
@@ -279,6 +313,30 @@ describe('finalizeWorkspaceLifecycleClosure ProjectData session finalization', (
     expect(mocks.stopSession).not.toHaveBeenCalled();
     expect(mocks.failSession).not.toHaveBeenCalled();
     expect(mocks.cleanupWorkspaceActivity).toHaveBeenCalledWith(env, PROJECT_ID, WORKSPACE_ID);
+  });
+
+  // The finalizer is a destroyer that mirrors the resumer through
+  // `restorableOrInFlightSleepSnapshotPredicateSql` — a THIRD copy of the budget
+  // rule, and the only one whose bind order changed from 5 to 6 placeholders.
+  // Nothing else forces SQLite to evaluate the decay half of that OR in this
+  // file's binding order (`.claude/rules/58`, `/61`).
+  it.each([
+    ['decayed', -60 * 60 * 1000, false],
+    ['undecayed', -60 * 1000, true],
+  ])('%s spent wake budget stops the session: %s', async (_label, offsetMs, stops) => {
+    seedNode();
+    seedWorkspace({ status: 'deleted' });
+    seedAgentSession();
+    seedRestorableSnapshot({ recoveryAttempts: 3, recoveryFailedAt: iso(offsetMs) });
+
+    await finalizeWorkspace();
+
+    if (stops) {
+      expect(mocks.stopSession).toHaveBeenCalledWith(env, PROJECT_ID, CHAT_SESSION_ID);
+    } else {
+      expect(mocks.stopSession).not.toHaveBeenCalled();
+    }
+    expect(mocks.failSession).not.toHaveBeenCalled();
   });
 
   it('still stops a session with no snapshot row', async () => {
@@ -471,7 +529,10 @@ describe('finalizeWorkspaceLifecycleClosure ProjectData session finalization', (
       workspacesTerminalized: 1,
       agentSessionsClosed: 1,
     });
-    expect(await loadWorkspace()).toMatchObject({ status: 'stopped' });
+    expect(await loadWorkspace()).toMatchObject({
+      status: 'deleted',
+      runtimeDeletionProof: 'vm_agent_confirmed',
+    });
     expect(mocks.stopSession).toHaveBeenCalledWith(env, PROJECT_ID, CHAT_SESSION_ID);
     vi.useRealTimers();
   });
@@ -502,10 +563,13 @@ describe('finalizeWorkspaceLifecycleClosure ProjectData session finalization', (
       projectSessionsClosed: 1,
       errors: 0,
     });
-    expect(await loadWorkspace()).toMatchObject({ status: 'stopped' });
+    expect(await loadWorkspace()).toMatchObject({
+      status: 'deleted',
+      runtimeDeletionProof: 'vm_agent_confirmed',
+    });
     expect(
       sqlite.prepare(`SELECT status FROM agent_sessions WHERE id = ?`).pluck().get(AGENT_SESSION_ID)
-    ).toBe('stopped');
+    ).toBe('completed');
     expect(
       sqlite
         .prepare(`SELECT ended_at FROM compute_usage WHERE id = 'usage-terminal-repair'`)
@@ -514,6 +578,33 @@ describe('finalizeWorkspaceLifecycleClosure ProjectData session finalization', (
     ).toBe(NOW_ISO);
     expect(mocks.stopSession).toHaveBeenCalledWith(env, PROJECT_ID, CHAT_SESSION_ID);
     vi.useRealTimers();
+  });
+
+  it('quarantines a terminal-label workspace when VM deletion times out', async () => {
+    seedNode(undefined, { status: 'deleted', updatedAt: iso(-60 * 60 * 1000) });
+    seedWorkspace({ status: 'running', updatedAt: iso(-45 * 60 * 1000) });
+    seedAgentSession({ status: 'running' });
+    mocks.deleteWorkspaceOnNode.mockRejectedValueOnce(new Error('VM delete request timed out'));
+
+    const result = await runTerminalNodeLifecycleRepair(env);
+
+    expect(result).toMatchObject({
+      selected: 1,
+      workspacesTerminalized: 0,
+      agentSessionsClosed: 0,
+      errors: 1,
+    });
+    expect(await loadWorkspace()).toMatchObject({
+      status: 'stopping',
+      runtimeDeletionConfirmedAt: null,
+      runtimeDeletionProof: null,
+    });
+    expect(
+      sqlite.prepare(`SELECT status FROM agent_sessions WHERE id = ?`).pluck().get(AGENT_SESSION_ID)
+    ).toBe('running');
+    expect(mocks.stopSession).not.toHaveBeenCalled();
+    expect(mocks.confirmWorkspaceDeletion).not.toHaveBeenCalled();
+    expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledOnce();
   });
 });
 
@@ -552,7 +643,8 @@ describe('real teardown writers preserve sleeping sessions through the finalizer
 
 describe('destructive archive/delete paths still stop sessions', () => {
   it('user workspace deletion removes snapshot state before finalization, so the session still stops', async () => {
-    seedWorkspace({ nodeId: null, status: 'sleeping' });
+    seedNode();
+    seedWorkspace({ status: 'sleeping' });
     seedRestorableSnapshot();
     const db = drizzle(env.DATABASE, { schema });
 

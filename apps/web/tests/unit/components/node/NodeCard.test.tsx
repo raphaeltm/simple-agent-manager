@@ -109,7 +109,7 @@ describe('NodeCard', () => {
       expect(screen.getByText(/medium/i)).toBeInTheDocument();
     });
 
-    it('renders exact catalog VM specs when provider data is available', () => {
+    it('does not reinterpret an existing legacy node through today’s provider catalog', () => {
       const node = createNode({ vmSize: 'medium', vmLocation: 'nbg1', cloudProvider: 'hetzner' });
 
       const { container } = render(
@@ -134,10 +134,10 @@ describe('NodeCard', () => {
         </MemoryRouter>
       );
 
-      expect(container.textContent).toContain('cx32');
-      expect(container.textContent).toContain('4 vCPU, 8 GB RAM');
-      expect(container.textContent).toContain('80 GB storage');
-      expect(container.textContent).toContain('€7.69/mo');
+      expect(container.textContent).not.toContain('cx32');
+      expect(container.textContent).not.toContain('4 vCPU');
+      expect(container.textContent).toContain('Compatibility estimate');
+      expect(container.textContent).toContain('Unknown — no hardware report');
     });
 
     it('renders error message when present', () => {

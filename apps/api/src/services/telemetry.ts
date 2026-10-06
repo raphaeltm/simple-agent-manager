@@ -172,6 +172,12 @@ export interface AcpActivityCallbackMetric {
   coalescedCount?: number;
   pendingCount?: number;
   durationMs?: number;
+  classification?: string | null;
+  runtimeWorkState?: string | null;
+  runtimeWorkCount?: number | null;
+  runtimeWorkSource?: string | null;
+  runtimeWorkObservedAt?: number | null;
+  runtimeWorkProgressAt?: number | null;
 }
 
 export function recordAcpActivityCallbackMetric(

@@ -1,5 +1,17 @@
 # Isolate standalone agent process environments
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** duplicate-key canonicalization. `mergeProcessEnv` gives configured variables
+>   deterministic precedence over ambient ones (`packages/vm-agent/internal/acp/process.go:469-497`;
+>   PR #1757, 1063bf0ff, the same PR that filed this task).
+> - **Still open:**
+>   - The child still inherits the full ambient environment: `process.go:405` passes
+>     `os.Environ()` into `mergeProcessEnv`. No allowlist or inventory of required variables yet.
+>   - Canary-secret child-process tests and a direct precedence test (today only
+>     `session_host_startup_path_test.go:42` exercises `mergeProcessEnv`, indirectly).
+>   - Staging Instant verification across the supported agents and runtimes.
+
 ## Context
 
 `startLocalProcess` currently constructs the child process environment with `append(os.Environ(), cfg.EnvVars...)`. As a result, every standalone agent process inherits all ambient `vm-agent` environment variables in addition to its configured variables.

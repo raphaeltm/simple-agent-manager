@@ -1,6 +1,6 @@
 # VM Agent Makefile
 
-.PHONY: all build clean test test-integration lint prepare-container
+.PHONY: all build clean test test-integration lint prepare-container prepare-codex-runtime
 
 # Go build settings
 BINARY_NAME := vm-agent
@@ -9,7 +9,25 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev
 BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 GO_VERSION ?= $(shell $(GO) version 2>/dev/null | awk '{print $$3}' || echo "unknown")
 LDFLAGS_VERSION := -X github.com/workspace/vm-agent/internal/sysinfo.Version=$(VERSION) -X github.com/workspace/vm-agent/internal/sysinfo.BuildDate=$(BUILD_DATE) -X github.com/workspace/vm-agent/internal/sysinfo.GoVersionBuild=$(GO_VERSION)
-GOFLAGS := -ldflags="-s -w $(LDFLAGS_VERSION)"
+# -trimpath is load-bearing, not hygiene. The deploy publishes binaries under an
+# immutable release key and refuses to overwrite it when the bytes differ
+# (scripts/deploy/publish-vm-agent-artifacts.sh). Since the release key now tracks
+# agent CONTENT, consecutive deploys reuse one key and must rebuild byte-identically.
+# Without -trimpath Go embeds the absolute source directory in the binary, so the
+# same source built from two different checkout paths produces different bytes and
+# fails that check closed — blocking the whole deploy, since the upload step runs
+# before the Worker is published. Verified: identical source, two paths, divergent
+# SHA-256 without this flag; identical with it.
+# -buildvcs=false is the reproducibility fix. Go stamps vcs.revision/vcs.time/
+# vcs.modified into the binary by default (-buildvcs=auto), and vcs.revision is
+# the DEPLOY commit — which by design now differs from the release. Staging
+# deploy 34597495795 proved it: identical source, identical VERSION and
+# BUILD_DATE, -trimpath on, and the upload step still refused the immutable key
+# with existing sha256 d43a3698... vs built 5798b56e.... The stamp is also
+# actively misleading under content-keyed releases, since it names whichever
+# deploy happened to compile the binary rather than the release it belongs to;
+# sysinfo.Version carries the identity we actually want.
+GOFLAGS := -trimpath -buildvcs=false -ldflags="-s -w $(LDFLAGS_VERSION)"
 CONTAINER_ARTIFACT_DIR ?= ../../apps/api/container-artifacts
 
 # Platforms
@@ -38,7 +56,10 @@ build-linux-amd64:
 
 # Build the exact binary Wrangler bakes into the raw Cloudflare Container image.
 # VERSION/BUILD_DATE default locally and are pinned by deploy-reusable.yml.
-prepare-container: build-linux-amd64
+prepare-codex-runtime:
+	@bash ../../scripts/deploy/prepare-codex-runtime-artifact.sh "$(CONTAINER_ARTIFACT_DIR)"
+
+prepare-container: prepare-codex-runtime build-linux-amd64
 	@mkdir -p $(CONTAINER_ARTIFACT_DIR)
 	@cp bin/$(BINARY_NAME)-linux-amd64 $(CONTAINER_ARTIFACT_DIR)/vm-agent-linux-amd64
 	@chmod 0755 $(CONTAINER_ARTIFACT_DIR)/vm-agent-linux-amd64

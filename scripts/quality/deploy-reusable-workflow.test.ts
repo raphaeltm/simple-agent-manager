@@ -1,7 +1,16 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
@@ -13,6 +22,162 @@ const syncWranglerConfig = readFileSync(
   new URL('../deploy/sync-wrangler-config.ts', import.meta.url),
   'utf8'
 );
+const publishVmAgentArtifactsPath = fileURLToPath(
+  new URL('../deploy/publish-vm-agent-artifacts.sh', import.meta.url)
+);
+const publishVmAgentArtifacts = readFileSync(publishVmAgentArtifactsPath, 'utf8');
+const resolveVmAgentReleasePath = fileURLToPath(
+  new URL('../deploy/resolve-vm-agent-release.sh', import.meta.url)
+);
+
+interface AgentReleaseRepo {
+  directory: string;
+  firstAgentCommit: string;
+  latestAgentCommit: string;
+  /** Touches `packages/vm-agent/.claude/`, which cannot change the binary. */
+  agentDocsCommit: string;
+  /** Touches only `*_test.go`, which is never linked into a non-test build. */
+  agentTestOnlyCommit: string;
+  /** HEAD. A Worker-only deploy is the case that used to evict the whole pool. */
+  workerOnlyCommit: string;
+}
+
+/**
+ * Build a real repository whose history interleaves VM-agent commits with
+ * Worker-only commits. The defect this guards against is only visible across
+ * more than one commit, so a single-commit fixture cannot observe it.
+ */
+/**
+ * Run `body` against a throwaway agent-history repo, cleaning up unconditionally.
+ *
+ * Every caller previously repeated create/try/finally-rmSync, which both
+ * duplicated the cleanup contract six times and left the temp directory behind
+ * when setup itself threw (setup runs outside the caller's `try`).
+ */
+function withAgentReleaseRepo<T>(body: (repo: AgentReleaseRepo) => T): T {
+  const directory = mkdtempSync(join(tmpdir(), 'sam-agent-release-'));
+  try {
+    return body(buildAgentReleaseRepo(directory));
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+function buildAgentReleaseRepo(directory: string): AgentReleaseRepo {
+  const git = (...args: string[]): string =>
+    execFileSync('git', args, { cwd: directory, encoding: 'utf8' }).trim();
+
+  git('-c', 'init.defaultBranch=main', 'init', '-q');
+  git('config', 'user.email', 'test@example.com');
+  git('config', 'user.name', 'SAM Test');
+
+  mkdirSync(join(directory, 'scripts', 'deploy'), { recursive: true });
+  writeFileSync(
+    join(directory, 'scripts', 'deploy', 'resolve-vm-agent-release.sh'),
+    readFileSync(resolveVmAgentReleasePath, 'utf8')
+  );
+  mkdirSync(join(directory, 'packages', 'vm-agent'), { recursive: true });
+  mkdirSync(join(directory, 'apps', 'api'), { recursive: true });
+
+  writeFileSync(join(directory, 'packages', 'vm-agent', 'main.go'), 'package main // v1\n');
+  git('add', '.');
+  git('commit', '-m', 'agent v1');
+  const firstAgentCommit = git('rev-parse', 'HEAD');
+
+  writeFileSync(join(directory, 'packages', 'vm-agent', 'main.go'), 'package main // v2\n');
+  git('add', '.');
+  git('commit', '-m', 'agent v2');
+  const latestAgentCommit = git('rev-parse', 'HEAD');
+
+  // A rule/doc commit INSIDE packages/vm-agent. `.claude/rules/02` mandates a rule
+  // update on every bug fix and those rules are co-located with the agent, so this
+  // is the common case, not an edge case.
+  mkdirSync(join(directory, 'packages', 'vm-agent', '.claude', 'rules'), { recursive: true });
+  writeFileSync(
+    join(directory, 'packages', 'vm-agent', '.claude', 'rules', '54-rollout.md'),
+    '# rollout rule\n'
+  );
+  git('add', '.');
+  git('commit', '-m', 'docs inside the agent directory');
+  const agentDocsCommit = git('rev-parse', 'HEAD');
+
+  // Test files are never linked into a non-test Go build. Both a top-level and a
+  // NESTED file, because the two are matched by different pathspec patterns and a
+  // change to either would otherwise break silently.
+  writeFileSync(join(directory, 'packages', 'vm-agent', 'main_test.go'), 'package main // t1\n');
+  mkdirSync(join(directory, 'packages', 'vm-agent', 'internal', 'acp'), { recursive: true });
+  writeFileSync(
+    join(directory, 'packages', 'vm-agent', 'internal', 'acp', 'host_test.go'),
+    'package acp // t1\n'
+  );
+  git('add', '.');
+  git('commit', '-m', 'agent tests only');
+  const agentTestOnlyCommit = git('rev-parse', 'HEAD');
+
+  writeFileSync(join(directory, 'apps', 'api', 'index.ts'), 'export const x = 1;\n');
+  git('add', '.');
+  git('commit', '-m', 'worker only');
+  const workerOnlyCommit = git('rev-parse', 'HEAD');
+
+  return {
+    directory,
+    firstAgentCommit,
+    latestAgentCommit,
+    agentDocsCommit,
+    agentTestOnlyCommit,
+    workerOnlyCommit,
+  };
+}
+
+/**
+ * A repo whose history contains the resolver but no VM-agent build inputs, so the
+ * release cannot resolve. Shared by the script-level and step-level fail-closed
+ * tests, which otherwise duplicate the whole fixture.
+ */
+function withRepoLackingAgentHistory<T>(body: (directory: string, head: string) => T): T {
+  const directory = mkdtempSync(join(tmpdir(), 'sam-agent-release-empty-'));
+  try {
+    const git = (...args: string[]): string =>
+      execFileSync('git', args, { cwd: directory, encoding: 'utf8' }).trim();
+    git('-c', 'init.defaultBranch=main', 'init', '-q');
+    git('config', 'user.email', 'test@example.com');
+    git('config', 'user.name', 'SAM Test');
+    mkdirSync(join(directory, 'scripts', 'deploy'), { recursive: true });
+    writeFileSync(
+      join(directory, 'scripts', 'deploy', 'resolve-vm-agent-release.sh'),
+      readFileSync(resolveVmAgentReleasePath, 'utf8')
+    );
+    git('add', '.');
+    git('commit', '-m', 'no agent build inputs');
+
+    return body(directory, git('rev-parse', 'HEAD'));
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+function runReleaseResolver(
+  directory: string,
+  deploySha: string
+): { status: number; stdout: string; stderr: string } {
+  const result = spawnSync('bash', ['scripts/deploy/resolve-vm-agent-release.sh', deploySha], {
+    cwd: directory,
+    encoding: 'utf8',
+  });
+  return { status: result.status ?? 1, stdout: result.stdout, stderr: result.stderr };
+}
+
+function releaseFieldsFrom(stdout: string): Record<string, string> {
+  return Object.fromEntries(
+    stdout
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => {
+        const index = line.indexOf('=');
+        return [line.slice(0, index), line.slice(index + 1)];
+      })
+  );
+}
 
 function stepBlock(stepName: string): string {
   const pattern = new RegExp(
@@ -28,7 +193,10 @@ function stepBlock(stepName: string): string {
 }
 
 function extractOptionalWorkerEnvVars(): string[] {
-  const match = syncWranglerConfig.match(/getOptionalProcessEnvVars\(\[\s*([\s\S]*?)\s*\]\)/);
+  // The checked-in `[vars]` argument precedes the list so differing overrides can be logged.
+  const match = syncWranglerConfig.match(
+    /getOptionalProcessEnvVars\((?:[A-Za-z_.]+,\s*)?\[\s*([\s\S]*?)\s*\]\)/
+  );
   const optionalEnvBlock = match?.[1];
 
   expect(optionalEnvBlock).toBeDefined();
@@ -62,6 +230,50 @@ const DEPLOYMENT_IMAGE_RESOLVE_ENV_VARS = [
   'DEPLOYMENT_IMAGE_RESOLVE_TOKEN_RESPONSE_MAX_BYTES',
   'DEPLOYMENT_IMAGE_RESOLVE_MAX_CONCURRENT_FETCHES',
   'DEPLOYMENT_IMAGE_RESOLVE_MAX_SERVICES',
+] as const;
+
+const ACP_INTERACTION_ENV_VARS = [
+  'ACP_INTERACTIONS_ENABLED',
+  'ACP_INTERACTION_FORMS_ENABLED',
+  'ACP_INTERACTION_URLS_ENABLED',
+  'ACP_INTERACTION_URL_DEADLINE_MS',
+  'ACP_INTERACTION_URL_MAX_CHARS',
+  'ACP_INTERACTION_URL_ELICITATION_ID_MAX_CHARS',
+  'ACP_INTERACTION_URL_REDIRECT_DEPTH',
+  'ACP_INTERACTION_PERMISSION_TASK_DEADLINE_MS',
+  'ACP_INTERACTION_PERMISSION_CONVERSATION_DEADLINE_MS',
+  'ACP_INTERACTION_MAX_DEADLINE_MS',
+  'ACP_INTERACTION_DEADLINE_MARGIN_MS',
+  'ACP_INTERACTION_MAX_PENDING_PER_SESSION',
+  'ACP_INTERACTION_REQUEST_MAX_BYTES',
+  'ACP_INTERACTION_OPTIONS_MAX_COUNT',
+  'ACP_INTERACTION_OPTION_ID_MAX_CHARS',
+  'ACP_INTERACTION_OPTION_NAME_MAX_CHARS',
+  'ACP_INTERACTION_RUNTIME_RECEIPT_LIMIT',
+  'ACP_INTERACTION_RUNTIME_RESPONSE_MAX_BYTES',
+  'ACP_INTERACTION_FORM_SCHEMA_MAX_BYTES',
+  'ACP_INTERACTION_FORM_SCHEMA_MAX_PROPERTIES',
+  'ACP_INTERACTION_FORM_SCHEMA_MAX_ENUM',
+  'ACP_INTERACTION_ANSWER_MAX_BYTES',
+  'ACP_INTERACTION_ANSWER_STRING_MAX_BYTES',
+  'ACP_INTERACTION_RETRY_DELAYS_MS',
+  'ACP_INTERACTION_RETRY_STEADY_MS',
+  'ACP_INTERACTION_DELIVERY_WINDOW_MS',
+  'ACP_INTERACTION_SENSITIVE_PURGE_MS',
+  'ACP_INTERACTION_SUMMARY_RETENTION_MS',
+  'ACP_INTERACTION_SUMMARY_LAST_SETTLED',
+  'ACP_INTERACTION_SNAPSHOT_LAST_SETTLED',
+  'ACP_INTERACTION_EXPIRY_BATCH_SIZE',
+  'ACP_INTERACTION_OUTBOX_BATCH_SIZE',
+  'ACP_INTERACTION_DELIVERY_BATCH_SIZE',
+  'ACP_INTERACTION_ALARM_WALL_TIME_MS',
+  'ACP_INTERACTION_ALARM_REARM_DELAY_MS',
+] as const;
+
+const ARCHIVE_SWEEP_AFFORDABILITY_ENV_VARS = [
+  'PROJECT_DATA_ARCHIVE_SWEEP_UNIT_OVERHEAD_PERCENT',
+  'PROJECT_DATA_ARCHIVE_SWEEP_FALLTHROUGH_DEPTH',
+  'PROJECT_DATA_ARCHIVE_BUDGET_STALL_ALERT_SWEEPS',
 ] as const;
 
 function stepRunScript(stepName: string): string {
@@ -119,6 +331,84 @@ function runWorkersDevSubdomainStep(httpCode: number): { output: string; status:
   }
 }
 
+function runVmAgentArtifactPublication(
+  mode: 'identical' | 'mismatch' | 'missing' | 'error',
+  legacyMode = mode
+): {
+  output: string;
+  puts: string[];
+  status: number;
+} {
+  const tmp = mkdtempSync(join(tmpdir(), 'sam-agent-artifact-test-'));
+  const fakeBin = join(tmp, 'bin');
+  const workspace = join(tmp, 'workspace');
+  const sourceDir = join(workspace, 'packages', 'vm-agent', 'bin');
+  const putLog = join(tmp, 'puts.log');
+  mkdirSync(fakeBin, { recursive: true });
+  mkdirSync(sourceDir, { recursive: true });
+  writeFileSync(join(sourceDir, 'vm-agent-linux-amd64'), 'amd64-release');
+  writeFileSync(join(sourceDir, 'vm-agent-linux-arm64'), 'arm64-release');
+
+  const pnpmPath = join(fakeBin, 'pnpm');
+  writeFileSync(
+    pnpmPath,
+    `#!/usr/bin/env bash
+set -euo pipefail
+operation="\${7:?}"
+object_path="\${8:?}"
+file_path="\${10:?}"
+architecture="\${object_path##*-}"
+if [ "$operation" = "get" ]; then
+  mode="$SAM_FAKE_R2_MODE"
+  if [[ "$object_path" != */agents/releases/* ]]; then
+    mode="$SAM_FAKE_R2_LEGACY_MODE"
+  fi
+  case "$mode" in
+    identical) cp "$SAM_FAKE_SOURCE_DIR/vm-agent-linux-$architecture" "$file_path" ;;
+    mismatch) printf 'different-bytes' > "$file_path" ;;
+    missing) echo 'The specified key does not exist.' >&2; exit 1 ;;
+    error) echo 'R2 request failed before receiving a response' >&2; exit 1 ;;
+  esac
+  exit 0
+fi
+if [ "$operation" = "put" ]; then
+  printf '%s\n' "$object_path" >> "$SAM_FAKE_PUT_LOG"
+  exit 0
+fi
+exit 64
+`
+  );
+  chmodSync(pnpmPath, 0o755);
+
+  try {
+    const result = spawnSync('bash', [publishVmAgentArtifactsPath], {
+      cwd: new URL('../..', import.meta.url),
+      env: {
+        ...process.env,
+        PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
+        R2_BUCKET: 'test-assets',
+        VM_AGENT_RELEASE: 'a'.repeat(40),
+        GITHUB_WORKSPACE: workspace,
+        RUNNER_TEMP: tmp,
+        SAM_FAKE_R2_MODE: mode,
+        SAM_FAKE_R2_LEGACY_MODE: legacyMode,
+        SAM_FAKE_SOURCE_DIR: sourceDir,
+        SAM_FAKE_PUT_LOG: putLog,
+      },
+      encoding: 'utf8',
+    });
+    return {
+      output: `${result.stdout}${result.stderr}`,
+      puts: existsSync(putLog)
+        ? readFileSync(putLog, 'utf8').trim().split('\n').filter(Boolean)
+        : [],
+      status: result.status ?? 1,
+    };
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
 describe('deploy reusable workflow', () => {
   it('uses the R2-compatible request checksum mode for every Pulumi state write', () => {
     expect(workflow).toContain("AWS_REQUEST_CHECKSUM_CALCULATION: 'when_supported'");
@@ -143,7 +433,16 @@ describe('deploy reusable workflow', () => {
       execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: tmp });
       execFileSync('git', ['config', 'user.name', 'SAM Test'], { cwd: tmp });
       writeFileSync(join(tmp, 'file.txt'), 'verified deployment\n');
-      execFileSync('git', ['add', 'file.txt'], { cwd: tmp });
+      // The step resolves the VM-agent release, so the fixture needs both the
+      // resolver and an agent commit for it to find.
+      mkdirSync(join(tmp, 'scripts', 'deploy'), { recursive: true });
+      writeFileSync(
+        join(tmp, 'scripts', 'deploy', 'resolve-vm-agent-release.sh'),
+        readFileSync(resolveVmAgentReleasePath, 'utf8')
+      );
+      mkdirSync(join(tmp, 'packages', 'vm-agent'), { recursive: true });
+      writeFileSync(join(tmp, 'packages', 'vm-agent', 'main.go'), 'package main\n');
+      execFileSync('git', ['add', '.'], { cwd: tmp });
       execFileSync('git', ['commit', '-m', 'test commit'], { cwd: tmp });
       const head = execFileSync('git', ['rev-parse', 'HEAD'], {
         cwd: tmp,
@@ -197,16 +496,238 @@ describe('deploy reusable workflow', () => {
     }
   });
 
+  describe('VM-agent release identity', () => {
+    it('keeps the release stable across a deploy that does not touch the agent', () => {
+      withAgentReleaseRepo((repo) => {
+        // The incident: every deploy rotated VM_AGENT_REQUIRED_VERSION, and
+        // isNodeAgentVersionCompatible compares for exact equality, so a
+        // Worker-only deploy made every running node ineligible for reuse.
+        const workerOnly = runReleaseResolver(repo.directory, repo.workerOnlyCommit);
+        expect(workerOnly.status).toBe(0);
+        const fields = releaseFieldsFrom(workerOnly.stdout);
+        expect(fields.release).toBe(repo.latestAgentCommit);
+        expect(fields.release).not.toBe(repo.workerOnlyCommit);
+      });
+    });
+
+    it.each([
+      ['a rule/doc commit inside the agent directory', 'agentDocsCommit' as const],
+      ['a test-only commit', 'agentTestOnlyCommit' as const],
+    ])('does not rotate the release for %s', (_label, key) => {
+      // Found in review, against this repo's own history: commit df8e03ee7 changed
+      // ONLY packages/vm-agent/.claude/rules/54-vm-agent-rollout-compatibility.md
+      // and the prefix-only pathspec treated it as a new agent release, which would
+      // have evicted the whole pool for a documentation edit.
+      withAgentReleaseRepo((repo) => {
+        const result = runReleaseResolver(repo.directory, repo[key]);
+        expect(result.status).toBe(0);
+        expect(releaseFieldsFrom(result.stdout).release).toBe(repo.latestAgentCommit);
+      });
+    });
+
+    it('rotates the release for a deploy that does touch the agent', () => {
+      withAgentReleaseRepo((repo) => {
+        // Discriminating control: without this the suite would pass with the
+        // release pinned to a constant.
+        const older = runReleaseResolver(repo.directory, repo.firstAgentCommit);
+        expect(older.status).toBe(0);
+        expect(releaseFieldsFrom(older.stdout).release).toBe(repo.firstAgentCommit);
+
+        const newer = runReleaseResolver(repo.directory, repo.latestAgentCommit);
+        expect(newer.status).toBe(0);
+        expect(releaseFieldsFrom(newer.stdout).release).toBe(repo.latestAgentCommit);
+        expect(repo.firstAgentCommit).not.toBe(repo.latestAgentCommit);
+      });
+    });
+
+    it('emits a build date from the release commit so identical agents rebuild identically', () => {
+      withAgentReleaseRepo((repo) => {
+        // publish-vm-agent-artifacts.sh refuses to overwrite an immutable release
+        // key whose bytes differ, and BUILD_DATE is baked into the binary. Two
+        // deploys of one agent release must therefore agree on the build date.
+        const first = releaseFieldsFrom(
+          runReleaseResolver(repo.directory, repo.workerOnlyCommit).stdout
+        );
+        const second = releaseFieldsFrom(
+          runReleaseResolver(repo.directory, repo.latestAgentCommit).stdout
+        );
+        expect(first.release).toBe(second.release);
+        expect(first.build_date).toBe(second.build_date);
+        expect(first.build_date).toBe(
+          execFileSync('git', ['show', '-s', '--format=%cI', repo.latestAgentCommit], {
+            cwd: repo.directory,
+            encoding: 'utf8',
+          }).trim()
+        );
+      });
+    });
+
+    it('builds the agent with the flags a reused release key requires', () => {
+      // Structural check on build configuration, not behaviour. The release key
+      // is now content-addressed, so consecutive deploys reuse one key and
+      // publish-vm-agent-artifacts.sh refuses a byte mismatch — which takes the
+      // whole deploy down, since the upload runs before the Worker is published.
+      // Staging run 34597495795 is the proof that this is not theoretical.
+      const makefile = readFileSync(
+        fileURLToPath(new URL('../../packages/vm-agent/Makefile', import.meta.url)),
+        'utf8'
+      );
+      const goflags = makefile.match(/^GOFLAGS :=.*$/m)?.[0] ?? '';
+
+      expect(goflags).toBeTruthy();
+      // Without it, Go embeds the absolute source directory.
+      expect(goflags).toContain('-trimpath');
+      // Without it, Go stamps vcs.revision — the DEPLOY commit, which the whole
+      // point of a content-addressed release is that it differs.
+      expect(goflags).toContain('-buildvcs=false');
+    });
+
+    it('embeds only the reviewed installer, which is a release input', () => {
+      const agentRoot = fileURLToPath(new URL('../../packages/vm-agent', import.meta.url));
+      const found = spawnSync('grep', ['-rn', '--include=*.go', 'go:embed', agentRoot], {
+        encoding: 'utf8',
+      });
+      expect(found.status, `grep failed: ${found.stderr}`).toBe(0);
+      // New embeds must be reviewed against the release resolver exclusions.
+      const embeds = found.stdout
+        .trim()
+        .split('\n')
+        .map((line) => line.replace(`${agentRoot}/`, '').replace(/:\d+:/, ':'));
+      expect(embeds).toEqual([
+        'internal/acp/codex_runtime_distribution.go://go:embed codex_runtime_installer.sh',
+      ]);
+      withAgentReleaseRepo((repo) => {
+        const path = join(
+          repo.directory,
+          'packages/vm-agent/internal/acp/codex_runtime_installer.sh'
+        );
+        writeFileSync(path, '#!/bin/bash\necho installer-v2\n');
+        execFileSync('git', ['add', '.'], { cwd: repo.directory });
+        execFileSync('git', ['commit', '-m', 'embedded installer change'], { cwd: repo.directory });
+        const head = execFileSync('git', ['rev-parse', 'HEAD'], {
+          cwd: repo.directory,
+          encoding: 'utf8',
+        }).trim();
+        const result = runReleaseResolver(repo.directory, head);
+        expect(result.status).toBe(0);
+        expect(releaseFieldsFrom(result.stdout).release).toBe(head);
+      });
+    });
+
+    it('fails closed on a shallow clone instead of falling back to the deploy commit', () => {
+      withAgentReleaseRepo((repo) => {
+        const shallow = mkdtempSync(join(tmpdir(), 'sam-agent-release-shallow-'));
+        try {
+          // A shallow clone answers `rev-list -1 -- <path>` with the shallow
+          // boundary, silently reproducing the per-deploy rotation.
+          execFileSync('git', ['clone', '--depth', '1', `file://${repo.directory}`, shallow]);
+          writeFileSync(
+            join(shallow, 'scripts', 'deploy', 'resolve-vm-agent-release.sh'),
+            readFileSync(resolveVmAgentReleasePath, 'utf8')
+          );
+          const head = execFileSync('git', ['rev-parse', 'HEAD'], {
+            cwd: shallow,
+            encoding: 'utf8',
+          }).trim();
+
+          const result = runReleaseResolver(shallow, head);
+          expect(result.status).not.toBe(0);
+          expect(result.stderr).toContain('shallow');
+        } finally {
+          rmSync(shallow, { recursive: true, force: true });
+        }
+      });
+    });
+
+    it('fails closed when no commit in history changed the agent build inputs', () => {
+      withRepoLackingAgentHistory((directory, head) => {
+        const result = runReleaseResolver(directory, head);
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('no commit changing');
+      });
+    });
+
+    it('aborts the deploy step when the release cannot be resolved', () => {
+      // The resolver is invoked from the step, so the step — not just the script
+      // — must fail. A step that swallowed the error would fall through with an
+      // empty agent_version and silently disable rollout gating.
+      const script = stepRunScript('Resolve and Verify Deployment SHA');
+      withRepoLackingAgentHistory((directory, head) => {
+        const outputPath = join(directory, 'output.txt');
+
+        const result = spawnSync('bash', ['-c', script], {
+          cwd: directory,
+          env: {
+            ...process.env,
+            EXPECTED_DEPLOY_SHA: head,
+            SKIP_AGENT: 'false',
+            GITHUB_OUTPUT: outputPath,
+          },
+          encoding: 'utf8',
+        });
+
+        expect(result.status).not.toBe(0);
+        expect(readFileSync(outputPath, 'utf8')).not.toContain('agent_version=');
+        // Pin WHICH guard fired: a regression in the earlier deploy-SHA equality
+        // check produces an identical exit code and an identical absent
+        // agent_version, and would leave this test green while proving nothing
+        // about resolver-failure propagation.
+        expect(readFileSync(outputPath, 'utf8')).toContain(`value=${head}`);
+        expect(`${result.stdout}${result.stderr}`).toContain(
+          'Could not resolve the VM-agent release'
+        );
+      });
+    });
+
+    it('resolves the release through the real deploy step, and still blanks it for skip_agent', () => {
+      const script = stepRunScript('Resolve and Verify Deployment SHA');
+      withAgentReleaseRepo((repo) => {
+        const outputPath = join(repo.directory, 'step-output.txt');
+        const normal = spawnSync('bash', ['-c', script], {
+          cwd: repo.directory,
+          env: {
+            ...process.env,
+            EXPECTED_DEPLOY_SHA: repo.workerOnlyCommit,
+            SKIP_AGENT: 'false',
+            GITHUB_OUTPUT: outputPath,
+          },
+          encoding: 'utf8',
+        });
+        expect(normal.status).toBe(0);
+        const emitted = releaseFieldsFrom(readFileSync(outputPath, 'utf8'));
+        expect(emitted.value).toBe(repo.workerOnlyCommit);
+        expect(emitted.release).toBe(repo.latestAgentCommit);
+        expect(emitted.agent_version).toBe(repo.latestAgentCommit);
+
+        const skippedPath = join(repo.directory, 'skip-output.txt');
+        const skipped = spawnSync('bash', ['-c', script], {
+          cwd: repo.directory,
+          env: {
+            ...process.env,
+            EXPECTED_DEPLOY_SHA: repo.workerOnlyCommit,
+            SKIP_AGENT: 'true',
+            GITHUB_OUTPUT: skippedPath,
+          },
+          encoding: 'utf8',
+        });
+        expect(skipped.status).toBe(0);
+        const skippedFields = releaseFieldsFrom(readFileSync(skippedPath, 'utf8'));
+        // skip_agent publishes no binaries, so gating stays disabled — but the
+        // release is still emitted for the container artifact, which always runs.
+        expect(skippedFields.agent_version).toBe('');
+        expect(skippedFields.release).toBe(repo.latestAgentCommit);
+      });
+    });
+  });
+
   it('runs D1 migrations and integrity checks before serving new API Worker code', () => {
     const migrationsIndex = workflow.indexOf('- name: Run Database Migrations With Safety Gates');
+    const bootstrapApiIndex = workflow.indexOf('- name: Bootstrap API Worker');
     const deployApiIndex = workflow.indexOf('- name: Deploy API Worker');
-    const redeployAfterSecretsIndex = workflow.indexOf(
-      '- name: Re-deploy API Worker (after secrets)'
-    );
 
     expect(migrationsIndex).toBeGreaterThan(-1);
+    expect(bootstrapApiIndex).toBeGreaterThan(migrationsIndex);
     expect(deployApiIndex).toBeGreaterThan(migrationsIndex);
-    expect(redeployAfterSecretsIndex).toBeGreaterThan(deployApiIndex);
   });
 
   it('creates installation identity before config sync and skips mutation on dry runs', () => {
@@ -291,6 +812,33 @@ describe('deploy reusable workflow', () => {
     }
   });
 
+  it('configures D1 read replication from Pulumi outputs, without interpolating into run:', () => {
+    const step = stepBlock('Configure D1 Read Replication');
+
+    expect(step).toContain('bash scripts/deploy/configure-d1-read-replication.sh');
+    expect(step).toContain('CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}');
+    expect(step).toContain('CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}');
+    // Operator override travels through `env:`, never through `run:` — GitHub expands
+    // expressions before the shell parses the script (`.claude/rules/02`, workflow input
+    // trust boundaries).
+    expect(step).toContain('D1_READ_REPLICATION_MODE: ${{ vars.D1_READ_REPLICATION_MODE }}');
+
+    const script = stepRunScript('Configure D1 Read Replication');
+    expect(script).not.toMatch(/\$\{\{/);
+    expect(script).toContain('set -euo pipefail');
+    expect(script).toContain('pulumi stack output d1DatabaseId');
+    expect(script).toContain('pulumi stack output observabilityD1DatabaseId');
+  });
+
+  it('runs D1 read replication before the API Worker that opens D1 sessions', () => {
+    const replicationIndex = workflow.indexOf('- name: Configure D1 Read Replication');
+    const deployIndex = workflow.indexOf('- name: Deploy API Worker');
+
+    expect(replicationIndex).toBeGreaterThan(-1);
+    expect(deployIndex).toBeGreaterThan(-1);
+    expect(replicationIndex).toBeLessThan(deployIndex);
+  });
+
   it('passes documented frontend limits and timing overrides into the web build', () => {
     const build = stepBlock('Build Applications');
 
@@ -306,6 +854,9 @@ describe('deploy reusable workflow', () => {
       "VITE_WORKSPACE_PORTS_CIRCUIT_RESET_MS: ${{ vars.VITE_WORKSPACE_PORTS_CIRCUIT_RESET_MS || '300000' }}",
       "VITE_PROJECT_PREFETCH_DELAY_MS: ${{ vars.VITE_PROJECT_PREFETCH_DELAY_MS || '120' }}",
       "VITE_BACKGROUND_FETCH_DELAY_MS: ${{ vars.VITE_BACKGROUND_FETCH_DELAY_MS || '150' }}",
+      "VITE_ACP_PERMISSION_POLL_MS: ${{ vars.VITE_ACP_PERMISSION_POLL_MS || '2000' }}",
+      "VITE_ACP_PERMISSION_RECOVERY_POLL_MS: ${{ vars.VITE_ACP_PERMISSION_RECOVERY_POLL_MS || '30000' }}",
+      "VITE_ACP_PERMISSION_QUERY_RETRY_COUNT: ${{ vars.VITE_ACP_PERMISSION_QUERY_RETRY_COUNT || '3' }}",
     ]) {
       expect(build).toContain(mapping);
     }
@@ -341,7 +892,7 @@ describe('deploy reusable workflow', () => {
   });
 
   it('allows only the intentionally gated Artifacts non-inheritance warning', () => {
-    for (const name of ['Deploy API Worker', 'Re-deploy API Worker \\(after secrets\\)']) {
+    for (const name of ['Bootstrap API Worker', 'Deploy API Worker']) {
       const block = stepBlock(name);
 
       expect(block).toContain('NON_ARTIFACTS_BINDING_WARNINGS=');
@@ -358,8 +909,9 @@ describe('deploy reusable workflow', () => {
     const goSetupIndex = workflow.indexOf('- name: Setup Go for Container Runtime');
 
     expect(prepare).toContain('make -C packages/vm-agent prepare-container');
-    expect(prepare).toContain('VERSION="$DEPLOY_SHA"');
-    expect(prepare).toContain('DEPLOY_SHA: ${{ steps.deploy-sha.outputs.value }}');
+    expect(prepare).toContain('VERSION="$VM_AGENT_RELEASE"');
+    expect(prepare).toContain('VM_AGENT_RELEASE: ${{ steps.deploy-sha.outputs.release }}');
+    expect(prepare).toContain('VM_AGENT_BUILD_DATE: ${{ steps.deploy-sha.outputs.build_date }}');
     expect(prepare).toContain('vm-agent-version.json');
     expect(prepare).not.toContain('secrets.');
     expect(prepareIndex).toBeGreaterThan(-1);
@@ -370,14 +922,57 @@ describe('deploy reusable workflow', () => {
     expect(goSetupIndex).toBeLessThan(prepareIndex);
   });
 
+  it('gives runtime publication access to the Pulumi state backend before Worker publication', () => {
+    const publish = stepBlock('Publish Pinned Codex Runtime');
+    expect(publish).toContain('pulumi stack output r2Name');
+    expect(publish).toContain('AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}');
+    expect(publish).toContain('AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}');
+    expect(publish).toContain('PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}');
+    expect(workflow.indexOf('- name: Publish Pinned Codex Runtime')).toBeLessThan(
+      workflow.indexOf('- name: Bootstrap API Worker')
+    );
+  });
+
   it('uploads the matching VM agent binaries before the API requires that build', () => {
     const buildIndex = workflow.indexOf('- name: Build VM Agent');
     const uploadIndex = workflow.indexOf('- name: Upload VM Agent Binaries');
     const deployIndex = workflow.indexOf('- name: Deploy API Worker');
+    const upload = stepBlock('Upload VM Agent Binaries');
 
     expect(buildIndex).toBeGreaterThan(-1);
     expect(uploadIndex).toBeGreaterThan(buildIndex);
     expect(uploadIndex).toBeLessThan(deployIndex);
+    expect(upload).toContain('bash ../scripts/deploy/publish-vm-agent-artifacts.sh');
+    expect(publishVmAgentArtifacts).toContain(
+      'local object_path="$R2_BUCKET/agents/releases/$VM_AGENT_RELEASE/vm-agent-linux-$architecture"'
+    );
+    expect(publishVmAgentArtifacts).toContain('publish_agent_artifact amd64');
+    expect(publishVmAgentArtifacts).toContain('publish_agent_artifact arm64');
+    expect(upload).toContain('VM_AGENT_RELEASE: ${{ steps.deploy-sha.outputs.release }}');
+    expect(upload).not.toContain('$R2_BUCKET/agents/vm-agent-linux-amd64');
+  });
+
+  it('publishes established Worker code only after the single secret revision', () => {
+    const firstDeploy = stepBlock('Check First Deploy Status');
+    const bootstrap = stepBlock('Bootstrap API Worker');
+    const tailConsumerRedeploy = stepBlock('Re-deploy API Worker \\(with tail_consumers\\)');
+    const configureSecretsIndex = workflow.indexOf('- name: Configure Worker Secrets');
+    const deployIndex = workflow.indexOf('- name: Deploy API Worker');
+
+    expect(bootstrap).toContain("steps.first_deploy.outputs.is_first == 'true'");
+    expect(firstDeploy).toMatch(
+      /if \[ -f \.wrangler\/api-worker-first-deploy \]; then\s+echo "is_first=true"/
+    );
+    expect(firstDeploy).toMatch(
+      /if \[ -f \.wrangler\/tail-worker-first-deploy \]; then\s+echo "needs_tail_sync=true"/
+    );
+    expect(stepBlock('Re-sync Wrangler Config \\(add tail_consumers\\)')).toContain(
+      "steps.first_deploy.outputs.needs_tail_sync == 'true'"
+    );
+    expect(tailConsumerRedeploy).toContain("steps.first_deploy.outputs.is_first == 'true'");
+    expect(configureSecretsIndex).toBeGreaterThan(-1);
+    expect(deployIndex).toBeGreaterThan(configureSecretsIndex);
+    expect(workflow.match(/ {6}- name: Deploy API Worker\n/g)).toHaveLength(1);
   });
 
   it('forwards the cf-container clone/create tunables into the wrangler config sync env', () => {
@@ -390,6 +985,13 @@ describe('deploy reusable workflow', () => {
       'CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS: ${{ vars.CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS }}'
     );
     expect(sync).toContain('CF_CONTAINER_CLONE_FILTER: ${{ vars.CF_CONTAINER_CLONE_FILTER }}');
+    for (const name of [
+      'DEPLOYMENT_DEFAULT_CPU_LIMIT_MILLIS',
+      'DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB',
+      'DEPLOYMENT_DEFAULT_ROOT_DISK_MB',
+    ]) {
+      expect(sync).toContain(name + ': ${{ vars.' + name + ' }}');
+    }
     expect(sync).toContain(
       'PLATFORM_FEEDBACK_PROJECT_ID: ${{ vars.PLATFORM_FEEDBACK_PROJECT_ID }}'
     );
@@ -510,14 +1112,147 @@ describe('deploy reusable workflow', () => {
     }
   });
 
-  it('versions the R2 vm-agent binaries with the same commit SHA as the container binary', () => {
+  it('forwards ACP interaction controls into every wrangler config sync env', () => {
+    const optionalWorkerVars = extractOptionalWorkerEnvVars();
+    const syncBlocks = [
+      stepBlock('Sync Wrangler Config \\(API \\+ Tail Worker\\)'),
+      stepBlock('Re-sync Wrangler Config \\(add tail_consumers\\)'),
+    ];
+
+    for (const name of ACP_INTERACTION_ENV_VARS) {
+      expect(optionalWorkerVars).toContain(name);
+      for (const sync of syncBlocks) {
+        expect(sync).toContain(name + ': ${{ vars.' + name + ' }}');
+      }
+    }
+    const wranglerToml = readFileSync(
+      new URL('../../apps/api/wrangler.toml', import.meta.url),
+      'utf8'
+    );
+    expect(wranglerToml).toMatch(/^ACP_INTERACTION_FORMS_ENABLED = "false"$/m);
+    expect(wranglerToml).toMatch(/^ACP_INTERACTION_URLS_ENABLED = "false"$/m);
+  });
+
+  /**
+   * A Worker var the code reads but the sync path does not forward is unoverridable in
+   * production, silently: the GitHub Environment variable is accepted, the deploy is green,
+   * and the deployed value is still the checked-in one. These three govern the archive
+   * sweep's candidate ceiling, its fall-through depth and its stall alert — exactly the
+   * knobs an operator reaches for when the sweep is misbehaving.
+   *
+   * They must ALSO exist in the top-level `[vars]`, because `listEnvironmentVarOverrides`
+   * only logs an override for a name it can compare against a checked-in value. Without
+   * that, an override of one of these would ship with no line in the deploy log — the
+   * `.claude/rules/70` failure mode verbatim.
+   */
+  it('forwards the archive sweep affordability tunables into every wrangler config sync env', () => {
+    const optionalWorkerVars = extractOptionalWorkerEnvVars();
+    const syncBlocks = [
+      stepBlock('Sync Wrangler Config \\(API \\+ Tail Worker\\)'),
+      stepBlock('Re-sync Wrangler Config \\(add tail_consumers\\)'),
+    ];
+    const wranglerToml = readFileSync(
+      new URL('../../apps/api/wrangler.toml', import.meta.url),
+      'utf8'
+    );
+
+    for (const name of ARCHIVE_SWEEP_AFFORDABILITY_ENV_VARS) {
+      expect(optionalWorkerVars).toContain(name);
+      expect(wranglerToml).toMatch(new RegExp(`^${name} = "`, 'm'));
+      for (const sync of syncBlocks) {
+        expect(sync).toContain(name + ': ${{ vars.' + name + ' }}');
+      }
+    }
+  });
+
+  it('versions the R2 vm-agent binaries with the same release commit as the container binary', () => {
+    const containerBuild = stepBlock('Prepare Versioned VM Agent Container Artifact');
     const build = stepBlock('Build VM Agent');
 
-    // Both the container-baked binary and the R2-uploaded binaries must report
-    // the deploy commit SHA so a running agent can be correlated to its artifact.
+    // Both the container-baked binary and the R2-uploaded binaries must report the
+    // VM-agent release commit so a running agent can be correlated to its artifact.
+    // BUILD_DATE comes from that same commit: it is baked into the binary, so taking
+    // it from the deployment commit would give two deploys of identical agent source
+    // different bytes under one immutable release key.
+    for (const block of [containerBuild, build]) {
+      expect(block).toContain('VM_AGENT_RELEASE: ${{ steps.deploy-sha.outputs.release }}');
+      expect(block).toContain('VM_AGENT_BUILD_DATE: ${{ steps.deploy-sha.outputs.build_date }}');
+      expect(block).toContain('BUILD_DATE="$VM_AGENT_BUILD_DATE"');
+      expect(block).not.toContain('$DEPLOY_SHA');
+    }
     expect(build).toContain('make -C packages/vm-agent build-all');
-    expect(build).toContain('VERSION="$DEPLOY_SHA"');
-    expect(build).toContain('DEPLOY_SHA: ${{ steps.deploy-sha.outputs.value }}');
+    expect(build).toContain('VERSION="$VM_AGENT_RELEASE"');
+  });
+
+  it('reuses identical same-SHA artifacts and refuses immutable-key overwrites', () => {
+    expect(publishVmAgentArtifacts).toContain('wrangler r2 object get "$object_path"');
+    expect(publishVmAgentArtifacts).toContain('source_sha=$(sha256sum "$source_path"');
+    expect(publishVmAgentArtifacts).toContain('existing_sha=$(sha256sum "$existing_path"');
+    expect(publishVmAgentArtifacts).toContain('if [ "$source_sha" != "$existing_sha" ]');
+    expect(publishVmAgentArtifacts).toContain('Refusing to overwrite immutable VM-agent artifact');
+    expect(publishVmAgentArtifacts).toContain('The specified key does not exist.');
+    expect(publishVmAgentArtifacts).toContain('wrangler r2 object put "$object_path"');
+  });
+
+  it('behaviorally reuses byte-identical immutable artifacts without a PUT', () => {
+    const result = runVmAgentArtifactPublication('identical');
+
+    expect(result.status).toBe(0);
+    expect(result.puts).toEqual([]);
+    expect(result.output.match(/Reusing identical immutable VM-agent artifact/g)).toHaveLength(2);
+  });
+
+  it('behaviorally rejects a digest mismatch without overwriting R2', () => {
+    const result = runVmAgentArtifactPublication('mismatch');
+
+    expect(result.status).toBe(1);
+    expect(result.puts).toEqual([]);
+    expect(result.output).toContain('Refusing to overwrite immutable VM-agent artifact');
+  });
+
+  it('behaviorally fails closed on an unexpected R2 read error', () => {
+    const result = runVmAgentArtifactPublication('error');
+
+    expect(result.status).toBe(1);
+    expect(result.puts).toEqual([]);
+    expect(result.output).toContain('Could not verify whether immutable VM-agent artifact exists');
+  });
+
+  it('behaviorally uploads both architectures only after confirmed absence', () => {
+    const result = runVmAgentArtifactPublication('missing');
+
+    expect(result.status).toBe(0);
+    expect(result.puts).toEqual([
+      `test-assets/agents/releases/${'a'.repeat(40)}/vm-agent-linux-amd64`,
+      `test-assets/agents/releases/${'a'.repeat(40)}/vm-agent-linux-arm64`,
+      'test-assets/agents/vm-agent-linux-amd64',
+      'test-assets/agents/vm-agent-linux-arm64',
+    ]);
+  });
+
+  it('seeds missing legacy downloads when immutable artifacts already exist', () => {
+    const result = runVmAgentArtifactPublication('identical', 'missing');
+
+    expect(result.status).toBe(0);
+    expect(result.puts).toEqual([
+      'test-assets/agents/vm-agent-linux-amd64',
+      'test-assets/agents/vm-agent-linux-arm64',
+    ]);
+  });
+
+  it('preserves different existing legacy bytes for callers on the prior Worker', () => {
+    const result = runVmAgentArtifactPublication('identical', 'mismatch');
+
+    expect(result.status).toBe(0);
+    expect(result.puts).toEqual([]);
+    expect(result.output.match(/Preserving existing legacy VM-agent artifact/g)).toHaveLength(2);
+  });
+
+  it('refuses to initialize legacy downloads after an ambiguous read failure', () => {
+    const result = runVmAgentArtifactPublication('identical', 'error');
+
+    expect(result.status).toBe(1);
+    expect(result.puts).toEqual([]);
   });
 
   it('continues deployment when workers.dev subdomain setup succeeds', () => {

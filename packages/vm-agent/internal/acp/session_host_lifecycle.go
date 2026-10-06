@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/workspace/vm-agent/internal/config"
 )
 
 // credSyncSnapshot holds credential metadata captured under the lock for
@@ -16,6 +17,40 @@ type credSyncSnapshot struct {
 	authFilePath  string
 	credKind      string
 	agentType     string
+}
+
+// lifecycleContext returns the context that lives for as long as this
+// SessionHost does. It is created in NewSessionHost and cancelled only by
+// Stop().
+//
+// Any work that OUTLIVES the request which started it must use this instead of
+// the caller's context. The canonical case is monitorProcessExit: it is spawned
+// during startup but drives agent restarts minutes or hours later, long after
+// the HTTP snapshot-restore request or viewer WebSocket connection that started
+// the agent has finished and had its context cancelled. See
+// .claude/rules/71-request-context-must-not-outlive-its-request.md.
+//
+// This is the single accessor for the host lifetime; prefer it over reading
+// h.ctx directly. Falls back to context.Background() for hosts built by struct
+// literal in tests rather than NewSessionHost, so a long-lived goroutine can
+// never receive nil.
+func (h *SessionHost) lifecycleContext() context.Context {
+	if h.ctx == nil {
+		return context.Background()
+	}
+	return h.ctx
+}
+
+// restartAttemptTimeout bounds ONE process-monitor restart attempt. The monitor
+// holds h.mu for the whole attempt and execInContainer has no timeout of its
+// own, so without this a wedged container runtime would block Stop() forever.
+// It is derived downward from lifecycleContext at the point of use and never
+// handed to the replacement process's monitor.
+func (h *SessionHost) restartAttemptTimeout() time.Duration {
+	if h.config.RestartAttemptTimeout > 0 {
+		return h.config.RestartAttemptTimeout
+	}
+	return config.DefaultACPRestartAttemptTimeout
 }
 
 func (h *SessionHost) credentialSyncTimeout() time.Duration {
@@ -102,6 +137,7 @@ func (h *SessionHost) Suspend() (acpSessionID string, agentType string) {
 		h.mu.Unlock()
 		return "", ""
 	}
+	h.closeUsageReportIngress()
 
 	// Capture the session state we need to preserve before stopping.
 	acpSessionID = string(h.sessionID)
@@ -126,7 +162,14 @@ func (h *SessionHost) Suspend() (acpSessionID string, agentType string) {
 	h.syncCredentialOnStop(snap)
 
 	// Report idle to the control plane so the browser status bar clears.
+	h.stopPromptActivityRereport()
 	h.clearHarnessWork()
+	if err := h.waitForUsageReportCallbacks(h.activityReportTimeout()); err != nil {
+		slog.Warn("usageReport: suspend callback drain failed", "error", err)
+	}
+	if err := h.flushUsageReports(h.activityReportTimeout()); err != nil {
+		slog.Warn("usageReport: suspend flush failed", "error", err)
+	}
 	h.reportActivity("idle")
 
 	h.cancel()

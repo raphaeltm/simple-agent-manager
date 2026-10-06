@@ -50,7 +50,7 @@ SAM exposes these MCP tools for deployment. They are the only interface you need
 | Tool | Purpose |
 | --- | --- |
 | \`create_deployment_environment(name)\` | Create a new non-reserved deployment environment for the current task. Requires a real task/profile context; defaults access to this creator profile only. |
-| \`list_deployment_environments()\` | List the active deployment environments this agent profile is allowed to target. |
+| \`list_deployment_environments()\` | List the deployment environments this agent profile is allowed to target: the active ones, plus any in \`error\` waiting for a new release to recover. |
 | \`list_deployment_environment_config(environment)\` | List the Variables (values visible) and Secret keys (values never returned) configured for an environment. |
 | \`set_deployment_environment_config(environment, key, value, isSecret?)\` | Create or update a Variable or Secret for an environment. |
 | \`build_and_publish(environment, reference?, workingDir?)\` | Start an async server-side Compose build/publish job and return a durable \`publishJobId\`. |
@@ -66,8 +66,9 @@ SAM exposes these MCP tools for deployment. They are the only interface you need
 
 ### Step 1 — Discover the target environment
 
-Call \`list_deployment_environments()\` first. It returns only the environments that are active AND that your agent profile is allowed to target.
+Call \`list_deployment_environments()\` first. It returns only the environments that your agent profile is allowed to target AND that are either active, or in \`error\` and waiting for a new release to recover.
 
+- An environment listed with \`status: "error"\` is **recoverable, not blocked**. Submitting a new \`build_and_publish\` release for it IS the recovery path — SAM re-places or re-adopts its deployment node when the release arrives. Report the environment's \`observedDeployment.errorMessage\` (alongside \`observedDeployment.status\`) to the user so they know what failed, then proceed with the deployment as normal.
 - If the user asked for a new non-reserved environment name, call \`create_deployment_environment(name)\`, then call \`list_deployment_environments()\` again and use the newly created environment.
 - If the list is **empty** and the user did not ask you to create an environment, ask whether to create one. Reserved names such as production must be created by the project owner from the control surface.
 - If an existing environment is missing because agent deployment is disabled or your profile has no access, report that the project owner must update the deployment environment policy. Do not try to work around this.

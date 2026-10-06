@@ -1,11 +1,18 @@
+import { DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS } from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
 
+import {
+  preferCapacityCandidatesInLocation,
+  rankCapacityCandidatesForRuntime,
+} from '../../../src/services/placement-capacity-ranking';
 import type {
   PlacementProfileDefaults,
   PlacementProjectDefaults,
+  TaskStartCapacityCandidate,
   TaskStartCapacityPoolSelection,
 } from '../../../src/services/placement-resolver';
 import {
+  directPlacementAuditSnapshot,
   PlacementResolutionError,
   resolveEffectivePlacementRuntime,
   resolvePlacementCredentialAttribution,
@@ -13,13 +20,14 @@ import {
   resolveTaskStartPlacement,
 } from '../../../src/services/placement-resolver';
 
-function reservation(overrides: Partial<ReturnType<typeof resolveTaskStartPlacement>['resolvedReservation']> = {}) {
+function reservation(
+  overrides: Partial<ReturnType<typeof resolveTaskStartPlacement>['resolvedReservation']> = {}
+) {
   return {
     cpuMillis: 2000,
     memoryMb: 4096,
     diskMb: 20 * 1024,
     exclusiveNode: false,
-    maxCoTenants: 1,
     source: 'platform' as const,
     sourceId: 'platform',
     ...overrides,
@@ -124,6 +132,51 @@ const PROFILE: PlacementProfileDefaults = {
 };
 
 describe('placement resolver parity', () => {
+  it.each([true, false])('persists direct-placement location provenance (%s)', (explicit) => {
+    const snapshot = directPlacementAuditSnapshot({ explicitVmLocation: explicit });
+    expect(snapshot.capacityPoolId).toBeNull();
+    expect(JSON.parse(snapshot.placementExplanationJson ?? '{}')).toMatchObject({
+      kind: 'direct_placement',
+      explicitVmLocation: explicit,
+    });
+  });
+
+  it('makes pack largest-first and smallest-fit cheapest among equal fits', () => {
+    const base = capacitySelection().candidates[0]!;
+    const smaller = {
+      ...base,
+      id: 'candidate-smaller',
+      providerInstanceVcpuCount: 4,
+      providerInstanceMemoryMb: 8192,
+      providerInstanceDiskGb: 80,
+    };
+    const largerExpensive = {
+      ...base,
+      id: 'candidate-larger-expensive',
+      providerInstancePriceMonthlyCents: 5000,
+      providerInstancePriceHourlyMicros: 70_000,
+    };
+    const largerCheap = {
+      ...largerExpensive,
+      id: 'candidate-larger-cheap',
+      providerInstancePriceMonthlyCents: 1000,
+      providerInstancePriceHourlyMicros: 14_000,
+    };
+
+    expect(
+      rankCapacityCandidatesForRuntime([smaller, largerCheap], {
+        strategy: 'pack',
+        reservation: reservation(),
+      }).map((candidate) => candidate.id)
+    ).toEqual(['candidate-larger-cheap', 'candidate-smaller']);
+    expect(
+      rankCapacityCandidatesForRuntime([largerExpensive, largerCheap], {
+        strategy: 'smallest-fit',
+        reservation: reservation(),
+      }).map((candidate) => candidate.id)
+    ).toEqual(['candidate-larger-cheap', 'candidate-larger-expensive']);
+  });
+
   it('matches task submit precedence and inherited parent credential attribution', () => {
     const placement = resolveTaskStartPlacement({
       entryPoint: 'task-submit',
@@ -165,7 +218,7 @@ describe('placement resolver parity', () => {
       taskMode: 'conversation',
       agentType: 'openai-codex',
       credentialLookup: {
-        userId: 'parent-attribution-user',
+        userId: 'submit-user',
         projectId: PROJECT.id,
         provider: 'scaleway',
       },
@@ -178,7 +231,7 @@ describe('placement resolver parity', () => {
     });
     expect(placement.resolvedReservation).toMatchObject({
       cpuMillis: 4000,
-      memoryMb: 16 * 1024,
+      memoryMb: DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS.small.minMemoryGb * 1024,
       source: 'task',
       sourceId: 'task-submit-1',
     });
@@ -190,7 +243,7 @@ describe('placement resolver parity', () => {
       })
     ).toEqual({
       effectiveProvider: 'scaleway',
-      credentialAttributionUserId: 'parent-attribution-user',
+      credentialAttributionUserId: 'submit-user',
       credentialAttributionProjectId: PROJECT.id,
       credentialAttributionSource: 'project',
     });
@@ -238,7 +291,7 @@ describe('placement resolver parity', () => {
       taskMode: 'task',
       agentType: 'claude-code',
       credentialLookup: {
-        userId: 'root-attribution-user',
+        userId: 'dispatching-user',
         projectId: null,
         provider: 'hetzner',
       },
@@ -248,6 +301,34 @@ describe('placement resolver parity', () => {
         isInstantRuntime: true,
         reason: 'explicit-cf-container',
       },
+    });
+  });
+
+  it('keeps skill legacy vm-size provenance independent from profile vm-size labels', () => {
+    const placement = resolveTaskStartPlacement({
+      entryPoint: 'task-submit',
+      taskId: 'task-submit-1',
+      projectId: PROJECT.id,
+      userId: 'submit-user',
+      project: PROJECT,
+      profile: {
+        ...PROFILE,
+        vmSizeOverride: 'large',
+        skillVmSizeOverride: 'large',
+        agentProfileVmSizeOverride: 'medium',
+      },
+      credentialProjectPolicy: 'current-project',
+      taskModeDefault: 'task',
+      profileVmSizeSource: 'agent-profile',
+      resourceRequirements: {},
+    });
+
+    expect(placement.vmSize).toBe('large');
+    expect(placement.vmSizeSource).toBe('skill');
+    expect(placement.resolvedReservation.source).toBe('skill');
+    expect(placement.resolvedReservation.fieldProvenance?.minVcpu).toMatchObject({
+      source: 'skill',
+      compatibility: expect.objectContaining({ legacyVmSize: 'large' }),
     });
   });
 
@@ -381,7 +462,7 @@ describe('placement resolver parity', () => {
       },
     });
     expect(placement.resolvedReservation).toMatchObject({
-      cpuMillis: 8000,
+      cpuMillis: DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS.small.minVcpu * 1000,
       diskMb: 100 * 1024,
       source: 'trigger',
       sourceId: 'trigger-1',
@@ -472,7 +553,7 @@ describe('placement resolver parity', () => {
       taskMode: 'task',
       agentType: 'openai-codex',
       credentialLookup: {
-        userId: 'child-attribution-user',
+        userId: 'parent-agent-user',
         projectId: PROJECT.id,
         provider: 'hetzner',
       },
@@ -485,7 +566,7 @@ describe('placement resolver parity', () => {
       })
     ).toEqual({
       effectiveProvider: 'hetzner',
-      credentialAttributionUserId: 'child-attribution-user',
+      credentialAttributionUserId: 'parent-agent-user',
       credentialAttributionProjectId: PROJECT.id,
       credentialAttributionSource: 'project',
     });
@@ -526,6 +607,85 @@ describe('placement resolver parity', () => {
         resourceRequirements: {},
       })
     ).toThrow(PlacementResolutionError);
+  });
+});
+
+describe('preferred (not explicit) location', () => {
+  function resolveWith(input: {
+    explicitVmLocation?: string | null;
+    preferredVmLocation?: string | null;
+    provider?: 'hetzner' | 'scaleway';
+  }) {
+    return resolveTaskStartPlacement({
+      entryPoint: 'session-recovery',
+      taskId: 'wake-task',
+      projectId: PROJECT.id,
+      userId: 'wake-user',
+      project: PROJECT,
+      explicit: {
+        provider: input.provider ?? 'hetzner',
+        vmLocation: input.explicitVmLocation ?? null,
+      },
+      preferredVmLocation: input.preferredVmLocation,
+      credentialProjectPolicy: 'current-project',
+      taskModeDefault: 'workspace-profile',
+      resourceRequirements: {},
+    });
+  }
+
+  it('becomes the resolved location without making it explicit', () => {
+    const placement = resolveWith({ preferredVmLocation: 'fsn1' });
+
+    // Outranks the project default (hel1): it is where this work last ran.
+    expect(placement.vmLocation).toBe('fsn1');
+    expect(placement.explicitVmLocation).toBe(false);
+    expect(placement.preferredVmLocation).toBe('fsn1');
+  });
+
+  it('never outranks an explicit location, and is not reported when unused', () => {
+    const placement = resolveWith({ explicitVmLocation: 'nbg1', preferredVmLocation: 'fsn1' });
+
+    expect(placement.vmLocation).toBe('nbg1');
+    expect(placement.explicitVmLocation).toBe(true);
+    expect(placement.preferredVmLocation).toBeUndefined();
+  });
+
+  it('is dropped, not rejected, when it does not fit the provider', () => {
+    // An explicit fr-par-1 on Hetzner throws (see above). Nobody asked for a preference, so a
+    // stale one must never turn into a validation error.
+    const placement = resolveWith({ preferredVmLocation: 'fr-par-1' });
+
+    expect(placement.vmLocation).toBe('hel1');
+    expect(placement.explicitVmLocation).toBe(false);
+    expect(placement.preferredVmLocation).toBeUndefined();
+  });
+
+  it('leaves ordinary starts exactly as before', () => {
+    const placement = resolveWith({});
+
+    expect(placement.vmLocation).toBe('hel1');
+    expect(placement).not.toHaveProperty('preferredVmLocation');
+  });
+});
+
+describe('preferCapacityCandidatesInLocation', () => {
+  it('moves the preferred region first and keeps the pool order within each group', () => {
+    const offerings = ['nbg1:cx23', 'fsn1:cx23', 'hel1:cx23', 'nbg1:cx33', 'hel1:cx33'].map(
+      (id) => {
+        const [location, type] = id.split(':');
+        return { id, location, providerInstanceType: type } as TaskStartCapacityCandidate;
+      }
+    );
+
+    expect(preferCapacityCandidatesInLocation(offerings, 'hel1').map((c) => c.id)).toEqual([
+      'hel1:cx23',
+      'hel1:cx33',
+      'nbg1:cx23',
+      'fsn1:cx23',
+      'nbg1:cx33',
+    ]);
+    // Nothing is dropped, including when the pool has no offering in that region.
+    expect(preferCapacityCandidatesInLocation(offerings, 'ash')).toEqual(offerings);
   });
 });
 

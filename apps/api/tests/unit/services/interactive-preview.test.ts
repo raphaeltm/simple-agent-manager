@@ -61,6 +61,20 @@ describe('interactive preview response policy', () => {
     expect(headers.get('content-security-policy')).not.toContain('allow-same-origin');
   });
 
+  it('lets the app frame previews during local development, where it runs on a loopback port', () => {
+    const headers = getInteractivePreviewHeaders({ BASE_DOMAIN: 'localhost:8787' });
+    expect(headers.get('content-security-policy')).toMatch(
+      /; frame-ancestors https:\/\/app\.localhost:8787 http:\/\/localhost:\* http:\/\/127\.0\.0\.1:\*$/
+    );
+  });
+
+  it('admits no loopback frame for a real domain that merely contains "localhost"', () => {
+    const headers = getInteractivePreviewHeaders({ BASE_DOMAIN: 'localhost-labs.example.com' });
+    expect(headers.get('content-security-policy')).toMatch(
+      /; frame-ancestors https:\/\/app\.localhost-labs\.example\.com$/
+    );
+  });
+
   it('applies the CSP sandbox and all strict headers to friendly errors', async () => {
     const response = interactivePreviewErrorResponse({ BASE_DOMAIN: 'example.com' });
     expect(response.status).toBe(403);

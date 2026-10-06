@@ -159,6 +159,20 @@ img, svg {
   max-width: 100%;
 }
 
+/* Themed screenshot pairs (see OptimizedFeatureImage.astro): show the variant
+   that matches the active site theme. */
+.shot-light {
+  display: none;
+}
+
+html[data-theme='light'] .shot-dark {
+  display: none;
+}
+
+html[data-theme='light'] .shot-light {
+  display: block;
+}
+
 a {
   color: var(--color-accent);
   text-decoration: none;
@@ -167,6 +181,14 @@ a {
 
 a:hover {
   color: var(--color-success);
+}
+
+a:focus-visible,
+button:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+  border-radius: var(--radius-sm);
 }
 
 /* --- Utilities --- */
@@ -253,4 +275,12 @@ a:hover {
 .animate-on-scroll.is-visible {
   opacity: 1;
   transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-on-scroll {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
 }

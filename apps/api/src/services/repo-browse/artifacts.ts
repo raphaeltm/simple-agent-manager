@@ -48,7 +48,11 @@ function countPatchLines(patch: string): { additions: number; deletions: number 
  * the root yields a completely empty tree. Exported so a real-git regression
  * test can exercise the recursion (the class-level tests mock `git.walk`).
  */
-export async function collectTreeEntries(fs: IsoFs, dir: string, ref: string): Promise<RepoTreeEntry[]> {
+export async function collectTreeEntries(
+  fs: IsoFs,
+  dir: string,
+  ref: string
+): Promise<RepoTreeEntry[]> {
   const entries: RepoTreeEntry[] = [];
   await git.walk({
     fs,
@@ -101,14 +105,30 @@ export async function collectCompareFiles(
       const status = !aOid ? 'added' : !bOid ? 'removed' : 'modified';
 
       if (isBinaryBytes(aBytes) || isBinaryBytes(bBytes)) {
-        files.push({ path: filepath, status, additions: 0, deletions: 0, patch: null, patchTruncated: false, isBinary: true });
+        files.push({
+          path: filepath,
+          status,
+          additions: 0,
+          deletions: 0,
+          patch: null,
+          patchTruncated: false,
+          isBinary: true,
+        });
         return undefined;
       }
       const aText = new TextDecoder().decode(aBytes);
       const bText = new TextDecoder().decode(bBytes);
       const patch = createPatch(filepath, aText, bText);
       const { additions, deletions } = countPatchLines(patch);
-      files.push({ path: filepath, status, additions, deletions, patch, patchTruncated: false, isBinary: false });
+      files.push({
+        path: filepath,
+        status,
+        additions,
+        deletions,
+        patch,
+        patchTruncated: false,
+        isBinary: false,
+      });
       return undefined;
     },
   });
@@ -146,7 +166,8 @@ export class ArtifactsRepoBrowser implements RepoBrowser {
         const binding = this.env.ARTIFACTS;
         if (!binding) throw errors.badRequest('Artifacts is not enabled on this deployment');
         const repo = await binding.get(this.repoId);
-        const ttl = parseInt(this.env.ARTIFACTS_TOKEN_TTL_SECONDS || '', 10) || DEFAULT_ARTIFACTS_TOKEN_TTL;
+        const ttl =
+          parseInt(this.env.ARTIFACTS_TOKEN_TTL_SECONDS || '', 10) || DEFAULT_ARTIFACTS_TOKEN_TTL;
         const token = await repo.createToken('read', ttl);
         const onAuth: OnAuth = () => ({ username: 'x', password: token.plaintext });
         // Prefer the stored clone URL; `get().remote` is empty on staging.
@@ -166,7 +187,17 @@ export class ArtifactsRepoBrowser implements RepoBrowser {
     const fs = new MemoryFS() as unknown as IsoFs;
     // noCheckout: we read objects via walk/readBlob, never the working tree — this
     // avoids writing a second copy of every blob into the in-memory fs.
-    await git.clone({ fs, http, dir: DIR, url: remote, ref, singleBranch: true, depth: 1, noCheckout: true, onAuth });
+    await git.clone({
+      fs,
+      http,
+      dir: DIR,
+      url: remote,
+      ref,
+      singleBranch: true,
+      depth: 1,
+      noCheckout: true,
+      onAuth,
+    });
     return fs;
   }
 
@@ -178,9 +209,7 @@ export class ArtifactsRepoBrowser implements RepoBrowser {
       prefix: 'refs/heads/',
       onAuth,
     });
-    const names = refs
-      .map((r) => r.ref.replace(/^refs\/heads\//, ''))
-      .filter((n) => n.length > 0);
+    const names = refs.map((r) => r.ref.replace(/^refs\/heads\//, '')).filter((n) => n.length > 0);
     // Default branch first, then the rest alphabetically.
     const rest = names.filter((n) => n !== this.defaultBranch).sort((a, b) => a.localeCompare(b));
     const ordered = names.includes(this.defaultBranch) ? [this.defaultBranch, ...rest] : rest;
@@ -210,7 +239,15 @@ export class ArtifactsRepoBrowser implements RepoBrowser {
     const fs = await this.cloneRef(ref);
     const bytes = await this.readFileBytes(fs, ref, path);
     const size = bytes.length;
-    const base: RepoFileContent = { ref, path, size, isBinary: false, tooLarge: false, content: null, rawUrl: null };
+    const base: RepoFileContent = {
+      ref,
+      path,
+      size,
+      isBinary: false,
+      tooLarge: false,
+      content: null,
+      rawUrl: null,
+    };
     if (size > maxInlineBytes(this.env)) return { ...base, tooLarge: true };
     if (isBinaryBytes(bytes)) return { ...base, isBinary: true };
     return { ...base, content: new TextDecoder().decode(bytes) };
@@ -225,8 +262,27 @@ export class ArtifactsRepoBrowser implements RepoBrowser {
   async compare(base: string, head: string): Promise<RepoCompareResponse> {
     const { remote, onAuth } = await this.info();
     const fs = new MemoryFS() as unknown as IsoFs;
-    await git.clone({ fs, http, dir: DIR, url: remote, ref: base, singleBranch: true, depth: 1, noCheckout: true, onAuth });
-    await git.fetch({ fs, http, dir: DIR, url: remote, ref: head, singleBranch: true, depth: 1, onAuth });
+    await git.clone({
+      fs,
+      http,
+      dir: DIR,
+      url: remote,
+      ref: base,
+      singleBranch: true,
+      depth: 1,
+      noCheckout: true,
+      onAuth,
+    });
+    await git.fetch({
+      fs,
+      http,
+      dir: DIR,
+      url: remote,
+      ref: head,
+      singleBranch: true,
+      depth: 1,
+      onAuth,
+    });
 
     const baseOid = await git.resolveRef({ fs, dir: DIR, ref: base });
     const headOid = await git

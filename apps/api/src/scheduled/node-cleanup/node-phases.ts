@@ -15,114 +15,18 @@ import { eq } from 'drizzle-orm';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
-import { stopNodeResources } from '../../services/nodes';
-import { persistError } from '../../services/observability';
+import { prepareAbsoluteLifetimeRelease } from './absolute-lifetime-preservation';
 import {
   boundedWarmPlacementClaimGuardSql,
   type CleanupConfig,
   type CleanupDb,
+  cleanupNodeProvenanceSql,
   destroyNodeForCleanup,
   getNodeWorkspaceIdleThresholdIso,
   LAST_WORKSPACE_ACTIVITY_SQL,
   markNodeCleanupBackoff,
   type NodeCleanupResult,
 } from './shared';
-
-/**
- * Phase 0 — cf-container nodes left behind after their task reached a terminal state.
- */
-export async function sweepTerminalCfContainers(
-  env: Env,
-  now: Date,
-  config: CleanupConfig,
-  result: NodeCleanupResult
-): Promise<void> {
-  const candidates = await env.DATABASE.prepare(
-    `SELECT DISTINCT n.id as node_id, n.user_id, w.id as workspace_id, t.id as task_id, t.status as task_status
-     FROM nodes n
-     INNER JOIN workspaces w ON w.node_id = n.id
-     INNER JOIN tasks t ON t.workspace_id = w.id
-     WHERE n.runtime = 'cf-container'
-       AND n.status NOT IN ('deleted', 'stopped')
-       AND n.node_role = 'workspace'
-       AND n.node_class != 'user-owned'
-       AND (n.cleanup_backoff_until IS NULL OR n.cleanup_backoff_until <= ?)
-       AND w.status IN ('running', 'creating', 'recovery', 'sleeping', 'stopped')
-       AND (
-         t.status IN ('failed', 'cancelled')
-         OR (t.status = 'completed' AND w.chat_session_id IS NULL)
-       )
-       AND NOT EXISTS (
-         SELECT 1 FROM tasks active
-         WHERE active.workspace_id = w.id
-           AND active.status IN ('queued', 'delegated', 'in_progress')
-       )
-       AND t.updated_at < ?
-     ORDER BY t.updated_at ASC
-     LIMIT ?`
-  )
-    .bind(
-      now.toISOString(),
-      new Date(now.getTime() - config.orphanGracePeriodMs).toISOString(),
-      config.cfContainerSweepLimit
-    )
-    .all<{
-      node_id: string;
-      user_id: string;
-      workspace_id: string;
-      task_id: string;
-      task_status: string;
-    }>();
-
-  for (const candidate of candidates.results) {
-    try {
-      log.warn('node_cleanup.cf_container_terminal_task_destroying', {
-        nodeId: candidate.node_id,
-        workspaceId: candidate.workspace_id,
-        taskId: candidate.task_id,
-        taskStatus: candidate.task_status,
-      });
-
-      await stopNodeResources(candidate.node_id, candidate.user_id, env);
-
-      await persistError(
-        env.OBSERVABILITY_DATABASE,
-        {
-          source: 'api',
-          level: 'warn',
-          message: 'Destroyed cf-container node left behind after terminal task',
-          context: {
-            recoveryType: 'cf_container_terminal_task_cleanup',
-            nodeId: candidate.node_id,
-            workspaceId: candidate.workspace_id,
-            taskId: candidate.task_id,
-            taskStatus: candidate.task_status,
-            gracePeriodMs: config.orphanGracePeriodMs,
-          },
-          userId: candidate.user_id,
-          nodeId: candidate.node_id,
-          workspaceId: candidate.workspace_id,
-        },
-        env
-      );
-
-      result.cfContainersDestroyed++;
-    } catch (err) {
-      await markNodeCleanupBackoff(
-        env,
-        candidate.node_id,
-        new Date(now.getTime() + config.failureBackoffMs).toISOString()
-      );
-      log.error('node_cleanup.cf_container_terminal_task_destroy_failed', {
-        nodeId: candidate.node_id,
-        workspaceId: candidate.workspace_id,
-        taskId: candidate.task_id,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      result.errors++;
-    }
-  }
-}
 
 /**
  * Phase 1 — warm nodes whose warm window has expired.
@@ -240,12 +144,12 @@ export async function sweepMaxLifetimeNodes(
   const idleThreshold = getNodeWorkspaceIdleThresholdIso(now, config);
 
   const candidates = await env.DATABASE.prepare(
-    `SELECT n.id, n.user_id, n.status, n.created_at,
+    `SELECT n.id, n.user_id, n.status, n.created_at, n.runtime_incarnation_id,
             COUNT(DISTINCT CASE WHEN w.status IN ('running', 'creating', 'recovery') THEN w.id END) as active_ws_count,
             ${LAST_WORKSPACE_ACTIVITY_SQL} as last_activity
      FROM nodes n
      LEFT JOIN workspaces w ON w.node_id = n.id
-     WHERE n.status NOT IN ('stopped', 'deleted')
+     WHERE n.status NOT IN ('stopped', 'destroying', 'deleted')
        AND n.node_role = 'workspace'
        AND n.node_class != 'user-owned'
        AND EXISTS (
@@ -256,7 +160,7 @@ export async function sweepMaxLifetimeNodes(
        ${boundedWarmPlacementClaimGuardSql('n.id')}
        AND n.created_at < ?
      GROUP BY n.id, n.user_id, n.status, n.created_at
-     ORDER BY n.created_at ASC
+     ORDER BY active_ws_count ASC, n.created_at ASC
      LIMIT ?`
   )
     .bind(now.toISOString(), idleThreshold, lifetimeThreshold, config.nodeSweepLimit)
@@ -265,6 +169,7 @@ export async function sweepMaxLifetimeNodes(
       user_id: string;
       status: string;
       created_at: string;
+      runtime_incarnation_id: string | null;
       active_ws_count: number;
       last_activity: string;
     }>();
@@ -307,6 +212,27 @@ export async function sweepMaxLifetimeNodes(
 
     const viaAbsoluteCeiling = node.active_ws_count > 0;
 
+    if (viaAbsoluteCeiling) {
+      try {
+        if (!(await prepareAbsoluteLifetimeRelease(env, node, now, config))) {
+          await markNodeCleanupBackoff(
+            env,
+            node.id,
+            new Date(now.getTime() + config.failureBackoffMs).toISOString()
+          );
+          result.lifetimeSkipped++;
+          continue;
+        }
+      } catch (error) {
+        log.error('node_cleanup.absolute_lifetime_preservation_failed', {
+          nodeId: node.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        result.errors++;
+        continue;
+      }
+    }
+
     const destroyed = await destroyNodeForCleanup(db, env, now.toISOString(), node, {
       logEvent: viaAbsoluteCeiling
         ? 'node_cleanup.destroying_absolute_max_lifetime'
@@ -321,7 +247,7 @@ export async function sweepMaxLifetimeNodes(
         : 'max_lifetime_node_cleanup',
       failureRecoveryType: 'max_lifetime_node_cleanup_failure',
       failureBackoffMs: config.failureBackoffMs,
-      allowActiveWorkspaces: viaAbsoluteCeiling,
+      allowActiveWorkspaces: false,
       requireWorkspaceIdle: viaAbsoluteCeiling,
       workspaceIdleThresholdIso: idleThreshold,
       context: {
@@ -329,6 +255,110 @@ export async function sweepMaxLifetimeNodes(
         lastWorkspaceActivity: node.last_activity,
         staleActiveWorkspaces: viaAbsoluteCeiling ? node.active_ws_count : 0,
         maxLifetimeMs: viaAbsoluteCeiling ? config.absoluteMaxLifetimeMs : config.maxLifetimeMs,
+        workspaceIdleTimeoutMs: config.workspaceIdleTimeoutMs,
+      },
+    });
+
+    if (destroyed === 'destroyed') {
+      result.lifetimeDestroyed++;
+    } else if (destroyed === 'skipped') {
+      result.lifetimeSkipped++;
+    } else {
+      result.errors++;
+    }
+  }
+}
+
+type HandoffCleanupStatus = 'stopped' | 'destroying';
+
+interface HandoffCleanupOptions {
+  status: HandoffCleanupStatus;
+  skippedActiveLogEvent: string;
+  logEvent: string;
+  failureLogEvent: string;
+  successMessage: string;
+  failureMessagePrefix: string;
+  recoveryType: string;
+  failureRecoveryType: string;
+}
+
+async function sweepManagedHandoffNodes(
+  db: CleanupDb,
+  env: Env,
+  now: Date,
+  config: CleanupConfig,
+  result: NodeCleanupResult,
+  options: HandoffCleanupOptions
+): Promise<void> {
+  const sweepDeadlineMs = Date.now() + config.stoppedHandoffSweepBudgetMs;
+  const workspaceIdleThreshold = getNodeWorkspaceIdleThresholdIso(now, config);
+  const candidates = await env.DATABASE.prepare(
+    `SELECT n.id, n.user_id, n.status, n.created_at,
+            COUNT(DISTINCT CASE WHEN w.status IN ('running', 'creating', 'recovery') THEN w.id END) as active_ws_count,
+            ${LAST_WORKSPACE_ACTIVITY_SQL} as last_activity
+     FROM nodes n
+     LEFT JOIN workspaces w ON w.node_id = n.id
+     WHERE n.status = ?
+       AND n.node_role = 'workspace'
+       AND n.node_class != 'user-owned'
+       AND ${cleanupNodeProvenanceSql('n')}
+       AND (n.cleanup_backoff_until IS NULL OR n.cleanup_backoff_until <= ?)
+       AND NOT EXISTS (
+         SELECT 1 FROM workspaces active_workspace
+         WHERE active_workspace.node_id = n.id
+           AND active_workspace.status IN ('running', 'creating', 'recovery')
+       )
+       ${boundedWarmPlacementClaimGuardSql('n.id')}
+     GROUP BY n.id, n.user_id, n.status, n.created_at
+     HAVING ${LAST_WORKSPACE_ACTIVITY_SQL} < ?
+     ORDER BY last_activity ASC
+     LIMIT ?`
+  )
+    .bind(
+      options.status,
+      now.toISOString(),
+      workspaceIdleThreshold,
+      workspaceIdleThreshold,
+      config.nodeSweepLimit
+    )
+    .all<{
+      id: string;
+      user_id: string;
+      status: string;
+      created_at: string;
+      active_ws_count: number;
+      last_activity: string;
+    }>();
+
+  for (const node of candidates.results) {
+    if (Date.now() >= sweepDeadlineMs) break;
+    if (node.active_ws_count > 0) {
+      log.warn(options.skippedActiveLogEvent, {
+        nodeId: node.id,
+        userId: node.user_id,
+        activeWorkspaces: node.active_ws_count,
+        lastWorkspaceActivity: node.last_activity,
+      });
+      result.lifetimeSkipped++;
+      continue;
+    }
+
+    const destroyed = await destroyNodeForCleanup(db, env, now.toISOString(), node, {
+      logEvent: options.logEvent,
+      requestDeadlineMs: Math.min(
+        sweepDeadlineMs,
+        Date.now() + config.stoppedHandoffRequestTimeoutMs
+      ),
+      failureLogEvent: options.failureLogEvent,
+      successMessage: options.successMessage,
+      failureMessagePrefix: options.failureMessagePrefix,
+      recoveryType: options.recoveryType,
+      failureRecoveryType: options.failureRecoveryType,
+      failureBackoffMs: config.failureBackoffMs,
+      workspaceIdleThresholdIso: workspaceIdleThreshold,
+      context: {
+        createdAt: node.created_at,
+        lastWorkspaceActivity: node.last_activity,
         workspaceIdleTimeoutMs: config.workspaceIdleTimeoutMs,
       },
     });
@@ -356,73 +386,43 @@ export async function sweepStoppedHandoffNodes(
   config: CleanupConfig,
   result: NodeCleanupResult
 ): Promise<void> {
-  const workspaceIdleThreshold = getNodeWorkspaceIdleThresholdIso(now, config);
-  const candidates = await env.DATABASE.prepare(
-    `SELECT n.id, n.user_id, n.status, n.created_at,
-            COUNT(DISTINCT CASE WHEN w.status IN ('running', 'creating', 'recovery') THEN w.id END) as active_ws_count,
-            ${LAST_WORKSPACE_ACTIVITY_SQL} as last_activity
-     FROM nodes n
-     LEFT JOIN workspaces w ON w.node_id = n.id
-     WHERE n.status = 'stopped'
-       AND n.node_role = 'workspace'
-       AND n.node_class != 'user-owned'
-       AND EXISTS (
-         SELECT 1 FROM tasks t
-         WHERE t.auto_provisioned_node_id = n.id
-       )
-       AND (n.cleanup_backoff_until IS NULL OR n.cleanup_backoff_until <= ?)
-       ${boundedWarmPlacementClaimGuardSql('n.id')}
-     GROUP BY n.id, n.user_id, n.status, n.created_at
-     HAVING ${LAST_WORKSPACE_ACTIVITY_SQL} < ?
-     ORDER BY last_activity ASC
-     LIMIT ?`
-  )
-    .bind(now.toISOString(), workspaceIdleThreshold, workspaceIdleThreshold, config.nodeSweepLimit)
-    .all<{
-      id: string;
-      user_id: string;
-      status: string;
-      created_at: string;
-      active_ws_count: number;
-      last_activity: string;
-    }>();
+  await sweepManagedHandoffNodes(db, env, now, config, result, {
+    status: 'stopped',
+    skippedActiveLogEvent: 'node_cleanup.stopped_handoff_skipped_active_workspaces',
+    logEvent: 'node_cleanup.destroying_stopped_handoff',
+    failureLogEvent: 'node_cleanup.stopped_handoff_destroy_failed',
+    successMessage: 'Destroyed stopped managed node left by NodeLifecycle alarm',
+    failureMessagePrefix: 'Failed to destroy stopped handoff node',
+    recoveryType: 'stopped_node_handoff_cleanup',
+    failureRecoveryType: 'stopped_node_handoff_cleanup_failure',
+  });
+}
 
-  for (const node of candidates.results) {
-    if (node.active_ws_count > 0) {
-      log.warn('node_cleanup.stopped_handoff_skipped_active_workspaces', {
-        nodeId: node.id,
-        userId: node.user_id,
-        activeWorkspaces: node.active_ws_count,
-        lastWorkspaceActivity: node.last_activity,
-      });
-      result.lifetimeSkipped++;
-      continue;
-    }
-
-    const destroyed = await destroyNodeForCleanup(db, env, now.toISOString(), node, {
-      logEvent: 'node_cleanup.destroying_stopped_handoff',
-      failureLogEvent: 'node_cleanup.stopped_handoff_destroy_failed',
-      successMessage: 'Destroyed stopped auto-provisioned node left by NodeLifecycle alarm',
-      failureMessagePrefix: 'Failed to destroy stopped handoff node',
-      recoveryType: 'stopped_node_handoff_cleanup',
-      failureRecoveryType: 'stopped_node_handoff_cleanup_failure',
-      failureBackoffMs: config.failureBackoffMs,
-      workspaceIdleThresholdIso: workspaceIdleThreshold,
-      context: {
-        createdAt: node.created_at,
-        lastWorkspaceActivity: node.last_activity,
-        workspaceIdleTimeoutMs: config.workspaceIdleTimeoutMs,
-      },
-    });
-
-    if (destroyed === 'destroyed') {
-      result.lifetimeDestroyed++;
-    } else if (destroyed === 'skipped') {
-      result.lifetimeSkipped++;
-    } else {
-      result.errors++;
-    }
-  }
+/**
+ * Phase 3b — stale nodes already claimed for destruction.
+ *
+ * A provider allocation can fail after SAM has claimed the node as `destroying`
+ * but before any provider instance ID is written. In that state there is no
+ * provider-side VM to delete, and the hourly sweep must be able to write the
+ * same terminal runtime proof the rest of cleanup requires.
+ */
+export async function sweepDestroyingHandoffNodes(
+  db: CleanupDb,
+  env: Env,
+  now: Date,
+  config: CleanupConfig,
+  result: NodeCleanupResult
+): Promise<void> {
+  await sweepManagedHandoffNodes(db, env, now, config, result, {
+    status: 'destroying',
+    skippedActiveLogEvent: 'node_cleanup.destroying_handoff_skipped_active_workspaces',
+    logEvent: 'node_cleanup.destroying_stale_handoff',
+    failureLogEvent: 'node_cleanup.destroying_handoff_destroy_failed',
+    successMessage: 'Destroyed managed node left in destroying handoff',
+    failureMessagePrefix: 'Failed to destroy stale destroying handoff node',
+    recoveryType: 'destroying_node_handoff_cleanup',
+    failureRecoveryType: 'destroying_node_handoff_cleanup_failure',
+  });
 }
 
 /**

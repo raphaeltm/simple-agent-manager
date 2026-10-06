@@ -28,7 +28,10 @@ export type CommentInboxSource =
       sessionTopic: string;
       /** Jump target inside the conversation. */
       messageId: string;
-      /** Role of the annotated message, so the row can say "on SAM's reply". */
+      /**
+       * Role of the annotated message, so the row can say "on SAM's reply". Null or
+       * absent when the message is not loaded and its author is unknown.
+       */
       messageRole?: 'user' | 'assistant' | null;
     }
   | {

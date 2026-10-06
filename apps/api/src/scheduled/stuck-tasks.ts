@@ -30,7 +30,7 @@ import {
   DEFAULT_TASK_LIVENESS_MAX_ACP_SESSIONS,
   DEFAULT_TASK_LIVENESS_PROBE_TIMEOUT_MS,
   DEFAULT_TASK_RUN_ABSOLUTE_CEILING_MS,
-  DEFAULT_TASK_RUN_HARD_TIMEOUT_MS,
+  DEFAULT_TASK_RUN_ABSOLUTE_CEILING_SLEEP_GRACE_MS,
   DEFAULT_TASK_RUN_MAX_EXECUTION_MS,
   DEFAULT_TASK_STUCK_DELEGATED_TIMEOUT_MS,
   DEFAULT_TASK_STUCK_QUEUED_TIMEOUT_MS,
@@ -42,11 +42,14 @@ const DEFAULT_INSTANT_START_STALE_TIMEOUT_MS = 10 * 60 * 1000;
 import type { TaskRunner } from '../durable-objects/task-runner';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { parsePositiveInt } from '../lib/route-helpers';
 import { maybeJsonRecord } from '../lib/runtime-validation';
 import { persistError } from '../services/observability';
 import * as projectDataService from '../services/project-data';
-import { DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS } from '../services/session-snapshot-artifacts';
+import {
+  sessionRecoveryAttemptDecayMs,
+  sessionRecoveryMaxAttempts,
+} from '../services/session-snapshot-recovery-budget';
+import { sessionSleepInFlightMaxAgeMs } from '../services/session-snapshot-sleep-predicate';
 import { cleanupTaskRun } from '../services/task-runner';
 import {
   classifyTaskRuntimeLiveness,
@@ -55,6 +58,7 @@ import {
   loadRuntimeWorkspaceSnapshot,
   loadSessionResumabilitySnapshot,
   loadTaskSupersession,
+  needsDeferredSessionSleepProbe,
   needsNodeHealthProbe,
   needsSessionResumabilityProbe,
   needsTaskSupersessionProbe,
@@ -62,8 +66,12 @@ import {
   type RuntimeAcpSessionSnapshot,
   type TaskRuntimeLiveness,
   type TaskRuntimeLivenessSignals,
-  type TaskSupersession,
 } from '../services/task-runtime-liveness';
+import {
+  loadTaskSleepPreservation,
+  withholdTerminalVerdictForSleepingSession,
+} from '../services/task-sleep-preservation';
+import { cleanupTerminalTaskResources } from '../services/task-terminal-cleanup';
 import { transitionTaskToTerminal } from '../services/task-terminal-transition';
 import {
   getVmAdmissionDiagnostics,
@@ -74,6 +82,9 @@ import {
   type CompactionLoopRecovery,
   detectTaskCompactionLoop,
 } from './claude-code-compaction-loop';
+import { classifyLongRunningTaskStall } from './stalled-task-classifier';
+import { evaluateRunawayCostCeiling, runawayCostCeilingReason } from './stuck-task-ceiling';
+import { recordLiveRuntimePreservation } from './stuck-task-live-runtime';
 
 /**
  * Recorded instead of a runtime-death message when a task ended because its
@@ -154,6 +165,7 @@ export interface StuckTaskCandidate {
   workspace_id: string | null;
   auto_provisioned_node_id: string | null;
   chat_session_id: string | null;
+  task_mode: string | null;
 }
 
 export interface StuckTaskScanCursor {
@@ -275,7 +287,7 @@ function parseStuckTaskScanCursor(raw: string | null): StuckTaskScanCursor | nul
 }
 
 const STUCK_TASK_CANDIDATE_COLUMNS = `id, project_id, user_id, status, execution_step, updated_at, started_at,
-       workspace_id, auto_provisioned_node_id, chat_session_id`;
+       workspace_id, auto_provisioned_node_id, chat_session_id, task_mode`;
 
 /**
  * Select one bounded, fair page of active tasks. A KV cursor prevents old live
@@ -456,47 +468,91 @@ export async function probeTaskRunnerStatus(
 }
 
 /** Prove task-scoped liveness. A shared-node heartbeat is never sufficient. */
+/**
+ * Public entry point. Classifies once, and if the verdict is a conclusive death
+ * reached WITHOUT the task-scoped sleep signal — the `node_not_live`,
+ * `cf_container_<terminal>` and `task_acp_session_terminal` paths, all reachable
+ * while `workspaces.status` still reads `running` — pays for one indexed
+ * `session_snapshots` lookup and re-classifies. Same classify → probe →
+ * re-classify shape as the node-health probe, and the same reason: the read is
+ * only worth its cost for a candidate about to be terminalized
+ * (`.claude/rules/47`, `.claude/rules/58` requirement 6).
+ */
 export async function getTaskRuntimeLiveness(
   env: Env,
-  task: { id: string; project_id: string; workspace_id: string | null }
-): Promise<TaskRuntimeLiveness> {
-  const probeTimeoutMs = parseMs(
-    env.TASK_LIVENESS_PROBE_TIMEOUT_MS,
-    DEFAULT_TASK_LIVENESS_PROBE_TIMEOUT_MS
-  );
-  const staleSeconds =
-    parseInt(env.NODE_HEARTBEAT_STALE_SECONDS || '', 10) || DEFAULT_NODE_HEARTBEAT_STALE_SECONDS;
-  let workspace: Awaited<ReturnType<typeof loadRuntimeWorkspaceSnapshot>> = null;
-  let workspaceProbeOutcome: TaskRuntimeLivenessSignals['workspaceProbeOutcome'] = 'ok';
-  if (task.workspace_id) {
-    try {
-      workspace = await loadRuntimeWorkspaceSnapshot(
-        env.DATABASE,
-        task.project_id,
-        task.workspace_id
-      );
-    } catch (err) {
-      workspaceProbeOutcome = 'error';
-      log.warn('stuck_task.workspace_liveness_query_failed', {
-        workspaceId: task.workspace_id,
-        projectId: task.project_id,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+  task: {
+    id: string;
+    project_id: string;
+    workspace_id: string | null;
+    chat_session_id?: string | null;
+  },
+  preloaded?: {
+    snapshot: Awaited<ReturnType<typeof loadRuntimeWorkspaceSnapshot>>;
+    outcome: TaskRuntimeLivenessSignals['workspaceProbeOutcome'];
   }
+): Promise<TaskRuntimeLiveness> {
+  const { liveness, signals } = await classifyTaskRuntime(env, task, preloaded);
+  if (!needsDeferredSessionSleepProbe(liveness, signals)) return liveness;
 
-  // Only probed for a workspace that would otherwise be declared conclusively
-  // dead, so the sweep pays one extra point lookup only when it is about to
-  // terminalize a task (`.claude/rules/47`).
-  const nowMs = Date.now();
-  const maxRecoveryAttempts = parsePositiveInt(
-    env.SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS,
-    DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS
-  );
+  const preservation = await loadTaskSleepPreservation(env.DATABASE, env, {
+    id: task.id,
+    projectId: task.project_id,
+    chatSessionId: task.chat_session_id ?? null,
+  });
+  if (preservation.outcome === 'not_run' || preservation.outcome === 'none') return liveness;
+  log.info('stuck_task.preserved_sleeping', {
+    taskId: task.id,
+    projectId: task.project_id,
+    chatSessionId: task.chat_session_id ?? null,
+    workspaceId: task.workspace_id,
+    livenessReason: liveness.reason,
+    sleepStatus: preservation.sleepStatus,
+    expiresAt: preservation.expiresAt,
+    source: 'deferred_liveness',
+    outcome: preservation.outcome,
+    action: 'preserved',
+  });
+  return classifyTaskRuntimeLiveness({ ...signals, taskSessionSleep: preservation.outcome });
+}
+
+/**
+ * The recoverability-probe stage of task-runtime classification.
+ *
+ * All three probes share one gate — "this candidate would otherwise be declared
+ * conclusively dead" — so the sweep pays these extra point lookups only when it
+ * is about to terminalize a task (`.claude/rules/47`). Extracted from
+ * `classifyTaskRuntime` to keep that function a readable sequencer.
+ */
+async function probeRecoverabilitySignals(
+  env: Env,
+  task: {
+    id: string;
+    project_id: string;
+    workspace_id: string | null;
+    chat_session_id?: string | null;
+  },
+  workspace: Awaited<ReturnType<typeof loadRuntimeWorkspaceSnapshot>>,
+  workspaceProbeOutcome: TaskRuntimeLivenessSignals['workspaceProbeOutcome'],
+  nowMs: number
+): Promise<
+  Pick<
+    TaskRuntimeLivenessSignals,
+    | 'resumabilityProbeOutcome'
+    | 'sessionResumability'
+    | 'resumabilityMaxRecoveryAttempts'
+    | 'resumabilityRecoveryAttemptDecayMs'
+    | 'taskSessionSleep'
+    | 'supersessionProbeOutcome'
+    | 'supersession'
+  >
+> {
+  const maxRecoveryAttempts = sessionRecoveryMaxAttempts(env);
+  const recoveryAttemptDecayMs = sessionRecoveryAttemptDecayMs(env);
   let resumabilityProbeOutcome: TaskRuntimeLivenessSignals['resumabilityProbeOutcome'] = 'not_run';
   let sessionResumability: TaskRuntimeLivenessSignals['sessionResumability'] = null;
   /** True when resumability alone already yields an inconclusive verdict. */
   let resumabilityResolvedInconclusive = false;
+
   if (needsSessionResumabilityProbe(workspace, workspaceProbeOutcome)) {
     try {
       sessionResumability = await loadSessionResumabilitySnapshot(
@@ -510,8 +566,7 @@ export async function getTaskRuntimeLiveness(
         sessionResumability,
         task.project_id,
         workspace.id,
-        maxRecoveryAttempts,
-        nowMs
+        { maxRecoveryAttempts, recoveryAttemptDecayMs, nowMs }
       );
     } catch (err) {
       resumabilityProbeOutcome = 'error';
@@ -525,13 +580,46 @@ export async function getTaskRuntimeLiveness(
     }
   }
 
-  // Tighter hot-path gate than the resumability probe (`.claude/rules/47`): skipped
-  // entirely when the snapshot already proved the session resumable, because the
-  // classifier returns `_snapshot_resumable` before it ever consults supersession.
+  // Task-scoped sleep guard. Gated on the same "about to be declared dead"
+  // condition, but deliberately NOT on `workspace.chatSessionId` — the shapes
+  // this exists to catch are exactly the ones where that column is null or the
+  // workspace row is absent.
+  let taskSessionSleep: TaskRuntimeLivenessSignals['taskSessionSleep'] = 'not_run';
+  if (
+    !resumabilityResolvedInconclusive &&
+    needsTaskSupersessionProbe(workspace, workspaceProbeOutcome)
+  ) {
+    const preservation = await loadTaskSleepPreservation(env.DATABASE, env, {
+      id: task.id,
+      projectId: task.project_id,
+      chatSessionId: task.chat_session_id ?? null,
+    });
+    taskSessionSleep = preservation.outcome;
+    if (preservation.outcome === 'preserve') {
+      log.info('stuck_task.preserved_sleeping', {
+        taskId: task.id,
+        projectId: task.project_id,
+        chatSessionId: task.chat_session_id ?? null,
+        workspaceId: task.workspace_id,
+        workspaceStatus: workspace?.status ?? null,
+        sleepStatus: preservation.sleepStatus,
+        expiresAt: preservation.expiresAt,
+        source: 'liveness',
+        action: 'preserved',
+      });
+    }
+  }
+
+  // Tighter hot-path gate still (`.claude/rules/47`): skipped entirely once the
+  // snapshot or the sleep record already resolved the verdict, because the
+  // classifier returns those more specific reasons before it ever consults
+  // supersession.
   let supersessionProbeOutcome: TaskRuntimeLivenessSignals['supersessionProbeOutcome'] = 'not_run';
   let supersession: TaskRuntimeLivenessSignals['supersession'] = 'none';
   if (
     !resumabilityResolvedInconclusive &&
+    taskSessionSleep !== 'preserve' &&
+    taskSessionSleep !== 'unknown' &&
     needsTaskSupersessionProbe(workspace, workspaceProbeOutcome)
   ) {
     try {
@@ -548,13 +636,88 @@ export async function getTaskRuntimeLiveness(
     }
   }
 
+  return {
+    resumabilityProbeOutcome,
+    sessionResumability,
+    resumabilityMaxRecoveryAttempts: maxRecoveryAttempts,
+    resumabilityRecoveryAttemptDecayMs: recoveryAttemptDecayMs,
+    taskSessionSleep,
+    supersessionProbeOutcome,
+    supersession,
+  };
+}
+
+async function classifyTaskRuntime(
+  env: Env,
+  task: {
+    id: string;
+    project_id: string;
+    workspace_id: string | null;
+    /**
+     * The task's own canonical chat session. Required for the task-scoped sleep
+     * guard, which must NOT key off the workspace row — a slept conversation may
+     * have no workspace row at all (`.claude/rules/58`).
+     */
+    chat_session_id?: string | null;
+  },
+  /**
+   * A workspace snapshot the caller already read for this same task, reused to
+   * avoid a second identical point lookup (`.claude/rules/47`). The ceiling gate
+   * reads it first on the over-soft-timeout path.
+   */
+  preloaded?: {
+    snapshot: Awaited<ReturnType<typeof loadRuntimeWorkspaceSnapshot>>;
+    outcome: TaskRuntimeLivenessSignals['workspaceProbeOutcome'];
+  }
+): Promise<{ liveness: TaskRuntimeLiveness; signals: TaskRuntimeLivenessSignals }> {
+  /** Pair every verdict with the signals that produced it, for the deferred re-probe. */
+  const finish = (signals: TaskRuntimeLivenessSignals) => ({
+    liveness: classifyTaskRuntimeLiveness(signals),
+    signals,
+  });
+  const probeTimeoutMs = parseMs(
+    env.TASK_LIVENESS_PROBE_TIMEOUT_MS,
+    DEFAULT_TASK_LIVENESS_PROBE_TIMEOUT_MS
+  );
+  const staleSeconds =
+    parseInt(env.NODE_HEARTBEAT_STALE_SECONDS || '', 10) || DEFAULT_NODE_HEARTBEAT_STALE_SECONDS;
+  let workspace: Awaited<ReturnType<typeof loadRuntimeWorkspaceSnapshot>> = null;
+  let workspaceProbeOutcome: TaskRuntimeLivenessSignals['workspaceProbeOutcome'] = 'ok';
+  if (preloaded) {
+    workspace = preloaded.snapshot;
+    workspaceProbeOutcome = preloaded.outcome;
+  } else if (task.workspace_id) {
+    try {
+      workspace = await loadRuntimeWorkspaceSnapshot(
+        env.DATABASE,
+        task.project_id,
+        task.workspace_id
+      );
+    } catch (err) {
+      workspaceProbeOutcome = 'error';
+      log.warn('stuck_task.workspace_liveness_query_failed', {
+        workspaceId: task.workspace_id,
+        projectId: task.project_id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  const nowMs = Date.now();
+  const recoverability = await probeRecoverabilitySignals(
+    env,
+    task,
+    workspace,
+    workspaceProbeOutcome,
+    nowMs
+  );
+
   let livenessSignals: TaskRuntimeLivenessSignals = {
     projectId: task.project_id,
     taskWorkspaceId: task.workspace_id,
     workspace,
     workspaceProbeOutcome,
-    supersessionProbeOutcome,
-    supersession,
+    ...recoverability,
     nowMs,
     heartbeatStaleMs: staleSeconds * 1000,
     acpProbeOutcome: 'not_run',
@@ -563,9 +726,6 @@ export async function getTaskRuntimeLiveness(
     sessionWork: null,
     containerProbeOutcome: 'not_run',
     containerLifecycle: null,
-    resumabilityProbeOutcome,
-    sessionResumability,
-    resumabilityMaxRecoveryAttempts: maxRecoveryAttempts,
   };
   let initialClassification = classifyTaskRuntimeLiveness(livenessSignals);
   if (needsNodeHealthProbe(livenessSignals) && livenessSignals.workspace?.nodeId) {
@@ -587,7 +747,7 @@ export async function getTaskRuntimeLiveness(
     };
     initialClassification = classifyTaskRuntimeLiveness(livenessSignals);
     if (probe.outcome !== 'ok') {
-      return initialClassification;
+      return { liveness: initialClassification, signals: livenessSignals };
     }
   }
   if (
@@ -597,7 +757,7 @@ export async function getTaskRuntimeLiveness(
     !workspace.nodeId ||
     (workspace.nodeRuntime !== 'cf-container' && initialClassification.conclusive)
   ) {
-    return initialClassification;
+    return { liveness: initialClassification, signals: livenessSignals };
   }
 
   if (workspace.nodeRuntime === 'cf-container') {
@@ -611,12 +771,12 @@ export async function getTaskRuntimeLiveness(
         }),
       ]);
       if (probe === TIMEOUT) {
-        return classifyTaskRuntimeLiveness({
+        return finish({
           ...livenessSignals,
           containerProbeOutcome: 'timeout',
         });
       }
-      return classifyTaskRuntimeLiveness({
+      return finish({
         ...livenessSignals,
         containerProbeOutcome: 'ok',
         containerLifecycle: probe,
@@ -627,7 +787,7 @@ export async function getTaskRuntimeLiveness(
         nodeId: workspace.nodeId,
         error: err instanceof Error ? err.message : String(err),
       });
-      return classifyTaskRuntimeLiveness({
+      return finish({
         ...livenessSignals,
         containerProbeOutcome: 'error',
       });
@@ -662,23 +822,24 @@ export async function getTaskRuntimeLiveness(
         workspaceId: task.workspace_id,
         probeTimeoutMs,
       });
-      return classifyTaskRuntimeLiveness({
+      return finish({
         ...livenessSignals,
         acpProbeOutcome: 'timeout',
       });
     }
-    return classifyTaskRuntimeLiveness({
+    return finish({
       ...livenessSignals,
       acpProbeOutcome: 'ok',
       acpSessions: probe.sessions as RuntimeAcpSessionSnapshot[],
       sessionWork: probe.sessionWork,
+      workEvidence: probe.workEvidence,
     });
   } catch (err) {
     log.warn('stuck_task.liveness_probe_failed', {
       workspaceId: task.workspace_id,
       error: err instanceof Error ? err.message : String(err),
     });
-    return classifyTaskRuntimeLiveness({
+    return finish({
       ...livenessSignals,
       acpProbeOutcome: 'error',
     });
@@ -695,7 +856,8 @@ export async function getTaskReconciliationDiagnostics(
   taskId: string
 ): Promise<TaskReconciliationDiagnostics | null> {
   const task = await env.DATABASE.prepare(
-    `SELECT id, project_id, status, execution_step, started_at, updated_at, workspace_id
+    `SELECT id, project_id, status, execution_step, started_at, updated_at, workspace_id,
+            chat_session_id
      FROM tasks
      WHERE id = ?
      LIMIT 1`
@@ -709,6 +871,10 @@ export async function getTaskReconciliationDiagnostics(
       started_at: string | null;
       updated_at: string;
       workspace_id: string | null;
+      // Without this the read-only diagnostics endpoint reports a conclusive-death
+      // verdict for a sleeping conversation the real sweep preserves — the sleep
+      // guard is keyed on the task's canonical chat session.
+      chat_session_id: string | null;
     }>();
 
   if (!task) return null;
@@ -947,10 +1113,13 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
     DEFAULT_INSTANT_START_STALE_TIMEOUT_MS
   );
   const maxExecutionMs = parseMs(env.TASK_RUN_MAX_EXECUTION_MS, DEFAULT_TASK_RUN_MAX_EXECUTION_MS);
-  const hardTimeoutMs = parseMs(env.TASK_RUN_HARD_TIMEOUT_MS, DEFAULT_TASK_RUN_HARD_TIMEOUT_MS);
   const absoluteCeilingMs = parseMs(
     env.TASK_RUN_ABSOLUTE_CEILING_MS,
     DEFAULT_TASK_RUN_ABSOLUTE_CEILING_MS
+  );
+  const ceilingSleepGraceMs = parseMs(
+    env.TASK_RUN_ABSOLUTE_CEILING_SLEEP_GRACE_MS,
+    DEFAULT_TASK_RUN_ABSOLUTE_CEILING_SLEEP_GRACE_MS
   );
   const mismatchGraceMs = parseMs(env.TASK_DO_MISMATCH_GRACE_MS, DEFAULT_TASK_DO_MISMATCH_GRACE_MS);
   const maxCandidates = parseMs(
@@ -958,19 +1127,22 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
     DEFAULT_STUCK_TASK_MAX_CANDIDATES_PER_SWEEP
   );
 
-  if (hardTimeoutMs <= maxExecutionMs) {
-    log.warn('stuck_task.misconfigured_hard_timeout', {
-      hardTimeoutMs,
+  if (absoluteCeilingMs <= maxExecutionMs) {
+    log.warn('stuck_task.misconfigured_absolute_ceiling', {
+      absoluteCeilingMs,
       maxExecutionMs,
       message:
-        'TASK_RUN_HARD_TIMEOUT_MS is <= TASK_RUN_MAX_EXECUTION_MS — heartbeat grace window is effectively zero',
+        'TASK_RUN_ABSOLUTE_CEILING_MS is <= TASK_RUN_MAX_EXECUTION_MS: live runtimes get no grace past the recovery check',
     });
   }
 
-  if (absoluteCeilingMs <= hardTimeoutMs) {
-    log.warn('stuck_task.misconfigured_absolute_ceiling', {
-      absoluteCeilingMs,
-      hardTimeoutMs,
+  const inFlightSleepMaxAgeMs = sessionSleepInFlightMaxAgeMs(env);
+  if (ceilingSleepGraceMs < inFlightSleepMaxAgeMs) {
+    log.warn('stuck_task.misconfigured_ceiling_sleep_grace', {
+      ceilingSleepGraceMs,
+      inFlightSleepMaxAgeMs,
+      message:
+        'TASK_RUN_ABSOLUTE_CEILING_SLEEP_GRACE_MS is shorter than one sleep episode: the ceiling can stop a capture that would finish',
     });
   }
 
@@ -989,6 +1161,8 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
     let deadRuntimeRecovery = false;
     /** Benign supersession termination — recorded as `cancelled`, never `failed`. */
     let supersededTermination = false;
+    /** The ceiling outlasted an in-flight sleep; the terminal gate must not re-defer to it. */
+    let ceilingOutlastedInFlightSleep = false;
     /**
      * The ONE place a conclusive verdict becomes a terminal reason. Every branch
      * that can terminalize a task routes through here, so a supersession can
@@ -1072,10 +1246,28 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
     // Compute task-scoped liveness at most once per candidate: both the
     // in_progress timeout gate and the DO-completed mismatch gate below may need
     // it, and each probe is a bounded ProjectData DO call (rule 47 — I/O budget).
+    //
+    // `preloadedWorkspace` is populated by the ceiling gate, which reads the same
+    // workspace row to decide whether a runtime generation is even allocated. The
+    // probe reuses it instead of issuing a second identical point lookup.
+    let preloadedWorkspace: Parameters<typeof getTaskRuntimeLiveness>[2] = undefined;
     let cachedLiveness: TaskRuntimeLiveness | null = null;
     const probeLiveness = async (): Promise<TaskRuntimeLiveness> => {
-      cachedLiveness ??= await getTaskRuntimeLiveness(env, task);
+      cachedLiveness ??= await getTaskRuntimeLiveness(env, task, preloadedWorkspace);
       return cachedLiveness;
+    };
+    let cachedStall: Awaited<ReturnType<typeof classifyLongRunningTaskStall>> | undefined;
+    const probeStall = async (
+      liveness: TaskRuntimeLiveness
+    ): Promise<Awaited<ReturnType<typeof classifyLongRunningTaskStall>>> => {
+      if (cachedStall === undefined) {
+        cachedStall = await classifyLongRunningTaskStall(env, {
+          task,
+          liveness,
+          nowMs: now.getTime(),
+        });
+      }
+      return cachedStall;
     };
     let cachedTaskRunnerProbe: TaskRunnerProbeResult | null = null;
     const probeTaskRunner = async (): Promise<TaskRunnerProbeResult> => {
@@ -1120,110 +1312,83 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
           const startedAt = task.started_at ? new Date(task.started_at).getTime() : updatedAt;
           const executionMs = now.getTime() - startedAt;
           if (executionMs > maxExecutionMs) {
-            if (executionMs > absoluteCeilingMs) {
-              // The ceiling is a cost backstop: it still terminalizes unconditionally
-              // and deliberately does NOT pay for a full liveness probe (no ACP /
-              // container round-trips — a property pinned by
-              // stuck-tasks.test.ts "without probing liveness"). But a superseded
-              // predecessor holds no compute at all, so it must not be recorded as a
-              // runaway failure. One cheap indexed lookup, reached only by 24h+ tasks,
-              // buys the correct label without reintroducing the expensive probe.
-              let ceilingSupersession: TaskSupersession | 'unknown' = 'none';
-              try {
-                ceilingSupersession = await loadTaskSupersession(
-                  env.DATABASE,
-                  task.project_id,
-                  task.id
-                );
-              } catch (err) {
-                log.warn('stuck_task.ceiling_supersession_query_failed', {
-                  taskId: task.id,
-                  projectId: task.project_id,
-                  action: 'withheld_terminal_verdict',
-                  error: err instanceof Error ? err.message : String(err),
-                });
-                ceilingSupersession = 'unknown';
+            const ceiling = await evaluateRunawayCostCeiling(
+              env,
+              {
+                id: task.id,
+                project_id: task.project_id,
+                workspace_id: task.workspace_id,
+                chat_session_id: task.chat_session_id,
+                startedAtMs: startedAt,
+              },
+              {
+                nowMs: now.getTime(),
+                absoluteCeilingMs,
+                sleepGraceMs: ceilingSleepGraceMs,
+                // Hand the workspace snapshot to the liveness probe so the
+                // fall-through path does not repeat the same point lookup
+                // (`.claude/rules/47`).
+                preloadWorkspace: (snapshot, outcome) => {
+                  preloadedWorkspace = { snapshot, outcome };
+                },
               }
-              if (ceilingSupersession === 'unknown') {
-                log.info('stuck_task.ceiling_preserved_supersession_unknown', {
-                  taskId: task.id,
-                  projectId: task.project_id,
-                  executionMs,
-                  action: 'preserved',
-                });
-                break;
-              }
-              if (ceilingSupersession === 'live') {
-                // Preserve, do NOT terminalize. A superseded predecessor holds no
-                // compute at all — its workspace is already deleted — so the cost
-                // ceiling has nothing to bound here. Worse, `cancelled` is a member
-                // of TERMINAL_TASK_STATUSES, so terminalizing would revoke the
-                // recovery guard its LIVE successor still depends on, and
-                // `abortRevokedSourceTaskWake` turns that into stopping a running
-                // container. `'live'` is inconclusive everywhere else in the system
-                // and must be inconclusive here too.
-                // Bounded escape (`.claude/rules/47`): once the successor ends this
-                // reads `'terminal'` on the next tick and the task is cancelled.
-                log.info('stuck_task.ceiling_preserved_superseded', {
-                  taskId: task.id,
-                  projectId: task.project_id,
-                  executionMs,
-                  action: 'preserved',
-                });
-                break;
-              }
+            );
+            if (ceiling.kind === 'preserve') break;
+            if (ceiling.kind === 'terminalize') {
               isStuck = true;
-              if (ceilingSupersession === 'terminal') {
+              if (ceiling.superseded) {
                 supersededTermination = true;
                 reason = SUPERSEDED_TERMINATION_MESSAGE;
               } else {
-                reason = `Task exceeded the absolute runaway-cost ceiling of ${Math.round(absoluteCeilingMs / 60000)} minutes; live-runtime tasks are bounded to prevent unbounded compute.${stepInfo}`;
+                ceilingOutlastedInFlightSleep = ceiling.inFlightSleepGraceExpired !== null;
+                reason = runawayCostCeilingReason(ceiling, absoluteCeilingMs, stepInfo);
               }
               break;
             }
+            // `not_applicable` falls through to the liveness branch below, which
+            // is the correct owner of a task whose runtime generation has already
+            // been released: it terminalizes a genuinely dead runtime and
+            // preserves a restorable one.
             const liveness = await probeLiveness();
             if (liveness.live || !liveness.conclusive) {
               if (liveness.live) {
-                log.info('stuck_task.skipped_active_heartbeat', {
-                  taskId: task.id,
-                  nodeId: liveness.nodeId,
-                  activeAcpSessionId: liveness.activeAcpSessionId,
+                const stall =
+                  task.status === 'in_progress' && executionMs > maxExecutionMs
+                    ? await probeStall(liveness)
+                    : null;
+                if (stall?.decision === 'stalled') {
+                  isStuck = true;
+                  reason =
+                    `SAM detected a stalled agent turn after ${Math.round(executionMs / 60000)} minutes: ` +
+                    `${stall.reason || 'the transcript has been silent while the turn stayed active'}.`;
+                  log.warn('stuck_task.stalled_classifier_terminal', {
+                    taskId: task.id,
+                    livenessReason: liveness.reason,
+                    classifierConfidence: stall.confidence,
+                    latestTranscriptActivityAgeMs: stall.latestTranscriptActivityAgeMs,
+                    transcriptMessageCount: stall.transcriptMessageCount,
+                  });
+                  break;
+                }
+                await recordLiveRuntimePreservation(env, {
+                  task,
+                  liveness,
                   executionMs,
                   maxExecutionMs,
-                  hardTimeoutMs,
+                  absoluteCeilingMs,
+                  runtimeGenerationMs:
+                    ceiling.reason === 'below_ceiling' ? ceiling.runtimeGenerationMs : null,
                 });
-
-                await persistError(
-                  env.OBSERVABILITY_DATABASE,
-                  {
-                    source: 'api',
-                    level: 'info',
-                    message: `Skipped stuck task recovery: VM agent heartbeat is recent (task running ${Math.round(executionMs / 60000)} min, hard timeout at ${Math.round(hardTimeoutMs / 60000)} min)`,
-                    context: {
-                      recoveryType: 'stuck_task_heartbeat_skip',
-                      taskId: task.id,
-                      nodeId: liveness.nodeId,
-                      activeAcpSessionId: liveness.activeAcpSessionId,
-                      executionMs,
-                      maxExecutionMs,
-                      hardTimeoutMs,
-                    },
-                    userId: task.user_id,
-                    nodeId: liveness.nodeId,
-                    taskId: task.id,
-                    sessionId: task.chat_session_id,
-                  },
-                  env
-                );
                 result.heartbeatSkipped++;
               }
               break;
             }
             isStuck = true;
-            const threshold = executionMs > hardTimeoutMs ? hardTimeoutMs : maxExecutionMs;
+            // The observed age, never a fixed label: "after 480 minutes" once
+            // appeared on tasks that ran 1,400 minutes before their node was deleted.
             reason = terminalReasonFor(
               liveness,
-              `Task runtime is no longer live after ${Math.round(threshold / 60000)} minutes. Last liveness result: ${liveness.reason}.${stepInfo}`
+              `Task runtime is no longer live (${liveness.reason}); task started ${Math.round(executionMs / 60000)} minutes ago.${stepInfo}`
             );
           }
           break;
@@ -1255,6 +1420,28 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
         const doProbe = await probeTaskRunner();
         const doStatus = doProbe.status;
         const liveness = task.status === 'in_progress' ? await probeLiveness() : null;
+
+        if (
+          task.status === 'in_progress' &&
+          timeForCheck > maxExecutionMs &&
+          liveness?.live
+        ) {
+          const startedAt = task.started_at ? new Date(task.started_at).getTime() : updatedAt;
+          const stall = await probeStall(liveness);
+          if (stall?.decision === 'stalled') {
+            isStuck = true;
+            reason =
+              `SAM detected a stalled agent turn after ${Math.round((now.getTime() - startedAt) / 60000)} minutes: ` +
+              `${stall.reason || 'the transcript has been silent while the turn stayed active'}.`;
+            log.warn('stuck_task.stalled_classifier_terminal', {
+              taskId: task.id,
+              livenessReason: liveness.reason,
+              classifierConfidence: stall.confidence,
+              latestTranscriptActivityAgeMs: stall.latestTranscriptActivityAgeMs,
+              transcriptMessageCount: stall.transcriptMessageCount,
+            });
+          }
+        }
 
         // TaskRunner.completed means orchestration handed off successfully, not
         // that the agent later finalized D1. Conclusive task-scoped runtime death
@@ -1350,6 +1537,40 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
       if (!isStuck) continue;
     }
 
+    // The ONE place a terminal verdict on an active conversation is gated on sleep
+    // state. Every in_progress branch above — the runaway-cost ceiling, the
+    // 240-minute liveness check, and the reconciliation-grace dead-runtime
+    // path — funnels through here, so a future branch cannot reintroduce this bug
+    // by forgetting to ask (`.claude/rules/58`; same choke-point reasoning as
+    // `terminalReasonFor`). Compaction-loop recovery is deliberately NOT gated: it
+    // is evidence of an actual malfunction burning tokens now, not a lifecycle
+    // verdict about recoverability — so `in_progress && !compactionLoopRecovery`
+    // is exactly the three branches in scope.
+    if (
+      isStuck &&
+      task.status === 'in_progress' &&
+      !compactionLoopRecovery &&
+      (await withholdTerminalVerdictForSleepingSession(
+        env.DATABASE,
+        env,
+        {
+          id: task.id,
+          projectId: task.project_id,
+          chatSessionId: task.chat_session_id,
+          workspaceId: task.workspace_id,
+          executionStep: task.execution_step,
+          taskMode: task.task_mode,
+        },
+        {
+          source: 'stuck_task.terminal_gate',
+          withheldReason: reason,
+          honorInFlightSleep: !ceilingOutlastedInFlightSleep,
+        }
+      ))
+    ) {
+      continue;
+    }
+
     try {
       // Gather diagnostic context before recovery
       const diagnosticElapsedMs =
@@ -1439,6 +1660,11 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
         // control-plane state.
         stopWorkspace: false,
         fillMissingStartedAt: task.status === 'in_progress',
+        // A supersession is the conversation moving on, not a malfunction, so it
+        // must not paint a red failure banner or invite debug diagnosis
+        // (policies `a974b04f`, `486d1dd1`). The reason survives on the status
+        // event.
+        lifecycleOutcome: supersededTermination,
       });
 
       if (transitionOutcome !== 'transitioned') {
@@ -1481,7 +1707,18 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
       // Best-effort cleanup: stop workspace and mark auto-provisioned node as warm.
       // cleanupTaskRun reads the task's workspaceId and autoProvisionedNodeId from DB.
       try {
-        await cleanupTaskRun(task.id, env);
+        if (cachedStall?.decision === 'stalled') {
+          // A classifier failure is recoverable, not an intentional cost kill.
+          // Reuse the failed-task snapshot/sleep path on VM and Instant; unknown
+          // preservation state withholds teardown. The sleep sweep bounds it.
+          await cleanupTerminalTaskResources(env, task.id, {
+            status: 'failed',
+            errorMessage: reason,
+            logContext: { source: 'scheduled.stuck_tasks.stalled_classifier' },
+          });
+        } else {
+          await cleanupTaskRun(task.id, env);
+        }
       } catch (cleanupErr) {
         log.error('stuck_task.cleanup_failed', {
           taskId: task.id,

@@ -11,6 +11,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/workspace/vm-agent/internal/config"
 )
 
 func (e *Engine) composeConfigPreflight(ctx context.Context, composeFile string, interpolationEnv map[string]string) error {
@@ -54,6 +56,123 @@ func (e *Engine) composeBinary() string {
 	return parts[0]
 }
 
+// setActiveApplySeq records which release the running apply belongs to, so
+// liveness signals emitted from a child process can be addressed to the right
+// watchdog. Returns a function restoring the previous value.
+func (e *Engine) setActiveApplySeq(seq int64) func() {
+	e.activeSeqMu.Lock()
+	previous := e.activeSeq
+	e.activeSeq = seq
+	e.activeSeqMu.Unlock()
+	return func() {
+		e.activeSeqMu.Lock()
+		e.activeSeq = previous
+		e.activeSeqMu.Unlock()
+	}
+}
+
+// composeOutputRetentionBytes resolves the retained-output cap, defaulting when the
+// engine was constructed without one (tests, and any caller that does not thread
+// the vm-agent config through).
+func (e *Engine) composeOutputRetentionBytes() int {
+	if e == nil || e.cfg.ComposeOutputRetentionBytes <= 0 {
+		return int(config.DefaultComposeOutputRetentionBytes)
+	}
+	return int(e.cfg.ComposeOutputRetentionBytes)
+}
+
+// signalLiveness pokes the apply watchdog without persisting a release event.
+func (e *Engine) signalLiveness() {
+	if e == nil || e.cfg.ApplyLiveness == nil {
+		return
+	}
+	e.activeSeqMu.RLock()
+	seq := e.activeSeq
+	e.activeSeqMu.RUnlock()
+	if seq <= 0 {
+		// Outside an apply (teardown, manual down) there is no watchdog to feed.
+		return
+	}
+	e.cfg.ApplyLiveness(e.cfg.EnvironmentID, seq)
+}
+
+// livenessWriter mirrors child output into a bounded TAIL buffer while reporting
+// that the process is still producing output. It is the child-process analogue
+// of newIdleProgressReader, which does the same for artifact downloads.
+//
+// Tail, not head: compose prints megabytes of "Pulling fs layer" progress and
+// then the actual failure (`no such image`, `unauthorized`, `no space left on
+// device`) on the LAST lines. Retaining the first N bytes would discard exactly
+// the diagnostic this buffer exists to preserve.
+//
+// os/exec serializes writes to cmd.Stderr on one copier goroutine and Cmd.Wait
+// blocks until that goroutine finishes, so neither the buffer nor reads after
+// cmd.Run returns need additional locking.
+type livenessWriter struct {
+	buf    bytes.Buffer
+	signal func()
+	// limit caps retained output. The liveness signal keeps firing past the cap,
+	// so a very chatty pull cannot be killed as "stalled" merely because its
+	// output stopped being recorded.
+	limit int
+	// redactionOverlap retains enough bytes before the returned tail for redaction
+	// to see secrets that straddle the retention boundary.
+	redactionOverlap int
+}
+
+func (w *livenessWriter) Write(p []byte) (int, error) {
+	w.buf.Write(p)
+	// Amortized compaction: let the buffer reach 2x the cap before trimming, so a
+	// multi-megabyte pull costs O(total) copying rather than O(total x limit).
+	if w.limit > 0 && w.buf.Len() > 2*w.retainedLimit() {
+		w.compact()
+	}
+	if w.signal != nil {
+		w.signal()
+	}
+	return len(p), nil
+}
+
+func (w *livenessWriter) retainedLimit() int {
+	if w.limit <= 0 {
+		return 0
+	}
+	if w.redactionOverlap <= 0 {
+		return w.limit
+	}
+	return w.limit + w.redactionOverlap
+}
+
+// compact discards all but the trailing retained bytes.
+func (w *livenessWriter) compact() {
+	retainedLimit := w.retainedLimit()
+	if retainedLimit <= 0 || w.buf.Len() <= retainedLimit {
+		return
+	}
+	b := w.buf.Bytes()
+	tail := append([]byte(nil), b[len(b)-retainedLimit:]...)
+	w.buf.Reset()
+	w.buf.Write(tail)
+}
+
+// String returns at most `limit` trailing bytes of the child's output.
+func (w *livenessWriter) String() string {
+	w.compact()
+	return tailString(w.buf.String(), w.limit)
+}
+
+func (w *livenessWriter) RedactedString(redactor envRedactor) string {
+	w.compact()
+	return tailString(redactor.redact(w.buf.String()), w.limit)
+}
+
+func tailString(value string, limit int) string {
+	if limit > 0 && len(value) > limit {
+		return value[len(value)-limit:]
+	}
+	return value
+}
+
 func (e *Engine) runCompose(ctx context.Context, composeFile string, interpolationEnv map[string]string, args ...string) error {
 	parts := strings.Fields(e.cfg.ComposeCmd)
 	cmdArgs := append(parts[1:], "--project-name", e.cfg.ComposeProjectName, "-f", composeFile)
@@ -61,16 +180,22 @@ func (e *Engine) runCompose(ctx context.Context, composeFile string, interpolati
 
 	cmd := exec.CommandContext(ctx, parts[0], cmdArgs...)
 	cmd.Env = mergeEnv(os.Environ(), interpolationEnv)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
 	redactor := newEnvRedactor(interpolationEnv)
+	// Compose streams pull/extract progress to stderr. Treat every write as proof
+	// of life so a slow-but-progressing pull is not mistaken for a hung apply.
+	stderr := &livenessWriter{
+		signal:           e.signalLiveness,
+		limit:            e.composeOutputRetentionBytes(),
+		redactionOverlap: redactor.maxValueLen(),
+	}
+	cmd.Stderr = stderr
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("%s %s: %w (stderr: %s)",
-			e.cfg.ComposeCmd, strings.Join(args, " "), err, redactor.redact(stderr.String()))
+			e.cfg.ComposeCmd, strings.Join(args, " "), err, stderr.RedactedString(redactor))
 	}
 	if argsContainConfig(args) && composeStderrHasMissingVar(stderr.String()) {
-		return fmt.Errorf("compose config reported missing interpolation variables: %s", redactor.redact(stderr.String()))
+		return fmt.Errorf("compose config reported missing interpolation variables: %s", stderr.RedactedString(redactor))
 	}
 	return nil
 }

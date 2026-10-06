@@ -1,6 +1,19 @@
 import { beforeEach,describe, expect, test, vi } from 'vitest';
 
-import { createModuleLogger, serializeError } from '../../../src/lib/logger';
+import {
+  createInstrumentedLogger,
+  createModuleLogger,
+  log,
+  serializeError,
+} from '../../../src/lib/logger';
+import {
+  allCredentialTokenCanaries,
+  credentialTokenCanaries,
+  expectCredentialTokensAbsent,
+} from '../../helpers/credential-token-canaries';
+
+const persistError = vi.hoisted(() => vi.fn(async () => undefined));
+vi.mock('../../../src/services/observability', () => ({ persistError }));
 
 describe('createModuleLogger', () => {
   beforeEach(() => {
@@ -106,3 +119,72 @@ describe('serializeError', () => {
     expect(entry.safe).toBe('kept');
   });
 });
+
+describe('credential-token redaction through the logging entry points', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    persistError.mockClear();
+  });
+
+  test('log.* strips every credential token from messages, nested fields, and arrays', () => {
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    log.warn('provider.request_failed', {
+      detail: `upstream rejected ${allCredentialTokenCanaries.join(' and ')}`,
+      nested: { attempts: allCredentialTokenCanaries.map((token) => `retrying with ${token}`) },
+      status: 401,
+    });
+
+    expect(spy).toHaveBeenCalledOnce();
+    const line = spy.mock.calls[0][0] as string;
+    expectCredentialTokensAbsent(line);
+    const entry = JSON.parse(line);
+    // Liveness: the non-secret context survives, so a line emptied by redaction cannot pass.
+    expect(entry.status).toBe(401);
+    expect(entry.detail).toBe(
+      `upstream rejected ${allCredentialTokenCanaries.map(() => '[REDACTED]').join(' and ')}`
+    );
+  });
+
+  test('a SAM PAT is redacted whole, not cut at its first hyphen', () => {
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    createModuleLogger('api_tokens').info('rotated', {
+      note: `old ${credentialTokenCanaries.samPersonalAccessToken} revoked`,
+    });
+
+    expect(JSON.parse(spy.mock.calls[0][0] as string).note).toBe('old [REDACTED] revoked');
+  });
+
+  test('serializeError strips credential tokens from non-Error values and string causes', () => {
+    const { openaiProjectKey, anthropicApiKey } = credentialTokenCanaries;
+
+    expect(serializeError(`auth failed for ${openaiProjectKey}`)).toEqual({
+      error: 'auth failed for [REDACTED]',
+    });
+    expect(
+      serializeError(new Error('wrapper', { cause: `key ${anthropicApiKey} rejected` })).cause
+    ).toBe('key [REDACTED] rejected');
+  });
+
+  test('the instrumented logger persists error context with credential tokens stripped', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const pending: Array<Promise<unknown>> = [];
+    const ilog = createInstrumentedLogger({} as D1Database, (promise) => pending.push(promise));
+
+    ilog.error('agent.bootstrap_failed', {
+      stderr: `export OPENAI_API_KEY=${credentialTokenCanaries.openaiLegacyKey}`,
+      workspaceId: 'ws-1',
+    });
+    await Promise.all(pending);
+
+    expect(persistError).toHaveBeenCalledOnce();
+    const persisted = persistError.mock.calls[0][1] as { context: Record<string, unknown> };
+    expectCredentialTokensAbsent(persisted);
+    expect(persisted.context).toEqual({
+      stderr: 'export OPENAI_API_KEY=[REDACTED]',
+      workspaceId: 'ws-1',
+    });
+  });
+});
+

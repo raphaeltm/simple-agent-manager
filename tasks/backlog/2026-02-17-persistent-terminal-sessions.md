@@ -1,5 +1,23 @@
 # Persistent Terminal Sessions (SessionHost Pattern for PTY)
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** server-side ping/pong stale detection (§1.5) on both terminal WebSocket handlers
+>   (`packages/vm-agent/internal/server/terminal_ws_hardening.go:51-88`, wired at
+>   `websocket.go:257,356`; commit 392e02c7b). Settings: `TERMINAL_WS_PING_INTERVAL`,
+>   `TERMINAL_WS_READ_TIMEOUT` (`packages/vm-agent/internal/config/config_load.go:125`).
+> - **Still open:**
+>   - The core `TerminalSessionHost`: multi-viewer fan-out, sequenced replay buffer, host
+>     registry, thin-relay `handleMultiTerminalWS`, and the `TERMINAL_MESSAGE_BUFFER_SIZE` /
+>     `TERMINAL_VIEWER_SEND_BUFFER` settings. PTY sessions still hold a single `attachedWriter`
+>     (`packages/vm-agent/internal/pty/session.go:40,55-67`).
+>   - Browser-side dedupe and stale-session review (Phase 3).
+>   - Broadcast process exit to every viewer; `session_closed` is only sent on a user close, to
+>     one connection (`packages/vm-agent/internal/server/websocket.go:612-618`). Lifecycle events.
+>   - All the tests listed below.
+> - **Moot/dropped:** the proposed `TERMINAL_PING_INTERVAL` / `TERMINAL_PONG_TIMEOUT` env vars;
+>   the shipped `TERMINAL_WS_*` settings replace them.
+
 **Status:** backlog
 **Priority:** high
 **Estimated Effort:** 1-2 weeks

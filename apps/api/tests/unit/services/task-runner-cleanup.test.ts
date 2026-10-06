@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   queueWorkspaceSessionSleep: vi.fn(),
   deleteSessionSnapshotState: vi.fn(),
   cancelVmTaskAdmission: vi.fn(),
+  preserveFailedTaskWork: vi.fn(),
+  surfaceFailedTaskWorkLoss: vi.fn(),
   log: {
     info: vi.fn(),
     warn: vi.fn(),
@@ -56,6 +58,16 @@ vi.mock('../../../src/services/vm-admission-control', () => ({
 
 vi.mock('../../../src/lib/logger', () => ({
   log: mocks.log,
+  createModuleLogger: () => mocks.log,
+}));
+
+// The preservation decision is exercised end to end against real SQL in
+// tests/integration/failed-task-preservation.test.ts; here it is a collaborator
+// whose verdict drives the call ordering. The real verdict predicate is kept.
+vi.mock('../../../src/services/failed-task-preservation', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/services/failed-task-preservation')>()),
+  preserveFailedTaskWork: (...args: unknown[]) => mocks.preserveFailedTaskWork(...args),
+  surfaceFailedTaskWorkLoss: (...args: unknown[]) => mocks.surfaceFailedTaskWorkLoss(...args),
 }));
 
 function buildDb(selectRows: unknown[][]) {
@@ -105,135 +117,242 @@ describe('cleanupTerminalTaskResources', () => {
     mocks.cancelVmTaskAdmission.mockResolvedValue(undefined);
   });
 
-  it('queues completed-session sleep without cleaning up the current prompt runtime', async () => {
-    const order: string[] = [];
-    const db = buildDb([
-      [
-        {
-          id: 'task-terminal-1',
-          projectId: 'project-terminal-1',
-          workspaceId: 'workspace-terminal-1',
-          errorMessage: null,
+  it(
+    'queues completed-session sleep without cleaning up the current prompt runtime',
+    async () => {
+      const order: string[] = [];
+      const db = buildDb([
+        [
+          {
+            id: 'task-terminal-1',
+            projectId: 'project-terminal-1',
+            workspaceId: 'workspace-terminal-1',
+            errorMessage: null,
+          },
+        ],
+        [{ chatSessionId: 'session-terminal-1', userId: 'workspace-owner-1' }],
+      ]);
+      mocks.drizzle.mockReturnValue(db);
+      mocks.queueWorkspaceSessionSleep.mockImplementation(async () => {
+        order.push('queueWorkspaceSessionSleep');
+      });
+
+      vi.doMock('../../../src/services/task-runner', () => ({
+        cleanupTaskRun: async () => {
+          order.push('cleanupTaskRun');
         },
-      ],
-      [{ chatSessionId: 'session-terminal-1', userId: 'workspace-owner-1' }],
-    ]);
-    mocks.drizzle.mockReturnValue(db);
-    mocks.queueWorkspaceSessionSleep.mockImplementation(async () => {
-      order.push('queueWorkspaceSessionSleep');
-    });
+      }));
 
-    vi.doMock('../../../src/services/task-runner', () => ({
-      cleanupTaskRun: async () => {
-        order.push('cleanupTaskRun');
-      },
-    }));
+      const { cleanupTerminalTaskResources } =
+        await import('../../../src/services/task-terminal-cleanup');
+      const env = { DATABASE: {} } as Env;
 
-    const { cleanupTerminalTaskResources } =
-      await import('../../../src/services/task-terminal-cleanup');
-    const env = { DATABASE: {} } as Env;
+      await cleanupTerminalTaskResources(env, 'task-terminal-1', { status: 'completed' });
 
-    await cleanupTerminalTaskResources(env, 'task-terminal-1', { status: 'completed' });
+      expect(mocks.cancelVmTaskAdmission).toHaveBeenCalledWith(
+        env,
+        'task-terminal-1',
+        'task_completed_cleanup'
+      );
+      expect(mocks.queueWorkspaceSessionSleep).toHaveBeenCalledWith(
+        env,
+        expect.objectContaining({
+          workspaceId: 'workspace-terminal-1',
+          userId: 'workspace-owner-1',
+          sleepAfterMs: 0,
+        })
+      );
+      expect(mocks.stopSession).not.toHaveBeenCalled();
+      expect(order).toEqual(['queueWorkspaceSessionSleep']);
+    },
+    CLEANUP_IMPORT_TEST_TIMEOUT_MS
+  );
 
-    expect(mocks.cancelVmTaskAdmission).toHaveBeenCalledWith(
-      env,
-      'task-terminal-1',
-      'task_completed_cleanup'
-    );
-    expect(mocks.queueWorkspaceSessionSleep).toHaveBeenCalledWith(
-      env,
-      expect.objectContaining({
-        workspaceId: 'workspace-terminal-1',
-        userId: 'workspace-owner-1',
-        sleepAfterMs: 0,
-      })
-    );
-    expect(mocks.stopSession).not.toHaveBeenCalled();
-    expect(order).toEqual(['queueWorkspaceSessionSleep']);
-  }, CLEANUP_IMPORT_TEST_TIMEOUT_MS);
-
-  it('fails the chat session before cleanup when task status is failed', async () => {
-    const order: string[] = [];
-    const db = buildDb([
+  function failedTaskDb() {
+    return buildDb([
       [
         {
           id: 'task-terminal-failed',
           projectId: 'project-terminal-1',
           workspaceId: 'workspace-terminal-1',
+          chatSessionId: 'session-terminal-1',
           errorMessage: 'runner failed',
-        },
-      ],
-      [{ chatSessionId: 'session-terminal-1' }],
-    ]);
-    mocks.drizzle.mockReturnValue(db);
-    mocks.failSession.mockImplementation(async () => {
-      order.push('failSession');
-    });
-
-    vi.doMock('../../../src/services/task-runner', () => ({
-      cleanupTaskRun: async () => {
-        order.push('cleanupTaskRun');
-      },
-    }));
-
-    const { cleanupTerminalTaskResources } =
-      await import('../../../src/services/task-terminal-cleanup');
-    const env = { DATABASE: {} } as Env;
-
-    await cleanupTerminalTaskResources(env, 'task-terminal-failed', { status: 'failed' });
-
-    expect(mocks.cancelVmTaskAdmission).toHaveBeenCalledWith(
-      env,
-      'task-terminal-failed',
-      'task_failed'
-    );
-    expect(mocks.failSession).toHaveBeenCalledWith(
-      env,
-      'project-terminal-1',
-      'session-terminal-1',
-      'runner failed'
-    );
-    expect(order).toEqual(['failSession', 'cleanupTaskRun']);
-  }, CLEANUP_IMPORT_TEST_TIMEOUT_MS);
-
-  it('deletes retained state before stopping an explicitly archived session', async () => {
-    const order: string[] = [];
-    const db = buildDb([
-      [
-        {
-          id: 'task-terminal-archive',
-          projectId: 'project-terminal-1',
-          workspaceId: 'workspace-terminal-1',
-          errorMessage: null,
         },
       ],
       [{ chatSessionId: 'session-terminal-1', userId: 'workspace-owner-1' }],
     ]);
-    mocks.drizzle.mockReturnValue(db);
-    mocks.deleteSessionSnapshotState.mockImplementation(async () => {
-      order.push('deleteSessionSnapshotState');
-      return true;
-    });
-    mocks.stopSession.mockImplementation(async () => {
-      order.push('stopSession');
-    });
+  }
 
-    vi.doMock('../../../src/services/task-runner', () => ({
-      cleanupTaskRun: async () => {
-        order.push('cleanupTaskRun');
-      },
-    }));
+  it(
+    'surfaces the loss, then fails the session and cleans up, when failed work cannot be preserved',
+    async () => {
+      const order: string[] = [];
+      mocks.drizzle.mockReturnValue(failedTaskDb());
+      mocks.preserveFailedTaskWork.mockResolvedValue({
+        outcome: 'not_preservable',
+        gap: 'no_resumable_agent_session',
+      });
+      mocks.surfaceFailedTaskWorkLoss.mockImplementation(async () => {
+        order.push('surfaceFailedTaskWorkLoss');
+      });
+      mocks.failSession.mockImplementation(async () => {
+        order.push('failSession');
+      });
 
-    const { cleanupTerminalTaskResources } =
-      await import('../../../src/services/task-terminal-cleanup');
-    const env = { DATABASE: {} } as Env;
+      vi.doMock('../../../src/services/task-runner', () => ({
+        cleanupTaskRun: async () => {
+          order.push('cleanupTaskRun');
+        },
+      }));
 
-    await cleanupTerminalTaskResources(env, 'task-terminal-archive', {
-      status: 'completed',
-      destructiveSessionEnd: true,
-    });
+      const { cleanupTerminalTaskResources } =
+        await import('../../../src/services/task-terminal-cleanup');
+      const env = { DATABASE: {} } as Env;
 
-    expect(mocks.queueWorkspaceSessionSleep).not.toHaveBeenCalled();
-    expect(order).toEqual(['deleteSessionSnapshotState', 'stopSession', 'cleanupTaskRun']);
-  }, CLEANUP_IMPORT_TEST_TIMEOUT_MS);
+      await cleanupTerminalTaskResources(env, 'task-terminal-failed', {
+        status: 'failed',
+        logContext: { source: 'task.callback' },
+      });
+
+      expect(mocks.cancelVmTaskAdmission).toHaveBeenCalledWith(
+        env,
+        'task-terminal-failed',
+        'task_failed'
+      );
+      expect(mocks.preserveFailedTaskWork).toHaveBeenCalledWith(env, {
+        taskId: 'task-terminal-failed',
+        projectId: 'project-terminal-1',
+        workspaceId: 'workspace-terminal-1',
+        chatSessionId: 'session-terminal-1',
+        source: 'task.callback',
+      });
+      expect(mocks.surfaceFailedTaskWorkLoss).toHaveBeenCalledWith(env, {
+        taskId: 'task-terminal-failed',
+        projectId: 'project-terminal-1',
+        chatSessionId: 'session-terminal-1',
+        reason: 'no_resumable_agent_session',
+        source: 'task.callback',
+      });
+      expect(mocks.failSession).toHaveBeenCalledWith(
+        env,
+        'project-terminal-1',
+        'session-terminal-1',
+        'runner failed'
+      );
+      expect(order).toEqual(['surfaceFailedTaskWorkLoss', 'failSession', 'cleanupTaskRun']);
+    },
+    CLEANUP_IMPORT_TEST_TIMEOUT_MS
+  );
+
+  it.each(['sleep_queued', 'already_asleep', 'unknown'] as const)(
+    'leaves the session and runtime alone when failed work is %s',
+    async (outcome) => {
+      const order: string[] = [];
+      mocks.drizzle.mockReturnValue(failedTaskDb());
+      mocks.preserveFailedTaskWork.mockResolvedValue({ outcome });
+      mocks.failSession.mockImplementation(async () => {
+        order.push('failSession');
+      });
+
+      vi.doMock('../../../src/services/task-runner', () => ({
+        cleanupTaskRun: async () => {
+          order.push('cleanupTaskRun');
+        },
+      }));
+
+      const { cleanupTerminalTaskResources } =
+        await import('../../../src/services/task-terminal-cleanup');
+      const env = { DATABASE: {} } as Env;
+
+      await cleanupTerminalTaskResources(env, 'task-terminal-failed', { status: 'failed' });
+
+      expect(mocks.preserveFailedTaskWork).toHaveBeenCalledOnce();
+      expect(mocks.surfaceFailedTaskWorkLoss).not.toHaveBeenCalled();
+      expect(mocks.stopSession).not.toHaveBeenCalled();
+      expect(order).toEqual([]);
+    },
+    CLEANUP_IMPORT_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'archives a failed task destructively without consulting preservation',
+    async () => {
+      // Control (policy e8897480): Archive / Complete & Delete must still tear down
+      // immediately and discard the restore state, even for a failed task.
+      const order: string[] = [];
+      mocks.drizzle.mockReturnValue(failedTaskDb());
+      mocks.deleteSessionSnapshotState.mockImplementation(async () => {
+        order.push('deleteSessionSnapshotState');
+        return true;
+      });
+      mocks.failSession.mockImplementation(async () => {
+        order.push('failSession');
+      });
+
+      vi.doMock('../../../src/services/task-runner', () => ({
+        cleanupTaskRun: async () => {
+          order.push('cleanupTaskRun');
+        },
+      }));
+
+      const { cleanupTerminalTaskResources } =
+        await import('../../../src/services/task-terminal-cleanup');
+      const env = { DATABASE: {} } as Env;
+
+      await cleanupTerminalTaskResources(env, 'task-terminal-failed', {
+        status: 'failed',
+        destructiveSessionEnd: true,
+      });
+
+      expect(mocks.preserveFailedTaskWork).not.toHaveBeenCalled();
+      expect(mocks.queueWorkspaceSessionSleep).not.toHaveBeenCalled();
+      expect(order).toEqual(['deleteSessionSnapshotState', 'failSession', 'cleanupTaskRun']);
+    },
+    CLEANUP_IMPORT_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'deletes retained state before stopping an explicitly archived session',
+    async () => {
+      const order: string[] = [];
+      const db = buildDb([
+        [
+          {
+            id: 'task-terminal-archive',
+            projectId: 'project-terminal-1',
+            workspaceId: 'workspace-terminal-1',
+            errorMessage: null,
+          },
+        ],
+        [{ chatSessionId: 'session-terminal-1', userId: 'workspace-owner-1' }],
+      ]);
+      mocks.drizzle.mockReturnValue(db);
+      mocks.deleteSessionSnapshotState.mockImplementation(async () => {
+        order.push('deleteSessionSnapshotState');
+        return true;
+      });
+      mocks.stopSession.mockImplementation(async () => {
+        order.push('stopSession');
+      });
+
+      vi.doMock('../../../src/services/task-runner', () => ({
+        cleanupTaskRun: async () => {
+          order.push('cleanupTaskRun');
+        },
+      }));
+
+      const { cleanupTerminalTaskResources } =
+        await import('../../../src/services/task-terminal-cleanup');
+      const env = { DATABASE: {} } as Env;
+
+      await cleanupTerminalTaskResources(env, 'task-terminal-archive', {
+        status: 'completed',
+        destructiveSessionEnd: true,
+      });
+
+      expect(mocks.queueWorkspaceSessionSleep).not.toHaveBeenCalled();
+      expect(order).toEqual(['deleteSessionSnapshotState', 'stopSession', 'cleanupTaskRun']);
+    },
+    CLEANUP_IMPORT_TEST_TIMEOUT_MS
+  );
 });

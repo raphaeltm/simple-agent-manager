@@ -2,12 +2,14 @@ import {
   type AdmitProjectEventInput,
   type CreateProjectEventDeliveryBatchInput,
   type CreateProjectEventSubscriptionInput,
+  CREDENTIAL_LIMIT_EVENT_SOURCE,
   PROJECT_EVENT_FILTER_FIELDS,
   PROJECT_EVENT_FILTER_VERSION,
   PROJECT_EVENT_REQUESTED_DELIVERY_MODES,
   PROJECT_EVENT_RESOLVED_DELIVERY_MODES,
   PROJECT_EVENT_SEVERITIES,
   PROJECT_EVENT_SUBSCRIPTION_OWNER_TYPES,
+  type ProjectEventAudience,
   type ProjectEventDeliveryAdapterCapability,
   type ProjectEventDeliveryAuthorization,
   type ProjectEventDeliveryPreference,
@@ -76,6 +78,7 @@ export type NormalizedSubscriptionInput = {
   idempotencyFingerprint: string;
   compiledFilter: CompiledProjectEventFilter;
   deliveryPreference: ProjectEventDeliveryPreference;
+  ownerTaskId: string | null;
   reason: string | null;
   expiresAt: number | null;
 };
@@ -129,6 +132,7 @@ export function normalizeProjectEventInput(
   input: AdmitProjectEventInput,
   limits: ProjectEventLimits
 ): NormalizedProjectEventInput {
+  const now = Date.now();
   const projectId = normalizeProjectId(input.projectId, limits);
   const source = normalizeText(input.source, 'source', limits.maxFilterStringBytes);
   const eventType = normalizeText(input.eventType, 'eventType', limits.maxFilterStringBytes);
@@ -144,6 +148,7 @@ export function normalizeProjectEventInput(
     limits.maxFilterStringBytes
   );
   const metadata = normalizeMetadata(input.metadata ?? {}, limits);
+  const audience = deriveProjectEventAudience(projectId, source, metadata);
   const metadataJson = stableStringify(metadata);
   const metadataBytes = byteLength(metadataJson);
   if (metadataBytes > limits.maxMetadataBytes) {
@@ -162,11 +167,8 @@ export function normalizeProjectEventInput(
   const rawPayloadRef = normalizeRawPayloadRef(input.rawPayloadRef ?? null, limits);
   const rawPayloadRefJson = rawPayloadRef ? stableStringify(rawPayloadRef) : null;
   const rawPayloadRefBytes = rawPayloadRefJson ? byteLength(rawPayloadRefJson) : 0;
-  const occurredAt = normalizeTimestamp(
-    input.occurredAt ?? input.receivedAt ?? Date.now(),
-    'occurredAt'
-  );
-  const receivedAt = normalizeTimestamp(input.receivedAt ?? Date.now(), 'receivedAt');
+  const occurredAt = normalizeTimestamp(input.occurredAt ?? input.receivedAt ?? now, 'occurredAt');
+  const receivedAt = Math.min(normalizeTimestamp(input.receivedAt ?? now, 'receivedAt'), now);
 
   return {
     projectId,
@@ -178,6 +180,7 @@ export function normalizeProjectEventInput(
     deliveryKey,
     payloadFingerprint,
     metadata,
+    audience,
     display,
     rawPayloadRef,
     occurredAt,
@@ -205,6 +208,11 @@ export function normalizeSubscriptionInput(
   );
   const compiledFilter = compileProjectEventFilter(input.filter, limits);
   const deliveryPreference = normalizeDeliveryPreference(input.deliveryPreference, limits);
+  const ownerTaskId = normalizeNullableText(
+    input.ownerTaskId ?? null,
+    'ownerTaskId',
+    limits.maxFilterStringBytes
+  );
   const reason = normalizeNullableText(input.reason ?? null, 'reason', limits.maxReasonBytes);
   const expiresAt =
     input.expiresAt === null || input.expiresAt === undefined
@@ -216,6 +224,7 @@ export function normalizeSubscriptionInput(
     owner.id,
     compiledFilter.fingerprint,
     deliveryPreference,
+    ownerTaskId,
     reason,
     expiresAt,
   ]);
@@ -227,6 +236,7 @@ export function normalizeSubscriptionInput(
     idempotencyFingerprint,
     compiledFilter,
     deliveryPreference,
+    ownerTaskId,
     reason,
     expiresAt,
   };
@@ -578,6 +588,38 @@ function normalizeMetadata(
     throw new ProjectEventValidationError('metadata must be an object');
   }
   return normalized as ProjectEventMetadata;
+}
+
+function deriveProjectEventAudience(
+  projectId: string,
+  source: string,
+  metadata: ProjectEventMetadata
+): ProjectEventAudience {
+  if (source !== CREDENTIAL_LIMIT_EVENT_SOURCE) {
+    return { scope: 'project', projectId, userId: null };
+  }
+  const credentialSource = metadataText(metadata, 'credentialSource');
+  const visibilityScope = metadataText(metadata, 'visibilityScope');
+  if (credentialSource === 'user' || visibilityScope === 'user') {
+    return {
+      scope: 'user',
+      projectId,
+      userId: metadataText(metadata, 'affectedUserId') ?? metadataText(metadata, 'userId'),
+    };
+  }
+  if (
+    credentialSource === 'project' ||
+    credentialSource === 'platform' ||
+    visibilityScope === 'project'
+  ) {
+    return { scope: 'project', projectId, userId: null };
+  }
+  return { scope: 'user', projectId, userId: null };
+}
+
+function metadataText(metadata: ProjectEventMetadata, key: string): string | null {
+  const value = metadata[key];
+  return typeof value === 'string' && value.trim() ? value : null;
 }
 
 function matchesFilterField(expected: string | string[] | undefined, actual: string): boolean {

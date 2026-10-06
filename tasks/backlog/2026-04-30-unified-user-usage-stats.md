@@ -1,5 +1,21 @@
 # Unified User Usage Stats Page
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** parts exist, in a different form than planned.
+>   - `/settings/usage` shows AI usage by model and day with a period selector (PR #860;
+>     `GET /api/usage/ai` at `apps/api/src/routes/usage.ts:92`;
+>     `apps/web/src/pages/SettingsComputeUsage.tsx:58-176`). It reads AI Gateway logs plus KV
+>     provider meters, which this task said not to rely on.
+>   - Platform vs bring-your-own-cloud vCPU-hours, and active sessions with `startedAt` and
+>     `credentialSource` (`packages/shared/src/types/compute-usage.ts:48-92`, PR #672).
+> - **Still open:**
+>   - A durable D1 `ai_usage_events` table, written by the AI proxy paths (none exists yet).
+>   - `GET /api/usage/summary`.
+>   - Period selection for compute (compute usage is current month only).
+>   - Breakdowns by cloud provider and by project.
+>   - User-facing docs on usage semantics.
+
 ## Problem
 
 The current `/settings/usage` page reports only current-month compute usage. Users need one user-scoped usage surface that explains compute and AI consumption for a selected period: vCPU-hours split by platform-provided compute versus BYOC, provider/source breakdowns, active resources, and AI input/output tokens by model.

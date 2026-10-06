@@ -1,3 +1,10 @@
+export type { DeploymentReservationDefaults, DeploymentReservationManifest } from './resources';
+export {
+  DEFAULT_DEPLOYMENT_SERVICE_CPU_MILLIS,
+  DEFAULT_DEPLOYMENT_SERVICE_DISK_MB,
+  DEFAULT_DEPLOYMENT_SERVICE_MEMORY_MB,
+  resolveDeploymentManifestReservation,
+} from './resources';
 export type {
   DeploymentManifest,
   EnvValue,

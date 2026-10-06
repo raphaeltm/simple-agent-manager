@@ -1,4 +1,15 @@
 export type {
+  AcpInteractionAnswerResponse,
+  AcpInteractionDetailResponse,
+  AcpInteractionSnapshotItem,
+  AcpInteractionSnapshotResponse,
+} from './acp-interactions';
+export {
+  answerAcpInteraction,
+  getAcpInteractionDetail,
+  listAcpInteractions,
+} from './acp-interactions';
+export type {
   AdminErrorsFilter,
   AdminLogQueryParams,
   AdminProjectEventInspectorResponse,
@@ -91,6 +102,13 @@ export {
   updatePlatformCredential,
   updateSignupApprovalConfig,
 } from './admin';
+export {
+  abandonAdminProjectDataArchiveMigration,
+  closeAdminProjectDataArchiveCircuitBreaker,
+  fetchAdminProjectDataArchiveCircuitBreakers,
+  fetchAdminProjectDataArchiveProblemMigrations,
+  fetchAdminProjectDataStorageTelemetry,
+} from './admin-project-data-storage';
 export {
   createAgentProfile,
   createSkill,
@@ -211,6 +229,7 @@ export {
   updateCCConfiguration,
   updateCCCredential,
 } from './composable-credentials';
+export { getMyCredentialLimits, getProjectCredentialLimits } from './credential-limits';
 export type {
   CredentialValidationResponse,
   GcpProject,
@@ -440,6 +459,16 @@ export {
   repoRawUrl,
 } from './repo-browse';
 export { getReportIssueConfig, submitReportIssue } from './report';
+export type {
+  ResourceTimelineChunkEntry,
+  ResourceTimelineChunkResponse,
+  ResourceTimelineIndexResponse,
+  ResourceTimelineRollup,
+  ResourceTimelineRunEntry,
+  WorkspaceResourceSample,
+  WorkspaceResourceToolSpan,
+} from './resource-timeline';
+export { getSessionResourceTimeline, getSessionResourceTimelineChunk } from './resource-timeline';
 export type {
   ActivityEventResponse,
   ActivityEventsListResponse,

@@ -114,6 +114,12 @@ interface RecentActivityState {
 
 interface PendingActivityState extends AcpActivityPendingSnapshot {
   flushScheduled: boolean;
+  /**
+   * Flushes of this pending state that ProjectData answered with a transient failure. Carried
+   * across newer reports that coalesce into it, so a stream of reports during an outage cannot
+   * reset the backoff; the state is deleted (and the count with it) once a flush succeeds.
+   */
+  flushRetries: number;
 }
 
 interface BindingCacheEntry {
@@ -177,6 +183,39 @@ export function isIntermediateAcpActivityReport(report: AcpActivityCallbackRepor
     report.activity === 'idle' &&
     (report.runtimeWorkState === 'active' || report.runtimeWorkState === 'settling')
   );
+}
+
+const ACP_RUNTIME_WORK_TELEMETRY_SOURCES = new Set([
+  'acp_tool_call',
+  'claude-background-tasks',
+  'claude_sdk',
+]);
+
+function runtimeWorkTelemetrySource(source: string | undefined): string | null {
+  if (!source) return null;
+  return ACP_RUNTIME_WORK_TELEMETRY_SOURCES.has(source) ? source : 'other';
+}
+
+export function buildAcpActivityRuntimeWorkMetricFields(
+  report: AcpActivityCallbackReport,
+  observedAt?: number
+): {
+  classification: 'intermediate' | 'critical';
+  runtimeWorkState?: AcpRuntimeWorkState | null;
+  runtimeWorkCount?: number | null;
+  runtimeWorkSource?: string | null;
+  runtimeWorkObservedAt?: number | null;
+  runtimeWorkProgressAt?: number | null;
+} {
+  return {
+    classification: isIntermediateAcpActivityReport(report) ? 'intermediate' : 'critical',
+    runtimeWorkState: report.runtimeWorkState ?? null,
+    runtimeWorkCount: typeof report.runtimeWorkCount === 'number' ? report.runtimeWorkCount : null,
+    runtimeWorkSource: runtimeWorkTelemetrySource(report.runtimeWorkSource),
+    runtimeWorkObservedAt: observedAt ?? null,
+    runtimeWorkProgressAt:
+      typeof report.runtimeWorkProgressAt === 'number' ? report.runtimeWorkProgressAt : null,
+  };
 }
 
 export function buildAcpActivityBinding(session: AcpSession): AcpActivityBinding | null {
@@ -320,6 +359,7 @@ export function recordAcpActivityAdmissionSuccess(input: {
   reason: string;
   source?: 'callback' | 'coalesced_flush';
   coalescedCount?: number;
+  observedAt?: number;
   now?: number;
 }): void {
   const now = input.now ?? Date.now();
@@ -346,6 +386,7 @@ export function recordAcpActivityAdmissionSuccess(input: {
       workspaceId: input.binding.workspaceId,
       activity: input.report.activity,
       reason: input.reason,
+      ...buildAcpActivityRuntimeWorkMetricFields(input.report, input.observedAt ?? now),
       source: input.source ?? 'callback',
       coalescedCount: input.coalescedCount,
       pendingCount: pendingActivityByKey.size,
@@ -358,9 +399,7 @@ export function clearPendingAcpActivity(projectId: string, sessionId: string): v
   pendingActivityByKey.delete(activityKey(projectId, sessionId));
 }
 
-export function isPendingAcpActivitySnapshotCurrent(
-  snapshot: AcpActivityPendingSnapshot
-): boolean {
+export function isPendingAcpActivitySnapshotCurrent(snapshot: AcpActivityPendingSnapshot): boolean {
   return pendingActivityByKey.get(snapshot.key)?.version === snapshot.version;
 }
 
@@ -446,13 +485,21 @@ function coalescePendingActivity(input: {
     reason: input.reason,
     version: ++pendingVersionCounter,
     flushScheduled: existing?.flushScheduled ?? false,
+    flushRetries: existing?.flushRetries ?? 0,
   };
   pendingActivityByKey.set(input.key, pending);
 
   if (!pending.flushScheduled) {
     pending.flushScheduled = true;
     pendingActivityByKey.set(input.key, pending);
-    schedulePendingFlush(input.env, input.config, input.key, input.waitUntil, input.flush);
+    schedulePendingFlush(
+      input.env,
+      input.config,
+      input.key,
+      input.waitUntil,
+      input.flush,
+      coalescedFlushDelayMs(input.config, pending.flushRetries)
+    );
   }
 
   recordAcpActivityCallbackMetric(
@@ -465,6 +512,7 @@ function coalescePendingActivity(input: {
       workspaceId: input.binding.workspaceId,
       activity: input.report.activity,
       reason: input.reason,
+      ...buildAcpActivityRuntimeWorkMetricFields(input.report, input.observedAt ?? input.now),
       source: 'callback',
       coalescedCount: pending.coalescedCount,
       pendingCount: pendingActivityByKey.size,
@@ -480,14 +528,32 @@ function coalescePendingActivity(input: {
   };
 }
 
+/**
+ * Delay before the next coalesced flush: the coalesce window, doubling per transient failure and
+ * capped at the pending TTL. On 2026-09-24 the SAM root object was unreachable for 33 minutes; a
+ * fixed 2 s retry would have flushed each session up to 30 times a minute into a dead object —
+ * more load than the VM retries this coalescing replaces. The TTL still bounds how long a pending
+ * report is kept at all.
+ */
+export function coalescedFlushDelayMs(
+  config: Pick<AcpActivityAdmissionConfig, 'coalesceWindowMs' | 'coalesceTtlMs'>,
+  flushRetries: number
+): number {
+  return Math.min(
+    config.coalesceWindowMs * 2 ** Math.max(0, flushRetries),
+    Math.max(config.coalesceWindowMs, config.coalesceTtlMs)
+  );
+}
+
 function schedulePendingFlush(
   env: Env,
   config: AcpActivityAdmissionConfig,
   key: string,
   waitUntil: WaitUntilFn,
-  flush: AcpActivityFlushHandler
+  flush: AcpActivityFlushHandler,
+  delayMs: number
 ): void {
-  const promise = delay(config.coalesceWindowMs)
+  const promise = delay(delayMs)
     .then(() => flushPendingActivity(env, config, key, waitUntil, flush))
     .catch((err) => {
       log.warn('acp_activity.coalesced_flush_failed', {
@@ -547,6 +613,7 @@ async function flushPendingActivity(
       reason: 'coalesced_flush',
       source: 'coalesced_flush',
       coalescedCount: snapshot.coalescedCount,
+      observedAt: snapshot.observedAt,
     });
     return;
   }
@@ -571,10 +638,18 @@ async function flushPendingActivity(
     return;
   }
 
+  latest.flushRetries += 1;
   if (!latest.flushScheduled) {
     latest.flushScheduled = true;
     pendingActivityByKey.set(key, latest);
-    schedulePendingFlush(env, config, key, waitUntil, flush);
+    schedulePendingFlush(
+      env,
+      config,
+      key,
+      waitUntil,
+      flush,
+      coalescedFlushDelayMs(config, latest.flushRetries)
+    );
   }
 }
 
@@ -669,6 +744,7 @@ function recordRejectedPending(
       workspaceId: pending.binding.workspaceId,
       activity: pending.report.activity,
       reason,
+      ...buildAcpActivityRuntimeWorkMetricFields(pending.report, pending.observedAt),
       source: 'admission_control',
       coalescedCount: pending.coalescedCount,
       pendingCount: pendingActivityByKey.size,

@@ -6,14 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
-
-	"github.com/workspace/vm-agent/internal/acp"
 )
 
 const (
@@ -31,6 +28,7 @@ type snapshotPrepareResponse struct {
 		TotalBudgetBytes      int64 `json:"totalBudgetBytes"`
 		EntryThresholdBytes   int64 `json:"entryThresholdBytes"`
 		TransferIdleTimeoutMs int64 `json:"transferIdleTimeoutMs"`
+		JSONBodyMaxBytes      int64 `json:"jsonBodyMaxBytes"`
 	} `json:"config"`
 	Upload struct {
 		Home string `json:"home"`
@@ -69,6 +67,7 @@ type snapshotManifest struct {
 	AcpSessionID   string                      `json:"acpSessionId,omitempty"`
 	AgentType      string                      `json:"agentType,omitempty"`
 	BaseCommit     string                      `json:"baseCommit,omitempty"`
+	Git            *snapshotGitMetadata        `json:"git,omitempty"`
 	Status         string                      `json:"status"`
 	Degradation    string                      `json:"degradation"`
 	Skipped        []snapshotSkippedEntry      `json:"skipped"`
@@ -88,17 +87,20 @@ type snapshotArtifact struct {
 }
 
 type sessionSnapshotHandlerInput struct {
-	workspaceID   string
-	sessionID     string
-	chatSessionID string
-	runtimeName   string
-	runtime       *WorkspaceRuntime
-	callbackToken string
-	agentType     string
-	background    bool
+	workspaceID            string
+	sessionID              string
+	chatSessionID          string
+	runtimeName            string
+	runtime                *WorkspaceRuntime
+	callbackToken          string
+	agentType              string
+	background             bool
+	workspaceCallbackToken string
+	acpSessionID           string
+	containerTarget        *containerSnapshotTarget
 }
 
-func (s *Server) sessionSnapshotHandlerInput(w http.ResponseWriter, r *http.Request) (*sessionSnapshotHandlerInput, bool) {
+func (s *Server) sessionSnapshotHandlerInput(w http.ResponseWriter, r *http.Request, restoring bool) (*sessionSnapshotHandlerInput, bool) {
 	workspaceID := r.PathValue("workspaceId")
 	sessionID := r.PathValue("sessionId")
 	if workspaceID == "" || sessionID == "" {
@@ -124,38 +126,63 @@ func (s *Server) sessionSnapshotHandlerInput(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, "chatSessionId is required")
 		return nil, false
 	}
+	// Validate routing before accepting callback credentials or touching files.
+	if restoring {
+		if err := s.initializeStandaloneRestoreSession(workspaceID, sessionID, body.ChatSessionID, body.Runtime); err != nil {
+			writeError(w, http.StatusConflict, err.Error())
+			return nil, false
+		}
+		if err := s.validateSessionRestoreIdentity(workspaceID, sessionID, body.ChatSessionID, strings.TrimSpace(body.AgentType)); err != nil {
+			writeError(w, http.StatusConflict, err.Error())
+			return nil, false
+		}
+	}
 	// A freshly-woken container never ran create-workspace, so its
 	// runtime.CallbackToken (the workspace-scoped token used by the message
 	// reporter and the snapshot callbacks) is unset. Persist the token the
 	// control plane provides on the restore request so chat replies and
 	// snapshot callbacks can authenticate after a wake.
-	if wsToken := strings.TrimSpace(body.WorkspaceCallbackToken); wsToken != "" {
-		s.upsertWorkspaceRuntime(workspaceID, "", "", "", wsToken)
+	if wsToken := strings.TrimSpace(body.WorkspaceCallbackToken); wsToken != "" && !restoring {
+		s.upsertWorkspaceRuntime(workspaceID, "", "", "", wsToken, workspaceRuntimeOpts{ChatSessionID: body.ChatSessionID})
 	}
 	runtime, ok := s.getWorkspaceRuntime(workspaceID)
 	if !ok {
 		writeError(w, http.StatusNotFound, "workspace not found")
 		return nil, false
 	}
+	if !restoring {
+		s.recordWorkspaceChatSessionID(workspaceID, body.ChatSessionID)
+	}
 	callbackToken := s.callbackTokenForWorkspace(workspaceID)
+	if restoring && strings.TrimSpace(body.WorkspaceCallbackToken) != "" {
+		callbackToken = strings.TrimSpace(body.WorkspaceCallbackToken)
+	}
 	if callbackToken == "" {
 		writeError(w, http.StatusConflict, "workspace callback token unavailable")
 		return nil, false
 	}
+	acpSessionID := ""
+	if s.agentSessions != nil {
+		if session, exists := s.agentSessions.Get(workspaceID, sessionID); exists {
+			acpSessionID = strings.TrimSpace(session.AcpSessionID)
+		}
+	}
 	return &sessionSnapshotHandlerInput{
-		workspaceID:   workspaceID,
-		sessionID:     sessionID,
-		chatSessionID: body.ChatSessionID,
-		runtimeName:   body.Runtime,
-		runtime:       runtime,
-		callbackToken: callbackToken,
-		agentType:     strings.TrimSpace(body.AgentType),
-		background:    body.Background,
+		workspaceID:            workspaceID,
+		sessionID:              sessionID,
+		chatSessionID:          body.ChatSessionID,
+		runtimeName:            body.Runtime,
+		runtime:                runtime,
+		callbackToken:          callbackToken,
+		agentType:              strings.TrimSpace(body.AgentType),
+		background:             body.Background,
+		workspaceCallbackToken: strings.TrimSpace(body.WorkspaceCallbackToken),
+		acpSessionID:           acpSessionID,
 	}, true
 }
 
 func (s *Server) handleHibernateAgentSession(w http.ResponseWriter, r *http.Request) {
-	input, ok := s.sessionSnapshotHandlerInput(w, r)
+	input, ok := s.sessionSnapshotHandlerInput(w, r, false)
 	if !ok {
 		return
 	}
@@ -175,53 +202,11 @@ func (s *Server) handleHibernateAgentSession(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, result)
 }
 
-func (s *Server) handleRestoreAgentSession(w http.ResponseWriter, r *http.Request) {
-	input, ok := s.sessionSnapshotHandlerInput(w, r)
-	if !ok {
-		return
-	}
-	result, err := s.restoreSessionSnapshot(r.Context(), input.runtime, input.sessionID, input.chatSessionID, input.agentType, input.callbackToken)
-	if err != nil {
-		_ = s.reportSnapshotRestoreResult(context.Background(), input.workspaceID, input.chatSessionID, "degraded", err.Error(), input.callbackToken)
-		s.prepareFreshSessionAfterDegradedRestore(input.workspaceID, input.sessionID, err)
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"status":  "degraded",
-			"message": "The saved workspace was restored, but the agent context could not be resumed.",
-		})
-		return
-	}
-	writeJSON(w, http.StatusOK, result)
-}
+func (s *Server) hibernateSessionSnapshot(ctx context.Context, input *sessionSnapshotHandlerInput) (map[string]interface{}, error) {
+	runtime := input.runtime
+	sessionID, chatSessionID := input.sessionID, input.chatSessionID
+	runtimeName, callbackToken := input.runtimeName, input.callbackToken
 
-func (s *Server) prepareFreshSessionAfterDegradedRestore(workspaceID, sessionID string, restoreErr error) {
-	hostKey := workspaceID + ":" + sessionID
-	s.sessionHostMu.Lock()
-	host := s.sessionHosts[hostKey]
-	if host != nil {
-		delete(s.sessionHosts, hostKey)
-	}
-	s.sessionHostMu.Unlock()
-	if host != nil {
-		host.Stop()
-	}
-
-	if _, err := s.agentSessions.PrepareDegradedRestoreFallback(workspaceID, sessionID); err != nil {
-		slog.Warn("Failed to prepare agent session for degraded snapshot fresh fallback",
-			"workspace", workspaceID, "session", sessionID, "error", err)
-	}
-	if s.store != nil {
-		if err := s.store.UpdateTabAcpSessionID(sessionID, ""); err != nil {
-			slog.Warn("Failed to clear persisted tab ACP session identity after degraded snapshot restore",
-				"workspace", workspaceID, "session", sessionID, "error", err)
-		}
-	}
-	s.appendNodeEvent(workspaceID, "warn", "session_snapshot.restore_degraded_fresh_fallback", "Snapshot restore degraded; next start will create a fresh agent context", map[string]interface{}{
-		"sessionId": sessionID,
-		"error":     restoreErr.Error(),
-	})
-}
-
-func (s *Server) hibernateSessionSnapshot(ctx context.Context, runtime *WorkspaceRuntime, sessionID, chatSessionID, runtimeName, agentType, callbackToken string) (map[string]interface{}, error) {
 	prepare, err := s.prepareSnapshot(ctx, runtime.ID, sessionID, chatSessionID, runtimeName, callbackToken)
 	if err != nil {
 		return nil, err
@@ -242,15 +227,7 @@ func (s *Server) hibernateSessionSnapshot(ctx context.Context, runtime *Workspac
 		Artifacts:      map[string]snapshotArtifact{},
 		CreatedAt:      time.Now().UTC().Format(time.RFC3339),
 	}
-	if s.agentSessions != nil {
-		if session, exists := s.agentSessions.Get(runtime.ID, sessionID); exists {
-			manifest.AcpSessionID = strings.TrimSpace(session.AcpSessionID)
-			manifest.AgentType = strings.TrimSpace(session.AgentType)
-		}
-	}
-	if manifest.AcpSessionID != "" && manifest.AgentType == "" {
-		manifest.AgentType = strings.TrimSpace(agentType)
-	}
+	s.populateSnapshotHarnessIdentity(&manifest, runtime.ID, sessionID, input.acpSessionID, input.agentType)
 	agentContextSkipped := false
 	if manifest.AcpSessionID == "" || manifest.AgentType == "" {
 		manifest.AcpSessionID = ""
@@ -262,68 +239,21 @@ func (s *Server) hibernateSessionSnapshot(ctx context.Context, runtime *Workspac
 		})
 	}
 	workDir := standaloneWorkspaceWorkDir(runtime, s.config.WorkspaceDir, s.config.ContainerWorkDir)
-	var snapshotTarget *containerSnapshotTarget
-	if !s.config.IsStandaloneMode() {
-		snapshotTarget, err = s.resolveContainerSnapshotTarget(runtime)
+	// A caller-frozen container target is authoritative: eviction pins the exact
+	// Docker identity it snapshots. Otherwise devcontainer workspaces resolve one.
+	snapshotTarget := input.containerTarget
+	if snapshotTarget == nil && !s.config.IsStandaloneMode() {
+		snapshotTarget, err = s.resolveContainerSnapshotTarget(ctx, runtime)
 		if err != nil {
 			return nil, newSnapshotResolveError(prepare.Generation, err)
 		}
+	}
+	if snapshotTarget != nil {
 		workDir = snapshotTarget.workDir
 	}
-	var baseCommit, wipPath string
-	var wipSkipped []snapshotSkippedEntry
-	if snapshotTarget == nil {
-		baseCommit, wipPath, wipSkipped, err = createWIPBundle(ctx, workDir, entryThreshold)
-	} else {
-		baseCommit, wipPath, wipSkipped, err = s.createContainerWIPBundle(ctx, snapshotTarget, entryThreshold, totalBudget, progress.Report)
-	}
-	manifest.BaseCommit = baseCommit
-	manifest.Skipped = append(manifest.Skipped, wipSkipped...)
-	wipCaptureFailed := err != nil
-	if err != nil {
-		manifest.Skipped = append(manifest.Skipped, snapshotSkippedEntry{Path: workDir, Reason: err.Error()})
-	}
-
-	remaining := totalBudget
-	if wipPath != "" {
-		size, sha, uploadErr := s.uploadSessionSnapshotArtifact(ctx, prepare.Upload.WIP, prepare.DirectUpload.WIP, wipPath, callbackToken, idleTimeout)
-		_ = os.Remove(wipPath)
-		if uploadErr != nil {
-			wipCaptureFailed = true
-			manifest.Skipped = append(manifest.Skipped, snapshotSkippedEntry{Path: workDir, Reason: uploadErr.Error()})
-		} else {
-			manifest.Artifacts["wip"] = snapshotArtifact{SizeBytes: size, SHA256: sha}
-			remaining -= size
-		}
-		progress.Report(ctx, "wip-upload")
-	}
-	var homePath string
-	var homeSkipped []snapshotSkippedEntry
-	if snapshotTarget == nil {
-		homePath, homeSkipped, err = createSessionStateTarWithContext(ctx, os.UserHomeDir, entryThreshold, remaining, true, progress.Report)
-	} else {
-		homePath, homeSkipped, err = s.createContainerHomeTar(ctx, snapshotTarget, entryThreshold, remaining, progress.Report)
-	}
-	progress.Report(ctx, "home-captured")
-	manifest.Skipped = append(manifest.Skipped, homeSkipped...)
-	homeCaptureFailed := err != nil
-	if err != nil {
-		manifest.Skipped = append(manifest.Skipped, snapshotSkippedEntry{Path: "$HOME", Reason: err.Error()})
-	}
-	if homePath != "" {
-		size, sha, uploadErr := s.uploadSessionSnapshotArtifact(ctx, prepare.Upload.Home, prepare.DirectUpload.Home, homePath, callbackToken, idleTimeout)
-		_ = os.Remove(homePath)
-		if uploadErr != nil {
-			homeCaptureFailed = true
-			manifest.Skipped = append(manifest.Skipped, snapshotSkippedEntry{Path: "$HOME", Reason: uploadErr.Error()})
-		} else {
-			manifest.Artifacts["home"] = snapshotArtifact{SizeBytes: size, SHA256: sha}
-		}
-		progress.Report(ctx, "home-upload")
-	}
-	if _, ok := manifest.Artifacts["home"]; !ok {
-		homeCaptureFailed = true
-	}
+	capture := snapshotArtifactCapture{server: s, target: snapshotTarget, workDir: workDir, token: callbackToken, prepare: prepare, threshold: entryThreshold, budget: totalBudget, idleTimeout: idleTimeout, progress: progress, manifest: &manifest}
+	wipCaptureFailed := capture.captureWIP(ctx)
+	homeCaptureFailed := capture.captureHome(ctx)
 	if homeCaptureFailed && wipCaptureFailed {
 		manifest.Degradation = "transcript-only"
 		manifest.Status = "degraded"
@@ -347,160 +277,12 @@ func (s *Server) hibernateSessionSnapshot(ctx context.Context, runtime *Workspac
 	if len(manifest.Skipped) > 0 && manifest.Status == "available" {
 		manifest.Status = "degraded"
 	}
+	manifest.Skipped = boundSnapshotSkippedEntries(manifest.Skipped, snapshotSkippedEntriesBudget(prepare))
 	err = s.completeSnapshot(ctx, runtime.ID, sessionID, chatSessionID, runtimeName, prepare.Generation, callbackToken, manifest)
 	if err != nil {
 		return nil, &sessionSnapshotCaptureError{generation: prepare.Generation, err: err}
 	}
 	return map[string]interface{}{"status": manifest.Status, "degradation": manifest.Degradation, "skipped": manifest.Skipped}, nil
-}
-
-func (s *Server) restoreSessionSnapshot(ctx context.Context, runtime *WorkspaceRuntime, sessionID, chatSessionID, agentType, callbackToken string) (map[string]interface{}, error) {
-	restore, err := s.fetchSnapshotRestore(ctx, runtime.ID, chatSessionID, callbackToken)
-	if err != nil {
-		return nil, err
-	}
-	if !restore.Available {
-		_ = s.reportSnapshotRestoreResult(ctx, runtime.ID, chatSessionID, "missing", restore.Reason, callbackToken)
-		return map[string]interface{}{"status": "transcript-replay", "reason": restore.Reason}, nil
-	}
-	idleTimeout := choosePositiveDurationMs(restore.Config.TransferIdleTimeoutMs, defaultSnapshotTransferIdleTimeout)
-	totalBudget := choosePositiveInt64(restore.Config.TotalBudgetBytes, defaultSnapshotTotalBudgetBytes)
-	entryThreshold := choosePositiveInt64(restore.Config.EntryThresholdBytes, defaultSnapshotEntryThresholdBytes)
-	// A freshly launched VM has no devcontainer to restore into. Provision the
-	// repository and container first; credential-bearing HOME paths are excluded
-	// from snapshots, so fresh control-plane credential injection remains
-	// authoritative even though the safe HOME archive is applied afterward.
-	var provisionErr error
-	if s.config.IsStandaloneMode() {
-		provisionErr = s.prepareStandaloneWorkspaceRuntime(ctx, runtime)
-	} else {
-		_, provisionErr = s.provisionWorkspaceRuntime(ctx, runtime)
-	}
-	if provisionErr != nil {
-		_ = s.reportSnapshotRestoreResult(ctx, runtime.ID, chatSessionID, "fresh_injection_failed", provisionErr.Error(), callbackToken)
-		return nil, provisionErr
-	}
-	if s.config.IsStandaloneMode() && restore.Download.Home != "" {
-		if err := s.downloadAndExtractSessionStateTar(ctx, restore.Download.Home, callbackToken, idleTimeout, entryThreshold, totalBudget); err != nil {
-			_ = s.reportSnapshotRestoreResult(ctx, runtime.ID, chatSessionID, "home_failed", err.Error(), callbackToken)
-			return nil, err
-		}
-	}
-	if s.config.IsStandaloneMode() && restore.Download.WIP != "" {
-		workDir := standaloneWorkspaceWorkDir(runtime, s.config.WorkspaceDir, s.config.ContainerWorkDir)
-		if err := s.downloadAndRestoreWIP(ctx, restore.Download.WIP, callbackToken, idleTimeout, workDir, restore.BaseCommit); err != nil {
-			_ = s.reportSnapshotRestoreResult(ctx, runtime.ID, chatSessionID, "wip_failed", err.Error(), callbackToken)
-			return nil, err
-		}
-	}
-	if !s.config.IsStandaloneMode() {
-		target, targetErr := s.resolveContainerSnapshotTarget(runtime)
-		if targetErr != nil {
-			return nil, targetErr
-		}
-		if restore.Download.Home != "" {
-			if err := s.downloadAndExtractContainerHome(ctx, target, restore.Download.Home, callbackToken, idleTimeout, entryThreshold, totalBudget); err != nil {
-				_ = s.reportSnapshotRestoreResult(ctx, runtime.ID, chatSessionID, "home_failed", err.Error(), callbackToken)
-				return nil, err
-			}
-		}
-		if restore.Download.WIP != "" {
-			if err := s.downloadAndRestoreContainerWIP(ctx, target, restore.Download.WIP, callbackToken, idleTimeout, totalBudget, restore.BaseCommit); err != nil {
-				_ = s.reportSnapshotRestoreResult(ctx, runtime.ID, chatSessionID, "wip_failed", err.Error(), callbackToken)
-				return nil, err
-			}
-		}
-	}
-
-	acpSessionID, savedAgentType, identityErr := snapshotHarnessResumeIdentity(restore.Manifest, sessionID, agentType)
-	if identityErr != nil {
-		return nil, identityErr
-	}
-	// Prime the per-workspace message reporter before the agent starts.
-	s.primeRestoredMessageReporter(runtime, chatSessionID)
-	if _, _, createErr := s.agentSessions.Create(runtime.ID, sessionID, "Restored session", "restore:"+sessionID); createErr != nil {
-		if _, exists := s.agentSessions.Get(runtime.ID, sessionID); !exists {
-			return nil, fmt.Errorf("recreate restored agent session: %w", createErr)
-		}
-	}
-	if updateErr := s.agentSessions.UpdateAcpSessionID(runtime.ID, sessionID, acpSessionID, savedAgentType); updateErr != nil {
-		return nil, fmt.Errorf("hydrate restored agent session: %w", updateErr)
-	}
-	session, exists := s.agentSessions.Get(runtime.ID, sessionID)
-	if !exists {
-		return nil, fmt.Errorf("restored agent session is unavailable")
-	}
-	hostKey := runtime.ID + ":" + sessionID
-	host := s.getOrCreateSessionHost(hostKey, runtime.ID, sessionID, session, runtime, "")
-	if restoreErr := host.RestoreAgent(ctx, savedAgentType); restoreErr != nil {
-		return nil, fmt.Errorf("resume saved agent context: %w", restoreErr)
-	}
-	if host.Status() != acp.HostReady {
-		return nil, fmt.Errorf("restored agent failed to become ready: %s", host.Status())
-	}
-	_ = s.reportSnapshotRestoreResult(ctx, runtime.ID, chatSessionID, "restored", "", callbackToken)
-	return map[string]interface{}{"status": "restored", "degradation": restore.Degradation}, nil
-}
-
-func snapshotHarnessResumeIdentity(manifest *snapshotManifest, sessionID, requestedAgentType string) (string, string, error) {
-	if manifest == nil {
-		return "", "", fmt.Errorf("snapshot manifest is unavailable")
-	}
-	if manifest.Artifacts == nil {
-		return "", "", fmt.Errorf("snapshot does not contain restored home state")
-	}
-	if _, ok := manifest.Artifacts["home"]; !ok {
-		return "", "", fmt.Errorf("snapshot does not contain restored home state")
-	}
-	// AgentSessionID is the old control-plane routing identity. A VM wake creates
-	// a replacement routing row, while AcpSessionID remains the authoritative
-	// harness identity that must be loaded. Chat/workspace ownership is validated
-	// by the authenticated snapshot endpoints before this point.
-	acpSessionID := strings.TrimSpace(manifest.AcpSessionID)
-	savedAgentType := strings.TrimSpace(manifest.AgentType)
-	if acpSessionID == "" || savedAgentType == "" {
-		return "", "", fmt.Errorf("snapshot does not contain resumable agent context")
-	}
-	requestedAgentType = strings.TrimSpace(requestedAgentType)
-	if requestedAgentType == "" {
-		return "", "", fmt.Errorf("agent type is required to restore a standalone session")
-	}
-	if requestedAgentType != savedAgentType {
-		return "", "", fmt.Errorf("snapshot agent type does not match requested agent")
-	}
-	return acpSessionID, savedAgentType, nil
-}
-
-// primeRestoredMessageReporter ensures the per-workspace message reporter exists
-// and is bound to the restored chat session before the agent starts producing
-// output. handleCreateAgentSession does this on the normal path; the restore
-// path must replicate it or the restored agent's replies are never enqueued and
-// are silently dropped after a wake.
-func (s *Server) primeRestoredMessageReporter(runtime *WorkspaceRuntime, chatSessionID string) {
-	if runtime == nil {
-		return
-	}
-	chatSessionID = strings.TrimSpace(chatSessionID)
-	projectID := strings.TrimSpace(runtime.ProjectID)
-	if projectID == "" {
-		projectID = strings.TrimSpace(s.config.ProjectID)
-	}
-	if projectID == "" || chatSessionID == "" {
-		// Without a project + chat session the reporter cannot be created, so
-		// the restored agent's output would be silently dropped. Log loudly so
-		// this failure mode is diagnosable instead of invisible.
-		slog.Warn("Restored session message reporter not primed: missing project or chat session",
-			"workspaceId", runtime.ID, "hasProjectID", projectID != "", "hasChatSessionID", chatSessionID != "")
-		return
-	}
-	s.workspaceMu.Lock()
-	if rt, ok := s.workspaces[runtime.ID]; ok && strings.TrimSpace(rt.ProjectID) == "" {
-		rt.ProjectID = projectID
-	}
-	s.workspaceMu.Unlock()
-	if reporter := s.getOrCreateReporter(runtime.ID, projectID, chatSessionID); reporter != nil {
-		reporter.SetSessionID(chatSessionID)
-	}
 }
 
 func (s *Server) downloadAndExtractTar(ctx context.Context, downloadPath, token string, idleTimeout time.Duration) error {
@@ -607,93 +389,6 @@ func ensureSafeLocalSnapshotDestination(destination string) error {
 		return err
 	}
 	return rejectSymlinkPath(string(filepath.Separator), destination)
-}
-
-func (s *Server) downloadAndRestoreWIP(ctx context.Context, downloadPath, token string, idleTimeout time.Duration, workDir, baseCommit string) error {
-	res, err := s.snapshotDownload(ctx, downloadPath, token)
-	if err != nil {
-		return err
-	}
-	defer res.Body.Close()
-	tmp, err := os.CreateTemp("", "sam-session-restore-*.bundle")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	_, copyErr := io.Copy(tmp, newIdleReader(res.Body, idleTimeout))
-	closeErr := tmp.Close()
-	if copyErr != nil {
-		_ = os.Remove(tmpPath)
-		return copyErr
-	}
-	if closeErr != nil {
-		_ = os.Remove(tmpPath)
-		return closeErr
-	}
-	defer os.Remove(tmpPath)
-	heads, err := runStandaloneGitCommand(ctx, workDir, nil, "bundle", "list-heads", tmpPath)
-	if err != nil {
-		return fmt.Errorf("list snapshot bundle heads: %w: %s", err, heads)
-	}
-	bundleRefs := make(map[string]string)
-	for _, line := range strings.Split(strings.TrimSpace(heads), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) >= 2 {
-			bundleRefs[fields[1]] = fields[0]
-		}
-	}
-	if len(bundleRefs) == 0 {
-		return fmt.Errorf("snapshot bundle has no restorable ref")
-	}
-	worktreeRef, worktreeCommit := snapshotBundleRef(bundleRefs, "/worktree")
-	indexRef, indexCommit := snapshotBundleRef(bundleRefs, "/index")
-	if worktreeRef != "" && indexRef != "" {
-		if output, err := runStandaloneGitCommand(ctx, workDir, nil, "fetch", tmpPath, worktreeRef, indexRef); err != nil {
-			return fmt.Errorf("fetch snapshot bundle: %w: %s", err, output)
-		}
-		if output, err := runStandaloneGitCommand(ctx, workDir, nil, "read-tree", "--reset", "-u", worktreeCommit); err != nil {
-			return fmt.Errorf("materialize snapshot worktree: %w: %s", err, output)
-		}
-		if strings.TrimSpace(baseCommit) != "" {
-			if output, err := runStandaloneGitCommand(ctx, workDir, nil, "reset", "--soft", baseCommit); err != nil {
-				return fmt.Errorf("restore snapshot base commit: %w: %s", err, output)
-			}
-		}
-		if output, err := runStandaloneGitCommand(ctx, workDir, nil, "read-tree", indexCommit); err != nil {
-			return fmt.Errorf("restore snapshot index: %w: %s", err, output)
-		}
-		return nil
-	}
-
-	// Version 1 bundles written before index preservation contained a single
-	// synthetic commit. Keep restoring them for compatibility; their original
-	// staged/unstaged split was not encoded and therefore cannot be recovered.
-	var legacyRef string
-	for ref := range bundleRefs {
-		legacyRef = ref
-		break
-	}
-	if output, err := runStandaloneGitCommand(ctx, workDir, nil, "fetch", tmpPath, legacyRef); err != nil {
-		return fmt.Errorf("fetch snapshot bundle: %w: %s", err, output)
-	}
-	if output, err := runStandaloneGitCommand(ctx, workDir, nil, "read-tree", "--reset", "-u", "FETCH_HEAD"); err != nil {
-		return fmt.Errorf("materialize snapshot tree: %w: %s", err, output)
-	}
-	if strings.TrimSpace(baseCommit) != "" {
-		if output, err := runStandaloneGitCommand(ctx, workDir, nil, "reset", "--mixed", baseCommit); err != nil {
-			return fmt.Errorf("restore snapshot base commit: %w: %s", err, output)
-		}
-	}
-	return nil
-}
-
-func snapshotBundleRef(refs map[string]string, suffix string) (string, string) {
-	for ref, commit := range refs {
-		if strings.HasSuffix(ref, suffix) {
-			return ref, commit
-		}
-	}
-	return "", ""
 }
 
 func (s *Server) snapshotDownload(ctx context.Context, downloadPath, token string) (*http.Response, error) {

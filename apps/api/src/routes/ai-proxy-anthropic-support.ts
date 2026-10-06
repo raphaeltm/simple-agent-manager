@@ -1,0 +1,188 @@
+/**
+ * Error shapes and platform-credential telemetry for the native Anthropic proxy
+ * (`routes/ai-proxy-anthropic.ts`).
+ *
+ * Split out of ai-proxy-anthropic.ts per .claude/rules/18-file-size-limits.md.
+ */
+import { DEFAULT_AI_PROXY_REQUEST_BODY_MAX_BYTES } from '@simple-agent-manager/shared';
+import type { Context } from 'hono';
+
+import type { Env } from '../env';
+import { log } from '../lib/logger';
+import { parsePositiveInt } from '../lib/route-helpers';
+import { RequestBodyTooLargeError } from '../lib/runtime-validation';
+import type { resolveUpstreamAuth } from '../services/ai-billing';
+import { checkModelTierAllowance, describeModelTierDenial } from '../services/ai-model-tier-gate';
+import {
+  isAnthropicModel,
+  updateAIProxyAgentCredentialAttribution,
+  type verifyAIProxyAuth,
+} from '../services/ai-proxy-shared';
+import { optionalExecutionContext } from '../services/ai-token-usage-accounting';
+import {
+  copyCredentialLimitHeaders,
+  recordProxyCredentialLimitObservationsFromHeaders,
+} from '../services/credential-limit-events';
+import { getAllowedModels } from './ai-proxy-model-resolution';
+
+type AnthropicProxyContext = Context<{ Bindings: Env }>;
+type AnthropicProxyAuth = Awaited<ReturnType<typeof verifyAIProxyAuth>>;
+
+/** Return an Anthropic-format error response. */
+export function anthropicError(
+  message: string,
+  type: string,
+  status: number,
+  headers?: HeadersInit
+): Response {
+  const responseHeaders = new Headers(headers);
+  if (!responseHeaders.has('Content-Type')) responseHeaders.set('Content-Type', 'application/json');
+  return new Response(JSON.stringify({ type: 'error', error: { type, message } }), {
+    status,
+    headers: responseHeaders,
+  });
+}
+
+export function anthropicProviderErrorHeaders(upstreamHeaders: Headers): Headers {
+  const headers = new Headers({ 'Content-Type': 'application/json' });
+  copyCredentialLimitHeaders(upstreamHeaders, headers);
+  return headers;
+}
+
+export function anthropicUsageGateError(
+  reason: 'daily-token-budget' | 'monthly-cost-cap'
+): Response {
+  if (reason === 'daily-token-budget') {
+    return anthropicError(
+      'Daily token budget exceeded. Resets at midnight UTC.',
+      'rate_limit_error',
+      429
+    );
+  }
+
+  return anthropicError(
+    'Monthly cost cap exceeded. Adjust your cap in Settings > Usage.',
+    'rate_limit_error',
+    429
+  );
+}
+
+export function anthropicBodyMaxBytes(c: AnthropicProxyContext): number {
+  return parsePositiveInt(
+    c.env.AI_PROXY_REQUEST_BODY_MAX_BYTES,
+    DEFAULT_AI_PROXY_REQUEST_BODY_MAX_BYTES
+  );
+}
+
+export function anthropicBodyParseError(error: unknown): Response {
+  if (error instanceof RequestBodyTooLargeError) {
+    return anthropicError(
+      `Request body exceeds ${error.maxBytes} bytes`,
+      'invalid_request_error',
+      413
+    );
+  }
+  return anthropicError('Invalid JSON in request body', 'invalid_request_error', 400);
+}
+
+async function recordAnthropicPlatformLimitHeaders(input: {
+  env: Env;
+  response: Response;
+  auth: AnthropicProxyAuth;
+  upstreamAuth: Awaited<ReturnType<typeof resolveUpstreamAuth>>;
+  source: string;
+}): Promise<void> {
+  try {
+    await updateAIProxyAgentCredentialAttribution(input.env, input.auth, input.upstreamAuth);
+  } catch (error) {
+    log.warn('ai_proxy_anthropic.credential_attribution_update_failed', {
+      userId: input.auth.userId,
+      workspaceId: input.auth.workspaceId,
+      agentSessionId: input.auth.agentSessionId ?? null,
+      source: input.source,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  await recordProxyCredentialLimitObservationsFromHeaders(input.env, input.response.headers, {
+    projectId: input.auth.projectId,
+    userId: input.auth.userId,
+    workspaceId: input.auth.workspaceId,
+    chatSessionId: input.auth.chatSessionId,
+    agentSessionId: input.auth.agentSessionId,
+    agentType: input.auth.agentType,
+    credentialReference: input.upstreamAuth.credentialReference,
+    credentialSource: input.upstreamAuth.credentialSource,
+    provider: 'anthropic',
+    providerMode: input.upstreamAuth.providerMode,
+    source: input.source,
+    responseStatus: input.response.status,
+  });
+}
+
+export function scheduleAnthropicPlatformLimitHeaders(
+  c: AnthropicProxyContext,
+  input: Parameters<typeof recordAnthropicPlatformLimitHeaders>[0]
+): void {
+  const telemetry = recordAnthropicPlatformLimitHeaders(input).catch((error) => {
+    log.warn('ai_proxy_anthropic.credential_limit_telemetry_failed', {
+      userId: input.auth.userId,
+      workspaceId: input.auth.workspaceId,
+      agentSessionId: input.auth.agentSessionId ?? null,
+      source: input.source,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
+  optionalExecutionContext(() => c.executionCtx)?.waitUntil(telemetry);
+  void telemetry;
+}
+
+/**
+ * Refuses a model outside the operator's AI proxy allowlist (`AI_PROXY_ALLOWED_MODELS`, by default
+ * the platform catalog) in the Anthropic error format — the boundary `validateAllowedModel`
+ * (`routes/ai-proxy-admission.ts`) enforces on the OpenAI-compatible routes. It applies to every
+ * caller, restricted or not, so an uncatalogued `claude-*` ID never reaches platform credentials.
+ */
+export function validateAnthropicAllowedModel(
+  c: AnthropicProxyContext,
+  auth: Pick<AnthropicProxyAuth, 'userId' | 'workspaceId'>,
+  modelId: string
+): Response | null {
+  const allowedModels = getAllowedModels(c.env);
+  if (allowedModels.has(modelId)) return null;
+
+  // Claude Code picks its own model IDs for background work, so a refusal here is how a new default
+  // that the catalog has not caught up with would first show up.
+  log.warn('ai_proxy_anthropic.model_not_allowed', {
+    userId: auth.userId,
+    workspaceId: auth.workspaceId,
+    modelId,
+  });
+  const allowedAnthropicModels = Array.from(allowedModels).filter(isAnthropicModel);
+  return anthropicError(
+    `Model '${modelId}' is not available. Allowed models: ${allowedAnthropicModels.join(', ') || 'none'}`,
+    'invalid_request_error',
+    400
+  );
+}
+
+/**
+ * Refuses a model outside the caller's admin-allowed budget tiers (`services/ai-model-tier-gate.ts`)
+ * in the Anthropic error format. Runs before the usage gate and any upstream spend.
+ */
+export async function enforceAnthropicModelTier(
+  c: AnthropicProxyContext,
+  auth: Pick<AnthropicProxyAuth, 'userId' | 'workspaceId'>,
+  modelId: string
+): Promise<Response | null> {
+  const decision = await checkModelTierAllowance(c.env.KV, auth.userId, modelId);
+  if (decision.allowed) return null;
+
+  log.warn('ai_proxy_anthropic.model_tier_denied', {
+    userId: auth.userId,
+    workspaceId: auth.workspaceId,
+    modelId,
+    ...decision,
+  });
+  return anthropicError(describeModelTierDenial(modelId, decision), 'permission_error', 403);
+}

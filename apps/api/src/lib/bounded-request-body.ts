@@ -10,6 +10,14 @@ export async function readBoundedRequestBody(
   request: Request,
   maxBytes: number
 ): Promise<Uint8Array> {
+  const contentLength = request.headers.get('content-length');
+  if (contentLength) {
+    const declaredBytes = Number.parseInt(contentLength, 10);
+    if (Number.isFinite(declaredBytes) && declaredBytes > maxBytes) {
+      throw new RequestBodyTooLargeError(maxBytes);
+    }
+  }
+
   const reader = request.body?.getReader();
   if (!reader) return new Uint8Array();
   const chunks: Uint8Array[] = [];

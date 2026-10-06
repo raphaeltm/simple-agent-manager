@@ -21,7 +21,12 @@ import {
 import { resolveTaskStartPlacementCredentialAttribution } from '../../../services/placement-resolver';
 import { resolveProjectAgentDefault } from '../../../services/project-agent-defaults';
 import * as projectDataService from '../../../services/project-data';
+import {
+  assertReplacementDeletionConfirmed,
+  WorkspaceDeletionUnconfirmedError,
+} from '../../../services/replacement-deletion-fence';
 import { parseSkillResourceRequirementsJson, resolveSkillProfile } from '../../../services/skills';
+import { markTaskFailedIfNonTerminal } from '../../../services/task-failure';
 import { startTaskRunnerDO } from '../../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../../services/task-title';
 import type { AnthropicToolDef, ToolContext } from '../types';
@@ -49,6 +54,23 @@ export const retrySubtaskDef: AnthropicToolDef = {
     required: ['taskId'],
   },
 };
+
+async function replacementDeletionError(
+  env: Env,
+  sourceTaskId: string,
+  projectId: string,
+  userId: string
+): Promise<{ error: string } | null> {
+  try {
+    await assertReplacementDeletionConfirmed(env, { sourceTaskId, projectId, userId });
+    return null;
+  } catch (error) {
+    if (error instanceof WorkspaceDeletionUnconfirmedError) {
+      return { error: error.message };
+    }
+    throw error;
+  }
+}
 
 export async function retrySubtask(
   input: { taskId: string; newDescription?: string },
@@ -90,7 +112,6 @@ export async function retrySubtask(
       projectDefaultAgentType: schema.projects.defaultAgentType,
       projectAgentDefaults: schema.projects.agentDefaults,
       projectTaskExecutionTimeoutMs: schema.projects.taskExecutionTimeoutMs,
-      projectMaxWorkspacesPerNode: schema.projects.maxWorkspacesPerNode,
       projectNodeCpuThresholdPercent: schema.projects.nodeCpuThresholdPercent,
       projectNodeMemoryThresholdPercent: schema.projects.nodeMemoryThresholdPercent,
       projectWarmNodeTimeoutMs: schema.projects.warmNodeTimeoutMs,
@@ -110,6 +131,9 @@ export async function retrySubtask(
       error: `Task is in '${original.status}' status — only failed or cancelled tasks can be retried.`,
     };
   }
+
+  const deletionError = await replacementDeletionError(env, taskId, original.projectId, ctx.userId);
+  if (deletionError) return deletionError;
 
   // Use new description or fall back to original
   const description = input.newDescription?.trim() || original.description;
@@ -280,11 +304,12 @@ export async function retrySubtask(
     );
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    await env.DATABASE.prepare(
-      `UPDATE tasks SET status = 'failed', error_message = ?, updated_at = ? WHERE id = ?`
-    )
-      .bind(`Session creation failed: ${errorMsg}`, new Date().toISOString(), newTaskId)
-      .run();
+    await markTaskFailedIfNonTerminal(
+      env.DATABASE,
+      newTaskId,
+      `Session creation failed: ${errorMsg}`,
+      { env, projectId: original.projectId, source: 'sam.retry_subtask.session_creation' }
+    );
     return {
       error: 'Failed to create chat session for the retried task. The error has been logged.',
     };
@@ -342,7 +367,6 @@ export async function retrySubtask(
       agentProfileHint: resolvedProfile?.profileId ?? original.agentProfileHint ?? null,
       projectScaling: {
         taskExecutionTimeoutMs: original.projectTaskExecutionTimeoutMs ?? null,
-        maxWorkspacesPerNode: original.projectMaxWorkspacesPerNode ?? null,
         nodeCpuThresholdPercent: original.projectNodeCpuThresholdPercent ?? null,
         nodeMemoryThresholdPercent: original.projectNodeMemoryThresholdPercent ?? null,
         warmNodeTimeoutMs: original.projectWarmNodeTimeoutMs ?? null,
@@ -350,14 +374,16 @@ export async function retrySubtask(
       resolvedReservation,
       capacityPoolSelection,
       vmSizeSource,
+      retrySourceTaskId: taskId,
     });
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    await env.DATABASE.prepare(
-      `UPDATE tasks SET status = 'failed', error_message = ?, updated_at = ? WHERE id = ?`
-    )
-      .bind(`Task runner startup failed: ${errorMsg}`, new Date().toISOString(), newTaskId)
-      .run();
+    await markTaskFailedIfNonTerminal(
+      env.DATABASE,
+      newTaskId,
+      `Task runner startup failed: ${errorMsg}`,
+      { env, projectId: original.projectId, source: 'sam.retry_subtask.runner_startup', sessionId }
+    );
     return {
       error: 'Failed to start task runner for the retried task. The error has been logged.',
     };

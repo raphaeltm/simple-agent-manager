@@ -409,7 +409,7 @@ func TestUpsertWorkspaceRuntimeSetsLightweightFlag(t *testing.T) {
 
 	// Create with Lightweight=true
 	runtime := s.upsertWorkspaceRuntime("WS_LIGHT", "octo/repo", "main", "creating", "", workspaceRuntimeOpts{
-		Lightweight: true,
+		Lightweight: lightweightOpt(true),
 	})
 	if !runtime.Lightweight {
 		t.Fatal("expected Lightweight=true on new runtime, got false")
@@ -446,7 +446,7 @@ func TestUpsertWorkspaceRuntimeLightweightPersistsToSQLite(t *testing.T) {
 
 	// Create workspace with lightweight=true
 	s.upsertWorkspaceRuntime("WS_PERSIST_LIGHT", "octo/repo", "main", "creating", "runtime-callback-token", workspaceRuntimeOpts{
-		Lightweight:   true,
+		Lightweight:   lightweightOpt(true),
 		BaseBranch:    "main",
 		DefaultBranch: "main",
 	})

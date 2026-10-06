@@ -2,53 +2,130 @@
 import OptimizedFeatureImage from './OptimizedFeatureImage.astro';
 import { featureSections } from '../data/features';
 
-let rowIndex = 0;
+// The homepage showcase is a curated tour, not the full feature catalog — see
+// /features/ for every section. Each entry below renders only its first
+// detail row, in the order that tells the clearest product story.
+const CURATED_SLUGS = [
+  'chat',
+  'multiplayer',
+  'comments',
+  'compute-pools',
+  'events',
+  'durable-sessions',
+  'agent-context',
+];
+
+const curatedSections = CURATED_SLUGS.map((slug) =>
+  featureSections.find((section) => section.slug === slug)
+).filter((section): section is (typeof featureSections)[number] => Boolean(section));
 ---
 
-{featureSections.map((section, sectionIdx) => (
-  <section class="showcase-section" id={`feature-${section.slug}`}>
-    <div class="container">
-      <div class="showcase-header animate-on-scroll">
-        <span class="section-label">{section.label}</span>
-        <h2 class="section-title" set:html={section.title.replace('\n', '<br />')} />
-        <p class="section-subtitle">{section.subtitle}</p>
-      </div>
+<div class="showcase-index animate-on-scroll">
+  {curatedSections.map((section) => (
+    <a href={`#feature-${section.slug}`} class="showcase-pill">{section.label}</a>
+  ))}
+</div>
 
-      <div class="editorial-rows">
-        {section.details.map((detail) => {
-          const flip = rowIndex++ % 2 === 1;
-          const eager = sectionIdx === 0 && !flip;
-          return (
-            <div class={`editorial-row animate-on-scroll${flip ? ' is-flipped' : ''}`}>
-              <div class="editorial-copy">
-                <h3 class="editorial-headline">{detail.headline}</h3>
-                <p class="editorial-body">{detail.body}</p>
-                <a href={`/features/${section.slug}/`} class="editorial-link">
-                  Explore {section.label}
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
-                </a>
-              </div>
+{curatedSections.map((section, sectionIdx) => {
+  const detail = section.details[0];
+  const flip = sectionIdx % 2 === 1;
+  const eager = sectionIdx === 0;
+  return (
+    <section class="showcase-section" id={`feature-${section.slug}`}>
+      <div class="container">
+        <div class="showcase-header animate-on-scroll">
+          <span class="section-label">{section.label}</span>
+          <h2 class="section-title" set:html={section.title.replace('\n', '<br />')} />
+          <p class="section-subtitle">{section.subtitle}</p>
+        </div>
 
-              <a href={`/features/${section.slug}/`} class="spotlight" aria-label={detail.headline}>
-                <span class="spotlight-glow" aria-hidden="true"></span>
-                <span class="spotlight-frame">
-                  <OptimizedFeatureImage
-                    src={detail.screenshot.src}
-                    alt={detail.screenshot.alt}
-                    loading={eager ? 'eager' : 'lazy'}
-                  />
-                  <span class="spotlight-caption">{detail.screenshot.caption}</span>
-                </span>
+        <div class="editorial-rows">
+          <div class={`editorial-row animate-on-scroll${flip ? ' is-flipped' : ''}`}>
+            <div class="editorial-copy">
+              <h3 class="editorial-headline">{detail.headline}</h3>
+              <p class="editorial-body">{detail.body}</p>
+              <a href={`/features/${section.slug}/`} class="editorial-link">
+                Explore {section.label}
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
               </a>
             </div>
-          );
-        })}
+
+            <a href={`/features/${section.slug}/`} class="spotlight" aria-label={detail.headline}>
+              <span class="spotlight-glow" aria-hidden="true"></span>
+              <span class="spotlight-frame">
+                <OptimizedFeatureImage
+                  src={detail.screenshot.src}
+                  alt={detail.screenshot.alt}
+                  loading={eager ? 'eager' : 'lazy'}
+                />
+                <span class="spotlight-caption">{detail.screenshot.caption}</span>
+              </span>
+            </a>
+          </div>
+        </div>
       </div>
-    </div>
-  </section>
-))}
+    </section>
+  );
+})}
+
+<div class="showcase-more animate-on-scroll">
+  <a href="/features/" class="showcase-more-link">
+    See every feature
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+  </a>
+</div>
 
 <style>
+  .showcase-index {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+    padding: 0 20px 48px;
+    max-width: var(--max-width);
+    margin: 0 auto;
+  }
+
+  .showcase-pill {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--color-fg-muted);
+    padding: 6px 14px;
+    border-radius: 100px;
+    border: 1px solid var(--glass-border);
+    background: var(--glass-bg-subtle);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+    white-space: nowrap;
+  }
+
+  .showcase-pill:hover {
+    color: var(--color-fg-primary);
+    border-color: var(--glass-border-hover);
+    background: var(--color-bg-surface-hover);
+  }
+
+  .showcase-more {
+    text-align: center;
+    padding: 8px 0 40px;
+  }
+
+  .showcase-more-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9375rem;
+    font-weight: 500;
+    color: var(--color-accent);
+    transition: gap 0.2s ease, color 0.2s ease;
+  }
+
+  .showcase-more-link:hover {
+    color: var(--color-accent-hover);
+    gap: 12px;
+  }
+
   .showcase-section {
     padding: 80px 0;
   }

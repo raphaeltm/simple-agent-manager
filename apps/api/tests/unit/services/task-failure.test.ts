@@ -1,8 +1,9 @@
-import { and, eq } from 'drizzle-orm';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
-import { markQueuedTaskFailed } from '../../../src/services/task-failure';
+import { markTaskFailedIfNonTerminal } from '../../../src/services/task-failure';
+import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const recordTaskLifecycleEventBestEffort = vi.hoisted(() => vi.fn(async () => undefined));
 
@@ -10,110 +11,159 @@ vi.mock('../../../src/services/project-lifecycle-events', () => ({
   recordTaskLifecycleEventBestEffort,
 }));
 
-interface RecordedUpdate {
-  table: unknown;
-  set: Record<string, unknown>;
-  where: unknown;
-}
+describe('markTaskFailedIfNonTerminal', () => {
+  let sqlite: Database.Database;
 
-interface RecordedInsert {
-  table: unknown;
-  values: Record<string, unknown>;
-}
-
-function createRecordingDb(updateChanges: number) {
-  const calls = { updates: [] as RecordedUpdate[], inserts: [] as RecordedInsert[] };
-  const db = {
-    update: vi.fn((table: unknown) => ({
-      set: vi.fn((set: Record<string, unknown>) => ({
-        where: vi.fn((where: unknown) => {
-          calls.updates.push({ table, set, where });
-          return Promise.resolve({ meta: { changes: updateChanges } });
-        }),
-      })),
-    })),
-    insert: vi.fn((table: unknown) => ({
-      values: vi.fn((values: Record<string, unknown>) => {
-        calls.inserts.push({ table, values });
-        return Promise.resolve();
-      }),
-    })),
-  };
-  return { db: db as never, calls };
-}
-
-describe('markQueuedTaskFailed', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    sqlite = new Database(':memory:');
+    createSchemaTables(sqlite, [schema.tasks, schema.taskStatusEvents]);
   });
 
-  it('marks the queued task failed and records the queued→failed status event', async () => {
-    const { db, calls } = createRecordingDb(1);
+  afterEach(() => sqlite.close());
 
-    const transitioned = await markQueuedTaskFailed(
-      db,
-      'task-123',
-      'Session creation failed: DO unavailable',
-      {
-        env: { PROJECT_DATA: {} } as never,
-        projectId: 'project-123',
-        source: 'test.queued_failure',
-      }
-    );
+  function seedTask(id: string, status: string): void {
+    sqlite.prepare('INSERT INTO tasks (id, status) VALUES (?, ?)').run(id, status);
+  }
 
-    expect(transitioned).toBe(true);
-    expect(calls.updates).toHaveLength(1);
-    expect(calls.updates[0].table).toBe(schema.tasks);
-    expect(calls.updates[0].set).toMatchObject({
+  const consolidatedWriters = [
+    'SAM dispatch session creation',
+    'SAM dispatch runner startup',
+    'SAM retry session creation',
+    'SAM retry runner startup',
+    'MCP dispatch session creation',
+    'MCP dispatch runner startup',
+    'MCP dispatch catch cleanup',
+    'MCP Instant dispatch',
+    'MCP orchestration retry stop',
+    'MCP orchestration retry session creation',
+    'MCP orchestration retry runner startup',
+    'task run session creation',
+    'task run runner startup',
+    'task submit session creation',
+    'task submit runner startup',
+    'chat start Instant acceptance',
+  ];
+
+  it.each(
+    consolidatedWriters.flatMap((writer) =>
+      ['completed', 'cancelled'].map((status) => [writer, status] as const)
+    )
+  )('%s preserves a terminal %s task', async (_writer, status) => {
+    seedTask('task-123', status);
+    expect(
+      await markTaskFailedIfNonTerminal(createSqliteD1(sqlite), 'task-123', 'late failure')
+    ).toBe(false);
+    expect(sqlite.prepare('SELECT status FROM tasks WHERE id = ?').get('task-123')).toEqual({
+      status,
+    });
+  });
+
+  it.each(consolidatedWriters)('%s still fails its in-progress owner state', async () => {
+    seedTask('task-123', 'in_progress');
+    expect(
+      await markTaskFailedIfNonTerminal(createSqliteD1(sqlite), 'task-123', 'owner failure')
+    ).toBe(true);
+    expect(sqlite.prepare('SELECT status FROM tasks WHERE id = ?').get('task-123')).toEqual({
       status: 'failed',
-      errorMessage: 'Session creation failed: DO unavailable',
     });
-    expect(typeof calls.updates[0].set.updatedAt).toBe('string');
-    // Optimistically locked: scoped to the task id AND the queued status
-    expect(calls.updates[0].where).toEqual(
-      and(eq(schema.tasks.id, 'task-123'), eq(schema.tasks.status, 'queued'))
-    );
-
-    expect(calls.inserts).toHaveLength(1);
-    expect(calls.inserts[0].table).toBe(schema.taskStatusEvents);
-    expect(calls.inserts[0].values).toMatchObject({
-      taskId: 'task-123',
-      fromStatus: 'queued',
-      toStatus: 'failed',
-      actorType: 'system',
-      actorId: null,
-      reason: 'Session creation failed: DO unavailable',
-    });
-    expect(typeof calls.inserts[0].values.id).toBe('string');
-    expect(calls.inserts[0].values.id).not.toHaveLength(0);
-    // Task row and status event carry the same failure instant
-    expect(calls.inserts[0].values.createdAt).toBe(calls.updates[0].set.updatedAt);
-    expect(recordTaskLifecycleEventBestEffort).toHaveBeenCalledWith(
-      { PROJECT_DATA: {} },
-      expect.objectContaining({
-        projectId: 'project-123',
-        taskId: 'task-123',
-        status: 'failed',
-        fromStatus: 'queued',
-        reason: 'Session creation failed: DO unavailable',
-        source: 'test.queued_failure',
-        occurredAt: calls.updates[0].set.updatedAt,
-      })
-    );
   });
 
-  it('does not record a status event when the task already left queued', async () => {
-    const { db, calls } = createRecordingDb(0);
+  it.each(['queued', 'delegated', 'in_progress'])(
+    'marks a %s task failed and records its observed prior status',
+    async (status) => {
+      seedTask('task-123', status);
 
-    const transitioned = await markQueuedTaskFailed(db, 'task-123', 'Instant launch failed: boom', {
-      env: { PROJECT_DATA: {} } as never,
-      projectId: 'project-123',
-      source: 'test.queued_failure',
-    });
+      const transitioned = await markTaskFailedIfNonTerminal(
+        createSqliteD1(sqlite),
+        'task-123',
+        'Session creation failed: DO unavailable',
+        {
+          env: { PROJECT_DATA: {} } as never,
+          projectId: 'project-123',
+          source: 'test.failure',
+        }
+      );
+
+      expect(transitioned).toBe(true);
+      expect(sqlite.prepare('SELECT status, error_message FROM tasks WHERE id = ?').get('task-123'))
+        .toEqual({ status: 'failed', error_message: 'Session creation failed: DO unavailable' });
+      expect(
+        sqlite
+          .prepare('SELECT from_status, to_status, reason FROM task_status_events WHERE task_id = ?')
+          .get('task-123')
+      ).toEqual({
+        from_status: status,
+        to_status: 'failed',
+        reason: 'Session creation failed: DO unavailable',
+      });
+      expect(recordTaskLifecycleEventBestEffort).toHaveBeenCalledWith(
+        { PROJECT_DATA: {} },
+        expect.objectContaining({ fromStatus: status, status: 'failed' })
+      );
+    }
+  );
+
+  it.each(['completed', 'cancelled'])('does not overwrite a %s task', async (status) => {
+    seedTask('task-123', status);
+
+    const transitioned = await markTaskFailedIfNonTerminal(
+      createSqliteD1(sqlite),
+      'task-123',
+      'late failure'
+    );
 
     expect(transitioned).toBe(false);
-    expect(calls.updates).toHaveLength(1);
-    expect(calls.inserts).toHaveLength(0);
-    expect(recordTaskLifecycleEventBestEffort).not.toHaveBeenCalled();
+    expect(sqlite.prepare('SELECT status, error_message FROM tasks WHERE id = ?').get('task-123'))
+      .toEqual({ status, error_message: null });
+    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM task_status_events').get()).toEqual({
+      count: 0,
+    });
+  });
+
+  it.each([
+    ['completed', false],
+    ['cancelled', false],
+    ['in_progress', true],
+  ] as const)(
+    'atomically observes a task changed to %s immediately before the failure batch',
+    async (winningStatus, expectedTransition) => {
+      seedTask('task-123', 'in_progress');
+      const base = createSqliteD1(sqlite);
+      const racingDatabase = {
+        ...base,
+        batch: async <T = unknown>(statements: D1PreparedStatement[]) => {
+          sqlite.prepare('UPDATE tasks SET status = ? WHERE id = ?').run(winningStatus, 'task-123');
+          return base.batch<T>(statements);
+        },
+      } as D1Database;
+
+      const transitioned = await markTaskFailedIfNonTerminal(
+        racingDatabase,
+        'task-123',
+        'late failure'
+      );
+
+      expect(transitioned).toBe(expectedTransition);
+      expect(sqlite.prepare('SELECT status FROM tasks WHERE id = ?').get('task-123')).toEqual({
+        status: expectedTransition ? 'failed' : winningStatus,
+      });
+      expect(
+        sqlite.prepare('SELECT from_status FROM task_status_events WHERE task_id = ?').get('task-123')
+      ).toEqual(expectedTransition ? { from_status: winningStatus } : undefined);
+    }
+  );
+
+  it('rolls back the task update when event persistence fails', async () => {
+    seedTask('task-123', 'in_progress');
+    sqlite.exec(`CREATE TRIGGER reject_task_status_event BEFORE INSERT ON task_status_events
+      BEGIN SELECT RAISE(ABORT, 'event write rejected'); END`);
+
+    await expect(
+      markTaskFailedIfNonTerminal(createSqliteD1(sqlite), 'task-123', 'owner failure')
+    ).rejects.toThrow('event write rejected');
+    expect(sqlite.prepare('SELECT status FROM tasks WHERE id = ?').get('task-123')).toEqual({
+      status: 'in_progress',
+    });
   });
 });

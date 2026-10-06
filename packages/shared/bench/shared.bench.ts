@@ -122,7 +122,7 @@ describe('model-catalog', () => {
 
   bench('isKnownModel - hit and miss lookups', () => {
     isKnownModel('claude-code', 'claude-opus-4-8');
-    isKnownModel('openai-codex', 'gpt-5.5-pro');
+    isKnownModel('openai-codex', 'gpt-6-astra');
     isKnownModel('claude-code', 'nonexistent-model');
     isKnownModel('unknown-agent', 'whatever');
   });

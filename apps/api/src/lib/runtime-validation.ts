@@ -1,6 +1,10 @@
 import type { GenericSchema, InferOutput } from 'valibot';
 import * as v from 'valibot';
 
+import { readBoundedRequestBody, RequestBodyTooLargeError } from './bounded-request-body';
+
+export { RequestBodyTooLargeError };
+
 export type JsonRecord = Record<string, unknown>;
 
 const jsonRecordSchema = v.record(v.string(), v.unknown());
@@ -76,12 +80,21 @@ export function parseJsonRecord(raw: string, context: string): JsonRecord {
 
 export async function readRequestJsonRecord(
   request: Request,
-  context: string
+  context: string,
+  maxBytes?: number
 ): Promise<JsonRecord> {
   let parsed: unknown;
   try {
-    parsed = await request.json();
+    if (maxBytes !== undefined) {
+      const bytes = await readBoundedRequestBody(request, maxBytes);
+      parsed = JSON.parse(new TextDecoder().decode(bytes));
+    } else {
+      parsed = await request.json();
+    }
   } catch (err) {
+    if (err instanceof RequestBodyTooLargeError) {
+      throw err;
+    }
     throw new RuntimeValidationError(
       err instanceof Error
         ? `Invalid request JSON at ${context}: ${err.message}`
@@ -90,6 +103,16 @@ export async function readRequestJsonRecord(
     );
   }
   return expectJsonRecord(parsed, context);
+}
+
+export async function readRequestJsonWithSchema<TSchema extends GenericSchema>(
+  schema: TSchema,
+  request: Request,
+  context: string,
+  maxBytes?: number
+): Promise<InferOutput<TSchema>> {
+  const record = await readRequestJsonRecord(request, context, maxBytes);
+  return parseWithSchema(schema, record, context);
 }
 
 export async function readResponseJson<TSchema extends GenericSchema>(

@@ -25,6 +25,7 @@ import { getPortAccessUrl, getProjectTask, listChatMessages } from '../../lib/ap
 import { stripMarkdown } from '../../lib/text-utils';
 import { sanitizeUrl } from '../../lib/url-utils';
 import type { SessionSourceContext } from '../../pages/project-chat/lineageUtils';
+import { SessionCredentialLimitChip } from '../credential-limits/SessionCredentialLimitChip';
 import { CopyableId } from './CopyableId';
 import { PublicPortsToggleRow } from './PublicPortsToggleRow';
 import { SessionCommentChip } from './SessionCommentChip';
@@ -57,7 +58,6 @@ export function SessionHeader({
   projectId,
   session,
   sessionState,
-  loading,
   idleCountdownMs,
   taskEmbed,
   workspace,
@@ -81,7 +81,6 @@ export function SessionHeader({
   projectId: string;
   session: ChatSessionResponse;
   sessionState: SessionState;
-  loading: boolean;
   idleCountdownMs: number | null;
   taskEmbed: ChatSessionResponse['task'] | null;
   workspace: WorkspaceResponse | null;
@@ -219,7 +218,10 @@ export function SessionHeader({
             unlabeled 14px icons. They are now named, grouped controls in
             `SessionToolRail`, so the title gets the full width. */}
         <div
-          className="text-sm font-semibold text-fg-primary min-w-0 leading-snug"
+          // Focus target after an in-chat link opens another chat (session-focus-handoff).
+          data-session-title
+          tabIndex={-1}
+          className="text-sm font-semibold text-fg-primary min-w-0 leading-snug rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
           title={sessionTitle}
           style={{
             display: '-webkit-box',
@@ -257,6 +259,11 @@ export function SessionHeader({
           </span>
 
           {workspace && <WorkspaceProfileBadge workspace={workspace} />}
+
+          <SessionCredentialLimitChip
+            projectId={projectId}
+            agentSessionId={session.agentSessionId ?? null}
+          />
 
           {creatorLabel && (
             <span
@@ -317,16 +324,6 @@ export function SessionHeader({
               title={lineageText}
             >
               {lineageText.startsWith('⑂') ? '⑂ fork' : lineageText}
-            </span>
-          )}
-
-          {loading && (
-            <span
-              role="status"
-              aria-label="Refreshing messages"
-              className="inline-flex items-center shrink-0"
-            >
-              <Spinner size="sm" />
             </span>
           )}
         </div>

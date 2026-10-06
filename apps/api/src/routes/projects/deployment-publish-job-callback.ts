@@ -47,11 +47,12 @@ const publishJobEventSchema = v.object({
 });
 
 deploymentPublishJobCallbackRoute.post('/:id/deployment-publish-jobs/:jobId/events', async (c) => {
-  const { projectId, workspaceId, userId, db } = await verifyWorkspacePublishCallback(
-    c,
-    'deployment_publish_job_event',
-    'Invalid token scope for deployment publish job event'
-  );
+  const { projectId, workspaceId, userId, db, assertCurrent } =
+    await verifyWorkspacePublishCallback(
+      c,
+      'deployment_publish_job_event',
+      'Invalid token scope for deployment publish job event'
+    );
   const publishJobId = c.req.param('jobId');
   const [job] = await db
     .select()
@@ -95,6 +96,7 @@ deploymentPublishJobCallbackRoute.post('/:id/deployment-publish-jobs/:jobId/even
 
   const status = optionalString(event.status) ?? undefined;
   const currentStep = optionalString(event.currentStep) ?? optionalString(event.step);
+  await assertCurrent();
   await appendDeploymentPublishJobEvent(db, {
     publishJobId,
     projectId,
@@ -116,6 +118,7 @@ deploymentPublishJobCallbackRoute.post('/:id/deployment-publish-jobs/:jobId/even
     retryable: event.retryable === true,
   });
 
+  await assertCurrent();
   if (status && status !== job.status) {
     c.executionCtx.waitUntil(
       recordDeploymentPublishJobLifecycleEventBestEffort(c.env, {
@@ -136,6 +139,7 @@ deploymentPublishJobCallbackRoute.post('/:id/deployment-publish-jobs/:jobId/even
     );
   }
 
+  await assertCurrent();
   return c.json({ ok: true });
 });
 

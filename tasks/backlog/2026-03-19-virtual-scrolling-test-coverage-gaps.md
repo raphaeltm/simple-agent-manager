@@ -1,5 +1,24 @@
 # Virtual Scrolling Test Coverage Gaps
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:**
+>   - The web Virtuoso mock exposes `atBottomStateChange`, `startReached` and `firstItemIndex`, and
+>     records `scrollToIndex` calls (`apps/web/tests/helpers/virtuoso-mock.tsx`).
+>   - `loadMore` / `firstItemIndex` pagination test (PR #2165):
+>     `apps/web/tests/unit/components/project-message-view-navigation.test.tsx:173-214`.
+>   - The source-contract test in `chat-components.test.ts` was removed (PR #598, `8603139c7`).
+> - **Still open:** all in `packages/acp-client/tests/unit/components/AgentPanel.test.tsx`
+>   (`AgentPanel` is still used by `apps/web/src/components/ChatSession.tsx:343`):
+>   - The mock lacks `atBottomStateChange` and does not capture `scrollToIndex` (`:12-23`).
+>   - No FAB visible-and-click test (`:449-478` only checks that it is hidden).
+>   - Replay scroll-reset tests should assert `scrollToIndex`, plus a negative ready→prompting case
+>     (logic at `packages/acp-client/src/components/AgentPanel.tsx:116-123`; tests `:412-440` only
+>     check re-rendering).
+>   - Switch the mock to `vi.hoisted` (`:12`).
+> - **Moot/dropped:** the ACP→DO `key` remount test; `useFullAcpView` was removed with the DO-only
+>   chat architecture (PR #978).
+
 **Created**: 2026-03-19
 **Source**: Late-arriving test-engineer review of PR #462 (virtual scrolling)
 **Priority**: Medium

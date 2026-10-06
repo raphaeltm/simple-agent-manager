@@ -17,7 +17,7 @@ This task must produce a specification document PR only. It must not implement r
   - `tasks/archive/2026-07-04-wave-1b-automation-context-membership-auth.md`
   - `tasks/archive/2026-07-04-wave-1c-deployment-membership-auth.md`
   - `tasks/archive/2026-07-04-credential-attribution-health.md`
-  - `tasks/active/2026-07-04-project-compute-credential-attribution.md`
+  - `tasks/archive/2026-07-04-project-compute-credential-attribution.md`
   - trigger and deployment task records under `tasks/archive/2026-04-*` and `tasks/archive/2026-06-*`
 - Key code areas to verify and cite:
   - `apps/api/src/routes/projects/members.ts`

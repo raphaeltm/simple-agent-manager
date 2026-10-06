@@ -28,6 +28,7 @@ const deploymentEnvironments = {
   nodeId: 'deploymentEnvironments.nodeId',
   status: 'deploymentEnvironments.status',
   requiresVolumes: 'deploymentEnvironments.requiresVolumes',
+  resolvedReservationJson: 'deploymentEnvironments.resolvedReservationJson',
 };
 const deploymentReleases = {
   id: 'deploymentReleases.id',
@@ -63,6 +64,7 @@ interface EnvironmentRow {
   nodeId: string | null;
   status: string;
   requiresVolumes: boolean;
+  resolvedReservationJson?: string | null;
 }
 
 interface ReleaseRow {
@@ -167,9 +169,8 @@ vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => createMockDb(),
 }));
 
-const { registerDeploymentEnvironmentLifecycleRoutes } = await import(
-  '../../../src/routes/deployment-environment-lifecycle'
-);
+const { registerDeploymentEnvironmentLifecycleRoutes } =
+  await import('../../../src/routes/deployment-environment-lifecycle');
 
 function eqValue(condition: Condition, col: unknown): unknown {
   if (!condition) {
@@ -211,7 +212,8 @@ function selectRows(table: unknown, condition: Condition, selection?: Record<str
     const id = eqValue(condition, nodes.id);
     const userId = eqValue(condition, nodes.userId);
     rows = nodeRows.filter(
-      (row) => (id === undefined || row.id === id) && (userId === undefined || row.userId === userId)
+      (row) =>
+        (id === undefined || row.id === id) && (userId === undefined || row.userId === userId)
     );
   } else if (table === deploymentEnvironments) {
     const id = eqValue(condition, deploymentEnvironments.id);
@@ -228,7 +230,9 @@ function selectRows(table: unknown, condition: Condition, selection?: Record<str
       .sort((a, b) => (b.version as number) - (a.version as number));
   } else if (table === deploymentVolumes) {
     const environmentId = eqValue(condition, deploymentVolumes.environmentId);
-    rows = volumeRows.filter((row) => environmentId === undefined || row.environmentId === environmentId);
+    rows = volumeRows.filter(
+      (row) => environmentId === undefined || row.environmentId === environmentId
+    );
   }
   return rows.map((row) => projectSelection(row, selection));
 }
@@ -291,19 +295,11 @@ function env(): Env {
 }
 
 function stop(app: ReturnType<typeof createApp>) {
-  return app.request(
-    '/api/projects/proj-1/environments/env-1/stop',
-    { method: 'POST' },
-    env()
-  );
+  return app.request('/api/projects/proj-1/environments/env-1/stop', { method: 'POST' }, env());
 }
 
 function start(app: ReturnType<typeof createApp>) {
-  return app.request(
-    '/api/projects/proj-1/environments/env-1/start',
-    { method: 'POST' },
-    env()
-  );
+  return app.request('/api/projects/proj-1/environments/env-1/start', { method: 'POST' }, env());
 }
 
 describe('deployment environment stop/start lifecycle', () => {
@@ -323,7 +319,13 @@ describe('deployment environment stop/start lifecycle', () => {
       volumeRows.filter((row) => row.environmentId === environmentId)
     );
     mockDetachEnvironmentVolumes.mockImplementation(
-      async (_db: unknown, _env: unknown, _userId: unknown, environmentId: string, serverId: string) => {
+      async (
+        _db: unknown,
+        _env: unknown,
+        _userId: unknown,
+        environmentId: string,
+        serverId: string
+      ) => {
         const detached = volumeRows.filter(
           (row) => row.environmentId === environmentId && row.attachedServerId === serverId
         );
@@ -347,11 +349,30 @@ describe('deployment environment stop/start lifecycle', () => {
       if (target) {
         target.nodeId = 'node-2';
       }
-      return { nodeId: 'node-2', provisioningStarted: false, provisioningPromise: Promise.resolve() };
+      return {
+        nodeId: 'node-2',
+        provisioningStarted: false,
+        provisioningPromise: Promise.resolve(),
+      };
     });
 
     envRows = [
-      { id: 'env-1', projectId: 'proj-1', nodeId: 'node-1', status: 'active', requiresVolumes: true },
+      {
+        id: 'env-1',
+        projectId: 'proj-1',
+        nodeId: 'node-1',
+        status: 'active',
+        requiresVolumes: true,
+        resolvedReservationJson: JSON.stringify({
+          version: 3,
+          cpuMillis: 750,
+          memoryMb: 768,
+          diskMb: 2_048,
+          exclusiveNode: true,
+          source: 'task',
+          sourceId: 'env-1',
+        }),
+      },
     ];
     releaseRows = [{ id: 'rel-1', environmentId: 'env-1', version: 7, status: 'created' }];
     volumeRows = [
@@ -427,6 +448,12 @@ describe('deployment environment stop/start lifecycle', () => {
       expect.anything(),
       expect.objectContaining({
         requiresVolumes: true,
+        reservation: expect.objectContaining({
+          cpuMillis: 750,
+          memoryMb: 768,
+          diskMb: 2_048,
+          exclusiveNode: true,
+        }),
         providerOverride: 'hetzner',
         vmLocationOverride: 'nbg1',
       })
@@ -458,6 +485,20 @@ describe('deployment environment stop/start lifecycle', () => {
         source: 'deployment_environment.start',
       })
     );
+  });
+
+  it('rejects a malformed stored reservation before starting or provisioning', async () => {
+    envRows[0]!.status = 'stopped';
+    envRows[0]!.nodeId = null;
+    envRows[0]!.resolvedReservationJson = '{"cpuMillis":"invalid"}';
+    volumeRows[0]!.attachedServerId = null;
+
+    const response = await start(createApp());
+    const body = (await response.json()) as { message: string };
+
+    expect(response.status).toBe(409);
+    expect(body.message).toContain('stored deployment resource reservation is invalid');
+    expect(mockProvisionDeploymentNode).not.toHaveBeenCalled();
   });
 
   it('returns 409 when stopping an environment that is already stopping', async () => {

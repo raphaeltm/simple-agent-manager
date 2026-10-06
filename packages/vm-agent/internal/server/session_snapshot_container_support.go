@@ -73,8 +73,8 @@ func (w *cappedFileWriter) Write(p []byte) (int, error) {
 	return n, nil
 }
 
-func (s *Server) resolveContainerSnapshotTarget(runtime *WorkspaceRuntime) (*containerSnapshotTarget, error) {
-	containerID, workDir, user, err := s.resolveContainerForWorkspace(runtime.ID)
+func (s *Server) resolveContainerSnapshotTarget(ctx context.Context, runtime *WorkspaceRuntime) (*containerSnapshotTarget, error) {
+	containerID, workDir, user, err := s.resolveContainerForWorkspaceContext(ctx, runtime.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +201,7 @@ func buildContainerSnapshotArchiveList(inventory []byte, logicalName string, ent
 		if rel == "." || rel == ".." || filepath.IsAbs(rel) || strings.HasPrefix(rel, "../") {
 			return nil, skipped, selectedBytes, fmt.Errorf("invalid container HOME entry path")
 		}
-		if shouldExcludeSnapshotRootPath(logicalName, rel) {
+		if shouldSkipSnapshotCapturePath(logicalName, rel) {
 			continue
 		}
 		entries = append(entries, containerSnapshotArchiveEntry{kind: kind, size: size, rel: rel})
@@ -275,7 +275,8 @@ func containerSnapshotInventoryArgs(root, logicalName string) []string {
 		prefixes = snapshotRootExcludePrefixes[logicalName]
 		files = snapshotRootExcludeFiles[logicalName]
 	}
-	for index, rel := range append(append([]string{}, prefixes...), mapKeys(files)...) {
+	prefixes = append(append([]string{}, prefixes...), snapshotCaptureExcludePrefixes(logicalName)...)
+	for index, rel := range append(prefixes, mapKeys(files)...) {
 		if index > 0 {
 			args = append(args, "-o")
 		}

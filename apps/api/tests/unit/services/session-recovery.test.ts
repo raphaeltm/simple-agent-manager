@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { Env } from '../../../src/env';
+
 const {
   claimSessionSnapshotRecoveryMock,
   databaseMock,
@@ -7,16 +9,23 @@ const {
   failSessionSnapshotRecoveryMock,
   selectQueue,
   startTaskRunnerDOMock,
+  assertReplacementDeletionConfirmedMock,
 } = vi.hoisted(() => {
   const selectQueue: unknown[] = [];
   let batchInsertChanges = 1;
+  let evictionFenceValid = true;
   const nextSelectedRow = async () => {
     const next = selectQueue.shift();
     return next ?? null;
   };
 
   const databaseMock = {
-    prepare: vi.fn(() => ({ bind: vi.fn(() => ({ kind: 'prepared' })) })),
+    prepare: vi.fn(() => ({
+      bind: vi.fn(() => ({
+        kind: 'prepared',
+        first: vi.fn(async () => (evictionFenceValid ? { valid: 1 } : null)),
+      })),
+    })),
     batch: vi.fn(async () => [
       { meta: { changes: batchInsertChanges } },
       { meta: { changes: batchInsertChanges } },
@@ -26,6 +35,9 @@ const {
     ]),
     setBatchInsertChanges: (changes: number) => {
       batchInsertChanges = changes;
+    },
+    setEvictionFenceValid: (valid: boolean) => {
+      evictionFenceValid = valid;
     },
   };
 
@@ -56,6 +68,7 @@ const {
     failSessionSnapshotRecoveryMock: vi.fn(async () => undefined),
     selectQueue,
     startTaskRunnerDOMock: vi.fn(async () => undefined),
+    assertReplacementDeletionConfirmedMock: vi.fn(async () => undefined),
   };
 });
 
@@ -77,6 +90,11 @@ vi.mock('../../../src/services/session-snapshots', () => ({
 vi.mock('../../../src/services/task-runner-do', () => ({
   ensureTaskRunnerStarted: vi.fn(async () => false),
   startTaskRunnerDO: startTaskRunnerDOMock,
+}));
+
+vi.mock('../../../src/services/replacement-deletion-fence', () => ({
+  assertReplacementDeletionConfirmed: assertReplacementDeletionConfirmedMock,
+  WorkspaceDeletionUnconfirmedError: class WorkspaceDeletionUnconfirmedError extends Error {},
 }));
 
 vi.mock('../../../src/services/placement-resolver', async (importOriginal) => {
@@ -141,8 +159,10 @@ vi.mock('../../../src/services/placement-resolver', async (importOriginal) => {
 
 import {
   ensureSessionRecovery,
+  reportSessionRecoveryRefusal,
   SESSION_RECOVERY_INITIAL_PROMPT,
 } from '../../../src/services/session-recovery';
+import { classifySessionRecoveryRefusal } from '../../../src/services/session-recovery-refusals';
 
 const emptyCapacityPlacement = {
   capacityPoolId: null,
@@ -158,18 +178,72 @@ const emptyCapacityPlacement = {
   placementExplanationJson: null,
 };
 
+function queuedSourceTask(title: string, workspaceId: string | null) {
+  return {
+    id: 'source-task-1',
+    projectId: 'project-1',
+    userId: 'user-1',
+    chatSessionId: 'chat-1',
+    workspaceId,
+    recoverySourceTaskId: null,
+    title,
+    description: 'Original task: push changes and deploy production',
+    status: 'queued',
+    agentProfileHint: null,
+    outputBranch: 'sam/original',
+    credentialAttributionUserId: 'user-1',
+    credentialAttributionProjectId: null,
+    credentialAttributionSource: 'user',
+    triggeredBy: 'mcp',
+  };
+}
+
 describe('ensureSessionRecovery', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     selectQueue.length = 0;
     databaseMock.setBatchInsertChanges(1);
+    databaseMock.setEvictionFenceValid(true);
     claimSessionSnapshotRecoveryMock.mockResolvedValue({
       status: 'claimed',
       taskId: 'recovery-task-1',
     });
+    assertReplacementDeletionConfirmedMock.mockResolvedValue(undefined);
   });
 
-  it('creates recovery tasks with a wake-specific prompt instead of rerunning the source task title', async () => {
+  it('records a container wake refusal on the sleeping snapshot', async () => {
+    await expect(
+      reportSessionRecoveryRefusal(
+        { DATABASE: databaseMock } as unknown as Env,
+        'chat-1',
+        'container_runtime_unavailable',
+        'Sleeping container workspace is deleted'
+      )
+    ).resolves.toEqual({ status: 'unavailable', reason: 'container_runtime_unavailable' });
+
+    const update = dbMock.update.mock.results[0]?.value;
+    expect(update.set).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recoveryError: expect.stringContaining('Sleeping container workspace is deleted'),
+      })
+    );
+  });
+
+  it('does not record a snapshot error for an in-place container wake', async () => {
+    await expect(
+      reportSessionRecoveryRefusal(
+        { DATABASE: databaseMock } as unknown as Env,
+        'chat-1',
+        'container_runtime_wakes_in_place'
+      )
+    ).resolves.toEqual({ status: 'unavailable', reason: 'container_runtime_wakes_in_place' });
+
+    expect(dbMock.update).not.toHaveBeenCalled();
+  });
+
+  it('fences an unconfirmed predecessor before claiming or creating recovery state', async () => {
+    const { WorkspaceDeletionUnconfirmedError } =
+      await import('../../../src/services/replacement-deletion-fence');
     selectQueue.push(
       {
         id: 'snapshot-1',
@@ -186,11 +260,104 @@ describe('ensureSessionRecovery', () => {
         defaultBranch: 'main',
         repository: 'owner/repo',
         installationId: 'install-1',
+      },
+      {
+        id: 'workspace-sleeping',
+        ...emptyCapacityPlacement,
+        userId: 'user-1',
+        vmSize: 'small',
+        vmLocation: 'nbg1',
+        branch: 'main',
+        workspaceProfile: 'lightweight',
+        devcontainerConfigName: null,
+        agentProfileHint: null,
+      },
+      {
+        id: 'user-1',
+        name: 'Test User',
+        email: 'test@example.com',
+        githubId: 'gh-1',
+      },
+      {
+        id: 'source-task-unconfirmed',
+        recoverySourceTaskId: null,
+        workspaceId: 'workspace-unconfirmed',
+        title: 'Unsafe predecessor',
+      }
+    );
+    assertReplacementDeletionConfirmedMock.mockRejectedValueOnce(
+      new WorkspaceDeletionUnconfirmedError('workspace-unconfirmed')
+    );
+
+    const refused = await ensureSessionRecovery(
+      { DATABASE: databaseMock, BASE_DOMAIN: 'example.test' } as never,
+      'project-1',
+      'chat-1'
+    );
+    expect(refused).toEqual({ status: 'unavailable', reason: 'workspace_deletion_unconfirmed' });
+    // Delivery and eviction retry this refusal: its name is their contract.
+    expect(
+      refused.status === 'unavailable' &&
+        classifySessionRecoveryRefusal(refused.reason).action === 'retry'
+    ).toBe(true);
+
+    expect(assertReplacementDeletionConfirmedMock).toHaveBeenCalledWith(expect.anything(), {
+      sourceTaskId: 'source-task-unconfirmed',
+      projectId: 'project-1',
+      userId: 'user-1',
+    });
+    expect(claimSessionSnapshotRecoveryMock).not.toHaveBeenCalled();
+    expect(dbMock.insert).not.toHaveBeenCalled();
+    expect(databaseMock.batch).not.toHaveBeenCalled();
+    expect(startTaskRunnerDOMock).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])('reactivates without replaying work (fallback=%s)', async (fallback) => {
+    selectQueue.push(
+      {
+        id: 'snapshot-1',
+        projectId: 'project-1',
+        workspaceId: 'workspace-sleeping',
+        userId: 'user-1',
+        runtime: 'vm',
+        sleepingAt: '2026-08-15T13:11:53.580Z',
+        manifestJson: JSON.stringify({ agentType: 'claude-code' }),
+        snapshotGeneration: 'generation-final',
+        sleepFallbackJson: fallback
+          ? JSON.stringify({
+              version: 1,
+              outcome: 'slept',
+              trigger: 'attempt_budget',
+              blockedReason: null,
+              decidedAt: '2026-08-15T13:11:53.580Z',
+              episodeStartedAt: null,
+              failedAttempts: 3,
+              lastError: 'snapshot upload failed',
+              recoveryPoint: {
+                generation: 'generation-final',
+                commit: 'abcdef1234567890',
+                branch: 'main',
+                detached: false,
+                upstream: null,
+                capturedAt: null,
+                snapshotStatus: 'degraded',
+                degradation: 'home-skipped',
+                workingTreeSaved: true,
+                homeSaved: false,
+              },
+            })
+          : null,
+      },
+      {
+        id: 'project-1',
+        defaultLocation: 'nbg1',
+        defaultBranch: 'main',
+        repository: 'owner/repo',
+        installationId: 'install-1',
         defaultVmSize: null,
         defaultAgentType: null,
         defaultProvider: null,
         taskExecutionTimeoutMs: null,
-        maxWorkspacesPerNode: null,
         nodeCpuThresholdPercent: null,
         nodeMemoryThresholdPercent: null,
         warmNodeTimeoutMs: null,
@@ -227,43 +394,61 @@ describe('ensureSessionRecovery', () => {
         credentialAttributionUserId: 'user-1',
         credentialAttributionProjectId: null,
         credentialAttributionSource: 'user',
-      },
-      null,
-      {
-        id: 'recovery-task-1',
-        projectId: 'project-1',
-        userId: 'user-1',
         chatSessionId: 'chat-1',
-        recoverySourceTaskId: 'source-task-1',
-        title: 'Original task title that must not become the fresh wake prompt',
-        description: SESSION_RECOVERY_INITIAL_PROMPT,
-        status: 'queued',
-        agentProfileHint: null,
-        outputBranch: 'sam/original',
-        credentialAttributionUserId: 'user-1',
-        credentialAttributionProjectId: null,
-        credentialAttributionSource: 'user',
-        triggeredBy: 'session-recovery',
+        workspaceId: 'workspace-sleeping',
+        status: 'sleeping',
       },
-      { id: 'source-task-1' }
+      queuedSourceTask(
+        'Original task title that must not become the fresh wake prompt',
+        'workspace-sleeping'
+      ),
+      queuedSourceTask('Original task title that must not become the fresh wake prompt', null)
     );
 
+    const evictionFence = {
+      workspaceId: 'workspace-sleeping',
+      nodeId: 'node-unhealthy',
+      generation: 'generation-1',
+    };
     const result = await ensureSessionRecovery(
       { DATABASE: databaseMock, BASE_DOMAIN: 'example.test' } as never,
       'project-1',
-      'chat-1'
+      'chat-1',
+      undefined,
+      { excludedNodeId: 'node-unhealthy', evictionFence }
     );
 
-    expect(result).toEqual({ status: 'waking', taskId: 'recovery-task-1' });
+    expect(result).toEqual({ status: 'waking', taskId: 'source-task-1' });
+    if (fallback) {
+      expect(startTaskRunnerDOMock).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          taskDescription: expect.stringContaining('SAM restored commit abcdef1234567890'),
+        }),
+        { reactivate: true }
+      );
+    }
+    expect(assertReplacementDeletionConfirmedMock).toHaveBeenCalledWith(expect.anything(), {
+      sourceTaskId: 'source-task-1',
+      projectId: 'project-1',
+      userId: 'user-1',
+    });
     expect(databaseMock.batch).toHaveBeenCalledTimes(1);
     expect(startTaskRunnerDOMock).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        taskId: 'recovery-task-1',
+        taskId: 'source-task-1',
         taskTitle: 'Original task title that must not become the fresh wake prompt',
-        taskDescription: SESSION_RECOVERY_INITIAL_PROMPT,
+        taskDescription: fallback
+          ? expect.stringContaining('Do not repeat actions with effects outside this workspace')
+          : SESSION_RECOVERY_INITIAL_PROMPT,
         resumeSnapshotChatSessionId: 'chat-1',
-      })
+        recoverySourceTaskId: null,
+        retrySourceTaskId: null,
+        excludedNodeId: 'node-unhealthy',
+        evictionFence,
+      }),
+      { reactivate: true }
     );
   });
 
@@ -282,7 +467,14 @@ describe('ensureSessionRecovery', () => {
       { id: 'project-1' },
       { id: 'workspace-sleeping', ...emptyCapacityPlacement, userId: 'user-1' },
       { id: 'user-1' },
-      { id: 'source-task-1', title: 'Parent', recoverySourceTaskId: null },
+      {
+        id: 'source-task-1',
+        title: 'Parent',
+        recoverySourceTaskId: null,
+        chatSessionId: 'chat-1',
+        workspaceId: 'workspace-sleeping',
+        status: 'cancelled',
+      },
       null,
       null
     );
@@ -309,10 +501,394 @@ describe('ensureSessionRecovery', () => {
       dbMock,
       expect.anything(),
       'chat-1',
-      'recovery-task-1',
-      'source task is no longer wakeable'
+      'source-task-1',
+      'source task is no longer wakeable',
+      expect.any(String)
     );
-    expect(databaseMock.batch).toHaveBeenCalledTimes(1);
+    expect(databaseMock.batch).not.toHaveBeenCalled();
     expect(startTaskRunnerDOMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Wake must resume the ORIGINAL run's canonical resource plan.
+ *
+ * Before this change `resolveRecoveryPlacement` did
+ * `JSON.parse(sourceTask.resourceRequirementsJson)` into the `task` layer alone.
+ * That dropped every inherited layer, ignored the persisted reservation, and
+ * threw an unhandled SyntaxError on a malformed value — while the project and
+ * agent-profile rows it read were TODAY's, so a default changed after the
+ * session went to sleep silently re-sized the woken workspace.
+ */
+describe('session recovery consumes the canonical persisted resource plan', () => {
+  // Sibling describe: the outer `beforeEach` does not run here, so the queue and
+  // mocks must be primed explicitly or rows leak between cases.
+  beforeEach(() => {
+    vi.clearAllMocks();
+    selectQueue.length = 0;
+    databaseMock.setBatchInsertChanges(1);
+    databaseMock.setEvictionFenceValid(true);
+    claimSessionSnapshotRecoveryMock.mockResolvedValue({
+      status: 'claimed',
+      taskId: 'recovery-task-1',
+    });
+    assertReplacementDeletionConfirmedMock.mockResolvedValue(undefined);
+  });
+
+  const SLEEPING_SNAPSHOT = {
+    id: 'snapshot-1',
+    projectId: 'project-1',
+    workspaceId: 'workspace-sleeping',
+    userId: 'user-1',
+    runtime: 'vm',
+    sleepingAt: '2026-08-15T13:11:53.580Z',
+    manifestJson: JSON.stringify({ agentType: 'claude-code' }),
+  };
+
+  /** The project row as it looks NOW — deliberately different from the original run. */
+  const PROJECT_WITH_CHANGED_DEFAULTS = {
+    id: 'project-1',
+    defaultLocation: 'nbg1',
+    defaultBranch: 'main',
+    repository: 'owner/repo',
+    installationId: 'install-1',
+    defaultVmSize: 'large',
+    defaultAgentType: null,
+    defaultProvider: null,
+    // A project-layer requirement added AFTER the session went to sleep.
+    resourceRequirementsJson: JSON.stringify({ minVcpu: 8, minMemoryGb: 16 }),
+    taskExecutionTimeoutMs: null,
+    nodeCpuThresholdPercent: null,
+    nodeMemoryThresholdPercent: null,
+    warmNodeTimeoutMs: null,
+  };
+
+  const WORKSPACE = {
+    id: 'workspace-sleeping',
+    ...emptyCapacityPlacement,
+    userId: 'user-1',
+    vmSize: 'small',
+    vmLocation: 'hel1',
+    branch: 'main',
+    workspaceProfile: 'lightweight',
+    devcontainerConfigName: null,
+    agentProfileHint: null,
+  };
+
+  const USER = { id: 'user-1', name: 'Test User', email: 'test@example.com', githubId: 'gh-1' };
+
+  function queueWake(sourceTask: Record<string, unknown>) {
+    selectQueue.push(SLEEPING_SNAPSHOT, PROJECT_WITH_CHANGED_DEFAULTS, WORKSPACE, USER, {
+      id: 'source-task-1',
+      recoverySourceTaskId: null,
+      workspaceId: 'workspace-sleeping',
+      title: 'Original run',
+      ...sourceTask,
+    });
+  }
+
+  async function wake(options: Parameters<typeof ensureSessionRecovery>[4] = {}) {
+    return ensureSessionRecovery(
+      { DATABASE: databaseMock, BASE_DOMAIN: 'example.test' } as never,
+      'project-1',
+      'chat-1',
+      undefined,
+      options
+    );
+  }
+
+  async function placementInput() {
+    const { resolveTaskStartPlacement } = await import('../../../src/services/placement-resolver');
+    const mock = resolveTaskStartPlacement as unknown as ReturnType<typeof vi.fn>;
+    expect(mock).toHaveBeenCalledTimes(1);
+    return mock.mock.calls[0]?.[0] as {
+      resourceRequirements: Record<string, unknown>;
+      resolvedReservationOverride: unknown;
+      explicit: { vmSize: string; vmSizeSource: string; vmLocation: string | null };
+      preferredVmLocation?: string | null;
+    };
+  }
+
+  const evictionOptions = {
+    excludedNodeId: 'node-unhealthy',
+    evictionFence: {
+      workspaceId: 'workspace-sleeping',
+      nodeId: 'node-unhealthy',
+      generation: 'generation-1',
+    },
+  };
+
+  it('drops an incidental old location so eviction recovery uses normal placement', async () => {
+    queueWake({
+      placementExplanationJson: JSON.stringify({ explicitVmLocation: false }),
+      requestedVmSize: 'small',
+      requestedVmSizeSource: 'task',
+    });
+
+    await wake(evictionOptions);
+
+    const input = await placementInput();
+    expect(input.explicit.vmLocation).toBeNull();
+    // Eviction relocates through normal placement (policy 95c3329a): not even a preference.
+    expect(input.preferredVmLocation).toBeNull();
+  });
+
+  it('preserves an old location the conversation explicitly asked for, on eviction too', async () => {
+    queueWake({
+      placementExplanationJson: JSON.stringify({ explicitVmLocation: true }),
+      requestedVmSize: 'small',
+      requestedVmSizeSource: 'task',
+    });
+
+    await wake(evictionOptions);
+
+    expect((await placementInput()).explicit.vmLocation).toBe('hel1');
+  });
+
+  // Changed 2026-09-25. Unknown provenance used to pin the old location. `explicitVmLocation` has
+  // only been recorded since 2026-09-20 (#2108), no production root run has ever requested a
+  // location, and pinning on "unknown" is exactly how a wake stranded itself in a region at its
+  // core quota. Absence of evidence of a request is not a request.
+  it.each([
+    ['legacy unknown provenance', null],
+    ['an explanation without the field', JSON.stringify({ kind: 'capacity_pool_default' })],
+  ])('treats %s as a preference, not a pin', async (_label, placementExplanationJson) => {
+    queueWake({
+      placementExplanationJson,
+      requestedVmSize: 'small',
+      requestedVmSizeSource: 'task',
+    });
+
+    await wake(evictionOptions);
+
+    expect((await placementInput()).explicit.vmLocation).toBeNull();
+  });
+
+  describe('human and durable wakes', () => {
+    it('prefer the region the session slept in without requiring it', async () => {
+      queueWake({
+        placementExplanationJson: JSON.stringify({ explicitVmLocation: false }),
+        requestedVmSize: 'small',
+        requestedVmSizeSource: 'task',
+      });
+
+      await wake();
+
+      const input = await placementInput();
+      // Before 2026-09-25 this was 'hel1': the wake pinned its own old region, which dropped every
+      // other permitted offering and host from placement.
+      expect(input.explicit.vmLocation).toBeNull();
+      expect(input.preferredVmLocation).toBe('hel1');
+    });
+
+    it('keep a location the first run explicitly asked for as a hard constraint', async () => {
+      queueWake({
+        placementExplanationJson: JSON.stringify({ explicitVmLocation: true }),
+        requestedVmSize: 'small',
+        requestedVmSizeSource: 'task',
+      });
+
+      await wake();
+
+      const input = await placementInput();
+      expect(input.explicit.vmLocation).toBe('hel1');
+      expect(input.preferredVmLocation).toBe('hel1');
+    });
+  });
+
+  it('replays every persisted layer at its original precedence, not just the task layer', async () => {
+    queueWake({
+      triggerId: 'trigger-1',
+      skillId: 'skill-1',
+      agentProfileHint: 'profile-1',
+      resourceRequirementPlanJson: JSON.stringify({
+        version: 1,
+        intent: {
+          task: { minVcpu: 2 },
+          trigger: { minMemoryGb: 3 },
+          skill: { minDiskGb: 20 },
+          agentProfile: { minVcpu: 1 },
+          project: { exclusiveNode: false },
+          user: null,
+        },
+        resolvedReservation: {
+          version: 1,
+          cpuMillis: 1500,
+          memoryMb: 3072,
+          diskMb: 20480,
+          exclusiveNode: false,
+          source: 'task',
+          sourceId: 'source-task-1',
+        },
+      }),
+      requestedVmSize: 'small',
+      requestedVmSizeSource: 'task',
+    });
+
+    await wake();
+    const input = await placementInput();
+
+    // Every inherited layer survives the wake. The pre-fix reader produced
+    // `{ task: <parsed> }` and nothing else.
+    expect(input.resourceRequirements).toMatchObject({
+      task: expect.objectContaining({ minVcpu: 2 }),
+      trigger: expect.objectContaining({ minMemoryGb: 3 }),
+      skill: expect.objectContaining({ minDiskGb: 20 }),
+      agentProfile: expect.objectContaining({ minVcpu: 1 }),
+      project: expect.objectContaining({ exclusiveNode: false }),
+    });
+  });
+
+  it('reuses the persisted reservation instead of recomputing from current defaults', async () => {
+    queueWake({
+      resourceRequirementPlanJson: JSON.stringify({
+        version: 1,
+        intent: { task: { minVcpu: 2 } },
+        resolvedReservation: {
+          version: 1,
+          cpuMillis: 1500,
+          memoryMb: 3072,
+          diskMb: 20480,
+          exclusiveNode: false,
+          source: 'task',
+          sourceId: 'source-task-1',
+        },
+      }),
+      requestedVmSize: 'small',
+      requestedVmSizeSource: 'task',
+    });
+
+    await wake();
+    const input = await placementInput();
+
+    // The project row above now carries minVcpu 8 / minMemoryGb 16 and a
+    // 'large' default size. None of it may reach the woken run.
+    expect(input.resolvedReservationOverride).toMatchObject({
+      cpuMillis: 1500,
+      memoryMb: 3072,
+      diskMb: 20480,
+    });
+    expect(input.explicit.vmSize).toBe('small');
+    expect(input.explicit.vmSizeSource).toBe('task');
+  });
+
+  it('preserves the original requested size when the project default changed after sleep', async () => {
+    queueWake({
+      resourceRequirementPlanJson: null,
+      resourceRequirementsJson: null,
+      resourceRequirementsSource: null,
+      resolvedReservationJson: null,
+      requestedVmSize: 'medium',
+      requestedVmSizeSource: 'trigger',
+    });
+
+    await wake();
+    const input = await placementInput();
+
+    // Not 'large' (today's project default) and not 'small' (the workspace row).
+    expect(input.explicit.vmSize).toBe('medium');
+    expect(input.explicit.vmSizeSource).toBe('trigger');
+  });
+
+  it.each([
+    { label: 'plan json', row: { resourceRequirementPlanJson: '{not json' } },
+    {
+      // The exact value the pre-fix `JSON.parse(sourceTask.resourceRequirementsJson)`
+      // threw a raw SyntaxError on, straight out of ensureSessionRecovery.
+      label: 'legacy requirements json',
+      row: { resourceRequirementsJson: '{not json', resourceRequirementsSource: 'task' },
+    },
+    {
+      label: 'unsupported plan version',
+      row: {
+        resourceRequirementPlanJson: JSON.stringify({ version: 99, intent: {} }),
+      },
+    },
+  ])(
+    'fails visibly on a malformed stored intent ($label) instead of waking onto current defaults',
+    async ({ row }) => {
+      queueWake({
+        ...row,
+        requestedVmSize: 'small',
+        requestedVmSizeSource: 'task',
+      });
+
+      const result = await wake();
+
+      // A named, surfaced refusal — not a raw SyntaxError escaping
+      // ensureSessionRecovery, and not a silent wake onto current defaults.
+      expect(result).toEqual({
+        status: 'unavailable',
+        reason: 'stored_resource_plan_invalid',
+      });
+      expect(classifySessionRecoveryRefusal(result.reason).action).toBe('report');
+      expect(startTaskRunnerDOMock).not.toHaveBeenCalled();
+      const { resolveTaskStartPlacement } =
+        await import('../../../src/services/placement-resolver');
+      expect(resolveTaskStartPlacement).not.toHaveBeenCalled();
+    }
+  );
+
+  it('names a placement that fails for now as a refusal its callers retry', async () => {
+    // The producer half of the delivery/eviction retry contract: a rename here
+    // would silently turn a retried refusal into a dropped one.
+    queueWake({ requestedVmSize: 'small', requestedVmSizeSource: 'task' });
+    const { resolveTaskStartPlacement } = await import('../../../src/services/placement-resolver');
+    (resolveTaskStartPlacement as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      () => {
+        throw new Error('capacity pool summary unavailable');
+      }
+    );
+
+    const result = await wake();
+
+    expect(result).toEqual({
+      status: 'unavailable',
+      reason: 'session_recovery_placement_lookup_failed',
+    });
+    expect(
+      result.status === 'unavailable' &&
+        classifySessionRecoveryRefusal(result.reason).action === 'retry'
+    ).toBe(true);
+    expect(startTaskRunnerDOMock).not.toHaveBeenCalled();
+  });
+
+  it('control: a well-formed plan still wakes normally', async () => {
+    // Absence assertions above are also satisfied by wake being broken outright
+    // (`.claude/rules/62`). This proves the happy path still reaches the runner.
+    queueWake({
+      resourceRequirementPlanJson: JSON.stringify({
+        version: 1,
+        intent: { task: { minVcpu: 2 } },
+        resolvedReservation: {
+          version: 1,
+          cpuMillis: 1500,
+          memoryMb: 3072,
+          diskMb: 0,
+          exclusiveNode: false,
+          source: 'task',
+          sourceId: 'source-task-1',
+        },
+      }),
+      requestedVmSize: 'small',
+      requestedVmSizeSource: 'task',
+      outputBranch: 'sam/original',
+      credentialAttributionUserId: 'user-1',
+      credentialAttributionProjectId: null,
+      credentialAttributionSource: 'user',
+      chatSessionId: 'chat-1',
+      workspaceId: 'workspace-sleeping',
+      status: 'sleeping',
+    });
+    // Row the stable-task reactivation batch reads back after the update.
+    selectQueue.push(
+      queuedSourceTask('Original run', 'workspace-sleeping'),
+      queuedSourceTask('Original run', null)
+    );
+
+    const result = await wake();
+
+    expect(result).toEqual({ status: 'waking', taskId: 'source-task-1' });
+    expect(startTaskRunnerDOMock).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,20 +1,40 @@
 import {
+  isUrgentMessageClass,
   MAX_ORCHESTRATOR_WAIT_CHILDREN,
   TASK_TERMINAL_STATUSES,
+  type VmPromptDeliveryCapabilities,
 } from '@simple-agent-manager/shared';
 
 import { createModuleLogger } from '../../lib/logger';
+import {
+  isSessionRecoverySourceTaskGuardValid,
+  type SessionRecoverySourceTaskGuard,
+} from '../../services/session-recovery-authority';
 import { recordDurableExecutionMetric } from '../../services/telemetry';
-import type { VmPromptDeliveryAdapter } from '../../services/vm-prompt-delivery-adapter';
+import type {
+  VmPromptDeliveryAdapter,
+  VmPromptDeliveryTarget,
+} from '../../services/vm-prompt-delivery-adapter';
 import * as activity from './activity';
 import type { DurableExecutionConfig } from './durable-execution-config';
+import { invalidScheduledDeliveryTarget } from './project-event-schedules-delivery';
+import {
+  advanceProjectEventPromptAttemptCheckpoint,
+  invalidProjectEventWakeDeliveryTargetResult,
+} from './project-events-wake-delivery';
 import {
   applyPromptDeliveryResult,
+  markPromptDeliverySubmitting,
   type PromptDeliveryClaim,
   type PromptDeliveryResult,
 } from './prompt-delivery';
+import {
+  stopBusyTurnForUrgentDelivery,
+  type UrgentBusyTurnStopOutcome,
+} from './prompt-delivery-interrupt';
 import * as sessionState from './session-state';
 import type { Env } from './types';
+import { raiseSessionWakeFailure } from './wake-failure';
 
 const log = createModuleLogger('project_data.prompt_delivery_runner');
 const MAX_TASK_ID_LENGTH = 128;
@@ -23,6 +43,12 @@ export interface PromptDeliveryRunnerHooks {
   projectId: string | null;
   recalculateAlarm: () => Promise<void>;
   broadcastEvent: (type: string, payload: Record<string, unknown>, sessionId?: string) => void;
+  /** Re-arm the idle timer for a chat session whose turn just ended. */
+  armIdleCleanup: (chatSessionId: string) => void;
+  /** Release durable messages queued behind the (now ended) turn. */
+  nudgeDeliveries: (chatSessionId: string) => number;
+  /** Refresh D1 session summaries after marker/message changes. */
+  scheduleSummarySync: () => void;
 }
 
 function parentWakeChildTaskIds(claim: PromptDeliveryClaim): string[] | null {
@@ -119,8 +145,7 @@ async function invalidParentWakeTargetResult(
     ? (TASK_TERMINAL_STATUSES as readonly string[]).includes(parent.status)
     : false;
   const parentIsWakeable =
-    parent &&
-    (!parentIsTerminal || (parent.status === 'cancelled' && Boolean(liveRecoveryOwner)));
+    parent && (!parentIsTerminal || (parent.status === 'cancelled' && Boolean(liveRecoveryOwner)));
   if (
     !parent ||
     !parentIsWakeable ||
@@ -175,6 +200,94 @@ function parentWakeValidationReadFailure(
   };
 }
 
+function sourceTaskGuardForClaim(
+  claim: PromptDeliveryClaim,
+  projectId: string | null
+): SessionRecoverySourceTaskGuard | undefined {
+  if (
+    claim.message.sourceKind !== 'parent_wakeup' &&
+    claim.message.sourceKind !== 'project_event_wake' &&
+    claim.message.sourceKind !== 'scheduled_action'
+  ) {
+    return undefined;
+  }
+  if (!claim.message.sourceTaskId || !projectId) return undefined;
+  const metadata = claim.message.metadata ?? {};
+  const projectEventWake =
+    claim.message.sourceKind === 'project_event_wake' &&
+    typeof metadata.batchId === 'string' &&
+    typeof metadata.subscriptionId === 'string'
+      ? { batchId: metadata.batchId, subscriptionId: metadata.subscriptionId }
+      : null;
+  return {
+    taskId: claim.message.sourceTaskId,
+    projectId,
+    chatSessionId: claim.message.targetSessionId,
+    ...(projectEventWake ? { projectEventWake } : {}),
+    ...(claim.message.sourceKind === 'scheduled_action' &&
+    typeof metadata.creatorUserId === 'string'
+      ? { requiredProjectMemberId: metadata.creatorUserId }
+      : {}),
+  };
+}
+
+async function invalidProjectEventWakeSourceTaskResult(
+  env: Env,
+  projectId: string | null,
+  claim: PromptDeliveryClaim
+): Promise<PromptDeliveryResult | null> {
+  if (claim.message.sourceKind !== 'project_event_wake') return null;
+  if (!claim.message.sourceTaskId || !projectId) {
+    return {
+      kind: 'failed',
+      reason: 'terminal_target',
+      error: !projectId
+        ? 'Project event wake has no project identity'
+        : 'Project event wake has no source task authority',
+      runtimeIdentity: claim.message.runtimeIdentity,
+      capabilities: null,
+    };
+  }
+  const valid = await isSessionRecoverySourceTaskGuardValid(env.DATABASE, {
+    requireSourceProjectMember: true,
+    taskId: claim.message.sourceTaskId,
+    projectId,
+    chatSessionId: claim.message.targetSessionId,
+  });
+  if (valid) return null;
+  return {
+    kind: 'failed',
+    reason: 'terminal_target',
+    error: 'Project event wake source task authority was revoked',
+    runtimeIdentity: claim.message.runtimeIdentity,
+    capabilities: null,
+  };
+}
+
+function projectEventWakeValidationReadFailure(
+  claim: PromptDeliveryClaim,
+  error: unknown
+): PromptDeliveryResult {
+  const message = error instanceof Error ? error.message : String(error);
+  if (claim.mode === 'reconcile') {
+    return {
+      kind: 'ambiguous',
+      reason: 'receipt_unavailable',
+      error: `Project event wake source authority validation failed during receipt reconciliation: ${message}`,
+      runtimeIdentity: claim.message.runtimeIdentity,
+      capabilities: null,
+      receipt: null,
+    };
+  }
+  return {
+    kind: 'retry',
+    reason: 'not_ready',
+    error: `Project event wake source authority validation temporarily failed: ${message}`,
+    runtimeIdentity: claim.message.runtimeIdentity,
+    capabilities: null,
+  };
+}
+
 export async function runPromptDeliveryClaim(
   sql: SqlStorage,
   env: Env,
@@ -196,7 +309,12 @@ export async function runPromptDeliveryClaim(
   );
 
   let result: PromptDeliveryResult;
+  // Stop-and-deliver outcome captured by the onBusyTurn hook below; read after
+  // the retry result is applied so a stopped turn's parked delivery can be
+  // re-nudged due immediately (see the comment at the nudge site).
+  let urgentStopOutcome: UrgentBusyTurnStopOutcome | null = null;
   try {
+    const sourceTaskGuard = sourceTaskGuardForClaim(claim, hooks.projectId);
     const validateParentWakeTarget = async (): Promise<PromptDeliveryResult | null> => {
       try {
         return await invalidParentWakeTargetResult(env, hooks.projectId, claim);
@@ -204,23 +322,60 @@ export async function runPromptDeliveryClaim(
         return parentWakeValidationReadFailure(claim, error);
       }
     };
+    const validateProjectEventWakeTarget = async (): Promise<PromptDeliveryResult | null> => {
+      const localInvalid = invalidProjectEventWakeDeliveryTargetResult(
+        sql,
+        env,
+        hooks.projectId,
+        claim
+      );
+      if (localInvalid) return localInvalid;
+      try {
+        const sourceInvalid = await invalidProjectEventWakeSourceTaskResult(
+          env,
+          hooks.projectId,
+          claim
+        );
+        if (sourceInvalid) return sourceInvalid;
+        return invalidProjectEventWakeDeliveryTargetResult(sql, env, hooks.projectId, claim);
+      } catch (error) {
+        return projectEventWakeValidationReadFailure(claim, error);
+      }
+    };
+    const validateDeliveryTarget = async (): Promise<PromptDeliveryResult | null> =>
+      (await validateParentWakeTarget()) ??
+      (await validateProjectEventWakeTarget()) ??
+      (await invalidScheduledDeliveryTarget(sql, env, hooks.projectId, claim));
+    // Stop-and-deliver: an urgent class rejected because the target is
+    // mid-turn may cancel that turn so this delivery becomes the next
+    // prompt. Informational classes never stop anything — for them the
+    // busy retry path below is byte-for-byte the pre-existing behaviour.
     const input = {
       projectId: hooks.projectId ?? '',
       claim,
       allowLegacyVm: config.legacyVmCompatEnabled,
       requestTimeoutMs: config.backgroundTimeoutMs,
-      beforeSideEffect: validateParentWakeTarget,
-      sourceTaskGuard:
-        claim.message.sourceKind === 'parent_wakeup' && claim.message.sourceTaskId
-          ? {
-              taskId: claim.message.sourceTaskId,
-              projectId: hooks.projectId ?? '',
-              chatSessionId: claim.message.targetSessionId,
-            }
-          : undefined,
+      beforeSideEffect: validateDeliveryTarget,
+      beforeSubmit: (capabilities: VmPromptDeliveryCapabilities) =>
+        markPromptDeliverySubmitting(sql, claim, capabilities),
+      sourceTaskGuard,
+      ...(isUrgentMessageClass(claim.message.messageClass)
+        ? {
+            onBusyTurn: async (target: VmPromptDeliveryTarget) => {
+              urgentStopOutcome = await stopBusyTurnForUrgentDelivery(
+                sql,
+                env,
+                hooks,
+                claim,
+                target,
+                { requestTimeoutMs: config.backgroundTimeoutMs }
+              );
+            },
+          }
+        : {}),
     };
     result =
-      (await validateParentWakeTarget()) ??
+      (await validateDeliveryTarget()) ??
       (claim.mode === 'submit' ? await adapter.submit(input) : await adapter.reconcile(input));
   } catch (error) {
     result = {
@@ -234,6 +389,20 @@ export async function runPromptDeliveryClaim(
   }
 
   const applied = applyPromptDeliveryResult(sql, claim, result, config);
+  if (applied) {
+    advanceProjectEventPromptAttemptCheckpoint(sql, hooks.projectId, claim, result);
+  }
+  if (applied && result.kind === 'retry' && urgentStopOutcome && urgentStopOutcome !== 'skipped') {
+    // The stop reached the VM (or the busy turn had already ended), but this
+    // delivery was still `delivering` when the turn-end fan-out nudged the
+    // queue, so its own release never happened — it just parked with ordinary
+    // backoff. Pull it due immediately: the claim engine orders by message
+    // class, so the urgent delivery now outranks any sibling the turn-end nudge
+    // released and becomes the target's next prompt instead of being jumped.
+    // A skipped stop (transport failure) keeps the backoff so a broken node
+    // cannot be hot-looped.
+    hooks.nudgeDeliveries(claim.message.targetSessionId);
+  }
   if (applied && result.kind === 'accepted') {
     sessionState.markPromptAccepted(
       sql,
@@ -241,6 +410,20 @@ export async function runPromptDeliveryClaim(
       result.promptEpoch,
       result.promptEpoch
     );
+  }
+  if (applied && result.kind === 'failed' && result.reason === 'wake_refused') {
+    raiseSessionWakeFailure(
+      sql,
+      {
+        sessionId: claim.message.targetSessionId,
+        taskId: claim.message.sourceTaskId,
+        deliveryId: claim.message.id,
+        reason: result.reason,
+        detail: result.error,
+      },
+      hooks.broadcastEvent
+    );
+    hooks.scheduleSummarySync();
   }
 
   const metric =

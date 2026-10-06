@@ -4,6 +4,7 @@
  * Centralizes user/project/installation seeding to avoid duplication
  * across DO test suites.
  */
+import { makeSignature } from 'better-auth/crypto';
 import { env } from 'cloudflare:test';
 
 /**
@@ -26,6 +27,24 @@ export async function seedUser(
 }
 
 /**
+ * Approve a seeded user, sign them in, and return the Cookie header their browser
+ * would send, so a test can reach session-authenticated routes through the real
+ * worker.
+ */
+export async function seedSignedInUser(userId: string): Promise<string> {
+  await env.DATABASE.prepare("UPDATE users SET status = 'active' WHERE id = ?").bind(userId).run();
+  const token = `browser-session-${crypto.randomUUID()}`;
+  await env.DATABASE.prepare(
+    `INSERT INTO sessions (id, expires_at, token, created_at, updated_at, user_id)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  )
+    .bind(`session-${token}`, Date.now() + 3_600_000, token, Date.now(), Date.now(), userId)
+    .run();
+  const signature = await makeSignature(token, env.BETTER_AUTH_SECRET || env.ENCRYPTION_KEY);
+  return `__Secure-better-auth.session_token=${token}.${signature}`;
+}
+
+/**
  * Seed a GitHub installation into D1. Idempotent.
  */
 export async function seedInstallation(
@@ -33,7 +52,11 @@ export async function seedInstallation(
   userId: string,
   opts?: { installationIdValue?: string; accountName?: string }
 ): Promise<void> {
-  const externalInstallationId = opts?.installationIdValue ?? 'inst-12345';
+  // Derived per installation, not a shared literal: github_installations is unique
+  // on external_installation_id, so a shared default made every installation after
+  // the first a silent INSERT OR IGNORE no-op and the next seedProject failed its
+  // installation_id foreign key.
+  const externalInstallationId = opts?.installationIdValue ?? `inst-${installationId}`;
   const accountName = opts?.accountName ?? 'test-user';
 
   await env.DATABASE.prepare(
@@ -117,6 +140,46 @@ export async function seedNode(
       opts?.createdAt ?? new Date().toISOString(),
       opts?.updatedAt ?? new Date().toISOString()
     )
+    .run();
+}
+
+/** Seed a providerless managed VM with exact placement and durable absence proof. */
+export async function seedManagedVmAbsenceProof(nodeId: string, userId: string): Promise<void> {
+  const poolId = `${nodeId}-proof-pool`;
+  const sourceId = `${nodeId}-proof-source`;
+  const credentialId = `${nodeId}-proof-credential`;
+  await env.DATABASE.prepare(
+    `INSERT INTO platform_credentials
+     (id, credential_type, provider, label, encrypted_token, iv, created_by)
+     VALUES (?, 'cloud-provider', 'hetzner', 'proof-credential', 'unused', 'unused', ?)`
+  )
+    .bind(credentialId, userId)
+    .run();
+  await env.DATABASE.prepare(
+    "INSERT INTO capacity_pools (id, scope, owner_user_id, name) VALUES (?, 'user', ?, 'proof-pool')"
+  )
+    .bind(poolId, userId)
+    .run();
+  await env.DATABASE.prepare(
+    `INSERT INTO capacity_sources
+     (id, scope, owner_user_id, source_kind, provider, credential_source,
+      platform_credential_id, credential_reference, credential_version)
+     VALUES (?, 'user', ?, 'cloud-provider-credential', 'hetzner', 'platform', ?, ?, 1)`
+  )
+    .bind(sourceId, userId, credentialId, credentialId)
+    .run();
+  await env.DATABASE.prepare(
+    `UPDATE nodes SET runtime = 'vm', runtime_incarnation_id = 'original',
+    runtime_termination_confirmed_at = datetime('now'), cloud_provider = 'hetzner',
+    node_role = 'workspace', workload_role = 'workspace', provider_instance_type = 'cx23',
+    provider_instance_vcpu_count = 2, provider_instance_memory_mb = 4096,
+    capacity_pool_id = ?, capacity_pool_scope = 'user', capacity_pool_revision = 1,
+    capacity_source_id = ?, capacity_source_generation = 1,
+    capacity_pool_candidate_id = 'proof-candidate', placement_credential_source = 'platform',
+    placement_credential_reference = ?, placement_credential_version = 1,
+    placement_credential_fingerprint = 'proof-fingerprint' WHERE id = ?`
+  )
+    .bind(poolId, sourceId, credentialId, nodeId)
     .run();
 }
 
@@ -207,13 +270,28 @@ export async function seedWorkspace(
     projectId?: string;
     status?: string;
     chatSessionId?: string;
+    resolvedReservationJson?: string | null;
     createdAt?: string;
     updatedAt?: string;
   }
 ): Promise<void> {
+  const resolvedReservationJson =
+    opts?.resolvedReservationJson === undefined
+      ? JSON.stringify({
+          cpuMillis: 1000,
+          memoryMb: 1024,
+          diskMb: 1024,
+          exclusiveNode: false,
+          source: 'platform',
+          sourceId: 'platform',
+          version: 1,
+        })
+      : opts.resolvedReservationJson;
   await env.DATABASE.prepare(
-    `INSERT OR IGNORE INTO workspaces (id, node_id, user_id, project_id, name, repository, branch, status, vm_size, vm_location, chat_session_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, 'main', ?, 'medium', 'nbg1', ?, ?, ?)`
+    `INSERT OR IGNORE INTO workspaces
+       (id, node_id, user_id, project_id, name, repository, branch, status, vm_size, vm_location,
+        chat_session_id, resolved_reservation_json, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, 'main', ?, 'medium', 'nbg1', ?, ?, ?, ?)`
   )
     .bind(
       workspaceId,
@@ -224,6 +302,7 @@ export async function seedWorkspace(
       'test-org/test-repo',
       opts?.status ?? 'running',
       opts?.chatSessionId ?? null,
+      resolvedReservationJson,
       opts?.createdAt ?? new Date().toISOString(),
       opts?.updatedAt ?? new Date().toISOString()
     )

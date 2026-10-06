@@ -16,9 +16,21 @@ const stuckTasksSource = readFileSync(
 );
 // node-cleanup.ts was split into a directory (rule 18). These structural assertions
 // apply to the sweep as a whole, so read every module and concatenate.
-const nodeCleanupSource = ['index.ts', 'shared.ts', 'node-phases.ts', 'workspace-phases.ts']
+const nodeCleanupSource = [
+  'index.ts',
+  'shared.ts',
+  'result.ts',
+  'node-phases.ts',
+  'terminal-cf-container-phase.ts',
+  'workspace-phases.ts',
+]
   .map((file) => readFileSync(resolve(process.cwd(), `src/scheduled/node-cleanup/${file}`), 'utf8'))
   .join('\n');
+// The live-runtime preservation record was split out of stuck-tasks.ts (rule 18).
+const stuckTaskLiveRuntimeSource = readFileSync(
+  resolve(process.cwd(), 'src/scheduled/stuck-task-live-runtime.ts'),
+  'utf8'
+);
 const timeoutSource = readFileSync(resolve(process.cwd(), 'src/services/timeout.ts'), 'utf8');
 const taskRunnerSource = readFileSync(
   resolve(process.cwd(), 'src/services/task-runner.ts'),
@@ -310,12 +322,14 @@ describe('node-cleanup orphan detection (TDF-7)', () => {
     // used to count only 'running', so a node holding a 'creating' workspace could
     // be destroyed by phase 1 while phases 2/3 correctly skipped it.
     expect(nodeCleanupSource).toContain("w.status IN ('running', 'creating', 'recovery')");
-    // Failed/cancelled work is terminal. Completed conversations remain
-    // persistent unless the workspace has no chat to resume.
-    expect(nodeCleanupSource).toContain("t.status IN ('failed', 'cancelled')");
+    // Terminal work is reaped unless the session-sleep lifecycle owns the
+    // workspace; the behavioural proof against real SQL lives in
+    // tests/workers/scheduled-node-cleanup.test.ts.
+    expect(nodeCleanupSource).toContain("t.status IN ('completed', 'failed', 'cancelled')");
     expect(nodeCleanupSource).toContain(
-      "(t.status = 'completed' AND w.chat_session_id IS NULL)"
+      "AND NOT ${sleepLifecycleOwnsTerminalTaskWorkspaceSql('t', 'w', sessionSleepMaxAttempts(env))}"
     );
+    expect(nodeCleanupSource).not.toContain("t.status IN ('failed', 'cancelled')");
     // Must NOT have any active task still referencing it
     expect(nodeCleanupSource).toContain('NOT EXISTS');
     expect(nodeCleanupSource).toContain("t.status IN ('queued', 'delegated', 'in_progress')");
@@ -479,7 +493,8 @@ describe('recovery type consistency (TDF-7)', () => {
 
   for (const recoveryType of allRecoveryTypes) {
     it(`uses recoveryType: '${recoveryType}'`, () => {
-      const allSources = stuckTasksSource + nodeCleanupSource + timeoutSource;
+      const allSources =
+        stuckTasksSource + stuckTaskLiveRuntimeSource + nodeCleanupSource + timeoutSource;
       // Recovery types may appear in ternary expressions, so check for the string literal
       expect(allSources).toContain(`'${recoveryType}'`);
     });

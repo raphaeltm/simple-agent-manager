@@ -1,14 +1,22 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  classifyDurableObjectError,
   computeDurableObjectRetryDelayMs,
   DEFAULT_DO_RETRY_BASE_DELAY_MS,
+  DEFAULT_DO_RETRY_CONNECTION_LOST_MAX_ATTEMPTS,
   DEFAULT_DO_RETRY_MAX_ATTEMPTS,
   DEFAULT_DO_RETRY_MAX_DELAY_MS,
   getDurableObjectRetryConfig,
+  isDurableObjectConnectionLostError,
+  isDurableObjectCpuLimitResetError,
   isDurableObjectStorageFullError,
+  isRetryableForIdempotentDurableObjectOperation,
   isTransientDurableObjectError,
 } from '../../../src/services/durable-object-retry';
+
+const CPU_LIMIT_RESET = 'Durable Object exceeded its CPU time limit and was reset.';
+const CONNECTION_LOST = 'Network connection lost.';
 
 describe('isTransientDurableObjectError', () => {
   it('matches the exact Cloudflare code-update reset string', () => {
@@ -84,17 +92,20 @@ describe('getDurableObjectRetryConfig', () => {
       maxAttempts: DEFAULT_DO_RETRY_MAX_ATTEMPTS,
       baseDelayMs: DEFAULT_DO_RETRY_BASE_DELAY_MS,
       maxDelayMs: DEFAULT_DO_RETRY_MAX_DELAY_MS,
+      connectionLostMaxAttempts: DEFAULT_DO_RETRY_CONNECTION_LOST_MAX_ATTEMPTS,
     });
     expect(
       getDurableObjectRetryConfig({
         DO_RETRY_MAX_ATTEMPTS: '0',
         DO_RETRY_BASE_DELAY_MS: 'not-a-number',
         DO_RETRY_MAX_DELAY_MS: '-1',
+        DO_RETRY_CONNECTION_LOST_MAX_ATTEMPTS: '0',
       })
     ).toEqual({
       maxAttempts: DEFAULT_DO_RETRY_MAX_ATTEMPTS,
       baseDelayMs: DEFAULT_DO_RETRY_BASE_DELAY_MS,
       maxDelayMs: DEFAULT_DO_RETRY_MAX_DELAY_MS,
+      connectionLostMaxAttempts: DEFAULT_DO_RETRY_CONNECTION_LOST_MAX_ATTEMPTS,
     });
   });
 
@@ -104,12 +115,23 @@ describe('getDurableObjectRetryConfig', () => {
         DO_RETRY_MAX_ATTEMPTS: '5',
         DO_RETRY_BASE_DELAY_MS: '25',
         DO_RETRY_MAX_DELAY_MS: '125',
+        DO_RETRY_CONNECTION_LOST_MAX_ATTEMPTS: '4',
       })
     ).toEqual({
       maxAttempts: 5,
       baseDelayMs: 25,
       maxDelayMs: 125,
+      connectionLostMaxAttempts: 4,
     });
+  });
+
+  it('never lets the lost-connection budget exceed the general one', () => {
+    expect(
+      getDurableObjectRetryConfig({
+        DO_RETRY_MAX_ATTEMPTS: '2',
+        DO_RETRY_CONNECTION_LOST_MAX_ATTEMPTS: '6',
+      }).connectionLostMaxAttempts
+    ).toBe(2);
   });
 });
 
@@ -120,5 +142,54 @@ describe('computeDurableObjectRetryDelayMs', () => {
     expect(computeDurableObjectRetryDelayMs(3, 50, 250)).toBe(200);
     expect(computeDurableObjectRetryDelayMs(4, 50, 250)).toBe(250);
     expect(computeDurableObjectRetryDelayMs(5, 50, 250)).toBe(250);
+  });
+});
+
+describe('CPU-limit reset and lost-connection classification', () => {
+  it("matches Cloudflare's exact CPU-limit reset text and nothing looser", () => {
+    expect(isDurableObjectCpuLimitResetError(new Error(CPU_LIMIT_RESET))).toBe(true);
+    expect(isDurableObjectCpuLimitResetError(CPU_LIMIT_RESET.toUpperCase())).toBe(true);
+    expect(isDurableObjectCpuLimitResetError(new Error('Worker exceeded CPU time limit.'))).toBe(
+      false
+    );
+  });
+
+  it('matches the exact lost-connection text only', () => {
+    expect(isDurableObjectConnectionLostError(new Error(CONNECTION_LOST))).toBe(true);
+    expect(isDurableObjectConnectionLostError({ message: ' network connection lost ' })).toBe(true);
+    expect(isDurableObjectConnectionLostError(new Error('Network connection lost to D1'))).toBe(
+      false
+    );
+  });
+
+  it('does not widen the shared transient predicate that mutation retries use (rule 67)', () => {
+    expect(isTransientDurableObjectError(new Error(CPU_LIMIT_RESET))).toBe(false);
+    expect(isTransientDurableObjectError(new Error(CONNECTION_LOST))).toBe(false);
+  });
+
+  it('lets idempotent operations retry every object-level failure except a full database', () => {
+    expect(isRetryableForIdempotentDurableObjectOperation(new Error(CPU_LIMIT_RESET))).toBe(true);
+    expect(isRetryableForIdempotentDurableObjectOperation(new Error(CONNECTION_LOST))).toBe(true);
+    expect(
+      isRetryableForIdempotentDurableObjectOperation(
+        new Error('Durable Object reset because its code was updated.')
+      )
+    ).toBe(true);
+    expect(isRetryableForIdempotentDurableObjectOperation(new Error('SQLITE_FULL'))).toBe(false);
+    expect(isRetryableForIdempotentDurableObjectOperation(new Error('no such table: x'))).toBe(
+      false
+    );
+  });
+
+  it('classifies failures into stable, message-free codes', () => {
+    expect(classifyDurableObjectError(new Error(CPU_LIMIT_RESET))).toBe('cpu_limit_reset');
+    expect(classifyDurableObjectError(new Error(CONNECTION_LOST))).toBe('connection_lost');
+    expect(classifyDurableObjectError(new Error('SQLITE_FULL'))).toBe('storage_full');
+    expect(
+      classifyDurableObjectError(
+        new Error('Durable Object is overloaded. Requests queued for too long.')
+      )
+    ).toBe('transient');
+    expect(classifyDurableObjectError(new Error('boom'))).toBeNull();
   });
 });

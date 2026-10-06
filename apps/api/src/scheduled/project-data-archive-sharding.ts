@@ -1,30 +1,65 @@
 // FILE SIZE EXCEPTION: ProjectData archive-sharding coordinator — keeping the D1 CAS journal, lease recovery, failure controls, copy-back, and publish/finalize gates in one module preserves the audited migration state-machine order. See .claude/rules/18-file-size-limits.md
 import type { ProjectData } from '../durable-objects/project-data';
 import type {
+  ArchiveSourceAbandonIntentResult,
+  ArchiveSourceFinalizeDeleteResult,
   ArchiveSourceInspectIntentResult,
   ArchiveSourcePrepareResult,
+  ArchiveTargetAbandonResult,
   ArchiveTargetInspectResult,
 } from '../durable-objects/project-data/archive-sharding';
 import type { Env } from '../env';
 import { createModuleLogger, serializeError } from '../lib/logger';
 import {
+  COMPACT_ARCHIVE_CHUNK_BYTES,
+  COMPACT_ARCHIVE_FORMAT,
+  compactArchiveTimeout,
+  isCompactArchiveTimeoutError,
+  LEGACY_ARCHIVE_FORMAT,
+  writeCompactChunk,
+  writeImmutableJson,
+} from '../project-data-archive/compact-r2';
+import {
+  isProjectDataArchiveSourcePrepareRefusal,
+  PROJECT_DATA_ARCHIVE_DEFAULT_BUDGET_STALL_ALERT_SWEEPS,
   PROJECT_DATA_ARCHIVE_DEFAULT_CHUNK_BYTES,
   PROJECT_DATA_ARCHIVE_DEFAULT_CHUNK_ROWS,
+  PROJECT_DATA_ARCHIVE_DEFAULT_FAILED_RETRY_DELAY_MS,
   PROJECT_DATA_ARCHIVE_DEFAULT_LEASE_MS,
+  PROJECT_DATA_ARCHIVE_DEFAULT_PRECOPY_REFUSAL_RETRY_MS,
   PROJECT_DATA_ARCHIVE_DEFAULT_R2_PREFIX,
   PROJECT_DATA_ARCHIVE_DEFAULT_SESSION_GRACE_MS,
   PROJECT_DATA_ARCHIVE_DEFAULT_SHARD_COUNT,
+  PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_FALLTHROUGH_DEPTH,
+  PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_MESSAGE_BUDGET,
   PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_PROJECTS,
   PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_SESSIONS,
   PROJECT_DATA_ARCHIVE_DEFAULT_WALL_TIME_MS,
   PROJECT_DATA_ARCHIVE_JOURNAL_STATES,
+  PROJECT_DATA_ARCHIVE_MAX_BUDGET_STALL_ALERT_SWEEPS,
   PROJECT_DATA_ARCHIVE_MAX_CHUNK_BYTES,
+  PROJECT_DATA_ARCHIVE_MAX_SWEEP_FALLTHROUGH_DEPTH,
+  PROJECT_DATA_ARCHIVE_MAX_SWEEP_MESSAGE_BUDGET,
+  PROJECT_DATA_ARCHIVE_PRECOPY_REFUSED_ERROR_CODE,
   PROJECT_DATA_ARCHIVE_ROUTING_SCHEMA_VERSION,
   PROJECT_DATA_ARCHIVE_TABLES,
   type ProjectDataArchiveChunk,
   type ProjectDataArchiveJournalState,
+  type ProjectDataArchiveSourcePrepareRefusal,
   type ProjectDataArchiveTableName,
 } from '../project-data-archive/contract';
+import {
+  ARCHIVE_DEFAULT_SWEEP_UNIT_OVERHEAD_PERCENT,
+  ARCHIVE_MAX_ESTIMATE_INVENTORY_UNITS,
+  ARCHIVE_MAX_SWEEP_UNIT_OVERHEAD_PERCENT,
+  archiveAffordableMessageCeiling,
+  archiveAffordableWriteUnits,
+  archiveWriteBudgetConfig,
+  type ArchiveWriteRefusalReason,
+  type ArchiveWriteReservation,
+  releaseUnusedArchiveReservation,
+  reserveArchiveWrites,
+} from '../project-data-archive/write-budget';
 import { getProjectDataArchiveRolloutWarningConfig } from '../services/project-data-archive-rollout-controls';
 import {
   archiveShardProjectDataOwner,
@@ -44,7 +79,16 @@ const PROJECT_DATA_ARCHIVE_DEFAULT_FROZEN_INTENT_INSPECTION_MAX_LIMIT = 10;
 const PROJECT_DATA_ARCHIVE_DEFAULT_GLOBAL_SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const PROJECT_DATA_ARCHIVE_MAX_GLOBAL_SWEEP_INTERVAL_MS = 365 * 24 * 60 * 60 * 1000;
 const PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_CADENCE_NAME = 'archive_sharding_global_sweep';
+/** The refusal window exists to stop per-tick thrash; a floor keeps a stray env value from disabling it. */
+const PROJECT_DATA_ARCHIVE_MIN_PRECOPY_REFUSAL_RETRY_MS = 60_000;
 
+/**
+ * Journal states a sweep may pick up again. Two consumers: candidate selection
+ * (`selectMigrationWork` / `selectScopedMigrationWork`) and the abandon lease guard in
+ * `abandonProjectDataArchiveMigration`, which treats membership as "a sweep could still hold a
+ * live lease on this row" (terminal states null their lease on transition, `failed` is
+ * exempted there). Adding a state here widens both.
+ */
 const ACTIVE_RECLAIMABLE_STATES = [
   'candidate',
   'leased',
@@ -82,18 +126,59 @@ const JOURNAL_PHASE_RANK: Record<ProjectDataArchiveJournalState, number> = {
 };
 
 type ArchiveCoordinatorConfig = {
+  writeReservation?: ArchiveWriteReservation;
   enabled: boolean;
   globalSweepIntervalMs: number;
   shardCount: number;
   sweepProjects: number;
+  /**
+   * Hard ceiling on sessions (in-flight plus new) one tick may FENCE and process. A
+   * candidate the write budget refuses is never fenced, so it does not consume a slot.
+   */
   sweepSessions: number;
+  /** Cumulative `message_count` of NEW candidates one tick may journal; largest first. */
+  sweepMessageBudget: number;
+  /**
+   * Per-candidate `message_count` ceiling, the smaller of `sweepMessageBudget` and the
+   * ceiling derived from the daily write allowance. Derived rather than configured so a
+   * selector can never offer a candidate the write budget must refuse forever — see
+   * `archiveAffordableWriteUnits`.
+   */
+  sweepMessageCeiling: number;
+  /** Largest per-session write estimate the daily allowance can admit, in estimate units. */
+  affordableWriteUnits: number;
+  /** Assumed non-`chat_messages` share of a session's write estimate, as a percentage. */
+  sweepUnitOverheadPercent: number;
+  /**
+   * Consecutive sweeps that may journal nothing solely because every candidate exceeded the
+   * whole daily allowance before the cadence row stops reporting `succeeded`.
+   */
+  budgetStallAlertSweeps: number;
+  /**
+   * Extra candidates the unscoped sweep reads beyond its session slots, so a refusal has
+   * somewhere smaller to descend to instead of ending the tick (`.claude/rules/65`).
+   */
+  sweepFallthroughDepth: number;
   sessionGraceMs: number;
+  /**
+   * Rule-47 expiring marker: how long a `frozen`/`precopy_refused` journal keeps its session out
+   * of candidate selection. Explicit session-scoped canaries bypass it.
+   */
+  precopyRefusalRetryMs: number;
+  /**
+   * Minimum age of a `failed` journal before a sweep reclaims it. Keeps the poison budget
+   * (`poisonAfterAttempts`) a wall-clock window rather than N consecutive cadence ticks, so a
+   * transient fault cannot open the project breaker within one cadence interval. Explicit
+   * session-scoped canaries bypass it.
+   */
+  failedRetryDelayMs: number;
   chunkRows: number;
   chunkBytes: number;
   leaseMs: number;
   wallTimeMs: number;
   poisonAfterAttempts: number;
   r2Prefix: string;
+  r2TimeoutMs: number;
 };
 
 type ArchiveCoordinatorScope = {
@@ -111,9 +196,11 @@ type ArchiveCoordinatorBudgetOverrides = {
 type CandidateRow = {
   project_id: string;
   session_id: string;
+  message_count: number;
 };
 
 type MigrationRow = {
+  storage_format?: typeof COMPACT_ARCHIVE_FORMAT | typeof LEGACY_ARCHIVE_FORMAT;
   migration_id: string;
   project_id: string;
   session_id: string;
@@ -136,12 +223,24 @@ type ClaimedMigrationRow = MigrationRow & {
   lease_expires_at: number;
 };
 
+type ArchiveCopyCheckpoint = {
+  migration_id: string;
+  table_name: ProjectDataArchiveTableName;
+  storage_format: typeof COMPACT_ARCHIVE_FORMAT | typeof LEGACY_ARCHIVE_FORMAT;
+  chunk_rows: number;
+  chunk_bytes: number;
+  next_ordinal: number;
+  source_cursor: string | null;
+  complete: number;
+  copied_rows: number;
+  copied_bytes: number;
+  last_chunk_sha256: string | null;
+  lease_epoch: number;
+  last_operation_id: string | null;
+};
+
 type ProjectDataArchiveGlobalSweepCadenceStatus =
-  | 'never'
-  | 'running'
-  | 'succeeded'
-  | 'failed'
-  | 'partial';
+  'never' | 'running' | 'succeeded' | 'failed' | 'partial';
 
 type ProjectDataArchiveGlobalSweepCadenceRow = {
   sweep_name: string;
@@ -154,6 +253,7 @@ type ProjectDataArchiveGlobalSweepCadenceRow = {
   lease_owner: string | null;
   lease_expires_at: number | null;
   run_count: number;
+  consecutive_budget_stalls: number;
   updated_at: number;
 };
 
@@ -171,9 +271,28 @@ export type ProjectDataArchiveGlobalSweepCadenceState = {
   leaseOwner: string | null;
   leaseExpiresAt: number | null;
   runCount: number;
+  /**
+   * Consecutive sweeps that journaled nothing because every candidate cost more than the
+   * whole daily write allowance. Non-zero means the sweep is stuck, not idle.
+   */
+  consecutiveBudgetStalls: number;
 };
 
 export type ProjectDataArchiveShardingStats = {
+  /** Total write-budget refusals, whatever their cause. Sum of the two fields below. */
+  budgetDeferred?: number;
+  /**
+   * Refusals where the session's estimate exceeded the ENTIRE daily allowance. Waiting
+   * cannot clear these; only a smaller candidate or a config change can. A tick that
+   * journals nothing and reports only this is the deadlock signature.
+   */
+  budgetUnaffordable?: number;
+  /** Refusals because the day's pool is already spent. Normal backpressure; not an alert. */
+  budgetWindowExhausted?: number;
+  /** The per-candidate `message_count` ceiling this tick selected with. */
+  messageCeiling?: number;
+  /** Largest per-session write estimate the current allowance can admit, in units. */
+  affordableWriteUnits?: number;
   enabled: boolean;
   skipped: boolean;
   skipReason: string | null;
@@ -181,6 +300,11 @@ export type ProjectDataArchiveShardingStats = {
   selected: number;
   migrated: number;
   recoveredCrashGaps: number;
+  /**
+   * Candidates the root object refused before any copy (pre-copy eligibility invariant). Each
+   * was returned to `root` in the same tick; none is a failure, none counts toward poison.
+   */
+  refused: number;
   failed: number;
   poisoned: number;
   chunksCopied: number;
@@ -304,6 +428,24 @@ export type ProjectDataArchiveCopyBackResult = {
   restoredToRoot: boolean;
 };
 
+export type ProjectDataArchiveAbandonResult = {
+  migrationId: string;
+  projectId: string;
+  sessionId: string;
+  reason: string;
+  /** Journal state before abandon. */
+  previousState: ProjectDataArchiveJournalState;
+  /** True when the D1 journal row was moved to `frozen` by this call (false on an idempotent rerun). */
+  journalFrozen: boolean;
+  /** True when the D1 session location was returned to `root` by this call. */
+  restoredToRoot: boolean;
+  /** True when a source intent row existed on the root object and was removed. */
+  sourceIntentRemoved: boolean;
+  /** True when partial target state existed on the archive shard and was removed. */
+  targetRemoved: boolean;
+  targetRowsDeleted: number;
+};
+
 type CrashGapRecoveryResult = {
   recovered: number;
   failed: number;
@@ -327,9 +469,74 @@ function envInt(value: string | undefined, fallback: number, min: number, max: n
   return fallback;
 }
 
+/**
+ * The per-candidate `message_count` ceiling a selector may offer.
+ *
+ * Two independently configured ceilings that must agree WILL drift: on 2026-09-08 the
+ * production daily write budget was lowered to 100000 through a GitHub Environment
+ * override while `PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET` stayed at the checked-in 5000,
+ * and largest-first selection then picked the same 4994-message session every hour for four
+ * days, each time estimating ~160,808 writes against a 100,000 allowance. Deriving the
+ * selection ceiling from the allowance makes that state unreachable regardless of how the
+ * two vars are configured.
+ *
+ * The derived half is a heuristic (it assumes `sweepUnitOverheadPercent` for the tool
+ * payload, grouped and FTS units `message_count` does not report), so it bounds the
+ * *expected* cost, not the actual one. A candidate whose real overhead is higher is still
+ * refused by `reserveArchiveWrites`; the fall-through in `processArchiveMigrationBatch` is
+ * what keeps that refusal from wasting the tick.
+ */
+function resolveSweepAffordability(
+  env: Env,
+  sweepMessageBudget: number,
+  overheadPercent: number
+): { sweepMessageCeiling: number; affordableWriteUnits: number } {
+  const { allowance, factor } = archiveWriteBudgetConfig(env);
+  return {
+    sweepMessageCeiling: Math.min(
+      sweepMessageBudget,
+      archiveAffordableMessageCeiling(allowance, factor, overheadPercent)
+    ),
+    affordableWriteUnits: archiveAffordableWriteUnits(allowance, factor),
+  };
+}
+
 function resolveConfig(env: Env): ArchiveCoordinatorConfig {
+  const sweepMessageBudget = envInt(
+    env.PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET,
+    PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_MESSAGE_BUDGET,
+    1,
+    PROJECT_DATA_ARCHIVE_MAX_SWEEP_MESSAGE_BUDGET
+  );
+  const sweepUnitOverheadPercent = envInt(
+    env.PROJECT_DATA_ARCHIVE_SWEEP_UNIT_OVERHEAD_PERCENT,
+    ARCHIVE_DEFAULT_SWEEP_UNIT_OVERHEAD_PERCENT,
+    0,
+    ARCHIVE_MAX_SWEEP_UNIT_OVERHEAD_PERCENT
+  );
+  const affordability = resolveSweepAffordability(
+    env,
+    sweepMessageBudget,
+    sweepUnitOverheadPercent
+  );
   return {
     enabled: env.PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED === 'true',
+    sweepMessageBudget,
+    sweepUnitOverheadPercent,
+    sweepMessageCeiling: affordability.sweepMessageCeiling,
+    affordableWriteUnits: affordability.affordableWriteUnits,
+    sweepFallthroughDepth: envInt(
+      env.PROJECT_DATA_ARCHIVE_SWEEP_FALLTHROUGH_DEPTH,
+      PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_FALLTHROUGH_DEPTH,
+      0,
+      PROJECT_DATA_ARCHIVE_MAX_SWEEP_FALLTHROUGH_DEPTH
+    ),
+    budgetStallAlertSweeps: envInt(
+      env.PROJECT_DATA_ARCHIVE_BUDGET_STALL_ALERT_SWEEPS,
+      PROJECT_DATA_ARCHIVE_DEFAULT_BUDGET_STALL_ALERT_SWEEPS,
+      1,
+      PROJECT_DATA_ARCHIVE_MAX_BUDGET_STALL_ALERT_SWEEPS
+    ),
     globalSweepIntervalMs: envInt(
       env.PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS,
       PROJECT_DATA_ARCHIVE_DEFAULT_GLOBAL_SWEEP_INTERVAL_MS,
@@ -359,6 +566,18 @@ function resolveConfig(env: Env): ArchiveCoordinatorConfig {
       PROJECT_DATA_ARCHIVE_DEFAULT_SESSION_GRACE_MS,
       1,
       365 * 24 * 60 * 60 * 1000
+    ),
+    precopyRefusalRetryMs: envInt(
+      env.PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS,
+      PROJECT_DATA_ARCHIVE_DEFAULT_PRECOPY_REFUSAL_RETRY_MS,
+      PROJECT_DATA_ARCHIVE_MIN_PRECOPY_REFUSAL_RETRY_MS,
+      365 * 24 * 60 * 60 * 1000
+    ),
+    failedRetryDelayMs: envInt(
+      env.PROJECT_DATA_ARCHIVE_FAILED_RETRY_DELAY_MS,
+      PROJECT_DATA_ARCHIVE_DEFAULT_FAILED_RETRY_DELAY_MS,
+      0,
+      7 * 24 * 60 * 60 * 1000
     ),
     chunkRows: envInt(
       env.PROJECT_DATA_ARCHIVE_CHUNK_ROWS,
@@ -390,6 +609,7 @@ function resolveConfig(env: Env): ArchiveCoordinatorConfig {
       1,
       PROJECT_DATA_ARCHIVE_MAX_POISON_AFTER_ATTEMPTS
     ),
+    r2TimeoutMs: compactArchiveTimeout(env.PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS),
     r2Prefix: env.PROJECT_DATA_ARCHIVE_R2_PREFIX || PROJECT_DATA_ARCHIVE_DEFAULT_R2_PREFIX,
   };
 }
@@ -411,6 +631,7 @@ function emptyCadenceState(
     leaseOwner: null,
     leaseExpiresAt: null,
     runCount: 0,
+    consecutiveBudgetStalls: 0,
   };
 }
 
@@ -435,6 +656,7 @@ function cadenceStateFromRow(
     leaseOwner: row.lease_owner,
     leaseExpiresAt: row.lease_expires_at,
     runCount: row.run_count,
+    consecutiveBudgetStalls: row.consecutive_budget_stalls ?? 0,
   };
 }
 
@@ -452,11 +674,48 @@ function emptyStats(
     selected: 0,
     migrated: 0,
     recoveredCrashGaps: 0,
+    refused: 0,
     failed: 0,
     poisoned: 0,
     chunksCopied: 0,
     rowsCopied: 0,
+    budgetDeferred: 0,
+    budgetUnaffordable: 0,
+    budgetWindowExhausted: 0,
+    messageCeiling: config.sweepMessageCeiling,
+    affordableWriteUnits: config.affordableWriteUnits,
   } satisfies ProjectDataArchiveShardingStats;
+}
+
+/**
+ * A refusal is counted in the total AND in its own category. Collapsing the two into one
+ * number is what made the deadlock invisible: an exhausted daily pool is expected on most
+ * ticks, so an alert keyed on the total would fire constantly and be ignored, while the
+ * genuinely stuck case looked identical to it (.claude/rules/72).
+ */
+function recordBudgetRefusal(
+  stats: ProjectDataArchiveShardingStats,
+  reason: ArchiveWriteRefusalReason
+): void {
+  stats.budgetDeferred = (stats.budgetDeferred ?? 0) + 1;
+  if (reason === 'window_exhausted')
+    stats.budgetWindowExhausted = (stats.budgetWindowExhausted ?? 0) + 1;
+  else stats.budgetUnaffordable = (stats.budgetUnaffordable ?? 0) + 1;
+}
+
+/**
+ * The deadlock signature: the tick did work-finding correctly, journaled nothing, and every
+ * refusal it saw was "this session costs more than the whole allowance". A spent daily pool
+ * would have produced at least one `window_exhausted`, so requiring zero of those keeps
+ * normal end-of-day backpressure out of the alert.
+ */
+function sweepStalledOnUnaffordableCandidates(stats: ProjectDataArchiveShardingStats): boolean {
+  return (
+    stats.migrated === 0 &&
+    stats.recoveredCrashGaps === 0 &&
+    (stats.budgetUnaffordable ?? 0) > 0 &&
+    (stats.budgetWindowExhausted ?? 0) === 0
+  );
 }
 
 function globalSweepCadenceLeaseMs(config: ArchiveCoordinatorConfig): number {
@@ -480,7 +739,7 @@ async function readGlobalSweepCadenceRow(
   return env.DATABASE.prepare(
     `SELECT sweep_name, last_started_at, last_completed_at, next_eligible_at,
             last_status, last_skip_reason, last_error, lease_owner, lease_expires_at,
-            run_count, updated_at
+            run_count, consecutive_budget_stalls, updated_at
      FROM project_data_archive_global_sweep_cadence
      WHERE sweep_name = ?`
   )
@@ -597,36 +856,68 @@ async function finishGlobalSweepCadence(
   error: unknown = null
 ): Promise<void> {
   const completedAt = Date.now();
-  const lastError = globalSweepCadenceLastError(stats, status, error);
-  const result = await env.DATABASE.prepare(
+  // `stalled` resets the streak to 0 on any tick that made progress OR that only ran out of
+  // daily pool, so an alert always describes a CURRENT run of stuck ticks (`.claude/rules/61`:
+  // a per-cycle counter that never resets becomes a lifetime counter).
+  const stalled = sweepStalledOnUnaffordableCandidates(stats);
+  // The increment, the threshold comparison and the status escalation all happen inside this
+  // one statement, reading the stored counter rather than a value fetched beforehand. A
+  // read-then-write would have to decide what to do when the read fails, and every available
+  // answer is wrong: defaulting to 0 silently restarts a streak in progress, which is exactly
+  // the condition — a sweep under stress — the counter exists to survive.
+  const stallDetail = budgetStallLastError(config, stats);
+  const nonStallError = globalSweepCadenceLastError(stats, status, error);
+  const updated = await env.DATABASE.prepare(
     `UPDATE project_data_archive_global_sweep_cadence
      SET last_completed_at = ?,
-         last_status = ?,
+         consecutive_budget_stalls = CASE WHEN ?
+           THEN consecutive_budget_stalls + 1 ELSE 0 END,
+         last_status = CASE WHEN ? AND ? = 'succeeded'
+           AND consecutive_budget_stalls + 1 >= ? THEN 'partial' ELSE ? END,
          last_skip_reason = NULL,
-         last_error = ?,
+         last_error = CASE WHEN ? AND ? = 'succeeded'
+           AND consecutive_budget_stalls + 1 >= ? THEN ? ELSE ? END,
          lease_owner = NULL,
          lease_expires_at = NULL,
          updated_at = ?
      WHERE sweep_name = ?
-       AND lease_owner = ?`
+       AND lease_owner = ?
+     RETURNING consecutive_budget_stalls, last_status`
   )
     .bind(
       completedAt,
+      stalled ? 1 : 0,
+      stalled ? 1 : 0,
       status,
-      lastError,
+      config.budgetStallAlertSweeps,
+      status,
+      stalled ? 1 : 0,
+      status,
+      config.budgetStallAlertSweeps,
+      stallDetail,
+      nonStallError,
       completedAt,
       PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_CADENCE_NAME,
       leaseOwner
     )
-    .run();
-  if ((result.meta.changes ?? 0) === 0) {
+    .first<{ consecutive_budget_stalls: number; last_status: string }>();
+  if (!updated) {
     log.warn('project_data_archive_global_sweep_cadence_finish_miss', {
       leaseOwner,
       status,
     });
+  } else if (updated.last_status === 'partial' && stalled) {
+    log.error('project_data_archive_sweep_budget_stalled', {
+      consecutiveStalls: updated.consecutive_budget_stalls,
+      threshold: config.budgetStallAlertSweeps,
+      selected: stats.selected,
+      budgetUnaffordable: stats.budgetUnaffordable ?? 0,
+      messageCeiling: config.sweepMessageCeiling,
+      affordableWriteUnits: config.affordableWriteUnits,
+    });
   }
-  const row = await readGlobalSweepCadenceRow(env).catch(() => null);
-  stats.cadence = cadenceStateFromRow(config, row, completedAt, true);
+  const finalRow = await readGlobalSweepCadenceRow(env).catch(() => null);
+  stats.cadence = cadenceStateFromRow(config, finalRow, completedAt, true);
 }
 
 function scopedConfig(
@@ -828,7 +1119,18 @@ function manifestForTarget(
   now: number
 ) {
   return {
-    version: PROJECT_DATA_ARCHIVE_ROUTING_SCHEMA_VERSION,
+    version:
+      migration.storage_format === COMPACT_ARCHIVE_FORMAT
+        ? 2
+        : PROJECT_DATA_ARCHIVE_ROUTING_SCHEMA_VERSION,
+    ...(migration.storage_format === COMPACT_ARCHIVE_FORMAT
+      ? {
+          storageFormat: COMPACT_ARCHIVE_FORMAT,
+          rawChunks: chunks
+            .filter((chunk) => chunk.rawChunkRef)
+            .map((chunk) => ({ ordinal: chunk.ordinal, ...chunk.rawChunkRef })),
+        }
+      : {}),
     projectId: migration.project_id,
     sessionId: migration.session_id,
     migrationId: migration.migration_id,
@@ -837,8 +1139,8 @@ function manifestForTarget(
     targetGeneration: migration.target_generation,
     terminalVersionSha256,
     aggregateSha256: targetAggregateSha256,
-    chunks: chunks.map((chunk) =>
-      targetChunkKey(config, migration, chunk.tableName, chunk.ordinal)
+    chunks: chunks.map(
+      (chunk) => chunk.r2Key ?? targetChunkKey(config, migration, chunk.tableName, chunk.ordinal)
     ),
     chunkHashes: chunks.map((chunk) => chunk.sha256),
     createdAt: now,
@@ -847,7 +1149,7 @@ function manifestForTarget(
 
 async function readMigration(env: Env, migrationId: string): Promise<MigrationRow | null> {
   return env.DATABASE.prepare(
-    `SELECT migration_id, project_id, session_id, state, source_owner_name, target_owner_name,
+    `SELECT migration_id, project_id, session_id, storage_format, state, source_owner_name, target_owner_name,
             target_generation, source_intent_token, terminal_version_sha256,
             target_aggregate_sha256, r2_manifest_key, lease_owner, lease_epoch,
             lease_expires_at, attempt_count
@@ -869,14 +1171,23 @@ async function readMigrationOrThrow(env: Env, migrationId: string): Promise<Migr
   return migration;
 }
 
+/**
+ * A `failed` journal is reclaimable only once it is older than `failedRetryDelayMs`. Without
+ * this, `poisonAfterAttempts` consecutive faults poison the row and open the project breaker
+ * within a few cadence ticks (45 minutes at the 15-minute cadence) instead of over a window a
+ * transient fault can outlast.
+ */
+const FAILED_RETRY_DELAY_SQL = `AND NOT (m.state = 'failed' AND m.updated_at > ?)`;
+
 async function selectReclaimableMigrations(
   env: Env,
+  config: ArchiveCoordinatorConfig,
   limit: number,
   now: number
 ): Promise<MigrationRow[]> {
   if (limit <= 0) return [];
   const rows = await env.DATABASE.prepare(
-    `SELECT m.migration_id, m.project_id, m.session_id, m.state, m.source_owner_name,
+    `SELECT m.migration_id, m.project_id, m.session_id, m.storage_format, m.state, m.source_owner_name,
             m.target_owner_name, m.target_generation, m.source_intent_token,
             m.terminal_version_sha256, m.target_aggregate_sha256, m.r2_manifest_key,
             m.lease_owner, m.lease_epoch, m.lease_expires_at, m.attempt_count
@@ -886,24 +1197,28 @@ async function selectReclaimableMigrations(
      WHERE m.state IN (${placeholders(ACTIVE_RECLAIMABLE_STATES.length)})
        AND (m.lease_expires_at IS NULL OR m.lease_expires_at <= ?)
        AND COALESCE(breaker.state, 'closed') = 'closed'
+       ${FAILED_RETRY_DELAY_SQL}
      ORDER BY m.updated_at ASC, m.migration_id ASC
      LIMIT ?`
   )
-    .bind(...ACTIVE_RECLAIMABLE_STATES, now, limit)
+    .bind(...ACTIVE_RECLAIMABLE_STATES, now, now - config.failedRetryDelayMs, limit)
     .all<MigrationRow>();
   return rows.results ?? [];
 }
 
 async function selectScopedReclaimableMigrations(
   env: Env,
+  config: ArchiveCoordinatorConfig,
   scope: ArchiveCoordinatorScope,
   limit: number,
   now: number
 ): Promise<MigrationRow[]> {
   if (limit <= 0) return [];
   const sessionPredicate = scope.sessionId ? 'AND m.session_id = ?' : '';
+  // An operator who names the session is asking for it now; the delay only paces the sweep.
+  const retryDelayPredicate = scope.sessionId ? '' : FAILED_RETRY_DELAY_SQL;
   const rows = await env.DATABASE.prepare(
-    `SELECT m.migration_id, m.project_id, m.session_id, m.state, m.source_owner_name,
+    `SELECT m.migration_id, m.project_id, m.session_id, m.storage_format, m.state, m.source_owner_name,
             m.target_owner_name, m.target_generation, m.source_intent_token,
             m.terminal_version_sha256, m.target_aggregate_sha256, m.r2_manifest_key,
             m.lease_owner, m.lease_epoch, m.lease_expires_at, m.attempt_count
@@ -915,6 +1230,7 @@ async function selectScopedReclaimableMigrations(
        AND m.state IN (${placeholders(ACTIVE_RECLAIMABLE_STATES.length)})
        AND (m.lease_expires_at IS NULL OR m.lease_expires_at <= ?)
        AND COALESCE(breaker.state, 'closed') = 'closed'
+       ${retryDelayPredicate}
      ORDER BY m.updated_at ASC, m.migration_id ASC
      LIMIT ?`
   )
@@ -923,12 +1239,111 @@ async function selectScopedReclaimableMigrations(
       ...(scope.sessionId ? [scope.sessionId] : []),
       ...ACTIVE_RECLAIMABLE_STATES,
       now,
+      ...(scope.sessionId ? [] : [now - config.failedRetryDelayMs]),
       limit
     )
     .all<MigrationRow>();
   return rows.results ?? [];
 }
 
+/**
+ * Rule-47 expiring marker for sessions the root object refused before any copy.
+ *
+ * A `frozen` journal with `error_code = 'precopy_refused'` newer than
+ * `now - precopyRefusalRetryMs` keeps its session out of selection, so a session that cannot
+ * migrate (e.g. an `active_session_state` row the D1 query cannot see) does not re-consume the
+ * tick's largest-first slot every cadence interval. After the window the session is eligible
+ * again; if the refusal condition persists it costs one prepare RPC per window, not one per tick.
+ * Seeks on `idx_project_data_archive_migrations_session (project_id, session_id, state)`.
+ */
+const PRECOPY_REFUSAL_EXCLUSION_SQL = `AND NOT EXISTS (
+         SELECT 1
+         FROM project_data_archive_migrations refusal
+         WHERE refusal.project_id = ss.project_id
+           AND refusal.session_id = ss.id
+           AND refusal.state = 'frozen'
+           AND refusal.error_code = ?
+           AND refusal.updated_at > ?
+       )`;
+
+function precopyRefusalExclusionBinds(
+  config: ArchiveCoordinatorConfig,
+  now: Date
+): [string, number] {
+  return [
+    PROJECT_DATA_ARCHIVE_PRECOPY_REFUSED_ERROR_CODE,
+    now.getTime() - config.precopyRefusalRetryMs,
+  ];
+}
+
+/**
+ * Keep the largest-first candidate prefix whose cumulative `message_count` fits the
+ * tick's message budget. Legacy admission retains its first oversized candidate; compact
+ * admission is strict and excludes oversized sessions before the SQL LIMIT. Sessions
+ * are the unit of work, so `message_count` from `session_summaries` is the size proxy the
+ * coordinator can see without touching a Durable Object.
+ */
+/**
+ * Greedy cumulative `message_count` packer, as a stateful admitter.
+ *
+ * One implementation, two consumers (`.claude/rules/24`, `.claude/rules/59`): the scoped
+ * canary's up-front `selected` disclosure, and the authoritative journaling loop in
+ * `processArchiveMigrationBatch`. The loop needs the stateful form because the cumulative
+ * budget bounds bytes MOVED, so it may only count candidates that were actually journaled —
+ * a candidate the write budget refused moved nothing and must leave the budget untouched.
+ */
+function createMessageBudgetPacker(budget: number, strict: boolean) {
+  let used = 0;
+  let kept = 0;
+  let closed = false;
+  return {
+    /**
+     * Returns a `commit` callback when the candidate fits, or `null` when it does not.
+     *
+     * The budget is charged only when `commit` runs, so a candidate admitted here and then
+     * refused downstream (by the daily write budget, or by a lost journal race) leaves the
+     * budget untouched — it moved no rows, so it must not be billed for any.
+     */
+    admit(candidate: CandidateRow): (() => void) | null {
+      if (closed) return null;
+      const size = Math.max(0, Number(candidate.message_count) || 0);
+      if (used + size > budget && (strict || kept > 0)) {
+        // Non-strict keeps the historical `break`: stop at the first overflow rather than
+        // descending past it. Strict descends, which is what makes fall-through possible.
+        if (!strict) closed = true;
+        return null;
+      }
+      return () => {
+        used += size;
+        kept++;
+      };
+    },
+  };
+}
+
+function applyMessageBudget(
+  candidates: CandidateRow[],
+  budget: number,
+  strict = false
+): CandidateRow[] {
+  const packer = createMessageBudgetPacker(budget, strict);
+  return candidates.filter((candidate) => {
+    const commit = packer.admit(candidate);
+    commit?.();
+    return commit !== null;
+  });
+}
+
+/**
+ * Eligible candidates for the unscoped sweep, ordered largest-first under the derived
+ * affordability ceiling.
+ *
+ * `limit` is the number of sessions the tick may FENCE; the query deliberately reads
+ * `sweepFallthroughDepth` rows beyond it. A candidate the write budget refuses is never
+ * fenced and must not cost the tick a slot, so the caller needs spare candidates below the
+ * refused one to descend to. Reading exactly `limit` rows is what turned a single
+ * unaffordable session into a four-day standstill in production.
+ */
 async function selectCandidates(
   env: Env,
   config: ArchiveCoordinatorConfig,
@@ -939,13 +1354,14 @@ async function selectCandidates(
   const cutoff = now.getTime() - config.sessionGraceMs;
   const nowIso = now.toISOString();
   const rows = await env.DATABASE.prepare(
-    `SELECT ss.project_id, ss.id AS session_id
+    `SELECT ss.project_id, ss.id AS session_id, ss.message_count
      FROM session_summaries ss
      LEFT JOIN project_data_session_locations loc
        ON loc.project_id = ss.project_id AND loc.session_id = ss.id
      LEFT JOIN project_data_archive_circuit_breakers breaker
        ON breaker.project_id = ss.project_id
      WHERE ss.status IN ('stopped', 'failed')
+       ${env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true' ? 'AND ss.message_count <= ?' : ''}
        AND ss.ended_at IS NOT NULL
        AND ss.ended_at <= ?
        AND (loc.session_id IS NULL OR loc.location_state = 'root')
@@ -957,10 +1373,17 @@ async function selectCandidates(
            AND snap.status IN ('available', 'degraded')
            AND snap.expires_at > ?
        )
-     ORDER BY ss.updated_at ASC, ss.id ASC
+       ${PRECOPY_REFUSAL_EXCLUSION_SQL}
+     ORDER BY ss.message_count DESC, ss.updated_at ASC, ss.id ASC
      LIMIT ?`
   )
-    .bind(cutoff, nowIso, Math.min(limit, config.sweepProjects * config.sweepSessions))
+    .bind(
+      ...(env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true' ? [config.sweepMessageCeiling] : []),
+      cutoff,
+      nowIso,
+      ...precopyRefusalExclusionBinds(config, now),
+      Math.min(limit, config.sweepProjects * config.sweepSessions) + config.sweepFallthroughDepth
+    )
     .all<CandidateRow>();
   return rows.results ?? [];
 }
@@ -976,8 +1399,15 @@ async function selectScopedCandidates(
   const cutoff = now.getTime() - config.sessionGraceMs;
   const nowIso = now.toISOString();
   const sessionPredicate = scope.sessionId ? 'AND ss.id = ?' : '';
+  // An operator who names the session is asking for exactly that session; the refusal marker
+  // exists to stop the unscoped sweep from re-consuming a slot, not to block that request.
+  const refusalPredicate = scope.sessionId ? '' : PRECOPY_REFUSAL_EXCLUSION_SQL;
+  // Same principle for the affordability ceiling: it exists so the unscoped sweep cannot
+  // keep choosing a candidate the write budget must refuse. A named session is an explicit
+  // operator request, and `reserveArchiveWrites` still has the final say on its cost.
+  const messageCeiling = scope.sessionId ? config.sweepMessageBudget : config.sweepMessageCeiling;
   const rows = await env.DATABASE.prepare(
-    `SELECT ss.project_id, ss.id AS session_id
+    `SELECT ss.project_id, ss.id AS session_id, ss.message_count
      FROM session_summaries ss
      LEFT JOIN project_data_session_locations loc
        ON loc.project_id = ss.project_id AND loc.session_id = ss.id
@@ -986,6 +1416,7 @@ async function selectScopedCandidates(
      WHERE ss.project_id = ?
        ${sessionPredicate}
        AND ss.status IN ('stopped', 'failed')
+       ${env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true' ? 'AND ss.message_count <= ?' : ''}
        AND ss.ended_at IS NOT NULL
        AND ss.ended_at <= ?
        AND (loc.session_id IS NULL OR loc.location_state = 'root')
@@ -997,10 +1428,19 @@ async function selectScopedCandidates(
            AND snap.status IN ('available', 'degraded')
            AND snap.expires_at > ?
        )
-     ORDER BY ss.updated_at ASC, ss.id ASC
+       ${refusalPredicate}
+     ORDER BY ss.message_count DESC, ss.updated_at ASC, ss.id ASC
      LIMIT ?`
   )
-    .bind(scope.projectId, ...(scope.sessionId ? [scope.sessionId] : []), cutoff, nowIso, limit)
+    .bind(
+      scope.projectId,
+      ...(scope.sessionId ? [scope.sessionId] : []),
+      ...(env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true' ? [messageCeiling] : []),
+      cutoff,
+      nowIso,
+      ...(scope.sessionId ? [] : precopyRefusalExclusionBinds(config, now)),
+      limit
+    )
     .all<CandidateRow>();
   return rows.results ?? [];
 }
@@ -1028,9 +1468,9 @@ async function createCandidateJournal(
       `INSERT INTO project_data_archive_migrations (
          migration_id, project_id, session_id, state, source_owner_name, target_owner_name,
          source_generation, target_generation, lease_epoch, attempt_count,
-         candidate_at, created_at, updated_at
+         candidate_at, created_at, updated_at, storage_format
        )
-       SELECT ?, ?, ?, 'candidate', ?, ?, 0, ?, 0, 0, ?, ?, ?
+       SELECT ?, ?, ?, 'candidate', ?, ?, 0, ?, 0, 0, ?, ?, ?, ?
        WHERE NOT EXISTS (
          SELECT 1
          FROM project_data_session_locations
@@ -1046,6 +1486,9 @@ async function createCandidateJournal(
       now,
       now,
       now,
+      env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true'
+        ? COMPACT_ARCHIVE_FORMAT
+        : LEGACY_ARCHIVE_FORMAT,
       projectId,
       sessionId
     ),
@@ -1110,22 +1553,37 @@ async function createCandidateJournal(
   return readMigration(env, migrationId);
 }
 
+type ArchiveMigrationWork = {
+  /** Journaled rows (reclaimed in-flight migrations) ready to process. */
+  migrations: MigrationRow[];
+  /**
+   * Eligible sessions NOT yet journaled. `processArchiveMigrationBatch` journals each one
+   * only when it is about to process it, so a session is never fenced `migrating` by a tick
+   * that then runs out of wall time before reaching it (which would leave it unreadable until
+   * the next cadence-gated sweep).
+   */
+  pending: CandidateRow[];
+  /**
+   * How many of `pending` the tick may actually journal. `pending` is deliberately longer
+   * than this so a write-budget refusal can descend to a smaller candidate.
+   */
+  pendingSlots: number;
+};
+
 async function selectMigrationWork(
   env: Env,
   config: ArchiveCoordinatorConfig,
   nowDate: Date,
   now: number
-): Promise<MigrationRow[]> {
-  const reclaimable = await selectReclaimableMigrations(env, config.sweepSessions, now);
+): Promise<ArchiveMigrationWork> {
+  const reclaimable = await selectReclaimableMigrations(env, config, config.sweepSessions, now);
   const remaining = config.sweepSessions - reclaimable.length;
-  if (remaining <= 0) return reclaimable;
-  const candidates = await selectCandidates(env, config, nowDate, remaining);
-  const created: MigrationRow[] = [];
-  for (const candidate of candidates) {
-    const migration = await createCandidateJournal(env, candidate, now);
-    if (migration) created.push(migration);
-  }
-  return [...reclaimable, ...created].slice(0, config.sweepSessions);
+  if (remaining <= 0) return { migrations: reclaimable, pending: [], pendingSlots: 0 };
+  // Not pre-packed by `sweepMessageBudget`: that budget bounds bytes MOVED, and applying it
+  // here would discard the very candidates a refusal needs to fall through to. The
+  // journaling loop applies it to the candidates it actually fences.
+  const pending = await selectCandidates(env, config, nowDate, remaining);
+  return { migrations: reclaimable, pending, pendingSlots: remaining };
 }
 
 async function selectScopedMigrationWork(
@@ -1135,12 +1593,10 @@ async function selectScopedMigrationWork(
   now: number,
   scope: ArchiveCoordinatorScope,
   dryRun: boolean
-): Promise<{
-  migrations: MigrationRow[];
-  selected: ProjectDataArchiveManualCanaryCandidate[];
-}> {
+): Promise<ArchiveMigrationWork & { selected: ProjectDataArchiveManualCanaryCandidate[] }> {
   const reclaimable = await selectScopedReclaimableMigrations(
     env,
+    config,
     scope,
     config.sweepSessions,
     now
@@ -1153,9 +1609,16 @@ async function selectScopedMigrationWork(
     source: 'existing_migration',
   }));
   const remaining = config.sweepSessions - reclaimable.length;
-  if (remaining <= 0) return { migrations: reclaimable, selected };
+  if (remaining <= 0) return { migrations: reclaimable, pending: [], pendingSlots: 0, selected };
 
-  const candidates = await selectScopedCandidates(env, config, nowDate, scope, remaining);
+  // The scoped canary reports `selected` up front, so it packs here rather than reading
+  // spare fall-through candidates. Re-packing the same list inside the journaling loop is
+  // idempotent (a packed list never overflows its own budget), so the two agree.
+  const candidates = applyMessageBudget(
+    await selectScopedCandidates(env, config, nowDate, scope, remaining),
+    config.sweepMessageBudget,
+    env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true'
+  );
   selected.push(
     ...candidates.map((candidate) => ({
       projectId: candidate.project_id,
@@ -1165,27 +1628,8 @@ async function selectScopedMigrationWork(
       source: 'eligible_session' as const,
     }))
   );
-  if (dryRun) return { migrations: reclaimable, selected };
-
-  const created: MigrationRow[] = [];
-  for (const candidate of candidates) {
-    const migration = await createCandidateJournal(env, candidate, now);
-    if (migration) {
-      created.push(migration);
-      const entry = selected.find(
-        (item) =>
-          item.source === 'eligible_session' &&
-          item.projectId === candidate.project_id &&
-          item.sessionId === candidate.session_id &&
-          item.migrationId === null
-      );
-      if (entry) {
-        entry.migrationId = migration.migration_id;
-        entry.state = migration.state;
-      }
-    }
-  }
-  return { migrations: [...reclaimable, ...created].slice(0, config.sweepSessions), selected };
+  if (dryRun) return { migrations: reclaimable, pending: [], pendingSlots: 0, selected };
+  return { migrations: reclaimable, pending: candidates, pendingSlots: remaining, selected };
 }
 
 async function claimMigrationLease(
@@ -1248,6 +1692,28 @@ function globalSweepCadenceLastError(
   }
   if (error) return errorMessage(error);
   return null;
+}
+
+/**
+ * Names the recovery action, not the symptom (`.claude/rules/72`). An operator reading this
+ * needs to know that nothing will improve on its own and which two knobs disagree.
+ */
+function budgetStallLastError(
+  config: ArchiveCoordinatorConfig,
+  stats: ProjectDataArchiveShardingStats
+): string {
+  // The streak length is deliberately NOT interpolated: it lives in this row's own
+  // `consecutive_budget_stalls` column, and keeping it out lets the whole cadence write stay
+  // one atomic statement that reads the counter it is incrementing.
+  return (
+    `archive sweep stalled: see consecutive_budget_stalls — every candidate's write estimate ` +
+    `exceeded the whole daily allowance ` +
+    `(unaffordable=${stats.budgetUnaffordable ?? 0}, selected=${stats.selected}, ` +
+    `messageCeiling=${config.sweepMessageCeiling}, affordableWriteUnits=${config.affordableWriteUnits}). ` +
+    `Waiting will not clear this. Lower PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET or ` +
+    `PROJECT_DATA_ARCHIVE_SWEEP_UNIT_OVERHEAD_PERCENT, or raise ` +
+    `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET — and verify the DEPLOYED value, not the diff.`
+  );
 }
 
 async function assertLeaseStillHeld(env: Env, migration: ClaimedMigrationRow): Promise<void> {
@@ -1448,21 +1914,6 @@ async function alignJournalToLocalSourceProof(
   return refreshClaimed(env, migration);
 }
 
-async function putImmutableJson(r2: R2Bucket, key: string, value: unknown): Promise<void> {
-  const text = JSON.stringify(value);
-  const existing = await r2.get(key);
-  if (existing) {
-    const existingText = await existing.text();
-    if (existingText !== text) {
-      throw new Error(`ProjectData archive immutable R2 object conflict at ${key}`);
-    }
-    return;
-  }
-  await r2.put(key, text, {
-    httpMetadata: { contentType: 'application/json' },
-  });
-}
-
 async function publishArchivedLocation(
   env: Env,
   migration: MigrationRow,
@@ -1565,7 +2016,7 @@ async function recoverCrashGaps(
     ? `AND m.project_id = ? ${scope.sessionId ? 'AND m.session_id = ?' : ''}`
     : '';
   const rows = await env.DATABASE.prepare(
-    `SELECT m.migration_id, m.project_id, m.session_id, m.state, m.source_owner_name,
+    `SELECT m.migration_id, m.project_id, m.session_id, m.storage_format, m.state, m.source_owner_name,
             m.target_owner_name, m.target_generation, m.source_intent_token,
             m.terminal_version_sha256, m.target_aggregate_sha256, m.r2_manifest_key,
             m.lease_owner, m.lease_epoch, m.lease_expires_at, m.attempt_count
@@ -1635,11 +2086,23 @@ async function ensureSourcePrepared(
   source: DurableObjectStub<ProjectData>,
   migration: ClaimedMigrationRow,
   now: number
-): Promise<{ migration: ClaimedMigrationRow; prepared: ArchiveSourcePrepareResult }> {
+): Promise<
+  | { refusal: ProjectDataArchiveSourcePrepareRefusal; migration: ClaimedMigrationRow }
+  | { refusal: null; migration: ClaimedMigrationRow; prepared: ArchiveSourcePrepareResult }
+> {
   const sourceIntentToken = crypto.randomUUID();
-  const prepared = await source.archiveSourcePrepareIntent(
-    sourcePrepareInput(migration, sourceIntentToken, now, config.sessionGraceMs)
-  );
+  // Eligibility is decided inside the same DO call that writes the intent, and a refusal comes
+  // back as a value. A separate pre-check RPC before journaling would spend one extra DO round
+  // trip on every candidate that turns out to be eligible (the common case) to avoid a rare
+  // unwind that costs two D1 statements in a batch this worker already owns.
+  const outcome = await source.archiveSourcePrepareIntent({
+    ...sourcePrepareInput(migration, sourceIntentToken, now, config.sessionGraceMs),
+    writeReservation: config.writeReservation,
+  });
+  if (isProjectDataArchiveSourcePrepareRefusal(outcome)) {
+    return { refusal: outcome, migration };
+  }
+  const prepared = outcome;
   const updated =
     migration.state === 'leased'
       ? await requireJournalCas(env, migration, {
@@ -1652,7 +2115,163 @@ async function ensureSourcePrepared(
           },
         })
       : await persistPreparedJournalFields(env, migration, prepared, sourceIntentToken, now);
-  return { migration: updated, prepared };
+  return { refusal: null, migration: updated, prepared };
+}
+
+/**
+ * The one statement that returns a session's D1 location to `root` (owner = the root object,
+ * generation 0, no migration, no target proof). Abandon, copy-back and the pre-copy refusal
+ * unwind all restore this same shape; each appends the guard that proves the caller owns the
+ * fence it is removing (`guardSql` is ANDed after `project_id` / `session_id`).
+ */
+function restoreSessionLocationToRootStatement(
+  env: Env,
+  input: {
+    projectId: string;
+    sessionId: string;
+    sourceOwnerName: string;
+    now: number;
+    guardSql: string;
+    guardParams: readonly unknown[];
+  }
+): D1PreparedStatement {
+  return env.DATABASE.prepare(
+    `UPDATE project_data_session_locations
+     SET location_state = 'root',
+         owner_kind = 'root',
+         owner_name = ?,
+         generation = 0,
+         migration_id = NULL,
+         target_aggregate_sha256 = NULL,
+         updated_at = ?
+     WHERE project_id = ?
+       AND session_id = ?
+       AND ${input.guardSql}`
+  ).bind(input.sourceOwnerName, input.now, input.projectId, input.sessionId, ...input.guardParams);
+}
+
+/**
+ * Unwind a candidate the root object refused BEFORE any copy.
+ *
+ * `createCandidateJournal` fences the session `migrating` before the object can say no, and
+ * the D1 candidate query cannot see the DO-local eligibility guards (`session_state`, ACP
+ * rows, comments, attention markers, ...). Left as `failed`, that fence made the session
+ * unreadable until an operator abandoned it, the row was reclaimed first by every later sweep,
+ * and three refusals poisoned it and opened the project breaker — halting the whole drain for
+ * a session nothing could have migrated (production, 2026-09-05, `ea87d375`).
+ *
+ * The object returns a refusal only while no source intent row exists, and only a `leased`
+ * journal reaches here, so nothing was written on either object and the location restore is a
+ * pure D1 unwind. The journal becomes `frozen` with `error_code = 'precopy_refused'`: terminal
+ * for reclaim (no retry, no poison, no breaker) and the rule-47 expiring marker that
+ * `PRECOPY_REFUSAL_EXCLUSION_SQL` consults. Same statement shapes as abandon; the location
+ * restore is conditioned on the journal freeze inside one batch so a lost lease fence can
+ * never unfence a migration another worker now owns.
+ */
+async function refusePreCopyMigration(
+  env: Env,
+  migration: ClaimedMigrationRow,
+  refusal: ProjectDataArchiveSourcePrepareRefusal,
+  now: number
+): Promise<void> {
+  assertArchiveJournalTransition(migration.state, 'frozen');
+  const errorMessage = `${refusal.reason}: ${refusal.message}`.slice(0, 1000);
+  const [journalResult, supersededRefusals, locationResult] = await env.DATABASE.batch([
+    env.DATABASE.prepare(
+      `UPDATE project_data_archive_migrations
+       SET state = 'frozen',
+           error_code = ?,
+           error_message = ?,
+           lease_owner = NULL,
+           lease_expires_at = NULL,
+           frozen_at = COALESCE(frozen_at, ?),
+           updated_at = ?
+       WHERE migration_id = ?
+         AND state = 'leased'
+         AND lease_owner = ?
+         AND lease_epoch = ?`
+    ).bind(
+      PROJECT_DATA_ARCHIVE_PRECOPY_REFUSED_ERROR_CODE,
+      errorMessage,
+      now,
+      now,
+      migration.migration_id,
+      migration.lease_owner,
+      migration.lease_epoch
+    ),
+    // A chronically refused session is re-selected once per window and each selection mints a
+    // new journal row, so keep only the newest refusal marker per session: older ones carry no
+    // proof (no intent, no target, no manifest) and would otherwise accumulate forever. Guarded
+    // on this refusal having landed, so a lost fence deletes nothing.
+    env.DATABASE.prepare(
+      `DELETE FROM project_data_archive_migrations
+       WHERE project_id = ?
+         AND session_id = ?
+         AND state = 'frozen'
+         AND error_code = ?
+         AND migration_id != ?
+         AND EXISTS (
+           SELECT 1
+           FROM project_data_archive_migrations m
+           WHERE m.migration_id = ?
+             AND m.state = 'frozen'
+             AND m.error_code = ?
+         )`
+    ).bind(
+      migration.project_id,
+      migration.session_id,
+      PROJECT_DATA_ARCHIVE_PRECOPY_REFUSED_ERROR_CODE,
+      migration.migration_id,
+      migration.migration_id,
+      PROJECT_DATA_ARCHIVE_PRECOPY_REFUSED_ERROR_CODE
+    ),
+    restoreSessionLocationToRootStatement(env, {
+      projectId: migration.project_id,
+      sessionId: migration.session_id,
+      sourceOwnerName: migration.source_owner_name,
+      now,
+      // Only the fence this migration opened, and only once the journal freeze above landed in
+      // this same batch: a lost lease fence (changes = 0 above) must leave the location alone.
+      guardSql: `migration_id = ?
+         AND location_state = 'migrating'
+         AND EXISTS (
+           SELECT 1
+           FROM project_data_archive_migrations m
+           WHERE m.migration_id = ?
+             AND m.state = 'frozen'
+             AND m.error_code = ?
+         )`,
+      guardParams: [
+        migration.migration_id,
+        migration.migration_id,
+        PROJECT_DATA_ARCHIVE_PRECOPY_REFUSED_ERROR_CODE,
+      ],
+    }),
+  ]);
+  if ((journalResult?.meta.changes ?? 0) === 0) {
+    throw new ProjectDataArchiveCoordinatorStateError(
+      'lease_fence_lost',
+      `ProjectData archive migration ${migration.migration_id} lost its lease fence before recording a pre-copy refusal`
+    );
+  }
+  void supersededRefusals;
+  if ((locationResult?.meta.changes ?? 0) === 0) {
+    // Every writer that moves the location off `migrating` also moves the journal off `leased`,
+    // so a frozen journal with an unrestored fence is an invariant violation, not a race. Fail
+    // loudly (the journal is terminal, so `markFailed` leaves it alone) rather than stranding a
+    // readable-in-theory session behind a fence nothing will retry.
+    throw new ProjectDataArchiveCoordinatorStateError(
+      'precopy_refusal_location_not_restored',
+      `ProjectData archive migration ${migration.migration_id} was frozen as ${PROJECT_DATA_ARCHIVE_PRECOPY_REFUSED_ERROR_CODE} but its session location was not returned to root`
+    );
+  }
+  log.warn('project_data_archive_candidate_refused', {
+    migrationId: migration.migration_id,
+    projectId: migration.project_id,
+    sessionId: migration.session_id,
+    reason: refusal.reason,
+    message: refusal.message,
+  });
 }
 
 async function ensureTargetPrepared(
@@ -1663,6 +2282,7 @@ async function ensureTargetPrepared(
   now: number
 ): Promise<ClaimedMigrationRow> {
   await target.archiveTargetPrepare({
+    storageFormat: migration.storage_format ?? LEGACY_ARCHIVE_FORMAT,
     projectId: migration.project_id,
     sessionId: migration.session_id,
     migrationId: migration.migration_id,
@@ -1696,46 +2316,439 @@ async function enterCopying(
   });
 }
 
+function copyChunkBytes(
+  config: ArchiveCoordinatorConfig,
+  storageFormat: string,
+  tableName: ProjectDataArchiveTableName
+): number {
+  return storageFormat === COMPACT_ARCHIVE_FORMAT && tableName === 'chat_messages'
+    ? Math.min(config.chunkBytes, COMPACT_ARCHIVE_CHUNK_BYTES)
+    : config.chunkBytes;
+}
+
+async function ensureCopyCheckpoints(
+  env: Env,
+  config: ArchiveCoordinatorConfig,
+  migration: ClaimedMigrationRow,
+  now: number
+): Promise<Map<ProjectDataArchiveTableName, ArchiveCopyCheckpoint>> {
+  const storageFormat = migration.storage_format ?? LEGACY_ARCHIVE_FORMAT;
+  await env.DATABASE.batch(
+    PROJECT_DATA_ARCHIVE_TABLES.map((tableName) =>
+      env.DATABASE.prepare(
+        `INSERT OR IGNORE INTO project_data_archive_copy_checkpoints (
+           migration_id, table_name, storage_format, chunk_rows, chunk_bytes,
+           next_ordinal, source_cursor, complete, copied_rows, copied_bytes,
+           lease_epoch, updated_at
+         ) VALUES (?, ?, ?, ?, ?, 0, NULL, 0, 0, 0, ?, ?)`
+      ).bind(
+        migration.migration_id,
+        tableName,
+        storageFormat,
+        config.chunkRows,
+        copyChunkBytes(config, storageFormat, tableName),
+        migration.lease_epoch,
+        now
+      )
+    )
+  );
+  const rows = await env.DATABASE.prepare(
+    `SELECT migration_id, table_name, storage_format, chunk_rows, chunk_bytes,
+            next_ordinal, source_cursor, complete, copied_rows, copied_bytes,
+            last_chunk_sha256, lease_epoch, last_operation_id
+     FROM project_data_archive_copy_checkpoints
+     WHERE migration_id = ?
+     ORDER BY table_name ASC`
+  )
+    .bind(migration.migration_id)
+    .all<ArchiveCopyCheckpoint>();
+  const checkpoints = new Map<ProjectDataArchiveTableName, ArchiveCopyCheckpoint>();
+  for (const row of rows.results ?? []) {
+    if (!PROJECT_DATA_ARCHIVE_TABLES.includes(row.table_name)) {
+      throw new ProjectDataArchiveCoordinatorStateError(
+        'copy_checkpoint_invalid',
+        `ProjectData archive migration ${migration.migration_id} has an invalid checkpoint table`
+      );
+    }
+    if (
+      row.storage_format !== storageFormat ||
+      !Number.isSafeInteger(row.chunk_rows) ||
+      row.chunk_rows <= 0 ||
+      !Number.isSafeInteger(row.chunk_bytes) ||
+      row.chunk_bytes <= 0
+    ) {
+      throw new ProjectDataArchiveCoordinatorStateError(
+        'copy_layout_mismatch',
+        `ProjectData archive migration ${migration.migration_id} copy layout changed after publication`
+      );
+    }
+    checkpoints.set(row.table_name, row);
+  }
+  if (checkpoints.size !== PROJECT_DATA_ARCHIVE_TABLES.length) {
+    throw new ProjectDataArchiveCoordinatorStateError(
+      'copy_checkpoint_missing',
+      `ProjectData archive migration ${migration.migration_id} is missing copy checkpoints`
+    );
+  }
+  return checkpoints;
+}
+
+async function markCopyOperationStarted(
+  env: Env,
+  migration: ClaimedMigrationRow,
+  checkpoint: ArchiveCopyCheckpoint,
+  operation: string,
+  now: number
+): Promise<string> {
+  const operationId = crypto.randomUUID();
+  const result = await env.DATABASE.prepare(
+    `UPDATE project_data_archive_copy_checkpoints
+     SET lease_epoch = ?, last_operation = ?, last_operation_id = ?, last_operation_started_at = ?,
+         last_operation_completed_at = NULL, last_operation_duration_ms = NULL, updated_at = ?
+     WHERE migration_id = ? AND table_name = ?
+       AND next_ordinal = ?
+       AND (source_cursor = ? OR (source_cursor IS NULL AND ? IS NULL))
+       AND EXISTS (
+         SELECT 1 FROM project_data_archive_migrations m
+         WHERE m.migration_id = project_data_archive_copy_checkpoints.migration_id
+           AND m.lease_owner = ? AND m.lease_epoch = ? AND m.lease_expires_at > ?
+       )`
+  )
+    .bind(
+      migration.lease_epoch,
+      `${operation}:started`,
+      operationId,
+      now,
+      now,
+      migration.migration_id,
+      checkpoint.table_name,
+      checkpoint.next_ordinal,
+      checkpoint.source_cursor,
+      checkpoint.source_cursor,
+      migration.lease_owner,
+      migration.lease_epoch,
+      now
+    )
+    .run();
+  if ((result.meta.changes ?? 0) !== 1) {
+    throw new ProjectDataArchiveCoordinatorStateError(
+      'copy_checkpoint_fence_lost',
+      `ProjectData archive migration ${migration.migration_id} could not start ${operation}`
+    );
+  }
+  return operationId;
+}
+
+async function advanceCopyCheckpoint(
+  env: Env,
+  migration: ClaimedMigrationRow,
+  checkpoint: ArchiveCopyCheckpoint,
+  chunk: Pick<ProjectDataArchiveChunk, 'cursor' | 'hasMore' | 'rowCount' | 'byteCount' | 'sha256'>,
+  operation: string,
+  operationId: string,
+  startedAt: number,
+  now: number
+): Promise<ArchiveCopyCheckpoint> {
+  const result = await env.DATABASE.prepare(
+    `UPDATE project_data_archive_copy_checkpoints
+     SET next_ordinal = next_ordinal + 1,
+         source_cursor = ?, complete = ?,
+         copied_rows = copied_rows + ?, copied_bytes = copied_bytes + ?,
+         last_chunk_sha256 = ?, lease_epoch = ?, last_operation = ?,
+         last_operation_completed_at = ?, last_operation_duration_ms = ?, updated_at = ?
+     WHERE migration_id = ? AND table_name = ?
+       AND next_ordinal = ?
+       AND (source_cursor = ? OR (source_cursor IS NULL AND ? IS NULL))
+       AND last_operation_id = ?
+       AND EXISTS (
+         SELECT 1 FROM project_data_archive_migrations m
+         WHERE m.migration_id = project_data_archive_copy_checkpoints.migration_id
+           AND m.lease_owner = ? AND m.lease_epoch = ? AND m.lease_expires_at > ?
+       )
+     RETURNING migration_id, table_name, storage_format, chunk_rows, chunk_bytes,
+       next_ordinal, source_cursor, complete, copied_rows, copied_bytes,
+       last_chunk_sha256, lease_epoch, last_operation_id`
+  )
+    .bind(
+      chunk.hasMore ? chunk.cursor : null,
+      chunk.hasMore ? 0 : 1,
+      chunk.rowCount,
+      chunk.byteCount,
+      chunk.sha256,
+      migration.lease_epoch,
+      `${operation}:succeeded`,
+      now,
+      Math.max(0, now - startedAt),
+      now,
+      migration.migration_id,
+      checkpoint.table_name,
+      checkpoint.next_ordinal,
+      checkpoint.source_cursor,
+      checkpoint.source_cursor,
+      operationId,
+      migration.lease_owner,
+      migration.lease_epoch,
+      now
+    )
+    .first<ArchiveCopyCheckpoint>();
+  if (!result) {
+    throw new ProjectDataArchiveCoordinatorStateError(
+      'copy_checkpoint_fence_lost',
+      `ProjectData archive migration ${migration.migration_id} could not advance ${checkpoint.table_name}`
+    );
+  }
+  return result;
+}
+
+async function markCopyOperationFailed(
+  env: Env,
+  migration: ClaimedMigrationRow,
+  checkpoint: ArchiveCopyCheckpoint,
+  operation: string,
+  operationId: string,
+  startedAt: number,
+  error: unknown
+): Promise<void> {
+  const now = Date.now();
+  const outcome = isCompactArchiveTimeoutError(error) ? 'timed_out' : 'failed';
+  await env.DATABASE.prepare(
+    `UPDATE project_data_archive_copy_checkpoints
+     SET last_operation = ?, last_operation_completed_at = ?,
+         last_operation_duration_ms = ?, updated_at = ?
+     WHERE migration_id = ? AND table_name = ?
+       AND next_ordinal = ?
+       AND (source_cursor = ? OR (source_cursor IS NULL AND ? IS NULL))
+       AND last_operation_id = ?
+       AND EXISTS (
+         SELECT 1 FROM project_data_archive_migrations m
+         WHERE m.migration_id = project_data_archive_copy_checkpoints.migration_id
+           AND m.lease_owner = ? AND m.lease_epoch = ? AND m.lease_expires_at > ?
+       )`
+  )
+    .bind(
+      `${operation}:${outcome}`,
+      now,
+      Math.max(0, now - startedAt),
+      now,
+      migration.migration_id,
+      checkpoint.table_name,
+      checkpoint.next_ordinal,
+      checkpoint.source_cursor,
+      checkpoint.source_cursor,
+      operationId,
+      migration.lease_owner,
+      migration.lease_epoch,
+      now
+    )
+    .run();
+}
+
+function tableReceipts(
+  targetInfo: ArchiveTargetInspectResult,
+  tableName: ProjectDataArchiveTableName
+): ArchiveTargetInspectResult['chunks'] {
+  return targetInfo.chunks
+    .filter((chunk) => chunk.tableName === tableName)
+    .sort((left, right) => left.ordinal - right.ordinal);
+}
+
 async function copySourceChunks(
+  env: Env,
   source: DurableObjectStub<ProjectData>,
   target: DurableObjectStub<ProjectData>,
   config: ArchiveCoordinatorConfig,
   r2: R2Bucket,
-  migration: MigrationRow,
+  migration: ClaimedMigrationRow,
   now: number
 ): Promise<{ chunkHashes: string[]; chunksCopied: number; rowsCopied: number }> {
   const sourceIntentToken = requireStringField(migration, 'source_intent_token');
-  const chunkHashes: string[] = [];
   let chunksCopied = 0;
   let rowsCopied = 0;
+  let targetInfo = await target.archiveTargetInspectSession(targetInspectInput(migration));
+  const checkpoints = await ensureCopyCheckpoints(env, config, migration, now);
   for (const tableName of PROJECT_DATA_ARCHIVE_TABLES) {
-    let cursor: string | null = null;
-    let ordinal = 0;
-    do {
-      const chunk = await source.archiveSourceExportChunk({
-        projectId: migration.project_id,
-        sessionId: migration.session_id,
-        migrationId: migration.migration_id,
-        sourceOwnerName: migration.source_owner_name,
-        targetOwnerName: migration.target_owner_name,
-        targetGeneration: migration.target_generation,
-        sourceIntentToken,
-        tableName,
-        ordinal,
-        cursor,
-        maxRows: config.chunkRows,
-        maxBytes: config.chunkBytes,
-      });
-      await putImmutableJson(r2, chunkKey(config, chunk), chunk);
-      await target.archiveTargetCommitChunk({ ...chunk, now });
-      chunkHashes.push(chunk.sha256);
-      chunksCopied++;
-      rowsCopied += chunk.rowCount;
-      cursor = chunk.hasMore ? chunk.cursor : null;
-      ordinal++;
-    } while (cursor);
+    let checkpoint = checkpoints.get(tableName);
+    if (!checkpoint) {
+      throw new ProjectDataArchiveCoordinatorStateError(
+        'copy_checkpoint_missing',
+        `ProjectData archive migration ${migration.migration_id} is missing ${tableName} progress`
+      );
+    }
+    const receipts = tableReceipts(targetInfo, tableName);
+    for (const [ordinal, receipt] of receipts.entries()) {
+      if (receipt.ordinal !== ordinal) {
+        throw new ProjectDataArchiveCoordinatorStateError(
+          'target_chunk_inventory_gap',
+          `ProjectData archive migration ${migration.migration_id} has a ${tableName} receipt gap`
+        );
+      }
+    }
+    if (receipts.length < checkpoint.next_ordinal) {
+      throw new ProjectDataArchiveCoordinatorStateError(
+        'copy_checkpoint_ahead_of_target',
+        `ProjectData archive migration ${migration.migration_id} checkpoint is ahead of target receipts`
+      );
+    }
+
+    // A target commit can succeed immediately before a reset prevents the D1
+    // checkpoint write. Reconcile that durable receipt first. New receipts carry
+    // their exact source continuation; legacy receipts are re-exported once to
+    // prove the same immutable hash and populate it.
+    while (checkpoint.next_ordinal < receipts.length) {
+      const receipt = receipts[checkpoint.next_ordinal];
+      if (!receipt) {
+        throw new ProjectDataArchiveCoordinatorStateError(
+          'target_chunk_inventory_gap',
+          `ProjectData archive migration ${migration.migration_id} has a ${tableName} receipt gap`
+        );
+      }
+      const startedAt = Date.now();
+      const operationId = await markCopyOperationStarted(
+        env,
+        migration,
+        checkpoint,
+        'reconcile_receipt',
+        startedAt
+      );
+      try {
+        let continuation = {
+          cursor: receipt.sourceCursor,
+          hasMore: receipt.sourceHasMore,
+          rowCount: receipt.rowCount,
+          byteCount: receipt.byteCount,
+          sha256: receipt.sha256,
+        };
+        if (receipt.sourceHasMore === null) {
+          const replay = await source.archiveSourceExportChunk({
+            projectId: migration.project_id,
+            sessionId: migration.session_id,
+            migrationId: migration.migration_id,
+            sourceOwnerName: migration.source_owner_name,
+            targetOwnerName: migration.target_owner_name,
+            targetGeneration: migration.target_generation,
+            sourceIntentToken,
+            tableName,
+            ordinal: checkpoint.next_ordinal,
+            cursor: checkpoint.source_cursor,
+            // Pre-checkpoint receipts do not carry their original source cursor or
+            // frozen layout. Their durable row/byte inventory is sufficient to
+            // replay the exact prefix even when deployment defaults changed.
+            maxRows: Math.max(1, receipt.rowCount),
+            maxBytes: Math.max(checkpoint.chunk_bytes, receipt.byteCount, 1),
+          });
+          if (
+            replay.sha256 !== receipt.sha256 ||
+            replay.rowCount !== receipt.rowCount ||
+            replay.byteCount !== receipt.byteCount
+          ) {
+            throw new ProjectDataArchiveCoordinatorStateError(
+              'copy_receipt_replay_mismatch',
+              `ProjectData archive migration ${migration.migration_id} legacy receipt no longer matches source`
+            );
+          }
+          await target.archiveTargetCommitChunk({ ...replay, now });
+          continuation = replay;
+        }
+        await assertLeaseStillHeld(env, migration);
+        checkpoint = await advanceCopyCheckpoint(
+          env,
+          migration,
+          checkpoint,
+          {
+            ...continuation,
+            cursor: continuation.cursor,
+            hasMore: continuation.hasMore ?? false,
+          },
+          'reconcile_receipt',
+          operationId,
+          startedAt,
+          Date.now()
+        );
+      } catch (error) {
+        await markCopyOperationFailed(
+          env,
+          migration,
+          checkpoint,
+          'reconcile_receipt',
+          operationId,
+          startedAt,
+          error
+        ).catch(() => undefined);
+        throw error;
+      }
+    }
+    if (checkpoint.complete === 1) continue;
+
+    for (;;) {
+      const startedAt = Date.now();
+      const operationId = await markCopyOperationStarted(
+        env,
+        migration,
+        checkpoint,
+        'export_commit',
+        startedAt
+      );
+      try {
+        const chunk = await source.archiveSourceExportChunk({
+          projectId: migration.project_id,
+          sessionId: migration.session_id,
+          migrationId: migration.migration_id,
+          sourceOwnerName: migration.source_owner_name,
+          targetOwnerName: migration.target_owner_name,
+          targetGeneration: migration.target_generation,
+          sourceIntentToken,
+          tableName,
+          ordinal: checkpoint.next_ordinal,
+          cursor: checkpoint.source_cursor,
+          maxRows: checkpoint.chunk_rows,
+          maxBytes: checkpoint.chunk_bytes,
+        });
+        if (targetInfo.storageFormat === COMPACT_ARCHIVE_FORMAT && tableName === 'chat_messages') {
+          const rawChunkRef = await writeCompactChunk(
+            r2,
+            config.r2Prefix,
+            chunk,
+            config.r2TimeoutMs
+          );
+          await target.archiveTargetCommitChunk({ ...chunk, rawChunkRef, now });
+        } else {
+          await writeImmutableJson(r2, chunkKey(config, chunk), chunk, config.r2TimeoutMs);
+          await target.archiveTargetCommitChunk({ ...chunk, now });
+        }
+        await assertLeaseStillHeld(env, migration);
+        checkpoint = await advanceCopyCheckpoint(
+          env,
+          migration,
+          checkpoint,
+          chunk,
+          'export_commit',
+          operationId,
+          startedAt,
+          Date.now()
+        );
+        chunksCopied++;
+        rowsCopied += chunk.rowCount;
+        if (!chunk.hasMore) break;
+      } catch (error) {
+        await markCopyOperationFailed(
+          env,
+          migration,
+          checkpoint,
+          'export_commit',
+          operationId,
+          startedAt,
+          error
+        ).catch(() => undefined);
+        throw error;
+      }
+    }
   }
-  return { chunkHashes, chunksCopied, rowsCopied };
+  targetInfo = await target.archiveTargetInspectSession(targetInspectInput(migration));
+  return {
+    chunkHashes: targetInfo.chunks.map((chunk) => chunk.sha256),
+    chunksCopied,
+    rowsCopied,
+  };
 }
 
 async function sealTargetAndSource(
@@ -1802,7 +2815,7 @@ async function persistRecoveryManifest(
   const terminalVersionSha256 =
     migration.terminal_version_sha256 ?? targetInfo.terminalVersionSha256;
   const recoveryManifestKey = manifestKey(config, migration);
-  await putImmutableJson(
+  await writeImmutableJson(
     r2,
     recoveryManifestKey,
     manifestForTarget(
@@ -1812,7 +2825,8 @@ async function persistRecoveryManifest(
       aggregateSha256,
       targetInfo.chunks,
       now
-    )
+    ),
+    config.r2TimeoutMs
   );
   const sourceMarked = await source.archiveSourceMarkRecoveryManifestPersisted({
     sessionId: migration.session_id,
@@ -1850,9 +2864,17 @@ async function finalizeSourceAndPublish(
   source: DurableObjectStub<ProjectData>,
   migration: ClaimedMigrationRow,
   now: number
-): Promise<{ migration: MigrationRow; recoveredCrashGap: boolean }> {
+): Promise<{
+  migration: MigrationRow;
+  recoveredCrashGap: boolean;
+  sourceFinalization: ArchiveSourceFinalizeDeleteResult & {
+    durationMs: number;
+    reclaimedBytes: number;
+  };
+}> {
   await assertLeaseStillHeld(env, migration);
-  await source.archiveSourceFinalizeDelete({
+  const startedAt = Date.now();
+  const sourceFinalization = await source.archiveSourceFinalizeDelete({
     projectId: migration.project_id,
     sessionId: migration.session_id,
     migrationId: migration.migration_id,
@@ -1897,6 +2919,14 @@ async function finalizeSourceAndPublish(
   return {
     migration: await readMigrationOrThrow(env, migration.migration_id),
     recoveredCrashGap: !casOk,
+    sourceFinalization: {
+      ...sourceFinalization,
+      durationMs: Math.max(0, Date.now() - startedAt),
+      reclaimedBytes: Math.max(
+        0,
+        sourceFinalization.databaseSizeBeforeBytes - sourceFinalization.databaseSizeAfterBytes
+      ),
+    },
   };
 }
 
@@ -1908,18 +2938,61 @@ async function migrateCandidate(
   now: number
 ): Promise<{
   migrated: boolean;
+  leaseNotAcquired?: boolean;
+  /** True when the source object refused before any copy and the fence was unwound. */
+  refused?: boolean;
   recoveredCrashGap: boolean;
   chunksCopied: number;
   rowsCopied: number;
 }> {
-  let migration = await claimMigrationLease(env, selected, now, config.leaseMs);
-  if (!migration) {
-    return { migrated: false, recoveredCrashGap: false, chunksCopied: 0, rowsCopied: 0 };
+  const claimedRow = await claimMigrationLease(env, selected, now, config.leaseMs);
+  if (!claimedRow) {
+    return {
+      migrated: false,
+      leaseNotAcquired: true,
+      recoveredCrashGap: false,
+      chunksCopied: 0,
+      rowsCopied: 0,
+    };
   }
+  try {
+    return await migrateClaimedCandidate(env, config, r2, claimedRow, now);
+  } catch (error) {
+    throw new ClaimedMigrationFailure(error, {
+      leaseOwner: claimedRow.lease_owner,
+      leaseEpoch: claimedRow.lease_epoch,
+    });
+  }
+}
+
+async function migrateClaimedCandidate(
+  env: Env,
+  config: ArchiveCoordinatorConfig,
+  r2: R2Bucket,
+  claimedRow: ClaimedMigrationRow,
+  now: number
+): Promise<{
+  migrated: boolean;
+  refused?: boolean;
+  recoveredCrashGap: boolean;
+  chunksCopied: number;
+  rowsCopied: number;
+}> {
+  let migration = claimedRow;
   const source = await ensureOwnerStub(env, migration.source_owner_name, migration.project_id);
   const target = await ensureOwnerStub(env, migration.target_owner_name, migration.project_id);
   let chunksCopied = 0;
   let rowsCopied = 0;
+  // Wall time per phase, logged on completion so production ticks quantify what each phase
+  // costs the root object (finalize in particular deletes a whole session inside one RPC).
+  const phaseStartedAt = Date.now();
+  const phaseDurationsMs: Record<string, number> = {};
+  let phaseMark = phaseStartedAt;
+  const markPhase = (phase: string) => {
+    const at = Date.now();
+    phaseDurationsMs[phase] = at - phaseMark;
+    phaseMark = at;
+  };
 
   const local = await inspectSourceIntent(source, migration);
   migration = await alignJournalToLocalSourceProof(env, migration, local, now);
@@ -1933,6 +3006,20 @@ async function migrateCandidate(
   }
 
   const preparedResult = await ensureSourcePrepared(env, config, source, migration, now);
+  markPhase('prepare');
+  if (preparedResult.refusal) {
+    // The object only refuses while it holds no intent row for the session. A journal past
+    // `leased` says an intent SHOULD exist, so the two disagree; keep the fail-closed
+    // `failed`/fenced path so an operator inspects it rather than unfencing on a contradiction.
+    if (preparedResult.migration.state !== 'leased') {
+      throw new ProjectDataArchiveCoordinatorStateError(
+        'precopy_refusal_after_intent',
+        `ProjectData archive migration ${migration.migration_id} was refused at prepare (${preparedResult.refusal.reason}) while its journal is ${preparedResult.migration.state}`
+      );
+    }
+    await refusePreCopyMigration(env, preparedResult.migration, preparedResult.refusal, now);
+    return { migrated: false, refused: true, recoveredCrashGap: false, chunksCopied, rowsCopied };
+  }
   migration = preparedResult.migration;
   const prepared = preparedResult.prepared;
 
@@ -1940,9 +3027,10 @@ async function migrateCandidate(
   migration = await enterCopying(env, migration, now);
 
   if (migration.state === 'copying') {
-    const copyResult = await copySourceChunks(source, target, config, r2, migration, now);
+    const copyResult = await copySourceChunks(env, source, target, config, r2, migration, now);
     chunksCopied += copyResult.chunksCopied;
     rowsCopied += copyResult.rowsCopied;
+    markPhase('copy');
     migration = await sealTargetAndSource(
       env,
       source,
@@ -1952,15 +3040,43 @@ async function migrateCandidate(
       copyResult.chunkHashes,
       now
     );
+    markPhase('seal');
   }
 
   if (migration.state === 'target_sealed') {
     migration = await persistRecoveryManifest(env, config, r2, source, target, migration, now);
+    markPhase('manifest');
   }
 
   if (migration.state === 'recovery_manifest_persisted') {
+    if (migration.storage_format === COMPACT_ARCHIVE_FORMAT) {
+      const inspected = await target.archiveTargetInspectSession(targetInspectInput(migration));
+      await target.archiveTargetSeal({
+        ...sourcePrepareInput(
+          migration,
+          requireStringField(migration, 'source_intent_token'),
+          now,
+          config.sessionGraceMs
+        ),
+        terminalVersionSha256: prepared.terminalVersionSha256,
+        expectedChunkHashes: inspected.chunks.map((chunk) => chunk.sha256),
+      });
+    }
     const finalized = await finalizeSourceAndPublish(env, config, source, migration, now);
+    markPhase('finalize');
     migration = finalized.migration as ClaimedMigrationRow;
+    log.info('project_data_archive_candidate_migrated', {
+      migrationId: migration.migration_id,
+      projectId: migration.project_id,
+      sessionId: migration.session_id,
+      state: migration.state,
+      messageCount: prepared.messageCount,
+      chunksCopied,
+      rowsCopied,
+      sourceFinalization: finalized.sourceFinalization,
+      totalMs: Date.now() - phaseStartedAt,
+      phaseDurationsMs,
+    });
     return {
       migrated: migration.state === 'published',
       recoveredCrashGap: finalized.recoveredCrashGap,
@@ -1982,15 +3098,47 @@ async function migrateCandidate(
   };
 }
 
+/** The lease a worker held when its migration attempt failed. */
+type HeldLease = { leaseOwner: string; leaseEpoch: number };
+
+/**
+ * Wraps a failure that happened while this worker held the journal lease, so the failure
+ * handler can refuse to overwrite a row another worker (or an abandon reservation) has since
+ * taken over. `cause` is the original error; `errorCode`/`errorMessage` read through it.
+ */
+class ClaimedMigrationFailure extends Error {
+  constructor(
+    readonly cause: unknown,
+    readonly lease: HeldLease
+  ) {
+    super(cause instanceof Error ? cause.message : String(cause));
+    this.name = 'ClaimedMigrationFailure';
+  }
+}
+
 async function markFailed(
   env: Env,
   config: ArchiveCoordinatorConfig,
   migration: MigrationRow,
   now: number,
-  error: unknown
+  error: unknown,
+  lease?: HeldLease
 ): Promise<'failed' | 'poisoned' | 'unchanged'> {
   const current = await readMigration(env, migration.migration_id);
   if (!current || ['source_deleted', 'published', 'poisoned', 'frozen'].includes(current.state)) {
+    return 'unchanged';
+  }
+  // A worker that lost its lease fence must not record a failure on the row its successor now
+  // owns (the successor may be mid-copy); only the lease holder's verdict counts.
+  if (
+    lease &&
+    (current.lease_owner !== lease.leaseOwner || current.lease_epoch !== lease.leaseEpoch)
+  ) {
+    log.warn('project_data_archive_mark_failed_lease_fence_lost', {
+      migrationId: current.migration_id,
+      projectId: current.project_id,
+      state: current.state,
+    });
     return 'unchanged';
   }
   if (current.attempt_count >= config.poisonAfterAttempts) {
@@ -2003,7 +3151,8 @@ async function markFailed(
     });
     return 'poisoned';
   }
-  await env.DATABASE.prepare(
+  const leaseGuard = lease ? 'AND lease_owner = ? AND lease_epoch = ?' : '';
+  const result = await env.DATABASE.prepare(
     `UPDATE project_data_archive_migrations
      SET state = 'failed',
          error_code = ?,
@@ -2012,11 +3161,18 @@ async function markFailed(
          lease_expires_at = NULL,
          updated_at = ?
      WHERE migration_id = ?
-       AND state NOT IN ('source_deleted', 'published', 'poisoned', 'frozen')`
+       AND state NOT IN ('source_deleted', 'published', 'poisoned', 'frozen')
+       ${leaseGuard}`
   )
-    .bind(errorCode(error), errorMessage(error), now, current.migration_id)
+    .bind(
+      errorCode(error),
+      errorMessage(error),
+      now,
+      current.migration_id,
+      ...(lease ? [lease.leaseOwner, lease.leaseEpoch] : [])
+    )
     .run();
-  return 'failed';
+  return (result.meta.changes ?? 0) > 0 ? 'failed' : 'unchanged';
 }
 
 export async function freezeProjectDataArchiveMigration(
@@ -2126,7 +3282,7 @@ export async function inspectFrozenProjectDataArchiveIntents(
   const limit = resolveProjectDataArchiveFrozenIntentInspectionLimit(env, input.limit);
   const projectPredicate = input.projectId ? 'AND m.project_id = ?' : '';
   const rows = await env.DATABASE.prepare(
-    `SELECT m.migration_id, m.project_id, m.session_id, m.state, m.source_owner_name,
+    `SELECT m.migration_id, m.project_id, m.session_id, m.storage_format, m.state, m.source_owner_name,
             m.target_owner_name, m.target_generation, m.source_intent_token,
             m.terminal_version_sha256, m.target_aggregate_sha256, m.r2_manifest_key,
             m.lease_owner, m.lease_epoch, m.lease_expires_at, m.attempt_count,
@@ -2137,11 +3293,19 @@ export async function inspectFrozenProjectDataArchiveIntents(
      LEFT JOIN project_data_archive_circuit_breakers breaker
        ON breaker.project_id = m.project_id
      WHERE (m.state IN ('failed', 'poisoned', 'frozen') OR loc.location_state = 'frozen')
+       AND NOT (m.state = 'frozen' AND m.error_code = ?)
        ${projectPredicate}
      ORDER BY m.updated_at ASC
      LIMIT ?`
   )
-    .bind(...(input.projectId ? [input.projectId] : []), limit)
+    .bind(
+      // A pre-copy refusal never created a source intent or a target row, so there is nothing
+      // on either object to inspect; excluding it keeps this 5-10 row, two-RPC-per-row queue for
+      // migrations that need a human. Refused rows stay visible in the problem-migrations list.
+      PROJECT_DATA_ARCHIVE_PRECOPY_REFUSED_ERROR_CODE,
+      ...(input.projectId ? [input.projectId] : []),
+      limit
+    )
     .all<MigrationRow & { location_state: string | null; breaker_state: string | null }>();
 
   const inspections: ProjectDataArchiveFrozenIntentInspection[] = [];
@@ -2222,6 +3386,262 @@ export async function inspectFrozenProjectDataArchiveIntents(
             },
           ]
         : [],
+  };
+}
+
+const ABANDON_LEASE_OWNER_PREFIX = 'abandon:';
+
+/** An operator reservation taken by an earlier abandon attempt, as opposed to a sweep lease. */
+function isAbandonReservation(leaseOwner: string | null): boolean {
+  return typeof leaseOwner === 'string' && leaseOwner.startsWith(ABANDON_LEASE_OWNER_PREFIX);
+}
+
+/**
+ * Reserve an operator lease on a migration about to be abandoned. Mirrors the
+ * `claimMigrationLease` CAS (no live lease held by anyone else, epoch bump) without changing
+ * `state`, so the journal keeps recording where the migration stopped. An earlier abandon
+ * reservation (`abandon:*` owner) may be taken over even if unexpired so an interrupted
+ * abandon can rerun; a sweep worker's live lease may not. Returns the fenced row or `null`.
+ */
+async function reserveAbandonLease(
+  env: Env,
+  migration: MigrationRow,
+  now: number,
+  leaseMs: number
+): Promise<ClaimedMigrationRow | null> {
+  const leaseOwner = `${ABANDON_LEASE_OWNER_PREFIX}${crypto.randomUUID()}`;
+  const result = await env.DATABASE.prepare(
+    `UPDATE project_data_archive_migrations
+     SET lease_owner = ?,
+         lease_epoch = lease_epoch + 1,
+         lease_expires_at = ?,
+         updated_at = ?
+     WHERE migration_id = ?
+       AND project_id = ?
+       AND state = ?
+       AND lease_epoch = ?
+       AND state NOT IN ('source_deleted', 'published')
+       AND (
+         lease_expires_at IS NULL
+         OR lease_expires_at <= ?
+         OR state = 'failed'
+         OR lease_owner LIKE ?
+       )`
+  )
+    .bind(
+      leaseOwner,
+      now + leaseMs,
+      now,
+      migration.migration_id,
+      migration.project_id,
+      migration.state,
+      migration.lease_epoch,
+      now,
+      `${ABANDON_LEASE_OWNER_PREFIX}%`
+    )
+    .run();
+  if ((result.meta.changes ?? 0) === 0) return null;
+  const fenced = await readMigrationOrThrow(env, migration.migration_id);
+  if (fenced.lease_owner !== leaseOwner || fenced.lease_expires_at === null) return null;
+  return fenced as ClaimedMigrationRow;
+}
+
+/** Drop an abandon reservation after a failed attempt so a sweep may reclaim the row. */
+async function releaseAbandonLease(env: Env, fenced: ClaimedMigrationRow): Promise<void> {
+  await env.DATABASE.prepare(
+    `UPDATE project_data_archive_migrations
+     SET lease_owner = NULL,
+         lease_expires_at = NULL
+     WHERE migration_id = ?
+       AND lease_owner = ?
+       AND lease_epoch = ?`
+  )
+    .bind(fenced.migration_id, fenced.lease_owner, fenced.lease_epoch)
+    .run();
+}
+
+/**
+ * Abandon a migration that never reached source deletion and return the session to root.
+ *
+ * Copy-back is the recovery for migrations whose source transcript was deleted; this is
+ * the recovery for everything before that point (`candidate` .. `recovery_manifest_persisted`,
+ * `failed`, `poisoned`, `frozen`). The root object still holds the transcript, so all that is
+ * needed is to drop the partial copy on the shard, drop the source intent, freeze the journal
+ * with a distinct `operator_abandoned` code, and flip the location back to `root`.
+ *
+ * Ordering is deliberate and load-bearing for data safety:
+ *   1. Reserve the journal lease (D1 CAS, epoch bump) so no sweep can claim or continue the
+ *      migration while the objects are being cleaned.
+ *   2. Remove the root source intent under the source transcript lock. This is the step that
+ *      proves the source transcript is intact: it refuses once the payload is deleted, and a
+ *      concurrent finalize cannot delete the payload without the intent it just removed.
+ *   3. Only then drop the shard copy, which is now provably a duplicate.
+ *   4. Write the D1 journal + location in one batch, guarded by the reserved epoch.
+ * Every object step is idempotent. If a step throws, the reservation is released and the
+ * location stays fenced (safe). If the batch fails after the object cleanups, a rerun
+ * observes "nothing to remove" and finishes the D1 side. The project circuit breaker is not
+ * touched: abandoning one migration is not evidence that the whole project's archive work
+ * is unsafe.
+ */
+export async function abandonProjectDataArchiveMigration(
+  env: Env,
+  input: {
+    migrationId: string;
+    projectId: string;
+    reason: string;
+    now?: number;
+  }
+): Promise<ProjectDataArchiveAbandonResult> {
+  const now = input.now ?? Date.now();
+  const reason = input.reason.trim();
+  if (!reason) {
+    throw new ProjectDataArchiveCoordinatorStateError(
+      'abandon_reason_required',
+      `ProjectData archive migration ${input.migrationId} abandon requires an explicit reason`
+    );
+  }
+  const migration = await readMigrationOrThrow(env, input.migrationId);
+  if (migration.project_id !== input.projectId) {
+    throw new ProjectDataArchiveCoordinatorStateError(
+      'migration_project_mismatch',
+      `ProjectData archive migration ${input.migrationId} does not belong to project ${input.projectId}`
+    );
+  }
+  if (migration.state === 'source_deleted' || migration.state === 'published') {
+    throw new ProjectDataArchiveCoordinatorStateError(
+      'abandon_requires_source_intact',
+      `ProjectData archive migration ${migration.migration_id} already deleted its source; use copy-back`
+    );
+  }
+  // A live lease means a sweep or canary may be mid-step on this migration; pulling the DO
+  // state out from under it would surface as spurious intent/target mismatches. Operators
+  // wait for the lease (PROJECT_DATA_ARCHIVE_LEASE_MS) or freeze the project first.
+  if (
+    ACTIVE_RECLAIMABLE_STATES.includes(
+      migration.state as (typeof ACTIVE_RECLAIMABLE_STATES)[number]
+    ) &&
+    migration.state !== 'failed' &&
+    migration.lease_expires_at !== null &&
+    migration.lease_expires_at > now &&
+    !isAbandonReservation(migration.lease_owner)
+  ) {
+    throw new ProjectDataArchiveCoordinatorStateError(
+      'abandon_requires_expired_lease',
+      `ProjectData archive migration ${migration.migration_id} is leased until ${migration.lease_expires_at}; wait for the lease or freeze the project first`
+    );
+  }
+
+  // Fence the journal before touching either object. This is the same CAS shape as
+  // `claimMigrationLease`: it only succeeds while no other worker holds a live lease, and it
+  // bumps `lease_epoch`, so a sweep that claimed the row earlier fails its next
+  // `assertLeaseStillHeld` / `requireJournalCas` instead of racing this abandon. A previous
+  // abandon attempt's own reservation may be taken over so an interrupted abandon can rerun.
+  const fenced = await reserveAbandonLease(env, migration, now, resolveConfig(env).leaseMs);
+  if (!fenced) {
+    throw new ProjectDataArchiveCoordinatorStateError(
+      'abandon_requires_expired_lease',
+      `ProjectData archive migration ${migration.migration_id} was claimed by another worker; wait for the lease or freeze the project first`
+    );
+  }
+
+  let sourceResult: ArchiveSourceAbandonIntentResult;
+  let targetResult: ArchiveTargetAbandonResult;
+  try {
+    const source = await ensureOwnerStub(env, migration.source_owner_name, migration.project_id);
+    const target = await ensureOwnerStub(env, migration.target_owner_name, migration.project_id);
+
+    // Cheap early refusal on a lagging journal; NOT the safety boundary (see below).
+    const sourceIntent = await inspectSourceIntent(source, migration);
+    if (
+      sourceIntent.exists &&
+      (sourceIntent.state === 'source_deleted' || sourceIntent.state === 'rehome_exported')
+    ) {
+      throw new ProjectDataArchiveCoordinatorStateError(
+        'abandon_requires_source_intact',
+        `ProjectData archive migration ${migration.migration_id} source intent is ${sourceIntent.state}; use copy-back`
+      );
+    }
+
+    // The root object is the serialization point for the source transcript: this RPC runs
+    // under the source transcript lock, re-reads the intent at the moment it mutates, and
+    // refuses once the source payload is gone. Removing the intent also makes any in-flight
+    // `archiveSourceFinalizeDelete` for this migration fail closed, because finalize requires
+    // its intent row. Only after it returns is the shard copy provably a duplicate, so the
+    // target delete MUST come second — never before this call.
+    sourceResult = await source.archiveSourceAbandonIntent({
+      ...sourceInspectInput(migration),
+      now,
+    });
+    targetResult = await target.archiveTargetAbandonSession({
+      ...targetInspectInput(migration),
+      migrationId: migration.migration_id,
+      // Set only because the source abandon above returned without refusing: the source
+      // transcript was intact under the root object's lock an instant ago and no path can
+      // delete it without the intent row that call just removed.
+      sourceIntactVerified: true,
+      now,
+    });
+  } catch (error) {
+    await releaseAbandonLease(env, fenced).catch((releaseError: unknown) => {
+      log.warn('project_data_archive_abandon_lease_release_failed', {
+        migrationId: migration.migration_id,
+        ...serializeError(releaseError),
+      });
+    });
+    throw error;
+  }
+
+  const [journalResult, locationResult] = await env.DATABASE.batch([
+    env.DATABASE.prepare(
+      `UPDATE project_data_archive_migrations
+       SET state = 'frozen',
+           error_code = 'operator_abandoned',
+           error_message = ?,
+           lease_owner = NULL,
+           lease_expires_at = NULL,
+           frozen_at = COALESCE(frozen_at, ?),
+           updated_at = ?
+       WHERE migration_id = ?
+         AND project_id = ?
+         AND lease_epoch = ?
+         AND state NOT IN ('source_deleted', 'published')
+         AND NOT (state = 'frozen' AND error_code = 'operator_abandoned')`
+    ).bind(reason, now, now, migration.migration_id, migration.project_id, fenced.lease_epoch),
+    restoreSessionLocationToRootStatement(env, {
+      projectId: migration.project_id,
+      sessionId: migration.session_id,
+      sourceOwnerName: migration.source_owner_name,
+      now,
+      guardSql: `migration_id = ? AND location_state IN ('migrating', 'frozen')`,
+      guardParams: [migration.migration_id],
+    }),
+  ]);
+
+  log.warn('project_data_archive_migration_abandoned', {
+    migrationId: migration.migration_id,
+    projectId: migration.project_id,
+    sessionId: migration.session_id,
+    previousState: migration.state,
+    sourceIntentRemoved: sourceResult.removed,
+    targetRemoved: targetResult.removed,
+    reason,
+  });
+
+  return {
+    migrationId: migration.migration_id,
+    projectId: migration.project_id,
+    sessionId: migration.session_id,
+    reason,
+    previousState: migration.state,
+    journalFrozen: (journalResult?.meta.changes ?? 0) > 0,
+    restoredToRoot: (locationResult?.meta.changes ?? 0) > 0,
+    sourceIntentRemoved: sourceResult.removed,
+    targetRemoved: targetResult.removed,
+    targetRowsDeleted:
+      targetResult.messagesDeleted +
+      targetResult.groupedRowsDeleted +
+      targetResult.toolArchiveRowsDeleted +
+      targetResult.chunksDeleted,
   };
 }
 
@@ -2330,28 +3750,14 @@ export async function copyBackProjectDataArchiveMigration(
     targetGeneration: migration.target_generation,
     now,
   });
-  const locationResult = await env.DATABASE.prepare(
-    `UPDATE project_data_session_locations
-     SET location_state = 'root',
-         owner_kind = 'root',
-         owner_name = ?,
-         generation = 0,
-         migration_id = NULL,
-         target_aggregate_sha256 = NULL,
-         updated_at = ?
-     WHERE project_id = ?
-       AND session_id = ?
-       AND (migration_id = ? OR owner_name = ?)`
-  )
-    .bind(
-      migration.source_owner_name,
-      now,
-      migration.project_id,
-      migration.session_id,
-      migration.migration_id,
-      migration.target_owner_name
-    )
-    .run();
+  const locationResult = await restoreSessionLocationToRootStatement(env, {
+    projectId: migration.project_id,
+    sessionId: migration.session_id,
+    sourceOwnerName: migration.source_owner_name,
+    now,
+    guardSql: `(migration_id = ? OR owner_name = ?)`,
+    guardParams: [migration.migration_id, migration.target_owner_name],
+  }).run();
   await env.DATABASE.prepare(
     `UPDATE project_data_archive_migrations
      SET state = 'frozen',
@@ -2391,45 +3797,161 @@ function recordMigrationFailure(
   else stats.failed++;
 }
 
+async function reserveMigrationAttempt(
+  migration: MigrationRow,
+  reserve: (projectId: string, sessionId: string) => Promise<ArchiveWriteReservation | null>
+): Promise<ArchiveWriteReservation | null | undefined> {
+  if (
+    migration.storage_format !== COMPACT_ARCHIVE_FORMAT ||
+    migration.state === 'source_deleted' ||
+    migration.state === 'published'
+  )
+    return undefined;
+  return reserve(migration.project_id, migration.session_id);
+}
+
 async function processArchiveMigrationBatch(input: {
   env: Env;
   config: ArchiveCoordinatorConfig;
   archiveR2: R2Bucket;
   migrations: MigrationRow[];
+  /** Eligible sessions journaled one at a time, each immediately before it is processed. */
+  pending?: CandidateRow[];
+  /**
+   * How many of `pending` may be journaled. `pending` is deliberately longer, holding
+   * smaller candidates for a write-budget refusal to descend to.
+   *
+   * Required, with no default: an optional slot count silently falling back to
+   * `pending.length` reads as correct and is invisible at small fixture sizes — the first
+   * cut of this change computed it, forgot to pass it, and every test still passed because
+   * no fixture had more affordable candidates than slots (`.claude/rules/73`).
+   */
+  pendingSlots: number;
+  onJournaled?: (candidate: CandidateRow, migration: MigrationRow) => void;
   now: number;
   startedAt: number;
   stats: ProjectDataArchiveShardingStats;
   markFailedErrorEvent: string;
   candidateFailedEvent: string;
 }): Promise<void> {
-  for (const migration of input.migrations) {
-    if (Date.now() - input.startedAt >= input.config.wallTimeMs) break;
+  // `ensureOwnerStub` costs a Durable Object round trip per call, and the fall-through can now
+  // ask about many candidates in one tick — most of them in the same project, since selection
+  // is global and one project dominates the backlog. The DO memoises `ensureProjectId`
+  // internally, so the repeat calls bought nothing but network hops.
+  const ensuredOwners = new Map<string, Promise<DurableObjectStub<ProjectData>>>();
+  const sourceStub = (projectId: string): Promise<DurableObjectStub<ProjectData>> => {
+    const existing = ensuredOwners.get(projectId);
+    if (existing) return existing;
+    const pending = ensureOwnerStub(input.env, projectId, projectId);
+    ensuredOwners.set(projectId, pending);
+    return pending;
+  };
+  const reserve = async (
+    projectId: string,
+    sessionId: string
+  ): Promise<ArchiveWriteReservation | null> => {
+    const { allowance, factor } = archiveWriteBudgetConfig(input.env);
+    // The estimate's own cap is the affordable UNIT count, not the message ceiling: any
+    // session whose real row inventory exceeds what the allowance can pay for is
+    // unaffordable regardless of how `session_summaries.message_count` reported it, and the
+    // estimator short-circuits such a session instead of counting further. This is the
+    // backstop for D1 <-> Durable Object count drift.
+    // Floored at 1, not 0: `estimateArchiveWrites` binds `maxMessages + 1` as a SQL LIMIT, and
+    // a degenerate allowance that affords nothing would otherwise send `LIMIT 1` worth of
+    // counting into the DO to answer a question already settled. 1 keeps the query valid and
+    // still short-circuits to MAX_SAFE_INTEGER for any session with a single row. Capped
+    // above so the scan cannot grow with an unbounded allowance.
+    const estimateCap = Math.min(
+      ARCHIVE_MAX_ESTIMATE_INVENTORY_UNITS,
+      Math.max(1, archiveAffordableWriteUnits(allowance, factor))
+    );
+    const source = await sourceStub(projectId);
+    const estimatedWrites = await source.archiveSourceEstimateWrites(
+      sessionId,
+      factor,
+      estimateCap
+    );
+    const outcome = await reserveArchiveWrites(
+      input.env.DATABASE,
+      estimatedWrites,
+      allowance,
+      input.now
+    );
+    if (!outcome.reserved) {
+      recordBudgetRefusal(input.stats, outcome.reason);
+      // `exceeds_allowance` is NOT a deferral: waiting cannot make this session affordable.
+      // It is logged at warn so it is distinguishable in Workers Observability from the
+      // routine exhaustion of a day's pool (.claude/rules/72).
+      const detail = { projectId, sessionId, estimatedWrites, allowance, reason: outcome.reason };
+      if (outcome.reason === 'window_exhausted')
+        log.info('project_data_archive_write_budget_deferred', detail);
+      else log.warn('project_data_archive_write_budget_unaffordable', detail);
+      return null;
+    }
+    log.info('project_data_archive_write_budget_reserved', {
+      projectId,
+      sessionId,
+      estimatedWrites,
+      allowance,
+    });
+    return {
+      reservationId: crypto.randomUUID(),
+      estimatedWrites,
+      factor,
+      maxMessages: estimateCap,
+    };
+  };
+  const releaseUnused = async (reservation?: ArchiveWriteReservation) => {
+    if (!reservation?.reservationId) return;
+    try {
+      await releaseUnusedArchiveReservation(
+        input.env.DATABASE,
+        reservation.reservationId,
+        reservation.estimatedWrites,
+        input.now,
+        input.env
+      );
+    } catch (error) {
+      log.warn('project_data_archive_unused_reservation_release_failed', {
+        ...serializeError(error),
+      });
+    }
+  };
+  const processOne = async (
+    migration: MigrationRow,
+    writeReservation?: ArchiveWriteReservation
+  ): Promise<void> => {
     try {
       const result = await migrateCandidate(
         input.env,
-        input.config,
+        { ...input.config, writeReservation },
         input.archiveR2,
         migration,
         input.now
       );
+      if (result.leaseNotAcquired) await releaseUnused(writeReservation);
       if (result.migrated) input.stats.migrated++;
+      if (result.refused) input.stats.refused++;
       if (result.recoveredCrashGap) input.stats.recoveredCrashGaps++;
       input.stats.chunksCopied += result.chunksCopied;
       input.stats.rowsCopied += result.rowsCopied;
-    } catch (error) {
+    } catch (caught) {
+      const error = caught instanceof ClaimedMigrationFailure ? caught.cause : caught;
+      const lease = caught instanceof ClaimedMigrationFailure ? caught.lease : undefined;
       const failureState = await markFailed(
         input.env,
         input.config,
         migration,
         input.now,
-        error
+        error,
+        lease
       ).catch((markError) => {
-          log.error(input.markFailedErrorEvent, {
-            migrationId: migration.migration_id,
-            ...serializeError(markError),
-          });
-          return 'unchanged' as const;
+        log.error(input.markFailedErrorEvent, {
+          migrationId: migration.migration_id,
+          ...serializeError(markError),
         });
+        return 'unchanged' as const;
+      });
       recordMigrationFailure(input.stats, failureState);
       log.warn(input.candidateFailedEvent, {
         migrationId: migration.migration_id,
@@ -2438,6 +3960,51 @@ async function processArchiveMigrationBatch(input: {
         ...serializeError(error),
       });
     }
+  };
+  const outOfTime = () => Date.now() - input.startedAt >= input.config.wallTimeMs;
+
+  for (const migration of input.migrations) {
+    if (outOfTime()) return;
+    const reservation = await reserveMigrationAttempt(migration, reserve);
+    if (reservation === null) continue;
+    await processOne(migration, reservation);
+  }
+  // Fence-then-process, one session at a time: the wall-time check runs BEFORE the journal
+  // row (and its `migrating` location fence) is created, so a tick never leaves sessions it
+  // did not reach fenced until the next cadence-gated sweep.
+  //
+  // Both per-tick bounds are applied HERE rather than to the candidate list, because both
+  // describe work the tick actually performs: `pendingSlots` counts `migrating` fences
+  // opened, and the message budget counts rows moved. A candidate the write budget refuses
+  // opened no fence and moved no rows, so it consumes neither — it simply falls through to
+  // the next, smaller candidate. Refusing without descending is what left production
+  // re-picking one unaffordable session every hour for four days.
+  const pending = input.pending ?? [];
+  const slots = input.pendingSlots;
+  const packer = createMessageBudgetPacker(
+    input.config.sweepMessageBudget,
+    input.env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true'
+  );
+  let journaled = 0;
+  for (const candidate of pending) {
+    if (journaled >= slots) break;
+    if (outOfTime()) return;
+    const commitMessageBudget = packer.admit(candidate);
+    if (!commitMessageBudget) continue;
+    const reservation =
+      input.env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true'
+        ? await reserve(candidate.project_id, candidate.session_id)
+        : undefined;
+    if (reservation === null) continue;
+    const migration = await createCandidateJournal(input.env, candidate, input.now);
+    if (!migration) {
+      await releaseUnused(reservation);
+      continue;
+    }
+    commitMessageBudget();
+    journaled++;
+    input.onJournaled?.(candidate, migration);
+    await processOne(migration, reservation);
   }
 }
 
@@ -2465,13 +4032,20 @@ export async function runProjectDataArchiveSharding(
     const crashGapRecovery = await recoverCrashGaps(env, config, now);
     stats.recoveredCrashGaps = crashGapRecovery.recovered;
     stats.failed += crashGapRecovery.failed;
-    const candidates = await selectMigrationWork(env, config, nowDate, now);
-    stats.selected = candidates.length;
+    const work = await selectMigrationWork(env, config, nowDate, now);
+    // Only what the tick could actually journal. The fall-through padding exists to be
+    // skipped past, so counting it would inflate the figure `budgetStallLastError` reports.
+    stats.selected = work.migrations.length + Math.min(work.pending.length, work.pendingSlots);
     await processArchiveMigrationBatch({
       env,
       config,
       archiveR2,
-      migrations: candidates,
+      migrations: work.migrations,
+      pending: work.pending,
+      // `pending` is longer than the tick may journal: the extra rows exist only so a
+      // write-budget refusal has somewhere smaller to descend to. Without this the session
+      // slot bound would silently become "everything we read".
+      pendingSlots: work.pendingSlots,
       now,
       startedAt,
       stats,
@@ -2574,6 +4148,21 @@ export async function runScopedProjectDataArchiveCanary(
     config,
     archiveR2,
     migrations: work.migrations,
+    pending: work.pending,
+    pendingSlots: work.pendingSlots,
+    onJournaled: (candidate, migration) => {
+      const entry = work.selected.find(
+        (item) =>
+          item.source === 'eligible_session' &&
+          item.projectId === candidate.project_id &&
+          item.sessionId === candidate.session_id &&
+          item.migrationId === null
+      );
+      if (entry) {
+        entry.migrationId = migration.migration_id;
+        entry.state = migration.state;
+      }
+    },
     now,
     startedAt,
     stats,

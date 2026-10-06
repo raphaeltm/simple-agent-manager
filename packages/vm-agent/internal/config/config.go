@@ -31,6 +31,10 @@ const DefaultDevcontainerImage = "mcr.microsoft.com/devcontainers/typescript-nod
 const DefaultDevcontainerConfigPath = "/etc/sam/default-devcontainer.json"
 
 const (
+	// DefaultCodexRuntimeInstallTimeout bounds an opted-in runtime download/install.
+	DefaultCodexRuntimeInstallTimeout   = 5 * time.Minute
+	DefaultCodexRuntimeInstallKillGrace = 5 * time.Second
+
 	// DefaultACPRecoveryWatchdogTimeout bounds crash recovery after an ACP
 	// disconnect. Override via DEFAULT_RECOVERY_WATCHDOG_TIMEOUT.
 	DefaultACPRecoveryWatchdogTimeout = 2 * time.Minute
@@ -132,9 +136,26 @@ const (
 	// no progress events have been emitted. Override via DEPLOY_APPLY_IDLE_TIMEOUT.
 	DefaultDeployApplyIdleTimeout = 15 * time.Minute
 
+	// DefaultComposeOutputRetentionBytes caps how much compose output is retained
+	// for an apply's error message. A long pull can emit megabytes of progress
+	// lines; only the tail is diagnostically useful, and the whole thing would
+	// otherwise be embedded in an error string and a DB column. The liveness signal
+	// keeps firing past the cap, so a chatty pull is never killed as stalled merely
+	// because its output stopped being recorded.
+	DefaultComposeOutputRetentionBytes int64 = 64 * 1024
+
 	// DefaultDeployBuildPublishTimeout bounds host build + push + release publish
 	// work. Override via DEPLOY_BUILD_PUBLISH_TIMEOUT.
 	DefaultDeployBuildPublishTimeout = 20 * time.Minute
+
+	// DefaultWorkspaceBuildQueueDepth preserves the historical single devcontainer
+	// build slot per VM while allowing operators to tune the per-node queue depth.
+	// Override via WORKSPACE_BUILD_QUEUE_DEPTH.
+	DefaultWorkspaceBuildQueueDepth = 1
+
+	// MaxWorkspaceBuildQueueDepth bounds the per-node devcontainer build semaphore
+	// so direct env usage cannot allocate an unbounded channel.
+	MaxWorkspaceBuildQueueDepth = 16
 
 	// DefaultDeployTeardownTimeout bounds per-environment deployment teardown.
 	// Override via DEPLOY_TEARDOWN_TIMEOUT.
@@ -235,10 +256,12 @@ type Config struct {
 	PTYCloseGracePeriod  time.Duration // Bounded wait after graceful PTY close signals (env: PTY_CLOSE_GRACE_PERIOD)
 
 	// ACP settings - configurable per constitution principle XI
-	ACPInitTimeoutMs                  int // Fallback timeout for all ACP init phases (default: 30000ms)
-	ACPInitializeTimeoutMs            int // Per-phase timeout for Initialize RPC; 0 = use ACPInitTimeoutMs (default: 0)
-	ACPNewSessionTimeoutMs            int // Per-phase timeout for NewSession RPC; 0 = use ACPInitTimeoutMs (default: 0)
-	ACPLoadSessionTimeoutMs           int // Per-phase timeout for LoadSession RPC; 0 = use ACPInitTimeoutMs (default: 0)
+	CodexRuntimeInstallTimeout        time.Duration // CODEX_RUNTIME_INSTALL_TIMEOUT, default 5m
+	CodexRuntimeInstallKillGrace      time.Duration // CODEX_RUNTIME_INSTALL_KILL_GRACE, default 5s
+	ACPInitTimeoutMs                  int           // Fallback timeout for all ACP init phases (default: 30000ms)
+	ACPInitializeTimeoutMs            int           // Per-phase timeout for Initialize RPC; 0 = use ACPInitTimeoutMs (default: 0)
+	ACPNewSessionTimeoutMs            int           // Per-phase timeout for NewSession RPC; 0 = use ACPInitTimeoutMs (default: 0)
+	ACPLoadSessionTimeoutMs           int           // Per-phase timeout for LoadSession RPC; 0 = use ACPInitTimeoutMs (default: 0)
 	ACPReconnectDelayMs               int
 	ACPReconnectTimeoutMs             int
 	ACPMaxRestartAttempts             int
@@ -249,7 +272,7 @@ type Config struct {
 	ACPPongTimeout                    time.Duration // WebSocket pong deadline after ping (default: 10s)
 	ACPPromptTimeout                  time.Duration // Max prompt runtime; 0 = no timeout (default: 0). Used for workspace sessions; task sessions use ACPTaskPromptTimeout via effectivePromptTimeout().
 	ACPTaskPromptTimeout              time.Duration // Max prompt runtime for task-driven sessions; 0 = no timeout (default: 8h)
-	ACPPromptCancelGrace              time.Duration // Wait after cancel before force-stop fallback (default: 5s)
+	ACPPromptCancelGrace              time.Duration // Wait for a cancelled prompt to settle before finishing it cancelled and restarting the agent (default: 5s)
 	ACPPromptRetryMaxRetries          int           // Retryable transient provider prompt errors after initial attempt (default: 2)
 	ACPPromptRetryInitial             time.Duration // Initial backoff for transient provider prompt retries (default: 15s)
 	ACPPromptRetryMax                 time.Duration // Max backoff for transient provider prompt retries (default: 2m)
@@ -266,7 +289,10 @@ type Config struct {
 	ACPTerminalActivityReportAttempts int           // Retry attempts for terminal activity reports (default: 5, env: ACTIVITY_TERMINAL_REPORT_ATTEMPTS)
 	ACPTerminalActivityReportBackoff  time.Duration // Retry backoff for terminal activity reports (default: 1s, env: ACTIVITY_TERMINAL_REPORT_BACKOFF)
 	ACPCredentialSyncTimeout          time.Duration // Timeout for auth-file sync-back during shutdown (default: 10s, env: ACP_CREDENTIAL_SYNC_TIMEOUT)
+	ACPRestartAttemptTimeout          time.Duration // Bounds one process-monitor agent restart attempt (default: 5m, env: ACP_RESTART_ATTEMPT_TIMEOUT)
 	ACPActivityReportTimeout          time.Duration // Timeout for each ACP activity callback attempt (default: 10s, env: ACP_ACTIVITY_REPORT_TIMEOUT)
+	ACPUsageProbeTimeout              time.Duration // Timeout for one post-turn provider usage probe (default: 10s, env: ACP_USAGE_PROBE_TIMEOUT)
+	OpenCodeGoUsageURL                string        // OpenCode Go usage endpoint probed after each turn (default: https://opencode.ai/zen/go/v1/usage, env: OPENCODE_GO_USAGE_URL)
 	ACPCheckpointPreemptGrace         time.Duration // Graceful cancel/close wait before force fallback (default: 30s, env: ACP_CHECKPOINT_PREEMPT_GRACE)
 	ACPCheckpointPreemptMaxGrace      time.Duration // Maximum caller-selected grace (default: 2m, env: ACP_CHECKPOINT_PREEMPT_MAX_GRACE)
 	ACPCheckpointRolloverTimeout      time.Duration // Full strict rollover operation deadline (default: 2m, env: ACP_CHECKPOINT_ROLLOVER_TIMEOUT)
@@ -298,6 +324,10 @@ type Config struct {
 	// Configurable per constitution principle XI.
 	DevcontainerBuildTimeout time.Duration // Max time for a single devcontainer up call (env: DEVCONTAINER_BUILD_TIMEOUT, default: 15m)
 
+	// WorkspaceBuildQueueDepth limits concurrent devcontainer builds on this VM.
+	// Configurable per constitution principle XI.
+	WorkspaceBuildQueueDepth int // Concurrent build slots (env: WORKSPACE_BUILD_QUEUE_DEPTH, default: 1)
+
 	// Devcontainer cache settings — opportunistic image caching via container registry.
 	// Configurable per constitution principle XI.
 	DevcontainerCacheEnabled     bool          // Enable devcontainer image caching (env: DEVCONTAINER_CACHE_ENABLED, default: false)
@@ -322,6 +352,26 @@ type Config struct {
 	EventStoreDBPath  string        // SQLite database path for persistent event logs
 	MetricsDBPath     string        // SQLite database path for resource metrics snapshots
 	MetricsInterval   time.Duration // Resource metrics collection interval (default: 1m)
+
+	// Active resource monitoring settings - configurable per constitution principle XI
+	ResourceEventBufferSize          int           // Bounded pressure event queue capacity (env: DEFAULT_RESOURCE_EVENT_BUFFER_SIZE, default: 64)
+	PSIPollInterval                  time.Duration // PSI memory pressure polling interval (env: DEFAULT_PSI_POLL_INTERVAL_SECONDS, default: 10s)
+	ContainerStatsInterval           time.Duration // Docker stats polling interval (env: DEFAULT_CONTAINER_STATS_INTERVAL_SECONDS, default: 30s)
+	PSIMemorySomeWarningThreshold    float64       // some memory PSI warning threshold (env: DEFAULT_PSI_MEMORY_SOME_WARNING_THRESHOLD, default: 25.0)
+	PSIMemorySomeCriticalThreshold   float64       // some memory PSI critical threshold (env: DEFAULT_PSI_MEMORY_SOME_CRITICAL_THRESHOLD, default: 50.0)
+	PSIMemoryFullWarningThreshold    float64       // full memory PSI warning threshold (env: DEFAULT_PSI_MEMORY_FULL_WARNING_THRESHOLD, default: 10.0)
+	PSIMemoryFullCriticalThreshold   float64       // full memory PSI critical threshold (env: DEFAULT_PSI_MEMORY_FULL_CRITICAL_THRESHOLD, default: 25.0)
+	EvictionDebounceWindow           time.Duration // Duplicate eviction debounce window (env: DEFAULT_EVICTION_DEBOUNCE_SECONDS, default: 30s)
+	EvictionSnapshotTimeout          time.Duration // Pre-stop eviction snapshot deadline (env: DEFAULT_EVICTION_SNAPSHOT_TIMEOUT_SECONDS, default: 120s)
+	EvictionDockerStopTimeout        time.Duration // Graceful docker stop timeout for evictions (env: DEFAULT_EVICTION_DOCKER_STOP_TIMEOUT_SECONDS, default: 10s)
+	EvictionCallbackRetryMaxInterval time.Duration // Durable callback retry backoff cap (env: DEFAULT_EVICTION_CALLBACK_RETRY_MAX_SECONDS, default: 300s)
+	EvictionResolveTimeout           time.Duration // Docker label resolution timeout for evictions (env: DEFAULT_EVICTION_RESOLVE_TIMEOUT_SECONDS, default: 5s)
+	ResourceHistorySampleInterval    time.Duration // Retained per-workspace resource sampling cadence (env: RESOURCE_HISTORY_SAMPLE_INTERVAL, default: 5s)
+	ResourceHistoryChunkInterval     time.Duration // Retained resource chunk duration (env: RESOURCE_HISTORY_CHUNK_INTERVAL, default: 15m)
+	ResourceHistorySpoolDir          string        // Node-local retry spool directory (env: RESOURCE_HISTORY_SPOOL_DIR)
+	ResourceHistorySpoolMaxBytes     int64         // Node-local retry spool size (env: RESOURCE_HISTORY_SPOOL_MAX_BYTES, default: 20MiB)
+	ResourceHistoryUploadTimeout     time.Duration // Upload request timeout (env: RESOURCE_HISTORY_UPLOAD_TIMEOUT, default: 10s)
+	ResourceHistoryMaxSamples        int           // Max samples per chunk (env: RESOURCE_HISTORY_MAX_SAMPLES, default: 4096)
 
 	// Git integration settings - configurable per constitution principle XI
 	GitCredentialTimeout     time.Duration // Timeout for credential-helper callbacks (env: GIT_CREDENTIAL_TIMEOUT, default: 5s)
@@ -354,6 +404,12 @@ type Config struct {
 	// Callback retry settings - configurable per constitution principle XI
 	WorkspaceReadyCallbackTimeout time.Duration // HTTP timeout for workspace-ready retry callbacks (env: WORKSPACE_READY_CALLBACK_TIMEOUT, default: 30s)
 
+	// Workspace callback token renewal (see callback_token_renewal.go for defaults and env vars)
+	WorkspaceCallbackTokenRefreshRatio        float64
+	WorkspaceCallbackTokenRenewalTimeout      time.Duration
+	WorkspaceCallbackTokenRenewalRetryInitial time.Duration
+	WorkspaceCallbackTokenRenewalRetryMax     time.Duration
+
 	// Error reporting settings - configurable per constitution principle XI
 	ErrorReportFlushInterval  time.Duration // Background flush interval (default: 30s)
 	ErrorReportMaxBatchSize   int           // Immediate flush threshold (default: 10)
@@ -381,9 +437,12 @@ type Config struct {
 	ErrorReportCollectorJobs  int           // Maximum concurrent automatic evidence collectors (default: 1)
 
 	// System info collection settings - configurable per constitution principle XI
-	SysInfoDockerTimeout  time.Duration // Timeout for Docker CLI commands in system info (default: 10s)
-	SysInfoVersionTimeout time.Duration // Timeout for version check commands (default: 5s)
-	SysInfoCacheTTL       time.Duration // Cache TTL for system info responses (default: 5s)
+	SysInfoDockerTimeout                    time.Duration // Timeout for Docker CLI commands in system info (default: 10s)
+	SysInfoVersionTimeout                   time.Duration // Timeout for version check commands (default: 5s)
+	SysInfoCacheTTL                         time.Duration // Cache TTL for system info responses (default: 5s)
+	HeartbeatDockerStatsTimeout             time.Duration // Timeout for heartbeat Docker stats (default: 2s)
+	HeartbeatWorkspaceMetricsMaxContainers  int           // Max workspace containers measured per heartbeat (default: 8)
+	HeartbeatWorkspaceMetricsMaxOutputBytes int64         // Max bytes read from heartbeat Docker metric commands (default: 64 KiB)
 
 	// Log reader/stream settings - configurable per constitution principle XI
 	LogReaderTimeout          time.Duration // Timeout for journalctl read commands (default: 30s)
@@ -425,6 +484,7 @@ type Config struct {
 	DeployArtifactResponseHeaderTimeout time.Duration // Response-header timeout for artifact downloads (env: DEPLOY_ARTIFACT_RESPONSE_HEADER_TIMEOUT)
 	DeployArtifactIdleTimeout           time.Duration // Max no-progress body read interval for artifact downloads (env: DEPLOY_ARTIFACT_IDLE_TIMEOUT)
 	DeployApplyIdleTimeout              time.Duration // Max no-progress interval for detached apply goroutines (env: DEPLOY_APPLY_IDLE_TIMEOUT)
+	ComposeOutputRetentionBytes         int64         // Max compose output bytes retained (tail) for apply error messages (env: COMPOSE_OUTPUT_RETENTION_BYTES)
 	DeployBuildPublishTimeout           time.Duration // Max host build/push/release publish duration (env: DEPLOY_BUILD_PUBLISH_TIMEOUT)
 	DeployPreflightCommandTimeout       time.Duration // Max deployment preflight diagnostic command duration (env: DEPLOY_PREFLIGHT_COMMAND_TIMEOUT)
 }

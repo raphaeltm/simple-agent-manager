@@ -8,15 +8,17 @@ import {
   DEFAULT_NOTIFICATION_FULL_BODY_LENGTH,
   MAX_NOTIFICATION_BODY_LENGTH,
   parseCompletionEvidenceJson,
+  type TaskTerminalTransitionEvent,
   validateCompletionEvidence,
 } from '@simple-agent-manager/shared';
-import type { SQL } from 'drizzle-orm';
-import { and, desc, eq, like, or } from 'drizzle-orm';
+import { and, desc, eq, type SQL, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { getSearchQueryLikePatterns, normalizeSearchQuery } from '../../lib/search-query-limits';
+import { ulid } from '../../lib/ulid';
 import * as notificationService from '../../services/notification';
 import * as projectDataService from '../../services/project-data';
 import * as orchestratorService from '../../services/project-orchestrator';
@@ -298,6 +300,7 @@ export async function handleCompleteTask(
     );
   }
   const evidenceJson = evidenceValidation?.ok ? JSON.stringify(evidenceValidation.value) : null;
+  const completionPrUrl = evidenceValidation?.ok ? (evidenceValidation.value.prUrl ?? null) : null;
 
   const now = new Date().toISOString();
 
@@ -326,12 +329,14 @@ export async function handleCompleteTask(
       `UPDATE tasks
        SET execution_step = 'awaiting_followup',
            output_summary = COALESCE(?, output_summary),
+           output_pr_url = COALESCE(?, output_pr_url),
            completion_evidence = COALESCE(?, completion_evidence),
            updated_at = ?
        WHERE id = ? AND project_id = ? AND status IN ('in_progress', 'delegated', 'awaiting_followup')`
     )
       .bind(
         summary ? summary.slice(0, getMcpLimits(env).outputSummaryMaxLength) : null,
+        completionPrUrl,
         evidenceJson,
         now,
         tokenData.taskId,
@@ -415,6 +420,7 @@ export async function handleCompleteTask(
      SET status = 'completed',
          completed_at = ?,
          output_summary = COALESCE(?, output_summary),
+         output_pr_url = COALESCE(?, output_pr_url),
          completion_evidence = COALESCE(?, completion_evidence),
          updated_at = ?
      WHERE id = ? AND project_id = ? AND status IN ('in_progress', 'delegated', 'awaiting_followup')`
@@ -422,6 +428,7 @@ export async function handleCompleteTask(
     .bind(
       now,
       summary ? summary.slice(0, getMcpLimits(env).outputSummaryMaxLength) : null,
+      completionPrUrl,
       evidenceJson,
       now,
       tokenData.taskId,
@@ -437,6 +444,22 @@ export async function handleCompleteTask(
       'Task cannot be completed — it may not exist or is not in a completable status'
     );
   }
+
+  const completedEvent: TaskTerminalTransitionEvent = {
+    transitionId: ulid(),
+    taskId: tokenData.taskId,
+    projectId: tokenData.projectId,
+    parentTaskId: taskRow?.parent_task_id ?? null,
+    status: 'completed',
+    reason: summary,
+    occurredAt: now,
+    source: 'mcp.complete_task',
+  };
+  // Capture before cleanup or other downstream work can fail after the winning CAS.
+  // This remains hook-bound capture, not an atomic task/outbox write.
+  await runTaskTerminalTransitionHooks(completedEvent, [
+    createProjectEventTaskTerminalTransitionHook(env, { captureAtHook: true }),
+  ]);
 
   // Sync trigger execution status (best-effort) — without this, cron triggers
   // with skipIfRunning=true permanently stop firing because the execution stays 'running'.
@@ -517,7 +540,7 @@ export async function handleCompleteTask(
         projectName,
         taskId: tokenData.taskId,
         taskTitle: taskRow.title,
-        outputPrUrl: taskRow.output_pr_url,
+        outputPrUrl: completionPrUrl ?? taskRow.output_pr_url,
         outputBranch: taskRow.output_branch,
         sessionId,
       });
@@ -545,18 +568,7 @@ export async function handleCompleteTask(
     throw err;
   }
 
-  await runTaskTerminalTransitionHooks(
-    {
-      taskId: tokenData.taskId,
-      projectId: tokenData.projectId,
-      parentTaskId: taskRow?.parent_task_id ?? null,
-      status: 'completed',
-      reason: summary,
-      occurredAt: now,
-      source: 'mcp.complete_task',
-    },
-    [createTaskWaitTerminalTransitionHook(env), createProjectEventTaskTerminalTransitionHook(env)]
-  );
+  await runTaskTerminalTransitionHooks(completedEvent, [createTaskWaitTerminalTransitionHook(env)]);
 
   log.info('mcp.complete_task', {
     taskId: tokenData.taskId,
@@ -715,39 +727,32 @@ export async function handleSearchTasks(
   tokenData: McpTokenData,
   env: Env
 ): Promise<JsonRpcResponse> {
-  const query = typeof params.query === 'string' ? params.query.trim() : '';
-  if (!query) {
+  const inputQuery = typeof params.query === 'string' ? params.query.trim() : '';
+  if (!inputQuery) {
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
       'query is required and must be a non-empty string'
     );
   }
-  if (query.length < 2) {
+  if (inputQuery.length < 2) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'query must be at least 2 characters');
   }
 
   const limits = getMcpLimits(env);
+  const normalizedQuery = normalizeSearchQuery(inputQuery, env);
+  const query = normalizedQuery.query;
   const status = typeof params.status === 'string' ? params.status : undefined;
   const requestedLimit = typeof params.limit === 'number' ? params.limit : 10;
   const searchLimit = Math.min(Math.max(1, Math.round(requestedLimit)), limits.taskSearchMax);
 
   const db = drizzle(env.DATABASE, { schema });
-  const searchPattern = `%${query}%`;
-
-  const titleOrDescriptionMatch = or(
-    like(schema.tasks.title, searchPattern),
-    like(schema.tasks.description, searchPattern)
-  );
-  if (!titleOrDescriptionMatch) {
-    // or() only returns undefined when given zero defined conditions — both
-    // like() calls above always return a defined SQL expression.
-    throw new Error('Internal error: failed to build task search condition');
-  }
-
   const conditions: SQL[] = [
     eq(schema.tasks.projectId, tokenData.projectId),
-    titleOrDescriptionMatch,
+    ...getSearchQueryLikePatterns(query).map(
+      (pattern) =>
+        sql<boolean>`(${schema.tasks.title} LIKE ${pattern} ESCAPE '\\' OR ${schema.tasks.description} LIKE ${pattern} ESCAPE '\\')`
+    ),
   ];
 
   if (status) {
@@ -778,7 +783,7 @@ export async function handleSearchTasks(
     content: [
       {
         type: 'text',
-        text: JSON.stringify({ tasks: result, count: result.length, query }, null, 2),
+        text: JSON.stringify({ tasks: result, count: result.length, ...normalizedQuery }, null, 2),
       },
     ],
   });

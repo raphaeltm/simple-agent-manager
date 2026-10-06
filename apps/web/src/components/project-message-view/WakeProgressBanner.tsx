@@ -15,20 +15,21 @@
  * ## Relationship to ProvisioningIndicator (rule 24)
  *
  * `pages/project-chat/ProvisioningIndicator.tsx` renders a similar, richer
- * 4-stage progress block from the same `TaskExecutionStep` vocabulary. The two do
- * not overlap, because they are driven by *different tasks*:
+ * 4-stage progress block from the same `TaskExecutionStep` vocabulary. The two
+ * must never render together, and since PR #2230 they are driven by the SAME
+ * task: a slept VM conversation keeps its original task row, which is
+ * `sleeping` while idle and `queued`/`delegated` while a wake is in flight.
  *
- *  - ProvisioningIndicator is fed by `useProjectChatState`, which polls
- *    `getProjectTask(session.taskId)` — the session's OWN task — and only
- *    populates state for a task that is neither terminal nor `in_progress`. During
- *    a wake the session's own task is `in_progress`, so it stays hidden.
- *  - This banner is fed by the *recovery* task, a different row reached through
- *    `session_snapshots.recovery_task_id`, which ProvisioningIndicator has no
- *    reference to.
+ *  - ProvisioningIndicator is fed by `pages/project-chat/useProvisioningTracker`,
+ *    which restores state only for a session that is not `sleeping` and whose
+ *    task is in a runner pre-agent status (`isProvisioningStatus`). It covers
+ *    the first boot of a new chat and nothing else.
+ *  - This banner is fed by `SessionStateSnapshot.recoveryStatus`/`wakePhase`
+ *    (`routes/chat/wake-state.ts`), so it covers the wake of a sleeping session.
  *
- * So a wake previously showed no phase progress at all. The `wake-progress-audit`
- * spec asserts the two never render together; if that assertion ever fires, they
- * have started to overlap and should be consolidated rather than both kept.
+ * `sleeping-session-audit.spec.ts` asserts the two never render together for an
+ * idle slept session or a waking one; if that assertion ever fires, consolidate
+ * rather than keep both.
  *
  * A thin strip rather than the full provisioning block is deliberate: a wake
  * restores an existing conversation, so the transcript stays on screen underneath.

@@ -1,18 +1,23 @@
 /**
- * Tests for message materialization and FTS5 search in ProjectData DO.
+ * Unit coverage for the pure pieces of message materialization: the FTS5 query
+ * builder, snippet extraction, migration shape, and the sweep config resolver.
  *
- * Since the DO methods use raw SQL on embedded SQLite (which we can't easily
- * mock with FTS5 support), these tests verify:
- * 1. The grouping logic used during materialization (same as groupTokensIntoMessages)
- * 2. The FTS5 query builder
- * 3. The snippet extraction
- * 4. The search_messages MCP handler delegation (in mcp.test.ts)
- *
- * Integration tests with real SQLite are in the integration test suite.
+ * The `groupTokens` helper below is a LOCAL COPY of the production grouping rule,
+ * not the production function, so it documents the rule but cannot prove
+ * production still follows it. Behavioral coverage of the real indexer — against
+ * real Durable Object SQLite and a real FTS5 index, driven through
+ * `sleepSession`/`wakeSession`/`stopSession` — lives in
+ * `tests/workers/project-data-incremental-materialization.test.ts`
+ * and `tests/workers/project-data-do.test.ts`.
  */
 import { describe, expect, it } from 'vitest';
 
 import { MIGRATIONS } from '../../../src/durable-objects/migrations';
+import {
+  DEFAULT_MATERIALIZATION_SWEEP_LIMIT,
+  DEFAULT_MATERIALIZATION_SWEEP_SCAN_LIMIT,
+  resolveMaterializationSweepConfig,
+} from '../../../src/durable-objects/project-data/materialization';
 import { buildSafeFtsQuery } from '../../../src/lib/fts5';
 
 // ── Grouping logic (mirrors ProjectData.materializeSession and mcp.ts groupTokensIntoMessages) ──
@@ -307,5 +312,40 @@ describe('Message Materialization', () => {
       // Should create index
       expect(execLog.some((q) => q.includes('idx_grouped_messages_session'))).toBe(true);
     });
+  });
+});
+
+describe('resolveMaterializationSweepConfig', () => {
+  it('falls back to the defaults when unset', () => {
+    expect(resolveMaterializationSweepConfig({})).toEqual({
+      limit: DEFAULT_MATERIALIZATION_SWEEP_LIMIT,
+      scanLimit: DEFAULT_MATERIALIZATION_SWEEP_SCAN_LIMIT,
+    });
+  });
+
+  it('honours operator overrides', () => {
+    expect(
+      resolveMaterializationSweepConfig({
+        PROJECT_DATA_MATERIALIZATION_SWEEP_LIMIT: '7',
+        PROJECT_DATA_MATERIALIZATION_SWEEP_SCAN_LIMIT: '99',
+      })
+    ).toEqual({ limit: 7, scanLimit: 99 });
+  });
+
+  it('rejects values that would disable the sweep', () => {
+    // `parsePositiveInt` is `Number.parseInt`-based, so a value like '7abc' is
+    // read as its leading integer rather than rejected. What must never happen is
+    // an operator typo silently setting the batch to zero or negative.
+    for (const bad of ['0', '-5', 'abc', '', ' ', 'null']) {
+      expect(
+        resolveMaterializationSweepConfig({
+          PROJECT_DATA_MATERIALIZATION_SWEEP_LIMIT: bad,
+          PROJECT_DATA_MATERIALIZATION_SWEEP_SCAN_LIMIT: bad,
+        })
+      ).toEqual({
+        limit: DEFAULT_MATERIALIZATION_SWEEP_LIMIT,
+        scanLimit: DEFAULT_MATERIALIZATION_SWEEP_SCAN_LIMIT,
+      });
+    }
   });
 });

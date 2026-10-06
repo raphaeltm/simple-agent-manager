@@ -1,11 +1,23 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import * as TOML from '@iarna/toml';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  assertWorkerTextBindingLimit,
   checkTailWorkerExists,
+  CLOUDFLARE_WORKER_TEXT_BINDING_GUARD_LIMIT,
+  countWorkerTextBindings,
   detectArtifactsAvailable,
+  encodeWorkflowCommandData,
   ensureTomlMap,
   generateApiWorkerEnv,
+  listEnvironmentVarOverrides,
+  reportEnvironmentVarOverrides,
   resolveArtifactsBindingEnabled,
+  writeDeploymentMarkers,
 } from '../deploy/sync-wrangler-config.js';
 import type { PulumiOutputs, WranglerToml } from '../deploy/types.js';
 
@@ -40,12 +52,74 @@ const outputs: PulumiOutputs = {
   installationId: '0123456789abcdef0123456789abcdef',
 };
 
+// GitHub Actions sets GITHUB_ACTIONS=true and a real GITHUB_STEP_SUMMARY for every step, and
+// `generateApiWorkerEnv` reaches `reportEnvironmentVarOverrides`, which reads both from the
+// ambient environment. Without this, running this suite in CI would write fabricated override
+// rows into the real job summary and raise a `::warning::` for fixture data — a quality test
+// forging the very signal it exists to check. Tests that want the Actions path opt in explicitly.
+beforeEach(() => {
+  vi.stubEnv('GITHUB_ACTIONS', '');
+  vi.stubEnv('GITHUB_STEP_SUMMARY', '');
+});
+
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
 
 describe('sync wrangler config', () => {
+  it('keeps the checked-in staging Worker under the text-binding guard', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    const checkedIn = TOML.parse(
+      readFileSync(join(import.meta.dirname, '../../apps/api/wrangler.toml'), 'utf-8')
+    ) as WranglerToml;
+
+    const generated = generateApiWorkerEnv(checkedIn, outputs, 'staging', false, false, null);
+    expect(countWorkerTextBindings(generated)).toBeLessThanOrEqual(
+      CLOUDFLARE_WORKER_TEXT_BINDING_GUARD_LIMIT
+    );
+  });
+
+  it('forwards configurable deployment reservation defaults to the Worker', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    vi.stubEnv('DEPLOYMENT_DEFAULT_CPU_LIMIT_MILLIS', '400');
+    vi.stubEnv('DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB', '640');
+    vi.stubEnv('DEPLOYMENT_DEFAULT_ROOT_DISK_MB', '2048');
+
+    expect(generateApiWorkerEnv({}, outputs, 'prod', false, false, null).vars).toMatchObject({
+      DEPLOYMENT_DEFAULT_CPU_LIMIT_MILLIS: '400',
+      DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB: '640',
+      DEPLOYMENT_DEFAULT_ROOT_DISK_MB: '2048',
+    });
+  });
+
+  it.each([
+    { migrationTag: null, tailExists: false, bootstrap: true, tailSync: true },
+    { migrationTag: null, tailExists: true, bootstrap: true, tailSync: false },
+    { migrationTag: 'v1', tailExists: false, bootstrap: false, tailSync: true },
+    { migrationTag: 'v1', tailExists: true, bootstrap: false, tailSync: false },
+  ])('separates API bootstrap from Tail repair: %j', (state) => {
+    const directory = mkdtempSync(join(tmpdir(), 'sam-deploy-markers-'));
+    try {
+      // Prior failed runs must not leave bootstrap markers for an existing API.
+      writeDeploymentMarkers(null, false, directory);
+      writeDeploymentMarkers(state.migrationTag, state.tailExists, directory);
+      expect(existsSync(join(directory, 'api-worker-first-deploy'))).toBe(state.bootstrap);
+      expect(existsSync(join(directory, 'tail-worker-first-deploy'))).toBe(state.tailSync);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('omits an empty VM-agent release from the generated Worker configuration', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    vi.stubEnv('VM_AGENT_REQUIRED_VERSION', '');
+
+    const vars = generateApiWorkerEnv({}, outputs, 'prod', false, false, null).vars;
+
+    expect(vars).not.toHaveProperty('VM_AGENT_REQUIRED_VERSION');
+  });
+
   it('passes deployment image-resolution limits into generated deployments', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
     vi.stubEnv('DEPLOYMENT_IMAGE_RESOLVE_REQUEST_TIMEOUT_MS', '1000');
@@ -65,6 +139,209 @@ describe('sync wrangler config', () => {
       DEPLOYMENT_IMAGE_RESOLVE_MAX_CONCURRENT_FETCHES: '2',
       DEPLOYMENT_IMAGE_RESOLVE_MAX_SERVICES: '1',
     });
+  });
+
+  it('logs every GitHub Environment override that differs from the checked-in wrangler.toml value', () => {
+    // PR #2023 flipped this var to "true" in wrangler.toml while the production Environment
+    // still pinned "false"; the Worker shipped "false" and nothing in the deploy log said so.
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    vi.stubEnv('PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED', 'false');
+    vi.stubEnv('PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS', '10');
+    vi.stubEnv('PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS', '3600000');
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const topLevel: WranglerToml = {
+      vars: {
+        PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '10',
+      },
+    };
+
+    const envConfig = generateApiWorkerEnv(topLevel, outputs, 'prod', false, false, null);
+
+    // The override still wins (that is the designed emergency-brake path)...
+    expect(envConfig.vars).toMatchObject({
+      PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'false',
+      PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '10',
+      PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS: '3600000',
+    });
+    // ...but it is now visible in the deploy log, and only when it actually differs.
+    const lines = log.mock.calls.map((call) => call.map(String).join(' '));
+    expect(lines).toContainEqual(
+      expect.stringContaining(
+        'Environment override: PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED="false" replaces wrangler.toml "true"'
+      )
+    );
+    expect(lines.filter((line) => line.includes('PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS'))).toEqual(
+      []
+    );
+    // A var absent from wrangler.toml is an addition, not an override.
+    expect(
+      lines.filter((line) => line.includes('PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS'))
+    ).toEqual([]);
+    expect(
+      listEnvironmentVarOverrides({ A: 'true', B: 'same' }, { A: 'false', B: 'same', C: 'added' })
+    ).toEqual([{ name: 'A', checkedIn: 'true', override: 'false' }]);
+    expect(listEnvironmentVarOverrides(undefined, { A: 'false' })).toEqual([]);
+  });
+
+  it('annotates only overrides this repository does not already explain', () => {
+    // The noise bound. Without it, the SAM production Environment's 19 live overrides would each
+    // raise an annotation on every deploy and a genuinely accidental one would have to be spotted
+    // among them — the same "signal buried in volume" failure this report exists to fix, moved up
+    // one layer.
+    const logged: string[] = [];
+    const log = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      logged.push(args.map(String).join(' '));
+    });
+    const summaryPath = join(tmpdir(), `override-summary-${Date.now()}-${Math.random()}.md`);
+    vi.stubEnv('GITHUB_ACTIONS', 'true');
+    vi.stubEnv('GITHUB_STEP_SUMMARY', summaryPath);
+
+    try {
+      reportEnvironmentVarOverrides([
+        // Known operator state — recorded, not annotated.
+        {
+          name: 'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_KEY',
+          checkedIn: '',
+          override: 'project-data/tool-payloads/approved-plans/p/root.abc.json',
+        },
+        // A flag. Deliberately absent from the allowlist, so it must still annotate.
+        {
+          name: 'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED',
+          checkedIn: 'true',
+          override: 'false',
+        },
+      ]);
+      const summary = readFileSync(summaryPath, 'utf-8');
+      // The flag annotates...
+      expect(logged).toContainEqual(
+        expect.stringContaining(
+          '::warning title=Unexpected environment override::Environment override: PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED='
+        )
+      );
+      // ...and the known operator override does NOT.
+      expect(
+        logged.filter(
+          (line) => line.startsWith('::warning') && line.includes('CLEANUP_MANIFEST_KEY')
+        )
+      ).toEqual([]);
+      // Liveness beside the absence assertion: the quiet one is still recorded, with its reason,
+      // so a stale allowlist entry stays visible instead of silently swallowing a signal.
+      expect(summary).toContain('Unexpected GitHub Environment overrides');
+      expect(summary).toContain('Expected GitHub Environment overrides');
+      expect(summary).toContain('approved cleanup plan identity');
+      expect(summary).toContain('**not in EXPECTED_ENVIRONMENT_VAR_OVERRIDES**');
+    } finally {
+      log.mockRestore();
+      rmSync(summaryPath, { force: true });
+    }
+  });
+
+  it('never fails a deploy when the step summary cannot be written', () => {
+    // Drives the REAL default path (process.env + appendFileSync), not an injected stub, because
+    // the property under test is precisely that the real file write is wrapped. A test that
+    // supplies its own `appendSummary` could not observe this.
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.stubEnv('GITHUB_ACTIONS', 'true');
+    vi.stubEnv('GITHUB_STEP_SUMMARY', join(tmpdir(), 'no-such-dir-for-sam-test', 'summary.md'));
+    try {
+      expect(() =>
+        reportEnvironmentVarOverrides([{ name: 'A', checkedIn: 'true', override: 'false' }])
+      ).not.toThrow();
+    } finally {
+      log.mockRestore();
+    }
+
+    // Control: with GITHUB_STEP_SUMMARY unset there is nothing to write and still no throw,
+    // and the annotation is unaffected either way.
+    const log2 = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.stubEnv('GITHUB_ACTIONS', 'true');
+    vi.stubEnv('GITHUB_STEP_SUMMARY', '');
+    try {
+      expect(() =>
+        reportEnvironmentVarOverrides([{ name: 'A', checkedIn: 'true', override: 'false' }])
+      ).not.toThrow();
+      expect(log2.mock.calls.map((call) => call.map(String).join(' '))).toContainEqual(
+        expect.stringContaining('::warning title=Unexpected environment override::')
+      );
+    } finally {
+      log2.mockRestore();
+    }
+  });
+
+  it('escapes workflow-command characters that would truncate the annotation', () => {
+    // An unescaped newline ends the `::warning::` command and drops everything after it, so a var
+    // value containing one would silently truncate the very warning that exists to stop a silent
+    // override.
+    expect(encodeWorkflowCommandData('a%b\nc\rd')).toBe('a%25b%0Ac%0Dd');
+    expect(encodeWorkflowCommandData('ordinary value')).toBe('ordinary value');
+  });
+
+  it('annotates and summarises overrides inside GitHub Actions so they are not buried in logs', () => {
+    // A plain log line did not work: `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED` was "true" in
+    // wrangler.toml from 2026-09-03 and "false" in the production Environment, and the
+    // resulting deployed no-op went unnoticed for eleven days. An Actions `::warning::`
+    // annotation surfaces on the run page and in the checks list; the step summary keeps a
+    // durable table of what actually shipped.
+    const lines: string[] = [];
+    const log = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      lines.push(args.map(String).join(' '));
+    });
+    const summaryPath = join(tmpdir(), `override-annotation-${Date.now()}-${Math.random()}.md`);
+    vi.stubEnv('GITHUB_ACTIONS', 'true');
+    vi.stubEnv('GITHUB_STEP_SUMMARY', summaryPath);
+
+    try {
+      reportEnvironmentVarOverrides([
+        { name: 'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED', checkedIn: 'true', override: 'false' },
+      ]);
+      expect(lines).toContainEqual(
+        expect.stringContaining(
+          '::warning title=Unexpected environment override::Environment override: PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED="false" replaces wrangler.toml "true"'
+        )
+      );
+      expect(readFileSync(summaryPath, 'utf-8')).toContain(
+        '| `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED` | `true` | `false` |'
+      );
+    } finally {
+      log.mockRestore();
+      rmSync(summaryPath, { force: true });
+    }
+  });
+
+  it('keeps local runs quiet and writes no summary when there is nothing to report', () => {
+    // Two controls for the annotation above. Outside Actions the plain line is all a developer
+    // gets (no `::warning::` syntax leaking into terminal output), and a deploy whose config
+    // agrees must produce no annotation at all — otherwise "no warning" would carry no
+    // information (`.claude/rules/62`: an absence assertion needs a positive one beside it).
+    const localLines: string[] = [];
+    const localLog = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      localLines.push(args.map(String).join(' '));
+    });
+    try {
+      // GITHUB_ACTIONS is '' from the suite-wide beforeEach: a developer's terminal.
+      reportEnvironmentVarOverrides([{ name: 'A', checkedIn: 'true', override: 'false' }]);
+    } finally {
+      localLog.mockRestore();
+    }
+    expect(localLines).toEqual(['  Environment override: A="false" replaces wrangler.toml "true"']);
+    expect(localLines.filter((line) => line.startsWith('::'))).toEqual([]);
+
+    const agreedLines: string[] = [];
+    const agreedLog = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      agreedLines.push(args.map(String).join(' '));
+    });
+    const summaryPath = join(tmpdir(), `override-quiet-${Date.now()}-${Math.random()}.md`);
+    vi.stubEnv('GITHUB_ACTIONS', 'true');
+    vi.stubEnv('GITHUB_STEP_SUMMARY', summaryPath);
+    try {
+      reportEnvironmentVarOverrides([]);
+    } finally {
+      agreedLog.mockRestore();
+      rmSync(summaryPath, { force: true });
+    }
+    expect(agreedLines).toEqual([]);
+    expect(existsSync(summaryPath)).toBe(false);
   });
 
   it('propagates the top-level CPU limit into generated deployment environments', () => {
@@ -587,6 +864,23 @@ describe('sync wrangler config', () => {
 
     expect(() => generateApiWorkerEnv({}, outputs, 'prod', false, true, null)).toThrow(
       'Artifacts is enabled but no top-level [[artifacts]] binding exists in wrangler.toml'
+    );
+  });
+
+  it('fails when generated Worker text bindings exceed the guard limit', () => {
+    const existingTextBindings = countWorkerTextBindings({ vars: {} });
+    const vars = Object.fromEntries(
+      Array.from(
+        {
+          length: CLOUDFLARE_WORKER_TEXT_BINDING_GUARD_LIMIT - existingTextBindings + 1,
+        },
+        (_, index) => [`TEST_TEXT_BINDING_${index}`, 'value']
+      )
+    );
+
+    expect(countWorkerTextBindings({ vars })).toBe(CLOUDFLARE_WORKER_TEXT_BINDING_GUARD_LIMIT + 1);
+    expect(() => assertWorkerTextBindingLimit({ vars })).toThrow(
+      'Generated Cloudflare Worker text bindings (341) exceed the 340 guard limit (350 Cloudflare max with 10 headroom)'
     );
   });
 

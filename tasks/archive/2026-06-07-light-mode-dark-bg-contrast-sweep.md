@@ -98,7 +98,7 @@ var HAS a light override (theme.css:363) → already adapts, NOT a bug.
       hardcoded near-black overlay in light mode; dark mode stays dark.
 
 > NOTE: The Tools/Admin/BootLog/ChatFile subset (Parts 5/6/8) and the old backlog
-> task `tasks/backlog/2026-06-07-light-mode-contrast-overlay-and-audit-coverage.md`
+> task `tasks/archive/2026-06-07-light-mode-contrast-overlay-and-audit-coverage.md`
 > were already merged as PR #1247 (commit cfa94804), which is in this branch's base.
 > No edits were needed here for those parts. This PR covers the remaining chat/
 > component overlay surfaces (Parts 1-4, 7, 9) plus the chat overlay audit.
@@ -125,7 +125,7 @@ var HAS a light override (theme.css:363) → already adapts, NOT a bug.
   staging verified in both themes.
 
 ## References
-- Supersedes/folds in: `tasks/backlog/2026-06-07-light-mode-contrast-overlay-and-audit-coverage.md`
+- Supersedes/folds in: `tasks/archive/2026-06-07-light-mode-contrast-overlay-and-audit-coverage.md`
   (ToolsCli/Tools/AdminComputeQuotas/BootLogPanel/ChatFilePanel subset). The full
   new audit-coverage Playwright suites listed there remain deferred.
 - `.claude/rules/17-ui-visual-testing.md`, `26-project-chat-first.md`

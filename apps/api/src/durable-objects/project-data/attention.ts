@@ -213,6 +213,7 @@ export function linkAttentionNotification(
 export type PrepareAttentionAnswerResult =
   | { status: 'ready' }
   | { status: 'not_found' }
+  | { status: 'unsupported_source'; source: string }
   | { status: 'already_resolved'; answer: string | null }
   | { status: 'in_flight'; answer: string }
   | { status: 'conflicting_answer'; answer: string }
@@ -242,6 +243,9 @@ export function prepareAttentionAnswer(
   if (rows.length === 0) return { status: 'not_found' };
 
   const marker = parseAttentionMarkerRow(rows[0]);
+  if (marker.source === 'acp_interaction') {
+    return { status: 'unsupported_source', source: marker.source };
+  }
   if (marker.resolvedAt !== null) {
     return { status: 'already_resolved', answer: marker.resolvedAnswer };
   }
@@ -339,6 +343,29 @@ export function listActiveAttentionMarkers(sql: SqlStorage, sessionId: string) {
   return rows.map((r) => parseAttentionMarkerRow(r));
 }
 
+/** Cheap watchdog guard; the attention expiry owner handles elapsed deadlines. */
+export function hasPendingHumanInput(
+  sql: SqlStorage,
+  sessionId: string,
+  taskId: string,
+  now: number
+): boolean {
+  return (
+    sql
+      .exec(
+        `SELECT 1 FROM session_attention_markers
+     WHERE session_id = ? AND resolved_at IS NULL AND kind = 'needs_input'
+       AND (task_id IS NULL OR task_id = ?)
+       AND expires_at > ?
+     LIMIT 1`,
+        sessionId,
+        taskId,
+        now
+      )
+      .toArray().length > 0
+  );
+}
+
 /**
  * Get a lightweight attention summary for session list enrichment.
  * Returns the most recent active marker, or null if none.
@@ -377,7 +404,7 @@ export function getAttentionSummary(
 export function getExpiredMarkers(sql: SqlStorage, now: number = Date.now()) {
   const rows = sql
     .exec(
-      `SELECT id, session_id, task_id, workspace_id, kind,
+      `SELECT id, session_id, task_id, workspace_id, kind, source,
               source_notification_id, notification_user_id, created_at,
               expires_at, next_escalation_at, escalation_count, max_expires_at
        FROM session_attention_markers
@@ -392,7 +419,7 @@ export function getExpiredMarkers(sql: SqlStorage, now: number = Date.now()) {
 export function getDueAttentionEscalations(sql: SqlStorage, now: number = Date.now()) {
   const rows = sql
     .exec(
-      `SELECT id, session_id, task_id, workspace_id, kind,
+      `SELECT id, session_id, task_id, workspace_id, kind, source,
             source_notification_id, notification_user_id, created_at,
             expires_at, next_escalation_at, escalation_count, max_expires_at
      FROM session_attention_markers

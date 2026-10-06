@@ -5,11 +5,17 @@ import { CLOUD_INIT_TEMPLATE } from './template';
 /** Alphanumeric, hyphens, underscores (IDs like nodeId, projectId, etc.) */
 const SAFE_ID_RE = /^[a-zA-Z0-9_-]+$/;
 
+/** Full lowercase Git commit SHA used for immutable VM-agent releases. */
+const VM_AGENT_RELEASE_RE = /^[0-9a-f]{40}$/;
+
 /** Valid hostname: alphanumeric, hyphens, dots */
 const SAFE_HOSTNAME_RE = /^[a-zA-Z0-9.-]+$/;
 
 /** Numeric positive integer */
 const NUMERIC_RE = /^[0-9]+$/;
+
+/** Highest workspace build queue depth accepted in cloud-init variables. */
+const WORKSPACE_BUILD_QUEUE_DEPTH_MAX = 16;
 
 /** journald size values: digits + optional K/M/G/T suffix */
 const JOURNALD_SIZE_RE = /^[0-9]+[KMGT]?$/;
@@ -84,6 +90,15 @@ export function validateCloudInitVariables(variables: CloudInitVariables): void 
         `vmAgentPort: must be numeric 1-65535 (got ${JSON.stringify(variables.vmAgentPort)})`
       );
     }
+  }
+  if (
+    variables.vmAgentRequiredVersion !== undefined &&
+    variables.vmAgentRequiredVersion !== '' &&
+    !VM_AGENT_RELEASE_RE.test(variables.vmAgentRequiredVersion)
+  ) {
+    errors.push(
+      `vmAgentRequiredVersion: must be a full lowercase Git commit SHA (got ${JSON.stringify(variables.vmAgentRequiredVersion)})`
+    );
   }
   if (variables.cfIpFetchTimeout !== undefined && variables.cfIpFetchTimeout !== '') {
     const timeout = Number(variables.cfIpFetchTimeout);
@@ -164,6 +179,21 @@ export function validateCloudInitVariables(variables: CloudInitVariables): void 
       );
     }
   }
+  if (
+    variables.workspaceBuildQueueDepth !== undefined &&
+    variables.workspaceBuildQueueDepth !== ''
+  ) {
+    const depth = Number(variables.workspaceBuildQueueDepth);
+    if (
+      !NUMERIC_RE.test(variables.workspaceBuildQueueDepth) ||
+      depth < 1 ||
+      depth > WORKSPACE_BUILD_QUEUE_DEPTH_MAX
+    ) {
+      errors.push(
+        `workspaceBuildQueueDepth: must be numeric 1-${WORKSPACE_BUILD_QUEUE_DEPTH_MAX} (got ${JSON.stringify(variables.workspaceBuildQueueDepth)})`
+      );
+    }
+  }
   if (variables.originCaCertificateUrl !== undefined && variables.originCaCertificateUrl !== '') {
     if (!SAFE_URL_RE.test(variables.originCaCertificateUrl)) {
       errors.push(
@@ -184,6 +214,84 @@ export function validateCloudInitVariables(variables: CloudInitVariables): void 
     if (!NUMERIC_RE.test(variables.swapSwappiness) || val < 0 || val > 100) {
       errors.push(
         `swapSwappiness: must be numeric 0-100 (got ${JSON.stringify(variables.swapSwappiness)})`
+      );
+    }
+  }
+  if (variables.vmAgentMemoryReserveMb !== undefined && variables.vmAgentMemoryReserveMb !== '') {
+    const reserve = Number(variables.vmAgentMemoryReserveMb);
+    if (!NUMERIC_RE.test(variables.vmAgentMemoryReserveMb) || reserve < 0 || reserve > 65536) {
+      errors.push(
+        `vmAgentMemoryReserveMb: must be numeric 0-65536 (got ${JSON.stringify(variables.vmAgentMemoryReserveMb)})`
+      );
+    }
+  }
+  if (
+    variables.samInfraSliceMemoryMinMb !== undefined &&
+    variables.samInfraSliceMemoryMinMb !== ''
+  ) {
+    const reserve = Number(variables.samInfraSliceMemoryMinMb);
+    if (!NUMERIC_RE.test(variables.samInfraSliceMemoryMinMb) || reserve < 1 || reserve > 65536) {
+      errors.push(
+        `samInfraSliceMemoryMinMb: must be numeric 1-65536 (got ${JSON.stringify(variables.samInfraSliceMemoryMinMb)})`
+      );
+    }
+  }
+  for (const [field, raw] of [
+    ['samInfraSliceCpuWeight', variables.samInfraSliceCpuWeight],
+    ['samWorkloadSliceCpuWeight', variables.samWorkloadSliceCpuWeight],
+  ] as const) {
+    if (raw === undefined || raw === '') continue;
+    const weight = Number(raw);
+    // systemd/cgroup v2 accepts 1-10000 for CPUWeight; anything else makes the
+    // unit fail to load, which would take the whole slice hierarchy down.
+    if (!NUMERIC_RE.test(raw) || weight < 1 || weight > 10000) {
+      errors.push(`${field}: must be numeric 1-10000 (got ${JSON.stringify(raw)})`);
+    }
+  }
+  if (variables.dockerMemoryMinMb !== undefined && variables.dockerMemoryMinMb !== '') {
+    const minimum = Number(variables.dockerMemoryMinMb);
+    if (!NUMERIC_RE.test(variables.dockerMemoryMinMb) || minimum < 1 || minimum > 65536) {
+      errors.push(
+        `dockerMemoryMinMb: must be numeric 1-65536 (got ${JSON.stringify(variables.dockerMemoryMinMb)})`
+      );
+    }
+  }
+  if (
+    variables.heartbeatDockerStatsTimeout !== undefined &&
+    variables.heartbeatDockerStatsTimeout !== '' &&
+    !GO_DURATION_RE.test(variables.heartbeatDockerStatsTimeout)
+  ) {
+    errors.push(
+      `heartbeatDockerStatsTimeout: must be a Go duration (got ${JSON.stringify(variables.heartbeatDockerStatsTimeout)})`
+    );
+  }
+  if (
+    variables.heartbeatWorkspaceMetricsMaxContainers !== undefined &&
+    variables.heartbeatWorkspaceMetricsMaxContainers !== ''
+  ) {
+    const maxContainers = Number(variables.heartbeatWorkspaceMetricsMaxContainers);
+    if (
+      !NUMERIC_RE.test(variables.heartbeatWorkspaceMetricsMaxContainers) ||
+      maxContainers < 0 ||
+      maxContainers > 128
+    ) {
+      errors.push(
+        `heartbeatWorkspaceMetricsMaxContainers: must be numeric 0-128 (got ${JSON.stringify(variables.heartbeatWorkspaceMetricsMaxContainers)})`
+      );
+    }
+  }
+  if (
+    variables.heartbeatWorkspaceMetricsMaxOutputBytes !== undefined &&
+    variables.heartbeatWorkspaceMetricsMaxOutputBytes !== ''
+  ) {
+    const maxOutputBytes = Number(variables.heartbeatWorkspaceMetricsMaxOutputBytes);
+    if (
+      !NUMERIC_RE.test(variables.heartbeatWorkspaceMetricsMaxOutputBytes) ||
+      maxOutputBytes < 1024 ||
+      maxOutputBytes > 1048576
+    ) {
+      errors.push(
+        `heartbeatWorkspaceMetricsMaxOutputBytes: must be numeric 1024-1048576 (got ${JSON.stringify(variables.heartbeatWorkspaceMetricsMaxOutputBytes)})`
       );
     }
   }
@@ -351,14 +459,34 @@ export interface CloudInitVariables {
   originCaCertificateUrl?: string;
   /** VM agent port override (default: 8443 with TLS, 8080 without) */
   vmAgentPort?: string;
+  /** Immutable VM-agent release selected by the control-plane deployment. */
+  vmAgentRequiredVersion?: string;
   /** Timeout in seconds for fetching Cloudflare IP ranges at boot (default: 10) */
   cfIpFetchTimeout?: string;
   /** Enable opportunistic devcontainer image caching via GHCR (default: false) */
   devcontainerCacheEnabled?: string;
+  /** Concurrent devcontainer build slots on a workspace VM (default: 1). */
+  workspaceBuildQueueDepth?: string;
   /** Swap file size in MB (default: 2048). Set to "0" to disable swap. */
   swapSizeMb?: string;
   /** Swap swappiness value 0-100 (default: 60). Only relevant when swap is enabled. */
   swapSwappiness?: string;
+  /** Host memory reserve in MB subtracted from the Docker workload slice (default: 512). */
+  vmAgentMemoryReserveMb?: string;
+  /** Minimum memory protection for VM agent/system services in MB (default: 256). */
+  samInfraSliceMemoryMinMb?: string;
+  /** systemd CPUWeight for the vm-agent slice (cgroup v2 range 1-10000). */
+  samInfraSliceCpuWeight?: string;
+  /** systemd CPUWeight for the Docker workload slice (cgroup v2 range 1-10000). */
+  samWorkloadSliceCpuWeight?: string;
+  /** Minimum Docker MemoryMax value retained when reserve is enabled (default: 512). */
+  dockerMemoryMinMb?: string;
+  /** Bounded Docker stats timeout for heartbeat workspace metrics (default: 2s). */
+  heartbeatDockerStatsTimeout?: string;
+  /** Max workspace containers measured by each heartbeat (default: 8). */
+  heartbeatWorkspaceMetricsMaxContainers?: string;
+  /** Max bytes read from each heartbeat Docker CLI command (default: 65536). */
+  heartbeatWorkspaceMetricsMaxOutputBytes?: string;
   /** VM agent role: 'workspace' (default) or 'deployment'. */
   role?: string;
   /** Deployment environment ID (required when role='deployment'). */
@@ -414,6 +542,10 @@ export interface GenerateCloudInitOptions {
   validateSize?: boolean;
 }
 
+function defaultWhenBlank(value: string | undefined, fallback: string): string {
+  return value === undefined || value === '' ? fallback : value;
+}
+
 /**
  * Generate cloud-init configuration from template with variables.
  */
@@ -429,6 +561,9 @@ export function generateCloudInit(
     '{{ node_id }}': variables.nodeId,
     '{{ hostname }}': variables.hostname,
     '{{ control_plane_url }}': variables.controlPlaneUrl,
+    '{{ vm_agent_release_query }}': variables.vmAgentRequiredVersion
+      ? '&release=' + variables.vmAgentRequiredVersion
+      : '',
     '{{ jwks_url }}': variables.jwksUrl,
     '{{ callback_token }}': variables.callbackToken,
     '{{ log_journal_max_use }}': variables.logJournalMaxUse ?? '500M',
@@ -448,8 +583,28 @@ export function generateCloudInit(
     '{{ cf_ip_fetch_timeout }}': variables.cfIpFetchTimeout ?? '10',
     '{{ provider }}': variables.provider ?? '',
     '{{ devcontainer_cache_enabled }}': variables.devcontainerCacheEnabled ?? 'false',
+    '{{ workspace_build_queue_depth }}': variables.workspaceBuildQueueDepth ?? '1',
     '{{ swap_size_mb }}': variables.swapSizeMb ?? '2048',
     '{{ swap_swappiness }}': variables.swapSwappiness ?? '60',
+    '{{ vm_agent_memory_reserve_mb }}': variables.vmAgentMemoryReserveMb ?? '512',
+    '{{ sam_infra_slice_memory_min_mb }}': variables.samInfraSliceMemoryMinMb ?? '256',
+    // The vm-agent shares the CPU with workload containers. Memory already has a
+    // reservation (MemoryMin above) because starvation there KILLS the agent;
+    // CPU had none, so a busy workspace could delay the heartbeat until the
+    // control plane declared the node dead. CFS weights are proportional and
+    // only apply under contention, so this costs nothing on an idle box: the
+    // agent's demand is tiny, it simply stops queueing behind builds.
+    '{{ sam_infra_slice_cpu_weight }}': defaultWhenBlank(variables.samInfraSliceCpuWeight, '1000'),
+    '{{ sam_workload_slice_cpu_weight }}': defaultWhenBlank(
+      variables.samWorkloadSliceCpuWeight,
+      '100'
+    ),
+    '{{ docker_memory_min_mb }}': variables.dockerMemoryMinMb ?? '512',
+    '{{ heartbeat_docker_stats_timeout }}': variables.heartbeatDockerStatsTimeout ?? '2s',
+    '{{ heartbeat_workspace_metrics_max_containers }}':
+      variables.heartbeatWorkspaceMetricsMaxContainers ?? '8',
+    '{{ heartbeat_workspace_metrics_max_output_bytes }}':
+      variables.heartbeatWorkspaceMetricsMaxOutputBytes ?? '65536',
     '{{ role }}': variables.role ?? '',
     '{{ environment_id }}': variables.environmentId ?? '',
     '{{ deploy_signing_pub_key }}': variables.deploySigningPubKey ?? '',

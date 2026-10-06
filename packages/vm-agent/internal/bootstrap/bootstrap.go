@@ -824,6 +824,10 @@ func ensureRepositoryReady(ctx context.Context, cfg *config.Config, state *boots
 		}
 
 		slog.Info("Cloning repository", "repository", cfg.Repository, "branch", cloneBranch, "checkoutBranch", branch, "workspaceDir", cfg.WorkspaceDir)
+		// Never add --single-branch: a single-branch clone has no
+		// refs/remotes/origin/HEAD, which session snapshots use to leave
+		// default-branch history out of the WIP bundle
+		// (internal/server/session_snapshot_bundle.go).
 		cmd := exec.CommandContext(ctx, gitBinaryPath, "clone", "--branch", cloneBranch, cloneURL, cfg.WorkspaceDir)
 		output, err := cmd.CombinedOutput()
 		if err != nil {
@@ -3146,7 +3150,22 @@ func createCheckoutBranch(ctx context.Context, workspaceDir, cloneBranch, checko
 	if cloneBranch == checkoutBranch {
 		return nil
 	}
-	cmd := exec.CommandContext(ctx, gitBinaryPath, "-C", workspaceDir, "checkout", "-b", checkoutBranch)
+	remoteRef := "refs/remotes/origin/" + checkoutBranch
+	cmd := exec.CommandContext(ctx, gitBinaryPath, "-C", workspaceDir, "show-ref", "--verify", "--quiet", remoteRef)
+	if err := cmd.Run(); err == nil {
+		cmd = exec.CommandContext(ctx, gitBinaryPath, "-C", workspaceDir, "checkout", "--track", "-b", checkoutBranch, "origin/"+checkoutBranch)
+		output, checkoutErr := cmd.CombinedOutput()
+		if checkoutErr != nil {
+			return fmt.Errorf("failed to check out existing remote branch %q: %w: %s", checkoutBranch, checkoutErr, strings.TrimSpace(string(output)))
+		}
+		return nil
+	} else {
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
+			return fmt.Errorf("failed to inspect remote checkout branch %q: %w", checkoutBranch, err)
+		}
+	}
+	cmd = exec.CommandContext(ctx, gitBinaryPath, "-C", workspaceDir, "checkout", "-b", checkoutBranch)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to create checkout branch %q from %q: %w: %s", checkoutBranch, cloneBranch, err, strings.TrimSpace(string(output)))

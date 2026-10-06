@@ -16,14 +16,17 @@ import { request } from './client';
  * both scopes from a single component.
  */
 function basePath(projectId: string | null): string {
-  return projectId === null
-    ? '/api/mcp-connections'
-    : `/api/projects/${projectId}/mcp-connections`;
+  return projectId === null ? '/api/mcp-connections' : `/api/projects/${projectId}/mcp-connections`;
 }
 
 export async function listMcpConnections(projectId: string | null): Promise<McpConnection[]> {
   const response = await request<McpConnectionListResponse>(basePath(projectId));
-  return response.items;
+  // The deploy publishes the web UI before the API Worker, so for a minute this UI can talk
+  // to an API that predates custom headers and omits `headerNames`.
+  return response.items.map((connection) => ({
+    ...connection,
+    headerNames: connection.headerNames ?? [],
+  }));
 }
 
 export async function createMcpConnection(

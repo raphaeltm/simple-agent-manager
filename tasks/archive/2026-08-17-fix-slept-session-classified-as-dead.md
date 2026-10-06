@@ -206,7 +206,7 @@ Every finding below has a checklist item or an explicit deferral.
 - `.claude/rules/57-write-only-cross-boundary-state.md` — reconcile, don't just report
 - `.claude/rules/47-control-loop-io-budget.md` — bounded escape path
 - `.claude/rules/44-dual-write-migration-enumerate-writers.md` — enumerate every adapter
-- `tasks/active/2026-08-16-session-activity-state-machine.md` — PR #1840 (ancestor)
+- `tasks/archive/2026-08-16-session-activity-state-machine.md` — PR #1840 (ancestor)
 
 ## Verification record (2026-08-17, landing run)
 

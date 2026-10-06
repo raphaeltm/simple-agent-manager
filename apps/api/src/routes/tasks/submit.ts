@@ -41,10 +41,22 @@ import {
 } from '../../services/placement-resolver';
 import { resolveProjectAgentDefault } from '../../services/project-agent-defaults';
 import * as projectDataService from '../../services/project-data';
-import { parseSkillResourceRequirementsJson, resolveSkillProfile } from '../../services/skills';
+import {
+  collectStoredResourceRequirementLayers,
+  createPersistedTaskResourcePlanJson,
+  firstResourceRequirementLayer,
+  firstResourceRequirementLayerJson,
+  mergeResourceRequirementLayers,
+  normalizeResourceRequirementsInput,
+  ResourceRequirementsValidationError,
+} from '../../services/resource-requirements-input';
+import { resolveSkillProfile } from '../../services/skills';
+import { submitInstantTask } from '../../services/submit-instant-task';
+import { markTaskFailedIfNonTerminal } from '../../services/task-failure';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import type { TaskTitleConfig } from '../../services/task-title';
 import { generateTaskTitle, getTaskTitleConfig, truncateTitle } from '../../services/task-title';
+import { resolveWorkspaceRuntime } from '../../services/workspace-runtime';
 import { requireRepositoryUserAccess } from '../projects/_helpers';
 
 /** Default max task message length. Override via MAX_TASK_MESSAGE_LENGTH env var. */
@@ -107,6 +119,33 @@ async function updateGeneratedTaskTitle(input: {
   }
 }
 
+function schedulePostSubmitWork(
+  input: Parameters<typeof updateGeneratedTaskTitle>[0] & {
+    waitUntil: (promise: Promise<unknown>) => void;
+    userId: string;
+    branchName: string;
+  }
+): void {
+  input.waitUntil(updateGeneratedTaskTitle(input));
+  input.waitUntil(
+    projectDataService
+      .recordActivityEvent(
+        input.env,
+        input.projectId,
+        'task.submitted',
+        'user',
+        input.userId,
+        null,
+        input.sessionId,
+        input.taskId,
+        { title: input.initialTitle, branchName: input.branchName }
+      )
+      .catch(() => {
+        /* best-effort */
+      })
+  );
+}
+
 /**
  * POST /projects/:projectId/tasks/submit
  *
@@ -139,6 +178,18 @@ submitRoutes.post(
 
     // Validated by Valibot middleware
     const body = c.req.valid('json');
+    const taskResourceRequirements = (() => {
+      try {
+        return body.resourceRequirements === undefined || body.resourceRequirements === null
+          ? undefined
+          : normalizeResourceRequirementsInput(body.resourceRequirements);
+      } catch (err) {
+        if (err instanceof ResourceRequirementsValidationError) {
+          throw errors.badRequest(err.message);
+        }
+        throw err;
+      }
+    })();
 
     if (body.message.trim().length === 0) {
       throw errors.badRequest('Message is required');
@@ -284,9 +335,92 @@ submitRoutes.post(
       body.agentProfileId || body.skillId
         ? await resolveSkillProfile(db, projectId, body.agentProfileId, body.skillId, userId, c.env)
         : null;
-    const skillResourceRequirements = parseSkillResourceRequirementsJson(
-      resolvedProfile?.resourceRequirementsJson
-    );
+    if (resolvedProfile?.runtime === 'cf-container') {
+      if (
+        body.nodeId ||
+        body.vmSize ||
+        body.vmLocation ||
+        body.provider ||
+        body.workspaceProfile === 'full' ||
+        body.devcontainerConfigName ||
+        (taskResourceRequirements && Object.keys(taskResourceRequirements).length > 0)
+      ) {
+        throw errors.badRequest(
+          'Instant containers cannot use VM resource overrides. Clear the overrides or choose a VM profile.'
+        );
+      }
+      const runtime = await resolveWorkspaceRuntime(db, c.env, {
+        userId,
+        projectId,
+        explicitRuntime: 'cf-container',
+      });
+      if (runtime.runtime !== 'cf-container') {
+        throw errors.conflict('Instant containers are disabled. Choose a VM profile.');
+      }
+      const result = await submitInstantTask({
+        db,
+        env: c.env,
+        waitUntil: (promise) => c.executionCtx.waitUntil(promise),
+        project,
+        userId,
+        taskId,
+        branchName,
+        message,
+        profile: resolvedProfile,
+        parentTaskId: body.parentTaskId,
+        contextSummary: body.contextSummary,
+        taskMode: body.taskMode,
+        agentType: body.agentType,
+        attachments: validatedAttachments,
+        credentialAttributionUserId: inheritedAttributionUserId ?? userId,
+        credentialAttributionProjectId: inheritedAttributionProjectId ?? null,
+        credentialAttributionSource: inheritedAttributionSource ?? 'user',
+      });
+      const titleConfig = getTaskTitleConfig(c.env);
+      schedulePostSubmitWork({
+        env: c.env,
+        projectId,
+        taskId,
+        sessionId: result.sessionId,
+        message,
+        initialTitle: getInitialTaskTitle(message, titleConfig),
+        titleConfig,
+        waitUntil: (promise) => c.executionCtx.waitUntil(promise),
+        userId,
+        branchName,
+      });
+      return c.json(result, 202);
+    }
+    const {
+      resourceRequirementLayers,
+      persistedResourceRequirementsJson,
+      taskRunnerResourceRequirements,
+    } = (() => {
+      try {
+        const layers = mergeResourceRequirementLayers(
+          collectStoredResourceRequirementLayers({
+            skill: resolvedProfile?.skillId ? resolvedProfile.resourceRequirementsJson : null,
+            agentProfile:
+              resolvedProfile?.agentProfileResourceRequirementsJson ??
+              (resolvedProfile?.skillId ? null : resolvedProfile?.resourceRequirementsJson),
+            project: project.resourceRequirementsJson,
+          }),
+          {
+            task: taskResourceRequirements,
+          }
+        );
+        return {
+          resourceRequirementLayers: layers,
+          persistedResourceRequirementsJson: firstResourceRequirementLayerJson(layers),
+          taskRunnerResourceRequirements: firstResourceRequirementLayer(layers),
+        };
+      } catch (err) {
+        if (err instanceof ResourceRequirementsValidationError) {
+          throw errors.badRequest(err.message);
+        }
+        throw err;
+      }
+    })();
 
     const placement = (() => {
       try {
@@ -314,10 +448,7 @@ submitRoutes.post(
           },
           credentialProjectPolicy: 'current-project-unless-inherited',
           taskModeDefault: 'workspace-profile',
-          resourceRequirements: {
-            task: body.resourceRequirements,
-            skill: skillResourceRequirements,
-          },
+          resourceRequirements: resourceRequirementLayers,
         });
       } catch (err) {
         if (err instanceof PlacementResolutionError) {
@@ -376,6 +507,12 @@ submitRoutes.post(
       resolvedReservation,
       agentType,
     } = placement;
+    const persistedResourceRequirementPlanJson = createPersistedTaskResourcePlanJson({
+      layers: resourceRequirementLayers,
+      resolvedReservation,
+      requestedVmSize: vmSize,
+      requestedVmSizeSource: vmSizeSource,
+    });
     const projectAgentDefaults = resolveProjectAgentDefault(project.agentDefaults, agentType);
 
     // Start new task work on its generated output branch so VM-agent completion
@@ -416,9 +553,8 @@ submitRoutes.post(
       outputBranch: branchName,
       requestedVmSize: vmSize,
       requestedVmSizeSource: vmSizeSource,
-      resourceRequirementsJson: body.resourceRequirements
-        ? JSON.stringify(body.resourceRequirements)
-        : (resolvedProfile?.resourceRequirementsJson ?? null),
+      resourceRequirementsJson: persistedResourceRequirementsJson,
+      resourceRequirementPlanJson: persistedResourceRequirementPlanJson,
       resourceRequirementsSource: resolvedReservation.source,
       resolvedReservationJson: JSON.stringify(resolvedReservation),
       credentialAttributionUserId,
@@ -477,60 +613,28 @@ submitRoutes.post(
     } catch (err) {
       // Session creation or message persistence failed — mark task as failed
       // to prevent orphaned 'queued' records that the task runner can't process.
-      const failedAt = new Date().toISOString();
       const errorMsg = err instanceof Error ? err.message : String(err);
-      await db
-        .update(schema.tasks)
-        .set({
-          status: 'failed',
-          errorMessage: `Session creation failed: ${errorMsg}`,
-          updatedAt: failedAt,
-        })
-        .where(eq(schema.tasks.id, taskId));
-      await db.insert(schema.taskStatusEvents).values({
-        id: ulid(),
+      await markTaskFailedIfNonTerminal(
+        c.env.DATABASE,
         taskId,
-        fromStatus: 'queued',
-        toStatus: 'failed',
-        actorType: 'system',
-        actorId: null,
-        reason: `Session creation failed: ${errorMsg}`,
-        createdAt: failedAt,
-      });
+        `Session creation failed: ${errorMsg}`
+      );
       log.error('task_submit.session_failed', { taskId, projectId, error: errorMsg });
       throw err; // Re-throw to return 500 to the frontend
     }
 
-    c.executionCtx.waitUntil(
-      updateGeneratedTaskTitle({
-        env: c.env,
-        projectId,
-        taskId,
-        sessionId,
-        message,
-        initialTitle: taskTitle,
-        titleConfig,
-      })
-    );
-
-    // Record activity event (best-effort)
-    c.executionCtx.waitUntil(
-      projectDataService
-        .recordActivityEvent(
-          c.env,
-          projectId,
-          'task.submitted',
-          'user',
-          userId,
-          null,
-          sessionId,
-          taskId,
-          { title: taskTitle, branchName }
-        )
-        .catch(() => {
-          /* best-effort */
-        })
-    );
+    schedulePostSubmitWork({
+      env: c.env,
+      projectId,
+      taskId,
+      sessionId,
+      message,
+      initialTitle: taskTitle,
+      titleConfig,
+      waitUntil: (promise) => c.executionCtx.waitUntil(promise),
+      userId,
+      branchName,
+    });
 
     log.info('task_submit.created', {
       taskId,
@@ -601,38 +705,23 @@ submitRoutes.post(
         attachments: validatedAttachments.length > 0 ? validatedAttachments : null,
         projectScaling: {
           taskExecutionTimeoutMs: project.taskExecutionTimeoutMs ?? null,
-          maxWorkspacesPerNode: project.maxWorkspacesPerNode ?? null,
           nodeCpuThresholdPercent: project.nodeCpuThresholdPercent ?? null,
           nodeMemoryThresholdPercent: project.nodeMemoryThresholdPercent ?? null,
           warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,
         },
-        resourceRequirements: body.resourceRequirements ?? null,
+        resourceRequirements: taskRunnerResourceRequirements,
         resolvedReservation,
         capacityPoolSelection,
         vmSizeSource,
       });
     } catch (err) {
       // TaskRunner DO startup failed — mark task as failed.
-      const failedAt = new Date().toISOString();
       const errorMsg = err instanceof Error ? err.message : String(err);
-      await db
-        .update(schema.tasks)
-        .set({
-          status: 'failed',
-          errorMessage: `Task runner startup failed: ${errorMsg}`,
-          updatedAt: failedAt,
-        })
-        .where(eq(schema.tasks.id, taskId));
-      await db.insert(schema.taskStatusEvents).values({
-        id: ulid(),
+      await markTaskFailedIfNonTerminal(
+        c.env.DATABASE,
         taskId,
-        fromStatus: 'queued',
-        toStatus: 'failed',
-        actorType: 'system',
-        actorId: null,
-        reason: `Task runner startup failed: ${errorMsg}`,
-        createdAt: failedAt,
-      });
+        `Task runner startup failed: ${errorMsg}`
+      );
       log.error('task_submit.do_startup_failed', { taskId, projectId, error: errorMsg });
       // Stop the orphaned session (best-effort — it has no workspace and will never be cleaned up otherwise)
       await projectDataService.stopSession(c.env, projectId, sessionId).catch((e) => {

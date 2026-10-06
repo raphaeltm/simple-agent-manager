@@ -18,7 +18,7 @@ func (h *SessionHost) establishACPSession(ctx context.Context, agentType string,
 	}
 	loaded, err := h.tryLoadPreviousACPSession(ctx, agentType, settings, previousAcpSessionID, initResp.AgentCapabilities.LoadSession, timeouts.loadSession, !requireLoadSession)
 	if loaded {
-		return nil
+		return err
 	}
 	if requireLoadSession {
 		if err != nil {
@@ -53,15 +53,25 @@ func (h *SessionHost) initializeACP(ctx context.Context, agentType string, timeo
 
 	slog.Info("ACP: sending Initialize request", "timeout", timeout)
 	h.reportLifecycle("info", "ACP Initialize started", map[string]interface{}{"agentType": agentType})
+	capabilities := acpsdk.ClientCapabilities{
+		Fs: acpsdk.FileSystemCapabilities{ReadTextFile: true, WriteTextFile: true},
+	}
+	if config := h.acpInteractionConfigSnapshot(); config.Enabled && config.validate() == nil && (config.FormsEnabled || config.URLsEnabled) {
+		capabilities.Elicitation = &acpsdk.ElicitationCapabilities{}
+		if config.FormsEnabled {
+			capabilities.Elicitation.Form = &acpsdk.ElicitationFormCapabilities{}
+		}
+		if config.URLsEnabled {
+			capabilities.Elicitation.Url = &acpsdk.ElicitationUrlCapabilities{}
+		}
+	}
 	resp, err := h.acpConn.Initialize(initCtx, acpsdk.InitializeRequest{
 		ProtocolVersion: acpsdk.ProtocolVersionNumber,
 		ClientInfo: &acpsdk.Implementation{
 			Name:    "sam",
 			Version: sysinfo.Version,
 		},
-		ClientCapabilities: acpsdk.ClientCapabilities{
-			Fs: acpsdk.FileSystemCapabilities{ReadTextFile: true, WriteTextFile: true},
-		},
+		ClientCapabilities: capabilities,
 	})
 	if err != nil {
 		h.reportLifecycle("warn", "ACP Initialize failed", map[string]interface{}{
@@ -154,7 +164,9 @@ func (h *SessionHost) tryLoadPreviousACPSession(
 	})
 	h.reportEvent("info", "agent.load_session_ok", "Previous conversation restored", map[string]interface{}{"acpSessionId": previousAcpSessionID})
 	h.persistAcpSessionID(agentType)
-	h.applySessionSettings(ctx, settings)
+	if err := h.applySessionSettings(ctx, settings); err != nil {
+		return true, fmt.Errorf("ACP loaded session settings failed: %w", err)
+	}
 	return true, nil
 }
 
@@ -185,7 +197,9 @@ func (h *SessionHost) startNewACPSession(ctx context.Context, agentType string, 
 		"acpSessionId": string(h.sessionID),
 	})
 	h.persistAcpSessionID(agentType)
-	h.applySessionSettings(ctx, settings)
+	if err := h.applySessionSettings(ctx, settings); err != nil {
+		return fmt.Errorf("ACP new session settings failed: %w", err)
+	}
 
 	return nil
 }

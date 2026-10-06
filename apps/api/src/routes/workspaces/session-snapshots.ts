@@ -9,10 +9,12 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { expectJsonRecord, parseWithSchema } from '../../lib/runtime-validation';
 import { errors } from '../../middleware/error';
+import { isValidGitRefName } from '../../services/branch-name';
 import {
   generateSessionSnapshotDirectUploadUrl,
   sessionSnapshotDirectUploadAvailable,
 } from '../../services/session-snapshot-direct-upload';
+import { sessionSnapshotRestoreResponse } from '../../services/session-snapshot-restore-response';
 import {
   ensureSessionSnapshotUploadRelay,
   resolveSessionSnapshotUploadTargets,
@@ -36,6 +38,7 @@ import {
   type SessionSnapshotStatus,
 } from '../../services/session-snapshots';
 import { markVmAgentContainerActiveWorkEndedBestEffort } from '../../services/vm-agent-container';
+import type { WorkspaceDeletionCallbackKind } from '../../services/workspace-deletion-callback-signal';
 import { assertWorkspaceCallbackResourceById, verifyWorkspaceCallbackAuth } from './_helpers';
 
 const sessionSnapshotRoutes = new Hono<{ Bindings: Env }>();
@@ -73,6 +76,14 @@ const SessionSnapshotManifestSchema = v.object({
   acpSessionId: v.optional(v.string()),
   agentType: v.optional(v.string()),
   baseCommit: v.optional(v.string()),
+  git: v.optional(
+    v.object({
+      branch: v.optional(v.string()),
+      upstream: v.optional(v.string()),
+      remote: v.optional(v.string()),
+      detached: v.boolean(),
+    })
+  ),
   status: v.picklist(['pending', 'available', 'degraded', 'failed', 'expired']),
   degradation: v.picklist([
     'none',
@@ -96,6 +107,8 @@ const SessionSnapshotManifestSchema = v.object({
   }),
   createdAt: v.string(),
 });
+
+const FULL_GIT_OBJECT_ID = /^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/;
 
 async function readJsonBody(c: SnapshotRouteContext) {
   const raw = await c.req.raw.text();
@@ -155,7 +168,7 @@ function containsOnlyRegenerableOpenCodeSkips(manifest: SessionSnapshotManifest)
 async function requireWorkspace(
   c: SnapshotRouteContext,
   workspaceId: string,
-  callback = 'session_snapshot'
+  callback: WorkspaceDeletionCallbackKind = 'session_snapshot'
 ) {
   const db = drizzle(c.env.DATABASE, { schema });
   const rows = await db
@@ -218,10 +231,12 @@ sessionSnapshotRoutes.post('/:id/session-snapshot/prepare', async (c) => {
   const uploadTargets = await resolveSessionSnapshotUploadTargets(c.env, {
     workspaceId,
     userId: workspace.userId,
+    projectId: workspace.projectId,
     chatSessionId,
     generation: prepared.generation,
     directUploadAvailable,
     directUploadSupported,
+    sourceNodeId: workspace.nodeId,
   });
   if (uploadTargets.needsRelayProvisioning && workspace.nodeId) {
     c.executionCtx.waitUntil(
@@ -294,8 +309,10 @@ sessionSnapshotRoutes.post('/:id/session-snapshot/artifacts/:artifact/upload-url
   await verifySessionSnapshotRelayAuthorization(
     c.env,
     workspace.userId,
+    workspace.projectId,
     c.req.header(SESSION_SNAPSHOT_RELAY_NODE_ID_HEADER),
-    c.req.header(SESSION_SNAPSHOT_RELAY_AUTHORIZATION_HEADER)
+    c.req.header(SESSION_SNAPSHOT_RELAY_AUTHORIZATION_HEADER),
+    workspace.nodeId
   );
   const capture = await db
     .select({ generation: schema.sessionSnapshots.captureGeneration })
@@ -411,6 +428,48 @@ sessionSnapshotRoutes.post('/:id/session-snapshot/complete', async (c) => {
   }
   if (manifest.status !== status || manifest.degradation !== degradation) {
     throw errors.badRequest('Snapshot manifest lifecycle does not match request');
+  }
+  const requestedBaseCommit = stringField(body, 'baseCommit', false);
+  if (
+    requestedBaseCommit !== null &&
+    manifest.baseCommit &&
+    requestedBaseCommit !== manifest.baseCommit
+  ) {
+    throw errors.badRequest('Snapshot base commit does not match manifest');
+  }
+  const baseCommit = requestedBaseCommit ?? manifest.baseCommit ?? null;
+  if (manifest.git) {
+    if (!baseCommit) throw errors.badRequest('Snapshot Git metadata requires a base commit');
+    if (!FULL_GIT_OBJECT_ID.test(baseCommit)) {
+      throw errors.badRequest('Snapshot Git metadata requires a full Git object ID');
+    }
+    if (manifest.git.detached === Boolean(manifest.git.branch)) {
+      throw errors.badRequest('Snapshot Git branch and detached state are inconsistent');
+    }
+    if (manifest.git.branch && !isValidGitRefName(manifest.git.branch)) {
+      throw errors.badRequest('Snapshot Git branch is invalid');
+    }
+    if (manifest.git.detached && (manifest.git.upstream || manifest.git.remote)) {
+      throw errors.badRequest('Detached snapshot Git state cannot include upstream metadata');
+    }
+    if (manifest.git.upstream && !manifest.git.remote) {
+      throw errors.badRequest('Snapshot Git upstream requires remote metadata');
+    }
+    if (manifest.git.remote && !manifest.git.upstream) {
+      throw errors.badRequest('Snapshot Git remote requires upstream metadata');
+    }
+    if (
+      manifest.git.upstream &&
+      (manifest.git.remote !== 'origin' || !manifest.git.upstream.startsWith('origin/'))
+    ) {
+      throw errors.badRequest('Snapshot Git upstream must use the canonical origin remote');
+    }
+    if (
+      manifest.git.upstream &&
+      !isValidGitRefName(manifest.git.upstream.slice('origin/'.length))
+    ) {
+      throw errors.badRequest('Snapshot Git upstream branch is invalid');
+    }
   }
   if (
     (status === 'available' && degradation !== 'none') ||
@@ -536,7 +595,7 @@ sessionSnapshotRoutes.post('/:id/session-snapshot/complete', async (c) => {
     chatSessionId,
     agentSessionId,
     runtime: stringField(body, 'runtime', false) || 'runtime-neutral',
-    baseCommit: stringField(body, 'baseCommit', false),
+    baseCommit,
     captureGeneration: generation,
     status,
     degradation,
@@ -568,24 +627,7 @@ sessionSnapshotRoutes.get('/:id/session-snapshot/restore', async (c) => {
   if (!snapshot) {
     return c.json({ available: false, reason: 'snapshot_missing_or_unavailable' });
   }
-
-  return c.json({
-    available: true,
-    status: snapshot.status,
-    degradation: snapshot.degradation,
-    baseCommit: snapshot.baseCommit,
-    manifest: snapshot.manifestJson ? JSON.parse(snapshot.manifestJson) : null,
-    config: getSessionSnapshotConfig(c.env),
-    download: {
-      home: snapshot.homeR2Key
-        ? `/api/workspaces/${workspaceId}/session-snapshot/artifacts/home?chatSessionId=${encodeURIComponent(chatSessionId)}`
-        : null,
-      wip: snapshot.wipR2Key
-        ? `/api/workspaces/${workspaceId}/session-snapshot/artifacts/wip?chatSessionId=${encodeURIComponent(chatSessionId)}`
-        : null,
-      manifest: `/api/workspaces/${workspaceId}/session-snapshot/artifacts/manifest?chatSessionId=${encodeURIComponent(chatSessionId)}`,
-    },
-  });
+  return c.json(sessionSnapshotRestoreResponse(c.env, workspaceId, chatSessionId, snapshot));
 });
 
 sessionSnapshotRoutes.get('/:id/session-snapshot/artifacts/:artifact', async (c) => {
@@ -631,7 +673,7 @@ sessionSnapshotRoutes.post('/:id/session-snapshot/restore-result', async (c) => 
   if (workspace.chatSessionId !== chatSessionId) {
     throw errors.forbidden('Snapshot chat session does not match workspace');
   }
-  await recordSessionSnapshotRestoreResult(db, {
+  await recordSessionSnapshotRestoreResult(db, c.env, {
     chatSessionId,
     status: requiredStringField(body, 'status'),
     message: stringField(body, 'message', false),

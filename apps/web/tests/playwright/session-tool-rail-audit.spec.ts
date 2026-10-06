@@ -19,6 +19,7 @@ import {
   screenshot,
   seedTheme,
 } from './audit-helpers';
+import { buildResourceScenario, type ResourceScenarioId } from './resource-timeline-scenarios';
 
 const PROJECT_ID = 'proj-rail-1';
 const SESSION_ID = 'cs-rail-1';
@@ -167,6 +168,8 @@ interface MockOptions extends SessionOptions {
   empty?: boolean;
   /** Seeds a long conversation so the scroll-to-bottom button can actually appear. */
   manyMessages?: boolean;
+  /** Which synthetic resource history the Resources drawer reads. */
+  resourceScenario?: ResourceScenarioId;
 }
 
 async function setupMocks(page: Page, options: MockOptions = {}) {
@@ -176,7 +179,10 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
     messagesLong = false,
     empty = false,
     manyMessages = false,
+    resourceScenario = 'overnight',
   } = options;
+  const resources = buildResourceScenario(resourceScenario, SESSION_ID, NOW);
+  const resourceTimelinePath = `/api/projects/${PROJECT_ID}/sessions/${SESSION_ID}/resource-timeline`;
 
   await page.addInitScript(
     ({ userId, storageKey, seededMode }) => {
@@ -224,6 +230,18 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
     }
     if (pathname === `/api/projects/${PROJECT_ID}/sessions/${SESSION_ID}/messages`) {
       await route.fulfill({ json: messages });
+      return;
+    }
+
+    if (pathname === resourceTimelinePath) {
+      await route.fulfill({ json: resources.index });
+      return;
+    }
+    if (pathname.startsWith(`${resourceTimelinePath}/chunks/`)) {
+      const chunk = resources.chunks.get(
+        decodeURIComponent(pathname.slice(resourceTimelinePath.length + 8))
+      );
+      await route.fulfill(chunk ? { json: chunk } : { status: 404, json: { error: 'NOT_FOUND' } });
       return;
     }
     if (pathname === `/api/projects/${PROJECT_ID}/sessions/${SESSION_ID}/state`) {
@@ -280,6 +298,22 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
     }
     if (pathname === '/api/nodes' || pathname === '/api/credentials') {
       await route.fulfill({ json: [] });
+      return;
+    }
+    if (pathname === '/api/credentials/agent') {
+      await route.fulfill({ json: { credentials: [] } });
+      return;
+    }
+    if (pathname === '/api/notifications') {
+      await route.fulfill({ json: [] });
+      return;
+    }
+    if (pathname === '/api/notifications/preferences') {
+      await route.fulfill({ json: { email: false, push: false } });
+      return;
+    }
+    if (pathname === `/api/projects/${PROJECT_ID}/credential-attribution-health`) {
+      await route.fulfill({ json: { healthy: true } });
       return;
     }
     if (pathname === '/api/chats') {
@@ -360,6 +394,8 @@ test.describe('Session tool rail — discoverability', () => {
       'files',
       'git',
       'timeline',
+      'resources',
+      'events',
       'comments',
       'retry',
       'fork',
@@ -385,6 +421,8 @@ test.describe('Session tool rail — discoverability', () => {
       ['files', 'Browse workspace files'],
       ['git', 'Review uncommitted changes'],
       ['timeline', 'Jump through session history'],
+      ['resources', 'Inspect session CPU, memory, I/O and tool-window correlation'],
+      ['events', 'Session events and schedules'],
       ['comments', 'Open comment threads on this session'],
       ['retry', 'Retry — re-run this task'],
       ['fork', 'Fork — start a new task from this session'],
@@ -589,7 +627,7 @@ test.describe('Session tool rail — layout', () => {
     if (metrics.scrollHeight <= metrics.clientHeight) {
       // Everything fits: nothing to scroll to, so assert the strong property instead —
       // every tool is already on screen.
-      for (const id of ['files', 'git', 'timeline']) {
+      for (const id of ['files', 'git', 'timeline', 'events']) {
         await expect(page.getByTestId(`session-tool-${id}`)).toBeInViewport();
       }
       return;
@@ -597,7 +635,7 @@ test.describe('Session tool rail — layout', () => {
 
     // Report/Complete/Details are pinned outside this scroller — covered separately by
     // 'Report, Complete and Details stay pinned above the fold'.
-    for (const id of ['files', 'git', 'timeline']) {
+    for (const id of ['files', 'git', 'timeline', 'events']) {
       const tool = page.getByTestId(`session-tool-${id}`);
       await tool.scrollIntoViewIfNeeded();
       await expect(tool).toBeInViewport();
@@ -875,5 +913,218 @@ test.describe('Session Details — desktop', () => {
 
   test('Details shows the workspace as plain text and the node as the link', async ({ page }) => {
     await assertDetailsInfrastructure(page, 'desktop');
+  });
+});
+
+test.describe('Session resource history drawer', () => {
+  test('opens the whole session from the real rail action and reads values under the cursor', async ({
+    page,
+  }) => {
+    await openChat(page, { state: 'active', messagesLong: true });
+    await page.getByTestId('session-tool-resources').click();
+
+    const dialog = page.getByRole('dialog', { name: 'Session resources' });
+    await expect(dialog).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Resources' })).toBeVisible();
+
+    // The whole session is on screen, and the OOM kill recorded in the detail samples is called out.
+    await expect(dialog.getByText('Whole session', { exact: true })).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(dialog.getByText('1 out-of-memory kill')).toBeVisible({ timeout: 10_000 });
+    const timeline = dialog.getByRole('slider', { name: /Session timeline/ });
+    await expect(timeline).toBeVisible();
+    await expect(dialog.getByText('Busiest moments', { exact: true })).toBeVisible();
+    // Chunks are a storage detail: nothing in the drawer offers them.
+    await expect(dialog.getByRole('button', { name: /chunk/i })).toHaveCount(0);
+
+    await capture(page, `resource-history-summary-${page.viewportSize()?.width ?? 'viewport'}`);
+
+    // Keyboard reaches the same readout a finger or pointer does.
+    await timeline.focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(dialog.getByRole('button', { name: 'Clear the selected instant' })).toBeVisible();
+    await expect(timeline).toHaveAttribute('aria-valuetext', /CPU <?\d+(\.\d+)? cores?/);
+    await expect(timeline).toHaveAttribute('aria-valuetext', /Memory \d/);
+
+    await capture(page, `resource-history-cursor-${page.viewportSize()?.width ?? 'viewport'}`);
+
+    await dialog.locator('.overflow-y-auto').evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
+    await capture(page, `resource-history-detail-${page.viewportSize()?.width ?? 'viewport'}`);
+  });
+});
+
+async function openResources(page: Page, resourceScenario: ResourceScenarioId) {
+  await openChat(page, { state: 'active', resourceScenario });
+  await page.getByTestId('session-tool-resources').click();
+  const dialog = page.getByRole('dialog', { name: 'Session resources' });
+  await expect(dialog).toBeVisible();
+  return dialog;
+}
+
+test.describe('Session resource timeline scenarios', () => {
+  test('zooming in fetches full detail only for the visible chunks, each once', async ({
+    page,
+  }) => {
+    const chunkRequests: string[] = [];
+    page.on('request', (request) => {
+      if (request.url().includes('/resource-timeline/chunks/')) chunkRequests.push(request.url());
+    });
+    const dialog = await openResources(page, 'overnight');
+    await expect(dialog.getByText('Whole session', { exact: true })).toBeVisible({
+      timeout: 10_000,
+    });
+    const total = buildResourceScenario('overnight', SESSION_ID, NOW).chunks.size;
+    const beforeZoom = chunkRequests.length;
+
+    await dialog.getByRole('button', { name: '15m', exact: true }).click();
+    await expect.poll(() => chunkRequests.length, { timeout: 10_000 }).toBeGreaterThan(beforeZoom);
+    await page.waitForTimeout(600);
+    // Zoomed to 15 minutes: a handful of chunks at most, never the whole session.
+    expect(chunkRequests.length).toBeLessThan(total);
+    await dialog.getByRole('button', { name: '1h', exact: true }).click();
+    await dialog.getByRole('button', { name: '15m', exact: true }).click();
+    await page.waitForTimeout(600);
+    expect(new Set(chunkRequests).size).toBe(chunkRequests.length);
+    await capture(page, `resource-timeline-zoomed-${page.viewportSize()?.width ?? 'viewport'}`);
+  });
+
+  test('older VM agents without rollups still draw the whole session', async ({ page }) => {
+    const dialog = await openResources(page, 'legacy-agent');
+    await expect(dialog.getByText('Whole session', { exact: true })).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(dialog.getByRole('slider', { name: /Session timeline/ })).toBeVisible();
+    await expect(dialog.getByText(/3 wake cycles/)).toBeVisible();
+    await capture(page, `resource-timeline-legacy-${page.viewportSize()?.width ?? 'viewport'}`);
+  });
+
+  test('a session past the server cap says how much older history is not shown', async ({
+    page,
+  }) => {
+    const dialog = await openResources(page, 'truncated');
+    await expect(dialog.getByText(/612 older 15-minute segments are not shown/)).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(dialog.getByText('Everything shown', { exact: true })).toBeVisible();
+    await expect(dialog.getByText('Whole session', { exact: true })).toHaveCount(0);
+    // Liveness: the part that is shown still draws.
+    await expect(dialog.getByRole('slider', { name: /Session timeline/ })).toBeVisible();
+    await capture(page, `resource-timeline-truncated-${page.viewportSize()?.width ?? 'viewport'}`);
+  });
+
+  test('a new VM session explains when its first samples arrive', async ({ page }) => {
+    const dialog = await openResources(page, 'pending');
+    await expect(dialog.getByText('No resource samples yet')).toBeVisible({ timeout: 10_000 });
+    await expect(dialog.getByText('Not recorded for Instant sessions')).toHaveCount(0);
+    await capture(page, `resource-timeline-pending-${page.viewportSize()?.width ?? 'viewport'}`);
+  });
+
+  test('an old session says its samples expired instead of promising data', async ({ page }) => {
+    const dialog = await openResources(page, 'expired');
+    await expect(dialog.getByText('Detailed history has expired')).toBeVisible({ timeout: 10_000 });
+    await expect(dialog.getByText('No resource samples yet')).toHaveCount(0);
+    await capture(page, `resource-timeline-expired-${page.viewportSize()?.width ?? 'viewport'}`);
+  });
+
+  test('an Instant session says nothing is recorded instead of promising data', async ({
+    page,
+  }) => {
+    const dialog = await openResources(page, 'instant');
+    await expect(dialog.getByText('Not recorded for Instant sessions')).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(dialog.getByText('No resource samples yet')).toHaveCount(0);
+    await capture(page, `resource-timeline-instant-${page.viewportSize()?.width ?? 'viewport'}`);
+  });
+});
+
+/** The chart's time slider, which also owns the pointer and touch gestures. */
+async function openOvernightTimeline(page: Page) {
+  const dialog = await openResources(page, 'overnight');
+  await expect(dialog.getByText('Whole session', { exact: true })).toBeVisible({ timeout: 10_000 });
+  const timeline = dialog.getByRole('slider', { name: /Session timeline/ });
+  const box = await timeline.boundingBox();
+  if (!box) throw new Error('timeline has no layout box');
+  return { dialog, timeline, box };
+}
+
+test.describe('Session resource timeline pointer interaction', () => {
+  test('hovering reads one moment and dragging across a panel zooms to that range', async ({
+    page,
+  }) => {
+    const { dialog, box } = await openOvernightTimeline(page);
+    const y = box.y + 40; // inside the CPU panel
+    await page.mouse.move(box.x + box.width * 0.5, y);
+    await expect(dialog.getByRole('button', { name: 'Clear the selected instant' })).toBeVisible();
+
+    await page.mouse.move(box.x + box.width * 0.3, y);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.45, y, { steps: 8 });
+    await page.mouse.up();
+    await page.mouse.move(box.x + box.width * 0.5, box.y + box.height + 200);
+
+    await expect(dialog.getByText('Whole session', { exact: true })).toHaveCount(0);
+    await expect(dialog.getByText(/active time in view/)).toBeVisible();
+  });
+
+  test('a busiest moment zooms to itself and loads its detail', async ({ page }) => {
+    const chunkRequests: string[] = [];
+    page.on('request', (request) => {
+      if (request.url().includes('/resource-timeline/chunks/')) chunkRequests.push(request.url());
+    });
+    const { dialog } = await openOvernightTimeline(page);
+    const before = chunkRequests.length;
+
+    await dialog
+      .getByRole('button', { name: /Zoom to/ })
+      .first()
+      .click();
+
+    // The peak becomes the selected moment; clearing it shows the zoomed range it left behind.
+    await dialog.getByRole('button', { name: 'Clear the selected instant' }).click();
+    await expect(dialog.getByText(/^10m of .* active time in view$/)).toBeVisible();
+    await expect.poll(() => chunkRequests.length, { timeout: 10_000 }).toBeGreaterThan(before);
+  });
+});
+
+test.describe('Session resource timeline touch interaction', () => {
+  test.use({ hasTouch: true });
+
+  test('a tap reads one moment and a pinch zooms in', async ({ page }) => {
+    const { dialog, box } = await openOvernightTimeline(page);
+    const cdp = await page.context().newCDPSession(page);
+    const y = Math.round(box.y + 40);
+    const at = (fraction: number) => Math.round(box.x + box.width * fraction);
+    const touch = (type: string, points: Array<{ x: number; id: number }>) =>
+      cdp.send('Input.dispatchTouchEvent', {
+        type,
+        touchPoints: points.map((point) => ({ x: point.x, y, id: point.id })),
+      });
+
+    await touch('touchStart', [{ x: at(0.5), id: 0 }]);
+    await touch('touchEnd', []);
+    const clear = dialog.getByRole('button', { name: 'Clear the selected instant' });
+    await expect(clear).toBeVisible();
+    await clear.click();
+    await expect(dialog.getByText('Whole session', { exact: true })).toBeVisible();
+
+    await touch('touchStart', [
+      { x: at(0.45), id: 0 },
+      { x: at(0.55), id: 1 },
+    ]);
+    for (let step = 1; step <= 6; step += 1) {
+      const spread = 0.05 + step * 0.05;
+      await touch('touchMove', [
+        { x: at(0.5 - spread), id: 0 },
+        { x: at(0.5 + spread), id: 1 },
+      ]);
+    }
+    await touch('touchEnd', []);
+
+    await expect(dialog.getByText('Whole session', { exact: true })).toHaveCount(0);
+    await expect(dialog.getByText(/active time in view/)).toBeVisible();
   });
 });

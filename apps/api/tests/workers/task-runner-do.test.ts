@@ -24,6 +24,8 @@ import type {
   TaskRunnerState,
 } from '../../src/durable-objects/task-runner';
 import { encrypt } from '../../src/services/encryption';
+import { assertReplacementDeletionConfirmed } from '../../src/services/replacement-deletion-fence';
+import { WORKSPACE_DELETION_DIAGNOSTIC_PREFIX } from '../../src/services/workspace-deletion';
 import {
   seedInstallation,
   seedNode,
@@ -218,6 +220,61 @@ describe('TaskRunner DO — state persistence and idempotency', () => {
     });
   });
 
+  it('fences an unguarded recovery at TaskRunner start when predecessor deletion becomes unconfirmed', async () => {
+    await seedTestData();
+    const sourceTaskId = 'tr-human-recovery-delete-source';
+    const recoveryTaskId = 'tr-human-recovery-delete-replacement';
+    const workspaceId = 'tr-human-recovery-delete-workspace';
+    await seedWorkspace(workspaceId, null, TEST_USER_ID, {
+      projectId: TEST_PROJECT_ID,
+      status: 'sleeping',
+    });
+    await seedTask(sourceTaskId, TEST_PROJECT_ID, TEST_USER_ID, {
+      status: 'completed',
+      workspaceId,
+      taskMode: 'conversation',
+    });
+    await seedTestTask(recoveryTaskId);
+
+    // This is the session-recovery preflight. The race begins after it passes.
+    await expect(
+      assertReplacementDeletionConfirmed(env, {
+        sourceTaskId,
+        projectId: TEST_PROJECT_ID,
+        userId: TEST_USER_ID,
+      })
+    ).resolves.toBeUndefined();
+
+    await env.DATABASE.prepare(
+      `UPDATE workspaces SET status = 'stopping', error_message = ? WHERE id = ?`
+    )
+      .bind(`${WORKSPACE_DELETION_DIAGNOSTIC_PREFIX}timeout`, workspaceId)
+      .run();
+
+    const input = buildStartInput(recoveryTaskId);
+    input.config.chatSessionId = 'tr-human-recovery-delete-chat';
+    input.config.resumeSnapshotChatSessionId = 'tr-human-recovery-delete-chat';
+    input.config.recoverySourceTaskId = null;
+    input.config.retrySourceTaskId = sourceTaskId;
+    input.config.taskMode = 'conversation';
+    const stub = getStub(recoveryTaskId);
+
+    await runInDurableObject(stub, async (instance) => {
+      await expect(instance.start(input)).rejects.toThrow(
+        `Replacement is fenced while workspace ${workspaceId} deletion is unconfirmed`
+      );
+      expect(await instance.ctx.storage.get('state')).toBeUndefined();
+      expect(await instance.ctx.storage.getAlarm()).toBeNull();
+    });
+
+    expect(await stub.getStatus()).toBeNull();
+    expect(
+      await env.DATABASE.prepare(`SELECT COUNT(*) AS count FROM nodes WHERE user_id = ?`)
+        .bind(TEST_USER_ID)
+        .first<{ count: number }>()
+    ).toEqual({ count: 0 });
+  });
+
   it('rejects a recovery whose source authority is revoked at the start boundary', async () => {
     await seedTestData();
     const input = await seedRecoveryAuthorization({
@@ -329,8 +386,14 @@ describe('TaskRunner DO — advanceWorkspaceReady', () => {
     const stub = getStub(taskId);
     await startWithoutAlarm(stub, buildStartInput(taskId));
 
+    await runInDurableObject(stub, async (instance) => {
+      const state = (await instance.ctx.storage.get<TaskRunnerState>('state'))!;
+      state.stepResults.workspaceId = 'current-workspace';
+      await instance.ctx.storage.put('state', state);
+    });
+
     // Send workspace ready signal
-    await stub.advanceWorkspaceReady('running', null);
+    await stub.advanceWorkspaceReady('running', null, 'current-workspace');
 
     const status = await stub.getStatus();
     expect(status!.workspaceReadyReceived).toBe(true);
@@ -346,13 +409,49 @@ describe('TaskRunner DO — advanceWorkspaceReady', () => {
     const stub = getStub(taskId);
     await startWithoutAlarm(stub, buildStartInput(taskId));
 
-    await stub.advanceWorkspaceReady('error', 'container failed to start');
+    await runInDurableObject(stub, async (instance) => {
+      const state = (await instance.ctx.storage.get<TaskRunnerState>('state'))!;
+      state.stepResults.workspaceId = 'current-workspace';
+      await instance.ctx.storage.put('state', state);
+    });
+    await stub.advanceWorkspaceReady('error', 'container failed to start', 'current-workspace');
 
     const status = await stub.getStatus();
     expect(status!.workspaceReadyReceived).toBe(true);
     expect(status!.workspaceReadyStatus).toBe('error');
     expect(status!.workspaceErrorMessage).toBe('container failed to start');
   });
+
+  it.each(['running', 'error'] as const)(
+    'ignores a delayed %s callback from the previous wake workspace',
+    async (signal) => {
+      await seedTestData();
+      const taskId = 'tr-stale-callback-' + signal;
+      await seedTestTask(taskId);
+      const stub = getStub(taskId);
+      await startWithoutAlarm(stub, buildStartInput(taskId));
+      await runInDurableObject(stub, async (instance) => {
+        const state = (await instance.ctx.storage.get<TaskRunnerState>('state'))!;
+        state.stepResults.workspaceId = 'new-wake-workspace';
+        state.config.recoveryAttemptId = 'new-wake';
+        await instance.ctx.storage.put('state', state);
+      });
+
+      await stub.advanceWorkspaceReady(
+        signal,
+        signal === 'error' ? 'Old runtime failed' : null,
+        'old-wake-workspace'
+      );
+
+      expect(await stub.getStatus()).toMatchObject({
+        workspaceReadyReceived: false,
+        workspaceReadyStatus: null,
+        workspaceErrorMessage: null,
+        stepResults: { workspaceId: 'new-wake-workspace' },
+        config: { recoveryAttemptId: 'new-wake' },
+      });
+    }
+  );
 
   it('is a no-op when state is completed', async () => {
     await seedTestData();
@@ -372,7 +471,7 @@ describe('TaskRunner DO — advanceWorkspaceReady', () => {
     });
 
     // Should not throw, just return
-    await stub.advanceWorkspaceReady('running', null);
+    await stub.advanceWorkspaceReady('running', null, 'current-workspace');
 
     // workspaceReadyReceived should still be false (no-op)
     await runInDurableObject(stub, async (instance) => {
@@ -608,6 +707,118 @@ describe('TaskRunner DO — failure handling', () => {
     // Should not throw
     await runInDurableObject(stub, async (instance) => {
       await instance.alarm();
+    });
+  });
+});
+
+describe('stable TaskRunner reactivation', () => {
+  async function stableWake(taskId: string) {
+    await seedTestData();
+    const input = await seedRecoveryAuthorization({
+      sourceTaskId: `${taskId}-legacy-source`,
+      recoveryTaskId: taskId,
+      workspaceId: `${taskId}-workspace`,
+      chatSessionId: `${taskId}-chat`,
+    });
+    await env.DATABASE.prepare(
+      `UPDATE tasks SET recovery_source_task_id = NULL, triggered_by = 'mcp' WHERE id = ?`
+    )
+      .bind(taskId)
+      .run();
+    await env.DATABASE.prepare(
+      `UPDATE session_snapshots SET recovery_attempt_id = 'wake-1' WHERE recovery_task_id = ?`
+    )
+      .bind(taskId)
+      .run();
+    input.config.recoverySourceTaskId = taskId;
+    input.config.recoveryAttemptId = 'wake-1';
+    return input;
+  }
+
+  it('requires the current wake acknowledgement and does not reset progressed state on retry', async () => {
+    const input = await stableWake('tr-stable-idempotent');
+    const stub = getStub(input.taskId);
+    await runInDurableObject(stub, async (instance) => {
+      await instance.start(buildStartInput(input.taskId));
+      const old = (await instance.ctx.storage.get<TaskRunnerState>('state'))!;
+      old.completed = true;
+      old.currentStep = 'running';
+      await instance.ctx.storage.put('state', old);
+      await instance.ctx.storage.deleteAlarm();
+      expect(await instance.ensureStarted('wake-1')).toBe(false);
+      await instance.reactivate(input);
+      expect(await instance.ensureStarted('wake-1')).toBe(true);
+      const waking = (await instance.ctx.storage.get<TaskRunnerState>('state'))!;
+      waking.currentStep = 'workspace_creation';
+      waking.stepResults.nodeId = 'already-selected';
+      await instance.ctx.storage.put('state', waking);
+      await instance.reactivate(input);
+      expect(await instance.getStatus()).toMatchObject({
+        currentStep: 'workspace_creation',
+        stepResults: { nodeId: 'already-selected' },
+      });
+      await instance.ctx.storage.deleteAlarm();
+    });
+  });
+
+  it('rejects an old wake RPC and alarm after a new claim without failing the stable task', async () => {
+    const input = await stableWake('tr-stable-stale');
+    const stub = getStub(input.taskId);
+    await runInDurableObject(stub, async (instance) => {
+      await instance.reactivate(input);
+      await instance.ctx.storage.deleteAlarm();
+    });
+    await env.DATABASE.prepare(
+      `UPDATE session_snapshots SET recovery_attempt_id = 'wake-2' WHERE recovery_task_id = ?`
+    )
+      .bind(input.taskId)
+      .run();
+    await runInDurableObject(stub, async (instance) => {
+      expect(await instance.ensureStarted('wake-1')).toBe(false);
+      await expect(instance.reactivate(input)).rejects.toThrow(
+        'Session recovery authority was revoked'
+      );
+      await instance.alarm();
+      expect((await getTaskFromD1(input.taskId))?.status).toBe('queued');
+      await instance.reactivate({
+        ...input,
+        config: { ...input.config, recoveryAttemptId: 'wake-2' },
+      });
+      expect(await instance.ensureStarted('wake-2')).toBe(true);
+      await instance.ctx.storage.deleteAlarm();
+    });
+  });
+});
+
+describe('TaskRunner state write fencing', () => {
+  it('rejects a late original-run write after the first wake commits', async () => {
+    await seedTestData();
+    const taskId = 'tr-late-original-write';
+    await seedTestTask(taskId);
+    const stub = getStub(taskId);
+    await runInDurableObject(stub, async (instance) => {
+      await instance.start(buildStartInput(taskId));
+      const oldState = (await instance.ctx.storage.get<TaskRunnerState>('state'))!;
+      const { taskRunnerAttemptContext } =
+        await import('../../src/durable-objects/task-runner/attempt-storage');
+      const oldContext = taskRunnerAttemptContext(instance.ctx, oldState);
+      const newState = {
+        ...oldState,
+        config: { ...oldState.config, recoveryAttemptId: 'wake-new' },
+      };
+      await instance.ctx.storage.put('state', newState);
+      oldState.completed = true;
+      await expect(oldContext.storage.put('state', oldState)).rejects.toThrow(
+        'Session recovery authority was revoked'
+      );
+      await expect(oldContext.storage.setAlarm(Date.now())).rejects.toThrow(
+        'Session recovery authority was revoked'
+      );
+      expect(await instance.getStatus()).toMatchObject({
+        completed: false,
+        config: { recoveryAttemptId: 'wake-new' },
+      });
+      await instance.ctx.storage.deleteAlarm();
     });
   });
 });

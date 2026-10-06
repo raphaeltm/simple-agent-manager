@@ -9,6 +9,9 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"unicode/utf8"
+
+	"github.com/workspace/vm-agent/internal/config"
 )
 
 func (s *Server) prepareSnapshot(ctx context.Context, workspaceID, sessionID, chatSessionID, runtimeName, token string) (*snapshotPrepareResponse, error) {
@@ -24,6 +27,12 @@ func (s *Server) prepareSnapshot(ctx context.Context, workspaceID, sessionID, ch
 }
 
 func (s *Server) completeSnapshot(ctx context.Context, workspaceID, sessionID, chatSessionID, runtimeName, generation, token string, manifest snapshotManifest) error {
+	var out map[string]interface{}
+	return s.doSnapshotJSON(ctx, http.MethodPost, workspaceID, "/session-snapshot/complete", token, snapshotCompletionPayload(sessionID, chatSessionID, runtimeName, generation, manifest), &out)
+}
+
+// snapshotCompletionPayload is the /session-snapshot/complete request body.
+func snapshotCompletionPayload(sessionID, chatSessionID, runtimeName, generation string, manifest snapshotManifest) map[string]interface{} {
 	artifactSizes := map[string]int64{}
 	if artifact, ok := manifest.Artifacts["home"]; ok {
 		artifactSizes["homeBytes"] = artifact.SizeBytes
@@ -31,7 +40,7 @@ func (s *Server) completeSnapshot(ctx context.Context, workspaceID, sessionID, c
 	if artifact, ok := manifest.Artifacts["wip"]; ok {
 		artifactSizes["wipBytes"] = artifact.SizeBytes
 	}
-	payload := map[string]interface{}{
+	return map[string]interface{}{
 		"chatSessionId":  chatSessionID,
 		"agentSessionId": sessionID,
 		"runtime":        runtimeName,
@@ -42,8 +51,6 @@ func (s *Server) completeSnapshot(ctx context.Context, workspaceID, sessionID, c
 		"manifest":       manifest,
 		"artifactSizes":  artifactSizes,
 	}
-	var out map[string]interface{}
-	return s.doSnapshotJSON(ctx, http.MethodPost, workspaceID, "/session-snapshot/complete", token, payload, &out)
 }
 
 func (s *Server) reportSnapshotProgress(ctx context.Context, workspaceID, chatSessionID, generation, step, token string) error {
@@ -74,9 +81,31 @@ func (s *Server) fetchSnapshotRestore(ctx context.Context, workspaceID, chatSess
 }
 
 func (s *Server) reportSnapshotRestoreResult(ctx context.Context, workspaceID, chatSessionID, status, message, token string) error {
-	payload := map[string]string{"chatSessionId": chatSessionID, "status": status, "message": message}
+	payload := map[string]string{"chatSessionId": chatSessionID, "status": status, "message": s.snapshotRestoreDiagnostic(message)}
 	var out map[string]interface{}
 	return s.doSnapshotJSON(ctx, http.MethodPost, workspaceID, "/session-snapshot/restore-result", token, payload, &out)
+}
+
+func (s *Server) snapshotRestoreDiagnostic(message string) string {
+	redacted := redactTaskCallbackDiagnosticText(message)
+	redacted = strings.Map(func(char rune) rune {
+		if char < 0x20 || char == 0x7f {
+			return ' '
+		}
+		return char
+	}, redacted)
+	limit := config.DefaultErrorReportMaxStringBytes
+	if s != nil && s.config != nil && s.config.ErrorReportStringBytes > 0 {
+		limit = s.config.ErrorReportStringBytes
+	}
+	if len(redacted) <= limit {
+		return redacted
+	}
+	end := limit
+	for end > 0 && !utf8.ValidString(redacted[:end]) {
+		end--
+	}
+	return redacted[:end]
 }
 
 func (s *Server) doSnapshotJSON(ctx context.Context, method, workspaceID, path, token string, payload interface{}, out interface{}) error {

@@ -1,5 +1,24 @@
 # Orphaned Session Detection & Recovery UX
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:**
+>   - PR #133 (534d5f0ba): detection, banner, auto-resume, Stop All and live-vs-DB polling
+>     (`apps/web/src/lib/session-utils.ts:31-35`, `OrphanedSessionsBanner.tsx`,
+>     `apps/web/src/pages/workspace/useSessionState.ts:227-275`, `useWorkspaceCore.ts:127-157`).
+>   - Stop reaches the VM even when the DB already shows the session as stopped
+>     (`apps/api/src/routes/workspaces/agent-sessions.ts:275-291`).
+>   - Phase 4: token refresh on each reconnect and priority for control messages (commit
+>     f75b4c34f); configurable prompt hard timeout (`ACP_PROMPT_TIMEOUT`,
+>     `packages/vm-agent/internal/config/config_load.go:153-154`); LoadSession fallback
+>     reported as an event (`packages/vm-agent/internal/acp/session_host_handshake.go:133-144`).
+> - **Still open:**
+>   - Show "unknown" when the VM agent is unreachable instead of silently falling back to the
+>     DB list (`useWorkspaceCore.ts:151-153`); add a confirmation dialog before Stop All.
+>   - Only mark a session stopped in the DB once the VM confirms, or add a pending/retry state
+>     (`apps/api/src/routes/workspaces/agent-sessions.ts:278-302`).
+>   - A toast, not just an event, when LoadSession falls back to a fresh session.
+
 **Created**: 2026-02-20
 **Priority**: High
 **Tags**: ux, reliability, sessions, acp, agent-lifecycle

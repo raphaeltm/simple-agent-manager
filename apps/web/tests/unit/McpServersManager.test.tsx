@@ -33,6 +33,7 @@ function makeConnection(overrides: Partial<McpConnection> = {}): McpConnection {
     urlHost: 'https://mcp.zapier.com',
     authType: 'bearer',
     hasToken: true,
+    headerNames: [],
     enabled: true,
     createdAt: '2026-08-23T00:00:00Z',
     updatedAt: '2026-08-23T00:00:00Z',
@@ -204,9 +205,7 @@ describe('McpServersManager', () => {
 
   it('hides write controls when the caller cannot write, but still lists servers', async () => {
     listMcpConnections.mockResolvedValue([makeConnection()]);
-    renderWithQuery(
-      <McpServersManager projectId="proj-1" queryScope="user-1" canWrite={false} />
-    );
+    renderWithQuery(<McpServersManager projectId="proj-1" queryScope="user-1" canWrite={false} />);
 
     // Positive liveness assertion beside the absence assertions (rule 62): a crashed render
     // would also satisfy "no buttons".
@@ -214,6 +213,189 @@ describe('McpServersManager', () => {
     expect(screen.queryByRole('button', { name: /^add$/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /disable/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /delete zapier/i })).toBeNull();
+  });
+
+  it('shows which custom headers a server sends, never their values', async () => {
+    listMcpConnections.mockResolvedValue([
+      makeConnection({
+        name: 'composio',
+        authType: 'none',
+        hasToken: false,
+        headerNames: ['x-api-key', 'X-Org_Id'],
+      }),
+    ]);
+    const { container } = renderWithQuery(
+      <McpServersManager projectId={null} queryScope="user-1" />
+    );
+
+    expect(await screen.findByText('x-api-key, X-Org_Id')).toBeInTheDocument();
+    expect(container.querySelector('input[type="password"]')).toBeNull();
+  });
+
+  it('adds a server authenticated only by a custom header (the Composio shape)', async () => {
+    const user = userEvent.setup();
+    renderWithQuery(<McpServersManager projectId="proj-1" queryScope="user-1" />);
+
+    await user.click(await screen.findByRole('button', { name: /^add$/i }));
+    await user.type(screen.getByLabelText(/^Name$/i), 'composio');
+    await user.type(
+      screen.getByLabelText(/MCP endpoint URL/i),
+      'https://backend.composio.dev/v3/mcp/x'
+    );
+    await user.selectOptions(screen.getByLabelText(/Authentication/i), 'none');
+    await user.click(screen.getByRole('button', { name: /add header/i }));
+    await user.type(screen.getByLabelText('Header 1 name'), 'x-api-key');
+    await user.type(screen.getByLabelText('x-api-key value'), 'ak_live_secret');
+
+    createMcpConnection.mockResolvedValue(makeConnection({ name: 'composio' }));
+    await user.click(screen.getByRole('button', { name: /add server/i }));
+
+    await waitFor(() => {
+      expect(createMcpConnection).toHaveBeenCalledWith('proj-1', {
+        name: 'composio',
+        url: 'https://backend.composio.dev/v3/mcp/x',
+        authType: 'none',
+        headers: [{ name: 'x-api-key', value: 'ak_live_secret' }],
+      });
+    });
+  });
+
+  it('removes an unsaved header row before it is ever sent', async () => {
+    const user = userEvent.setup();
+    renderWithQuery(<McpServersManager projectId={null} queryScope="user-1" />);
+
+    await user.click(await screen.findByRole('button', { name: /^add$/i }));
+    await user.click(screen.getByRole('button', { name: /add header/i }));
+    await user.type(screen.getByLabelText('Header 1 name'), 'x-debug');
+    await user.click(screen.getByRole('button', { name: /remove x-debug/i }));
+
+    expect(screen.queryByLabelText('x-debug value')).toBeNull();
+    await user.type(screen.getByLabelText(/^Name$/i), 'zapier');
+    await user.type(screen.getByLabelText(/MCP endpoint URL/i), 'https://mcp.zapier.com/s/abc');
+    await user.type(screen.getByLabelText(/Bearer token/i), 'secret-token');
+    createMcpConnection.mockResolvedValue(makeConnection());
+    await user.click(screen.getByRole('button', { name: /add server/i }));
+
+    await waitFor(() => {
+      expect(createMcpConnection).toHaveBeenCalledWith(null, {
+        name: 'zapier',
+        url: 'https://mcp.zapier.com/s/abc',
+        authType: 'bearer',
+        token: 'secret-token',
+      });
+    });
+  });
+
+  describe('editing a saved server', () => {
+    const saved = makeConnection({
+      name: 'composio',
+      urlHost: 'https://backend.composio.dev',
+      authType: 'none',
+      hasToken: false,
+      headerNames: ['x-api-key', 'x-org-id'],
+    });
+
+    async function openEditor() {
+      const user = userEvent.setup();
+      listMcpConnections.mockResolvedValue([saved]);
+      renderWithQuery(<McpServersManager projectId="proj-1" queryScope="user-1" />);
+      await user.click(await screen.findByRole('button', { name: /edit composio/i }));
+      return user;
+    }
+
+    it('opens prefilled with names only, and keeps every secret that is not retyped', async () => {
+      const user = await openEditor();
+
+      const form = screen.getByRole('form', { name: /edit composio/i });
+      expect(within(form).getByLabelText(/^Name$/i)).toHaveValue('composio');
+      expect(within(form).getByLabelText(/MCP endpoint URL/i)).toHaveValue('');
+      expect(within(form).getByLabelText('x-api-key value')).toHaveValue('');
+      // No other form is offered while one is open.
+      expect(screen.queryByRole('button', { name: /^add$/i })).toBeNull();
+
+      updateMcpConnection.mockResolvedValue(saved);
+      await user.click(within(form).getByRole('button', { name: /save changes/i }));
+
+      await waitFor(() => {
+        expect(updateMcpConnection).toHaveBeenCalledWith('proj-1', 'conn-1', {
+          name: 'composio',
+          authType: 'none',
+          headers: [{ name: 'x-api-key' }, { name: 'x-org-id' }],
+        });
+      });
+      expect(toastSuccess).toHaveBeenCalledWith('MCP server updated');
+    });
+
+    it('rotates one header, removes another and adds a third in a single save', async () => {
+      const user = await openEditor();
+      const form = screen.getByRole('form', { name: /edit composio/i });
+
+      await user.type(within(form).getByLabelText('x-api-key value'), 'ak_rotated');
+      await user.click(within(form).getByRole('button', { name: /remove x-org-id/i }));
+      await user.click(within(form).getByRole('button', { name: /add header/i }));
+      await user.type(within(form).getByLabelText('Header 2 name'), 'x-team');
+      await user.type(within(form).getByLabelText('x-team value'), 'platform');
+
+      updateMcpConnection.mockResolvedValue(saved);
+      await user.click(within(form).getByRole('button', { name: /save changes/i }));
+
+      await waitFor(() => {
+        expect(updateMcpConnection).toHaveBeenCalledWith('proj-1', 'conn-1', {
+          name: 'composio',
+          authType: 'none',
+          headers: [
+            { name: 'x-api-key', value: 'ak_rotated' },
+            { name: 'x-team', value: 'platform' },
+          ],
+        });
+      });
+    });
+
+    it('requires a token when switching a tokenless server to bearer', async () => {
+      const user = await openEditor();
+      const form = screen.getByRole('form', { name: /edit composio/i });
+
+      await user.selectOptions(within(form).getByLabelText(/Authentication/i), 'bearer');
+
+      expect(within(form).getByLabelText(/Bearer token/i)).toBeRequired();
+    });
+
+    it('does not require retyping the saved token of a bearer server', async () => {
+      const user = userEvent.setup();
+      listMcpConnections.mockResolvedValue([makeConnection()]);
+      renderWithQuery(<McpServersManager projectId={null} queryScope="user-1" />);
+      await user.click(await screen.findByRole('button', { name: /edit zapier/i }));
+
+      const form = screen.getByRole('form', { name: /edit zapier/i });
+      expect(within(form).getByLabelText(/Bearer token/i)).not.toBeRequired();
+
+      updateMcpConnection.mockResolvedValue(makeConnection());
+      await user.click(within(form).getByRole('button', { name: /save changes/i }));
+      await waitFor(() => {
+        expect(updateMcpConnection).toHaveBeenCalledWith(null, 'conn-1', {
+          name: 'zapier',
+          authType: 'bearer',
+          headers: [],
+        });
+      });
+    });
+
+    it('keeps the editor open with the typed values when the server rejects the save', async () => {
+      const user = await openEditor();
+      const form = screen.getByRole('form', { name: /edit composio/i });
+      await user.type(within(form).getByLabelText('x-api-key value'), 'ak_rotated');
+
+      updateMcpConnection.mockRejectedValue(
+        new Error('Header "x-api-key" value must not contain line breaks')
+      );
+      await user.click(within(form).getByRole('button', { name: /save changes/i }));
+
+      await waitFor(() =>
+        expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/x-api-key/))
+      );
+      expect(screen.getByRole('form', { name: /edit composio/i })).toBeInTheDocument();
+      expect(screen.getByLabelText('x-api-key value')).toHaveValue('ak_rotated');
+    });
   });
 
   it('reads the project endpoint when given a project id', async () => {

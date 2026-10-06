@@ -79,7 +79,7 @@ If you prefer to create the GitHub App first, use the wizard below to create it 
 
 <GitHubAppSetup />
 
-The GitHub App needs **Pull requests: Read-only** because it subscribes to the `pull_request` webhook event. Enable **Redirect on update** under the Setup URL settings so repository access changes return users to SAM.
+The GitHub App needs **Pull requests: Read-only** for pull request and review webhooks, **Issues: Read-only** for `issues`/`issue_comment`, **Checks: Read-only** for `check_run`/`check_suite`, and **Actions: Read-only** for `workflow_run`. Subscribe it to `push`, `pull_request`, `issues`, `issue_comment`, `repository`, `check_run`, `check_suite`, `workflow_run`, `pull_request_review`, and `pull_request_review_comment`. Enable **Redirect on update** under the Setup URL settings so repository access changes return users to SAM.
 
 :::caution
 "Request user authorization (OAuth) during installation" must be **unchecked** on the GitHub form. When checked, it disables the Setup URL and breaks post-installation redirects.
@@ -170,9 +170,24 @@ installations must add this policy before their next production deployment.
 | `PREVIEW_URL_TTL_SECONDS`                          | Optional lifetime for signed interactive-preview URLs                                                                                               | `300`                                    |
 | `RESOURCE_PREFIX`                                  | Domain-derived Cloudflare resource prefix                                                                                                           | `sa379a6`                                |
 | `CF_CONTAINER_ENABLED`                             | Optional instant-session runtime toggle. Generated deploys set `true`; set `false` to force VM runtime.                                             | `false`                                  |
+| `D1_READ_REPLICATION_MODE`                         | Optional D1 read-replication mode applied on every deploy. Defaults to `auto`; set `disabled` to remove replicas.                                   | `disabled`                               |
+| `D1_SESSION_MODE`                                  | Optional Worker D1 Sessions anchor. Defaults to `first-primary`; set `disabled` to send every query to the primary.                                 | `disabled`                               |
 | `D1_RESTORE_RECOVERY_WINDOW_DAYS`                  | Optional D1 restore window for accounts with narrower retention. Defaults to `30`; range `1`–`30`.                                                  | `7`                                      |
 | `D1_MIGRATION_CHURNING_TABLES`                     | Optional comma-separated `<binding>.<table>` subset of the reviewed retention/expiry table list. May narrow the built-in list but cannot expand it. | `OBSERVABILITY_DATABASE.platform_errors` |
 | `D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT` | Maximum allowed decrease for reviewed churning tables. Defaults to `50`; range `0`–`100`. A decrease exactly at the limit is accepted.              | `25`                                     |
+
+By default, each deploy enables D1 read replication (`read_replication.mode = "auto"`) on the
+main and observability databases, and the API Worker runs each request against a single D1 session so its
+queries after the first can be served by a nearby replica instead of crossing to the primary
+region. This is safe by construction: the session is anchored `first-primary`, so a request never
+sees data older than its own start and cannot miss a write that completed before it began, and
+queries that do not open a session always go to the primary. (It does not promise that a write
+landing _during_ a request is visible to that request's later queries — that is the ordinary
+two-non-atomic-reads race, unchanged by replication and now with a shorter window.) Scheduled sweeps and Durable Objects keep the unsessioned binding. Set
+`D1_READ_REPLICATION_MODE=disabled` to remove the replicas (Cloudflare takes up to 24 hours to
+stop routing to them) or `D1_SESSION_MODE=disabled` to keep the replicas but route every Worker
+query at the primary. Replication needs no extra API-token permission beyond the
+**Account → Cloudflare Workers: D1 → Edit** grant the deploy token already requires.
 
 The reviewed default churning selectors are `DATABASE.deployment_releases`, `DATABASE.github_webhook_deliveries`, `DATABASE.project_files`, `DATABASE.registry_credential_rate_limits`, `DATABASE.session_snapshots`, `DATABASE.sessions`, `DATABASE.trial_waitlist`, `DATABASE.trigger_executions`, `DATABASE.verifications`, `DATABASE.webhook_deliveries`, and `OBSERVABILITY_DATABASE.platform_errors`. All other application tables retain zero row-decrease tolerance. Leave `D1_MIGRATION_CHURNING_TABLES` unset to use the complete reviewed default list.
 
@@ -242,18 +257,23 @@ See [Configuration → Analytics](/docs/reference/configuration/#analytics) for 
 
 ## Step 7: Deploy
 
-Go to Actions → Deploy Production → Run workflow. Choose the `main` branch and enter the exact 40-character commit SHA currently at your fork's `main` tip as `target_commit_sha`. No additional commit is needed after the environment is configured.
+Go to Actions → Deploy Production → Run workflow. Choose the `main` branch. You may leave `target_commit_sha` empty to deploy the current `main` tip, or paste the current `main` tip's exact 40-character commit SHA. Historical commits and non-`main` commits are rejected. No additional commit is needed after the environment is configured.
 
 The workflow:
 
 1. Validates configuration
 2. Provisions infrastructure via Pulumi (D1, KV, R2, DNS), including private VM diagnostic evidence, ProjectData archived tool payloads, one-day temporary uploads, and thirty-day TTS cache objects (`infra/resources/storage.ts:r2BucketLifecycle`)
 3. Runs database migrations
-4. Deploys API Worker and Web UI
-5. Builds and uploads VM Agent binaries
-6. Runs health check
+4. Builds the VM Agent reproducibly and publishes both architectures under immutable keys containing the deployment commit SHA
+5. On a fresh installation only, bootstraps the API Worker and its Tail Worker binding
+6. Deploys the Web UI, applies API Worker secrets in one bulk revision, and publishes the final API Worker code
+7. Runs health checks
 
-Before deploying the API Worker, the workflow reads its applied Durable Object migration tag. A fresh installation creates every namespace with SQLite storage; an existing installation retains its already-applied namespace history and storage backends. This is automatic—do not edit historical migration entries or create namespaces manually.
+On an established installation, the workflow skips the bootstrap Worker revisions. It publishes the immutable VM Agent artifacts before the API Worker can require them, applies secrets in one bulk revision, and then publishes code once. Re-running the same commit reuses an existing artifact only when its digest matches and fails before Worker publication if the bytes differ.
+
+The artifact publisher also initializes missing legacy binaries for unversioned downloads, including later `skip_agent` deployments on a fresh installation. Existing legacy binaries are preserved unchanged so a partial deployment cannot replace bytes still needed by the live Worker.
+
+Before publishing final API Worker code, the workflow reads its applied Durable Object migration tag. A fresh installation creates every namespace with SQLite storage; an existing installation retains its already-applied namespace history and storage backends. This is automatic—do not edit historical migration entries or create namespaces manually.
 
 Pulumi also creates or updates the assets bucket lifecycle resource on every deploy.
 The defaults are `sessionSnapshotTtlDays=7`, `diagnosticIncidentTtlDays=7`,
@@ -298,7 +318,7 @@ If deployment stops with a Durable Object migration-state error:
 - **"tag is not present in the checked-in history"** means `apps/api/wrangler.toml` lost migration entries that were already applied to your Worker — usually an upgrade merge that dropped fork-local `[[migrations]]` entries. Restore the missing entries so the deployed tag appears in the history, then redeploy.
 - **Never delete the API Worker to recover.** Deleting a Worker destroys every Durable Object namespace behind it — all chat sessions, messages, and task state. There is no undo.
 
-VM diagnostic evidence, ProjectData archived tool payloads, and production-disabled terminal-session archive chunks/manifests use the existing application R2 bucket; there is no separate bucket or manually generated secret to configure. Pulumi creates an independent lifecycle rule for the private diagnostic prefix and the deployment sync binds the same bucket as `PROJECT_DATA_ARCHIVE_R2` for ProjectData archival. Optional stack settings are `diagnosticIncidentPrefix` (default `diagnostic-incidents`) and `diagnosticIncidentTtlDays` (default `7`, any positive integer). Keep the diagnostic prefix private and distinct from the reserved application namespaces `agents`, `cli`, `compose-image-artifacts`, `library`, `project-data`, `session-snapshots`, `temp-uploads`, and `tts`; Pulumi rejects overrides whose top-level segment would expire objects owned by one of those features.
+VM diagnostic evidence, ProjectData archived tool payloads, and terminal-session archive chunks/manifests use the existing application R2 bucket; there is no separate bucket or manually generated secret to configure. Pulumi creates an independent lifecycle rule for the private diagnostic prefix and the deployment sync binds the same bucket as `PROJECT_DATA_ARCHIVE_R2` for ProjectData archival. Optional stack settings are `diagnosticIncidentPrefix` (default `diagnostic-incidents`) and `diagnosticIncidentTtlDays` (default `7`, any positive integer). Keep the diagnostic prefix private and distinct from the reserved application namespaces `agents`, `cli`, `compose-image-artifacts`, `library`, `project-data`, `resource-history`, `session-snapshots`, `temp-uploads`, and `tts`; Pulumi rejects overrides whose top-level segment would expire objects owned by one of those features.
 
 ## Verification
 
@@ -318,16 +338,29 @@ If you enabled GitLab in platform configuration, create a test project from a Gi
 
 ## Updating an Existing Self-Hosted Instance
 
-Sync or merge upstream SAM changes into your fork's `main` branch when you want to update. Pushing those changes to the fork does **not** update the running instance by itself. Self-host forks skip the canonical repository's full `main`-push CI path, so the automatic `workflow_run` production deploy is not the update mechanism for forks.
+Pushing upstream changes to your fork's `main` branch does **not** update the running instance by itself. Self-host forks skip the canonical repository's full `main`-push CI path, so the automatic `workflow_run` production deploy is not the update mechanism for forks.
 
-To deploy an update:
+Before you update, read the **For self-hosters & admins** notes in [Recent Product Changes](/docs/guides/recent-product-changes/) for every cycle since your last update. They list new and changed settings, and from the 23–29 September 2026 cycle on, they also say whether updating needs any action from you.
 
-1. Sync your fork's `main` branch with upstream.
+### Option A: Update Self-Hosted Instance workflow (recommended)
+
+The **Update Self-Hosted Instance** workflow (`update-self-hosted.yml`) automates the entire update process. It fetches the upstream release, fast-forwards your fork's `main` branch, and triggers a production deploy automatically.
+
+1. Open **Actions → Update Self-Hosted Instance → Run workflow** in your fork.
+2. Leave `release` as `latest` to use the most recent upstream release, or enter a specific CalVer tag (e.g. `v2026.09.20`).
+3. The workflow fast-forwards `main` to the release commit and triggers Deploy Production.
+4. Wait for the Deploy Production workflow to finish, then re-run the health check above.
+
+If your fork has local commits that are not in the upstream release, the workflow will fail with a fast-forward error. In that case, merge manually and use Option B.
+
+### Option B: Manual deploy
+
+1. Sync your fork's `main` branch with upstream (e.g. via GitHub's "Sync fork" button or `git fetch upstream && git merge upstream/main`).
 2. Open **Actions → Deploy Production → Run workflow** in your fork.
-3. Choose the `main` branch, paste the exact 40-character SHA from that synced commit into `target_commit_sha`, and leave `dry_run` disabled.
+3. Choose the `main` branch and leave `target_commit_sha` empty (it defaults to the current `main` tip). Optionally paste the current `main` tip's exact 40-character SHA. Historical commits are rejected. Leave `dry_run` disabled.
 4. Wait for the workflow to finish, then re-run the health check above.
 
-Use the same manual workflow when you rotate deployment secrets, change GitHub Environment variables, or want to re-apply Pulumi-managed infrastructure.
+Use the manual workflow when you rotate deployment secrets, change GitHub Environment variables, or want to re-apply Pulumi-managed infrastructure.
 
 ## First Login & Admin Access
 
@@ -349,6 +382,33 @@ Notes:
 ### Overriding the sentinel id (optional)
 
 The sentinel user id defaults to `system_anonymous_trials`. If your deployment uses a different sentinel id, set `TRIAL_ANONYMOUS_USER_ID` to that value so the first-user checks exclude it correctly. This variable scopes the login-time self-heal hook and the first-user creation check; the deploy-time migration excludes the sentinel by its `status='system'` flag (not by id), so it stays correct regardless of this setting because the sentinel is always seeded with `status='system'`. Most deployments never need to set this.
+
+### Storage and archive circuit breakers
+
+**Admin → Storage** (`/admin/storage`) shows per-project ProjectData storage telemetry and the archive-sharding circuit breakers. When a project's archive drain fails repeatedly, its breaker opens and the scheduled sweep stops archiving that project until a superadmin closes the breaker. Use the **Close breaker** button on that page (it works from a phone) once the underlying failure is fixed; it calls `POST /api/admin/project-data/storage/:projectId/archive-sharding/circuit-breaker` with `state: "closed"` and the reason you enter. Closing a breaker does not thaw migrations that were already frozen.
+
+Below the breakers, **Problem migrations** lists the individual session migrations that need attention, each with its error code, attempt count, and timestamps:
+
+| Badge        | Meaning                                                                                                                 |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| **Failed**   | An attempt failed. The sweep retries it after `PROJECT_DATA_ARCHIVE_FAILED_RETRY_DELAY_MS` (an hour by default).        |
+| **Poisoned** | It failed `PROJECT_DATA_ARCHIVE_POISON_AFTER_ATTEMPTS` times (3 by default), which is what opens the project's breaker. |
+| **Frozen**   | The sweep has stopped trying it. The **Error code** says why, and whether you need to do anything (below).              |
+
+What to do, by what the card shows:
+
+- **Frozen, error code `precopy_refused`**: nothing. The session was still in use when the sweep tried to copy it, so nothing was copied and it reads normally; the sweep tries it again after `PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS` (a week). The list shows these last.
+- **Frozen, error code `operator_abandoned`**: nothing. Someone already abandoned it, and the card stays in the list as a record. These records are never removed, and the list puts older entries first, so over time they can push newer problems past its limit (`PROJECT_DATA_ARCHIVE_ROLLOUT_LIST_LIMIT_DEFAULT`, 25). When the page says more may exist beyond the limit, open `https://api.yourdomain.com/api/admin/project-data/storage/archive-sharding/problem-migrations?limit=100&projectId=<id>` in a browser tab where you're signed in as a superadmin (100 is the default maximum; leave out `projectId` to list every project).
+- **Failed**: nothing yet. If it keeps failing it turns Poisoned.
+- **Poisoned, or Frozen with any other error code**: read the error and fix its cause first. Then clear the migration with **Abandon** (or a copy-back, if it already deleted its source — see below), and finally **Close breaker** for the project, because abandoning a migration does not close the breaker.
+
+**Abandon** clears a migration that never got as far as deleting the session from the project's live storage. It discards the partial archive copy, returns the session to live storage so it reads normally, and makes it eligible for a later sweep; you have to enter a reason. (The dialog calls these the partial _shard copy_ and _root_, and records the result as `operator_abandoned`.) SAM refuses, and the page shows its reason verbatim, when the migration is still running (its lease has not expired) or has already deleted its source. That second case needs a copy-back instead, which has no button yet: `POST /api/admin/project-data/storage/:projectId/archive-sharding/migrations/:migrationId/copy-back` with a `reason`.
+
+<img
+  src="/images/docs/admin-storage-abandon-dialog-mobile.png"
+  alt="The Abandon migration dialog on a phone for a poisoned migration: it explains that abandoning drops the partial shard copy, returns the session to root, and freezes the journal as operator_abandoned; lists the project, migration, and session IDs; and has a filled-in Reason field above a red Abandon migration button and a Cancel button."
+  width="375"
+/>
 
 ## Teardown
 
@@ -374,7 +434,15 @@ VMs are billed to the cloud provider credential SAM uses for the node. In a typi
 
 When Infrastructure Compute Pools are enabled, the editor uses the provider-native catalog for the
 project, user, or platform credential in scope. The small/medium/large prices below remain useful as
-legacy preset examples, but pool editing is based on concrete provider instance types.
+legacy provider examples, but pool editing is based on concrete provider instance types. Deprecated
+legacy size labels are translated into workload slices for compatibility; they do not choose a
+provider SKU directly, and changing one does not rewrite the native provider payload. Exact native
+offerings carry their own storage/image/architecture request details where the provider API supports
+them. After a VM
+is created, the provider package returns provider-reported server type and resource fields as
+provenance-labeled observed hardware and leaves omitted resource fields unknown
+(`packages/providers/src/native-vm-config.ts`). Persisting those observations into node-pool
+admission records is part of the parent section C integration.
 
 **Hetzner:**
 
@@ -422,7 +490,18 @@ DigitalOcean bills hourly, defaults to `fra1` (Frankfurt), and requires a Full A
 
 UpCloud billing is usage-based. SAM verifies the configured simple plan and zone through the current API before provisioning; the default zone is `de-fra1` (Frankfurt). Create a dedicated API subaccount with API access and storage permissions, then enter its username and password in Settings. Prices are indicative; verify current regional pricing in the UpCloud calculator.
 
+### Unresponsive machines are released automatically
+
+A workspace VM that stops sending heartbeats is released rather than left running up a bill and holding provider quota. That covers every cloud VM SAM manages for workspaces — the ones it provisioned automatically and the ones users created from the **Nodes** page:
+
+1. After `NODE_UNHEALTHY_DRAIN_AFTER_MS` (10 minutes) of silence, SAM posts a notice in each chat on the VM and asks those sessions to sleep, so idle ones can be woken on another machine later. Once every session on the VM is asleep, or if it had none, SAM deletes the VM right away.
+2. Otherwise, after `NODE_UNHEALTHY_RELEASE_AFTER_MS` (30 minutes), SAM deletes the VM through the provider and fails any task still running on it, with a message naming the lost node.
+
+Machines users enrolled themselves (bring-your-own nodes), app-deployment nodes, and Instant containers are left alone. If half or more of the running workspace VMs go silent at once (`NODE_UNHEALTHY_FLEET_MAX_FRACTION`, applied once there are at least `NODE_UNHEALTHY_FLEET_MIN_NODES`, default 3), SAM assumes it has stopped _receiving_ heartbeats rather than that every machine died. It then holds everything — no chat notices, no sleep requests, no deletions — and, once the silence outlasts the two windows combined (40 minutes by default), logs `node_cleanup.fleet_heartbeat_intake_escalation_required` for you to investigate. Each health decision is recorded in the `node_health_events` table, which keeps its rows after the node itself is deleted. The settings are in [Idle & Orphan Node Reaping](/docs/reference/configuration/#idle--orphan-node-reaping).
+
 ## Troubleshooting
+
+For what SAM does with a workspace VM that stops responding, see [Unresponsive machines are released automatically](#unresponsive-machines-are-released-automatically).
 
 ### "error: failed to decrypt state"
 
@@ -480,3 +559,7 @@ Use the D1 database name from the deploy workflow's Pulumi stack output.
 Check Hetzner console for VM status. If the VM is running, SSH in and check `systemctl status vm-agent`.
 
 This page is the canonical troubleshooting reference for self-hosted deployments.
+
+### Compact conversation archives
+
+Compact SQLite/R2 archive writes are opt-in (`PROJECT_DATA_ARCHIVE_COMPACT_ENABLED=false`). Deployment supplies the existing private archive bucket; no new credentials are required. Before enabling, validate history, search and copy-back on staging and choose a migration allowance with room for normal account usage. Keep archived R2 objects for as long as their conversations exist. See the [format, cost controls and recovery limits](/docs/reference/configuration/#compact-archive-shards).

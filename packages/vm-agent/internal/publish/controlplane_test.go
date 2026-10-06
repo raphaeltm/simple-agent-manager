@@ -169,3 +169,45 @@ func TestHTTPControlPlaneSubmitReleaseSendsReleasePayload(t *testing.T) {
 		t.Fatalf("result = %+v", result)
 	}
 }
+
+// A publish can outlive a workspace callback token renewal, so each request reads
+// the current token; the token captured at start is the fallback.
+func TestHTTPControlPlaneUsesTheCurrentTokenForEachRequest(t *testing.T) {
+	var gotAuth []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = append(gotAuth, r.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	current := "token-at-start"
+	cp := NewHTTPControlPlane(HTTPControlPlaneOptions{
+		BaseURL:     srv.URL,
+		Token:       "token-captured-at-start",
+		TokenSource: func() string { return current },
+		Client:      srv.Client(),
+	})
+	complete := func() {
+		t.Helper()
+		if err := cp.CompleteArtifactUploads(context.Background(), "proj1", ArtifactCompleteRequest{}); err != nil {
+			t.Fatalf("CompleteArtifactUploads: %v", err)
+		}
+	}
+
+	complete()
+	current = "token-renewed-mid-publish"
+	complete()
+	current = ""
+	complete()
+
+	want := []string{"Bearer token-at-start", "Bearer token-renewed-mid-publish", "Bearer token-captured-at-start"}
+	if len(gotAuth) != len(want) {
+		t.Fatalf("requests = %v, want %v", gotAuth, want)
+	}
+	for i := range want {
+		if gotAuth[i] != want[i] {
+			t.Fatalf("request %d authorization = %q, want %q", i, gotAuth[i], want[i])
+		}
+	}
+}

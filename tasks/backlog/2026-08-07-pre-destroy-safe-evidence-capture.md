@@ -27,6 +27,6 @@ Raphaël has explicitly prioritized preserving VM evidence at incident time befo
 
 ## References
 
-- `tasks/active/2026-08-07-debugging-experience-overhaul.md` (origin of this follow-up)
-- `tasks/active/2026-08-05-complete-local-debugging-experience.md` (safe snapshot framework)
+- `tasks/archive/2026-08-07-debugging-experience-overhaul.md` (origin of this follow-up)
+- `tasks/archive/2026-08-05-complete-local-debugging-experience.md` (safe snapshot framework)
 - `.claude/rules/47-control-loop-io-budget.md`, `.claude/rules/53-scheduled-handler-isolation-and-liveness-signals.md`

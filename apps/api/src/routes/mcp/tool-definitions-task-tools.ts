@@ -2,6 +2,8 @@
  * MCP tool definitions — task lifecycle, dispatch, and notification tools.
  */
 
+import { resourceRequirementsMcpProperty } from './tool-definitions-shared-fields';
+
 export const TASK_LIFECYCLE_TOOLS = [
   {
     name: 'get_instructions',
@@ -33,7 +35,8 @@ export const TASK_LIFECYCLE_TOOLS = [
     name: 'complete_task',
     description:
       'Mark the current task as completed. Call this after all work is done and changes are pushed. ' +
-      'Optionally include structured evidence describing tests, staging checks, CI, manual verification, PR URL, or notes.',
+      'Optionally include structured evidence describing tests, staging checks, CI, manual verification, or notes. ' +
+      'When work has a pull request, pass its URL as evidence.prUrl so it is saved on the task.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -75,7 +78,11 @@ export const TASK_LIFECYCLE_TOOLS = [
                 additionalProperties: false,
               },
             },
-            prUrl: { type: 'string' },
+            prUrl: {
+              type: 'string',
+              description:
+                'Pull request URL for the completed work. This is persisted as the task output PR URL.',
+            },
             notes: { type: 'string' },
           },
           additionalProperties: false,
@@ -100,9 +107,14 @@ export const TASK_LIFECYCLE_TOOLS = [
         vmSize: {
           type: 'string',
           description:
-            'VM size for the dispatched task (small, medium, large). Defaults to project default.',
+            'Deprecated legacy VM size for the dispatched task (small, medium, large). Prefer resourceRequirements; the canonical compatibility adapter translates legacy tiers. Defaults to project default.',
           enum: ['small', 'medium', 'large'],
         },
+        resourceRequirements: resourceRequirementsMcpProperty({
+          nullable: false,
+          description:
+            'Modern workload requirements for the dispatched task. Known fields: minVcpu, minMemoryGb, minDiskGb, and exclusiveNode. Placement uses explicit CPU, memory, and disk reservations. Omitted fields inherit; explicit false is preserved.',
+        }),
         runtime: {
           type: 'string',
           enum: ['vm', 'cf-container'],
@@ -127,7 +139,7 @@ export const TASK_LIFECYCLE_TOOLS = [
         agentProfileId: {
           type: 'string',
           description:
-            'Agent profile ID or name to use. Profile settings (model, permissionMode, agentType, vmSize, etc.) override project defaults but are overridden by explicit task-level fields.',
+            'Agent profile ID or name to use. Profile settings (model, permissionMode, agentType, resourceRequirements, deprecated vmSize, etc.) override project defaults but are overridden by explicit task-level fields.',
         },
         skillId: {
           type: 'string',

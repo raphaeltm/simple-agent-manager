@@ -33,6 +33,8 @@ export interface ChatSession {
 
 export interface ChatSessionTaskEmbed {
   id: string;
+  /** Canonical, user-safe saved placement diagnostics, including queued runs. */
+  placementExplanationJson?: string | null;
   status: TaskStatus;
   executionStep: TaskExecutionStep | null;
   errorMessage: string | null;

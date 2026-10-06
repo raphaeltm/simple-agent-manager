@@ -139,13 +139,16 @@ import {
   handleRemoveProfileEnvVar,
   handleUpdateAgentProfile,
 } from './profile-tools';
+import { handleChannelTool } from './project-event-channel-tools';
 import {
   handleAckEventDelivery,
   handleGetEvent,
   handleListSubscriptionEvents,
 } from './project-event-tools';
+import { handleScheduleTool } from './project-schedule-tools';
 import {
   handleGetArchivedToolPayloads,
+  handleGetResourceHistory,
   handleGetSessionMessages,
   handleListSessions,
   handleSearchMessages,
@@ -179,6 +182,7 @@ import {
   handleGetWorkspaceDiffSummary,
   handleGetWorkspaceInfo,
 } from './workspace-tools';
+import { handleGetCredentialLimits } from './workspace-tools-credential-limits';
 import {
   handleCheckDnsStatus,
   handleGetPeerAgentOutput,
@@ -328,6 +332,21 @@ mcpRoutes.post('/', async (c) => {
           }
           case 'wait_for_subtasks':
             return c.json(await handleWaitForSubtasks(requestId, toolArgs, tokenData, c.env));
+          case 'create_project_schedule':
+          case 'list_project_schedules':
+          case 'get_project_schedule':
+          case 'reschedule_project_schedule':
+          case 'cancel_project_schedule':
+          case 'reconcile_project_schedule':
+            return c.json(
+              await handleScheduleTool(toolName, requestId, toolArgs, tokenData, c.env)
+            );
+          case 'publish_channel_event':
+          case 'list_event_channels':
+          case 'get_channel_history':
+          case 'follow_event_channel':
+          case 'catch_up_event_channel':
+            return c.json(await handleChannelTool(toolName, requestId, toolArgs, tokenData, c.env));
           case 'create_project_event_subscription':
             return c.json(
               await handleCreateProjectEventSubscription(requestId, toolArgs, tokenData, c.env)
@@ -415,6 +434,8 @@ mcpRoutes.post('/', async (c) => {
             return c.json(
               await handleGetArchivedToolPayloads(requestId, toolArgs, tokenData, c.env)
             );
+          case 'get_resource_history':
+            return c.json(await handleGetResourceHistory(requestId, toolArgs, tokenData, c.env));
           case 'search_messages':
             return c.json(await handleSearchMessages(requestId, toolArgs, tokenData, c.env));
           case 'update_session_topic':
@@ -473,6 +494,8 @@ mcpRoutes.post('/', async (c) => {
             return c.json(await handleGetWorkspaceInfo(requestId, tokenData, c.env));
           case 'get_credential_status':
             return c.json(await handleGetCredentialStatus(requestId, tokenData, c.env));
+          case 'get_credential_limits':
+            return c.json(await handleGetCredentialLimits(requestId, toolArgs, tokenData, c.env));
           case 'get_network_info':
             return c.json(await handleGetNetworkInfo(requestId, tokenData, c.env));
           case 'expose_port':

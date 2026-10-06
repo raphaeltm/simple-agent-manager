@@ -1,46 +1,34 @@
-import type { NodeHealthStatus, NodeResponse } from '@simple-agent-manager/shared';
 import {
   DEFAULT_VM_LOCATION,
   DEFAULT_VM_SIZE,
   getLocationsForProvider,
   isValidLocationForProvider,
 } from '@simple-agent-manager/shared';
-import { and, desc, eq, inArray, ne } from 'drizzle-orm';
+import { and, desc, eq, ne } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { ulid } from '../lib/ulid';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireNodeOwnership } from '../middleware/node-auth';
 import { CreateNodeSchema, jsonValidator } from '../schemas';
-import { collectEnvironmentRouteHostnames } from '../services/deployment-routing';
-import { cleanupAppRouteDNSRecords } from '../services/dns';
-import { signNodeManagementToken } from '../services/jwt';
+import { resolveCanonicalVmAllocationPlan } from '../services/canonical-vm-allocation';
+import { scheduleDirectProvisioning } from '../services/direct-provisioning';
 import { getRuntimeLimits } from '../services/limits';
-import {
-  fetchNodeAgent,
-  getNodeAgentRequestTimeoutMs,
-  listNodeEventsOnNode,
-  nodeAgentRawRequest,
-  stopWorkspaceOnNode,
-} from '../services/node-agent';
-import {
-  getNodeLogsFromNode,
-  getNodeSystemInfoFromNode,
-  listNodeContainersFromNode,
-} from '../services/node-agent-diagnostics';
-import { finalizeDeletion as finalizeNodeLifecycleDeletion } from '../services/node-lifecycle';
-import {
-  createNodeRecord,
-  deleteNodeResources,
-  provisionNode,
-  retireDeletedDeploymentNodeRecord,
-  stopNodeResources,
-} from '../services/nodes';
+import { stopWorkspaceOnNode } from '../services/node-agent';
+import { createNodeRecord, stopNodeResources } from '../services/nodes';
 import { recordNodeRoutingMetric } from '../services/telemetry';
+import { deleteNodeRoute } from './nodes/delete';
+import { nodeDiagnosticsRoutes } from './nodes/diagnostics';
+import {
+  loadDeploymentEnvironmentSummaries,
+  refreshNodeHealth,
+  toNodeResponse,
+} from './nodes/response';
 
 const nodesRoutes = new Hono<{ Bindings: Env }>();
 
@@ -67,129 +55,17 @@ nodesRoutes.use('/*', async (c, next) => {
   });
 });
 
-function deriveHealthStatus(node: schema.Node, now: number): NodeHealthStatus {
-  if (node.status !== 'running') {
-    return (node.healthStatus as NodeHealthStatus) || 'stale';
+function optionalPositiveInteger(value: number | undefined, field: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isInteger(value) || value <= 0) {
+    throw errors.badRequest(`${field} must be a positive integer`);
   }
-
-  if (!node.lastHeartbeatAt) {
-    return 'stale';
-  }
-
-  const lastHeartbeat = Date.parse(node.lastHeartbeatAt);
-  if (Number.isNaN(lastHeartbeat)) {
-    return 'unhealthy';
-  }
-
-  const ageSeconds = Math.max(0, Math.floor((now - lastHeartbeat) / 1000));
-  const staleThreshold = Math.max(1, node.heartbeatStaleAfterSeconds || 180);
-
-  if (ageSeconds <= staleThreshold) {
-    return 'healthy';
-  }
-  if (ageSeconds <= staleThreshold * 2) {
-    return 'stale';
-  }
-  return 'unhealthy';
+  return value;
 }
 
-type DeploymentEnvironmentNodeSummary = NonNullable<NodeResponse['deploymentEnvironments']>[number];
-
-function toNodeResponse(
-  node: schema.Node,
-  deploymentEnvironments: DeploymentEnvironmentNodeSummary[] = []
-): NodeResponse {
-  let lastMetrics: NodeResponse['lastMetrics'] = null;
-  if (node.lastMetrics) {
-    try {
-      lastMetrics = JSON.parse(node.lastMetrics);
-    } catch {
-      // Ignore malformed JSON in lastMetrics
-    }
-  }
-
-  return {
-    id: node.id,
-    name: node.name,
-    status: node.status as NodeResponse['status'],
-    healthStatus: node.healthStatus as NodeResponse['healthStatus'],
-    cloudProvider: (node.cloudProvider as NodeResponse['cloudProvider']) ?? null,
-    vmSize: node.vmSize as NodeResponse['vmSize'],
-    vmLocation: node.vmLocation as NodeResponse['vmLocation'],
-    providerInstanceType: node.providerInstanceType ?? null,
-    providerInstanceVcpuCount: node.providerInstanceVcpuCount ?? null,
-    providerInstanceMemoryMb: node.providerInstanceMemoryMb ?? null,
-    providerInstanceDiskGb: node.providerInstanceDiskGb ?? null,
-    providerInstancePriceDisplay: node.providerInstancePriceDisplay ?? null,
-    providerInstancePriceCurrency: node.providerInstancePriceCurrency ?? null,
-    providerInstancePriceMonthlyCents: node.providerInstancePriceMonthlyCents ?? null,
-    providerInstancePriceHourlyMicros: node.providerInstancePriceHourlyMicros ?? null,
-    nodeRole: (node.nodeRole ?? 'workspace') as NodeResponse['nodeRole'],
-    nodeClass: (node.nodeClass ?? 'managed') as NodeResponse['nodeClass'],
-    transport: (node.transport as NodeResponse['transport']) ?? null,
-    tunnelName: node.tunnelName ?? null,
-    ipAddress: node.ipAddress,
-    lastHeartbeatAt: node.lastHeartbeatAt,
-    heartbeatStaleAfterSeconds: node.heartbeatStaleAfterSeconds,
-    lastMetrics,
-    deploymentEnvironments,
-    errorMessage: node.errorMessage,
-    createdAt: node.createdAt,
-    updatedAt: node.updatedAt,
-  };
-}
-
-async function loadDeploymentEnvironmentSummaries(
-  db: ReturnType<typeof drizzle<typeof schema>>,
-  nodeIds: string[]
-): Promise<Map<string, DeploymentEnvironmentNodeSummary[]>> {
-  if (nodeIds.length === 0) return new Map();
-
-  const rows = await db
-    .select({
-      id: schema.deploymentEnvironments.id,
-      projectId: schema.deploymentEnvironments.projectId,
-      name: schema.deploymentEnvironments.name,
-      nodeId: schema.deploymentEnvironments.nodeId,
-    })
-    .from(schema.deploymentEnvironments)
-    .where(inArray(schema.deploymentEnvironments.nodeId, nodeIds));
-
-  const byNode = new Map<string, DeploymentEnvironmentNodeSummary[]>();
-  for (const row of rows) {
-    if (!row.nodeId) continue;
-    const existing = byNode.get(row.nodeId) ?? [];
-    existing.push({ id: row.id, projectId: row.projectId, name: row.name });
-    byNode.set(row.nodeId, existing);
-  }
-  for (const environments of byNode.values()) {
-    environments.sort((a, b) => a.name.localeCompare(b.name));
-  }
-  return byNode;
-}
-
-async function refreshNodeHealth(
-  db: ReturnType<typeof drizzle<typeof schema>>,
-  node: schema.Node
-): Promise<schema.Node> {
-  const computedHealth = deriveHealthStatus(node, Date.now());
-  if (computedHealth === node.healthStatus) {
-    return node;
-  }
-
-  await db
-    .update(schema.nodes)
-    .set({
-      healthStatus: computedHealth,
-      updatedAt: new Date().toISOString(),
-    })
-    .where(eq(schema.nodes.id, node.id));
-
-  return {
-    ...node,
-    healthStatus: computedHealth,
-    updatedAt: new Date().toISOString(),
-  };
+function optionalTrimmedString(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed || undefined;
 }
 
 nodesRoutes.get('/', async (c) => {
@@ -202,7 +78,7 @@ nodesRoutes.get('/', async (c) => {
     .where(and(eq(schema.nodes.userId, userId), ne(schema.nodes.status, 'deleted')))
     .orderBy(desc(schema.nodes.createdAt));
 
-  const hydrated = await Promise.all(nodes.map((node) => refreshNodeHealth(db, node)));
+  const hydrated = await Promise.all(nodes.map((node) => refreshNodeHealth(db, node, c.env)));
   const deploymentSummaries = await loadDeploymentEnvironmentSummaries(
     db,
     hydrated
@@ -255,16 +131,42 @@ nodesRoutes.post('/', jsonValidator(CreateNodeSchema), async (c) => {
     );
   }
 
-  // Enforce compute quota when platform credentials will be used
-  const { resolveCredentialSource } = await import('../services/provider-credentials');
-  const credResult = await resolveCredentialSource(db, userId, provider ?? undefined);
-  if (!credResult) {
-    throw errors.forbidden(
-      'Cloud provider credentials required. Connect your account in Settings.'
-    );
+  const providerInstanceType =
+    optionalTrimmedString(body.providerInstanceType) ?? optionalTrimmedString(body.nativeOffering);
+  const providerInstanceBootDiskSizeGb = optionalPositiveInteger(
+    body.bootDiskSizeGb,
+    'bootDiskSizeGb'
+  );
+  const providerInstanceImage = optionalTrimmedString(body.image) ?? null;
+  const providerInstanceArchitecture = body.architecture ?? null;
+  const allocation = await resolveCanonicalVmAllocationPlan(db, c.env, {
+    entryPoint: 'direct-node',
+    taskId: ulid(),
+    userId,
+    projectId: null,
+    explicit: {
+      vmSize: body.vmSize ?? DEFAULT_VM_SIZE,
+      provider: provider ?? null,
+      vmLocation,
+      native: {
+        providerInstanceType,
+        providerInstanceBootDiskSizeGb,
+        providerInstanceImage,
+        providerInstanceArchitecture,
+      },
+    },
+    credentialProjectPolicy: 'inherited-or-none',
+    taskModeDefault: 'task',
+    workloadRole: 'workspace',
+    credentialsRequiredMessage:
+      'Cloud provider credentials required. Connect your account in Settings.',
+  });
+  if ('error' in allocation) {
+    if (allocation.errorKind === 'credentials') throw errors.forbidden(allocation.error);
+    throw errors.badRequest(allocation.error);
   }
   if (
-    credResult.credentialSource === 'platform' &&
+    allocation.quotaCredentialSource === 'platform' &&
     c.env.COMPUTE_QUOTA_ENFORCEMENT_ENABLED !== 'false'
   ) {
     const { checkQuotaForUser } = await import('../services/compute-quotas');
@@ -279,11 +181,19 @@ nodesRoutes.post('/', jsonValidator(CreateNodeSchema), async (c) => {
 
   const created = await createNodeRecord(c.env, {
     userId,
+    credentialAttributionUserId: allocation.credentialAttributionUserId,
+    credentialAttributionProjectId: allocation.credentialAttributionProjectId,
+    credentialAttributionSource: allocation.credentialAttributionSource,
     name: body.name.trim(),
-    vmSize: body.vmSize ?? DEFAULT_VM_SIZE,
-    vmLocation,
-    cloudProvider: provider,
+    vmSize: allocation.vmSize,
+    vmLocation: allocation.vmLocation,
+    cloudProvider: allocation.effectiveProvider,
+    providerInstanceType: allocation.providerInstanceType,
+    providerInstanceBootDiskSizeGb: allocation.providerInstanceBootDiskSizeGb,
+    providerInstanceImage: allocation.providerInstanceImage,
+    providerInstanceArchitecture: allocation.providerInstanceArchitecture,
     heartbeatStaleAfterSeconds: limits.nodeHeartbeatStaleSeconds,
+    capacityPlacementSnapshot: allocation.capacityPlacementSnapshot,
   });
 
   recordNodeRoutingMetric(
@@ -297,7 +207,7 @@ nodesRoutes.post('/', jsonValidator(CreateNodeSchema), async (c) => {
     c.env
   );
 
-  c.executionCtx.waitUntil(provisionNode(created.id, c.env));
+  await scheduleDirectProvisioning(c.env, { nodeId: created.id, userId });
   return c.json(created, 201);
 });
 
@@ -308,7 +218,7 @@ nodesRoutes.get('/:id', async (c) => {
     throw errors.notFound('Node');
   }
 
-  const refreshed = await refreshNodeHealth(db, node);
+  const refreshed = await refreshNodeHealth(db, node, c.env);
   const deploymentSummaries = await loadDeploymentEnvironmentSummaries(db, [refreshed.id]);
   return c.json(toNodeResponse(refreshed, deploymentSummaries.get(refreshed.id) ?? []));
 });
@@ -353,373 +263,8 @@ nodesRoutes.post('/:id/stop', async (c) => {
   return c.json({ status: 'stopped' });
 });
 
-nodesRoutes.delete('/:id', async (c) => {
-  const nodeId = c.req.param('id');
-  const userId = getUserId(c);
-  const db = drizzle(c.env.DATABASE, { schema });
-  const node = await requireNodeOwnership(c, nodeId);
+nodesRoutes.delete('/:id', deleteNodeRoute);
 
-  if (!node) {
-    throw errors.notFound('Node');
-  }
-
-  const cleanup = await deleteNodeResources(nodeId, userId, c.env);
-  if ((node.nodeRole ?? 'workspace') === 'deployment' && cleanup.errors.length > 0) {
-    throw errors.conflict(
-      `Deployment node could not be fully deprovisioned: ${cleanup.errors.join('; ')}`
-    );
-  }
-
-  // Deprovision app-route DNS records for any deployment environments hosted on
-  // this node. The environment rows survive (nodeId is set null by the FK), but
-  // their grey-cloud A records would otherwise point at the now-freed VM IP.
-  const hostedEnvs = await db
-    .select({ id: schema.deploymentEnvironments.id })
-    .from(schema.deploymentEnvironments)
-    .where(eq(schema.deploymentEnvironments.nodeId, nodeId));
-
-  for (const envRow of hostedEnvs) {
-    const releases = await db
-      .select({ manifest: schema.deploymentReleases.manifest })
-      .from(schema.deploymentReleases)
-      .where(eq(schema.deploymentReleases.environmentId, envRow.id));
-
-    const hostnames = collectEnvironmentRouteHostnames(
-      releases.map((r) => r.manifest),
-      {
-        environmentId: envRow.id,
-        baseDomain: c.env.BASE_DOMAIN,
-        routePortBase: c.env.DEPLOYMENT_ROUTE_PORT_BASE,
-        routePortSpan: c.env.DEPLOYMENT_ROUTE_PORT_SPAN,
-      }
-    );
-
-    const dnsRecordsDeleted = await cleanupAppRouteDNSRecords(hostnames, c.env);
-    log.info('node.deployment_dns_cleaned_up', {
-      nodeId,
-      environmentId: envRow.id,
-      dnsRecordsDeleted,
-    });
-  }
-
-  if ((node.nodeRole ?? 'workspace') === 'deployment') {
-    await retireDeletedDeploymentNodeRecord(db, c.env, nodeId, userId);
-  } else {
-    await db
-      .delete(schema.workspaces)
-      .where(and(eq(schema.workspaces.nodeId, nodeId), eq(schema.workspaces.userId, userId)));
-
-    await db
-      .delete(schema.nodes)
-      .where(and(eq(schema.nodes.id, nodeId), eq(schema.nodes.userId, userId)));
-  }
-
-  await finalizeNodeLifecycleDeletion(c.env, nodeId, userId);
-
-  return c.json({ success: true });
-});
-
-/**
- * GET /:id/events — Proxy node events from the VM Agent.
- * Node events are proxied through the control plane because vm-* DNS records are
- * DNS-only (no Cloudflare SSL termination), so the browser cannot reach them directly
- * from an HTTPS page. Workspace events use ws-{id} subdomains which ARE Cloudflare-proxied.
- */
-nodesRoutes.get('/:id/events', async (c) => {
-  const nodeId = c.req.param('id');
-  const userId = getUserId(c);
-  const node = await requireNodeOwnership(c, nodeId);
-
-  if (!node) {
-    throw errors.notFound('Node');
-  }
-
-  if (node.status !== 'running') {
-    return c.json({ events: [], nextCursor: null });
-  }
-
-  const limit = Math.min(Math.max(Number(c.req.query('limit')) || 100, 1), 500);
-
-  try {
-    const result = await listNodeEventsOnNode(nodeId, c.env, userId, limit);
-    return c.json(result);
-  } catch {
-    // Node agent may be unreachable — return empty rather than 500
-    return c.json({ events: [], nextCursor: null });
-  }
-});
-
-/**
- * GET /:id/system-info — Proxy system info from the VM Agent.
- * Returns CPU, memory, disk, Docker, software versions, and agent info.
- * Only available when the node is running.
- */
-nodesRoutes.get('/:id/system-info', async (c) => {
-  const nodeId = c.req.param('id');
-  const userId = getUserId(c);
-  const node = await requireNodeOwnership(c, nodeId);
-
-  if (!node) {
-    throw errors.notFound('Node');
-  }
-
-  if (node.status !== 'running') {
-    return c.json(
-      { error: 'NODE_NOT_RUNNING', message: 'System info unavailable when node is not running' },
-      400
-    );
-  }
-
-  try {
-    const result = await getNodeSystemInfoFromNode(nodeId, c.env, userId);
-    return c.json(result);
-  } catch {
-    // Node agent may be unreachable — return 503
-    return c.json({ error: 'UNAVAILABLE', message: 'Could not reach node agent' }, 503);
-  }
-});
-
-/**
- * GET /:id/logs — Proxy node logs from the VM Agent.
- * Passes through query params (source, level, container, since, until, search, cursor, limit)
- * to the VM Agent's /logs endpoint. Only available when the node is running.
- */
-nodesRoutes.get('/:id/logs', async (c) => {
-  const nodeId = c.req.param('id');
-  const userId = getUserId(c);
-  const node = await requireNodeOwnership(c, nodeId);
-
-  if (!node) {
-    throw errors.notFound('Node');
-  }
-
-  if (node.status !== 'running') {
-    return c.json({ entries: [], nextCursor: null, hasMore: false });
-  }
-
-  // Pass through all query params to the VM Agent
-  const queryString = new URL(c.req.url).searchParams.toString();
-
-  try {
-    const result = await getNodeLogsFromNode(nodeId, c.env, userId, queryString);
-    return c.json(result);
-  } catch {
-    // Node agent may be unreachable — return empty rather than 500
-    return c.json({ entries: [], nextCursor: null, hasMore: false });
-  }
-});
-
-/**
- * GET /:id/containers — Proxy Docker container list from the VM Agent.
- * Used by log filters to offer per-container selection.
- */
-nodesRoutes.get('/:id/containers', async (c) => {
-  const nodeId = c.req.param('id');
-  const userId = getUserId(c);
-  const node = await requireNodeOwnership(c, nodeId);
-
-  if (!node) {
-    throw errors.notFound('Node');
-  }
-
-  if (node.status !== 'running') {
-    return c.json({ containers: [], nodeId, unavailableReason: 'node_not_running' });
-  }
-
-  try {
-    const result = await listNodeContainersFromNode(nodeId, c.env, userId);
-    return c.json({
-      ...(typeof result === 'object' && result !== null ? result : { containers: [] }),
-      nodeId,
-    });
-  } catch {
-    return c.json({ containers: [], nodeId, unavailableReason: 'node_agent_unreachable' }, 503);
-  }
-});
-
-/**
- * GET /:id/logs/stream — WebSocket proxy for real-time log streaming from the VM Agent.
- * Authenticates the user, verifies node ownership, signs a management JWT,
- * and proxies the WebSocket connection to the VM agent's /logs/stream endpoint.
- */
-nodesRoutes.get('/:id/logs/stream', async (c) => {
-  const nodeId = c.req.param('id');
-  const userId = getUserId(c);
-  const node = await requireNodeOwnership(c, nodeId);
-
-  if (!node) {
-    throw errors.notFound('Node');
-  }
-
-  if (node.status !== 'running') {
-    throw errors.badRequest(`Node is not running (status: ${node.status})`);
-  }
-
-  // Sign a management JWT for the VM agent
-  const { token } = await signNodeManagementToken(userId, nodeId, null, c.env);
-
-  // Build the VM agent WebSocket URL with all query params
-  const clientUrl = new URL(c.req.url);
-  const vmProtocol = c.env.VM_AGENT_PROTOCOL || 'https';
-  const vmPort = c.env.VM_AGENT_PORT || '8443';
-  const vmUrl = new URL(
-    `${vmProtocol}://${nodeId.toLowerCase()}.vm.${c.env.BASE_DOMAIN}:${vmPort}/logs/stream`
-  );
-  vmUrl.searchParams.set('token', token);
-
-  // Forward filter params from client
-  for (const [key, value] of clientUrl.searchParams.entries()) {
-    if (key !== 'token') {
-      vmUrl.searchParams.set(key, value);
-    }
-  }
-
-  // Proxy only WebSocket handshake headers to the VM agent. Browser/control-plane
-  // credentials such as Cookie or Authorization must not be forwarded because
-  // VM-agent diagnostic auth gives Authorization precedence over the query token.
-  const clientHeaders = c.req.raw.headers;
-  const headers = new Headers();
-  for (const name of [
-    'Upgrade',
-    'Connection',
-    'Sec-WebSocket-Key',
-    'Sec-WebSocket-Version',
-    'Sec-WebSocket-Protocol',
-    'Sec-WebSocket-Extensions',
-    'Origin',
-  ]) {
-    const value = clientHeaders.get(name);
-    if (value) {
-      headers.set(name, value);
-    }
-  }
-  headers.set('Authorization', `Bearer ${token}`);
-  headers.set('X-SAM-Node-Id', nodeId);
-
-  return fetchNodeAgent(
-    nodeId,
-    c.env,
-    vmUrl.toString(),
-    {
-      method: 'GET',
-      headers,
-    },
-    getNodeAgentRequestTimeoutMs(c.env)
-  );
-});
-
-/**
- * GET /:id/events/export — Download the raw SQLite event database from the VM Agent.
- * Streams the binary file through to the browser as an attachment download.
- */
-nodesRoutes.get('/:id/events/export', async (c) => {
-  const nodeId = c.req.param('id');
-  const userId = getUserId(c);
-  const node = await requireNodeOwnership(c, nodeId);
-
-  if (!node) {
-    throw errors.notFound('Node');
-  }
-  if (node.status !== 'running') {
-    throw errors.badRequest('Node is not running');
-  }
-
-  try {
-    const response = await nodeAgentRawRequest(nodeId, c.env, '/events/export', userId);
-    if (!response.ok) {
-      const body = await response.text().catch(() => '');
-      throw new Error(`VM agent returned ${response.status}: ${body}`);
-    }
-
-    return new Response(response.body, {
-      status: 200,
-      headers: {
-        'Content-Type': response.headers.get('Content-Type') || 'application/x-sqlite3',
-        'Content-Disposition':
-          response.headers.get('Content-Disposition') ||
-          `attachment; filename="events-${nodeId}.db"`,
-        'Content-Length': response.headers.get('Content-Length') || '',
-      },
-    });
-  } catch {
-    throw errors.badRequest('Could not download events database — node agent may be unreachable');
-  }
-});
-
-/**
- * GET /:id/metrics/export — Download the raw SQLite metrics database from the VM Agent.
- * Streams the binary file through to the browser as an attachment download.
- */
-nodesRoutes.get('/:id/metrics/export', async (c) => {
-  const nodeId = c.req.param('id');
-  const userId = getUserId(c);
-  const node = await requireNodeOwnership(c, nodeId);
-
-  if (!node) {
-    throw errors.notFound('Node');
-  }
-  if (node.status !== 'running') {
-    throw errors.badRequest('Node is not running');
-  }
-
-  try {
-    const response = await nodeAgentRawRequest(nodeId, c.env, '/metrics/export', userId);
-    if (!response.ok) {
-      const body = await response.text().catch(() => '');
-      throw new Error(`VM agent returned ${response.status}: ${body}`);
-    }
-
-    return new Response(response.body, {
-      status: 200,
-      headers: {
-        'Content-Type': response.headers.get('Content-Type') || 'application/x-sqlite3',
-        'Content-Disposition':
-          response.headers.get('Content-Disposition') ||
-          `attachment; filename="metrics-${nodeId}.db"`,
-        'Content-Length': response.headers.get('Content-Length') || '',
-      },
-    });
-  } catch {
-    throw errors.badRequest('Could not download metrics database — node agent may be unreachable');
-  }
-});
-
-/**
- * GET /:id/debug-package — Download a tar.gz archive with all diagnostic data
- * from the VM Agent: logs (cloud-init, journald, Docker), metrics DB, events DB,
- * system info, boot events, and system state snapshots.
- */
-nodesRoutes.get('/:id/debug-package', async (c) => {
-  const nodeId = c.req.param('id');
-  const userId = getUserId(c);
-  const node = await requireNodeOwnership(c, nodeId);
-
-  if (!node) {
-    throw errors.notFound('Node');
-  }
-  if (node.status !== 'running') {
-    throw errors.badRequest('Node is not running');
-  }
-
-  try {
-    const response = await nodeAgentRawRequest(nodeId, c.env, '/debug-package', userId);
-    if (!response.ok) {
-      const body = await response.text().catch(() => '');
-      throw new Error(`VM agent returned ${response.status}: ${body}`);
-    }
-
-    return new Response(response.body, {
-      status: 200,
-      headers: {
-        'Content-Type': response.headers.get('Content-Type') || 'application/gzip',
-        'Content-Disposition':
-          response.headers.get('Content-Disposition') ||
-          `attachment; filename="debug-${nodeId}.tar.gz"`,
-      },
-    });
-  } catch {
-    throw errors.badRequest('Could not download debug package — node agent may be unreachable');
-  }
-});
+nodesRoutes.route('/', nodeDiagnosticsRoutes);
 
 export { nodesRoutes };

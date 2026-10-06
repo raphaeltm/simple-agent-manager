@@ -50,6 +50,7 @@ const AdminProjectEvents = lazyNamed(
   () => import('./pages/AdminProjectEvents'),
   'AdminProjectEvents'
 );
+const AdminStorage = lazyNamed(() => import('./pages/AdminStorage'), 'AdminStorage');
 const AdminStream = lazyNamed(() => import('./pages/AdminStream'), 'AdminStream');
 const AdminTrials = lazyNamed(() => import('./pages/AdminTrials'), 'AdminTrials');
 const AdminUsers = lazyNamed(() => import('./pages/AdminUsers'), 'AdminUsers');
@@ -143,6 +144,7 @@ const ProjectTriggerDetail = lazyNamed(
   'ProjectTriggerDetail'
 );
 const ProjectTriggers = lazyNamed(() => import('./pages/ProjectTriggers'), 'ProjectTriggers');
+const ProjectEvents = lazyNamed(() => import('./pages/ProjectEvents'), 'ProjectEvents');
 const SamPrototype = lazyNamed(() => import('./pages/SamPrototype'), 'SamPrototype');
 const Settings = lazyNamed(() => import('./pages/Settings'), 'Settings');
 const SettingsAgents = lazyNamed(() => import('./pages/SettingsAgents'), 'SettingsAgents');
@@ -327,6 +329,7 @@ export default function App() {
                         </Route>
                         <Route path="activity" element={page(<ProjectActivity />)} />
                         <Route path="notifications" element={page(<ProjectNotifications />)} />
+                        <Route path="events" element={page(<ProjectEvents />)} />
                         <Route path="triggers" element={page(<ProjectTriggers />)} />
                         <Route
                           path="triggers/:triggerId"
@@ -377,6 +380,7 @@ export default function App() {
                         <Route path="integrations" element={page(<AdminPlatformConfig />)} />
                         <Route path="credentials" element={page(<AdminPlatformCredentials />)} />
                         <Route path="infrastructure" element={page(<AdminInfrastructure />)} />
+                        <Route path="storage" element={page(<AdminStorage />)} />
                         <Route path="ai-proxy" element={page(<AdminAIProxy />)} />
                         <Route path="trials" element={page(<AdminTrials />)} />
                         <Route path="costs" element={page(<AdminCosts />)} />

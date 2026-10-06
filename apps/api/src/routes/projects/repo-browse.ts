@@ -1,3 +1,4 @@
+import { OCTET_STREAM_MIME } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 import { type Context, Hono } from 'hono';
 
@@ -6,6 +7,11 @@ import type { Env } from '../../env';
 import { getUserId } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireProjectAccess } from '../../middleware/project-auth';
+import {
+  contentDispositionFilename,
+  INERT_DOCUMENT_CSP,
+  isActiveContentType,
+} from '../../services/file-serving-policy';
 import { getExternalInstallationId } from '../../services/github-installation-ids';
 import type { RepoBrowser } from '../../services/repo-browse';
 import { resolveRepoBrowser } from '../../services/repo-browse';
@@ -15,12 +21,6 @@ const repoBrowseRoutes = new Hono<{ Bindings: Env }>();
 
 /** Allowed characters in a git ref/branch name (rejects control chars, whitespace, CRLF, NUL). */
 const VALID_REF = /^[A-Za-z0-9._\-/]+$/;
-/**
- * MIME types the browser will execute as script if served inline. We force these
- * to octet-stream + attachment so a committed .svg/.html cannot run as stored XSS
- * on the api origin. Mirrors apps/api/src/routes/library.ts.
- */
-const DANGEROUS_MIMES = ['text/html', 'application/javascript', 'application/xhtml+xml', 'image/svg+xml', 'text/xml'];
 
 /** Validate a git ref: non-empty, no `..`, only ref-safe characters. */
 function validateRef(ref: string, label = 'ref'): string {
@@ -98,20 +98,20 @@ repoBrowseRoutes.get('/:id/repo/file', async (c) => {
 });
 
 /** GET /:id/repo/raw?ref=&path= — raw file bytes (images, binary, oversized).
- *  Script-capable MIME types are forced to a download so a committed .svg/.html
+ *  Active content types are forced to a download so a committed .svg/.html
  *  cannot execute as stored XSS on the api origin. */
 repoBrowseRoutes.get('/:id/repo/raw', async (c) => {
   const { browser } = await resolveBrowser(c);
   const path = requirePath(c);
   const { bytes, contentType } = await browser.getRawFile(requireRef(c), path);
-  const safe = DANGEROUS_MIMES.includes(contentType.toLowerCase());
-  const filename = (path.split('/').pop() || 'file').replace(/[^\x20-\x7E]|["\\;]/g, '_');
+  const attachment = isActiveContentType(contentType);
+  const filename = contentDispositionFilename(path.split('/').pop() || 'file');
   return new Response(bytes as unknown as BodyInit, {
     headers: {
-      'Content-Type': safe ? 'application/octet-stream' : contentType,
+      'Content-Type': attachment ? OCTET_STREAM_MIME : contentType,
       'Content-Length': String(bytes.length),
-      'Content-Disposition': `${safe ? 'attachment' : 'inline'}; filename="${filename}"`,
-      'Content-Security-Policy': "default-src 'none'; sandbox",
+      'Content-Disposition': `${attachment ? 'attachment' : 'inline'}; filename="${filename}"`,
+      'Content-Security-Policy': INERT_DOCUMENT_CSP,
       'X-Content-Type-Options': 'nosniff',
     },
   });

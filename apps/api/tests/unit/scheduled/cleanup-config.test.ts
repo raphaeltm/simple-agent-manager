@@ -17,7 +17,8 @@ import {
 
 const logWarn = vi.fn();
 
-vi.mock('../../../src/lib/logger', () => ({
+vi.mock('../../../src/lib/logger', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/logger')>()),
   log: { info: vi.fn(), warn: (...a: unknown[]) => logWarn(...a), error: vi.fn(), debug: vi.fn() },
 }));
 vi.mock('../../../src/services/node-agent', () => ({

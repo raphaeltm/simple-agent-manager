@@ -1,10 +1,17 @@
 import { Hono } from 'hono';
 
+import {
+  type GroupedFtsWallRecoveryConfig,
+  resolveGroupedFtsWallRecoveryConfig,
+} from '../../durable-objects/project-data/grouped-fts-wall-recovery';
 import { resolveStorageSafetyConfig } from '../../durable-objects/project-data/storage-safety';
 import { ProjectDataManualToolPayloadCleanupStateError } from '../../durable-objects/project-data/tool-payload-cleanup-types';
 import type { Env } from '../../env';
+import { log } from '../../lib/logger';
+import { getUserId } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import {
+  abandonProjectDataArchiveMigration,
   copyBackProjectDataArchiveMigration,
   getProjectDataArchiveFrozenIntentInspectionConfig,
   inspectFrozenProjectDataArchiveIntents,
@@ -18,6 +25,7 @@ import {
   ProjectDataArchiveCircuitBreakerSchema,
   ProjectDataArchiveFreezeProjectSchema,
   ProjectDataArchiveRecoveryControlSchema,
+  ProjectDataGroupedFtsWallRecoverySchema,
   ProjectDataManualToolPayloadCleanupSchema,
   ProjectDataStorageEmergencyPurgeSchema,
   ProjectDataStorageReliefMeasureSchema,
@@ -26,17 +34,21 @@ import {
   measureProjectDataStorage,
   measureProjectDataStorageRelief,
   runProjectDataGroupedFtsCleanup,
+  runProjectDataGroupedFtsWallRecovery,
   runProjectDataManualToolPayloadCleanup,
   runProjectDataStorageEmergencyPurge,
 } from '../../services/project-data';
 import {
   freezeProjectDataArchiveProject,
   getProjectDataArchiveManualCanaryConfig,
-  getProjectDataArchiveRolloutListConfig,
   getProjectDataArchiveRolloutState,
   listProjectDataArchiveProblemMigrations,
   setProjectDataArchiveCircuitBreaker,
 } from '../../services/project-data-archive-rollout-controls';
+import {
+  adminProjectDataArchiveBreakerRoutes,
+  parseArchiveRolloutLimit,
+} from './project-data-archive-breakers';
 
 const PROJECT_DATA_STORAGE_STATUSES = new Set(['ok', 'notice', 'warning', 'critical', 'degraded']);
 const PROJECT_DATA_STORAGE_CLEANUP_HEALTH_STATES = new Set([
@@ -50,6 +62,11 @@ const DEFAULT_STORAGE_TELEMETRY_LIST_LIMIT = 50;
 const DEFAULT_STORAGE_TELEMETRY_LIST_MAX = 200;
 
 export const adminProjectDataStorageRoutes = new Hono<{ Bindings: Env }>();
+
+adminProjectDataStorageRoutes.route(
+  '/archive-sharding/circuit-breakers',
+  adminProjectDataArchiveBreakerRoutes
+);
 
 function parsePositiveIntegerConfig(raw: string | undefined, fallback: number): number {
   if (!raw?.trim()) return fallback;
@@ -75,15 +92,6 @@ function getStorageTelemetryListConfig(env: Env): { defaultLimit: number; maxLim
 
 function parseStorageTelemetryLimit(rawLimit: string | undefined, env: Env): number {
   const { defaultLimit, maxLimit } = getStorageTelemetryListConfig(env);
-  const parsedLimit = rawLimit ? Number.parseInt(rawLimit, 10) : defaultLimit;
-  if (!Number.isSafeInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > maxLimit) {
-    throw errors.badRequest(`limit must be between 1 and ${maxLimit}`);
-  }
-  return parsedLimit;
-}
-
-function parseArchiveRolloutLimit(rawLimit: string | undefined, env: Env): number {
-  const { defaultLimit, maxLimit } = getProjectDataArchiveRolloutListConfig(env);
   const parsedLimit = rawLimit ? Number.parseInt(rawLimit, 10) : defaultLimit;
   if (!Number.isSafeInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > maxLimit) {
     throw errors.badRequest(`limit must be between 1 and ${maxLimit}`);
@@ -137,6 +145,30 @@ function assertManualToolPayloadCleanupBudgetBounds(
     throw errors.badRequest(
       `wallTimeMs must be between 1 and ${config.toolPayloadManualCleanupMaxWallTimeMs}`
     );
+  }
+}
+
+const GROUPED_FTS_WALL_RECOVERY_BOUNDS: Array<{
+  field: 'maxRows' | 'maxBytes' | 'maxSessions';
+  ceiling: keyof GroupedFtsWallRecoveryConfig;
+}> = [
+  { field: 'maxRows', ceiling: 'maxRows' },
+  { field: 'maxBytes', ceiling: 'maxBytes' },
+  { field: 'maxSessions', ceiling: 'maxSessions' },
+];
+
+function assertGroupedFtsWallRecoveryBounds(
+  body: Record<'maxRows' | 'maxBytes' | 'maxSessions', number> & { skipSessionIds: string[] },
+  env: Env
+): void {
+  const config = resolveGroupedFtsWallRecoveryConfig(env);
+  for (const { field, ceiling } of GROUPED_FTS_WALL_RECOVERY_BOUNDS) {
+    if (body[field] > config[ceiling]) {
+      throw errors.badRequest(`${field} must be between 1 and ${config[ceiling]}`);
+    }
+  }
+  if (body.skipSessionIds.length > config.maxSessions) {
+    throw errors.badRequest(`skipSessionIds may hold at most ${config.maxSessions} ids`);
   }
 }
 
@@ -390,7 +422,7 @@ adminProjectDataStorageRoutes.post(
  * POST /api/admin/project-data/storage/:projectId/archive-sharding/unfreeze
  *
  * Alias for closing the project circuit breaker. Frozen migration rows remain
- * frozen until copy-back or a later explicit thaw operation exists.
+ * frozen until copy-back (source already deleted) or abandon (source intact) resolves them.
  */
 adminProjectDataStorageRoutes.post(
   '/:projectId/archive-sharding/unfreeze',
@@ -447,6 +479,45 @@ adminProjectDataStorageRoutes.post(
       throw error;
     }
     return c.json({ result });
+  }
+);
+
+/**
+ * POST /api/admin/project-data/storage/:projectId/archive-sharding/migrations/:migrationId/abandon
+ *
+ * Abandon a migration that never reached source deletion: drops the partial shard copy and
+ * the root source intent, freezes the journal as `operator_abandoned`, and returns the
+ * session location to `root` so the session reads again. Migrations past source deletion
+ * are refused; those need copy-back.
+ */
+adminProjectDataStorageRoutes.post(
+  '/:projectId/archive-sharding/migrations/:migrationId/abandon',
+  jsonValidator(ProjectDataArchiveRecoveryControlSchema),
+  async (c) => {
+    const projectId = assertProjectId(c.req.param('projectId'));
+    const migrationId = c.req.param('migrationId')?.trim();
+    if (!migrationId) throw errors.badRequest('migrationId is required');
+    const body = c.req.valid('json');
+    try {
+      const result = await abandonProjectDataArchiveMigration(c.env, {
+        projectId,
+        migrationId,
+        reason: body.reason.trim(),
+      });
+      return c.json({ result });
+    } catch (error) {
+      if (
+        error instanceof ProjectDataArchiveCoordinatorStateError &&
+        (error.reason === 'abandon_reason_required' ||
+          error.reason === 'abandon_requires_source_intact' ||
+          error.reason === 'abandon_requires_expired_lease' ||
+          error.reason === 'migration_project_mismatch' ||
+          error.reason === 'journal_missing')
+      ) {
+        throw errors.badRequest(error.message);
+      }
+      throw error;
+    }
   }
 );
 
@@ -519,6 +590,43 @@ adminProjectDataStorageRoutes.post('/:projectId/grouped-fts-cleanup', async (c) 
   const result = await runProjectDataGroupedFtsCleanup(c.env, projectId);
   return c.json({ result });
 });
+
+/**
+ * POST /api/admin/project-data/storage/:projectId/grouped-fts-wall-recovery
+ *
+ * Superadmin storage relief that works at the hard per-object cap: prunes
+ * grouped/FTS search rows of old terminal sessions delete-first, never touching
+ * message text. `dryRun` and every budget are required and bounded by env
+ * ceilings; `skipSessionIds` bypasses a session whose page keeps failing.
+ */
+adminProjectDataStorageRoutes.post(
+  '/:projectId/grouped-fts-wall-recovery',
+  jsonValidator(ProjectDataGroupedFtsWallRecoverySchema),
+  async (c) => {
+    const projectId = assertProjectId(c.req.param('projectId'));
+    const body = c.req.valid('json');
+    assertGroupedFtsWallRecoveryBounds(body, c.env);
+    log.warn('admin.grouped_fts_wall_recovery_requested', {
+      projectId,
+      userId: getUserId(c),
+      reason: body.reason,
+      dryRun: body.dryRun,
+      maxRows: body.maxRows,
+      maxBytes: body.maxBytes,
+      maxSessions: body.maxSessions,
+      skipSessionIds: body.skipSessionIds.length,
+    });
+    const result = await runProjectDataGroupedFtsWallRecovery(c.env, projectId, {
+      reason: body.reason,
+      dryRun: body.dryRun,
+      maxRows: body.maxRows,
+      maxBytes: body.maxBytes,
+      maxSessions: body.maxSessions,
+      skipSessionIds: body.skipSessionIds,
+    });
+    return c.json({ result });
+  }
+);
 
 /**
  * POST /api/admin/project-data/storage/:projectId/emergency-purge

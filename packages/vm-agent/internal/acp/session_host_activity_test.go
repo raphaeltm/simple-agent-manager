@@ -43,7 +43,7 @@ func TestPromptActivityRereportStopsBeforeIdle(t *testing.T) {
 		},
 	})
 
-	host.markPromptStarted(acpsdk.SessionId("sdk-1"), 1, "viewer-1")
+	host.markPromptStarted(nil, acpsdk.SessionId("sdk-1"), 1, "viewer-1")
 	waitFor(t, 250*time.Millisecond, func() bool {
 		return countActivity(&mu, &activities, "prompting") >= 2
 	})
@@ -220,4 +220,31 @@ func TestErrorActivityIncludesRedactedStatusError(t *testing.T) {
 	case <-time.After(250 * time.Millisecond):
 		t.Fatal("timed out waiting for error activity report")
 	}
+}
+
+type activityRecorder struct {
+	mu         sync.Mutex
+	activities []string
+	server     *httptest.Server
+}
+
+func (recorder *activityRecorder) ServeHTTP(w http.ResponseWriter, request *http.Request) {
+	payload := activityPayload{}
+	decoder := json.NewDecoder(request.Body)
+	if decodeErr := decoder.Decode(&payload); decodeErr != nil {
+		http.Error(w, "invalid activity payload", http.StatusBadRequest)
+		return
+	}
+	recorder.mu.Lock()
+	recorder.activities = append(recorder.activities, payload.Activity)
+	recorder.mu.Unlock()
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func newActivityRecorder(t *testing.T) *activityRecorder {
+	t.Helper()
+	recorder := &activityRecorder{}
+	recorder.server = httptest.NewServer(recorder)
+	t.Cleanup(recorder.server.Close)
+	return recorder
 }

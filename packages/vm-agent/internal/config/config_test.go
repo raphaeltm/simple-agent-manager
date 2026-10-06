@@ -141,6 +141,117 @@ func TestLoadCallbackTokenEnvFallback(t *testing.T) {
 	}
 }
 
+func TestLoadResourceMonitoringDefaults(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	if cfg.PSIPollInterval != time.Duration(DefaultPSIPollIntervalSeconds)*time.Second {
+		t.Fatalf("PSIPollInterval=%s, want %ds", cfg.PSIPollInterval, DefaultPSIPollIntervalSeconds)
+	}
+	if cfg.ContainerStatsInterval != time.Duration(DefaultContainerStatsIntervalSeconds)*time.Second {
+		t.Fatalf("ContainerStatsInterval=%s, want %ds", cfg.ContainerStatsInterval, DefaultContainerStatsIntervalSeconds)
+	}
+	if cfg.PSIMemorySomeWarningThreshold != DefaultPSIMemorySomeWarningThreshold ||
+		cfg.PSIMemorySomeCriticalThreshold != DefaultPSIMemorySomeCriticalThreshold ||
+		cfg.PSIMemoryFullWarningThreshold != DefaultPSIMemoryFullWarningThreshold ||
+		cfg.PSIMemoryFullCriticalThreshold != DefaultPSIMemoryFullCriticalThreshold {
+		t.Fatalf("unexpected PSI threshold defaults: %#v", cfg)
+	}
+	if cfg.EvictionDebounceWindow != time.Duration(DefaultEvictionDebounceSeconds)*time.Second {
+		t.Fatalf("EvictionDebounceWindow=%s, want %ds", cfg.EvictionDebounceWindow, DefaultEvictionDebounceSeconds)
+	}
+	if cfg.EvictionSnapshotTimeout != time.Duration(DefaultEvictionSnapshotTimeoutSeconds)*time.Second {
+		t.Fatalf("EvictionSnapshotTimeout=%s, want %ds", cfg.EvictionSnapshotTimeout, DefaultEvictionSnapshotTimeoutSeconds)
+	}
+	if cfg.EvictionDockerStopTimeout != time.Duration(DefaultEvictionDockerStopTimeoutSeconds)*time.Second {
+		t.Fatalf("EvictionDockerStopTimeout=%s, want %ds", cfg.EvictionDockerStopTimeout, DefaultEvictionDockerStopTimeoutSeconds)
+	}
+	if cfg.EvictionResolveTimeout != time.Duration(DefaultEvictionResolveTimeoutSeconds)*time.Second {
+		t.Fatalf("EvictionResolveTimeout=%s, want %ds", cfg.EvictionResolveTimeout, DefaultEvictionResolveTimeoutSeconds)
+	}
+}
+
+func TestLoadResourceMonitoringOverrides(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	t.Setenv(EnvDefaultPSIPollIntervalSeconds, "3")
+	t.Setenv(EnvDefaultContainerStatsIntervalSeconds, "7")
+	t.Setenv(EnvDefaultPSIMemorySomeWarningThreshold, "11.5")
+	t.Setenv(EnvDefaultPSIMemorySomeCriticalThreshold, "22.5")
+	t.Setenv(EnvDefaultPSIMemoryFullWarningThreshold, "4.5")
+	t.Setenv(EnvDefaultPSIMemoryFullCriticalThreshold, "9.5")
+	t.Setenv(EnvDefaultEvictionDebounceSeconds, "13")
+	t.Setenv(EnvDefaultEvictionSnapshotTimeoutSeconds, "47")
+	t.Setenv(EnvDefaultEvictionDockerStopTimeoutSeconds, "8")
+	t.Setenv(EnvDefaultEvictionResolveTimeoutSeconds, "6")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	if cfg.PSIPollInterval != 3*time.Second {
+		t.Fatalf("PSIPollInterval=%s, want 3s", cfg.PSIPollInterval)
+	}
+	if cfg.ContainerStatsInterval != 7*time.Second {
+		t.Fatalf("ContainerStatsInterval=%s, want 7s", cfg.ContainerStatsInterval)
+	}
+	if cfg.PSIMemorySomeWarningThreshold != 11.5 ||
+		cfg.PSIMemorySomeCriticalThreshold != 22.5 ||
+		cfg.PSIMemoryFullWarningThreshold != 4.5 ||
+		cfg.PSIMemoryFullCriticalThreshold != 9.5 {
+		t.Fatalf("unexpected PSI threshold overrides: %#v", cfg)
+	}
+	if cfg.EvictionDebounceWindow != 13*time.Second {
+		t.Fatalf("EvictionDebounceWindow=%s, want 13s", cfg.EvictionDebounceWindow)
+	}
+	if cfg.EvictionSnapshotTimeout != 47*time.Second {
+		t.Fatalf("EvictionSnapshotTimeout=%s, want 47s", cfg.EvictionSnapshotTimeout)
+	}
+	if cfg.EvictionDockerStopTimeout != 8*time.Second {
+		t.Fatalf("EvictionDockerStopTimeout=%s, want 8s", cfg.EvictionDockerStopTimeout)
+	}
+	if cfg.EvictionResolveTimeout != 6*time.Second {
+		t.Fatalf("EvictionResolveTimeout=%s, want 6s", cfg.EvictionResolveTimeout)
+	}
+}
+
+func TestResourceMonitoringDefaultsUseNamedConstants(t *testing.T) {
+	source, err := os.ReadFile("config_load.go")
+	if err != nil {
+		t.Fatalf("read config_load.go: %v", err)
+	}
+	loadSource := string(source)
+	pairs := []struct {
+		envConst     string
+		defaultConst string
+	}{
+		{"EnvDefaultPSIPollIntervalSeconds", "DefaultPSIPollIntervalSeconds"},
+		{"EnvDefaultContainerStatsIntervalSeconds", "DefaultContainerStatsIntervalSeconds"},
+		{"EnvDefaultPSIMemorySomeWarningThreshold", "DefaultPSIMemorySomeWarningThreshold"},
+		{"EnvDefaultPSIMemorySomeCriticalThreshold", "DefaultPSIMemorySomeCriticalThreshold"},
+		{"EnvDefaultPSIMemoryFullWarningThreshold", "DefaultPSIMemoryFullWarningThreshold"},
+		{"EnvDefaultPSIMemoryFullCriticalThreshold", "DefaultPSIMemoryFullCriticalThreshold"},
+		{"EnvDefaultEvictionDebounceSeconds", "DefaultEvictionDebounceSeconds"},
+		{"EnvDefaultEvictionSnapshotTimeoutSeconds", "DefaultEvictionSnapshotTimeoutSeconds"},
+		{"EnvDefaultEvictionDockerStopTimeoutSeconds", "DefaultEvictionDockerStopTimeoutSeconds"},
+		{"EnvDefaultEvictionResolveTimeoutSeconds", "DefaultEvictionResolveTimeoutSeconds"},
+	}
+	for _, pair := range pairs {
+		if !strings.Contains(loadSource, pair.envConst) {
+			t.Fatalf("config_load.go must use %s", pair.envConst)
+		}
+		if !strings.Contains(loadSource, pair.defaultConst) {
+			t.Fatalf("config_load.go must use %s", pair.defaultConst)
+		}
+	}
+}
+
 func TestLoadDurableErrorReportGuardrails(t *testing.T) {
 	persistenceDir := t.TempDir()
 	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
@@ -378,6 +489,7 @@ func legacyOperationalTimeoutChecks(cfg *Config) []struct {
 		{"MCPBuildPrepareTimeout", cfg.MCPBuildPrepareTimeout, 30 * time.Second},
 		{"JWKSFetchTimeout", cfg.JWKSFetchTimeout, 10 * time.Second},
 		{"ACPCredentialSyncTimeout", cfg.ACPCredentialSyncTimeout, 10 * time.Second},
+		{"ACPRestartAttemptTimeout", cfg.ACPRestartAttemptTimeout, 5 * time.Minute},
 		{"ACPActivityReportTimeout", cfg.ACPActivityReportTimeout, 10 * time.Second},
 		{"ACPHarnessActivityReportDebounce", cfg.ACPHarnessActivityReportDebounce, 750 * time.Millisecond},
 		{"DevcontainerCachePushTimeout", cfg.DevcontainerCachePushTimeout, 10 * time.Minute},
@@ -404,6 +516,62 @@ func TestOperationalTimeoutDefaults(t *testing.T) {
 	}
 }
 
+func TestHeartbeatWorkspaceMetricDefaultsAndOverrides(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.HeartbeatDockerStatsTimeout != 2*time.Second {
+		t.Fatalf("HeartbeatDockerStatsTimeout = %v, want 2s", cfg.HeartbeatDockerStatsTimeout)
+	}
+	if cfg.HeartbeatWorkspaceMetricsMaxContainers != 8 {
+		t.Fatalf("HeartbeatWorkspaceMetricsMaxContainers = %d, want 8", cfg.HeartbeatWorkspaceMetricsMaxContainers)
+	}
+	if cfg.HeartbeatWorkspaceMetricsMaxOutputBytes != 64*1024 {
+		t.Fatalf("HeartbeatWorkspaceMetricsMaxOutputBytes = %d, want %d", cfg.HeartbeatWorkspaceMetricsMaxOutputBytes, int64(64*1024))
+	}
+	if cfg.ComposeOutputRetentionBytes != DefaultComposeOutputRetentionBytes {
+		t.Fatalf("ComposeOutputRetentionBytes = %d, want %d", cfg.ComposeOutputRetentionBytes, DefaultComposeOutputRetentionBytes)
+	}
+
+	t.Setenv("HEARTBEAT_DOCKER_STATS_TIMEOUT", "1500ms")
+	t.Setenv("HEARTBEAT_WORKSPACE_METRICS_MAX_CONTAINERS", "4")
+	t.Setenv("HEARTBEAT_WORKSPACE_METRICS_MAX_OUTPUT_BYTES", "32768")
+	t.Setenv("COMPOSE_OUTPUT_RETENTION_BYTES", "4096")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("Load() override error = %v", err)
+	}
+	if cfg.HeartbeatDockerStatsTimeout != 1500*time.Millisecond {
+		t.Fatalf("HeartbeatDockerStatsTimeout = %v, want 1500ms", cfg.HeartbeatDockerStatsTimeout)
+	}
+	if cfg.HeartbeatWorkspaceMetricsMaxContainers != 4 {
+		t.Fatalf("HeartbeatWorkspaceMetricsMaxContainers = %d, want 4", cfg.HeartbeatWorkspaceMetricsMaxContainers)
+	}
+	if cfg.HeartbeatWorkspaceMetricsMaxOutputBytes != 32768 {
+		t.Fatalf("HeartbeatWorkspaceMetricsMaxOutputBytes = %d, want 32768", cfg.HeartbeatWorkspaceMetricsMaxOutputBytes)
+	}
+	if cfg.ComposeOutputRetentionBytes != 4096 {
+		t.Fatalf("ComposeOutputRetentionBytes = %d, want 4096", cfg.ComposeOutputRetentionBytes)
+	}
+}
+
+func TestLoadRejectsMalformedComposeOutputRetentionBytes(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	t.Setenv("COMPOSE_OUTPUT_RETENTION_BYTES", "not-a-number")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() succeeded with malformed COMPOSE_OUTPUT_RETENTION_BYTES")
+	}
+	if !strings.Contains(err.Error(), "COMPOSE_OUTPUT_RETENTION_BYTES") {
+		t.Fatalf("Load() error = %v, want COMPOSE_OUTPUT_RETENTION_BYTES context", err)
+	}
+}
+
 func TestOperationalTimeoutOverrides(t *testing.T) {
 	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
 	t.Setenv("WORKSPACE_ID", "ws-123")
@@ -416,6 +584,7 @@ func TestOperationalTimeoutOverrides(t *testing.T) {
 	t.Setenv("MCP_BUILD_PREPARE_TIMEOUT", "40s")
 	t.Setenv("JWKS_FETCH_TIMEOUT", "14s")
 	t.Setenv("ACP_CREDENTIAL_SYNC_TIMEOUT", "16s")
+	t.Setenv("ACP_RESTART_ATTEMPT_TIMEOUT", "4m")
 	t.Setenv("ACP_ACTIVITY_REPORT_TIMEOUT", "17s")
 	t.Setenv("ACP_HARNESS_ACTIVITY_REPORT_DEBOUNCE", "875ms")
 	t.Setenv("WORKSPACE_READY_CALLBACK_TIMEOUT", "33s")
@@ -442,6 +611,7 @@ func TestOperationalTimeoutOverrides(t *testing.T) {
 		{"MCPBuildPrepareTimeout", cfg.MCPBuildPrepareTimeout, 40 * time.Second},
 		{"JWKSFetchTimeout", cfg.JWKSFetchTimeout, 14 * time.Second},
 		{"ACPCredentialSyncTimeout", cfg.ACPCredentialSyncTimeout, 16 * time.Second},
+		{"ACPRestartAttemptTimeout", cfg.ACPRestartAttemptTimeout, 4 * time.Minute},
 		{"ACPActivityReportTimeout", cfg.ACPActivityReportTimeout, 17 * time.Second},
 		{"ACPHarnessActivityReportDebounce", cfg.ACPHarnessActivityReportDebounce, 875 * time.Millisecond},
 		{"WorkspaceReadyCallbackTimeout", cfg.WorkspaceReadyCallbackTimeout, 33 * time.Second},
@@ -464,6 +634,7 @@ func TestInvalidOperationalTimeoutParseFallsBackAndRedactsValue(t *testing.T) {
 		"GRACEFUL_SHUTDOWN_TIMEOUT", "SYSTEM_PROVISIONING_TIMEOUT", "CF_IP_FETCH_TIMEOUT",
 		"BOOT_LOG_HTTP_TIMEOUT", "MCP_SHORT_COMMAND_TIMEOUT", "MCP_DIFF_COMMAND_TIMEOUT",
 		"MCP_BUILD_PREPARE_TIMEOUT", "JWKS_FETCH_TIMEOUT", "ACP_CREDENTIAL_SYNC_TIMEOUT",
+		"ACP_RESTART_ATTEMPT_TIMEOUT",
 		"ACP_ACTIVITY_REPORT_TIMEOUT", "ACP_HARNESS_ACTIVITY_REPORT_DEBOUNCE",
 		"DEVCONTAINER_CACHE_PUSH_TIMEOUT",
 		"DEPLOY_PREFLIGHT_COMMAND_TIMEOUT", "LOG_STREAM_PING_WRITE_TIMEOUT",
@@ -877,48 +1048,160 @@ func splitFirst(s, sep string) []string {
 // validConfig returns a Config with all required fields set to valid values.
 func validConfig() *Config {
 	return &Config{
-		Port:                                  8080,
-		ControlPlaneURL:                       "https://api.example.com",
-		NodeID:                                "node-1",
-		SessionMaxCount:                       100,
-		DefaultRows:                           24,
-		DefaultCols:                           80,
-		WSReadBufferSize:                      1024,
-		WSWriteBufferSize:                     1024,
-		TerminalWSMaxMessageBytes:             DefaultTerminalWSMaxMessageBytes,
-		TerminalWSReadTimeout:                 DefaultTerminalWSReadTimeout,
-		TerminalWSPingInterval:                DefaultTerminalWSPingInterval,
-		TerminalWSMessageRate:                 DefaultTerminalWSMessageRate,
-		TerminalWSMessageBurst:                DefaultTerminalWSMessageBurst,
-		TerminalSessionIDMaxLength:            DefaultTerminalSessionIDMaxLength,
-		GitCredentialTimeout:                  DefaultGitCredentialTimeout,
-		SessionSnapshotOperationTimeout:       DefaultSessionSnapshotOperationTimeout,
-		SessionSnapshotProgressReportInterval: DefaultSessionSnapshotProgressReportInterval,
-		SessionSnapshotProgressReportTimeout:  DefaultSessionSnapshotProgressReportTimeout,
-		GracefulShutdownTimeout:               DefaultGracefulShutdownTimeout,
-		BootstrapMaxWait:                      5 * time.Minute,
-		BootstrapTimeout:                      30 * time.Minute,
-		SystemProvisioningTimeout:             DefaultSystemProvisioningTimeout,
-		CFIPFetchTimeout:                      DefaultCFIPFetchTimeout,
-		BootLogHTTPTimeout:                    DefaultBootLogHTTPTimeout,
-		HTTPReadTimeout:                       15 * time.Second,
-		HTTPWriteTimeout:                      15 * time.Second,
-		HTTPIdleTimeout:                       60 * time.Second,
-		HTTPCallbackTimeout:                   30 * time.Second,
-		MCPShortCommandTimeout:                DefaultMCPShortCommandTimeout,
-		MCPDiffCommandTimeout:                 DefaultMCPDiffCommandTimeout,
-		MCPBuildPrepareTimeout:                DefaultMCPBuildPrepareTimeout,
-		JWKSFetchTimeout:                      DefaultJWKSFetchTimeout,
-		ACPCredentialSyncTimeout:              DefaultACPCredentialSyncTimeout,
-		ACPActivityReportTimeout:              DefaultACPActivityReportTimeout,
-		ACPHarnessActivityReportDebounce:      DefaultACPHarnessActivityReportDebounce,
-		WorkspaceReadyCallbackTimeout:         DefaultWorkspaceReadyCallbackTimeout,
-		ErrorReportResponseBytes:              DefaultErrorReportResponseMaxBytes,
-		ErrorReportStoredErrBytes:             DefaultErrorReportStoredErrorBytes,
-		ErrorReportCollectorJobs:              DefaultErrorReportCollectorWorkers,
-		DevcontainerCachePushTimeout:          DefaultDevcontainerCachePushTimeout,
-		DeployPreflightCommandTimeout:         DefaultDeployPreflightCommandTimeout,
-		LogStreamPingWriteTimeout:             DefaultLogStreamPingWriteTimeout,
+		Port:                                    8080,
+		ControlPlaneURL:                         "https://api.example.com",
+		NodeID:                                  "node-1",
+		SessionMaxCount:                         100,
+		DefaultRows:                             24,
+		DefaultCols:                             80,
+		WSReadBufferSize:                        1024,
+		WSWriteBufferSize:                       1024,
+		TerminalWSMaxMessageBytes:               DefaultTerminalWSMaxMessageBytes,
+		TerminalWSReadTimeout:                   DefaultTerminalWSReadTimeout,
+		TerminalWSPingInterval:                  DefaultTerminalWSPingInterval,
+		TerminalWSMessageRate:                   DefaultTerminalWSMessageRate,
+		TerminalWSMessageBurst:                  DefaultTerminalWSMessageBurst,
+		TerminalSessionIDMaxLength:              DefaultTerminalSessionIDMaxLength,
+		GitCredentialTimeout:                    DefaultGitCredentialTimeout,
+		SessionSnapshotOperationTimeout:         DefaultSessionSnapshotOperationTimeout,
+		SessionSnapshotProgressReportInterval:   DefaultSessionSnapshotProgressReportInterval,
+		SessionSnapshotProgressReportTimeout:    DefaultSessionSnapshotProgressReportTimeout,
+		GracefulShutdownTimeout:                 DefaultGracefulShutdownTimeout,
+		BootstrapMaxWait:                        5 * time.Minute,
+		BootstrapTimeout:                        30 * time.Minute,
+		SystemProvisioningTimeout:               DefaultSystemProvisioningTimeout,
+		CFIPFetchTimeout:                        DefaultCFIPFetchTimeout,
+		BootLogHTTPTimeout:                      DefaultBootLogHTTPTimeout,
+		HTTPReadTimeout:                         15 * time.Second,
+		HTTPWriteTimeout:                        15 * time.Second,
+		HTTPIdleTimeout:                         60 * time.Second,
+		HTTPCallbackTimeout:                     30 * time.Second,
+		MCPShortCommandTimeout:                  DefaultMCPShortCommandTimeout,
+		MCPDiffCommandTimeout:                   DefaultMCPDiffCommandTimeout,
+		MCPBuildPrepareTimeout:                  DefaultMCPBuildPrepareTimeout,
+		JWKSFetchTimeout:                        DefaultJWKSFetchTimeout,
+		ACPCredentialSyncTimeout:                DefaultACPCredentialSyncTimeout,
+		ACPRestartAttemptTimeout:                DefaultACPRestartAttemptTimeout,
+		ACPActivityReportTimeout:                DefaultACPActivityReportTimeout,
+		ACPUsageProbeTimeout:                    DefaultACPUsageProbeTimeout,
+		ACPHarnessActivityReportDebounce:        DefaultACPHarnessActivityReportDebounce,
+		WorkspaceReadyCallbackTimeout:           DefaultWorkspaceReadyCallbackTimeout,
+		ErrorReportResponseBytes:                DefaultErrorReportResponseMaxBytes,
+		ErrorReportStoredErrBytes:               DefaultErrorReportStoredErrorBytes,
+		ErrorReportCollectorJobs:                DefaultErrorReportCollectorWorkers,
+		HeartbeatDockerStatsTimeout:             2 * time.Second,
+		HeartbeatWorkspaceMetricsMaxContainers:  8,
+		HeartbeatWorkspaceMetricsMaxOutputBytes: 64 * 1024,
+		ComposeOutputRetentionBytes:             DefaultComposeOutputRetentionBytes,
+		DevcontainerCachePushTimeout:            DefaultDevcontainerCachePushTimeout,
+		WorkspaceBuildQueueDepth:                DefaultWorkspaceBuildQueueDepth,
+		DeployPreflightCommandTimeout:           DefaultDeployPreflightCommandTimeout,
+		LogStreamPingWriteTimeout:               DefaultLogStreamPingWriteTimeout,
+		ResourceEventBufferSize:                 DefaultResourceEventBufferSize,
+		PSIPollInterval:                         time.Duration(DefaultPSIPollIntervalSeconds) * time.Second,
+		ContainerStatsInterval:                  time.Duration(DefaultContainerStatsIntervalSeconds) * time.Second,
+		PSIMemorySomeWarningThreshold:           DefaultPSIMemorySomeWarningThreshold,
+		PSIMemorySomeCriticalThreshold:          DefaultPSIMemorySomeCriticalThreshold,
+		PSIMemoryFullWarningThreshold:           DefaultPSIMemoryFullWarningThreshold,
+		PSIMemoryFullCriticalThreshold:          DefaultPSIMemoryFullCriticalThreshold,
+		EvictionDebounceWindow:                  time.Duration(DefaultEvictionDebounceSeconds) * time.Second,
+		EvictionSnapshotTimeout:                 time.Duration(DefaultEvictionSnapshotTimeoutSeconds) * time.Second,
+		EvictionDockerStopTimeout:               time.Duration(DefaultEvictionDockerStopTimeoutSeconds) * time.Second,
+		EvictionCallbackRetryMaxInterval:        time.Duration(DefaultEvictionCallbackRetryMaxSeconds) * time.Second,
+		EvictionResolveTimeout:                  time.Duration(DefaultEvictionResolveTimeoutSeconds) * time.Second,
+	}
+}
+
+func TestValidateResourceMonitoringConfig(t *testing.T) {
+	tests := []struct {
+		name    string
+		wantErr string
+		mutate  func(*Config)
+	}{
+		{
+			name:    "psi interval",
+			wantErr: EnvDefaultPSIPollIntervalSeconds,
+			mutate:  func(cfg *Config) { cfg.PSIPollInterval = 0 },
+		},
+		{
+			name:    "container stats interval",
+			wantErr: EnvDefaultContainerStatsIntervalSeconds,
+			mutate:  func(cfg *Config) { cfg.ContainerStatsInterval = 0 },
+		},
+		{
+			name:    "eviction debounce",
+			wantErr: EnvDefaultEvictionDebounceSeconds,
+			mutate:  func(cfg *Config) { cfg.EvictionDebounceWindow = 0 },
+		},
+		{
+			name:    "eviction snapshot timeout",
+			wantErr: EnvDefaultEvictionSnapshotTimeoutSeconds,
+			mutate:  func(cfg *Config) { cfg.EvictionSnapshotTimeout = 0 },
+		},
+		{
+			name:    "eviction docker stop timeout",
+			wantErr: EnvDefaultEvictionDockerStopTimeoutSeconds,
+			mutate:  func(cfg *Config) { cfg.EvictionDockerStopTimeout = 0 },
+		},
+		{
+			name:    "eviction callback retry cap",
+			wantErr: EnvDefaultEvictionCallbackRetryMaxSeconds,
+			mutate:  func(cfg *Config) { cfg.EvictionCallbackRetryMaxInterval = 0 },
+		},
+		{
+			name:    "eviction resolve timeout",
+			wantErr: EnvDefaultEvictionResolveTimeoutSeconds,
+			mutate:  func(cfg *Config) { cfg.EvictionResolveTimeout = 0 },
+		},
+		{
+			name:    "some warning threshold",
+			wantErr: EnvDefaultPSIMemorySomeWarningThreshold,
+			mutate:  func(cfg *Config) { cfg.PSIMemorySomeWarningThreshold = 0 },
+		},
+		{
+			name:    "some critical threshold",
+			wantErr: EnvDefaultPSIMemorySomeCriticalThreshold,
+			mutate:  func(cfg *Config) { cfg.PSIMemorySomeCriticalThreshold = 0 },
+		},
+		{
+			name:    "full warning threshold",
+			wantErr: EnvDefaultPSIMemoryFullWarningThreshold,
+			mutate:  func(cfg *Config) { cfg.PSIMemoryFullWarningThreshold = 0 },
+		},
+		{
+			name:    "full critical threshold",
+			wantErr: EnvDefaultPSIMemoryFullCriticalThreshold,
+			mutate:  func(cfg *Config) { cfg.PSIMemoryFullCriticalThreshold = 0 },
+		},
+		{
+			name:    "some warning above critical",
+			wantErr: EnvDefaultPSIMemorySomeCriticalThreshold,
+			mutate: func(cfg *Config) {
+				cfg.PSIMemorySomeWarningThreshold = 60
+				cfg.PSIMemorySomeCriticalThreshold = 50
+			},
+		},
+		{
+			name:    "full warning above critical",
+			wantErr: EnvDefaultPSIMemoryFullCriticalThreshold,
+			mutate: func(cfg *Config) {
+				cfg.PSIMemoryFullWarningThreshold = 30
+				cfg.PSIMemoryFullCriticalThreshold = 25
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := validConfig()
+			test.mutate(cfg)
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatalf("Validate() should reject %s", test.name)
+			}
+			if !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("Validate() error=%v, want %s", err, test.wantErr)
+			}
+		})
 	}
 }
 
@@ -951,11 +1234,82 @@ func TestValidateOperationalTimeouts(t *testing.T) {
 		{"mcp build prepare", func(cfg *Config) { cfg.MCPBuildPrepareTimeout = 0 }, "MCP_BUILD_PREPARE_TIMEOUT"},
 		{"jwks fetch", func(cfg *Config) { cfg.JWKSFetchTimeout = 0 }, "JWKS_FETCH_TIMEOUT"},
 		{"credential sync", func(cfg *Config) { cfg.ACPCredentialSyncTimeout = 0 }, "ACP_CREDENTIAL_SYNC_TIMEOUT"},
+		{"restart attempt", func(cfg *Config) { cfg.ACPRestartAttemptTimeout = 0 }, "ACP_RESTART_ATTEMPT_TIMEOUT"},
 		{"activity report", func(cfg *Config) { cfg.ACPActivityReportTimeout = 0 }, "ACP_ACTIVITY_REPORT_TIMEOUT"},
+		{"usage probe", func(cfg *Config) { cfg.ACPUsageProbeTimeout = 0 }, "ACP_USAGE_PROBE_TIMEOUT"},
 		{"harness activity debounce", func(cfg *Config) { cfg.ACPHarnessActivityReportDebounce = 0 }, "ACP_HARNESS_ACTIVITY_REPORT_DEBOUNCE"},
 		{"cache push", func(cfg *Config) { cfg.DevcontainerCachePushTimeout = 0 }, "DEVCONTAINER_CACHE_PUSH_TIMEOUT"},
 		{"deploy preflight", func(cfg *Config) { cfg.DeployPreflightCommandTimeout = 0 }, "DEPLOY_PREFLIGHT_COMMAND_TIMEOUT"},
 		{"log stream ping write", func(cfg *Config) { cfg.LogStreamPingWriteTimeout = 0 }, "LOG_STREAM_PING_WRITE_TIMEOUT"},
+		{"workspace build queue depth low", func(cfg *Config) { cfg.WorkspaceBuildQueueDepth = 0 }, "WORKSPACE_BUILD_QUEUE_DEPTH"},
+		{"workspace build queue depth high", func(cfg *Config) { cfg.WorkspaceBuildQueueDepth = MaxWorkspaceBuildQueueDepth + 1 }, "WORKSPACE_BUILD_QUEUE_DEPTH"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := validConfig()
+			tc.mutate(cfg)
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatal("expected validation error")
+			}
+			if !strings.Contains(err.Error(), tc.wantKey) {
+				t.Fatalf("expected %s error, got: %v", tc.wantKey, err)
+			}
+		})
+	}
+}
+
+func TestValidateOpenCodeGoUsageURL(t *testing.T) {
+	t.Parallel()
+	// The probe sends the OpenCode API key as a bearer token, so a remote usage
+	// endpoint must be https; loopback http is allowed for local test doubles.
+	accepted := []string{
+		"",
+		DefaultOpenCodeGoUsageURL,
+		"https://proxy.example.com/usage",
+		"http://localhost:8080/usage",
+		"http://usage.localhost/v1",
+		"http://127.0.0.1:9999/usage",
+		"http://[::1]:9999/usage",
+	}
+	for _, raw := range accepted {
+		cfg := validConfig()
+		cfg.OpenCodeGoUsageURL = raw
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("expected %q to be accepted, got: %v", raw, err)
+		}
+	}
+	rejected := []string{
+		"http://opencode.ai/zen/go/v1/usage",
+		"http://10.0.0.5/usage",
+		"ftp://opencode.ai/usage",
+		"/zen/go/v1/usage",
+		"://bad",
+	}
+	for _, raw := range rejected {
+		cfg := validConfig()
+		cfg.OpenCodeGoUsageURL = raw
+		err := cfg.Validate()
+		if err == nil || !strings.Contains(err.Error(), "OPENCODE_GO_USAGE_URL") {
+			t.Fatalf("expected %q to be rejected with an OPENCODE_GO_USAGE_URL error, got: %v", raw, err)
+		}
+	}
+}
+
+func TestValidateHeartbeatWorkspaceMetricBounds(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		mutate  func(*Config)
+		wantKey string
+	}{
+		{"docker stats timeout", func(cfg *Config) { cfg.HeartbeatDockerStatsTimeout = 0 }, "HEARTBEAT_DOCKER_STATS_TIMEOUT"},
+		{"negative container bound", func(cfg *Config) { cfg.HeartbeatWorkspaceMetricsMaxContainers = -1 }, "HEARTBEAT_WORKSPACE_METRICS_MAX_CONTAINERS"},
+		{"excess container bound", func(cfg *Config) { cfg.HeartbeatWorkspaceMetricsMaxContainers = 129 }, "HEARTBEAT_WORKSPACE_METRICS_MAX_CONTAINERS"},
+		{"low output bound", func(cfg *Config) { cfg.HeartbeatWorkspaceMetricsMaxOutputBytes = 1023 }, "HEARTBEAT_WORKSPACE_METRICS_MAX_OUTPUT_BYTES"},
+		{"high output bound", func(cfg *Config) { cfg.HeartbeatWorkspaceMetricsMaxOutputBytes = 1048577 }, "HEARTBEAT_WORKSPACE_METRICS_MAX_OUTPUT_BYTES"},
+		{"low compose retention bound", func(cfg *Config) { cfg.ComposeOutputRetentionBytes = 1023 }, "COMPOSE_OUTPUT_RETENTION_BYTES"},
+		{"high compose retention bound", func(cfg *Config) { cfg.ComposeOutputRetentionBytes = 1048577 }, "COMPOSE_OUTPUT_RETENTION_BYTES"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1656,6 +2010,58 @@ func TestDevcontainerBuildTimeoutOverride(t *testing.T) {
 	}
 }
 
+func TestWorkspaceBuildQueueDepthDefault(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.WorkspaceBuildQueueDepth != DefaultWorkspaceBuildQueueDepth {
+		t.Fatalf("WorkspaceBuildQueueDepth=%d, want %d", cfg.WorkspaceBuildQueueDepth, DefaultWorkspaceBuildQueueDepth)
+	}
+}
+
+func TestWorkspaceBuildQueueDepthOverride(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	t.Setenv("WORKSPACE_BUILD_QUEUE_DEPTH", "3")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.WorkspaceBuildQueueDepth != 3 {
+		t.Fatalf("WorkspaceBuildQueueDepth=%d, want 3", cfg.WorkspaceBuildQueueDepth)
+	}
+}
+
+func TestWorkspaceBuildQueueDepthInvalidUsesDefault(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+	}{
+		{name: "zero", value: "0"},
+		{name: "above max", value: "17"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+			t.Setenv("WORKSPACE_ID", "ws-123")
+			t.Setenv("WORKSPACE_BUILD_QUEUE_DEPTH", tt.value)
+
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("Load returned error: %v", err)
+			}
+			if cfg.WorkspaceBuildQueueDepth != DefaultWorkspaceBuildQueueDepth {
+				t.Fatalf("WorkspaceBuildQueueDepth=%d, want %d", cfg.WorkspaceBuildQueueDepth, DefaultWorkspaceBuildQueueDepth)
+			}
+		})
+	}
+}
+
 func TestProviderDefault(t *testing.T) {
 	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
 	t.Setenv("WORKSPACE_ID", "ws-123")
@@ -1764,5 +2170,26 @@ func TestResolveStandaloneCloneFilter(t *testing.T) {
 				t.Fatalf("ResolveStandaloneCloneFilter(%q)=%q, want %q", tc.raw, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestLoadEvictionCallbackRetryCap(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	for _, test := range []struct {
+		value string
+		want  time.Duration
+	}{
+		{"", time.Duration(DefaultEvictionCallbackRetryMaxSeconds) * time.Second},
+		{"45", 45 * time.Second},
+	} {
+		t.Setenv(EnvDefaultEvictionCallbackRetryMaxSeconds, test.value)
+		cfg, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.EvictionCallbackRetryMaxInterval != test.want {
+			t.Fatalf("retry cap = %s, want %s", cfg.EvictionCallbackRetryMaxInterval, test.want)
+		}
 	}
 }

@@ -23,6 +23,8 @@ export interface SessionUpdatedPayload {
   topic?: string;
   taskId?: string;
   workspaceId?: string;
+  /** Sleep (`'sleeping'`) and wake (`'active'`) broadcasts from ProjectData. */
+  status?: string;
 }
 
 export interface SessionStoppedPayload {
@@ -73,6 +75,17 @@ export type SessionEvent =
 // Convert raw WebSocket payload to typed event
 // ---------------------------------------------------------------------------
 
+/** Only the fields present on the frame are carried, so the reducer patches nothing else. */
+function sessionUpdatedPayload(p: RawSessionEvent['payload']): SessionUpdatedPayload {
+  return {
+    sessionId: String(p.sessionId ?? ''),
+    ...(p.topic != null ? { topic: String(p.topic) } : {}),
+    ...(p.taskId != null ? { taskId: String(p.taskId) } : {}),
+    ...(p.workspaceId != null ? { workspaceId: String(p.workspaceId) } : {}),
+    ...(typeof p.status === 'string' ? { status: p.status } : {}),
+  };
+}
+
 export function rawToSessionEvent(raw: RawSessionEvent): SessionEvent | null {
   const p = raw.payload;
   switch (raw.type) {
@@ -95,15 +108,7 @@ export function rawToSessionEvent(raw: RawSessionEvent): SessionEvent | null {
     case 'session.failed':
       return { type: 'session.failed', payload: { sessionId: String(p.sessionId ?? '') } };
     case 'session.updated':
-      return {
-        type: 'session.updated',
-        payload: {
-          sessionId: String(p.sessionId ?? ''),
-          ...(p.topic != null ? { topic: String(p.topic) } : {}),
-          ...(p.taskId != null ? { taskId: String(p.taskId) } : {}),
-          ...(p.workspaceId != null ? { workspaceId: String(p.workspaceId) } : {}),
-        },
-      };
+      return { type: 'session.updated', payload: sessionUpdatedPayload(p) };
     case 'session.agent_completed':
       return {
         type: 'session.agent_completed',
@@ -203,6 +208,10 @@ export function applySessionEvent(
         ...(fields.topic !== undefined ? { topic: fields.topic } : {}),
         ...(fields.taskId !== undefined ? { taskId: fields.taskId } : {}),
         ...(fields.workspaceId !== undefined ? { workspaceId: fields.workspaceId } : {}),
+        // ProjectData broadcasts `status: 'sleeping'` on sleep and `'active'` on
+        // wake. Dropping it left the sidebar (and anything gating on a list
+        // item's status) up to SESSION_RECONCILE_INTERVAL_MS behind the server.
+        ...(fields.status !== undefined ? { status: fields.status } : {}),
       }));
     }
 
@@ -216,11 +225,10 @@ export function applySessionEvent(
     }
 
     case 'session.activity': {
-      const { sessionId } = event.payload;
-      return patchSession(sessions, sessionId, (s) => ({
-        ...s,
-        lastMessageAt: Date.now(),
-      }));
+      // This event reports lifecycle state, not a persisted transcript message.
+      // Even promptStartedAt can be synthesized or delivered after the message,
+      // so only message data or a refreshed summary may change message recency.
+      return sessions;
     }
 
     case 'attention.created': {

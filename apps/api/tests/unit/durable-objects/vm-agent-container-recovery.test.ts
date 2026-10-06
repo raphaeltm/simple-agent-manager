@@ -9,6 +9,7 @@ const recoveryMocks = vi.hoisted(() => ({
   signNodeCallbackToken: vi.fn(),
   signCallbackToken: vi.fn(),
   signNodeManagementToken: vi.fn(),
+  commitWake: vi.fn(),
 }));
 
 vi.mock('../../../src/durable-objects/vm-agent-container-recovery', async (importOriginal) => {
@@ -21,9 +22,16 @@ vi.mock('../../../src/durable-objects/vm-agent-container-recovery', async (impor
     loadRuntimeRecoveryContext: recoveryMocks.loadContext,
     persistRuntimeRecovering: recoveryMocks.persistRecovering,
     persistRuntimeRecovered: recoveryMocks.persistRecovered,
-    persistRuntimeRecoveryFailed: recoveryMocks.persistFailed,
   };
 });
+
+vi.mock('../../../src/durable-objects/vm-agent-container-recovery-failure', () => ({
+  persistRuntimeRecoveryFailed: recoveryMocks.persistFailed,
+}));
+
+vi.mock('../../../src/services/container-wake-commit', () => ({
+  commitContainerWakeFromSleep: recoveryMocks.commitWake,
+}));
 
 vi.mock('../../../src/services/jwt', () => ({
   signNodeCallbackToken: recoveryMocks.signNodeCallbackToken,
@@ -185,6 +193,7 @@ beforeEach(() => {
   recoveryMocks.signNodeCallbackToken.mockResolvedValue('fresh-node-token');
   recoveryMocks.signCallbackToken.mockResolvedValue('fresh-workspace-token');
   recoveryMocks.signNodeManagementToken.mockResolvedValue({ token: 'management-token' });
+  recoveryMocks.commitWake.mockResolvedValue(undefined);
 });
 
 describe('VmAgentContainer snapshot recovery state machine', () => {
@@ -443,6 +452,89 @@ describe('VmAgentContainer snapshot recovery state machine', () => {
     );
     expect(values.get('lifecycleStatus')).toBe('running');
     expect(values.has('runtimeRecovery')).toBe(false);
+  });
+
+  it('commits an unguarded wake to the session it serves', async () => {
+    const { fake } = makeRecoveryFake();
+
+    await expect(callEnsureAwake(fake)).resolves.toEqual({ ok: true, status: 'running' });
+
+    expect(recoveryMocks.commitWake).toHaveBeenCalledOnce();
+    expect(recoveryMocks.commitWake).toHaveBeenCalledWith(
+      fake.env,
+      expect.objectContaining({
+        projectId: 'project-1',
+        chatSessionId: 'chat-1',
+        workspaceId: 'workspace-1',
+      })
+    );
+  });
+
+  it('leaves a guarded wake for the durable delivery that carries the guard to commit', async () => {
+    const { fake, values } = makeRecoveryFake();
+    const sourceTaskGuard = { taskId: 'parent-1', projectId: 'project-1', chatSessionId: 'chat-1' };
+    const recovery: RuntimeRecoveryState = {
+      version: 1,
+      phase: 'waking',
+      trigger: 'idle',
+      cause: { kind: 'idle_sleep' },
+      attempts: 1,
+      promptDisposition: 'none',
+      agentSessionId: 'agent-session-1',
+      startedAt: 1,
+      updatedAt: 1,
+    };
+
+    await expect(
+      (
+        privateContainer.wakeFromSnapshot as unknown as (
+          this: unknown,
+          recovery: RuntimeRecoveryState,
+          guard: typeof sourceTaskGuard
+        ) => Promise<unknown>
+      ).call(fake, recovery, sourceTaskGuard)
+    ).resolves.toEqual({ ok: true, status: 'running' });
+
+    // Liveness: the guarded wake itself completed.
+    expect(recoveryMocks.persistRecovered).toHaveBeenCalledOnce();
+    expect(values.get('lifecycleStatus')).toBe('running');
+    expect(recoveryMocks.commitWake).not.toHaveBeenCalled();
+  });
+
+  // Rule 45: the commit writes session state, so an explicit stop must not interleave with it.
+  it('serializes an explicit stop behind the commit of the wake it crosses', async () => {
+    const { fake, values } = makeRecoveryFake();
+    let releaseCommit!: () => void;
+    let commitStarted!: () => void;
+    const commitRunning = new Promise<void>((resolve) => {
+      commitStarted = resolve;
+    });
+    recoveryMocks.commitWake.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseCommit = resolve;
+          commitStarted();
+        })
+    );
+    const stopForUser = (
+      VmAgentContainer.prototype as unknown as {
+        stopForUser: (this: unknown) => Promise<void>;
+      }
+    ).stopForUser;
+
+    const wake = callEnsureAwake(fake);
+    await commitRunning;
+    const stop = stopForUser.call(fake);
+    // Midpoint: let the stop run as far as it can while the commit is held open.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(values.get('lifecycleStatus')).not.toBe('stopping');
+    expect(fake.stop).not.toHaveBeenCalled();
+
+    releaseCommit();
+    await expect(wake).resolves.toEqual({ ok: true, status: 'running' });
+    await stop;
+    expect(values.get('lifecycleStatus')).toBe('stopping');
+    expect(fake.stop).toHaveBeenCalledOnce();
   });
 
   it('keeps missing snapshots degraded until the bounded attempt is exhausted', async () => {

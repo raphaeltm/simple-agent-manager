@@ -30,6 +30,7 @@ import {
   readExistingTriageRow,
   recordGroupBudgetDeferral,
   recordGroupFailure,
+  resolveExistingGroupSignatures,
 } from './persistence';
 import { prioritizeFeedbackGroups, shouldReopenExistingTriage } from './prioritization';
 import type { ErrorRow, FeedbackTriageResult, FeedbackTriageTrigger, TriageDeps } from './types';
@@ -110,7 +111,10 @@ export async function runPlatformFeedbackTriage(
     project.id
   );
   const rowsWithAgentVersions = await annotateNodeAgentVersions(env, candidateRows);
-  const grouped = await groupPlatformErrors(rowsWithAgentVersions, evidenceLimit);
+  const grouped = await resolveExistingGroupSignatures(
+    env,
+    await groupPlatformErrors(rowsWithAgentVersions, evidenceLimit)
+  );
   const dueBudgetDeferred = await loadDueBudgetDeferredGroups(
     env,
     now,
@@ -134,12 +138,13 @@ export async function runPlatformFeedbackTriage(
     const refs = JSON.stringify(group.evidence);
     await env.DATABASE.prepare(
       `INSERT OR IGNORE INTO platform_feedback_triages
-      (signature, source, summary, first_seen_at, last_seen_at, occurrence_count, evidence_refs,
+      (signature, canonical_signature, source, summary, first_seen_at, last_seen_at, occurrence_count, evidence_refs,
        severity, queue_state, queued_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`
     )
       .bind(
         group.signature,
+        group.canonicalSignature ?? group.signature,
         group.source,
         group.summary,
         group.firstSeenAt,

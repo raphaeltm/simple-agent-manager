@@ -1,4 +1,4 @@
-import { and, eq, gt, inArray, isNull, lte, or, sql } from 'drizzle-orm';
+import { and, eq, gt, isNull, lte, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -10,6 +10,9 @@ import {
   finishSleepingWorkspaceComputeCleanup,
   markWorkspaceNodeWarmIfEmpty,
 } from '../services/session-sleep';
+import { chatSessionTaskOwnerJoins } from '../services/session-sleep-task-owner';
+import { verifySessionSnapshotArtifactsForSleep } from '../services/session-snapshot-artifacts';
+import { getRestorableSessionSnapshot } from '../services/session-snapshot-persistence';
 import { markSessionSnapshotSleeping } from '../services/session-snapshot-sleep-lifecycle';
 import { sessionSleepInFlightMaxAgeMs } from '../services/session-snapshot-sleep-predicate';
 
@@ -27,18 +30,29 @@ export interface SessionSleepLifecycleRepairStats {
 async function projectDataSessionAlreadyClosedForSleep(
   env: Env,
   projectId: string,
-  chatSessionId: string
+  chatSessionId: string,
+  taskStatus: string | null
 ): Promise<boolean> {
-  const session = await projectDataService.getSession(env, projectId, chatSessionId).catch((error) => {
-    log.warn('session_sleep_lifecycle_repair.project_data_status_failed', {
-      projectId,
-      chatSessionId,
-      error: error instanceof Error ? error.message : String(error),
+  const session = await projectDataService
+    .getSession(env, projectId, chatSessionId)
+    .catch((error) => {
+      log.warn('session_sleep_lifecycle_repair.project_data_status_failed', {
+        projectId,
+        chatSessionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
     });
-    return null;
-  });
   const status = typeof session?.status === 'string' ? session.status : null;
-  return status === 'sleeping' || status === 'stopped';
+  // A failed task's failed session is closed too: a terminal reconciler can fail
+  // it after its preservation sleep passed the point of no return, and the sleep
+  // must still finish its teardown rather than hold the runtime at `stopping`.
+  // Scoped to failed tasks: any other task's failed session keeps its handling.
+  return (
+    status === 'sleeping' ||
+    status === 'stopped' ||
+    (status === 'failed' && taskStatus === 'failed')
+  );
 }
 
 function repairBatchSize(env: Env): number {
@@ -66,6 +80,7 @@ export async function runSessionSleepLifecycleRepair(
 ): Promise<SessionSleepLifecycleRepairStats> {
   const db = drizzle(env.DATABASE, { schema });
   const cutoff = new Date(now.getTime() - sessionSleepInFlightMaxAgeMs(env)).toISOString();
+  const snapshotChatOwner = chatSessionTaskOwnerJoins(schema.sessionSnapshots.chatSessionId);
   const rows = await db
     .select({
       snapshotId: schema.sessionSnapshots.id,
@@ -77,61 +92,28 @@ export async function runSessionSleepLifecycleRepair(
       nodeRole: schema.nodes.nodeRole,
       runtime: schema.sessionSnapshots.runtime,
       taskId: schema.tasks.id,
+      taskStatus: schema.tasks.status,
       warmNodeTimeoutMs: schema.projects.warmNodeTimeoutMs,
     })
     .from(schema.sessionSnapshots)
     .leftJoin(schema.workspaces, eq(schema.workspaces.id, schema.sessionSnapshots.workspaceId))
     .leftJoin(schema.nodes, eq(schema.nodes.id, schema.sessionSnapshots.nodeId))
     .leftJoin(schema.projects, eq(schema.projects.id, schema.sessionSnapshots.projectId))
-    .leftJoin(
-      schema.sessionSummaries,
-      eq(schema.sessionSummaries.id, schema.sessionSnapshots.chatSessionId)
-    )
-    .leftJoin(
-      schema.tasks,
-      or(
-        eq(schema.tasks.id, schema.sessionSummaries.taskId),
-        and(
-          isNull(schema.sessionSummaries.taskId),
-          eq(schema.tasks.chatSessionId, schema.sessionSnapshots.chatSessionId)
-        )
-      )
-    )
+    .leftJoin(schema.sessionSummaries, snapshotChatOwner.summary)
+    .leftJoin(schema.tasks, snapshotChatOwner.task)
     .where(
       and(
         isNull(schema.sessionSnapshots.sleepingAt),
-        or(
-          and(
-            eq(schema.sessionSnapshots.sleepStatus, 'preparing'),
-            lte(
-              sql`COALESCE(${schema.sessionSnapshots.sleepClaimedAt}, ${schema.sessionSnapshots.updatedAt}, ${schema.sessionSnapshots.createdAt})`,
-              cutoff
-            )
-          ),
-          and(
-            eq(schema.sessionSnapshots.sleepStatus, 'stopping'),
-            lte(
-              sql`COALESCE(${schema.sessionSnapshots.sleepStoppingSince}, ${schema.sessionSnapshots.sleepClaimedAt}, ${schema.sessionSnapshots.updatedAt}, ${schema.sessionSnapshots.createdAt})`,
-              cutoff
-            )
-          )
+        eq(schema.sessionSnapshots.sleepStatus, 'stopping'),
+        eq(schema.workspaces.status, 'sleeping'),
+        lte(
+          sql`COALESCE(${schema.sessionSnapshots.sleepStoppingSince}, ${schema.sessionSnapshots.sleepClaimedAt}, ${schema.sessionSnapshots.updatedAt}, ${schema.sessionSnapshots.createdAt})`,
+          cutoff
         ),
         gt(schema.sessionSnapshots.expiresAt, now.toISOString()),
-        or(
-          and(
-            eq(schema.sessionSnapshots.status, 'available'),
-            eq(schema.sessionSnapshots.degradation, 'none')
-          ),
-          and(
-            eq(schema.sessionSnapshots.status, 'degraded'),
-            inArray(schema.sessionSnapshots.degradation, [
-              'home-skipped',
-              'wip-skipped',
-              'entries-skipped',
-              'transcript-only',
-            ])
-          )
-        )
+        eq(schema.sessionSnapshots.status, 'available'),
+        eq(schema.sessionSnapshots.degradation, 'none'),
+        isNull(schema.sessionSnapshots.captureGeneration)
       )
     )
     .orderBy(schema.sessionSnapshots.sleepClaimedAt, schema.sessionSnapshots.id)
@@ -151,6 +133,19 @@ export async function runSessionSleepLifecycleRepair(
         stats.skipped++;
         continue;
       }
+      const snapshot = await getRestorableSessionSnapshot(db, row.chatSessionId, now);
+      if (
+        !snapshot ||
+        snapshot.workspaceId !== row.workspaceId ||
+        snapshot.status !== 'available' ||
+        snapshot.degradation !== 'none' ||
+        !snapshot.snapshotGeneration ||
+        snapshot.captureGeneration ||
+        !(await verifySessionSnapshotArtifactsForSleep(env, snapshot))
+      ) {
+        stats.skipped++;
+        continue;
+      }
       const projectDataSlept = await projectDataService
         .sleepSession(env, row.projectId, row.chatSessionId)
         .catch((error) => {
@@ -166,7 +161,8 @@ export async function runSessionSleepLifecycleRepair(
         const alreadyClosed = await projectDataSessionAlreadyClosedForSleep(
           env,
           row.projectId,
-          row.chatSessionId
+          row.chatSessionId,
+          row.taskStatus
         );
         if (!alreadyClosed) {
           stats.projectDataErrors++;
@@ -183,7 +179,13 @@ export async function runSessionSleepLifecycleRepair(
           chatSessionId: row.chatSessionId,
         });
       }
-      const marked = await markSessionSnapshotSleeping(db, env, row.chatSessionId, now);
+      const marked = await markSessionSnapshotSleeping(
+        db,
+        env,
+        row.chatSessionId,
+        now,
+        snapshot.snapshotGeneration
+      );
       if (!marked) {
         stats.skipped++;
         continue;

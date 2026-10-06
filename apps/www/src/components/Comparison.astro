@@ -2,7 +2,7 @@
 const rows = [
   {
     label: 'Your code runs on',
-    sam: 'Your cloud (Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, GCP)',
+    sam: 'Instant containers or your cloud (Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, GCP)',
     managed: 'Their infrastructure',
     selfHosted: 'Your infra (AWS, GCP, K8s)',
     samWins: true,
@@ -11,7 +11,7 @@ const rows = [
     label: 'Agent choice',
     sam: 'Claude Code, Codex, Gemini CLI, Mistral Vibe, OpenCode, Amp',
     managed: 'Their proprietary agent',
-    selfHosted: 'Varies (Claude, OpenAI)',
+    selfHosted: 'Native agent with configurable LLM providers; third-party agents in workspaces',
     samWins: true,
   },
   {
@@ -30,7 +30,7 @@ const rows = [
   },
   {
     label: 'Infrastructure cost',
-    sam: 'Cloud bill direct to provider',
+    sam: 'Your cloud bill for BYOC VMs; hosted compute where available',
     managed: 'From $20/mo (compute + inference)',
     selfHosted: 'Your cloud bill + license fees',
     samWins: true,
@@ -38,20 +38,62 @@ const rows = [
   {
     label: 'Self-hostable',
     sam: 'Fully — control plane + VMs',
-    managed: 'No',
-    selfHosted: 'Yes — Terraform + K8s required',
+    managed: 'Managed service; enterprise VPC deployment available',
+    selfHosted: 'Yes — standalone server, Docker, or K8s; Terraform workspaces',
+    samWins: true,
+  },
+  {
+    label: 'Shared projects & roles',
+    sam: 'Invite link, approval, owner/admin roles, credential attribution',
+    managed: 'Seat-based team plans',
+    selfHosted: 'Workspace access control and read-only agent chat sharing',
+    samWins: true,
+  },
+  {
+    label: 'Comments that become agent context',
+    sam: 'Comment on chat or files, send to agent, agent replies and resolves',
+    managed: 'Bundled or unavailable',
+    selfHosted: 'No agent-level comments',
+    samWins: true,
+  },
+  {
+    label: 'Compute pools across clouds',
+    sam: '7 providers, real SKUs, strategy + exhaustion policy per pool',
+    managed: 'Single vendor, opaque sizing',
+    selfHosted: 'You wire it yourself',
+    samWins: true,
+  },
+  {
+    label: 'Token & compute usage reporting',
+    sam: 'Per-user usage by model/day + monthly budget, node-hours, admin cost summary',
+    managed: 'Bundled into one bill',
+    selfHosted: 'AI usage reporting and licensed AI Gateway budgets',
+    samWins: true,
+  },
+  {
+    label: 'Event triggers & webhooks',
+    sam: 'Cron, GitHub events, authenticated webhooks, standing watches',
+    managed: 'Schedules, GitHub/integration events, and custom webhooks',
+    selfHosted: 'Agent API for custom webhook and scheduled automation',
+    samWins: true,
+  },
+  {
+    label: 'Durable sleep/wake sessions',
+    sam: '7-day snapshots; labelled transcript + Git fallback for idle VMs',
+    managed: 'Varies, usually opaque',
+    selfHosted: 'Persistent agent chats; workspace storage depends on template',
     samWins: true,
   },
   {
     label: 'Setup effort',
-    sam: 'Deploy to Cloudflare + connect cloud',
+    sam: 'Deploy to Cloudflare; connect a cloud for BYOC VMs',
     managed: 'Zero config',
-    selfHosted: 'Terraform + cluster management',
+    selfHosted: 'Server deployment + Terraform workspace templates',
     samWins: false,
   },
   {
     label: 'Data sovereignty',
-    sam: 'Code runs on your cloud; control plane data in Cloudflare',
+    sam: 'VM code runs on your cloud; Instant and control plane data use Cloudflare',
     managed: 'Vendor-managed',
     selfHosted: 'Full — your infrastructure',
     samWins: true,
@@ -69,7 +111,7 @@ const rows = [
       </p>
     </div>
 
-    <div class="table-wrapper animate-on-scroll">
+    <div class="table-wrapper animate-on-scroll" tabindex="0" role="region" aria-label="Comparison table">
       <table class="comparison-table">
         <thead>
           <tr>
@@ -83,7 +125,7 @@ const rows = [
             <th class="col-other">
               <div class="col-header-content col-header-managed">
                 Managed AI Platforms
-                <span class="col-examples">Devin, Ona</span>
+                <span class="col-examples">Devin</span>
               </div>
             </th>
             <th class="col-other">
@@ -98,9 +140,9 @@ const rows = [
           {rows.map((row) => (
             <tr>
               <td class="col-label">{row.label}</td>
-              <td class={`col-sam ${row.samWins ? 'highlight' : ''}`}>{row.sam}</td>
-              <td class="col-other">{row.managed}</td>
-              <td class="col-other">{row.selfHosted}</td>
+              <td class={`col-sam ${row.samWins ? 'highlight' : ''}`} data-label="SAM">{row.sam}</td>
+              <td class="col-other" data-label="Managed AI Platforms">{row.managed}</td>
+              <td class="col-other" data-label="Self-Hosted CDEs">{row.selfHosted}</td>
             </tr>
           ))}
         </tbody>
@@ -108,7 +150,7 @@ const rows = [
     </div>
 
     <p class="comparison-footnote animate-on-scroll">
-      SAM infrastructure costs are compute only — bring your own API keys for AI providers.
+      Compute costs exclude AI inference — connect agent credentials or use SAM-managed AI where configured.
       Managed platform pricing bundles compute and model inference.
       Read the <a href="/compare/paseo/">SAM vs Paseo comparison</a>.
     </p>
@@ -187,6 +229,69 @@ const rows = [
     white-space: nowrap;
   }
 
+  /* Below tablet width the four-column table cannot fit: stack each row as a
+     card (label, then SAM / Managed / Self-hosted values with inline headings)
+     so every cell stays readable without horizontal scrolling. */
+  @media (max-width: 767px) {
+    .table-wrapper {
+      overflow-x: visible;
+      padding: 4px;
+    }
+
+    .comparison-table thead {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      white-space: nowrap;
+    }
+
+    .comparison-table,
+    .comparison-table tbody,
+    .comparison-table tr,
+    .comparison-table td {
+      display: block;
+    }
+
+    .comparison-table tr {
+      padding: 14px 12px 6px;
+      border-bottom: 1px solid var(--glass-border);
+    }
+
+    .comparison-table tr:last-child {
+      border-bottom: none;
+    }
+
+    .comparison-table td {
+      border-bottom: none;
+      padding: 4px 0;
+    }
+
+    .col-label {
+      white-space: normal;
+      font-family: var(--font-display);
+      font-size: 1rem;
+      color: var(--color-fg-primary);
+      padding-bottom: 8px;
+    }
+
+    .comparison-table td[data-label]::before {
+      content: attr(data-label);
+      display: block;
+      font-family: var(--font-mono);
+      font-size: 0.6875rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--color-fg-dim);
+      margin-bottom: 2px;
+    }
+
+    .col-sam[data-label]::before {
+      color: var(--color-accent);
+    }
+  }
+
   .col-sam {
     color: var(--color-fg-primary);
   }
@@ -213,6 +318,8 @@ const rows = [
 
   .comparison-footnote a {
     color: var(--color-accent);
+    text-decoration: underline;
+    text-underline-offset: 3px;
   }
 
   .comparison-footnote a:hover {

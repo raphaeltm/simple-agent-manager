@@ -24,6 +24,11 @@ import type {
   CollectedToolCall,
   ToolContext,
 } from '../../../src/durable-objects/sam-session/types';
+import {
+  DEFAULT_SEARCH_QUERY_MAX_LENGTH,
+  DEFAULT_SEARCH_QUERY_MAX_TERM_LENGTH,
+  DEFAULT_SEARCH_QUERY_MAX_TERMS,
+} from '../../../src/lib/search-query-limits';
 
 // Mock cloudflare:workers
 vi.mock('cloudflare:workers', () => ({
@@ -50,14 +55,24 @@ const mockListSessions = vi.fn();
 const mockGetSession = vi.fn();
 const mockGetMessages = vi.fn();
 const mockSearchMessages = vi.fn();
+const mockRootSearch = vi.fn((): unknown => null);
 
 vi.mock('../../../src/services/project-data', () => ({
   listSessions: (...args: unknown[]) => mockListSessions(...args),
   getSession: (...args: unknown[]) => mockGetSession(...args),
   getMessages: (...args: unknown[]) => mockGetMessages(...args),
-  searchMessages: (...args: unknown[]) => mockSearchMessages(...args),
   searchMessagesWithArchiveMetadata: async (...args: unknown[]) => ({
     results: await mockSearchMessages(...args),
+    query: {
+      query: String(args[2] ?? ''),
+      queryTruncated: false,
+      queryLimits: {
+        maxLength: DEFAULT_SEARCH_QUERY_MAX_LENGTH,
+        maxTermLength: DEFAULT_SEARCH_QUERY_MAX_TERM_LENGTH,
+        maxTerms: DEFAULT_SEARCH_QUERY_MAX_TERMS,
+      },
+    },
+    rootSearch: mockRootSearch(),
     archiveSearch: {
       partial: false,
       reason: null,
@@ -314,10 +329,39 @@ describe('search_task_messages', () => {
       results: unknown[];
       count: number;
       query: string;
+      rootSearch: unknown;
+      coverageNotes: string[];
     };
     expect(result.count).toBe(1);
     expect(result.query).toBe('test query');
     expect(result.results).toHaveLength(1);
+    // Root coverage is always surfaced, even when nothing was truncated.
+    expect(result).toHaveProperty('rootSearch', null);
+    expect(result.coverageNotes).toEqual([]);
+  });
+
+  it('tells the agent when the root search only reached its newest matches', async () => {
+    mockSearchMessages.mockResolvedValueOnce([]);
+    mockRootSearch.mockReturnValueOnce({
+      ftsCandidateLimit: 2000,
+      ftsCandidatesTruncated: true,
+      keywordScanRowLimit: 50000,
+      keywordFallbackRan: true,
+      keywordScanTruncated: true,
+    });
+    const ctx = buildCtx({ dbFirstResult: OWNED_PROJECT });
+    const result = (await searchTaskMessages(
+      { projectId: 'proj-1', query: 'old decision' },
+      ctx
+    )) as { count: number; rootSearch: unknown; coverageNotes: string[] };
+
+    // An empty result that is not proof of absence says so, in words the agent reads.
+    expect(result.count).toBe(0);
+    expect(result.rootSearch).toMatchObject({ ftsCandidatesTruncated: true });
+    expect(result.coverageNotes).toEqual([
+      expect.stringContaining('newest 2000 matching messages'),
+      expect.stringContaining('newest 50000 raw messages'),
+    ]);
   });
 
   it('resolves taskId to sessionId before searching', async () => {
@@ -332,9 +376,49 @@ describe('search_task_messages', () => {
       'test',
       'resolved-session',
       null,
-      expect.any(Number)
+      expect.any(Number),
+      null
     );
   });
+
+  it('forwards the signed archive continuation', async () => {
+    mockSearchMessages.mockResolvedValueOnce([]);
+    const ctx = buildCtx({ dbFirstResult: OWNED_PROJECT });
+    await searchTaskMessages(
+      { projectId: 'proj-1', query: 'test', continuation: 'signed-continuation' },
+      ctx
+    );
+    expect(mockSearchMessages).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'test',
+      null,
+      null,
+      expect.any(Number),
+      'signed-continuation'
+    );
+  });
+
+  it.each([{ sessionId: 'session-one' }, { taskId: 'task-one' }])(
+    'rejects a continuation combined with exact scope $sessionId$taskId',
+    async (scope) => {
+      const callsBefore = mockSearchMessages.mock.calls.length;
+      const result = await searchTaskMessages(
+        {
+          projectId: 'proj-1',
+          query: 'test',
+          continuation: 'signed-project-wide-cursor',
+          ...scope,
+        },
+        buildCtx({ dbFirstResult: OWNED_PROJECT })
+      );
+
+      expect(result).toEqual({
+        error: 'continuation cannot be combined with sessionId or taskId.',
+      });
+      expect(mockSearchMessages).toHaveBeenCalledTimes(callsBefore);
+    }
+  );
 
   it('dispatches via executeTool', async () => {
     const ctx = buildCtx();

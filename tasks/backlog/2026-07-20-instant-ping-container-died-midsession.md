@@ -1,5 +1,26 @@
 # Instant container died mid-session during production verification ping; no parent-side terminal path for dead-node children
 
+> **Reconciliation 2026-10-05:** #2230 widened this. VM teardown now sets tasks to `sleeping` (`apps/api/src/services/session-sleep-teardown.ts:214-230`), and MCP `ACTIVE_STATUSES` (`apps/api/src/routes/mcp/_helpers.ts:322`) does not include it, so `stop_subtask` and `send_message_to_subtask` refuse a slept child (`routes/mcp/orchestration-comms.ts:146`), even though `sleeping → cancelled` is an allowed transition (`services/task-status.ts:37`). That part is tracked with the other `sleeping` gaps in `2026-10-05-sleeping-task-status-follow-ups.md`. The node-not-running refusal this file describes is unchanged (`orchestration-comms.ts:190-204`).
+
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:**
+>   - Instant sessions now recover across container loss (PR #1660, 9a7ceab7a).
+>   - The stuck-task sweep treats an Instant lifecycle in true `error` as conclusively dead and
+>     fails the task, putting the liveness reason in `errorMessage`
+>     (`apps/api/tests/unit/stuck-task-container-liveness.test.ts:67`;
+>     `apps/api/src/scheduled/stuck-tasks.ts:1366,1408`).
+> - **Still open:** `stop_subtask` (and `send_message_to_subtask`) still reject a child whose
+>   node is not `running` before any DB transition
+>   (`apps/api/src/routes/mcp/orchestration-comms.ts:192-203`). Add the DB-side terminal path
+>   plus a regression test (a live-node child must still get the runtime stop first).
+> - **Moot/dropped:**
+>   - Root-causing this specific death: the PR #1660 evidence points to container rollouts (this
+>     incident happened during a post-deploy check, though that is not proven), and recovery now
+>     handles that case.
+>   - Checking how long the sweep took for task `01KY03K1GHVK2HMBWRNQ82YC94`: superseded by the
+>     sweep behaviour above.
+
 ## Problem
 
 During post-deploy verification of PR #1643 (dispatch_task runtime routing), a

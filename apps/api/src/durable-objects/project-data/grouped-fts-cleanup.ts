@@ -1,4 +1,8 @@
 import { createModuleLogger, serializeError } from '../../lib/logger';
+import {
+  SEARCH_INDEX_STATE_COMPLETE,
+  SEARCH_INDEX_STATE_PRUNED,
+} from './materialization';
 import type { ProjectDataStorageStatus, StorageSafetyConfig } from './storage-safety';
 import {
   META_LAST_MEASURED_AT,
@@ -155,12 +159,14 @@ function readCandidates(
        WHERE s.status IN ('stopped', 'failed')
          AND s.updated_at <= ?
          AND s.materialized_at IS NOT NULL
-         AND COALESCE(s.search_index_state, 'complete') != 'grouped_fts_pruned'
+         AND COALESCE(s.search_index_state, ?) != ?
          AND (? IS NULL OR s.id > ?)
        GROUP BY s.id
        ORDER BY s.id ASC
        LIMIT ?`,
       cutoff,
+      SEARCH_INDEX_STATE_COMPLETE,
+      SEARCH_INDEX_STATE_PRUNED,
       cursorSessionId,
       cursorSessionId ?? '',
       config.groupedFtsCleanupBatchSessions + 1
@@ -227,13 +233,23 @@ function deleteGroupedFtsForSession(
     groupedRowsDeleted++;
   }
 
+  // The watermark must die with the rows it described (rule 44: every writer that
+  // invalidates a column has to clear it). `resolveWatermark()` prefers the
+  // watermark over `materialized_at`, so a leftover value would claim the deleted
+  // head rows are still indexed: only the tail would ever be re-grouped, and
+  // `searchMessagesLike` would skip the head's raw rows as already covered. Today
+  // the `grouped_fts_pruned` refusal is what prevents that, and this clearing is
+  // what makes the refusal a second line of defence rather than the only one.
   sql.exec(
     `UPDATE chat_sessions
      SET materialized_at = NULL,
-         search_index_state = 'grouped_fts_pruned',
+         materialized_through_created_at = NULL,
+         materialized_through_sequence = NULL,
+         search_index_state = ?,
          search_index_updated_at = ?,
          search_index_degradation_reason = ?
      WHERE id = ?`,
+    SEARCH_INDEX_STATE_PRUNED,
     now,
     'Grouped/FTS derived rows were pruned for storage relief; search uses raw-message LIKE fallback for this terminal session.',
     sessionId

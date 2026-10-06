@@ -103,7 +103,10 @@ const MOCK_MESSAGES = [
   },
 ];
 
-async function setupApiMocks(page: Page, task = MOCK_TASK) {
+async function setupApiMocks(page: Page, task = MOCK_TASK, isMine = true, messages = MOCK_MESSAGES) {
+  await page.addInitScript(() => {
+    localStorage.setItem('sam-onboarding-wizard-dismissed-user-test-1', 'true');
+  });
   const isTerminalLifecycle =
     task.status === 'failed' && task.executionStep === 'awaiting_human_input';
   const session = {
@@ -118,6 +121,8 @@ async function setupApiMocks(page: Page, task = MOCK_TASK) {
       : {}),
     taskId: task.id,
     task,
+    isMine,
+    messageCount: messages.length,
   };
   await page.route('**/api/**', async (route: Route) => {
     const url = new URL(route.request().url());
@@ -154,11 +159,11 @@ async function setupApiMocks(page: Page, task = MOCK_TASK) {
       }
 
       if (subPath === `/sessions/${MOCK_SESSION.id}`) {
-        return respond(200, { session, messages: MOCK_MESSAGES, hasMore: false });
+        return respond(200, { session, messages, hasMore: false });
       }
 
       if (subPath.match(/\/sessions\/[^/]+\/messages/)) {
-        return respond(200, { messages: MOCK_MESSAGES, hasMore: false });
+        return respond(200, { messages, hasMore: false });
       }
 
       if (subPath === '/tasks') return respond(200, { tasks: [task], total: 1, nextCursor: null });
@@ -196,6 +201,195 @@ async function assertNoHorizontalOverflow(page: Page) {
 }
 
 test.describe('Project chat recoverable error banner', () => {
+  test('startup missing credential reaches existing agent connections', async ({ page }, testInfo) => {
+    const systemMessage = {
+      ...MOCK_MESSAGES[0],
+      id: 'msg-system-auth',
+      role: 'system',
+      content: 'Agent startup failed because its provider connection is missing.',
+    };
+    await setupApiMocks(page, { ...MOCK_TASK, errorMessage: 'model_provider_credential_missing' }, true, [
+      systemMessage,
+      { ...systemMessage, id: 'msg-system-later', content: 'Workspace is preparing.' },
+    ]);
+    await page.goto('/projects/proj-test-1/chat/session-recoverable-1');
+    const banner = page.getByTestId('agent-connection-guidance');
+    await expect(banner).toBeVisible();
+    const link = banner.getByRole('link', { name: 'Open agent connections' });
+    await expect(link).toHaveAttribute('href', '/settings/connections');
+    await assertNoHorizontalOverflow(page);
+    await screenshot(page, `acp-agent-auth-${testInfo.project.name.includes('Desktop') ? 'desktop' : 'mobile'}`);
+    await link.click();
+    await expect(page).toHaveURL(/\/settings\/connections$/);
+  });
+
+  test('startup auth banner offers no personal settings action to another member', async ({ page }) => {
+    const systemMessage = {
+      ...MOCK_MESSAGES[0],
+      id: 'msg-system-auth',
+      role: 'system',
+      content: 'Agent startup failed because its provider connection is missing.',
+    };
+    await setupApiMocks(page, { ...MOCK_TASK, errorMessage: null }, false, [systemMessage]);
+    await page.goto('/projects/proj-test-1/chat/session-recoverable-1');
+    const banner = page.getByTestId('agent-connection-guidance');
+    await expect(banner).toBeVisible();
+    await expect(banner.getByRole('link', { name: 'Open agent connections' })).toHaveCount(0);
+  });
+
+  test('assistant or tool text cannot impersonate the startup system diagnosis', async ({ page }) => {
+    const content = 'Agent startup failed because its provider connection is missing.';
+    await setupApiMocks(page, { ...MOCK_TASK, errorMessage: null }, true, [
+      { ...MOCK_MESSAGES[0], id: 'msg-assistant-spoof', role: 'assistant', content },
+      { ...MOCK_MESSAGES[0], id: 'msg-tool-spoof', role: 'tool', content },
+    ]);
+    await page.goto('/projects/proj-test-1/chat/session-recoverable-1');
+    await expect(page.getByTestId('agent-connection-guidance')).toHaveCount(0);
+  });
+
+  test('successful retry turn clears stale startup guidance even after a later system row', async ({ page }) => {
+    const systemMessage = {
+      ...MOCK_MESSAGES[0],
+      id: 'msg-system-auth',
+      role: 'system',
+      content: 'Agent startup failed because its provider connection is missing.',
+    };
+    await setupApiMocks(page, { ...MOCK_TASK, errorMessage: null }, true, [
+      systemMessage,
+      { ...systemMessage, id: 'msg-user-later', role: 'user', content: 'I connected the agent.' },
+      { ...systemMessage, id: 'msg-assistant-later', role: 'assistant', content: 'Connection restored.' },
+      { ...systemMessage, id: 'msg-system-later', content: 'Workspace is preparing.' },
+    ]);
+    await page.goto('/projects/proj-test-1/chat/session-recoverable-1');
+    await expect(page.getByTestId('agent-connection-guidance')).toHaveCount(0);
+  });
+
+  test('creator sees fixed loopback guidance and reaches existing MCP settings', async ({ page }, testInfo) => {
+    const promptMessage = { ...MOCK_MESSAGES[0], id: 'msg-loopback-prompt' };
+    const systemMessage = {
+      ...MOCK_MESSAGES[0], id: 'msg-system-loopback', role: 'system',
+      content: 'This sign-in flow requires a local callback that this session cannot complete.',
+      toolMetadata: { promptMessageId: promptMessage.id }, sequence: 2,
+    };
+    await setupApiMocks(page, { ...MOCK_TASK, errorMessage: null }, true, [
+      promptMessage,
+      systemMessage,
+      { ...systemMessage, id: 'msg-system-later', content: 'Workspace is preparing. '.repeat(12), sequence: 3 },
+    ]);
+    await page.goto('/projects/proj-test-1/chat/session-recoverable-1');
+    const banner = page.getByTestId('loopback-auth-guidance');
+    await expect(banner).toBeVisible();
+    const link = banner.getByRole('link', { name: 'Review MCP connections' });
+    await expect(link).toHaveAttribute('href', '/settings/mcp-servers');
+    await assertNoHorizontalOverflow(page);
+    await screenshot(page, `acp-loopback-auth-${testInfo.project.name.includes('Desktop') ? 'desktop' : 'mobile'}`);
+    await link.click();
+    await expect(page).toHaveURL(/\/settings\/mcp-servers$/);
+  });
+
+  test('loopback guidance is creator-gated and cannot be spoofed by assistant or tool text', async ({ page }) => {
+    const content = 'This sign-in flow requires a local callback that this session cannot complete.';
+    const promptMessage = { ...MOCK_MESSAGES[0], id: 'msg-loopback-prompt' };
+    const message = { ...MOCK_MESSAGES[0], id: 'msg-loopback', content,
+      toolMetadata: { promptMessageId: promptMessage.id }, sequence: 2 };
+    await setupApiMocks(page, { ...MOCK_TASK, errorMessage: null }, false, [
+      promptMessage,
+      { ...message, role: 'system' },
+    ]);
+    await page.goto('/projects/proj-test-1/chat/session-recoverable-1');
+    const banner = page.getByTestId('loopback-auth-guidance');
+    await expect(banner).toBeVisible();
+    await expect(banner.getByRole('link')).toHaveCount(0);
+
+    await setupApiMocks(page, { ...MOCK_TASK, errorMessage: null }, true, [
+      { ...message, id: 'msg-assistant-spoof', role: 'assistant' },
+      { ...message, id: 'msg-tool-spoof', role: 'tool' },
+    ]);
+    await page.reload();
+    await expect(page.getByTestId('loopback-auth-guidance')).toHaveCount(0);
+  });
+
+  test('new turn clears loopback guidance even after an unrelated system row', async ({ page }) => {
+    const promptMessage = { ...MOCK_MESSAGES[0], id: 'msg-loopback-prompt' };
+    const message = {
+      ...MOCK_MESSAGES[0], id: 'msg-system-loopback', role: 'system',
+      content: 'This sign-in flow requires a local callback that this session cannot complete.',
+      toolMetadata: { promptMessageId: promptMessage.id }, sequence: 2,
+    };
+    await setupApiMocks(page, { ...MOCK_TASK, errorMessage: null }, true, [
+      promptMessage,
+      message,
+      { ...message, id: 'msg-user-later', role: 'user', content: 'I tried another method.', sequence: 3 },
+      { ...message, id: 'msg-system-later', content: 'Workspace is preparing.', sequence: 4 },
+    ]);
+    await page.goto('/projects/proj-test-1/chat/session-recoverable-1');
+    await expect(page.getByTestId('loopback-auth-guidance')).toHaveCount(0);
+  });
+
+  test('late loopback persistence cannot revive guidance after retry at equal millisecond', async ({ page }) => {
+    const sameMillisecond = NOW - 30_000;
+    const promptA = { ...MOCK_MESSAGES[0], id: 'msg-loopback-prompt-a', createdAt: sameMillisecond, sequence: 10 };
+    const retryB = { ...MOCK_MESSAGES[0], id: 'msg-loopback-retry-b', createdAt: sameMillisecond, sequence: 11 };
+    const lateDiagnosis = { ...MOCK_MESSAGES[0], id: 'msg-late-loopback', role: 'system',
+      content: 'This sign-in flow requires a local callback that this session cannot complete.',
+      toolMetadata: { promptMessageId: promptA.id }, createdAt: sameMillisecond, sequence: 12 };
+    await setupApiMocks(page, { ...MOCK_TASK, errorMessage: null }, true, [promptA, retryB, lateDiagnosis]);
+    await page.goto('/projects/proj-test-1/chat/session-recoverable-1');
+    await expect(page.getByTestId('loopback-auth-guidance')).toHaveCount(0);
+
+    await setupApiMocks(page, { ...MOCK_TASK, errorMessage: null }, true, [
+      promptA, retryB, { ...lateDiagnosis, id: 'msg-skewed-loopback', createdAt: sameMillisecond + 10_000 },
+    ]);
+    await page.reload();
+    await expect(page.getByTestId('loopback-auth-guidance')).toHaveCount(0);
+
+    // Missing or spoofed anchors fail closed, even if the system text matches.
+    await setupApiMocks(page, { ...MOCK_TASK, errorMessage: null }, true, [
+      { ...lateDiagnosis, id: 'msg-no-anchor', toolMetadata: { promptMessageId: 'missing-user-row' } },
+    ]);
+    await page.reload();
+    await expect(page.getByTestId('loopback-auth-guidance')).toHaveCount(0);
+  });
+
+  test('creator can open existing auth settings from a classified chat failure', async ({ page }, testInfo) => {
+    await setupApiMocks(page, {
+      ...MOCK_TASK,
+      errorMessage: 'mcp_endpoint_needs_auth',
+    }, true);
+    await page.goto('/projects/proj-test-1/chat/session-recoverable-1');
+    const card = page.locator('[data-failure-kind="diagnosable"]');
+    await expect(card.getByText('Tool connection needs sign-in')).toBeVisible();
+    await card.getByRole('button', { name: /Tool connection needs sign-in/ }).click();
+    const link = card.getByRole('link', { name: 'Review personal MCP settings' });
+    await expect(link).toHaveAttribute('href', '/settings/mcp-servers');
+    await expect(card.getByRole('link', { name: 'View project MCP settings' })).toHaveAttribute('href', '/projects/proj-test-1/settings/runtime');
+    await assertNoHorizontalOverflow(page);
+    await screenshot(page, `acp-auth-chat-${testInfo.project.name.includes('Desktop') ? 'desktop' : 'mobile'}`);
+    await link.click();
+    await expect(page).toHaveURL(/\/settings\/mcp-servers$/);
+  });
+
+  test('another project member sees the diagnosis without a credential action', async ({ page }) => {
+    await setupApiMocks(page, {
+      ...MOCK_TASK,
+      errorMessage: 'model_provider_credential_missing',
+    }, false);
+    await page.goto('/projects/proj-test-1/chat/session-recoverable-1');
+    const card = page.locator('[data-failure-kind="diagnosable"]');
+    await expect(card.getByText('Agent connection missing')).toBeVisible();
+    await card.getByRole('button', { name: /Agent connection missing/ }).click();
+    await expect(card.getByRole('link', { name: 'Open agent connections' })).toHaveCount(0);
+  });
+
+  test('generic prompt failure does not prescribe credential changes', async ({ page }) => {
+    await setupApiMocks(page, { ...MOCK_TASK, errorMessage: 'agent_prompt_failed' }, true);
+    await page.goto('/projects/proj-test-1/chat/session-recoverable-1');
+    const card = page.locator('[data-failure-kind="diagnosable"]');
+    await expect(card.getByText('Agent request failed')).toBeVisible();
+    await card.getByRole('button', { name: /Agent request failed/ }).click();
+    await expect(card.getByRole('link', { name: /connections|MCP settings/i })).toHaveCount(0);
+  });
+
   test('renders recoverable error guidance and keeps the composer enabled', async ({
     page,
   }, testInfo) => {

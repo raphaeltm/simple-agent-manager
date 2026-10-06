@@ -7,30 +7,29 @@ import {
 import type { Env as WorkerEnv } from '../../env';
 import { createModuleLogger } from '../../lib/logger';
 import {
-  getFreshHarnessWorkLeaseExpiry,
-  parseHarnessWorkConfig,
-} from '../../services/session-idleness';
-import { DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS } from '../../services/session-snapshot-artifacts';
+  sessionRecoveryAttemptDecayMs,
+  sessionRecoveryMaxAttempts,
+} from '../../services/session-snapshot-recovery-budget';
 import {
   classifyTaskRuntimeLiveness,
   isSessionResumable,
   loadRuntimeWorkspaceSnapshot,
   loadSessionResumabilitySnapshot,
   loadTaskSupersession,
+  needsDeferredSessionSleepProbe,
   needsNodeHealthProbe,
   needsSessionResumabilityProbe,
   needsTaskSupersessionProbe,
   probeNodeHealthForTaskLiveness,
-  type RuntimeAcpSessionSnapshot,
-  type RuntimeSessionWorkSnapshot,
-  type TaskAcpLivenessSignals,
   type TaskRuntimeLiveness,
   type TaskRuntimeLivenessSignals,
 } from '../../services/task-runtime-liveness';
+import { loadTaskSleepPreservation } from '../../services/task-sleep-preservation';
 import { inspectVmAgentContainerLifecycle } from '../../services/vm-agent-container';
-import { listAcpSessions } from './acp-sessions';
-import { parseActivityStaleThreshold, WORKING_ACTIVITIES } from './session-state';
+import { readTaskAcpLivenessSignals } from './task-acp-liveness-signals';
 import type { Env } from './types';
+
+export { readTaskAcpLivenessSignals } from './task-acp-liveness-signals';
 
 const log = createModuleLogger('idle_cleanup_liveness');
 
@@ -39,121 +38,18 @@ function positiveInt(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function freshNumber(value: unknown, floor: number): number | null {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < floor) return null;
-  return value;
-}
-
-function numberOrNull(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
-}
-
-function maxFreshEvidence(floor: number, ...values: unknown[]): number | null {
-  const freshValues = values
-    .map((value) => freshNumber(value, floor))
-    .filter((value): value is number => value !== null);
-  return freshValues.length > 0 ? Math.max(...freshValues) : null;
-}
-
-function isWorkingActivityName(value: unknown): boolean {
-  return typeof value === 'string' && (WORKING_ACTIVITIES as readonly string[]).includes(value);
-}
-
-function readTaskSessionWork(
-  sql: SqlStorage,
-  env: Env,
-  opts: { chatSessionId: string; workspaceId: string; limit: number; nowMs: number }
-): RuntimeSessionWorkSnapshot | null {
-  const rows = sql
-    .exec(
-      `SELECT acp.id AS acp_session_id,
-              ss.activity AS activity,
-              ss.activity_at AS activity_at,
-              ss.prompt_started_at AS prompt_started_at,
-              ss.runtime_work_state AS runtime_work_state,
-              ss.runtime_work_updated_at AS runtime_work_updated_at,
-              ss.runtime_work_progress_at AS runtime_work_progress_at
-       FROM acp_sessions acp
-       LEFT JOIN session_state ss ON ss.session_id = acp.id
-       WHERE acp.chat_session_id = ?
-         AND acp.workspace_id = ?
-         AND acp.status IN ('assigned', 'running')
-       ORDER BY COALESCE(acp.started_at, acp.assigned_at, acp.updated_at, acp.created_at) DESC
-       LIMIT ?`,
-      opts.chatSessionId,
-      opts.workspaceId,
-      opts.limit
-    )
-    .toArray();
-
-  const activityFloor =
-    opts.nowMs - parseActivityStaleThreshold(env.SESSION_ACTIVITY_STALE_THRESHOLD_MS);
-  const harnessWorkConfig = parseHarnessWorkConfig(env);
-  const now = new Date(opts.nowMs);
-
-  for (const row of rows) {
-    const activeAcpSessionId = typeof row.acp_session_id === 'string' ? row.acp_session_id : null;
-    if (!activeAcpSessionId) continue;
-
-    if (
-      isWorkingActivityName(row.activity) &&
-      maxFreshEvidence(activityFloor, row.prompt_started_at, row.activity_at) !== null
-    ) {
-      return {
-        active: true,
-        activeAcpSessionId,
-        reason: 'task_prompt_turn_active',
-      };
-    }
-
-    const runtimeWorkLeaseExpiry = getFreshHarnessWorkLeaseExpiry(
-      {
-        runtimeWorkState:
-          typeof row.runtime_work_state === 'string' ? row.runtime_work_state : null,
-        runtimeWorkUpdatedAt: numberOrNull(row.runtime_work_updated_at),
-        runtimeWorkProgressAt: numberOrNull(row.runtime_work_progress_at),
-      },
-      now,
-      harnessWorkConfig.leaseMs,
-      harnessWorkConfig.maxDurationMs
-    );
-    if (runtimeWorkLeaseExpiry) {
-      return {
-        active: true,
-        activeAcpSessionId,
-        reason: 'task_runtime_work_active',
-      };
-    }
-  }
-
-  return null;
-}
-
-export function readTaskAcpLivenessSignals(
-  sql: SqlStorage,
-  env: Env,
-  opts: { chatSessionId: string; workspaceId: string; limit: number; nowMs?: number }
-): TaskAcpLivenessSignals {
-  const { sessions, total } = listAcpSessions(sql, {
-    chatSessionId: opts.chatSessionId,
-    limit: opts.limit,
-  });
-  const nowMs = opts.nowMs ?? Date.now();
-  return {
-    sessions: sessions as RuntimeAcpSessionSnapshot[],
-    total,
-    sessionWork: readTaskSessionWork(sql, env, {
-      chatSessionId: opts.chatSessionId,
-      workspaceId: opts.workspaceId,
-      limit: opts.limit,
-      nowMs,
-    }),
-  };
-}
-
 /**
  * ProjectData-side adapter for the shared task runtime classifier. ACP state is
  * read directly from this DO's SQLite storage, never through self-RPC.
+ */
+
+/**
+ * Public entry point, mirroring the cron adapter exactly (`.claude/rules/61`).
+ * Classifies once, then pays for one indexed `session_snapshots` lookup and
+ * re-classifies only when the verdict is a conclusive death reached without the
+ * task-scoped sleep signal — the `node_not_live`, `cf_container_<terminal>` and
+ * `task_acp_session_terminal` paths, reachable while `workspaces.status` still
+ * reads `running`.
  */
 export async function getLocalTaskRuntimeLiveness(
   sql: SqlStorage,
@@ -166,6 +62,44 @@ export async function getLocalTaskRuntimeLiveness(
     acpSessionId?: string | null;
   }
 ): Promise<TaskRuntimeLiveness> {
+  const { liveness, signals } = await classifyLocalTaskRuntime(sql, env, task);
+  if (!needsDeferredSessionSleepProbe(liveness, signals)) return liveness;
+
+  const preservation = await loadTaskSleepPreservation(env.DATABASE, env, {
+    id: task.taskId,
+    projectId: task.projectId,
+    chatSessionId: task.chatSessionId ?? signals.workspace?.chatSessionId ?? null,
+  });
+  if (preservation.outcome === 'not_run' || preservation.outcome === 'none') return liveness;
+  log.info('preserved_sleeping', {
+    taskId: task.taskId,
+    projectId: task.projectId,
+    workspaceId: task.workspaceId,
+    livenessReason: liveness.reason,
+    sleepStatus: preservation.sleepStatus,
+    expiresAt: preservation.expiresAt,
+    source: 'deferred_liveness',
+    outcome: preservation.outcome,
+    action: 'preserved',
+  });
+  return classifyTaskRuntimeLiveness({ ...signals, taskSessionSleep: preservation.outcome });
+}
+async function classifyLocalTaskRuntime(
+  sql: SqlStorage,
+  env: Env,
+  task: {
+    taskId: string;
+    projectId: string;
+    workspaceId: string | null;
+    chatSessionId?: string | null;
+    acpSessionId?: string | null;
+  }
+): Promise<{ liveness: TaskRuntimeLiveness; signals: TaskRuntimeLivenessSignals }> {
+  /** Pair every verdict with the signals that produced it, for the deferred re-probe. */
+  const finish = (signals: TaskRuntimeLivenessSignals) => ({
+    liveness: classifyTaskRuntimeLiveness(signals),
+    signals,
+  });
   const staleMs =
     positiveInt(env.NODE_HEARTBEAT_STALE_SECONDS, DEFAULT_NODE_HEARTBEAT_STALE_SECONDS) * 1000;
   let workspace: Awaited<ReturnType<typeof loadRuntimeWorkspaceSnapshot>> = null;
@@ -191,10 +125,8 @@ export async function getLocalTaskRuntimeLiveness(
   // Only probed for a workspace that would otherwise be declared conclusively
   // dead, keeping this off the alarm's hot path (`.claude/rules/47`).
   const nowMs = Date.now();
-  const maxRecoveryAttempts = positiveInt(
-    env.SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS,
-    DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS
-  );
+  const maxRecoveryAttempts = sessionRecoveryMaxAttempts(env);
+  const recoveryAttemptDecayMs = sessionRecoveryAttemptDecayMs(env);
   let resumabilityProbeOutcome: TaskRuntimeLivenessSignals['resumabilityProbeOutcome'] = 'not_run';
   let sessionResumability: TaskRuntimeLivenessSignals['sessionResumability'] = null;
   /** True when resumability alone already yields an inconclusive verdict. */
@@ -214,8 +146,7 @@ export async function getLocalTaskRuntimeLiveness(
         sessionResumability,
         task.projectId,
         workspace.id,
-        maxRecoveryAttempts,
-        nowMs
+        { maxRecoveryAttempts, recoveryAttemptDecayMs, nowMs }
       );
     } catch (err) {
       resumabilityProbeOutcome = 'error';
@@ -229,14 +160,44 @@ export async function getLocalTaskRuntimeLiveness(
     }
   }
 
+  // Task-scoped sleep guard — the same shared predicate the cron sweep uses, so
+  // the two terminalization runtimes cannot disagree about whether a slept
+  // conversation is recoverable (`.claude/rules/61`).
+  let taskSessionSleep: TaskRuntimeLivenessSignals['taskSessionSleep'] = 'not_run';
+  if (
+    workspaceChatMatches &&
+    !resumabilityResolvedInconclusive &&
+    needsTaskSupersessionProbe(workspace, workspaceProbeOutcome)
+  ) {
+    const preservation = await loadTaskSleepPreservation(env.DATABASE, env, {
+      id: task.taskId,
+      projectId: task.projectId,
+      chatSessionId: task.chatSessionId ?? workspace?.chatSessionId ?? null,
+    });
+    taskSessionSleep = preservation.outcome;
+    if (preservation.outcome === 'preserve') {
+      log.info('preserved_sleeping', {
+        taskId: task.taskId,
+        projectId: task.projectId,
+        workspaceId: task.workspaceId,
+        sleepStatus: preservation.sleepStatus,
+        expiresAt: preservation.expiresAt,
+        action: 'preserved',
+      });
+    }
+  }
+
   // Tighter hot-path gate than the resumability probe (`.claude/rules/47`): skipped
   // entirely when the snapshot already proved the session resumable, because the
   // classifier returns `_snapshot_resumable` before it ever consults supersession.
+  // Also skipped once sleep alone resolved the verdict, for the same reason.
   let supersessionProbeOutcome: TaskRuntimeLivenessSignals['supersessionProbeOutcome'] = 'not_run';
   let supersession: TaskRuntimeLivenessSignals['supersession'] = 'none';
   if (
     workspaceChatMatches &&
     !resumabilityResolvedInconclusive &&
+    taskSessionSleep !== 'preserve' &&
+    taskSessionSleep !== 'unknown' &&
     needsTaskSupersessionProbe(workspace, workspaceProbeOutcome)
   ) {
     try {
@@ -262,6 +223,7 @@ export async function getLocalTaskRuntimeLiveness(
     workspaceProbeOutcome,
     supersessionProbeOutcome,
     supersession,
+    taskSessionSleep,
     nowMs,
     heartbeatStaleMs: staleMs,
     acpProbeOutcome: 'not_run',
@@ -273,9 +235,10 @@ export async function getLocalTaskRuntimeLiveness(
     resumabilityProbeOutcome,
     sessionResumability,
     resumabilityMaxRecoveryAttempts: maxRecoveryAttempts,
+    resumabilityRecoveryAttemptDecayMs: recoveryAttemptDecayMs,
   };
   let initialClassification = classifyTaskRuntimeLiveness(livenessSignals);
-  if (!workspaceChatMatches) return initialClassification;
+  if (!workspaceChatMatches) return { liveness: initialClassification, signals: livenessSignals };
   if (needsNodeHealthProbe(livenessSignals) && livenessSignals.workspace?.nodeId) {
     const nodeId = livenessSignals.workspace.nodeId;
     const probe = await probeNodeHealthForTaskLiveness(env, nodeId);
@@ -297,7 +260,7 @@ export async function getLocalTaskRuntimeLiveness(
     };
     initialClassification = classifyTaskRuntimeLiveness(livenessSignals);
     if (probe.outcome !== 'ok') {
-      return initialClassification;
+      return { liveness: initialClassification, signals: livenessSignals };
     }
   }
   if (
@@ -307,7 +270,7 @@ export async function getLocalTaskRuntimeLiveness(
     !workspace.nodeId ||
     (workspace.nodeRuntime !== 'cf-container' && initialClassification.conclusive)
   ) {
-    return initialClassification;
+    return { liveness: initialClassification, signals: livenessSignals };
   }
 
   if (workspace.nodeRuntime === 'cf-container') {
@@ -331,12 +294,12 @@ export async function getLocalTaskRuntimeLiveness(
           probeTimeoutMs,
           action: 'preserved',
         });
-        return classifyTaskRuntimeLiveness({
+        return finish({
           ...livenessSignals,
           containerProbeOutcome: 'timeout',
         });
       }
-      return classifyTaskRuntimeLiveness({
+      return finish({
         ...livenessSignals,
         containerProbeOutcome: 'ok',
         containerLifecycle: probe,
@@ -348,7 +311,7 @@ export async function getLocalTaskRuntimeLiveness(
         action: 'preserved',
         error: err instanceof Error ? err.message : String(err),
       });
-      return classifyTaskRuntimeLiveness({
+      return finish({
         ...livenessSignals,
         containerProbeOutcome: 'error',
       });
@@ -368,11 +331,12 @@ export async function getLocalTaskRuntimeLiveness(
       limit,
       nowMs,
     });
-    return classifyTaskRuntimeLiveness({
+    return finish({
       ...livenessSignals,
       acpProbeOutcome: 'ok',
       acpSessions: probe.sessions,
       sessionWork: probe.sessionWork,
+      workEvidence: probe.workEvidence,
     });
   } catch (err) {
     log.warn('local_acp_read_failed', {
@@ -382,7 +346,7 @@ export async function getLocalTaskRuntimeLiveness(
       action: 'preserved',
       error: err instanceof Error ? err.message : String(err),
     });
-    return classifyTaskRuntimeLiveness({
+    return finish({
       ...livenessSignals,
       acpProbeOutcome: 'error',
     });

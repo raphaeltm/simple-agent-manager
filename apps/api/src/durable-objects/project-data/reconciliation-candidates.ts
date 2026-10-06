@@ -3,6 +3,7 @@ import * as v from 'valibot';
 
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import { parseRowOrNull } from '../row-validation';
+import { readProjectEventWakeLeaseUntil } from './project-events-wake-delivery';
 import {
   CANDIDATE_GATE_META_PREFIX,
   claimReconciliationCandidate,
@@ -15,6 +16,7 @@ import {
   resetReconciliationCursor,
   writeReconciliationCursor,
 } from './reconciliation-candidate-state';
+import { RECONCILIATION_EPISODE_PREFIX } from './reconciliation-episode';
 import {
   maxCandidatesPerSweep,
   promptHardStallMs,
@@ -23,6 +25,7 @@ import {
   reconciliationIdleMs,
   reconciliationProbeMaxAttempts,
 } from './reconciliation-thresholds';
+import { freshRuntimeWorkProgressAt } from './runtime-work-progress';
 import type { Env } from './types';
 
 const log = createModuleLogger('reconciliation');
@@ -44,6 +47,9 @@ const SessionStateRowSchema = v.object({
   activity: v.nullable(v.string()),
   activity_at: v.nullable(v.number()),
   prompt_started_at: v.nullable(v.number()),
+  runtime_work_state: v.nullable(v.string()),
+  runtime_work_progress_at: v.nullable(v.number()),
+  runtime_work_updated_at: v.nullable(v.number()),
 });
 
 interface LocalCandidateRow {
@@ -88,6 +94,10 @@ function selectLocalCandidatePage(
          WHERE cs.status = 'active'
            AND COALESCE(ics.task_id, cs.task_id) IS NOT NULL
            AND COALESCE(ics.workspace_id, cs.workspace_id) IS NOT NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM do_meta episode WHERE episode.key = ? || cs.id
+           AND json_valid(episode.value) AND json_extract(episode.value, '$.paused') = 1
+       )
            AND CASE
              WHEN gate.value IS NULL OR json_valid(gate.value) = 0 THEN 1
              ELSE COALESCE(
@@ -113,6 +123,7 @@ function selectLocalCandidatePage(
        ORDER BY last_activity_at ASC, session_id ASC
        LIMIT ?`,
       CANDIDATE_GATE_META_PREFIX,
+      RECONCILIATION_EPISODE_PREFIX,
       idleThreshold,
       cursorActivity,
       cursorActivity,
@@ -241,7 +252,9 @@ function resolvePromptAction(
   const stateRow = parseRowOrNull(
     sql
       .exec(
-        `SELECT activity, activity_at, prompt_started_at FROM session_state WHERE session_id = ?`,
+        `SELECT activity, activity_at, prompt_started_at,
+                runtime_work_state, runtime_work_progress_at, runtime_work_updated_at
+         FROM session_state WHERE session_id = ?`,
         acpSessionId
       )
       .toArray()[0],
@@ -257,7 +270,18 @@ function resolvePromptAction(
     deferReconciliationCandidateUntil(sql, sessionId, promptStartedAt + softPromptMs);
     return null;
   }
-  const action = promptAgeMs >= hardPromptMs ? 'cancel_prompt' : 'observe_prompt';
+  const hasProgress =
+    freshRuntimeWorkProgressAt(
+      {
+        runtimeWorkState: stateRow.runtime_work_state,
+        runtimeWorkProgressAt: stateRow.runtime_work_progress_at,
+        runtimeWorkUpdatedAt: stateRow.runtime_work_updated_at,
+      },
+      now,
+      hardPromptMs,
+      promptStartedAt
+    ) !== null;
+  const action = promptAgeMs >= hardPromptMs && !hasProgress ? 'cancel_prompt' : 'observe_prompt';
   return { action, promptStartedAt, promptAgeMs };
 }
 
@@ -278,6 +302,12 @@ async function buildCandidate(input: CandidateBuildInput): Promise<CandidateBuil
   const workspaceId = row.workspace_id;
   const taskId = row.task_id;
   const lastActivityAt = row.last_activity_at;
+
+  const eventWakeLeaseUntil = readProjectEventWakeLeaseUntil(sql, sessionId, now);
+  if (eventWakeLeaseUntil !== null) {
+    deferReconciliationCandidateUntil(sql, sessionId, eventWakeLeaseUntil);
+    return { candidate: null };
+  }
 
   let projectId: string | null = null;
   try {

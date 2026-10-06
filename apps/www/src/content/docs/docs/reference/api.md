@@ -17,7 +17,58 @@ Private feedback-project agents can also call `list_incident_queue`, `get_incide
 
 Project eventing uses a pull loop over the canonical ProjectData `project_event_*` tables. Agents create a short-lived subscription with `create_project_event_subscription`, using v1 exact/set filters for `source`, `eventType`, `subjectType`, `subjectId`, and `severity`; recover existing subscriptions with `list_project_event_subscriptions`; inspect or cancel with `get_project_event_subscription` and `cancel_project_event_subscription`. Project, task, session, workspace, owner, and agent identity come from the verified MCP token, not tool arguments.
 
-After subscribing, call `list_subscription_events` with the `subscriptionId` to replay missed or queued matches. The list response is payload-free: it returns summaries, delivery IDs, delivery state, `hasMore`, and an opaque `nextCursor` that is valid only for the same subscription. Call `get_event` only when a summary needs full stored event details, then call `ack_event_delivery` after processing each returned `deliveryId`; ack is idempotent. V1 records matches, delivery decisions, and pull acknowledgements only. It does not inject prompts, steer runtimes, interrupt sessions, spawn tasks, or expose human/UI controls.
+`dispatch_task` accepts modern VM workload input through `resourceRequirements` with optional `minVcpu`, `minMemoryGb`, `minDiskGb`, and `exclusiveNode`. Known numeric fields must be finite and non-negative; `exclusiveNode: false` is preserved. Deprecated `vmSize` remains accepted as a legacy compatibility hint and is not expanded into hardware by the client or MCP handler.
+
+After subscribing, call `list_subscription_events` with the `subscriptionId` to replay missed or queued matches. The list response is payload-free: it returns summaries, delivery IDs, delivery state, `hasMore`, and an opaque `nextCursor` that is valid only for the same subscription. Call `get_event` only when a summary needs full stored event details, then call `ack_event_delivery` after processing each returned `deliveryId`; ack is idempotent. The pull tools themselves record matches, delivery decisions, and pull acknowledgements only — they do not steer runtimes, spawn tasks, or expose human/UI controls. Delivery happens out of band: `existing_session_prompt` and `runtime_interrupt` subscriptions wake the target chat through the durable prompt queue, and `runtime_interrupt` wakes carry the `interrupt` mailbox class, which may cancel an in-flight turn so the wake is delivered immediately.
+
+## Event subscriptions
+
+Project members with read access can inspect subscriptions. Members with task write access can cancel human or agent subscriptions. System, policy and standing-watch subscriptions must be managed through their owning controls.
+
+| Method | Endpoint                                                                  | Purpose                                                       |
+| ------ | ------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| GET    | `/api/projects/:projectId/event-subscriptions`                            | List subscriptions; optional `sessionId`, `state` and `limit` |
+| GET    | `/api/projects/:projectId/event-subscriptions/:subscriptionId`            | Inspect one subscription                                      |
+| GET    | `/api/projects/:projectId/event-subscriptions/:subscriptionId/deliveries` | Inspect bounded recent transport outcomes; optional `limit`   |
+| POST   | `/api/projects/:projectId/event-subscriptions/:subscriptionId/cancel`     | Cancel with optional `{ "reason": "No longer needed" }`       |
+
+The list defaults to active subscriptions and returns `{ subscriptions, hasMore }`. `state` accepts `active`, `cancelled`, `expired` or `any`. Results include ownership, target, requested and resolved delivery, expiry and cancellation details. Cancelling again is safe and reports `idempotent: true`; cancellation does not undo work an agent has already performed. The server derives the cancelling user's identity from the authenticated session.
+
+Implementation: [`projectEventSubscriptionRoutes`](https://github.com/raphaeltm/simple-agent-manager/blob/main/apps/api/src/routes/project-event-subscriptions.ts) uses the existing project capability checks and canonical subscription cancellation.
+
+## Agent event channels
+
+Project members can browse channel activity with `GET /api/projects/:projectId/event-channels`
+and read a channel with `GET /api/projects/:projectId/event-channels/:channel/history`.
+Both require active membership with `task:read`. Each accepts `limit` and an optional
+`cursor`; catalog responses return `nextCursor`, while history returns `cursor`,
+`hasMore`, `watermark`, and `retentionGap`. Counts describe lifetime publications in
+the current catalog generation, including events that retention has removed.
+
+Agents use `publish_channel_event`, `list_event_channels`, `get_channel_history`,
+`follow_event_channel`, and `catch_up_event_channel` through MCP. Publishing and
+following require `task:write`; SAM verifies the calling task and derives its
+project, user, chat and workspace identity. Messages are untrusted evidence.
+They cannot override the reserved `sam.agent_channel` source or its event type.
+
+To switch from history to live events, pass the consumed history cursor to
+`follow_event_channel`, then call `catch_up_event_channel` until `hasMore` is false.
+Read and acknowledge the resulting events with the ordinary subscription tools.
+Concurrent publications are included through either catch-up or live matching.
+Replaying a follow key retains the original watermark and deadline; a retention
+gap or expired checkpoint requires a new explicit history/follow decision.
+Omit the history cursor when only future events are wanted.
+Following defaults to recording events. With `requestedDelivery: existing_session_prompt`,
+follow and catch-up responses include the ordinary subscription checkpoint/end-turn
+instructions and explain that a no-match expiry delivers no wake prompt.
+
+Publishing the same message with the same key in the same chat/channel replays its
+retained event. Reusing that key with different content reports a conflict.
+Idempotency ends when event retention removes the record. Publication has a shared
+per-project fixed-window rate limit; a boundary burst can span two windows.
+Payload, fanout, channel cardinality and history page limits are configurable.
+Empty idle catalog generations may be reclaimed, while live subscriptions continue
+to follow the stable channel name.
 
 ## Authentication
 
@@ -65,15 +116,36 @@ Permanently stop a running workspace and delete any retained persistent-session 
 
 ### `POST /api/workspaces/:id/sleep`
 
-Checkpoint the workspace's agent HOME, harness identity, and repository work in progress, verify the snapshot, and put the session to sleep. VM compute is stopped only after SAM re-verifies the durable manifest and every artifact the manifest still claims. A complete snapshot restores the full state; a degraded-but-verified snapshot can still sleep and will surface reduced restore state on wake. If an accepted final checkpoint stops reporting progress, SAM records an explicit degraded snapshot instead of leaving idle compute awake indefinitely. Sending a follow-up in the same chat wakes the session during the seven-day retention window.
+Checkpoint the workspace's agent HOME, harness identity, exact Git checkout, and repository work in progress, verify the snapshot, and put the session to sleep. Git state includes the saved `HEAD`, branch or detached state, canonical upstream metadata, clean local-only commits, working tree, and index. VM compute is stopped only after SAM re-verifies the durable manifest and every artifact the manifest still claims. A complete snapshot restores and validates that state; if the saved Git state cannot be recreated, wake reports explicit degraded recovery instead of success on a different commit. Sleep requires a complete final snapshot (`verifyAndBeginSleepTeardown` in `apps/api/src/services/session-sleep-execution.ts`). If the final checkpoint is degraded, or stops reporting progress and is recorded as degraded, the sleep request fails and the workspace stays awake. SAM then retries automatically, within the bounded sleep-failure budget (`SESSION_SLEEP_FAILURE_MAX_ATTEMPTS`, `SESSION_SLEEP_FAILURE_MAX_ELAPSED_MS`); after that an idle VM session may sleep on a Git recovery point instead ([SAM could not save a complete snapshot](/docs/guides/session-troubleshooting/#sam-could-not-save-a-complete-snapshot)). A session that already sleeps on an older degraded snapshot still wakes and reports the reduced restore state. Sending a follow-up in the same chat wakes the session during the seven-day retention window.
 
 ### `POST /api/workspaces/:id/restart`
 
-Restart a stopped or errored workspace. Provisions a new VM and recreates the container.
+Restart a stopped or errored workspace. Provisions a new VM and recreates the container. A
+restart can cancel an unclaimed pending deletion, but returns `409` once a deletion attempt
+has started or if the workspace identity changes before runtime recreation.
+
+### `POST /api/workspaces/:id/rebuild`
+
+Rebuild a running, recovering, or errored workspace on its assigned node. Returns `202` with
+`{ "status": "rebuilding" }` after the exact workspace transition is claimed. Rebuild uses
+the same deletion fence as restart: it cannot cancel or cross a deletion attempt that has
+already started, and the VM request is refused if the workspace identity or status changes.
 
 ### `DELETE /api/workspaces/:id`
 
-Permanently delete a workspace, its retained session snapshot, and all associated resources.
+Permanently request deletion of a workspace, its retained session snapshot, and associated
+resources. A confirmed deletion returns `200` with
+`{ "success": true, "deletionStatus": "confirmed" }`. If VM deletion is not yet proven,
+the endpoint returns `202` with
+`{ "success": true, "deletionStatus": "pending", "workspaceStatus": "stopping", "reason": "..." }`.
+The `202` response is not deletion proof: SAM keeps the workspace quarantined and retries from
+durable state until VM absence/success or strict provider/container termination is confirmed.
+The same `202` is returned for an idempotent repeat while that exact durable attempt is already
+in flight, or when VM proof arrived but a concurrent state write requires terminalization to
+converge on a later retry.
+If the exact deletion target is missing, active, or reassigned before a durable attempt is
+retained, the endpoint returns `409` with `deletionStatus: "rejected"`; it never labels that
+rejection as a pending deletion.
 
 ### `GET /api/workspaces/:id/boot-log`
 
@@ -92,6 +164,33 @@ List active agent sessions for a workspace.
 ### `POST /api/workspaces/:id/agent-sessions/:sessionId/stop`
 
 Stop a running agent session.
+
+## Resource history
+
+Retained CPU, memory, I/O, and out-of-memory observations for VM-backed workspaces. Requires project access. See [Session Resource History](/docs/guides/session-resources/) for how to read the values.
+
+| Method | Endpoint                                                     | Purpose                            |
+| ------ | ------------------------------------------------------------ | ---------------------------------- |
+| GET    | `/api/projects/:id/sessions/:sessionId/resource-history`     | History scoped to one chat session |
+| GET    | `/api/projects/:id/tasks/:taskId/resource-history`           | History scoped to one task         |
+| GET    | `/api/projects/:id/workspaces/:workspaceId/resource-history` | History scoped to one workspace    |
+
+All three return `{ summary, chunks }`, where `summary` carries the session's peaks, sample and gap counts, I/O totals, OOM count, and nullable `agentProfileId`, `skillId`, and `agentType` attribution. SAM resolves those attribution fields from server-owned records scoped to the same project and workspace; upload values cannot override them. `memoryWorkingSetMeanBytes` and `memoryWorkingSetPeakBytes` exclude reclaimable inactive file cache and are the sizing figures; they are `null` for history uploaded by older VM agents. `memoryMeanBytes`, `memoryPeakBytes`, and `memoryKernelPeakBytes` remain cache-inclusive for comparison. `chunks` is the index of retained time slices, newest first and capped at `WORKSPACE_RESOURCE_LIST_LIMIT` (24) with no cursor or offset — `?chunkId=` still resolves a chunk outside that window, but nothing enumerates the older IDs. Add `?chunkId=` to include a `detail` object with that chunk's samples and tool-correlation spans, downsampled to `WORKSPACE_RESOURCE_DETAIL_MAX_POINTS` (720) with spikes preserved. Each sample can include `memoryWorkingSetBytes`; when it is absent, that sample's working set is unknown rather than zero. Each `detail.toolSpans` entry may include an ACP `kind` and metadata-provided `toolName`; either can be absent in history from older VM agents. Tool names are capped by `WORKSPACE_RESOURCE_TOOL_NAME_MAX_BYTES` (256 by default).
+
+Samples are workspace-cgroup observations, not per-process attribution. Stored payloads deliberately exclude prompts, tool-call titles, commands, tool inputs and arguments, tool output, file paths, environment values, and secrets; tool-call IDs are hashed. A tool name identifies the tool implementation, such as `Bash`, without exposing what it ran. Instant (Cloudflare Container) sessions have no resource history: the response is `200` with `summary: null` and an empty `chunks` array.
+
+### Session timeline
+
+The Resources drawer reads a whole chat session through two endpoints, both scoped to the project and session in the path.
+
+| Method | Endpoint                                                                  | Purpose                                           |
+| ------ | ------------------------------------------------------------------------- | ------------------------------------------------- |
+| GET    | `/api/projects/:id/sessions/:sessionId/resource-timeline`                 | Every retained chunk of the session, with rollups |
+| GET    | `/api/projects/:id/sessions/:sessionId/resource-timeline/chunks/:chunkId` | One chunk's 5-second samples and tool spans       |
+
+The index returns `{ sessionId, runs, chunks, totalChunkCount, omittedChunkCount, maxChunks, collection, runtime }`. `chunks` is ascending by start time and covers every workspace the session ran on (each wake is a new workspace); each carries its `summary` and a columnar per-minute `rollup` (`null` for chunks uploaded before rollups existed). `runs` groups chunks by workspace with that workspace's `reservation` (`cpuMillis`, `memoryMb`, or `null`). Past `WORKSPACE_RESOURCE_TIMELINE_MAX_CHUNKS` (1000) the oldest chunks are left out and counted in `omittedChunkCount`. When there are no chunks, `collection` explains why: `unsupported` (an Instant session), `expired` (samples passed retention; the summary remains), or `pending` (nothing uploaded yet). The chunk endpoint returns the same shape as `detail` above and `404`s for a chunk that belongs to another project or session.
+
+Agents read the same data with the `get_resource_history` MCP tool, which takes no `projectId` — the project comes from the verified token. With no arguments it returns the caller's own session; supplying any one of `sessionId`, `taskId`, or `workspaceId` replaces the caller's defaults entirely rather than narrowing within them.
 
 ## Nodes
 
@@ -135,6 +234,22 @@ List all credentials for the authenticated user (tokens are not returned).
 
 Delete a stored cloud-provider credential.
 
+### `GET /api/credentials/limits`
+
+Latest provider usage windows for the authenticated user's personal credentials, across projects
+(newest sample per credential and window). Each credential carries `credentialId` (for
+`cc_credentials:<id>` references), `level` (`ok`, `warning`, `critical`, `rejected`) and its
+`windows` (`windowType`, `utilizationPercent`, `windowMinutes`, `resetsAt`, `observedAt`, `source`).
+Rows come from `credential_limit_windows`; the response is capped by `CREDENTIAL_LIMIT_READ_MAX_ROWS`.
+
+### `GET /api/projects/:id/credential-limits`
+
+Usage windows visible to the caller inside a project: the caller's own credentials plus project-
+and platform-shared ones, never another member's personal credential. Requires `project:read`.
+Optional `agentSessionId` narrows the result to the credential that agent session is attributed to,
+resolved server-side from `agent_sessions`. The MCP tool `get_credential_limits` exposes the same
+view to agents (`scope: "session" | "project"`).
+
 ### `GET /api/providers/catalog`
 
 List non-secret compute-provider catalog metadata for cloud-provider credentials the caller can use.
@@ -159,19 +274,48 @@ with `credentialSetupRequired: true` and a `credentialSetupMessage` suitable for
 
 ## Capacity pools
 
+See the [Compute Pools guide](/docs/guides/compute-pools/) for what these concepts mean and how
+they are surfaced in the app.
+
 Default capacity-pool endpoints expose non-secret pool, source, and concrete candidate metadata.
-Responses have this shape: `effective`, `effectiveScope`, `defaults`, `precedence`,
-`reconciledScopes`, and `policyMutationSupported`. Use `ensure=true` on GET endpoints, or call the
-matching `/reconcile` endpoint, to refresh pool metadata from the credential-scoped provider-native
-catalog. Provider API failures fall back to static curated catalog rows for that provider. Provider
-catalog offerings expose `catalogSource`; capacity-pool candidates expose the persisted
-`providerInstanceCatalogSource` snapshot.
+Responses have this shape: `effective`, `effectiveScope`, `effectiveState`, `defaults`,
+`precedence`, `reconciledScopes`, `policyMutationSupported`, and `placementSettings`. Each summary
+includes `activeCandidateCount`, `availableCandidateCount`, `effectiveState`, and non-secret
+diagnostics. `placementSettings` is a redacted settings contract containing the effective settings
+fingerprint, selected source labels, selection weights, rollout percent, and normalized
+`resourceDefaults.legacyWorkloadMapping` plus `resourceDefaults.platformDefaults`; it does not
+include internal diagnostics or credential/source identifiers. Use `ensure=true` on GET endpoints,
+or call the matching `/reconcile` endpoint, to refresh pool metadata from the credential-scoped
+provider-native catalog. Provider API failures are reported in catalog refresh metadata and do not
+synthesize static available rows for reconciliation. Provider catalog offerings expose
+`catalogSource`; capacity-pool candidates expose the persisted `providerInstanceCatalogSource` and
+`catalogAvailability` snapshot. `sourceGeneration` and `catalogGeneration` are refresh/fencing
+epochs and may advance on identical reconciliations. `authorityGeneration` on sources and
+candidates is a stable semantic authority value for the selected credential/source/offering state.
+Placement snapshots persist `capacityAuthorityGeneration`; the legacy `sourceGeneration` snapshot
+field is a compatibility alias for that same authority value, not the refresh epoch.
+
+Only an unconfigured scope inherits from the next default-pool scope. A configured project or user
+pool with state `configured-empty`, `source-disabled`, `catalog-unavailable`, or `migration-pending`
+remains authoritative and is returned as `effective`; placement then queues/fails inside that pool
+according to its exhaustion policy.
 
 ### `GET /api/capacity-pools/defaults`
 
 Read the authenticated user's default compute pool. Optional `ensure=true` reconciles it from the
-user's active personal compute credentials. Disabled zero-active owned pools remain visible for the
-editor; they are not selected as `effective`.
+user's active personal compute credentials. The response includes `effectiveSummary`, a redacted
+project/user/installation selection summary with no credential IDs or source metadata. Configured
+zero-active or catalog-unavailable owned pools remain visible and are still selected as `effective`
+so clients do not infer unsupported cross-scope fallback. Ordinary users may receive an
+installation-funded `effectiveSummary` from existing installation metadata, but this endpoint never
+reconciles installation credentials.
+
+When the effective pool is ready, `effectiveSummary.nativeOfferings` lists its eligible VM
+provider, location, native instance type, display name, resources and displayed price. These
+choices omit pool, source, credential and owner identifiers. The Nodes creation form uses them
+even when the user has no personal cloud credential. Empty, disabled or migrating effective
+pools return no choices; they do not fall back to a personal credential catalog. Final node
+creation still revalidates the selected offering against current pool authority.
 
 ### `POST /api/capacity-pools/defaults/reconcile`
 
@@ -203,9 +347,12 @@ provider/location/instance type; it does not accept secret material:
 
 ### `GET /api/projects/:id/capacity-pools/defaults`
 
-Read a project's default pool context. Requires project `secret:read`. Optional `ensure=true`
-reconciles project credentials plus visible fallback summaries. Non-superadmins do not receive
-installation fallback details.
+Read a project's default pool context. Requires project `project:read`. All members receive
+`effectiveSummary`, a redacted authoritative project → user → installation selection summary with no
+credential IDs or source metadata. Raw project/user summaries require project `secret:read`; raw
+installation details remain superadmin-only. Optional `ensure=true` reconciles only when the caller
+also has project `secret:read`, and non-superadmins never reconcile installation credentials through
+this route.
 
 ### `POST /api/projects/:id/capacity-pools/defaults/reconcile`
 
@@ -291,9 +438,16 @@ Submit an idea for autonomous execution. This is the chat-first path used by the
 
 ```json
 {
-  "message": "Fix the login button on the settings page"
+  "message": "Fix the login button on the settings page",
+  "resourceRequirements": {
+    "minVcpu": 4,
+    "minMemoryGb": 16,
+    "exclusiveNode": false
+  }
 }
 ```
+
+`resourceRequirements` is additive modern workload input. The API validates known fields and persists the normalized JSON through task launch inputs. Legacy `vmSize` is still accepted for old clients as a deprecated compatibility hint; clients should not infer provider hardware from it. Profiles, skills, and triggers persist the same modern data as `resourceRequirementsJson` for compatibility, with explicit `null` clearing that layer and omitted fields preserving inherited behavior.
 
 ## File Proxy (Project Chat)
 
@@ -365,7 +519,7 @@ JSON Web Key Set for JWT verification by VM Agents.
 
 ### `GET /api/agent/download`
 
-Download the VM Agent binary. Query params: `os` (linux), `arch` (amd64, arm64).
+Download the VM Agent binary. Query params: `os` (linux), `arch` (amd64, arm64), and an optional `release` containing exactly 40 lowercase hexadecimal characters. Invalid releases return `400 INVALID_VERSION` before R2 is read. Official deployments use `release` so a new VM downloads the immutable binary selected by the live control plane; versioned responses use a one-year immutable cache policy. The unversioned URL retains its one-hour cache policy for legacy, local, manual, and intentional `skip_agent` deployments.
 
 Used by cloud-init during VM (BYOC) provisioning. The Cloudflare Container instant-session runtime does **not** call this endpoint — its vm-agent binary is baked into the container image at deploy time.
 
@@ -424,3 +578,46 @@ provided value must be boolean.
 Disabling the alarm switch does not drop alarm chains: each affected Durable
 Object re-arms at the reported safe retry interval and resumes normally after
 the switch is enabled again.
+
+## Admin AI Allowances
+
+These endpoints require an approved, authenticated **superadmin**. An allowance caps what a user
+may set as their own SAM-mode AI budget and, through `allowedModelTiers`, which budget tiers of
+the platform model catalog they may use at all.
+
+### `GET /api/admin/ai-allowance/:userId`
+
+Read the stored allowance (or `null`) and the effective budget ceilings.
+
+### `PUT /api/admin/ai-allowance/:userId`
+
+Set or update fields; omitted fields keep their stored value.
+
+```json
+{
+  "maxDailyInputTokens": 1000000,
+  "maxDailyOutputTokens": null,
+  "maxMonthlyCostCapUsd": 25,
+  "allowedModelTiers": ["low-cost", "standard"]
+}
+```
+
+`allowedModelTiers` is `null` (every tier) or an array drawn from `low-cost`, `standard` and
+`premium`; any other value returns `400`, and `[]` allows no platform model. The AI proxy enforces
+it on every route that spends platform credentials — `/ai/v1/chat/completions`,
+`/ai/v1/responses`, `/ai/anthropic/v1/messages` and `/ai/anthropic/v1/messages/count_tokens` —
+before the request reaches the upstream provider. A model outside the allowed tiers, or one the
+platform catalog does not assign a tier, returns `403` with a `permission_error` naming the model
+and the allowed tiers; an allowance the proxy cannot read is refused rather than treated as
+unrestricted. BYO-key passthrough (`/ai/proxy/:wstoken/…`) is not restricted, because it spends the
+user's own provider credential.
+
+Before the tier check, each of those routes also requires the model to be on the operator's
+allowlist, `AI_PROXY_ALLOWED_MODELS` (by default every model in the platform catalog), whether or
+not the user has an allowance; any other model returns `400` with an `invalid_request_error`.
+Allowances live in Workers KV, so a change can take a minute or more to reach every Cloudflare
+location.
+
+### `DELETE /api/admin/ai-allowance/:userId`
+
+Remove the allowance; the user reverts to platform defaults and every tier.

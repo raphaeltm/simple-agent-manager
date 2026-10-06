@@ -9,12 +9,24 @@ import { UpCloudProvider } from './upcloud';
 import { VultrProvider } from './vultr';
 
 // Re-export types
+export {
+  assertBootDiskSizeGb,
+  assertIncludedBootDiskCapacity,
+  legacySizeToNativeVMConfig,
+  type NativeVMResolveOptions,
+  observedHardware,
+  observedValue,
+  type ResolvedNativeVMConfig,
+  resolveVMConfigWithLegacySizeAdapter,
+  unknownValue,
+} from './native-vm-config';
 export type {
   DigitalOceanProviderConfig,
   GcpProviderConfig,
   HetznerProviderConfig,
   InfomaniakProviderConfig,
   LocationMeta,
+  NativeVMConfig,
   Provider,
   ProviderConfig,
   ProviderErrorCategory,
@@ -27,8 +39,13 @@ export type {
   ScalewayProviderConfig,
   SizeConfig,
   UpCloudProviderConfig,
+  VMArchitecture,
   VMConfig,
+  VMHardwareObservationSource,
+  VMHardwareResources,
   VMInstance,
+  VMObservedHardware,
+  VMObservedValue,
   VMStatus,
   VolumeAttachmentConfig,
   VolumeCapabilities,
@@ -106,8 +123,17 @@ export {
   HETZNER_VOLUME_MAX_SIZE_GB,
   HETZNER_VOLUME_MIN_SIZE_GB,
   HetznerProvider,
+  isHetznerPlacementCapacityError,
   isTransientCapacityError,
 } from './hetzner';
+export {
+  classifyHetznerAccountLimit,
+  type HetznerAccountLimit,
+  type HetznerAccountLimitResource,
+  type HetznerCoreClass,
+  hetznerCoreLimitCovers,
+  hetznerServerTypeCoreClass,
+} from './hetzner-account-limits';
 export { HETZNER_SIZE_CONFIGS } from './hetzner-metadata';
 export {
   classifyInfomaniakError,

@@ -2,6 +2,7 @@ package acp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 )
@@ -49,12 +50,34 @@ func (h *SessionHost) selectAgent(ctx context.Context, agentType string, require
 
 	cred, err := h.fetchAgentKey(ctx, agentType)
 	if err != nil {
-		h.failAgentSelection(agentType, "agent_key_fetch", fmt.Sprintf("Failed to fetch credential for %s — check Settings", agentType), err)
+		message := "Agent connection could not be checked"
+		if errors.Is(err, errAgentCredentialMissing) {
+			message = "model_provider_credential_missing"
+			err = errAgentCredentialMissing
+		} else {
+			err = errors.New("agent credential lookup failed")
+		}
+		h.failAgentSelection(agentType, "agent_key_fetch", message, err)
 		return err
 	}
 	h.reportCredentialFetched(agentType, cred)
 
 	info := getAgentCommandInfo(agentType, cred.credentialKind)
+	selector, err := h.resolveCodexC2Selector(ctx, agentType)
+	if err != nil {
+		h.failAgentSelection(agentType, "agent_install", "Codex session runtime assets unavailable", err)
+		return err
+	}
+	effectiveSelector, err := h.selectSessionCodexRuntime(agentType, selector)
+	if err != nil {
+		h.failAgentSelection(agentType, "agent_install", "Invalid Codex runtime selection", err)
+		return err
+	}
+	info, err = selectCodexC2Candidate(info, agentType, effectiveSelector)
+	if err != nil {
+		h.failAgentSelection(agentType, "agent_install", "Invalid Codex staging candidate selection", err)
+		return err
+	}
 	if err := h.ensureAgentInstalled(ctx, info); err != nil {
 		h.failAgentSelection(agentType, "agent_install", fmt.Sprintf("Failed to install %s: %v", info.command, err), err)
 		return err

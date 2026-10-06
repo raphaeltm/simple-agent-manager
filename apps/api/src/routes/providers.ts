@@ -1,6 +1,6 @@
 import type { ProviderCatalogResponse } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
-import { type Context,Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
@@ -40,7 +40,11 @@ providersRoutes.get('/catalog', async (c) => {
           credentialSetupRequired: true,
           credentialSetupMessage: CLOUD_PROVIDER_CREDENTIAL_SETUP_MESSAGE,
         }
-      : { catalogs: result.catalogs, credentialSetupRequired: false };
+      : {
+          catalogs: result.catalogs,
+          refreshFailures: result.refreshFailures,
+          credentialSetupRequired: false,
+        };
   c.header('Cache-Control', 'private, no-store');
   return c.json(response);
 });

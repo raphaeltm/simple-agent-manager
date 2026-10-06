@@ -1,22 +1,15 @@
-import {
-  type CreateMcpConnectionRequest,
-  MCP_CONNECTION_NAME_RULE,
-  type McpConnection,
-  type McpConnectionAuthType,
-} from '@simple-agent-manager/shared';
-import { Alert, Button, Input, Select, Spinner, StatusBadge } from '@simple-agent-manager/ui';
+import type { McpConnection } from '@simple-agent-manager/shared';
+import { Alert, Button, Spinner, StatusBadge } from '@simple-agent-manager/ui';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, Trash2 } from 'lucide-react';
+import { Pencil, Plus, Trash2 } from 'lucide-react';
 import { type FC, useCallback, useState } from 'react';
 
 import { useToast } from '../../hooks/useToast';
-import {
-  createMcpConnection,
-  deleteMcpConnection,
-  updateMcpConnection,
-} from '../../lib/api';
+import { createMcpConnection, deleteMcpConnection, updateMcpConnection } from '../../lib/api';
 import { mcpConnectionQueryKeys, mcpConnectionsQueryOptions } from '../../lib/query-options';
 import { ConfirmDialog } from '../ConfirmDialog';
+import { type McpServerFormState, toCreateRequest, toUpdateRequest } from './mcp-server-form-state';
+import { McpServerForm } from './McpServerForm';
 
 interface McpServersManagerProps {
   /** null = the caller's personal scope; a project id = that project's shared scope. */
@@ -32,12 +25,8 @@ interface McpServersManagerProps {
   title?: string | null;
 }
 
-const EMPTY_FORM = {
-  name: '',
-  url: '',
-  authType: 'bearer' as McpConnectionAuthType,
-  token: '',
-};
+/** At most one form is open: adding a server, or editing the one with this id. */
+type Editor = { mode: 'create' } | { mode: 'edit'; connectionId: string } | null;
 
 /**
  * One implementation for both the personal and project MCP-server scopes.
@@ -53,8 +42,7 @@ export const McpServersManager: FC<McpServersManagerProps> = ({
 }) => {
   const toast = useToast();
   const queryClient = useQueryClient();
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState(EMPTY_FORM);
+  const [editor, setEditor] = useState<Editor>(null);
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<McpConnection | null>(null);
@@ -66,24 +54,22 @@ export const McpServersManager: FC<McpServersManagerProps> = ({
     await queryClient.invalidateQueries({ queryKey: mcpConnectionQueryKeys.all(queryScope) });
   }, [queryClient, queryScope]);
 
-  const handleCreate = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (saving) return;
+  const handleSubmit = async (form: McpServerFormState) => {
+    if (!editor) return;
+    const editing = editor.mode === 'edit';
     setSaving(true);
     try {
-      const payload: CreateMcpConnectionRequest = {
-        name: form.name.trim(),
-        url: form.url.trim(),
-        authType: form.authType,
-        ...(form.authType === 'bearer' ? { token: form.token } : {}),
-      };
-      await createMcpConnection(projectId, payload);
+      if (editing) {
+        await updateMcpConnection(projectId, editor.connectionId, toUpdateRequest(form));
+      } else {
+        await createMcpConnection(projectId, toCreateRequest(form));
+      }
       await invalidate();
-      setForm(EMPTY_FORM);
-      setShowForm(false);
-      toast.success('MCP server added');
+      setEditor(null);
+      toast.success(editing ? 'MCP server updated' : 'MCP server added');
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to add MCP server');
+      const fallback = editing ? 'Failed to update MCP server' : 'Failed to add MCP server';
+      toast.error(error instanceof Error ? error.message : fallback);
     } finally {
       setSaving(false);
     }
@@ -135,9 +121,7 @@ export const McpServersManager: FC<McpServersManagerProps> = ({
       <Alert variant="error">
         <span className="break-words">
           Failed to load MCP servers
-          {query.error instanceof Error && query.error.message
-            ? `: ${query.error.message}`
-            : '.'}
+          {query.error instanceof Error && query.error.message ? `: ${query.error.message}` : '.'}
         </span>
       </Alert>
     );
@@ -154,7 +138,7 @@ export const McpServersManager: FC<McpServersManagerProps> = ({
           */}
           {title !== null && (
             <>
-              <h3 className="text-sm font-medium text-fg-primary">{title}</h3>
+              <h3 className="sam-type-card-title m-0 text-fg-primary">{title}</h3>
               <p className="mt-1 text-xs text-fg-muted break-words">
                 {projectId === null
                   ? 'Available to every session you start, in any project.'
@@ -163,103 +147,20 @@ export const McpServersManager: FC<McpServersManagerProps> = ({
             </>
           )}
         </div>
-        {canWrite && !showForm && (
-          <Button size="sm" variant="secondary" onClick={() => setShowForm(true)}>
+        {canWrite && editor === null && (
+          <Button size="sm" variant="secondary" onClick={() => setEditor({ mode: 'create' })}>
             <Plus size={14} /> Add
           </Button>
         )}
       </div>
 
-      {showForm && canWrite && (
-        <form onSubmit={handleCreate} className="space-y-3 rounded-md border border-border-default p-3">
-          <div>
-            <label htmlFor="mcp-name" className="block text-xs font-medium text-fg-muted">
-              Name
-            </label>
-            <Input
-              id="mcp-name"
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              placeholder="zapier"
-              required
-              className="mt-1"
-            />
-            <p className="mt-1 text-xs text-fg-muted break-words">
-              Agents see tools namespaced by this name — {MCP_CONNECTION_NAME_RULE}.
-            </p>
-          </div>
-
-          <div>
-            <label htmlFor="mcp-url" className="block text-xs font-medium text-fg-muted">
-              MCP endpoint URL
-            </label>
-            <Input
-              id="mcp-url"
-              type="url"
-              inputMode="url"
-              value={form.url}
-              onChange={(e) => setForm({ ...form, url: e.target.value })}
-              placeholder="https://mcp.zapier.com/api/mcp/s/..."
-              required
-              className="mt-1"
-            />
-            <p className="mt-1 text-xs text-fg-muted break-words">
-              Stored encrypted and never shown again — some providers put the credential in
-              the URL itself.
-            </p>
-          </div>
-
-          <div>
-            <label htmlFor="mcp-auth" className="block text-xs font-medium text-fg-muted">
-              Authentication
-            </label>
-            <Select
-              id="mcp-auth"
-              value={form.authType}
-              onChange={(e) =>
-                setForm({ ...form, authType: e.target.value as McpConnectionAuthType })
-              }
-              className="mt-1"
-            >
-              <option value="bearer">Bearer token</option>
-              <option value="none">None (credential is in the URL)</option>
-            </Select>
-          </div>
-
-          {form.authType === 'bearer' && (
-            <div>
-              <label htmlFor="mcp-token" className="block text-xs font-medium text-fg-muted">
-                Bearer token
-              </label>
-              <Input
-                id="mcp-token"
-                type="password"
-                autoComplete="off"
-                value={form.token}
-                onChange={(e) => setForm({ ...form, token: e.target.value })}
-                required
-                className="mt-1"
-              />
-            </div>
-          )}
-
-          <div className="flex gap-2">
-            <Button type="submit" size="sm" disabled={saving}>
-              {saving ? 'Adding…' : 'Add server'}
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              onClick={() => {
-                setShowForm(false);
-                setForm(EMPTY_FORM);
-              }}
-            >
-              Cancel
-            </Button>
-          </div>
-        </form>
+      {editor?.mode === 'create' && canWrite && (
+        <McpServerForm
+          connection={null}
+          saving={saving}
+          onSubmit={(form) => void handleSubmit(form)}
+          onCancel={() => setEditor(null)}
+        />
       )}
 
       {connections.length === 0 ? (
@@ -268,53 +169,83 @@ export const McpServersManager: FC<McpServersManagerProps> = ({
         </p>
       ) : (
         <ul className="space-y-2">
-          {connections.map((connection) => (
-            <li
-              key={connection.id}
-              className="flex flex-wrap items-center gap-2 rounded-md border border-border-default p-3"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-medium text-fg-primary break-words">
-                    {connection.name}
-                  </span>
-                  {!connection.enabled && <StatusBadge status="disabled" pulse={false} />}
-                </div>
+          {connections.map((connection) =>
+            editor?.mode === 'edit' && editor.connectionId === connection.id && canWrite ? (
+              <li key={connection.id}>
+                <McpServerForm
+                  connection={connection}
+                  saving={saving}
+                  onSubmit={(form) => void handleSubmit(form)}
+                  onCancel={() => setEditor(null)}
+                />
+              </li>
+            ) : (
+              <li
+                key={connection.id}
+                className="flex flex-wrap items-center gap-2 rounded-md border border-border-default p-3"
+              >
                 {/*
-                  The host needs `break-all` because a pre-signed gateway subdomain has no
-                  break opportunities, but the auth label must not inherit it — otherwise it
-                  wraps as "bea rer token".
+                  `basis-48` lets the three actions wrap under the text on a phone instead of
+                  squeezing a long host into a column a few characters wide.
                 */}
-                <p className="mt-0.5 text-xs text-fg-muted">
-                  <span className="break-all">{connection.urlHost}</span>
-                  <span className="whitespace-nowrap">
-                    {connection.hasToken ? ' · bearer token' : ' · no auth'}
-                  </span>
-                </p>
-              </div>
-              {canWrite && (
-                <div className="flex items-center gap-2">
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    disabled={busyId === connection.id}
-                    onClick={() => void handleToggle(connection)}
-                  >
-                    {connection.enabled ? 'Disable' : 'Enable'}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    aria-label={`Delete ${connection.name}`}
-                    disabled={busyId === connection.id}
-                    onClick={() => setPendingDelete(connection)}
-                  >
-                    <Trash2 size={14} />
-                  </Button>
+                <div className="min-w-0 grow basis-48">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-medium text-fg-primary break-words">
+                      {connection.name}
+                    </span>
+                    {!connection.enabled && <StatusBadge status="disabled" pulse={false} />}
+                  </div>
+                  {/*
+                    The host needs `break-all` because a pre-signed gateway subdomain has no
+                    break opportunities, but the auth label must not inherit it — otherwise it
+                    wraps as "bea rer token".
+                  */}
+                  <p className="mt-0.5 text-xs text-fg-muted">
+                    <span className="break-all">{connection.urlHost}</span>
+                    <span className="whitespace-nowrap">
+                      {connection.hasToken ? ' · bearer token' : ' · no auth'}
+                    </span>
+                  </p>
+                  {connection.headerNames.length > 0 && (
+                    <p className="mt-0.5 text-xs text-fg-muted break-all">
+                      Headers:{' '}
+                      <span className="font-mono">{connection.headerNames.join(', ')}</span>
+                    </p>
+                  )}
                 </div>
-              )}
-            </li>
-          ))}
+                {canWrite && (
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={busyId === connection.id}
+                      onClick={() => void handleToggle(connection)}
+                    >
+                      {connection.enabled ? 'Disable' : 'Enable'}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      aria-label={`Edit ${connection.name}`}
+                      disabled={editor !== null || busyId === connection.id}
+                      onClick={() => setEditor({ mode: 'edit', connectionId: connection.id })}
+                    >
+                      <Pencil size={14} />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      aria-label={`Delete ${connection.name}`}
+                      disabled={busyId === connection.id}
+                      onClick={() => setPendingDelete(connection)}
+                    >
+                      <Trash2 size={14} />
+                    </Button>
+                  </div>
+                )}
+              </li>
+            )
+          )}
         </ul>
       )}
 

@@ -263,47 +263,58 @@ describe('CreateWorkspace', () => {
     expect(mocks.getProject).toHaveBeenCalledWith('proj-1');
   });
 
-  it('submits the displayed project default VM size, provider, and location', async () => {
-    mocks.getProviderCatalog.mockResolvedValue({
-      catalogs: [{
-        provider: 'hetzner',
+  it.each([false, true])(
+    'inherits project resources without fabricating a task tier (partial override: %s)',
+    async (partialOverride) => {
+      mocks.getProviderCatalog.mockResolvedValue({
+        catalogs: [
+          {
+            provider: 'hetzner',
+            defaultLocation: 'nbg1',
+            locations: [{ id: 'nbg1', name: 'Nuremberg', country: 'DE' }],
+            sizes: {
+              small: { type: 'cx22', vcpu: 2, ramGb: 4, storageGb: 40, price: '€4.35/mo' },
+              medium: { type: 'cx32', vcpu: 4, ramGb: 8, storageGb: 80, price: '€7.69/mo' },
+              large: { type: 'cx42', vcpu: 8, ramGb: 16, storageGb: 160, price: '€14.51/mo' },
+            },
+          },
+        ],
+      });
+      mocks.getProject.mockResolvedValue({
+        id: 'proj-1',
+        name: 'My Project',
+        repository: 'octo/my-repo',
+        defaultBranch: 'main',
+        installationId: 'inst-1',
+        defaultVmSize: 'large',
+        resourceRequirementsJson: JSON.stringify({ minVcpu: 8, minMemoryGb: 16, minDiskGb: 50 }),
+        defaultProvider: 'hetzner',
         defaultLocation: 'nbg1',
-        locations: [{ id: 'nbg1', name: 'Nuremberg', country: 'DE' }],
-        sizes: {
-          small: { type: 'cx22', vcpu: 2, ramGb: 4, storageGb: 40, price: '€4.35/mo' },
-          medium: { type: 'cx32', vcpu: 4, ramGb: 8, storageGb: 80, price: '€7.69/mo' },
-          large: { type: 'cx42', vcpu: 8, ramGb: 16, storageGb: 160, price: '€14.51/mo' },
-        },
-      }],
-    });
-    mocks.getProject.mockResolvedValue({
-      id: 'proj-1',
-      name: 'My Project',
-      repository: 'octo/my-repo',
-      defaultBranch: 'main',
-      installationId: 'inst-1',
-      defaultVmSize: 'large',
-      defaultProvider: 'hetzner',
-      defaultLocation: 'nbg1',
-    });
-    mocks.createWorkspace.mockResolvedValue({ id: 'ws-1' });
+      });
+      mocks.createWorkspace.mockResolvedValue({ id: 'ws-1' });
 
-    renderCreateWorkspace();
+      renderCreateWorkspace();
 
-    await waitFor(() => {
-      expect(screen.getByText(/cx42/)).toBeInTheDocument();
-    });
+      await screen.findByLabelText('Memory (GB)');
+      if (partialOverride)
+        fireEvent.change(screen.getByLabelText('Memory (GB)'), { target: { value: '3' } });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Create Workspace' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Create Workspace' }));
 
-    await waitFor(() => {
-      expect(mocks.createWorkspace).toHaveBeenCalledWith(expect.objectContaining({
-        projectId: 'proj-1',
-        vmSize: 'large',
-        vmLocation: 'nbg1',
-        provider: 'hetzner',
-      }));
-    });
-  });
-
+      await waitFor(() => {
+        expect(mocks.createWorkspace).toHaveBeenCalledWith(
+          expect.objectContaining({
+            projectId: 'proj-1',
+            vmLocation: 'nbg1',
+            provider: 'hetzner',
+          })
+        );
+      });
+      const payload = mocks.createWorkspace.mock.calls[0]![0];
+      expect(payload).not.toHaveProperty('vmSize');
+      expect(payload.resourceRequirements).toEqual(
+        partialOverride ? { minMemoryGb: 3 } : undefined
+      );
+    }
+  );
 });

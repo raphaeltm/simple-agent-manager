@@ -1,3 +1,4 @@
+import type { HistoryTarget } from '../../lib/message-paging';
 import type { CommentInboxBucket } from './comments/comment-inbox';
 
 export type TimelineEntry =
@@ -64,9 +65,4 @@ export type TimelineEntry =
     };
 
 /** Where a timeline entry should jump to in the message list. */
-export interface TimelineJumpTarget {
-  /** Exact message anchor, when the entry corresponds to a persisted message. */
-  messageId?: string;
-  /** Timestamp used to resolve the nearest message when there is no exact anchor. */
-  timestamp: number;
-}
+export type TimelineJumpTarget = HistoryTarget;

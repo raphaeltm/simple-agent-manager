@@ -3,6 +3,8 @@ import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { redactSecretPatterns } from './secret-redaction';
+import { abandonSessionSnapshotCapture } from './session-sleep-fallback-state';
 import {
   buildSessionSnapshotR2Key,
   type CompleteSessionSnapshotInput,
@@ -11,6 +13,10 @@ import {
   type SessionSnapshotArtifact,
   type SessionSnapshotManifest,
 } from './session-snapshot-artifacts';
+import {
+  deleteAbandonedSessionSnapshotObjects,
+  sessionSnapshotCaptureKeys,
+} from './session-snapshot-capture-cleanup';
 import { scheduleSessionSnapshotSleep } from './session-snapshot-sleep-lifecycle';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
@@ -31,14 +37,25 @@ export async function deleteSessionSnapshotState(
       homeR2Key: schema.sessionSnapshots.homeR2Key,
       wipR2Key: schema.sessionSnapshots.wipR2Key,
       manifestR2Key: schema.sessionSnapshots.manifestR2Key,
+      captureGeneration: schema.sessionSnapshots.captureGeneration,
     })
     .from(schema.sessionSnapshots)
     .where(eq(schema.sessionSnapshots.chatSessionId, chatSessionId))
     .get();
   if (!snapshot) return false;
-  const keys = [snapshot.homeR2Key, snapshot.wipR2Key, snapshot.manifestR2Key].filter(
-    (key): key is string => Boolean(key)
-  );
+  const inFlightCaptureKeys = snapshot.captureGeneration
+    ? sessionSnapshotCaptureKeys(env, chatSessionId, snapshot.captureGeneration)
+    : [];
+  const keys = [
+    ...new Set(
+      [
+        snapshot.homeR2Key,
+        snapshot.wipR2Key,
+        snapshot.manifestR2Key,
+        ...inFlightCaptureKeys,
+      ].filter((key): key is string => Boolean(key))
+    ),
+  ];
   if (keys.length > 0) await env.R2.delete(keys);
   await db.delete(schema.sessionSnapshots).where(eq(schema.sessionSnapshots.id, snapshot.id));
   return true;
@@ -127,9 +144,23 @@ export async function completeSessionSnapshot(
     (key): key is string =>
       Boolean(key) && key !== homeR2Key && key !== wipR2Key && key !== manifestR2Key
   );
-  if (oldKeys.length > 0) {
-    await env.R2.delete(oldKeys).catch(() => undefined);
-  }
+  // A degraded completion can leave an artifact this generation uploaded
+  // unrecorded (for example a HOME upload whose capture then failed). Nothing
+  // references that object, so it goes with the replaced generation's keys.
+  const unrecordedKeys = sessionSnapshotCaptureKeys(
+    env,
+    input.chatSessionId,
+    captureGeneration,
+    (['home', 'wip'] as const).filter((artifact) =>
+      artifact === 'home' ? homeR2Key === null : wipR2Key === null
+    )
+  );
+  await deleteAbandonedSessionSnapshotObjects(env, {
+    chatSessionId: input.chatSessionId,
+    generation: captureGeneration,
+    keys: [...oldKeys, ...unrecordedKeys],
+    keep: [homeR2Key, wipR2Key, manifestR2Key],
+  });
 
   if (input.status === 'available' && input.degradation === 'none') {
     await scheduleSessionSnapshotSleep(db, env, input.chatSessionId, completedAt, {
@@ -195,7 +226,19 @@ export async function recordSessionSnapshotCaptureFailure(
         eq(schema.sessionSnapshots.captureGeneration, input.generation)
       )
     );
-  return (result.meta.changes ?? 0) > 0;
+  const recorded = (result.meta.changes ?? 0) > 0;
+  if (recorded) {
+    // A failed capture never calls /complete, so whatever it uploaded is
+    // abandoned. Its manifest key is left alone: the final-snapshot wait may
+    // still complete this generation as a transcript-only snapshot, which
+    // writes that manifest.
+    await deleteAbandonedSessionSnapshotObjects(env, {
+      chatSessionId: input.chatSessionId,
+      generation: input.generation,
+      keys: sessionSnapshotCaptureKeys(env, input.chatSessionId, input.generation, ['home', 'wip']),
+    });
+  }
+  return recorded;
 }
 
 export async function recordSessionSnapshotProgress(
@@ -220,6 +263,15 @@ export async function recordSessionSnapshotProgress(
   return (result.meta.changes ?? 0) > 0;
 }
 
+/**
+ * End a capture generation that failed or stopped making progress. With no completed
+ * generation to fall back on, it completes as a `transcript-only` marker. A completed
+ * generation that already records a Git commit or artifacts is never replaced by that
+ * marker — replacing it would delete the only recovery point the bounded sleep fallback
+ * (`session-sleep-recovery-point.ts`) could use — so the stalled capture is abandoned
+ * instead and its late callbacks get 409. Returns which happened, or null when the
+ * generation was no longer current.
+ */
 export async function completeActiveSessionSnapshotAsDegraded(
   db: Db,
   env: Env,
@@ -233,9 +285,16 @@ export async function completeActiveSessionSnapshotAsDegraded(
     agentType?: string;
     acpSessionId?: string;
   }
-): Promise<boolean> {
+): Promise<'degraded' | 'abandoned' | null> {
   const current = await db
-    .select({ captureGeneration: schema.sessionSnapshots.captureGeneration })
+    .select({
+      captureGeneration: schema.sessionSnapshots.captureGeneration,
+      snapshotGeneration: schema.sessionSnapshots.snapshotGeneration,
+      status: schema.sessionSnapshots.status,
+      baseCommit: schema.sessionSnapshots.baseCommit,
+      homeR2Key: schema.sessionSnapshots.homeR2Key,
+      wipR2Key: schema.sessionSnapshots.wipR2Key,
+    })
     .from(schema.sessionSnapshots)
     .where(
       and(
@@ -244,7 +303,18 @@ export async function completeActiveSessionSnapshotAsDegraded(
       )
     )
     .get();
-  if (!current) return false;
+  if (!current) return null;
+  const completedGenerationHasRecoveryState =
+    Boolean(current.snapshotGeneration) &&
+    (current.status === 'available' || current.status === 'degraded') &&
+    Boolean(current.baseCommit || current.homeR2Key || current.wipR2Key);
+  if (completedGenerationHasRecoveryState) {
+    const abandoned = await abandonSessionSnapshotCapture(db, env, {
+      chatSessionId: input.chatSessionId,
+      generation: input.captureGeneration,
+    });
+    return abandoned ? 'abandoned' : null;
+  }
 
   const reason = sessionLifecycleError(env, input.reason);
   const createdAt = new Date().toISOString();
@@ -272,7 +342,7 @@ export async function completeActiveSessionSnapshotAsDegraded(
     manifest,
     artifactSizes: {},
   });
-  return true;
+  return 'degraded';
 }
 
 export async function getRestorableSessionSnapshot(
@@ -298,19 +368,39 @@ export async function getRestorableSessionSnapshot(
 
 export async function recordSessionSnapshotRestoreResult(
   db: Db,
+  env: Env,
   input: {
     chatSessionId: string;
     status: string;
     message: string | null;
   }
 ): Promise<void> {
+  const restoreMessage = sanitizeSessionLifecycleMessage(env, input.message);
   await db
     .update(schema.sessionSnapshots)
     .set({
       restoreStatus: input.status,
-      restoreMessage: input.message,
+      restoreMessage,
       restoredAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     })
     .where(eq(schema.sessionSnapshots.chatSessionId, input.chatSessionId));
+}
+
+/**
+ * Make text from a VM agent, or from an internal failure, safe to store and to show in a
+ * chat: control characters become spaces, secret shapes are redacted, and the result is
+ * bounded like every lifecycle error. Used for restore results and for the error a sleep
+ * fallback notice quotes.
+ */
+export function sanitizeSessionLifecycleMessage(
+  env: Env,
+  message: string | null
+): string | null {
+  if (message === null) return null;
+  const withoutControls = Array.from(message, (character) => {
+    const code = character.codePointAt(0) ?? 0;
+    return code < 0x20 || code === 0x7f ? ' ' : character;
+  }).join('');
+  return sessionLifecycleError(env, redactSecretPatterns(withoutControls));
 }

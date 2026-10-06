@@ -66,12 +66,15 @@ export function FloatingHeader({
     : '0 4px 24px rgba(0, 0, 0, 0.4)';
 
   return (
-    <div ref={containerRef} className="absolute top-0 left-0 right-0 z-10">
+    <div
+      ref={containerRef}
+      className="absolute top-0 left-0 right-0 z-10"
+      data-testid="session-floating-header"
+    >
       <SessionHeader
         projectId={projectId}
         session={lc.session}
         sessionState={lc.sessionState}
-        loading={lc.loading}
         idleCountdownMs={lc.idleCountdownMs}
         taskEmbed={lc.taskEmbed}
         workspace={lc.workspace}
@@ -112,6 +115,7 @@ export function FloatingHeader({
             workspaceId={lc.workspace?.id ?? lc.session?.workspaceId}
             nodeId={lc.node?.id ?? lc.workspace?.nodeId}
             recoverable={hasRecoverableTaskError}
+            isSessionCreator={lc.session.isMine === true}
           />
         </div>
       )}

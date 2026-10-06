@@ -285,6 +285,7 @@ describe('ProjectTriggers', () => {
           skipIfRunning: true,
           maxConcurrent: 1,
           vmSizeOverride: undefined,
+          resourceRequirementsJson: null,
           taskMode: 'task',
           agentProfileId: 'profile-webhook',
           githubConfig: undefined,

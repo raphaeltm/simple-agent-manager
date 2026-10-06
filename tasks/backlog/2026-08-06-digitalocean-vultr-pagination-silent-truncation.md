@@ -1,5 +1,20 @@
 # DigitalOcean/Vultr pagination silently truncates on cap exhaustion
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** the Hetzner half of the Principle XI item. `maxListPages` is a runtime option
+>   and `HETZNER_MAX_LIST_PAGES` is wired (`packages/providers/src/hetzner.ts:115`,
+>   `hetzner-metadata.ts:114`, `apps/api/src/services/provider-credential-codecs.ts:162`,
+>   `apps/api/src/env.ts:563`; commit 6270514b6).
+> - **Still open:**
+>   - DigitalOcean still warns and returns a partial list on cap exhaustion
+>     (`packages/providers/src/digitalocean.ts:333`, `digitalocean-volumes.ts:318`).
+>   - Vultr still truncates (`vultr.ts:346,375`); `vultr-volumes.ts:282-296` truncates without
+>     even a warning.
+>   - The GCP page cap is not configurable (`gcp.ts:736`, no `GCP_MAX_LIST_PAGES`), and Vultr's
+>     cap is a fixed constant (`VULTR_MAX_LIST_PAGES = 50`).
+>   - Regression tests asserting the throw and the call count.
+
 ## Problem
 
 PR #1744 fixed Hetzner and GCP pagination to throw `ProviderError` when the

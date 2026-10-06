@@ -57,13 +57,14 @@ export const PROJECT_AWARENESS_TOOLS = [
   {
     name: 'search_tasks',
     description:
-      'Search tasks in your project by keyword. Searches both title and description fields.',
+      'Search tasks in your project by keyword. Searches both title and description fields, requiring every retained term to match. Queries beyond the server-configured guardrails are truncated; the response reports queryTruncated, the effective query, and queryLimits.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         query: {
           type: 'string',
-          description: 'Search keyword to find in task titles and descriptions',
+          description:
+            'Search text for task titles and descriptions. Over-limit input is truncated and disclosed in the response.',
         },
         status: {
           type: 'string',
@@ -168,15 +169,44 @@ export const PROJECT_AWARENESS_TOOLS = [
     },
   },
   {
+    name: 'get_resource_history',
+    description:
+      'Inspect bounded workspace resource history for the current project. By default, MCP callers read their current session/task/workspace summary, including server-resolved agentProfileId, skillId, and agentType, plus the chunk index. Pass sessionId, taskId, or workspaceId to inspect a related scope. Pass chunkId to lazily load downsampled raw samples and tool-span correlation for that chunk, including ACP kind and metadata-provided tool name when available. Working-set memory is the sizing figure; total memory includes reclaimable file cache. This reports correlation, not causal per-process attribution, and never includes titles, prompts, commands, tool args/output, file paths, env, or secrets.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        sessionId: {
+          type: 'string',
+          description: 'Optional session scope. Defaults to the caller session when available.',
+        },
+        taskId: {
+          type: 'string',
+          description: 'Optional task scope. Defaults to the caller task when available.',
+        },
+        workspaceId: {
+          type: 'string',
+          description: 'Optional workspace scope. Defaults to the caller workspace when available.',
+        },
+        chunkId: {
+          type: 'string',
+          description:
+            'Optional resource chunk ID to load detailed downsampled samples/tool spans.',
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'search_messages',
     description:
-      'Search messages across all chat sessions in your project by keyword using full-text search. Returns matching message snippets with session context. Useful for finding past discussions about specific topics, decisions, or code. Completed sessions use FTS5 indexing (matches messages containing all search words); active sessions fall back to keyword matching.',
+      'Search messages across all chat sessions in your project by keyword using full-text search. Returns matching message snippets with session context. Long multi-word input searches every retained term. Queries beyond the server-configured guardrails are truncated; the response reports queryTruncated, the effective query, and queryLimits. Sessions are indexed incrementally each time they sleep or stop, so sleeping and stopped sessions are covered by FTS5 (matches messages containing all retained search words); only messages written since a session was last indexed fall back to keyword matching. To keep large projects responsive, relevance ranking considers the newest matches (a configured window) and the keyword fallback scans only the newest raw messages; when either bound was reached, the rootSearch field flags it and coverageNotes explains what was not searched, so an empty result then does not prove absence.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         query: {
           type: 'string',
-          description: 'Search keyword to find in message content',
+          description:
+            'Search text for message content. Over-limit input is truncated and disclosed in the response.',
         },
         sessionId: {
           type: 'string',
@@ -190,6 +220,11 @@ export const PROJECT_AWARENESS_TOOLS = [
         limit: {
           type: 'number',
           description: 'Max results to return (default: 10, max: 20)',
+        },
+        continuation: {
+          type: 'string',
+          description:
+            'Project-wide signed continuation returned by archiveSearch.continuation. Repeat the same query, roles, and limit until archiveSearch.complete is true. Cannot be combined with sessionId.',
         },
       },
       required: ['query'],

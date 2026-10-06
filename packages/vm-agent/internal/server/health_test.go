@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,6 +18,19 @@ import (
 	"github.com/workspace/vm-agent/internal/persistence"
 	"github.com/workspace/vm-agent/internal/sysinfo"
 )
+
+func TestWorkspaceRuntimeReportsAdmissionMetricsStatuses(t *testing.T) {
+	for _, status := range []string{"running", "creating", "recovery"} {
+		if !workspaceRuntimeReportsAdmissionMetrics(status) {
+			t.Fatalf("status %q should report admission metrics", status)
+		}
+	}
+	for _, status := range []string{"", "stopped", "error"} {
+		if workspaceRuntimeReportsAdmissionMetrics(status) {
+			t.Fatalf("status %q should not report admission metrics", status)
+		}
+	}
+}
 
 // newTestErrorReporter creates a minimal error reporter for tests.
 func newTestErrorReporter() *errorreport.Reporter {
@@ -204,6 +218,55 @@ func TestNodeReadyAndHeartbeatReportAgentVersion(t *testing.T) {
 	}
 }
 
+func TestNodeHeartbeatBuildQueueDepthRolloutCompatible(t *testing.T) {
+	var payload map[string]any
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/nodes/node-build-queue/heartbeat" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode heartbeat payload: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(heartbeatResponse{
+			Status:          "running",
+			LastHeartbeatAt: time.Now().UTC().Format(time.RFC3339),
+			HealthStatus:    "healthy",
+		})
+	}))
+	defer ts.Close()
+
+	cfg := &config.Config{
+		ControlPlaneURL:          ts.URL,
+		NodeID:                   "node-build-queue",
+		CallbackToken:            "callback-token",
+		HeartbeatInterval:        time.Minute,
+		WorkspaceBuildQueueDepth: 3,
+	}
+	s := &Server{
+		config:        cfg,
+		callbackToken: cfg.CallbackToken,
+		workspaces: map[string]*WorkspaceRuntime{
+			"ws-creating": {ID: "ws-creating", Status: "creating", ProvisioningActive: true},
+		},
+		errorReporter: newTestErrorReporter(),
+		done:          make(chan struct{}),
+	}
+
+	s.sendNodeHeartbeat()
+	if payload == nil {
+		t.Fatal("heartbeat payload was not captured")
+	}
+	if _, ok := payload["workspaceBuildQueueDepth"]; ok {
+		t.Fatal("heartbeat should not require a new build-queue-depth field for rollout compatibility")
+	}
+	if got, ok := payload["creatingWorkspaces"].(float64); !ok || got != 1 {
+		t.Fatalf("creatingWorkspaces = %v (%T), want 1", payload["creatingWorkspaces"], payload["creatingWorkspaces"])
+	}
+}
+
 func TestRunDetachedDeploymentApplyCancelsAfterIdleProgress(t *testing.T) {
 	jobID := applyJobID("env-1", 7)
 	releaseRequested := make(chan struct{})
@@ -294,6 +357,20 @@ func TestRunDetachedDeploymentApplyCancelsAfterIdleProgress(t *testing.T) {
 	}
 	if job == nil || job.Status != vmJobStatusFailed || !strings.Contains(job.ErrorMessage, "no progress") {
 		t.Fatalf("expected durable stalled apply failure, got %+v", job)
+	}
+
+	// The stall must be the PRIMARY cause, not something buried inside the child's
+	// error. The child fails BECAUSE we cancelled it, so reporting only its error
+	// (`signal: killed` for compose) makes a self-inflicted timeout
+	// indistinguishable from an OOM kill — which is exactly how the 2026-09-05
+	// incident presented. A Contains() check cannot see this: the cancel cause
+	// propagates into the child's error text, so it passes either way. Anchoring on
+	// the prefix is what discriminates.
+	if !strings.HasPrefix(job.ErrorMessage, "deployment apply stalled:") {
+		t.Fatalf("stall must lead the error message, got %q", job.ErrorMessage)
+	}
+	if !strings.Contains(job.ErrorMessage, "child result:") {
+		t.Fatalf("child result must be retained as context, got %q", job.ErrorMessage)
 	}
 }
 
@@ -924,4 +1001,42 @@ func TestHeartbeatNoRefreshWhenFieldEmpty(t *testing.T) {
 	if got := s.getCallbackToken(); got != "stable-token" {
 		t.Fatalf("expected token unchanged when no refresh, got %q", got)
 	}
+}
+
+// The apply idle timer firing does NOT imply the apply failed. `done` is buffered,
+// so Go's select can pick the timer case even when the apply had already succeeded
+// and both cases were ready — recording that as "stalled" would fail a deployment
+// that actually worked. And when the child really did fail, its error is a
+// consequence of our own cancel, so the stall must stay the primary cause.
+func TestStalledApplyResultDistinguishesRacedSuccessFromRealStall(t *testing.T) {
+	stallErr := errors.New("deployment apply stalled: no progress for 15m0s")
+
+	t.Run("raced success is not reported as stalled", func(t *testing.T) {
+		succeeded, failure := stalledApplyResult(stallErr, nil)
+		if !succeeded {
+			t.Fatal("a nil child result means the apply completed; it must not be recorded as stalled")
+		}
+		if failure != nil {
+			t.Fatalf("failure = %v, want nil", failure)
+		}
+	})
+
+	t.Run("real stall keeps the stall as the primary cause", func(t *testing.T) {
+		childErr := errors.New("docker compose up: signal: killed")
+		succeeded, failure := stalledApplyResult(stallErr, childErr)
+		if succeeded {
+			t.Fatal("a failing child must not be reported as a success")
+		}
+		if !strings.HasPrefix(failure.Error(), "deployment apply stalled:") {
+			t.Fatalf("stall must lead the message, got %q", failure.Error())
+		}
+		if !strings.Contains(failure.Error(), "signal: killed") {
+			t.Fatalf("child result must be retained as context, got %q", failure.Error())
+		}
+		// The wrap must preserve the stall for errors.Is, so callers can still
+		// classify it without string matching.
+		if !errors.Is(failure, stallErr) {
+			t.Fatal("failure must wrap the stall error")
+		}
+	})
 }

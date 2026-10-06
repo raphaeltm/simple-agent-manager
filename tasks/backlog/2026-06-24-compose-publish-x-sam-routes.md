@@ -1,5 +1,19 @@
 # Compose-publish `x-sam-routes` override support
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** the behavior and docs, in PR #1424 (`9256bf64c`). Compose-publish now uses the
+>   shared route parser (`apps/api/src/services/compose-publish-apply.ts:479-481`,
+>   `packages/shared/src/compose-parser/parse-fields.ts:362-418`), drops the original `ports:`
+>   (`:552`) and adds a loopback binding for every public route (`:599-617`). Docs:
+>   `apps/www/src/content/docs/docs/guides/app-deployments.md:21,87` and
+>   `apps/api/src/routes/mcp/deployment-guide-tools.ts:90,165`.
+> - **Still open:** the regression tests. `compose-publish-apply.test.ts:168-274` covers only
+>   `ports:`. Add: a public `x-sam-routes` entry with no `ports:`, a private entry suppressing a
+>   matching `ports:` entry, no duplicate for explicit + `ports:`, invalid-route errors, and a
+>   reconstruction test in `deployment-routing.test.ts`. No test anywhere covers a
+>   `mode: private` override today.
+
 ## Problem statement
 
 The deployment docs and MCP deployment guide say SAM derives public app routes from either top-level `x-sam-routes` or Compose service `ports:`. That is true for the normalized YAML release endpoint, where `parseCompose()` turns `x-sam-routes` into `manifest.routes` and falls back to `ports:`/`expose:` route hints.

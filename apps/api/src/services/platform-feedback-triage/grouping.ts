@@ -29,7 +29,9 @@ export function severityRank(severity: string | null | undefined): number {
   return normalizeSeverity(severity) === 'error' ? 2 : 1;
 }
 
-function normalizeMessage(message: string): string {
+const SEMANTIC_JSON_KEYS = new Set(['code', 'error', 'message', 'name', 'reason', 'type']);
+
+function normalizeLegacyMessage(message: string): string {
   return String(redactSensitiveData(message))
     .toLowerCase()
     .replace(/\b[a-z0-9.!#$%&*+/=?^_`{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}\b/gi, '[email]')
@@ -41,6 +43,125 @@ function normalizeMessage(message: string): string {
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, PLATFORM_ERROR_MESSAGE_GROUP_MAX_LENGTH);
+}
+
+function normalizeTextTokens(value: string, normalizeQuotedValues = true): string {
+  let normalized = value
+    .toLowerCase()
+    .replace(/https?:\/\/\S+/g, '[url]')
+    .replace(/\b[a-z0-9.!#$%&*+/=?^_`{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}\b/gi, '[email]')
+    .replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, '[ip]')
+    .replace(/\b\d{4}-\d{2}-\d{2}[t ]\d{2}:\d{2}:\d{2}(?:\.\d+)?z?\b/gi, '[timestamp]')
+    .replace(/\b[0-9a-hjkmnp-tv-z]{26}\b/gi, '[id]')
+    .replace(
+      /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi,
+      '[id]'
+    )
+    .replace(/\b(?:0x)?[0-9a-f]{8,}\b/gi, '[id]')
+    .replace(/\b\d+(?:\.\d+)?\s*(?:ns|us|µs|ms|s|m|h|d)\b/gi, '[duration]')
+    .replace(/\b\d+(?:\.\d+)?\s*secs?\b/gi, '[duration]')
+    .replace(/\b\d+(?:\.\d+)?\s*(?:seconds?|minutes?|hours?|days?)\b/gi, '[duration]')
+    .replace(/\b\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?\b/g, '[duration]')
+    .replace(/(?<![a-z0-9_])[-+]?\d+(?:\.\d+)?(?:e[-+]?\d+)?(?![a-z0-9_])/gi, '[n]');
+  if (normalizeQuotedValues) {
+    normalized = normalized
+      .replace(/"(?:\\.|[^"\\])*"/g, '[quoted]')
+      .replace(/'(?:\\.|[^'\\])*'/g, '[quoted]');
+  }
+  return normalized.replace(/\s+/g, ' ').trim();
+}
+
+function jsonShape(value: unknown, key?: string): string {
+  if (value === null) return '[null]';
+  if (Array.isArray(value)) {
+    const shapes = [...new Set(value.map((item) => jsonShape(item)))].sort((left, right) =>
+      left.localeCompare(right)
+    );
+    return `[${shapes.join(',')}]`;
+  }
+  if (typeof value === 'object') {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(
+        ([entryKey, entryValue]) =>
+          `${normalizeTextTokens(entryKey, false)}:${jsonShape(entryValue, entryKey)}`
+      )
+      .join(',')}}`;
+  }
+  if (typeof value === 'string') {
+    return key && SEMANTIC_JSON_KEYS.has(key.toLowerCase())
+      ? normalizeTextTokens(value, false)
+      : '[string]';
+  }
+  if (typeof value === 'number') return '[n]';
+  if (typeof value === 'boolean') return '[boolean]';
+  return `[${typeof value}]`;
+}
+
+interface JsonStringScanState {
+  escaped: boolean;
+  inString: boolean;
+}
+
+function consumeJsonStringCharacter(character: string, state: JsonStringScanState): boolean {
+  if (!state.inString) {
+    if (character !== '"') return false;
+    state.inString = true;
+    return true;
+  }
+  if (state.escaped) state.escaped = false;
+  else if (character === '\\') state.escaped = true;
+  else if (character === '"') state.inString = false;
+  return true;
+}
+
+function findEmbeddedJsonEnd(value: string, start: number, opener: '{' | '['): number | null {
+  const closer = opener === '{' ? '}' : ']';
+  const stringState: JsonStringScanState = { escaped: false, inString: false };
+  let depth = 0;
+  for (let end = start; end < value.length; end += 1) {
+    const character = value.charAt(end);
+    if (consumeJsonStringCharacter(character, stringState)) continue;
+    if (character === opener) depth += 1;
+    if (character !== closer) continue;
+    depth -= 1;
+    if (depth === 0) return end;
+  }
+  return null;
+}
+
+function parsedJsonShape(candidate: string): string | null {
+  try {
+    return jsonShape(JSON.parse(candidate));
+  } catch {
+    return null;
+  }
+}
+
+function normalizeEmbeddedJson(value: string): string {
+  let result = '';
+  let index = 0;
+  while (index < value.length) {
+    const opener = value[index];
+    if (opener !== '{' && opener !== '[') {
+      result += opener;
+      index += 1;
+      continue;
+    }
+    const end = findEmbeddedJsonEnd(value, index, opener);
+    const shape = end === null ? null : parsedJsonShape(value.slice(index, end + 1));
+    result += shape ?? opener;
+    index = shape === null || end === null ? index + 1 : end + 1;
+  }
+  return result;
+}
+
+function normalizeMessage(message: string): string {
+  const redacted = String(redactSensitiveData(message));
+  return normalizeTextTokens(normalizeEmbeddedJson(redacted)).slice(
+    0,
+    PLATFORM_ERROR_MESSAGE_GROUP_MAX_LENGTH
+  );
 }
 
 export function parseStoredEvidenceRefs(
@@ -95,14 +216,21 @@ export async function groupPlatformErrors(
   rows: ErrorRow[],
   evidenceLimit: number
 ): Promise<FeedbackErrorGroup[]> {
-  const groups = new Map<string, Omit<FeedbackErrorGroup, 'signature'>>();
+  const groups = new Map<
+    string,
+    Omit<FeedbackErrorGroup, 'signature' | 'canonicalSignature' | 'legacySignatures'> & {
+      legacyKeys: Set<string>;
+    }
+  >();
   for (const row of rows) {
     const candidateSource = row.source.trim().toLowerCase();
     const source = ALLOWED_ERROR_SOURCES.has(candidateSource) ? candidateSource : 'unknown';
     const severity = normalizeSeverity(row.level);
     const normalized = normalizeMessage(row.message) || 'redacted platform error';
+    const legacyNormalized = normalizeLegacyMessage(row.message) || 'redacted platform error';
     const summary = `Recurring ${source} platform error`;
     const key = `${source}\n${normalized}`;
+    const legacyKey = `${source}\n${legacyNormalized}`;
     const current = groups.get(key);
     const safeErrorId =
       /^(?:[0-9A-HJKMNP-TV-Z]{26}|[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i.test(
@@ -119,6 +247,7 @@ export async function groupPlatformErrors(
       ...(nodeAgentVersion ? { nodeAgentVersion } : {}),
     };
     if (current) {
+      current.legacyKeys.add(legacyKey);
       current.count += 1;
       current.severity =
         severityRank(severity) > severityRank(current.severity) ? severity : current.severity;
@@ -134,11 +263,22 @@ export async function groupPlatformErrors(
         lastSeenAt: row.timestamp,
         evidence: [evidence],
         count: 1,
+        legacyKeys: new Set([legacyKey]),
       });
     }
   }
   return Promise.all(
-    [...groups.entries()].map(async ([key, group]) => ({ ...group, signature: await digest(key) }))
+    [...groups.entries()].map(async ([key, group]) => {
+      const { legacyKeys, ...storedGroup } = group;
+      const signature = await digest(key);
+      const legacySignatures = await Promise.all([...legacyKeys].map(digest));
+      return {
+        ...storedGroup,
+        signature,
+        canonicalSignature: signature,
+        legacySignatures: legacySignatures.filter((legacy) => legacy !== signature),
+      };
+    })
   );
 }
 export function ideaDescription(group: FeedbackErrorGroup, diagnosisId: string): string {

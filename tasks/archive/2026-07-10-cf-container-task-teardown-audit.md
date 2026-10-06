@@ -80,7 +80,7 @@ Cloudflare Container-backed SAM workspaces (`runtime = 'cf-container'`) run a st
 
 ## Task Completion Validation Report
 
-**Task**: `tasks/active/2026-07-10-cf-container-task-teardown-audit.md`  
+**Task**: `tasks/archive/2026-07-10-cf-container-task-teardown-audit.md`  
 **Branch**: `sam/teardown-audit-task-backed-0q5rht`  
 **Date**: 2026-07-11
 

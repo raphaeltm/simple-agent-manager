@@ -21,10 +21,7 @@
  * number of unreachable probes. Quarantine preserves "work may be in flight"
  * and authoritative VM reports reset it.
  */
-import type { Env as WorkerEnv } from '../../env';
-import { createModuleLogger, serializeError } from '../../lib/logger';
-import { listAgentSessionsOnNode } from '../../services/node-agent';
-import { recordAcpActivityCallbackMetric } from '../../services/telemetry';
+import { createModuleLogger } from '../../lib/logger';
 import { recordActivityEventInternal } from './activity';
 import {
   minReconciliationAlarmDelayMs,
@@ -78,6 +75,38 @@ export interface SessionActivityReconciliationHooks {
   /** Re-arm the idle timer a wrongly-active session was never given. */
   armIdleCleanup: (chatSessionId: string) => void;
   recalculateAlarm: () => Promise<void>;
+}
+
+/**
+ * What happened to the session, as distinct from what happened to the turn.
+ *
+ * Required rather than defaulted so a new caller must state which it means. The
+ * distinction is load-bearing for the idle timer:
+ *
+ * - A TURN ending on a session that lives on RE-ARMS the timer — that session
+ *   was wrongly denied one while its mirror was wedged, which is the whole
+ *   point of the reconciliation.
+ * - A SESSION ending LEAVES THE EXISTING SCHEDULE ALONE. Neither alternative is
+ *   safe: re-arming pushes the deadline out on a session that will never report
+ *   again, while cancelling deletes the row whose expiry is what actually calls
+ *   `stopWorkspaceInD1`. Some callers deliberately keep the workspace running
+ *   past the session's end (`scheduled/stuck-tasks.ts` transitions with
+ *   `stopWorkspace: false` before failing the session), so cancelling would
+ *   remove that workspace's only teardown path. Leaving the original deadline
+ *   intact preserves teardown, and the row is not an immortal candidate because
+ *   `processExpiredCleanups` terminalizes it when it fires.
+ */
+export type TurnEndDisposition =
+  /** The turn ended; the session remains alive and may receive another prompt. */
+  | { kind: 'idle' }
+  /** The session itself was stopped. */
+  | { kind: 'stopped' }
+  /** The session itself ended in failure. */
+  | { kind: 'failed'; statusError: string };
+
+function dispositionActivity(disposition: TurnEndDisposition): string {
+  if (disposition.kind === 'idle') return 'idle';
+  return disposition.kind === 'stopped' ? 'stopped' : 'error';
 }
 
 /**
@@ -205,8 +234,9 @@ export function computeSessionActivityProbeAlarmTime(
   );
   const maxAttempts = sessionActivityProbeMaxAttempts(env);
   const minDelayMs = minReconciliationAlarmDelayMs(env);
-  // Must mirror `probeStaleSessionActivity`'s lease derivation exactly, or the
-  // scheduler and the selector disagree about when a claimed row is due again.
+  // Must mirror `probeStaleSessionActivity`'s lease derivation exactly
+  // (`session-activity-probe.ts`), or the scheduler and the selector disagree about
+  // when a claimed row is due again.
   const leaseMs = sessionActivityProbeMaxCandidates(env) * sessionActivityProbeTimeoutMs(env);
   const placeholders = PROBE_RECONCILIABLE_ACTIVITIES.map(() => '?').join(', ');
 
@@ -362,7 +392,11 @@ export function applyProbeOutcome(
     return recordProbeReconciledTurnEnd(sql, candidate.acpSessionId, {
       reason: 'probe_reconciled',
       source: 'probe',
+      // `observedAt` here is the `activity_at` read at candidate selection, not
+      // a wall-clock observation, so the guard is optimistic concurrency: any
+      // fresh report since selection withdraws this probe's stale verdict.
       observedAt: candidate.activityAt,
+      guard: 'row_unchanged',
       now,
     });
   }
@@ -427,143 +461,39 @@ export function applyProbeOutcome(
  */
 export async function publishTurnEnd(
   hooks: SessionActivityReconciliationHooks,
-  chatSessionId: string
+  chatSessionId: string,
+  disposition: TurnEndDisposition,
+  options: { deferAlarm?: boolean } = {}
 ): Promise<void> {
   hooks.broadcastEvent(
     'session.activity',
-    { sessionId: chatSessionId, activity: 'idle', promptStartedAt: null },
+    {
+      sessionId: chatSessionId,
+      activity: dispositionActivity(disposition),
+      promptStartedAt: null,
+      ...(disposition.kind === 'failed' ? { statusError: disposition.statusError } : {}),
+    },
     chatSessionId
   );
-  hooks.armIdleCleanup(chatSessionId);
-  hooks.nudgeDeliveries(chatSessionId);
-  await hooks.recalculateAlarm();
-}
-
-/** Resolve the workspace owner needed to authenticate the probe request. */
-async function resolveProbeUserId(
-  env: WorkerEnv,
-  workspaceId: string,
-  projectId: string | null
-): Promise<string | null> {
-  const row = await env.DATABASE.prepare(
-    `SELECT user_id, project_id FROM workspaces WHERE id = ? LIMIT 1`
-  )
-    .bind(workspaceId)
-    .first<{ user_id: string | null; project_id: string | null }>();
-
-  if (!row?.user_id) return null;
-  // Never probe across tenants. Fail CLOSED (.claude/rules/51): an absent
-  // project on either side leaves ownership ambiguous, and an ambiguous
-  // identity must reject rather than fall through to the permissive path —
-  // this probe mints a node-management token scoped to the workspace owner.
-  if (!projectId || row.project_id !== projectId) {
-    log.error('session_activity.workspace_project_mismatch', {
-      workspaceId,
-      expectedProjectId: projectId,
-      actualProjectId: row.project_id,
-      action: 'rejected',
-    });
-    return null;
+  // Only a TURN ending re-arms. A session ending leaves the existing schedule
+  // untouched — see TurnEndDisposition for why neither re-arming nor cancelling
+  // is safe there.
+  let alarmMayHaveMoved = false;
+  if (disposition.kind === 'idle') {
+    hooks.armIdleCleanup(chatSessionId);
+    alarmMayHaveMoved = true;
   }
-  return row.user_id;
-}
+  // Releasing a queued delivery makes it due sooner, which is the only reason a
+  // terminal ending needs the alarm touched at all.
+  alarmMayHaveMoved = hooks.nudgeDeliveries(chatSessionId) > 0 || alarmMayHaveMoved;
 
-/**
- * Probe every stale candidate and reconcile the authoritative state.
- *
- * Intended to run from `ctx.waitUntil()` — never inline on the alarm path.
- */
-export async function probeStaleSessionActivity(
-  sql: SqlStorage,
-  env: DOEnv,
-  hooks: SessionActivityReconciliationHooks,
-  options: { thresholdMs: number; projectId: string | null }
-): Promise<{ probed: number; reconciled: number }> {
-  const maxAttempts = sessionActivityProbeMaxAttempts(env);
-  const requestTimeoutMs = sessionActivityProbeTimeoutMs(env);
-  const maxCandidates = sessionActivityProbeMaxCandidates(env);
-  const candidates = selectStaleActivityProbeCandidates(sql, {
-    thresholdMs: options.thresholdMs,
-    maxAttempts,
-    maxCandidates,
-    // Worst case this pass takes maxCandidates * requestTimeoutMs; hold the
-    // claim at least that long so an overlapping alarm cannot re-probe a row
-    // this pass has not reached yet.
-    leaseMs: maxCandidates * requestTimeoutMs,
-  });
-  if (candidates.length === 0) return { probed: 0, reconciled: 0 };
-
-  const workerEnv = env as unknown as WorkerEnv;
-  let reconciled = 0;
-
-  for (const candidate of candidates) {
-    let outcome: ProbeOutcome;
-    try {
-      const userId = await resolveProbeUserId(workerEnv, candidate.workspaceId, options.projectId);
-      if (!userId) {
-        outcome = { kind: 'unreachable', error: 'workspace_owner_unresolved' };
-      } else {
-        const payload = await listAgentSessionsOnNode(
-          candidate.nodeId,
-          candidate.workspaceId,
-          workerEnv,
-          userId,
-          { requestTimeoutMs }
-        );
-        outcome = classifyProbeResponse(payload, candidate.acpSessionId, candidate.workspaceId);
-      }
-    } catch (err) {
-      outcome = { kind: 'unreachable', error: err instanceof Error ? err.message : String(err) };
-    }
-
-    let changed = false;
-    try {
-      changed = applyProbeOutcome(sql, candidate, outcome, { maxAttempts });
-    } catch (err) {
-      log.error('session_activity.probe_apply_failed', {
-        acpSessionId: candidate.acpSessionId,
-        ...serializeError(err),
-      });
-      continue;
-    }
-
-    if (!changed) continue;
-    reconciled += 1;
-    recordAcpActivityCallbackMetric(
-      {
-        metric: 'acp_activity_callback',
-        outcome: 'healed',
-        projectId: options.projectId,
-        sessionId: candidate.acpSessionId,
-        nodeId: candidate.nodeId,
-        workspaceId: candidate.workspaceId,
-        activity: 'idle',
-        reason: 'probe_reconciled',
-        source: 'reconciliation_probe',
-      },
-      workerEnv
-    );
-    recordActivityEventInternal(
-      sql,
-      'session.activity_reconciled',
-      'system',
-      null,
-      candidate.workspaceId,
-      candidate.chatSessionId,
-      null,
-      JSON.stringify({
-        acpSessionId: candidate.acpSessionId,
-        outcome: outcome.kind,
-        hostStatus: outcome.kind === 'not_working' ? outcome.hostStatus : null,
-        staleForMs: Math.max(0, Date.now() - candidate.activityAt),
-      })
-    );
-    await publishTurnEnd(hooks, candidate.chatSessionId);
-  }
-
-  log.info('session_activity.probe_sweep_completed', {
-    probed: candidates.length,
-    reconciled,
-  });
-  return { probed: candidates.length, reconciled };
+  // Recompute only when something actually moved. `stopSession`/`failSession`
+  // never scheduled an alarm before this fan-out existed, and scheduling one
+  // unconditionally makes every terminal transition wake the object to re-read
+  // all nine alarm sources and run storage maintenance that nothing asked for.
+  //
+  // Batch callers defer entirely and recompute once for the whole sweep, since
+  // paying a full nine-source recompute per candidate is an N x amplification
+  // inside a single alarm tick (.claude/rules/47).
+  if (!options.deferAlarm && alarmMayHaveMoved) await hooks.recalculateAlarm();
 }

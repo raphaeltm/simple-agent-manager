@@ -1,5 +1,20 @@
 # Project credentials UI follow-ups
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** most of Finding 2. `apps/web/src/pages/ProjectSettings.tsx` went from 712 to 503
+>   lines; sections moved to `apps/web/src/components/project-settings/` and per-page exports.
+> - **Still open:**
+>   - Finding 1. Paths moved: `ProjectAgentCredentialsSection` was renamed to
+>     `ProjectAgentsSection` / `ProjectAgentCard` in PR #757. `ProjectAgentCard.tsx:168-176` still
+>     renders `AgentKeyCard` without `opencodeProvider`, so labels fall back to the default
+>     provider. Since PR #1431 only the `custom` provider has a different label and help
+>     text. Take the value from the user's `agent_settings.opencodeProvider`;
+>     `ProjectAgentDefaults` has no such field.
+>   - Rest of Finding 2: `ProjectSettings.tsx` is 503 lines, 3 over the 500-line threshold.
+> - **Moot/dropped:** Finding 3. `docs/architecture/credential-security.md` was deleted in the docs
+>   consolidation (PR #1174, `cd4c6e83d`); the www docs have no partial-index SQL block.
+
 **Created**: 2026-04-18
 **Priority**: MEDIUM
 **Source**: Post-merge UI/UX review on PR #753 (`sam/project-credential-overrides`)

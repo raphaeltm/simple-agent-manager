@@ -34,6 +34,10 @@ import {
   clearProjectMultiplayerStateCache,
   getProjectMultiplayerState,
 } from '../../services/project-multiplayer';
+import {
+  ResourceRequirementsValidationError,
+  serializeResourceRequirementsInput,
+} from '../../services/resource-requirements-input';
 import { resolveMaxTriggersPerProject } from '../../services/trigger-limits';
 import { listTriggerRows, toTriggerResponse } from '../../services/trigger-read';
 import {
@@ -86,6 +90,26 @@ async function attribution(
 function clearTriggerPageCaches(projectId: string): void {
   clearCredentialAttributionHealthCache(projectId);
   clearProjectMultiplayerStateCache(projectId);
+}
+
+function triggerResourceRequirementsJson(body: {
+  resourceRequirements?: unknown;
+  resourceRequirementsJson?: string | null;
+}): string | null {
+  try {
+    if (body.resourceRequirements !== undefined) {
+      return serializeResourceRequirementsInput(body.resourceRequirements);
+    }
+    return serializeResourceRequirementsInput(
+      body.resourceRequirementsJson,
+      'resourceRequirementsJson'
+    );
+  } catch (err) {
+    if (err instanceof ResourceRequirementsValidationError) {
+      throw errors.badRequest(err.message);
+    }
+    throw err;
+  }
 }
 
 async function enrichTrigger(
@@ -261,6 +285,7 @@ crudRoutes.post('/', jsonValidator(CreateTriggerSchema), async (c) => {
     skillId: body.skillId ?? null,
     taskMode: body.taskMode ?? 'task',
     vmSizeOverride: body.vmSizeOverride ?? null,
+    resourceRequirementsJson: triggerResourceRequirementsJson(body),
     maxConcurrent,
     nextFireAt,
     createdAt: now,
@@ -420,6 +445,9 @@ crudRoutes.patch('/:triggerId', jsonValidator(UpdateTriggerSchema), async (c) =>
   if (body.skillId !== undefined) updates.skillId = body.skillId;
   if (body.taskMode !== undefined) updates.taskMode = body.taskMode;
   if (body.vmSizeOverride !== undefined) updates.vmSizeOverride = body.vmSizeOverride;
+  if (body.resourceRequirements !== undefined || body.resourceRequirementsJson !== undefined) {
+    updates.resourceRequirementsJson = triggerResourceRequirementsJson(body);
+  }
   if (body.maxConcurrent !== undefined) {
     const maxConcurrentLimit = parsePositiveInt(
       c.env.TRIGGER_MAX_CONCURRENT_LIMIT,

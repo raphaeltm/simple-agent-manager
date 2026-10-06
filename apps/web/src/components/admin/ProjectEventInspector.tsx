@@ -12,6 +12,8 @@ import { Button, Caption, Card, EmptyState, Secondary } from '@simple-agent-mana
 import { Clock3, Database, Radio, RefreshCcw, ShieldAlert } from 'lucide-react';
 import type { CSSProperties, ReactNode } from 'react';
 
+import { stateTone } from '../../lib/event-state-tone';
+
 interface ProjectEventInspectorProps {
   data: AdminProjectEventInspectorResponse;
   isRefreshing?: boolean;
@@ -53,39 +55,6 @@ function formatBytes(value: number): string {
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function stateTone(state: string): string {
-  switch (state) {
-    case 'active':
-    case 'delivered':
-    case 'acked':
-    case 'accepted':
-    case 'matched':
-    case 'batch_created':
-    case 'record_only':
-      return 'bg-success-tint text-success-fg';
-    case 'pending':
-    case 'queued_for_prompt_delivery':
-    case 'runtime_steer':
-    case 'runtime_interrupt':
-    case 'spawn_task':
-      return 'bg-info-tint text-info-fg';
-    case 'retry':
-    case 'ambiguous':
-      return 'bg-warning-tint text-warning-fg';
-    case 'failed':
-    case 'unauthorized':
-    case 'unsupported':
-    case 'critical':
-    case 'error':
-      return 'bg-danger-tint text-danger-fg';
-    case 'cancelled':
-    case 'expired':
-    case 'recorded_not_injected':
-    default:
-      return 'bg-surface-secondary text-fg-muted';
-  }
 }
 
 function StatePill({ state, label }: { state: string; label?: string }) {

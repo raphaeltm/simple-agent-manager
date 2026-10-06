@@ -1,5 +1,25 @@
 # Make Background VM Provisioning Durable Beyond `waitUntil()`
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** node POST and workspace create no longer provision inside HTTP `waitUntil()`
+>   (PR #2030).
+>   - Both call `scheduleDirectProvisioning` (`services/direct-provisioning.ts:11-23`), which hands
+>     the work to the NodeLifecycle Durable Object before the response returns.
+>     `durable-objects/node-lifecycle-provisioning.ts:64-150` persists the intent (attempt count,
+>     runtime incarnation) and drives it from the DO alarm.
+>   - Tests (`apps/api/tests/workers/direct-provisioning-do.test.ts:214-290`): finishing after the
+>     HTTP background work has ended, resuming an uncertain allocation without a second paid
+>     create, and replaying an accepted dispatch after the DO controller restarts.
+> - **Still open:** three paths still run `provisionNode` inside HTTP `waitUntil()`. Each needs the
+>   same durable move, its tests, and a real-VM staging check:
+>   - Deployment environment start: `routes/deployment-environment-lifecycle.ts:590`, via
+>     `services/deployment-provisioning.ts:423-487`.
+>   - Deployment release placement: `routes/deployment-release-placement.ts:428`.
+>   - Session-snapshot upload relay (added 2026-08-14, after this file was written):
+>     `routes/workspaces/session-snapshots.ts:241` →
+>     `services/session-snapshot-upload-relay.ts:539`.
+
 ## Problem
 
 Several HTTP routes return a response and continue VM provisioning through

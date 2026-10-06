@@ -3,6 +3,8 @@ import type { TaskActorType, TaskTerminalStatus } from '@simple-agent-manager/sh
 import type { Env } from '../env';
 import { createModuleLogger } from '../lib/logger';
 import { ulid } from '../lib/ulid';
+import { projectEventSourceOutboxInsertStatement } from './project-event-source-outbox';
+import { buildTaskLifecycleEventInput } from './project-lifecycle-event-inputs';
 import { loadTaskSupersession } from './task-runtime-liveness';
 import {
   createProjectEventTaskTerminalTransitionHook,
@@ -50,6 +52,8 @@ export interface TransitionTaskToTerminalOptions {
   actorType?: TaskActorType;
   actorId?: string | null;
   stopWorkspace?: boolean;
+  /** Preserve a specific failure phase when startup never reached the runner. */
+  executionStep?: string | null;
   /**
    * Attention/reconciliation terminalization happens after a task is already
    * actively running. If a legacy row missed `started_at`, set it at the same
@@ -57,6 +61,13 @@ export interface TransitionTaskToTerminalOptions {
    * appears never to have started.
    */
   fillMissingStartedAt?: boolean;
+  /**
+   * This termination is a NORMAL lifecycle outcome, not a malfunction: suppress
+   * `tasks.error_message` (and therefore the red failure banner and the debug
+   * diagnosis it invites) while still recording `reason` on the status event.
+   * See `terminalErrorMessage`.
+   */
+  lifecycleOutcome?: boolean;
 }
 
 function changed(result: D1Result<unknown> | undefined): number {
@@ -69,8 +80,26 @@ function admissionReason(status: TaskTerminalStatus): string {
   return 'task_completed_cleanup';
 }
 
-function terminalErrorMessage(status: TaskTerminalStatus, reason: string | null): string | null {
+/**
+ * `tasks.error_message` is what renders the red "Task failed" block in chat
+ * (`project-message-view/FloatingHeader.tsx` gates the whole failure panel on it
+ * being non-null, and `classifyFailure` runs on its text). A NORMAL lifecycle
+ * outcome must therefore leave it null, or the user is shown a failure for
+ * something that did not fail — policies `a974b04f` ("Do not diagnose normal
+ * lifecycle terminations") and `486d1dd1` ("Parent-stopped tasks are cancelled,
+ * not failed").
+ *
+ * The reason itself is NOT lost: `task_status_events.reason` is written from
+ * `options.reason` independently of this value, so the timeline still explains
+ * why the task ended.
+ */
+function terminalErrorMessage(
+  status: TaskTerminalStatus,
+  reason: string | null,
+  lifecycleOutcome: boolean | undefined
+): string | null {
   if (status === 'completed') return null;
+  if (lifecycleOutcome) return null;
   return reason;
 }
 
@@ -158,14 +187,36 @@ export async function transitionTaskToTerminal(
   if (!ACTIVE_TERMINALIZABLE_TASK_STATUSES.has(task.status)) return 'not_terminalizable';
 
   const now = new Date().toISOString();
-  const errorMessage = terminalErrorMessage(options.status, options.reason);
+  const terminalTransitionId = ulid();
+  const lifecycleEventIntentId = ulid();
+  const lifecycleEventIntent = await buildTaskLifecycleEventInput({
+    transitionId: terminalTransitionId,
+    projectId: options.projectId,
+    taskId: options.taskId,
+    status: options.status,
+    fromStatus: task.status,
+    parentTaskId: task.parent_task_id,
+    workspaceId: task.workspace_id,
+    sessionId: task.chat_session_id,
+    actorType: options.actorType ?? 'system',
+    actorId: options.actorId ?? null,
+    reason: options.reason,
+    source: options.source,
+    occurredAt: now,
+  });
+  const errorMessage = terminalErrorMessage(
+    options.status,
+    options.reason,
+    options.lifecycleOutcome
+  );
   const updateTask = env.DATABASE.prepare(
     `UPDATE tasks
      SET status = ?,
-         execution_step = NULL,
+         execution_step = ?,
          error_message = ?,
          started_at = CASE WHEN ? = 1 THEN COALESCE(started_at, ?) ELSE started_at END,
          completed_at = ?,
+         terminal_transition_id = ?,
          updated_at = ?
      WHERE id = ?
        AND project_id = ?
@@ -199,10 +250,12 @@ export async function transitionTaskToTerminal(
        )`
   ).bind(
     options.status,
+    options.executionStep ?? null,
     errorMessage,
     options.fillMissingStartedAt === false ? 0 : 1,
     now,
     now,
+    terminalTransitionId,
     now,
     options.taskId,
     options.projectId,
@@ -224,6 +277,7 @@ export async function transitionTaskToTerminal(
        AND project_id = ?
        AND status = ?
        AND completed_at = ?
+       AND terminal_transition_id = ?
        AND ((? IS NULL AND error_message IS NULL) OR error_message = ?)`
   ).bind(
     ulid(),
@@ -237,11 +291,31 @@ export async function transitionTaskToTerminal(
     options.projectId,
     options.status,
     now,
+    terminalTransitionId,
     errorMessage,
     errorMessage
   );
 
-  const [updateResult, eventResult] = await env.DATABASE.batch([updateTask, insertEvent]);
+  const insertLifecycleEventIntent = projectEventSourceOutboxInsertStatement(
+    env,
+    lifecycleEventIntent,
+    {
+      now: new Date(now),
+      id: lifecycleEventIntentId,
+      capture: {
+        kind: 'task_terminal_transition',
+        projectId: options.projectId,
+        taskId: options.taskId,
+        terminalTransitionId,
+      },
+    }
+  );
+
+  const [updateResult, eventResult, outboxResult] = await env.DATABASE.batch([
+    updateTask,
+    insertEvent,
+    insertLifecycleEventIntent,
+  ]);
   if (changed(updateResult) === 0) {
     try {
       const supersession = await loadTaskSupersession(
@@ -262,6 +336,9 @@ export async function transitionTaskToTerminal(
   }
   if (changed(eventResult) === 0) {
     throw new Error('Task terminal transition did not append its status event');
+  }
+  if (changed(outboxResult) === 0) {
+    throw new Error('Task terminal transition did not append its source outbox intent');
   }
 
   await syncTriggerExecutionStatus(
@@ -293,6 +370,7 @@ export async function transitionTaskToTerminal(
       taskId: options.taskId,
       projectId: options.projectId,
       parentTaskId: task.parent_task_id,
+      projectEventSourceIntentId: lifecycleEventIntentId,
       status: options.status,
       reason: options.reason,
       occurredAt: now,

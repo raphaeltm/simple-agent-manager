@@ -5,7 +5,7 @@ import * as v from 'valibot';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { parseWithSchema, readRequestJsonRecord } from '../../lib/runtime-validation';
-import { errors } from '../../middleware/error';
+import { AppError, errors } from '../../middleware/error';
 import { assertAgentDeploymentAllowedForProfile } from '../../services/deployment-control';
 import {
   consumeRegistryCredentialRateLimit,
@@ -52,11 +52,12 @@ const registryPushCredentialRequestSchema = v.object({
 });
 
 registryPushCredentialsCallbackRoute.post('/:id/registry-push-credentials', async (c) => {
-  const { projectId, workspaceId, userId, db } = await verifyWorkspacePublishCallback(
-    c,
-    'registry_push_cred',
-    'Invalid token scope for registry push credentials'
-  );
+  const { projectId, workspaceId, userId, db, assertCurrent } =
+    await verifyWorkspacePublishCallback(
+      c,
+      'registry_push_cred',
+      'Invalid token scope for registry push credentials'
+    );
 
   let requestBody: Record<string, unknown>;
   try {
@@ -101,6 +102,7 @@ registryPushCredentialsCallbackRoute.post('/:id/registry-push-credentials', asyn
     throw errors.forbidden(policyResult.error);
   }
 
+  await assertCurrent();
   const rateLimit = await consumeRegistryCredentialRateLimit(c.env, projectId);
   if (!rateLimit.allowed) {
     log.warn('registry_push_cred.rate_limited', {
@@ -116,6 +118,7 @@ registryPushCredentialsCallbackRoute.post('/:id/registry-push-credentials', asyn
   try {
     // taskId is '' — the publish path has no task context. permissions include
     // 'pull' so the daemon can resolve the source layers it re-tags.
+    await assertCurrent();
     const result = await mintProjectRegistryCredential(c.env, projectId, userId, '', environment, {
       permissions: ['pull', 'push'],
     });
@@ -123,6 +126,7 @@ registryPushCredentialsCallbackRoute.post('/:id/registry-push-credentials', asyn
     // Response shape matches the agent's Go PushCredentials struct
     // (registry/username/password/namespace/expiresAt). The Go decode rejects
     // empty registry or namespace.
+    await assertCurrent();
     return c.json({
       registry: result.registry,
       username: result.username,
@@ -131,6 +135,7 @@ registryPushCredentialsCallbackRoute.post('/:id/registry-push-credentials', asyn
       expiresAt: result.expiresAt,
     });
   } catch (err) {
+    if (err instanceof AppError) throw err;
     const internalMessage = err instanceof Error ? err.message : String(err);
     log.error('registry_push_cred.mint_failed', {
       projectId,

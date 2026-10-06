@@ -4,7 +4,8 @@ import { assertNoOverflow, screenshot, setupProjectChatMocks } from './audit-hel
 
 const PROJECT_ID = 'proj-test-1';
 const SESSION_ID = 'sess-tool-details';
-const TOOL_TITLE = 'Bash: pnpm --filter @simple-agent-manager/web test -- chatMessagesToConversationItems.test.ts';
+const TOOL_TITLE =
+  'Bash: pnpm --filter @simple-agent-manager/web test -- chatMessagesToConversationItems.test.ts';
 
 const MOCK_PROJECT = {
   id: PROJECT_ID,
@@ -32,7 +33,9 @@ const MOCK_SESSION = {
   agentType: 'claude-code',
 };
 
-const TOOL_CONTENT = [{ type: 'terminal', output: 'SAM_DURABLE_COMMAND_OUTPUT_112\nexit status: 0 ✅' }];
+const TOOL_CONTENT = [
+  { type: 'terminal', output: 'SAM_DURABLE_COMMAND_OUTPUT_112\nexit status: 0 ✅' },
+];
 const TOOL_BUTTON_NAME = new RegExp(TOOL_TITLE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
 
 const MOCK_MESSAGES = [
@@ -96,10 +99,13 @@ async function setupMocks(page: Page) {
 
   // Registered after the shared mocks so it wins precedence for its specific
   // URL (the shared session regex cannot match the deeper tool-content path).
-  await page.route(`**/api/projects/${PROJECT_ID}/sessions/${SESSION_ID}/messages/*/tool-content`, (route: Route) => {
-    toolContentRequests.push(route.request().url());
-    return route.fulfill({ status: 200, json: { content: TOOL_CONTENT } });
-  });
+  await page.route(
+    `**/api/projects/${PROJECT_ID}/sessions/${SESSION_ID}/messages/*/tool-content`,
+    (route: Route) => {
+      toolContentRequests.push(route.request().url());
+      return route.fulfill({ status: 200, json: { content: TOOL_CONTENT } });
+    }
+  );
 
   return { toolContentRequests };
 }
@@ -117,9 +123,19 @@ async function assertPersistedToolCallLazyLoads(
   });
   await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
 
+  // Consecutive tool calls now collapse into one activity card, so the
+  // per-call disclosure lives behind the group header. The assistant prose is
+  // visible without expanding anything — that is the point of the grouping.
+  await expect(page.getByText('The focused conversion test passed.')).toBeVisible();
+  const groupHeader = page.getByRole('button', { name: /1 tool call/ });
+  await expect(groupHeader).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByText(TOOL_TITLE)).toHaveCount(0);
+
+  await groupHeader.click();
+  await expect(groupHeader).toHaveAttribute('aria-expanded', 'true');
+
   await expect(page.getByText(TOOL_TITLE)).toBeVisible();
   await expect(page.getByText('execute')).toBeVisible();
-  await expect(page.getByText('The focused conversion test passed.')).toBeVisible();
   await expect(page.getByText('128 B')).toBeVisible();
 
   const toolButton = page.getByRole('button', { name: TOOL_BUTTON_NAME });
@@ -138,7 +154,11 @@ async function assertPersistedToolCallLazyLoads(
 test.describe('Project Chat Persisted Tool Calls — Mobile', () => {
   test('keeps rich tool title after status-only persisted update', async ({ page }) => {
     const { toolContentRequests } = await setupMocks(page);
-    await assertPersistedToolCallLazyLoads(page, toolContentRequests, 'project-chat-tool-call-persisted-mobile');
+    await assertPersistedToolCallLazyLoads(
+      page,
+      toolContentRequests,
+      'project-chat-tool-call-persisted-mobile'
+    );
   });
 });
 
@@ -147,6 +167,10 @@ test.describe('Project Chat Persisted Tool Calls — Desktop', () => {
 
   test('keeps rich tool title after status-only persisted update', async ({ page }) => {
     const { toolContentRequests } = await setupMocks(page);
-    await assertPersistedToolCallLazyLoads(page, toolContentRequests, 'project-chat-tool-call-persisted-desktop');
+    await assertPersistedToolCallLazyLoads(
+      page,
+      toolContentRequests,
+      'project-chat-tool-call-persisted-desktop'
+    );
   });
 });

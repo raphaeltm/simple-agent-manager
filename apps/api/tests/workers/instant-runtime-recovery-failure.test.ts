@@ -2,10 +2,8 @@ import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 import type { ProjectData } from '../../src/durable-objects/project-data';
-import {
-  persistRuntimeRecoveryFailed,
-  RUNTIME_RECOVERY_DEGRADED_MESSAGE,
-} from '../../src/durable-objects/vm-agent-container-recovery';
+import { RUNTIME_RECOVERY_DEGRADED_MESSAGE } from '../../src/durable-objects/vm-agent-container-recovery';
+import { persistRuntimeRecoveryFailed } from '../../src/durable-objects/vm-agent-container-recovery-failure';
 import type { Env } from '../../src/env';
 import {
   seedInstallation,
@@ -91,9 +89,11 @@ describe('Instant runtime terminal reconciliation with Miniflare D1', () => {
     await persistRuntimeRecoveryFailed(env as unknown as Env, {
       nodeId,
       workspaceId,
+      userId,
       projectId,
       chatSessionId,
       agentSessionId,
+      runtimeIncarnationId: null,
     });
 
     const node = await env.DATABASE.prepare(

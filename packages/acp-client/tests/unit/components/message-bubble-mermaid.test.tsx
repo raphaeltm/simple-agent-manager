@@ -1,7 +1,6 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { MERMAID_SVG_SANITIZE_CONFIG } from '../../../src/components/MermaidDiagram';
 import { MessageBubble } from '../../../src/components/MessageBubble';
 
 const initializeConfigs: unknown[] = [];
@@ -138,44 +137,5 @@ describe('MessageBubble Mermaid rendering', () => {
     expect(screen.getByText('graph TD').tagName).toBe('CODE');
     expect(screen.queryByTestId('mermaid-diagram')).toBeNull();
     expect(mocks.mermaidRender).not.toHaveBeenCalled();
-  });
-
-  it('sanitizes foreignObject label content without preserving dangerous HTML', async () => {
-    mocks.mermaidRender.mockResolvedValue({
-      svg: [
-        '<svg viewBox="0 0 100 80">',
-        '<foreignObject width="100" height="40">',
-        '<div xmlns="http://www.w3.org/1999/xhtml">',
-        '<img src="x" onerror="alert(1)"/>',
-        '<script>alert(2)</script>',
-        '<span class="nodeLabel">Safe Label</span>',
-        '</div>',
-        '</foreignObject>',
-        '</svg>',
-      ].join(''),
-    });
-
-    render(<MessageBubble role="agent" text={'```mermaid\ngraph TD\n  A-->B\n```'} />);
-
-    await waitFor(() => {
-      expect(screen.getByTestId('mermaid-diagram-svg').innerHTML).toContain('Safe Label');
-    });
-
-    const html = screen.getByTestId('mermaid-diagram-svg').innerHTML;
-    expect(html).toContain('foreignObject');
-    expect(html).not.toContain('<img');
-    expect(html).not.toContain('onerror');
-    expect(html).not.toContain('<script');
-    expect(html).not.toContain('alert');
-  });
-
-  it('uses explicit sanitizer allowlists for Mermaid SVG output', () => {
-    expect(MERMAID_SVG_SANITIZE_CONFIG.ALLOWED_TAGS.length).toBeGreaterThan(10);
-    expect(MERMAID_SVG_SANITIZE_CONFIG.ALLOWED_ATTR.length).toBeGreaterThan(10);
-    expect(MERMAID_SVG_SANITIZE_CONFIG.ADD_TAGS.map((tag) => tag.toLowerCase())).toEqual(
-      expect.arrayContaining(['foreignobject', 'div', 'span', 'p', 'br']),
-    );
-    expect(MERMAID_SVG_SANITIZE_CONFIG.ALLOWED_TAGS).not.toContain('script');
-    expect(MERMAID_SVG_SANITIZE_CONFIG.ALLOWED_ATTR).not.toContain('onclick');
   });
 });

@@ -1,5 +1,10 @@
 # Playwright visual audit for ProjectAgentCredentialsSection
 
+> **Reconciliation 2026-09-30:** still open. The target component was renamed to
+> `ProjectAgentsSection` / `ProjectAgentCard` in PR #757 (page `/projects/:id/settings/agents`).
+> The only coverage is one marketing screenshot
+> (`apps/web/tests/playwright/marketing-shots-workspace.spec.ts:848-863`).
+
 **Created**: 2026-04-18
 **Priority**: HIGH
 **Source**: task-completion-validator re-run on PR #753 (`sam/project-credential-overrides`)

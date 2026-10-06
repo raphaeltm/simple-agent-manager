@@ -3,7 +3,7 @@
  * the `fetchDefaultBranch` GitHub probe used during project_creation.
  *
  * These assert the class-of-bug regressions described in
- * tasks/active/2026-04-19-trial-orchestrator-actually-start-agent.md:
+ * tasks/archive/2026-04-19-trial-orchestrator-actually-start-agent.md:
  *
  *   1. handleDiscoveryAgentStart previously only created ACP session rows and
  *      never told the VM agent to actually launch the subprocess. The ACP

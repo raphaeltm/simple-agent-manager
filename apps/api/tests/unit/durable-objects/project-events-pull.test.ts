@@ -105,8 +105,13 @@ describe('ProjectData project_event pull delivery tools', () => {
 
   it('cursor-paginates visible subscription events and keeps list summaries payload-free', () => {
     const subscription = createAgentSubscription(sql, env).subscription;
+    // Pagination is ordered by match time then random ID, not receipt time.
+    // Give these admissions distinct match times to assert chronological pages.
+    vi.setSystemTime(1_001);
     admitGithubEvent(sql, env, 1);
+    vi.setSystemTime(1_002);
     admitGithubEvent(sql, env, 2);
+    vi.setSystemTime(1_003);
     admitGithubEvent(sql, env, 3);
 
     vi.setSystemTime(4_000);

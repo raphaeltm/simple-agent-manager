@@ -22,6 +22,7 @@ import {
   within,
 } from '@testing-library/react';
 import type { ReactElement, ReactNode } from 'react';
+import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // jsdom doesn't support scrollIntoView
@@ -49,6 +50,7 @@ const mocks = vi.hoisted(() => ({
   listChatMessages: vi.fn(),
   listActivityEvents: vi.fn(),
   listNotifications: vi.fn(),
+  listAcpInteractions: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
@@ -82,8 +84,8 @@ let capturedWsOnCatchUp:
   | ((msgs: ReturnType<typeof makeMessage>[], session: ReturnType<typeof makeSession>) => void)
   | null = null;
 let capturedWsOnCommentEvent:
-  | ((event: import('../../../src/lib/api/comments').MessageCommentRealtimeEvent) => void)
-  | null = null;
+  ((event: import('../../../src/lib/api/comments').MessageCommentRealtimeEvent) => void) | null =
+  null;
 let mockWsConnectionState: 'connecting' | 'connected' | 'reconnecting' | 'disconnected' =
   'connected';
 
@@ -147,6 +149,7 @@ vi.mock('react-virtuoso', async () => {
 // assert the exact coordinate the component asked for.
 const virtuosoMock = {
   scrollToIndexCalls: (await import('../../helpers/virtuoso-mock')).scrollToIndexCalls,
+  lastProps: (await import('../../helpers/virtuoso-mock')).virtuosoLastProps,
   reset: (await import('../../helpers/virtuoso-mock')).resetVirtuosoMock,
 };
 
@@ -184,6 +187,11 @@ vi.mock('../../../src/lib/api/notifications', async (importOriginal) => ({
   listNotifications: mocks.listNotifications,
 }));
 
+vi.mock('../../../src/lib/api/acp-interactions', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api/acp-interactions')>()),
+  listAcpInteractions: mocks.listAcpInteractions,
+}));
+
 // Safe defaults so any expanded-header / timeline fetch resolves to empty rather
 // than `undefined` (SessionHeader chains `.then()` on listChatMessages). These
 // implementations survive `vi.clearAllMocks()` (which clears calls, not impls),
@@ -196,6 +204,7 @@ import {
   chatMessagesToConversationItems,
   ProjectMessageView,
 } from '../../../src/components/project-message-view';
+import { VIRTUAL_START } from '../../../src/components/project-message-view/types';
 
 beforeEach(() => {
   mockWsConnectionState = 'connected';
@@ -262,6 +271,7 @@ beforeEach(() => {
       comment: makeCommentThread({ id: commentId, status: 'sent' }),
     })
   );
+  mocks.listAcpInteractions.mockResolvedValue({ pending: [], settled: [], cursor: null });
 });
 
 // --- Test helpers ---
@@ -285,14 +295,15 @@ function makeMessage(
   content: string,
   role: 'assistant' | 'user' | 'system' | 'tool' = 'assistant'
 ) {
+  const createdAt = Date.now();
   return {
     id,
     sessionId,
     role,
     content,
     toolMetadata: null,
-    createdAt: Date.now(),
-    sequence: null,
+    createdAt,
+    sequence: createdAt,
   };
 }
 
@@ -341,7 +352,9 @@ function render(ui: ReactElement) {
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   const Wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    <MemoryRouter>
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    </MemoryRouter>
   );
 
   return rtlRender(ui, { wrapper: Wrapper });
@@ -396,13 +409,48 @@ function renderWorkspaceBadgeFixture(sessionId: string, workspace: WorkspaceBadg
     healthStatus: 'healthy',
   });
   mocks.getChatSession.mockResolvedValue({
-    session: makeSession(sessionId, 'active'),
+    session: { ...makeSession(sessionId, 'active'), workspaceId: workspace.id },
     messages: [makeMessage('m1', sessionId, 'Hello')],
     hasMore: false,
   });
 
   render(<ProjectMessageView projectId="proj-1" sessionId={sessionId} />);
 }
+
+describe('ProjectMessageView — ACP permission refresh signal', () => {
+  it('refetches the snapshot through the real message view when its attention signal changes', async () => {
+    const pending = {
+      interactionId: '11111111-1111-4111-8111-111111111111',
+      kind: 'permission' as const,
+      state: 'pending' as const,
+      createdAt: Date.now(),
+      deadlineAt: Date.now() + 60_000,
+    };
+    mocks.getChatSession.mockResolvedValue({
+      ...makeSessionResponse('session-1', [makeMessage('m1', 'session-1', 'Hello')]),
+      session: { ...makeSession('session-1'), isMine: false },
+    });
+    mocks.listAcpInteractions
+      .mockResolvedValueOnce({ pending: [], settled: [], cursor: null })
+      .mockResolvedValueOnce({ pending: [pending], settled: [], cursor: null });
+
+    const { rerender } = render(
+      <ProjectMessageView projectId="proj-1" sessionId="session-1" permissionRefreshSignal={null} />
+    );
+    await waitFor(() => expect(mocks.listAcpInteractions).toHaveBeenCalledTimes(1));
+
+    rerender(
+      <ProjectMessageView
+        projectId="proj-1"
+        sessionId="session-1"
+        permissionRefreshSignal="permission-marker-1:ACP permission required"
+      />
+    );
+
+    await waitFor(() => expect(mocks.listAcpInteractions).toHaveBeenCalledTimes(2));
+    expect(mocks.listAcpInteractions).toHaveBeenLastCalledWith('proj-1', 'session-1');
+  });
+});
 
 describe('ProjectMessageView — session isolation', () => {
   beforeEach(() => {
@@ -429,7 +477,7 @@ describe('ProjectMessageView — session isolation', () => {
     vi.useRealTimers();
   });
 
-  it('loads the full conversation on open and polls with only the small window', async () => {
+  it('opens on the newest page and polls with the same small window', async () => {
     // The fallback poll only runs while the WebSocket is not connected.
     mockWsConnectionState = 'reconnecting';
     const limits: Array<number | undefined> = [];
@@ -442,9 +490,9 @@ describe('ProjectMessageView — session isolation', () => {
 
     render(<ProjectMessageView projectId="proj-1" sessionId="session-A" />);
 
-    // Initial load requests the full-conversation ceiling.
+    // Initial load requests only the newest page — never the ceiling.
     await waitFor(() => expect(limits.length).toBeGreaterThanOrEqual(1));
-    expect(limits[0]).toBe(DEFAULT_CHAT_SESSION_MESSAGE_MAX);
+    expect(limits[0]).toBe(DEFAULT_CHAT_SESSION_MESSAGE_LIMIT);
     // The fallback poll must request only the small recent window — never the ceiling.
     // Under full coverage load, React may commit the polling effect after the
     // first timer advance, so advance multiple intervals until it fires.
@@ -648,7 +696,7 @@ describe('ProjectMessageView — message rendering', () => {
           content: errorLog,
           toolMetadata: null,
           createdAt: Date.now(),
-          sequence: null,
+          sequence: 1,
         },
       ],
       hasMore: false,
@@ -1101,13 +1149,13 @@ describe('ProjectMessageView — collapsible session header', () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.clearAllMocks();
-    mocks.getWorkspace.mockResolvedValue({
-      id: 'ws-test',
+    mocks.getWorkspace.mockImplementation(async (id: string) => ({
+      id,
       name: 'test',
       status: 'running',
       vmSize: 'medium',
       vmLocation: 'fsn1',
-    });
+    }));
     mocks.getNode.mockResolvedValue({
       id: 'node-test',
       name: 'node-test',
@@ -1334,7 +1382,7 @@ describe('ProjectMessageView — session context dropdown', () => {
       cloudProvider: 'hetzner',
     });
 
-    const session = makeSession('sess-ctx', 'active');
+    const session = { ...makeSession('sess-ctx', 'active'), workspaceId: 'ws-ctx-1' };
     mocks.getChatSession.mockResolvedValue({
       session,
       messages: [makeMessage('m1', 'sess-ctx', 'Hello')],
@@ -1361,9 +1409,10 @@ describe('ProjectMessageView — session context dropdown', () => {
     // Workspace status "(running)" may appear alongside timing "(running)" — check at least one exists
     expect(screen.getAllByText('(running)').length).toBeGreaterThanOrEqual(1);
 
-    // Should show VM size
-    expect(screen.getByText('VM Size:')).toBeTruthy();
-    expect(screen.getByText('Medium')).toBeTruthy();
+    // Requested resources and reported hardware must remain distinct.
+    expect(screen.getByText('Requested:')).toBeTruthy();
+    expect(screen.getByText('Unknown — no saved resource request')).toBeTruthy();
+    expect(screen.getByText('Unknown — no hardware report')).toBeTruthy();
 
     // Should show node info
     expect(screen.getByText('Node:')).toBeTruthy();
@@ -1495,7 +1544,7 @@ describe('ProjectMessageView — session context dropdown', () => {
       healthStatus: 'healthy',
     });
 
-    const session = makeSession('sess-dn', 'active');
+    const session = { ...makeSession('sess-dn', 'active'), workspaceId: 'ws-nodn' };
     mocks.getChatSession.mockResolvedValue({
       session,
       messages: [makeMessage('m1', 'sess-dn', 'Hello')],
@@ -1527,7 +1576,7 @@ describe('ProjectMessageView — session context dropdown', () => {
       // no nodeId
     });
 
-    const session = makeSession('sess-nonode', 'active');
+    const session = { ...makeSession('sess-nonode', 'active'), workspaceId: 'ws-nonode' };
     mocks.getChatSession.mockResolvedValue({
       session,
       messages: [makeMessage('m1', 'sess-nonode', 'Hello')],
@@ -1566,7 +1615,7 @@ describe('ProjectMessageView — session context dropdown', () => {
     });
     mocks.getNode.mockRejectedValue(new Error('Node not found'));
 
-    const session = makeSession('sess-partial', 'active');
+    const session = { ...makeSession('sess-partial', 'active'), workspaceId: 'ws-partial' };
     mocks.getChatSession.mockResolvedValue({
       session,
       messages: [makeMessage('m1', 'sess-partial', 'Hello')],
@@ -1587,7 +1636,7 @@ describe('ProjectMessageView — session context dropdown', () => {
       expect(screen.getByText('partial-ws')).toBeTruthy();
     });
     expect(screen.getByText('Workspace:')).toBeTruthy();
-    expect(screen.getByText('VM Size:')).toBeTruthy();
+    expect(screen.getByText('Requested:')).toBeTruthy();
 
     // Node details should NOT appear
     await waitFor(() => {
@@ -2274,6 +2323,98 @@ describe('ProjectMessageView — cancel button', () => {
       expect(screen.queryByRole('button', { name: 'Interrupt agent' })).toBeNull();
     });
   });
+
+  /**
+   * Drive the working state the way production does — an assistant message over
+   * the WebSocket — then return the Interrupt control.
+   */
+  async function renderWorkingSessionAndGetInterrupt() {
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [makeMessage('msg-1', 'session-1', 'Working on it')])
+    );
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+    await waitFor(() => {
+      expect(screen.getByText('Working on it')).toBeTruthy();
+    });
+    await act(async () => {
+      capturedWsOnMessage!(makeMessage('msg-2', 'session-1', 'Still working'));
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Interrupt agent' })).toBeTruthy();
+    });
+    return screen.getByRole('button', { name: 'Interrupt agent' });
+  }
+
+  it('shows a disabled interrupting state while the cancel is in flight', async () => {
+    // A deferred promise lets the test stop at the load-bearing midpoint — the
+    // request in flight — and assert the intermediate UI before releasing it.
+    // `mockResolvedValue` would settle before React could commit that state
+    // (.claude/rules/62, asynchronous ordering).
+    let release!: () => void;
+    mocks.cancelAgentPrompt.mockReturnValue(
+      new Promise<{ status: string; message: string }>((resolve) => {
+        release = () => resolve({ status: 'cancelled', message: 'Prompt cancel signal sent' });
+      })
+    );
+
+    const interrupt = await renderWorkingSessionAndGetInterrupt();
+    await act(async () => {
+      fireEvent.click(interrupt);
+    });
+
+    // Mid-flight: the control must say so and refuse further presses, instead of
+    // silently swallowing them behind a ref.
+    const busy = await screen.findByRole('button', { name: 'Interrupting agent' });
+    expect(busy).toBeDisabled();
+    expect(busy).toHaveAttribute('aria-busy', 'true');
+
+    await act(async () => {
+      fireEvent.click(busy);
+    });
+    expect(mocks.cancelAgentPrompt).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      release();
+    });
+  });
+
+  it('surfaces a failed interrupt and leaves the control usable for a retry', async () => {
+    let reject!: (err: Error) => void;
+    mocks.cancelAgentPrompt.mockReturnValue(
+      new Promise<{ status: string; message: string }>((_resolve, rejectFn) => {
+        reject = rejectFn;
+      })
+    );
+
+    const interrupt = await renderWorkingSessionAndGetInterrupt();
+    await act(async () => {
+      fireEvent.click(interrupt);
+    });
+    await screen.findByRole('button', { name: 'Interrupting agent' });
+
+    await act(async () => {
+      reject(new Error('Failed to cancel prompt on agent'));
+    });
+
+    // The failure must be visible. It used to vanish into an empty `.catch()`.
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent('Failed to cancel prompt on agent');
+    });
+
+    // And the user must be able to try again — the activity state is left alone
+    // on failure precisely so the control stays available.
+    const retryable = screen.getByRole('button', { name: 'Interrupt agent' });
+    expect(retryable).toBeEnabled();
+
+    mocks.cancelAgentPrompt.mockResolvedValue({
+      status: 'cancelled',
+      message: 'Prompt cancel signal sent',
+    });
+    await act(async () => {
+      fireEvent.click(retryable);
+    });
+    expect(mocks.cancelAgentPrompt).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('ProjectMessageView — inline idle indicator', () => {
@@ -2585,7 +2726,7 @@ describe('ProjectMessageView — timeline jump-to-message', () => {
       content,
       toolMetadata: null,
       createdAt,
-      sequence: null,
+      sequence: createdAt,
     };
   }
   function makeAgentMessage(id: string, sessionId: string, content: string, createdAt: number) {
@@ -2596,7 +2737,7 @@ describe('ProjectMessageView — timeline jump-to-message', () => {
       content,
       toolMetadata: null,
       createdAt,
-      sequence: null,
+      sequence: createdAt,
     };
   }
 
@@ -2685,5 +2826,469 @@ describe('ProjectMessageView — timeline jump-to-message', () => {
     for (const idx of indices) {
       expect(typeof idx === 'number' ? idx : Number(idx)).toBeLessThan(1000);
     }
+  });
+});
+
+describe('ProjectMessageView — prepend anchors on rendered rows, not messages', () => {
+  /*
+   * Virtuoso's `firstItemIndex` must move by the number of rows added at the
+   * FRONT of the data array, and with grouping that is not the message count.
+   * Two consumers depend on it: the list itself (a wrong delta shifts every
+   * existing row's absolute index and jumps the reader's scroll position) and
+   * `CommentableConversationItem`'s `index - firstItemIndex === animationTargetIdx`,
+   * which compares against a 0-based DISPLAY index.
+   *
+   * Entered through the real "Load earlier messages" control (rule 62), so the
+   * whole `loadMore` -> `mergeMessages` -> `countDisplayRows` path runs.
+   */
+  function toolRow(id: string, title: string, createdAt: number) {
+    return {
+      id,
+      sessionId: 'session-prepend',
+      role: 'tool' as const,
+      content: '(tool call)',
+      toolMetadata: { toolCallId: `tc-${id}`, title, kind: 'execute', status: 'completed' },
+      createdAt,
+      sequence: createdAt,
+    };
+  }
+  function textRow(id: string, role: 'user' | 'assistant', content: string, createdAt: number) {
+    return {
+      id,
+      sessionId: 'session-prepend',
+      role,
+      content,
+      toolMetadata: null,
+      createdAt,
+      sequence: createdAt,
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    virtuosoMock.reset();
+    mocks.getWorkspace.mockResolvedValue({
+      id: 'ws-test',
+      name: 'test',
+      status: 'running',
+      vmSize: 'medium',
+      vmLocation: 'fsn1',
+    });
+    mocks.getNode.mockResolvedValue({
+      id: 'node-test',
+      name: 'node-test',
+      status: 'active',
+      healthStatus: 'healthy',
+    });
+    mocks.listMessageComments.mockResolvedValue({ comments: [] });
+  });
+
+  async function loadEarlier() {
+    fireEvent.click(await screen.findByText('Load earlier messages'));
+  }
+
+  it('decrements firstItemIndex by the ROW delta, not the message count', async () => {
+    const sid = 'session-prepend';
+    // Existing window: a user message then an agent message -> 2 rows.
+    mocks.getChatSession.mockResolvedValueOnce({
+      session: makeSession(sid, 'stopped'),
+      messages: [
+        textRow('u1', 'user', 'What did you do?', 2_000),
+        textRow('m1', 'assistant', 'Quite a lot.', 2_100),
+      ],
+      hasMore: true,
+    });
+    // Older page: 3 assistant tokens fold into ONE bubble and 6 tool calls fold
+    // into ONE group -> 9 messages, 2 rows. The trailing tool row is adjacent to
+    // the existing USER message, so nothing merges across the boundary.
+    mocks.getChatSession.mockResolvedValueOnce({
+      session: makeSession(sid, 'stopped'),
+      messages: [
+        textRow('a1', 'assistant', 'Starting. ', 1_000),
+        textRow('a2', 'assistant', 'Still going. ', 1_100),
+        textRow('a3', 'assistant', 'Nearly there.', 1_200),
+        toolRow('t1', 'Bash: one', 1_300),
+        toolRow('t2', 'Bash: two', 1_400),
+        toolRow('t3', 'Bash: three', 1_500),
+        toolRow('t4', 'Bash: four', 1_600),
+        toolRow('t5', 'Bash: five', 1_700),
+        toolRow('t6', 'Bash: six', 1_800),
+      ],
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId={sid} />);
+    await waitFor(() => {
+      expect(virtuosoMock.lastProps.dataLength).toBe(2);
+    });
+    const before = virtuosoMock.lastProps.firstItemIndex!;
+    expect(before).toBe(VIRTUAL_START);
+
+    await loadEarlier();
+
+    // 4 rows now: [agent bubble][tool group][user][agent bubble].
+    await waitFor(() => {
+      expect(virtuosoMock.lastProps.dataLength).toBe(4);
+    });
+    // Exactly 2 — the rows actually added. NOT 9, the messages added.
+    expect(before - virtuosoMock.lastProps.firstItemIndex!).toBe(2);
+    expect(virtuosoMock.lastProps.firstItemIndex).toBe(VIRTUAL_START - 2);
+    // Liveness: the older page really did render, so the delta is not 2 because
+    // the prepend silently failed.
+    expect(await screen.findByRole('button', { name: /6 tool calls/ })).toBeTruthy();
+  });
+
+  it('leaves firstItemIndex untouched when the older page merges into the first group', async () => {
+    const sid = 'session-prepend';
+    // Existing window is a single group of 2 tool calls -> 1 row.
+    mocks.getChatSession.mockResolvedValueOnce({
+      session: makeSession(sid, 'stopped'),
+      messages: [toolRow('tA', 'Bash: alpha', 2_000), toolRow('tB', 'Bash: bravo', 2_100)],
+      hasMore: true,
+    });
+    // Older page is one more tool call, which joins that same run: still 1 row.
+    mocks.getChatSession.mockResolvedValueOnce({
+      session: makeSession(sid, 'stopped'),
+      messages: [toolRow('tC', 'Bash: charlie', 1_000)],
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId={sid} />);
+    await screen.findByRole('button', { name: /2 tool calls/ });
+    const before = virtuosoMock.lastProps.firstItemIndex!;
+
+    await loadEarlier();
+
+    // The group absorbed the older call, so the row count is unchanged...
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /3 tool calls/ })).toBeTruthy();
+    });
+    expect(virtuosoMock.lastProps.dataLength).toBe(1);
+    // ...and therefore the anchor must not move at all. The message-count version
+    // decrements by 1 here and shifts a row that was never added.
+    expect(virtuosoMock.lastProps.firstItemIndex).toBe(before);
+  });
+});
+
+describe('ProjectMessageView — tool call activity groups', () => {
+  function makeToolMessage(
+    id: string,
+    sessionId: string,
+    createdAt: number,
+    metadata: Record<string, unknown>
+  ) {
+    return {
+      id,
+      sessionId,
+      role: 'tool' as const,
+      content: '(tool call)',
+      toolMetadata: {
+        toolCallId: `tc-${id}`,
+        kind: 'execute',
+        status: 'completed',
+        contentSize: 64,
+        ...metadata,
+      },
+      createdAt,
+      sequence: createdAt,
+    };
+  }
+
+  function makeTypedMessage(id: string, sessionId: string, createdAt: number) {
+    return {
+      id,
+      sessionId,
+      role: 'tool' as const,
+      content: '(tool call)',
+      toolMetadata: {
+        toolCallId: `tc-${id}`,
+        title: 'display_from_library',
+        toolName: 'mcp__sam-mcp__display_from_library',
+        kind: 'fetch',
+        status: 'completed',
+        rawInput: { fileId: 'file-1' },
+        rawOutput: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              id: 'file-1',
+              filename: 'design-notes.pdf',
+              mimeType: 'application/pdf',
+              sizeBytes: 2048,
+            }),
+          },
+        ],
+      },
+      createdAt,
+      sequence: createdAt,
+    };
+  }
+
+  function makeTextMessage(
+    id: string,
+    sessionId: string,
+    role: 'user' | 'assistant',
+    content: string,
+    createdAt: number
+  ) {
+    return { id, sessionId, role, content, toolMetadata: null, createdAt, sequence: createdAt };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    virtuosoMock.reset();
+    mocks.getWorkspace.mockResolvedValue({
+      id: 'ws-test',
+      name: 'test',
+      status: 'running',
+      vmSize: 'medium',
+      vmLocation: 'fsn1',
+    });
+    mocks.getNode.mockResolvedValue({
+      id: 'node-test',
+      name: 'node-test',
+      status: 'active',
+      healthStatus: 'healthy',
+    });
+    mocks.listChatMessages.mockResolvedValue({ messages: [], hasMore: false });
+    mocks.listActivityEvents.mockResolvedValue({ events: [] });
+    mocks.listNotifications.mockResolvedValue({ notifications: [], nextCursor: null });
+    mocks.listMessageComments.mockResolvedValue({ comments: [] });
+  });
+
+  /** user → tool ×3 → assistant, entered through the real `messages` payload. */
+  function threeCallSession(sid: string) {
+    return [
+      makeTextMessage('msg-user-1', sid, 'user', 'Run the checks please.', 1_000),
+      makeToolMessage('msg-tool-1', sid, 2_000, { title: 'Bash: pnpm lint' }),
+      makeToolMessage('msg-tool-2', sid, 3_000, { title: 'Bash: pnpm typecheck' }),
+      makeToolMessage('msg-tool-3', sid, 4_000, { title: 'Bash: pnpm test' }),
+      makeTextMessage('msg-assistant-1', sid, 'assistant', 'All three checks passed.', 5_000),
+    ];
+  }
+
+  it('collapses a run of tool calls into one card and keeps the assistant text visible', async () => {
+    const sid = 'session-groups';
+    mocks.getChatSession.mockResolvedValue({
+      session: makeSession(sid, 'stopped'),
+      messages: threeCallSession(sid),
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId={sid} />);
+
+    const groupButton = await screen.findByRole('button', { name: /3 tool calls/ });
+    expect(groupButton).toHaveAttribute('aria-expanded', 'false');
+
+    // The prose on both sides of the run is what this feature exists to surface.
+    expect(screen.getByText('Run the checks please.')).toBeTruthy();
+    expect(screen.getByText('All three checks passed.')).toBeTruthy();
+
+    // Exactly one card between them — no per-call titles until it is expanded.
+    expect(screen.queryAllByTestId('acp-tool-call')).toHaveLength(0);
+    expect(screen.queryByText('Bash: pnpm typecheck')).toBeNull();
+
+    fireEvent.click(groupButton);
+
+    expect(groupButton).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getAllByTestId('acp-tool-call')).toHaveLength(3);
+    expect(screen.getByText('Bash: pnpm typecheck')).toBeTruthy();
+  });
+
+  it('leaves a document card standalone between two runs', async () => {
+    const sid = 'session-groups-doc';
+    mocks.getChatSession.mockResolvedValue({
+      session: makeSession(sid, 'stopped'),
+      messages: [
+        makeTextMessage('msg-user-1', sid, 'user', 'Show me the notes.', 1_000),
+        makeToolMessage('msg-tool-1', sid, 2_000, { title: 'Bash: ls' }),
+        makeTypedMessage('msg-doc-1', sid, 3_000),
+        makeToolMessage('msg-tool-2', sid, 4_000, { title: 'Bash: cat' }),
+        makeTextMessage('msg-assistant-1', sid, 'assistant', 'Here they are.', 5_000),
+      ],
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId={sid} />);
+
+    // Two single-call groups, one on each side of the document card.
+    await waitFor(() => {
+      expect(screen.getAllByRole('button', { name: /1 tool call/ })).toHaveLength(2);
+    });
+    // The document card was never swallowed — it renders outside any group.
+    const docCard = screen.getByText('design-notes.pdf');
+    expect(docCard.closest('[data-testid="tool-call-group"]')).toBeNull();
+  });
+
+  it('renders no comment anchor or comment action row for a group row', async () => {
+    const sid = 'session-groups-comments';
+    mocks.getChatSession.mockResolvedValue({
+      session: makeSession(sid, 'active'),
+      messages: threeCallSession(sid),
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId={sid} />);
+
+    const groupButton = await screen.findByRole('button', { name: /3 tool calls/ });
+    const groupRow = groupButton.closest('.sam-message-entry');
+    expect(groupRow).toBeTruthy();
+    expect(groupRow!.querySelector('[data-comment-anchor]')).toBeNull();
+    expect(within(groupRow as HTMLElement).queryByRole('button', { name: /comment/i })).toBeNull();
+
+    // Liveness control: commentable rows still get their anchor, so the
+    // assertions above cannot pass because comments stopped rendering entirely.
+    expect(document.querySelector('[data-comment-anchor="msg-assistant-1"]')).toBeTruthy();
+  });
+
+  /*
+   * F5b, through the REAL trigger (rule 62).
+   *
+   * Statuses flip per call, so between "call A completed" and the next row every
+   * call in the tail group reads `completed`. The only thing that can keep the
+   * motion indicator on is the session's working signal — and the production way
+   * that signal moves is the DO WebSocket: `useSessionLifecycle`'s `onMessage`
+   * sets `agentActivity = 'responding'` for every non-user row.
+   *
+   * The pushed row is a status-only `tool_call_update` that stays `completed`, so
+   * nothing in the group's own statuses can produce the running glyph. If the
+   * `live` predicate is wrong, the glyph stays settled and this fails.
+   */
+  it('keeps the tail group in motion while the agent is mid-turn, and settles when idle', async () => {
+    const sid = 'session-live-group';
+    mocks.getChatSession.mockResolvedValue({
+      session: makeSession(sid, 'active'),
+      messages: [
+        makeTextMessage('msg-user-1', sid, 'user', 'Run the checks please.', 1_000),
+        makeToolMessage('msg-tool-1', sid, 2_000, { title: 'Bash: pnpm lint' }),
+        makeToolMessage('msg-tool-2', sid, 3_000, { title: 'Bash: pnpm typecheck' }),
+        makeToolMessage('msg-tool-3', sid, 4_000, { title: 'Bash: pnpm test' }),
+      ],
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId={sid} />);
+
+    // Control: the group is the tail row, every call has settled, and the agent
+    // is idle — so the glyph must read settled. Without this the "running"
+    // assertion below could pass for a component that is always in motion.
+    const glyph = await waitFor(() => screen.getByTestId('tool-group-glyph'));
+    expect(glyph).toHaveAttribute('data-state', 'done');
+    expect(screen.queryByText('· working')).toBeNull();
+
+    // The real trigger: a status-only tool update arriving over the DO socket.
+    await act(async () => {
+      capturedWsOnMessage!(
+        makeToolMessage('msg-tool-3-update', sid, 5_000, {
+          toolCallId: 'tc-msg-tool-3',
+          status: 'completed',
+        }) as unknown as ReturnType<typeof makeMessage>
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('tool-group-glyph')).toHaveAttribute('data-state', 'running');
+    });
+    expect(screen.getByText('· working')).toBeTruthy();
+  });
+
+  /*
+   * The staging deep-link failure (round 3c).
+   *
+   * A merged tool call answers to more than one message id: `item.id` stays the
+   * FIRST row's id while `messageId` is repointed at whichever row carries the
+   * content — the `tool_call_update` row, here. A deep link (or an MCP-created
+   * comment thread, which has no role restriction) can anchor on exactly that
+   * update row, and before the fix it resolved to nothing and fell through to
+   * `nearestItemId(…, Date.now())`.
+   *
+   * The group sits at 0-based index 1 and the trailing assistant row at 2, so the
+   * fallback's answer (2) is unambiguously different from the correct one (1).
+   */
+  it('jumps to the GROUP row when the deep-link target is a tool call UPDATE row', async () => {
+    const sid = 'session-groups-update-jump';
+    mocks.getChatSession.mockResolvedValue({
+      session: makeSession(sid, 'stopped'),
+      messages: [
+        makeTextMessage('msg-user-1', sid, 'user', 'Run the checks please.', 1_000),
+        makeToolMessage('msg-tool-1', sid, 2_000, { title: 'Bash: pnpm lint' }),
+        makeToolMessage('msg-tool-2', sid, 3_000, { title: 'Bash: pnpm typecheck' }),
+        makeToolMessage('msg-tool-3', sid, 4_000, { title: 'Bash: pnpm test' }),
+        // Status-only update: merges into msg-tool-3's item and becomes its
+        // `messageId`, so this id is the item's *content* row, not its `id`.
+        makeToolMessage('msg-tool-3-update', sid, 5_000, {
+          toolCallId: 'tc-msg-tool-3',
+          status: 'completed',
+        }),
+        makeTextMessage('msg-assistant-1', sid, 'assistant', 'All three checks passed.', 6_000),
+      ],
+      hasMore: false,
+    });
+
+    render(
+      <ProjectMessageView projectId="proj-1" sessionId={sid} targetMessageId="msg-tool-3-update" />
+    );
+
+    await waitFor(() => {
+      expect(virtuosoMock.scrollToIndexCalls.length).toBeGreaterThan(0);
+    });
+
+    const indices = virtuosoMock.scrollToIndexCalls.map((c) =>
+      typeof c === 'number' ? c : c.index
+    );
+    expect(indices).toContain(1);
+    // Not the nearest-by-timestamp fallback (the trailing assistant row), and not
+    // a firstItemIndex-offset value.
+    expect(indices).not.toContain(2);
+    for (const idx of indices) {
+      expect(typeof idx === 'number' ? idx : Number(idx)).toBeLessThan(1000);
+    }
+
+    const groupButton = await screen.findByRole('button', { name: /3 tool calls/ });
+    const groupRow = groupButton.closest('.sam-message-entry');
+    await waitFor(() => {
+      expect(groupRow!.className).toContain('sam-message-highlight');
+    });
+  });
+
+  // A deep link (Project → Comments, or any URL target) can point at a tool
+  // message id that is now absorbed into a group. `itemIndexById` registers
+  // every absorbed id against its GROUP's row index, so the jump lands on a row
+  // that exists instead of dead-clicking.
+  //
+  // The group sits at 0-based index 1 (user 0, group 1, assistant 2), and no
+  // `targetMessageTimestamp` is supplied — so the nearest-by-timestamp fallback
+  // would resolve to the LAST row (index 2). Asserting index 1 (and NOT 2) is
+  // what discriminates the inner-id registration from the fallback.
+  it('jumps to the GROUP row when the deep-link target is an absorbed tool message', async () => {
+    const sid = 'session-groups-jump';
+    mocks.getChatSession.mockResolvedValue({
+      session: makeSession(sid, 'stopped'),
+      messages: threeCallSession(sid),
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId={sid} targetMessageId="msg-tool-3" />);
+
+    await waitFor(() => {
+      expect(virtuosoMock.scrollToIndexCalls.length).toBeGreaterThan(0);
+    });
+
+    const indices = virtuosoMock.scrollToIndexCalls.map((c) =>
+      typeof c === 'number' ? c : c.index
+    );
+    expect(indices).toContain(1);
+    // Not the timestamp fallback's answer, and not a firstItemIndex-offset value.
+    expect(indices).not.toContain(2);
+    for (const idx of indices) {
+      expect(typeof idx === 'number' ? idx : Number(idx)).toBeLessThan(1000);
+    }
+
+    // The highlight lands on the group row, not on a virtualized-out tool row.
+    const groupButton = await screen.findByRole('button', { name: /3 tool calls/ });
+    const groupRow = groupButton.closest('.sam-message-entry');
+    await waitFor(() => {
+      expect(groupRow!.className).toContain('sam-message-highlight');
+    });
   });
 });

@@ -30,6 +30,12 @@
  */
 
 export {
+  adminProjectDataArchiveBreakersQueryOptions,
+  adminProjectDataArchiveProblemMigrationsQueryOptions,
+  adminProjectDataStorageQueryKeys,
+  adminProjectDataStorageTelemetryQueryOptions,
+} from './admin-project-data-storage';
+export {
   adminProjectEventInspectorQueryOptions,
   adminProjectEventQueryKeys,
 } from './admin-project-events';
@@ -46,6 +52,7 @@ export {
   chatQueryKeys,
   chatSessionMessagesQueryOptions,
   type ChatSessionSummary,
+  evictStaleTranscripts,
   projectChatSessionsQueryOptions,
   recentChatsQueryOptions,
   timelineActivityEventsQueryOptions,
@@ -62,6 +69,13 @@ export {
   projectCommentsQueryOptions,
   upsertLibraryFileCommentThread,
 } from './comments';
+export {
+  CREDENTIAL_LIMITS_REFETCH_INTERVAL_MS,
+  CREDENTIAL_LIMITS_STALE_TIME_MS,
+  credentialLimitQueryKeys,
+  myCredentialLimitsQueryOptions,
+  projectCredentialLimitsQueryOptions,
+} from './credential-limits';
 export { credentialQueryKeys, credentialsQueryOptions } from './credentials';
 export { githubInstallationsQueryOptions, githubQueryKeys } from './github';
 export {
@@ -89,6 +103,7 @@ export {
   projectListQueryOptions,
   projectQueryKeys,
 } from './projects';
+export { reportIssueConfigQueryOptions, reportIssueQueryKeys } from './report-issue';
 export {
   activeTasksQueryOptions,
   draftIdeasQueryOptions,

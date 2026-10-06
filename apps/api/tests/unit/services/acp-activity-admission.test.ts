@@ -8,6 +8,7 @@ import type {
 import {
   cacheAcpActivityBinding,
   coalesceAcpActivityAfterProjectDataTransient,
+  coalescedFlushDelayMs,
   getAcpActivityAdmissionConfig,
   getAcpActivityAdmissionSnapshotForTests,
   getCachedAcpActivityBinding,
@@ -177,5 +178,94 @@ describe('ACP activity admission controller', () => {
     }
 
     expect(getAcpActivityAdmissionSnapshotForTests().recent).toBe(2);
+  });
+
+  it('emits runtime-work classification details for admitted intermediate idle reports', () => {
+    const config = getAcpActivityAdmissionConfig(env);
+    recordAcpActivityAdmissionSuccess({
+      env,
+      projectId: 'project-1',
+      sessionId: 'session-1',
+      binding: binding('session-1'),
+      report: report({
+        activity: 'idle',
+        runtimeWorkState: 'settling',
+        runtimeWorkCount: 1,
+        runtimeWorkSource: 'claude-background-tasks',
+        runtimeWorkProgressAt: 1234,
+      }),
+      reason: 'activity_transition',
+      observedAt: 1500,
+      now: 2000,
+    });
+
+    expect(config.enabled).toBe(true);
+    expect(recordAcpActivityCallbackMetric).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: 'admitted',
+        reason: 'activity_transition',
+        activity: 'idle',
+        classification: 'intermediate',
+        runtimeWorkState: 'settling',
+        runtimeWorkCount: 1,
+        runtimeWorkSource: 'claude-background-tasks',
+        runtimeWorkObservedAt: 1500,
+        runtimeWorkProgressAt: 1234,
+      }),
+      env
+    );
+  });
+
+  it('buckets unknown runtime-work telemetry sources and classifies critical reports', () => {
+    recordAcpActivityAdmissionSuccess({
+      env,
+      projectId: 'project-1',
+      sessionId: 'session-1',
+      binding: binding('session-1'),
+      report: report({
+        activity: 'idle',
+        runtimeWorkState: 'inactive',
+        runtimeWorkCount: 0,
+        runtimeWorkSource: 'custom-adapter',
+        runtimeWorkProgressAt: 1234,
+      }),
+      reason: 'critical_transition',
+      observedAt: 1500,
+      now: 2000,
+    });
+
+    expect(recordAcpActivityCallbackMetric).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: 'admitted',
+        reason: 'critical_transition',
+        activity: 'idle',
+        classification: 'critical',
+        runtimeWorkState: 'inactive',
+        runtimeWorkCount: 0,
+        runtimeWorkSource: 'other',
+        runtimeWorkObservedAt: 1500,
+        runtimeWorkProgressAt: 1234,
+      }),
+      env
+    );
+  });
+});
+
+describe('coalescedFlushDelayMs', () => {
+  const config = { coalesceWindowMs: 2_000, coalesceTtlMs: 60_000 };
+
+  it('doubles the coalesce window per transient flush failure', () => {
+    expect([0, 1, 2, 3, 4].map((retries) => coalescedFlushDelayMs(config, retries))).toEqual([
+      2_000, 4_000, 8_000, 16_000, 32_000,
+    ]);
+  });
+
+  it('never waits longer than the pending TTL, which is what bounds the report anyway', () => {
+    expect(coalescedFlushDelayMs(config, 5)).toBe(60_000);
+    expect(coalescedFlushDelayMs(config, 50)).toBe(60_000);
+  });
+
+  it('falls back to the window when the TTL is shorter than it', () => {
+    expect(coalescedFlushDelayMs({ coalesceWindowMs: 5_000, coalesceTtlMs: 1_000 }, 3)).toBe(5_000);
   });
 });

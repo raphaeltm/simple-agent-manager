@@ -1,0 +1,170 @@
+name: Create Release
+
+on:
+  schedule:
+    # Daily at 06:00 UTC
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  deployments: read
+
+jobs:
+  release:
+    name: Tag and release the latest production deploy
+    if: github.repository == 'raphaeltm/simple-agent-manager'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Find latest successful production deploy SHA
+        id: deploy
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+        run: |
+          deployments=$(gh api --paginate "repos/${GH_REPOSITORY}/deployments?environment=production&per_page=100")
+          DEPLOY_SHA=$(
+            jq -r '.[] | select((.payload | type) == "object" and .payload.workflow == "deploy.yml" and .payload.dry_run == false) | [.id, .sha] | @tsv' <<< "$deployments" |
+              while IFS=$'\t' read -r deployment_id deployment_sha; do
+                latest_state=$(gh api "repos/${GH_REPOSITORY}/deployments/${deployment_id}/statuses?per_page=1" --jq '.[0].state // empty')
+                if [ "$latest_state" = "success" ]; then
+                  echo "$deployment_sha"
+                  break
+                fi
+              done
+          )
+
+          if [ -z "$DEPLOY_SHA" ]; then
+            echo "No successful non-dry-run production deployment marker found. Skipping release."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "sha=$DEPLOY_SHA" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "Latest deployed SHA: $DEPLOY_SHA"
+
+      - name: Determine tag name
+        if: steps.deploy.outputs.skip != 'true'
+        id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_SHA: ${{ steps.deploy.outputs.sha }}
+        run: |
+          TODAY=$(date -u +%Y.%m.%d)
+          BASE_TAG="v${TODAY}"
+
+          TAG_NAME="$BASE_TAG"
+          SUFFIX=0
+          while git rev-parse "$TAG_NAME" >/dev/null 2>&1; do
+            TAG_SHA=$(git rev-list -n 1 "$TAG_NAME")
+            if [ "$TAG_SHA" = "$DEPLOY_SHA" ]; then
+              if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+                echo "Release $TAG_NAME already exists for $DEPLOY_SHA. Skipping."
+                echo "skip=true" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+
+              echo "Tag $TAG_NAME already exists for $DEPLOY_SHA without a published release."
+              echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
+              echo "tag_exists=true" >> "$GITHUB_OUTPUT"
+              echo "skip=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            SUFFIX=$((SUFFIX + 1))
+            TAG_NAME="${BASE_TAG}.${SUFFIX}"
+          done
+
+          echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
+          echo "tag_exists=false" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "Will create tag: $TAG_NAME"
+
+      - name: Create tag and release
+        if: steps.deploy.outputs.skip != 'true' && steps.tag.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+          GH_SERVER_URL: ${{ github.server_url }}
+          TAG_NAME: ${{ steps.tag.outputs.tag_name }}
+          TAG_EXISTS: ${{ steps.tag.outputs.tag_exists }}
+          DEPLOY_SHA: ${{ steps.deploy.outputs.sha }}
+          # GitHub rejects a release body over 125,000 characters with HTTP 422.
+          # Stay under it with headroom for the fallback text below.
+          RELEASE_NOTES_MAX_BYTES: ${{ vars.RELEASE_NOTES_MAX_BYTES || '120000' }}
+        run: |
+          # A `[ x -gt y ]` usage error exits 2, and errexit exempts an `if`
+          # condition, so a malformed override would silently skip truncation
+          # and send the oversized body — reintroducing the 422 this guards.
+          # Validate up front and fail closed instead.
+          case "$RELEASE_NOTES_MAX_BYTES" in
+            '' | *[!0-9]*)
+              echo "::error::RELEASE_NOTES_MAX_BYTES must be a positive integer (got: '$RELEASE_NOTES_MAX_BYTES')"
+              exit 1
+              ;;
+          esac
+          if [ "$RELEASE_NOTES_MAX_BYTES" -le 0 ]; then
+            echo "::error::RELEASE_NOTES_MAX_BYTES must be greater than zero (got: '$RELEASE_NOTES_MAX_BYTES')"
+            exit 1
+          fi
+
+          if [ "$TAG_EXISTS" != "true" ]; then
+            git tag -a "$TAG_NAME" "$DEPLOY_SHA" -m "Release $TAG_NAME"
+            git push origin "$TAG_NAME"
+          fi
+
+          NOTES_FILE="${RUNNER_TEMP:-/tmp}/release-notes.md"
+          PREVIOUS_TAG=$(
+            gh release list --repo "$GH_REPOSITORY" --limit 1 --json tagName --jq '.[0].tagName // empty'
+          )
+
+          # Bound the generated notes to the previous release when there is one.
+          # Without previous_tag_name GitHub summarises the ENTIRE history, which
+          # is what broke the first release (run 35626181536: HTTP 422).
+          generate_notes_args=(
+            --method POST
+            "repos/${GH_REPOSITORY}/releases/generate-notes"
+            -f "tag_name=${TAG_NAME}"
+            -f "target_commitish=${DEPLOY_SHA}"
+          )
+          if [ -n "$PREVIOUS_TAG" ]; then
+            generate_notes_args+=(-f "previous_tag_name=${PREVIOUS_TAG}")
+            CHANGELOG_URL="${GH_SERVER_URL}/${GH_REPOSITORY}/compare/${PREVIOUS_TAG}...${TAG_NAME}"
+          else
+            CHANGELOG_URL="${GH_SERVER_URL}/${GH_REPOSITORY}/commits/${TAG_NAME}"
+          fi
+
+          gh api "${generate_notes_args[@]}" --jq '.body' > "$NOTES_FILE"
+
+          # One rule covers both the first release and any long gap between
+          # releases: if the notes do not fit, link to them instead of failing.
+          if [ "$(wc -c < "$NOTES_FILE")" -gt "$RELEASE_NOTES_MAX_BYTES" ]; then
+            echo "Generated notes exceed ${RELEASE_NOTES_MAX_BYTES} bytes; substituting a changelog link."
+            {
+              echo "Production deploy \`${DEPLOY_SHA}\`."
+              echo
+              echo "Generated release notes exceeded GitHub's release body limit and were omitted."
+              echo
+              echo "Full changelog: ${CHANGELOG_URL}"
+            } > "$NOTES_FILE"
+          fi
+
+          gh release create "$TAG_NAME" \
+            --target "$DEPLOY_SHA" \
+            --verify-tag \
+            --notes-file "$NOTES_FILE" \
+            --latest \
+            --title "$TAG_NAME"
+
+          echo "Created release $TAG_NAME at $DEPLOY_SHA"

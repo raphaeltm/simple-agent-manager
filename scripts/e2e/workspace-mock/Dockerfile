@@ -1,5 +1,5 @@
 # Reviewed source tag: docker.io/library/debian:bookworm-slim
-FROM docker.io/library/debian:bookworm-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241
+FROM docker.io/library/debian@sha256:9cc080028c43b27d2074d63a5f9caf7166d731494965616c1a6d2827a004585c
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends bash ca-certificates coreutils sed \

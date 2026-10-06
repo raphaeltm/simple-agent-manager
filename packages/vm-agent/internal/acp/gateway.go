@@ -11,21 +11,26 @@ import (
 	"os"
 	"os/exec"
 	"path"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/pelletier/go-toml/v2"
 )
 
 const localShellPath = "/bin/sh"
+const geminiInstallPackage = "@google/gemini-cli@0.61.0"
+const opencodeInstallPackage = "opencode-ai@1.18.32"
+const vibeInstallPackage = "mistral-vibe==2.25.8"
+const ampCLIInstallPackage = "@ampcode/cli@0.0.1790261352-g2ab14a"
 
-const claudeACPInstallPackage = "@agentclientprotocol/claude-agent-acp@0.73.0"
-const claudeCodeMinVersion = "2.1.251"
-const claudeCodeInstallPackage = "@anthropic-ai/claude-code@2.1.260"
+const claudeACPInstallPackage = "@agentclientprotocol/claude-agent-acp@0.81.2"
+const claudeCodeMinVersion = "2.1.280"
+const claudeCodeInstallPackage = "@anthropic-ai/claude-code@2.1.281"
 const claudeCodeInstallCommand = "npm install -g " + claudeACPInstallPackage + " " + claudeCodeInstallPackage
+const codexACPInstallPackage = "@agentclientprotocol/codex-acp@2.1.1"
+const codexCLIInstallPackage = "@openai/codex@0.160.0"
+const codexACPInstallCommand = "npm install -g " + codexACPInstallPackage + " " + codexCLIInstallPackage
 
 // BootLogReporter sends structured log entries to the control plane.
 // It must be non-nil and have a valid token for logging to work.
@@ -90,6 +95,13 @@ type MessageReporter interface {
 	Enqueue(msg MessageReportEntry) error
 }
 
+// ToolLifecycleObserver observes sanitized ACP tool-call lifecycle edges.
+// Implementations must not persist raw prompts, arguments, outputs, commands, paths, or env.
+type ToolLifecycleObserver interface {
+	RecordACPToolCall(toolCallID string, status string, kind string, toolName string, at time.Time)
+	ReconcileACPToolCalls(at time.Time)
+}
+
 // MessageReportEntry is the data needed to enqueue a chat message.
 // It mirrors messagereport.Message but lives in the acp package to avoid
 // circular imports.
@@ -112,6 +124,9 @@ type GatewayConfig struct {
 	// InitTimeoutMs is the fallback ACP initialization timeout in milliseconds.
 	// Used when per-phase timeouts below are not set (0).
 	InitTimeoutMs int
+	// CodexRuntimeInstallTimeout bounds opted-in VM installation; zero uses the config default.
+	CodexRuntimeInstallTimeout   time.Duration
+	CodexRuntimeInstallKillGrace time.Duration
 	// InitializeTimeoutMs is the timeout for the Initialize RPC in milliseconds.
 	// When 0, falls back to InitTimeoutMs.
 	InitializeTimeoutMs int
@@ -133,6 +148,8 @@ type GatewayConfig struct {
 	WorkspaceID string
 	// SessionID is the agent session identifier (used for persistence).
 	SessionID string
+	// RuntimeIdentity identifies this vm-agent process for delivery fencing.
+	RuntimeIdentity string
 	// CallbackToken is the JWT for authenticating with the control plane.
 	CallbackToken string
 	// ContainerResolver returns the devcontainer's Docker container ID.
@@ -178,7 +195,8 @@ type GatewayConfig struct {
 	PongTimeout time.Duration
 	// PromptTimeout bounds how long a prompt can run before force-stop fallback.
 	PromptTimeout time.Duration
-	// PromptCancelGracePeriod waits after cancel before force-stopping unresponsive prompt.
+	// PromptCancelGracePeriod waits after cancel for the cancelled prompt to
+	// settle before finishing it as cancelled and restarting the agent.
 	PromptCancelGracePeriod time.Duration
 	// PromptRetryMaxRetries bounds transient provider prompt retries after the initial attempt.
 	PromptRetryMaxRetries int
@@ -207,8 +225,19 @@ type GatewayConfig struct {
 	TerminalActivityReportBackoff time.Duration
 	// ActivityReportTimeout bounds each activity callback request.
 	ActivityReportTimeout time.Duration
+	// UsageProbeTimeout bounds one post-turn provider usage probe (Codex rollout
+	// read or OpenCode Go usage request). Zero selects the package default.
+	UsageProbeTimeout time.Duration
+	// OpenCodeGoUsageURL is the OpenCode Go usage endpoint probed after each
+	// turn of an OpenCode session that uses the opencode-go provider. Empty
+	// selects the package default.
+	OpenCodeGoUsageURL string
 	// CredentialSyncTimeout bounds auth-file sync-back during shutdown.
 	CredentialSyncTimeout time.Duration
+
+	// RestartAttemptTimeout bounds a single agent restart attempt performed by
+	// the process monitor. Zero uses DefaultACPRestartAttemptTimeout.
+	RestartAttemptTimeout time.Duration
 	// RecoveryWatchdogTimeout bounds crash recovery after a prompt disconnect.
 	// Zero uses DefaultRecoveryWatchdogTimeout.
 	RecoveryWatchdogTimeout time.Duration
@@ -228,6 +257,8 @@ type GatewayConfig struct {
 	// MessageReporter enqueues chat messages for batched delivery to the
 	// control plane. When nil, message persistence is a no-op.
 	MessageReporter MessageReporter
+	// ToolLifecycleObserver records sanitized tool-call overlap windows for resource history.
+	ToolLifecycleObserver ToolLifecycleObserver
 	// OnPromptComplete is called after a prompt finishes (success or failure).
 	// Used by task-driven workspaces to report completion back to the control plane.
 	// When nil, no callback fires. The string arg is the stop reason (e.g. "end_turn", "error").
@@ -261,23 +292,6 @@ type GatewayConfig struct {
 	// HTTPClient is the HTTP client used for outbound control-plane calls
 	// (credential fetches, settings fetches). Must have an explicit timeout.
 	HTTPClient *http.Client
-}
-
-// McpServerEntry is a lightweight MCP server config passed from the control
-// plane for injection into ACP sessions. It represents an HTTP MCP server with
-// optional bearer token authentication.
-//
-// An empty Token means "no auth" — several MCP providers issue pre-signed URLs
-// that carry the credential in the URL itself. Every harness below omits the
-// auth header in that case.
-//
-// Name is the agent-visible server name; tools are namespaced by it. It is
-// optional because a control plane older than this field does not send one, in
-// which case ResolveMcpServerNames falls back to the legacy positional scheme.
-type McpServerEntry struct {
-	URL   string `json:"url"`
-	Token string `json:"token"`
-	Name  string `json:"name,omitempty"`
 }
 
 // Gateway is a thin per-WebSocket relay between a browser and a SessionHost.
@@ -494,8 +508,13 @@ func (g *Gateway) handleMessage(ctx context.Context, data []byte) {
 
 // agentCredential holds the credential and its type returned from the control plane.
 type agentCredential struct {
-	credential     string
-	credentialKind string // "api-key" or "oauth-token"
+	credential           string
+	credentialKind       string // "api-key" or "oauth-token"
+	credentialSource     string
+	credentialReference  string
+	credentialGeneration int64
+	credentialProvider   string
+	providerMode         string
 	// AI proxy fields (set for claude-code/openai-codex when the AI proxy is
 	// enabled and the user has no dedicated agent key). OpenCode is always
 	// bring-your-own-key and never uses these.
@@ -771,21 +790,33 @@ func readAuthFileFromContainer(ctx context.Context, containerID, user, authFileP
 	return buf.String(), nil
 }
 
-// agentInstallMu serializes concurrent agent binary installs to prevent
-// npm ENOTEMPTY errors when two SelectAgent calls race.
-var agentInstallMu sync.Mutex
+// agentInstallGate serializes installs while letting cancelled/deadline-bound
+// selections leave the queue without waiting for another install to finish.
+var agentInstallGate = make(chan struct{}, 1)
+
+func acquireAgentInstall(ctx context.Context) (func(), error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case agentInstallGate <- struct{}{}:
+		return func() { <-agentInstallGate }, nil
+	}
+}
 
 // installAgentBinary checks if the agent command exists in the given container
 // and installs it via the provided installCmd if missing. The install runs as
 // root to ensure permissions for system-level package installs. Returns nil if
 // the binary was already present or was installed successfully.
 //
-// A package-level mutex serializes installs so that concurrent SelectAgent
+// A package-level gate serializes installs so that concurrent SelectAgent
 // calls do not race on npm global installs (which causes ENOTEMPTY errors).
-// The fast-path `which` check runs without the mutex; only the slow install
+// The fast-path `which` check runs without the gate; only the slow install
 // path acquires it, with a double-check after acquisition.
 func installAgentBinary(ctx context.Context, containerID string, info agentCommandInfo) error {
-	// Fast path: check without mutex — avoids contention when already installed.
+	// Fast path: check without gate — avoids contention when already installed.
 	checkScript := agentInstalledCheckScript(info)
 	checkArgs := []string{"exec", containerID, "sh", "-c", checkScript}
 	checkCmd := exec.CommandContext(ctx, "docker", checkArgs...)
@@ -794,16 +825,19 @@ func installAgentBinary(ctx context.Context, containerID string, info agentComma
 		return nil
 	}
 
-	// Slow path: acquire mutex to serialize installs.
-	agentInstallMu.Lock()
-	defer agentInstallMu.Unlock()
+	// Slow path: acquire gate to serialize installs.
+	releaseInstall, err := acquireAgentInstall(ctx)
+	if err != nil {
+		return err
+	}
+	defer releaseInstall()
 
-	// Bail out if context was cancelled while waiting for the mutex.
+	// Bail out if context was cancelled while waiting for the gate.
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
 
-	// Double-check after acquiring mutex — another goroutine may have installed it.
+	// Double-check after acquiring gate — another goroutine may have installed it.
 	recheckCmd := exec.CommandContext(ctx, "docker", checkArgs...)
 	if err := recheckCmd.Run(); err == nil {
 		slog.Info("Agent binary was installed by another goroutine", "command", info.command)
@@ -849,23 +883,26 @@ func installAgentBinary(ctx context.Context, containerID string, info agentComma
 // script is the same hardcoded literal from getAgentCommandInfo — never derived
 // from external input.
 func installAgentBinaryLocal(ctx context.Context, info agentCommandInfo) error {
-	// Fast path: check without mutex. exec.LookPath matches how startLocalProcess
+	// Fast path: check without gate. exec.LookPath matches how startLocalProcess
 	// resolves the command, so this is the correct "already installed" check.
 	if err := exec.CommandContext(ctx, localShellPath, "-c", agentInstalledCheckScript(info)).Run(); err == nil {
 		slog.Info("Agent binary is already installed (local)", "command", info.command)
 		return nil
 	}
 
-	// Slow path: acquire mutex to serialize installs (shared with docker path).
-	agentInstallMu.Lock()
-	defer agentInstallMu.Unlock()
+	// Slow path: acquire gate to serialize installs (shared with docker path).
+	releaseInstall, err := acquireAgentInstall(ctx)
+	if err != nil {
+		return err
+	}
+	defer releaseInstall()
 
-	// Bail out if context was cancelled while waiting for the mutex.
+	// Bail out if context was cancelled while waiting for the gate.
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
 
-	// Double-check after acquiring mutex — another goroutine may have installed it.
+	// Double-check after acquiring gate — another goroutine may have installed it.
 	if err := exec.CommandContext(ctx, localShellPath, "-c", agentInstalledCheckScript(info)).Run(); err == nil {
 		slog.Info("Agent binary was installed by another goroutine (local)", "command", info.command)
 		return nil
@@ -900,18 +937,21 @@ func agentInstallScript(info agentCommandInfo) string {
 		return info.installCmd
 	}
 	return fmt.Sprintf(
-		`node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"; { which npm >/dev/null 2>&1 && [ "$node_major" -ge 20 ]; } || { rm -f /etc/apt/sources.list.d/github-cli.list /etc/apt/keyrings/githubcli-archive-keyring.gpg; apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nodejs npm && npm install -g n && n 22 && hash -r; }; %s`,
+		`node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"; { which npm >/dev/null 2>&1 && [ "$node_major" -ge 22 ]; } || { rm -f /etc/apt/sources.list.d/github-cli.list /etc/apt/keyrings/githubcli-archive-keyring.gpg; apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nodejs npm && npm install -g n && n 22 && hash -r; }; %s`,
 		info.installCmd,
 	)
 }
 
+// The ACP adapter bundles its own Claude SDK. Checking only the companion CLI
+// accepts obsolete SDKs even after `claude update`; validate both install surfaces.
 func claudeCodeVersionCheckCommand() string {
 	minParts := strings.Split(claudeCodeMinVersion, ".")
 	if len(minParts) != 3 {
 		panic("claudeCodeMinVersion must use major.minor.patch")
 	}
 	return fmt.Sprintf(
-		`command -v claude >/dev/null 2>&1 && version="$(claude --version 2>/dev/null | sed -n 's/.*\([0-9][0-9]*\)\.\([0-9][0-9]*\)\.\([0-9][0-9]*\).*/\1 \2 \3/p' | head -n 1)" && set -- $version && [ "$#" -eq 3 ] && { [ "$1" -gt %s ] || { [ "$1" -eq %s ] && { [ "$2" -gt %s ] || { [ "$2" -eq %s ] && [ "$3" -ge %s ]; }; }; }; }`,
+		`[ "$(claude-agent-acp --version 2>/dev/null)" = "%s" ] && command -v claude >/dev/null 2>&1 && version="$(claude --version 2>/dev/null | sed -n 's/.*\([0-9][0-9]*\)\.\([0-9][0-9]*\)\.\([0-9][0-9]*\).*/\1 \2 \3/p' | head -n 1)" && set -- $version && [ "$#" -eq 3 ] && { [ "$1" -gt %s ] || { [ "$1" -eq %s ] && { [ "$2" -gt %s ] || { [ "$2" -eq %s ] && [ "$3" -ge %s ]; }; }; }; }`,
+		strings.TrimPrefix(claudeACPInstallPackage, "@agentclientprotocol/claude-agent-acp@"),
 		minParts[0],
 		minParts[0],
 		minParts[1],
@@ -920,10 +960,26 @@ func claudeCodeVersionCheckCommand() string {
 	)
 }
 
+func codexVersionCheckCommand() string {
+	adapterVersion := strings.TrimPrefix(codexACPInstallPackage, "@agentclientprotocol/codex-acp@")
+	cliVersion := strings.TrimPrefix(codexCLIInstallPackage, "@openai/codex@")
+	return fmt.Sprintf(
+		`[ "$(codex-acp --version 2>/dev/null)" = "@agentclientprotocol/codex-acp %s" ] && [ "$(codex --version 2>/dev/null)" = "codex-cli %s" ]`,
+		adapterVersion,
+		cliVersion,
+	)
+}
+
+// versionCheckCommand compares the complete version token, allowing a CLI's
+// human-readable suffix (Amp includes release time). Inputs are trusted pins.
+func versionCheckCommand(command, version string) string {
+	return fmt.Sprintf(`case "$(%s --version 2>/dev/null)" in "%s"|"%s "*) true ;; *) false ;; esac`, command, version, version)
+}
+
 func agentInstalledCheckScript(info agentCommandInfo) string {
 	checkScript := "command -v " + info.command + " >/dev/null 2>&1"
 	if info.validationCmd != "" {
-		checkScript += " && " + info.validationCmd
+		checkScript += " && { " + info.validationCmd + "; }"
 	}
 	return checkScript
 }
@@ -938,11 +994,10 @@ type agentCommandInfo struct {
 	installCmd    string // shell command to run if binary is missing (npm, pip, etc.)
 	isNpmBased    bool   // true for agents installed via npm; controls prerequisite injection and cleanup
 	validationCmd string // optional shell check for underlying companion CLI/version requirements
+	verifyOnly    bool   // explicit staged release: fail closed instead of installing stock packages
 	injectionMode string // "env" (default) or "auth-file" — how the credential is injected
 	authFilePath  string // relative to home dir, e.g. ".codex/auth.json" (only when injectionMode == "auth-file")
 }
-
-const codexACPInstallCommand = "npm install -g @agentclientprotocol/codex-acp@1.8.0 @openai/codex@0.153.2"
 
 // getAgentCommandInfo returns the ACP command, args, env var name, and install command for a given agent type.
 // These match the agent catalog defined in packages/shared/src/agents.ts.
@@ -968,7 +1023,7 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 		}
 	case "openai-codex":
 		// Sandbox and approval overrides are injected through CODEX_CONFIG by
-		// writeCodexStartupConfig. codex-acp (verified through 1.8.0) does not parse Codex CLI -c
+		// writeCodexStartupConfig. codex-acp (verified through 2.1.1) does not parse Codex CLI -c
 		// arguments; its supported config channel is CODEX_CONFIG JSON, which it
 		// forwards to every app-server thread (including spawned subagents).
 		if credentialKind == "oauth-token" {
@@ -978,46 +1033,52 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 				envVarName:    "",
 				installCmd:    codexACPInstallCommand,
 				isNpmBased:    true,
+				validationCmd: codexVersionCheckCommand(),
 				injectionMode: "auth-file",
 				authFilePath:  ".codex/auth.json",
 			}
 		}
 		return agentCommandInfo{
-			command:    "codex-acp",
-			envVarName: "OPENAI_API_KEY",
-			installCmd: codexACPInstallCommand,
-			isNpmBased: true,
+			command:       "codex-acp",
+			envVarName:    "OPENAI_API_KEY",
+			installCmd:    codexACPInstallCommand,
+			isNpmBased:    true,
+			validationCmd: codexVersionCheckCommand(),
 		}
 	case "google-gemini":
 		return agentCommandInfo{
-			command:    "gemini",
-			args:       []string{"--acp"},
-			envVarName: "GEMINI_API_KEY",
-			installCmd: "npm install -g @google/gemini-cli@0.50.0",
-			isNpmBased: true,
+			command:       "gemini",
+			args:          []string{"--acp"},
+			envVarName:    "GEMINI_API_KEY",
+			installCmd:    "npm install -g " + geminiInstallPackage,
+			validationCmd: versionCheckCommand("gemini", strings.TrimPrefix(geminiInstallPackage, "@google/gemini-cli@")),
+			isNpmBased:    true,
 		}
 	case "mistral-vibe":
 		return agentCommandInfo{
-			command:    "vibe-acp",
-			envVarName: "MISTRAL_API_KEY",
-			installCmd: `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe==2.19.1 --python 3.12 --quiet`,
+			command:       "vibe-acp",
+			envVarName:    "MISTRAL_API_KEY",
+			validationCmd: versionCheckCommand("vibe-acp", "vibe-acp "+strings.TrimPrefix(vibeInstallPackage, "mistral-vibe==")),
+			installCmd:    `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe==2.25.8 --python 3.12 --quiet`,
 		}
 	case "opencode":
 		return agentCommandInfo{
 			command:       "opencode",
 			args:          []string{"acp"},
 			envVarName:    "OPENCODE_API_KEY",
-			installCmd:    "npm install -g opencode-ai@1.18.27",
+			installCmd:    "npm install -g " + opencodeInstallPackage,
+			validationCmd: versionCheckCommand("opencode", strings.TrimPrefix(opencodeInstallPackage, "opencode-ai@")),
 			isNpmBased:    true,
 			injectionMode: "",
 			authFilePath:  "",
 		}
 	case "amp":
 		return agentCommandInfo{
-			command:    "acp-amp",
-			args:       []string{"run"},
-			envVarName: "AMP_API_KEY",
-			installCmd: `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install acp-amp==0.1.3 --with agent-client-protocol==0.7.1 --with amp-sdk==0.1.2 --with pydantic==2.12.5 --with pydantic-core==2.41.5 --with annotated-types==0.7.0 --with typing-inspection==0.4.2 --with typing-extensions==4.15.0 --python 3.12 --quiet && npm install -g @ampcode/cli@0.0.1783785389-g0da70d && UV_PYTHON_INSTALL_DIR=/opt/uv-python uv run --python 3.12 python -c "
+			command:       "acp-amp",
+			args:          []string{"run"},
+			envVarName:    "AMP_API_KEY",
+			validationCmd: versionCheckCommand("amp", strings.TrimPrefix(ampCLIInstallPackage, "@ampcode/cli@")),
+			installCmd: `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install acp-amp==0.1.3 --with agent-client-protocol==0.7.1 --with amp-sdk==0.1.2 --with pydantic==2.12.5 --with pydantic-core==2.41.5 --with annotated-types==0.7.0 --with typing-inspection==0.4.2 --with typing-extensions==4.15.0 --python 3.12 --quiet && npm install -g @ampcode/cli@0.0.1790261352-g2ab14a && UV_PYTHON_INSTALL_DIR=/opt/uv-python uv run --python 3.12 python -c "
 PYTHON_SDK_PATH = "/opt/uv-tools/acp-amp/lib/python3.12/site-packages/acp_amp/driver/python_sdk.py"
 AMP_TYPES_PATH = "/opt/uv-tools/acp-amp/lib/python3.12/site-packages/amp_sdk/types.py"
 
@@ -1059,7 +1120,7 @@ with open(AMP_TYPES_PATH, "w", encoding="utf-8") as handle:
     handle.write(vt)
 print('Patched amp_sdk: visibility default to private')
 "`,
-			// isNpmBased must be true because installCmd chains `npm install -g @ampcode/cli@0.0.1783785389-g0da70d`
+			// isNpmBased must be true because installCmd chains `npm install -g @ampcode/cli@0.0.1790261352-g2ab14a`
 			// after the uv install. The Node.js bootstrap preamble ensures npm is available
 			// inside devcontainers that don't ship with Node.js pre-installed.
 			isNpmBased:    true,
@@ -1132,192 +1193,6 @@ func tomlEscapeBasicString(s string) string {
 	return s
 }
 
-const (
-	codexManagedMcpStartMarker = "# BEGIN SAM MANAGED MCP"
-	codexManagedMcpEndMarker   = "# END SAM MANAGED MCP"
-	codexProxyProviderID       = "sam-openai"
-	codexProxyProviderEnvKey   = "OPENAI_API_KEY"
-)
-
-type codexProxyProviderConfig struct {
-	baseURL string
-	model   string
-}
-
-// codexMcpTokenEnvVar derives the env var Codex reads a server's bearer token from.
-//
-// The "_TOKEN" suffix is required, not stylistic: isSecretEnvVar in process.go classifies
-// secrets by that substring, and an unclassified value would be passed through docker exec
-// argv and become visible in /proc/*/cmdline.
-//
-// The two legacy shapes ("sam-mcp" and "sam-mcp-<n>") keep their historical env var names so
-// unnamed entries produce byte-identical config to before this field existed.
-func codexMcpTokenEnvVar(name string) string {
-	if name == SamMcpServerName {
-		return "SAM_MCP_TOKEN"
-	}
-	if suffix, ok := strings.CutPrefix(name, SamMcpServerName+"-"); ok && isAllDigits(suffix) {
-		return "SAM_MCP_TOKEN_" + suffix
-	}
-	return fmt.Sprintf("SAM_MCP_%s_TOKEN", McpServerEnvVarSuffix(name))
-}
-
-func isAllDigits(s string) bool {
-	if s == "" {
-		return false
-	}
-	for _, r := range s {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return true
-}
-
-func removeManagedCodexMcpBlock(existing string) string {
-	for {
-		start := strings.Index(existing, codexManagedMcpStartMarker)
-		if start == -1 {
-			return existing
-		}
-		endRel := strings.Index(existing[start:], codexManagedMcpEndMarker)
-		if endRel == -1 {
-			return existing[:start]
-		}
-		end := start + endRel + len(codexManagedMcpEndMarker)
-		if end < len(existing) && existing[end] == '\n' {
-			end++
-		}
-		existing = existing[:start] + existing[end:]
-	}
-}
-
-func mergeManagedCodexMcpConfig(existing, managed string) string {
-	cleaned := removeManagedCodexMcpBlock(existing)
-	managed = strings.TrimSpace(managed)
-	managedTopLevelKeys := codexTopLevelAssignmentKeys(managed)
-	if len(managedTopLevelKeys) > 0 {
-		lines := strings.Split(cleaned, "\n")
-		filtered := lines[:0]
-		atTopLevel := true
-		for _, line := range lines {
-			trimmed := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmed, "[") {
-				atTopLevel = false
-			}
-			if atTopLevel {
-				if key, ok := codexAssignmentKey(trimmed); ok && managedTopLevelKeys[key] {
-					continue
-				}
-			}
-			filtered = append(filtered, line)
-		}
-		cleaned = strings.Join(filtered, "\n")
-	}
-	cleaned = strings.TrimRight(cleaned, "\n")
-
-	switch {
-	case cleaned == "" && managed == "":
-		return ""
-	case cleaned == "":
-		return managed + "\n"
-	case managed == "":
-		return cleaned + "\n"
-	default:
-		lines := strings.Split(cleaned, "\n")
-		firstTable := len(lines)
-		for i, line := range lines {
-			if strings.HasPrefix(strings.TrimSpace(line), "[") {
-				firstTable = i
-				break
-			}
-		}
-		topLevel := strings.TrimSpace(strings.Join(lines[:firstTable], "\n"))
-		tables := strings.TrimSpace(strings.Join(lines[firstTable:], "\n"))
-		sections := make([]string, 0, 3)
-		if topLevel != "" {
-			sections = append(sections, topLevel)
-		}
-		sections = append(sections, managed)
-		if tables != "" {
-			sections = append(sections, tables)
-		}
-		return strings.Join(sections, "\n\n") + "\n"
-	}
-}
-
-func codexTopLevelAssignmentKeys(config string) map[string]bool {
-	keys := make(map[string]bool)
-	for _, line := range strings.Split(config, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "[") {
-			break
-		}
-		if key, ok := codexAssignmentKey(trimmed); ok {
-			keys[key] = true
-		}
-	}
-	return keys
-}
-
-func codexAssignmentKey(line string) (string, bool) {
-	if line == "" || strings.HasPrefix(line, "#") {
-		return "", false
-	}
-	var assignment map[string]any
-	if err := toml.Unmarshal([]byte(line), &assignment); err != nil || len(assignment) != 1 {
-		return "", false
-	}
-	for key := range assignment {
-		return key, true
-	}
-	return "", false
-}
-
-func codexProxyProviderConfigFromCredential(cred *agentCredential, callbackToken string) *codexProxyProviderConfig {
-	if cred == nil || cred.inferenceConfig == nil {
-		return nil
-	}
-	// Auth-file credentials (OAuth tokens) use auth.json injection, not env-var-based
-	// proxy providers. Generating a proxy provider config here would produce a
-	// config.toml entry with env_key = "OPENAI_API_KEY" that is never set,
-	// causing Codex to crash immediately.
-	if cred.credentialKind == "oauth-token" {
-		return nil
-	}
-	if cred.inferenceConfig.Provider != "openai-proxy" && cred.inferenceConfig.Provider != "openai-passthrough" {
-		return nil
-	}
-	baseURL := strings.ReplaceAll(cred.inferenceConfig.BaseURL, "{wstoken}", callbackToken)
-	if baseURL == "" || strings.ContainsAny(baseURL, "\n\r") {
-		return nil
-	}
-	model := cred.inferenceConfig.Model
-	if strings.ContainsAny(model, "\n\r") {
-		model = ""
-	}
-	return &codexProxyProviderConfig{baseURL: baseURL, model: model}
-}
-
-func generateCodexProxyProviderConfig(config *codexProxyProviderConfig) string {
-	if config == nil {
-		return ""
-	}
-
-	var b strings.Builder
-	b.WriteString("# SAM-managed Codex provider for proxy-backed sessions.\n")
-	if config.model != "" {
-		b.WriteString(fmt.Sprintf("model = \"%s\"\n", tomlEscapeBasicString(config.model)))
-	}
-	b.WriteString(fmt.Sprintf("model_provider = \"%s\"\n\n", codexProxyProviderID))
-	b.WriteString(fmt.Sprintf("[model_providers.%s]\n", codexProxyProviderID))
-	b.WriteString("name = \"SAM OpenAI Proxy\"\n")
-	b.WriteString(fmt.Sprintf("base_url = \"%s\"\n", tomlEscapeBasicString(config.baseURL)))
-	b.WriteString(fmt.Sprintf("env_key = \"%s\"\n", codexProxyProviderEnvKey))
-	b.WriteString("wire_api = \"responses\"\n\n")
-	return b.String()
-}
-
 func normalizeAgentEffort(effort string) string {
 	trimmed := strings.TrimSpace(effort)
 	switch trimmed {
@@ -1326,188 +1201,6 @@ func normalizeAgentEffort(effort string) string {
 	default:
 		return ""
 	}
-}
-
-func normalizeCodexEffort(effort string) string {
-	trimmed := strings.TrimSpace(effort)
-	switch trimmed {
-	case "low", "medium", "high", "xhigh":
-		return trimmed
-	default:
-		return ""
-	}
-}
-
-// generateCodexMcpConfig produces a managed TOML block for Codex MCP server
-// configuration plus the environment variables referenced by
-// bearer_token_env_var. Codex natively supports streamable HTTP MCP servers
-// via ~/.codex/config.toml.
-func generateCodexMcpConfig(mcpServers []McpServerEntry, proxyProvider *codexProxyProviderConfig, effort string) (string, []string) {
-	providerConfig := generateCodexProxyProviderConfig(proxyProvider)
-	codexEffort := normalizeCodexEffort(effort)
-	validServers := make([]McpServerEntry, 0, len(mcpServers))
-	for i, server := range mcpServers {
-		if strings.ContainsAny(server.URL, "\n\r") || strings.ContainsAny(server.Token, "\n\r") {
-			slog.Warn("Skipping Codex MCP server with control characters in URL or token",
-				"index", i, "url_length", len(server.URL))
-			continue
-		}
-		validServers = append(validServers, server)
-	}
-	var config strings.Builder
-	envVars := make([]string, 0, len(validServers))
-
-	config.WriteString(codexManagedMcpStartMarker)
-	config.WriteString("\n# Added by SAM vm-agent for Codex ACP sessions.\n")
-	config.WriteString("sandbox_mode = \"danger-full-access\"\n")
-	config.WriteString("approval_policy = \"never\"\n")
-	if codexEffort != "" {
-		config.WriteString(fmt.Sprintf("model_reasoning_effort = \"%s\"\n", codexEffort))
-	}
-	config.WriteString(providerConfig)
-
-	// Names are resolved over validServers (post-filter) so the positional fallback matches
-	// the keys actually written; dropping a server renumbers the rest, which is the
-	// pre-existing behaviour.
-	names := ResolveMcpServerNames(validServers)
-	for i, server := range validServers {
-		name := names[i]
-		config.WriteString(fmt.Sprintf("[mcp_servers.%s]\n", name))
-		config.WriteString(fmt.Sprintf("url = \"%s\"\n", tomlEscapeBasicString(server.URL)))
-		if server.Token != "" {
-			tokenEnvVar := codexMcpTokenEnvVar(name)
-			config.WriteString(fmt.Sprintf("bearer_token_env_var = \"%s\"\n", tokenEnvVar))
-			envVars = append(envVars, fmt.Sprintf("%s=%s", tokenEnvVar, server.Token))
-		}
-		config.WriteString("\n")
-	}
-
-	config.WriteString(codexManagedMcpEndMarker)
-	config.WriteString("\n")
-	return config.String(), envVars
-}
-
-// vibeDefaultActiveModel is the model alias used when no user model override
-// is configured. Defaults to Mistral Large (their most capable model).
-// Override at deployment via VIBE_DEFAULT_ACTIVE_MODEL env var.
-var vibeDefaultActiveModel = func() string {
-	if v := os.Getenv("VIBE_DEFAULT_ACTIVE_MODEL"); v != "" {
-		return v
-	}
-	return "mistral-large"
-}()
-
-// sanitizeVibeModelAlias validates and sanitizes a model alias string to
-// prevent TOML injection. Aliases must be alphanumeric with hyphens only.
-// Returns the sanitized alias, or the default if the input is invalid.
-func sanitizeVibeModelAlias(alias string) string {
-	if alias == "" {
-		return vibeDefaultActiveModel
-	}
-	for _, c := range alias {
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.') {
-			slog.Warn("Invalid Vibe model alias, falling back to default",
-				"requested", alias, "default", vibeDefaultActiveModel)
-			return vibeDefaultActiveModel
-		}
-	}
-	return alias
-}
-
-// vibeBuiltinAliases lists the aliases that are always defined in the
-// generated config. If the user selects one of these, no extra entry is needed.
-var vibeBuiltinAliases = map[string]bool{
-	"mistral-large": true,
-	"devstral-2":    true,
-	"codestral":     true,
-}
-
-// generateVibeConfig produces a TOML config for ~/.vibe/config.toml that
-// defines model aliases so users can select models beyond the built-in
-// defaults. The activeModel parameter sets which alias is active.
-// If activeModel doesn't match a built-in alias, a dynamic [[models]] entry
-// is generated using the value as both the alias and the Mistral API model name.
-// This allows the UI model catalog to use raw Mistral API IDs without needing
-// vm-agent changes when new models are released.
-// If mcpServers is provided, it includes MCP server configurations for tool discovery.
-func generateVibeConfig(activeModel string, mcpServers []McpServerEntry) string {
-	activeModel = sanitizeVibeModelAlias(activeModel)
-
-	config := fmt.Sprintf(`# Generated by SAM vm-agent — do not edit manually.
-# This config defines model aliases and MCP servers for Mistral Vibe ACP sessions.
-
-active_model = "%s"
-
-# Mistral Large — most capable model
-[[models]]
-name = "mistral-large-latest"
-provider = "mistral"
-alias = "mistral-large"
-temperature = 0.2
-
-# Devstral 2 — default coding model
-[[models]]
-name = "mistral-vibe-cli-latest"
-provider = "mistral"
-alias = "devstral-2"
-temperature = 0.2
-
-# Codestral — code-specialized model
-[[models]]
-name = "codestral-latest"
-provider = "mistral"
-alias = "codestral"
-temperature = 0.2
-`, activeModel)
-
-	// If the active model isn't a built-in alias, generate a dynamic entry
-	// using the model ID as both alias and API name. This lets the UI catalog
-	// list raw Mistral API model IDs (e.g. "mistral-medium-3-5-2604") without
-	// requiring vm-agent updates for each new model.
-	if activeModel != vibeDefaultActiveModel && !vibeBuiltinAliases[activeModel] {
-		config += fmt.Sprintf(`
-# Dynamic model entry (from SAM user settings)
-[[models]]
-name = "%s"
-provider = "mistral"
-alias = "%s"
-temperature = 0.2
-`, activeModel, activeModel)
-	}
-
-	// Append MCP server configurations if provided.
-	//
-	// Names come from the shared resolver rather than a local "sam-mcp-%d" — this call site
-	// used to always index-suffix, so a single server was named "sam-mcp-0" here while ACP
-	// and Codex called the same server "sam-mcp". Using the shared resolver fixes that
-	// divergence as well as honouring user-chosen names.
-	names := ResolveMcpServerNames(mcpServers)
-	for i, server := range mcpServers {
-		// Skip entries with control characters that would corrupt TOML
-		if strings.ContainsAny(server.URL, "\n\r") || strings.ContainsAny(server.Token, "\n\r") {
-			slog.Warn("Skipping MCP server with control characters in URL or token",
-				"index", i, "url_length", len(server.URL))
-			continue
-		}
-		safeURL := tomlEscapeBasicString(server.URL)
-		config += fmt.Sprintf("\n[[mcp_servers]]\nname = \"%s\"\ntransport = \"http\"\nurl = \"%s\"\n", names[i], safeURL)
-		if server.Token != "" {
-			safeToken := tomlEscapeBasicString(server.Token)
-			config += fmt.Sprintf("headers = { Authorization = \"Bearer %s\" }\n", safeToken)
-		}
-	}
-
-	return config
-}
-
-// resolveVibeActiveModel determines which model alias to use for a Mistral
-// Vibe session. Returns the user's model override if set, otherwise the
-// platform default (Mistral Large).
-func resolveVibeActiveModel(settings *agentSettingsPayload) string {
-	if settings != nil && settings.Model != "" {
-		return settings.Model
-	}
-	return vibeDefaultActiveModel
 }
 
 // Default values for OpenCode provider configuration.
@@ -1696,16 +1389,6 @@ func sanitizeModelAlias(model string) string {
 	return model
 }
 
-// writeVibeConfigToContainer writes a .vibe/config.toml into the container
-// for the Mistral Vibe agent. This is necessary because VIBE_ACTIVE_MODEL
-// expects a config alias (not a raw API model name), and only "devstral-2"
-// is defined by default. If mcpServers is provided, it includes MCP server
-// configurations for tool discovery.
-func writeVibeConfigToContainer(ctx context.Context, containerID, user, activeModel string, mcpServers []McpServerEntry) error {
-	config := generateVibeConfig(activeModel, mcpServers)
-	return writeAuthFileToContainer(ctx, containerID, user, ".vibe/config.toml", config)
-}
-
 // readOptionalFileFromContainer reads a file inside a container if it exists,
 // returning an empty string when the file is absent.
 func readOptionalFileFromContainer(ctx context.Context, containerID, user, filePath string) (string, error) {
@@ -1753,63 +1436,4 @@ func readOptionalFileFromContainer(ctx context.Context, containerID, user, fileP
 		return "", fmt.Errorf("docker exec failed: %w", err)
 	}
 	return buf.String(), nil
-}
-
-// writeCodexConfigToContainer updates ~/.codex/config.toml with a SAM-managed
-// MCP block. Existing non-SAM config is preserved, and prior SAM-managed blocks
-// are replaced so resumed or restarted sessions do not accumulate stale tokens.
-func writeCodexConfigToContainer(ctx context.Context, containerID, user string, mcpServers []McpServerEntry, proxyProvider *codexProxyProviderConfig, effort string) ([]string, error) {
-	managedConfig, envVars := generateCodexMcpConfig(mcpServers, proxyProvider, effort)
-	existingConfig, err := readOptionalFileFromContainer(ctx, containerID, user, ".codex/config.toml")
-	if err != nil {
-		return nil, err
-	}
-	mergedConfig := mergeManagedCodexMcpConfig(existingConfig, managedConfig)
-	if mergedConfig == "" {
-		return nil, nil
-	}
-	if err := writeAuthFileToContainer(ctx, containerID, user, ".codex/config.toml", mergedConfig); err != nil {
-		return nil, err
-	}
-	return envVars, nil
-}
-
-// writeCodexConfigLocally updates ~/.codex/config.toml on the local filesystem
-// with a SAM-managed MCP block. Used for standalone/cf-container sessions where
-// no Docker container is available. Mirrors writeCodexConfigToContainer.
-func writeCodexConfigLocally(mcpServers []McpServerEntry, proxyProvider *codexProxyProviderConfig, effort string) ([]string, error) {
-	managedConfig, envVars := generateCodexMcpConfig(mcpServers, proxyProvider, effort)
-
-	configPath, err := resolveLocalAuthFileTargetPath(".codex/config.toml")
-	if err != nil {
-		return nil, fmt.Errorf("resolve codex config path: %w", err)
-	}
-
-	var existingConfig string
-	data, err := os.ReadFile(configPath)
-	if err == nil {
-		existingConfig = string(data)
-	} else if !os.IsNotExist(err) {
-		return nil, fmt.Errorf("read existing codex config: %w", err)
-	}
-
-	mergedConfig := mergeManagedCodexMcpConfig(existingConfig, managedConfig)
-	if mergedConfig == "" {
-		return nil, nil
-	}
-
-	dir := filepath.Dir(configPath)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, fmt.Errorf("create codex config directory: %w", err)
-	}
-	if err := os.Chmod(dir, 0o700); err != nil {
-		return nil, fmt.Errorf("chmod codex config directory: %w", err)
-	}
-	if err := os.WriteFile(configPath, []byte(mergedConfig), 0o600); err != nil {
-		return nil, fmt.Errorf("write codex config.toml: %w", err)
-	}
-	if err := os.Chmod(configPath, 0o600); err != nil {
-		return nil, fmt.Errorf("chmod codex config.toml: %w", err)
-	}
-	return envVars, nil
 }

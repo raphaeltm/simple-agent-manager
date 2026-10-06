@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   jwt: {
     signCallbackToken: vi.fn(),
     signNodeCallbackToken: vi.fn(),
+    signTerminalToken: vi.fn(),
   },
   mcp: {
     generateMcpToken: vi.fn(),
@@ -13,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   nodeAgent: {
     createAgentSessionOnNode: vi.fn(),
     createWorkspaceOnNode: vi.fn(),
+    fetchNodeAgent: vi.fn(),
     getCfContainerCreateWorkspaceTimeoutMs: vi.fn(),
     startAgentSessionOnNode: vi.fn(),
     waitForNodeAgentReady: vi.fn(),
@@ -36,6 +38,7 @@ const mocks = vi.hoisted(() => ({
     runContainerPhase: vi.fn(),
   },
   ulid: vi.fn(),
+  transitionTaskToTerminal: vi.fn(),
 }));
 
 vi.mock('../../../src/services/jwt', () => mocks.jwt);
@@ -45,6 +48,8 @@ vi.mock('../../../src/services/nodes', () => mocks.nodes);
 vi.mock('../../../src/services/project-data', () => mocks.projectData);
 vi.mock('../../../src/services/vm-agent-container', () => mocks.container);
 vi.mock('../../../src/lib/ulid', () => ({ ulid: mocks.ulid }));
+
+vi.mock('../../../src/services/task-terminal-transition', () => ({ transitionTaskToTerminal: mocks.transitionTaskToTerminal }));
 
 import { launchInstantSession } from '../../../src/services/instant-session';
 
@@ -110,9 +115,12 @@ function baseLaunchInput() {
 describe('launchInstantSession', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.transitionTaskToTerminal.mockResolvedValue('transitioned');
     mocks.ulid.mockReturnValueOnce('workspace-1').mockReturnValueOnce('agent-session-1');
     mocks.jwt.signCallbackToken.mockResolvedValue('workspace-callback-token');
     mocks.jwt.signNodeCallbackToken.mockResolvedValue('node-callback-token');
+    mocks.jwt.signTerminalToken.mockResolvedValue({ token: 'attachment-terminal-token' });
+    mocks.nodeAgent.fetchNodeAgent.mockResolvedValue(new Response('{}'));
     mocks.mcp.generateMcpToken.mockReturnValue('mcp-token');
     mocks.mcp.revokeMcpToken.mockResolvedValue(undefined);
     mocks.mcp.storeMcpToken.mockResolvedValue(undefined);
@@ -416,6 +424,74 @@ describe('launchInstantSession', () => {
     );
   });
 
+  it.each([200, 403])(
+    'uploads attachments between workspace creation and agent startup (upload status %s)',
+    async (status) => {
+      const { db } = makeDb();
+      const get = vi.fn(async () => ({
+        body: new Blob(['test']).stream(),
+        httpMetadata: { contentType: 'text/plain' },
+      }));
+      const remove = vi.fn(async () => undefined);
+      const attachmentEnv = { ...env, R2: { get, delete: remove } } as never;
+      const attachment = {
+        uploadId: 'upload-1',
+        filename: 'debug.txt',
+        size: 4,
+        contentType: 'text/plain',
+      };
+      mocks.nodeAgent.fetchNodeAgent.mockResolvedValue(new Response('{}', { status }));
+      const launch = launchInstantSession(db as never, attachmentEnv, {
+        taskId: 'task-1',
+        project,
+        userId: 'user-1',
+        initialPrompt: 'Read debug.txt',
+        displayMessage: 'Read debug.txt',
+        agentType: 'claude-code',
+        attachments: [attachment],
+      });
+      if (status === 200) {
+        await expect(launch).resolves.toMatchObject({
+          workspaceId: 'workspace-1',
+          chatSessionId: 'chat-session-1',
+        });
+        expect(mocks.nodeAgent.fetchNodeAgent.mock.invocationCallOrder[0]).toBeLessThan(
+          mocks.nodeAgent.startAgentSessionOnNode.mock.invocationCallOrder[0]!
+        );
+        expect(remove).toHaveBeenCalledWith('temp-uploads/user-1/upload-1/debug.txt');
+      } else {
+        await expect(launch).rejects.toThrow('Attachment transfer failed for debug.txt: 403');
+        expect(mocks.nodeAgent.createAgentSessionOnNode).not.toHaveBeenCalled();
+        expect(mocks.nodeAgent.startAgentSessionOnNode).not.toHaveBeenCalled();
+        expect(mocks.container.destroyVmAgentContainer).toHaveBeenCalledWith(
+          attachmentEnv,
+          'node-1'
+        );
+        expect(mocks.projectData.failSession).toHaveBeenCalledWith(
+          attachmentEnv,
+          'project-1',
+          'chat-session-1',
+          'Attachment transfer failed for debug.txt: 403'
+        );
+        expect(mocks.transitionTaskToTerminal).toHaveBeenCalledWith(attachmentEnv,
+          expect.objectContaining({ taskId: 'task-1', status: 'failed', executionStep: 'launch_failed',
+            expectedWorkspaceId: 'workspace-1', expectedChatSessionId: 'chat-session-1',
+            reason: 'Attachment transfer failed for debug.txt: 403', fillMissingStartedAt: false, stopWorkspace: false,
+          })
+        );
+        expect(remove).not.toHaveBeenCalled();
+      }
+      expect(mocks.nodeAgent.createWorkspaceOnNode.mock.invocationCallOrder[0]).toBeLessThan(
+        mocks.nodeAgent.fetchNodeAgent.mock.invocationCallOrder[0]!
+      );
+      expect(get).toHaveBeenCalledWith('temp-uploads/user-1/upload-1/debug.txt');
+      const [nodeId, , url, request] = mocks.nodeAgent.fetchNodeAgent.mock.calls[0]!;
+      expect(nodeId).toBe('node-1');
+      expect(new URL(url).pathname).toBe('/workspaces/workspace-1/files/upload');
+      expect(await request.body.get('files').text()).toBe('test');
+    }
+  );
+
   it('marks the workspace error and destroys the container when launch fails', async () => {
     const { db, updates } = makeDb();
     mocks.nodeAgent.waitForNodeAgentReady.mockRejectedValueOnce(
@@ -460,8 +536,10 @@ describe('launchInstantSession', () => {
     expect(updates).toContainEqual(
       expect.objectContaining({ status: 'error', errorMessage: 'Request timed out after 120000ms' })
     );
-    expect(updates).toContainEqual(
-      expect.objectContaining({ status: 'failed', executionStep: 'launch_failed' })
+    expect(mocks.transitionTaskToTerminal).toHaveBeenCalledWith(env,
+      expect.objectContaining({ taskId: 'task-1', status: 'failed', executionStep: 'launch_failed',
+        reason: 'Request timed out after 120000ms', fillMissingStartedAt: false, stopWorkspace: false,
+      })
     );
   });
 

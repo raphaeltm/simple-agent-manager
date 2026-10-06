@@ -1,5 +1,31 @@
 # Lifecycle State Accuracy Fixes
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:**
+>   - Fix 1 (destroy orphaned nodes): #1758 (`50af27fac`). The sweep now destroys idle orphan
+>     nodes (`apps/api/src/scheduled/node-cleanup/node-phases.ts:588`), and
+>     `orphanedNodesDestroyed` replaced `orphanedNodesFlagged` (`node-cleanup/result.ts:6-11`).
+>     Tests: `apps/api/tests/unit/services/node-cleanup-idle-signal.test.ts:220`,
+>     `apps/api/tests/workers/scheduled-node-cleanup.test.ts:857`. Idleness uses
+>     `NODE_WORKSPACE_IDLE_TIMEOUT_MS` rather than the env var proposed here.
+>   - Fix 4 (stale-heartbeat nodes): #2147 (`e5ad04fe4`). Managed nodes that stop heartbeating
+>     are drained, then released and destroyed (default 30 min after the last heartbeat,
+>     `NODE_UNHEALTHY_RELEASE_AFTER_MS`; `apps/api/src/scheduled/node-cleanup/unhealthy-nodes.ts`).
+> - **Still open:** Fix 5 only. Settings > Usage still shows the limits only as utilization-bar
+>   denominators (`apps/web/src/pages/SettingsComputeUsage.tsx:393-440`). There is no "Your Limits"
+>   card with a Platform default/Custom label per limit, and the monthly-cap row is hidden, not
+>   shown as "Unlimited", when no cap is set.
+> - **Moot/dropped:**
+>   - Fix 2: the premise does not hold. The `assigned` transition already sets `last_heartbeat_at`
+>     (`apps/api/src/durable-objects/project-data/acp-sessions.ts:171-180`), and it is the only way
+>     into `assigned`/`running`, so the existing timeout already catches sessions that never
+>     heartbeat. Only legacy rows could still be NULL.
+>   - Fix 3: replaced by event-driven cleanup. The shared workspace finalizer stops or fails the
+>     chat session on teardown (`apps/api/src/services/workspace-lifecycle-finalizer.ts`, #1917),
+>     and a repair sweep stops sessions left active after their task ended
+>     (`apps/api/src/scheduled/terminal-session-ledger-reconciliation.ts`, #1969).
+
 ## Problem
 
 Multiple entity types (nodes, ACP sessions, chat sessions) can get stuck in incorrect states indefinitely, leading to inaccurate usage tracking and stale data in the UI. The existing cleanup systems have gaps:

@@ -25,6 +25,8 @@ var (
 	inspectContainerBridgeIP     = dockerInspectContainerBridgeIP
 )
 
+const defaultCompatibilityResolverTimeout = 10 * time.Second
+
 // DockerCLIPath resolves an absolute path to the docker CLI. It prefers the
 // SAM_DOCKER_CLI_PATH override, then a PATH lookup (only if it resolves to an
 // absolute path), and finally falls back to the conventional install location.
@@ -45,10 +47,11 @@ type Discovery struct {
 	labelKey   string
 	labelValue string
 
-	mu          sync.RWMutex
-	containerID string
-	lastCheck   time.Time
-	cacheTTL    time.Duration
+	mu            sync.RWMutex
+	containerID   string
+	lastCheck     time.Time
+	cacheTTL      time.Duration
+	lookupTimeout time.Duration
 
 	bridgeIPMu    sync.RWMutex
 	bridgeIP      string
@@ -65,9 +68,7 @@ func FindContainerByLabel(ctx context.Context, labelKey, labelValue string) (str
 		return "", err
 	}
 
-	// The Docker-backed delegate currently uses exec.Command rather than
-	// exec.CommandContext, so cancellation is checked around the one-shot query.
-	candidates, err := listRunningContainersByLabel(labelKey, labelValue)
+	candidates, err := listRunningContainersByLabel(ctx, labelKey, labelValue)
 	if err != nil {
 		return "", fmt.Errorf("failed to query docker: %w", err)
 	}
@@ -92,6 +93,9 @@ type Config struct {
 	// BridgeIPTTL is how long to cache the container bridge IP before re-checking.
 	// Defaults to 30s if not set.
 	BridgeIPTTL time.Duration
+	// CompatibilityResolverTimeout bounds legacy context-free GetContainerID lookups.
+	// Callers that need a different deadline should use GetContainerIDContext.
+	CompatibilityResolverTimeout time.Duration
 }
 
 // NewDiscovery creates a new container discovery instance.
@@ -108,41 +112,62 @@ func NewDiscovery(cfg Config) *Discovery {
 	if cfg.BridgeIPTTL == 0 {
 		cfg.BridgeIPTTL = 30 * time.Second
 	}
+	if cfg.CompatibilityResolverTimeout == 0 {
+		cfg.CompatibilityResolverTimeout = defaultCompatibilityResolverTimeout
+	}
 	return &Discovery{
-		labelKey:    cfg.LabelKey,
-		labelValue:  cfg.LabelValue,
-		cacheTTL:    cfg.CacheTTL,
-		bridgeIPTTL: cfg.BridgeIPTTL,
+		labelKey:      cfg.LabelKey,
+		labelValue:    cfg.LabelValue,
+		cacheTTL:      cfg.CacheTTL,
+		bridgeIPTTL:   cfg.BridgeIPTTL,
+		lookupTimeout: cfg.CompatibilityResolverTimeout,
 	}
 }
 
 // GetContainerID returns the devcontainer's Docker container ID.
 // It caches the result and re-discovers if the cache is stale or the container is gone.
 func (d *Discovery) GetContainerID() (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), d.lookupTimeout)
+	defer cancel()
+	return d.GetContainerIDContext(ctx)
+}
+
+// GetContainerIDContext returns the devcontainer's Docker container ID while
+// bounding Docker CLI probes with the caller's context.
+func (d *Discovery) GetContainerIDContext(ctx context.Context) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	d.mu.RLock()
 	if d.containerID != "" && time.Since(d.lastCheck) < d.cacheTTL {
 		id := d.containerID
 		d.mu.RUnlock()
-		if isContainerRunning(id) {
+		if isContainerRunning(ctx, id) {
 			return id, nil
+		}
+		if err := ctx.Err(); err != nil {
+			return "", err
 		}
 		slog.Warn("Cached devcontainer no longer running, rediscovering", "containerID", id)
 		d.clearContainerIfCurrent(id)
-		return d.discover()
+		return d.discover(ctx)
 	}
 	d.mu.RUnlock()
 
-	return d.discover()
+	return d.discover(ctx)
 }
 
 // discover queries Docker for the devcontainer and caches the result.
-func (d *Discovery) discover() (string, error) {
+func (d *Discovery) discover(ctx context.Context) (string, error) {
 	d.mu.Lock()
 	if d.containerID != "" && time.Since(d.lastCheck) < d.cacheTTL {
 		id := d.containerID
 		d.mu.Unlock()
-		if isContainerRunning(id) {
+		if isContainerRunning(ctx, id) {
 			return id, nil
+		}
+		if err := ctx.Err(); err != nil {
+			return "", err
 		}
 		slog.Warn("Cached devcontainer no longer running, rediscovering", "containerID", id)
 		d.clearContainerIfCurrent(id)
@@ -150,7 +175,7 @@ func (d *Discovery) discover() (string, error) {
 		d.mu.Unlock()
 	}
 
-	candidates, err := listRunningContainersByLabel(d.labelKey, d.labelValue)
+	candidates, err := listRunningContainersByLabel(ctx, d.labelKey, d.labelValue)
 	if err != nil {
 		return "", fmt.Errorf("failed to query docker: %w", err)
 	}
@@ -187,11 +212,17 @@ func sortCandidates(candidates []containerCandidate) {
 	})
 }
 
-func dockerListRunningContainersByLabel(labelKey, labelValue string) ([]containerCandidate, error) {
+func dockerListRunningContainersByLabel(ctx context.Context, labelKey, labelValue string) ([]containerCandidate, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	filter := fmt.Sprintf("label=%s=%s", labelKey, labelValue)
-	cmd := exec.Command(DockerCLIPath(), "ps", "--format", "{{.ID}}\t{{.CreatedAt}}", "--filter", filter)
+	cmd := exec.CommandContext(ctx, DockerCLIPath(), "ps", "--format", "{{.ID}}\t{{.CreatedAt}}", "--filter", filter)
 	output, err := cmd.Output()
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
 		return nil, err
 	}
 
@@ -217,11 +248,14 @@ func dockerListRunningContainersByLabel(labelKey, labelValue string) ([]containe
 	return candidates, nil
 }
 
-func dockerIsContainerRunning(containerID string) bool {
+func dockerIsContainerRunning(ctx context.Context, containerID string) bool {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if strings.TrimSpace(containerID) == "" {
 		return false
 	}
-	cmd := exec.Command(DockerCLIPath(), "inspect", "-f", "{{.State.Running}}", containerID)
+	cmd := exec.CommandContext(ctx, DockerCLIPath(), "inspect", "-f", "{{.State.Running}}", containerID)
 	output, err := cmd.Output()
 	return err == nil && strings.TrimSpace(string(output)) == "true"
 }

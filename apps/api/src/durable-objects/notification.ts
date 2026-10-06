@@ -5,7 +5,7 @@
  * Supports Hibernatable WebSockets for real-time push to connected browsers.
  * Accessed via `env.NOTIFICATION.idFromName(userId)`.
  *
- * See: tasks/active/2026-03-16-notification-system-phase1.md
+ * See: tasks/archive/2026-03-16-notification-system-phase2.md
  */
 import type {
   CreateNotificationRequest,
@@ -28,9 +28,9 @@ import {
 } from '@simple-agent-manager/shared';
 import { DurableObject } from 'cloudflare:workers';
 
+import { getAppOrigin } from '../lib/app-origin';
 import { createModuleLogger } from '../lib/logger';
 import { validateWebPushSubscription } from '../lib/web-push';
-import { getAppOrigin } from '../services/interactive-preview';
 import { runNotificationMigrationsAtomically } from './notification-migrations';
 import type { WebPushEnv } from './notification-push';
 import { deliverNotificationWebPush } from './notification-push';

@@ -20,6 +20,7 @@ import { DurableObject } from 'cloudflare:workers';
 import type { Env as AppEnv } from '../../env';
 import { createModuleLogger } from '../../lib/logger';
 import { readRequestJsonRecord } from '../../lib/runtime-validation';
+import { normalizeSearchQuery } from '../../lib/search-query-limits';
 import {
   type ConversationSummaryRow,
   ConversationSummaryRowSchema,
@@ -29,7 +30,7 @@ import {
   RateLimitRowSchema,
   RowidRowSchema,
 } from '../row-validation';
-import { buildFtsQuery, extractSnippet } from '../sam-session';
+import { appendMessageLikeSearchResults, buildFtsQuery, extractSnippet } from '../sam-session';
 import { runAgentLoop } from '../sam-session/agent-loop';
 import type { MessageRow, SamSseEvent } from '../sam-session/types';
 import { PROJECT_AGENT_SYSTEM_PROMPT } from './system-prompt';
@@ -489,9 +490,10 @@ export class ProjectAgent extends DurableObject<AppEnv> {
 
     const config = resolveSamConfig(this.env as unknown as Record<string, string | undefined>);
     const limit = Math.min(requestedLimit || config.searchLimit, config.searchMaxLimit);
+    const normalizedQuery = normalizeSearchQuery(query, this.env);
 
-    const results = this.searchMessages(query, limit, config.ftsEnabled);
-    return new Response(JSON.stringify({ results }), {
+    const results = this.searchMessages(normalizedQuery.query, limit, config.ftsEnabled);
+    return new Response(JSON.stringify({ results, ...normalizedQuery }), {
       headers: { 'content-type': 'application/json' },
     });
   }
@@ -502,6 +504,7 @@ export class ProjectAgent extends DurableObject<AppEnv> {
     limit: number,
     ftsEnabled: boolean = true
   ): Array<{ snippet: string; role: string; sequence: number; createdAt: string }> {
+    query = normalizeSearchQuery(query, this.env).query;
     const results: Array<{ snippet: string; role: string; sequence: number; createdAt: string }> =
       [];
 
@@ -536,32 +539,7 @@ export class ProjectAgent extends DurableObject<AppEnv> {
     }
 
     if (results.length < limit) {
-      const remaining = limit - results.length;
-      const escapedQuery = query.replace(/[%_\\]/g, '\\$&');
-      const rows = this.sql
-        .exec(
-          `SELECT role, content, sequence, created_at
-         FROM messages
-         WHERE content LIKE ? ESCAPE '\\'
-         ORDER BY created_at DESC
-         LIMIT ?`,
-          `%${escapedQuery}%`,
-          remaining
-        )
-        .toArray();
-
-      const seenSequences = new Set(results.map((r) => r.sequence));
-      for (const row of rows) {
-        const seq = Number(row.sequence);
-        if (seenSequences.has(seq)) continue;
-        seenSequences.add(seq);
-        results.push({
-          snippet: extractSnippet(String(row.content), query),
-          role: String(row.role),
-          sequence: seq,
-          createdAt: String(row.created_at),
-        });
-      }
+      appendMessageLikeSearchResults(this.sql, query, limit - results.length, results);
     }
 
     return results;

@@ -61,6 +61,16 @@ export const CACHED_COMMANDS_STALE_TIME_MS = resolveDurationMs(
 );
 
 /**
+ * Report-issue availability (`GET /api/report-issue/config`) — a deployment-level
+ * flag that every chat's tool rail reads. Changes only with deployment config.
+ */
+const DEFAULT_REPORT_ISSUE_CONFIG_STALE_TIME_MS = 300_000;
+export const REPORT_ISSUE_CONFIG_STALE_TIME_MS = resolveDurationMs(
+  import.meta.env.VITE_REPORT_ISSUE_CONFIG_STALE_TIME_MS,
+  DEFAULT_REPORT_ISSUE_CONFIG_STALE_TIME_MS
+);
+
+/**
  * Project creation feature flags such as Cloudflare Artifacts availability. These
  * are deployment/config-level values, not per-keystroke user data.
  */

@@ -19,9 +19,13 @@ func (h *SessionHost) persistAgentSelectionFailure(agentType, message string) {
 		}
 	}
 	if h.config.MessageReporter != nil && h.config.SessionID != "" {
+		content := "Agent startup failed: " + message
+		if message == "model_provider_credential_missing" {
+			content = "Agent startup failed because its provider connection is missing."
+		}
 		if err := h.config.MessageReporter.Enqueue(MessageReportEntry{
 			MessageID: uuid.NewString(), SessionID: h.config.SessionID, Role: "system",
-			Content: "Agent startup failed: " + message, Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
+			Content: content, Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
 		}); err != nil {
 			slog.Warn("Failed to persist agent selection system message", "error", err)
 		}

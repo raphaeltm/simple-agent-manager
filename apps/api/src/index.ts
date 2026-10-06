@@ -1,3 +1,5 @@
+import { projectScheduleRoutes } from './routes/project-schedules';
+import { projectStandingWatchRoutes } from './routes/project-standing-watches';
 // Re-export Durable Object classes for Cloudflare Workers runtime
 export { AdminLogs } from './durable-objects/admin-logs';
 export { AiTokenBudgetCounter } from './durable-objects/ai-token-budget-counter';
@@ -7,6 +9,7 @@ export { CredentialSetupSession } from './durable-objects/credential-setup-sessi
 export { DiagnosisRunner } from './durable-objects/diagnosis-runner';
 export { GitHubUserAccessTokenLock } from './durable-objects/github-user-access-token-lock';
 export { GitLabUserAccessTokenLock } from './durable-objects/gitlab-user-access-token-lock';
+export { InteractionStore } from './durable-objects/interaction-store';
 export { NodeLifecycle } from './durable-objects/node-lifecycle';
 export { NotificationService } from './durable-objects/notification';
 export { ProjectAgent } from './durable-objects/project-agent';
@@ -33,6 +36,7 @@ import * as schema from './db/schema';
 import type { Env } from './env';
 import { applyCacheHeaders } from './lib/cache-headers';
 import { resolveCredentialedCorsOrigin } from './lib/cors-origin';
+import { withRequestScopedD1Bindings } from './lib/d1-session';
 import { log, serializeError } from './lib/logger';
 import { resolvePagesProxyTarget } from './lib/pages-proxy';
 import { parseWorkspaceSubdomain } from './lib/workspace-subdomain';
@@ -79,7 +83,9 @@ import { chatsRoutes } from './routes/chats';
 import { cliRoutes } from './routes/cli';
 import { clientErrorsRoutes } from './routes/client-errors';
 import { codexRefreshRoutes } from './routes/codex-refresh';
+import { codexRuntimeRoutes } from './routes/codex-runtime';
 import { ccRoutes } from './routes/composable-credentials';
+import { credentialLimitsRoute } from './routes/credential-limits';
 import { credentialsRoutes } from './routes/credentials';
 import { dashboardRoutes } from './routes/dashboard';
 import { deployReleaseCallbackRoute } from './routes/deploy-release-callback';
@@ -121,14 +127,20 @@ import {
   gcpDeployCallbackRoute,
   projectDeploymentRoutes,
 } from './routes/project-deployment';
+import { projectEventChannelRoutes } from './routes/project-event-channels';
+import { projectEventSubscriptionRoutes } from './routes/project-event-subscriptions';
 import { projectsRoutes } from './routes/projects';
+import { acpInteractionCallbackRoute } from './routes/projects/acp-interaction-callback';
 import { agentActivityCallbackRoute } from './routes/projects/agent-activity-callback';
+import { agentUsageCallbackRoute } from './routes/projects/agent-usage-callback';
 import { buildStartedCallbackRoute } from './routes/projects/build-started-callback';
 import { composeImageArtifactsCallbackRoute } from './routes/projects/compose-image-artifacts-callback';
 import { composePublishReleaseCallbackRoute } from './routes/projects/compose-publish-release-callback';
 import { deploymentPublishJobCallbackRoute } from './routes/projects/deployment-publish-job-callback';
 import { nodeAcpHeartbeatRoute } from './routes/projects/node-acp-heartbeat';
 import { registryPushCredentialsCallbackRoute } from './routes/projects/registry-push-credentials-callback';
+import { workspaceEvictionCallbackRoute } from './routes/projects/workspace-eviction-callback';
+import { workspaceResourceHistoryCallbackRoute } from './routes/projects/workspace-resource-history-callback';
 import { providersRoutes } from './routes/providers';
 import { reportIssueRoutes } from './routes/report-issue';
 import { resolutionStatusRoute } from './routes/resolution-status';
@@ -769,6 +781,7 @@ app.route('/api/auth', deviceFlowRoutes);
 app.route('/api/auth', authRoutes);
 app.route('/api/setup', setupRoutes);
 app.route('/api/credentials', resolutionStatusRoute);
+app.route('/api/credentials', credentialLimitsRoute);
 app.route('/api/credentials', credentialsRoutes);
 app.route('/api/capacity-pools', capacityPoolsRoutes);
 app.route('/api/agent-credential-setup-sessions', agentCredentialSetupSessionsRoutes);
@@ -785,6 +798,7 @@ app.route('/api/nodes', nodeLifecycleRoutes);
 app.route('/api/workspaces', workspacesRoutes);
 app.route('/api/terminal', terminalRoutes);
 app.route('/api/agent', agentRoutes);
+app.route('/api/acp/codex-runtime', codexRuntimeRoutes);
 app.route('/api/agents', agentsCatalogRoutes);
 app.route('/api/model-catalog', modelCatalogRoutes);
 app.route('/api/bootstrap', bootstrapRoutes);
@@ -805,18 +819,26 @@ app.route('/api/webhooks', triggerWebhookRoutes);
 // See .claude/rules/06-api-patterns.md (Hono middleware scoping)
 app.route('/api/projects', deploymentIdentityTokenRoute);
 app.route('/api/projects', nodeAcpHeartbeatRoute);
+app.route('/api/projects', acpInteractionCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', agentActivityCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
+app.route('/api/projects', agentUsageCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', buildStartedCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', taskCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', registryPushCredentialsCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', composeImageArtifactsCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', composePublishReleaseCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', deploymentPublishJobCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
+app.route('/api/projects', workspaceEvictionCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
+app.route('/api/projects', workspaceResourceHistoryCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', projectsRoutes);
 app.route('/api/projects/:projectId/tasks', tasksRoutes);
 app.route('/api/projects/:projectId/sessions', chatStartRoutes);
 app.route('/api/projects/:projectId/sessions', chatRoutes);
 app.route('/api/projects/:projectId/comments', projectCommentRoutes);
+app.route('/api/projects/:projectId/event-subscriptions', projectEventSubscriptionRoutes);
+app.route('/api/projects/:projectId/schedules', projectScheduleRoutes);
+app.route('/api/projects/:projectId/standing-watches', projectStandingWatchRoutes);
+app.route('/api/projects/:projectId/event-channels', projectEventChannelRoutes);
 app.route('/api/projects/:projectId/cached-commands', cachedCommandRoutes);
 app.route('/api/projects/:projectId/activity', activityRoutes);
 app.route('/api/projects/:projectId/library', libraryRoutes);
@@ -907,4 +929,15 @@ app.notFound((c) => {
 });
 
 // Export HTTP and scheduled Worker entry points.
-export default { fetch: app.fetch, scheduled };
+//
+// `fetch` runs the whole request against a single request-scoped D1 session per database
+// (`lib/d1-session.ts`), so one request pays one trans-Atlantic round trip to the primary
+// instead of one per query. `scheduled` deliberately keeps the raw bindings: cron sweeps
+// own terminal verdicts and must read exactly what they read today
+// (`.claude/rules/53`, `/58`, `/66`). Durable Objects are constructed by the runtime with
+// the real env and are likewise unaffected.
+export default {
+  fetch: (request: Request, env: Env, ctx: ExecutionContext) =>
+    app.fetch(request, withRequestScopedD1Bindings(env), ctx),
+  scheduled,
+};

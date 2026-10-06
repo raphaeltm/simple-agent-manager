@@ -13,6 +13,10 @@
       "registryUrl": "https://www.npmjs.com/package/@eslint/js",
       "necessity": "Provides supported ESLint flat recommended configuration."
     },
+    "@modelcontextprotocol/sdk": {
+      "registryUrl": "https://www.npmjs.com/package/@modelcontextprotocol/sdk",
+      "necessity": "Runs the disposable HTTPS MCP service and notification fixture for ACP URL completion verification."
+    },
     "@playwright/test": {
       "registryUrl": "https://www.npmjs.com/package/@playwright/test",
       "necessity": "Executes browser evidence and screenshot checks."
@@ -85,6 +89,10 @@
       "registryUrl": "https://www.npmjs.com/package/oxlint",
       "necessity": "Measures native lint findings in shadow mode."
     },
+    "sharp": {
+      "registryUrl": "https://www.npmjs.com/package/sharp",
+      "necessity": "Downscales marketing feature screenshots and writes their WebP siblings (apps/www optimize:features)."
+    },
     "storybook": {
       "registryUrl": "https://www.npmjs.com/package/storybook",
       "necessity": "Provides the Storybook build and test CLI."
@@ -104,6 +112,11 @@
     "typescript-eslint": {
       "registryUrl": "https://www.npmjs.com/package/typescript-eslint",
       "necessity": "Provides supported ESLint flat TypeScript configuration."
+    },
+    "uplot": {
+      "registryUrl": "https://www.npmjs.com/package/uplot",
+      "homepageUrl": "https://github.com/leeoniya/uPlot",
+      "necessity": "Canvas time-series charts for the session resource timeline; handles tens of thousands of points with zoom and synced cursors in ~23 KB gzipped, loaded only when Resources opens."
     },
     "vite": {
       "registryUrl": "https://www.npmjs.com/package/vite",

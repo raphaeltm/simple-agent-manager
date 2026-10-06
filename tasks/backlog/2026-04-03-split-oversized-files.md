@@ -1,5 +1,13 @@
 # Split Oversized Files (Pre-Existing Tech Debt)
 
+> **Reconciliation 2026-09-30:** still open, and most files grew. Line counts now (when filed):
+> `bootstrap.go` 3,297 (2,236), `session_host.go` 744 (2,207), vm-agent `server/server.go` 2,003
+> (1,287), `gateway.go` 1,408 (1,081), vm-agent `server/workspaces.go` 2,201 (1,067),
+> `apps/api/src/index.ts` 939 (848), `MultiTerminal.tsx` 825 (841), `useAcpSession.ts` 831 (822).
+> Add `apps/api/src/scheduled/stuck-tasks.ts` (1,742, also in `EXEMPT_FILES`) and
+> `scripts/deploy/sync-wrangler-config.ts` (1,444; its FILE SIZE EXCEPTION comment points here).
+> `session_host.go` is now under 800 and can leave `EXEMPT_FILES`.
+
 ## Problem
 
 8 files exceed the 800-line mandatory split threshold (`.claude/rules/18-file-size-limits.md`). These are allowlisted in `scripts/quality/check-file-sizes.ts` to avoid blocking CI, but should be split.

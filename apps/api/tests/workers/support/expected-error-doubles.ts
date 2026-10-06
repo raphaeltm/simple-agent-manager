@@ -1,5 +1,6 @@
 import { NodeLifecycle } from '../../../src/durable-objects/node-lifecycle';
 import { ProjectData } from '../../../src/durable-objects/project-data';
+import * as archiveSharding from '../../../src/durable-objects/project-data/archive-sharding';
 import * as mailbox from '../../../src/durable-objects/project-data/mailbox';
 import * as messages from '../../../src/durable-objects/project-data/messages';
 
@@ -63,6 +64,55 @@ type ProjectDataExpectedErrorOperation =
  * behavior while returning a serializable assertion value to Vitest.
  */
 export class ProjectDataTestDouble extends ProjectData {
+  /**
+   * Test convenience over the production `searchMessagesWithCoverage` RPC: the same bounded
+   * search, results only. Production callers must use the coverage variant and disclose it.
+   */
+  searchMessages(
+    query: string,
+    sessionId: string | null = null,
+    roles: string[] | null = null,
+    limit: number = 10
+  ) {
+    return this.searchMessagesWithCoverage(query, sessionId, roles, limit).results;
+  }
+
+  async archiveTargetCommitChunkRollbackForTest(
+    input: archiveSharding.ArchiveTargetCommitChunkInput
+  ): Promise<CapturedExpectedError> {
+    try {
+      await archiveSharding.commitArchiveTargetChunk(
+        this.ctx.storage.sql,
+        input,
+        this.env,
+        (callback) =>
+          this.ctx.storage.transactionSync(() => {
+            callback();
+            throw new Error('injected target commit rollback');
+          })
+      );
+      return { threw: false };
+    } catch (error) {
+      return capture(error);
+    }
+  }
+
+  async archiveSourceFinalizeDeleteRollbackForTest(
+    input: archiveSharding.ArchiveSourceFinalizeDeleteInput
+  ): Promise<CapturedExpectedError> {
+    try {
+      await archiveSharding.finalizeSourceDelete(this.ctx.storage.sql, input, (callback) =>
+        this.ctx.storage.transactionSync(() => {
+          callback();
+          throw new Error('injected source finalize rollback');
+        })
+      );
+      return { threw: false };
+    } catch (error) {
+      return capture(error);
+    }
+  }
+
   /**
    * Read `do_meta.projectId` straight out of DO SQLite, so a test can tell
    * "this DO has been ensured" apart from "this isolate believes it has".

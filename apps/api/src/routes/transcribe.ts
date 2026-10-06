@@ -1,9 +1,10 @@
-import { Hono } from 'hono';
+import { Hono, type MiddlewareHandler } from 'hono';
 
 import type { Env } from '../env';
 import { createModuleLogger, serializeError } from '../lib/logger';
 import { requireApproved,requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
+import { rateLimitTranscribe } from '../middleware/rate-limit';
 
 const log = createModuleLogger('transcribe');
 
@@ -33,6 +34,9 @@ const transcribeRoutes = new Hono<{ Bindings: Env }>();
 // Apply auth middleware to all routes
 transcribeRoutes.use('*', requireAuth(), requireApproved());
 
+const limitTranscription: MiddlewareHandler<{ Bindings: Env }> = (c, next) =>
+  rateLimitTranscribe(c.env)(c, next);
+
 /**
  * POST /api/transcribe
  *
@@ -41,7 +45,7 @@ transcribeRoutes.use('*', requireAuth(), requireApproved());
  *
  * Response: { text: string }
  */
-transcribeRoutes.post('/', async (c) => {
+transcribeRoutes.post('/', limitTranscription, async (c) => {
   const startTime = Date.now();
   log.info('request_received');
 

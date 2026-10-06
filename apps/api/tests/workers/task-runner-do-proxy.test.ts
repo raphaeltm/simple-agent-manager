@@ -25,12 +25,30 @@ import { seedInstallation, seedNode, seedProject, seedTask, seedUser } from './h
 // Helpers
 // ---------------------------------------------------------------------------
 
+const RESOLVED_RESERVATION = {
+  cpuMillis: 2_000,
+  memoryMb: 4_096,
+  diskMb: 40_960,
+  exclusiveNode: false,
+  source: 'task' as const,
+  sourceId: 'task-start-001',
+  version: 1,
+};
+
 function getStub(taskId: string): DurableObjectStub<TaskRunner> {
   const id = env.TASK_RUNNER.idFromName(taskId);
   return env.TASK_RUNNER.get(id) as DurableObjectStub<TaskRunner>;
 }
 
 /** Full realistic input for startTaskRunnerDO */
+async function bindWorkspace(taskId: string, workspaceId: string): Promise<void> {
+  await runInDurableObject(getStub(taskId), async (instance) => {
+    const state = (await instance.ctx.storage.get<TaskRunnerState>('state'))!;
+    state.stepResults.workspaceId = workspaceId;
+    await instance.ctx.storage.put('state', state);
+  });
+}
+
 function makeStartInput(taskId: string) {
   return {
     taskId,
@@ -72,11 +90,11 @@ function makeStartInput(taskId: string) {
     ],
     projectScaling: {
       taskExecutionTimeoutMs: 7200000,
-      maxWorkspacesPerNode: 3,
       nodeCpuThresholdPercent: 80,
       nodeMemoryThresholdPercent: 85,
       warmNodeTimeoutMs: 60000,
     },
+    resolvedReservation: RESOLVED_RESERVATION,
   };
 }
 
@@ -150,6 +168,7 @@ const TASK_IDS = [
   'task-status-init-001',
   'task-redact-mcp-001',
   'task-deterministic-001',
+  'task-start-guard-001',
   'task-capacity-explicit-guard-001',
   'task-capacity-flexible-location-001',
 ];
@@ -258,7 +277,81 @@ describe('task-runner-do proxy — Worker→DO contract', () => {
     expect(config.attachments![0]!.id).toBe('att-001');
     expect(config.attachments![0]!.filename).toBe('spec.md');
     expect(config.projectScaling?.taskExecutionTimeoutMs).toBe(7200000);
-    expect(config.projectScaling?.maxWorkspacesPerNode).toBe(3);
+    expect(config.projectScaling?.nodeCpuThresholdPercent).toBe(80);
+    expect(config.resolvedReservation).toEqual(RESOLVED_RESERVATION);
+  });
+
+  it('startTaskRunnerDO forwards reserved submission startGuard to the DO', async () => {
+    const taskId = 'task-start-guard-001';
+    const chatSessionId = 'chat-start-guard-001';
+    const initialStatusEventId = 'status-start-guard-001';
+    const intentFingerprint = `sha256:${'a'.repeat(64)}`;
+    const now = new Date().toISOString();
+
+    await env.DATABASE.prepare(
+      `UPDATE tasks SET status = 'queued', chat_session_id = ?, updated_at = ? WHERE id = ?`
+    )
+      .bind(chatSessionId, now, taskId)
+      .run();
+    await env.DATABASE.prepare(
+      `INSERT INTO task_status_events
+         (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)
+       VALUES (?, ?, NULL, 'queued', 'system', NULL, 'reserved start guard test', ?)`
+    )
+      .bind(initialStatusEventId, taskId, now)
+      .run();
+    await env.DATABASE.prepare(
+      `INSERT INTO task_submission_checkpoints
+         (task_id, project_id, user_id, chat_session_id, initial_message_id,
+          initial_status_event_id, source_kind, source_id, source_execution_id,
+          triggered_by, intent_fingerprint, accepted_snapshot_json, branch_name,
+          task_title, checkpoint_state, project_data_committed_at, created_at, updated_at)
+       VALUES (?, 'proj-tr-001', 'user-tr-001', ?, 'msg-start-guard-001', ?,
+          'trigger', 'trigger-start-guard-001', 'exec-start-guard-001', 'cron',
+          ?, '{}', 'task/start-guard', 'Start guard task', 'project_data_committed', ?, ?, ?)`
+    )
+      .bind(taskId, chatSessionId, initialStatusEventId, intentFingerprint, now, now, now)
+      .run();
+
+    const projectDataStub = env.PROJECT_DATA.get(env.PROJECT_DATA.idFromName('proj-tr-001'));
+    await runInDurableObject(projectDataStub, async (_instance, state) => {
+      const timestamp = Date.now();
+      state.storage.sql.exec(
+        `INSERT OR REPLACE INTO chat_sessions
+           (id, workspace_id, task_id, created_by_user_id, topic, status,
+            message_count, started_at, created_at, updated_at)
+         VALUES (?, NULL, ?, ?, 'Start guard task', 'active', 1, ?, ?, ?)`,
+        chatSessionId,
+        taskId,
+        'user-tr-001',
+        timestamp,
+        timestamp,
+        timestamp
+      );
+    });
+
+    await startTaskRunnerDO(env, {
+      ...makeStartInput(taskId),
+      chatSessionId,
+      startGuard: {
+        kind: 'reserved_submission',
+        taskId,
+        projectId: 'proj-tr-001',
+        userId: 'user-tr-001',
+        chatSessionId,
+        intentFingerprint,
+      },
+    });
+
+    const status = (await getStub(taskId).getStatus()) as TaskRunnerState;
+    expect(status.config.startGuard).toEqual({
+      kind: 'reserved_submission',
+      taskId,
+      projectId: 'proj-tr-001',
+      userId: 'user-tr-001',
+      chatSessionId,
+      intentFingerprint,
+    });
   });
 
   it('startTaskRunnerDO defaults optional fields to null', async () => {
@@ -274,6 +367,7 @@ describe('task-runner-do proxy — Worker→DO contract', () => {
       taskTitle: 'Minimal task',
       repository: 'test-org/test-repo',
       installationId: 'inst-002',
+      resolvedReservation: RESOLVED_RESERVATION,
     });
 
     const stub = getStub(taskId);
@@ -300,6 +394,7 @@ describe('task-runner-do proxy — Worker→DO contract', () => {
     expect(status.config.systemPromptAppend).toBeNull();
     expect(status.config.attachments).toBeNull();
     expect(status.config.projectScaling).toBeNull();
+    expect(status.config.resolvedReservation).toEqual(RESOLVED_RESERVATION);
   });
 
   it('does not let a mismatched capacity candidate override explicit provider or location', async () => {
@@ -366,8 +461,10 @@ describe('task-runner-do proxy — Worker→DO contract', () => {
   it('advanceTaskRunnerWorkspaceReady forwards running status', async () => {
     const taskId = 'task-advance-running-001';
     await startTaskRunnerDO(env, makeStartInput(taskId));
+    const workspaceId = 'workspace-advance-running';
+    await bindWorkspace(taskId, workspaceId);
 
-    await advanceTaskRunnerWorkspaceReady(env, taskId, 'running', null);
+    await advanceTaskRunnerWorkspaceReady(env, taskId, 'running', null, workspaceId);
 
     const stub = getStub(taskId);
     const status = (await stub.getStatus()) as TaskRunnerState;
@@ -379,8 +476,10 @@ describe('task-runner-do proxy — Worker→DO contract', () => {
   it('advanceTaskRunnerWorkspaceReady forwards recovery status', async () => {
     const taskId = 'task-advance-recovery-001';
     await startTaskRunnerDO(env, makeStartInput(taskId));
+    const workspaceId = 'workspace-advance-recovery';
+    await bindWorkspace(taskId, workspaceId);
 
-    await advanceTaskRunnerWorkspaceReady(env, taskId, 'recovery', null);
+    await advanceTaskRunnerWorkspaceReady(env, taskId, 'recovery', null, workspaceId);
 
     const stub = getStub(taskId);
     const status = (await stub.getStatus()) as TaskRunnerState;
@@ -391,8 +490,10 @@ describe('task-runner-do proxy — Worker→DO contract', () => {
   it('advanceTaskRunnerWorkspaceReady forwards error status with message', async () => {
     const taskId = 'task-advance-error-001';
     await startTaskRunnerDO(env, makeStartInput(taskId));
+    const workspaceId = 'workspace-advance-error';
+    await bindWorkspace(taskId, workspaceId);
 
-    await advanceTaskRunnerWorkspaceReady(env, taskId, 'error', 'Container build failed: OOM');
+    await advanceTaskRunnerWorkspaceReady(env, taskId, 'error', 'Container build failed: OOM', workspaceId);
 
     const stub = getStub(taskId);
     const status = (await stub.getStatus()) as TaskRunnerState;
@@ -404,7 +505,7 @@ describe('task-runner-do proxy — Worker→DO contract', () => {
   it('advanceTaskRunnerWorkspaceReady is a no-op on uninitialized DO', async () => {
     // Calling advance on a DO that was never started should not throw
     await expect(
-      advanceTaskRunnerWorkspaceReady(env, 'task-advance-noop-001', 'running', null)
+      advanceTaskRunnerWorkspaceReady(env, 'task-advance-noop-001', 'running', null, 'workspace-noop')
     ).resolves.toBeUndefined();
 
     // Verify DO remains uninitialized

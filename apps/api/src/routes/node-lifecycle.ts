@@ -39,6 +39,7 @@ import {
   nodeStatusTerminatesCallbacks,
   verifyNodeCallbackAuth,
 } from '../services/node-callback-auth';
+import { recordNodeHealthEvent } from '../services/node-health';
 import { issueNodeOriginCertificate } from '../services/origin-ca-certificates';
 import * as projectDataService from '../services/project-data';
 import {
@@ -496,6 +497,16 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
     rejectTerminalNodeCallback(nodeId, latest?.status, 'heartbeat');
   }
 
+  if (node.healthStatus === 'unhealthy' && node.lastHeartbeatAt) {
+    await recordNodeHealthEvent(c.env, {
+      nodeId,
+      episodeStartedAt: node.lastHeartbeatAt,
+      event: 'recovered',
+      reason: 'node_heartbeat_resumed',
+      createdAt: now,
+    });
+  }
+
   // Backup ACP heartbeat sweep — primary heartbeat is now sent directly by the
   // VM agent via POST /api/projects/:id/node-acp-heartbeat. Retained as safety net.
   const acpSweepTimeoutMs = parseInt(c.env.HEARTBEAT_ACP_SWEEP_TIMEOUT_MS || '15000', 10);
@@ -767,13 +778,18 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
       }
 
       if (pendingReleases.length > 0) {
+        // `deployment.pendingReleases` is the ONLY advertisement of a pending
+        // release. The legacy top-level `pendingReleaseSeq` carried a duplicate of
+        // the lone entry, which health.go appended to this same list under its own
+        // cloud-init ENVIRONMENT_ID — two apply goroutines per tick, mis-attributed
+        // on multi-environment nodes. Rollout-safe to drop: the agent gained
+        // `pendingReleases` in the same commit that started emitting it (703b8b56f,
+        // 2026-06-21), and it still honours the legacy field as a fallback when this
+        // list is absent.
         response.deployment = {
           ...(response.deployment as Record<string, unknown>),
           pendingReleases,
         };
-        if (pendingReleases.length === 1) {
-          response.pendingReleaseSeq = pendingReleases[0]?.seq;
-        }
       }
       if (pendingRouteConfigs.length > 0) {
         response.deployment = {

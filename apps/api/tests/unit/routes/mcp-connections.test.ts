@@ -16,6 +16,7 @@ import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
+import { openMcpConnectionHeaders } from '../../../src/services/mcp-connection-headers';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 let currentUserId = 'owner-user';
@@ -26,9 +27,8 @@ vi.mock('../../../src/middleware/auth', () => ({
   getUserId: () => currentUserId,
 }));
 
-const { projectMcpConnectionRoutes, userMcpConnectionRoutes } = await import(
-  '../../../src/routes/mcp-connections'
-);
+const { projectMcpConnectionRoutes, userMcpConnectionRoutes } =
+  await import('../../../src/routes/mcp-connections');
 const { handleAppError } = await import('../../../src/middleware/app-error-handler');
 
 const ENCRYPTION_KEY = Buffer.alloc(32, 9).toString('base64');
@@ -43,8 +43,8 @@ function makeApp() {
   return app;
 }
 
-function env() {
-  return { DATABASE: createSqliteD1(sqlite), ENCRYPTION_KEY } as unknown as Record<
+function env(overrides: Record<string, string> = {}) {
+  return { DATABASE: createSqliteD1(sqlite), ENCRYPTION_KEY, ...overrides } as unknown as Record<
     string,
     unknown
   >;
@@ -59,9 +59,7 @@ function seedProject(projectId: string, ownerId: string) {
 function seedMember(projectId: string, userId: string, role: string, status = 'active') {
   // Composite (project_id, user_id) primary key — no surrogate id column.
   sqlite
-    .prepare(
-      'INSERT INTO project_members (project_id, user_id, role, status) VALUES (?, ?, ?, ?)'
-    )
+    .prepare('INSERT INTO project_members (project_id, user_id, role, status) VALUES (?, ?, ?, ?)')
     .run(projectId, userId, role, status);
 }
 
@@ -74,7 +72,7 @@ const VALID_BODY = {
 
 async function request(
   path: string,
-  init?: { method?: string; body?: unknown }
+  init?: { method?: string; body?: unknown; env?: Record<string, string> }
 ): Promise<Response> {
   return makeApp().request(
     path,
@@ -84,7 +82,7 @@ async function request(
         ? { body: JSON.stringify(init.body), headers: { 'Content-Type': 'application/json' } }
         : {}),
     },
-    env()
+    env(init?.env)
   );
 }
 
@@ -271,5 +269,146 @@ describe('personal-scope routes', () => {
       body: { ...VALID_BODY, name: 'sam-mcp' },
     });
     expect(res.status).toBe(400);
+  });
+});
+
+describe('custom headers over HTTP', () => {
+  const API_KEY = 'ak_route_secret';
+  const COMPOSIO_BODY = {
+    name: 'composio',
+    url: 'https://backend.composio.dev/v3/mcp/server-1',
+    authType: 'none',
+    headers: [{ name: 'x-api-key', value: API_KEY }],
+  };
+
+  async function storedHeaders(id: string) {
+    const row = sqlite
+      .prepare(
+        'SELECT encrypted_headers AS encryptedHeaders, headers_iv AS headersIv FROM mcp_connections WHERE id = ?'
+      )
+      .get(id) as { encryptedHeaders: string | null; headersIv: string | null };
+    return openMcpConnectionHeaders(row, ENCRYPTION_KEY);
+  }
+
+  it('stores header values encrypted and returns only their names', async () => {
+    currentUserId = 'user-a';
+    const created = await request('/api/mcp-connections', { method: 'POST', body: COMPOSIO_BODY });
+    const raw = await created.text();
+
+    expect(created.status).toBe(201);
+    expect(raw).not.toContain(API_KEY);
+    const { id, headerNames } = JSON.parse(raw) as { id: string; headerNames: string[] };
+    expect(headerNames).toEqual(['x-api-key']);
+
+    const listed = await (await request('/api/mcp-connections')).text();
+    expect(listed).not.toContain(API_KEY);
+    expect(JSON.parse(listed)).toMatchObject({ items: [{ id, headerNames: ['x-api-key'] }] });
+
+    expect(await storedHeaders(id)).toEqual([{ name: 'x-api-key', value: API_KEY }]);
+    const ciphertext = sqlite
+      .prepare('SELECT encrypted_headers FROM mcp_connections')
+      .pluck()
+      .get();
+    expect(String(ciphertext)).not.toContain(API_KEY);
+  });
+
+  it('PATCH keeps a value sent without one and adds a new header', async () => {
+    currentUserId = 'owner-user';
+    const created = await request('/api/projects/proj-1/mcp-connections', {
+      method: 'POST',
+      body: COMPOSIO_BODY,
+    });
+    const { id } = (await created.json()) as { id: string };
+
+    const patched = await request(`/api/projects/proj-1/mcp-connections/${id}`, {
+      method: 'PATCH',
+      body: { headers: [{ name: 'x-api-key' }, { name: 'x-org-id', value: 'org-42' }] },
+    });
+
+    expect(patched.status).toBe(200);
+    expect(((await patched.json()) as { headerNames: string[] }).headerNames).toEqual([
+      'x-api-key',
+      'x-org-id',
+    ]);
+    expect(await storedHeaders(id)).toEqual([
+      { name: 'x-api-key', value: API_KEY },
+      { name: 'x-org-id', value: 'org-42' },
+    ]);
+  });
+
+  it('requires a value for every header on create', async () => {
+    currentUserId = 'user-a';
+    const res = await request('/api/mcp-connections', {
+      method: 'POST',
+      body: { ...COMPOSIO_BODY, headers: [{ name: 'x-api-key' }] },
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects an Authorization header on a bearer server with 400', async () => {
+    currentUserId = 'user-a';
+    const res = await request('/api/mcp-connections', {
+      method: 'POST',
+      body: { ...VALID_BODY, headers: [{ name: 'Authorization', value: 'Basic dXNlcjpwYXNz' }] },
+    });
+    expect(res.status).toBe(400);
+    expect(await res.text()).toMatch(/conflicts with the bearer token/);
+  });
+
+  it('applies MAX_MCP_CONNECTION_HEADERS from the environment on create and update', async () => {
+    currentUserId = 'user-a';
+    const limitEnv = { MAX_MCP_CONNECTION_HEADERS: '1' };
+    const twoHeaders = [
+      { name: 'x-api-key', value: API_KEY },
+      { name: 'x-org-id', value: 'org-42' },
+    ];
+
+    const tooMany = await request('/api/mcp-connections', {
+      method: 'POST',
+      body: { ...COMPOSIO_BODY, headers: twoHeaders },
+      env: limitEnv,
+    });
+    expect(tooMany.status).toBe(400);
+    expect(await tooMany.text()).toMatch(/Maximum 1 headers/);
+
+    // Control: one header fits the same limit, so the 400 above is the limit and not breakage.
+    const fits = await request('/api/mcp-connections', {
+      method: 'POST',
+      body: COMPOSIO_BODY,
+      env: limitEnv,
+    });
+    expect(fits.status).toBe(201);
+    const { id } = (await fits.json()) as { id: string };
+
+    const grow = await request(`/api/mcp-connections/${id}`, {
+      method: 'PATCH',
+      body: { headers: [{ name: 'x-api-key' }, { name: 'x-org-id', value: 'org-42' }] },
+      env: limitEnv,
+    });
+    expect(grow.status).toBe(400);
+    expect(await storedHeaders(id)).toEqual([{ name: 'x-api-key', value: API_KEY }]);
+  });
+
+  it('applies MCP_CONNECTION_HEADER_VALUE_MAX_BYTES from the environment, in bytes', async () => {
+    currentUserId = 'user-a';
+    const limitEnv = { MCP_CONNECTION_HEADER_VALUE_MAX_BYTES: '8' };
+
+    // Five characters, ten bytes.
+    const tooBig = await request('/api/mcp-connections', {
+      method: 'POST',
+      body: { ...COMPOSIO_BODY, headers: [{ name: 'x-api-key', value: 'ééééé' }] },
+      env: limitEnv,
+    });
+    expect(tooBig.status).toBe(400);
+    const message = await tooBig.text();
+    expect(message).toMatch(/exceeds max size of 8 bytes/);
+    expect(message).not.toContain('ééééé');
+
+    const fits = await request('/api/mcp-connections', {
+      method: 'POST',
+      body: { ...COMPOSIO_BODY, headers: [{ name: 'x-api-key', value: 'abcdefgh' }] },
+      env: limitEnv,
+    });
+    expect(fits.status).toBe(201);
   });
 });

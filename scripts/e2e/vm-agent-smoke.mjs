@@ -165,7 +165,7 @@ function startControlPlaneMock(publicJwk) {
 
         if (parsed.agentType === 'opencode') {
           res.writeHead(404, { 'content-type': 'application/json' });
-          res.end(JSON.stringify({ error: 'not_found', message: 'Agent credential' }));
+          res.end(JSON.stringify({ error: 'NOT_FOUND', message: 'Agent credential not found' }));
           return;
         }
 
@@ -658,7 +658,7 @@ async function runOpenCodeNoKeySmoke(jwtToken, controlPlane) {
         msg.status === 'error' &&
         msg.agentType === 'opencode' &&
         typeof msg.error === 'string' &&
-        msg.error.includes('Failed to fetch credential'),
+        msg.error === 'model_provider_credential_missing',
       15_000
     );
 

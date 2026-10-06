@@ -3,7 +3,7 @@
  *
  * Without this constraint, multiple workspaces can share the same chatSessionId,
  * causing non-deterministic message routing for follow-up prompts.
- * See: tasks/active/2026-03-03-fix-chat-session-message-leakage.md (Bug 5)
+ * See: tasks/archive/2026-03-03-fix-chat-session-message-leakage.md (Bug 5)
  */
 import { getTableConfig } from 'drizzle-orm/sqlite-core';
 import { readdirSync,readFileSync } from 'fs';

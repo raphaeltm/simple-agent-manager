@@ -12,6 +12,7 @@ import type {
   AdmitProjectEventInput,
   AgentMailboxMessage,
   CancelProjectEventSubscriptionInput,
+  CatchUpProjectEventChannelInput,
   CheckpointEpisode,
   CheckpointEpisodeTransitionInput,
   CommentAuthor,
@@ -22,10 +23,13 @@ import type {
   CreateProjectEventSubscriptionInput,
   DeliveryState,
   ExpireProjectEventSubscriptionsInput,
+  FollowProjectEventChannelInput,
+  FollowProjectEventChannelResult,
   GetProjectEventInput,
   GetProjectEventRecentStatusInput,
   GetProjectEventSubscriptionInput,
   LibraryFileCommentMutationResponse,
+  ListProjectEventChannelsInput,
   ListProjectEventDeliveryAttemptsInput,
   ListProjectEventDeliveryBatchesInput,
   ListProjectEventSubscriptionEventsInput,
@@ -35,7 +39,11 @@ import type {
   MessageCommentMutationResponse,
   MessageCommentReplyMutationResponse,
   MessageCommentThread,
+  MessageCursor,
   ProjectEventAdmissionResult,
+  ProjectEventChannelHistory,
+  ProjectEventChannelHistoryInput,
+  ProjectEventChannelList,
   ProjectEventDeliveryAckResult,
   ProjectEventDeliveryAttemptListResult,
   ProjectEventDeliveryAttemptMutationResult,
@@ -48,6 +56,8 @@ import type {
   ProjectEventSubscriptionEventListResult,
   ProjectEventSubscriptionListResult,
   ProjectEventSubscriptionMutationResult,
+  PublishProjectEventChannelInput,
+  PublishProjectEventChannelResult,
   RecordProjectEventDeliveryAttemptInput,
   RunProjectEventRetentionInput,
   SessionActivityTerminalReason,
@@ -73,6 +83,11 @@ import {
   CommentValidationError,
 } from '../durable-objects/project-data/comment-contracts';
 import type { ProjectDataGroupedFtsCleanupResult } from '../durable-objects/project-data/grouped-fts-cleanup';
+import type {
+  GroupedFtsWallRecoveryRequest,
+  GroupedFtsWallRecoveryResult,
+} from '../durable-objects/project-data/grouped-fts-wall-recovery';
+import type { SearchResult } from '../durable-objects/project-data/message-search';
 import {
   ProjectEventAckPolicyError,
   ProjectEventAckStateError,
@@ -115,39 +130,48 @@ export {
   ProjectEventNotFoundError,
   ProjectEventValidationError,
 } from '../durable-objects/project-data/project-events-contracts';
+import type { ValidateProjectEventWakeRecoveryAuthorityInput } from '../durable-objects/project-data/project-events-wake-delivery';
 import type {
   AcceptedPromptDelivery,
   AcceptPromptDeliveryInput,
 } from '../durable-objects/project-data/prompt-delivery';
+import type {
+  CreateReservedTaskSessionWithInitialMessageInput,
+  CreateReservedTaskSessionWithInitialMessageResult,
+  SessionIdentityGuard as ProjectDataSessionIdentityGuard,
+} from '../durable-objects/project-data/sessions';
 import type { RegisterTaskWaitInput } from '../durable-objects/project-data/task-waits';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { type NormalizedSearchQuery, normalizeSearchQuery } from '../lib/search-query-limits';
 import {
+  PROJECT_DATA_ARCHIVE_DEFAULT_SEARCH_CONCURRENCY,
   PROJECT_DATA_ARCHIVE_DEFAULT_SEARCH_MAX_OWNERS,
+  PROJECT_DATA_ARCHIVE_MAX_SEARCH_CONCURRENCY,
   PROJECT_DATA_ARCHIVE_MAX_SEARCH_OWNERS,
   PROJECT_DATA_ARCHIVE_ROUTING_SCHEMA_VERSION,
   type ProjectDataArchiveLocation,
   type ProjectDataArchiveOwnerRef,
 } from '../project-data-archive/contract';
-import {
-  computeDurableObjectRetryDelayMs,
-  getDurableObjectRetryConfig,
-  isDurableObjectStorageFullError,
-  isTransientDurableObjectError,
-} from './durable-object-retry';
+import { isDurableObjectStorageFullError } from './durable-object-retry';
 import {
   assertExactWriteAllowed,
   isProjectDataArchiveExactRoutingEnabled,
   resolveExactReadOwner,
 } from './project-data-archive-routing';
 import { ensureOncePerIsolate, forgetEnsuredProjectData } from './project-data-ensure-memo';
+import { type ProjectDataRpcRetryPolicy, retryProjectDataRpc } from './project-data-rpc-retry';
+import type { ProjectDataRootSearchCoverage } from './project-data-search-coverage';
 import { toProjectDataStorageFullError } from './project-data-storage-errors';
 import {
   buildSessionLifecycleEventInput,
   type SessionLifecycleEventInput,
 } from './project-lifecycle-event-inputs';
+import { recordReservedTaskSessionRevocation } from './reserved-task-session-revocations';
 import { hasAuthorizedRestorableSnapshotWakeClaim } from './session-snapshots';
 import type { TaskAcpLivenessSignals } from './task-runtime-liveness';
+
+export type { ProjectDataSessionIdentityGuard };
 
 function rootExactReadOwner(projectId: string, sessionId: string): ProjectDataArchiveLocation {
   return {
@@ -319,6 +343,12 @@ function normalizeProjectDataEventRpcError(err: unknown): Error | null {
   }
 }
 
+function isFailSessionIdentityGuardDenial(err: unknown, sessionId: string): boolean {
+  return (
+    err instanceof Error && err.message.startsWith(`Session ${sessionId} cannot failed: expected `)
+  );
+}
+
 async function callProjectDataNoRetry<T>(
   env: Env,
   projectId: string,
@@ -338,52 +368,20 @@ async function callProjectDataWithRetry<T>(
   env: Env,
   projectId: string,
   operation: string,
-  call: (stub: DurableObjectStub<ProjectData>) => Promise<T>
+  call: (stub: DurableObjectStub<ProjectData>) => Promise<T>,
+  policy: ProjectDataRpcRetryPolicy = 'mutation'
 ): Promise<T> {
-  const retryConfig = getDurableObjectRetryConfig(env);
-  let lastError: unknown;
-
-  for (let attempt = 1; attempt <= retryConfig.maxAttempts; attempt++) {
-    try {
-      const stub = await getStub(env, projectId);
-      return await call(stub);
-    } catch (err) {
-      lastError = err;
-      // Any DO failure means this isolate could not observe the DO's state, so
-      // drop its belief that projectId is persisted and let the next attempt
-      // re-ensure. Idempotent, and defence in depth only — see the memo module.
-      forgetEnsuredProject(env, projectId);
-
-      if (isDurableObjectStorageFullError(err)) {
-        throw toProjectDataStorageFullError(projectId, operation, err);
-      }
-
-      if (attempt >= retryConfig.maxAttempts || !isTransientDurableObjectError(err)) {
-        throw err;
-      }
-
-      const delayMs = computeDurableObjectRetryDelayMs(
-        attempt,
-        retryConfig.baseDelayMs,
-        retryConfig.maxDelayMs
-      );
-      log.warn('project_data.do_rpc_retry', {
-        projectId,
-        operation,
-        attempt,
-        maxAttempts: retryConfig.maxAttempts,
-        delayMs,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      await sleep(delayMs);
-    }
-  }
-
-  throw normalizeProjectDataRpcError(
+  return retryProjectDataRpc({
+    env,
     projectId,
     operation,
-    lastError ?? new Error('ProjectData DO retry exhausted without an error')
-  );
+    policy,
+    resolveStub: () => getStub(env, projectId),
+    // Defence in depth only — see the memo module.
+    forgetEnsured: () => forgetEnsuredProject(env, projectId),
+    normalizeError: (err) => normalizeProjectDataRpcError(projectId, operation, err),
+    call,
+  });
 }
 
 async function callProjectDataOwnerWithRetry<T>(
@@ -391,53 +389,19 @@ async function callProjectDataOwnerWithRetry<T>(
   projectId: string,
   ownerName: string,
   operation: string,
-  call: (stub: DurableObjectStub<ProjectData>) => Promise<T>
+  call: (stub: DurableObjectStub<ProjectData>) => Promise<T>,
+  policy: ProjectDataRpcRetryPolicy = 'mutation'
 ): Promise<T> {
-  const retryConfig = getDurableObjectRetryConfig(env);
-  let lastError: unknown;
-
-  for (let attempt = 1; attempt <= retryConfig.maxAttempts; attempt++) {
-    try {
-      const stub = await getStubForOwner(env, projectId, ownerName);
-      return await call(stub);
-    } catch (err) {
-      lastError = err;
-      forgetEnsuredOwner(env, ownerName);
-
-      if (isDurableObjectStorageFullError(err)) {
-        throw toProjectDataStorageFullError(projectId, operation, err);
-      }
-
-      if (attempt >= retryConfig.maxAttempts || !isTransientDurableObjectError(err)) {
-        throw err;
-      }
-
-      const delayMs = computeDurableObjectRetryDelayMs(
-        attempt,
-        retryConfig.baseDelayMs,
-        retryConfig.maxDelayMs
-      );
-      log.warn('project_data.do_rpc_retry', {
-        projectId,
-        operation,
-        attempt,
-        maxAttempts: retryConfig.maxAttempts,
-        delayMs,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      await sleep(delayMs);
-    }
-  }
-
-  throw normalizeProjectDataRpcError(
+  return retryProjectDataRpc({
+    env,
     projectId,
     operation,
-    lastError ?? new Error('ProjectData DO retry exhausted without an error')
-  );
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+    policy,
+    resolveStub: () => getStubForOwner(env, projectId, ownerName),
+    forgetEnsured: () => forgetEnsuredOwner(env, ownerName),
+    normalizeError: (err) => normalizeProjectDataRpcError(projectId, operation, err),
+    call,
+  });
 }
 
 type ProjectDataEventInput<T extends { projectId: string }> = Omit<T, 'projectId'>;
@@ -450,6 +414,19 @@ function withProjectId<T extends { projectId: string }>(
 }
 
 type ProjectDataEventRpc = {
+  publishProjectEventChannel(
+    input: PublishProjectEventChannelInput
+  ): Promise<PublishProjectEventChannelResult>;
+  listProjectEventChannels(input: ListProjectEventChannelsInput): Promise<ProjectEventChannelList>;
+  getProjectEventChannelHistory(
+    input: ProjectEventChannelHistoryInput
+  ): Promise<ProjectEventChannelHistory>;
+  followProjectEventChannel(
+    input: FollowProjectEventChannelInput
+  ): Promise<FollowProjectEventChannelResult>;
+  catchUpProjectEventChannel(
+    input: CatchUpProjectEventChannelInput
+  ): Promise<FollowProjectEventChannelResult>;
   admitProjectEvent(input: AdmitProjectEventInput): Promise<ProjectEventAdmissionResult>;
   createProjectEventSubscription(
     input: CreateProjectEventSubscriptionInput
@@ -488,6 +465,9 @@ type ProjectDataEventRpc = {
   getProjectEventRecentStatus(
     input: GetProjectEventRecentStatusInput
   ): Promise<ProjectEventRecentStatus>;
+  validateProjectEventWakeRecoveryAuthority(
+    input: ValidateProjectEventWakeRecoveryAuthorityInput
+  ): Promise<boolean> | boolean;
   runProjectEventRetention(
     input: RunProjectEventRetentionInput
   ): Promise<ProjectEventRetentionResult>;
@@ -569,11 +549,47 @@ export async function createSession(
   return sessionId;
 }
 
+export async function createReservedTaskSessionWithInitialMessage(
+  env: Env,
+  projectId: string,
+  input: CreateReservedTaskSessionWithInitialMessageInput
+): Promise<CreateReservedTaskSessionWithInitialMessageResult> {
+  await assertExactWriteAllowedIfArchiveEnabled(
+    env,
+    projectId,
+    input.sessionId,
+    'createReservedTaskSessionWithInitialMessage'
+  );
+  const result = await callProjectDataWithRetry<CreateReservedTaskSessionWithInitialMessageResult>(
+    env,
+    projectId,
+    'createReservedTaskSessionWithInitialMessage',
+    async (stub) =>
+      (await stub.createReservedTaskSessionWithInitialMessage(
+        input
+      )) as CreateReservedTaskSessionWithInitialMessageResult
+  );
+  if (result.outcome === 'created' && result.sessionInserted) {
+    await recordSessionLifecycleEventBestEffort(env, {
+      projectId,
+      sessionId: input.sessionId,
+      lifecycle: 'started',
+      status: 'active',
+      taskId: input.taskId,
+      workspaceId: input.workspaceId,
+      source: 'project_data.create_reserved_task_session',
+      occurredAt: Date.now(),
+    });
+  }
+  return result;
+}
+
 export async function linkSessionToWorkspace(
   env: Env,
   projectId: string,
   sessionId: string,
-  workspaceId: string
+  workspaceId: string,
+  guard?: ProjectDataSessionIdentityGuard | null
 ): Promise<void> {
   await assertExactWriteAllowedIfArchiveEnabled(
     env,
@@ -582,7 +598,7 @@ export async function linkSessionToWorkspace(
     'linkSessionToWorkspace'
   );
   return callProjectDataWithRetry(env, projectId, 'linkSessionToWorkspace', (stub) =>
-    stub.linkSessionToWorkspace(sessionId, workspaceId)
+    stub.linkSessionToWorkspace(sessionId, workspaceId, guard ?? null)
   );
 }
 
@@ -592,6 +608,12 @@ export async function stopSession(
   sessionId: string
 ): Promise<boolean> {
   await assertExactWriteAllowedIfArchiveEnabled(env, projectId, sessionId, 'stopSession');
+  await recordReservedTaskSessionRevocation(env, {
+    projectId,
+    chatSessionId: sessionId,
+    reason: 'session_stopped',
+    source: 'project_data.stop_session',
+  });
   const stub = await getStub(env, projectId);
   const stopped = await stub.stopSession(sessionId);
   if (stopped) {
@@ -696,12 +718,33 @@ export async function failSession(
   env: Env,
   projectId: string,
   sessionId: string,
-  errorMessage: string | null = null
+  errorMessage: string | null = null,
+  guard?: ProjectDataSessionIdentityGuard | null
 ): Promise<boolean> {
   await assertExactWriteAllowedIfArchiveEnabled(env, projectId, sessionId, 'failSession');
   const stub = await getStub(env, projectId);
-  const failed = await stub.failSession(sessionId, errorMessage);
+  let failed: boolean;
+  try {
+    failed = await stub.failSession(sessionId, errorMessage, guard ?? null);
+  } catch (error) {
+    if (guard && isFailSessionIdentityGuardDenial(error, sessionId)) {
+      log.info('project_data.fail_session_identity_guard_denied', {
+        projectId,
+        sessionId,
+        taskId: guard.taskId ?? null,
+      });
+      return false;
+    }
+    throw error;
+  }
   if (failed) {
+    await recordReservedTaskSessionRevocation(env, {
+      projectId,
+      chatSessionId: sessionId,
+      taskId: guard?.taskId ?? null,
+      reason: 'session_failed',
+      source: 'project_data.fail_session',
+    });
     await recordSessionLifecycleEventBestEffort(env, {
       projectId,
       sessionId,
@@ -743,7 +786,8 @@ export async function persistMessage(
   role: string,
   content: string,
   toolMetadata: Record<string, unknown> | null,
-  messageId?: string
+  messageId?: string,
+  guard?: ProjectDataSessionIdentityGuard | null
 ): Promise<string> {
   await assertExactWriteAllowedIfArchiveEnabled(env, projectId, sessionId, 'persistMessage');
   return callProjectDataNoRetry(env, projectId, 'persistMessage', (stub) =>
@@ -752,7 +796,8 @@ export async function persistMessage(
       role,
       content,
       toolMetadata ? JSON.stringify(toolMetadata) : null,
-      messageId
+      messageId,
+      guard ?? null
     )
   );
 }
@@ -806,8 +851,12 @@ export async function listSessions(
   taskId: string | null = null,
   createdByUserId: string | null = null
 ): Promise<{ sessions: Record<string, unknown>[]; total: number; hasMore: boolean }> {
-  return callProjectDataWithRetry(env, projectId, 'listSessions', (stub) =>
-    stub.listSessions(status, limit, offset, taskId, createdByUserId)
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'listSessions',
+    (stub) => stub.listSessions(status, limit, offset, taskId, createdByUserId),
+    'idempotent_read'
   );
 }
 
@@ -850,8 +899,12 @@ export async function getSession(
   projectId: string,
   sessionId: string
 ): Promise<Record<string, unknown> | null> {
-  return callProjectDataWithRetry(env, projectId, 'getSession', (stub) =>
-    stub.getSession(sessionId)
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'getSession',
+    (stub) => stub.getSession(sessionId),
+    'idempotent_read'
   );
 }
 
@@ -860,19 +913,26 @@ export async function getMessages(
   projectId: string,
   sessionId: string,
   limit: number = 100,
-  before: number | null = null,
-  after: number | null = null,
+  before: MessageCursor | null = null,
+  after: MessageCursor | null = null,
   roles?: string[],
   compact: boolean = false,
   order: 'asc' | 'desc' = 'desc'
 ): Promise<{ messages: Record<string, unknown>[]; hasMore: boolean }> {
   const owner = await resolveExactReadOwnerIfArchiveEnabled(env, projectId, sessionId);
-  return callProjectDataOwnerWithRetry(env, projectId, owner.ownerName, 'getMessages', (stub) => {
-    if (owner.kind === 'root') {
-      return stub.archiveSourceGetMessages(owner, limit, before, after, roles, compact, order);
-    }
-    return stub.archiveTargetGetMessages(owner, limit, before, after, roles, compact, order);
-  });
+  return callProjectDataOwnerWithRetry(
+    env,
+    projectId,
+    owner.ownerName,
+    'getMessages',
+    (stub) => {
+      if (owner.kind === 'root') {
+        return stub.archiveSourceGetMessages(owner, limit, before, after, roles, compact, order);
+      }
+      return stub.archiveTargetGetMessages(owner, limit, before, after, roles, compact, order);
+    },
+    'idempotent_read'
+  );
 }
 
 export async function getMessageToolContent(
@@ -920,16 +980,8 @@ export async function getMessageCount(
   return stub.archiveTargetGetMessageCount(owner, roles);
 }
 
-/** Search messages across sessions by keyword. */
-export type ProjectDataMessageSearchResult = {
-  id: string;
-  sessionId: string;
-  role: string;
-  snippet: string;
-  createdAt: number;
-  sessionTopic: string | null;
-  sessionTaskId: string | null;
-};
+/** Search messages across sessions by keyword; the DO's own result shape, not a parallel copy. */
+export type ProjectDataMessageSearchResult = SearchResult;
 
 export type ProjectDataArchiveSearchMetadata = {
   partial: boolean;
@@ -937,19 +989,39 @@ export type ProjectDataArchiveSearchMetadata = {
     | null
     | 'session_scoped_exact_read'
     | 'archive_owner_inventory_unavailable'
-    | 'archive_owner_limit_exceeded'
-    | 'archive_owner_query_failed';
+    | 'continuation_required'
+    | 'archive_search_errors';
+  complete: boolean;
+  continuation: string | null;
+  resultsProvisional: boolean;
   rootQueried: boolean;
+  rootError: string | null;
   archiveOwnersAvailable: number;
   archiveOwnersQueried: number;
   archiveOwnersFailed: number;
   archiveOwnersOmitted: number;
   archiveOwnerLimit: number;
+  ownerCoverage: {
+    attempted: number;
+    succeeded: number;
+    remaining: number;
+    complete: boolean;
+  };
+  indexCoverage: {
+    sessionsAvailable: number;
+    sessionsIndexed: number;
+    sessionsIncomplete: number;
+    complete: boolean;
+    errors: Array<{ ownerName: string; sessionId: string; error: string }>;
+  };
+  executionErrors: Array<{ ownerName: string; error: string }>;
 };
 
 export type ProjectDataSearchMessagesWithArchiveMetadataResult = {
   results: ProjectDataMessageSearchResult[];
   archiveSearch: ProjectDataArchiveSearchMetadata;
+  rootSearch: ProjectDataRootSearchCoverage | null;
+  query: NormalizedSearchQuery;
 };
 
 type ProjectDataArchiveSearchOwnerRow = {
@@ -961,7 +1033,7 @@ function resolveProjectWideArchiveSearchMaxOwners(env: Env): number {
   const parsed = Number.parseInt(env.PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS ?? '', 10);
   if (
     Number.isSafeInteger(parsed) &&
-    parsed >= 0 &&
+    parsed > 0 &&
     parsed <= PROJECT_DATA_ARCHIVE_MAX_SEARCH_OWNERS
   ) {
     return parsed;
@@ -969,154 +1041,677 @@ function resolveProjectWideArchiveSearchMaxOwners(env: Env): number {
   return PROJECT_DATA_ARCHIVE_DEFAULT_SEARCH_MAX_OWNERS;
 }
 
+function resolveProjectWideArchiveSearchConcurrency(env: Env): number {
+  const parsed = Number.parseInt(env.PROJECT_DATA_ARCHIVE_SEARCH_CONCURRENCY ?? '', 10);
+  if (
+    Number.isSafeInteger(parsed) &&
+    parsed > 0 &&
+    parsed <= PROJECT_DATA_ARCHIVE_MAX_SEARCH_CONCURRENCY
+  ) {
+    return parsed;
+  }
+  return PROJECT_DATA_ARCHIVE_DEFAULT_SEARCH_CONCURRENCY;
+}
+
+function resolveBoundedArchiveSearchInt(
+  value: string | undefined,
+  fallback: number,
+  maximum: number
+): number {
+  const parsed = Number.parseInt(value ?? '', 10);
+  return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= maximum ? parsed : fallback;
+}
+
+function resolveArchiveSearchContinuationTtlMs(env: Env): number {
+  return resolveBoundedArchiveSearchInt(
+    env.PROJECT_DATA_ARCHIVE_SEARCH_CONTINUATION_TTL_MS,
+    15 * 60 * 1000,
+    24 * 60 * 60 * 1000
+  );
+}
+
+function resolveArchiveSearchCursorMaxBytes(env: Env): number {
+  return resolveBoundedArchiveSearchInt(
+    env.PROJECT_DATA_ARCHIVE_SEARCH_CURSOR_MAX_BYTES,
+    1024 * 1024,
+    4 * 1024 * 1024
+  );
+}
+
+function resolveArchiveSearchErrorLimit(env: Env): number {
+  return resolveBoundedArchiveSearchInt(env.PROJECT_DATA_ARCHIVE_SEARCH_ERROR_LIMIT, 20, 100);
+}
+
 async function readProjectWideArchiveSearchOwners(
   env: Env,
-  projectId: string,
-  limit: number
-): Promise<{ owners: ProjectDataArchiveSearchOwnerRow[]; total: number }> {
-  const totalRow = await env.DATABASE.prepare(
-    `SELECT COUNT(*) AS count
-     FROM (
+  projectId: string
+): Promise<ProjectDataArchiveSearchOwnerRow[]> {
+  const rows = await env.DATABASE.prepare(
+    `SELECT owner_name, generation FROM (
        SELECT owner_name, generation
        FROM project_data_session_locations
        WHERE project_id = ?
          AND location_state = 'archive_shard'
          AND owner_kind = 'archive_shard'
-       GROUP BY owner_name, generation
-     )`
-  )
-    .bind(projectId)
-    .first<{ count: number }>();
-  const total = typeof totalRow?.count === 'number' ? totalRow.count : 0;
-  if (limit === 0) return { owners: [], total };
-  const rows = await env.DATABASE.prepare(
-    `SELECT owner_name, generation
-     FROM project_data_session_locations
-     WHERE project_id = ?
-       AND location_state = 'archive_shard'
-       AND owner_kind = 'archive_shard'
+       UNION
+       SELECT target_owner_name AS owner_name, target_generation AS generation
+       FROM project_data_archive_migrations
+       WHERE project_id = ?
+         AND state IN ('target_sealed', 'recovery_manifest_persisted', 'source_deleted')
+         AND target_aggregate_sha256 IS NOT NULL
+         AND target_aggregate_sha256 != ''
+     )
      GROUP BY owner_name, generation
-     ORDER BY generation DESC, owner_name ASC
-     LIMIT ?`
+     ORDER BY generation DESC, owner_name ASC`
   )
-    .bind(projectId, limit)
+    .bind(projectId, projectId)
     .all<ProjectDataArchiveSearchOwnerRow>();
-  return { owners: rows.results ?? [], total };
+  return rows.results ?? [];
 }
 
 function sortAndLimitSearchResults(
   results: ProjectDataMessageSearchResult[],
   limit: number
 ): ProjectDataMessageSearchResult[] {
-  return [...results].sort((a, b) => b.createdAt - a.createdAt).slice(0, limit);
+  const deduped = new Map<string, ProjectDataMessageSearchResult>();
+  for (const result of results) deduped.set(`${result.sessionId}\u0000${result.id}`, result);
+  return [...deduped.values()]
+    .sort(
+      (a, b) =>
+        b.createdAt - a.createdAt ||
+        a.sessionId.localeCompare(b.sessionId) ||
+        a.id.localeCompare(b.id)
+    )
+    .slice(0, limit);
+}
+
+type ArchiveSearchCursor = {
+  version: 1;
+  expiresAt: number;
+  projectId: string;
+  query: string;
+  roles: string[] | null;
+  limit: number;
+  owners: ProjectDataArchiveSearchOwnerRow[];
+  retryOwners: ProjectDataArchiveSearchOwnerRow[];
+  ownerCount: number;
+  nextOwner: number;
+  results: ProjectDataMessageSearchResult[];
+  rootQueried: boolean;
+  rootError: string | null;
+  rootSearch?: ProjectDataRootSearchCoverage | null;
+  ownersSucceeded: number;
+  ownersFailed: number;
+  sessionsAvailable: number;
+  sessionsIndexed: number;
+  sessionsIncomplete: number;
+  indexErrors: Array<{ ownerName: string; sessionId: string; error: string }>;
+  executionErrors: Array<{ ownerName: string; error: string }>;
+  failedOwnerNames: string[];
+  ownerIndexCoverage: Array<{
+    ownerName: string;
+    sessionsAvailable: number;
+    sessionsIndexed: number;
+    sessionsIncomplete: number;
+  }>;
+};
+
+function isArchiveSearchCursor(value: unknown): value is ArchiveSearchCursor {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const cursor = value as Record<string, unknown>;
+  const integers = [
+    'expiresAt',
+    'limit',
+    'nextOwner',
+    'ownersSucceeded',
+    'ownersFailed',
+    'sessionsAvailable',
+    'sessionsIndexed',
+    'sessionsIncomplete',
+  ];
+  if (
+    cursor.version !== 1 ||
+    typeof cursor.projectId !== 'string' ||
+    typeof cursor.query !== 'string' ||
+    typeof cursor.rootQueried !== 'boolean' ||
+    (cursor.rootError !== null && typeof cursor.rootError !== 'string') ||
+    !integers.every((key) => Number.isSafeInteger(cursor[key])) ||
+    !(
+      cursor.roles === null ||
+      (Array.isArray(cursor.roles) && cursor.roles.every((role) => typeof role === 'string'))
+    ) ||
+    !Array.isArray(cursor.owners) ||
+    !Array.isArray(cursor.retryOwners) ||
+    !Array.isArray(cursor.results) ||
+    !Array.isArray(cursor.indexErrors) ||
+    !Array.isArray(cursor.executionErrors) ||
+    !Array.isArray(cursor.failedOwnerNames) ||
+    !Array.isArray(cursor.ownerIndexCoverage) ||
+    !Number.isSafeInteger(cursor.ownerCount)
+  ) {
+    return false;
+  }
+  const recordsHave = (items: unknown[], fields: string[]) =>
+    items.every(
+      (item) =>
+        item !== null &&
+        typeof item === 'object' &&
+        !Array.isArray(item) &&
+        fields.every((field) => typeof (item as Record<string, unknown>)[field] === 'string')
+    );
+  return (
+    cursor.owners.every(
+      (owner) =>
+        owner !== null &&
+        typeof owner === 'object' &&
+        !Array.isArray(owner) &&
+        typeof (owner as Record<string, unknown>).owner_name === 'string' &&
+        Number.isSafeInteger((owner as Record<string, unknown>).generation)
+    ) &&
+    cursor.retryOwners.every(
+      (owner) =>
+        owner !== null &&
+        typeof owner === 'object' &&
+        !Array.isArray(owner) &&
+        typeof (owner as Record<string, unknown>).owner_name === 'string' &&
+        Number.isSafeInteger((owner as Record<string, unknown>).generation)
+    ) &&
+    cursor.results.every(
+      (result) =>
+        result !== null &&
+        typeof result === 'object' &&
+        !Array.isArray(result) &&
+        ['id', 'sessionId', 'role', 'snippet'].every(
+          (field) => typeof (result as Record<string, unknown>)[field] === 'string'
+        ) &&
+        Number.isSafeInteger((result as Record<string, unknown>).createdAt) &&
+        ['sessionTopic', 'sessionTaskId'].every((field) => {
+          const fieldValue = (result as Record<string, unknown>)[field];
+          return fieldValue === null || typeof fieldValue === 'string';
+        })
+    ) &&
+    recordsHave(cursor.indexErrors, ['ownerName', 'sessionId', 'error']) &&
+    recordsHave(cursor.executionErrors, ['ownerName', 'error']) &&
+    cursor.failedOwnerNames.every((ownerName) => typeof ownerName === 'string') &&
+    cursor.ownerIndexCoverage.every(
+      (coverage) =>
+        coverage !== null &&
+        typeof coverage === 'object' &&
+        !Array.isArray(coverage) &&
+        typeof (coverage as Record<string, unknown>).ownerName === 'string' &&
+        ['sessionsAvailable', 'sessionsIndexed', 'sessionsIncomplete'].every((field) =>
+          Number.isSafeInteger((coverage as Record<string, unknown>)[field])
+        )
+    )
+  );
+}
+
+function base64UrlEncode(bytes: Uint8Array): string {
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function base64UrlDecode(value: string): Uint8Array {
+  const padded = value
+    .replace(/-/g, '+')
+    .replace(/_/g, '/')
+    .padEnd(Math.ceil(value.length / 4) * 4, '=');
+  const binary = atob(padded);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
+async function archiveSearchCursorKey(secret: string): Promise<CryptoKey> {
+  return crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign', 'verify']
+  );
+}
+
+async function compressArchiveSearchCursor(value: ArchiveSearchCursor): Promise<Uint8Array> {
+  const source = new TextEncoder().encode(JSON.stringify(value));
+  const body = new Blob([source]).stream().pipeThrough(new CompressionStream('gzip'));
+  return new Uint8Array(await new Response(body).arrayBuffer());
+}
+
+async function parseArchiveSearchCursor(bytes: Uint8Array): Promise<unknown> {
+  try {
+    // Accept the uncompressed form emitted by the first Slice B build so a rolling
+    // deployment does not invalidate continuations that are already in flight.
+    const decoded =
+      bytes[0] === 0x1f && bytes[1] === 0x8b
+        ? new Uint8Array(
+            await new Response(
+              new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))
+            ).arrayBuffer()
+          )
+        : bytes;
+    return JSON.parse(new TextDecoder().decode(decoded));
+  } catch {
+    throw new Error('Invalid archive search continuation body');
+  }
+}
+
+async function encodeArchiveSearchCursor(env: Env, cursor: ArchiveSearchCursor): Promise<string> {
+  // The continuation crosses MCP and agent tool-result boundaries. Compressing the
+  // frozen inventory keeps exhaustive traversal usable even when a project has many
+  // archive owners, while the HMAC below still authenticates every cursor byte.
+  const body = base64UrlEncode(await compressArchiveSearchCursor(cursor));
+  const signature = await crypto.subtle.sign(
+    'HMAC',
+    await archiveSearchCursorKey(env.ENCRYPTION_KEY),
+    new TextEncoder().encode(body)
+  );
+  const token = `${body}.${base64UrlEncode(new Uint8Array(signature))}`;
+  if (token.length > resolveArchiveSearchCursorMaxBytes(env)) {
+    throw new Error('Archive search continuation exceeds the configured byte limit');
+  }
+  return token;
+}
+
+async function decodeArchiveSearchCursor(
+  env: Env,
+  value: string,
+  binding: Pick<ArchiveSearchCursor, 'projectId' | 'query' | 'roles' | 'limit'>
+): Promise<ArchiveSearchCursor> {
+  if (value.length > resolveArchiveSearchCursorMaxBytes(env)) {
+    throw new Error('Archive search continuation exceeds the configured byte limit');
+  }
+  const [body, suppliedSignature, extra] = value.split('.');
+  if (!body || !suppliedSignature || extra) throw new Error('Invalid archive search continuation');
+  const valid = await crypto.subtle.verify(
+    'HMAC',
+    await archiveSearchCursorKey(env.ENCRYPTION_KEY),
+    base64UrlDecode(suppliedSignature),
+    new TextEncoder().encode(body)
+  );
+  if (!valid) throw new Error('Invalid archive search continuation signature');
+  const parsed = await parseArchiveSearchCursor(base64UrlDecode(body));
+  if (!isArchiveSearchCursor(parsed)) throw new Error('Invalid archive search continuation body');
+  const cursor = parsed;
+  if (
+    cursor.version !== 1 ||
+    cursor.expiresAt < Date.now() ||
+    cursor.projectId !== binding.projectId ||
+    cursor.query !== binding.query ||
+    cursor.limit !== binding.limit ||
+    JSON.stringify(cursor.roles) !== JSON.stringify(binding.roles) ||
+    !Array.isArray(cursor.owners) ||
+    !Number.isSafeInteger(cursor.nextOwner) ||
+    cursor.nextOwner < 0 ||
+    cursor.nextOwner > cursor.owners.length
+  ) {
+    throw new Error('Archive search continuation does not match this query');
+  }
+  return cursor;
+}
+
+async function mapWithConcurrency<T, R>(
+  values: T[],
+  concurrency: number,
+  fn: (value: T) => Promise<R>
+): Promise<Array<PromiseSettledResult<R>>> {
+  const results: Array<PromiseSettledResult<R>> = new Array(values.length);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, values.length) }, async () => {
+      for (;;) {
+        const index = next++;
+        const value = values[index];
+        if (value === undefined) return;
+        try {
+          results[index] = { status: 'fulfilled', value: await fn(value) };
+        } catch (reason) {
+          results[index] = { status: 'rejected', reason };
+        }
+      }
+    })
+  );
+  return results;
 }
 
 export async function searchMessagesWithArchiveMetadata(
   env: Env,
   projectId: string,
-  query: string,
+  inputQuery: string,
   sessionId: string | null = null,
   roles: string[] | null = null,
-  limit: number = 10
+  limit: number = 10,
+  continuation: string | null = null
 ): Promise<ProjectDataSearchMessagesWithArchiveMetadataResult> {
+  const searchStartedAt = Date.now();
+  const normalizedQuery = normalizeSearchQuery(inputQuery, env);
+  const query = normalizedQuery.query;
+  if (sessionId && continuation) {
+    throw new Error('Archive search continuation cannot be combined with a session-scoped search');
+  }
   if (sessionId) {
     const owner = await resolveExactReadOwnerIfArchiveEnabled(env, projectId, sessionId);
     const ownerStub = await getStubForOwner(env, projectId, owner.ownerName);
     let results: ProjectDataMessageSearchResult[];
+    let rootSearch: ProjectDataRootSearchCoverage | null = null;
     if (owner.kind === 'root') {
-      results = await ownerStub.archiveSourceSearchMessages(owner, query, roles, limit);
+      const search = await ownerStub.archiveSourceSearchMessagesWithCoverage(
+        owner,
+        query,
+        roles,
+        limit
+      );
+      results = search.results;
+      rootSearch = search.coverage;
     } else {
       results = await ownerStub.archiveTargetSearchMessages(owner, query, roles, limit);
     }
     return {
       results,
+      rootSearch,
+      query: normalizedQuery,
       archiveSearch: {
         partial: false,
         reason: 'session_scoped_exact_read',
+        complete: true,
+        continuation: null,
+        resultsProvisional: false,
         rootQueried: owner.kind === 'root',
+        rootError: null,
         archiveOwnersAvailable: owner.kind === 'archive_shard' ? 1 : 0,
         archiveOwnersQueried: owner.kind === 'archive_shard' ? 1 : 0,
         archiveOwnersFailed: 0,
         archiveOwnersOmitted: 0,
         archiveOwnerLimit: 1,
+        ownerCoverage: {
+          attempted: owner.kind === 'archive_shard' ? 1 : 0,
+          succeeded: owner.kind === 'archive_shard' ? 1 : 0,
+          remaining: 0,
+          complete: true,
+        },
+        indexCoverage: {
+          sessionsAvailable: owner.kind === 'archive_shard' ? 1 : 0,
+          sessionsIndexed: owner.kind === 'archive_shard' ? 1 : 0,
+          sessionsIncomplete: 0,
+          complete: true,
+          errors: [],
+        },
+        executionErrors: [],
       },
     };
   }
-  const stub = await getStub(env, projectId);
-  const rootResults = (await stub.searchMessages(
-    query,
-    sessionId,
-    roles,
-    limit
-  )) as ProjectDataMessageSearchResult[];
   const archiveOwnerLimit = resolveProjectWideArchiveSearchMaxOwners(env);
-  let archiveOwners: ProjectDataArchiveSearchOwnerRow[] = [];
-  let archiveOwnersAvailable = 0;
-  let reason: ProjectDataArchiveSearchMetadata['reason'] = null;
-  try {
-    const inventory = await readProjectWideArchiveSearchOwners(env, projectId, archiveOwnerLimit);
-    archiveOwners = inventory.owners;
-    archiveOwnersAvailable = inventory.total;
-    if (inventory.total > inventory.owners.length) reason = 'archive_owner_limit_exceeded';
-  } catch (error) {
-    log.warn('project_data.archive_search_inventory_failed', {
-      projectId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    reason = 'archive_owner_inventory_unavailable';
-  }
-
-  const archiveResults: ProjectDataMessageSearchResult[] = [];
-  let archiveOwnersFailed = 0;
-  for (const archiveOwner of archiveOwners) {
-    const owner: ProjectDataArchiveOwnerRef = {
-      kind: 'archive_shard',
-      projectId,
-      ownerName: archiveOwner.owner_name,
-      generation: archiveOwner.generation,
-    };
+  let cursor: ArchiveSearchCursor;
+  if (continuation) {
+    cursor = await decodeArchiveSearchCursor(env, continuation, { projectId, query, roles, limit });
+  } else {
+    let rootResults: ProjectDataMessageSearchResult[] = [];
+    let rootError: string | null = null;
+    let rootSearch: ProjectDataRootSearchCoverage | null = null;
     try {
-      const ownerStub = await getStubForOwner(env, projectId, owner.ownerName);
-      archiveResults.push(
-        ...(await ownerStub.archiveTargetSearchProjectMessages(owner, query, roles, limit))
-      );
+      const stub = await getStub(env, projectId);
+      const search = await stub.searchMessagesWithCoverage(query, null, roles, limit);
+      rootResults = search.results;
+      rootSearch = search.coverage;
     } catch (error) {
-      archiveOwnersFailed++;
-      reason = 'archive_owner_query_failed';
-      log.warn('project_data.archive_search_owner_failed', {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      rootError = 'root_search_failed';
+      log.warn('project_data.root_search_failed', { projectId, error: errorMessage });
+    }
+    let owners: ProjectDataArchiveSearchOwnerRow[];
+    try {
+      owners = await readProjectWideArchiveSearchOwners(env, projectId);
+    } catch (error) {
+      log.warn('project_data.archive_search_inventory_failed', {
         projectId,
-        ownerName: owner.ownerName,
-        generation: owner.generation,
         error: error instanceof Error ? error.message : String(error),
       });
+      return {
+        results: rootResults,
+        rootSearch,
+        query: normalizedQuery,
+        archiveSearch: {
+          partial: true,
+          reason: 'archive_owner_inventory_unavailable',
+          complete: false,
+          continuation: null,
+          resultsProvisional: true,
+          rootQueried: true,
+          rootError,
+          archiveOwnersAvailable: 0,
+          archiveOwnersQueried: 0,
+          archiveOwnersFailed: 0,
+          archiveOwnersOmitted: 0,
+          archiveOwnerLimit,
+          ownerCoverage: { attempted: 0, succeeded: 0, remaining: 0, complete: false },
+          indexCoverage: {
+            sessionsAvailable: 0,
+            sessionsIndexed: 0,
+            sessionsIncomplete: 0,
+            complete: false,
+            errors: [],
+          },
+          executionErrors: [],
+        },
+      };
     }
+    cursor = {
+      version: 1,
+      expiresAt: Date.now() + resolveArchiveSearchContinuationTtlMs(env),
+      projectId,
+      query,
+      roles,
+      limit,
+      owners,
+      retryOwners: [],
+      ownerCount: owners.length,
+      nextOwner: 0,
+      results: rootResults,
+      rootQueried: true,
+      rootError,
+      rootSearch,
+      ownersSucceeded: 0,
+      ownersFailed: 0,
+      sessionsAvailable: 0,
+      sessionsIndexed: 0,
+      sessionsIncomplete: 0,
+      indexErrors: [],
+      executionErrors: [],
+      failedOwnerNames: [],
+      ownerIndexCoverage: [],
+    };
   }
 
-  return {
-    results: sortAndLimitSearchResults([...rootResults, ...archiveResults], limit),
+  if (cursor.rootError !== null) {
+    try {
+      const stub = await getStub(env, projectId);
+      const search = await stub.searchMessagesWithCoverage(query, null, roles, limit);
+      cursor.results.push(...search.results);
+      cursor.rootSearch = search.coverage;
+      cursor.rootError = null;
+    } catch (error) {
+      log.warn('project_data.root_search_retry_failed', {
+        projectId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      cursor.rootError = 'root_search_failed';
+    }
+  }
+  if (cursor.nextOwner >= cursor.owners.length && cursor.retryOwners.length > 0) {
+    cursor.owners = cursor.retryOwners;
+    cursor.retryOwners = [];
+    cursor.nextOwner = 0;
+  }
+
+  const ownerBatch = cursor.owners.slice(cursor.nextOwner, cursor.nextOwner + archiveOwnerLimit);
+  const ownerResults = await mapWithConcurrency(
+    ownerBatch,
+    resolveProjectWideArchiveSearchConcurrency(env),
+    async (archiveOwner) => {
+      const owner: ProjectDataArchiveOwnerRef = {
+        kind: 'archive_shard',
+        projectId,
+        ownerName: archiveOwner.owner_name,
+        generation: archiveOwner.generation,
+      };
+      const ownerStub = await getStubForOwner(env, projectId, owner.ownerName);
+      return {
+        owner,
+        result: await ownerStub.archiveTargetSearchProjectMessages(owner, query, roles, limit),
+      };
+    }
+  );
+  let repairAttempts = 0;
+  let sessionsRepaired = 0;
+  ownerResults.forEach((settled, index) => {
+    const archiveOwner = ownerBatch[index];
+    if (!archiveOwner) return;
+    cursor.executionErrors = cursor.executionErrors.filter(
+      (item) => item.ownerName !== archiveOwner.owner_name
+    );
+    cursor.failedOwnerNames = cursor.failedOwnerNames.filter(
+      (ownerName) => ownerName !== archiveOwner.owner_name
+    );
+    cursor.indexErrors = cursor.indexErrors.filter(
+      (item) => item.ownerName !== archiveOwner.owner_name
+    );
+    if (settled.status === 'rejected') {
+      const error =
+        settled.reason instanceof Error ? settled.reason.message : String(settled.reason);
+      cursor.executionErrors.push({
+        ownerName: archiveOwner.owner_name,
+        error: 'archive_owner_search_failed',
+      });
+      cursor.failedOwnerNames.push(archiveOwner.owner_name);
+      cursor.retryOwners.push(archiveOwner);
+      log.warn('project_data.archive_search_owner_failed', {
+        projectId,
+        ownerName: archiveOwner.owner_name,
+        generation: archiveOwner.generation,
+        error,
+      });
+      return;
+    }
+    cursor.results.push(...settled.value.result.results);
+    cursor.results = sortAndLimitSearchResults(cursor.results, limit);
+    const coverage = settled.value.result.coverage;
+    repairAttempts += coverage.repairAttempts ?? 0;
+    sessionsRepaired += coverage.sessionsRepaired ?? 0;
+    cursor.ownerIndexCoverage = cursor.ownerIndexCoverage.filter(
+      (item) => item.ownerName !== archiveOwner.owner_name
+    );
+    cursor.ownerIndexCoverage.push({
+      ownerName: archiveOwner.owner_name,
+      sessionsAvailable: coverage.sessionsAvailable,
+      sessionsIndexed: coverage.sessionsIndexed,
+      sessionsIncomplete: coverage.sessionsIncomplete,
+    });
+    cursor.indexErrors.push(
+      ...coverage.errors.map((error: { sessionId: string; error: string }) => ({
+        ownerName: archiveOwner.owner_name,
+        ...error,
+      }))
+    );
+    if (coverage.sessionsIncomplete > 0 || coverage.errors.length > 0) {
+      cursor.retryOwners.push(archiveOwner);
+    } else {
+      cursor.ownersSucceeded++;
+    }
+  });
+  cursor.nextOwner += ownerBatch.length;
+
+  const errorLimit = resolveArchiveSearchErrorLimit(env);
+  cursor.executionErrors = cursor.executionErrors.slice(-errorLimit);
+  cursor.indexErrors = cursor.indexErrors.slice(-errorLimit);
+  const failedOwnerNames = new Set(cursor.failedOwnerNames);
+  const successfullyQueriedOwnerNames = new Set(
+    cursor.ownerIndexCoverage
+      .map((item) => item.ownerName)
+      .filter((ownerName) => !failedOwnerNames.has(ownerName))
+  );
+  const attemptedOwnerNames = new Set([
+    ...cursor.ownerIndexCoverage.map((item) => item.ownerName),
+    ...failedOwnerNames,
+  ]);
+  cursor.ownersSucceeded = successfullyQueriedOwnerNames.size;
+  cursor.ownersFailed = failedOwnerNames.size;
+  cursor.sessionsAvailable = cursor.ownerIndexCoverage.reduce(
+    (total, item) => total + item.sessionsAvailable,
+    0
+  );
+  cursor.sessionsIndexed = cursor.ownerIndexCoverage.reduce(
+    (total, item) => total + item.sessionsIndexed,
+    0
+  );
+  cursor.sessionsIncomplete = cursor.ownerIndexCoverage.reduce(
+    (total, item) => total + item.sessionsIncomplete,
+    0
+  );
+  const remaining = cursor.owners.length - cursor.nextOwner + cursor.retryOwners.length;
+  const ownerTraversalRemaining = Math.max(0, cursor.ownerCount - attemptedOwnerNames.size);
+  const ownerTraversalComplete = ownerTraversalRemaining === 0;
+  const complete =
+    remaining === 0 &&
+    cursor.rootError === null &&
+    cursor.failedOwnerNames.length === 0 &&
+    cursor.sessionsIncomplete === 0;
+  const nextContinuation = complete ? null : await encodeArchiveSearchCursor(env, cursor);
+  const hasErrors = cursor.rootError !== null || cursor.failedOwnerNames.length > 0;
+  const indexComplete =
+    ownerTraversalComplete &&
+    cursor.sessionsIncomplete === 0 &&
+    cursor.ownersFailed === 0 &&
+    cursor.indexErrors.length === 0;
+  const partial = !complete || !indexComplete || hasErrors;
+
+  const response: ProjectDataSearchMessagesWithArchiveMetadataResult = {
+    results: sortAndLimitSearchResults(cursor.results, limit),
+    rootSearch: cursor.rootSearch ?? null,
+    query: normalizedQuery,
     archiveSearch: {
-      partial: reason !== null,
-      reason,
-      rootQueried: true,
-      archiveOwnersAvailable,
-      archiveOwnersQueried: archiveOwners.length - archiveOwnersFailed,
-      archiveOwnersFailed,
-      archiveOwnersOmitted: Math.max(0, archiveOwnersAvailable - archiveOwners.length),
+      partial,
+      reason: !complete ? 'continuation_required' : partial ? 'archive_search_errors' : null,
+      complete,
+      continuation: nextContinuation,
+      resultsProvisional: !complete,
+      rootQueried: cursor.rootQueried,
+      rootError: cursor.rootError,
+      archiveOwnersAvailable: cursor.ownerCount,
+      archiveOwnersQueried: cursor.ownersSucceeded,
+      archiveOwnersFailed: cursor.ownersFailed,
+      archiveOwnersOmitted: remaining,
       archiveOwnerLimit,
+      ownerCoverage: {
+        attempted: attemptedOwnerNames.size,
+        succeeded: cursor.ownersSucceeded,
+        remaining: ownerTraversalRemaining,
+        complete: ownerTraversalComplete,
+      },
+      indexCoverage: {
+        sessionsAvailable: cursor.sessionsAvailable,
+        sessionsIndexed: cursor.sessionsIndexed,
+        sessionsIncomplete: cursor.sessionsIncomplete,
+        complete: indexComplete,
+        errors: cursor.indexErrors,
+      },
+      executionErrors: cursor.executionErrors,
     },
   };
-}
-
-export async function searchMessages(
-  env: Env,
-  projectId: string,
-  query: string,
-  sessionId: string | null = null,
-  roles: string[] | null = null,
-  limit: number = 10
-): Promise<ProjectDataMessageSearchResult[]> {
-  return (await searchMessagesWithArchiveMetadata(env, projectId, query, sessionId, roles, limit))
-    .results;
+  log.info('project_data.archive_search_completed', {
+    projectId,
+    durationMs: Date.now() - searchStartedAt,
+    ownerBatchSize: ownerBatch.length,
+    ownersAvailable: cursor.ownerCount,
+    ownersSucceeded: cursor.ownersSucceeded,
+    ownersFailed: cursor.ownersFailed,
+    ownersRemaining: remaining,
+    sessionsAvailable: cursor.sessionsAvailable,
+    sessionsIndexed: cursor.sessionsIndexed,
+    sessionsIncomplete: cursor.sessionsIncomplete,
+    repairAttempts,
+    sessionsRepaired,
+    complete,
+  });
+  return response;
 }
 
 // =========================================================================
@@ -1130,8 +1725,12 @@ export async function listCommentThreads(
   projectId: string,
   input: ListCommentThreadsInput
 ): Promise<MessageCommentListResponse> {
-  return callProjectDataWithRetry(env, projectId, 'listCommentThreads', (stub) =>
-    stub.listCommentThreads(input)
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'listCommentThreads',
+    (stub) => stub.listCommentThreads(input),
+    'idempotent_read'
   );
 }
 
@@ -1141,8 +1740,12 @@ export async function getCommentThread(
   sessionId: string,
   threadId: string
 ): Promise<MessageCommentThread | null> {
-  return callProjectDataWithRetry(env, projectId, 'getCommentThread', (stub) =>
-    stub.getCommentThread({ sessionId, threadId })
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'getCommentThread',
+    (stub) => stub.getCommentThread({ sessionId, threadId }),
+    'idempotent_read'
   );
 }
 
@@ -1200,14 +1803,58 @@ export async function listProjectCommentInbox(
   projectId: string,
   input: ListProjectCommentThreadsInput
 ): Promise<ProjectCommentInboxResult> {
-  return callProjectDataWithRetry(env, projectId, 'listProjectCommentInbox', (stub) =>
-    stub.listProjectCommentInbox(input)
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'listProjectCommentInbox',
+    (stub) => stub.listProjectCommentInbox(input),
+    'idempotent_read'
   );
 }
 
 // =========================================================================
 // ProjectData Event Subscription Core
 // =========================================================================
+
+export function publishProjectEventChannel(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<PublishProjectEventChannelInput>
+) {
+  return callProjectDataEvent(env, projectId, 'publishProjectEventChannel', input);
+}
+
+export function listProjectEventChannels(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<ListProjectEventChannelsInput> = {}
+) {
+  return callProjectDataEvent(env, projectId, 'listProjectEventChannels', input);
+}
+
+export function getProjectEventChannelHistory(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<ProjectEventChannelHistoryInput>
+) {
+  return callProjectDataEvent(env, projectId, 'getProjectEventChannelHistory', input);
+}
+
+export function followProjectEventChannel(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<FollowProjectEventChannelInput>
+) {
+  return callProjectDataEvent(env, projectId, 'followProjectEventChannel', input);
+}
+
+export function catchUpProjectEventChannel(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<CatchUpProjectEventChannelInput>
+) {
+  return callProjectDataEvent(env, projectId, 'catchUpProjectEventChannel', input);
+}
 
 export async function admitProjectEvent(
   env: Env,
@@ -1321,6 +1968,14 @@ export async function getProjectEventRecentStatus(
   return callProjectDataEvent(env, projectId, 'getProjectEventRecentStatus', input);
 }
 
+export async function validateProjectEventWakeRecoveryAuthority(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<ValidateProjectEventWakeRecoveryAuthorityInput>
+): Promise<boolean> {
+  return callProjectDataEvent(env, projectId, 'validateProjectEventWakeRecoveryAuthority', input);
+}
+
 export async function runProjectEventRetention(
   env: Env,
   projectId: string,
@@ -1338,8 +1993,12 @@ export async function listFileCommentThreads(
   projectId: string,
   input: ListFileCommentThreadsInput
 ): Promise<ListFileCommentThreadsResult> {
-  return callProjectDataWithRetry(env, projectId, 'listFileCommentThreads', (stub) =>
-    stub.listFileCommentThreads(input)
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'listFileCommentThreads',
+    (stub) => stub.listFileCommentThreads(input),
+    'idempotent_read'
   );
 }
 
@@ -1373,14 +2032,21 @@ export async function updateFileCommentThreadStatus(
   );
 }
 
-/** Materialize all stopped sessions that haven't been indexed yet. */
-export async function materializeAllStopped(
+/**
+ * Materialize sessions whose transcript has outrun their search index.
+ *
+ * Backfill entry point for sessions that were already sleeping when incremental
+ * materialization shipped; ordinary sessions are indexed by their own sleep and
+ * stop transitions.
+ */
+export async function materializePendingSessions(
   env: Env,
   projectId: string,
-  limit: number = 50
+  limit?: number,
+  scanLimit?: number
 ): Promise<{ materialized: number; errors: number; remaining: number }> {
   const stub = await getStub(env, projectId);
-  return stub.materializeAllStopped(limit);
+  return stub.materializePendingSessions(limit, scanLimit);
 }
 
 export async function getCleanupAt(
@@ -1521,8 +2187,12 @@ export async function listActivityEvents(
   before: number | null = null,
   sessionId: string | null = null
 ): Promise<{ events: Record<string, unknown>[]; hasMore: boolean }> {
-  return callProjectDataWithRetry(env, projectId, 'listActivityEvents', (stub) =>
-    stub.listActivityEvents(eventType, limit, before, sessionId)
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'listActivityEvents',
+    (stub) => stub.listActivityEvents(eventType, limit, before, sessionId),
+    'idempotent_read'
   );
 }
 
@@ -1592,8 +2262,12 @@ export async function getTaskAcpLivenessSignals(
     nowMs?: number;
   }
 ): Promise<TaskAcpLivenessSignals> {
-  return callProjectDataWithRetry(env, projectId, 'getTaskAcpLivenessSignals', (stub) =>
-    stub.getTaskAcpLivenessSignals(opts)
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'getTaskAcpLivenessSignals',
+    (stub) => stub.getTaskAcpLivenessSignals(opts),
+    'idempotent_read'
   );
 }
 
@@ -1686,8 +2360,12 @@ export async function recordSessionTurnEnd(
 
 /** Get the persisted session state snapshot (for page load catch-up). */
 export async function getSessionState(env: Env, projectId: string, sessionId: string) {
-  return callProjectDataWithRetry(env, projectId, 'getSessionState', (stub) =>
-    stub.getSessionState(sessionId)
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'getSessionState',
+    (stub) => stub.getSessionState(sessionId),
+    'idempotent_read'
   );
 }
 
@@ -1805,6 +2483,16 @@ export async function runProjectDataGroupedFtsCleanup(
 ): Promise<ProjectDataGroupedFtsCleanupResult | null> {
   return callProjectDataNoRetry(env, projectId, 'runProjectDataGroupedFtsCleanup', (stub) =>
     stub.runGroupedFtsCleanup()
+  );
+}
+
+export async function runProjectDataGroupedFtsWallRecovery(
+  env: Env,
+  projectId: string,
+  request: GroupedFtsWallRecoveryRequest
+): Promise<GroupedFtsWallRecoveryResult> {
+  return callProjectDataNoRetry(env, projectId, 'runProjectDataGroupedFtsWallRecovery', (stub) =>
+    stub.runGroupedFtsWallRecovery(request)
   );
 }
 
@@ -2289,16 +2977,36 @@ export async function forwardWebSocket(
   projectId: string,
   request: Request
 ): Promise<Response> {
-  return callProjectDataWithRetry(env, projectId, 'forwardWebSocket', (stub) => {
-    const url = new URL(request.url);
-    url.pathname = '/ws';
-    return stub.fetch(new Request(url.toString(), request));
-  });
+  // A WebSocket upgrade creates no state a repeat could duplicate; a retried attempt simply
+  // accepts a fresh socket if the first one never reached the object.
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'forwardWebSocket',
+    (stub) => {
+      const url = new URL(request.url);
+      url.pathname = '/ws';
+      return stub.fetch(new Request(url.toString(), request));
+    },
+    'idempotent_read'
+  );
 }
 
 // =========================================================================
 // Attention Markers
 // =========================================================================
+
+export function hasPendingSessionHumanInput(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  taskId: string,
+  now: number
+): Promise<boolean> {
+  return callProjectDataNoRetry(env, projectId, 'hasPendingSessionHumanInput', (stub) =>
+    stub.hasPendingSessionHumanInput(sessionId, taskId, now)
+  );
+}
 
 export async function createAttentionMarker(
   env: Env,
@@ -2376,4 +3084,91 @@ export async function resolveSessionAttentionMarkers(
 ): Promise<number> {
   const stub = await getStub(env, projectId);
   return stub.resolveSessionAttentionMarkers(sessionId, resolvedByMessageId, actorType, reason);
+}
+
+export function createProjectSchedule(
+  env: Env,
+  projectId: string,
+  input: Omit<Parameters<ProjectData['createProjectSchedule']>[0], 'projectId'>
+) {
+  return callProjectDataNoRetry(env, projectId, 'createProjectSchedule', (stub) =>
+    stub.createProjectSchedule({ ...input, projectId })
+  );
+}
+export function getProjectSchedule(
+  env: Env,
+  projectId: string,
+  input: Omit<Parameters<ProjectData['getProjectSchedule']>[0], 'projectId'>
+) {
+  return callProjectDataNoRetry(env, projectId, 'getProjectSchedule', (stub) =>
+    stub.getProjectSchedule({ ...input, projectId })
+  );
+}
+export function listProjectSchedules(
+  env: Env,
+  projectId: string,
+  input: Omit<Parameters<ProjectData['listProjectSchedules']>[0], 'projectId'>
+) {
+  return callProjectDataNoRetry(env, projectId, 'listProjectSchedules', (stub) =>
+    stub.listProjectSchedules({ ...input, projectId })
+  );
+}
+export function mutateProjectSchedule(
+  env: Env,
+  projectId: string,
+  input: Omit<Parameters<ProjectData['mutateProjectSchedule']>[0], 'projectId'>
+) {
+  return callProjectDataNoRetry(env, projectId, 'mutateProjectSchedule', (stub) =>
+    stub.mutateProjectSchedule({ ...input, projectId })
+  );
+}
+
+export function reconcileProjectSchedule(
+  env: Env,
+  projectId: string,
+  input: Omit<Parameters<ProjectData['reconcileProjectSchedule']>[0], 'projectId'>
+) {
+  return callProjectDataNoRetry(env, projectId, 'reconcileProjectSchedule', (stub) =>
+    stub.reconcileProjectSchedule({ ...input, projectId })
+  );
+}
+
+export function createProjectStandingWatch(
+  env: Env,
+  projectId: string,
+  input: Omit<Parameters<ProjectData['createProjectStandingWatch']>[0], 'projectId'>
+) {
+  return callProjectDataNoRetry(env, projectId, 'createProjectStandingWatch', (stub) =>
+    stub.createProjectStandingWatch({ ...input, projectId })
+  );
+}
+
+export function getProjectStandingWatch(
+  env: Env,
+  projectId: string,
+  input: Omit<Parameters<ProjectData['getProjectStandingWatch']>[0], 'projectId'>
+) {
+  return callProjectDataNoRetry(env, projectId, 'getProjectStandingWatch', (stub) =>
+    stub.getProjectStandingWatch({ ...input, projectId })
+  );
+}
+
+export function listProjectStandingWatches(
+  env: Env,
+  projectId: string,
+  input: Omit<Parameters<ProjectData['listProjectStandingWatches']>[0], 'projectId'>
+) {
+  return callProjectDataNoRetry(env, projectId, 'listProjectStandingWatches', (stub) =>
+    stub.listProjectStandingWatches({ ...input, projectId })
+  );
+}
+
+export function mutateProjectStandingWatch(
+  env: Env,
+  projectId: string,
+  input: Omit<Parameters<ProjectData['mutateProjectStandingWatch']>[0], 'projectId'>
+) {
+  return callProjectDataNoRetry(env, projectId, 'mutateProjectStandingWatch', (stub) =>
+    stub.mutateProjectStandingWatch({ ...input, projectId })
+  );
 }

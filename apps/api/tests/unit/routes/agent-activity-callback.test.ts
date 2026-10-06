@@ -51,8 +51,21 @@ vi.mock('drizzle-orm/d1', () => ({
         mocks.updateSets.push(values);
         return {
           where: vi.fn().mockImplementation(() => {
-            if (mocks.updateReject) return Promise.reject(mocks.updateReject);
-            return Promise.resolve(undefined);
+            const pending = mocks.updateReject
+              ? Promise.reject(mocks.updateReject)
+              : Promise.resolve(undefined);
+            return Object.assign(pending, {
+              returning: vi.fn(async () => {
+                await pending;
+                if (
+                  values.status === 'error' &&
+                  !['creating', 'running', 'recovery'].includes(mocks.workspaceStatus)
+                ) {
+                  return [];
+                }
+                return [{ id: 'agent-session-1' }];
+              }),
+            });
           }),
         };
       },
@@ -284,7 +297,83 @@ describe('agent activity callback', () => {
     expect(mocks.nodeAgent.hibernateAgentSessionOnNode).not.toHaveBeenCalled();
     expect(mocks.container.markVmAgentContainerActiveWorkEndedBestEffort).not.toHaveBeenCalled();
     expect(mocks.updateSets).toContainEqual(
-      expect.objectContaining({ sleepStatus: null, sleepClaimId: null })
+      // Activity fences preparation; the real D1 test verifies the conditional
+      // completion-intent preservation versus ordinary cancellation.
+      expect.objectContaining({ sleepClaimId: null, sleepClaimedAt: null })
+    );
+  });
+
+  it('emits route-level runtime-work telemetry with observed callback time and source bucketing', async () => {
+    vi.useFakeTimers();
+    const observedAt = Date.parse('2026-08-31T00:00:01.500Z');
+    vi.setSystemTime(observedAt);
+    const app = await createTestApp();
+
+    const response = await postActivity(app, {
+      activity: 'idle',
+      nodeId: 'node-1',
+      agentType: 'claude-code',
+      runtimeWorkState: 'active',
+      runtimeWorkCount: 1,
+      runtimeWorkSource: 'custom_adapter',
+      runtimeWorkProgressAt: 1234,
+    });
+
+    expect(response.status).toBe(204);
+    expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenCalledWith(
+      env,
+      'project-1',
+      'agent-session-1',
+      'idle',
+      expect.objectContaining({
+        observedAt,
+        runtimeWorkSource: 'custom_adapter',
+      })
+    );
+    expect(mocks.log.info).toHaveBeenCalledWith(
+      'acp_activity.telemetry',
+      expect.objectContaining({
+        outcome: 'admitted',
+        activity: 'idle',
+        classification: 'intermediate',
+        runtimeWorkState: 'active',
+        runtimeWorkCount: 1,
+        runtimeWorkSource: 'other',
+        runtimeWorkObservedAt: observedAt,
+        runtimeWorkProgressAt: 1234,
+      })
+    );
+  });
+
+  it('does not cancel scheduled sleep when ProjectData rejects stale intermediate activity', async () => {
+    vi.useFakeTimers();
+    const observedAt = Date.parse('2026-08-31T00:00:01.500Z');
+    vi.setSystemTime(observedAt);
+    mocks.projectData.reportAcpSessionActivity.mockResolvedValueOnce(false);
+    const app = await createTestApp();
+
+    const response = await postActivity(app, {
+      activity: 'idle',
+      nodeId: 'node-1',
+      agentType: 'claude-code',
+      runtimeWorkState: 'active',
+      runtimeWorkCount: 1,
+      runtimeWorkSource: 'custom_adapter',
+      runtimeWorkProgressAt: 1234,
+    });
+
+    expect(response.status).toBe(204);
+    expect(mocks.updateSets).toHaveLength(0);
+    expect(mocks.log.info).toHaveBeenCalledWith(
+      'acp_activity.telemetry',
+      expect.objectContaining({
+        outcome: 'rejected',
+        reason: 'stale_activity_observed_at',
+        activity: 'idle',
+        classification: 'intermediate',
+        runtimeWorkSource: 'other',
+        runtimeWorkObservedAt: observedAt,
+      })
     );
   });
 
@@ -552,6 +641,8 @@ describe('agent activity callback', () => {
     await Promise.resolve();
 
     expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenCalledTimes(2);
+    expect(mocks.updateSets).toHaveLength(2);
+    expect(mocks.updateSets).toContainEqual(expect.objectContaining({ status: 'error' }));
     expect(mocks.log.info).toHaveBeenCalledWith(
       'acp_activity.telemetry',
       expect.objectContaining({
@@ -588,6 +679,9 @@ describe('agent activity callback', () => {
       })
     );
 
+    // First flush (window 2 s) hits the overload and backs off to 4 s.
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(mocks.projectData.reportAcpSessionActivity).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(2000);
     expect(mocks.projectData.reportAcpSessionActivity).not.toHaveBeenCalled();
 
@@ -600,6 +694,78 @@ describe('agent activity callback', () => {
       'agent-session-1',
       'prompting',
       expect.objectContaining({ promptStartedAt: 100 })
+    );
+  });
+
+  it.each([
+    ['a lost connection (the 2026-09-24 outage)', 'Network connection lost.'],
+    ['a CPU-limit reset', 'Durable Object exceeded its CPU time limit and was reset.'],
+  ])(
+    'coalesces an intermediate report through %s instead of answering 500',
+    async (_label, message) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-09-24T16:10:00.000Z'));
+      mocks.projectData.getAcpSession
+        .mockRejectedValueOnce(new Error(message))
+        .mockResolvedValue(assignedAcpSession());
+      const app = await createTestApp();
+
+      const response = await postActivity(app, {
+        activity: 'prompting',
+        nodeId: 'node-1',
+        promptStartedAt: 100,
+        agentType: 'openai-codex',
+      });
+
+      // 204, not 500: a 5xx makes the VM re-send the same report up to five times.
+      expect(response.status).toBe(204);
+      expect(mocks.log.info).toHaveBeenCalledWith(
+        'acp_activity.telemetry',
+        expect.objectContaining({ outcome: 'coalesced', reason: 'project_data_transient' })
+      );
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it('backs coalesced flushes off exponentially while the object stays unreachable', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-24T16:02:00.000Z'));
+    mocks.projectData.getAcpSession.mockRejectedValue(new Error('Network connection lost.'));
+    const app = await createTestApp();
+
+    const response = await postActivity(app, {
+      activity: 'prompting',
+      nodeId: 'node-1',
+      promptStartedAt: 100,
+      agentType: 'openai-codex',
+    });
+    expect(response.status).toBe(204);
+
+    // Past the 60 s pending TTL. Flushes at +2, +6, +14, +30 s; the next would land after the
+    // TTL, so the report is dropped. A fixed 2 s retry made ~30 calls into the dead object here.
+    await vi.advanceTimersByTimeAsync(70_000);
+
+    const lookups = mocks.projectData.getAcpSession.mock.calls.length;
+    expect(lookups).toBe(1 + 4);
+    expect(mocks.projectData.reportAcpSessionActivity).not.toHaveBeenCalled();
+  });
+
+  it('still surfaces a lost connection on a terminal report so the VM retries it', async () => {
+    mocks.projectData.getAcpSession.mockRejectedValue(new Error('Network connection lost.'));
+    const app = await createTestApp();
+
+    const response = await postActivity(app, {
+      activity: 'error',
+      nodeId: 'node-1',
+      agentType: 'openai-codex',
+      statusError: 'agent crashed',
+    });
+
+    expect(response.status).toBe(500);
+    expect(mocks.log.info).not.toHaveBeenCalledWith(
+      'acp_activity.telemetry',
+      expect.objectContaining({ outcome: 'coalesced' })
     );
   });
 
@@ -652,7 +818,7 @@ describe('agent activity callback', () => {
 
     expect(response.status).toBe(204);
     expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenCalledTimes(1);
-    expect(mocks.updateSets).toHaveLength(2);
+    expect(mocks.updateSets).toHaveLength(1);
     expect(mocks.nodeAgent.hibernateAgentSessionOnNode).not.toHaveBeenCalled();
     expect(mocks.container.markVmAgentContainerActiveWorkEndedBestEffort).not.toHaveBeenCalled();
 
@@ -670,6 +836,53 @@ describe('agent activity callback', () => {
       })
     );
     expect(mocks.container.markVmAgentContainerActiveWorkEndedBestEffort).not.toHaveBeenCalled();
+  });
+
+  it('does not cancel scheduled sleep when a coalesced flush is rejected as stale', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-31T00:00:00.000Z'));
+    const app = await createTestApp();
+
+    await postActivity(app, {
+      activity: 'idle',
+      nodeId: 'node-1',
+      agentType: 'claude-code',
+      runtimeWorkState: 'active',
+      runtimeWorkCount: 1,
+      runtimeWorkSource: 'custom_adapter',
+      runtimeWorkProgressAt: 1000,
+    });
+    expect(mocks.updateSets).toHaveLength(1);
+    mocks.updateSets.length = 0;
+    mocks.projectData.reportAcpSessionActivity.mockResolvedValueOnce(false);
+
+    const response = await postActivity(app, {
+      activity: 'idle',
+      nodeId: 'node-1',
+      agentType: 'claude-code',
+      runtimeWorkState: 'active',
+      runtimeWorkCount: 1,
+      runtimeWorkSource: 'custom_adapter',
+      runtimeWorkProgressAt: 1000,
+    });
+
+    expect(response.status).toBe(204);
+    expect(mocks.updateSets).toHaveLength(0);
+
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenCalledTimes(2);
+    expect(mocks.updateSets).toHaveLength(0);
+    expect(mocks.log.info).toHaveBeenCalledWith(
+      'acp_activity.telemetry',
+      expect.objectContaining({
+        outcome: 'rejected',
+        reason: 'stale_activity_observed_at',
+        source: 'admission_control',
+        classification: 'intermediate',
+        runtimeWorkSource: 'other',
+      })
+    );
   });
 
   it('keeps cached callbacks subject to terminal workspace 410 behavior', async () => {
@@ -816,6 +1029,26 @@ describe('agent activity callback', () => {
     );
   });
 
+  it('lets deletion fence error fanout after the activity mirror but before the D1 error write', async () => {
+    mocks.projectData.reportAcpSessionActivity.mockImplementationOnce(async () => {
+      mocks.workspaceStatus = 'stopping';
+    });
+    const app = await createTestApp();
+
+    const response = await postActivity(app, {
+      activity: 'error',
+      nodeId: 'node-1',
+      agentType: 'openai-codex',
+      statusError: 'late container failure',
+    });
+
+    expect(response.status).toBe(410);
+    expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenCalledOnce();
+    expect(mocks.projectData.transitionAcpSession).not.toHaveBeenCalled();
+    expect(mocks.projectData.failSession).not.toHaveBeenCalled();
+    expect(mocks.container.markVmAgentContainerActiveWorkEndedBestEffort).not.toHaveBeenCalled();
+  });
+
   // --- Callback-token binding (security-critique #1, rule 28) ---------------------------------
   // The token's OWN identity (payload.workspace) must be bound to the session; the client-supplied
   // body.nodeId is NOT trusted for authorization. Each rejection test is discriminating: on pre-fix
@@ -957,6 +1190,9 @@ describe('agent activity callback', () => {
     });
 
     it('(a) rejects a stale error callback after recovery completed — session NOT regressed', async () => {
+      vi.useFakeTimers();
+      const observedAt = Date.parse('2026-08-31T00:00:01.500Z');
+      vi.setSystemTime(observedAt);
       // Recovery completed: agent_sessions.updated_at reconciled to running well
       // after the OLD container's token was issued (gap 180s ≫ 60s margin).
       mocks.guardRow = {
@@ -994,14 +1230,23 @@ describe('agent activity callback', () => {
           action: 'rejected_stale_callback',
         })
       );
+      expect(mocks.log.info).toHaveBeenCalledWith(
+        'acp_activity.telemetry',
+        expect.objectContaining({
+          outcome: 'rejected',
+          reason: 'stale_generation',
+          source: 'callback',
+          classification: 'critical',
+          runtimeWorkObservedAt: observedAt,
+        })
+      );
     });
 
     it('does not clear current pending intermediate activity when rejecting a stale error', async () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date('2026-08-31T00:00:00.000Z'));
-      const { getAcpActivityAdmissionSnapshotForTests } = await import(
-        '../../../src/services/acp-activity-admission'
-      );
+      const { getAcpActivityAdmissionSnapshotForTests } =
+        await import('../../../src/services/acp-activity-admission');
       mocks.guardRow = {
         runtime: 'cf-container',
         updatedAt: new Date(TOKEN_IAT_MS + 180_000).toISOString(),

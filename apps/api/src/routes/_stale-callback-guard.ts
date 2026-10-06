@@ -1,6 +1,5 @@
-import { decodeJwt } from 'jose';
-
 import type { Env } from '../env';
+import { callbackTokenGenerationIssuedAtSeconds } from '../services/callback-token-claims';
 
 /**
  * Staleness guard for VM-agent → control-plane DESTRUCTIVE callbacks (S2).
@@ -37,26 +36,24 @@ export const DEFAULT_INSTANT_STALE_CALLBACK_MARGIN_MS = 60_000;
 export function getInstantStaleCallbackMarginMs(env: Env): number {
   const raw = env.INSTANT_STALE_CALLBACK_MARGIN_MS;
   const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
-  return Number.isFinite(parsed) && parsed >= 0
-    ? parsed
-    : DEFAULT_INSTANT_STALE_CALLBACK_MARGIN_MS;
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_INSTANT_STALE_CALLBACK_MARGIN_MS;
 }
 
 /**
- * Read the `iat` (issued-at) claim from an ALREADY-VERIFIED callback token and
+ * Read the issue time of an ALREADY-VERIFIED callback token's generation and
  * return it in milliseconds. The token MUST have been verified by
  * `verifyCallbackToken` first — `decodeJwt` does not verify the signature; it is
- * used here only to read a claim `verifyCallbackToken` does not surface.
+ * used here only to read claims `verifyCallbackToken` does not surface.
  *
- * Returns null when the token cannot be decoded or has no numeric `iat`.
+ * A renewed workspace token keeps its chain's first `iat` in the `gen_iat` claim
+ * (`callbackTokenGenerationIssuedAtSeconds`), so renewal never makes a superseded
+ * container generation look newer than the recovery that replaced it.
+ *
+ * Returns null when the token cannot be decoded or has no usable issue time.
  */
 export function callbackTokenIssuedAtMs(token: string): number | null {
-  try {
-    const claims = decodeJwt(token);
-    return typeof claims.iat === 'number' ? claims.iat * 1000 : null;
-  } catch {
-    return null;
-  }
+  const generationIssuedAtSeconds = callbackTokenGenerationIssuedAtSeconds(token);
+  return generationIssuedAtSeconds === null ? null : generationIssuedAtSeconds * 1000;
 }
 
 export interface SupersededInstantCallbackInput {

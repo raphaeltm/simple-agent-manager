@@ -20,6 +20,7 @@ import { DefaultVmPromptDeliveryAdapter } from '../../services/vm-prompt-deliver
 import { recordActivityEventInternal } from './activity';
 import { createAttentionMarker } from './attention';
 import { persistMessage } from './messages';
+import { readProjectEventWakeLeaseUntil } from './project-events-wake-delivery';
 import type { PromptDeliveryClaim } from './prompt-delivery';
 import {
   CANDIDATE_GATE_META_PREFIX,
@@ -38,6 +39,8 @@ import {
   type ReconciliationProcessingHooks,
   terminallyFailDeadTarget,
 } from './reconciliation-dead-target';
+import { readReconciliationEpisode, RECONCILIATION_EPISODE_PREFIX } from './reconciliation-episode';
+import { guardReconciliationLoop, reserveReconciliationCheckin } from './reconciliation-loop';
 import {
   minReconciliationAlarmDelayMs,
   promptHardStallMs,
@@ -140,6 +143,12 @@ async function processSingleCandidate(
   const projectId = resolveCandidateProject(sql, candidate, hooks, env);
   if (!projectId) return 0;
 
+  const eventWakeLeaseUntil = readProjectEventWakeLeaseUntil(sql, candidate.sessionId);
+  if (eventWakeLeaseUntil !== null) {
+    deferReconciliationCandidateUntil(sql, candidate.sessionId, eventWakeLeaseUntil);
+    return 0;
+  }
+
   const liveness = await getLocalTaskRuntimeLiveness(sql, env, {
     taskId: candidate.taskId,
     projectId,
@@ -212,7 +221,8 @@ function handleObservePrompt(
   } else {
     recordReconciliationCandidateInconclusive(sql, env, {
       ...candidate,
-      reason: delivery.kind === 'inconclusive' ? (delivery.reason ?? liveness.reason) : liveness.reason,
+      reason:
+        delivery.kind === 'inconclusive' ? (delivery.reason ?? liveness.reason) : liveness.reason,
     });
   }
   return 0;
@@ -269,11 +279,10 @@ async function handleCheckinDelivery(
   env: DOEnv
 ): Promise<number> {
   const { broadcastEvent, deadlineMs, promptDeliveryAdapter } = ctx;
-  const intent = getOrCreateReconciliationCheckinIntent(
-    sql,
-    candidate.sessionId,
-    candidate.taskId
-  );
+  if (!(await guardReconciliationLoop(sql, env, candidate, broadcastEvent))) return 0;
+  const intent = getOrCreateReconciliationCheckinIntent(sql, candidate.sessionId, candidate.taskId);
+  reserveReconciliationCheckin(sql, candidate.sessionId, intent.deliveryId);
+  const generation = readReconciliationEpisode(sql, candidate.sessionId)?.generation;
   const deliveryResult = await sendCheckinToAgent(
     env,
     candidate,
@@ -297,6 +306,11 @@ async function handleCheckinDelivery(
     JSON.stringify(metadata),
     intent.promptMessageId
   );
+
+  const currentEpisode = readReconciliationEpisode(sql, candidate.sessionId);
+  // A response/human retry may arrive before receipt acknowledgement. Never
+  // re-arm a failure deadline for a paused or superseded episode.
+  if (currentEpisode?.paused || currentEpisode?.generation !== generation) return 1;
 
   const marker = createAttentionMarker(sql, {
     sessionId: candidate.sessionId,
@@ -695,12 +709,17 @@ export function computeReconciliationAlarmTime(sql: SqlStorage, env: DOEnv): num
        AND COALESCE(ics.task_id, cs.task_id) IS NOT NULL
        AND COALESCE(ics.workspace_id, cs.workspace_id) IS NOT NULL
        AND NOT EXISTS (
+         SELECT 1 FROM do_meta episode WHERE episode.key = ? || cs.id
+           AND json_valid(episode.value) AND json_extract(episode.value, '$.paused') = 1
+       )
+       AND NOT EXISTS (
          SELECT 1 FROM session_attention_markers sam
          WHERE sam.session_id = cs.id
            AND sam.resolved_at IS NULL
            AND sam.kind IN ('needs_input', 'reconciliation_checkin')
        )`,
-      CANDIDATE_GATE_META_PREFIX
+      CANDIDATE_GATE_META_PREFIX,
+      RECONCILIATION_EPISODE_PREFIX
     )
     .toArray();
 
@@ -712,13 +731,13 @@ export function computeReconciliationAlarmTime(sql: SqlStorage, env: DOEnv): num
   const now = Date.now();
 
   for (const row of rows) {
-    const candidateTime = computeRowCandidateTime(
-      row,
-      idleThresholdMs,
-      softPromptMs,
-      hardPromptMs,
-      now
-    );
+    const sessionId = typeof row.session_id === 'string' ? row.session_id : null;
+    const eventWakeLeaseUntil = sessionId
+      ? readProjectEventWakeLeaseUntil(sql, sessionId, now)
+      : null;
+    const candidateTime =
+      eventWakeLeaseUntil ??
+      computeRowCandidateTime(row, idleThresholdMs, softPromptMs, hardPromptMs, now);
     if (candidateTime === null) continue;
     nextCheck = nextCheck === null ? candidateTime : Math.min(nextCheck, candidateTime);
   }

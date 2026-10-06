@@ -166,10 +166,14 @@ export interface CompletionDockProps {
   archiving?: boolean;
   /** True while the sleep request is in flight; disables the Sleep button. */
   sleeping?: boolean;
+  /** True while the interrupt request is in flight; disables the Interrupt button. */
+  cancelling?: boolean;
   /** Error message from a failed archive attempt, shown beneath the bar. */
   archiveError?: string | null;
   /** Error message from a failed sleep attempt, shown beneath the bar. */
   sleepError?: string | null;
+  /** Error message from a failed interrupt attempt, shown beneath the bar. */
+  cancelError?: string | null;
   /** Optional elapsed-time node rendered on the right while working. */
   elapsed?: ReactNode;
 }
@@ -184,8 +188,10 @@ export function CompletionDock({
   onOpenPlan,
   archiving = false,
   sleeping = false,
+  cancelling = false,
   archiveError,
   sleepError,
+  cancelError,
   elapsed,
 }: CompletionDockProps) {
   const reducedMotion = usePrefersReducedMotion();
@@ -259,13 +265,16 @@ export function CompletionDock({
   const centerFg = 'var(--sam-color-fg-on-accent)';
   const centerDisabled =
     (effectiveCenterAction === 'archive' && archiving) ||
-    (effectiveCenterAction === 'sleep' && sleeping);
+    (effectiveCenterAction === 'sleep' && sleeping) ||
+    (effectiveCenterAction === 'interrupt' && cancelling);
   const centerLabel =
     effectiveCenterAction === 'archive'
       ? 'Archive conversation'
       : effectiveCenterAction === 'sleep'
         ? 'Sleep session'
-        : 'Interrupt agent';
+        : cancelling
+          ? 'Interrupting agent'
+          : 'Interrupt agent';
   const centerTitle =
     effectiveCenterAction === 'archive'
       ? archiving
@@ -275,13 +284,15 @@ export function CompletionDock({
         ? sleeping
           ? 'Sleeping…'
           : 'Sleep'
-        : 'Interrupt';
+        : cancelling
+          ? 'Interrupting…'
+          : 'Interrupt';
   const actionError =
     effectiveCenterAction === 'sleep'
       ? sleepError
       : effectiveCenterAction === 'archive'
         ? archiveError
-        : null;
+        : cancelError;
 
   useEffect(() => {
     if (effectiveCenterAction !== 'archive') {
@@ -325,11 +336,13 @@ export function CompletionDock({
       {/* Announce working/idle transitions to assistive tech (the morph itself is
           purely visual; ElapsedTime is aria-hidden). */}
       <span className="sr-only" role="status" aria-live="polite">
-        {working
-          ? 'Agent working'
-          : effectiveCenterAction === 'sleep'
-            ? 'Agent idle, ready to sleep'
-            : 'Session sleeping'}
+        {cancelling
+          ? 'Interrupting agent'
+          : working
+            ? 'Agent working'
+            : effectiveCenterAction === 'sleep'
+              ? 'Agent idle, ready to sleep'
+              : 'Session sleeping'}
       </span>
       <div ref={ref} className="relative w-full select-none" style={{ height: totalH }}>
         <svg
@@ -385,7 +398,16 @@ export function CompletionDock({
           onClick={handleCenterClick}
           disabled={centerDisabled}
           aria-label={centerLabel}
-          className="pointer-events-auto absolute flex items-center justify-center rounded-full cursor-pointer border-0 shadow-lg disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-focus-ring focus-visible:outline-offset-2"
+          aria-busy={centerDisabled}
+          // While cancelling, dimming alone is too quiet to read as "working on
+          // it" — the pulse is the visible progress signal the button otherwise
+          // lacks. `motion-safe:` matches the spinner ring's own guard, so
+          // reduced-motion users get the dim + label change only.
+          className={`pointer-events-auto absolute flex items-center justify-center rounded-full cursor-pointer border-0 shadow-lg disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-focus-ring focus-visible:outline-offset-2${
+            cancelling && effectiveCenterAction === 'interrupt'
+              ? ' motion-safe:animate-pulse'
+              : ''
+          }`}
           style={{
             width: BTN,
             height: BTN,
@@ -440,7 +462,11 @@ export function CompletionDock({
       </Dialog>
 
       {actionError && (
-        <div className="px-3 pb-2 text-xs text-danger" role="alert">
+        // `break-words` is load-bearing: server error text is not length-bounded,
+        // and one long unbreakable token would otherwise shear off the right edge
+        // inside the chat's `overflow-x-hidden` ancestor, where a document-level
+        // overflow check cannot see it (.claude/rules/56).
+        <div className="px-3 pb-2 text-xs text-danger break-words" role="alert">
           {actionError}
         </div>
       )}

@@ -27,10 +27,14 @@ type EngineConfig struct {
 	HTTPClient              *http.Client
 	ArtifactIdleTimeout     time.Duration
 	PreflightCommandTimeout time.Duration
-	ApplyProgress           ApplyProgressFunc
-	DockerLogin             DockerLoginFunc // defaults to cache.DockerLogin if nil
-	MountChecker            MountChecker    // defaults to RealMountChecker if nil
-	VolumeMounter           VolumeMounter   // defaults to RealVolumeMounter if nil
+	// ComposeOutputRetentionBytes caps retained compose output (tail) for error
+	// messages. Zero falls back to config.DefaultComposeOutputRetentionBytes.
+	ComposeOutputRetentionBytes int64
+	ApplyProgress               ApplyProgressFunc
+	ApplyLiveness               ApplyLivenessFunc
+	DockerLogin                 DockerLoginFunc // defaults to cache.DockerLogin if nil
+	MountChecker                MountChecker    // defaults to RealMountChecker if nil
+	VolumeMounter               VolumeMounter   // defaults to RealVolumeMounter if nil
 }
 
 // NewEngine creates a new deployment engine.

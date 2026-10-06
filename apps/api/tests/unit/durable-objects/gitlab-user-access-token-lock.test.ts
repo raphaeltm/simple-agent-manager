@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import {
+  expectBetterAuthTokenLookup,
+  expectTrustedOwnerTokenLookup,
+  makeAccessTokenLockRequest,
+  makeBetterAuthAccountEnv,
+} from './access-token-lock-test-helpers';
+
 const { createAuthMock, logWarnMock } = vi.hoisted(() => ({
   createAuthMock: vi.fn(),
   logWarnMock: vi.fn(),
@@ -27,18 +34,6 @@ vi.mock('../../../src/lib/logger', () => ({
 }));
 
 import { GitLabUserAccessTokenLock } from '../../../src/durable-objects/gitlab-user-access-token-lock';
-
-function makeRequest(): Request {
-  return new Request('https://gitlab-user-access-token-lock/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      userId: 'user-1',
-      flow: 'test',
-      headers: [['cookie', 'session=abc']],
-    }),
-  });
-}
 
 describe('GitLabUserAccessTokenLock', () => {
   beforeEach(() => {
@@ -76,9 +71,13 @@ describe('GitLabUserAccessTokenLock', () => {
 
     createAuthMock.mockReturnValue({ api: { getAccessToken } });
 
-    const lock = new GitLabUserAccessTokenLock({} as never, {} as never);
+    const { env } = makeBetterAuthAccountEnv('gitlab-account-row');
+    const lock = new GitLabUserAccessTokenLock({} as never, env as never);
 
-    const [res1, res2] = await Promise.all([lock.fetch(makeRequest()), lock.fetch(makeRequest())]);
+    const [res1, res2] = await Promise.all([
+      lock.fetch(makeAccessTokenLockRequest('https://gitlab-user-access-token-lock/token')),
+      lock.fetch(makeAccessTokenLockRequest('https://gitlab-user-access-token-lock/token')),
+    ]);
 
     expect(res1.status).toBe(200);
     expect(res2.status).toBe(200);
@@ -87,6 +86,7 @@ describe('GitLabUserAccessTokenLock', () => {
     expect(body1.accessToken).toBe('fresh-access');
     expect(body2.accessToken).toBe('fresh-access');
     expect(refreshCount).toBe(1);
+    expectBetterAuthTokenLookup(getAccessToken, 'gitlab-account-row');
   });
 
   it('returns 401 token_unavailable when BetterAuth cannot produce a token', async () => {
@@ -95,8 +95,11 @@ describe('GitLabUserAccessTokenLock', () => {
     });
     createAuthMock.mockReturnValue({ api: { getAccessToken } });
 
-    const lock = new GitLabUserAccessTokenLock({} as never, {} as never);
-    const res = await lock.fetch(makeRequest());
+    const { env } = makeBetterAuthAccountEnv('gitlab-account-row');
+    const lock = new GitLabUserAccessTokenLock({} as never, env as never);
+    const res = await lock.fetch(
+      makeAccessTokenLockRequest('https://gitlab-user-access-token-lock/token')
+    );
 
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: 'token_unavailable' });
@@ -104,6 +107,42 @@ describe('GitLabUserAccessTokenLock', () => {
       'gitlab.user_access_token_lock.unavailable',
       expect.objectContaining({ flow: 'test', userId: 'user-1' })
     );
+  });
+
+  it('preserves the trusted owner context by omitting headers for Better Auth', async () => {
+    const getAccessToken = vi.fn(async () => ({ accessToken: 'owner-token' }));
+    createAuthMock.mockReturnValue({ api: { getAccessToken } });
+    const { env } = makeBetterAuthAccountEnv('gitlab-account-row');
+    const lock = new GitLabUserAccessTokenLock({} as never, env as never);
+
+    const res = await lock.fetch(
+      makeAccessTokenLockRequest('https://gitlab-user-access-token-lock/token', {
+        includeHeaders: false,
+      })
+    );
+
+    expect(res.status).toBe(200);
+    expectTrustedOwnerTokenLookup(getAccessToken, 'gitlab-account-row');
+  });
+
+  it('returns 401 before BetterAuth when the user has no linked GitLab account row', async () => {
+    const getAccessToken = vi.fn();
+    createAuthMock.mockReturnValue({ api: { getAccessToken } });
+
+    const { env } = makeBetterAuthAccountEnv(null);
+    const lock = new GitLabUserAccessTokenLock({} as never, env as never);
+    const res = await lock.fetch(
+      makeAccessTokenLockRequest('https://gitlab-user-access-token-lock/token')
+    );
+
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: 'token_unavailable' });
+    expect(createAuthMock).not.toHaveBeenCalled();
+    expect(getAccessToken).not.toHaveBeenCalled();
+    expect(logWarnMock).toHaveBeenCalledWith('gitlab.user_access_token_lock.account_missing', {
+      flow: 'test',
+      userId: 'user-1',
+    });
   });
 
   it('rejects non-POST requests', async () => {

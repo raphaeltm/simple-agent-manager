@@ -87,6 +87,15 @@ export async function fetchVmAgentContainer(
   return container.proxyHttp(request, port);
 }
 
+export async function fetchVmAgentContainerNoWake(
+  env: Env,
+  nodeId: string,
+  request: Request,
+  port?: number
+): Promise<Response> {
+  return getVmAgentContainer(env, nodeId).proxyHttpNoWake(request, port);
+}
+
 export async function resumeVmAgentContainer(
   env: Env,
   nodeId: string,

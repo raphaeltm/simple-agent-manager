@@ -1,5 +1,20 @@
 # Leak-sweep test coverage gaps (follow-up from PR #1245)
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** M1, the `afterId` cursor case that keeps the personal-type filter
+>   (`apps/api/tests/unit/services/github-installation-leak-sweep.test.ts:292`, PR #1245).
+> - **Still open:**
+>   - M2: `makeSweepDb` (same file, lines 40-90) still ignores the WHERE clause. Add a real-SQL
+>     test (`createSqliteD1`) proving org rows are never processed or deleted.
+>   - L1: two rows with the same `userId` should issue one `users` query.
+>   - L3: webhook tests only use numeric ids
+>     (`apps/api/tests/unit/routes/github-installations.test.ts:1068-1130`), so the login
+>     fallback is untested on that path.
+>   - L4: `apps/api/src/routes/admin-github-installation-leak-sweep.ts` has no tests (`limit`
+>     cap/floor, `afterId` forwarding).
+>   - L2 (optional): the progress log every 25 rows.
+
 ## Problem
 
 A late-arriving test-engineer review of PR #1245 (harden github-webhook owner

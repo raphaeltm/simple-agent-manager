@@ -65,7 +65,7 @@ Shannon AI pentester identified multiple HIGH and CRITICAL vulnerabilities in a 
 
 ## References
 
-- Assessment report: `tasks/backlog/2026-03-12-shannon-security-assessment.md`
+- Assessment report: `tasks/archive/2026-03-12-shannon-security-assessment.md`
 - Affected files:
   - `apps/api/src/routes/projects.ts` (runtime files, ACP sessions)
   - `apps/api/src/routes/workspaces.ts` (branch field)

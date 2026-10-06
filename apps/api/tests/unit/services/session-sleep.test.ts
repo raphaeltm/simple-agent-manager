@@ -50,7 +50,21 @@ vi.mock('../../../src/services/session-snapshots', () => ({
   deferSessionSnapshotSleepBeforeClaim: (...args: unknown[]) =>
     mocks.deferSessionSnapshotSleepBeforeClaim(...args),
   DEFAULT_SESSION_SLEEP_AFTER_MS: 15 * 60 * 1000,
-  getRestorableSessionSnapshot: (...args: unknown[]) => mocks.getRestorableSessionSnapshot(...args),
+  getRestorableSessionSnapshot: async (...args: unknown[]) => {
+    const snapshot = await mocks.getRestorableSessionSnapshot(...args);
+    // Older test fixtures predate generation fencing; preserve their intended
+    // successful final capture while dedicated fence tests set a generation.
+    return snapshot?.status === 'available'
+      ? {
+          workspaceId: 'workspace-1',
+          agentSessionId: 'agent-session-1',
+          nodeId: 'node-1',
+          runtime: 'vm',
+          snapshotGeneration: 'generation-final',
+          ...snapshot,
+        }
+      : snapshot;
+  },
   getSessionSnapshotCaptureState: (...args: unknown[]) =>
     mocks.getSessionSnapshotCaptureState(...args),
   isSessionSnapshotSleepReleasable: (...args: unknown[]) =>
@@ -89,7 +103,8 @@ function buildDb(
   taskStatus = 'in_progress',
   activeNodeWorkspaces: Array<{ id: string }> = [],
   nodeWarmSince: string | null = null,
-  includeAgentQuery = true
+  includeAgentQuery = true,
+  postEnsureWorkspace?: { nodeId: string; chatSessionId: string }
 ) {
   const selectRows = [
     [
@@ -107,11 +122,12 @@ function buildDb(
       },
     ],
     ...(includeAgentQuery ? [[{ id: 'agent-session-1', agentType: 'openai-codex' }]] : []),
-    [{ warmSince: nodeWarmSince }],
+    [postEnsureWorkspace ?? { warmSince: nodeWarmSince }],
     activeNodeWorkspaces,
   ];
-  const select = vi.fn(() => {
-    const rows = selectRows.shift() ?? [];
+  const select = vi.fn((projection?: Record<string, unknown>) => {
+    // Event insert-select is a statement, not another loaded workspace query.
+    const rows = projection?.toStatus ? [] : (selectRows.shift() ?? []);
     const chain = {
       from: vi.fn(() => chain),
       leftJoin: vi.fn(() => chain),
@@ -128,7 +144,8 @@ function buildDb(
     };
     return chain;
   });
-  return { select, update, batch: vi.fn(async () => undefined) };
+  const insert = vi.fn(() => ({ select: vi.fn((query: unknown) => query) }));
+  return { select, update, insert, batch: vi.fn(async () => undefined) };
 }
 
 function buildD1Database(
@@ -200,18 +217,14 @@ describe('parseHarnessWorkConfig', () => {
 
 describe('isHarnessWorkLeaseActive', () => {
   it('returns false for null state', async () => {
-    const { isHarnessWorkLeaseActive } = await import(
-      '../../../src/services/session-idleness'
-    );
+    const { isHarnessWorkLeaseActive } = await import('../../../src/services/session-idleness');
     expect(
       isHarnessWorkLeaseActive(null, new Date(), { leaseMs: 300000, maxDurationMs: 1800000 })
     ).toBe(false);
   });
 
   it('returns true for active work within lease', async () => {
-    const { isHarnessWorkLeaseActive } = await import(
-      '../../../src/services/session-idleness'
-    );
+    const { isHarnessWorkLeaseActive } = await import('../../../src/services/session-idleness');
     const now = new Date();
     expect(
       isHarnessWorkLeaseActive(
@@ -227,9 +240,7 @@ describe('isHarnessWorkLeaseActive', () => {
   });
 
   it('returns false for expired lease', async () => {
-    const { isHarnessWorkLeaseActive } = await import(
-      '../../../src/services/session-idleness'
-    );
+    const { isHarnessWorkLeaseActive } = await import('../../../src/services/session-idleness');
     const now = new Date();
     expect(
       isHarnessWorkLeaseActive(
@@ -245,9 +256,7 @@ describe('isHarnessWorkLeaseActive', () => {
   });
 
   it('returns false for inactive work state', async () => {
-    const { isHarnessWorkLeaseActive } = await import(
-      '../../../src/services/session-idleness'
-    );
+    const { isHarnessWorkLeaseActive } = await import('../../../src/services/session-idleness');
     const now = new Date();
     expect(
       isHarnessWorkLeaseActive(
@@ -265,7 +274,7 @@ describe('isHarnessWorkLeaseActive', () => {
 
 describe('sleepWorkspaceSession', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mocks.drizzle.mockReturnValue(buildDb());
     mocks.stopWorkspaceOnNode.mockResolvedValue(undefined);
     mocks.ensureSessionSnapshotForSleep.mockResolvedValue(undefined);
@@ -281,7 +290,7 @@ describe('sleepWorkspaceSession', () => {
             (snapshot.status === 'degraded' && snapshot.degradation !== 'none'))
         )
     );
-    mocks.completeActiveSessionSnapshotAsDegraded.mockResolvedValue(false);
+    mocks.completeActiveSessionSnapshotAsDegraded.mockResolvedValue(null);
     mocks.getSessionSnapshotCaptureState
       .mockResolvedValueOnce({
         status: 'pending',
@@ -338,6 +347,70 @@ describe('sleepWorkspaceSession', () => {
     expect(mocks.hibernateAgentSessionOnNode).not.toHaveBeenCalled();
     expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
     expect(mocks.cleanupTaskRun).not.toHaveBeenCalled();
+  });
+
+  it('does not schedule a deferred unhealthy-node sleep after its budget is cancelled', async () => {
+    const env = buildEnv();
+    const { queueWorkspaceSessionSleep } = await import('../../../src/services/session-sleep');
+    let finishSnapshot: (() => void) | undefined;
+    mocks.ensureSessionSnapshotForSleep.mockImplementation(
+      () => new Promise<void>((resolve) => (finishSnapshot = resolve))
+    );
+    const controller = new AbortController();
+    const queued = queueWorkspaceSessionSleep(env, {
+      workspaceId: 'workspace-1',
+      userId: 'user-1',
+      reason: 'node_heartbeat_lost',
+      expectedNodeId: 'node-1',
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(mocks.ensureSessionSnapshotForSleep).toHaveBeenCalledTimes(1));
+
+    controller.abort(); // The node has now been released by the bounded cleanup.
+    finishSnapshot?.();
+
+    await expect(queued).rejects.toMatchObject({ name: 'AbortError' });
+    expect(mocks.scheduleSessionSnapshotSleep).not.toHaveBeenCalled();
+  });
+
+  it('does not queue a sleep for a workspace on a replacement node', async () => {
+    const env = buildEnv();
+    const { queueWorkspaceSessionSleep } = await import('../../../src/services/session-sleep');
+
+    await expect(
+      queueWorkspaceSessionSleep(env, {
+        workspaceId: 'workspace-1',
+        userId: 'user-1',
+        reason: 'node_heartbeat_lost',
+        expectedNodeId: 'retired-node',
+      })
+    ).rejects.toThrow('Workspace moved from the unhealthy node');
+
+    expect(mocks.ensureSessionSnapshotForSleep).not.toHaveBeenCalled();
+    expect(mocks.scheduleSessionSnapshotSleep).not.toHaveBeenCalled();
+  });
+
+  it('rechecks ownership after snapshot setup before scheduling sleep', async () => {
+    const env = buildEnv();
+    mocks.drizzle.mockReturnValue(
+      buildDb('vm', 'running', 'in_progress', [], null, true, {
+        nodeId: 'replacement-node',
+        chatSessionId: 'chat-1',
+      })
+    );
+    const { queueWorkspaceSessionSleep } = await import('../../../src/services/session-sleep');
+
+    await expect(
+      queueWorkspaceSessionSleep(env, {
+        workspaceId: 'workspace-1',
+        userId: 'user-1',
+        reason: 'node_heartbeat_lost',
+        expectedNodeId: 'node-1',
+      })
+    ).rejects.toThrow('Workspace moved from the unhealthy node');
+
+    expect(mocks.ensureSessionSnapshotForSleep).toHaveBeenCalledTimes(1);
+    expect(mocks.scheduleSessionSnapshotSleep).not.toHaveBeenCalled();
   });
 
   it('defers heartbeat-live prompting activity without consuming a sleep claim', async () => {
@@ -666,7 +739,7 @@ describe('sleepWorkspaceSession', () => {
     expect(mocks.deferSessionSnapshotSleepBeforeClaim).toHaveBeenCalledTimes(1);
   });
 
-  it('sleeps compute when the final snapshot is durably degraded and verified', async () => {
+  it('preserves compute when the final snapshot is degraded', async () => {
     mocks.getRestorableSessionSnapshot
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({
@@ -703,23 +776,34 @@ describe('sleepWorkspaceSession', () => {
         userId: 'user-1',
         reason: 'test',
       })
-    ).resolves.toMatchObject({ status: 'sleeping', chatSessionId: 'chat-1' });
+    ).rejects.toThrow('snapshot completion was not durably verified');
 
-    expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledTimes(1);
+    expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
     expect(mocks.sleepVmAgentContainer).not.toHaveBeenCalled();
-    expect(mocks.verifySessionSnapshotArtifactsForSleep).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ status: 'degraded', degradation: 'entries-skipped' })
-    );
-    expect(mocks.finalizeSessionSnapshotSleeping).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      'chat-1',
-      expect.any(String),
-      expect.any(Date),
-      { sleepWarning: 'Workspace slept with degraded snapshot (entries-skipped)' }
-    );
-    expect(mocks.failSessionSnapshotSleepBeforeTeardown).not.toHaveBeenCalled();
+    expect(mocks.verifySessionSnapshotArtifactsForSleep).not.toHaveBeenCalled();
+    expect(mocks.beginSessionSnapshotStopping).not.toHaveBeenCalled();
+    expect(mocks.failSessionSnapshotSleepBeforeTeardown).toHaveBeenCalled();
+  });
+
+  it('preserves compute when the completed snapshot is from a different generation', async () => {
+    mocks.getRestorableSessionSnapshot.mockResolvedValueOnce(null).mockResolvedValueOnce({
+      status: 'available',
+      degradation: 'none',
+      snapshotGeneration: 'older-generation',
+      expiresAt: '2026-08-19T00:00:00.000Z',
+    });
+    const { sleepWorkspaceSession } = await import('../../../src/services/session-sleep');
+
+    await expect(
+      sleepWorkspaceSession(buildEnv(), {
+        workspaceId: 'workspace-1',
+        userId: 'user-1',
+        reason: 'test',
+      })
+    ).rejects.toThrow('complete final generation required');
+
+    expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
+    expect(mocks.beginSessionSnapshotStopping).not.toHaveBeenCalled();
   });
 
   it('preserves compute when snapshot completion cannot be re-read durably', async () => {
@@ -862,7 +946,7 @@ describe('sleepWorkspaceSession', () => {
     expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledTimes(1);
   });
 
-  it('degrades and sleeps a final snapshot that stalls with no progress after prepare', async () => {
+  it('preserves compute when a final snapshot stalls and degrades', async () => {
     const env = {
       ...buildEnv(),
       SESSION_SNAPSHOT_REQUEST_TIMEOUT_MS: '20',
@@ -872,7 +956,7 @@ describe('sleepWorkspaceSession', () => {
     let degradedPersisted = false;
     mocks.completeActiveSessionSnapshotAsDegraded.mockImplementation(async () => {
       degradedPersisted = true;
-      return true;
+      return 'degraded';
     });
     mocks.getRestorableSessionSnapshot
       .mockResolvedValueOnce(null)
@@ -915,7 +999,7 @@ describe('sleepWorkspaceSession', () => {
         userId: 'user-1',
         reason: 'stalled',
       })
-    ).resolves.toMatchObject({ status: 'sleeping' });
+    ).rejects.toThrow('snapshot completion was not durably verified');
 
     expect(mocks.completeActiveSessionSnapshotAsDegraded).toHaveBeenCalledWith(
       expect.anything(),
@@ -927,8 +1011,8 @@ describe('sleepWorkspaceSession', () => {
         reason: 'Workspace snapshot made no progress for 5ms',
       })
     );
-    expect(mocks.failSessionSnapshotSleepBeforeTeardown).not.toHaveBeenCalled();
-    expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledTimes(1);
+    expect(mocks.failSessionSnapshotSleepBeforeTeardown).toHaveBeenCalled();
+    expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
   });
 
   it('stops a VM only after a verified complete snapshot', async () => {
@@ -1098,6 +1182,7 @@ describe('sleepWorkspaceSession', () => {
       .mockResolvedValueOnce({
         status: 'available',
         degradation: 'none',
+        runtime: 'cf-container',
         expiresAt: '2026-08-19T00:00:00.000Z',
       })
       .mockResolvedValueOnce({
@@ -1364,6 +1449,7 @@ describe('sleepWorkspaceSession', () => {
     });
     mocks.getRestorableSessionSnapshot
       .mockResolvedValueOnce({ status: 'available', degradation: 'none' })
+      .mockResolvedValueOnce({ status: 'available', degradation: 'none' })
       .mockResolvedValueOnce({
         status: 'available',
         degradation: 'none',
@@ -1383,5 +1469,27 @@ describe('sleepWorkspaceSession', () => {
     expect(mocks.hibernateAgentSessionOnNode).not.toHaveBeenCalled();
     expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledTimes(1);
     expect(mocks.finalizeSessionSnapshotSleeping).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not stop a runtime for a reclaimed legacy degraded stopping claim', async () => {
+    mocks.claimSessionSnapshotSleep.mockResolvedValueOnce({
+      status: 'claimed',
+      claimId: 'claim-repair',
+      phase: 'stopping',
+    });
+    mocks.getRestorableSessionSnapshot
+      .mockResolvedValueOnce({ status: 'degraded', degradation: 'home-skipped' })
+      .mockResolvedValueOnce({ status: 'degraded', degradation: 'home-skipped' });
+    const { sleepWorkspaceSession } = await import('../../../src/services/session-sleep');
+
+    await expect(
+      sleepWorkspaceSession(buildEnv(), {
+        workspaceId: 'workspace-1',
+        userId: 'user-1',
+        reason: 'test',
+      })
+    ).rejects.toThrow('Stopping claim lacks a complete verified workspace snapshot');
+    expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
+    expect(mocks.sleepVmAgentContainer).not.toHaveBeenCalled();
   });
 });

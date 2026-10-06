@@ -1,5 +1,4 @@
-import { readFileSync } from 'node:fs';
-import * as v from 'valibot';
+import { resolvePullRequestEvidenceState } from './pr-evidence-source';
 
 /**
  * CI quality check: validates the Specialist Review Evidence table in PR bodies.
@@ -41,33 +40,6 @@ export interface CheckResult {
 function fail(message: string): never {
   console.error(`\nSpecialist review evidence check failed:\n- ${message}\n`);
   process.exit(1);
-}
-
-const pullRequestPayloadSchema = v.object({
-  pull_request: v.object({
-    body: v.optional(v.nullable(v.string())),
-    html_url: v.optional(v.string()),
-    labels: v.optional(v.array(v.object({ name: v.string() }))),
-  }),
-});
-
-function parsePullRequestPayload(raw: string): {
-  body: string;
-  labels: Array<{ name: string }>;
-  htmlUrl?: string;
-} {
-  const payload: unknown = JSON.parse(raw);
-  const result = v.safeParse(pullRequestPayloadSchema, payload);
-  if (!result.success) {
-    fail('GitHub event payload must include pull_request with valid body, html_url, and labels.');
-  }
-  const pullRequest = result.output.pull_request;
-
-  return {
-    body: pullRequest.body ?? '',
-    labels: pullRequest.labels ?? [],
-    htmlUrl: pullRequest.html_url,
-  };
 }
 
 /**
@@ -248,19 +220,20 @@ export function validateReviewEvidence(body: string, labels: Array<{ name: strin
   return result;
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const eventName = process.env.GITHUB_EVENT_NAME;
   if (eventName !== 'pull_request' && eventName !== 'pull_request_target') {
     console.log('Skipping specialist review evidence check: not a pull request event.');
     return;
   }
 
-  const eventPath = process.env.GITHUB_EVENT_PATH;
-  if (!eventPath) {
-    fail('GITHUB_EVENT_PATH is missing.');
+  let payload;
+  try {
+    payload = await resolvePullRequestEvidenceState();
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
   }
-
-  const payload = parsePullRequestPayload(readFileSync(eventPath, 'utf8'));
+  console.log(`Validating specialist review evidence from: ${payload.source}`);
 
   const body = payload.body;
   const labels = payload.labels;
@@ -308,5 +281,12 @@ function main(): void {
 // test runner.
 const isDirectExecution = process.argv[1]?.endsWith('check-specialist-review-evidence.ts');
 if (isDirectExecution) {
-  main();
+  // main() is async: an unhandled rejection must not exit 0 and silently pass the
+  // gate. Fail closed on any unexpected error.
+  main().catch((error: unknown) => {
+    console.error(
+      `\nSpecialist review evidence check errored:\n- ${error instanceof Error ? error.message : String(error)}\n`
+    );
+    process.exit(1);
+  });
 }

@@ -13,17 +13,19 @@
  * - Stopped workspace TTL deletion
  * - Stale warm nodes: error is caught (no Hetzner), counted in result
  */
-import { env } from 'cloudflare:test';
+import { env, runInDurableObject } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
 import { runNodeCleanupSweep } from '../../src/scheduled/node-cleanup';
-import { sweepTerminalCfContainers } from '../../src/scheduled/node-cleanup/node-phases';
 import {
   claimNodeForCleanup,
   emptyResult,
   resolveCleanupConfig,
 } from '../../src/scheduled/node-cleanup/shared';
+import { sweepTerminalCfContainers } from '../../src/scheduled/node-cleanup/terminal-cf-container-phase';
+import type { UnhealthyNodeBoundaries } from '../../src/scheduled/node-cleanup/unhealthy-nodes';
+import { sweepStaleStoppedWorkspaces } from '../../src/scheduled/node-cleanup/workspace-phases';
 import { ensureSessionRecovery } from '../../src/services/session-recovery';
 import {
   seedAgentSession,
@@ -125,6 +127,40 @@ async function seedRestorableSleepingSnapshot(input: {
     .run();
 }
 
+/** A sleep-lifecycle row for a failed task's chat that has not slept (yet). */
+async function seedPendingSleepSnapshot(input: {
+  id: string;
+  workspaceId: string;
+  chatSessionId: string;
+  sleepStatus: 'scheduled' | 'failed';
+  sleepAfter: string | null;
+  sleepAttempts?: number;
+}): Promise<void> {
+  const now = new Date().toISOString();
+  await env.DATABASE.prepare(
+    `INSERT INTO session_snapshots
+       (id, project_id, workspace_id, user_id, chat_session_id, runtime, status, degradation,
+        manifest_r2_key, expires_at, sleep_status, sleep_after, recovery_attempts,
+        sleep_attempts, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 'vm', 'pending', 'none', ?, ?, ?, ?, 0, ?, ?, ?)`
+  )
+    .bind(
+      input.id,
+      PROJECT_ID,
+      input.workspaceId,
+      USER_ID,
+      input.chatSessionId,
+      `session-snapshots/${input.chatSessionId}/manifest.json`,
+      new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      input.sleepStatus,
+      input.sleepAfter,
+      input.sleepAttempts ?? 2,
+      now,
+      now
+    )
+    .run();
+}
+
 async function getNodeStatus(
   nodeId: string
 ): Promise<{ status: string; warm_since: string | null } | null> {
@@ -167,8 +203,129 @@ async function getObservabilityEvents(
 }
 
 describe('runNodeCleanupSweep — vertical slice', () => {
+  it('drains and releases a silent node through the scheduled entry point', async () => {
+    await seedBaseData();
+    const nodeId = 'node-unhealthy-trigger';
+    const workspaces = [
+      {
+        workspaceId: 'workspace-unhealthy-trigger-a',
+        chatSessionId: 'session-unhealthy-trigger-a',
+        agentSessionId: 'agent-unhealthy-trigger-a',
+      },
+      {
+        workspaceId: 'workspace-unhealthy-trigger-b',
+        chatSessionId: 'session-unhealthy-trigger-b',
+        agentSessionId: 'agent-unhealthy-trigger-b',
+      },
+    ];
+    const heartbeatAt = new Date(Date.now() - 31 * 60_000).toISOString();
+    await seedNode(nodeId, USER_ID, {
+      createdAt: heartbeatAt,
+      lastHeartbeatAt: heartbeatAt,
+    });
+    for (const workspace of workspaces) {
+      await seedWorkspace(workspace.workspaceId, nodeId, USER_ID, {
+        projectId: PROJECT_ID,
+        chatSessionId: workspace.chatSessionId,
+      });
+      await seedAgentSession(workspace.agentSessionId, workspace.workspaceId, USER_ID);
+    }
+    await seedAutoProvisionedTaskForNode('task-unhealthy-trigger', nodeId);
+
+    const order: string[] = [];
+    const notice = vi.fn<UnhealthyNodeBoundaries['notice']>(async () => {
+      order.push('notice');
+      return 'notice-id';
+    });
+    const sleep = vi.fn<UnhealthyNodeBoundaries['sleep']>(async () => {
+      order.push('sleep');
+    });
+    const release = vi.fn<UnhealthyNodeBoundaries['release']>(
+      async (_db, workerEnv, nowIso, node, options) => {
+        order.push('release');
+        const claimed = await claimNodeForCleanup(workerEnv, node, nowIso, {
+          allowActiveWorkspaces: options.allowActiveWorkspaces,
+          allowManagedRunningProvenance: options.allowManagedRunningProvenance,
+          expectedLastHeartbeatAt: options.expectedLastHeartbeatAt,
+          requireWorkspaceIdle: options.requireWorkspaceIdle,
+        });
+        if (!claimed) return 'skipped';
+        await workerEnv.DATABASE.prepare('DELETE FROM nodes WHERE id = ?').bind(node.id).run();
+        return 'destroyed';
+      }
+    );
+    const boundaries: UnhealthyNodeBoundaries = {
+      notice: notice as UnhealthyNodeBoundaries['notice'],
+      sleep: sleep as UnhealthyNodeBoundaries['sleep'],
+      release: release as UnhealthyNodeBoundaries['release'],
+    };
+
+    const result = await runNodeCleanupSweep(env as Env, boundaries);
+
+    expect(order).toEqual(['notice', 'sleep', 'notice', 'sleep', 'release']);
+    expect(
+      notice.mock.calls.map((call) => ({
+        projectId: call[1],
+        chatSessionId: call[2],
+        role: call[3],
+        content: call[4],
+        metadata: call[5],
+        messageId: call[6],
+      }))
+    ).toEqual(
+      expect.arrayContaining(
+        workspaces.map((workspace) => ({
+          projectId: PROJECT_ID,
+          chatSessionId: workspace.chatSessionId,
+          role: 'system',
+          content: expect.stringContaining(`SAM lost contact with node ${nodeId}`),
+          metadata: { source: 'node_health', kind: 'heartbeat_lost' },
+          messageId: `node-health:${nodeId}:${workspace.workspaceId}:${Date.parse(heartbeatAt)}`,
+        }))
+      )
+    );
+    expect(sleep.mock.calls.map((call) => call[1])).toEqual(
+      expect.arrayContaining(
+        workspaces.map((workspace) =>
+          expect.objectContaining({
+            workspaceId: workspace.workspaceId,
+            userId: USER_ID,
+            reason: 'node_heartbeat_lost',
+            sleepAfterMs: 0,
+            expectedNodeId: nodeId,
+            signal: expect.any(AbortSignal),
+          })
+        )
+      )
+    );
+    expect(release).toHaveBeenCalledOnce();
+    expect(release.mock.calls[0]?.[3]).toMatchObject({
+      id: nodeId,
+      user_id: USER_ID,
+      last_heartbeat_at: heartbeatAt,
+    });
+    expect(release.mock.calls[0]?.[4]).toMatchObject({
+      allowActiveWorkspaces: true,
+      allowManagedRunningProvenance: true,
+      expectedLastHeartbeatAt: heartbeatAt,
+      requireWorkspaceIdle: false,
+      context: {
+        episodeStartedAt: heartbeatAt,
+        reason: 'heartbeat_loss_exceeded_release_window',
+      },
+    });
+    expect(result.unhealthyReleased).toBe(1);
+    expect(await getNodeStatus(nodeId)).toBeNull();
+    const events = await env.DATABASE.prepare(
+      'SELECT event FROM node_health_events WHERE node_id = ? ORDER BY created_at, rowid'
+    )
+      .bind(nodeId)
+      .all<{ event: string }>();
+    expect(events.results.map((row) => row.event)).toContain('released');
+  });
+
   describe('orphaned workspace stopping (Phase 3)', () => {
-    it('destroys failed cf-container task workspaces instead of leaving the container active', async () => {
+    it('destroys cancelled cf-container task workspaces instead of leaving the container active', async () => {
       await seedBaseData();
       const nodeId = 'node-nc-cf-terminal';
       const wsId = 'ws-nc-cf-terminal';
@@ -192,7 +349,7 @@ describe('runNodeCleanupSweep — vertical slice', () => {
       });
       await seedAgentSession('agent-nc-cf-terminal', wsId, USER_ID, { status: 'running' });
       await seedTask(taskId, PROJECT_ID, USER_ID, {
-        status: 'failed',
+        status: 'cancelled',
         workspaceId: wsId,
         updatedAt: oldDate,
       });
@@ -219,6 +376,133 @@ describe('runNodeCleanupSweep — vertical slice', () => {
       expect(await getAgentSessionStatus('agent-nc-cf-terminal')).toMatchObject({
         status: 'stopped',
         stopped_at: expect.any(String),
+      });
+    });
+
+    it('leaves a failed cf-container task to the sleep lifecycle only while its agent session can be slept', async () => {
+      // Failed-task work preservation (idea 01M1XGHX7NQZQYWQRV5C1PJ60N): the
+      // container is the failed task's unpushed work until its sleep snapshot is
+      // taken. Once no agent session can be slept, the reaper is its only escape.
+      await seedBaseData();
+      const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const destroyForUser = vi.fn().mockResolvedValue(undefined);
+      for (const [suffix, agentStatus] of [
+        ['resumable', 'running'],
+        ['ended', 'failed'],
+      ] as const) {
+        const nodeId = `node-nc-cf-failed-${suffix}`;
+        const wsId = `ws-nc-cf-failed-${suffix}`;
+        await seedNode(nodeId, USER_ID, {
+          status: 'running',
+          createdAt: oldDate,
+          updatedAt: oldDate,
+        });
+        await env.DATABASE.prepare(`UPDATE nodes SET runtime = 'cf-container' WHERE id = ?`)
+          .bind(nodeId)
+          .run();
+        await seedWorkspace(wsId, nodeId, USER_ID, {
+          projectId: PROJECT_ID,
+          status: 'running',
+          chatSessionId: `session-nc-cf-failed-${suffix}`,
+          createdAt: oldDate,
+        });
+        await seedAgentSession(`agent-nc-cf-failed-${suffix}`, wsId, USER_ID, {
+          status: agentStatus,
+        });
+        await seedTask(`task-nc-cf-failed-${suffix}`, PROJECT_ID, USER_ID, {
+          status: 'failed',
+          workspaceId: wsId,
+          updatedAt: oldDate,
+        });
+      }
+      const testEnv = {
+        ...env,
+        CF_CONTAINER_ENABLED: 'true',
+        VM_AGENT_CONTAINER: {
+          idFromName: (id: string) => id,
+          get: () => ({ destroyForUser }),
+        },
+        ORPHANED_WORKSPACE_GRACE_PERIOD_MS: '1000',
+      } as unknown as Env;
+      const result = emptyResult();
+
+      await sweepTerminalCfContainers(testEnv, new Date(), resolveCleanupConfig(testEnv), result);
+
+      expect(result.cfContainersDestroyed).toBe(1);
+      expect(destroyForUser).toHaveBeenCalledTimes(1);
+      expect(await getWorkspaceStatus('ws-nc-cf-failed-resumable')).toMatchObject({
+        status: 'running',
+      });
+      expect(await getNodeRuntimeStatus('node-nc-cf-failed-resumable')).toMatchObject({
+        status: 'running',
+      });
+      expect(await getNodeRuntimeStatus('node-nc-cf-failed-ended')).toMatchObject({
+        status: 'deleted',
+      });
+    });
+
+    it('reaps a failed task container the sleep lifecycle neither holds nor can claim', async () => {
+      // A stopped workspace whose agent row still says running can never be claimed
+      // by the sleep sweep, so only the reaper can end it. A slept container is the
+      // wake target and stays.
+      await seedBaseData();
+      const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const destroyForUser = vi.fn().mockResolvedValue(undefined);
+      for (const [suffix, workspaceStatus, agentStatus] of [
+        ['stale-stopped', 'stopped', 'running'],
+        ['slept', 'sleeping', 'sleeping'],
+      ] as const) {
+        const nodeId = `node-nc-cf-failed-${suffix}`;
+        const wsId = `ws-nc-cf-failed-${suffix}`;
+        const chatSessionId = `session-nc-cf-failed-${suffix}`;
+        await seedNode(nodeId, USER_ID, {
+          status: 'running',
+          createdAt: oldDate,
+          updatedAt: oldDate,
+        });
+        await env.DATABASE.prepare(`UPDATE nodes SET runtime = 'cf-container' WHERE id = ?`)
+          .bind(nodeId)
+          .run();
+        await seedWorkspace(wsId, nodeId, USER_ID, {
+          projectId: PROJECT_ID,
+          status: workspaceStatus,
+          chatSessionId,
+          createdAt: oldDate,
+        });
+        await seedAgentSession(`agent-nc-cf-failed-${suffix}`, wsId, USER_ID, {
+          status: agentStatus,
+        });
+        await seedTask(`task-nc-cf-failed-${suffix}`, PROJECT_ID, USER_ID, {
+          status: 'failed',
+          workspaceId: wsId,
+          updatedAt: oldDate,
+        });
+        if (suffix === 'slept') {
+          await seedRestorableSleepingSnapshot({
+            id: `snapshot-nc-cf-failed-${suffix}`,
+            workspaceId: wsId,
+            nodeId,
+            chatSessionId,
+            timestamp: oldDate,
+          });
+        }
+      }
+      const testEnv = {
+        ...env,
+        CF_CONTAINER_ENABLED: 'true',
+        VM_AGENT_CONTAINER: { idFromName: (id: string) => id, get: () => ({ destroyForUser }) },
+        ORPHANED_WORKSPACE_GRACE_PERIOD_MS: '1000',
+      } as unknown as Env;
+      const result = emptyResult();
+
+      await sweepTerminalCfContainers(testEnv, new Date(), resolveCleanupConfig(testEnv), result);
+
+      expect(result.cfContainersDestroyed).toBe(1);
+      expect(await getNodeRuntimeStatus('node-nc-cf-failed-stale-stopped')).toMatchObject({
+        status: 'deleted',
+      });
+      expect(await getNodeRuntimeStatus('node-nc-cf-failed-slept')).toMatchObject({
+        status: 'running',
       });
     });
 
@@ -321,7 +605,7 @@ describe('runNodeCleanupSweep — vertical slice', () => {
       ).run();
     });
 
-    it('stops an orphaned workspace after a failed task', async () => {
+    it('stops an orphaned workspace after a cancelled task', async () => {
       await seedBaseData();
       const nodeId = 'node-nc-orphan-ws';
       const wsId = 'ws-nc-orphan';
@@ -337,7 +621,7 @@ describe('runNodeCleanupSweep — vertical slice', () => {
       });
       await seedAgentSession('agent-nc-orphan', wsId, USER_ID, { status: 'running' });
       await seedTask(taskId, PROJECT_ID, USER_ID, {
-        status: 'failed',
+        status: 'cancelled',
         workspaceId: wsId,
       });
 
@@ -362,6 +646,114 @@ describe('runNodeCleanupSweep — vertical slice', () => {
       const events = await getObservabilityEvents('orphaned_workspace');
       expect(events.length).toBeGreaterThanOrEqual(1);
       expect(events[0].message).toContain('Orphaned workspace stopped');
+    });
+
+    it('leaves a failed task workspace to the sleep lifecycle only while its agent session can be slept', async () => {
+      // node_cleanup runs before session_sleep in every tick: without this
+      // ownership predicate it would stop a failed task's workspace before its
+      // preservation snapshot could be taken (idea 01M1XGHX7NQZQYWQRV5C1PJ60N).
+      await seedBaseData();
+      const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      for (const [suffix, agentStatus] of [
+        ['resumable', 'running'],
+        ['sleeping', 'sleeping'],
+        ['ended', 'failed'],
+      ] as const) {
+        const nodeId = `node-nc-failed-${suffix}`;
+        const wsId = `ws-nc-failed-${suffix}`;
+        await seedNode(nodeId, USER_ID);
+        await seedWorkspace(wsId, nodeId, USER_ID, {
+          projectId: PROJECT_ID,
+          status: 'running',
+          chatSessionId: `session-nc-failed-${suffix}`,
+          createdAt: oldDate,
+        });
+        await seedAgentSession(`agent-nc-failed-${suffix}`, wsId, USER_ID, {
+          status: agentStatus,
+        });
+        await seedTask(`task-nc-failed-${suffix}`, PROJECT_ID, USER_ID, {
+          status: 'failed',
+          workspaceId: wsId,
+        });
+      }
+      const testEnv = {
+        ...env,
+        ORPHANED_WORKSPACE_GRACE_PERIOD_MS: '1000',
+      } as unknown as Env;
+
+      const result = await runNodeCleanupSweep(testEnv);
+
+      expect(result.orphanedWorkspacesFlagged).toBe(1);
+      expect(await getWorkspaceStatus('ws-nc-failed-resumable')).toMatchObject({
+        status: 'running',
+      });
+      expect(await getWorkspaceStatus('ws-nc-failed-sleeping')).toMatchObject({
+        status: 'running',
+      });
+      expect(await getWorkspaceStatus('ws-nc-failed-ended')).toMatchObject({ status: 'stopped' });
+    });
+
+    it('reaps a failed task workspace once the sleep lifecycle can no longer take it', async () => {
+      // The reapers are the durable backstop for a preservation that cannot finish:
+      // an agent session that errored after the sleep was queued (the sweep can
+      // never claim it), or a sleep whose retry budget is spent. A queued sleep, or
+      // a failed one the sweep will still retry, stays exempt.
+      await seedBaseData();
+      const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const now = new Date().toISOString();
+      for (const [suffix, agentStatus, sleepStatus, sleepAfter, sleepAttempts] of [
+        ['queued', 'running', 'scheduled', now, 0],
+        ['errored', 'error', 'scheduled', now, 0],
+        ['retrying', 'running', 'failed', null, 2],
+        ['exhausted', 'running', 'failed', null, 3],
+      ] as const) {
+        const nodeId = `node-nc-failed-backstop-${suffix}`;
+        const wsId = `ws-nc-failed-backstop-${suffix}`;
+        const chatSessionId = `session-nc-failed-backstop-${suffix}`;
+        await seedNode(nodeId, USER_ID);
+        await seedWorkspace(wsId, nodeId, USER_ID, {
+          projectId: PROJECT_ID,
+          status: 'running',
+          chatSessionId,
+          createdAt: oldDate,
+        });
+        await seedAgentSession(`agent-nc-failed-backstop-${suffix}`, wsId, USER_ID, {
+          status: agentStatus,
+        });
+        await seedTask(`task-nc-failed-backstop-${suffix}`, PROJECT_ID, USER_ID, {
+          status: 'failed',
+          workspaceId: wsId,
+        });
+        await seedPendingSleepSnapshot({
+          id: `snapshot-nc-failed-backstop-${suffix}`,
+          workspaceId: wsId,
+          chatSessionId,
+          sleepStatus,
+          sleepAfter,
+          sleepAttempts,
+        });
+      }
+      const testEnv = {
+        ...env,
+        ORPHANED_WORKSPACE_GRACE_PERIOD_MS: '1000',
+        SESSION_SLEEP_MAX_ATTEMPTS: '3',
+      } as unknown as Env;
+
+      const result = await runNodeCleanupSweep(testEnv);
+
+      expect(result.orphanedWorkspacesFlagged).toBe(2);
+      expect(await getWorkspaceStatus('ws-nc-failed-backstop-queued')).toMatchObject({
+        status: 'running',
+      });
+      expect(await getWorkspaceStatus('ws-nc-failed-backstop-errored')).toMatchObject({
+        status: 'stopped',
+      });
+      expect(await getWorkspaceStatus('ws-nc-failed-backstop-retrying')).toMatchObject({
+        status: 'running',
+      });
+      expect(await getWorkspaceStatus('ws-nc-failed-backstop-exhausted')).toMatchObject({
+        status: 'stopped',
+      });
     });
 
     it('stops orphaned recovery workspace so it no longer blocks node cleanup forever', async () => {
@@ -445,10 +837,18 @@ describe('runNodeCleanupSweep — vertical slice', () => {
         updatedAt: oldDate,
       });
       await seedAutoProvisionedTaskForNode(taskId, nodeId, { updatedAt: oldDate });
+      await env.DATABASE.prepare(`UPDATE nodes SET runtime = 'cf-container' WHERE id = ?`)
+        .bind(nodeId)
+        .run();
       // No workspaces on this node
 
       const testEnv = {
         ...env,
+        CF_CONTAINER_ENABLED: 'true',
+        VM_AGENT_CONTAINER: {
+          idFromName: (id: string) => id,
+          get: () => ({ destroyForUser: vi.fn().mockResolvedValue(undefined) }),
+        },
         NODE_WORKSPACE_IDLE_TIMEOUT_MS: '1000',
       } as unknown as Env;
 
@@ -485,15 +885,147 @@ describe('runNodeCleanupSweep — vertical slice', () => {
 
       const result = await runNodeCleanupSweep(testEnv);
 
-      expect(result.stoppedWorkspacesDeleted).toBeGreaterThanOrEqual(1);
+      expect(result.stoppedWorkspacesDeleted).toBe(0);
+      expect(result.stoppedWorkspacesQueued).toBeGreaterThanOrEqual(1);
+      expect((await getWorkspaceStatus(wsId))?.status).toBe('stopped');
+      expect(await getAgentSessionStatus('agent-nc-stopped-ttl')).toMatchObject({
+        status: 'running',
+        stopped_at: null,
+      });
 
-      // Verify D1 state: workspace should now be 'deleted'
-      const ws = await getWorkspaceStatus(wsId);
-      expect(ws?.status).toBe('deleted');
+      const stub = env.NODE_LIFECYCLE.get(env.NODE_LIFECYCLE.idFromName(nodeId));
+      await runInDurableObject(stub, async (instance) => {
+        const key = `ws-delete:${wsId}`;
+        const pending = await instance.ctx.storage.get<Record<string, unknown>>(key);
+        expect(pending).toMatchObject({ workspaceId: wsId, attemptCount: 0 });
+        await instance.ctx.storage.put(key, { ...pending, deleteAt: Date.now() - 1 });
+        await instance.alarm();
+      });
+      await vi.waitFor(async () => {
+        expect((await getWorkspaceStatus(wsId))?.status).toBe('deleted');
+      });
       expect(await getAgentSessionStatus('agent-nc-stopped-ttl')).toMatchObject({
         status: 'completed',
         stopped_at: expect.any(String),
       });
+    });
+
+    it('queues stale stopped deletion without doing VM I/O in cron', async () => {
+      await seedBaseData();
+      const nodeId = 'node-nc-ttl-timeout';
+      const wsId = 'ws-nc-stopped-timeout';
+      const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+
+      await seedNode(nodeId, USER_ID);
+      await seedWorkspace(wsId, nodeId, USER_ID, {
+        projectId: PROJECT_ID,
+        status: 'stopped',
+        updatedAt: oldDate,
+      });
+      await seedAgentSession('agent-nc-stopped-timeout', wsId, USER_ID, {
+        status: 'running',
+      });
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL) => {
+          const url =
+            typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+          if (url.includes('.vm.test.example.com')) {
+            throw new Error('simulated scheduled VM delete timeout');
+          }
+          return originalFetch(input);
+        })
+      );
+
+      const result = await runNodeCleanupSweep({
+        ...env,
+        WORKSPACE_STOPPED_TTL_MS: '1000',
+        WORKSPACE_DELETION_RETRY_BASE_MS: '60000',
+      } as unknown as Env);
+
+      expect(result.stoppedWorkspacesDeleted).toBe(0);
+      expect(result.stoppedWorkspacesQueued).toBeGreaterThanOrEqual(1);
+      expect(result.errors).toBe(0);
+      expect(fetch).not.toHaveBeenCalled();
+      const ws = await env.DATABASE.prepare(
+        'SELECT status, error_message FROM workspaces WHERE id = ?'
+      )
+        .bind(wsId)
+        .first<{ status: string; error_message: string | null }>();
+      expect(ws).toMatchObject({
+        status: 'stopped',
+        error_message: null,
+      });
+      expect(await getAgentSessionStatus('agent-nc-stopped-timeout')).toMatchObject({
+        status: 'running',
+        stopped_at: null,
+      });
+
+      const stub = env.NODE_LIFECYCLE.get(env.NODE_LIFECYCLE.idFromName(nodeId));
+      await runInDurableObject(stub, async (instance) => {
+        expect(await instance.ctx.storage.get(`ws-delete:${wsId}`)).toMatchObject({
+          workspaceId: wsId,
+          nodeId,
+          userId: USER_ID,
+          attemptCount: 0,
+          lastError: 'scheduled by stopped-workspace cleanup safety net',
+        });
+        expect(await instance.ctx.storage.getAlarm()).toBeGreaterThan(Date.now());
+      });
+    });
+
+    it('does not enqueue when restart wins after the stale-candidate scan', async () => {
+      await seedBaseData();
+      const nodeId = 'node-nc-stale-scan-restart-race';
+      const wsId = 'ws-nc-stale-scan-restart-race';
+      const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      await seedNode(nodeId, USER_ID);
+      await seedWorkspace(wsId, nodeId, USER_ID, {
+        projectId: PROJECT_ID,
+        status: 'stopped',
+        updatedAt: oldDate,
+      });
+
+      const realNamespace = env.NODE_LIFECYCLE;
+      let targetScheduleResult: boolean | null = null;
+      const scheduleAfterRestart = vi.fn(async (...args: unknown[]) => {
+        await env.DATABASE.prepare("UPDATE workspaces SET status = 'running' WHERE id = ?")
+          .bind(wsId)
+          .run();
+        const realStub = realNamespace.get(realNamespace.idFromName(nodeId)) as DurableObjectStub<{
+          scheduleWorkspaceDeletion: (...input: unknown[]) => Promise<boolean>;
+        }>;
+        const scheduled = await realStub.scheduleWorkspaceDeletion(...args);
+        if (args[1] === wsId) targetScheduleResult = scheduled;
+        return scheduled;
+      });
+      const testEnv = {
+        ...env,
+        WORKSPACE_STOPPED_TTL_MS: '1000',
+        NODE_LIFECYCLE: {
+          idFromName: (id: string) => id,
+          get: () => ({ scheduleWorkspaceDeletion: scheduleAfterRestart }),
+        },
+      } as unknown as Env;
+      const result = emptyResult();
+
+      await sweepStaleStoppedWorkspaces(
+        undefined as never,
+        testEnv,
+        new Date(),
+        resolveCleanupConfig(testEnv),
+        result
+      );
+
+      expect(scheduleAfterRestart.mock.calls.filter((call) => call[1] === wsId)).toHaveLength(1);
+      expect(targetScheduleResult).toBe(false);
+      expect(await getWorkspaceStatus(wsId)).toEqual({ status: 'running' });
+      const realStub = realNamespace.get(realNamespace.idFromName(nodeId));
+      expect(
+        await runInDurableObject(realStub, async (instance) =>
+          instance.ctx.storage.get(`ws-delete:${wsId}`)
+        )
+      ).toBeUndefined();
     });
 
     it('does not delete recently stopped workspace', async () => {
@@ -672,9 +1204,17 @@ describe('runNodeCleanupSweep — vertical slice', () => {
         executionStep: 'running',
         updatedAt: new Date().toISOString(),
       });
+      await env.DATABASE.prepare(`UPDATE nodes SET runtime = 'cf-container' WHERE id = ?`)
+        .bind(nodeId)
+        .run();
 
       const testEnv = {
         ...env,
+        CF_CONTAINER_ENABLED: 'true',
+        VM_AGENT_CONTAINER: {
+          idFromName: (id: string) => id,
+          get: () => ({ destroyForUser: vi.fn().mockResolvedValue(undefined) }),
+        },
         NODE_WORKSPACE_IDLE_TIMEOUT_MS: '1000',
       } as unknown as Env;
 
@@ -738,9 +1278,17 @@ describe('runNodeCleanupSweep — vertical slice', () => {
         chatSessionId,
         timestamp: oldDate,
       });
+      await env.DATABASE.prepare(`UPDATE nodes SET runtime = 'cf-container' WHERE id = ?`)
+        .bind(nodeId)
+        .run();
 
       const testEnv = {
         ...env,
+        CF_CONTAINER_ENABLED: 'true',
+        VM_AGENT_CONTAINER: {
+          idFromName: (id: string) => id,
+          get: () => ({ destroyForUser: vi.fn().mockResolvedValue(undefined) }),
+        },
         NODE_WORKSPACE_IDLE_TIMEOUT_MS: '1000',
       } as unknown as Env;
 
@@ -780,7 +1328,7 @@ describe('runNodeCleanupSweep — vertical slice', () => {
         })
       ).resolves.toMatchObject({
         status: 'unavailable',
-        reason: 'session_recovery_placement_credentials',
+        reason: 'placement_credentials_missing',
       });
 
       const recoveryTask = await env.DATABASE.prepare(
@@ -955,10 +1503,13 @@ describe('runNodeCleanupSweep — vertical slice', () => {
         orphanedWorkspacesFlagged: expect.any(Number),
         orphanedNodesDestroyed: expect.any(Number),
         orphanedNodesSkipped: expect.any(Number),
+        stoppedWorkspacesQueued: expect.any(Number),
         stoppedWorkspacesDeleted: expect.any(Number),
         cfContainersDestroyed: expect.any(Number),
         incompatibleDestroyed: expect.any(Number),
         incompatibleSkipped: expect.any(Number),
+        unhealthyReleased: expect.any(Number),
+        unhealthyHeld: expect.any(Number),
         errors: expect.any(Number),
       });
     });

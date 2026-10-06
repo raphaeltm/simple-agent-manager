@@ -6,219 +6,155 @@
  * lifecycle DO) are substituted so contract drift between queue, defer, claim,
  * final snapshot, and cleanup cannot hide behind unit mocks.
  */
-import Database from 'better-sqlite3';
+import type Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { runSessionSleepSweep } from '../../src/scheduled/session-sleep';
+import { sleepWorkspaceSession } from '../../src/services/session-sleep';
 import { cleanupTerminalTaskResources } from '../../src/services/task-terminal-cleanup';
-import { createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
+import type { SleepActivity } from '../helpers/session-sleep-fixture';
 
-const mocks = vi.hoisted(() => ({
-  cleanupTaskRun: vi.fn(),
-  getAcpSession: vi.fn(),
-  getSession: vi.fn(),
-  getSessionState: vi.fn(),
-  hibernateAgentSessionOnNode: vi.fn(),
-  markIdle: vi.fn(),
-  r2Head: vi.fn(),
-  scheduleWorkspaceDeletion: vi.fn(),
-  sleepSession: vi.fn(),
-  stopComputeTracking: vi.fn(),
-  stopWorkspaceOnNode: vi.fn(),
-  transitionAcpSession: vi.fn(),
-}));
-
-vi.mock('../../src/services/node-agent', () => ({
-  hibernateAgentSessionOnNode: (...args: unknown[]) => mocks.hibernateAgentSessionOnNode(...args),
-  stopWorkspaceOnNode: (...args: unknown[]) => mocks.stopWorkspaceOnNode(...args),
-}));
-
-vi.mock('../../src/services/project-data', () => ({
-  failSession: vi.fn(),
-  getAcpSession: (...args: unknown[]) => mocks.getAcpSession(...args),
-  getSession: (...args: unknown[]) => mocks.getSession(...args),
-  getSessionState: (...args: unknown[]) => mocks.getSessionState(...args),
-  sleepSession: (...args: unknown[]) => mocks.sleepSession(...args),
-  stopSession: vi.fn(),
-  transitionAcpSession: (...args: unknown[]) => mocks.transitionAcpSession(...args),
-}));
-
-vi.mock('../../src/services/compute-usage', () => ({
-  stopComputeTracking: (...args: unknown[]) => mocks.stopComputeTracking(...args),
-}));
-
-vi.mock('../../src/services/task-runner', () => ({
-  cleanupTaskRun: (...args: unknown[]) => mocks.cleanupTaskRun(...args),
-}));
-
-vi.mock('../../src/services/vm-agent-container', () => ({
-  markVmAgentContainerActiveWorkStarted: vi.fn(),
-  sleepVmAgentContainer: vi.fn(),
-}));
-
-const START = new Date('2026-08-14T05:00:00.000Z');
+const {
+  sleepBoundaryMocks: mocks,
+  createSessionSleepFixture,
+  SLEEP_START: START,
+} = await vi.hoisted(() => import('../helpers/session-sleep-fixture'));
 const RETRY_AT = new Date('2026-08-14T05:15:00.000Z');
-const HOME_SHA256 = 'ab'.repeat(32);
-
-function checksumBytes(hex: string): ArrayBuffer {
-  return Uint8Array.from(Buffer.from(hex, 'hex')).buffer;
-}
 
 describe('terminal session sleep lifecycle integration', () => {
   let sqlite: Database.Database;
   let env: Env;
-  let activity: { activity: 'prompting' | 'idle'; activityAt: number };
+  let activity: SleepActivity;
+  let fixture: ReturnType<typeof createSessionSleepFixture>;
   let order: string[];
 
   beforeEach(() => {
-    vi.useFakeTimers();
-    vi.setSystemTime(START);
-    vi.resetAllMocks();
-    sqlite = new Database(':memory:');
-    createSchemaTables(sqlite, [
-      schema.projects,
-      schema.nodes,
-      schema.workspaces,
-      schema.tasks,
-      schema.sessionSummaries,
-      schema.agentSessions,
-      schema.sessionSnapshots,
-      schema.computeUsage,
-    ]);
-    sqlite.exec(
-      'CREATE UNIQUE INDEX idx_session_snapshots_chat_session_id ON session_snapshots(chat_session_id)'
-    );
-    sqlite
-      .prepare(`INSERT INTO projects (id, warm_node_timeout_ms) VALUES ('project-1', 2700000)`)
-      .run();
-    sqlite
-      .prepare(
-        `INSERT INTO nodes (id, user_id, status, node_role, runtime)
-         VALUES ('node-1', 'user-1', 'running', 'workspace', 'vm')`
-      )
-      .run();
-    sqlite
-      .prepare(
-        `INSERT INTO workspaces
-           (id, node_id, project_id, user_id, chat_session_id, status, updated_at)
-         VALUES
-           ('workspace-1', 'node-1', 'project-1', 'user-1', 'chat-1', 'running', ?)`
-      )
-      .run(START.toISOString());
-    sqlite
-      .prepare(
-        `INSERT INTO tasks
-           (id, project_id, user_id, workspace_id, status)
-         VALUES
-           ('task-1', 'project-1', 'user-1', 'workspace-1', 'completed')`
-      )
-      .run();
-    // Task submission owns the session through the ProjectData summary. The
-    // tasks.chat_session_id compatibility link is normally null on this path.
-    sqlite
-      .prepare(
-        `INSERT INTO session_summaries
-           (id, project_id, user_id, status, task_id, workspace_id,
-            message_count, started_at, updated_at)
-         VALUES
-           ('chat-1', 'project-1', 'user-1', 'active', 'task-1', 'workspace-1',
-            1, ?, ?)`
-      )
-      .run(START.getTime(), START.getTime());
-    sqlite
-      .prepare(
-        `INSERT INTO agent_sessions (id, workspace_id, status, agent_type, created_at)
-         VALUES ('agent-1', 'workspace-1', 'running', 'openai-codex', ?)`
-      )
-      .run(START.toISOString());
-    sqlite
-      .prepare(
-        `INSERT INTO session_snapshots
-           (id, project_id, workspace_id, node_id, user_id, chat_session_id,
-            agent_session_id, runtime, status, degradation, manifest_r2_key,
-            expires_at, sleep_attempts, created_at, updated_at)
-         VALUES
-           ('snapshot-1', 'project-old', 'workspace-old', 'node-old', 'user-old', 'chat-1',
-            'agent-old', 'cf-container', 'pending', 'none', 'old/manifest.json',
-            '2026-08-21T05:00:00.000Z', 0, ?, ?)`
-      )
-      .run(START.toISOString(), START.toISOString());
-
     activity = { activity: 'prompting', activityAt: START.getTime() };
-    order = [];
-    mocks.getSessionState.mockImplementation(async () => activity);
-    mocks.getSession.mockResolvedValue({ status: 'active' });
-    mocks.sleepSession.mockResolvedValue(true);
-    mocks.getAcpSession.mockResolvedValue(null);
-    mocks.stopWorkspaceOnNode.mockImplementation(async () => {
-      order.push('stop-workspace');
-    });
-    mocks.stopComputeTracking.mockImplementation(async () => {
-      order.push('stop-compute-tracking');
-      return 1;
-    });
-    mocks.cleanupTaskRun.mockImplementation(async () => {
-      order.push('task-cleanup');
-    });
-    mocks.scheduleWorkspaceDeletion.mockImplementation(async () => {
-      order.push('schedule-deletion');
-    });
-    mocks.markIdle.mockImplementation(async () => {
-      order.push('mark-node-warm');
-    });
-    mocks.r2Head.mockImplementation(async (key: string) => {
-      order.push(`r2-head:${key}`);
-      return key.endsWith('/home.tar')
-        ? { size: 4, checksums: { sha256: checksumBytes(HOME_SHA256) } }
-        : { size: 128, checksums: {} };
-    });
-    mocks.hibernateAgentSessionOnNode.mockImplementation(async () => {
-      const generation = 'generation-final';
-      const prefix = `session-snapshots/chat-1/${generation}`;
-      sqlite
-        .prepare(
-          `UPDATE session_snapshots
-           SET status = 'available', degradation = 'none',
-               snapshot_generation = ?, capture_generation = NULL,
-               home_r2_key = ?, home_sha256 = ?, manifest_r2_key = ?,
-               manifest_json = ?
-           WHERE chat_session_id = 'chat-1'`
-        )
-        .run(
-          generation,
-          `${prefix}/home.tar`,
-          HOME_SHA256,
-          `${prefix}/manifest.json`,
-          JSON.stringify({ artifacts: { home: { sizeBytes: 4 } } })
-        );
-      order.push('final-snapshot');
-      return { status: 'pending', accepted: true };
-    });
-
-    env = {
-      DATABASE: createSqliteD1(sqlite),
-      R2: { head: mocks.r2Head },
-      SESSION_SLEEP_AFTER_MS: '900000',
-      SESSION_SLEEP_RETRY_DELAY_MS: '60000',
-      SESSION_SLEEP_MAX_ATTEMPTS: '3',
-      SESSION_SLEEP_SWEEP_BATCH_SIZE: '5',
-      SESSION_SNAPSHOT_POLL_INTERVAL_MS: '1',
-      SESSION_SNAPSHOT_REQUEST_TIMEOUT_MS: '1000',
-      NODE_LIFECYCLE: {
-        idFromName: vi.fn(() => 'node-do-id'),
-        get: vi.fn(() => ({
-          markIdle: mocks.markIdle,
-          scheduleWorkspaceDeletion: mocks.scheduleWorkspaceDeletion,
-        })),
-      },
-    } as unknown as Env;
+    fixture = createSessionSleepFixture('completed', () => activity);
+    ({ sqlite, env, order } = fixture);
   });
 
-  afterEach(() => {
-    sqlite.close();
-    vi.useRealTimers();
+  afterEach(() => fixture.dispose());
+
+  it.each(['in_progress', 'completed', 'failed', 'cancelled'])(
+    'sleeps a VM with task status %s without rewriting terminal tasks',
+    async (status) => {
+      sqlite
+        .prepare("UPDATE tasks SET status = ?, execution_step = 'agent_ready' WHERE id = 'task-1'")
+        .run(status);
+      activity = { activity: 'idle', activityAt: START.getTime() - 60_000 };
+
+      await sleepWorkspaceSession(env, {
+        workspaceId: 'workspace-1',
+        userId: 'user-1',
+        reason: 'explicit test sleep',
+      });
+
+      expect(
+        sqlite.prepare("SELECT status, execution_step FROM tasks WHERE id = 'task-1'").get()
+      ).toEqual({
+        status: status === 'in_progress' ? 'sleeping' : status,
+        execution_step: status === 'in_progress' ? null : 'agent_ready',
+      });
+      expect(
+        sqlite.prepare("SELECT status FROM workspaces WHERE id = 'workspace-1'").get()
+      ).toEqual({
+        status: 'sleeping',
+      });
+      expect(mocks.stopWorkspaceOnNode).toHaveBeenCalled();
+      const events = sqlite
+        .prepare("SELECT from_status, to_status FROM task_status_events WHERE task_id = 'task-1'")
+        .all();
+      expect(events).toEqual(
+        status === 'in_progress' ? [{ from_status: 'in_progress', to_status: 'sleeping' }] : []
+      );
+    }
+  );
+
+  it('protects a long prompt immediately after completion in both sweep and teardown gates', async () => {
+    sqlite
+      .prepare('UPDATE tasks SET completed_at = ? WHERE id = ?')
+      .run(START.toISOString(), 'task-1');
+    activity = { activity: 'prompting', activityAt: START.getTime() - 60 * 60 * 1000 };
+    await cleanupTerminalTaskResources(env, 'task-1', { status: 'completed' });
+    expect(await runSessionSleepSweep(env, START)).toMatchObject({
+      deferred: 1,
+      claimed: 0,
+      slept: 0,
+    });
+    expect(
+      sqlite.prepare('SELECT sleep_after FROM session_snapshots WHERE id = ?').get('snapshot-1')
+    ).toEqual({ sleep_after: RETRY_AT.toISOString() });
+    await expect(
+      sleepWorkspaceSession(env, {
+        workspaceId: 'workspace-1',
+        userId: 'user-1',
+        reason: 'explicit test sleep',
+      })
+    ).rejects.toThrow('Workspace agent is not idle (prompting)');
+    expect(mocks.hibernateAgentSessionOnNode).not.toHaveBeenCalled();
+    expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
+  });
+
+  it('terminalizes a stopped capture in the service catch before the sweep handles it again', async () => {
+    await cleanupTerminalTaskResources(env, 'task-1', { status: 'completed' });
+    activity = { activity: 'idle', activityAt: START.getTime() };
+    mocks.hibernateAgentSessionOnNode.mockRejectedValue(
+      new Error(
+        'resolve snapshot devcontainer: workspace is not running/recovery (status: stopped)'
+      )
+    );
+
+    const first = await runSessionSleepSweep(env, START);
+    const second = await runSessionSleepSweep(env, RETRY_AT);
+
+    expect(first).toMatchObject({ claimed: 1, failed: 1 });
+    expect(second).toMatchObject({ selected: 0 });
+    expect(
+      sqlite
+        .prepare(
+          `SELECT sleep_status, sleep_claim_id FROM session_snapshots
+      WHERE id = 'snapshot-1'`
+        )
+        .get()
+    ).toEqual({
+      sleep_status: 'terminal_failed',
+      sleep_claim_id: null,
+    });
+    expect(mocks.hibernateAgentSessionOnNode).toHaveBeenCalledTimes(1);
+    expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
+  });
+
+  it('preserves a concurrent renewed intent when an old capture fails', async () => {
+    await cleanupTerminalTaskResources(env, 'task-1', { status: 'completed' });
+    activity = { activity: 'idle', activityAt: START.getTime() };
+    mocks.hibernateAgentSessionOnNode.mockImplementation(async () => {
+      sqlite
+        .prepare(
+          `UPDATE session_snapshots SET sleep_status = 'scheduled',
+        sleep_claim_id = NULL, sleep_after = '2026-08-15T05:00:00.000Z',
+        capture_generation = 'renewed' WHERE id = 'snapshot-1'`
+        )
+        .run();
+      throw new Error(
+        'resolve snapshot devcontainer: workspace is not running/recovery (status: stopped)'
+      );
+    });
+    await runSessionSleepSweep(env, START);
+    expect(
+      sqlite
+        .prepare(
+          `SELECT sleep_status, sleep_after, capture_generation FROM session_snapshots
+      WHERE id = 'snapshot-1'`
+        )
+        .get()
+    ).toEqual({
+      sleep_status: 'scheduled',
+      sleep_after: '2026-08-15T05:00:00.000Z',
+      capture_generation: 'renewed',
+    });
+    expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
   });
 
   it('persists terminal intent, defers prompting without an attempt, then sleeps on idle', async () => {
@@ -307,7 +243,7 @@ describe('terminal session sleep lifecycle integration', () => {
       status: 'sleeping',
     });
 
-    expect(order.indexOf('final-snapshot')).toBeLessThan(
+    expect(order.indexOf('final-snapshot:chat-1')).toBeLessThan(
       order.findIndex((event) => event.startsWith('r2-head:'))
     );
     expect(order.findIndex((event) => event.startsWith('r2-head:'))).toBeLessThan(
@@ -318,5 +254,284 @@ describe('terminal session sleep lifecycle integration', () => {
     expect(order.indexOf('task-cleanup')).toBeLessThan(order.indexOf('mark-node-warm'));
     expect(mocks.cleanupTaskRun).toHaveBeenCalledWith('task-1', env, 2_700_000);
     expect(mocks.markIdle).toHaveBeenCalledWith('node-1', 'user-1', 2_700_000);
+  });
+
+  it('discovers a snapshotless Instant workspace but defers while settling work is fresh', async () => {
+    sqlite.prepare(`UPDATE workspaces SET status = 'sleeping' WHERE id = 'workspace-1'`).run();
+    sqlite
+      .prepare(
+        `INSERT INTO nodes (id, user_id, status, node_role, runtime, last_heartbeat_at, updated_at)
+         VALUES ('fresh-instant-node', 'user-1', 'running', 'workspace', 'cf-container', ?, ?)`
+      )
+      .run(START.toISOString(), START.toISOString());
+    sqlite
+      .prepare(
+        `INSERT INTO workspaces
+           (id, node_id, project_id, user_id, chat_session_id, status, updated_at, last_activity_at, provider_instance_type)
+         VALUES
+           ('fresh-instant-workspace', 'fresh-instant-node', 'project-1', 'user-1', 'fresh-instant-chat',
+            'running', ?, ?, 'cf-container')`
+      )
+      .run(START.toISOString(), START.toISOString());
+    sqlite
+      .prepare(
+        `INSERT INTO tasks
+           (id, project_id, user_id, workspace_id, chat_session_id, status, execution_step, task_mode, updated_at)
+         VALUES
+           ('fresh-instant-task', 'project-1', 'user-1', 'fresh-instant-workspace', 'fresh-instant-chat',
+            'in_progress', 'awaiting_followup', 'conversation', ?)`
+      )
+      .run(START.toISOString());
+    sqlite
+      .prepare(
+        `INSERT INTO session_summaries
+           (id, project_id, user_id, status, task_id, workspace_id,
+            message_count, started_at, last_message_at, updated_at)
+         VALUES
+           ('fresh-instant-chat', 'project-1', 'user-1', 'active', 'fresh-instant-task',
+            'fresh-instant-workspace', 10, ?, ?, ?)`
+      )
+      .run(START.getTime(), START.getTime(), START.getTime());
+    sqlite
+      .prepare(
+        `INSERT INTO agent_sessions (id, workspace_id, user_id, status, agent_type, created_at, updated_at)
+         VALUES ('fresh-instant-agent', 'fresh-instant-workspace', 'user-1', 'running', 'claude-code', ?, ?)`
+      )
+      .run(START.toISOString(), START.toISOString());
+
+    activity = {
+      activity: 'idle',
+      activityAt: START.getTime(),
+      runtimeWorkState: 'settling',
+      runtimeWorkCount: 1,
+      runtimeWorkSource: 'claude-background-tasks',
+      runtimeWorkUpdatedAt: START.getTime(),
+      runtimeWorkProgressAt: START.getTime(),
+    };
+
+    const result = await runSessionSleepSweep(env, START);
+
+    expect(result).toMatchObject({ reconciled: 1, selected: 1, deferred: 1, claimed: 0, slept: 0 });
+    expect(
+      sqlite
+        .prepare(
+          `SELECT runtime, sleep_status, sleep_after, sleep_attempts
+           FROM session_snapshots WHERE chat_session_id = 'fresh-instant-chat'`
+        )
+        .get()
+    ).toEqual({
+      runtime: 'cf-container',
+      sleep_status: 'scheduled',
+      sleep_after: '2026-08-14T05:05:00.000Z',
+      sleep_attempts: 0,
+    });
+    expect(
+      sqlite.prepare(`SELECT status FROM workspaces WHERE id = 'fresh-instant-workspace'`).get()
+    ).toEqual({
+      status: 'running',
+    });
+    expect(mocks.hibernateAgentSessionOnNode).not.toHaveBeenCalled();
+    expect(mocks.sleepVmAgentContainer).not.toHaveBeenCalled();
+  });
+
+  it('discovers a stranded Instant workspace without a snapshot and sleeps after stale settling expires', async () => {
+    sqlite.prepare(`UPDATE workspaces SET status = 'sleeping' WHERE id = 'workspace-1'`).run();
+    sqlite
+      .prepare(
+        `INSERT INTO nodes (id, user_id, status, node_role, runtime, last_heartbeat_at, updated_at)
+         VALUES ('instant-node', 'user-1', 'running', 'workspace', 'cf-container', ?, ?)`
+      )
+      .run(RETRY_AT.toISOString(), RETRY_AT.toISOString());
+    sqlite
+      .prepare(
+        `INSERT INTO workspaces
+           (id, node_id, project_id, user_id, chat_session_id, status, updated_at, last_activity_at, provider_instance_type)
+         VALUES
+           ('instant-workspace', 'instant-node', 'project-1', 'user-1', 'instant-chat', 'running', ?, ?, 'cf-container')`
+      )
+      .run(START.toISOString(), START.toISOString());
+    sqlite
+      .prepare(
+        `INSERT INTO tasks
+           (id, project_id, user_id, workspace_id, chat_session_id, status, execution_step, task_mode, updated_at)
+         VALUES
+           ('instant-task', 'project-1', 'user-1', 'instant-workspace', 'instant-chat', 'in_progress',
+            'awaiting_followup', 'conversation', ?)`
+      )
+      .run(START.toISOString());
+    sqlite
+      .prepare(
+        `INSERT INTO session_summaries
+           (id, project_id, user_id, status, task_id, workspace_id,
+            message_count, started_at, last_message_at, updated_at)
+         VALUES
+           ('instant-chat', 'project-1', 'user-1', 'active', 'instant-task', 'instant-workspace',
+            10, ?, ?, ?)`
+      )
+      .run(START.getTime(), START.getTime(), START.getTime());
+    sqlite
+      .prepare(
+        `INSERT INTO agent_sessions (id, workspace_id, user_id, status, agent_type, created_at, updated_at)
+         VALUES ('instant-agent', 'instant-workspace', 'user-1', 'running', 'claude-code', ?, ?)`
+      )
+      .run(START.toISOString(), START.toISOString());
+    sqlite.prepare(`DELETE FROM session_snapshots WHERE chat_session_id = 'instant-chat'`).run();
+
+    activity = {
+      activity: 'idle',
+      activityAt: START.getTime(),
+      runtimeWorkState: 'settling',
+      runtimeWorkCount: 1,
+      runtimeWorkSource: 'claude-background-tasks',
+      runtimeWorkUpdatedAt: START.getTime() - 10 * 60 * 1000,
+      runtimeWorkProgressAt: START.getTime() - 31 * 60 * 1000,
+    };
+    vi.setSystemTime(RETRY_AT);
+
+    const result = await runSessionSleepSweep(env, RETRY_AT);
+
+    expect(result).toMatchObject({ reconciled: 1, selected: 1, claimed: 1, slept: 1 });
+    expect(
+      sqlite
+        .prepare(
+          `SELECT runtime, status, sleep_status, sleeping_at, sleep_attempts
+           FROM session_snapshots WHERE chat_session_id = 'instant-chat'`
+        )
+        .get()
+    ).toEqual({
+      runtime: 'cf-container',
+      status: 'available',
+      sleep_status: 'sleeping',
+      sleeping_at: RETRY_AT.toISOString(),
+      sleep_attempts: 1,
+    });
+    expect(
+      sqlite.prepare(`SELECT status FROM workspaces WHERE id = 'instant-workspace'`).get()
+    ).toEqual({
+      status: 'sleeping',
+    });
+    expect(
+      sqlite.prepare(`SELECT status FROM agent_sessions WHERE id = 'instant-agent'`).get()
+    ).toEqual({
+      status: 'sleeping',
+    });
+    expect(sqlite.prepare(`SELECT status FROM nodes WHERE id = 'instant-node'`).get()).toEqual({
+      status: 'sleeping',
+    });
+    expect(order).toContain('final-snapshot:instant-chat');
+    expect(order).toContain('sleep-container:instant-node');
+    expect(order.indexOf('final-snapshot:instant-chat')).toBeLessThan(
+      order.findIndex((event) => event.startsWith('r2-head:session-snapshots/instant-chat/'))
+    );
+    expect(
+      order.findIndex((event) => event.startsWith('r2-head:session-snapshots/instant-chat/'))
+    ).toBeLessThan(order.indexOf('sleep-container:instant-node'));
+    expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalledWith(
+      'instant-node',
+      'instant-workspace',
+      expect.anything(),
+      'user-1'
+    );
+  });
+
+  it('discovers mixed VM and Instant candidates in the same bounded sweep', async () => {
+    sqlite.prepare(`UPDATE workspaces SET status = 'sleeping' WHERE id = 'workspace-1'`).run();
+    for (const [prefix, runtime] of [
+      ['mixed-vm', 'vm'],
+      ['mixed-instant', 'cf-container'],
+    ] as const) {
+      sqlite
+        .prepare(
+          `INSERT INTO nodes (id, user_id, status, node_role, runtime, last_heartbeat_at, updated_at)
+           VALUES (?, 'user-1', 'running', 'workspace', ?, ?, ?)`
+        )
+        .run(`${prefix}-node`, runtime, RETRY_AT.toISOString(), RETRY_AT.toISOString());
+      sqlite
+        .prepare(
+          `INSERT INTO workspaces
+             (id, node_id, project_id, user_id, chat_session_id, status, updated_at, last_activity_at, provider_instance_type)
+           VALUES (?, ?, 'project-1', 'user-1', ?, 'running', ?, ?, ?)`
+        )
+        .run(
+          `${prefix}-workspace`,
+          `${prefix}-node`,
+          `${prefix}-chat`,
+          START.toISOString(),
+          START.toISOString(),
+          runtime
+        );
+      sqlite
+        .prepare(
+          `INSERT INTO tasks
+             (id, project_id, user_id, workspace_id, chat_session_id, status, execution_step, task_mode, updated_at)
+           VALUES (?, 'project-1', 'user-1', ?, ?, 'in_progress', 'awaiting_followup', 'conversation', ?)`
+        )
+        .run(`${prefix}-task`, `${prefix}-workspace`, `${prefix}-chat`, START.toISOString());
+      sqlite
+        .prepare(
+          `INSERT INTO session_summaries
+             (id, project_id, user_id, status, task_id, workspace_id,
+              message_count, started_at, last_message_at, updated_at)
+           VALUES (?, 'project-1', 'user-1', 'active', ?, ?, 10, ?, ?, ?)`
+        )
+        .run(
+          `${prefix}-chat`,
+          `${prefix}-task`,
+          `${prefix}-workspace`,
+          START.getTime(),
+          START.getTime(),
+          START.getTime()
+        );
+      sqlite
+        .prepare(
+          `INSERT INTO agent_sessions (id, workspace_id, user_id, status, agent_type, created_at, updated_at)
+           VALUES (?, ?, 'user-1', 'running', 'claude-code', ?, ?)`
+        )
+        .run(`${prefix}-agent`, `${prefix}-workspace`, START.toISOString(), START.toISOString());
+    }
+
+    activity = {
+      activity: 'idle',
+      activityAt: START.getTime(),
+    };
+    vi.setSystemTime(RETRY_AT);
+
+    const result = await runSessionSleepSweep(env, RETRY_AT);
+
+    expect(result).toMatchObject({ reconciled: 2, selected: 2, deferred: 0, claimed: 2, slept: 2 });
+    expect(
+      sqlite
+        .prepare(
+          `SELECT chat_session_id, runtime, sleep_status
+           FROM session_snapshots
+           WHERE chat_session_id IN ('mixed-vm-chat', 'mixed-instant-chat')
+           ORDER BY chat_session_id`
+        )
+        .all()
+    ).toEqual([
+      {
+        chat_session_id: 'mixed-instant-chat',
+        runtime: 'cf-container',
+        sleep_status: 'sleeping',
+      },
+      {
+        chat_session_id: 'mixed-vm-chat',
+        runtime: 'vm',
+        sleep_status: 'sleeping',
+      },
+    ]);
+    expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledWith(
+      'mixed-vm-node',
+      'mixed-vm-workspace',
+      env,
+      'user-1'
+    );
+    expect(mocks.sleepVmAgentContainer).toHaveBeenCalledWith(env, 'mixed-instant-node');
+    expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalledWith(
+      'mixed-instant-node',
+      'mixed-instant-workspace',
+      expect.anything(),
+      'user-1'
+    );
   });
 });

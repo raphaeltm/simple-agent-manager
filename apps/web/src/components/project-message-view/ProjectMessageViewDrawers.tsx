@@ -1,16 +1,24 @@
+import { useMemo } from 'react';
+
 import type { MessageCommentAction } from '../../lib/api/comments';
 import { ChatTimelineDrawer } from '../chat/ChatTimelineDrawer';
+import { apiResourceHistorySource } from '../chat/resource-timeline/resource-source';
 import { SessionCommentsDrawer } from '../chat/SessionCommentsDrawer';
+import { SessionResourceHistoryDrawer } from '../chat/SessionResourceHistoryDrawer';
 import type { CommentInboxItem } from './comments/comment-inbox';
 import type { TimelineEntry, TimelineJumpTarget } from './timeline-types';
 
 export function ProjectMessageViewDrawers({
   showTimeline,
+  projectId,
+  sessionId,
   timelineEntries,
   timelineLoading,
   showTimelineContext,
   onToggleTimelineContext,
   onCloseTimeline,
+  showResources,
+  onCloseResources,
   showComments,
   commentItems,
   commentsLoading,
@@ -24,11 +32,15 @@ export function ProjectMessageViewDrawers({
   onSendToAgent,
 }: Readonly<{
   showTimeline: boolean;
+  projectId: string;
+  sessionId: string;
   timelineEntries: TimelineEntry[];
   timelineLoading: boolean;
   showTimelineContext: boolean;
   onToggleTimelineContext: () => void;
   onCloseTimeline: () => void;
+  showResources: boolean;
+  onCloseResources: () => void;
   showComments: boolean;
   commentItems: CommentInboxItem[];
   commentsLoading: boolean;
@@ -41,6 +53,11 @@ export function ProjectMessageViewDrawers({
   onReopen: (threadId: string) => Promise<unknown>;
   onSendToAgent: (threadId: string) => Promise<unknown>;
 }>) {
+  const resourceSource = useMemo(
+    () => apiResourceHistorySource(projectId, sessionId),
+    [projectId, sessionId]
+  );
+
   return (
     <>
       {showTimeline && (
@@ -52,6 +69,10 @@ export function ProjectMessageViewDrawers({
           onClose={onCloseTimeline}
           onJump={onJump}
         />
+      )}
+
+      {showResources && (
+        <SessionResourceHistoryDrawer source={resourceSource} onClose={onCloseResources} />
       )}
 
       {showComments && (

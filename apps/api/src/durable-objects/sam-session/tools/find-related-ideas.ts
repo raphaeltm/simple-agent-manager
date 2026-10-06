@@ -6,6 +6,10 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../../db/schema';
 import type { Env } from '../../../env';
+import {
+  getSearchQueryLikePatterns,
+  normalizeSearchQuery,
+} from '../../../lib/search-query-limits';
 import type { AnthropicToolDef, ToolContext } from '../types';
 
 const DEFAULT_LIMIT = 10;
@@ -15,7 +19,7 @@ const DEFAULT_SNIPPET_LENGTH = 200;
 export const findRelatedIdeasDef: AnthropicToolDef = {
   name: 'find_related_ideas',
   description:
-    'Search ideas in a project by keyword. Matches against title and description.',
+    'Search ideas in a project by keyword. Matches against title and description. Over-limit queries are truncated and disclosed in the response.',
   input_schema: {
     type: 'object',
     properties: {
@@ -53,6 +57,7 @@ export async function findRelatedIdeas(
     return { error: 'query must be at least 2 characters.' };
   }
 
+  const normalizedQuery = normalizeSearchQuery(input.query, env);
   const maxLimit = Number(env.SAM_IDEA_SEARCH_MAX_LIMIT) || DEFAULT_MAX_LIMIT;
   const limit = Math.min(Math.max(1, Math.round(input.limit || DEFAULT_LIMIT)), maxLimit);
   const snippetLen = Number(env.SAM_IDEA_SNIPPET_LENGTH) || DEFAULT_SNIPPET_LENGTH;
@@ -73,18 +78,18 @@ export async function findRelatedIdeas(
     return { error: 'Project not found or not owned by you.' };
   }
 
-  // LIKE search on title and description (draft ideas only)
-  // Escape LIKE metacharacters to prevent semantic mismatch
-  const escaped = input.query.trim().replace(/[%_\\]/g, '\\$&');
-  const searchPattern = `%${escaped}%`;
+  const likePatterns = getSearchQueryLikePatterns(normalizedQuery.query);
+  const termConditions = likePatterns
+    .map(() => String.raw`(title LIKE ? ESCAPE '\' OR description LIKE ? ESCAPE '\')`)
+    .join(' AND ');
   const results = await env.DATABASE.prepare(
     `SELECT id, title, description, status, priority, updated_at
      FROM tasks
      WHERE project_id = ? AND status = 'draft'
-       AND (title LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\')
+       AND ${termConditions}
      ORDER BY updated_at DESC
      LIMIT ?`,
-  ).bind(project.id, searchPattern, searchPattern, limit)
+  ).bind(project.id, ...likePatterns.flatMap((pattern) => [pattern, pattern]), limit)
     .all<{
       id: string;
       title: string;
@@ -106,6 +111,6 @@ export async function findRelatedIdeas(
       updatedAt: r.updated_at,
     })),
     count: results.results?.length ?? 0,
-    query: input.query.trim(),
+    ...normalizedQuery,
   };
 }

@@ -9,6 +9,7 @@ import type { Context, MiddlewareHandler, Next } from 'hono';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { parsePositiveInt } from '../lib/route-helpers';
 import { AppError } from './error';
 
 /**
@@ -26,7 +27,7 @@ export interface RateLimitConfig {
 }
 
 /**
- * Default rate limits (per hour).
+ * Default rate limits, per clock hour unless an entry's limiter below passes its own window.
  * These values are used when environment variables are not set.
  */
 export const DEFAULT_RATE_LIMITS = {
@@ -47,6 +48,16 @@ export const DEFAULT_RATE_LIMITS = {
   TRIAL_CREATE: 10,
   // SSE events endpoint — short window to prevent connection storms.
   TRIAL_SSE: 30,
+  // Fork (`fork-prepare`) and Retry (`summarize`) each send up to 1,000 session messages to
+  // Workers AI. They spend the same budget, so they share one per-user bucket.
+  SESSION_SUMMARIZE: 30,
+  // Voice transcription runs Workers AI Whisper on every request. Per MINUTE, not per hour
+  // (`DEFAULT_TRANSCRIBE_WINDOW_SECONDS`): dictation is bursty, and the budget is for abuse.
+  TRANSCRIBE: 30,
+  // Workspace callback-token renewal, per workspace. A healthy VM agent asks about once
+  // per half token lifetime, so this only bounds a holder of both proofs replaying them
+  // (`services/workspace-callback-token-renewal-rate-limit.ts`).
+  CALLBACK_TOKEN_RENEWAL: 12,
 } as const;
 
 /** Default time window (1 hour in seconds) */
@@ -111,7 +122,8 @@ export function getCurrentWindowStart(windowSeconds: number): number {
  *
  * NOTE: This read-increment-write pattern is not atomic. KV has no CAS primitive.
  * Under concurrent requests from the same identifier, the true count may exceed
- * `limit` by a small amount. For strict enforcement, use a Durable Object counter.
+ * `limit` by a small amount. For strict enforcement, use a Durable Object counter
+ * or a single-statement D1 counter such as `checkAiSpendRateLimit`.
  */
 export async function checkRateLimit(
   kv: KVNamespace,
@@ -167,6 +179,125 @@ export class RateLimitError extends AppError {
   }
 }
 
+type RateLimitResult = { allowed: boolean; remaining: number; resetAt: number };
+
+export type AiSpendRateLimitBucket = 'session-summarize' | 'transcribe';
+
+interface AiSpendRateLimitRow {
+  count: number;
+  window_start: number;
+}
+
+/**
+ * Atomically check and update a Workers AI spend rate limit in D1.
+ *
+ * The generic KV helper above is intentionally left for low-stakes buckets; these
+ * buckets guard direct Workers AI spend and must not lose increments under parallel
+ * requests from the same user.
+ */
+export async function checkAiSpendRateLimit(
+  db: D1Database,
+  bucket: AiSpendRateLimitBucket,
+  userId: string,
+  limit: number,
+  windowSeconds: number
+): Promise<RateLimitResult> {
+  const windowStart = getCurrentWindowStart(windowSeconds);
+  const row = await db
+    .prepare(
+      `INSERT INTO ai_spend_rate_limits (bucket, user_id, window_start, count)
+       VALUES (?, ?, ?, 1)
+       ON CONFLICT(bucket, user_id) DO UPDATE SET
+         count = CASE
+           WHEN ai_spend_rate_limits.window_start = excluded.window_start
+             THEN ai_spend_rate_limits.count + 1
+           ELSE 1
+         END,
+         window_start = excluded.window_start
+       RETURNING count, window_start`
+    )
+    .bind(bucket, userId, windowStart)
+    .first<AiSpendRateLimitRow>();
+
+  if (!row) {
+    throw new Error('AI spend rate-limit counter did not return a row');
+  }
+
+  const count = Number(row.count);
+  const returnedWindowStart = Number(row.window_start);
+  const resetAt = returnedWindowStart + windowSeconds;
+  return {
+    allowed: count <= limit,
+    remaining: Math.max(0, limit - count),
+    resetAt,
+  };
+}
+
+function rateLimitHeaders(
+  c: Context<{ Bindings: Env }>,
+  limit: number,
+  remaining: number,
+  resetAt: number
+): void {
+  c.header('X-RateLimit-Limit', limit.toString());
+  c.header('X-RateLimit-Remaining', remaining.toString());
+  c.header('X-RateLimit-Reset', resetAt.toString());
+}
+
+function aiSpendRateLimit(config: {
+  bucket: AiSpendRateLimitBucket;
+  limit: number;
+  windowSeconds: number;
+}): MiddlewareHandler<{ Bindings: Env }> {
+  return async (c: Context<{ Bindings: Env }>, next: Next) => {
+    const userId = c.get('auth')?.user?.id;
+    const fallbackResetAt = getCurrentWindowStart(config.windowSeconds) + config.windowSeconds;
+
+    if (!userId) {
+      rateLimitHeaders(c, config.limit, 0, fallbackResetAt);
+      c.header('Retry-After', '1');
+      throw new AppError(
+        503,
+        'RATE_LIMIT_UNAVAILABLE',
+        'Rate limit state unavailable. Please try again later.'
+      );
+    }
+
+    let result: RateLimitResult;
+    try {
+      result = await checkAiSpendRateLimit(
+        c.env.DATABASE,
+        config.bucket,
+        userId,
+        config.limit,
+        config.windowSeconds
+      );
+    } catch (error) {
+      log.error('ai_spend_rate_limit.unavailable', {
+        bucket: config.bucket,
+        ...((error as Error).message ? { error: (error as Error).message } : {}),
+      });
+      rateLimitHeaders(c, config.limit, 0, fallbackResetAt);
+      c.header('Retry-After', '1');
+      throw new AppError(
+        503,
+        'RATE_LIMIT_UNAVAILABLE',
+        'Rate limit state unavailable. Please try again later.'
+      );
+    }
+
+    rateLimitHeaders(c, config.limit, result.remaining, result.resetAt);
+
+    if (!result.allowed) {
+      const retryAfter = result.resetAt - Math.floor(Date.now() / 1000);
+      c.header('Retry-After', Math.max(1, retryAfter).toString());
+      throw new RateLimitError(retryAfter);
+    }
+
+    return next();
+  };
+}
+
 /**
  * Rate limiting middleware.
  */
@@ -203,9 +334,7 @@ export function rateLimit(config: RateLimitConfig): MiddlewareHandler<{ Bindings
       windowSeconds
     );
 
-    c.header('X-RateLimit-Limit', config.limit.toString());
-    c.header('X-RateLimit-Remaining', remaining.toString());
-    c.header('X-RateLimit-Reset', resetAt.toString());
+    rateLimitHeaders(c, config.limit, remaining, resetAt);
 
     if (!allowed) {
       const retryAfter = resetAt - Math.floor(Date.now() / 1000);
@@ -292,5 +421,41 @@ export function rateLimitReportIssuePost(env: Env): MiddlewareHandler<{ Bindings
   return rateLimit({
     limit: getRateLimit(env, 'REPORT_ISSUE_POST'),
     keyPrefix: 'report-issue-post',
+  });
+}
+
+/** Session summarization's window: per hour. Override via RATE_LIMIT_SESSION_SUMMARIZE_WINDOW_SECONDS. */
+export const DEFAULT_SESSION_SUMMARIZE_WINDOW_SECONDS = 3600;
+
+/**
+ * Rate limit shared by the two session-summarization routes, `POST …/sessions/:id/fork-prepare`
+ * and `POST …/sessions/:id/summarize`. Default: 30 per hour per user, across both.
+ */
+export function rateLimitSessionSummarize(env: Env): MiddlewareHandler<{ Bindings: Env }> {
+  return aiSpendRateLimit({
+    limit: getRateLimit(env, 'SESSION_SUMMARIZE'),
+    windowSeconds: parsePositiveInt(
+      env.RATE_LIMIT_SESSION_SUMMARIZE_WINDOW_SECONDS,
+      DEFAULT_SESSION_SUMMARIZE_WINDOW_SECONDS
+    ),
+    bucket: 'session-summarize',
+  });
+}
+
+/** Voice transcription's window: per minute. Override via RATE_LIMIT_TRANSCRIBE_WINDOW_SECONDS. */
+export const DEFAULT_TRANSCRIBE_WINDOW_SECONDS = 60;
+
+/**
+ * Rate limit for voice transcription (`POST /api/transcribe`).
+ * Default: 30 per minute per user.
+ */
+export function rateLimitTranscribe(env: Env): MiddlewareHandler<{ Bindings: Env }> {
+  return aiSpendRateLimit({
+    limit: getRateLimit(env, 'TRANSCRIBE'),
+    windowSeconds: parsePositiveInt(
+      env.RATE_LIMIT_TRANSCRIBE_WINDOW_SECONDS,
+      DEFAULT_TRANSCRIBE_WINDOW_SECONDS
+    ),
+    bucket: 'transcribe',
   });
 }

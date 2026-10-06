@@ -66,7 +66,6 @@ export const dispatchProject = {
   defaultLocation: null,
   agentDefaults: null,
   taskExecutionTimeoutMs: null,
-  maxWorkspacesPerNode: null,
   nodeCpuThresholdPercent: null,
   nodeMemoryThresholdPercent: null,
   warmNodeTimeoutMs: null,
@@ -126,9 +125,7 @@ export function buildDispatchPlacementResolution(input: DispatchPlacementResolut
     effectiveProvider: 'hetzner',
     credentialAttributionUserId: inherited.userId ?? input.userId,
     credentialAttributionProjectId:
-      credentialAttributionSource === 'project'
-        ? (inherited.projectId ?? input.projectId)
-        : null,
+      credentialAttributionSource === 'project' ? (inherited.projectId ?? input.projectId) : null,
     credentialAttributionSource,
   };
 }
@@ -137,6 +134,16 @@ export function resetDispatchTaskMocks(options: { title?: string } = {}) {
   vi.clearAllMocks();
   dispatchTaskMocks.db.select.mockImplementation(() => selectRows([]));
   dispatchTaskMocks.db.select.mockImplementationOnce(() => selectRows([dispatchProject]));
+  dispatchTaskMocks.db.select.mockImplementationOnce(() =>
+    selectRows([
+      {
+        projectId: 'proj-1',
+        userId: 'user-1',
+        role: 'owner',
+        status: 'active',
+      },
+    ])
+  );
   dispatchTaskMocks.resolveAgentProfile.mockResolvedValue(null);
   dispatchTaskMocks.resolveCredentialSource.mockResolvedValue({
     credentialSource: 'user',
@@ -187,6 +194,11 @@ export function buildDispatchCtx(
       env: {
         DATABASE: {
           prepare: vi.fn(() => statement),
+          batch: vi.fn().mockResolvedValue([
+            { success: true, results: [{ status: 'queued' }], meta: { changes: 0 } },
+            { success: true, results: [], meta: { changes: 1 } },
+            { success: true, results: [], meta: { changes: 1 } },
+          ]),
         },
         PROJECT_DATA: {
           idFromName: vi.fn(() => 'project-data-id'),

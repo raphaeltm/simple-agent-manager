@@ -58,6 +58,10 @@ func Load() (*Config, error) {
 	}
 	persistenceDBPath := getEnv("PERSISTENCE_DB_PATH", "/var/lib/vm-agent/state.db")
 	persistenceDir := filepath.Dir(persistenceDBPath)
+	composeOutputRetentionBytes, err := getEnvInt64Strict("COMPOSE_OUTPUT_RETENTION_BYTES", DefaultComposeOutputRetentionBytes)
+	if err != nil {
+		return nil, err
+	}
 
 	cfg := &Config{
 		// Node role
@@ -134,6 +138,8 @@ func Load() (*Config, error) {
 		PTYCloseGracePeriod:  getEnvDuration("PTY_CLOSE_GRACE_PERIOD", 250*time.Millisecond),
 
 		// ACP settings - configurable per constitution principle XI
+		CodexRuntimeInstallTimeout:        getEnvDuration("CODEX_RUNTIME_INSTALL_TIMEOUT", DefaultCodexRuntimeInstallTimeout),
+		CodexRuntimeInstallKillGrace:      getEnvDuration("CODEX_RUNTIME_INSTALL_KILL_GRACE", DefaultCodexRuntimeInstallKillGrace),
 		ACPInitTimeoutMs:                  getEnvInt("ACP_INIT_TIMEOUT_MS", 30000),
 		ACPInitializeTimeoutMs:            getEnvInt("ACP_INITIALIZE_TIMEOUT_MS", 0),   // 0 = use ACPInitTimeoutMs
 		ACPNewSessionTimeoutMs:            getEnvInt("ACP_NEW_SESSION_TIMEOUT_MS", 0),  // 0 = use ACPInitTimeoutMs
@@ -165,7 +171,10 @@ func Load() (*Config, error) {
 		ACPTerminalActivityReportAttempts: getEnvInt("ACTIVITY_TERMINAL_REPORT_ATTEMPTS", DefaultACPTerminalActivityReportAttempts),
 		ACPTerminalActivityReportBackoff:  getEnvDuration("ACTIVITY_TERMINAL_REPORT_BACKOFF", DefaultACPTerminalActivityReportBackoff),
 		ACPCredentialSyncTimeout:          getEnvDuration("ACP_CREDENTIAL_SYNC_TIMEOUT", DefaultACPCredentialSyncTimeout),
+		ACPRestartAttemptTimeout:          getEnvDuration("ACP_RESTART_ATTEMPT_TIMEOUT", DefaultACPRestartAttemptTimeout),
 		ACPActivityReportTimeout:          getEnvDuration("ACP_ACTIVITY_REPORT_TIMEOUT", DefaultACPActivityReportTimeout),
+		ACPUsageProbeTimeout:              getEnvDuration("ACP_USAGE_PROBE_TIMEOUT", DefaultACPUsageProbeTimeout),
+		OpenCodeGoUsageURL:                getEnv("OPENCODE_GO_USAGE_URL", DefaultOpenCodeGoUsageURL),
 		ACPCheckpointPreemptGrace:         getEnvDuration("ACP_CHECKPOINT_PREEMPT_GRACE", DefaultACPCheckpointPreemptGrace),
 		ACPCheckpointPreemptMaxGrace:      getEnvDuration("ACP_CHECKPOINT_PREEMPT_MAX_GRACE", DefaultACPCheckpointPreemptMaxGrace),
 		ACPCheckpointRolloverTimeout:      getEnvDuration("ACP_CHECKPOINT_ROLLOVER_TIMEOUT", DefaultACPCheckpointRolloverTimeout),
@@ -196,6 +205,9 @@ func Load() (*Config, error) {
 		// Devcontainer build timeout — prevents indefinite hangs on network failures.
 		DevcontainerBuildTimeout: getEnvDuration("DEVCONTAINER_BUILD_TIMEOUT", 15*time.Minute),
 
+		// Per-node build concurrency. Keep the default at one slot for rollout compatibility.
+		WorkspaceBuildQueueDepth: getBoundedPositiveEnvInt("WORKSPACE_BUILD_QUEUE_DEPTH", DefaultWorkspaceBuildQueueDepth, MaxWorkspaceBuildQueueDepth),
+
 		// Devcontainer cache settings — opportunistic image caching.
 		DevcontainerCacheEnabled:     getEnvBool("DEVCONTAINER_CACHE_ENABLED", false),
 		DevcontainerCacheRegistry:    getEnv("DEVCONTAINER_CACHE_REGISTRY", "ghcr.io"),
@@ -218,6 +230,26 @@ func Load() (*Config, error) {
 		EventStoreDBPath:  getEnv("EVENTSTORE_DB_PATH", "/var/lib/vm-agent/events.db"),
 		MetricsDBPath:     getEnv("METRICS_DB_PATH", "/var/lib/vm-agent/metrics.db"),
 		MetricsInterval:   getEnvDuration("METRICS_INTERVAL", time.Minute),
+
+		// Active resource monitoring settings - configurable per constitution principle XI
+		ResourceEventBufferSize:          getEnvInt(EnvDefaultResourceEventBufferSize, DefaultResourceEventBufferSize),
+		PSIPollInterval:                  time.Duration(getEnvInt(EnvDefaultPSIPollIntervalSeconds, DefaultPSIPollIntervalSeconds)) * time.Second,
+		ContainerStatsInterval:           time.Duration(getEnvInt(EnvDefaultContainerStatsIntervalSeconds, DefaultContainerStatsIntervalSeconds)) * time.Second,
+		PSIMemorySomeWarningThreshold:    getEnvFloat(EnvDefaultPSIMemorySomeWarningThreshold, DefaultPSIMemorySomeWarningThreshold),
+		PSIMemorySomeCriticalThreshold:   getEnvFloat(EnvDefaultPSIMemorySomeCriticalThreshold, DefaultPSIMemorySomeCriticalThreshold),
+		PSIMemoryFullWarningThreshold:    getEnvFloat(EnvDefaultPSIMemoryFullWarningThreshold, DefaultPSIMemoryFullWarningThreshold),
+		PSIMemoryFullCriticalThreshold:   getEnvFloat(EnvDefaultPSIMemoryFullCriticalThreshold, DefaultPSIMemoryFullCriticalThreshold),
+		EvictionDebounceWindow:           time.Duration(getEnvInt(EnvDefaultEvictionDebounceSeconds, DefaultEvictionDebounceSeconds)) * time.Second,
+		EvictionSnapshotTimeout:          time.Duration(getEnvInt(EnvDefaultEvictionSnapshotTimeoutSeconds, DefaultEvictionSnapshotTimeoutSeconds)) * time.Second,
+		EvictionDockerStopTimeout:        time.Duration(getEnvInt(EnvDefaultEvictionDockerStopTimeoutSeconds, DefaultEvictionDockerStopTimeoutSeconds)) * time.Second,
+		EvictionCallbackRetryMaxInterval: time.Duration(getEnvInt(EnvDefaultEvictionCallbackRetryMaxSeconds, DefaultEvictionCallbackRetryMaxSeconds)) * time.Second,
+		EvictionResolveTimeout:           time.Duration(getEnvInt(EnvDefaultEvictionResolveTimeoutSeconds, DefaultEvictionResolveTimeoutSeconds)) * time.Second,
+		ResourceHistorySampleInterval:    getEnvDuration(EnvResourceHistorySampleInterval, 5*time.Second),
+		ResourceHistoryChunkInterval:     getEnvDuration(EnvResourceHistoryChunkInterval, 15*time.Minute),
+		ResourceHistorySpoolDir:          getEnv(EnvResourceHistorySpoolDir, "/var/lib/vm-agent/resource-history"),
+		ResourceHistorySpoolMaxBytes:     getEnvInt64(EnvResourceHistorySpoolMaxBytes, DefaultResourceHistorySpoolMaxBytes),
+		ResourceHistoryUploadTimeout:     getEnvDuration(EnvResourceHistoryUploadTimeout, 10*time.Second),
+		ResourceHistoryMaxSamples:        getBoundedPositiveEnvInt(EnvResourceHistoryMaxSamples, DefaultResourceHistoryMaxSamples, MaxResourceHistoryMaxSamples),
 
 		// Git integration settings - configurable per constitution principle XI
 		GitCredentialTimeout:     getEnvDuration("GIT_CREDENTIAL_TIMEOUT", DefaultGitCredentialTimeout),
@@ -249,6 +281,11 @@ func Load() (*Config, error) {
 		// Callback retry settings - configurable per constitution principle XI
 		WorkspaceReadyCallbackTimeout: getEnvDuration("WORKSPACE_READY_CALLBACK_TIMEOUT", DefaultWorkspaceReadyCallbackTimeout),
 
+		WorkspaceCallbackTokenRefreshRatio:        clampWorkspaceCallbackTokenRefreshRatio(getEnvFloat("WORKSPACE_CALLBACK_TOKEN_REFRESH_RATIO", DefaultWorkspaceCallbackTokenRefreshRatio)),
+		WorkspaceCallbackTokenRenewalTimeout:      positiveDurationOr(getEnvDuration("WORKSPACE_CALLBACK_TOKEN_RENEWAL_TIMEOUT", DefaultWorkspaceCallbackTokenRenewalTimeout), DefaultWorkspaceCallbackTokenRenewalTimeout),
+		WorkspaceCallbackTokenRenewalRetryInitial: positiveDurationOr(getEnvDuration("WORKSPACE_CALLBACK_TOKEN_RENEWAL_RETRY_INITIAL", DefaultWorkspaceCallbackTokenRenewalRetryInitial), DefaultWorkspaceCallbackTokenRenewalRetryInitial),
+		WorkspaceCallbackTokenRenewalRetryMax:     positiveDurationOr(getEnvDuration("WORKSPACE_CALLBACK_TOKEN_RENEWAL_RETRY_MAX", DefaultWorkspaceCallbackTokenRenewalRetryMax), DefaultWorkspaceCallbackTokenRenewalRetryMax),
+
 		// Error reporting settings - configurable per constitution principle XI
 		ErrorReportFlushInterval:  getEnvDuration("ERROR_REPORT_FLUSH_INTERVAL", 30*time.Second),
 		ErrorReportMaxBatchSize:   getEnvInt("ERROR_REPORT_MAX_BATCH_SIZE", 10),
@@ -276,9 +313,12 @@ func Load() (*Config, error) {
 		ErrorReportCollectorJobs:  getEnvInt("ERROR_REPORT_COLLECTOR_CONCURRENCY", DefaultErrorReportCollectorWorkers),
 
 		// System info settings - configurable per constitution principle XI
-		SysInfoDockerTimeout:  getEnvDuration("SYSINFO_DOCKER_TIMEOUT", 10*time.Second),
-		SysInfoVersionTimeout: getEnvDuration("SYSINFO_VERSION_TIMEOUT", 5*time.Second),
-		SysInfoCacheTTL:       getEnvDuration("SYSINFO_CACHE_TTL", 5*time.Second),
+		SysInfoDockerTimeout:                    getEnvDuration("SYSINFO_DOCKER_TIMEOUT", 10*time.Second),
+		SysInfoVersionTimeout:                   getEnvDuration("SYSINFO_VERSION_TIMEOUT", 5*time.Second),
+		SysInfoCacheTTL:                         getEnvDuration("SYSINFO_CACHE_TTL", 5*time.Second),
+		HeartbeatDockerStatsTimeout:             getEnvDuration("HEARTBEAT_DOCKER_STATS_TIMEOUT", 2*time.Second),
+		HeartbeatWorkspaceMetricsMaxContainers:  getEnvInt("HEARTBEAT_WORKSPACE_METRICS_MAX_CONTAINERS", 8),
+		HeartbeatWorkspaceMetricsMaxOutputBytes: getEnvInt64("HEARTBEAT_WORKSPACE_METRICS_MAX_OUTPUT_BYTES", 64*1024),
 
 		// Log reader/stream settings - configurable per constitution principle XI
 		LogReaderTimeout:          getEnvDuration("LOG_READER_TIMEOUT", 30*time.Second),
@@ -317,6 +357,7 @@ func Load() (*Config, error) {
 		DeployArtifactResponseHeaderTimeout: getEnvDuration("DEPLOY_ARTIFACT_RESPONSE_HEADER_TIMEOUT", DefaultDeployArtifactResponseHeaderTimeout),
 		DeployArtifactIdleTimeout:           getEnvDuration("DEPLOY_ARTIFACT_IDLE_TIMEOUT", DefaultDeployArtifactIdleTimeout),
 		DeployApplyIdleTimeout:              getEnvDuration("DEPLOY_APPLY_IDLE_TIMEOUT", DefaultDeployApplyIdleTimeout),
+		ComposeOutputRetentionBytes:         composeOutputRetentionBytes,
 		DeployBuildPublishTimeout:           getEnvDuration("DEPLOY_BUILD_PUBLISH_TIMEOUT", DefaultDeployBuildPublishTimeout),
 		DeployPreflightCommandTimeout:       getEnvDuration("DEPLOY_PREFLIGHT_COMMAND_TIMEOUT", DefaultDeployPreflightCommandTimeout),
 	}

@@ -1,5 +1,25 @@
 # Fix All Known Flaky Tests at the Root (No Retries)
 
+> **Reconciliation 2026-10-05:** Two more load-sensitive tests surfaced in this week's PRs and are tracked nowhere else: `apps/api/tests/unit/routes/nodes-max-nodes-quota.test.ts` hits its 5 s timeout under a full parallel `pnpm test`, also on `main` (#2205), and `apps/web/tests/unit/components/admin/error-trends.test.tsx` failed once under CI load (#2199). None of this file's fixes shipped; none of its named tests failed in the 15 failed CI runs since 2026-09-30.
+
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** item 1. The ToolCallCard test now awaits the final UI state
+>   (`packages/acp-client/tests/unit/components/ToolCallCard.test.tsx:159`, PR #1774). The two
+>   files this task superseded (`2026-02-28-fix-flaky-vm-agent-tests.md`,
+>   `2026-04-11-fix-flaky-useAvailableCommands-test.md`) were archived this week.
+> - **Still open:**
+>   - `asyncUtilTimeout` in `apps/web/tests/setup.ts` and `packages/acp-client/src/test-setup.ts`.
+>   - Make `TestSessionHost_ReplayDoesNotDropMessages` deterministic. It still uses a send
+>     buffer of 8 and a reader that starts after `AttachViewer` (`session_host_test.go:740-803`).
+>   - The fail-fast `fetch` stub in the web test setup, and the pattern audit.
+>   - Unfiled product bug: `session_host.go:435-439` sends `replay_done` even when
+>     `replayToViewer` aborted (`session_host_broadcast.go:79-95`), so clients believe replay
+>     finished. The fix belongs with the reconnect-replay integration test in
+>     `2026-02-20-acp-reconnect-replay-integration-test.md`.
+>   - Context: none of the named tests failed in the 400 most recent failed CI runs
+>     (2026-08-05 to 2026-09-30); `useAvailableCommands` now uses TanStack Query (PR #1872).
+
 ## Problem Statement
 
 CI has repeatedly gone red on tests unrelated to the changed code, blocking production deploys (most recently commits 95be06994/8591fb4e0, which touched only `packages/shared` yet failed on an acp-client component test). The user has explicitly rejected retry-based mitigation: **no vitest `retry` config, no CI auto-rerun logic anywhere**. Every known flaky test must be fixed at its root cause.
@@ -7,8 +27,8 @@ CI has repeatedly gone red on tests unrelated to the changed code, blocking prod
 Known flaky tests and noise sources:
 
 1. **acp-client** `ToolCallCard › lazy-loads empty tool content and keeps the card expandable` (`packages/acp-client/tests/unit/components/ToolCallCard.test.tsx:75-92`)
-2. **web** `useAvailableCommands › re-fetches when refreshKey changes (new session)` (`apps/web/tests/unit/hooks/useAvailableCommands.test.ts:150-176`) — tracked in `tasks/backlog/2026-04-11-fix-flaky-useAvailableCommands-test.md`
-3. **vm-agent (Go)** `TestSessionHost_ReplayDoesNotDropMessages` (`packages/vm-agent/internal/acp/session_host_test.go:435`) — tracked in `tasks/backlog/2026-02-28-fix-flaky-vm-agent-tests.md`
+2. **web** `useAvailableCommands › re-fetches when refreshKey changes (new session)` (`apps/web/tests/unit/hooks/useAvailableCommands.test.ts:150-176`) — tracked in `tasks/archive/2026-04-11-fix-flaky-useAvailableCommands-test.md`
+3. **vm-agent (Go)** `TestSessionHost_ReplayDoesNotDropMessages` (`packages/vm-agent/internal/acp/session_host_test.go:435`) — tracked in `tasks/archive/2026-02-28-fix-flaky-vm-agent-tests.md`
 4. **web** unit tests hit real `fetch` in jsdom (no stub in `apps/web/tests/setup.ts`), producing "Failed to load skills: fetch failed" console noise and background state updates during unrelated tests (e.g. `apps/web/src/pages/project-chat/useProjectSkills.ts:16` fetches on mount)
 5. Other instances of the sync-assert-after-async-boundary pattern across `apps/web/tests` and `packages/acp-client/tests`
 
@@ -70,7 +90,7 @@ Historically flaky files to re-check: `repo-selector.test.tsx`, `agents-section.
 - [ ] File backlog task for the vm-agent product bug: silent replay abort still sends `replay_done` (suffix loss invisible to clients)
 - [ ] Add fail-fast fetch stub to `apps/web/tests/setup.ts`; fix all tests that break because they relied on real fetch
 - [ ] Audit web + acp-client tests for the sync-assert-after-async pattern; fix instances found
-- [ ] Archive `tasks/backlog/2026-04-11-fix-flaky-useAvailableCommands-test.md` and `tasks/backlog/2026-02-28-fix-flaky-vm-agent-tests.md` through the tasks/ flow (resolved by this work)
+- [ ] Archive `tasks/archive/2026-04-11-fix-flaky-useAvailableCommands-test.md` and `tasks/archive/2026-02-28-fix-flaky-vm-agent-tests.md` through the tasks/ flow (resolved by this work)
 - [ ] Verification: 5x consecutive green `--coverage` runs for each touched JS suite (matching CI conditions); `go test -race -count=100 ./internal/acp/` green
 
 ## Hard Constraints
@@ -92,6 +112,6 @@ Historically flaky files to re-check: `repo-selector.test.tsx`, `agents-section.
 
 - `.claude/rules/02-quality-gates.md` — regression tests, prohibited patterns
 - `.claude/rules/46-vm-agent-diagnostic-getter-sync.md` — vm-agent concurrency test conventions
-- `tasks/backlog/2026-04-11-fix-flaky-useAvailableCommands-test.md` (superseded analysis)
-- `tasks/backlog/2026-02-28-fix-flaky-vm-agent-tests.md` (superseded analysis — Option A invalid, ingestion is synchronous)
+- `tasks/archive/2026-04-11-fix-flaky-useAvailableCommands-test.md` (superseded analysis)
+- `tasks/archive/2026-02-28-fix-flaky-vm-agent-tests.md` (superseded analysis — Option A invalid, ingestion is synchronous)
 - Prior flake fixes: PRs #867, #878, commit 3217faa06

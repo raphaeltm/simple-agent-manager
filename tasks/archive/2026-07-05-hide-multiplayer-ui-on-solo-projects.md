@@ -87,7 +87,7 @@ This task will add explicit tests for both sides of the product-mode gate and up
 
 ### Task Completion Validation Report
 
-**Task**: `tasks/active/2026-07-05-hide-multiplayer-ui-on-solo-projects.md`  
+**Task**: `tasks/archive/2026-07-05-hide-multiplayer-ui-on-solo-projects.md`  
 **Branch**: `sam/wave-7-multiplayershared-projects-01kwt0`  
 **Date**: 2026-07-05
 

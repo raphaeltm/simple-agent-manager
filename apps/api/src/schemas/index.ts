@@ -114,8 +114,12 @@ export {
   AcpSessionForkSchema,
   AcpSessionHeartbeatSchema,
   AcpSessionStatusReportSchema,
+  AcpSessionUsageReportSchema,
   CreateAcpSessionSchema,
 } from './acp-sessions';
+
+// Workspace resource history schemas
+export { WorkspaceResourceUploadSchema } from './workspace-resource-history';
 
 // Message-anchored comment schemas
 export {
@@ -135,6 +139,7 @@ export {
   ProjectDataArchiveCircuitBreakerSchema,
   ProjectDataArchiveFreezeProjectSchema,
   ProjectDataArchiveRecoveryControlSchema,
+  ProjectDataGroupedFtsWallRecoverySchema,
   ProjectDataManualToolPayloadCleanupSchema,
   ProjectDataStorageEmergencyPurgeSchema,
   ProjectDataStorageReliefMeasureSchema,

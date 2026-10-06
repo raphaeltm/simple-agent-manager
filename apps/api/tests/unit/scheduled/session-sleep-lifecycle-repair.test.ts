@@ -36,14 +36,17 @@ function insertStaleStoppingSnapshot(
     updatedAt?: string;
   } = {}
 ) {
+  sqlite.prepare(`UPDATE workspaces SET status = 'sleeping' WHERE id = 'workspace-1'`).run();
   sqlite
     .prepare(
       `INSERT INTO session_snapshots
          (id, project_id, workspace_id, node_id, user_id, chat_session_id, runtime, status,
-          degradation, manifest_r2_key, home_r2_key, expires_at, sleep_status,
+          degradation, snapshot_generation, manifest_r2_key, manifest_json, home_r2_key, home_sha256, expires_at, sleep_status,
           sleep_claim_id, sleep_claimed_at, sleep_stopping_since, sleep_attempts, created_at, updated_at)
        VALUES ('snapshot-1', 'project-1', 'workspace-1', 'node-1', 'user-1', 'chat-1', 'vm',
-          'available', 'none', 'snapshots/chat-1/manifest.json', 'snapshots/chat-1/home.tar.zst',
+          'available', 'none', 'generation-1', 'snapshots/chat-1/generation-1/manifest.json',
+          '{"version":1,"chatSessionId":"chat-1","workspaceId":"workspace-1","status":"available","degradation":"none","artifacts":{"home":{"sizeBytes":42,"sha256":"${'a'.repeat(64)}"}}}',
+          'snapshots/chat-1/generation-1/home.tar', '${'a'.repeat(64)}',
           '2026-08-20T00:00:00.000Z', 'stopping', ?, ?, ?, 2, ?, ?)`
     )
     .run(claimId, claimedAt, stoppingSince, '2026-08-12T00:00:00.000Z', updatedAt);
@@ -68,6 +71,15 @@ describe('session sleep lifecycle repair', () => {
     ]);
     env = {
       DATABASE: createSqliteD1(sqlite),
+      SESSION_SNAPSHOT_R2_PREFIX: 'snapshots',
+      R2: {
+        head: async (key: string) =>
+          key.endsWith('/home.tar')
+            ? { size: 42, checksums: {} }
+            : key.endsWith('/manifest.json')
+              ? { size: 120, checksums: {} }
+              : null,
+      },
       SESSION_SLEEP_IN_FLIGHT_MAX_AGE_MS: '1800000',
       NODE_LIFECYCLE: {
         idFromName: (id: string) => id,
@@ -160,6 +172,23 @@ describe('session sleep lifecycle repair', () => {
     ).toEqual(expect.any(String));
   });
 
+  it('does not repair a stale degraded capture into a sleeping workspace', async () => {
+    insertStaleStoppingSnapshot(sqlite);
+    sqlite
+      .prepare(
+        `UPDATE session_snapshots SET status = 'degraded', degradation = 'home-skipped',
+        home_r2_key = NULL, home_sha256 = NULL WHERE id = 'snapshot-1'`
+      )
+      .run();
+
+    const result = await runSessionSleepLifecycleRepair(env, new Date('2026-08-12T01:00:00.000Z'));
+    expect(result).toMatchObject({ selected: 0, repaired: 0 });
+    expect(mocks.sleepSession).not.toHaveBeenCalled();
+    expect(
+      sqlite.prepare(`SELECT status FROM workspaces WHERE id = 'workspace-1'`).pluck().get()
+    ).toBe('sleeping');
+  });
+
   it('repairs a stopping row from its stable stopping age even when the claim was refreshed recently', async () => {
     insertStaleStoppingSnapshot(sqlite, { claimId: 'reclaimed-owner' });
 
@@ -196,7 +225,7 @@ describe('session sleep lifecycle repair', () => {
     expect(mocks.sleepSession).not.toHaveBeenCalled();
     expect(
       sqlite.prepare(`SELECT status FROM workspaces WHERE id = 'workspace-1'`).pluck().get()
-    ).toBe('running');
+    ).toBe('sleeping');
   });
 
   it('keeps a stale post-capture row retryable when ProjectData sleep fails', async () => {
@@ -231,7 +260,7 @@ describe('session sleep lifecycle repair', () => {
       sleep_claimed_at: '2026-08-12T00:00:00.000Z',
     });
     expect(sqlite.prepare(`SELECT status FROM workspaces WHERE id = 'workspace-1'`).get()).toEqual({
-      status: 'running',
+      status: 'sleeping',
     });
     expect(
       sqlite.prepare(`SELECT status FROM agent_sessions WHERE id = 'agent-1'`).pluck().get()
@@ -241,70 +270,115 @@ describe('session sleep lifecycle repair', () => {
     ).toBeNull();
   });
 
-  async function runStaleRepairForProjectDataStatus(projectDataStatus: string | null) {
+  async function runStaleRepairForProjectDataStatus(
+    projectDataStatus: string | null,
+    taskStatus = 'in_progress'
+  ) {
     mocks.sleepSession.mockResolvedValueOnce(false);
     mocks.getSession.mockResolvedValueOnce(
       projectDataStatus === null ? null : { status: projectDataStatus }
     );
+    sqlite.prepare(`UPDATE tasks SET status = ? WHERE id = 'task-1'`).run(taskStatus);
     insertStaleStoppingSnapshot(sqlite);
 
     return runSessionSleepLifecycleRepair(env, new Date('2026-08-12T01:00:00.000Z'));
   }
 
   it.each([
-    ['stopped', 'terminal reconciliation stopped it'],
-    ['sleeping', 'ProjectData already slept it'],
-  ])('repairs a stale stopping row when ProjectData is already %s (%s)', async (status) => {
-    const result = await runStaleRepairForProjectDataStatus(status);
+    ['stopped', 'in_progress', 'terminal reconciliation stopped it'],
+    ['sleeping', 'in_progress', 'ProjectData already slept it'],
+    // A failed task's preservation sleep can pass the point of no return after a
+    // terminal reconciler failed its session; the teardown must still finish.
+    ['failed', 'failed', "terminal reconciliation failed a failed task's session"],
+  ])(
+    'repairs a stale stopping row when ProjectData is already %s (%s task: %s)',
+    async (status, taskStatus) => {
+      const result = await runStaleRepairForProjectDataStatus(status, taskStatus);
 
-    expect(result).toMatchObject({
-      selected: 1,
-      repaired: 1,
-      skipped: 0,
-      projectDataErrors: 0,
-      errors: 0,
-    });
-    expect(mocks.sleepSession).toHaveBeenCalledWith(env, 'project-1', 'chat-1');
-    expect(mocks.getSession).toHaveBeenCalledWith(env, 'project-1', 'chat-1');
-    expect(sqlite.prepare(`SELECT status FROM workspaces WHERE id = 'workspace-1'`).get()).toEqual({
-      status: 'sleeping',
-    });
-    expect(
-      sqlite
-        .prepare(
-          `SELECT sleep_status, sleeping_at, sleep_claim_id, sleep_claimed_at
+      expect(result).toMatchObject({
+        selected: 1,
+        repaired: 1,
+        skipped: 0,
+        projectDataErrors: 0,
+        errors: 0,
+      });
+      expect(mocks.sleepSession).toHaveBeenCalledWith(env, 'project-1', 'chat-1');
+      expect(mocks.getSession).toHaveBeenCalledWith(env, 'project-1', 'chat-1');
+      expect(
+        sqlite.prepare(`SELECT status FROM workspaces WHERE id = 'workspace-1'`).get()
+      ).toEqual({
+        status: 'sleeping',
+      });
+      expect(
+        sqlite
+          .prepare(
+            `SELECT sleep_status, sleeping_at, sleep_claim_id, sleep_claimed_at
              FROM session_snapshots WHERE id = 'snapshot-1'`
-        )
-        .get()
-    ).toEqual({
-      sleep_status: 'sleeping',
-      sleeping_at: '2026-08-12T01:00:00.000Z',
-      sleep_claim_id: null,
-      sleep_claimed_at: null,
-    });
-    expect(
-      sqlite.prepare(`SELECT ended_at FROM compute_usage WHERE id = 'usage-1'`).pluck().get()
-    ).toEqual(expect.any(String));
-  });
+          )
+          .get()
+      ).toEqual({
+        sleep_status: 'sleeping',
+        sleeping_at: '2026-08-12T01:00:00.000Z',
+        sleep_claim_id: null,
+        sleep_claimed_at: null,
+      });
+      expect(
+        sqlite.prepare(`SELECT ended_at FROM compute_usage WHERE id = 'usage-1'`).pluck().get()
+      ).toEqual(expect.any(String));
+    }
+  );
 
   it.each([
-    [null, 'missing'],
-    ['failed', 'unsupported'],
-  ])('does not repair a stale stopping row when ProjectData status is %s (%s)', async (status) => {
-    const result = await runStaleRepairForProjectDataStatus(status);
+    [null, 'in_progress', 'missing'],
+    ['active', 'in_progress', 'still open'],
+    // Scoped to failed tasks (rule 67): any other task's failed session keeps
+    // its pre-existing handling.
+    ['failed', 'in_progress', "a live task's failed session"],
+  ])(
+    'does not repair a stale stopping row when ProjectData status is %s (%s task: %s)',
+    async (status, taskStatus) => {
+      const result = await runStaleRepairForProjectDataStatus(status, taskStatus);
 
-    expect(result).toMatchObject({
-      selected: 1,
-      repaired: 0,
-      skipped: 0,
-      projectDataErrors: 1,
-      errors: 0,
-    });
-    expect(sqlite.prepare(`SELECT status FROM workspaces WHERE id = 'workspace-1'`).get()).toEqual({
-      status: 'running',
-    });
+      expect(result).toMatchObject({
+        selected: 1,
+        repaired: 0,
+        skipped: 0,
+        projectDataErrors: 1,
+        errors: 0,
+      });
+      expect(
+        sqlite.prepare(`SELECT status FROM workspaces WHERE id = 'workspace-1'`).get()
+      ).toEqual({
+        status: 'sleeping',
+      });
+      expect(
+        sqlite
+          .prepare(`SELECT sleep_status FROM session_snapshots WHERE id = 'snapshot-1'`)
+          .pluck()
+          .get()
+      ).toBe('stopping');
+    }
+  );
+
+  it('never promotes a stale preparing claim while its runtime may still be live', async () => {
+    insertStaleStoppingSnapshot(sqlite);
+    sqlite.prepare(`UPDATE workspaces SET status = 'running' WHERE id = 'workspace-1'`).run();
+    sqlite
+      .prepare(`UPDATE session_snapshots SET sleep_status = 'preparing' WHERE id = 'snapshot-1'`)
+      .run();
+    const result = await runSessionSleepLifecycleRepair(env, new Date('2026-08-12T01:00:00.000Z'));
+    expect(result).toMatchObject({ selected: 0, repaired: 0 });
+    expect(mocks.sleepSession).not.toHaveBeenCalled();
     expect(
-      sqlite.prepare(`SELECT sleep_status FROM session_snapshots WHERE id = 'snapshot-1'`).pluck().get()
-    ).toBe('stopping');
+      sqlite.prepare(`SELECT status FROM workspaces WHERE id = 'workspace-1'`).pluck().get()
+    ).toBe('running');
+  });
+
+  it('never promotes a stopping claim before the workspace records completed runtime teardown', async () => {
+    insertStaleStoppingSnapshot(sqlite);
+    sqlite.prepare(`UPDATE workspaces SET status = 'running' WHERE id = 'workspace-1'`).run();
+    const result = await runSessionSleepLifecycleRepair(env, new Date('2026-08-12T01:00:00.000Z'));
+    expect(result).toMatchObject({ selected: 0, repaired: 0 });
+    expect(mocks.sleepSession).not.toHaveBeenCalled();
   });
 });

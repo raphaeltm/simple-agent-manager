@@ -81,4 +81,4 @@ TypewriterText animates batches -> feels like streaming
 
 ## References
 - React error #185: infinite render loop from dual WebSocket sources
-- `tasks/backlog/2026-03-06-unify-project-chat-through-do-streaming.md` — earlier proposal for DO-only streaming
+- `tasks/archive/2026-03-06-unify-project-chat-through-do-streaming.md` — earlier proposal for DO-only streaming

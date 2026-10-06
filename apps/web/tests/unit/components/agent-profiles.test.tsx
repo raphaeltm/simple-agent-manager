@@ -390,14 +390,20 @@ describe('ProfileFormDialog', () => {
     expect(defaultOnSave).not.toHaveBeenCalled();
   });
 
-  it('shows provider catalog details for VM size overrides', async () => {
+  it('saves workload resource overrides without selecting a legacy VM size', async () => {
+    const user = userEvent.setup();
     render(
       <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} projectId="proj-test-1" />, { wrapper: Wrapper },
     );
-
-    await waitFor(() => {
-      expect(screen.getByRole('option', { name: 'Medium — cx32 (4 vCPU, 8 GB RAM, 80 GB storage) €7.69/mo' })).toBeInTheDocument();
-    });
+    await user.type(screen.getByPlaceholderText('e.g. Fast Implementer'), 'Custom resources');
+    await user.click(screen.getByText('Infrastructure'));
+    await user.type(screen.getByRole('spinbutton', { name: 'vCPU' }), '2.5');
+    await user.type(screen.getByRole('spinbutton', { name: 'Memory (GB)' }), '6');
+    await user.click(screen.getByText('Create Profile'));
+    await waitFor(() => expect(defaultOnSave).toHaveBeenCalledOnce());
+    const payload = defaultOnSave.mock.calls[0]?.[0];
+    expect(payload.vmSizeOverride).toBeNull();
+    expect(JSON.parse(payload.resourceRequirementsJson)).toMatchObject({ minVcpu: 2.5, minMemoryGb: 6 });
   });
 
   it('calls onSave with correct payload in create mode', async () => {
@@ -468,17 +474,17 @@ describe('ProfileFormDialog', () => {
     expect(effortSelect).toHaveValue('high');
   });
 
-  it('offers GPT-5.5 Pro for OpenAI Codex profiles', async () => {
+  it('offers GPT-6 Astra for OpenAI Codex profiles', async () => {
     const user = userEvent.setup();
-    const profile = makeProfile({ agentType: 'openai-codex', model: 'gpt-5.5' });
+    const profile = makeProfile({ agentType: 'openai-codex', model: 'gpt-6-sol' });
     render(
       <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} profile={profile} projectId="proj-test-1" />, { wrapper: Wrapper },
     );
 
     await user.click(screen.getByLabelText('Model'));
 
-    expect(screen.getByText('GPT-5.5 Pro')).toBeInTheDocument();
-    expect(screen.getByText('gpt-5.5-pro')).toBeInTheDocument();
+    expect(screen.getByText('GPT-6 Astra')).toBeInTheDocument();
+    expect(screen.getByText('gpt-6-astra')).toBeInTheDocument();
   });
 
   it('shows error when onSave rejects', async () => {

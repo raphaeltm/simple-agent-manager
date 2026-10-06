@@ -170,7 +170,7 @@ describe('project-data service: session lifecycle', () => {
     expect(session).toMatchObject({
       status: 'active',
       workspaceId: 'ws-new',
-      taskId: 'task-new',
+      taskId: 'task-old',
       endedAt: null,
       isTerminated: false,
     });
@@ -190,6 +190,7 @@ describe('project-data service: session lifecycle', () => {
     expect(await svc.sleepSession(testEnv, pid, sessionId)).toBe(true);
     expect(await svc.wakeSession(testEnv, pid, sessionId, 'ws-wake', 'task-wake')).toBe(true);
     expect(await svc.wakeSession(testEnv, pid, sessionId, 'ws-wake', 'task-relink')).toBe(true);
+    expect((await svc.getSession(testEnv, pid, sessionId))?.taskId).toBe('task-start');
     expect(await svc.stopSession(testEnv, pid, sessionId)).toBe(true);
     expect(await svc.stopSession(testEnv, pid, sessionId)).toBe(false);
 
@@ -332,7 +333,7 @@ describe('project-data service: session lifecycle', () => {
     expect(session).toMatchObject({
       status: 'active',
       workspaceId: nextWorkspaceId,
-      taskId: recoveryTaskId,
+      taskId: null,
       endedAt: null,
       isTerminated: false,
     });
@@ -795,7 +796,11 @@ describe('project-data service: message persistence', () => {
     );
     await svc.persistMessage(testEnv, pid, sessionId, 'user', 'Deploy to production', null);
 
-    const results = await svc.searchMessages(testEnv, pid, 'authentication');
+    const { results } = await svc.searchMessagesWithArchiveMetadata(
+      testEnv,
+      pid,
+      'authentication'
+    );
     expect(results.length).toBeGreaterThanOrEqual(2);
     for (const r of results) {
       expect(r.snippet.toLowerCase()).toContain('authentication');

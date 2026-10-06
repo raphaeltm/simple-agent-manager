@@ -3,8 +3,14 @@
  *
  * Also exports TokenRow and groupTokensIntoMessages for use by tests and other modules.
  */
+import { drizzle } from 'drizzle-orm/d1';
+
+import * as schema from '../../db/schema';
 import type { Env } from '../../env';
+import { requireProjectAccess } from '../../middleware/project-auth';
 import * as projectDataService from '../../services/project-data';
+import { describeRootSearchCoverage } from '../../services/project-data-search-coverage';
+import { getWorkspaceResourceHistory } from '../../services/workspace-resource-history';
 import {
   getMcpLimits,
   INVALID_PARAMS,
@@ -53,7 +59,13 @@ export async function handleListSessions(
 }
 
 // Roles whose consecutive tokens should be concatenated into a single logical message.
-// Mirrors the frontend groupMessages() in ProjectMessageView.tsx.
+// The frontend equivalent is `chatMessagesToConversationItems()` in
+// `apps/web/src/components/project-message-view/types.ts` (consecutive assistant
+// and thinking tokens merge; tool rows merge by `toolCallId`), followed by
+// `groupToolCallItems()` in
+// `apps/web/src/components/project-message-view/tool-call-groups.ts`, which folds
+// a run of tool/thinking items into one collapsed activity row. The old
+// `groupMessages()` helper this used to cite was dead code and has been removed.
 const GROUPABLE_ROLES = new Set(['assistant', 'tool', 'thinking']);
 
 export interface TokenRow {
@@ -154,6 +166,69 @@ export async function handleGetSessionMessages(
   });
 }
 
+function parseOptionalScope(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+export async function handleGetResourceHistory(
+  requestId: string | number | null,
+  params: Record<string, unknown>,
+  tokenData: McpTokenData,
+  env: Env
+): Promise<JsonRpcResponse> {
+  const explicitSessionId = parseOptionalScope(params.sessionId);
+  const explicitTaskId = parseOptionalScope(params.taskId);
+  const explicitWorkspaceId = parseOptionalScope(params.workspaceId);
+  const hasExplicitScope = Boolean(explicitSessionId || explicitTaskId || explicitWorkspaceId);
+  const sessionId = hasExplicitScope
+    ? explicitSessionId
+    : parseOptionalScope(tokenData.chatSessionId);
+  const taskId = hasExplicitScope ? explicitTaskId : parseOptionalScope(tokenData.taskId);
+  const workspaceId = hasExplicitScope
+    ? explicitWorkspaceId
+    : parseOptionalScope(tokenData.workspaceId);
+  const detailChunkId = parseOptionalScope(params.chunkId);
+
+  if (!sessionId && !taskId && !workspaceId) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'Provide sessionId, taskId, or workspaceId, or call from a workspace-scoped MCP token'
+    );
+  }
+
+  const history = await getWorkspaceResourceHistory(env, {
+    projectId: tokenData.projectId,
+    sessionId,
+    taskId,
+    workspaceId,
+    detailChunkId,
+  });
+
+  return jsonRpcSuccess(requestId, {
+    content: [
+      {
+        type: 'text',
+        text: JSON.stringify(
+          {
+            scope: { projectId: tokenData.projectId, sessionId, taskId, workspaceId },
+            ...history,
+            notes: [
+              'Samples are workspace-level cgroup observations, not per-process attribution.',
+              'memoryWorkingSetMeanBytes and memoryWorkingSetPeakBytes estimate memory needed by excluding reclaimable inactive file cache; null means the VM agent did not report them.',
+              'memoryMeanBytes, memoryPeakBytes, and memoryKernelPeakBytes include cache and remain available for historical comparison.',
+              'Tool spans are timestamp correlation windows and may include an ACP kind and metadata-provided tool name; titles and inputs are never returned.',
+              'Chunk detail is returned only when chunkId is supplied; summary reads stay bounded.',
+            ],
+          },
+          null,
+          2
+        ),
+      },
+    ],
+  });
+}
+
 export async function handleSearchMessages(
   requestId: string | number | null,
   params: Record<string, unknown>,
@@ -185,6 +260,23 @@ export async function handleSearchMessages(
   const roles = rolesResult.roles;
   const requestedLimit = typeof params.limit === 'number' ? params.limit : 10;
   const limit = Math.min(Math.max(1, Math.round(requestedLimit)), limits.messageSearchMax);
+  const continuation =
+    typeof params.continuation === 'string' && params.continuation.length > 0
+      ? params.continuation
+      : null;
+  if (sessionId && continuation) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'continuation cannot be combined with sessionId'
+    );
+  }
+
+  await requireProjectAccess(
+    drizzle(env.DATABASE, { schema }),
+    tokenData.projectId,
+    tokenData.userId
+  );
 
   const search = await projectDataService.searchMessagesWithArchiveMetadata(
     env,
@@ -192,7 +284,8 @@ export async function handleSearchMessages(
     query,
     sessionId,
     roles,
-    limit
+    limit,
+    continuation
   );
 
   return jsonRpcSuccess(requestId, {
@@ -211,8 +304,10 @@ export async function handleSearchMessages(
               createdAt: r.createdAt,
             })),
             count: search.results.length,
-            query,
+            ...search.query,
             archiveSearch: search.archiveSearch,
+            rootSearch: search.rootSearch,
+            coverageNotes: describeRootSearchCoverage(search.rootSearch),
           },
           null,
           2

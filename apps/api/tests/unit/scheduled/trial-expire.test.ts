@@ -13,25 +13,25 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Env } from '../../../src/env';
 
 const {
-  deleteWorkspaceOnNodeMock,
   deleteNodeResourcesStrictMock,
+  cleanupWorkspaceForDeletionMock,
   persistErrorMock,
   stopSessionMock,
   cleanupWorkspaceActivityMock,
 } = vi.hoisted(() => ({
-  deleteWorkspaceOnNodeMock: vi.fn(async () => {}),
-  deleteNodeResourcesStrictMock: vi.fn(async () => {}),
+  deleteNodeResourcesStrictMock: vi.fn(),
+  cleanupWorkspaceForDeletionMock: vi.fn(),
   persistErrorMock: vi.fn(async () => {}),
   stopSessionMock: vi.fn(async () => {}),
   cleanupWorkspaceActivityMock: vi.fn(async () => {}),
 }));
 
-vi.mock('../../../src/services/node-agent', () => ({
-  deleteWorkspaceOnNode: deleteWorkspaceOnNodeMock,
-}));
-
 vi.mock('../../../src/services/nodes', () => ({
   deleteNodeResourcesStrict: deleteNodeResourcesStrictMock,
+}));
+
+vi.mock('../../../src/services/workspace-cleanup', () => ({
+  cleanupWorkspaceForDeletion: (...args: unknown[]) => cleanupWorkspaceForDeletionMock(...args),
 }));
 
 vi.mock('../../../src/services/observability', () => ({
@@ -173,6 +173,17 @@ function baseWorkspace(overrides: Partial<MockWorkspace> = {}): MockWorkspace {
 describe('runTrialExpireSweep', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    deleteNodeResourcesStrictMock.mockResolvedValue({
+      providerVm: 'deleted',
+      runtimeTerminationConfirmedAt: '2026-09-04T00:00:00.000Z',
+      runtimeIncarnationId: 'runtime-trial-001',
+      providerInstanceId: 'provider-trial-001',
+    });
+    cleanupWorkspaceForDeletionMock.mockResolvedValue({
+      status: 'confirmed',
+      proof: 'vm_agent_confirmed',
+      workspaceFinalized: true,
+    });
   });
 
   it('expires rows using a guarded D1 update and returns actual affected rows', async () => {
@@ -235,7 +246,7 @@ describe('runTrialExpireSweep', () => {
       nodesDeleted: 1,
       cleanupErrors: 0,
     });
-    expect(deleteWorkspaceOnNodeMock).not.toHaveBeenCalled();
+    expect(cleanupWorkspaceForDeletionMock).not.toHaveBeenCalled();
     expect(deleteNodeResourcesStrictMock).toHaveBeenCalledWith(
       'node_old',
       'system_anonymous_trials',
@@ -259,7 +270,12 @@ describe('runTrialExpireSweep', () => {
   });
 
   it('finalizes local resources once when strict deletion reports a conclusively absent VM', async () => {
-    deleteNodeResourcesStrictMock.mockResolvedValueOnce({ providerVm: 'already-absent' });
+    deleteNodeResourcesStrictMock.mockResolvedValueOnce({
+      providerVm: 'already-absent',
+      runtimeTerminationConfirmedAt: '2026-09-04T00:00:00.000Z',
+      runtimeIncarnationId: 'runtime-trial-001',
+      providerInstanceId: 'provider-trial-001',
+    });
     const env = makeEnv({
       expiredProjects: [{ trial_id: 'trial_old', project_id: 'proj_old' }],
       workspacesByInvocation: [[baseWorkspace()], []],
@@ -343,7 +359,11 @@ describe('runTrialExpireSweep', () => {
   });
 
   it('keeps shared-node workspace visible when VM-agent workspace deletion fails', async () => {
-    deleteWorkspaceOnNodeMock.mockRejectedValueOnce(new Error('workspace still busy'));
+    cleanupWorkspaceForDeletionMock.mockResolvedValueOnce({
+      status: 'retry',
+      reason: 'runtime_deletion_unconfirmed',
+      diagnostic: 'workspace deletion remains unconfirmed',
+    });
     const env = makeEnv({
       expiredProjects: [{ trial_id: 'trial_old', project_id: 'proj_old' }],
       workspaces: [baseWorkspace({ node_id: 'node_shared' })],
@@ -357,11 +377,12 @@ describe('runTrialExpireSweep', () => {
       nodesDeleted: 0,
       cleanupErrors: 1,
     });
-    expect(deleteWorkspaceOnNodeMock).toHaveBeenCalledWith(
-      'node_shared',
-      'ws_old',
-      env,
-      'system_anonymous_trials'
+    expect(cleanupWorkspaceForDeletionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        env,
+        userId: 'system_anonymous_trials',
+        workspace: expect.objectContaining({ id: 'ws_old', nodeId: 'node_shared' }),
+      })
     );
     expect(deleteNodeResourcesStrictMock).not.toHaveBeenCalled();
     expect(env.__calls.some((call) => call.sql.includes('UPDATE workspaces'))).toBe(false);
@@ -381,7 +402,7 @@ describe('runTrialExpireSweep', () => {
       nodesDeleted: 0,
       cleanupErrors: 0,
     });
-    expect(deleteWorkspaceOnNodeMock).toHaveBeenCalledTimes(1);
+    expect(cleanupWorkspaceForDeletionMock).toHaveBeenCalledTimes(1);
     expect(deleteNodeResourcesStrictMock).not.toHaveBeenCalled();
     const activeCountCall = env.__calls.find((call) =>
       call.sql.includes('COUNT(*) as active_count')

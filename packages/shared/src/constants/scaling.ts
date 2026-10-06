@@ -1,5 +1,4 @@
 import { DEFAULT_NODE_WARM_TIMEOUT_MS } from './node-pooling';
-import { DEFAULT_MAX_WORKSPACES_PER_NODE } from './task-execution';
 import {
   DEFAULT_MAX_TRIGGERS_PER_PROJECT,
   MAX_MAX_TRIGGERS_PER_PROJECT,
@@ -34,12 +33,48 @@ export const MAX_MAX_SUB_TASKS_PER_TASK = 20;
 export const MIN_WARM_NODE_TIMEOUT_MS = 30 * 1000; // 30 seconds — prevents instant-destroy race
 export const MAX_WARM_NODE_TIMEOUT_MS = 4 * 60 * 60 * 1000; // 4 hours
 
-/** Min/max for max workspaces per node. Default uses existing DEFAULT_MAX_WORKSPACES_PER_NODE. */
-export const MIN_MAX_WORKSPACES_PER_NODE = 1;
-export const MAX_MAX_WORKSPACES_PER_NODE = 10;
-
 /** Default CPU threshold (%). Override per-project or via TASK_RUN_NODE_CPU_THRESHOLD_PERCENT env var. */
-export const DEFAULT_NODE_CPU_THRESHOLD_PERCENT = 50;
+/**
+ * Live CPU is a SATURATION ceiling, not a "this node is busy" mark.
+ *
+ * CPU is compressible — the kernel time-slices it — and each workspace's
+ * committed CPU is already subtracted from the node's declared reservation
+ * budget. Refusing admission at 50% therefore double-counted a co-tenant's own
+ * reserved burst and refused exactly the nodes that were doing useful work: on a
+ * 2-vCPU host one busy core is 50%, so in production only idle nodes were ever
+ * admissible and almost every agent got a VM of its own.
+ *
+ * The node's own cgroup layout says the same thing, and says it in two different
+ * shapes (`packages/cloud-init/src/template.ts`). Memory is protected through
+ * explicit reservation accounting and host reserve — `sam-infra.slice` carries
+ * `MemoryMin` and the vm-agent unit `OOMScoreAdjust=-900`. CPU is
+ * protected with a PROPORTIONAL share instead: `sam-infra.slice` is
+ * `CPUWeight=1000` against `sam-workload.slice`'s 100, which is a CFS weight and
+ * so applies only under contention. Nothing caps the workload's CPU, because CPU
+ * contention only slows the agent down. Live CPU remains a saturation ceiling;
+ * live memory is a scoring signal while reservations are the admission authority.
+ *
+ * Why 85 rather than a value nearer true saturation:
+ *
+ * - The input is laggy. `cpuPercent` is derived from `cpuLoadAvg1`, a ONE-MINUTE
+ *   trailing load average, and the reading may be up to
+ *   `metricsTtlMs` (3 min) old, so a decision taken at the ceiling can reflect a
+ *   host that is already hotter. 15 points of headroom covers a rising ramp.
+ * - `cpuMillis` is admission-time bookkeeping only — nothing translates it into a
+ *   cgroup quota or `docker run --cpus`. A workspace that under-declares, or
+ *   simply bursts past its reservation, is invisible to the budget check, so this
+ *   ceiling is the only backstop against real usage exceeding declared usage.
+ * - Sustained CPU saturation is not purely a slowdown on this platform: it has
+ *   previously starved the vm-agent heartbeat loop and produced false
+ *   `node_not_live` task failures (`tasks/archive/2026-08-25-build-concurrency-backpressure.md`).
+ *   That incident's own mitigation — a per-node build queue — covers concurrent
+ *   devcontainer builds but not steady-state contention between running
+ *   workspaces, so admission keeps a real margin.
+ *
+ * Do not lower this back toward a "node is busy" value; do not raise it toward
+ * 100 without first enforcing `cpuMillis` as a real cgroup limit.
+ */
+export const DEFAULT_NODE_CPU_THRESHOLD_PERCENT = 85;
 export const MIN_NODE_CPU_THRESHOLD_PERCENT = 10;
 export const MAX_NODE_CPU_THRESHOLD_PERCENT = 95;
 
@@ -66,9 +101,7 @@ export const SCALING_PARAMS: ScalingParamMeta[] = [
   { key: 'maxDispatchDepth', label: 'Max Dispatch Depth', envVar: 'MCP_DISPATCH_MAX_DEPTH', defaultValue: DEFAULT_MAX_DISPATCH_DEPTH, min: MIN_MAX_DISPATCH_DEPTH, max: MAX_MAX_DISPATCH_DEPTH, unit: 'count' },
   { key: 'maxSubTasksPerTask', label: 'Max Sub-Tasks Per Task', envVar: 'MCP_DISPATCH_MAX_PER_TASK', defaultValue: DEFAULT_MAX_SUB_TASKS_PER_TASK, min: MIN_MAX_SUB_TASKS_PER_TASK, max: MAX_MAX_SUB_TASKS_PER_TASK, unit: 'count' },
   { key: 'warmNodeTimeoutMs', label: 'Warm Node Timeout', envVar: 'NODE_WARM_TIMEOUT_MS', defaultValue: DEFAULT_NODE_WARM_TIMEOUT_MS, min: MIN_WARM_NODE_TIMEOUT_MS, max: MAX_WARM_NODE_TIMEOUT_MS, unit: 'ms' },
-  { key: 'maxWorkspacesPerNode', label: 'Max Workspaces Per Node', envVar: 'MAX_WORKSPACES_PER_NODE', defaultValue: DEFAULT_MAX_WORKSPACES_PER_NODE, min: MIN_MAX_WORKSPACES_PER_NODE, max: MAX_MAX_WORKSPACES_PER_NODE, unit: 'count' },
   { key: 'nodeCpuThresholdPercent', label: 'Node CPU Threshold', envVar: 'TASK_RUN_NODE_CPU_THRESHOLD_PERCENT', defaultValue: DEFAULT_NODE_CPU_THRESHOLD_PERCENT, min: MIN_NODE_CPU_THRESHOLD_PERCENT, max: MAX_NODE_CPU_THRESHOLD_PERCENT, unit: 'percent' },
-  { key: 'nodeMemoryThresholdPercent', label: 'Node Memory Threshold', envVar: 'TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT', defaultValue: DEFAULT_NODE_MEMORY_THRESHOLD_PERCENT, min: MIN_NODE_MEMORY_THRESHOLD_PERCENT, max: MAX_NODE_MEMORY_THRESHOLD_PERCENT, unit: 'percent' },
   { key: 'maxTriggers', label: 'Max Triggers', envVar: 'MAX_TRIGGERS_PER_PROJECT', defaultValue: DEFAULT_MAX_TRIGGERS_PER_PROJECT, min: MIN_MAX_TRIGGERS_PER_PROJECT, max: MAX_MAX_TRIGGERS_PER_PROJECT, unit: 'count' },
 ];
 

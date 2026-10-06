@@ -113,7 +113,7 @@ func (s *Server) sendNodeReady() {
 	if resp.StatusCode >= 300 {
 		body := readAcpHeartbeatErrorBody(resp.Body)
 		if isTerminalControlPlaneCallbackStatus(resp.StatusCode) {
-			s.markControlPlaneCallbacksTerminal("node_ready", resp.StatusCode, body)
+			s.markControlPlaneCallbacksTerminal(nodeReadyCallback, resp.StatusCode, body)
 			return
 		}
 		slog.Warn("Node ready callback returned non-success status",
@@ -139,7 +139,7 @@ type deploymentPendingRouteConfigResponse struct {
 type deploymentHeartbeatResponse struct {
 	Environments        *[]deploymentEnvironmentResponse       `json:"environments,omitempty"`
 	RetireEnvironments  []deploymentEnvironmentResponse        `json:"retireEnvironments,omitempty"`
-	PendingReleases     []deploymentPendingReleaseResponse     `json:"pendingReleases,omitempty"`
+	PendingReleases     []deploymentPendingReleaseResponse     `json:"pendingReleases"`
 	PendingRouteConfigs []deploymentPendingRouteConfigResponse `json:"pendingRouteConfigs,omitempty"`
 	DeployPubKey        string                                 `json:"deployPubKey,omitempty"`
 }
@@ -204,14 +204,20 @@ func (s *Server) sendNodeHeartbeat() {
 		payload["deployment"] = map[string]interface{}{"environments": environments}
 	}
 
-	// Enrich heartbeat with lightweight system metrics (procfs only, no exec calls).
+	// Enrich heartbeat with lightweight system metrics. Workspace container
+	// memory is optional, bounded, and omitted when discovery or Docker stats
+	// cannot complete within its configured timeout.
 	if s.sysInfoCollector != nil {
 		if quick, err := s.sysInfoCollector.CollectQuick(); err == nil {
-			payload["metrics"] = map[string]interface{}{
+			metrics := map[string]interface{}{
 				"cpuLoadAvg1":   quick.CPULoadAvg1,
 				"memoryPercent": quick.MemoryPercent,
 				"diskPercent":   quick.DiskPercent,
 			}
+			if workspaceMemory := s.collectWorkspaceMemoryMetrics(); len(workspaceMemory) > 0 {
+				metrics["workspaceMemory"] = workspaceMemory
+			}
+			payload["metrics"] = metrics
 		} else {
 			slog.Warn("Heartbeat metrics collection failed", "error", err)
 		}
@@ -241,7 +247,7 @@ func (s *Server) sendNodeHeartbeat() {
 	if resp.StatusCode >= 300 {
 		body := readAcpHeartbeatErrorBody(resp.Body)
 		if isTerminalControlPlaneCallbackStatus(resp.StatusCode) {
-			s.markControlPlaneCallbacksTerminal("node_heartbeat", resp.StatusCode, body)
+			s.markControlPlaneCallbacksTerminal(nodeHeartbeatCallback, resp.StatusCode, body)
 			return
 		}
 		slog.Warn("Node heartbeat returned non-success status",
@@ -307,14 +313,21 @@ func (s *Server) sendNodeHeartbeat() {
 			}
 		}
 
+		// `deployment.pendingReleases` is authoritative and complete when present.
+		// The legacy top-level `pendingReleaseSeq` is a FALLBACK for a control
+		// plane old enough not to send the structured list at all — it must never
+		// be merged alongside it. Appending it unconditionally is what turned a
+		// single pending release into two apply goroutines from one heartbeat
+		// tick, and it is also mis-attributed: the seq gets filed under this
+		// node's own cloud-init ENVIRONMENT_ID, so on a node hosting more than one
+		// environment a release for environment B was also applied against
+		// environment A's engine. claimJob cannot dedupe that — the job ids differ.
 		pendingReleases := hbResp.Deployment.PendingReleases
-		if hbResp.PendingReleaseSeq > 0 {
-			if s.config.EnvironmentID != "" {
-				pendingReleases = append(pendingReleases, deploymentPendingReleaseResponse{
-					EnvironmentID: s.config.EnvironmentID,
-					Seq:           hbResp.PendingReleaseSeq,
-				})
-			}
+		if pendingReleases == nil && hbResp.PendingReleaseSeq > 0 && s.config.EnvironmentID != "" {
+			pendingReleases = []deploymentPendingReleaseResponse{{
+				EnvironmentID: s.config.EnvironmentID,
+				Seq:           hbResp.PendingReleaseSeq,
+			}}
 		}
 
 		for _, pending := range pendingReleases {
@@ -363,6 +376,11 @@ func (s *Server) sendNodeHeartbeat() {
 	}
 
 	// Heartbeat succeeded — connectivity to the control plane is confirmed.
+	// Resume one durable eviction callback without delaying the heartbeat ticker.
+	go s.retryPendingEvictionCallbacks()
+	// Renew workspace callback tokens that are past their refresh point.
+	go s.renewDueWorkspaceCallbackTokensOnce()
+
 	// Retry any pending workspace-ready callbacks in a background goroutine
 	// so the heartbeat ticker is not blocked by potentially slow HTTP calls.
 	go func() {
@@ -374,8 +392,104 @@ func (s *Server) sendNodeHeartbeat() {
 	}()
 }
 
+type workspaceMemoryMetric struct {
+	WorkspaceID      string  `json:"workspaceId"`
+	MemoryUsageBytes uint64  `json:"memoryUsageBytes"`
+	MemoryLimitBytes uint64  `json:"memoryLimitBytes,omitempty"`
+	MemoryPercent    float64 `json:"memoryPercent,omitempty"`
+	ContainerID      string  `json:"containerId,omitempty"`
+	ContainerName    string  `json:"containerName,omitempty"`
+	CollectedAt      string  `json:"collectedAt,omitempty"`
+}
+
+func (s *Server) collectWorkspaceMemoryMetrics() []workspaceMemoryMetric {
+	if s == nil || s.config == nil || !s.config.ContainerMode {
+		return nil
+	}
+	limit := s.config.HeartbeatWorkspaceMetricsMaxContainers
+	if limit <= 0 {
+		return nil
+	}
+
+	labelValueToWorkspace := make(map[string]string, limit)
+	labelValues := make([]string, 0, limit)
+	s.workspaceMu.RLock()
+	for _, runtime := range s.workspaces {
+		if runtime == nil || !workspaceRuntimeReportsAdmissionMetrics(runtime.Status) {
+			continue
+		}
+		labelValue := strings.TrimSpace(runtime.ContainerLabelValue)
+		if labelValue == "" {
+			continue
+		}
+		labelValueToWorkspace[labelValue] = runtime.ID
+		labelValues = append(labelValues, labelValue)
+		if len(labelValues) > limit {
+			break
+		}
+	}
+	s.workspaceMu.RUnlock()
+	if len(labelValues) == 0 || len(labelValues) > limit {
+		return nil
+	}
+
+	stats, err := sysinfo.CollectDockerContainerStatsForLabelsBounded(
+		context.Background(),
+		sysinfo.DockerContainerStatsOptions{
+			Timeout:        s.config.HeartbeatDockerStatsTimeout,
+			MaxContainers:  limit,
+			MaxOutputBytes: s.config.HeartbeatWorkspaceMetricsMaxOutputBytes,
+		},
+		s.config.ContainerLabelKey,
+		labelValues,
+	)
+	if err != nil {
+		slog.Debug("Heartbeat workspace memory stats unavailable", "error", err)
+		return nil
+	}
+
+	result := make([]workspaceMemoryMetric, 0, len(stats))
+	for _, stat := range stats {
+		workspaceID := labelValueToWorkspace[stat.LabelValue]
+		if workspaceID == "" {
+			continue
+		}
+		result = append(result, workspaceMemoryMetric{
+			WorkspaceID:      workspaceID,
+			MemoryUsageBytes: stat.MemoryUsageBytes,
+			MemoryLimitBytes: stat.MemoryLimitBytes,
+			MemoryPercent:    stat.MemoryPercent,
+			ContainerID:      stat.ID,
+			ContainerName:    stat.Name,
+			CollectedAt:      stat.CollectedAt.Format(time.RFC3339Nano),
+		})
+	}
+	return result
+}
+
+func workspaceRuntimeReportsAdmissionMetrics(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "running", "creating", "recovery":
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *Server) runDetachedDeploymentApply(environmentID string, seq int64, engine *deploy.Engine) {
 	jobID := applyJobID(environmentID, seq)
+
+	// Skip if an identical apply is already running. Deferred so the claim is
+	// released even if the apply panics — otherwise this job id stays wedged and
+	// the node stops applying that release entirely.
+	releaseClaim, claimed := s.claimJob(jobID)
+	if !claimed {
+		slog.Info("deploy: apply already in flight; skipping duplicate",
+			"environmentId", environmentID, "seq", seq)
+		return
+	}
+	defer releaseClaim()
+
 	s.persistVMJobStart(jobID, vmJobKindApply, environmentID, vmJobStatusStarting, "accepted")
 	cleanup := s.registerApplyWatchdog(jobID)
 	defer cleanup()
@@ -416,22 +530,57 @@ func (s *Server) runDetachedDeploymentApply(environmentID string, seq int64, eng
 			}
 			timer.Reset(idleTimeout)
 		case <-timer.C:
-			err := fmt.Errorf("deployment apply stalled: no progress for %s", idleTimeout)
-			cancel(err)
+			stallErr := fmt.Errorf("deployment apply stalled: no progress for %s", idleTimeout)
+			cancel(stallErr)
 			applyErr := <-done
-			if applyErr != nil {
-				err = applyErr
+
+			succeeded, failure := stalledApplyResult(stallErr, applyErr)
+			if succeeded {
+				s.persistVMJobComplete(jobID, vmJobStatusSucceeded, "succeeded", "", map[string]any{"seq": seq})
+				return
 			}
-			s.persistVMJobComplete(jobID, vmJobStatusFailed, "stalled", err.Error(), nil)
+			s.persistVMJobComplete(jobID, vmJobStatusFailed, "stalled", failure.Error(), nil)
 			slog.Error("deploy: fetch and apply stalled",
-				"environmentId", environmentID, "seq", seq, "error", err)
+				"environmentId", environmentID, "seq", seq, "error", failure)
 			return
 		}
 	}
 }
 
+// stalledApplyResult decides what a fired apply idle timer actually means, once
+// the child has reported back.
+//
+// Two distinct lies are possible here and this is where both are prevented:
+//
+//   - `done` is buffered, so select can pick the timer case even when the apply
+//     had ALREADY SUCCEEDED and both cases were ready. Recording that as
+//     "stalled" would fail a deployment that worked, so a nil child result means
+//     believe the apply over our own timer.
+//   - When the child really did fail, its error is a CONSEQUENCE of our cancel —
+//     compose reports `signal: killed` because we killed it. Reporting only that
+//     discards the diagnosis and makes a self-inflicted timeout indistinguishable
+//     from an OOM kill, which is how the 2026-09-05 incident presented. So the
+//     stall stays the primary cause with the child's output as context.
+func stalledApplyResult(stallErr, applyErr error) (succeeded bool, failure error) {
+	if applyErr == nil {
+		return true, nil
+	}
+	return false, fmt.Errorf("%w (child result: %v)", stallErr, applyErr)
+}
+
 func (s *Server) runDetachedDeploymentRouteApply(environmentID string, revision int64, engine *deploy.Engine) {
 	jobID := routeConfigJobID(environmentID, revision)
+
+	// Same duplicate-spawn guard as the apply path: pending route configs are
+	// re-advertised every heartbeat until observed.RoutingRevision catches up.
+	releaseClaim, claimed := s.claimJob(jobID)
+	if !claimed {
+		slog.Info("deploy: route config apply already in flight; skipping duplicate",
+			"environmentId", environmentID, "revision", revision)
+		return
+	}
+	defer releaseClaim()
+
 	s.persistVMJobStart(jobID, vmJobKindRouteConfig, environmentID, vmJobStatusStarting, "accepted")
 
 	idleTimeout := s.config.DeployApplyIdleTimeout

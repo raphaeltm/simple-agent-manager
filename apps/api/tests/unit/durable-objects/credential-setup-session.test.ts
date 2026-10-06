@@ -30,6 +30,11 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import {
+  credentialTokenCanaries,
+  expectCredentialTokensAbsent,
+} from '../../helpers/credential-token-canaries';
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 vi.mock('cloudflare:workers', () => ({
   DurableObject: class {
@@ -971,6 +976,18 @@ describe('CredentialSetupSession — alarm() capture polling', () => {
         expectMessage: 'network error',
         expectDetail: '[CLI: connctECONNREFUSED 10.0.0.1:443 [redacted] junk]',
       },
+      {
+        id: 'setup-network-openai-keys',
+        driver: {
+          status: 'failed',
+          error: 'Sign-in failed with a network error during the code exchange',
+          code: 'exchange_network_error',
+          detail: `retry with ${credentialTokenCanaries.openaiProjectKey} or ${credentialTokenCanaries.openaiLegacyKey}`,
+        },
+        expectCode: 'exchange_network_error',
+        expectMessage: 'network error',
+        expectDetail: '[CLI: retry with [redacted] or [redacted]]',
+      },
     ] as const;
 
     for (const scenario of scenarios) {
@@ -1005,6 +1022,7 @@ describe('CredentialSetupSession — alarm() capture polling', () => {
       expect(state?.errorMessage).toContain(scenario.expectMessage);
       expect(state?.errorMessage).toContain(scenario.expectDetail);
       expect(state?.errorMessage).not.toContain('sk-ant');
+      expectCredentialTokensAbsent(state?.errorMessage ?? '');
     }
   });
 

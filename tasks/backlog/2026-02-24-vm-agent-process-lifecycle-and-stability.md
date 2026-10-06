@@ -1,5 +1,24 @@
 # VM Agent Process Lifecycle & Long-Running Stability
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** (VM paths below are under `packages/vm-agent/internal/`)
+>   - PR #183 (6c55fc6f7): Phase 2 process groups with graceful SIGTERM then SIGKILL
+>     (`acp/process.go:364,418,567-589`); session suspend/resume and idle auto-suspend
+>     (`acp/session_host.go:454-468`).
+>   - Phase 6 (`server/agent_ws.go:162-166`); goroutine count in `/system-info`
+>     (`sysinfo/sysinfo.go:483`); workspace-ready callback retry (`bootstrap/bootstrap.go:3111`).
+> - **Still open:**
+>   - Phase 3 systemd settings (the unit has only `Restart=always` and `RestartSec=5`,
+>     `packages/cloud-init/src/template.ts:236-237`); Phase 4 retries for the node-ready
+>     callback (`server/health.go:86-122`) and the first JWKS fetch (`auth/jwt.go:48-61`).
+>   - Phase 5 cancellable PTY reader (`pty/session.go:219`); Phase 1c release crashed
+>     SessionHosts (`acp/session_host_process.go:320-338`); Phase 7 counts in `/health`, pprof.
+>   - Decide whether idle auto-suspend made Phase 1b bulk-stop and the 1d session cap unneeded.
+> - **Moot/dropped:** the proposed `PTY_ORPHAN_GRACE_PERIOD` default (drop it: it conflicts with
+>   `2026-02-17-persistent-terminal-sessions.md`); the Non-Goals and Future Considerations
+>   (sessions now suspend and resume without losing context, PRs #183 and #1785).
+
 **Created**: 2026-02-24
 **Priority**: High
 **Classification**: `cross-component-change`, `business-logic-change`, `infra-change`

@@ -9,6 +9,7 @@ import {
   getCurrentWindowStart,
   isRateLimitReached,
 } from '../middleware/rate-limit';
+import { enqueueGenericWebhookProjectEvent } from '../services/generic-webhook-project-event-producer';
 import {
   admitAndSubmitTriggerExecution,
   type TriggerTaskSubmitter,
@@ -36,6 +37,8 @@ import {
   linkWebhookDeliveryExecution,
   recordWebhookRejectedDelivery,
 } from '../services/webhook-trigger-store';
+
+type WebhookProjectEventAdmission = Awaited<ReturnType<typeof enqueueGenericWebhookProjectEvent>>;
 
 class BodyTooLargeError extends Error {}
 
@@ -283,8 +286,26 @@ async function handleWebhookIngress(
       limits.maxFilterPathDepth
     );
     if (!filterResult.matched) {
+      const projectEventAdmission = await enqueueGenericWebhookProjectEvent(c.env, {
+        trigger: resolved.trigger,
+        config: resolved.config,
+        projectName: resolved.projectName,
+        deliveryId: delivery.id,
+        outcome: 'filtered',
+        receivedAt,
+        body,
+        headers: selectWebhookHeaders(c.req.raw.headers, resolved.config.includedHeaders),
+      });
       await finalize('filtered', 202);
-      return c.json({ accepted: true, filtered: true, deliveryId: delivery.id }, 202);
+      return c.json(
+        {
+          accepted: true,
+          filtered: true,
+          deliveryId: delivery.id,
+          projectEventAdmission,
+        },
+        202
+      );
     }
 
     const safeHeaders = selectWebhookHeaders(c.req.raw.headers, resolved.config.includedHeaders);
@@ -327,9 +348,37 @@ async function handleWebhookIngress(
     if (admission.outcome === 'submitted') {
       externallySubmitted = true;
       submittedExecutionId = admission.executionId;
-      await finalize('accepted', 202, admission.executionId);
+      let projectEventAdmission: WebhookProjectEventAdmission | null = null;
+      let admissionErrorCode: string | undefined;
+      try {
+        projectEventAdmission = await enqueueGenericWebhookProjectEvent(c.env, {
+          trigger: resolved.trigger,
+          config: resolved.config,
+          projectName: resolved.projectName,
+          deliveryId: delivery.id,
+          outcome: 'accepted',
+          receivedAt,
+          body,
+          headers: safeHeaders,
+          executionId: admission.executionId,
+        });
+      } catch (error) {
+        admissionErrorCode = 'project_event_admission_failed';
+        log.error('webhook_trigger.project_event_admission_failed', {
+          triggerId: resolved.trigger.id,
+          deliveryId: delivery.id,
+          executionId: admission.executionId,
+          errorType: error instanceof Error ? error.name : 'UnknownError',
+        });
+      }
+      await finalize('accepted', 202, admission.executionId, admissionErrorCode);
       return c.json(
-        { accepted: true, deliveryId: delivery.id, executionId: admission.executionId },
+        {
+          accepted: true,
+          deliveryId: delivery.id,
+          executionId: admission.executionId,
+          projectEventAdmission,
+        },
         202
       );
     }
@@ -343,18 +392,73 @@ async function handleWebhookIngress(
       return publicError(503, 'Webhook is still processing');
     }
     if (admission.outcome === 'skipped') {
+      const projectEventAdmission = await enqueueGenericWebhookProjectEvent(c.env, {
+        trigger: resolved.trigger,
+        config: resolved.config,
+        projectName: resolved.projectName,
+        deliveryId: delivery.id,
+        outcome: admission.reason,
+        receivedAt,
+        body,
+        headers: safeHeaders,
+        executionId: admission.executionId,
+      });
       await finalize(admission.reason, 202, admission.executionId);
-      return c.json({ accepted: true, skipped: admission.reason, deliveryId: delivery.id }, 202);
+      return c.json(
+        {
+          accepted: true,
+          skipped: admission.reason,
+          deliveryId: delivery.id,
+          projectEventAdmission,
+        },
+        202
+      );
     }
     if (admission.outcome === 'inactive') {
+      const projectEventAdmission = await enqueueGenericWebhookProjectEvent(c.env, {
+        trigger: resolved.trigger,
+        config: resolved.config,
+        projectName: resolved.projectName,
+        deliveryId: delivery.id,
+        outcome: 'inactive',
+        receivedAt,
+        body,
+        headers: safeHeaders,
+      });
       await finalize('inactive', 202, undefined, admission.reason);
-      return c.json({ accepted: true, inactive: true, deliveryId: delivery.id }, 202);
+      return c.json(
+        {
+          accepted: true,
+          inactive: true,
+          deliveryId: delivery.id,
+          projectEventAdmission,
+        },
+        202
+      );
     }
 
     // Preserve the durable linkage only if beforeSubmit committed it. Passing the
     // execution ID here would make a failed linkage look submitted and prevent a
     // safe pre-submission retry.
     await finalize('internal_error', 503, undefined, 'submission_failed');
+    await enqueueGenericWebhookProjectEvent(c.env, {
+      trigger: resolved.trigger,
+      config: resolved.config,
+      projectName: resolved.projectName,
+      deliveryId: delivery.id,
+      outcome: 'internal_error',
+      receivedAt,
+      body,
+      headers: safeHeaders,
+      executionId: admission.executionId,
+    }).catch((error) => {
+      log.error('webhook_trigger.project_event_admission_failed', {
+        triggerId: resolved.trigger.id,
+        deliveryId: delivery.id,
+        executionId: admission.executionId,
+        errorType: error instanceof Error ? error.name : 'UnknownError',
+      });
+    });
     log.error('webhook_trigger.ingest_failed', {
       triggerId: resolved.trigger.id,
       deliveryId: delivery.id,

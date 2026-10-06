@@ -1,7 +1,9 @@
 import {
   expectObject,
   type JsonObject,
+  optionalNonNegativeInteger,
   optionalObject,
+  optionalPositiveInteger,
   optionalString,
   requireArray,
   requireNumber,
@@ -25,6 +27,9 @@ export interface VultrInstancePayload {
   date_created: string;
   label: string;
   tags: string[];
+  vcpu_count?: number;
+  ram?: number;
+  disk?: number;
 }
 
 export interface VultrOsPayload {
@@ -124,6 +129,21 @@ function validateVultrInstance(payload: unknown, context: string): VultrInstance
     date_created: requireString(inst, 'date_created', 'vultr', context),
     label: optionalString(inst, 'label', 'vultr', context) ?? '',
     tags: optionalStringArray(inst, 'tags', 'vultr', context),
+    ...optionalInstanceResources(inst, context),
+  };
+}
+
+function optionalInstanceResources(
+  inst: JsonObject,
+  context: string
+): Pick<VultrInstancePayload, 'vcpu_count' | 'ram' | 'disk'> {
+  const vcpuCount = optionalPositiveInteger(inst, 'vcpu_count', 'vultr', context);
+  const ram = optionalPositiveInteger(inst, 'ram', 'vultr', context);
+  const disk = optionalNonNegativeInteger(inst, 'disk', 'vultr', context);
+  return {
+    ...(vcpuCount !== undefined ? { vcpu_count: vcpuCount } : {}),
+    ...(ram !== undefined ? { ram } : {}),
+    ...(disk !== undefined ? { disk } : {}),
   };
 }
 

@@ -11,9 +11,16 @@
  * (rule 56).
  */
 
-import { expect, type Page, type Route, test } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
 
-import { assertNoOverflow, makeMockUser, screenshot } from './audit-helpers';
+import {
+  assertNoOverflow,
+  makeIdleSessionState,
+  makeMockProject,
+  makeMockUser,
+  screenshot,
+  setupSleepingChatMocks,
+} from './audit-helpers';
 
 const MOCK_USER = makeMockUser({
   email: 'test@example.com',
@@ -23,21 +30,7 @@ const MOCK_USER = makeMockUser({
   userId: 'user-test-1',
 });
 
-const MOCK_PROJECT = {
-  id: 'proj-test-1',
-  name: 'Test Project',
-  repository: 'testuser/test-repo',
-  defaultBranch: 'main',
-  userId: 'user-test-1',
-  githubInstallationId: 'inst-1',
-  defaultVmSize: null,
-  defaultAgentType: null,
-  defaultProvider: null,
-  workspaceIdleTimeoutMs: null,
-  nodeIdleTimeoutMs: null,
-  createdAt: '2026-01-01T00:00:00Z',
-  updatedAt: '2026-01-01T00:00:00Z',
-};
+const MOCK_PROJECT = makeMockProject();
 
 /** Every phase a user can actually sit through, plus the pre-step window. */
 const PHASES = [
@@ -94,92 +87,31 @@ async function setupApiMocks(
   page: Page,
   options: { wakePhase: string | null; recoveryStatus?: string } = { wakePhase: null }
 ) {
-  const session = makeSleepingSession();
-
-  await page.route('**/api/**', async (route: Route) => {
-    const url = new URL(route.request().url());
-    const path = url.pathname;
-    const respond = (status: number, body: unknown) =>
-      route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
-
-    if (path.includes('/api/auth/')) return respond(200, MOCK_USER);
-    if (path.startsWith('/api/notifications/preferences')) return respond(200, {});
-    if (path.startsWith('/api/notifications')) {
-      return respond(200, { notifications: [], unreadCount: 0 });
-    }
-    if (path.startsWith('/api/credentials')) return respond(200, []);
-    if (path.startsWith('/api/provider-catalog')) return respond(200, { catalogs: [] });
-    if (path.startsWith('/api/github/installations')) return respond(200, []);
-    if (path.startsWith('/api/report-issue/config')) return respond(200, { enabled: false });
-    if (path === '/api/trial-status') return respond(200, {});
-    if (path === '/api/agents') return respond(200, []);
-
-    const projectMatch = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
-    if (projectMatch) {
-      const subPath = projectMatch[2] || '';
-      // Envelope shapes matter: the client reads `.sessions`, `.items`,
-      // `.commands` and `.messages`. Returning a bare array here crashes the app
-      // into its ErrorBoundary, where an overflow-only assertion would still pass.
-      if (subPath === '/sessions') return respond(200, { sessions: [session], total: 1 });
-      if (subPath === '/agent-profiles') return respond(200, { items: [] });
-      if (subPath === '/cached-commands') return respond(200, { commands: [] });
-      if (subPath === '/credential-attribution-health') return respond(200, {});
-
-      // Session detail — the shape wake-state.ts produces mid-wake.
-      if (subPath.match(/^\/sessions\/[^/]+$/)) {
-        return respond(200, {
-          session,
-          messages: MESSAGES,
-          hasMore: false,
-          state: {
-            activity: 'idle',
-            activityAt: 0,
-            statusError: null,
-            currentPlan: null,
-            planUpdatedAt: null,
-            promptStartedAt: null,
-            agentType: null,
-            lastStopReason: null,
-            runtimeWorkState: null,
-            runtimeWorkCount: null,
-            runtimeWorkSource: null,
-            runtimeWorkUpdatedAt: null,
-            runtimeWorkProgressAt: null,
-            recoveryStatus: options.recoveryStatus ?? 'waking',
-            wakePhase: options.wakePhase,
-          },
-        });
-      }
-
-      if (subPath.match(/\/sessions\/[^/]+\/messages/)) {
-        return respond(200, { messages: MESSAGES, hasMore: false });
-      }
-      if (subPath === '/tasks') return respond(200, []);
-      // The session's OWN task. Realistic state matters here: `useProjectChatState`
-      // only populates `provisioning` (and thus renders ProvisioningIndicator) for
-      // a task that is neither terminal nor in_progress. A slept session's task is
-      // in_progress, so the big provisioning block correctly stays hidden and the
-      // wake banner is the only indicator. An empty `{}` here fakes an
-      // undefined-status task and renders BOTH — a mock artifact, not real UI.
-      if (subPath.match(/^\/tasks\/[^/]+$/)) {
-        return respond(200, {
-          id: 'task-session-1',
-          status: 'in_progress',
-          executionStep: 'running',
-          errorMessage: null,
-          outputBranch: 'sam/test',
-          startedAt: '2026-01-15T10:00:00Z',
-          workspaceId: 'ws-test-1',
-        });
-      }
-      if (subPath === '/agents') return respond(200, []);
-      if (subPath === '/skills') return respond(200, []);
-      if (subPath === '') return respond(200, MOCK_PROJECT);
-      return respond(200, {});
-    }
-
-    if (path === '/api/projects') return respond(200, [MOCK_PROJECT]);
-    return respond(200, {});
+  const recoveryStatus = options.recoveryStatus ?? 'waking';
+  // The session's OWN task. Since PR #2230 a slept conversation keeps its
+  // original task row: `queued` with `node_selection` once a wake is claimed
+  // (services/session-recovery.ts), `in_progress`/`running` once restored.
+  // Realistic state matters: `useProvisioningTracker` must not restore
+  // ProvisioningIndicator for a sleeping session even though its task is
+  // `queued`, or both progress blocks render at once. An empty `{}` here
+  // fakes an undefined-status task — a mock artifact, not real UI.
+  const restored = recoveryStatus !== 'waking';
+  await setupSleepingChatMocks(page, {
+    user: MOCK_USER,
+    project: MOCK_PROJECT,
+    session: makeSleepingSession(),
+    messages: MESSAGES,
+    // Session detail state — the shape wake-state.ts produces mid-wake.
+    state: makeIdleSessionState({ recoveryStatus, wakePhase: options.wakePhase }),
+    ownTask: {
+      id: 'task-session-1',
+      status: restored ? 'in_progress' : 'queued',
+      executionStep: restored ? 'running' : 'node_selection',
+      errorMessage: null,
+      outputBranch: 'sam/test',
+      startedAt: '2026-01-15T10:00:00Z',
+      workspaceId: restored ? 'ws-test-1' : null,
+    },
   });
 }
 

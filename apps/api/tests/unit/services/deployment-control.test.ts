@@ -1,3 +1,5 @@
+import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/d1';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
@@ -11,6 +13,7 @@ import {
   toDeploymentAgentPolicy,
   toObservedDeploymentState,
 } from '../../../src/services/deployment-control';
+import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 function tokenData(
   overrides: Partial<import('../../../src/services/mcp-token').McpTokenData> = {}
@@ -151,7 +154,8 @@ describe('assertAgentDeploymentAllowed', () => {
     const db = createPolicyDb({ envRows: [] });
     const result = await assertAgentDeploymentAllowed(db as any, 'proj-1', 'staging', tokenData());
     expect(result).toEqual({
-      error: "Deployment environment 'staging' not found or inactive for this project.",
+      error:
+        "Deployment environment 'staging' not found for this project, or its status does not allow agent deployment (must be active or error).",
     });
   });
 
@@ -314,5 +318,132 @@ describe('reconcileDeploymentReleaseStatuses', () => {
     expect(db.updates.map((update) => update.values)).toEqual([
       expect.objectContaining({ status: 'failed', statusUpdatedAt: expect.any(String) }),
     ]);
+  });
+});
+
+/**
+ * The agent gate is a SQL `WHERE` predicate, so these cases drive the real
+ * statement against a real SQL engine (`.claude/rules/28` §5). `createPolicyDb`
+ * above returns canned rows from a `.where()` that ignores its arguments, so it
+ * would pass identically with the status predicate deleted.
+ */
+describe('assertAgentDeploymentAllowedForProfile — status gate against real SQL', () => {
+  let sqlite: Database.Database;
+
+  const PROJECT_ID = 'proj-sql';
+  const ENV_NAME = 'production';
+  const ENV_ID = 'env-sql-1';
+  const ALLOWED_PROFILE = 'profile-allowed';
+  const NOT_FOUND_ERROR = `Deployment environment '${ENV_NAME}' not found for this project, or its status does not allow agent deployment (must be active or error).`;
+
+  function db() {
+    return drizzle(createSqliteD1(sqlite), { schema });
+  }
+
+  function seedEnvironment(overrides: Record<string, unknown> = {}): void {
+    const row: Record<string, unknown> = {
+      id: ENV_ID,
+      project_id: PROJECT_ID,
+      name: ENV_NAME,
+      status: 'active',
+      agent_deploy_enabled: 1,
+      agent_deploy_enabled_by: 'user-1',
+      agent_deploy_enabled_at: '2026-09-01T00:00:00.000Z',
+      agent_deploy_disabled_at: null,
+      allowed_deploy_profile_ids_json: JSON.stringify([ALLOWED_PROFILE]),
+      created_at: '2026-09-01T00:00:00.000Z',
+      updated_at: '2026-09-01T00:00:00.000Z',
+      ...overrides,
+    };
+    const columns = Object.keys(row);
+    sqlite
+      .prepare(
+        `INSERT INTO deployment_environments (${columns.map((c) => `"${c}"`).join(', ')})
+         VALUES (${columns.map(() => '?').join(', ')})`
+      )
+      .run(...columns.map((c) => row[c] as never));
+  }
+
+  beforeEach(() => {
+    sqlite = new Database(':memory:');
+    createAllSchemaTables(sqlite, schema);
+  });
+
+  // 'error' is admitted because a new release IS the recovery path for a parked
+  // environment; the lifecycle-transition statuses stay excluded so an agent can
+  // neither restart a user-stopped environment nor race an in-flight operation.
+  const cases: Array<{ status: string; allowed: boolean }> = [
+    { status: 'active', allowed: true },
+    { status: 'error', allowed: true },
+    { status: 'stopped', allowed: false },
+    { status: 'starting', allowed: false },
+    { status: 'stopping', allowed: false },
+    { status: 'deleting', allowed: false },
+    { status: 'deleted', allowed: false },
+  ];
+
+  for (const { status, allowed } of cases) {
+    it(`${allowed ? 'admits' : 'denies'} an environment with status '${status}'`, async () => {
+      seedEnvironment({ status });
+
+      const result = await assertAgentDeploymentAllowedForProfile(
+        db(),
+        PROJECT_ID,
+        ENV_NAME,
+        ALLOWED_PROFILE
+      );
+
+      if (allowed) {
+        expect(result).toMatchObject({
+          environmentId: ENV_ID,
+          taskAgentProfileId: ALLOWED_PROFILE,
+        });
+      } else {
+        expect(result).toEqual({ error: NOT_FOUND_ERROR });
+      }
+    });
+  }
+
+  // Controls: widening the status set must not have deleted the policy checks
+  // that sit behind it.
+  it('denies an errored environment whose owner disabled agent deployment', async () => {
+    seedEnvironment({ status: 'error', agent_deploy_enabled: 0 });
+
+    const result = await assertAgentDeploymentAllowedForProfile(
+      db(),
+      PROJECT_ID,
+      ENV_NAME,
+      ALLOWED_PROFILE
+    );
+
+    expect('error' in result ? result.error : '').toContain('Agent deployment is disabled');
+  });
+
+  it('denies an errored environment for a profile outside the allowlist', async () => {
+    seedEnvironment({ status: 'error' });
+
+    const result = await assertAgentDeploymentAllowedForProfile(
+      db(),
+      PROJECT_ID,
+      ENV_NAME,
+      'profile-other'
+    );
+
+    expect('error' in result ? result.error : '').toContain('not allowed to deploy');
+  });
+
+  it('denies an errored environment belonging to a different project', async () => {
+    seedEnvironment({ status: 'error' });
+
+    const result = await assertAgentDeploymentAllowedForProfile(
+      db(),
+      'proj-other',
+      ENV_NAME,
+      ALLOWED_PROFILE
+    );
+
+    expect(result).toEqual({
+      error: `Deployment environment '${ENV_NAME}' not found for this project, or its status does not allow agent deployment (must be active or error).`,
+    });
   });
 });

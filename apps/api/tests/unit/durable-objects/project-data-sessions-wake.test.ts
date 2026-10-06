@@ -10,7 +10,7 @@ function makeWakeSql(rowsWritten: number) {
 }
 
 describe('ProjectData wakeSession', () => {
-  it('accepts an already-active recovery session on the same workspace and updates its task', () => {
+  it('accepts an already-active recovery session on the same workspace without rebinding its task', () => {
     const sql = makeWakeSql(1);
 
     const updated = wakeSession(sql, 'chat-1', 'workspace-recovery', 'task-recovery');
@@ -19,7 +19,6 @@ describe('ProjectData wakeSession', () => {
     expect(sql.exec).toHaveBeenCalledWith(
       expect.stringContaining("status IN ('active', 'failed') AND workspace_id = ?"),
       'workspace-recovery',
-      'task-recovery',
       expect.any(Number),
       'chat-1',
       'workspace-recovery',
@@ -57,7 +56,6 @@ describe('ProjectData wakeSession', () => {
     expect(sql.exec).toHaveBeenCalledWith(
       expect.stringContaining("? = 1 AND status = 'stopped'"),
       'workspace-recovery',
-      'task-recovery',
       expect.any(Number),
       'chat-1',
       'workspace-recovery',

@@ -1,4 +1,7 @@
 ---
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 interface Props {
   src: string;
   alt: string;
@@ -6,35 +9,31 @@ interface Props {
 }
 
 const { src, alt, loading = 'lazy' } = Astro.props;
-const optimizedFeatureImages: Record<string, string> = {
-  'agent-actions.png': 'sam-agent-actions-activity-log.png',
-  'agent-context-overview.png': 'sam-agent-context-overview.png',
-  'agent-memory.png': 'sam-agent-memory-knowledge.png',
-  'agent-policies.png': 'sam-agent-policies-instructions.png',
-  'dashboard.png': 'sam-dashboard-active-tasks-projects.png',
-  'document-viewer.png': 'sam-document-viewer-mermaid.png',
-  'ideas.png': 'sam-ideas-execute-task.png',
-  'library.png': 'sam-project-library-files.png',
-  'live-session.png': 'sam-live-agent-session-tool-stream.png',
-  'nodes.png': 'sam-nodes-health-workspaces.png',
-  'notifications.png': 'sam-notifications-filtered-feed.png',
-  'project-chat.png': 'sam-project-chat-agent-selector.png',
-  'settings.png': 'sam-project-settings-agents-nodes.png',
-  'triggers.png': 'sam-recurring-triggers-schedules.png',
-};
 
-const pathParts = src.split('/');
-const fileName = pathParts[pathParts.length - 1] ?? '';
-pathParts[pathParts.length - 1] = optimizedFeatureImages[fileName] ?? fileName;
-const optimizedSrc = pathParts.join('/');
-const webpSrc = optimizedSrc.replace(/\.png$/, '.webp');
+// Screenshots are generated in both themes (`<name>.png` and `<name>-light.png`,
+// see apps/web/tests/playwright/marketing-shots-helpers.ts). When a light
+// sibling exists we render both and let the site theme pick one, so a visitor
+// in light mode never sees a dark screenshot.
+const publicDir = resolve(process.cwd(), 'public');
+const lightSrc = src.replace(/\.png$/, '-light.png');
+const hasLight = lightSrc !== src && existsSync(resolve(publicDir, `.${lightSrc}`));
+
 const escapeAttribute = (value: string) =>
   value
     .replace(/&/g, '&amp;')
     .replace(/"/g, '&quot;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
-const pictureHtml = `<picture><source srcset="${escapeAttribute(webpSrc)}" type="image/webp"><img src="${escapeAttribute(optimizedSrc)}" alt="${escapeAttribute(alt)}" loading="${loading}" decoding="async"></picture>`;
+
+const picture = (pngSrc: string, className?: string) => {
+  const webpSrc = pngSrc.replace(/\.png$/, '.webp');
+  const classAttr = className ? ` class="${className}"` : '';
+  return `<picture${classAttr}><source srcset="${escapeAttribute(webpSrc)}" type="image/webp"><img src="${escapeAttribute(pngSrc)}" alt="${escapeAttribute(alt)}" loading="${loading}" decoding="async"></picture>`;
+};
+
+const pictureHtml = hasLight
+  ? picture(src, 'shot-dark') + picture(lightSrc, 'shot-light')
+  : picture(src);
 ---
 
 <Fragment set:html={pictureHtml} />

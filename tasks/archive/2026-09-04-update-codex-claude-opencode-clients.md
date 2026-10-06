@@ -78,7 +78,7 @@ are out of scope.
   (`installAgentBinary`); presence check is `command -v <bin>` plus, for claude-code, a
   `claude --version >= 2.1.251` validation. Existing live containers keep their current
   binaries until restart/new session — same as every previous bump (see
-  `tasks/active/2026-09-01-add-claude-fable-51-model-catalog.md` review notes).
+  `tasks/archive/2026-09-01-add-claude-fable-51-model-catalog.md` review notes).
 - cf-container (Instant) sessions get the new versions from the image baked at deploy
   time (`Dockerfile.vm-agent-container`).
 - Rule 27: staging verification of vm-agent changes requires deleting existing staging
@@ -144,5 +144,5 @@ are out of scope.
 - `.claude/rules/27-vm-agent-staging-refresh.md` — fresh-node staging requirement
 - `.claude/rules/54-vm-agent-rollout-compatibility.md` — rollout compatibility
 - `.claude/rules/13-staging-verification.md`, `.claude/rules/30-never-ship-broken-features.md`
-- `tasks/active/2026-09-01-add-claude-fable-51-model-catalog.md` — previous client bump
+- `tasks/archive/2026-09-01-add-claude-fable-51-model-catalog.md` — previous client bump
 - `scripts/quality/check-agent-install-manifest.ts` — sync gate

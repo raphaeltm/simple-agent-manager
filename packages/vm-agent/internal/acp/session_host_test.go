@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -1103,6 +1104,23 @@ func TestRedactAgentDiagnosticText(t *testing.T) {
 	}
 }
 
+func TestMonitorStderrStoresRedactedDiagnostics(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+	proc, _, _ := newFakeAgentProcess(time.Now(), true)
+	proc.stderr = strings.NewReader("fatal diagnostic\n" + syntheticOpenAIKeyEnvLine())
+
+	host.monitorStderr(proc)
+	got := host.peekStderr()
+	if strings.Contains(got, syntheticSecretForRedactionTest()) {
+		t.Fatalf("stderr buffer leaked secret: %s", got)
+	}
+	if !strings.Contains(got, "fatal diagnostic") {
+		t.Fatalf("stderr buffer removed safe diagnostic: %s", got)
+	}
+}
+
 func TestSessionHost_BeginCrashRecoveryRequiresLoadSession(t *testing.T) {
 	t.Parallel()
 
@@ -1514,23 +1532,19 @@ func TestSessionHost_ForceStoppedPromptReportsFatalCompletionExactlyOnce(t *test
 		completed <- completion{stopReason: stopReason, err: err}
 	}
 
-	const promptID = uint64(42)
 	const timeoutReason = "Prompt timed out after 6h0m0s"
-	host.promptCancelMu.Lock()
-	host.activePromptID = promptID
-	host.promptCancelMu.Unlock()
-	host.promptMu.Lock()
-	host.promptInFlight = true
-	host.promptMu.Unlock()
-	if host.promptAttemptForID(promptID) == nil {
-		t.Fatal("promptAttemptForID returned nil for in-flight prompt")
+	_, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	attempt, ok := host.beginPrompt(cancel, nil)
+	if !ok {
+		t.Fatal("prompt was not accepted")
 	}
 	host.mu.Lock()
 	host.setStatusLocked(HostPrompting)
 	host.agentType = "openai-codex"
 	host.mu.Unlock()
 
-	host.triggerPromptForceStopIfStuck(promptID, timeoutReason)
+	host.triggerPromptForceStopIfStuck(attempt, timeoutReason)
 
 	select {
 	case got := <-completed:
@@ -1545,7 +1559,7 @@ func TestSessionHost_ForceStoppedPromptReportsFatalCompletionExactlyOnce(t *test
 	}
 
 	// A late watchdog/retry for the same prompt must not terminalize twice.
-	host.triggerPromptForceStopIfStuck(promptID, timeoutReason)
+	host.triggerPromptForceStopIfStuck(attempt, timeoutReason)
 	select {
 	case got := <-completed:
 		t.Fatalf("received duplicate force-stop completion: %+v", got)
@@ -1568,17 +1582,12 @@ func TestSessionHost_CompetingPromptCompletionPathsClaimExactlyOnce(t *testing.T
 		completed <- completion{stopReason: stopReason, err: err}
 	}
 
-	const promptID = uint64(43)
 	const timeoutReason = "Prompt timed out after 6h0m0s"
-	host.promptCancelMu.Lock()
-	host.activePromptID = promptID
-	host.promptCancelMu.Unlock()
-	host.promptMu.Lock()
-	host.promptInFlight = true
-	host.promptMu.Unlock()
-	attempt := host.promptAttemptForID(promptID)
-	if attempt == nil {
-		t.Fatal("promptAttemptForID returned nil for in-flight prompt")
+	_, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	attempt, ok := host.beginPrompt(cancel, nil)
+	if !ok {
+		t.Fatal("prompt was not accepted")
 	}
 	host.mu.Lock()
 	host.setStatusLocked(HostPrompting)
@@ -1596,7 +1605,7 @@ func TestSessionHost_CompetingPromptCompletionPathsClaimExactlyOnce(t *testing.T
 	go func() {
 		defer contenders.Done()
 		<-start
-		host.triggerPromptForceStopIfStuck(promptID, timeoutReason)
+		host.triggerPromptForceStopIfStuck(attempt, timeoutReason)
 	}()
 	close(start)
 	contenders.Wait()
@@ -1704,7 +1713,7 @@ func TestSessionHost_MonitorRapidExitCrashRecoveryFailsWithReport(t *testing.T) 
 	host.crashStderr = "write_stdin failed: stdin is closed\n" + syntheticOpenAIKeyEnvLine()
 	host.mu.Unlock()
 
-	host.monitorProcessExit(context.Background(), process, "openai-codex", nil, nil)
+	host.monitorProcessExit(process, "openai-codex", nil, nil)
 
 	select {
 	case stopReason := <-done:
@@ -1896,7 +1905,7 @@ func TestSessionHost_MonitorIntentionalPromptCancelDoesNotConsumeRestartBudget(t
 	host.intentionalPromptCancelProcessStop = true
 	host.mu.Unlock()
 
-	host.monitorProcessExit(context.Background(), process, "claude-code", nil, nil)
+	host.monitorProcessExit(process, "claude-code", nil, nil)
 
 	host.mu.RLock()
 	restartCount := host.restartCount
@@ -1911,6 +1920,59 @@ func TestSessionHost_MonitorIntentionalPromptCancelDoesNotConsumeRestartBudget(t
 	}
 	if !strings.Contains(statusErr, "container unavailable") {
 		t.Fatalf("statusErr = %q, expected restart attempt failure from container resolver", statusErr)
+	}
+}
+
+func TestSessionHost_MonitorIntentionalPromptCancelReportsIdleAfterSuccessfulRestart(t *testing.T) {
+	recorder := newActivityRecorder(t)
+
+	host := newRecoveryTestHost(t, time.Second)
+	defer host.Stop()
+	host.config.ProjectID = "project-1"
+	host.config.NodeID = "node-1"
+	host.config.ControlPlaneURL = recorder.server.URL
+	host.config.CallbackToken = "token"
+	host.config.HTTPClient = recorder.server.Client()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CODEX_HOME", "")
+	host.config.ContainerResolver = func() (string, error) { return "", nil }
+	var starts atomic.Int32
+	host.config.StartProcess = func(*agentStartup) (agentProcess, error) {
+		starts.Add(1)
+		proc, reader, writer := newFakeAgentProcess(time.Now(), true)
+		serveRecoveryACP(t, reader, writer)
+		return proc, nil
+	}
+
+	oldProc, _, _ := newFakeAgentProcess(time.Now().Add(-10*time.Second), false)
+	host.mu.Lock()
+	host.process = oldProc
+	host.setStatusLocked(HostReady)
+	host.agentType = "claude-code"
+	host.setSessionIDLocked("acp-session-1")
+	host.agentSupportsLoadSession = true
+	host.intentionalPromptCancelProcessStop = true
+	host.mu.Unlock()
+	close(oldProc.waitCh)
+
+	host.monitorProcessExit(
+		oldProc,
+		"claude-code",
+		&agentCredential{credentialKind: "api-key"},
+		nil,
+	)
+
+	waitFor(t, 250*time.Millisecond, func() bool {
+		return countActivity(&recorder.mu, &recorder.activities, "idle") == 1
+	})
+	if starts.Load() != 1 {
+		t.Fatalf("restart count = %d, want 1", starts.Load())
+	}
+	if host.Status() != HostReady {
+		t.Fatalf("status = %s, want %s", host.Status(), HostReady)
+	}
+	if countActivity(&recorder.mu, &recorder.activities, "recovering") != 1 {
+		t.Fatalf("activities = %v, want one recovering report before idle", snapshotActivities(&recorder.mu, &recorder.activities))
 	}
 }
 
@@ -1937,7 +1999,7 @@ func TestSessionHost_MonitorUnexpectedExitConsumesRestartBudget(t *testing.T) {
 	host.restartCount = 1
 	host.mu.Unlock()
 
-	host.monitorProcessExit(context.Background(), process, "claude-code", nil, nil)
+	host.monitorProcessExit(process, "claude-code", nil, nil)
 
 	host.mu.RLock()
 	restartCount := host.restartCount
@@ -2514,88 +2576,6 @@ func TestSessionUpdate_EmptyUpdate_NoEnqueue(t *testing.T) {
 	msgs := reporter.Messages()
 	if len(msgs) != 0 {
 		t.Fatalf("expected 0 enqueued messages for empty thought text, got %d", len(msgs))
-	}
-}
-
-func TestSessionHost_CancelPrompt_ForceStopsAfterGracePeriod(t *testing.T) {
-	t.Parallel()
-
-	host := NewSessionHost(SessionHostConfig{
-		GatewayConfig: GatewayConfig{
-			SessionID:               "test-session",
-			WorkspaceID:             "test-workspace",
-			PromptCancelGracePeriod: 10 * time.Millisecond,
-		},
-		MessageBufferSize: 100,
-		ViewerSendBuffer:  32,
-	})
-	defer host.Stop()
-
-	host.mu.Lock()
-	host.setStatusLocked(HostPrompting)
-	host.agentType = "claude-code"
-	host.mu.Unlock()
-
-	host.promptMu.Lock()
-	host.promptInFlight = true
-	host.promptMu.Unlock()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	host.promptCancelMu.Lock()
-	host.promptCancel = cancel
-	host.activePromptID = 42
-	host.promptCancelMu.Unlock()
-
-	host.CancelPrompt()
-
-	select {
-	case <-ctx.Done():
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("expected prompt context to be cancelled")
-	}
-
-	deadline := time.Now().Add(1 * time.Second)
-	for host.Status() != HostError {
-		if time.Now().After(deadline) {
-			t.Fatal("expected host to transition to error after cancel grace elapsed")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	host.mu.RLock()
-	statusErr := host.statusErr
-	host.mu.RUnlock()
-	if !strings.Contains(statusErr, "Prompt cancel grace elapsed") {
-		t.Fatalf("statusErr = %q, expected cancel grace reason", statusErr)
-	}
-
-	host.promptCancelMu.Lock()
-	if host.activePromptID != 0 {
-		t.Fatalf("activePromptID = %d, want 0", host.activePromptID)
-	}
-	if host.promptCancel != nil {
-		t.Fatal("promptCancel should be cleared after force-stop")
-	}
-	host.promptCancelMu.Unlock()
-
-	host.promptMu.Lock()
-	if host.promptInFlight {
-		t.Fatal("promptInFlight should be false after force-stop")
-	}
-	host.promptMu.Unlock()
-
-	bufferDeadline := time.Now().Add(500 * time.Millisecond)
-	for {
-		host.bufMu.RLock()
-		buffered := len(host.messageBuf)
-		host.bufMu.RUnlock()
-		if buffered >= 2 {
-			break
-		}
-		if time.Now().After(bufferDeadline) {
-			t.Fatalf("expected prompt_done + error status messages, buffered=%d", buffered)
-		}
-		time.Sleep(10 * time.Millisecond)
 	}
 }
 

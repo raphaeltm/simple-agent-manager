@@ -8,14 +8,13 @@ import { reconcileDiagnosticIncidents } from '../services/diagnostic-incident-re
 import { isOperationalLoopEnabled } from '../services/operational-kill-switch';
 import { checkProvisioningTimeouts } from '../services/timeout';
 import { migrateOrphanedWorkspaces } from '../services/workspace-migration';
+import { runWorkspaceResourceHistoryCleanup } from '../services/workspace-resource-history';
 import { runAnalyticsForwardJob } from './analytics-forward';
+import { runScheduledCapacityPoolReconciliation } from './capacity-pool-reconciliation';
 import { runScheduledComposeImageArtifactCleanup } from './compose-image-artifact-cleanup';
 import { runComputeUsageCleanup } from './compute-usage-cleanup';
 import { runCronTriggerSweep } from './cron-triggers';
-import {
-  runScheduledDeploymentReleaseRetention,
-  runScheduledSessionSnapshotPurge,
-} from './d1-retention';
+import { runScheduledDeploymentReleaseRetention } from './d1-retention';
 import { notifyFailedSweeps } from './failed-sweep-notifications';
 import { runIncidentTriggerSweep } from './incident-triggers';
 import { runNodeCleanupSweep } from './node-cleanup';
@@ -29,6 +28,7 @@ import { runProjectDataStorageReliefPreflight } from './project-data-storage-rel
 import { runProviderOrphanReconciliation } from './provider-orphan-reconciliation';
 import { runSessionSleepSweep } from './session-sleep';
 import { runSessionSleepLifecycleRepair } from './session-sleep-lifecycle-repair';
+import { runScheduledSessionSnapshotPurge } from './session-snapshot-purge';
 import { runSessionTaskReconciliation } from './session-task-reconciliation';
 import { runSetupSessionSweep } from './setup-session-sweep';
 import { recoverStuckTasks } from './stuck-tasks';
@@ -147,6 +147,9 @@ export async function scheduled(
   const providerOrphans = await sweeps.isolate('provider_orphan_reconciliation', () =>
     runProviderOrphanReconciliation(env)
   );
+  const capacityPools = await sweeps.isolate('capacity_pool_reconciliation', () =>
+    runScheduledCapacityPoolReconciliation(env)
+  );
   const observabilityPurge = await sweeps.isolate('observability_purge', () =>
     runObservabilityPurge(env)
   );
@@ -163,9 +166,6 @@ export async function scheduled(
   const terminalSessionLedger = await sweeps.isolate('terminal_session_ledger_reconciliation', () =>
     runTerminalSessionLedgerReconciliation(env)
   );
-  const projectDataArchiveSharding = await sweeps.isolate('project_data_archive_sharding', () =>
-    runProjectDataArchiveSharding(env)
-  );
   const sessionSleep = await sweeps.isolate('session_sleep', () =>
     runSessionSleepSweep(env, new Date(), ctx)
   );
@@ -180,6 +180,10 @@ export async function scheduled(
   const sessionSnapshotPurge = await sweeps.isolate('session_snapshot_purge', () =>
     runScheduledSessionSnapshotPurge(env)
   );
+  const workspaceResourceHistoryCleanup = await sweeps.isolate(
+    'workspace_resource_history_cleanup',
+    () => runWorkspaceResourceHistoryCleanup(env)
+  );
   const composeArtifactCleanup = await sweeps.isolate('compose_artifact_cleanup', () =>
     runScheduledComposeImageArtifactCleanup(env)
   );
@@ -187,6 +191,16 @@ export async function scheduled(
     runComputeUsageCleanup(env)
   );
   const trialExpire = await sweeps.isolate('trial_expire', () => runTrialExpireSweep(env));
+
+  // Runs after every lifecycle sweep on purpose. When its persisted cadence is due it copies
+  // whole terminal sessions between ProjectData objects under PROJECT_DATA_ARCHIVE_WALL_TIME_MS
+  // (checked only between candidates, so one large session can run well past it). Earlier in
+  // the chain that budget would delay session_sleep and the other lifecycle sweeps on every
+  // tick the cadence fires (`.claude/rules/47`); on the ticks it is not due it costs two D1
+  // statements.
+  const projectDataArchiveSharding = await sweeps.isolate('project_data_archive_sharding', () =>
+    runProjectDataArchiveSharding(env)
+  );
 
   // Runs LAST on purpose. The relief preflight is read-only, but it is the only
   // sweep whose run budget is operator-tuned into the minutes
@@ -235,6 +249,7 @@ export async function scheduled(
     orphanedWorkspacesFlagged: nodeCleanup?.orphanedWorkspacesFlagged,
     orphanedNodesDestroyed: nodeCleanup?.orphanedNodesDestroyed,
     orphanedNodesSkipped: nodeCleanup?.orphanedNodesSkipped,
+    stoppedWorkspacesQueued: nodeCleanup?.stoppedWorkspacesQueued,
     stoppedWorkspacesDeleted: nodeCleanup?.stoppedWorkspacesDeleted,
     cfContainersDestroyed: nodeCleanup?.cfContainersDestroyed,
     providerOrphansScanned: providerOrphans?.scanned,
@@ -251,6 +266,12 @@ export async function scheduled(
     providerOrphansSkippedAmbiguousClaim: providerOrphans?.skippedAmbiguousClaim,
     providerOrphanSkipReason: providerOrphans?.skipReason,
     providerOrphanErrors: providerOrphans?.errors,
+    capacityPoolInstallationEnsured: capacityPools?.installationEnsured,
+    capacityPoolUsersEnsured: capacityPools?.usersEnsured,
+    capacityPoolProjectsEnsured: capacityPools?.projectsEnsured,
+    capacityPoolReconciliationSkipped: capacityPools?.skipped,
+    capacityPoolReconciliationSkipReason: capacityPools?.skipReason,
+    capacityPoolReconciliationNextEligibleAt: capacityPools?.nextEligibleAt,
     stuckTasksFailedQueued: stuckTasks?.failedQueued,
     stuckTasksFailedDelegated: stuckTasks?.failedDelegated,
     stuckTasksFailedInProgress: stuckTasks?.failedInProgress,
@@ -276,6 +297,8 @@ export async function scheduled(
     triggerExecStaleQueuedRecovered: triggerCleanup?.staleQueuedRecovered,
     triggerExecRetentionPurged: triggerCleanup?.retentionPurged,
     webhookDeliveriesPurged: triggerCleanup?.webhookDeliveriesPurged,
+    projectEventSourceOutboxAdmitted: triggerCleanup?.projectEventSourceOutboxAdmitted,
+    credentialLimitWindowsPurged: triggerCleanup?.credentialLimitWindowsPurged,
     triggerExecCleanupErrors: triggerCleanup?.errors,
     sessionTaskRepairScanned: sessionTaskRepair?.scanned,
     sessionTaskRepairRepaired: sessionTaskRepair?.repaired,
@@ -328,6 +351,7 @@ export async function scheduled(
     projectDataArchiveShardingSelected: projectDataArchiveSharding?.selected,
     projectDataArchiveShardingMigrated: projectDataArchiveSharding?.migrated,
     projectDataArchiveShardingRecoveredCrashGaps: projectDataArchiveSharding?.recoveredCrashGaps,
+    projectDataArchiveShardingRefused: projectDataArchiveSharding?.refused,
     projectDataArchiveShardingFailed: projectDataArchiveSharding?.failed,
     projectDataArchiveShardingChunksCopied: projectDataArchiveSharding?.chunksCopied,
     projectDataArchiveShardingRowsCopied: projectDataArchiveSharding?.rowsCopied,
@@ -339,6 +363,9 @@ export async function scheduled(
     sessionSleepDeferred: sessionSleep?.deferred,
     sessionSleepFailed: sessionSleep?.failed,
     sessionSleepExhausted: sessionSleep?.exhausted,
+    sessionSleepFallbacks: sessionSleep?.fallbacks,
+    sessionSleepBlocked: sessionSleep?.blocked,
+    sessionSleepRetired: sessionSleep?.retired,
     sessionSleepBudgetExhausted: sessionSleep?.budgetExhausted,
     deploymentReleaseRetentionSkipped: deploymentReleaseRetention?.skipped,
     deploymentReleaseRetentionSkipReason: deploymentReleaseRetention?.skipReason,
@@ -348,6 +375,14 @@ export async function scheduled(
     sessionSnapshotPurgeDeleted: sessionSnapshotPurge?.deletedSnapshots,
     sessionSnapshotObjectsDeleted: sessionSnapshotPurge?.deletedObjects,
     sessionSnapshotPurgeErrors: sessionSnapshotPurge?.errors,
+    workspaceResourceHistoryExpiredChunksSelected:
+      workspaceResourceHistoryCleanup?.expiredChunksSelected,
+    workspaceResourceHistoryExpiredChunksDeleted:
+      workspaceResourceHistoryCleanup?.expiredChunksDeleted,
+    workspaceResourceHistoryExpiredChunkDeleteErrors:
+      workspaceResourceHistoryCleanup?.expiredChunkDeleteErrors,
+    workspaceResourceHistorySummariesSelected: workspaceResourceHistoryCleanup?.summariesSelected,
+    workspaceResourceHistorySummariesDeleted: workspaceResourceHistoryCleanup?.summariesDeleted,
     composeArtifactCleanupSkipped: composeArtifactCleanup?.skipped,
     composeArtifactCleanupSkipReason: composeArtifactCleanup?.skipReason,
     composeArtifactCleanupScanned: composeArtifactCleanup?.scannedObjects,

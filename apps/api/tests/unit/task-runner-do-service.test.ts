@@ -10,6 +10,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
+import { resolveReusableNodeCapacitySnapshot } from '../../src/services/placement-resolver';
 import { startTaskRunnerDO } from '../../src/services/task-runner-do';
 
 const serviceSource = readFileSync(
@@ -164,7 +165,7 @@ describe('task-runner-do service', () => {
 
   it('exports ensureTaskRunnerStarted function', () => {
     expect(serviceSource).toContain('export async function ensureTaskRunnerStarted(');
-    expect(serviceSource).toContain('return stub.ensureStarted()');
+    expect(serviceSource).toContain('stub.ensureStarted(recoveryAttemptId)');
   });
 
   it('uses typed DO stub via getStub helper', () => {
@@ -186,7 +187,9 @@ describe('task-runner-do service', () => {
   });
 
   it('calls stub.advanceWorkspaceReady()', () => {
-    expect(serviceSource).toContain('await stub.advanceWorkspaceReady(status, errorMessage)');
+    expect(serviceSource).toContain(
+      'await stub.advanceWorkspaceReady(status, errorMessage, workspaceId)'
+    );
   });
 
   it('calls stub.getStatus()', () => {
@@ -219,7 +222,6 @@ describe('task-runner-do service', () => {
 
   it('does not forward a capacity candidate that conflicts with explicit placement', async () => {
     const { env, start } = createTaskRunnerEnv();
-
     await startTaskRunnerDO(env, {
       ...minimalStartInput,
       cloudProvider: 'hetzner',
@@ -234,6 +236,47 @@ describe('task-runner-do service', () => {
     expect(forwarded.config.cloudProvider).toBe('hetzner');
     expect(forwarded.config.vmLocation).toBe('nbg1');
     expect(forwarded.config.capacityPoolSelection).toBeNull();
+  });
+
+  it('persists exact event wake authority in the TaskRunner start config', async () => {
+    const { env, start } = createTaskRunnerEnv();
+
+    (env as Env & { DATABASE: unknown }).DATABASE = {
+      prepare: vi.fn(() => ({
+        bind: vi.fn(() => ({
+          first: vi.fn(async () => ({
+            workspaceId: 'workspace-event-wake',
+            workspaceStatus: 'deleted',
+            runtimeDeletionConfirmedAt: '2026-09-07T00:00:00.000Z',
+            nodeId: 'node-event-wake',
+            runtimeTerminationConfirmedAt: null,
+          })),
+        })),
+      })),
+    };
+
+    await startTaskRunnerDO(env, {
+      ...minimalStartInput,
+      chatSessionId: 'chat-event-wake',
+      resumeSnapshotChatSessionId: 'chat-event-wake',
+      recoverySourceTaskId: 'source-task-event-wake',
+      retrySourceTaskId: 'source-task-event-wake',
+      recoveryRequiredProjectMemberId: 'schedule-creator',
+      projectEventWakeGuard: {
+        batchId: 'batch-event-wake',
+        subscriptionId: 'sub-event-wake',
+      },
+    });
+
+    expect(start.mock.calls[0]?.[0].config).toMatchObject({
+      recoverySourceTaskId: 'source-task-event-wake',
+      retrySourceTaskId: 'source-task-event-wake',
+      recoveryRequiredProjectMemberId: 'schedule-creator',
+      projectEventWakeGuard: {
+        batchId: 'batch-event-wake',
+        subscriptionId: 'sub-event-wake',
+      },
+    });
   });
 
   it('forwards matching capacity candidates so flexible location choice is preserved', async () => {
@@ -282,9 +325,42 @@ describe('task-runner-do service', () => {
     });
     expect(candidates[1]).toMatchObject({
       providerInstanceType: 'cx24',
-      providerInstancePriceCurrency: null,
-      providerInstancePriceMonthlyCents: null,
-      providerInstancePriceHourlyMicros: null,
+      providerInstancePriceDisplay: '€6.00/mo',
+      providerInstancePriceCurrency: 'EUR',
+      providerInstancePriceMonthlyCents: 501,
+      providerInstancePriceHourlyMicros: 8001,
+    });
+    const selection = forwarded.config.capacityPoolSelection!;
+    const candidate = candidates[1]!;
+    const snapshot = resolveReusableNodeCapacitySnapshot({
+      selection,
+      projectId: minimalStartInput.projectId,
+      requestedVmSize: 'medium',
+      node: {
+        capacityPoolId: selection.poolId,
+        capacityPoolScope: selection.scope,
+        capacityPoolProjectId: selection.capacityPoolProjectId,
+        capacitySourceId: candidate.capacitySourceId,
+        capacityPoolCandidateId: candidate.id,
+        workloadRole: candidate.workloadRole,
+        cloudProvider: candidate.provider,
+        vmLocation: candidate.location,
+        vmSize: 'medium',
+        providerInstanceType: candidate.providerInstanceType,
+        providerInstanceVcpuCount: candidate.providerInstanceVcpuCount,
+        providerInstanceMemoryMb: candidate.providerInstanceMemoryMb,
+        providerInstanceDiskGb: candidate.providerInstanceDiskGb,
+      },
+    });
+    expect(snapshot).toMatchObject({
+      providerInstancePriceCurrency: 'EUR',
+      providerInstancePriceHourlyMicros: 8001,
+    });
+    expect(JSON.parse(snapshot!.placementExplanationJson!)).toMatchObject({
+      providerInstancePriceDisplay: '€6.00/mo',
+      providerInstancePriceCurrency: 'EUR',
+      providerInstancePriceMonthlyCents: 501,
+      providerInstancePriceHourlyMicros: 8001,
     });
   });
 
@@ -355,8 +431,10 @@ describe('task-runs route uses TaskRunner DO', () => {
     expect(taskRunsSource).not.toContain('initiateTaskRun');
   });
 
-  it('still imports cleanupTaskRun for cleanup endpoint', () => {
-    expect(taskRunsSource).toContain("import { cleanupTaskRun } from '../../services/task-runner'");
+  it('routes the cleanup endpoint through the requested-run cleanup service', () => {
+    expect(taskRunsSource).toContain(
+      "import { cleanupRequestedTaskRun } from '../../services/requested-task-run-cleanup'"
+    );
   });
 
   it('transitions task to queued before starting DO', () => {

@@ -13,7 +13,7 @@
  * See docs/notes/2026-03-12-callback-auth-middleware-leak-postmortem.md (same bug class)
  */
 import { Hono } from 'hono';
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppError } from '../../src/middleware/error';
 
@@ -32,16 +32,19 @@ vi.mock('drizzle-orm/d1', () => ({
     select: () => ({
       from: () => ({
         where: () => ({
-          limit: () => Promise.resolve([{
-            id: 'cred-1',
-            projectId: 'proj-test',
-            provider: 'gcp',
-            gcpProjectId: 'my-gcp-project',
-            gcpProjectNumber: '123456',
-            serviceAccountEmail: 'sa@test.iam.gserviceaccount.com',
-            wifPoolId: 'sam-pool',
-            wifProviderId: 'sam-provider',
-          }]),
+          limit: () =>
+            Promise.resolve([
+              {
+                id: 'cred-1',
+                projectId: 'proj-test',
+                provider: 'gcp',
+                gcpProjectId: 'my-gcp-project',
+                gcpProjectNumber: '123456',
+                serviceAccountEmail: 'sa@test.iam.gserviceaccount.com',
+                wifPoolId: 'sam-pool',
+                wifProviderId: 'sam-provider',
+              },
+            ]),
           orderBy: () => Promise.resolve([]),
         }),
       }),
@@ -83,7 +86,13 @@ vi.mock('../../src/middleware/rate-limit', async () => {
   const actual = await vi.importActual('../../src/middleware/rate-limit');
   return {
     ...actual,
-    checkRateLimit: vi.fn().mockResolvedValue({ allowed: true, remaining: 9, resetAt: Math.floor(Date.now() / 1000) + 60 }),
+    checkRateLimit: vi
+      .fn()
+      .mockResolvedValue({
+        allowed: true,
+        remaining: 9,
+        resetAt: Math.floor(Date.now() / 1000) + 60,
+      }),
   };
 });
 
@@ -124,7 +133,8 @@ vi.mock('../../src/services/gcp-errors', () => ({
  */
 async function createTestApp(): Promise<Hono> {
   const { projectsRoutes } = await import('../../src/routes/projects/index');
-  const { deploymentIdentityTokenRoute, projectDeploymentRoutes } = await import('../../src/routes/project-deployment');
+  const { deploymentIdentityTokenRoute, projectDeploymentRoutes } =
+    await import('../../src/routes/project-deployment');
 
   const app = new Hono();
 
@@ -162,7 +172,7 @@ describe('deployment-identity-token auth routing (regression)', () => {
     const res = await app.request('/api/projects/proj-test/deployment-identity-token', {
       method: 'GET',
       headers: {
-        'Authorization': 'Bearer valid-mcp-token',
+        Authorization: 'Bearer valid-mcp-token',
       },
     });
 
@@ -179,7 +189,7 @@ describe('deployment-identity-token auth routing (regression)', () => {
     const res = await app.request('/api/projects/proj-test/deployment-identity-token', {
       method: 'GET',
       headers: {
-        'Authorization': 'Bearer valid-mcp-token',
+        Authorization: 'Bearer valid-mcp-token',
       },
     });
 

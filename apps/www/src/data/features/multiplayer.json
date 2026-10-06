@@ -1,0 +1,61 @@
+{
+  "slug": "multiplayer",
+  "label": "Multiplayer Projects",
+  "title": "Work on projects.\nNot alone.",
+  "subtitle": "Invite teammates with a link, approve access requests, and share agent profiles, skills, and project files. See who is running what, and whose keys are paying for it.",
+  "summary": "Invite your team into a project, share profiles and skills, and see whose keys pay for shared automation.",
+  "highlights": [
+    "Any member creates an invite link; an owner or admin approves each request",
+    "Approved members join as admins and share profiles, skills, env vars, and library files",
+    "Every member’s chat sessions are visible, with a my sessions / all sessions filter",
+    "A Credential Attribution panel flags shared work running on a personal key, with a Fix link",
+    "Offboarding previews a departing member’s resources before they lose access"
+  ],
+  "docsHref": "/docs/guides/collaboration/",
+  "group": "collaborate",
+  "screenshots": [
+    {
+      "src": "/images/features/sam-collab-all-sessions.png",
+      "alt": "Project chat with the All sessions filter selected, listing eight sessions started by five different team members, each labelled with who started it",
+      "caption": "One project, every member’s sessions — switch between my sessions and all sessions"
+    }
+  ],
+  "details": [
+    {
+      "headline": "Invite, request, approve",
+      "body": "Any active member creates an invite link. The recipient opens it and requests access — an owner or admin approves before they join. Approved members join as admins, with full project control except deleting the project or transferring ownership.",
+      "screenshot": {
+        "src": "/images/features/sam-collab-members-access.png",
+        "alt": "Settings → Access showing an owner and four admins, two pending access requests (one GitHub verified, one flagged as having no repo access), and an invite link with its expiry, use count, and Copy, New Link, and Revoke controls",
+        "caption": "Members, pending requests, and the invite link — all managed from Settings → Access"
+      }
+    },
+    {
+      "headline": "A request, not an automatic add",
+      "body": "Sharing a link is safe: nobody joins your project until someone with permission approves them. SAM also checks whether the requester’s GitHub sign-in already has access to the linked repository, so approvers have context before deciding.",
+      "screenshot": {
+        "src": "/images/features/sam-collab-invite-request.png",
+        "alt": "The Request Access card a recipient sees after opening a project invite link",
+        "caption": "Opening an invite link only creates a request — nobody joins automatically"
+      }
+    },
+    {
+      "headline": "See everyone’s work, or just yours",
+      "body": "Members share agent profiles, skills, project environment variables and secrets, and library files. A my sessions / all sessions filter on the chat list lets you focus on your own work or watch everything happening in the project.",
+      "screenshot": {
+        "src": "/images/features/sam-collab-all-sessions.png",
+        "alt": "Project chat with the All sessions filter selected, listing eight sessions started by five different team members, each labelled with who started it",
+        "caption": "Switch between my sessions and all sessions to see the whole project’s activity"
+      }
+    },
+    {
+      "headline": "Know whose keys are paying",
+      "body": "Personal API keys and cloud credentials always stay personal — a teammate’s trigger bills their key, not yours. The Credential Attribution panel lists triggers, tasks, nodes, and deployments running on a personal key, with a Fix link to move them onto a shared project credential.",
+      "screenshot": {
+        "src": "/images/features/sam-collab-credential-attribution.png",
+        "alt": "Credential Attribution panel showing a trigger flagged as running on a personal key with a Fix link, next to resources covered by the project’s shared Hetzner credential",
+        "caption": "See at a glance which shared resources run on a personal key"
+      }
+    }
+  ]
+}

@@ -1,5 +1,12 @@
 import type { CredentialSource } from './user';
 
+export type ComputeVcpuCountSource =
+  | 'observed'
+  | 'planned'
+  | 'recorded'
+  | 'compatibility-estimate'
+  | 'unknown';
+
 // =============================================================================
 // Compute Usage Metering Types
 // =============================================================================
@@ -12,10 +19,21 @@ export interface ComputeUsageRecord {
   nodeId: string;
   serverType: string;
   vcpuCount: number;
+  /** Provenance of the CPU figure; null/unknown is not zero hardware. */
+  vcpuCountSource?: ComputeVcpuCountSource;
   providerInstanceType?: string | null;
   providerInstanceVcpuCount?: number | null;
   providerInstanceMemoryMb?: number | null;
   providerInstanceDiskGb?: number | null;
+  providerInstanceBootDiskSizeGb?: number | null;
+  providerInstanceImage?: string | null;
+  providerInstanceArchitecture?: string | null;
+  observedProviderInstanceType?: string | null;
+  observedProviderInstanceVcpuCount?: number | null;
+  observedProviderInstanceMemoryMb?: number | null;
+  observedProviderInstanceDiskGb?: number | null;
+  observedHardwareJson?: string | null;
+  observedHardwareSource?: string | null;
   providerInstancePriceDisplay?: string | null;
   providerInstancePriceCurrency?: string | null;
   providerInstancePriceMonthlyCents?: number | null;
@@ -35,11 +53,22 @@ export interface ActiveComputeSession {
   status?: string;
   workspaceId: string;
   serverType: string;
-  vcpuCount: number;
+  vcpuCount: number | null;
+  /** Provenance of the CPU figure; null/unknown is not zero hardware. */
+  vcpuCountSource?: ComputeVcpuCountSource;
   providerInstanceType?: string | null;
   providerInstanceVcpuCount?: number | null;
   providerInstanceMemoryMb?: number | null;
   providerInstanceDiskGb?: number | null;
+  providerInstanceBootDiskSizeGb?: number | null;
+  providerInstanceImage?: string | null;
+  providerInstanceArchitecture?: string | null;
+  observedProviderInstanceType?: string | null;
+  observedProviderInstanceVcpuCount?: number | null;
+  observedProviderInstanceMemoryMb?: number | null;
+  observedProviderInstanceDiskGb?: number | null;
+  observedHardwareJson?: string | null;
+  observedHardwareSource?: string | null;
   providerInstancePriceDisplay?: string | null;
   providerInstancePriceCurrency?: string | null;
   providerInstancePriceMonthlyCents?: number | null;
@@ -107,11 +136,22 @@ export interface NodeUsageRecord {
   nodeId: string;
   name: string;
   vmSize: string;
-  vcpuCount: number;
+  vcpuCount: number | null;
+  /** Provenance of the CPU figure; null/unknown is not zero hardware. */
+  vcpuCountSource?: ComputeVcpuCountSource;
   providerInstanceType?: string | null;
   providerInstanceVcpuCount?: number | null;
   providerInstanceMemoryMb?: number | null;
   providerInstanceDiskGb?: number | null;
+  providerInstanceBootDiskSizeGb?: number | null;
+  providerInstanceImage?: string | null;
+  providerInstanceArchitecture?: string | null;
+  observedProviderInstanceType?: string | null;
+  observedProviderInstanceVcpuCount?: number | null;
+  observedProviderInstanceMemoryMb?: number | null;
+  observedProviderInstanceDiskGb?: number | null;
+  observedHardwareJson?: string | null;
+  observedHardwareSource?: string | null;
   providerInstancePriceDisplay?: string | null;
   vmLocation: string;
   cloudProvider: string | null;

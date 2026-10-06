@@ -1,18 +1,18 @@
-import type { ConversationItem, ToolCallContentItem } from '@simple-agent-manager/acp-client';
+import type { ToolCallContentItem } from '@simple-agent-manager/acp-client';
 import {
   AgentCrashReportView,
   MessageBubble as AcpMessageBubble,
   PlanView,
   RawFallbackView,
   ThinkingBlock as AcpThinkingBlock,
-  ToolCallCard as AcpToolCallCard,
-  UserMessageFade,
 } from '@simple-agent-manager/acp-client';
 import { memo, useCallback } from 'react';
 
 import { useGlobalAudio } from '../../contexts/GlobalAudioContext';
 import { getTtsApiUrl } from '../../lib/api';
+import type { DisplayItem } from './tool-call-groups';
 import { matchToolCard } from './tool-cards';
+import { AbsorbedConversationItemView, ToolCallGroupCard } from './ToolCallGroupCard';
 
 /** Lazily computed TTS API URL — avoids module-scope errors in test environments. */
 let _cachedTtsApiUrl: string | undefined;
@@ -86,7 +86,7 @@ export function CollapsedInjectedMessage({ text }: { text: string }) {
 }
 
 interface AcpConversationItemViewProps {
-  item: ConversationItem;
+  item: DisplayItem;
   onFileClick?: (path: string, line?: number | null) => void;
   onLoadToolContent?: (messageId: string) => Promise<ToolCallContentItem[]>;
   /** When true, agent_message text is animated with per-character fade. */
@@ -95,6 +95,15 @@ interface AcpConversationItemViewProps {
   animateUserMessage?: boolean;
   /** Project context — enables typed tool-call cards (e.g. DocumentCard previews). */
   projectId?: string;
+  /**
+   * Controlled expansion for a `tool_call_group` row. Omitted (undefined) leaves
+   * the card uncontrolled, which is what the workspace chat surface uses.
+   */
+  groupExpanded?: boolean;
+  /** Stable toggle for the controlled group card. */
+  onToggleGroup?: (groupId: string) => void;
+  /** True when this group is the tail row and the agent is mid-turn. */
+  groupLive?: boolean;
 }
 
 /** Renders a single ACP ConversationItem using the shared acp-client components.
@@ -107,6 +116,9 @@ function AcpConversationItemViewImpl({
   animateText,
   animateUserMessage,
   projectId,
+  groupExpanded,
+  onToggleGroup,
+  groupLive,
 }: AcpConversationItemViewProps) {
   // Depend on `startPlayback` (a stable useCallback) rather than the whole
   // GlobalAudio context value — that value is memoized but re-created as
@@ -148,18 +160,16 @@ function AcpConversationItemViewImpl({
       if (item.origin === 'system') {
         return <CollapsedInjectedMessage text={item.text} />;
       }
-      if (animateUserMessage) {
-        return (
-          <div className="flex justify-end mb-4">
-            <div className="max-w-[80%] min-w-0 rounded-lg px-4 py-3 glass-msg-user">
-              <div className="prose prose-sm max-w-none overflow-x-auto break-words">
-                <UserMessageFade text={item.text} />
-              </div>
-            </div>
-          </div>
-        );
-      }
-      return <AcpMessageBubble text={item.text} role="user" bubbleClassName="glass-msg-user" />;
+      // The timestamp is what turns on the bubble's Info + Copy actions.
+      return (
+        <AcpMessageBubble
+          text={item.text}
+          role="user"
+          animated={animateUserMessage}
+          timestamp={item.timestamp}
+          bubbleClassName="glass-msg-user"
+        />
+      );
     case 'agent_message':
       return (
         <AcpMessageBubble
@@ -177,23 +187,32 @@ function AcpConversationItemViewImpl({
       );
     case 'thinking':
       return <AcpThinkingBlock text={item.text} active={item.active} />;
+    case 'tool_call_group':
+      return (
+        <ToolCallGroupCard
+          group={item}
+          live={groupLive}
+          expanded={groupExpanded}
+          onToggle={onToggleGroup}
+          onFileClick={onFileClick}
+          onLoadToolContent={onLoadToolContent}
+        />
+      );
     case 'tool_call': {
       // Typed tool-call cards (e.g. DocumentCard) render in place of the generic
-      // card when the tool matches the registry; unknown tools fall back.
+      // card when the tool matches the registry; unknown tools fall back. Only
+      // TYPED cards reach this branch on the grouped surfaces — generic calls are
+      // absorbed into a `tool_call_group` — but the fallback stays for callers
+      // that render ungrouped items.
       const TypedCard = matchToolCard(item);
       if (TypedCard) {
         return <TypedCard item={item} projectId={projectId} />;
       }
       return (
-        <AcpToolCallCard
-          toolCall={item}
+        <AbsorbedConversationItemView
+          item={item}
           onFileClick={onFileClick}
-          onLoadContent={onLoadToolContent}
-          className={
-            item.contentLoaded === false
-              ? 'glass-surface rounded-md border-border-default'
-              : undefined
-          }
+          onLoadToolContent={onLoadToolContent}
         />
       );
     }

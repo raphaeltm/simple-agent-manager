@@ -1,5 +1,19 @@
 # Deployment Settings UI Quality Fixes
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** Fixes 2–5 in PR #500 (939756b44):
+>   - Fix 2: the status dot uses `bg-success` (`DeploymentSettings.tsx:182`).
+>   - Fix 3: shared `Select` from `@simple-agent-manager/ui` (`DeploymentSettings.tsx:246`).
+>   - Fix 4: `ConfirmDialog` replaces `window.confirm()` (`DeploymentSettings.tsx:206–215`).
+>   - Fix 5: empty state when no GCP projects are found (`DeploymentSettings.tsx:277–300`).
+> - **Still open:** Fix 1. `DeploymentSettings.tsx:17` still declares its own `API_URL` with a
+>   `|| ''` fallback. Import the shared one from `../lib/api` (`lib/api/client.ts:6`), as
+>   `GcpCredentialForm.tsx:8` already does.
+> - **Moot/dropped:** Fix 6 (`sr-only` "Connected" text). The visible "GCP Connected" label next
+>   to the dot (`DeploymentSettings.tsx:183`) already gives screen readers the state; at most
+>   mark the decorative dot `aria-hidden`.
+
 ## Problem
 
 The UI/UX specialist review of the DeploymentSettings component (from PR #499) identified 6 issues where the component deviates from design system patterns and accessibility standards. Four of five rubric categories scored below the threshold of 4.

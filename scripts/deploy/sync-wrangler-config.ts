@@ -18,7 +18,7 @@
 
 import { execSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import * as TOML from '@iarna/toml';
@@ -43,15 +43,117 @@ import type {
 
 const INFRA_DIR = resolve(import.meta.dirname, '../../infra');
 const WRANGLER_TOML_PATH = resolve(import.meta.dirname, '../../apps/api/wrangler.toml');
+const CONFIGURE_SECRETS_PATH = resolve(import.meta.dirname, './configure-secrets.sh');
 const TAIL_WORKER_WRANGLER_TOML_PATH = resolve(
   import.meta.dirname,
   '../../apps/tail-worker/wrangler.toml'
 );
 const DEPLOY_STATE_DIR = resolve(import.meta.dirname, '../../.wrangler');
-const FIRST_DEPLOY_MARKER = resolve(DEPLOY_STATE_DIR, 'tail-worker-first-deploy');
 const SETUP_TOKEN_BYTES = 24;
 const DEFAULT_SANDBOX_CONTAINER_MAX_INSTANCES = 6;
 const DEFAULT_VM_AGENT_CONTAINER_MAX_INSTANCES = 3;
+const CLOUDFLARE_WORKER_TEXT_BINDING_MAX = 350;
+const CLOUDFLARE_WORKER_TEXT_BINDING_HEADROOM = 10;
+export const CLOUDFLARE_WORKER_TEXT_BINDING_GUARD_LIMIT =
+  CLOUDFLARE_WORKER_TEXT_BINDING_MAX - CLOUDFLARE_WORKER_TEXT_BINDING_HEADROOM;
+
+const EVENTING_OPTIONAL_PROCESS_ENV_VARS = [
+  'PROJECT_EVENT_MAX_ACTIVE_SUBSCRIPTIONS_PER_PROJECT',
+  'PROJECT_EVENT_FILTER_MAX_VALUES_PER_FIELD',
+  'PROJECT_EVENT_FILTER_MAX_MATCH_KEYS',
+  'PROJECT_EVENT_FILTER_MAX_STRING_BYTES',
+  'PROJECT_EVENT_METADATA_MAX_BYTES',
+  'PROJECT_EVENT_METADATA_MAX_DEPTH',
+  'PROJECT_EVENT_METADATA_MAX_KEYS',
+  'PROJECT_EVENT_METADATA_MAX_ARRAY_ITEMS',
+  'PROJECT_EVENT_DISPLAY_MAX_BYTES',
+  'PROJECT_EVENT_DISPLAY_MAX_LABELS',
+  'PROJECT_EVENT_RAW_PAYLOAD_REF_MAX_BYTES',
+  'PROJECT_EVENT_REASON_MAX_BYTES',
+  'PROJECT_EVENT_MAX_MATCHES_PER_EVENT',
+  'PROJECT_EVENT_DELIVERY_BATCH_MAX_EVENTS',
+  'PROJECT_EVENT_DELIVERY_ATTEMPT_MAX_PER_BATCH',
+  'PROJECT_EVENT_SCHEDULE_MAX_SCHEDULES',
+  'PROJECT_EVENT_SCHEDULE_MAX_WATCHES',
+  'PROJECT_EVENT_SCHEDULE_MAX_RETAINED_SCHEDULES',
+  'PROJECT_EVENT_SCHEDULE_MAX_RETAINED_WATCHES',
+  'PROJECT_EVENT_SCHEDULE_PROMPT_MAX_BYTES',
+  'PROJECT_EVENT_SCHEDULE_MAX_HORIZON_MS',
+  'PROJECT_EVENT_SCHEDULE_LATE_GRACE_MS',
+  'PROJECT_EVENT_SCHEDULE_DELIVERY_TTL_MS',
+  'PROJECT_EVENT_SCHEDULE_SWEEP_BATCH_SIZE',
+  'PROJECT_EVENT_SCHEDULE_CLAIM_LEASE_MS',
+  'PROJECT_EVENT_SCHEDULE_RETRY_BASE_MS',
+  'PROJECT_EVENT_SCHEDULE_MAX_ATTEMPTS',
+  'PROJECT_EVENT_SCHEDULE_MAX_DEFERRAL_MS',
+  'PROJECT_EVENT_WATCH_COOLDOWN_MIN_MS',
+  'PROJECT_EVENT_WATCH_MAX_EXECUTIONS',
+  'PROJECT_EVENT_WATCH_MAX_CONCURRENT',
+  'PROJECT_EVENT_CHANNEL_MAX_CHANNELS',
+  'PROJECT_EVENT_CHANNEL_MESSAGE_MAX_BYTES',
+  'PROJECT_EVENT_CHANNEL_NAME_MAX_BYTES',
+  'PROJECT_EVENT_CHANNEL_PUBLISH_WINDOW_MS',
+  'PROJECT_EVENT_CHANNEL_PUBLISH_MAX_PER_WINDOW',
+  'PROJECT_EVENT_CHANNEL_CURSOR_TTL_MS',
+  'PROJECT_EVENT_CHANNEL_CATALOG_IDLE_TTL_MS',
+  'PROJECT_EVENT_LIST_LIMIT',
+  'PROJECT_EVENT_LIST_MAX',
+  'PROJECT_EVENT_RECENT_STATUS_LIMIT',
+  'PROJECT_EVENT_RETENTION_DAYS',
+  'PROJECT_EVENT_RETENTION_BATCH_ROWS',
+  'PROJECT_EVENT_SOURCE_OUTBOX_BATCH_ROWS',
+  'PROJECT_EVENT_SOURCE_OUTBOX_MAX_ATTEMPTS',
+  'PROJECT_EVENT_SOURCE_OUTBOX_TTL_MS',
+  'PROJECT_EVENT_SOURCE_OUTBOX_RETRY_BASE_MS',
+  'PROJECT_EVENT_SOURCE_OUTBOX_RETRY_MAX_MS',
+  'PROJECT_EVENT_SOURCE_OUTBOX_PROCESSING_LEASE_MS',
+  'PROJECT_EVENT_RETENTION_INTERVAL_MS',
+  'PROJECT_EVENT_RETENTION_MIN_ALARM_DELAY_MS',
+  'PROJECT_EVENT_WAKE_ENABLED',
+  'PROJECT_EVENT_WAKE_MATERIALIZATION_MIN_ALARM_DELAY_MS',
+  'PROJECT_EVENT_WAKE_MATERIALIZATION_BACKOFF_BASE_MS',
+  'PROJECT_EVENT_WAKE_MATERIALIZATION_BACKOFF_MAX_MS',
+  'PROJECT_EVENT_WAKE_PROMPT_TTL_MS',
+  'PROJECT_EVENT_WAKE_READ_GRACE_MS',
+  'PROJECT_EVENT_WAKE_TARGET_COOLDOWN_MS',
+  'PROJECT_EVENT_WAKE_SUBSCRIPTION_COOLDOWN_MS',
+  'PROJECT_EVENT_WAKE_SUBSCRIPTION_LIFETIME_MS',
+  'PROJECT_EVENT_WAKE_MAX_PER_SUBSCRIPTION',
+  'CREDENTIAL_LIMIT_WARNING_PERCENT',
+  'CREDENTIAL_LIMIT_CRITICAL_PERCENT',
+  'CREDENTIAL_LIMIT_MAX_OBSERVATIONS_PER_REPORT',
+  'CREDENTIAL_LIMIT_TRANSITION_RECOMPUTE_ATTEMPTS',
+  'CREDENTIAL_LIMIT_USAGE_CALLBACK_MAX_BODY_BYTES',
+  'CREDENTIAL_LIMIT_USAGE_CALLBACK_RATE_LIMIT_RPM',
+  'CREDENTIAL_LIMIT_USAGE_CALLBACK_RATE_LIMIT_WINDOW_SECONDS',
+  'CREDENTIAL_LIMIT_OBSERVATION_MAX_AGE_MS',
+  'CREDENTIAL_LIMIT_OBSERVATION_FUTURE_SKEW_MS',
+  'CREDENTIAL_LIMIT_RESET_MAX_FUTURE_MS',
+  'CREDENTIAL_LIMIT_SUPPORTED_PROVIDERS',
+  'CREDENTIAL_LIMIT_SUPPORTED_SOURCES',
+  'CREDENTIAL_LIMIT_SUPPORTED_WINDOW_TYPES',
+  'CREDENTIAL_LIMIT_READ_MAX_ROWS',
+  'PROJECT_EVENT_SOURCE_OUTBOX_SWEEP_WALL_MS',
+  'PROJECT_EVENT_SOURCE_OUTBOX_ADMISSION_TIMEOUT_MS',
+  'PROJECT_EVENT_SOURCE_OUTBOX_TERMINAL_RETENTION_MS',
+] as const;
+
+/** API bootstrap and Tail binding repair have independent deployment requirements. */
+export function writeDeploymentMarkers(
+  deployedMigrationTag: string | null,
+  hasTailWorker: boolean,
+  stateDirectory = DEPLOY_STATE_DIR
+): void {
+  mkdirSync(stateDirectory, { recursive: true });
+  for (const [filename, needed] of [
+    ['api-worker-first-deploy', deployedMigrationTag === null],
+    ['tail-worker-first-deploy', !hasTailWorker],
+  ] as const) {
+    const path = resolve(stateDirectory, filename);
+    if (needed) writeFileSync(path, 'true', 'utf-8');
+    else rmSync(path, { force: true });
+  }
+}
 
 const CONTAINER_MAX_INSTANCE_CONFIG = {
   SandboxDO: {
@@ -306,8 +408,7 @@ function extractStaticBindings(topLevel: WranglerToml): {
     durable_objects: topLevel.durable_objects as DurableObjectsConfig | undefined,
     ai: topLevel.ai as AIBinding | undefined,
     analytics_engine_datasets: topLevel.analytics_engine_datasets as
-      | AnalyticsEngineDatasetBinding[]
-      | undefined,
+      AnalyticsEngineDatasetBinding[] | undefined,
     containers: topLevel.containers as ContainerBinding[] | undefined,
     migrations: topLevel.migrations as MigrationEntry[] | undefined,
     artifacts: topLevel.artifacts as unknown[] | undefined,
@@ -422,7 +523,210 @@ function getApiWorkerRoutes(baseDomain: string): NonNullable<WranglerEnvConfig['
   ];
 }
 
-function getOptionalProcessEnvVars(names: readonly string[]): Record<string, string> {
+export type EnvironmentVarOverride = {
+  name: string;
+  /** Value checked into the top-level `[vars]` section of wrangler.toml. */
+  checkedIn: string;
+  /** Value the GitHub Environment (process env) supplied instead. */
+  override: string;
+};
+
+/**
+ * Optional process-env vars silently replace the checked-in top-level `[vars]` value. PR #2023
+ * flipped `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED` to "true" in wrangler.toml while the
+ * production GitHub Environment still pinned "false"; the deployed Worker kept the override and
+ * the archive sweep never ran, with nothing in the deploy log saying so. List every override whose
+ * value differs from wrangler.toml so the log records what actually shipped. `[vars]` are
+ * non-secret by construction (secrets go through `wrangler secret`), so printing values is safe.
+ * See `.claude/rules/70-flag-flips-must-verify-the-deployed-value.md`.
+ */
+export function listEnvironmentVarOverrides(
+  checkedIn: Record<string, unknown> | undefined,
+  overrides: Record<string, string>
+): EnvironmentVarOverride[] {
+  const listed: EnvironmentVarOverride[] = [];
+  for (const [name, override] of Object.entries(overrides)) {
+    if (!checkedIn || !Object.prototype.hasOwnProperty.call(checkedIn, name)) continue;
+    const checkedInValue = String(checkedIn[name]);
+    if (checkedInValue === override) continue;
+    listed.push({ name, checkedIn: checkedInValue, override });
+  }
+  return listed;
+}
+
+/**
+ * Emit the override report where a human will actually see it.
+ *
+ * A `console.log` line is buried in thousands of lines of deploy output, which is how
+ * `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED` stayed pinned `false` in production for eleven days
+ * after `684f99d60` set it `true` here. A GitHub Actions `::warning::` annotation surfaces on the
+ * run page and in the PR checks list, and the step summary keeps a durable table of what actually
+ * shipped. Both are no-ops outside Actions, so local runs keep the plain log line.
+ *
+ * `[vars]` are non-secret by construction — secrets go through `wrangler secret` — so printing
+ * values is safe. See `.claude/rules/70-flag-flips-must-verify-the-deployed-value.md`.
+ */
+/**
+ * Escape the data segment of a GitHub Actions workflow command.
+ *
+ * `%`, CR and LF are structural in the `::warning::<data>` form: an unescaped newline ends the
+ * command and drops everything after it, so a var value containing one would silently truncate
+ * the very warning that exists to stop a silent override. Not attacker-controlled today — these
+ * are `[vars]` values from a repository-owned Environment — but the whole point of this report
+ * is that it must survive contact with a value nobody anticipated.
+ *
+ * https://docs.github.com/actions/reference/workflow-commands-for-github-actions
+ */
+export function encodeWorkflowCommandData(value: string): string {
+  return value.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A');
+}
+
+/**
+ * Environment overrides this repository already knows about, each with the reason it exists.
+ *
+ * Without this list every deploy would annotate all 19 overrides the SAM production Environment
+ * currently applies, and a genuinely accidental one would have to be spotted among them — the
+ * same "signal buried in volume" failure this report exists to fix, moved up one layer.
+ *
+ * Two deliberate design choices:
+ *
+ * - **Exact names, never prefixes.** A prefix rule such as `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_*`
+ *   would have matched `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED` — the exact variable whose
+ *   silent override hid a disabled production feature for eleven days. The rule that suppresses
+ *   the warning must not be able to grow over the case that needed it.
+ * - **No `*_ENABLED` flag belongs here.** A feature flag diverging from the repository is always
+ *   worth re-reading on a deploy, even when the divergence is intended, because the intent can
+ *   expire while the override does not. `PROJECT_DATA_ARCHIVE_COMPACT_ENABLED` and
+ *   `PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED` are deliberately absent and will keep annotating.
+ *
+ * An entry whose reason has expired should be DELETED, not left to suppress a warning forever.
+ * Expected overrides are still printed in the job summary with their reason, so a stale entry is
+ * visible on every deploy rather than silently swallowing a signal.
+ */
+export const EXPECTED_ENVIRONMENT_VAR_OVERRIDES: Readonly<Record<string, string>> = {
+  // The one-shot P0 ProjectData storage-relief measurement plan
+  // (prod-p0-projectdata-01khrjganbbwgdy1nz0kvf0d4j-20260904). It completed 2026-09-04 and its
+  // D1 row is terminal, so these size a run that will not happen again; they are per-installation
+  // operator state and deliberately absent from wrangler.toml.
+  PROJECT_DATA_STORAGE_RELIEF_MEASURE_MAX_BATCH_ROWS: 'P0 storage-relief plan sizing',
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_BATCH_ROWS: 'P0 storage-relief plan sizing',
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_CUTOFF_CREATED_AT: 'P0 storage-relief plan identity',
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_INTERVAL_MS: 'P0 storage-relief plan sizing',
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_BATCHES: 'P0 storage-relief plan sizing',
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_BYTES: 'P0 storage-relief plan sizing',
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_ROWS: 'P0 storage-relief plan sizing',
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_PLAN_ID: 'P0 storage-relief plan identity',
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_PROJECT_ID: 'P0 storage-relief plan identity',
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_RUN_WALL_TIME_MS: 'P0 storage-relief plan sizing',
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_SLICES_PER_RUN: 'P0 storage-relief plan sizing',
+  // The approved tool-payload cleanup plan's identity and hard cumulative ceilings. Also
+  // per-installation operator state: a manifest key and its caps describe one specific audited
+  // plan, so wrangler.toml ships them empty on purpose.
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_MANIFEST_MAX_BYTES: 'approved cleanup plan sizing',
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_CUTOFF_CREATED_AT: 'approved cleanup plan identity',
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_KEY: 'approved cleanup plan identity',
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_SHA256: 'approved cleanup plan identity',
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_BYTES: 'approved cleanup plan ceiling',
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_R2_OPERATIONS: 'approved cleanup plan ceiling',
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_ROWS: 'approved cleanup plan ceiling',
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_WALL_TIME_MS: 'approved cleanup plan ceiling',
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PLAN_ID: 'approved cleanup plan identity',
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PROJECT_IDS: 'approved cleanup plan scope',
+};
+
+/** Append to a GitHub Actions file output, matching `validate-production-dispatch.ts`. */
+function append(path: string | undefined, content: string): void {
+  if (!path) return;
+  try {
+    appendFileSync(path, content);
+  } catch (error) {
+    // A summary write must never fail a deploy; the annotation already carried the signal.
+    console.log(`  (could not append to GITHUB_STEP_SUMMARY: ${String(error)})`);
+  }
+}
+
+function overrideSummaryTable(heading: string, note: string, rows: readonly string[]): string {
+  return [
+    `### ${heading}`,
+    '',
+    note,
+    '',
+    '| Variable | wrangler.toml | deployed | note |',
+    '| --- | --- | --- | --- |',
+    ...rows,
+    '',
+  ].join('\n');
+}
+
+/**
+ * Emit the override report where a human will actually see it.
+ *
+ * A `console.log` line is buried in thousands of lines of deploy output, which is how
+ * `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED` stayed pinned `false` in production for eleven days
+ * after `684f99d60` set it `true` here. An UNEXPECTED override now raises a GitHub Actions
+ * `::warning::`, which surfaces on the run page and in the PR checks list; an expected one
+ * (`EXPECTED_ENVIRONMENT_VAR_OVERRIDES`) is recorded in the job summary only, so the annotations
+ * stay rare enough to mean something.
+ *
+ * `[vars]` are non-secret by construction — secrets go through `wrangler secret` — so printing
+ * values is safe. See `.claude/rules/70-flag-flips-must-verify-the-deployed-value.md`.
+ */
+export function reportEnvironmentVarOverrides(
+  overrides: readonly EnvironmentVarOverride[],
+  env: { githubActions?: string; githubStepSummary?: string } = {
+    githubActions: process.env.GITHUB_ACTIONS,
+    githubStepSummary: process.env.GITHUB_STEP_SUMMARY,
+  }
+): void {
+  if (overrides.length === 0) return;
+  const inActions = env.githubActions === 'true';
+  const expectedRows: string[] = [];
+  const unexpectedRows: string[] = [];
+
+  for (const entry of overrides) {
+    const reason = EXPECTED_ENVIRONMENT_VAR_OVERRIDES[entry.name];
+    const message = `Environment override: ${entry.name}="${entry.override}" replaces wrangler.toml "${entry.checkedIn}"`;
+    console.log(`  ${message}${reason ? ` (expected: ${reason})` : ''}`);
+    const row = `| \`${entry.name}\` | \`${entry.checkedIn}\` | \`${entry.override}\` | ${reason ?? '**not in EXPECTED_ENVIRONMENT_VAR_OVERRIDES**'} |`;
+    if (reason) {
+      expectedRows.push(row);
+      continue;
+    }
+    unexpectedRows.push(row);
+    if (inActions) {
+      console.log(
+        `::warning title=Unexpected environment override::${encodeWorkflowCommandData(message)}`
+      );
+    }
+  }
+
+  if (!inActions) return;
+  if (unexpectedRows.length > 0) {
+    append(
+      env.githubStepSummary,
+      overrideSummaryTable(
+        'Unexpected GitHub Environment overrides',
+        'These deployed values come from the GitHub Environment, NOT from the repository, and this repository does not record a reason for them. Reconcile or delete the override, or add it to `EXPECTED_ENVIRONMENT_VAR_OVERRIDES` in `scripts/deploy/sync-wrangler-config.ts` with the reason.',
+        unexpectedRows
+      )
+    );
+  }
+  if (expectedRows.length > 0) {
+    append(
+      env.githubStepSummary,
+      overrideSummaryTable(
+        'Expected GitHub Environment overrides',
+        'Known per-installation operator state. An entry whose reason has expired should be deleted from `EXPECTED_ENVIRONMENT_VAR_OVERRIDES` rather than left to suppress a warning.',
+        expectedRows
+      )
+    );
+  }
+}
+
+function getOptionalProcessEnvVars(
+  checkedIn: Record<string, unknown> | undefined,
+  names: readonly string[]
+): Record<string, string> {
   const vars: Record<string, string> = {};
   for (const name of names) {
     const value = process.env[name];
@@ -430,7 +734,36 @@ function getOptionalProcessEnvVars(names: readonly string[]): Record<string, str
       vars[name] = value;
     }
   }
+  reportEnvironmentVarOverrides(listEnvironmentVarOverrides(checkedIn, vars));
   return vars;
+}
+
+export function countWorkerTextBindings(envConfig: Pick<WranglerEnvConfig, 'vars'>): number {
+  const variableCount = Object.keys(envConfig.vars ?? {}).length;
+  const configuredSecrets = Array.from(
+    new Set(
+      Array.from(
+        readFileSync(CONFIGURE_SECRETS_PATH, 'utf-8').matchAll(
+          /set_worker_secret\s+"([A-Z0-9_]+)"/g
+        ),
+        (match) => match[1]
+      )
+    )
+  );
+  return variableCount + configuredSecrets.length;
+}
+
+export function assertWorkerTextBindingLimit(envConfig: Pick<WranglerEnvConfig, 'vars'>): void {
+  const count = countWorkerTextBindings(envConfig);
+  if (count <= CLOUDFLARE_WORKER_TEXT_BINDING_GUARD_LIMIT) return;
+
+  throw new Error(
+    `Generated Cloudflare Worker text bindings (${count}) exceed the ` +
+      `${CLOUDFLARE_WORKER_TEXT_BINDING_GUARD_LIMIT} guard limit ` +
+      `(${CLOUDFLARE_WORKER_TEXT_BINDING_MAX} Cloudflare max with ` +
+      `${CLOUDFLARE_WORKER_TEXT_BINDING_HEADROOM} headroom). Remove redundant ` +
+      `checked-in [vars] defaults or unused Worker secrets before deploying.`
+  );
 }
 
 function getApiWorkerVars(
@@ -456,7 +789,8 @@ function getApiWorkerVars(
     SESSION_SNAPSHOT_TTL_DAYS: String(outputs.sessionSnapshotTtlDays),
     VM_INCIDENT_R2_PREFIX: outputs.diagnosticIncidentPrefix,
     VM_INCIDENT_RETENTION_DAYS: String(outputs.diagnosticIncidentTtlDays),
-    ...getOptionalProcessEnvVars([
+    ...getOptionalProcessEnvVars(topLevel.vars, [
+      'D1_SESSION_MODE',
       'REQUIRE_APPROVAL',
       'CRON_SWEEPS_ENABLED_KV_KEY',
       'DO_ALARMS_ENABLED_KV_KEY',
@@ -496,6 +830,21 @@ function getApiWorkerVars(
       'NODE_LIFECYCLE_MAX_DESTROYING_AGE_MS',
       'NODE_WORKSPACE_IDLE_TIMEOUT_MS',
       'NODE_CLEANUP_FAILURE_BACKOFF_MS',
+      'NODE_UNHEALTHY_DRAIN_AFTER_MS',
+      'NODE_UNHEALTHY_RELEASE_AFTER_MS',
+      'NODE_UNHEALTHY_FLEET_MAX_FRACTION',
+      'NODE_UNHEALTHY_FLEET_MIN_NODES',
+      'NODE_UNHEALTHY_RETRY_MS',
+      'NODE_UNHEALTHY_PRESERVATION_TIMEOUT_MS',
+      'NODE_AGENT_REQUEST_TIMEOUT_MS',
+      'NODE_AGENT_BACKGROUND_REQUEST_TIMEOUT_MS',
+      'WORKSPACE_DELETION_RETRY_BASE_MS',
+      'WORKSPACE_DELETION_RETRY_MAX_MS',
+      'WORKSPACE_DELETION_MAX_RESIDENCE_MS',
+      'WORKSPACE_DELETION_ALARM_BATCH_SIZE',
+      'WORKSPACE_DELETION_CALLBACK_SIGNAL_TTL_SECONDS',
+      'WORKSPACE_DELETION_CALLBACK_SIGNAL_CLEANUP_LIMIT',
+      'WORKSPACE_DELETION_DIAGNOSTIC_MAX_LENGTH',
       'DIAGNOSIS_COMPLETED_STEP_MIN_DELAY_MS',
       'ORCHESTRATOR_ZERO_TASK_GRACE_MS',
       'ORCHESTRATOR_MAX_MISSION_LIFETIME_MS',
@@ -505,6 +854,9 @@ function getApiWorkerVars(
       'ORCHESTRATOR_WAIT_MAX_DURATION_MS',
       'ORCHESTRATOR_WAIT_MAX_CANDIDATES_PER_ALARM',
       'HETZNER_BASE_IMAGE',
+      'DEPLOYMENT_DEFAULT_CPU_LIMIT_MILLIS',
+      'DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB',
+      'DEPLOYMENT_DEFAULT_ROOT_DISK_MB',
       'DEPLOYMENT_RELEASE_RETENTION_ENABLED',
       'DEPLOYMENT_RELEASE_RETENTION_COUNT',
       'DEPLOYMENT_RELEASE_RETENTION_BATCH_SIZE',
@@ -596,15 +948,33 @@ function getApiWorkerVars(
       'PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_TIME_MS',
       'PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_UNSAFE_RATIO',
       'PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES',
+      'PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_MAX_ROWS',
+      'PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_MAX_BYTES',
+      'PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_MAX_SESSIONS',
+      'PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_TRANSACTION_ROWS',
+      'PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_TRANSACTION_BYTES',
       'PROJECT_DATA_ARCHIVE_SHARDING_ENABLED',
+      'PROJECT_DATA_ARCHIVE_COMPACT_ENABLED',
+      'PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET',
+      'PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR',
+      'PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS',
+      'PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_RETENTION_MS',
+      'PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_CLEANUP_LIMIT',
       'PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED',
       'PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS',
       'PROJECT_DATA_ARCHIVE_SHARD_COUNT',
       'PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS',
       'PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS',
+      'PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET',
+      'PROJECT_DATA_ARCHIVE_SWEEP_UNIT_OVERHEAD_PERCENT',
+      'PROJECT_DATA_ARCHIVE_SWEEP_FALLTHROUGH_DEPTH',
+      'PROJECT_DATA_ARCHIVE_BUDGET_STALL_ALERT_SWEEPS',
       'PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS',
+      'PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS',
+      'PROJECT_DATA_ARCHIVE_FAILED_RETRY_DELAY_MS',
       'PROJECT_DATA_ARCHIVE_CHUNK_ROWS',
       'PROJECT_DATA_ARCHIVE_CHUNK_BYTES',
+      'PROJECT_DATA_ARCHIVE_HASH_PAGE_ROWS',
       'PROJECT_DATA_ARCHIVE_LEASE_MS',
       'PROJECT_DATA_ARCHIVE_WALL_TIME_MS',
       'PROJECT_DATA_ARCHIVE_ROLLOUT_LIST_LIMIT_DEFAULT',
@@ -618,6 +988,22 @@ function getApiWorkerVars(
       'PROJECT_DATA_ARCHIVE_POISON_AFTER_ATTEMPTS',
       'PROJECT_DATA_ARCHIVE_R2_PREFIX',
       'PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS',
+      'PROJECT_DATA_ARCHIVE_SEARCH_CONCURRENCY',
+      'PROJECT_DATA_ARCHIVE_SEARCH_REPAIR_SESSIONS',
+      'PROJECT_DATA_ARCHIVE_SEARCH_REPAIR_CHUNKS',
+      'PROJECT_DATA_ARCHIVE_SEARCH_CONTINUATION_TTL_MS',
+      'PROJECT_DATA_ARCHIVE_SEARCH_CURSOR_MAX_BYTES',
+      'PROJECT_DATA_ARCHIVE_SEARCH_ERROR_LIMIT',
+      'PROJECT_DATA_SEARCH_FTS_CANDIDATE_LIMIT',
+      'PROJECT_DATA_SEARCH_FTS_SCAN_LIMIT',
+      'PROJECT_DATA_SEARCH_KEYWORD_SCAN_ROW_LIMIT',
+      'SEARCH_QUERY_MAX_LENGTH',
+      'SEARCH_QUERY_MAX_TERM_LENGTH',
+      'SEARCH_QUERY_MAX_TERMS',
+      'PROJECT_DATA_ALARM_SECTION_GATING_ENABLED',
+      'PROJECT_DATA_ALARM_FULL_RUN_INTERVAL_MS',
+      'PROJECT_DATA_ALARM_DUE_TOLERANCE_MS',
+      'PROJECT_DATA_ALARM_SLOW_SECTION_MS',
       'PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED',
       'PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS',
       'PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS',
@@ -627,7 +1013,10 @@ function getApiWorkerVars(
       'SESSION_SLEEP_SWEEP_WALL_BUDGET_MS',
       'SESSION_SLEEP_RETRY_DELAY_MS',
       'SESSION_SLEEP_MAX_ATTEMPTS',
+      'SESSION_SLEEP_FAILURE_MAX_ATTEMPTS',
+      'SESSION_SLEEP_FAILURE_MAX_ELAPSED_MS',
       'SESSION_SLEEP_CLAIM_LEASE_MS',
+      'FAILED_TASK_PRESERVATION_MAX_WAIT_MS',
       'HARNESS_BACKGROUND_WORK_LEASE_MS',
       'HARNESS_BACKGROUND_WORK_MAX_DURATION_MS',
       'ACP_ACTIVITY_ADMISSION_ENABLED',
@@ -636,6 +1025,41 @@ function getApiWorkerVars(
       'ACP_ACTIVITY_COALESCE_MAX_PENDING',
       'ACP_ACTIVITY_BINDING_CACHE_TTL_MS',
       'ACP_ACTIVITY_BINDING_CACHE_MAX_ENTRIES',
+      'ACP_INTERACTIONS_ENABLED',
+      'ACP_INTERACTION_FORMS_ENABLED',
+      'ACP_INTERACTION_URLS_ENABLED',
+      'ACP_INTERACTION_URL_DEADLINE_MS',
+      'ACP_INTERACTION_URL_MAX_CHARS',
+      'ACP_INTERACTION_URL_ELICITATION_ID_MAX_CHARS',
+      'ACP_INTERACTION_URL_REDIRECT_DEPTH',
+      'ACP_INTERACTION_PERMISSION_TASK_DEADLINE_MS',
+      'ACP_INTERACTION_PERMISSION_CONVERSATION_DEADLINE_MS',
+      'ACP_INTERACTION_MAX_DEADLINE_MS',
+      'ACP_INTERACTION_DEADLINE_MARGIN_MS',
+      'ACP_INTERACTION_MAX_PENDING_PER_SESSION',
+      'ACP_INTERACTION_REQUEST_MAX_BYTES',
+      'ACP_INTERACTION_OPTIONS_MAX_COUNT',
+      'ACP_INTERACTION_OPTION_ID_MAX_CHARS',
+      'ACP_INTERACTION_OPTION_NAME_MAX_CHARS',
+      'ACP_INTERACTION_RUNTIME_RECEIPT_LIMIT',
+      'ACP_INTERACTION_RUNTIME_RESPONSE_MAX_BYTES',
+      'ACP_INTERACTION_FORM_SCHEMA_MAX_BYTES',
+      'ACP_INTERACTION_FORM_SCHEMA_MAX_PROPERTIES',
+      'ACP_INTERACTION_FORM_SCHEMA_MAX_ENUM',
+      'ACP_INTERACTION_ANSWER_MAX_BYTES',
+      'ACP_INTERACTION_ANSWER_STRING_MAX_BYTES',
+      'ACP_INTERACTION_RETRY_DELAYS_MS',
+      'ACP_INTERACTION_RETRY_STEADY_MS',
+      'ACP_INTERACTION_DELIVERY_WINDOW_MS',
+      'ACP_INTERACTION_SENSITIVE_PURGE_MS',
+      'ACP_INTERACTION_SUMMARY_RETENTION_MS',
+      'ACP_INTERACTION_SUMMARY_LAST_SETTLED',
+      'ACP_INTERACTION_SNAPSHOT_LAST_SETTLED',
+      'ACP_INTERACTION_EXPIRY_BATCH_SIZE',
+      'ACP_INTERACTION_OUTBOX_BATCH_SIZE',
+      'ACP_INTERACTION_DELIVERY_BATCH_SIZE',
+      'ACP_INTERACTION_ALARM_WALL_TIME_MS',
+      'ACP_INTERACTION_ALARM_REARM_DELAY_MS',
       'SESSION_SNAPSHOT_RECOVERY_CLAIM_LEASE_MS',
       'SESSION_LIFECYCLE_ERROR_MAX_LENGTH',
       'LIBRARY_PROJECT_DELETE_CLEANUP_BATCH_SIZE',
@@ -739,6 +1163,7 @@ function getApiWorkerVars(
       'SANDBOX_ENABLED',
       'SANDBOX_EXEC_TIMEOUT_MS',
       'SANDBOX_VM_AGENT_PORT',
+      ...EVENTING_OPTIONAL_PROCESS_ENV_VARS,
       // Guided Codex credential-setup tuning.
       'MAX_CONCURRENT_SETUP_SESSIONS',
       'SETUP_SESSION_TTL_MS',
@@ -893,6 +1318,8 @@ export function generateApiWorkerEnv(
     ...getTailConsumers(includeTailConsumers, tailWorkerName),
   };
 
+  assertWorkerTextBindingLimit(envConfig);
+
   return envConfig;
 }
 
@@ -978,9 +1405,7 @@ async function main(): Promise<void> {
   const hasTailWorker = await checkTailWorkerExists(outputs.cloudflareAccountId, tailWorkerName);
   console.log(`  Tail worker "${tailWorkerName}" exists: ${hasTailWorker}`);
   if (!hasTailWorker) {
-    console.log(
-      `  tail_consumers will be OMITTED (first deploy — will re-add after tail worker is deployed)`
-    );
+    console.log(`  tail_consumers will be OMITTED until the tail worker is deployed`);
   }
 
   // Auto-detect whether this deployment can use Cloudflare Artifacts (probes the
@@ -1022,13 +1447,9 @@ async function main(): Promise<void> {
   // Generate env section for tail worker
   syncTailWorkerConfig(stack, outputs.cloudflareAccountId, envKey);
 
-  // Write first-deploy marker for the workflow to detect
-  if (!hasTailWorker) {
-    mkdirSync(DEPLOY_STATE_DIR, { recursive: true });
-    writeFileSync(FIRST_DEPLOY_MARKER, 'true', 'utf-8');
-    console.log(`\nFirst-deploy marker written to ${FIRST_DEPLOY_MARKER}`);
-    console.log('The deploy workflow will re-sync and re-deploy after the tail worker is created.');
-  }
+  // The migration probe returns null only for a confirmed absent API Worker.
+  // A missing Tail Worker must never trigger extra code revisions on a live API.
+  writeDeploymentMarkers(deployedMigrationTag, hasTailWorker);
 
   console.log('\nSync complete.');
 }
