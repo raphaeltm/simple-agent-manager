@@ -893,7 +893,8 @@ jobs:
       needs.sonar-go-coverage.result == 'success') &&
       (github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository)
-    timeout-minutes: 15
+    # Full security and architecture analysis can exceed 15 minutes on this repository.
+    timeout-minutes: 60
     runs-on: ubuntu-latest
     permissions:
       contents: read

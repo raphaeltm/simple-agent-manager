@@ -388,3 +388,5 @@ Implementation and local validation are complete. This file is archived at `/do`
 archival does not claim release completion. Final-head CI and Sonar coverage/gate proof,
 CodeRabbit follow-up, merge and production workflow monitoring remain unchecked release gates
 tracked in [PR #2020](https://github.com/raphaeltm/simple-agent-manager/pull/2020).
+
+- 2026-10-06 final-head run 37509476587: coverage producers and input validation passed, but Sonar security analysis was cancelled at the 15-minute job limit (500/2142 files). Increased the bounded scanner budget to 60 minutes without disabling analyzers or relaxing thresholds. Operational credential review found the standard expiring token inherits admin permissions; the Free plan lacks scoped organization tokens. Requires an analysis-only identity or explicit user exception before merge; previous code-boundary PASS did not establish credential privileges.

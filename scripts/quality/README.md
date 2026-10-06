@@ -103,6 +103,9 @@ steps. GitHub treats Dependabot-triggered workflows like fork workflows and with
 Actions secrets, so the explicit Dependabot exclusion prevents an enabled scanner from failing
 on an unavailable token. Do not replace this boundary with `pull_request_target`.
 
+The scanner job allows up to 60 minutes for the full security and architecture analyzers.
+A live scan exceeded the original 15-minute budget; analyzer scope and quality thresholds remain unchanged.
+
 Sonar classifies matching test files under `sonar.tests` with explicit `sonar.test.inclusions`,
 while retaining all other files under `sonar.sources`. Test code is analyzed as test code rather
 than treated as uncovered production code; the behavioral validator remains production source
