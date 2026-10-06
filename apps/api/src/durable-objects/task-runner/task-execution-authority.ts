@@ -43,6 +43,12 @@ export async function retireRevokedTaskRunner(
     state.completed = true;
     await rc.ctx.storage.put('state', state);
     await rc.ctx.storage.deleteAlarm();
+    log.info('task_runner_do.execution_authority_revoked', {
+      taskId: state.taskId,
+      projectId: state.projectId,
+      step: state.currentStep,
+      nodeId: state.stepResults.nodeId ?? null,
+    });
   };
   // A grant can race API cancellation and revive the admission mirror. Retire
   // only our admission generation; an executable replacement or newer token wins.
