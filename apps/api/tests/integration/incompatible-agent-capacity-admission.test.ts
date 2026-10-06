@@ -6,6 +6,7 @@ import { TaskRunner } from '../../src/durable-objects/task-runner';
 import { requestIncompatiblePoolNodeDrain } from '../../src/durable-objects/task-runner/incompatible-node-drain';
 import { findNodeWithCapacity } from '../../src/durable-objects/task-runner/node-selection';
 import { handleNodeProvisioning } from '../../src/durable-objects/task-runner/node-steps';
+import { retireRevokedTaskRunner } from '../../src/durable-objects/task-runner/task-execution-authority';
 import type { TaskRunnerState } from '../../src/durable-objects/task-runner/types';
 import type { Env } from '../../src/env';
 import { sweepDestroyingHandoffNodes } from '../../src/scheduled/node-cleanup/node-phases';
@@ -715,6 +716,185 @@ describe('cancelled admission alarms', () => {
       expect(
         fixture.sqlite.prepare("SELECT status,error_message FROM tasks WHERE id='task-1'").get()
       ).toEqual({ status: 'cancelled', error_message: 'CANCELLED' });
+      expect(run.state().completed).toBe(true);
+      expect(run.alarm()).toBeNull();
+    }
+  );
+  it('does not resurrect a cancelled admission when cancellation races the provisioning lease grant', async () => {
+    const create = vi.spyOn(nodesService, 'createNodeRecord');
+    const provider = vi.spyOn(nodesService, 'provisionNode');
+    const run = alarmRunner();
+    await run.runner.alarm();
+    expect(
+      fixture.sqlite.prepare("SELECT state FROM vm_task_admissions WHERE task_id='task-1'").get()
+    ).toEqual({ state: 'waiting' });
+    fixture.sqlite.exec(
+      "UPDATE nodes SET status='deleted',runtime_termination_confirmed_at='2026-10-05T12:00:00.000Z' WHERE id='existing-node'"
+    );
+    const prepare = fixture.database.prepare.bind(fixture.database);
+    let raced = false;
+    vi.spyOn(fixture.database, 'prepare').mockImplementation((sql: string) => {
+      if (!raced && sql.includes("SET state = 'provisioning_granted'")) {
+        raced = true;
+        fixture.sqlite.exec(
+          "UPDATE tasks SET status='cancelled',error_message='CANCELLED',admission_state='cancelled',admission_reason='cancelled' WHERE id='task-1'; UPDATE vm_task_admissions SET state='cancelled',reason='cancelled',completed_at='2026-10-05T12:00:00.000Z',next_retry_at=NULL WHERE task_id='task-1'"
+        );
+      }
+      return prepare(sql);
+    });
+    vi.advanceTimersByTime(1001);
+    await run.runner.alarm();
+    expect(raced).toBe(true);
+    expect(create).not.toHaveBeenCalled();
+    expect(provider).not.toHaveBeenCalled();
+    expect(
+      fixture.sqlite.prepare("SELECT state FROM vm_task_admissions WHERE task_id='task-1'").get()
+    ).toEqual({ state: 'cancelled' });
+    expect(
+      fixture.sqlite
+        .prepare(
+          "SELECT COUNT(*) AS count FROM vm_task_admissions WHERE state IN ('queued','waiting','provisioning_granted','provisioning','node_ready')"
+        )
+        .get()
+    ).toEqual({ count: 0 });
+    expect(
+      fixture.sqlite.prepare('SELECT COUNT(*) AS count FROM vm_provisioning_leases').get()
+    ).toEqual({ count: 0 });
+    expect(
+      fixture.sqlite
+        .prepare("SELECT status,error_message,admission_state FROM tasks WHERE id='task-1'")
+        .get()
+    ).toEqual({ status: 'cancelled', error_message: 'CANCELLED', admission_state: 'cancelled' });
+    expect(run.state().completed).toBe(true);
+    expect(run.alarm()).toBeNull();
+  });
+
+  it.each(['newer-token', 'foreign-user', 'foreign-project'])(
+    'leaves another admission generation intact on cancellation cleanup: %s',
+    async (kind) => {
+      const run = alarmRunner();
+      await run.runner.alarm();
+      fixture.sqlite.exec(
+        "UPDATE tasks SET status='cancelled',error_message='CANCELLED' WHERE id='task-1'; UPDATE vm_task_admissions SET state='provisioning_granted',fencing_token=1 WHERE task_id='task-1'"
+      );
+      if (kind === 'newer-token')
+        fixture.sqlite.exec("UPDATE vm_task_admissions SET fencing_token=2 WHERE task_id='task-1'");
+      if (kind === 'foreign-user')
+        fixture.sqlite.exec(
+          "UPDATE vm_task_admissions SET user_id='another-user' WHERE task_id='task-1'"
+        );
+      if (kind === 'foreign-project')
+        fixture.sqlite.exec(
+          "UPDATE vm_task_admissions SET project_id='another-project' WHERE task_id='task-1'"
+        );
+      fixture.sqlite.exec(
+        "INSERT INTO vm_provisioning_leases(scope_key,owner_task_id,fencing_token,provider,credential_domain_key,provider_domain_key,requested_vm_size,expires_at) VALUES ('shared-generation-scope','old-task',2,'hetzner','credential-1','domain','large','2026-10-06T00:00:00.000Z')"
+      );
+      const persisted = structuredClone(run.state());
+      persisted.admissionScopeKey = 'shared-generation-scope';
+      persisted.admissionLeaseToken = 1;
+      run.replaceState(persisted);
+      const admissionBefore = fixture.sqlite
+        .prepare("SELECT * FROM vm_task_admissions WHERE task_id='task-1'")
+        .get();
+      const leaseBefore = fixture.sqlite.prepare('SELECT * FROM vm_provisioning_leases').get();
+      const create = vi.spyOn(nodesService, 'createNodeRecord');
+      const provider = vi.spyOn(nodesService, 'provisionNode');
+      await run.runner.alarm();
+      expect(
+        fixture.sqlite.prepare("SELECT * FROM vm_task_admissions WHERE task_id='task-1'").get()
+      ).toEqual(admissionBefore);
+      expect(fixture.sqlite.prepare('SELECT * FROM vm_provisioning_leases').get()).toEqual(
+        leaseBefore
+      );
+      expect(create).not.toHaveBeenCalled();
+      expect(provider).not.toHaveBeenCalled();
+      expect(run.state().completed).toBe(true);
+    }
+  );
+  it.each(['repair', 'newer-token', 'executable-replacement'])(
+    'replays a partial admission/mirror cleanup commit safely: %s',
+    async (outcome) => {
+      const run = alarmRunner();
+      await run.runner.alarm();
+      fixture.sqlite.exec(
+        "UPDATE tasks SET status='cancelled',error_message='CANCELLED',admission_state='provisioning_granted' WHERE id='task-1'; UPDATE vm_task_admissions SET state='provisioning_granted',fencing_token=1 WHERE task_id='task-1'"
+      );
+      const persisted = structuredClone(run.state());
+      persisted.admissionLeaseToken = 1;
+      run.replaceState(persisted);
+      const create = vi.spyOn(nodesService, 'createNodeRecord');
+      const provider = vi.spyOn(nodesService, 'provisionNode');
+      const prepare = fixture.database.prepare.bind(fixture.database);
+      let faulted = false;
+      vi.spyOn(fixture.database, 'prepare').mockImplementation((sql: string) => {
+        if (!faulted && sql.includes("UPDATE tasks SET admission_state = 'cancelled'")) {
+          faulted = true;
+          throw new Error('admission mirror D1 write failed');
+        }
+        return prepare(sql);
+      });
+      await expect(run.runner.alarm()).rejects.toThrow('admission mirror D1 write failed');
+      expect(faulted).toBe(true);
+      expect(
+        fixture.sqlite
+          .prepare("SELECT state,reason FROM vm_task_admissions WHERE task_id='task-1'")
+          .get()
+      ).toEqual({ state: 'cancelled', reason: 'task_execution_authority_revoked' });
+      expect(
+        fixture.sqlite.prepare("SELECT admission_state FROM tasks WHERE id='task-1'").get()
+      ).toEqual({ admission_state: 'provisioning_granted' });
+      expect(run.state().completed).toBe(false);
+      expect(run.storage.deleteAlarm).not.toHaveBeenCalled();
+      if (outcome === 'repair') {
+        const terminalBefore = fixture.sqlite
+          .prepare("SELECT * FROM vm_task_admissions WHERE task_id='task-1'")
+          .get();
+        await run.runner.alarm();
+        expect(
+          fixture.sqlite.prepare("SELECT * FROM vm_task_admissions WHERE task_id='task-1'").get()
+        ).toEqual(terminalBefore);
+        expect(
+          fixture.sqlite
+            .prepare(
+              "SELECT status,error_message,admission_state,admission_reason,admission_next_retry_at FROM tasks WHERE id='task-1'"
+            )
+            .get()
+        ).toEqual({
+          status: 'cancelled',
+          error_message: 'CANCELLED',
+          admission_state: 'cancelled',
+          admission_reason: 'task_execution_authority_revoked',
+          admission_next_retry_at: null,
+        });
+      } else {
+        if (outcome === 'newer-token')
+          fixture.sqlite.exec(
+            "UPDATE vm_task_admissions SET state='provisioning_granted',fencing_token=2,reason='newer_grant' WHERE task_id='task-1'; UPDATE tasks SET admission_reason='newer_grant' WHERE id='task-1'"
+          );
+        else
+          fixture.sqlite.exec(
+            "UPDATE tasks SET status='queued',error_message=NULL,admission_state='provisioning_granted',admission_reason='replacement_grant' WHERE id='task-1'; UPDATE vm_task_admissions SET state='provisioning_granted',reason='replacement_grant' WHERE task_id='task-1'"
+          );
+        const admissionBefore = fixture.sqlite
+          .prepare("SELECT * FROM vm_task_admissions WHERE task_id='task-1'")
+          .get();
+        const taskBefore = fixture.sqlite.prepare("SELECT * FROM tasks WHERE id='task-1'").get();
+        // Exercise the late old cleanup response directly: a current executable
+        // replacement would otherwise dispatch normally from its own alarm.
+        await retireRevokedTaskRunner(structuredClone(run.state()), {
+          ...fixture.rc,
+          ctx: { ...fixture.rc.ctx, storage: run.storage } as unknown as DurableObjectState,
+        });
+        expect(
+          fixture.sqlite.prepare("SELECT * FROM vm_task_admissions WHERE task_id='task-1'").get()
+        ).toEqual(admissionBefore);
+        expect(fixture.sqlite.prepare("SELECT * FROM tasks WHERE id='task-1'").get()).toEqual(
+          taskBefore
+        );
+      }
+      expect(create).not.toHaveBeenCalled();
+      expect(provider).not.toHaveBeenCalled();
       expect(run.state().completed).toBe(true);
       expect(run.alarm()).toBeNull();
     }

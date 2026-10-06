@@ -44,6 +44,35 @@ export async function retireRevokedTaskRunner(
     await rc.ctx.storage.put('state', state);
     await rc.ctx.storage.deleteAlarm();
   };
+  // A grant can race API cancellation and revive the admission mirror. Retire
+  // only our admission generation; an executable replacement or newer token wins.
+  const now = new Date().toISOString();
+  await rc.env.DATABASE.prepare(
+    `UPDATE vm_task_admissions SET state = 'cancelled', reason = 'task_execution_authority_revoked',
+        next_retry_at = NULL, completed_at = COALESCE(completed_at, ?), updated_at = ?
+      WHERE task_id = ? AND project_id = ? AND user_id = ?
+        AND COALESCE(fencing_token, 0) = ?
+        AND state IN ('queued', 'waiting', 'provisioning_granted', 'provisioning', 'node_ready')
+        AND EXISTS (SELECT 1 FROM tasks t WHERE t.id = vm_task_admissions.task_id
+          AND t.project_id = vm_task_admissions.project_id AND t.user_id = vm_task_admissions.user_id
+          AND t.status NOT IN (${TASK_EXECUTION_AUTHORITY_STATUS_SQL}))`
+  )
+    .bind(now, now, state.taskId, state.projectId, state.userId, state.admissionLeaseToken ?? 0)
+    .run();
+  // Use the persisted terminal admission so a replay repairs the mirror even
+  // when the first write succeeded and this write previously failed.
+  await rc.env.DATABASE.prepare(
+    `UPDATE tasks SET admission_state = 'cancelled', admission_reason = 'task_execution_authority_revoked',
+        admission_next_retry_at = NULL, updated_at = ?
+      WHERE id = ? AND project_id = ? AND user_id = ?
+        AND status NOT IN (${TASK_EXECUTION_AUTHORITY_STATUS_SQL})
+        AND EXISTS (SELECT 1 FROM vm_task_admissions a WHERE a.task_id = tasks.id
+          AND a.project_id = tasks.project_id AND a.user_id = tasks.user_id
+          AND COALESCE(a.fencing_token, 0) = ?
+          AND a.state = 'cancelled' AND a.reason = 'task_execution_authority_revoked')`
+  )
+    .bind(now, state.taskId, state.projectId, state.userId, state.admissionLeaseToken ?? 0)
+    .run();
   await releaseVmProvisioningLease(
     rc.env,
     state.admissionScopeKey,
