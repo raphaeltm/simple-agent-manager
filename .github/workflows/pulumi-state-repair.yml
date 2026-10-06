@@ -82,11 +82,12 @@ jobs:
       - name: Login to Pulumi R2 Backend
         run: |
           BUCKET_NAME="${{ vars.PULUMI_STATE_BUCKET || format('{0}-pulumi-state', steps.prefix.outputs.value) }}"
-          R2_ENDPOINT="${{ secrets.CF_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          R2_ENDPOINT="${CF_ACCOUNT_ID}.r2.cloudflarestorage.com"
           pulumi login "s3://${BUCKET_NAME}?endpoint=${R2_ENDPOINT}&region=auto"
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
       - name: Select Pulumi Stack
         working-directory: infra
@@ -254,8 +255,6 @@ jobs:
         run: |
           PREFIX="${{ steps.prefix.outputs.value }}"
           STACK="${{ steps.stack.outputs.name }}"
-          CF_ACCOUNT_ID="${{ secrets.CF_ACCOUNT_ID }}"
-          CF_ZONE_ID="${{ secrets.CF_ZONE_ID }}"
 
           echo "## Import Existing Resources" >> $GITHUB_STEP_SUMMARY
 
@@ -337,6 +336,8 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
 
       - name: "Refresh after import"
         if: inputs.action == 'import-and-up' && inputs.dry_run == false
