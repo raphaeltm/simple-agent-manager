@@ -100,3 +100,5 @@ Related, tracked elsewhere:
 - The failed-task-preservation realistic fixture also declares taskStatusEvents; its 21 regression tests pass. This is test setup only, runtime candidate remains reviewed `7041c6a4d`.
 
 - Full root test:20/21 tasks PASS; API816/817 filesPASS with8 failures confined to old mocked session-sleep fixture missing db.insert. Corrected that fixture to model event insert-select without consuming workspace query responses; all43 tests pass on targeted rerun. Full API11387 passing tests plus targeted43/43 after correction; whole suite was not rerun yet. Runtime source unchanged.
+
+- Sonar reported205 copied fixture lines. Extracted shared SQLite/boundary fixture used by consumer and lifecycle suites;27/27 targetedPASS, eslint/format/diffPASS. Independent API reviewer confirms flattened else-if is behaviorally equivalent, preserving all predicates and D1 batch order. No new admission/telemetry scope.
