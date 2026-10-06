@@ -89,4 +89,37 @@ since (#2180–#2240).
 
 ## Review log
 
-(none yet)
+- **Round 1** — two local reviewers in parallel (user-journey critique; code fact-check). User
+  reviewer: 1 CRITICAL, 2 HIGH, 9 MEDIUM, 6 LOW groups. Fact-checker: 0 CRITICAL, 6 HIGH, 16 MEDIUM,
+  ~10 LOW groups. Every finding re-verified against code before changing anything; all but the
+  items below accepted.
+  - Release ranges (git tags): sign-in broken v2026.09.24–v2026.10.01, fixed v2026.10.02; bridge
+    without Bypass default v2026.10.01–10.04; v2026.10.05 lacks #2240.
+  - "Tool connection needs sign-in" / "Sign-in flow unavailable" cards are unreachable (no producer
+    of `mcp_endpoint_needs_auth`/`unsupported_loopback_auth`; `auth_failure.go`); docs now describe
+    the strip, the card, and the failed tool step that actually appear.
+  - Missing credential = strip with **Open agent connections**, not a card; only rejected/model
+    unavailable reach the card.
+  - Unsupported-model check-in pause is immediate and applies to any chat
+    (`reconciliation-episode.ts:observeReconciliationMessage`).
+  - Stalled-turn failures skip work preservation (`stuck-tasks.ts` → `cleanupTaskRun`, no
+    `preserveFailedTaskWork`): unpushed work is lost.
+  - Plan approval never offers "Yes, auto-accept edits" (Auto mode always available); title is
+    **Approve Plan**.
+  - Questions/links have no tool-call ID → rendered at the end of the chat; spec fixture fixed.
+  - Settings → Agents before #2225 saved the preselected always-ask mode (now "Manual").
+  - Typed messages are `deliver` class and queue behind the open turn (don't answer a card).
+  - Usage chip lives on **Settings → Advanced**, personal credentials only; readings purged after
+    30 days; SAM provider mode = Claude Code/Codex only; profiles have no credential field.
+  - Turning request switches off is enforced at request time (immediately); on needs new sessions.
+  - Partially accepted: "the machine keeps running if you never reply" (check-in pause) — not
+    verified, so not stated. Kept "session list" as the docs' standard term.
+  - Screenshots: phone-width variants for question/link cards via `<picture>` (tall phone viewport
+    so the card isn't cropped by the composer); phone permission shot at 375×812 so the header
+    doesn't cut a "Comment" link in half.
+  - Configuration: agent-request settings moved to their own top-level section, plain-language
+    switch rows, 7 undocumented `ACP_INTERACTION_*` settings added (incl. the 4 h max deadline).
+  - Ideas filed: `01M47PH42BYKGR0W90XFWPY1R5` (Needs input chats collapse into Older),
+    `01M47PYF4XAJ0GZZ8KJP3XBBKH` (Archive fails on sleeping VM chats since #2230),
+    `01M47PYM16AJQ3ANQ4X2Z1QB9T` (expired requests shown as cancelled),
+    `01M47PYS4NFYDHEDYAQ4ZF2WAQ` (unreachable MCP sign-in failure cards).

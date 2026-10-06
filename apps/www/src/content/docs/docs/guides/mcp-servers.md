@@ -58,24 +58,28 @@ Use the **Disable** toggle to stop injecting a server without deleting it and lo
 
 ## When a server needs sign-in
 
-There are three ways a chat tells you an MCP server isn't signed in:
+How a chat shows that an MCP server isn't signed in depends on the server:
 
+- **A tool step fails with the server's own error**, such as `401 Unauthorized`. The server refused
+  the credential SAM sent. Review its entry under **Settings → MCP Servers**, or ask a project
+  administrator to check **Project Settings → Runtime** for a shared server. A bearer token works
+  only if that service accepts bearer authentication; some services need an API-key header instead
+  (see [Adding a server](#adding-a-server)).
 - **The server sends you a link.** Some servers ask you to approve access on their own website. The
   chat shows an **External service request** card with the destination; open the link, finish
   there, then select **Continue after opening**. See
   [Links to open](/docs/guides/chat-features/#links-to-open).
-- **A failure card reads "Tool connection needs sign-in".** The server refused the credential SAM
-  sent. Review its entry under **Settings → MCP Servers**, or ask a project administrator to check
-  **Project Settings → Runtime** for a shared server. A bearer token works only if that service
-  accepts bearer authentication; some services need an API-key header instead (see
-  [Adding a server](#adding-a-server)), and some need a browser sign-in.
 - **The chat says "This sign-in flow needs a local callback that this session cannot complete".**
   The service wants to finish its sign-in by redirecting to `localhost`, which can't work from a
   remote SAM session. Use another authentication method the service supports for remote clients,
   usually a token or API key from its dashboard.
 
-The chat's shortcut to personal MCP settings appears only for the person who started it; shared
-servers are managed by project administrators.
+The last two only happen in sessions labelled **Chat**, and only where link requests are turned on
+(they are on the hosted service; self-hosted operators turn them on as described in
+[Let agents ask in chat](/docs/guides/self-hosting/#let-agents-ask-in-chat)). Elsewhere a server that
+wants a browser sign-in just fails its tool step, so connect it with a token or API key from its
+dashboard instead. The chat's shortcut to personal MCP settings appears only for the person who
+started it; shared servers are managed by project administrators.
 
 ## Security
 

@@ -103,10 +103,14 @@ SAM's in-app **Report an Issue** flow is off until you nominate a project to rec
 
 Agents can stop and ask the person running a chat for permission, ask them a question, or send a
 sign-in link to open — see [When the Agent Needs You](/docs/guides/chat-features/#when-the-agent-needs-you).
-This is off on a new installation. Until you turn it on, SAM refuses every such request the moment
-an agent makes it. Claude Code and Codex in the default **Bypass Permissions** mode rarely ask, so
-most users won't notice, but an agent in **Manual** or **Plan Mode** — or one such as Amp that asks
-on its own — is told no every time it asks to make a change.
+This is off unless you turn it on, on new and updated installations alike. Until then, SAM refuses
+every such request the moment an agent makes it, and no card appears. Claude Code and Codex in the
+default **Bypass Permissions** mode rarely ask, so most users won't notice, but an agent in
+**Manual**, **Accept Edits**, or **Plan Mode** — or Amp or Gemini CLI, which ask on their own — is told no
+every time it asks to make a change. A mode can be set in a profile, a project's **Agent
+Overrides**, or a user's **Settings → Agents**; saving that page before 4 October stored the old
+always-ask default, now shown as **Manual**. Run v2026.10.05 or later, the first release where
+agents with no mode set start in Bypass Permissions.
 
 To turn it on, add these GitHub Environment **variables** (not secrets) to your `production`
 environment, then run **Deploy Production**:
@@ -117,9 +121,9 @@ environment, then run **Deploy Production**:
 | `ACP_INTERACTION_FORMS_ENABLED` | `true` | Questions, in conversation-mode chats                                 |
 | `ACP_INTERACTION_URLS_ENABLED`  | `true` | Links to open (external service requests), in conversation-mode chats |
 
-An agent session reads these when it starts, so chats that are already running carry on as they
-began: start a new chat to try it. Setting a variable back to `false` stops new requests, and any
-already waiting can still be answered until they expire. Deadlines and size limits are in the
+Turning a switch on applies to chats started after the deploy, so start a new chat to try it.
+Turning one off refuses new requests straight away, even in running chats; any already waiting can
+still be answered until they expire. Deadlines and size limits are in the
 [configuration reference](/docs/reference/configuration/#agent-requests-in-chat).
 
 Codex needs SAM's own build of its runtime to ask questions and send links. Every deploy publishes
@@ -437,17 +441,39 @@ What to do, by what the card shows:
   width="375"
 />
 
-**When a project reaches the 10 GiB cap.** Cloudflare limits each project's storage object to 10 GiB.
-At the cap every write to that project fails with `PROJECT_DATA_STORAGE_FULL` — new tasks, chat
-messages, sleep — and so do the archive drain, **Abandon**, and the routine cleanup, because each
-has to write something before it can free space. To get out of that state, a superadmin can call
+### When a project reaches the 10 GiB storage cap
+
+Cloudflare limits each project's storage object to 10 GiB. **Admin → Storage** shows how close each
+project is. At the cap every write to that project fails: new tasks and chat messages get
+`PROJECT_DATA_STORAGE_FULL`, and putting sessions to sleep fails too. So do the archive drain and
+**Abandon**, because each has to write something before it can free space, and the routine search
+cleanup switches itself off just before the cap.
+
+To get out of that state, a superadmin can call
 `POST /api/admin/project-data/storage/:projectId/grouped-fts-wall-recovery`, which deletes the
-search index of old, finished sessions first. Every call needs a `reason` and its own limits
-(`dryRun`, `maxRows`, `maxBytes`, `maxSessions`, each capped by a
-`PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_*` setting). Start with `dryRun: true`, then raise the limits
-while each call reports space freed. Messages are not deleted: searches that cover those sessions
-still work, but find less, because they fall back to scanning recent messages. There is no button
-for this yet.
+search index of finished (stopped or failed) sessions at least a week old, largest first. Messages are not deleted: searches that cover those
+sessions still work, but find less, because they fall back to scanning recent messages. There is no
+button for it yet. Sign in to SAM as a superadmin, open `https://api.yourdomain.com/health` in the
+same browser, and run this in that tab's developer console:
+
+```js
+await fetch('/api/admin/project-data/storage/<projectId>/grouped-fts-wall-recovery', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    reason: 'Project storage at the 10 GiB cap',
+    dryRun: true,
+    maxSessions: 10,
+    maxRows: 5000,
+    maxBytes: 33554432,
+  }),
+}).then((response) => response.json());
+```
+
+Every call needs a `reason`, `dryRun`, and the three limits `maxSessions`, `maxRows`, and `maxBytes`,
+each capped by a `PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_*` setting. The dry run reports what a real call would
+remove. Then set `dryRun: false` and start small — one session, 500 rows, 4 MiB (`4194304`) — and
+raise the limits while each response shows `error: null` and `afterBytes` below `beforeBytes`.
 
 ## Teardown
 
@@ -541,6 +567,13 @@ Machines users enrolled themselves (bring-your-own nodes), app-deployment nodes,
 ## Troubleshooting
 
 For what SAM does with a workspace VM that stops responding, see [Unresponsive machines are released automatically](#unresponsive-machines-are-released-automatically).
+
+### Agents stop whenever they need approval
+
+If agents stop each time they need permission and no card appears in the chat, agent requests are
+off, so SAM refuses every request. Turn them on as described in
+[Let agents ask in chat](#let-agents-ask-in-chat), or have users switch those agents to **Bypass
+Permissions**, then start a new chat. Running sessions keep the setting they started with.
 
 ### "error: failed to decrypt state"
 

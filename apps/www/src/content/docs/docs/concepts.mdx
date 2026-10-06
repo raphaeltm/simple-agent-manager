@@ -120,7 +120,7 @@ When you submit work from the chat:
 1. SAM generates a concise title from your message
 2. A descriptive output branch is created (`sam/...`) from your default branch
 3. SAM selects or provisions a workspace, **already checked out on that branch**, reusing a warm one when available
-4. Your chosen agent runs autonomously with your description
+4. Your chosen agent runs autonomously with your description — unless its [permission mode](/docs/guides/agents/#permission-mode) tells it to ask you first, in which case it [waits for your answer in the chat](/docs/guides/chat-features/#when-the-agent-needs-you)
 5. When done, the agent commits, pushes, and opens a pull request
 
 SAM refuses to auto-push a completed task while the workspace is still on the project's default branch, so agent work reaches a reviewable branch rather than `main`. See [Where the work lands](/docs/guides/idea-execution/#where-the-work-lands).

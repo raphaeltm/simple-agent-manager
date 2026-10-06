@@ -100,6 +100,10 @@ Once someone is a member, the project becomes genuinely shared. Any active membe
 
 What stays personal:
 
+- **Answering your agent.** When an agent stops to ask for permission, ask a question, or send a
+  link to open, only the person who started that chat can see the request and answer it. Teammates
+  see that the chat is waiting (**Needs input**), not what it asked — see
+  [When the Agent Needs You](/docs/guides/chat-features/#when-the-agent-needs-you).
 - **Your API keys and cloud credentials** are yours. A teammate never sees or uses your raw keys.
 - **Nodes** (the VMs that host workspaces) are user-scoped resources, billed to the credential that provisioned them.
 

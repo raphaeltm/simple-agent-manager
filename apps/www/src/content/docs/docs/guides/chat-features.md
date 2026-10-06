@@ -11,23 +11,13 @@ Recent chat updates make the workspace feel more like a persistent work surface:
 
 Agent output streams directly to your browser via WebSocket. You see code being written, terminal commands executing, and the agent's thought process as it happens — no waiting for a complete response.
 
-## Message Actions
-
-Once a message has finished arriving, small buttons appear under it:
-
-- **Info** shows when the message was sent and how many words and characters it has.
-- **Copy** copies the message as written, Markdown included.
-- **Read aloud** plays an agent reply as audio — see [Text-to-Speech Playback](#text-to-speech-playback).
-
-Your own messages have **Info** and **Copy** too, so you can pick up a prompt you wrote earlier and
-reuse it.
-
 ## When the Agent Needs You
 
 Sometimes an agent stops and waits for you. It wants permission before it runs a command or edits a
 file, it has a question only you can answer, or a tool it uses wants you to open a page in your
-browser. Each request appears as a card in the chat, under the step it belongs to, and the chat is
-marked **Needs input** in the session list. The agent is paused until you answer.
+browser. Each request appears as a card in the chat — a permission request under the step it's
+about, a question or a link at the end of the chat — and the chat is marked **Needs input** in the
+session list. The agent is paused until you answer.
 
 <picture>
   <source media="(max-width: 40em)" srcset="/images/docs/chat-permission-request-mobile.png 2x" />
@@ -42,69 +32,114 @@ For every kind of request:
 - **Only the person who started the chat can answer.** In a
   [shared project](/docs/guides/collaboration/), other members see that the agent is waiting, but
   not what it asked or what you answered.
-- **No notification is sent.** Watch the session list for **Needs input**. (A notification arrives
-  only when an agent asks with its `request_human_input` tool, which is a different, message-style
-  question — see [Notifications](/docs/guides/notifications/).)
-- **Requests expire.** The card shows how long you have. If nobody answers in time, the card changes
-  to **Request expired**, the agent is told the request was cancelled, and the action it asked
-  about does not happen. Send a message to tell the agent how to carry on.
-- **Once you've answered, you can close the tab.** **Answer saved** means SAM has your answer and is
-  delivering it; the card then changes to **Delivered to agent**. If the agent stopped before it
-  could take the answer, the card says **Request interrupted** instead — send your decision as a
-  message.
+- **No notification is sent.** Watch the session list for **Needs input**; on a phone, open the list
+  with the list button at the top right of the project. A chat with no new messages for three hours
+  moves into the collapsed **Older** group at the bottom of the list, label and all, so look there
+  too. (Notifications cover a different kind of question, the one agents ask with their
+  `request_human_input` tool — see [Notifications](/docs/guides/notifications/).)
+- **You don't have to stay on the page.** A request waits in SAM, not in your browser tab, so you can
+  answer later or from another device until its deadline, which the card shows. If nobody answers in
+  time, the request ends — the card says it expired or was cancelled — and the agent is told no, so
+  the action it asked about does not happen. Send a message to tell the agent how to carry on.
+- **Answer on the card, not in the message box.** A message you type waits until the agent's turn
+  ends, and the turn can't end until the card is answered or expires. To stop the agent instead,
+  select **Interrupt** (the red button above the message box); the card then says **Request
+  cancelled**.
+- **After you answer**, the card says your answer is saved, then that it was delivered to the agent.
+  If your connection dropped as you answered, select **Retry answer** (or **Check receipt**) on the
+  card: it sends the same answer again, so it can't count twice. If the card says delivery is
+  unconfirmed, or that the request was interrupted because the agent stopped first, check whether
+  the agent carried on; if not, send your decision as a message.
 
 :::note[Self-hosted instances]
 These requests are off until an operator turns them on — see
-[Let agents ask in chat](/docs/guides/self-hosting/#let-agents-ask-in-chat). Until then, an
-agent that asks for permission is told no automatically, so the action it wanted does not happen.
+[Let agents ask in chat](/docs/guides/self-hosting/#let-agents-ask-in-chat). Until then no card
+appears: whatever the agent asked to do is refused on the spot, which can look as though the agent
+stopped for no reason.
 :::
 
 ### Permission requests
 
 Whether an agent asks before acting depends on its
 [permission mode](/docs/guides/agents/#permission-mode). Agents start in **Bypass Permissions**,
-which rarely asks (a few agents, such as Amp, ask on their own anyway). In **Manual** mode the agent
+which rarely asks (a few agents, such as Amp and Gemini CLI, ask on their own anyway). In **Manual**
+mode the agent
 asks before it runs commands or changes files, and in **Plan Mode** Claude Code asks you to approve
 its plan before it changes anything.
 
 The card is titled with what the agent wants to do — for a command, the command itself — and its
-buttons are the agent's own choices. For a Claude Code command they are usually **Yes**; **Yes, and
-don't ask again for …**, naming the kind of command it will stop asking about; and **No**. A plan
-approval asks how to continue — for example **Yes, auto-accept edits** — or offers **No, keep
-planning**. A permission request waits up to two hours in a conversation and 30 minutes in a task.
+buttons are the agent's own choices. For a Claude Code command they are usually:
+
+- **Yes** runs it this once.
+- **Yes, and don't ask again for …** runs it and lets similar commands, named on the button, run
+  without asking from then on in this chat's workspace.
+- **No** refuses. The agent is told you said no and carries on without it.
+
+A plan approval is titled **Approve Plan** and asks how to continue — for example **Yes, and use
+auto mode** or **Yes, manually approve edits** — or offers **No, keep planning**. A permission request
+waits up to two hours in a session labelled **Chat** in the session list, and up to 30 minutes in
+one labelled **Task**.
 
 ### Questions
 
 When an agent needs a decision — which of two designs to build, say — it can ask with a short form:
 choices to pick from, short text, numbers, or yes/no. Fill it in and select **Send answer**. Claude
 Code's multiple-choice questions arrive this way, each with an **Other** box for an answer of your
-own. **Decline** tells the agent you're skipping the question.
+own. **Decline** tells the agent you're skipping the question. A question waits up to two hours.
 
-![An "Agent question" card in the chat, with its deadline under the title. The agent asks "Where should uploaded receipts be stored?". A "Storage" dropdown has "R2 bucket (Recommended)" selected, with that option's description below it, and an empty "Other" box follows for an answer of your own. At the bottom are "Send answer" and "Decline" buttons.](/images/docs/chat-agent-question.png)
+<picture>
+  <source media="(max-width: 40em)" srcset="/images/docs/chat-agent-question-mobile.png 2x" />
+  <img
+    src="/images/docs/chat-agent-question.png"
+    alt="An &quot;Agent question&quot; card in the chat, with its deadline under the title. The agent asks &quot;Where should uploaded receipts be stored?&quot;. A &quot;Storage&quot; dropdown has &quot;R2 bucket (Recommended)&quot; selected, with that option's description below it, and an empty &quot;Other&quot; box follows for an answer of your own. At the bottom are &quot;Send answer&quot; and &quot;Decline&quot; buttons."
+  />
+</picture>
 
-Questions appear only in conversation-mode chats, which include every
-[Instant](/docs/guides/instant-sessions/) chat. A task can't stop to ask this way.
+Questions appear only in sessions labelled **Chat** in the session list — which includes every
+[Instant](/docs/guides/instant-sessions/) session you start yourself. A **Task** can ask for
+permission, but not ask questions or send links.
 
 ### Links to open
 
 Some tools — usually an [MCP server](/docs/guides/mcp-servers/) you connected — need you to sign in
 or approve something on their own website. The card, titled **External service request**, shows
-where the link goes. Select the **Open …** link to visit it in a new tab and finish there, then
-come back and select **Continue after opening** so the agent carries on; that button only becomes
-available once you have opened the link. **Decline** tells the agent you won't.
+where the link goes. Select the **Open …** link to visit it in a new tab and finish there, then come
+back and select **Continue after opening** so the agent carries on. That button only becomes
+available once you have opened the link, and if the page reloads while you're away — common on
+phones — select the link again first. **Decline** tells the agent you won't.
 
-![An "External service request" card. It says that Northwind CRM needs you to approve access before the agent can read your customer records, shows "Destination: mcp.northwind-crm.com" and an "Open mcp.northwind-crm.com" link, and has two buttons: "Continue after opening", which stays unavailable until you open the link, and "Decline".](/images/docs/chat-external-link-request.png)
+<picture>
+  <source media="(max-width: 40em)" srcset="/images/docs/chat-external-link-request-mobile.png 2x" />
+  <img
+    src="/images/docs/chat-external-link-request.png"
+    alt="An &quot;External service request&quot; card. It says that Northwind CRM needs you to approve access before the agent can read your customer records, shows &quot;Destination: mcp.northwind-crm.com&quot; and an &quot;Open mcp.northwind-crm.com&quot; link, and has two buttons: &quot;Continue after opening&quot;, which stays unavailable until you open the link, and &quot;Decline&quot;."
+  />
+</picture>
 
-SAM never opens a link by itself, and it shows only links to public `https://` addresses. Opening
+SAM never opens a link by itself, and it shows only `https://` links to a named host — never
+`localhost`, an IP address, or a link with a password in it. Opening
 the link doesn't prove the sign-in worked. If the service reports back, the card says **The external
 service reported completion**; many services don't, so the card can say completion is unconfirmed
 even when it succeeded. A link request waits up to 10 minutes, and like questions it appears only in
-conversation-mode chats.
+sessions labelled **Chat**.
 
 A tool whose sign-in has to return to `localhost` can't finish from a SAM session, so SAM refuses
 it and the chat says **This sign-in flow needs a local callback that this session cannot
 complete**. Connect that service another way — see
 [When a server needs sign-in](/docs/guides/mcp-servers/#when-a-server-needs-sign-in).
+
+## Message Actions
+
+Once a message has finished arriving, small icon buttons appear under it:
+
+- **Info** (an _i_ in a circle) shows when the message was sent and how many words and characters it
+  has.
+- **Read aloud** (a speaker) plays an agent reply as audio — see
+  [Text-to-Speech Playback](#text-to-speech-playback).
+- **Copy** (two overlapping squares) copies the message as written, Markdown included.
+
+Your own messages have **Info** and **Copy** too, so you can pick up a prompt you wrote earlier and
+reuse it.
 
 ## The Session Tool Rail
 

@@ -110,31 +110,40 @@ coming before an agent stops on it.
 - **In a chat**, a small chip under the chat's title shows the credential that chat's agent uses —
   for example `Claude · 5h 78% · Week 31%`, shortest limit first. Select it to see every limit, how
   much of it is used, and when it resets. It appears once SAM has a reading, usually after the
-  agent's first reply.
-- **In Settings → Advanced**, each entry in the **Credentials** list shows the same chip once an
-  agent has used it.
+  agent's first reply; credentials that report nothing (see the table below) never show one.
+- **In Settings → Advanced**, each of your personal credentials in the **Credentials** list shows the
+  same chip once an agent has used it.
 - **Agents** can read the same numbers with the `get_credential_limits` tool, so an agent
   coordinating others can pause before a limit and schedule itself to wake after the reset.
 
-The chip's colour follows the fullest limit: **OK** below 75%, **Warning** from 75%, **Critical**
-from 90%, and **Limit reached** once the provider refuses requests. When a limit is nearly used up,
-wait for the reset time shown in the dialog, or start new work with a profile that uses a different
-credential.
+The chip's colour shows the most serious state among the limits, and the dialog names it: **OK**,
+**Warning** (from 75%, or earlier if the provider warns), **Critical** (from 90%), or **Limit
+reached** (the provider is refusing requests). The percentages are for your whole account with that
+provider, so they include use outside SAM. When a limit is nearly used up,
+wait for the reset time shown in the dialog, or start new work with a profile for a different agent
+— Codex instead of Claude Code, say. If a limit runs out in the middle of a task, the task fails, but
+SAM keeps its workspace: reply in the same chat after the reset to carry on (see
+[When a task fails](/docs/guides/session-troubleshooting/#when-a-task-fails)).
 
 The numbers are the last reading SAM took while an agent was using that credential, not live figures
-from the provider. A credential nobody has used for a while keeps its last reading, and the dialog
-says how old it is.
+from the provider. A credential nobody has used for a while keeps its last reading for up to 30 days,
+and the dialog says how old it is.
 
-| Agent and credential                           | Limits shown                                                 |
-| ---------------------------------------------- | ------------------------------------------------------------ |
-| Claude Code with a Claude Pro/Max subscription | Five-hour, weekly, and the weekly Opus and Sonnet limits     |
-| Codex with a ChatGPT plan                      | The plan's limits — often five-hour and weekly               |
-| OpenCode with an OpenCode Go key               | Rolling, weekly, and monthly                                 |
-| Any agent in the **SAM** provider mode         | The request and token rate limits the model provider reports |
+Which credentials report limits:
+
+- **Claude Code with a Claude Pro/Max subscription:** whichever of the five-hour, weekly, weekly Opus,
+  and weekly Sonnet limits Claude Code reports.
+- **Codex with a ChatGPT plan:** the plan's limits — often five-hour and weekly, sometimes weekly
+  only.
+- **OpenCode with an OpenCode Go key:** rolling, weekly, and monthly.
+- **Claude Code or Codex in the SAM provider mode:** the request and token rate limits the model
+  provider reports, shown as **Platform credential**.
 
 OpenCode Zen bills from a credit balance that only the OpenCode console shows, so Zen has no chip;
-OpenCode's agent settings link to the console instead. SAM reads these numbers only from what the
-agent and the provider report while working; it doesn't call undocumented provider account pages.
+OpenCode's agent settings link to the console instead. API keys used directly, and the other agents,
+report no limits. SAM reads these numbers from what the agents and providers report while they work,
+plus OpenCode's Go usage endpoint; it doesn't call Anthropic's or OpenAI's undocumented account-usage
+pages.
 
 ## AI Provider Modes
 
@@ -177,8 +186,13 @@ ID is refused.
 Agents start in **Bypass Permissions** mode, so they edit files and run commands without stopping to
 ask. Each workspace is its own isolated VM or container. To make an agent more careful, choose another
 mode in a profile, in the project's **Agent Overrides** (project settings), or in **Settings → Agents**.
-SAM uses the first of these that sets a mode, in that order, so a mode saved earlier — in an older
-profile, say — still applies.
+SAM uses the first of these that sets a mode, in that order, and a change applies to chats started,
+or woken from sleep, after you save it — not to a chat that is already running.
+
+A mode saved earlier still applies. If an agent asks when you don't expect it, check all three
+places: older built-in profiles were set to **Accept Edits** or **Plan Mode**, and saving
+**Settings → Agents** before 4 October stored the old default, now shown as **Manual**, even if you
+only changed the model. Choose **Bypass Permissions** there to stop the questions.
 
 | Mode                             | What the agent does                                                        |
 | -------------------------------- | -------------------------------------------------------------------------- |
@@ -191,13 +205,14 @@ profile, say — still applies.
 When the agent asks, a card appears in the chat and the agent waits for your answer — see
 [When the Agent Needs You](/docs/guides/chat-features/#when-the-agent-needs-you). A request nobody
 answers expires and counts as a no. On a self-hosted instance where the operator hasn't
-[turned agent requests on](/docs/guides/self-hosting/#let-agents-ask-in-chat), every request
-counts as a no, so an agent in **Manual** or **Plan Mode** can't get approval to make changes.
+[turned agent requests on](/docs/guides/self-hosting/#let-agents-ask-in-chat), no card appears and
+every request counts as a no, so an agent in **Manual**, **Accept Edits**, or **Plan Mode** can't get
+approval to make changes.
 
 Claude Code supports every mode. Even in Bypass Permissions it still asks about a few safety checks,
 and those questions appear in the chat. Codex always runs with full access. Other agents keep their
-own behavior when they don't support the chosen mode — Amp, for example, still asks before some
-actions even when SAM sets Bypass Permissions.
+own behavior when they don't support the chosen mode — Amp and Gemini CLI, for example, still ask
+before some actions even when SAM sets Bypass Permissions.
 
 ## Workspace Profiles
 

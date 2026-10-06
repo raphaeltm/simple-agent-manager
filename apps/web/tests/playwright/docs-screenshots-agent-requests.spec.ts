@@ -336,7 +336,9 @@ const INTERACTIONS: Record<string, InteractionFixture> = {
       answeredAt: null,
       deliveryState: null,
       attentionMarkerId: `marker-${QUESTION.id}`,
-      toolCallId: QUESTION_TOOL_CALL,
+      // The runtime sends no tool-call ID for a question (`session_host_form.go`), so the card
+      // renders at the end of the chat, after the AskUserQuestion step.
+      toolCallId: null,
     },
     // Claude Code's AskUserQuestion form (`elicitation.js:askUserQuestionsToCreateRequest`).
     detail: {
@@ -575,6 +577,16 @@ function isMobile(page: Page): boolean {
 }
 
 /**
+ * A card crop on a phone needs the whole card inside the visible conversation: at 375x667 a
+ * question or link card is taller than the space between the header and the composer, so the
+ * crop caught the composer and the scroll button and cut the card off. Height does not change
+ * a card's layout at a given width, so a tall phone viewport gives a faithful 375-wide card.
+ */
+async function fitCardOnPhone(page: Page) {
+  if (isMobile(page)) await page.setViewportSize({ width: 375, height: 1200 });
+}
+
+/**
  * For a crop of one card: the agent's turn is still open while it waits, so the floating
  * Interrupt button sits over the end of the conversation — which is where the card is. It is
  * not part of the card, so it is hidden once the test has seen it.
@@ -635,9 +647,15 @@ test('docs: permission request in the session list and the chat', async ({ page 
   });
 });
 
-/** The same request on a phone, where the desktop capture shrinks to unreadable text. */
+/**
+ * The same request on a phone, where the desktop capture shrinks to unreadable text. A
+ * 375x812 phone (rather than the project's 375x667) shows the agent's whole reply above the
+ * step: at the shorter height the floating header cut a message's "Comment" link in half,
+ * which reads as a rendering bug in a still image.
+ */
 test('docs: permission request on a phone', async ({ page }) => {
   test.skip(!isMobile(page), 'phone capture');
+  await page.setViewportSize({ width: 375, height: 812 });
   await openChat(page, PERMISSION, PERMISSION_LIST);
   const card = await expectPermissionCard(page);
   await card.scrollIntoViewIfNeeded();
@@ -649,7 +667,7 @@ test('docs: permission request on a phone', async ({ page }) => {
 // ---------------------------------------------------------------------------
 
 test('docs: agent question card', async ({ page }) => {
-  test.skip(isMobile(page), 'desktop capture');
+  await fitCardOnPhone(page);
   await openChat(page, QUESTION, [QUESTION, ...OTHER_SESSIONS]);
 
   const card = page.getByTestId(`acp-form-${QUESTION_ID}`);
@@ -667,11 +685,11 @@ test('docs: agent question card', async ({ page }) => {
 
   await card.scrollIntoViewIfNeeded();
   await hideInterruptButton(page);
-  await docsShot(page, 'chat-agent-question', card);
+  await docsShot(page, isMobile(page) ? 'chat-agent-question-mobile' : 'chat-agent-question', card);
 });
 
 test('docs: external link request card', async ({ page }) => {
-  test.skip(isMobile(page), 'desktop capture');
+  await fitCardOnPhone(page);
   await openChat(page, LINK, [LINK, ...OTHER_SESSIONS]);
 
   const card = page.getByTestId(`acp-url-${LINK_ID}`);
@@ -685,7 +703,11 @@ test('docs: external link request card', async ({ page }) => {
 
   await card.scrollIntoViewIfNeeded();
   await hideInterruptButton(page);
-  await docsShot(page, 'chat-external-link-request', card);
+  await docsShot(
+    page,
+    isMobile(page) ? 'chat-external-link-request-mobile' : 'chat-external-link-request',
+    card
+  );
 });
 
 // ---------------------------------------------------------------------------
