@@ -14,7 +14,7 @@ Concurrent final flushes pass the chunk read, both increment the summary, and th
 - [x] Serialize collector spool upload; prevent restart during Stop; Go race tests including final flush.
 - [x] Read-only production summary and R2 existence audit; concrete guarded repair plan, seek approval before irreversible changes.
 - [x] Required lint13/13, typecheck19/19, root tests21/21 (API11383; web4023), build9/9; full Go and targeted race tests.
-- [ ] Independent Cloudflare/Go/test/constitution/completion review; address findings.
+- [x] Independent Cloudflare/Go/test/constitution/completion implementation review; findings addressed. Final workflow review remains required before archive.
 - [ ] One coordinated bounded staging deploy and real VM heartbeat/access/final flush; cleanup.
 - [ ] Draft PR until gates pass; CI, best-effort CodeRabbit request/wait, merge, production deploy monitoring.
 - [x] SAM Idea follow-up for full seven-day postdeploy zero-error/count mismatch check: `01M475RGQFE39D940WDJVEGA2N` (window starts at successful production deployment).
@@ -42,3 +42,13 @@ Introduced by c97d00ec0 (per-workspace resource history, #2110): the original se
 Quality evidence: root lint13/13 and typecheck19/19 passed; complete VM-agent Go suite passed, plus targeted race checks. All resource-history API tests29/29 passed. Root build9/9 and full root JavaScript tests21/21 passed (API816 files/11383 tests; web4023 tests); an initial paused run hit worker startup timeouts and was restarted cleanly. Shared staging candidate is isolated from this PR branch and will combine independently reviewed siblings; live validation and workflow gates must be recorded before completion.
 
 Independent repair-artifact review PASS: all 45 dry-run predicates equal forward predicates; both backup queries use exact target IDs; inverse SQL changes only before/after counts. Independent SQLite dry-run/backup/forward/rollback and timestamp-drift controls passed. No production mutations.
+
+## Shared staging evidence (in progress)
+
+Pinned integration `2613b82d02afe0c10a229b236055adcb979085c7` deployed successfully, including smoke, in [run37389450160](https://github.com/raphaeltm/simple-agent-manager/actions/runs/37389450160). It contains reviewed resource-history runtime `4f83d6a7287c4c34fff480dc78cf9cac269840aa`, capacity `65dfc2ca7f148cc08dd8de5bc0804828f22ee3a4`, and sleeping visibility `7041c6a4dafb13c734df7d40577478f197a6fec2` plus test-only fixture correction. Each feature PR retains its own scope. Combined focused63/63 and API typecheck passed. Immediately before deployment, both active workflows and live usage were checked; only the owned old-agent fixture was active.
+
+Playwright dashboard/projects/settings loaded fully with no page errors; sleeping chat header and node page also loaded. The chat capture does not establish transcript rendering. Genuine old-agent callback uploads use new attempt UUID R2 keys after deployment; the final-flush chunk contains138 samples. All four chunks pass raw checksum/decode detail reads, and the summary680 samples/5 tool spans exactly equals chunk sums.
+
+The old-agent capacity admission, deadline preservation and busy missing-intent controls passed. First normal sleep capture timed out after a150-second home-upload progress gap; its previous committed snapshot remained authoritative. The normal second attempt succeeded at2026-10-06T00:21:44.095Z with a full non-degraded snapshot and expected Git HEAD. Runtime deletion was confirmed at00:26:49.018Z under the existing five-minute TTL. Upload timing evidence was added to existing SAM Idea `01M0VZ205TN8A1JYHNJN77DS4F`; no unrelated runtime change.
+
+Node warm retention remains30 minutes from00:21:52.108Z, earliest retirement00:51:52. Cost is bounded to one occupied host and sequential replacement, conservative<=EUR0.03 withinEUR0.10; coordinated cleanup deadline01:20UTC. Fresh-agent heartbeat/access, collector final-flush/restart, sibling wake/stop controls and final cleanup remain pending. No policy, idle deadline or production data overrides. Physical provider inventory is unavailable in this environment; qualify direct inventory claims and retain lifecycle/provider termination receipts.
