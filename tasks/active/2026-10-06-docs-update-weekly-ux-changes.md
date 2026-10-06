@@ -287,3 +287,16 @@ since (#2180–#2240).
     - LOW: Usage Limits says the chat has usually slept by the reset; a waiting card keeps the
       machine running (`session-idleness.ts`); the previous cycle's "no action" note warns about
       the v2026.09.24–v2026.10.01 sign-in bug.
+- **Round 8**, same two lenses on a8613c6d5.
+  - Fact-checker: 4 LOW findings, all fixed.
+    - A fresh-start wake still doesn't commit or push a Task.
+    - A woken Task keeps its **Task** label.
+    - The sign-in range in the previous cycle's note now says "v2026.09.24 to v2026.10.01; update
+      to v2026.10.02 or later".
+    - "Can reliably ask only in a new or forked chat".
+  - The "machine keeps running" note is now scoped to VMs, because Instant's own 1-hour idle
+    path isn't traced.
+  - The fact-checker confirmed:
+    - Pushing to the output branch updates the existing PR.
+    - Task-mode turns push after every turn while the Task is awake.
+    - Completed tasks sleep immediately.

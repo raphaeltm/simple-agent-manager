@@ -174,7 +174,8 @@ it or stops. There are two causes:
 Switching to Bypass Permissions doesn't help Amp or Gemini CLI, which ask on their own even in
 Bypass Permissions, or Claude Code in a devcontainer that
 [runs as `root`](/docs/guides/agents/#claude-code-asks-even-in-bypass-permissions). Those agents
-can ask only in a new or forked chat, and on a self-hosted instance only once requests are on.
+can reliably ask only in a new or forked chat, and on a self-hosted instance only once requests are
+on.
 
 ## Recovery is in progress
 

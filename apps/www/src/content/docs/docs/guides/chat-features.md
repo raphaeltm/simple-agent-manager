@@ -37,8 +37,8 @@ For every kind of request:
   question, the one agents ask with their `request_human_input` tool — see
   [Notifications](/docs/guides/notifications/).)
 - **You don't have to stay on the page.** A request waits in SAM, not in your browser tab, so you can
-  answer later or from another device until its deadline, which the card shows. Meanwhile the
-  session stays awake, so its machine keeps running — on your own cloud account, that is billed. If
+  answer later or from another device until its deadline, which the card shows. Meanwhile a VM
+  session stays awake, so its machine keeps running, billed to your cloud account if it's yours. If
   nobody answers in
   time, the request ends — the card says it expired or was cancelled — and the agent is told no, so
   the action it asked about does not happen. Send a message to tell the agent how to carry on.
@@ -175,7 +175,8 @@ A **Chat** doesn't commit, push, or open a pull request for you. For work you wa
 pull request, use a VM profile whose **Task Mode** is **Task**, such as one you create with **Build
 and open PRs** and **Cloud VM**. A **Task** pushes your follow-ups only while it's awake: once it has
 slept — when it's completed, or after sitting idle (15 minutes on a VM by default) — a reply wakes
-it [as a Chat](/docs/guides/agents/#after-a-chat-wakes-from-sleep), and SAM stops pushing for it.
+it, but from then on it [works like a Chat](/docs/guides/agents/#after-a-chat-wakes-from-sleep)
+(it keeps its **Task** label), and SAM stops pushing for it.
 See
 [What happens to your work](/docs/guides/instant-sessions/#what-happens-to-your-work).
 

@@ -237,7 +237,7 @@ failed — without the settings it started with:
   opened, or to open one if there isn't one yet.
 
 The exception is a VM wake where SAM has to start the agent fresh: that uses the profile's mode and
-model and can ask, though a Task still doesn't open its pull request. To get the profile's settings back, or when the agent needs your approval,
+model and can ask, but SAM still doesn't commit or push a Task's work. To get the profile's settings back, or when the agent needs your approval,
 [fork](/docs/guides/chat-features/#conversation-forking) the chat or start a new one with that
 profile selected.
 

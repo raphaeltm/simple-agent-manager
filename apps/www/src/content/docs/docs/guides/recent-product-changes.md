@@ -262,8 +262,9 @@ and disk alone — see [Compute Pools](/docs/guides/compute-pools/).
   inconclusive checks back off to six hours: `WORKSPACE_IDLE_BACKOFF_BASE_MS`,
   `WORKSPACE_IDLE_BACKOFF_MAX_MS`.
 
-**Updating to any release from this cycle needs no action**, though from v2026.09.24 until v2026.10.02
-signing in with GitHub fails in a browser that isn't already signed in, so prefer a later release.
+**Updating to any release from this cycle needs no action**, though on v2026.09.24 to v2026.10.01
+signing in with GitHub fails in a browser that isn't already signed in, so update to v2026.10.02 or
+later instead.
 There are no new secrets or bindings,
 and the new database migrations run in the deploy pipeline. Two things are worth a look. A
 `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS` or `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET` variable
