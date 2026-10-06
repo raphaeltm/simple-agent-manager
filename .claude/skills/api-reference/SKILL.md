@@ -105,6 +105,8 @@ Comment threads are scoped to the ProjectData Durable Object addressed by `proje
 
 ## MCP Orchestration
 
+- `list_project_agents` includes sleeping VM tasks. `send_message_to_subtask` and `send_durable_message` accept same-project sleeping targets through durable prompt delivery; when that rollout is disabled, they return an explicit refusal instead of attempting a live-node send. `stop_subtask` allows direct-parent cancellation of a sleeping child without contacting its released runtime. Live-caller authorization and terminal-target exclusions remain enforced.
+
 - `wait_for_subtasks` — Task-agent-only tool that registers one durable wait for unique same-project task IDs. `waitKey` is a required stable workflow-step idempotency key and must be reused after a lost response. `condition` is `all` (default) or `any`; optional `wakeAfterSeconds` is positive and server-capped. Persist workflow state before calling, then end the turn. ProjectData wakes the caller through exact-once durable prompt delivery when the condition or finite deadline resolves.
 - `dispatch_task` — Create a direct child task subject to project dispatch depth and concurrency limits. Accepts `resourceRequirements` for modern workload sizing and deprecated `vmSize` for legacy compatibility. `resourceRequirements` is VM-only and conflicts with `runtime: "cf-container"`.
 - `get_task_details` / `get_peer_agent_output` — Read authoritative child status and output after a durable wake.

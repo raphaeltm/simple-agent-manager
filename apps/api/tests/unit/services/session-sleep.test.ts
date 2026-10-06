@@ -125,8 +125,9 @@ function buildDb(
     [postEnsureWorkspace ?? { warmSince: nodeWarmSince }],
     activeNodeWorkspaces,
   ];
-  const select = vi.fn(() => {
-    const rows = selectRows.shift() ?? [];
+  const select = vi.fn((projection?: Record<string, unknown>) => {
+    // Event insert-select is a statement, not another loaded workspace query.
+    const rows = projection?.toStatus ? [] : (selectRows.shift() ?? []);
     const chain = {
       from: vi.fn(() => chain),
       leftJoin: vi.fn(() => chain),
@@ -143,7 +144,8 @@ function buildDb(
     };
     return chain;
   });
-  return { select, update, batch: vi.fn(async () => undefined) };
+  const insert = vi.fn(() => ({ select: vi.fn((query: unknown) => query) }));
+  return { select, update, insert, batch: vi.fn(async () => undefined) };
 }
 
 function buildD1Database(

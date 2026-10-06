@@ -12,6 +12,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { ulid } from '../lib/ulid';
 import { stopWorkspaceOnNode } from './node-agent';
 import * as projectDataService from './project-data';
 import {
@@ -228,6 +229,32 @@ export async function completeSleepTeardown(
             )
           )
       : null;
+  // Capture the previous status in the same transaction before updating it.
+  // The predicate excludes already-sleeping and terminal rows so retries neither
+  // duplicate events nor invent a transition for completed conversations.
+  const taskSleepEvent =
+    taskSleeping && workspace.taskId
+      ? db.insert(schema.taskStatusEvents).select(
+          db
+            .select({
+              id: sql<string>`${ulid()}`.as('id'),
+              taskId: schema.tasks.id,
+              fromStatus: schema.tasks.status,
+              toStatus: sql<string>`'sleeping'`.as('to_status'),
+              actorType: sql<string>`'system'`.as('actor_type'),
+              actorId: sql<string | null>`NULL`.as('actor_id'),
+              reason: sql<string>`'VM conversation sleep completed'`.as('reason'),
+              createdAt: sql<string>`${now}`.as('created_at'),
+            })
+            .from(schema.tasks)
+            .where(
+              and(
+                eq(schema.tasks.id, workspace.taskId),
+                inArray(schema.tasks.status, ['queued', 'delegated', 'in_progress'])
+              )
+            )
+        )
+      : null;
   if (workspace.nodeRuntime === 'cf-container') {
     const nodeSleeping = db
       .update(schema.nodes)
@@ -239,12 +266,10 @@ export async function completeSleepTeardown(
       })
       .where(eq(schema.nodes.id, workspace.nodeId));
     await db.batch([workspaceSleeping, agentSleeping, nodeSleeping]);
+  } else if (taskSleeping && taskSleepEvent) {
+    await db.batch([workspaceSleeping, agentSleeping, taskSleepEvent, taskSleeping]);
   } else {
-    if (taskSleeping) {
-      await db.batch([workspaceSleeping, agentSleeping, taskSleeping]);
-    } else {
-      await db.batch([workspaceSleeping, agentSleeping]);
-    }
+    await db.batch([workspaceSleeping, agentSleeping]);
   }
   const sleepWarning = options.fallback
     ? `Workspace slept through the bounded sleep fallback (transcript and Git recovery point, snapshot ${verified?.status ?? 'unknown'}/${verified?.degradation ?? 'unknown'})`

@@ -366,6 +366,7 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
       schema.nodes,
       schema.workspaces,
       schema.tasks,
+      schema.taskStatusEvents,
       schema.sessionSummaries,
       schema.agentSessions,
       schema.sessionSnapshots,

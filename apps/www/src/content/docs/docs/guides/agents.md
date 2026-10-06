@@ -201,8 +201,10 @@ Agent responses can be played back as audio using Deepgram Aura 2 (via Workers A
 SAM tracks related lifecycle state at three levels:
 
 - **Chat session**: `active`, `sleeping`, `stopped`, or `error` in the public API. A sleeping conversation keeps the composer visible so a same-chat follow-up can wake and resume it.
-- **Task record**: `draft`, `ready`, `queued`, `delegated`, `in_progress`, `completed`, `failed`, or `cancelled`. Task-mode work keeps its task completion lifecycle instead of showing the manual Sleep action while idle.
+- **Task record**: `draft`, `ready`, `queued`, `delegated`, `in_progress`, `sleeping`, `completed`, `failed`, or `cancelled`. A sleeping VM conversation retains the same task when it wakes. Task-mode work keeps its task completion lifecycle instead of showing the manual Sleep action while idle.
 - **Runtime agent session**: `running`, `recovery`, `sleeping`, `suspended`, `stopped`, or `error`. Recovery means SAM is rebuilding runtime compute and restoring the saved harness/session state.
+
+Sleeping VM tasks remain visible in Active Tasks, the account map, and agent lists. Agents in the same project can send a follow-up using `send_message_to_subtask` or `send_durable_message`; durable delivery wakes the saved conversation. If durable delivery is disabled, the tools explain that sleeping targets require it. A direct parent can cancel a sleeping child with `stop_subtask` without waking its VM.
 
 Conversation-mode sessions with an attached workspace can be manually slept when awake and idle. Archive remains destructive and appears after the reversible sleep boundary.
 
