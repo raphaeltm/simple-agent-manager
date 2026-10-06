@@ -273,3 +273,17 @@ since (#2180–#2240).
       card appears".
   - The fact-checker also confirmed that Agent Overrides and Settings → Agents changes apply on
     the next wake: the restore re-fetches `/agent-settings`.
+  - User reviewer: 3 MEDIUM, 4 LOW. All verified and fixed; one LOW (no Sleep path for a woken
+    Task) was already fixed by the fact-check round.
+    - MEDIUM: follow-ups after a Task has slept aren't pushed to its PR. A wake re-queues even
+      completed tasks (`session-recovery.ts`) in conversation mode. The docs now say to ask the
+      agent to commit and push to its branch (which updates the existing PR) rather than "open
+      one". Chat or Task explains when this starts, and the troubleshooting index has an entry.
+    - MEDIUM: added a troubleshooting index entry for "an agent set to ask made changes without
+      asking" (woken chat falls back to Bypass).
+    - MEDIUM: agents.md spells out that an asking mode in Agent Overrides or Settings → Agents
+      makes a woken chat refuse every request. The caution box states the trade-off: fork with
+      the profile selected for approvals, or carry on without approvals to keep the files.
+    - LOW: Usage Limits says the chat has usually slept by the reset; a waiting card keeps the
+      machine running (`session-idleness.ts`); the previous cycle's "no action" note warns about
+      the v2026.09.24–v2026.10.01 sign-in bug.

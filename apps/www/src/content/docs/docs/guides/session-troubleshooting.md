@@ -16,6 +16,10 @@ your work is safe and what to do next. Everything here applies to both
   model is unavailable for your account. → [Fix the connection](#the-agent-or-a-tool-cant-sign-in)
 - **A message saying a sign-in flow requires a local callback**, or an MCP tool failing with
   `401 Unauthorized`. → [Connect the tool another way](#the-agent-or-a-tool-cant-sign-in)
+- **An agent set to ask made changes without asking**, after its chat slept and woke. A woken chat
+  doesn't keep its profile's mode. → [Fork, or start a new chat](/docs/guides/agents/#after-a-chat-wakes-from-sleep)
+- **Changes you asked for after a Task slept aren't in its pull request.** A woken Task works like a
+  Chat, so SAM doesn't push for it. → [Ask the agent to push](/docs/guides/agents/#after-a-chat-wakes-from-sleep)
 - **The agent stops whenever it needs your approval, and no card appears.** The chat has woken from
   sleep, or agent requests are off on a self-hosted instance.
   → [Fork, or change the mode](#the-agent-stops-for-approval-and-no-card-appears)
@@ -128,7 +132,8 @@ or in the failure card under the chat header (expand the card for the next step)
   sleep, then reply to wake it; in a **Chat**, select **Sleep** (the moon button above the message
   box), then send a message. A woken chat
   [works differently](/docs/guides/agents/#after-a-chat-wakes-from-sleep): it usually can't ask for
-  your approval, and a Task no longer opens its pull request. If you need either, start a new chat.
+  your approval, and SAM no longer pushes a Task's work for it. If you need either, start a new
+  chat.
 - **A failure card: "Model unavailable for this account."** The credential works, but your plan or
   account can't use that model — or the model ID is mistyped. Pick another model in the agent's
   profile, the project's **Agent Overrides**, or **Settings → Agents**, then start a new chat, or
@@ -371,8 +376,8 @@ kept:
 
 - **The chat goes to Sleeping, and the composer is still there.** The work was kept. Reply in the
   same chat: it wakes with its files restored, and you can tell the agent how to carry on. It then
-  [works like a Chat](/docs/guides/agents/#after-a-chat-wakes-from-sleep), so SAM won't open the
-  pull request for it: ask the agent to push and open one when it's done. Don't use
+  [works like a Chat](/docs/guides/agents/#after-a-chat-wakes-from-sleep), so SAM won't push for it:
+  ask the agent to commit and push to its branch, and to open a pull request if there isn't one. Don't use
   **Retry** for this, even if the failure card suggests it — Retry starts a new chat without the
   saved files.
 - **A system message: "Task failed. SAM saved this conversation, but its workspace snapshot is

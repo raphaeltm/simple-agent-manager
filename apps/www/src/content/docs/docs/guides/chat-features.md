@@ -37,7 +37,9 @@ For every kind of request:
   question, the one agents ask with their `request_human_input` tool — see
   [Notifications](/docs/guides/notifications/).)
 - **You don't have to stay on the page.** A request waits in SAM, not in your browser tab, so you can
-  answer later or from another device until its deadline, which the card shows. If nobody answers in
+  answer later or from another device until its deadline, which the card shows. Meanwhile the
+  session stays awake, so its machine keeps running — on your own cloud account, that is billed. If
+  nobody answers in
   time, the request ends — the card says it expired or was cancelled — and the agent is told no, so
   the action it asked about does not happen. Send a message to tell the agent how to carry on.
 - **Answer on the card, not in the message box.** A message you type waits until the agent's turn
@@ -57,11 +59,12 @@ For every kind of request:
   card, and the chat usually drops its profile's permission mode, so a **Manual** profile may go
   ahead without asking. The same goes for a chat SAM restored after its container or machine failed.
   Chats sleep on their own when idle — by default after 15 minutes on a VM and an hour on Instant —
-  and the session list then marks them with a moon icon. To approve the agent's work
-  again, [fork](#conversation-forking) the chat or start a new one; a fork carries a summary of the
-  chat, not its files. See
+  and the session list then marks them with a moon icon. To get approvals back,
+  [fork](#conversation-forking) the chat or start a new one with that profile selected; a fork
+  carries a summary of the chat, not its files. To keep working on the same files, let the chat carry
+  on without approvals — see
   [The agent stops for approval and no card appears](/docs/guides/session-troubleshooting/#the-agent-stops-for-approval-and-no-card-appears)
-  for a way to keep them.
+  if its requests are being refused.
 - **On long-running VM work, answer within an hour.** Once a VM chat or task has been awake for four
   hours, SAM's check for
   [stalled turns](/docs/guides/session-troubleshooting/#sam-ended-a-stalled-turn) can end it when a
@@ -170,7 +173,10 @@ permission, but not ask questions or send links. Which you get depends on what y
 
 A **Chat** doesn't commit, push, or open a pull request for you. For work you want delivered as a
 pull request, use a VM profile whose **Task Mode** is **Task**, such as one you create with **Build
-and open PRs** and **Cloud VM** — see
+and open PRs** and **Cloud VM**. A **Task** pushes your follow-ups only while it's awake: once it has
+slept — when it's completed, or after sitting idle (15 minutes on a VM by default) — a reply wakes
+it [as a Chat](/docs/guides/agents/#after-a-chat-wakes-from-sleep), and SAM stops pushing for it.
+See
 [What happens to your work](/docs/guides/instant-sessions/#what-happens-to-your-work).
 
 ## Message Actions

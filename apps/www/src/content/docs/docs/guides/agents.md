@@ -129,7 +129,8 @@ When a limit is nearly used up, wait for the reset time shown in the dialog, or 
 profile for a different agent — Codex instead of Claude Code, say. If a limit runs out in the middle of work, a **Task** fails but
 SAM keeps its workspace (see [When a task fails](/docs/guides/session-troubleshooting/#when-a-task-fails)),
 and a **Chat** just stops with the provider's error. Either way, reply in the same chat after the
-reset to carry on; a Task woken this way then [works like a Chat](#after-a-chat-wakes-from-sleep).
+reset to carry on. By then the chat has usually gone to sleep, so it wakes
+[without some of its settings](#after-a-chat-wakes-from-sleep).
 
 The numbers are the last reading SAM took while an agent was using that credential, not live figures
 from the provider. A credential nobody has used for a while keeps its last reading for up to 30 days,
@@ -225,12 +226,15 @@ failed — without the settings it started with:
 
 - **Mode:** it takes its mode from **Agent Overrides**, then **Settings → Agents**, and uses Bypass
   Permissions if neither sets one. So a chat whose profile is set to **Manual** or **Plan Mode**
-  usually goes ahead without asking, unless one of those places also sets an asking mode.
+  usually goes ahead without asking. If one of those places sets an asking mode instead, every
+  request is refused and the agent
+  [stops](/docs/guides/session-troubleshooting/#the-agent-stops-for-approval-and-no-card-appears).
 - **Model:** a Claude Code chat keeps its model unless one of those places sets one; other agents
   may switch to their default model.
 - **Requests:** it can't ask you anything yet — SAM refuses its requests without showing a card.
-- **Pull requests:** a **Task** carries on like a **Chat**. When the agent finishes, SAM doesn't
-  commit, push, or open a pull request, so ask the agent to push its work and open one.
+- **Pull requests:** a **Task** carries on like a **Chat**: SAM no longer commits or pushes for it.
+  Ask the agent to commit and push to its branch, which updates the pull request SAM already
+  opened, or to open one if there isn't one yet.
 
 The exception is a VM wake where SAM has to start the agent fresh: that uses the profile's mode and
 model and can ask, though a Task still doesn't open its pull request. To get the profile's settings back, or when the agent needs your approval,
