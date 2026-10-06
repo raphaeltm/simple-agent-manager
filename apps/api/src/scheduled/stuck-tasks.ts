@@ -71,6 +71,7 @@ import {
   loadTaskSleepPreservation,
   withholdTerminalVerdictForSleepingSession,
 } from '../services/task-sleep-preservation';
+import { cleanupTerminalTaskResources } from '../services/task-terminal-cleanup';
 import { transitionTaskToTerminal } from '../services/task-terminal-transition';
 import {
   getVmAdmissionDiagnostics,
@@ -1706,7 +1707,18 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
       // Best-effort cleanup: stop workspace and mark auto-provisioned node as warm.
       // cleanupTaskRun reads the task's workspaceId and autoProvisionedNodeId from DB.
       try {
-        await cleanupTaskRun(task.id, env);
+        if (cachedStall?.decision === 'stalled') {
+          // A classifier failure is recoverable, not an intentional cost kill.
+          // Reuse the failed-task snapshot/sleep path on VM and Instant; unknown
+          // preservation state withholds teardown. The sleep sweep bounds it.
+          await cleanupTerminalTaskResources(env, task.id, {
+            status: 'failed',
+            errorMessage: reason,
+            logContext: { source: 'scheduled.stuck_tasks.stalled_classifier' },
+          });
+        } else {
+          await cleanupTaskRun(task.id, env);
+        }
       } catch (cleanupErr) {
         log.error('stuck_task.cleanup_failed', {
           taskId: task.id,

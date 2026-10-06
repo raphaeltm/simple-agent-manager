@@ -2040,6 +2040,10 @@ export class ProjectData extends DurableObject<Env> {
     return count;
   }
 
+  hasPendingSessionHumanInput(sessionId: string, taskId: string, now: number) {
+    return attention.hasPendingHumanInput(this.sql, sessionId, taskId, now);
+  }
+
   getSessionAttentionSummary(sessionId: string) {
     return attention.getAttentionSummary(this.sql, sessionId);
   }

@@ -6,11 +6,13 @@ import {
   DEFAULT_STALLED_TASK_CLASSIFIER_SELECTOR,
   DEFAULT_STALLED_TASK_CLASSIFIER_TIMEOUT_MS,
   DEFAULT_STALLED_TASK_CLASSIFIER_TRANSCRIPT_MAX_CHARS,
+  DEFAULT_TASK_LIVENESS_PROBE_TIMEOUT_MS,
 } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
 import { redactCredentialTokens } from '../lib/credential-token-redaction';
 import { log } from '../lib/logger';
+import { snapshotInteractions } from '../services/acp-interaction-store';
 import * as projectDataService from '../services/project-data';
 import type { TaskRuntimeLiveness } from '../services/task-runtime-liveness';
 
@@ -169,6 +171,49 @@ function longTurnAge(liveness: TaskRuntimeLiveness): number | null {
   return null;
 }
 
+/** Read authoritative input state, independently of the quiet transcript.
+ * Both reads share the background liveness budget. A failed/unknown read throws
+ * into the classifier's fail-safe catch; it never authorizes a terminal verdict.
+ */
+async function isWaitingForHumanInput(
+  env: Env,
+  task: { id: string; project_id: string; chat_session_id: string },
+  nowMs: number
+): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error('human input probe timed out')),
+      parsePositiveInt(env.TASK_LIVENESS_PROBE_TIMEOUT_MS, DEFAULT_TASK_LIVENESS_PROBE_TIMEOUT_MS)
+    );
+  });
+  try {
+    const [attentionPending, interactions] = await Promise.race([
+      Promise.all([
+        projectDataService.hasPendingSessionHumanInput(
+          env,
+          task.project_id,
+          task.chat_session_id,
+          task.id,
+          nowMs
+        ),
+        snapshotInteractions(env, task.project_id, task.chat_session_id),
+      ]),
+      timeout,
+    ]);
+    return (
+      attentionPending ||
+      interactions.pending.some(
+        (request) =>
+          (request.state === 'pending' || request.state === 'answered') &&
+          request.deadlineAt > nowMs
+      )
+    );
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export async function classifyLongRunningTaskStall(
   env: Env,
   input: {
@@ -188,6 +233,8 @@ export async function classifyLongRunningTaskStall(
   if (activeAgeMs === null || activeAgeMs < config.minActivityAgeMs) return null;
 
   try {
+    const inputTask = { ...input.task, chat_session_id: input.task.chat_session_id };
+    if (await isWaitingForHumanInput(env, inputTask, input.nowMs)) return null;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(
@@ -266,8 +313,15 @@ export async function classifyLongRunningTaskStall(
     ]).finally(() => {
       if (timer) clearTimeout(timer);
     });
+    const verdict = extractDecision(payload, config.confidenceThreshold);
+    // A request can arrive while Clef is running. Do not act on that stale verdict.
+    if (
+      verdict.decision === 'stalled' &&
+      (await isWaitingForHumanInput(env, inputTask, Date.now()))
+    )
+      return null;
     return {
-      ...extractDecision(payload, config.confidenceThreshold),
+      ...verdict,
       transcriptMessageCount: messages.length,
       latestTranscriptActivityAgeMs: latestActivityAgeMs,
     };

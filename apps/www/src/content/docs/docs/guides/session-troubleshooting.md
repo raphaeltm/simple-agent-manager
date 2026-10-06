@@ -229,6 +229,11 @@ workspace, and puts the chat to sleep. That usually takes a few minutes, but if 
 middle of a turn SAM waits for it to end, for up to eight hours. Until then the chat stays awake with
 the failure card showing: wait for it to go to sleep rather than using **Retry**.
 
+SAM's stalled-turn check respects unanswered permission requests and questions until their
+response deadline. Waiting for your answer is not treated as an agent stall. If SAM detects a
+real stalled turn, it uses the same snapshot-and-sleep process described above to try to keep
+its work before removing the workspace.
+
 The failure card under the chat header stays either way. It is red, or grey when there is nothing to
 debug — an expired question, for example. Two tools in the
 [session tool rail](/docs/guides/chat-features/#the-session-tool-rail) start over: **Retry** opens a
