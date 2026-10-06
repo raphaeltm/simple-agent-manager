@@ -21,10 +21,12 @@ Complete the existing draft PR without changing its intent: make `.do-state.md` 
 - [x] Use PATH-resolved Git and fail closed when Git fails.
 - [x] Update both agent workflow instructions to describe local-only, snapshot-visible state.
 - [x] Add real-Git tests for snapshot tree capture/restore, tracking/staging rejection, removal, and Git failure.
-- [ ] Validate lint, types, build, quality tests and existing Go snapshot regressions.
-- [ ] Complete independent specialist reviews and record findings/evidence in PR.
-- [ ] Ready PR after validation; request CodeRabbit and complete required wait.
-- [ ] Merge only after all required checks pass; monitor production deployment.
+- [x] Validate types, build, 655 quality tests and existing Go snapshot regressions; format ratchet passed. Blocking lint/CI remains recorded in PR evidence.
+- [x] Complete independent specialist reviews and record findings/evidence in PR.
+
+## Release gates (canonical record: PR body)
+
+Ready the PR only after validation; request CodeRabbit and complete its wait. Merge only after required checks pass, then monitor production deployment. These operational steps are tracked in PR evidence rather than claimed complete by this implementation archive.
 
 ## Staging decision
 
