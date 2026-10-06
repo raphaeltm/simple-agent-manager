@@ -88,6 +88,7 @@ func (s *Server) claimWorkspaceReprovision(ctx context.Context, workspaceID stri
 	if body.EvictionGeneration != "" {
 		runtime.EvictionGeneration = body.EvictionGeneration
 	}
+	s.resetResourceHistoryAfterReprovision(workspaceID)
 	runtime.Status = "creating"
 	runtime.UpdatedAt = nowUTC()
 	return runtime, *runtime, 0, nil

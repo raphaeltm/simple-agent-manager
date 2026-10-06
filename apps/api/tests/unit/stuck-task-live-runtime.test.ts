@@ -26,11 +26,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as observabilitySchema from '../../src/db/observability-schema';
 import * as schema from '../../src/db/schema';
 import { runMigrations } from '../../src/durable-objects/migrations';
+import {
+  createAttentionMarker,
+  hasPendingHumanInput,
+} from '../../src/durable-objects/project-data/attention';
 import { upsertActivityState } from '../../src/durable-objects/project-data/session-state';
 import { readTaskAcpLivenessSignals } from '../../src/durable-objects/project-data/task-runtime-liveness';
 import type { Env as ProjectDataEnv } from '../../src/durable-objects/project-data/types';
 import type { Env } from '../../src/env';
 import { recoverStuckTasks } from '../../src/scheduled/stuck-tasks';
+import { hasUnexpiredHumanInput } from '../../src/services/acp-interaction-store';
+import * as projectDataService from '../../src/services/project-data';
 import { createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 import { createSqlStorage } from './durable-objects/sql-storage-test-utils';
 
@@ -59,9 +65,14 @@ const { projectDataRpc } = vi.hoisted(() => ({
     messages: [] as Record<string, unknown>[],
     /** Simulates an unreachable ProjectData Durable Object. */
     unreachable: false,
+    pendingInteractions: [] as Array<{ state: string; deadlineAt: number; kind: string }>,
   },
 }));
 vi.mock('../../src/services/project-data', () => ({
+  hasPendingSessionHumanInput: vi.fn(async (_env, _projectId, sessionId, taskId, nowMs) => {
+    if (projectDataRpc.unreachable) throw new Error('ProjectData RPC failed');
+    return hasPendingHumanInput(projectDataRpc.sql!, sessionId, taskId, nowMs);
+  }),
   getMessages: vi.fn(async () => ({ messages: projectDataRpc.messages, hasMore: false })),
   listSessions: vi.fn().mockResolvedValue({ sessions: [], total: 0 }),
   listAcpSessions: vi.fn().mockResolvedValue({ sessions: [] }),
@@ -76,6 +87,13 @@ vi.mock('../../src/services/project-data', () => ({
       if (!projectDataRpc.sql) throw new Error('ProjectData store not seeded');
       return readTaskAcpLivenessSignals(projectDataRpc.sql, {} as ProjectDataEnv, opts);
     }
+  ),
+}));
+vi.mock('../../src/services/acp-interaction-store', () => ({
+  hasUnexpiredHumanInput: vi.fn(async (_env, _projectId, _sessionId, now: number) =>
+    projectDataRpc.pendingInteractions.some(
+      (request) => ['pending', 'answered'].includes(request.state) && request.deadlineAt > now
+    )
   ),
 }));
 vi.mock('../../src/services/vm-agent-container', () => ({
@@ -307,6 +325,7 @@ beforeEach(() => {
   cleanupTaskRunMock.mockResolvedValue(undefined);
   d1 = new Database(':memory:');
   createSchemaTables(d1, [
+    schema.agentSessions,
     schema.tasks,
     schema.taskStatusEvents,
     schema.workspaces,
@@ -316,12 +335,14 @@ beforeEach(() => {
     schema.projectEventSourceOutbox,
     observabilitySchema.platformErrors,
   ]);
+  d1.exec('CREATE UNIQUE INDEX snapshots_chat ON session_snapshots(chat_session_id)');
   projectDb = new Database(':memory:');
   doSql = createSqlStorage(projectDb);
   runMigrations(doSql);
   projectDataRpc.sql = doSql;
   projectDataRpc.messages = [];
   projectDataRpc.unreachable = false;
+  projectDataRpc.pendingInteractions = [];
 });
 
 afterEach(() => {
@@ -465,7 +486,7 @@ describe('live-runtime record: what kept the task, and why', () => {
     expect(row.message).toContain('(now 540 min)');
   });
 
-  it('fails a long live prompt when Clef classifies transcript silence as stalled', async () => {
+  function seedOldActivePrompt() {
     seedTask({ startedAt: T0 - 9 * HOUR });
     seedLiveRuntime({ generationStartedAt: T0 - 9 * HOUR, nodeHeartbeatAt: T0 - 30_000 });
     seedAcpSession({ heartbeatAt: T0 - 20_000 });
@@ -479,6 +500,10 @@ describe('live-runtime record: what kept the task, and why', () => {
       observedAt: T0 - 2 * MINUTE,
       now: T0 - 2 * MINUTE,
     });
+  }
+
+  it('fails a real stalled turn but queues snapshot-backed sleep instead of tearing down work', async () => {
+    seedOldActivePrompt();
     projectDataRpc.messages = [
       {
         id: 'msg-1',
@@ -497,13 +522,23 @@ describe('live-runtime record: what kept the task, and why', () => {
       },
     });
 
+    d1.prepare("UPDATE nodes SET node_role = 'workspace' WHERE id = ?").run(NODE_ID);
+    d1.prepare(
+      "INSERT INTO agent_sessions (id, workspace_id, user_id, status) VALUES (?, ?, 'user-1', 'running')"
+    ).run(ACP_ID, WORKSPACE_ID);
     const result = await recoverStuckTasks(env({ AI: { run: aiRun } }));
 
     expect(result.failedInProgress).toBe(1);
     expect(result.heartbeatSkipped).toBe(0);
     expect(taskRow().status).toBe('failed');
     expect(taskRow().error_message).toContain('SAM detected a stalled agent turn');
-    expect(cleanupTaskRunMock).toHaveBeenCalledWith(TASK_ID, expect.anything());
+    expect(cleanupTaskRunMock).not.toHaveBeenCalled();
+    expect(
+      d1
+        .prepare('SELECT sleep_status FROM session_snapshots WHERE chat_session_id = ?')
+        .pluck()
+        .get(CHAT_SESSION_ID)
+    ).toBe('scheduled');
     expect(aiRun).toHaveBeenCalledWith(
       '@cf/cloudflare/clef',
       expect.objectContaining({
@@ -513,20 +548,145 @@ describe('live-runtime record: what kept the task, and why', () => {
     );
   });
 
+  describe('human input is not a stalled agent', () => {
+    function quietPrompt() {
+      seedOldActivePrompt();
+      projectDataRpc.messages = [
+        {
+          id: 'quiet',
+          role: 'tool',
+          content: 'Waiting for permission.',
+          createdAt: T0 - 80 * MINUTE,
+        },
+      ];
+    }
+    function stalledVerdict() {
+      return {
+        answers: {
+          stall_status: { value: 'stalled', probabilities: { stalled: 0.99 } },
+          reason: { value: 'transcript_silent' },
+        },
+      };
+    }
+    it.each(['permission', 'form', 'url'])(
+      'preserves an unanswered %s request without consulting the model',
+      async (kind) => {
+        quietPrompt();
+        projectDataRpc.pendingInteractions = [
+          { state: 'pending', deadlineAt: T0 + 30 * MINUTE, kind },
+        ];
+        const aiRun = vi.fn().mockResolvedValue(stalledVerdict());
+        await recoverStuckTasks(env({ AI: { run: aiRun } }));
+        expect(taskRow().status).toBe('in_progress');
+        expect(aiRun).not.toHaveBeenCalled();
+        expect(cleanupTaskRunMock).not.toHaveBeenCalled();
+      }
+    );
+    it('preserves needs-input even when a newer non-input marker exists', async () => {
+      quietPrompt();
+      createAttentionMarker(doSql, {
+        sessionId: CHAT_SESSION_ID,
+        taskId: TASK_ID,
+        workspaceId: WORKSPACE_ID,
+        kind: 'needs_input',
+        source: 'request_human_input',
+        expiresAt: T0 + MINUTE,
+      });
+      vi.setSystemTime(T0 + 1);
+      createAttentionMarker(doSql, {
+        sessionId: CHAT_SESSION_ID,
+        taskId: TASK_ID,
+        workspaceId: WORKSPACE_ID,
+        kind: 'wake_failed',
+        source: 'system',
+      });
+      const aiRun = vi.fn().mockResolvedValue(stalledVerdict());
+      await recoverStuckTasks(env({ AI: { run: aiRun } }));
+      expect(taskRow().status).toBe('in_progress');
+      expect(aiRun).not.toHaveBeenCalled();
+      expect(cleanupTaskRunMock).not.toHaveBeenCalled();
+    });
+    it('rejects a stale verdict if a human request arrived during inference', async () => {
+      quietPrompt();
+      const aiRun = vi.fn(async () => {
+        projectDataRpc.pendingInteractions = [
+          { state: 'pending', kind: 'permission', deadlineAt: T0 + MINUTE },
+        ];
+        return stalledVerdict();
+      });
+      await recoverStuckTasks(env({ AI: { run: aiRun } }));
+      expect(aiRun).toHaveBeenCalledOnce();
+      expect(taskRow().status).toBe('in_progress');
+      expect(cleanupTaskRunMock).not.toHaveBeenCalled();
+    });
+    it('withholds failure when the interaction lookup is unavailable', async () => {
+      quietPrompt();
+      vi.mocked(hasUnexpiredHumanInput).mockRejectedValueOnce(
+        new Error('InteractionStore unavailable')
+      );
+      const aiRun = vi.fn().mockResolvedValue(stalledVerdict());
+      await recoverStuckTasks(env({ AI: { run: aiRun } }));
+      expect(taskRow().status).toBe('in_progress');
+      expect(aiRun).not.toHaveBeenCalled();
+      expect(cleanupTaskRunMock).not.toHaveBeenCalled();
+    });
+    it('withholds failure when the attention lookup is unavailable', async () => {
+      quietPrompt();
+      vi.mocked(projectDataService.hasPendingSessionHumanInput).mockRejectedValueOnce(
+        new Error('ProjectData unavailable')
+      );
+      const aiRun = vi.fn().mockResolvedValue(stalledVerdict());
+      await recoverStuckTasks(env({ AI: { run: aiRun } }));
+      expect(taskRow().status).toBe('in_progress');
+      expect(aiRun).not.toHaveBeenCalled();
+      expect(cleanupTaskRunMock).not.toHaveBeenCalled();
+    });
+    it('bounds a hung interaction lookup without failing or cleaning the task', async () => {
+      quietPrompt();
+      // Durable Object RPC returns a Promise with RPC property picks; this test
+      // intentionally models only its never-settling await boundary.
+      vi.mocked(hasUnexpiredHumanInput).mockImplementationOnce(
+        () => new Promise(() => {}) as unknown as ReturnType<typeof hasUnexpiredHumanInput>
+      );
+      const aiRun = vi.fn().mockResolvedValue(stalledVerdict());
+      await recoverStuckTasks(env({ AI: { run: aiRun }, TASK_LIVENESS_PROBE_TIMEOUT_MS: '5' }));
+      expect(taskRow().status).toBe('in_progress');
+      expect(aiRun).not.toHaveBeenCalled();
+      expect(cleanupTaskRunMock).not.toHaveBeenCalled();
+    });
+    it('rechecks the attention store after a stalled verdict', async () => {
+      quietPrompt();
+      const aiRun = vi.fn(async () => {
+        createAttentionMarker(doSql, {
+          sessionId: CHAT_SESSION_ID,
+          taskId: TASK_ID,
+          workspaceId: WORKSPACE_ID,
+          kind: 'needs_input',
+          source: 'request_human_input',
+          expiresAt: T0 + MINUTE,
+        });
+        return stalledVerdict();
+      });
+      await recoverStuckTasks(env({ AI: { run: aiRun } }));
+      expect(aiRun).toHaveBeenCalledOnce();
+      expect(taskRow().status).toBe('in_progress');
+      expect(cleanupTaskRunMock).not.toHaveBeenCalled();
+    });
+    it('allows classification after a request deadline, so stale requests do not pin compute', async () => {
+      quietPrompt();
+      projectDataRpc.pendingInteractions = [
+        { state: 'pending', kind: 'permission', deadlineAt: T0 - 1 },
+      ];
+      const aiRun = vi
+        .fn()
+        .mockResolvedValue({ answers: { stall_status: { value: 'still_working' } } });
+      await recoverStuckTasks(env({ AI: { run: aiRun } }));
+      expect(aiRun).toHaveBeenCalledOnce();
+    });
+  });
+
   it('keeps a long live prompt when transcript output is recent', async () => {
-    seedTask({ startedAt: T0 - 9 * HOUR });
-    seedLiveRuntime({ generationStartedAt: T0 - 9 * HOUR, nodeHeartbeatAt: T0 - 30_000 });
-    seedAcpSession({ heartbeatAt: T0 - 20_000 });
-    upsertActivityState(doSql, ACP_ID, {
-      activity: 'prompting',
-      observedAt: T0 - 90 * MINUTE,
-      now: T0 - 90 * MINUTE,
-    });
-    upsertActivityState(doSql, ACP_ID, {
-      activity: 'prompting',
-      observedAt: T0 - 2 * MINUTE,
-      now: T0 - 2 * MINUTE,
-    });
+    seedOldActivePrompt();
     projectDataRpc.messages = [
       {
         id: 'msg-1',

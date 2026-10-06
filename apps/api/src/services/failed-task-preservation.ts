@@ -16,6 +16,7 @@
  * - `cleanupTerminalTaskResources` for `status: 'failed'` without destructive
  *   intent: the VM / standalone-agent failure callback, the task status route and
  *   explicit run cleanup (`cleanupRequestedTaskRun`).
+ * - `stuck-tasks.ts` for classifier-confirmed stalls (not cost kill switches).
  * - `attention-expiry.ts` for expired human-input and SAM check-in markers.
  *
  * Deliberately NOT routed here: explicit archive/delete (`destructiveSessionEnd`,

@@ -2996,6 +2996,18 @@ export async function forwardWebSocket(
 // Attention Markers
 // =========================================================================
 
+export function hasPendingSessionHumanInput(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  taskId: string,
+  now: number
+): Promise<boolean> {
+  return callProjectDataNoRetry(env, projectId, 'hasPendingSessionHumanInput', (stub) =>
+    stub.hasPendingSessionHumanInput(sessionId, taskId, now)
+  );
+}
+
 export async function createAttentionMarker(
   env: Env,
   projectId: string,

@@ -68,3 +68,27 @@ export async function readInteractionDetail(
   }
   return { summary: parseSummary(row), detail };
 }
+
+/** Indexed existence probe independent of UI snapshot limits or expiry backlog. */
+export function hasUnexpiredInteractionInput(sql: SqlStorage, now: number): boolean {
+  return (
+    sql
+      .exec<{ pending: number }>(
+        `SELECT 1 AS pending FROM interactions
+     WHERE state IN ('pending', 'answered') AND deadline_at > ? LIMIT 1`,
+        now
+      )
+      .toArray().length > 0
+  );
+}
+
+export function readInteractionRow(sql: SqlStorage, interactionId: string): InteractionRow | null {
+  return (
+    sql
+      .exec<InteractionRow>(
+        'SELECT * FROM interactions WHERE interaction_id = ? LIMIT 1',
+        interactionId
+      )
+      .toArray()[0] ?? null
+  );
+}

@@ -90,7 +90,9 @@ type Collector struct {
 	activeToolName map[string]string
 	closed         bool
 
-	cancel context.CancelFunc
+	cancel   context.CancelFunc
+	loopDone chan struct{}
+	stopDone chan struct{}
 }
 
 type Sample struct {
@@ -262,7 +264,7 @@ func (c *Collector) UpdateAttribution(attr Attribution) {
 
 func (c *Collector) Start(parent context.Context) {
 	c.mu.Lock()
-	if !c.enabledLocked() {
+	if c.closed || !c.enabledLocked() {
 		c.mu.Unlock()
 		return
 	}
@@ -273,6 +275,7 @@ func (c *Collector) Start(parent context.Context) {
 	runCtx, cancel := context.WithCancel(parent)
 	c.cancel = cancel
 	c.started = true
+	c.loopDone = make(chan struct{})
 	c.chunkStartedAt = c.cfg.Now()
 	c.mu.Unlock()
 
@@ -288,14 +291,30 @@ func (c *Collector) Start(parent context.Context) {
 func (c *Collector) Stop(ctx context.Context) {
 	c.mu.Lock()
 	if c.closed {
+		done := c.stopDone
 		c.mu.Unlock()
+		if done != nil {
+			select {
+			case <-done:
+			case <-ctx.Done():
+			}
+		}
 		return
 	}
 	c.closed = true
+	c.stopDone = make(chan struct{})
+	done := c.stopDone
+	loopDone := c.loopDone
 	if c.cancel != nil {
 		c.cancel()
 	}
 	c.mu.Unlock()
+	defer close(done)
+	// Join sampling and periodic flush before publishing the final chunk. The
+	// loop uses the cancelled context, including for any in-flight HTTP upload.
+	if loopDone != nil {
+		<-loopDone
+	}
 	c.flush(ctx, true)
 	c.retrySpool(ctx)
 }
@@ -362,6 +381,7 @@ func (c *Collector) ReconcileACPToolCalls(at time.Time) {
 }
 
 func (c *Collector) loop(ctx context.Context) {
+	defer close(c.loopDone)
 	ticker := time.NewTicker(c.cfg.SampleInterval)
 	defer ticker.Stop()
 	c.sample(ctx)
@@ -477,6 +497,8 @@ func (c *Collector) sampleFromCounters(now time.Time, counters cgroupCounters) S
 }
 
 func (c *Collector) flush(ctx context.Context, final bool) {
+	unlock := acquireSpoolLock(c.cfg.SpoolDir)
+	defer unlock()
 	body, ok := c.buildUpload(final)
 	if !ok {
 		return
@@ -485,7 +507,7 @@ func (c *Collector) flush(ctx context.Context, final bool) {
 		c.cfg.Logger.Warn("resourcehistory: spool write failed", "error", err)
 		return
 	}
-	c.retrySpool(ctx)
+	c.retrySpoolLocked(ctx)
 }
 
 func (c *Collector) buildUpload(final bool) (uploadBody, bool) {
@@ -657,7 +679,19 @@ func (c *Collector) writeSpool(body uploadBody) error {
 		return err
 	}
 	path := filepath.Join(c.cfg.SpoolDir, fmt.Sprintf("%020d.json", body.ChunkSequence))
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	tmp, err := os.CreateTemp(c.cfg.SpoolDir, ".chunk-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
 		return err
 	}
 	return c.enforceSpoolBudget()
@@ -698,6 +732,13 @@ func (c *Collector) enforceSpoolBudget() error {
 }
 
 func (c *Collector) retrySpool(ctx context.Context) {
+	// Hold ownership through reading, uploading and removing each spool file.
+	unlock := acquireSpoolLock(c.cfg.SpoolDir)
+	defer unlock()
+	c.retrySpoolLocked(ctx)
+}
+
+func (c *Collector) retrySpoolLocked(ctx context.Context) {
 	entries, err := os.ReadDir(c.cfg.SpoolDir)
 	if err != nil {
 		return
