@@ -307,3 +307,10 @@ since (#2180–#2240).
       approvals back" (fork or new chat).
     - LOW: the self-hosted requests-off remedy now also says how to keep the chat's files (Sleep,
       then send a message).
+- **Round 9**, same two lenses on 3f32289cb.
+  - Fact-checker: 3 LOW. Two fixed:
+    - The self-hosted "keep the files" path now says a Task that sleeps stops getting SAM's
+      pushes. It also uses the sleep-then-wake wording, since a Task has no Sleep button.
+    - "Profile or skill sets a mode".
+  - Declined: noting that a degraded-snapshot fresh start gives a **Task** conversation-mode
+    requests while it keeps the Task label. It's rare, and readers can't detect or act on it.
