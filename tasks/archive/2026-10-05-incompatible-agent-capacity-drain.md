@@ -2,6 +2,10 @@
 
 SAM task: 01M473KXWJYT6S1JR03E8GVY2B. Idea: 01M4677451EBA2GZW0TENE0WEM.
 
+## Current outcome
+
+Implementation, full local quality, independent specialist reviews and assigned staging acceptance PASS. Shared compute cleanup completed01:18:32 with zero live nodes/reservations before restoring original pool maximum3. Final independent completion reviewer PASS with qualified physical-overlap/browser evidence. PR2239 remains draft until exact-head CI passes; CodeRabbit request/wait, normal merge and successful production deployment are subsequent workflow gates.
+
 ## Problem
 
 Six production tasks exhausted the two-hour admission deadline while an occupied incompatible-agent host held spare hardware capacity and a pool slot. Preserve active work and configured pool/account limits. No legacy workspace-count caps or quota/spend changes.
@@ -26,7 +30,7 @@ Six production tasks exhausted the two-hour admission deadline while an occupied
 - [x] Eligible-full convergence and busy/blocked/foreign/deployment/Instant controls.
 - [x] Prove regression fails against original code and run required quality checks.
 - [x] Independent Cloudflare, constitution, test, documentation and completion review; resolve findings.
-- [ ] Coordinate one pinned bounded staging sweep with visibility and telemetry siblings; clean resources.
+- [x] Coordinate one pinned bounded staging sweep with visibility and telemetry siblings; clean resources.
 - [ ] Archive task, draft PR, CI, CodeRabbit request/wait, merge and monitor production deploy.
 
 ## Acceptance
@@ -124,3 +128,13 @@ The restored original fixture's explicit Sleep request exceeded the client's45-s
 Authorized normal VM Stop of ONLY the now-idle, fully captured restored original workspace returned stopping, then stopped/occupiedreservationreleased at01:01:58. Source finalizeWorkspaceStopInNode preserves recovery artifacts, clears obsolete sleep claims under the exact stop identity fence and schedules normal workspace TTL. Snapshot stayed available/restored. The original automatic protected sleep proof is separate and already passed; this manual handoff is not falsely counted as successful sleep.
 At01:02 coordinator and visibility received release for active parentprobe task01M477VY1W106QZW9E8H5KW2EH/session2f801eaa-2fa6-429d-a4ea-106d71e61a47/workspace01M47BC96W5665AXVFGRWYNTWC, sole current-agent node01M47B46AN4V9H6DC9PY79NY21/poolmax1rev28/occupied1. Visibility owns one child on this existing host, then coordinator owns telemetry stop/restart and cleanup by01:20. Parent normal idle intent01:12:44.986 must be cancelled through their ordinary dispatch prompt; no independent keepalive or allocation. Capacity agent now only observes and records evidence.
 Independent final completion reviewer found no substantive runtime expansion required: unchanged pool semantics are logical, and local tests cover the deleted cleanup path rather than a mandatory physical-deletion gate. Physical overlap qualification was added to existing follow-up SAM Idea01M474AV9DBFPBKPKAZ6PZXDTV. Final acceptance remains held for sibling checks and cleanup.
+Normal Stop cleanup qualification: original restored task closed FAILED at01:05:46.534 with exact reason “Task runtime is conclusively gone after reconciliation grace (workspace_stopped).” This is owned cleanup behavior after its successful stable-ID restore, not a failed admission or lost-work assertion. Restored workspace physical deletion confirmed01:06:56.336 after normal five-minute TTL; its snapshot remains available/restored. Sibling first protected sleep completed01:05:25.334 on same current host, no additional VM.
+
+### Final coordinated cleanup and runtime verification
+
+Coordinator verified direct parent WSS/TLS and executed marker at01:13:22.948, normal Stop01:14:26, same-host Restart RUNNING01:14:47, postrestart WSS/TLS executed marker01:15:32, final Stop confirmed01:16:06.848. Raw parent history181+35+7 samples equals summary223 with two tool spans and three distinct object keys, all payload integrity PASS. The restarted collector emitted seven fresh samples; running-window duration does not prove continuous sampling. Shared postdeploy Playwright header/status/input/node rendering and screenshots were inspected with no JS errors; blank transcript pane is still explicitly not counted as a functional transcript assertion. Separate actual file/Git restoration and terminal execution checks passed.
+Visibility exercised one child sleep and one actual same-host wake: HANDOFF_WAKE_OK, canonical idle/inactive/count0. Its remaining cycles/mailbox wake/sleeping cancellation cases did not fit the bounded window and remain pending on its own draft PR2240. Coordinator expressly confirmed these do not block the separately verified capacity prevention fix. No additional fixture writes after handoff.
+Urgent cleanup release was verified through SAM task identity and authenticated coordinator session messages confirming final Stop and cleanup handback; normal cleanup finished01:18:32.184 before firm01:20. Only owned parent01M477VY1W106QZW9E8H5KW2EH and child01M47BRJVHCQHKTFHSNYA8TEDY were cancelled. Owned replacement node01M47B46AN4V9H6DC9PY79NY21/provider168939857 normal DELETE returned success; strict endpoint termination gate and node row absence qualify the provider-boundary receipt. Owned managed node count0, active reservation count0, replacement row count0. No direct provider inventory was available. All remaining owned snapshot-linked workspaces have deleted/no-node state and runtime_deletion_proof node_runtime_terminated at01:18:20.480.
+Original pool maximum3 restored through normal PATCH, revision29 verified AFTER zero compute. No account quota/spending limit increase, third VM, direct D1 writes, workspace/project evidence purge, or independent deploy. Three available snapshots retained with node_idNULL and ordinary expires_at: original8a531f4e... 2026-10-13T00:59:11.618Z, parent2f801eaa... 2026-10-13T01:02:58.557Z, child3e86ad77... 2026-10-13T01:12:41.071Z. Four snapshot-linked deleted workspace records remain; normal history retention remains unchanged. Coordinator, visibility and parent received exact release receipts.
+
+Final independent task-completion review PASS: all assigned research/checklist/acceptance findings implemented and tested, real protected drain/restoration/full-host control and normal zero-compute/pool restoration verified. No material runtime issues or new code changes required. Existing no-node scheduled child snapshot is a normal reconciliation artifact, not active compute; do not claim every sleep intent cleared. CodeRabbit, final CI, merge and production deployment remain required workflow gates.
