@@ -192,6 +192,18 @@ The index returns `{ sessionId, runs, chunks, totalChunkCount, omittedChunkCount
 
 Agents read the same data with the `get_resource_history` MCP tool, which takes no `projectId` — the project comes from the verified token. With no arguments it returns the caller's own session; supplying any one of `sessionId`, `taskId`, or `workspaceId` replaces the caller's defaults entirely rather than narrowing within them.
 
+### Agent requests
+
+The permission requests, questions, and links an agent puts in a chat while it waits (see [When the Agent Needs You](/docs/guides/chat-features/#when-the-agent-needs-you)).
+
+| Method | Endpoint                                                                   | Purpose                                            |
+| ------ | -------------------------------------------------------------------------- | -------------------------------------------------- |
+| GET    | `/api/projects/:id/sessions/:sessionId/interactions`                       | Pending and recently settled requests for the chat |
+| GET    | `/api/projects/:id/sessions/:sessionId/interactions/:interactionId`        | One request's full detail (session creator only)   |
+| POST   | `/api/projects/:id/sessions/:sessionId/interactions/:interactionId/answer` | Answer a pending request (session creator only)    |
+
+The list returns `{ pending, settled, cursor }`. Each item has the request's `kind` (`permission`, `form`, or `url`), `state`, and `deadlineAt`; other project members get only that structural subset for pending requests, never the question or the answer. The detail is decrypted on request and served `Cache-Control: no-store`. An answer carries an `answerKey` and a `decision` with a SHA-256 `answerHash`, so repeating the same answer is safe; answering a request that was already answered or has expired returns `409`.
+
 ## Nodes
 
 ### `GET /api/nodes`
