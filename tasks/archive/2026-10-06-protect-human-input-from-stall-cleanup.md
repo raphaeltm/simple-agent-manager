@@ -40,3 +40,7 @@ Waiting for human input is never interpreted as a machine stall before its deadl
 ## Delivery record
 
 Implementation archived after task-completion-validator A–F PASS and all local reviews complete. Release progress and final result: https://github.com/raphaeltm/simple-agent-manager/pull/2245.
+
+## CodeRabbit follow-up
+
+Capped UI interaction snapshots can omit unexpired requests behind expired backlog. Replaced the classifier snapshot read with an indexed `InteractionStore.hasUnexpiredHumanInput(now)` existence probe, independent of snapshot limits. Canonical deadlines protect ACP requests even when their projection has no expiry; unbounded projection markers alone do not pin compute. Real DO test adds 64 expired records, proves the UI snapshot omits the live request, and verifies pending/answered protection then deadline release. Focused 59 tests, real Worker test, API typecheck/build and updated runtime/completion reviews PASS.

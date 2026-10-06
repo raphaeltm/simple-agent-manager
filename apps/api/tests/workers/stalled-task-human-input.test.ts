@@ -63,9 +63,33 @@ describe('stalled-turn human-input guard across real Durable Objects', () => {
         await state.storage.deleteAlarm();
       });
       await runInDurableObject(store, async (_instance, state) => {
+        // Expiry alarms batch work; old records can fill the UI snapshot cap.
+        const columns = state.storage.sql
+          .exec<{ name: string }>('PRAGMA table_info(interactions)')
+          .toArray()
+          .map((column) => column.name);
+        const selected = columns
+          .map((name) =>
+            ['interaction_id', 'created_at', 'deadline_at'].includes(name) ? '?' : name
+          )
+          .join(', ');
+        for (let index = 0; index < 64; index++) {
+          state.storage.sql.exec(
+            `INSERT INTO interactions (${columns.join(', ')}) SELECT ${selected}
+             FROM interactions WHERE interaction_id = ?`,
+            `expired-${index}`,
+            now - HOUR,
+            now - 1,
+            interactionId
+          );
+        }
         state.storage.sql.exec('DELETE FROM outbox');
         await state.storage.deleteAlarm();
       });
+      expect(
+        (await store.snapshot()).pending.some((request) => request.interactionId === interactionId)
+      ).toBe(false);
+      expect(await store.hasUnexpiredHumanInput(now)).toBe(true);
       const aiRun = vi.fn().mockResolvedValue({
         answers: { stall_status: { value: 'stalled', probabilities: { stalled: 0.99 } } },
       });

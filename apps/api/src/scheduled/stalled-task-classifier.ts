@@ -12,7 +12,7 @@ import {
 import type { Env } from '../env';
 import { redactCredentialTokens } from '../lib/credential-token-redaction';
 import { log } from '../lib/logger';
-import { snapshotInteractions } from '../services/acp-interaction-store';
+import { hasUnexpiredHumanInput } from '../services/acp-interaction-store';
 import * as projectDataService from '../services/project-data';
 import type { TaskRuntimeLiveness } from '../services/task-runtime-liveness';
 
@@ -188,7 +188,7 @@ async function isWaitingForHumanInput(
     );
   });
   try {
-    const [attentionPending, interactions] = await Promise.race([
+    const [attentionPending, interactionPending] = await Promise.race([
       Promise.all([
         projectDataService.hasPendingSessionHumanInput(
           env,
@@ -197,18 +197,14 @@ async function isWaitingForHumanInput(
           task.id,
           nowMs
         ),
-        snapshotInteractions(env, task.project_id, task.chat_session_id),
+        hasUnexpiredHumanInput(env, task.project_id, task.chat_session_id, nowMs),
       ]),
       timeout,
     ]);
-    return (
-      attentionPending ||
-      interactions.pending.some(
-        (request) =>
-          (request.state === 'pending' || request.state === 'answered') &&
-          request.deadlineAt > nowMs
-      )
-    );
+    if (typeof attentionPending !== 'boolean' || typeof interactionPending !== 'boolean') {
+      throw new Error('invalid human input probe response');
+    }
+    return attentionPending || interactionPending;
   } finally {
     if (timer) clearTimeout(timer);
   }

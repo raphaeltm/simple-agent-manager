@@ -35,7 +35,7 @@ import { readTaskAcpLivenessSignals } from '../../src/durable-objects/project-da
 import type { Env as ProjectDataEnv } from '../../src/durable-objects/project-data/types';
 import type { Env } from '../../src/env';
 import { recoverStuckTasks } from '../../src/scheduled/stuck-tasks';
-import { snapshotInteractions } from '../../src/services/acp-interaction-store';
+import { hasUnexpiredHumanInput } from '../../src/services/acp-interaction-store';
 import * as projectDataService from '../../src/services/project-data';
 import { createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 import { createSqlStorage } from './durable-objects/sql-storage-test-utils';
@@ -90,11 +90,11 @@ vi.mock('../../src/services/project-data', () => ({
   ),
 }));
 vi.mock('../../src/services/acp-interaction-store', () => ({
-  snapshotInteractions: vi.fn(async () => ({
-    pending: projectDataRpc.pendingInteractions,
-    settled: [],
-    cursor: null,
-  })),
+  hasUnexpiredHumanInput: vi.fn(async (_env, _projectId, _sessionId, now: number) =>
+    projectDataRpc.pendingInteractions.some(
+      (request) => ['pending', 'answered'].includes(request.state) && request.deadlineAt > now
+    )
+  ),
 }));
 vi.mock('../../src/services/vm-agent-container', () => ({
   inspectVmAgentContainerLifecycle: vi.fn(),
@@ -621,7 +621,7 @@ describe('live-runtime record: what kept the task, and why', () => {
     });
     it('withholds failure when the interaction lookup is unavailable', async () => {
       quietPrompt();
-      vi.mocked(snapshotInteractions).mockRejectedValueOnce(
+      vi.mocked(hasUnexpiredHumanInput).mockRejectedValueOnce(
         new Error('InteractionStore unavailable')
       );
       const aiRun = vi.fn().mockResolvedValue(stalledVerdict());
@@ -645,8 +645,8 @@ describe('live-runtime record: what kept the task, and why', () => {
       quietPrompt();
       // Durable Object RPC returns a Promise with RPC property picks; this test
       // intentionally models only its never-settling await boundary.
-      vi.mocked(snapshotInteractions).mockImplementationOnce(
-        () => new Promise(() => {}) as unknown as ReturnType<typeof snapshotInteractions>
+      vi.mocked(hasUnexpiredHumanInput).mockImplementationOnce(
+        () => new Promise(() => {}) as unknown as ReturnType<typeof hasUnexpiredHumanInput>
       );
       const aiRun = vi.fn().mockResolvedValue(stalledVerdict());
       await recoverStuckTasks(env({ AI: { run: aiRun }, TASK_LIVENESS_PROBE_TIMEOUT_MS: '5' }));

@@ -382,6 +382,19 @@ export class InteractionStore extends DurableObject<Env> {
   ): Promise<{ status: 'completed' | 'duplicate' | 'not_found' | 'stale' }> {
     return completeUrlInteraction(this.sql, this.env, input);
   }
+  /** Indexed existence probe independent of UI snapshot limits or expiry backlog. */
+  hasUnexpiredHumanInput(now: number): boolean {
+    return (
+      this.sql
+        .exec<{ pending: number }>(
+          `SELECT 1 AS pending FROM interactions
+         WHERE state IN ('pending', 'answered') AND deadline_at > ? LIMIT 1`,
+          now
+        )
+        .toArray().length > 0
+    );
+  }
+
   snapshot(cursor: string | null = null): InteractionStoreSnapshot {
     return readInteractionSnapshot(this.sql, this.env, cursor);
   }
