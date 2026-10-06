@@ -291,6 +291,58 @@ function alarmRunner() {
 }
 
 describe('advisory drain failures during actual admission alarms', () => {
+  it('preserves a newer admission and alarm when drain persistence loses its attempt fence', async () => {
+    const run = alarmRunner();
+    const newer = structuredClone(fixture.state);
+    newer.config.recoveryAttemptId = 'newer-during-advisory-drain';
+    newer.currentStep = 'node_agent_ready';
+    const newAlarm = Date.now() + 12345;
+    const transaction = run.storage.transaction.getMockImplementation()!;
+    let superseded = false;
+    let admissionBefore: unknown;
+    let taskBefore: unknown;
+    run.storage.transaction.mockImplementation(async (callback) => {
+      const diagnostics = fixture.sqlite
+        .prepare("SELECT placement_explanation_json FROM tasks WHERE id='task-1'")
+        .get() as { placement_explanation_json: string | null };
+      if (!superseded && diagnostics.placement_explanation_json?.includes('Queued safe drain')) {
+        // The newer wake commits after advisory D1 diagnostics but before the
+        // old run's storage transaction reads its attempt identity.
+        superseded = true;
+        run.replaceState(newer);
+        await run.storage.setAlarm(newAlarm);
+        fixture.sqlite.exec(`
+          INSERT INTO vm_task_admissions
+            (task_id,project_id,user_id,state,reason,fencing_token,attempt_count,scope_key)
+          VALUES ('task-1','project-1','user-1','provisioning_granted','provisioning_started',42,7,'newer-scope');
+          UPDATE tasks SET status='in_progress',execution_step='node_agent_ready',
+            admission_state='provisioning_granted',admission_reason='provisioning_started' WHERE id='task-1';
+        `);
+        admissionBefore = fixture.sqlite
+          .prepare("SELECT * FROM vm_task_admissions WHERE task_id='task-1'")
+          .get();
+        taskBefore = fixture.sqlite.prepare("SELECT * FROM tasks WHERE id='task-1'").get();
+      }
+      return transaction(callback);
+    });
+    const provider = vi.spyOn(nodesService, 'provisionNode');
+    const create = vi.spyOn(nodesService, 'createNodeRecord');
+    await run.runner.alarm();
+    expect(superseded).toBe(true);
+    expect(
+      fixture.sqlite.prepare("SELECT * FROM vm_task_admissions WHERE task_id='task-1'").get()
+    ).toEqual(admissionBefore);
+    expect(fixture.sqlite.prepare("SELECT * FROM tasks WHERE id='task-1'").get()).toEqual(
+      taskBefore
+    );
+    expect(run.state()).toEqual(newer);
+    expect(run.alarm()).toBe(newAlarm);
+    expect(run.storage.setAlarm).toHaveBeenCalledTimes(1);
+    expect(provider).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+    expect(snapshot()).toMatchObject({ sleep_status: 'scheduled' });
+  });
+
   it.each(['candidate-select', 'drain-diagnostics'])(
     'keeps the capacity wait and retry budget when %s fails',
     async (boundary) => {

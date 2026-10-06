@@ -1,4 +1,5 @@
 import { log } from '../../lib/logger';
+import { SessionRecoveryAuthorityRevokedError } from '../../services/session-recovery-authority';
 import {
   resolveVmAdmissionScope,
   type VmAdmissionWait,
@@ -91,6 +92,7 @@ export async function waitOrThrowForCapacityPoolNodeLimit(
   try {
     await requestIncompatiblePoolNodeDrain(state, rc);
   } catch (error) {
+    if (error instanceof SessionRecoveryAuthorityRevokedError) throw error;
     log.warn('task_runner_do.incompatible_node_drain_failed', {
       taskId: state.taskId,
       error: error instanceof Error ? error.message : String(error),
