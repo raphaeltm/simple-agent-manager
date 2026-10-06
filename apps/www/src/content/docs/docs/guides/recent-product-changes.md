@@ -5,7 +5,174 @@ description: User-facing SAM changes from the latest development cycles, with pr
 
 This page summarizes recent changes that affect how people use SAM. Use it as a quick orientation when returning to the product after a week away, then follow the linked guides for the full workflow.
 
-## This cycle: 23–29 September 2026
+## This cycle: 29 September – 6 October 2026
+
+### For everyone
+
+- **Agents can stop and ask you.** When an agent wants permission, has a question, or needs you to
+  open a sign-in link, a card appears in the chat, and the chat is marked **Needs input** in the
+  session list. Answer on the card; the agent waits until you do. On self-hosted SAM this works once
+  your operator turns it on. A chat that has slept and woken usually can't ask yet.
+  → [When the Agent Needs You](/docs/guides/chat-features/#when-the-agent-needs-you)
+- **Claude Code starts in Bypass Permissions.** A Claude Code agent with no permission mode set now
+  works without asking, apart from a few safety checks (Codex never asks for permission). The
+  always-ask mode is now called **Manual**: choose it, or **Plan Mode**, to approve changes yourself.
+  A chat that sleeps and wakes usually doesn't keep a mode set in its profile. A mode saved earlier still applies, so if an agent asks when you
+  don't expect it, check where its mode is set. → [Permission mode](/docs/guides/agents/#permission-mode)
+- **See your subscription limits.** On a Claude, ChatGPT, or OpenCode Go subscription, a chip under
+  the chat's title shows how much of each limit is used; select it for reset times.
+  → [Usage Limits](/docs/guides/agents/#usage-limits)
+- **Connection problems say what to fix.** When an agent's credential is missing or rejected, or its
+  model isn't available to your account, the chat names the problem, and for a credential links to
+  the page that fixes it.
+  → [The agent or a tool can't sign in](/docs/guides/session-troubleshooting/#the-agent-or-a-tool-cant-sign-in)
+- **Resources shows the whole session.** The **Resources** panel draws one timeline across every
+  wake, with zoom, **Busiest moments**, the running tool's name when you read a moment, and memory
+  split into what the work used and cache. → [Session Resource History](/docs/guides/session-resources/)
+- **MCP servers can take an API-key header.** Add custom HTTP headers to an MCP server — Composio's
+  `x-api-key`, for example — in personal or project settings.
+  → [Adding a server](/docs/guides/mcp-servers/#adding-a-server)
+- **A session whose snapshot keeps failing stops trying to sleep.** After three failed attempts or
+  15 minutes, SAM either puts a VM session to sleep on a saved Git checkpoint and says what wasn't
+  kept, or says it can't sleep and leaves it running — instead of retrying all day.
+  → [SAM could not save a complete snapshot](/docs/guides/session-troubleshooting/#sam-could-not-save-a-complete-snapshot)
+- **Copy your own messages.** Your messages now have **Info** and **Copy** buttons, like the agent's.
+  → [Message Actions](/docs/guides/chat-features/#message-actions)
+- **The session list keeps its order.** Chats are ordered by their latest message, so archiving or
+  stopping an old chat no longer moves it to the top.
+  → [Switching Between Chats](/docs/guides/chat-features/#switching-between-chats)
+- **New models.** OpenAI **GPT-6.1 Sol** with Codex, **Claude Sonnet 5.5**, **Gemini 3 Flash
+  Preview**, and more OpenCode Zen models. → [New models](#new-models)
+
+Also changed this week:
+
+- **Signing in with GitHub works again.** From 23 September to 1 October, signing in from a browser
+  that wasn't already signed in failed with `unable_to_get_user_info`. Browsers that were already
+  signed in kept working.
+- **Idle VM sessions go to sleep again.** Their snapshots were too large to finish for big
+  repositories, so idle sessions stayed awake and kept their machines running. Snapshots now leave
+  out history that is already on your default branch, and a session awake for more than a day can
+  still save one.
+- **SAM stops nudging a stuck agent.** After three check-ins with no progress, SAM pauses its
+  check-ins and posts what to look at, instead of nudging the agent all day.
+  → [SAM paused automatic check-ins](/docs/guides/session-troubleshooting/#sam-paused-automatic-check-ins)
+- **A turn that hangs for hours is ended.** When a VM task or chat has been awake for more than four
+  hours and the agent's turn has shown nothing for an hour, SAM checks it, and fails the task if the
+  turn is clearly wedged. Pending requests are protected until their response deadline, and SAM
+  tries to save a stalled task's workspace before removing it.
+  → [SAM ended a stalled turn](/docs/guides/session-troubleshooting/#sam-ended-a-stalled-turn)
+- **A message sent right after you stop the agent goes through.** A follow-up sent within about five
+  seconds of stopping a prompt could be killed along with it, failing the task.
+- **A sleeping VM conversation keeps its task.** Waking one used to create a new task behind the
+  scenes, so a sub-task could lose its link to the agent that started it. Sleeping tasks now stay on
+  the dashboard's **Active Tasks** list, other agents can still message them, and the agent that
+  started one can stop it without waking it.
+
+### For self-hosters & admins
+
+**Decide on agent requests before you update.** Before v2026.10.01, SAM approved every permission
+request automatically, whatever mode an agent was in. From v2026.10.01 each request goes to the
+person running the chat — or, unless you turn agent requests on, it is refused, on new and updated
+installations alike.
+
+1. **Turn agent requests on first**, with three GitHub Environment variables
+   ([Let agents ask in chat](/docs/guides/self-hosting/#let-agents-ask-in-chat)), so the update's
+   deploy picks them up. If you leave them off, agents need **Bypass Permissions**, and Amp, Gemini
+   CLI, and Claude Code in a devcontainer that
+   [runs as `root`](/docs/guides/agents/#claude-code-asks-even-in-bypass-permissions) ask even then.
+2. **Update to the newest release**
+   ([Updating an existing instance](/docs/guides/self-hosting/#updating-an-existing-self-hosted-instance)).
+   v2026.10.05 is the first where Claude Code agents with no mode set start in Bypass Permissions; on
+   v2026.10.01 to v2026.10.04 they ask, and with requests off are refused every time. The check-in cap, usage chips, the Codex upgrade for GPT-6.1 Sol, and sleeping
+   tasks on Active Tasks arrive in the release after v2026.10.05.
+3. **If you left requests off, find the saved modes that will be refused** — in profiles, skills,
+   projects' **Agent Overrides**, and users' **Settings → Agents**, where saving on a release before
+   v2026.10.05 stored the old always-ask default, now shown as **Manual**.
+   [Let agents ask in chat](/docs/guides/self-hosting/#let-agents-ask-in-chat) has a query that
+   lists them.
+
+- **Fresh GitHub sign-ins fail on v2026.09.24 to v2026.10.01** (fixed from v2026.10.02).
+- **Codex questions and links ship with the deploy.** Every deploy publishes SAM's own Codex build to
+  your R2 bucket, and Instant images include it; Codex sessions use it once questions or links are
+  on. No setup.
+- **New limits**, with their defaults. The sleep-failure budget, `SESSION_SLEEP_FAILURE_MAX_ATTEMPTS`
+  (3) and `SESSION_SLEEP_FAILURE_MAX_ELAPSED_MS` (15 min), can be set as GitHub Environment
+  variables. The rest are read only from `[vars]` in `apps/api/wrangler.toml`, so changing one means
+  editing your fork ([Worker Variables](/docs/reference/configuration/#worker-variables)): check-ins,
+  `TASK_RECONCILIATION_MAX_CHECKINS` (3); stalled-turn checks, `STALLED_TASK_CLASSIFIER_*` (Workers
+  AI, on); callback-token renewals, `RATE_LIMIT_CALLBACK_TOKEN_RENEWAL` (12 an hour); and
+  `TASK_RUN_ABSOLUTE_CEILING_SLEEP_GRACE_MS` (1 h), the longest the 24-hour runaway-cost ceiling now
+  waits for a sleep that keeps retrying.
+- **Failed snapshot uploads are cleaned up.** Uploads from snapshot attempts that can never finish
+  are deleted from R2 instead of piling up. Ones already left behind are not removed.
+- **A project at the 10 GB storage cap can be recovered.** A superadmin API frees space by removing
+  the search index of old, finished sessions.
+  → [When a project reaches the 10 GB storage cap](/docs/guides/self-hosting/#when-a-project-reaches-the-10-gb-storage-cap)
+
+Otherwise, updating needs no action: there are no new secrets, and the new database migrations run
+in the deploy pipeline. `TASK_RUN_HARD_TIMEOUT_MS` is gone (it had no effect); if you set it, you can
+delete it.
+
+### Agents ask you before they act
+
+Until this cycle, SAM approved every permission request an agent made, whatever its permission mode,
+so "ask me first" did nothing. Now the request reaches you as a card in the chat: the command or
+change the agent wants to make, and the agent's own choices — for Claude Code a command usually
+offers **Yes**, **Yes, and don't ask again for …**, and **No**. Agents can also ask a question with a
+short form (Claude Code's multiple-choice questions arrive this way), and a tool can send you a
+sign-in link to open.
+
+Only the person who started the chat can answer, each request has a deadline shown on the card, and
+an unanswered request counts as a no. No notification is sent: watch for **Needs input** in the
+session list.
+
+Because asking is now real, a Claude Code agent with no mode chosen starts in **Bypass
+Permissions**. Pick **Manual** or **Plan Mode** to approve its changes yourself, or **Accept Edits** to
+approve only the commands it runs. See
+[When the Agent Needs You](/docs/guides/chat-features/#when-the-agent-needs-you) and
+[Permission mode](/docs/guides/agents/#permission-mode).
+
+### See how much of your subscription is left
+
+Claude Max, ChatGPT plans, and OpenCode Go limit how much you can use in five hours, a week, or a
+month. Until now you found out when the agent hit one and stopped. Now a chip under the chat's title —
+for example `Claude · 5h 78% · Week 31%` — shows how much of each limit is used; select it for reset
+times. The same chip appears on your credentials in **Settings → Advanced**, and agents can read the
+numbers to pause work until a reset. See [Usage Limits](/docs/guides/agents/#usage-limits).
+
+### Sleep gives up instead of looping
+
+A session sleeps by saving a snapshot of its workspace. For a large repository that snapshot could
+never finish, so idle sessions stayed awake, kept their machines running, and retried every few
+minutes, sometimes for more than a day. Snapshots now leave out history that is already on your
+default branch, which makes them small again.
+
+If a snapshot still keeps failing, SAM stops after three attempts or 15 minutes. For a VM session
+whose earlier snapshot saved the repository's exact commit and uncommitted changes, SAM sleeps the
+chat on that and says in the chat what wasn't kept; waking it starts the agent fresh from the
+transcript. Otherwise — and always for Instant sessions — the chat says SAM couldn't put it to sleep,
+and the session keeps running until you act. See
+[SAM could not save a complete snapshot](/docs/guides/session-troubleshooting/#sam-could-not-save-a-complete-snapshot).
+
+### Resources shows the whole session
+
+The **Resources** panel used to show one 15-minute slice at a time, which made it easy to misread a
+long session. It now draws the whole session as one timeline across every wake, from per-minute
+summaries, and fetches 5-second detail only when you zoom in. Hover or tap to read a moment,
+including which tool was running; **Busiest moments** jumps to the peaks; and memory is split into
+used (what the work needed) and **+ cache**. See
+[Session Resource History](/docs/guides/session-resources/).
+
+### New models
+
+Profiles can now use OpenAI **GPT-6.1 Sol** with Codex (whether your ChatGPT plan can use it is up to
+OpenAI), **Claude Sonnet 5.5 (1M context)** with Claude Code, **Gemini 3 Flash Preview** with Gemini
+CLI, and GPT-6.1 Sol, Claude Sonnet 5.5, **Fledge Alpha Free**, and **Ling 3.1 Flash Free** with
+OpenCode Zen. SAM also upgraded the Codex it
+installs, so a profile set to GPT-6.1 Sol starts instead of being rejected. See
+[Choosing a model](/docs/guides/agents/#choosing-a-model).
+
+## Previous cycle: 23–29 September 2026
 
 ### For everyone
 
@@ -95,7 +262,10 @@ and disk alone — see [Compute Pools](/docs/guides/compute-pools/).
   inconclusive checks back off to six hours: `WORKSPACE_IDLE_BACKOFF_BASE_MS`,
   `WORKSPACE_IDLE_BACKOFF_MAX_MS`.
 
-**Updating to any release from this cycle needs no action.** There are no new secrets or bindings,
+**Updating to any release from this cycle needs no action**, though on v2026.09.24 to v2026.10.01
+signing in with GitHub fails in a browser that isn't already signed in, so update to v2026.10.02 or
+later instead.
+There are no new secrets or bindings,
 and the new database migrations run in the deploy pipeline. Two things are worth a look. A
 `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS` or `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET` variable
 in your GitHub Environment overrides the faster archive defaults. And if you set
@@ -206,7 +376,7 @@ Pro. A profile already set to one keeps its setting, shown as a custom model.
 If a model you want isn't in the list yet, type its ID — see
 [Choosing a model](/docs/guides/agents/#choosing-a-model).
 
-## Previous cycle: 16–23 September 2026
+## Earlier cycle: 16–23 September 2026
 
 ### For everyone
 

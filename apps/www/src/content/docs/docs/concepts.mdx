@@ -24,18 +24,18 @@ A workspace runs in one of two places:
 | **Instant** | A container on Cloudflare's network | Starts in seconds, no cloud account needed — but no devcontainer and no Docker |
 | **VM**      | A cloud VM on your provider account | Your full environment, at the cost of a minute or two of provisioning          |
 
-Which one you get is an [agent profile](#agent-profiles) setting: a profile whose runtime is **Instant container** starts chats on Instant; everything else runs as a task on a VM. Instant needs no cloud provider credential, so it's how you work before connecting a cloud account.
+Which one you get is an [agent profile](#agent-profiles) setting: a profile whose runtime is **Instant container** starts chats on Instant; everything else runs on a VM, as a **Task** or a **Chat** depending on the profile (see [Chat or Task](/docs/guides/chat-features/#chat-or-task)). A Task carries the work through to a pull request; a Chat is back-and-forth and doesn't commit or push for you. Instant needs no cloud provider credential, so it's how you work before connecting a cloud account.
 
 Instant and VM sessions sleep when idle and restore from a runtime-neutral snapshot on wake. A VM wake provisions a replacement workspace after the original compute is removed. See [Instant Sessions and persistent sleep](/docs/guides/instant-sessions/).
 
 ### Workspace Profiles
 
-When you start a chat you can choose a workspace profile:
+An agent profile's **Workspace Profile** setting chooses how much environment a VM chat gets:
 
-| Profile            | Best for                                                                                                           |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------ |
-| **Full** (default) | Work where the agent needs to run your stack — builds your `.devcontainer` on a VM workspace; no effect on Instant |
-| **Lightweight**    | Quick questions and code exploration — starts faster                                                               |
+| Profile            | Best for                                                                                                                                         |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Full** (default) | Work where the agent needs to run your stack — builds your `.devcontainer` on a VM workspace; no effect on Instant                               |
+| **Lightweight**    | Quick questions and code exploration — starts faster; with **Task Mode** left at **Default**, its sessions are Chats (no automatic pull request) |
 
 ### Port Exposure
 
@@ -120,8 +120,8 @@ When you submit work from the chat:
 1. SAM generates a concise title from your message
 2. A descriptive output branch is created (`sam/...`) from your default branch
 3. SAM selects or provisions a workspace, **already checked out on that branch**, reusing a warm one when available
-4. Your chosen agent runs autonomously with your description
-5. When done, the agent commits, pushes, and opens a pull request
+4. Your chosen agent runs autonomously with your description — unless its [permission mode](/docs/guides/agents/#permission-mode) tells it to ask you first, in which case it [waits for your answer in the chat](/docs/guides/chat-features/#when-the-agent-needs-you)
+5. When a **Task** is done, the agent commits, pushes, and opens a pull request (a **Chat** pushes only what you ask the agent to push)
 
 SAM refuses to auto-push a completed task while the workspace is still on the project's default branch, so agent work reaches a reviewable branch rather than `main`. See [Where the work lands](/docs/guides/idea-execution/#where-the-work-lands).
 

@@ -20,24 +20,24 @@ How the endpoint reaches the agent depends on the agent. Claude Code receives it
 
 ## Choosing a provider
 
-| Provider | Best for | Auth |
-| --- | --- | --- |
-| [Zapier MCP](https://zapier.com/mcp) | Breadth — around 9,000 apps, including LinkedIn and Google Docs | Bearer token |
-| [executor.sh](https://executor.sh/) | Open source (MIT). Run it yourself via CLI, Docker or a Cloudflare Worker, or use their hosted endpoint | Bearer token |
-| [Composio / Rube](https://composio.dev/) | Managed OAuth with a large toolkit catalog | API key header — choose **None** and add an `x-api-key` header (`x-consumer-api-key` for Composio Connect). Older pre-signed URLs need no header. |
-| [Klavis / Strata](https://www.klavis.ai/) | Self-hosting everything (Apache-2.0) | Bearer token |
-| Official service endpoints | A single service you already pay for — GitHub, Notion, Linear, Sentry, Stripe | Personal access token as bearer |
+| Provider                                  | Best for                                                                                                | Auth                                                                                                                                              |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Zapier MCP](https://zapier.com/mcp)      | Breadth — around 9,000 apps, including LinkedIn and Google Docs                                         | Bearer token                                                                                                                                      |
+| [executor.sh](https://executor.sh/)       | Open source (MIT). Run it yourself via CLI, Docker or a Cloudflare Worker, or use their hosted endpoint | Bearer token                                                                                                                                      |
+| [Composio / Rube](https://composio.dev/)  | Managed OAuth with a large toolkit catalog                                                              | API key header — choose **None** and add an `x-api-key` header (`x-consumer-api-key` for Composio Connect). Older pre-signed URLs need no header. |
+| [Klavis / Strata](https://www.klavis.ai/) | Self-hosting everything (Apache-2.0)                                                                    | Bearer token                                                                                                                                      |
+| Official service endpoints                | A single service you already pay for — GitHub, Notion, Linear, Sentry, Stripe                           | Personal access token as bearer                                                                                                                   |
 
 Prefer gateway-style providers that expose a small number of tools over servers that dump a hundred tool definitions into the agent's context. Every tool definition costs context window on every turn.
 
 ## Adding a server
 
-| Field | Notes |
-| --- | --- |
-| **Name** | How the agent sees the server; its tools are namespaced by it. 1–32 characters, lowercase letters, digits and hyphens; it may not start or end with a hyphen. `sam-mcp` is reserved. |
-| **MCP endpoint URL** | Must be HTTPS. `http://localhost:<port>` and `http://127.0.0.1:<port>` are allowed for a gateway running on the same machine — an explicit port is required. |
-| **Authentication** | **Bearer token** for most providers. **None** when the credential travels in the URL itself (pre-signed URLs) or in a custom header. |
-| **Headers** | Optional HTTP headers sent with every request, for providers that take an API key in a header — Composio's `x-api-key`, for example. Names are 1–64 letters, digits, hyphens or underscores. Headers the MCP transport sets itself (`Accept`, `Content-Type`, `Host`, `Connection`, `Content-Length`, `Transfer-Encoding`, `Mcp-Session-Id`, `Mcp-Protocol-Version`, `Last-Event-ID`) cannot be overridden. `Authorization` is accepted only when Authentication is **None**, so you can use a scheme other than Bearer. By default a server can have up to 10 headers. |
+| Field                | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Name**             | How the agent sees the server; its tools are namespaced by it. 1–32 characters, lowercase letters, digits and hyphens; it may not start or end with a hyphen. `sam-mcp` is reserved.                                                                                                                                                                                                                                                                                                                                                                                    |
+| **MCP endpoint URL** | Must be HTTPS. `http://localhost:<port>` and `http://127.0.0.1:<port>` are allowed for a gateway running on the same machine — an explicit port is required.                                                                                                                                                                                                                                                                                                                                                                                                            |
+| **Authentication**   | **Bearer token** for most providers. **None** when the credential travels in the URL itself (pre-signed URLs) or in a custom header.                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| **Headers**          | Optional HTTP headers sent with every request, for providers that take an API key in a header — Composio's `x-api-key`, for example. Names are 1–64 letters, digits, hyphens or underscores. Headers the MCP transport sets itself (`Accept`, `Content-Type`, `Host`, `Connection`, `Content-Length`, `Transfer-Encoding`, `Mcp-Session-Id`, `Mcp-Protocol-Version`, `Last-Event-ID`) cannot be overridden. `Authorization` is accepted only when Authentication is **None**, so you can use a scheme other than Bearer. By default a server can have up to 10 headers. |
 
 The URL, the token and every header value are encrypted at rest and are never returned by the API or shown again after you save them — several providers put the credential directly in the URL, so the URL is treated as a secret too. SAM shows only the host and the header names.
 
@@ -47,16 +47,42 @@ Use **Edit** to rename a server, switch its authentication, or add, replace and 
 
 ## Scopes
 
-| Scope | Where | Who it applies to |
-| --- | --- | --- |
-| **Personal** | Settings → MCP Servers | Every session *you* start, in any project |
-| **Project** | Project Settings → Runtime | Every session any member starts in that project |
+| Scope        | Where                      | Who it applies to                               |
+| ------------ | -------------------------- | ----------------------------------------------- |
+| **Personal** | Settings → MCP Servers     | Every session _you_ start, in any project       |
+| **Project**  | Project Settings → Runtime | Every session any member starts in that project |
 
 If a project server and a personal server share a name, the project one wins. Adding or changing a project-scoped server requires the `secret:write` capability, so project owners and admins can manage them but maintainers and viewers cannot.
 
 Use the **Disable** toggle to stop injecting a server without deleting it and losing the credential.
 
-If a chat says a **tool connection needs sign-in**, review its entry under **Settings → MCP Servers** (or ask a project administrator to check **Project Settings → Runtime** for a shared server). A bearer token works only when that service accepts bearer authentication; some services require a separate browser sign-in. A service that requires a callback to `localhost` cannot complete that callback through the remote SAM session. Use an authentication method the service supports for remote clients. The chat's personal-settings shortcut appears for its creator; project administrators manage shared server settings according to their project permissions.
+## When a server needs sign-in
+
+How a chat shows that an MCP server isn't signed in depends on the server:
+
+- **The server's tools are missing from the session, or a tool step fails with the server's own
+  error**, such as `401 Unauthorized`. The server refused the credential SAM sent. Review its entry
+  under **Settings → MCP Servers**, or ask a project administrator to check **Project Settings →
+  Runtime** for a shared server. A bearer token works only if that service accepts bearer
+  authentication; some services need an API-key header instead (see
+  [Adding a server](#adding-a-server)).
+- **The server sends you a link.** Some servers ask you to approve access on their own website. The
+  chat shows an **External service request** card with the destination; open the link, finish
+  there, then select **Continue after opening**. See
+  [Links to open](/docs/guides/chat-features/#links-to-open).
+- **The chat says "This sign-in flow requires a local callback that this session cannot complete".**
+  The service wants to finish its sign-in by redirecting to `localhost`, which can't work from a
+  remote SAM session. Use another authentication method the service supports for remote clients,
+  usually a token or API key from its dashboard.
+
+The last two only happen in sessions labelled **Chat** (see
+[Chat or Task](/docs/guides/chat-features/#chat-or-task)), only where link requests are turned on
+(they are on the hosted service; self-hosted operators turn them on as described in
+[Let agents ask in chat](/docs/guides/self-hosting/#let-agents-ask-in-chat)), and usually not in a
+chat that has slept and woken. Elsewhere
+a server that wants a browser sign-in just fails, or its tools don't appear, so connect it with a
+token or API key from its dashboard instead. The chat's shortcut to personal MCP settings appears
+only for the person who started it; shared servers are managed by project administrators.
 
 ## Security
 
@@ -72,7 +98,7 @@ Tools from a connected MCP server run inside your agent's session, which already
 
 ## Notes on specific services
 
-- **LinkedIn** — the official API only supports *posting*; it cannot read your feed, DMs or arbitrary profiles. Any MCP server that reads the feed drives a member session cookie, which violates LinkedIn's user agreement. Posting works through Zapier and Composio; reading is a risk decision that belongs to you and your chosen vendor.
+- **LinkedIn** — the official API only supports _posting_; it cannot read your feed, DMs or arbitrary profiles. Any MCP server that reads the feed drives a member session cookie, which violates LinkedIn's user agreement. Posting works through Zapier and Composio; reading is a risk decision that belongs to you and your chosen vendor.
 - **Medium** — the API is closed to new integrations and no new tokens are issued. Publish to Dev.to, Hashnode, Ghost or WordPress instead, or to a company blog through the GitHub repository SAM already connects to.
 
 ## Limitations

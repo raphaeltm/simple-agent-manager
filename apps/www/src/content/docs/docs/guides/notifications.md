@@ -1,6 +1,6 @@
 ---
 title: Notifications
-description: In-app and Web Push notifications in SAM — task completion, agent requests, progress updates, and out-of-band delivery.
+description: In-app and Web Push notifications in SAM — task completion, questions agents send with the request_human_input tool, progress updates, and out-of-band delivery.
 ---
 
 SAM combines an in-app notification center with optional Web Push delivery for agent progress and activity.
@@ -17,13 +17,17 @@ SAM combines an in-app notification center with optional Web Push delivery for a
 | **pr_created**    | Medium  | An agent creates a pull request                                          |
 | **cron_failure**  | High    | A five-minute operational recovery sweep fails (active superadmins only) |
 
+A permission request, question, or link card that an agent puts in the chat while it waits does
+**not** send a notification. Those show up as **Needs input** beside the chat in the project's
+session list — see [When the Agent Needs You](/docs/guides/chat-features/#when-the-agent-needs-you).
+
 ## Delivery Channels
 
 Notifications are delivered via WebSocket for instant updates. The notification bell in the UI header shows the unread count and updates in real-time without page refresh.
 
 Web Push is available for medium- and high-urgency notifications. Enable it under
-**Settings → Notifications** to receive agent questions and task results even when SAM is
-closed. Push on means the browser receives every eligible notification; SAM does not
+**Settings → Notifications** to receive the questions agents send with `request_human_input`, and
+task results, even when SAM is closed. Push on means the browser receives every eligible notification; SAM does not
 suppress phone delivery merely because another browser tab is connected. Low-urgency
 progress updates remain in-app only.
 

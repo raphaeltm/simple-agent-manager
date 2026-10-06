@@ -1,6 +1,6 @@
 ---
 title: Chat Features
-description: The session tool rail, file browsing, tool activity cards, diagrams, conversation forking, finding past conversations, voice input, and text-to-speech in SAM's chat interface.
+description: Answering an agent's permission requests and questions, message actions, the session tool rail, file browsing, tool activity cards, diagrams, conversation forking, finding past conversations, voice input, and text-to-speech in SAM's chat interface.
 ---
 
 SAM's project pages are chat-first interfaces where you interact with AI coding agents in real-time.
@@ -11,15 +11,188 @@ Recent chat updates make the workspace feel more like a persistent work surface:
 
 Agent output streams directly to your browser via WebSocket. You see code being written, terminal commands executing, and the agent's thought process as it happens — no waiting for a complete response.
 
-## Agent Questions
+## When the Agent Needs You
 
-When an ACP agent asks for structured input in a conversation session, the question appears as a form in the chat. The session creator can select choices, enter supported short values, send an answer, or decline. Other project members see that the agent is waiting, without seeing the question or its answers. The card shows when an answer is saved, delivered, interrupted, or expired, including after reconnecting to the chat.
+Sometimes an agent stops and waits for you. It wants permission before it runs a command or edits a
+file, it has a question only you can answer, or a tool it uses wants you to open a page in your
+browser. Each request appears as a card in the chat — a permission request under the step it's
+about, a question or a link at the end of the chat — and the chat is marked **Needs input** in the
+session list. The agent is paused until you answer.
 
-Form questions are available when the operator enables `ACP_INTERACTIONS_ENABLED` and `ACP_INTERACTION_FORMS_ENABLED`. Unsupported form schemas are cancelled explicitly. Task-mode forms are unavailable.
+<picture>
+  <source media="(max-width: 40em)" srcset="/images/docs/chat-permission-request-mobile.png 2x" />
+  <img
+    src="/images/docs/chat-permission-request.png"
+    alt="A chat where the agent is waiting for permission. The user asked it to fix flaky checkout tests, and the agent replied that it will run the test suite. Under its running &quot;npm test&quot; step, a card titled &quot;npm test&quot; has a &quot;Permission needed&quot; badge and a countdown of about two hours, and three buttons supplied by the agent: &quot;Yes&quot;, &quot;Yes, and don't ask again for npm commands&quot;, and &quot;No&quot;. On a wide screen, the session list beside the chat marks it &quot;Needs input&quot; in amber; the other chats in the list carry no status label."
+  />
+</picture>
 
-Remote HTTPS URL requests have a separate `ACP_INTERACTION_URLS_ENABLED` switch, off by default. Once enabled on a verified runtime, the session creator sees the destination host and must choose to open the link, then separately tell the agent to continue or decline. Opening the link is consent to navigate; only a later completion notification from the external service confirms its flow completed. URL requests and answers are encrypted in Cloudflare storage and never sent through a direct browser-to-VM channel. Other project members see generic request state.
+For every kind of request:
 
-SAM declines HTTP URLs, local or loopback destinations, explicit local callback and redirect parameters, embedded credentials, IP literal destinations, and unsupported request shapes. A structurally valid request rejected for an explicit loopback callback shows fixed guidance in the chat; the session creator can review existing MCP settings for a supported connection method. The redirect check covers explicit known query parameters; it cannot prove every provider-specific redirect behavior. SAM does not fetch links or follow redirect chains, so a remote service must own its own externally reachable callback and completion. Claude's localhost MCP OAuth startup, arbitrary provider account login, callback tunnels, and token custody are unsupported. Use existing credential settings or guided provider login for native model access.
+- **Only the person who started the chat can answer.** In a
+  [shared project](/docs/guides/collaboration/), other members see that the agent is waiting, but
+  not what it asked or what you answered.
+- **No notification is sent.** Watch the session list for **Needs input**; on a phone, open the list
+  with the list icon at the right of the project-name bar. (Notifications cover a different kind of
+  question, the one agents ask with their `request_human_input` tool — see
+  [Notifications](/docs/guides/notifications/).)
+- **You don't have to stay on the page.** A request waits in SAM, not in your browser tab, so you can
+  answer later or from another device until its deadline, which the card shows. Meanwhile a VM
+  session stays awake, so its machine keeps running, billed to your cloud account if it's yours. If
+  nobody answers in
+  time, the request ends — the card says it expired or was cancelled — and the agent is told no, so
+  the action it asked about does not happen. Send a message to tell the agent how to carry on. (A
+  **Task** has often gone to sleep by then; your reply wakes it
+  [like a Chat](/docs/guides/agents/#after-a-chat-wakes-from-sleep), so ask the agent to push its
+  work.)
+- **Answer on the card, not in the message box.** A message you type waits until the agent's turn
+  ends, and the turn can't end until the card is answered or expires. To stop the agent instead,
+  select **Interrupt** (the red button above the message box); the card then says **Request
+  cancelled**.
+- **After you answer**, the card says your answer is saved, then that it was delivered to the agent.
+  If your connection dropped as you answered, select **Retry answer** (or **Check receipt**) on the
+  card: it sends the same answer again, so it can't count twice. If the card says delivery is
+  unconfirmed, or that the request was interrupted because the agent stopped first, check whether
+  the agent carried on. If it's still waiting, select **Interrupt** first, then send your decision as
+  a message.
+
+:::caution[Current limitations]
+
+- **A chat that has slept and woken usually can't ask.** SAM refuses its requests without showing a
+  card, and the chat usually drops its profile's permission mode, so a **Manual** profile may go
+  ahead without asking. The same goes for a chat SAM restored after its container or machine failed.
+  Chats sleep on their own when idle — by default after 15 minutes on a VM and an hour on Instant —
+  and the session list then marks them with a moon icon. To get approvals back,
+  [fork](#conversation-forking) the chat or start a new one with that profile selected; a fork
+  carries a summary of the chat, not its files. To keep working on the same files, let the chat carry
+  on without approvals — see
+  [The agent stops for approval and no card appears](/docs/guides/session-troubleshooting/#the-agent-stops-for-approval-and-no-card-appears)
+  if its requests are being refused.
+- **Answer before the deadline on the card.** SAM's stalled-turn check respects pending requests
+  until their response deadline; waiting for your answer is not treated as a stall. If the request
+  expires, the agent is told no — send a message saying how to continue.
+
+:::
+
+:::note[Self-hosted instances]
+These requests are off until an operator turns them on — see
+[Let agents ask in chat](/docs/guides/self-hosting/#let-agents-ask-in-chat). Until then no card
+appears: whatever the agent asked to do is refused on the spot, which can look as though the agent
+stopped for no reason.
+:::
+
+### Permission requests
+
+Whether an agent asks before acting depends on its
+[permission mode](/docs/guides/agents/#permission-mode). Agents start in **Bypass Permissions**,
+which rarely asks (a few agents, such as Amp and Gemini CLI, ask on their own anyway). In **Manual**
+mode the agent
+asks before it runs commands or changes files, and in **Plan Mode** Claude Code asks you to approve
+its plan before it changes anything.
+
+The card is titled with what the agent wants to do — for a command, the command itself — and its
+buttons are the agent's own choices. For a Claude Code command they are usually:
+
+- **Yes** runs it this once.
+- **Yes, and don't ask again for …** runs it and lets similar commands, named on the button, run
+  without asking from then on in this chat's workspace.
+- **No** refuses. The agent is told you said no and carries on without it.
+
+If the agent asks about every command and you didn't choose that, its mode was probably saved as
+**Manual** earlier — see
+[An agent asks when you don't expect it](/docs/guides/agents/#an-agent-asks-when-you-dont-expect-it)
+— or the project's
+devcontainer runs as `root`, where Claude Code
+[refuses Bypass Permissions](/docs/guides/agents/#claude-code-asks-even-in-bypass-permissions). In
+the meantime, **Yes, and don't ask again for …** stops it asking about that kind of command.
+
+A plan approval is titled **Approve Plan** and asks how to continue — for example **Yes, and use
+auto mode** or **Yes, manually approve edits** — or offers **No, keep planning**. A permission request
+waits up to two hours in a session labelled **Chat** in the session list, and up to 30 minutes in
+one labelled **Task**.
+
+### Questions
+
+When an agent needs a decision — which of two designs to build, say — it can ask with a short form:
+choices to pick from, short text, numbers, or yes/no. Fill it in and select **Send answer**. Claude
+Code's multiple-choice questions arrive this way, each with an **Other** box for an answer of your
+own. **Decline** tells the agent you're skipping the question. A question waits up to two hours.
+
+<picture>
+  <source media="(max-width: 40em)" srcset="/images/docs/chat-agent-question-mobile.png 2x" />
+  <img
+    src="/images/docs/chat-agent-question.png"
+    alt="An &quot;Agent question&quot; card in the chat, with its deadline under the title. The agent asks &quot;Where should uploaded receipts be stored?&quot;. A &quot;Storage&quot; dropdown has &quot;R2 bucket (Recommended)&quot; selected, with that option's description below it, and an empty &quot;Other&quot; box follows for an answer of your own. At the bottom are &quot;Send answer&quot; and &quot;Decline&quot; buttons."
+  />
+</picture>
+
+Questions appear only in sessions labelled **Chat** in the session list — see
+[Chat or Task](#chat-or-task).
+
+### Links to open
+
+Some tools — usually an [MCP server](/docs/guides/mcp-servers/) you connected — need you to sign in
+or approve something on their own website. The card, titled **External service request**, shows
+where the link goes. Select the **Open …** link to visit it in a new tab and finish there, then come
+back and select **Continue after opening** so the agent carries on. That button only becomes
+available once you have opened the link, and if the page reloads while you're away — common on
+phones — select the link again first. **Decline** tells the agent you won't.
+
+<picture>
+  <source media="(max-width: 40em)" srcset="/images/docs/chat-external-link-request-mobile.png 2x" />
+  <img
+    src="/images/docs/chat-external-link-request.png"
+    alt="An &quot;External service request&quot; card. It says that Northwind CRM needs you to approve access before the agent can read your customer records, shows &quot;Destination: mcp.northwind-crm.com&quot; and an &quot;Open mcp.northwind-crm.com&quot; link, and has two buttons: &quot;Continue after opening&quot;, which stays unavailable until you open the link, and &quot;Decline&quot;."
+  />
+</picture>
+
+SAM never opens a link by itself, and it shows only `https://` links to a named host — never
+`localhost`, an IP address, or a link with a password in it. Opening
+the link doesn't prove the sign-in worked. If the service reports back, the card says **The external
+service reported completion**; many services don't, so the card can say completion is unconfirmed
+even when it succeeded. A link request waits up to 10 minutes, and like questions it appears only in
+sessions labelled **Chat**.
+
+A tool whose sign-in has to return to `localhost` can't finish from a SAM session, so SAM refuses
+it and the chat says **This sign-in flow requires a local callback that this session cannot
+complete**. Connect that service another way — see
+[When a server needs sign-in](/docs/guides/mcp-servers/#when-a-server-needs-sign-in).
+
+### Chat or Task
+
+Each session is labelled **Chat** or **Task** in the session list. A **Task** can ask for
+permission, but not ask questions or send links. Which you get depends on what you start it with:
+
+- An [agent profile](/docs/guides/agents/#agent-profiles) whose runtime is
+  [Instant](/docs/guides/instant-sessions/) gives a **Chat** (unless you attach a file or start from
+  an idea's **Execute** button, and also pick a skill set to **Task**).
+- On a VM, a profile whose **Task Mode** is **Conversation** gives a **Chat**; profiles you create
+  with **Chat and explore** in the chat input are set that way. With **Task Mode** left at
+  **Default**, a profile whose **Workspace Profile** is **Lightweight** does too. If you also pick a
+  skill, the skill's **Task Mode** decides instead, and new skills are set to **Task**.
+- Anything else gives a **Task**.
+
+A **Chat** doesn't commit, push, or open a pull request for you. For work you want delivered as a
+pull request, use a VM profile whose **Task Mode** is **Task**, such as one you create with **Build
+and open PRs** and **Cloud VM**. A **Task** pushes your follow-ups only while it's awake: once it has
+slept — when it's completed, or after sitting idle (15 minutes on a VM by default) — a reply wakes
+it, but from then on it [works like a Chat](/docs/guides/agents/#after-a-chat-wakes-from-sleep)
+(it keeps its **Task** label), and SAM stops pushing for it.
+See
+[What happens to your work](/docs/guides/instant-sessions/#what-happens-to-your-work).
+
+## Message Actions
+
+Once a message has finished arriving, small icon buttons appear under it:
+
+- **Info** (an _i_ in a circle) shows when the message was sent and how many words and characters it
+  has.
+- **Read aloud** (a speaker) plays an agent reply as audio — see
+  [Text-to-Speech Playback](#text-to-speech-playback).
+- **Copy** (two overlapping squares) copies the message as written, Markdown included.
+
+Your own messages have **Info** and **Copy** too, so you can pick up a prompt you wrote earlier and
+reuse it.
 
 ## The Session Tool Rail
 
@@ -331,7 +504,7 @@ Persistent chat sessions can sleep and recover on both [Instant and VM-backed ru
 - **Snapshots that keep failing.** If SAM cannot save a complete snapshot after a few tries (three, or 15 minutes, by default), it stops retrying. A VM session whose earlier snapshot saved its exact Git commit sleeps anyway, keeping the conversation and the repository but not every file, and the chat says what was kept. Otherwise the chat says SAM could not put the session to sleep, and the workspace keeps running. [SAM could not save a complete snapshot](/docs/guides/session-troubleshooting/#sam-could-not-save-a-complete-snapshot) explains both.
 - **Recovery.** SAM is rebuilding the session's runtime and restoring its saved state. Wait for it to finish instead of resending.
 - **Wake failed.** SAM could not safely wake the sleeping session or the queued wake prompt expired before delivery. The session is marked **Wake failed** in the list and a system message in the chat explains the reason, so the failure is visible instead of hidden in retry state. [Wake failed](/docs/guides/session-troubleshooting/#wake-failed) lists the reasons and what to do about each.
-- **Failed tasks.** When a task fails while its workspace is still running, SAM snapshots the workspace and puts the conversation to sleep instead of deleting it. That covers a provider usage limit, an expired request for your input, and an agent that went quiet after a SAM check-in. If the agent is still working when the task fails, SAM waits for its turn to end first (up to 8 hours by default). The failure banner stays, and sending a message wakes the same chat with its files restored. If SAM could not save the workspace, or the snapshot is incomplete, the chat says so. An agent that crashed, timed out, or hung mid-turn has no session SAM can safely snapshot, so its uncommitted changes are lost and the chat says that too. **Archive** still deletes it right away. [When a task fails](/docs/guides/session-troubleshooting/#when-a-task-fails) shows how to tell which happened.
+- **Failed tasks.** When a task fails while its workspace is still running, SAM snapshots the workspace and puts the conversation to sleep instead of deleting it. That covers a provider usage limit, a question the agent sent with its `request_human_input` tool that nobody answered, and an agent that went quiet after a SAM check-in. If the agent is still working when the task fails, SAM waits for its turn to end first (up to 8 hours by default). The failure banner stays, and sending a message wakes the same chat with its files restored. If SAM could not save the workspace, or the snapshot is incomplete, the chat says so. If SAM cannot safely snapshot the failed runtime, uncommitted changes may be lost; the chat explains what could not be saved. **Archive** still deletes it right away. [When a task fails](/docs/guides/session-troubleshooting/#when-a-task-fails) shows how to tell which happened.
 
 You may also see a banner telling you a message was saved but its delivery was interrupted. **That one needs a decision from you** — SAM will not replay the message automatically, because replaying a prompt that already half-ran duplicates commits and pull requests. See [Your prompt may or may not have run](/docs/guides/session-troubleshooting/#your-prompt-may-or-may-not-have-run).
 
@@ -342,6 +515,11 @@ When you open a new chat, SAM offers a few repo-aware **starter prompts** (for e
 To send on a desktop keyboard, press **Cmd+Enter** on Mac or **Ctrl+Enter** on Windows/Linux — plain **Enter** inserts a new line so you can write multi-line prompts. The composer shows the correct shortcut for your platform as a hint. On mobile, tap the send button; **Enter** always inserts a new line.
 
 ## Switching Between Chats
+
+The session list puts the chat with the most recent message first. Only a new message moves a chat
+up — from you, the agent, or SAM itself, such as a wake-failure notice. Sleeping, waking, stopping,
+or archiving a chat leaves it where it is, so an old chat you archive doesn't jump to the top. A
+chat with no messages yet is placed by when it was created.
 
 A chat you opened in the last 24 hours opens at once from a cache in your browser, then refreshes in the background. A thin bar at the top of the page shows while the refresh runs, and messages that arrived while you were away appear when it finishes. A chat that is not cached shows a loading indicator until its newest messages arrive. The previous chat never stays on screen while the next one loads.
 
