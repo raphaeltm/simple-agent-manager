@@ -651,7 +651,11 @@ describe('live-runtime record: what kept the task, and why', () => {
     });
     it('bounds a hung interaction lookup without failing or cleaning the task', async () => {
       quietPrompt();
-      vi.mocked(snapshotInteractions).mockImplementationOnce(() => new Promise(() => {}));
+      // Durable Object RPC returns a Promise with RPC property picks; this test
+      // intentionally models only its never-settling await boundary.
+      vi.mocked(snapshotInteractions).mockImplementationOnce(
+        () => new Promise(() => {}) as unknown as ReturnType<typeof snapshotInteractions>
+      );
       const aiRun = vi.fn().mockResolvedValue(stalledVerdict());
       await recoverStuckTasks(env({ AI: { run: aiRun }, TASK_LIVENESS_PROBE_TIMEOUT_MS: '5' }));
       expect(taskRow().status).toBe('in_progress');

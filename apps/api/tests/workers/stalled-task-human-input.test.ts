@@ -66,21 +66,29 @@ describe('stalled-turn human-input guard across real Durable Objects', () => {
         state.storage.sql.exec('DELETE FROM outbox');
         await state.storage.deleteAlarm();
       });
-      const aiRun = vi
-        .fn()
-        .mockResolvedValue({
-          answers: { stall_status: { value: 'stalled', probabilities: { stalled: 0.99 } } },
-        });
+      const aiRun = vi.fn().mockResolvedValue({
+        answers: { stall_status: { value: 'stalled', probabilities: { stalled: 0.99 } } },
+      });
       const input = {
         task: { id: taskId, project_id: projectId, workspace_id: null, chat_session_id: sessionId },
         liveness: {
           live: true,
           conclusive: true,
           reason: 'task_prompt_turn_active',
-          evidence: { promptStartedAgeMs: 2 * HOUR },
+          workspaceStatus: 'running',
+          nodeId: 'node-1',
+          activeAcpSessionId: 'agent-1',
+          evidence: {
+            workState: 'prompt_turn_active',
+            activity: 'prompting',
+            lastActivityAgeMs: 0,
+            promptStartedAgeMs: 2 * HOUR,
+            runtimeWorkProgressAgeMs: null,
+            acpHeartbeatAgeMs: 0,
+          },
         },
         nowMs: now,
-      } as const;
+      } satisfies Parameters<typeof classifyLongRunningTaskStall>[1];
       const classifierEnv = { ...bindings, AI: { run: aiRun } } as unknown as Env;
       expect(await classifyLongRunningTaskStall(classifierEnv, input)).toBeNull();
       expect(aiRun).not.toHaveBeenCalled();
