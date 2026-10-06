@@ -110,11 +110,14 @@ coming before an agent stops on it.
 - **In a chat**, a small chip under the chat's title shows the credential that chat's agent uses —
   for example `Claude · 5h 78% · Week 31%`, shortest limit first. Select it to see every limit, how
   much of it is used, and when it resets. It appears once SAM has a reading, usually after the
-  agent's first reply; credentials that report nothing (see the table below) never show one.
+  agent's first reply; credentials that report nothing (see the list below) never show one.
 - **In Settings → Advanced**, each of your personal credentials in the **Credentials** list shows the
   same chip once an agent has used it.
 - **Agents** can read the same numbers with the `get_credential_limits` tool, so an agent
   coordinating others can pause before a limit and schedule itself to wake after the reset.
+
+The **Usage** tab in Settings is different: it shows SAM's own AI-proxy and compute usage, not your
+provider's limits.
 
 The chip's colour shows the most serious state among the limits, and the dialog names it: **OK**,
 **Warning** (from 75%, or earlier if the provider warns), **Critical** (from 90%), or **Limit
@@ -191,8 +194,10 @@ or woken from sleep, after you save it — not to a chat that is already running
 
 A mode saved earlier still applies. If an agent asks when you don't expect it, check all three
 places: older built-in profiles were set to **Accept Edits** or **Plan Mode**, and saving
-**Settings → Agents** before 4 October stored the old default, now shown as **Manual**, even if you
-only changed the model. Choose **Bypass Permissions** there to stop the questions.
+**Settings → Agents** on or before 4 October stored the old default, now shown as **Manual**, even if
+you only changed the model. To stop the questions, set **Bypass Permissions** wherever the mode is
+set — a profile's choice wins over the project's **Agent Overrides**, which win over
+**Settings → Agents**.
 
 | Mode                             | What the agent does                                                        |
 | -------------------------------- | -------------------------------------------------------------------------- |

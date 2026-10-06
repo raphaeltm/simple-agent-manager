@@ -587,15 +587,16 @@ async function fitCardOnPhone(page: Page) {
 }
 
 /**
- * For a crop of one card: the agent's turn is still open while it waits, so the floating
- * Interrupt button sits over the end of the conversation — which is where the card is. It is
- * not part of the card, so it is hidden once the test has seen it.
+ * For a crop of one card: the agent's turn is still open while it waits, so the completion dock —
+ * the floating Interrupt button and the crest behind it — sits over the end of the conversation,
+ * which is where the card is. It is not part of the card, so it is hidden once the test has seen it.
  */
-async function hideInterruptButton(page: Page) {
+async function hideCompletionDock(page: Page) {
   const interrupt = page.getByRole('button', { name: 'Interrupt agent' });
   await expect(interrupt).toBeVisible();
-  await page.addStyleTag({
-    content: 'button[aria-label="Interrupt agent"]{visibility:hidden !important;}',
+  await interrupt.evaluate((button) => {
+    const dock = button.closest<HTMLElement>('div.shrink-0.pointer-events-none') ?? button;
+    dock.style.visibility = 'hidden';
   });
   await expect(interrupt).toBeHidden();
 }
@@ -684,7 +685,7 @@ test('docs: agent question card', async ({ page }) => {
   await expect(card.getByRole('button', { name: 'Decline' })).toBeEnabled();
 
   await card.scrollIntoViewIfNeeded();
-  await hideInterruptButton(page);
+  await hideCompletionDock(page);
   await docsShot(page, isMobile(page) ? 'chat-agent-question-mobile' : 'chat-agent-question', card);
 });
 
@@ -702,7 +703,7 @@ test('docs: external link request card', async ({ page }) => {
   await expect(card.getByRole('button', { name: 'Decline' })).toBeEnabled();
 
   await card.scrollIntoViewIfNeeded();
-  await hideInterruptButton(page);
+  await hideCompletionDock(page);
   await docsShot(
     page,
     isMobile(page) ? 'chat-external-link-request-mobile' : 'chat-external-link-request',

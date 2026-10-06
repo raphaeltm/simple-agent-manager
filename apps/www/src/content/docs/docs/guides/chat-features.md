@@ -23,7 +23,7 @@ session list. The agent is paused until you answer.
   <source media="(max-width: 40em)" srcset="/images/docs/chat-permission-request-mobile.png 2x" />
   <img
     src="/images/docs/chat-permission-request.png"
-    alt="A chat where the agent is waiting for permission. The user asked it to fix flaky checkout tests, and the agent replied that it will run the test suite. Under its running &quot;npm test&quot; step, a card titled &quot;npm test&quot; has a &quot;Permission needed&quot; badge and a countdown of about two hours, and three buttons supplied by the agent: &quot;Yes&quot;, &quot;Yes, and don't ask again for npm commands&quot;, and &quot;No&quot;. On a wide screen, the session list beside the chat marks it &quot;Needs input&quot; in amber; the other chats in the list carry no label."
+    alt="A chat where the agent is waiting for permission. The user asked it to fix flaky checkout tests, and the agent replied that it will run the test suite. Under its running &quot;npm test&quot; step, a card titled &quot;npm test&quot; has a &quot;Permission needed&quot; badge and a countdown of about two hours, and three buttons supplied by the agent: &quot;Yes&quot;, &quot;Yes, and don't ask again for npm commands&quot;, and &quot;No&quot;. On a wide screen, the session list beside the chat marks it &quot;Needs input&quot; in amber; the other chats in the list carry no status label."
   />
 </picture>
 
@@ -33,14 +33,17 @@ For every kind of request:
   [shared project](/docs/guides/collaboration/), other members see that the agent is waiting, but
   not what it asked or what you answered.
 - **No notification is sent.** Watch the session list for **Needs input**; on a phone, open the list
-  with the list button at the top right of the project. A chat with no new messages for three hours
+  with the list icon at the right of the project-name bar. A chat with no new messages for three hours
   moves into the collapsed **Older** group at the bottom of the list, label and all, so look there
   too. (Notifications cover a different kind of question, the one agents ask with their
   `request_human_input` tool — see [Notifications](/docs/guides/notifications/).)
 - **You don't have to stay on the page.** A request waits in SAM, not in your browser tab, so you can
   answer later or from another device until its deadline, which the card shows. If nobody answers in
   time, the request ends — the card says it expired or was cancelled — and the agent is told no, so
-  the action it asked about does not happen. Send a message to tell the agent how to carry on.
+  the action it asked about does not happen. Send a message to tell the agent how to carry on. One
+  exception: on work that started more than four hours ago, answer within an hour. SAM's check for
+  [stalled turns](/docs/guides/session-troubleshooting/#when-a-task-fails) can't yet tell that the
+  agent is waiting for you, and may end the task.
 - **Answer on the card, not in the message box.** A message you type waits until the agent's turn
   ends, and the turn can't end until the card is answered or expires. To stop the agent instead,
   select **Interrupt** (the red button above the message box); the card then says **Request
@@ -49,7 +52,8 @@ For every kind of request:
   If your connection dropped as you answered, select **Retry answer** (or **Check receipt**) on the
   card: it sends the same answer again, so it can't count twice. If the card says delivery is
   unconfirmed, or that the request was interrupted because the agent stopped first, check whether
-  the agent carried on; if not, send your decision as a message.
+  the agent carried on. If it's still waiting, select **Interrupt** first, then send your decision as
+  a message.
 
 :::note[Self-hosted instances]
 These requests are off until an operator turns them on — see
@@ -74,6 +78,10 @@ buttons are the agent's own choices. For a Claude Code command they are usually:
 - **Yes, and don't ask again for …** runs it and lets similar commands, named on the button, run
   without asking from then on in this chat's workspace.
 - **No** refuses. The agent is told you said no and carries on without it.
+
+If the agent asks about every command and you didn't choose that, its mode was probably saved as
+**Manual** earlier — see [Permission mode](/docs/guides/agents/#permission-mode). In the meantime,
+**Yes, and don't ask again for …** stops it asking about that kind of command.
 
 A plan approval is titled **Approve Plan** and asks how to continue — for example **Yes, and use
 auto mode** or **Yes, manually approve edits** — or offers **No, keep planning**. A permission request
@@ -451,7 +459,7 @@ Persistent chat sessions can sleep and recover on both [Instant and VM-backed ru
 - **Snapshots that keep failing.** If SAM cannot save a complete snapshot after a few tries (three, or 15 minutes, by default), it stops retrying. A VM session whose earlier snapshot saved its exact Git commit sleeps anyway, keeping the conversation and the repository but not every file, and the chat says what was kept. Otherwise the chat says SAM could not put the session to sleep, and the workspace keeps running. [SAM could not save a complete snapshot](/docs/guides/session-troubleshooting/#sam-could-not-save-a-complete-snapshot) explains both.
 - **Recovery.** SAM is rebuilding the session's runtime and restoring its saved state. Wait for it to finish instead of resending.
 - **Wake failed.** SAM could not safely wake the sleeping session or the queued wake prompt expired before delivery. The session is marked **Wake failed** in the list and a system message in the chat explains the reason, so the failure is visible instead of hidden in retry state. [Wake failed](/docs/guides/session-troubleshooting/#wake-failed) lists the reasons and what to do about each.
-- **Failed tasks.** When a task fails while its workspace is still running, SAM snapshots the workspace and puts the conversation to sleep instead of deleting it. That covers a provider usage limit, an expired request for your input, and an agent that went quiet after a SAM check-in. If the agent is still working when the task fails, SAM waits for its turn to end first (up to 8 hours by default). The failure banner stays, and sending a message wakes the same chat with its files restored. If SAM could not save the workspace, or the snapshot is incomplete, the chat says so. An agent that crashed, timed out, or hung mid-turn has no session SAM can safely snapshot, so its uncommitted changes are lost and the chat says that too. **Archive** still deletes it right away. [When a task fails](/docs/guides/session-troubleshooting/#when-a-task-fails) shows how to tell which happened.
+- **Failed tasks.** When a task fails while its workspace is still running, SAM snapshots the workspace and puts the conversation to sleep instead of deleting it. That covers a provider usage limit, a question the agent sent with its `request_human_input` tool that nobody answered, and an agent that went quiet after a SAM check-in. If the agent is still working when the task fails, SAM waits for its turn to end first (up to 8 hours by default). The failure banner stays, and sending a message wakes the same chat with its files restored. If SAM could not save the workspace, or the snapshot is incomplete, the chat says so. An agent that crashed, timed out, or hung mid-turn has no session SAM can safely snapshot, so its uncommitted changes are lost and the chat says that too. **Archive** still deletes it right away. [When a task fails](/docs/guides/session-troubleshooting/#when-a-task-fails) shows how to tell which happened.
 
 You may also see a banner telling you a message was saved but its delivery was interrupted. **That one needs a decision from you** — SAM will not replay the message automatically, because replaying a prompt that already half-ran duplicates commits and pull requests. See [Your prompt may or may not have run](/docs/guides/session-troubleshooting/#your-prompt-may-or-may-not-have-run).
 

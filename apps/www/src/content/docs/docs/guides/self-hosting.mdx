@@ -108,9 +108,9 @@ every such request the moment an agent makes it, and no card appears. Claude Cod
 default **Bypass Permissions** mode rarely ask, so most users won't notice, but an agent in
 **Manual**, **Accept Edits**, or **Plan Mode** — or Amp or Gemini CLI, which ask on their own — is told no
 every time it asks to make a change. A mode can be set in a profile, a project's **Agent
-Overrides**, or a user's **Settings → Agents**; saving that page before 4 October stored the old
-always-ask default, now shown as **Manual**. Run v2026.10.05 or later, the first release where
-agents with no mode set start in Bypass Permissions.
+Overrides**, or a user's **Settings → Agents**; saving that page on a release before v2026.10.05
+stored the old always-ask default, now shown as **Manual**. Run the newest release: v2026.10.05 is
+the first where Claude Code agents with no mode set start in Bypass Permissions.
 
 To turn it on, add these GitHub Environment **variables** (not secrets) to your `production`
 environment, then run **Deploy Production**:
@@ -445,7 +445,8 @@ What to do, by what the card shows:
 
 Cloudflare limits each project's storage object to 10 GiB. **Admin → Storage** shows how close each
 project is. At the cap every write to that project fails: new tasks and chat messages get
-`PROJECT_DATA_STORAGE_FULL`, and putting sessions to sleep fails too. So do the archive drain and
+`PROJECT_DATA_STORAGE_FULL` (_"ProjectData storage is full; storage recovery is required before this
+write can complete."_), and putting sessions to sleep fails too. So do the archive drain and
 **Abandon**, because each has to write something before it can free space, and the routine search
 cleanup switches itself off just before the cap.
 
@@ -454,7 +455,8 @@ To get out of that state, a superadmin can call
 search index of finished (stopped or failed) sessions at least a week old, largest first. Messages are not deleted: searches that cover those
 sessions still work, but find less, because they fall back to scanning recent messages. There is no
 button for it yet. Sign in to SAM as a superadmin, open `https://api.yourdomain.com/health` in the
-same browser, and run this in that tab's developer console:
+same browser, and run this in that tab's developer console, with the project's ID (the part after
+`/projects/` in the project's address in SAM) in place of `<projectId>`:
 
 ```js
 await fetch('/api/admin/project-data/storage/<projectId>/grouped-fts-wall-recovery', {
@@ -473,7 +475,8 @@ await fetch('/api/admin/project-data/storage/<projectId>/grouped-fts-wall-recove
 Every call needs a `reason`, `dryRun`, and the three limits `maxSessions`, `maxRows`, and `maxBytes`,
 each capped by a `PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_*` setting. The dry run reports what a real call would
 remove. Then set `dryRun: false` and start small — one session, 500 rows, 4 MiB (`4194304`) — and
-raise the limits while each response shows `error: null` and `afterBytes` below `beforeBytes`.
+raise the limits while each response's `result` shows `error: null` and `afterBytes` below
+`beforeBytes`.
 
 ## Teardown
 
@@ -573,7 +576,14 @@ For what SAM does with a workspace VM that stops responding, see [Unresponsive m
 If agents stop each time they need permission and no card appears in the chat, agent requests are
 off, so SAM refuses every request. Turn them on as described in
 [Let agents ask in chat](#let-agents-ask-in-chat), or have users switch those agents to **Bypass
-Permissions**, then start a new chat. Running sessions keep the setting they started with.
+Permissions**, then start a new chat — running sessions keep the setting they started with. Amp and
+Gemini CLI ask on their own even in Bypass Permissions, so for them only turning requests on helps.
+
+### "ProjectData storage is full"
+
+If writes to one project fail with _"ProjectData storage is full; storage recovery is required
+before this write can complete."_, that project has reached Cloudflare's 10 GiB limit. See
+[When a project reaches the 10 GiB storage cap](#when-a-project-reaches-the-10-gib-storage-cap).
 
 ### "error: failed to decrypt state"
 

@@ -10,11 +10,11 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 ### For everyone
 
 - **Agents can stop and ask you.** When an agent wants permission, has a question, or needs you to
-  open a sign-in link, a card appears in the chat under the step it's about, and the chat is marked
-  **Needs input** in the session list. Answer on the card; the agent waits until you do.
+  open a sign-in link, a card appears in the chat, and the chat is marked **Needs input** in the
+  session list. Answer on the card; the agent waits until you do.
   → [When the Agent Needs You](/docs/guides/chat-features/#when-the-agent-needs-you)
 - **Agents don't ask unless you want them to.** A Claude Code agent with no permission mode set now
-  starts in **Bypass Permissions** (Codex never asks). The always-ask mode is now called **Manual**: choose it, or **Plan Mode**,
+  starts in **Bypass Permissions** (Codex never asks for permission). The always-ask mode is now called **Manual**: choose it, or **Plan Mode**,
   to approve changes yourself. A mode saved earlier still applies, so if an agent asks when you
   don't expect it, check where its mode is set. → [Permission mode](/docs/guides/agents/#permission-mode)
 - **See your subscription limits.** On a Claude, ChatGPT, or OpenCode Go subscription, a chip under
@@ -56,7 +56,8 @@ Also changed this week:
   → [SAM paused automatic check-ins](/docs/guides/session-troubleshooting/#sam-paused-automatic-check-ins)
 - **A turn that hangs for hours is ended.** When work started more than four hours ago and the agent's
   turn has shown nothing for an hour, SAM checks it, and fails the task if the turn is clearly
-  wedged. Work that wasn't pushed is lost, so the troubleshooting guide says what to do.
+  wedged. Work that wasn't pushed is lost, and the check can't yet tell when the agent is waiting on
+  a card for you, so answer cards promptly on long-running work.
   → [When a task fails](/docs/guides/session-troubleshooting/#when-a-task-fails)
 - **A message sent right after you stop the agent goes through.** A follow-up sent within about five
   seconds of stopping a prompt could be killed along with it, failing the task.
@@ -67,22 +68,23 @@ Also changed this week:
 
 ### For self-hosters & admins
 
-**Decide on agent requests before you update.** Before 30 September, SAM approved every permission
-request automatically, whatever mode an agent was in. Now each request goes to the person running the
-chat — or, unless you turn agent requests on, it is refused, on new and updated installations alike.
-Turn them on with three GitHub Environment variables
-([Let agents ask in chat](/docs/guides/self-hosting/#let-agents-ask-in-chat)), or make sure agents
-run in **Bypass Permissions** — and know that Amp and Gemini CLI ask on their own even then. Check
-all three places a mode can be set: profiles, each project's
-**Agent Overrides**, and each user's **Settings → Agents** — saving that page before 4 October stored
-the old always-ask default, now shown as **Manual**. Update to v2026.10.05 or later: v2026.10.01 to
-v2026.10.04 already handle requests this way but don't yet start agents in Bypass Permissions, so
-with requests off, an agent with no mode set was refused every time it asked.
+**Decide on agent requests before you update.** Before v2026.10.01, SAM approved every permission
+request automatically, whatever mode an agent was in. From v2026.10.01 each request goes to the
+person running the chat — or, unless you turn agent requests on, it is refused, on new and updated
+installations alike.
 
-- **Fresh GitHub sign-ins fail on v2026.09.24 to v2026.10.01** (fixed from v2026.10.02). Update to
-  v2026.10.05 or later.
-- **v2026.10.05 drops sleeping VM tasks from the dashboard's Active Tasks list.** The release after
-  it fixes that.
+1. **Update to the newest release.** v2026.10.05 is the first where Claude Code agents with no mode
+   set start in Bypass Permissions; on v2026.10.01 to v2026.10.04 they ask, and with requests off are
+   refused every time. The check-in cap, usage chips, the Codex upgrade for GPT-6.1 Sol, and sleeping
+   tasks on Active Tasks arrive in the release after v2026.10.05.
+2. **Turn agent requests on**, with three GitHub Environment variables
+   ([Let agents ask in chat](/docs/guides/self-hosting/#let-agents-ask-in-chat)), or make sure agents
+   run in **Bypass Permissions**. Amp and Gemini CLI ask on their own even then.
+3. **Check where modes are set:** profiles, each project's **Agent Overrides**, and each user's
+   **Settings → Agents** — saving that page on a release before v2026.10.05 stored the old
+   always-ask default, now shown as **Manual**.
+
+- **Fresh GitHub sign-ins fail on v2026.09.24 to v2026.10.01** (fixed from v2026.10.02).
 - **Codex questions and links ship with the deploy.** Every deploy publishes SAM's own Codex build to
   your R2 bucket, and Instant images include it; Codex sessions use it once questions or links are
   on. No setup.

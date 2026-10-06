@@ -52,24 +52,30 @@ an Instant profile has no branch of its own, and pushes only what you ask the ag
 ## The agent is waiting for you
 
 **Needs input** beside a chat in the session list means it is waiting for an answer. On a phone,
-open the session list with the list button at the top right of the project. A chat with no new
+open the session list with the list icon at the right of the project-name bar. A chat with no new
 messages for three hours moves into the collapsed **Older** group at the bottom of the list, so look
 there too. Open the chat and look for one of these:
 
-- **A card under one of the agent's steps** — a permission request, a question, or a link to open.
-  Answer it there; the agent carries on once it has your answer. If the card says the request expired
+- **A card in the chat** — a permission request, under the step it's about, or a question or a link
+  to open, at the end of the chat. Answer it there; the agent carries on once it has your answer. If the card says the request expired
   or was cancelled, the agent was told no, so send a message saying how to continue. See
   [When the Agent Needs You](/docs/guides/chat-features/#when-the-agent-needs-you).
 - **A question the agent asked with its `request_human_input` tool.** It shows as that tool's step
   in the chat, and as a notification — with answer buttons if the agent offered choices. Reply in
-  the composer, or pick an answer in the notification. See
-  [Notifications](/docs/guides/notifications/#request_human_input).
+  the composer, or pick an answer in the notification. If nobody answers for about two hours (longer
+  if the notification didn't reach you), the task fails but keeps its workspace, so you can still
+  reply to carry on. See [Notifications](/docs/guides/notifications/#request_human_input).
 - **SAM's notice that it paused check-ins.** See
   [SAM paused automatic check-ins](#sam-paused-automatic-check-ins).
 
 Only the person who started the chat can answer a card. If you're someone else in a
 [shared project](/docs/guides/collaboration/), the card says it is waiting for the session creator:
 ask them.
+
+If an agent keeps asking about every command when you don't want it to, its permission mode is set
+to ask — often **Manual**, saved earlier without anyone choosing it. See
+[Permission mode](/docs/guides/agents/#permission-mode) for where to change it; the change applies to
+new chats and to chats woken from sleep.
 
 ## SAM paused automatic check-ins
 
@@ -89,8 +95,8 @@ keeps coming back — would otherwise be nudged forever. SAM pauses and posts on
   straight away, in any chat, when Codex reports that your ChatGPT plan doesn't support the selected
   model. Choose a model it supports — in the agent's
   [profile](/docs/guides/agents/#choosing-a-model), the project's **Agent Overrides**, or
-  **Settings → Agents**, wherever the model was set — then start a new chat: a running chat keeps the
-  model it started with.
+  **Settings → Agents**, wherever the model was set — then start a new chat. The notice says to send
+  a message to retry, but this chat keeps the model it started with, so it would hit the same error.
 
 The chat is marked **Needs input** until someone replies. Your next message, or a new tool step
 finishing successfully, starts the check-ins again with a fresh count. Self-hosters can change the
@@ -109,7 +115,7 @@ or in the failure card under the chat header (expand the card for the next step)
 - **A failure card: "Agent connection rejected."** The provider refused the credential — usually an
   expired subscription sign-in or a revoked API key. Reconnect it under **Settings → Connections**
   (the card's **Open agent connections** button, for the person who started the chat), then reply in
-  the chat or use **Retry**.
+  the chat to carry on. Use **Retry** only if the chat has ended.
 - **A failure card: "Model unavailable for this account."** The credential works, but your plan or
   account can't use that model — or the model ID is mistyped. Pick another model in the agent's
   profile, the project's **Agent Overrides**, or **Settings → Agents**, then start a new chat.
@@ -132,7 +138,8 @@ agent makes it. The step it wanted to run fails, and the agent either works arou
 
 Until requests are turned on, use **Bypass Permissions** for the agent — in its profile, in the
 project's **Agent Overrides**, and in **Settings → Agents** (see
-[Permission mode](/docs/guides/agents/#permission-mode)) — and start a new chat. An operator can turn
+[Permission mode](/docs/guides/agents/#permission-mode)) — and start a new chat. That doesn't help
+Amp or Gemini CLI, which ask on their own even in Bypass Permissions. An operator can turn
 requests on as described in [Let agents ask in chat](/docs/guides/self-hosting/#let-agents-ask-in-chat).
 
 ## Recovery is in progress
@@ -318,7 +325,9 @@ If a reason isn't in this list, or a fixable one keeps coming back after you fix
 ## When a task fails
 
 A task can fail for reasons that have nothing to do with its work — the provider's usage limit ran
-out, or a question the agent asked you expired unanswered. When that happens while the workspace is
+out, or nobody answered a question the agent asked with its `request_human_input` tool. (A card in
+the chat that nobody answers doesn't fail the task; it only tells the agent no.) When that happens
+while the workspace is
 still running, SAM tries to keep the workspace: it lets the agent's current turn end, snapshots the
 workspace, and puts the chat to sleep. That usually takes a few minutes, but if the agent was in the
 middle of a turn SAM waits for it to end, for up to eight hours. Until then the chat stays awake with
@@ -350,7 +359,8 @@ minutes** under **Error**. SAM looks closer at a task or chat whose work started
 ago when the agent's current turn has been open for over an hour and nothing new has appeared in the
 chat for an hour. An AI check reads the end of the conversation, and if it is confident the turn is
 wedged — the last step should have finished by now — SAM fails the task instead of letting it run
-until SAM's 24-hour limit. **This failure does not save the workspace:** uncommitted and unpushed
+until SAM's 24-hour limit. That check can't yet tell when the agent is waiting for you to answer a
+card, so on long-running work, answer cards within an hour. **This failure does not save the workspace:** uncommitted and unpushed
 changes are lost. Check GitHub for what was pushed, then use **Retry** or
 [Fork](/docs/guides/chat-features/#conversation-forking). If the agent was really busy with
 something long and quiet, such as a slow build, ask it to report progress as it goes, or split the
