@@ -105,7 +105,7 @@ A subscription only lets you use so much in a stretch of time — Claude Max has
 weekly limit, for example. SAM shows how much of each limit your agents have used, so you can see one
 coming before an agent stops on it.
 
-![The usage details dialog opened from a chat. It reads "Claude usage", "Your credential · claude-code · sampled 4m ago", with a Warning badge, and lists two limits with progress bars: "5h" at 78% used, resetting in 2h 10m, and "Week" at 31% used, resetting in 3d.](/images/docs/credential-usage-limits.png)
+![The usage details dialog opened from a chat's usage chip. It reads "Claude usage" and "Your credential · claude-code · sampled 4m ago", with an amber Warning badge, and lists two limits with progress bars: "5h" at 78% used in amber, resetting in about two hours, and "Week" at 31% used in green, resetting in about three days. A note at the bottom says the values are the latest samples SAM saw, not a live quote from the provider.](/images/docs/credential-usage-limits.png)
 
 - **In a chat**, a small chip under the chat's title shows the credential that chat's agent uses —
   for example `Claude · 5h 78% · Week 31%`, shortest limit first. Select it to see every limit, how

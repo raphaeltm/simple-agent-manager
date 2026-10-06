@@ -29,7 +29,13 @@ file, it has a question only you can answer, or a tool it uses wants you to open
 browser. Each request appears as a card in the chat, under the step it belongs to, and the chat is
 marked **Needs input** in the session list. The agent is paused until you answer.
 
-![A chat where the agent is waiting for permission. In the session list on the left, the chat reads "Needs input" in amber. In the conversation, under the agent's "npm test" step, a card titled "npm test" has a "Permission needed" badge and a countdown, and three buttons supplied by the agent: "Yes", "Yes, and don't ask again for npm commands", and "No".](/images/docs/chat-permission-request.png)
+<picture>
+  <source media="(max-width: 40em)" srcset="/images/docs/chat-permission-request-mobile.png 2x" />
+  <img
+    src="/images/docs/chat-permission-request.png"
+    alt="A chat where the agent is waiting for permission. The user asked it to fix flaky checkout tests, and the agent replied that it will run the test suite. Under its running &quot;npm test&quot; step, a card titled &quot;npm test&quot; has a &quot;Permission needed&quot; badge and a countdown of about two hours, and three buttons supplied by the agent: &quot;Yes&quot;, &quot;Yes, and don't ask again for npm commands&quot;, and &quot;No&quot;. On a wide screen, the session list beside the chat marks it &quot;Needs input&quot; in amber; the other chats in the list carry no label."
+  />
+</picture>
 
 For every kind of request:
 
@@ -73,7 +79,7 @@ choices to pick from, short text, numbers, or yes/no. Fill it in and select **Se
 Code's multiple-choice questions arrive this way, each with an **Other** box for an answer of your
 own. **Decline** tells the agent you're skipping the question.
 
-![An "Agent question" card in the chat. The agent asks where to store uploaded receipts. A "Storage" dropdown has "R2 bucket (Recommended)" selected, with the option's description below it, and an empty "Other" box follows. Below the field are "Send answer" and "Decline" buttons.](/images/docs/chat-agent-question.png)
+![An "Agent question" card in the chat, with its deadline under the title. The agent asks "Where should uploaded receipts be stored?". A "Storage" dropdown has "R2 bucket (Recommended)" selected, with that option's description below it, and an empty "Other" box follows for an answer of your own. At the bottom are "Send answer" and "Decline" buttons.](/images/docs/chat-agent-question.png)
 
 Questions appear only in conversation-mode chats, which include every
 [Instant](/docs/guides/instant-sessions/) chat. A task can't stop to ask this way.
@@ -86,7 +92,7 @@ where the link goes. Select the **Open …** link to visit it in a new tab and f
 come back and select **Continue after opening** so the agent carries on; that button only becomes
 available once you have opened the link. **Decline** tells the agent you won't.
 
-![An "External service request" card. It explains that the Linear MCP server needs you to approve access, shows "Destination: mcp.linear.app", an "Open mcp.linear.app" link, and the buttons "Continue after opening" (not yet available) and "Decline".](/images/docs/chat-external-link-request.png)
+![An "External service request" card. It says that Northwind CRM needs you to approve access before the agent can read your customer records, shows "Destination: mcp.northwind-crm.com" and an "Open mcp.northwind-crm.com" link, and has two buttons: "Continue after opening", which stays unavailable until you open the link, and "Decline".](/images/docs/chat-external-link-request.png)
 
 SAM never opens a link by itself, and it shows only links to public `https://` addresses. Opening
 the link doesn't prove the sign-in worked. If the service reports back, the card says **The external
