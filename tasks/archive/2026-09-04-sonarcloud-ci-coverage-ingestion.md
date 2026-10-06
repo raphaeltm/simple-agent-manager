@@ -206,6 +206,15 @@ producer/consumer boundary whose missing output has been interpreted as success.
 - [ ] After the now-authorized merge, monitor the repository's automatic production workflow to
       completion without starting a separate manual deployment.
 
+### Live-scan regression completion (2026-10-06)
+
+- [x] Generate focused validator LCOV in the existing Test job before normalization/upload.
+- [x] Derive, normalize, upload, download and validate the 13th report alongside workspace LCOV.
+- [x] Classify tests separately while retaining production coverage requirements and existing
+      Playwright screenshot exclusions.
+- [x] Add root-report and classification regressions plus real CLI-entrypoint scenarios.
+- [x] Renew specialist reviews and synchronize README/task evidence.
+
 ### Merge continuation
 
 - [x] Re-resolve the remote PR head and current `main`, reuse only PR #2020 and its
@@ -215,7 +224,7 @@ producer/consumer boundary whose missing output has been interpreted as success.
       distinguishes locale-aware alphabetical ordering from the unreliable default sort.
 - [x] Exhaust the existing authorized GitHub/SAM/project credential sources without exposing
       values; record that none provides the required Sonar admin/token capability.
-- [ ] Have a Sonar project/org admin create and store `SONAR_TOKEN`, disable Automatic Analysis,
+- [x] Have a Sonar project/org admin create and store `SONAR_TOKEN`, disable Automatic Analysis,
       and then enable `SONAR_CI_ENABLED` in that documented order. Do not log or persist token
       values outside the GitHub secret.
 - [ ] Prove on the final PR head that the scanner job executed (not skipped), all exact-head
@@ -372,3 +381,10 @@ producer, artifact, consumer, source paths, or Sonar properties drift apart.
   on rerun with a 30-second operator timeout; no test assertions or source thresholds changed.
 - Renewed local specialist reviews are tracked in the PR; live final-head scanner/gate proof,
   best-effort CodeRabbit follow-up and merge/deploy monitoring remain required.
+
+## Archive status
+
+Implementation and local validation are complete. This file is archived at `/do` Phase 4;
+archival does not claim release completion. Final-head CI and Sonar coverage/gate proof,
+CodeRabbit follow-up, merge and production workflow monitoring remain unchecked release gates
+tracked in [PR #2020](https://github.com/raphaeltm/simple-agent-manager/pull/2020).
