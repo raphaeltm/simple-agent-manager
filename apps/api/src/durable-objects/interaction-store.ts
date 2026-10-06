@@ -43,7 +43,12 @@ import {
   pendingInteractionCount,
   terminalState,
 } from './interaction-store-model';
-import { readInteractionDetail, readInteractionSnapshot } from './interaction-store-read';
+import {
+  hasUnexpiredInteractionInput,
+  readInteractionDetail,
+  readInteractionRow,
+  readInteractionSnapshot,
+} from './interaction-store-read';
 import {
   completeUrlInteraction,
   validUrlAnswerDecision,
@@ -151,7 +156,7 @@ export class InteractionStore extends DurableObject<Env> {
   ): Promise<InteractionStoreCreateResult> {
     const config = getAcpInteractionConfig(this.env);
     const now = nowMs();
-    const existing = this.read(input.interactionId);
+    const existing = readInteractionRow(this.sql, input.interactionId);
     if (existing) {
       if (existing.payload_hash !== input.payloadHash) {
         return { status: 'conflict', reason: 'interaction id already exists with another payload' };
@@ -233,7 +238,7 @@ export class InteractionStore extends DurableObject<Env> {
 
   async answer(input: InteractionStoreAnswerInput): Promise<InteractionStoreAnswerResult> {
     const config = getAcpInteractionConfig(this.env);
-    const row = this.read(input.interactionId);
+    const row = readInteractionRow(this.sql, input.interactionId);
     if (row?.project_id !== input.projectId || row.chat_session_id !== input.chatSessionId) {
       return { status: 'not_found', reason: 'interaction not found' };
     }
@@ -361,7 +366,7 @@ export class InteractionStore extends DurableObject<Env> {
   async settle(
     input: InteractionStoreSettleInput
   ): Promise<{ status: 'settled' | 'not_found' | 'stale' }> {
-    const row = this.read(input.interactionId);
+    const row = readInteractionRow(this.sql, input.interactionId);
     if (!row) return { status: 'not_found' };
     if (
       row.generation !== input.generation ||
@@ -382,17 +387,8 @@ export class InteractionStore extends DurableObject<Env> {
   ): Promise<{ status: 'completed' | 'duplicate' | 'not_found' | 'stale' }> {
     return completeUrlInteraction(this.sql, this.env, input);
   }
-  /** Indexed existence probe independent of UI snapshot limits or expiry backlog. */
   hasUnexpiredHumanInput(now: number): boolean {
-    return (
-      this.sql
-        .exec<{ pending: number }>(
-          `SELECT 1 AS pending FROM interactions
-         WHERE state IN ('pending', 'answered') AND deadline_at > ? LIMIT 1`,
-          now
-        )
-        .toArray().length > 0
-    );
+    return hasUnexpiredInteractionInput(this.sql, now);
   }
 
   snapshot(cursor: string | null = null): InteractionStoreSnapshot {
@@ -403,7 +399,7 @@ export class InteractionStore extends DurableObject<Env> {
     summary: AcpInteractionSafeSummary;
     detail: Record<string, unknown> | null;
   } | null> {
-    const row = this.read(interactionId);
+    const row = readInteractionRow(this.sql, interactionId);
     if (!row) return null;
     return readInteractionDetail(row, this.env);
   }
@@ -423,7 +419,7 @@ export class InteractionStore extends DurableObject<Env> {
     outcome: 'confirmed' | 'unconfirmed' | 'interrupted',
     error: string | null = null
   ): Promise<{ status: 'recorded' | 'not_found' }> {
-    const row = this.read(interactionId);
+    const row = readInteractionRow(this.sql, interactionId);
     if (!row) return { status: 'not_found' };
     const now = nowMs();
     // The wrapper may report completion after answer delivery. Keep the encrypted
@@ -488,19 +484,8 @@ export class InteractionStore extends DurableObject<Env> {
     }
   }
 
-  private read(interactionId: string): InteractionRow | null {
-    return (
-      this.sql
-        .exec<InteractionRow>(
-          `SELECT * FROM interactions WHERE interaction_id = ? LIMIT 1`,
-          interactionId
-        )
-        .toArray()[0] ?? null
-    );
-  }
-
   private readRequired(interactionId: string): InteractionRow {
-    const row = this.read(interactionId);
+    const row = readInteractionRow(this.sql, interactionId);
     if (!row) throw new Error('interaction row disappeared after write');
     return row;
   }
@@ -587,7 +572,7 @@ export class InteractionStore extends DurableObject<Env> {
   }
 
   private async processDeliveryJob(interactionId: string, now: number): Promise<void> {
-    const row = this.read(interactionId);
+    const row = readInteractionRow(this.sql, interactionId);
     if (row?.state !== 'answered') return;
     if (!row.encrypted_decision || !row.decision_iv) {
       await this.recordDelivery(
@@ -731,7 +716,7 @@ export class InteractionStore extends DurableObject<Env> {
   }
 
   private async projectAttention(interactionId: string): Promise<void> {
-    const row = this.read(interactionId);
+    const row = readInteractionRow(this.sql, interactionId);
     if (!row || terminalState(row.state) || row.attention_marker_id?.length) return;
     const stub = this.projectDataStub(row.project_id);
     const summary = parseSummary(row);
@@ -762,7 +747,7 @@ export class InteractionStore extends DurableObject<Env> {
   }
 
   private async resolveProjectedAttention(interactionId: string): Promise<void> {
-    const row = this.read(interactionId);
+    const row = readInteractionRow(this.sql, interactionId);
     if (!row?.attention_marker_id) return;
     const stub = this.projectDataStub(row.project_id);
     await stub.resolveAttentionMarkerById(
