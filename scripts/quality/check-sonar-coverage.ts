@@ -15,6 +15,8 @@ export const GO_COVERAGE_REPORT_PATH = 'packages/cli/coverage.out';
 const SONAR_PROPERTIES_PATH = 'sonar-project.properties';
 const JAVASCRIPT_REPORT_PROPERTY = 'sonar.javascript.lcov.reportPaths';
 const GO_REPORT_PROPERTY = 'sonar.go.coverage.reportPaths';
+const VALIDATOR_COVERAGE_SCRIPT = 'quality:sonar-validator:coverage';
+const VALIDATOR_COVERAGE_REPORT_PATH = 'scripts/quality/coverage/lcov.info';
 
 export interface PrepareJavaScriptCoverageOptions {
   normalize: boolean;
@@ -92,6 +94,20 @@ function isVitestCoverageCommand(command: unknown): command is string {
   );
 }
 
+function readManifestScript(manifestPath: string, scriptName: string): unknown {
+  if (!existsSync(manifestPath)) return undefined;
+  const manifest: unknown = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  if (
+    typeof manifest !== 'object' ||
+    manifest === null ||
+    !('scripts' in manifest) ||
+    typeof manifest.scripts !== 'object' ||
+    manifest.scripts === null
+  )
+    return undefined;
+  return Reflect.get(manifest.scripts, scriptName);
+}
+
 export function findJavaScriptCoverageReportPaths(root: string): string[] {
   const workspaces = readWorkspacePatterns(root).flatMap((pattern) =>
     expandWorkspacePattern(root, pattern)
@@ -101,19 +117,18 @@ export function findJavaScriptCoverageReportPaths(root: string): string[] {
   for (const workspace of workspaces) {
     const manifestPath = join(root, workspace, 'package.json');
     if (!existsSync(manifestPath)) continue;
-    const manifest: unknown = JSON.parse(readFileSync(manifestPath, 'utf8'));
-    const coverageCommand =
-      typeof manifest === 'object' &&
-      manifest !== null &&
-      'scripts' in manifest &&
-      typeof manifest.scripts === 'object' &&
-      manifest.scripts !== null &&
-      'test:coverage' in manifest.scripts
-        ? manifest.scripts['test:coverage']
-        : undefined;
+    const coverageCommand = readManifestScript(manifestPath, 'test:coverage');
     if (isVitestCoverageCommand(coverageCommand)) {
       reportPaths.add(`${toRepositoryPath(workspace)}/coverage/lcov.info`);
     }
+  }
+
+  if (
+    isVitestCoverageCommand(
+      readManifestScript(join(root, 'package.json'), VALIDATOR_COVERAGE_SCRIPT)
+    )
+  ) {
+    reportPaths.add(VALIDATOR_COVERAGE_REPORT_PATH);
   }
 
   if (reportPaths.size === 0) {

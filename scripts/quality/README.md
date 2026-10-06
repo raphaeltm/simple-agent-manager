@@ -69,7 +69,9 @@ secret material in logs, PR text, or public issues.
 ## SonarQube Cloud coverage ingestion
 
 The CI workflow retains LCOV from the existing `pnpm test:coverage` run instead of running the
-JavaScript/TypeScript suites again. `pnpm quality:sonar-coverage:javascript` invokes `runCli` and
+JavaScript/TypeScript suites again. The same job runs the focused validator tests once with
+`pnpm quality:sonar-validator:coverage`, generating `scripts/quality/coverage/lcov.info` for the
+validator itself. `pnpm quality:sonar-coverage:javascript` invokes `runCli` and
 `prepareJavaScriptCoverageReports` only to normalize every `SF:` entry to a repository-relative
 source path and reject missing, empty, malformed, or mispointed reports. The CI `test` job then
 separately uploads these current-run files as the `js-ts-lcov` artifact:
@@ -87,6 +89,7 @@ packages/providers/coverage/lcov.info
 packages/shared/coverage/lcov.info
 packages/terminal/coverage/lcov.info
 packages/ui/coverage/lcov.info
+scripts/quality/coverage/lcov.info
 ```
 
 Go coverage remains at `packages/cli/coverage.out` in the `cli-go-coverage` artifact. The ordinary
@@ -99,6 +102,12 @@ Dependabot-triggered workflows, and exposes `SONAR_TOKEN` only to the token chec
 steps. GitHub treats Dependabot-triggered workflows like fork workflows and withholds ordinary
 Actions secrets, so the explicit Dependabot exclusion prevents an enabled scanner from failing
 on an unavailable token. Do not replace this boundary with `pull_request_target`.
+
+Sonar classifies matching test files under `sonar.tests` with explicit `sonar.test.inclusions`,
+while retaining all other files under `sonar.sources`. Test code is analyzed as test code rather
+than treated as uncovered production code; the behavioral validator remains production source
+and receives its own measured coverage. No production coverage exclusions or quality thresholds
+are relaxed. See the [official analysis scope documentation](https://docs.sonarsource.com/sonarqube-cloud/managing-your-projects/project-analysis/setting-analysis-scope/setting-initial-scope).
 
 Coverage import requires CI-based analysis; SonarQube Cloud Automatic Analysis does not import
 these reports. Automatic and CI-based analysis must not run together. Complete this one-time

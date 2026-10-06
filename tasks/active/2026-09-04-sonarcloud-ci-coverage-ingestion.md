@@ -338,3 +338,37 @@ producer, artifact, consumer, source paths, or Sonar properties drift apart.
 - `.claude/rules/22-infrastructure-merge-gate.md`
 - `.claude/rules/36-cli-quality.md`
 - `.specify/memory/constitution.md` Principles II, III, VI, X, XI, XII, and XIII
+
+## 2026-10-06 completion continuation
+
+- Updated against main `04a36a6f7` with merge commit `737805b71`, preserving history and main's
+  README additions and Sonar comments. No other PR branch was modified.
+- Resolved the earlier credential blocker through newly available workspace Sonar access.
+  Created a dedicated expiring CI token and securely stored it as repository `SONAR_TOKEN`;
+  its expiration is 2026-11-05 and rotation must happen before then. No token value was logged.
+  Disabled Automatic Analysis and enabled `SONAR_CI_ENABLED` for the first real scan.
+- Live run [37504614273](https://github.com/raphaeltm/simple-agent-manager/actions/runs/37504614273)
+  produced 12 valid workspace LCOV reports (1,985 sources, 95,897 line records) and CLI Go
+  coverage. The scanner executed successfully on `737805b71`; analysis
+  `45fd11b5-251d-4097-8907-77344bc74938` proved coverage ingestion: 69.6% coverage across
+  108,344 lines to cover. The gate correctly failed new coverage: 0.0% over 330 new lines.
+- Sonar's per-file API identified 167 uncovered validator lines plus 163 lines in test files
+  incorrectly classified as production. Restored Automatic Analysis with `SONAR_CI_ENABLED=false`
+  during the fix so unrelated PRs retain their previous analysis path.
+- Added a focused validator LCOV producer to the existing CI Test job, before normalization
+  and upload, retaining the single full workspace coverage invocation. Discovery, properties,
+  artifact upload and consumer validation now include the 13th report at
+  `scripts/quality/coverage/lcov.info`.
+- Classified tests using `sonar.sources=.`, `sonar.tests=.` and explicit test inclusions.
+  The validator remains production source; no production coverage exclusions or thresholds
+  were weakened. Added regression contracts for root report discovery/normalization, producer
+  ordering and test classification, plus four behavioral CLI tests exercising the real entrypoint.
+- TDD red: four pipeline tests failed before the report/classification fix. Green: 36 pipeline
+  tests and 12 companion workflow tests passed. Validator LCOV records 170/179 lines covered
+  (95.0%) and 114/127 branches (89.8%); all 13 current reports validate together.
+- Local full lint and typecheck passed. Full root tests passed all other workspaces; the API
+  suite passed all 819 files and 11,468 tests on a standalone two-worker rerun after parallel-load
+  timeouts. Build passed 9/9 tasks. Quality-script suite had timeout-only failures, which passed
+  on rerun with a 30-second operator timeout; no test assertions or source thresholds changed.
+- Renewed local specialist reviews are tracked in the PR; live final-head scanner/gate proof,
+  best-effort CodeRabbit follow-up and merge/deploy monitoring remain required.

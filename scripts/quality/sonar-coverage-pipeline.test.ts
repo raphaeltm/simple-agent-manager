@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parse } from 'yaml';
 
 import {
@@ -26,6 +26,7 @@ const EXPECTED_JAVASCRIPT_REPORTS = [
   'packages/shared/coverage/lcov.info',
   'packages/terminal/coverage/lcov.info',
   'packages/ui/coverage/lcov.info',
+  'scripts/quality/coverage/lcov.info',
 ];
 const temporaryRoots: string[] = [];
 
@@ -142,6 +143,38 @@ afterEach(() => {
   for (const root of temporaryRoots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
+async function invokeCoverageCli(
+  root: string,
+  args: string[]
+): Promise<{
+  exitCode: string | number | undefined;
+  logs: string[];
+  errors: string[];
+}> {
+  const originalArgs = process.argv;
+  const originalExitCode = process.exitCode;
+  const cwd = vi.spyOn(process, 'cwd').mockReturnValue(root);
+  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+  process.argv = ['node', join(REPO_ROOT, 'scripts/quality/check-sonar-coverage.ts'), ...args];
+  process.exitCode = undefined;
+  vi.resetModules();
+  try {
+    await import('./check-sonar-coverage');
+    return {
+      exitCode: process.exitCode,
+      logs: log.mock.calls.map((call) => String(call[0])),
+      errors: error.mock.calls.map((call) => String(call[0])),
+    };
+  } finally {
+    process.argv = originalArgs;
+    process.exitCode = originalExitCode;
+    cwd.mockRestore();
+    log.mockRestore();
+    error.mockRestore();
+  }
+}
+
 describe('Sonar coverage report contract', () => {
   it('retains existing coverage reporters and restores cached coverage outputs', () => {
     const rootManifest = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8')) as {
@@ -176,6 +209,39 @@ describe('Sonar coverage report contract', () => {
       'apps/éclair/coverage/lcov.info',
       'apps/zeta/coverage/lcov.info',
     ]);
+  });
+
+  it('discovers and normalizes the root validator coverage report', () => {
+    const root = createFixture({
+      sonarJavaScriptPaths: [
+        'apps/covered/coverage/lcov.info',
+        'scripts/quality/coverage/lcov.info',
+      ],
+    });
+    write(
+      root,
+      'package.json',
+      JSON.stringify({
+        scripts: {
+          'quality:sonar-validator:coverage': 'vitest run --coverage',
+        },
+      })
+    );
+    write(root, 'scripts/quality/check-sonar-coverage.ts', 'export const validated = true;\n');
+    write(
+      root,
+      'scripts/quality/coverage/lcov.info',
+      'TN:\nSF:check-sonar-coverage.ts\nDA:1,1\nend_of_record\n'
+    );
+    const result = prepareJavaScriptCoverageReports(root, { normalize: true });
+    expect(result.reports).toEqual([
+      'apps/covered/coverage/lcov.info',
+      'scripts/quality/coverage/lcov.info',
+    ]);
+    expect(result.sourceFiles).toBe(2);
+    expect(readFileSync(join(root, 'scripts/quality/coverage/lcov.info'), 'utf8')).toContain(
+      'SF:scripts/quality/check-sonar-coverage.ts'
+    );
   });
 
   it('discovers every checked-in Vitest coverage workspace', () => {
@@ -315,7 +381,78 @@ describe('Sonar coverage report contract', () => {
   });
 });
 
+describe('coverage validator CLI', () => {
+  it('normalizes JavaScript reports without requiring Go for the producer', async () => {
+    const root = createFixture();
+    const result = await invokeCoverageCli(root, ['--normalize', '--require=javascript']);
+    expect(result.exitCode).toBeUndefined();
+    expect(result.errors).toEqual([]);
+    expect(result.logs).toEqual([
+      'Validated 1 JavaScript coverage reports (1 source files, 1 line records).',
+    ]);
+    expect(readFileSync(join(root, 'apps/covered/coverage/lcov.info'), 'utf8')).toContain(
+      'SF:apps/covered/src/index.ts'
+    );
+  });
+
+  it('validates both report families by default for the consumer', async () => {
+    const root = createFixture({
+      goCoverage: 'mode: atomic\nexample.test/sam-cli/main.go:3.1,3.15 1 1\n',
+    });
+    prepareJavaScriptCoverageReports(root, { normalize: true });
+    const result = await invokeCoverageCli(root, []);
+    expect(result.exitCode).toBeUndefined();
+    expect(result.errors).toEqual([]);
+    expect(result.logs).toHaveLength(2);
+    expect(result.logs[1]).toBe('Validated Go coverage report packages/cli/coverage.out.');
+  });
+
+  it('supports the Go-only producer without requiring JavaScript output', async () => {
+    const root = createFixture({
+      javascriptCoverage: null,
+      goCoverage: 'mode: atomic\nexample.test/sam-cli/main.go:3.1,3.15 1 1\n',
+    });
+    const result = await invokeCoverageCli(root, ['--require=go']);
+    expect(result.exitCode).toBeUndefined();
+    expect(result.logs).toEqual(['Validated Go coverage report packages/cli/coverage.out.']);
+  });
+
+  it('fails with a diagnostic for invalid CLI arguments', async () => {
+    const result = await invokeCoverageCli(createFixture(), ['--require=unsupported']);
+    expect(result.exitCode).toBe(1);
+    expect(result.errors).toEqual(['--require must be one of: all, go, javascript.']);
+  });
+});
+
 describe('Sonar CI wiring', () => {
+  it('classifies tests separately from production coverage obligations', () => {
+    const properties = new Map(
+      readFileSync(join(REPO_ROOT, 'sonar-project.properties'), 'utf8')
+        .split('\n')
+        .filter((line) => line.includes('='))
+        .map((line) => {
+          const index = line.indexOf('=');
+          return [line.slice(0, index), line.slice(index + 1)];
+        })
+    );
+    expect(properties.get('sonar.sources')).toBe('.');
+    expect(properties.get('sonar.tests')).toBe('.');
+    const testPatterns = properties.get('sonar.test.inclusions')?.split(',');
+    for (const pattern of [
+      '**/*.test.ts',
+      '**/*.test.tsx',
+      '**/*.test.js',
+      '**/*.test.mjs',
+      '**/*.spec.ts',
+      '**/*_test.go',
+      '**/tests/**',
+      '**/__tests__/**',
+    ]) {
+      expect(testPatterns).toContain(pattern);
+    }
+    expect(properties.has('sonar.coverage.exclusions')).toBe(false);
+  });
+
   it('uploads normalized LCOV from the existing coverage job', () => {
     const testJob = workflowJobs().test;
     const job = serialized(testJob);
@@ -323,6 +460,12 @@ describe('Sonar CI wiring', () => {
     const inputs = upload.with as Record<string, unknown>;
 
     expect(job).toContain('pnpm test:coverage');
+    const validator = namedStep(testJob, 'Generate validator coverage');
+    expect(validator.run).toBe('pnpm quality:sonar-validator:coverage');
+    const steps = workflowSteps(testJob);
+    expect(steps.indexOf(validator)).toBeLessThan(
+      steps.indexOf(namedStep(testJob, 'Normalize and validate JavaScript coverage reports'))
+    );
     expect(job).toContain('pnpm quality:sonar-coverage:javascript');
     expect(upload.uses).toBe('actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a');
     expect(inputs.name).toBe('js-ts-lcov');

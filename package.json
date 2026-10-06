@@ -71,7 +71,8 @@
     "quality:gitleaks:current": "tsx scripts/quality/run-gitleaks.ts --mode=current-tree",
     "quality:gitleaks:pr": "tsx scripts/quality/run-gitleaks.ts --mode=pr-range",
     "check:fast": "pnpm format:check && pnpm lint:oxlint && pnpm lint && pnpm quality:type-boundaries",
-    "quality:agent-context-budget": "tsx scripts/quality/check-agent-context-budget.ts"
+    "quality:agent-context-budget": "tsx scripts/quality/check-agent-context-budget.ts",
+    "quality:sonar-validator:coverage": "vitest run --config scripts/quality/vitest.config.ts sonar-coverage-pipeline.test.ts --coverage --coverage.include=check-sonar-coverage.ts --coverage.reporter=lcov --coverage.reportsDirectory=coverage"
   },
   "dependencies": {
     "@iarna/toml": "2.2.5",

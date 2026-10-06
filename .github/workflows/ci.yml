@@ -374,6 +374,9 @@ jobs:
       - name: Run tests with coverage
         run: pnpm test:coverage
 
+      - name: Generate validator coverage
+        run: pnpm quality:sonar-validator:coverage
+
       - name: Normalize and validate JavaScript coverage reports
         run: pnpm quality:sonar-coverage:javascript
 
@@ -394,6 +397,7 @@ jobs:
             packages/shared/coverage/lcov.info
             packages/terminal/coverage/lcov.info
             packages/ui/coverage/lcov.info
+            scripts/quality/coverage/lcov.info
           if-no-files-found: error
           retention-days: 7
 
