@@ -437,6 +437,7 @@ describe('Sonar CI wiring', () => {
     );
     expect(properties.get('sonar.sources')).toBe('.');
     expect(properties.get('sonar.tests')).toBe('.');
+    expect(properties.get('sonar.test.exclusions')).toBe('apps/web/tests/playwright/**');
     const testPatterns = properties.get('sonar.test.inclusions')?.split(',');
     for (const pattern of [
       '**/*.test.ts',
