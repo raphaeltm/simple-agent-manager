@@ -104,8 +104,9 @@ SAM's in-app **Report an Issue** flow is off until you nominate a project to rec
 Agents can stop and ask the person running a chat for permission, ask them a question, or send a
 sign-in link to open — see [When the Agent Needs You](/docs/guides/chat-features/#when-the-agent-needs-you).
 This is off on a new installation. Until you turn it on, SAM refuses every such request the moment
-an agent makes it. Agents in the default **Bypass Permissions** mode rarely ask, so most users won't
-notice, but an agent in **Manual** or **Plan Mode** is told no every time it asks to make a change.
+an agent makes it. Claude Code and Codex in the default **Bypass Permissions** mode rarely ask, so
+most users won't notice, but an agent in **Manual** or **Plan Mode** — or one such as Amp that asks
+on its own — is told no every time it asks to make a change.
 
 To turn it on, add these GitHub Environment **variables** (not secrets) to your `production`
 environment, then run **Deploy Production**:
@@ -435,6 +436,18 @@ What to do, by what the card shows:
   alt="The Abandon migration dialog on a phone for a poisoned migration: it explains that abandoning drops the partial shard copy, returns the session to root, and freezes the journal as operator_abandoned; lists the project, migration, and session IDs; and has a filled-in Reason field above a red Abandon migration button and a Cancel button."
   width="375"
 />
+
+**When a project reaches the 10 GiB cap.** Cloudflare limits each project's storage object to 10 GiB.
+At the cap every write to that project fails with `PROJECT_DATA_STORAGE_FULL` — new tasks, chat
+messages, sleep — and so do the archive drain, **Abandon**, and the routine cleanup, because each
+has to write something before it can free space. To get out of that state, a superadmin can call
+`POST /api/admin/project-data/storage/:projectId/grouped-fts-wall-recovery`, which deletes the
+search index of old, finished sessions first. Every call needs a `reason` and its own limits
+(`dryRun`, `maxRows`, `maxBytes`, `maxSessions`, each capped by a
+`PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_*` setting). Start with `dryRun: true`, then raise the limits
+while each call reports space freed. Messages are not deleted: searches that cover those sessions
+still work, but find less, because they fall back to scanning recent messages. There is no button
+for this yet.
 
 ## Teardown
 

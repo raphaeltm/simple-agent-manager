@@ -63,8 +63,9 @@ agent that asks for permission is told no automatically, so the action it wanted
 
 Whether an agent asks before acting depends on its
 [permission mode](/docs/guides/agents/#permission-mode). Agents start in **Bypass Permissions**,
-which rarely asks. In **Manual** mode the agent asks before it runs commands or changes files, and
-in **Plan Mode** Claude Code asks you to approve its plan before it changes anything.
+which rarely asks (a few agents, such as Amp, ask on their own anyway). In **Manual** mode the agent
+asks before it runs commands or changes files, and in **Plan Mode** Claude Code asks you to approve
+its plan before it changes anything.
 
 The card is titled with what the agent wants to do — for a command, the command itself — and its
 buttons are the agent's own choices. For a Claude Code command they are usually **Yes**; **Yes, and

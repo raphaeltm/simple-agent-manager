@@ -35,23 +35,23 @@ since (#2180–#2240).
 
 ## Implementation checklist
 
-- [ ] `chat-features.md`: replace operator-voiced "Agent Questions" with **When the agent needs you** —
+- [x] `chat-features.md`: replace operator-voiced "Agent Questions" with **When the agent needs you** —
       permission requests, questions, external-link requests; Needs input label; who can answer;
       deadlines and what happens if you don't answer; no push notification; operator detail moved to
       self-hosting/configuration. Screenshots.
-- [ ] `chat-features.md`: **Message actions** (Info / Read aloud / Copy, now on your own messages);
+- [x] `chat-features.md`: **Message actions** (Info / Read aloud / Copy, now on your own messages);
       chat list order (latest message, lifecycle doesn't reorder).
-- [ ] `agents.md` Permission mode: link to the chat section; what Manual/Plan look like; explicit modes kept;
+- [x] `agents.md` Permission mode: link to the chat section; what Manual/Plan look like; explicit modes kept;
       self-hosted instances without requests enabled decline them.
-- [ ] `agents.md` Usage Limits: correct **Settings → Advanced**; explain levels; user-first, source
+- [x] `agents.md` Usage Limits: correct **Settings → Advanced**; explain levels; user-first, source
       detail trimmed; screenshot of chip + details dialog.
-- [ ] `session-troubleshooting.md`: entries for **Needs input**, check-ins paused, stalled turn,
+- [x] `session-troubleshooting.md`: entries for **Needs input**, check-ins paused, stalled turn,
       connection/sign-in failure cards.
-- [ ] `quickstart.md`: Active Tasks includes sleeping tasks.
-- [ ] `self-hosting.mdx`: turning on agent requests in chat (three GitHub Environment variables).
-- [ ] `reference/configuration.md`: `STALLED_TASK_CLASSIFIER_*`, `RATE_LIMIT_CALLBACK_TOKEN_RENEWAL*`.
-- [ ] `recent-product-changes.md`: new 29 Sep – 6 Oct cycle; roll previous cycles.
-- [ ] Screenshots via a new Playwright spec (real components, mock data): permission request with the
+- [x] `quickstart.md`: Active Tasks includes sleeping tasks.
+- [x] `self-hosting.mdx`: turning on agent requests in chat (three GitHub Environment variables).
+- [x] `reference/configuration.md`: `STALLED_TASK_CLASSIFIER_*`, `RATE_LIMIT_CALLBACK_TOKEN_RENEWAL*`.
+- [x] `recent-product-changes.md`: new 29 Sep – 6 Oct cycle; roll previous cycles.
+- [x] Screenshots via a new Playwright spec (real components, mock data): permission request with the
       Needs input list label; agent question form; external-link request; usage chip + details dialog.
 - [ ] Local sub-agent review loop until no actionable feedback
 - [ ] `pnpm --filter @simple-agent-manager/www build` + link check; PR; CI green; merge

@@ -196,7 +196,8 @@ counts as a no, so an agent in **Manual** or **Plan Mode** can't get approval to
 
 Claude Code supports every mode. Even in Bypass Permissions it still asks about a few safety checks,
 and those questions appear in the chat. Codex always runs with full access. Other agents keep their
-own behavior when they don't support the chosen mode.
+own behavior when they don't support the chosen mode — Amp, for example, still asks before some
+actions even when SAM sets Bypass Permissions.
 
 ## Workspace Profiles
 
