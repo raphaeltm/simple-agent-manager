@@ -16,8 +16,9 @@ your work is safe and what to do next. Everything here applies to both
   model is unavailable for your account. → [Fix the connection](#the-agent-or-a-tool-cant-sign-in)
 - **A message saying a sign-in flow requires a local callback**, or an MCP tool failing with
   `401 Unauthorized`. → [Connect the tool another way](#the-agent-or-a-tool-cant-sign-in)
-- **On a self-hosted instance, the agent stops whenever it needs your approval**, and no card
-  appears. → [Agent requests are turned off](#agent-requests-are-turned-off)
+- **The agent stops whenever it needs your approval, and no card appears.** The chat has woken from
+  sleep, or agent requests are off on a self-hosted instance.
+  → [Fork, or change the mode](#the-agent-stops-for-approval-and-no-card-appears)
 - **A strip with a spinner**, such as **Waking and restoring session...** or, on a VM, a step like
   **Finding a server...** or **Waiting for server capacity...**. A wake or a recovery is in
   progress. → [Wait](#recovery-is-in-progress)
@@ -81,10 +82,10 @@ ask them (the session list shows who started it).
 
 If an agent keeps asking about every command when you don't want it to, its permission mode is set
 to ask — often **Manual**, saved earlier without anyone choosing it. See
-[Permission mode](/docs/guides/agents/#permission-mode) for where to change it. A change applies to
-new chats; a chat woken from sleep follows **Agent Overrides** and **Settings → Agents**, not its
-profile. And if the project's devcontainer runs as `root`, Claude Code refuses Bypass Permissions
-and asks anyway — see
+[An agent asks when you don't expect it](/docs/guides/agents/#an-agent-asks-when-you-dont-expect-it)
+for where to change it. A change applies to new chats; a chat woken from sleep follows **Agent
+Overrides** and **Settings → Agents**, not its profile. And if the project's devcontainer runs as
+`root`, Claude Code refuses Bypass Permissions and asks anyway — see
 [Claude Code asks even in Bypass Permissions](/docs/guides/agents/#claude-code-asks-even-in-bypass-permissions)
 to check and fix it.
 
@@ -108,7 +109,7 @@ keeps coming back — would otherwise be nudged forever. SAM pauses and posts on
   [profile](/docs/guides/agents/#choosing-a-model), the project's **Agent Overrides**, or
   **Settings → Agents**, wherever the model was set — then start a new chat, or
   [Fork](/docs/guides/chat-features/#conversation-forking) this one to carry a summary of it over.
-  The notice says to send a message to retry, but this chat keeps the model it started with, so it
+  The notice says to send a message to retry, but while it's awake the chat keeps its model, so that
   would hit the same error.
 
 The chat is marked **Needs input** until someone replies. Your next message, or a new tool step
@@ -131,7 +132,8 @@ or in the failure card under the chat header (expand the card for the next step)
   (the card's **Open agent connections** button, for the person who started the chat). The agent
   picks up the new connection only when it starts again: in a **Task**, wait for the chat to go to
   sleep, then reply to wake it; in a **Chat**, select **Sleep** (the moon button above the message
-  box) and then send a message, or start a new chat.
+  box) and then send a message, or start a new chat. A woken chat can't ask for your approval, so
+  start a new chat if the agent will need to ask.
 - **A failure card: "Model unavailable for this account."** The credential works, but your plan or
   account can't use that model — or the model ID is mistyped. Pick another model in the agent's
   profile, the project's **Agent Overrides**, or **Settings → Agents**, then start a new chat, or
@@ -149,19 +151,23 @@ too:
   started the chat **Review MCP connections** (anyone else is asked to tell them); connect the
   server another way.
 
-## Agent requests are turned off
+## The agent stops for approval and no card appears
 
-This applies to self-hosted instances. If an agent stops each time it needs your approval and no
-card appears, the operator hasn't turned on agent requests: SAM refuses every request the moment the
-agent makes it. The step it wanted to run fails, and the agent either works around it or stops.
+If an agent stops each time it needs your approval and no card appears, SAM is refusing its requests
+the moment the agent makes them. The step it wanted to run fails, and the agent either works around
+it or stops. There are two causes:
 
-Until requests are turned on, use **Bypass Permissions** for the agent — in its profile, in the
-project's **Agent Overrides**, and in **Settings → Agents** (see
-[Permission mode](/docs/guides/agents/#permission-mode)) — and start a new chat. That doesn't help
-Amp or Gemini CLI, which ask on their own even in Bypass Permissions, or Claude Code in a
-devcontainer that
-[runs as `root`](/docs/guides/agents/#claude-code-asks-even-in-bypass-permissions). An operator can turn
-requests on as described in [Let agents ask in chat](/docs/guides/self-hosting/#let-agents-ask-in-chat).
+- **The chat has slept and woken.** A woken chat can't ask yet, on any instance. When the agent
+  needs your approval, [fork](/docs/guides/chat-features/#conversation-forking) the chat or start a
+  new one.
+- **Agent requests are off on a self-hosted instance.** Until the operator turns them on, use
+  **Bypass Permissions** for the agent — in its profile, in the project's **Agent Overrides**, and in
+  **Settings → Agents** (see [Permission mode](/docs/guides/agents/#permission-mode)) — and start a
+  new chat. That doesn't help Amp or Gemini CLI, which ask on their own even in Bypass Permissions,
+  or Claude Code in a devcontainer that
+  [runs as `root`](/docs/guides/agents/#claude-code-asks-even-in-bypass-permissions). An operator can
+  turn requests on as described in
+  [Let agents ask in chat](/docs/guides/self-hosting/#let-agents-ask-in-chat).
 
 ## Recovery is in progress
 

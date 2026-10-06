@@ -203,3 +203,20 @@ since (#2180–#2240).
     - The 4 October date now notes the self-hosted equivalent.
     - Accept Edits approves only commands.
     - Sleep is the moon button.
+- **Round 5**, same two lenses on 848fb0a47.
+  - User reviewer: 1 HIGH, 1 MEDIUM, 4 LOW, all verified in code and fixed.
+    - HIGH: a woken chat can't ask at all. The `acpInteractions` contract is only sent by
+      `startAgentSessionOnNode`. The bootstrap's create call omits it, and the restore host
+      (`getOrCreateSessionHostForRestore`) only reads `sessionManualInteractionConfig`. Every
+      request is cancelled (`requestPermission`: `!config.Enabled`). Documented in chat-features,
+      agents.md ("After a chat wakes from sleep"), troubleshooting ("The agent stops for approval
+      and no card appears", both causes), self-hosting, configuration and the changelog. Appended
+      to idea `01M47WCAGF4A18CC0DCHYFK6CP`, which is now priority 8 and retitled.
+    - MEDIUM: Permission mode section reordered (table first, then where to set, then `####`
+      subsections for woken chats, unexpected asking, and root).
+    - LOW: composer Instant chats always start as Chat via `/sessions/start` (`taskMode:
+      'conversation'`), so skills decide only on a VM; "anything else gives a Task".
+    - LOW: check-in pause model wording ("while it's awake").
+    - LOW: concepts and quickstart PR promises ("Build and open PRs" vs "Chat and explore").
+    - LOW: self-hosting recommends turning requests on, says what changes, and what to do with
+      query results.

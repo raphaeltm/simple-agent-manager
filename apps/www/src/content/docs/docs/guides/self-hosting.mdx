@@ -114,8 +114,10 @@ Overrides**, or a user's **Settings → Agents**; saving that page on a release 
 stored the old always-ask default, now shown as **Manual**. Run the newest release: v2026.10.05 is
 the first where Claude Code agents with no mode set start in Bypass Permissions.
 
-To turn it on, add these GitHub Environment **variables** (not secrets) to your `production`
-environment, each set to `true`:
+We recommend turning it on; the hosted service has it on. Agents set to ask then wait for an
+answer — a permission request for up to 30 minutes in a task and 2 hours in a chat — and only the
+person who started the chat can answer, with no notification sent. To turn it on, add these GitHub
+Environment **variables** (not secrets) to your `production` environment, each set to `true`:
 
 | Variable                        | What it turns on                                                      |
 | ------------------------------- | --------------------------------------------------------------------- |
@@ -125,8 +127,9 @@ environment, each set to `true`:
 
 They take effect at the next deploy: run **Deploy Production**, or set them before you
 [update](#updating-an-existing-self-hosted-instance) so the update's deploy picks them up. Turning a
-switch on applies to chats started after that deploy. To check that it works, start a new chat with a Claude Code profile set to **Manual** and ask the agent to create a file: a card with a
-**Permission needed** badge should appear. Turning a switch off refuses new requests straight away,
+switch on applies to chats started after that deploy; a chat that sleeps and wakes can't ask yet.
+To check that it works, start a new chat with a Claude Code profile set to **Manual** and ask the
+agent to create a file: a card with a **Permission needed** badge should appear. Turning a switch off refuses new requests straight away,
 even in running chats; any already waiting can still be answered until they expire. Deadlines and
 size limits are in the
 [configuration reference](/docs/reference/configuration/#agent-requests-in-chat).
@@ -159,7 +162,8 @@ SELECT 'project: ' || pr.name, pr.id, u.email, pr.agent_defaults
 ```
 
 `owner` is the user who saved the setting, or who owns the project. A project row lists every
-agent the project sets a mode for; read its JSON to see which.
+agent the project sets a mode for; read its JSON to see which. Ask those owners to set **Bypass
+Permissions** there, or to clear the mode.
 
 ## GCP provisioning credentials
 
@@ -606,7 +610,8 @@ For what SAM does with a workspace VM that stops responding, see [Unresponsive m
 ### Agents stop whenever they need approval
 
 If agents stop each time they need permission and no card appears in the chat, agent requests are
-off, so SAM refuses every request. Turn them on as described in
+off, so SAM refuses every request. (With requests on, a chat that has slept and woken does the same:
+it can't ask yet, so fork it or start a new chat.) Turn them on as described in
 [Let agents ask in chat](#let-agents-ask-in-chat), or have users switch those agents to **Bypass
 Permissions**, then start a new chat — running sessions keep the setting they started with. Amp and
 Gemini CLI ask on their own even in Bypass Permissions, and so does Claude Code in a devcontainer that

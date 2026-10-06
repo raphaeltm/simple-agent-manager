@@ -31,7 +31,7 @@ From the **Dashboard**, click **Import Project** and pick a repository that has 
 
 ### 5. Chat
 
-Open your project and type what you want done in the chat — for example, "add input validation to the signup form and write tests." SAM automatically provisions a workspace, runs your chosen agent, streams its progress back to you in real time, and opens a pull request when it's done.
+Open your project and type what you want done in the chat — for example, "add input validation to the signup form and write tests." SAM automatically provisions a workspace, runs your chosen agent, streams its progress back to you in real time, and opens a pull request when it's done. If SAM first asks you to create a profile, choose **Build and open PRs** for work like this; **Chat and explore** is for questions and planning, and doesn't open a pull request.
 
 ### 6. Come Back Later
 

@@ -761,8 +761,8 @@ them a question, or send a link to open — see
 [When the Agent Needs You](/docs/guides/chat-features/#when-the-agent-needs-you). All three switches
 are `false` in the checked-in configuration; set them as GitHub Environment variables to turn them
 on (see [Let agents ask in chat](/docs/guides/self-hosting/#let-agents-ask-in-chat)). Turning a
-switch on applies to agent sessions started afterwards; turning one off refuses new requests at once,
-even in running sessions.
+switch on applies to agent sessions started afterwards (a session woken from sleep can't ask yet);
+turning one off refuses new requests at once, even in running sessions.
 
 A permission request in a **Chat** session, and every question, waits up to
 `ACP_INTERACTION_PERMISSION_CONVERSATION_DEADLINE_MS`; a permission request in a **Task** waits up to

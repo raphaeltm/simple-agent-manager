@@ -190,22 +190,8 @@ ID is refused.
 ### Permission mode
 
 Agents start in **Bypass Permissions** mode, so they edit files and run commands without stopping to
-ask. Each workspace is its own isolated VM or container. To make an agent more careful, choose another
-mode in a profile, in the project's **Agent Overrides** (project settings), or in **Settings → Agents**.
-When a chat starts, SAM uses the first of these that sets a mode, in that order; a change applies to
-chats started after you save it, not to one already running. (A skill created with SAM's
-`create_skill` tool can set a mode too, and it wins over the profile's.)
-
-A chat woken from sleep doesn't re-apply its profile's mode or model. It takes them from **Agent
-Overrides**, then **Settings → Agents**, and uses Bypass Permissions if neither sets a mode — so a
-woken chat can start or stop asking, or change model, when those places differ from its profile.
-
-A mode saved earlier still applies. If an agent asks when you don't expect it, check all three
-places: older built-in profiles were set to **Accept Edits** or **Plan Mode**, and saving
-**Settings → Agents** on or before 4 October (on a self-hosted instance, before it ran v2026.10.05)
-stored the old default, now shown as **Manual**, even if you only changed the model. To stop the questions, set **Bypass Permissions** where the mode is set,
-or clear it there so the next place decides: **No override** in a profile, **Inherit from user
-settings** in **Agent Overrides**.
+ask. Each workspace is its own isolated VM or container. To make an agent more careful, choose
+another mode:
 
 | Mode                             | What the agent does                                                        |
 | -------------------------------- | -------------------------------------------------------------------------- |
@@ -214,6 +200,11 @@ settings** in **Agent Overrides**.
 | **Manual**                       | Asks before it changes files or runs commands                              |
 | **Plan Mode**                    | Reads and plans without changing anything, then asks you to approve a plan |
 | **Don't Ask**                    | Never asks; anything that would need your approval is refused              |
+
+Set a mode in a profile, in the project's **Agent Overrides** (project settings), or in
+**Settings → Agents**. When a chat starts, SAM uses the first of these that sets a mode, in that
+order; a change applies to chats started after you save it, not to one already running. (A skill
+created with SAM's `create_skill` tool can set a mode too, and it wins over the profile's.)
 
 When the agent asks, a card appears in the chat and the agent waits for your answer — see
 [When the Agent Needs You](/docs/guides/chat-features/#when-the-agent-needs-you). A request nobody
@@ -225,8 +216,24 @@ anything, and one in **Accept Edits** can edit files but not run commands that n
 Claude Code supports every mode. Even in Bypass Permissions it still asks about a few safety checks,
 and those questions appear in the chat. Codex always runs with full access. Other agents keep their
 own behavior when they don't support the chosen mode — Amp and Gemini CLI, for example, still ask
-before some actions even when SAM sets Bypass Permissions. Claude Code itself refuses Bypass
-Permissions when it runs as `root` — see below.
+before some actions even when SAM sets Bypass Permissions.
+
+#### After a chat wakes from sleep
+
+A chat woken from sleep doesn't re-apply its profile's mode or model: it takes them from **Agent
+Overrides**, then **Settings → Agents**, and uses Bypass Permissions if neither sets a mode. It also
+can't ask you anything yet — SAM refuses its requests without showing a card. To get the profile's
+mode and model back, or when the agent needs your approval,
+[fork](/docs/guides/chat-features/#conversation-forking) the chat or start a new one.
+
+#### An agent asks when you don't expect it
+
+A mode saved earlier still applies, so check all three places. Older built-in profiles were set to
+**Accept Edits** or **Plan Mode**, and saving **Settings → Agents** on or before 4 October (on a
+self-hosted instance, before it ran v2026.10.05) stored the old default, now shown as **Manual**,
+even if you only changed the model. To stop the questions, set **Bypass Permissions** where the mode
+is set, or clear it there so the next place decides: **No override** in a profile, **Inherit from
+user settings** in **Agent Overrides**. If Claude Code still asks, it may be running as `root`.
 
 #### Claude Code asks even in Bypass Permissions
 

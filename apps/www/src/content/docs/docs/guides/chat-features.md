@@ -55,6 +55,9 @@ For every kind of request:
   unconfirmed, or that the request was interrupted because the agent stopped first, check whether
   the agent carried on. If it's still waiting, select **Interrupt** first, then send your decision as
   a message.
+- **A chat that has slept and woken can't ask yet.** SAM refuses its requests without showing a card,
+  so the agent is told no. When you need to approve something, [fork](#conversation-forking) the
+  chat or start a new one.
 
 :::note[Self-hosted instances]
 These requests are off until an operator turns them on — see
@@ -81,7 +84,9 @@ buttons are the agent's own choices. For a Claude Code command they are usually:
 - **No** refuses. The agent is told you said no and carries on without it.
 
 If the agent asks about every command and you didn't choose that, its mode was probably saved as
-**Manual** earlier — see [Permission mode](/docs/guides/agents/#permission-mode) — or the project's
+**Manual** earlier — see
+[An agent asks when you don't expect it](/docs/guides/agents/#an-agent-asks-when-you-dont-expect-it)
+— or the project's
 devcontainer runs as `root`, where Claude Code
 [refuses Bypass Permissions](/docs/guides/agents/#claude-code-asks-even-in-bypass-permissions). In
 the meantime, **Yes, and don't ask again for …** stops it asking about that kind of command.
@@ -114,9 +119,9 @@ with:
   [Instant](/docs/guides/instant-sessions/) gives a **Chat**.
 - On a VM, a profile whose **Task Mode** is **Conversation** gives a **Chat**; profiles you create
   with **Chat and explore** in the chat input are set that way. With **Task Mode** left at
-  **Default**, a profile whose **Workspace Profile** is **Lightweight** does too.
-- If you also pick a skill, the skill's **Task Mode** decides instead, and new skills are set to
-  **Task**.
+  **Default**, a profile whose **Workspace Profile** is **Lightweight** does too. If you also pick a
+  skill, the skill's **Task Mode** decides instead, and new skills are set to **Task**.
+- Anything else gives a **Task**.
 
 A **Chat** doesn't commit, push, or open a pull request for you, so keep **Task Mode** at **Task**
 for work you want delivered as a pull request — see
