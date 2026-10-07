@@ -2,6 +2,10 @@
 
 > Agent instruction file only. This is not user-facing documentation or a getting-started guide. Canonical public documentation lives in `apps/www/src/content/docs/docs/`.
 
+## Simplest Viable Solution
+
+Always choose the smallest complete solution that meets the current need and stays easy to evolve. Prefer existing capabilities and standard interfaces; justify added components against current requirements. Future-proof through clear boundaries and reversible choices, not speculative infrastructure. Preserve security, correctness, reliability, and required validation. See [Constitution Principle X](.specify/memory/constitution.md#x-simplicity--clarity).
+
 ## Context Loading Policy
 
 Keep startup context small and load detail only when the current task needs it. Prefer indexes, skills, and scoped docs over reading broad instruction trees.

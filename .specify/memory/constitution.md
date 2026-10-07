@@ -1,17 +1,17 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version Change: 1.8.0 → 1.8.1
-Bump Rationale: PATCH - Align Principle IV file-size limits with enforced thresholds
+Version Change: 1.8.1 → 1.8.2
+Bump Rationale: PATCH - Clarify existing Principle X simplicity and evolutionary design requirements
 
 Modified Principles:
-  - Principle IV: "files under 400 lines" → "files under 500 lines, mandatory split above 800 lines"
+  - Principle X: Make the smallest complete solution the default; clarify future-proofing and quality boundaries
 
 Modified Sections: None
 Added Sections: None
 
 Templates Status:
-  - plan-template.md: ✅ Compatible (no dependency on file-size limits)
+  - plan-template.md: ✅ Compatible (Constitution Check and Complexity Tracking already apply)
   - spec-template.md: ✅ Compatible (no direct dependency)
   - tasks-template.md: ✅ Compatible (no direct dependency)
   - checklist-template.md: ✅ Compatible (no direct dependency)
@@ -181,6 +181,9 @@ Complexity is the enemy. Every abstraction, pattern, and dependency MUST justify
 
 **Rules:**
 
+- Always choose the smallest, simplest solution that fully satisfies the current need and remains easy to evolve. Minimum viable MUST still meet security, correctness, reliability, and required validation.
+- Prefer existing capabilities and standard interfaces. Every added component, dependency, abstraction, or workflow MUST be justified by a current requirement; explain why the simpler existing path is insufficient.
+- Future-proof through clear boundaries and reversible choices, not speculative features, adapters, or infrastructure.
 - YAGNI: Don't build features until needed
 - KISS: Prefer simple solutions; clever code is hard to debug
 - New dependencies require justification in PR description
@@ -937,4 +940,4 @@ and other project documentation, this Constitution takes precedence.
 - Violations should be addressed constructively with reference to specific principles
 - Repeated violations may result in contribution restrictions per Code of Conduct
 
-**Version**: 1.8.1 | **Ratified**: 2026-01-24 | **Last Amended**: 2026-05-07
+**Version**: 1.8.2 | **Ratified**: 2026-01-24 | **Last Amended**: 2026-10-07
