@@ -583,7 +583,11 @@
     "realStartBeforePreviousRetryMs": 4240,
     "orderedActualStarts": true,
     "bothAckedAndNextAttemptNull": true,
-    "noAdditionalWake": true,
-    "receiptOrSessionStateNotUsedAsActualStart": true
-  }
+    "receiptOrSessionStateNotUsedAsActualStart": true,
+    "coordinatorOwnedSleepRequests": 1
+  },
+  "limits": [
+    "Live Instant A bypassed a 10-second retry; saturated maximum-backoff coverage is deterministic.",
+    "Single sleep/wake request is coordinator-owned harness evidence, not an exhaustive count of all runtime recovery attempts."
+  ]
 }
