@@ -59,7 +59,11 @@ const protocolFixture = JSON.parse(
   notFoundReceipt: Record<string, unknown>;
 };
 const promptProtocolCapabilities = {
-  ...protocolFixture.capabilities,
+  // Prompt submission consumes its known capability projection, not optional restore metadata.
+  protocolVersion: protocolFixture.capabilities.protocolVersion,
+  runtimeIdentity: protocolFixture.capabilities.runtimeIdentity,
+  promptReceipts: protocolFixture.capabilities.promptReceipts,
+  checkpointRollover: protocolFixture.capabilities.checkpointRollover,
   interactions: {
     supported: true,
     version: 1,
