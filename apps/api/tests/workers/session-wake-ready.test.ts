@@ -242,9 +242,9 @@ describe('readiness RPC interleaving', () => {
               const bound = prepared.bind(...values);
               return {
                 async first() {
+                  const readIndex = ++reads;
                   const result = await bound.first();
-                  reads++;
-                  if (reads === 1) {
+                  if (readIndex === 1) {
                     readStarted();
                     await held;
                   }
