@@ -1,4 +1,4 @@
-/** One expiring claim per webhook; plaintext is minted only for the winning redemption. */
+/** One expiring claim per webhook; plaintext is returned only for the winning redemption. */
 import { DEFAULT_WEBHOOK_CREDENTIAL_CLAIM_TTL_SECONDS } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
