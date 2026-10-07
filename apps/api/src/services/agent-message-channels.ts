@@ -1,7 +1,7 @@
 /**
- * Preview: ordinary agent messages over SAM-managed `agent-dm.*` pair channels.
+ * Ordinary agent messages over SAM-managed `agent-dm.*` pair channels.
  *
- * Disabled by default (`AGENT_MESSAGE_CHANNELS_ENABLED`). The preview is only
+ * Disabled by default (`AGENT_MESSAGE_CHANNELS_ENABLED`). The transport is only
  * effective while the canonical event wake path and durable prompt delivery are
  * both enabled; without them a recipient would never be notified, so the
  * messaging tools keep their legacy path instead of accepting a message nobody
@@ -31,7 +31,7 @@ export type AgentMessageChannelsConfig =
 
 export function resolveAgentMessageChannelsConfig(env: Env): AgentMessageChannelsConfig {
   const flag = env.AGENT_MESSAGE_CHANNELS_ENABLED?.trim();
-  // Only an explicit "true" enables the preview; any other value keeps it off.
+  // Only an explicit "true" enables the channel transport; any other value keeps it off.
   const requested = flag ? flag === 'true' : DEFAULT_AGENT_MESSAGE_CHANNELS_ENABLED;
   if (!requested) return { enabled: false, reason: 'flag_off' };
   if (!isProjectEventWakeEnabled(env)) {

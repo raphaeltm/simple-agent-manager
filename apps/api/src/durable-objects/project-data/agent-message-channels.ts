@@ -1,5 +1,5 @@
 /**
- * SAM-managed agent message channels (preview, disabled by default).
+ * SAM-managed agent message channels (configurable transport).
  *
  * One canonical `agent-dm.*` channel per unordered pair of stable chat sessions.
  * Both participants hold a SAM-managed prompt-delivery subscription, and a

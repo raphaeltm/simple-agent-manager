@@ -14,6 +14,7 @@ import { persistOrchestrationPrompt } from '../../services/orchestration-prompts
 import * as projectDataService from '../../services/project-data';
 import {
   ACTIVE_STATUSES,
+  AGENT_TARGET_STATUSES,
   INVALID_PARAMS,
   jsonRpcError,
   type JsonRpcResponse,
@@ -21,6 +22,7 @@ import {
 } from './_helpers';
 
 export interface ResolvedMailboxTarget {
+  taskStatus: string;
   projectId: string;
   chatSessionId: string;
   nodeId: string;
@@ -86,7 +88,7 @@ export async function resolveProjectAgentForMailbox(
   }
 
   // Verify target is in an active status
-  if (!ACTIVE_STATUSES.includes(targetTask.status)) {
+  if (!AGENT_TARGET_STATUSES.includes(targetTask.status)) {
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
@@ -115,7 +117,7 @@ export async function resolveProjectAgentForMailbox(
     )
     .limit(1);
 
-  if (!workspace || !workspace.nodeId) {
+  if (!workspace || (!workspace.nodeId && targetTask.status !== 'sleeping')) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'Target workspace or node not found');
   }
 
@@ -143,9 +145,10 @@ export async function resolveProjectAgentForMailbox(
     .limit(1);
 
   return {
+    taskStatus: targetTask.status,
     projectId: targetTask.projectId,
     chatSessionId,
-    nodeId: workspace.nodeId,
+    nodeId: workspace.nodeId ?? '',
     workspaceId: workspace.id,
     agentSessionId: agentSession?.id ?? '',
     callerSourceTaskId: callerTask.recoverySourceTaskId ?? callerTask.id,

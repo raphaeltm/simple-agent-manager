@@ -71,7 +71,7 @@ export async function handleStopSubtask(
   const { task, workspace, agentSession } = resolution;
 
   // If reason provided, inject a final warning message (best-effort)
-  if (reason) {
+  if (reason && task.status !== 'sleeping') {
     try {
       await sendPromptToAgentOnNode(
         workspace.nodeId,
@@ -95,15 +95,17 @@ export async function handleStopSubtask(
     await new Promise((resolve) => setTimeout(resolve, gracePeriodMs));
   }
 
-  // Hard stop the agent session
+  // Sleeping targets have already released their runtime; stop without waking them.
   try {
-    await stopAgentSessionOnNode(
-      workspace.nodeId,
-      workspace.id,
-      agentSession.id,
-      env,
-      tokenData.userId
-    );
+    if (task.status !== 'sleeping') {
+      await stopAgentSessionOnNode(
+        workspace.nodeId,
+        workspace.id,
+        agentSession.id,
+        env,
+        tokenData.userId
+      );
+    }
   } catch (err) {
     log.error('mcp.stop_subtask.stop_failed', {
       parentTaskId: tokenData.taskId,

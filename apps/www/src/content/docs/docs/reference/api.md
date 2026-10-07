@@ -78,7 +78,7 @@ the publisher (`isSelfOriginatedChannelWake`). Record-only followers still see t
 own publications in their pull feed. Channel names starting with `agent-dm.` are
 reserved for SAM agent messaging and are rejected by `publish_channel_event`.
 
-### Agent messages over shared channels (preview, off by default)
+### Agent messages over shared channels
 
 With `AGENT_MESSAGE_CHANNELS_ENABLED=true`, and only while event wakes and durable
 prompt delivery are enabled, `send_durable_message` (classes `notify` and `deliver`)
@@ -94,7 +94,7 @@ Responses report `accepted: true, delivered: false` with `transport`, `channel`,
 `eventId` and `sequence`; an optional `idempotencyKey` replays a lost-response retry,
 and changed content under the same key is rejected as a conflict. Messages are capped
 by `PROJECT_EVENT_CHANNEL_MESSAGE_MAX_BYTES` and pair channels by
-`AGENT_MESSAGE_CHANNEL_MAX_CHANNELS`. This preview has not been validated on staging.
+`AGENT_MESSAGE_CHANNEL_MAX_CHANNELS`. Managed deployments enable the transport in `wrangler.toml`; the code fallback is off and `AGENT_MESSAGE_CHANNELS_ENABLED=false` selects the legacy path.
 
 Pair-channel events match only subscriptions targeting one of the two participant
 chats (`subscriptionCanMatchProjectEvent`), `follow_event_channel` rejects
@@ -107,9 +107,9 @@ matched idle pair subscriptions on other channels (the pair's next message recre
 them), and refuses the send with `outcome: "capacity"` (retryable) while every
 candidate still owes a wake. Failed sends report `outcome` as `recipient_unavailable`
 (the recipient's chat or authority is gone; not retryable), `conflict`, `capacity` or
-`rejected`, and commit nothing. Known limit: a managed subscription that has used its
-wake budget is replaced even when its last wake is still queued, which fails that wake;
-those messages remain in channel history.
+`rejected`, and commit nothing. When a managed subscription exhausts its wake budget, its pending
+wake remains deliverable while a replacement handles new messages. The drained old
+subscription is retired after delivery.
 
 ## Authentication
 

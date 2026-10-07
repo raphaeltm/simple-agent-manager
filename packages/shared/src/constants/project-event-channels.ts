@@ -8,7 +8,7 @@ export const DEFAULT_PROJECT_EVENT_CHANNEL_CATALOG_IDLE_TTL_MS = 30 * 24 * 60 * 
 
 /**
  * SAM-managed agent message channels (`agent-dm.*`). Disabled by default: the
- * feature is a preliminary draft and has not been validated on staging.
+ * managed deployment enables it in wrangler.toml after release validation.
  * Override: AGENT_MESSAGE_CHANNELS_ENABLED.
  */
 export const DEFAULT_AGENT_MESSAGE_CHANNELS_ENABLED = false;

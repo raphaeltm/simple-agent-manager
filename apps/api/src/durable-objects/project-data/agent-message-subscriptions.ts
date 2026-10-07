@@ -28,12 +28,14 @@ type ManagedSubscriptionRow = {
   expires_at: number | null;
   delivery_lifetime_expires_at: number | null;
   prompt_delivery_count: number;
+  has_match_keys: number;
 };
 
 /**
  * Reuse the participant's managed subscription for this channel while it can
  * still wake the chat; otherwise retire it and create a fresh one. At most one
- * managed subscription per (chat, channel) stays active. Ownership mirrors an
+ * managed subscription per (chat, channel) accepts new events; exhausted ones
+ * remain active only while their queued wakes drain. Ownership mirrors an
  * agent's own subscriptions (`${projectId}:${chatSessionId}`), so the canonical
  * list/get/ack tools serve it, and `ownerTaskId` is the participant's stable
  * source task, which the wake path re-checks before every delivery.
@@ -54,7 +56,9 @@ export function ensureManagedSubscription(
   const keyPrefix = `${AGENT_MESSAGE_SUBSCRIPTION_KEY_PREFIX}${channel}:`;
   const rows = sql
     .exec<ManagedSubscriptionRow>(
-      `SELECT id, expires_at, delivery_lifetime_expires_at, prompt_delivery_count
+      `SELECT id, expires_at, delivery_lifetime_expires_at, prompt_delivery_count,
+              EXISTS (SELECT 1 FROM project_event_subscription_match_keys k
+                      WHERE k.subscription_id = project_event_subscriptions.id) AS has_match_keys
        FROM project_event_subscriptions
        WHERE project_id = ? AND owner_type = 'agent' AND owner_id = ? AND target_session_id = ?
          AND lifecycle_state = 'active' AND substr(idempotency_key, 1, ?) = ?
@@ -73,7 +77,10 @@ export function ensureManagedSubscription(
       row.expires_at ?? Number.POSITIVE_INFINITY,
       row.delivery_lifetime_expires_at ?? Number.POSITIVE_INFINITY
     );
-    const canWake = row.prompt_delivery_count < limits.wakeMaxPerSubscription && end > now;
+    const canWake =
+      row.has_match_keys === 1 &&
+      row.prompt_delivery_count < limits.wakeMaxPerSubscription &&
+      end > now;
     // Near its end, keep it only while it still owes a wake: retiring would fail it.
     if (
       reusable === null &&
@@ -81,11 +88,20 @@ export function ensureManagedSubscription(
       (end > now + graceMs || hasPendingWake(sql, projectId, row.id, participant.chatSessionId))
     ) {
       reusable = row.id;
+    } else if (
+      end > now &&
+      (row.has_match_keys === 0 || row.prompt_delivery_count >= limits.wakeMaxPerSubscription) &&
+      hasQueuedWake(sql, projectId, row.id, participant.chatSessionId)
+    ) {
+      // Keep the queued batch's original authority and lease until it drains.
+      // Removing match keys stops new events reaching the exhausted subscription
+      // while its replacement receives them; cancelling/expiring it would fail
+      // the queued prompt before the recipient can read its message.
+      sql.exec(
+        `DELETE FROM project_event_subscription_match_keys WHERE subscription_id = ?`,
+        row.id
+      );
     } else {
-      // Known limit: a subscription out of wakes is retired even if its last wake
-      // is still queued, which fails that wake; the messages stay in channel
-      // history. Keeping it active instead would also match every new message and
-      // hit the pull bug tracked in Idea 01M3WTZATH40CGC2JZ16201E0G.
       stale.push(row.id);
     }
   }
@@ -234,6 +250,27 @@ function hasPendingWake(
          LIMIT 1`,
         projectId,
         subscriptionId,
+        projectId,
+        targetSessionId,
+        subscriptionId
+      )
+      .toArray().length > 0
+  );
+}
+
+/** A materialized wake has already spent its subscription's delivery budget. */
+function hasQueuedWake(
+  sql: SqlStorage,
+  projectId: string,
+  subscriptionId: string,
+  targetSessionId: string
+): boolean {
+  return (
+    sql
+      .exec(
+        `SELECT 1 FROM project_event_delivery_batches
+         WHERE project_id = ? AND delivery_channel = 'prompt_queue' AND target_session_id = ?
+           AND state = 'pending' AND subscription_id = ? LIMIT 1`,
         projectId,
         targetSessionId,
         subscriptionId

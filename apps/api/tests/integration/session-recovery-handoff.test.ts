@@ -194,10 +194,14 @@ describe('session recovery stable task identity', () => {
     const sqlite = new Database(':memory:');
     try {
       seedStableRecoveryFixture(sqlite);
-      sqlite.prepare("UPDATE tasks SET coordination_channel = 'feature.wake' WHERE id = 'task-1'").run();
-      const wake = await expectWakingRecovery(createSqliteD1(sqlite));
-      expect(sqlite.prepare('SELECT coordination_channel FROM tasks WHERE id = ?').get(wake.taskId))
-        .toEqual({ coordination_channel: 'feature.wake' });
+      sqlite
+        .prepare("UPDATE tasks SET coordination_channel = 'feature.wake' WHERE id = 'task-1'")
+        .run();
+      const result = await wake(createSqliteD1(sqlite));
+      expect(result.status).toBe('waking');
+      expect(
+        sqlite.prepare('SELECT coordination_channel FROM tasks WHERE id = ?').get('task-1')
+      ).toEqual({ coordination_channel: 'feature.wake' });
     } finally {
       sqlite.close();
     }

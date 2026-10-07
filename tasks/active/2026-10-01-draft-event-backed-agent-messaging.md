@@ -1,19 +1,26 @@
 # Draft: event-backed agent messaging and coordination guidance
 
-**Status:** active (preliminary DRAFT PR — must stay draft and unmerged)
+**Status:** active (release continuation authorized 2026-10-07)
 **SAM task:** 01M3WPVNYF2JX9CT94W7NV6BTS
 **Branch:** `sam/create-preliminary-draft-pr-nv6bts`
 **Design source:** SAM Idea 01M3WAGPW113X8VYMHACWHY6KJ (incl. adoption/feature-coordination addendum)
 **Evidence:** SAM Idea 01M3128W1NWW0SYH54K4Q27F1A
 
-## Delivery boundary (overrides /do Phases 6–7)
+## Release authorization (2026-10-07)
 
-- Open a DRAFT PR; never mark ready, never merge.
-- No staging or production deploy, no live activation. Staging/live validation is explicitly
-  deferred for this preliminary draft.
-- This task file lives on the output branch only (pushing to `main` auto-deploys production).
-- No SAM subtask dispatch; local subagents only for review.
-- Unfinished behavior ships disabled (`AGENT_MESSAGE_CHANNELS_ENABLED` defaults off).
+Raphaël requested: “Get it green and merged please.” This supersedes the original draft-only/no-deploy boundary. Complete normal local validation, specialist reviews, staging verification, CI, CodeRabbit request/wait, merge, and production deploy monitoring. Reuse PR #2213 and its branch.
+
+### Release checklist
+
+- [x] Merge current main, preserving stable wake task identity and sleeping target support.
+- [x] Move coordination migration to the next unused prefix (0186; 0185 reserved by runtime-contract release).
+- [x] Preserve queued notification during exhausted-subscription renewal.
+- [x] Wire configuration overrides and enable channel messaging in managed deployment.
+- [ ] Re-run local quality/worker checks and specialist review.
+- [ ] Staging: send/read/ack and sleeping recipient notification; cleanup.
+- [ ] Update final PR scope/evidence, remove draft gate, obtain green CI.
+- [ ] Request CodeRabbit and wait, resolve any received findings.
+- [ ] Archive task, merge and verify production deployment.
 
 ## Problem
 
@@ -59,7 +66,7 @@ coordination channel to descendants.
    name cap: the pair channel name must be a hash of the unordered pair.
 7. **Event metadata limits** (8192 bytes, depth 4) bound message + caller metadata together.
 8. **Wake/eventing evidence.** 2026-09-21 verified a PR `issue_comment.created` waking an
-   *idle, live* chat (Idea 01M3128W1NWW0SYH54K4Q27F1A). Not verified: sleeping-session
+   _idle, live_ chat (Idea 01M3128W1NWW0SYH54K4Q27F1A). Not verified: sleeping-session
    restoration, CI/review families, other delivery modes. New read-only evidence
    (2026-10-01, production Workers Logs, last 72h, newest 500
    `github.webhook.project_events_admitted` lines): check_run 309, workflow_run 77,
@@ -85,6 +92,7 @@ coordination channel to descendants.
 ## Scope of this draft
 
 ### Implemented slice
+
 - Feature flag `AGENT_MESSAGE_CHANNELS_ENABLED` (default `false`). Effective only when
   `PROJECT_EVENT_WAKE_ENABLED=true` and durable prompt delivery is enabled; otherwise the
   legacy path runs and a configuration warning is logged.
@@ -106,6 +114,7 @@ coordination channel to descendants.
   command text, public docs.
 
 ### Remaining (documented in the PR, not implemented)
+
 - Staging/live validation of everything above (deferred by the task boundary).
 - Target eligibility is unchanged: the channel path accepts a sleeping recipient chat and
   queues its wake (tested), but the existing tool target resolution still decides which
@@ -117,35 +126,30 @@ coordination channel to descendants.
   but rollout/rollback observation is.
 - SAM-session (top-level SAM agent) `dispatch_task` does not accept `coordinationChannel`
   (its `retry_subtask` copies it).
-- Known limit: a managed subscription that has used its wake budget is retired even when its
-  last wake is still queued, which fails that wake (messages stay in channel history).
-  Keeping it active would also match new messages and hit the pull bug in Idea
-  01M3WTZATH40CGC2JZ16201E0G; a clean fix needs canonical "stop matching, keep delivering".
-- Open decision before enabling (security re-review, HIGH): pair history and catalog entries
-  are readable by every project agent (`get_channel_history`, `list_event_channels`). Not a
-  regression (legacy text is readable through `get_session_messages`, which checks project
-  scope only), and the design treats channels as routing, not privacy. Options: keep
-  project-visible, or restrict `agent-dm.*` reads to the two participants.
-- Activation prerequisite: the `AGENT_MESSAGE_*` vars are not yet in
-  `getOptionalProcessEnvVars` (`scripts/deploy/sync-wrangler-config.ts`) or the
-  `wrangler_sync_env` mapping (`.github/workflows/deploy-reusable.yml`), so a GitHub
-  Environment value cannot reach the Worker. Add them (and list overrides per rule 70)
-  before enabling anywhere.
+- Queued-wake renewal fixed during release: remove match keys from an exhausted subscription
+  while preserving its active queued delivery authority; the replacement handles new sends.
+- Pair history remains project-visible as the design source explicitly specifies. Independent
+  security review confirmed this preserves the existing project authorization boundary.
+- Activation wiring added to both deployment workflow mappings and sync allowlist; managed
+  deployment enables the transport, with an explicit false override for rollback.
 - Following a not-yet-published channel; adoption/delivery measurement.
 
 ## Implementation checklist
 
 ### Refactor (separate commits, no behavior change)
+
 - [x] Extract mailbox helpers from `mailbox-tools.ts` to stay well under the size limits
 - [x] Extract `handleStopSubtask` from `orchestration-comms.ts`
 - [x] Extract knowledge formatting helpers from `instruction-tools.ts`
 - [x] Extract dispatch description building from `dispatch-tool.ts`
 
 ### Shared
+
 - [x] Constants: reserved prefix, DM channel cap, rotation grace, flag default
 - [x] Types: `SendAgentChannelMessageInput` / `SendAgentChannelMessageResult`
 
 ### ProjectData DO
+
 - [x] Self-echo suppression helper + use in `createMatchesForEvent` and `catchUpChannel`
 - [x] Reserved prefix rejected in generic publish; namespace-aware channel capacity
 - [x] `agent-message-channels.ts`: pair channel name, prepare, ensure/rotate managed
@@ -154,6 +158,7 @@ coordination channel to descendants.
 - [x] Agent-message wake notice text in `buildWakePromptInput`
 
 ### API / MCP
+
 - [x] `services/agent-message-channels.ts`: config resolution, recipient wake-authority
       precheck, DO call, receipts, safe-identifier error mapping
 - [x] Route `send_durable_message` notify/deliver + `send_message_to_subtask` through it
@@ -164,11 +169,13 @@ coordination channel to descendants.
 - [x] `get_instructions`: eventing guidance + `task.coordinationChannel`
 
 ### Docs / guidance
+
 - [x] `apps/www` API reference + agents guide
 - [x] `.claude/commands/workflow.md`, `.claude/commands/do.md`
 - [x] `apps/api/.env.example` + env reference skill
 
 ### Review fixes (Phase 5)
+
 - [x] Pair-channel events match only participant subscriptions (security HIGH)
 - [x] `follow_event_channel` rejects `agent-dm.`; `sam-agent-message:` subscription keys reserved
 - [x] Managed subscriptions limited to a share of the project cap with idle-LRU release
@@ -187,6 +194,7 @@ coordination channel to descendants.
       as an open human decision (see Remaining)
 
 ### Tests
+
 - [x] Worker test via real MCP route: A→B creates one channel + two subscriptions, recipient
       matched, sender not matched, SAM notice materialized for recipient only
 - [x] Concurrent first sends A→B and B→A: one channel, no duplicate subscriptions, each

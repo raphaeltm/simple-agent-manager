@@ -553,7 +553,7 @@ describe('get_instructions eventing guidance', () => {
       AGENT_MESSAGE_CHANNELS_ENABLED: 'true',
       PROJECT_EVENT_WAKE_ENABLED: 'true',
     });
-    expect(on.text).toContain('arrive as a SAM notice with event IDs, never as raw text');
+    expect(on.text).toContain('arrive as a SAM notice with event IDs instead of peer text');
   });
 
   it('omits eventing guidance for sessions without a task-backed agent token', async () => {

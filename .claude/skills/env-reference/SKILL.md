@@ -408,7 +408,7 @@ per-slice and per-run admission budgets, and the verified R2 manifest writes.
 - `PROJECT_EVENT_CHANNEL_PUBLISH_MAX_PER_WINDOW` — Maximum newly committed channel publishes per project window; retained replays do not consume quota (default: `120`)
 - `PROJECT_EVENT_CHANNEL_CURSOR_TTL_MS` — History cursor and unfinished catch-up lifetime in milliseconds; continuation never extends it (default: `3600000`)
 - `PROJECT_EVENT_CHANNEL_CATALOG_IDLE_TTL_MS` — Minimum idle time before reclaiming an empty catalog generation without live catch-up (default: `2592000000`)
-- `AGENT_MESSAGE_CHANNELS_ENABLED` — Preview: send notify/deliver agent messages over SAM-managed `agent-dm.*` pair channels; effective only while `PROJECT_EVENT_WAKE_ENABLED` and durable prompt delivery are on (default: `false`)
+- `AGENT_MESSAGE_CHANNELS_ENABLED` — Send notify/deliver agent messages over SAM-managed `agent-dm.*` pair channels; effective only while `PROJECT_EVENT_WAKE_ENABLED` and durable prompt delivery are on (default: `false`)
 - `AGENT_MESSAGE_CHANNEL_MAX_CHANNELS` — Maximum `agent-dm.*` pair channels per project, separate from `PROJECT_EVENT_CHANNEL_MAX_CHANNELS` (default: `1024`)
 - `AGENT_MESSAGE_SUBSCRIPTION_ROTATION_GRACE_MS` — Replace a managed pair subscription this close to the end of its wake lifetime when it owes no pending wake (default: `300000`)
 - `AGENT_MESSAGE_MAX_ACTIVE_SUBSCRIPTIONS` — Share of `PROJECT_EVENT_MAX_ACTIVE_SUBSCRIPTIONS_PER_PROJECT` that SAM-managed agent-message subscriptions may hold; idle ones on other pairs are released first (default: `100`)

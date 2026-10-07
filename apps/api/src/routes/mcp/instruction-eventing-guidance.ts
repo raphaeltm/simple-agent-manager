@@ -25,7 +25,7 @@ export function buildEventingInstructions(input: {
   ];
   if (input.agentMessageChannelsEnabled) {
     instructions.push(
-      'Messages from other agents arrive as a SAM notice with event IDs, never as raw text: read them with `get_event`, ' +
+      'Ordinary notify/deliver messages from other agents arrive as a SAM notice with event IDs instead of peer text: read them with `get_event`, ' +
         'reply with `send_durable_message`, then call `ack_event_delivery`.'
     );
   }

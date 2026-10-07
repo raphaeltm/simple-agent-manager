@@ -147,6 +147,98 @@ describe('agent message channels: replay and bounds', () => {
     expect(match!.reason).toBe('agent message subscription renewed');
   });
 
+  it('preserves the last queued wake while a replacement alone receives later messages', async () => {
+    const f = await twoAgentProject();
+    const limits = { PROJECT_EVENT_WAKE_MAX_PER_SUBSCRIPTION: '1' };
+    await withProjectDataEnv(f.stub, limits, () =>
+      withAgentMessageChannels(async () => {
+        const first = okBody<ChannelReceipt>(await send(f.a, f.b, 'first pending message'));
+        await materializeWakes(f.stub, f.projectId);
+        const [firstWake] = await inboxRows(f.stub);
+        expect(firstWake).toBeDefined();
+        const [firstMatch] = await eventMatches(f.stub, first.eventId);
+        const oldId = firstMatch!.subscription_id;
+
+        const second = okBody<ChannelReceipt>(await send(f.a, f.b, 'second pending message'));
+        const secondMatches = await eventMatches(f.stub, second.eventId);
+        expect(secondMatches).toHaveLength(1);
+        expect(secondMatches[0]!.subscription_id).not.toBe(oldId);
+        expect((await subscriptionStates(f))[oldId]).toBe('active');
+        expect(
+          await sqlRows(
+            f.stub,
+            'SELECT state FROM project_event_delivery_batches WHERE id = ?',
+            firstWake!.id
+          )
+        ).toEqual([{ state: 'pending' }]);
+        expect(
+          await sqlRows(
+            f.stub,
+            'SELECT subscription_id FROM project_event_subscription_match_keys WHERE subscription_id = ?',
+            oldId
+          )
+        ).toEqual([]);
+        const read = okBody<{ event: { metadata: { message: string } } }>(
+          await f.b.tool('get_event', { eventId: first.eventId })
+        );
+        expect(read.event.metadata.message).toBe('first pending message');
+        okBody(await f.b.tool('ack_event_delivery', { deliveryId: firstWake!.id }));
+        await materializeWakes(f.stub, f.projectId);
+        expect(
+          await sqlRows(
+            f.stub,
+            'SELECT state FROM project_event_delivery_batches WHERE subscription_id = ?',
+            secondMatches[0]!.subscription_id
+          )
+        ).toEqual([{ state: 'pending' }]);
+
+        // Once drained, a later send retires it without losing the next queued wake.
+        const third = okBody<ChannelReceipt>(await send(f.a, f.b, 'third pending message'));
+        expect((await subscriptionStates(f))[oldId]).toBe('expired');
+        expect(await eventMatches(f.stub, third.eventId)).toHaveLength(1);
+        expect(
+          await sqlRows(
+            f.stub,
+            `SELECT state FROM project_event_delivery_batches WHERE subscription_id = ?`,
+            secondMatches[0]!.subscription_id
+          )
+        ).toEqual([{ state: 'pending' }]);
+      }, limits)
+    );
+  });
+
+  it('keeps a draining subscription retired from matching when its configured wake budget increases', async () => {
+    const f = await twoAgentProject();
+    const limits = { PROJECT_EVENT_WAKE_MAX_PER_SUBSCRIPTION: '1' };
+    await withProjectDataEnv(f.stub, limits, () =>
+      withAgentMessageChannels(async () => {
+        const first = okBody<ChannelReceipt>(await send(f.a, f.b, 'queued at old budget'));
+        await materializeWakes(f.stub, f.projectId);
+        const [firstMatch] = await eventMatches(f.stub, first.eventId);
+        const oldId = firstMatch!.subscription_id;
+        okBody<ChannelReceipt>(await send(f.a, f.b, 'rotate exhausted subscription'));
+        await withProjectDataEnv(
+          f.stub,
+          { PROJECT_EVENT_WAKE_MAX_PER_SUBSCRIPTION: '3' },
+          async () => {
+            const third = okBody<ChannelReceipt>(await send(f.a, f.b, 'after increasing budget'));
+            expect((await subscriptionStates(f))[oldId]).toBe('active');
+            const matches = await eventMatches(f.stub, third.eventId);
+            expect(matches).toHaveLength(1);
+            expect(matches[0]!.subscription_id).not.toBe(oldId);
+            expect(
+              await sqlRows(
+                f.stub,
+                'SELECT state FROM project_event_delivery_batches WHERE subscription_id = ?',
+                oldId
+              )
+            ).toEqual([{ state: 'pending' }]);
+          }
+        );
+      }, limits)
+    );
+  });
+
   it.each([
     ['too deep', { metadata: { a: { b: { c: { d: { e: 'x' } } } } } }, 'metadata depth exceeds'],
     [

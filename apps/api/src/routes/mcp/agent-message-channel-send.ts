@@ -1,5 +1,5 @@
 /**
- * Preview transport for the existing messaging tools: send_durable_message and
+ * Channel transport for the existing messaging tools: send_durable_message and
  * send_message_to_subtask route ordinary (notify/deliver) messages over the
  * SAM-managed pair channel when AGENT_MESSAGE_CHANNELS_ENABLED is on. Urgent
  * classes keep stop-and-deliver, which already frames the text as an untrusted
@@ -75,7 +75,7 @@ export function parseIdempotencyKeyParam(
 
 /**
  * Send over the agent message channel, or return null so the caller keeps its
- * legacy path (preview off, prerequisites off, or an urgent message class).
+ * legacy path (flag off, prerequisites off, or an urgent message class).
  */
 export async function trySendOverAgentMessageChannel(
   requestId: string | number | null,
