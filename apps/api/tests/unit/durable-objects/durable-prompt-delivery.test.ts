@@ -445,15 +445,26 @@ describe('ProjectData durable prompt delivery', () => {
     ]);
 
     const claims = claimDuePromptDeliveries(sql, config, 10_000);
-
-    expect(claims.map((claim) => claim.message.id)).toEqual([
-      'comment-directive-thread-1',
-      'comment-directive-thread-2',
-    ]);
-    expect(claims.map((claim) => claim.message.sourceKind)).toEqual([
-      'comment_directive',
-      'comment_directive',
-    ]);
+    expect(claims.map((claim) => claim.message.id)).toEqual(['comment-directive-thread-1']);
+    expect(claims[0]!.message.sourceKind).toBe('comment_directive');
+    expect(claimDuePromptDeliveries(sql, config, 10_001)).toEqual([]);
+    applyPromptDeliveryResult(
+      sql,
+      claims[0]!,
+      {
+        kind: 'accepted',
+        acpSessionId: 'acp',
+        promptEpoch: 10_001,
+        runtimeIdentity: 'runtime-1',
+        capabilities,
+        receipt: null,
+      },
+      config,
+      10_001
+    );
+    const next = claimDuePromptDeliveries(sql, config, 10_001);
+    expect(next.map((claim) => claim.message.id)).toEqual(['comment-directive-thread-2']);
+    expect(next[0]!.message.sourceKind).toBe('comment_directive');
   });
 
   it('rejects reuse of a stable delivery identity for different prompt intent', () => {

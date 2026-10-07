@@ -464,6 +464,17 @@ export async function runPromptDeliveryClaim(
         result: result.kind,
         reason: 'reason' in result ? result.reason : null,
         runtimeIdentity: result.runtimeIdentity,
+        userMessageAt: claim.message.createdAt,
+        preparationStartedAt: startedAt,
+        resultAppliedAt: Date.now(),
+        runtimeAcceptedAt: result.kind === 'accepted' ? result.promptEpoch : null,
+        wakeReadyAt:
+          sql
+            .exec(
+              'SELECT ready_at FROM session_wake_readiness WHERE session_id = ?',
+              claim.message.targetSessionId
+            )
+            .toArray()[0]?.ready_at ?? null,
       })
     );
     hooks.broadcastEvent(

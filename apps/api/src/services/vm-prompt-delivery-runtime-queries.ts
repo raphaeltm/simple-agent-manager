@@ -71,6 +71,9 @@ export async function getDeliveryCapabilities(
         userId: target.userId,
         workspaceId: target.workspaceId,
         requestTimeoutMs,
+        // A read-only probe can outlive the preparation budget while wake converges.
+        // Its timeout is not evidence of an interrupted prompt or a failed runtime.
+        recoverContainerOnTimeout: false,
         ...(sourceTaskGuard ? { sourceTaskGuard } : {}),
       }
     );

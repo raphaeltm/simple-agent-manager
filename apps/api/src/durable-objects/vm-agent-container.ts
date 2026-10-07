@@ -13,6 +13,7 @@ import {
   SessionRecoveryAuthorityRevokedError,
   type SessionRecoverySourceTaskGuard,
 } from '../services/session-recovery-authority';
+import { signalSessionWakeReadyBestEffort } from '../services/session-wake-ready';
 import {
   ACTIVE_WORK_KEY,
   type ActiveWorkRuntime,
@@ -962,6 +963,24 @@ export class VmAgentContainer extends Container<Env> {
         // if stopForUser() already issued it.
         await this.stop().catch(() => undefined);
         return stoppedRecoveryResult();
+      }
+      if (target.runtimeIncarnationId) {
+        // Emit only after the incarnation-fenced recovery and lifecycle commit. Ordinary
+        // healthy reconciliation above must not repeatedly release unrelated busy retries.
+        this.ctx.waitUntil(
+          signalSessionWakeReadyBestEffort(this.env, {
+            projectId: target.projectId,
+            chatSessionId: target.chatSessionId,
+            workspaceId: target.workspaceId,
+            agentSessionId: target.agentSessionId,
+            runtimeReadyAt: Date.now(),
+            fence: {
+              runtime: 'cf-container',
+              nodeId: target.nodeId,
+              runtimeIncarnationId: target.runtimeIncarnationId,
+            },
+          })
+        );
       }
       log.info('vm_agent_container_recovery_completed', {
         nodeId: config.nodeId,

@@ -56,6 +56,23 @@ export async function transitionToInProgress(
   const now = new Date().toISOString();
   const recoverySourceTaskId = state.config.recoverySourceTaskId ?? null;
   const recoveryChatSessionId = state.config.resumeSnapshotChatSessionId ?? null;
+  const readiness =
+    recoveryChatSessionId &&
+    state.config.recoveryAttemptId &&
+    state.stepResults.workspaceId &&
+    state.stepResults.agentSessionId
+      ? {
+          projectId: state.projectId,
+          chatSessionId: recoveryChatSessionId,
+          workspaceId: state.stepResults.workspaceId,
+          agentSessionId: state.stepResults.agentSessionId,
+          fence: {
+            runtime: 'vm' as const,
+            taskId: state.taskId,
+            recoveryAttemptId: state.config.recoveryAttemptId,
+          },
+        }
+      : undefined;
 
   // Optimistic lock: only transition if still delegated. Guarded snapshot
   // recovery also proves the exact source and snapshot claim are live in the
@@ -125,6 +142,7 @@ export async function transitionToInProgress(
           projectId: state.projectId,
           chatSessionId: recoveryChatSessionId,
           status: 'restored',
+          readiness,
         })
       );
       state.currentStep = 'running';
@@ -156,6 +174,20 @@ export async function transitionToInProgress(
     await failTask(state, 'Task orchestration was superseded before agent handoff completed.', rc);
     return;
   }
+
+  // The agent session is live, so the wake is over. This is the ONLY terminal
+  // emit on the happy path: the raw guarded UPDATE above bypasses
+  // `updateD1ExecutionStep`, and the alarm dispatcher treats `running` as a
+  // terminal no-op step, so the intermediate-phase choke point never fires here.
+  rc.ctx.waitUntil(
+    notifyWakeSettled({
+      env: rc.env,
+      projectId: state.projectId,
+      chatSessionId: recoveryChatSessionId,
+      status: 'restored',
+      readiness,
+    })
+  );
 
   // Record status event
   const { ulid } = await import('../../lib/ulid');
@@ -215,19 +247,6 @@ export async function transitionToInProgress(
       });
     }
   }
-
-  // The agent session is live, so the wake is over. This is the ONLY terminal
-  // emit on the happy path: the raw guarded UPDATE above bypasses
-  // `updateD1ExecutionStep`, and the alarm dispatcher treats `running` as a
-  // terminal no-op step, so the intermediate-phase choke point never fires here.
-  rc.ctx.waitUntil(
-    notifyWakeSettled({
-      env: rc.env,
-      projectId: state.projectId,
-      chatSessionId: recoveryChatSessionId,
-      status: 'restored',
-    })
-  );
 
   state.currentStep = 'running';
   state.completed = true;

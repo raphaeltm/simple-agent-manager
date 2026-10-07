@@ -34,24 +34,17 @@ import type { TaskExecutionStep } from '@simple-agent-manager/shared';
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import {
+  getWakeProgressBroadcastTimeoutMs,
+  signalSessionWakeReadyBestEffort,
+} from '../../services/session-wake-ready';
+export {
+  DEFAULT_WAKE_PROGRESS_BROADCAST_TIMEOUT_MS,
+  getWakeProgressBroadcastTimeoutMs,
+} from '../../services/session-wake-ready';
 import type { ProjectData } from '../project-data';
 import type { SessionWakeProgressInput } from '../project-data/session-wake-progress';
-import { parseEnvInt } from './helpers';
-
-/**
- * Bounded budget for the wake-progress broadcast RPC. The DO side only writes to
- * already-open sockets, so a healthy call returns in single-digit milliseconds;
- * seconds of silence means the DO is unavailable and the delta is not worth
- * waiting for.
- */
-export const DEFAULT_WAKE_PROGRESS_BROADCAST_TIMEOUT_MS = 5_000;
-
-export function getWakeProgressBroadcastTimeoutMs(env: Env): number {
-  return parseEnvInt(
-    env.WAKE_PROGRESS_BROADCAST_TIMEOUT_MS,
-    DEFAULT_WAKE_PROGRESS_BROADCAST_TIMEOUT_MS
-  );
-}
+import type { SessionWakeReadyInput } from '../project-data/session-wake-ready';
 
 /** Terminal steps: the replacement runner is up, so the wake is over. */
 const RESTORED_STEPS: ReadonlySet<TaskExecutionStep> = new Set<TaskExecutionStep>([
@@ -98,10 +91,14 @@ export interface NotifyWakeSettledArgs {
   /** Null for a normal task run — the discriminator that keeps this a no-op. */
   chatSessionId: string | null | undefined;
   status: 'restored' | 'failed';
+  readiness?: SessionWakeReadyInput;
 }
 
 /**
- * Broadcast that a wake has finished, so the banner clears immediately.
+ * Signal fenced delivery readiness for a committed successful wake, then clear the banner.
+ * Browser progress alone never grants delivery authority; ProjectData validates readiness
+ * against D1 and retains preparation-timeout races durably. Failed signaling leaves normal
+ * retries and their TTL intact.
  *
  * This exists as a separate entry point because the terminal transition does NOT
  * flow through `updateD1ExecutionStep`: `transitionToInProgress` writes
@@ -115,6 +112,9 @@ export interface NotifyWakeSettledArgs {
  */
 export async function notifyWakeSettled(args: NotifyWakeSettledArgs): Promise<boolean> {
   const { env, projectId, chatSessionId, status } = args;
+  if (status === 'restored' && args.readiness) {
+    await signalSessionWakeReadyBestEffort(env, { ...args.readiness, runtimeReadyAt: Date.now() });
+  }
   return emitWakeProgress(env, projectId, chatSessionId, {
     recoveryStatus: status,
     // The wake is over; a phase here would render as stale progress.
