@@ -1,0 +1,28 @@
+{
+  "observedAt": "2026-10-07T16:07:37.978588+00:00",
+  "environment": "staging",
+  "sourceQueries": {
+    "workspace": "SELECT id,status,runtime_deletion_confirmed_at,runtime_deletion_proof FROM workspaces WHERE id='01M4BGS9CWM16KGFM6M321KRQY'",
+    "node": "SELECT id,status FROM nodes WHERE id='01M4BGS967YC353PEAQT799MYA'",
+    "snapshots": "SELECT COUNT(*) AS count FROM session_snapshots WHERE chat_session_id='033133d6-ab82-4dec-bb1a-47790c9aa8e3'"
+  },
+  "workspace": [
+    {
+      "id": "01M4BGS9CWM16KGFM6M321KRQY",
+      "status": "deleted",
+      "runtime_deletion_confirmed_at": "2026-10-07T15:55:16.054Z",
+      "runtime_deletion_proof": "node_runtime_terminated"
+    }
+  ],
+  "node": [
+    {
+      "id": "01M4BGS967YC353PEAQT799MYA",
+      "status": "deleted"
+    }
+  ],
+  "snapshots": [
+    {
+      "count": 0
+    }
+  ]
+}

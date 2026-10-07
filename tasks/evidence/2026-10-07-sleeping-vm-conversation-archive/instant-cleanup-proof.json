@@ -1,0 +1,49 @@
+{
+  "workspace": [
+    {
+      "id": "01M4B4YSGN7PRF30WA3GYB9KYK",
+      "status": "deleted",
+      "runtime_deletion_confirmed_at": "2026-10-07T15:40:47.543Z",
+      "runtime_deletion_proof": "node_runtime_terminated"
+    }
+  ],
+  "node": [
+    {
+      "id": "01M4B4YSAHYFGDZ247S6F9MG6D",
+      "status": "deleted"
+    }
+  ],
+  "snapshots": [
+    {
+      "snapshot_count": 0
+    }
+  ],
+  "active": [
+    {
+      "active_count": 0
+    }
+  ],
+  "task": [
+    {
+      "id": "01M4B4YQ4F2HF0YX5Q62MGFVPN",
+      "status": "completed",
+      "completed_at": "2026-10-07T15:35:24.117Z",
+      "output_pr_url": "https://github.com/serverspresentation2025/crewai/pull/4"
+    }
+  ],
+  "provenance": {
+    "observedAt": "2026-10-07T15:56:14.170088+00:00",
+    "environment": "staging",
+    "projectId": "01KJNR9R3TEN3KX1ETE33852R8",
+    "source": "Cloudflare D1 read-only API",
+    "databaseId": "1cfaf5d4-8226-47d8-bf26-6ba727ce5718",
+    "scope": "Exact original Instant task/workspace/node IDs; snapshot and active-workspace counts scoped to owned resources",
+    "sourceQueries": {
+      "workspace": "SELECT id,status,runtime_deletion_confirmed_at,runtime_deletion_proof FROM workspaces WHERE id='01M4B4YSGN7PRF30WA3GYB9KYK'",
+      "node": "SELECT id,status FROM nodes WHERE id='01M4B4YSAHYFGDZ247S6F9MG6D'",
+      "snapshots": "SELECT COUNT(*) AS snapshot_count FROM session_snapshots WHERE chat_session_id='36200219-1ea0-43ff-8a8d-f119c68c56ca' AND project_id='01KJNR9R3TEN3KX1ETE33852R8'",
+      "active": "SELECT COUNT(*) AS active_count FROM workspaces WHERE node_id='01M4B4YSAHYFGDZ247S6F9MG6D' AND status NOT IN ('deleted','stopped','error')",
+      "task": "SELECT id,status,completed_at,output_pr_url FROM tasks WHERE id='01M4B4YQ4F2HF0YX5Q62MGFVPN'"
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "before": {
+    "status": 200,
+    "id": "01M4B53CBBF17ZTNDNX8455QJB",
+    "statusValue": "running"
+  },
+  "deletion": {
+    "status": 200,
+    "body": {
+      "success": true
+    }
+  },
+  "after": {
+    "status": 404
+  }
+}

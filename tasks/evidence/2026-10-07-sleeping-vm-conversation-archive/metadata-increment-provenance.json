@@ -1,0 +1,55 @@
+{
+  "deployedCandidate": "bbaee36fd5a6126d1bb4e0305a2886b636ed4e5d",
+  "sourceIntegrationAfterImportOnlyReview": "ad16e116f9228b07785c447db7dea3e357b80c45",
+  "run": 37640782379,
+  "runConclusion": "failure before smoke job scheduling",
+  "deployJob": 112858915274,
+  "deployJobConclusion": "success",
+  "missingSmokeRecovery": {
+    "suite": "exact existing tests/smoke/playwright.config.ts against deployed staging",
+    "testsPassed": 12,
+    "duration": "2.0m",
+    "trace": "off",
+    "computeCreated": false
+  },
+  "importOnlyIndependentValidation": {
+    "testsPassed": 157,
+    "typecheck": "pass",
+    "eslint": "pass",
+    "wranglerDryRunBuild": "pass; no Worker upload or container rollout",
+    "runtimeSemantics": "same timeout/parser/public export/provider resolution/authentication/Go; proof is not relabeled to new SHA"
+  },
+  "observedAt": "2026-10-07T15:28:35.473234+00:00",
+  "apiVersion": "aaa1ff32-e7f2-4e7f-9c40-25d8e7564ca3",
+  "workerCodeETag": "35c82b7fa0c8a03c160dd6d72cc7ae5c7408bb86029406e5e8385810ccad57a9",
+  "flags": {
+    "ACP_INTERACTION_FORMS_ENABLED": "false",
+    "ACP_INTERACTIONS_ENABLED": "false",
+    "ACP_INTERACTION_URLS_ENABLED": "false",
+    "VERSION": "0.1.0",
+    "VM_AGENT_REQUIRED_VERSION": "1120e0404aa19c5e9fdee62e141522a50571f5cc"
+  },
+  "webDeployment": "282c7897.sam-web-staging.pages.dev",
+  "liveArtifacts": {
+    "assets": [
+      {
+        "url": "https://app.sammy.party/assets/index-BI3bEJ8R.js",
+        "status": 200,
+        "sha256": "1e5086e0cc8987632787e51d0b2f6fd3735a3628499f0f787905c8eb91762d1d",
+        "bytes": 52439
+      },
+      {
+        "url": "https://app.sammy.party/assets/index-DuI4u-ZD.css",
+        "status": 200,
+        "sha256": "99860b377dfd428c05fc098b9516e7fe9d43968194351be4e81833dbe90b7c64",
+        "bytes": 143063
+      }
+    ],
+    "agent": {
+      "status": 200,
+      "body": "curl -fsSL \"https://api.sammy.party/api/agent/download?os=$OS&arch=$ARCH&release=1120e0404aa19c5e9fdee62e141522a50571f5cc\" -o /usr/local/bin/vm-agent"
+    }
+  },
+  "agentBinarySha256": "69d7f870c58572fecd655a4988c1045df93dfb1f7390e53a5e0fdaa5ceb61fa6",
+  "lease": "runtime released for same Instant completion, sequential Manual Instant, cleanup/flagsfalse; Archive LAST"
+}

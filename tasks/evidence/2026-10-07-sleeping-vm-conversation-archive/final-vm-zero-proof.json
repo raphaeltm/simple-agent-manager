@@ -1,0 +1,63 @@
+{
+  "observedAt": "2026-10-07T14:00:53.952315+00:00",
+  "node": [
+    {
+      "node_count": 0
+    }
+  ],
+  "snapshot": [
+    {
+      "id": "01M4B1WXAANXDV512XTZAFKMNM",
+      "status": "available",
+      "degradation": "none",
+      "sleep_status": "sleeping"
+    }
+  ],
+  "task": [
+    {
+      "id": "01M4B1NAFZRYJ5JRD3AN463EXK",
+      "status": "sleeping"
+    }
+  ],
+  "stagingNodes": [
+    {
+      "cloud_provider": null,
+      "status": "deleted",
+      "count": 40
+    },
+    {
+      "cloud_provider": "cloudflare",
+      "status": "deleted",
+      "count": 182
+    },
+    {
+      "cloud_provider": "cloudflare",
+      "status": "sleeping",
+      "count": 1
+    },
+    {
+      "cloud_provider": "hetzner",
+      "status": "deleted",
+      "count": 107
+    },
+    {
+      "cloud_provider": "scaleway",
+      "status": "deleted",
+      "count": 1
+    }
+  ],
+  "r2": [
+    {
+      "kind": "home.tar",
+      "status": 200
+    },
+    {
+      "kind": "wip.bundle",
+      "status": 200
+    },
+    {
+      "kind": "manifest.json",
+      "status": 200
+    }
+  ]
+}

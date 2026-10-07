@@ -1,0 +1,43 @@
+{
+  "candidate": "f0a0cd93de005eb21c04ac6feabaa908b2d1980b",
+  "run": 37633897250,
+  "runConclusion": "success including smoke",
+  "observedAt": "2026-10-07T14:23:41.565756+00:00",
+  "apiVersion": "a2c69be2-a6a3-47e8-8ff4-90037d29f30e",
+  "workerCodeETag": "e081b5d0d9ee9c724e127f42cfbb2a56072698a7b8c4b28b2ca4ed156bfd9ece",
+  "flags": {
+    "ACP_INTERACTION_FORMS_ENABLED": "false",
+    "ACP_INTERACTIONS_ENABLED": "false",
+    "ACP_INTERACTION_URLS_ENABLED": "false",
+    "VERSION": "0.1.0",
+    "VM_AGENT_REQUIRED_VERSION": "1120e0404aa19c5e9fdee62e141522a50571f5cc"
+  },
+  "webDeployment": "992c2f76.sam-web-staging.pages.dev",
+  "liveArtifacts": {
+    "assets": [
+      {
+        "url": "https://app.sammy.party/assets/index-BI3bEJ8R.js",
+        "status": 200,
+        "sha256": "1e5086e0cc8987632787e51d0b2f6fd3735a3628499f0f787905c8eb91762d1d",
+        "bytes": 52439
+      },
+      {
+        "url": "https://app.sammy.party/assets/index-DuI4u-ZD.css",
+        "status": 200,
+        "sha256": "99860b377dfd428c05fc098b9516e7fe9d43968194351be4e81833dbe90b7c64",
+        "bytes": 143063
+      }
+    ],
+    "agent": {
+      "status": 200,
+      "body": "curl -fsSL \"https://api.sammy.party/api/agent/download?os=$OS&arch=$ARCH&release=1120e0404aa19c5e9fdee62e141522a50571f5cc\" -o /usr/local/bin/vm-agent"
+    }
+  },
+  "agentBinarySha256": "69d7f870c58572fecd655a4988c1045df93dfb1f7390e53a5e0fdaa5ceb61fa6",
+  "migrationLedgerPreserved": [
+    "0184_webhook_credential_claims.sql",
+    "0185_session_runtime_contract.sql"
+  ],
+  "finalIndependentScopedTests": 79,
+  "lease": "Runtime owns same retained Instant completion, sequential Manual Instant, cleanup and flags restore; coordinator Archive LAST."
+}

@@ -1,0 +1,26 @@
+[
+  {
+    "name": "desktop",
+    "errors": [],
+    "overflow": false
+  },
+  {
+    "name": "mobile",
+    "errors": [],
+    "overflow": false
+  },
+  {
+    "closeStatus": 200,
+    "closeBody": {
+      "status": "completed",
+      "closedAt": "2026-10-07T16:06:11.797Z"
+    }
+  },
+  {
+    "retryStatus": 200,
+    "retryBody": {
+      "status": "completed",
+      "closedAt": "2026-10-07T16:06:11.797Z"
+    }
+  }
+]

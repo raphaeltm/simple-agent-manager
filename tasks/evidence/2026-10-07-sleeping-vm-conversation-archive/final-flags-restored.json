@@ -1,0 +1,38 @@
+{
+  "observedAt": "2026-10-07T15:59:28.917825+00:00",
+  "environment": "staging",
+  "activeVersions": [
+    {
+      "version_id": "8b19aee2-667a-4824-bb50-60ff7bd4c180",
+      "percentage": 100
+    }
+  ],
+  "codeETag": "35c82b7fa0c8a03c160dd6d72cc7ae5c7408bb86029406e5e8385810ccad57a9",
+  "allowlistedBindings": [
+    [
+      "ACP_INTERACTION_FORMS_ENABLED",
+      "false"
+    ],
+    [
+      "ACP_INTERACTIONS_ENABLED",
+      "false"
+    ],
+    [
+      "ACP_INTERACTION_URLS_ENABLED",
+      "false"
+    ],
+    [
+      "VERSION",
+      "0.1.0"
+    ],
+    [
+      "VM_AGENT_REQUIRED_VERSION",
+      "1120e0404aa19c5e9fdee62e141522a50571f5cc"
+    ]
+  ],
+  "restorationWorkflow": 37648102691,
+  "workflowConclusion": "SUCCESS",
+  "temporaryFlagBranch": "owner deleted",
+  "deployedCoreCandidate": "bbaee36fd5a6126d1bb4e0305a2886b636ed4e5d",
+  "reviewedImportOnlyIntegration": "ad16e116f9228b07785c447db7dea3e357b80c45"
+}
