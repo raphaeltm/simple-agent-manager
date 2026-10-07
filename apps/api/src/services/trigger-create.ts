@@ -17,12 +17,14 @@ import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';
 import type { CreateTriggerSchema } from '../schemas/triggers';
 import { cronToNextFire, validateCronExpression } from './cron-utils';
+import type { McpTokenData } from './mcp-token';
 import {
   ResourceRequirementsValidationError,
   serializeResourceRequirementsInput,
 } from './resource-requirements-input';
 import { clearTriggerPageCaches } from './trigger-cache';
 import { resolveMaxTriggersPerProject } from './trigger-limits';
+import { prepareWebhookClaim } from './webhook-credential-claim';
 import { getWebhookTriggerLimits, validateWebhookTriggerConfig } from './webhook-trigger-config';
 import { createWebhookTokenMaterial, webhookConfigValues } from './webhook-trigger-store';
 type Database = ReturnType<typeof drizzle<typeof schema>>;
@@ -152,7 +154,8 @@ export async function createTrigger(
   env: Env,
   project: Pick<schema.Project, 'id' | 'maxTriggers'>,
   userId: string,
-  body: v.InferOutput<typeof CreateTriggerSchema>
+  body: v.InferOutput<typeof CreateTriggerSchema>,
+  claimIdentity?: McpTokenData
 ) {
   const projectId = project.id;
   const { name, promptTemplate } = validateTriggerCreation(env, body);
@@ -228,6 +231,10 @@ export async function createTrigger(
     updatedAt: now,
   };
 
+  const claim =
+    body.sourceType === 'webhook' && claimIdentity
+      ? prepareWebhookClaim(env, claimIdentity)
+      : undefined;
   let webhookToken: Awaited<ReturnType<typeof createWebhookTokenMaterial>> | undefined;
   if (body.sourceType === 'webhook' && body.webhookConfig) {
     webhookToken = await createWebhookTokenMaterial(env.ENCRYPTION_KEY);
@@ -235,7 +242,7 @@ export async function createTrigger(
       db.insert(schema.triggers).values(values),
       db
         .insert(schema.webhookTriggerConfigs)
-        .values(webhookConfigValues(id, body.webhookConfig, webhookToken)),
+        .values({ ...webhookConfigValues(id, body.webhookConfig, webhookToken), ...claim?.values }),
     ]);
   } else if (body.sourceType === 'github' && body.githubConfig) {
     await db.batch([
@@ -256,5 +263,5 @@ export async function createTrigger(
   const created = await db.select().from(schema.triggers).where(eq(schema.triggers.id, id)).get();
   if (!created) throw errors.internal('Created trigger not found');
   clearTriggerPageCaches(projectId);
-  return { created, webhookToken };
+  return { created, webhookToken: claim ? undefined : webhookToken, webhookClaim: claim?.response };
 }
