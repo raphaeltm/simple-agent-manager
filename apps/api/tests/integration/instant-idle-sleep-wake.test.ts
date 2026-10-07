@@ -156,6 +156,14 @@ class ContainerVmAgent {
     mcpServers: { name: string; url: string; token: string }[];
   }[] = [];
   createStatus = 201;
+  workspaceStatus = 201;
+  readonly hydratedWorkspaces: {
+    workspaceId: string;
+    branch: string;
+    defaultBranch: string;
+    baseBranch: string;
+    callbackToken: string;
+  }[] = [];
   /** Holds a restore open so a test can observe the wake mid-flight. */
   restoreGate: Promise<void> | null = null;
   private notifyRestoreStarted: (() => void) | null = null;
@@ -182,6 +190,19 @@ class ContainerVmAgent {
     if (!this.running) throw new TypeError('Network connection lost.');
     const { pathname } = new URL(request.url);
     this.requests.push({ method: request.method, path: pathname });
+    if (pathname === '/workspaces' && request.method === 'POST') {
+      if (
+        request.headers.get('Authorization') !== 'Bearer node-management-token' ||
+        request.headers.get('X-SAM-Workspace-Id') !== WORKSPACE_ID ||
+        request.headers.get('X-SAM-Node-Id') !== NODE_ID
+      )
+        return Response.json({ error: 'UNAUTHORIZED' }, { status: 401 });
+      const metadata = (await request.json()) as ContainerVmAgent['hydratedWorkspaces'][number];
+      this.hydratedWorkspaces.push(metadata);
+      return this.workspaceStatus === 201
+        ? Response.json({ id: metadata.workspaceId, status: 'running' }, { status: 201 })
+        : Response.json({ error: 'HYDRATION_REFUSED' }, { status: this.workspaceStatus });
+    }
     if (pathname === `/workspaces/${WORKSPACE_ID}/agent-sessions` && request.method === 'POST') {
       if (
         request.headers.get('Authorization') !== 'Bearer node-management-token' ||
@@ -297,7 +318,7 @@ describe('Instant session wake after idle sleep', () => {
     } as unknown as R2Bucket;
   }
 
-  function newContainer(): VmAgentContainer {
+  function newContainer(branch = 'main'): VmAgentContainer {
     const values = new Map<string, unknown>([
       ['lifecycleStatus', 'running'],
       [
@@ -308,7 +329,7 @@ describe('Instant session wake after idle sleep', () => {
           projectId: PROJECT_ID,
           chatSessionId: CHAT_SESSION_ID,
           repository: 'owner/repo',
-          branch: 'main',
+          branch,
           workspaceDir: '/workspaces/repo',
           controlPlaneUrl: 'https://api.example.test',
           vmAgentPort: 8080,
@@ -342,10 +363,12 @@ describe('Instant session wake after idle sleep', () => {
 
   function seedLiveInstantSession(): void {
     const now = new Date().toISOString();
-    d1.prepare(`INSERT INTO projects (id, user_id, name) VALUES (?, ?, 'SAM')`).run(
-      PROJECT_ID,
-      USER_ID
-    );
+    d1.prepare(
+      `INSERT INTO users (id, name, email) VALUES (?, 'Developer', 'developer@example.com')`
+    ).run(USER_ID);
+    d1.prepare(
+      `INSERT INTO projects (id, user_id, name, repository, default_branch) VALUES (?, ?, 'SAM', 'owner/repo', 'main')`
+    ).run(PROJECT_ID, USER_ID);
     d1.prepare(
       `INSERT INTO project_members (project_id, user_id, role, status) VALUES (?, ?, 'owner', 'active')`
     ).run(PROJECT_ID, USER_ID);
@@ -717,6 +740,56 @@ describe('Instant session wake after idle sleep', () => {
         status: 'active',
       });
     });
+  });
+
+  it('hydrates the canonical project default branch rather than the task checkout branch', async () => {
+    d1.prepare(
+      "UPDATE projects SET default_branch = 'develop', repository = 'owner/repo' WHERE id = ?"
+    ).run(PROJECT_ID);
+    d1.prepare("UPDATE workspaces SET branch = 'sam/task-change' WHERE id = ?").run(WORKSPACE_ID);
+    container = newContainer('sam/task-change');
+    await sleepOnContainerIdleTimeout();
+    expect((await postWorkspaceAgentResume()).status).toBe(200);
+    expect(vmAgent.hydratedWorkspaces).toHaveLength(1);
+    expect(vmAgent.hydratedWorkspaces[0]).toMatchObject({
+      workspaceId: WORKSPACE_ID,
+      repository: 'owner/repo',
+      branch: 'sam/task-change',
+      defaultBranch: 'develop',
+      baseBranch: 'develop',
+      projectId: PROJECT_ID,
+      taskId: TASK_ID,
+      callbackToken: 'workspace-callback-token',
+    });
+    const workspaceIndex = vmAgent.requests.findIndex(
+      (request) => request.method === 'POST' && request.path === '/workspaces'
+    );
+    const sessionIndex = vmAgent.requests.findIndex(
+      (request) =>
+        request.method === 'POST' && request.path === `/workspaces/${WORKSPACE_ID}/agent-sessions`
+    );
+    const restoreIndex = vmAgent.requests.findIndex(
+      (request) => request.path === `${AGENT_PATH}/restore`
+    );
+    expect(workspaceIndex).toBeGreaterThanOrEqual(0);
+    expect(sessionIndex).toBeGreaterThan(workspaceIndex);
+    expect(restoreIndex).toBeGreaterThan(sessionIndex);
+    expect(runtimeRows()).toEqual(AWAKE_ROWS);
+  });
+  it('preserves snapshot and creates no session or MCP token if workspace hydration is refused', async () => {
+    await sleepOnContainerIdleTimeout();
+    const generation = restorableGeneration();
+    vmAgent.workspaceStatus = 403;
+    expect((await postWorkspaceAgentResume()).status).toBeGreaterThanOrEqual(400);
+    expect(vmAgent.hydratedWorkspaces).toHaveLength(1);
+    expect(vmAgent.creations).toHaveLength(0);
+    expect(vmAgent.requests.filter((request) => request.path === `${AGENT_PATH}/restore`)).toEqual(
+      []
+    );
+    expect(kvValues.size).toBe(0);
+    expect(vmAgent.running).toBe(false);
+    expect(restorableGeneration()).toBe(generation);
+    expect(runtimeRows().snapshot).toEqual(SLEPT_ROWS.snapshot);
   });
 
   it.each(['task', 'conversation'] as const)(

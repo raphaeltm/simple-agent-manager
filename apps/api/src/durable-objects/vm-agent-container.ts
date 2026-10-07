@@ -7,7 +7,9 @@ import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { maybeJsonRecord } from '../lib/runtime-validation';
 import { commitContainerWakeFromSleep } from '../services/container-wake-commit';
+import { loadInstantRestoreWorkspace } from '../services/instant-restore-workspace';
 import { signCallbackToken, signNodeCallbackToken, signNodeManagementToken } from '../services/jwt';
+import { getCfContainerCreateWorkspaceTimeoutMs } from '../services/node-agent';
 import {
   isSessionRecoverySourceTaskGuardFullyValidForEnv,
   SessionRecoveryAuthorityRevokedError,
@@ -919,6 +921,37 @@ export class VmAgentContainer extends Container<Env> {
         return this.degradeRecovery(restoring, 'restore_http', target, capabilityResponse.status);
       }
       assertSessionRuntimeContractCapability(await capabilityResponse.json());
+      await this.assertSourceTaskGuard(sourceTaskGuard);
+      const restoreWorkspace = await loadInstantRestoreWorkspace(this.env, {
+        workspaceId: config.workspaceId,
+        userId: context.userId,
+        projectId: config.projectId,
+        chatSessionId: context.chatSessionId,
+      });
+      await this.assertSourceTaskGuard(sourceTaskGuard);
+      const workspaceResponse = await this.containerFetch(
+        new Request(`http://localhost:${config.vmAgentPort}/workspaces`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+            'X-SAM-Node-Id': config.nodeId,
+            'X-SAM-Workspace-Id': config.workspaceId,
+          },
+          body: JSON.stringify({
+            ...restoreWorkspace,
+            callbackToken: workspaceCallbackToken,
+            lightweight: true,
+            projectId: config.projectId,
+            taskId: context.runtimeContract?.taskContext?.taskId,
+          }),
+          signal: AbortSignal.timeout(getCfContainerCreateWorkspaceTimeoutMs(this.env)),
+        }),
+        config.vmAgentPort
+      );
+      if (!workspaceResponse.ok) {
+        return this.degradeRecovery(restoring, 'restore_http', target, workspaceResponse.status);
+      }
       await this.assertSourceTaskGuard(sourceTaskGuard);
       restoreMcp = await prepareSessionRestoreMcp(this.env, {
         userId: context.userId,
