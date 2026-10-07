@@ -16,9 +16,10 @@ Affected boundaries: agent-session-bootstrap.ts, node-agent-session-snapshots.ts
 - [x] Add meaningful regression tests for modes, settings, interactions, task/chat and both runtimes.
 - [x] Update affected user docs and source Idea.
 - [x] Run applicable local quality checks and CI.
-- [ ] Complete independent Go, Cloudflare, security, test, constitution, docs and completion reviews.
+- [x] Complete independent Go, Cloudflare, security, test, constitution, docs and completion reviews.
 - [x] Coordinate bounded shared staging; real sleep→wake, answer Manual request card, restored task completion/push/PR; clean up owned resources.
-- [ ] Archive only after completion validation; merge after normal gates and prove production deployment.
+- [x] Archive only after independent completion validation PASS.
+- [ ] Release operation: merge after latest CI/CodeRabbit gates and prove production deployment; recorded in PR/source Idea after merge.
 
 ## Acceptance criteria
 
@@ -117,3 +118,7 @@ Latest head2021 CI37642868685 all substantive checks PASS; specialist evidence d
 Coordinator01M4B28P7RY8Y9DPXEG8YJ81TB final receipt: normal mobile dock ArchivePOST200 completed16:06:11.797Z; repeatclose200 retains SAMEclosedAt. Desktop/mobile before/confirmation/ended screens reviewed without errors/overflow. Independent D116:06:45 confirms original task completed with conversation retained, workspaceNULL, exact workspace/snapshot absent, completed status events exactly1(before0). All three original R2 objectsGET404, liveNodes=[], migration0184/0185 ledger unchanged. Original temporary profileDELETE200/GET40416:07:20; task/chat/project audit retained. Immutable Manual evidenceb290 and scoped strict deletion proof independently rechecked16:07:37 PASS. Credential-free coordinator receipt is shared-cleanup.json.
 
 Only release actions remain: mandatory final independent completion verdict before archive; publish archival evidence/latest CI; request CodeRabbit once and observe per policy; merge and production proof. These are intentionally pending operational gates, not omitted implementation/acceptance criteria. Latest maincc9891b4f is blog-only PR2263, no overlapping runtime code.
+
+### Mandatory final completion review and archival
+
+Independent `/root/cloudflare_contract_review` final task-completion-validator PASS on51a4521f4 against latestmaincc989: checksA-F, no uncovered findings/criteria/blockers. Implementation, all four actual fixtures and final strict shared cleanup validated. Full credential-free verdict in completion-review.md. Task archived only after this verdict. Latest CI/CodeRabbit/merge/production are intentionally pending release actions and will be recorded in PR/source Idea; archival does not falsely claim deployment complete.
