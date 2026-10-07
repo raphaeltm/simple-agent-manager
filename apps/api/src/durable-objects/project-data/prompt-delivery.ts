@@ -246,16 +246,8 @@ function noEarlierDeliverySql(): string {
       )))`;
 }
 
-export function claimDuePromptDeliveries(
-  sql: SqlStorage,
-  config: DurableExecutionConfig,
-  now = Date.now()
-): PromptDeliveryClaim[] {
-  expireDuePromptDeliveries(sql, config, now);
-  const staleBefore = now - config.receiptTimeoutMs;
-  const rows = sql
-    .exec(
-      `SELECT * FROM session_inbox inbox
+// Built once from module-owned SQL fragments; caller values remain bound parameters.
+const CLAIM_DUE_PROMPT_DELIVERIES_SQL = `SELECT * FROM session_inbox inbox
      WHERE (
        delivery_state IN ('queued', 'retry_wait')
        AND COALESCE(next_attempt_at, created_at) <= ?
@@ -277,7 +269,34 @@ export function claimDuePromptDeliveries(
        END DESC,
        created_at ASC,
        rowid ASC
-     LIMIT ?`,
+     LIMIT ?`;
+// Built once from module-owned SQL fragments; caller values remain bound parameters.
+const PROMPT_DELIVERY_ALARM_SQL = `SELECT MIN(due_at) AS due_at FROM (
+       SELECT MIN(COALESCE(next_attempt_at, created_at)) AS due_at
+       FROM session_inbox inbox
+       WHERE delivery_state IN ('queued', 'retry_wait')
+         AND ${noEarlierDeliverySql()}
+       UNION ALL
+       SELECT MIN(attempt_started_at + ?) AS due_at
+       FROM session_inbox
+       WHERE delivery_state = 'delivering' AND attempt_started_at IS NOT NULL
+       UNION ALL
+       SELECT MIN(expires_at) AS due_at
+       FROM session_inbox
+       WHERE delivery_state IN ('queued', 'retry_wait', 'delivering')
+         AND expires_at IS NOT NULL
+     )`;
+
+export function claimDuePromptDeliveries(
+  sql: SqlStorage,
+  config: DurableExecutionConfig,
+  now = Date.now()
+): PromptDeliveryClaim[] {
+  expireDuePromptDeliveries(sql, config, now);
+  const staleBefore = now - config.receiptTimeoutMs;
+  const rows = sql
+    .exec(
+      CLAIM_DUE_PROMPT_DELIVERIES_SQL,
       now,
       config.maxAttempts,
       staleBefore,
@@ -547,26 +566,7 @@ export function computePromptDeliveryAlarmTime(
   config: DurableExecutionConfig,
   now = Date.now()
 ): number | null {
-  const row = sql
-    .exec(
-      `SELECT MIN(due_at) AS due_at FROM (
-       SELECT MIN(COALESCE(next_attempt_at, created_at)) AS due_at
-       FROM session_inbox inbox
-       WHERE delivery_state IN ('queued', 'retry_wait')
-         AND ${noEarlierDeliverySql()}
-       UNION ALL
-       SELECT MIN(attempt_started_at + ?) AS due_at
-       FROM session_inbox
-       WHERE delivery_state = 'delivering' AND attempt_started_at IS NOT NULL
-       UNION ALL
-       SELECT MIN(expires_at) AS due_at
-       FROM session_inbox
-       WHERE delivery_state IN ('queued', 'retry_wait', 'delivering')
-         AND expires_at IS NOT NULL
-     )`,
-      config.receiptTimeoutMs
-    )
-    .toArray()[0];
+  const row = sql.exec(PROMPT_DELIVERY_ALARM_SQL, config.receiptTimeoutMs).toArray()[0];
   const dueAt = typeof row?.due_at === 'number' ? row.due_at : null;
   if (dueAt === null) return null;
   return Math.max(dueAt, now + config.minAlarmDelayMs);
