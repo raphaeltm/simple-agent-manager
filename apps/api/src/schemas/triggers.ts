@@ -10,7 +10,7 @@ const VMSizeSchema = v.picklist(['small', 'medium', 'large']);
 const GitHubEventTypeSchema = v.picklist(['issues', 'issue_comment', 'pull_request', 'push']);
 
 const GitHubFiltersSchema = v.optional(
-  v.object({
+  v.strictObject({
     actions: v.optional(v.array(v.string())),
     labels: v.optional(v.array(v.string())),
     ignoreActors: v.optional(v.array(v.string())),
@@ -21,12 +21,11 @@ const GitHubFiltersSchema = v.optional(
   })
 );
 
-const GitHubConfigSchema = v.optional(
-  v.object({
-    eventType: GitHubEventTypeSchema,
-    filters: GitHubFiltersSchema,
-  })
-);
+export const GitHubConfigValueSchema = v.strictObject({
+  eventType: GitHubEventTypeSchema,
+  filters: GitHubFiltersSchema,
+});
+const GitHubConfigSchema = v.optional(GitHubConfigValueSchema);
 
 const WebhookFilterValueSchema = v.union([v.string(), v.number(), v.boolean(), v.null_()]);
 

@@ -90,7 +90,7 @@ Authenticated project members can use the same management surface as the UI. Pro
 | `POST`  | `/api/projects/:projectId/triggers/:triggerId/webhook/rotate`     | Rotate and return a replacement token once                         |
 | `GET`   | `/api/projects/:projectId/triggers/:triggerId/webhook/deliveries` | Read paginated redacted delivery metadata                          |
 
-The MCP `create_trigger` tool remains cron-only. Use the UI or authenticated REST API for webhook creation and credential operations so the one-time token is handled explicitly.
+The MCP `create_trigger` tool supports cron and GitHub triggers. Use the UI or authenticated REST API for webhook creation and credential operations so the one-time token is handled explicitly.
 
 ## Runtime Configuration
 

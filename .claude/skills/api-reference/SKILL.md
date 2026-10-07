@@ -209,7 +209,7 @@ Agent profile and skill create/update surfaces accept `resourceRequirements` as 
 
 Trigger create/update accepts `resourceRequirements` or `resourceRequirementsJson` and persists normalized JSON on the trigger layer. Omitted fields inherit lower layers; explicit `null` clears the trigger-layer JSON. Deprecated `vmSizeOverride` remains accepted as `small`, `medium`, `large`, or `null`.
 
-The MCP `create_trigger` tool intentionally creates cron triggers only. Generic webhook creation, incident trigger creation, filter management, preview, and credential rotation use the authenticated UI/REST surface so one-time credentials and private operator configuration can be handled explicitly.
+The MCP `create_trigger` tool creates cron and GitHub triggers in the token’s current project. Omitting `sourceType` defaults to cron for existing callers. For GitHub, use `sourceType: "github"` and `githubConfig: { eventType, filters }` without cron fields; supported events are `issues`, `issue_comment`, `pull_request`, and `push`. `update_trigger` and REST PATCH can replace GitHub event/filter configuration on existing GitHub triggers; send `filters: {}` to clear filters. Cron fields only apply to cron triggers, and source type cannot be changed. Generic webhook creation, incident trigger creation, webhook filter management, preview, and credential rotation use the authenticated UI/REST surface so one-time credentials and private operator configuration can be handled explicitly.
 
 ## VM Communication (Callback Endpoints)
 

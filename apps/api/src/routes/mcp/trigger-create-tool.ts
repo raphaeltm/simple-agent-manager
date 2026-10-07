@@ -1,28 +1,19 @@
-import {
-  DEFAULT_CRON_MIN_INTERVAL_MINUTES,
-  DEFAULT_CRON_TEMPLATE_MAX_LENGTH,
-  DEFAULT_TRIGGER_DEFAULT_MAX_CONCURRENT,
-  DEFAULT_TRIGGER_NAME_MAX_LENGTH,
-} from '@simple-agent-manager/shared';
+import { eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
+import * as v from 'valibot';
 
+import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
-import { parsePositiveInt } from '../../lib/route-helpers';
-import { ulid } from '../../lib/ulid';
-import {
-  cronToHumanReadable,
-  cronToNextFire,
-  validateCronExpression,
-} from '../../services/cron-utils';
+import { AppError } from '../../middleware/error';
+import { CreateTriggerSchema } from '../../schemas/triggers';
+import { cronToHumanReadable } from '../../services/cron-utils';
 import {
   ResourceRequirementsValidationError,
   serializeModernResourceRequirementsInput,
   serializeResourceRequirementsInput,
 } from '../../services/resource-requirements-input';
-import {
-  loadProjectMaxTriggersOverride,
-  resolveMaxTriggersPerProject,
-} from '../../services/trigger-limits';
+import { createTrigger } from '../../services/trigger-create';
 import {
   INVALID_PARAMS,
   jsonRpcError,
@@ -38,214 +29,97 @@ export async function handleCreateTrigger(
   tokenData: McpTokenData,
   env: Env
 ): Promise<JsonRpcResponse> {
-  const maxNameLength = parsePositiveInt(
-    env.TRIGGER_NAME_MAX_LENGTH,
-    DEFAULT_TRIGGER_NAME_MAX_LENGTH
-  );
-  const name =
-    typeof params.name === 'string'
-      ? sanitizeUserInput(params.name.trim()).slice(0, maxNameLength)
-      : '';
-  if (!name) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      'name is required and must be a non-empty string'
-    );
+  const sourceType = params.sourceType === undefined ? 'cron' : params.sourceType;
+  if (sourceType !== 'cron' && sourceType !== 'github') {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'sourceType must be "cron" or "github"');
   }
-
-  const cronExpression =
-    typeof params.cronExpression === 'string' ? params.cronExpression.trim() : '';
-  if (!cronExpression) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'cronExpression is required');
-  }
-
-  const promptTemplate =
-    typeof params.promptTemplate === 'string' ? params.promptTemplate.trim() : '';
-  if (!promptTemplate) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      'promptTemplate is required and must be non-empty'
-    );
-  }
-
-  const maxTemplateLength = parsePositiveInt(
-    env.CRON_TEMPLATE_MAX_LENGTH,
-    DEFAULT_CRON_TEMPLATE_MAX_LENGTH
-  );
-  if (promptTemplate.length > maxTemplateLength) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      `promptTemplate must be ${maxTemplateLength} characters or less`
-    );
-  }
-
-  const minInterval = parsePositiveInt(
-    env.CRON_MIN_INTERVAL_MINUTES,
-    DEFAULT_CRON_MIN_INTERVAL_MINUTES
-  );
-  const cronValidation = validateCronExpression(cronExpression, minInterval);
-  if (!cronValidation.valid) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      `Invalid cron expression: ${cronValidation.error}`
-    );
-  }
-
-  const cronTimezone = typeof params.cronTimezone === 'string' ? params.cronTimezone.trim() : 'UTC';
+  // Keep MCP's modern resource input contract and retired-field compatibility.
+  let resourceRequirementsJson: string | null;
   try {
-    Intl.DateTimeFormat('en-US', { timeZone: cronTimezone });
-  } catch {
-    return jsonRpcError(requestId, INVALID_PARAMS, `Invalid timezone: ${cronTimezone}`);
+    resourceRequirementsJson =
+      params.resourceRequirements !== undefined
+        ? serializeModernResourceRequirementsInput(params.resourceRequirements)
+        : serializeResourceRequirementsInput(
+            params.resourceRequirementsJson,
+            'resourceRequirementsJson'
+          );
+  } catch (error) {
+    if (error instanceof ResourceRequirementsValidationError)
+      return jsonRpcError(requestId, INVALID_PARAMS, error.message);
+    throw error;
   }
-
-  const agentProfileId =
-    typeof params.agentProfileId === 'string' ? params.agentProfileId.trim() : null;
-  if (
-    params.taskMode !== undefined &&
-    params.taskMode !== 'task' &&
-    params.taskMode !== 'conversation'
-  ) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'taskMode must be "task" or "conversation"');
+  const parsed = v.safeParse(CreateTriggerSchema, {
+    ...params,
+    sourceType,
+    name: typeof params.name === 'string' ? sanitizeUserInput(params.name.trim()) : params.name,
+    cronExpression:
+      typeof params.cronExpression === 'string'
+        ? params.cronExpression.trim()
+        : params.cronExpression,
+    cronTimezone:
+      typeof params.cronTimezone === 'string' ? params.cronTimezone.trim() : params.cronTimezone,
+    agentProfileId:
+      typeof params.agentProfileId === 'string'
+        ? params.agentProfileId.trim()
+        : params.agentProfileId,
+    resourceRequirements: undefined,
+    resourceRequirementsJson,
+  });
+  if (!parsed.success) {
+    const issue = parsed.issues[0];
+    const path = issue.path?.map((item) => String(item.key)).join('.') ?? 'input';
+    return jsonRpcError(requestId, INVALID_PARAMS, `${path}: ${issue.message}`);
   }
-  const taskMode = params.taskMode === 'conversation' ? 'conversation' : 'task';
-  if (
-    params.vmSizeOverride !== undefined &&
-    (typeof params.vmSizeOverride !== 'string' ||
-      !['small', 'medium', 'large'].includes(params.vmSizeOverride))
-  ) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      'vmSizeOverride must be "small", "medium", or "large"'
-    );
-  }
-  const vmSizeOverride = typeof params.vmSizeOverride === 'string' ? params.vmSizeOverride : null;
-  let resourceRequirementsJson: string | null = null;
   try {
-    if (params.resourceRequirements !== undefined) {
-      resourceRequirementsJson = serializeModernResourceRequirementsInput(
-        params.resourceRequirements
-      );
-    } else if (params.resourceRequirementsJson !== undefined) {
-      resourceRequirementsJson = serializeResourceRequirementsInput(
-        params.resourceRequirementsJson,
-        'resourceRequirementsJson'
-      );
-    }
-  } catch (err) {
-    if (err instanceof ResourceRequirementsValidationError) {
-      return jsonRpcError(requestId, INVALID_PARAMS, err.message);
-    }
-    throw err;
+    const db = drizzle(env.DATABASE, { schema });
+    const project = await db
+      .select({ id: schema.projects.id, maxTriggers: schema.projects.maxTriggers })
+      .from(schema.projects)
+      .where(eq(schema.projects.id, tokenData.projectId))
+      .get();
+    if (!project) return jsonRpcError(requestId, INVALID_PARAMS, 'Project not found');
+    const { created } = await createTrigger(db, env, project, tokenData.userId, parsed.output);
+    log.info('mcp.create_trigger', {
+      triggerId: created.id,
+      projectId: tokenData.projectId,
+      userId: tokenData.userId,
+      sourceType,
+    });
+    return jsonRpcSuccess(requestId, {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            triggerId: created.id,
+            id: created.id,
+            name: created.name,
+            status: created.status,
+            sourceType: created.sourceType,
+            cronExpression: created.cronExpression,
+            cronTimezone: created.cronTimezone,
+            nextFireAt: created.nextFireAt,
+            promptTemplate: created.promptTemplate,
+            agentProfileId: created.agentProfileId,
+            taskMode: created.taskMode,
+            vmSizeOverride: created.vmSizeOverride,
+            resourceRequirementsJson: created.resourceRequirementsJson,
+            cronHumanReadable: created.cronExpression
+              ? cronToHumanReadable(created.cronExpression, created.cronTimezone ?? 'UTC')
+              : undefined,
+            githubConfig:
+              sourceType === 'github'
+                ? {
+                    eventType: parsed.output.githubConfig?.eventType,
+                    filters: parsed.output.githubConfig?.filters ?? {},
+                  }
+                : undefined,
+          }),
+        },
+      ],
+    });
+  } catch (error) {
+    if (error instanceof AppError && error.statusCode < 500)
+      return jsonRpcError(requestId, INVALID_PARAMS, error.message);
+    throw error;
   }
-
-  if (agentProfileId) {
-    const profileResult = await env.DATABASE.prepare(
-      'SELECT id FROM agent_profiles WHERE id = ? AND project_id = ? LIMIT 1'
-    )
-      .bind(agentProfileId, tokenData.projectId)
-      .first<{ id: string }>();
-    if (!profileResult) {
-      return jsonRpcError(requestId, INVALID_PARAMS, 'agentProfileId not found in this project');
-    }
-  }
-
-  const existingResult = await env.DATABASE.prepare(
-    'SELECT id FROM triggers WHERE project_id = ? AND name = ? LIMIT 1'
-  )
-    .bind(tokenData.projectId, name)
-    .first<{ id: string }>();
-  if (existingResult) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      `Trigger "${name}" already exists in this project`
-    );
-  }
-
-  const projectMaxTriggers = await loadProjectMaxTriggersOverride(
-    env.DATABASE,
-    tokenData.projectId
-  );
-  const maxTriggers = resolveMaxTriggersPerProject(
-    projectMaxTriggers,
-    env.MAX_TRIGGERS_PER_PROJECT
-  );
-  const countResult = await env.DATABASE.prepare(
-    'SELECT COUNT(*) as cnt FROM triggers WHERE project_id = ?'
-  )
-    .bind(tokenData.projectId)
-    .first<{ cnt: number }>();
-  if ((countResult?.cnt ?? 0) >= maxTriggers) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      `Maximum triggers per project (${maxTriggers}) reached`
-    );
-  }
-
-  const triggerId = ulid();
-  const now = new Date().toISOString();
-  const nextFireAt = cronToNextFire(cronExpression, cronTimezone);
-  const humanReadable = cronToHumanReadable(cronExpression, cronTimezone);
-
-  await env.DATABASE.prepare(
-    `INSERT INTO triggers (
-      id, project_id, user_id, name, description, status, source_type,
-      cron_expression, cron_timezone, skip_if_running, prompt_template,
-      agent_profile_id, task_mode, vm_size_override, resource_requirements_json, max_concurrent,
-      next_fire_at, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, NULL, 'active', 'cron', ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  )
-    .bind(
-      triggerId,
-      tokenData.projectId,
-      tokenData.userId,
-      name,
-      cronExpression,
-      cronTimezone,
-      promptTemplate,
-      agentProfileId,
-      taskMode,
-      vmSizeOverride,
-      resourceRequirementsJson,
-      DEFAULT_TRIGGER_DEFAULT_MAX_CONCURRENT,
-      nextFireAt,
-      now,
-      now
-    )
-    .run();
-
-  log.info('mcp.create_trigger', {
-    triggerId,
-    projectId: tokenData.projectId,
-    userId: tokenData.userId,
-    cronExpression,
-    cronTimezone,
-  });
-
-  return jsonRpcSuccess(requestId, {
-    content: [
-      {
-        type: 'text',
-        text: JSON.stringify({
-          triggerId,
-          name,
-          status: 'active',
-          cronExpression,
-          cronTimezone,
-          cronHumanReadable: humanReadable,
-          nextFireAt,
-          promptTemplate,
-          taskMode,
-          vmSizeOverride,
-          resourceRequirementsJson,
-        }),
-      },
-    ],
-  });
 }

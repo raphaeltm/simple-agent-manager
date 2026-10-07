@@ -106,3 +106,25 @@ Tools from a connected MCP server run inside your agent's session, which already
 - **Remote HTTP servers only.** `stdio` servers are not supported: configuring an arbitrary command from a web UI is an unnecessary attack surface, and every major provider is remote-first.
 - **Personal and project scope only.** Attaching a server to a specific agent profile or skill is not yet supported.
 - **Amp exposes the endpoint URL locally.** The Amp harness reaches remote MCP servers through a bridge process that receives the URL and the header names as command-line arguments, so anything running inside that same workspace can read them. The bearer token and header values are not exposed this way. If your endpoint's URL is itself the credential (a pre-signed URL), prefer a different agent for now.
+
+## GitHub automation triggers
+
+Agents can create GitHub event triggers for their current SAM project with `create_trigger`:
+
+```json
+{
+  "name": "Triage new bugs",
+  "sourceType": "github",
+  "githubConfig": {
+    "eventType": "issues",
+    "filters": { "actions": ["opened"], "labels": ["bug"], "ignoreActors": ["dependabot[bot]"] }
+  },
+  "promptTemplate": "Triage {{issue.title}}: {{issue.body}}"
+}
+```
+
+Choose `issues`, `issue_comment`, `pull_request`, or `push`. Filters support `actions`, `labels`, `ignoreActors`, `commandPrefix`, `bodyContains`, `branches`, and `ignoreDrafts`. Your installation must have GitHub event triggers enabled and receive the relevant GitHub App events for the project repository.
+
+Use `agentProfileId` to select a profile in the current project, or omit it to use the project default. Use `update_trigger` with the trigger ID and `githubConfig` to replace the event type and filters. Include the event type on every configuration update; `filters: {}` clears all filters. The trigger's source type cannot be changed.
+
+Cron callers can continue to omit `sourceType` and supply `cronExpression`. GitHub triggers do not take cron schedule fields. Webhook creation and credential operations remain available through the UI or authenticated REST API; these MCP tools do not return webhook secrets.
