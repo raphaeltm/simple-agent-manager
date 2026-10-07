@@ -42,6 +42,17 @@ Boundary guidance and sanctioned Valibot patterns are in
 `.claude/rules/51-runtime-boundary-validation.md`. Current helpers live in
 `apps/api/src/lib/runtime-validation.ts` and `apps/api/src/schemas/_validator.ts`.
 
+## Runtime workflow state
+
+`pnpm quality:runtime-state-files` rejects committed or staged `.do-state.md` and
+`.workflow-state.md` files, including nested files. Untracked state remains visible to
+SAM snapshots, and staged removal of accidentally committed state is allowed.
+
+The guard executes `/usr/bin/git` directly instead of searching inherited `PATH`.
+For another installation, set `SAM_GIT_BINARY` to the absolute path of a trusted Git
+executable, for example `SAM_GIT_BINARY=/opt/homebrew/bin/git pnpm check:fast`.
+Relative paths are rejected. This is a developer/CI script setting, not a deployment secret.
+
 ## Workspace and template coverage
 
 `scripts/quality/workspace-quality-coverage.test.ts` proves that every pnpm workspace has the

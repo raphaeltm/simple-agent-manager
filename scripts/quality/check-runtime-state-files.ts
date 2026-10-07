@@ -1,6 +1,13 @@
 import { execFileSync } from 'node:child_process';
+import { isAbsolute } from 'node:path';
 
-const GIT_BIN = 'git';
+const DEFAULT_GIT_BIN = '/usr/bin/git';
+const GIT_BIN = process.env.SAM_GIT_BINARY ?? DEFAULT_GIT_BIN;
+
+if (!isAbsolute(GIT_BIN)) {
+  console.error('SAM_GIT_BINARY must be an absolute path to a trusted Git executable.');
+  process.exit(1);
+}
 
 const forbiddenRuntimeStatePaths = [':(glob)**/.do-state.md', ':(glob)**/.workflow-state.md'];
 

@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -31,11 +31,12 @@ function makeGitRepo(): string {
   return repo;
 }
 
-function runCheck(repo: string) {
+function runCheck(repo: string, env: NodeJS.ProcessEnv = {}) {
   return spawnSync(process.execPath, [TSX_CLI, SCRIPT], {
     cwd: repo,
     encoding: 'utf8',
     timeout: 30_000,
+    env: { ...process.env, ...env },
   });
 }
 
@@ -49,6 +50,28 @@ afterEach(() => {
 });
 
 describe('runtime state Git contract', () => {
+  it('ignores a Git executable shadowed on PATH', () => {
+    const repo = makeGitRepo();
+    const shadowDir = join(repo, 'shadow-bin');
+    mkdirSync(shadowDir);
+    writeFileSync(join(shadowDir, 'git'), '#!/bin/sh\nexit 77\n', { mode: 0o755 });
+    expect(runCheck(repo, { PATH: `${shadowDir}:${process.env.PATH}` }).status).toBe(0);
+  });
+
+  it('supports an explicitly configured absolute Git executable', () => {
+    const repo = makeGitRepo();
+    const customGit = join(repo, 'configured-git');
+    symlinkSync('/usr/bin/git', customGit);
+    expect(runCheck(repo, { SAM_GIT_BINARY: customGit }).status).toBe(0);
+  });
+
+  it('rejects a relative Git executable override', () => {
+    const repo = makeGitRepo();
+    const result = runCheck(repo, { SAM_GIT_BINARY: 'git' });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('SAM_GIT_BINARY must be an absolute path');
+  });
+
   it('allows local state and includes it in a Git snapshot tree without modifying the real index', () => {
     const repo = makeGitRepo();
     for (const path of runtimePaths) writeState(repo, path);
