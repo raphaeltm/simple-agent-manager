@@ -147,3 +147,8 @@ Credential-free ci-fixture-reconciliation.json recordsfailure/reproduction/corre
 ## Latest-main reconciliation completion supplement
 
 Independent Cloudflare/task-completion review PASS at 883ba85ea6be0cf667fa100dd08cc77f33f1505b before this evidence update. Latest main 57aaa057b0601076cf167896558cb5754c405387 merges cleanly; runtime-contract columns and coordinationChannel coexist, additive nullable migrations 0184/0185/0186 remain distinct. Shared build/API typecheck and seven runtime/recovery/MCP seam files (120 tests) PASS. Runtime validation, scoped snapshot preservation and credential shim remain reviewed production code 8978d3130. Coordinated packaging run 37656801006 at d0d4ddf0d489679e1071a897c8e8663b633e3e1b independently corroborated terminal SUCCESS; final published-head CI, parent merge and production proof remain pending.
+
+
+## Supplemental synthetic-evidence scanner review
+
+Independent security/task-evidence review PASS before archival update: scanner candidate is historical test-count prose only. Current evidence uses readable spaced counts; existing reviewed-baseline policy admits one exact historical synthetic-evidence digest until 2026-11-06, with unchanged headers/groups and no wildcard. Actual matcher rejects changed file, line, bytes and expiry. Checksum-verified CI Gitleaks 8.30.1 current-tree (50 reviewed, 0 new) and PR-range (1 reviewed, 0 new), formatting and diff checks PASS. No production code, authorization, artifact or staging change. Final published-head CI/parent merge/production proof remain pending.
