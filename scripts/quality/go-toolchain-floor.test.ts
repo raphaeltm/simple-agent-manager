@@ -28,8 +28,8 @@ function expectWorkflowUsesPinnedGo(path: string): void {
 }
 
 describe('Go toolchain floor', () => {
-  it('pins patched toolchains without changing source language directives', () => {
-    expectGoModDirectives('packages/vm-agent/go.mod', '1.25.0');
+  it('pins patched toolchains alongside each module source language minimum', () => {
+    expectGoModDirectives('packages/vm-agent/go.mod', '1.26.0');
     expectGoModDirectives('packages/cli/go.mod', '1.24.0');
     expectGoModDirectives('scripts/quality/govulncheck-tool/go.mod', '1.25.0');
   });
