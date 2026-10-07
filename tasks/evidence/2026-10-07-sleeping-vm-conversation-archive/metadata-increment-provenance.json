@@ -21,7 +21,7 @@
   },
   "observedAt": "2026-10-07T15:28:35.473234+00:00",
   "apiVersion": "aaa1ff32-e7f2-4e7f-9c40-25d8e7564ca3",
-  "apiETag": "35c82b7fa0c8a03c160dd6d72cc7ae5c7408bb86029406e5e8385810ccad57a9",
+  "workerCodeETag": "35c82b7fa0c8a03c160dd6d72cc7ae5c7408bb86029406e5e8385810ccad57a9",
   "flags": {
     "ACP_INTERACTION_FORMS_ENABLED": "false",
     "ACP_INTERACTIONS_ENABLED": "false",

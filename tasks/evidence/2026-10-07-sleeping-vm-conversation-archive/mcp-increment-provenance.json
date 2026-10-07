@@ -4,7 +4,7 @@
   "runConclusion": "success including smoke",
   "observedAt": "2026-10-07T14:23:41.565756+00:00",
   "apiVersion": "a2c69be2-a6a3-47e8-8ff4-90037d29f30e",
-  "apiETag": "e081b5d0d9ee9c724e127f42cfbb2a56072698a7b8c4b28b2ca4ed156bfd9ece",
+  "workerCodeETag": "e081b5d0d9ee9c724e127f42cfbb2a56072698a7b8c4b28b2ca4ed156bfd9ece",
   "flags": {
     "ACP_INTERACTION_FORMS_ENABLED": "false",
     "ACP_INTERACTIONS_ENABLED": "false",
