@@ -24,8 +24,8 @@ import { CreateTriggerSchema, jsonValidator, UpdateTriggerSchema } from '../../s
 import { buildCredentialAttributionForTriggers } from '../../services/credential-attribution-health';
 import { cronToNextFire } from '../../services/cron-utils';
 import {
+  assertGitHubTriggerConfigExists,
   githubTriggerConfigUpdate,
-  readGitHubTriggerConfig,
 } from '../../services/github-trigger-config';
 import { parseGitHubTriggerFiltersJson } from '../../services/github-trigger-filter';
 import { getProjectMultiplayerState } from '../../services/project-multiplayer';
@@ -331,7 +331,7 @@ crudRoutes.patch('/:triggerId', jsonValidator(UpdateTriggerSchema), async (c) =>
     );
     if (configError) throw errors.badRequest(configError);
   }
-  if (body.githubConfig) await readGitHubTriggerConfig(db, triggerId);
+  if (body.githubConfig) await assertGitHubTriggerConfigExists(db, triggerId);
   const triggerUpdate = db
     .update(schema.triggers)
     .set(updates)

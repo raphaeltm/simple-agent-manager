@@ -98,6 +98,65 @@ describe('GitHub REST/MCP configuration parity', () => {
       ((await (await request(`/${created.id}`)).json()) as { githubConfig: unknown }).githubConfig
     ).toEqual(config);
   });
+  it('allows metadata reads and updates without a stored config but rejects replacement', async () => {
+    const created = parse(await handleCreateTrigger('1', input, token, env));
+    sqlite.prepare('DELETE FROM github_trigger_configs WHERE trigger_id = ?').run(created.id);
+    expect(
+      parse(await handleUpdateTrigger('2', { triggerId: created.id }, token, env)).githubConfig
+    ).toBeUndefined();
+    expect(
+      parse(await handleUpdateTrigger('3', { triggerId: created.id, name: 'Renamed' }, token, env))
+        .name
+    ).toBe('Renamed');
+    expect(
+      (
+        await handleUpdateTrigger(
+          '4',
+          { triggerId: created.id, githubConfig: input.githubConfig },
+          token,
+          env
+        )
+      ).error?.message
+    ).toContain('GitHub trigger configuration');
+    expect(
+      (await request(`/${created.id}`, 'PATCH', { githubConfig: input.githubConfig })).status
+    ).toBe(404);
+  });
+  it.each(['not-json', '{"labels":42}'])(
+    'reads and repairs malformed stored filters %s',
+    async (filters) => {
+      const created = parse(await handleCreateTrigger('1', input, token, env));
+      const corrupt = () =>
+        sqlite
+          .prepare('UPDATE github_trigger_configs SET filters_json = ? WHERE trigger_id = ?')
+          .run(filters, created.id);
+      corrupt();
+      expect(
+        parse(await handleUpdateTrigger('2', { triggerId: created.id }, token, env)).githubConfig
+          .filters
+      ).toEqual({});
+      expect(
+        parse(
+          await handleUpdateTrigger('3', { triggerId: created.id, name: 'Renamed' }, token, env)
+        ).githubConfig.filters
+      ).toEqual({});
+      const config = { eventType: 'push', filters: { branches: ['main'] } };
+      expect(
+        parse(
+          await handleUpdateTrigger(
+            '4',
+            { triggerId: created.id, githubConfig: config },
+            token,
+            env
+          )
+        ).githubConfig
+      ).toEqual(config);
+      corrupt();
+      const repaired = await request(`/${created.id}`, 'PATCH', { githubConfig: config });
+      expect(repaired.status).toBe(200);
+      expect(((await repaired.json()) as { githubConfig: unknown }).githubConfig).toEqual(config);
+    }
+  );
   it('rejects source-mismatched and malformed REST updates without changing the config', async () => {
     const created = parse(await handleCreateTrigger('1', input, token, env));
     for (const body of [

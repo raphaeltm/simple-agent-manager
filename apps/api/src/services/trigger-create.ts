@@ -113,14 +113,7 @@ export function validateTriggerSourceFields(
     throw errors.badRequest('webhookConfig is only valid for webhook triggers');
 }
 
-export async function createTrigger(
-  db: Database,
-  env: Env,
-  project: Pick<schema.Project, 'id' | 'maxTriggers'>,
-  userId: string,
-  body: v.InferOutput<typeof CreateTriggerSchema>
-) {
-  const projectId = project.id;
+function validateTriggerCreation(env: Env, body: v.InferOutput<typeof CreateTriggerSchema>) {
   const name = body.name.trim();
   const promptTemplate = body.promptTemplate.trim();
   if (!name) throw errors.badRequest('name is required');
@@ -151,6 +144,18 @@ export async function createTrigger(
     );
     if (configError) throw errors.badRequest(configError);
   }
+  return { name, promptTemplate };
+}
+
+export async function createTrigger(
+  db: Database,
+  env: Env,
+  project: Pick<schema.Project, 'id' | 'maxTriggers'>,
+  userId: string,
+  body: v.InferOutput<typeof CreateTriggerSchema>
+) {
+  const projectId = project.id;
+  const { name, promptTemplate } = validateTriggerCreation(env, body);
   await validateReferences(db, projectId, body.agentProfileId, body.skillId);
 
   const [sameName, total] = await Promise.all([

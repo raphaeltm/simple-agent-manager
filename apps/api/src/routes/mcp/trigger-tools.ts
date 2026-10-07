@@ -21,6 +21,7 @@ import {
   validateCronExpression,
 } from '../../services/cron-utils';
 import {
+  assertGitHubTriggerConfigExists,
   parseGitHubTriggerConfig,
   readGitHubTriggerConfig,
 } from '../../services/github-trigger-config';
@@ -60,7 +61,7 @@ export async function handleUpdateTrigger(
       return jsonRpcError(requestId, INVALID_PARAMS, 'sourceType cannot be changed');
     if (params.githubConfig !== undefined) {
       parseGitHubTriggerConfig(params.githubConfig);
-      await readGitHubTriggerConfig(drizzle(env.DATABASE, { schema }), triggerId);
+      await assertGitHubTriggerConfigExists(drizzle(env.DATABASE, { schema }), triggerId);
     }
   } catch (error) {
     if (error instanceof AppError) return jsonRpcError(requestId, INVALID_PARAMS, error.message);

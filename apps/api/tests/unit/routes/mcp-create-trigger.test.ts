@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import type { McpTokenData } from '../../../src/routes/mcp/_helpers';
+import { TRIGGER_TOOLS } from '../../../src/routes/mcp/tool-definitions-trigger-tools';
 import { handleCreateTrigger, handleUpdateTrigger } from '../../../src/routes/mcp/trigger-tools';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 import { seedProjectWithMember, seedUser } from './capacity-pool-test-seeds';
@@ -145,4 +146,18 @@ describe('MCP create_trigger with canonical persistence', () => {
       event_type: 'issues',
     });
   });
+});
+
+// Some tool clients reject union schemas at the tool root before invoking the handler.
+it('advertises an object schema while handlers enforce source-specific requirements', () => {
+  const tool = TRIGGER_TOOLS.find((entry) => entry.name === 'create_trigger')!;
+  expect(tool.inputSchema.type).toBe('object');
+  expect(tool.inputSchema).not.toHaveProperty('anyOf');
+  expect(tool.inputSchema.required).toEqual(['name', 'promptTemplate']);
+  expect(tool.inputSchema.properties).toHaveProperty('githubConfig');
+  expect(tool.inputSchema.properties).toHaveProperty('sourceType.enum', ['cron', 'github']);
+  expect(tool.inputSchema.properties).toHaveProperty(
+    'cronExpression.description',
+    expect.stringContaining('Required when sourceType is cron or omitted')
+  );
 });

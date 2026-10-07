@@ -80,7 +80,7 @@ export const TRIGGER_TOOLS = [
         cronExpression: {
           type: 'string',
           description:
-            'Standard 5-field cron expression (minute hour day month weekday). ' +
+            'Required when sourceType is cron or omitted. Standard 5-field cron expression (minute hour day month weekday). ' +
             'Examples: "0 9 * * *" (daily at 9am), "0 9 * * 1-5" (weekdays at 9am), "*/30 * * * *" (every 30 min)',
         },
         cronTimezone: {
@@ -122,13 +122,6 @@ export const TRIGGER_TOOLS = [
         },
       },
       required: ['name', 'promptTemplate'],
-      anyOf: [
-        { properties: { sourceType: { enum: ['cron'] } }, required: ['cronExpression'] },
-        {
-          properties: { sourceType: { enum: ['github'] } },
-          required: ['sourceType', 'githubConfig'],
-        },
-      ],
       additionalProperties: false,
     },
   },
@@ -162,7 +155,7 @@ export const TRIGGER_TOOLS = [
         cronExpression: {
           type: 'string',
           description:
-            'Standard 5-field cron expression (minute hour day month weekday). ' +
+            'Optional cron-only schedule update. Standard 5-field cron expression (minute hour day month weekday). ' +
             'Changing this recomputes the next fire time for active triggers.',
         },
         cronTimezone: {

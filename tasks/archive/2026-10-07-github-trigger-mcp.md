@@ -27,3 +27,7 @@ apps/api/src/routes/mcp/trigger-create-tool.ts; apps/api/src/routes/mcp/tool-def
 
 ## Verification
 66 focused unit/integration tests and 8 real Worker MCP dispatch tests passed. Full root lint/typecheck/test/build passed. Local specialist reviews passed; documentation finding corrected (canonical github.* template variables). Staging/PR/merge/deploy remain tracked in PR and .do-state.md. Existing SAM isolated branch reused; task-only push to main rejected by GH013 required Workers check, so task record included in feature PR.
+
+### CodeRabbit follow-up
+
+Removed root input-schema union for MCP client compatibility while retaining source-specific server validation. Separated strict replacement validation from tolerant stored-filter reads and existence checks, permitting malformed-filter repair through REST/MCP. Added repair/read/metadata regression cases. Extracted shared creation validation to reduce Sonar complexity. Follow-up Cloudflare/security and completion reviews passed.
