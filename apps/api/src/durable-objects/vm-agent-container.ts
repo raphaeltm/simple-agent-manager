@@ -13,6 +13,7 @@ import {
   SessionRecoveryAuthorityRevokedError,
   type SessionRecoverySourceTaskGuard,
 } from '../services/session-recovery-authority';
+import { assertSessionRuntimeContractCapability } from '../services/session-runtime-contract';
 import {
   ACTIVE_WORK_KEY,
   type ActiveWorkRuntime,
@@ -894,6 +895,26 @@ export class VmAgentContainer extends Container<Env> {
         config.workspaceId,
         this.env
       );
+      // A new Worker can briefly reach the prior container image during rollout.
+      // Probe this live host before restoring; old decoders ignore unknown contract fields.
+      const capabilityResponse = await this.containerFetch(
+        new Request(
+          `http://localhost:${config.vmAgentPort}/workspaces/${config.workspaceId}/agent-capabilities`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'X-SAM-Node-Id': config.nodeId,
+              'X-SAM-Workspace-Id': config.workspaceId,
+            },
+            signal: AbortSignal.timeout(this.getRuntimeSettings().portReadyTimeoutMs),
+          }
+        ),
+        config.vmAgentPort
+      );
+      if (!capabilityResponse.ok) {
+        return this.degradeRecovery(restoring, 'restore_http', target, capabilityResponse.status);
+      }
+      assertSessionRuntimeContractCapability(await capabilityResponse.json());
       const restoreUrl = new URL(
         `http://localhost:${config.vmAgentPort}/workspaces/${config.workspaceId}/agent-sessions/${context.agentSessionId}/restore`
       );

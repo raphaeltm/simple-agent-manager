@@ -159,7 +159,7 @@ Project event pull loop: create a subscription with the narrowest useful filter,
 
 ### VM Agent direct execution protocol (node-management JWT)
 
-- `GET /workspaces/:workspaceId/agent-capabilities` — Discover VM execution protocol version, durable receipt support, checkpoint-rollover support, and configured timing bounds
+- `GET /workspaces/:workspaceId/agent-capabilities` — Discover VM execution protocol version, durable receipt support, checkpoint-rollover support, configured timing bounds, and `sessionRuntimeContract: { supported: true, version: 1 }`. Contract-aware restore requires this live capability before POST restore.
 - `POST /workspaces/:workspaceId/agent-sessions/:sessionId/start` — Start a session; optional protocol-v1 `deliveryId` durably guards the initial prompt
 - `POST /workspaces/:workspaceId/agent-sessions/:sessionId/prompt` — Send a follow-up; optional protocol-v1 `deliveryId` durably guards agent invocation
 - `GET /workspaces/:workspaceId/agent-sessions/:sessionId/prompt-receipts/:deliveryId` — Reconcile `accepted`, `in_flight`, `completed`, or cross-runtime `ambiguous` delivery state
