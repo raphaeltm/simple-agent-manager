@@ -13,7 +13,7 @@ A webhook lets another service send SAM an event and start an agent task. It nee
 
 ## How the one-time handoff works
 
-When an agent creates a webhook with MCP, SAM returns the webhook address and a short-lived claim URL. The claim URL is not the webhook credential. To redeem it, the request must come from the same user, project, workspace, and chat or agent session that created it, and that user must still have permission to manage project tasks. The claim expires after ten minutes by default and can be used once.
+When an agent creates a webhook with MCP, SAM returns the webhook address and a short-lived claim URL. The claim URL is not the webhook credential. To redeem it, the request must come from the same user, project, workspace, and originating session that created it, and that user must still have permission to manage project tasks. The claim expires after ten minutes by default and can be used once.
 
 The agent can make an authenticated `POST` from the workspace and pipe the response directly into a secret manager that accepts input from standard input. This Bash example stores the credential in a Cloudflare Worker secret. Replace the final command with the secret store you use:
 
@@ -23,13 +23,16 @@ set -o pipefail
 : "${SAM_MCP_TOKEN:?Set the workspace MCP token first}"
 CLAIM_URL='<webhookClaim.claimUrl>'
 
-curl --fail --silent --show-error --request POST \
+if ! curl --fail --silent --show-error --request POST \
   --config <(printf 'header = "Authorization: Bearer %s"\n' "$SAM_MCP_TOKEN") \
   "$CLAIM_URL" | (
     IFS= read -r secret || test -n "$secret"
     [[ "$secret" =~ ^sam_wh_[A-Za-z0-9_-]{43}$ ]] || exit 1
     printf '%s' "$secret" | wrangler secret put SAM_WEBHOOK_TOKEN --name my-worker
-  )
+  ); then
+  printf '%s\n' 'Claim redemption or secret storage failed. Create a fresh webhook credential.' >&2
+  exit 1
+fi
 ```
 
 `pipefail` makes the pipeline fail if either the request or secret store fails. The check rejects an empty or unexpected response before the secret store is updated. The credential goes to the store's standard input, not to chat or an MCP tool result.
