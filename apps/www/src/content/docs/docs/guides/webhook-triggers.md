@@ -90,7 +90,30 @@ Authenticated project members can use the same management surface as the UI. Pro
 | `POST`  | `/api/projects/:projectId/triggers/:triggerId/webhook/rotate`     | Rotate and return a replacement token once                         |
 | `GET`   | `/api/projects/:projectId/triggers/:triggerId/webhook/deliveries` | Read paginated redacted delivery metadata                          |
 
-The MCP `create_trigger` tool supports cron and GitHub triggers. Use the UI or authenticated REST API for webhook creation and credential operations so the one-time token is handled explicitly.
+## Creating Webhooks through MCP
+
+Use `create_trigger` with `sourceType: "webhook"`, an explicit project-local `agentProfileId`, and `webhookConfig` (for example `{ "sourceLabel": "build", "filters": [] }`). The result includes the trigger ID and `webhookClaim` containing `claimUrl`, `expiresAt`, and the ingress endpoint. The credential never appears in the MCP response.
+
+Redeem from the originating workspace/session with its existing `SAM_MCP_TOKEN`. No SAM CLI installation is needed. The URL alone grants no access. An authenticated POST succeeds once; GET, HEAD, expired claims, and replays cannot retrieve the token. The default lifetime is ten minutes. Current project write membership is checked again at redemption.
+
+Pipe the response into a secret command accepting stdin. This Bash example keeps authentication out of curl's process arguments and rejects empty input before updating a Cloudflare Worker secret:
+
+```bash
+set +x
+set -o pipefail
+CLAIM_URL='<webhookClaim.claimUrl>'
+curl --fail --silent --show-error --request POST \
+  --config <(printf 'header = "Authorization: Bearer %s"\n' "$SAM_MCP_TOKEN") \
+  "$CLAIM_URL" | (
+    IFS= read -r secret || test -n "$secret"
+    [[ "$secret" =~ ^sam_wh_[A-Za-z0-9_-]{43}$ ]] || exit 1
+    printf '%s' "$secret" | wrangler secret put SAM_WEBHOOK_TOKEN --name my-worker
+  )
+```
+
+Check that the pipeline succeeded. Do not print the response, use a model-visible fetch tool, enable tracing or HTTP verbosity, or automatically retry redemption. A lost response cannot be recovered: rotate through the UI/REST API, or delete the unused trigger and create a replacement. Rotation invalidates pending claims immediately. The recipient sends `Authorization: Bearer <stored token>` to the returned ingress endpoint.
+
+This implements webhook delivery; a general sensitive-input or ACP framework remains future work.
 
 ## Runtime Configuration
 

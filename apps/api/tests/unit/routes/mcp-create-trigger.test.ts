@@ -41,6 +41,24 @@ describe('MCP create_trigger with canonical persistence', () => {
   const content = (result: Awaited<ReturnType<typeof handleCreateTrigger>>) =>
     JSON.parse((result.result as { content: { text: string }[] }).content[0].text);
 
+  it('rejects MCP webhook creation while public ingress is disabled', async () => {
+    env.WEBHOOK_TRIGGERS_ENABLED = 'false';
+    const result = await handleCreateTrigger(
+      '1',
+      {
+        name: 'Webhook',
+        sourceType: 'webhook',
+        agentProfileId: 'profile',
+        promptTemplate: 'Handle webhook',
+        webhookConfig: {},
+      },
+      token,
+      env
+    );
+    expect(result.error?.message).toContain('Webhook triggers are disabled');
+    expect(sqlite.prepare('SELECT count(*) AS count FROM triggers').get()).toEqual({ count: 0 });
+  });
+
   it('preserves cron callers that omit sourceType and UTC default', async () => {
     const result = await handleCreateTrigger('1', cron, token, env);
     expect(result.error).toBeUndefined();
@@ -106,7 +124,7 @@ describe('MCP create_trigger with canonical persistence', () => {
     ],
     [{ ...github, cronExpression: '0 9 * * *' }, 'only valid for cron'],
     [{ ...cron, githubConfig: github.githubConfig }, 'only valid for github'],
-    [{ ...cron, sourceType: 'webhook' }, 'sourceType'],
+    [{ ...cron, sourceType: 'webhook' }, 'only valid for cron'],
     [{ ...cron, sourceType: 'incident' }, 'sourceType'],
     [{ ...github, agentProfileId: 'foreign' }, 'Agent profile not found'],
   ])('rejects invalid input without persisting: %j', async (params, message) => {
@@ -155,7 +173,11 @@ it('advertises an object schema while handlers enforce source-specific requireme
   expect(tool.inputSchema).not.toHaveProperty('anyOf');
   expect(tool.inputSchema.required).toEqual(['name', 'promptTemplate']);
   expect(tool.inputSchema.properties).toHaveProperty('githubConfig');
-  expect(tool.inputSchema.properties).toHaveProperty('sourceType.enum', ['cron', 'github']);
+  expect(tool.inputSchema.properties).toHaveProperty('sourceType.enum', [
+    'cron',
+    'github',
+    'webhook',
+  ]);
   expect(tool.inputSchema.properties).toHaveProperty(
     'cronExpression.description',
     expect.stringContaining('Required when sourceType is cron or omitted')

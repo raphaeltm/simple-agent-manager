@@ -175,6 +175,7 @@ import {
   handleListTriggers,
   handleUpdateTrigger,
 } from './trigger-tools';
+import { webhookClaimRoutes } from './webhook-claims';
 import {
   handleExposePort,
   handleGetCredentialStatus,
@@ -208,6 +209,8 @@ export const mcpRoutes = new Hono<{ Bindings: Env }>();
 function normalizeRpcId(id: unknown): string | number | null {
   return typeof id === 'string' || typeof id === 'number' ? id : null;
 }
+
+mcpRoutes.route('/', webhookClaimRoutes);
 
 mcpRoutes.post('/', async (c) => {
   // NOSONAR - legacy MCP dispatcher switch is intentionally centralized.
