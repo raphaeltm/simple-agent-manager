@@ -49,6 +49,7 @@ export const PROJECT_EVENT_LIMIT_EXCEEDED = 'PROJECT_EVENT_LIMIT_EXCEEDED';
 export const PROJECT_EVENT_CURSOR_INVALID = 'PROJECT_EVENT_CURSOR_INVALID';
 export const PROJECT_EVENT_ACK_POLICY = 'PROJECT_EVENT_ACK_POLICY';
 export const PROJECT_EVENT_ACK_STATE = 'PROJECT_EVENT_ACK_STATE';
+export const AGENT_MESSAGE_RECIPIENT_UNAVAILABLE = 'AGENT_MESSAGE_RECIPIENT_UNAVAILABLE';
 
 export class ProjectEventNotFoundError extends Error {
   readonly code = PROJECT_EVENT_NOT_FOUND;
@@ -117,5 +118,20 @@ export class ProjectEventAckStateError extends Error {
   constructor(message = 'Delivery cannot be acknowledged in its current state') {
     super(message);
     this.name = 'ProjectEventAckStateError';
+  }
+}
+
+/**
+ * An agent message was refused because its recipient chat cannot be notified.
+ * Nothing was recorded, and resending the same message will not help.
+ */
+export class AgentMessageRecipientUnavailableError extends Error {
+  readonly code = AGENT_MESSAGE_RECIPIENT_UNAVAILABLE;
+
+  constructor(
+    message = 'Recipient cannot be notified: its task no longer owns its chat, or its owner lacks active write access in this project'
+  ) {
+    super(message);
+    this.name = 'AgentMessageRecipientUnavailableError';
   }
 }

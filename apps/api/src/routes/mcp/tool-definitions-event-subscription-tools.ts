@@ -83,7 +83,9 @@ export const PROJECT_EVENT_SUBSCRIPTION_TOOLS = [
   {
     name: 'create_project_event_subscription',
     description:
-      'Create or replay a short-lived ProjectData event subscription owned by the calling task agent. Project, owner, session, task, and agent identity are derived from the MCP token; do not provide projectId or owner. For existing_session_prompt, SAM may wake this same chat later with event IDs only after a matching event materializes; read wakeInstructions in the response, checkpoint local state before ending your turn, and use list_subscription_events/get_event/ack_event_delivery after wake or polling.',
+      'Create or replay a short-lived ProjectData event subscription owned by the calling task agent. Project, owner, session, task, and agent identity are derived from the MCP token; do not provide projectId or owner. For existing_session_prompt, SAM may wake this same chat later with event IDs only after a matching event materializes; read wakeInstructions in the response, checkpoint local state before ending your turn, and use list_subscription_events/get_event/ack_event_delivery after wake or polling. ' +
+      'Waiting on a GitHub PR: filter source "github" with subjectType "pull_request" and subjectId = the PR number for review, review-comment, PR-comment and PR events; CI events (check_run, check_suite, workflow_run) use subjectType "commit" and subjectId = the head SHA. ' +
+      'Only a PR comment waking an idle, live chat has been verified end to end; keep one bounded fallback check (for example gh pr checks) and say when you used it.',
     inputSchema: {
       type: 'object' as const,
       properties: {

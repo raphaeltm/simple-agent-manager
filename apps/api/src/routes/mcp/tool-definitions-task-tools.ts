@@ -183,6 +183,13 @@ export const TASK_LIFECYCLE_TOOLS = [
           description:
             'Mission ID to attach this task to. The task inherits the mission context and can read/write mission state.',
         },
+        coordinationChannel: {
+          type: 'string',
+          description:
+            "Project event channel shared by this feature's agents (lowercase letters, digits, dots, underscores or hyphens). " +
+            'Omit to inherit your own; children and all later descendants inherit it, and their instructions explain how to ' +
+            'publish findings and read or follow the channel. Publish a kickoff first: a channel cannot be followed before its first message.',
+        },
       },
       required: ['description'],
       additionalProperties: false,

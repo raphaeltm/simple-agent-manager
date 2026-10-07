@@ -651,6 +651,42 @@ describe('MCP Orchestration Communication Tools', () => {
       expect(result.error?.message).toContain('direct parent');
     });
 
+    it('cancels a sleeping child without contacting its released runtime', async () => {
+      mockD1ResultSequence([
+        [{
+          id: 'child-001',
+          status: 'sleeping',
+          workspace_id: 'ws-child-001',
+          project_id: 'proj-001',
+          parent_task_id: 'parent-task-001',
+          recovery_source_task_id: 'source-child-001',
+        }],
+        [{
+          id: 'ws-child-001',
+          node_id: null,
+          chat_session_id: 'chat-child-001',
+          status: null,
+        }],
+        [],
+      ]);
+
+      const result = await handleStopSubtask(
+        1,
+        { taskId: 'child-001', reason: 'No longer needed' },
+        parentTokenData,
+        mockEnv as Env
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(mockSendPromptToAgentOnNode).not.toHaveBeenCalled();
+      expect(mockStopAgentSessionOnNode).not.toHaveBeenCalled();
+      expect(mockCleanupTerminalTaskResources).toHaveBeenCalledWith(
+        mockEnv,
+        'child-001',
+        expect.objectContaining({ status: 'cancelled' })
+      );
+    });
+
     it('should stop child without warning when no reason provided', async () => {
       mockD1ResultSequence([
         [
