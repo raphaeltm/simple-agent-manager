@@ -611,6 +611,8 @@ function serializeMcpServers(
 
 /** Optional overrides for agent model and permission mode, resolved from agent profiles. */
 export interface AgentSessionOverrides {
+  /** Values were resolved and persisted by the control plane, including absent defaults. */
+  settingsResolved?: boolean;
   model?: string | null;
   effort?: string | null;
   permissionMode?: string | null;
@@ -638,12 +640,15 @@ export async function startAgentSessionOnNode(
   overrides?: AgentSessionOverrides,
   taskContext?: AgentSessionTaskContext,
   injectedInstructions?: string,
-  options?: GuardedNodeAgentMutationOptions
+  options?: GuardedNodeAgentMutationOptions,
+  acpInteractions?: ReturnType<typeof buildAcpInteractionRuntimeConfig>
 ): Promise<unknown> {
   const body: Record<string, unknown> = {
+    settingsResolved: overrides?.settingsResolved,
     agentType,
     initialPrompt,
-    acpInteractions: buildAcpInteractionRuntimeConfig(env, taskContext?.taskMode),
+    acpInteractions:
+      acpInteractions ?? buildAcpInteractionRuntimeConfig(env, taskContext?.taskMode),
   };
   if (injectedInstructions != null && injectedInstructions !== '') {
     // SAM-injected system instructions delivered as a separate origin="system"

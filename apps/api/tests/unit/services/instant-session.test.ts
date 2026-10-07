@@ -76,6 +76,7 @@ function makeDb(selectResults: unknown[][] = []) {
       select: vi.fn(() => ({
         from: vi.fn(() => ({
           where: vi.fn(() => ({
+            get: vi.fn().mockResolvedValue(null),
             limit: vi
               .fn()
               .mockImplementation(() => Promise.resolve(selectResults[selectIndex++] ?? [])),
@@ -116,7 +117,7 @@ describe('launchInstantSession', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.transitionTaskToTerminal.mockResolvedValue('transitioned');
-    mocks.ulid.mockReturnValueOnce('workspace-1').mockReturnValueOnce('agent-session-1');
+    mocks.ulid.mockReset().mockReturnValueOnce('workspace-1').mockReturnValueOnce('agent-session-1');
     mocks.jwt.signCallbackToken.mockResolvedValue('workspace-callback-token');
     mocks.jwt.signNodeCallbackToken.mockResolvedValue('node-callback-token');
     mocks.jwt.signTerminalToken.mockResolvedValue({ token: 'attachment-terminal-token' });
@@ -280,10 +281,16 @@ describe('launchInstantSession', () => {
       expect.anything(),
       'user-1',
       [{ url: 'https://api.example.com/mcp', token: 'mcp-token', name: 'sam-mcp' }],
-      { model: 'claude-sonnet-4-5-20250929', effort: 'auto' },
+      expect.objectContaining({ model: 'claude-sonnet-4-5-20250929', effort: 'auto', settingsResolved: true, permissionMode: 'bypassPermissions', taskContext: { projectId: 'project-1', taskId: 'task-1', taskMode: 'conversation' } }),
       { projectId: 'project-1', taskId: 'task-1', taskMode: 'conversation' },
-      expect.stringContaining('MUST call')
+      expect.stringContaining('MUST call'),
+      undefined,
+      expect.objectContaining({ enabled: false, protocolVersion: 1, formsEnabled: false, urlsEnabled: false })
     );
+    const persistedContractUpdate = updates.find((update) => Boolean((update as { runtimeContractJson?: string }).runtimeContractJson)) as { runtimeContractJson: string };
+    const persistedContract = JSON.parse(persistedContractUpdate.runtimeContractJson);
+    expect(mocks.nodeAgent.startAgentSessionOnNode.mock.calls[0][8]).toEqual(persistedContract);
+    expect(mocks.nodeAgent.startAgentSessionOnNode.mock.calls[0][12]).toEqual(persistedContract.acpInteractions);
     expect(mocks.nodeAgent.startAgentSessionOnNode.mock.calls[0][4]).toBe('enriched prompt');
     expect(mocks.container.launchVmAgentContainer).toHaveBeenCalledWith(
       expect.anything(),
@@ -316,7 +323,7 @@ describe('launchInstantSession', () => {
   });
 
   it('passes task mode through to task prompt and MCP token context exactly once', async () => {
-    const { db } = makeDb();
+    const { db, updates } = makeDb();
 
     await launchInstantSession(db as never, env, {
       ...baseLaunchInput(),
@@ -352,10 +359,17 @@ describe('launchInstantSession', () => {
       expect.anything(),
       expect.anything(),
       expect.anything(),
-      undefined,
+      expect.objectContaining({ settingsResolved: true, model: null, effort: null, taskContext: { projectId: 'project-1', taskId: 'task-1', taskMode: 'task' } }),
       { projectId: 'project-1', taskId: 'task-1', taskMode: 'task' },
-      expect.anything()
+      expect.anything(),
+      undefined,
+      expect.objectContaining({ formsEnabled: false, urlsEnabled: false, protocolVersion: 1 })
     );
+    const persistedContractUpdate = updates.find((update) => Boolean((update as { runtimeContractJson?: string }).runtimeContractJson)) as { runtimeContractJson: string };
+    const persistedContract = JSON.parse(persistedContractUpdate.runtimeContractJson);
+    expect(persistedContract).toMatchObject({ promptKind: 'task', taskContext: { projectId: 'project-1', taskId: 'task-1', taskMode: 'task' } });
+    expect(mocks.nodeAgent.startAgentSessionOnNode.mock.calls[0][8]).toEqual(persistedContract);
+    expect(mocks.nodeAgent.startAgentSessionOnNode.mock.calls[0][12]).toEqual(persistedContract.acpInteractions);
   });
 
   it('passes GitLab repository metadata to the VM agent create-workspace request', async () => {
@@ -371,6 +385,7 @@ describe('launchInstantSession', () => {
     const { db } = makeDb([[gitlabMetadata]]);
 
     await launchInstantSession(db as never, env, {
+      taskId: 'task-1',
       project: {
         ...project,
         id: 'gitlab-project-1',

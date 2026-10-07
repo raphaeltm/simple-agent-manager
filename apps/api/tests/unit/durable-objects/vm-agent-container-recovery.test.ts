@@ -55,6 +55,8 @@ import {
   RUNTIME_RECOVERY_DEGRADED_MESSAGE,
   type RuntimeRecoveryState,
 } from '../../../src/durable-objects/vm-agent-container-recovery';
+import type { Env } from '../../../src/env';
+import { buildAcpInteractionRuntimeConfig } from '../../../src/services/acp-interaction-runtime-config';
 import { SessionRecoveryAuthorityRevokedError } from '../../../src/services/session-recovery-authority';
 
 const launchConfig = {
@@ -74,6 +76,22 @@ const runtimeContext = {
   chatSessionId: 'chat-1',
   agentSessionId: 'agent-session-1',
   agentType: 'codex',
+  runtimeContract: {
+    version: 1,
+    agentType: 'codex',
+    settingsResolved: true,
+    model: 'gpt-6.1-sol',
+    effort: 'xhigh',
+    permissionMode: 'default',
+    opencodeProvider: null,
+    opencodeBaseUrl: null,
+    promptKind: 'task',
+    taskContext: { projectId: 'project-1', taskId: 'task-1', taskMode: 'task' },
+    acpInteractions: buildAcpInteractionRuntimeConfig(
+      { ACP_INTERACTIONS_ENABLED: 'true' } as Env,
+      'task'
+    ),
+  },
 };
 
 type PrivateContainer = {
@@ -436,6 +454,7 @@ describe('VmAgentContainer snapshot recovery state machine', () => {
       runtime: 'cf-container',
       agentType: 'codex',
       workspaceCallbackToken: 'fresh-workspace-token',
+      runtimeContract: runtimeContext.runtimeContract,
     });
     expect(recoveryMocks.persistRecovering).toHaveBeenCalledWith(
       fake.env,

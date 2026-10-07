@@ -911,6 +911,7 @@ export class VmAgentContainer extends Container<Env> {
             chatSessionId: context.chatSessionId,
             runtime: 'cf-container',
             agentType: context.agentType,
+            runtimeContract: context.runtimeContract,
             workspaceCallbackToken,
           }),
         }),
