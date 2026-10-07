@@ -1,8 +1,11 @@
 import Database from 'better-sqlite3';
+import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
+import { AppError } from '../../src/middleware/error';
+import { crudRoutes } from '../../src/routes/tasks/crud';
 import { ensureSessionRecovery } from '../../src/services/session-recovery';
 import { cancelVmTaskAdmission } from '../../src/services/vm-admission-control';
 import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
@@ -16,6 +19,33 @@ vi.mock('../../src/services/task-runner-do', () => ({
   ensureTaskRunnerStarted: ensureTaskRunnerStartedMock,
   startTaskRunnerDO: startTaskRunnerDOMock,
 }));
+
+vi.mock('../../src/middleware/auth', () => ({
+  requireAuth: () => async (_c: unknown, next: () => Promise<void>) => next(),
+  requireApproved: () => async (_c: unknown, next: () => Promise<void>) => next(),
+  getUserId: () => 'user-1',
+}));
+vi.mock('../../src/services/workspace-cleanup', () => ({
+  cleanupWorkspaceForDeletion: vi.fn(async () => ({ status: 'retry', reason: 'runtime_deletion_unconfirmed' })),
+}));
+vi.mock('../../src/services/project-data', () => ({ recordActivityEvent: vi.fn(async () => undefined) }));
+vi.mock('../../src/services/project-lifecycle-events', () => ({
+  recordTaskLifecycleEventBestEffort: vi.fn(async () => undefined),
+  isLifecycleTaskStatus: () => true,
+}));
+
+async function archive(database: D1Database) {
+  const app = new Hono<{ Bindings: Env }>();
+  app.onError((error, c) => error instanceof AppError
+    ? c.json(error.toJSON(), error.statusCode as never)
+    : c.json({ error: error.message }, 500));
+  app.route('/api/projects/:projectId/tasks', crudRoutes);
+  return app.fetch(new Request('https://api.test/api/projects/project-1/tasks/task-1/close', {
+    method: 'POST',
+  }), { DATABASE: database } as Env, {
+    waitUntil: vi.fn(), passThroughOnException: vi.fn(),
+  } as unknown as ExecutionContext);
+}
 
 function seedStableRecoveryFixture(sqlite: Database.Database): void {
   createAllSchemaTables(sqlite, schema);
@@ -215,6 +245,52 @@ describe('session recovery stable task identity', () => {
       }
     }
   );
+
+  it('rolls back completion if atomic snapshot invalidation fails', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      seedStableRecoveryFixture(sqlite);
+      sqlite.exec(`CREATE TRIGGER reject_archive BEFORE UPDATE OF sleeping_at ON session_snapshots
+        WHEN NEW.sleeping_at IS NULL BEGIN SELECT RAISE(ABORT, 'archive intent unavailable'); END;`);
+      const database = createSqliteD1(sqlite);
+      expect((await archive(database)).status).toBe(500);
+      expect(taskRow(sqlite)).toMatchObject({ status: 'sleeping', workspace_id: 'workspace-1' });
+      expect(sqlite.prepare('SELECT sleeping_at FROM session_snapshots').pluck().get()).toBeTruthy();
+      expect(sqlite.prepare('SELECT COUNT(*) FROM task_status_events').pluck().get()).toBe(0);
+      expect(startTaskRunnerDOMock).not.toHaveBeenCalled();
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it.each(['archive-first', 'claim-first'])('destructive archive fences human recovery (%s)', async (ordering) => {
+    const sqlite = new Database(':memory:');
+    try {
+      seedStableRecoveryFixture(sqlite);
+      const database = createSqliteD1(sqlite);
+      if (ordering === 'archive-first') {
+        expect((await archive(database)).status).toBe(409); // durable cleanup pending
+      } else {
+        const batch = database.batch.bind(database);
+        vi.spyOn(database, 'batch').mockImplementationOnce(async (statements) => {
+          // Recovery claimed the snapshot, but has not yet queued the task.
+          expect(sqlite.prepare('SELECT recovery_status FROM session_snapshots').pluck().get()).toBe('waking');
+          expect((await archive(database)).status).toBe(409);
+          return batch(statements);
+        });
+      }
+      await expect(ensureSessionRecovery({ DATABASE: database } as Env, 'project-1', 'chat-1'))
+        .resolves.toMatchObject({ status: 'unavailable' });
+      expect(taskRow(sqlite)).toMatchObject({ status: 'completed', workspace_id: 'workspace-1' });
+      expect(sqlite.prepare('SELECT chat_session_id FROM workspaces').pluck().get()).toBe('chat-1');
+      expect(sqlite.prepare('SELECT sleeping_at, recovery_attempt_id, manifest_r2_key FROM session_snapshots').get())
+        .toMatchObject({ sleeping_at: null, recovery_attempt_id: null, manifest_r2_key: 'snapshots/chat-1/generation-final/manifest.json' });
+      expect(sqlite.prepare("SELECT COUNT(*) FROM task_status_events WHERE to_status = 'queued'").pluck().get()).toBe(0);
+      expect(startTaskRunnerDOMock).not.toHaveBeenCalled();
+    } finally {
+      sqlite.close();
+    }
+  });
 
   it('does not revive a terminal conversation for an automated wake', async () => {
     const sqlite = new Database(':memory:');

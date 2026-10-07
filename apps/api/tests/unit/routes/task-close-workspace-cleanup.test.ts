@@ -52,7 +52,7 @@ function buildDb(selectResults: unknown[][]) {
     values: vi.fn(() => Promise.resolve()),
   }));
 
-  return { select, update, insert };
+  return { select, update, insert, batch: vi.fn(async () => [[{ id: 'task-close-1' }], []]) };
 }
 
 function createApp() {

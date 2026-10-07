@@ -13,9 +13,11 @@ import {
   count,
   desc,
   eq,
+  exists,
   gte,
   isNull,
   lt,
+  sql,
 } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -745,26 +747,61 @@ crudRoutes.post('/:taskId/close', requireAuth(), requireApproved(), async (c) =>
     throw errors.badRequest(`Task cannot be closed from status '${task.status}'. Must be in_progress, delegated or sleeping.`);
   }
 
+  // Resolve the exact caller-owned workspace before claiming archive intent.
+  // Cleanup revalidates this identity, rather than adopting a later assignment.
+  const [workspace] = task.workspaceId ? await db.select().from(schema.workspaces)
+    .where(and(
+      eq(schema.workspaces.id, task.workspaceId),
+      eq(schema.workspaces.userId, userId),
+      eq(schema.workspaces.projectId, projectId),
+      task.chatSessionId ? eq(schema.workspaces.chatSessionId, task.chatSessionId) : undefined
+    )).limit(1) : [];
+  const archiveChatSessionId = task.chatSessionId ?? workspace?.chatSessionId ?? null;
+
   const now = task.completedAt ?? new Date().toISOString();
 
-  if (task.status !== 'completed') {
-    // Fence wake/assignment/status changes between lookup and terminal transition.
-    const rows = await db.update(schema.tasks)
-      .set({ status: 'completed', completedAt: now, executionStep: null, updatedAt: now })
-      .where(and(
-        eq(schema.tasks.id, taskId),
-        eq(schema.tasks.projectId, projectId),
-        eq(schema.tasks.status, task.status),
-        eq(schema.tasks.updatedAt, task.updatedAt),
-        task.workspaceId === null
-          ? isNull(schema.tasks.workspaceId)
-          : eq(schema.tasks.workspaceId, task.workspaceId)
-      ))
-      .returning({ id: schema.tasks.id });
-    if (rows.length === 0) {
-      throw errors.conflict('Conversation changed while archiving. Refresh and try again.');
-    }
+  const archiveRevision = task.status === 'completed' ? task.updatedAt : now;
 
+  // Fence wake/assignment/status changes between lookup and terminal transition.
+  const [rows] = await db.batch([db.update(schema.tasks)
+    .set({ status: 'completed', completedAt: now, executionStep: null, updatedAt: archiveRevision })
+    .where(and(
+      eq(schema.tasks.id, taskId),
+      eq(schema.tasks.projectId, projectId),
+      eq(schema.tasks.status, task.status),
+      eq(schema.tasks.updatedAt, task.updatedAt),
+      task.workspaceId === null
+        ? isNull(schema.tasks.workspaceId)
+        : eq(schema.tasks.workspaceId, task.workspaceId)
+    ))
+    .returning({ id: schema.tasks.id }),
+    db.update(schema.sessionSnapshots)
+      // Archive is irreversible: revoke both future and already-claimed wakes
+      // in the same transaction as completion, before asynchronous teardown.
+      // Keep object keys/metadata until authorized runtime deletion is proven.
+      .set({ sleepingAt: null, recoveryAttemptId: null })
+      .where(and(
+        eq(schema.sessionSnapshots.projectId, projectId),
+        eq(schema.sessionSnapshots.userId, userId),
+        archiveChatSessionId === null
+          ? sql`0`
+          : eq(schema.sessionSnapshots.chatSessionId, archiveChatSessionId),
+        task.workspaceId === null
+          ? sql`0`
+          : eq(schema.sessionSnapshots.workspaceId, task.workspaceId),
+        exists(db.select({ id: schema.tasks.id }).from(schema.tasks).where(and(
+          eq(schema.tasks.id, taskId),
+          eq(schema.tasks.projectId, projectId),
+          eq(schema.tasks.status, 'completed'),
+          eq(schema.tasks.updatedAt, archiveRevision)
+        )))
+      )),
+  ]);
+  if (rows.length === 0) {
+    throw errors.conflict('Conversation changed while archiving. Refresh and try again.');
+  }
+
+  if (task.status !== 'completed') {
     await appendStatusEvent(db, taskId, task.status as TaskStatus, 'completed', 'user', userId, 'Conversation closed by user');
 
     c.executionCtx.waitUntil(
@@ -808,16 +845,6 @@ crudRoutes.post('/:taskId/close', requireAuth(), requireApproved(), async (c) =>
   // member's compute by archiving their conversation. When the caller does not own the
   // workspace we skip and log, leaving teardown to the node-cleanup sweep.
   if (task.workspaceId) {
-    const [workspace] = await db
-      .select()
-      .from(schema.workspaces)
-      .where(and(
-        eq(schema.workspaces.id, task.workspaceId),
-        eq(schema.workspaces.userId, userId),
-        eq(schema.workspaces.projectId, projectId)
-      ))
-      .limit(1);
-
     if (workspace) {
       const cleanup = await cleanupWorkspaceForDeletion({
         db,

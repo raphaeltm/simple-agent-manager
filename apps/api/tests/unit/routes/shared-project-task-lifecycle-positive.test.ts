@@ -434,10 +434,11 @@ describe('POST /:taskId/close — workspace teardown stays caller-scoped (real S
       id: 'node-conv', userId: MEMBER, name: 'sleeping VM node', runtime: 'vm',
       runtimeTerminationConfirmedAt: '2026-10-07T10:00:00.000Z',
     } as typeof schema.nodes.$inferInsert);
-    for (const [id, session, owner] of [['owned-snapshot', 'session-1', MEMBER], ['other-snapshot', 'session-other', CREATOR]]) {
+    for (const [id, session, owner] of [['owned-snapshot', 'session-1', MEMBER], ['other-snapshot', 'session-other', MEMBER]]) {
       await db().insert(schema.sessionSnapshots).values({
         id, chatSessionId: session, userId: owner, projectId: PROJECT,
-        workspaceId: id === 'owned-snapshot' ? 'ws-conv' : 'ws-other', runtime: 'vm',
+        workspaceId: 'ws-conv', runtime: 'vm',
+        sleepingAt: '2026-10-07T10:00:00.000Z', recoveryAttemptId: `${id}-attempt`,
         status: 'available', homeR2Key: `${id}/home`, wipR2Key: `${id}/wip`,
         manifestR2Key: `${id}/manifest`, expiresAt: '2026-10-14T10:00:00.000Z',
       });
@@ -456,7 +457,8 @@ describe('POST /:taskId/close — workspace teardown stays caller-scoped (real S
     mocks.cleanupWorkspaceForDeletion.mockImplementation(actual.cleanupWorkspaceForDeletion);
     expect((await close()).status).toBe(200);
     expect(sqlite.prepare("SELECT COUNT(*) FROM workspaces WHERE id = 'ws-conv'").pluck().get()).toBe(0);
-    expect(sqlite.prepare('SELECT id FROM session_snapshots').all()).toEqual([{ id: 'other-snapshot' }]);
+    expect(sqlite.prepare('SELECT id, sleeping_at, recovery_attempt_id FROM session_snapshots').all())
+      .toEqual([{ id: 'other-snapshot', sleeping_at: '2026-10-07T10:00:00.000Z', recovery_attempt_id: 'other-snapshot-attempt' }]);
     expect(deleteObjects).toHaveBeenCalledWith(['owned-snapshot/home', 'owned-snapshot/wip', 'owned-snapshot/manifest']);
     expect((await close()).status).toBe(200);
     expect(deleteObjects).toHaveBeenCalledTimes(1);
