@@ -32,7 +32,7 @@ sequenceDiagram
     Sender->>SAM: Send event with stored credential
 ```
 
-The claim check and credential rotation happen together in one database update. If two requests race to redeem the same link, only one receives the credential. A replay, expired claim, or request with the wrong workspace identity gets no credential.
+When the claim is redeemed, SAM creates the webhook credential, stores its keyed hash, and clears the claim in one database update. If two requests race to redeem the same link, only one receives the credential. A replay, expired claim, or request with the wrong workspace identity gets no credential.
 
 ## Why the secret goes straight to a store
 
