@@ -92,7 +92,7 @@ export const TRIGGER_TOOLS = [
           type: 'string',
           description:
             'The prompt sent to the agent each time the trigger fires. ' +
-            'Supports {{variable}} interpolation: {{schedule.time}}, {{schedule.date}}, {{schedule.dayOfWeek}}, {{trigger.name}}, {{project.name}}, {{execution.sequenceNumber}}.',
+            'Supports {{variable}} interpolation: {{schedule.time}}, {{schedule.date}}, {{schedule.dayOfWeek}}, {{trigger.name}}, {{project.name}}, {{execution.sequenceNumber}}. GitHub triggers support {{github.title}}, {{github.body}}, {{github.action}}, {{github.actor}}, and {{github.comment}}.',
         },
         agentProfileId: {
           type: 'string',
@@ -122,6 +122,13 @@ export const TRIGGER_TOOLS = [
         },
       },
       required: ['name', 'promptTemplate'],
+      anyOf: [
+        { properties: { sourceType: { enum: ['cron'] } }, required: ['cronExpression'] },
+        {
+          properties: { sourceType: { enum: ['github'] } },
+          required: ['sourceType', 'githubConfig'],
+        },
+      ],
       additionalProperties: false,
     },
   },

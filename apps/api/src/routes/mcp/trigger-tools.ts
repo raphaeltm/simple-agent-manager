@@ -29,6 +29,7 @@ import {
   serializeModernResourceRequirementsInput,
   serializeResourceRequirementsInput,
 } from '../../services/resource-requirements-input';
+import { clearTriggerPageCaches } from '../../services/trigger-cache';
 import { validateTriggerSourceFields } from '../../services/trigger-create';
 import {
   INVALID_PARAMS,
@@ -371,6 +372,7 @@ export async function handleUpdateTrigger(
     return jsonRpcError(requestId, INVALID_PARAMS, 'Trigger not found in this project');
   }
 
+  clearTriggerPageCaches(tokenData.projectId);
   log.info('mcp.update_trigger', {
     triggerId,
     projectId: tokenData.projectId,

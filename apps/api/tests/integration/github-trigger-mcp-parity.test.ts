@@ -34,7 +34,7 @@ const input = {
     eventType: 'issue_comment',
     filters: { actions: ['created'], commandPrefix: '/sam', bodyContains: 'please' },
   },
-  promptTemplate: 'Review {{comment.body}}',
+  promptTemplate: 'Review {{github.comment}}',
 };
 
 describe('GitHub REST/MCP configuration parity', () => {

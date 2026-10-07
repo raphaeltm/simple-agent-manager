@@ -21,24 +21,19 @@ import { parsePositiveInt, requireRouteParam } from '../../lib/route-helpers';
 import { getAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { CreateTriggerSchema, jsonValidator, UpdateTriggerSchema } from '../../schemas';
-import {
-  buildCredentialAttributionForTriggers,
-  clearCredentialAttributionHealthCache,
-} from '../../services/credential-attribution-health';
+import { buildCredentialAttributionForTriggers } from '../../services/credential-attribution-health';
 import { cronToNextFire } from '../../services/cron-utils';
 import {
   githubTriggerConfigUpdate,
   readGitHubTriggerConfig,
 } from '../../services/github-trigger-config';
 import { parseGitHubTriggerFiltersJson } from '../../services/github-trigger-filter';
-import {
-  clearProjectMultiplayerStateCache,
-  getProjectMultiplayerState,
-} from '../../services/project-multiplayer';
+import { getProjectMultiplayerState } from '../../services/project-multiplayer';
 import {
   ResourceRequirementsValidationError,
   serializeResourceRequirementsInput,
 } from '../../services/resource-requirements-input';
+import { clearTriggerPageCaches } from '../../services/trigger-cache';
 import {
   createTrigger,
   validateCron,
@@ -89,11 +84,6 @@ async function attribution(
       ] as const;
     })
   );
-}
-
-function clearTriggerPageCaches(projectId: string): void {
-  clearCredentialAttributionHealthCache(projectId);
-  clearProjectMultiplayerStateCache(projectId);
 }
 
 function triggerResourceRequirementsJson(body: {

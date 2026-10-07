@@ -119,7 +119,7 @@ Agents can create GitHub event triggers for their current SAM project with `crea
     "eventType": "issues",
     "filters": { "actions": ["opened"], "labels": ["bug"], "ignoreActors": ["dependabot[bot]"] }
   },
-  "promptTemplate": "Triage {{issue.title}}: {{issue.body}}"
+  "promptTemplate": "Triage {{github.title}}: {{github.body}}"
 }
 ```
 

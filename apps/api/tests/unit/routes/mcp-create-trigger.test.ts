@@ -23,7 +23,7 @@ const github = {
     eventType: 'issues',
     filters: { actions: ['opened'], labels: ['bug'], ignoreActors: ['bot'] },
   },
-  promptTemplate: 'Review {{issue.title}}',
+  promptTemplate: 'Review {{github.title}}',
 };
 
 describe('MCP create_trigger with canonical persistence', () => {

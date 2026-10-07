@@ -11,12 +11,12 @@ MCP create_trigger requires a cron expression and always persists cron, so agent
 - Existing cron clients omit sourceType; retain cron as the MCP default.
 
 ## Checklist
-- [ ] Share canonical creation validation/persistence with REST, retain source-specific validation and atomic GitHub writes.
-- [ ] Support MCP sourceType github and eventType/filters; exclude webhook/incident creation and secrets.
-- [ ] Add GitHub config updates to MCP and REST with source-specific checks.
-- [ ] Preserve project/profile scope and existing cron/resource callers.
-- [ ] Add meaningful real-dispatch integration and regression tests.
-- [ ] Update tool descriptions and docs.
+- [x] Share canonical creation validation/persistence with REST, retain source-specific validation and atomic GitHub writes.
+- [x] Support MCP sourceType github and eventType/filters; exclude webhook/incident creation and secrets.
+- [x] Add GitHub config updates to MCP and REST with source-specific checks.
+- [x] Preserve project/profile scope and existing cron/resource callers.
+- [x] Add meaningful real-dispatch integration and regression tests.
+- [x] Update tool descriptions and docs.
 - [ ] Run quality checks, completion/specialist review, staging, CI, CodeRabbit, merge and production verification.
 
 ## Acceptance
@@ -24,3 +24,6 @@ GitHub MCP creation works without cron, stores validated filters, returns no sec
 
 ## References
 apps/api/src/routes/mcp/trigger-create-tool.ts; apps/api/src/routes/mcp/tool-definitions-trigger-tools.ts; apps/api/src/routes/triggers/crud.ts; .claude/rules/25-review-merge-gate.md; apps/api/.claude/rules/32-cf-api-debugging.md.
+
+## Verification
+66 focused unit/integration tests and 8 real Worker MCP dispatch tests passed. Full root lint/typecheck/test/build passed. Local specialist reviews passed; documentation finding corrected (canonical github.* template variables). Staging/PR/merge/deploy remain tracked in PR and .do-state.md. Existing SAM isolated branch reused; task-only push to main rejected by GH013 required Workers check, so task record included in feature PR.

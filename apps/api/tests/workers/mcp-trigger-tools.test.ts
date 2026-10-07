@@ -222,7 +222,7 @@ describe('MCP trigger management tools', () => {
     const args = {
       name: 'GitHub issue triage',
       sourceType: 'github',
-      promptTemplate: 'Triage {{issue.title}}',
+      promptTemplate: 'Triage {{github.title}}',
       githubConfig: {
         eventType: 'issues',
         filters: { actions: ['opened'], labels: ['bug'], ignoreActors: ['bot'] },

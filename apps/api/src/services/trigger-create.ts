@@ -21,6 +21,7 @@ import {
   ResourceRequirementsValidationError,
   serializeResourceRequirementsInput,
 } from './resource-requirements-input';
+import { clearTriggerPageCaches } from './trigger-cache';
 import { resolveMaxTriggersPerProject } from './trigger-limits';
 import { getWebhookTriggerLimits, validateWebhookTriggerConfig } from './webhook-trigger-config';
 import { createWebhookTokenMaterial, webhookConfigValues } from './webhook-trigger-store';
@@ -249,5 +250,6 @@ export async function createTrigger(
 
   const created = await db.select().from(schema.triggers).where(eq(schema.triggers.id, id)).get();
   if (!created) throw errors.internal('Created trigger not found');
+  clearTriggerPageCaches(projectId);
   return { created, webhookToken };
 }
