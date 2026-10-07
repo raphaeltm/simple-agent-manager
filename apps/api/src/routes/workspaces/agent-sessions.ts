@@ -17,6 +17,7 @@ import { getRuntimeLimits } from '../../services/limits';
 import { buildSessionMcpServers } from '../../services/mcp-connection-resolution';
 import { generateMcpToken, revokeMcpToken, storeMcpToken } from '../../services/mcp-token';
 import { createAgentSessionOnNode, stopAgentSessionOnNode } from '../../services/node-agent';
+import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
 import { isSleepingContainerNode } from '../../services/sleeping-container-runtime';
 import { requireRepositoryOwnerAccess } from '../projects/_helpers';
 import {
@@ -94,7 +95,71 @@ agentSessionRoutes.post(
 
     const node = await getOwnedNode(db, workspace.nodeId, userId);
     assertNodeOperational(node, 'create agent session');
+    // This route creates directly on an existing workspace and bypasses the
+    // scheduler's required-version placement check.
+    if (
+      node.runtime === 'vm' &&
+      !isNodeAgentVersionCompatible(node.agentVersion, c.env.VM_AGENT_REQUIRED_VERSION)
+    ) {
+      throw errors.conflict('Workspace node is running an incompatible VM agent build');
+    }
     await requireWorkspaceAgentGitHubAccess(c.env, db, workspace, userId);
+
+    // A manually created workspace session can bind a project profile before
+    // agent selection. Runtime-assets lookup then uses this exact session ID;
+    // a profile from another project cannot supply its environment marker.
+    let profileAgentType: string | null = null;
+    const profileId = body.agentProfileId?.trim();
+    const requestedAgentType = body.agentType?.trim() || null;
+    if (body.agentProfileId !== undefined && !profileId) {
+      throw errors.badRequest('Agent profile ID must not be empty');
+    }
+    if (profileId) {
+      if (!workspace.projectId) {
+        throw errors.badRequest('Agent profile requires a project workspace');
+      }
+      const [profile] = await db
+        .select({ id: schema.agentProfiles.id, agentType: schema.agentProfiles.agentType })
+        .from(schema.agentProfiles)
+        .where(
+          and(
+            eq(schema.agentProfiles.id, profileId),
+            eq(schema.agentProfiles.projectId, workspace.projectId)
+          )
+        )
+        .limit(1);
+      if (!profile) {
+        throw errors.notFound('Agent profile');
+      }
+      if (requestedAgentType && requestedAgentType !== profile.agentType) {
+        throw errors.badRequest('Agent type does not match selected profile');
+      }
+      profileAgentType = profile.agentType;
+    }
+
+    // Manual project workspaces are task-backed. Only the exact linked
+    // conversation task may enable URL/form interactions on this direct-create
+    // path; a chatSessionId by itself is not a task-mode authorization.
+    let interactionTaskMode: 'conversation' | undefined;
+    if (workspace.projectId && workspace.chatSessionId) {
+      const [conversationTask] = await db
+        .select({ id: schema.tasks.id, taskMode: schema.tasks.taskMode })
+        .from(schema.tasks)
+        .where(
+          and(
+            eq(schema.tasks.workspaceId, workspace.id),
+            eq(schema.tasks.projectId, workspace.projectId),
+            eq(schema.tasks.userId, userId),
+            eq(schema.tasks.chatSessionId, workspace.chatSessionId),
+            eq(schema.tasks.taskMode, 'conversation'),
+            eq(schema.tasks.status, 'in_progress')
+          )
+        )
+        .limit(1);
+      if (conversationTask?.taskMode === 'conversation') {
+        interactionTaskMode = 'conversation';
+      }
+    }
 
     const existingRunning = await db
       .select({ id: schema.agentSessions.id })
@@ -122,7 +187,8 @@ agentSessionRoutes.post(
       userId,
       status: 'running',
       label: body.label?.trim() || null,
-      agentType: body.agentType?.trim() || null,
+      agentType: profileAgentType ?? requestedAgentType,
+      agentProfileId: profileId ?? null,
       worktreePath: body.worktreePath?.trim() || null,
       createdAt: now,
       updatedAt: now,
@@ -178,7 +244,9 @@ agentSessionRoutes.post(
         userId,
         workspace.chatSessionId,
         workspace.projectId,
-        mcpServers
+        mcpServers,
+        undefined,
+        interactionTaskMode
       );
     } catch (err) {
       if (mcpToken) {

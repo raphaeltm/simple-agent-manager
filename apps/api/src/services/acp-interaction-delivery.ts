@@ -146,7 +146,7 @@ export async function deliverAcpInteractionAnswer(
     ) {
       return { outcome: 'interrupted', reason: 'runtime permission bridge unsupported' };
     }
-    if (input.kind === 'url') {
+    if (input.kind === 'url' && !capabilities.interactions.urlBridge) {
       return { outcome: 'interrupted', reason: 'runtime URL bridge unsupported' };
     }
     if (input.kind === 'form' && !capabilities.interactions.formBridge) {

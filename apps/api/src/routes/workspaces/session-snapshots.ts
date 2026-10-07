@@ -14,6 +14,7 @@ import {
   generateSessionSnapshotDirectUploadUrl,
   sessionSnapshotDirectUploadAvailable,
 } from '../../services/session-snapshot-direct-upload';
+import { sessionSnapshotRestoreResponse } from '../../services/session-snapshot-restore-response';
 import {
   ensureSessionSnapshotUploadRelay,
   resolveSessionSnapshotUploadTargets,
@@ -626,24 +627,7 @@ sessionSnapshotRoutes.get('/:id/session-snapshot/restore', async (c) => {
   if (!snapshot) {
     return c.json({ available: false, reason: 'snapshot_missing_or_unavailable' });
   }
-
-  return c.json({
-    available: true,
-    status: snapshot.status,
-    degradation: snapshot.degradation,
-    baseCommit: snapshot.baseCommit,
-    manifest: snapshot.manifestJson ? JSON.parse(snapshot.manifestJson) : null,
-    config: getSessionSnapshotConfig(c.env),
-    download: {
-      home: snapshot.homeR2Key
-        ? `/api/workspaces/${workspaceId}/session-snapshot/artifacts/home?chatSessionId=${encodeURIComponent(chatSessionId)}`
-        : null,
-      wip: snapshot.wipR2Key
-        ? `/api/workspaces/${workspaceId}/session-snapshot/artifacts/wip?chatSessionId=${encodeURIComponent(chatSessionId)}`
-        : null,
-      manifest: `/api/workspaces/${workspaceId}/session-snapshot/artifacts/manifest?chatSessionId=${encodeURIComponent(chatSessionId)}`,
-    },
-  });
+  return c.json(sessionSnapshotRestoreResponse(c.env, workspaceId, chatSessionId, snapshot));
 });
 
 sessionSnapshotRoutes.get('/:id/session-snapshot/artifacts/:artifact', async (c) => {

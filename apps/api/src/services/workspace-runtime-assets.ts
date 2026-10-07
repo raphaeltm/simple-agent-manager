@@ -15,6 +15,10 @@ import {
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
+// This staging-only process selector must originate from the validated session
+// profile, never from project or skill assets merged into the runtime env.
+const codexC2CandidateEnv = 'SAM_CODEX_C2_CANDIDATE';
+
 export interface RuntimeAssetContextInput {
   workspaceId: string;
   agentSessionId?: string | null;
@@ -143,12 +147,7 @@ async function validateSkillId(
   const rows = await db
     .select({ id: schema.skills.id })
     .from(schema.skills)
-    .where(
-      and(
-        eq(schema.skills.id, skillId),
-        eq(schema.skills.projectId, workspace.projectId)
-      )
-    )
+    .where(and(eq(schema.skills.id, skillId), eq(schema.skills.projectId, workspace.projectId)))
     .limit(1);
   if (!rows[0]) {
     throw errors.forbidden('Skill is not valid for workspace');
@@ -267,10 +266,17 @@ export async function getWorkspaceRuntimeAssets(
     ? await getSkillRuntimeAssets(db, context.skillId, workspace.userId, encryptionKey)
     : { envVars: [], files: [] };
   const mergedAssets = mergeRuntimeAssetRows(projectAssets, profileAssets, skillAssets);
+  const profileCandidate =
+    context.source === 'agent-session'
+      ? profileAssets.envVars.find((item) => item.key === codexC2CandidateEnv)
+      : undefined;
 
   return {
     workspaceId: workspace.id,
-    envVars: mergedAssets.envVars,
+    envVars: [
+      ...mergedAssets.envVars.filter((item) => item.key !== codexC2CandidateEnv),
+      ...(profileCandidate ? [profileCandidate] : []),
+    ],
     files: mergedAssets.files,
   };
 }

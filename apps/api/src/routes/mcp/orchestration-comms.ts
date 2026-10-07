@@ -123,6 +123,14 @@ export async function handleSendMessageToSubtask(
     });
   }
 
+  if (resolution.task.status === 'sleeping') {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'Sleeping targets require durable prompt delivery to be enabled'
+    );
+  }
+
   const messageId = await persistOrchestrationPrompt({
     env,
     projectId: resolution.task.projectId,

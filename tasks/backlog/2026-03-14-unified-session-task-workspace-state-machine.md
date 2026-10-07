@@ -1,5 +1,7 @@
 # Unified Session/Task/Workspace State Machine
 
+> **Reconciliation 2026-10-05:** Pointer correction only. The 2026-09-30 block cites `session-sleep-execution.ts:367` for the sleep-time ACP `interrupted` call; #2223 moved it to `apps/api/src/services/session-sleep-teardown.ts:316-333`. Gap 5 is still open: the stop paths update `chat_sessions` only (`apps/api/src/durable-objects/project-data/sessions.ts:290-312`).
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** every cascade except gap 5 (paths under `apps/api/src/` unless noted).

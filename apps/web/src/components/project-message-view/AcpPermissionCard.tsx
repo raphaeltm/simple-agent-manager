@@ -117,7 +117,7 @@ function PermissionStatusHeader({
       </span>
       <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-x-3 gap-y-1">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <h3 className="break-words text-sm font-semibold text-fg-primary">{title}</h3>
+          <h3 className="min-w-0 max-w-full [overflow-wrap:anywhere] text-sm font-semibold text-fg-primary">{title}</h3>
           <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${badgeClass}`}>
             {status.label}
           </span>

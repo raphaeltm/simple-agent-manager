@@ -640,6 +640,70 @@ What changed since the last audit:
 Next actions, in order. These are human-gated production operations, not code:
 
 1. Decide on the #2161 rollback trigger (revert the interval to 3600000, or keep 18 minutes).
+   Status 2026-10-03: the nightly billing agent set it to 3600000 (#2216) and it was reverted to
+   1080000 the same day; the 18-minute cadence stays.
 2. Abandon or retry the failed/poisoned migrations first. Closing the breaker while `156046f1`,
    `5ed87b67` and `ff721a49` are still failed risks re-poisoning it at once.
 3. Close SAM's breaker from Admin → Storage (phone-usable, PR #2135).
+   Status 2026-10-03 (prod D1, read-only): `156046f1` and `6d6f3099` were operator-abandoned
+   2026-10-02 16:28Z and the breaker was closed 16:29Z; SAM archives resumed at 16:33Z.
+
+## Incident — 2026-10-02: the root object hit the hard 10 GiB cap
+
+Read-only production D1 evidence:
+
+- `project_data_storage_telemetry`: `database_size_bytes = 10,737,418,240` (exactly 10 GiB) at
+  09:34:29Z, still exactly that at 10:04:17Z. Daily growth after the breaker opened on 09-27:
+  +218, +171, +210 MB/day (10.03 GB at 09-28 16:37Z, 10.63 GB at 10-01 16:39Z).
+- First `PROJECT_DATA_STORAGE_FULL` 507 at 09:28:58Z (`GET .../sessions/ws`), then
+  `tasks/submit` (507), workspace sleep (500), `GET .../sessions/:id/state` (507), and the
+  admin abandon of `6d6f3099` (500, `Exceeded the maximum database size.`).
+- Breaker closed from the admin UI at 09:35:34Z; the 09:51:50Z sweep picked `156046f1`, failed
+  on the full object, poisoned it, and re-opened the breaker.
+
+Why nothing in-app could recover it: the archive drain, migration abandon and tool-payload
+cleanup all insert bookkeeping before freeing anything, and the alarm grouped/FTS cleanup
+refuses at >= `PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_UNSAFE_RATIO` (0.98) of the configured
+10^10 limit, i.e. since about Sep 3, at 91% of the real cap.
+
+Relief shipped: superadmin `POST /api/admin/project-data/storage/:projectId/grouped-fts-wall-recovery`
+(branch `claude/friendly-planck-qziggg`), which prunes grouped/FTS search rows delete-first.
+Staging verification was skipped on Raphaël's explicit instruction for this emergency; the
+at-cap behaviour is proven by the first bounded production call.
+
+## Reconciliation — 2026-10-05 (weekly queue audit)
+
+**Verdict: stays active, now recovering on its own.** The headline criterion (at or below
+9,000,000,000 bytes) is still unmet, but the size is falling for the first time since the breaker
+opened on 2026-09-27, and none of the 2026-09-30 next actions is still waiting on a human.
+
+Measured 2026-10-05 (read-only production D1 `sam-prod`):
+
+- `project_data_storage_telemetry`: **9,719,410,688 bytes** at 05:15Z (usage ratio 0.9719, status
+  `degraded`). That is 90.5% of the hard 10 GiB cap.
+- Daily 16:40Z samples from `project_data_storage_telemetry_history`: 10.627 GB (10-01),
+  10.267 GB (10-02), 10.213 GB (10-03), 9.842 GB (10-04). Overnight 10-05 the hourly samples fall
+  by 12 to 15 MB an hour. At 250 to 370 MB a day, the 9.0 GB target is about two to three days out.
+- `project_data_archive_circuit_breakers`: SAM's breaker is **`closed`** ("Closed from admin UI",
+  updated 2026-10-02 16:29Z).
+- SAM archive migrations: 452 `published`, 47 `frozen`, and **0** `failed`, `poisoned` or in
+  flight. Publishes per day: 14 (10-02), 40 (10-03), 59 (10-04), 17 by 05:52Z on 10-05. The global
+  sweep (`archive_sharding_global_sweep`) last finished `succeeded`, with 0 budget stalls.
+
+What changed since 2026-09-30:
+
+- The root object hit the hard cap on 10-02 (see the incident section above). #2215 shipped the
+  superadmin grouped-FTS wall recovery and freed about 464 MB.
+- The failed and poisoned migrations were abandoned from Admin → Storage and the breaker was
+  closed (10-02 16:28Z to 16:29Z). SAM archives resumed at 16:33Z.
+- #2216 slowed the archive sweep to one hour on 10-03 02:50Z. #2220 restored the 18-minute
+  cadence the same day at 13:27Z, so the #2161 rollback question is settled: keep 18 minutes.
+
+Still open:
+
+1. The headline criterion. Re-measure around 2026-10-08. If the drain flattens before 9.0 GB, the
+   next lever is Slice C below, not another manual relief call.
+2. Slice C (bounded root history indexing) is still unmerged: commit `7868bc894` on
+   `sam/implement-reliable-projectdata-archiving-tc49jm`, now 217 commits behind `main`.
+3. Rebuild grouped FTS rows after the wall recovery:
+   `tasks/backlog/2026-10-02-rebuild-grouped-fts-after-wall-recovery.md`.

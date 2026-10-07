@@ -176,7 +176,9 @@ describe('advanceWorkspaceReady — callback signal handling', () => {
   );
 
   it('returns early if state is null', () => {
-    expect(advanceSection).toContain('if (!state || state.completed) return');
+    expect(advanceSection).toContain(
+      'if (!state || state.completed || state.stepResults.workspaceId !== workspaceId) return'
+    );
   });
 
   it('returns early if DO is completed', () => {
@@ -196,7 +198,7 @@ describe('advanceWorkspaceReady — callback signal handling', () => {
   });
 
   it('persists state after storing callback signal', () => {
-    expect(advanceSection).toContain("this.ctx.storage.put('state', state)");
+    expect(advanceSection).toContain('putTaskRunnerState(this.ctx.storage, state)');
   });
 
   it('fires immediate alarm when DO is at workspace_ready step', () => {
@@ -545,7 +547,9 @@ describe('task-runner-do service bridge', () => {
   });
 
   it('calls stub.advanceWorkspaceReady', () => {
-    expect(serviceSource).toContain('stub.advanceWorkspaceReady(status, errorMessage)');
+    expect(serviceSource).toContain(
+      'stub.advanceWorkspaceReady(status, errorMessage, workspaceId)'
+    );
   });
 
   it('looks up DO by taskId using idFromName', () => {

@@ -56,8 +56,14 @@ func (h *SessionHost) initializeACP(ctx context.Context, agentType string, timeo
 	capabilities := acpsdk.ClientCapabilities{
 		Fs: acpsdk.FileSystemCapabilities{ReadTextFile: true, WriteTextFile: true},
 	}
-	if config := h.acpInteractionConfigSnapshot(); config.Enabled && config.FormsEnabled && config.validate() == nil {
-		capabilities.Elicitation = &acpsdk.ElicitationCapabilities{Form: &acpsdk.ElicitationFormCapabilities{}}
+	if config := h.acpInteractionConfigSnapshot(); config.Enabled && config.validate() == nil && (config.FormsEnabled || config.URLsEnabled) {
+		capabilities.Elicitation = &acpsdk.ElicitationCapabilities{}
+		if config.FormsEnabled {
+			capabilities.Elicitation.Form = &acpsdk.ElicitationFormCapabilities{}
+		}
+		if config.URLsEnabled {
+			capabilities.Elicitation.Url = &acpsdk.ElicitationUrlCapabilities{}
+		}
 	}
 	resp, err := h.acpConn.Initialize(initCtx, acpsdk.InitializeRequest{
 		ProtocolVersion: acpsdk.ProtocolVersionNumber,

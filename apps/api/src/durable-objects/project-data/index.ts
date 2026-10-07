@@ -56,6 +56,7 @@ import * as comments from './comments';
 import { stopTimedOutConversationWorkspaces } from './conversation-timeout';
 import * as durability from './durability-foundation';
 import * as groupedFtsCleanup from './grouped-fts-cleanup';
+import * as groupedFtsWallRecovery from './grouped-fts-wall-recovery';
 import * as ideas from './ideas';
 import * as idleCleanup from './idle-cleanup';
 import * as knowledge from './knowledge';
@@ -437,7 +438,12 @@ export class ProjectData extends DurableObject<Env> {
     const result = sessions.stopSession(this.sql, sessionId);
     if (result) {
       attention.resolveAttentionMarkersByKind(
-        this.sql, sessionId, 'reconciliation_checkin', null, 'human', 'session_stopped'
+        this.sql,
+        sessionId,
+        'reconciliation_checkin',
+        null,
+        'human',
+        'session_stopped'
       );
       activity.recordActivityEventInternal(
         this.sql,
@@ -451,10 +457,10 @@ export class ProjectData extends DurableObject<Env> {
       );
       try {
         materialization.materializeSession(
-      this.sql,
-      sessionId,
-      materialization.resolveMaterializationPassConfig(this.env)
-    );
+          this.sql,
+          sessionId,
+          materialization.resolveMaterializationPassConfig(this.env)
+        );
       } catch (e) {
         log.error('materialize_session_on_stop_failed', { sessionId, error: String(e) });
       }
@@ -487,10 +493,10 @@ export class ProjectData extends DurableObject<Env> {
       // for its new tail each time, not for its whole history.
       try {
         materialization.materializeSession(
-      this.sql,
-      sessionId,
-      materialization.resolveMaterializationPassConfig(this.env)
-    );
+          this.sql,
+          sessionId,
+          materialization.resolveMaterializationPassConfig(this.env)
+        );
       } catch (e) {
         log.error('materialize_session_on_sleep_failed', { sessionId, error: String(e) });
       }
@@ -573,10 +579,10 @@ export class ProjectData extends DurableObject<Env> {
       );
       try {
         materialization.materializeSession(
-      this.sql,
-      sessionId,
-      materialization.resolveMaterializationPassConfig(this.env)
-    );
+          this.sql,
+          sessionId,
+          materialization.resolveMaterializationPassConfig(this.env)
+        );
       } catch (e) {
         log.error('materialize_session_on_fail_failed', { sessionId, error: String(e) });
       }
@@ -804,7 +810,14 @@ export class ProjectData extends DurableObject<Env> {
     taskId: string | null = null,
     createdByUserId: string | null = null
   ): Promise<{ sessions: Record<string, unknown>[]; total: number; hasMore: boolean }> {
-    const result = sessionReads.listSessions(this.sql, status, limit, offset, taskId, createdByUserId);
+    const result = sessionReads.listSessions(
+      this.sql,
+      status,
+      limit,
+      offset,
+      taskId,
+      createdByUserId
+    );
     return {
       sessions: result.sessions.map((s) => this.addBaseDomain(s)),
       total: result.total,
@@ -1035,9 +1048,9 @@ export class ProjectData extends DurableObject<Env> {
   archiveTargetPrepare(
     input: archiveSharding.ArchiveTargetPrepareInput
   ): Promise<archiveSharding.ArchiveTargetPrepareResult> {
-    return this.withArchiveTranscriptLock(async () => this.ctx.storage.transactionSync(() =>
-      archiveSharding.prepareArchiveTarget(this.sql, input)
-    ));
+    return this.withArchiveTranscriptLock(async () =>
+      this.ctx.storage.transactionSync(() => archiveSharding.prepareArchiveTarget(this.sql, input))
+    );
   }
 
   async archiveTargetCommitChunk(
@@ -1058,21 +1071,31 @@ export class ProjectData extends DurableObject<Env> {
   async archiveTargetSeal(
     input: archiveSharding.ArchiveTargetSealInput
   ): Promise<archiveSharding.ArchiveTargetSealResult> {
-    return this.withArchiveTranscriptLock(() => measureArchiveSql(this.sql, input.sessionId, 'target_seal', sql => archiveSharding.sealArchiveTarget(sql, {
-      ...input,
-      hashPageRows: input.hashPageRows ?? this.archiveHashPageRows(),
-    }, this.env)));
+    return this.withArchiveTranscriptLock(() =>
+      measureArchiveSql(this.sql, input.sessionId, 'target_seal', (sql) =>
+        archiveSharding.sealArchiveTarget(
+          sql,
+          {
+            ...input,
+            hashPageRows: input.hashPageRows ?? this.archiveHashPageRows(),
+          },
+          this.env
+        )
+      )
+    );
   }
 
   archiveTargetAbandonSession(
     input: archiveSharding.ArchiveTargetAbandonInput
   ): Promise<archiveSharding.ArchiveTargetAbandonResult> {
-    return this.withArchiveTranscriptLock(async () => this.ctx.storage.transactionSync(() =>
-      archiveSharding.abandonArchiveTargetSession(this.sql, {
-        ...input,
-        hashPageRows: input.hashPageRows ?? this.archiveHashPageRows(),
-      })
-    ));
+    return this.withArchiveTranscriptLock(async () =>
+      this.ctx.storage.transactionSync(() =>
+        archiveSharding.abandonArchiveTargetSession(this.sql, {
+          ...input,
+          hashPageRows: input.hashPageRows ?? this.archiveHashPageRows(),
+        })
+      )
+    );
   }
 
   archiveTargetInspectSession(
@@ -1084,7 +1107,9 @@ export class ProjectData extends DurableObject<Env> {
   async archiveTargetExportChunk(
     input: archiveSharding.ArchiveTargetExportChunkInput
   ): Promise<import('../../project-data-archive/contract').ProjectDataArchiveChunk> {
-    return this.withArchiveTranscriptLock(() => archiveSharding.exportArchiveTargetChunk(this.sql, input, this.env));
+    return this.withArchiveTranscriptLock(() =>
+      archiveSharding.exportArchiveTargetChunk(this.sql, input, this.env)
+    );
   }
 
   archiveTargetMarkRehomeExported(input: {
@@ -1095,9 +1120,11 @@ export class ProjectData extends DurableObject<Env> {
     targetGeneration: number;
     now: number;
   }): Promise<boolean> {
-    return this.withArchiveTranscriptLock(async () => this.ctx.storage.transactionSync(() =>
-      archiveSharding.markArchiveTargetRehomeExported(this.sql, input)
-    ));
+    return this.withArchiveTranscriptLock(async () =>
+      this.ctx.storage.transactionSync(() =>
+        archiveSharding.markArchiveTargetRehomeExported(this.sql, input)
+      )
+    );
   }
 
   archiveTargetGetMessages(
@@ -1109,12 +1136,14 @@ export class ProjectData extends DurableObject<Env> {
     compact: boolean = false,
     order: 'asc' | 'desc' = 'desc'
   ) {
-    return archiveSharding.archiveTargetReadMessages(
-      this.sql,
-      this.env,
-      input,
-      { limit, before, after, roles, compact, order }
-    );
+    return archiveSharding.archiveTargetReadMessages(this.sql, this.env, input, {
+      limit,
+      before,
+      after,
+      roles,
+      compact,
+      order,
+    });
   }
 
   async archiveTargetGetMessageToolContent(input: {
@@ -1943,8 +1972,12 @@ export class ProjectData extends DurableObject<Env> {
   ): Promise<{ id: string; createdAt: number; expiresAt: number | null }> {
     if (opts.kind === 'needs_input' && opts.source === 'request_human_input') {
       attention.resolveAttentionMarkersByKind(
-        this.sql, opts.sessionId, 'reconciliation_checkin', null,
-        'agent', 'human_input_requested'
+        this.sql,
+        opts.sessionId,
+        'reconciliation_checkin',
+        null,
+        'agent',
+        'human_input_requested'
       );
     }
     const result = attention.createAttentionMarker(this.sql, opts);
@@ -2036,6 +2069,10 @@ export class ProjectData extends DurableObject<Env> {
     return count;
   }
 
+  hasPendingSessionHumanInput(sessionId: string, taskId: string, now: number) {
+    return attention.hasPendingHumanInput(this.sql, sessionId, taskId, now);
+  }
+
   getSessionAttentionSummary(sessionId: string) {
     return attention.getAttentionSummary(this.sql, sessionId);
   }
@@ -2061,6 +2098,14 @@ export class ProjectData extends DurableObject<Env> {
       parentSessionId: opts.parentSessionId ?? null,
       forkDepth: opts.forkDepth ?? 0,
     });
+    // A chat page opened before the agent session existed only learns
+    // `agentSessionId` from the initial fetch, so push it: the usage-limit chip,
+    // the ACP id in the header, and resume/recovery all key on it.
+    this.broadcastEvent(
+      'session.updated',
+      { sessionId: opts.chatSessionId, agentSessionId: result.id },
+      opts.chatSessionId
+    );
     return result;
   }
 
@@ -2196,11 +2241,9 @@ export class ProjectData extends DurableObject<Env> {
     const chatSessionId = sessionState.resolveActivityChatSessionId(this.sql, sessionId);
     // The TURN ended; the session lives on and may receive another prompt, so it
     // still wants an idle timer.
-    await sessionActivityReconciliation.publishTurnEnd(
-      this.sessionActivityHooks(),
-      chatSessionId,
-      { kind: 'idle' }
-    );
+    await sessionActivityReconciliation.publishTurnEnd(this.sessionActivityHooks(), chatSessionId, {
+      kind: 'idle',
+    });
     return true;
   }
 
@@ -2339,6 +2382,29 @@ export class ProjectData extends DurableObject<Env> {
     );
     await this.recalculateAlarm();
     return result;
+  }
+
+  /**
+   * Operator wall recovery: prunes grouped/FTS search rows delete-first so it can
+   * run when the object is at its hard storage cap. Synchronous by design; see
+   * `grouped-fts-wall-recovery.ts`. Deliberately does not touch the alarm, whose
+   * scheduling writes are exactly what fails at the cap.
+   */
+  runGroupedFtsWallRecovery(
+    request: groupedFtsWallRecovery.GroupedFtsWallRecoveryRequest
+  ): groupedFtsWallRecovery.GroupedFtsWallRecoveryResult {
+    const recoveryConfig = groupedFtsWallRecovery.resolveGroupedFtsWallRecoveryConfig(this.env);
+    return groupedFtsWallRecovery.runGroupedFtsWallRecovery(
+      this.sql,
+      this.getProjectId(),
+      {
+        ...request,
+        transactionRows: recoveryConfig.transactionRows,
+        transactionBytes: recoveryConfig.transactionBytes,
+      },
+      storageSafety.resolveStorageSafetyConfig(this.env),
+      { transactionSync: (callback) => this.ctx.storage.transactionSync(callback) }
+    );
   }
 
   async runManualToolPayloadCleanup(
@@ -2873,7 +2939,13 @@ export class ProjectData extends DurableObject<Env> {
     limit: number
   ) {
     const normalized = normalizeSearchQuery(query, this.env);
-    return knowledge.searchObservations(this.sql, normalized.query, entityType, minConfidence, limit);
+    return knowledge.searchObservations(
+      this.sql,
+      normalized.query,
+      entityType,
+      minConfidence,
+      limit
+    );
   }
 
   async getRelevantKnowledge(context: string, limit: number) {

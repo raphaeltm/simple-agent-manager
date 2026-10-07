@@ -64,7 +64,7 @@ func (h *SessionHost) requestForm(ctx context.Context, generation string,
 		!config.Enabled || !config.FormsEnabled ||
 		config.validate() != nil || generation == "" || h.config.ProjectID == "" ||
 		h.config.WorkspaceID == "" || h.config.SessionID == "" || h.config.RuntimeIdentity == "" ||
-		h.config.CallbackToken == "" || h.config.ControlPlaneURL == "" {
+		h.callbackToken() == "" || h.config.ControlPlaneURL == "" {
 		slog.Info("acp_interaction.form_cancelled", "reason", "unsupported")
 		return cancelledFormResponse(), nil
 	}
@@ -180,8 +180,10 @@ func (h *SessionHost) requestForm(ctx context.Context, generation string,
 		Action: "accept", Content: result.content}}, nil
 }
 
-// No URL response is generated in C1. C2 owns completion notifications.
 func (c *sessionHostClient) UnstableCreateElicitation(ctx context.Context,
 	params acpsdk.UnstableCreateElicitationRequest) (acpsdk.UnstableCreateElicitationResponse, error) {
+	if params.Url != nil {
+		return c.host.requestURL(ctx, c.interactionGeneration, params)
+	}
 	return c.host.requestForm(ctx, c.interactionGeneration, params)
 }

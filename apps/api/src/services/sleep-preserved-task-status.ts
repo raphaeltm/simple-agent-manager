@@ -77,8 +77,6 @@ export interface SessionSleepAttemptState {
   sleepAfter: string | null;
   sleepStatus: string | null;
   sleepAttempts: number;
-  status: string;
-  captureGeneration: string | null;
 }
 
 /**
@@ -86,12 +84,14 @@ export interface SessionSleepAttemptState {
  * and either terminally failed or failed with its retry budget
  * (`SESSION_SLEEP_MAX_ATTEMPTS`) spent. It mirrors what the sweep will no longer
  * select (`runSessionSleepSweep`): a `failed` row with no retry time is still
- * re-selected while attempts remain — raising the budget re-arms it — and a
- * repairable capture (degraded, or a capture in progress) is retried past the
- * budget. Every writer that ends a sleep episode leaves this shape
- * (`failSessionSnapshotSleepBeforeTeardown`, the selection-time exhaustion,
- * `terminalizeMissingSleepSource`). {@link exhaustedSessionSleepSql} is the same
- * definition in SQL.
+ * re-selected while attempts remain — raising the budget re-arms it. A degraded
+ * or in-flight capture is no longer retried past the budget: the bounded
+ * sleep-failure episode (`session-sleep-episode.ts`) keeps a due retry on every
+ * failure until the sweep falls back to a transcript-and-Git sleep or ends the
+ * episode blocked (`terminal_failed`). Every writer that ends a sleep episode
+ * leaves this shape (`blockSessionSleepEpisode`, the failure writer's terminal
+ * errors, `terminalizeMissingSleepSource`, `retireDeadWorkspaceSleepIntent`).
+ * {@link exhaustedSessionSleepSql} is the same definition in SQL.
  */
 export function isSessionSleepExhausted(
   row: SessionSleepAttemptState,
@@ -99,12 +99,7 @@ export function isSessionSleepExhausted(
 ): boolean {
   if (row.sleepingAt || row.sleepAfter !== null) return false;
   if (row.sleepStatus === TERMINAL_SESSION_SLEEP_STATUS) return true;
-  return (
-    row.sleepStatus === 'failed' &&
-    row.sleepAttempts >= maxSleepAttempts &&
-    row.status !== 'degraded' &&
-    !row.captureGeneration
-  );
+  return row.sleepStatus === 'failed' && row.sleepAttempts >= maxSleepAttempts;
 }
 
 function assertSqlAlias(alias: string): string {
@@ -136,8 +131,6 @@ export function exhaustedSessionSleepSql(
         OR (
           exhausted_sleep.sleep_status = 'failed'
           AND exhausted_sleep.sleep_attempts >= ${assertAttemptBudget(maxSleepAttempts)}
-          AND exhausted_sleep.status != 'degraded'
-          AND exhausted_sleep.capture_generation IS NULL
         )
       )
   )`;

@@ -17,6 +17,7 @@ export const AGENT_ACTIVITY_ACTIVE_TASK_STATUSES = [
   'queued',
   'delegated',
   'in_progress',
+  'sleeping',
 ] as const satisfies readonly TaskStatus[];
 
 const WORKING_EXECUTION_STEPS = new Set<TaskExecutionStep>([

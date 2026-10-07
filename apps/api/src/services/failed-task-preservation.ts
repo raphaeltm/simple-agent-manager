@@ -16,6 +16,7 @@
  * - `cleanupTerminalTaskResources` for `status: 'failed'` without destructive
  *   intent: the VM / standalone-agent failure callback, the task status route and
  *   explicit run cleanup (`cleanupRequestedTaskRun`).
+ * - `stuck-tasks.ts` for classifier-confirmed stalls (not cost kill switches).
  * - `attention-expiry.ts` for expired human-input and SAM check-in markers.
  *
  * Deliberately NOT routed here: explicit archive/delete (`destructiveSessionEnd`,
@@ -172,6 +173,7 @@ async function queueFailedTaskSleepEpisode(
       sleepAfterMs: 0,
       allowIncomplete: true,
       resetAttempts: true,
+      startNewEpisode: true,
     });
   await startEpisode();
   await queueWorkspaceSessionSleep(env, {
@@ -402,6 +404,8 @@ export interface PreservationSnapshotOwner {
   status: string;
   degradation: string;
   captureGeneration: string | null;
+  /** The bounded sleep-failure decision, when the episode ended (`session-sleep-episode.ts`). */
+  sleepFallbackJson: string | null;
   taskId: string | null;
   taskStatus: string | null;
   taskErrorMessage: string | null;
@@ -426,6 +430,7 @@ export async function loadPreservationSnapshotOwner(
       status: schema.sessionSnapshots.status,
       degradation: schema.sessionSnapshots.degradation,
       captureGeneration: schema.sessionSnapshots.captureGeneration,
+      sleepFallbackJson: schema.sessionSnapshots.sleepFallbackJson,
       taskId: schema.tasks.id,
       taskStatus: schema.tasks.status,
       taskErrorMessage: schema.tasks.errorMessage,

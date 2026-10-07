@@ -24,6 +24,7 @@ import {
   surfaceFailedTaskWorkLoss,
 } from './failed-task-preservation';
 import * as projectDataService from './project-data';
+import { parseSessionSleepFallbackRecord } from './session-sleep-episode';
 import { TERMINAL_SESSION_SLEEP_STATUS } from './session-snapshot-sleep-failure';
 import {
   isSessionSleepExhausted,
@@ -123,9 +124,11 @@ async function abandonFailedTaskPreservation(
 
 /**
  * Called by the sleep sweep after a failed or given-up sleep attempt. Acts once the
- * sleep lifecycle has given up (`isSessionSleepExhausted`) — or, for a failed task,
- * once the retry budget is spent even on a repairable capture, which other sleeps
- * keep retrying indefinitely. A capture still inside its budget is left alone.
+ * sleep lifecycle has given up (`isSessionSleepExhausted`): the bounded sleep-failure
+ * episode ended blocked without a recovery point it could fall back to
+ * (`session-sleep-episode.ts`), or a legacy row spent its budget. A failure still
+ * inside the episode is left alone — the episode itself may yet sleep the runtime
+ * through the transcript-and-Git fallback, which preserves more than this release.
  * Completed tasks keep the pre-existing behaviour. Returns true when it released.
  */
 export async function releaseExhaustedFailedTaskPreservation(
@@ -134,15 +137,15 @@ export async function releaseExhaustedFailedTaskPreservation(
 ): Promise<boolean> {
   const owner = failedTaskOwner(await loadPreservationSnapshotOwner(env, input.chatSessionId));
   if (!owner) return false;
-  const maxAttempts = sessionSleepMaxAttempts(env);
-  const budgetSpent =
-    !owner.sleepingAt && owner.sleepStatus === 'failed' && owner.sleepAttempts >= maxAttempts;
-  if (!isSessionSleepExhausted(owner, maxAttempts) && !budgetSpent) return false;
+  if (!isSessionSleepExhausted(owner, sessionSleepMaxAttempts(env))) return false;
+  // A bounded episode that ended blocked kept failing to snapshot; any other terminal
+  // end means the runtime itself was gone.
+  const blocked = parseSessionSleepFallbackRecord(owner.sleepFallbackJson)?.outcome === 'blocked';
   return abandonFailedTaskPreservation(
     env,
     owner,
     input.chatSessionId,
-    owner.sleepStatus === TERMINAL_SESSION_SLEEP_STATUS
+    owner.sleepStatus === TERMINAL_SESSION_SLEEP_STATUS && !blocked
       ? 'snapshot_unavailable'
       : 'snapshot_retry_exhausted'
   );

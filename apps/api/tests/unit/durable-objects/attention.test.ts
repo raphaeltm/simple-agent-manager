@@ -15,6 +15,7 @@ import {
   createAttentionMarker,
   getAttentionSummary,
   getExpiredMarkers,
+  hasPendingHumanInput,
   listActiveAttentionMarkers,
   prepareAttentionAnswer,
   releaseAttentionAnswer,
@@ -45,6 +46,47 @@ describe('Attention Markers Module', () => {
 
   afterEach(() => {
     db.close();
+  });
+
+  describe('human-input watchdog guard', () => {
+    it('ignores resolved, expired, unbounded, other-task and other-session markers', () => {
+      const now = Date.now();
+      for (const [sessionId, taskId, expiresAt] of [
+        ['session-1', 'task-1', now],
+        ['session-1', 'task-1', null],
+        ['session-1', 'other-task', now + 60_000],
+        ['session-2', 'task-1', now + 60_000],
+      ] as const) {
+        createAttentionMarker(sql, {
+          sessionId,
+          taskId,
+          workspaceId: 'ws-1',
+          kind: 'needs_input',
+          source: 'human',
+          expiresAt,
+        });
+      }
+      const resolved = createAttentionMarker(sql, {
+        sessionId: 'session-1',
+        taskId: 'task-1',
+        workspaceId: 'ws-1',
+        kind: 'needs_input',
+        source: 'human',
+        expiresAt: now + 60_000,
+      });
+      resolveAttentionMarkerById(sql, resolved.id, 'answered');
+      expect(hasPendingHumanInput(sql, 'session-1', 'task-1', now)).toBe(false);
+      createAttentionMarker(sql, {
+        sessionId: 'session-1',
+        taskId: null,
+        workspaceId: 'ws-1',
+        kind: 'needs_input',
+        source: 'human',
+        expiresAt: now + 60_000,
+      });
+      expect(hasPendingHumanInput(sql, 'session-1', 'task-1', now)).toBe(true);
+      expect(hasPendingHumanInput(sql, 'session-1', 'task-1', now + 60_000)).toBe(false);
+    });
   });
 
   describe('createAttentionMarker', () => {

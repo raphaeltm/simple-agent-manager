@@ -238,6 +238,19 @@ It counts **managed workspace nodes only** — nodes you brought yourself and de
 not counted and are not capped by it. A separate installation-wide ceiling (`MAX_NODES_PER_USER`,
 10 by default) applies on top, so raising the pool limit past that has no effect.
 
+After an agent update, an older machine can still count toward the limit while being unable to
+accept new work. When that blocks queued work on a managed machine provisioned by a SAM task,
+SAM requests sleep for its persistent sessions.
+Working sessions keep running; idle sessions sleep through the normal bounded snapshot process.
+Existing sleep retries and blocked sessions keep their current state. Once the machine empties,
+normal retention and cleanup free its slot so queued work can use a current machine. SAM does
+not raise the pool limit or rent an extra replacement while the old machine still holds the slot.
+If a session cannot safely sleep, it stays awake and the capacity wait can still expire.
+
+Cancelling queued work revokes its admission authority. A later free slot cannot restart that
+task or provision a machine for it. If cancellation races a new allocation, SAM retires only
+that newly allocated empty machine, preserving occupied hosts and other placement claims.
+
 ## Exhaustion policy: what happens when nothing is available
 
 Providers run out of capacity, regions sell out, and accounts hit server limits. **Exhaustion

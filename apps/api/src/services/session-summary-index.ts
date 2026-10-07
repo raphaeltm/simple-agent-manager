@@ -87,6 +87,7 @@ const SessionSummaryRowSchema = v.object({
   status: v.string(),
   message_count: v.number(),
   started_at: v.number(),
+  last_message_at: v.nullable(v.number()),
   ended_at: v.nullable(v.number()),
   created_at: v.nullable(v.number()),
   updated_at: v.number(),
@@ -99,10 +100,9 @@ const SessionSummaryRowSchema = v.object({
  *
  * Two details here are load-bearing and must not be "simplified":
  *
- *  - `lastMessageAt` comes from `updated_at`, NOT from the `last_message_at`
- *    column. The DO's row mapper sets `lastMessageAt: r.updated_at`, and
- *    `session_summaries` happens to carry both, so reading the intuitively-named
- *    column would make the two paths disagree about ordering.
+ *  - Activity comes from the latest real message, with creation/start time as
+ *    the stable fallback for an empty session. Lifecycle updates still advance
+ *    `updated_at` for D1 sync and therefore cannot be used as activity.
  *  - `cleanupAt` is always null. The DO's LIST query does not join
  *    `idle_cleanup_schedule` (only its single-session `getSession` does), so
  *    null is what the DO path returns here too.
@@ -136,7 +136,7 @@ function mapIndexRow(raw: unknown, baseDomain: string | undefined): Record<strin
     endedAt: row.ended_at,
     createdAt: row.created_at,
     agentCompletedAt: row.agent_completed_at,
-    lastMessageAt: row.updated_at,
+    lastMessageAt: row.last_message_at ?? row.created_at ?? row.started_at,
     isIdle: row.status === 'active' && row.agent_completed_at != null,
     isTerminated: row.status === 'stopped' || row.status === 'failed',
     workspaceUrl:
@@ -224,10 +224,10 @@ async function readIndex(
     db
       .prepare(
         `SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count,
-                started_at, ended_at, created_at, updated_at, agent_completed_at, attention_json
+                started_at, last_message_at, ended_at, created_at, updated_at, agent_completed_at, attention_json
          FROM session_summaries
          WHERE ${whereClause}
-         ORDER BY updated_at DESC
+         ORDER BY COALESCE(last_message_at, created_at, started_at) DESC, id DESC
          LIMIT ? OFFSET ?`
       )
       .bind(...params, query.limit, query.offset)

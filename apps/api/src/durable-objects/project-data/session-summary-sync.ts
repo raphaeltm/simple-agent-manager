@@ -92,10 +92,11 @@ export async function syncSessionSummariesToD1(
         .exec(
           `SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count,
                   started_at, ended_at, created_at, updated_at, agent_completed_at,
-                  COALESCE(
-                    archive_last_message_at,
-                    (SELECT MAX(created_at) FROM chat_messages WHERE session_id = chat_sessions.id)
-                  ) as last_message_at
+                  NULLIF(MAX(
+                    COALESCE(archive_last_message_at, 0),
+                    (SELECT COALESCE(MAX(created_at), 0)
+                     FROM chat_messages WHERE session_id = chat_sessions.id)
+                  ), 0) as last_message_at
            FROM chat_sessions
            WHERE updated_at >= ?
            ORDER BY updated_at DESC
@@ -214,10 +215,11 @@ function readBackfillPage(
 ): Record<string, unknown>[] {
   const select = `SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count,
                          started_at, ended_at, created_at, updated_at, agent_completed_at,
-                         COALESCE(
-                           archive_last_message_at,
-                           (SELECT MAX(created_at) FROM chat_messages WHERE session_id = chat_sessions.id)
-                         ) as last_message_at
+                         NULLIF(MAX(
+                           COALESCE(archive_last_message_at, 0),
+                           (SELECT COALESCE(MAX(created_at), 0)
+                            FROM chat_messages WHERE session_id = chat_sessions.id)
+                         ), 0) as last_message_at
                   FROM chat_sessions`;
   if (coverage?.backfill_cursor_updated_at !== null && coverage?.backfill_cursor_id) {
     const query = `${select}

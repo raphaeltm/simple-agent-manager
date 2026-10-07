@@ -1,0 +1,995 @@
+diff --git a/codex-rs/app-server-protocol/src/protocol/common.rs b/codex-rs/app-server-protocol/src/protocol/common.rs
+index c37c495..7820cc2 100644
+--- a/codex-rs/app-server-protocol/src/protocol/common.rs
++++ b/codex-rs/app-server-protocol/src/protocol/common.rs
+@@ -1976,0 +1977 @@ server_notification_definitions! {
++    McpServerElicitationCompleted => "mcpServer/elicitation/completed" (v2::McpServerElicitationCompletedNotification),
+diff --git a/codex-rs/app-server-protocol/src/protocol/v2/mcp.rs b/codex-rs/app-server-protocol/src/protocol/v2/mcp.rs
+index be16f57..8580c34 100644
+--- a/codex-rs/app-server-protocol/src/protocol/v2/mcp.rs
++++ b/codex-rs/app-server-protocol/src/protocol/v2/mcp.rs
+@@ -408,0 +409,9 @@ impl From<rmcp::model::ElicitationAction> for McpServerElicitationAction {
++#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
++#[serde(rename_all = "camelCase")]
++#[ts(export_to = "v2/")]
++pub struct McpServerElicitationCompletedNotification {
++    pub thread_id: String,
++    pub server_name: String,
++    pub elicitation_id: String,
++}
++
+diff --git a/codex-rs/app-server/src/bespoke_event_handling.rs b/codex-rs/app-server/src/bespoke_event_handling.rs
+index d1b0ab8..a1f8e9b 100644
+--- a/codex-rs/app-server/src/bespoke_event_handling.rs
++++ b/codex-rs/app-server/src/bespoke_event_handling.rs
+@@ -37,0 +38 @@ use codex_app_server_protocol::McpServerElicitationRequestParams;
++use codex_app_server_protocol::McpServerElicitationCompletedNotification;
+@@ -871,0 +873,9 @@ pub(crate) async fn apply_bespoke_event_handling(
++        EventMsg::McpElicitationCompleted(completed) => {
++            outgoing.send_server_notification(ServerNotification::McpServerElicitationCompleted(
++                McpServerElicitationCompletedNotification {
++                    thread_id: conversation_id.to_string(),
++                    server_name: completed.server_name,
++                    elicitation_id: completed.elicitation_id,
++                },
++            )).await;
++        }
+diff --git a/codex-rs/app-server/src/message_processor.rs b/codex-rs/app-server/src/message_processor.rs
+index 9e9a904..6f245bf 100644
+--- a/codex-rs/app-server/src/message_processor.rs
++++ b/codex-rs/app-server/src/message_processor.rs
+@@ -1626,0 +1627 @@ impl MessageProcessor {
++                        client_mcp_extensions.clone(),
+diff --git a/codex-rs/app-server/src/notification_media.rs b/codex-rs/app-server/src/notification_media.rs
+index a3bb780..e5ad7c9 100644
+--- a/codex-rs/app-server/src/notification_media.rs
++++ b/codex-rs/app-server/src/notification_media.rs
+@@ -138,0 +139 @@ pub(crate) fn without_notification_media(notification: ServerNotification) -> Se
++        ServerNotification::McpServerElicitationCompleted(_) => notification,
+diff --git a/codex-rs/app-server/src/request_processors/thread_processor.rs b/codex-rs/app-server/src/request_processors/thread_processor.rs
+index 289cb63..bf972f0 100644
+--- a/codex-rs/app-server/src/request_processors/thread_processor.rs
++++ b/codex-rs/app-server/src/request_processors/thread_processor.rs
+@@ -3677,0 +3678 @@ impl ThreadRequestProcessor {
++                    &client_mcp_extensions,
+@@ -3816,0 +3818 @@ impl ThreadRequestProcessor {
++                    &client_mcp_extensions,
+@@ -4274,0 +4277 @@ impl ThreadRequestProcessor {
++        client_mcp_extensions: &ClientMcpExtensions,
+@@ -4335,0 +4339,3 @@ impl ThreadRequestProcessor {
++            // A rejoining client may clear stale modes but cannot enable new
++            // ones on an active thread. Only an authorized turn owner may do so.
++            existing_thread.restrict_explicit_mcp_elicitation_from_client(client_mcp_extensions);
+diff --git a/codex-rs/app-server/src/request_processors/turn_processor.rs b/codex-rs/app-server/src/request_processors/turn_processor.rs
+index e42e53d..7857e60 100644
+--- a/codex-rs/app-server/src/request_processors/turn_processor.rs
++++ b/codex-rs/app-server/src/request_processors/turn_processor.rs
+@@ -179,0 +180 @@ impl TurnRequestProcessor {
++        client_mcp_extensions: codex_protocol::mcp::ClientMcpExtensions,
+@@ -186,0 +188 @@ impl TurnRequestProcessor {
++            client_mcp_extensions,
+@@ -527,0 +530 @@ impl TurnRequestProcessor {
++        client_mcp_extensions: codex_protocol::mcp::ClientMcpExtensions,
+@@ -650,0 +654,4 @@ impl TurnRequestProcessor {
++        let explicit_mcp_modes = thread
++            .explicit_mcp_elicitation_modes_for_client(&client_mcp_extensions)
++            .await;
++
+@@ -653,0 +661 @@ impl TurnRequestProcessor {
++                    .with_explicit_mcp_elicitation_modes(explicit_mcp_modes)
+diff --git a/codex-rs/cli/src/main.rs b/codex-rs/cli/src/main.rs
+index bdd7771..4380e4f 100644
+--- a/codex-rs/cli/src/main.rs
++++ b/codex-rs/cli/src/main.rs
+@@ -116 +116 @@ use codex_terminal_detection::TerminalName;
+-    version,
++    version = "0.160.0-sam-c2.2",
+diff --git a/codex-rs/codex-mcp/src/client_capabilities.rs b/codex-rs/codex-mcp/src/client_capabilities.rs
+index 582891d..0eac15d 100644
+--- a/codex-rs/codex-mcp/src/client_capabilities.rs
++++ b/codex-rs/codex-mcp/src/client_capabilities.rs
+@@ -7,0 +8 @@ use codex_protocol::mcp::OPENAI_STANDARD_FORM_INPUT_EXTENSION_ID;
++use codex_protocol::mcp::SAM_ACP_EXPLICIT_ELICITATION_EXTENSION_ID;
+@@ -51,0 +53 @@ pub fn client_mcp_extensions(
++                    | SAM_ACP_EXPLICIT_ELICITATION_EXTENSION_ID
+diff --git a/codex-rs/codex-mcp/src/connection_manager_tests.rs b/codex-rs/codex-mcp/src/connection_manager_tests.rs
+index 0152405..e04371a 100644
+--- a/codex-rs/codex-mcp/src/connection_manager_tests.rs
++++ b/codex-rs/codex-mcp/src/connection_manager_tests.rs
+@@ -17,0 +18 @@ use crate::rmcp_client::list_tools_for_client_uncached;
++use crate::runtime::McpRuntime;
+@@ -1000,0 +1002,248 @@ fn full_access_form_input_enabled_router() -> ElicitationRequestRouter {
++#[tokio::test]
++async fn explicit_mcp_opt_in_preserves_reviewer_for_other_policies() {
++    for policy in [
++        AskForApproval::OnRequest,
++        AskForApproval::Granular(GranularApprovalConfig {
++            sandbox_approval: true,
++            rules: true,
++            skill_approval: true,
++            request_permissions: true,
++            mcp_elicitations: true,
++        }),
++    ] {
++        let router = ElicitationRequestRouter::default();
++        router.enable_explicit_mcp_elicitation(true, true);
++        let reviewer = Arc::new(DecliningElicitationReviewer::default());
++        let manager = ElicitationRequestManager::new(
++            test_elicitation_config("server", policy, PermissionProfile::Disabled),
++            Some(reviewer.clone()),
++            None,
++            router,
++        );
++        let (tx_event, rx_event) = async_channel::bounded(1);
++        let sender = manager.make_sender(
++            "server".to_string(),
++            Some(tx_event),
++            &ClientMcpExtensions::default(),
++        );
++        let response = sender(
++            NumberOrString::Number(1),
++            codex_rmcp_client::Elicitation::Mcp(ElicitRequestParams::FormElicitationParams {
++                meta: None,
++                message: "Provide input".to_string(),
++                requested_schema: requested_user_input_schema(),
++            }),
++        )
++        .await
++        .expect("reviewer should resolve request");
++        assert_eq!(response.action, ElicitationAction::Decline);
++        assert_eq!(reviewer.review_count.load(Ordering::SeqCst), 1);
++        assert!(rx_event.try_recv().is_err());
++    }
++}
++
++#[tokio::test]
++async fn explicit_mcp_opt_in_never_policy_still_calls_reviewer() {
++    let router = ElicitationRequestRouter::default();
++    router.enable_explicit_mcp_elicitation(true, true);
++    let reviewer = Arc::new(DecliningElicitationReviewer::default());
++    let manager = ElicitationRequestManager::new(
++        test_elicitation_config("server", AskForApproval::Never, PermissionProfile::Disabled),
++        Some(reviewer.clone()),
++        None,
++        router,
++    );
++    let (tx_event, rx_event) = async_channel::bounded(1);
++    let sender = manager.make_sender(
++        "server".to_string(),
++        Some(tx_event),
++        &ClientMcpExtensions::default(),
++    );
++    let response = sender(
++        NumberOrString::Number(1),
++        codex_rmcp_client::Elicitation::Mcp(ElicitRequestParams::FormElicitationParams {
++            meta: None,
++            message: "Provide input".to_string(),
++            requested_schema: requested_user_input_schema(),
++        }),
++    )
++    .await
++    .expect("reviewer should resolve request");
++    assert_eq!(response.action, ElicitationAction::Decline);
++    assert_eq!(reviewer.review_count.load(Ordering::SeqCst), 1);
++    assert!(rx_event.try_recv().is_err());
++}
++
++#[tokio::test]
++async fn explicit_mcp_opt_in_requires_human_answer_and_resets_to_disabled() {
++    let router = ElicitationRequestRouter::default();
++    router.enable_explicit_mcp_elicitation(true, true);
++    let manager = ElicitationRequestManager::new(
++        test_elicitation_config(
++            "server",
++            AskForApproval::Never,
++            PermissionProfile::default(),
++        ),
++        None,
++        None,
++        router.clone(),
++    );
++    let (tx_event, rx_event) = async_channel::bounded(1);
++    let sender = manager.make_sender(
++        "server".to_string(),
++        Some(tx_event),
++        &ClientMcpExtensions::default(),
++    );
++    let mut pending = tokio::spawn(sender(
++        NumberOrString::Number(1),
++        codex_rmcp_client::Elicitation::Mcp(ElicitRequestParams::FormElicitationParams {
++            meta: None,
++            message: "Provide input".to_string(),
++            requested_schema: requested_user_input_schema(),
++        }),
++    ));
++    let event = tokio::select! {
++        event = rx_event.recv() => event.expect("human input event"),
++        response = &mut pending => panic!("resolved without human input: {response:?}"),
++    };
++    let EventMsg::ElicitationRequest(request) = event.msg else {
++        panic!("expected elicitation request");
++    };
++    let codex_protocol::mcp::RequestId::String(request_id) = request.id else {
++        panic!("expected generated request ID");
++    };
++    router
++        .resolve(
++            "server".to_string(),
++            NumberOrString::String(request_id.into()),
++            ElicitationResponse {
++                action: ElicitationAction::Cancel,
++                content: None,
++                meta: None,
++            },
++        )
++        .await
++        .expect("human cancellation should resolve");
++    assert_eq!(
++        pending
++            .await
++            .expect("task completion")
++            .expect("resolved response")
++            .action,
++        ElicitationAction::Cancel
++    );
++
++    router.enable_explicit_mcp_elicitation(false, false);
++    assert_requested_user_input_is_declined(
++        AskForApproval::Never,
++        PermissionProfile::default(),
++        router,
++    )
++    .await;
++}
++
++#[tokio::test]
++async fn warm_rejoin_can_remove_url_without_enabling_form() {
++    let router = ElicitationRequestRouter::default();
++    router.enable_explicit_mcp_elicitation(false, true);
++    router.restrict_explicit_mcp_elicitation(true, false);
++    let manager = ElicitationRequestManager::new(
++        test_elicitation_config("server", AskForApproval::Never, PermissionProfile::Disabled),
++        None,
++        None,
++        router,
++    );
++    let (tx_event, rx_event) = async_channel::bounded(1);
++    let sender = manager.make_sender(
++        "server".to_string(),
++        Some(tx_event),
++        &ClientMcpExtensions::default(),
++    );
++    let response = sender(
++        NumberOrString::Number(1),
++        codex_rmcp_client::Elicitation::Mcp(ElicitRequestParams::UrlElicitationParams {
++            meta: None,
++            message: "Visit".to_string(),
++            url: "https://example.invalid".to_string(),
++            elicitation_id: "opaque-id".to_string(),
++        }),
++    )
++    .await
++    .expect("URL should decline after opt-out");
++    assert_eq!(response.action, ElicitationAction::Decline);
++    assert!(rx_event.try_recv().is_err());
++}
++
++#[tokio::test]
++async fn explicit_empty_form_is_not_silently_auto_accepted() {
++    let router = ElicitationRequestRouter::default();
++    router.enable_explicit_mcp_elicitation(true, false);
++    let manager = ElicitationRequestManager::new(
++        test_elicitation_config("server", AskForApproval::Never, PermissionProfile::Disabled),
++        None,
++        None,
++        router.clone(),
++    );
++    let (tx_event, rx_event) = async_channel::bounded(1);
++    let sender = manager.make_sender(
++        "server".to_string(),
++        Some(tx_event),
++        &ClientMcpExtensions::default(),
++    );
++    let mut pending = tokio::spawn(sender(
++        NumberOrString::Number(1),
++        codex_rmcp_client::Elicitation::Mcp(ElicitRequestParams::FormElicitationParams {
++            meta: None,
++            message: "Confirm".to_string(),
++            requested_schema: rmcp::model::ElicitationSchema::builder()
++                .build()
++                .expect("empty schema"),
++        }),
++    ));
++    let EventMsg::ElicitationRequest(request) = (tokio::select! {
++        event = rx_event.recv() => event.expect("human confirmation event"),
++        response = &mut pending => panic!("silently resolved empty form: {response:?}"),
++    })
++    .msg
++    else {
++        panic!("expected human confirmation");
++    };
++    let codex_protocol::mcp::RequestId::String(request_id) = request.id else {
++        panic!("generated ID");
++    };
++    router
++        .resolve(
++            "server".to_string(),
++            NumberOrString::String(request_id.into()),
++            ElicitationResponse {
++                action: ElicitationAction::Decline,
++                content: None,
++                meta: None,
++            },
++        )
++        .await
++        .expect("human denial should resolve");
++    assert_eq!(
++        pending
++            .await
++            .expect("task completion")
++            .expect("response")
++            .action,
++        ElicitationAction::Decline
++    );
++}
++
++#[test]
++fn new_mcp_runtime_does_not_inherit_another_threads_opt_in() {
++    let first = McpRuntime::empty(false);
++    let second = McpRuntime::empty(false);
++    first.enable_explicit_mcp_elicitation(true, true);
++    let form = codex_rmcp_client::Elicitation::Mcp(ElicitRequestParams::FormElicitationParams {
++        meta: None,
++        message: "Input".to_string(),
++        requested_schema: requested_user_input_schema(),
++    });
++    assert!(first.explicit_mcp_mode_enabled_for(&form));
++    assert!(!second.explicit_mcp_mode_enabled_for(&form));
++}
++
+@@ -1952,0 +2202,49 @@ fn tool_filter_applies_disabled_list() {
++#[tokio::test]
++async fn explicit_mcp_opt_in_does_not_invoke_disabled_tool() {
++    let approval_policy = Constrained::allow_any(AskForApproval::Never);
++    let permission_profile = Constrained::allow_any(PermissionProfile::Disabled);
++    let mut manager = McpConnectionSet::new_uninitialized(
++        &approval_policy,
++        &permission_profile,
++        true,
++    );
++    let router = ElicitationRequestRouter::default();
++    router.enable_explicit_mcp_elicitation(true, true);
++    manager.elicitation_requests = ElicitationRequestManager::new(
++        test_elicitation_config("server", AskForApproval::Never, PermissionProfile::Disabled),
++        None,
++        None,
++        router,
++    );
++    manager.insert_test_client(
++        "server".to_string(),
++        AsyncManagedClient {
++            client: futures::future::pending::<Result<ManagedClient, StartupOutcomeError>>()
++                .boxed()
++                .shared(),
++            is_codex_apps_mcp_server: false,
++            server_capabilities: Arc::new(std::sync::Mutex::new(None)),
++            cached_server_info: None,
++            codex_apps_tools_cache_context: None,
++            tool_catalog_cache_context: None,
++            startup_complete: Arc::new(AtomicBool::new(false)),
++            startup_reconnect: None,
++            cancel_token: CancellationToken::new(),
++        },
++    );
++    manager
++        .servers
++        .get_mut("server")
++        .expect("server exists")
++        .tool_filter
++        .disabled
++        .insert("blocked".to_string());
++    let result = tokio::time::timeout(
++        std::time::Duration::from_millis(100),
++        manager.call_tool("server", "blocked", None, None, None, None, false),
++    )
++    .await
++    .expect("disabled tool must fail before waiting for a client");
++    assert!(result.expect_err("tool must be denied").to_string().contains("disabled"));
++}
++
+diff --git a/codex-rs/codex-mcp/src/elicitation.rs b/codex-rs/codex-mcp/src/elicitation.rs
+index 9707940..018c934 100644
+--- a/codex-rs/codex-mcp/src/elicitation.rs
++++ b/codex-rs/codex-mcp/src/elicitation.rs
+@@ -7 +7 @@
+-//! Explicit MCP elicitation requests can be surfaced by root and non-root agents.
++//! Explicit MCP input is surfaced only for an opted-in root thread.
+@@ -104,0 +105,2 @@ pub(crate) struct ElicitationRequestRouter {
++    explicit_mcp_form_enabled: Arc<AtomicBool>,
++    explicit_mcp_url_enabled: Arc<AtomicBool>,
+@@ -141,0 +144,29 @@ impl ElicitationRequestRouter {
++    pub(crate) fn enable_explicit_mcp_elicitation(&self, form: bool, url: bool) {
++        self.explicit_mcp_form_enabled
++            .store(form, Ordering::Release);
++        self.explicit_mcp_url_enabled.store(url, Ordering::Release);
++    }
++
++    pub(crate) fn restrict_explicit_mcp_elicitation(&self, form: bool, url: bool) {
++        if !form {
++            self.explicit_mcp_form_enabled
++                .store(false, Ordering::Release);
++        }
++        if !url {
++            self.explicit_mcp_url_enabled
++                .store(false, Ordering::Release);
++        }
++    }
++
++    pub(crate) fn explicit_mcp_mode_enabled_for(&self, elicitation: &Elicitation) -> bool {
++        match elicitation {
++            Elicitation::Mcp(rmcp::model::ElicitRequestParams::FormElicitationParams {
++                ..
++            }) => self.explicit_mcp_form_enabled.load(Ordering::Acquire),
++            Elicitation::Mcp(rmcp::model::ElicitRequestParams::UrlElicitationParams { .. }) => {
++                self.explicit_mcp_url_enabled.load(Ordering::Acquire)
++            }
++            _ => false,
++        }
++    }
++
+@@ -420 +451,9 @@ impl ElicitationRequestManager {
+-                if permission_prompt_is_auto_approved && can_auto_accept_elicitation(&elicitation) {
++                let allow_never_explicit_mcp = approval_policy == AskForApproval::Never
++                    && router.explicit_mcp_mode_enabled_for(&elicitation)
++                    && !elicitation
++                        .meta()
++                        .is_some_and(|meta| meta.contains_key(APPROVAL_KIND_KEY));
++                if permission_prompt_is_auto_approved
++                    && can_auto_accept_elicitation(&elicitation)
++                    && !allow_never_explicit_mcp
++                {
+@@ -452 +491,3 @@ impl ElicitationRequestManager {
+-                    if elicitation_is_rejected_by_policy(approval_policy) {
++                    if elicitation_is_rejected_by_policy(approval_policy)
++                        && !allow_never_explicit_mcp
++                    {
+@@ -467 +508,7 @@ impl ElicitationRequestManager {
+-                            return Ok(response);
++                            // An ACP opt-in still requires an explicit human answer. A
++                            // reviewer may reject it, but cannot silently accept it.
++                            if !allow_never_explicit_mcp
++                                || response.action != ElicitationAction::Accept
++                            {
++                                return Ok(response);
++                            }
+diff --git a/codex-rs/codex-mcp/src/rmcp_client.rs b/codex-rs/codex-mcp/src/rmcp_client.rs
+index f40ca17..1bdf900 100644
+--- a/codex-rs/codex-mcp/src/rmcp_client.rs
++++ b/codex-rs/codex-mcp/src/rmcp_client.rs
+@@ -936,0 +937,2 @@ async fn start_server_task(
++    let completion_events = tx_event.clone();
++    let completion_server_name = server_name.clone();
+@@ -938,0 +941,17 @@ async fn start_server_task(
++    let send_elicitation_complete: codex_rmcp_client::SendElicitationComplete = Box::new(move |elicitation_id| {
++        let tx_event = completion_events.clone();
++        let server_name = completion_server_name.clone();
++        async move {
++            if let Some(tx_event) = tx_event {
++                let _ = tx_event.send(Event {
++                    id: String::new(),
++                    msg: EventMsg::McpElicitationCompleted(
++                        codex_protocol::protocol::McpElicitationCompletedEvent {
++                            server_name,
++                            elicitation_id,
++                        },
++                    ),
++                }).await;
++            }
++        }.boxed()
++    });
+@@ -955 +974 @@ async fn start_server_task(
+-        .initialize(params, startup_timeout, send_elicitation)
++        .initialize_with_completion(params, startup_timeout, send_elicitation, Some(send_elicitation_complete))
+diff --git a/codex-rs/codex-mcp/src/runtime.rs b/codex-rs/codex-mcp/src/runtime.rs
+index 5abfa51..431a475 100644
+--- a/codex-rs/codex-mcp/src/runtime.rs
++++ b/codex-rs/codex-mcp/src/runtime.rs
+@@ -604,0 +605,18 @@ impl McpRuntime {
++    pub fn enable_explicit_mcp_elicitation(&self, form: bool, url: bool) {
++        self.elicitation_router
++            .enable_explicit_mcp_elicitation(form, url);
++    }
++
++    pub fn restrict_explicit_mcp_elicitation(&self, form: bool, url: bool) {
++        self.elicitation_router
++            .restrict_explicit_mcp_elicitation(form, url);
++    }
++
++    pub fn explicit_mcp_mode_enabled_for(
++        &self,
++        elicitation: &codex_rmcp_client::Elicitation,
++    ) -> bool {
++        self.elicitation_router
++            .explicit_mcp_mode_enabled_for(elicitation)
++    }
++
+diff --git a/codex-rs/core/src/codex_thread.rs b/codex-rs/core/src/codex_thread.rs
+index 316af05..fac032c 100644
+--- a/codex-rs/core/src/codex_thread.rs
++++ b/codex-rs/core/src/codex_thread.rs
+@@ -912,0 +913,24 @@ impl CodexThread {
++    /// Bind the explicit human MCP input opt-in to the current owning client.
++    /// Resolve the submitting client's modes without mutating an active turn.
++    pub async fn explicit_mcp_elicitation_modes_for_client(&self, extensions: &ClientMcpExtensions) -> (bool, bool) {
++        let source = self.config_snapshot().await.thread_source;
++        let (form, url) = if self.session_source.is_non_root_agent()
++            || !matches!(source, None | Some(ThreadSource::User))
++        {
++            (false, false)
++        } else {
++            extensions.explicit_mcp_elicitation_modes()
++        };
++        (form, url)
++    }
++
++    /// A warm rejoin may only remove modes from an active thread. Enabling a
++    /// mode waits for the next authorized direct-input turn.
++    pub fn restrict_explicit_mcp_elicitation_from_client(&self, extensions: &ClientMcpExtensions) {
++        let (form, url) = extensions.explicit_mcp_elicitation_modes();
++        self.session
++            .services
++            .mcp_runtime
++            .restrict_explicit_mcp_elicitation(form, url);
++    }
++
+diff --git a/codex-rs/core/src/session/mcp.rs b/codex-rs/core/src/session/mcp.rs
+index 765fe5e..83e34f7 100644
+--- a/codex-rs/core/src/session/mcp.rs
++++ b/codex-rs/core/src/session/mcp.rs
+@@ -754,0 +755,36 @@ impl Session {
++fn guardian_explicit_human_mcp(
++    approval_policy: AskForApproval,
++    mode_enabled: bool,
++    elicitation: &Elicitation,
++) -> bool {
++    approval_policy == AskForApproval::Never
++        && mode_enabled
++        && !elicitation
++            .meta()
++            .is_some_and(|meta| meta.contains_key(MCP_ELICITATION_APPROVAL_KIND_KEY))
++}
++
++fn guardian_empty_form_shortcut_decision(
++    explicit_human_mcp: bool,
++    full_access_or_cua: bool,
++    elicitation: &Elicitation,
++    cancelled: bool,
++) -> Option<ReviewDecision> {
++    if explicit_human_mcp
++        || !full_access_or_cua
++        || !matches!(
++            elicitation,
++            Elicitation::Mcp(rmcp::model::ElicitRequestParams::FormElicitationParams {
++                requested_schema, ..
++            }) if requested_schema.properties.is_empty()
++        )
++    {
++        return None;
++    }
++    Some(if cancelled {
++        ReviewDecision::Abort
++    } else {
++        ReviewDecision::Approved
++    })
++}
++
+@@ -768,0 +805,8 @@ async fn review_guardian_mcp_elicitation(
++    let explicit_human_mcp = guardian_explicit_human_mcp(
++        mcp_config.approval_policy.value(),
++        session
++            .services
++            .mcp_runtime
++            .explicit_mcp_mode_enabled_for(&request.elicitation),
++        &request.elicitation,
++    );
+@@ -783,20 +827,13 @@ async fn review_guardian_mcp_elicitation(
+-    if (user_cua_execution
+-        || turn_context.initial_environments.has_full_access(
+-            turn_context.approval_policy(),
+-            &turn_context
+-                .config
+-                .permissions
+-                .effective_permission_profile(),
+-        ))
+-        && matches!(
+-            &request.elicitation,
+-            Elicitation::Mcp(rmcp::model::ElicitRequestParams::FormElicitationParams {
+-                requested_schema, ..
+-            }) if requested_schema.properties.is_empty()
+-        )
+-    {
+-        let decision = if cancellation_token.is_cancelled() {
+-            ReviewDecision::Abort
+-        } else {
+-            ReviewDecision::Approved
+-        };
++    if let Some(decision) = guardian_empty_form_shortcut_decision(
++        explicit_human_mcp,
++        user_cua_execution
++            || turn_context.initial_environments.has_full_access(
++                turn_context.approval_policy(),
++                &turn_context
++                    .config
++                    .permissions
++                    .effective_permission_profile(),
++            ),
++        &request.elicitation,
++        cancellation_token.is_cancelled(),
++    ) {
+@@ -928,0 +966,6 @@ async fn review_guardian_mcp_elicitation(
++                // The MCP tool call has already been admitted. With an opted-in
++                // human input host, preserve the explicit answer path instead
++                // of treating the command Never policy as a user denial.
++                if explicit_human_mcp {
++                    return Ok(None);
++                }
+diff --git a/codex-rs/core/src/session/mcp_tests.rs b/codex-rs/core/src/session/mcp_tests.rs
+index 28c099f..d576c12 100644
+--- a/codex-rs/core/src/session/mcp_tests.rs
++++ b/codex-rs/core/src/session/mcp_tests.rs
+@@ -42,0 +43,33 @@ fn form_request(meta: Option<RequestMetaObject>) -> ElicitationReviewRequest {
++#[test]
++fn guardian_explicit_input_is_never_only_and_keeps_empty_form_cancellation() {
++    let request = form_request(None);
++    for policy in [AskForApproval::OnRequest, AskForApproval::UnlessTrusted] {
++        assert!(!guardian_explicit_human_mcp(policy, true, &request.elicitation));
++        assert!(matches!(
++            guardian_empty_form_shortcut_decision(false, true, &request.elicitation, false),
++            Some(ReviewDecision::Approved)
++        ));
++        assert!(matches!(
++            guardian_empty_form_shortcut_decision(false, true, &request.elicitation, true),
++            Some(ReviewDecision::Abort)
++        ));
++    }
++    assert!(guardian_explicit_human_mcp(
++        AskForApproval::Never,
++        true,
++        &request.elicitation
++    ));
++    assert!(guardian_empty_form_shortcut_decision(
++        true,
++        true,
++        &request.elicitation,
++        false
++    )
++    .is_none());
++    assert!(!guardian_explicit_human_mcp(
++        AskForApproval::Never,
++        true,
++        &form_request(guardian_meta(None)).elicitation
++    ));
++}
++
+diff --git a/codex-rs/core/src/session/turn.rs b/codex-rs/core/src/session/turn.rs
+index 5b335c2..84d455e 100644
+--- a/codex-rs/core/src/session/turn.rs
++++ b/codex-rs/core/src/session/turn.rs
+@@ -2181,0 +2182 @@ pub(super) fn realtime_text_for_event(msg: &EventMsg) -> Option<RealtimeEventTex
++        EventMsg::McpElicitationCompleted(_) => None,
+diff --git a/codex-rs/core/src/session/turn_input.rs b/codex-rs/core/src/session/turn_input.rs
+index d9a5c6a..150f95f 100644
+--- a/codex-rs/core/src/session/turn_input.rs
++++ b/codex-rs/core/src/session/turn_input.rs
+@@ -286,0 +287 @@ async fn start_or_steer(
++        explicit_mcp_elicitation_modes,
+@@ -347,0 +349,3 @@ async fn start_or_steer(
++            if let Some((form, url)) = explicit_mcp_elicitation_modes {
++                session.services.mcp_runtime.enable_explicit_mcp_elicitation(form, url);
++            }
+diff --git a/codex-rs/core/src/session/turn_input_tests.rs b/codex-rs/core/src/session/turn_input_tests.rs
+index e76b3e2..7bd85a4 100644
+--- a/codex-rs/core/src/session/turn_input_tests.rs
++++ b/codex-rs/core/src/session/turn_input_tests.rs
+@@ -110,0 +111,56 @@ async fn submit_steer_only(
++#[tokio::test]
++async fn active_turn_steer_and_rejected_input_cannot_grant_mcp_modes() {
++    let (session, turn_context, _rx) = make_session_and_context_with_rx().await;
++    session
++        .spawn_task(
++            turn_context,
++            Vec::new(),
++            NeverEndingTask {
++                kind: TaskKind::Regular,
++                listen_to_cancellation_token: true,
++            },
++        )
++        .await;
++    let router = &session.services.mcp_runtime;
++    assert!(!router.explicit_mcp_mode_enabled_for(&codex_rmcp_client::Elicitation::Mcp(
++        rmcp::model::ElicitRequestParams::UrlElicitationParams {
++            meta: None,
++            message: "authorize".to_string(),
++            url: "https://example.test".to_string(),
++            elicitation_id: "test".to_string(),
++        }
++    )));
++    let steer = handle(
++        &session,
++        TurnInputRequest::user_input(vec![UserInput::Text {
++            text: "steer".to_string(),
++            text_elements: Vec::new(),
++        }])
++        .with_explicit_mcp_elicitation_modes((true, true)),
++        TurnInputMode::StartOrSteer,
++        "steer-opt-in".to_string(),
++    )
++    .await
++    .expect("steer submission");
++    assert!(matches!(steer, TurnInputSubmission::Steered { .. }));
++    let rejected = handle(
++        &session,
++        TurnInputRequest::user_input(Vec::new())
++            .with_explicit_mcp_elicitation_modes((true, true)),
++        TurnInputMode::StartOrSteer,
++        "rejected-opt-in".to_string(),
++    )
++    .await
++    .expect("rejected submission");
++    assert!(matches!(rejected, TurnInputSubmission::NotSubmitted { .. }));
++    assert!(!router.explicit_mcp_mode_enabled_for(&codex_rmcp_client::Elicitation::Mcp(
++        rmcp::model::ElicitRequestParams::UrlElicitationParams {
++            meta: None,
++            message: "authorize".to_string(),
++            url: "https://example.test".to_string(),
++            elicitation_id: "test".to_string(),
++        }
++    )));
++    session.abort_all_tasks(TurnAbortReason::Interrupted).await;
++}
++
+diff --git a/codex-rs/core/src/thread_manager.rs b/codex-rs/core/src/thread_manager.rs
+index ba195d8..39bfb40 100644
+--- a/codex-rs/core/src/thread_manager.rs
++++ b/codex-rs/core/src/thread_manager.rs
+@@ -2357,0 +2358,14 @@ impl ThreadManagerState {
++        let (form, url) = if tracked_session_source.is_non_root_agent()
++            || !matches!(thread_source.as_ref(), None | Some(ThreadSource::User))
++        {
++            (false, false)
++        } else {
++            session
++                .services
++                .client_mcp_extensions
++                .explicit_mcp_elicitation_modes()
++        };
++        session
++            .services
++            .mcp_runtime
++            .enable_explicit_mcp_elicitation(form, url);
+diff --git a/codex-rs/protocol/src/mcp.rs b/codex-rs/protocol/src/mcp.rs
+index 3e5c62e..14f47d7 100644
+--- a/codex-rs/protocol/src/mcp.rs
++++ b/codex-rs/protocol/src/mcp.rs
+@@ -32,0 +33,2 @@ pub const OPENAI_STANDARD_FORM_INPUT_EXTENSION_ID: &str = "openai/standard-form-
++/// App-server-only opt-in for explicit MCP elicitation under Never approval.
++pub const SAM_ACP_EXPLICIT_ELICITATION_EXTENSION_ID: &str = "sam/acp-explicit-elicitation";
+@@ -163 +165,4 @@ pub struct McpResourceOrigin {
+-const MCP_CLIENT_ONLY_EXTENSION_IDS: [&str; 1] = [OPENAI_STANDARD_FORM_INPUT_EXTENSION_ID];
++const MCP_CLIENT_ONLY_EXTENSION_IDS: [&str; 2] = [
++    OPENAI_STANDARD_FORM_INPUT_EXTENSION_ID,
++    SAM_ACP_EXPLICIT_ELICITATION_EXTENSION_ID,
++];
+@@ -171,0 +177,13 @@ impl ClientMcpExtensions {
++    /// Only explicit true values opt a host into human MCP input. Missing or false resets it.
++    pub fn explicit_mcp_elicitation_modes(&self) -> (bool, bool) {
++        let settings = self
++            .get(SAM_ACP_EXPLICIT_ELICITATION_EXTENSION_ID)
++            .and_then(serde_json::Value::as_object);
++        let enabled = |key| {
++            settings
++                .and_then(|settings| settings.get(key))
++                .and_then(serde_json::Value::as_bool)
++                == Some(true)
++        };
++        (enabled("form"), enabled("url"))
++    }
+@@ -585,0 +604,4 @@ mod tests {
++            (
++                SAM_ACP_EXPLICIT_ELICITATION_EXTENSION_ID.to_string(),
++                serde_json::json!({"form": true, "url": true}),
++            ),
+@@ -604,0 +627,18 @@ mod tests {
++    #[test]
++    fn explicit_mcp_modes_require_true_and_are_session_local() {
++        let enabled = ClientMcpExtensions::new([(
++            SAM_ACP_EXPLICIT_ELICITATION_EXTENSION_ID.to_string(),
++            serde_json::json!({"form": true, "url": true}),
++        )]);
++        let disabled = ClientMcpExtensions::new([(
++            SAM_ACP_EXPLICIT_ELICITATION_EXTENSION_ID.to_string(),
++            serde_json::json!({"form": false, "url": "true"}),
++        )]);
++        assert_eq!(enabled.explicit_mcp_elicitation_modes(), (true, true));
++        assert_eq!(disabled.explicit_mcp_elicitation_modes(), (false, false));
++        assert_eq!(
++            ClientMcpExtensions::default().explicit_mcp_elicitation_modes(),
++            (false, false)
++        );
++    }
++
+diff --git a/codex-rs/protocol/src/protocol.rs b/codex-rs/protocol/src/protocol.rs
+index abc4e90..45770b5 100644
+--- a/codex-rs/protocol/src/protocol.rs
++++ b/codex-rs/protocol/src/protocol.rs
+@@ -1351,0 +1352,7 @@ pub struct EnvironmentConnectionEvent {
++/// Response event from the agent
++#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS)]
++pub struct McpElicitationCompletedEvent {
++    pub server_name: String,
++    pub elicitation_id: String,
++}
++
+@@ -1497,0 +1505,3 @@ pub enum EventMsg {
++    /// MCP URL service completed independently of the human elicitation answer.
++    McpElicitationCompleted(McpElicitationCompletedEvent),
++
+diff --git a/codex-rs/protocol/src/turn_input.rs b/codex-rs/protocol/src/turn_input.rs
+index e7c17ea..393938a 100644
+--- a/codex-rs/protocol/src/turn_input.rs
++++ b/codex-rs/protocol/src/turn_input.rs
+@@ -52,0 +53,2 @@ pub struct TurnInputRequest {
++    /// Applied only when this input starts a new user turn, before its task runs.
++    pub explicit_mcp_elicitation_modes: Option<(bool, bool)>,
+@@ -77,0 +80 @@ impl TurnInputRequest {
++            explicit_mcp_elicitation_modes: None,
+@@ -128,0 +132,5 @@ impl TurnInputRequest {
++
++    pub fn with_explicit_mcp_elicitation_modes(mut self, modes: (bool, bool)) -> Self {
++        self.explicit_mcp_elicitation_modes = Some(modes);
++        self
++    }
+diff --git a/codex-rs/rmcp-client/src/elicitation_client_service.rs b/codex-rs/rmcp-client/src/elicitation_client_service.rs
+index 2ef94e2..adc3e7e 100644
+--- a/codex-rs/rmcp-client/src/elicitation_client_service.rs
++++ b/codex-rs/rmcp-client/src/elicitation_client_service.rs
+@@ -36,0 +37 @@ use crate::rmcp_client::SendElicitation;
++use crate::rmcp_client::SendElicitationComplete;
+@@ -65,0 +67,2 @@ pub(crate) struct ElicitationClientService {
++    send_elicitation_complete: Option<Arc<SendElicitationComplete>>,
++    supports_url_completion: bool,
+@@ -101,0 +105,2 @@ impl ElicitationClientService {
++        let supports_url_completion = client_info.capabilities.elicitation.as_ref()
++            .is_some_and(|capability| capability.url.is_some());
+@@ -130,0 +136,2 @@ impl ElicitationClientService {
++            send_elicitation_complete: None,
++            supports_url_completion,
+@@ -135,0 +143,5 @@ impl ElicitationClientService {
++    pub(crate) fn with_completion_sender(mut self, sender: Option<Arc<SendElicitationComplete>>) -> Self {
++        self.send_elicitation_complete = sender;
++        self
++    }
++
+@@ -302,0 +315,15 @@ impl Service<RoleClient> for ElicitationClientService {
++        if let ServerNotification::CustomNotification(custom) = &notification
++            && custom.method == "notifications/elicitation/complete"
++        {
++            if self.supports_url_completion
++                && let Some(sender) = &self.send_elicitation_complete
++                && let Some(elicitation_id) = custom.params.as_ref()
++                    .and_then(|params| params.get("elicitationId"))
++                    .and_then(Value::as_str)
++                && !elicitation_id.is_empty()
++                && elicitation_id.len() <= 256
++            {
++                sender(elicitation_id.to_string()).await;
++            }
++            return Ok(());
++        }
+diff --git a/codex-rs/rmcp-client/src/lib.rs b/codex-rs/rmcp-client/src/lib.rs
+index 3a4a2b0..b43e6ba 100644
+--- a/codex-rs/rmcp-client/src/lib.rs
++++ b/codex-rs/rmcp-client/src/lib.rs
+@@ -89,0 +90 @@ pub use rmcp_client::SendElicitation;
++pub use rmcp_client::SendElicitationComplete;
+diff --git a/codex-rs/rmcp-client/src/rmcp_client.rs b/codex-rs/rmcp-client/src/rmcp_client.rs
+index b8817d2..489659d 100644
+--- a/codex-rs/rmcp-client/src/rmcp_client.rs
++++ b/codex-rs/rmcp-client/src/rmcp_client.rs
+@@ -193,0 +194 @@ struct InitializeContext {
++    send_elicitation_complete: Option<Arc<SendElicitationComplete>>,
+@@ -378,0 +380 @@ pub type SendElicitation = Box<
++pub type SendElicitationComplete = Box<dyn Fn(String) -> BoxFuture<'static, ()> + Send + Sync>;
+@@ -639,0 +642,10 @@ impl RmcpClient {
++    ) -> Result<ServerPeerInfo> {
++        self.initialize_with_completion(params, timeout, send_elicitation, None).await
++    }
++
++    pub async fn initialize_with_completion(
++        &self,
++        params: InitializeRequestParams,
++        timeout: Option<Duration>,
++        send_elicitation: SendElicitation,
++        send_elicitation_complete: Option<SendElicitationComplete>,
+@@ -644,0 +657 @@ impl RmcpClient {
++            send_elicitation_complete: send_elicitation_complete.map(Arc::new),
+@@ -1286 +1299 @@ impl RmcpClient {
+-        );
++        ).with_completion_sender(initialize_context.send_elicitation_complete.clone());
+diff --git a/codex-rs/rmcp-client/src/user_verification_cancellation_tests.rs b/codex-rs/rmcp-client/src/user_verification_cancellation_tests.rs
+index 2fc8a2f..2d1bb41 100644
+--- a/codex-rs/rmcp-client/src/user_verification_cancellation_tests.rs
++++ b/codex-rs/rmcp-client/src/user_verification_cancellation_tests.rs
+@@ -18,0 +19,2 @@ use rmcp::model::CustomRequest;
++use rmcp::model::CustomNotification;
++use rmcp::model::ElicitationCapability;
+@@ -24,0 +27 @@ use rmcp::model::ServerRequest;
++use rmcp::model::UrlElicitationCapability;
+@@ -40,0 +44,41 @@ struct ElicitationTestServer;
++#[tokio::test]
++async fn url_completion_notification_requires_capability_and_valid_id() -> anyhow::Result<()> {
++    for url_enabled in [false, true] {
++        let (completed_tx, mut completed_rx) = mpsc::unbounded_channel();
++        let mut info = ClientInfo::default();
++        if url_enabled {
++            info.capabilities.elicitation = Some(
++                ElicitationCapability::new().with_url(UrlElicitationCapability::new()),
++            );
++        }
++        let service = ElicitationClientService::new(
++            info,
++            Box::new(|_, _| Box::pin(async { anyhow::bail!("unexpected elicitation") })),
++            ElicitationPauseState::new(),
++        )
++        .with_completion_sender(Some(Arc::new(Box::new(move |id| {
++            let tx = completed_tx.clone();
++            Box::pin(async move { let _ = tx.send(id); })
++        }))));
++        let (client_transport, server_transport) = tokio::io::duplex(4096);
++        let client = serve_directly(service, client_transport, None);
++        let mut server = IntoTransport::<RoleServer, _, _>::into_transport(server_transport);
++        for (method, params) in [
++            ("notifications/elicitation/complete", json!({"elicitationId": "valid-id"})),
++            ("notifications/elicitation/complete", json!({"elicitationId": ""})),
++            ("notifications/other", json!({"elicitationId": "wrong-method"})),
++        ] {
++            server.send(ServerJsonRpcMessage::notification(
++                ServerNotification::CustomNotification(CustomNotification::new(method, Some(params))),
++            )).await?;
++        }
++        if url_enabled {
++            assert_eq!(timeout(Duration::from_secs(5), completed_rx.recv()).await?, Some("valid-id".to_string()));
++        }
++        tokio::task::yield_now().await;
++        assert!(completed_rx.try_recv().is_err());
++        client.cancel().await?;
++    }
++    Ok(())
++}
++
+diff --git a/codex-rs/rollout-trace/src/protocol_event.rs b/codex-rs/rollout-trace/src/protocol_event.rs
+index dadc4bb..a96feb4 100644
+--- a/codex-rs/rollout-trace/src/protocol_event.rs
++++ b/codex-rs/rollout-trace/src/protocol_event.rs
+@@ -433,0 +434 @@ pub(crate) fn tool_runtime_trace_event(event: &EventMsg) -> Option<ToolRuntimeTr
++        EventMsg::McpElicitationCompleted(_) => None,
+@@ -521,0 +523 @@ pub(crate) fn wrapped_protocol_event_type(event: &EventMsg) -> Option<&'static s
++        EventMsg::McpElicitationCompleted(_) => None,
+diff --git a/codex-rs/rollout/src/policy.rs b/codex-rs/rollout/src/policy.rs
+index c82b5ce..0e6b11e 100644
+--- a/codex-rs/rollout/src/policy.rs
++++ b/codex-rs/rollout/src/policy.rs
+@@ -186,0 +187 @@ pub fn should_persist_event_msg(ev: &EventMsg, history_mode: ThreadHistoryMode)
++        | EventMsg::McpElicitationCompleted(_)
+diff --git a/codex-rs/tui/src/app/app_server_event_targets.rs b/codex-rs/tui/src/app/app_server_event_targets.rs
+index eb5ffa6..6261d44 100644
+--- a/codex-rs/tui/src/app/app_server_event_targets.rs
++++ b/codex-rs/tui/src/app/app_server_event_targets.rs
+@@ -49,0 +50 @@ pub(super) fn server_notification_thread_target(
++        ServerNotification::McpServerElicitationCompleted(notification) => Some(notification.thread_id.as_str()),
+diff --git a/codex-rs/tui/src/chatwidget/protocol.rs b/codex-rs/tui/src/chatwidget/protocol.rs
+index ba0d2e4..dd21393 100644
+--- a/codex-rs/tui/src/chatwidget/protocol.rs
++++ b/codex-rs/tui/src/chatwidget/protocol.rs
+@@ -383,0 +384 @@ impl ChatWidget {
++            ServerNotification::McpServerElicitationCompleted(_) => {}

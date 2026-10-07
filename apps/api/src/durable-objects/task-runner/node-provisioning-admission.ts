@@ -1,4 +1,5 @@
 import { log } from '../../lib/logger';
+import { SessionRecoveryAuthorityRevokedError } from '../../services/session-recovery-authority';
 import {
   resolveVmAdmissionScope,
   type VmAdmissionWait,
@@ -6,6 +7,7 @@ import {
   type VmTaskAdmissionIdentity,
   waitForVmAdmissionCapacity,
 } from '../../services/vm-admission-control';
+import { requestIncompatiblePoolNodeDrain } from './incompatible-node-drain';
 import { persistPlacementDiagnostics } from './placement-diagnostics';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
@@ -87,6 +89,15 @@ export async function waitOrThrowForCapacityPoolNodeLimit(
   admissionIdentity: VmTaskAdmissionIdentity | null,
   poolMaxNodes: number
 ): Promise<'waiting'> {
+  try {
+    await requestIncompatiblePoolNodeDrain(state, rc);
+  } catch (error) {
+    if (error instanceof SessionRecoveryAuthorityRevokedError) throw error;
+    log.warn('task_runner_do.incompatible_node_drain_failed', {
+      taskId: state.taskId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
   if (admissionIdentity) {
     const waitResult = await waitForVmAdmissionCapacity(
       rc.env,

@@ -392,8 +392,8 @@ func TestCodexInstalledCheckRequiresExactAdapterAndCLI(t *testing.T) {
 		return cmd.Run()
 	}
 
-	writeVersionCommand("codex-acp", "@agentclientprotocol/codex-acp 1.13.1")
-	writeVersionCommand("codex", "codex-cli 0.156.1")
+	writeVersionCommand("codex-acp", "@agentclientprotocol/codex-acp 2.1.1")
+	writeVersionCommand("codex", "codex-cli 0.160.0")
 	if err := runCheck(); err != nil {
 		t.Fatalf("current Codex adapter and CLI should pass validation: %v", err)
 	}
@@ -403,7 +403,7 @@ func TestCodexInstalledCheckRequiresExactAdapterAndCLI(t *testing.T) {
 		t.Fatal("stale Codex adapter unexpectedly passed validation")
 	}
 
-	writeVersionCommand("codex-acp", "@agentclientprotocol/codex-acp 1.13.1")
+	writeVersionCommand("codex-acp", "@agentclientprotocol/codex-acp 2.1.1")
 	writeVersionCommand("codex", "codex-cli 0.153.2")
 	if err := runCheck(); err == nil {
 		t.Fatal("stale Codex CLI unexpectedly passed validation")
@@ -1776,7 +1776,7 @@ func TestWriteAgentStartupConfigCodexStandaloneWritesMcpConfig(t *testing.T) {
 		},
 	}
 
-	startup := &agentStartup{containerID: "", envVars: []string{
+	startup := &agentStartup{containerID: "", settings: &agentSettingsPayload{Model: "gpt-6.1-sol"}, envVars: []string{
 		`CODEX_CONFIG={"sandbox_mode":"read-only"}`,
 		"INITIAL_AGENT_MODE=agent",
 		"CODEX_PATH=/stale/codex",
@@ -1807,7 +1807,7 @@ func TestWriteAgentStartupConfigCodexStandaloneWritesMcpConfig(t *testing.T) {
 		t.Errorf("config.toml missing SAM MCP bearer env reference: %s", data)
 	}
 	assertCodexStartupTOML(t, data, "https://api.example.com/mcp", "SAM_MCP_TOKEN")
-	assertEnvContains(t, startup.envVars, "CODEX_CONFIG", `{"sandbox_mode":"danger-full-access","approval_policy":"never"}`)
+	assertEnvContains(t, startup.envVars, "CODEX_CONFIG", `{"sandbox_mode":"danger-full-access","approval_policy":"never","model":"gpt-6.1-sol"}`)
 	assertEnvContains(t, startup.envVars, "INITIAL_AGENT_MODE", "agent-full-access")
 	assertEnvContains(t, startup.envVars, "CODEX_PATH", "codex")
 	if got := countEnvKey(startup.envVars, "CODEX_PATH"); got != 1 {
@@ -1843,7 +1843,7 @@ esac
 			ContainerUser: "testuser",
 		},
 	}}
-	startup := &agentStartup{containerID: "container-123", envVars: []string{
+	startup := &agentStartup{containerID: "container-123", settings: &agentSettingsPayload{Model: "gpt-6.1-sol"}, envVars: []string{
 		`CODEX_CONFIG={"sandbox_mode":"read-only"}`,
 		"INITIAL_AGENT_MODE=agent",
 		"CODEX_PATH=/stale/codex",
@@ -1866,7 +1866,7 @@ esac
 		t.Fatalf("container config contract changed: %s", content)
 	}
 	assertCodexStartupTOML(t, data, "https://api.example.com/mcp", "SAM_MCP_TOKEN")
-	assertEnvContains(t, startup.envVars, "CODEX_CONFIG", `{"sandbox_mode":"danger-full-access","approval_policy":"never"}`)
+	assertEnvContains(t, startup.envVars, "CODEX_CONFIG", `{"sandbox_mode":"danger-full-access","approval_policy":"never","model":"gpt-6.1-sol"}`)
 	assertEnvContains(t, startup.envVars, "INITIAL_AGENT_MODE", "agent-full-access")
 	assertEnvContains(t, startup.envVars, "CODEX_PATH", "codex")
 	if got := countEnvKey(startup.envVars, "CODEX_PATH"); got != 1 {

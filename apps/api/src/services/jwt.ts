@@ -14,6 +14,7 @@ import {
 
 import type { Env } from '../env';
 import { AppError } from '../middleware/error';
+import { CALLBACK_TOKEN_GENERATION_ISSUED_AT_CLAIM } from './callback-token-claims';
 
 // Key ID format: key-YYYY-MM (rotates monthly)
 const KEY_ID = `key-${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
@@ -102,6 +103,11 @@ export async function signTerminalToken(
   };
 }
 
+export interface SignCallbackTokenOptions {
+  /** Generation issue time (seconds) to preserve when renewing an existing token. */
+  generationIssuedAtSeconds?: number;
+}
+
 /**
  * Sign a workspace-scoped callback token for VM-to-API authentication.
  * Used by VM agent to call back to control plane for workspace-specific operations
@@ -110,16 +116,24 @@ export async function signTerminalToken(
  * The `scope: 'workspace'` claim restricts this token to the specific workspace.
  * Node-scoped tokens cannot be used for workspace-scoped endpoints.
  */
-export async function signCallbackToken(workspaceId: string, env: Env): Promise<string> {
+export async function signCallbackToken(
+  workspaceId: string,
+  env: Env,
+  options: SignCallbackTokenOptions = {}
+): Promise<string> {
   const privateKey = await importPKCS8(env.JWT_PRIVATE_KEY, 'RS256');
   const expiry = getCallbackTokenExpiry(env);
   const expiresAt = new Date(Date.now() + expiry);
   const issuer = getIssuer(env);
+  const generationIssuedAt = options.generationIssuedAtSeconds;
 
   const token = await new SignJWT({
     workspace: workspaceId,
     type: 'callback',
     scope: 'workspace',
+    ...(generationIssuedAt !== undefined
+      ? { [CALLBACK_TOKEN_GENERATION_ISSUED_AT_CLAIM]: generationIssuedAt }
+      : {}),
   })
     .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
     .setIssuer(issuer)

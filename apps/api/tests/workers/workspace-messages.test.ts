@@ -286,6 +286,27 @@ describe('POST /workspaces/:id/messages — behavioral tests', () => {
   });
 
   describe('safeParseJson (Bug 2 fix)', () => {
+    it('preserves fixed loopback prompt attribution through the authenticated callback', async () => {
+      const promptId = `${TEST_PREFIX}-prompt-a`;
+      const diagnosticId = `${TEST_PREFIX}-loopback-diagnostic`;
+      const message = makeMessage({
+        messageId: diagnosticId,
+        role: 'system',
+        content: 'This sign-in flow requires a local callback that this session cannot complete.',
+        toolMetadata: JSON.stringify({ promptMessageId: promptId }),
+      });
+      const response = await postMessages(WORKSPACE_ID, [message], validToken);
+      expect(response.status).toBe(200);
+      const projectData = env.PROJECT_DATA.get(env.PROJECT_DATA.idFromName(PROJECT_ID));
+      const storedMetadata = await runInDurableObject(projectData, async (instance) => {
+        const row = instance.ctx.storage.sql.exec(
+          'SELECT tool_metadata FROM chat_messages WHERE id = ?', diagnosticId
+        ).toArray()[0] as { tool_metadata: string } | undefined;
+        return row?.tool_metadata;
+      });
+      expect(storedMetadata && JSON.parse(storedMetadata)).toEqual({ promptMessageId: promptId });
+    });
+
     it('preserves tool metadata when toolMetadata is valid JSON', async () => {
       const toolMeta = JSON.stringify({
         toolCallId: 'tc-123',

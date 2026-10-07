@@ -1,5 +1,7 @@
 # Enforce Per-Project Task Execution Timeout
 
+> **Reconciliation 2026-10-05:** The premise needs correcting. `TASK_RUN_MAX_EXECUTION_MS` has not killed a live task since #1567; #2222 documents this at `apps/api/src/scheduled/stuck-task-live-runtime.ts:17-18`. The only hard stop is `TASK_RUN_ABSOLUTE_CEILING_MS` (24h, `packages/shared/src/constants/task-execution.ts:26`). Option A would therefore only move the recovery check: the "terminated after 30 minutes" criterion needs its own kill path (Option B, or a per-project absolute ceiling). The per-project value is still not read by the stuck-task sweep or TaskRunner (`apps/api/src/scheduled/stuck-tasks.ts:1113` reads env only).
+
 ## Problem Statement
 
 The `taskExecutionTimeoutMs` per-project scaling parameter is stored in the projects table, collected via the Settings UI, and passed through `TaskRunConfig.projectScaling` — but it is never enforced at runtime. The stuck-tasks cron (`apps/api/src/scheduled/stuck-tasks.ts`) only reads the platform-wide `TASK_RUN_MAX_EXECUTION_MS` env var.

@@ -20,7 +20,10 @@ type promptAttempt struct {
 	ctx context.Context
 	// deliveryID is the control-plane prompt delivery that created this
 	// attempt, empty for viewer prompts. Immutable after beginPrompt.
-	deliveryID          string
+	deliveryID string
+	// messageID is the control-plane user message that opened this prompt.
+	// Set before the agent RPC starts; empty for prompts without a trusted row.
+	messageID           string
 	startedAt           time.Time
 	cancel              context.CancelFunc
 	done                chan struct{}

@@ -225,9 +225,9 @@ func sessionHostForRole(t *testing.T, role string, workspaceID, sessionID string
 	return host
 }
 
-// The provider must be wired for standalone and withheld for VM. The VM control
-// is what stops "always wire it" from passing: VM sessions read project env from
-// /etc/sam/project-env inside the devcontainer instead.
+// Both runtimes bind the provider to the exact session. Standalone applies its
+// assets; VM sessions read normal project env from /etc/sam/project-env and use
+// the provider only to resolve the Codex candidate selector.
 func TestSessionHostRuntimeAssetsProviderByRuntime(t *testing.T) {
 	t.Parallel()
 
@@ -237,7 +237,7 @@ func TestSessionHostRuntimeAssetsProviderByRuntime(t *testing.T) {
 		wantProvider bool
 	}{
 		{name: "standalone cf-container", role: config.RoleStandalone, wantProvider: true},
-		{name: "vm devcontainer", role: "", wantProvider: false},
+		{name: "vm devcontainer", role: "", wantProvider: true},
 	}
 
 	for _, tc := range cases {

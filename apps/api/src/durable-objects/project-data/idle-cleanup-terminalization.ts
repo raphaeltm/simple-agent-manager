@@ -2,6 +2,7 @@ import { createModuleLogger, serializeError } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
 import {
   isSupersededTerminalReason,
+  livenessEvidenceLogFields,
   type TaskRuntimeLiveness,
 } from '../../services/task-runtime-liveness';
 import { syncTriggerExecutionStatus } from '../../services/trigger-execution-sync';
@@ -216,6 +217,8 @@ export async function terminalizeIdleTaskInD1(
       live: liveness.live,
       conclusive: liveness.conclusive,
       reason: liveness.reason,
+      // Live is not working: an idle agent waiting for its user is live too.
+      ...livenessEvidenceLogFields(liveness),
       action: 'preserved',
     });
     return { outcome: 'preserved', taskId: task.id, liveness, errorMessage: null };

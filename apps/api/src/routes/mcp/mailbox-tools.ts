@@ -163,6 +163,14 @@ export async function handleSendDurableMessage(
     }
   }
 
+  if (resolution.taskStatus === 'sleeping') {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'Sleeping targets require durable prompt delivery to be enabled'
+    );
+  }
+
   // Enqueue the message in the target project's DO
   try {
     const msg = await projectDataService.enqueueMailboxMessage(env, resolution.projectId, {

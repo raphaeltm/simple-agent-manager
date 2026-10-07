@@ -105,7 +105,9 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `FAILED_TASK_PRESERVATION_MAX_WAIT_MS` — Longest a failed task's runtime waits for its work-preservation sleep, from the latest of the failure, an in-place wake and the agent's current turn start, before the sweep tears it down with a chat notice (default: `28800000`)
 - `SESSION_SLEEP_SWEEP_BATCH_SIZE` — Maximum due VM sleeps atomically claimed by one scheduled sweep (default: `10`)
 - `SESSION_SLEEP_RETRY_DELAY_MS` — Delay after a fail-closed automatic sleep attempt (default: `300000`)
-- `SESSION_SLEEP_MAX_ATTEMPTS` — Maximum automatic sleep attempts; exhaustion preserves compute and records the error, except a failed task's preservation, which then tears the runtime down and says so (default: `9`)
+- `SESSION_SLEEP_MAX_ATTEMPTS` — Failed-attempt ceiling of a bounded sleep-failure episode: at it the episode ends blocked (no teardown, chat notice), except a failed task's preservation, which then tears the runtime down and says so; also re-arms legacy rows exhausted below a raised value (default: `9`, clamped above `SESSION_SLEEP_FAILURE_MAX_ATTEMPTS`)
+- `SESSION_SLEEP_FAILURE_MAX_ATTEMPTS` — Failed full-snapshot sleep attempts in one episode before the transcript-and-Git fallback is tried (default: `3`)
+- `SESSION_SLEEP_FAILURE_MAX_ELAPSED_MS` — Time since the sleep episode began (with at least one failure) before the transcript-and-Git fallback is tried (default: `900000`, 15 min)
 - `SESSION_SLEEP_CLAIM_LEASE_MS` — Reclaim timeout for an interrupted automatic-sleep claim (default: `600000`)
 - `HARNESS_BACKGROUND_WORK_LEASE_MS` — Finite sleep-protection lease renewed by normalized harness background-work lifecycle signals (default: `300000`)
 - `HARNESS_BACKGROUND_WORK_MAX_DURATION_MS` — Absolute ceiling, measured from the last harness lifecycle progress edge, on how long background work may defer sleep (default: `1800000`)
@@ -301,6 +303,11 @@ per-slice and per-run admission budgets, and the verified R2 manifest writes.
 - `PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_TIME_MS` — Soft wall-clock budget for one grouped/FTS cleanup slice (default: `5000`)
 - `PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_UNSAFE_RATIO` — Refuses grouped/FTS cleanup writes when the object is too close to the configured storage limit (default: `0.98`)
 - `PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES` — Stops grouped/FTS cleanup if a slice deletes rows but `databaseSize` does not drop by at least this many bytes (default: `1`)
+- `PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_MAX_ROWS` — Ceiling on grouped rows one superadmin grouped/FTS wall-recovery call may prune (default: `10000`)
+- `PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_MAX_BYTES` — Ceiling on grouped content bytes one grouped/FTS wall-recovery call may prune (default: `33554432`)
+- `PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_MAX_SESSIONS` — Ceiling on terminal sessions one grouped/FTS wall-recovery call may consider, and on its `skipSessionIds` length (default: `500`)
+- `PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_TRANSACTION_ROWS` — Grouped rows pruned per wall-recovery transaction (default: `500`)
+- `PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_TRANSACTION_BYTES` — Grouped content bytes held in memory per wall-recovery transaction (default: `8388608`)
 - `PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED` — Enables automatic deletion of old low-value terminal-session `activity_events` and terminal ACP event history when storage remains above the cleanup target (default: enabled)
 - `PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS` — Maximum terminal `activity_events` rows and terminal `acp_session_events` rows deleted per automatic cleanup alarm batch (default: `500`)
 - `PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS` — Minimum terminal-session age before automatic event-log cleanup may delete its activity/ACP event history (default: `7`)
@@ -313,7 +320,7 @@ per-slice and per-run admission budgets, and the verified R2 manifest writes.
 - `PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_RETENTION_MS` — Unused reservation receipt retention; minimum one UTC budget day. Default: `604800000` (7 days).
 - `PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_CLEANUP_LIMIT` — Maximum expired receipts removed per unused release; zero disables cleanup. Default: `100`.
 - `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED` — Separate production-disabled switch for the unscoped scheduled archive-sharding sweep; enabling exact routing alone does not run global migration (default: disabled)
-- `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS` — Persisted cadence gate between unscoped scheduled archive-sharding sweeps; the Worker scheduled handler wakes every five minutes and claims the cadence row only when it is due. The code fallback is daily; the checked-in `wrangler.toml` ships 18 minutes, which lands a claim on the fourth five-minute tick (occasionally the fifth when the archive step starts over two minutes earlier than at the previous claim). Each claim archives one session, so this interval sets the drain rate (default: `86400000`, shipped: `1080000`)
+- `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS` — Persisted cadence gate between unscoped scheduled archive-sharding sweeps; the Worker scheduled handler wakes every five minutes and claims the cadence row only when it is due. The code fallback is daily; the checked-in `wrangler.toml` ships 18 minutes, which lands a claim on the fourth five-minute tick (occasionally the fifth when the archive step starts over two minutes earlier than at the previous claim). Each claim can migrate zero or more sessions (usually one, because a real candidate outlasts the `PROJECT_DATA_ARCHIVE_WALL_TIME_MS` gate checked between candidates), subject to the per-sweep session and message budgets and the daily write budget, so cadence alone does not set the drain rate (default: `86400000`, shipped: `1080000`)
 - `PROJECT_DATA_ARCHIVE_SHARD_COUNT` — Deterministic archive-shard fanout used when assigning terminal sessions to ProjectData archive Durable Objects (default: `128`)
 - `PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS` — Maximum projects selected by one archive-sharding cron pass (default: `1`)
 - `PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS` — Hard ceiling on sessions (in-flight plus new candidates) one archive-sharding pass may FENCE and process; a candidate the write budget refuses opens no fence and consumes no slot (default: `10`, shipped: `8`)
@@ -531,6 +538,13 @@ by the read-only cron-liveness check.
 - `MCP_INCIDENT_LIST_MAX` — Maximum result count accepted by the private `list_incident_queue` MCP tool (default: 50)
 - `HETZNER_MAX_LIST_PAGES` — Maximum pages per Hetzner list request (default: 100)
 
+### Callback Tokens
+
+- `CALLBACK_TOKEN_EXPIRY_MS` — Lifetime of node- and workspace-scoped VM callback JWTs (default: `86400000` / 24h). Changing it does not extend tokens already issued.
+- `CALLBACK_TOKEN_REFRESH_THRESHOLD_RATIO` — Fraction of a callback token's lifetime after which it may be renewed (default: `0.5`, clamped to `0.1`–`0.9`). Gates both the node token refresh in `POST /api/nodes/:id/heartbeat` and workspace token renewal in `POST /api/workspaces/:id/callback-token/renew`; a token younger than this is not re-minted.
+- `RATE_LIMIT_CALLBACK_TOKEN_RENEWAL` — Authenticated workspace callback-token renewal attempts allowed per workspace per window (default: `12`). Counted atomically in D1 (`workspace_callback_token_renewal_rate_limits`) only after both proofs and the node binding pass; a healthy agent asks about once per half token lifetime.
+- `RATE_LIMIT_CALLBACK_TOKEN_RENEWAL_WINDOW_SECONDS` — Window for `RATE_LIMIT_CALLBACK_TOKEN_RENEWAL` (default: `3600`).
+
 ### Timeouts
 
 - `ORCHESTRATOR_STOP_CAS_MAX_ATTEMPTS` — Maximum task-status compare-and-set attempts after a parent hard-stops a child runtime (default: 2)
@@ -555,7 +569,8 @@ by the read-only cron-liveness check.
 - `TERMINAL_SESSION_RECONCILE_BATCH_SIZE` — Maximum active ProjectData `chat_sessions` candidates reconciled per project per 5-minute sweep (default: 25; capped at 200)
 - `TERMINAL_SESSION_SUMMARY_RECONCILE_BATCH_SIZE` — Maximum active D1 `session_summaries` candidates reconciled globally per 5-minute sweep (default: 25; capped at 200)
 - `TERMINAL_SESSION_RECONCILE_DEFER_MS` — Retry delay for live-head, snapshot-protected, or temporarily ineligible terminal-session ledger candidates (default: 3600000; capped at 86400000)
-- `TASK_RUN_ABSOLUTE_CEILING_MS` — Absolute runaway-cost ceiling that fails even a demonstrably live task (default: 86400000 / 24h). Aged from the current runtime generation (`workspaces.created_at`), not `tasks.started_at`, and skipped entirely when no runtime generation is allocated or the chat session holds a restorable/in-flight sleep record
+- `TASK_RUN_ABSOLUTE_CEILING_MS` — Absolute runaway-cost ceiling that fails even a demonstrably live task (default: 86400000 / 24h). Aged from the current runtime generation (`workspaces.created_at`), not `tasks.started_at`. Skipped when no runtime generation is allocated or the chat session holds a restorable sleep record; a sleep that is only in flight defers it for at most `TASK_RUN_ABSOLUTE_CEILING_SLEEP_GRACE_MS`
+- `TASK_RUN_ABSOLUTE_CEILING_SLEEP_GRACE_MS` — Longest the absolute ceiling defers to a sleep still in flight (scheduled, capturing, stopping or retrying) once passed, measured on runtime-generation age so sleep retries cannot renew it; keep it above `SESSION_SLEEP_IN_FLIGHT_MAX_AGE_MS` (default: 3600000 / 1h)
 - `SESSION_ACTIVITY_STALE_THRESHOLD_MS` — Threshold before stale working activity is checked against authoritative SessionHost inventory (default: 300000)
 - `NODE_HEARTBEAT_STALE_SECONDS` — Staleness threshold for node health
 - `TASK_LIVENESS_PROBE_TIMEOUT_MS` — Per-candidate timeout for ACP and Instant lifecycle probes used by ProjectData heartbeat deferral, idle cleanup, and stuck-task reconciliation; timeout is inconclusive (default: 5000)
@@ -661,6 +676,7 @@ by the read-only cron-liveness check.
 - `TRIGGER_EXECUTION_CLEANUP_ENABLED` — Trigger execution cleanup kill switch (default: enabled; set to `false` to disable)
 - `TRIGGER_STALE_RECOVERY_BATCH_SIZE` — Maximum stale execution candidates processed per sweep (default: `100`)
 - `WEBHOOK_TRIGGERS_ENABLED` — Public ingress kill switch (default: `true`)
+- `WEBHOOK_CREDENTIAL_CLAIM_TTL_SECONDS` — Authenticated one-time MCP credential claim lifetime (default: `600`)
 - `WEBHOOK_TRIGGER_MAX_BODY_BYTES` — Maximum JSON request body (default: `65536`)
 - `WEBHOOK_TRIGGER_MAX_FILTERS` — Maximum deterministic filters per trigger (default: `10`)
 - `WEBHOOK_TRIGGER_MAX_FILTER_PATH_LENGTH` — Maximum filter dot-path length (default: `200`)
@@ -723,6 +739,16 @@ Generated deployments validate and pass these values through cloud-init to newly
 - `SESSION_SNAPSHOT_PROGRESS_REPORT_INTERVAL` — Minimum interval between progress callbacks while a checkpoint continues making progress (default: `15s`)
 - `SESSION_SNAPSHOT_PROGRESS_REPORT_TIMEOUT` — Timeout for each best-effort progress callback to the control plane (default: `5s`)
 
+### Workspace Callback Token Renewal
+
+The agent renews each workspace callback token after a successful node heartbeat once the token is past the refresh ratio (`internal/server/workspace_callback_token_renewal.go`). These use their defaults unless set in the agent service environment.
+
+- `WORKSPACE_CALLBACK_TOKEN_REFRESH_RATIO` — Fraction of a workspace token's lifetime after which the agent renews it (default: `0.5`, clamped to `0.1`–`0.9`; the control plane's `CALLBACK_TOKEN_REFRESH_THRESHOLD_RATIO` still decides)
+- `WORKSPACE_CALLBACK_TOKEN_RENEWAL_TIMEOUT` — Timeout for one renewal request (default: `15s`)
+- `WORKSPACE_CALLBACK_TOKEN_RENEWAL_RETRY_INITIAL` — First backoff after a transient renewal failure (default: `1m`)
+- `WORKSPACE_CALLBACK_TOKEN_RENEWAL_RETRY_MAX` — Backoff ceiling, also the wait after a "not yet due" answer (default: `30m`)
+- `MSG_AUTH_RENEWAL_WAIT` — How long chat-message delivery may stay paused on a rejected (401) workspace token before the pause is reported as an error (default: `15m`). Held messages are kept either way.
+
 ### File Operations
 
 - `FILE_LIST_TIMEOUT` — Timeout for file listing commands (default: 10s)
@@ -763,6 +789,9 @@ Generated deployments validate and pass these values through cloud-init to newly
 - `MSG_BATCH_MAX_BYTES` — Max serialized request body per batch (default: 262144, matches the API's `MAX_MESSAGES_PAYLOAD_BYTES`). Every message is shaped at enqueue to fit one request on its own: tool metadata that cannot fit is replaced by an identity summary flagged `contentTruncated`/`transportTruncated` with `originalSizeBytes`. Keep both values at or below the API's limits.
 
 ### ACP (Agent Communication Protocol)
+
+- `CODEX_RUNTIME_INSTALL_KILL_GRACE` — Additional grace after the container install deadline before forced termination (default: 5s; nonpositive values use the default).
+- `CODEX_RUNTIME_INSTALL_TIMEOUT` — VM-agent host setting bounding opted-in pinned Codex download/install (default: 5m; nonpositive values use the default). Enforced inside the devcontainer as well as on the host. Instant uses a preinstalled image and never installs as the runtime user.
 
 - `ACP_MESSAGE_BUFFER_SIZE` — Max buffered messages per SessionHost for late-join replay (default: 5000)
 - `ACP_VIEWER_SEND_BUFFER` — Per-viewer send channel buffer size (default: 256)
@@ -809,3 +838,7 @@ Generated deployments validate and pass these values through cloud-init to newly
 - `DEFAULT_EVICTION_DOCKER_STOP_TIMEOUT_SECONDS` — Grace period passed to `docker stop --time` during eviction, in seconds (default: 10)
 - `DEFAULT_EVICTION_CALLBACK_RETRY_MAX_SECONDS` — Durable callback backoff cap, in seconds (default: 300). Retry eligibility also respects the complete operation lease (default: 60 seconds), which can exceed the cap; delivery is heartbeat-paced
 - `DEFAULT_EVICTION_RESOLVE_TIMEOUT_SECONDS` — Deadline for resolving a pressured Docker container to a workspace before eviction, in seconds (default: 5)
+
+### Repeated agent check-ins
+
+`TASK_RECONCILIATION_MAX_CHECKINS` (default `3`) caps automatic check-ins per durable no-progress episode. Human input or a newly completed tool call resets the budget; assistant error/text and system messages do not. A recognized unsupported-model runtime error pauses check-ins before another delivery. At the cap, SAM pauses nudges and asks Clef once using the existing `STALLED_TASK_CLASSIFIER_*` model, timeout, confidence, and transcript limits (without the long-turn age gate). Disabled/unavailable/uncertain classification never grants additional retries. The session/work remains intact; the attention notice explains how to retry.

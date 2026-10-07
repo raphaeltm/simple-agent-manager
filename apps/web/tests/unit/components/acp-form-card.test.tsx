@@ -40,6 +40,27 @@ describe('AcpFormCard secure detail ownership', () => {
     mocks.detail.mockResolvedValue(formDetail('Current question'));
   });
 
+  it('uses schema names for untitled fields while retaining unique input IDs and answer keys', async () => {
+    mocks.detail.mockResolvedValue({ summary: interaction(), detail: { message: 'Untitled fields',
+      schema: { type: 'object', properties: {
+        response: { type: 'string' },
+        regions: { type: 'array', items: { anyOf: [{ const: 'EU', title: 'Europe' }] } },
+        named: { type: 'string', title: 'Friendly title' },
+      }, required: ['response'] } } });
+    mocks.answer.mockResolvedValue({ accepted: true, state: 'answered' });
+    const { container } = render(<AcpFormCard {...props} interaction={interaction()} canAnswer />);
+    const input = await screen.findByRole('textbox', { name: /^response/ });
+    expect(input).toHaveAttribute('id', `${ID}-response`);
+    expect(screen.getByRole('group', { name: 'regions' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Friendly title' })).toBeInTheDocument();
+    expect([...container.querySelectorAll('label, legend')].some((element) => element.textContent?.includes(ID))).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Use empty answer for response' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Europe' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
+    await waitFor(() => expect(mocks.answer).toHaveBeenCalled());
+    expect(mocks.answer.mock.calls[0]?.[3]).toMatchObject({ decision: { kind: 'accepted', content: { response: '', regions: ['EU'] } } });
+  });
+
   it('ignores a fulfilled stale detail request after ownership changes', async () => {
     const old = deferred<ReturnType<typeof formDetail>>();
     mocks.detail.mockReturnValueOnce(old.promise).mockResolvedValueOnce(formDetail('New question'));

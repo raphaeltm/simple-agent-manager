@@ -14,6 +14,7 @@ import type {
 } from '@simple-agent-manager/shared';
 import {
   AGENT_PERMISSION_MODE_LABELS,
+  DEFAULT_AGENT_PERMISSION_MODE,
   DEFAULT_OPENCODE_PROVIDER,
   DEFAULT_OPENCODE_ZEN_MODEL,
   OPENCODE_PROVIDER_OPTIONS,
@@ -46,6 +47,9 @@ export interface AgentSettingsCardProps {
 /**
  * Per-agent settings card for model selection and permission mode.
  */
+/** OpenCode's own console, the only place Zen credit balance is visible. */
+const OPENCODE_CONSOLE_URL = 'https://opencode.ai/zen';
+
 export function AgentSettingsCard({
   agent,
   settings,
@@ -55,7 +59,7 @@ export function AgentSettingsCard({
 }: AgentSettingsCardProps) {
   const [model, setModel] = useState(settings?.model ?? '');
   const [permissionMode, setPermissionMode] = useState<AgentPermissionMode>(
-    settings?.permissionMode ?? 'default'
+    settings?.permissionMode ?? DEFAULT_AGENT_PERMISSION_MODE
   );
   const [opencodeProvider, setOpencodeProvider] = useState<OpenCodeProvider>(
     settings?.opencodeProvider ?? DEFAULT_OPENCODE_PROVIDER
@@ -89,7 +93,7 @@ export function AgentSettingsCard({
   // Sync state when settings prop changes
   useEffect(() => {
     setModel(settings?.model ?? '');
-    setPermissionMode(settings?.permissionMode ?? 'default');
+    setPermissionMode(settings?.permissionMode ?? DEFAULT_AGENT_PERMISSION_MODE);
     setOpencodeProvider(settings?.opencodeProvider ?? DEFAULT_OPENCODE_PROVIDER);
     setOpencodeBaseUrl(settings?.opencodeBaseUrl ?? '');
     setProviderMode(settings?.providerMode ?? '');
@@ -132,7 +136,7 @@ export function AgentSettingsCard({
       setResetting(true);
       await onReset(agent.id);
       setModel('');
-      setPermissionMode('default');
+      setPermissionMode(DEFAULT_AGENT_PERMISSION_MODE);
       setOpencodeProvider(DEFAULT_OPENCODE_PROVIDER);
       setOpencodeBaseUrl('');
       setProviderMode('');
@@ -165,7 +169,7 @@ export function AgentSettingsCard({
 
   const hasChanges = (() => {
     if ((model.trim() || null) !== (settings?.model ?? null)) return true;
-    if (permissionMode !== (settings?.permissionMode ?? 'default')) return true;
+    if (permissionMode !== (settings?.permissionMode ?? DEFAULT_AGENT_PERMISSION_MODE)) return true;
     if (isOpenCode) {
       if (opencodeProvider !== (settings?.opencodeProvider ?? DEFAULT_OPENCODE_PROVIDER))
         return true;
@@ -224,6 +228,23 @@ export function AgentSettingsCard({
               </option>
             ))}
           </select>
+          {opencodeProvider === 'opencode-zen' && (
+            <p className="text-xs text-fg-muted mt-2 mb-0" data-testid="opencode-zen-balance-note">
+              Zen bills per request from a credit balance that OpenCode only shows in its own
+              console, so SAM cannot display remaining Zen credit.{' '}
+              <a
+                href={OPENCODE_CONSOLE_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-accent underline-offset-2 hover:underline"
+              >
+                Check your balance in the OpenCode console
+              </a>
+              {
+                '. OpenCode Go plans report rolling, weekly and monthly usage in the session header.'
+              }
+            </p>
+          )}
         </div>
       )}
 

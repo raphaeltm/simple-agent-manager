@@ -5,7 +5,6 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
 import {
-  DEFAULT_SESSION_SLEEP_MAX_ATTEMPTS,
   DEFAULT_SESSION_SLEEP_RETRY_DELAY_MS,
   sessionLifecycleError,
 } from './session-snapshot-artifacts';
@@ -22,6 +21,16 @@ function isTerminalPostSleepCaptureError(error: string): boolean {
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
+/**
+ * Record a failed sleep attempt that never crossed the point of no return.
+ *
+ * Every failure counts against the bounded episode (`session-sleep-episode.ts`) and keeps
+ * a due retry: the sweep then either retries, falls back to a transcript-and-Git sleep, or
+ * ends the episode blocked. A degraded capture or a capture still in flight is no longer
+ * exempt from the budget — that exemption is what let a permanently degraded session
+ * retry every few minutes forever. The terminal post-capture errors (the workspace was
+ * stopped underneath the sleep) still end the episode at once.
+ */
 export async function failSessionSnapshotSleepBeforeTeardown(
   db: Db,
   env: Env,
@@ -34,29 +43,23 @@ export async function failSessionSnapshotSleepBeforeTeardown(
     env.SESSION_SLEEP_RETRY_DELAY_MS,
     DEFAULT_SESSION_SLEEP_RETRY_DELAY_MS
   );
-  const maxAttempts = parsePositiveInt(
-    env.SESSION_SLEEP_MAX_ATTEMPTS,
-    DEFAULT_SESSION_SLEEP_MAX_ATTEMPTS
-  );
   const terminal = isTerminalPostSleepCaptureError(error);
+  const nowIso = now.toISOString();
   const retryAt = new Date(now.getTime() + retryDelayMs).toISOString();
   const result = await db
     .update(schema.sessionSnapshots)
     .set({
       sleepStatus: terminal ? TERMINAL_SESSION_SLEEP_STATUS : 'failed',
-      // Repairable captures may retry beyond the ordinary attempt budget, but
-      // must still yield their queue slot until the persisted retry deadline.
-      sleepAfter: terminal
-        ? null
-        : sql`CASE WHEN ${schema.sessionSnapshots.sleepAttempts} >= ${maxAttempts}
-        AND ${schema.sessionSnapshots.status} != 'degraded'
-        AND ${schema.sessionSnapshots.captureGeneration} IS NULL
-        THEN NULL ELSE ${retryAt} END`,
+      sleepAfter: terminal ? null : retryAt,
       sleepError: sessionLifecycleError(env, error),
+      sleepEpisodeFailures: sql`COALESCE(${schema.sessionSnapshots.sleepEpisodeFailures}, 0) + 1`,
+      // A claim always stamps the episode start; the fallbacks cover rows claimed by a
+      // deployment that predates the column.
+      sleepEpisodeStartedAt: sql`COALESCE(${schema.sessionSnapshots.sleepEpisodeStartedAt}, ${schema.sessionSnapshots.sleepClaimedAt}, ${nowIso})`,
       sleepClaimId: null,
       sleepClaimedAt: null,
       sleepStoppingSince: null,
-      updatedAt: now.toISOString(),
+      updatedAt: nowIso,
     })
     .where(
       and(

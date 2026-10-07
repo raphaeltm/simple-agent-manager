@@ -45,6 +45,7 @@ export const UpdateWorkspacePortsPublicSchema = v.object({
 export const CreateAgentSessionSchema = v.object({
   label: v.optional(v.string()),
   agentType: v.optional(v.string()),
+  agentProfileId: v.optional(v.string()),
   worktreePath: v.optional(v.string()),
 });
 

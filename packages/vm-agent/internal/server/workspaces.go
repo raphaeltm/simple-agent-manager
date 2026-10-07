@@ -64,6 +64,7 @@ func (s *Server) stopSessionHost(workspaceID, sessionID string) {
 	delete(s.sessionMcpServers, hostKey)
 	delete(s.sessionProfileOvr, hostKey)
 	delete(s.sessionTaskCtx, hostKey)
+	delete(s.sessionManualInteractionConfig, hostKey)
 	s.sessionHostMu.Unlock()
 
 	// Clean up persisted MCP servers (best-effort).
@@ -124,6 +125,7 @@ func (s *Server) stopSessionHostsForWorkspace(workspaceID string) {
 		delete(s.sessionMcpServers, key)
 		delete(s.sessionProfileOvr, key)
 		delete(s.sessionTaskCtx, key)
+		delete(s.sessionManualInteractionConfig, key)
 	}
 	s.sessionHostMu.Unlock()
 	for _, host := range hosts {
@@ -1092,11 +1094,12 @@ func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request
 	}
 
 	var body struct {
-		SessionID     string               `json:"sessionId"`
-		Label         string               `json:"label"`
-		ChatSessionID string               `json:"chatSessionId"` // Chat session ID for message routing (warm node reuse)
-		ProjectID     string               `json:"projectId"`     // Project ID for late-init of message reporter (manual nodes)
-		McpServers    []acp.McpServerEntry `json:"mcpServers,omitempty"`
+		SessionID       string                           `json:"sessionId"`
+		Label           string                           `json:"label"`
+		ChatSessionID   string                           `json:"chatSessionId"` // Chat session ID for message routing (warm node reuse)
+		ProjectID       string                           `json:"projectId"`     // Project ID for late-init of message reporter (manual nodes)
+		McpServers      []acp.McpServerEntry             `json:"mcpServers,omitempty"`
+		AcpInteractions *acp.AcpInteractionRuntimeConfig `json:"acpInteractions,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -1105,6 +1108,12 @@ func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request
 	if strings.TrimSpace(body.SessionID) == "" {
 		writeError(w, http.StatusBadRequest, "sessionId is required")
 		return
+	}
+	if body.AcpInteractions != nil {
+		if err := acp.ValidateAcpInteractionRuntimeConfig(*body.AcpInteractions); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 
 	chatSID := strings.TrimSpace(body.ChatSessionID)
@@ -1196,6 +1205,14 @@ func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request
 	}
 
 	s.registerSessionMcpServers(workspaceID, session.ID, mcpServers)
+	if body.AcpInteractions != nil {
+		s.sessionHostMu.Lock()
+		if s.sessionManualInteractionConfig == nil {
+			s.sessionManualInteractionConfig = make(map[string]acp.AcpInteractionRuntimeConfig)
+		}
+		s.sessionManualInteractionConfig[workspaceID+":"+session.ID] = *body.AcpInteractions
+		s.sessionHostMu.Unlock()
+	}
 
 	if !idempotentHit {
 		s.appendNodeEvent(workspaceID, "info", "agent_session.created", "Agent session created", map[string]interface{}{"sessionId": session.ID})
@@ -1897,6 +1914,7 @@ func (s *Server) agentCapabilities() map[string]interface{} {
 			"answerEndpoint":    true,
 			"permissionBridge":  true,
 			"formBridge":        true,
+			"urlBridge":         true,
 			"deliverySemantics": "best_effort_no_wake",
 			"noWaiterStatus":    "no_waiter",
 			"staleStatus":       "stale_generation",

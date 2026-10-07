@@ -975,6 +975,47 @@ describe('Node Agent client functions send correct payloads', () => {
     ]);
   });
 
+  it('sends conversation URL capability on a manually created session only with verified task mode', async () => {
+    fetchWithTimeoutMock.mockImplementation(async () => new Response('{}', { status: 201 }));
+    const env = {
+      ...makeNodeAgentTestEnv(),
+      ACP_INTERACTIONS_ENABLED: 'true',
+      ACP_INTERACTION_URLS_ENABLED: 'true',
+    };
+    await createAgentSessionOnNode(
+      'node-abc',
+      'ws-test',
+      'sess-manual',
+      null,
+      env,
+      'user-123',
+      'chat-123',
+      'proj-123',
+      undefined,
+      undefined,
+      'conversation'
+    );
+
+    const [, capturedInit] = fetchWithTimeoutMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(capturedInit.body as string);
+    expect(CreateAgentSessionAgentRequestSchema.safeParse(body).success).toBe(true);
+    expect(body.acpInteractions).toMatchObject({ enabled: true, urlsEnabled: true });
+
+    fetchWithTimeoutMock.mockClear();
+    await createAgentSessionOnNode(
+      'node-abc',
+      'ws-test',
+      'sess-no-task',
+      null,
+      env,
+      'user-123',
+      'chat-123',
+      'proj-123'
+    );
+    const [, noTaskInit] = fetchWithTimeoutMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(noTaskInit.body as string)).not.toHaveProperty('acpInteractions');
+  });
+
   it('createAgentSessionOnNode serializes N MCP servers and omits absent names', async () => {
     fetchWithTimeoutMock.mockResolvedValue(
       new Response(

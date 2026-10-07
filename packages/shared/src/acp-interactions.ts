@@ -38,6 +38,11 @@ export const ACP_RUNTIME_ANSWER_STATUS_VALUES = [
 
 export const DEFAULT_ACP_INTERACTIONS_ENABLED = false;
 export const DEFAULT_ACP_INTERACTION_FORMS_ENABLED = false;
+export const DEFAULT_ACP_INTERACTION_URLS_ENABLED = false;
+export const DEFAULT_ACP_INTERACTION_URL_DEADLINE_MS = 10 * 60 * 1000;
+export const DEFAULT_ACP_INTERACTION_URL_MAX_CHARS = 8192;
+export const DEFAULT_ACP_INTERACTION_URL_ELICITATION_ID_MAX_CHARS = 256;
+export const DEFAULT_ACP_INTERACTION_URL_REDIRECT_DEPTH = 2;
 export const DEFAULT_ACP_INTERACTION_PERMISSION_CONVERSATION_DEADLINE_MS = 2 * 60 * 60 * 1000;
 export const DEFAULT_ACP_INTERACTION_PERMISSION_TASK_DEADLINE_MS = 30 * 60 * 1000;
 export const DEFAULT_ACP_INTERACTION_MAX_DEADLINE_MS = 4 * 60 * 60 * 1000;
@@ -98,6 +103,7 @@ export const AcpInteractionSafeSummarySchema = v.object({
   deliveryState: v.nullable(v.picklist(['pending', 'confirmed', 'unconfirmed', 'interrupted'])),
   attentionMarkerId: v.nullable(v.string()),
   toolCallId: v.nullable(v.string()),
+  urlCompletedAt: v.optional(v.nullable(v.number())),
 });
 
 export const AcpInteractionEncryptedPayloadSchema = v.object({
@@ -138,6 +144,15 @@ export const AcpInteractionRuntimeSettleSchema = v.object({
   ]),
 });
 
+export const AcpInteractionRuntimeCompleteUrlSchema = v.object({
+  protocolVersion: v.literal(ACP_INTERACTION_PROTOCOL_VERSION),
+  interactionId: AcpInteractionIdSchema,
+  generation: AcpInteractionGenerationSchema,
+  runtimeIdentity: v.pipe(v.string(), v.minLength(1), v.maxLength(512)),
+  agentSessionId: v.pipe(v.string(), v.minLength(1), v.maxLength(256)),
+  elicitationId: v.pipe(v.string(), v.minLength(1), v.maxLength(256)),
+});
+
 export const AcpInteractionAnswerDecisionSchema = v.object({
   kind: AcpInteractionDecisionKindSchema,
   optionId: v.optional(v.string()),
@@ -172,6 +187,11 @@ export const AcpInteractionRuntimeConfigSchema = v.object({
   protocolVersion: v.literal(ACP_INTERACTION_PROTOCOL_VERSION),
   permissionDeadlineMs: v.pipe(v.number(), v.integer(), v.minValue(1)),
   formDeadlineMs: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+  urlsEnabled: v.optional(v.boolean()),
+  urlDeadlineMs: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+  urlMaxChars: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+  urlElicitationIdMaxChars: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+  urlRedirectDepth: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))),
   maxDeadlineMs: v.pipe(v.number(), v.integer(), v.minValue(1)),
   deadlineMarginMs: v.pipe(v.number(), v.integer(), v.minValue(0)),
   requestMaxBytes: v.pipe(v.number(), v.integer(), v.minValue(1)),
@@ -194,6 +214,7 @@ export type AcpInteractionState = v.InferOutput<typeof AcpInteractionStateSchema
 export type AcpInteractionSafeSummary = v.InferOutput<typeof AcpInteractionSafeSummarySchema>;
 export type AcpInteractionRuntimeCreate = v.InferOutput<typeof AcpInteractionRuntimeCreateSchema>;
 export type AcpInteractionRuntimeSettle = v.InferOutput<typeof AcpInteractionRuntimeSettleSchema>;
+export type AcpInteractionRuntimeCompleteUrl = v.InferOutput<typeof AcpInteractionRuntimeCompleteUrlSchema>;
 export type AcpInteractionAnswerDecision = v.InferOutput<typeof AcpInteractionAnswerDecisionSchema>;
 export type AcpInteractionBrowserAnswer = v.InferOutput<typeof AcpInteractionBrowserAnswerSchema>;
 export type AcpRuntimeAnswerRequest = v.InferOutput<typeof AcpRuntimeAnswerRequestSchema>;
@@ -205,6 +226,7 @@ export interface AcpInteractionCapabilities {
   answerEndpoint: boolean;
   permissionBridge: boolean;
   formBridge?: boolean;
+  urlBridge?: boolean;
 }
 
 export function buildAcpInteractionAnswerPath(

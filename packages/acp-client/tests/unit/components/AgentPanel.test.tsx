@@ -1,9 +1,9 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { act, render, screen, fireEvent, within } from '@testing-library/react';
 import React from 'react';
 import { AgentPanel, CLIENT_COMMANDS } from '../../../src/components/AgentPanel';
 import type { AcpSessionHandle } from '../../../src/hooks/useAcpSession';
-import type { AcpMessagesHandle } from '../../../src/hooks/useAcpMessages';
+import { type AcpMessagesHandle, useAcpMessages } from '../../../src/hooks/useAcpMessages';
 import type { ConversationItem } from '../../../src/hooks/useAcpMessages';
 import type { SlashCommand } from '../../../src/types';
 
@@ -366,6 +366,34 @@ describe('AgentPanel toolbar row', () => {
     expect(cancelButton.className).toContain('text-gray-400');
   });
 
+  it('opens the settings panel on the host default permission mode', () => {
+    const session = createMockSession();
+    const messages = createMockMessages();
+
+    render(
+      <AgentPanel
+        session={session}
+        messages={messages}
+        agentSettings={{ model: null, permissionMode: null }}
+        onSaveSettings={vi.fn()}
+        permissionModes={[
+          { value: 'default', label: 'Manual' },
+          { value: 'bypassPermissions', label: 'Bypass Permissions' },
+        ]}
+        defaultPermissionMode="bypassPermissions"
+      />
+    );
+
+    fireEvent.click(screen.getByLabelText('Agent settings'));
+
+    expect(
+      screen.getByRole('radio', { name: 'Bypass Permissions' }).getAttribute('aria-checked')
+    ).toBe('true');
+    expect(screen.getByRole('radio', { name: 'Manual' }).getAttribute('aria-checked')).toBe(
+      'false'
+    );
+  });
+
   it('settings button is not inside the form element', () => {
     const session = createMockSession();
     const messages = createMockMessages();
@@ -471,5 +499,46 @@ describe('AgentPanel scroll-to-bottom FAB', () => {
     render(<AgentPanel session={session} messages={messages} />);
 
     expect(screen.queryByLabelText('Scroll to bottom')).toBeNull();
+  });
+});
+
+// =============================================================================
+// User message actions
+// =============================================================================
+
+describe('AgentPanel user message actions', () => {
+  beforeEach(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+      writable: true,
+      configurable: true,
+    });
+  });
+
+  it('gives a replayed user message Info and Copy, but not Read aloud', () => {
+    // Real message store, fed the same session/update a replay delivers, so a
+    // chunk handler or render path that drops the timestamp fails here.
+    let store: AcpMessagesHandle | null = null;
+    function Harness() {
+      store = useAcpMessages();
+      return <AgentPanel session={createMockSession()} messages={store} />;
+    }
+    render(<Harness />);
+    act(() => {
+      store!.processMessage({
+        jsonrpc: '2.0',
+        method: 'session/update',
+        params: {
+          sessionId: 'acp-1',
+          update: { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'Ship it' } },
+        },
+      });
+    });
+
+    const bubble = screen.getByText('Ship it').closest<HTMLElement>('.bg-blue-600');
+    expect(bubble).not.toBeNull();
+    expect(within(bubble!).getByRole('button', { name: 'Message info' })).toBeTruthy();
+    expect(within(bubble!).getByRole('button', { name: 'Copy message' })).toBeTruthy();
+    expect(within(bubble!).queryByRole('button', { name: 'Read aloud' })).toBeNull();
   });
 });

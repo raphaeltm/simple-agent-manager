@@ -21,6 +21,7 @@ describe('capacity pool node-limit handler boundary', () => {
     createAllSchemaTables(sqlite, schema);
     sqlite.exec(`
       INSERT INTO users (id) VALUES ('user-1');
+      INSERT INTO tasks (id, project_id, user_id, status) VALUES ('task-1', 'project-1', 'user-1', 'queued');
       INSERT INTO capacity_pools
         (id, scope, owner_user_id, name, is_default, status, strategy, exhaustion_policy, max_nodes)
       VALUES ('pool-1', 'user', 'user-1', 'Pool', 1, 'active', 'spread', 'queue', 1);

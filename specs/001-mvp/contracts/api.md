@@ -636,3 +636,25 @@ Subscription session filtering precedes the bounded SQL limit. Channel reads acc
 from the authenticated human. Human/agent-owned subscriptions can be cancelled;
 policy/system/standing-watch ownership uses its separate control path. Cancellation
 is idempotent and revokes pending canonical deliveries.
+
+### Pinned Codex runtime download
+
+`GET /api/acp/codex-runtime/download?release=<sha256>&os=linux&arch=amd64`
+streams the exact reviewed public runtime archive from its immutable R2 key.
+The release parameter is required and must match the server allowlist; Linux
+amd64 is the only supported platform (glibc and Node 22+ are required at install).
+Responses are 400 for unsupported release/platform, 404 before publication,
+503 for unavailable storage or invalid artifact size, and 200 with immutable
+cache headers for a published archive. Installers must verify the pinned SHA-256
+before extraction or execution. This public binary endpoint grants no workspace
+access and does not enable ACP features.
+
+## MCP Webhook Credential Claim
+
+`create_trigger` accepts `sourceType: "webhook"`, an explicit project-local `agentProfileId`, and `webhookConfig`. It returns safe `webhookClaim` metadata (`claimUrl`, ISO `expiresAt`, `endpointUrl`, `headerName`, `method`, handling instructions), never a plaintext credential. REST creation and rotation continue returning credentials once.
+
+### POST /mcp/webhook-claims/:claimId
+
+Authenticate with the originating project/user/workspace/session MCP bearer token. Current active project `task:write` membership is required. Atomic redemption returns the installed credential as `text/plain` with `Cache-Control: private, no-store`, `Referrer-Policy: no-referrer`, and `X-Content-Type-Options: nosniff`. Only its keyed hash is persisted.
+
+Missing/revoked authentication returns 401; missing project capability returns 403; missing, expired, consumed, incorrectly scoped, disabled-trigger, or revoked claims return 404; MCP rate limiting returns 429. GET/HEAD never redeem. Concurrent redemptions have exactly one winner. Rotation clears pending claims and deletion cascades their removal. `WEBHOOK_CREDENTIAL_CLAIM_TTL_SECONDS` defaults to 600.

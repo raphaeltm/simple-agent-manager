@@ -330,20 +330,19 @@ export function wakeSession(
   sql: SqlStorage,
   sessionId: string,
   workspaceId: string,
-  taskId: string,
+  _taskId: string,
   options: WakeSessionOptions = {}
 ): boolean {
   const now = Date.now();
   const cursor = sql.exec(
     `UPDATE chat_sessions
-     SET status = 'active', workspace_id = ?, task_id = ?, ended_at = NULL,
+     SET status = 'active', workspace_id = ?, ended_at = NULL,
          agent_completed_at = NULL, updated_at = ?
      WHERE id = ? AND (
        status = 'sleeping' OR (status IN ('active', 'failed') AND workspace_id = ?)
        OR (? = 1 AND status = 'stopped')
      )`,
     workspaceId,
-    taskId,
     now,
     sessionId,
     workspaceId,

@@ -553,7 +553,8 @@ export async function createAgentSessionOnNode(
   chatSessionId?: string | null,
   projectId?: string | null,
   mcpServers?: McpServerConfig[],
-  options?: GuardedNodeAgentMutationOptions
+  options?: GuardedNodeAgentMutationOptions,
+  interactionTaskMode?: string | null
 ): Promise<unknown> {
   const body: Record<string, unknown> = {
     sessionId,
@@ -562,6 +563,9 @@ export async function createAgentSessionOnNode(
     projectId: projectId ?? undefined,
   };
   const serializedMcpServers = serializeMcpServers(mcpServers);
+  if (interactionTaskMode) {
+    body.acpInteractions = buildAcpInteractionRuntimeConfig(env, interactionTaskMode);
+  }
   if (serializedMcpServers) {
     body.mcpServers = serializedMcpServers;
   }
@@ -751,6 +755,7 @@ export async function sendPromptToAgentOnNode(
   }
 }
 
+export type { HibernateCallbackTokenDelivery } from './node-agent-session-snapshots';
 export {
   hibernateAgentSessionOnNode,
   restoreAgentSessionOnNode,

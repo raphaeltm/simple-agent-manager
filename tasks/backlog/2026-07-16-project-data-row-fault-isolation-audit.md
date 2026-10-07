@@ -1,5 +1,7 @@
 # Audit project-data DO list reads for single-bad-row fault isolation
 
+> **Reconciliation 2026-10-05:** A second tolerant row mapper already exists: `mapRows` in `apps/api/src/durable-objects/project-data/project-events-storage-helpers.ts:594`, used by five project-events modules since #1962, duplicates `apps/api/src/durable-objects/row-validation.ts:50`. The fault-isolation fix should consolidate onto one helper rather than add a third.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:**

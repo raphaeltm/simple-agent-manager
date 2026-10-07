@@ -15,6 +15,7 @@ import { eq } from 'drizzle-orm';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { prepareAbsoluteLifetimeRelease } from './absolute-lifetime-preservation';
 import {
   boundedWarmPlacementClaimGuardSql,
   type CleanupConfig,
@@ -23,6 +24,7 @@ import {
   destroyNodeForCleanup,
   getNodeWorkspaceIdleThresholdIso,
   LAST_WORKSPACE_ACTIVITY_SQL,
+  markNodeCleanupBackoff,
   type NodeCleanupResult,
 } from './shared';
 
@@ -142,7 +144,7 @@ export async function sweepMaxLifetimeNodes(
   const idleThreshold = getNodeWorkspaceIdleThresholdIso(now, config);
 
   const candidates = await env.DATABASE.prepare(
-    `SELECT n.id, n.user_id, n.status, n.created_at,
+    `SELECT n.id, n.user_id, n.status, n.created_at, n.runtime_incarnation_id,
             COUNT(DISTINCT CASE WHEN w.status IN ('running', 'creating', 'recovery') THEN w.id END) as active_ws_count,
             ${LAST_WORKSPACE_ACTIVITY_SQL} as last_activity
      FROM nodes n
@@ -158,7 +160,7 @@ export async function sweepMaxLifetimeNodes(
        ${boundedWarmPlacementClaimGuardSql('n.id')}
        AND n.created_at < ?
      GROUP BY n.id, n.user_id, n.status, n.created_at
-     ORDER BY n.created_at ASC
+     ORDER BY active_ws_count ASC, n.created_at ASC
      LIMIT ?`
   )
     .bind(now.toISOString(), idleThreshold, lifetimeThreshold, config.nodeSweepLimit)
@@ -167,6 +169,7 @@ export async function sweepMaxLifetimeNodes(
       user_id: string;
       status: string;
       created_at: string;
+      runtime_incarnation_id: string | null;
       active_ws_count: number;
       last_activity: string;
     }>();
@@ -209,6 +212,27 @@ export async function sweepMaxLifetimeNodes(
 
     const viaAbsoluteCeiling = node.active_ws_count > 0;
 
+    if (viaAbsoluteCeiling) {
+      try {
+        if (!(await prepareAbsoluteLifetimeRelease(env, node, now, config))) {
+          await markNodeCleanupBackoff(
+            env,
+            node.id,
+            new Date(now.getTime() + config.failureBackoffMs).toISOString()
+          );
+          result.lifetimeSkipped++;
+          continue;
+        }
+      } catch (error) {
+        log.error('node_cleanup.absolute_lifetime_preservation_failed', {
+          nodeId: node.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        result.errors++;
+        continue;
+      }
+    }
+
     const destroyed = await destroyNodeForCleanup(db, env, now.toISOString(), node, {
       logEvent: viaAbsoluteCeiling
         ? 'node_cleanup.destroying_absolute_max_lifetime'
@@ -223,7 +247,7 @@ export async function sweepMaxLifetimeNodes(
         : 'max_lifetime_node_cleanup',
       failureRecoveryType: 'max_lifetime_node_cleanup_failure',
       failureBackoffMs: config.failureBackoffMs,
-      allowActiveWorkspaces: viaAbsoluteCeiling,
+      allowActiveWorkspaces: false,
       requireWorkspaceIdle: viaAbsoluteCeiling,
       workspaceIdleThresholdIso: idleThreshold,
       context: {

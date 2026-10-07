@@ -118,6 +118,23 @@ describe('ACP interaction answer delivery', () => {
     }
   );
 
+  it.each(['vm', 'cf-container'] as const)('delivers URL consent to live %s only with URL bridge and no wake', async (runtime) => {
+    nodeAgentRequest.mockResolvedValueOnce({ ...capabilities(), interactions: {
+      ...capabilities().interactions, urlBridge: true,
+    } }).mockResolvedValueOnce({ status: 'consumed', interactionId: input.interactionId,
+      generation: input.generation, runtimeIdentity: input.runtimeIdentity });
+    await expect(deliverAcpInteractionAnswer({} as never, { ...target, runtime }, { ...input, kind: 'url' }))
+      .resolves.toMatchObject({ outcome: 'confirmed' });
+    expect(nodeAgentRequest).toHaveBeenNthCalledWith(2, 'node-1', expect.anything(),
+      expect.stringContaining('/interactions/'), expect.objectContaining({
+        method: 'POST', noWakeContainer: true, recoverContainerOnTimeout: false,
+      }));
+
+    nodeAgentRequest.mockResolvedValueOnce(capabilities());
+    await expect(deliverAcpInteractionAnswer({} as never, { ...target, runtime }, { ...input, kind: 'url' }))
+      .resolves.toMatchObject({ outcome: 'interrupted', reason: 'runtime URL bridge unsupported' });
+  });
+
   it.each(['vm', 'cf-container'] as const)(
     'interrupts a dead %s runtime generation without recovery',
     async (runtime) => {

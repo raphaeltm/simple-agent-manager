@@ -17,8 +17,39 @@ func guardRawElicitationSchema(line []byte, expectedSession string) []byte {
 		return line
 	}
 	var mode string
-	if json.Unmarshal(params["mode"], &mode) != nil || mode != "form" {
+	if json.Unmarshal(params["mode"], &mode) != nil || (mode != "form" && mode != "url") {
 		return line
+	}
+	if mode == "url" {
+		allowed := map[string]bool{"mode": true, "message": true, "url": true,
+			"elicitationId": true, "sessionId": true, "toolCallId": true,
+			"requestId": true, "_meta": true}
+		unsupported := false
+		if expectedSession != "" {
+			var claimed string
+			if json.Unmarshal(params["sessionId"], &claimed) != nil || claimed != expectedSession {
+				unsupported = true
+			}
+		}
+		for key := range params {
+			if !allowed[key] {
+				unsupported = true
+			}
+		}
+		if !unsupported {
+			return line
+		}
+		params["url"] = json.RawMessage(`""`)
+		encodedParams, err := json.Marshal(params)
+		if err != nil {
+			return line
+		}
+		envelope["params"] = encodedParams
+		guarded, err := json.Marshal(envelope)
+		if err != nil {
+			return line
+		}
+		return guarded
 	}
 	var schema map[string]json.RawMessage
 	if json.Unmarshal(params["requestedSchema"], &schema) != nil {

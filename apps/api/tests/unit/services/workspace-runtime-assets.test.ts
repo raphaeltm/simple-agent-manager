@@ -64,18 +64,30 @@ describe('workspace runtime asset resolver', () => {
       [
         { key: 'SHARED_KEY', storedValue: 'project-value', valueIv: null, isSecret: false },
         { key: 'PROJECT_ONLY', storedValue: 'project-only', valueIv: null, isSecret: false },
+        { key: 'SAM_CODEX_C2_CANDIDATE', storedValue: '1', valueIv: null, isSecret: false },
       ],
       [
         { path: 'shared.txt', storedContent: 'project-file', contentIv: null, isSecret: false },
-        { path: 'project.txt', storedContent: 'project-only-file', contentIv: null, isSecret: false },
+        {
+          path: 'project.txt',
+          storedContent: 'project-only-file',
+          contentIv: null,
+          isSecret: false,
+        },
       ],
       [
         { key: 'SHARED_KEY', storedValue: 'profile-value', valueIv: null, isSecret: false },
         { key: 'PROFILE_ONLY', storedValue: 'profile-only', valueIv: null, isSecret: false },
+        { key: 'SAM_CODEX_C2_CANDIDATE', storedValue: '1', valueIv: null, isSecret: false },
       ],
       [
         { path: 'shared.txt', storedContent: 'profile-file', contentIv: null, isSecret: false },
-        { path: 'profile.txt', storedContent: 'profile-only-file', contentIv: null, isSecret: false },
+        {
+          path: 'profile.txt',
+          storedContent: 'profile-only-file',
+          contentIv: null,
+          isSecret: false,
+        },
       ],
       [
         { key: 'SHARED_KEY', storedValue: 'skill-value', valueIv: null, isSecret: false },
@@ -107,13 +119,15 @@ describe('workspace runtime asset resolver', () => {
     const db = makeDbWithLimitAwareness([
       [{ id: 'ws-1', userId: 'user-1', projectId: 'project-1', agentProfileHint: null }],
       [{ id: 'ws-1', userId: 'user-1', projectId: 'project-1', agentProfileHint: null }],
-      [{
-        id: 'agent-session-1',
-        workspaceId: 'ws-1',
-        userId: 'user-1',
-        profileId: 'profile-1',
-        skillId: 'skill-1',
-      }],
+      [
+        {
+          id: 'agent-session-1',
+          workspaceId: 'ws-1',
+          userId: 'user-1',
+          profileId: 'profile-1',
+          skillId: 'skill-1',
+        },
+      ],
       [{ id: 'profile-1' }],
       [{ id: 'skill-1' }],
       [],
@@ -136,17 +150,71 @@ describe('workspace runtime asset resolver', () => {
     ]);
   });
 
+  it('takes the Codex candidate marker only from the validated session profile', async () => {
+    const marker = 'SAM_CODEX_C2_CANDIDATE';
+    const db = makeDbWithLimitAwareness([
+      [{ id: 'ws-1', userId: 'user-1', projectId: 'project-1', agentProfileHint: null }],
+      [{ id: 'ws-1', userId: 'user-1', projectId: 'project-1', agentProfileHint: null }],
+      [
+        {
+          id: 'session-1',
+          workspaceId: 'ws-1',
+          userId: 'user-1',
+          profileId: 'profile-1',
+          skillId: 'skill-1',
+        },
+      ],
+      [{ id: 'profile-1' }],
+      [{ id: 'skill-1' }],
+      [{ key: marker, storedValue: 'project-value', valueIv: null, isSecret: false }],
+      [],
+      [{ key: marker, storedValue: '1', valueIv: null, isSecret: false }],
+      [],
+      [{ key: marker, storedValue: 'skill-value', valueIv: null, isSecret: false }],
+      [],
+    ]);
+
+    const assets = await getWorkspaceRuntimeAssets(
+      db as never,
+      { workspaceId: 'ws-1', agentSessionId: 'session-1' },
+      'enc-key'
+    );
+    expect(assets.envVars.filter((item) => item.key === marker)).toEqual([
+      { key: marker, value: '1', isSecret: false },
+    ]);
+  });
+
+  it('cannot select the candidate from a project marker in another session', async () => {
+    const marker = 'SAM_CODEX_C2_CANDIDATE';
+    const db = makeDbWithLimitAwareness([
+      [{ id: 'ws-1', userId: 'user-1', projectId: 'project-1', agentProfileHint: null }],
+      [{ id: 'ws-1', userId: 'user-1', projectId: 'project-1', agentProfileHint: null }],
+      [{ id: 'session-2', workspaceId: 'ws-1', userId: 'user-1', profileId: null, skillId: null }],
+      [{ key: marker, storedValue: '1', valueIv: null, isSecret: false }],
+      [],
+    ]);
+
+    const assets = await getWorkspaceRuntimeAssets(
+      db as never,
+      { workspaceId: 'ws-1', agentSessionId: 'session-2' },
+      'enc-key'
+    );
+    expect(assets.envVars).toEqual([]);
+  });
+
   it('fails closed when supplied agentSessionId belongs to another workspace', async () => {
     const db = makeDbWithLimitAwareness([
       [{ id: 'ws-1', userId: 'user-1', projectId: 'project-1', agentProfileHint: null }],
       [{ id: 'ws-1', userId: 'user-1', projectId: 'project-1', agentProfileHint: null }],
-      [{
-        id: 'agent-session-2',
-        workspaceId: 'ws-2',
-        userId: 'user-1',
-        profileId: 'profile-1',
-        skillId: null,
-      }],
+      [
+        {
+          id: 'agent-session-2',
+          workspaceId: 'ws-2',
+          userId: 'user-1',
+          profileId: 'profile-1',
+          skillId: null,
+        },
+      ],
     ]);
 
     await expect(
@@ -158,17 +226,36 @@ describe('workspace runtime asset resolver', () => {
     ).rejects.toMatchObject({ statusCode: 403 });
   });
 
+  it('does not read runtime asset rows for a missing agent session', async () => {
+    const db = makeDbWithLimitAwareness([
+      [{ id: 'ws-1', userId: 'user-1', projectId: 'project-1', agentProfileHint: null }],
+      [{ id: 'ws-1', userId: 'user-1', projectId: 'project-1', agentProfileHint: null }],
+      [],
+    ]);
+
+    await expect(
+      getWorkspaceRuntimeAssets(
+        db as never,
+        { workspaceId: 'ws-1', agentSessionId: 'rejected-session' },
+        'enc-key'
+      )
+    ).rejects.toMatchObject({ statusCode: 404 });
+    expect(db.select).toHaveBeenCalledTimes(3);
+  });
+
   it('fails closed when supplied agentSessionId references a profile outside the workspace project', async () => {
     const db = makeDbWithLimitAwareness([
       [{ id: 'ws-1', userId: 'user-1', projectId: 'project-1', agentProfileHint: null }],
       [{ id: 'ws-1', userId: 'user-1', projectId: 'project-1', agentProfileHint: null }],
-      [{
-        id: 'agent-session-1',
-        workspaceId: 'ws-1',
-        userId: 'user-1',
-        profileId: 'profile-from-other-project',
-        skillId: null,
-      }],
+      [
+        {
+          id: 'agent-session-1',
+          workspaceId: 'ws-1',
+          userId: 'user-1',
+          profileId: 'profile-from-other-project',
+          skillId: null,
+        },
+      ],
       [],
       [],
     ]);

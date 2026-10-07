@@ -1,5 +1,7 @@
 # Admin AI Proxy UI: Handle KV Default Model No Longer in Catalog
 
+> **Reconciliation 2026-10-05:** A second trigger now exists. #2199 hides Responses-only models from `models[]` (`apps/api/src/routes/admin-ai-proxy.ts:106-108`), so an environment default of `gpt-6.1-sol` would show up orphaned in the picker. Still no orphan flag.
+
 ## Problem
 
 `GET /api/admin/ai-proxy/config` returns `defaultModel` from the KV override

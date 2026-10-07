@@ -85,6 +85,10 @@ import {
   CommentValidationError,
 } from '../durable-objects/project-data/comment-contracts';
 import type { ProjectDataGroupedFtsCleanupResult } from '../durable-objects/project-data/grouped-fts-cleanup';
+import type {
+  GroupedFtsWallRecoveryRequest,
+  GroupedFtsWallRecoveryResult,
+} from '../durable-objects/project-data/grouped-fts-wall-recovery';
 import type { SearchResult } from '../durable-objects/project-data/message-search';
 import {
   AgentMessageRecipientUnavailableError,
@@ -2502,6 +2506,16 @@ export async function runProjectDataGroupedFtsCleanup(
   );
 }
 
+export async function runProjectDataGroupedFtsWallRecovery(
+  env: Env,
+  projectId: string,
+  request: GroupedFtsWallRecoveryRequest
+): Promise<GroupedFtsWallRecoveryResult> {
+  return callProjectDataNoRetry(env, projectId, 'runProjectDataGroupedFtsWallRecovery', (stub) =>
+    stub.runGroupedFtsWallRecovery(request)
+  );
+}
+
 export async function runProjectDataManualToolPayloadCleanup(
   env: Env,
   projectId: string,
@@ -3001,6 +3015,18 @@ export async function forwardWebSocket(
 // =========================================================================
 // Attention Markers
 // =========================================================================
+
+export function hasPendingSessionHumanInput(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  taskId: string,
+  now: number
+): Promise<boolean> {
+  return callProjectDataNoRetry(env, projectId, 'hasPendingSessionHumanInput', (stub) =>
+    stub.hasPendingSessionHumanInput(sessionId, taskId, now)
+  );
+}
 
 export async function createAttentionMarker(
   env: Env,

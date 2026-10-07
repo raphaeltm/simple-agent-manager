@@ -28,9 +28,9 @@ const claudeACPInstallPackage = "@agentclientprotocol/claude-agent-acp@0.81.2"
 const claudeCodeMinVersion = "2.1.280"
 const claudeCodeInstallPackage = "@anthropic-ai/claude-code@2.1.281"
 const claudeCodeInstallCommand = "npm install -g " + claudeACPInstallPackage + " " + claudeCodeInstallPackage
-const codexACPInstallPackage = "@agentclientprotocol/codex-acp@1.13.1"
-const codexCLIInstallPackage = "@openai/codex@0.156.1"
-const codexACPInstallCommand = "npm install -g @agentclientprotocol/codex-acp@1.13.1 @openai/codex@0.156.1"
+const codexACPInstallPackage = "@agentclientprotocol/codex-acp@2.1.1"
+const codexCLIInstallPackage = "@openai/codex@0.160.0"
+const codexACPInstallCommand = "npm install -g " + codexACPInstallPackage + " " + codexCLIInstallPackage
 
 // BootLogReporter sends structured log entries to the control plane.
 // It must be non-nil and have a valid token for logging to work.
@@ -124,6 +124,9 @@ type GatewayConfig struct {
 	// InitTimeoutMs is the fallback ACP initialization timeout in milliseconds.
 	// Used when per-phase timeouts below are not set (0).
 	InitTimeoutMs int
+	// CodexRuntimeInstallTimeout bounds opted-in VM installation; zero uses the config default.
+	CodexRuntimeInstallTimeout   time.Duration
+	CodexRuntimeInstallKillGrace time.Duration
 	// InitializeTimeoutMs is the timeout for the Initialize RPC in milliseconds.
 	// When 0, falls back to InitTimeoutMs.
 	InitializeTimeoutMs int
@@ -222,6 +225,13 @@ type GatewayConfig struct {
 	TerminalActivityReportBackoff time.Duration
 	// ActivityReportTimeout bounds each activity callback request.
 	ActivityReportTimeout time.Duration
+	// UsageProbeTimeout bounds one post-turn provider usage probe (Codex rollout
+	// read or OpenCode Go usage request). Zero selects the package default.
+	UsageProbeTimeout time.Duration
+	// OpenCodeGoUsageURL is the OpenCode Go usage endpoint probed after each
+	// turn of an OpenCode session that uses the opencode-go provider. Empty
+	// selects the package default.
+	OpenCodeGoUsageURL string
 	// CredentialSyncTimeout bounds auth-file sync-back during shutdown.
 	CredentialSyncTimeout time.Duration
 
@@ -780,21 +790,33 @@ func readAuthFileFromContainer(ctx context.Context, containerID, user, authFileP
 	return buf.String(), nil
 }
 
-// agentInstallMu serializes concurrent agent binary installs to prevent
-// npm ENOTEMPTY errors when two SelectAgent calls race.
-var agentInstallMu sync.Mutex
+// agentInstallGate serializes installs while letting cancelled/deadline-bound
+// selections leave the queue without waiting for another install to finish.
+var agentInstallGate = make(chan struct{}, 1)
+
+func acquireAgentInstall(ctx context.Context) (func(), error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case agentInstallGate <- struct{}{}:
+		return func() { <-agentInstallGate }, nil
+	}
+}
 
 // installAgentBinary checks if the agent command exists in the given container
 // and installs it via the provided installCmd if missing. The install runs as
 // root to ensure permissions for system-level package installs. Returns nil if
 // the binary was already present or was installed successfully.
 //
-// A package-level mutex serializes installs so that concurrent SelectAgent
+// A package-level gate serializes installs so that concurrent SelectAgent
 // calls do not race on npm global installs (which causes ENOTEMPTY errors).
-// The fast-path `which` check runs without the mutex; only the slow install
+// The fast-path `which` check runs without the gate; only the slow install
 // path acquires it, with a double-check after acquisition.
 func installAgentBinary(ctx context.Context, containerID string, info agentCommandInfo) error {
-	// Fast path: check without mutex — avoids contention when already installed.
+	// Fast path: check without gate — avoids contention when already installed.
 	checkScript := agentInstalledCheckScript(info)
 	checkArgs := []string{"exec", containerID, "sh", "-c", checkScript}
 	checkCmd := exec.CommandContext(ctx, "docker", checkArgs...)
@@ -803,16 +825,19 @@ func installAgentBinary(ctx context.Context, containerID string, info agentComma
 		return nil
 	}
 
-	// Slow path: acquire mutex to serialize installs.
-	agentInstallMu.Lock()
-	defer agentInstallMu.Unlock()
+	// Slow path: acquire gate to serialize installs.
+	releaseInstall, err := acquireAgentInstall(ctx)
+	if err != nil {
+		return err
+	}
+	defer releaseInstall()
 
-	// Bail out if context was cancelled while waiting for the mutex.
+	// Bail out if context was cancelled while waiting for the gate.
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
 
-	// Double-check after acquiring mutex — another goroutine may have installed it.
+	// Double-check after acquiring gate — another goroutine may have installed it.
 	recheckCmd := exec.CommandContext(ctx, "docker", checkArgs...)
 	if err := recheckCmd.Run(); err == nil {
 		slog.Info("Agent binary was installed by another goroutine", "command", info.command)
@@ -858,23 +883,26 @@ func installAgentBinary(ctx context.Context, containerID string, info agentComma
 // script is the same hardcoded literal from getAgentCommandInfo — never derived
 // from external input.
 func installAgentBinaryLocal(ctx context.Context, info agentCommandInfo) error {
-	// Fast path: check without mutex. exec.LookPath matches how startLocalProcess
+	// Fast path: check without gate. exec.LookPath matches how startLocalProcess
 	// resolves the command, so this is the correct "already installed" check.
 	if err := exec.CommandContext(ctx, localShellPath, "-c", agentInstalledCheckScript(info)).Run(); err == nil {
 		slog.Info("Agent binary is already installed (local)", "command", info.command)
 		return nil
 	}
 
-	// Slow path: acquire mutex to serialize installs (shared with docker path).
-	agentInstallMu.Lock()
-	defer agentInstallMu.Unlock()
+	// Slow path: acquire gate to serialize installs (shared with docker path).
+	releaseInstall, err := acquireAgentInstall(ctx)
+	if err != nil {
+		return err
+	}
+	defer releaseInstall()
 
-	// Bail out if context was cancelled while waiting for the mutex.
+	// Bail out if context was cancelled while waiting for the gate.
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
 
-	// Double-check after acquiring mutex — another goroutine may have installed it.
+	// Double-check after acquiring gate — another goroutine may have installed it.
 	if err := exec.CommandContext(ctx, localShellPath, "-c", agentInstalledCheckScript(info)).Run(); err == nil {
 		slog.Info("Agent binary was installed by another goroutine (local)", "command", info.command)
 		return nil
@@ -966,6 +994,7 @@ type agentCommandInfo struct {
 	installCmd    string // shell command to run if binary is missing (npm, pip, etc.)
 	isNpmBased    bool   // true for agents installed via npm; controls prerequisite injection and cleanup
 	validationCmd string // optional shell check for underlying companion CLI/version requirements
+	verifyOnly    bool   // explicit staged release: fail closed instead of installing stock packages
 	injectionMode string // "env" (default) or "auth-file" — how the credential is injected
 	authFilePath  string // relative to home dir, e.g. ".codex/auth.json" (only when injectionMode == "auth-file")
 }
@@ -994,7 +1023,7 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 		}
 	case "openai-codex":
 		// Sandbox and approval overrides are injected through CODEX_CONFIG by
-		// writeCodexStartupConfig. codex-acp (verified through 1.13.1) does not parse Codex CLI -c
+		// writeCodexStartupConfig. codex-acp (verified through 2.1.1) does not parse Codex CLI -c
 		// arguments; its supported config channel is CODEX_CONFIG JSON, which it
 		// forwards to every app-server thread (including spawned subagents).
 		if credentialKind == "oauth-token" {

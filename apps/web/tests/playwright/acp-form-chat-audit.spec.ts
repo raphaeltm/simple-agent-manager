@@ -131,17 +131,17 @@ for (const viewport of ['iPhone SE (375x667)', 'Desktop (1280x800)']) {
         route.fulfill({ status: 200, json: { summary: summary(FORM_ID, 'pending', Date.now() + 30 * 60_000),
           detail: { message: 'Empty strings are valid answers here.', schema: {
             type: 'object', properties: {
-              freeText: { type: 'string', title: 'Free text', minLength: 0 },
+              freeText: { type: 'string', minLength: 0 },
               emptyChoice: { type: 'string', title: 'Empty choice', oneOf: [
                 { const: '', title: 'Empty option' }, { const: 'filled', title: 'Filled option' }] },
             }, required: ['freeText', 'emptyChoice'] } } } }));
       await page.goto(`/projects/${PROJECT}/chat/${SESSION}`);
       const card = page.getByTestId(`acp-form-${FORM_ID}`);
       await expect(card.getByText('Empty strings are valid answers here.')).toBeVisible();
-      await expect(card.getByRole('textbox', { name: 'Free text' })).not.toHaveAttribute('required');
+      await expect(card.getByRole('textbox', { name: 'freeText' })).not.toHaveAttribute('required');
       await card.getByRole('button', { name: 'Send answer' }).click();
-      await expect(card.getByText('Check Free text.')).toBeVisible();
-      await card.getByRole('button', { name: 'Use empty answer for Free text' }).click();
+      await expect(card.getByText('Check freeText.')).toBeVisible();
+      await card.getByRole('button', { name: 'Use empty answer for freeText' }).click();
       await expect(card.getByText('Empty answer selected')).toBeVisible();
       await card.getByLabel('Empty choice').selectOption({ label: 'Empty option' });
       await expect(card.getByLabel('Empty choice')).toHaveValue('0');
@@ -159,6 +159,8 @@ for (const viewport of ['iPhone SE (375x667)', 'Desktop (1280x800)']) {
         }
         throw new Error('Conversation scroller missing');
       });
+      await assertNoOverflow(page);
+      await assertNoClippedOverflow(page);
       await screenshot(page, viewport.startsWith('iPhone') ? 'acp-form-empty-mobile' : 'acp-form-empty-desktop');
       await card.getByRole('button', { name: 'Send answer' }).click();
       await expect(card).toHaveAttribute('data-interaction-state', 'answered');

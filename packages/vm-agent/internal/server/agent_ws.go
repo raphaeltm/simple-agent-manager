@@ -384,15 +384,10 @@ func (s *Server) getOrCreateSessionHostForRestore(hostKey, workspaceID, sessionI
 		if resolver := s.ptyManagerContainerResolverForLabel(runtime.ContainerLabelValue); resolver != nil {
 			cfg.ContainerResolver = resolver
 		}
-		// Standalone mode is the whole condition: with no devcontainer there is no
-		// /etc/sam/project-env for resolveAgentEnvVars to read (session_host_startup.go),
-		// so this provider is the only path by which project/profile/skill env vars and
-		// runtime files reach the agent process. Do NOT re-add a runtime.Lightweight
-		// conjunct here: Lightweight is a per-workspace *provisioning* choice (skip the
-		// devcontainer build) that VM workspaces also use, not a statement about whether
-		// a container exists. Gating on it made a caller that forgot to thread
-		// lightweight=true silently disable env injection — see .claude/rules/73.
-		if s.config != nil && s.config.IsStandaloneMode() {
+		// Standalone sessions apply all runtime assets. VM devcontainers still get
+		// their normal assets at bootstrap; they fetch only the per-session Codex
+		// candidate selector from this provider, bound to sessionID above.
+		if s.config != nil {
 			runtimeAssetsProvider = s.runtimeAssetsProviderForWorkspaceSession(workspaceID, sessionID)
 		}
 	}
@@ -427,6 +422,9 @@ func (s *Server) getOrCreateSessionHostForRestore(hostKey, workspaceID, sessionI
 		RuntimeAssetsProvider: runtimeAssetsProvider,
 	}
 	host := acp.NewSessionHost(hostCfg)
+	if interactionConfig, ok := s.sessionManualInteractionConfig[hostKey]; ok {
+		host.ConfigureAcpInteractions(interactionConfig)
+	}
 	s.sessionHosts[hostKey] = host
 
 	slog.Info("SessionHost created", "workspace", workspaceID, "sessionId", sessionID,

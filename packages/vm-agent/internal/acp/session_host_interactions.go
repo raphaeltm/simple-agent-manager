@@ -23,26 +23,31 @@ const (
 // AcpInteractionRuntimeConfig is the versioned Worker -> vm-agent start contract.
 // A missing or disabled contract always fails closed.
 type AcpInteractionRuntimeConfig struct {
-	Enabled                 bool  `json:"enabled"`
-	FormsEnabled            bool  `json:"formsEnabled"`
-	ProtocolVersion         int   `json:"protocolVersion"`
-	PermissionDeadlineMs    int64 `json:"permissionDeadlineMs"`
-	FormDeadlineMs          int64 `json:"formDeadlineMs"`
-	MaxDeadlineMs           int64 `json:"maxDeadlineMs"`
-	DeadlineMarginMs        int64 `json:"deadlineMarginMs"`
-	RequestMaxBytes         int   `json:"requestMaxBytes"`
-	OptionsMaxCount         int   `json:"optionsMaxCount"`
-	OptionIDMaxChars        int   `json:"optionIdMaxChars"`
-	OptionNameMaxChars      int   `json:"optionNameMaxChars"`
-	ReceiptLimit            int   `json:"receiptLimit"`
-	ResponseMaxBytes        int64 `json:"responseMaxBytes"`
-	FormSchemaMaxBytes      int   `json:"formSchemaMaxBytes"`
-	FormSchemaMaxProperties int   `json:"formSchemaMaxProperties"`
-	FormSchemaMaxEnum       int   `json:"formSchemaMaxEnum"`
-	AnswerMaxBytes          int   `json:"answerMaxBytes"`
-	AnswerStringMaxBytes    int   `json:"answerStringMaxBytes"`
-	SettleRetryDelaysMs     []int `json:"settleRetryDelaysMs"`
-	SettleRetrySteadyMs     int   `json:"settleRetrySteadyMs"`
+	Enabled                  bool  `json:"enabled"`
+	FormsEnabled             bool  `json:"formsEnabled"`
+	URLsEnabled              bool  `json:"urlsEnabled"`
+	ProtocolVersion          int   `json:"protocolVersion"`
+	PermissionDeadlineMs     int64 `json:"permissionDeadlineMs"`
+	FormDeadlineMs           int64 `json:"formDeadlineMs"`
+	URLDeadlineMs            int64 `json:"urlDeadlineMs"`
+	URLMaxChars              int   `json:"urlMaxChars"`
+	URLElicitationIDMaxChars int   `json:"urlElicitationIdMaxChars"`
+	URLRedirectDepth         int   `json:"urlRedirectDepth"`
+	MaxDeadlineMs            int64 `json:"maxDeadlineMs"`
+	DeadlineMarginMs         int64 `json:"deadlineMarginMs"`
+	RequestMaxBytes          int   `json:"requestMaxBytes"`
+	OptionsMaxCount          int   `json:"optionsMaxCount"`
+	OptionIDMaxChars         int   `json:"optionIdMaxChars"`
+	OptionNameMaxChars       int   `json:"optionNameMaxChars"`
+	ReceiptLimit             int   `json:"receiptLimit"`
+	ResponseMaxBytes         int64 `json:"responseMaxBytes"`
+	FormSchemaMaxBytes       int   `json:"formSchemaMaxBytes"`
+	FormSchemaMaxProperties  int   `json:"formSchemaMaxProperties"`
+	FormSchemaMaxEnum        int   `json:"formSchemaMaxEnum"`
+	AnswerMaxBytes           int   `json:"answerMaxBytes"`
+	AnswerStringMaxBytes     int   `json:"answerStringMaxBytes"`
+	SettleRetryDelaysMs      []int `json:"settleRetryDelaysMs"`
+	SettleRetrySteadyMs      int   `json:"settleRetrySteadyMs"`
 }
 
 func (c AcpInteractionRuntimeConfig) validate() error {
@@ -65,6 +70,10 @@ func (c AcpInteractionRuntimeConfig) validate() error {
 		c.FormSchemaMaxBytes <= 0 || c.FormSchemaMaxProperties <= 0 || c.FormSchemaMaxEnum <= 0 ||
 		c.AnswerMaxBytes <= 0 || c.AnswerStringMaxBytes <= 0) {
 		return errors.New("invalid ACP form bounds")
+	}
+	if c.URLsEnabled && (c.URLDeadlineMs <= 0 || c.URLDeadlineMs > c.MaxDeadlineMs ||
+		c.URLMaxChars <= 0 || c.URLElicitationIDMaxChars <= 0 || c.URLRedirectDepth < 0) {
+		return errors.New("invalid ACP URL deadline")
 	}
 	for _, delay := range c.SettleRetryDelaysMs {
 		if delay <= 0 {
@@ -94,8 +103,10 @@ type acpPermissionDetail struct {
 
 type acpInteractionDetail struct {
 	acpPermissionDetail
-	Message *string        `json:"message,omitempty"`
-	Schema  map[string]any `json:"schema,omitempty"`
+	Message       *string        `json:"message,omitempty"`
+	Schema        map[string]any `json:"schema,omitempty"`
+	URL           string         `json:"url,omitempty"`
+	ElicitationID string         `json:"elicitationId,omitempty"`
 }
 
 type acpInteractionCreateRequest struct {
@@ -158,7 +169,7 @@ func ValidateAcpInteractionDecision(decision AcpInteractionAnswerDecision) error
 		return ValidatePermissionAcpInteractionDecision(decision)
 	}
 	decodedHash, err := hex.DecodeString(decision.AnswerHash)
-	if err != nil || len(decodedHash) != sha256.Size || decision.OptionID != "" || decision.Content == nil {
+	if err != nil || len(decodedHash) != sha256.Size || decision.OptionID != "" {
 		return errors.New("invalid form decision")
 	}
 	return nil
@@ -177,6 +188,7 @@ type acpInteractionWaiter struct {
 	options       map[string]struct{}
 	formSchema    map[string]any
 	formLimits    acpFormLimits
+	urlRequest    bool
 	result        chan acpInteractionWaitResult
 	cancelRequest context.CancelFunc
 }
@@ -189,6 +201,14 @@ type acpInteractionReceipt struct {
 type acpInteractionCreateResult struct {
 	outcome acpInteractionCreateOutcome
 	err     error
+}
+
+type acpUrlElicitation struct {
+	interactionID string
+	generation    string
+	deadline      time.Time
+	completed     bool
+	cancelled     bool
 }
 
 func (h *SessionHost) configureAcpInteractions(config AcpInteractionRuntimeConfig) {
@@ -229,6 +249,7 @@ func (h *SessionHost) attachAcpInteractionGeneration() string {
 	generation := uuid.NewString()
 	h.interactionMu.Lock()
 	h.cancelInteractionWaitersLocked("connection_replaced")
+	clear(h.urlElicitations)
 	h.interactionGeneration = generation
 	h.interactionMu.Unlock()
 	return generation
@@ -381,10 +402,17 @@ func (h *SessionHost) ResolveAcpInteractionAnswer(
 		}
 		result.optionID = decision.OptionID
 	case "accepted":
-		if waiter.formSchema == nil || !validateAcpFormAnswer(waiter.formSchema, decision.Content, waiter.formLimits) {
-			return "conflict"
+		if waiter.urlRequest {
+			acceptedHash := sha256.Sum256([]byte("accepted"))
+			if decision.Content != nil || decision.OptionID != "" || decision.AnswerHash != hex.EncodeToString(acceptedHash[:]) {
+				return "conflict"
+			}
+		} else {
+			if waiter.formSchema == nil || !validateAcpFormAnswer(waiter.formSchema, decision.Content, waiter.formLimits) {
+				return "conflict"
+			}
+			result.content = decision.Content
 		}
-		result.content = decision.Content
 	case "declined", "cancelled":
 		result.cancel = true
 		if decision.Kind == "declined" {
@@ -482,7 +510,7 @@ func (h *SessionHost) requestPermission(
 	config := h.acpInteractionConfigSnapshot()
 	if !config.Enabled || config.validate() != nil || generation == "" ||
 		h.config.ProjectID == "" || h.config.WorkspaceID == "" || h.config.SessionID == "" ||
-		h.config.RuntimeIdentity == "" || h.config.CallbackToken == "" || h.config.ControlPlaneURL == "" {
+		h.config.RuntimeIdentity == "" || h.callbackToken() == "" || h.config.ControlPlaneURL == "" {
 		slog.Info("acp_interaction.permission_cancelled", "reason", "unsupported")
 		return cancelledPermissionResponse(), nil
 	}

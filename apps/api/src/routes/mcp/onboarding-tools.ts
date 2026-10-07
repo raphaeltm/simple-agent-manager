@@ -71,6 +71,7 @@ This connects to the SAM control plane. It's how you interact with tasks, projec
 **Identity & Orientation:**
 - \`get_workspace_info\` — Your workspace metadata: ID, node, project, branch, mode (task vs conversation), VM size, URL, uptime.
 - \`get_credential_status\` — Which credentials are available and their status.
+- \`get_credential_limits\` — Remaining provider usage for your credential (Claude/Codex 5h and weekly windows, OpenCode Go windows). Check before heavy work; when a window is critical, pause dispatching and schedule a wake after it resets.
 
 **Network & Ports:**
 - \`get_network_info\` — Your workspace URL, base domain, and discovered ports.

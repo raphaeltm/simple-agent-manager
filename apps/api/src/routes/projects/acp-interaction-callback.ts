@@ -1,4 +1,5 @@
 import {
+  AcpInteractionRuntimeCompleteUrlSchema,
   AcpInteractionRuntimeCreateSchema,
   AcpInteractionRuntimeSettleSchema,
 } from '@simple-agent-manager/shared';
@@ -12,7 +13,11 @@ import { extractBearerToken } from '../../lib/auth-helpers';
 import { log } from '../../lib/logger';
 import { errors } from '../../middleware/error';
 import { jsonValidator } from '../../schemas';
-import { createInteraction, settleInteraction } from '../../services/acp-interaction-store';
+import {
+  completeUrlInteraction,
+  createInteraction,
+  settleInteraction,
+} from '../../services/acp-interaction-store';
 import { verifyCallbackToken } from '../../services/jwt';
 
 const acpInteractionCallbackRoute = new Hono<{ Bindings: Env }>();
@@ -70,10 +75,7 @@ async function assertConversationTask(env: Env, workspaceId: string, chatSession
     .select({ taskMode: schema.tasks.taskMode })
     .from(schema.tasks)
     .where(
-      and(
-        eq(schema.tasks.workspaceId, workspaceId),
-        eq(schema.tasks.chatSessionId, chatSessionId)
-      )
+      and(eq(schema.tasks.workspaceId, workspaceId), eq(schema.tasks.chatSessionId, chatSessionId))
     )
     .get();
   if (task?.taskMode !== 'conversation') {
@@ -114,7 +116,7 @@ acpInteractionCallbackRoute.post(
   async (c) => {
     const identity = await verifyWorkspaceCallback(c);
     const body = c.req.valid('json');
-    if (body.kind === 'form') {
+    if (body.kind === 'form' || body.kind === 'url') {
       await assertConversationTask(c.env, identity.workspaceId, identity.chatSessionId);
     }
     await assertAgentSessionExists(c.env, identity.workspaceId, body.agentSessionId, true);
@@ -137,6 +139,27 @@ acpInteractionCallbackRoute.post(
     if (result.status === 'conflict') return c.json(result, 409);
     if (result.status === 'too_many_pending') return c.json(result, 429);
     return c.json(result, 400);
+  }
+);
+
+acpInteractionCallbackRoute.post(
+  '/:id/workspaces/:workspaceId/acp-interactions/:interactionId/complete-url',
+  jsonValidator(AcpInteractionRuntimeCompleteUrlSchema),
+  async (c) => {
+    const identity = await verifyWorkspaceCallback(c);
+    const body = c.req.valid('json');
+    if (body.interactionId !== c.req.param('interactionId'))
+      throw errors.badRequest('interactionId route/body mismatch');
+    await assertAgentSessionExists(c.env, identity.workspaceId, body.agentSessionId, false);
+    const result = await completeUrlInteraction(
+      c.env,
+      identity.projectId,
+      identity.chatSessionId,
+      body
+    );
+    if (result.status === 'not_found') throw errors.notFound('ACP interaction');
+    if (result.status === 'stale') throw errors.conflict('ACP URL completion is stale');
+    return c.json(result, 200);
   }
 );
 

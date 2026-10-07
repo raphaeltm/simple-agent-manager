@@ -175,6 +175,7 @@ import {
   handleListTriggers,
   handleUpdateTrigger,
 } from './trigger-tools';
+import { webhookClaimRoutes } from './webhook-claims';
 import {
   handleExposePort,
   handleGetCredentialStatus,
@@ -182,6 +183,7 @@ import {
   handleGetWorkspaceDiffSummary,
   handleGetWorkspaceInfo,
 } from './workspace-tools';
+import { handleGetCredentialLimits } from './workspace-tools-credential-limits';
 import {
   handleCheckDnsStatus,
   handleGetPeerAgentOutput,
@@ -207,6 +209,8 @@ export const mcpRoutes = new Hono<{ Bindings: Env }>();
 function normalizeRpcId(id: unknown): string | number | null {
   return typeof id === 'string' || typeof id === 'number' ? id : null;
 }
+
+mcpRoutes.route('/', webhookClaimRoutes);
 
 mcpRoutes.post('/', async (c) => {
   // NOSONAR - legacy MCP dispatcher switch is intentionally centralized.
@@ -493,6 +497,8 @@ mcpRoutes.post('/', async (c) => {
             return c.json(await handleGetWorkspaceInfo(requestId, tokenData, c.env));
           case 'get_credential_status':
             return c.json(await handleGetCredentialStatus(requestId, tokenData, c.env));
+          case 'get_credential_limits':
+            return c.json(await handleGetCredentialLimits(requestId, toolArgs, tokenData, c.env));
           case 'get_network_info':
             return c.json(await handleGetNetworkInfo(requestId, tokenData, c.env));
           case 'expose_port':

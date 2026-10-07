@@ -66,6 +66,7 @@ const promptProtocolCapabilities = {
     answerEndpoint: true,
     permissionBridge: true,
     formBridge: true,
+    urlBridge: true,
   },
 };
 const targetRow = {

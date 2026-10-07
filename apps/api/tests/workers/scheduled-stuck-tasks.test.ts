@@ -294,7 +294,6 @@ describe('recoverStuckTasks — vertical slice', () => {
         TASK_STUCK_QUEUED_TIMEOUT_MS: '60000', // 1 min (task is 20m old)
         TASK_STUCK_DELEGATED_TIMEOUT_MS: '300000',
         TASK_RUN_MAX_EXECUTION_MS: '14400000',
-        TASK_RUN_HARD_TIMEOUT_MS: '28800000',
         STUCK_TASK_SCAN_CURSOR_KV_KEY: 'test:stuck-task-cursor:queued-stuck',
       } as unknown as Env;
 
@@ -339,7 +338,6 @@ describe('recoverStuckTasks — vertical slice', () => {
         TASK_STUCK_QUEUED_TIMEOUT_MS: '300000',
         TASK_STUCK_DELEGATED_TIMEOUT_MS: '60000', // 1 min (task is 30m old)
         TASK_RUN_MAX_EXECUTION_MS: '14400000',
-        TASK_RUN_HARD_TIMEOUT_MS: '28800000',
       } as unknown as Env;
 
       const result = await recoverStuckTasks(testEnv);
@@ -353,7 +351,7 @@ describe('recoverStuckTasks — vertical slice', () => {
   });
 
   describe('stuck in_progress task detection', () => {
-    it('fails in_progress task past hard timeout', async () => {
+    it('fails an in_progress task past the recovery check with no live runtime', async () => {
       await seedBaseData();
       const taskId = 'task-st-inprog-hard';
       const nineHoursAgo = new Date(Date.now() - 9 * 60 * 60 * 1000).toISOString();
@@ -370,7 +368,6 @@ describe('recoverStuckTasks — vertical slice', () => {
         TASK_STUCK_QUEUED_TIMEOUT_MS: '300000',
         TASK_STUCK_DELEGATED_TIMEOUT_MS: '300000',
         TASK_RUN_MAX_EXECUTION_MS: '14400000', // 4h
-        TASK_RUN_HARD_TIMEOUT_MS: '28800000', // 8h (task is 9h old)
       } as unknown as Env;
 
       const result = await recoverStuckTasks(testEnv);
@@ -379,10 +376,11 @@ describe('recoverStuckTasks — vertical slice', () => {
 
       const task = await getTaskStatus(taskId);
       expect(task?.status).toBe('failed');
-      // Past the hard timeout with no provable live runtime (no workspace), the
-      // task is failed through the liveness gate with a sanitized reason.
-      expect(task?.error_message).toContain('no longer live');
-      expect(task?.error_message).toContain('workspace_missing');
+      // Past the recovery check with no provable live runtime (no workspace), the
+      // task is failed through the liveness gate with its observed age.
+      expect(task?.error_message).toContain(
+        'Task runtime is no longer live (workspace_missing); task started 540 minutes ago.'
+      );
     });
   });
 
@@ -418,7 +416,6 @@ describe('recoverStuckTasks — vertical slice', () => {
         TASK_STUCK_QUEUED_TIMEOUT_MS: '300000',
         TASK_STUCK_DELEGATED_TIMEOUT_MS: '300000',
         TASK_RUN_MAX_EXECUTION_MS: '14400000', // 4h: task is eligible for liveness reconciliation
-        TASK_RUN_HARD_TIMEOUT_MS: '28800000', // 8h: task is inside the hard timeout window
         NODE_HEARTBEAT_STALE_SECONDS: '300',
         STUCK_TASK_SCAN_CURSOR_KV_KEY: 'test:stuck-task-cursor:missing-projectdata-acp',
       } as unknown as Env;
@@ -508,7 +505,6 @@ describe('recoverStuckTasks — vertical slice', () => {
         TASK_STUCK_QUEUED_TIMEOUT_MS: '300000',
         TASK_STUCK_DELEGATED_TIMEOUT_MS: '300000',
         TASK_RUN_MAX_EXECUTION_MS: '14400000',
-        TASK_RUN_HARD_TIMEOUT_MS: '28800000',
         NODE_HEARTBEAT_STALE_SECONDS: '300',
         STUCK_TASK_SCAN_CURSOR_KV_KEY: cursorKey,
       } as unknown as Env;
@@ -568,7 +564,6 @@ describe('recoverStuckTasks — vertical slice', () => {
         TASK_STUCK_QUEUED_TIMEOUT_MS: '300000',
         TASK_STUCK_DELEGATED_TIMEOUT_MS: '300000',
         TASK_RUN_MAX_EXECUTION_MS: '14400000', // 4h (task is 5h old → past soft timeout)
-        TASK_RUN_HARD_TIMEOUT_MS: '28800000', // 8h (task is within hard timeout)
         NODE_HEARTBEAT_STALE_SECONDS: '300', // 5 min
       } as unknown as Env;
 
@@ -607,7 +602,6 @@ describe('recoverStuckTasks — vertical slice', () => {
         TASK_STUCK_QUEUED_TIMEOUT_MS: '60000',
         TASK_STUCK_DELEGATED_TIMEOUT_MS: '900000', // 15m — task just became delegated, not stuck
         TASK_RUN_MAX_EXECUTION_MS: '14400000',
-        TASK_RUN_HARD_TIMEOUT_MS: '28800000',
       } as unknown as Env;
 
       const result = await recoverStuckTasks(testEnv);
@@ -634,7 +628,6 @@ describe('recoverStuckTasks — vertical slice', () => {
         TASK_STUCK_QUEUED_TIMEOUT_MS: '300000', // 5 min
         TASK_STUCK_DELEGATED_TIMEOUT_MS: '300000',
         TASK_RUN_MAX_EXECUTION_MS: '14400000',
-        TASK_RUN_HARD_TIMEOUT_MS: '28800000',
       } as unknown as Env;
 
       const result = await recoverStuckTasks(testEnv);
@@ -662,7 +655,6 @@ describe('recoverStuckTasks — vertical slice', () => {
         TASK_STUCK_QUEUED_TIMEOUT_MS: '60000',
         TASK_STUCK_DELEGATED_TIMEOUT_MS: '300000',
         TASK_RUN_MAX_EXECUTION_MS: '14400000',
-        TASK_RUN_HARD_TIMEOUT_MS: '28800000',
         STUCK_TASK_SCAN_CURSOR_KV_KEY: 'test:stuck-task-cursor:obs-event',
       } as unknown as Env;
 
@@ -688,7 +680,9 @@ describe('recoverStuckTasks — vertical slice', () => {
 describe('gatherDiagnostics', () => {
   it('includes workspace and node status from D1', async () => {
     await seedUser('user-st-diag');
-    await seedInstallation('install-st-diag', 'user-st-diag', { installationIdValue: 'install-st-diag-ext' });
+    await seedInstallation('install-st-diag', 'user-st-diag', {
+      installationIdValue: 'install-st-diag-ext',
+    });
     await seedProject('project-st-diag', 'user-st-diag', 'install-st-diag');
     await seedNode('node-st-diag', 'user-st-diag', { status: 'running', healthStatus: 'healthy' });
     await seedWorkspace('ws-st-diag', 'node-st-diag', 'user-st-diag', {

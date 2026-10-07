@@ -215,6 +215,11 @@ PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED = "true"
 # stays bounded by _WALL_TIME_MS, _SWEEP_SESSIONS and _SWEEP_MESSAGE_BUDGET; daily volume by
 # _DAILY_WRITE_BUDGET. Load review: tasks/archive/2026-09-27-triple-archive-drain-speed.md and the
 # archive-sharding notes in apps/www/src/content/docs/docs/reference/configuration.md.
+# 2026-10-03: a billing firebreak (#2216) set this back to one hour and was reverted the same day.
+# The cost spike it reacted to came from Containers, Workers AI and R2 snapshot uploads, not from
+# this sweep, while the SAM root ProjectData DO sat ~550 MB under Cloudflare's hard 10 GiB cap
+# (it hit the cap on 2026-10-02). This drain is storage protection, not a cost lever: do not slow
+# it to save money.
 PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS = "1080000"
 PROJECT_DATA_ARCHIVE_SHARD_COUNT = "128"
 PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS = "1"
@@ -270,7 +275,7 @@ PROJECT_DATA_ARCHIVE_BUDGET_STALL_ALERT_SWEEPS = "3"
 PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS = "604800000"
 PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS = "604800000"
 # Failed journals wait this long before a sweep retries them, so three faults poison a row over
-# hours, not three consecutive 15-minute ticks.
+# hours, not three consecutive sweep cadence ticks.
 PROJECT_DATA_ARCHIVE_FAILED_RETRY_DELAY_MS = "3600000"
 PROJECT_DATA_ARCHIVE_CHUNK_ROWS = "500"
 PROJECT_DATA_ARCHIVE_CHUNK_BYTES = "16777216"
@@ -381,12 +386,14 @@ TASK_RECONCILIATION_NODE_CALL_TIMEOUT_MS = "5000"
 TASK_RECONCILIATION_CANDIDATE_LEASE_MS = "30000"
 TASK_RECONCILIATION_PROBE_MAX_ATTEMPTS = "3"
 TASK_RECONCILIATION_QUARANTINE_MS = "300000"
-# Dormant durable ACP interaction foundation. Slice A keeps this disabled; later
-# slices activate runtime/UI capability after end-to-end verification. Tuning
-# defaults live in shared constants and apps/api/.env.example to avoid consuming
-# production Worker text bindings unless an operator intentionally overrides them.
+# Reviewed permission creation requires an explicit deployment override after
+# compatible-runtime verification. Pending requests remain answerable when
+# creation is disabled. Forms have a separate opt-in switch.
 ACP_INTERACTIONS_ENABLED = "false"
 ACP_INTERACTION_FORMS_ENABLED = "false"
+ACP_INTERACTION_URLS_ENABLED = "false"
+# URL bounds use shared defaults unless a deployment sets an explicit override.
+# Keeping default values out of [vars] preserves Worker text-binding headroom.
 # AI Inference Proxy (Cloudflare AI Gateway for trial/zero-config users)
 AI_PROXY_ENABLED = "true"
 AI_PROXY_DEFAULT_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8"

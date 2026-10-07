@@ -82,6 +82,9 @@ func (r *Reporter) sendBatch(batch []outboxRow) error {
 		// No workspace yet — leave messages in outbox for later.
 		return fmt.Errorf("no workspace ID")
 	}
+	if r.awaitingCredential(token) {
+		return errAwaitingCredential
+	}
 
 	body, err := buildBatchBody(batch)
 	if err != nil {
@@ -136,6 +139,9 @@ func (r *Reporter) handleBatchResponse(batch []outboxRow, url, token, wsID strin
 	}
 	if postErr == nil && statusCode >= 200 && statusCode < 300 {
 		return true, nil
+	}
+	if statusCode == http.StatusUnauthorized {
+		return true, r.credentialRejected(token, responseBody)
 	}
 	if statusCode == http.StatusConflict && isSessionMessageLimitError(responseBody) {
 		r.markMessageLimitReached(batch, responseBody)
@@ -205,9 +211,11 @@ func (r *Reporter) discardRejectedRow(row outboxRow, rejection rowRejectedError)
 	r.deleteBatch([]outboxRow{row})
 }
 
+// isTerminalBatchResponse is true when the control plane says the workspace or
+// session will never accept these messages. 401 is not terminal: it rejects the
+// token, which can be replaced (see credential.go).
 func isTerminalBatchResponse(statusCode int) bool {
-	return statusCode == http.StatusUnauthorized ||
-		statusCode == http.StatusForbidden ||
+	return statusCode == http.StatusForbidden ||
 		statusCode == http.StatusNotFound ||
 		statusCode == http.StatusGone
 }
@@ -332,6 +340,10 @@ func (r *Reporter) sendRowsIndividually(url, token, wsID string, batch []outboxR
 		case sessionMessageLimitError:
 			r.markMessageLimitReached(batch, verdict.responseBody)
 			return nil
+		case credentialRejectedError:
+			// Rows already sent are resent with the next token; the control plane
+			// dedupes them by message id.
+			return r.credentialRejected(token, verdict.responseBody)
 		case terminalPersistenceError:
 			r.markTerminalPersistenceFailure(batch, verdict.statusCode, verdict.responseBody)
 			return nil
@@ -391,6 +403,9 @@ func fallbackCandidateResult(row outboxRow, candidateIndex int, statusCode int, 
 	}
 	if statusCode == http.StatusConflict && isSessionMessageLimitError(responseBody) {
 		return false, sessionMessageLimitError{responseBody: responseBody}
+	}
+	if statusCode == http.StatusUnauthorized {
+		return false, credentialRejectedError{responseBody: responseBody}
 	}
 	if isTerminalBatchResponse(statusCode) {
 		return false, terminalPersistenceError{statusCode: statusCode, responseBody: responseBody}

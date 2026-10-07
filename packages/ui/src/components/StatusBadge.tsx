@@ -69,6 +69,11 @@ const statusConfig: Record<string, { label: string; bg: string; fg: string }> = 
     bg: 'var(--sam-status-success-bg)',
     fg: 'var(--sam-status-success-fg)',
   },
+  sleeping: {
+    label: 'Sleeping',
+    bg: 'var(--sam-status-muted-bg)',
+    fg: 'var(--sam-status-muted-fg)',
+  },
   completed: {
     label: 'Completed',
     bg: 'var(--sam-status-success-strong-bg)',
@@ -108,6 +113,26 @@ const statusConfig: Record<string, { label: string; bg: string; fg: string }> = 
     label: 'Disabled',
     bg: 'var(--sam-status-muted-bg)',
     fg: 'var(--sam-status-muted-fg)',
+  },
+  // Credential usage-limit levels (credential_limit_windows.last_event_level).
+  // Four distinct tiers: ok (green), warning (amber), critical (orange),
+  // rejected (red) — critical must not share danger's hue, or "nearly out"
+  // and "blocked" become indistinguishable at a glance.
+  ok: { label: 'OK', bg: 'var(--sam-status-success-bg)', fg: 'var(--sam-status-success-fg)' },
+  warning: {
+    label: 'Warning',
+    bg: 'var(--sam-status-warning-bg)',
+    fg: 'var(--sam-status-warning-fg)',
+  },
+  critical: {
+    label: 'Critical',
+    bg: 'var(--sam-status-critical-bg)',
+    fg: 'var(--sam-status-critical-fg)',
+  },
+  rejected: {
+    label: 'Rejected',
+    bg: 'var(--sam-status-danger-bg)',
+    fg: 'var(--sam-status-danger-fg)',
   },
 };
 

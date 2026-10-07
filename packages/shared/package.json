@@ -16,6 +16,7 @@
     "build": "tsc",
     "test": "vitest run",
     "test:pinned-acp-forms": "node scripts/verify-pinned-acp-form-fixtures.mjs",
+    "test:pinned-acp-urls": "node scripts/verify-pinned-acp-url-paths.mjs",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",

@@ -12,6 +12,11 @@ import { signCallbackToken, verifyCallbackToken } from '../../services/jwt';
 import { createWorkspaceOnNode } from '../../services/node-agent';
 import { nodeStatusTerminatesCallbacks } from '../../services/node-callback-auth';
 import {
+  sameWorkspaceCallbackIdentity,
+  WORKSPACE_CALLBACK_ACTIVE_STATUSES,
+  type WorkspaceCallbackIdentitySnapshot,
+} from '../../services/workspace-callback-identity';
+import {
   signalWorkspaceDeletionUnconfirmedCallback,
   type WorkspaceDeletionCallbackKind,
 } from '../../services/workspace-deletion-callback-signal';
@@ -20,26 +25,17 @@ import {
   type WorkspaceGitSourceProject,
 } from '../../services/workspace-git-source';
 
+export {
+  sameWorkspaceCallbackIdentity,
+  WORKSPACE_CALLBACK_ACTIVE_STATUSES,
+  type WorkspaceCallbackIdentitySnapshot,
+} from '../../services/workspace-callback-identity';
+
 export const ACTIVE_WORKSPACE_STATUSES = new Set(['running', 'recovery'] as const);
-export const WORKSPACE_CALLBACK_ACTIVE_STATUSES: ReadonlySet<string> = new Set([
-  'creating',
-  'running',
-  'recovery',
-]);
 export const WORKSPACE_CALLBACK_PROVISIONING_FAILURE_STATUSES: ReadonlySet<string> = new Set([
   'creating',
   'error',
 ]);
-
-export interface WorkspaceCallbackIdentitySnapshot {
-  workspaceId: string;
-  userId: string;
-  projectId: string | null;
-  chatSessionId: string | null;
-  status: string;
-  nodeId: string | null;
-  nodeStatus: string | null;
-}
 
 export function isActiveWorkspaceStatus(status: string): boolean {
   return ACTIVE_WORKSPACE_STATUSES.has(status as 'running' | 'recovery');
@@ -115,21 +111,6 @@ export async function loadWorkspaceCallbackIdentity(
     .where(eq(schema.workspaces.id, workspaceId))
     .limit(1);
   return rows[0] ?? null;
-}
-
-export function sameWorkspaceCallbackIdentity(
-  current: WorkspaceCallbackIdentitySnapshot,
-  expected: WorkspaceCallbackIdentitySnapshot
-): boolean {
-  return (
-    current.workspaceId === expected.workspaceId &&
-    current.userId === expected.userId &&
-    current.projectId === expected.projectId &&
-    current.chatSessionId === expected.chatSessionId &&
-    current.status === expected.status &&
-    current.nodeId === expected.nodeId &&
-    current.nodeStatus === expected.nodeStatus
-  );
 }
 
 interface WorkspaceCallbackTransitionValues {
@@ -448,8 +429,13 @@ export async function scheduleWorkspaceCreateOnNode(
       },
       { beforeExternalMutation: assertCurrent }
     );
-    if (options.durableRetry && (!acknowledgement || typeof acknowledgement !== 'object'
-      || !('workspaceId' in acknowledgement) || acknowledgement.workspaceId !== workspaceId)) {
+    if (
+      options.durableRetry &&
+      (!acknowledgement ||
+        typeof acknowledgement !== 'object' ||
+        !('workspaceId' in acknowledgement) ||
+        acknowledgement.workspaceId !== workspaceId)
+    ) {
       throw new Error('Node agent did not acknowledge the expected workspace identity');
     }
     await assertCurrent();

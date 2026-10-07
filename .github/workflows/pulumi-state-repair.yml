@@ -108,18 +108,27 @@ jobs:
         if: inputs.action == 'export-state' || inputs.action == 'full-repair'
         working-directory: infra
         run: |
-          echo "## Current Pulumi State" >> $GITHUB_STEP_SUMMARY
-          echo '```json' >> $GITHUB_STEP_SUMMARY
-          pulumi stack export 2>/dev/null | head -500 >> $GITHUB_STEP_SUMMARY
+          # Security note: do not print raw `pulumi stack export` in logs or
+          # GitHub summaries because deployment state may contain plaintext
+          # resource outputs for sensitive infrastructure resources.
+          STATE_FILE=$(mktemp)
+          pulumi stack export > "$STATE_FILE"
+
+          echo "## Current Pulumi State (sanitized)" >> $GITHUB_STEP_SUMMARY
+          echo "Raw stack export captured to a temporary file for this job only." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Resource Counts by Type" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          jq -r '.deployment.resources | group_by(.type) | map({type: .[0].type, count: length}) | .[] | "\(.count)\t\(.type)"' "$STATE_FILE" | sort -nr >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
           echo ""
           echo "=== Resource URNs ==="
-          pulumi stack export 2>/dev/null | jq -r '.deployment.resources[].urn' 2>/dev/null || echo "Failed to list URNs"
+          jq -r '.deployment.resources[].urn' "$STATE_FILE" 2>/dev/null || echo "Failed to list URNs"
 
           echo ""
           echo "=== Broken resources (D1 + PagesDomain) ==="
-          pulumi stack export 2>/dev/null | jq '.deployment.resources[] | select(.type | test("D1Database|PagesDomain")) | {urn: .urn, type: .type, inputs: .inputs, outputs: .outputs}' 2>/dev/null || echo "Failed to extract"
+          jq '.deployment.resources[] | select(.type | test("D1Database|PagesDomain")) | {urn: .urn, type: .type}' "$STATE_FILE" 2>/dev/null || echo "Failed to extract"
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}

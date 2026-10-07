@@ -122,16 +122,31 @@ until the budget refreshes and must not silently drop the candidate.
     times at the 60 s floor, and 19 of 25 production objects fired ~1,450 alarms a
     day (PR #2170, `project-data/workspace-idle-timeouts.ts`).
 
+11. **A failure that looks repairable still spends the budget.** Do not exempt a
+    failure class from the attempt cap because the next attempt might fix it. Session
+    sleep exempted degraded and still-in-flight captures from
+    `SESSION_SLEEP_MAX_ATTEMPTS`; an agent that can never produce a complete capture
+    makes every attempt look repairable. On 2026-10-04 three idle production
+    workspaces had made 93, 101 and 100 attempts that way, pinning two nodes until a
+    person deleted them. Keep an attempt count and an elapsed-time bound on the
+    durable row, and let only the end of the episode reset them: success, or a human
+    action. A new capture generation, a deferral or a restart must not. When the
+    budget runs out, act on what already exists: fall back to the cheapest outcome
+    that still meets the minimum guarantee, or stop in a terminal state the user can
+    see and leave by acting. Automatic retries must skip that terminal state
+    (`apps/api/src/services/session-sleep-episode.ts`).
+
 ## Required Tests
 
 For every new or changed sweep/reconcile candidate class, include a zombie
 prevention regression test:
 
 - Saturate the configured batch with permanently failing candidates, including
-  NULL-deadline and repair-exemption variants, and place valid work behind them.
-  Assert bounded repeated ticks reach that work. A failure that remains repairable
-  beyond the ordinary attempt budget must persist a future retry deadline, and
-  the selector and claim predicate must both honor that deadline.
+  NULL-deadline and looks-repairable variants, and place valid work behind them.
+  Assert bounded repeated ticks reach that work. Every failure persists a future
+  retry deadline that the selector and claim predicate both honor, and the retries
+  end at the budget (requirement 11), driven through the scheduled trigger with an
+  injected clock (`tests/integration/session-sleep-bounded-fallback.test.ts`).
 - When a service and its sweep both catch an error, test their real composition.
   Terminal classification must happen in the first ownership-fenced failure write;
   a later catch must not overwrite a renewed intent after the claim was released.

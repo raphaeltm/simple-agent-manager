@@ -1,5 +1,12 @@
 # Simplify Shared Packages
 
+> **Reconciliation 2026-10-05:** #2225 (9ef726c20) deleted the unused `AGENT_PERMISSION_MODE_DESCRIPTIONS`. Only `AGENT_PERMISSION_MODE_LABELS` remains (`packages/shared/src/constants/agent-settings.ts:24-30`), so the labels/descriptions merge is done. Still open:
+>
+> - Move the computed `isIdle`, `isTerminated` and `workspaceUrl` out of the API response type (`packages/shared/src/types/session.ts:23-27`).
+> - Decide `toolMetadata`: `z.string()` at `vm-agent-contract.ts:202` vs a Record at `types/session.ts:62`.
+> - Remove the `HETZNER_IMAGE` alias (`constants/hetzner.ts:20-21`).
+> - Remove the positional-args overload (`packages/acp-client/src/transport/websocket.ts:91-128`).
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:**

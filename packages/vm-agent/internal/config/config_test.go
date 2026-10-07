@@ -1083,6 +1083,7 @@ func validConfig() *Config {
 		ACPCredentialSyncTimeout:                DefaultACPCredentialSyncTimeout,
 		ACPRestartAttemptTimeout:                DefaultACPRestartAttemptTimeout,
 		ACPActivityReportTimeout:                DefaultACPActivityReportTimeout,
+		ACPUsageProbeTimeout:                    DefaultACPUsageProbeTimeout,
 		ACPHarnessActivityReportDebounce:        DefaultACPHarnessActivityReportDebounce,
 		WorkspaceReadyCallbackTimeout:           DefaultWorkspaceReadyCallbackTimeout,
 		ErrorReportResponseBytes:                DefaultErrorReportResponseMaxBytes,
@@ -1235,6 +1236,7 @@ func TestValidateOperationalTimeouts(t *testing.T) {
 		{"credential sync", func(cfg *Config) { cfg.ACPCredentialSyncTimeout = 0 }, "ACP_CREDENTIAL_SYNC_TIMEOUT"},
 		{"restart attempt", func(cfg *Config) { cfg.ACPRestartAttemptTimeout = 0 }, "ACP_RESTART_ATTEMPT_TIMEOUT"},
 		{"activity report", func(cfg *Config) { cfg.ACPActivityReportTimeout = 0 }, "ACP_ACTIVITY_REPORT_TIMEOUT"},
+		{"usage probe", func(cfg *Config) { cfg.ACPUsageProbeTimeout = 0 }, "ACP_USAGE_PROBE_TIMEOUT"},
 		{"harness activity debounce", func(cfg *Config) { cfg.ACPHarnessActivityReportDebounce = 0 }, "ACP_HARNESS_ACTIVITY_REPORT_DEBOUNCE"},
 		{"cache push", func(cfg *Config) { cfg.DevcontainerCachePushTimeout = 0 }, "DEVCONTAINER_CACHE_PUSH_TIMEOUT"},
 		{"deploy preflight", func(cfg *Config) { cfg.DeployPreflightCommandTimeout = 0 }, "DEPLOY_PREFLIGHT_COMMAND_TIMEOUT"},
@@ -1254,6 +1256,43 @@ func TestValidateOperationalTimeouts(t *testing.T) {
 				t.Fatalf("expected %s error, got: %v", tc.wantKey, err)
 			}
 		})
+	}
+}
+
+func TestValidateOpenCodeGoUsageURL(t *testing.T) {
+	t.Parallel()
+	// The probe sends the OpenCode API key as a bearer token, so a remote usage
+	// endpoint must be https; loopback http is allowed for local test doubles.
+	accepted := []string{
+		"",
+		DefaultOpenCodeGoUsageURL,
+		"https://proxy.example.com/usage",
+		"http://localhost:8080/usage",
+		"http://usage.localhost/v1",
+		"http://127.0.0.1:9999/usage",
+		"http://[::1]:9999/usage",
+	}
+	for _, raw := range accepted {
+		cfg := validConfig()
+		cfg.OpenCodeGoUsageURL = raw
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("expected %q to be accepted, got: %v", raw, err)
+		}
+	}
+	rejected := []string{
+		"http://opencode.ai/zen/go/v1/usage",
+		"http://10.0.0.5/usage",
+		"ftp://opencode.ai/usage",
+		"/zen/go/v1/usage",
+		"://bad",
+	}
+	for _, raw := range rejected {
+		cfg := validConfig()
+		cfg.OpenCodeGoUsageURL = raw
+		err := cfg.Validate()
+		if err == nil || !strings.Contains(err.Error(), "OPENCODE_GO_USAGE_URL") {
+			t.Fatalf("expected %q to be rejected with an OPENCODE_GO_USAGE_URL error, got: %v", raw, err)
+		}
 	}
 }
 

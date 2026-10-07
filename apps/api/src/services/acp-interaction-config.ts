@@ -28,12 +28,22 @@ import {
   DEFAULT_ACP_INTERACTION_SNAPSHOT_LAST_SETTLED,
   DEFAULT_ACP_INTERACTION_SUMMARY_LAST_SETTLED,
   DEFAULT_ACP_INTERACTION_SUMMARY_RETENTION_MS,
+  DEFAULT_ACP_INTERACTION_URL_DEADLINE_MS,
+  DEFAULT_ACP_INTERACTION_URL_ELICITATION_ID_MAX_CHARS,
+  DEFAULT_ACP_INTERACTION_URL_MAX_CHARS,
+  DEFAULT_ACP_INTERACTION_URL_REDIRECT_DEPTH,
+  DEFAULT_ACP_INTERACTION_URLS_ENABLED,
   DEFAULT_ACP_INTERACTIONS_ENABLED,
 } from '@simple-agent-manager/shared';
 
 export interface AcpInteractionConfigEnv {
   ACP_INTERACTIONS_ENABLED?: string;
   ACP_INTERACTION_FORMS_ENABLED?: string;
+  ACP_INTERACTION_URLS_ENABLED?: string;
+  ACP_INTERACTION_URL_DEADLINE_MS?: string;
+  ACP_INTERACTION_URL_MAX_CHARS?: string;
+  ACP_INTERACTION_URL_ELICITATION_ID_MAX_CHARS?: string;
+  ACP_INTERACTION_URL_REDIRECT_DEPTH?: string;
   ACP_INTERACTION_PERMISSION_TASK_DEADLINE_MS?: string;
   ACP_INTERACTION_PERMISSION_CONVERSATION_DEADLINE_MS?: string;
   ACP_INTERACTION_MAX_DEADLINE_MS?: string;
@@ -67,6 +77,11 @@ export interface AcpInteractionConfigEnv {
 export interface AcpInteractionConfig {
   enabled: boolean;
   formsEnabled: boolean;
+  urlsEnabled: boolean;
+  urlDeadlineMs: number;
+  urlMaxChars: number;
+  urlElicitationIdMaxChars: number;
+  urlRedirectDepth: number;
   permissionTaskDeadlineMs: number;
   permissionConversationDeadlineMs: number;
   maxDeadlineMs: number;
@@ -108,6 +123,12 @@ function positiveInt(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function nonnegativeInt(value: string | undefined, fallback: number): number {
+  if (value === undefined || value.trim() === '') return fallback;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
 function positiveIntList(value: string | undefined, fallback: readonly number[]): number[] {
   if (value === undefined || value.trim() === '') return [...fallback];
   const parsed = value
@@ -121,6 +142,14 @@ export function getAcpInteractionConfig(env: AcpInteractionConfigEnv): AcpIntera
   return {
     enabled: envFlag(env.ACP_INTERACTIONS_ENABLED, DEFAULT_ACP_INTERACTIONS_ENABLED),
     formsEnabled: envFlag(env.ACP_INTERACTION_FORMS_ENABLED, DEFAULT_ACP_INTERACTION_FORMS_ENABLED),
+    urlsEnabled: envFlag(env.ACP_INTERACTION_URLS_ENABLED, DEFAULT_ACP_INTERACTION_URLS_ENABLED),
+    urlDeadlineMs: positiveInt(env.ACP_INTERACTION_URL_DEADLINE_MS, DEFAULT_ACP_INTERACTION_URL_DEADLINE_MS),
+    urlMaxChars: Math.min(positiveInt(env.ACP_INTERACTION_URL_MAX_CHARS, DEFAULT_ACP_INTERACTION_URL_MAX_CHARS),
+      DEFAULT_ACP_INTERACTION_URL_MAX_CHARS),
+    urlElicitationIdMaxChars: Math.min(positiveInt(env.ACP_INTERACTION_URL_ELICITATION_ID_MAX_CHARS,
+      DEFAULT_ACP_INTERACTION_URL_ELICITATION_ID_MAX_CHARS), DEFAULT_ACP_INTERACTION_URL_ELICITATION_ID_MAX_CHARS),
+    urlRedirectDepth: Math.min(nonnegativeInt(env.ACP_INTERACTION_URL_REDIRECT_DEPTH,
+      DEFAULT_ACP_INTERACTION_URL_REDIRECT_DEPTH), DEFAULT_ACP_INTERACTION_URL_REDIRECT_DEPTH),
     permissionTaskDeadlineMs: positiveInt(
       env.ACP_INTERACTION_PERMISSION_TASK_DEADLINE_MS,
       DEFAULT_ACP_INTERACTION_PERMISSION_TASK_DEADLINE_MS

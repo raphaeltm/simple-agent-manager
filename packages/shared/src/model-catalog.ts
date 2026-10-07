@@ -65,6 +65,7 @@ const CLAUDE_MODELS: ModelGroup[] = [
       { id: 'claude-fable-5', name: 'Claude Fable 5 (1M context)', group: 'Claude 5 (Frontier)' },
       { id: 'claude-opus-5-5', name: 'Claude Opus 5.5 (1M context)', group: 'Claude 5 (Frontier)' },
       { id: 'claude-opus-5', name: 'Claude Opus 5 (1M context)', group: 'Claude 5 (Frontier)' },
+      { id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5 (1M context)', group: 'Claude 5 (Frontier)' },
       { id: 'claude-sonnet-5', name: 'Claude Sonnet 5 (1M context)', group: 'Claude 5 (Frontier)' },
     ],
   },
@@ -141,6 +142,8 @@ const CODEX_MODELS: ModelGroup[] = [
 
 const OPENCODE_MODELS: ModelGroup[] = [
   modelGroup('OpenCode Zen', [
+    { id: 'opencode/fledge-alpha-free', name: 'Fledge Alpha Free' },
+    { id: 'opencode/ling-3.1-flash-free', name: 'Ling 3.1 Flash Free' },
     { id: 'opencode/ling-3.0-flash-fin-free', name: 'Ling 3.0 Flash Fin Free' },
     { id: 'opencode/longcat-2.5-preview-free', name: 'LongCat 2.5 Preview Free' },
     { id: 'opencode/qwen3.8-max', name: 'Qwen3.8 Max' },
@@ -149,7 +152,7 @@ const OPENCODE_MODELS: ModelGroup[] = [
     { id: 'opencode/gpt-5.4-pro', name: 'GPT-5.4 Pro' },
     { id: 'opencode/muse-spark-1.3', name: 'Muse Spark 1.3' },
     { id: 'opencode/gpt-5.5-pro', name: 'GPT-5.5 Pro' },
-    { id: 'opencode/grok-4.7', name: 'Grok 4.7 (30% Off)' },
+    { id: 'opencode/grok-4.7', name: 'Grok 4.7' },
     { id: 'opencode/gpt-5.4-nano', name: 'GPT-5.4 Nano' },
     { id: 'opencode/gpt-5.2-codex', name: 'GPT-5.2 Codex' },
     { id: 'opencode/gpt-5.1-codex', name: 'GPT-5.1 Codex' },
@@ -295,6 +298,7 @@ const GEMINI_MODELS: ModelGroup[] = [
     ['gemini-3.5-flash', 'Gemini 3.5 Flash'],
     ['gemini-3.5-flash-lite', 'Gemini 3.5 Flash-Lite'],
     ['gemini-3.1-pro-preview', 'Gemini 3.1 Pro Preview'],
+    ['gemini-3-flash-preview', 'Gemini 3 Flash Preview'],
     ['gemini-3.1-flash-lite', 'Gemini 3.1 Flash-Lite'],
   ]),
   modelGroupFromTuples('Gemini 2.5 (Current)', [

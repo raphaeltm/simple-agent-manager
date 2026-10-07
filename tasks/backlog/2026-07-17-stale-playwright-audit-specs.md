@@ -1,5 +1,13 @@
 # Repair or retire stale Playwright audit specs (164 failures on main)
 
+> **Reconciliation 2026-10-05:** No spec left quarantine this week. #2217 (b79136805) added the onboarding-wizard dismissal seed (`project-chat-recoverable-error-audit.spec.ts:108`) and 11 ACP auth/loopback-guidance tests to that spec. The ACP task reports them passing locally (`tasks/archive/2026-10-01-acp-auth-diagnosis.md:59`), but the spec is still quarantined (`visual-audit-quarantine.txt:80`), so none of its 13 tests run in CI. The 5 audit specs added this week are not quarantined, so the count is now 99 of 120. Still open:
+> - Run the recoverable-error spec in CI mode and un-quarantine it. It still does not assert the "Send another message to retry" guidance (now `FailureCard.tsx:330`).
+> - Repair or retire every other quarantined spec and delete its entry. This includes `knowledge-ui-audit` against the still-quarantined `agent-context-audit`, and the still-unverified nav-toggle and chat-file-viewer fixes.
+> - `slice-e-theme-audit` ideas mocks.
+> - A full corpus run with 0 failures.
+> - Do `2026-09-23-playwright-audit-shell-mocks-crash.md` first.
+> - The "Carried over 2026-09-30" items.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** a drift guard. PR #1908 (ddd991fc4) added

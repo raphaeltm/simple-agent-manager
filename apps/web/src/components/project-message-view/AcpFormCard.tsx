@@ -59,8 +59,9 @@ function formStatus(state: string): string {
   }
 }
 
-function FormFieldView({ id, field, value, disabled, required, invalid, onChange }: {
+function FormFieldView({ id, fieldName, field, value, disabled, required, invalid, onChange }: {
   id: string;
+  fieldName: string;
   field: AcpFormField;
   value: unknown;
   disabled: boolean;
@@ -71,7 +72,7 @@ function FormFieldView({ id, field, value, disabled, required, invalid, onChange
   const options = choices(field);
   const inputClass = 'mt-1 block min-h-11 w-full min-w-0 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-fg-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent';
   const helpId = `${id}-help`;
-  const fieldLabel = <>{field.title || id}{required ? <span className="ml-1 text-danger" aria-label="required">*</span> : null}</>;
+  const fieldLabel = <>{field.title || fieldName}{required ? <span className="ml-1 text-danger" aria-label="required">*</span> : null}</>;
   return (
     <div className="min-w-0 space-y-1">
       {field.type !== 'array' && <label htmlFor={id} className="block break-words text-sm font-medium text-fg-primary">{fieldLabel}</label>}
@@ -98,7 +99,7 @@ function FormFieldView({ id, field, value, disabled, required, invalid, onChange
           aria-describedby={field.description ? helpId : undefined}
           onChange={(event) => onChange(event.target.value)} />
           {required && (field.minLength ?? 0) === 0 && <div className="mt-1 flex flex-wrap items-center gap-2">
-            <button type="button" disabled={disabled} aria-label={`Use empty answer for ${field.title || id}`}
+            <button type="button" disabled={disabled} aria-label={`Use empty answer for ${field.title || fieldName}`}
               className="min-h-11 rounded-md px-2 text-xs text-accent underline underline-offset-2"
               onClick={() => onChange('')}>Use empty answer</button>
             {value === '' && <span className="text-xs text-fg-muted" role="status">Empty answer selected</span>}
@@ -258,7 +259,7 @@ export function AcpFormCard({ interaction, projectId, sessionId, canAnswer, onRe
     {mayReveal && detail && <div className="mt-3 min-w-0 space-y-4">
       <p className="break-words text-sm text-fg-secondary">{detail.message}</p>
       {Object.entries(detail.schema.properties).map(([key, field]) => <FormFieldView
-        key={key} id={`${interaction.interactionId}-${key}`} field={field} value={values[key]}
+        key={key} id={`${interaction.interactionId}-${key}`} fieldName={key} field={field} value={values[key]}
         required={detail.schema.required?.includes(key) ?? false} disabled={saving || !!receipt}
         invalid={invalidField === key}
         onChange={(value) => { setValues((previous) => ({ ...previous, [key]: value })); if (invalidField === key) { setInvalidField(null); setError(null); } }} />)}

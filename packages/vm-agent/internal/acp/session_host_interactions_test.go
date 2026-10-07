@@ -56,14 +56,16 @@ type interactionRecorder struct {
 	server      *httptest.Server
 	creates     chan acpInteractionCreateRequest
 	settles     chan acpInteractionSettleRequest
+	completions chan string
 	createBlock <-chan struct{}
 }
 
 func newInteractionRecorder(t *testing.T, createStatus int) *interactionRecorder {
 	t.Helper()
 	recorder := &interactionRecorder{
-		creates: make(chan acpInteractionCreateRequest, 8),
-		settles: make(chan acpInteractionSettleRequest, 8),
+		creates:     make(chan acpInteractionCreateRequest, 8),
+		settles:     make(chan acpInteractionSettleRequest, 8),
+		completions: make(chan string, 8),
 	}
 	recorder.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer callback-token" {
@@ -91,6 +93,11 @@ func newInteractionRecorder(t *testing.T, createStatus int) *interactionRecorder
 				status = "disabled"
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"status": status})
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/complete-url") {
+			recorder.completions <- r.URL.Path
+			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 		if !strings.HasSuffix(r.URL.Path, "/settle") {
@@ -122,8 +129,10 @@ func newInteractionHost(recorder *interactionRecorder) (*SessionHost, *sessionHo
 	host.ConfigureAcpInteractions(testInteractionConfig())
 	generation := host.attachAcpInteractionGeneration()
 	promptCtx, promptCancel := context.WithCancel(host.lifecycleContext())
-	if _, ok := host.beginPromptForDelivery(promptCtx, promptCancel, "test-prompt", nil); !ok {
+	if attempt, ok := host.beginPromptForDelivery(promptCtx, promptCancel, "test-prompt", nil); !ok {
 		panic("test prompt was not accepted")
+	} else {
+		attempt.messageID = "prompt-user-a"
 	}
 	return host, &sessionHostClient{host: host, interactionGeneration: generation}
 }

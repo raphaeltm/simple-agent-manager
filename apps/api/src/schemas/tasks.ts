@@ -26,6 +26,7 @@ const TaskStatusSchema = v.picklist([
   'queued',
   'delegated',
   'in_progress',
+  'sleeping',
   'completed',
   'failed',
   'cancelled',

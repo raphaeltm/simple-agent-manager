@@ -12,6 +12,7 @@
       "version": 1,
       "answerEndpoint": true,
       "permissionBridge": true,
+      "urlBridge": true,
       "formBridge": true,
       "deliverySemantics": "best_effort_no_wake",
       "noWaiterStatus": "no_waiter",

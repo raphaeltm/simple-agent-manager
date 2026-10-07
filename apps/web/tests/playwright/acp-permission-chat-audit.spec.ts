@@ -724,3 +724,55 @@ test.describe('ACP permission cards — Narrow mobile', () => {
     await screenshot(page, 'acp-permission-chat-retry-narrow-mobile');
   });
 });
+
+for (const viewport of ['iPhone SE (375x667)', 'Desktop (1280x800)']) {
+  test(`permission command title stays inside its card — ${viewport}`, async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== viewport);
+    await setupPermissionMocks(page, true);
+    const command = `node -e 'console.log("ACP_INSTANT_PERMISSION_CANARY")'`;
+    await page.route(`**/interactions/${ANCHORED_ID}`, (route) =>
+      route.fulfill({
+        status: 200,
+        json: {
+          summary: ownerSnapshot().pending.find((item) => item.interactionId === ANCHORED_ID),
+          detail: {
+            ...DETAILS[ANCHORED_ID],
+            title: command,
+            description: 'Choose one of the exact options supplied by the agent.',
+          },
+        },
+      })
+    );
+    await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
+    const card = page.getByTestId(`acp-permission-${ANCHORED_ID}`);
+    const heading = card.getByRole('heading', { name: command, exact: true });
+    await expect(heading).toBeVisible();
+    await positionAnchoredCardBelowStickyHeader(page);
+    const bounds = await heading.evaluate((element) => {
+      const card = element.closest('section')!.getBoundingClientRect();
+      const heading = element.getBoundingClientRect();
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      return {
+        left: card.left,
+        right: card.right,
+        headingLeft: heading.left,
+        headingRight: heading.right,
+        text: [...range.getClientRects()].map((rect) => ({ left: rect.left, right: rect.right })),
+      };
+    });
+    expect(bounds.headingLeft).toBeGreaterThanOrEqual(bounds.left);
+    expect(bounds.headingRight).toBeLessThanOrEqual(bounds.right);
+    for (const rect of bounds.text) {
+      expect(rect.left).toBeGreaterThanOrEqual(bounds.headingLeft - 1);
+      expect(rect.right).toBeLessThanOrEqual(bounds.headingRight + 1);
+    }
+    await assertNoOverflow(page);
+    await screenshot(
+      page,
+      `acp-permission-command-${viewport.startsWith('iPhone') ? 'mobile' : 'desktop'}`
+    );
+  });
+}

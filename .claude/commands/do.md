@@ -31,7 +31,7 @@ TodoWrite([
 
 You may add sub-tasks for implementation details, but these 7 phase-level items MUST remain in the todo list at all times. Mark each phase as `completed` only when ALL of its steps are done. If the conversation is resumed after compaction, check the todo list to determine which phase you are in and continue from there — do NOT re-read only the code summary.
 
-Also create `.do-state.md` in the repo root (gitignored) as a complementary external memory file. See `.claude/rules/14-do-workflow-persistence.md` for the full spec. Re-read it at every phase boundary.
+Also create `.do-state.md` in the repo root (local-only, snapshot-visible; never commit) as a complementary external memory file. See `.claude/rules/14-do-workflow-persistence.md` for the full spec. Re-read it at every phase boundary.
 
 ---
 

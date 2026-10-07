@@ -50,7 +50,7 @@ export default {
       }
 
       if (body.agentType === 'opencode') {
-        return jsonResponse({ error: 'not_found', message: 'Agent credential' }, 404);
+        return jsonResponse({ error: 'NOT_FOUND', message: 'Agent credential not found' }, 404);
       }
 
       return jsonResponse({ apiKey: `sk-e2e-${body.agentType}` });

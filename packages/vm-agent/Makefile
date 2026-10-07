@@ -1,6 +1,6 @@
 # VM Agent Makefile
 
-.PHONY: all build clean test test-integration lint prepare-container
+.PHONY: all build clean test test-integration lint prepare-container prepare-codex-runtime
 
 # Go build settings
 BINARY_NAME := vm-agent
@@ -56,7 +56,10 @@ build-linux-amd64:
 
 # Build the exact binary Wrangler bakes into the raw Cloudflare Container image.
 # VERSION/BUILD_DATE default locally and are pinned by deploy-reusable.yml.
-prepare-container: build-linux-amd64
+prepare-codex-runtime:
+	@bash ../../scripts/deploy/prepare-codex-runtime-artifact.sh "$(CONTAINER_ARTIFACT_DIR)"
+
+prepare-container: prepare-codex-runtime build-linux-amd64
 	@mkdir -p $(CONTAINER_ARTIFACT_DIR)
 	@cp bin/$(BINARY_NAME)-linux-amd64 $(CONTAINER_ARTIFACT_DIR)/vm-agent-linux-amd64
 	@chmod 0755 $(CONTAINER_ARTIFACT_DIR)/vm-agent-linux-amd64

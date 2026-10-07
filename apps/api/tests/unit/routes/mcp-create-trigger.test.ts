@@ -1,364 +1,185 @@
-/**
- * Unit tests for MCP create_trigger tool.
- *
- * Tests input validation and successful creation flow.
- * Uses direct D1 mock since the handler uses raw SQL (not Drizzle ORM).
- */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import type { McpTokenData } from '../../../src/routes/mcp/_helpers';
+import { TRIGGER_TOOLS } from '../../../src/routes/mcp/tool-definitions-trigger-tools';
+import { handleCreateTrigger, handleUpdateTrigger } from '../../../src/routes/mcp/trigger-tools';
+import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
+import { seedProjectWithMember, seedUser } from './capacity-pool-test-seeds';
 
-// ─── Mocks ──────────────────────────────────────────────────────────────────
-
-const mockValidateCron = vi
-  .fn()
-  .mockReturnValue({ valid: true, humanReadable: 'Every day at 9:00 AM' });
-vi.mock('../../../src/services/cron-utils', () => ({
-  validateCronExpression: (...args: unknown[]) => mockValidateCron(...args),
-  cronToNextFire: vi.fn().mockReturnValue('2026-04-10T09:00:00.000Z'),
-  cronToHumanReadable: vi.fn().mockReturnValue('Every day at 9:00 AM (UTC)'),
-}));
-
-vi.mock('../../../src/lib/ulid', () => ({
-  ulid: () => 'trigger-001',
-}));
-
-vi.mock('../../../src/lib/logger', () => ({
-  log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-}));
-
-// ─── D1 mock ────────────────────────────────────────────────────────────────
-
-function createMockD1() {
-  const stmt = {
-    bind: vi.fn().mockReturnThis(),
-    first: vi.fn().mockResolvedValue(null),
-    run: vi.fn().mockResolvedValue({ success: true }),
-  };
-  return {
-    prepare: vi.fn().mockReturnValue(stmt),
-    _stmt: stmt,
-  };
-}
-
-// ─── Test setup ─────────────────────────────────────────────────────────────
-
-import { handleCreateTrigger } from '../../../src/routes/mcp/trigger-tools';
-
-const tokenData: McpTokenData = {
-  taskId: 'task-001',
-  projectId: 'proj-001',
-  userId: 'user-001',
-  workspaceId: 'ws-001',
-  createdAt: new Date().toISOString(),
+const token: McpTokenData = {
+  taskId: 'task',
+  projectId: 'project',
+  userId: 'user',
+  workspaceId: 'ws',
+  createdAt: '2026-10-07T00:00:00Z',
+};
+const cron = { name: 'Daily', cronExpression: '0 9 * * *', promptTemplate: 'Review' };
+const github = {
+  name: 'Issues',
+  sourceType: 'github',
+  githubConfig: {
+    eventType: 'issues',
+    filters: { actions: ['opened'], labels: ['bug'], ignoreActors: ['bot'] },
+  },
+  promptTemplate: 'Review {{github.title}}',
 };
 
-describe('MCP create_trigger tool', () => {
-  let mockD1: ReturnType<typeof createMockD1>;
-  let env: Partial<Env>;
-
+describe('MCP create_trigger with canonical persistence', () => {
+  let sqlite: Database.Database;
+  let env: Env;
   beforeEach(() => {
-    vi.clearAllMocks();
-    mockD1 = createMockD1();
-    env = {
-      DATABASE: mockD1 as unknown as D1Database,
-      CRON_TEMPLATE_MAX_LENGTH: undefined,
-      MAX_TRIGGERS_PER_PROJECT: undefined,
-      CRON_MIN_INTERVAL_MINUTES: undefined,
-    } as Partial<Env>;
+    sqlite = new Database(':memory:');
+    createAllSchemaTables(sqlite, schema);
+    seedUser(sqlite, 'user');
+    seedProjectWithMember(sqlite, { projectId: 'project', userId: 'user', role: 'owner' });
+    env = { DATABASE: createSqliteD1WithBindLimit(sqlite, 100) } as Env;
+  });
+  afterEach(() => sqlite.close());
+  const content = (result: Awaited<ReturnType<typeof handleCreateTrigger>>) =>
+    JSON.parse((result.result as { content: { text: string }[] }).content[0].text);
+
+  it('rejects MCP webhook creation while public ingress is disabled', async () => {
+    env.WEBHOOK_TRIGGERS_ENABLED = 'false';
+    const result = await handleCreateTrigger(
+      '1',
+      {
+        name: 'Webhook',
+        sourceType: 'webhook',
+        agentProfileId: 'profile',
+        promptTemplate: 'Handle webhook',
+        webhookConfig: {},
+      },
+      token,
+      env
+    );
+    expect(result.error?.message).toContain('Webhook triggers are disabled');
+    expect(sqlite.prepare('SELECT count(*) AS count FROM triggers').get()).toEqual({ count: 0 });
   });
 
-  it('creates a trigger successfully with required fields', async () => {
-    // Name uniqueness check: no existing trigger
-    mockD1._stmt.first.mockResolvedValueOnce(null);
-    // Project lookup: no per-project max_triggers override
-    mockD1._stmt.first.mockResolvedValueOnce({ maxTriggers: null });
-    // Count check: below limit
-    mockD1._stmt.first.mockResolvedValueOnce({ cnt: 0 });
-
-    const result = await handleCreateTrigger(
-      'req-1',
-      {
-        name: 'Daily Review',
-        cronExpression: '0 9 * * *',
-        promptTemplate: 'Review all open PRs',
-      },
-      tokenData,
-      env as Env
-    );
-
+  it('preserves cron callers that omit sourceType and UTC default', async () => {
+    const result = await handleCreateTrigger('1', cron, token, env);
     expect(result.error).toBeUndefined();
-    expect(result.result).toBeDefined();
-    const content = (result.result as { content: { text: string }[] }).content[0];
-    const parsed = JSON.parse(content.text);
-    expect(parsed.triggerId).toBe('trigger-001');
-    expect(parsed.name).toBe('Daily Review');
-    expect(parsed.status).toBe('active');
-    expect(parsed.cronExpression).toBe('0 9 * * *');
-    expect(parsed.cronHumanReadable).toBeDefined();
-    expect(parsed.nextFireAt).toBeDefined();
+    expect(content(result)).toMatchObject({
+      sourceType: 'cron',
+      cronTimezone: 'UTC',
+      status: 'active',
+    });
+    expect(content(result).nextFireAt).toBeTruthy();
+    expect(content(result).cronHumanReadable).toBeTruthy();
   });
-
-  it('rejects missing name', async () => {
-    const result = await handleCreateTrigger(
-      'req-1',
-      { cronExpression: '0 9 * * *', promptTemplate: 'Do stuff' },
-      tokenData,
-      env as Env
-    );
-
-    expect(result.error).toBeDefined();
-    expect(result.error?.message).toContain('name is required');
-  });
-
-  it('rejects empty cron expression', async () => {
-    const result = await handleCreateTrigger(
-      'req-1',
-      { name: 'Test', cronExpression: '', promptTemplate: 'Do stuff' },
-      tokenData,
-      env as Env
-    );
-
-    expect(result.error).toBeDefined();
-    expect(result.error?.message).toContain('cronExpression is required');
-  });
-
-  it('rejects empty prompt template', async () => {
-    const result = await handleCreateTrigger(
-      'req-1',
-      { name: 'Test', cronExpression: '0 9 * * *', promptTemplate: '   ' },
-      tokenData,
-      env as Env
-    );
-
-    expect(result.error).toBeDefined();
-    expect(result.error?.message).toContain('promptTemplate is required');
-  });
-
-  it('rejects prompt template exceeding max length', async () => {
-    const longTemplate = 'x'.repeat(8001); // Default max is 8000
-    const result = await handleCreateTrigger(
-      'req-1',
-      { name: 'Test', cronExpression: '0 9 * * *', promptTemplate: longTemplate },
-      tokenData,
-      env as Env
-    );
-
-    expect(result.error).toBeDefined();
-    expect(result.error?.message).toContain('characters or less');
-  });
-
-  it('rejects invalid cron expression', async () => {
-    mockValidateCron.mockReturnValueOnce({ valid: false, error: 'bad expression' });
-
-    const result = await handleCreateTrigger(
-      'req-1',
-      { name: 'Test', cronExpression: 'not-valid', promptTemplate: 'Do stuff' },
-      tokenData,
-      env as Env
-    );
-
-    expect(result.error).toBeDefined();
-    expect(result.error?.message).toContain('Invalid cron expression');
-  });
-
-  it('rejects invalid timezone', async () => {
-    const result = await handleCreateTrigger(
-      'req-1',
-      {
-        name: 'Test',
-        cronExpression: '0 9 * * *',
-        cronTimezone: 'Invalid/Zone',
-        promptTemplate: 'Do stuff',
-      },
-      tokenData,
-      env as Env
-    );
-
-    expect(result.error).toBeDefined();
-    expect(result.error?.message).toContain('Invalid timezone');
-  });
-
-  it('rejects agentProfileId not in project', async () => {
-    // agentProfileId lookup: not found
-    mockD1._stmt.first.mockResolvedValueOnce(null);
-
-    const result = await handleCreateTrigger(
-      'req-1',
-      {
-        name: 'Test',
-        cronExpression: '0 9 * * *',
-        promptTemplate: 'Do stuff',
-        agentProfileId: 'nonexistent-profile',
-      },
-      tokenData,
-      env as Env
-    );
-
-    expect(result.error).toBeDefined();
-    expect(result.error?.message).toContain('agentProfileId not found');
-  });
-
-  it('rejects duplicate trigger name', async () => {
-    // Name uniqueness check: existing trigger found
-    mockD1._stmt.first.mockResolvedValueOnce({ id: 'existing-trigger' });
-
-    const result = await handleCreateTrigger(
-      'req-1',
-      { name: 'Daily Review', cronExpression: '0 9 * * *', promptTemplate: 'Review PRs' },
-      tokenData,
-      env as Env
-    );
-
-    expect(result.error).toBeDefined();
-    expect(result.error?.message).toContain('already exists');
-  });
-
-  it('rejects when max triggers reached', async () => {
-    // Name uniqueness: no conflict
-    mockD1._stmt.first.mockResolvedValueOnce(null);
-    // Project lookup: no override (default 20)
-    mockD1._stmt.first.mockResolvedValueOnce({ maxTriggers: null });
-    // Count check: at limit (default 20)
-    mockD1._stmt.first.mockResolvedValueOnce({ cnt: 20 });
-
-    const result = await handleCreateTrigger(
-      'req-1',
-      { name: 'Test', cronExpression: '0 9 * * *', promptTemplate: 'Do stuff' },
-      tokenData,
-      env as Env
-    );
-
-    expect(result.error).toBeDefined();
-    expect(result.error?.message).toContain('Maximum triggers per project');
-  });
-
-  it('uses the per-project max_triggers override when set', async () => {
-    // Name uniqueness: no conflict
-    mockD1._stmt.first.mockResolvedValueOnce(null);
-    // Project lookup: per-project override of 5 (below the default 20)
-    mockD1._stmt.first.mockResolvedValueOnce({ maxTriggers: 5 });
-    // Count check: at the per-project limit
-    mockD1._stmt.first.mockResolvedValueOnce({ cnt: 5 });
-
-    const result = await handleCreateTrigger(
-      'req-1',
-      { name: 'Test', cronExpression: '0 9 * * *', promptTemplate: 'Do stuff' },
-      tokenData,
-      env as Env
-    );
-
-    expect(result.error).toBeDefined();
-    expect(result.error?.message).toContain('Maximum triggers per project');
-  });
-
-  it('uses the per-project max_triggers override to allow more than the default', async () => {
-    // Name uniqueness: no conflict
-    mockD1._stmt.first.mockResolvedValueOnce(null);
-    // Project lookup: per-project override raised to 30
-    mockD1._stmt.first.mockResolvedValueOnce({ maxTriggers: 30 });
-    // Count check: 25 triggers (above default 20, below override 30) → allowed
-    mockD1._stmt.first.mockResolvedValueOnce({ cnt: 25 });
-
-    const result = await handleCreateTrigger(
-      'req-1',
-      { name: 'Test', cronExpression: '0 9 * * *', promptTemplate: 'Do stuff' },
-      tokenData,
-      env as Env
-    );
-
+  it('creates and replaces GitHub config without cron scheduling', async () => {
+    const result = await handleCreateTrigger('1', github, token, env);
     expect(result.error).toBeUndefined();
-    expect(result.result).toBeDefined();
-  });
-
-  it('uses default UTC timezone when not specified', async () => {
-    mockD1._stmt.first.mockResolvedValueOnce(null);
-    mockD1._stmt.first.mockResolvedValueOnce({ maxTriggers: null });
-    mockD1._stmt.first.mockResolvedValueOnce({ cnt: 0 });
-
-    const result = await handleCreateTrigger(
-      'req-1',
-      { name: 'Test', cronExpression: '0 9 * * *', promptTemplate: 'Do stuff' },
-      tokenData,
-      env as Env
-    );
-
-    expect(result.error).toBeUndefined();
-    const content = (result.result as { content: { text: string }[] }).content[0];
-    const parsed = JSON.parse(content.text);
-    expect(parsed.cronTimezone).toBe('UTC');
-  });
-
-  it('accepts optional fields (agentProfileId, taskMode, vmSizeOverride, resourceRequirements)', async () => {
-    // agentProfileId lookup: found
-    mockD1._stmt.first.mockResolvedValueOnce({ id: 'profile-1' });
-    // Name uniqueness: no conflict
-    mockD1._stmt.first.mockResolvedValueOnce(null);
-    // Project lookup: no override
-    mockD1._stmt.first.mockResolvedValueOnce({ maxTriggers: null });
-    // Count check: below limit
-    mockD1._stmt.first.mockResolvedValueOnce({ cnt: 0 });
-
-    const result = await handleCreateTrigger(
-      'req-1',
+    const created = content(result);
+    expect(created).toMatchObject({
+      sourceType: 'github',
+      cronExpression: null,
+      cronTimezone: null,
+      nextFireAt: null,
+      githubConfig: github.githubConfig,
+    });
+    const updated = await handleUpdateTrigger(
+      '2',
       {
-        name: 'Full Config',
-        cronExpression: '0 9 * * *',
-        promptTemplate: 'Do stuff',
-        agentProfileId: 'profile-1',
-        taskMode: 'conversation',
-        vmSizeOverride: 'large',
-        resourceRequirements: { minVcpu: 4, exclusiveNode: false, maxCoTenants: 2 },
+        triggerId: created.triggerId,
+        githubConfig: { eventType: 'push', filters: { branches: ['main'] } },
       },
-      tokenData,
-      env as Env
+      token,
+      env
     );
-
-    expect(result.error).toBeUndefined();
-    const content = (result.result as { content: { text: string }[] }).content[0];
-    const parsed = JSON.parse(content.text);
-    expect(parsed.taskMode).toBe('conversation');
-    expect(parsed.vmSizeOverride).toBe('large');
-    // Older clients may still send the retired maxCoTenants cap; it is dropped, not stored.
-    expect(parsed.resourceRequirementsJson).toBe('{"minVcpu":4,"exclusiveNode":false}');
-  });
-
-  it('rejects invalid vmSizeOverride values', async () => {
-    mockD1._stmt.first.mockResolvedValueOnce(null);
-    mockD1._stmt.first.mockResolvedValueOnce({ maxTriggers: null });
-    mockD1._stmt.first.mockResolvedValueOnce({ cnt: 0 });
-
-    const result = await handleCreateTrigger(
-      'req-1',
-      {
-        name: 'Test',
-        cronExpression: '0 9 * * *',
-        promptTemplate: 'Do stuff',
-        vmSizeOverride: 'xlarge',
-      },
-      tokenData,
-      env as Env
+    expect(updated.error).toBeUndefined();
+    expect(content(updated).githubConfig).toEqual({
+      eventType: 'push',
+      filters: { branches: ['main'] },
+    });
+    const cleared = await handleUpdateTrigger(
+      '3',
+      { triggerId: created.triggerId, githubConfig: { eventType: 'push', filters: {} } },
+      token,
+      env
     );
-
-    expect(result.error).toBeDefined();
-    expect(result.error?.message).toContain('vmSizeOverride must be');
+    expect(content(cleared).githubConfig.filters).toEqual({});
   });
-
-  it('rejects malformed resourceRequirements', async () => {
-    const result = await handleCreateTrigger(
-      'req-1',
-      {
-        name: 'Test',
-        cronExpression: '0 9 * * *',
-        promptTemplate: 'Do stuff',
-        resourceRequirements: { minMemoryGb: -1 },
-      },
-      tokenData,
-      env as Env
+  it.each([
+    [{ ...cron, name: undefined }, 'name'],
+    [{ ...cron, name: ' ' }, 'name is required'],
+    [{ ...cron, cronExpression: '' }, 'cronExpression is required'],
+    [{ ...cron, promptTemplate: ' ' }, 'promptTemplate is required'],
+    [{ ...cron, promptTemplate: 'x'.repeat(8001) }, 'too long'],
+    [{ ...cron, cronExpression: 'invalid' }, 'Invalid cron'],
+    [{ ...cron, cronTimezone: 'Invalid/Zone' }, 'Invalid timezone'],
+    [{ ...cron, vmSizeOverride: 'xlarge' }, 'vmSizeOverride'],
+    [{ ...github, githubConfig: undefined }, 'githubConfig.eventType'],
+    [{ ...github, githubConfig: { eventType: 'unsupported' } }, 'githubConfig'],
+    [
+      { ...github, githubConfig: { eventType: 'issues', filters: { labels: 'bug' } } },
+      'githubConfig',
+    ],
+    [
+      { ...github, githubConfig: { eventType: 'issues', filters: { unknownFilter: true } } },
+      'githubConfig',
+    ],
+    [{ ...github, cronExpression: '0 9 * * *' }, 'only valid for cron'],
+    [{ ...cron, githubConfig: github.githubConfig }, 'only valid for github'],
+    [{ ...cron, sourceType: 'webhook' }, 'only valid for cron'],
+    [{ ...cron, sourceType: 'incident' }, 'sourceType'],
+    [{ ...github, agentProfileId: 'foreign' }, 'Agent profile not found'],
+  ])('rejects invalid input without persisting: %j', async (params, message) => {
+    const result = await handleCreateTrigger('1', params, token, env);
+    expect(result.error?.message).toContain(message);
+    expect(sqlite.prepare('SELECT count(*) AS count FROM triggers').get()).toEqual({ count: 0 });
+  });
+  it('enforces duplicate names and project trigger limits', async () => {
+    expect((await handleCreateTrigger('1', github, token, env)).error).toBeUndefined();
+    expect((await handleCreateTrigger('2', github, token, env)).error?.message).toContain(
+      'already exists'
     );
-
-    expect(result.error).toBeDefined();
-    expect(result.error?.message).toContain('finite positive number');
+    sqlite.prepare('UPDATE projects SET max_triggers = 1 WHERE id = ?').run('project');
+    expect((await handleCreateTrigger('3', cron, token, env)).error?.message).toContain(
+      'Maximum triggers'
+    );
   });
+  it('rejects nonexistent token project', async () => {
+    expect(
+      (await handleCreateTrigger('1', github, { ...token, projectId: 'missing' }, env)).error
+        ?.message
+    ).toContain('Project not found');
+  });
+  it('rejects source-specific updates without changing stored config', async () => {
+    const created = content(await handleCreateTrigger('1', github, token, env));
+    for (const params of [
+      { cronExpression: '0 10 * * *' },
+      { sourceType: 'cron' },
+      { githubConfig: { eventType: 'bad' } },
+    ]) {
+      expect(
+        (await handleUpdateTrigger('2', { triggerId: created.triggerId, ...params }, token, env))
+          .error
+      ).toBeDefined();
+    }
+    expect(sqlite.prepare('SELECT event_type FROM github_trigger_configs').get()).toEqual({
+      event_type: 'issues',
+    });
+  });
+});
+
+// Some tool clients reject union schemas at the tool root before invoking the handler.
+it('advertises an object schema while handlers enforce source-specific requirements', () => {
+  const tool = TRIGGER_TOOLS.find((entry) => entry.name === 'create_trigger')!;
+  expect(tool.inputSchema.type).toBe('object');
+  expect(tool.inputSchema).not.toHaveProperty('anyOf');
+  expect(tool.inputSchema.required).toEqual(['name', 'promptTemplate']);
+  expect(tool.inputSchema.properties).toHaveProperty('githubConfig');
+  expect(tool.inputSchema.properties).toHaveProperty('sourceType.enum', [
+    'cron',
+    'github',
+    'webhook',
+  ]);
+  expect(tool.inputSchema.properties).toHaveProperty(
+    'cronExpression.description',
+    expect.stringContaining('Required when sourceType is cron or omitted')
+  );
 });

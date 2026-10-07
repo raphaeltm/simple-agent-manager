@@ -745,7 +745,7 @@ describe('workspace resource history', () => {
     ).toEqual({ count: 0 });
   });
 
-  it('deletes the uploaded R2 object when D1 indexing fails', async () => {
+  it('retains its attempt object when the D1 batch outcome is uncertain', async () => {
     const { r2, env } = makePersistedResourceTestEnv({ includeSummary: false });
 
     await expect(
@@ -753,7 +753,62 @@ describe('workspace resource history', () => {
     ).rejects.toThrow(/workspace_resource_summaries/i);
 
     expect(r2.puts).toHaveLength(1);
-    expect(r2.deletes).toEqual(r2.puts);
-    expect(r2.objects.size).toBe(0);
+    expect(r2.deletes).toEqual([]);
+    expect(r2.objects.size).toBe(1);
+  });
+});
+
+describe('resource chunk transactional failure controls', () => {
+  it('rolls back the summary delta when chunk insertion fails, then retries once', async () => {
+    const { sqlite, env, r2 } = makePersistedResourceTestEnv();
+    const body = await uploadBody();
+    await storeWorkspaceResourceChunk(env, 'proj-1', body, 'node-1');
+    sqlite.exec(`CREATE TRIGGER fail_chunk BEFORE INSERT ON workspace_resource_chunks
+      WHEN NEW.chunk_sequence = 1 BEGIN SELECT RAISE(ABORT, 'controlled insert failure'); END`);
+    await expect(
+      storeWorkspaceResourceChunk(env, 'proj-1', { ...body, chunkSequence: 1 }, 'node-1')
+    ).rejects.toThrow('controlled insert failure');
+    expect(
+      sqlite.prepare('SELECT sample_count, tool_span_count FROM workspace_resource_summaries').get()
+    ).toEqual({ sample_count: 3, tool_span_count: 1 });
+    expect(sqlite.prepare('SELECT COUNT(*) AS n FROM workspace_resource_chunks').get()).toEqual({
+      n: 1,
+    });
+    sqlite.exec('DROP TRIGGER fail_chunk');
+    await storeWorkspaceResourceChunk(env, 'proj-1', { ...body, chunkSequence: 1 }, 'node-1');
+    expect(
+      sqlite.prepare('SELECT sample_count, tool_span_count FROM workspace_resource_summaries').get()
+    ).toEqual({ sample_count: 6, tool_span_count: 2 });
+    expect(r2.objects.size).toBe(3); // uncertain failed attempt is retained safely
+    sqlite.close();
+  });
+
+  it('preserves a committed object if the batch response is lost', async () => {
+    const { sqlite, env, r2 } = makePersistedResourceTestEnv();
+    const database = env.DATABASE;
+    env.DATABASE = {
+      ...database,
+      batch: async (statements: D1PreparedStatement[]) => {
+        await database.batch(statements);
+        throw new Error('controlled lost response');
+      },
+    } as D1Database;
+    const body = await uploadBody();
+    await expect(storeWorkspaceResourceChunk(env, 'proj-1', body, 'node-1')).rejects.toThrow(
+      'controlled lost response'
+    );
+    env.DATABASE = database;
+    expect(await storeWorkspaceResourceChunk(env, 'proj-1', body, 'node-1')).toMatchObject({
+      idempotent: true,
+    });
+    expect(sqlite.prepare('SELECT sample_count FROM workspace_resource_summaries').get()).toEqual({
+      sample_count: 3,
+    });
+    const row = sqlite.prepare('SELECT r2_key FROM workspace_resource_chunks').get() as {
+      r2_key: string;
+    };
+    expect(r2.objects.has(row.r2_key)).toBe(true);
+    expect(r2.deletes).toEqual([]);
+    sqlite.close();
   });
 });

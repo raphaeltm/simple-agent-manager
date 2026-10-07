@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
-import { ensureSessionSnapshotForSleep } from '../../../src/services/session-snapshot-artifacts';
+import { ensureSessionSnapshotForSleep } from '../../../src/services/session-snapshot-prepare';
 import { scheduleSessionSnapshotSleep } from '../../../src/services/session-snapshot-sleep-lifecycle';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 

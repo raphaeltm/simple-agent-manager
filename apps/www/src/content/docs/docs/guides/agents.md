@@ -99,6 +99,62 @@ A few things worth knowing:
 - **User-scoped.** Guided sign-in saves the credential for your account, so it applies across your projects. To set a subscription credential for a single [shared project](/docs/guides/collaboration/), use the manual paste fallback in that project's connections.
 - **Availability.** Guided sign-in is available on the hosted platform and on self-hosted deployments running on Cloudflare Containers (SAM's default runtime). If the button isn't shown, use the manual API key or token fields in the same panel.
 
+## Usage Limits
+
+A subscription only lets you use so much in a stretch of time — Claude Max has a five-hour and a
+weekly limit, for example. SAM shows how much of each limit your agents have used, so you can see one
+coming before an agent stops on it.
+
+<picture>
+  <source media="(max-width: 40em)" srcset="/images/docs/credential-usage-limits-mobile.png" />
+  <img src="/images/docs/credential-usage-limits.png" alt="The usage details dialog opened from a chat's usage chip. It reads &quot;Claude usage&quot; and &quot;Your credential · claude-code · sampled 4m ago&quot;, with an amber Warning badge, and lists two limits with progress bars: &quot;5h&quot; at 78% used in amber, resetting in about two hours, and &quot;Week&quot; at 31% used in green, resetting in about three days. A note at the bottom says the values are the latest samples SAM saw, not a live quote from the provider." loading="lazy" />
+</picture>
+
+- **In a chat**, a small chip under the chat's title shows the credential that chat's agent uses —
+  for example `Claude · 5h 78% · Week 31%`, shortest limit first. Select it to see every limit, how
+  much of it is used, and when it resets. It appears once SAM has a reading, usually after the
+  agent's first reply; credentials that report nothing (see the list below) never show one.
+- **In Settings → Advanced**, each of your personal credentials in the **Credentials** list shows the
+  same chip once an agent has used it.
+- **Agents** can read the same numbers with the `get_credential_limits` tool, so an agent
+  coordinating others can pause before a limit and schedule itself to wake after the reset.
+
+The **Usage** tab in Settings is different: it shows SAM's own AI-proxy and compute usage, not your
+provider's limits.
+
+The chip's colour shows the most serious state among the limits, and the dialog names it: **OK**,
+**Warning** (from 75%, or earlier if the provider warns), **Critical** (from 90%), or **Limit
+reached** (the provider is refusing requests). For your own subscription the percentages cover your
+whole account with that provider, so they include use outside SAM; a **Platform credential**'s
+numbers are SAM's shared limits.
+
+When a limit is nearly used up, wait for the reset time shown in the dialog, or start new work with a
+profile for a different agent — Codex instead of Claude Code, say. If a limit runs out in the middle of work, a **Task** fails but
+SAM keeps its workspace (see [When a task fails](/docs/guides/session-troubleshooting/#when-a-task-fails)),
+and a **Chat** just stops with the provider's error. Either way, reply in the same chat after the
+reset to carry on. By then the chat has usually gone to sleep, so it wakes
+[without some of its settings](#after-a-chat-wakes-from-sleep).
+
+The numbers are the last reading SAM took while an agent was using that credential, not live figures
+from the provider. A credential nobody has used for a while keeps its last reading for up to 30 days,
+and the dialog says how old it is.
+
+Which credentials report limits:
+
+- **Claude Code with a Claude Pro/Max subscription:** whichever of the five-hour, weekly, weekly Opus,
+  and weekly Sonnet limits Claude Code reports.
+- **Codex with a ChatGPT plan:** the plan's limits — often five-hour and weekly, sometimes weekly
+  only.
+- **OpenCode with an OpenCode Go key:** rolling, weekly, and monthly.
+- **Claude Code or Codex in the SAM provider mode:** the request and token rate limits the model
+  provider reports, shown as **Platform credential**.
+
+OpenCode Zen bills from a credit balance that only the OpenCode console shows, so Zen has no chip;
+OpenCode's agent settings link to the console instead. API keys used directly, and the other agents,
+report no limits. SAM reads these numbers from what the agents and providers report while they work,
+plus OpenCode's Go usage endpoint; it doesn't call Anthropic's or OpenAI's undocumented account-usage
+pages.
+
 ## AI Provider Modes
 
 Each agent runs in one of three provider modes, which control where LLM traffic goes and who pays for it:
@@ -135,12 +191,94 @@ has to be a model your provider accepts and your agent's version can run. The ex
 **SAM** provider mode: the platform proxy only serves models in its catalog, so there an unlisted
 ID is refused.
 
+### Permission mode
+
+Agents start in **Bypass Permissions** mode, so they edit files and run commands without stopping to
+ask. Each workspace is its own isolated VM or container. To make an agent more careful, choose
+another mode:
+
+| Mode                             | What the agent does                                                        |
+| -------------------------------- | -------------------------------------------------------------------------- |
+| **Bypass Permissions** (default) | Works without asking                                                       |
+| **Accept Edits**                 | Changes files without asking, but asks before running commands             |
+| **Manual**                       | Asks before it changes files or runs commands                              |
+| **Plan Mode**                    | Reads and plans without changing anything, then asks you to approve a plan |
+| **Don't Ask**                    | Never asks; anything that would need your approval is refused              |
+
+Set a mode in a profile, in the project's **Agent Overrides** (project settings), or in
+**Settings → Agents**. When a chat starts, SAM uses the first of these that sets a mode, in that
+order; a change applies to chats started after you save it, not to one already running. (A skill
+created with SAM's `create_skill` tool can set a mode too, and it wins over the profile's.)
+
+When the agent asks, a card appears in the chat and the agent waits for your answer — see
+[When the Agent Needs You](/docs/guides/chat-features/#when-the-agent-needs-you). A request nobody
+answers expires and counts as a no. On a self-hosted instance where the operator hasn't
+[turned agent requests on](/docs/guides/self-hosting/#let-agents-ask-in-chat), no card appears and
+every request counts as a no: an agent in **Manual** or **Plan Mode** can't get approval to change
+anything, and one in **Accept Edits** can edit files but not run commands that need approval.
+
+Claude Code supports every mode. Even in Bypass Permissions it still asks about a few safety checks,
+and those questions appear in the chat. Codex always runs with full access. Other agents keep their
+own behavior when they don't support the chosen mode — Amp and Gemini CLI, for example, still ask
+before some actions even when SAM sets Bypass Permissions.
+
+#### After a chat wakes from sleep
+
+A chat usually comes back from sleep — or from SAM restoring it after its container or machine
+failed — without the settings it started with:
+
+- **Mode:** it takes its mode from **Agent Overrides**, then **Settings → Agents**, and uses Bypass
+  Permissions if neither sets one. So a chat whose profile is set to **Manual** or **Plan Mode**
+  usually goes ahead without asking. If one of those places sets an asking mode instead, every
+  request is refused and the agent
+  [stops](/docs/guides/session-troubleshooting/#the-agent-stops-for-approval-and-no-card-appears).
+- **Model:** a Claude Code chat keeps its model unless one of those places sets one; other agents
+  may switch to their default model.
+- **Requests:** it can't ask you anything yet — SAM refuses its requests without showing a card.
+- **Pull requests:** a **Task** carries on like a **Chat**: SAM no longer commits or pushes for it.
+  Ask the agent to commit and push to its branch, which updates the pull request SAM already
+  opened, or to open one if there isn't one yet.
+
+The exception is a VM wake where SAM has to start the agent fresh: that uses the profile's mode and
+model and can ask, but SAM still doesn't commit or push a Task's work. To get the profile's settings back, or when the agent needs your approval,
+[fork](/docs/guides/chat-features/#conversation-forking) the chat or start a new one with that
+profile selected.
+
+#### An agent asks when you don't expect it
+
+A mode saved earlier still applies, so check all three places. Older built-in profiles were set to
+**Accept Edits** or **Plan Mode**, and saving **Settings → Agents** on or before 4 October (on a
+self-hosted instance, before it ran v2026.10.05) stored the old default, now shown as **Manual**,
+even if you only changed the model. To stop the questions, set **Bypass Permissions** where the mode
+is set, or clear it there so the next place decides: **No override** in a profile, **Inherit from
+user settings** in **Agent Overrides**. If Claude Code still asks, it may be running as `root`.
+
+#### Claude Code asks even in Bypass Permissions
+
+Claude Code won't use Bypass Permissions when it runs as `root`, so it asks as in **Manual** instead.
+On a VM the agent runs as your devcontainer's user, so this happens when the project's devcontainer
+runs as `root`. Repositories without a `.devcontainer`, the **Lightweight** workspace profile, and
+[Instant](/docs/guides/instant-sessions/) sessions use SAM's own images, which run as a non-root
+user — though Lightweight still follows a `devcontainer.json` that sets `remoteUser` or
+`containerUser` to `root`.
+
+To check, ask the agent to run `whoami`, or run it yourself in the workspace's
+[terminal](/docs/guides/creating-workspaces/#terminal). If it prints `root`, set `"remoteUser"` in
+`.devcontainer/devcontainer.json` to a non-root user that exists in your image — `vscode` in most
+[Dev Container images](https://github.com/devcontainers/images), `node` in the Node.js ones; if your
+image has none, create one in its Dockerfile. Then push the change to your default branch and start
+a new chat.
+
+Claude Code also refuses Bypass Permissions when the repository's `.claude/settings.json` or
+`.claude/settings.local.json` sets `permissions.disableBypassPermissionsMode` to `"disable"`. Remove
+that setting if you want Bypass Permissions.
+
 ## Workspace Profiles
 
-When you start a chat you can also choose how much environment to bring:
+An agent profile's **Workspace Profile** setting chooses how much environment its chats get:
 
 - **Full** (default) — builds your project's `.devcontainer` so the agent can run your stack, tests, and services. Best when the work depends on your real environment.
-- **Lightweight** — starts faster with a minimal environment. Best for quick questions, planning, and code exploration.
+- **Lightweight** — starts faster with a minimal environment. Best for quick questions, planning, and code exploration. With **Task Mode** left at **Default**, a Lightweight profile's sessions are Chats, so SAM doesn't commit, push, or open a pull request — see [Chat or Task](/docs/guides/chat-features/#chat-or-task).
 
 ## Agent Session Features
 
@@ -168,8 +306,10 @@ Agent responses can be played back as audio using Deepgram Aura 2 (via Workers A
 SAM tracks related lifecycle state at three levels:
 
 - **Chat session**: `active`, `sleeping`, `stopped`, or `error` in the public API. A sleeping conversation keeps the composer visible so a same-chat follow-up can wake and resume it.
-- **Task record**: `draft`, `ready`, `queued`, `delegated`, `in_progress`, `completed`, `failed`, or `cancelled`. Task-mode work keeps its task completion lifecycle instead of showing the manual Sleep action while idle.
+- **Task record**: `draft`, `ready`, `queued`, `delegated`, `in_progress`, `sleeping`, `completed`, `failed`, or `cancelled`. A sleeping VM conversation retains the same task when it wakes. Task-mode work keeps its task completion lifecycle instead of showing the manual Sleep action while idle.
 - **Runtime agent session**: `running`, `recovery`, `sleeping`, `suspended`, `stopped`, or `error`. Recovery means SAM is rebuilding runtime compute and restoring the saved harness/session state.
+
+Sleeping VM tasks remain visible in Active Tasks, the account map, and agent lists. Agents in the same project can send a follow-up using `send_message_to_subtask` or `send_durable_message`; durable delivery wakes the saved conversation. If durable delivery is disabled, the tools explain that sleeping targets require it. A direct parent can cancel a sleeping child with `stop_subtask` without waking its VM.
 
 Conversation-mode sessions with an attached workspace can be manually slept when awake and idle. Archive remains destructive and appears after the reversible sleep boundary.
 
@@ -179,38 +319,38 @@ SAM now backs chat sessions with task records across more runtime paths. In prac
 
 Running agents have access to project-aware MCP tools:
 
-| Tool                                | Description                                                                                                                                                                                                                                                                                                                                       |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `dispatch_task`                     | Spawn follow-up work using the selected profile runtime, or an explicit `runtime` override; an optional `coordinationChannel` is inherited by every descendant                                                                                                                                                                                    |
-| `create_idea`                       | Create a new idea                                                                                                                                                                                                                                                                                                                                 |
-| `update_idea`                       | Update an idea's title, content, priority, or status                                                                                                                                                                                                                                                                                              |
-| `list_ideas`                        | View project ideas                                                                                                                                                                                                                                                                                                                                |
-| `get_idea`                          | Read idea details                                                                                                                                                                                                                                                                                                                                 |
-| `search_ideas`                      | Search ideas by keyword. Long multi-word input searches every retained term; input beyond the configured guardrails is truncated and disclosed in the response.                                                                                                                                                                                    |
-| `link_idea`                         | Link an idea to a chat session                                                                                                                                                                                                                                                                                                                    |
-| `unlink_idea`                       | Remove an idea-session link                                                                                                                                                                                                                                                                                                                       |
-| `find_related_ideas`                | Find ideas related to a session                                                                                                                                                                                                                                                                                                                   |
-| `list_linked_ideas`                 | List ideas linked to a session                                                                                                                                                                                                                                                                                                                    |
-| `list_sessions`                     | View chat sessions                                                                                                                                                                                                                                                                                                                                |
-| `get_session_messages`              | Read conversation history (consecutive streaming tokens are concatenated into logical messages)                                                                                                                                                                                                                                                   |
+| Tool                                | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dispatch_task`                     | Spawn follow-up work using the selected profile runtime, or an explicit `runtime` override; an optional `coordinationChannel` is inherited by every descendant                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `create_idea`                       | Create a new idea                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `update_idea`                       | Update an idea's title, content, priority, or status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `list_ideas`                        | View project ideas                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `get_idea`                          | Read idea details                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `search_ideas`                      | Search ideas by keyword. Long multi-word input searches every retained term; input beyond the configured guardrails is truncated and disclosed in the response.                                                                                                                                                                                                                                                                                                                                                                     |
+| `link_idea`                         | Link an idea to a chat session                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `unlink_idea`                       | Remove an idea-session link                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `find_related_ideas`                | Find ideas related to a session                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `list_linked_ideas`                 | List ideas linked to a session                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `list_sessions`                     | View chat sessions                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `get_session_messages`              | Read conversation history (consecutive streaming tokens are concatenated into logical messages)                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `search_messages`                   | Search current and archived messages by keyword. Long multi-word input searches every retained term; input beyond the configured guardrails is truncated and disclosed through `queryTruncated`, `query`, and `queryLimits`. Sessions are indexed incrementally as they sleep or stop. Project-wide results may be provisional: repeat the same input query, roles, and limit with `archiveSearch.continuation` until `archiveSearch.complete` is true; owner, index, execution, and `rootSearch` coverage are reported separately. |
-| `get_resource_history`              | Read a VM-backed workspace's retained CPU, memory, I/O and OOM history; defaults to the caller's own session                                                                                                                                                                                                                                      |
-| `list_triggers`                     | List this project's automation triggers, optionally filtered by status or source type                                                                                                                                                                                                                                                             |
-| `create_project_event_subscription` | Subscribe the current task agent to durable project events using bounded v1 exact/set filters for source, event type, subject, and severity                                                                                                                                                                                                       |
-| `list_project_event_subscriptions`  | Recover active event subscription IDs owned by the current task agent                                                                                                                                                                                                                                                                             |
-| `get_project_event_subscription`    | Inspect one owned event subscription, including filter and recorded delivery preference                                                                                                                                                                                                                                                           |
-| `cancel_project_event_subscription` | Idempotently cancel one owned event subscription                                                                                                                                                                                                                                                                                                  |
-| `list_subscription_events`          | Replay missed or queued events for one visible subscription; returns payload-free summaries, delivery IDs, and an opaque subscription-bound cursor                                                                                                                                                                                                |
-| `get_event`                         | Fetch full stored details for one event that is visible through an active subscription                                                                                                                                                                                                                                                            |
-| `ack_event_delivery`                | Idempotently acknowledge a processed pull delivery by delivery ID                                                                                                                                                                                                                                                                                 |
-| `list_incident_queue`               | List grouped private feedback incidents; available only inside the configured feedback project                                                                                                                                                                                                                                                    |
-| `get_incident`                      | Read one bounded, redacted private incident and its untrusted evidence                                                                                                                                                                                                                                                                            |
-| `claim_incident`                    | Atomically claim a private incident for the current task                                                                                                                                                                                                                                                                                          |
-| `resolve_incident`                  | Terminally resolve or reject a claimed private incident; resolved outcomes require a PR/task/Idea ship-or-track reference                                                                                                                                                                                                                         |
-| `update_task_status`                | Report progress                                                                                                                                                                                                                                                                                                                                   |
-| `get_task_details`                  | Inspect task state, persisted output fields, PR/error details, session id, and bounded recent assistant diagnostics                                                                                                                                                                                                                               |
-| `complete_task`                     | Mark current work as done. Pass the pull request URL as `evidence.prUrl`; it is saved on the task alongside optional test, staging, CI, manual verification, and note evidence.                                                                                                                                                                    |
-| `request_human_input`               | Record a user decision request and notify the user; the tool call itself is non-blocking                                                                                                                                                                                                                                                          |
+| `get_resource_history`              | Read a VM-backed workspace's retained CPU, memory, I/O and OOM history; defaults to the caller's own session                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `list_triggers`                     | List this project's automation triggers, optionally filtered by status or source type                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `create_project_event_subscription` | Subscribe the current task agent to durable project events using bounded v1 exact/set filters for source, event type, subject, and severity                                                                                                                                                                                                                                                                                                                                                                                         |
+| `list_project_event_subscriptions`  | Recover active event subscription IDs owned by the current task agent                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `get_project_event_subscription`    | Inspect one owned event subscription, including filter and recorded delivery preference                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `cancel_project_event_subscription` | Idempotently cancel one owned event subscription                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `list_subscription_events`          | Replay missed or queued events for one visible subscription; returns payload-free summaries, delivery IDs, and an opaque subscription-bound cursor                                                                                                                                                                                                                                                                                                                                                                                  |
+| `get_event`                         | Fetch full stored details for one event that is visible through an active subscription                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `ack_event_delivery`                | Idempotently acknowledge a processed pull delivery by delivery ID                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `list_incident_queue`               | List grouped private feedback incidents; available only inside the configured feedback project                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `get_incident`                      | Read one bounded, redacted private incident and its untrusted evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `claim_incident`                    | Atomically claim a private incident for the current task                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `resolve_incident`                  | Terminally resolve or reject a claimed private incident; resolved outcomes require a PR/task/Idea ship-or-track reference                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `update_task_status`                | Report progress                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `get_task_details`                  | Inspect task state, persisted output fields, PR/error details, session id, and bounded recent assistant diagnostics                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `complete_task`                     | Mark current work as done. Pass the pull request URL as `evidence.prUrl`; it is saved on the task alongside optional test, staging, CI, manual verification, and note evidence.                                                                                                                                                                                                                                                                                                                                                     |
+| `request_human_input`               | Record a user decision request and notify the user; the tool call itself is non-blocking                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
 `get_task_details` keeps `outputPrUrl`, `outputSummary`, and `completionEvidence` as the canonical persisted completion fields. When a task has a linked chat session, it can also include a bounded `recentAssistantMessages` array with up to five recent assistant messages, each capped to 2,000 characters, so orchestrators can recover useful final output when the persisted summary is sparse. The SAM session (Anthropic tool) variant returns a single `finalAssistantMessage` (the latest assistant message, content capped to 2,000 characters) instead of the full array. If session diagnostics are unavailable, task details still return and the diagnostic fields are empty/null.
 
@@ -221,5 +361,7 @@ To wait on a pull request without polling, subscribe and end the turn: use sourc
 To coordinate several agents on one feature, publish a short kickoff to a project channel and pass it as `coordinationChannel` to `dispatch_task`. Children and their descendants inherit it and are told to publish findings, decisions, blockers and completion evidence with `publish_channel_event`, and to read it with `get_channel_history` or follow it with `follow_event_channel`. A publication never wakes its own author.
 
 Claude Code and Codex get these tools on both the VM and [Instant](/docs/guides/instant-sessions/) runtimes. If a Codex session is handed an MCP server without a usable token, it fails to start with an explicit error rather than launching a tool-less agent.
+
+If a chat reports that its **agent connection is missing or rejected**, the session creator can open **Settings → Connections**. Claude Code and Codex offer guided sign-in; other agents may require a supported key method. A provider error saying the **model is unsupported or unavailable for the account** is different: a working sign-in does not grant model access. Check that model's availability with the provider.
 
 An agent that reports it has no SAM tools is worth [reporting](/docs/guides/reporting-issues/) — it is not expected behavior on either runtime.

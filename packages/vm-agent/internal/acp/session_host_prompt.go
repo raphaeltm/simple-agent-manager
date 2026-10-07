@@ -67,7 +67,11 @@ func (h *SessionHost) AcceptPrompt(
 	}
 
 	promptCtx, promptCancel, promptTimeout := h.newPromptContext(ctx)
-	attempt, ok := h.beginPromptForDelivery(promptCtx, promptCancel, deliveryID, observer)
+	messageID := ""
+	if viewerID == "control-plane" || viewerID == "server" {
+		messageID = promptReq.messageID
+	}
+	attempt, ok := h.beginPromptForDeliveryWithMessageID(promptCtx, promptCancel, deliveryID, messageID, observer)
 	if !ok {
 		promptCancel()
 		h.sendJSONRPCErrorToViewer(viewerID, reqID, -32603, "Prompt already in progress")
@@ -596,6 +600,9 @@ func (h *SessionHost) finishPrompt(
 	}))
 	h.checkStderrForSilentErrors(resp.StopReason)
 	h.broadcastPromptResponse(reqID, resp)
+	// Codex and OpenCode expose their plan usage only outside the ACP stream;
+	// sample it once per completed turn (session_host_usage_probe.go).
+	h.scheduleProviderUsageProbe()
 }
 
 func (h *SessionHost) finishPromptCancelled(attempt *promptAttempt, reqID json.RawMessage, info promptStartInfo) {
@@ -650,7 +657,10 @@ func (h *SessionHost) finishPromptAttemptWithError(attempt *promptAttempt, promp
 		return
 	}
 
-	errMsg := fmt.Sprintf("Prompt failed: %v", err)
+	errMsg := "agent_prompt_failed"
+	if reasonCode := ClassifyPromptError(err); reasonCode != "" {
+		errMsg = reasonCode
+	}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(promptCtx.Err(), context.DeadlineExceeded) {
 		if info.timeout > 0 {
 			errMsg = fmt.Sprintf("Prompt timed out after %s", info.timeout)
@@ -658,7 +668,7 @@ func (h *SessionHost) finishPromptAttemptWithError(attempt *promptAttempt, promp
 			errMsg = "Prompt cancelled (context deadline exceeded)"
 		}
 	}
-	slog.Warn("ACP Prompt failed (non-fatal)", "error", err)
+	slog.Warn("ACP Prompt failed (non-fatal)", "reason", errMsg)
 	h.reportLifecycle("warn", "ACP Prompt failed", map[string]interface{}{
 		"error":    errMsg,
 		"duration": time.Since(info.startedAt).String(),

@@ -31,7 +31,7 @@ function artifactKey(prefix: string, name: string): string {
   return `${prefix}/${name}`;
 }
 
-function streamBinary(object: R2ObjectBody, filename: string, immutable: boolean): Response {
+export function streamBinary(object: R2ObjectBody, filename: string, immutable: boolean): Response {
   return new Response(object.body, {
     headers: {
       'Content-Type': 'application/octet-stream',

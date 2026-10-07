@@ -99,6 +99,74 @@ A superadmin can separately configure **Google infrastructure OAuth** at `/admin
 
 SAM's in-app **Report an Issue** flow is off until you nominate a project to receive reports. Create a project for feedback, then open **Admin → Integrations** (`/admin/integrations`) and select it under **Private feedback project**. `PLATFORM_FEEDBACK_PROJECT_ID` is still supported as a bootstrap/environment fallback, but the in-app runtime setting is preferred and overrides it. Until an effective project exists, the Report button and the crash-screen report link are hidden from every user — so if people tell you there's no Report button, this is why. The same setting enables hourly automated triage of platform errors into that project. See [Reporting Issues](/docs/guides/reporting-issues/#for-operators-where-reports-land).
 
+### Let agents ask in chat
+
+Agents can stop and ask the person running a chat for permission, ask them a question, or send a
+sign-in link to open — see [When the Agent Needs You](/docs/guides/chat-features/#when-the-agent-needs-you).
+This is off unless you turn it on, on new and updated installations alike. Until then, SAM refuses
+every such request the moment an agent makes it, and no card appears. Claude Code and Codex in the
+default **Bypass Permissions** mode rarely ask, so most users won't notice, but an agent in
+**Manual**, **Accept Edits**, or **Plan Mode** — or Amp or Gemini CLI, which ask on their own, or
+Claude Code in a devcontainer that
+[runs as `root`](/docs/guides/agents/#claude-code-asks-even-in-bypass-permissions) — is told no
+every time it asks to make a change. Release-specific steps are in the self-hoster notes of
+[Recent Product Changes](/docs/guides/recent-product-changes/).
+
+We recommend turning it on; the hosted service has it on. Agents set to ask then wait for an
+answer — a permission request for up to 30 minutes in a task and 2 hours in a chat — and only the
+person who started the chat can answer, with no notification sent. To turn it on, add these GitHub
+Environment **variables** (not secrets) to your `production` environment, each set to `true`:
+
+| Variable                        | What it turns on                                                      |
+| ------------------------------- | --------------------------------------------------------------------- |
+| `ACP_INTERACTIONS_ENABLED`      | Permission requests. The other two need it as well.                   |
+| `ACP_INTERACTION_FORMS_ENABLED` | Questions, in conversation-mode chats                                 |
+| `ACP_INTERACTION_URLS_ENABLED`  | Links to open (external service requests), in conversation-mode chats |
+
+They take effect at the next deploy: run **Deploy Production**, or set them before you
+[update](#updating-an-existing-self-hosted-instance) so the update's deploy picks them up. Turning a
+switch on applies to chats started after that deploy; a chat that sleeps and wakes usually can't
+ask yet.
+To check that it works, start a new chat with a Claude Code profile set to **Manual** and ask the
+agent to create a file: a card with a **Permission needed** badge should appear. Turning a switch off refuses new requests straight away,
+even in running chats; any already waiting can still be answered until they expire. Deadlines and
+size limits are in the
+[configuration reference](/docs/reference/configuration/#agent-requests-in-chat).
+
+Codex needs SAM's own build of its runtime to ask questions and send links. Every deploy publishes
+that build to your R2 bucket, and new sessions use it when these variables are on, so there is
+nothing else to set up.
+
+If you leave requests off, this query finds the saved Claude Code modes whose requests will be
+refused, in user settings, profiles, skills, and projects' **Agent Overrides**. Run it in the
+console of your SAM D1 database (the one bound as `DATABASE`; its name is in the deploy workflow's
+Pulumi stack output) in the Cloudflare dashboard:
+
+```sql
+SELECT 'user setting' AS place, NULL AS project_id, u.email AS owner, s.permission_mode AS mode
+  FROM agent_settings s LEFT JOIN users u ON u.id = s.user_id
+ WHERE s.agent_type = 'claude-code' AND s.permission_mode NOT IN ('bypassPermissions', 'dontAsk')
+UNION ALL
+SELECT 'profile: ' || p.name, p.project_id, u.email, p.permission_mode
+  FROM agent_profiles p LEFT JOIN users u ON u.id = p.user_id
+ WHERE p.agent_type = 'claude-code' AND p.permission_mode NOT IN ('bypassPermissions', 'dontAsk')
+UNION ALL
+SELECT 'skill: ' || k.name, k.project_id, u.email, k.permission_mode
+  FROM skills k LEFT JOIN users u ON u.id = k.user_id
+ WHERE k.agent_type = 'claude-code' AND k.permission_mode NOT IN ('bypassPermissions', 'dontAsk')
+UNION ALL
+SELECT 'project: ' || pr.name, pr.id, u.email, pr.agent_defaults
+  FROM projects pr LEFT JOIN users u ON u.id = pr.user_id
+ WHERE pr.agent_defaults LIKE '%"permissionMode":"%';
+```
+
+`owner` is whose **Settings → Agents** it is, who created the profile or skill, or who owns the
+project. A project row lists every agent the project sets a mode for; read its JSON to see which.
+Set those modes to **Bypass Permissions**, or clear them: a user changes their own **Settings →
+Agents**, and any admin of a project can change its profiles and **Agent Overrides**. A skill's mode
+has no field in the app; change it with SAM's `update_skill` tool (ask an agent in the project) or
+the API.
+
 ## GCP provisioning credentials
 
 Each user connects Google Cloud from **Settings → Cloud Provider → Google Cloud**. SAM supports two mutually exclusive authentication modes.
@@ -163,18 +231,19 @@ installations must add this policy before their next production deployment.
 
 **Environment variables:**
 
-| Variable                                           | Description                                                                                                                                         | Example                                  |
-| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
-| `BASE_DOMAIN`                                      | Your domain                                                                                                                                         | `example.com`                            |
-| `PREVIEW_BASE_DOMAIN`                              | Optional full preview hostname override; defaults to `preview.BASE_DOMAIN`                                                                          | `usercontent.example.com`                |
-| `PREVIEW_URL_TTL_SECONDS`                          | Optional lifetime for signed interactive-preview URLs                                                                                               | `300`                                    |
-| `RESOURCE_PREFIX`                                  | Domain-derived Cloudflare resource prefix                                                                                                           | `sa379a6`                                |
-| `CF_CONTAINER_ENABLED`                             | Optional instant-session runtime toggle. Generated deploys set `true`; set `false` to force VM runtime.                                             | `false`                                  |
-| `D1_READ_REPLICATION_MODE`                         | Optional D1 read-replication mode applied on every deploy. Defaults to `auto`; set `disabled` to remove replicas.                                   | `disabled`                               |
-| `D1_SESSION_MODE`                                  | Optional Worker D1 Sessions anchor. Defaults to `first-primary`; set `disabled` to send every query to the primary.                                 | `disabled`                               |
-| `D1_RESTORE_RECOVERY_WINDOW_DAYS`                  | Optional D1 restore window for accounts with narrower retention. Defaults to `30`; range `1`–`30`.                                                  | `7`                                      |
-| `D1_MIGRATION_CHURNING_TABLES`                     | Optional comma-separated `<binding>.<table>` subset of the reviewed retention/expiry table list. May narrow the built-in list but cannot expand it. | `OBSERVABILITY_DATABASE.platform_errors` |
-| `D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT` | Maximum allowed decrease for reviewed churning tables. Defaults to `50`; range `0`–`100`. A decrease exactly at the limit is accepted.              | `25`                                     |
+| Variable                                           | Description                                                                                                                                                               | Example                                  |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| `BASE_DOMAIN`                                      | Your domain                                                                                                                                                               | `example.com`                            |
+| `PREVIEW_BASE_DOMAIN`                              | Optional full preview hostname override; defaults to `preview.BASE_DOMAIN`. Currently ignored: the deploy doesn't pass it to the Worker                                   | `usercontent.example.com`                |
+| `PREVIEW_URL_TTL_SECONDS`                          | Optional lifetime for signed interactive-preview URLs. Currently ignored: the deploy doesn't pass it to the Worker                                                        | `300`                                    |
+| `RESOURCE_PREFIX`                                  | Domain-derived Cloudflare resource prefix                                                                                                                                 | `sa379a6`                                |
+| `CF_CONTAINER_ENABLED`                             | Optional instant-session runtime toggle. Generated deploys set `true`; set `false` to force VM runtime.                                                                   | `false`                                  |
+| `D1_READ_REPLICATION_MODE`                         | Optional D1 read-replication mode applied on every deploy. Defaults to `auto`; set `disabled` to remove replicas.                                                         | `disabled`                               |
+| `D1_SESSION_MODE`                                  | Optional Worker D1 Sessions anchor. Defaults to `first-primary`; set `disabled` to send every query to the primary.                                                       | `disabled`                               |
+| `D1_RESTORE_RECOVERY_WINDOW_DAYS`                  | Optional D1 restore window for accounts with narrower retention. Defaults to `30`; range `1`–`30`.                                                                        | `7`                                      |
+| `D1_MIGRATION_CHURNING_TABLES`                     | Optional comma-separated `<binding>.<table>` subset of the reviewed retention/expiry table list. May narrow the built-in list but cannot expand it.                       | `OBSERVABILITY_DATABASE.platform_errors` |
+| `D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT` | Maximum allowed decrease for reviewed churning tables. Defaults to `50`; range `0`–`100`. A decrease exactly at the limit is accepted.                                    | `25`                                     |
+| `ACP_INTERACTIONS_ENABLED`                         | Optional. `true` lets agents ask users for permission in chat; off unless set. See [Let agents ask in chat](#let-agents-ask-in-chat) for it and the two related switches. | `true`                                   |
 
 By default, each deploy enables D1 read replication (`read_replication.mode = "auto"`) on the
 main and observability databases, and the API Worker runs each request against a single D1 session so its
@@ -410,6 +479,20 @@ What to do, by what the card shows:
   width="375"
 />
 
+### When a project reaches the 10 GB storage cap
+
+Cloudflare limits each project's storage object to 10 GB. **Admin → Storage** shows how close each
+project is. At the cap every write to that project fails: new tasks and chat messages get
+`PROJECT_DATA_STORAGE_FULL` (_"ProjectData storage is full; storage recovery is required before this
+write can complete."_), and putting sessions to sleep fails too. So do the archive drain and
+**Abandon**, because each has to write something before it can free space, and the routine search
+cleanup switches itself off just before the cap.
+
+A superadmin recovery endpoint can remove the search index of older finished sessions without
+removing their messages, but it does not yet have a control in **Admin → Storage**. There is
+currently no supported recovery button for a project already at the cap. Monitor storage and
+resolve stuck archive migrations through **Admin → Storage** before writes stop working.
+
 ## Teardown
 
 To remove all resources: Actions → Teardown → Run workflow → type `DELETE` to confirm.
@@ -502,6 +585,23 @@ Machines users enrolled themselves (bring-your-own nodes), app-deployment nodes,
 ## Troubleshooting
 
 For what SAM does with a workspace VM that stops responding, see [Unresponsive machines are released automatically](#unresponsive-machines-are-released-automatically).
+
+### Agents stop whenever they need approval
+
+If agents stop each time they need permission and no card appears in the chat, agent requests are
+off, so SAM refuses every request. (With requests on, a chat that has slept and woken usually does the
+same: it can't ask yet, so fork it or start a new chat.) Turn them on as described in
+[Let agents ask in chat](#let-agents-ask-in-chat), or have users switch those agents to **Bypass
+Permissions**, then start a new chat — running sessions keep the setting they started with. Amp and
+Gemini CLI ask on their own even in Bypass Permissions, and so does Claude Code in a devcontainer that
+[runs as `root`](/docs/guides/agents/#claude-code-asks-even-in-bypass-permissions); for them, turn
+requests on or fix the devcontainer user.
+
+### "ProjectData storage is full"
+
+If writes to one project fail with _"ProjectData storage is full; storage recovery is required
+before this write can complete."_, that project has reached Cloudflare's 10 GB limit. See
+[When a project reaches the 10 GB storage cap](#when-a-project-reaches-the-10-gb-storage-cap).
 
 ### "error: failed to decrypt state"
 

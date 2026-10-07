@@ -43,8 +43,8 @@ chatsRoutes.get('/recent', async (c) => {
        JOIN projects p ON p.id = ss.project_id
        WHERE ss.user_id = ?
          AND ss.status NOT IN ('stopped', 'failed')
-         AND ss.updated_at > ?
-       ORDER BY ss.updated_at DESC
+         AND COALESCE(ss.last_message_at, ss.created_at, ss.started_at) > ?
+       ORDER BY COALESCE(ss.last_message_at, ss.created_at, ss.started_at) DESC, ss.id DESC
        LIMIT ?`
     )
     .bind(userId, cutoff, limit)
@@ -57,7 +57,7 @@ chatsRoutes.get('/recent', async (c) => {
        FROM session_summaries
        WHERE user_id = ?
          AND status NOT IN ('stopped', 'failed')
-         AND updated_at > ?`
+         AND COALESCE(last_message_at, created_at, started_at) > ?`
     )
     .bind(userId, cutoff)
     .first<{ cnt: number }>();
@@ -104,7 +104,7 @@ chatsRoutes.get('/', async (c) => {
        FROM session_summaries ss
        JOIN projects p ON p.id = ss.project_id
        WHERE ${whereClause}
-       ORDER BY ss.updated_at DESC
+       ORDER BY COALESCE(ss.last_message_at, ss.created_at, ss.started_at) DESC, ss.id DESC
        LIMIT ? OFFSET ?`
     )
     .bind(...params, limit, offset)
@@ -128,6 +128,7 @@ interface SessionSummaryD1Row {
   message_count: number;
   started_at: number;
   last_message_at: number | null;
+  created_at: number | null;
   agent_completed_at: number | null;
   ended_at: number | null;
   updated_at: number;
@@ -147,7 +148,7 @@ function mapSessionSummaryRow(row: SessionSummaryD1Row) {
     workspaceId: row.workspace_id,
     messageCount: row.message_count,
     startedAt: row.started_at,
-    lastMessageAt: row.last_message_at,
+    lastMessageAt: row.last_message_at ?? row.created_at ?? row.started_at,
     agentCompletedAt: row.agent_completed_at,
     endedAt: row.ended_at,
     updatedAt: row.updated_at,

@@ -2,6 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import * as TOML from '@iarna/toml';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -67,6 +68,18 @@ afterEach(() => {
 });
 
 describe('sync wrangler config', () => {
+  it('keeps the checked-in staging Worker under the text-binding guard', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    const checkedIn = TOML.parse(
+      readFileSync(join(import.meta.dirname, '../../apps/api/wrangler.toml'), 'utf-8')
+    ) as WranglerToml;
+
+    const generated = generateApiWorkerEnv(checkedIn, outputs, 'staging', false, false, null);
+    expect(countWorkerTextBindings(generated)).toBeLessThanOrEqual(
+      CLOUDFLARE_WORKER_TEXT_BINDING_GUARD_LIMIT
+    );
+  });
+
   it('forwards configurable deployment reservation defaults to the Worker', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
     vi.stubEnv('DEPLOYMENT_DEFAULT_CPU_LIMIT_MILLIS', '400');
@@ -209,8 +222,7 @@ describe('sync wrangler config', () => {
       // ...and the known operator override does NOT.
       expect(
         logged.filter(
-          (line) =>
-            line.startsWith('::warning') && line.includes('CLEANUP_MANIFEST_KEY')
+          (line) => line.startsWith('::warning') && line.includes('CLEANUP_MANIFEST_KEY')
         )
       ).toEqual([]);
       // Liveness beside the absence assertion: the quiet one is still recorded, with its reason,

@@ -1,3 +1,4 @@
+import { exportPKCS8, generateKeyPair } from 'jose';
 import { describe, expect, it } from 'vitest';
 
 import type { Env } from '../../../src/env';
@@ -7,6 +8,7 @@ import {
   getInstantStaleCallbackMarginMs,
   isSupersededInstantCallback,
 } from '../../../src/routes/_stale-callback-guard';
+import { signCallbackToken } from '../../../src/services/jwt';
 
 function jwtWith(payload: Record<string, unknown>): string {
   const seg = (obj: unknown) => Buffer.from(JSON.stringify(obj)).toString('base64url');
@@ -31,16 +33,59 @@ describe('callbackTokenIssuedAtMs', () => {
     expect(callbackTokenIssuedAtMs(jwtWith({ workspace: 'ws-1' }))).toBeNull();
     expect(callbackTokenIssuedAtMs(jwtWith({ iat: 'nope' }))).toBeNull();
   });
+
+  it('returns the preserved generation (gen_iat) of a renewed token, not its renewal iat', () => {
+    expect(
+      callbackTokenIssuedAtMs(jwtWith({ iat: IAT_SECONDS + 86_400, gen_iat: IAT_SECONDS }))
+    ).toBe(IAT_MS);
+  });
+
+  it('falls back to iat when gen_iat is malformed', () => {
+    expect(callbackTokenIssuedAtMs(jwtWith({ iat: IAT_SECONDS, gen_iat: 'x' }))).toBe(IAT_MS);
+    expect(callbackTokenIssuedAtMs(jwtWith({ iat: IAT_SECONDS, gen_iat: -1 }))).toBe(IAT_MS);
+    expect(callbackTokenIssuedAtMs(jwtWith({ iat: IAT_SECONDS, gen_iat: 1.5 }))).toBe(IAT_MS);
+  });
+
+  it('keeps a renewed token from a superseded Instant generation detectable as stale', async () => {
+    // The renewal route signs with the real signer; reading must agree on the claim name.
+    const { privateKey } = await generateKeyPair('RS256', { extractable: true });
+    const env = {
+      JWT_PRIVATE_KEY: await exportPKCS8(privateKey),
+      BASE_DOMAIN: 'example.com',
+    } as unknown as Env;
+    const generationIssuedAtSeconds = Math.floor(Date.now() / 1000) - 2 * 3600;
+    const renewed = await signCallbackToken('ws-instant', env, { generationIssuedAtSeconds });
+    const firstIssue = await signCallbackToken('ws-instant', env);
+
+    const recoveredAtMs = generationIssuedAtSeconds * 1000 + MARGIN + 60_000;
+    const verdict = (token: string) =>
+      isSupersededInstantCallback({
+        runtime: 'cf-container',
+        rowUpdatedAt: iso(recoveredAtMs),
+        tokenIssuedAtMs: callbackTokenIssuedAtMs(token),
+        marginMs: MARGIN,
+      });
+
+    // Renewed after the recovery, but its generation predates it: still superseded.
+    expect(callbackTokenIssuedAtMs(renewed)).toBe(generationIssuedAtSeconds * 1000);
+    expect(verdict(renewed)).toBe(true);
+    // Control: a generation issued after the recovery is current.
+    expect(verdict(firstIssue)).toBe(false);
+  });
 });
 
 describe('getInstantStaleCallbackMarginMs', () => {
   it('defaults when unset', () => {
-    expect(getInstantStaleCallbackMarginMs({} as Env)).toBe(DEFAULT_INSTANT_STALE_CALLBACK_MARGIN_MS);
+    expect(getInstantStaleCallbackMarginMs({} as Env)).toBe(
+      DEFAULT_INSTANT_STALE_CALLBACK_MARGIN_MS
+    );
   });
 
   it('honours a valid override', () => {
     expect(
-      getInstantStaleCallbackMarginMs({ INSTANT_STALE_CALLBACK_MARGIN_MS: '30000' } as unknown as Env)
+      getInstantStaleCallbackMarginMs({
+        INSTANT_STALE_CALLBACK_MARGIN_MS: '30000',
+      } as unknown as Env)
     ).toBe(30_000);
   });
 

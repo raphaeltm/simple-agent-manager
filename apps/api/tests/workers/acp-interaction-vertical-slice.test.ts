@@ -58,7 +58,7 @@ describe('ACP interaction cross-boundary vertical slice', () => {
     vi.unstubAllGlobals();
   });
 
-  it('commits callback creation before a browser answer reaches the VM boundary', async () => {
+  it('keeps a pending permission readable and deliverable after creation is disabled', async () => {
     const suffix = crypto.randomUUID();
     const userId = `vertical-user-${suffix}`;
     const installationId = `vertical-installation-${suffix}`;
@@ -139,6 +139,25 @@ describe('ACP interaction cross-boundary vertical slice', () => {
       pending: [expect.objectContaining({ interactionId, state: 'pending' })],
     });
 
+    (testEnv as unknown as Record<string, string>).ACP_INTERACTIONS_ENABLED = 'false';
+    const sessionCookie = await seedSignedInUser(userId);
+    const list = await browserApp().request(
+      `/api/projects/${projectId}/sessions/${chatSessionId}/interactions`,
+      { headers: { Cookie: sessionCookie } },
+      testEnv
+    );
+    expect(list.status).toBe(200);
+    expect(await list.json()).toMatchObject({
+      pending: [expect.objectContaining({ interactionId })],
+    });
+    const detail = await browserApp().request(
+      `/api/projects/${projectId}/sessions/${chatSessionId}/interactions/${interactionId}`,
+      { headers: { Cookie: sessionCookie } },
+      testEnv
+    );
+    expect(detail.status).toBe(200);
+    expect(await detail.json()).toMatchObject({ detail: { permissionName: 'VERTICAL_SECRET' } });
+
     fetchMock.mockImplementation(async (input) => {
       const url = typeof input === 'string' ? input : input.url;
       const payload = url.endsWith('/agent-capabilities')
@@ -176,7 +195,6 @@ describe('ACP interaction cross-boundary vertical slice', () => {
         headers: { 'Content-Type': 'application/json' },
       });
     });
-    const sessionCookie = await seedSignedInUser(userId);
     const answer = await browserApp().request(
       `/api/projects/${projectId}/sessions/${chatSessionId}/interactions/${interactionId}/answer`,
       {
@@ -248,6 +266,16 @@ describe('ACP interaction cross-boundary vertical slice', () => {
     expect(created.status).toBe(201);
     const result = await created.json() as { summary: { interactionId: string } };
     const interactionId = result.summary.interactionId;
+    (testEnv as unknown as Record<string, string>).ACP_INTERACTION_FORMS_ENABLED = 'false';
+    (testEnv as unknown as Record<string, string>).ACP_INTERACTIONS_ENABLED = 'false';
+    const cookie = await seedSignedInUser(userId);
+    const detail = await browserApp().request(
+      `/api/projects/${projectId}/sessions/${chatSessionId}/interactions/${interactionId}`,
+      { headers: { Cookie: cookie } },
+      testEnv
+    );
+    expect(detail.status).toBe(200);
+    expect(await detail.json()).toMatchObject({ detail: { message: 'Which path?' } });
     fetchMock.mockImplementation(async (input) => {
       const url = typeof input === 'string' ? input : input.url;
       return new Response(JSON.stringify(url.endsWith('/agent-capabilities') ? {
@@ -263,7 +291,6 @@ describe('ACP interaction cross-boundary vertical slice', () => {
         status: 200, headers: { 'Content-Type': 'application/json' },
       });
     });
-    const cookie = await seedSignedInUser(userId);
     const answer = await browserApp().request(
       `/api/projects/${projectId}/sessions/${chatSessionId}/interactions/${interactionId}/answer`, {
         method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json', Origin: 'https://app.test.example.com' },

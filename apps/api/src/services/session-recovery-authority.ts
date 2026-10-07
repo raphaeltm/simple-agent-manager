@@ -121,6 +121,7 @@ export async function isSessionRecoveryTaskAuthorized(
   database: D1Database,
   input: {
     recoveryTaskId: string;
+    recoveryAttemptId?: string | null;
     sourceTaskId: string;
     projectId: string;
     chatSessionId: string;
@@ -133,18 +134,19 @@ export async function isSessionRecoveryTaskAuthorized(
       `SELECT recovery.id
          FROM tasks recovery
          JOIN tasks source
-           ON source.id = recovery.recovery_source_task_id
+           ON source.id = ?
+          AND (source.id = recovery.id OR source.id = recovery.recovery_source_task_id)
           AND source.project_id = recovery.project_id
          JOIN session_snapshots snapshot
            ON snapshot.chat_session_id = recovery.chat_session_id
           AND snapshot.project_id = recovery.project_id
           AND snapshot.recovery_task_id = recovery.id
         WHERE recovery.id = ?
-          AND recovery.recovery_source_task_id = ?
           AND recovery.project_id = ?
           AND recovery.chat_session_id = ?
-          AND recovery.triggered_by = 'session-recovery'
+          AND (source.id = recovery.id OR recovery.triggered_by = 'session-recovery')
           AND recovery.status NOT IN (${TERMINAL_TASK_STATUSES_SQL})
+          AND (? IS NULL OR snapshot.recovery_attempt_id = ?)
           AND (
             (recovery.status = 'in_progress' AND snapshot.recovery_status = 'restored')
             OR (
@@ -172,17 +174,37 @@ export async function isSessionRecoveryTaskAuthorized(
         LIMIT 1`
     )
     .bind(
-      input.recoveryTaskId,
       input.sourceTaskId,
+      input.recoveryTaskId,
       input.projectId,
       input.chatSessionId,
+      input.recoveryAttemptId ?? null,
+      input.recoveryAttemptId ?? null,
       ...(input.requiredProjectMemberId ? [input.requiredProjectMemberId] : [])
     )
     .first<{ id: string }>();
   return Boolean(row);
 }
 
+/** A stable task ID cannot distinguish old alarms from the current wake claim. */
+export async function isSessionRecoveryAttemptCurrent(
+  database: D1Database,
+  input: { taskId: string; projectId: string; chatSessionId: string; recoveryAttemptId: string }
+): Promise<boolean> {
+  const row = await database
+    .prepare(
+      `SELECT id FROM session_snapshots
+      WHERE chat_session_id = ? AND project_id = ?
+        AND recovery_task_id = ? AND recovery_attempt_id = ?
+      LIMIT 1`
+    )
+    .bind(input.chatSessionId, input.projectId, input.taskId, input.recoveryAttemptId)
+    .first<{ id: string }>();
+  return Boolean(row);
+}
+
 export interface SessionRecoveryTaskAuthorityInput {
+  recoveryAttemptId?: string | null;
   requiredProjectMemberId?: string | null;
   recoveryTaskId: string;
   sourceTaskId: string;
@@ -474,14 +496,7 @@ export async function failAndRestoreSessionRecoveryHandoff(
             )
             AND recovery_status = 'waking'`
       )
-      .bind(
-        input.error,
-        now,
-        now,
-        input.chatSessionId,
-        input.recoveryTaskId,
-        input.statusEventId
-      ),
+      .bind(input.error, now, now, input.chatSessionId, input.recoveryTaskId, input.statusEventId),
   ]);
   if ((results[0]?.meta.changes ?? 0) === 0 || (results[1]?.meta.changes ?? 0) === 0) {
     throw new Error('Recovery start failure lost its authoritative snapshot claim');

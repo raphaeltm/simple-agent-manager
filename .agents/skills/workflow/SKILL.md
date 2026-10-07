@@ -25,4 +25,4 @@ All agents have access to `$CF_TOKEN` for direct Cloudflare API queries against 
 
 ## State Persistence
 
-Maintain `.workflow-state.md` (gitignored) as external memory. Write it before registering a wait and re-read it whenever SAM wakes the session. This survives sleep, recovery, and context compaction. See `.claude/commands/workflow.md` for the full state file format.
+Maintain `.workflow-state.md` (local-only, snapshot-visible; never commit) as external memory. Write it before registering a wait and re-read it whenever SAM wakes the session. This survives sleep, recovery, and context compaction. See `.claude/commands/workflow.md` for the full state file format.

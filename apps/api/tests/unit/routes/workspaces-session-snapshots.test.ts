@@ -943,6 +943,81 @@ describe('workspaces session snapshot callback routes', () => {
     });
   });
 
+  it('withholds the saved agent session after a fallback sleep, so the wake starts fresh', async () => {
+    const manifestJson = JSON.stringify({
+      version: 1,
+      chatSessionId: 'chat-1',
+      workspaceId: 'WS_1',
+      agentSessionId: 'agent-session-1',
+      acpSessionId: 'acp-session-1',
+      agentType: 'claude-code',
+      baseCommit: BASE_COMMIT,
+      git: { branch: 'sam/saved-task', detached: false },
+      status: 'degraded',
+      degradation: 'home-skipped',
+      skipped: [],
+      artifacts: { wip: { sizeBytes: 3, sha256: WIP_SHA256 } },
+      createdAt: '2026-10-04T08:10:00.000Z',
+    });
+    const fallbackJson = JSON.stringify({
+      version: 1,
+      outcome: 'slept',
+      trigger: 'attempt_budget',
+      blockedReason: null,
+      decidedAt: '2026-10-04T08:15:00.000Z',
+      episodeStartedAt: '2026-10-04T08:00:00.000Z',
+      failedAttempts: 3,
+      lastError: null,
+      recoveryPoint: {
+        generation: 'generation-1',
+        commit: BASE_COMMIT,
+        branch: 'sam/saved-task',
+        detached: false,
+        upstream: null,
+        capturedAt: '2026-10-04T08:10:00.000Z',
+        snapshotStatus: 'degraded',
+        degradation: 'home-skipped',
+        workingTreeSaved: true,
+        homeSaved: false,
+      },
+    });
+    const snapshot = {
+      status: 'degraded',
+      degradation: 'home-skipped',
+      baseCommit: BASE_COMMIT,
+      snapshotGeneration: 'generation-1',
+      homeR2Key: null,
+      wipR2Key: 'test-snapshots/chat-1/generation-1/wip.bundle',
+      manifestR2Key: 'test-snapshots/chat-1/generation-1/manifest.json',
+      manifestJson,
+    };
+    const restore = async () => {
+      const res = await app.request(
+        '/api/workspaces/WS_1/session-snapshot/restore?chatSessionId=chat-1',
+        { headers: { Authorization: 'Bearer callback-token' } },
+        runtimeBindings
+      );
+      expect(res.status).toBe(200);
+      return (await res.json()) as { manifest: Record<string, unknown> };
+    };
+
+    mocks.getRestorableSessionSnapshot.mockResolvedValue({
+      ...snapshot,
+      sleepFallbackJson: fallbackJson,
+    });
+    const afterFallback = await restore();
+    expect(afterFallback.manifest).not.toHaveProperty('acpSessionId');
+    expect(afterFallback.manifest).toMatchObject({
+      agentType: 'claude-code',
+      baseCommit: BASE_COMMIT,
+      git: { branch: 'sam/saved-task' },
+    });
+
+    // Control: the same snapshot after an ordinary sleep keeps its agent session.
+    mocks.getRestorableSessionSnapshot.mockResolvedValue({ ...snapshot, sleepFallbackJson: null });
+    expect((await restore()).manifest).toMatchObject({ acpSessionId: 'acp-session-1' });
+  });
+
   it('accepts direct-upload artifacts with absent R2 checksum when authorization matches', async () => {
     r2.head.mockImplementation(async (key: string) =>
       key.endsWith('home.tar') ? { size: 4, checksums: {} } : null

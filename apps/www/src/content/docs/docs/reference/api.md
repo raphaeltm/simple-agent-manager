@@ -157,7 +157,7 @@ Permanently stop a running workspace and delete any retained persistent-session 
 
 ### `POST /api/workspaces/:id/sleep`
 
-Checkpoint the workspace's agent HOME, harness identity, exact Git checkout, and repository work in progress, verify the snapshot, and put the session to sleep. Git state includes the saved `HEAD`, branch or detached state, canonical upstream metadata, clean local-only commits, working tree, and index. VM compute is stopped only after SAM re-verifies the durable manifest and every artifact the manifest still claims. A complete snapshot restores and validates that state; if the saved Git state cannot be recreated, wake reports explicit degraded recovery instead of success on a different commit. A degraded-but-verified snapshot can still sleep and will surface reduced restore state on wake. If an accepted final checkpoint stops reporting progress, SAM records an explicit degraded snapshot instead of leaving idle compute awake indefinitely. Sending a follow-up in the same chat wakes the session during the seven-day retention window.
+Checkpoint the workspace's agent HOME, harness identity, exact Git checkout, and repository work in progress, verify the snapshot, and put the session to sleep. Git state includes the saved `HEAD`, branch or detached state, canonical upstream metadata, clean local-only commits, working tree, and index. VM compute is stopped only after SAM re-verifies the durable manifest and every artifact the manifest still claims. A complete snapshot restores and validates that state; if the saved Git state cannot be recreated, wake reports explicit degraded recovery instead of success on a different commit. Sleep requires a complete final snapshot (`verifyAndBeginSleepTeardown` in `apps/api/src/services/session-sleep-execution.ts`). If the final checkpoint is degraded, or stops reporting progress and is recorded as degraded, the sleep request fails and the workspace stays awake. SAM then retries automatically, within the bounded sleep-failure budget (`SESSION_SLEEP_FAILURE_MAX_ATTEMPTS`, `SESSION_SLEEP_FAILURE_MAX_ELAPSED_MS`); after that an idle VM session may sleep on a Git recovery point instead ([SAM could not save a complete snapshot](/docs/guides/session-troubleshooting/#sam-could-not-save-a-complete-snapshot)). A session that already sleeps on an older degraded snapshot still wakes and reports the reduced restore state. Sending a follow-up in the same chat wakes the session during the seven-day retention window.
 
 ### `POST /api/workspaces/:id/restart`
 
@@ -233,6 +233,18 @@ The index returns `{ sessionId, runs, chunks, totalChunkCount, omittedChunkCount
 
 Agents read the same data with the `get_resource_history` MCP tool, which takes no `projectId` — the project comes from the verified token. With no arguments it returns the caller's own session; supplying any one of `sessionId`, `taskId`, or `workspaceId` replaces the caller's defaults entirely rather than narrowing within them.
 
+### Agent requests
+
+The permission requests, questions, and links an agent puts in a chat while it waits (see [When the Agent Needs You](/docs/guides/chat-features/#when-the-agent-needs-you)).
+
+| Method | Endpoint                                                                   | Purpose                                            |
+| ------ | -------------------------------------------------------------------------- | -------------------------------------------------- |
+| GET    | `/api/projects/:id/sessions/:sessionId/interactions`                       | Pending and recently settled requests for the chat |
+| GET    | `/api/projects/:id/sessions/:sessionId/interactions/:interactionId`        | One request's full detail (session creator only)   |
+| POST   | `/api/projects/:id/sessions/:sessionId/interactions/:interactionId/answer` | Answer a pending request (session creator only)    |
+
+The list returns `{ pending, settled, cursor }` and needs `task:read` on the project. Each item has the request's `interactionId`, `kind` (`permission`, `form`, or `url`), `state`, `createdAt`, and `deadlineAt`; for other project members that is all a pending item carries, and `settled` is empty — they never see the question or the answer. The detail is for the session creator only, decrypted on request, and served with `Cache-Control: private, no-store`. Answering needs `task:write`, must come from the SAM web app's origin (the `Origin` header must match), and sends an `answerKey` with a `decision`: `{ kind: "selected_option", optionId }` for a permission, `{ kind: "accepted", content }` for a question (`content` holds the form's values) or `{ kind: "accepted" }` for a link, or `{ kind: "declined" }`. Each decision also carries an `answerHash`: the SHA-256 hex of the option ID, of the form values as key-sorted JSON, or of the word `accepted` or `declined`. Sending the same `answerKey` and decision again is safe; answering a request that was already answered or has expired returns `409`.
+
 ## Nodes
 
 ### `GET /api/nodes`
@@ -274,6 +286,22 @@ List all credentials for the authenticated user (tokens are not returned).
 ### `DELETE /api/credentials/:provider`
 
 Delete a stored cloud-provider credential.
+
+### `GET /api/credentials/limits`
+
+Latest provider usage windows for the authenticated user's personal credentials, across projects
+(newest sample per credential and window). Each credential carries `credentialId` (for
+`cc_credentials:<id>` references), `level` (`ok`, `warning`, `critical`, `rejected`) and its
+`windows` (`windowType`, `utilizationPercent`, `windowMinutes`, `resetsAt`, `observedAt`, `source`).
+Rows come from `credential_limit_windows`; the response is capped by `CREDENTIAL_LIMIT_READ_MAX_ROWS`.
+
+### `GET /api/projects/:id/credential-limits`
+
+Usage windows visible to the caller inside a project: the caller's own credentials plus project-
+and platform-shared ones, never another member's personal credential. Requires `project:read`.
+Optional `agentSessionId` narrows the result to the credential that agent session is attributed to,
+resolved server-side from `agent_sessions`. The MCP tool `get_credential_limits` exposes the same
+view to agents (`scope: "session" | "project"`).
 
 ### `GET /api/providers/catalog`
 

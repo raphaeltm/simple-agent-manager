@@ -235,6 +235,11 @@ const DEPLOYMENT_IMAGE_RESOLVE_ENV_VARS = [
 const ACP_INTERACTION_ENV_VARS = [
   'ACP_INTERACTIONS_ENABLED',
   'ACP_INTERACTION_FORMS_ENABLED',
+  'ACP_INTERACTION_URLS_ENABLED',
+  'ACP_INTERACTION_URL_DEADLINE_MS',
+  'ACP_INTERACTION_URL_MAX_CHARS',
+  'ACP_INTERACTION_URL_ELICITATION_ID_MAX_CHARS',
+  'ACP_INTERACTION_URL_REDIRECT_DEPTH',
   'ACP_INTERACTION_PERMISSION_TASK_DEADLINE_MS',
   'ACP_INTERACTION_PERMISSION_CONVERSATION_DEADLINE_MS',
   'ACP_INTERACTION_MAX_DEADLINE_MS',
@@ -577,22 +582,36 @@ describe('deploy reusable workflow', () => {
       expect(goflags).toContain('-buildvcs=false');
     });
 
-    it('has no go:embed that would pull an excluded path into the binary', () => {
-      // The exclusions in resolve-vm-agent-release.sh assert that `.claude/`,
-      // `AGENTS.md` and `*_test.go` cannot change the compiled binary. `_test.go`
-      // is a Go language guarantee; the other two are only true while nothing
-      // embeds them. If a `//go:embed` ever appears, re-check the exclusion list
-      // before this silently ships a stale binary under a current version.
+    it('embeds only the reviewed installer, which is a release input', () => {
       const agentRoot = fileURLToPath(new URL('../../packages/vm-agent', import.meta.url));
-      // grep exits 1 on no matches, so spawnSync (not execFileSync, which throws).
       const found = spawnSync('grep', ['-rn', '--include=*.go', 'go:embed', agentRoot], {
         encoding: 'utf8',
       });
-
-      // Guard the guard: status 2 means grep itself failed (bad path), which would
-      // otherwise look identical to "no embeds found".
-      expect(found.status, `grep failed: ${found.stderr}`).not.toBe(2);
-      expect(found.stdout.trim()).toBe('');
+      expect(found.status, `grep failed: ${found.stderr}`).toBe(0);
+      // New embeds must be reviewed against the release resolver exclusions.
+      const embeds = found.stdout
+        .trim()
+        .split('\n')
+        .map((line) => line.replace(`${agentRoot}/`, '').replace(/:\d+:/, ':'));
+      expect(embeds).toEqual([
+        'internal/acp/codex_runtime_distribution.go://go:embed codex_runtime_installer.sh',
+      ]);
+      withAgentReleaseRepo((repo) => {
+        const path = join(
+          repo.directory,
+          'packages/vm-agent/internal/acp/codex_runtime_installer.sh'
+        );
+        writeFileSync(path, '#!/bin/bash\necho installer-v2\n');
+        execFileSync('git', ['add', '.'], { cwd: repo.directory });
+        execFileSync('git', ['commit', '-m', 'embedded installer change'], { cwd: repo.directory });
+        const head = execFileSync('git', ['rev-parse', 'HEAD'], {
+          cwd: repo.directory,
+          encoding: 'utf8',
+        }).trim();
+        const result = runReleaseResolver(repo.directory, head);
+        expect(result.status).toBe(0);
+        expect(releaseFieldsFrom(result.stdout).release).toBe(head);
+      });
     });
 
     it('fails closed on a shallow clone instead of falling back to the deploy commit', () => {
@@ -903,6 +922,17 @@ describe('deploy reusable workflow', () => {
     expect(goSetupIndex).toBeLessThan(prepareIndex);
   });
 
+  it('gives runtime publication access to the Pulumi state backend before Worker publication', () => {
+    const publish = stepBlock('Publish Pinned Codex Runtime');
+    expect(publish).toContain('pulumi stack output r2Name');
+    expect(publish).toContain('AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}');
+    expect(publish).toContain('AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}');
+    expect(publish).toContain('PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}');
+    expect(workflow.indexOf('- name: Publish Pinned Codex Runtime')).toBeLessThan(
+      workflow.indexOf('- name: Bootstrap API Worker')
+    );
+  });
+
   it('uploads the matching VM agent binaries before the API requires that build', () => {
     const buildIndex = workflow.indexOf('- name: Build VM Agent');
     const uploadIndex = workflow.indexOf('- name: Upload VM Agent Binaries');
@@ -1095,8 +1125,12 @@ describe('deploy reusable workflow', () => {
         expect(sync).toContain(name + ': ${{ vars.' + name + ' }}');
       }
     }
-    const wranglerToml = readFileSync(new URL('../../apps/api/wrangler.toml', import.meta.url), 'utf8');
+    const wranglerToml = readFileSync(
+      new URL('../../apps/api/wrangler.toml', import.meta.url),
+      'utf8'
+    );
     expect(wranglerToml).toMatch(/^ACP_INTERACTION_FORMS_ENABLED = "false"$/m);
+    expect(wranglerToml).toMatch(/^ACP_INTERACTION_URLS_ENABLED = "false"$/m);
   });
 
   /**

@@ -79,6 +79,235 @@ async function clearDueWork(store: DurableObjectStub<InteractionStore>): Promise
 }
 
 describe('InteractionStore durable ACP foundation', () => {
+  it('records URL completion independently of answer, rejects stale IDs, and keeps URL ciphertext private', async () => {
+    const mutableEnv = apiEnv() as unknown as Record<string, string>;
+    mutableEnv.ACP_INTERACTIONS_ENABLED = 'true';
+    mutableEnv.ACP_INTERACTION_URLS_ENABLED = 'true';
+    try {
+      const store = stub(`url/${crypto.randomUUID()}`);
+      const chatSessionId = createChatSession();
+      const interactionId = crypto.randomUUID();
+      const url = 'https://auth.example.com/approve?state=SECRET_URL_CANARY';
+      const created = await store.create(
+        createInput({
+          chatSessionId,
+          interactionId,
+          kind: 'url',
+          detail: { message: 'Approve service', url, elicitationId: 'opaque-1' },
+          safeSummary: {},
+          deadlineAt: Date.now() + 60_000,
+        })
+      );
+      expect(created.status).toBe('created');
+      await clearDueWork(store);
+      const raw = await runInDurableObject(store, (_instance, state) =>
+        JSON.stringify(
+          state.storage.sql
+            .exec(`SELECT * FROM interactions WHERE interaction_id = ?`, interactionId)
+            .one()
+        )
+      );
+      expect(raw).not.toContain('SECRET_URL_CANARY');
+      expect(raw).not.toContain('opaque-1');
+
+      // Turning off new URL creation must not strand an already-created request.
+      mutableEnv.ACP_INTERACTION_URLS_ENABLED = 'false';
+
+      const completion = {
+        protocolVersion: 1 as const,
+        interactionId,
+        generation: GENERATION,
+        runtimeIdentity: 'runtime-1',
+        agentSessionId: 'agent-session-1',
+        elicitationId: 'opaque-1',
+      };
+      expect(await store.completeURL({ ...completion, elicitationId: 'wrong' })).toMatchObject({
+        status: 'stale',
+      });
+      expect(await store.completeURL(completion)).toMatchObject({ status: 'completed' });
+      expect(await store.completeURL(completion)).toMatchObject({ status: 'duplicate' });
+      expect((await store.snapshot(null)).pending[0]).toMatchObject({
+        urlCompletedAt: expect.any(Number),
+        state: 'pending',
+      });
+
+      const acceptedHash = await crypto.subtle.digest(
+        'SHA-256',
+        new TextEncoder().encode('accepted')
+      );
+      const answerHash = [...new Uint8Array(acceptedHash)]
+        .map((part) => part.toString(16).padStart(2, '0'))
+        .join('');
+      const answer = await store.answer({
+        projectId: PROJECT_ID,
+        chatSessionId,
+        interactionId,
+        answerKey: 'url-answer-1',
+        answerBodyHash: HASH_A,
+        decision: { kind: 'accepted', answerHash },
+      });
+      expect(answer.status).toBe('answered');
+      expect((await store.snapshot(null)).pending[0]).toMatchObject({
+        urlCompletedAt: expect.any(Number),
+        state: 'answered',
+      });
+    } finally {
+      delete mutableEnv.ACP_INTERACTIONS_ENABLED;
+      delete mutableEnv.ACP_INTERACTION_URLS_ENABLED;
+    }
+  });
+  it('retains encrypted URL identity through its deadline when the configured purge is shorter', async () => {
+    const mutableEnv = apiEnv() as unknown as Record<string, string>;
+    mutableEnv.ACP_INTERACTIONS_ENABLED = 'true';
+    mutableEnv.ACP_INTERACTION_URLS_ENABLED = 'true';
+    mutableEnv.ACP_INTERACTION_SENSITIVE_PURGE_MS = '1';
+    try {
+      const store = stub(`url-short-purge/${crypto.randomUUID()}`);
+      const interactionId = crypto.randomUUID();
+      const chatSessionId = createChatSession();
+      const deadlineAt = Date.now() + 60_000;
+      expect(
+        (
+          await store.create(
+            createInput({
+              interactionId,
+              chatSessionId,
+              kind: 'url',
+              detail: {
+                message: 'Approve',
+                url: 'https://auth.example.com/approve',
+                elicitationId: 'opaque-2',
+              },
+              safeSummary: {},
+              deadlineAt,
+            })
+          )
+        ).status
+      ).toBe('created');
+      await clearDueWork(store);
+      const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('accepted'));
+      const answerHash = [...new Uint8Array(digest)]
+        .map((part) => part.toString(16).padStart(2, '0'))
+        .join('');
+      expect(
+        (
+          await store.answer({
+            projectId: PROJECT_ID,
+            chatSessionId,
+            interactionId,
+            answerKey: 'url-answer-2',
+            answerBodyHash: HASH_A,
+            decision: { kind: 'accepted', answerHash },
+          })
+        ).status
+      ).toBe('answered');
+      expect((await store.recordDelivery(interactionId, 'confirmed')).status).toBe('recorded');
+      const row = await runInDurableObject(store, (_instance, state) =>
+        state.storage.sql
+          .exec<{ purge_at: number; deadline_at: number }>(
+            `SELECT purge_at, deadline_at FROM interactions WHERE interaction_id = ?`,
+            interactionId
+          )
+          .one()
+      );
+      expect(row.purge_at).toBeGreaterThanOrEqual(row.deadline_at);
+      expect(
+        await store.completeURL({
+          protocolVersion: 1,
+          interactionId,
+          generation: GENERATION,
+          runtimeIdentity: 'runtime-1',
+          agentSessionId: 'agent-session-1',
+          elicitationId: 'opaque-2',
+        })
+      ).toMatchObject({ status: 'completed' });
+    } finally {
+      delete mutableEnv.ACP_INTERACTIONS_ENABLED;
+      delete mutableEnv.ACP_INTERACTION_URLS_ENABLED;
+      delete mutableEnv.ACP_INTERACTION_SENSITIVE_PURGE_MS;
+    }
+  });
+  it('enforces configured URL size, ID, and explicit redirect bounds', async () => {
+    const mutableEnv = apiEnv() as unknown as Record<string, string>;
+    mutableEnv.ACP_INTERACTIONS_ENABLED = 'true';
+    mutableEnv.ACP_INTERACTION_URLS_ENABLED = 'true';
+    mutableEnv.ACP_INTERACTION_URL_MAX_CHARS = '40';
+    mutableEnv.ACP_INTERACTION_URL_ELICITATION_ID_MAX_CHARS = '3';
+    mutableEnv.ACP_INTERACTION_URL_REDIRECT_DEPTH = '0';
+    try {
+      const store = stub(`url-bounds/${crypto.randomUUID()}`);
+      const base = { kind: 'url' as const, safeSummary: {}, deadlineAt: Date.now() + 60_000 };
+      const createURL = (url: string, elicitationId: string) =>
+        store.create(
+          createInput({
+            ...base,
+            interactionId: crypto.randomUUID(),
+            detail: { message: 'Approve', url, elicitationId },
+          })
+        );
+      expect(
+        (await createURL('https://auth.example.com/very-long-approval-path', 'id')).status
+      ).toBe('invalid');
+      mutableEnv.ACP_INTERACTION_URL_MAX_CHARS = '100';
+      expect((await createURL('https://auth.example.com/ok', 'long-id')).status).toBe('invalid');
+      expect(
+        (await createURL('https://auth.example.com/?next=https%3A%2F%2Fdone.example.com', 'id'))
+          .status
+      ).toBe('invalid');
+      expect((await createURL('https://auth.example.com/ok', 'id')).status).toBe('created');
+      await clearDueWork(store);
+    } finally {
+      delete mutableEnv.ACP_INTERACTIONS_ENABLED;
+      delete mutableEnv.ACP_INTERACTION_URLS_ENABLED;
+      delete mutableEnv.ACP_INTERACTION_URL_MAX_CHARS;
+      delete mutableEnv.ACP_INTERACTION_URL_ELICITATION_ID_MAX_CHARS;
+      delete mutableEnv.ACP_INTERACTION_URL_REDIRECT_DEPTH;
+    }
+  });
+  it('accepts bounded URL clock skew, rejects excess, and uses UTF-16 ID limits through completion', async () => {
+    const mutableEnv = apiEnv() as unknown as Record<string, string>;
+    mutableEnv.ACP_INTERACTIONS_ENABLED = 'true';
+    mutableEnv.ACP_INTERACTION_URLS_ENABLED = 'true';
+    mutableEnv.ACP_INTERACTION_URL_DEADLINE_MS = '60000';
+    mutableEnv.ACP_INTERACTION_MAX_DEADLINE_MS = '60000';
+    mutableEnv.ACP_INTERACTION_DEADLINE_MARGIN_MS = '10000';
+    try {
+      const store = stub(`url-skew/${crypto.randomUUID()}`);
+      const createURL = (elicitationId: string, deadlineAt: number) =>
+        store.create(
+          createInput({
+            interactionId: crypto.randomUUID(),
+            kind: 'url',
+            safeSummary: {},
+            deadlineAt,
+            detail: { message: 'Approve', url: 'https://auth.example.com/approve', elicitationId },
+          })
+        );
+      const acceptedId = '😀'.repeat(128);
+      const accepted = await createURL(acceptedId, Date.now() + 65_000);
+      expect(accepted.status).toBe('created');
+      if (accepted.status !== 'created') throw new Error('expected accepted URL interaction');
+      expect(
+        await store.completeURL({
+          protocolVersion: 1,
+          interactionId: accepted.summary.interactionId,
+          generation: GENERATION,
+          runtimeIdentity: 'runtime-1',
+          agentSessionId: 'agent-session-1',
+          elicitationId: acceptedId,
+        })
+      ).toMatchObject({ status: 'completed' });
+      expect((await createURL('😀'.repeat(129), Date.now() + 60_000)).status).toBe('invalid');
+      expect((await createURL('short-id', Date.now() + 71_000)).status).toBe('invalid');
+      await clearDueWork(store);
+    } finally {
+      delete mutableEnv.ACP_INTERACTIONS_ENABLED;
+      delete mutableEnv.ACP_INTERACTION_URLS_ENABLED;
+      delete mutableEnv.ACP_INTERACTION_URL_DEADLINE_MS;
+      delete mutableEnv.ACP_INTERACTION_MAX_DEADLINE_MS;
+      delete mutableEnv.ACP_INTERACTION_DEADLINE_MARGIN_MS;
+    }
+  });
   it('serializes concurrent creates into stable idempotent results', async () => {
     await withInteractionsEnabled(async () => {
       const store = stub(`create-race/${crypto.randomUUID()}`);
@@ -92,22 +321,41 @@ describe('InteractionStore durable ACP foundation', () => {
     });
   });
 
-  it('is dormant by default and preserves existing records once disabled', async () => {
+  it('rejects new requests after rollback while preserving pending reads and answers', async () => {
     const store = stub(`disabled/${crypto.randomUUID()}`);
     const chatSessionId = createChatSession();
-    const disabled = await store.create(createInput({ chatSessionId }));
-    expect(disabled).toMatchObject({ status: 'disabled' });
-
+    expect(await store.create(createInput({ chatSessionId }))).toMatchObject({
+      status: 'disabled',
+    });
+    const existingId = crypto.randomUUID();
     await withInteractionsEnabled(async () => {
-      const created = await store.create(
-        createInput({ chatSessionId, interactionId: crypto.randomUUID() })
-      );
+      const created = await store.create(createInput({ chatSessionId, interactionId: existingId }));
       expect(created.status).toBe('created');
       await clearDueWork(store);
     });
-
-    const snapshot = await store.snapshot(null);
-    expect(snapshot.pending).toHaveLength(1);
+    const mutableEnv = apiEnv() as unknown as Record<string, string>;
+    const previous = mutableEnv.ACP_INTERACTIONS_ENABLED;
+    mutableEnv.ACP_INTERACTIONS_ENABLED = 'false';
+    try {
+      const disabled = await store.create(createInput({ chatSessionId }));
+      expect(disabled).toMatchObject({ status: 'disabled' });
+      expect((await store.snapshot(null)).pending).toHaveLength(1);
+      expect((await store.detail(existingId))?.detail).toMatchObject({
+        permissionName: 'SECRET_CANARY_PERMISSION',
+      });
+      const answered = await store.answer({
+        projectId: PROJECT_ID,
+        chatSessionId,
+        interactionId: existingId,
+        answerKey: 'rollback-answer',
+        answerBodyHash: HASH_A,
+        decision: { kind: 'selected_option', optionId: 'allow', answerHash: HASH_A },
+      });
+      expect(answered.status).toBe('answered');
+      await clearDueWork(store);
+    } finally {
+      mutableEnv.ACP_INTERACTIONS_ENABLED = previous;
+    }
   });
 
   it('encrypts arbitrary detail, keeps only structural summaries, and rejects same id with another payload hash', async () => {
@@ -399,7 +647,9 @@ describe('InteractionStore durable ACP foundation', () => {
       await runInDurableObject(store, (_instance, state) => {
         state.storage.sql.exec(
           `UPDATE interactions SET encrypted_answer = ?, answer_iv = ? WHERE interaction_id = ?`,
-          'SECRET_CANARY_ANSWER', 'iv', INTERACTION_ID
+          'SECRET_CANARY_ANSWER',
+          'iv',
+          INTERACTION_ID
         );
       });
       await store.recordDelivery(INTERACTION_ID, 'confirmed');

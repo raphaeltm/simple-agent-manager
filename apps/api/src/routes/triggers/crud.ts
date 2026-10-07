@@ -6,13 +6,11 @@ import type {
   TriggerResponse,
 } from '@simple-agent-manager/shared';
 import {
-  DEFAULT_CRON_MIN_INTERVAL_MINUTES,
   DEFAULT_CRON_TEMPLATE_MAX_LENGTH,
-  DEFAULT_TRIGGER_DEFAULT_MAX_CONCURRENT,
   DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT,
   DEFAULT_TRIGGER_NAME_MAX_LENGTH,
 } from '@simple-agent-manager/shared';
-import { and, count, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -20,36 +18,37 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { parsePositiveInt, requireRouteParam } from '../../lib/route-helpers';
-import { ulid } from '../../lib/ulid';
 import { getAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { CreateTriggerSchema, jsonValidator, UpdateTriggerSchema } from '../../schemas';
+import { buildCredentialAttributionForTriggers } from '../../services/credential-attribution-health';
+import { cronToNextFire } from '../../services/cron-utils';
 import {
-  buildCredentialAttributionForTriggers,
-  clearCredentialAttributionHealthCache,
-} from '../../services/credential-attribution-health';
-import { cronToNextFire, validateCronExpression } from '../../services/cron-utils';
+  assertGitHubTriggerConfigExists,
+  githubTriggerConfigUpdate,
+} from '../../services/github-trigger-config';
 import { parseGitHubTriggerFiltersJson } from '../../services/github-trigger-filter';
-import {
-  clearProjectMultiplayerStateCache,
-  getProjectMultiplayerState,
-} from '../../services/project-multiplayer';
+import { getProjectMultiplayerState } from '../../services/project-multiplayer';
 import {
   ResourceRequirementsValidationError,
   serializeResourceRequirementsInput,
 } from '../../services/resource-requirements-input';
-import { resolveMaxTriggersPerProject } from '../../services/trigger-limits';
+import { clearTriggerPageCaches } from '../../services/trigger-cache';
+import {
+  createTrigger,
+  validateCron,
+  validateReferences,
+  validateTriggerSourceFields,
+} from '../../services/trigger-create';
 import { listTriggerRows, toTriggerResponse } from '../../services/trigger-read';
 import {
   getWebhookTriggerLimits,
   validateWebhookTriggerConfig,
 } from '../../services/webhook-trigger-config';
 import {
-  createWebhookTokenMaterial,
   mergeWebhookConfig,
   toWebhookTriggerConfig,
   webhookConfigUpdateValues,
-  webhookConfigValues,
 } from '../../services/webhook-trigger-store';
 import { requireProjectTaskRead, requireProjectTaskWrite } from '../task-project-auth';
 import { buildWebhookCredential } from './webhooks';
@@ -85,11 +84,6 @@ async function attribution(
       ] as const;
     })
   );
-}
-
-function clearTriggerPageCaches(projectId: string): void {
-  clearCredentialAttributionHealthCache(projectId);
-  clearProjectMultiplayerStateCache(projectId);
 }
 
 function triggerResourceRequirementsJson(body: {
@@ -147,176 +141,14 @@ async function enrichTrigger(
   return response;
 }
 
-async function validateReferences(
-  db: Database,
-  projectId: string,
-  agentProfileId: string | null | undefined,
-  skillId: string | null | undefined
-) {
-  if (agentProfileId) {
-    const profile = await db
-      .select({ id: schema.agentProfiles.id })
-      .from(schema.agentProfiles)
-      .where(
-        and(
-          eq(schema.agentProfiles.id, agentProfileId),
-          eq(schema.agentProfiles.projectId, projectId)
-        )
-      )
-      .get();
-    if (!profile) throw errors.notFound('Agent profile');
-  }
-  if (skillId) {
-    const skill = await db
-      .select({ id: schema.skills.id })
-      .from(schema.skills)
-      .where(and(eq(schema.skills.id, skillId), eq(schema.skills.projectId, projectId)))
-      .get();
-    if (!skill) throw errors.notFound('Skill');
-  }
-}
-
-function validateCron(env: Env, expression: string | undefined, timezone: string | undefined) {
-  if (!expression) throw errors.badRequest('cronExpression is required for cron triggers');
-  const validation = validateCronExpression(
-    expression,
-    parsePositiveInt(env.CRON_MIN_INTERVAL_MINUTES, DEFAULT_CRON_MIN_INTERVAL_MINUTES)
-  );
-  if (!validation.valid) throw errors.badRequest(`Invalid cron expression: ${validation.error}`);
-  try {
-    Intl.DateTimeFormat('en-US', { timeZone: timezone ?? 'UTC' });
-  } catch {
-    throw errors.badRequest(`Invalid timezone: ${timezone}`);
-  }
-}
-
 crudRoutes.post('/', jsonValidator(CreateTriggerSchema), async (c) => {
   const projectId = requireRouteParam(c, 'projectId');
   const db = drizzle(c.env.DATABASE, { schema });
   const userId = getAuth(c).user.id;
   const project = await requireProjectTaskWrite(db, projectId, userId);
   const body = c.req.valid('json');
-  const name = body.name.trim();
-  const promptTemplate = body.promptTemplate.trim();
-  if (!name) throw errors.badRequest('name is required');
-  if (!promptTemplate) throw errors.badRequest('promptTemplate is required');
-  if (
-    promptTemplate.length >
-    parsePositiveInt(c.env.CRON_TEMPLATE_MAX_LENGTH, DEFAULT_CRON_TEMPLATE_MAX_LENGTH)
-  ) {
-    throw errors.badRequest('promptTemplate is too long');
-  }
-  if (body.sourceType === 'cron') validateCron(c.env, body.cronExpression, body.cronTimezone);
-  if (body.sourceType === 'github' && !body.githubConfig?.eventType) {
-    throw errors.badRequest('githubConfig.eventType is required for github triggers');
-  }
-  if (body.sourceType === 'webhook' && (!body.webhookConfig || !body.agentProfileId)) {
-    throw errors.badRequest('webhookConfig and agentProfileId are required for webhook triggers');
-  }
-  if (body.webhookConfig) {
-    const configError = validateWebhookTriggerConfig(
-      body.webhookConfig,
-      getWebhookTriggerLimits(c.env)
-    );
-    if (configError) throw errors.badRequest(configError);
-  }
-  await validateReferences(db, projectId, body.agentProfileId, body.skillId);
-
-  const [sameName, total] = await Promise.all([
-    db
-      .select({ id: schema.triggers.id })
-      .from(schema.triggers)
-      .where(and(eq(schema.triggers.projectId, projectId), eq(schema.triggers.name, name)))
-      .get(),
-    db
-      .select({ count: count() })
-      .from(schema.triggers)
-      .where(eq(schema.triggers.projectId, projectId))
-      .get(),
-  ]);
-  if (sameName) throw errors.conflict(`Trigger "${name}" already exists in this project`);
-  const maxTriggers = resolveMaxTriggersPerProject(
-    project.maxTriggers,
-    c.env.MAX_TRIGGERS_PER_PROJECT
-  );
-  if ((total?.count ?? 0) >= maxTriggers) {
-    throw errors.badRequest(`Maximum triggers per project (${maxTriggers}) reached`);
-  }
-  const maxConcurrent = body.maxConcurrent ?? DEFAULT_TRIGGER_DEFAULT_MAX_CONCURRENT;
-  const maxConcurrentLimit = parsePositiveInt(
-    c.env.TRIGGER_MAX_CONCURRENT_LIMIT,
-    DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT
-  );
-  if (maxConcurrent < 1 || maxConcurrent > maxConcurrentLimit) {
-    throw errors.badRequest(`maxConcurrent must be between 1 and ${maxConcurrentLimit}`);
-  }
-
-  // validateCron() above already throws when cronExpression is falsy for a
-  // 'cron' trigger, but that guarantee doesn't propagate back onto
-  // body.cronExpression's type here — re-check explicitly instead of
-  // asserting.
-  let cronExpression: string | null = null;
-  let cronTimezone: string | null = null;
-  let nextFireAt: string | null = null;
-  if (body.sourceType === 'cron') {
-    if (!body.cronExpression) {
-      throw errors.badRequest('cronExpression is required for cron triggers');
-    }
-    cronExpression = body.cronExpression;
-    cronTimezone = body.cronTimezone ?? 'UTC';
-    nextFireAt = cronToNextFire(cronExpression, cronTimezone);
-  }
-
-  const id = ulid();
-  const now = new Date().toISOString();
-  const values: schema.NewTriggerRow = {
-    id,
-    projectId,
-    userId,
-    name,
-    description: body.description?.trim() || null,
-    status: 'active',
-    sourceType: body.sourceType,
-    cronExpression,
-    cronTimezone,
-    skipIfRunning: body.skipIfRunning ?? true,
-    promptTemplate,
-    agentProfileId: body.agentProfileId ?? null,
-    skillId: body.skillId ?? null,
-    taskMode: body.taskMode ?? 'task',
-    vmSizeOverride: body.vmSizeOverride ?? null,
-    resourceRequirementsJson: triggerResourceRequirementsJson(body),
-    maxConcurrent,
-    nextFireAt,
-    createdAt: now,
-    updatedAt: now,
-  };
-
-  let webhookToken: Awaited<ReturnType<typeof createWebhookTokenMaterial>> | undefined;
-  if (body.sourceType === 'webhook' && body.webhookConfig) {
-    webhookToken = await createWebhookTokenMaterial(c.env.ENCRYPTION_KEY);
-    await db.batch([
-      db.insert(schema.triggers).values(values),
-      db
-        .insert(schema.webhookTriggerConfigs)
-        .values(webhookConfigValues(id, body.webhookConfig, webhookToken)),
-    ]);
-  } else {
-    await db.insert(schema.triggers).values(values);
-    if (body.sourceType === 'github' && body.githubConfig) {
-      await db.insert(schema.githubTriggerConfigs).values({
-        id: ulid(),
-        triggerId: id,
-        eventType: body.githubConfig.eventType,
-        filtersJson: JSON.stringify(body.githubConfig.filters ?? {}),
-        createdAt: now,
-        updatedAt: now,
-      });
-    }
-  }
-
-  const created = await db.select().from(schema.triggers).where(eq(schema.triggers.id, id)).get();
-  if (!created) throw errors.internal('Created trigger not found');
+  const { created, webhookToken } = await createTrigger(db, c.env, project, userId, body);
+  const id = created.id;
   clearTriggerPageCaches(projectId);
   const attributionById = await attribution(db, c.env, project, [created]);
   const response: CreateTriggerResponse = {
@@ -409,6 +241,7 @@ crudRoutes.patch('/:triggerId', jsonValidator(UpdateTriggerSchema), async (c) =>
     .get();
   if (!trigger) throw errors.notFound('Trigger');
   const body = c.req.valid('json');
+  validateTriggerSourceFields(trigger.sourceType, body);
   if (body.webhookConfig && trigger.sourceType !== 'webhook') {
     throw errors.badRequest('webhookConfig is only valid for webhook triggers');
   }
@@ -498,11 +331,17 @@ crudRoutes.patch('/:triggerId', jsonValidator(UpdateTriggerSchema), async (c) =>
     );
     if (configError) throw errors.badRequest(configError);
   }
+  if (body.githubConfig) await assertGitHubTriggerConfigExists(db, triggerId);
   const triggerUpdate = db
     .update(schema.triggers)
     .set(updates)
     .where(and(eq(schema.triggers.id, triggerId), eq(schema.triggers.projectId, projectId)));
-  if (effectiveWebhookConfig) {
+  if (body.githubConfig) {
+    await db.batch([
+      triggerUpdate,
+      githubTriggerConfigUpdate(db, triggerId, body.githubConfig, now),
+    ]);
+  } else if (effectiveWebhookConfig) {
     await db.batch([
       triggerUpdate,
       db

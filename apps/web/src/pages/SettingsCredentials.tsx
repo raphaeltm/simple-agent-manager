@@ -3,10 +3,15 @@
  * Credentials, Configurations, and Attachments.
  */
 
+import type { CredentialLimitCredentialSummary } from '@simple-agent-manager/shared';
 import { Alert, Button, Card, Input, Select, StatusBadge } from '@simple-agent-manager/ui';
-import { useCallback, useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
+import { formatSampledAgo } from '../components/credential-limits/credential-limit-format';
+import { CredentialLimitChip } from '../components/credential-limits/CredentialLimitChip';
 import { ConfigurationSection } from '../components/settings-credentials/ConfigurationSection';
+import { useQueryScope } from '../hooks/useQueryScope';
 import {
   type CCAttachmentListItem,
   type CCConfigurationListItem,
@@ -22,6 +27,7 @@ import {
   updateCCAttachment,
   updateCCCredential,
 } from '../lib/api';
+import { myCredentialLimitsQueryOptions } from '../lib/query-options';
 
 const KIND_LABELS: Record<string, string> = {
   'api-key': 'API Key',
@@ -42,10 +48,13 @@ interface ProjectOption {
 
 function CredentialCard({
   cred,
+  usage,
   onToggle,
   onDelete,
 }: {
   cred: CCCredentialListItem;
+  /** Latest provider usage windows SAM observed for this credential, when any. */
+  usage: CredentialLimitCredentialSummary | null;
   onToggle: () => Promise<void>;
   onDelete: () => Promise<void>;
 }) {
@@ -56,7 +65,9 @@ function CredentialCard({
       }`}
     >
       <div className="flex items-start justify-between gap-2 flex-wrap">
-        <span className="text-sm font-semibold text-fg-primary break-words">{cred.name}</span>
+        <span className="min-w-0 text-sm font-semibold text-fg-primary break-words [overflow-wrap:anywhere]">
+          {cred.name}
+        </span>
         <div className="flex items-center gap-2 shrink-0">
           <span className="inline-flex items-center rounded-full border border-border-default px-2 py-0.5 text-[0.7rem] font-medium text-fg-muted whitespace-nowrap">
             {KIND_LABELS[cred.kind] ?? cred.kind}
@@ -64,6 +75,15 @@ function CredentialCard({
           {!cred.isActive && <StatusBadge status="stopped" label="Inactive" />}
         </div>
       </div>
+      {usage && usage.windows.length > 0 && (
+        <div
+          className="flex flex-wrap items-center gap-2 text-xs text-fg-muted"
+          data-testid="credential-usage-row"
+        >
+          <CredentialLimitChip credential={usage} />
+          <span>{formatSampledAgo(usage.observedAt, Date.now())}</span>
+        </div>
+      )}
       <div className="flex gap-2">
         <Button
           variant="ghost"
@@ -375,6 +395,18 @@ export function SettingsCredentials() {
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const queryScope = useQueryScope();
+  const limitsQuery = useQuery({
+    ...myCredentialLimitsQueryOptions(queryScope),
+    enabled: Boolean(queryScope),
+  });
+  const usageByCredentialId = useMemo(() => {
+    const map = new Map<string, CredentialLimitCredentialSummary>();
+    for (const credential of limitsQuery.data?.credentials ?? []) {
+      if (credential.credentialId) map.set(credential.credentialId, credential);
+    }
+    return map;
+  }, [limitsQuery.data]);
 
   const loadAll = useCallback(async () => {
     try {
@@ -453,6 +485,7 @@ export function SettingsCredentials() {
             <CredentialCard
               key={cred.id}
               cred={cred}
+              usage={usageByCredentialId.get(cred.id) ?? null}
               onToggle={() =>
                 handleMutation(() => updateCCCredential(cred.id, { isActive: !cred.isActive }))
               }

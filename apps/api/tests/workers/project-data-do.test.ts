@@ -992,6 +992,28 @@ describe('ProjectData Durable Object', () => {
   // =========================================================================
 
   describe('batch message persistence', () => {
+    it('preserves structural loopback attribution on a delayed system row', async () => {
+      const stub = getStub('project-batch-loopback-attribution');
+      const sessionId = await stub.createSession(null, null);
+      const timestamp = new Date().toISOString();
+      const promptId = crypto.randomUUID();
+      const retryId = crypto.randomUUID();
+      const diagnosticId = crypto.randomUUID();
+      await stub.persistMessageBatch(sessionId, [
+        { messageId: promptId, role: 'user', content: 'start sign-in', toolMetadata: null, timestamp },
+        { messageId: retryId, role: 'user', content: 'try another method', toolMetadata: null, timestamp },
+      ]);
+      await stub.persistMessageBatch(sessionId, [
+        { messageId: diagnosticId, role: 'system',
+          content: 'This sign-in flow requires a local callback that this session cannot complete.',
+          toolMetadata: JSON.stringify({ promptMessageId: promptId }), timestamp },
+      ]);
+      const { messages } = await stub.getMessages(sessionId);
+      expect(messages.map((message) => message.id)).toEqual([promptId, retryId, diagnosticId]);
+      expect(messages[2]?.toolMetadata).toEqual({ promptMessageId: promptId });
+      expect(messages[2]?.sequence).toBeGreaterThan(messages[1]!.sequence);
+    });
+
     it('persists a batch of messages', async () => {
       const stub = getStub('project-batch-basic');
       const sessionId = await stub.createSession(null, null);

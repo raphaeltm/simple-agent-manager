@@ -13,6 +13,8 @@ import (
 	"time"
 )
 
+var errAgentCredentialMissing = errors.New("agent credential missing")
+
 // reportAgentError sends an agent error to boot-log and error reporter.
 func (h *SessionHost) reportAgentError(agentType, step, message, detail string) {
 	message = redactAgentDiagnosticText(message)
@@ -76,7 +78,7 @@ func (h *SessionHost) fetchAgentKey(ctx context.Context, agentType string) (*age
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+h.config.CallbackToken)
+	req.Header.Set("Authorization", "Bearer "+h.callbackToken())
 
 	resp, err := h.httpClient().Do(req)
 	if err != nil {
@@ -85,7 +87,15 @@ func (h *SessionHost) fetchAgentKey(ctx context.Context, agentType string) (*age
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("no credential configured for %s", agentType)
+		var apiError struct {
+			Code    string `json:"error"`
+			Message string `json:"message"`
+		}
+		if err := json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&apiError); err == nil &&
+			apiError.Code == "NOT_FOUND" && apiError.Message == "Agent credential not found" {
+			return nil, fmt.Errorf("%w for %s", errAgentCredentialMissing, agentType)
+		}
+		return nil, fmt.Errorf("control plane returned status %d", resp.StatusCode)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("control plane returned status %d", resp.StatusCode)
@@ -107,7 +117,7 @@ func (h *SessionHost) fetchAgentKey(ctx context.Context, agentType string) (*age
 
 	// Allow empty APIKey when inferenceConfig is present (platform AI proxy path).
 	if result.APIKey == "" && result.InferenceConfig == nil {
-		return nil, fmt.Errorf("empty credential returned for %s", agentType)
+		return nil, fmt.Errorf("control plane returned an incomplete agent credential response")
 	}
 
 	if result.CredentialKind == "" {
@@ -142,7 +152,7 @@ func (h *SessionHost) fetchAgentSettings(ctx context.Context, agentType string) 
 		return nil
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+h.config.CallbackToken)
+	req.Header.Set("Authorization", "Bearer "+h.callbackToken())
 
 	resp, err := h.httpClient().Do(req)
 	if err != nil {
@@ -272,7 +282,7 @@ func (h *SessionHost) prepareActivityReport(activity string) (activityReportRequ
 	projectID := h.config.ProjectID
 	nodeID := h.config.NodeID
 	controlPlaneURL := h.config.ControlPlaneURL
-	callbackToken := h.config.CallbackToken
+	callbackToken := h.callbackToken()
 	sessionID := h.config.SessionID
 
 	if projectID == "" || nodeID == "" || controlPlaneURL == "" || sessionID == "" {

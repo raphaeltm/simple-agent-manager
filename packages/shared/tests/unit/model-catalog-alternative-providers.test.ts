@@ -64,7 +64,7 @@ describe('OpenCode model catalog entries', () => {
     expect(namesById.get('opencode/gpt-6-astra')).toBe('GPT-6 Astra');
     expect(namesById.get('opencode/gpt-6.1-sol')).toBe('GPT-6.1 Sol');
     expect(namesById.get('opencode/gpt-5.6-sol')).toBe('GPT-5.6 Sol');
-    expect(namesById.get('opencode/grok-4.7')).toBe('Grok 4.7 (30% Off)');
+    expect(namesById.get('opencode/grok-4.7')).toBe('Grok 4.7');
     expect(namesById.get('opencode/muse-spark-1.3-contributor-free')).toBe('Muse Spark 1.3 Free');
     expect(namesById.get('opencode-go/deepseek-v4-flash')).toBe('DeepSeek V4 Flash');
     expect(namesById.get('opencode-go/deepseek-v4-pro')).toBe('DeepSeek V4 Pro (New)');

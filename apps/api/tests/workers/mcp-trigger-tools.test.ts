@@ -71,7 +71,7 @@ async function storeToken(token: string, projectId: string, userId: string): Pro
 async function callMcpTool(
   token: string,
   name: string,
-  args: Record<string, unknown>,
+  args: Record<string, unknown>
 ): Promise<JsonRpcToolResponse> {
   const response = await SELF.fetch('https://api.test.example.com/mcp', {
     method: 'POST',
@@ -123,15 +123,22 @@ async function getTrigger(triggerId: string): Promise<TriggerRow | null> {
     `SELECT id, project_id, name, status, cron_expression, cron_timezone, next_fire_at, prompt_template
      FROM triggers
      WHERE id = ?
-     LIMIT 1`,
-  ).bind(triggerId).first<TriggerRow>();
+     LIMIT 1`
+  )
+    .bind(triggerId)
+    .first<TriggerRow>();
 }
 
-async function countRows(table: 'github_trigger_configs' | 'trigger_executions' | 'triggers', triggerId: string): Promise<number> {
+async function countRows(
+  table: 'github_trigger_configs' | 'trigger_executions' | 'triggers',
+  triggerId: string
+): Promise<number> {
   const column = table === 'triggers' ? 'id' : 'trigger_id';
   const row = await env.DATABASE.prepare(
-    `SELECT COUNT(*) AS count FROM ${table} WHERE ${column} = ?`,
-  ).bind(triggerId).first<CountRow>();
+    `SELECT COUNT(*) AS count FROM ${table} WHERE ${column} = ?`
+  )
+    .bind(triggerId)
+    .first<CountRow>();
   return row?.count ?? 0;
 }
 
@@ -196,6 +203,126 @@ describe('MCP trigger management tools', () => {
     });
   });
 
+  it('creates GitHub triggers through MCP and persists source config, updates it and cleans up', async () => {
+    const caller = await seedProjectGraph('github-create');
+    const other = await seedProjectGraph('github-foreign-profile');
+    const token = `${TEST_PREFIX}-github-create-token`;
+    await storeToken(token, caller.projectId, caller.userId);
+    const now = new Date().toISOString();
+    await env.DATABASE.prepare(
+      `INSERT INTO agent_profiles (id, project_id, user_id, name, agent_type, created_at, updated_at) VALUES (?, ?, ?, ?, 'openai-codex', ?, ?)`
+    )
+      .bind(`${TEST_PREFIX}-foreign-profile`, other.projectId, other.userId, 'Foreign', now, now)
+      .run();
+    await env.DATABASE.prepare(
+      `INSERT INTO agent_profiles (id, project_id, user_id, name, agent_type, created_at, updated_at) VALUES (?, ?, ?, ?, 'openai-codex', ?, ?)`
+    )
+      .bind(`${TEST_PREFIX}-local-profile`, caller.projectId, caller.userId, 'Local', now, now)
+      .run();
+    const args = {
+      name: 'GitHub issue triage',
+      sourceType: 'github',
+      promptTemplate: 'Triage {{github.title}}',
+      githubConfig: {
+        eventType: 'issues',
+        filters: { actions: ['opened'], labels: ['bug'], ignoreActors: ['bot'] },
+      },
+    };
+    const rejected = await callMcpTool(token, 'create_trigger', {
+      ...args,
+      agentProfileId: `${TEST_PREFIX}-foreign-profile`,
+    });
+    expect(rejected.error?.message).toContain('Agent profile not found');
+    const created = parseToolContent(
+      await callMcpTool(token, 'create_trigger', {
+        ...args,
+        agentProfileId: `${TEST_PREFIX}-local-profile`,
+      })
+    );
+    const triggerId = String(created.triggerId);
+    expect(created).toMatchObject({
+      sourceType: 'github',
+      githubConfig: args.githubConfig,
+      cronExpression: null,
+      nextFireAt: null,
+    });
+    expect(JSON.stringify(created)).not.toMatch(/credential|secret|token/i);
+    const row = await getTrigger(triggerId);
+    expect(row?.project_id).toBe(caller.projectId);
+    expect(row?.cron_expression).toBeNull();
+    expect(row?.next_fire_at).toBeNull();
+    const config = await env.DATABASE.prepare(
+      'SELECT event_type, filters_json FROM github_trigger_configs WHERE trigger_id = ?'
+    )
+      .bind(triggerId)
+      .first<{ event_type: string; filters_json: string }>();
+    expect(config?.event_type).toBe('issues');
+    expect(JSON.parse(config?.filters_json ?? '{}')).toEqual(args.githubConfig.filters);
+    const updated = parseToolContent(
+      await callMcpTool(token, 'update_trigger', {
+        triggerId,
+        githubConfig: {
+          eventType: 'pull_request',
+          filters: { branches: ['main'], ignoreDrafts: true },
+        },
+      })
+    );
+    expect(updated.githubConfig).toEqual({
+      eventType: 'pull_request',
+      filters: { branches: ['main'], ignoreDrafts: true },
+    });
+    expect(
+      (await callMcpTool(token, 'update_trigger', { triggerId, cronExpression: '0 9 * * *' })).error
+        ?.message
+    ).toContain('only valid for cron');
+    const foreignToken = `${TEST_PREFIX}-github-other-token`;
+    await storeToken(foreignToken, other.projectId, other.userId);
+    expect(
+      (
+        await callMcpTool(foreignToken, 'update_trigger', {
+          triggerId,
+          githubConfig: { eventType: 'push' },
+        })
+      ).error?.message
+    ).toContain('not found in this project');
+    expect(
+      (
+        await callMcpTool(token, 'create_trigger', {
+          ...args,
+          name: 'Invalid event',
+          githubConfig: { eventType: 'invalid' },
+        })
+      ).error
+    ).toBeDefined();
+    expect(
+      (
+        await callMcpTool(token, 'create_trigger', {
+          ...args,
+          name: 'Webhook',
+          sourceType: 'webhook',
+        })
+      ).error
+    ).toBeDefined();
+    parseToolContent(await callMcpTool(token, 'delete_trigger', { triggerId }));
+    expect(await countRows('github_trigger_configs', triggerId)).toBe(0);
+  });
+
+  it('creates legacy cron triggers without sourceType', async () => {
+    const { userId, projectId } = await seedProjectGraph('cron-create');
+    const token = `${TEST_PREFIX}-cron-create-token`;
+    await storeToken(token, projectId, userId);
+    const created = parseToolContent(
+      await callMcpTool(token, 'create_trigger', {
+        name: 'Legacy cron',
+        cronExpression: '0 9 * * *',
+        promptTemplate: 'Review',
+      })
+    );
+    expect(created.sourceType).toBe('cron');
+    expect(created.cronTimezone).toBe('UTC');
+    expect((await getTrigger(String(created.triggerId)))?.next_fire_at).toBeTruthy();
+  });
+
   it('updates a trigger and recomputes next_fire_at', async () => {
     const { userId, projectId } = await seedProjectGraph('update');
     const token = `${TEST_PREFIX}-update-token`;
@@ -246,8 +373,10 @@ describe('MCP trigger management tools', () => {
     await seedTriggerExecution(`${triggerId}-execution`, triggerId, projectId);
     await env.DATABASE.prepare(
       `INSERT INTO github_trigger_configs (id, trigger_id, event_type, filters_json, created_at, updated_at)
-       VALUES (?, ?, 'issues', '{}', datetime('now'), datetime('now'))`,
-    ).bind(`${triggerId}-github-config`, triggerId).run();
+       VALUES (?, ?, 'issues', '{}', datetime('now'), datetime('now'))`
+    )
+      .bind(`${triggerId}-github-config`, triggerId)
+      .run();
 
     const response = await callMcpTool(token, 'delete_trigger', { triggerId });
     const payload = parseToolContent(response);

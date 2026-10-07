@@ -21,6 +21,7 @@ export type InteractionRow = {
   encrypted_detail: string | null;
   detail_iv: string | null;
   detail_purged_at: number | null;
+  url_completed_at: number | null;
   safe_summary_json: string;
   upstream_request_id: string | null;
   created_at: number;
@@ -155,6 +156,7 @@ export function parseSummary(row: InteractionRow): AcpInteractionSafeSummary {
       typeof safeSummary.toolCallId === 'string'
         ? safeSummary.toolCallId
         : null,
+    urlCompletedAt: row.url_completed_at,
   };
 }
 

@@ -290,12 +290,13 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   CREDENTIAL_LIMIT_OBSERVATION_MAX_AGE_MS?: string; // Oldest accepted credential limit observation age (default: 86400000)
   CREDENTIAL_LIMIT_OBSERVATION_FUTURE_SKEW_MS?: string; // Accepted future clock skew for credential limit samples (default: 300000)
   CREDENTIAL_LIMIT_RESET_MAX_FUTURE_MS?: string; // Max future provider reset timestamp accepted (default: 691200000)
-  CREDENTIAL_LIMIT_SUPPORTED_PROVIDERS?: string; // Comma-separated credential telemetry provider allowlist (default: anthropic,openai)
+  CREDENTIAL_LIMIT_SUPPORTED_PROVIDERS?: string; // Comma-separated credential telemetry provider allowlist (default: anthropic,openai,opencode)
   CREDENTIAL_LIMIT_SUPPORTED_SOURCES?: string; // Comma-separated credential telemetry source allowlist
   CREDENTIAL_LIMIT_SUPPORTED_WINDOW_TYPES?: string; // Comma-separated credential telemetry window allowlist
   CREDENTIAL_LIMIT_ADMISSION_MAX_ACTIVE_PER_PROJECT?: string; // Max retained credential event admissions per project (default: 1000)
   CREDENTIAL_LIMIT_ADMISSION_RETRY_BATCH_SIZE?: string; // Max pending credential admissions retried per opportunistic sweep (default: 25)
   CREDENTIAL_LIMIT_ADMISSION_RETENTION_DAYS?: string; // Retention for credential admission/outbox rows (default: 30)
+  CREDENTIAL_LIMIT_READ_MAX_ROWS?: string; // Max credential limit window rows returned per read request (default: 200)
   ORCHESTRATOR_WAIT_RECONCILE_INTERVAL_MS?: string; // Durable parent-wait D1 reconciliation interval (default: 30000)
   ORCHESTRATOR_WAIT_MAX_CHILDREN?: string; // Max same-project task IDs in one wait_for_subtasks call (default: 20)
   ORCHESTRATOR_WAIT_MAX_ACTIVE_PER_PROJECT?: string; // Max active parent waits per project (default: 100)
@@ -304,7 +305,9 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   SESSION_SLEEP_SWEEP_BATCH_SIZE?: string; // Max due sleeps claimed per cron sweep (default: 10)
   SESSION_SLEEP_SWEEP_WALL_BUDGET_MS?: string; // Soft D1/DO claim-loop wall budget before deferring remaining candidates (default: 20000)
   SESSION_SLEEP_RETRY_DELAY_MS?: string; // Delay after a fail-closed sleep attempt (default: 300000)
-  SESSION_SLEEP_MAX_ATTEMPTS?: string; // Max automatic sleep attempts before preserving compute (default: 9)
+  SESSION_SLEEP_MAX_ATTEMPTS?: string; // Max automatic sleep attempts before preserving compute (default: 9); also the failed-attempt ceiling at which a bounded sleep episode ends blocked
+  SESSION_SLEEP_FAILURE_MAX_ATTEMPTS?: string; // Failed full-snapshot sleep attempts per episode before the transcript-and-Git fallback (default: 3)
+  SESSION_SLEEP_FAILURE_MAX_ELAPSED_MS?: string; // Time since a sleep episode began before the transcript-and-Git fallback (default: 900000)
   SESSION_SLEEP_CLAIM_LEASE_MS?: string; // Reclaim timeout for interrupted automatic sleep claims (default: 600000)
   SESSION_SLEEP_IN_FLIGHT_MAX_AGE_MS?: string; // Absolute ceiling for in-flight sleep destroyer deferral (default: 1800000)
   FAILED_TASK_PRESERVATION_MAX_WAIT_MS?: string; // Longest a failed task's runtime waits for its preservation sleep before release (default: 28800000)
@@ -332,6 +335,8 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   RATE_LIMIT_SESSION_SUMMARIZE_WINDOW_SECONDS?: string;
   RATE_LIMIT_IDENTITY_TOKEN?: string;
   RATE_LIMIT_IDENTITY_TOKEN_WINDOW_SECONDS?: string;
+  RATE_LIMIT_CALLBACK_TOKEN_RENEWAL?: string; // Authenticated workspace callback-token renewal attempts per workspace per window (default: 12)
+  RATE_LIMIT_CALLBACK_TOKEN_RENEWAL_WINDOW_SECONDS?: string; // Window for RATE_LIMIT_CALLBACK_TOKEN_RENEWAL (default: 3600)
   /**
    * Max Codex refresh requests per user per window. Defaults to 30. Enforced
    * atomically by CodexRefreshLock DO using ctx.storage (not KV). See
@@ -451,7 +456,14 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   DEFAULT_TASK_AGENT_TYPE?: string;
   // Task execution timeout (stuck task recovery)
   TASK_RUN_MAX_EXECUTION_MS?: string;
-  TASK_RUN_HARD_TIMEOUT_MS?: string;
+  STALLED_TASK_CLASSIFIER_ENABLED?: string; // "false" disables Clef-based long-turn stall classification
+  STALLED_TASK_CLASSIFIER_MODEL?: string; // Workers AI model id (default: @cf/cloudflare/clef)
+  STALLED_TASK_CLASSIFIER_SELECTOR?: string; // Clef selector (default: clef)
+  STALLED_TASK_CLASSIFIER_TIMEOUT_MS?: string; // Per-classification timeout (default: 10000)
+  STALLED_TASK_CLASSIFIER_MIN_ACTIVITY_AGE_MS?: string; // Transcript silence + turn age before classifying (default: 3600000)
+  STALLED_TASK_CLASSIFIER_MESSAGE_LIMIT?: string; // Raw transcript rows to inspect (default: 200)
+  STALLED_TASK_CLASSIFIER_TRANSCRIPT_MAX_CHARS?: string; // Max transcript chars sent to Clef (default: 24000)
+  STALLED_TASK_CLASSIFIER_CONFIDENCE_THRESHOLD?: string; // Required stalled probability (default: 0.8)
   TASK_STUCK_QUEUED_TIMEOUT_MS?: string;
   INSTANT_START_STALE_TIMEOUT_MS?: string;
   TASK_STUCK_DELEGATED_TIMEOUT_MS?: string;
@@ -699,6 +711,11 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_TIME_MS?: string;
   PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_UNSAFE_RATIO?: string;
   PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES?: string;
+  PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_MAX_ROWS?: string;
+  PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_MAX_BYTES?: string;
+  PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_MAX_SESSIONS?: string;
+  PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_TRANSACTION_ROWS?: string;
+  PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_TRANSACTION_BYTES?: string;
   PROJECT_DATA_ARCHIVE_SHARDING_ENABLED?: string; // Exact archive read routing switch (default: disabled)
   PROJECT_DATA_ARCHIVE_COMPACT_ENABLED?: string; // Opt-in compact raw-history writer (default: disabled)
   PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET?: string; // Installation-wide estimated daily SQL write allowance (default: 250000)
@@ -852,6 +869,11 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_EVENT_SOURCE_OUTBOX_SWEEP_WALL_MS?: string;
   ACP_INTERACTIONS_ENABLED?: string;
   ACP_INTERACTION_FORMS_ENABLED?: string;
+  ACP_INTERACTION_URLS_ENABLED?: string;
+  ACP_INTERACTION_URL_DEADLINE_MS?: string;
+  ACP_INTERACTION_URL_MAX_CHARS?: string;
+  ACP_INTERACTION_URL_ELICITATION_ID_MAX_CHARS?: string;
+  ACP_INTERACTION_URL_REDIRECT_DEPTH?: string;
   ACP_INTERACTION_PERMISSION_TASK_DEADLINE_MS?: string;
   ACP_INTERACTION_PERMISSION_CONVERSATION_DEADLINE_MS?: string;
   ACP_INTERACTION_MAX_DEADLINE_MS?: string;
@@ -1001,6 +1023,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   TASK_RECONCILIATION_MAX_CANDIDATES_PER_SWEEP?: string; // Max candidates processed per alarm sweep (default: 5)
   TASK_RECONCILIATION_NODE_CALL_TIMEOUT_MS?: string; // Short timeout for reconciliation-originated node calls (default: 5000 = 5 seconds)
   TASK_RECONCILIATION_CANDIDATE_LEASE_MS?: string; // Durable claim floor; effective lease covers configured liveness + delivery I/O budgets (default: 30000 = 30 seconds)
+  TASK_RECONCILIATION_MAX_CHECKINS?: string; // Automatic check-ins per no-progress episode (default: 3)
   TASK_RECONCILIATION_PROBE_MAX_ATTEMPTS?: string; // Inconclusive attempts before task reconciliation quarantine (default: 3)
   TASK_RECONCILIATION_QUARANTINE_MS?: string; // Cooldown after inconclusive attempt exhaustion (default: 300000 = 5 minutes)
   TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS?: string; // Short timeout for task-liveness VM-agent health probes (default: 5000 = 5 seconds)

@@ -1,5 +1,7 @@
 # Fix All Known Flaky Tests at the Root (No Retries)
 
+> **Reconciliation 2026-10-05:** Two more load-sensitive tests surfaced in this week's PRs and are tracked nowhere else: `apps/api/tests/unit/routes/nodes-max-nodes-quota.test.ts` hits its 5 s timeout under a full parallel `pnpm test`, also on `main` (#2205), and `apps/web/tests/unit/components/admin/error-trends.test.tsx` failed once under CI load (#2199). None of this file's fixes shipped; none of its named tests failed in the 15 failed CI runs since 2026-09-30.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** item 1. The ToolCallCard test now awaits the final UI state

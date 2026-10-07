@@ -13,6 +13,10 @@
       "registryUrl": "https://www.npmjs.com/package/@eslint/js",
       "necessity": "Provides supported ESLint flat recommended configuration."
     },
+    "@modelcontextprotocol/sdk": {
+      "registryUrl": "https://www.npmjs.com/package/@modelcontextprotocol/sdk",
+      "necessity": "Runs the disposable HTTPS MCP service and notification fixture for ACP URL completion verification."
+    },
     "@playwright/test": {
       "registryUrl": "https://www.npmjs.com/package/@playwright/test",
       "necessity": "Executes browser evidence and screenshot checks."

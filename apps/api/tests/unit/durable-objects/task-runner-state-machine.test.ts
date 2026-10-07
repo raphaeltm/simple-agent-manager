@@ -723,7 +723,8 @@ describe('failTask', () => {
       rc.env,
       'session-1',
       'task-1',
-      'replacement restore failed'
+      'replacement restore failed',
+      undefined
     );
     expect(restoreSessionRecoveryHandoffMock).toHaveBeenCalledWith(
       rc.env.DATABASE,

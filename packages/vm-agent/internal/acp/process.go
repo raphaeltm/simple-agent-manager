@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -654,18 +655,31 @@ func (p *AgentProcess) killContainerProcesses(sig syscall.Signal) {
 
 	// Kill the ACP adapter process and all its children inside the container.
 	// Using pkill with -f matches the full command line.
-	cmd := exec.CommandContext(ctx, "docker", "exec", p.containerID,
-		"pkill", fmt.Sprintf("-%s", sigName), "-f", p.agentType)
-	if err := cmd.Run(); err != nil {
-		// Exit code 1 means no processes matched — that's fine, they already exited.
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
-			slog.Debug("No container processes matched for kill", "signal", sigName, "pattern", p.agentType)
+	patterns := containerProcessKillPatterns(p.agentType)
+	for _, pattern := range patterns {
+		cmd := exec.CommandContext(ctx, "docker", "exec", p.containerID,
+			"pkill", fmt.Sprintf("-%s", sigName), "-f", pattern)
+		if err := cmd.Run(); err != nil {
+			// Exit code 1 means no processes matched — that's fine, they already exited.
+			if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+				slog.Debug("No container processes matched for kill", "signal", sigName, "pattern", pattern)
+			} else {
+				slog.Warn("Failed to kill container processes", "signal", sigName, "pattern", pattern, "error", err)
+			}
 		} else {
-			slog.Warn("Failed to kill container processes", "signal", sigName, "pattern", p.agentType, "error", err)
+			slog.Info("Sent signal to container processes", "signal", sigName, "pattern", pattern, "container", p.containerID)
 		}
-	} else {
-		slog.Info("Sent signal to container processes", "signal", sigName, "pattern", p.agentType, "container", p.containerID)
 	}
+}
+
+func containerProcessKillPatterns(command string) []string {
+	if command == codexC2ReleaseRoot+"/current/bin/codex-acp" {
+		// The reviewed wrapper execs Node and its paired CLI through the real
+		// release directory, so neither process retains the wrapper path.
+		base := codexC2ReleaseRoot + "/releases/" + codexC2ReleaseIdentity + "/payload/"
+		return []string{regexp.QuoteMeta(base + "adapter.js"), regexp.QuoteMeta(base + "codex")}
+	}
+	return []string{command}
 }
 
 // Wait waits for the agent process to exit and returns the error (if any).

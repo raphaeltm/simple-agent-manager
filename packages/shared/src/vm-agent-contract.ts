@@ -124,6 +124,15 @@ export const CreateAgentSessionAgentRequestSchema = z.object({
   chatSessionId: z.string().optional(),
   projectId: z.string().optional(),
   mcpServers: z.array(McpServerEntrySchema).optional(),
+  acpInteractions: z
+    .object({
+      protocolVersion: z.number(),
+      enabled: z.boolean(),
+      formsEnabled: z.boolean(),
+      urlsEnabled: z.boolean(),
+    })
+    .passthrough()
+    .optional(),
 });
 
 export type CreateAgentSessionAgentRequest = z.infer<typeof CreateAgentSessionAgentRequestSchema>;

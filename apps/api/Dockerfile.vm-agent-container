@@ -1,4 +1,13 @@
 # Reviewed source tag: docker.io/library/node:22-bookworm-slim
+# Install in a throwaway stage so the compressed archive is not retained in
+# the final image's layers. Both stages use the same reviewed Node/glibc base.
+FROM docker.io/library/node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 AS codex-runtime
+RUN apt-get update && apt-get install -y --no-install-recommends bash coreutils gzip tar util-linux libssl3 liblzma5 libgcc-s1 && \
+    rm -rf /var/lib/apt/lists/*
+COPY container-artifacts/codex-runtime-linux-amd64.tar.gz /tmp/codex-runtime-linux-amd64.tar.gz
+COPY container-artifacts/install-codex-runtime.sh /tmp/install-codex-runtime.sh
+RUN bash /tmp/install-codex-runtime.sh /tmp/codex-runtime-linux-amd64.tar.gz /opt/sam-codex-c2
+
 FROM docker.io/library/node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436
 
 COPY container-entrypoints/patch-acp-amp.py /tmp/patch-acp-amp.py
@@ -8,14 +17,14 @@ LABEL org.opencontainers.image.title="SAM vm-agent instant runtime" \
 
 RUN set -eux; \
     apt-get update; \
-    apt-get install -y --no-install-recommends ca-certificates curl git jq openssh-client procps wget; \
+    apt-get install -y --no-install-recommends bash coreutils gzip tar util-linux libssl3 liblzma5 libgcc-s1 ca-certificates curl git jq openssh-client procps wget; \
     mkdir -p -m 755 /etc/apt/keyrings; \
     wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg > /etc/apt/keyrings/githubcli-archive-keyring.gpg; \
     chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg; \
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list; \
     apt-get update; \
     apt-get install -y --no-install-recommends gh; \
-    npm install -g @agentclientprotocol/claude-agent-acp@0.81.2 @anthropic-ai/claude-code@2.1.281 @agentclientprotocol/codex-acp@1.13.1 @openai/codex@0.156.1 @google/gemini-cli@0.61.0 opencode-ai@1.18.32 @ampcode/cli@0.0.1790261352-g2ab14a; \
+    npm install -g @agentclientprotocol/claude-agent-acp@0.81.2 @anthropic-ai/claude-code@2.1.281 @agentclientprotocol/codex-acp@2.1.1 @openai/codex@0.160.0 @google/gemini-cli@0.61.0 opencode-ai@1.18.32 @ampcode/cli@0.0.1790261352-g2ab14a; \
     curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh; \
     UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe==2.25.8 --python 3.12 --quiet; \
     UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install acp-amp==0.1.3 --with agent-client-protocol==0.7.1 --with amp-sdk==0.1.2 --with pydantic==2.12.5 --with pydantic-core==2.41.5 --with annotated-types==0.7.0 --with typing-inspection==0.4.2 --with typing-extensions==4.15.0 --python 3.12 --quiet; \
@@ -34,10 +43,12 @@ ENV SAM_AGENT_HOME=/var/lib/vm-agent/agents \
 # Build prerequisite: container-artifacts/ is gitignored and generated at deploy
 # time by `make -C packages/vm-agent prepare-container` (see deploy-reusable.yml).
 # A local `docker build` / `wrangler dev` of this image must run that target first,
-# or the two COPY lines below fail with "file not found in build context".
+# or the generated artifact COPY lines below fail. The pinned Codex archive is
+# fetched and checksum-verified during preparation, then verified again at install.
 COPY container-entrypoints/vm-agent-bootstrap.sh /usr/local/bin/vm-agent-bootstrap
 COPY container-artifacts/vm-agent-linux-amd64 /usr/local/bin/vm-agent
 COPY container-artifacts/vm-agent-version.json /etc/sam/vm-agent-version.json
+COPY --from=codex-runtime /opt/sam-codex-c2 /opt/sam-codex-c2
 RUN chmod +x /usr/local/bin/vm-agent-bootstrap /usr/local/bin/vm-agent && \
     mkdir -p /workspaces /var/lib/vm-agent/agents/bin /var/lib/vm-agent/agents/npm /var/lib/vm-agent/agents/uv-tools /var/lib/vm-agent/agents/uv-python && \
     touch /usr/local/bin/git-credential-sam && \

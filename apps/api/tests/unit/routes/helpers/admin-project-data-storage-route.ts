@@ -5,6 +5,7 @@ import type { Env } from '../../../../src/env';
 import { handleAppError } from '../../../../src/middleware/app-error-handler';
 
 vi.mock('../../../../src/middleware/auth', () => ({
+  getUserId: () => 'test-superadmin',
   requireAuth: () => vi.fn((_c: unknown, next: () => Promise<void>) => next()),
   requireApproved: () => vi.fn((_c: unknown, next: () => Promise<void>) => next()),
   requireSuperadmin: () =>

@@ -16,7 +16,11 @@ export const CREDENTIAL_LIMIT_EVENT_TYPES = {
 } as const;
 
 /** Provider identifiers accepted from credential-limit telemetry. */
-export const DEFAULT_CREDENTIAL_LIMIT_SUPPORTED_PROVIDERS = ['anthropic', 'openai'] as const;
+export const DEFAULT_CREDENTIAL_LIMIT_SUPPORTED_PROVIDERS = [
+  'anthropic',
+  'openai',
+  'opencode',
+] as const;
 
 /** Source identifiers accepted from credential-limit telemetry. */
 export const DEFAULT_CREDENTIAL_LIMIT_SUPPORTED_SOURCES = [
@@ -31,6 +35,8 @@ export const DEFAULT_CREDENTIAL_LIMIT_SUPPORTED_SOURCES = [
   'claude-acp.rate_limit',
   'claude-acp.usage_update',
   'vm-agent.acp_usage_update',
+  'vm-agent.codex_rollout',
+  'vm-agent.opencode_go_usage',
 ] as const;
 
 /** Window identifiers accepted from credential-limit telemetry. */
@@ -43,6 +49,13 @@ export const DEFAULT_CREDENTIAL_LIMIT_SUPPORTED_WINDOW_TYPES = [
   'anthropic.tokens',
   'claude.five_hour',
   'claude.seven_day',
+  'claude.seven_day_opus',
+  'claude.seven_day_sonnet',
+  'codex.primary',
+  'codex.secondary',
+  'opencode.monthly',
+  'opencode.rolling',
+  'opencode.weekly',
   'openai.project-tokens',
   'openai.requests',
   'openai.tokens',
@@ -80,3 +93,6 @@ export const DEFAULT_CREDENTIAL_LIMIT_ADMISSION_RETRY_BATCH_SIZE = 25;
 
 /** Retention for credential-limit admission/outbox rows. */
 export const DEFAULT_CREDENTIAL_LIMIT_ADMISSION_RETENTION_DAYS = 30;
+
+/** Maximum credential-limit window rows returned by one read request. */
+export const DEFAULT_CREDENTIAL_LIMIT_READ_MAX_ROWS = 200;

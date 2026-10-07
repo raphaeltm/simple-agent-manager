@@ -257,6 +257,10 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	if err := validateOpenCodeGoUsageURL(c.OpenCodeGoUsageURL); err != nil {
+		errs = append(errs, fmt.Errorf("OPENCODE_GO_USAGE_URL: %w", err))
+	}
+
 	if c.ErrorReportEventLimit < 0 {
 		errs = append(errs, fmt.Errorf(
 			"ERROR_REPORT_EVENT_LIMIT must be non-negative, got %d",
@@ -352,6 +356,7 @@ func (c *Config) Validate() error {
 		{"ACP_CREDENTIAL_SYNC_TIMEOUT", c.ACPCredentialSyncTimeout},
 		{"ACP_RESTART_ATTEMPT_TIMEOUT", c.ACPRestartAttemptTimeout},
 		{"ACP_ACTIVITY_REPORT_TIMEOUT", c.ACPActivityReportTimeout},
+		{"ACP_USAGE_PROBE_TIMEOUT", c.ACPUsageProbeTimeout},
 		{"ACP_HARNESS_ACTIVITY_REPORT_DEBOUNCE", c.ACPHarnessActivityReportDebounce},
 		{"JWKS_FETCH_TIMEOUT", c.JWKSFetchTimeout},
 		{EnvDefaultPSIPollIntervalSeconds, c.PSIPollInterval},
@@ -436,4 +441,44 @@ func (c *Config) Validate() error {
 	}
 
 	return errors.Join(errs...)
+}
+
+// validateOpenCodeGoUsageURL accepts the empty value (the built-in default
+// applies) and otherwise requires an absolute http(s) URL. The probe sends the
+// session's OpenCode API key as a bearer token, so plain http is only allowed
+// for loopback hosts (local test doubles); any remote host must use https.
+func validateOpenCodeGoUsageURL(raw string) error {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil
+	}
+	u, err := url.Parse(trimmed)
+	if err != nil {
+		return fmt.Errorf("not a valid URL: %w", err)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("must be an absolute URL, got %q", trimmed)
+	}
+	switch u.Scheme {
+	case "https":
+		return nil
+	case "http":
+		if isLoopbackHost(u.Hostname()) {
+			return nil
+		}
+		return fmt.Errorf("must use https for non-loopback host %q (the probe sends a bearer token)", u.Hostname())
+	default:
+		return fmt.Errorf("must use http or https scheme, got %q", u.Scheme)
+	}
+}
+
+// isLoopbackHost reports whether host names the local machine: "localhost",
+// "*.localhost", or a loopback IP literal.
+func isLoopbackHost(host string) bool {
+	lower := strings.ToLower(host)
+	if lower == "localhost" || strings.HasSuffix(lower, ".localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

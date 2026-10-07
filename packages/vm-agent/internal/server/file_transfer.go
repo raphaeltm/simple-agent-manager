@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -79,6 +80,15 @@ func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), s.config.FileUploadTimeout)
 	defer cancel()
+	// A context deadline does not interrupt reads from the HTTP request body.
+	// Give this authenticated upload its configured transfer window instead of
+	// the server's shorter API read timeout, while retaining any earlier caller
+	// deadline. net/http resets the connection deadline for the next request.
+	deadline, _ := ctx.Deadline()
+	if err := http.NewResponseController(w).SetReadDeadline(deadline); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		writeError(w, http.StatusInternalServerError, "failed to configure upload deadline")
+		return
+	}
 
 	for {
 		part, err := reader.NextPart()

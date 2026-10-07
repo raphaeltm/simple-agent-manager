@@ -35,6 +35,10 @@ func (h *SessionHost) beginPrompt(cancel context.CancelFunc, observer PromptTerm
 }
 
 func (h *SessionHost) beginPromptForDelivery(ctx context.Context, cancel context.CancelFunc, deliveryID string, observer PromptTerminalObserver) (*promptAttempt, bool) {
+	return h.beginPromptForDeliveryWithMessageID(ctx, cancel, deliveryID, "", observer)
+}
+
+func (h *SessionHost) beginPromptForDeliveryWithMessageID(ctx context.Context, cancel context.CancelFunc, deliveryID, messageID string, observer PromptTerminalObserver) (*promptAttempt, bool) {
 	h.promptMu.Lock()
 	defer h.promptMu.Unlock()
 	if h.promptInFlight {
@@ -48,6 +52,7 @@ func (h *SessionHost) beginPromptForDelivery(ctx context.Context, cancel context
 		startedAt:  h.now(),
 		cancel:     cancel,
 		deliveryID: deliveryID,
+		messageID:  messageID,
 		done:       make(chan struct{}),
 		rpcDone:    make(chan struct{}),
 		observer:   observer,

@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   createInteraction: vi.fn(),
   drizzle: vi.fn(),
   settleInteraction: vi.fn(),
+  completeUrlInteraction: vi.fn(),
   verifyCallbackToken: vi.fn(),
 }));
 
@@ -17,6 +18,7 @@ vi.mock('../../../src/services/jwt', () => ({ verifyCallbackToken: mocks.verifyC
 vi.mock('../../../src/services/acp-interaction-store', () => ({
   createInteraction: mocks.createInteraction,
   settleInteraction: mocks.settleInteraction,
+  completeUrlInteraction: mocks.completeUrlInteraction,
 }));
 
 const interactionId = '11111111-1111-4111-8111-111111111111';
@@ -83,6 +85,7 @@ describe('ACP interaction callback routes', () => {
       summary: { state: 'pending' },
     });
     mocks.settleInteraction.mockResolvedValue({ status: 'settled' });
+    mocks.completeUrlInteraction.mockResolvedValue({ status: 'completed' });
   });
 
   it('binds create to callback workspace and server-resolved project and chat session', async () => {
@@ -168,5 +171,60 @@ describe('ACP interaction callback routes', () => {
       expect.anything(),
       expect.objectContaining({ projectId: 'project-1', chatSessionId: 'chat-1', interactionId })
     );
+  });
+
+  it('binds URL completion to workspace callback identity and exact interaction id', async () => {
+    const completeBody = {
+      protocolVersion: 1,
+      interactionId,
+      generation,
+      runtimeIdentity: 'runtime-1',
+      agentSessionId: 'agent-session-1',
+      elicitationId: 'opaque-id',
+    };
+    const mismatched = await app().request(
+      '/api/projects/project-1/workspaces/workspace-1/acp-interactions/33333333-3333-4333-8333-333333333333/complete-url',
+      {
+        method: 'POST',
+        headers: { Authorization: 'Bearer callback-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify(completeBody),
+      },
+      env()
+    );
+    expect(mismatched.status).toBe(400);
+    expect(mocks.completeUrlInteraction).not.toHaveBeenCalled();
+
+    const response = await app().request(
+      `/api/projects/project-1/workspaces/workspace-1/acp-interactions/${interactionId}/complete-url`,
+      {
+        method: 'POST',
+        headers: { Authorization: 'Bearer callback-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify(completeBody),
+      },
+      env()
+    );
+    expect(response.status).toBe(200);
+    expect(mocks.completeUrlInteraction).toHaveBeenCalledWith(
+      expect.anything(),
+      'project-1',
+      'chat-1',
+      completeBody
+    );
+
+    mocks.completeUrlInteraction.mockResolvedValueOnce({ status: 'stale' });
+    const stale = await app().request(
+      `/api/projects/project-1/workspaces/workspace-1/acp-interactions/${interactionId}/complete-url`,
+      {
+        method: 'POST',
+        headers: { Authorization: 'Bearer callback-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify(completeBody),
+      },
+      env()
+    );
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toMatchObject({
+      error: expect.any(String),
+      message: expect.any(String),
+    });
   });
 });

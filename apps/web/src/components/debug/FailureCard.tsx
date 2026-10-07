@@ -34,6 +34,19 @@ interface FailureCardProps {
   workspaceId?: string | null;
   nodeId?: string | null;
   recoverable: boolean;
+  isSessionCreator?: boolean;
+}
+
+function authSettingsAction(code: FailureClassification['code']) {
+  switch (code) {
+    case 'model-credential-missing':
+    case 'model-credential-rejected':
+      return { href: '/settings/connections', label: 'Open agent connections' };
+    case 'mcp-auth-required':
+      return { href: '/settings/mcp-servers', label: 'Review personal MCP settings' };
+    default:
+      return null;
+  }
 }
 
 function ClassificationIcon({ code }: { code: string }) {
@@ -66,6 +79,7 @@ export function FailureCard({
   workspaceId,
   nodeId,
   recoverable,
+  isSessionCreator = false,
 }: FailureCardProps) {
   const { isSuperadmin } = useAuth();
   const queryScope = useQueryScope();
@@ -90,6 +104,7 @@ export function FailureCard({
   );
 
   const style = useMemo(() => getClassificationStyle(classification), [classification]);
+  const settingsAction = isSessionCreator ? authSettingsAction(classification.code) : null;
 
   const handleCopyReport = useCallback(async () => {
     const report = buildDebugReport({
@@ -198,6 +213,22 @@ export function FailureCard({
               {classification.guidance}
             </p>
           </div>
+          {settingsAction && (
+            <a
+              href={settingsAction.href}
+              className="inline-flex self-start items-center gap-2 rounded-md border border-border-default px-3 py-2 text-xs font-medium text-accent no-underline hover:bg-surface-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-primary"
+            >
+              {settingsAction.label}
+              <ExternalLink size={13} aria-hidden="true" />
+            </a>
+          )}
+          {settingsAction && classification.code === 'mcp-auth-required' && (
+            <a href={`/projects/${encodeURIComponent(projectId)}/settings/runtime`}
+              className="inline-flex self-start items-center gap-2 rounded-md border border-border-default px-3 py-2 text-xs font-medium text-accent no-underline hover:bg-surface-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-primary">
+              View project MCP settings
+              <ExternalLink size={13} aria-hidden="true" />
+            </a>
+          )}
 
           {/* Failure reason */}
           {taskEmbed.errorMessage && (

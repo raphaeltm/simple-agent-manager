@@ -138,6 +138,8 @@ func Load() (*Config, error) {
 		PTYCloseGracePeriod:  getEnvDuration("PTY_CLOSE_GRACE_PERIOD", 250*time.Millisecond),
 
 		// ACP settings - configurable per constitution principle XI
+		CodexRuntimeInstallTimeout:        getEnvDuration("CODEX_RUNTIME_INSTALL_TIMEOUT", DefaultCodexRuntimeInstallTimeout),
+		CodexRuntimeInstallKillGrace:      getEnvDuration("CODEX_RUNTIME_INSTALL_KILL_GRACE", DefaultCodexRuntimeInstallKillGrace),
 		ACPInitTimeoutMs:                  getEnvInt("ACP_INIT_TIMEOUT_MS", 30000),
 		ACPInitializeTimeoutMs:            getEnvInt("ACP_INITIALIZE_TIMEOUT_MS", 0),   // 0 = use ACPInitTimeoutMs
 		ACPNewSessionTimeoutMs:            getEnvInt("ACP_NEW_SESSION_TIMEOUT_MS", 0),  // 0 = use ACPInitTimeoutMs
@@ -171,6 +173,8 @@ func Load() (*Config, error) {
 		ACPCredentialSyncTimeout:          getEnvDuration("ACP_CREDENTIAL_SYNC_TIMEOUT", DefaultACPCredentialSyncTimeout),
 		ACPRestartAttemptTimeout:          getEnvDuration("ACP_RESTART_ATTEMPT_TIMEOUT", DefaultACPRestartAttemptTimeout),
 		ACPActivityReportTimeout:          getEnvDuration("ACP_ACTIVITY_REPORT_TIMEOUT", DefaultACPActivityReportTimeout),
+		ACPUsageProbeTimeout:              getEnvDuration("ACP_USAGE_PROBE_TIMEOUT", DefaultACPUsageProbeTimeout),
+		OpenCodeGoUsageURL:                getEnv("OPENCODE_GO_USAGE_URL", DefaultOpenCodeGoUsageURL),
 		ACPCheckpointPreemptGrace:         getEnvDuration("ACP_CHECKPOINT_PREEMPT_GRACE", DefaultACPCheckpointPreemptGrace),
 		ACPCheckpointPreemptMaxGrace:      getEnvDuration("ACP_CHECKPOINT_PREEMPT_MAX_GRACE", DefaultACPCheckpointPreemptMaxGrace),
 		ACPCheckpointRolloverTimeout:      getEnvDuration("ACP_CHECKPOINT_ROLLOVER_TIMEOUT", DefaultACPCheckpointRolloverTimeout),
@@ -276,6 +280,11 @@ func Load() (*Config, error) {
 
 		// Callback retry settings - configurable per constitution principle XI
 		WorkspaceReadyCallbackTimeout: getEnvDuration("WORKSPACE_READY_CALLBACK_TIMEOUT", DefaultWorkspaceReadyCallbackTimeout),
+
+		WorkspaceCallbackTokenRefreshRatio:        clampWorkspaceCallbackTokenRefreshRatio(getEnvFloat("WORKSPACE_CALLBACK_TOKEN_REFRESH_RATIO", DefaultWorkspaceCallbackTokenRefreshRatio)),
+		WorkspaceCallbackTokenRenewalTimeout:      positiveDurationOr(getEnvDuration("WORKSPACE_CALLBACK_TOKEN_RENEWAL_TIMEOUT", DefaultWorkspaceCallbackTokenRenewalTimeout), DefaultWorkspaceCallbackTokenRenewalTimeout),
+		WorkspaceCallbackTokenRenewalRetryInitial: positiveDurationOr(getEnvDuration("WORKSPACE_CALLBACK_TOKEN_RENEWAL_RETRY_INITIAL", DefaultWorkspaceCallbackTokenRenewalRetryInitial), DefaultWorkspaceCallbackTokenRenewalRetryInitial),
+		WorkspaceCallbackTokenRenewalRetryMax:     positiveDurationOr(getEnvDuration("WORKSPACE_CALLBACK_TOKEN_RENEWAL_RETRY_MAX", DefaultWorkspaceCallbackTokenRenewalRetryMax), DefaultWorkspaceCallbackTokenRenewalRetryMax),
 
 		// Error reporting settings - configurable per constitution principle XI
 		ErrorReportFlushInterval:  getEnvDuration("ERROR_REPORT_FLUSH_INTERVAL", 30*time.Second),

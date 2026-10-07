@@ -60,3 +60,27 @@ func TestRawFormGuardRejectsWrongSessionBeforeSDKDropsScope(t *testing.T) {
 		t.Fatal("wrong-session form survived SDK scope loss")
 	}
 }
+
+func TestRawURLGuardRejectsUnknownFieldsAndWrongSessionBeforeSDKDropsScope(t *testing.T) {
+	for _, params := range []string{
+		`{"mode":"url","sessionId":"other-session","message":"Approve","url":"https://auth.example.com/approve","elicitationId":"id-1"}`,
+		`{"mode":"url","sessionId":"current-session","message":"Approve","url":"https://auth.example.com/approve","elicitationId":"id-1","unsupportedCallback":"http://127.0.0.1"}`,
+	} {
+		line := []byte(`{"jsonrpc":"2.0","id":9,"method":"elicitation/create","params":` + params + `}`)
+		guarded := guardRawElicitationSchema(line, "current-session")
+		var frame struct {
+			Params json.RawMessage `json:"params"`
+		}
+		if err := json.Unmarshal(guarded, &frame); err != nil {
+			t.Fatal(err)
+		}
+		var request acpsdk.UnstableCreateElicitationRequest
+		if err := json.Unmarshal(frame.Params, &request); err != nil {
+			t.Fatal(err)
+		}
+		if request.Url == nil || eligibleAcpURL(request.Url.Url,
+			testURLConfig().URLMaxChars, testURLConfig().URLRedirectDepth) {
+			t.Fatalf("unsupported URL survived guard: %s", guarded)
+		}
+	}
+}

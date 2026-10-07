@@ -49,10 +49,13 @@ func (s *Server) downloadAndRestoreWIPWithGitState(ctx context.Context, download
 	if len(bundleRefs) == 0 {
 		return fmt.Errorf("snapshot bundle has no restorable ref")
 	}
+	if err := ensureSnapshotBundlePrerequisites(ctx, standaloneSnapshotGit(workDir), tmpPath, gitState); err != nil {
+		return err
+	}
 	worktreeRef, worktreeCommit := snapshotBundleRef(bundleRefs, "/worktree")
 	indexRef, indexCommit := snapshotBundleRef(bundleRefs, "/index")
 	if worktreeRef != "" && indexRef != "" {
-		if output, err := runStandaloneGitCommand(ctx, workDir, nil, "fetch", tmpPath, worktreeRef, indexRef); err != nil {
+		if output, err := runStandaloneGitCommand(ctx, workDir, nil, "fetch", "--", tmpPath, worktreeRef, indexRef); err != nil {
 			return fmt.Errorf("fetch snapshot bundle: %w: %s", err, output)
 		}
 		if err := restoreStandaloneSnapshotGitState(ctx, workDir, gitState); err != nil {
@@ -80,7 +83,7 @@ func (s *Server) downloadAndRestoreWIPWithGitState(ctx context.Context, download
 		legacyRef = ref
 		break
 	}
-	if output, err := runStandaloneGitCommand(ctx, workDir, nil, "fetch", tmpPath, legacyRef); err != nil {
+	if output, err := runStandaloneGitCommand(ctx, workDir, nil, "fetch", "--", tmpPath, legacyRef); err != nil {
 		return fmt.Errorf("fetch snapshot bundle: %w: %s", err, output)
 	}
 	if err := restoreStandaloneSnapshotGitState(ctx, workDir, gitState); err != nil {

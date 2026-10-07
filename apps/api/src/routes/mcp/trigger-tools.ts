@@ -8,20 +8,30 @@ import {
   DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT,
   DEFAULT_TRIGGER_NAME_MAX_LENGTH,
 } from '@simple-agent-manager/shared';
+import { drizzle } from 'drizzle-orm/d1';
 
+import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
+import { AppError } from '../../middleware/error';
 import {
   cronToHumanReadable,
   cronToNextFire,
   validateCronExpression,
 } from '../../services/cron-utils';
 import {
+  assertGitHubTriggerConfigExists,
+  parseGitHubTriggerConfig,
+  readGitHubTriggerConfig,
+} from '../../services/github-trigger-config';
+import {
   ResourceRequirementsValidationError,
   serializeModernResourceRequirementsInput,
   serializeResourceRequirementsInput,
 } from '../../services/resource-requirements-input';
+import { clearTriggerPageCaches } from '../../services/trigger-cache';
+import { validateTriggerSourceFields } from '../../services/trigger-create';
 import {
   INVALID_PARAMS,
   jsonRpcError,
@@ -45,6 +55,18 @@ export async function handleUpdateTrigger(
   const ownedTrigger = await resolveOwnedTrigger(requestId, params, tokenData, env, 'update');
   if (!ownedTrigger.ok) return ownedTrigger.response;
   const { triggerId, trigger: existingTrigger } = ownedTrigger;
+  try {
+    validateTriggerSourceFields(existingTrigger.source_type, params);
+    if (params.sourceType !== undefined)
+      return jsonRpcError(requestId, INVALID_PARAMS, 'sourceType cannot be changed');
+    if (params.githubConfig !== undefined) {
+      parseGitHubTriggerConfig(params.githubConfig);
+      await assertGitHubTriggerConfigExists(drizzle(env.DATABASE, { schema }), triggerId);
+    }
+  } catch (error) {
+    if (error instanceof AppError) return jsonRpcError(requestId, INVALID_PARAMS, error.message);
+    throw error;
+  }
   const updates: string[] = ['updated_at = ?'];
   const values: unknown[] = [new Date().toISOString()];
   const bodyFields = Object.keys(params).filter((key) => key !== 'triggerId');
@@ -300,16 +322,35 @@ export async function handleUpdateTrigger(
   if (bodyFields.length === 0) {
     return jsonRpcSuccess(requestId, {
       content: [
-        { type: 'text', text: JSON.stringify(triggerResponse(existingTrigger, cronHumanReadable)) },
+        {
+          type: 'text',
+          text: JSON.stringify({
+            ...triggerResponse(existingTrigger, cronHumanReadable),
+            githubConfig:
+              existingTrigger.source_type === 'github'
+                ? await readGitHubTriggerConfig(drizzle(env.DATABASE, { schema }), triggerId)
+                : undefined,
+          }),
+        },
       ],
     });
   }
 
-  await env.DATABASE.prepare(
+  const triggerUpdate = env.DATABASE.prepare(
     `UPDATE triggers SET ${updates.join(', ')} WHERE id = ? AND project_id = ?`
-  )
-    .bind(...values, triggerId, tokenData.projectId)
-    .run();
+  ).bind(...values, triggerId, tokenData.projectId);
+  if (params.githubConfig !== undefined) {
+    // D1 batch is atomic: metadata and source configuration cannot diverge.
+    const config = parseGitHubTriggerConfig(params.githubConfig);
+    await env.DATABASE.batch([
+      triggerUpdate,
+      env.DATABASE.prepare(
+        'UPDATE github_trigger_configs SET event_type = ?, filters_json = ?, updated_at = ? WHERE trigger_id = ?'
+      ).bind(config.eventType, JSON.stringify(config.filters), values[0], triggerId),
+    ]);
+  } else {
+    await triggerUpdate.run();
+  }
 
   const updated = await env.DATABASE.prepare(
     `SELECT id, project_id, name, description, status, source_type, cron_expression,
@@ -332,6 +373,7 @@ export async function handleUpdateTrigger(
     return jsonRpcError(requestId, INVALID_PARAMS, 'Trigger not found in this project');
   }
 
+  clearTriggerPageCaches(tokenData.projectId);
   log.info('mcp.update_trigger', {
     triggerId,
     projectId: tokenData.projectId,
@@ -340,7 +382,18 @@ export async function handleUpdateTrigger(
   });
 
   return jsonRpcSuccess(requestId, {
-    content: [{ type: 'text', text: JSON.stringify(triggerResponse(updated, cronHumanReadable)) }],
+    content: [
+      {
+        type: 'text',
+        text: JSON.stringify({
+          ...triggerResponse(updated, cronHumanReadable),
+          githubConfig:
+            updated.source_type === 'github'
+              ? await readGitHubTriggerConfig(drizzle(env.DATABASE, { schema }), triggerId)
+              : undefined,
+        }),
+      },
+    ],
   });
 }
 

@@ -5,6 +5,30 @@ import { TRIGGER_SOURCE_TYPES, TRIGGER_STATUSES } from '@simple-agent-manager/sh
 
 import { resourceRequirementsMcpProperty } from './tool-definitions-shared-fields';
 
+const githubConfigProperty = {
+  type: 'object',
+  description:
+    'GitHub event configuration. Requires eventType; filters are replaced as a complete set on update. Use filters: {} to clear filters.',
+  properties: {
+    eventType: { type: 'string', enum: ['issues', 'issue_comment', 'pull_request', 'push'] },
+    filters: {
+      type: 'object',
+      properties: {
+        actions: { type: 'array', items: { type: 'string' } },
+        labels: { type: 'array', items: { type: 'string' } },
+        ignoreActors: { type: 'array', items: { type: 'string' } },
+        commandPrefix: { type: 'string' },
+        bodyContains: { type: 'string' },
+        branches: { type: 'array', items: { type: 'string' } },
+        ignoreDrafts: { type: 'boolean' },
+      },
+      additionalProperties: false,
+    },
+  },
+  required: ['eventType'],
+  additionalProperties: false,
+};
+
 export const TRIGGER_TOOLS = [
   {
     name: 'list_triggers',
@@ -36,10 +60,10 @@ export const TRIGGER_TOOLS = [
   {
     name: 'create_trigger',
     description:
-      'Create a new automation trigger that runs tasks on a cron schedule. ' +
+      'Create a cron, GitHub event, or webhook automation trigger in the current project. ' +
       'The trigger will automatically submit tasks based on the prompt template at the specified schedule. ' +
       'Use this when a user asks to schedule recurring tasks (e.g., "run this every day at 9am"). ' +
-      'This MCP tool creates cron triggers only; create webhook triggers and manage their one-time credentials through the UI or REST API.',
+      'Omitting sourceType preserves cron behavior; github requires githubConfig.eventType and no cron fields. Webhooks require agentProfileId and webhookConfig ({} is valid). They return an expiring authenticated POST claim URL, never a raw credential. Redeem inside the workspace with SAM_MCP_TOKEN and pipe directly into a secret store; do not print the response or use a model-visible fetch tool.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -47,10 +71,40 @@ export const TRIGGER_TOOLS = [
           type: 'string',
           description: 'Human-readable name for the trigger (max 100 characters)',
         },
+        sourceType: {
+          type: 'string',
+          enum: ['cron', 'github', 'webhook'],
+          description:
+            'Defaults to cron. GitHub requires githubConfig; webhook requires agentProfileId and webhookConfig.',
+        },
+        webhookConfig: {
+          type: 'object',
+          description: 'Webhook payload filters and safe headers; {} accepts all payloads.',
+          properties: {
+            sourceLabel: { type: 'string' },
+            filterMode: { type: 'string', enum: ['all', 'any'] },
+            filters: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  path: { type: 'string' },
+                  operator: { type: 'string', enum: ['exists', 'equals', 'contains'] },
+                  value: { type: ['string', 'number', 'boolean', 'null'] },
+                },
+                required: ['path', 'operator'],
+                additionalProperties: false,
+              },
+            },
+            includedHeaders: { type: 'array', items: { type: 'string' } },
+          },
+          additionalProperties: false,
+        },
+        githubConfig: githubConfigProperty,
         cronExpression: {
           type: 'string',
           description:
-            'Standard 5-field cron expression (minute hour day month weekday). ' +
+            'Required when sourceType is cron or omitted. Standard 5-field cron expression (minute hour day month weekday). ' +
             'Examples: "0 9 * * *" (daily at 9am), "0 9 * * 1-5" (weekdays at 9am), "*/30 * * * *" (every 30 min)',
         },
         cronTimezone: {
@@ -62,7 +116,7 @@ export const TRIGGER_TOOLS = [
           type: 'string',
           description:
             'The prompt sent to the agent each time the trigger fires. ' +
-            'Supports {{variable}} interpolation: {{schedule.time}}, {{schedule.date}}, {{schedule.dayOfWeek}}, {{trigger.name}}, {{project.name}}, {{execution.sequenceNumber}}.',
+            'Supports {{variable}} interpolation: {{schedule.time}}, {{schedule.date}}, {{schedule.dayOfWeek}}, {{trigger.name}}, {{project.name}}, {{execution.sequenceNumber}}. GitHub triggers support {{github.title}}, {{github.body}}, {{github.action}}, {{github.actor}}, and {{github.comment}}.',
         },
         agentProfileId: {
           type: 'string',
@@ -91,7 +145,7 @@ export const TRIGGER_TOOLS = [
             'Compatibility JSON string for trigger workload requirements. Prefer resourceRequirements.',
         },
       },
-      required: ['name', 'cronExpression', 'promptTemplate'],
+      required: ['name', 'promptTemplate'],
       additionalProperties: false,
     },
   },
@@ -100,7 +154,7 @@ export const TRIGGER_TOOLS = [
     description:
       'Update an existing automation trigger in the current project. ' +
       'Use this to rename a trigger, pause/resume it, change its prompt template, profile, skill, task mode, VM size, or concurrency limit. ' +
-      'Cron schedule fields apply to cron triggers. Webhook filters, included headers, and credential rotation are managed through the UI or REST API.',
+      'Cron schedule fields apply only to cron triggers. githubConfig applies only to GitHub triggers and replaces eventType/filters; sourceType cannot be changed. Webhook filters, included headers, and credential rotation are managed through the UI or REST API.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -121,10 +175,11 @@ export const TRIGGER_TOOLS = [
           description: 'Trigger status. Paused or disabled triggers do not schedule future runs.',
           enum: ['active', 'paused', 'disabled'],
         },
+        githubConfig: githubConfigProperty,
         cronExpression: {
           type: 'string',
           description:
-            'Standard 5-field cron expression (minute hour day month weekday). ' +
+            'Optional cron-only schedule update. Standard 5-field cron expression (minute hour day month weekday). ' +
             'Changing this recomputes the next fire time for active triggers.',
         },
         cronTimezone: {

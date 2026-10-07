@@ -940,6 +940,145 @@ describe('credential limit producer', () => {
   });
 });
 
+describe('credential limit producer allowlists for Codex, OpenCode and per-model Claude windows', () => {
+  function windowRow(sqlite: Database.Database, windowType: string) {
+    return sqlite
+      .prepare(
+        `SELECT provider, source, status, last_event_level, utilization_percent, window_minutes
+           FROM credential_limit_windows
+          WHERE project_id = 'project-1'
+            AND credential_reference = 'cc_credentials:cred-1'
+            AND window_type = ?`
+      )
+      .get(windowType) as
+      | {
+          provider: string;
+          source: string;
+          status: string;
+          last_event_level: string;
+          utilization_percent: number | null;
+          window_minutes: number | null;
+        }
+      | undefined;
+  }
+
+  it('admits Codex rollout windows reported by the VM agent', async () => {
+    const { sqlite, env } = createCredentialD1();
+    await expect(
+      recordCredentialLimitObservation(
+        env as never,
+        baseObservation({
+          provider: 'openai',
+          source: 'vm-agent.codex_rollout',
+          windowType: 'codex.primary',
+          agentType: 'openai-codex',
+          utilizationPercent: 41.5,
+          windowMinutes: 300,
+          status: 'allowed',
+        })
+      )
+    ).resolves.toEqual({ outcome: 'ignored', reason: 'ok' });
+    await expect(
+      recordCredentialLimitObservation(
+        env as never,
+        baseObservation({
+          provider: 'openai',
+          source: 'vm-agent.codex_rollout',
+          windowType: 'codex.secondary',
+          agentType: 'openai-codex',
+          utilizationPercent: 95,
+          windowMinutes: 10080,
+          status: 'allowed',
+        })
+      )
+    ).resolves.toMatchObject({ outcome: 'event_admitted', transition: 'critical' });
+    expect(windowRow(sqlite, 'codex.primary')).toMatchObject({
+      provider: 'openai',
+      source: 'vm-agent.codex_rollout',
+      last_event_level: 'ok',
+      utilization_percent: 41.5,
+      window_minutes: 300,
+    });
+    expect(windowRow(sqlite, 'codex.secondary')).toMatchObject({
+      last_event_level: 'critical',
+      window_minutes: 10080,
+    });
+  });
+
+  it('admits OpenCode Go windows with the opencode provider', async () => {
+    const { sqlite, env } = createCredentialD1();
+    for (const windowType of ['opencode.rolling', 'opencode.weekly', 'opencode.monthly']) {
+      await expect(
+        recordCredentialLimitObservation(
+          env as never,
+          baseObservation({
+            provider: 'opencode',
+            source: 'vm-agent.opencode_go_usage',
+            windowType,
+            agentType: 'opencode',
+            utilizationPercent: 7,
+            status: 'allowed',
+          })
+        )
+      ).resolves.toEqual({ outcome: 'ignored', reason: 'ok' });
+      expect(windowRow(sqlite, windowType)).toMatchObject({
+        provider: 'opencode',
+        last_event_level: 'ok',
+      });
+    }
+  });
+
+  it('admits the per-model Claude weekly windows', async () => {
+    const { sqlite, env } = createCredentialD1();
+    for (const windowType of ['claude.seven_day_opus', 'claude.seven_day_sonnet']) {
+      await expect(
+        recordCredentialLimitObservation(
+          env as never,
+          baseObservation({ windowType, utilizationPercent: 12, status: 'allowed' })
+        )
+      ).resolves.toEqual({ outcome: 'ignored', reason: 'ok' });
+      expect(windowRow(sqlite, windowType)).toBeDefined();
+    }
+  });
+
+  it('still rejects windows, sources and providers outside the allowlists', async () => {
+    const { sqlite, env } = createCredentialD1();
+    await expect(
+      recordCredentialLimitObservation(
+        env as never,
+        baseObservation({
+          provider: 'openai',
+          source: 'vm-agent.codex_rollout',
+          windowType: 'codex.credits',
+        })
+      )
+    ).resolves.toEqual({ outcome: 'ignored', reason: 'unsupported' });
+    await expect(
+      recordCredentialLimitObservation(
+        env as never,
+        baseObservation({
+          provider: 'opencode',
+          source: 'vm-agent.console_scrape',
+          windowType: 'opencode.weekly',
+        })
+      )
+    ).resolves.toEqual({ outcome: 'ignored', reason: 'unsupported' });
+    await expect(
+      recordCredentialLimitObservation(
+        env as never,
+        baseObservation({
+          provider: 'mistral',
+          source: 'vm-agent.codex_rollout',
+          windowType: 'codex.primary',
+        })
+      )
+    ).resolves.toEqual({ outcome: 'ignored', reason: 'unsupported' });
+    expect(windowRow(sqlite, 'codex.credits')).toBeUndefined();
+    expect(windowRow(sqlite, 'opencode.weekly')).toBeUndefined();
+    expect(windowRow(sqlite, 'codex.primary')).toBeUndefined();
+  });
+});
+
 describe('ACP usage callback credential verification', () => {
   function seedCallback() {
     vi.mocked(projectDataService.getAcpSession).mockResolvedValue({
@@ -997,6 +1136,76 @@ describe('ACP usage callback credential verification', () => {
         agentSessionId: 'session-1',
         serverReceivedAt: 100_000,
       },
+    });
+  });
+
+  it('admits every window of one multi-window callback against the same credential', async () => {
+    const { sqlite, env } = createCredentialD1();
+    seedCallback();
+
+    const response = await handleAcpUsageCallback(makeContext(env), {
+      projectId: 'project-1',
+      sessionId: 'session-1',
+      body: {
+        nodeId: 'node-1',
+        credentialReference: 'cc_credentials:cred-1',
+        credentialSource: 'user',
+        credentialGeneration: 1,
+        observedAt: 100_000,
+        source: 'vm-agent.codex_rollout',
+        rateLimits: [
+          {
+            windowType: 'codex.primary',
+            provider: 'openai',
+            source: 'vm-agent.codex_rollout',
+            status: 'allowed',
+            utilizationPercent: 41.5,
+            windowMinutes: 300,
+            resetsAt: 120_000,
+          },
+          {
+            windowType: 'codex.secondary',
+            provider: 'openai',
+            source: 'vm-agent.codex_rollout',
+            status: 'allowed',
+            utilizationPercent: 95,
+            windowMinutes: 10080,
+            resetsAt: 130_000,
+          },
+        ],
+      },
+    });
+
+    expect(response.status).toBe(204);
+    const rows = sqlite
+      .prepare(
+        `SELECT window_type, provider, utilization_percent, window_minutes, last_event_level
+           FROM credential_limit_windows
+          WHERE project_id = 'project-1' AND credential_reference = 'cc_credentials:cred-1'
+          ORDER BY window_type`
+      )
+      .all();
+    expect(rows).toEqual([
+      {
+        window_type: 'codex.primary',
+        provider: 'openai',
+        utilization_percent: 41.5,
+        window_minutes: 300,
+        last_event_level: 'ok',
+      },
+      {
+        window_type: 'codex.secondary',
+        provider: 'openai',
+        utilization_percent: 95,
+        window_minutes: 10080,
+        last_event_level: 'critical',
+      },
+    ]);
+    // Only the critical window crosses a threshold; the other admits silently.
+    expect(projectDataService.admitProjectEvent).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(projectDataService.admitProjectEvent).mock.calls[0]![2]).toMatchObject({
+      eventType: CREDENTIAL_LIMIT_EVENT_TYPES.critical,
+      subject: { type: 'credential', id: 'cc_credentials:cred-1' },
     });
   });
 

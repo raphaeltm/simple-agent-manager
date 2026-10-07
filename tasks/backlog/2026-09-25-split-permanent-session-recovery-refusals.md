@@ -1,5 +1,12 @@
 # Give permanent session-recovery refusals their own names
 
+> **Reconciliation 2026-10-05:** Pointer correction only. #2230 (`ee80b0ee0`) rewrote
+> `apps/api/src/services/session-recovery.ts` (`createRecoveryTask` became
+> `reactivateSleepingTask`; the file is now 370 lines), so the 2026-09-30 block's
+> `session-recovery.ts:~372-392` and `:456` now read `:188` (`placement_unsatisfiable`), `:207-208`
+> (`placement_credentials_missing`) and `:275` (`session_recovery_placement_lookup_failed`). The
+> reason codes and logic are unchanged; still open as described.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:**

@@ -7,7 +7,13 @@ import type { Env } from '../../src/env';
 const schema = {
   type: 'object',
   properties: {
-    question: { type: 'string', oneOf: [{ const: 'Fast', title: 'Fast' }, { const: 'Slow', title: 'Slow' }] },
+    question: {
+      type: 'string',
+      oneOf: [
+        { const: 'Fast', title: 'Fast' },
+        { const: 'Slow', title: 'Slow' },
+      ],
+    },
     note: { type: 'string', maxLength: 100 },
   },
   required: ['question'],
@@ -24,7 +30,9 @@ async function formEnabled<T>(fn: () => Promise<T>): Promise<T> {
   const previousForms = mutable.ACP_INTERACTION_FORMS_ENABLED;
   mutable.ACP_INTERACTIONS_ENABLED = 'true';
   mutable.ACP_INTERACTION_FORMS_ENABLED = 'true';
-  try { return await fn(); } finally {
+  try {
+    return await fn();
+  } finally {
     mutable.ACP_INTERACTIONS_ENABLED = previousGlobal;
     mutable.ACP_INTERACTION_FORMS_ENABLED = previousForms;
   }
@@ -38,9 +46,14 @@ async function hash(value: string): Promise<string> {
 function createInput(id: string) {
   return {
     protocolVersion: 1 as const,
-    projectId: 'form-project', chatSessionId: 'form-chat', agentSessionId: 'form-agent',
-    interactionId: id, generation: crypto.randomUUID(), runtimeIdentity: 'runtime-1',
-    kind: 'form' as const, payloadHash: 'a'.repeat(64),
+    projectId: 'form-project',
+    chatSessionId: 'form-chat',
+    agentSessionId: 'form-agent',
+    interactionId: id,
+    generation: crypto.randomUUID(),
+    runtimeIdentity: 'runtime-1',
+    kind: 'form' as const,
+    payloadHash: 'a'.repeat(64),
     detail: { message: 'SECRET_FORM_MESSAGE_CANARY', schema },
     safeSummary: { optionCount: 0 },
     deadlineAt: Date.now() + 30 * 60_000,
@@ -48,14 +61,44 @@ function createInput(id: string) {
 }
 
 describe('encrypted ACP form authority', () => {
+  it('keeps a pending form readable and answerable when both creation flags are disabled', async () => {
+    const instance = store();
+    const input = createInput(crypto.randomUUID());
+    await formEnabled(async () => {
+      expect((await instance.create(input)).status).toBe('created');
+    });
+
+    expect((await instance.create(createInput(crypto.randomUUID()))).status).toBe('disabled');
+    expect((await instance.snapshot(null)).pending).toHaveLength(1);
+    expect((await instance.detail(input.interactionId))?.detail?.message).toBe(
+      'SECRET_FORM_MESSAGE_CANARY'
+    );
+    const content = { question: 'Fast' };
+    const answered = await instance.answer({
+      projectId: input.projectId,
+      chatSessionId: input.chatSessionId,
+      interactionId: input.interactionId,
+      answerKey: 'rollback-form-answer',
+      answerBodyHash: 'f'.repeat(64),
+      decision: { kind: 'accepted', content, answerHash: await hash(JSON.stringify(content)) },
+    });
+    expect(answered.status).toBe('answered');
+  });
   it('rejects forms independently when disabled, and rejects unsupported schema constraints', async () => {
     const instance = store();
     const input = createInput(crypto.randomUUID());
     expect((await instance.create(input)).status).toBe('disabled');
     await formEnabled(async () => {
-      const unsupported = { ...input, detail: { ...input.detail, schema: {
-        ...schema, properties: { question: { type: 'string', pattern: '(a+)+$' } },
-      } } };
+      const unsupported = {
+        ...input,
+        detail: {
+          ...input.detail,
+          schema: {
+            ...schema,
+            properties: { question: { type: 'string', pattern: '(a+)+$' } },
+          },
+        },
+      };
       expect((await instance.create(unsupported)).status).toBe('invalid');
       expect((await instance.create(input)).status).toBe('created');
     });
@@ -67,23 +110,54 @@ describe('encrypted ACP form authority', () => {
       const input = createInput(crypto.randomUUID());
       expect((await instance.create(input)).status).toBe('created');
       const badContent = { question: 'Unknown', note: 'SECRET_FORM_ANSWER_CANARY' };
-      const bad = await instance.answer({ projectId: input.projectId, chatSessionId: input.chatSessionId,
-        interactionId: input.interactionId, answerKey: 'bad', answerBodyHash: 'b'.repeat(64),
-        decision: { kind: 'accepted', content: badContent, answerHash: await hash(JSON.stringify(badContent)) } });
+      const bad = await instance.answer({
+        projectId: input.projectId,
+        chatSessionId: input.chatSessionId,
+        interactionId: input.interactionId,
+        answerKey: 'bad',
+        answerBodyHash: 'b'.repeat(64),
+        decision: {
+          kind: 'accepted',
+          content: badContent,
+          answerHash: await hash(JSON.stringify(badContent)),
+        },
+      });
       expect(bad.status).toBe('conflict');
 
       const content = { question: 'Fast', note: 'SECRET_FORM_ANSWER_CANARY' };
-      const decision = { kind: 'accepted' as const, content, answerHash: await hash(JSON.stringify({ note: content.note, question: content.question })) };
-      const request = { projectId: input.projectId, chatSessionId: input.chatSessionId,
-        interactionId: input.interactionId, answerKey: 'answer-key', answerBodyHash: 'c'.repeat(64), decision };
+      const decision = {
+        kind: 'accepted' as const,
+        content,
+        answerHash: await hash(JSON.stringify({ note: content.note, question: content.question })),
+      };
+      const request = {
+        projectId: input.projectId,
+        chatSessionId: input.chatSessionId,
+        interactionId: input.interactionId,
+        answerKey: 'answer-key',
+        answerBodyHash: 'c'.repeat(64),
+        decision,
+      };
       const accepted = await instance.answer(request);
       expect(accepted.status).toBe('answered');
       expect((await instance.answer(request)).status).toBe('already_answered');
-      expect((await instance.answer({ ...request, answerBodyHash: 'd'.repeat(64) })).status).toBe('answer_key_conflict');
-      expect((await instance.answer({ ...request, answerKey: 'another-key', answerBodyHash: 'e'.repeat(64) })).status).toBe('conflict');
-      const raw = await runInDurableObject(instance, (_object, state) => state.storage.sql.exec(
-        `SELECT * FROM interactions WHERE interaction_id = ?`, input.interactionId
-      ).one<Record<string, unknown>>());
+      expect((await instance.answer({ ...request, answerBodyHash: 'd'.repeat(64) })).status).toBe(
+        'answer_key_conflict'
+      );
+      expect(
+        (
+          await instance.answer({
+            ...request,
+            answerKey: 'another-key',
+            answerBodyHash: 'e'.repeat(64),
+          })
+        ).status
+      ).toBe('conflict');
+      const raw = await runInDurableObject(instance, (_object, state) =>
+        state.storage.sql
+          .exec(`SELECT * FROM interactions WHERE interaction_id = ?`, input.interactionId)
+          .one<Record<string, unknown>>()
+      );
       const plaintextRow = JSON.stringify(raw);
       expect(plaintextRow).not.toContain('SECRET_FORM_MESSAGE_CANARY');
       expect(plaintextRow).not.toContain('SECRET_FORM_ANSWER_CANARY');
@@ -101,18 +175,42 @@ describe('encrypted ACP form authority', () => {
       const instance = store();
       const input = createInput(crypto.randomUUID());
       expect((await instance.create(input)).status).toBe('created');
-      const smuggled = await instance.answer({ projectId: input.projectId, chatSessionId: input.chatSessionId,
-        interactionId: input.interactionId, answerKey: 'smuggled', answerBodyHash: 'd'.repeat(64),
-        decision: { kind: 'declined', answerHash: await hash('declined'), encryptedAnswer: { ciphertext: 'must-not-store', iv: 'iv' } } });
+      const smuggled = await instance.answer({
+        projectId: input.projectId,
+        chatSessionId: input.chatSessionId,
+        interactionId: input.interactionId,
+        answerKey: 'smuggled',
+        answerBodyHash: 'd'.repeat(64),
+        decision: {
+          kind: 'declined',
+          answerHash: await hash('declined'),
+          encryptedAnswer: { ciphertext: 'must-not-store', iv: 'iv' },
+        },
+      });
       expect(smuggled.status).toBe('conflict');
-      await runInDurableObject(instance, (_object, state) => state.storage.sql.exec(
-        `UPDATE interactions SET deadline_at = ? WHERE interaction_id = ?`, Date.now() - 1, input.interactionId
-      ));
-      const late = await instance.answer({ projectId: input.projectId, chatSessionId: input.chatSessionId,
-        interactionId: input.interactionId, answerKey: 'late', answerBodyHash: 'e'.repeat(64),
-        decision: { kind: 'accepted', content: { question: 'Fast' }, answerHash: await hash('{"question":"Fast"}') } });
+      await runInDurableObject(instance, (_object, state) =>
+        state.storage.sql.exec(
+          `UPDATE interactions SET deadline_at = ? WHERE interaction_id = ?`,
+          Date.now() - 1,
+          input.interactionId
+        )
+      );
+      const late = await instance.answer({
+        projectId: input.projectId,
+        chatSessionId: input.chatSessionId,
+        interactionId: input.interactionId,
+        answerKey: 'late',
+        answerBodyHash: 'e'.repeat(64),
+        decision: {
+          kind: 'accepted',
+          content: { question: 'Fast' },
+          answerHash: await hash('{"question":"Fast"}'),
+        },
+      });
       expect(late.status).toBe('stale');
-      expect((await instance.snapshot(null)).settled).toEqual([expect.objectContaining({ state: 'expired' })]);
+      expect((await instance.snapshot(null)).settled).toEqual([
+        expect.objectContaining({ state: 'expired' }),
+      ]);
     });
   });
 });

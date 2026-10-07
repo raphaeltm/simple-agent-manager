@@ -865,21 +865,120 @@ describe('MessageActions', () => {
     });
   });
 
-  describe('popover alignment by variant', () => {
-    it('popover uses left-0 for default (agent) variant', () => {
+  describe('align prop', () => {
+    it('defaults to the start edge: buttons left, popover anchored left', () => {
       render(<MessageActions {...defaultProps} />);
+      const row = screen.getByLabelText('Message info').parentElement!;
+      expect(row.className).not.toContain('justify-end');
+
       fireEvent.click(screen.getByLabelText('Message info'));
       const dialog = screen.getByRole('dialog');
       expect(dialog.className).toContain('left-0');
       expect(dialog.className).not.toContain('right-0');
     });
 
-    it('popover uses right-0 for on-dark (user) variant', () => {
-      render(<MessageActions {...defaultProps} variant="on-dark" hideTts />);
+    it('align="end" right-aligns the buttons and anchors the popover right', () => {
+      render(<MessageActions {...defaultProps} align="end" hideTts />);
+      const row = screen.getByLabelText('Message info').parentElement!;
+      expect(row.className).toContain('justify-end');
+
       fireEvent.click(screen.getByLabelText('Message info'));
       const dialog = screen.getByRole('dialog');
       expect(dialog.className).toContain('right-0');
       expect(dialog.className).not.toContain('left-0');
+    });
+
+    it('the color variant does not move the popover', () => {
+      render(<MessageActions {...defaultProps} variant="on-dark" hideTts />);
+      fireEvent.click(screen.getByLabelText('Message info'));
+      expect(screen.getByRole('dialog').className).toContain('left-0');
+    });
+  });
+
+  describe('popover placement', () => {
+    const POPOVER_HEIGHT = 74;
+
+    function rect(top: number, bottom: number): DOMRect {
+      return {
+        top,
+        bottom,
+        height: bottom - top,
+        left: 0,
+        right: 200,
+        width: 200,
+        x: 0,
+        y: top,
+        toJSON: () => ({}),
+      } as DOMRect;
+    }
+
+    /**
+     * Renders the actions inside a scroll container (like the chat's message
+     * list) and fakes layout: jsdom has none. `rowTop` is where the action row
+     * sits inside a 600px-tall scroller.
+     */
+    function renderInScroller(position: { rowTop: number; scrollerBottom?: number }) {
+      render(
+        <div data-testid="scroller" style={{ overflowY: 'auto' }}>
+          <MessageActions {...defaultProps} hideTts />
+        </div>
+      );
+      const scroller = screen.getByTestId('scroller');
+      const actionsRoot = screen.getByLabelText('Message info').parentElement!.parentElement!;
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+        this: HTMLElement
+      ) {
+        if (this === scroller) return rect(0, position.scrollerBottom ?? 600);
+        if (this === actionsRoot) return rect(position.rowTop, position.rowTop + 44);
+        if (this.getAttribute('role') === 'dialog') return rect(0, POPOVER_HEIGHT);
+        return rect(0, 0);
+      });
+      return { actionsRoot };
+    }
+
+    it('opens below the buttons when there is room', () => {
+      renderInScroller({ rowTop: 100 });
+      fireEvent.click(screen.getByLabelText('Message info'));
+      const dialog = screen.getByRole('dialog');
+      expect(dialog.style.top).toBe('100%');
+      expect(dialog.style.bottom).toBe('');
+    });
+
+    it('opens upward when it would be cut off at the bottom of the scroller', () => {
+      // 540 + 44 + 4 + 74 = 662 > 600: no room below; 540 - 4 - 74 >= 0: room above.
+      renderInScroller({ rowTop: 540 });
+      fireEvent.click(screen.getByLabelText('Message info'));
+      const dialog = screen.getByRole('dialog');
+      expect(dialog.style.bottom).toBe('100%');
+      expect(dialog.style.top).toBe('');
+    });
+
+    it('stays below when it fits neither way', () => {
+      renderInScroller({ rowTop: 20, scrollerBottom: 100 });
+      fireEvent.click(screen.getByLabelText('Message info'));
+      expect(screen.getByRole('dialog').style.top).toBe('100%');
+    });
+
+    it('re-measures every time it opens', () => {
+      const position = { rowTop: 540 };
+      renderInScroller(position);
+      const info = screen.getByLabelText('Message info');
+      fireEvent.click(info);
+      expect(screen.getByRole('dialog').style.bottom).toBe('100%');
+      fireEvent.click(info);
+      expect(screen.queryByRole('dialog')).toBeNull();
+
+      position.rowTop = 100;
+      fireEvent.click(info);
+      expect(screen.getByRole('dialog').style.top).toBe('100%');
+    });
+
+    it('sizes the popover to its content, not the bubble width', () => {
+      renderInScroller({ rowTop: 100 });
+      fireEvent.click(screen.getByLabelText('Message info'));
+      const dialog = screen.getByRole('dialog');
+      expect(dialog.style.width).toBe('max-content');
+      expect(dialog.style.maxWidth).toBe('calc(100vw - 2rem)');
     });
   });
 

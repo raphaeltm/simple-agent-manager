@@ -1,0 +1,49 @@
+name: ACP Codex Review Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [sam/acp-slice-d-loopback-integration]
+    paths:
+      - '.github/workflows/acp-codex-review-build.yml'
+      - 'scripts/diagnostics/build-pinned-codex-review.sh'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: acp-codex-review-build
+  cancel-in-progress: false
+
+jobs:
+  review-artifact:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+      - name: Record disk and remove unused hosted-runner toolchains
+        run: |
+          df -h "$RUNNER_TEMP"
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          df -h "$RUNNER_TEMP"
+      - name: Install pinned Rust and build dependencies
+        run: |
+          rustup toolchain install 1.95.0 --profile minimal
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev clang cmake protobuf-compiler python3-tomli
+      - name: Build exact source patches for review
+        run: bash scripts/diagnostics/build-pinned-codex-review.sh "$RUNNER_TEMP/acp-build" "$RUNNER_TEMP/acp-review"
+      - name: Package review files with executable modes
+        run: tar -czf "$RUNNER_TEMP/acp-review.tar.gz" -C "$RUNNER_TEMP/acp-review" .
+      - name: Retain review artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: acp-codex-review-${{ github.sha }}
+          path: ${{ runner.temp }}/acp-review.tar.gz
+          if-no-files-found: error
+          retention-days: 7

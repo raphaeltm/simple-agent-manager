@@ -63,6 +63,9 @@ jobs:
               - 'scripts/quality/runtime-boundary*.ts'
             vm-agent:
               - 'packages/vm-agent/**'
+              - 'apps/api/Dockerfile.vm-agent-container'
+              - 'scripts/ci/verify-codex-runtime-image.sh'
+              - 'scripts/deploy/prepare-codex-runtime-artifact.sh'
             cli:
               - 'packages/cli/**'
               - 'sonar-project.properties'
@@ -261,6 +264,9 @@ jobs:
 
       - name: Enforce type-boundary ratchet
         run: pnpm quality:type-boundaries
+
+      - name: Keep runtime workflow state out of commits
+        run: pnpm quality:runtime-state-files
 
       - name: Run SAM RuleTester fixtures
         run: pnpm --filter @simple-agent-manager/eslint-plugin-sam test
@@ -819,6 +825,9 @@ jobs:
 
       - name: Prepare devcontainer fixture images
         run: bash scripts/ci/prepare-devcontainer-fixture-images.sh
+
+      - name: Verify pinned runtime image
+        run: bash scripts/ci/verify-codex-runtime-image.sh
 
       - name: Run VM Agent integration tests
         working-directory: packages/vm-agent

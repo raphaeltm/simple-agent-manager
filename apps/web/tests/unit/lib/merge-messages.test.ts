@@ -1,5 +1,6 @@
 import { describe, expect,it } from 'vitest';
 
+import { hasActiveLoopbackGuidance } from '../../../src/components/project-message-view/SessionStatusBanners';
 import type { ChatMessageResponse } from '../../../src/lib/api';
 import { getLastMessageId,mergeMessages } from '../../../src/lib/merge-messages';
 
@@ -16,6 +17,27 @@ function msg(overrides: Partial<ChatMessageResponse> & { id: string }): ChatMess
 }
 
 describe('mergeMessages', () => {
+  it('keeps delayed loopback guidance cleared after a retry despite timestamp ties and skew', () => {
+    const prompt = msg({ id: 'prompt-a', role: 'user', content: 'sign in', createdAt: 10, sequence: 1 });
+    const retry = msg({ id: 'prompt-b', role: 'user', content: 'retry', createdAt: 10, sequence: 2 });
+    const diagnostic = msg({ id: 'diagnostic-a', role: 'system',
+      content: 'This sign-in flow requires a local callback that this session cannot complete.',
+      toolMetadata: { promptMessageId: prompt.id }, createdAt: 10, sequence: 3 });
+    expect(hasActiveLoopbackGuidance(mergeMessages([prompt], [diagnostic], 'append'))).toBe(true);
+    const sameMillisecond = mergeMessages([prompt, retry], [diagnostic], 'append');
+    expect(sameMillisecond.map((row) => row.id)).toEqual(['prompt-a', 'prompt-b', 'diagnostic-a']);
+    expect(hasActiveLoopbackGuidance(sameMillisecond)).toBe(false);
+    const skewed = mergeMessages([prompt, retry], [{ ...diagnostic, createdAt: 20 }], 'append');
+    expect(hasActiveLoopbackGuidance(skewed)).toBe(false);
+    expect(hasActiveLoopbackGuidance(mergeMessages([], [diagnostic], 'append'))).toBe(false);
+    expect(hasActiveLoopbackGuidance(mergeMessages([prompt], [
+      { ...diagnostic, toolMetadata: { promptMessageId: 'foreign-prompt' } },
+    ], 'append'))).toBe(false);
+    expect(hasActiveLoopbackGuidance(mergeMessages([
+      msg({ id: 'spoof-prompt', role: 'assistant', createdAt: 10, sequence: 1 }),
+    ], [{ ...diagnostic, toolMetadata: { promptMessageId: 'spoof-prompt' } }], 'append'))).toBe(false);
+  });
+
   describe('append strategy', () => {
     it('appends new messages', () => {
       const prev = [msg({ id: 'a', createdAt: 1 })];

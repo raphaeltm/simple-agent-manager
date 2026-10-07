@@ -50,6 +50,8 @@ CREATE TABLE tasks (
 CREATE TABLE webhook_trigger_configs (
   trigger_id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, token_last_four TEXT NOT NULL,
   token_created_at TEXT NOT NULL, token_rotated_at TEXT, source_label TEXT,
+  claim_id TEXT UNIQUE, claim_expires_at INTEGER, claim_user_id TEXT,
+  claim_workspace_id TEXT, claim_session_id TEXT,
   filter_mode TEXT NOT NULL DEFAULT 'all', filters_json TEXT NOT NULL DEFAULT '[]',
   included_headers_json TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL

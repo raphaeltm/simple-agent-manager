@@ -78,11 +78,23 @@ const FILLER = Array.from({ length: 32 }, (_, n) =>
     'stopped'
   )
 );
+const ARCHIVED = {
+  ...chatSession(
+    'sess-archived-lifecycle-bump',
+    'Archived conversation with recent retention metadata',
+    12,
+    'stopped'
+  ),
+  lastMessageAt: NOW - 14 * 86_400_000,
+  // Deliberately recent sync/lifecycle metadata must not make this conversation
+  // look current in the client session list.
+  updatedAt: NOW,
+};
 // An agent run: every page of 500 rows is one short reply followed by an unbroken
 // streak of tool calls, which the view folds into a single card — a whole page
 // renders as two rows.
 const TOOLS = chatSession('sess-tools', 'Agent run with long unbroken tool-call streaks', 1_500);
-const SESSIONS = [LONG, TOOLS, EMPTY, WORDY, ...FILLER];
+const SESSIONS = [LONG, TOOLS, EMPTY, WORDY, ...FILLER, ARCHIVED];
 
 function toolRun(sessionId: string, length: number): Row[] {
   return Array.from({ length }, (_, n) => ({
@@ -123,6 +135,9 @@ const TRANSCRIPTS: Record<string, Row[]> = {
       session.id,
       transcript(session.id, 12, (n) => `${session.topic} — message ${n}`),
     ])
+  ),
+  [ARCHIVED.id]: transcript(ARCHIVED.id, ARCHIVED.messageCount, (n) =>
+    `Archived conversation message ${n}`
   ),
 };
 
@@ -454,5 +469,39 @@ test.describe('project chat — instant switching audit', () => {
     await assertNoOverflow(page);
     // Taken while the refresh is still outstanding.
     await screenshot(page, `project-chat-switching-cached-return-${viewport}`);
+  });
+
+  test('a recent archive-maintenance timestamp does not put an old chat in Recent', async ({
+    page,
+  }, testInfo) => {
+    await setupApi(page, []);
+    await page.goto(`/projects/${PROJECT_ID}/chat/${LONG.id}`);
+    await expect(conversation(page).getByText('Long chat message 1199:')).toBeVisible({
+      timeout: 15_000,
+    });
+
+    let sessionList = page.getByRole('navigation', { name: 'Chat sessions' });
+    if (isMobile(page)) {
+      await page.getByRole('button', { name: 'Open chat list' }).click();
+      sessionList = page.getByRole('dialog', { name: 'Chat sessions' });
+    }
+
+    const olderToggle = sessionList.getByRole('button', { name: 'Older (1)' });
+    await expect(olderToggle).toBeVisible();
+    await olderToggle.click();
+    const listViewport = isMobile(page)
+      ? sessionList.getByRole('navigation', { name: 'Chat sessions' })
+      : sessionList;
+    await listViewport.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    const archivedRow = sessionList.getByText(ARCHIVED.topic, { exact: false });
+    await expect(archivedRow).toBeVisible();
+    await expect(archivedRow).toBeInViewport();
+    await assertNoOverflow(page);
+
+    await listViewport.screenshot({
+      path: testInfo.outputPath('session-list-archive-maintenance-activity.png'),
+    });
   });
 });

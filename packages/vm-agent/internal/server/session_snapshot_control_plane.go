@@ -27,6 +27,12 @@ func (s *Server) prepareSnapshot(ctx context.Context, workspaceID, sessionID, ch
 }
 
 func (s *Server) completeSnapshot(ctx context.Context, workspaceID, sessionID, chatSessionID, runtimeName, generation, token string, manifest snapshotManifest) error {
+	var out map[string]interface{}
+	return s.doSnapshotJSON(ctx, http.MethodPost, workspaceID, "/session-snapshot/complete", token, snapshotCompletionPayload(sessionID, chatSessionID, runtimeName, generation, manifest), &out)
+}
+
+// snapshotCompletionPayload is the /session-snapshot/complete request body.
+func snapshotCompletionPayload(sessionID, chatSessionID, runtimeName, generation string, manifest snapshotManifest) map[string]interface{} {
 	artifactSizes := map[string]int64{}
 	if artifact, ok := manifest.Artifacts["home"]; ok {
 		artifactSizes["homeBytes"] = artifact.SizeBytes
@@ -34,7 +40,7 @@ func (s *Server) completeSnapshot(ctx context.Context, workspaceID, sessionID, c
 	if artifact, ok := manifest.Artifacts["wip"]; ok {
 		artifactSizes["wipBytes"] = artifact.SizeBytes
 	}
-	payload := map[string]interface{}{
+	return map[string]interface{}{
 		"chatSessionId":  chatSessionID,
 		"agentSessionId": sessionID,
 		"runtime":        runtimeName,
@@ -45,8 +51,6 @@ func (s *Server) completeSnapshot(ctx context.Context, workspaceID, sessionID, c
 		"manifest":       manifest,
 		"artifactSizes":  artifactSizes,
 	}
-	var out map[string]interface{}
-	return s.doSnapshotJSON(ctx, http.MethodPost, workspaceID, "/session-snapshot/complete", token, payload, &out)
 }
 
 func (s *Server) reportSnapshotProgress(ctx context.Context, workspaceID, chatSessionID, generation, step, token string) error {

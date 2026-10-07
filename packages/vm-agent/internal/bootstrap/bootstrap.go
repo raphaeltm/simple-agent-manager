@@ -824,6 +824,10 @@ func ensureRepositoryReady(ctx context.Context, cfg *config.Config, state *boots
 		}
 
 		slog.Info("Cloning repository", "repository", cfg.Repository, "branch", cloneBranch, "checkoutBranch", branch, "workspaceDir", cfg.WorkspaceDir)
+		// Never add --single-branch: a single-branch clone has no
+		// refs/remotes/origin/HEAD, which session snapshots use to leave
+		// default-branch history out of the WIP bundle
+		// (internal/server/session_snapshot_bundle.go).
 		cmd := exec.CommandContext(ctx, gitBinaryPath, "clone", "--branch", cloneBranch, cloneURL, cfg.WorkspaceDir)
 		output, err := cmd.CombinedOutput()
 		if err != nil {

@@ -16,8 +16,13 @@ export type FailureCode =
   | 'capacity'
   | 'provisioning'
   | 'agent-install'
-  | 'credentials'
+  | 'model-credential-missing'
+  | 'model-credential-rejected'
+  | 'mcp-auth-required'
+  | 'unsupported-loopback-auth'
+  | 'model-unavailable'
   | 'provider-overload'
+  | 'agent-prompt-failed'
   | 'prompt-timeout'
   | 'agent-crash'
   | 'runtime-lost'
@@ -101,24 +106,58 @@ const FAILURE_RULES: FailureRule[] = [
     ],
   },
   {
-    code: 'credentials',
-    label: 'Credentials / billing',
-    explanation: 'An API key, OAuth token, or account balance problem stopped the agent.',
-    guidance:
-      'Check the agent credential in Settings (API key validity, OAuth login, or provider credit balance), then retry.',
+    code: 'model-unavailable',
+    label: 'Model unavailable for this account',
+    explanation: 'The provider rejected this model for the current account or credential.',
+    guidance: 'Check model access with the provider. Changing a working login alone may not grant access.',
+    retryable: false,
+    diagnosable: true,
+    patterns: [/^model_unavailable$/],
+  },
+  {
+    code: 'unsupported-loopback-auth',
+    label: 'Sign-in flow unavailable',
+    explanation: 'This service requires a local browser callback that this session cannot complete.',
+    guidance: 'Use a connection method supported by that service. This session cannot complete its local callback flow.',
+    retryable: false,
+    diagnosable: true,
+    patterns: [/^unsupported_loopback_auth$/],
+  },
+  {
+    code: 'mcp-auth-required',
+    label: 'Tool connection needs sign-in',
+    explanation: 'An MCP service rejected the tool connection because it needs authentication.',
+    guidance: 'Review the personal or project MCP connection. A project administrator may need to update a shared server. Its service may require sign-in rather than a bearer token.',
     retryable: true,
     diagnosable: true,
-    patterns: [
-      /credit balance/,
-      /insufficient (credit|funds|quota)/,
-      /invalid (api key|x-api-key|token|credential)/,
-      /(authentication|authorization) (failed|error)/,
-      /\bunauthorized\b/,
-      /\b401\b/,
-      /token (expired|revoked|invalid)/,
-      /refresh token/,
-      /billing/,
-    ],
+    patterns: [/^mcp_endpoint_needs_auth$/],
+  },
+  {
+    code: 'model-credential-missing',
+    label: 'Agent connection missing',
+    explanation: 'The selected agent has no usable provider connection for this session.',
+    guidance: 'The session creator can connect the agent in Settings using the guided sign-in or supported key method.',
+    retryable: true,
+    diagnosable: true,
+    patterns: [/^model_provider_credential_missing$/],
+  },
+  {
+    code: 'agent-prompt-failed',
+    label: 'Agent request failed',
+    explanation: 'The agent could not complete this request. The cause is not yet known.',
+    guidance: 'Retry the request. If it fails again, copy the debug report for investigation.',
+    retryable: true,
+    diagnosable: true,
+    patterns: [/^agent_prompt_failed$/],
+  },
+  {
+    code: 'model-credential-rejected',
+    label: 'Agent connection rejected',
+    explanation: 'The model provider rejected the credential used by this agent.',
+    guidance: 'The session creator can check or reconnect the agent in Settings, then retry.',
+    retryable: true,
+    diagnosable: true,
+    patterns: [/^model_provider_credential_rejected$/],
   },
   {
     code: 'provider-overload',
@@ -128,6 +167,7 @@ const FAILURE_RULES: FailureRule[] = [
     retryable: true,
     diagnosable: true,
     patterns: [
+      /provider_overloaded/,
       /\boverloaded\b/,
       /rate.?limit/,
       /\b429\b/,
@@ -214,6 +254,7 @@ const FAILURE_RULES: FailureRule[] = [
     retryable: true,
     diagnosable: true,
     patterns: [
+      /agent_crash/,
       /peer disconnected/,
       /process (exited|crashed|terminated)/,
       /agent (process )?(crashed|exited|died)/,
@@ -246,6 +287,7 @@ const FAILURE_RULES: FailureRule[] = [
     retryable: true,
     diagnosable: true,
     patterns: [
+      /network_error/,
       /\betimedout\b|\beconnrefused\b|\benotfound\b/,
       /network (error|failure|unreachable)/,
       /fetch failed/,
@@ -266,6 +308,13 @@ const UNKNOWN_CLASSIFICATION: FailureClassification = {
   diagnosable: true,
 };
 
+// These codes are emitted by the VM task callback. Never infer them from an
+// execution step, conversation text, URL, schema field, or wrapper metadata.
+const STRUCTURAL_FAILURE_CODES = new Set<FailureCode>([
+  'model-unavailable', 'unsupported-loopback-auth', 'mcp-auth-required',
+  'model-credential-missing', 'model-credential-rejected', 'agent-prompt-failed',
+]);
+
 /**
  * Classify a failure from its free-text message (and optional execution step).
  * Returns a stable classification; falls back to `unknown` when no rule matches.
@@ -275,11 +324,13 @@ export function classifyFailure(
   step?: string | null
 ): FailureClassification {
   const haystack = `${message ?? ''} ${step ?? ''}`.toLowerCase();
+  const structuralEvidence = (message ?? '').trim().toLowerCase();
   if (!haystack.trim()) {
     return UNKNOWN_CLASSIFICATION;
   }
   for (const rule of FAILURE_RULES) {
-    if (rule.patterns.some((p) => p.test(haystack))) {
+    const evidence = STRUCTURAL_FAILURE_CODES.has(rule.code) ? structuralEvidence : haystack;
+    if (rule.patterns.some((p) => p.test(evidence))) {
       return {
         code: rule.code,
         label: rule.label,
