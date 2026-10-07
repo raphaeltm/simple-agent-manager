@@ -61,6 +61,8 @@ describe('agent message channels: released sleeping targets', () => {
         source_kind: 'project_event_wake',
       });
       expect(wakes[0]!.content).toContain('SAM notice (system-generated, not a human message)');
+      expect(wakes[0]!.content).toContain('Only reply when the peer request needs a response');
+      expect(wakes[0]!.content).not.toContain('Reply with send_durable_message');
       expect(wakes[0]!.content).toContain(receipt.eventId);
       expect(wakes[0]!.content).not.toContain(peerText);
     }
