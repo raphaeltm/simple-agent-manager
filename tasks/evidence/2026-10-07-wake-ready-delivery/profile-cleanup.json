@@ -1,0 +1,20 @@
+{
+  "observedAt": 1791387900289,
+  "stagingOnly": true,
+  "projectId": "01KJNR9R3TEN3KX1ETE33852R8",
+  "profileId": "01M4B4YC23EYXEPR5DA299H9V4",
+  "taskId": "01M4B4YQ4F2HF0YX5Q62MGFVPN",
+  "profileDeleteStatus": 200,
+  "profileReadbackStatus": 404,
+  "taskReadbackStatus": 200,
+  "taskStatus": "completed",
+  "taskCompletedAt": "2026-10-07T15:35:24.117Z",
+  "taskOutputPrUrl": "https://github.com/serverspresentation2025/crewai/pull/4",
+  "taskError": null,
+  "independentD1Readback": {
+    "workspaceStatus": "deleted",
+    "nodeStatus": "deleted",
+    "snapshotCount": 0
+  },
+  "scope": "Deleted only owned temporary profile; preserved completed task and deleted workspace/node audit rows."
+}

@@ -1,0 +1,63 @@
+{
+  "stagingOnly": true,
+  "coordinatorTaskId": "01M4B28P7RY8Y9DPXEG8YJ81TB",
+  "parentTaskId": "01M4ABRWV97F54MQ1FFJFGHMBA",
+  "source": "Verified-actor SAM coordinator and parent cleanup receipts; flags and zero-node readback independently repeated by delivery agent.",
+  "originalArchive": {
+    "taskId": "01M4B1NAFZRYJ5JRD3AN463EXK",
+    "chatSessionId": "e46ff3f1-4fbe-48ab-9ab2-a57c347fa811",
+    "normalMobileDockPostStatus": 200,
+    "closedAt": "2026-10-07T16:06:11.797Z",
+    "repeatPostStatus": 200,
+    "repeatClosedAtUnchanged": true,
+    "completedStatusEventCountBefore": 0,
+    "completedStatusEventCountAfter": 1,
+    "workspaceAbsent": true,
+    "snapshotAbsent": true,
+    "originalR2ObjectReadbackStatuses": [
+      404,
+      404,
+      404
+    ],
+    "temporaryProfileDeleteStatus": 200,
+    "temporaryProfileReadbackStatus": 404,
+    "completedTaskChatProjectAuditsRetained": true
+  },
+  "finalRuntimeOwnerRelease": {
+    "sameInstantTaskStatus": "completed",
+    "completedTaskAuditsRetained": true,
+    "ownedFixtureProfilesSnapshotsComputeAndGitBranchesCleaned": true,
+    "manualInstantPermissionCard": "8708edb6",
+    "manualInstantResult": "Yes \u2192 delivery_confirmed \u2192 Write \u2192 idle; no browser errors",
+    "strictContainerTerminationConfirmed": true,
+    "snapshotCount": 0
+  },
+  "finalFlags": {
+    "restoreRun": 37648102691,
+    "restoreRunConclusion": "success",
+    "activeApiVersion": "8b19aee2-667a-4824-bb50-60ff7bd4c180",
+    "codeETag": "35c82b7fa0c8a03c160dd6d72cc7ae5c7408bb86029406e5e8385810ccad57a9",
+    "ACP_INTERACTIONS_ENABLED": "false",
+    "ACP_INTERACTION_FORMS_ENABLED": "false",
+    "ACP_INTERACTION_URLS_ENABLED": "false",
+    "bindingCount": 355,
+    "independentlyReadByDelivery": true
+  },
+  "liveNodes": [],
+  "liveNodesIndependentlyReadByDelivery": true,
+  "d1MigrationLedger0184And0185Unchanged": true,
+  "firstInstantStop500FollowupIdeaId": "01M4BH36AZV3Q2J8MH43JXY8M6",
+  "stagingDeploymentLimit": {
+    "actualDeployedCandidate": "bbaee36fd5a6126d1bb4e0305a2886b636ed4e5d",
+    "run": 37640782379,
+    "overallRunConclusion": "failure",
+    "deployChildJob": 112858915274,
+    "deployChildConclusion": "success",
+    "missingSmokeJobRecoveredUsingExactExistingLiveSmokeSuite": true,
+    "liveSmokePassed": 12,
+    "liveSmokeTotal": 12,
+    "importOnlySourceEvidence": "ad16e116f",
+    "importOnlySourceWasNotRelabelledAsDeployed": true
+  },
+  "finalOwnership": "No further staging mutations, owned compute, prompts, browsers or captures. Delivery owns only PR2262 merge after PR2261 and normal gates."
+}

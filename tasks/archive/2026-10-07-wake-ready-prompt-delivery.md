@@ -25,8 +25,10 @@ Queued prompts can wait saturated retry backoff after VM/Instant recovery comple
 - [x] Add phase timestamps and deterministic saturated-backoff/duplicate/stale/race tests.
 - [x] Update affected docs and source Idea.
 - [x] Run applicable lint/typecheck/tests/build and independent specialist reviews.
-- [ ] Coordinate pinned staging with siblings/occupants; measure user-message→ready→actual prompt start for both runtimes, verify no residual retry wait, clean owned resources.
-- [ ] Validate task completion, archive evidence, create PR, pass CI and best-effort CodeRabbit, merge and verify production deployment.
+- [x] Coordinate pinned staging with siblings/occupants; measure user-message→ready→actual prompt start for both runtimes, verify no residual retry wait, clean owned resources.
+- [x] Validate task completion and archive evidence after independent final review.
+- [x] Create PR2262 and pass applicable CI.
+- [ ] Complete best-effort CodeRabbit, reconcile merged runtime PR2261, merge PR2262 and verify production deployment (shipping gates after evidence archive).
 
 ## Acceptance
 
@@ -69,4 +71,20 @@ PR2262 opened after coordinator approval with feature staging evidence and retai
 
 ### Final prearchive assessment
 
-Independent completion reviewer found no remaining code, regression, live-latency or behavior-documentation gap. Archive verdict remains WARN solely until shared cleanup evidence arrives. Runtime sibling owns the retained Instant callback/Git/PR and MCP completion proof, public Stop/container-zero and owned PR/branch cleanup. Preserve its completed task audit. Delivery deletes only temporary profile01M4B4YC23EYXEPR5DA299H9V4 after explicit fixture release and verifies404. Coordinator owns original conversation ArchiveLAST, restored interaction flagsfalse and final owned compute/container-zero proof. No delivery staging mutations or additional resources while the shared lease is held. Future merge and production verification remain shipping gates after validated archive.
+Independent completion reviewer found no remaining code, regression, live-latency or behavior-documentation gap. The earlier prearchive verdict was WARN pending shared cleanup; the final fulfilled receipt and PASS below supersede that state. Runtime sibling owns the retained Instant callback/Git/PR and MCP completion proof, public Stop/container-zero and owned PR/branch cleanup. Preserve its completed task audit. Delivery deletes only temporary profile01M4B4YC23EYXEPR5DA299H9V4 after explicit fixture release and verifies404. Coordinator owns original conversation ArchiveLAST, restored interaction flagsfalse and final owned compute/container-zero proof. No delivery staging mutations or additional resources while the shared lease is held. Future merge and production verification remain shipping gates after validated archive.
+
+### Owned fixture cleanup
+
+Runtime sibling proved actual same-session automatic Git/PR and original MCP completion: task01M4B4YQ4F2HF0YX5Q62MGFVPN completed2026-10-07T15:35:24.117Z/errornull; exact local/remote/PR commit38530c93911c4bfd05b385e7bbce8b2e2c7f89bd, owned fixture PR4 closed and branch404. It stopped the runtime through the public API and explicitly released only profile cleanup. Delivery independently read owned workspace/node statusesdeleted and snapshotcount0, then deleted only profile01M4B4YC23EYXEPR5DA299H9V4 (200→GET404). Completed task GET200 retained identical completion timestamp/outputPR; no task audit deletion. [Redacted cleanup proof](../evidence/2026-10-07-wake-ready-delivery/profile-cleanup.json). All API/browser/capture contexts closed; delivery released for sibling sequential Manual Instant check/finalflagsfalse and coordinator ArchiveLAST/sharedzero proof.
+
+Evidence-only task-note head5cbc99ea5 passed all applicable CI in37640036496. Final shared metadata increment deployedbbaee36fd5a6126d1bb4e0305a2886b636ed4e5d: childdeploy112858915274 succeeded, overall37640782379 failed before creating smoke job. Coordinator recovered the gate with the exact existing live smoke suite12/12PASS, verified activeAPIaaa1ff32/codeETag35c82b7f/agent1120/web282c7897 and parent explicit release. Reviewed import-onlyad16 is source evidence, not relabeled as the deployed bba. No blindredeploy/newVM; flags and same fixture remained under sibling ownership.
+
+Runtime owner final staging release: actual Manual Instant Write card8708edb6 Yes→delivery_confirmed/Write/idle/zeroJS PASS; owned Stop200/profile200→404/snapshot0, completed audits retained. Finalflags restore37648102691SUCCESS/API8b19aee2-667a-4824-bb50-60ff7bd4c180/unchanged ETag35c82b7fa0c8a03c160dd6d72cc7ae5c7408bb86029406e5e8385810ccad57a9. Delivery independently read all three ACP interaction flagsfalse/355 bindings and D1liveNodes=[] after final release. Coordinator original ArchiveLAST receipt remains the sole prearchive operational gate; no further delivery staging mutations/resources.
+
+### Final shared cleanup gate fulfilled
+
+Coordinator and parent final receipts confirm original ArchiveLAST normal mobile dockPOST200/closedAt2026-10-07T16:06:11.797Z, repeat200/sameclosedAt, exactly1completed event (before0), originalworkspace/snapshotabsent, all3originalR2GET404/liveNodes[]. Original temporary profile200→404; completed task/chat/project audits retained. Manual Instant strict termination and snapshot0 reviewed; finalflagsfalse and migrationledger unchanged. [Bounded redacted shared cleanup receipt](../evidence/2026-10-07-wake-ready-delivery/shared-cleanup.json). First Instant public Stop500 recorded as nonblocking follow-up Idea01M4BH36AZV3Q2J8MH43JXY8M6; one bounded idempotent retry succeeded, no broad fix added here. No remaining staging mutation/resource or operational cleanup blocker. Final independent completion validation precedes task archive. Merge order2261→2262→archive; this task owns only2262 and will reconcile runtime/main overlap before merging. CodeRabbit and production proof remain honest future shipping gates.
+
+### Final task-completion validation: ARCHIVE PASS
+
+Independent wake_docs_completion_review revalidated the actual diff, test suite and all four phase/browser/cleanup evidence records. A research→checklist PASS; B checklist→diff PASS; C acceptance→tests/live PASS; D UI→backend N/A; E runtime selection PASS; F vertical slice PASS. No implementation, evidence, documentation or operational cleanup gap remains. Both new cleanup JSONs included with archive move. CodeRabbit, reconciliation after runtimePR2261, mergePR2262 and production deployment verification remain future shipping gates and are not asserted complete by archive validation.
