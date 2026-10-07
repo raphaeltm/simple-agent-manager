@@ -13,7 +13,7 @@ VM sleep now persists task status sleeping (#2230), but the conversation close r
 - [x] Verify immediate owned workspace/snapshot cleanup, retry/failure safety and idempotence without unrelated deletion.
 - [x] Add real SQLite route regression tests including failure, races and authorization.
 - [x] Update affected documentation and source Idea.
-- [ ] Run applicable lint/typecheck/test/build and independent specialist reviews.
+- [x] Run applicable lint/typecheck/test/build and independent specialist reviews.
 - [ ] Coordinate staging deployment and archive a sleeping VM chat from normal dock; clean owned resources.
 - [ ] Task-completion validation before archiving evidence.
 - [ ] PR/CI, best-effort CodeRabbit, merge, production deployment proof.
@@ -35,3 +35,5 @@ Rules 09, 13, 25, 79; sibling tasks 01M4AXFSY11GR95XTD2N68ZE6F and 01M4AXGMEWDEH
 - Direct task-only push to main rejected by required Durable Object Workers check; task evidence stays in feature PR rather than bypassing repository rules.
 
 - Latest focused suite: 306 tests across four files PASS. Neighbor snapshot test uses the same owner/project/workspace but different chat and verifies its recovery state/objects survive. Actual close + ensureSessionRecovery archive-first/claim-first tests refuse revival, preserve workspace linkage, and start no runner. SQLite trigger-abort test proves transaction rollback leaves task sleeping. Full lint 13 tasks, typecheck 19 tasks, build 9 tasks PASS.
+
+- Full API suite: 820 files / 11,499 tests PASS; full web suite: 336 files / 4,023 tests PASS, both with maxWorkers=2. Initial root turbo run completed 19/21 tasks before unrelated web timing failures interrupted API; bounded full reruns resolved all four timing failures. No unrelated code changes. Shared staging still reserved by webhook Deploy Staging run 37607076979; waiting explicit release before coordinated candidate deployment.
