@@ -120,6 +120,7 @@ async function seedTask(overrides: Partial<typeof schema.tasks.$inferInsert> = {
       title: 'Task created by another member',
       status: 'in_progress',
       taskMode: 'task',
+      updatedAt: '2026-10-07T10:00:00.000Z',
       ...overrides,
     } as typeof schema.tasks.$inferInsert);
 }
@@ -138,7 +139,7 @@ beforeEach(() => {
   mocks.startTaskRunnerDO.mockResolvedValue(undefined);
   mocks.requireRepositoryUserAccess.mockResolvedValue(undefined);
   mocks.createSession.mockResolvedValue('session-1');
-  mocks.cleanupWorkspaceForDeletion.mockResolvedValue(undefined);
+  mocks.cleanupWorkspaceForDeletion.mockResolvedValue({ status: 'confirmed' });
 
   sqlite = new Database(':memory:');
   createAllSchemaTables(sqlite, schema);
@@ -220,8 +221,8 @@ describe('shared-project task lifecycle — positive paths for a non-creator mem
     );
   });
 
-  it('POST /:taskId/status: a member can cancel another member task and the row is persisted', async () => {
-    await seedTask({ status: 'in_progress' });
+  it.each(['in_progress', 'sleeping'])('POST /:taskId/status: a member can cancel another member %s task', async (status) => {
+    await seedTask({ status });
 
     const response = await makeApp(crudRoutes).fetch(
       new Request(`https://api.test/api/projects/${PROJECT}/tasks/task-1/status`, {
@@ -244,8 +245,8 @@ describe('shared-project task lifecycle — positive paths for a non-creator mem
     );
   });
 
-  it('DELETE /:taskId: cancels admission before deleting the task row', async () => {
-    await seedTask({ status: 'queued', errorMessage: 'waiting for capacity' });
+  it.each(['queued', 'sleeping'])('DELETE /:taskId: cleanup precedes deleting a %s task row', async (status) => {
+    await seedTask({ status, errorMessage: 'waiting for capacity' });
     mocks.cleanupTerminalTaskResourcesOrThrow.mockImplementationOnce(async () => {
       expect((await readTask())?.id).toBe('task-1');
     });
@@ -403,6 +404,129 @@ describe('shared-project task lifecycle — positive paths for a non-creator mem
 });
 
 describe('POST /:taskId/close — workspace teardown stays caller-scoped (real SQLite)', () => {
+  async function seedSleepingConversation(owner = MEMBER) {
+    await seedConversationWithWorkspace(owner);
+    await db().update(schema.tasks).set({ status: 'sleeping' }).where(eq(schema.tasks.id, 'task-1'));
+    await db().update(schema.workspaces).set({ status: 'sleeping', chatSessionId: 'session-1' })
+      .where(eq(schema.workspaces.id, 'ws-conv'));
+  }
+
+  it('archives a sleeping VM conversation and awaits its owned cleanup', async () => {
+    await seedSleepingConversation();
+    mocks.cleanupWorkspaceForDeletion.mockImplementationOnce(async () => {
+      expect((await readTask())?.status).toBe('completed');
+      await db().delete(schema.workspaces).where(eq(schema.workspaces.id, 'ws-conv'));
+      return { status: 'confirmed' };
+    });
+    expect((await close()).status).toBe(200);
+    expect((await readTask())?.completedAt).toBeTruthy();
+    expect(sqlite.prepare('SELECT COUNT(*) FROM workspaces').pluck().get()).toBe(0);
+    expect(sqlite.prepare('SELECT from_status, to_status FROM task_status_events').get())
+      .toMatchObject({ from_status: 'sleeping', to_status: 'completed' });
+    expect(mocks.cleanupWorkspaceForDeletion).toHaveBeenCalledWith(expect.objectContaining({
+      userId: MEMBER, workspace: expect.objectContaining({ id: 'ws-conv', status: 'sleeping' }),
+    }));
+  });
+
+  it('executes real owned snapshot/workspace cleanup after proven VM teardown', async () => {
+    await seedSleepingConversation();
+    await db().insert(schema.nodes).values({
+      id: 'node-conv', userId: MEMBER, name: 'sleeping VM node', runtime: 'vm',
+      runtimeTerminationConfirmedAt: '2026-10-07T10:00:00.000Z',
+    } as typeof schema.nodes.$inferInsert);
+    for (const [id, session, owner] of [['owned-snapshot', 'session-1', MEMBER], ['other-snapshot', 'session-other', MEMBER]]) {
+      await db().insert(schema.sessionSnapshots).values({
+        id, chatSessionId: session, userId: owner, projectId: PROJECT,
+        workspaceId: 'ws-conv', runtime: 'vm',
+        sleepingAt: '2026-10-07T10:00:00.000Z', recoveryAttemptId: `${id}-attempt`,
+        status: 'available', homeR2Key: `${id}/home`, wipR2Key: `${id}/wip`,
+        manifestR2Key: `${id}/manifest`, expiresAt: '2026-10-14T10:00:00.000Z',
+      });
+    }
+    const deleteObjects = vi.fn(async () => undefined);
+    env.R2 = { delete: deleteObjects, list: vi.fn(async () => ({ objects: [], truncated: false })) } as unknown as R2Bucket;
+    env.NODE_LIFECYCLE = {
+      idFromName: vi.fn((id: string) => id), get: vi.fn(() => ({
+        claimWorkspaceDeletionAttempt: vi.fn(async () => 'claimed'),
+        confirmWorkspaceDeletion: vi.fn(async () => undefined),
+      })),
+    } as unknown as Env['NODE_LIFECYCLE'];
+    const actual = await vi.importActual<typeof import('../../../src/services/workspace-cleanup')>(
+      '../../../src/services/workspace-cleanup'
+    );
+    mocks.cleanupWorkspaceForDeletion.mockImplementation(actual.cleanupWorkspaceForDeletion);
+    expect((await close()).status).toBe(200);
+    expect(sqlite.prepare("SELECT COUNT(*) FROM workspaces WHERE id = 'ws-conv'").pluck().get()).toBe(0);
+    expect(sqlite.prepare('SELECT id, sleeping_at, recovery_attempt_id FROM session_snapshots').all())
+      .toEqual([{ id: 'other-snapshot', sleeping_at: '2026-10-07T10:00:00.000Z', recovery_attempt_id: 'other-snapshot-attempt' }]);
+    expect(deleteObjects).toHaveBeenCalledWith(['owned-snapshot/home', 'owned-snapshot/wip', 'owned-snapshot/manifest']);
+    expect((await close()).status).toBe(200);
+    expect(deleteObjects).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['retry', 'fenced', 'superseded'])('reports cleanup %s without repeating completion on retry', async (status) => {
+    await seedSleepingConversation();
+    mocks.cleanupWorkspaceForDeletion.mockResolvedValueOnce({ status, reason: 'workspace_assignment_changed' });
+    expect((await close()).status).toBe(409);
+    expect((await readTask())?.status).toBe('completed');
+    expect(sqlite.prepare('SELECT COUNT(*) FROM workspaces').pluck().get()).toBe(1);
+    expect((await close()).status).toBe(200);
+    expect(sqlite.prepare('SELECT COUNT(*) FROM task_status_events').pluck().get()).toBe(1);
+  });
+
+  it('retries failed archive cleanup without duplicate status or activity events', async () => {
+    await seedSleepingConversation();
+    mocks.cleanupWorkspaceForDeletion.mockRejectedValueOnce(new Error('cleanup unavailable'));
+    expect((await close()).status).toBe(500);
+    const completedAt = (await readTask())?.completedAt;
+    expect((await close()).status).toBe(200);
+    expect((await readTask())?.completedAt).toBe(completedAt);
+    expect(mocks.cleanupWorkspaceForDeletion).toHaveBeenCalledTimes(2);
+    expect(sqlite.prepare('SELECT COUNT(*) FROM task_status_events').pluck().get()).toBe(1);
+    expect(mocks.recordActivityEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('repeated archive after workspace removal is idempotent', async () => {
+    await seedSleepingConversation();
+    expect((await close()).status).toBe(200);
+    await db().delete(schema.workspaces).where(eq(schema.workspaces.id, 'ws-conv'));
+    expect((await close()).status).toBe(200);
+    expect(mocks.cleanupWorkspaceForDeletion).toHaveBeenCalledTimes(1);
+    expect(sqlite.prepare('SELECT COUNT(*) FROM task_status_events').pluck().get()).toBe(1);
+  });
+
+  it('does not destroy another member sleeping workspace', async () => {
+    await seedSleepingConversation(CREATOR);
+    expect((await close()).status).toBe(200);
+    expect(mocks.cleanupWorkspaceForDeletion).not.toHaveBeenCalled();
+    expect(sqlite.prepare('SELECT status FROM workspaces').pluck().get()).toBe('sleeping');
+  });
+
+  it.each(['status', 'workspace', 'revision'])('fences a concurrent wake %s change before archive', async (change) => {
+    await seedSleepingConversation();
+    const prepare = env.DATABASE.prepare.bind(env.DATABASE);
+    let raced = false;
+    vi.spyOn(env.DATABASE, 'prepare').mockImplementation((query: string) => {
+      if (!raced && query.startsWith('update "tasks"')) {
+        raced = true;
+        if (change === 'status') sqlite.prepare("UPDATE tasks SET status = 'queued'").run();
+        if (change === 'workspace') sqlite.prepare("UPDATE tasks SET workspace_id = 'ws-new'").run();
+        if (change === 'revision') sqlite.prepare("UPDATE tasks SET updated_at = '2026-10-07T10:01:00.000Z'").run();
+      }
+      return prepare(query);
+    });
+    expect((await close()).status).toBe(409);
+    expect((await readTask())?.status).not.toBe('completed');
+    expect(mocks.cleanupWorkspaceForDeletion).not.toHaveBeenCalled();
+    expect(sqlite.prepare('SELECT COUNT(*) FROM task_status_events').pluck().get()).toBe(0);
+  });
+
+  it('rejects sleeping task-mode completion via the conversation endpoint', async () => {
+    await seedTask({ status: 'sleeping', taskMode: 'task' });
+    expect((await close()).status).toBe(400);
+    expect((await readTask())?.status).toBe('sleeping');
+  });
+
   /** Seed a conversation task whose workspace belongs to `owner`. */
   async function seedConversationWithWorkspace(owner: string) {
     await db()

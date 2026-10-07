@@ -45,14 +45,14 @@ function buildDb(selectResults: unknown[][]) {
   });
   const update = vi.fn(() => ({
     set: vi.fn(() => ({
-      where: vi.fn(() => Promise.resolve()),
+      where: vi.fn(() => ({ returning: vi.fn(async () => [{ id: 'task-close-1' }]) })),
     })),
   }));
   const insert = vi.fn(() => ({
     values: vi.fn(() => Promise.resolve()),
   }));
 
-  return { select, update, insert };
+  return { select, update, insert, batch: vi.fn(async () => [[{ id: 'task-close-1' }], []]) };
 }
 
 function createApp() {
@@ -72,7 +72,7 @@ describe('POST /api/projects/:projectId/tasks/:taskId/close workspace cleanup', 
     vi.clearAllMocks();
     mocks.requireProjectCapability.mockResolvedValue({ id: 'project-close-1' });
     mocks.recordActivityEvent.mockResolvedValue(undefined);
-    mocks.cleanupWorkspaceForDeletion.mockResolvedValue(undefined);
+    mocks.cleanupWorkspaceForDeletion.mockResolvedValue({ status: 'confirmed' });
   });
 
   it('awaits immediate cleanup for the closing conversation task linked workspace', async () => {

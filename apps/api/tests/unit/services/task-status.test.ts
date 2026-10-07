@@ -25,7 +25,7 @@ const VALID_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
   queued: ['delegated', 'failed', 'cancelled'],
   delegated: ['in_progress', 'sleeping', 'failed', 'cancelled'],
   in_progress: ['sleeping', 'completed', 'failed', 'cancelled'],
-  sleeping: ['queued', 'delegated', 'in_progress', 'cancelled'],
+  sleeping: ['queued', 'delegated', 'in_progress', 'completed', 'cancelled'],
   completed: [],
   failed: ['ready', 'cancelled'],
   cancelled: ['ready'],
@@ -454,8 +454,10 @@ describe('property-based tests', () => {
     fc.assert(
       fc.property(statusArb, (status) => {
         const allowed = getAllowedTaskTransitions(status);
-        // No state has more than 4 outgoing transitions
-        expect(allowed.length).toBeLessThanOrEqual(4);
+        // Every outgoing edge names a distinct other status.
+        expect(new Set(allowed).size).toBe(allowed.length);
+        expect(allowed).not.toContain(status);
+        expect(allowed.length).toBeLessThan(TASK_STATUSES.length);
       }),
     );
   });
