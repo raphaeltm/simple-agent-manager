@@ -262,6 +262,11 @@ func TestWorkspaceTokenRenewal_NeverLogsATokenValue(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFor(t, func() bool { return heldOnToken(h.cp, renewed) }, "the reporter never hit a 401")
+	// The fake server records the rejection before the reporter processes its
+	// response. Wait for that processing before inspecting the captured logs.
+	waitFor(t, func() bool {
+		return strings.Contains(logs.String(), "holding messages until it is replaced")
+	}, "the reporter never logged its credential hold")
 
 	output := logs.String()
 	for _, want := range []string{
