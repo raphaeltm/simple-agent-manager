@@ -71,6 +71,7 @@ For each subtask that has no unmet dependencies:
    - Write a clear, self-contained description
    - Include `Execute this task using the /do skill.` in the description
    - Set appropriate priority (lower number = higher priority)
+   - For multi-agent features, pass `coordinationChannel` (for example `feature.<short-name>`). Publish a short kickoff to it with `publish_channel_event` first: a channel cannot be followed before its first message. Children and their descendants inherit it; their instructions explain how to publish findings, decisions and blockers and how to read or follow it. Follow it yourself with `follow_event_channel` (`record_only` keeps a history feed without waking you).
 
 2. **Record the task ID** in `.workflow-state.md` immediately after dispatch
 

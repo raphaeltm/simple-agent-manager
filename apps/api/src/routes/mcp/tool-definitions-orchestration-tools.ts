@@ -50,7 +50,10 @@ export const ORCHESTRATION_TOOLS = [
       '"preempt_and_replan" (same stop-and-deliver, requires ack + replanning), ' +
       '"shutdown_with_final_prompt" (same stop-and-deliver with highest urgency — session termination is a Phase 2 feature). ' +
       'Urgent classes ("interrupt" and above) cancel the target\'s current turn through the same transport as the user stop button, ' +
-      'so use them only when the peer must see the message immediately. Returns the message ID and delivery state.',
+      'so use them only when the peer must see the message immediately. Returns the message ID and delivery state. ' +
+      'When SAM agent message channels are enabled (preview), notify/deliver messages are recorded on a shared agent-dm channel and the ' +
+      'recipient gets a SAM notice and reads the text with get_event; the response then reports transport "agent_message_channel". ' +
+      'Accepted never means read or acted on.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -77,6 +80,12 @@ export const ORCHESTRATION_TOOLS = [
           type: 'object',
           description: 'Optional metadata to attach to the message (JSON object)',
         },
+        idempotencyKey: {
+          type: 'string',
+          description:
+            'Optional retry key. Reusing it after a lost response replays the same message instead of sending a second one ' +
+            '(honored by agent message channels; ignored by the legacy transport).',
+        },
       },
       required: ['targetTaskId', 'message'],
       additionalProperties: false,
@@ -88,7 +97,8 @@ export const ORCHESTRATION_TOOLS = [
       "Get all unacknowledged messages for the calling agent's session, ordered by urgency " +
       '(shutdown_with_final_prompt first, then preempt_and_replan, interrupt, deliver, notify). ' +
       'Messages are automatically marked as "delivered" when retrieved. ' +
-      'Call this at turn boundaries to check for orchestrator directives.',
+      'Call this at turn boundaries to check for orchestrator directives. ' +
+      'Messages sent over agent message channels are not listed here: they arrive as a SAM notice with event IDs for get_event.',
     inputSchema: {
       type: 'object' as const,
       properties: {},
@@ -119,7 +129,9 @@ export const ORCHESTRATION_TOOLS = [
     description:
       'Send a message to a running same-project task agent. The message is injected as a user-role prompt into the target ACP session. ' +
       'Any active task agent in the project can message any other active task agent in the same project; cross-project targets are rejected. ' +
-      'Returns { delivered: true } on success, or { delivered: false, reason: "agent_busy" } if the target agent is currently processing.',
+      'Returns { delivered: true } on success, or { delivered: false, reason: "agent_busy" } if the target agent is currently processing. ' +
+      'When SAM agent message channels are enabled (preview), the message is recorded on a shared agent-dm channel instead of being injected, ' +
+      'the target gets a SAM notice and reads it with get_event, and the response reports { accepted: true, delivered: false, transport: "agent_message_channel" }.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -130,6 +142,12 @@ export const ORCHESTRATION_TOOLS = [
         message: {
           type: 'string',
           description: "The message to inject into the target agent's session (max 32768 chars)",
+        },
+        idempotencyKey: {
+          type: 'string',
+          description:
+            'Optional retry key. Reusing it after a lost response replays the same message ' +
+            '(honored by agent message channels; ignored by the legacy transport).',
         },
       },
       required: ['taskId', 'message'],

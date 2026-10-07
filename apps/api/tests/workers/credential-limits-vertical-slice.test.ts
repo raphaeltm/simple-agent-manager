@@ -196,9 +196,8 @@ describe('credential usage limits vertical slice', () => {
     );
     expect(response.status).toBe(200);
     const body = (await response.json()) as LimitsBody;
-    expect(references(body)).toEqual([
-      `cc_credentials:owner-${suffix}`,
-      `cc_credentials:owner-elsewhere-${suffix}`,
-    ]);
+    expect(references(body)).toEqual(
+      [`cc_credentials:owner-${suffix}`, `cc_credentials:owner-elsewhere-${suffix}`].sort()
+    );
   });
 });

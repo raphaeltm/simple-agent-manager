@@ -190,6 +190,23 @@ describe('session recovery stable task identity', () => {
     }
   });
 
+  it('preserves the coordination channel on the stable task through wake', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      seedStableRecoveryFixture(sqlite);
+      sqlite
+        .prepare("UPDATE tasks SET coordination_channel = 'feature.wake' WHERE id = 'task-1'")
+        .run();
+      const result = await wake(createSqliteD1(sqlite));
+      expect(result.status).toBe('waking');
+      expect(
+        sqlite.prepare('SELECT coordination_channel FROM tasks WHERE id = ?').get('task-1')
+      ).toEqual({ coordination_channel: 'feature.wake' });
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it.each(['completed', 'failed', 'cancelled'])(
     'allows a human follow-up to a %s conversation',
     async (status) => {
