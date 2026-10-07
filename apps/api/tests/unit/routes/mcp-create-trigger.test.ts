@@ -41,6 +41,24 @@ describe('MCP create_trigger with canonical persistence', () => {
   const content = (result: Awaited<ReturnType<typeof handleCreateTrigger>>) =>
     JSON.parse((result.result as { content: { text: string }[] }).content[0].text);
 
+  it('rejects MCP webhook creation while public ingress is disabled', async () => {
+    env.WEBHOOK_TRIGGERS_ENABLED = 'false';
+    const result = await handleCreateTrigger(
+      '1',
+      {
+        name: 'Webhook',
+        sourceType: 'webhook',
+        agentProfileId: 'profile',
+        promptTemplate: 'Handle webhook',
+        webhookConfig: {},
+      },
+      token,
+      env
+    );
+    expect(result.error?.message).toContain('Webhook triggers are disabled');
+    expect(sqlite.prepare('SELECT count(*) AS count FROM triggers').get()).toEqual({ count: 0 });
+  });
+
   it('preserves cron callers that omit sourceType and UTC default', async () => {
     const result = await handleCreateTrigger('1', cron, token, env);
     expect(result.error).toBeUndefined();

@@ -41,3 +41,5 @@ Raphaël authorized implementing the agreed URL-first webhook flow, green PR and
 - Full local API coverage: 820 files / 11,482 tests pass with two workers; other package coverage passed on retry. Full build/typecheck/lint and format ratchet pass.
 - Live staging tools/list, safe creation, GET/unauthenticated rejection, authenticated no-store redemption, replay rejection, filtered ingress, and ordinary curl-to-stdin delivery pass. Both temporary triggers deleted. Browser dashboard/projects/settings navigation had no runtime errors.
 - Implementation validated and archived; remaining release execution (latest-commit CI, CodeRabbit, merge, production deployment and live verification) is tracked in PR #2260 and SAM task progress. No runtime work omitted.
+
+- CodeRabbit identified a minor compatibility regression: the new ingress guard also blocked REST preconfiguration. Moved the guard to MCP only; mounted REST-disabled creation and MCP-disabled rejection regressions pass (70 affected tests total). CI and staging rerun for this final fix before merge.

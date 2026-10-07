@@ -14,6 +14,7 @@ import {
   serializeResourceRequirementsInput,
 } from '../../services/resource-requirements-input';
 import { createTrigger } from '../../services/trigger-create';
+import { areWebhookTriggersEnabled } from '../../services/webhook-trigger-config';
 import { requireProjectTaskWrite } from '../task-project-auth';
 import {
   INVALID_PARAMS,
@@ -83,8 +84,11 @@ export async function handleCreateTrigger(
       .where(eq(schema.projects.id, tokenData.projectId))
       .get();
     if (!project) return jsonRpcError(requestId, INVALID_PARAMS, 'Project not found');
-    if (sourceType === 'webhook')
+    if (sourceType === 'webhook') {
       await requireProjectTaskWrite(db, tokenData.projectId, tokenData.userId);
+      if (!areWebhookTriggersEnabled(env))
+        return jsonRpcError(requestId, INVALID_PARAMS, 'Webhook triggers are disabled');
+    }
     const { created, webhookClaim } = await createTrigger(
       db,
       env,

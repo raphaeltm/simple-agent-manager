@@ -25,11 +25,7 @@ import {
 import { clearTriggerPageCaches } from './trigger-cache';
 import { resolveMaxTriggersPerProject } from './trigger-limits';
 import { prepareWebhookClaim } from './webhook-credential-claim';
-import {
-  areWebhookTriggersEnabled,
-  getWebhookTriggerLimits,
-  validateWebhookTriggerConfig,
-} from './webhook-trigger-config';
+import { getWebhookTriggerLimits, validateWebhookTriggerConfig } from './webhook-trigger-config';
 import { createWebhookTokenMaterial, webhookConfigValues } from './webhook-trigger-store';
 type Database = ReturnType<typeof drizzle<typeof schema>>;
 function triggerResourceRequirementsJson(body: {
@@ -143,8 +139,6 @@ function validateTriggerCreation(env: Env, body: v.InferOutput<typeof CreateTrig
   if (body.sourceType === 'webhook' && (!body.webhookConfig || !body.agentProfileId)) {
     throw errors.badRequest('webhookConfig and agentProfileId are required for webhook triggers');
   }
-  if (body.sourceType === 'webhook' && !areWebhookTriggersEnabled(env))
-    throw errors.forbidden('Webhook triggers are disabled');
   if (body.webhookConfig) {
     const configError = validateWebhookTriggerConfig(
       body.webhookConfig,
