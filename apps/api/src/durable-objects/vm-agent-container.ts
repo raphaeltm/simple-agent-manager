@@ -6,10 +6,10 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { maybeJsonRecord } from '../lib/runtime-validation';
+import { getCfContainerCreateWorkspaceTimeoutMs } from '../services/cf-container-timeouts';
 import { commitContainerWakeFromSleep } from '../services/container-wake-commit';
 import { loadInstantRestoreWorkspace } from '../services/instant-restore-workspace';
 import { signCallbackToken, signNodeCallbackToken, signNodeManagementToken } from '../services/jwt';
-import { getCfContainerCreateWorkspaceTimeoutMs } from '../services/node-agent';
 import {
   isSessionRecoverySourceTaskGuardFullyValidForEnv,
   SessionRecoveryAuthorityRevokedError,

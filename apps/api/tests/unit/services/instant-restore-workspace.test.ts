@@ -15,7 +15,12 @@ const input = {
 };
 beforeEach(() => {
   sqlite = new Database(':memory:');
-  createSchemaTables(sqlite, [schema.users, schema.projects, schema.workspaces]);
+  createSchemaTables(sqlite, [
+    schema.users,
+    schema.projects,
+    schema.workspaces,
+    schema.projectGitlabRepositories,
+  ]);
   sqlite
     .prepare(
       "INSERT INTO users (id,name,email,github_id) VALUES ('user-1','Developer','developer@example.com',123)"
@@ -50,6 +55,37 @@ describe('canonical cold Instant workspace Git metadata', () => {
       gitUserEmail: 'developer@example.com',
       githubId: '123',
     });
+  });
+  it('retains canonical GitLab repository source and project default branch', async () => {
+    sqlite
+      .prepare(
+        "UPDATE projects SET repo_provider = 'gitlab', repository = 'group/repo' WHERE id = 'project-1'"
+      )
+      .run();
+    sqlite
+      .prepare("UPDATE workspaces SET repository = 'group/repo' WHERE id = 'workspace-1'")
+      .run();
+    sqlite
+      .prepare(
+        "INSERT INTO project_gitlab_repositories (id,project_id,user_id,host,gitlab_project_id,path_with_namespace,http_url_to_repo,default_branch) VALUES ('gitlab-meta','project-1','user-1','gitlab.example.test',123,'group/repo','https://gitlab.example.test/group/repo.git','stale-metadata-branch')"
+      )
+      .run();
+    expect(await loadInstantRestoreWorkspace(env, input)).toMatchObject({
+      repoProvider: 'gitlab',
+      repository: 'group/repo',
+      cloneUrl: 'https://gitlab.example.test/group/repo.git',
+      repositoryHost: 'gitlab.example.test',
+      repositoryPath: 'group/repo',
+      defaultBranch: 'develop',
+      baseBranch: 'develop',
+      branch: 'sam/task-change',
+    });
+  });
+  it('fails closed when a GitLab project lacks repository metadata', async () => {
+    sqlite.prepare("UPDATE projects SET repo_provider = 'gitlab' WHERE id = 'project-1'").run();
+    await expect(loadInstantRestoreWorkspace(env, input)).rejects.toThrow(
+      'GitLab repository metadata is missing'
+    );
   });
   it.each(['userId', 'projectId', 'chatSessionId', 'workspaceId'] as const)(
     'rejects conflicting %s ownership rather than hydrating another session',
