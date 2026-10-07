@@ -782,7 +782,14 @@ crudRoutes.post('/:taskId/close', requireAuth(), requireApproved(), async (c) =>
       .set({ sleepingAt: null, recoveryAttemptId: null })
       .where(and(
         eq(schema.sessionSnapshots.projectId, projectId),
-        eq(schema.sessionSnapshots.userId, userId),
+        // Project members may archive the task, but may only revoke the
+        // recovery claim belonging to its exact workspace owner.
+        exists(db.select({ id: schema.workspaces.id }).from(schema.workspaces).where(and(
+          eq(schema.workspaces.id, schema.sessionSnapshots.workspaceId),
+          eq(schema.workspaces.projectId, projectId),
+          eq(schema.workspaces.chatSessionId, schema.sessionSnapshots.chatSessionId),
+          eq(schema.workspaces.userId, schema.sessionSnapshots.userId)
+        ))),
         archiveChatSessionId === null
           ? sql`0`
           : eq(schema.sessionSnapshots.chatSessionId, archiveChatSessionId),

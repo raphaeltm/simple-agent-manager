@@ -10,7 +10,8 @@ import { ensureSessionRecovery } from '../../src/services/session-recovery';
 import { cancelVmTaskAdmission } from '../../src/services/vm-admission-control';
 import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
-const { ensureTaskRunnerStartedMock, startTaskRunnerDOMock } = vi.hoisted(() => ({
+const { ensureTaskRunnerStartedMock, startTaskRunnerDOMock, getUserIdMock } = vi.hoisted(() => ({
+  getUserIdMock: vi.fn(() => 'user-1'),
   ensureTaskRunnerStartedMock: vi.fn(async () => false),
   startTaskRunnerDOMock: vi.fn(async () => undefined),
 }));
@@ -23,7 +24,7 @@ vi.mock('../../src/services/task-runner-do', () => ({
 vi.mock('../../src/middleware/auth', () => ({
   requireAuth: () => async (_c: unknown, next: () => Promise<void>) => next(),
   requireApproved: () => async (_c: unknown, next: () => Promise<void>) => next(),
-  getUserId: () => 'user-1',
+  getUserId: getUserIdMock,
 }));
 vi.mock('../../src/services/workspace-cleanup', () => ({
   cleanupWorkspaceForDeletion: vi.fn(async () => ({ status: 'retry', reason: 'runtime_deletion_unconfirmed' })),
@@ -177,6 +178,7 @@ async function wake(database: D1Database) {
 describe('session recovery stable task identity', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    getUserIdMock.mockReturnValue('user-1');
     ensureTaskRunnerStartedMock.mockResolvedValue(false);
     startTaskRunnerDOMock.mockResolvedValue(undefined);
   });
@@ -263,19 +265,27 @@ describe('session recovery stable task identity', () => {
     }
   });
 
-  it.each(['archive-first', 'claim-first'])('destructive archive fences human recovery (%s)', async (ordering) => {
+  it.each([
+    ['archive-first', 'user-1'], ['claim-first', 'user-1'],
+    ['archive-first', 'member-1'], ['claim-first', 'member-1'],
+  ])('destructive archive fences human recovery (%s, caller %s)', async (ordering, caller) => {
     const sqlite = new Database(':memory:');
     try {
       seedStableRecoveryFixture(sqlite);
+      sqlite.exec(`INSERT INTO users (id, name, email, github_id, status)
+        VALUES ('member-1', 'Member', 'member@example.com', 'gh-member', 'active');
+        INSERT INTO project_members (project_id, user_id, role, status)
+        VALUES ('project-1', 'member-1', 'maintainer', 'active');`);
+      getUserIdMock.mockReturnValue(caller);
       const database = createSqliteD1(sqlite);
       if (ordering === 'archive-first') {
-        expect((await archive(database)).status).toBe(409); // durable cleanup pending
+        expect((await archive(database)).status).toBe(caller === 'user-1' ? 409 : 200);
       } else {
         const batch = database.batch.bind(database);
         vi.spyOn(database, 'batch').mockImplementationOnce(async (statements) => {
           // Recovery claimed the snapshot, but has not yet queued the task.
           expect(sqlite.prepare('SELECT recovery_status FROM session_snapshots').pluck().get()).toBe('waking');
-          expect((await archive(database)).status).toBe(409);
+          expect((await archive(database)).status).toBe(caller === 'user-1' ? 409 : 200);
           return batch(statements);
         });
       }
