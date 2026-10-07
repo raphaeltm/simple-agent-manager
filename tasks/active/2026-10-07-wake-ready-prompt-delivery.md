@@ -24,7 +24,7 @@ Queued prompts can wait saturated retry backoff after VM/Instant recovery comple
 - [x] Fix proven capability timeout race using existing transport option.
 - [x] Add phase timestamps and deterministic saturated-backoff/duplicate/stale/race tests.
 - [x] Update affected docs and source Idea.
-- [ ] Run applicable lint/typecheck/tests/build and independent specialist reviews.
+- [x] Run applicable lint/typecheck/tests/build and independent specialist reviews.
 - [ ] Coordinate pinned staging with siblings/occupants; measure user-message→ready→actual prompt start for both runtimes, verify no residual retry wait, clean owned resources.
 - [ ] Validate task completion, archive evidence, create PR, pass CI and best-effort CodeRabbit, merge and verify production deployment.
 
@@ -45,3 +45,5 @@ Latest focused Workers run: 6/6 (readiness vertical slices + preparation fences)
 Final local validation updates: full lint13 tasks, typecheck19 tasks, build9 tasks PASS. Full root test run passed20 other package tasks; API818/821files and11491/11500tests passed. Focused rerun isolates six integration fixture failures (missing ctx.waitUntil/ProjectData readiness RPC and obsolete concurrent same-target expectation); fixed fixture now22/22PASS independently. Other two suites94 tests pass on focused rerun after import-pressure timeouts. Full API rerun with8 workers in progress.
 
 Rule45 mutation proof: in an isolated worktree bypassing wakeReadyLock, strengthened deferred-D1 test fails expected reads1 vs actual2 at entry. Original completion-count assertion did not discriminate; readIndex now increments before D1 await. Production mutex unchanged. Independent test-engineer final review PASS and independently reran Instant integration22/22. Temporary mutation worktree removed.
+
+Full API final bounded run PASS821files/11500tests (128.21s). All other20 root test tasks passed. Final intact readiness Workers3/3PASS; unchanged preparation Workers3/3priorPASS. All local reviewer findings addressed; staging/CI/merge/deploy remain pending.
