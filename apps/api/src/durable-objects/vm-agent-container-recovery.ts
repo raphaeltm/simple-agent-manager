@@ -3,6 +3,11 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import {
+  parseSessionRuntimeContract,
+  resolveSessionRuntimeContract,
+  type SessionRuntimeContract,
+} from '../services/session-runtime-contract';
 
 export const RUNTIME_RECOVERING_MESSAGE =
   'Instant session interrupted; restoring the last safe checkpoint.';
@@ -67,6 +72,7 @@ export interface RuntimeRecoveryContext {
   chatSessionId: string;
   agentSessionId: string;
   agentType: string | null;
+  runtimeContract: SessionRuntimeContract | null;
   runtimeIncarnationId: string | null;
 }
 
@@ -111,6 +117,7 @@ export async function loadRuntimeRecoveryContext(
   const db = drizzle(env.DATABASE, { schema });
   const workspace = await db
     .select({
+      projectId: schema.workspaces.projectId,
       userId: schema.workspaces.userId,
       chatSessionId: schema.workspaces.chatSessionId,
       runtimeIncarnationId: schema.nodes.runtimeIncarnationId,
@@ -130,7 +137,11 @@ export async function loadRuntimeRecoveryContext(
   if (!workspace?.chatSessionId) return null;
 
   const agentSession = await db
-    .select({ id: schema.agentSessions.id, agentType: schema.agentSessions.agentType })
+    .select({
+      id: schema.agentSessions.id,
+      agentType: schema.agentSessions.agentType,
+      runtimeContractJson: schema.agentSessions.runtimeContractJson,
+    })
     .from(schema.agentSessions)
     .where(
       input.preferredAgentSessionId
@@ -144,11 +155,41 @@ export async function loadRuntimeRecoveryContext(
     .get();
   if (!agentSession) return null;
 
+  let runtimeContract = parseSessionRuntimeContract(agentSession.runtimeContractJson);
+  if (!runtimeContract) {
+    if (!workspace.projectId || !agentSession.agentType)
+      throw new Error('Legacy runtime contract identity unavailable');
+    const task = await db
+      .select()
+      .from(schema.tasks)
+      .where(
+        and(
+          eq(schema.tasks.chatSessionId, workspace.chatSessionId),
+          eq(schema.tasks.projectId, workspace.projectId),
+          eq(schema.tasks.userId, workspace.userId)
+        )
+      )
+      .orderBy(desc(schema.tasks.updatedAt))
+      .get();
+    runtimeContract = await resolveSessionRuntimeContract(db, env, {
+      projectId: workspace.projectId,
+      userId: workspace.userId,
+      agentType: agentSession.agentType,
+      promptKind: task ? 'task' : 'conversation',
+      overrides: { permissionMode: 'default' },
+      taskContext: task
+        ? { taskId: task.id, taskMode: task.taskMode === 'task' ? 'task' : 'conversation' }
+        : null,
+    });
+  }
+  if (runtimeContract.taskContext && runtimeContract.taskContext.projectId !== workspace.projectId)
+    throw new Error('Session runtime contract project mismatch');
   return {
     userId: workspace.userId,
     chatSessionId: workspace.chatSessionId,
     agentSessionId: agentSession.id,
     agentType: agentSession.agentType,
+    runtimeContract,
     runtimeIncarnationId: workspace.runtimeIncarnationId,
   };
 }

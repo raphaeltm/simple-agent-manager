@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/workspace/vm-agent/internal/agentsessions"
@@ -13,12 +14,13 @@ import (
 // so neither create nor restore adopts them after an agent restart. Completed
 // attempts remain cached: replaying HOME/WIP could overwrite subsequent edits.
 type sessionRestoreAttempt struct {
-	chatSessionID string
-	agentType     string
-	done          chan struct{}
-	cancel        context.CancelFunc
-	result        map[string]interface{}
-	err           error
+	runtimeContract *sessionRuntimeContract
+	chatSessionID   string
+	agentType       string
+	done            chan struct{}
+	cancel          context.CancelFunc
+	result          map[string]interface{}
+	err             error
 }
 
 // runSessionRestore admits one restore per workspace session and waits for its
@@ -45,7 +47,7 @@ func (s *Server) runSessionRestore(ctx context.Context, input *sessionSnapshotHa
 	}
 	if existing := s.sessionRestores[key]; existing != nil {
 		s.sessionHostMu.Unlock()
-		if existing.chatSessionID != input.chatSessionID || existing.agentType != input.agentType {
+		if existing.chatSessionID != input.chatSessionID || existing.agentType != input.agentType || !reflect.DeepEqual(existing.runtimeContract, input.runtimeContract) {
 			return nil, fmt.Errorf("session restore identity conflicts")
 		}
 		return awaitSessionRestore(ctx, existing)
@@ -89,7 +91,7 @@ func (s *Server) runSessionRestore(ctx context.Context, input *sessionSnapshotHa
 	}
 	restoreCtx, cancel := context.WithTimeout(context.Background(), s.sessionSnapshotOperationTimeout())
 	attempt := &sessionRestoreAttempt{
-		chatSessionID: input.chatSessionID, agentType: input.agentType,
+		chatSessionID: input.chatSessionID, agentType: input.agentType, runtimeContract: input.runtimeContract,
 		done: make(chan struct{}), cancel: cancel, err: fmt.Errorf("session restore did not finish"),
 	}
 	if s.sessionRestores == nil {

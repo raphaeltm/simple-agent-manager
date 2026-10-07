@@ -80,6 +80,7 @@ vi.mock('drizzle-orm/d1', () => ({
     select: () => ({
       from: () => ({
         where: () => ({
+          get: async () => null,
           limit: async () => {
             const existingId = [...dbAgentSessionIds][0];
             return existingId ? [{ id: existingId }] : [];
@@ -143,7 +144,7 @@ function makeState(overrides: Partial<TaskRunnerState> = {}): TaskRunnerState {
       taskMode: 'task',
       model: 'gpt-5-codex',
       effort: 'high',
-      permissionMode: 'auto-edit',
+      permissionMode: 'acceptEdits',
       opencodeProvider: null,
       opencodeBaseUrl: null,
       systemPromptAppend: 'Use the backend implementation profile.',
@@ -364,7 +365,7 @@ describe('handleAgentSession', () => {
       expect.objectContaining({
         model: 'gpt-5-codex',
         effort: 'high',
-        permissionMode: 'auto-edit',
+        permissionMode: 'acceptEdits',
       }),
       { projectId: 'project-1', taskId: 'task-1', taskMode: 'task' },
       // Injected system instructions (get_instructions reminder) sent as a
@@ -373,7 +374,8 @@ describe('handleAgentSession', () => {
       expect.objectContaining({
         beforeExternalMutation: expect.any(Function),
         sourceTaskGuard: undefined,
-      })
+      }),
+      expect.objectContaining({ protocolVersion: 1 })
     );
 
     const startArgs = startAgentSessionOnNodeMock.mock.calls[0]!;
@@ -709,14 +711,15 @@ describe('handleAgentSession', () => {
       expect.objectContaining({
         model: 'gpt-5-codex',
         effort: 'high',
-        permissionMode: 'auto-edit',
+        permissionMode: 'default',
       }),
       { projectId: 'project-1', taskId: 'task-1', taskMode: 'task' },
       expect.stringContaining('get_instructions'),
       expect.objectContaining({
         beforeExternalMutation: expect.any(Function),
         sourceTaskGuard: undefined,
-      })
+      }),
+      expect.objectContaining({ protocolVersion: 1 })
     );
     expect(transitionAcpSessionMock).toHaveBeenCalledWith(
       rc.env,

@@ -23,18 +23,17 @@ const standaloneGhShimDir = "/var/lib/vm-agent/agents/bin"
 // list) cannot route the refresh back to the stale token, and git can never
 // stop to prompt on a terminal.
 //
-// When the exchange yields no token, the inherited GH_TOKEN is dropped rather
-// than trusted: gh fails visibly instead of silently using a credential SAM can
-// no longer vouch for, such as one minted before the installation or the
-// project's GitHub CLI policy was revoked.
+// When the exchange yields no token, stop before invoking gh. Otherwise gh can
+// fall back to stored credentials that SAM can no longer authorize, even when
+// no token was inherited from the session.
 const standaloneGhShimScriptTemplate = `#!/bin/sh
 sam_gh_token=$(printf 'protocol=https\nhost=github.com\n\n' | {{ credential_helper }} get 2>/dev/null | sed -n 's/^password=//p' | head -n 1)
 if [ -n "$sam_gh_token" ]; then
   GH_TOKEN=$sam_gh_token
   export GH_TOKEN
-elif [ -n "${GH_TOKEN:-}" ]; then
-  echo 'gh: SAM could not refresh GitHub credentials; not using the GH_TOKEN inherited at session start' >&2
-  unset GH_TOKEN
+else
+  echo 'gh: SAM could not refresh GitHub credentials; refusing to run gh' >&2
+  exit 1
 fi
 unset sam_gh_token
 exec {{ real_gh }} "$@"

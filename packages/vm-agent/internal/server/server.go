@@ -42,6 +42,7 @@ import (
 // profileOverrides holds model/permissionMode/effort/opencode provider overrides from agent profiles.
 // Passed from the control plane in the start-agent-session request.
 type profileOverrides struct {
+	SettingsResolved bool
 	Model            string
 	PermissionMode   string
 	Effort           string
@@ -1821,7 +1822,7 @@ func (s *Server) tryCreateReviewRequest(workspaceID, containerID, workDir, user,
 			return "", 0
 		}
 	}
-	return s.tryCreatePR(containerID, workDir, user)
+	return s.tryCreatePR(containerID, workDir, user, sourceBranch)
 }
 
 func (s *Server) tryCreateGitLabMergeRequest(runtime *WorkspaceRuntime, sourceBranch string) (string, int) {
@@ -1943,7 +1944,13 @@ func (s *Server) getExistingGitLabMergeRequest(ctx context.Context, runtime *Wor
 
 // tryCreatePR attempts to create a GitHub PR using gh CLI inside the container.
 // Returns (prURL, prNumber) on success, or ("", 0) on failure.
-func (s *Server) tryCreatePR(containerID, workDir, user string) (string, int) {
+func (s *Server) tryCreatePR(containerID, workDir, user, sourceBranch string) (string, int) {
+	return s.tryCreatePRWithExec(containerID, workDir, user, sourceBranch, s.execInContainer)
+}
+
+func (s *Server) tryCreatePRWithExec(containerID, workDir, user, sourceBranch string,
+	run func(context.Context, string, string, string, ...string) (string, string, error),
+) (string, int) {
 	timeout := s.config.GitExecTimeout
 	if timeout <= 0 {
 		timeout = 30 * time.Second
@@ -1951,10 +1958,10 @@ func (s *Server) tryCreatePR(containerID, workDir, user string) (string, int) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	stdout, stderr, err := s.execInContainer(ctx, containerID, user, workDir,
+	stdout, stderr, err := run(ctx, containerID, user, workDir,
 		"gh", "pr", "create",
 		"--fill",
-		"--head", "HEAD",
+		"--head", sourceBranch,
 	)
 	outputStr := strings.TrimSpace(stdout)
 	if strings.TrimSpace(stderr) != "" {
@@ -1965,7 +1972,7 @@ func (s *Server) tryCreatePR(containerID, workDir, user string) (string, int) {
 		if strings.Contains(outputStr, "already exists") {
 			slog.Info("PR already exists for this branch", "output", outputStr)
 			// Try to get the existing PR URL
-			return s.getExistingPRURL(containerID, workDir, user)
+			return s.getExistingPRURL(containerID, workDir, user, run)
 		}
 		slog.Warn("gh pr create failed (non-fatal)", "error", err, "output", outputStr)
 		return "", 0
@@ -1988,7 +1995,9 @@ func (s *Server) tryCreatePR(containerID, workDir, user string) (string, int) {
 }
 
 // getExistingPRURL looks up the existing PR URL for the current branch.
-func (s *Server) getExistingPRURL(containerID, workDir, user string) (string, int) {
+func (s *Server) getExistingPRURL(containerID, workDir, user string,
+	run func(context.Context, string, string, string, ...string) (string, string, error),
+) (string, int) {
 	timeout := s.config.GitExecTimeout
 	if timeout <= 0 {
 		timeout = 30 * time.Second
@@ -1996,7 +2005,7 @@ func (s *Server) getExistingPRURL(containerID, workDir, user string) (string, in
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	output, _, err := s.execInContainer(ctx, containerID, user, workDir,
+	output, _, err := run(ctx, containerID, user, workDir,
 		"gh", "pr", "view", "--json", "url,number", "--jq", ".url",
 	)
 	if err != nil {

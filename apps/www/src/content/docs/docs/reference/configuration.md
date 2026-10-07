@@ -764,8 +764,8 @@ them a question, or send a link to open — see
 [When the Agent Needs You](/docs/guides/chat-features/#when-the-agent-needs-you). All three switches
 are `false` in the checked-in configuration; set them as GitHub Environment variables to turn them
 on (see [Let agents ask in chat](/docs/guides/self-hosting/#let-agents-ask-in-chat)). Turning a
-switch on applies to agent sessions started afterwards (a session woken from sleep usually can't ask
-yet);
+switch on applies to agent sessions started afterwards; sleep and wake preserve their recorded
+interaction settings;
 turning one off refuses new requests at once, even in running sessions.
 
 A permission request in a **Chat** session, and every question, waits up to

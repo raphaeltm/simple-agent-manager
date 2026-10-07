@@ -250,7 +250,11 @@ describe('session snapshot progress persistence', () => {
   it('does not let a late prepare reopen a finalized sleeping snapshot', async () => {
     const sqlite = new Database(':memory:');
     try {
-      createSchemaTables(sqlite, [schema.sessionSnapshots, schema.projectDataSessionLocations]);
+      createSchemaTables(sqlite, [
+        schema.sessionSnapshots,
+        schema.agentSessions,
+        schema.projectDataSessionLocations,
+      ]);
       sqlite
         .prepare(
           `INSERT INTO session_snapshots
@@ -308,7 +312,7 @@ describe('session snapshot progress persistence', () => {
   it('does not let a capture reopen the generation after teardown claims stopping', async () => {
     const sqlite = new Database(':memory:');
     try {
-      createSchemaTables(sqlite, [schema.sessionSnapshots]);
+      createSchemaTables(sqlite, [schema.sessionSnapshots, schema.agentSessions]);
       sqlite
         .prepare(
           `INSERT INTO session_snapshots
@@ -348,7 +352,7 @@ describe('session snapshot progress persistence', () => {
   it('rejects preparation when sleep finalizes between the read and capture update', async () => {
     const sqlite = new Database(':memory:');
     try {
-      createSchemaTables(sqlite, [schema.sessionSnapshots]);
+      createSchemaTables(sqlite, [schema.sessionSnapshots, schema.agentSessions]);
       sqlite
         .prepare(
           `INSERT INTO session_snapshots
@@ -418,7 +422,7 @@ describe('session snapshot progress persistence', () => {
   it('preserves a degraded checkpoint while opening a replacement capture generation', async () => {
     const sqlite = new Database(':memory:');
     try {
-      createSchemaTables(sqlite, [schema.sessionSnapshots]);
+      createSchemaTables(sqlite, [schema.sessionSnapshots, schema.agentSessions]);
       sqlite
         .prepare(
           `INSERT INTO session_snapshots
@@ -474,7 +478,7 @@ describe('session snapshot progress persistence', () => {
   it('records progress and terminalizes the active generation even when a previous snapshot is available', async () => {
     const sqlite = new Database(':memory:');
     try {
-      createSchemaTables(sqlite, [schema.sessionSnapshots]);
+      createSchemaTables(sqlite, [schema.sessionSnapshots, schema.agentSessions]);
       sqlite
         .prepare(
           `INSERT INTO session_snapshots
@@ -554,7 +558,7 @@ describe('session snapshot progress persistence', () => {
   it('abandons a stalled capture instead of replacing a generation that holds a Git commit', async () => {
     const sqlite = new Database(':memory:');
     try {
-      createSchemaTables(sqlite, [schema.sessionSnapshots]);
+      createSchemaTables(sqlite, [schema.sessionSnapshots, schema.agentSessions]);
       sqlite
         .prepare(
           `INSERT INTO session_snapshots
@@ -618,7 +622,7 @@ describe('session snapshot progress persistence', () => {
     const sqlite = new Database(':memory:');
     try {
       const sha = '4ea140588150773ce3aace786aeef7f4049ce100fa649c94fbbddb960f1da942';
-      createSchemaTables(sqlite, [schema.sessionSnapshots]);
+      createSchemaTables(sqlite, [schema.sessionSnapshots, schema.agentSessions]);
       const r2 = { put: vi.fn(), delete: vi.fn(async () => undefined), head: vi.fn() };
       const testEnv = env({
         DATABASE: createSqliteD1(sqlite),
@@ -677,7 +681,7 @@ describe('session snapshot progress persistence', () => {
   it('records capture failure only for the active capture generation', async () => {
     const sqlite = new Database(':memory:');
     try {
-      createSchemaTables(sqlite, [schema.sessionSnapshots]);
+      createSchemaTables(sqlite, [schema.sessionSnapshots, schema.agentSessions]);
       sqlite
         .prepare(
           `INSERT INTO session_snapshots
@@ -732,7 +736,11 @@ describe('session snapshot recovery lifecycle', () => {
   it('allows a degraded sleeping snapshot to be claimed for wake', async () => {
     const sqlite = new Database(':memory:');
     try {
-      createSchemaTables(sqlite, [schema.sessionSnapshots, schema.projectDataSessionLocations]);
+      createSchemaTables(sqlite, [
+        schema.sessionSnapshots,
+        schema.agentSessions,
+        schema.projectDataSessionLocations,
+      ]);
       sqlite
         .prepare(
           `INSERT INTO session_snapshots
@@ -895,7 +903,11 @@ describe('session snapshot recovery lifecycle', () => {
   it('clears the sleeping claim when snapshot recovery completes', async () => {
     const sqlite = new Database(':memory:');
     try {
-      createSchemaTables(sqlite, [schema.sessionSnapshots, schema.projectDataSessionLocations]);
+      createSchemaTables(sqlite, [
+        schema.sessionSnapshots,
+        schema.agentSessions,
+        schema.projectDataSessionLocations,
+      ]);
       sqlite
         .prepare(
           `INSERT INTO session_snapshots
@@ -1017,7 +1029,11 @@ describe('session snapshot recovery lifecycle', () => {
   it('can fail a restored claim left behind by a crash before TaskRunner marker cleanup', async () => {
     const sqlite = new Database(':memory:');
     try {
-      createSchemaTables(sqlite, [schema.sessionSnapshots, schema.projectDataSessionLocations]);
+      createSchemaTables(sqlite, [
+        schema.sessionSnapshots,
+        schema.agentSessions,
+        schema.projectDataSessionLocations,
+      ]);
       sqlite.exec(`
         INSERT INTO session_snapshots
           (id, workspace_id, project_id, user_id, chat_session_id, runtime, status,
@@ -1060,7 +1076,11 @@ describe('session snapshot recovery lifecycle', () => {
   it('resets recovery_attempts on successful wake so the 4th cycle still succeeds', async () => {
     const sqlite = new Database(':memory:');
     try {
-      createSchemaTables(sqlite, [schema.sessionSnapshots, schema.projectDataSessionLocations]);
+      createSchemaTables(sqlite, [
+        schema.sessionSnapshots,
+        schema.agentSessions,
+        schema.projectDataSessionLocations,
+      ]);
       sqlite
         .prepare(
           `INSERT INTO session_snapshots
@@ -1141,7 +1161,11 @@ describe('session snapshot recovery lifecycle', () => {
   it('resets recovery_attempts on in-place wake (markSessionSnapshotAwakeInPlace)', async () => {
     const sqlite = new Database(':memory:');
     try {
-      createSchemaTables(sqlite, [schema.sessionSnapshots, schema.projectDataSessionLocations]);
+      createSchemaTables(sqlite, [
+        schema.sessionSnapshots,
+        schema.agentSessions,
+        schema.projectDataSessionLocations,
+      ]);
       sqlite
         .prepare(
           `INSERT INTO session_snapshots
@@ -1189,7 +1213,11 @@ describe('session snapshot recovery lifecycle', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     const sqlite = new Database(':memory:');
     try {
-      createSchemaTables(sqlite, [schema.sessionSnapshots, schema.projectDataSessionLocations]);
+      createSchemaTables(sqlite, [
+        schema.sessionSnapshots,
+        schema.agentSessions,
+        schema.projectDataSessionLocations,
+      ]);
       sqlite
         .prepare(
           `INSERT INTO session_snapshots
@@ -1234,7 +1262,11 @@ describe('session snapshot recovery lifecycle', () => {
   it('fences snapshot recovery claims and in-place wake while ProjectData archive migration owns the session', async () => {
     const sqlite = new Database(':memory:');
     try {
-      createSchemaTables(sqlite, [schema.sessionSnapshots, schema.projectDataSessionLocations]);
+      createSchemaTables(sqlite, [
+        schema.sessionSnapshots,
+        schema.agentSessions,
+        schema.projectDataSessionLocations,
+      ]);
       sqlite
         .prepare(
           `INSERT INTO session_snapshots
@@ -1302,7 +1334,11 @@ describe('session snapshot recovery lifecycle', () => {
   it('3 consecutive failed wakes exhaust the budget — 4th claim is rejected', async () => {
     const sqlite = new Database(':memory:');
     try {
-      createSchemaTables(sqlite, [schema.sessionSnapshots, schema.projectDataSessionLocations]);
+      createSchemaTables(sqlite, [
+        schema.sessionSnapshots,
+        schema.agentSessions,
+        schema.projectDataSessionLocations,
+      ]);
       sqlite
         .prepare(
           `INSERT INTO session_snapshots
@@ -1364,7 +1400,7 @@ describe('session snapshot recovery lifecycle', () => {
   it('re-sleep resets recovery_attempts so a fresh cycle starts clean', async () => {
     const sqlite = new Database(':memory:');
     try {
-      createSchemaTables(sqlite, [schema.sessionSnapshots]);
+      createSchemaTables(sqlite, [schema.sessionSnapshots, schema.agentSessions]);
       sqlite
         .prepare(
           `INSERT INTO session_snapshots

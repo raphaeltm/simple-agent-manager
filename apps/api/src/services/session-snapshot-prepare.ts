@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, or } from 'drizzle-orm';
+import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -34,6 +34,7 @@ export async function prepareSessionSnapshot(
   keys: Record<SessionSnapshotArtifact, string>;
   config: SessionSnapshotConfig;
 }> {
+  const runtimeContractJson = await snapshotRuntimeContract(db, input);
   const config = getSessionSnapshotConfig(env);
   const now = new Date();
   const expiresAt = snapshotExpiry(now, config.ttlDays);
@@ -73,6 +74,7 @@ export async function prepareSessionSnapshot(
     manifestR2Key: keys.manifest,
     baseCommit: null,
     expiresAt,
+    runtimeContractJson,
     manifestJson: null,
     restoreStatus: null,
     restoreMessage: null,
@@ -134,6 +136,7 @@ export async function prepareSessionSnapshot(
           userId: input.userId,
           agentSessionId: input.agentSessionId,
           runtime: input.runtime,
+          runtimeContractJson,
           captureGeneration: generation,
           captureError: null,
           authorizedHomeBytes: null,
@@ -224,6 +227,7 @@ export async function ensureSessionSnapshotForSleep(
   input: PrepareSessionSnapshotInput,
   options: { expectedNodeId?: string } = {}
 ): Promise<boolean> {
+  const runtimeContractJson = await snapshotRuntimeContract(db, input);
   const now = new Date();
   const placeholderGeneration = ulid();
   const row = {
@@ -237,6 +241,7 @@ export async function ensureSessionSnapshotForSleep(
     runtime: input.runtime,
     status: 'pending',
     degradation: 'none',
+    runtimeContractJson,
     manifestR2Key: buildSessionSnapshotR2Key(
       env,
       input.chatSessionId,
@@ -250,7 +255,7 @@ export async function ensureSessionSnapshotForSleep(
   if (options.expectedNodeId) {
     return ensureUnhealthyNodeSleepPlaceholder(env, row, options.expectedNodeId);
   }
-  await db
+  const persisted = await db
     .insert(schema.sessionSnapshots)
     .values(row)
     .onConflictDoUpdate({
@@ -266,8 +271,37 @@ export async function ensureSessionSnapshotForSleep(
         userId: input.userId,
         agentSessionId: input.agentSessionId,
         runtime: input.runtime,
+        runtimeContractJson: sql`COALESCE(${runtimeContractJson}, ${schema.sessionSnapshots.runtimeContractJson})`,
         updatedAt: now.toISOString(),
       },
-    });
+      setWhere: and(
+        eq(schema.sessionSnapshots.userId, input.userId),
+        input.projectId === null
+          ? isNull(schema.sessionSnapshots.projectId)
+          : eq(schema.sessionSnapshots.projectId, input.projectId)
+      ),
+    })
+    .returning({ id: schema.sessionSnapshots.id })
+    .get();
+  if (!persisted) throw new Error('Session snapshot ownership conflict');
   return true;
+}
+
+async function snapshotRuntimeContract(
+  db: Db,
+  input: PrepareSessionSnapshotInput
+): Promise<string | null> {
+  if (!input.agentSessionId) return null;
+  const row = await db
+    .select({ runtimeContractJson: schema.agentSessions.runtimeContractJson })
+    .from(schema.agentSessions)
+    .where(
+      and(
+        eq(schema.agentSessions.id, input.agentSessionId),
+        eq(schema.agentSessions.workspaceId, input.workspaceId),
+        eq(schema.agentSessions.userId, input.userId)
+      )
+    )
+    .get();
+  return row?.runtimeContractJson ?? null;
 }

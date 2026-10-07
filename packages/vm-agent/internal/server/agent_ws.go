@@ -406,6 +406,7 @@ func (s *Server) getOrCreateSessionHostForRestore(hostKey, workspaceID, sessionI
 
 	// Inject per-session profile overrides (model/permissionMode/opencode from agent profiles).
 	if ovr, ok := s.sessionProfileOvr[hostKey]; ok {
+		cfg.SettingsResolved = ovr.SettingsResolved
 		cfg.ModelOverride = ovr.Model
 		cfg.PermissionModeOverride = ovr.PermissionMode
 		cfg.EffortOverride = ovr.Effort

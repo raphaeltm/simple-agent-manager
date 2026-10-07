@@ -1,0 +1,28 @@
+{
+  "status": "Fixture correction and latest-main reconciliation independently reviewed/completion PASS; parent final published-head CI and production gates pending",
+  "failedHead": "f9499676597144ceb1914c31f5fa6e2a5bd997b3",
+  "failedCi": 37655864180,
+  "failedJob": 112911552101,
+  "fullCiApiOutcome": "22 failed, 11,537 passed; failures limited to session-sleep-lifecycle (8) and sleeping-task-consumers (14)",
+  "rootReproduction": "Same2files22failed5passed beforefixture correction",
+  "diagnosis": "Shared snapshot fixture used user-old/project-old although authoritative workspace/task/chat summary belonguser-1/project-1; unauthorized ownership transfer conflated with intended routing replacement",
+  "changes": "Only test fixture owner/project corrected; stale workspace-old/node-old/agent-old/cf-container and old snapshot artifacts retained. Production authorization/upsert/shim unchanged.",
+  "meaningfulRegression": "Two actual sleepWorkspaceSession foreign-owner/project cases: snapshot/task/workspace full rows unchanged; no hibernate/stop/sleep calls or external ordering",
+  "rootVerification": "3files55PASS: lifecycle15/consumers14/contract26; typecheck/changed-fileESLint/format/diffPASS",
+  "independentTestReview": "3files55PASS2.64s; meaningful negative/positive scenarios, no auth masking",
+  "independentCloudflareSecurityCompletion": "PASS test-only supplemental completion, no gaps; previous implementation/live evidence remains valid",
+  "staging": "Running approved37656801006 preserved; no production/artifact change, no redeploy/compute/cancellation necessary",
+  "latestMainToReconcile": "57aaa057b0601076cf167896558cb5754c405387 PR2213 including0186; noGo changes",
+  "releaseOwnership": "Parent owns PRbody/gates/threads/merge; root owns implementation/test/evidence and proof corroboration",
+  "reconciledHead": "883ba85ea6be0cf667fa100dd08cc77f33f1505b",
+  "reconciledVerification": "Shared build and API typecheck PASS; seven runtime/recovery/MCP seam files 120 PASS; diff check PASS",
+  "independentReconciliation": "Cloudflare/task-completion supplemental PASS: both contract columns and coordination field retained, additive nullable migrations 0184/0185/0186 intact, runtime validation/snapshot/credential shim unchanged",
+  "coordinatedPackaging": {
+    "run": 37656801006,
+    "head": "d0d4ddf0d489679e1071a897c8e8663b633e3e1b",
+    "conclusion": "success",
+    "goRelease": "8978d3130d7c44fb4a94311d61d9c0f9211fafa0",
+    "proof": "GitHub terminal conclusion independently corroborated; coordinator immutable receipts pending"
+  },
+  "secretScanCorrection": "Private checksum-verified Gitleaks 8.30.1 classified a concatenated historical test-count summary as synthetic evidence, not credential material. Current prose spaced; one exact historical digest expires 2026-11-06 under existing baseline policy. Independent security review PASS, altered file/line/bytes and expiry refuse. Current-tree 50 reviewed/0 new and PR-range 1 reviewed/0 new PASS; no scanner reports/candidates published."
+}

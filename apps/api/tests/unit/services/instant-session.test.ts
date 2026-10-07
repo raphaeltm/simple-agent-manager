@@ -49,7 +49,9 @@ vi.mock('../../../src/services/project-data', () => mocks.projectData);
 vi.mock('../../../src/services/vm-agent-container', () => mocks.container);
 vi.mock('../../../src/lib/ulid', () => ({ ulid: mocks.ulid }));
 
-vi.mock('../../../src/services/task-terminal-transition', () => ({ transitionTaskToTerminal: mocks.transitionTaskToTerminal }));
+vi.mock('../../../src/services/task-terminal-transition', () => ({
+  transitionTaskToTerminal: mocks.transitionTaskToTerminal,
+}));
 
 import { launchInstantSession } from '../../../src/services/instant-session';
 
@@ -76,6 +78,7 @@ function makeDb(selectResults: unknown[][] = []) {
       select: vi.fn(() => ({
         from: vi.fn(() => ({
           where: vi.fn(() => ({
+            get: vi.fn().mockResolvedValue(null),
             limit: vi
               .fn()
               .mockImplementation(() => Promise.resolve(selectResults[selectIndex++] ?? [])),
@@ -116,7 +119,10 @@ describe('launchInstantSession', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.transitionTaskToTerminal.mockResolvedValue('transitioned');
-    mocks.ulid.mockReturnValueOnce('workspace-1').mockReturnValueOnce('agent-session-1');
+    mocks.ulid
+      .mockReset()
+      .mockReturnValueOnce('workspace-1')
+      .mockReturnValueOnce('agent-session-1');
     mocks.jwt.signCallbackToken.mockResolvedValue('workspace-callback-token');
     mocks.jwt.signNodeCallbackToken.mockResolvedValue('node-callback-token');
     mocks.jwt.signTerminalToken.mockResolvedValue({ token: 'attachment-terminal-token' });
@@ -280,9 +286,30 @@ describe('launchInstantSession', () => {
       expect.anything(),
       'user-1',
       [{ url: 'https://api.example.com/mcp', token: 'mcp-token', name: 'sam-mcp' }],
-      { model: 'claude-sonnet-4-5-20250929', effort: 'auto' },
+      expect.objectContaining({
+        model: 'claude-sonnet-4-5-20250929',
+        effort: 'auto',
+        settingsResolved: true,
+        permissionMode: 'bypassPermissions',
+        taskContext: { projectId: 'project-1', taskId: 'task-1', taskMode: 'conversation' },
+      }),
       { projectId: 'project-1', taskId: 'task-1', taskMode: 'conversation' },
-      expect.stringContaining('MUST call')
+      expect.stringContaining('MUST call'),
+      undefined,
+      expect.objectContaining({
+        enabled: false,
+        protocolVersion: 1,
+        formsEnabled: false,
+        urlsEnabled: false,
+      })
+    );
+    const persistedContractUpdate = updates.find((update) =>
+      Boolean((update as { runtimeContractJson?: string }).runtimeContractJson)
+    ) as { runtimeContractJson: string };
+    const persistedContract = JSON.parse(persistedContractUpdate.runtimeContractJson);
+    expect(mocks.nodeAgent.startAgentSessionOnNode.mock.calls[0][8]).toEqual(persistedContract);
+    expect(mocks.nodeAgent.startAgentSessionOnNode.mock.calls[0][12]).toEqual(
+      persistedContract.acpInteractions
     );
     expect(mocks.nodeAgent.startAgentSessionOnNode.mock.calls[0][4]).toBe('enriched prompt');
     expect(mocks.container.launchVmAgentContainer).toHaveBeenCalledWith(
@@ -316,7 +343,7 @@ describe('launchInstantSession', () => {
   });
 
   it('passes task mode through to task prompt and MCP token context exactly once', async () => {
-    const { db } = makeDb();
+    const { db, updates } = makeDb();
 
     await launchInstantSession(db as never, env, {
       ...baseLaunchInput(),
@@ -352,9 +379,28 @@ describe('launchInstantSession', () => {
       expect.anything(),
       expect.anything(),
       expect.anything(),
-      undefined,
+      expect.objectContaining({
+        settingsResolved: true,
+        model: null,
+        effort: null,
+        taskContext: { projectId: 'project-1', taskId: 'task-1', taskMode: 'task' },
+      }),
       { projectId: 'project-1', taskId: 'task-1', taskMode: 'task' },
-      expect.anything()
+      expect.anything(),
+      undefined,
+      expect.objectContaining({ formsEnabled: false, urlsEnabled: false, protocolVersion: 1 })
+    );
+    const persistedContractUpdate = updates.find((update) =>
+      Boolean((update as { runtimeContractJson?: string }).runtimeContractJson)
+    ) as { runtimeContractJson: string };
+    const persistedContract = JSON.parse(persistedContractUpdate.runtimeContractJson);
+    expect(persistedContract).toMatchObject({
+      promptKind: 'task',
+      taskContext: { projectId: 'project-1', taskId: 'task-1', taskMode: 'task' },
+    });
+    expect(mocks.nodeAgent.startAgentSessionOnNode.mock.calls[0][8]).toEqual(persistedContract);
+    expect(mocks.nodeAgent.startAgentSessionOnNode.mock.calls[0][12]).toEqual(
+      persistedContract.acpInteractions
     );
   });
 
@@ -371,6 +417,7 @@ describe('launchInstantSession', () => {
     const { db } = makeDb([[gitlabMetadata]]);
 
     await launchInstantSession(db as never, env, {
+      taskId: 'task-1',
       project: {
         ...project,
         id: 'gitlab-project-1',
@@ -392,6 +439,8 @@ describe('launchInstantSession', () => {
         workspaceId: 'workspace-1',
         repository: 'group/gitlab-repo',
         branch: 'main',
+        defaultBranch: 'main',
+        baseBranch: 'main',
         repoProvider: 'gitlab',
         cloneUrl: 'https://gitlab.com/group/gitlab-repo.git',
         repositoryHost: 'gitlab.com',
@@ -419,7 +468,12 @@ describe('launchInstantSession', () => {
       'node-1',
       env,
       'user-1',
-      expect.objectContaining({ workspaceId: 'workspace-1', lightweight: true }),
+      expect.objectContaining({
+        workspaceId: 'workspace-1',
+        lightweight: true,
+        defaultBranch: 'main',
+        baseBranch: 'main',
+      }),
       { requestTimeoutMs: 90_000 }
     );
   });
@@ -473,10 +527,17 @@ describe('launchInstantSession', () => {
           'chat-session-1',
           'Attachment transfer failed for debug.txt: 403'
         );
-        expect(mocks.transitionTaskToTerminal).toHaveBeenCalledWith(attachmentEnv,
-          expect.objectContaining({ taskId: 'task-1', status: 'failed', executionStep: 'launch_failed',
-            expectedWorkspaceId: 'workspace-1', expectedChatSessionId: 'chat-session-1',
-            reason: 'Attachment transfer failed for debug.txt: 403', fillMissingStartedAt: false, stopWorkspace: false,
+        expect(mocks.transitionTaskToTerminal).toHaveBeenCalledWith(
+          attachmentEnv,
+          expect.objectContaining({
+            taskId: 'task-1',
+            status: 'failed',
+            executionStep: 'launch_failed',
+            expectedWorkspaceId: 'workspace-1',
+            expectedChatSessionId: 'chat-session-1',
+            reason: 'Attachment transfer failed for debug.txt: 403',
+            fillMissingStartedAt: false,
+            stopWorkspace: false,
           })
         );
         expect(remove).not.toHaveBeenCalled();
@@ -536,9 +597,15 @@ describe('launchInstantSession', () => {
     expect(updates).toContainEqual(
       expect.objectContaining({ status: 'error', errorMessage: 'Request timed out after 120000ms' })
     );
-    expect(mocks.transitionTaskToTerminal).toHaveBeenCalledWith(env,
-      expect.objectContaining({ taskId: 'task-1', status: 'failed', executionStep: 'launch_failed',
-        reason: 'Request timed out after 120000ms', fillMissingStartedAt: false, stopWorkspace: false,
+    expect(mocks.transitionTaskToTerminal).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({
+        taskId: 'task-1',
+        status: 'failed',
+        executionStep: 'launch_failed',
+        reason: 'Request timed out after 120000ms',
+        fillMissingStartedAt: false,
+        stopWorkspace: false,
       })
     );
   });

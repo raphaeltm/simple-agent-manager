@@ -12,12 +12,12 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 - **Agents can stop and ask you.** When an agent wants permission, has a question, or needs you to
   open a sign-in link, a card appears in the chat, and the chat is marked **Needs input** in the
   session list. Answer on the card; the agent waits until you do. On self-hosted SAM this works once
-  your operator turns it on. A chat that has slept and woken usually can't ask yet.
+  your operator turns it on. Sleep and wake now preserve the request settings of new sessions.
   → [When the Agent Needs You](/docs/guides/chat-features/#when-the-agent-needs-you)
 - **Claude Code starts in Bypass Permissions.** A Claude Code agent with no permission mode set now
   works without asking, apart from a few safety checks (Codex never asks for permission). The
   always-ask mode is now called **Manual**: choose it, or **Plan Mode**, to approve changes yourself.
-  A chat that sleeps and wakes usually doesn't keep a mode set in its profile. A mode saved earlier still applies, so if an agent asks when you
+  New sessions keep their resolved mode when they sleep and wake. A mode saved earlier still applies, so if an agent asks when you
   don't expect it, check where its mode is set. → [Permission mode](/docs/guides/agents/#permission-mode)
 - **See your subscription limits.** On a Claude, ChatGPT, or OpenCode Go subscription, a chip under
   the chat's title shows how much of each limit is used; select it for reset times.

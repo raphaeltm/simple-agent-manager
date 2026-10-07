@@ -5,11 +5,16 @@ import {
   type GuardedNodeAgentMutationOptions,
   nodeAgentRequest,
 } from './node-agent';
+import {
+  assertSessionRuntimeContractCapability,
+  type SessionRuntimeContract,
+} from './session-runtime-contract';
 import { mintWorkspaceCallbackTokenForNodeDelivery } from './workspace-callback-token-binding';
 
 export const DEFAULT_SESSION_SNAPSHOT_REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
 
 interface SessionSnapshotRequest {
+  runtimeContract?: SessionRuntimeContract;
   chatSessionId: string;
   runtime: string;
   agentType?: string;
@@ -87,7 +92,7 @@ export async function hibernateAgentSessionOnNode(
   });
 }
 
-export function restoreAgentSessionOnNode(
+export async function restoreAgentSessionOnNode(
   nodeId: string,
   workspaceId: string,
   sessionId: string,
@@ -96,6 +101,23 @@ export function restoreAgentSessionOnNode(
   input: SessionSnapshotRequest,
   options?: GuardedNodeAgentMutationOptions
 ): Promise<unknown> {
+  if (input.runtimeContract) {
+    const capabilities = await nodeAgentRequest(
+      nodeId,
+      env,
+      `/workspaces/${workspaceId}/agent-capabilities`,
+      {
+        method: 'GET',
+        userId,
+        workspaceId,
+        sourceTaskGuard: options?.sourceTaskGuard,
+        recoverContainerOnTimeout: false,
+        noWakeContainer: true,
+        requestTimeoutMs: getSessionSnapshotRequestTimeoutMs(env),
+      }
+    );
+    assertSessionRuntimeContractCapability(capabilities);
+  }
   return requestSessionSnapshot(
     'restore',
     nodeId,

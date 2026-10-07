@@ -224,25 +224,21 @@ before some actions even when SAM sets Bypass Permissions.
 
 #### After a chat wakes from sleep
 
-A chat usually comes back from sleep — or from SAM restoring it after its container or machine
-failed — without the settings it started with:
+Sessions started on the current version keep their resolved permission mode, model, reasoning
+effort, and provider settings when they wake on either VM or Instant. Later changes to a profile,
+**Agent Overrides**, or **Settings → Agents** apply to new sessions. Agent requests still appear
+as cards after wake when your operator has enabled them.
 
-- **Mode:** it takes its mode from **Agent Overrides**, then **Settings → Agents**, and uses Bypass
-  Permissions if neither sets one. So a chat whose profile is set to **Manual** or **Plan Mode**
-  usually goes ahead without asking. If one of those places sets an asking mode instead, every
-  request is refused and the agent
-  [stops](/docs/guides/session-troubleshooting/#the-agent-stops-for-approval-and-no-card-appears).
-- **Model:** a Claude Code chat keeps its model unless one of those places sets one; other agents
-  may switch to their default model.
-- **Requests:** it can't ask you anything yet — SAM refuses its requests without showing a card.
-- **Pull requests:** a **Task** carries on like a **Chat**: SAM no longer commits or pushes for it.
-  Ask the agent to commit and push to its branch, which updates the pull request SAM already
-  opened, or to open one if there isn't one yet.
+A **Task** keeps its task completion and commit, push, and pull request behavior after waking;
+a **Chat** remains a Chat. On a VM, if SAM starts fresh from a degraded snapshot, it keeps these
+settings and reads the saved transcript before continuing. It still tells you which files could not be
+restored.
 
-The exception is a VM wake where SAM has to start the agent fresh: that uses the profile's mode and
-model and can ask, but SAM still doesn't commit or push a Task's work. To get the profile's settings back, or when the agent needs your approval,
-[fork](/docs/guides/chat-features/#conversation-forking) the chat or start a new one with that
-profile selected.
+Older saved sessions may not have their original settings recorded. SAM resumes those with
+**Manual** permissions rather than silently granting Bypass Permissions. To choose a different
+mode or model, start a new chat or [fork](/docs/guides/chat-features/#conversation-forking) with
+the desired profile selected. Agent-specific limits still apply, including Codex's full-access
+permission behavior.
 
 #### An agent asks when you don't expect it
 

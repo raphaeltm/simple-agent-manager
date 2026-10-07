@@ -143,6 +143,7 @@ export function createSessionSleepFixture(taskStatus: string, getActivity: () =>
          VALUES ('agent-1', 'workspace-1', 'running', 'openai-codex', ?)`
     )
     .run(START.toISOString());
+  // Recovery may replace workspace/node/runtime while retaining the same owner and project.
   sqlite
     .prepare(
       `INSERT INTO session_snapshots
@@ -150,7 +151,7 @@ export function createSessionSleepFixture(taskStatus: string, getActivity: () =>
             agent_session_id, runtime, status, degradation, manifest_r2_key,
             expires_at, sleep_attempts, created_at, updated_at)
          VALUES
-           ('snapshot-1', 'project-old', 'workspace-old', 'node-old', 'user-old', 'chat-1',
+           ('snapshot-1', 'project-1', 'workspace-old', 'node-old', 'user-1', 'chat-1',
             'agent-old', 'cf-container', 'pending', 'none', 'old/manifest.json',
             '2026-08-21T05:00:00.000Z', 0, ?, ?)`
     )

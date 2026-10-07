@@ -1263,6 +1263,7 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 		AgentType        string                          `json:"agentType"`
 		InitialPrompt    string                          `json:"initialPrompt"`
 		McpServers       []acp.McpServerEntry            `json:"mcpServers,omitempty"`
+		SettingsResolved bool                            `json:"settingsResolved,omitempty"`
 		Model            string                          `json:"model,omitempty"`
 		PermissionMode   string                          `json:"permissionMode,omitempty"`
 		Effort           string                          `json:"effort,omitempty"`
@@ -1343,6 +1344,7 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 		s.sessionTaskCtx = make(map[string]taskCallbackContext)
 	}
 	s.sessionProfileOvr[hostKey] = profileOverrides{
+		SettingsResolved: body.SettingsResolved,
 		Model:            body.Model,
 		PermissionMode:   body.PermissionMode,
 		Effort:           body.Effort,
@@ -1902,6 +1904,10 @@ func (s *Server) agentCapabilities() map[string]interface{} {
 	return map[string]interface{}{
 		"protocolVersion": vmExecutionProtocolVersion,
 		"runtimeIdentity": s.executionRuntimeID,
+		"sessionRuntimeContract": map[string]interface{}{
+			"supported": true,
+			"version":   1,
+		},
 		"promptReceipts": map[string]interface{}{
 			"supported": true,
 			"lookup":    true,

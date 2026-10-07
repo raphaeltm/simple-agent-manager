@@ -378,6 +378,7 @@ export async function continueInstantSessionLaunch(
   requireVmAgentContainer(env);
 
   const config = getVmAgentContainerConfig(env);
+  const defaultBranch = input.project.defaultBranch || 'main';
   const taskMode = input.taskMode ?? 'conversation';
   const {
     nodeId,
@@ -437,6 +438,8 @@ export async function continueInstantSessionLaunch(
           workspaceId,
           repository: input.project.repository,
           branch,
+          baseBranch: defaultBranch,
+          defaultBranch,
           repoProvider: gitSource.repoProvider,
           cloneUrl: gitSource.cloneUrl,
           repositoryHost: gitSource.repositoryHost,
@@ -566,13 +569,12 @@ export async function continueInstantSessionLaunch(
       executionStep: 'launch_failed',
       fillMissingStartedAt: false,
       stopWorkspace: false,
-    })
-      .catch((updateErr) => {
-        log.warn('instant_session.task_error_update_failed', {
-          taskId: input.taskId,
-          error: errorMessage(updateErr),
-        });
+    }).catch((updateErr) => {
+      log.warn('instant_session.task_error_update_failed', {
+        taskId: input.taskId,
+        error: errorMessage(updateErr),
       });
+    });
     await projectDataService
       .failSession(env, input.project.id, chatSessionId, message)
       .catch((updateErr) => {
