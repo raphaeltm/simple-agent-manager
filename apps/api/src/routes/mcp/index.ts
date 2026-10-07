@@ -8,7 +8,6 @@
  * Auth: task-scoped opaque token stored in KV, passed as Bearer token.
  */
 import { Hono } from 'hono';
-import { webhookClaimRoutes } from './webhook-claims';
 import * as v from 'valibot';
 
 import type { Env } from '../../env';
@@ -176,6 +175,7 @@ import {
   handleListTriggers,
   handleUpdateTrigger,
 } from './trigger-tools';
+import { webhookClaimRoutes } from './webhook-claims';
 import {
   handleExposePort,
   handleGetCredentialStatus,
