@@ -1,0 +1,593 @@
+{
+  "taskId": "01M4AXGMEWDEH8KRRQ4X0CW824",
+  "runtime": "cf-container",
+  "projectId": "01KJNR9R3TEN3KX1ETE33852R8",
+  "sessionId": "36200219-1ea0-43ff-8a8d-f119c68c56ca",
+  "workspaceId": "01M4B4YSGN7PRF30WA3GYB9KYK",
+  "fixtureTaskId": "01M4B4YQ4F2HF0YX5Q62MGFVPN",
+  "candidateSha": "a1d340864b580dbe28d00a051c2f309aa02370cc",
+  "deployRun": 37617669770,
+  "apiVersion": "5a86cabc-3d5b-4b28-8578-94fbcbd6a31f",
+  "flagOnlyVersion": "a7db0912-6107-40a6-a5ba-411d303d9c43",
+  "unchangedCodeETag": "fd387f25174f853c73bde9b3a730cc1abf03f2c3a05b0602558ed22c92b21037",
+  "sourceQueries": {
+    "ready": "Cloudflare Workers telemetry needle=session_wake.ready_signaled, same session",
+    "actualStart": "Staging observability D1 platform_errors: source=vm-agent, workspace_id, exact deliveryId, message=ACP Prompt started; timestamp is producer time"
+  },
+  "deliveries": [
+    {
+      "label": "a",
+      "deliveryId": "01M4B52E736CHSSHMH7DSETMBZ",
+      "observations": [
+        {
+          "observedAt": 1791375805682,
+          "delivery": {
+            "id": "01M4B52E736CHSSHMH7DSETMBZ",
+            "deliveryState": "retry_wait",
+            "deliveryAttempts": 2,
+            "createdAt": 1791375784163,
+            "lastDeliveryAt": 1791375795169,
+            "nextAttemptAt": 1791375810169,
+            "attemptStartedAt": 1791375795169,
+            "acceptedAt": null,
+            "ackedAt": null,
+            "receiptState": null,
+            "runtimeIdentity": null,
+            "lastError": "Prompt target preparation failed: Target preparation deadline elapsed"
+          }
+        },
+        {
+          "observedAt": 1791375807146,
+          "delivery": {
+            "id": "01M4B52E736CHSSHMH7DSETMBZ",
+            "deliveryState": "acked",
+            "deliveryAttempts": 3,
+            "createdAt": 1791375784163,
+            "lastDeliveryAt": 1791375804818,
+            "nextAttemptAt": null,
+            "attemptStartedAt": 1791375804818,
+            "acceptedAt": 1791375805927,
+            "ackedAt": 1791375805965,
+            "receiptState": "in_flight",
+            "runtimeIdentity": "898eabb7-ea2f-4286-996e-1213bace164f",
+            "lastError": null
+          }
+        }
+      ],
+      "activityEvents": [
+        {
+          "id": "5c0096db-5d17-40c3-acf4-d04dab939ae8",
+          "eventType": "prompt_delivery.accepted",
+          "actorType": "system",
+          "actorId": null,
+          "workspaceId": null,
+          "sessionId": "36200219-1ea0-43ff-8a8d-f119c68c56ca",
+          "taskId": null,
+          "payload": {
+            "deliveryId": "01M4B52E736CHSSHMH7DSETMBZ",
+            "attemptId": "01M4B532CJ9REA26C5Z349MHGF",
+            "attemptCount": 3,
+            "mode": "submit",
+            "result": "accepted",
+            "reason": null,
+            "runtimeIdentity": "898eabb7-ea2f-4286-996e-1213bace164f",
+            "userMessageAt": 1791375784163,
+            "preparationStartedAt": 1791375804818,
+            "resultAppliedAt": 1791375805965,
+            "runtimeAcceptedAt": 1791375805927,
+            "wakeReadyAt": 1791375803660
+          },
+          "createdAt": 1791375805965
+        },
+        {
+          "id": "c4cea3e6-9dd1-49a1-af81-f4ab4389320b",
+          "eventType": "prompt_delivery.retry",
+          "actorType": "system",
+          "actorId": null,
+          "workspaceId": null,
+          "sessionId": "36200219-1ea0-43ff-8a8d-f119c68c56ca",
+          "taskId": null,
+          "payload": {
+            "deliveryId": "01M4B52E736CHSSHMH7DSETMBZ",
+            "attemptId": "01M4B52RZ1VA829M0RG9Y3DP3T",
+            "attemptCount": 2,
+            "mode": "submit",
+            "result": "retry",
+            "reason": "not_ready",
+            "runtimeIdentity": null,
+            "userMessageAt": 1791375784163,
+            "preparationStartedAt": 1791375795169,
+            "resultAppliedAt": 1791375800169,
+            "runtimeAcceptedAt": null,
+            "wakeReadyAt": null
+          },
+          "createdAt": 1791375800169
+        },
+        {
+          "id": "71628a4f-1d6d-4ebb-b013-332cb0cb1407",
+          "eventType": "prompt_delivery.retry",
+          "actorType": "system",
+          "actorId": null,
+          "workspaceId": null,
+          "sessionId": "36200219-1ea0-43ff-8a8d-f119c68c56ca",
+          "taskId": null,
+          "payload": {
+            "deliveryId": "01M4B52E736CHSSHMH7DSETMBZ",
+            "attemptId": "01M4B52F6GJCT8TC6AAEJM34N6",
+            "attemptCount": 1,
+            "mode": "submit",
+            "result": "retry",
+            "reason": "not_ready",
+            "runtimeIdentity": null,
+            "userMessageAt": 1791375784163,
+            "preparationStartedAt": 1791375785168,
+            "resultAppliedAt": 1791375790168,
+            "runtimeAcceptedAt": null,
+            "wakeReadyAt": null
+          },
+          "createdAt": 1791375790168
+        }
+      ],
+      "actualPromptStartRows": [
+        {
+          "id": "01M4B533F9GA7W0E83T97SNHSM",
+          "promptStartedAt": 1791375805929,
+          "ingestedAt": 1791375806000,
+          "workspace_id": "01M4B4YSGN7PRF30WA3GYB9KYK",
+          "message": "ACP Prompt started",
+          "context": "{\"acpSessionId\":\"01a1164f-b8e1-7823-b3dd-0589df737e6b\",\"blockCount\":1,\"deliveryId\":\"01M4B52E736CHSSHMH7DSETMBZ\",\"promptId\":1,\"viewerId\":\"control-plane\"}"
+        }
+      ]
+    },
+    {
+      "label": "b",
+      "deliveryId": "01M4B52XQHZ8KJT6HPPAQ2DYCH",
+      "observations": [
+        {
+          "observedAt": 1791375818574,
+          "delivery": {
+            "id": "01M4B52XQHZ8KJT6HPPAQ2DYCH",
+            "deliveryState": "retry_wait",
+            "deliveryAttempts": 2,
+            "createdAt": 1791375800049,
+            "lastDeliveryAt": 1791375812540,
+            "nextAttemptAt": 1791375823956,
+            "attemptStartedAt": 1791375812540,
+            "acceptedAt": null,
+            "ackedAt": null,
+            "receiptState": null,
+            "runtimeIdentity": "898eabb7-ea2f-4286-996e-1213bace164f",
+            "lastError": "Target VM is currently processing a prompt"
+          }
+        },
+        {
+          "observedAt": 1791375820008,
+          "delivery": {
+            "id": "01M4B52XQHZ8KJT6HPPAQ2DYCH",
+            "deliveryState": "retry_wait",
+            "deliveryAttempts": 2,
+            "createdAt": 1791375800049,
+            "lastDeliveryAt": 1791375812540,
+            "nextAttemptAt": 1791375823956,
+            "attemptStartedAt": 1791375812540,
+            "acceptedAt": null,
+            "ackedAt": null,
+            "receiptState": null,
+            "runtimeIdentity": "898eabb7-ea2f-4286-996e-1213bace164f",
+            "lastError": "Target VM is currently processing a prompt"
+          }
+        },
+        {
+          "observedAt": 1791375821331,
+          "delivery": {
+            "id": "01M4B52XQHZ8KJT6HPPAQ2DYCH",
+            "deliveryState": "retry_wait",
+            "deliveryAttempts": 2,
+            "createdAt": 1791375800049,
+            "lastDeliveryAt": 1791375812540,
+            "nextAttemptAt": 1791375823956,
+            "attemptStartedAt": 1791375812540,
+            "acceptedAt": null,
+            "ackedAt": null,
+            "receiptState": null,
+            "runtimeIdentity": "898eabb7-ea2f-4286-996e-1213bace164f",
+            "lastError": "Target VM is currently processing a prompt"
+          }
+        },
+        {
+          "observedAt": 1791375822670,
+          "delivery": {
+            "id": "01M4B52XQHZ8KJT6HPPAQ2DYCH",
+            "deliveryState": "retry_wait",
+            "deliveryAttempts": 2,
+            "createdAt": 1791375800049,
+            "lastDeliveryAt": 1791375812540,
+            "nextAttemptAt": 1791375823956,
+            "attemptStartedAt": 1791375812540,
+            "acceptedAt": null,
+            "ackedAt": null,
+            "receiptState": null,
+            "runtimeIdentity": "898eabb7-ea2f-4286-996e-1213bace164f",
+            "lastError": "Target VM is currently processing a prompt"
+          }
+        },
+        {
+          "observedAt": 1791375824020,
+          "delivery": {
+            "id": "01M4B52XQHZ8KJT6HPPAQ2DYCH",
+            "deliveryState": "retry_wait",
+            "deliveryAttempts": 2,
+            "createdAt": 1791375800049,
+            "lastDeliveryAt": 1791375812540,
+            "nextAttemptAt": 1791375823956,
+            "attemptStartedAt": 1791375812540,
+            "acceptedAt": null,
+            "ackedAt": null,
+            "receiptState": null,
+            "runtimeIdentity": "898eabb7-ea2f-4286-996e-1213bace164f",
+            "lastError": "Target VM is currently processing a prompt"
+          }
+        },
+        {
+          "observedAt": 1791375825367,
+          "delivery": {
+            "id": "01M4B52XQHZ8KJT6HPPAQ2DYCH",
+            "deliveryState": "delivering",
+            "deliveryAttempts": 3,
+            "createdAt": 1791375800049,
+            "lastDeliveryAt": 1791375823956,
+            "nextAttemptAt": 1791375823956,
+            "attemptStartedAt": 1791375823956,
+            "acceptedAt": null,
+            "ackedAt": null,
+            "receiptState": null,
+            "runtimeIdentity": "898eabb7-ea2f-4286-996e-1213bace164f",
+            "lastError": null
+          }
+        },
+        {
+          "observedAt": 1791375826696,
+          "delivery": {
+            "id": "01M4B52XQHZ8KJT6HPPAQ2DYCH",
+            "deliveryState": "retry_wait",
+            "deliveryAttempts": 3,
+            "createdAt": 1791375800049,
+            "lastDeliveryAt": 1791375823956,
+            "nextAttemptAt": 1791375845401,
+            "attemptStartedAt": 1791375823956,
+            "acceptedAt": null,
+            "ackedAt": null,
+            "receiptState": null,
+            "runtimeIdentity": "898eabb7-ea2f-4286-996e-1213bace164f",
+            "lastError": "Target VM is currently processing a prompt"
+          }
+        },
+        {
+          "observedAt": 1791375828053,
+          "delivery": {
+            "id": "01M4B52XQHZ8KJT6HPPAQ2DYCH",
+            "deliveryState": "retry_wait",
+            "deliveryAttempts": 3,
+            "createdAt": 1791375800049,
+            "lastDeliveryAt": 1791375823956,
+            "nextAttemptAt": 1791375845401,
+            "attemptStartedAt": 1791375823956,
+            "acceptedAt": null,
+            "ackedAt": null,
+            "receiptState": null,
+            "runtimeIdentity": "898eabb7-ea2f-4286-996e-1213bace164f",
+            "lastError": "Target VM is currently processing a prompt"
+          }
+        },
+        {
+          "observedAt": 1791375829372,
+          "delivery": {
+            "id": "01M4B52XQHZ8KJT6HPPAQ2DYCH",
+            "deliveryState": "retry_wait",
+            "deliveryAttempts": 3,
+            "createdAt": 1791375800049,
+            "lastDeliveryAt": 1791375823956,
+            "nextAttemptAt": 1791375845401,
+            "attemptStartedAt": 1791375823956,
+            "acceptedAt": null,
+            "ackedAt": null,
+            "receiptState": null,
+            "runtimeIdentity": "898eabb7-ea2f-4286-996e-1213bace164f",
+            "lastError": "Target VM is currently processing a prompt"
+          }
+        },
+        {
+          "observedAt": 1791375830733,
+          "delivery": {
+            "id": "01M4B52XQHZ8KJT6HPPAQ2DYCH",
+            "deliveryState": "retry_wait",
+            "deliveryAttempts": 3,
+            "createdAt": 1791375800049,
+            "lastDeliveryAt": 1791375823956,
+            "nextAttemptAt": 1791375845401,
+            "attemptStartedAt": 1791375823956,
+            "acceptedAt": null,
+            "ackedAt": null,
+            "receiptState": null,
+            "runtimeIdentity": "898eabb7-ea2f-4286-996e-1213bace164f",
+            "lastError": "Target VM is currently processing a prompt"
+          }
+        },
+        {
+          "observedAt": 1791375832060,
+          "delivery": {
+            "id": "01M4B52XQHZ8KJT6HPPAQ2DYCH",
+            "deliveryState": "retry_wait",
+            "deliveryAttempts": 3,
+            "createdAt": 1791375800049,
+            "lastDeliveryAt": 1791375823956,
+            "nextAttemptAt": 1791375845401,
+            "attemptStartedAt": 1791375823956,
+            "acceptedAt": null,
+            "ackedAt": null,
+            "receiptState": null,
+            "runtimeIdentity": "898eabb7-ea2f-4286-996e-1213bace164f",
+            "lastError": "Target VM is currently processing a prompt"
+          }
+        },
+        {
+          "observedAt": 1791375833370,
+          "delivery": {
+            "id": "01M4B52XQHZ8KJT6HPPAQ2DYCH",
+            "deliveryState": "retry_wait",
+            "deliveryAttempts": 3,
+            "createdAt": 1791375800049,
+            "lastDeliveryAt": 1791375823956,
+            "nextAttemptAt": 1791375845401,
+            "attemptStartedAt": 1791375823956,
+            "acceptedAt": null,
+            "ackedAt": null,
+            "receiptState": null,
+            "runtimeIdentity": "898eabb7-ea2f-4286-996e-1213bace164f",
+            "lastError": "Target VM is currently processing a prompt"
+          }
+        },
+        {
+          "observedAt": 1791375834916,
+          "delivery": {
+            "id": "01M4B52XQHZ8KJT6HPPAQ2DYCH",
+            "deliveryState": "retry_wait",
+            "deliveryAttempts": 3,
+            "createdAt": 1791375800049,
+            "lastDeliveryAt": 1791375823956,
+            "nextAttemptAt": 1791375834616,
+            "attemptStartedAt": 1791375823956,
+            "acceptedAt": null,
+            "ackedAt": null,
+            "receiptState": null,
+            "runtimeIdentity": "898eabb7-ea2f-4286-996e-1213bace164f",
+            "lastError": "Target VM is currently processing a prompt"
+          }
+        },
+        {
+          "observedAt": 1791375836306,
+          "delivery": {
+            "id": "01M4B52XQHZ8KJT6HPPAQ2DYCH",
+            "deliveryState": "delivering",
+            "deliveryAttempts": 4,
+            "createdAt": 1791375800049,
+            "lastDeliveryAt": 1791375835616,
+            "nextAttemptAt": 1791375834616,
+            "attemptStartedAt": 1791375835616,
+            "acceptedAt": null,
+            "ackedAt": null,
+            "receiptState": null,
+            "runtimeIdentity": "898eabb7-ea2f-4286-996e-1213bace164f",
+            "lastError": null
+          }
+        },
+        {
+          "observedAt": 1791375837621,
+          "delivery": {
+            "id": "01M4B52XQHZ8KJT6HPPAQ2DYCH",
+            "deliveryState": "acked",
+            "deliveryAttempts": 4,
+            "createdAt": 1791375800049,
+            "lastDeliveryAt": 1791375835616,
+            "nextAttemptAt": null,
+            "attemptStartedAt": 1791375835616,
+            "acceptedAt": 1791375807175,
+            "ackedAt": 1791375836858,
+            "receiptState": "in_flight",
+            "runtimeIdentity": "898eabb7-ea2f-4286-996e-1213bace164f",
+            "lastError": null
+          }
+        }
+      ],
+      "activityEvents": [
+        {
+          "id": "f928b2ea-1842-471b-97a6-1300beabfa88",
+          "eventType": "prompt_delivery.accepted",
+          "actorType": "system",
+          "actorId": null,
+          "workspaceId": null,
+          "sessionId": "36200219-1ea0-43ff-8a8d-f119c68c56ca",
+          "taskId": null,
+          "payload": {
+            "deliveryId": "01M4B52XQHZ8KJT6HPPAQ2DYCH",
+            "attemptId": "01M4B540F07ZBAPAGYMKNGVF8Z",
+            "attemptCount": 4,
+            "mode": "submit",
+            "result": "accepted",
+            "reason": null,
+            "runtimeIdentity": "898eabb7-ea2f-4286-996e-1213bace164f",
+            "userMessageAt": 1791375800049,
+            "preparationStartedAt": 1791375835616,
+            "resultAppliedAt": 1791375836858,
+            "runtimeAcceptedAt": 1791375807175,
+            "wakeReadyAt": 1791375803660
+          },
+          "createdAt": 1791375836858
+        },
+        {
+          "id": "e162e86e-7a07-4845-8bab-f3ebab125309",
+          "eventType": "prompt_delivery.retry",
+          "actorType": "system",
+          "actorId": null,
+          "workspaceId": null,
+          "sessionId": "36200219-1ea0-43ff-8a8d-f119c68c56ca",
+          "taskId": null,
+          "payload": {
+            "deliveryId": "01M4B52XQHZ8KJT6HPPAQ2DYCH",
+            "attemptId": "01M4B53N2M2NCE4W2J1VBYHPSH",
+            "attemptCount": 3,
+            "mode": "submit",
+            "result": "retry",
+            "reason": "busy",
+            "runtimeIdentity": "898eabb7-ea2f-4286-996e-1213bace164f",
+            "userMessageAt": 1791375800049,
+            "preparationStartedAt": 1791375823956,
+            "resultAppliedAt": 1791375825401,
+            "runtimeAcceptedAt": null,
+            "wakeReadyAt": 1791375803660
+          },
+          "createdAt": 1791375825401
+        },
+        {
+          "id": "dc9f3d5b-181a-47a0-826c-a56b38882a35",
+          "eventType": "prompt_delivery.retry",
+          "actorType": "system",
+          "actorId": null,
+          "workspaceId": null,
+          "sessionId": "36200219-1ea0-43ff-8a8d-f119c68c56ca",
+          "taskId": null,
+          "payload": {
+            "deliveryId": "01M4B52XQHZ8KJT6HPPAQ2DYCH",
+            "attemptId": "01M4B539XWEVSQ4TS30ZWC5BZ1",
+            "attemptCount": 2,
+            "mode": "submit",
+            "result": "retry",
+            "reason": "busy",
+            "runtimeIdentity": "898eabb7-ea2f-4286-996e-1213bace164f",
+            "userMessageAt": 1791375800049,
+            "preparationStartedAt": 1791375812540,
+            "resultAppliedAt": 1791375813956,
+            "runtimeAcceptedAt": null,
+            "wakeReadyAt": 1791375803660
+          },
+          "createdAt": 1791375813956
+        },
+        {
+          "id": "c42b1fdf-74ff-49a5-9944-b068400877ad",
+          "eventType": "prompt_delivery.retry",
+          "actorType": "system",
+          "actorId": null,
+          "workspaceId": null,
+          "sessionId": "36200219-1ea0-43ff-8a8d-f119c68c56ca",
+          "taskId": null,
+          "payload": {
+            "deliveryId": "01M4B52XQHZ8KJT6HPPAQ2DYCH",
+            "attemptId": "01M4B533J7JJ3WB3DYT3Q1886A",
+            "attemptCount": 1,
+            "mode": "submit",
+            "result": "retry",
+            "reason": "busy",
+            "runtimeIdentity": "898eabb7-ea2f-4286-996e-1213bace164f",
+            "userMessageAt": 1791375800049,
+            "preparationStartedAt": 1791375806023,
+            "resultAppliedAt": 1791375807382,
+            "runtimeAcceptedAt": null,
+            "wakeReadyAt": 1791375803660
+          },
+          "createdAt": 1791375807382
+        }
+      ],
+      "actualPromptStartRows": [
+        {
+          "id": "01M4B541M5R52YX3NSQ1A6010D",
+          "promptStartedAt": 1791375836805,
+          "ingestedAt": 1791375836000,
+          "workspace_id": "01M4B4YSGN7PRF30WA3GYB9KYK",
+          "message": "ACP Prompt started",
+          "context": "{\"acpSessionId\":\"01a1164f-b8e1-7823-b3dd-0589df737e6b\",\"blockCount\":1,\"deliveryId\":\"01M4B52XQHZ8KJT6HPPAQ2DYCH\",\"promptId\":2,\"viewerId\":\"control-plane\"}"
+        }
+      ]
+    }
+  ],
+  "profile": {
+    "id": "01M4B4YC23EYXEPR5DA299H9V4",
+    "agentType": "openai-codex",
+    "model": "gpt-6.1-sol",
+    "effort": "auto",
+    "permissionMode": "bypassPermissions",
+    "runtime": "cf-container",
+    "taskMode": "task",
+    "githubCliPolicy": {
+      "mode": "custom",
+      "repositoryScope": "project",
+      "permissions": {
+        "contents": "write",
+        "pullRequests": "write",
+        "issues": "none",
+        "actions": "none",
+        "packages": "none"
+      }
+    }
+  },
+  "baselineRuntimeContract": {
+    "version": 1,
+    "agentType": "openai-codex",
+    "model": "gpt-6.1-sol",
+    "effort": "auto",
+    "permissionMode": "bypassPermissions",
+    "settingsResolved": true,
+    "promptKind": "task",
+    "taskContext": {
+      "projectId": "01KJNR9R3TEN3KX1ETE33852R8",
+      "taskId": "01M4B4YQ4F2HF0YX5Q62MGFVPN",
+      "taskMode": "task"
+    }
+  },
+  "readinessProducer": {
+    "level": "info",
+    "timestamp": "2026-10-07T12:23:23.869Z",
+    "event": "session_wake.ready_signaled",
+    "projectId": "01KJNR9R3TEN3KX1ETE33852R8",
+    "sessionId": "36200219-1ea0-43ff-8a8d-f119c68c56ca",
+    "workspaceId": "01M4B4YSGN7PRF30WA3GYB9KYK",
+    "runtime": "cf-container",
+    "readyAt": 1791375803660,
+    "signalStartedAt": 1791375803660,
+    "signaledAt": 1791375803869,
+    "released": 2
+  },
+  "assistantTokens": "CONTRACT_BASELINE_READYWAKE_READY_A_0CW824WAKE_READY_B_0CW824",
+  "finalState": {
+    "activity": "idle",
+    "activityAt": 1791375842493,
+    "statusError": null,
+    "currentPlan": null,
+    "planUpdatedAt": null,
+    "promptStartedAt": null,
+    "lastStopReason": null,
+    "agentType": "openai-codex",
+    "activitySource": "vm_report",
+    "activityReason": "completed",
+    "runtimeWorkState": "inactive",
+    "runtimeWorkCount": 0,
+    "runtimeWorkSource": "acp_tool_call",
+    "runtimeWorkUpdatedAt": 1791375842493,
+    "runtimeWorkProgressAt": 1791375822140
+  },
+  "taskExecutionStep": "awaiting_followup",
+  "assertions": {
+    "userToReadyMs": 19497,
+    "readyToRealPromptStartMs": 2269,
+    "userToRealPromptStartMs": 21766,
+    "previousRetryDeadlineAt": 1791375810169,
+    "realStartBeforePreviousRetryMs": 4240,
+    "orderedActualStarts": true,
+    "bothAckedAndNextAttemptNull": true,
+    "receiptOrSessionStateNotUsedAsActualStart": true,
+    "coordinatorOwnedSleepRequests": 1
+  },
+  "limits": [
+    "Live Instant A bypassed a 10-second retry; saturated maximum-backoff coverage is deterministic.",
+    "Single sleep/wake request is coordinator-owned harness evidence, not an exhaustive count of all runtime recovery attempts."
+  ]
+}
