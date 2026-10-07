@@ -1,6 +1,6 @@
-# Draft: event-backed agent messaging and coordination guidance
+# Event-backed agent messaging and coordination guidance
 
-**Status:** active (release continuation authorized 2026-10-07)
+**Status:** implementation complete; release verification pending (authorized 2026-10-07)
 **SAM task:** 01M3WPVNYF2JX9CT94W7NV6BTS
 **Branch:** `sam/create-preliminary-draft-pr-nv6bts`
 **Design source:** SAM Idea 01M3WAGPW113X8VYMHACWHY6KJ (incl. adoption/feature-coordination addendum)
@@ -16,11 +16,18 @@ Raphaël requested: “Get it green and merged please.” This supersedes the or
 - [x] Move coordination migration to the next unused prefix (0186; 0185 reserved by runtime-contract release).
 - [x] Preserve queued notification during exhausted-subscription renewal.
 - [x] Wire configuration overrides and enable channel messaging in managed deployment.
-- [ ] Re-run local quality/worker checks and specialist review.
+- [x] Re-run local quality/worker checks and specialist review.
 - [ ] Staging: send/read/ack and sleeping recipient notification; cleanup.
-- [ ] Update final PR scope/evidence, remove draft gate, obtain green CI.
+- [x] Update PR scope/evidence, remove draft gate, obtain green CI at 1c1b8e56c.
 - [ ] Request CodeRabbit and wait, resolve any received findings.
-- [ ] Archive task, merge and verify production deployment.
+- [x] Completion validator passed; archive implementation task before release verification.
+- [ ] Merge and verify production deployment.
+
+### Implementation validation and release handoff (2026-10-07)
+
+`pnpm lint`, `pnpm typecheck`, `pnpm build`, all 21 package test tasks (API 11,499 tests), `pnpm check:fast` and all 658 quality/deployment script tests pass. CI run 37630373693 passes all checks at 1c1b8e56c, including 1,386 Worker tests in 110 files. SonarCloud is OK on that commit, with zero bugs/vulnerabilities; remaining maintainability notes are recorded in the PR. Full local Worker run passed 1,385/1,386: an unrelated credential-limits test assumed random credential suffix ordering. Sorting its expected references preserves exact membership coverage; reviewer PASS and focused corrected rerun 4/4. Final CI rechecks that correction.
+
+All local specialists returned PASS or ADDRESSED. Final task-completion verdict: A/B/C/E/F PASS, D N/A, no unresolved HIGH. Archival records implementation completion, not release completion. The explicit release checklist above and PR #2213 remain the durable source for pending live verification, CodeRabbit, merge and deployment. Shared staging is reserved by sleep/wake coordinator 01M4B28P7RY8Y9DPXEG8YJ81TB until explicit handoff; no staging exemption. Bounded one-node/two-conversation send/read/ack and sleeping-recipient proof is prepared, with owned cleanup.
 
 ## Problem
 
@@ -115,7 +122,7 @@ coordination channel to descendants.
 
 ### Remaining (documented in the PR, not implemented)
 
-- Staging/live validation of everything above (deferred by the task boundary).
+- Staging/live validation of everything above (required before merge under the release authorization).
 - Target eligibility is unchanged: the channel path accepts a sleeping recipient chat and
   queues its wake (tested), but the existing tool target resolution still decides which
   tasks can be messaged, and restoring a genuinely sleeping session on delivery is unverified.
@@ -190,8 +197,9 @@ coordination channel to descendants.
 - [x] api-reference skill, API/config/env docs updated
 - [x] Focused re-reviews of the fixes: cloudflare-specialist PASS (2 LOW fixed in 523e82420:
       release candidates not capped at the share; idea cited at the known limit); security-auditor
-      verified all fixes, LOW capacity churn accepted, HIGH project-visible history escalated
-      as an open human decision (see Remaining)
+      verified all fixes, LOW capacity churn accepted. The original draft privacy escalation
+      is superseded: project-visible history matches the design and existing authorization boundary;
+      the 2026-10-07 security re-review passed.
 
 ### Tests
 
@@ -218,7 +226,7 @@ coordination channel to descendants.
       released pair resumes; least recently matched released first
 - [x] Each new guard proven discriminating (remove → test red → restore)
 
-## Acceptance criteria (draft)
+## Implementation acceptance criteria
 
 - [x] With the flag off, existing messaging behavior and tests are unchanged. (worker: "keeps the legacy raw-prompt path…"; full route/service unit suites green)
 - [x] With the flag on, an existing send creates one reusable shared channel and both
@@ -232,11 +240,11 @@ coordination channel to descendants.
 - [x] Bounded: message bytes, DM channel cardinality, subscriptions per pair, retention. (payload-cap, G10, rotation tests; retention reuses canonical event retention)
 - [x] Coordination channel reaches children and grandchildren and survives retry/recovery. (C1, C4, C5)
 - [x] Guidance is concise, at entry points, and does not claim unverified families/modes work. (instruction tests pin "not verified yet" wording)
-- [x] Draft PR documents scope, architecture, before/after, implemented vs remaining,
-      compatibility questions, checks, risks, and deferred staging validation.
-      (PR #2213, draft, `needs-human-review` for the open privacy decision)
+- [x] PR #2213 documents scope, architecture, before/after, remaining release checks,
+      compatibility, risks and completed specialist evidence. The draft/privacy gate is
+      superseded by authorized release continuation; staging still blocks merge.
 
-## Notes
+## Original draft history (2026-10-01/02)
 
 - Read-only production evidence only (one D1 aggregate, one Workers Logs query); no probes,
   no mutations.
