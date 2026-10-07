@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, or } from 'drizzle-orm';
+import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -255,7 +255,7 @@ export async function ensureSessionSnapshotForSleep(
   if (options.expectedNodeId) {
     return ensureUnhealthyNodeSleepPlaceholder(env, row, options.expectedNodeId);
   }
-  await db
+  const persisted = await db
     .insert(schema.sessionSnapshots)
     .values(row)
     .onConflictDoUpdate({
@@ -271,10 +271,19 @@ export async function ensureSessionSnapshotForSleep(
         userId: input.userId,
         agentSessionId: input.agentSessionId,
         runtime: input.runtime,
-        runtimeContractJson,
+        runtimeContractJson: sql`COALESCE(${runtimeContractJson}, ${schema.sessionSnapshots.runtimeContractJson})`,
         updatedAt: now.toISOString(),
       },
-    });
+      setWhere: and(
+        eq(schema.sessionSnapshots.userId, input.userId),
+        input.projectId === null
+          ? isNull(schema.sessionSnapshots.projectId)
+          : eq(schema.sessionSnapshots.projectId, input.projectId)
+      ),
+    })
+    .returning({ id: schema.sessionSnapshots.id })
+    .get();
+  if (!persisted) throw new Error('Session snapshot ownership conflict');
   return true;
 }
 

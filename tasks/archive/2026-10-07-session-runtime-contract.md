@@ -16,9 +16,10 @@ Affected boundaries: agent-session-bootstrap.ts, node-agent-session-snapshots.ts
 - [x] Add meaningful regression tests for modes, settings, interactions, task/chat and both runtimes.
 - [x] Update affected user docs and source Idea.
 - [x] Run applicable local quality checks and CI.
-- [ ] Complete independent Go, Cloudflare, security, test, constitution, docs and completion reviews.
-- [ ] Coordinate bounded shared staging; real sleep→wake, answer Manual request card, restored task completion/push/PR; clean up owned resources.
-- [ ] Archive only after completion validation; merge after normal gates and prove production deployment.
+- [x] Complete independent Go, Cloudflare, security, test, constitution, docs and completion reviews.
+- [x] Coordinate bounded shared staging; real sleep→wake, answer Manual request card, restored task completion/push/PR; clean up owned resources.
+- [x] Archive only after independent completion validation PASS.
+- [ ] Release operation: merge after latest CI/CodeRabbit gates and prove production deployment; recorded in PR/source Idea after merge.
 
 ## Acceptance criteria
 
@@ -101,3 +102,37 @@ The same fixture was safely parked by Sleep200 at14:46:09.403 with the original 
 ### Full-CI dependency isolation correction
 
 Head5baa full CI passed Workers/Go/build/lint/typecheck/browser checks but failed API tests in12 existing suites because two new eager imports pulled OAuth/auth initialization into their narrow logger fixtures. The exact23 failures were reproduced before repair. The unchanged clone-timeout getter and sole120000default now live in a lightweight module with a compatible node-agent re-export; provider resolution loads only after scoped D1 identity validation during actual restoration. No production logging, authorization, provider query, protected-branch guard or timeout behavior changed. Existing mocks remain unchanged. Independent final verification passes19files/290tests, including all12 formerly failing files, metadata restoration, real GitLab success/refusal, timeout compatibility and a logger import trap. Independent security/domain review PASS; latest CI must be rerun before merge.
+
+### Final actual fixture acceptance and release (16:05 UTC)
+
+All four runtime-contract acceptance fixtures PASS. Same original Sol Instant task automatically pushed38530c93911c4bfd05b385e7bbce8b2e2c7f89bd and created fixturePR4; canonical workspace_callback a65320cc reports pushed=true/originaltask. Original restored mcp.sam-mcp.complete_task completed the original task at15:35:24.117Z, error=null/outputPrUrl4. No manual staging/commit/push/PR or HTTP/D1 completion. Curated instant-task.json contains independently reviewed receipts. PR4 closed without merge; exact branch deleted; Stop bounded retry200, strict node/workspace deleted and snapshot zero; delivery-owned profileDELETE200/GET404 and completed task audit retained.
+
+Manual Instant genuinely slept15:49:56.061, then only its owned temporary profile changed Manual→Bypass. Saved/restored contract equality retains Manual, original model, ACP permissions/forms/URLs and conversation context. Actual Write8708edb6 reached a390x844 browser; exact Yes allow once answered1791388353041, delivery_confirmed1791388354788, successful Write/CONTRACT_MANUAL_INSTANT_ANSWERED/idle1791388356203/zero browser errors. Curated manual-instant.json plus authentic request/answer PNGs independently inspected PASS. Owned Stop bounded retry200/workspaceDeletedtrue, profileDELETE200/GET404, scoped active workspace/node/snapshot counts zero. Two initial Instant Stop500s are deferred in nonblocking Idea01M4BH36AZV3Q2J8MH43JXY8M6, with request IDs preserved and no speculative diagnosis.
+
+Final guarded flag restore37648102691SUCCESS: all three false, activeAPI8b19aee2-667a-4824-bb50-60ff7bd4c180, unchanged codeETag35c82b7fa0c8a03c160dd6d72cc7ae5c7408bb86029406e5e8385810ccad57a9 and355bindings. Owned temporary flags remote branch/worktree deleted. Root explicitly released staging to coordinator for original shared Archive LAST; no further root compute/prompts/deploys. Latest deployed combinedbbaee36 has successful deploy children; parent37640782379 FAILED before smoke scheduling, recovered exact existing live smoke12/12PASS with coordinator/parent approval. Import-only2021 integratedad16 was independently dry-run reviewed, not falsely reported deployed.
+
+Latest head2021 CI37642868685 all substantive checks PASS; specialist evidence deliberately pending final completion review. Final shared Archive/resource/R2 receipts, mandatory task-completion validation and archive, final CI/CodeRabbit, merge and production remain release gates. Earlier pending/provenance sections above are chronological evidence superseded by these final receipts.
+
+### Shared Archive LAST and final cleanup PASS
+
+Coordinator01M4B28P7RY8Y9DPXEG8YJ81TB final receipt: normal mobile dock ArchivePOST200 completed16:06:11.797Z; repeatclose200 retains SAMEclosedAt. Desktop/mobile before/confirmation/ended screens reviewed without errors/overflow. Independent D116:06:45 confirms original task completed with conversation retained, workspaceNULL, exact workspace/snapshot absent, completed status events exactly1(before0). All three original R2 objectsGET404, liveNodes=[], migration0184/0185 ledger unchanged. Original temporary profileDELETE200/GET40416:07:20; task/chat/project audit retained. Immutable Manual evidenceb290 and scoped strict deletion proof independently rechecked16:07:37 PASS. Credential-free coordinator receipt is shared-cleanup.json.
+
+Only release actions remain: mandatory final independent completion verdict before archive; publish archival evidence/latest CI; request CodeRabbit once and observe per policy; merge and production proof. These are intentionally pending operational gates, not omitted implementation/acceptance criteria. Latest maincc9891b4f is blog-only PR2263, no overlapping runtime code.
+
+### Mandatory final completion review and archival
+
+Independent `/root/cloudflare_contract_review` final task-completion-validator PASS on51a4521f4 against latestmaincc989: checksA-F, no uncovered findings/criteria/blockers. Implementation, all four actual fixtures and final strict shared cleanup validated. Full credential-free verdict in completion-review.md. Task archived only after this verdict. Latest CI/CodeRabbit/merge/production are intentionally pending release actions and will be recorded in PR/source Idea; archival does not falsely claim deployment complete.
+
+### Binding CodeRabbit corrections and reopened validation
+
+CodeRabbit review5445510008 arrived on final-green archivalhead4c43. All three valid findings fixed: default placeholder retains existing runtime contract via parameterizedCOALESCE, same-owner/project conditional update (nullable project handled), and RETURNING absence throws before lifecycle callers continue; no sibling lifecycle edits. Seven realSQLite regressions with actual uniquechat index cover bothruntimes, validreplacement, legacyNULL and three scoped conflicts/fullrowunchanged; red5fail21pass→green26pass. Stale Task ask-agent-to-push instruction removed. Existing standalone shim now exits1 before realgh on any empty/denied credential refresh; authentic process canaries demonstrate neither inherited nor stored HOME/GH_CONFIG_DIR credentials can bypass current policy. Success path unchanged.
+
+IndependentCF/constitution/docs/security and Go/security deltaPASS; test-engineer targeted/fullGo25packages1868top-level3043withsubtestsPASS; entireserverrace547top-level928withsubtestsPASS; independentfocusedrace1.137sPASS. RootfocusedAPI4files67PASS, typecheck/lint/format/diffPASS; actual sleep caller/Workers wiring checks finish before handoff. Credential-free coderabbit-corrections.json records exact findings. Task reopened after new findings, final completion revalidation required before rearchival. Earlier51a/4c review/archival remain historical truthful receipts, not the final delta gate.
+
+Latest parent directive transfers PR2261body/gates/merge ownership to parent01M4ABRWV97F54MQ1FFJFGHMBA; root owns narrow code/tests/reviews/evidence and production corroboration, no duplicate merge or CodeRabbit trigger. MessagingPR2213 occupies staging, so no root deploy/compute mutation. Final coordinated normal deploy/smoke verifies packaging after owner release; no repeat fourfixture matrix needed under independent domain assessment, no live credential poisoning or ad-hocD1 updates. Latest CI/incremental CodeRabbit/staging/merge/production remain explicitly pending release actions.
+
+Final delta checks: actual sleep caller43PASS, actual Cloudflare Workers/D1 snapshot wiring2PASS, final contract26PASS including same-owner nullable-project recovery, API67focusedPASS. APItypecheck/lint/format/diffPASS. Test-engineer entireGo andrace results plus independentGo/security andCF/constitution/docs/security reviews PASS. Parent-owned final CI/CodeRabbit/coordinated staging/merge/production are subsequent release gates; no code/acceptance criteria deferred.
+
+### Final correction validation and rearchival
+
+Mandatory independent task-completion revalidation PASS on8978d3130, checksA-F/no gaps/blockers. All seven localreviewers PASS with actual Go/API/WorkersD1 checks above. Task rearchived only after this verdict; exact receipt appended to completion-review.md. Parent-owned finalCI/incrementalCodeRabbit/coordinateddeploysmoke/merge/production are explicitly pending release operations; root will continue production corroboration and record final evidence.

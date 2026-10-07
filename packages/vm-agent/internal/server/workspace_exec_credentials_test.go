@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -43,15 +44,28 @@ func TestStandaloneRuntimeGitCommandUsesTrustedWorkspaceCredentialExchange(t *te
 }
 
 func TestStandaloneRuntimeGhCommandUsesRefreshShimAndFailsWithoutMint(t *testing.T) {
-	for _, mintStatus := range []int{http.StatusOK, http.StatusForbidden} {
-		t.Run(http.StatusText(mintStatus), func(t *testing.T) {
-			exchange := newStandaloneCredentialExchange(t, "owned-workspace", mintStatus, "fresh-runtime-token")
+	for _, tc := range []struct {
+		name           string
+		mintStatus     int
+		inheritedToken string
+	}{
+		{"fresh exchange", http.StatusOK, "stale-runtime-token"},
+		{"refused with inherited token", http.StatusForbidden, "stale-runtime-token"},
+		{"refused without inherited token", http.StatusForbidden, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			exchange := newStandaloneCredentialExchange(t, "owned-workspace", tc.mintStatus, "fresh-runtime-token")
 			systemBin := writeFakeGh(t, "system-gh")
+			var storedEnv []string
+			var canary string
+			if tc.mintStatus != http.StatusOK {
+				systemBin, storedEnv, canary = storedCredentialGh(t)
+			}
 			shimDir := t.TempDir()
 			shimPath := installShim(t, shimDir, exchange.helperPath, pathList(shimDir, systemBin))
 			s := &Server{config: &config.Config{Role: config.RoleStandalone, WorkspaceID: exchange.workspaceID}}
 			cmd, err := s.workspaceExecCommandWithEnv(context.Background(), "", "", t.TempDir(),
-				[]string{"SAM_WORKSPACE_ID=other-workspace", "GH_TOKEN=stale-runtime-token"}, "gh", "pr", "list")
+				[]string{"SAM_WORKSPACE_ID=other-workspace", "GH_TOKEN=" + tc.inheritedToken}, "gh", "pr", "list")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -65,15 +79,25 @@ func TestStandaloneRuntimeGhCommandUsesRefreshShimAndFailsWithoutMint(t *testing
 			cmd.Args[0] = shimPath
 			cmd.Env = withoutTestGitOverrides(cmd.Env)
 			cmd.Env = append(cmd.Env, "SAM_GIT_CREDENTIAL_ENDPOINT="+exchange.endpoint)
+			cmd.Env = append(cmd.Env, storedEnv...)
 			out, err := cmd.Output()
-			if err != nil {
-				t.Fatalf("runtime gh shim execution failed: %v", err)
-			}
-			if mintStatus == http.StatusOK && !bytes.Contains(out, []byte("GH_TOKEN=fresh-runtime-token")) {
-				t.Fatal("runtime gh did not receive refreshed credential")
-			}
-			if mintStatus != http.StatusOK && !bytes.Contains(out, []byte("GH_TOKEN= args=")) {
-				t.Fatal("runtime gh used credentials after mint was refused")
+			if tc.mintStatus == http.StatusOK {
+				if err != nil {
+					t.Fatalf("runtime gh shim execution failed: %v", err)
+				}
+				if !bytes.Contains(out, []byte("GH_TOKEN=fresh-runtime-token")) {
+					t.Fatal("runtime gh did not receive refreshed credential")
+				}
+			} else {
+				if err == nil {
+					t.Fatalf("runtime gh succeeded after mint was refused: %q", out)
+				}
+				if len(out) != 0 {
+					t.Fatalf("runtime gh read stored credentials after mint was refused: %q", out)
+				}
+				if _, err := os.Stat(canary); !os.IsNotExist(err) {
+					t.Fatalf("runtime gh was invoked after refusal: %v", err)
+				}
 			}
 			if exchange.mintCalls.Load() != 1 {
 				t.Fatal("runtime gh did not use scoped credential exchange")

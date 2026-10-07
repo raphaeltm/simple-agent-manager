@@ -12,7 +12,10 @@ import {
   loadSnapshotRuntimeContract,
   parseSessionRuntimeContract,
 } from '../../../src/services/session-runtime-contract';
-import { prepareSessionSnapshot } from '../../../src/services/session-snapshot-prepare';
+import {
+  ensureSessionSnapshotForSleep,
+  prepareSessionSnapshot,
+} from '../../../src/services/session-snapshot-prepare';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const { createAgentSessionOnNodeMock, restoreAgentSessionOnNodeMock, startAgentSessionOnNodeMock } =
@@ -96,6 +99,9 @@ beforeEach(() => {
     schema.tasks,
     schema.agentProfiles,
   ]);
+  sqlite.exec(
+    'CREATE UNIQUE INDEX session_snapshots_chat_unique ON session_snapshots(chat_session_id)'
+  );
   db = drizzle(createSqliteD1(sqlite), { schema });
 });
 afterEach(() => sqlite.close());
@@ -496,4 +502,104 @@ describe('recovery task runner transport preserves completion and delivery mode'
       );
     }
   );
+});
+
+describe('sleep placeholder retains the owned durable runtime contract', () => {
+  function placeholder(extra: Record<string, unknown> = {}) {
+    return {
+      workspaceId: 'ws-1',
+      nodeId: 'node-1',
+      projectId: 'proj-1',
+      userId: 'user-1',
+      chatSessionId: 'chat-1',
+      agentSessionId: 'agent-1',
+      runtime: 'vm' as const,
+      ...extra,
+    };
+  }
+  it.each(['vm', 'cf-container'] as const)(
+    'preserves a contract during %s recovery when session metadata is absent',
+    async (runtime) => {
+      await startSamAwareAgentSession(db, env(), input({ overrides: { permissionMode: 'plan' } }));
+      const saved = await sleep();
+      expect(
+        await ensureSessionSnapshotForSleep(
+          db,
+          env(),
+          placeholder({
+            runtime,
+            workspaceId: 'replacement-ws',
+            nodeId: 'replacement-node',
+            agentSessionId: null,
+          })
+        )
+      ).toBe(true);
+      const row = sqlite
+        .prepare('SELECT runtime_contract_json, workspace_id, node_id FROM session_snapshots')
+        .get() as Record<string, string>;
+      expect(JSON.parse(row.runtime_contract_json)).toEqual(saved);
+      expect(row.workspace_id).toBe('replacement-ws');
+      expect(row.node_id).toBe('replacement-node');
+    }
+  );
+  it('replaces the saved contract when a new owned session has resolved settings', async () => {
+    await startSamAwareAgentSession(db, env(), input());
+    const saved = await sleep();
+    const replacement = { ...saved, permissionMode: 'plan' };
+    sqlite
+      .prepare('UPDATE agent_sessions SET runtime_contract_json = ? WHERE id = ?')
+      .run(JSON.stringify(replacement), 'agent-1');
+    expect(await ensureSessionSnapshotForSleep(db, env(), placeholder())).toBe(true);
+    expect(
+      JSON.parse(
+        (
+          sqlite.prepare('SELECT runtime_contract_json FROM session_snapshots').get() as {
+            runtime_contract_json: string;
+          }
+        ).runtime_contract_json
+      )
+    ).toEqual(replacement);
+  });
+  it.each([{ userId: 'another-owner' }, { projectId: 'another-project' }, { projectId: null }])(
+    'refuses a conflicting owner/project without changing durable recovery state: %j',
+    async (conflict) => {
+      await startSamAwareAgentSession(db, env(), input());
+      await sleep();
+      const before = sqlite.prepare('SELECT * FROM session_snapshots').get();
+      await expect(
+        ensureSessionSnapshotForSleep(db, env(), placeholder({ ...conflict, agentSessionId: null }))
+      ).rejects.toThrow('Session snapshot ownership conflict');
+      expect(sqlite.prepare('SELECT * FROM session_snapshots').get()).toEqual(before);
+    }
+  );
+  it('keeps a first legacy placeholder contract nullable', async () => {
+    expect(
+      await ensureSessionSnapshotForSleep(
+        db,
+        env(),
+        placeholder({ agentSessionId: null, projectId: null })
+      )
+    ).toBe(true);
+    expect(
+      (
+        sqlite.prepare('SELECT runtime_contract_json FROM session_snapshots').get() as {
+          runtime_contract_json: null;
+        }
+      ).runtime_contract_json
+    ).toBeNull();
+    expect(
+      await ensureSessionSnapshotForSleep(
+        db,
+        env(),
+        placeholder({ agentSessionId: null, projectId: null, workspaceId: 'legacy-replacement' })
+      )
+    ).toBe(true);
+    expect(
+      (
+        sqlite.prepare('SELECT workspace_id FROM session_snapshots').get() as {
+          workspace_id: string;
+        }
+      ).workspace_id
+    ).toBe('legacy-replacement');
+  });
 });

@@ -1,0 +1,131 @@
+{
+  "status": "Live fixture acceptance PASS; owned cleanup complete; final shared Archive, merge and production gates recorded separately",
+  "deployedCandidate": "bbaee36fd5a6126d1bb4e0305a2886b636ed4e5d",
+  "deploymentRun": 37640782379,
+  "deploymentChildJob": 112858915274,
+  "deploymentGate": {
+    "childDeploy": "SUCCESS",
+    "parentWorkflow": "FAILURE before smoke scheduling",
+    "recoveredExistingLiveSmokeSuite": "12/12 PASS, coordinator independently verified",
+    "importOnlyCorrection": "2021f28de07847976c24f89703e1a1d022eecd37, integrated ad16e116f; identical runtime behavior reviewed separately, not a deployed alias"
+  },
+  "agentVersion": "1120e0404aa19c5e9fdee62e141522a50571f5cc",
+  "wakeDeliveryId": "01M4BFXVCXAAV5PZPXP9YNPTCV",
+  "chatSessionId": "36200219-1ea0-43ff-8a8d-f119c68c56ca",
+  "workspaceId": "01M4B4YSGN7PRF30WA3GYB9KYK",
+  "nodeId": "01M4B4YSAHYFGDZ247S6F9MG6D",
+  "savedContract": {
+    "version": 1,
+    "agentType": "openai-codex",
+    "model": "gpt-6.1-sol",
+    "effort": "auto",
+    "permissionMode": "bypassPermissions",
+    "opencodeProvider": null,
+    "opencodeBaseUrl": null,
+    "settingsResolved": true,
+    "acpInteractions": {
+      "enabled": false,
+      "formsEnabled": false,
+      "protocolVersion": 1,
+      "permissionDeadlineMs": 1800000,
+      "formDeadlineMs": 7200000,
+      "urlsEnabled": false,
+      "urlDeadlineMs": 600000,
+      "urlMaxChars": 8192,
+      "urlElicitationIdMaxChars": 256,
+      "urlRedirectDepth": 2,
+      "maxDeadlineMs": 14400000,
+      "deadlineMarginMs": 60000,
+      "requestMaxBytes": 32768,
+      "optionsMaxCount": 16,
+      "optionIdMaxChars": 128,
+      "optionNameMaxChars": 200,
+      "receiptLimit": 256,
+      "responseMaxBytes": 65536,
+      "formSchemaMaxBytes": 16384,
+      "formSchemaMaxProperties": 20,
+      "formSchemaMaxEnum": 50,
+      "answerMaxBytes": 16384,
+      "answerStringMaxBytes": 4096,
+      "settleRetryDelaysMs": [1000, 5000, 30000, 120000, 300000],
+      "settleRetrySteadyMs": 300000
+    },
+    "promptKind": "task",
+    "taskContext": {
+      "projectId": "01KJNR9R3TEN3KX1ETE33852R8",
+      "taskId": "01M4B4YQ4F2HF0YX5Q62MGFVPN",
+      "taskMode": "task"
+    }
+  },
+  "contractUnchangedAfterRestore": true,
+  "savedBaseCommit": "90839ea4d4484eae8670a1badbedcae44fd0d495",
+  "automaticCallback": {
+    "id": "a65320cc-4cbf-44aa-814a-3018d9faa349",
+    "eventType": "task.agent_completed",
+    "actorType": "workspace_callback",
+    "actorId": "01M4B4YSGN7PRF30WA3GYB9KYK",
+    "workspaceId": "01M4B4YSGN7PRF30WA3GYB9KYK",
+    "sessionId": "36200219-1ea0-43ff-8a8d-f119c68c56ca",
+    "taskId": "01M4B4YQ4F2HF0YX5Q62MGFVPN",
+    "payload": {
+      "title": "Verify staging wake-ready delivery baseline phase",
+      "pushed": true,
+      "branchName": "sam/coordinated-staging-wake-ready-mgfvpn",
+      "prUrl": "https://github.com/serverspresentation2025/crewai/pull/4"
+    },
+    "createdAt": 1791387220280
+  },
+  "remoteVerification": {
+    "method": "Read-only agent commands: local HEAD, git ls-remote exact branch, gh pr view4",
+    "localRemoteAndPrHead": "38530c93911c4bfd05b385e7bbce8b2e2c7f89bd",
+    "workingTree": "clean",
+    "manualGitDelivery": false,
+    "setup": "Only fixture-local Git identity configured when missing; one owned file append"
+  },
+  "originalMcpCompletion": {
+    "taskId": "01M4B4YQ4F2HF0YX5Q62MGFVPN",
+    "status": "completed",
+    "completedAt": "2026-10-07T15:35:24.117Z",
+    "errorMessage": null,
+    "outputPrUrl": "https://github.com/serverspresentation2025/crewai/pull/4",
+    "tool": "mcp.sam-mcp.complete_task",
+    "marker": "CONTRACT_INSTANT_TASK_COMPLETED",
+    "manualHttpOrD1Completion": false
+  },
+  "cleanup": {
+    "ownedPr4": "closed without merge/comment",
+    "ownedTaskBranch": "GET404",
+    "remoteCleanupMarker": "CONTRACT_INSTANT_FIXTURE_CLEANED",
+    "publicStop": {
+      "first": "HTTP500 f43b9a1b-4ece-47fc-ae6a-f96f1a33ee77 after partial stop",
+      "boundedIdempotentRetry": "HTTP200 status stopped/workspaceDeleted true"
+    },
+    "scopedActiveResources": {
+      "activeWorkspaceCount": 0,
+      "activeNodeCount": 0,
+      "snapshotCount": 0
+    },
+    "stoppedAuditMetadata": "retained",
+    "completedTaskAudit": "preserved",
+    "temporaryProfile": {
+      "id": "01M4B4YC23EYXEPR5DA299H9V4",
+      "owner": "wake-ready-delivery sibling",
+      "delete": "HTTP200",
+      "readback": "HTTP404",
+      "verifiedAt": 1791387900289,
+      "independentScopedResources": "workspace/node deleted, snapshot zero",
+      "taskAudit": "GET200/completed/original completion time and PR4 retained"
+    }
+  },
+  "finalFlags": {
+    "workflow": 37648102691,
+    "conclusion": "SUCCESS",
+    "allThreeFlags": false,
+    "activeApiVersion": "8b19aee2-667a-4824-bb50-60ff7bd4c180",
+    "unchangedCodeETag": "35c82b7fa0c8a03c160dd6d72cc7ae5c7408bb86029406e5e8385810ccad57a9",
+    "bindingCount": 355,
+    "ownedTemporaryRemoteBranchAndWorktree": "deleted"
+  },
+  "independentLiveEvidenceReview": "cloudflare_contract_review PASS: curated contract, task callback/MCP, browser request/answer images and owned cleanup",
+  "nonblockingStopFollowupIdea": "01M4BH36AZV3Q2J8MH43JXY8M6"
+}
