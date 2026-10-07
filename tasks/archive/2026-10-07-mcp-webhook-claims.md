@@ -20,8 +20,8 @@ Raphaël authorized implementing the agreed URL-first webhook flow, green PR and
 - [x] Add authenticated POST route using existing MCP token and current project capability, scoped atomic consumption/minting, no-store response, generic errors and safe logging.
 - [x] Revoke pending claims on REST credential rotation; configurable claim TTL with docs.
 - [x] Update API reference/contract and webhook user guide with safe runnable pipe-based instructions.
-- [ ] Run relevant tests, typecheck/lint/build/quality checks, local specialists and task-completion review.
-- [ ] Verify staging schema, live MCP create/redemption/replay/ingress plus identity controls; clean fixtures.
+- [x] Run relevant tests, typecheck/lint/build/quality checks, local specialists and task-completion review.
+- [x] Verify staging schema, live MCP create/redemption/replay/ingress plus identity controls; clean fixtures.
 
 ## Acceptance
 
@@ -36,4 +36,8 @@ Raphaël authorized implementing the agreed URL-first webhook flow, green PR and
 - TDD: new Worker suite failed before support existed; 19 real-worker tests now pass.
 - Existing GitHub parity and webhook ingress/management suites: 45 tests pass.
 - Local security/platform reviews completed; scope-based rate limiting, full-token shell validation, SQLite fixtures and MCP guide corrections applied. Task-completion review found no implementation gaps; shipping evidence pending.
-- Additive migration safety/order checks pass. Staging deployment run 37607076979 in progress.
+- Additive migration safety/order checks pass. Staging deployment and smoke run 37607076979 passed.
+
+- Full local API coverage: 820 files / 11,482 tests pass with two workers; other package coverage passed on retry. Full build/typecheck/lint and format ratchet pass.
+- Live staging tools/list, safe creation, GET/unauthenticated rejection, authenticated no-store redemption, replay rejection, filtered ingress, and ordinary curl-to-stdin delivery pass. Both temporary triggers deleted. Browser dashboard/projects/settings navigation had no runtime errors.
+- Implementation validated and archived; remaining release execution (latest-commit CI, CodeRabbit, merge, production deployment and live verification) is tracked in PR #2260 and SAM task progress. No runtime work omitted.
