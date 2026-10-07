@@ -1,0 +1,49 @@
+{
+  "zero_live_vm": [
+    {
+      "live_vm_count": 0
+    }
+  ],
+  "old_node": [
+    {
+      "node_count": 0
+    }
+  ],
+  "old_reservations": [
+    {
+      "active_workspaces": 0
+    }
+  ],
+  "preserved": [
+    {
+      "id": "01M4B1NAFZRYJ5JRD3AN463EXK",
+      "status": "sleeping",
+      "workspace_id": "01M4B5BEDFZBYFTJCSQA65TVBE",
+      "output_branch": "sam/bounded-staging-conversation-verification-463exk",
+      "snapshot_id": "01M4B1WXAANXDV512XTZAFKMNM",
+      "snapshot_status": "available",
+      "degradation": "none",
+      "sleep_status": "sleeping",
+      "base_commit": "eb8437022a55673dca81bf2d1b92dafdb7df8edd",
+      "sleeping_at": "2026-10-07T12:36:40.429Z",
+      "node_id": null,
+      "runtime_deletion_confirmed_at": "2026-10-07T13:33:55.625Z",
+      "runtime_deletion_proof": "node_runtime_terminated"
+    },
+    {
+      "id": "01M4B5XFMZT00CH2SR5ED0K5K2",
+      "status": "sleeping",
+      "workspace_id": "01M4B6DGH92JKY3Y33MBDW6ZEQ",
+      "output_branch": "sam/bounded-staging-runtime-contract-d0k5k2",
+      "snapshot_id": "01M4B5ZXDQQNKA7NR8AM8TSGCW",
+      "snapshot_status": "available",
+      "degradation": "none",
+      "sleep_status": "sleeping",
+      "base_commit": "4272b81a77a3f4f16f0e6e5b27eaba1b0be9d084",
+      "sleeping_at": "2026-10-07T12:51:24.604Z",
+      "node_id": null,
+      "runtime_deletion_confirmed_at": "2026-10-07T13:33:55.625Z",
+      "runtime_deletion_proof": "node_runtime_terminated"
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+[
+  {
+    "chatSessionId": "6ff2b572-f038-40a2-9902-1c2b87de73ee",
+    "kind": "home_r2_key",
+    "status": 200
+  },
+  {
+    "chatSessionId": "6ff2b572-f038-40a2-9902-1c2b87de73ee",
+    "kind": "wip_r2_key",
+    "status": 200
+  },
+  {
+    "chatSessionId": "6ff2b572-f038-40a2-9902-1c2b87de73ee",
+    "kind": "manifest_r2_key",
+    "status": 200
+  },
+  {
+    "chatSessionId": "e46ff3f1-4fbe-48ab-9ab2-a57c347fa811",
+    "kind": "home_r2_key",
+    "status": 200
+  },
+  {
+    "chatSessionId": "e46ff3f1-4fbe-48ab-9ab2-a57c347fa811",
+    "kind": "wip_r2_key",
+    "status": 200
+  },
+  {
+    "chatSessionId": "e46ff3f1-4fbe-48ab-9ab2-a57c347fa811",
+    "kind": "manifest_r2_key",
+    "status": 200
+  }
+]
