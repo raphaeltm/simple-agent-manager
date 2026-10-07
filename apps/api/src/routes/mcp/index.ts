@@ -8,6 +8,7 @@
  * Auth: task-scoped opaque token stored in KV, passed as Bearer token.
  */
 import { Hono } from 'hono';
+import { webhookClaimRoutes } from './webhook-claims';
 import * as v from 'valibot';
 
 import type { Env } from '../../env';
@@ -208,6 +209,8 @@ export const mcpRoutes = new Hono<{ Bindings: Env }>();
 function normalizeRpcId(id: unknown): string | number | null {
   return typeof id === 'string' || typeof id === 'number' ? id : null;
 }
+
+mcpRoutes.route('/', webhookClaimRoutes);
 
 mcpRoutes.post('/', async (c) => {
   // NOSONAR - legacy MCP dispatcher switch is intentionally centralized.

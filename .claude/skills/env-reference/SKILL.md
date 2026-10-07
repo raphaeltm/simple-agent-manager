@@ -672,6 +672,7 @@ by the read-only cron-liveness check.
 - `TRIGGER_EXECUTION_CLEANUP_ENABLED` — Trigger execution cleanup kill switch (default: enabled; set to `false` to disable)
 - `TRIGGER_STALE_RECOVERY_BATCH_SIZE` — Maximum stale execution candidates processed per sweep (default: `100`)
 - `WEBHOOK_TRIGGERS_ENABLED` — Public ingress kill switch (default: `true`)
+- `WEBHOOK_CREDENTIAL_CLAIM_TTL_SECONDS` — Authenticated one-time MCP credential claim lifetime (default: `600`)
 - `WEBHOOK_TRIGGER_MAX_BODY_BYTES` — Maximum JSON request body (default: `65536`)
 - `WEBHOOK_TRIGGER_MAX_FILTERS` — Maximum deterministic filters per trigger (default: `10`)
 - `WEBHOOK_TRIGGER_MAX_FILTER_PATH_LENGTH` — Maximum filter dot-path length (default: `200`)
