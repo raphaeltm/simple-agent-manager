@@ -13,8 +13,8 @@ import {
   SessionRecoveryAuthorityRevokedError,
   type SessionRecoverySourceTaskGuard,
 } from '../services/session-recovery-authority';
-import { assertSessionRuntimeContractCapability } from '../services/session-runtime-contract';
 import { prepareSessionRestoreMcp } from '../services/session-restore-mcp';
+import { assertSessionRuntimeContractCapability } from '../services/session-runtime-contract';
 import { signalSessionWakeReadyBestEffort } from '../services/session-wake-ready';
 import {
   ACTIVE_WORK_KEY,
