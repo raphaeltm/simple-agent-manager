@@ -1,0 +1,76 @@
+{
+  "observedAt": "2026-10-07T17:29:26.373212+00:00",
+  "candidate": "d0d4ddf0d489679e1071a897c8e8663b633e3e1b",
+  "workflow": {
+    "runId": 37656801006,
+    "conclusion": "success",
+    "deployJob": 112913871267,
+    "smokeJob": 112919747772,
+    "smokeConclusion": "success",
+    "smokeTestsPassed": 12
+  },
+  "apiVersion": "e4873f38-feef-4e86-8a37-3346d73b98e9",
+  "workerCodeETag": "e48e8fa81dcae2bab37a927ca16d2a20111828482991a92d1266d6c05ceb3ec6",
+  "bindings": {
+    "ACP_INTERACTION_FORMS_ENABLED": "false",
+    "ACP_INTERACTIONS_ENABLED": "false",
+    "ACP_INTERACTION_URLS_ENABLED": "false",
+    "VERSION": "0.1.0",
+    "VM_AGENT_REQUIRED_VERSION": "8978d3130d7c44fb4a94311d61d9c0f9211fafa0"
+  },
+  "agent": {
+    "release": "8978d3130d7c44fb4a94311d61d9c0f9211fafa0",
+    "buildDate": "2026-10-07T17:00:30Z",
+    "bytes": 17203465,
+    "binarySHA256": "e71634dd6a634bff40211709e7e92efb62e81a5a924358cdd2d2c7029cc74a19",
+    "pipelineBakedBinaryManifestMatchesDownload": true,
+    "imageTag": "sam-api-staging-vmagentcontainer-staging:e4873f38",
+    "publishedImageDigests": [
+      "sha256:239102984dfe0847bfeb66798742634d3833bf22f97fb7802a7c3c032d2d4acf",
+      "sha256:3706bef9b912c302f46d9e342d2db496431fad986273aefce90757bb7814f113"
+    ]
+  },
+  "web": {
+    "assets": [
+      {
+        "url": "https://app.sammy.party/assets/index-BI3bEJ8R.js",
+        "status": 200,
+        "sha256": "1e5086e0cc8987632787e51d0b2f6fd3735a3628499f0f787905c8eb91762d1d",
+        "bytes": 52439
+      },
+      {
+        "url": "https://app.sammy.party/assets/index-DuI4u-ZD.css",
+        "status": 200,
+        "sha256": "99860b377dfd428c05fc098b9516e7fe9d43968194351be4e81833dbe90b7c64",
+        "bytes": 143063
+      }
+    ],
+    "agent": {
+      "status": 200,
+      "release": "8978d3130d7c44fb4a94311d61d9c0f9211fafa0"
+    }
+  },
+  "ledgerAndCompute": {
+    "observedAt": "2026-10-07T17:28:29.698673+00:00",
+    "migrations": [
+      {
+        "id": 213,
+        "name": "0184_webhook_credential_claims.sql",
+        "applied_at": "2026-10-07 10:30:37"
+      },
+      {
+        "id": 214,
+        "name": "0185_session_runtime_contract.sql",
+        "applied_at": "2026-10-07 11:08:11"
+      },
+      {
+        "id": 215,
+        "name": "0186_task_coordination_channel.sql",
+        "applied_at": "2026-10-07 16:14:14"
+      }
+    ],
+    "liveNodes": []
+  },
+  "scope": "Normal packaging deployment and smoke only. No new VM or fixtures. Candidate precedes messaging main 57aaa; messaging has independent staging proof. Runtime CI fixture repair remains a separate merge gate; no whole-wave completion claimed.",
+  "stageLease": "FULL RELEASE to reliability parent; no further coordinator staging mutations planned."
+}
