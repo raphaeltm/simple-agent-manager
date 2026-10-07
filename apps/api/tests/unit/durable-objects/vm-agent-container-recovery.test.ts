@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const recoveryMocks = vi.hoisted(() => ({
   loadContext: vi.fn(),
@@ -10,6 +10,9 @@ const recoveryMocks = vi.hoisted(() => ({
   signCallbackToken: vi.fn(),
   signNodeManagementToken: vi.fn(),
   commitWake: vi.fn(),
+  prepareRestoreMcp: vi.fn(),
+  loadRestoreWorkspace: vi.fn(),
+  revokeRestoreMcp: vi.fn(),
 }));
 
 vi.mock('../../../src/durable-objects/vm-agent-container-recovery', async (importOriginal) => {
@@ -31,6 +34,14 @@ vi.mock('../../../src/durable-objects/vm-agent-container-recovery-failure', () =
 
 vi.mock('../../../src/services/container-wake-commit', () => ({
   commitContainerWakeFromSleep: recoveryMocks.commitWake,
+}));
+
+vi.mock('../../../src/services/instant-restore-workspace', () => ({
+  loadInstantRestoreWorkspace: recoveryMocks.loadRestoreWorkspace,
+}));
+
+vi.mock('../../../src/services/session-restore-mcp', () => ({
+  prepareSessionRestoreMcp: recoveryMocks.prepareRestoreMcp,
 }));
 
 vi.mock('../../../src/services/jwt', () => ({
@@ -55,6 +66,8 @@ import {
   RUNTIME_RECOVERY_DEGRADED_MESSAGE,
   type RuntimeRecoveryState,
 } from '../../../src/durable-objects/vm-agent-container-recovery';
+import type { Env } from '../../../src/env';
+import { buildAcpInteractionRuntimeConfig } from '../../../src/services/acp-interaction-runtime-config';
 import { SessionRecoveryAuthorityRevokedError } from '../../../src/services/session-recovery-authority';
 
 const launchConfig = {
@@ -74,13 +87,33 @@ const runtimeContext = {
   chatSessionId: 'chat-1',
   agentSessionId: 'agent-session-1',
   agentType: 'codex',
+  runtimeContract: {
+    version: 1,
+    agentType: 'codex',
+    settingsResolved: true,
+    model: 'gpt-6.1-sol',
+    effort: 'xhigh',
+    permissionMode: 'default',
+    opencodeProvider: null,
+    opencodeBaseUrl: null,
+    promptKind: 'task',
+    taskContext: { projectId: 'project-1', taskId: 'task-1', taskMode: 'task' },
+    acpInteractions: buildAcpInteractionRuntimeConfig(
+      { ACP_INTERACTIONS_ENABLED: 'true' } as Env,
+      'task'
+    ),
+  },
 };
 
 type PrivateContainer = {
   proxyHttpAuthorized: (this: unknown, request: Request, port?: number) => Promise<Response>;
   ensureAwake: (this: unknown) => Promise<unknown>;
   beginUnexpectedRecovery: (this: unknown, input: unknown) => Promise<unknown>;
-  wakeFromSnapshot: (this: unknown, recovery: RuntimeRecoveryState) => Promise<unknown>;
+  wakeFromSnapshot: (
+    this: unknown,
+    recovery: RuntimeRecoveryState,
+    guard?: { taskId: string; projectId: string; chatSessionId: string }
+  ) => Promise<unknown>;
   degradeRecovery: (this: unknown, ...args: unknown[]) => Promise<unknown>;
   exhaustRecovery: (this: unknown, ...args: unknown[]) => Promise<unknown>;
   withLifecycleLock: (this: unknown, operation: () => Promise<unknown>) => Promise<unknown>;
@@ -112,14 +145,24 @@ function makeStorage(initialLifecycle: string) {
   };
 }
 
+function supportedContractCapabilities() {
+  return Response.json({ sessionRuntimeContract: { supported: true, version: 1 } });
+}
+
 function makeRecoveryFake(input?: {
   lifecycle?: string;
   restoreResponse?: Response;
+  capabilityResponse?: Response;
+  createResponse?: Response;
+  workspaceResponse?: Response;
   maxAttempts?: number;
 }) {
   const { values, storage } = makeStorage(input?.lifecycle ?? 'sleeping');
   const fake = {
-    env: { CF_CONTAINER_RECOVERY_MAX_ATTEMPTS: String(input?.maxAttempts ?? 2) },
+    env: {
+      CF_CONTAINER_RECOVERY_MAX_ATTEMPTS: String(input?.maxAttempts ?? 2),
+      CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS: '90001',
+    },
     ctx: { storage },
     wakeChain: Promise.resolve(),
     lifecycleChain: Promise.resolve(),
@@ -145,12 +188,24 @@ function makeRecoveryFake(input?: {
     markActiveWorkEnded: vi.fn().mockResolvedValue(undefined),
     startRuntime: vi.fn().mockResolvedValue(undefined),
     stop: vi.fn().mockResolvedValue(undefined),
-    containerFetch: vi
-      .fn()
-      .mockResolvedValue(
+    containerFetch: vi.fn(async (request: Request) => {
+      if (new URL(request.url).pathname.endsWith('/agent-capabilities')) {
+        return input?.capabilityResponse ?? supportedContractCapabilities();
+      }
+      if (request.method === 'POST' && new URL(request.url).pathname === '/workspaces')
+        return (
+          input?.workspaceResponse ??
+          Response.json({ id: 'workspace-1', status: 'running' }, { status: 201 })
+        );
+      if (request.method === 'POST' && new URL(request.url).pathname.endsWith('/agent-sessions'))
+        return (
+          input?.createResponse ?? Response.json({ sessionId: 'agent-session-1' }, { status: 201 })
+        );
+      return (
         input?.restoreResponse ??
-          Response.json({ status: 'restored', degradation: 'none', skipped: [] })
-      ),
+        Response.json({ status: 'restored', degradation: 'none', skipped: [] })
+      );
+    }),
     getState: vi.fn().mockResolvedValue({ status: 'running' }),
   };
   return { fake, values, storage };
@@ -194,7 +249,27 @@ beforeEach(() => {
   recoveryMocks.signCallbackToken.mockResolvedValue('fresh-workspace-token');
   recoveryMocks.signNodeManagementToken.mockResolvedValue({ token: 'management-token' });
   recoveryMocks.commitWake.mockResolvedValue(undefined);
+  recoveryMocks.revokeRestoreMcp.mockResolvedValue(undefined);
+  recoveryMocks.loadRestoreWorkspace.mockResolvedValue({
+    workspaceId: 'workspace-1',
+    repository: 'owner/repo',
+    branch: 'sam/task',
+    baseBranch: 'develop',
+    defaultBranch: 'develop',
+    repoProvider: 'github',
+    cloneUrl: null,
+    repositoryHost: null,
+    repositoryPath: null,
+  });
+  recoveryMocks.prepareRestoreMcp.mockResolvedValue({
+    mcpServers: [
+      { name: 'sam-mcp', url: 'https://api.example.test/mcp', token: 'fresh-restore-mcp-token' },
+    ],
+    revoke: recoveryMocks.revokeRestoreMcp,
+  });
 });
+
+afterEach(() => vi.restoreAllMocks());
 
 describe('VmAgentContainer snapshot recovery state machine', () => {
   it('revalidates inside the lifecycle lock before committing a restored guarded wake', async () => {
@@ -206,7 +281,11 @@ describe('VmAgentContainer snapshot recovery state machine', () => {
     };
     fake.assertSourceTaskGuard
       .mockResolvedValueOnce(undefined) // before startRuntime
-      .mockResolvedValueOnce(undefined) // before restore fetch
+      .mockResolvedValueOnce(undefined) // after capability, before metadata lookup
+      .mockResolvedValueOnce(undefined) // before workspace hydration
+      .mockResolvedValueOnce(undefined) // after workspace hydration, before preparing credentials
+      .mockResolvedValueOnce(undefined) // before create fetch
+      .mockResolvedValueOnce(undefined) // after create, before restore fetch
       .mockResolvedValueOnce(undefined) // after restore
       .mockRejectedValueOnce(new SessionRecoveryAuthorityRevokedError()); // inside lock
     const recovery: RuntimeRecoveryState = {
@@ -232,7 +311,7 @@ describe('VmAgentContainer snapshot recovery state machine', () => {
     ).rejects.toBeInstanceOf(SessionRecoveryAuthorityRevokedError);
 
     expect(fake.startRuntime).toHaveBeenCalledOnce();
-    expect(fake.containerFetch).toHaveBeenCalledOnce();
+    expect(fake.containerFetch).toHaveBeenCalledTimes(4);
     expect(recoveryMocks.persistRecovered).not.toHaveBeenCalled();
     expect(fake.stop).toHaveBeenCalledOnce();
     expect(values.get('lifecycleStatus')).toBe('sleeping');
@@ -247,7 +326,11 @@ describe('VmAgentContainer snapshot recovery state machine', () => {
     };
     fake.assertSourceTaskGuard
       .mockResolvedValueOnce(undefined) // before startRuntime
-      .mockResolvedValueOnce(undefined) // before restore fetch
+      .mockResolvedValueOnce(undefined) // after capability, before metadata lookup
+      .mockResolvedValueOnce(undefined) // before workspace hydration
+      .mockResolvedValueOnce(undefined) // after workspace hydration, before preparing credentials
+      .mockResolvedValueOnce(undefined) // before create fetch
+      .mockResolvedValueOnce(undefined) // after create, before restore fetch
       .mockResolvedValueOnce(undefined) // after restore
       .mockResolvedValueOnce(undefined) // inside lock, before D1 commit
       .mockRejectedValueOnce(new SessionRecoveryAuthorityRevokedError()); // after D1 commit
@@ -360,6 +443,11 @@ describe('VmAgentContainer snapshot recovery state machine', () => {
     const { fake } = makeRecoveryFake({ lifecycle: 'running' });
     fake.containerFetch
       .mockResolvedValueOnce(new Response('{"sessions": "not-an-array"}', { status: 200 }))
+      .mockResolvedValueOnce(supportedContractCapabilities())
+      .mockResolvedValueOnce(
+        Response.json({ id: 'workspace-1', status: 'running' }, { status: 201 })
+      )
+      .mockResolvedValueOnce(Response.json({ sessionId: 'agent-session-1' }, { status: 201 }))
       .mockResolvedValueOnce(
         Response.json({ status: 'restored', degradation: 'none', skipped: [] })
       );
@@ -376,6 +464,11 @@ describe('VmAgentContainer snapshot recovery state machine', () => {
       .mockResolvedValueOnce(
         Response.json({ sessions: [{ id: 'agent-session-1', status: 'running' }] })
       )
+      .mockResolvedValueOnce(supportedContractCapabilities())
+      .mockResolvedValueOnce(
+        Response.json({ id: 'workspace-1', status: 'running' }, { status: 201 })
+      )
+      .mockResolvedValueOnce(Response.json({ sessionId: 'agent-session-1' }, { status: 201 }))
       .mockResolvedValueOnce(
         Response.json({ status: 'restored', degradation: 'none', skipped: [] })
       );
@@ -421,21 +514,175 @@ describe('VmAgentContainer snapshot recovery state machine', () => {
     expect(values.get('lifecycleStatus')).toBe('stopping');
   });
 
+  it.each([
+    ['missing', {}],
+    ['malformed', { sessionRuntimeContract: 'yes' }],
+    ['future version', { sessionRuntimeContract: { supported: true, version: 2 } }],
+    ['unsupported', { sessionRuntimeContract: { supported: false, version: 1 } }],
+  ])(
+    'degrades safely without restore for %s runtime contract capability',
+    async (_name, payload) => {
+      const { fake, values } = makeRecoveryFake({ capabilityResponse: Response.json(payload) });
+      const result = await callEnsureAwake(fake);
+      expect(result).toMatchObject({ ok: false, status: 'degraded' });
+      expect(fake.containerFetch).toHaveBeenCalledOnce();
+      const request = fake.containerFetch.mock.calls[0]?.[0] as Request;
+      expect(request.method).toBe('GET');
+      expect(new URL(request.url).pathname).toBe('/workspaces/workspace-1/agent-capabilities');
+      expect(recoveryMocks.persistRecovered).not.toHaveBeenCalled();
+      expect(recoveryMocks.persistFailed).not.toHaveBeenCalled();
+      expect(values.get('runtimeRecovery')).toMatchObject({ phase: 'degraded' });
+    }
+  );
+
+  it('fails closed if canonical workspace hydration is refused, without minting MCP credentials or restoring', async () => {
+    const { fake, values } = makeRecoveryFake({
+      workspaceResponse: Response.json({ error: 'FORBIDDEN' }, { status: 403 }),
+    });
+    expect(await callEnsureAwake(fake)).toMatchObject({ ok: false, status: 'degraded' });
+    expect(fake.containerFetch).toHaveBeenCalledTimes(2);
+    expect(
+      fake.containerFetch.mock.calls.map(([request]) => new URL(request.url).pathname)
+    ).toEqual(['/workspaces/workspace-1/agent-capabilities', '/workspaces']);
+    expect(recoveryMocks.prepareRestoreMcp).not.toHaveBeenCalled();
+    expect(recoveryMocks.persistRecovered).not.toHaveBeenCalled();
+    expect(fake.stop).toHaveBeenCalledOnce();
+    expect(values.get('runtimeRecovery')).toMatchObject({ phase: 'degraded' });
+  });
+
+  it('revokes fresh MCP credentials and stops runtime if session creation is refused', async () => {
+    const { fake, values } = makeRecoveryFake({
+      createResponse: Response.json({ error: 'FORBIDDEN' }, { status: 403 }),
+    });
+    const result = await callEnsureAwake(fake);
+    expect(result).toMatchObject({ ok: false, status: 'degraded' });
+    expect(fake.containerFetch).toHaveBeenCalledTimes(3);
+    expect(
+      fake.containerFetch.mock.calls.map(([request]) => new URL(request.url).pathname)
+    ).toEqual([
+      '/workspaces/workspace-1/agent-capabilities',
+      '/workspaces',
+      '/workspaces/workspace-1/agent-sessions',
+    ]);
+    expect(recoveryMocks.revokeRestoreMcp).toHaveBeenCalledOnce();
+    expect(recoveryMocks.persistRecovered).not.toHaveBeenCalled();
+    expect(fake.stop).toHaveBeenCalledOnce();
+    expect(values.get('runtimeRecovery')).toMatchObject({ phase: 'degraded' });
+  });
+  it('revokes prepared MCP credentials on a failed restore without committing recovery', async () => {
+    const { fake } = makeRecoveryFake({
+      restoreResponse: Response.json({ error: 'RESTORE_FAILED' }, { status: 500 }),
+    });
+    expect(await callEnsureAwake(fake)).toMatchObject({ ok: false, status: 'degraded' });
+    expect(fake.containerFetch).toHaveBeenCalledTimes(4);
+    expect(recoveryMocks.revokeRestoreMcp).toHaveBeenCalledOnce();
+    expect(recoveryMocks.persistRecovered).not.toHaveBeenCalled();
+    expect(fake.stop).toHaveBeenCalledOnce();
+  });
+  it('revokes fresh credentials without restore when source authority changes after session creation', async () => {
+    const { fake } = makeRecoveryFake();
+    fake.assertSourceTaskGuard
+      .mockResolvedValueOnce(undefined) // before launch
+      .mockResolvedValueOnce(undefined) // before metadata lookup
+      .mockResolvedValueOnce(undefined) // before workspace hydration
+      .mockResolvedValueOnce(undefined) // after workspace hydration, before credentials
+      .mockResolvedValueOnce(undefined) // before create
+      .mockRejectedValueOnce(new SessionRecoveryAuthorityRevokedError()); // after create
+    const recovery: RuntimeRecoveryState = {
+      version: 1,
+      phase: 'waking',
+      trigger: 'idle',
+      cause: { kind: 'idle_sleep' },
+      attempts: 1,
+      promptDisposition: 'none',
+      agentSessionId: 'agent-session-1',
+      startedAt: 1,
+      updatedAt: 1,
+    };
+    await expect(
+      privateContainer.wakeFromSnapshot.call(fake, recovery, {
+        taskId: 'task-1',
+        projectId: 'project-1',
+        chatSessionId: 'chat-1',
+      })
+    ).rejects.toBeInstanceOf(SessionRecoveryAuthorityRevokedError);
+    expect(fake.containerFetch).toHaveBeenCalledTimes(3);
+    expect(recoveryMocks.revokeRestoreMcp).toHaveBeenCalledOnce();
+    expect(recoveryMocks.persistRecovered).not.toHaveBeenCalled();
+    expect(fake.stop).toHaveBeenCalledOnce();
+  });
+
   it('cold-wakes, reinjects fresh callback tokens, restores, then reconciles running', async () => {
     const { fake, values } = makeRecoveryFake();
 
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
     const result = await callEnsureAwake(fake);
+    expect(timeout).toHaveBeenCalledWith(90001);
 
     expect(result).toEqual({ ok: true, status: 'running' });
     expect(fake.startRuntime).toHaveBeenCalledWith(launchConfig, {
       nodeCallbackToken: 'fresh-node-token',
     });
-    const restoreRequest = fake.containerFetch.mock.calls[0]?.[0] as Request;
+    const capabilityRequest = fake.containerFetch.mock.calls[0]?.[0] as Request;
+    expect(capabilityRequest.method).toBe('GET');
+    expect(new URL(capabilityRequest.url).pathname).toBe(
+      '/workspaces/workspace-1/agent-capabilities'
+    );
+    expect(capabilityRequest.headers.get('Authorization')).toBe('Bearer management-token');
+    const workspaceRequest = fake.containerFetch.mock.calls[1]?.[0] as Request;
+    expect(workspaceRequest.method).toBe('POST');
+    expect(new URL(workspaceRequest.url).pathname).toBe('/workspaces');
+    expect(workspaceRequest.headers.get('Authorization')).toBe('Bearer management-token');
+    expect(workspaceRequest.headers.get('X-SAM-Workspace-Id')).toBe('workspace-1');
+    await expect(workspaceRequest.json()).resolves.toMatchObject({
+      workspaceId: 'workspace-1',
+      repository: 'owner/repo',
+      branch: 'sam/task',
+      defaultBranch: 'develop',
+      baseBranch: 'develop',
+      callbackToken: 'fresh-workspace-token',
+      lightweight: true,
+      projectId: 'project-1',
+      taskId: 'task-1',
+    });
+    expect(recoveryMocks.loadRestoreWorkspace).toHaveBeenCalledWith(fake.env, {
+      workspaceId: 'workspace-1',
+      userId: 'user-1',
+      projectId: 'project-1',
+      chatSessionId: 'chat-1',
+    });
+    const createRequest = fake.containerFetch.mock.calls[2]?.[0] as Request;
+    expect(createRequest.method).toBe('POST');
+    expect(new URL(createRequest.url).pathname).toBe('/workspaces/workspace-1/agent-sessions');
+    expect(createRequest.headers.get('Authorization')).toBe('Bearer management-token');
+    await expect(createRequest.json()).resolves.toMatchObject({
+      sessionId: 'agent-session-1',
+      label: 'Restored session',
+      chatSessionId: 'chat-1',
+      projectId: 'project-1',
+      mcpServers: [
+        { name: 'sam-mcp', url: 'https://api.example.test/mcp', token: 'fresh-restore-mcp-token' },
+      ],
+    });
+    expect(recoveryMocks.prepareRestoreMcp).toHaveBeenCalledWith(
+      fake.env,
+      expect.objectContaining({
+        userId: 'user-1',
+        projectId: 'project-1',
+        workspaceId: 'workspace-1',
+        chatSessionId: 'chat-1',
+        agentSessionId: 'agent-session-1',
+        runtimeContract: runtimeContext.runtimeContract,
+      })
+    );
+    expect(recoveryMocks.revokeRestoreMcp).not.toHaveBeenCalled();
+    const restoreRequest = fake.containerFetch.mock.calls[3]?.[0] as Request;
     await expect(restoreRequest.json()).resolves.toMatchObject({
       chatSessionId: 'chat-1',
       runtime: 'cf-container',
       agentType: 'codex',
       workspaceCallbackToken: 'fresh-workspace-token',
+      runtimeContract: runtimeContext.runtimeContract,
     });
     expect(recoveryMocks.persistRecovering).toHaveBeenCalledWith(
       fake.env,
@@ -606,12 +853,18 @@ describe('VmAgentContainer snapshot recovery state machine', () => {
   it('keeps an explicit stop terminal when it crosses an active restore', async () => {
     let finishRestore!: (response: Response) => void;
     const { fake, values } = makeRecoveryFake();
-    fake.containerFetch.mockImplementationOnce(
-      () =>
-        new Promise<Response>((resolve) => {
-          finishRestore = resolve;
-        })
-    );
+    fake.containerFetch
+      .mockResolvedValueOnce(supportedContractCapabilities())
+      .mockResolvedValueOnce(
+        Response.json({ id: 'workspace-1', status: 'running' }, { status: 201 })
+      )
+      .mockResolvedValueOnce(Response.json({ sessionId: 'agent-session-1' }, { status: 201 }))
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            finishRestore = resolve;
+          })
+      );
     const stopForUser = (
       VmAgentContainer.prototype as unknown as {
         stopForUser: (this: unknown) => Promise<void>;
@@ -619,7 +872,7 @@ describe('VmAgentContainer snapshot recovery state machine', () => {
     ).stopForUser;
 
     const wake = callEnsureAwake(fake);
-    await vi.waitFor(() => expect(fake.containerFetch).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(fake.containerFetch).toHaveBeenCalledTimes(4));
 
     await stopForUser.call(fake);
     finishRestore(

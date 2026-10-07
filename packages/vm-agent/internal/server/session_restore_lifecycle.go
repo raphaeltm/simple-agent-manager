@@ -47,6 +47,7 @@ func (s *Server) completeSessionRestore(ctx context.Context, attempt *sessionRes
 	if input.workspaceCallbackToken != "" {
 		s.upsertWorkspaceRuntime(input.workspaceID, "", "", "", input.workspaceCallbackToken)
 	}
+	s.configureRestoredSession(input)
 	attempt.result = restore(ctx)
 	attempt.err = ctx.Err()
 }

@@ -1,38 +1,36 @@
 /**
- * MCP instruction tools — get_instructions and request_human_input.
+ * MCP instruction tools — get_instructions (request_human_input lives in ./human-input-tool
+ * and is re-exported here for existing importers).
  */
-import type { HumanInputCategory } from '@simple-agent-manager/shared';
-import {
-  HUMAN_INPUT_CATEGORIES,
-  KNOWLEDGE_DEFAULTS,
-  MAX_HUMAN_INPUT_CONTEXT_LENGTH,
-  MAX_HUMAN_INPUT_OPTION_LENGTH,
-  MAX_HUMAN_INPUT_OPTIONS_COUNT,
-} from '@simple-agent-manager/shared';
+import { KNOWLEDGE_DEFAULTS } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
-import { computeHumanInputSchedule } from '../../durable-objects/project-data/attention';
 import type { KnowledgeEntityIndexEntry } from '../../durable-objects/project-data/knowledge';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
-import * as notificationService from '../../services/notification';
+import { resolveAgentMessageChannelsConfig } from '../../services/agent-message-channels';
 import * as projectDataService from '../../services/project-data';
 import {
   INTERNAL_ERROR,
-  INVALID_PARAMS,
   jsonRpcError,
   type JsonRpcResponse,
   jsonRpcSuccess,
   type McpTokenData,
-  sanitizeUserInput,
 } from './_helpers';
+import { buildEventingInstructions } from './instruction-eventing-guidance';
 import {
+  buildKnowledgeInstructions,
   buildPolicyInstructions,
+  formatKnowledgeDirectives,
+  formatKnowledgeEntityIndex,
   formatPolicyDirectives,
   type PolicyEntry,
+  serializeRejection,
 } from './instruction-formatting';
+
+export { handleRequestHumanInput } from './human-input-tool';
 
 type InstructionContextType = 'task' | 'conversation' | 'trial' | 'direct-workspace';
 
@@ -285,6 +283,9 @@ export async function handleGetInstructions(
             status: context.task.status,
             priority: context.task.priority,
             outputBranch: context.task.outputBranch,
+            ...(context.task.coordinationChannel
+              ? { coordinationChannel: context.task.coordinationChannel }
+              : {}),
           },
         }
       : {}),
@@ -322,6 +323,13 @@ export async function handleGetInstructions(
             'Push your changes to the output branch before calling the SAM MCP `complete_task` tool.',
             'If you encounter blockers, report them via the SAM MCP `update_task_status` tool with a clear description.',
           ]),
+      // Event tools need a task-backed agent token.
+      ...(tokenData.taskId
+        ? buildEventingInstructions({
+            coordinationChannel: context.task?.coordinationChannel ?? null,
+            agentMessageChannelsEnabled: resolveAgentMessageChannelsConfig(env).enabled,
+          })
+        : []),
       ...knowledgeInstructions,
       ...policyInstructions,
       ...(project.repoProvider === 'artifacts'
@@ -360,340 +368,5 @@ export async function handleGetInstructions(
 
   return jsonRpcSuccess(requestId, {
     content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-  });
-}
-
-// ─── Knowledge Formatting Helpers ───────────────────────────────────────────
-
-interface KnowledgeEntry {
-  entityName: string;
-  entityType: string;
-  observation: string;
-  confidence: number;
-}
-
-/** Normalize a Promise.allSettled rejection reason for structured logging. */
-function serializeRejection(reason: unknown): string {
-  return reason instanceof Error ? reason.message : String(reason);
-}
-
-/**
- * Format knowledge observations into a readable text block grouped by entity.
- * Returns null if there are no observations.
- *
- * Output looks like:
- *   ## Project Knowledge — apply these to your work
- *
- *   **User** (context): Raphaël, solo founder. Primarily uses mobile PWA.
- *   **CodeQuality** (preference): Prefers Valibot. Skeptical of useEffect.
- */
-function formatKnowledgeDirectives(entries: KnowledgeEntry[]): string | null {
-  if (entries.length === 0) return null;
-
-  // Group by entity name
-  const grouped = new Map<string, { entityType: string; observations: string[] }>();
-  for (const entry of entries) {
-    let group = grouped.get(entry.entityName);
-    if (!group) {
-      group = { entityType: entry.entityType, observations: [] };
-      grouped.set(entry.entityName, group);
-    }
-    group.observations.push(entry.observation);
-  }
-
-  const lines: string[] = ['## Project Knowledge — apply these to your work\n'];
-  for (const [name, group] of grouped) {
-    const obs = group.observations.join(' | ');
-    lines.push(`**${name}** (${group.entityType}): ${obs}`);
-  }
-
-  return lines.join('\n');
-}
-
-/**
- * Render the complete entity index that accompanies the ranked directives.
- *
- * The directive block is ranked and capped, so it is deliberately partial. Without
- * this index that truncation is invisible — an agent cannot search for a topic it has
- * no reason to believe exists, which is precisely how ContentStyle/User/Architecture
- * stayed unreachable for months. One short line per entity keeps the whole store
- * discoverable for roughly a token apiece.
- */
-function formatKnowledgeEntityIndex(
-  entityIndex: KnowledgeEntityIndexEntry[],
-  injected: KnowledgeEntry[],
-  totalEntities: number
-): string | null {
-  if (entityIndex.length === 0) return null;
-
-  const injectedEntities = new Set(injected.map((e) => e.entityName));
-  const notInjected = entityIndex.filter((e) => !injectedEntities.has(e.name)).length;
-
-  // The index itself is capped, and a project may hold more entities than that cap.
-  // Claiming "full" while truncating would repeat this bug one level up, so the header
-  // only says "Full" when it genuinely is, and otherwise states N of M.
-  const truncated = totalEntities > entityIndex.length;
-  const heading = truncated
-    ? `### Knowledge index (${entityIndex.length} of ${totalEntities} entities, densest first)`
-    : `### Full knowledge index (${entityIndex.length} entities)`;
-
-  return [
-    `\n${heading}\n` +
-      'The block above shows only the highest-ranked observations, capped per entity — it is NOT everything ' +
-      `this project knows.${notInjected > 0 ? ` ${notInjected} of the entities listed here have no observations shown above at all.` : ''} ` +
-      `${truncated ? `A further ${totalEntities - entityIndex.length} entities are not listed; \`search_knowledge\` still reaches them. ` : ''}` +
-      'Each entry below is `EntityName (type, N observations)`. To read anything not shown in full, call ' +
-      '`search_knowledge` with the entity name, or `get_relevant_knowledge` with a description of what you are about to do. ' +
-      'Do this before decisions that touch one of these topics.\n',
-    entityIndex.map((e) => `${e.name} (${e.entityType}, ${e.observationCount})`).join(', '),
-  ].join('\n');
-}
-
-/**
- * Build knowledge graph instructions based on whether knowledge exists
- * and the session mode. Conversation mode gets more aggressive capture
- * instructions since direct user interaction is the richest source.
- */
-function buildKnowledgeInstructions(hasKnowledge: boolean, isConversation: boolean): string[] {
-  const instructions: string[] = [];
-
-  // Core directive — MUST, not "you can"
-  instructions.push(
-    'You MUST use the knowledge graph to remember important facts about the user and project across sessions.'
-  );
-
-  // When to SAVE — concrete trigger patterns
-  instructions.push(
-    'Save to knowledge graph (via `add_knowledge`) when ANY of these happen: ' +
-      '(1) User corrects you or says "don\'t do X" → sourceType "explicit", confidence 0.9+. ' +
-      '(2) User states a preference ("I prefer...", "always use...", "never...") → sourceType "explicit", confidence 0.9+. ' +
-      '(3) User describes their role, expertise, or background → entityType "expertise". ' +
-      '(4) You learn a project convention or architecture decision → entityType "context". ' +
-      '(5) User gives feedback on your response style → entityType "preference".'
-  );
-
-  // When to READ — decision-point retrieval (Layer 2)
-  instructions.push(
-    'Search knowledge (via `search_knowledge`) BEFORE making key decisions: ' +
-      'before writing content/blogs → search "ContentStyle"; ' +
-      'before choosing libraries/tools → search "CodeQuality"; ' +
-      'before UI layout decisions → search "User" and "mobile"; ' +
-      'before architecture decisions → search "Architecture"; ' +
-      'before pricing/business decisions → search "BusinessStrategy". ' +
-      'These entities are usually NOT injected in full — check the knowledge index for what exists, ' +
-      'then retrieve it. Do not assume an entity is empty because its observations are not shown above.'
-  );
-
-  // What NOT to save
-  instructions.push(
-    'Do NOT save to knowledge: code patterns derivable from the codebase, git history, ephemeral task details, or things already in CLAUDE.md or project config.'
-  );
-
-  if (hasKnowledge) {
-    // Knowledge exists — tell agent to apply it and maintain it
-    instructions.push(
-      'The knowledgeDirectives field above contains stored knowledge from previous sessions. Apply these preferences and facts to your work. ' +
-        'It is RANKED (by confidence and how recently each observation was confirmed) and CAPPED per entity, so it is a partial view, not the whole store. ' +
-        'Its trailing knowledge-index section lists entities with their observation counts, and states in its own heading whether that list is itself complete or truncated — do not infer completeness from this sentence. ' +
-        'Use `search_knowledge` or `get_relevant_knowledge` to pull anything listed there but not shown in full, and to reach entities the index itself had to drop. ' +
-        'If any observation seems outdated, call `update_knowledge` or `remove_knowledge`. ' +
-        'If you verify an observation is still accurate, call `confirm_knowledge` to keep it fresh — confirming also raises its rank for future sessions.'
-    );
-  } else {
-    // Empty knowledge graph — bootstrapping prompt
-    instructions.push(
-      'This project has no stored knowledge yet. ' +
-        'Actively look for user preferences, project conventions, and important context to store. ' +
-        'If this is a conversation, ask the user about their preferences when relevant. ' +
-        'You can also search past conversations (via `search_messages`) for user preferences using queries like "prefer", "don\'t want", "I like", "always" to seed the knowledge graph.'
-    );
-  }
-
-  if (isConversation) {
-    instructions.push(
-      'You are in a direct conversation — this is the richest source of user knowledge. ' +
-        'Pay close attention to corrections, preferences, and context the user shares. ' +
-        'Store important observations as you go, not just at the end.'
-    );
-  }
-
-  return instructions;
-}
-
-export async function handleRequestHumanInput(
-  requestId: string | number | null,
-  params: Record<string, unknown>,
-  tokenData: McpTokenData,
-  env: Env
-): Promise<JsonRpcResponse> {
-  const context = params.context;
-  if (typeof context !== 'string' || !context.trim()) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      'context is required and must be a non-empty string'
-    );
-  }
-
-  if (context.length > MAX_HUMAN_INPUT_CONTEXT_LENGTH) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      `context exceeds maximum length of ${MAX_HUMAN_INPUT_CONTEXT_LENGTH} characters`
-    );
-  }
-
-  // Sanitize context: strip null bytes, Unicode bidi overrides, and C0/C1 control chars (except \n, \t)
-  const sanitizedContext = sanitizeUserInput(context.trim());
-
-  // Validate category if provided
-  let category: HumanInputCategory | null = null;
-  if (params.category !== undefined) {
-    if (
-      typeof params.category !== 'string' ||
-      !(HUMAN_INPUT_CATEGORIES as readonly string[]).includes(params.category)
-    ) {
-      return jsonRpcError(
-        requestId,
-        INVALID_PARAMS,
-        `category must be one of: ${HUMAN_INPUT_CATEGORIES.join(', ')}`
-      );
-    }
-    category = params.category as HumanInputCategory;
-  }
-
-  // Validate options if provided
-  let options: string[] | null = null;
-  if (params.options !== undefined) {
-    if (!Array.isArray(params.options)) {
-      return jsonRpcError(requestId, INVALID_PARAMS, 'options must be an array of strings');
-    }
-    if (params.options.some((o: unknown) => typeof o !== 'string')) {
-      return jsonRpcError(requestId, INVALID_PARAMS, 'options must contain only strings');
-    }
-    options = (params.options as string[])
-      .slice(0, MAX_HUMAN_INPUT_OPTIONS_COUNT)
-      .map((o) => sanitizeUserInput(o).slice(0, MAX_HUMAN_INPUT_OPTION_LENGTH));
-    if (options.length === 0) options = null;
-  }
-
-  // Fetch task title (user_id verified against token below)
-  const taskRow = await env.DATABASE.prepare(
-    `SELECT user_id, title, chat_session_id FROM tasks WHERE id = ? AND project_id = ?`
-  )
-    .bind(tokenData.taskId, tokenData.projectId)
-    .first<{
-      user_id: string;
-      title: string;
-      chat_session_id: string | null;
-    }>();
-
-  if (!taskRow) {
-    return jsonRpcError(requestId, INTERNAL_ERROR, 'Task not found');
-  }
-
-  // Verify task ownership matches token — use tokenData.userId as authoritative target
-  if (taskRow.user_id !== tokenData.userId) {
-    log.error('mcp.request_human_input.user_id_mismatch', {
-      tokenUserId: tokenData.userId,
-      taskUserId: taskRow.user_id,
-      taskId: tokenData.taskId,
-    });
-    return jsonRpcError(requestId, INTERNAL_ERROR, 'Task ownership mismatch');
-  }
-
-  const sessionId =
-    tokenData.chatSessionId ??
-    taskRow.chat_session_id ??
-    (await notificationService.getChatSessionId(env, tokenData.workspaceId));
-  if (!sessionId) {
-    log.error('mcp.request_human_input.chat_session_missing', {
-      taskId: tokenData.taskId,
-      projectId: tokenData.projectId,
-      workspaceId: tokenData.workspaceId,
-    });
-    return jsonRpcError(
-      requestId,
-      INTERNAL_ERROR,
-      'Human input request could not be recorded because the chat session is missing'
-    );
-  }
-
-  const schedule = computeHumanInputSchedule(env);
-  let marker: Awaited<ReturnType<typeof projectDataService.createAttentionMarker>>;
-  try {
-    marker = await projectDataService.createAttentionMarker(env, tokenData.projectId, {
-      sessionId,
-      taskId: tokenData.taskId,
-      workspaceId: tokenData.workspaceId,
-      kind: 'needs_input',
-      source: 'request_human_input',
-      notificationUserId: tokenData.userId,
-      reason: sanitizedContext,
-      metadata: category || options ? JSON.stringify({ category, options }) : null,
-      ...schedule,
-    });
-  } catch (err) {
-    log.error('mcp.request_human_input.attention_marker_failed', {
-      taskId: tokenData.taskId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return jsonRpcError(
-      requestId,
-      INTERNAL_ERROR,
-      'Human input request could not be recorded safely'
-    );
-  }
-
-  let notificationScheduled = false;
-  if (env.NOTIFICATION) {
-    try {
-      const projectName = await notificationService.getProjectName(env, tokenData.projectId);
-      const notification = await notificationService.notifyNeedsInput(env, tokenData.userId, {
-        projectId: tokenData.projectId,
-        projectName,
-        taskId: tokenData.taskId,
-        taskTitle: taskRow.title,
-        context: sanitizedContext,
-        category,
-        options,
-        sessionId,
-        attentionMarkerId: marker.id,
-      });
-      notificationScheduled = notification.id !== 'suppressed';
-      if (notificationScheduled) {
-        await projectDataService.linkAttentionNotification(
-          env,
-          tokenData.projectId,
-          marker.id,
-          tokenData.userId,
-          notification.id
-        );
-      }
-    } catch (err) {
-      log.warn('mcp.request_human_input.notification_failed', {
-        taskId: tokenData.taskId,
-        markerId: marker.id,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
-  log.info('mcp.request_human_input', {
-    taskId: tokenData.taskId,
-    projectId: tokenData.projectId,
-    category,
-    hasOptions: options !== null,
-  });
-
-  return jsonRpcSuccess(requestId, {
-    content: [
-      {
-        type: 'text',
-        text: notificationScheduled
-          ? 'Human input request recorded. Notification delivery has been scheduled. You may continue working or end your turn.'
-          : 'Human input request recorded, but notification delivery was not scheduled. SAM will keep the task alive while waiting for delivery. You may continue working.',
-      },
-    ],
   });
 }

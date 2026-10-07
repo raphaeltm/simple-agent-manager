@@ -18,7 +18,10 @@ vi.mock('drizzle-orm/d1', () => ({
 
 vi.mock('../../../src/services/project-data', () => mocks.projectData);
 
-import { handleGetInstructions, resolveInstructionContext } from '../../../src/routes/mcp/instruction-tools';
+import {
+  handleGetInstructions,
+  resolveInstructionContext,
+} from '../../../src/routes/mcp/instruction-tools';
 import { handleUpdateTaskStatus } from '../../../src/routes/mcp/task-tools';
 import type { McpTokenData } from '../../../src/services/mcp-token';
 
@@ -184,14 +187,18 @@ describe('MCP instruction context handlers', () => {
     mocks.selectRows = [[project]];
     mocks.projectData.getSession.mockResolvedValue({ id: 'chat-1', topic: 'Instant topic' });
 
-    const response = await handleGetInstructions('request-1', {
-      ...baseToken,
-      taskId: '',
-      contextType: 'conversation',
-      taskMode: 'conversation',
-      chatSessionId: 'chat-1',
-      agentSessionId: 'agent-1',
-    }, makeEnv());
+    const response = await handleGetInstructions(
+      'request-1',
+      {
+        ...baseToken,
+        taskId: '',
+        contextType: 'conversation',
+        taskMode: 'conversation',
+        chatSessionId: 'chat-1',
+        agentSessionId: 'agent-1',
+      },
+      makeEnv()
+    );
     const payload = parseInstructionPayload(response);
     const instructions = (payload.instructions as string[]).join('\n');
 
@@ -376,14 +383,18 @@ describe('MCP instruction context handlers', () => {
       topic: 'Instant topic',
     });
 
-    const response = await handleGetInstructions('request-1', {
-      ...baseToken,
-      taskId: '',
-      contextType: 'conversation',
-      taskMode: 'conversation',
-      chatSessionId: 'chat-1',
-      agentSessionId: 'agent-1',
-    }, makeEnv());
+    const response = await handleGetInstructions(
+      'request-1',
+      {
+        ...baseToken,
+        taskId: '',
+        contextType: 'conversation',
+        taskMode: 'conversation',
+        chatSessionId: 'chat-1',
+        agentSessionId: 'agent-1',
+      },
+      makeEnv()
+    );
     const payload = parseInstructionPayload(response);
 
     expect(payload.context).toMatchObject({
@@ -394,24 +405,32 @@ describe('MCP instruction context handlers', () => {
     });
     expect(payload.task).toBeUndefined();
     expect(payload.session).toMatchObject({ id: 'chat-1', topic: 'Instant topic' });
-    expect(JSON.stringify(payload.instructions)).toContain('Do NOT call the SAM MCP `complete_task` tool');
+    expect(JSON.stringify(payload.instructions)).toContain(
+      'Do NOT call the SAM MCP `complete_task` tool'
+    );
     expect(String(payload.knowledgeDirectives)).toContain('Worker control plane');
     expect(String(payload.policyDirectives)).toContain('Call get_instructions');
   });
 
   it('resolves trial and direct-workspace contexts without a task row', async () => {
-    const trial = await resolveInstructionContext({
-      ...baseToken,
-      taskId: '',
-      contextType: 'trial',
-      agentSessionId: 'trial-agent',
-    }, makeEnv());
-    const direct = await resolveInstructionContext({
-      ...baseToken,
-      taskId: '',
-      contextType: 'direct-workspace',
-      agentSessionId: 'direct-agent',
-    }, makeEnv());
+    const trial = await resolveInstructionContext(
+      {
+        ...baseToken,
+        taskId: '',
+        contextType: 'trial',
+        agentSessionId: 'trial-agent',
+      },
+      makeEnv()
+    );
+    const direct = await resolveInstructionContext(
+      {
+        ...baseToken,
+        taskId: '',
+        contextType: 'direct-workspace',
+        agentSessionId: 'direct-agent',
+      },
+      makeEnv()
+    );
 
     expect(trial).toMatchObject({
       ok: true,
@@ -419,18 +438,25 @@ describe('MCP instruction context handlers', () => {
     });
     expect(direct).toMatchObject({
       ok: true,
-      context: { type: 'direct-workspace', workspaceId: 'workspace-1', agentSessionId: 'direct-agent' },
+      context: {
+        type: 'direct-workspace',
+        workspaceId: 'workspace-1',
+        agentSessionId: 'direct-agent',
+      },
     });
   });
 
   it('fails closed for malformed taskless conversation tokens', async () => {
-    const result = await resolveInstructionContext({
-      ...baseToken,
-      taskId: '',
-      contextType: 'conversation',
-      taskMode: 'conversation',
-      chatSessionId: undefined,
-    }, makeEnv());
+    const result = await resolveInstructionContext(
+      {
+        ...baseToken,
+        taskId: '',
+        contextType: 'conversation',
+        taskMode: 'conversation',
+        chatSessionId: undefined,
+      },
+      makeEnv()
+    );
 
     expect(result).toEqual({ ok: false, message: 'Conversation context missing chatSessionId' });
   });
@@ -461,6 +487,86 @@ describe('MCP instruction context handlers', () => {
       'chat-1',
       null,
       expect.objectContaining({ message: 'Loaded project context' })
+    );
+  });
+});
+
+describe('get_instructions eventing guidance', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.selectRows = [];
+    mocks.drizzle.mockReturnValue(makeMockDb());
+    mocks.projectData.getSession.mockResolvedValue(null);
+    mocks.projectData.getAllHighConfidenceKnowledge.mockResolvedValue([]);
+    mocks.projectData.getKnowledgeEntityIndex.mockResolvedValue({ entries: [], totalEntities: 0 });
+    mocks.projectData.getActivePolicies.mockResolvedValue([]);
+  });
+
+  const instructionsFor = async (
+    taskRow: Record<string, unknown>,
+    env: Record<string, unknown> = {},
+    token: McpTokenData = baseToken
+  ) => {
+    mocks.selectRows = [[taskRow], [project]];
+    const payload = parseInstructionPayload(
+      await handleGetInstructions('request-1', token, { ...(makeEnv() as object), ...env } as never)
+    );
+    return { payload, text: (payload.instructions as string[]).join('\n') };
+  };
+
+  it('tells task agents how to wait on PRs without claiming unverified delivery works', async () => {
+    const { text } = await instructionsFor(task);
+    expect(text).toContain('create_project_event_subscription');
+    expect(text).toContain('subjectType "pull_request"');
+    expect(text).toContain('subjectType "commit"');
+    expect(text).toContain('a PR comment waking an idle, live chat');
+    expect(text).toContain('not verified yet');
+    expect(text).toContain('bounded fallback check');
+    // Failures are reported with safe identifiers, and a send is not proof of reading.
+    expect(text).toContain('subscriptionId, eventId or deliveryId');
+    expect(text).toContain('never proves the recipient read it');
+  });
+
+  it('surfaces an inherited coordination channel with how to publish and read it', async () => {
+    const { payload, text } = await instructionsFor({
+      ...task,
+      coordinationChannel: 'feature.messaging',
+    });
+    expect(payload.task).toMatchObject({ coordinationChannel: 'feature.messaging' });
+    expect(text).toContain('Your feature coordination channel is `feature.messaging`');
+    expect(text).toContain('`publish_channel_event`');
+    expect(text).toContain('`follow_event_channel`');
+  });
+
+  it('suggests creating a coordination channel when the task has none', async () => {
+    const { payload, text } = await instructionsFor(task);
+    expect(payload.task).not.toHaveProperty('coordinationChannel');
+    expect(text).toContain('pass it as `coordinationChannel` to `dispatch_task`');
+  });
+
+  it('explains SAM agent-message notices only while that preview is effective', async () => {
+    const off = await instructionsFor(task);
+    expect(off.text).not.toContain('arrive as a SAM notice');
+    const half = await instructionsFor(task, { AGENT_MESSAGE_CHANNELS_ENABLED: 'true' });
+    expect(half.text).not.toContain('arrive as a SAM notice');
+    const on = await instructionsFor(task, {
+      AGENT_MESSAGE_CHANNELS_ENABLED: 'true',
+      PROJECT_EVENT_WAKE_ENABLED: 'true',
+    });
+    expect(on.text).toContain('arrive as a SAM notice with event IDs instead of peer text');
+  });
+
+  it('omits eventing guidance for sessions without a task-backed agent token', async () => {
+    mocks.selectRows = [[project]];
+    const payload = parseInstructionPayload(
+      await handleGetInstructions(
+        'request-1',
+        { ...baseToken, taskId: '', contextType: 'direct-workspace' },
+        makeEnv()
+      )
+    );
+    expect((payload.instructions as string[]).join('\n')).not.toContain(
+      'create_project_event_subscription'
     );
   });
 });

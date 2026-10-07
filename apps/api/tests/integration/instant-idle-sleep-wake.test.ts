@@ -38,6 +38,8 @@ import { AppError } from '../../src/middleware/error';
 import { chatRoutes } from '../../src/routes/chat';
 import { agentSessionSuspendResumeRoutes } from '../../src/routes/workspaces/agent-session-suspend-resume';
 import { agentSessionRoutes } from '../../src/routes/workspaces/agent-sessions';
+import { validateMcpToken } from '../../src/services/mcp-token';
+import { resolveSessionRuntimeContract } from '../../src/services/session-runtime-contract';
 import { sleepWorkspaceSession } from '../../src/services/session-sleep-execution';
 import { endSessionSleepEpisodeBlocked } from '../../src/services/session-sleep-fallback';
 import {
@@ -140,6 +142,23 @@ class ContainerVmAgent {
   readonly prompts: string[] = [];
   /** Cancel/stop signals the agent received, by path. */
   readonly signals: string[] = [];
+  readonly requests: { method: string; path: string }[] = [];
+  readonly creations: {
+    sessionId: string;
+    label: string;
+    chatSessionId: string;
+    projectId: string;
+    mcpServers: { name: string; url: string; token: string }[];
+  }[] = [];
+  createStatus = 201;
+  workspaceStatus = 201;
+  readonly hydratedWorkspaces: {
+    workspaceId: string;
+    branch: string;
+    defaultBranch: string;
+    baseBranch: string;
+    callbackToken: string;
+  }[] = [];
   /** Holds a restore open so a test can observe the wake mid-flight. */
   restoreGate: Promise<void> | null = null;
   private notifyRestoreStarted: (() => void) | null = null;
@@ -165,8 +184,38 @@ class ContainerVmAgent {
   async fetch(request: Request): Promise<Response> {
     if (!this.running) throw new TypeError('Network connection lost.');
     const { pathname } = new URL(request.url);
+    this.requests.push({ method: request.method, path: pathname });
+    if (pathname === '/workspaces' && request.method === 'POST') {
+      if (
+        request.headers.get('Authorization') !== 'Bearer node-management-token' ||
+        request.headers.get('X-SAM-Workspace-Id') !== WORKSPACE_ID ||
+        request.headers.get('X-SAM-Node-Id') !== NODE_ID
+      )
+        return Response.json({ error: 'UNAUTHORIZED' }, { status: 401 });
+      const metadata = (await request.json()) as ContainerVmAgent['hydratedWorkspaces'][number];
+      this.hydratedWorkspaces.push(metadata);
+      return this.workspaceStatus === 201
+        ? Response.json({ id: metadata.workspaceId, status: 'running' }, { status: 201 })
+        : Response.json({ error: 'HYDRATION_REFUSED' }, { status: this.workspaceStatus });
+    }
+    if (pathname === `/workspaces/${WORKSPACE_ID}/agent-sessions` && request.method === 'POST') {
+      if (
+        request.headers.get('Authorization') !== 'Bearer node-management-token' ||
+        request.headers.get('X-SAM-Workspace-Id') !== WORKSPACE_ID ||
+        request.headers.get('X-SAM-Node-Id') !== NODE_ID
+      )
+        return Response.json({ error: 'UNAUTHORIZED' }, { status: 401 });
+      const body = (await request.json()) as ContainerVmAgent['creations'][number];
+      this.creations.push(body);
+      return this.createStatus === 201
+        ? Response.json({ sessionId: body.sessionId }, { status: 201 })
+        : Response.json({ error: 'CREATE_REFUSED' }, { status: this.createStatus });
+    }
     if (pathname === CAPABILITIES_PATH) {
-      return Response.json(versionedPromptCapabilities(this.runtimeIdentity));
+      return Response.json({
+        ...versionedPromptCapabilities(this.runtimeIdentity),
+        sessionRuntimeContract: { supported: true, version: 1 },
+      });
     }
     if (pathname === `${AGENT_PATH}/restore`) {
       this.notifyRestoreStarted?.();
@@ -207,6 +256,7 @@ describe('Instant session wake after idle sleep', () => {
   let container: VmAgentContainer;
   let vmAgent: ContainerVmAgent;
   let deliveries = 0;
+  let kvValues: Map<string, { value: string; expiresAt: number | null }>;
 
   /** What the vm-agent does to capture a snapshot: prepare, upload HOME, complete. */
   async function captureSnapshot(): Promise<void> {
@@ -262,7 +312,7 @@ describe('Instant session wake after idle sleep', () => {
     } as unknown as R2Bucket;
   }
 
-  function newContainer(): VmAgentContainer {
+  function newContainer(branch = 'main'): VmAgentContainer {
     const values = new Map<string, unknown>([
       ['lifecycleStatus', 'running'],
       [
@@ -273,7 +323,7 @@ describe('Instant session wake after idle sleep', () => {
           projectId: PROJECT_ID,
           chatSessionId: CHAT_SESSION_ID,
           repository: 'owner/repo',
-          branch: 'main',
+          branch,
           workspaceDir: '/workspaces/repo',
           controlPlaneUrl: 'https://api.example.test',
           vmAgentPort: 8080,
@@ -304,10 +354,12 @@ describe('Instant session wake after idle sleep', () => {
 
   function seedLiveInstantSession(): void {
     const now = new Date().toISOString();
-    d1.prepare(`INSERT INTO projects (id, user_id, name) VALUES (?, ?, 'SAM')`).run(
-      PROJECT_ID,
-      USER_ID
-    );
+    d1.prepare(
+      `INSERT INTO users (id, name, email) VALUES (?, 'Developer', 'developer@example.com')`
+    ).run(USER_ID);
+    d1.prepare(
+      `INSERT INTO projects (id, user_id, name, repository, default_branch) VALUES (?, ?, 'SAM', 'owner/repo', 'main')`
+    ).run(PROJECT_ID, USER_ID);
     d1.prepare(
       `INSERT INTO project_members (project_id, user_id, role, status) VALUES (?, ?, 'owner', 'active')`
     ).run(PROJECT_ID, USER_ID);
@@ -558,7 +610,28 @@ describe('Instant session wake after idle sleep', () => {
     projectData.sql = createSqlStorage(projectDataDb);
     projectData.idleSince = Date.now() - 60_000;
     runMigrations(projectData.sql);
+    kvValues = new Map();
+    const kv = {
+      put: async (key: string, value: string, options?: { expirationTtl?: number }) => {
+        kvValues.set(key, {
+          value,
+          expiresAt: options?.expirationTtl ? Date.now() + options.expirationTtl * 1000 : null,
+        });
+      },
+      get: async (key: string, options?: { type?: string } | string) => {
+        const row = kvValues.get(key);
+        if (!row || (row.expiresAt !== null && row.expiresAt <= Date.now())) return null;
+        return (typeof options === 'string' ? options : options?.type) === 'json'
+          ? JSON.parse(row.value)
+          : row.value;
+      },
+      delete: async (key: string) => {
+        kvValues.delete(key);
+      },
+    };
     env = {
+      KV: kv,
+      ENCRYPTION_KEY: Buffer.alloc(32, 5).toString('base64'),
       DATABASE: createSqliteD1(d1),
       R2: r2Bucket(),
       BASE_DOMAIN: 'example.test',
@@ -606,6 +679,36 @@ describe('Instant session wake after idle sleep', () => {
       });
       expect(vmAgent.starts).toBe(1);
       expect(vmAgent.prompts).toEqual(['Pick up where you left off.']);
+      expect(vmAgent.creations).toHaveLength(1);
+      const recreated = vmAgent.creations[0]!;
+      expect(recreated).toMatchObject({
+        sessionId: AGENT_SESSION_ID,
+        label: 'Restored session',
+        chatSessionId: CHAT_SESSION_ID,
+        projectId: PROJECT_ID,
+      });
+      expect(recreated.mcpServers).toHaveLength(1);
+      const server = recreated.mcpServers[0]!;
+      expect(server).toMatchObject({ name: 'sam-mcp', url: 'https://api.example.test/mcp' });
+      expect(await validateMcpToken(env.KV, server.token, env)).toMatchObject({
+        userId: USER_ID,
+        projectId: PROJECT_ID,
+        workspaceId: WORKSPACE_ID,
+        chatSessionId: CHAT_SESSION_ID,
+        agentSessionId: AGENT_SESSION_ID,
+        taskId: TASK_ID,
+        taskMode: 'conversation',
+      });
+      const createIndex = vmAgent.requests.findIndex(
+        (request) =>
+          request.method === 'POST' && request.path === `/workspaces/${WORKSPACE_ID}/agent-sessions`
+      );
+      const restoreIndex = vmAgent.requests.findIndex(
+        (request) => request.path === `${AGENT_PATH}/restore`
+      );
+      expect(createIndex).toBeGreaterThanOrEqual(0);
+      expect(restoreIndex).toBeGreaterThan(createIndex);
+
       expect(d1.prepare('SELECT status FROM tasks WHERE id = ?').get(TASK_ID)).toEqual({
         status: 'in_progress',
       });
@@ -614,6 +717,116 @@ describe('Instant session wake after idle sleep', () => {
         status: 'active',
       });
     });
+  });
+
+  it('hydrates the canonical project default branch rather than the task checkout branch', async () => {
+    d1.prepare(
+      "UPDATE projects SET default_branch = 'develop', repository = 'owner/repo' WHERE id = ?"
+    ).run(PROJECT_ID);
+    d1.prepare("UPDATE workspaces SET branch = 'sam/task-change' WHERE id = ?").run(WORKSPACE_ID);
+    container = newContainer('sam/task-change');
+    await sleepOnContainerIdleTimeout();
+    expect((await postWorkspaceAgentResume()).status).toBe(200);
+    expect(vmAgent.hydratedWorkspaces).toHaveLength(1);
+    expect(vmAgent.hydratedWorkspaces[0]).toMatchObject({
+      workspaceId: WORKSPACE_ID,
+      repository: 'owner/repo',
+      branch: 'sam/task-change',
+      defaultBranch: 'develop',
+      baseBranch: 'develop',
+      projectId: PROJECT_ID,
+      taskId: TASK_ID,
+      callbackToken: 'workspace-callback-token',
+    });
+    const workspaceIndex = vmAgent.requests.findIndex(
+      (request) => request.method === 'POST' && request.path === '/workspaces'
+    );
+    const sessionIndex = vmAgent.requests.findIndex(
+      (request) =>
+        request.method === 'POST' && request.path === `/workspaces/${WORKSPACE_ID}/agent-sessions`
+    );
+    const restoreIndex = vmAgent.requests.findIndex(
+      (request) => request.path === `${AGENT_PATH}/restore`
+    );
+    expect(workspaceIndex).toBeGreaterThanOrEqual(0);
+    expect(sessionIndex).toBeGreaterThan(workspaceIndex);
+    expect(restoreIndex).toBeGreaterThan(sessionIndex);
+    expect(runtimeRows()).toEqual(AWAKE_ROWS);
+  });
+  it('preserves snapshot and creates no session or MCP token if workspace hydration is refused', async () => {
+    await sleepOnContainerIdleTimeout();
+    const generation = restorableGeneration();
+    vmAgent.workspaceStatus = 403;
+    expect((await postWorkspaceAgentResume()).status).toBeGreaterThanOrEqual(400);
+    expect(vmAgent.hydratedWorkspaces).toHaveLength(1);
+    expect(vmAgent.creations).toHaveLength(0);
+    expect(vmAgent.requests.filter((request) => request.path === `${AGENT_PATH}/restore`)).toEqual(
+      []
+    );
+    expect(kvValues.size).toBe(0);
+    expect(vmAgent.running).toBe(false);
+    expect(restorableGeneration()).toBe(generation);
+    expect(runtimeRows().snapshot).toEqual(SLEPT_ROWS.snapshot);
+  });
+
+  it.each(['task', 'conversation'] as const)(
+    'retains saved %s MCP context through real KV and session recreation',
+    async (taskMode) => {
+      const db = drizzle(env.DATABASE, { schema });
+      const contract = await resolveSessionRuntimeContract(db, env, {
+        userId: USER_ID,
+        projectId: PROJECT_ID,
+        agentType: 'codex',
+        promptKind: taskMode,
+        taskContext: { taskId: TASK_ID, taskMode },
+        overrides: { permissionMode: 'default', model: 'gpt-6.1-sol', effort: 'xhigh' },
+      });
+      d1.prepare('UPDATE agent_sessions SET runtime_contract_json = ? WHERE id = ?').run(
+        JSON.stringify(contract),
+        AGENT_SESSION_ID
+      );
+      await captureSnapshot();
+      await sleepOnContainerIdleTimeout();
+      // Current task mode changed after the original session launched.
+      d1.prepare("UPDATE tasks SET task_mode = 'conversation' WHERE id = ?").run(TASK_ID);
+      const deliveryId = await sendFollowUp('Continue the original session.');
+      expect(mailbox.getMessage(projectDataSql(), deliveryId)).toMatchObject({
+        deliveryState: 'acked',
+      });
+      expect(vmAgent.creations).toHaveLength(1);
+      const token = vmAgent.creations[0]!.mcpServers[0]!.token;
+      expect(await validateMcpToken(env.KV, token, env)).toMatchObject({
+        taskId: TASK_ID,
+        taskMode,
+        contextType: taskMode,
+        workspaceId: WORKSPACE_ID,
+        chatSessionId: CHAT_SESSION_ID,
+        agentSessionId: AGENT_SESSION_ID,
+        userId: USER_ID,
+        projectId: PROJECT_ID,
+      });
+      expect(runtimeRows()).toEqual(AWAKE_ROWS);
+    }
+  );
+
+  it('revokes freshly minted MCP token and preserves snapshot when session recreation is refused', async () => {
+    await sleepOnContainerIdleTimeout();
+    const generation = restorableGeneration();
+    vmAgent.createStatus = 403;
+    const response = await postWorkspaceAgentResume();
+    expect(response.status).toBeGreaterThanOrEqual(400);
+    expect(vmAgent.creations).toHaveLength(1);
+    const token = vmAgent.creations[0]!.mcpServers[0]!.token;
+    expect(await validateMcpToken(env.KV, token, env)).toBeNull();
+    expect(kvValues.size).toBe(0);
+    expect(vmAgent.requests.filter((request) => request.path === `${AGENT_PATH}/restore`)).toEqual(
+      []
+    );
+    expect(vmAgent.running).toBe(false);
+    expect(restorableGeneration()).toBe(generation);
+    expect(runtimeRows().snapshot).toEqual(SLEPT_ROWS.snapshot);
+    expect(runtimeRows().node).not.toEqual(AWAKE_ROWS.node);
+    expect(vmAgent.prompts).toEqual([]);
   });
 
   // Durable delivery commits the wake it starts. These requests wake the container outside it,

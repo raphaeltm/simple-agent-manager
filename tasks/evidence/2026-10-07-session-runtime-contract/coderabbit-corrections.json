@@ -1,0 +1,42 @@
+{
+  "reviewId": 5445510008,
+  "reviewedOriginalHead": "4c43ba51e871b483a6ae2b7508a03e670f386d94",
+  "status": "All three CodeRabbit corrections implemented, independently reviewed/tested, final completion revalidation PASS before rearchival; parent-owned release gates pending",
+  "findings": [
+    {
+      "commentId": 4209571853,
+      "path": "apps/api/src/services/session-snapshot-prepare.ts",
+      "correction": "Parameterized COALESCE preserves existing contract for NULL; scoped same owner/project update with explicit nullable project handling; missing returned row throws before lifecycle callers continue.",
+      "regression": "Actual SQLite unique chat constraint, null preservation VM/Instant, valid replacement, three full-row unchanged ownership conflicts, first legacy NULL; red5fail21pass then26pass."
+    },
+    {
+      "commentId": 4209571887,
+      "actualPath": "packages/vm-agent/internal/server/standalone_gh_shim.go",
+      "correction": "Unconditional diagnostic and exit1 when no fresh token, before real gh. Successful fresh exchange unchanged.",
+      "regression": "Production-rendered shim and actual runtime command builder, stale/absent inherited token, private HOME/GH_CONFIG_DIR stored canary, no invocation marker/no credential output, success HTTP200/installer path/reinstall/permissions preserved."
+    },
+    {
+      "outsideDiff": "apps/www/src/content/docs/docs/guides/chat-features.md:45",
+      "correction": "Task wake retains original mode and automatic git delivery; old ask-to-push instruction removed."
+    }
+  ],
+  "verification": {
+    "apiFocused": "4 files67PASS, actual sleep caller43PASS, actual Workers/D1 snapshot wiring2PASS, final contract26PASS including nullable-project recovery",
+    "typecheck": "PASS",
+    "lint": "PASS",
+    "formatAndDiff": "PASS",
+    "goTargeted": "PASS",
+    "goFull": "25packages1868top-level3043withsubtestsPASS",
+    "goEntireServerRace": "547top-level928withsubtestsPASS",
+    "independentGoSecurityRace": "1.137sPASS"
+  },
+  "independentReviews": {
+    "cloudflareConstitutionDocsSecurity": "PASS",
+    "goSecurity": "PASS",
+    "testEngineer": "PASS",
+    "completionDelta": "Final A-F task-completion revalidation PASS on8978d3130; no uncovered findings/criteria/blockers"
+  },
+  "stagingAssessment": "No repeat4livefixtures required; unchanged success path already proved, SQLite/process regressions decisive. Parent coordinates final candidate normal deploy/smoke only after occupant release; optional owned sleep/readback, no live credential poisoning or D1 mutation/newVM.",
+  "ownership": "Parent01M4ABRWV97F54MQ1FFJFGHMBA now owns PRbody/gates/merge under latest directive; root owns code/reviews/evidence and production corroboration; no duplicate merge/retrigger.",
+  "reviewedImplementationHead": "8978d3130"
+}

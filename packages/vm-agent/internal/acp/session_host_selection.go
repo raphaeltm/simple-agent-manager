@@ -226,6 +226,11 @@ func (h *SessionHost) reportCredentialFetched(agentType string, cred *agentCrede
 }
 
 func (h *SessionHost) loadAgentSettings(ctx context.Context, agentType string) *agentSettingsPayload {
+	if h.config.SettingsResolved {
+		return &agentSettingsPayload{Model: h.config.ModelOverride, Effort: h.config.EffortOverride,
+			PermissionMode: h.config.PermissionModeOverride, OpencodeProvider: h.config.OpencodeProviderOverride,
+			OpencodeBaseURL: h.config.OpencodeBaseURLOverride}
+	}
 	settings := h.fetchAgentSettings(ctx, agentType)
 	if settings == nil {
 		slog.Info("No agent settings found, using defaults", "agentType", agentType, "workspaceId", h.config.WorkspaceID)

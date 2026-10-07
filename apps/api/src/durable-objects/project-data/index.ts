@@ -17,6 +17,8 @@ import {
   type MessageCommentThread,
   type MessageCommentThreadEventReason,
   type MessageCursor,
+  type SendAgentChannelMessageInput,
+  type SendAgentChannelMessageResult,
   type SessionActivityTerminalReason,
 } from '@simple-agent-manager/shared';
 import { DurableObject } from 'cloudflare:workers';
@@ -31,6 +33,7 @@ import { isSessionRecoverySourceTaskGuardValid } from '../../services/session-re
 import { runMigrations } from '../migrations';
 import * as acpSessions from './acp-sessions';
 import * as activity from './activity';
+import * as agentMessageChannels from './agent-message-channels';
 import {
   computeProjectDataAlarmSectionTimes,
   earliestAlarmTime,
@@ -1576,6 +1579,32 @@ export class ProjectData extends DurableObject<Env> {
     const result = this.ctx.storage.transactionSync(() => {
       requireChannelActorChat(this.sql, prepared.actor);
       return eventChannels.publishChannel(this.sql, this.env, this.getProjectId(), prepared);
+    });
+    await this.recalculateAlarm();
+    return result;
+  }
+
+  /** Preview: an ordinary agent message over its SAM-managed pair channel. */
+  async sendAgentChannelMessage(
+    input: SendAgentChannelMessageInput
+  ): Promise<SendAgentChannelMessageResult> {
+    this.ensureProjectId(input.projectId);
+    const prepared = await agentMessageChannels.prepareAgentChannelMessage(this.env, input);
+    await requireChannelActorAuthority(this.env, prepared.projectId, prepared.actor);
+    // Same two-step shape as publishProjectEventChannel: bounded catalog
+    // maintenance commits on its own, then the send is one transaction.
+    this.ctx.storage.transactionSync(() => {
+      requireChannelActorChat(this.sql, prepared.actor);
+      eventChannels.cleanupEmptyChannels(this.sql, this.env, prepared.projectId, Date.now());
+    });
+    const result = this.ctx.storage.transactionSync(() => {
+      requireChannelActorChat(this.sql, prepared.actor);
+      return agentMessageChannels.sendAgentChannelMessage(
+        this.sql,
+        this.env,
+        this.getProjectId(),
+        prepared
+      );
     });
     await this.recalculateAlarm();
     return result;

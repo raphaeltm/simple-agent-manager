@@ -42,9 +42,8 @@ For every kind of request:
   nobody answers in
   time, the request ends — the card says it expired or was cancelled — and the agent is told no, so
   the action it asked about does not happen. Send a message to tell the agent how to carry on. (A
-  **Task** has often gone to sleep by then; your reply wakes it
-  [like a Chat](/docs/guides/agents/#after-a-chat-wakes-from-sleep), so ask the agent to push its
-  work.)
+  **Task** may have gone to sleep by then; your reply wakes it with its original task mode and
+  automatic Git delivery behavior.)
 - **Answer on the card, not in the message box.** A message you type waits until the agent's turn
   ends, and the turn can't end until the card is answered or expires. To stop the agent instead,
   select **Interrupt** (the red button above the message box); the card then says **Request
@@ -58,16 +57,9 @@ For every kind of request:
 
 :::caution[Current limitations]
 
-- **A chat that has slept and woken usually can't ask.** SAM refuses its requests without showing a
-  card, and the chat usually drops its profile's permission mode, so a **Manual** profile may go
-  ahead without asking. The same goes for a chat SAM restored after its container or machine failed.
-  Chats sleep on their own when idle — by default after 15 minutes on a VM and an hour on Instant —
-  and the session list then marks them with a moon icon. To get approvals back,
-  [fork](#conversation-forking) the chat or start a new one with that profile selected; a fork
-  carries a summary of the chat, not its files. To keep working on the same files, let the chat carry
-  on without approvals — see
-  [The agent stops for approval and no card appears](/docs/guides/session-troubleshooting/#the-agent-stops-for-approval-and-no-card-appears)
-  if its requests are being refused.
+- **Sleep and wake retain agent requests.** Sessions started on the current version keep their
+  recorded settings and can ask after waking when requests are enabled. Older saved sessions use
+  [conservative compatibility](/docs/guides/agents/#after-a-chat-wakes-from-sleep).
 - **Answer before the deadline on the card.** SAM's stalled-turn check respects pending requests
   until their response deadline; waiting for your answer is not treated as a stall. If the request
   expires, the agent is told no — send a message saying how to continue.
@@ -174,10 +166,8 @@ permission, but not ask questions or send links. Which you get depends on what y
 
 A **Chat** doesn't commit, push, or open a pull request for you. For work you want delivered as a
 pull request, use a VM profile whose **Task Mode** is **Task**, such as one you create with **Build
-and open PRs** and **Cloud VM**. A **Task** pushes your follow-ups only while it's awake: once it has
-slept — when it's completed, or after sitting idle (15 minutes on a VM by default) — a reply wakes
-it, but from then on it [works like a Chat](/docs/guides/agents/#after-a-chat-wakes-from-sleep)
-(it keeps its **Task** label), and SAM stops pushing for it.
+and open PRs** and **Cloud VM**. A **Task** retains its completion and git delivery behavior
+when a follow-up wakes it from sleep; a **Chat** remains a Chat.
 See
 [What happens to your work](/docs/guides/instant-sessions/#what-happens-to-your-work).
 

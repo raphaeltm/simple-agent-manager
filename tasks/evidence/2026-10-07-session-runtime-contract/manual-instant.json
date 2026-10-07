@@ -1,0 +1,144 @@
+{
+  "status": "Live fixture acceptance PASS; owned cleanup complete; final shared Archive, merge and production gates recorded separately",
+  "deployedCandidate": "bbaee36fd5a6126d1bb4e0305a2886b636ed4e5d",
+  "agentVersion": "1120e0404aa19c5e9fdee62e141522a50571f5cc",
+  "chatSessionId": "033133d6-ab82-4dec-bb1a-47790c9aa8e3",
+  "taskId": "01M4BGS8SK5GMDGXDZARE7K9F4",
+  "workspaceId": "01M4BGS9CWM16KGFM6M321KRQY",
+  "nodeId": "01M4BGS967YC353PEAQT799MYA",
+  "temporaryProfileId": "01M4BGS64WEREJHBJFSPJTG93H",
+  "baseline": {
+    "permissionInteraction": "6538fbea-4e02-44ad-b9ed-cdd0d077b2f9",
+    "answeredAt": 1791388159094,
+    "confirmedAt": 1791388160885,
+    "marker": "CONTRACT_BASELINE_READY",
+    "idleAt": 1791388164718
+  },
+  "realSleep": {
+    "httpStatus": 200,
+    "completedAt": "2026-10-07T15:49:56.061Z",
+    "snapshotId": "01M4BGWA3BN6PAMZ5PMTKFKV5V",
+    "status": "available",
+    "degradation": "none"
+  },
+  "savedContract": {
+    "version": 1,
+    "agentType": "claude-code",
+    "model": "claude-sonnet-4-5-20250929",
+    "effort": "auto",
+    "permissionMode": "default",
+    "opencodeProvider": null,
+    "opencodeBaseUrl": null,
+    "settingsResolved": true,
+    "acpInteractions": {
+      "enabled": true,
+      "formsEnabled": true,
+      "protocolVersion": 1,
+      "permissionDeadlineMs": 7200000,
+      "formDeadlineMs": 7200000,
+      "urlsEnabled": true,
+      "urlDeadlineMs": 600000,
+      "urlMaxChars": 8192,
+      "urlElicitationIdMaxChars": 256,
+      "urlRedirectDepth": 2,
+      "maxDeadlineMs": 14400000,
+      "deadlineMarginMs": 60000,
+      "requestMaxBytes": 32768,
+      "optionsMaxCount": 16,
+      "optionIdMaxChars": 128,
+      "optionNameMaxChars": 200,
+      "receiptLimit": 256,
+      "responseMaxBytes": 65536,
+      "formSchemaMaxBytes": 16384,
+      "formSchemaMaxProperties": 20,
+      "formSchemaMaxEnum": 50,
+      "answerMaxBytes": 16384,
+      "answerStringMaxBytes": 4096,
+      "settleRetryDelaysMs": [1000, 5000, 30000, 120000, 300000],
+      "settleRetrySteadyMs": 300000
+    },
+    "promptKind": "conversation",
+    "taskContext": {
+      "projectId": "01KJNR9R3TEN3KX1ETE33852R8",
+      "taskId": "01M4BGS8SK5GMDGXDZARE7K9F4",
+      "taskMode": "conversation"
+    }
+  },
+  "onlyPostSleepMutation": {
+    "target": "owned temporary profile",
+    "permissionMode": "default -> bypassPermissions",
+    "time": "2026-10-07T15:50:47.883Z"
+  },
+  "restoredContractUnchanged": true,
+  "wakeDeliveryId": "01M4BGYVS0XK4XD53W2FV48K3V",
+  "genuineUserRequest": {
+    "tool": "Write",
+    "ownedFile": ".sam-runtime-contract-manual-instant-20261007.txt",
+    "interaction": {
+      "interactionId": "8708edb6-a904-4bed-9b82-40526000bbb0",
+      "kind": "permission",
+      "state": "delivery_confirmed",
+      "createdAt": 1791388279309,
+      "updatedAt": 1791388354788,
+      "deadlineAt": 1791395479151,
+      "answeredAt": 1791388353041,
+      "deliveryState": "confirmed",
+      "attentionMarkerId": "2bb38abf-3a3d-4ce7-8d9b-b2b523e5d347",
+      "toolCallId": "toolu_01Vw2H7miUT1bhj8ae5XQ99v",
+      "urlCompletedAt": null
+    },
+    "browserViewport": {
+      "width": 390,
+      "height": 844
+    },
+    "selectedExactAgentOption": "Yes (allow once)",
+    "ui": "Delivered to agent",
+    "pageErrors": [],
+    "rootVisualInspection": "Authentic cropped request and answered screenshots inspected; choices readable"
+  },
+  "completion": {
+    "write": "succeeded",
+    "marker": "CONTRACT_MANUAL_INSTANT_ANSWERED",
+    "state": {
+      "activity": "idle",
+      "activityAt": 1791388356203,
+      "statusError": null,
+      "currentPlan": null,
+      "planUpdatedAt": null,
+      "promptStartedAt": null,
+      "lastStopReason": null,
+      "agentType": "claude-code",
+      "activitySource": "vm_report",
+      "activityReason": "completed",
+      "runtimeWorkState": "inactive",
+      "runtimeWorkCount": 0,
+      "runtimeWorkSource": "claude_sdk",
+      "runtimeWorkUpdatedAt": 1791388356203,
+      "runtimeWorkProgressAt": 1791388261312
+    }
+  },
+  "cleanup": {
+    "firstPublicStop": "HTTP500 fd8dcfa0-0487-4b28-a506-39dce920b91c after partial stopped state",
+    "boundedIdempotentRetry": "HTTP200 status stopped/workspaceDeleted true",
+    "temporaryProfileDelete": "HTTP200",
+    "temporaryProfileReadback": "HTTP404",
+    "scopedActiveResources": {
+      "activeWorkspaceCount": 0,
+      "activeNodeCount": 0,
+      "snapshotCount": 0
+    },
+    "audit": "Stopped/cancelled test audit retained; no foreign resources touched"
+  },
+  "rootAndSharedSolSelection": "unchanged; permission-capable test fixture explicitly approved",
+  "finalFlags": {
+    "workflow": 37648102691,
+    "conclusion": "SUCCESS",
+    "allThreeFlags": false,
+    "activeApiVersion": "8b19aee2-667a-4824-bb50-60ff7bd4c180",
+    "unchangedCodeETag": "35c82b7fa0c8a03c160dd6d72cc7ae5c7408bb86029406e5e8385810ccad57a9",
+    "bindingCount": 355,
+    "ownedTemporaryRemoteBranchAndWorktree": "deleted"
+  },
+  "independentLiveEvidenceReview": "cloudflare_contract_review PASS: curated contract, task callback/MCP, browser request/answer images and owned cleanup",
+  "nonblockingStopFollowupIdea": "01M4BH36AZV3Q2J8MH43JXY8M6"
+}

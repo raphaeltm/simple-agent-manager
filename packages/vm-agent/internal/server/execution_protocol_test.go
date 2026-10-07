@@ -278,6 +278,10 @@ func TestAgentCapabilitiesAdvertiseVersionedInertExecutionFeatures(t *testing.T)
 	if interactions["supported"] != true || interactions["version"] != acpInteractionCapabilityVersion {
 		t.Fatalf("interactions = %#v", interactions)
 	}
+	contract := capabilities["sessionRuntimeContract"].(map[string]interface{})
+	if contract["supported"] != true || contract["version"] != 1 {
+		t.Fatalf("session runtime contract = %#v", contract)
+	}
 	rollover := capabilities["checkpointRollover"].(map[string]interface{})
 	if rollover["supported"] != true || rollover["automatic"] != false {
 		t.Fatalf("checkpoint rollover = %#v", rollover)

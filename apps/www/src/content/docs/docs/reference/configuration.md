@@ -764,8 +764,8 @@ them a question, or send a link to open — see
 [When the Agent Needs You](/docs/guides/chat-features/#when-the-agent-needs-you). All three switches
 are `false` in the checked-in configuration; set them as GitHub Environment variables to turn them
 on (see [Let agents ask in chat](/docs/guides/self-hosting/#let-agents-ask-in-chat)). Turning a
-switch on applies to agent sessions started afterwards (a session woken from sleep usually can't ask
-yet);
+switch on applies to agent sessions started afterwards; sleep and wake preserve their recorded
+interaction settings;
 turning one off refuses new requests at once, even in running sessions.
 
 A permission request in a **Chat** session, and every question, waits up to
@@ -1368,6 +1368,10 @@ Safe operator sequence for ProjectData storage relief:
 | `PROJECT_EVENT_CHANNEL_PUBLISH_MAX_PER_WINDOW`              | `120`                       | Maximum newly committed channel publishes per project window; retained replays do not consume quota                                                                                                                            |
 | `PROJECT_EVENT_CHANNEL_CURSOR_TTL_MS`                       | `3600000`                   | History cursor and unfinished catch-up lifetime in milliseconds; continuation never extends it                                                                                                                                 |
 | `PROJECT_EVENT_CHANNEL_CATALOG_IDLE_TTL_MS`                 | `2592000000`                | Minimum idle time before reclaiming an empty catalog generation without live catch-up                                                                                                                                          |
+| `AGENT_MESSAGE_CHANNELS_ENABLED`                            | `false`                     | Code fallback is off; managed deployment sets `true`. Send `notify`/`deliver` agent messages over SAM-managed `agent-dm.*` pair channels. Effective only while `PROJECT_EVENT_WAKE_ENABLED` and durable prompt delivery are on |
+| `AGENT_MESSAGE_CHANNEL_MAX_CHANNELS`                        | `1024`                      | Maximum `agent-dm.*` pair channels per project, separate from `PROJECT_EVENT_CHANNEL_MAX_CHANNELS`                                                                                                                             |
+| `AGENT_MESSAGE_SUBSCRIPTION_ROTATION_GRACE_MS`              | `300000`                    | Replace a managed pair subscription this close to the end of its wake lifetime when it owes no pending wake                                                                                                                    |
+| `AGENT_MESSAGE_MAX_ACTIVE_SUBSCRIPTIONS`                    | `100`                       | Share of `PROJECT_EVENT_MAX_ACTIVE_SUBSCRIPTIONS_PER_PROJECT` that SAM-managed agent-message subscriptions may hold; idle ones on other pairs are released first                                                               |
 | `PROJECT_EVENT_LIST_LIMIT`                                  | `50`                        | Default ProjectData event-subscription list/status page size                                                                                                                                                                   |
 | `PROJECT_EVENT_LIST_MAX`                                    | `200`                       | Maximum ProjectData event-subscription list/status page size                                                                                                                                                                   |
 | `PROJECT_EVENT_SUBSCRIPTION_EVENT_CURSOR_MAX_LENGTH`        | `512`                       | Maximum opaque `list_subscription_events` cursor length accepted by ProjectData pull delivery                                                                                                                                  |

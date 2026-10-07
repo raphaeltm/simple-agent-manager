@@ -19,6 +19,7 @@ import {
   snapshotAgentType,
 } from './session-recovery-request';
 import { SourceTaskNotWakeableError } from './session-recovery-task-guard';
+import { parseSessionRuntimeContract } from './session-runtime-contract';
 import { sleptFallbackRecord } from './session-sleep-episode';
 import {
   SESSION_RECOVERY_INITIAL_PROMPT,
@@ -117,6 +118,7 @@ export async function startRecoveryTask(
   }
   if (task.status === 'in_progress') return;
 
+  const contract = parseSessionRuntimeContract(context.snapshot.runtimeContractJson);
   const profile = task.agentProfileHint
     ? await db
         .select()
@@ -173,16 +175,20 @@ export async function startRecoveryTask(
       credentialAttributionUserId: placementResolution.credentialAttributionUserId,
       credentialAttributionProjectId: placementResolution.credentialAttributionProjectId,
       credentialAttributionSource: placementResolution.credentialAttributionSource,
-      taskMode: 'conversation',
-      model: profile?.model ?? null,
-      effort:
-        profile?.effort === 'low' ||
-        profile?.effort === 'medium' ||
-        profile?.effort === 'high' ||
-        profile?.effort === 'auto'
+      taskMode:
+        contract?.taskContext?.taskMode ?? (task.taskMode === 'task' ? 'task' : 'conversation'),
+      model: contract ? contract.model : (profile?.model ?? null),
+      effort: contract
+        ? contract.effort
+        : profile?.effort === 'low' ||
+            profile?.effort === 'medium' ||
+            profile?.effort === 'high' ||
+            profile?.effort === 'auto'
           ? profile.effort
           : null,
-      permissionMode: profile?.permissionMode ?? null,
+      permissionMode: contract?.permissionMode ?? 'default',
+      opencodeProvider: contract?.opencodeProvider ?? null,
+      opencodeBaseUrl: contract?.opencodeBaseUrl ?? null,
       systemPromptAppend: profile?.systemPromptAppend ?? null,
       agentProfileHint: task.agentProfileHint,
       projectScaling: {

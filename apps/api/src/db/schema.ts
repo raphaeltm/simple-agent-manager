@@ -970,6 +970,11 @@ export const tasks = sqliteTable(
     credentialBlockedAt: text('credential_blocked_at'),
     /** Null for standalone tasks; set when task belongs to a mission. Set null on mission delete. */
     missionId: text('mission_id').references(() => missions.id, { onDelete: 'set null' }),
+    /**
+     * Project event channel shared by a feature's coordinator and its descendants.
+     * Inherited through dispatch; copied by retry and session recovery. Null = none.
+     */
+    coordinationChannel: text('coordination_channel'),
     /** Scheduler classification for mission tasks. Null for standalone tasks. */
     schedulerState: text('scheduler_state'),
     /** Resolved VM size for audit (e.g. 'small', 'medium', 'large'). */
@@ -1719,6 +1724,7 @@ export const agentSessions = sqliteTable(
     agentProviderMode: text('agent_provider_mode'),
     agentCredentialGeneration: integer('agent_credential_generation').notNull().default(0),
     skillId: text('skill_id').references(() => skills.id, { onDelete: 'set null' }),
+    runtimeContractJson: text('runtime_contract_json'),
     worktreePath: text('worktree_path'),
     stoppedAt: text('stopped_at'),
     suspendedAt: text('suspended_at'),
@@ -1849,6 +1855,7 @@ export const sessionSnapshots = sqliteTable(
     manifestR2Key: text('manifest_r2_key').notNull(),
     baseCommit: text('base_commit'),
     expiresAt: text('expires_at').notNull(),
+    runtimeContractJson: text('runtime_contract_json'),
     manifestJson: text('manifest_json'),
     restoreStatus: text('restore_status'),
     restoreMessage: text('restore_message'),

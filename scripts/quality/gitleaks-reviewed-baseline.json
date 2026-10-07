@@ -226,6 +226,14 @@
         "c5428e30be5f1a9bbde3649acf0e488dd7203dc0a4bfaf4557d5e6d4a4bc0da5",
         "df76a1a9723b08c12905857c01846c80bd86964dc6d5d16b95cd06b4013f3c6c"
       ]
+    },
+    {
+      "classification": "synthetic-test-fixture",
+      "reason": "Intermediate PR-range evidence only: a concatenated failed/passed test-count summary was interpreted as a credential. Independent review confirms exact CI counts, not credential material; current evidence uses readable spaced numbers. Exact historical finding only.",
+      "owner": "security",
+      "reviewedAt": "2026-10-07T17:38:00.000Z",
+      "expiresAt": "2026-11-06T00:00:00.000Z",
+      "digests": ["78c85a43bd94bd7a35bccfd006f9e2a07e64180c5fb750742fd6545db14a2349"]
     }
   ]
 }

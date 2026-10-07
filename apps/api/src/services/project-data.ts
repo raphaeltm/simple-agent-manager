@@ -60,6 +60,8 @@ import type {
   PublishProjectEventChannelResult,
   RecordProjectEventDeliveryAttemptInput,
   RunProjectEventRetentionInput,
+  SendAgentChannelMessageInput,
+  SendAgentChannelMessageResult,
   SessionActivityTerminalReason,
 } from '@simple-agent-manager/shared';
 import { resolveHandoffLimits, resolveMissionStateLimits } from '@simple-agent-manager/shared';
@@ -89,6 +91,7 @@ import type {
 } from '../durable-objects/project-data/grouped-fts-wall-recovery';
 import type { SearchResult } from '../durable-objects/project-data/message-search';
 import {
+  AgentMessageRecipientUnavailableError,
   ProjectEventAckPolicyError,
   ProjectEventAckStateError,
   ProjectEventCursorError,
@@ -122,6 +125,7 @@ export {
   CommentValidationError,
 } from '../durable-objects/project-data/comment-contracts';
 export {
+  AgentMessageRecipientUnavailableError,
   ProjectEventAckPolicyError,
   ProjectEventAckStateError,
   ProjectEventCursorError,
@@ -326,6 +330,10 @@ function normalizeProjectDataEventRpcError(err: unknown): Error | null {
   if (err.message.startsWith(ackStatePrefix)) {
     return new ProjectEventAckStateError(err.message.slice(ackStatePrefix.length));
   }
+  const recipientPrefix = 'AgentMessageRecipientUnavailableError: ';
+  if (err.message.startsWith(recipientPrefix)) {
+    return new AgentMessageRecipientUnavailableError(err.message.slice(recipientPrefix.length));
+  }
 
   switch (err.message) {
     case 'ProjectEventNotFoundError: Project event not found':
@@ -417,6 +425,9 @@ type ProjectDataEventRpc = {
   publishProjectEventChannel(
     input: PublishProjectEventChannelInput
   ): Promise<PublishProjectEventChannelResult>;
+  sendAgentChannelMessage(
+    input: SendAgentChannelMessageInput
+  ): Promise<SendAgentChannelMessageResult>;
   listProjectEventChannels(input: ListProjectEventChannelsInput): Promise<ProjectEventChannelList>;
   getProjectEventChannelHistory(
     input: ProjectEventChannelHistoryInput
@@ -1822,6 +1833,15 @@ export function publishProjectEventChannel(
   input: ProjectDataEventInput<PublishProjectEventChannelInput>
 ) {
   return callProjectDataEvent(env, projectId, 'publishProjectEventChannel', input);
+}
+
+/** Preview: send an ordinary agent message over its SAM-managed pair channel. */
+export function sendAgentChannelMessage(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<SendAgentChannelMessageInput>
+) {
+  return callProjectDataEvent(env, projectId, 'sendAgentChannelMessage', input);
 }
 
 export function listProjectEventChannels(
