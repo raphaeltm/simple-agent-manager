@@ -1,0 +1,676 @@
+{
+  "status": "live acceptance incomplete; not merge approval",
+  "taskId": "01M4AXFSY11GR95XTD2N68ZE6F",
+  "pr": 2261,
+  "reviewedCodeHead": "c47aa611e206cc0cf7c2f0daa2671c1a15019371",
+  "coordinatedStaging": {
+    "run": 37617669770,
+    "candidate": "a1d340864b580dbe28d00a051c2f309aa02370cc",
+    "workerVersion": "5a86cabc-3d5b-4b28-8578-94fbcbd6a31f",
+    "codeEtag": "fd387f25174f853c73bde9b3a730cc1abf03f2c3a05b0602558ed22c92b21037",
+    "temporaryFlagRun": 37620485248,
+    "temporaryFlagsStillEnabled": true
+  },
+  "vmConversation": {
+    "before": {
+      "chatSessionId": "e46ff3f1-4fbe-48ab-9ab2-a57c347fa811",
+      "snapshots": [
+        {
+          "id": "01M4B1WXAANXDV512XTZAFKMNM",
+          "agent_session_id": "01M4B1VRNC45KMXYARD03FZEGH",
+          "runtime": "vm",
+          "status": "available",
+          "degradation": "none",
+          "restore_status": null,
+          "sleep_status": "sleeping",
+          "recovery_status": null,
+          "runtime_contract_json": {
+            "version": 1,
+            "agentType": "openai-codex",
+            "model": "gpt-6.1-sol",
+            "effort": "auto",
+            "permissionMode": "bypassPermissions",
+            "opencodeProvider": null,
+            "opencodeBaseUrl": null,
+            "settingsResolved": true,
+            "acpInteractions": {
+              "enabled": false,
+              "formsEnabled": false,
+              "protocolVersion": 1,
+              "permissionDeadlineMs": 7200000,
+              "formDeadlineMs": 7200000,
+              "urlsEnabled": false,
+              "urlDeadlineMs": 600000,
+              "urlMaxChars": 8192,
+              "urlElicitationIdMaxChars": 256,
+              "urlRedirectDepth": 2,
+              "maxDeadlineMs": 14400000,
+              "deadlineMarginMs": 60000,
+              "requestMaxBytes": 32768,
+              "optionsMaxCount": 16,
+              "optionIdMaxChars": 128,
+              "optionNameMaxChars": 200,
+              "receiptLimit": 256,
+              "responseMaxBytes": 65536,
+              "formSchemaMaxBytes": 16384,
+              "formSchemaMaxProperties": 20,
+              "formSchemaMaxEnum": 50,
+              "answerMaxBytes": 16384,
+              "answerStringMaxBytes": 4096,
+              "settleRetryDelaysMs": [
+                1000,
+                5000,
+                30000,
+                120000,
+                300000
+              ],
+              "settleRetrySteadyMs": 300000
+            },
+            "promptKind": "task",
+            "taskContext": {
+              "projectId": "01M4B1N63Q5XE39D9SCQHSNDBH",
+              "taskId": "01M4B1NAFZRYJ5JRD3AN463EXK",
+              "taskMode": "conversation"
+            }
+          }
+        }
+      ],
+      "sessions": [
+        {
+          "id": "01M4B1VRNC45KMXYARD03FZEGH",
+          "workspace_id": "01M4B1V3S4BZV70HSFT87NTQQM",
+          "status": "completed",
+          "agent_type": "openai-codex",
+          "runtime_contract_json": {
+            "version": 1,
+            "agentType": "openai-codex",
+            "model": "gpt-6.1-sol",
+            "effort": "auto",
+            "permissionMode": "bypassPermissions",
+            "opencodeProvider": null,
+            "opencodeBaseUrl": null,
+            "settingsResolved": true,
+            "acpInteractions": {
+              "enabled": false,
+              "formsEnabled": false,
+              "protocolVersion": 1,
+              "permissionDeadlineMs": 7200000,
+              "formDeadlineMs": 7200000,
+              "urlsEnabled": false,
+              "urlDeadlineMs": 600000,
+              "urlMaxChars": 8192,
+              "urlElicitationIdMaxChars": 256,
+              "urlRedirectDepth": 2,
+              "maxDeadlineMs": 14400000,
+              "deadlineMarginMs": 60000,
+              "requestMaxBytes": 32768,
+              "optionsMaxCount": 16,
+              "optionIdMaxChars": 128,
+              "optionNameMaxChars": 200,
+              "receiptLimit": 256,
+              "responseMaxBytes": 65536,
+              "formSchemaMaxBytes": 16384,
+              "formSchemaMaxProperties": 20,
+              "formSchemaMaxEnum": 50,
+              "answerMaxBytes": 16384,
+              "answerStringMaxBytes": 4096,
+              "settleRetryDelaysMs": [
+                1000,
+                5000,
+                30000,
+                120000,
+                300000
+              ],
+              "settleRetrySteadyMs": 300000
+            },
+            "promptKind": "task",
+            "taskContext": {
+              "projectId": "01M4B1N63Q5XE39D9SCQHSNDBH",
+              "taskId": "01M4B1NAFZRYJ5JRD3AN463EXK",
+              "taskMode": "conversation"
+            }
+          }
+        }
+      ]
+    },
+    "after": {
+      "chatSessionId": "e46ff3f1-4fbe-48ab-9ab2-a57c347fa811",
+      "snapshots": [
+        {
+          "id": "01M4B1WXAANXDV512XTZAFKMNM",
+          "agent_session_id": "01M4B5C7PTJ9CDCVWV7P8P60ZD",
+          "runtime": "vm",
+          "status": "available",
+          "degradation": "none",
+          "restore_status": "restored",
+          "sleep_status": "scheduled",
+          "recovery_status": "restored",
+          "runtime_contract_json": {
+            "version": 1,
+            "agentType": "openai-codex",
+            "model": "gpt-6.1-sol",
+            "effort": "auto",
+            "permissionMode": "bypassPermissions",
+            "opencodeProvider": null,
+            "opencodeBaseUrl": null,
+            "settingsResolved": true,
+            "acpInteractions": {
+              "enabled": false,
+              "formsEnabled": false,
+              "protocolVersion": 1,
+              "permissionDeadlineMs": 7200000,
+              "formDeadlineMs": 7200000,
+              "urlsEnabled": false,
+              "urlDeadlineMs": 600000,
+              "urlMaxChars": 8192,
+              "urlElicitationIdMaxChars": 256,
+              "urlRedirectDepth": 2,
+              "maxDeadlineMs": 14400000,
+              "deadlineMarginMs": 60000,
+              "requestMaxBytes": 32768,
+              "optionsMaxCount": 16,
+              "optionIdMaxChars": 128,
+              "optionNameMaxChars": 200,
+              "receiptLimit": 256,
+              "responseMaxBytes": 65536,
+              "formSchemaMaxBytes": 16384,
+              "formSchemaMaxProperties": 20,
+              "formSchemaMaxEnum": 50,
+              "answerMaxBytes": 16384,
+              "answerStringMaxBytes": 4096,
+              "settleRetryDelaysMs": [
+                1000,
+                5000,
+                30000,
+                120000,
+                300000
+              ],
+              "settleRetrySteadyMs": 300000
+            },
+            "promptKind": "task",
+            "taskContext": {
+              "projectId": "01M4B1N63Q5XE39D9SCQHSNDBH",
+              "taskId": "01M4B1NAFZRYJ5JRD3AN463EXK",
+              "taskMode": "conversation"
+            }
+          }
+        }
+      ],
+      "sessions": [
+        {
+          "id": "01M4B5C7PTJ9CDCVWV7P8P60ZD",
+          "workspace_id": "01M4B5BEDFZBYFTJCSQA65TVBE",
+          "status": "running",
+          "agent_type": "openai-codex",
+          "runtime_contract_json": {
+            "version": 1,
+            "agentType": "openai-codex",
+            "model": "gpt-6.1-sol",
+            "effort": "auto",
+            "permissionMode": "bypassPermissions",
+            "opencodeProvider": null,
+            "opencodeBaseUrl": null,
+            "settingsResolved": true,
+            "acpInteractions": {
+              "enabled": false,
+              "formsEnabled": false,
+              "protocolVersion": 1,
+              "permissionDeadlineMs": 7200000,
+              "formDeadlineMs": 7200000,
+              "urlsEnabled": false,
+              "urlDeadlineMs": 600000,
+              "urlMaxChars": 8192,
+              "urlElicitationIdMaxChars": 256,
+              "urlRedirectDepth": 2,
+              "maxDeadlineMs": 14400000,
+              "deadlineMarginMs": 60000,
+              "requestMaxBytes": 32768,
+              "optionsMaxCount": 16,
+              "optionIdMaxChars": 128,
+              "optionNameMaxChars": 200,
+              "receiptLimit": 256,
+              "responseMaxBytes": 65536,
+              "formSchemaMaxBytes": 16384,
+              "formSchemaMaxProperties": 20,
+              "formSchemaMaxEnum": 50,
+              "answerMaxBytes": 16384,
+              "answerStringMaxBytes": 4096,
+              "settleRetryDelaysMs": [
+                1000,
+                5000,
+                30000,
+                120000,
+                300000
+              ],
+              "settleRetrySteadyMs": 300000
+            },
+            "promptKind": "task",
+            "taskContext": {
+              "projectId": "01M4B1N63Q5XE39D9SCQHSNDBH",
+              "taskId": "01M4B1NAFZRYJ5JRD3AN463EXK",
+              "taskMode": "conversation"
+            }
+          }
+        }
+      ]
+    },
+    "callbackEvents": [
+      {
+        "time": "2026-10-07T12:29:45.074846387Z",
+        "level": "INFO",
+        "msg": "Agent completion git push result",
+        "taskId": "01M4B1NAFZRYJ5JRD3AN463EXK",
+        "workspaceId": "01M4B5BEDFZBYFTJCSQA65TVBE",
+        "taskMode": "conversation",
+        "skipped": true,
+        "pushed": false,
+        "commitSha": "",
+        "prUrl": "",
+        "error": ""
+      }
+    ]
+  },
+  "vmTask": {
+    "before": {
+      "chatSessionId": "6ff2b572-f038-40a2-9902-1c2b87de73ee",
+      "snapshots": [
+        {
+          "id": "01M4B5ZXDQQNKA7NR8AM8TSGCW",
+          "agent_session_id": "01M4B5YPGT7V80QBHGSSXSNTM4",
+          "runtime": "vm",
+          "status": "available",
+          "degradation": "none",
+          "restore_status": null,
+          "sleep_status": "scheduled",
+          "recovery_status": null,
+          "runtime_contract_json": {
+            "version": 1,
+            "agentType": "openai-codex",
+            "model": "gpt-6.1-sol",
+            "effort": "auto",
+            "permissionMode": "bypassPermissions",
+            "opencodeProvider": null,
+            "opencodeBaseUrl": null,
+            "settingsResolved": true,
+            "acpInteractions": {
+              "enabled": true,
+              "formsEnabled": false,
+              "protocolVersion": 1,
+              "permissionDeadlineMs": 1800000,
+              "formDeadlineMs": 7200000,
+              "urlsEnabled": false,
+              "urlDeadlineMs": 600000,
+              "urlMaxChars": 8192,
+              "urlElicitationIdMaxChars": 256,
+              "urlRedirectDepth": 2,
+              "maxDeadlineMs": 14400000,
+              "deadlineMarginMs": 60000,
+              "requestMaxBytes": 32768,
+              "optionsMaxCount": 16,
+              "optionIdMaxChars": 128,
+              "optionNameMaxChars": 200,
+              "receiptLimit": 256,
+              "responseMaxBytes": 65536,
+              "formSchemaMaxBytes": 16384,
+              "formSchemaMaxProperties": 20,
+              "formSchemaMaxEnum": 50,
+              "answerMaxBytes": 16384,
+              "answerStringMaxBytes": 4096,
+              "settleRetryDelaysMs": [
+                1000,
+                5000,
+                30000,
+                120000,
+                300000
+              ],
+              "settleRetrySteadyMs": 300000
+            },
+            "promptKind": "task",
+            "taskContext": {
+              "projectId": "01KJNR9R3TEN3KX1ETE33852R8",
+              "taskId": "01M4B5XFMZT00CH2SR5ED0K5K2",
+              "taskMode": "task"
+            }
+          }
+        }
+      ],
+      "sessions": [
+        {
+          "id": "01M4B5YPGT7V80QBHGSSXSNTM4",
+          "workspace_id": "01M4B5XK1STT53KHX8B2CFB1XV",
+          "status": "running",
+          "agent_type": "openai-codex",
+          "runtime_contract_json": {
+            "version": 1,
+            "agentType": "openai-codex",
+            "model": "gpt-6.1-sol",
+            "effort": "auto",
+            "permissionMode": "bypassPermissions",
+            "opencodeProvider": null,
+            "opencodeBaseUrl": null,
+            "settingsResolved": true,
+            "acpInteractions": {
+              "enabled": true,
+              "formsEnabled": false,
+              "protocolVersion": 1,
+              "permissionDeadlineMs": 1800000,
+              "formDeadlineMs": 7200000,
+              "urlsEnabled": false,
+              "urlDeadlineMs": 600000,
+              "urlMaxChars": 8192,
+              "urlElicitationIdMaxChars": 256,
+              "urlRedirectDepth": 2,
+              "maxDeadlineMs": 14400000,
+              "deadlineMarginMs": 60000,
+              "requestMaxBytes": 32768,
+              "optionsMaxCount": 16,
+              "optionIdMaxChars": 128,
+              "optionNameMaxChars": 200,
+              "receiptLimit": 256,
+              "responseMaxBytes": 65536,
+              "formSchemaMaxBytes": 16384,
+              "formSchemaMaxProperties": 20,
+              "formSchemaMaxEnum": 50,
+              "answerMaxBytes": 16384,
+              "answerStringMaxBytes": 4096,
+              "settleRetryDelaysMs": [
+                1000,
+                5000,
+                30000,
+                120000,
+                300000
+              ],
+              "settleRetrySteadyMs": 300000
+            },
+            "promptKind": "task",
+            "taskContext": {
+              "projectId": "01KJNR9R3TEN3KX1ETE33852R8",
+              "taskId": "01M4B5XFMZT00CH2SR5ED0K5K2",
+              "taskMode": "task"
+            }
+          }
+        }
+      ]
+    },
+    "after": {
+      "chatSessionId": "6ff2b572-f038-40a2-9902-1c2b87de73ee",
+      "snapshots": [
+        {
+          "id": "01M4B5ZXDQQNKA7NR8AM8TSGCW",
+          "agent_session_id": "01M4B6EP0Y7K5F26PP7SDFEC2F",
+          "runtime": "vm",
+          "status": "available",
+          "degradation": "none",
+          "restore_status": "restored",
+          "sleep_status": null,
+          "recovery_status": "restored",
+          "runtime_contract_json": {
+            "version": 1,
+            "agentType": "openai-codex",
+            "model": "gpt-6.1-sol",
+            "effort": "auto",
+            "permissionMode": "bypassPermissions",
+            "opencodeProvider": null,
+            "opencodeBaseUrl": null,
+            "settingsResolved": true,
+            "acpInteractions": {
+              "enabled": true,
+              "formsEnabled": false,
+              "protocolVersion": 1,
+              "permissionDeadlineMs": 1800000,
+              "formDeadlineMs": 7200000,
+              "urlsEnabled": false,
+              "urlDeadlineMs": 600000,
+              "urlMaxChars": 8192,
+              "urlElicitationIdMaxChars": 256,
+              "urlRedirectDepth": 2,
+              "maxDeadlineMs": 14400000,
+              "deadlineMarginMs": 60000,
+              "requestMaxBytes": 32768,
+              "optionsMaxCount": 16,
+              "optionIdMaxChars": 128,
+              "optionNameMaxChars": 200,
+              "receiptLimit": 256,
+              "responseMaxBytes": 65536,
+              "formSchemaMaxBytes": 16384,
+              "formSchemaMaxProperties": 20,
+              "formSchemaMaxEnum": 50,
+              "answerMaxBytes": 16384,
+              "answerStringMaxBytes": 4096,
+              "settleRetryDelaysMs": [
+                1000,
+                5000,
+                30000,
+                120000,
+                300000
+              ],
+              "settleRetrySteadyMs": 300000
+            },
+            "promptKind": "task",
+            "taskContext": {
+              "projectId": "01KJNR9R3TEN3KX1ETE33852R8",
+              "taskId": "01M4B5XFMZT00CH2SR5ED0K5K2",
+              "taskMode": "task"
+            }
+          }
+        }
+      ],
+      "sessions": [
+        {
+          "id": "01M4B6EP0Y7K5F26PP7SDFEC2F",
+          "workspace_id": "01M4B6DGH92JKY3Y33MBDW6ZEQ",
+          "status": "running",
+          "agent_type": "openai-codex",
+          "runtime_contract_json": {
+            "version": 1,
+            "agentType": "openai-codex",
+            "model": "gpt-6.1-sol",
+            "effort": "auto",
+            "permissionMode": "bypassPermissions",
+            "opencodeProvider": null,
+            "opencodeBaseUrl": null,
+            "settingsResolved": true,
+            "acpInteractions": {
+              "enabled": true,
+              "formsEnabled": false,
+              "protocolVersion": 1,
+              "permissionDeadlineMs": 1800000,
+              "formDeadlineMs": 7200000,
+              "urlsEnabled": false,
+              "urlDeadlineMs": 600000,
+              "urlMaxChars": 8192,
+              "urlElicitationIdMaxChars": 256,
+              "urlRedirectDepth": 2,
+              "maxDeadlineMs": 14400000,
+              "deadlineMarginMs": 60000,
+              "requestMaxBytes": 32768,
+              "optionsMaxCount": 16,
+              "optionIdMaxChars": 128,
+              "optionNameMaxChars": 200,
+              "receiptLimit": 256,
+              "responseMaxBytes": 65536,
+              "formSchemaMaxBytes": 16384,
+              "formSchemaMaxProperties": 20,
+              "formSchemaMaxEnum": 50,
+              "answerMaxBytes": 16384,
+              "answerStringMaxBytes": 4096,
+              "settleRetryDelaysMs": [
+                1000,
+                5000,
+                30000,
+                120000,
+                300000
+              ],
+              "settleRetrySteadyMs": 300000
+            },
+            "promptKind": "task",
+            "taskContext": {
+              "projectId": "01KJNR9R3TEN3KX1ETE33852R8",
+              "taskId": "01M4B5XFMZT00CH2SR5ED0K5K2",
+              "taskMode": "task"
+            }
+          }
+        }
+      ]
+    },
+    "callbackEvents": [
+      {
+        "time": "2026-10-07T12:48:32.189090413Z",
+        "level": "INFO",
+        "msg": "Agent completion git push result",
+        "taskId": "01M4B5XFMZT00CH2SR5ED0K5K2",
+        "workspaceId": "01M4B6DGH92JKY3Y33MBDW6ZEQ",
+        "taskMode": "task",
+        "skipped": false,
+        "pushed": true,
+        "commitSha": "4272b81a77a3f4f16f0e6e5b27eaba1b0be9d084",
+        "prUrl": "",
+        "error": ""
+      },
+      {
+        "time": "2026-10-07T12:48:32.189052115Z",
+        "level": "WARN",
+        "msg": "gh pr create failed (non-fatal)",
+        "error": "command failed: exit status 1",
+        "output": "pull request create failed: GraphQL: Head sha can't be blank, Base sha can't be blank, No commits between main and HEAD, Head ref must be a branch (createPullRequest)"
+      },
+      {
+        "time": "2026-10-07T12:48:28.960465596Z",
+        "level": "INFO",
+        "msg": "Git push succeeded",
+        "workspaceId": "01M4B6DGH92JKY3Y33MBDW6ZEQ",
+        "branch": "sam/bounded-staging-runtime-contract-d0k5k2",
+        "sha": "4272b81a77a3f4f16f0e6e5b27eaba1b0be9d084"
+      }
+    ],
+    "realSleepConfirmedAt": "2026-10-07T12:41:15.048Z",
+    "wakeDeliveryId": "01M4B64S446SS3BC9N7JVFT8FW",
+    "priorSleep409": "Activity changed during capture; followup sent too early. Not counted as real sleep/wake."
+  },
+  "instantTask": {
+    "after": {
+      "chatSessionId": "36200219-1ea0-43ff-8a8d-f119c68c56ca",
+      "snapshots": [
+        {
+          "id": "01M4B4ZSC3XDYTC52D2RVJBGX5",
+          "agent_session_id": "01M4B4Z41J0XSJ5RGC0XKZYK57",
+          "runtime": "cf-container",
+          "status": "available",
+          "degradation": "none",
+          "restore_status": "restored",
+          "sleep_status": null,
+          "recovery_status": "restored",
+          "runtime_contract_json": {
+            "version": 1,
+            "agentType": "openai-codex",
+            "model": "gpt-6.1-sol",
+            "effort": "auto",
+            "permissionMode": "bypassPermissions",
+            "opencodeProvider": null,
+            "opencodeBaseUrl": null,
+            "settingsResolved": true,
+            "acpInteractions": {
+              "enabled": false,
+              "formsEnabled": false,
+              "protocolVersion": 1,
+              "permissionDeadlineMs": 1800000,
+              "formDeadlineMs": 7200000,
+              "urlsEnabled": false,
+              "urlDeadlineMs": 600000,
+              "urlMaxChars": 8192,
+              "urlElicitationIdMaxChars": 256,
+              "urlRedirectDepth": 2,
+              "maxDeadlineMs": 14400000,
+              "deadlineMarginMs": 60000,
+              "requestMaxBytes": 32768,
+              "optionsMaxCount": 16,
+              "optionIdMaxChars": 128,
+              "optionNameMaxChars": 200,
+              "receiptLimit": 256,
+              "responseMaxBytes": 65536,
+              "formSchemaMaxBytes": 16384,
+              "formSchemaMaxProperties": 20,
+              "formSchemaMaxEnum": 50,
+              "answerMaxBytes": 16384,
+              "answerStringMaxBytes": 4096,
+              "settleRetryDelaysMs": [
+                1000,
+                5000,
+                30000,
+                120000,
+                300000
+              ],
+              "settleRetrySteadyMs": 300000
+            },
+            "promptKind": "task",
+            "taskContext": {
+              "projectId": "01KJNR9R3TEN3KX1ETE33852R8",
+              "taskId": "01M4B4YQ4F2HF0YX5Q62MGFVPN",
+              "taskMode": "task"
+            }
+          }
+        }
+      ],
+      "sessions": [
+        {
+          "id": "01M4B4Z41J0XSJ5RGC0XKZYK57",
+          "workspace_id": "01M4B4YSGN7PRF30WA3GYB9KYK",
+          "status": "running",
+          "agent_type": "openai-codex",
+          "runtime_contract_json": {
+            "version": 1,
+            "agentType": "openai-codex",
+            "model": "gpt-6.1-sol",
+            "effort": "auto",
+            "permissionMode": "bypassPermissions",
+            "opencodeProvider": null,
+            "opencodeBaseUrl": null,
+            "settingsResolved": true,
+            "acpInteractions": {
+              "enabled": false,
+              "formsEnabled": false,
+              "protocolVersion": 1,
+              "permissionDeadlineMs": 1800000,
+              "formDeadlineMs": 7200000,
+              "urlsEnabled": false,
+              "urlDeadlineMs": 600000,
+              "urlMaxChars": 8192,
+              "urlElicitationIdMaxChars": 256,
+              "urlRedirectDepth": 2,
+              "maxDeadlineMs": 14400000,
+              "deadlineMarginMs": 60000,
+              "requestMaxBytes": 32768,
+              "optionsMaxCount": 16,
+              "optionIdMaxChars": 128,
+              "optionNameMaxChars": 200,
+              "receiptLimit": 256,
+              "responseMaxBytes": 65536,
+              "formSchemaMaxBytes": 16384,
+              "formSchemaMaxProperties": 20,
+              "formSchemaMaxEnum": 50,
+              "answerMaxBytes": 16384,
+              "answerStringMaxBytes": 4096,
+              "settleRetryDelaysMs": [
+                1000,
+                5000,
+                30000,
+                120000,
+                300000
+              ],
+              "settleRetrySteadyMs": 300000
+            },
+            "promptKind": "task",
+            "taskContext": {
+              "projectId": "01KJNR9R3TEN3KX1ETE33852R8",
+              "taskId": "01M4B4YQ4F2HF0YX5Q62MGFVPN",
+              "taskMode": "task"
+            }
+          }
+        }
+      ]
+    },
+    "autoCommit": "1abaebbe39efcbd8176aec3c08329a0508d620bc",
+    "pushPending": true,
+    "callbackCredentialReproduction": "Agent push --dry-run succeeded; same dry-run with SAM_WORKSPACE_ID/GH_TOKEN/GITHUB_TOKEN removed failed username acquisition with terminal prompts disabled."
+  }
+}
