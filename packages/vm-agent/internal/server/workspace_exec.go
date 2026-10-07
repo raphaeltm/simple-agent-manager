@@ -23,7 +23,9 @@ func standaloneWorkspaceCommandPath(command string) (string, error) {
 	case "find":
 		return "/usr/bin/find", nil
 	case "gh":
-		return "/usr/bin/gh", nil
+		// Use the installed refresh shim, never PATH or the unscoped system gh.
+		// If installation failed, execution fails rather than using stale credentials.
+		return standaloneGhShimDir + "/gh", nil
 	case "git":
 		return "/usr/bin/git", nil
 	case "mkdir":
@@ -82,6 +84,9 @@ func (s *Server) workspaceExecCommandWithEnv(ctx context.Context, containerID, u
 	}
 
 	if s.isStandaloneWorkspaceExec() {
+		if args[0] == "gh" && strings.TrimSpace(s.config.WorkspaceID) == "" {
+			return nil, fmt.Errorf("standalone git workspace identity unavailable")
+		}
 		commandPath, err := standaloneWorkspaceCommandPath(args[0])
 		if err != nil {
 			return nil, err
@@ -90,9 +95,7 @@ func (s *Server) workspaceExecCommandWithEnv(ctx context.Context, containerID, u
 		if workDir != "" {
 			cmd.Dir = workDir
 		}
-		if len(extraEnv) > 0 {
-			cmd.Env = append(os.Environ(), extraEnv...)
-		}
+		cmd.Env = standaloneWorkspaceExecEnv(s.config.WorkspaceID, os.Environ(), extraEnv)
 		return cmd, nil
 	}
 
@@ -109,4 +112,20 @@ func (s *Server) workspaceExecCommandWithEnv(ctx context.Context, containerID, u
 	dockerArgs = append(dockerArgs, containerID)
 	dockerArgs = append(dockerArgs, args...)
 	return dockerWorkspaceExecCommand(ctx, dockerArgs), nil
+}
+
+// Runtime-owned commands do not inherit an ACP process's scoped environment.
+// Bind credential exchange to launch identity, overriding both inherited and
+// caller-supplied scope. Tokens are fetched by the existing local helper.
+func standaloneWorkspaceExecEnv(workspaceID string, inherited, extra []string) []string {
+	env := make([]string, 0, len(inherited)+len(extra)+1)
+	for _, entries := range [][]string{inherited, extra} {
+		for _, entry := range entries {
+			key, _, _ := strings.Cut(entry, "=")
+			if key != "SAM_WORKSPACE_ID" && key != "GH_TOKEN" && key != "GITHUB_TOKEN" {
+				env = append(env, entry)
+			}
+		}
+	}
+	return append(env, "SAM_WORKSPACE_ID="+strings.TrimSpace(workspaceID))
 }
