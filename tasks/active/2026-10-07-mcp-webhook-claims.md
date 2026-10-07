@@ -14,12 +14,12 @@ Raphaël authorized implementing the agreed URL-first webhook flow, green PR and
 
 ## Checklist
 
-- [ ] Add real-worker failing tests for MCP creation, plain-body redemption, single-winner concurrency, expiry, wrong identity, revoked auth/membership, non-POST, invalid config, REST rotation and delete.
-- [ ] Add additive claim columns/index migration and matching schema.
-- [ ] Extend canonical creation and MCP schema/handler with safe claim metadata and profile/config validation.
-- [ ] Add authenticated POST route using existing MCP token and current project capability, scoped atomic consumption/minting, no-store response, generic errors and safe logging.
-- [ ] Revoke pending claims on REST credential rotation; configurable claim TTL with docs.
-- [ ] Update API reference/contract and webhook user guide with safe runnable pipe-based instructions.
+- [x] Add real-worker failing tests for MCP creation, plain-body redemption, single-winner concurrency, expiry, wrong identity, revoked auth/membership, non-POST, invalid config, REST rotation and delete.
+- [x] Add additive claim columns/index migration and matching schema.
+- [x] Extend canonical creation and MCP schema/handler with safe claim metadata and profile/config validation.
+- [x] Add authenticated POST route using existing MCP token and current project capability, scoped atomic consumption/minting, no-store response, generic errors and safe logging.
+- [x] Revoke pending claims on REST credential rotation; configurable claim TTL with docs.
+- [x] Update API reference/contract and webhook user guide with safe runnable pipe-based instructions.
 - [ ] Run relevant tests, typecheck/lint/build/quality checks, local specialists and task-completion review.
 - [ ] Verify staging schema, live MCP create/redemption/replay/ingress plus identity controls; clean fixtures.
 
@@ -30,3 +30,10 @@ Raphaël authorized implementing the agreed URL-first webhook flow, green PR and
 - Redeemed credential authenticates ingress and only keyed hash/last-four persist. Existing REST webhook creation/rotation and cron/GitHub MCP remain compatible.
 - Ordinary curl using existing workspace SAM_MCP_TOKEN can pipe into a destination without exposing values to argv/output/model; documented failure handling never automatically replays.
 - Staging, CI, reviews and production verification pass; evidence captured in PR and task.
+
+## Validation evidence
+
+- TDD: new Worker suite failed before support existed; 19 real-worker tests now pass.
+- Existing GitHub parity and webhook ingress/management suites: 45 tests pass.
+- Local security/platform reviews completed; scope-based rate limiting, full-token shell validation, SQLite fixtures and MCP guide corrections applied. Task-completion review found no implementation gaps; shipping evidence pending.
+- Additive migration safety/order checks pass. Staging deployment run 37607076979 in progress.
