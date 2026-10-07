@@ -104,6 +104,8 @@ CREATE TABLE webhook_trigger_configs (
   trigger_id TEXT PRIMARY KEY REFERENCES triggers(id) ON DELETE CASCADE,
   token_hash TEXT NOT NULL UNIQUE, token_last_four TEXT NOT NULL,
   token_created_at TEXT NOT NULL, token_rotated_at TEXT, source_label TEXT,
+  claim_id TEXT UNIQUE, claim_expires_at INTEGER, claim_user_id TEXT,
+  claim_workspace_id TEXT, claim_session_id TEXT,
   filter_mode TEXT NOT NULL DEFAULT 'all', filters_json TEXT NOT NULL DEFAULT '[]',
   included_headers_json TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
@@ -215,6 +217,36 @@ describe('webhook trigger management vertical slice', () => {
   });
 
   afterEach(() => sqlite.close());
+
+  it('preserves REST credential creation while public ingress is disabled', async () => {
+    env.WEBHOOK_TRIGGERS_ENABLED = 'false';
+    const response = await app.request(
+      '/api/projects/project-1/triggers',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Prepared webhook',
+          sourceType: 'webhook',
+          agentProfileId: 'profile-1',
+          promptTemplate: 'Handle {{webhook.payload}}',
+          webhookConfig: {},
+        }),
+      },
+      env
+    );
+    expect(response.status).toBe(201);
+    const created = await response.json<{ id: string; webhookCredential: { token: string } }>();
+    expect(created.webhookCredential.token).toMatch(/^sam_wh_[A-Za-z0-9_-]{43}$/);
+    expect(response.headers.get('Cache-Control')).toContain('no-store');
+    const stored = sqlite
+      .prepare('SELECT token_hash, claim_id FROM webhook_trigger_configs WHERE trigger_id = ?')
+      .get(created.id) as { token_hash: string; claim_id: string | null };
+    expect(stored.token_hash).toBe(
+      await hashWebhookToken(created.webhookCredential.token, env.ENCRYPTION_KEY)
+    );
+    expect(stored.claim_id).toBeNull();
+  });
 
   it('validates the effective webhook patch before atomically updating either table', async () => {
     const invalid = await app.request(

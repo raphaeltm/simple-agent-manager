@@ -14,6 +14,8 @@ import {
   serializeResourceRequirementsInput,
 } from '../../services/resource-requirements-input';
 import { createTrigger } from '../../services/trigger-create';
+import { areWebhookTriggersEnabled } from '../../services/webhook-trigger-config';
+import { requireProjectTaskWrite } from '../task-project-auth';
 import {
   INVALID_PARAMS,
   jsonRpcError,
@@ -30,8 +32,12 @@ export async function handleCreateTrigger(
   env: Env
 ): Promise<JsonRpcResponse> {
   const sourceType = params.sourceType === undefined ? 'cron' : params.sourceType;
-  if (sourceType !== 'cron' && sourceType !== 'github') {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'sourceType must be "cron" or "github"');
+  if (sourceType !== 'cron' && sourceType !== 'github' && sourceType !== 'webhook') {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'sourceType must be "cron", "github", or "webhook"'
+    );
   }
   // Keep MCP's modern resource input contract and retired-field compatibility.
   let resourceRequirementsJson: string | null;
@@ -78,7 +84,19 @@ export async function handleCreateTrigger(
       .where(eq(schema.projects.id, tokenData.projectId))
       .get();
     if (!project) return jsonRpcError(requestId, INVALID_PARAMS, 'Project not found');
-    const { created } = await createTrigger(db, env, project, tokenData.userId, parsed.output);
+    if (sourceType === 'webhook') {
+      await requireProjectTaskWrite(db, tokenData.projectId, tokenData.userId);
+      if (!areWebhookTriggersEnabled(env))
+        return jsonRpcError(requestId, INVALID_PARAMS, 'Webhook triggers are disabled');
+    }
+    const { created, webhookClaim } = await createTrigger(
+      db,
+      env,
+      project,
+      tokenData.userId,
+      parsed.output,
+      sourceType === 'webhook' ? tokenData : undefined
+    );
     log.info('mcp.create_trigger', {
       triggerId: created.id,
       projectId: tokenData.projectId,
@@ -90,6 +108,7 @@ export async function handleCreateTrigger(
         {
           type: 'text',
           text: JSON.stringify({
+            webhookClaim,
             triggerId: created.id,
             id: created.id,
             name: created.name,

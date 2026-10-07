@@ -1,6 +1,7 @@
 /** Environment configuration consumed by generic webhook trigger surfaces. */
 export interface WebhookTriggerEnv {
   WEBHOOK_TRIGGERS_ENABLED?: string;
+  WEBHOOK_CREDENTIAL_CLAIM_TTL_SECONDS?: string;
   WEBHOOK_TRIGGER_MAX_BODY_BYTES?: string;
   WEBHOOK_TRIGGER_MAX_FILTERS?: string;
   WEBHOOK_TRIGGER_MAX_FILTER_PATH_LENGTH?: string;
