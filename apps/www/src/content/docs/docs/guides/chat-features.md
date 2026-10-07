@@ -42,9 +42,8 @@ For every kind of request:
   nobody answers in
   time, the request ends — the card says it expired or was cancelled — and the agent is told no, so
   the action it asked about does not happen. Send a message to tell the agent how to carry on. (A
-  **Task** has often gone to sleep by then; your reply wakes it
-  [like a Chat](/docs/guides/agents/#after-a-chat-wakes-from-sleep), so ask the agent to push its
-  work.)
+  **Task** may have gone to sleep by then; your reply wakes it with its original task mode and
+  automatic Git delivery behavior.)
 - **Answer on the card, not in the message box.** A message you type waits until the agent's turn
   ends, and the turn can't end until the card is answered or expires. To stop the agent instead,
   select **Interrupt** (the red button above the message box); the card then says **Request
