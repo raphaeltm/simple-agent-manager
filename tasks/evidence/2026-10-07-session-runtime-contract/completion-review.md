@@ -20,3 +20,11 @@ Shared cleanup verifies idempotent Archive, exactly one completion event, worksp
 Nonblocking followups: Stop500 Idea01M4BH36AZV3Q2J8MH43JXY8M6, Artifacts initial-clone branch Idea01M4B29WPWZSXSVFSKMTEV69T7, and credential-limits randomized-order backlog task. No runtime-contract acceptance deferred.
 
 Archival, latest CI/CodeRabbit, merge and production are subsequent release gates. This review does not claim those operations complete.
+
+## Final CodeRabbit correction revalidation
+
+Independent `/root/cloudflare_contract_review` final mandatory task-completion revalidation PASS on8978d3130 againstorigin/main, after reopening the task for the three valid findings. ChecksA-F PASS: research/checklist/diff, all acceptance criteria, no unwiredUI, scoped resource/provider selection and complete vertical slice coverage. No gaps/blockers. RealSQLite nullpreservation/scope/refusal and nullableproject compatibility, actual sleep callers/WorkersD1, production-rendered shim and runtimecommand denial canaries, docs correction substantively verified.
+
+API67 +sleepcallers43 +WorkersD1wiring2 +finalcontract26PASS; fullGo25packages1868top3043total and entireserverrace547top928totalPASS, independentfocusedrace1.137sPASS. Prior four actualfixtures/strictcleanup remain valid for unchanged success path. All domain/security/test reviewsPASS. Rearchival permitted only after this verdict.
+
+Parent now owns finalCI/incrementalCodeRabbit/coordinateddeploysmoke/merge/production gates; these remain explicitly pending, no task-completion or deployment claim beyond reviewed implementation/acceptance.
