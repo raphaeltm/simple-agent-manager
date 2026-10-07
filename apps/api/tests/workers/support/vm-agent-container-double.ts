@@ -51,6 +51,28 @@ const LIFECYCLE_STATUS_KEY = 'lifecycleStatus';
 const RECOVERY_STATE_KEY = 'runtimeRecovery';
 
 export class VmAgentContainerTestDouble extends DurableObject<Env> {
+  async markActiveWorkStarted(): Promise<void> {}
+  async markActiveWorkEnded(): Promise<void> {}
+
+  /** HTTP runtime boundary for delivery tests; control-plane scheduling runs unchanged. */
+  async proxyHttp(request: Request): Promise<Response> {
+    const { versionedPromptCapabilities, acceptedPromptResponse } =
+      await import('../../helpers/vm-prompt-delivery-fixtures');
+    if (request.method === 'GET') return Response.json(versionedPromptCapabilities('test-runtime'));
+    const body = (await request.json()) as { deliveryId: string; prompt: string };
+    const submissions = (await this.ctx.storage.get<string[]>('promptSubmissions')) ?? [];
+    submissions.push(body.deliveryId);
+    await this.ctx.storage.put('promptSubmissions', submissions);
+    const sessionId = new URL(request.url).pathname.split('/')[4]!;
+    return Response.json(
+      acceptedPromptResponse(sessionId, body.deliveryId, 'test-runtime', Date.now())
+    );
+  }
+
+  async __promptSubmissions(): Promise<string[]> {
+    return (await this.ctx.storage.get<string[]>('promptSubmissions')) ?? [];
+  }
+
   /**
    * Container-less vertical slice for the production guard's D1 check and DO
    * preparation boundary. The real Container base cannot run in Miniflare,

@@ -45,6 +45,8 @@ import {
   startAgentSessionOnNode,
 } from '../../../src/services/node-agent';
 import { restoreAgentSessionOnNode } from '../../../src/services/node-agent-session-snapshots';
+import { getDeliveryCapabilities } from '../../../src/services/vm-prompt-delivery-runtime-queries';
+import { versionedPromptCapabilities } from '../../helpers/vm-prompt-delivery-fixtures';
 
 const cfContainerEnv = {
   BASE_DOMAIN: 'example.com',
@@ -154,6 +156,41 @@ describe('createWorkspaceOnNode cf-container timeout plumbing', () => {
     const rejection = expect(createPromise).rejects.toThrow('Request timed out after 30000ms');
     await vi.advanceTimersByTimeAsync(30_100);
     await rejection;
+  });
+
+  it('a five-second capability preparation timeout cannot restart a wake that finishes later', async () => {
+    let wakeCompleted = false;
+    mocks.container.fetchVmAgentContainer.mockImplementation(
+      () =>
+        new Promise<Response>((resolve) => {
+          setTimeout(() => {
+            wakeCompleted = true;
+            resolve(Response.json(versionedPromptCapabilities('restored-runtime')));
+          }, 6_000);
+        })
+    );
+    const pending = getDeliveryCapabilities(
+      cfContainerEnv,
+      {
+        nodeId: 'node-1',
+        workspaceId: 'ws-1',
+        agentSessionId: 'agent-1',
+        userId: 'user-1',
+        projectId: 'project-1',
+        chatSessionId: 'chat-1',
+        runtimeIdentity: 'old-runtime',
+        runtime: 'cf-container',
+      },
+      5_000
+    );
+    await vi.advanceTimersByTimeAsync(5_001);
+    expect(await pending).toBeNull();
+    expect(wakeCompleted).toBe(false);
+    expect(mocks.container.markVmAgentContainerRequestInterrupted).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(wakeCompleted).toBe(true);
+    expect(mocks.container.markVmAgentContainerRequestInterrupted).not.toHaveBeenCalled();
+    expect(mocks.container.fetchVmAgentContainer).toHaveBeenCalledOnce();
   });
 
   it('does not start cf-container recovery when a deletion request times out', async () => {
@@ -361,36 +398,51 @@ describe('createWorkspaceOnNode cf-container timeout plumbing', () => {
     expect(mocks.container.fetchVmAgentContainer).not.toHaveBeenCalled();
   });
 
-  it.each(['vm', 'cf-container'])('withholds a %s prompt when authority is revoked during token signing', async (runtime) => {
-    let releaseSigning!: () => void;
-    let signingStarted!: () => void;
-    const started = new Promise<void>((resolve) => { signingStarted = resolve; });
-    const barrier = new Promise<void>((resolve) => { releaseSigning = resolve; });
-    mocks.jwt.signNodeManagementToken.mockImplementationOnce(async () => {
-      signingStarted();
-      await barrier;
-      return { token: 'mgmt-token' };
-    });
-    mocks.drizzle.mockReturnValue({
-      select: () => ({ from: () => ({ where: () => ({ get: async () => ({ runtime }) }) }) }),
-    });
-    const directFetch = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
-    vi.stubGlobal('fetch', directFetch);
-    mocks.container.fetchVmAgentContainer.mockResolvedValue(new Response('{}', { status: 200 }));
-    let authorized = true;
-    const beforeExternalMutation = async () => {
-      if (!authorized) throw new Error('source authority revoked');
-    };
-    const pending = sendPromptToAgentOnNode('node-1', 'ws-1', 'session-1', 'wake', cfContainerEnv,
-      'user-1', 'message-1', { beforeExternalMutation });
-    await started;
-    authorized = false;
-    const rejection = expect(pending).rejects.toThrow('source authority revoked');
-    releaseSigning();
-    await rejection;
-    expect(directFetch).not.toHaveBeenCalled();
-    expect(mocks.container.fetchVmAgentContainer).not.toHaveBeenCalled();
-  });
+  it.each(['vm', 'cf-container'])(
+    'withholds a %s prompt when authority is revoked during token signing',
+    async (runtime) => {
+      let releaseSigning!: () => void;
+      let signingStarted!: () => void;
+      const started = new Promise<void>((resolve) => {
+        signingStarted = resolve;
+      });
+      const barrier = new Promise<void>((resolve) => {
+        releaseSigning = resolve;
+      });
+      mocks.jwt.signNodeManagementToken.mockImplementationOnce(async () => {
+        signingStarted();
+        await barrier;
+        return { token: 'mgmt-token' };
+      });
+      mocks.drizzle.mockReturnValue({
+        select: () => ({ from: () => ({ where: () => ({ get: async () => ({ runtime }) }) }) }),
+      });
+      const directFetch = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+      vi.stubGlobal('fetch', directFetch);
+      mocks.container.fetchVmAgentContainer.mockResolvedValue(new Response('{}', { status: 200 }));
+      let authorized = true;
+      const beforeExternalMutation = async () => {
+        if (!authorized) throw new Error('source authority revoked');
+      };
+      const pending = sendPromptToAgentOnNode(
+        'node-1',
+        'ws-1',
+        'session-1',
+        'wake',
+        cfContainerEnv,
+        'user-1',
+        'message-1',
+        { beforeExternalMutation }
+      );
+      await started;
+      authorized = false;
+      const rejection = expect(pending).rejects.toThrow('source authority revoked');
+      releaseSigning();
+      await rejection;
+      expect(directFetch).not.toHaveBeenCalled();
+      expect(mocks.container.fetchVmAgentContainer).not.toHaveBeenCalled();
+    }
+  );
 
   it('withholds direct VM workspace creation when authority is revoked at the physical boundary', async () => {
     mocks.drizzle.mockReturnValue({

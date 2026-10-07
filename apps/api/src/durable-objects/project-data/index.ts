@@ -95,6 +95,7 @@ import * as sessionReads from './session-reads';
 import * as sessionState from './session-state';
 import * as sessionSummarySync from './session-summary-sync';
 import * as sessionWakeProgress from './session-wake-progress';
+import * as sessionWakeReady from './session-wake-ready';
 import * as sessions from './sessions';
 import * as storageReliefMeasurement from './storage-relief-measurement';
 import * as storageSafety from './storage-safety';
@@ -142,6 +143,7 @@ export class ProjectData extends DurableObject<Env> {
   private persistedAlarmSchedule: string | null = null;
   private summarySyncTimer: ReturnType<typeof setTimeout> | null = null;
   /** Serializes summary syncs — see `runSummarySyncLocked` (rule 45). */
+  private wakeReadyLock: Promise<unknown> = Promise.resolve();
   private summarySyncLock: Promise<unknown> = Promise.resolve();
   /** Serializes archive source hash/finalize awaits against local transcript writers (rule 45). */
   private archiveTranscriptLock: Promise<unknown> = Promise.resolve();
@@ -539,6 +541,27 @@ export class ProjectData extends DurableObject<Env> {
       input,
       Date.now()
     );
+  }
+
+  async signalSessionWakeReady(input: sessionWakeReady.SessionWakeReadyInput): Promise<number> {
+    // Authority reads must be serialized with dedup writes: an older RPC suspended in D1
+    // cannot overwrite a newer fence and make its duplicate appear novel.
+    const run = this.wakeReadyLock.then(async () => {
+      this.ensureProjectId(input.projectId);
+      if (!(await sessionWakeReady.isSessionWakeReadyCurrent(this.env, input))) return 0;
+      const now = Date.now();
+      const released = this.ctx.storage.transactionSync(() =>
+        sessionWakeReady.applySessionWakeReady(this.sql, input, now)
+      );
+      // Re-arm even on duplicate: a previous RPC may have committed SQLite before alarm I/O failed.
+      await this.recalculateAlarm();
+      return released;
+    });
+    this.wakeReadyLock = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
   }
 
   /** @param options.deferAlarm See {@link ProjectData.stopSession}. */

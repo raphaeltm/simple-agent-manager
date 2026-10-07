@@ -95,7 +95,9 @@ During an Instant wake you may see:
 
 > **Waking and restoring the Instant session. Wait for restore to finish, then send your message.**
 
-Wait for it to clear rather than resending — the wake has a bounded budget (`CF_CONTAINER_WAKE_TIMEOUT_MS`, two minutes by default).
+Wait for it to clear rather than resending. The saved message is scheduled for delivery as soon as its current runtime finishes waking, on both Instant and VM sessions. Duplicate or obsolete wake completions cannot replay a message.
+
+Interactive Instant requests use `CF_CONTAINER_WAKE_TIMEOUT_MS` (two minutes by default). Durable queued messages use short preparation attempts (`PROMPT_DELIVERY_BACKGROUND_TIMEOUT_MS`, five seconds by default); a preparation timeout leaves the wake running and the message queued, until readiness schedules another attempt. Their overall limit is the delivery TTL (`PROMPT_DELIVERY_TTL_MS`, one hour by default).
 
 ## What gets restored
 
@@ -141,7 +143,7 @@ Launching an Instant session takes several steps. SAM does the bookkeeping up fr
 | VM idle before sleeping                            | 15 minutes                | `SESSION_SLEEP_AFTER_MS`                                                               |
 | Completed task sleep intent                        | Immediate                 | task-completion lifecycle                                                              |
 | How long active work can hold sleep off            | 2 hours                   | `CF_CONTAINER_ACTIVE_WORK_MAX_MS`                                                      |
-| Max wake + restore time                            | 2 minutes                 | `CF_CONTAINER_WAKE_TIMEOUT_MS`                                                         |
+| Interactive wake + restore budget                  | 2 minutes                 | `CF_CONTAINER_WAKE_TIMEOUT_MS`                                                         |
 | Snapshot restore attempts before the session fails | 2 (minimum)               | `CF_CONTAINER_RECOVERY_MAX_ATTEMPTS`                                                   |
 | Replacement-VM wake attempts in a row              | 3, then a 15-minute pause | `SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS`, `SESSION_SNAPSHOT_RECOVERY_ATTEMPT_DECAY_MS` |
 | Start budget (includes repo clone)                 | 2 minutes                 | `CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS`                                             |

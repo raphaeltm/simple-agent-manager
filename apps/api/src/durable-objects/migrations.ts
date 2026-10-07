@@ -2387,6 +2387,17 @@ export const MIGRATIONS: Migration[] = [
       sql.exec(`ALTER TABLE workspace_activity ADD COLUMN next_idle_check_at INTEGER`);
     },
   },
+  {
+    name: '061-session-wake-readiness',
+    run: (sql) => {
+      sql.exec(`CREATE TABLE session_wake_readiness (
+        session_id TEXT PRIMARY KEY REFERENCES chat_sessions(id) ON DELETE CASCADE,
+        fence TEXT NOT NULL,
+        ready_at INTEGER NOT NULL
+      )`);
+      sql.exec('ALTER TABLE session_inbox ADD COLUMN wake_ready_attempt_id TEXT');
+    },
+  },
   // Retired before release: `059-message-upload-parts` ran on staging only. Objects
   // that ran it keep an unused `message_upload_parts` table, since DO migrations
   // never drop tables, so neither that migration name nor that table name may be reused.

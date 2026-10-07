@@ -207,6 +207,11 @@ describe('VM prompt delivery adapter', () => {
     expect(mocks.nodeAgentRequest).toHaveBeenCalledOnce();
   });
 
+  it('forwards no-recovery-on-timeout for a read-only capability probe', async () => {
+    await new DefaultVmPromptDeliveryAdapter(envWithTarget()).submit(input(false));
+    expect(mocks.nodeAgentRequest).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), expect.objectContaining({ method: 'GET', recoverContainerOnTimeout: false }));
+  });
+
   it('fails closed for an old VM unless compatibility is explicitly enabled', async () => {
     mocks.nodeAgentRequest.mockRejectedValue(new Error('Node Agent request failed: 404'));
     const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());

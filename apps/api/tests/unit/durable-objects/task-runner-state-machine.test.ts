@@ -293,6 +293,7 @@ function createContext(
   // terminal step bypasses `updateD1ExecutionStep`, so this is the only place
   // that emit can be observed.
   const publishSessionWakeProgress = vi.fn(async () => undefined);
+  const signalSessionWakeReady = vi.fn(async () => 1);
   const rc = {
     env: {
       DATABASE: database,
@@ -300,7 +301,7 @@ function createContext(
       KV: {},
       PROJECT_DATA: {
         idFromName: vi.fn((id: string) => ({ toString: () => id })),
-        get: vi.fn(() => ({ publishSessionWakeProgress })),
+        get: vi.fn(() => ({ publishSessionWakeProgress, signalSessionWakeReady })),
       },
       NODE_LIFECYCLE: {
         idFromName: vi.fn((id: string) => id),
@@ -325,7 +326,7 @@ function createContext(
     assertRecoveryAuthority: vi.fn(async () => undefined),
   } as unknown as TaskRunnerContext;
 
-  return { dbState, rc, storageWrites, publishSessionWakeProgress };
+  return { dbState, rc, storageWrites, publishSessionWakeProgress, signalSessionWakeReady };
 }
 
 function seedTask(dbState: ReturnType<typeof createD1State>, overrides: Partial<TaskRow> = {}) {
@@ -411,6 +412,40 @@ describe('transitionToInProgress', () => {
       // No phase on a settled wake — a step here would render as stale progress.
       wakePhase: null,
     });
+  });
+
+  it('signals the exact VM recovery attempt before optional chat feedback resolves', async () => {
+    const { dbState, rc, signalSessionWakeReady } = createContext();
+    seedTask(dbState);
+    const state = makeState({
+      stepResults: { ...makeState().stepResults, chatSessionId: 'chat-session-1' },
+      config: {
+        ...makeState().config,
+        resumeSnapshotChatSessionId: 'chat-session-1',
+        recoveryAttemptId: 'attempt-1',
+      },
+    });
+    let release!: () => void;
+    persistMessageMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        })
+    );
+    const pending = transitionToInProgress(state, rc);
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+
+    expect(signalSessionWakeReady).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatSessionId: 'chat-session-1',
+        workspaceId: 'workspace-1',
+        agentSessionId: 'agent-session-1',
+        fence: { runtime: 'vm', taskId: 'task-1', recoveryAttemptId: 'attempt-1' },
+        runtimeReadyAt: expect.any(Number),
+      })
+    );
+    release();
+    await pending;
   });
 
   it('does NOT broadcast wake progress for a normal (non-recovery) task', async () => {
