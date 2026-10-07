@@ -1,0 +1,148 @@
+{
+  "status": "VM automatic push/PR and explicit MCP completion passed; overall acceptance pending Instant and final cleanup",
+  "candidate": "356438b9d817ff99a9a81f39d90c8d22307ee469",
+  "deploymentRun": 37626881781,
+  "agentVersion": "1120e0404aa19c5e9fdee62e141522a50571f5cc",
+  "nodeId": "01M4B9AH9PR7MJ0M39YNQ85H7A",
+  "freshHeartbeatAt": "2026-10-07T13:43:07.337Z",
+  "wakeDeliveryId": "01M4B9A6Q2FZND5YJ8NX8C3NWQ",
+  "contract": {
+    "chatSessionId": "6ff2b572-f038-40a2-9902-1c2b87de73ee",
+    "snapshots": [
+      {
+        "id": "01M4B5ZXDQQNKA7NR8AM8TSGCW",
+        "agent_session_id": "01M4B9PCJ2453GMHNB2B5AEEX0",
+        "runtime": "vm",
+        "status": "available",
+        "degradation": "none",
+        "restore_status": "restored",
+        "sleep_status": null,
+        "recovery_status": "restored",
+        "home_r2_key": "session-snapshots/6ff2b572-f038-40a2-9902-1c2b87de73ee/01M4B9W2EW0QAP5A7QRXN48HZA/home.tar",
+        "wip_r2_key": "session-snapshots/6ff2b572-f038-40a2-9902-1c2b87de73ee/01M4B9W2EW0QAP5A7QRXN48HZA/wip.bundle",
+        "manifest_r2_key": "session-snapshots/6ff2b572-f038-40a2-9902-1c2b87de73ee/01M4B9W2EW0QAP5A7QRXN48HZA/manifest.json",
+        "base_commit": "d617e329f6f01c40769685eceb04110e157cc6a6",
+        "expires_at": "2026-10-14T13:47:11.086Z",
+        "runtime_contract_json": {
+          "version": 1,
+          "agentType": "openai-codex",
+          "model": "gpt-6.1-sol",
+          "effort": "auto",
+          "permissionMode": "bypassPermissions",
+          "opencodeProvider": null,
+          "opencodeBaseUrl": null,
+          "settingsResolved": true,
+          "acpInteractions": {
+            "enabled": true,
+            "formsEnabled": false,
+            "protocolVersion": 1,
+            "permissionDeadlineMs": 1800000,
+            "formDeadlineMs": 7200000,
+            "urlsEnabled": false,
+            "urlDeadlineMs": 600000,
+            "urlMaxChars": 8192,
+            "urlElicitationIdMaxChars": 256,
+            "urlRedirectDepth": 2,
+            "maxDeadlineMs": 14400000,
+            "deadlineMarginMs": 60000,
+            "requestMaxBytes": 32768,
+            "optionsMaxCount": 16,
+            "optionIdMaxChars": 128,
+            "optionNameMaxChars": 200,
+            "receiptLimit": 256,
+            "responseMaxBytes": 65536,
+            "formSchemaMaxBytes": 16384,
+            "formSchemaMaxProperties": 20,
+            "formSchemaMaxEnum": 50,
+            "answerMaxBytes": 16384,
+            "answerStringMaxBytes": 4096,
+            "settleRetryDelaysMs": [1000, 5000, 30000, 120000, 300000],
+            "settleRetrySteadyMs": 300000
+          },
+          "promptKind": "task",
+          "taskContext": {
+            "projectId": "01KJNR9R3TEN3KX1ETE33852R8",
+            "taskId": "01M4B5XFMZT00CH2SR5ED0K5K2",
+            "taskMode": "task"
+          }
+        }
+      }
+    ],
+    "sessions": [
+      {
+        "id": "01M4B9PCJ2453GMHNB2B5AEEX0",
+        "workspace_id": "01M4B9N2PJVGXB49PGMCDNJEBC",
+        "status": "running",
+        "agent_type": "openai-codex",
+        "runtime_contract_json": {
+          "version": 1,
+          "agentType": "openai-codex",
+          "model": "gpt-6.1-sol",
+          "effort": "auto",
+          "permissionMode": "bypassPermissions",
+          "opencodeProvider": null,
+          "opencodeBaseUrl": null,
+          "settingsResolved": true,
+          "acpInteractions": {
+            "enabled": true,
+            "formsEnabled": false,
+            "protocolVersion": 1,
+            "permissionDeadlineMs": 1800000,
+            "formDeadlineMs": 7200000,
+            "urlsEnabled": false,
+            "urlDeadlineMs": 600000,
+            "urlMaxChars": 8192,
+            "urlElicitationIdMaxChars": 256,
+            "urlRedirectDepth": 2,
+            "maxDeadlineMs": 14400000,
+            "deadlineMarginMs": 60000,
+            "requestMaxBytes": 32768,
+            "optionsMaxCount": 16,
+            "optionIdMaxChars": 128,
+            "optionNameMaxChars": 200,
+            "receiptLimit": 256,
+            "responseMaxBytes": 65536,
+            "formSchemaMaxBytes": 16384,
+            "formSchemaMaxProperties": 20,
+            "formSchemaMaxEnum": 50,
+            "answerMaxBytes": 16384,
+            "answerStringMaxBytes": 4096,
+            "settleRetryDelaysMs": [1000, 5000, 30000, 120000, 300000],
+            "settleRetrySteadyMs": 300000
+          },
+          "promptKind": "task",
+          "taskContext": {
+            "projectId": "01KJNR9R3TEN3KX1ETE33852R8",
+            "taskId": "01M4B5XFMZT00CH2SR5ED0K5K2",
+            "taskMode": "task"
+          }
+        }
+      }
+    ]
+  },
+  "automaticCallback": [
+    {
+      "time": "2026-10-07T13:45:15.262115961Z",
+      "level": "INFO",
+      "msg": "Agent completion git push result",
+      "taskId": "01M4B5XFMZT00CH2SR5ED0K5K2",
+      "workspaceId": "01M4B9N2PJVGXB49PGMCDNJEBC",
+      "taskMode": "task",
+      "skipped": false,
+      "pushed": true,
+      "commitSha": "d617e329f6f01c40769685eceb04110e157cc6a6",
+      "prUrl": "https://github.com/serverspresentation2025/crewai/pull/3",
+      "error": ""
+    }
+  ],
+  "completedTask": {
+    "id": "01M4B5XFMZT00CH2SR5ED0K5K2",
+    "status": "completed",
+    "taskMode": "task",
+    "outputBranch": "sam/bounded-staging-runtime-contract-d0k5k2",
+    "outputPrUrl": "https://github.com/serverspresentation2025/crewai/pull/3",
+    "outputSummary": "Completed bounded staging runtime-contract sleep/wake proof. Runtime callback automatically delivered commit d617e329f6f01c40769685eceb04110e157cc6a6 and created https://github.com/serverspresentation2025/crewai/pull/3. Read-only checks verified the remote branch and open PR match that commit.",
+    "completedAt": "2026-10-07T13:46:51.563Z",
+    "errorMessage": null
+  }
+}
