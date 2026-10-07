@@ -14,8 +14,8 @@ VM sleep now persists task status sleeping (#2230), but the conversation close r
 - [x] Add real SQLite route regression tests including failure, races and authorization.
 - [x] Update affected documentation and source Idea.
 - [x] Run applicable lint/typecheck/test/build and independent specialist reviews.
-- [ ] Coordinate staging deployment and archive a sleeping VM chat from normal dock; clean owned resources.
-- [ ] Task-completion validation before archiving evidence.
+- [x] Coordinate staging deployment and archive a sleeping VM chat from normal dock; clean owned resources.
+- [x] Task-completion validation before archiving evidence.
 - [ ] PR/CI, best-effort CodeRabbit, merge, production deployment proof.
 
 ## Acceptance
@@ -142,3 +142,21 @@ The retained original Sol Instant task `01M4B4YQ4F2HF0YX5Q62MGFVPN` passed the a
 The runtime owner closed only fixture PR4, deleted only its task branch, and stopped the Instant through the normal public chat action. First Stop returned 500 (request `f43b9a1b-4ece-47fc-ae6a-f96f1a33ee77`); one bounded idempotent retry returned 200 with `workspaceDeleted=true`. Independent D1 confirms workspace/node deleted, `node_runtime_terminated` at `15:40:47.543Z`, active workspace count0 and snapshot count0, while completed task/PR audit remains. See `instant-cleanup-proof.json`. Scoped CF telemetry confirms the first request error but does not establish its cause. Nonblocking follow-up is SAM Idea `01M4BH36AZV3Q2J8MH43JXY8M6`; no unrelated fix/deployment was added.
 
 Delivery owner deleted only its temporary Sol profile `01M4B4YC23EYXEPR5DA299H9V4` (DELETE200/GET404), independently confirmed strict cleanup, and released its lane. Runtime then started ONE sequential Manual Instant, with no VM. Genuine baseline permission response was delivered, normal Sleep succeeded at `15:49:56.061Z`, and only its owned temporary profile was changed Manual→Bypass after sleeping. Saved contract remains Manual; post-wake Write permission/answer, owned cleanup and final false-flag restore are still pending. Original sleeping conversation remains untouched for Archive LAST.
+
+
+### Final Manual Instant, Archive LAST and global lease release (16:08Z)
+
+Runtime immutable evidence `b290ae6ed:tasks/evidence/2026-10-07-session-runtime-contract/{instant-task.json,manual-instant.json,manual-instant-request.png,manual-instant-answered.png}` independently read. Genuine saved-Manual Write card `8708edb6-a904-4bed-9b82-40526000bbb0` appeared after real Sleep and only owned profile Manual→Bypass mutation; exact Yes delivered, Write/marker/idle, no page errors. Cropped request and delivered screenshots independently reviewed readable. Scoped D1 independently confirms Manual workspace/node deleted with `node_runtime_terminated` at15:55:16.054Z and snapshot count0. Temporary Manual profile DELETE200/GET404 confirmed by owner; no foreign resources touched.
+
+Final guarded flag restoration `37648102691` succeeded. Independent CF readback: active API `8b19aee2-667a-4824-bb50-60ff7bd4c180` at100%, all three ACP flags false, unchanged code ETag `35c82b7fa0c8a03c160dd6d72cc7ae5c7408bb86029406e5e8385810ccad57a9`, required agent1120 unchanged. Owner deleted temporary flag branch/worktree. Parent explicitly confirmed final release. No additional VM or Instant was created.
+
+The ORIGINAL sleeping VM conversation archived LAST through its normal confirmed mobile dock action: HTTP200/completed at **16:06:11.797Z**, repeat close HTTP200 with EXACT same closedAt. Desktop confirmation was opened then cancelled before the mobile confirmation executed; no alternate completion path. Desktop/mobile before, confirmation and ended-session captures reviewed, zero page errors or overflow; final mobile capture reloaded to settle client state. Independent D1 after proof: same task/conversation retained completed, workspaceIdNULL, exact workspace and snapshot rows absent, completed status-event count EXACTLY1 (before0). All three original R2 objects now GET404 (before200), staging liveNodes empty, applied ledger0184/0185 unchanged. See `archive-final.json`, `archive-{pre,post}-final-state.json` and screenshots.
+
+Only original owned temporary Sol profile `01M4B1NA22DKXQD9HTHH11BZG3` then deleted (200/readback404). Original completed task/chat/project and fixture project's completed task audits retained. Strict postcleanup evidence and final flags are committed here. First Instant Stop500 is the nonblocking follow-up Idea `01M4BH36AZV3Q2J8MH43JXY8M6`; one normal bounded retry completed cleanup, no unrelated implementation added.
+
+GLOBAL staging lease explicitly released to messaging PR2213 owner after all these proofs. Its isolated combined candidate preserves reviewed ad16 source and already-applied0184/0185 before additive0186. This reliability wave has no further staging resources, prompts, flag changes or deployments. Archive final task validator and PR/CI/CodeRabbit/merge/production gates remain pending until their actual outcomes below.
+
+
+### Mandatory final pre-PR task-completion review
+
+Independent `archive_review` completed PASS after personally reading the exact final normal Archive/retry, D1/R2 lifecycle and cleanup receipts, immutable runtime Manual/automatic completion evidence, final flags/provenance and migration ledger. Personally viewed desktop/mobile sleeping, confirmation and ended screenshots with no issues. Implementation/review/live acceptance/owned cleanup meet the planned acceptance; safe to archive task evidence and create PR. Operational CI, best-effort CodeRabbit, merge and production remain explicitly pending; this review is not a claim of production shipment.

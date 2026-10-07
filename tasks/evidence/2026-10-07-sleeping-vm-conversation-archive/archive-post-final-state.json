@@ -1,0 +1,56 @@
+{
+  "observedAt": "2026-10-07T16:06:45.854196+00:00",
+  "environment": "staging",
+  "sourceQueries": {
+    "task": "SELECT id,status,task_mode,workspace_id,chat_session_id,completed_at FROM tasks WHERE id='01M4B1NAFZRYJ5JRD3AN463EXK'",
+    "workspace": "SELECT id,status,node_id,runtime_deletion_confirmed_at,runtime_deletion_proof FROM workspaces WHERE id='01M4B5BEDFZBYFTJCSQA65TVBE'",
+    "snapshot": "SELECT id,status,sleep_status,sleeping_at,recovery_status,recovery_attempt_id FROM session_snapshots WHERE project_id='01M4B1N63Q5XE39D9SCQHSNDBH' AND chat_session_id='e46ff3f1-4fbe-48ab-9ab2-a57c347fa811'",
+    "completedEvents": "SELECT COUNT(*) AS completed_events FROM task_status_events WHERE task_id='01M4B1NAFZRYJ5JRD3AN463EXK' AND to_status='completed'",
+    "liveNodes": "SELECT cloud_provider,status,COUNT(*) AS count FROM nodes WHERE status NOT IN ('deleted','stopped','error') GROUP BY cloud_provider,status",
+    "ledger": "SELECT id,name,applied_at FROM d1_migrations WHERE name IN ('0184_webhook_credential_claims.sql','0185_session_runtime_contract.sql') ORDER BY id"
+  },
+  "task": [
+    {
+      "id": "01M4B1NAFZRYJ5JRD3AN463EXK",
+      "status": "completed",
+      "task_mode": "conversation",
+      "workspace_id": null,
+      "chat_session_id": "e46ff3f1-4fbe-48ab-9ab2-a57c347fa811",
+      "completed_at": "2026-10-07T16:06:11.797Z"
+    }
+  ],
+  "workspace": [],
+  "snapshot": [],
+  "completedEvents": [
+    {
+      "completed_events": 1
+    }
+  ],
+  "liveNodes": [],
+  "ledger": [
+    {
+      "id": 213,
+      "name": "0184_webhook_credential_claims.sql",
+      "applied_at": "2026-10-07 10:30:37"
+    },
+    {
+      "id": 214,
+      "name": "0185_session_runtime_contract.sql",
+      "applied_at": "2026-10-07 11:08:11"
+    }
+  ],
+  "r2": [
+    {
+      "key": "session-snapshots/e46ff3f1-4fbe-48ab-9ab2-a57c347fa811/01M4B5TRH1V02VG1GV7NJN78FZ/home.tar",
+      "status": 404
+    },
+    {
+      "key": "session-snapshots/e46ff3f1-4fbe-48ab-9ab2-a57c347fa811/01M4B5TRH1V02VG1GV7NJN78FZ/wip.bundle",
+      "status": 404
+    },
+    {
+      "key": "session-snapshots/e46ff3f1-4fbe-48ab-9ab2-a57c347fa811/01M4B5TRH1V02VG1GV7NJN78FZ/manifest.json",
+      "status": 404
+    }
+  ]
+}
