@@ -72,6 +72,42 @@ describe('terminal session sleep lifecycle integration', () => {
     }
   );
 
+  it.each(['user_id', 'project_id'] as const)(
+    'refuses a conflicting snapshot %s before lifecycle changes or runtime teardown',
+    async (column) => {
+      sqlite.prepare("UPDATE tasks SET status = 'in_progress' WHERE id = 'task-1'").run();
+      sqlite
+        .prepare(`UPDATE session_snapshots SET ${column} = ? WHERE id = ?`)
+        .run('foreign-scope', 'snapshot-1');
+      activity = { activity: 'idle', activityAt: START.getTime() - 60_000 };
+      const snapshotBefore = sqlite
+        .prepare("SELECT * FROM session_snapshots WHERE id = 'snapshot-1'")
+        .get();
+      const taskBefore = sqlite.prepare("SELECT * FROM tasks WHERE id = 'task-1'").get();
+      const workspaceBefore = sqlite
+        .prepare("SELECT * FROM workspaces WHERE id = 'workspace-1'")
+        .get();
+      await expect(
+        sleepWorkspaceSession(env, {
+          workspaceId: 'workspace-1',
+          userId: 'user-1',
+          reason: 'ownership conflict regression',
+        })
+      ).rejects.toThrow('Session snapshot ownership conflict');
+      expect(
+        sqlite.prepare("SELECT * FROM session_snapshots WHERE id = 'snapshot-1'").get()
+      ).toEqual(snapshotBefore);
+      expect(sqlite.prepare("SELECT * FROM tasks WHERE id = 'task-1'").get()).toEqual(taskBefore);
+      expect(sqlite.prepare("SELECT * FROM workspaces WHERE id = 'workspace-1'").get()).toEqual(
+        workspaceBefore
+      );
+      expect(mocks.hibernateAgentSessionOnNode).not.toHaveBeenCalled();
+      expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
+      expect(mocks.sleepSession).not.toHaveBeenCalled();
+      expect(order).toEqual([]);
+    }
+  );
+
   it('protects a long prompt immediately after completion in both sweep and teardown gates', async () => {
     sqlite
       .prepare('UPDATE tasks SET completed_at = ? WHERE id = ?')

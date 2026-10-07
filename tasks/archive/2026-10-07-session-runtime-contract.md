@@ -136,3 +136,9 @@ Final delta checks: actual sleep caller43PASS, actual Cloudflare Workers/D1 snap
 ### Final correction validation and rearchival
 
 Mandatory independent task-completion revalidation PASS on8978d3130, checksA-F/no gaps/blockers. All seven localreviewers PASS with actual Go/API/WorkersD1 checks above. Task rearchived only after this verdict; exact receipt appended to completion-review.md. Parent-owned finalCI/incrementalCodeRabbit/coordinateddeploysmoke/merge/production are explicitly pending release operations; root will continue production corroboration and record final evidence.
+
+### Full-CI ownership fixture reconciliation
+
+Corrected-headf949 fullCI37655864180 API failed22/11537PASS in EXACT2integrationfiles: session-sleep-lifecycle8 and sleeping-task-consumers14. Root reproduced22fail5pass. Sharedfixture intentionally retained stale routing but also incorrectly used foreign user/project unlike authoritative current workspace/task/chat summary. Only fixture owner/project now matchuser-1/project-1; staleworkspace/node/session/runtime/artifacts preserved. Production scope guard/shim unchanged. Two added actualsleep caller foreignowner/project regressions assert entire snapshot/task/workspace rows unchanged and no hibernate/stop/sleep/order boundary calls. Root55testsPASS plus typecheck/changed-filelint/format/diffPASS; independenttest-engineer55PASS2.64s andCF/security/supplementalcompletionPASS beforearchival evidence update.
+
+Credential-free ci-fixture-reconciliation.json recordsfailure/reproduction/correction; no successclaim forfailedCI. Runningstaging37656801006 preserved withoutredeploy/resources/cancellation; fixture-onlydelta doesnotchangeagent/APIartifact. Newmain57aaa PR2213 added0186/messaging; rootreconciles it and validatesrecovery/MCPseams beforefinalhandoff. Parent-ownedlatestCI/CR/staging/merge/prod gates remain pending.

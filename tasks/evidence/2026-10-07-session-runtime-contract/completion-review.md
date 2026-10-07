@@ -28,3 +28,7 @@ Independent `/root/cloudflare_contract_review` final mandatory task-completion r
 API67 +sleepcallers43 +WorkersD1wiring2 +finalcontract26PASS; fullGo25packages1868top3043total and entireserverrace547top928totalPASS, independentfocusedrace1.137sPASS. Prior four actualfixtures/strictcleanup remain valid for unchanged success path. All domain/security/test reviewsPASS. Rearchival permitted only after this verdict.
 
 Parent now owns finalCI/incrementalCodeRabbit/coordinateddeploysmoke/merge/production gates; these remain explicitly pending, no task-completion or deployment claim beyond reviewed implementation/acceptance.
+
+## Supplemental full-CI fixture reconciliation
+
+Independent test-engineer and CF/security/task-completion supplemental review PASS before archival evidence update. Foreign user/project in the shared fixture violated authoritative tenant identity; correction retains stale routing/runtime/artifacts so legitimate recovery remains exercised. Two new actualsleep foreign-scope regressions prove fullrow preservation and no teardown. Independent3files55PASS2.64s, root55PASS, typecheck/lint/format/diffPASS. Production code/authorization unchanged; no staging redeploy or repeated fixtures required. Latestmain57aaa reconciliation and parent-owned release gates remain pending.
