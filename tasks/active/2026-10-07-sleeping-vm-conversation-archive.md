@@ -37,3 +37,15 @@ Rules 09, 13, 25, 79; sibling tasks 01M4AXFSY11GR95XTD2N68ZE6F and 01M4AXGMEWDEH
 - Latest focused suite: 306 tests across four files PASS. Neighbor snapshot test uses the same owner/project/workspace but different chat and verifies its recovery state/objects survive. Actual close + ensureSessionRecovery archive-first/claim-first tests refuse revival, preserve workspace linkage, and start no runner. SQLite trigger-abort test proves transaction rollback leaves task sleeping. Full lint 13 tasks, typecheck 19 tasks, build 9 tasks PASS.
 
 - Full API suite: 820 files / 11,499 tests PASS; full web suite: 336 files / 4,023 tests PASS, both with maxWorkers=2. Initial root turbo run completed 19/21 tasks before unrelated web timing failures interrupted API; bounded full reruns resolved all four timing failures. No unrelated code changes. Shared staging still reserved by webhook Deploy Staging run 37607076979; waiting explicit release before coordinated candidate deployment.
+
+## Post-mortem
+### What broke
+The normal sleeping VM conversation dock offered Archive, but the close route rejected the newly persisted sleeping task status.
+### Root cause
+VM sleep began writing sleeping in #2230; close's in_progress/delegated allowlist and sleeping transition table were not reconciled. Route mocks alone did not cover the actual SQLite transition and snapshot cleanup boundary.
+### Class of bug
+A new lifecycle enum value omitted from an existing action allowlist, with a concurrent wake boundary requiring transactional fencing.
+### Why it was not caught
+Existing close coverage omitted sleeping and did not exercise actual recovery claims against archive.
+### Process fix
+Existing rule 79 already requires auditing every enum gate, so no duplicate standing guidance is added. This task records complete/close/cancel/delete audit decisions; regression tests exercise real SQLite close, actual authorized cleanup, both wake orderings, and atomic rollback.
