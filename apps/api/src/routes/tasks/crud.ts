@@ -14,6 +14,7 @@ import {
   desc,
   eq,
   gte,
+  isNull,
   lt,
 } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -738,50 +739,65 @@ crudRoutes.post('/:taskId/close', requireAuth(), requireApproved(), async (c) =>
     throw errors.badRequest('Only conversation-mode tasks can be closed via this endpoint. Use complete_task for task-mode tasks.');
   }
 
-  // Only active tasks can be closed
-  const closableStatuses: TaskStatus[] = ['in_progress', 'delegated'];
-  if (!closableStatuses.includes(task.status as TaskStatus)) {
-    throw errors.badRequest(`Task cannot be closed from status '${task.status}'. Must be in_progress or delegated.`);
+  // A completed conversation may retry interrupted cleanup without a second transition.
+  const closableStatuses: TaskStatus[] = ['in_progress', 'delegated', 'sleeping'];
+  if (task.status !== 'completed' && !closableStatuses.includes(task.status as TaskStatus)) {
+    throw errors.badRequest(`Task cannot be closed from status '${task.status}'. Must be in_progress, delegated or sleeping.`);
   }
 
-  const now = new Date().toISOString();
+  const now = task.completedAt ?? new Date().toISOString();
 
-  await db.update(schema.tasks)
-    .set({ status: 'completed', completedAt: now, updatedAt: now })
-    .where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.projectId, projectId)));
+  if (task.status !== 'completed') {
+    // Fence wake/assignment/status changes between lookup and terminal transition.
+    const rows = await db.update(schema.tasks)
+      .set({ status: 'completed', completedAt: now, executionStep: null, updatedAt: now })
+      .where(and(
+        eq(schema.tasks.id, taskId),
+        eq(schema.tasks.projectId, projectId),
+        eq(schema.tasks.status, task.status),
+        eq(schema.tasks.updatedAt, task.updatedAt),
+        task.workspaceId === null
+          ? isNull(schema.tasks.workspaceId)
+          : eq(schema.tasks.workspaceId, task.workspaceId)
+      ))
+      .returning({ id: schema.tasks.id });
+    if (rows.length === 0) {
+      throw errors.conflict('Conversation changed while archiving. Refresh and try again.');
+    }
 
-  await appendStatusEvent(db, taskId, task.status as TaskStatus, 'completed', 'user', userId, 'Conversation closed by user');
+    await appendStatusEvent(db, taskId, task.status as TaskStatus, 'completed', 'user', userId, 'Conversation closed by user');
 
-  c.executionCtx.waitUntil(
-    recordTaskLifecycleEventBestEffort(c.env, {
-      projectId,
-      taskId,
-      status: 'completed',
-      fromStatus: task.status,
-      workspaceId: task.workspaceId,
-      actorType: 'user',
-      actorId: userId,
-      reason: 'Conversation closed by user',
-      source: 'tasks.conversation_close',
-      occurredAt: now,
-      title: task.title,
-    })
-  );
+    c.executionCtx.waitUntil(
+      recordTaskLifecycleEventBestEffort(c.env, {
+        projectId,
+        taskId,
+        status: 'completed',
+        fromStatus: task.status,
+        workspaceId: task.workspaceId,
+        actorType: 'user',
+        actorId: userId,
+        reason: 'Conversation closed by user',
+        source: 'tasks.conversation_close',
+        occurredAt: now,
+        title: task.title,
+      })
+    );
 
-  // Record activity event (best-effort)
-  c.executionCtx.waitUntil(
-    projectDataService.recordActivityEvent(
-      c.env,
-      projectId,
-      'task.completed',
-      'user',
-      userId,
-      null,
-      null,
-      taskId,
-      { reason: 'Conversation closed by user' }
-    ).catch(() => { /* best-effort */ })
-  );
+    // Record activity event (best-effort)
+    c.executionCtx.waitUntil(
+      projectDataService.recordActivityEvent(
+        c.env,
+        projectId,
+        'task.completed',
+        'user',
+        userId,
+        null,
+        null,
+        taskId,
+        { reason: 'Conversation closed by user' }
+      ).catch(() => { /* best-effort */ })
+    );
+  }
 
   // Immediately clean up the linked workspace so Archive has the same
   // user-visible lifecycle semantics as Complete & Delete.
@@ -803,13 +819,19 @@ crudRoutes.post('/:taskId/close', requireAuth(), requireApproved(), async (c) =>
       .limit(1);
 
     if (workspace) {
-      await cleanupWorkspaceForDeletion({
+      const cleanup = await cleanupWorkspaceForDeletion({
         db,
         env: c.env,
         workspace,
         userId,
         logContext: { taskId, projectId, closePath: 'conversation' },
       });
+      if (cleanup.status === 'retry') {
+        throw errors.conflict('Conversation archived; workspace cleanup is pending. Retry Archive to check cleanup.');
+      }
+      if (cleanup.status === 'fenced' || cleanup.status === 'superseded') {
+        throw errors.conflict('Conversation archived; workspace changed during cleanup and was preserved.');
+      }
     } else {
       log.info('task.close.workspace_cleanup_skipped_owner_mismatch', {
         taskId,
