@@ -31,7 +31,7 @@
     "@playwright/test": "1.62.1",
     "@vitest/coverage-v8": "catalog:",
     "esbuild": "0.28.1",
-    "sharp": "0.35.2",
+    "sharp": "0.35.5",
     "tsx": "catalog:",
     "typescript": "catalog:",
     "wrangler": "catalog:"
