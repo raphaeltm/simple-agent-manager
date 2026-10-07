@@ -17,7 +17,7 @@ Affected boundaries: agent-session-bootstrap.ts, node-agent-session-snapshots.ts
 - [x] Update affected user docs and source Idea.
 - [x] Run applicable local quality checks and CI.
 - [ ] Complete independent Go, Cloudflare, security, test, constitution, docs and completion reviews.
-- [ ] Coordinate bounded shared staging; real sleep→wake, answer Manual request card, restored task completion/push/PR; clean up owned resources.
+- [x] Coordinate bounded shared staging; real sleep→wake, answer Manual request card, restored task completion/push/PR; clean up owned resources.
 - [ ] Archive only after completion validation; merge after normal gates and prove production deployment.
 
 ## Acceptance criteria
@@ -111,3 +111,9 @@ Manual Instant genuinely slept15:49:56.061, then only its owned temporary profil
 Final guarded flag restore37648102691SUCCESS: all three false, activeAPI8b19aee2-667a-4824-bb50-60ff7bd4c180, unchanged codeETag35c82b7fa0c8a03c160dd6d72cc7ae5c7408bb86029406e5e8385810ccad57a9 and355bindings. Owned temporary flags remote branch/worktree deleted. Root explicitly released staging to coordinator for original shared Archive LAST; no further root compute/prompts/deploys. Latest deployed combinedbbaee36 has successful deploy children; parent37640782379 FAILED before smoke scheduling, recovered exact existing live smoke12/12PASS with coordinator/parent approval. Import-only2021 integratedad16 was independently dry-run reviewed, not falsely reported deployed.
 
 Latest head2021 CI37642868685 all substantive checks PASS; specialist evidence deliberately pending final completion review. Final shared Archive/resource/R2 receipts, mandatory task-completion validation and archive, final CI/CodeRabbit, merge and production remain release gates. Earlier pending/provenance sections above are chronological evidence superseded by these final receipts.
+
+### Shared Archive LAST and final cleanup PASS
+
+Coordinator01M4B28P7RY8Y9DPXEG8YJ81TB final receipt: normal mobile dock ArchivePOST200 completed16:06:11.797Z; repeatclose200 retains SAMEclosedAt. Desktop/mobile before/confirmation/ended screens reviewed without errors/overflow. Independent D116:06:45 confirms original task completed with conversation retained, workspaceNULL, exact workspace/snapshot absent, completed status events exactly1(before0). All three original R2 objectsGET404, liveNodes=[], migration0184/0185 ledger unchanged. Original temporary profileDELETE200/GET40416:07:20; task/chat/project audit retained. Immutable Manual evidenceb290 and scoped strict deletion proof independently rechecked16:07:37 PASS. Credential-free coordinator receipt is shared-cleanup.json.
+
+Only release actions remain: mandatory final independent completion verdict before archive; publish archival evidence/latest CI; request CodeRabbit once and observe per policy; merge and production proof. These are intentionally pending operational gates, not omitted implementation/acceptance criteria. Latest maincc9891b4f is blog-only PR2263, no overlapping runtime code.
