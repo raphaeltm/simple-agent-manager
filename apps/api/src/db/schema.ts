@@ -2801,6 +2801,11 @@ export const webhookTriggerConfigs = sqliteTable(
     tokenLastFour: text('token_last_four').notNull(),
     tokenCreatedAt: text('token_created_at').notNull(),
     tokenRotatedAt: text('token_rotated_at'),
+    claimId: text('claim_id'),
+    claimExpiresAt: integer('claim_expires_at'),
+    claimUserId: text('claim_user_id'),
+    claimWorkspaceId: text('claim_workspace_id'),
+    claimSessionId: text('claim_session_id'),
     sourceLabel: text('source_label'),
     filterMode: text('filter_mode').notNull().default('all'),
     filtersJson: text('filters_json').notNull().default('[]'),
@@ -2814,6 +2819,7 @@ export const webhookTriggerConfigs = sqliteTable(
   },
   (table) => ({
     tokenHashUnique: uniqueIndex('idx_webhook_trigger_configs_token_hash').on(table.tokenHash),
+    claimIdUnique: uniqueIndex('idx_webhook_trigger_configs_claim_id').on(table.claimId),
   })
 );
 

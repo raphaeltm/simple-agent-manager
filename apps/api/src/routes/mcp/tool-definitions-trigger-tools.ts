@@ -60,10 +60,10 @@ export const TRIGGER_TOOLS = [
   {
     name: 'create_trigger',
     description:
-      'Create a cron schedule or GitHub event automation trigger in the current project. ' +
+      'Create a cron, GitHub event, or webhook automation trigger in the current project. ' +
       'The trigger will automatically submit tasks based on the prompt template at the specified schedule. ' +
       'Use this when a user asks to schedule recurring tasks (e.g., "run this every day at 9am"). ' +
-      'Omitting sourceType preserves cron behavior; github requires githubConfig.eventType and no cron fields. Create webhook triggers and manage their one-time credentials through the UI or REST API.',
+      'Omitting sourceType preserves cron behavior; github requires githubConfig.eventType and no cron fields. Webhooks require agentProfileId and webhookConfig ({} is valid). They return an expiring authenticated POST claim URL, never a raw credential. Redeem inside the workspace with SAM_MCP_TOKEN and pipe directly into a secret store; do not print the response or use a model-visible fetch tool.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -73,8 +73,32 @@ export const TRIGGER_TOOLS = [
         },
         sourceType: {
           type: 'string',
-          enum: ['cron', 'github'],
-          description: 'Defaults to cron. GitHub triggers require githubConfig.',
+          enum: ['cron', 'github', 'webhook'],
+          description:
+            'Defaults to cron. GitHub requires githubConfig; webhook requires agentProfileId and webhookConfig.',
+        },
+        webhookConfig: {
+          type: 'object',
+          description: 'Webhook payload filters and safe headers; {} accepts all payloads.',
+          properties: {
+            sourceLabel: { type: 'string' },
+            filterMode: { type: 'string', enum: ['all', 'any'] },
+            filters: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  path: { type: 'string' },
+                  operator: { type: 'string', enum: ['exists', 'equals', 'contains'] },
+                  value: { type: ['string', 'number', 'boolean', 'null'] },
+                },
+                required: ['path', 'operator'],
+                additionalProperties: false,
+              },
+            },
+            includedHeaders: { type: 'array', items: { type: 'string' } },
+          },
+          additionalProperties: false,
         },
         githubConfig: githubConfigProperty,
         cronExpression: {

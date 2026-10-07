@@ -148,7 +148,9 @@ export async function rotateWebhookToken(
   const token = await createWebhookTokenMaterial(env.ENCRYPTION_KEY);
   const result = await env.DATABASE.prepare(
     `UPDATE webhook_trigger_configs
-       SET token_hash = ?, token_last_four = ?, token_created_at = ?, token_rotated_at = ?, updated_at = ?
+       SET token_hash = ?, token_last_four = ?, token_created_at = ?, token_rotated_at = ?, updated_at = ?,
+           claim_id = NULL, claim_expires_at = NULL, claim_user_id = NULL,
+           claim_workspace_id = NULL, claim_session_id = NULL
      WHERE trigger_id = ?
        AND EXISTS (SELECT 1 FROM triggers WHERE id = ? AND project_id = ? AND source_type = 'webhook')`
   )
