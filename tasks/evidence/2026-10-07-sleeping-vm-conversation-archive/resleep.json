@@ -1,0 +1,21 @@
+[
+  {
+    "name": "desktop",
+    "sleepVisible": true,
+    "overflow": false
+  },
+  {
+    "name": "mobile",
+    "sleepVisible": true,
+    "overflow": false
+  },
+  {
+    "sleepStatus": 200,
+    "body": {
+      "status": "sleeping",
+      "workspaceId": "01M4B5BEDFZBYFTJCSQA65TVBE",
+      "chatSessionId": "e46ff3f1-4fbe-48ab-9ab2-a57c347fa811",
+      "snapshotExpiresAt": "2026-10-14T12:36:40.429Z"
+    }
+  }
+]
