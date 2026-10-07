@@ -1904,6 +1904,10 @@ func (s *Server) agentCapabilities() map[string]interface{} {
 	return map[string]interface{}{
 		"protocolVersion": vmExecutionProtocolVersion,
 		"runtimeIdentity": s.executionRuntimeID,
+		"sessionRuntimeContract": map[string]interface{}{
+			"supported": true,
+			"version":   1,
+		},
 		"promptReceipts": map[string]interface{}{
 			"supported": true,
 			"lookup":    true,

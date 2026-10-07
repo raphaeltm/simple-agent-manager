@@ -25,6 +25,10 @@
       "defaultGraceMs": 30000,
       "maxGraceMs": 120000,
       "operationTimeoutMs": 120000
+    },
+    "sessionRuntimeContract": {
+      "supported": true,
+      "version": 1
     }
   },
   "newPrompt": {

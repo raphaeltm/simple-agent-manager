@@ -171,7 +171,10 @@ class ContainerVmAgent {
     if (!this.running) throw new TypeError('Network connection lost.');
     const { pathname } = new URL(request.url);
     if (pathname === CAPABILITIES_PATH) {
-      return Response.json(versionedPromptCapabilities(this.runtimeIdentity));
+      return Response.json({
+        ...versionedPromptCapabilities(this.runtimeIdentity),
+        sessionRuntimeContract: { supported: true, version: 1 },
+      });
     }
     if (pathname === `${AGENT_PATH}/restore`) {
       this.notifyRestoreStarted?.();

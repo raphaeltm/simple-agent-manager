@@ -118,3 +118,13 @@ export async function loadSnapshotRuntimeContract(
     throw new Error('Session runtime contract project mismatch');
   return contract;
 }
+
+/** Optional advertisement is required before restore: old hosts ignore unknown request fields. */
+export function assertSessionRuntimeContractCapability(capabilities: unknown): void {
+  v.parse(
+    v.object({
+      sessionRuntimeContract: v.object({ supported: v.literal(true), version: v.literal(1) }),
+    }),
+    capabilities
+  );
+}

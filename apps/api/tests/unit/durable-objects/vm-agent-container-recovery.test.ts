@@ -131,9 +131,14 @@ function makeStorage(initialLifecycle: string) {
   };
 }
 
+function supportedContractCapabilities() {
+  return Response.json({ sessionRuntimeContract: { supported: true, version: 1 } });
+}
+
 function makeRecoveryFake(input?: {
   lifecycle?: string;
   restoreResponse?: Response;
+  capabilityResponse?: Response;
   maxAttempts?: number;
 }) {
   const { values, storage } = makeStorage(input?.lifecycle ?? 'sleeping');
@@ -171,12 +176,15 @@ function makeRecoveryFake(input?: {
     markActiveWorkEnded: vi.fn().mockResolvedValue(undefined),
     startRuntime: vi.fn().mockResolvedValue(undefined),
     stop: vi.fn().mockResolvedValue(undefined),
-    containerFetch: vi
-      .fn()
-      .mockResolvedValue(
+    containerFetch: vi.fn(async (request: Request) => {
+      if (new URL(request.url).pathname.endsWith('/agent-capabilities')) {
+        return input?.capabilityResponse ?? supportedContractCapabilities();
+      }
+      return (
         input?.restoreResponse ??
-          Response.json({ status: 'restored', degradation: 'none', skipped: [] })
-      ),
+        Response.json({ status: 'restored', degradation: 'none', skipped: [] })
+      );
+    }),
     getState: vi.fn().mockResolvedValue({ status: 'running' }),
   };
   return { fake, values, storage, signalSessionWakeReady };
@@ -279,7 +287,7 @@ describe('VmAgentContainer snapshot recovery state machine', () => {
     ).rejects.toBeInstanceOf(SessionRecoveryAuthorityRevokedError);
 
     expect(fake.startRuntime).toHaveBeenCalledOnce();
-    expect(fake.containerFetch).toHaveBeenCalledOnce();
+    expect(fake.containerFetch).toHaveBeenCalledTimes(2);
     expect(recoveryMocks.persistRecovered).not.toHaveBeenCalled();
     expect(fake.stop).toHaveBeenCalledOnce();
     expect(values.get('lifecycleStatus')).toBe('sleeping');
@@ -407,6 +415,7 @@ describe('VmAgentContainer snapshot recovery state machine', () => {
     const { fake } = makeRecoveryFake({ lifecycle: 'running' });
     fake.containerFetch
       .mockResolvedValueOnce(new Response('{"sessions": "not-an-array"}', { status: 200 }))
+      .mockResolvedValueOnce(supportedContractCapabilities())
       .mockResolvedValueOnce(
         Response.json({ status: 'restored', degradation: 'none', skipped: [] })
       );
@@ -423,6 +432,7 @@ describe('VmAgentContainer snapshot recovery state machine', () => {
       .mockResolvedValueOnce(
         Response.json({ sessions: [{ id: 'agent-session-1', status: 'running' }] })
       )
+      .mockResolvedValueOnce(supportedContractCapabilities())
       .mockResolvedValueOnce(
         Response.json({ status: 'restored', degradation: 'none', skipped: [] })
       );
@@ -468,6 +478,27 @@ describe('VmAgentContainer snapshot recovery state machine', () => {
     expect(values.get('lifecycleStatus')).toBe('stopping');
   });
 
+  it.each([
+    ['missing', {}],
+    ['malformed', { sessionRuntimeContract: 'yes' }],
+    ['future version', { sessionRuntimeContract: { supported: true, version: 2 } }],
+    ['unsupported', { sessionRuntimeContract: { supported: false, version: 1 } }],
+  ])(
+    'degrades safely without restore for %s runtime contract capability',
+    async (_name, payload) => {
+      const { fake, values } = makeRecoveryFake({ capabilityResponse: Response.json(payload) });
+      const result = await callEnsureAwake(fake);
+      expect(result).toMatchObject({ ok: false, status: 'degraded' });
+      expect(fake.containerFetch).toHaveBeenCalledOnce();
+      const request = fake.containerFetch.mock.calls[0]?.[0] as Request;
+      expect(request.method).toBe('GET');
+      expect(new URL(request.url).pathname).toBe('/workspaces/workspace-1/agent-capabilities');
+      expect(recoveryMocks.persistRecovered).not.toHaveBeenCalled();
+      expect(recoveryMocks.persistFailed).not.toHaveBeenCalled();
+      expect(values.get('runtimeRecovery')).toMatchObject({ phase: 'degraded' });
+    }
+  );
+
   it('cold-wakes, reinjects fresh callback tokens, restores, then reconciles running', async () => {
     const { fake, values } = makeRecoveryFake();
 
@@ -477,7 +508,13 @@ describe('VmAgentContainer snapshot recovery state machine', () => {
     expect(fake.startRuntime).toHaveBeenCalledWith(launchConfig, {
       nodeCallbackToken: 'fresh-node-token',
     });
-    const restoreRequest = fake.containerFetch.mock.calls[0]?.[0] as Request;
+    const capabilityRequest = fake.containerFetch.mock.calls[0]?.[0] as Request;
+    expect(capabilityRequest.method).toBe('GET');
+    expect(new URL(capabilityRequest.url).pathname).toBe(
+      '/workspaces/workspace-1/agent-capabilities'
+    );
+    expect(capabilityRequest.headers.get('Authorization')).toBe('Bearer management-token');
+    const restoreRequest = fake.containerFetch.mock.calls[1]?.[0] as Request;
     await expect(restoreRequest.json()).resolves.toMatchObject({
       chatSessionId: 'chat-1',
       runtime: 'cf-container',
@@ -654,12 +691,14 @@ describe('VmAgentContainer snapshot recovery state machine', () => {
   it('keeps an explicit stop terminal when it crosses an active restore', async () => {
     let finishRestore!: (response: Response) => void;
     const { fake, values } = makeRecoveryFake();
-    fake.containerFetch.mockImplementationOnce(
-      () =>
-        new Promise<Response>((resolve) => {
-          finishRestore = resolve;
-        })
-    );
+    fake.containerFetch
+      .mockResolvedValueOnce(supportedContractCapabilities())
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            finishRestore = resolve;
+          })
+      );
     const stopForUser = (
       VmAgentContainer.prototype as unknown as {
         stopForUser: (this: unknown) => Promise<void>;
@@ -667,7 +706,7 @@ describe('VmAgentContainer snapshot recovery state machine', () => {
     ).stopForUser;
 
     const wake = callEnsureAwake(fake);
-    await vi.waitFor(() => expect(fake.containerFetch).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(fake.containerFetch).toHaveBeenCalledTimes(2));
 
     await stopForUser.call(fake);
     finishRestore(
