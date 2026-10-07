@@ -39,11 +39,6 @@ const DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS = 30_000;
 // blows the Worker wall-clock budget, aborting the whole cron. See rule 47.
 const DEFAULT_NODE_AGENT_BACKGROUND_REQUEST_TIMEOUT_MS = 5_000;
 const DEFAULT_CF_CONTAINER_WAKE_TIMEOUT_MS = 120_000;
-// cf-container workspace creation clones the repository synchronously inside
-// the request (vm-agent handleStandaloneWorkspaceCreate), so it needs a
-// background-work budget rather than the interactive 30s default. 120s mirrors
-// the wake/restore budget, which re-runs the same clone. See rule 43.
-const DEFAULT_CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS = 120_000;
 
 interface NodeAgentRequestOptions extends RequestInit {
   userId: string;
@@ -131,6 +126,7 @@ function requestInitWithoutSignal(options: RequestInit): RequestInit {
 }
 
 export { getNodeAgentReadyPollIntervalMs, getNodeAgentReadyTimeoutMs };
+export { getCfContainerCreateWorkspaceTimeoutMs } from './cf-container-timeouts';
 
 export function getNodeAgentRequestTimeoutMs(env: {
   NODE_AGENT_REQUEST_TIMEOUT_MS?: string;
@@ -159,15 +155,6 @@ export function getCfContainerWakeTimeoutMs(env: {
   CF_CONTAINER_WAKE_TIMEOUT_MS?: string;
 }): number {
   return getTimeoutMs(env.CF_CONTAINER_WAKE_TIMEOUT_MS, DEFAULT_CF_CONTAINER_WAKE_TIMEOUT_MS);
-}
-
-export function getCfContainerCreateWorkspaceTimeoutMs(env: {
-  CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS?: string;
-}): number {
-  return getTimeoutMs(
-    env.CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS,
-    DEFAULT_CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS
-  );
 }
 
 export async function waitForNodeAgentReady(nodeId: string, env: Env): Promise<void> {

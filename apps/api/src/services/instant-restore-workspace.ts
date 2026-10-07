@@ -3,7 +3,6 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
-import { resolveWorkspaceGitSource } from './workspace-git-source';
 
 /** Rehydrate trusted Git metadata before a cold Instant host restores its session. */
 export async function loadInstantRestoreWorkspace(
@@ -42,6 +41,9 @@ export async function loadInstantRestoreWorkspace(
   ) {
     throw new Error('Instant restore workspace Git identity unavailable or changed');
   }
+  // Provider resolution can load OAuth clients; load it only during an actual
+  // recovery, keeping the Container module's startup dependency surface small.
+  const { resolveWorkspaceGitSource } = await import('./workspace-git-source');
   const source = await resolveWorkspaceGitSource(db, {
     id: input.projectId,
     repoProvider: row.repoProvider,
