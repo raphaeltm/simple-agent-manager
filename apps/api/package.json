@@ -35,7 +35,7 @@
     "@simple-agent-manager/shared": "workspace:*",
     "ai": "7.0.9",
     "better-auth": "catalog:",
-    "better-auth-cloudflare": "0.3.0",
+    "better-auth-cloudflare": "0.3.1",
     "diff": "^9.0.0",
     "drizzle-orm": "0.45.2",
     "hono": "4.13.4",
