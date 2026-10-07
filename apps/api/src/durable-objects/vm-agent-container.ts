@@ -14,6 +14,7 @@ import {
   type SessionRecoverySourceTaskGuard,
 } from '../services/session-recovery-authority';
 import { assertSessionRuntimeContractCapability } from '../services/session-runtime-contract';
+import { prepareSessionRestoreMcp } from '../services/session-restore-mcp';
 import { signalSessionWakeReadyBestEffort } from '../services/session-wake-ready';
 import {
   ACTIVE_WORK_KEY,
@@ -888,6 +889,8 @@ export class VmAgentContainer extends Container<Env> {
     await this.ctx.storage.put(RECOVERY_STATE_KEY, restoring);
     await this.ctx.storage.put('lifecycleStatus', 'restoring' satisfies LifecycleStatus);
 
+    let restoreMcp: Awaited<ReturnType<typeof prepareSessionRestoreMcp>> | undefined;
+    let retainRestoreMcp = false;
     try {
       const workspaceCallbackToken = await signCallbackToken(config.workspaceId, this.env);
       const { token } = await signNodeManagementToken(
@@ -916,6 +919,44 @@ export class VmAgentContainer extends Container<Env> {
         return this.degradeRecovery(restoring, 'restore_http', target, capabilityResponse.status);
       }
       assertSessionRuntimeContractCapability(await capabilityResponse.json());
+      await this.assertSourceTaskGuard(sourceTaskGuard);
+      restoreMcp = await prepareSessionRestoreMcp(this.env, {
+        userId: context.userId,
+        projectId: config.projectId,
+        workspaceId: config.workspaceId,
+        chatSessionId: context.chatSessionId,
+        agentSessionId: context.agentSessionId,
+        runtimeContract: context.runtimeContract,
+      });
+      // A fresh Instant process has no session MCP map or SQLite credentials.
+      // Reuse authenticated session creation without starting a new agent context.
+      await this.assertSourceTaskGuard(sourceTaskGuard);
+      const createResponse = await this.containerFetch(
+        new Request(
+          `http://localhost:${config.vmAgentPort}/workspaces/${config.workspaceId}/agent-sessions`,
+          {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json',
+              'X-SAM-Node-Id': config.nodeId,
+              'X-SAM-Workspace-Id': config.workspaceId,
+            },
+            body: JSON.stringify({
+              sessionId: context.agentSessionId,
+              label: 'Restored session',
+              chatSessionId: context.chatSessionId,
+              projectId: config.projectId,
+              mcpServers: restoreMcp.mcpServers,
+            }),
+            signal: AbortSignal.timeout(this.getRuntimeSettings().portReadyTimeoutMs),
+          }
+        ),
+        config.vmAgentPort
+      );
+      if (!createResponse.ok) {
+        return this.degradeRecovery(restoring, 'restore_http', target, createResponse.status);
+      }
       const restoreUrl = new URL(
         `http://localhost:${config.vmAgentPort}/workspaces/${config.workspaceId}/agent-sessions/${context.agentSessionId}/restore`
       );
@@ -1010,6 +1051,7 @@ export class VmAgentContainer extends Container<Env> {
         attempts: restoring.attempts,
         promptDisposition: restoring.promptDisposition,
       });
+      retainRestoreMcp = true;
       return { ok: true, status: 'running' };
     } catch (error) {
       if (error instanceof SessionRecoveryAuthorityRevokedError) {
@@ -1022,6 +1064,8 @@ export class VmAgentContainer extends Container<Env> {
         errorName: error instanceof Error ? error.name : 'unknown',
       });
       return this.degradeRecovery(restoring, 'unexpected', target);
+    } finally {
+      if (restoreMcp && !retainRestoreMcp) await restoreMcp.revoke().catch(() => undefined);
     }
   }
 

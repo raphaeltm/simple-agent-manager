@@ -1,0 +1,271 @@
+{
+  "status": "VM Manual post-sleep proof passed; overall acceptance pending Instant/PR retests/cleanup",
+  "profileChangedAfterSleep": {
+    "profileId": "01M4B6Q67PMTVCWJ8AYN0HRCF5",
+    "from": "default",
+    "to": "bypassPermissions"
+  },
+  "realSleepConfirmedAt": "2026-10-07T12:55:29.331Z",
+  "wakeDeliveryId": "01M4B6YR7PM18PZA41CG00JEBA",
+  "before": {
+    "chatSessionId": "6ca76804-f03c-43a3-9581-3c33b1765c26",
+    "snapshots": [],
+    "sessions": [
+      {
+        "id": "01M4B6RFRH8JG5EGJ5QBX2SF3R",
+        "workspace_id": "01M4B6QC9XPK6Y2KMGGXYKVEW4",
+        "status": "running",
+        "agent_type": "claude-code",
+        "runtime_contract_json": {
+          "version": 1,
+          "agentType": "claude-code",
+          "model": "claude-sonnet-4-5-20250929",
+          "effort": "auto",
+          "permissionMode": "default",
+          "opencodeProvider": null,
+          "opencodeBaseUrl": null,
+          "settingsResolved": true,
+          "acpInteractions": {
+            "enabled": true,
+            "formsEnabled": true,
+            "protocolVersion": 1,
+            "permissionDeadlineMs": 7200000,
+            "formDeadlineMs": 7200000,
+            "urlsEnabled": true,
+            "urlDeadlineMs": 600000,
+            "urlMaxChars": 8192,
+            "urlElicitationIdMaxChars": 256,
+            "urlRedirectDepth": 2,
+            "maxDeadlineMs": 14400000,
+            "deadlineMarginMs": 60000,
+            "requestMaxBytes": 32768,
+            "optionsMaxCount": 16,
+            "optionIdMaxChars": 128,
+            "optionNameMaxChars": 200,
+            "receiptLimit": 256,
+            "responseMaxBytes": 65536,
+            "formSchemaMaxBytes": 16384,
+            "formSchemaMaxProperties": 20,
+            "formSchemaMaxEnum": 50,
+            "answerMaxBytes": 16384,
+            "answerStringMaxBytes": 4096,
+            "settleRetryDelaysMs": [
+              1000,
+              5000,
+              30000,
+              120000,
+              300000
+            ],
+            "settleRetrySteadyMs": 300000
+          },
+          "promptKind": "task",
+          "taskContext": {
+            "projectId": "01KJNR9R3TEN3KX1ETE33852R8",
+            "taskId": "01M4B6Q8GJ53J8P94HYXD4MFAP",
+            "taskMode": "conversation"
+          }
+        }
+      }
+    ]
+  },
+  "after": {
+    "chatSessionId": "6ca76804-f03c-43a3-9581-3c33b1765c26",
+    "snapshots": [
+      {
+        "id": "01M4B6WXRSFW352027PH2X5X6H",
+        "agent_session_id": "01M4B6RFRH8JG5EGJ5QBX2SF3R",
+        "runtime": "vm",
+        "status": "available",
+        "degradation": "none",
+        "restore_status": null,
+        "sleep_status": "sleeping",
+        "recovery_status": "waking",
+        "runtime_contract_json": {
+          "version": 1,
+          "agentType": "claude-code",
+          "model": "claude-sonnet-4-5-20250929",
+          "effort": "auto",
+          "permissionMode": "default",
+          "opencodeProvider": null,
+          "opencodeBaseUrl": null,
+          "settingsResolved": true,
+          "acpInteractions": {
+            "enabled": true,
+            "formsEnabled": true,
+            "protocolVersion": 1,
+            "permissionDeadlineMs": 7200000,
+            "formDeadlineMs": 7200000,
+            "urlsEnabled": true,
+            "urlDeadlineMs": 600000,
+            "urlMaxChars": 8192,
+            "urlElicitationIdMaxChars": 256,
+            "urlRedirectDepth": 2,
+            "maxDeadlineMs": 14400000,
+            "deadlineMarginMs": 60000,
+            "requestMaxBytes": 32768,
+            "optionsMaxCount": 16,
+            "optionIdMaxChars": 128,
+            "optionNameMaxChars": 200,
+            "receiptLimit": 256,
+            "responseMaxBytes": 65536,
+            "formSchemaMaxBytes": 16384,
+            "formSchemaMaxProperties": 20,
+            "formSchemaMaxEnum": 50,
+            "answerMaxBytes": 16384,
+            "answerStringMaxBytes": 4096,
+            "settleRetryDelaysMs": [
+              1000,
+              5000,
+              30000,
+              120000,
+              300000
+            ],
+            "settleRetrySteadyMs": 300000
+          },
+          "promptKind": "task",
+          "taskContext": {
+            "projectId": "01KJNR9R3TEN3KX1ETE33852R8",
+            "taskId": "01M4B6Q8GJ53J8P94HYXD4MFAP",
+            "taskMode": "conversation"
+          }
+        }
+      }
+    ],
+    "sessions": [
+      {
+        "id": "01M4B7A61Z0D700HF6W9G8A77W",
+        "workspace_id": "01M4B78XA27V8AF7Y94VVAZQ8T",
+        "status": "running",
+        "agent_type": "claude-code",
+        "runtime_contract_json": {
+          "version": 1,
+          "agentType": "claude-code",
+          "model": "claude-sonnet-4-5-20250929",
+          "effort": "auto",
+          "permissionMode": "default",
+          "opencodeProvider": null,
+          "opencodeBaseUrl": null,
+          "settingsResolved": true,
+          "acpInteractions": {
+            "enabled": true,
+            "formsEnabled": true,
+            "protocolVersion": 1,
+            "permissionDeadlineMs": 7200000,
+            "formDeadlineMs": 7200000,
+            "urlsEnabled": true,
+            "urlDeadlineMs": 600000,
+            "urlMaxChars": 8192,
+            "urlElicitationIdMaxChars": 256,
+            "urlRedirectDepth": 2,
+            "maxDeadlineMs": 14400000,
+            "deadlineMarginMs": 60000,
+            "requestMaxBytes": 32768,
+            "optionsMaxCount": 16,
+            "optionIdMaxChars": 128,
+            "optionNameMaxChars": 200,
+            "receiptLimit": 256,
+            "responseMaxBytes": 65536,
+            "formSchemaMaxBytes": 16384,
+            "formSchemaMaxProperties": 20,
+            "formSchemaMaxEnum": 50,
+            "answerMaxBytes": 16384,
+            "answerStringMaxBytes": 4096,
+            "settleRetryDelaysMs": [
+              1000,
+              5000,
+              30000,
+              120000,
+              300000
+            ],
+            "settleRetrySteadyMs": 300000
+          },
+          "promptKind": "task",
+          "taskContext": {
+            "projectId": "01KJNR9R3TEN3KX1ETE33852R8",
+            "taskId": "01M4B6Q8GJ53J8P94HYXD4MFAP",
+            "taskMode": "conversation"
+          }
+        }
+      }
+    ]
+  },
+  "request": {
+    "summary": {
+      "interactionId": "882e99ad-be15-4b54-827f-4c359a97bc34",
+      "kind": "permission",
+      "state": "pending",
+      "createdAt": 1791378195295,
+      "updatedAt": 1791378196320,
+      "deadlineAt": 1791385394080,
+      "answeredAt": null,
+      "deliveryState": null,
+      "attentionMarkerId": "586c5256-0fff-4842-8bf5-9c712579dfa0",
+      "toolCallId": "toolu_012XAtUaznrFTQw8Nu9Hh2Us",
+      "urlCompletedAt": null
+    },
+    "detail": {
+      "options": [
+        {
+          "id": "allow-once",
+          "kind": "allow_once",
+          "name": "Yes"
+        },
+        {
+          "id": "allow-with-updates",
+          "kind": "allow_always",
+          "name": "Yes, allow all edits during this session"
+        },
+        {
+          "id": "reject",
+          "kind": "reject_once",
+          "name": "No"
+        }
+      ],
+      "title": "Write .sam-runtime-contract-manual-vm-20261007.txt",
+      "toolCallId": "toolu_012XAtUaznrFTQw8Nu9Hh2Us",
+      "toolKind": "edit"
+    }
+  },
+  "answer": {
+    "summary": {
+      "interactionId": "882e99ad-be15-4b54-827f-4c359a97bc34",
+      "kind": "permission",
+      "state": "delivery_confirmed",
+      "createdAt": 1791378195295,
+      "updatedAt": 1791378244423,
+      "deadlineAt": 1791385394080,
+      "answeredAt": 1791378243143,
+      "deliveryState": "confirmed",
+      "attentionMarkerId": "586c5256-0fff-4842-8bf5-9c712579dfa0",
+      "toolCallId": "toolu_012XAtUaznrFTQw8Nu9Hh2Us",
+      "urlCompletedAt": null
+    },
+    "detail": {
+      "options": [
+        {
+          "id": "allow-once",
+          "kind": "allow_once",
+          "name": "Yes"
+        },
+        {
+          "id": "allow-with-updates",
+          "kind": "allow_always",
+          "name": "Yes, allow all edits during this session"
+        },
+        {
+          "id": "reject",
+          "kind": "reject_once",
+          "name": "No"
+        }
+      ],
+      "title": "Write .sam-runtime-contract-manual-vm-20261007.txt",
+      "toolCallId": "toolu_012XAtUaznrFTQw8Nu9Hh2Us",
+      "toolKind": "edit"
+    }
+  },
+  "reply": "CONTRACT_MANUAL_VM_ANSWERED",
+  "idleAt": 1791378245970,
+  "pageErrors": [],
+  "desktopScreenshot": "manual-vm-request.png",
+  "answeredScreenshot": "manual-vm-answered.png"
+}
