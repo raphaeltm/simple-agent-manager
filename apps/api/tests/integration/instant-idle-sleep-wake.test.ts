@@ -31,6 +31,11 @@ import {
   nudgePromptDeliveriesForTarget,
 } from '../../src/durable-objects/project-data/prompt-delivery';
 import { getSession } from '../../src/durable-objects/project-data/session-reads';
+import {
+  applySessionWakeReady,
+  isSessionWakeReadyCurrent,
+  type SessionWakeReadyInput,
+} from '../../src/durable-objects/project-data/session-wake-ready';
 import * as sessions from '../../src/durable-objects/project-data/sessions';
 import { VmAgentContainer } from '../../src/durable-objects/vm-agent-container';
 import type { Env } from '../../src/env';
@@ -207,6 +212,7 @@ describe('Instant session wake after idle sleep', () => {
   let container: VmAgentContainer;
   let vmAgent: ContainerVmAgent;
   let deliveries = 0;
+  let background: Promise<unknown>[] = [];
 
   /** What the vm-agent does to capture a snapshot: prepare, upload HOME, complete. */
   async function captureSnapshot(): Promise<void> {
@@ -288,7 +294,10 @@ describe('Instant session wake after idle sleep', () => {
       delete: async (key: string) => values.delete(key),
     };
     const instance = new VmAgentContainer(
-      { storage } as unknown as DurableObjectState<Record<string, never>>,
+      {
+        storage,
+        waitUntil: (promise: Promise<unknown>) => background.push(promise),
+      } as unknown as DurableObjectState<Record<string, never>>,
       env
     );
     // The container runtime the Durable Object drives.
@@ -392,6 +401,7 @@ describe('Instant session wake after idle sleep', () => {
         nudgePromptDeliveriesForTarget(projectDataSql(), sessionId),
     });
     await Promise.all(claims);
+    await Promise.all(background.splice(0));
   }
 
   function runtimeRows() {
@@ -566,6 +576,18 @@ describe('Instant session wake after idle sleep', () => {
       SESSION_SNAPSHOT_POLL_INTERVAL_MS: '1',
       TASK_RUN_CLEANUP_DELAY_MS: '0',
     } as unknown as Env;
+    background = [];
+    Object.assign(env, {
+      PROJECT_DATA: {
+        idFromName: (name: string) => name,
+        get: () => ({
+          async signalSessionWakeReady(input: SessionWakeReadyInput) {
+            if (!(await isSessionWakeReadyCurrent(env, input))) return 0;
+            return applySessionWakeReady(projectDataSql(), input, Date.now());
+          },
+        }),
+      },
+    });
     vmAgent = new ContainerVmAgent(captureSnapshot);
     container = newContainer();
     Object.assign(env, {
@@ -577,7 +599,8 @@ describe('Instant session wake after idle sleep', () => {
     await captureSnapshot();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await Promise.all(background.splice(0));
     projectData.sql = null;
     d1.close();
     projectDataDb.close();
@@ -742,18 +765,6 @@ describe('Instant session wake after idle sleep', () => {
     vmAgent.restoreGate = new Promise<void>((resolve) => {
       releaseRestore = resolve;
     });
-    let containerRequests = 0;
-    let secondRequestArrived!: () => void;
-    const secondRequest = new Promise<void>((resolve) => {
-      secondRequestArrived = resolve;
-    });
-    const proxyHttp = container.proxyHttp.bind(container);
-    container.proxyHttp = (request, port) => {
-      containerRequests += 1;
-      if (containerRequests === 2) secondRequestArrived();
-      return proxyHttp(request, port);
-    };
-
     // The first follow-up starts the in-place wake; its restore is held open.
     const first = acceptFollowUp('First follow-up');
     const firstAttempt = runDeliveryAlarm();
@@ -775,26 +786,21 @@ describe('Instant session wake after idle sleep', () => {
       snapshot: { sleep_status: 'sleeping', asleep: 1 },
     });
 
-    // A second follow-up resolves its target against those mid-wake rows and joins the
-    // wake at the container, rather than being refused before it gets there.
+    // Admission keeps the second original prompt queued behind the first preparing
+    // attempt while its runtime wakes. It cannot overtake or submit concurrently.
     const second = acceptFollowUp('Second follow-up');
-    const secondAttempt = runDeliveryAlarm();
-    await Promise.race([
-      secondRequest,
-      secondAttempt.then(() => {
-        throw new Error(
-          `The second follow-up ended before it reached the container: ${JSON.stringify(
-            mailbox.getMessage(projectDataSql(), second)
-          )}`
-        );
-      }),
-    ]);
+    await runDeliveryAlarm();
+    expect(mailbox.getMessage(projectDataSql(), second)).toMatchObject({
+      deliveryState: 'queued',
+      deliveryAttempts: 0,
+    });
     releaseRestore();
-    await Promise.all([firstAttempt, secondAttempt]);
+    await firstAttempt;
+    await runDeliveryAlarm();
 
     expect(wakeFailures()).toEqual({ markers: [], messages: [] });
     expect(vmAgent.starts).toBe(1);
-    expect([...vmAgent.prompts].sort()).toEqual(['First follow-up', 'Second follow-up']);
+    expect(vmAgent.prompts).toEqual(['First follow-up', 'Second follow-up']);
     for (const deliveryId of [first, second]) {
       expect(mailbox.getMessage(projectDataSql(), deliveryId)).toMatchObject({
         deliveryState: 'acked',

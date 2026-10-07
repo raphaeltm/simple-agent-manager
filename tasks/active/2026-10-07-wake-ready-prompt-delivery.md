@@ -41,3 +41,7 @@ Current committed wake schedules eligible prompt delivery at configured minimum 
 - Archive only after final task-completion validation with coordinated staging evidence; CI/merge/production proof remain required.
 
 Latest focused Workers run: 6/6 (readiness vertical slices + preparation fences). Full typecheck 19 tasks pass; full build 9 tasks pass. Full lint only failed import sorting in changed timeout transport test, autofixed; rerun pending.
+
+Final local validation updates: full lint13 tasks, typecheck19 tasks, build9 tasks PASS. Full root test run passed20 other package tasks; API818/821files and11491/11500tests passed. Focused rerun isolates six integration fixture failures (missing ctx.waitUntil/ProjectData readiness RPC and obsolete concurrent same-target expectation); fixed fixture now22/22PASS independently. Other two suites94 tests pass on focused rerun after import-pressure timeouts. Full API rerun with8 workers in progress.
+
+Rule45 mutation proof: in an isolated worktree bypassing wakeReadyLock, strengthened deferred-D1 test fails expected reads1 vs actual2 at entry. Original completion-count assertion did not discriminate; readIndex now increments before D1 await. Production mutex unchanged. Independent test-engineer final review PASS and independently reran Instant integration22/22. Temporary mutation worktree removed.
