@@ -86,7 +86,7 @@ func TestSessionRestoreRejectsConcurrentStartAndSiblingCreateBeforeMetadataEffec
 		if start.Code != http.StatusConflict {
 			t.Errorf("concurrent start status = %d %s", start.Code, start.Body.String())
 		}
-		if len(s.sessionProfileOvr) != 0 || len(s.sessionTaskCtx) != 0 || len(s.sessionMcpServers) != 0 {
+		if len(s.sessionProfileOvr) != 1 || s.sessionProfileOvr["ws:session"].PermissionMode != "default" || len(s.sessionTaskCtx) != 0 || len(s.sessionMcpServers) != 0 {
 			t.Error("refused start changed restore profile, task ownership, or MCP settings")
 		}
 		create := post(s.handleCreateAgentSession, `{"sessionId":"sibling","label":"Sibling","chatSessionId":"other-chat","projectId":"other-project"}`)

@@ -276,7 +276,8 @@ type GatewayConfig struct {
 	McpServers []McpServerEntry
 	// ModelOverride, if non-empty, overrides the model fetched from user agent settings.
 	// Set by the control plane when an agent profile specifies a model.
-	ModelOverride string
+	SettingsResolved bool
+	ModelOverride    string
 	// PermissionModeOverride, if non-empty, overrides the permission mode fetched from
 	// user agent settings. Set by the control plane when an agent profile specifies a permission mode.
 	PermissionModeOverride string

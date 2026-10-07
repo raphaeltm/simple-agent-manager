@@ -87,6 +87,7 @@ type snapshotArtifact struct {
 }
 
 type sessionSnapshotHandlerInput struct {
+	runtimeContract        *sessionRuntimeContract
 	workspaceID            string
 	sessionID              string
 	chatSessionID          string
@@ -111,11 +112,12 @@ func (s *Server) sessionSnapshotHandlerInput(w http.ResponseWriter, r *http.Requ
 		return nil, false
 	}
 	var body struct {
-		ChatSessionID          string `json:"chatSessionId"`
-		Runtime                string `json:"runtime"`
-		AgentType              string `json:"agentType"`
-		WorkspaceCallbackToken string `json:"workspaceCallbackToken"`
-		Background             bool   `json:"background"`
+		RuntimeContract        *sessionRuntimeContract `json:"runtimeContract"`
+		ChatSessionID          string                  `json:"chatSessionId"`
+		Runtime                string                  `json:"runtime"`
+		AgentType              string                  `json:"agentType"`
+		WorkspaceCallbackToken string                  `json:"workspaceCallbackToken"`
+		Background             bool                    `json:"background"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -150,6 +152,12 @@ func (s *Server) sessionSnapshotHandlerInput(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusNotFound, "workspace not found")
 		return nil, false
 	}
+	if restoring {
+		if err := body.RuntimeContract.validate(runtime.ProjectID, strings.TrimSpace(body.AgentType)); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return nil, false
+		}
+	}
 	if !restoring {
 		s.recordWorkspaceChatSessionID(workspaceID, body.ChatSessionID)
 	}
@@ -168,6 +176,7 @@ func (s *Server) sessionSnapshotHandlerInput(w http.ResponseWriter, r *http.Requ
 		}
 	}
 	return &sessionSnapshotHandlerInput{
+		runtimeContract:        body.RuntimeContract,
 		workspaceID:            workspaceID,
 		sessionID:              sessionID,
 		chatSessionID:          body.ChatSessionID,

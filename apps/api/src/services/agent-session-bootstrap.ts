@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -23,6 +23,11 @@ import {
   startAgentSessionOnNode,
 } from './node-agent';
 import * as projectDataService from './project-data';
+import {
+  loadSnapshotRuntimeContract,
+  parseSessionRuntimeContract,
+  resolveSessionRuntimeContract,
+} from './session-runtime-contract';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -230,6 +235,52 @@ export async function startSamAwareAgentSession(
   env: Env,
   input: SamAwareAgentStartInput
 ): Promise<SamAwareAgentStartResult> {
+  const savedRow = input.agentSessionId
+    ? await db
+        .select({ runtimeContractJson: schema.agentSessions.runtimeContractJson })
+        .from(schema.agentSessions)
+        .where(
+          and(
+            eq(schema.agentSessions.id, input.agentSessionId),
+            eq(schema.agentSessions.userId, input.userId),
+            eq(schema.agentSessions.workspaceId, input.workspaceId)
+          )
+        )
+        .get()
+    : null;
+  const savedContract = input.restoreSnapshotChatSessionId
+    ? await loadSnapshotRuntimeContract(
+        db,
+        input.projectId,
+        input.userId,
+        input.restoreSnapshotChatSessionId
+      )
+    : parseSessionRuntimeContract(savedRow?.runtimeContractJson);
+  const contract =
+    savedContract ??
+    (await resolveSessionRuntimeContract(db, env, {
+      ...input,
+      // Historical sessions lack proof of their original permission mode. Never silently grant bypass.
+      overrides: input.restoreSnapshotChatSessionId
+        ? { ...input.overrides, permissionMode: 'default' }
+        : input.overrides,
+    }));
+  if (contract.taskContext && contract.taskContext.projectId !== input.projectId)
+    throw new Error('Session runtime contract project mismatch');
+  if (
+    contract.taskContext &&
+    input.taskContext &&
+    contract.taskContext.taskId !== input.taskContext.taskId
+  ) {
+    throw new Error('Session runtime contract task identity mismatch');
+  }
+  input = {
+    ...input,
+    agentType: contract.agentType,
+    overrides: contract,
+    promptKind: contract.promptKind,
+    taskContext: contract.taskContext ? { ...input.taskContext, ...contract.taskContext } : null,
+  };
   const agentSessionId = input.agentSessionId || ulid();
   const generatedMcpToken = !input.existingMcpToken;
   const mcpToken = input.existingMcpToken || generateMcpToken();
@@ -245,6 +296,12 @@ export async function startSamAwareAgentSession(
   try {
     await runMaybePhased(input, 'create_agent_session_row', () =>
       ensureAgentSessionRow(db, input, agentSessionId)
+    );
+    await runMaybePhased(input, 'persist_runtime_contract', () =>
+      db
+        .update(schema.agentSessions)
+        .set({ runtimeContractJson: JSON.stringify(contract) })
+        .where(eq(schema.agentSessions.id, agentSessionId))
     );
     await input.onAgentSessionId?.(agentSessionId);
 
@@ -319,6 +376,7 @@ export async function startSamAwareAgentSession(
             chatSessionId: restoreSnapshotChatSessionId,
             runtime: 'vm',
             agentType: input.agentType,
+            runtimeContract: contract,
           },
         ] as const;
         return guardedMutationOptions
@@ -364,10 +422,10 @@ export async function startSamAwareAgentSession(
               }
             : undefined,
           injectedInstructions,
+          guardedMutationOptions,
+          contract.acpInteractions,
         ] as const;
-        return guardedMutationOptions
-          ? startAgentSessionOnNode(...args, guardedMutationOptions)
-          : startAgentSessionOnNode(...args);
+        return startAgentSessionOnNode(...args);
       });
     }
 

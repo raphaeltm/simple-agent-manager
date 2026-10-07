@@ -86,7 +86,7 @@ function harness(
   options: { r2DeleteFails?: boolean } = {}
 ): Harness {
   const sqlite = new Database(':memory:');
-  createSchemaTables(sqlite, [schema.sessionSnapshots]);
+  createSchemaTables(sqlite, [schema.sessionSnapshots, schema.agentSessions]);
   const deleted: string[] = [];
   const env = {
     DATABASE: createSqliteD1(sqlite),

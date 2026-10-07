@@ -9,6 +9,7 @@ interface SleepPlaceholder {
   chatSessionId: string;
   agentSessionId: string | null;
   runtime: string;
+  runtimeContractJson: string | null;
   manifestR2Key: string;
   expiresAt: string;
   createdAt: string;
@@ -25,8 +26,8 @@ export async function ensureUnhealthyNodeSleepPlaceholder(
   const result = await env.DATABASE.prepare(
     `INSERT INTO session_snapshots
        (id, project_id, workspace_id, node_id, user_id, chat_session_id, agent_session_id,
-        runtime, status, degradation, manifest_r2_key, expires_at, created_at, updated_at)
-       SELECT ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'none', ?, ?, ?, ?
+        runtime, runtime_contract_json, status, degradation, manifest_r2_key, expires_at, created_at, updated_at)
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'none', ?, ?, ?, ?
        WHERE EXISTS (
          SELECT 1 FROM workspaces w
          WHERE w.id = ? AND w.node_id = ? AND w.user_id = ? AND w.chat_session_id = ?
@@ -39,6 +40,7 @@ export async function ensureUnhealthyNodeSleepPlaceholder(
          user_id = excluded.user_id,
          agent_session_id = excluded.agent_session_id,
          runtime = excluded.runtime,
+         runtime_contract_json = COALESCE(excluded.runtime_contract_json, session_snapshots.runtime_contract_json),
          updated_at = excluded.updated_at
        WHERE (session_snapshots.workspace_id IS NULL
               OR session_snapshots.workspace_id = excluded.workspace_id)
@@ -58,6 +60,7 @@ export async function ensureUnhealthyNodeSleepPlaceholder(
       row.chatSessionId,
       row.agentSessionId,
       row.runtime,
+      row.runtimeContractJson,
       row.manifestR2Key,
       row.expiresAt,
       row.createdAt,

@@ -16,13 +16,10 @@ your work is safe and what to do next. Everything here applies to both
   model is unavailable for your account. → [Fix the connection](#the-agent-or-a-tool-cant-sign-in)
 - **A message saying a sign-in flow requires a local callback**, or an MCP tool failing with
   `401 Unauthorized`. → [Connect the tool another way](#the-agent-or-a-tool-cant-sign-in)
-- **An agent set to ask made changes without asking**, after its chat slept and woke. A woken chat
-  doesn't keep its profile's mode. → [Fork, or start a new chat](/docs/guides/agents/#after-a-chat-wakes-from-sleep)
-- **Changes you asked for after a Task slept aren't in its pull request.** A woken Task works like a
-  Chat, so SAM doesn't push for it. → [Ask the agent to push](/docs/guides/agents/#after-a-chat-wakes-from-sleep)
-- **The agent stops whenever it needs your approval, and no card appears.** The chat has woken from
-  sleep, or agent requests are off on a self-hosted instance.
-  → [Fork, or change the mode](#the-agent-stops-for-approval-and-no-card-appears)
+- **An older sleeping chat asks for approval after waking.** Its original settings may not have
+  been recorded. → [Check wake compatibility](/docs/guides/agents/#after-a-chat-wakes-from-sleep)
+- **The agent stops whenever it needs your approval, and no card appears.** Check whether agent
+  requests are enabled on your instance. → [Check request settings](#the-agent-stops-for-approval-and-no-card-appears)
 - **A strip with a spinner**, such as **Waking and restoring session...** or, on a VM, a step like
   **Finding a server...** or **Waiting for server capacity...**. A wake or a recovery is in
   progress. → [Wait](#recovery-is-in-progress)
@@ -58,9 +55,9 @@ runs on its own `sam/…` [output branch](/docs/guides/idea-execution/#where-the
 project **Files** tab shows its diff without opening a workspace. A chat started in the composer on
 an Instant profile has no branch of its own, and pushes only what you ask the agent to push.
 
-Several sections also tell you to reply to wake a chat. A **Task** woken this way
-[works like a Chat](/docs/guides/agents/#after-a-chat-wakes-from-sleep): SAM won't push its new work,
-so ask the agent to commit and push to its branch.
+A **Task** keeps its task completion and git delivery behavior after sleep and wake;
+a **Chat** remains a Chat. [Wake settings](/docs/guides/agents/#after-a-chat-wakes-from-sleep)
+explains compatibility with older saved sessions.
 
 ## The agent is waiting for you
 
@@ -133,10 +130,7 @@ or in the failure card under the chat header (expand the card for the next step)
   (the card's **Open agent connections** button, for the person who started the chat). The agent
   picks up the new connection only when it starts again: in a **Task**, wait for the chat to go to
   sleep, then reply to wake it; in a **Chat**, select **Sleep** (the moon button above the message
-  box), then send a message. A woken chat
-  [works differently](/docs/guides/agents/#after-a-chat-wakes-from-sleep): it usually can't ask for
-  your approval, and SAM no longer pushes a Task's work for it. If you need either, start a new
-  chat.
+  box), then send a message. The woken session keeps its recorded settings and task behavior.
 - **A failure card: "Model unavailable for this account."** The credential works, but your plan or
   account can't use that model — or the model ID is mistyped. Pick another model in the agent's
   profile, the project's **Agent Overrides**, or **Settings → Agents**, then start a new chat, or
@@ -156,35 +150,16 @@ too:
 
 ## The agent stops for approval and no card appears
 
-If an agent stops each time it needs your approval and no card appears, SAM is refusing its requests
-the moment the agent makes them. The step it wanted to run fails, and the agent either works around
-it or stops. There are two causes:
+If an agent stops each time it needs your approval and no card appears, check that agent requests
+are enabled. On a self-hosted instance, the operator must enable them as described in
+[Let agents ask in chat](/docs/guides/self-hosting/#let-agents-ask-in-chat). A sleeping session
+keeps the interaction settings it had when it started; turning requests on applies to new
+sessions, so start or [fork](/docs/guides/chat-features/#conversation-forking) a chat after enabling
+them. Turning requests off refuses new requests immediately, including in running sessions.
 
-- **The chat has slept and woken**, or SAM restored it after its container or machine failed. A
-  woken chat usually can't ask yet, on any instance, and it takes its mode from the project's
-  **Agent Overrides** and your **Settings → Agents**, not its profile. Choose one:
-  - **Keep this chat and its files:** wherever those two are set to **Manual**, **Accept Edits**, or
-    **Plan Mode**, set **Bypass Permissions** (or **Inherit from user settings** in **Agent
-    Overrides**). Then wake the chat again: in a **Chat**, select **Sleep** (the moon button above
-    the message box) and send a message; in a **Task**, wait for it to go to sleep, then reply. New
-    chats then also work without asking unless their profile or skill sets a mode, so to keep
-    approvals there, set **Manual** or **Plan Mode** on the profile.
-  - **Get approvals back:** [fork](/docs/guides/chat-features/#conversation-forking) the chat or
-    start a new one. A fork carries a summary of the chat, not its files.
-- **Agent requests are off on a self-hosted instance.** Until the operator turns them on, use
-  **Bypass Permissions** for the agent — in its profile, in the project's **Agent Overrides**, and in
-  **Settings → Agents** (see [Permission mode](/docs/guides/agents/#permission-mode)) — and start a
-  new chat. To keep this chat's files instead, let it sleep and wake it as in the bullet above. Once a
-  Task has slept, SAM stops pushing for it, so
-  [ask the agent to push](/docs/guides/agents/#after-a-chat-wakes-from-sleep). An operator can turn
-  requests on as described in
-  [Let agents ask in chat](/docs/guides/self-hosting/#let-agents-ask-in-chat).
-
-Switching to Bypass Permissions doesn't help Amp or Gemini CLI, which ask on their own even in
-Bypass Permissions, or Claude Code in a devcontainer that
-[runs as `root`](/docs/guides/agents/#claude-code-asks-even-in-bypass-permissions). Those agents
-can reliably ask only in a new or forked chat, and on a self-hosted instance only once requests are
-on.
+Sleep and wake preserve permission mode and requests for sessions started on the current version.
+Older sessions without recorded settings use Manual permissions; see
+[After a chat wakes from sleep](/docs/guides/agents/#after-a-chat-wakes-from-sleep).
 
 ## Recovery is in progress
 
@@ -389,11 +364,9 @@ Both carry a summary of this chat, but not its files. Read the chat to see wheth
 kept:
 
 - **The chat goes to Sleeping, and the composer is still there.** The work was kept. Reply in the
-  same chat: it wakes with its files restored, and you can tell the agent how to carry on. It then
-  [works like a Chat](/docs/guides/agents/#after-a-chat-wakes-from-sleep), so SAM won't push for it:
-  ask the agent to commit and push to its branch, and to open a pull request if there isn't one. Don't use
-  **Retry** for this, even if the failure card suggests it — Retry starts a new chat without the
-  saved files.
+  same chat: it wakes with its files restored, and you can tell the agent how to carry on. A Task
+  keeps its completion and git delivery behavior; a Chat remains a Chat. Don't use **Retry**
+  for this, even if the failure card suggests it — Retry starts a new chat without the saved files.
 - **A system message: "Task failed. SAM saved this conversation, but its workspace snapshot is
   incomplete (…)".** On a VM, replying still wakes the chat, but some uncommitted changes may be
   missing. On Instant the message ends "…so this Instant workspace cannot be restored": don't reply,

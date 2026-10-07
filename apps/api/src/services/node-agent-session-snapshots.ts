@@ -5,11 +5,13 @@ import {
   type GuardedNodeAgentMutationOptions,
   nodeAgentRequest,
 } from './node-agent';
+import type { SessionRuntimeContract } from './session-runtime-contract';
 import { mintWorkspaceCallbackTokenForNodeDelivery } from './workspace-callback-token-binding';
 
 export const DEFAULT_SESSION_SNAPSHOT_REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
 
 interface SessionSnapshotRequest {
+  runtimeContract?: SessionRuntimeContract;
   chatSessionId: string;
   runtime: string;
   agentType?: string;
