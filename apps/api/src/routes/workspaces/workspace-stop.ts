@@ -14,6 +14,7 @@ import { stopNodeResources } from '../../services/nodes';
 import * as projectDataService from '../../services/project-data';
 import { deleteSessionSnapshotState } from '../../services/session-snapshots';
 import { finalizeWorkspaceStopOnNode } from '../../services/workspace-eviction-lifecycle';
+import { finalizeWorkspaceLifecycleClosure } from '../../services/workspace-lifecycle-finalizer';
 import {
   assertNodeOperational,
   getOwnedNode,
@@ -28,15 +29,24 @@ const CF_CONTAINER_STOPPABLE_WORKSPACE_STATUSES = new Set([
   'creating',
   'error',
   'stopping',
+  'sleeping',
+  'stopped',
 ]);
-const CF_CONTAINER_STOPPABLE_NODE_STATUSES = new Set(['running', 'creating', 'error']);
+const CF_CONTAINER_STOPPABLE_NODE_STATUSES = new Set([
+  'running',
+  'creating',
+  'error',
+  'sleeping',
+  'stopped',
+  'destroying',
+]);
 
 workspaceStopRoutes.post('/:id/stop', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
   const workspaceId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  const workspace = await getOwnedWorkspace(db, workspaceId, userId);
+  const workspace = await getOwnedWorkspace(db, workspaceId, userId, { includeDeleted: true });
   if (!workspace.nodeId) {
     throw errors.badRequest('Workspace is not attached to a node');
   }
@@ -44,6 +54,24 @@ workspaceStopRoutes.post('/:id/stop', requireAuth(), requireApproved(), async (c
 
   const node = await getOwnedNode(db, nodeId, userId);
   const isCfContainerNode = node.runtime === 'cf-container';
+  if (
+    isCfContainerNode &&
+    node.status === 'deleted' &&
+    node.runtimeTerminationConfirmedAt &&
+    workspace.runtimeDeletionConfirmedAt === node.runtimeTerminationConfirmedAt &&
+    workspace.runtimeDeletionProof === 'node_runtime_terminated'
+  ) {
+    // Runtime proof can precede a failed session/usage finalization. Repeated
+    // Stop must retry that idempotent work without destroying compute again.
+    await finalizeWorkspaceLifecycleClosure(c.env, {
+      workspaceIds: [workspace.id],
+      userId,
+      agentSessionStatus: 'stopped',
+      reason: 'cf_container_stop_retry',
+    });
+    return c.json({ status: 'stopped' });
+  }
+  if (workspace.status === 'deleted') throw errors.notFound('Workspace');
   const retryStopCleanup =
     !isCfContainerNode &&
     workspace.status === 'stopping' &&

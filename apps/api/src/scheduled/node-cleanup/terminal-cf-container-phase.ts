@@ -39,9 +39,9 @@ export async function sweepTerminalCfContainers(
        AND n.node_role = 'workspace'
        AND n.node_class != 'user-owned'
        AND (n.cleanup_backoff_until IS NULL OR n.cleanup_backoff_until <= ?)
-       AND w.status IN ('running', 'creating', 'recovery', 'sleeping', 'stopped')
+       AND w.status IN ('running', 'creating', 'recovery', 'sleeping', 'stopping', 'stopped')
        AND t.status IN ('completed', 'failed', 'cancelled')
-       AND NOT ${sleepLifecycleOwnsTerminalTaskWorkspaceSql('t', 'w', sessionSleepMaxAttempts(env))}
+       AND (w.status = 'stopping' OR NOT ${sleepLifecycleOwnsTerminalTaskWorkspaceSql('t', 'w', sessionSleepMaxAttempts(env))})
        AND NOT EXISTS (
          SELECT 1 FROM tasks active
          WHERE active.workspace_id = w.id

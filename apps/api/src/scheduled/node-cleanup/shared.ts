@@ -105,6 +105,15 @@ export function cleanupNodeProvenanceSql(
   ))`;
 }
 
+/** Sleeping Instant compute is the only wake target; snapshot retention owns teardown. */
+export function sleepingContainerRetentionGuardSql(nodeAlias: string): string {
+  return `AND NOT (${nodeAlias}.runtime = 'cf-container' AND EXISTS (
+    SELECT 1 FROM workspaces retained_workspace
+    WHERE retained_workspace.node_id = ${nodeAlias}.id
+      AND retained_workspace.status = 'sleeping'
+  ))`;
+}
+
 export async function claimNodeForCleanup(
   env: Env,
   node: CleanupNode,
@@ -154,6 +163,7 @@ export async function claimNodeForCleanup(
        ${options.expectedLastHeartbeatAt === undefined ? '' : 'AND last_heartbeat_at IS ?'}
        AND ${cleanupNodeProvenanceSql('nodes', options.allowManagedRunningProvenance)}
        ${activeWorkspaceGuard}
+       ${sleepingContainerRetentionGuardSql('nodes')}
        ${boundedWarmPlacementClaimGuardSql('nodes.id')}
        ${workspaceIdleGuard}`
   )
