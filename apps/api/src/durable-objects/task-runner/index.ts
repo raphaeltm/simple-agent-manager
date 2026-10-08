@@ -57,6 +57,7 @@ import { handleAgentSession } from './agent-session-step';
 import { putTaskRunnerState, taskRunnerAttemptContext } from './attempt-storage';
 import { computeBackoffMs, isTransientError, parseEnvInt } from './helpers';
 import { handleNodeAgentReady, handleNodeProvisioning, handleNodeSelection } from './node-steps';
+import { recordRunnerPhase } from './phase-timings';
 import { hasTaskStepRetryBudget } from './snapshot-restore-retry';
 import { failTask } from './state-machine';
 import { redactTaskRunnerStatus } from './status';
@@ -434,6 +435,7 @@ export class TaskRunner extends DurableObject<Env> {
       const errorMessage = err instanceof Error ? err.message : String(err);
       const durationMs = Date.now() - stepStartMs;
 
+      recordRunnerPhase(state, 'error');
       log.error('task_runner_do.step_error', {
         taskId: state.taskId,
         step: state.currentStep,
@@ -481,6 +483,7 @@ export class TaskRunner extends DurableObject<Env> {
       advanceToStep: async (state: TaskRunnerState, nextStep: TaskExecutionStep) => {
         if (!(await this.isCurrentRecoveryAttempt(state)))
           throw new SessionRecoveryAuthorityRevokedError();
+        recordRunnerPhase(state, 'success');
         state.currentStep = nextStep;
         state.retryCount = 0;
         state.lastStepAt = Date.now();

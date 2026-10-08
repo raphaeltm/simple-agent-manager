@@ -18,6 +18,7 @@ type snapshotArtifactCapture struct {
 }
 
 func (c *snapshotArtifactCapture) captureWIP(ctx context.Context) bool {
+	nextLifecyclePhase(ctx, "wip_capture")
 	var err error
 	var baseCommit, wipPath string
 	var wipSkipped []snapshotSkippedEntry
@@ -51,6 +52,7 @@ func (c *snapshotArtifactCapture) captureWIP(ctx context.Context) bool {
 	}
 
 	if wipPath != "" {
+		nextLifecyclePhase(ctx, "wip_upload")
 		size, sha, uploadErr := c.server.uploadSessionSnapshotArtifact(ctx, c.prepare.Upload.WIP, c.prepare.DirectUpload.WIP, wipPath, c.token, c.idleTimeout)
 		_ = os.Remove(wipPath)
 		if uploadErr != nil {
@@ -66,6 +68,7 @@ func (c *snapshotArtifactCapture) captureWIP(ctx context.Context) bool {
 }
 
 func (c *snapshotArtifactCapture) captureHome(ctx context.Context) bool {
+	nextLifecyclePhase(ctx, "home_capture")
 	var err error
 	var homePath string
 	var homeSkipped []snapshotSkippedEntry
@@ -81,6 +84,7 @@ func (c *snapshotArtifactCapture) captureHome(ctx context.Context) bool {
 		c.manifest.Skipped = append(c.manifest.Skipped, snapshotSkippedEntry{Path: "$HOME", Reason: err.Error()})
 	}
 	if homePath != "" {
+		nextLifecyclePhase(ctx, "home_upload")
 		size, sha, uploadErr := c.server.uploadSessionSnapshotArtifact(ctx, c.prepare.Upload.Home, c.prepare.DirectUpload.Home, homePath, c.token, c.idleTimeout)
 		_ = os.Remove(homePath)
 		if uploadErr != nil {

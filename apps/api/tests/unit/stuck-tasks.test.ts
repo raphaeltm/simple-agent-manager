@@ -200,6 +200,10 @@ function createMockEnv(
   const workspaceNodeRows = collectWorkspaceNodeRows(prepareResponses);
   const mockDb = {
     prepare: vi.fn((sql: string) => {
+      if (sql === 'SELECT * FROM tasks WHERE id = ?') {
+        const candidates = prepareResponses.get("status IN ('queued', 'delegated', 'in_progress')")?.results ?? [];
+        return { bind: (id: string) => mockPreparedStatement(candidates.filter((row) => (row as { id: string }).id === id)) };
+      }
       if (
         sql.includes('SELECT node_id') &&
         sql.includes('FROM workspaces') &&

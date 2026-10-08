@@ -154,6 +154,44 @@ describe('workspace callback auth routing (regression)', () => {
   // These are the regression tests — they would have caught the original bug.
   // =========================================================================
 
+  it('accepts a bounded lifecycle summary through combined callback routing', async () => {
+    const response = await app.request(
+      '/api/workspaces/ws-test/lifecycle-timings',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer valid-callback-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          operation: 'sleep',
+          phases: [{ phase: 'home_upload', durationMs: 123 }],
+        }),
+      },
+      {}
+    );
+    expect(response.status, await response.clone().text()).toBe(200);
+    expect(await response.json()).toEqual({ accepted: true });
+  });
+
+  it('rejects a foreign workspace lifecycle callback', async () => {
+    const response = await app.request('/api/workspaces/foreign/lifecycle-timings', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer valid-callback-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ operation: 'wake', phases: [] }),
+    });
+    expect(response.status).toBe(403);
+  });
+
+  it('bounds lifecycle callback body size before parsing', async () => {
+    const response = await app.request('/api/workspaces/ws-test/lifecycle-timings', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer valid-callback-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ operation: 'wake', phases: [], padding: 'x'.repeat(8192) }),
+    });
+    expect(response.status).toBe(413);
+  });
+
   it('POST /:id/provisioning-failed with Bearer token is NOT blocked by session auth', async () => {
     const res = await app.request('/api/workspaces/ws-test/provisioning-failed', {
       method: 'POST',

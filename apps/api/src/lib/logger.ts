@@ -29,6 +29,7 @@
 
 import type { Env } from '../env';
 import { redactCredentialTokens } from './credential-token-redaction';
+import { d1CauseCode } from './d1-error-code';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -91,8 +92,10 @@ export function serializeError(err: unknown): Record<string, unknown> {
       error: REDACTED_MESSAGE,
       errorName: err.name,
     };
+    const causeCode = d1CauseCode(err);
+    if (causeCode) result.causeCode = causeCode;
     if (err.cause) {
-      result.cause = err.cause instanceof Error ? REDACTED_MESSAGE : sanitizeString(String(err.cause), false);
+      result.cause = REDACTED_MESSAGE;
     }
     return result;
   }

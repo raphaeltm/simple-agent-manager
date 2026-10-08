@@ -97,10 +97,14 @@ func workspaceRuntimeRequiresGitToken(runtime *WorkspaceRuntime) bool {
 	}
 }
 
-func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *WorkspaceRuntime) (bool, error) {
+func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *WorkspaceRuntime) (recovery bool, resultErr error) {
 	if runtime == nil {
 		return false, fmt.Errorf("workspace runtime is required")
 	}
+	ctx, timings := startLifecycleTimings(ctx, "system_wait")
+	defer func() {
+		s.finishLifecycleTimings(timings, "workspace", runtime.ID, s.runtimeCallbackToken(runtime), resultErr)
+	}()
 	if err := s.waitForSystemProvisioning(ctx); err != nil {
 		return false, err
 	}
@@ -136,6 +140,7 @@ func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *Workspa
 	}
 	defer cancel()
 
+	nextLifecyclePhase(ctx, "git_token")
 	gitToken, err := s.fetchGitTokenForWorkspace(provisionCtx, runtime.ID, callbackToken)
 	if err != nil {
 		if workspaceRuntimeRequiresGitToken(runtime) {
@@ -144,6 +149,7 @@ func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *Workspa
 		slog.Warn("Proceeding without git token", "workspace", runtime.ID, "error", err)
 	}
 
+	nextLifecyclePhase(ctx, "runtime_assets")
 	runtimeAssets, err := s.fetchProjectRuntimeAssetsForWorkspace(provisionCtx, runtime.ID, callbackToken, "")
 	if err != nil {
 		return false, fmt.Errorf("failed to fetch project runtime assets: %w", err)
@@ -153,10 +159,12 @@ func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *Workspa
 	// Wire it to the workspace-specific broadcaster so WebSocket clients see logs.
 	reporter := bootlog.New(s.config.ControlPlaneURL, runtime.ID)
 	reporter.SetToken(callbackToken)
+	reporter.SetPhaseObserver(timings.observe)
 	if broadcaster := s.GetBootLogBroadcasterForWorkspace(runtime.ID); broadcaster != nil {
 		reporter.SetBroadcaster(broadcaster)
 	}
 
+	nextLifecyclePhase(ctx, "workspace_prepare")
 	recoveryMode, err := prepareWorkspaceForRuntime(provisionCtx, &cfg, bootstrap.ProvisionState{
 		GitHubToken:            gitToken,
 		GitUserName:            runtime.GitUserName,

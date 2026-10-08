@@ -21,6 +21,7 @@ import { syncTriggerExecutionStatus } from '../../services/trigger-execution-syn
 import { cancelVmTaskAdmission, wakeVmAdmissionWaiters } from '../../services/vm-admission-control';
 import { finalizeWorkspaceLifecycleClosure } from '../../services/workspace-lifecycle-finalizer';
 import { releaseClaimedWarmNode } from './node-selection';
+import { recordRunnerPhase } from './phase-timings';
 import {
   canMutateProjectDataFailureSession,
   projectDataGuardForReservedSubmission,
@@ -145,6 +146,7 @@ export async function transitionToInProgress(
           readiness,
         })
       );
+      recordRunnerPhase(state, 'success');
       state.currentStep = 'running';
       state.completed = true;
       await rc.ctx.storage.put('state', state);
@@ -248,6 +250,7 @@ export async function transitionToInProgress(
     }
   }
 
+  recordRunnerPhase(state, 'success');
   state.currentStep = 'running';
   state.completed = true;
   await rc.ctx.storage.put('state', state);

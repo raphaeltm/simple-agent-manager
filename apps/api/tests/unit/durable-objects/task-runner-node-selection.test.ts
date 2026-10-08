@@ -25,6 +25,7 @@ vi.mock('../../../src/services/vm-admission-control', async (importActual) => {
 });
 
 type D1ResultMap = {
+  task?: { id: string; projectId: string; userId: string; taskMode: string; triggeredBy: string };
   activePoolNodeCount?: number;
   persistedWarmClaim?: string | null;
   persistedWarmNode?: PlacementRowNodeSource;
@@ -246,6 +247,19 @@ function createStatement(sql: string, results: D1ResultMap) {
       return this;
     },
     first() {
+      if (sql.includes("task_mode = 'conversation' AND triggered_by = 'user'")) {
+        const task = results.task;
+        return Promise.resolve(
+          task &&
+            task.id === bound[0] &&
+            task.projectId === bound[1] &&
+            task.userId === bound[2] &&
+            task.taskMode === 'conversation' &&
+            task.triggeredBy === 'user'
+            ? { id: task.id }
+            : null
+        );
+      }
       if (sql.includes('COUNT(*) AS count') && sql.includes('capacity_pool_id = ?')) {
         return Promise.resolve({ count: results.activePoolNodeCount ?? 0 });
       }
@@ -1533,6 +1547,108 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
           reasons: ['node build queue is busy'],
         },
       ],
+    });
+  });
+
+  it.each([
+    { label: 'first human conversation', triggeredBy: 'user', resume: false, admitted: true },
+    { label: 'background conversation', triggeredBy: 'schedule', resume: false, admitted: false },
+    { label: 'human conversation wake', triggeredBy: 'user', resume: true, admitted: false },
+  ])(
+    'handles build deferral for a $label through the real selector',
+    async ({ triggeredBy, resume, admitted }) => {
+      const state = busyBuildState();
+      state.config.taskMode = 'conversation';
+      state.config.resumeSnapshotChatSessionId = resume ? 'sleeping-chat' : null;
+      const now = new Date().toISOString();
+      const rc = createContext({
+        task: {
+          id: state.taskId,
+          projectId: state.projectId,
+          userId: state.userId,
+          taskMode: 'conversation',
+          triggeredBy,
+        },
+        existingNodes: [busyBuildNode('node-building', state.config.capacityPoolSelection!)],
+        workspaceReservations: [
+          {
+            nodeId: 'node-building',
+            resolvedReservationJson: JSON.stringify(state.config.resolvedReservation),
+          },
+        ],
+        healthByNode: {
+          'node-building': {
+            health_status: 'healthy',
+            last_heartbeat_at: now,
+            agent_ready_at: now,
+            agent_version: 'current-sha',
+          },
+        },
+      });
+
+      await handleNodeSelection(state, rc);
+
+      if (admitted) {
+        expect(state.stepResults.nodeId).toBe('node-building');
+        expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'workspace_creation');
+        expect(admissionMocks.waitForVmAdmissionCapacity).not.toHaveBeenCalled();
+      } else {
+        expect(state.stepResults.nodeId).toBeNull();
+        expect(rc.advanceToStep).not.toHaveBeenCalled();
+        expect(rc.updateD1ExecutionStep).toHaveBeenCalledWith(
+          state.taskId,
+          'waiting_for_node_capacity'
+        );
+        expect(admissionMocks.waitForVmAdmissionCapacity).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({ taskId: state.taskId }),
+          'compatible_node_building_workspace',
+          null,
+          null,
+          expect.objectContaining({ waitTimeoutMs: expect.any(Number) })
+        );
+      }
+    }
+  );
+
+  it('keeps aggregate resource rejection for a first human conversation on a building host', async () => {
+    const selection = capacityPoolSelection('user', {
+      machineSize: 'small',
+      providerInstanceType: 'cx23',
+      vcpuCount: 2,
+      memoryMb: 4096,
+      diskGb: 40,
+    });
+    const state = busyBuildState({ cpuMillis: 1500, selection });
+    state.config.taskMode = 'conversation';
+    const rc = createContext({
+      task: {
+        id: state.taskId,
+        projectId: state.projectId,
+        userId: state.userId,
+        taskMode: 'conversation',
+        triggeredBy: 'user',
+      },
+      existingNodes: [busyBuildNode('node-building-full', selection)],
+      workspaceReservations: [
+        {
+          nodeId: 'node-building-full',
+          resolvedReservationJson: JSON.stringify({
+            ...state.config.resolvedReservation,
+            cpuMillis: 1000,
+          }),
+        },
+      ],
+    });
+
+    await handleNodeSelection(state, rc);
+
+    expect(state.stepResults.nodeId).toBeNull();
+    expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_provisioning');
+    expect(admissionMocks.waitForVmAdmissionCapacity).not.toHaveBeenCalled();
+    expect(state.stepResults.placementDiagnostics?.hosts[0]).toMatchObject({
+      outcome: 'rejected',
+      reasons: expect.arrayContaining(['CPU share budget would be exceeded']),
     });
   });
 

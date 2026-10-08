@@ -353,3 +353,5 @@ checkpoint, current creator authority, and the original unexpired submission dea
 all reserved identities and immutable intent. Missing/ambiguous receipts are never proof of
 completion or permission to replay. The response includes `recovery.outcome` and
 `execution.retrySubmissionAllowed`; original deadlines cannot be extended by recovery.
+
+- `POST /api/workspaces/:id/lifecycle-timings` — Workspace callback JWT; fixed bounded numeric lifecycle phase summary emitted to structured logs only. See `docs/notes/session-lifecycle-timings.md`.
