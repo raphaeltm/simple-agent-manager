@@ -694,11 +694,12 @@ export async function runProjectDataStorageSafetyAlarm(
   sql: SqlStorage,
   env: Env,
   projectId: string | null,
-  options: { transactionSync?: <T>(callback: () => T) => T } = {}
+  options: { transactionSync?: <T>(callback: () => T) => T; sync?: () => Promise<void> } = {}
 ): Promise<ProjectDataStorageAlarmResult> {
   const config = resolveStorageSafetyConfig(env);
   return runProjectDataStorageSafetyAlarmCore(sql, env, projectId, config, {
     ...(options.transactionSync ? { transactionSync: options.transactionSync } : {}),
+    sync: options.sync,
     shouldMeasure: shouldMeasureProjectDataStorage,
     measureAndPersist: measureAndPersistProjectDataStorage,
     classifyStatus: classifyStorageUsage,

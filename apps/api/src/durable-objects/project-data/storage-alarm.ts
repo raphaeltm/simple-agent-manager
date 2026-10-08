@@ -21,6 +21,7 @@ import {
   META_LAST_ERROR,
   META_LAST_MEASURED_AT,
   META_LAST_STATUS,
+  STORAGE_SAFETY_ERROR_MAX_LENGTH,
   truncateStorageSafetyMetaValue as truncate,
   writeStorageSafetyMeta as writeMeta,
 } from './storage-safety-meta';
@@ -41,6 +42,7 @@ import type { Env } from './types';
 const log = createModuleLogger('project_data.storage_alarm');
 
 export interface ProjectDataStorageAlarmCallbacks {
+  sync?: () => Promise<void>;
   transactionSync?: <T>(callback: () => T) => T;
   shouldMeasure: (sql: SqlStorage, env: Env, now: number) => boolean;
   measureAndPersist: (
@@ -201,7 +203,7 @@ async function persistCleanupHealthTelemetryAndAlerts(
 
   writeMeta(sql, META_LAST_MEASURED_AT, String(measuredAt));
   writeMeta(sql, META_LAST_STATUS, telemetry.status);
-  if (lastError) writeMeta(sql, META_LAST_ERROR, truncate(lastError, 500));
+  if (lastError) writeMeta(sql, META_LAST_ERROR, truncate(lastError, STORAGE_SAFETY_ERROR_MAX_LENGTH));
   else if (!cleanupHadFailure(cleanup, groupedFtsCleanup, eventLogCleanup)) {
     deleteMeta(sql, META_LAST_ERROR);
   }
@@ -218,7 +220,7 @@ async function persistCleanupHealthTelemetryAndAlerts(
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    writeMeta(sql, META_LAST_ERROR, truncate(message, 500));
+    writeMeta(sql, META_LAST_ERROR, truncate(message, STORAGE_SAFETY_ERROR_MAX_LENGTH));
     log.warn('cleanup_health_telemetry_upsert_failed', {
       projectId,
       ...serializeError(error),
@@ -236,7 +238,7 @@ async function persistCleanupHealthTelemetryAndAlerts(
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      writeMeta(sql, META_LAST_ERROR, truncate(message, 500));
+      writeMeta(sql, META_LAST_ERROR, truncate(message, STORAGE_SAFETY_ERROR_MAX_LENGTH));
       log.warn('cleanup_target_unreachable_alert_failed', {
         projectId,
         ...serializeError(error),
@@ -256,55 +258,97 @@ export async function runProjectDataStorageSafetyAlarmCore(
 ): Promise<ProjectDataStorageAlarmResult> {
   const startedAt = Date.now();
   const now = Date.now();
-  let measurement: ProjectDataStorageTelemetry | null = null;
-  if (callbacks.shouldMeasure(sql, env, now)) {
-    measurement = await callbacks.measureAndPersist(sql, env, projectId, 'alarm');
-  }
+  const failedSteps: string[] = [];
+  const errors: unknown[] = [];
+  // A caught SQLite error can roll back the current implicit transaction. Flush
+  // prior alarm work and each completed step before starting independent SQL.
+  await callbacks.sync?.();
+  const runStep = async <T>(name: string, operation: () => Promise<T>): Promise<T | null> => {
+    const stepStartedAt = Date.now();
+    let result: T | null = null;
+    try {
+      result = await operation();
 
-  const cleanup = await runProjectDataToolPayloadCleanup(sql, env, projectId, config, {
-    allowStart: measurement !== null,
-    now,
-    ...(callbacks.transactionSync ? { transactionSync: callbacks.transactionSync } : {}),
-    classifyStatus: (databaseSizeBytes) => callbacks.classifyStatus(databaseSizeBytes, config),
-    recordTelemetry: async (telemetry, fields) => {
-      const enriched = await enrichProjectDataStorageTelemetry(sql, env, telemetry, config, {
-        includeCategoryBreakdown: false,
-      });
-      await upsertProjectDataStorageTelemetry(env, enriched, fields);
-    },
-  });
-  const groupedFtsCleanup = config.groupedFtsCleanupEnabled
-    ? await runProjectDataGroupedFtsCleanup(sql, env, projectId, config, {
-        allowStart: measurement !== null || cleanup !== null,
-        now,
-        classifyStatus: (databaseSizeBytes) => callbacks.classifyStatus(databaseSizeBytes, config),
-      })
-    : null;
-  const eventLogCleanup = await runProjectDataEventLogCleanup(sql, env, projectId, config, {
-    allowStart: measurement !== null || cleanup !== null || groupedFtsCleanup !== null,
-    now,
-    classifyStatus: (databaseSizeBytes) => callbacks.classifyStatus(databaseSizeBytes, config),
-    recordTelemetry: async (telemetry, fields) => {
-      const enriched = await enrichProjectDataStorageTelemetry(sql, env, telemetry, config, {
-        includeCategoryBreakdown: false,
-      });
-      await upsertProjectDataStorageTelemetry(env, enriched, fields);
-    },
-  });
-  const cleanupHealth = await persistCleanupHealthTelemetryAndAlerts(
-    sql,
-    env,
-    projectId,
-    config,
-    callbacks,
-    measurement,
-    cleanup,
-    groupedFtsCleanup,
-    eventLogCleanup
+    } catch (error) {
+      failedSteps.push(name);
+      errors.push(error);
+      log.error('step_failed', { projectId, step: name, ...serializeError(error) });
+      // Even recording the failure may fail on an unhealthy SQLite connection.
+      try {
+        writeMeta(sql, META_LAST_ERROR, truncate(`${name}: ${String(error)}`, STORAGE_SAFETY_ERROR_MAX_LENGTH));
+      } catch (recordError) {
+        log.warn('step_failure_record_failed', { projectId, step: name, ...serializeError(recordError) });
+      }
+    }
+    // Do not continue if durability itself fails: later operations cannot be
+    // isolated safely on an unusable storage connection.
+    try {
+      await callbacks.sync?.();
+    } catch (error) {
+      log.error('step_commit_failed', { projectId, step: name, ...serializeError(error) });
+      throw error;
+    }
+    if (!failedSteps.includes(name)) {
+      log.info('step_completed', { projectId, step: name, durationMs: Date.now() - stepStartedAt });
+    }
+    return result;
+  };
+  const measurement = await runStep('measurement', async () =>
+    callbacks.shouldMeasure(sql, env, now)
+      ? callbacks.measureAndPersist(sql, env, projectId, 'alarm')
+      : null
+  );
+  const cleanup = await runStep('tool_payload_cleanup', () =>
+    runProjectDataToolPayloadCleanup(sql, env, projectId, config, {
+      allowStart: measurement !== null,
+      now,
+      ...(callbacks.transactionSync ? { transactionSync: callbacks.transactionSync } : {}),
+      classifyStatus: (databaseSizeBytes) => callbacks.classifyStatus(databaseSizeBytes, config),
+      recordTelemetry: async (telemetry, fields) => {
+        const enriched = await enrichProjectDataStorageTelemetry(sql, env, telemetry, config, {
+          includeCategoryBreakdown: false,
+        });
+        await upsertProjectDataStorageTelemetry(env, enriched, fields);
+      },
+    })
+  );
+  const groupedFtsCleanup = await runStep('grouped_fts_cleanup', async () =>
+    config.groupedFtsCleanupEnabled
+      ? await runProjectDataGroupedFtsCleanup(sql, env, projectId, config, {
+          transactionSync: callbacks.transactionSync,
+          allowStart: measurement !== null || cleanup !== null,
+          now,
+          classifyStatus: (databaseSizeBytes) => callbacks.classifyStatus(databaseSizeBytes, config),
+        })
+      : null
+  );
+  const eventLogCleanup = await runStep('event_log_cleanup', () =>
+    runProjectDataEventLogCleanup(sql, env, projectId, config, {
+      allowStart: measurement !== null || cleanup !== null || groupedFtsCleanup !== null,
+      now,
+      classifyStatus: (databaseSizeBytes) => callbacks.classifyStatus(databaseSizeBytes, config),
+      recordTelemetry: async (telemetry, fields) => {
+        const enriched = await enrichProjectDataStorageTelemetry(sql, env, telemetry, config, {
+          includeCategoryBreakdown: false,
+        });
+        await upsertProjectDataStorageTelemetry(env, enriched, fields);
+      },
+    })
+  );
+  // A failed cleanup is not an exhausted candidate set. Preserve the failure
+  // instead of publishing a misleading target_unreachable alert.
+  if (failedSteps.length > 0) {
+    log.warn('step_skipped', { projectId, step: 'cleanup_health', reason: 'cleanup_failed', failedSteps });
+  }
+  const cleanupHealth = failedSteps.length > 0 ? null : await runStep('cleanup_health', () =>
+    persistCleanupHealthTelemetryAndAlerts(
+      sql, env, projectId, config, callbacks, measurement, cleanup, groupedFtsCleanup, eventLogCleanup
+    )
   );
   const durationMs = Date.now() - startedAt;
   log.info('completed', {
     projectId,
+    failedSteps,
     durationMs,
     measured: measurement !== null,
     databaseSizeBytes: measurement?.databaseSizeBytes ?? sql.databaseSize,
@@ -350,5 +394,8 @@ export async function runProjectDataStorageSafetyAlarmCore(
         }
       : null,
   });
+  if (failedSteps.length > 0) {
+    throw new AggregateError(errors, `Storage safety substeps failed: ${failedSteps.join(', ')}`);
+  }
   return { measurement, cleanup, groupedFtsCleanup, eventLogCleanup, cleanupHealth, durationMs };
 }

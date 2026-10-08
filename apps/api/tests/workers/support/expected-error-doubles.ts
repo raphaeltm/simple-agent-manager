@@ -135,6 +135,54 @@ export class ProjectDataTestDouble extends ProjectData {
     await this.runSummarySyncLocked();
   }
 
+  /** Inject a rollback inside the DO realm so the workers pool does not report
+   * a test-realm thrown exception as an unhandled RPC rejection. */
+  async runAlarmWithGroupedCleanupFailureForTest(failurePoint: 'candidate' | 'second_delete' = 'candidate', failRecording = false): Promise<{
+    injected: boolean; laterCleanup: boolean; markerCommitted: boolean; rolledBack: boolean;
+  }> {
+    const storage = this.ctx.storage;
+    const sql = storage.sql;
+    const exec = sql.exec.bind(sql);
+    const sync = storage.sync.bind(storage);
+    let injected = false;
+    let deletes = 0;
+    let laterCleanup = false;
+    let markerWritten = false;
+    let markerCommitted = false;
+    let markerCommittedBeforeFailure = false;
+    storage.sync = async () => {
+      await sync();
+      if (markerWritten) markerCommitted = true;
+    };
+    sql.exec = ((query: string, ...bindings: SqlStorageValue[]) => {
+      if (/INSERT INTO chat_messages_grouped_fts/.test(query) && /VALUES\('delete'/.test(query)) deletes++;
+      const shouldFail = failurePoint === 'candidate'
+        ? /SELECT id FROM chat_sessions/.test(query) : deletes === 2;
+      if (!injected && shouldFail) {
+        injected = true;
+        markerCommittedBeforeFailure = markerCommitted;
+        storage.transactionSync(() => {
+          exec('INSERT INTO nomem_rollback_probe VALUES (2)');
+          throw new Error('out of memory: SQLITE_NOMEM');
+        });
+      }
+      if (injected && failRecording && bindings[0] === 'storageSafetyLastError' && /INSERT/.test(query)) {
+        throw new Error('injected diagnostic write failure');
+      }
+      if (bindings[0] === 'storageSafetyLastAlertAt' && /INSERT/.test(query)) markerWritten = true;
+      if (injected && /DELETE FROM activity_events/.test(query)) laterCleanup = true;
+      return exec(query, ...bindings);
+    }) as typeof sql.exec;
+    try {
+      await this.alarm();
+      return { injected, laterCleanup, markerCommitted: markerCommittedBeforeFailure,
+        rolledBack: exec('SELECT count(*) n FROM nomem_rollback_probe WHERE id = 2').one().n === 0 };
+    } finally {
+      sql.exec = exec;
+      storage.sync = sync;
+    }
+  }
+
   /** Drive the production storage-safety path through its rule-45 cleanup mutex. */
   async runStorageSafetyAlarmForTest(): Promise<void> {
     await this.runStorageSafetyAlarmLocked();
