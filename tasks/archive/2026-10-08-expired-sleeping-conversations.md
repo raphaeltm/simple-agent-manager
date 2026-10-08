@@ -18,7 +18,7 @@ Snapshot retention ends after seven days but tasks stay sleeping or legacy in_pr
 - [x] Expired chat list/header and clear Fork path; readable transcript.
 - [x] Real purge/sweep regression tests and race/nonexpired controls.
 - [ ] Desktop/mobile Playwright screenshots inspected and attached to PR.
-- [ ] Lint/typecheck/test/build and local specialist reviews.
+- [x] Lint/typecheck/test/build and local specialist reviews.
 - [ ] Exclusive staging lease, deploy and verify, release.
 - [ ] PR/CI/CodeRabbit/merge/production deploy and real-row verification.
 - [ ] Append evidence to ideas, complete only after verified deployment; channel MERGED/DONE and unsubscribe.
@@ -37,3 +37,9 @@ Ideas 01M43NCRFC9VF93RPM355FZAKJ and 01M372H3BSH4PFC67MH6J63WS8; tasks/backlog/2
 - Amended API regression pass:165 tests (real purge/sweep, migration, terminal reconciliation fixtures); web focused78 passed. Isolated Vite mutation probes each fail their intended assertion when expiry reason or wake-claim fence is removed; working source untouched.
 - Production false-failure refresh14:19Z still four confirmed rows plus the excluded unexpired control. Recheck before production deployment.
 - Reviewed screenshots are retained in project library `/engineering/expiry-2026-10-08/`: mobile header `01M4DXTJRN09HE3QT9Q2GPGWAX`, mobile list `01M4DXTN1QF5BEAECW0BSBNNDW`, desktop header `01M4DXTQQKRE9DX2JQJN451284`, desktop list `01M4DXTT8CSSKMA0MZD6B1XPMT`.
+
+Implementation validated and archived by the explicit `/do` workflow. Delivery gates above remain pending and are tracked in the PR and SAM task; ideas will not be completed before verified production deployment.
+
+Final local package runs:826API files/11615tests passed with six old fixture failures; corrected fixtures passed fresh in165-test affected suite. Web335files/4024tests passed with one newly-added cache test running against a pre-edit cached module; fresh78-test run passed. CI will rerun the final committed tree.
+
+Load review: new degraded pass and existing artifact purge each use the configured batch cap (default250), aggregate500maximum candidates. Expected initial49production/11staging degraded expiries; indexed lookup plus existing D1/DO terminal machinery per row; no new VM/R2 operations.
