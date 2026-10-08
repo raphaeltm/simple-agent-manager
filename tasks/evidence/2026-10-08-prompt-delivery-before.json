@@ -1,0 +1,350 @@
+{
+  "capturedAt": "2026-10-08T20:53:19.226Z",
+  "from": "2026-10-08T19:00:00Z",
+  "to": "2026-10-08T20:00:00Z",
+  "objectId": "dd1dc7854bfe6d171cb7db70805b7dc3262566c4b685217736bd43af61d59960",
+  "data": {
+    "account": [
+      {
+        "dimensions": {
+          "datetimeFiveMinutes": "2026-10-08T19:00:00Z"
+        },
+        "sum": {
+          "duration": 31.769062784,
+          "rowsRead": 3329295,
+          "rowsWritten": 9204
+        }
+      },
+      {
+        "dimensions": {
+          "datetimeFiveMinutes": "2026-10-08T19:05:00Z"
+        },
+        "sum": {
+          "duration": 23.354860288,
+          "rowsRead": 2343521,
+          "rowsWritten": 3100
+        }
+      },
+      {
+        "dimensions": {
+          "datetimeFiveMinutes": "2026-10-08T19:10:00Z"
+        },
+        "sum": {
+          "duration": 32.707731584,
+          "rowsRead": 2313626,
+          "rowsWritten": 4003
+        }
+      },
+      {
+        "dimensions": {
+          "datetimeFiveMinutes": "2026-10-08T19:15:00Z"
+        },
+        "sum": {
+          "duration": 19.186187647999997,
+          "rowsRead": 1460413,
+          "rowsWritten": 2041
+        }
+      },
+      {
+        "dimensions": {
+          "datetimeFiveMinutes": "2026-10-08T19:20:00Z"
+        },
+        "sum": {
+          "duration": 28.65544256,
+          "rowsRead": 2667006,
+          "rowsWritten": 15642
+        }
+      },
+      {
+        "dimensions": {
+          "datetimeFiveMinutes": "2026-10-08T19:25:00Z"
+        },
+        "sum": {
+          "duration": 39.894536192,
+          "rowsRead": 614665,
+          "rowsWritten": 1691
+        }
+      },
+      {
+        "dimensions": {
+          "datetimeFiveMinutes": "2026-10-08T19:30:00Z"
+        },
+        "sum": {
+          "duration": 26.823062656000005,
+          "rowsRead": 1709712,
+          "rowsWritten": 2575
+        }
+      },
+      {
+        "dimensions": {
+          "datetimeFiveMinutes": "2026-10-08T19:35:00Z"
+        },
+        "sum": {
+          "duration": 45.541062399999994,
+          "rowsRead": 2713490,
+          "rowsWritten": 4704
+        }
+      },
+      {
+        "dimensions": {
+          "datetimeFiveMinutes": "2026-10-08T19:40:00Z"
+        },
+        "sum": {
+          "duration": 26.790749952,
+          "rowsRead": 1566293,
+          "rowsWritten": 4100
+        }
+      },
+      {
+        "dimensions": {
+          "datetimeFiveMinutes": "2026-10-08T19:45:00Z"
+        },
+        "sum": {
+          "duration": 15.876500224,
+          "rowsRead": 1356095,
+          "rowsWritten": 1549
+        }
+      },
+      {
+        "dimensions": {
+          "datetimeFiveMinutes": "2026-10-08T19:50:00Z"
+        },
+        "sum": {
+          "duration": 39.677592319999995,
+          "rowsRead": 2470079,
+          "rowsWritten": 6349
+        }
+      },
+      {
+        "dimensions": {
+          "datetimeFiveMinutes": "2026-10-08T19:55:00Z"
+        },
+        "sum": {
+          "duration": 36.94682112,
+          "rowsRead": 1736332,
+          "rowsWritten": 3628
+        }
+      }
+    ],
+    "alarms": [
+      {
+        "dimensions": {
+          "datetimeFiveMinutes": "2026-10-08T19:00:00Z"
+        },
+        "sum": {
+          "requests": 64
+        }
+      },
+      {
+        "dimensions": {
+          "datetimeFiveMinutes": "2026-10-08T19:05:00Z"
+        },
+        "sum": {
+          "requests": 59
+        }
+      },
+      {
+        "dimensions": {
+          "datetimeFiveMinutes": "2026-10-08T19:10:00Z"
+        },
+        "sum": {
+          "requests": 50
+        }
+      },
+      {
+        "dimensions": {
+          "datetimeFiveMinutes": "2026-10-08T19:15:00Z"
+        },
+        "sum": {
+          "requests": 34
+        }
+      },
+      {
+        "dimensions": {
+          "datetimeFiveMinutes": "2026-10-08T19:20:00Z"
+        },
+        "sum": {
+          "requests": 35
+        }
+      },
+      {
+        "dimensions": {
+          "datetimeFiveMinutes": "2026-10-08T19:25:00Z"
+        },
+        "sum": {
+          "requests": 18
+        }
+      },
+      {
+        "dimensions": {
+          "datetimeFiveMinutes": "2026-10-08T19:30:00Z"
+        },
+        "sum": {
+          "requests": 33
+        }
+      },
+      {
+        "dimensions": {
+          "datetimeFiveMinutes": "2026-10-08T19:35:00Z"
+        },
+        "sum": {
+          "requests": 55
+        }
+      },
+      {
+        "dimensions": {
+          "datetimeFiveMinutes": "2026-10-08T19:40:00Z"
+        },
+        "sum": {
+          "requests": 33
+        }
+      },
+      {
+        "dimensions": {
+          "datetimeFiveMinutes": "2026-10-08T19:45:00Z"
+        },
+        "sum": {
+          "requests": 35
+        }
+      },
+      {
+        "dimensions": {
+          "datetimeFiveMinutes": "2026-10-08T19:50:00Z"
+        },
+        "sum": {
+          "requests": 44
+        }
+      },
+      {
+        "dimensions": {
+          "datetimeFiveMinutes": "2026-10-08T19:55:00Z"
+        },
+        "sum": {
+          "requests": 31
+        }
+      }
+    ],
+    "root": [
+      {
+        "dimensions": {
+          "datetimeFiveMinutes": "2026-10-08T19:00:00Z"
+        },
+        "sum": {
+          "duration": 27.814838144,
+          "rowsRead": 3308268,
+          "rowsWritten": 6999
+        }
+      },
+      {
+        "dimensions": {
+          "datetimeFiveMinutes": "2026-10-08T19:05:00Z"
+        },
+        "sum": {
+          "duration": 20.86916352,
+          "rowsRead": 2339668,
+          "rowsWritten": 2626
+        }
+      },
+      {
+        "dimensions": {
+          "datetimeFiveMinutes": "2026-10-08T19:10:00Z"
+        },
+        "sum": {
+          "duration": 30.929476224,
+          "rowsRead": 2311126,
+          "rowsWritten": 3721
+        }
+      },
+      {
+        "dimensions": {
+          "datetimeFiveMinutes": "2026-10-08T19:15:00Z"
+        },
+        "sum": {
+          "duration": 17.918417792,
+          "rowsRead": 1453175,
+          "rowsWritten": 1934
+        }
+      },
+      {
+        "dimensions": {
+          "datetimeFiveMinutes": "2026-10-08T19:20:00Z"
+        },
+        "sum": {
+          "duration": 25.419268736,
+          "rowsRead": 2323512,
+          "rowsWritten": 8261
+        }
+      },
+      {
+        "dimensions": {
+          "datetimeFiveMinutes": "2026-10-08T19:25:00Z"
+        },
+        "sum": {
+          "duration": 29.173116288,
+          "rowsRead": 613266,
+          "rowsWritten": 1673
+        }
+      },
+      {
+        "dimensions": {
+          "datetimeFiveMinutes": "2026-10-08T19:30:00Z"
+        },
+        "sum": {
+          "duration": 24.869553535999998,
+          "rowsRead": 1706664,
+          "rowsWritten": 2502
+        }
+      },
+      {
+        "dimensions": {
+          "datetimeFiveMinutes": "2026-10-08T19:35:00Z"
+        },
+        "sum": {
+          "duration": 25.770585343999997,
+          "rowsRead": 2706374,
+          "rowsWritten": 3966
+        }
+      },
+      {
+        "dimensions": {
+          "datetimeFiveMinutes": "2026-10-08T19:40:00Z"
+        },
+        "sum": {
+          "duration": 25.029680895999995,
+          "rowsRead": 1563597,
+          "rowsWritten": 2617
+        }
+      },
+      {
+        "dimensions": {
+          "datetimeFiveMinutes": "2026-10-08T19:45:00Z"
+        },
+        "sum": {
+          "duration": 14.569031423999999,
+          "rowsRead": 1354084,
+          "rowsWritten": 1342
+        }
+      },
+      {
+        "dimensions": {
+          "datetimeFiveMinutes": "2026-10-08T19:50:00Z"
+        },
+        "sum": {
+          "duration": 28.714624384,
+          "rowsRead": 2465110,
+          "rowsWritten": 5726
+        }
+      },
+      {
+        "dimensions": {
+          "datetimeFiveMinutes": "2026-10-08T19:55:00Z"
+        },
+        "sum": {
+          "duration": 34.346056448,
+          "rowsRead": 1734811,
+          "rowsWritten": 3342
+        }
+      }
+    ]
+  }
+}

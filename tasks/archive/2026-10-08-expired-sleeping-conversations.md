@@ -50,3 +50,21 @@ Final frozen-tree root validation14:35Z: `pnpm exec turbo run test --concurrency
 - First staging deployment37794259672 applied0187. Real cron at15:02Z expired11legacy tasks, exactlyone expiry event each; sixunexpired controls unchanged; all1524transcript messages retained. Degraded snapshot metadata retained with expired status.
 - Found and fixed a completeness gap before PR: sidebar's200recent-task page could omit older expired tasks. Session-list API now includes authoritative task outcomes for returned sessions, scoped byproject and uniquechat ID; D1parameter chunking permits at mosttwoqueries for100sessions. Invalid/nonpositive page limits now normalize before both readers, avoiding SQLite's unlimited negative limit.
 - Real-route tests13PASS across index/DO fallback, project isolation, negative/invalid limits. Revised Playwright2PASS with emptyrecent-task page; fourupdated screenshots reviewed PASS and replaced in retained libraryfiles. All three localdelta reviewers PASS/ADDRESSED. Final staging redeploy pending.
+
+## Production delivery and bounded follow-up (2026-10-08)
+PR [#2280](https://github.com/raphaeltm/simple-agent-manager/pull/2280) merged as `90cbf4ea4505347709816d3d7275dcb283d3a042`. Main CI `37811997822` and production deployment `37815107732` passed. CodeRabbit approved with no actionable findings. Final staging `37798002716` passed; desktop/mobile screenshots and review are linked in [PR evidence](https://github.com/raphaeltm/simple-agent-manager/pull/2280#issuecomment-6063219584).
+
+Production verification at 17:44Z: 53 degraded legacy snapshots reached the neutral expired terminal state with metadata retained; four original false failures were corrected; an available snapshot expiring at 17:41:59Z was handled correctly by the deployed purge. All 255,863 messages across the 75 tracked conversations remain present. Unexpired sleeping and unrelated failed controls remain unchanged.
+
+Two additional legacy snapshots expired while the old code was still deployed during review/deployment. A fresh read-only dry run matched exactly two false failures, one per guarded correction:
+
+| Task | Snapshot expired | Original failure completion | Retained messages |
+| --- | --- | --- | --- |
+| `01M3W1QQCPTM787VWRXQZAEGEE` | 15:48:53.044Z | 15:55:58.440Z | 6,207 |
+| `01M3VY3XJV909HKR9VZ5HEJX5W` | 17:19:24.488Z | 17:20:56.187Z | 3,585 |
+
+Both have deleted workspaces, stopped chats, no remaining snapshot, and the specific `workspace_deleted` failure observed after retention expiry. Operational mutation was denied by read-only Cloudflare access (error 7500); no row changed. Additive migration 0188, claimed on coordination channel sequence 76, carries the exact two corrections through the normal deployment path. It must retain completion times, prior failure history, transcript counts, and independent controls. Final task/idea completion remains pending this follow-up's production verification.
+
+Follow-up local validation: 11 real SQLite migration tests passed, including the full migration chain, both exact corrections, changed-observation/restored-snapshot controls, unrelated unexpired conversations, and idempotent audit events. ESLint and migration safety passed (206 foreign-key relationships, zero violations). Independent completeness review passed. Staging dry run found zero matching production IDs, as expected; deployment remains queued under the shared lease protocol.
+
+Exact migration-predicate dry run matched `[1, 1]` in production and `[0, 0]` in staging. This caught and corrected the second legacy row’s stored `task_mode=task`; the first is `conversation`. Both modes are now fenced independently, with a regression control for changed modes.
