@@ -240,7 +240,7 @@ Users and their agents must be able to run containers inside a workspace: `docke
 - `initializeCommand`, which the devcontainer CLI runs on the VM itself
 - Compose-based devcontainers
 
-The VM agent runs as root (`packages/cloud-init/src/template.ts`). It forwards the merged output of `devcontainer read-configuration --include-merged-configuration` without filtering these fields (`writeMountOverrideConfig` in `packages/vm-agent/internal/bootstrap/bootstrap.go`). Filtering them would not harden SAM. It would break every repository that runs containers in its workspace, including SAM's own.
+The VM agent runs as root (`packages/cloud-init/src/template.ts`). It forwards the merged output of `devcontainer read-configuration --include-merged-configuration` without filtering these fields (`writeMountOverrideConfig` in `packages/vm-agent/internal/bootstrap/bootstrap.go`). SAM's own default container, used for lightweight and fallback workspaces, is privileged too (`writeDefaultDevcontainerConfigForMode` in the same file). Filtering repository settings would not harden SAM. It would break every repository that runs containers in its workspace, including SAM's own.
 
 Instant workspaces run in Cloudflare Containers and do not use repository devcontainers, so this section is about VM workspaces.
 
@@ -250,13 +250,14 @@ Instant workspaces run in Cloudflare Containers and do not use repository devcon
 - The task runner reuses only the requesting user's own running or warm nodes (`apps/api/src/durable-objects/task-runner/node-selection.ts`). Creating a workspace on a specific node requires owning that node (`getOwnedNode` in `apps/api/src/routes/workspaces/_helpers.ts`).
 - SAM is self-hosted. A person or an organization runs each installation, and nodes live in a cloud account that belongs to the user, the project or the installation operator (see the Cloud Credential Model above). SAM does not mix unrelated customers on shared hosts.
 - Nodes hold no cloud-account credentials. The provider API token stays in the control plane, GCP VMs are created without a service account (`packages/providers/src/gcp.ts`), and cloud-init blocks containers from reaching the cloud metadata endpoint (`packages/cloud-init/src/template.ts`).
+- **Exception: anonymous trials.** Every trial runs under one shared system account (`TRIAL_ANONYMOUS_USER_ID`), and the trial orchestrator can reuse a running trial node for a later trial (`apps/api/src/durable-objects/trial-orchestrator/steps.ts`). The per-user boundary therefore does not separate one trial visitor from another. Trials stay off unless an operator turns on the `trials:enabled` kill switch (`apps/api/src/services/trial/kill-switch.ts`).
 
-So escaping a devcontainer reaches only the user's own VM, whether the escape comes from repository configuration, user code or an agent. On that VM it can reach the user's other workspaces on the node and the credentials the node holds for them. Opening a repository in SAM trusts its devcontainer the same way opening it in VS Code Dev Containers or GitHub Codespaces does. That repository's code already runs with the user's credentials inside the workspace.
+Outside anonymous trials, escaping a devcontainer reaches only the user's own VM, whether the escape comes from repository configuration, user code or an agent. On that VM it can reach the user's other workspaces on the node and the credentials the node holds for them. Opening a repository in SAM trusts its devcontainer the same way opening it in VS Code Dev Containers or GitHub Codespaces does. That repository's code already runs with the user's credentials inside the workspace.
 
 ### Where security review should focus
 
 - **Control-plane authorization.** Node and workspace callback tokens are each scoped to one node or one workspace, and the Worker checks them (see Callback Tokens above).
-- **Placement.** Nothing may place one user's workspace on another user's node.
+- **Placement.** Nothing may place one user's workspace on another user's node. Anonymous trials share one system account, so trials must not share nodes with each other either.
 - **Credential scoping.** A node must never receive another user's credentials or installation-wide secrets.
 - **App deployments.** Deployment nodes run internet-facing apps unattended and can host several environments belonging to the same user. Their Compose subset denies host-authority fields such as `privileged`, `network_mode` and `use_api_socket` (`DENIED_SERVICE_FIELDS` in `packages/shared/src/compose-parser/constants.ts`).
 
