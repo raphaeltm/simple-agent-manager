@@ -582,7 +582,7 @@ export async function cleanupOnFailure(
 
     if (workspace?.status === 'creating' && !workspace.dispatchedAt) {
       await rc.env.DATABASE.prepare(
-        `UPDATE workspaces SET status = 'stopped', error_message = ?, updated_at = ? WHERE id = ?`
+        `UPDATE workspaces SET status = 'stopped', error_message = ?, updated_at = ? WHERE id = ? AND status != 'deleted'`
       )
         .bind(
           `Task ended before workspace dispatch during ${state.currentStep}`,
@@ -635,7 +635,7 @@ export async function cleanupOnFailure(
     }
 
     await rc.env.DATABASE.prepare(
-      `UPDATE workspaces SET status = 'stopped', updated_at = ? WHERE id = ?`
+      `UPDATE workspaces SET status = 'stopped', updated_at = ? WHERE id = ? AND status != 'deleted'`
     )
       .bind(now, state.stepResults.workspaceId)
       .run();

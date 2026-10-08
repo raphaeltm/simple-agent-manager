@@ -84,6 +84,37 @@ export async function failRecoveryLifecycle(
   // converge. Releasing this claim earlier admits a new wake during old cleanup.
   await options.beforeRelease?.();
   if (!(await ownsRecoveryAttempt(state, rc))) return;
+  if (preserve && state.config.recoveryAttemptId && state.stepResults.workspaceId) {
+    // A failed replacement must relinquish the unique workspace/chat binding
+    // before another wake can allocate its successor. Deleted rows also retain
+    // that unique binding; only the still-owned attempt may release it.
+    await rc.env.DATABASE.prepare(
+      `UPDATE workspaces SET chat_session_id = NULL, updated_at = ?
+       WHERE id = ? AND project_id = ? AND user_id = ? AND chat_session_id = ?
+         AND EXISTS (
+           SELECT 1 FROM session_snapshots snapshot JOIN tasks task
+             ON task.id = snapshot.recovery_task_id
+            WHERE snapshot.project_id = workspaces.project_id
+              AND snapshot.user_id = workspaces.user_id
+              AND snapshot.chat_session_id = workspaces.chat_session_id
+              AND snapshot.recovery_workspace_id = workspaces.id
+              AND snapshot.recovery_task_id = ? AND snapshot.recovery_attempt_id = ?
+              AND snapshot.recovery_status = 'waking'
+              AND task.project_id = workspaces.project_id AND task.user_id = workspaces.user_id
+              AND task.chat_session_id = workspaces.chat_session_id AND task.status = 'sleeping'
+         )`
+    )
+      .bind(
+        new Date().toISOString(),
+        state.stepResults.workspaceId,
+        state.projectId,
+        state.userId,
+        recoverySessionId,
+        state.taskId,
+        state.config.recoveryAttemptId
+      )
+      .run();
+  }
   const { drizzle } = await import('drizzle-orm/d1');
   const schema = await import('../../db/schema');
   const { failSessionSnapshotRecovery } = await import('../../services/session-snapshots');

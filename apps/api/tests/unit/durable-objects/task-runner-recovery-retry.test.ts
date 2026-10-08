@@ -494,6 +494,169 @@ describe('TaskRunner snapshot restore retry deadline', () => {
     expect(vm.restore).not.toHaveBeenCalled();
   });
 
+  it('fences replacement detach when the attempt changes at the D1 mutation boundary', async () => {
+    storedState.config.recoveryAttemptId = 'attempt-1';
+    sqlite.exec(
+      "UPDATE session_snapshots SET recovery_attempt_id = 'attempt-1'; UPDATE workspaces SET chat_session_id = 'chat' WHERE id = 'replacement'"
+    );
+    vm.restore.mockRejectedValueOnce(
+      Object.assign(new Error('Restore refused'), { permanent: true })
+    );
+    const prepare = env.DATABASE.prepare.bind(env.DATABASE);
+    let reachedDetach = false;
+    env.DATABASE.prepare = ((sql: string) => {
+      if (
+        sql.includes('UPDATE workspaces SET chat_session_id = NULL') &&
+        sql.includes('snapshot.recovery_workspace_id = workspaces.id')
+      ) {
+        reachedDetach = true;
+        // Happens AFTER the JS ownership precheck: only the SQL CAS can fence it.
+        sqlite.exec("UPDATE session_snapshots SET recovery_attempt_id = 'new-attempt'");
+        storedState.config.recoveryAttemptId = 'new-attempt';
+        storedState.wakeFailureMessage = undefined;
+      }
+      return prepare(sql);
+    }) as D1Database['prepare'];
+    await expect(runAlarm()).rejects.toThrow('authority was revoked');
+    expect(reachedDetach).toBe(true);
+    expect(
+      sqlite
+        .prepare("SELECT chat_session_id FROM workspaces WHERE id = 'replacement'")
+        .pluck()
+        .get()
+    ).toBe('chat');
+    expect(snapshot()).toMatchObject({ recovery_status: 'waking' });
+    expect(terminalNotice).not.toHaveBeenCalled();
+  });
+
+  it('retries interrupted replacement detach before releasing the wake claim', async () => {
+    storedState.config.recoveryAttemptId = 'attempt-1';
+    sqlite.exec(
+      "UPDATE session_snapshots SET recovery_attempt_id = 'attempt-1'; UPDATE workspaces SET chat_session_id = 'chat' WHERE id = 'replacement'"
+    );
+    vm.restore.mockRejectedValueOnce(
+      Object.assign(new Error('Restore refused'), { permanent: true })
+    );
+    const prepare = env.DATABASE.prepare.bind(env.DATABASE);
+    let interrupted = false;
+    env.DATABASE.prepare = ((sql: string) => {
+      if (
+        !interrupted &&
+        sql.includes('UPDATE workspaces SET chat_session_id = NULL') &&
+        sql.includes('snapshot.recovery_workspace_id = workspaces.id')
+      ) {
+        interrupted = true;
+        throw new Error('detach D1 unavailable');
+      }
+      return prepare(sql);
+    }) as D1Database['prepare'];
+    await expect(runAlarm()).rejects.toThrow('detach D1 unavailable');
+    expect(snapshot()).toMatchObject({ recovery_status: 'waking' });
+    expect(storedState.completed).toBe(false);
+    expect(chat.status).toBe('sleeping');
+    await runAlarm();
+    expect(storedState.completed).toBe(true);
+    expect(snapshot()).toMatchObject({ recovery_status: 'failed' });
+    expect(
+      sqlite
+        .prepare("SELECT chat_session_id FROM workspaces WHERE id = 'replacement'")
+        .pluck()
+        .get()
+    ).toBeNull();
+    expect(vm.restore).toHaveBeenCalledOnce();
+    expect(terminalNotice).not.toHaveBeenCalled();
+  });
+
+  it.each(['stopped', 'deleted'])(
+    'allocates a fresh workspace after a failed wake leaves a %s replacement',
+    async (replacementStatus) => {
+      storedState.config.recoveryAttemptId = 'attempt-1';
+      sqlite.exec(`CREATE UNIQUE INDEX wake_workspace_chat_unique ON workspaces(chat_session_id)
+        WHERE chat_session_id IS NOT NULL;
+        UPDATE session_snapshots SET recovery_attempt_id = 'attempt-1';
+        UPDATE workspaces SET chat_session_id = 'chat' WHERE id = 'replacement'`);
+      // Runtime teardown wins while the restore RPC is still outstanding.
+      vm.restore.mockImplementationOnce(async () => {
+        sqlite
+          .prepare("UPDATE workspaces SET status = ? WHERE id = 'replacement'")
+          .run(replacementStatus);
+        throw Object.assign(new Error('Restore runtime disappeared'), { permanent: true });
+      });
+      await runAlarm();
+      expect
+        .soft(
+          sqlite
+            .prepare("SELECT status, chat_session_id FROM workspaces WHERE id = 'replacement'")
+            .get()
+        )
+        .toEqual({ status: replacementStatus, chat_session_id: null });
+      expect(chat.status).toBe('sleeping');
+      expect(storedState.completed).toBe(true);
+      expect(terminalNotice).not.toHaveBeenCalled();
+
+      sqlite.exec(`UPDATE tasks SET status = 'queued', workspace_id = NULL WHERE id = 'recovery';
+        UPDATE session_snapshots SET recovery_status = 'waking', recovery_attempt_id = 'attempt-2',
+          recovery_workspace_id = NULL, recovery_failed_at = NULL`);
+      const runner = new TaskRunner(rc.ctx, env);
+      await runner.reactivate({
+        taskId: 'recovery',
+        projectId: 'project',
+        userId: 'user',
+        config: {
+          ...storedState.config,
+          recoveryAttemptId: 'attempt-2',
+          repository: 'org/repo',
+          branch: 'main',
+          vmSize: 'small',
+          vmLocation: 'fsn1',
+        },
+      });
+      // Resume at the durable placement checkpoint; workspace allocation, its
+      // unique index, task handoff and the alarm dispatcher are all real.
+      storedState.currentStep = 'workspace_creation';
+      storedState.stepResults.nodeId = 'next-node';
+      sqlite
+        .prepare(
+          `INSERT INTO nodes
+        (id, user_id, name, status, runtime, node_role, node_class, workload_role,
+         observed_provider_instance_vcpu_count, observed_provider_instance_memory_mb,
+         observed_provider_instance_disk_gb, observed_hardware_source, last_heartbeat_at, last_metrics)
+        VALUES ('next-node', 'user', 'Ready placement', 'running', 'vm', 'workspace', 'managed',
+          'workspace', 8, 16384, 240, 'observed', ?, ?)`
+        )
+        .run(
+          new Date().toISOString(),
+          JSON.stringify({
+            version: 1,
+            cpuLoadAvg1: 0.2,
+            memoryPercent: 10,
+            diskPercent: 10,
+            creatingWorkspaces: 0,
+          })
+        );
+      sqlite.exec(
+        "UPDATE nodes SET provider_instance_id = 'provider-next' WHERE id = 'next-node'; INSERT INTO project_members (project_id, user_id, role, status) VALUES ('project', 'user', 'owner', 'active')"
+      );
+      const stub = env.PROJECT_DATA.get(
+        env.PROJECT_DATA.idFromName('project')
+      ) as unknown as Record<string, unknown>;
+      stub.linkSessionToWorkspace = async (_id: string, workspaceId: string) => {
+        chat.workspaceId = workspaceId;
+        return true;
+      };
+      await runAlarm();
+      expect(storedState.wakeFailureMessage).toBeUndefined();
+      expect(storedState.currentStep).toBe('workspace_dispatch');
+      expect(storedState.stepResults.workspaceId).not.toBe('replacement');
+      expect(
+        sqlite.prepare("SELECT id FROM workspaces WHERE chat_session_id = 'chat'").get()
+      ).toEqual({ id: storedState.stepResults.workspaceId });
+      expect(sqlite.prepare("SELECT status FROM tasks WHERE id = 'recovery'").pluck().get()).toBe(
+        'delegated'
+      );
+    }
+  );
+
   it('evaluates fresh placement after reactivating a previously failed wake', async () => {
     storedState.config.recoveryAttemptId = 'attempt-1';
     sqlite.exec("UPDATE session_snapshots SET recovery_attempt_id = 'attempt-1'");
@@ -603,6 +766,7 @@ describe('TaskRunner snapshot restore retry deadline', () => {
       sqlite.exec(
         "UPDATE session_snapshots SET recovery_attempt_id = 'new-attempt'; UPDATE tasks SET status = 'delegated' WHERE id = 'recovery'"
       );
+      sqlite.exec("UPDATE workspaces SET chat_session_id = 'chat' WHERE id = 'replacement'");
       storedState.config.recoveryAttemptId = 'new-attempt';
       storedState.wakeFailureMessage = undefined;
       chat.status = 'active';
@@ -611,6 +775,12 @@ describe('TaskRunner snapshot restore retry deadline', () => {
     };
     await expect(runAlarm()).rejects.toThrow('authority was revoked');
     expect(storedState.config.recoveryAttemptId).toBe('new-attempt');
+    expect(
+      sqlite
+        .prepare("SELECT chat_session_id FROM workspaces WHERE id = 'replacement'")
+        .pluck()
+        .get()
+    ).toBe('chat');
     expect(storedState.completed).toBe(false);
     expect(chat).toMatchObject({ status: 'active', workspaceId: 'new-workspace' });
     expect(vm.stop).not.toHaveBeenCalled();

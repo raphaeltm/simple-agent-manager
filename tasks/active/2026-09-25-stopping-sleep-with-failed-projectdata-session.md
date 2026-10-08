@@ -164,9 +164,54 @@ is a deleted tombstone with runtime-deletion proof; no owned runtime is active. 
 released result=fail, cleaned=yes, with a direct handoff to the expiry follow-up and a request
 to requeue after it. At most two VMs were used. PR #2276 remains closed until the exact gate.
 
-Next probe must verify authenticated runtime access before starting the sequence. Direct
-origin access should resolve the owned VM IP and trust the official Cloudflare Origin CA;
-do not disable certificate validation or alter shared DNS/pools. Keep the source snapshot
-intact: control-plane workspace DELETE deliberately deletes it, so it is unsuitable for
-failure injection. A direct runtime removal during agent-session restoration can exercise
-normal failure handling, followed by the queued prompt's fresh recovery claim.
+The follow-up probe must use the authenticated owner workspace Stop API for a VM
+replacement during its still-waking agent-session phase. Unlike explicit workspace DELETE,
+the VM Stop path preserves an already-sleeping source snapshot and does not cancel its task.
+Do not use the cf-container Stop branch, which intentionally deletes its snapshot. Direct
+node management tokens cannot mutate a workspace without its matching workspace claim;
+that rejection is correct. Direct origin access is also intentionally blocked by the VM's
+Cloudflare-only firewall. Neither boundary should be bypassed for the test.
+
+## Live failure and successor-allocation regression (2026-10-08, lease 127)
+
+Candidate 81329dc9a integrates timing instrumentation main 096afcd8f. Full CI
+37853293761 and deployment 37853287563 passed; Worker version
+286c8ba0-1c0f-4a85-afa2-3784aad317cf served 100%. Core authenticated Playwright
+pages returned 200 with no errors, and screenshots were reviewed.
+
+The owner VM Stop API stopped the actual waking replacement at 22:44:07.381,
+while recovery attempt 01M4ETZ62900JVVFV574RCW3M1 still held its claim. The real
+restore timeout settled at 23:04:58.318: task and ProjectData session sleeping,
+completed/ended timestamps null, available snapshot with identical generation,
+R2 keys, hashes and expiry, and zero failed task-status events. Playwright showed
+the conversation sleeping with a recoverable error. This preservation gate passed.
+
+The next automatic attempt 01M4EW7FQP8MADZBPYFQQM0K2E started at 23:05:30 and
+reached workspace creation, proving the stale failure marker was cleared. It failed
+at 23:06:54 with the workspaces.chat_session_id unique constraint. The failed
+replacement retained its chat binding; the next wake detached only the snapshot's
+original workspace. The unique index includes deleted workspaces too. Separately,
+failure cleanup changed the deleted replacement back to stopped. Both need fixes
+and a regression that crosses the real successor allocation boundary with that
+unique index enabled; the earlier placement-only regression missed this edge.
+
+The fixture was stopped/cancelled and both cx23 nodes deleted by 23:09 (the second
+was autoallocated during a cleanup race). GET /api/nodes returned []; owned
+workspace rows were absent or deleted with null node/chat links. Lease 127 was
+released result=fail, cleaned=yes (channel sequence 136), and the boot peer was
+notified directly. PR #2276 remains closed; no production completion is claimed.
+
+The successor fix now detaches only the failed replacement's unique chat binding,
+after guarded resleep/cleanup and before releasing its recovery claim. One SQL
+statement fences workspace/project/user/chat, snapshot task/attempt/workspace,
+waking status, and sleeping task ownership. Database errors propagate so the real
+alarm retries cleanup; an already-detached row is safe to replay. Both cleanup
+status writes preserve deleted tombstones.
+
+New real-alarm tests reproduced the stopped/deleted replacement UNIQUE failures
+before the fix, then passed real successor workspace allocation after it. A
+controlled SQL-boundary race proves a newer attempt keeps its binding; removing
+only the SQL attempt predicate makes that assertion fail. A one-shot detach D1
+outage proves durable cleanup retry without replaying restore or terminal hooks.
+The final-delta reviewer passed these changes. All 36 alarm tests and 54 surrounding
+state-machine/handoff/recovery tests pass; API typecheck and changed-file ESLint pass.
