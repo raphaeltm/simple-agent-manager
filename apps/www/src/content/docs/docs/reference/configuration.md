@@ -818,13 +818,14 @@ tune how SAM stores and delivers requests internally and rarely need changing; t
 
 ## ACP Protocol (VM Agent)
 
+Task-managed ACP prompts use control-plane inactivity classification and the task absolute ceiling. `ACP_TASK_PROMPT_TIMEOUT` has been removed; legacy values no longer impose a duration-only failure. `ACP_PROMPT_TIMEOUT` applies only to unmanaged workspace sessions.
+
 | Variable                               | Default | Description                                                      |
 | -------------------------------------- | ------- | ---------------------------------------------------------------- |
 | `ACP_MESSAGE_BUFFER_SIZE`              | `5000`  | Buffer size for ACP messages                                     |
 | `ACP_STDERR_BUFFER_BYTES`              | `4096`  | Agent stderr bytes retained for crash reports                    |
 | `ACP_PING_INTERVAL`                    | `30s`   | WebSocket keepalive ping interval                                |
 | `ACP_PONG_TIMEOUT`                     | `10s`   | Pong response timeout                                            |
-| `ACP_TASK_PROMPT_TIMEOUT`              | `8h`    | Task execution prompt timeout                                    |
 | `ACP_PROMPT_RETRY_MAX_RETRIES`         | `2`     | Max transient provider prompt retries after the initial attempt  |
 | `ACP_PROMPT_RETRY_INITIAL_BACKOFF`     | `15s`   | Initial backoff before retrying transient provider prompt errors |
 | `ACP_PROMPT_RETRY_MAX_BACKOFF`         | `2m`    | Max exponential backoff for transient provider prompt retries    |

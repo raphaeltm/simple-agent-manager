@@ -480,7 +480,7 @@ func (h *SessionHost) cancelAutoSuspendTimer() {
 }
 
 func (h *SessionHost) newPromptContext(ctx context.Context) (context.Context, context.CancelFunc, time.Duration) {
-	promptTimeout := h.promptTimeout()
+	promptTimeout := h.PromptTimeout()
 	if promptTimeout > 0 {
 		promptCtx, promptCancel := context.WithTimeout(ctx, promptTimeout)
 		return promptCtx, promptCancel, promptTimeout

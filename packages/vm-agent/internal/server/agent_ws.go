@@ -303,7 +303,7 @@ func (s *Server) getOrCreateSessionHostForRestore(hostKey, workspaceID, sessionI
 	// Disable auto-suspend for both conversation and task mode. Viewer presence
 	// is not the right lifecycle signal — the correct shutdown mechanisms are:
 	// 1. 15-min DO alarm after last agent activity (control-plane side)
-	// 2. 8-hour prompt timeout
+	// 2. Control-plane stall classification and task absolute ceiling
 	// 3. 2-hour workspace idle timeout
 	// 4. Orphan workspace cron sweep
 	// 5. 4-hour max node lifetime
@@ -337,6 +337,7 @@ func (s *Server) getOrCreateSessionHostForRestore(hostKey, workspaceID, sessionI
 		}
 		hasTaskCtx = true
 	}
+	cfg.TaskManaged = hasTaskCtx && strings.TrimSpace(taskCtx.TaskID) != ""
 	if cfg.ProjectID == "" && hasTaskCtx {
 		cfg.ProjectID = strings.TrimSpace(taskCtx.ProjectID)
 	}
