@@ -38,3 +38,6 @@ Single-shot Origin CA issuance originated in a34af0662 (#1413); permanent failur
 Lint13/13, typecheck19/19, build9/9 passed. Focused API71 tests, cloud-init180 tests, deployment forwarding47 tests passed. Recovery/readiness/callback coverage:96.24% lines,88.07% branches. Full root run web4023 tests passed; API run found two expected integration updates (terminal-writer inventory and old generic timeout assertion), both corrected and focused36 tests passed. Full-suite completion still pending; staging is queued behind the shared lease.
 
 Final root rerun passed21/21 tasks; API830files/11653tests passed. All required local validation is green.
+
+## Staging queue checkpoint
+Merged main PR2277 cleanly in3564a6622;79 overlapping boot recovery/preservation/lifecycle-inventory tests passed. Staging claim queued behind NOMEM task01M4DV2PE0ARS834TY69DG3KSF (active claim54); our queued claim uses branchsam/fresh-vms-fail-boot-m06427 and eta45min. Do not deploy until that holder releases. No resources created, no PR yet. Subscriptionee4dcb0e-562d-46e3-968e-f6884a48ae79 remains active. SAM runtime sleep discarded installed dependencies and ignored temporary scripts; recreate staging helpers if needed. Local.do-state.md removed from Git after automated sleep checkpoint tracked it; it must stay local.
