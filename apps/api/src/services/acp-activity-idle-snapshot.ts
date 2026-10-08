@@ -45,11 +45,19 @@ export async function markTerminalContainerWorkEnded(input: {
       })
       .from(schema.workspaces)
       .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
-      .leftJoin(schema.sessionSnapshots, eq(schema.sessionSnapshots.chatSessionId, schema.workspaces.chatSessionId))
+      .leftJoin(
+        schema.sessionSnapshots,
+        eq(schema.sessionSnapshots.chatSessionId, schema.workspaces.chatSessionId)
+      )
       .where(eq(schema.workspaces.id, input.existing.workspaceId))
       .get();
-    if (workspace?.runtime && workspace.chatSessionId && !workspace.sleepingAt &&
-      workspace.sleepStatus !== 'stopping' && workspace.sleepStatus !== 'sleeping') {
+    if (
+      workspace?.runtime &&
+      workspace.chatSessionId &&
+      !workspace.sleepingAt &&
+      workspace.sleepStatus !== 'stopping' &&
+      workspace.sleepStatus !== 'sleeping'
+    ) {
       await input.beforeSideEffect();
       await hibernateAgentSessionOnNode(
         input.existing.nodeId,
@@ -87,4 +95,3 @@ export async function markTerminalContainerWorkEnded(input: {
     );
   }
 }
-

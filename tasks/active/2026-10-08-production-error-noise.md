@@ -13,14 +13,14 @@ Rules: API AGENTS.md; 02 quality, 05 preflight, 13 staging, 14 workflow state, 3
 Coordination: reliability-wave-1008 subscription active. Ownership published. Obey staging lease and migration claims; no staging deploy before all local reviews complete.
 
 ## Implementation checklist
-- [ ] Skip idle capture for sleepingAt or stopping/sleeping snapshot; retain normal idle capture.
-- [ ] Return typed 409 for snapshot teardown/CAS races with HTTP/persistence coverage.
-- [ ] Atomically omit missing workspace FK during legacy task repair; scheduled path repairs and links chats idempotently.
-- [ ] Extract only allowlisted D1 cause codes; persist/log codes without SQL parameters or cause messages.
-- [ ] Persist quarantine reason and attempt count via actual retry/dead-letter path.
-- [ ] Re-read task after DO probe before diagnosing/persisting mismatch; retain true mismatch warning.
+- [x] Skip idle capture for sleepingAt or stopping/sleeping snapshot; retain normal idle capture.
+- [x] Return typed 409 for snapshot teardown/CAS races with HTTP/persistence coverage.
+- [x] Atomically omit missing workspace FK during legacy task repair; scheduled path repairs and links chats idempotently.
+- [x] Extract only allowlisted D1 cause codes; persist/log codes without SQL parameters or cause messages.
+- [x] Persist quarantine reason and attempt count via actual retry/dead-letter path.
+- [x] Re-read task after DO probe before diagnosing/persisting mismatch; retain true mismatch warning.
 - [ ] Run regression discrimination and relevant lint/typecheck/test/build validation.
-- [ ] Complete local specialist reviews and completion validator.
+- [x] Complete local specialist reviews and completion validator.
 - [ ] Acquire staging lease, deploy and verify live behavior; release cleanly.
 - [ ] PR/CI/CodeRabbit request-and-wait, merge, production deployment.
 - [ ] Verify production counts and automatic repair of the 23 historical chats.
@@ -29,3 +29,6 @@ Coordination: reliability-wave-1008 subscription active. Ownership published. Ob
 
 ## Acceptance criteria
 Each fix has a real-path regression that fails on old behavior. Known snapshot races return 409 without persisted 500; normal capture and genuine 500 remain observable. Task repair succeeds with deleted workspace references and preserves existing valid references. Cause diagnostics contain only allowlisted codes and no raw parameters. Quarantine diagnostics retain reason/attempts. Converged tasks produce no mismatch warning; genuine mismatch persists once. Staging passes, PR is reviewed/green/merged, deployment succeeds, and production evidence quantifies noise reduction and historical repair.
+
+## Local review and validation
+Cloudflare/security, test-engineer/task-completion and docs/constitution reviewers all passed; removed their common finding, an unused snapshot join outside the idle path. Root lint 13/13, typecheck 19/19, build 9/9 passed. Full root tests and final callback regression are running. Real Workers route/cron tests passed for prepare conflicts (including both lost CAS races), stale workspace repair, D1 cause persistence/redaction, NodeLifecycle quarantine and task-warning convergence. Optional VM typed-status classification remains open; no VM rollout in this PR.

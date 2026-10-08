@@ -95,7 +95,7 @@ export function serializeError(err: unknown): Record<string, unknown> {
     const causeCode = d1CauseCode(err);
     if (causeCode) result.causeCode = causeCode;
     if (err.cause) {
-      result.cause = err.cause instanceof Error ? REDACTED_MESSAGE : sanitizeString(String(err.cause), false);
+      result.cause = REDACTED_MESSAGE;
     }
     return result;
   }

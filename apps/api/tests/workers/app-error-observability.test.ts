@@ -103,21 +103,31 @@ describe('global app.onError observability persistence', () => {
       const db = drizzle(c.env.DATABASE, { schema });
       try {
         await db.insert(schema.tasks).values({
-          id: crypto.randomUUID(), projectId: 'nonexistent-project', userId: 'nonexistent-user',
-          title: canary, createdBy: 'nonexistent-user',
+          id: crypto.randomUUID(),
+          projectId: 'nonexistent-project',
+          userId: 'nonexistent-user',
+          title: canary,
+          createdBy: 'nonexistent-user',
         });
       } catch (error) {
-        createInstrumentedLogger(c.env.OBSERVABILITY_DATABASE, (p) => pending.push(p), c.env)
-          .error('query_failure', serializeError(error));
+        createInstrumentedLogger(c.env.OBSERVABILITY_DATABASE, (p) => pending.push(p), c.env).error(
+          'query_failure',
+          serializeError(error)
+        );
         throw error;
       }
       return c.json({ unexpected: true });
     });
-    const response = await app.fetch(new Request('https://api.test.example.com/fail'), env, executionContext(pending));
+    const response = await app.fetch(
+      new Request('https://api.test.example.com/fail'),
+      env,
+      executionContext(pending)
+    );
     expect(response.status).toBe(500);
     await Promise.all(pending);
-    const rows = await env.OBSERVABILITY_DATABASE.prepare('SELECT message, stack, context FROM platform_errors')
-      .all<{ message: string; stack: string | null; context: string }>();
+    const rows = await env.OBSERVABILITY_DATABASE.prepare(
+      'SELECT message, stack, context FROM platform_errors'
+    ).all<{ message: string; stack: string | null; context: string }>();
     expect(rows.results).toHaveLength(2);
     for (const row of rows.results) {
       expect(JSON.parse(row.context).causeCode).toMatch(/^SQLITE_CONSTRAINT(?:_FOREIGNKEY)?$/);
@@ -129,16 +139,26 @@ describe('global app.onError observability persistence', () => {
   it.each([
     ['D1_ERROR: D1 DB is overloaded. Requests queued for too long.', 'D1_OVERLOADED'],
     ['D1_ERROR: Network connection lost.', 'D1_NETWORK'],
-    ['D1_ERROR: D1 DB storage operation exceeded timeout which caused object to be reset.', 'D1_TIMEOUT'],
+    [
+      'D1_ERROR: D1 DB storage operation exceeded timeout which caused object to be reset.',
+      'D1_TIMEOUT',
+    ],
     ['unknown-private-cause', undefined],
   ])('stores safe cause classification for %s', async (cause, expectedCode) => {
     const pending: Promise<unknown>[] = [];
-    const app = errorApp(() => new Error('Failed query: select ?\nparams: private-canary', { cause: new Error(cause) }));
-    const response = await app.fetch(new Request('https://api.example.com/api/workspaces/ws/fail'), env, executionContext(pending));
+    const app = errorApp(
+      () => new Error('Failed query: select ?\nparams: private-canary', { cause: new Error(cause) })
+    );
+    const response = await app.fetch(
+      new Request('https://api.example.com/api/workspaces/ws/fail'),
+      env,
+      executionContext(pending)
+    );
     expect(response.status).toBe(500);
     await Promise.all(pending);
-    const row = await env.OBSERVABILITY_DATABASE.prepare('SELECT message, stack, context FROM platform_errors LIMIT 1')
-      .first<{ message: string; stack: string | null; context: string }>();
+    const row = await env.OBSERVABILITY_DATABASE.prepare(
+      'SELECT message, stack, context FROM platform_errors LIMIT 1'
+    ).first<{ message: string; stack: string | null; context: string }>();
     expect(JSON.parse(row!.context).causeCode).toBe(expectedCode);
     expect(row!.stack).toBeNull();
     expect(row!.message).toBe('Failed query: [REDACTED]');

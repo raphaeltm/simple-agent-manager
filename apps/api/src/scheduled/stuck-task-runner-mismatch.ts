@@ -33,7 +33,8 @@ export async function recordTaskRunnerMismatch(
   liveness: TaskRuntimeLiveness | null
 ): Promise<void> {
   const task = await env.DATABASE.prepare('SELECT * FROM tasks WHERE id = ?')
-    .bind(taskId).first<StuckTaskCandidate>();
+    .bind(taskId)
+    .first<StuckTaskCandidate>();
   if (!task || !['queued', 'delegated', 'in_progress'].includes(task.status)) return;
   if (isNormalCompletedTaskRunnerHandoff(task, doStatus)) {
     // `transitionToInProgress` deliberately stores TaskRunner
@@ -60,7 +61,7 @@ export async function recordTaskRunnerMismatch(
       doRetryCount: doStatus.retryCount,
       mismatchKind,
     });
-  
+
     // One durable diagnostic per task is enough. Repeating the same
     // preserved candidate every 30 minutes caused the production noise that
     // hid the real state: normal handoff and resumable/superseded sessions.
@@ -71,7 +72,7 @@ export async function recordTaskRunnerMismatch(
     )
       .bind(task.id, `%${TASK_RUNNER_MISMATCH_RECOVERY_TYPE}%`)
       .first();
-  
+
     if (!existingMismatch) {
       await persistError(
         env.OBSERVABILITY_DATABASE,

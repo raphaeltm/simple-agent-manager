@@ -38,12 +38,12 @@ import {
   persistIntermediateActivity,
 } from './acp-activity-callback-flush';
 import { normalizeAgentActivityErrorMessage } from './acp-activity-error-message';
+import { markTerminalContainerWorkEnded } from './acp-activity-idle-snapshot';
 import { isRetryableForIdempotentDurableObjectOperation } from './durable-object-retry';
 import { type CallbackTokenPayload, verifyCallbackToken } from './jwt';
 import { callbackTokenMatchesNode, callbackTokenMatchesWorkspace } from './node-callback-auth';
 import * as projectDataService from './project-data';
 import { recordAcpActivityCallbackMetric } from './telemetry';
-import { markTerminalContainerWorkEnded } from './acp-activity-idle-snapshot';
 
 function canTransitionAcpSessionToFailed(status: string): boolean {
   const validTargets = (ACP_SESSION_VALID_TRANSITIONS as Record<string, readonly string[]>)[status];
@@ -258,13 +258,10 @@ async function rejectSupersededInstantError(input: {
     .select({
       updatedAt: schema.agentSessions.updatedAt,
       runtime: schema.nodes.runtime,
-        sleepingAt: schema.sessionSnapshots.sleepingAt,
-        sleepStatus: schema.sessionSnapshots.sleepStatus,
     })
     .from(schema.agentSessions)
     .leftJoin(schema.workspaces, eq(schema.workspaces.id, schema.agentSessions.workspaceId))
     .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
-      .leftJoin(schema.sessionSnapshots, eq(schema.sessionSnapshots.chatSessionId, schema.workspaces.chatSessionId))
     .where(eq(schema.agentSessions.id, input.sessionId))
     .get();
   const tokenIssuedAtMs = callbackTokenIssuedAtMs(input.token);
