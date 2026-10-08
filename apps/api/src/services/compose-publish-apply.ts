@@ -504,10 +504,11 @@ export function buildComposePublishApplyPayload(
     }
 
     const service: Record<string, unknown> = { ...rawService };
+    const isProvider = 'provider' in service;
     // Strip denied fields before the provider early return so model services
     // cannot bypass the shared Compose security policy.
     for (const deniedField of Object.keys(DENIED_SERVICE_FIELDS)) {
-      if (deniedField === 'build') continue; // handled for normal services below
+      if (deniedField === 'build' && !isProvider) continue; // normal services replace build below
       if (deniedField in service) {
         const message = DENIED_SERVICE_FIELDS[deniedField];
         if (message === undefined) {
@@ -526,7 +527,7 @@ export function buildComposePublishApplyPayload(
 
     // Provider (Docker Model Runner) services retain their provider-specific
     // configuration. Re-networking or re-labelling breaks the integration.
-    if ('provider' in service) {
+    if (isProvider) {
       hasModelProvider = true;
       outServices[name] = service;
       continue;

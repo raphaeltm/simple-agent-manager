@@ -87,7 +87,7 @@ describe('buildComposePublishApplyPayload', () => {
   it('strips denied fields from provider services without changing provider configuration', () => {
     const composeYaml = CREWAI_COMPOSE.replace(
       '  chat:\n    provider:',
-      '  chat:\n    use_api_socket: true\n    privileged: true\n    provider:'
+      '  chat:\n    build: .\n    use_api_socket: true\n    privileged: true\n    provider:'
     );
     const result = buildComposePublishApplyPayload(makeSubmission({ composeYaml }), OPTS);
     const doc = parseYaml(result.composeYaml) as Record<string, any>;
@@ -99,6 +99,7 @@ describe('buildComposePublishApplyPayload', () => {
       expect.arrayContaining([
         expect.objectContaining({ service: 'chat', field: 'use_api_socket' }),
         expect.objectContaining({ service: 'chat', field: 'privileged' }),
+        expect.objectContaining({ service: 'chat', field: 'build' }),
       ])
     );
   });
