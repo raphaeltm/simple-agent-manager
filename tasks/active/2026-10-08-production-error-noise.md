@@ -19,7 +19,7 @@ Coordination: reliability-wave-1008 subscription active. Ownership published. Ob
 - [x] Extract only allowlisted D1 cause codes; persist/log codes without SQL parameters or cause messages.
 - [x] Persist quarantine reason and attempt count via actual retry/dead-letter path.
 - [x] Re-read task after DO probe before diagnosing/persisting mismatch; retain true mismatch warning.
-- [ ] Run regression discrimination and relevant lint/typecheck/test/build validation.
+- [x] Run regression discrimination and relevant lint/typecheck/test/build validation.
 - [x] Complete local specialist reviews and completion validator.
 - [ ] Acquire staging lease, deploy and verify live behavior; release cleanly.
 - [ ] PR/CI/CodeRabbit request-and-wait, merge, production deployment.
@@ -41,3 +41,5 @@ Candidate sets and existing scheduler limits are unchanged. Task repair keeps it
 Fresh production baseline at 2026-10-08 14:58 UTC: today's API snapshot signature count is 30 (Oct5/6/7 still 21/32/43). Retained the exact 23 taskless IDs locally for postdeploy comparison. Use `instr(message, ...)` for signature counts: an unbounded LIKE hit SQLite's pattern-complexity error on an existing oversized message.
 
 Regression discrimination (2026-10-08 15:03 UTC): in a separate detached checkout, removed idle sleep admission, restored generic prepare errors/stale workspace copying, removed cause/quarantine fields, and restored stale delegated classification. All six test files failed at expected assertions (13 failing cases, three positive controls passing; one repair positive case also saw the unrepaired deleted candidate). Restoring the unchanged feature source made all 16 selected cases pass across all six files. Callback full file 7/7, snapshot/observability/stuck-task rerun 36/36, repair 2/2 and NodeLifecycle full suite passed. Final API typecheck passed. No mutation touched the feature checkout.
+
+Final validation (2026-10-08 15:18 UTC): full root tests21/21 tasks PASS, including API828files/11,620tests and Web336files/4,023tests. Initial five failures were preexisting source-reader paths after helper extraction; updated readers retain every assertion, focused79/79PASS, reviewer deltaPASS, then final full run green. Root lint13/13, typecheck19/19, build9/9 and file-size checkPASS. Playwright Chromium and shared staging helpers launch successfully without contacting staging. Ready for a20–25minute, zero-VM staging lease; expiry task still holds lease43. No deploy or PR yet.
