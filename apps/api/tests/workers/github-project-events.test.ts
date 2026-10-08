@@ -1,4 +1,4 @@
-import { env } from 'cloudflare:test';
+import { env, runInDurableObject } from 'cloudflare:test';
 import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
 
@@ -8,6 +8,7 @@ import { admitGitHubWebhookProjectEvents } from '../../src/services/github-proje
 import { __resetPlatformConfigCacheForTest } from '../../src/services/platform-config';
 import * as projectDataService from '../../src/services/project-data';
 import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
+import type { ProjectDataTestDouble } from './support/expected-error-doubles';
 
 const TEST_PREFIX = `github-project-events-${Date.now()}`;
 const testEnv = env as unknown as Env;
@@ -33,6 +34,14 @@ async function seedProjectGraph(
       .bind(options.githubRepoId, projectId)
       .run();
   }
+  const stub = env.PROJECT_DATA.get(
+    env.PROJECT_DATA.idFromName(projectId)
+  ) as DurableObjectStub<ProjectDataTestDouble>;
+  await runInDurableObject(stub, (instance) => {
+    // Producer tests inspect admitted records, not background delivery/retention.
+    // Keep earlier fixtures' alarm ticks out of later admission assertions.
+    instance.alarm = async () => {};
+  });
   return { userId, projectId };
 }
 
