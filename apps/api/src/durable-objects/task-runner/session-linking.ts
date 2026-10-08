@@ -87,6 +87,16 @@ export async function ensureSessionLinked(
 
   try {
     const projectDataService = await import('../../services/project-data');
+    if (state.config.resumeSnapshotChatSessionId) {
+      await rc.assertRecoveryAuthority(state);
+      await projectDataService.repairFailedSessionForSnapshotRecovery(
+        rc.env,
+        state.projectId,
+        chatSessionId,
+        workspaceId,
+        state.taskId
+      );
+    }
     await projectDataService.linkSessionToWorkspace(
       rc.env,
       state.projectId,
@@ -122,13 +132,18 @@ export async function ensureSessionLinked(
       workspaceId,
       error: err instanceof Error ? err.message : String(err),
     });
-    if (state.config.startGuard?.kind === 'reserved_submission') {
+    if (
+      state.config.resumeSnapshotChatSessionId ||
+      state.config.startGuard?.kind === 'reserved_submission'
+    ) {
       const guardedLinkError = new Error(
         `Failed to link reserved ProjectData session ${chatSessionId} to workspace ${workspaceId}: ${
           err instanceof Error ? err.message : String(err)
         }`
       );
-      (guardedLinkError as Error & { permanent: boolean }).permanent = true;
+      (guardedLinkError as Error & { permanent: boolean }).permanent =
+        state.config.startGuard?.kind === 'reserved_submission' ||
+        (err instanceof Error && err.message.includes('SESSION_LINK_STATUS_REFUSED'));
       throw guardedLinkError;
     }
   }

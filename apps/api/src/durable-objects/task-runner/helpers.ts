@@ -57,6 +57,9 @@ export function isTransientError(err: unknown): boolean {
 
   const msg = err.message.toLowerCase();
 
+  // RPC serialization may discard custom Error fields; the domain code survives.
+  if (msg.includes('session_link_status_refused')) return false;
+
   if (isTransientDurableObjectError(err)) {
     return true;
   }

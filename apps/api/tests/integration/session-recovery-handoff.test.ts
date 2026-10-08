@@ -27,9 +27,14 @@ vi.mock('../../src/middleware/auth', () => ({
   getUserId: getUserIdMock,
 }));
 vi.mock('../../src/services/workspace-cleanup', () => ({
-  cleanupWorkspaceForDeletion: vi.fn(async () => ({ status: 'retry', reason: 'runtime_deletion_unconfirmed' })),
+  cleanupWorkspaceForDeletion: vi.fn(async () => ({
+    status: 'retry',
+    reason: 'runtime_deletion_unconfirmed',
+  })),
 }));
-vi.mock('../../src/services/project-data', () => ({ recordActivityEvent: vi.fn(async () => undefined) }));
+vi.mock('../../src/services/project-data', () => ({
+  recordActivityEvent: vi.fn(async () => undefined),
+}));
 vi.mock('../../src/services/project-lifecycle-events', () => ({
   recordTaskLifecycleEventBestEffort: vi.fn(async () => undefined),
   isLifecycleTaskStatus: () => true,
@@ -37,15 +42,22 @@ vi.mock('../../src/services/project-lifecycle-events', () => ({
 
 async function archive(database: D1Database) {
   const app = new Hono<{ Bindings: Env }>();
-  app.onError((error, c) => error instanceof AppError
-    ? c.json(error.toJSON(), error.statusCode as never)
-    : c.json({ error: error.message }, 500));
+  app.onError((error, c) =>
+    error instanceof AppError
+      ? c.json(error.toJSON(), error.statusCode as never)
+      : c.json({ error: error.message }, 500)
+  );
   app.route('/api/projects/:projectId/tasks', crudRoutes);
-  return app.fetch(new Request('https://api.test/api/projects/project-1/tasks/task-1/close', {
-    method: 'POST',
-  }), { DATABASE: database } as Env, {
-    waitUntil: vi.fn(), passThroughOnException: vi.fn(),
-  } as unknown as ExecutionContext);
+  return app.fetch(
+    new Request('https://api.test/api/projects/project-1/tasks/task-1/close', {
+      method: 'POST',
+    }),
+    { DATABASE: database } as Env,
+    {
+      waitUntil: vi.fn(),
+      passThroughOnException: vi.fn(),
+    } as unknown as ExecutionContext
+  );
 }
 
 function seedStableRecoveryFixture(sqlite: Database.Database): void {
@@ -274,7 +286,9 @@ describe('session recovery stable task identity', () => {
       const database = createSqliteD1(sqlite);
       expect((await archive(database)).status).toBe(500);
       expect(taskRow(sqlite)).toMatchObject({ status: 'sleeping', workspace_id: 'workspace-1' });
-      expect(sqlite.prepare('SELECT sleeping_at FROM session_snapshots').pluck().get()).toBeTruthy();
+      expect(
+        sqlite.prepare('SELECT sleeping_at FROM session_snapshots').pluck().get()
+      ).toBeTruthy();
       expect(sqlite.prepare('SELECT COUNT(*) FROM task_status_events').pluck().get()).toBe(0);
       expect(startTaskRunnerDOMock).not.toHaveBeenCalled();
     } finally {
@@ -283,8 +297,10 @@ describe('session recovery stable task identity', () => {
   });
 
   it.each([
-    ['archive-first', 'user-1'], ['claim-first', 'user-1'],
-    ['archive-first', 'member-1'], ['claim-first', 'member-1'],
+    ['archive-first', 'user-1'],
+    ['claim-first', 'user-1'],
+    ['archive-first', 'member-1'],
+    ['claim-first', 'member-1'],
   ])('destructive archive fences human recovery (%s, caller %s)', async (ordering, caller) => {
     const sqlite = new Database(':memory:');
     try {
@@ -301,18 +317,35 @@ describe('session recovery stable task identity', () => {
         const batch = database.batch.bind(database);
         vi.spyOn(database, 'batch').mockImplementationOnce(async (statements) => {
           // Recovery claimed the snapshot, but has not yet queued the task.
-          expect(sqlite.prepare('SELECT recovery_status FROM session_snapshots').pluck().get()).toBe('waking');
+          expect(
+            sqlite.prepare('SELECT recovery_status FROM session_snapshots').pluck().get()
+          ).toBe('waking');
           expect((await archive(database)).status).toBe(caller === 'user-1' ? 409 : 200);
           return batch(statements);
         });
       }
-      await expect(ensureSessionRecovery({ DATABASE: database } as Env, 'project-1', 'chat-1'))
-        .resolves.toMatchObject({ status: 'unavailable' });
+      await expect(
+        ensureSessionRecovery({ DATABASE: database } as Env, 'project-1', 'chat-1')
+      ).resolves.toMatchObject({ status: 'unavailable' });
       expect(taskRow(sqlite)).toMatchObject({ status: 'completed', workspace_id: 'workspace-1' });
       expect(sqlite.prepare('SELECT chat_session_id FROM workspaces').pluck().get()).toBe('chat-1');
-      expect(sqlite.prepare('SELECT sleeping_at, recovery_attempt_id, manifest_r2_key FROM session_snapshots').get())
-        .toMatchObject({ sleeping_at: null, recovery_attempt_id: null, manifest_r2_key: 'snapshots/chat-1/generation-final/manifest.json' });
-      expect(sqlite.prepare("SELECT COUNT(*) FROM task_status_events WHERE to_status = 'queued'").pluck().get()).toBe(0);
+      expect(
+        sqlite
+          .prepare(
+            'SELECT sleeping_at, recovery_attempt_id, manifest_r2_key FROM session_snapshots'
+          )
+          .get()
+      ).toMatchObject({
+        sleeping_at: null,
+        recovery_attempt_id: null,
+        manifest_r2_key: 'snapshots/chat-1/generation-final/manifest.json',
+      });
+      expect(
+        sqlite
+          .prepare("SELECT COUNT(*) FROM task_status_events WHERE to_status = 'queued'")
+          .pluck()
+          .get()
+      ).toBe(0);
       expect(startTaskRunnerDOMock).not.toHaveBeenCalled();
     } finally {
       sqlite.close();
@@ -349,6 +382,15 @@ describe('session recovery stable task identity', () => {
           .prepare("SELECT recovery_status FROM session_snapshots WHERE id = 'snapshot-1'")
           .get()
       ).toEqual({ recovery_status: 'failed' });
+      expect(taskRow(sqlite)).toMatchObject({ status: 'sleeping' });
+      expect(
+        sqlite.prepare("SELECT completed_at FROM tasks WHERE id = 'task-1'").pluck().get()
+      ).toBeNull();
+      await expect(wake(createSqliteD1(sqlite))).resolves.toMatchObject({
+        status: 'waking',
+        taskId: 'task-1',
+      });
+      expect(taskRow(sqlite)).toMatchObject({ status: 'queued' });
     } finally {
       sqlite.close();
     }

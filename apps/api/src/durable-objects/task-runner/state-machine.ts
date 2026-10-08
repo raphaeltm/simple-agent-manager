@@ -7,10 +7,7 @@
 import { log } from '../../lib/logger';
 import { persistError, redactSensitiveData } from '../../services/observability';
 import { recordTaskLifecycleEventBestEffort } from '../../services/project-lifecycle-events';
-import {
-  isSessionRecoveryAttemptCurrent,
-  restoreSessionRecoveryHandoff,
-} from '../../services/session-recovery-authority';
+import { returnFailedWakeToSleep } from '../../services/session-recovery-failure';
 import { taskStatusIsNonTerminalSql, TERMINAL_STATUS_VALUES } from '../../services/task-status';
 import {
   createProjectEventTaskTerminalTransitionHook,
@@ -21,6 +18,7 @@ import { syncTriggerExecutionStatus } from '../../services/trigger-execution-syn
 import { cancelVmTaskAdmission, wakeVmAdmissionWaiters } from '../../services/vm-admission-control';
 import { finalizeWorkspaceLifecycleClosure } from '../../services/workspace-lifecycle-finalizer';
 import { releaseClaimedWarmNode } from './node-selection';
+import { failRecoveryLifecycle, ownsRecoveryAttempt } from './recovery-failure-cleanup';
 import {
   canMutateProjectDataFailureSession,
   projectDataGuardForReservedSubmission,
@@ -256,26 +254,6 @@ export async function transitionToInProgress(
 /**
  * Fail the task, clean up resources, record error, mark DO as complete.
  */
-async function ownsRecoveryAttempt(
-  state: TaskRunnerState,
-  rc: TaskRunnerContext
-): Promise<boolean> {
-  const persisted = await rc.ctx.storage.get?.<TaskRunnerState>('state');
-  if (
-    persisted &&
-    (persisted.config.recoveryAttemptId ?? null) !== (state.config.recoveryAttemptId ?? null)
-  )
-    return false;
-  return (
-    !state.config.recoveryAttemptId ||
-    isSessionRecoveryAttemptCurrent(rc.env.DATABASE, {
-      taskId: state.taskId,
-      projectId: state.projectId,
-      chatSessionId: state.config.resumeSnapshotChatSessionId ?? state.config.chatSessionId ?? '',
-      recoveryAttemptId: state.config.recoveryAttemptId,
-    })
-  );
-}
 
 export async function failTask(
   state: TaskRunnerState,
@@ -285,13 +263,14 @@ export async function failTask(
   const ownsClaim = () => ownsRecoveryAttempt(state, rc);
   if (!(await ownsClaim())) return;
   const now = new Date().toISOString();
-
-  log.error('task_runner_do.task_failed', {
-    taskId: state.taskId,
-    step: state.currentStep,
-    errorMessage,
-    totalDurationMs: Date.now() - state.createdAt,
-  });
+  if (
+    state.config.recoveryAttemptId &&
+    state.config.resumeSnapshotChatSessionId &&
+    state.wakeFailureMessage === undefined
+  ) {
+    state.wakeFailureMessage = errorMessage;
+    await rc.ctx.storage.put('state', state);
+  }
 
   // Check current status before failing (idempotent)
   const task = await rc.env.DATABASE.prepare(
@@ -316,6 +295,49 @@ export async function failTask(
     await rc.ctx.storage.put('state', state);
     return;
   }
+
+  if (
+    state.config.resumeSnapshotChatSessionId &&
+    state.config.recoveryAttemptId &&
+    (await returnFailedWakeToSleep(rc.env.DATABASE, {
+      taskId: state.taskId,
+      projectId: state.projectId,
+      chatSessionId: state.config.resumeSnapshotChatSessionId,
+      recoveryAttemptId: state.config.recoveryAttemptId,
+      errorMessage,
+    }))
+  ) {
+    await failRecoveryLifecycle(state, errorMessage, rc, {
+      preserveSession: true,
+      beforeRelease: async () => {
+        if (state.stepResults.mcpToken) {
+          const { revokeMcpToken } = await import('../../services/mcp-token');
+          await revokeMcpToken(rc.env.KV, state.stepResults.mcpToken);
+          state.stepResults.mcpToken = null;
+        }
+        await recoverReservedWorkspaceAllocationForCleanup(state, rc);
+        await cleanupOnFailure(state, rc, 'task_failed', true);
+      },
+    });
+    rc.ctx.waitUntil(
+      notifyWakeSettled({
+        env: rc.env,
+        projectId: state.projectId,
+        chatSessionId: state.config.resumeSnapshotChatSessionId,
+        status: 'failed',
+      })
+    );
+    state.completed = true;
+    await rc.ctx.storage.put('state', state);
+    return;
+  }
+
+  log.error('task_runner_do.task_failed', {
+    taskId: state.taskId,
+    step: state.currentStep,
+    errorMessage,
+    totalDurationMs: Date.now() - state.createdAt,
+  });
 
   // Fail the task. The status predicate makes this idempotent against a
   // concurrent terminal transition that lands between the check above and this
@@ -495,48 +517,6 @@ export async function failTask(
   await rc.ctx.storage.put('state', state);
 }
 
-async function failRecoveryLifecycle(
-  state: TaskRunnerState,
-  errorMessage: string,
-  rc: TaskRunnerContext
-): Promise<void> {
-  const recoverySessionId = state.config.resumeSnapshotChatSessionId;
-  if (!recoverySessionId || !(await ownsRecoveryAttempt(state, rc))) return;
-
-  // Ownership restoration is a correctness boundary, not best-effort cleanup:
-  // if D1 is temporarily unavailable, let the DO alarm retry instead of
-  // completing with a terminal replacement still owning the durable chat.
-  if (!state.config.recoveryAttemptId) {
-    await restoreSessionRecoveryHandoff(rc.env.DATABASE, state.taskId, recoverySessionId);
-  }
-  const { drizzle } = await import('drizzle-orm/d1');
-  const schema = await import('../../db/schema');
-  const { failSessionSnapshotRecovery } = await import('../../services/session-snapshots');
-  await failSessionSnapshotRecovery(
-    drizzle(rc.env.DATABASE, { schema }),
-    rc.env,
-    recoverySessionId,
-    state.taskId,
-    errorMessage,
-    state.config.recoveryAttemptId ?? undefined
-  );
-
-  // The failed task owns only the replacement runtime. Preserve the original
-  // conversation as sleeping so another bounded wake attempt can reuse the
-  // verified snapshot. This also compensates if ProjectData accepted the wake
-  // immediately before a later D1 recovery-commit failure.
-  try {
-    const { sleepSession } = await import('../../services/project-data');
-    await sleepSession(rc.env, state.projectId, recoverySessionId);
-  } catch (chatErr) {
-    log.warn('task_runner_do.session_recovery_resleep_failed', {
-      taskId: state.taskId,
-      sessionId: recoverySessionId,
-      error: chatErr instanceof Error ? chatErr.message : String(chatErr),
-    });
-  }
-}
-
 // =========================================================================
 // Cleanup
 // =========================================================================
@@ -547,7 +527,8 @@ async function failRecoveryLifecycle(
 export async function cleanupOnFailure(
   state: TaskRunnerState,
   rc: TaskRunnerContext,
-  admissionCancelReason: 'task_failed' | 'cancelled' = 'task_failed'
+  admissionCancelReason: 'task_failed' | 'cancelled' = 'task_failed',
+  preserveRecoverySession = false
 ): Promise<void> {
   if (!(await ownsRecoveryAttempt(state, rc))) return;
   const now = new Date().toISOString();
@@ -665,6 +646,9 @@ export async function cleanupOnFailure(
           state.workspaceErrorMessage ?? `Task failed during ${state.currentStep} cleanup`,
         nowIso: now,
         reason: 'task_runner_do_cleanup_on_failure',
+        // The owned wake is being re-slept before releasing its claim. Its retry
+        // budget may be at the limit until the clean failure is recorded below.
+        ...(preserveRecoverySession ? { stopProjectSessions: false } : {}),
       });
     } catch (err) {
       log.error('task_runner_do.cleanup.lifecycle_finalizer_failed', {

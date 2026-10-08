@@ -793,7 +793,7 @@ describe('handleAgentSession', () => {
     const { rc } = makeContext();
 
     await expect(handleAgentSession(state, rc)).rejects.toThrow(
-      'Strict session restore succeeded but lifecycle recovery commit failed'
+      'Strict session restore succeeded but lifecycle recovery commit refused'
     );
 
     expect(completeSessionSnapshotRecoveryMock).not.toHaveBeenCalled();

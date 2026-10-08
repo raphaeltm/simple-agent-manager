@@ -643,11 +643,12 @@ export async function stopSession(
 export async function sleepSession(
   env: Env,
   projectId: string,
-  sessionId: string
+  sessionId: string,
+  options?: import('../durable-objects/project-data/sessions').SleepSessionOptions
 ): Promise<boolean> {
   await assertExactWriteAllowedIfArchiveEnabled(env, projectId, sessionId, 'sleepSession');
   const stub = await getStub(env, projectId);
-  const sleeping = await stub.sleepSession(sessionId);
+  const sleeping = await stub.sleepSession(sessionId, options);
   if (sleeping) {
     await recordSessionLifecycleEventBestEffort(env, {
       projectId,
@@ -685,6 +686,41 @@ export async function wakeSession(
     });
   }
   return woke;
+}
+
+/** Heal a legacy failed mirror only when the exact replacement owns a saved wake. */
+export async function repairFailedSessionForSnapshotRecovery(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  workspaceId: string,
+  taskId: string
+): Promise<void> {
+  await assertExactWriteAllowedIfArchiveEnabled(
+    env,
+    projectId,
+    sessionId,
+    'repairFailedSessionForSnapshotRecovery'
+  );
+  if (
+    !(await hasAuthorizedRestorableSnapshotWakeClaim(env.DATABASE, {
+      projectId,
+      chatSessionId: sessionId,
+      workspaceId,
+      taskId,
+    }))
+  )
+    return;
+  const stub = await getStub(env, projectId);
+  const session = (await stub.getSession(sessionId)) as Record<string, unknown> | null;
+  if (sessionStatus(session) !== 'failed' || session?.taskId !== taskId) return;
+  await stub.sleepSession(sessionId, {
+    failedOnly: true,
+    guard: {
+      taskId,
+      workspaceId: typeof session.workspaceId === 'string' ? session.workspaceId : null,
+    },
+  });
 }
 
 export async function wakeSessionForSnapshotRecovery(

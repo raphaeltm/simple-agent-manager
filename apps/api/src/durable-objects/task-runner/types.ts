@@ -165,6 +165,8 @@ export interface TaskRunnerState {
   workspaceReadyReceived: boolean;
   workspaceReadyStatus: 'running' | 'recovery' | 'error' | null;
   workspaceErrorMessage: string | null;
+  /** Durable cleanup intent: resume failure cleanup, never replay provisioning. */
+  wakeFailureMessage?: string;
   createdAt: number;
   lastStepAt: number;
   /** Set when we started waiting for node provisioning — used for timeout detection */

@@ -23,6 +23,7 @@ import {
   evictionRecoveryFenceMatches,
   type SessionRecoveryOptions,
 } from './session-recovery-eviction';
+import { returnFailedWakeToSleep } from './session-recovery-failure';
 import {
   recordSessionRecoveryRefusal,
   type SessionRecoveryResult,
@@ -351,6 +352,13 @@ export async function ensureSessionRecovery(
       return { status: 'waking', taskId: claimedTaskId };
     }
     const failure = sessionLifecycleError(env, `Session recovery failed: ${message}`);
+    await returnFailedWakeToSleep(env.DATABASE, {
+      taskId: claimedTaskId,
+      projectId,
+      chatSessionId,
+      recoveryAttemptId,
+      errorMessage: failure,
+    });
     await failSessionSnapshotRecovery(
       db,
       env,

@@ -68,6 +68,28 @@ describe('findRestorableOrInFlightSleepSnapshot', () => {
     sqlite.close();
   });
 
+  it('preserves a clean failed wake through cooldown but never beyond snapshot expiry', async () => {
+    seedFailedSleep({ attempts: 0, status: 'available' });
+    sqlite
+      .prepare(
+        `UPDATE session_snapshots SET sleep_status = 'sleeping', sleeping_at = ?,
+      recovery_status = 'failed', recovery_failed_at = ?, recovery_attempts = 99,
+      recovery_workspace_id = 'replacement'`
+      )
+      .run(NOW.toISOString(), NOW.toISOString());
+    expect(await find()).not.toBeNull();
+    expect(
+      await findRestorableOrInFlightSleepSnapshot(database, {} as Env, {
+        projectId: 'project-1',
+        chatSessionId: 'chat-1',
+        workspaceId: 'replacement',
+        now: NOW,
+      })
+    ).not.toBeNull();
+    sqlite.prepare('UPDATE session_snapshots SET expires_at = ?').run(NOW.toISOString());
+    expect(await find()).toBeNull();
+  });
+
   it('keeps a failed sleep in flight while the sweep still has sleep attempts left', async () => {
     // Five failed attempts: past the wake budget (3), inside the sleep budget (9).
     // The sweep retries this row, so every reaper that reads this predicate must

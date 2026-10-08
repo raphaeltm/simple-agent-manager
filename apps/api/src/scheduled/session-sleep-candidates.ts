@@ -2,12 +2,13 @@
  * Candidate selection for the session-sleep sweep (`runSessionSleepSweep`). Split out
  * of `session-sleep.ts` (`.claude/rules/18-file-size-limits.md`).
  */
-import { and, eq, inArray, isNull, lt, lte, or } from 'drizzle-orm';
+import { and, eq, gt, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
+import { sessionSleepInFlightMaxAgeMs } from '../services/session-snapshot-sleep-predicate';
 import { DEFAULT_SESSION_SLEEP_CLAIM_LEASE_MS } from '../services/session-snapshots';
 
 function claimLeaseCutoff(env: Env, now: Date): string {
@@ -78,6 +79,11 @@ export function selectSweepCandidates(
           ),
           and(
             eq(snapshots.sleepStatus, 'stopping'),
+            // Past this immutable age, lifecycle repair owns convergence.
+            gt(
+              sql`COALESCE(${snapshots.sleepStoppingSince}, ${snapshots.sleepClaimedAt}, ${snapshots.updatedAt}, ${snapshots.createdAt})`,
+              new Date(now.getTime() - sessionSleepInFlightMaxAgeMs(env)).toISOString()
+            ),
             or(
               lte(snapshots.sleepAfter, nowIso),
               isNull(snapshots.sleepClaimedAt),

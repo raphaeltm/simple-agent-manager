@@ -19,8 +19,9 @@ import { describe, expect, it } from 'vitest';
 
 const SOURCE_ROOT = join(process.cwd(), 'src');
 
-/** Both spellings a writer can use: raw SQL and the drizzle object form. */
-const FAILED_STATUS_WRITE = /recovery_status\s*=\s*'failed'|recoveryStatus:\s*'failed'/;
+/** Assignment forms only: a qualified WHERE predicate is a reader, not a writer. */
+const FAILED_STATUS_WRITE =
+  /(?:SET|,)\s+recovery_status\s*=\s*'failed'|recoveryStatus:\s*'failed'/;
 const ANCHOR_WRITE = /recovery_failed_at\s*=\s*\?|recoveryFailedAt:/;
 
 function sourceFiles(directory: string): string[] {

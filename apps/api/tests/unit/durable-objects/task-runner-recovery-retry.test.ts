@@ -4,8 +4,14 @@ import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
+import {
+  linkSessionToWorkspace,
+  sleepSession,
+} from '../../../src/durable-objects/project-data/sessions';
 import { TaskRunner } from '../../../src/durable-objects/task-runner';
 import { handleAgentSession } from '../../../src/durable-objects/task-runner/agent-session-step';
+import { isTransientError } from '../../../src/durable-objects/task-runner/helpers';
+import { ensureSessionLinked } from '../../../src/durable-objects/task-runner/session-linking';
 import { failTask } from '../../../src/durable-objects/task-runner/state-machine';
 import type {
   TaskRunnerContext,
@@ -19,6 +25,7 @@ import {
   SessionRecoveryAuthorityRevokedError,
 } from '../../../src/services/session-recovery-authority';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
+import { createSqlStorage } from './sql-storage-test-utils';
 
 vi.mock('cloudflare:workers', () => ({
   DurableObject: class {
@@ -45,6 +52,9 @@ let background: Promise<unknown>[];
 let tokens: Map<string, string>;
 let chat: { id: string; status: string; workspaceId: string; taskId: string };
 let wake: ReturnType<typeof vi.fn>;
+let terminalNotice: ReturnType<typeof vi.fn>;
+let failChat: ReturnType<typeof vi.fn>;
+let resleep: ReturnType<typeof vi.fn>;
 
 function state(sourceTaskId: string | null = null): TaskRunnerState {
   return {
@@ -137,14 +147,20 @@ beforeEach(() => {
     chat = { ...chat, status: 'active', workspaceId, taskId };
     return true;
   });
+  terminalNotice = vi.fn(async () => undefined);
+  failChat = vi.fn(async () => {
+    chat.status = 'failed';
+    return true;
+  });
+  resleep = vi.fn(async () => {
+    chat.status = 'sleeping';
+    return true;
+  });
   const projectData = {
     ensureProjectId: vi.fn(async () => undefined),
     getSession: vi.fn(async () => ({ ...chat })),
     wakeSession: wake,
-    sleepSession: vi.fn(async () => {
-      chat.status = 'sleeping';
-      return true;
-    }),
+    sleepSession: resleep,
     getAcpSession: vi.fn(async (id: string) => acp.get(id) ?? null),
     createAcpSession: vi.fn(async (input: { id: string; chatSessionId: string }) => {
       const session = { ...input, status: 'pending' };
@@ -161,6 +177,9 @@ beforeEach(() => {
     admitProjectEvent: vi.fn(async () => ({ status: 'admitted', eventId: 'event' })),
     publishSessionWakeProgress: vi.fn(async () => undefined),
     notifyTaskTerminal: vi.fn(async () => undefined),
+    reconcileTaskWaits: terminalNotice,
+    failSession: failChat,
+    cleanupWorkspaceActivity: vi.fn(async () => undefined),
   };
   env = {
     BASE_DOMAIN: 'example.test',
@@ -192,6 +211,7 @@ beforeEach(() => {
           callback(rc.ctx.storage as unknown as DurableObjectTransaction),
         get: async () => structuredClone(storedState),
         setAlarm: vi.fn(async () => undefined),
+        deleteAlarm: vi.fn(async () => undefined),
         put: async (_key: string, value: TaskRunnerState) => {
           storedState = structuredClone(value);
         },
@@ -421,6 +441,59 @@ describe('TaskRunner snapshot restore retry deadline', () => {
     env.TASK_RUNNER_STEP_MAX_RETRIES = '3';
   });
 
+  it.each([true, false])(
+    'alarm failure preserves only a restorable stable wake (restorable=%s)',
+    async (restorable) => {
+      storedState.config.recoveryAttemptId = 'attempt-1';
+      sqlite.exec(`UPDATE session_snapshots SET recovery_attempt_id = 'attempt-1';
+      UPDATE workspaces SET chat_session_id = 'chat' WHERE id = 'replacement';
+      INSERT INTO tasks (id, project_id, user_id, title, status)
+        VALUES ('parent', 'project', 'user', 'Parent', 'in_progress');
+      UPDATE tasks SET parent_task_id = 'parent' WHERE id = 'recovery'`);
+      if (!restorable) sqlite.exec("UPDATE session_snapshots SET status = 'failed'");
+      vm.restore.mockRejectedValueOnce(
+        Object.assign(new Error('Restore refused'), { permanent: true })
+      );
+      await runAlarm();
+      expect(storedState.completed).toBe(true);
+      expect(sqlite.prepare("SELECT status FROM tasks WHERE id = 'recovery'").pluck().get()).toBe(
+        restorable ? 'sleeping' : 'failed'
+      );
+      expect(chat.status).toBe(restorable ? 'sleeping' : 'failed');
+      expect(terminalNotice).toHaveBeenCalledTimes(restorable ? 0 : 1);
+      expect(vm.stop).toHaveBeenCalledOnce();
+      expect(snapshot()).toMatchObject({
+        recovery_status: 'failed',
+        recovery_failed_at: expect.any(String),
+      });
+      if (restorable) expect(failChat).not.toHaveBeenCalled();
+      await runAlarm();
+      expect(vm.stop).toHaveBeenCalledOnce();
+    }
+  );
+
+  it('resleeps a failed original mirror when replacement allocation fails before linking', async () => {
+    storedState.config.recoveryAttemptId = 'attempt-1';
+    storedState.wakeFailureMessage = 'Replacement allocation failed before linking';
+    sqlite.exec("UPDATE session_snapshots SET recovery_attempt_id = 'attempt-1'");
+    chat = { ...chat, status: 'failed', taskId: 'recovery', workspaceId: 'original' };
+    resleep.mockImplementationOnce(async (_id, options) => {
+      expect(options).toMatchObject({
+        failedOnly: true,
+        guard: { taskId: 'recovery', workspaceId: 'original' },
+      });
+      chat.status = 'sleeping';
+      return true;
+    });
+    await runAlarm();
+    expect(storedState.completed).toBe(true);
+    expect(chat.status).toBe('sleeping');
+    expect(snapshot()).toMatchObject({ recovery_status: 'failed' });
+    expect(terminalNotice).not.toHaveBeenCalled();
+    expect(vm.stop).toHaveBeenCalledOnce();
+    expect(vm.restore).not.toHaveBeenCalled();
+  });
+
   it('keeps an accepted restore live across four 524s and restarts, then commits the same conversation', async () => {
     let deadline: number | null | undefined;
     vm.restore.mockImplementation(async () => {
@@ -458,6 +531,178 @@ describe('TaskRunner snapshot restore retry deadline', () => {
     expect(chat.status).toBe('active');
     expect(vm.restore).toHaveBeenCalledTimes(5);
     expect(vm.start).not.toHaveBeenCalled();
+  });
+
+  it('retries a rejected resleep without releasing the claim or abandoning cleanup', async () => {
+    storedState.config.recoveryAttemptId = 'attempt-1';
+    sqlite.exec("UPDATE session_snapshots SET recovery_attempt_id = 'attempt-1'");
+    chat = { ...chat, status: 'active', taskId: 'recovery', workspaceId: 'replacement' };
+    vm.restore.mockRejectedValueOnce(
+      Object.assign(new Error('Restore refused'), { permanent: true })
+    );
+    resleep.mockRejectedValueOnce(new Error('ProjectData temporarily unavailable'));
+    await expect(runAlarm()).rejects.toThrow('ProjectData temporarily unavailable');
+    expect(snapshot()).toMatchObject({ recovery_status: 'waking' });
+    expect(storedState.completed).toBe(false);
+    expect(vm.stop).not.toHaveBeenCalled();
+    await runAlarm();
+    expect(chat.status).toBe('sleeping');
+    expect(storedState.completed).toBe(true);
+    expect(snapshot()).toMatchObject({ recovery_status: 'failed' });
+    expect(vm.stop).toHaveBeenCalledOnce();
+    expect(vm.restore).toHaveBeenCalledOnce();
+  });
+
+  it('does not overwrite a newer wake that supersedes cleanup at an awaited boundary', async () => {
+    storedState.config.recoveryAttemptId = 'attempt-1';
+    sqlite.exec("UPDATE session_snapshots SET recovery_attempt_id = 'attempt-1'");
+    vm.restore.mockRejectedValueOnce(
+      Object.assign(new Error('Restore refused'), { permanent: true })
+    );
+    const deleteToken = env.KV.delete;
+    env.KV.delete = async (key: string) => {
+      expect(snapshot()).toMatchObject({ recovery_status: 'waking' });
+      sqlite.exec(
+        "UPDATE session_snapshots SET recovery_attempt_id = 'new-attempt'; UPDATE tasks SET status = 'delegated' WHERE id = 'recovery'"
+      );
+      storedState.config.recoveryAttemptId = 'new-attempt';
+      storedState.wakeFailureMessage = undefined;
+      chat.status = 'active';
+      chat.workspaceId = 'new-workspace';
+      await deleteToken(key);
+    };
+    await expect(runAlarm()).rejects.toThrow('authority was revoked');
+    expect(storedState.config.recoveryAttemptId).toBe('new-attempt');
+    expect(storedState.completed).toBe(false);
+    expect(chat).toMatchObject({ status: 'active', workspaceId: 'new-workspace' });
+    expect(vm.stop).not.toHaveBeenCalled();
+    expect(terminalNotice).not.toHaveBeenCalled();
+  });
+
+  it('legacy wake cleanup reaches the finalizer and preserves its restorable conversation', async () => {
+    sqlite.exec("UPDATE workspaces SET chat_session_id = 'chat' WHERE id = 'replacement'");
+    vm.restore.mockRejectedValueOnce(
+      Object.assign(new Error('Restore refused'), { permanent: true })
+    );
+    await runAlarm();
+    expect(chat.status).toBe('sleeping');
+    expect(failChat).not.toHaveBeenCalled();
+    expect(vm.stop).toHaveBeenCalledOnce();
+  });
+
+  it('resumes durable wake failure cleanup after a crash with the task already sleeping', async () => {
+    storedState.config.recoveryAttemptId = 'attempt-1';
+    sqlite.exec("UPDATE session_snapshots SET recovery_attempt_id = 'attempt-1'");
+    vm.restore.mockRejectedValueOnce(
+      Object.assign(new Error('Restore refused'), { permanent: true })
+    );
+    const deleteToken = env.KV.delete;
+    let interrupted = false;
+    env.KV.delete = async (key: string) => {
+      if (!interrupted) {
+        interrupted = true;
+        throw new Error('token revocation interrupted');
+      }
+      await deleteToken(key);
+    };
+    await expect(runAlarm()).rejects.toThrow('token revocation interrupted');
+    expect(storedState.wakeFailureMessage).toBe('Restore refused');
+    expect(storedState.completed).toBe(false);
+    expect(sqlite.prepare("SELECT status FROM tasks WHERE id = 'recovery'").pluck().get()).toBe(
+      'sleeping'
+    );
+    await runAlarm();
+    expect(storedState.completed).toBe(true);
+    expect(vm.restore).toHaveBeenCalledOnce();
+    expect(vm.stop).toHaveBeenCalledOnce();
+    expect(storedState.stepResults.mcpToken).toBeNull();
+    expect(chat.status).toBe('sleeping');
+    expect(terminalNotice).not.toHaveBeenCalled();
+  });
+
+  it.each(['valid', 'expired', 'cancelled', 'wrong-project', 'concurrent-wake', 'status-refusal'])(
+    'heals a failed ProjectData mirror only with an authorized saved wake (%s)',
+    async (fixture) => {
+      sqlite.exec(`CREATE TABLE chat_sessions (id TEXT PRIMARY KEY, workspace_id TEXT, task_id TEXT,
+      created_by_user_id TEXT, status TEXT, message_count INTEGER, ended_at INTEGER, updated_at INTEGER);
+      CREATE TABLE workspace_activity (workspace_id TEXT, session_id TEXT, last_message_at INTEGER, created_at INTEGER);
+      INSERT INTO chat_sessions VALUES ('chat', 'original', 'recovery', 'user', 'failed', 0, 1, 1);`);
+      const sql = createSqlStorage(sqlite);
+      const stub = env.PROJECT_DATA.get(
+        env.PROJECT_DATA.idFromName('project')
+      ) as unknown as Record<string, unknown>;
+      stub.getSession = async () =>
+        sqlite
+          .prepare(
+            "SELECT *, task_id AS taskId, workspace_id AS workspaceId FROM chat_sessions WHERE id = 'chat'"
+          )
+          .get();
+      stub.sleepSession = async (id: string, options: { failedOnly?: boolean }) =>
+        sleepSession(sql, id, options);
+      stub.linkSessionToWorkspace = async (id: string, ws: string) =>
+        linkSessionToWorkspace(sql, id, ws);
+      if (fixture === 'expired')
+        sqlite.exec("UPDATE session_snapshots SET expires_at = '2000-01-01T00:00:00.000Z'");
+      if (fixture === 'cancelled')
+        sqlite.exec("UPDATE tasks SET status = 'cancelled' WHERE id = 'recovery'");
+      if (fixture === 'wrong-project')
+        sqlite.exec("UPDATE session_snapshots SET project_id = 'other'");
+      if (fixture === 'status-refusal') {
+        storedState.currentStep = 'workspace_creation';
+        storedState.config.recoveryAttemptId = 'attempt-1';
+        sqlite.exec("UPDATE session_snapshots SET recovery_attempt_id = 'attempt-1'");
+        const read = stub.getSession as () => Promise<Record<string, unknown>>;
+        let reads = 0;
+        // The mirror fails after the repair's read but before its link RPC.
+        stub.getSession = async () => {
+          const row = await read();
+          return ++reads === 1 ? { ...row, status: 'sleeping' } : row;
+        };
+        await runAlarm();
+        expect(storedState.completed).toBe(true);
+        expect(storedState.retryCount).toBe(0);
+        expect(storedState.wakeFailureMessage).toContain('SESSION_LINK_STATUS_REFUSED');
+        expect(sqlite.prepare('SELECT status FROM chat_sessions').pluck().get()).toBe('sleeping');
+        expect(snapshot()).toMatchObject({ recovery_status: 'failed' });
+        expect(vm.restore).not.toHaveBeenCalled();
+        expect(terminalNotice).not.toHaveBeenCalled();
+      } else if (fixture === 'concurrent-wake') {
+        const read = stub.getSession as () => Promise<unknown>;
+        stub.getSession = async () => {
+          const observed = await read();
+          sqlite.exec("UPDATE chat_sessions SET status = 'active'");
+          return observed;
+        };
+        await ensureSessionLinked(storedState, 'replacement', rc);
+        expect(sqlite.prepare('SELECT status FROM chat_sessions').pluck().get()).toBe('active');
+      } else if (fixture === 'valid') {
+        await expect(ensureSessionLinked(storedState, 'replacement', rc)).resolves.toBeUndefined();
+        expect(sqlite.prepare('SELECT status, workspace_id FROM chat_sessions').get()).toEqual({
+          status: 'sleeping',
+          workspace_id: 'replacement',
+        });
+      } else {
+        const error = await ensureSessionLinked(storedState, 'replacement', rc).catch(
+          (error) => error
+        );
+        expect(error).toBeInstanceOf(Error);
+        expect(isTransientError(new Error(error.message))).toBe(false);
+        expect(sqlite.prepare('SELECT status FROM chat_sessions').pluck().get()).toBe('failed');
+      }
+    }
+  );
+
+  it('fails a refused lifecycle commit on the first alarm inside the restore deadline', async () => {
+    storedState.config.recoveryAttemptId = 'attempt-1';
+    sqlite.exec("UPDATE session_snapshots SET recovery_attempt_id = 'attempt-1'");
+    wake.mockResolvedValueOnce(false);
+    await runAlarm();
+    expect(storedState.completed).toBe(true);
+    expect(storedState.retryCount).toBe(0);
+    expect(sqlite.prepare("SELECT status FROM tasks WHERE id = 'recovery'").pluck().get()).toBe(
+      'sleeping'
+    );
+    expect(vm.restore).toHaveBeenCalledOnce();
   });
 
   it('pins the configured operation duration plus one request timeout for final result retrieval', async () => {

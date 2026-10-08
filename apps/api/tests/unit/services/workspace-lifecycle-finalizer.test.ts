@@ -382,28 +382,33 @@ describe('finalizeWorkspaceLifecycleClosure ProjectData session finalization', (
     expect(mocks.failSession).not.toHaveBeenCalled();
   });
 
-  it('still fails a session when the lifecycle closure is failed', async () => {
-    seedNode();
-    seedWorkspace({ status: 'deleted' });
-    seedRestorableSnapshot();
+  it.each([true, false])(
+    'failed closure preserves only a restorable session (snapshot=%s)',
+    async (restorable) => {
+      seedNode();
+      seedWorkspace({ status: 'deleted' });
+      if (restorable) seedRestorableSnapshot();
 
-    await finalizeWorkspaceLifecycleClosure(env, {
-      workspaceIds: [WORKSPACE_ID],
-      userId: USER_ID,
-      agentSessionStatus: 'failed',
-      errorMessage: 'workspace failed',
-      nowIso: NOW_ISO,
-      reason: 'test_failed_finalizer',
-    });
+      await finalizeWorkspaceLifecycleClosure(env, {
+        workspaceIds: [WORKSPACE_ID],
+        userId: USER_ID,
+        agentSessionStatus: 'failed',
+        errorMessage: 'workspace failed',
+        nowIso: NOW_ISO,
+        reason: 'test_failed_finalizer',
+      });
 
-    expect(mocks.failSession).toHaveBeenCalledWith(
-      env,
-      PROJECT_ID,
-      CHAT_SESSION_ID,
-      'workspace failed'
-    );
-    expect(mocks.stopSession).not.toHaveBeenCalled();
-  });
+      if (restorable) expect(mocks.failSession).not.toHaveBeenCalled();
+      else
+        expect(mocks.failSession).toHaveBeenCalledWith(
+          env,
+          PROJECT_ID,
+          CHAT_SESSION_ID,
+          'workspace failed'
+        );
+      expect(mocks.stopSession).not.toHaveBeenCalled();
+    }
+  );
 
   it('withholds ProjectData stop when the snapshot lookup fails', async () => {
     seedNode();

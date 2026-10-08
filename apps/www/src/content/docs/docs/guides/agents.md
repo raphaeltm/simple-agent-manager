@@ -305,6 +305,11 @@ SAM tracks related lifecycle state at three levels:
 - **Task record**: `draft`, `ready`, `queued`, `delegated`, `in_progress`, `sleeping`, `completed`, `failed`, or `cancelled`. A sleeping VM conversation retains the same task when it wakes. Task-mode work keeps its task completion lifecycle instead of showing the manual Sleep action while idle.
 - **Runtime agent session**: `running`, `recovery`, `sleeping`, `suspended`, `stopped`, or `error`. Recovery means SAM is rebuilding runtime compute and restoring the saved harness/session state.
 
+If a VM wake attempt fails while its saved workspace is still recoverable, the conversation
+returns to sleeping and keeps the same task. Its parent is not told that the conversation
+failed. You can try again; repeated wake failures may require a short cooldown. A wake
+without a usable saved workspace still ends with a visible failure.
+
 Sleeping VM tasks remain visible in Active Tasks, the account map, and agent lists. Agents in the same project can send a follow-up using `send_message_to_subtask` or `send_durable_message`; durable delivery wakes the saved conversation. If durable delivery is disabled, the tools explain that sleeping targets require it. A direct parent can cancel a sleeping child with `stop_subtask` without waking its VM.
 
 Conversation-mode sessions with an attached workspace can be manually slept when awake and idle. Archive remains destructive and appears after the reversible sleep boundary.

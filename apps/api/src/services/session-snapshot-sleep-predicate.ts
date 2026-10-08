@@ -46,7 +46,9 @@ export function sessionSleepInFlightMaxAgeMs(env: SleepPredicateEnv): number {
 }
 
 /**
- * Restorable sleeping snapshot, or a sleep still in flight. A `failed` sleep is in
+ * Restorable sleeping snapshot, or a sleep still in flight. A clean failed wake
+ * may be temporarily rate-limited; preserve it through cooldown until expiry.
+ * The resumer's attempt budget decays, so cooldown is not loss of recoverability. A `failed` sleep is in
  * flight while the sweep will act on it: inside a bounded sleep-failure episode every
  * failure keeps a due retry (`sleep_after`) until the sweep retries it, falls back to a
  * transcript-and-Git sleep, or ends the episode blocked (`session-sleep-episode.ts`).
@@ -63,8 +65,9 @@ export function restorableOrInFlightSleepSnapshotPredicateSql(alias = 'snapshot'
     (
       ${s}.sleeping_at IS NOT NULL
       AND ${s}.sleep_status = 'sleeping'
-      AND ${s}.expires_at > ?
-      AND ${sessionRecoveryBudgetAvailableSql(s)}
+      AND ${s}.expires_at > ? AND julianday(${s}.expires_at) IS NOT NULL
+      AND (${sessionRecoveryBudgetAvailableSql(s)}
+        OR (${s}.recovery_status = 'failed' AND julianday(${s}.recovery_failed_at) IS NOT NULL))
       AND (
         (${s}.status = 'available' AND ${s}.degradation = 'none')
         OR (${s}.status = 'degraded' AND ${s}.degradation IS NOT NULL AND ${s}.degradation != 'none')
@@ -117,9 +120,11 @@ export async function findRestorableOrInFlightSleepSnapshot(
   input: SleepLifecyclePredicateInput
 ): Promise<SleepLifecyclePredicateResult | null> {
   const now = input.now ?? new Date();
-  const workspaceClause = input.workspaceId ? 'AND workspace_id = ?' : '';
+  const workspaceClause = input.workspaceId
+    ? 'AND (workspace_id = ? OR recovery_workspace_id = ?)'
+    : '';
   const bindings: unknown[] = [input.chatSessionId, input.projectId];
-  if (input.workspaceId) bindings.push(input.workspaceId);
+  if (input.workspaceId) bindings.push(input.workspaceId, input.workspaceId);
   bindings.push(...sleepLifecyclePredicateBindings(env, now));
 
   const row = await database

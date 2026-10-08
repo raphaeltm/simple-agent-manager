@@ -852,7 +852,7 @@ describe('session sleep sweep', () => {
       .prepare(
         `UPDATE session_snapshots
          SET sleep_status = 'stopping', sleep_after = '2026-08-12T00:30:00.000Z',
-             sleep_claim_id = 'dead-owner', sleep_claimed_at = '2026-08-12T00:00:00.000Z'
+             sleep_claim_id = 'dead-owner', sleep_claimed_at = '2026-08-12T00:45:00.000Z'
          WHERE id = 'snapshot-stopping'`
       )
       .run();
@@ -881,7 +881,7 @@ describe('session sleep sweep', () => {
       .prepare(
         `UPDATE session_snapshots
          SET sleep_status = 'stopping', sleep_after = '2026-08-12T00:30:00.000Z',
-             sleep_claim_id = 'dead-owner', sleep_claimed_at = '2026-08-12T00:00:00.000Z',
+             sleep_claim_id = 'dead-owner', sleep_claimed_at = '2026-08-12T00:45:00.000Z',
              sleep_stopping_since = NULL, updated_at = '2026-08-12T00:05:00.000Z'
          WHERE id = 'snapshot-legacy-stopping'`
       )
@@ -900,7 +900,7 @@ describe('session sleep sweep', () => {
     ).toEqual({
       sleep_claim_id: expect.any(String),
       sleep_claimed_at: '2026-08-12T01:00:00.000Z',
-      sleep_stopping_since: '2026-08-12T00:00:00.000Z',
+      sleep_stopping_since: '2026-08-12T00:45:00.000Z',
       sleep_attempts: 2,
     });
   });

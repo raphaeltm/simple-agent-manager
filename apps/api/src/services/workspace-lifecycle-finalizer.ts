@@ -212,38 +212,36 @@ async function finalizeProjectDataSession(
   if (input.stopProjectSessions === false) return 'skipped';
   if (!row.project_id || !row.chat_session_id) return 'skipped';
 
-  if (input.agentSessionStatus !== 'failed' && input.agentSessionStatus !== 'error') {
-    try {
-      // Mirrors the shared destroyer guard: restorable sleeping snapshots and
-      // bounded in-flight sleep lifecycles are authoritative recoverability
-      // records. Per rule 66, explicit archive/delete paths remove the snapshot
-      // first, so preserving it here does not weaken destructive intent.
-      if (
-        await findRestorableOrInFlightSleepSnapshot(env.DATABASE, env, {
-          projectId: row.project_id,
-          workspaceId: row.id,
-          chatSessionId: row.chat_session_id,
-          now: new Date(nowIso),
-        })
-      ) {
-        log.info('workspace_lifecycle_finalizer.project_session_preserved_for_snapshot', {
-          workspaceId: row.id,
-          projectId: row.project_id,
-          sessionId: row.chat_session_id,
-          reason: input.reason,
-        });
-        return 'skipped';
-      }
-    } catch (err) {
-      log.warn('workspace_lifecycle_finalizer.project_session_resumability_lookup_failed', {
+  try {
+    // Mirrors the shared destroyer guard: restorable sleeping snapshots and
+    // bounded in-flight sleep lifecycles are authoritative recoverability
+    // records. Per rule 66, explicit archive/delete paths remove the snapshot
+    // first, so preserving it here does not weaken destructive intent.
+    if (
+      await findRestorableOrInFlightSleepSnapshot(env.DATABASE, env, {
+        projectId: row.project_id,
+        workspaceId: row.id,
+        chatSessionId: row.chat_session_id,
+        now: new Date(nowIso),
+      })
+    ) {
+      log.info('workspace_lifecycle_finalizer.project_session_preserved_for_snapshot', {
         workspaceId: row.id,
         projectId: row.project_id,
         sessionId: row.chat_session_id,
         reason: input.reason,
-        error: err instanceof Error ? err.message : String(err),
       });
-      return 'failed';
+      return 'skipped';
     }
+  } catch (err) {
+    log.warn('workspace_lifecycle_finalizer.project_session_resumability_lookup_failed', {
+      workspaceId: row.id,
+      projectId: row.project_id,
+      sessionId: row.chat_session_id,
+      reason: input.reason,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return 'failed';
   }
 
   try {

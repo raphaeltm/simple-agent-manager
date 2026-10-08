@@ -485,8 +485,8 @@ export class ProjectData extends DurableObject<Env> {
     return false;
   }
 
-  async sleepSession(sessionId: string): Promise<boolean> {
-    const updated = sessions.sleepSession(this.sql, sessionId);
+  async sleepSession(sessionId: string, options?: sessions.SleepSessionOptions): Promise<boolean> {
+    const updated = sessions.sleepSession(this.sql, sessionId, options);
     if (updated) {
       // Most sessions worth searching are sleeping, not stopped, and every
       // streaming token is its own row — so without this the transcript stays

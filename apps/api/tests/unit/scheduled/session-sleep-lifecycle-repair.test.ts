@@ -1,8 +1,10 @@
 import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
+import { selectSweepCandidates } from '../../../src/scheduled/session-sleep-candidates';
 import { runSessionSleepLifecycleRepair } from '../../../src/scheduled/session-sleep-lifecycle-repair';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
@@ -328,12 +330,51 @@ describe('session sleep lifecycle repair', () => {
     }
   );
 
+  it('bounds stopping retries and retires a failed session of a non-failed task within two sweeps', async () => {
+    const now = new Date('2026-08-12T01:00:00.000Z');
+    const result = await runStaleRepairForProjectDataStatus('failed', 'completed');
+    expect(result).toMatchObject({ selected: 1, repaired: 1, errors: 0 });
+    expect(
+      sqlite.prepare('SELECT sleep_status, sleeping_at, sleep_error FROM session_snapshots').get()
+    ).toEqual({
+      sleep_status: 'terminal_failed',
+      sleeping_at: null,
+      sleep_error: expect.stringContaining('failed'),
+    });
+    expect(mocks.cleanupTaskRun).toHaveBeenCalled();
+    expect(await selectSweepCandidates(env, drizzle(env.DATABASE, { schema }), now, 25, 3)).toEqual(
+      []
+    );
+    expect(await runSessionSleepLifecycleRepair(env, now)).toMatchObject({ selected: 0 });
+  });
+
+  it('hands stale stopping rows to repair rather than retrying the runtime forever', async () => {
+    insertStaleStoppingSnapshot(sqlite, { claimedAt: '2026-08-12T00:00:00.000Z' });
+    expect(
+      await selectSweepCandidates(
+        env,
+        drizzle(env.DATABASE, { schema }),
+        new Date('2026-08-12T01:00:00.000Z'),
+        25,
+        3
+      )
+    ).toEqual([]);
+    // A due claim inside the stopping age bound still gets its normal retry.
+    sqlite.exec("UPDATE session_snapshots SET sleep_stopping_since = '2026-08-12T00:55:00.000Z'");
+    expect(
+      await selectSweepCandidates(
+        env,
+        drizzle(env.DATABASE, { schema }),
+        new Date('2026-08-12T01:00:00.000Z'),
+        25,
+        3
+      )
+    ).toHaveLength(1);
+  });
+
   it.each([
     [null, 'in_progress', 'missing'],
     ['active', 'in_progress', 'still open'],
-    // Scoped to failed tasks (rule 67): any other task's failed session keeps
-    // its pre-existing handling.
-    ['failed', 'in_progress', "a live task's failed session"],
   ])(
     'does not repair a stale stopping row when ProjectData status is %s (%s task: %s)',
     async (status, taskStatus) => {

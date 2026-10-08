@@ -160,7 +160,10 @@ export async function handleAgentSession(
       state.taskId
     );
     if (!sessionWoken) {
-      throw new Error('Strict session restore succeeded but lifecycle recovery commit failed');
+      throw Object.assign(
+        new Error('Strict session restore succeeded but lifecycle recovery commit refused'),
+        { permanent: true }
+      );
     }
     await rc.assertRecoveryAuthority(state);
     const snapshotDb = drizzle(rc.env.DATABASE, { schema });
@@ -182,7 +185,10 @@ export async function handleAgentSession(
           state.config.recoveryAttemptId ?? undefined
         );
     if (!recoveryCompleted) {
-      throw new Error('Strict session restore succeeded but lifecycle recovery commit failed');
+      throw Object.assign(
+        new Error('Strict session restore succeeded but lifecycle recovery commit refused'),
+        { permanent: true }
+      );
     }
   }
 

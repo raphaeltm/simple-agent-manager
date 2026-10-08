@@ -38,10 +38,10 @@ Found by the round 3 review of `sam/preserve-failed-tasks-work-fn8ba7` (idea
 
 ## Acceptance Criteria
 
-- [ ] A `stopping` row whose ProjectData session is `failed` (non-failed task) leaves the sweep's
+- [x] A `stopping` row whose ProjectData session is `failed` (non-failed task) leaves the sweep's
       candidate set within a bounded number of sweeps (rule 47), with a recorded terminal reason.
-- [ ] The runtime is torn down and the snapshot is not presented as wakeable.
-- [ ] A two-sweep regression test against real SQL, plus a control that a `sleeping`/`stopped`
+- [x] The runtime is torn down and the snapshot is not presented as wakeable.
+- [x] A two-sweep regression test against real SQL, plus a control that a `sleeping`/`stopped`
       ProjectData session still completes as sleeping.
 
 ## 2026-10-08 implementation scope
@@ -56,13 +56,13 @@ Sleep repair deliberately excludes failed sessions of non-failed tasks; stopping
 selection has no age bound. Recovery budgets decay after clean failures; cooldown is not
 permanent loss of recoverability.
 
-- [ ] Return a recoverable stable wake task to sleeping before terminal hooks; fence attempt ownership.
-- [ ] Preserve authoritative restorable snapshots through replacement cleanup; genuine loss remains visible.
-- [ ] Heal failed ProjectData sessions only under an authorized snapshot wake claim.
-- [ ] Classify status refusal as permanent across RPC error serialization.
-- [ ] Bound stopping selection on immutable stopping age; repair failed non-failed-task sessions to terminal failure with reason and cleanup.
-- [ ] Real alarm → failure → finalizer SQL regression, parent-hook assertion, unrecoverable control, next-wake and status-refusal coverage.
-- [ ] Two-sweep real SQL regression for stopping repair.
+- [x] Return a recoverable stable wake task to sleeping before terminal hooks; fence attempt ownership.
+- [x] Preserve authoritative restorable snapshots through replacement cleanup; genuine loss remains visible.
+- [x] Heal failed ProjectData sessions only under an authorized snapshot wake claim.
+- [x] Classify status refusal as permanent across RPC error serialization.
+- [x] Bound stopping selection on immutable stopping age; repair failed non-failed-task sessions to terminal failure with reason and cleanup.
+- [x] Real alarm → failure → finalizer SQL regression, parent-hook assertion, unrecoverable control, next-wake and status-refusal coverage.
+- [x] Two-sweep real SQL regression for stopping repair.
 - [ ] Local checks and specialist reviews; coordinated staging lease and live verification.
 - [ ] PR/CI/CodeRabbit/merge/production; idea evidence and channel cleanup.
 

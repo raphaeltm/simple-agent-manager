@@ -60,6 +60,7 @@ vi.mock('../../../src/services/observability', async () => {
 
 vi.mock('../../../src/services/project-data', () => ({
   failSession: failSessionMock,
+  getSession: vi.fn(async () => ({ status: 'sleeping' })),
   persistMessage: persistMessageMock,
   reconcileTaskWaits: vi.fn(async () => undefined),
   sleepSession: sleepSessionMock,
@@ -732,7 +733,7 @@ describe('failTask', () => {
     });
   });
 
-  it('fails only the replacement recovery task and returns the original chat to sleeping', async () => {
+  it('fails a legacy recovery without an authoritative snapshot', async () => {
     const { dbState, rc } = createContext();
     seedTask(dbState, {
       status: 'delegated',
@@ -766,8 +767,13 @@ describe('failTask', () => {
       'task-1',
       'session-1'
     );
-    expect(sleepSessionMock).toHaveBeenCalledWith(rc.env, 'project-1', 'session-1');
-    expect(failSessionMock).not.toHaveBeenCalled();
+    expect(sleepSessionMock).not.toHaveBeenCalled();
+    expect(failSessionMock).toHaveBeenCalledWith(
+      rc.env,
+      'project-1',
+      'session-1',
+      'replacement restore failed'
+    );
     expect(persistMessageMock).not.toHaveBeenCalled();
     expect(stopWorkspaceOnNodeMock).toHaveBeenCalledWith('node-1', 'workspace-1', rc.env, 'user-1');
   });

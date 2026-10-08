@@ -384,6 +384,13 @@ export class TaskRunner extends DurableObject<Env> {
     const rc = this.buildContext(state);
     const stepStartMs = Date.now();
 
+    // A crash after returning the task to sleeping must resume failure cleanup,
+    // rather than failing the execution-authority check or replaying restoration.
+    if (state.wakeFailureMessage !== undefined) {
+      await failTask(state, state.wakeFailureMessage, rc);
+      return;
+    }
+
     try {
       await this.assertRecoveryAuthority(state);
       switch (state.currentStep) {

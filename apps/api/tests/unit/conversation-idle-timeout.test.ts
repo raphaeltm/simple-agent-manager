@@ -97,6 +97,8 @@ const D1_SCHEMA = `
     sleep_claimed_at TEXT,
     sleep_stopping_since TEXT,
     capture_generation TEXT,
+    recovery_workspace_id TEXT,
+    recovery_status TEXT,
     recovery_attempts INTEGER NOT NULL DEFAULT 0,
     recovery_failed_at TEXT,
     created_at TEXT,

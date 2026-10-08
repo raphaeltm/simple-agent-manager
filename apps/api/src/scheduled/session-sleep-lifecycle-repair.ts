@@ -32,7 +32,7 @@ async function projectDataSessionAlreadyClosedForSleep(
   projectId: string,
   chatSessionId: string,
   taskStatus: string | null
-): Promise<boolean> {
+): Promise<'closed' | 'failed' | null> {
   const session = await projectDataService
     .getSession(env, projectId, chatSessionId)
     .catch((error) => {
@@ -44,15 +44,8 @@ async function projectDataSessionAlreadyClosedForSleep(
       return null;
     });
   const status = typeof session?.status === 'string' ? session.status : null;
-  // A failed task's failed session is closed too: a terminal reconciler can fail
-  // it after its preservation sleep passed the point of no return, and the sleep
-  // must still finish its teardown rather than hold the runtime at `stopping`.
-  // Scoped to failed tasks: any other task's failed session keeps its handling.
-  return (
-    status === 'sleeping' ||
-    status === 'stopped' ||
-    (status === 'failed' && taskStatus === 'failed')
-  );
+  if (status === 'failed' && taskStatus !== 'failed') return 'failed';
+  return status === 'sleeping' || status === 'stopped' || status === 'failed' ? 'closed' : null;
 }
 
 function repairBatchSize(env: Env): number {
@@ -157,6 +150,7 @@ export async function runSessionSleepLifecycleRepair(
           });
           return false;
         });
+      let terminalFailure = false;
       if (!projectDataSlept) {
         const alreadyClosed = await projectDataSessionAlreadyClosedForSleep(
           env,
@@ -173,19 +167,42 @@ export async function runSessionSleepLifecycleRepair(
           });
           continue;
         }
+        terminalFailure = alreadyClosed === 'failed';
         log.info('session_sleep_lifecycle_repair.project_data_already_closed', {
           snapshotId: row.snapshotId,
           workspaceId: row.workspaceId,
           chatSessionId: row.chatSessionId,
         });
       }
-      const marked = await markSessionSnapshotSleeping(
-        db,
-        env,
-        row.chatSessionId,
-        now,
-        snapshot.snapshotGeneration
-      );
+      const terminalReason = 'Sleep teardown finished after the conversation session failed';
+      const marked = terminalFailure
+        ? (
+            await db
+              .update(schema.sessionSnapshots)
+              .set({
+                sleepStatus: 'terminal_failed',
+                sleepError: terminalReason,
+                sleepClaimId: null,
+                sleepClaimedAt: null,
+                sleepAfter: null,
+                updatedAt: now.toISOString(),
+              })
+              .where(
+                and(
+                  eq(schema.sessionSnapshots.id, row.snapshotId),
+                  eq(schema.sessionSnapshots.sleepStatus, 'stopping'),
+                  isNull(schema.sessionSnapshots.sleepingAt),
+                  eq(schema.sessionSnapshots.snapshotGeneration, snapshot.snapshotGeneration)
+                )
+              )
+          ).meta.changes > 0
+        : await markSessionSnapshotSleeping(
+            db,
+            env,
+            row.chatSessionId,
+            now,
+            snapshot.snapshotGeneration
+          );
       if (!marked) {
         stats.skipped++;
         continue;
@@ -194,11 +211,19 @@ export async function runSessionSleepLifecycleRepair(
       await db.batch([
         db
           .update(schema.workspaces)
-          .set({ status: 'sleeping', errorMessage: null, updatedAt: nowIso })
+          .set({
+            status: terminalFailure ? 'stopped' : 'sleeping',
+            errorMessage: terminalFailure ? terminalReason : null,
+            updatedAt: nowIso,
+          })
           .where(eq(schema.workspaces.id, row.workspaceId)),
         db
           .update(schema.agentSessions)
-          .set({ status: 'sleeping', errorMessage: null, updatedAt: nowIso })
+          .set({
+            status: terminalFailure ? 'failed' : 'sleeping',
+            errorMessage: terminalFailure ? terminalReason : null,
+            updatedAt: nowIso,
+          })
           .where(eq(schema.agentSessions.workspaceId, row.workspaceId)),
       ]);
       await finishSleepingWorkspaceComputeCleanup(db, env, {

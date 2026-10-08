@@ -7,9 +7,7 @@ import type { Env } from './types';
 import { generateId } from './types';
 
 export type ReservedTaskSessionConflictReason =
-  | 'session_identity_conflict'
-  | 'session_terminal'
-  | 'session_capacity_exceeded';
+  'session_identity_conflict' | 'session_terminal' | 'session_capacity_exceeded';
 
 export class ReservedTaskSessionConflictError extends Error {
   constructor(
@@ -311,13 +309,25 @@ function terminateSession(
   return { ...parseSessionStop(row), rowsWritten: cursor.rowsWritten };
 }
 
-export function sleepSession(sql: SqlStorage, sessionId: string): boolean {
+export interface SleepSessionOptions {
+  /** Internal only: the service proved an authoritative snapshot wake claim. */
+  failedOnly?: boolean;
+  guard?: SessionIdentityGuard;
+}
+
+export function sleepSession(
+  sql: SqlStorage,
+  sessionId: string,
+  options: SleepSessionOptions = {}
+): boolean {
+  if (options.guard) assertSessionIdentityGuard(sql, sessionId, 'sleep session', options.guard);
   const now = Date.now();
   const cursor = sql.exec(
     `UPDATE chat_sessions SET status = 'sleeping', ended_at = NULL, updated_at = ?
-     WHERE id = ? AND status = 'active'`,
+     WHERE id = ? AND status = ?`,
     now,
-    sessionId
+    sessionId,
+    options.failedOnly ? 'failed' : 'active'
   );
   return cursor.rowsWritten > 0;
 }
@@ -395,7 +405,9 @@ export function linkSessionToWorkspace(
   }
   const status = typeof session.status === 'string' ? session.status : null;
   if (status !== 'active' && status !== 'sleeping') {
-    throw new Error(`Session ${sessionId} is ${status ?? 'unknown'} and cannot be linked`);
+    throw new Error(
+      `SESSION_LINK_STATUS_REFUSED: Session ${sessionId} is ${status ?? 'unknown'} and cannot be linked`
+    );
   }
 
   const now = Date.now();
