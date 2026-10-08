@@ -200,6 +200,30 @@ describe('ACP activity callback vertical slice', () => {
     delete mutableEnv.ACP_ACTIVITY_COALESCE_WINDOW_MS;
   });
 
+  it.each([
+    { sleepStatus: 'stopping', sleepingAt: null },
+    { sleepStatus: 'sleeping', sleepingAt: null },
+    { sleepStatus: null, sleepingAt: '2026-10-08T00:00:00.000Z' },
+    { sleepStatus: 'preparing', sleepingAt: null },
+    { sleepStatus: null, sleepingAt: null },
+  ])('admits idle capture according to durable sleep state %j', async (state) => {
+    const session = await seedCallbackSession(crypto.randomUUID(), { acpSdkSessionId: 'sdk-session' });
+    await env.DATABASE.prepare(`INSERT INTO session_snapshots
+      (id, chat_session_id, workspace_id, node_id, user_id, runtime, status, sleep_status, sleeping_at, created_at, updated_at, expires_at)
+      VALUES (?, ?, ?, ?, ?, 'vm', 'pending', ?, ?, datetime('now'), datetime('now'), datetime('now', '+7 days'))`)
+      .bind(crypto.randomUUID(), session.chatSessionId, session.workspaceId, session.nodeId,
+        session.userId, state.sleepStatus, state.sleepingAt).run();
+    const app = await createTestApp();
+    const response = await postActivity(app, session, { activity: 'idle', nodeId: session.nodeId });
+    expect(response.status).toBe(200);
+    const blocked = state.sleepingAt !== null || ['stopping', 'sleeping'].includes(state.sleepStatus ?? '');
+    expect(mocks.nodeAgent.hibernateAgentSessionOnNode).toHaveBeenCalledTimes(blocked ? 0 : 1);
+    if (blocked) expect(mocks.container.markVmAgentContainerActiveWorkEndedBestEffort).toHaveBeenCalled();
+    else expect(mocks.nodeAgent.hibernateAgentSessionOnNode).toHaveBeenCalledWith(
+      session.nodeId, session.workspaceId, 'sdk-session', testEnv, session.userId,
+      expect.objectContaining({ background: true, chatSessionId: session.chatSessionId }));
+  });
+
   it('coalesces redundant intermediate callbacks before a terminal idle write', async () => {
     const suffix = crypto.randomUUID();
     const session = await seedCallbackSession(suffix);

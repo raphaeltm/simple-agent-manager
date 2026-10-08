@@ -1704,11 +1704,14 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
         expect(telemetry).toMatchObject({
           message: 'Workspace deletion entered durable operator quarantine',
           stack: null,
-          context: null,
+          context: expect.any(String),
           ip_address: null,
           user_agent: null,
           workspace_id: wsId,
           node_id: nodeId,
+        });
+        expect(JSON.parse(telemetry!.context!)).toMatchObject({
+          reason: 'maximum retry residence exceeded', attemptCount: 3,
         });
         expect(JSON.stringify(telemetry)).not.toContain(payloadMarker);
       });
