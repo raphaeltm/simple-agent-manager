@@ -509,7 +509,7 @@ describe('runNodeCleanupSweep', () => {
       // Behaviour against real SQL: tests/workers/scheduled-node-cleanup.test.ts.
       expect(terminalQuery).toContain("t.status IN ('completed', 'failed', 'cancelled')");
       expect(terminalQuery).toContain(
-        `AND NOT ${sleepLifecycleOwnsTerminalTaskWorkspaceSql('t', 'w', 4)}`
+        `AND (w.status = 'stopping' OR NOT ${sleepLifecycleOwnsTerminalTaskWorkspaceSql('t', 'w', 4)})`
       );
     });
   });
