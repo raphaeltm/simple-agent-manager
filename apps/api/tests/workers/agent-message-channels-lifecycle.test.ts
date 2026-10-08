@@ -44,7 +44,7 @@ const subscriptionStates = async (f: Fixture) =>
 
 describe('agent message channels: recipient lifecycle', () => {
   it('accepts a message for a sleeping recipient and queues its wake', async () => {
-    const f = await twoAgentProject();
+    const f = await twoAgentProject({ manualAlarms: true });
     await setChatStatus(f, f.b.sessionId, 'sleeping');
     const receipt = await withAgentMessageChannels(async () => {
       const sent = okBody<ChannelReceipt>(await send(f.a, f.b, 'while you sleep'));
@@ -60,7 +60,7 @@ describe('agent message channels: recipient lifecycle', () => {
   });
 
   it('refuses a recipient whose chat is no longer active, logs it, and commits nothing', async () => {
-    const f = await twoAgentProject();
+    const f = await twoAgentProject({ manualAlarms: true });
     await setChatStatus(f, f.b.sessionId, 'stopped');
     const warn = vi.spyOn(console, 'warn');
     const reply = await withAgentMessageChannels(() => send(f.a, f.b, 'too late'));
@@ -89,7 +89,7 @@ describe('agent message channels: recipient lifecycle', () => {
   });
 
   it('wakes the original sender with a reply it can read with verified authorship', async () => {
-    const f = await twoAgentProject();
+    const f = await twoAgentProject({ manualAlarms: true });
     const reply = await withAgentMessageChannels(async () => {
       okBody<ChannelReceipt>(await send(f.a, f.b, 'question'));
       const answered = okBody<ChannelReceipt>(await send(f.b, f.a, 'answer'));
@@ -112,7 +112,7 @@ describe('agent message channels: recipient lifecycle', () => {
 
 describe('agent message channels: replay and bounds', () => {
   it('replays a retried send after its recipient subscription was rotated', async () => {
-    const f = await twoAgentProject();
+    const f = await twoAgentProject({ manualAlarms: true });
     const args = { idempotencyKey: 'step-1' };
     const { first, retry } = await withAgentMessageChannels(async () => {
       const sent = okBody<ChannelReceipt>(await send(f.a, f.b, 'once', args));
@@ -148,7 +148,7 @@ describe('agent message channels: replay and bounds', () => {
   });
 
   it('preserves the last queued wake while a replacement alone receives later messages', async () => {
-    const f = await twoAgentProject();
+    const f = await twoAgentProject({ manualAlarms: true });
     const limits = { PROJECT_EVENT_WAKE_MAX_PER_SUBSCRIPTION: '1' };
     await withProjectDataEnv(f.stub, limits, () =>
       withAgentMessageChannels(async () => {
@@ -208,7 +208,7 @@ describe('agent message channels: replay and bounds', () => {
   });
 
   it('keeps a draining subscription retired from matching when its configured wake budget increases', async () => {
-    const f = await twoAgentProject();
+    const f = await twoAgentProject({ manualAlarms: true });
     const limits = { PROJECT_EVENT_WAKE_MAX_PER_SUBSCRIPTION: '1' };
     await withProjectDataEnv(f.stub, limits, () =>
       withAgentMessageChannels(async () => {
@@ -249,7 +249,7 @@ describe('agent message channels: replay and bounds', () => {
   ])(
     'rejects caller metadata that makes the stored envelope %s, before any write',
     async (_label, extra, detail) => {
-      const f = await twoAgentProject();
+      const f = await twoAgentProject({ manualAlarms: true });
       const reply = await withAgentMessageChannels(() => send(f.a, f.b, 'with metadata', extra));
       expect(reply.error?.message).toContain('Agent message is too large to store');
       expect(reply.error?.message).toContain(detail);
@@ -260,7 +260,7 @@ describe('agent message channels: replay and bounds', () => {
   );
 
   it('fails closed when the configured channel name limit cannot hold a pair channel', async () => {
-    const f = await twoAgentProject();
+    const f = await twoAgentProject({ manualAlarms: true });
     const reply = await withProjectDataEnv(
       f.stub,
       { PROJECT_EVENT_CHANNEL_NAME_MAX_BYTES: '20' },
@@ -274,7 +274,7 @@ describe('agent message channels: replay and bounds', () => {
 
 describe('agent message channels: third-party isolation', () => {
   it('does not wake a third agent subscribed to every channel event, but still delivers coordination events to it', async () => {
-    const f = await twoAgentProject();
+    const f = await twoAgentProject({ manualAlarms: true });
     const d = await seedTaskAgent(f.projectId, f.ownerId, f.ownerNodeId, 'd');
     const watcher = okBody<{ subscription: { id: string } }>(
       await d.tool('create_project_event_subscription', {
@@ -308,7 +308,7 @@ describe('agent message channels: third-party isolation', () => {
   });
 
   it('refuses to let any agent follow a pair channel or claim the managed key prefix', async () => {
-    const f = await twoAgentProject();
+    const f = await twoAgentProject({ manualAlarms: true });
     const dm = await withAgentMessageChannels(async () =>
       okBody<ChannelReceipt>(await send(f.a, f.b, 'private-ish'))
     );
@@ -330,7 +330,7 @@ describe('agent message channels: third-party isolation', () => {
 
 describe('agent message channels: capacity share', () => {
   it('releases idle pair subscriptions for a new pair, refuses while they still owe wakes, and lets the old pair resume', async () => {
-    const f = await twoAgentProject();
+    const f = await twoAgentProject({ manualAlarms: true });
     const d = await seedTaskAgent(f.projectId, f.ownerId, f.ownerNodeId, 'd');
     await withProjectDataEnv(f.stub, { AGENT_MESSAGE_MAX_ACTIVE_SUBSCRIPTIONS: '2' }, () =>
       withAgentMessageChannels(async () => {
@@ -371,7 +371,7 @@ describe('agent message channels: capacity share', () => {
   });
 
   it('converges after the share is lowered below the subscriptions already active', async () => {
-    const f = await twoAgentProject();
+    const f = await twoAgentProject({ manualAlarms: true });
     const d = await seedTaskAgent(f.projectId, f.ownerId, f.ownerNodeId, 'd');
     await withAgentMessageChannels(async () => {
       okBody<ChannelReceipt>(await send(f.a, f.b, 'one'));
@@ -398,7 +398,7 @@ describe('agent message channels: capacity share', () => {
   });
 
   it('releases the least recently matched idle subscription first', async () => {
-    const f = await twoAgentProject();
+    const f = await twoAgentProject({ manualAlarms: true });
     const d = await seedTaskAgent(f.projectId, f.ownerId, f.ownerNodeId, 'd');
     await withProjectDataEnv(f.stub, { AGENT_MESSAGE_MAX_ACTIVE_SUBSCRIPTIONS: '3' }, () =>
       withAgentMessageChannels(async () => {

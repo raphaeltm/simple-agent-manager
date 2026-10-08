@@ -90,12 +90,22 @@ export async function seedTaskAgent(
  * One project with agent A (owner) and agent B (a maintainer, a different user),
  * plus agent C in an unrelated project owned by the same owner.
  */
-export async function twoAgentProject() {
+export async function twoAgentProject(options: { manualAlarms?: boolean } = {}) {
   const id = crypto.randomUUID();
   const ownerId = `owner-${id}`;
   const memberId = `member-${id}`;
   const projectId = `p-${id}`;
   const otherProjectId = `p2-${id}`;
+  if (options.manualAlarms) {
+    for (const fixtureProjectId of [projectId, otherProjectId]) {
+      await runInDurableObject(projectStub(fixtureProjectId), (instance) => {
+        // These fixtures explicitly drive materialization and inspect pending
+        // batches. An automatic tick would race those assertions and contact
+        // fake VM hosts. Keep real scheduling/storage, but let the test drive materialization.
+        instance.alarm = async () => {};
+      });
+    }
+  }
   await seedUser(ownerId);
   await seedUser(memberId);
   await seedInstallation(id, ownerId, { installationIdValue: id, accountName: ownerId });

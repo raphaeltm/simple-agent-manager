@@ -36,7 +36,7 @@ const send = (from: Fixture['a'], to: Fixture['a'], message: string) =>
 
 describe('agent message wake scheduler isolation', () => {
   it('notifies a newly eligible chat while another chat still holds an unacknowledged wake', async () => {
-    const f = await twoAgentProject();
+    const f = await twoAgentProject({ manualAlarms: true });
     await withAgentMessageChannels(async () => {
       okBody(await send(f.a, f.b, 'first notification remains unacknowledged'));
       const firstAt = Date.now();
@@ -77,7 +77,7 @@ describe('agent message wake scheduler isolation', () => {
   });
 
   it('recovers a pre-upgrade global capacity checkpoint without bypassing real failure backoff', async () => {
-    const f = await twoAgentProject();
+    const f = await twoAgentProject({ manualAlarms: true });
     await withAgentMessageChannels(async () => {
       okBody(await send(f.a, f.b, 'ready after upgrade'));
       const now = Date.now();
