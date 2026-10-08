@@ -49,3 +49,28 @@ body, external fetch response):
   line, or UI display string from values the current function already validated or itself
   constructed is not re-parsing untrusted input; the cast only reconciles TypeScript's structural
   typing with a shape the author assembled.
+
+## An echoed server-issued value gets no tighter cap than the value it echoes
+
+Some request fields carry a value the server issued and the caller only echoes back: credential
+references, ids, keys. The handler checks them for equality against stored state, so a length cap
+on them is a proxy for "well-formed", not a check of anything (`.claude/rules/74`).
+
+Incident (2026-10-08): `AcpSessionUsageReportSchema` capped `credentialReference` at 160 chars.
+Credentials from the 2026-06 composable-credentials backfill have ids of up to 223 chars, so every
+Claude usage callback for those users returned `400 Invalid usage callback request body` for
+weeks. Nothing logged it and the only symptom was an absence: no Claude usage chip. The callback
+tests called the handler directly with short references, and staging used a newer, short-id
+credential, so nothing exercised the schema with a production-length value.
+
+1. Bound an echoed server-issued field by the request body cap, not by an identifier-sized guess.
+   The equality check against the stored value is the validation.
+2. If a downstream store needs a bounded key (project-event subject ids reject more than 160 bytes),
+   derive a collision-free key (`credentialLimitReferenceKey` in
+   `services/credential-limit-events/values.ts`) and make every reader derive the same key. Never
+   truncate: a truncated key is a different string from the one readers look up.
+3. Callback route tests must send production-shaped values through the route's schema, including
+   the longest legacy shape that exists in production. A test that calls the handler directly
+   cannot see the schema reject the request (`.claude/rules/62`).
+
+Task: `tasks/archive/2026-10-08-claude-credential-usage-limits.md`.
