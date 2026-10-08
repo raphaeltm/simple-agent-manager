@@ -621,18 +621,6 @@ export interface SubmitTaskRequest {
   resourceRequirements?: ResourceRequirements;
 }
 
-/** Response from the session summarize endpoint. */
-export interface SessionSummaryResponse {
-  /** The generated context summary text. */
-  summary: string;
-  /** Total number of messages in the session. */
-  messageCount: number;
-  /** Number of messages after filtering (user + assistant only). */
-  filteredCount: number;
-  /** Method used to generate the summary. */
-  method: 'ai' | 'heuristic' | 'verbatim';
-}
-
 export interface SubmitTaskResponse {
   taskId: string;
   sessionId: string;

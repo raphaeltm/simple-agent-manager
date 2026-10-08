@@ -616,9 +616,6 @@ by the read-only cron-liveness check.
 - `RATE_LIMIT_TRANSCRIBE` — Transcriptions allowed per user per window (default: 30)
 - `RATE_LIMIT_TRANSCRIBE_WINDOW_SECONDS` — Transcription rate-limit window in seconds (default: 60)
 
-### Session Summarization (Fork / Retry)
-
-
 ### Client Error Reporting
 
 - `RATE_LIMIT_CLIENT_ERRORS` — Rate limit per hour per IP (default: 200)
