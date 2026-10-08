@@ -573,7 +573,7 @@ describe('TaskRunner DO — failure handling', () => {
     });
   });
 
-  it('terminalizes a task whose claimed node was deleted without returning the node to warm reuse', async () => {
+  it('terminalizes a task whose reused claimed node was deleted without returning the node to warm reuse', async () => {
     await seedTestData();
     const taskId = 'tr-test-claimed-node-deleted-001';
     const nodeId = 'tr-test-node-deleted-001';
@@ -595,7 +595,7 @@ describe('TaskRunner DO — failure handling', () => {
       if (!state) throw new Error('TaskRunner state was not initialized');
       state.currentStep = 'node_agent_ready';
       state.stepResults.nodeId = nodeId;
-      state.stepResults.autoProvisioned = true;
+      state.stepResults.autoProvisioned = false;
       state.agentReadyStartedAt = Date.now() - 65_000;
       await instance.ctx.storage.put('state', state);
 
