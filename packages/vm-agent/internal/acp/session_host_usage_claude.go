@@ -2,6 +2,7 @@ package acp
 
 import (
 	"encoding/json"
+	"math"
 	"strings"
 	"time"
 
@@ -27,11 +28,11 @@ func (h *SessionHost) prepareUsageReportWithAttribution(params acpsdk.SessionNot
 	}
 
 	observedAt := h.now().UnixMilli()
-	limit, ok := usageLimitFromClaudeRateLimit(meta, observedAt)
-	if !ok {
+	limits := usageLimitsFromClaudeRateLimit(meta, observedAt)
+	if len(limits) == 0 {
 		return usageReportRequest{}, false
 	}
-	return h.buildUsageReportRequest(attr, hasAttr, "claude-acp.usage_update", observedAt, []usageLimitPayload{limit})
+	return h.buildUsageReportRequest(attr, hasAttr, "claude-acp.usage_update", observedAt, limits)
 }
 
 func claudeRateLimitMeta(params acpsdk.SessionNotification) (map[string]any, bool) {
@@ -78,6 +79,84 @@ func usageLimitFromClaudeRateLimit(meta map[string]any, observedAt int64) (usage
 	}, true
 }
 
+// claudeUnifiedWindowNames are the windows read from rate_limit_info.unifiedWindows,
+// in report order. Claude Code (2.1.281) attaches every window it tracks there —
+// five_hour, seven_day and seven_day_overage_included — on each rate-limit event.
+// Only the windows SAM's credential-limit allowlist accepts are read.
+var claudeUnifiedWindowNames = []string{"five_hour", "seven_day"}
+
+// usageLimitsFromClaudeRateLimit turns one rate_limit_info into every window it
+// describes. The top-level fields describe only the representative window (the
+// one closest to its limit) and carry utilization only once that window is in a
+// warning state, so in normal use the five-hour and weekly percentages exist only
+// in unifiedWindows. The representative window keeps the top-level status; a
+// representative window absent from unifiedWindows (weekly Opus or Sonnet) is
+// reported from the top-level fields alone. Payloads without unifiedWindows (older
+// Claude Code) produce the single top-level window, exactly as before.
+func usageLimitsFromClaudeRateLimit(meta map[string]any, observedAt int64) []usageLimitPayload {
+	representative, hasRepresentative := usageLimitFromClaudeRateLimit(meta, observedAt)
+	unifiedWindows, _ := meta["unifiedWindows"].(map[string]any)
+	accountStatus := normalizeUsageLimitStatus(stringField(meta, "status"))
+
+	limits := make([]usageLimitPayload, 0, len(claudeUnifiedWindowNames)+1)
+	representativeReported := false
+	for _, name := range claudeUnifiedWindowNames {
+		window, ok := unifiedWindows[name].(map[string]any)
+		if !ok {
+			continue
+		}
+		limit, ok := usageLimitFromClaudeUnifiedWindow(name, window, accountStatus, observedAt)
+		if !ok {
+			continue
+		}
+		if hasRepresentative && representative.WindowType == limit.WindowType {
+			limit.Status = representative.Status
+			if limit.UtilizationPercent == nil {
+				limit.UtilizationPercent = representative.UtilizationPercent
+			}
+			if limit.ResetsAt == nil {
+				limit.ResetsAt = representative.ResetsAt
+			}
+			representativeReported = true
+		}
+		limits = append(limits, limit)
+	}
+	if hasRepresentative && !representativeReported {
+		limits = append(limits, representative)
+	}
+	return limits
+}
+
+// usageLimitFromClaudeUnifiedWindow reads one unifiedWindows entry:
+// {utilization: fraction of the window used, resetsAt: unix seconds}. Claude Code
+// reports a status only for the representative window. Any other window is not
+// what is limiting the account, so it is "allowed" while the account is allowed;
+// once the account is rejected SAM cannot tell which other windows are exhausted,
+// so they are "unknown" and their level comes from utilization alone.
+func usageLimitFromClaudeUnifiedWindow(name string, window map[string]any, accountStatus string, observedAt int64) (usageLimitPayload, bool) {
+	utilizationPercent, hasUtilization := utilizationPercentField(window, "utilization")
+	resetsAt := resetMillisField(window, "resetsAt", "resets_at")
+	if !hasUtilization && resetsAt == nil {
+		return usageLimitPayload{}, false
+	}
+	status := "unknown"
+	if accountStatus == "allowed" || accountStatus == "allowed_warning" {
+		status = "allowed"
+	}
+	freshnessMs := int64(0)
+	return usageLimitPayload{
+		WindowType:         "claude." + name,
+		Provider:           "anthropic",
+		Source:             "claude-acp.rate_limit",
+		Status:             status,
+		UtilizationPercent: utilizationPercent,
+		WindowMinutes:      claudeWindowMinutes(name),
+		ResetsAt:           resetsAt,
+		ObservedAt:         observedAt,
+		FreshnessMs:        &freshnessMs,
+	}, true
+}
+
 func stringField(values map[string]any, keys ...string) string {
 	for _, key := range keys {
 		value, ok := values[key]
@@ -106,6 +185,12 @@ func normalizeUsageLimitStatus(value string) string {
 	}
 }
 
+// utilizationPercentField converts Claude's rate-limit utilization to a percent.
+// Claude Code reports it as the fraction of the window used (0..1, read from the
+// anthropic-ratelimit-unified-*-utilization headers) and its own status line
+// renders round(x*1000)/10; the same rounding here keeps float noise
+// (0.13*100 = 13.000000000000002) out of the report. A fraction above 1 means the
+// window is over its limit and clamps to 100.
 func utilizationPercentField(values map[string]any, key string) (*float64, bool) {
 	value, ok := values[key]
 	if !ok {
@@ -115,9 +200,7 @@ func utilizationPercentField(values map[string]any, key string) (*float64, bool)
 	if !ok {
 		return nil, false
 	}
-	if number <= 1 {
-		number *= 100
-	}
+	number = math.Round(number*1000) / 10
 	if number < 0 {
 		number = 0
 	}
