@@ -507,7 +507,9 @@ export function applyPromptDeliveryResult(
       sql.exec(
         `INSERT INTO prompt_delivery_target_backoff
           (target_session_id, busy_attempts, next_attempt_at, message_priority)
-          SELECT target_session_id, ?, ?, ${deliveryPrioritySql('session_inbox')}
+          SELECT target_session_id, ?, ?, CASE message_class
+            WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4
+            WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END
           FROM session_inbox WHERE id = ?
           ON CONFLICT(target_session_id) DO UPDATE SET
             busy_attempts = excluded.busy_attempts,
