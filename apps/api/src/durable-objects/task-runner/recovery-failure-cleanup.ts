@@ -25,6 +25,31 @@ export async function ownsRecoveryAttempt(
   );
 }
 
+async function resleepRecoverySession(
+  state: TaskRunnerState,
+  recoverySessionId: string,
+  rc: TaskRunnerContext
+): Promise<boolean> {
+  const { sleepSession, getSession } = await import('../../services/project-data');
+  const session = await getSession(rc.env, state.projectId, recoverySessionId);
+  if (!(await ownsRecoveryAttempt(state, rc))) return false;
+  if (session?.status !== 'sleeping') {
+    const slept = await sleepSession(rc.env, state.projectId, recoverySessionId, {
+      failedOnly: session?.status === 'failed',
+      ...(state.config.recoveryAttemptId
+        ? {
+            guard: {
+              taskId: state.taskId,
+              workspaceId: typeof session?.workspaceId === 'string' ? session.workspaceId : null,
+            },
+          }
+        : {}),
+    });
+    if (!slept) throw new Error('Recovery failure could not return the conversation to sleeping');
+  }
+  return true;
+}
+
 export async function failRecoveryLifecycle(
   state: TaskRunnerState,
   errorMessage: string,
@@ -40,7 +65,7 @@ export async function failRecoveryLifecycle(
   if (!state.config.recoveryAttemptId) {
     await restoreSessionRecoveryHandoff(rc.env.DATABASE, state.taskId, recoverySessionId);
   }
-  const { sleepSession, failSession, getSession } = await import('../../services/project-data');
+  const { failSession } = await import('../../services/project-data');
   const { findRestorableOrInFlightSleepSnapshot } =
     await import('../../services/session-snapshot-sleep-predicate');
   const preserve =
@@ -50,22 +75,7 @@ export async function failRecoveryLifecycle(
       chatSessionId: recoverySessionId,
     }));
   if (preserve) {
-    const session = await getSession(rc.env, state.projectId, recoverySessionId);
-    if (!(await ownsRecoveryAttempt(state, rc))) return;
-    if (session?.status !== 'sleeping') {
-      const slept = await sleepSession(rc.env, state.projectId, recoverySessionId, {
-        failedOnly: session?.status === 'failed',
-        ...(state.config.recoveryAttemptId
-          ? {
-              guard: {
-                taskId: state.taskId,
-                workspaceId: typeof session?.workspaceId === 'string' ? session.workspaceId : null,
-              },
-            }
-          : {}),
-      });
-      if (!slept) throw new Error('Recovery failure could not return the conversation to sleeping');
-    }
+    if (!(await resleepRecoverySession(state, recoverySessionId, rc))) return;
   } else {
     await failSession(rc.env, state.projectId, recoverySessionId, errorMessage);
   }
