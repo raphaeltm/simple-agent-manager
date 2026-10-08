@@ -2398,6 +2398,34 @@ export const MIGRATIONS: Migration[] = [
       sql.exec('ALTER TABLE session_inbox ADD COLUMN wake_ready_attempt_id TEXT');
     },
   },
+  {
+    name: '062-prompt-delivery-target-backoff',
+    run(sql) {
+      sql.exec(`CREATE TABLE prompt_delivery_target_backoff (
+        target_session_id TEXT PRIMARY KEY REFERENCES chat_sessions(id) ON DELETE CASCADE,
+        busy_attempts INTEGER NOT NULL,
+        next_attempt_at INTEGER NOT NULL,
+        message_priority INTEGER NOT NULL
+      )`);
+      // Partial indexes exclude retained delivery history. The head lookup uses
+      // SQLite's implicit rowid suffix for stable FIFO ties without sorting.
+      sql.exec(`CREATE INDEX idx_inbox_active_target_head ON session_inbox (
+        target_session_id, (delivery_state = 'delivering') DESC,
+        (CASE message_class WHEN 'shutdown_with_final_prompt' THEN 5
+          WHEN 'preempt_and_replan' THEN 4 WHEN 'interrupt' THEN 3
+          WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END) DESC,
+        created_at
+      ) WHERE delivery_state IN ('queued', 'retry_wait', 'delivering')`);
+      sql.exec(`CREATE INDEX idx_inbox_pending_due ON session_inbox (
+        COALESCE(next_attempt_at, created_at)
+      ) WHERE delivery_state IN ('queued', 'retry_wait')`);
+      sql.exec(`CREATE INDEX idx_inbox_active_expiry ON session_inbox (expires_at)
+        WHERE delivery_state IN ('queued', 'retry_wait', 'delivering')
+          AND expires_at IS NOT NULL`);
+      sql.exec(`CREATE INDEX idx_inbox_pending_attempts ON session_inbox (delivery_attempts)
+        WHERE delivery_state IN ('queued', 'retry_wait')`);
+    },
+  },
   // Retired before release: `059-message-upload-parts` ran on staging only. Objects
   // that ran it keep an unused `message_upload_parts` table, since DO migrations
   // never drop tables, so neither that migration name nor that table name may be reused.
