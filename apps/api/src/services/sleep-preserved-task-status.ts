@@ -155,6 +155,9 @@ const SLEEP_LIFECYCLE_OWNERSHIP: Record<
   // or will no longer claim must stay reachable by the reapers — otherwise it has
   // no escape path at all (`.claude/rules/47`), and the reapers are the durable
   // backstop for an exhaustion release or failure teardown that never ran.
+  // A capture already claimed by sleep remains an owner after an error callback
+  // changes the agent status. The claim is scoped to this workspace and bounded
+  // by the same in-flight age limit as the snapshot lifecycle.
   failed: (w, maxSleepAttempts) => `(
     ${w}.project_id IS NOT NULL
     AND ${w}.status IN ${sqlList([...SLEEP_CLAIMABLE_WORKSPACE_STATUSES, 'sleeping'])}
@@ -164,11 +167,22 @@ const SLEEP_LIFECYCLE_OWNERSHIP: Record<
         AND sleep_node.node_role = '${SLEEP_CLAIMABLE_NODE_ROLE}'
         AND sleep_node.runtime IN ${sqlList(SLEEP_SNAPSHOT_NODE_RUNTIMES)}
     )
-    AND EXISTS (
+    AND (EXISTS (
       SELECT 1 FROM agent_sessions resumable_agent
       WHERE resumable_agent.workspace_id = ${w}.id
         AND resumable_agent.status IN ${sqlList(SLEEP_RESUMABLE_AGENT_SESSION_STATUSES)}
-    )
+    ) OR EXISTS (
+      SELECT 1 FROM session_snapshots active_capture
+      WHERE active_capture.workspace_id = ${w}.id
+        AND active_capture.project_id = ${w}.project_id
+        AND active_capture.chat_session_id = ${w}.chat_session_id
+        AND active_capture.sleeping_at IS NULL
+        AND active_capture.sleep_status IN ('preparing', 'stopping')
+        AND active_capture.sleep_claim_id IS NOT NULL
+        AND CASE WHEN active_capture.sleep_status = 'stopping'
+          THEN COALESCE(active_capture.sleep_stopping_since, active_capture.sleep_claimed_at)
+          ELSE active_capture.sleep_claimed_at END > ?
+    ))
     AND NOT ${exhaustedSessionSleepSql(`${w}.chat_session_id`, maxSleepAttempts)}
   )`,
 };
@@ -178,6 +192,7 @@ const SLEEP_LIFECYCLE_OWNERSHIP: Record<
  * the session-sleep lifecycle, so the node-cleanup orphan reapers must leave it
  * alone. The reapers run before `session_sleep` in every cron tick, so without
  * this they would destroy a runtime before its sleep snapshot could be taken.
+ * The returned SQL has one placeholder: bind the snapshot in-flight cutoff first.
  */
 export function sleepLifecycleOwnsTerminalTaskWorkspaceSql(
   taskAlias: string,

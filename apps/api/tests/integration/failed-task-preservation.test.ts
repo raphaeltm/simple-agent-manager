@@ -15,6 +15,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
+import { emptyResult, resolveCleanupConfig } from '../../src/scheduled/node-cleanup/shared';
+import { sweepOrphanedWorkspaces } from '../../src/scheduled/node-cleanup/workspace-phases';
 import { runSessionSleepSweep } from '../../src/scheduled/session-sleep';
 import {
   failedTaskNoticeId,
@@ -50,6 +52,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../../src/services/node-agent', () => ({
+  getNodeAgentBackgroundRequestTimeoutMs: () => 5000,
   hibernateAgentSessionOnNode: (...args: unknown[]) => mocks.hibernateAgentSessionOnNode(...args),
   stopWorkspaceOnNode: (...args: unknown[]) => mocks.stopWorkspaceOnNode(...args),
 }));
@@ -107,8 +110,8 @@ describe('failed-task work preservation vertical slice', () => {
   ) {
     sqlite
       .prepare(
-        `INSERT INTO nodes (id, user_id, status, node_role, runtime)
-         VALUES ('node-1', 'user-1', 'running', 'workspace', ?)`
+        `INSERT INTO nodes (id, user_id, status, node_role, node_class, runtime)
+         VALUES ('node-1', 'user-1', 'running', 'workspace', 'managed', ?)`
       )
       .run(runtime);
     sqlite
@@ -414,6 +417,50 @@ describe('failed-task work preservation vertical slice', () => {
       taskId: 'recovery-task-1',
     });
     expect(claim).toEqual({ status: 'claimed', taskId: 'recovery-task-1' });
+  });
+
+  it('keeps the failed workspace owned while capture is paused and the agent reports error', async () => {
+    seedFailedTask('vm');
+    await cleanupTerminalTaskResources(env, 'task-1', { status: 'failed' });
+    const captureImpl = mocks.hibernateAgentSessionOnNode.getMockImplementation()!;
+    let resumeCapture!: () => void;
+    let captureStarted!: () => void;
+    const midpoint = new Promise<void>((resolve) => {
+      captureStarted = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      resumeCapture = resolve;
+    });
+    mocks.hibernateAgentSessionOnNode.mockImplementationOnce(async (...args: unknown[]) => {
+      captureStarted();
+      await release;
+      return captureImpl(...args);
+    });
+    const sleep = runSessionSleepSweep(env, START);
+    await midpoint;
+    expect(snapshotRow()).toMatchObject({ sleep_status: 'preparing' });
+    // The error activity callback may commit while the VM capture is in flight.
+    sqlite.prepare("UPDATE agent_sessions SET status = 'error' WHERE id = 'agent-1'").run();
+    sqlite.prepare("UPDATE workspaces SET created_at = '2026-09-24T00:00:00.000Z'").run();
+    const result = emptyResult();
+    await sweepOrphanedWorkspaces(
+      drizzle(env.DATABASE, { schema }),
+      env,
+      START,
+      resolveCleanupConfig(env),
+      result
+    );
+    expect(statusOf('workspaces', 'workspace-1')).toBe('running');
+    expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
+    resumeCapture();
+    expect(await sleep).toMatchObject({ slept: 1, failed: 0 });
+    expect(snapshotRow()).toMatchObject({
+      sleep_status: 'sleeping',
+      status: 'available',
+      degradation: 'none',
+    });
+    expect(statusOf('workspaces', 'workspace-1')).toBe('sleeping');
+    expect(order.indexOf('final-snapshot')).toBeLessThan(order.indexOf('stop-workspace'));
   });
 
   it('sleeps a failed Instant (cf-container) task through the container sleep path', async () => {

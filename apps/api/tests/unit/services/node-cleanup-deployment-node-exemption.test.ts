@@ -136,6 +136,7 @@ beforeEach(() => {
     -- The sleep columns and agent_sessions are read by the terminal-task
     -- ownership predicate (sleepLifecycleOwnsTerminalTaskWorkspaceSql).
     CREATE TABLE session_snapshots (
+      workspace_id TEXT, project_id TEXT, sleep_claim_id TEXT, sleep_claimed_at TEXT, sleep_stopping_since TEXT,
       chat_session_id TEXT PRIMARY KEY, status TEXT NOT NULL,
       degradation TEXT NOT NULL, expires_at TEXT NOT NULL,
       sleeping_at TEXT, sleep_status TEXT, sleep_after TEXT, capture_generation TEXT,
@@ -265,8 +266,7 @@ describe('node-cleanup sweep never destroys deployment nodes', () => {
     expect(stopCalls).toHaveLength(0);
 
     const row = sqlite?.prepare(`SELECT status FROM nodes WHERE id = ?`).get('deployment-only') as
-      | { status: string }
-      | undefined;
+      { status: string } | undefined;
     expect(row?.status).toBe('running');
   });
 });
