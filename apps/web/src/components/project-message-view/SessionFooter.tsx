@@ -1,6 +1,8 @@
 import type { SlashCommand } from '@simple-agent-manager/acp-client';
 import { PlanModal } from '@simple-agent-manager/acp-client';
 import type { AgentProfile } from '@simple-agent-manager/shared';
+import { isExpiredTask } from '@simple-agent-manager/shared';
+import { Button } from '@simple-agent-manager/ui';
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
 
 import { CompletionDock } from './CompletionDock';
@@ -23,6 +25,7 @@ interface SessionFooterProps {
   agentProfiles: AgentProfile[];
   slashCommands: SlashCommand[];
   onNewChat?: () => void;
+  onFork?: () => void;
 }
 
 /**
@@ -42,6 +45,7 @@ export function SessionFooter({
   agentProfiles,
   slashCommands,
   onNewChat,
+  onFork,
 }: Readonly<SessionFooterProps>) {
   const [showPlanModal, setShowPlanModal] = useState(false);
 
@@ -153,7 +157,16 @@ export function SessionFooter({
       )}
       {lc.sessionState === 'terminated' && (
         <div className="shrink-0 border-t border-border-default px-4 py-3 bg-surface text-center">
-          <span className="sam-type-secondary text-fg-muted">This session has ended.</span>
+          <p className="m-0 sam-type-secondary text-fg-muted">
+            {isExpiredTask(lc.taskEmbed)
+              ? 'The saved workspace has expired. Your transcript is still available. Choose Fork to continue in a new conversation.'
+              : 'This session has ended.'}
+          </p>
+          {isExpiredTask(lc.taskEmbed) && onFork && (
+            <Button onClick={onFork} size="lg" className="mt-2">
+              Fork conversation
+            </Button>
+          )}
         </div>
       )}
     </>

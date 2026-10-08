@@ -818,13 +818,14 @@ tune how SAM stores and delivers requests internally and rarely need changing; t
 
 ## ACP Protocol (VM Agent)
 
+Task-managed ACP prompts use control-plane inactivity classification and the task absolute ceiling. `ACP_TASK_PROMPT_TIMEOUT` has been removed; legacy values no longer impose a duration-only failure. `ACP_PROMPT_TIMEOUT` applies only to unmanaged workspace sessions.
+
 | Variable                               | Default | Description                                                      |
 | -------------------------------------- | ------- | ---------------------------------------------------------------- |
 | `ACP_MESSAGE_BUFFER_SIZE`              | `5000`  | Buffer size for ACP messages                                     |
 | `ACP_STDERR_BUFFER_BYTES`              | `4096`  | Agent stderr bytes retained for crash reports                    |
 | `ACP_PING_INTERVAL`                    | `30s`   | WebSocket keepalive ping interval                                |
 | `ACP_PONG_TIMEOUT`                     | `10s`   | Pong response timeout                                            |
-| `ACP_TASK_PROMPT_TIMEOUT`              | `8h`    | Task execution prompt timeout                                    |
 | `ACP_PROMPT_RETRY_MAX_RETRIES`         | `2`     | Max transient provider prompt retries after the initial attempt  |
 | `ACP_PROMPT_RETRY_INITIAL_BACKOFF`     | `15s`   | Initial backoff before retrying transient provider prompt errors |
 | `ACP_PROMPT_RETRY_MAX_BACKOFF`         | `2m`    | Max exponential backoff for transient provider prompt retries    |
@@ -1313,7 +1314,7 @@ Safe operator sequence for ProjectData storage relief:
 | `PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED`                  | `false`                     | Enables cleanup of old terminal-session grouped message rows and their FTS entries under storage pressure. `wrangler.toml` ships `true`, so this is ON; a cleaned session falls back to keyword search and is never re-indexed |
 | `PROJECT_DATA_GROUPED_FTS_CLEANUP_TRIGGER_RATIO`            | `0.9`                       | ProjectData usage ratio that starts grouped/FTS derived-data cleanup                                                                                                                                                           |
 | `PROJECT_DATA_GROUPED_FTS_CLEANUP_TARGET_RATIO`             | `0.85`                      | ProjectData usage ratio below which grouped/FTS cleanup stops                                                                                                                                                                  |
-| `PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_SESSIONS`           | `2`                         | Maximum terminal sessions cleaned by one grouped/FTS canary slice                                                                                                                                                              |
+| `PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_SESSIONS`           | `2`                         | Maximum terminal sessions examined by one grouped/FTS slice; candidate selection pages IDs first and reads at most one extra session for continuation                                                                                                                                                              |
 | `PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_ROWS`               | `1000`                      | Maximum grouped message rows deleted by one grouped/FTS canary slice                                                                                                                                                           |
 | `PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_BYTES`              | `4194304`                   | Maximum grouped message content bytes deleted by one grouped/FTS canary slice                                                                                                                                                  |
 | `PROJECT_DATA_GROUPED_FTS_CLEANUP_MIN_SESSION_AGE_DAYS`     | `7`                         | Minimum terminal-session age before grouped/FTS derived rows may be cleaned                                                                                                                                                    |
@@ -1441,7 +1442,7 @@ lifecycle bookkeeping.
 | `DO_RETRY_MAX_ATTEMPTS`                 | `8`     | Max attempts for transient Durable Object RPC reset/overload errors                                                                                                                                                                                     |
 | `DO_RETRY_BASE_DELAY_MS`                | `100`   | Base retry delay in milliseconds for transient Durable Object RPC failures                                                                                                                                                                              |
 | `DO_RETRY_MAX_DELAY_MS`                 | `250`   | Max per-attempt retry delay for transient Durable Object RPC failures                                                                                                                                                                                   |
-| `DO_RETRY_CONNECTION_LOST_MAX_ATTEMPTS` | `3`     | Attempts (capped at `DO_RETRY_MAX_ATTEMPTS`) for an idempotent ProjectData read whose connection to the object was lost. An idempotent read that exhausts its attempts on a lost connection or a CPU-limit reset returns `503 PROJECT_DATA_UNAVAILABLE` |
+| `DO_RETRY_CONNECTION_LOST_MAX_ATTEMPTS` | `3`     | Attempts (capped at `DO_RETRY_MAX_ATTEMPTS`) for an idempotent ProjectData read whose connection to the object was lost or that encounters `SQLITE_NOMEM`. Mutations never retry `SQLITE_NOMEM`. An idempotent read that exhausts its attempts on either error or a CPU-limit reset returns `503 PROJECT_DATA_UNAVAILABLE` |
 | `PROJECT_DATA_ENSURE_MEMO_MAX_ENTRIES`  | `2000`  | Max ProjectData Durable Objects one Worker isolate remembers as already having a persisted `projectId`, so `ensureProjectId` costs one RPC per isolate instead of one before every DO call                                                              |
 
 ## Runtime Config Limits

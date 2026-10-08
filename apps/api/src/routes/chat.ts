@@ -215,6 +215,7 @@ chatRoutes.get('/:sessionId', async (c) => {
           id: schema.tasks.id,
           status: schema.tasks.status,
           executionStep: schema.tasks.executionStep,
+          terminalReason: schema.tasks.terminalReason,
           errorMessage: schema.tasks.errorMessage,
           placementExplanationJson: schema.tasks.placementExplanationJson,
           outputBranch: schema.tasks.outputBranch,
@@ -239,6 +240,7 @@ chatRoutes.get('/:sessionId', async (c) => {
           id: taskRow.id,
           status: isTaskStatus(taskRow.status) ? taskRow.status : 'draft',
           executionStep: isTaskExecutionStep(taskRow.executionStep) ? taskRow.executionStep : null,
+          terminalReason: taskRow.terminalReason ?? null,
           errorMessage: taskRow.errorMessage ?? null,
           placementExplanationJson: publicPlacementExplanationJson(
             taskRow.placementExplanationJson

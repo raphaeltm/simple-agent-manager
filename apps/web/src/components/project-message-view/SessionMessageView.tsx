@@ -413,6 +413,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
       />
 
       <SessionFooter
+        onFork={onFork}
         lc={lc}
         canWriteSession={canWriteSession}
         selectedTextComposer={commentUi.selectedTextComposer}

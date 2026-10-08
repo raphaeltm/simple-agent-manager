@@ -193,3 +193,15 @@ describe('CPU-limit reset and lost-connection classification', () => {
     expect(classifyDurableObjectError(new Error('boom'))).toBeNull();
   });
 });
+
+
+describe('SQLite memory exhaustion', () => {
+  it('classifies NOMEM separately and permits only explicitly idempotent retries', () => {
+    for (const message of ['out of memory: SQLITE_NOMEM', 'Durable Object reset: SQLITE_NOMEM']) {
+      expect(classifyDurableObjectError(new Error(message))).toBe('sqlite_nomem');
+      expect(isTransientDurableObjectError(new Error(message))).toBe(false);
+      expect(isRetryableForIdempotentDurableObjectOperation(new Error(message))).toBe(true);
+    }
+    expect(classifyDurableObjectError(new Error('out of memory'))).toBeNull();
+  });
+});
