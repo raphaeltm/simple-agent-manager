@@ -348,14 +348,14 @@ describe('agent readiness through persisted heartbeat records', () => {
     }
   );
 
-  it('throws a permanent error at the configured agent-ready timeout', async () => {
+  it('reports the first-heartbeat deadline capped by the configured readiness timeout', async () => {
     seedNode('existing');
     const state = makeState();
     state.stepResults.nodeId = 'existing';
     state.agentReadyStartedAt = NOW - 120_001;
     const rc = makeContext();
     await expect(handleNodeAgentReady(state, rc)).rejects.toMatchObject({
-      message: 'Node agent not ready within 120000ms',
+      message: 'Node boot recovery exhausted or unavailable: first_heartbeat_timeout',
       permanent: true,
     });
     expect(rc.advanceToStep).not.toHaveBeenCalled();

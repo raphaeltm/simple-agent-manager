@@ -63,6 +63,8 @@ const SHARED_FINALIZER_ROUTE_SYMBOLS = [
  * decision that future deletion writers must not copy blindly.
  */
 const ALLOWLIST: Record<string, string> = {
+  'durable-objects/task-runner/boot-recovery.ts':
+    'Replaces only a fresh managed VM before any workspace exists: atomic quarantine excludes every workspace, other task owner and live placement claim. Strict teardown proves runtime termination before marking only that node deleted; no workspace/session lifecycle exists to finalize.',
   'durable-objects/task-runner/task-execution-authority.ts':
     'Cancelled allocation compensation claims only this runner’s newly allocated empty managed host, excluding active reservations, other task ownership and live placement claims. Strict teardown closes no active workspace; the destroying-node handoff sweep owns final D1 node closure. This exception permits only the strict external-delete primitive, not terminal row writes.',
   'durable-objects/task-runner/node-provisioning-rejected-node.ts':
@@ -84,6 +86,10 @@ const ALLOWLIST: Record<string, string> = {
 // Extraction must not turn provisioning compensation into a blanket exemption
 // for future terminal workspace writes in either module.
 const PROVISIONING_COMPENSATION_KINDS: Record<string, ReadonlySet<string>> = {
+  'durable-objects/task-runner/boot-recovery.ts': new Set([
+    'strict_node_delete_helper',
+    'workspace_or_node_deleted_sql_write',
+  ]),
   'durable-objects/task-runner/task-execution-authority.ts': new Set(['strict_node_delete_helper']),
   'durable-objects/task-runner/node-provisioning-rejected-node.ts': new Set([
     'workspace_or_node_sql_delete',
@@ -101,6 +107,13 @@ function isAllowlistedWriter(relative: string, evidence: TerminalWriterEvidence[
     !allowedKinds ||
     evidence.every((item) => {
       if (!allowedKinds.has(item.kind)) return false;
+      if (item.kind === 'workspace_or_node_deleted_sql_write') {
+        return (
+          relative === 'durable-objects/task-runner/boot-recovery.ts' &&
+          /UPDATE nodes SET status = 'deleted'/.test(item.excerpt) &&
+          /runtime_termination_confirmed_at IS NOT NULL/.test(item.excerpt)
+        );
+      }
       if (item.kind === 'workspace_or_node_sql_delete') {
         return /^DELETE\s+FROM\s+nodes$/i.test(item.matchedText);
       }
@@ -117,7 +130,7 @@ function relativeToSrc(file: string): string {
 }
 
 function excerptAround(source: string, index: number): string {
-  return source.slice(Math.max(0, index - 60), Math.min(source.length, index + 120));
+  return source.slice(Math.max(0, index - 60), Math.min(source.length, index + 180));
 }
 
 function findTerminalWriterEvidence(source: string): TerminalWriterEvidence[] {
@@ -251,6 +264,27 @@ describe('workspace/node terminal writers route through shared lifecycle finaliz
       expect(evidence.length).toBeGreaterThanOrEqual(2);
       expect(isAllowlistedWriter(relative, evidence)).toBe(false);
     }
+  });
+
+  it('limits fresh boot recovery to termination-proven node closure', () => {
+    const relative = 'durable-objects/task-runner/boot-recovery.ts';
+    const proven =
+      "UPDATE nodes SET status = 'deleted', updated_at = ? WHERE id = ? AND status = 'destroying' AND runtime_termination_confirmed_at IS NOT NULL";
+    expect(isAllowlistedWriter(relative, findTerminalWriterEvidence(proven))).toBe(true);
+    expect(
+      isAllowlistedWriter(
+        relative,
+        findTerminalWriterEvidence(proven.replace('nodes', 'workspaces'))
+      )
+    ).toBe(false);
+    expect(
+      isAllowlistedWriter(
+        relative,
+        findTerminalWriterEvidence(
+          proven.replace(' AND runtime_termination_confirmed_at IS NOT NULL', '')
+        )
+      )
+    ).toBe(false);
   });
 
   it('every terminal writer routes through the finalizer or is explicitly allowlisted', () => {

@@ -30,3 +30,9 @@ Transient certificate failure recovers without failing task. Exhausted boot fail
 
 ## Specialist review
 All findings addressed: security reviewer identified pre-workspace warm-claim race; quarantine now applies bounded warm-claim and other-task ownership guards. Completion/test reviewers requested real deletion→replacement integration; added real strict deletion, lease release, provisioning and readiness test with only external providers stubbed. Re-reviews PASS for security, Cloudflare/test engineering, completion, environment, constitution and documentation. Full validation/staging/deploy remain pending.
+
+## Post-mortem
+Single-shot Origin CA issuance originated in a34af0662 (#1413); permanent failure for disappeared claimed nodes was made explicit in 71e97323e (#1764). A transient bootstrap dependency failure therefore became a permanent task failure after the readiness wait. Existing tests covered immediate issuance and deleted-node rejection, not transient transport recovery followed by safe replacement. This change adds executable shell fault tests, SQLite callback/recovery tests, strict deletion→provisioning integration, and crash/replay controls. The lifecycle writer inventory explicitly limits this new empty-node compensation path to termination-proven node closure and rejects workspace closure.
+
+## Local validation evidence
+Lint13/13, typecheck19/19, build9/9 passed. Focused API71 tests, cloud-init180 tests, deployment forwarding47 tests passed. Recovery/readiness/callback coverage:96.24% lines,88.07% branches. Full root run web4023 tests passed; API run found two expected integration updates (terminal-writer inventory and old generic timeout assertion), both corrected and focused36 tests passed. Full-suite completion still pending; staging is queued behind the shared lease.
