@@ -36,4 +36,4 @@ VM rules 27/54/78; API rule 69; telemetry policy 235ad923; scheduling policy 95c
 - Original implementation preserved after runtime loss; resumed from transcript and saved state.
 - Fixed bootstrap cache span boundaries, dropped four unsupported labels, and mapped sam_env to platform_environment only at logging boundary.
 - Selector32, real D1 races15, focused callback/admission/capacity90 tests pass. Fresh independent API/security/constitution/docs and Go reviews pass.
-- Full quality/Go suites, shared staging lease and production measurements remain pending. PR2268 is temporarily closed until staging passes.
+- Full quality passed35/35; root tests passed21/21 (API11,647/web4,023); full Go server passed35.7s after correcting the callback fixture, isolated regression3xPASS. Shared staging lease and production measurements remain pending. PR2268 is temporarily closed until staging passes.
