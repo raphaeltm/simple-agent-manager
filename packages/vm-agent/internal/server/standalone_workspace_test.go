@@ -119,7 +119,14 @@ func TestStandaloneCheckoutKeepsCredentialsAndRedactsFailure(t *testing.T) {
 	}
 	s := &Server{config: &config.Config{StandaloneCloneFilter: "blob:none"}}
 	runtime := &WorkspaceRuntime{Repository: "https://user:" + token + "@example.test/repo.git", BaseBranch: "main", Branch: "output"}
-	err := s.cloneStandaloneRepository(context.Background(), runtime, t.TempDir())
+	workDir := filepath.Join(t.TempDir(), "checkout")
+	if err := os.MkdirAll(filepath.Join(workDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	err := s.cloneStandaloneRepository(context.Background(), runtime, workDir)
+	if _, statErr := os.Stat(workDir); !os.IsNotExist(statErr) {
+		t.Fatalf("failed checkout remains reusable on retry: %v", statErr)
+	}
 	if !checkoutCalled || err == nil {
 		t.Fatalf("checkout failure was not exercised: %v", err)
 	}

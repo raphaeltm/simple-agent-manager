@@ -148,6 +148,9 @@ func (s *Server) cloneStandaloneRepository(ctx context.Context, runtime *Workspa
 		return fmt.Errorf("failed to sanitize standalone repository origin URL: %w: %s", err, output)
 	}
 	if err := checkoutStandaloneBranch(ctx, workDir, cloneBranch, branch, extraEnv); err != nil {
+		if rmErr := os.RemoveAll(workDir); rmErr != nil {
+			slog.Warn("Failed to clean standalone workspace after checkout failure", "workspace", runtime.ID, "error", rmErr)
+		}
 		return fmt.Errorf("standalone checkout failed: %s", redactStandaloneCloneSecrets(err.Error(), cloneSpec.Token))
 	}
 	return nil
