@@ -20,7 +20,7 @@ Busy recipients retry queued messages and repeatedly scan the mailbox. Productio
 - [x] Real delivery alarm tests with many queued messages, controlled busy/idle midpoint, bounded attempts/alarms, eventual ordered exactly-once acceptance.
 - [x] Test migration upgrades and clean installs; guard discrimination and real Workers SQLite query cost.
 - [x] Lint/typecheck/tests/build; local specialist reviews and task completion audit.
-- [ ] Claim shared staging lease, deploy and verify, clean up and release.
+- [x] Claim shared staging lease, deploy and verify, clean up and release.
 - [ ] PR/CI/CodeRabbit request-and-wait, merge, production deploy.
 - [ ] Compare production GraphQL root alarms and periodic rowsRead before/after; append PR/evidence to idea and complete only after deployment and verified improvement.
 - [ ] Publish MERGED and DONE, cancel subscription cd6274cb-ca5c-40ac-9c6e-1b6bcdb8eced.
@@ -41,3 +41,9 @@ Busy recipients retry queued messages and repeatedly scan the mailbox. Productio
 - Final current-main checks: API lint/typecheck/build and DO migration safety PASS; Workers rerun3 files/6tests PASS in73.80s. No code changes required after main integration; only migration-count fixture corrected. Local implementation validation complete; staging/merge/production acceptance remain open.
 - Integrated NOMEM fix #2269/main ef0e38a53 cleanly (merge3b5a3b445). Rechecked26 migration/delivery unit tests and30 tests across four Workers files, including storage-safety alarms: all passed. The NOMEM owner removed its temporary production override for the fixed-main rollout; do not deploy an older commit with cleanup enabled.
 - Queue update77 inserts expiry follow-up immediately after this task. On staging release, send a direct message to task01M4DV3VH64H7NWXCZ8YXJDKMN in addition to the channel release event.
+
+## Staging verification
+
+Lease112 deployment[37842526334](https://github.com/raphaeltm/simple-agent-manager/actions/runs/37842526334) passed including smoke, candidate c542e5dc7; Worker c91ecb6a-f29b-47fe-bf32-77aeca58fa03. One2vCPU/4GB cx23 VM heartbeat21:03:14, ready21:05:04. Initial early submission failed admission before workspace creation; a new conversation on the same ready node passed. Three follow-ups queued during the real busy prompt:18 snapshots showed both trailing messages at zero attempts. First acknowledgement observed21:10:24, before prior retry deadline21:11:18; all three acknowledged21:10:40. Assistant transcript contains each numbered marker exactly once in order. Dashboard/projects/settings/chat HTTP200, no page errors or horizontal overflow, screenshots reviewed. Both own chats stopped, workspace/node deleted, D1 rows absent and active count0; borrowed project/profile/pool unchanged. Release115 published, direct handoff to failed-wake owner sent.
+
+Evidence: `tasks/evidence/2026-10-08-prompt-delivery-staging.json`. Refreshed post-NOMEM baseline19:00–20:00UTC:491 root alarms,23,879,655 root rowsRead,24,280,527 account rowsRead; raw five-minute groups in `tasks/evidence/2026-10-08-prompt-delivery-before.json`. Cost tool reran successfully. Production acceptance remains pending.
