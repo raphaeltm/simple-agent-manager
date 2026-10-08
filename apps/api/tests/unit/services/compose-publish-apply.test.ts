@@ -278,6 +278,7 @@ describe('buildComposePublishApplyPayload', () => {
     privileged: true
     cap_add:
       - NET_ADMIN
+    use_api_socket: true
     ports:
       - "8000:8000"
 `;
@@ -289,8 +290,10 @@ describe('buildComposePublishApplyPayload', () => {
 
     expect(doc.services.app.privileged).toBeUndefined();
     expect(doc.services.app.cap_add).toBeUndefined();
+    expect(doc.services.app.use_api_socket).toBeUndefined();
     expect(result.warnings.some((w) => w.field === 'privileged')).toBe(true);
     expect(result.warnings.some((w) => w.field === 'cap_add')).toBe(true);
+    expect(result.warnings.some((w) => w.field === 'use_api_socket')).toBe(true);
   });
 
   it('strips denied top-level fields (networks) and replaces with the SAM bridge', () => {
