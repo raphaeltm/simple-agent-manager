@@ -1001,6 +1001,19 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 		// merged config so required fields (image/dockerFile/dockerComposeFile)
 		// remain intact.
 		var overridePath string
+		if volumeName == "" {
+			readResult, readErr := runReadConfiguration(ctx, cfg.WorkspaceDir, devcontainerConfigName)
+			if readErr == nil {
+				readErr = validateReadDevcontainerSecurity(readResult)
+			}
+			if readErr != nil {
+				fallbackOutput := []byte(fmt.Sprintf("failed to validate repo devcontainer config: %v\n", readErr))
+				usedFallback, readErr = fallbackToDefaultDevcontainer(ctx, cfg, volumeName, credHelperHostPath, readErr, fallbackOutput)
+				if readErr != nil {
+					return false, readErr
+				}
+			}
+		}
 		if volumeName != "" {
 			var mountErr error
 			overridePath, mountErr = writeMountOverrideConfig(ctx, cfg, volumeName, credHelperHostPath, devcontainerConfigName, effectiveCacheRef)
@@ -1014,7 +1027,7 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 				}
 			}
 			defer os.Remove(overridePath)
-		} else if credHelperHostPath != "" {
+		} else if !usedFallback && credHelperHostPath != "" {
 			// Repo has config but no volume — use a credential-only override.
 			var credErr error
 			overridePath, credErr = writeCredentialOverrideConfig(credHelperHostPath, effectiveCacheRef)
@@ -1025,7 +1038,7 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 			if overridePath != "" {
 				defer os.Remove(overridePath)
 			}
-		} else if effectiveCacheRef != "" {
+		} else if !usedFallback && effectiveCacheRef != "" {
 			// No volume, no credential helper, but we have a cache ref —
 			// write a cache-only override config.
 			var cacheErr error
@@ -1853,17 +1866,7 @@ func writeMountOverrideConfig(ctx context.Context, cfg *config.Config, volumeNam
 	if err != nil {
 		return "", err
 	}
-	if len(readResult.MergedConfiguration) == 0 {
-		return "", errors.New("devcontainer read-configuration returned empty mergedConfiguration")
-	}
-	if !hasMergedRuntimeSource(readResult.MergedConfiguration) {
-		return "", errors.New("devcontainer read-configuration mergedConfiguration missing image/dockerFile/dockerComposeFile")
-	}
-
-	if len(readResult.Configuration) == 0 {
-		return "", errors.New("devcontainer read-configuration returned empty configuration")
-	}
-	if err := validateMergedDevcontainerSecurity(readResult.Configuration, readResult.MergedConfiguration); err != nil {
+	if err := validateReadDevcontainerSecurity(readResult); err != nil {
 		return "", err
 	}
 
@@ -1926,6 +1929,19 @@ func writeMountOverrideConfig(ctx context.Context, cfg *config.Config, volumeNam
 
 	slog.Info("Wrote mount override config", "path", tmpFile.Name(), "volume", volumeName, "workspaceFolder", "/workspaces/"+repoDirName, "cacheFrom", cacheFrom)
 	return tmpFile.Name(), nil
+}
+
+func validateReadDevcontainerSecurity(readResult *devcontainerReadConfigurationResult) error {
+	if len(readResult.MergedConfiguration) == 0 {
+		return errors.New("devcontainer read-configuration returned empty mergedConfiguration")
+	}
+	if !hasMergedRuntimeSource(readResult.MergedConfiguration) {
+		return errors.New("devcontainer read-configuration mergedConfiguration missing image/dockerFile/dockerComposeFile")
+	}
+	if len(readResult.Configuration) == 0 {
+		return errors.New("devcontainer read-configuration returned empty configuration")
+	}
+	return validateMergedDevcontainerSecurity(readResult.Configuration, readResult.MergedConfiguration)
 }
 
 // runDevcontainerWithDefault writes a default devcontainer config and runs devcontainer up

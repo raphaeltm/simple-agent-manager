@@ -2316,6 +2316,10 @@ func TestPrepareWorkspaceMarksReadyAsRecoveryWhenFallbackIsUsed(t *testing.T) {
 	mockBinDir := t.TempDir()
 	mockDevcontainer := filepath.Join(mockBinDir, "devcontainer")
 	mockScript := `#!/bin/sh
+if [ "$1" = "read-configuration" ]; then
+  echo '{"configuration":{"image":"node:20"},"mergedConfiguration":{"image":"node:20"}}'
+  exit 0
+fi
 for arg in "$@"; do
   case "$arg" in
     --override-config) exit 0 ;;
@@ -2497,6 +2501,10 @@ exit 0
 	mockDevcontainer := filepath.Join(mockBinDir, "devcontainer")
 	// Script: first invocation fails if no --override-config flag, second (with --override-config) succeeds
 	mockScript := `#!/bin/sh
+if [ "$1" = "read-configuration" ]; then
+  echo '{"configuration":{"image":"node:20"},"mergedConfiguration":{"image":"node:20"}}'
+  exit 0
+fi
 for arg in "$@"; do
   case "$arg" in
     --override-config) exit 0 ;;
@@ -2710,7 +2718,7 @@ exit 0
 
 func TestEnsureDevcontainerReadyNoFallbackWhenRepoConfigSucceeds(t *testing.T) {
 	// Mock devcontainer CLI that always succeeds
-	installMockDevcontainerCommand(t, "#!/bin/sh\nexit 0\n")
+	installMockDevcontainerCommand(t, "#!/bin/sh\nif [ \"$1\" = \"read-configuration\" ]; then echo '{\"configuration\":{\"image\":\"node:20\"},\"mergedConfiguration\":{\"image\":\"node:20\"}}'; fi\nexit 0\n")
 
 	workspaceDir := t.TempDir()
 	// Create a repo devcontainer config
@@ -2735,6 +2743,42 @@ func TestEnsureDevcontainerReadyNoFallbackWhenRepoConfigSucceeds(t *testing.T) {
 	}
 	if usedFallback {
 		t.Fatal("expected usedFallback=false when repo config succeeds")
+	}
+}
+
+func TestEnsureDevcontainerReadyRejectsUnsafeRepoConfigWithoutVolume(t *testing.T) {
+	callLog := filepath.Join(t.TempDir(), "devcontainer-calls")
+	mockScript := fmt.Sprintf(`#!/bin/sh
+echo "$@" >> %q
+if [ "$1" = "read-configuration" ]; then
+  echo '{"configuration":{"image":"node:20","mounts":["source=/,target=/host,type=bind"]},"mergedConfiguration":{"image":"node:20","mounts":["source=/,target=/host,type=bind"]}}'
+  exit 0
+fi
+exit 0
+`, callLog)
+	installMockDevcontainerCommand(t, mockScript)
+	workspaceDir := t.TempDir()
+	devcontainerDir := filepath.Join(workspaceDir, ".devcontainer")
+	if err := os.MkdirAll(devcontainerDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(devcontainerDir, "devcontainer.json"), []byte(`{"image":"node:20","mounts":["source=/,target=/host,type=bind"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{WorkspaceDir: workspaceDir, DefaultDevcontainerConfigPath: filepath.Join(t.TempDir(), "default.json"), DefaultDevcontainerImage: "node:20"}
+	usedFallback, err := ensureDevcontainerReady(context.Background(), cfg, "", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !usedFallback {
+		t.Fatal("expected unsafe no-volume repo config to enter recovery")
+	}
+	calls, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(calls), "up ") != 1 {
+		t.Fatalf("expected only the default-container up call, got:\n%s", calls)
 	}
 }
 
