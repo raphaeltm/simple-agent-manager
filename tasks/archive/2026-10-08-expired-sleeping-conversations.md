@@ -20,8 +20,8 @@ Snapshot retention ends after seven days but tasks stay sleeping or legacy in_pr
 - [x] Desktop/mobile Playwright screenshots inspected and attached to PR.
 - [x] Lint/typecheck/test/build and local specialist reviews.
 - [x] Exclusive staging lease, deploy and verify, release.
-- [ ] PR/CI/CodeRabbit/merge/production deploy and real-row verification.
-- [ ] Append evidence to ideas, complete only after verified deployment; channel MERGED/DONE and unsubscribe.
+- [x] PR/CI/CodeRabbit/merge and production real-row verification; final deployment workflow result tracked in PR #2281.
+- Delivery coordination: idea completion, channel DONE/unsubscription and SAM task closure are tracked in PR #2281 and the SAM task after verified deployment.
 
 ## Acceptance criteria
 Expired saved workspaces end as Expired without failure messaging or silent fresh wake. Transcript and Fork remain available. Unexpired and unrelated failures are unchanged. Legacy degraded rows converge without R2 deletion. Backfill is bounded and WHERE guarded with recorded counts.
@@ -71,8 +71,8 @@ Exact migration-predicate dry run matched `[1, 1]` in production and `[0, 0]` in
 
 ## Final verification update — 2026-10-08 23:43Z
 
-Follow-up [#2281](https://github.com/raphaeltm/simple-agent-manager/pull/2281) merged as `2bbe9336f`. Final PR CI37857334982 and main CI37858894058 passed. CodeRabbit trusted request37857283129 returned rate limit; the15-minute observation window completed with no findings. Staging37850306941 passed including smoke; authenticated desktop/mobile Expired transcript/Fork and dashboard/projects/settings checks passed, screenshots reviewed. Lease122 released with no resources created.
+Follow-up [#2281](https://github.com/raphaeltm/simple-agent-manager/pull/2281) merged as `2bbe9336f`. Final PR CI 37857334982 and main CI 37858894058 passed. CodeRabbit trusted request 37857283129 returned a rate limit; the 15-minute observation window completed with no findings. Staging deployment 37850306941 passed, including smoke tests. Authenticated desktop/mobile Expired transcript and Fork checks, plus dashboard/projects/settings navigation, passed. Screenshots were reviewed. Lease 122 was released with no resources created.
 
-Production migration0188 applied. Both review-window failures are corrected; their original timestamps, terminal transition IDs and failure events remain, with exactly one correction event each. All75 tracked conversations retain their per-row transcript counts:255,863messages total,61Expired,13sleeping and one unchanged unrelated failure. The first modern sleeper and unrelated failed/unexpired control remain unchanged. Before/after metadata is retained in project library `/engineering/expiry-2026-10-08/followup/` (before01M4ESMTCNGHSG3EM61AFFK521; after01M4EYDED18SMEGB1J8GQCNRCB).
+Production migration 0188 applied. Both review-window failures are corrected. Their original timestamps, terminal transition IDs and failure events remain, with exactly one correction event each. All 75 tracked conversations retain their per-row transcript counts: 255,863 messages total, 61 Expired, 13 sleeping and one unchanged unrelated failure. The first modern sleeper and unrelated failed/unexpired control remain unchanged. Before/after metadata is retained in project library `/engineering/expiry-2026-10-08/followup/` (before: `01M4ESMTCNGHSG3EM61AFFK521`; after: `01M4EYDED18SMEGB1J8GQCNRCB`).
 
-This update supersedes earlier pending validation statements. Full production workflow37860260750 and final idea/task closure are still pending at this timestamp.
+This dated update supersedes earlier pending validation statements. Production workflow 37860260750 was still running at this observation. Its final result and subsequent idea/task closure are recorded in [PR #2281](https://github.com/raphaeltm/simple-agent-manager/pull/2281) and the SAM task, rather than inferred from this intermediate observation.
