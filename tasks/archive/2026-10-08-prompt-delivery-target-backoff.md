@@ -19,7 +19,7 @@ Busy recipients retry queued messages and repeatedly scan the mailbox. Productio
 - [x] Preserve priority/FIFO, no drop/duplicate, single-flight and independent recipient progress; urgent controls remain usable.
 - [x] Real delivery alarm tests with many queued messages, controlled busy/idle midpoint, bounded attempts/alarms, eventual ordered exactly-once acceptance.
 - [x] Test migration upgrades and clean installs; guard discrimination and real Workers SQLite query cost.
-- [ ] Lint/typecheck/tests/build; local specialist reviews and task completion audit.
+- [x] Lint/typecheck/tests/build; local specialist reviews and task completion audit.
 - [ ] Claim shared staging lease, deploy and verify, clean up and release.
 - [ ] PR/CI/CodeRabbit request-and-wait, merge, production deploy.
 - [ ] Compare production GraphQL root alarms and periodic rowsRead before/after; append PR/evidence to idea and complete only after deployment and verified improvement.
@@ -27,3 +27,15 @@ Busy recipients retry queued messages and repeatedly scan the mailbox. Productio
 
 ## Rules
 62 real-trigger and controlled-order testing; 76 billed metrics; 31 additive migration safety; 25 review/merge gate. Shared staging lease and migration claims follow channel kickoff.
+
+## Validation and recovery evidence
+
+- Local specialist reviews completed: Cloudflare/constitution PASS, docs PASS, task-completion/test engineer ADDRESSED (candidate-limit test added and approved).
+- Full lint/typecheck/build passed on the implementation; web336 files/4,023 tests and other completed package suites passed. Sleep interrupted the first API run, so no success was attributed to that incomplete run.
+- Integrated main90cbf4ea4 (#2277/#2280) without conflicts. Restored API full suite:830 files/11,652 tests; only failure was the old index-count fixture126 versus actual130. Corrected in91de6b446; migration/busy-target/upgrade rerun26/26PASS, other11,651 tests passed.
+- Three Workers regression files passed6 tests before recovery, covering preparation, recipient starvation and measured query cost. Guard-removal checks failed as intended and were restored.
+- Additional billed baseline13:00–14:00UTC October8: root705 alarms, root46,497,540 periodic rowsRead; account46,580,706 reads. NOMEM task later disabled production grouped-FTS cleanup as a temporary stopgap; refresh immediate pre/post windows and distinguish that change from this one.
+- PR[2272](https://github.com/raphaeltm/simple-agent-manager/pull/2272) was auto-opened by SAM, then closed pending required staging. Review/measurement evidence is preserved in its body; reopen only after staging passes.
+- Coordination update: channel notifications did not wake sleeping runtimes. Use direct peer handoff and a <=45-minute fallback scheduled self-message before yielding. Queue is Instant → failed-wake → noise → latency → this task → VM-boot retry; never deploy under another lease. Preserve NOMEM-owned production FTS override.
+
+- Final current-main checks: API lint/typecheck/build and DO migration safety PASS; Workers rerun3 files/6tests PASS in73.80s. No code changes required after main integration; only migration-count fixture corrected. Local implementation validation complete; staging/merge/production acceptance remain open.
