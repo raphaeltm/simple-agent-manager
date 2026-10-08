@@ -1,4 +1,3 @@
-import { isUserConversationStart } from './user-start-admission';
 /**
  * Reusable-node warm-pool claim and capacity-selection helpers.
  *
@@ -48,6 +47,7 @@ import {
 import { updatePlacementDiagnostics } from './placement-diagnostics';
 import { taskPlacementStrategy } from './task-placement-strategy';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
+import { isUserConversationStart } from './user-start-admission';
 
 export { verifyNodeAgentHealthy } from './node-agent-health';
 export type { ReusableNodePlacementResult, ReusableNodeSelection } from './node-placement-deferral';

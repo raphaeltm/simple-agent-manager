@@ -37,10 +37,6 @@ export const LIFECYCLE_PHASES = [
   'git_creds',
   'git_identity',
   'sam_env',
-  'project_env',
-  'project_files',
-  'post_create',
-  'post_start',
 ] as const;
 const phases = new Set<string>(LIFECYCLE_PHASES);
 export const LIFECYCLE_TIMINGS_MAX_BYTES = 8192;
@@ -76,7 +72,12 @@ export function recordLifecycleTimings(
   identity: { nodeId?: string | null; workspaceId?: string; chatSessionId?: string | null },
   outcome: 'success' | 'error' = 'success'
 ): void {
-  const phases = boundedLifecycleTimings(timings);
+  // Keep the wire vocabulary compatible while avoiding the logger's sam_* token
+  // redaction. Never relax credential redaction for a telemetry label.
+  const phases = boundedLifecycleTimings(timings).map((timing) => ({
+    ...timing,
+    phase: timing.phase === 'sam_env' ? 'platform_environment' : timing.phase,
+  }));
   if (phases.length)
     log.info('session_lifecycle.timings', { operation, outcome, ...identity, phases });
 }

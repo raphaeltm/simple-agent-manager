@@ -1,4 +1,3 @@
-import { recordLifecycleTimings } from '../services/lifecycle-timings';
 // FILE SIZE EXCEPTION: Pre-existing VM node lifecycle route surface; splitting is tracked separately from eventing reconciliation. See .claude/rules/18-file-size-limits.md
 /**
  * Node lifecycle routes — VM-agent callbacks plus browser token issuance.
@@ -33,6 +32,7 @@ import {
   signNodeCallbackToken,
   signNodeManagementToken,
 } from '../services/jwt';
+import { recordLifecycleTimings } from '../services/lifecycle-timings';
 import { createWorkspaceOnNode } from '../services/node-agent';
 import {
   NODE_CALLBACK_TERMINAL_STATUSES,

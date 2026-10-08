@@ -1,4 +1,3 @@
-import { recordRunnerPhase } from './phase-timings';
 /**
  * TaskRunner Durable Object — alarm-driven task orchestration (TDF-2).
  *
@@ -58,6 +57,7 @@ import { handleAgentSession } from './agent-session-step';
 import { putTaskRunnerState, taskRunnerAttemptContext } from './attempt-storage';
 import { computeBackoffMs, isTransientError, parseEnvInt } from './helpers';
 import { handleNodeAgentReady, handleNodeProvisioning, handleNodeSelection } from './node-steps';
+import { recordRunnerPhase } from './phase-timings';
 import { hasTaskStepRetryBudget } from './snapshot-restore-retry';
 import { failTask } from './state-machine';
 import { redactTaskRunnerStatus } from './status';

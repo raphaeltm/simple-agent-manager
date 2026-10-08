@@ -1,4 +1,3 @@
-import { isUserConversationStart } from './user-start-admission';
 /** Workspace creation and VM dispatch steps; readiness and attachment handlers are re-exported below. */
 /**
  * Workspace-related step handlers for the TaskRunner DO.
@@ -28,6 +27,7 @@ import { computeBackoffMs, getRecoverySourceTaskGuard, isTransientError } from '
 import { persistPlacementDiagnostics, updatePlacementDiagnostics } from './placement-diagnostics';
 import { ensureSessionLinked } from './state-machine';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
+import { isUserConversationStart } from './user-start-admission';
 import { ensureBranchExistsOnRemote } from './workspace-branch';
 import {
   claimWorkspaceAllocationForTask,

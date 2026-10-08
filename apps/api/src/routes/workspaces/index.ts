@@ -1,4 +1,3 @@
-import { lifecycleTimingsRoutes } from './lifecycle-timings';
 import { Hono } from 'hono';
 
 import type { Env } from '../../env';
@@ -7,6 +6,7 @@ import { agentSessionRoutes } from './agent-sessions';
 import { callbackTokenRenewalRoutes } from './callback-token-renewal';
 import { crudRoutes } from './crud';
 import { lifecycleRoutes } from './lifecycle';
+import { lifecycleTimingsRoutes } from './lifecycle-timings';
 import { localForwardRoutes } from './local-forward';
 import { runtimeRoutes } from './runtime';
 import { sessionSnapshotRoutes } from './session-snapshots';

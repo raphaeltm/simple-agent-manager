@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/workspace/vm-agent/internal/bootlog"
 	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/eventstore"
 )
@@ -75,5 +76,35 @@ func TestLifecycleTimingCallbackIsBoundedAndDoesNotCarryError(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("callback not delivered")
+	}
+}
+
+func TestBootstrapTimingObserverReportsTerminalSpansWithoutDetails(t *testing.T) {
+	for _, status := range []string{"completed", "failed"} {
+		t.Run(status, func(t *testing.T) {
+			_, timings := startLifecycleTimings(context.Background(), "workspace_prepare")
+			reporter := bootlog.New("", "ws-1")
+			reporter.SetPhaseObserver(timings.observe)
+			secret := "ghp_canary_bootstrap_detail"
+			reporter.Log("devcontainer_cache", "started", secret, secret)
+			timings.starts["devcontainer_cache"] = time.Now().Add(-time.Second)
+			reporter.Log("devcontainer_cache", status, secret, secret)
+			duration := timings.durations["devcontainer_cache"]
+			// A duplicate terminal event must not double count the span.
+			reporter.Log("devcontainer_cache", status, secret, secret)
+			reporter.Log(secret, "started", secret)
+			reporter.Log(secret, status, secret)
+			summary := timings.summary()
+			if len(summary) != 2 || len(timings.starts) != 0 {
+				t.Fatalf("unexpected bootstrap spans: %+v", summary)
+			}
+			if duration < 1000 || timings.durations["devcontainer_cache"] != duration {
+				t.Fatalf("cache span missing or double counted: %d", duration)
+			}
+			data, err := json.Marshal(summary)
+			if err != nil || strings.Contains(string(data), secret) {
+				t.Fatalf("bootstrap detail leaked or summary invalid: %s, %v", data, err)
+			}
+		})
 	}
 }

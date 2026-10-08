@@ -20,7 +20,7 @@ var lifecyclePhaseNames = []string{
 	"workspace_prepare", "prepare", "wip_capture", "wip_upload", "home_capture",
 	"home_upload", "complete", "metadata", "workspace", "home_restore", "git_restore",
 	"agent_restore", "verify",
-	"volume_create", "git_clone", "devcontainer_cache", "devcontainer_up", "gh_cli", "git_creds", "git_identity", "sam_env", "project_env", "project_files", "post_create", "post_start",
+	"volume_create", "git_clone", "devcontainer_cache", "devcontainer_up", "gh_cli", "git_creds", "git_identity", "sam_env",
 }
 
 type lifecycleTiming struct {

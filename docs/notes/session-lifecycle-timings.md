@@ -8,6 +8,8 @@ sampling and retention settings; missing logs are not zero-duration phases.
   setup, snapshot capture (`sleep`), or snapshot restore (`wake`). `phases` contains
   only fixed names and integer milliseconds. Workspace identity comes from the
   authenticated callback route; provisioning is attached to the node-ready callback.
+  The wire phase `sam_env` is logged as `platform_environment` so credential
+  redaction preserves the measurement label.
 - `session_lifecycle.runner_phase`: TaskRunner wall-clock transitions, including time
   spent between polling alarms. `attemptId` separates wakes of the same task. Error
   records may describe retried phases; do not sum those with the eventual success.
@@ -25,8 +27,9 @@ without changing operation success. Node `/ready` accepts optional `provisionTim
 
 Workspace `workspace_prepare` includes its bootstrap spans (`git_clone`,
 `devcontainer_up`, credentials/setup hooks); these are nested durations and must not
-be summed with their parent. Restore `workspace` includes fresh provisioning;
-`home_restore` and `git_restore` include download and extraction/application.
+be summed with their parent. Bootstrap spans also include synchronous boot-log
+delivery, so they measure wall-clock work rather than isolated command execution.
+Restore `workspace` includes fresh provisioning; `home_restore` and `git_restore` include download and extraction/application.
 Sleep separates WIP/HOME capture and upload. These measurements identify the next
 optimization; they do not themselves change compression or restore transport.
 

@@ -1,8 +1,8 @@
-import { log } from '../lib/logger';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import * as projectDataService from './project-data';
 import {
