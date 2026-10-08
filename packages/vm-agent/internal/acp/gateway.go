@@ -117,6 +117,8 @@ type MessageReportEntry struct {
 
 // GatewayConfig holds configuration for the ACP gateway and SessionHost.
 type GatewayConfig struct {
+	// TaskManaged delegates task prompt liveness and the absolute ceiling to the control plane.
+	TaskManaged bool
 	// Now supplies wall-clock time for prompt epochs and lifecycle timestamps.
 	// Nil uses time.Now. It is injectable so deadline and epoch tests do not
 	// depend on wall-clock sleeps.
