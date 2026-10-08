@@ -74,15 +74,42 @@ func TestCreateWorkspaceFailsWithoutBuildingWhenSystemProvisioningCannotFinish(t
 				return false, nil
 			}
 			failures := make(chan string, 1)
+			timingsReceived := make(chan struct{}, 1)
 			controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/workspaces/ws-startup-failed/lifecycle-timings" {
+					var payload struct {
+						Operation string            `json:"operation"`
+						Outcome   string            `json:"outcome"`
+						Phases    []lifecycleTiming `json:"phases"`
+					}
+					if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+						t.Errorf("decode timing callback: %v", err)
+					}
+					if payload.Operation != "workspace" || payload.Outcome != "error" || len(payload.Phases) != 1 || payload.Phases[0].Phase != "system_wait" {
+						t.Errorf("unexpected provisioning failure timings: %+v", payload)
+					}
+					select {
+					case timingsReceived <- struct{}{}:
+					default:
+						t.Error("duplicate lifecycle timing callback")
+					}
+					w.WriteHeader(http.StatusOK)
+					return
+				}
 				if r.URL.Path != "/api/workspaces/ws-startup-failed/provisioning-failed" {
 					t.Errorf("unexpected request before system provisioning: %s", r.URL.Path)
+					http.NotFound(w, r)
+					return
 				}
 				var payload map[string]string
 				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 					t.Errorf("decode failure callback: %v", err)
 				}
-				failures <- payload["errorMessage"]
+				select {
+				case failures <- payload["errorMessage"]:
+				default:
+					t.Error("duplicate provisioning failure callback")
+				}
 				w.WriteHeader(http.StatusOK)
 			}))
 			defer controlPlane.Close()
@@ -115,6 +142,11 @@ func TestCreateWorkspaceFailsWithoutBuildingWhenSystemProvisioningCannotFinish(t
 				}
 			default:
 				t.Fatal("system provisioning failure was not published to the control plane")
+			}
+			select {
+			case <-timingsReceived:
+			case <-time.After(time.Second):
+				t.Fatal("system provisioning failure timing was not published")
 			}
 		})
 	}
