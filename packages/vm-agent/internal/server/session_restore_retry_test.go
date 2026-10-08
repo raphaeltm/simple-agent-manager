@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -437,18 +438,41 @@ func TestRestoreHandlerKeepsRestoringAfterItsRequestIsCancelled(t *testing.T) {
 
 // Outliving its request must not make a restore immortal: the attempt ends at
 // the snapshot operation deadline and its waiters get a result.
+// Keep the real authenticated restore/fence/request path, but intercept at the
+// HTTP transport boundary: a short operation can expire before a local server
+// accepts the request. Its cancellation must still reach the outbound request.
+type restoreDeadlineTransport struct {
+	t         *testing.T
+	timeout   time.Duration
+	cancelled chan struct{}
+}
+
+func (transport restoreDeadlineTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.Method != http.MethodGet {
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{}`)), Request: r}, nil
+	}
+	deadline, ok := r.Context().Deadline()
+	if !ok || time.Until(deadline) > transport.timeout {
+		transport.t.Error("snapshot fetch must inherit the configured operation deadline")
+		return nil, errors.New("snapshot operation deadline missing")
+	}
+	<-r.Context().Done()
+	close(transport.cancelled)
+	return nil, r.Context().Err()
+}
+
 func TestRestoreAttemptEndsAtTheSnapshotOperationDeadline(t *testing.T) {
 	fetchCancelled := make(chan struct{})
-	s, restoreRequest := newStandaloneRestoreHandlerServer(t, func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.Method != http.MethodGet {
-			_, _ = w.Write([]byte(`{}`))
-			return
-		}
-		<-r.Context().Done()
-		close(fetchCancelled)
+	s, restoreRequest := newStandaloneRestoreHandlerServer(t, func(http.ResponseWriter, *http.Request) {
+		t.Error("snapshot fetch bypassed the injected HTTP transport")
 	})
-	s.config.SessionSnapshotOperationTimeout = 50 * time.Millisecond
+	// Leave admission and persistence headroom; the transport checks the actual
+	// inherited deadline instead of asserting a scheduler-speed threshold.
+	s.config.SessionSnapshotOperationTimeout = time.Second
+	// Exclude the client's independent timeout: this test must fail if the
+	// operation deadline is removed or detached from the outbound request.
+	s.config.HTTPCallbackTimeout = 0
+	s.httpClient = &http.Client{Transport: restoreDeadlineTransport{t, s.config.SessionSnapshotOperationTimeout, fetchCancelled}}
 
 	responses := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
@@ -466,7 +490,7 @@ func TestRestoreAttemptEndsAtTheSnapshotOperationDeadline(t *testing.T) {
 	}
 	select {
 	case <-fetchCancelled:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the restore's fetch outlived the snapshot operation deadline")
+	default:
+		t.Fatal("the restore's fetch did not observe the snapshot operation deadline")
 	}
 }

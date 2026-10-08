@@ -31,7 +31,8 @@ func (c *sdkPermissionObservingClient) RequestPermission(
 
 type sdkPermissionFixtureAgent struct {
 	acpsdk.Agent
-	conn *acpsdk.AgentSideConnection
+	conn      *acpsdk.AgentSideConnection
+	cancelled chan struct{}
 }
 
 func (a *sdkPermissionFixtureAgent) Initialize(
@@ -45,6 +46,7 @@ func (a *sdkPermissionFixtureAgent) Initialize(
 }
 
 func (a *sdkPermissionFixtureAgent) Cancel(context.Context, acpsdk.CancelNotification) error {
+	a.cancelled <- struct{}{}
 	return nil
 }
 
@@ -62,6 +64,7 @@ type sdkPermissionFixture struct {
 	host       *SessionHost
 	clientConn *acpsdk.ClientSideConnection
 	observed   chan sdkPermissionContextObservation
+	cancelled  <-chan struct{}
 }
 
 func newSDKPermissionFixture(t *testing.T, recorder *interactionRecorder) *sdkPermissionFixture {
@@ -88,7 +91,7 @@ func newSDKPermissionFixture(t *testing.T, recorder *interactionRecorder) *sdkPe
 		_ = agentToClientWriter.Close()
 	})
 
-	agent := &sdkPermissionFixtureAgent{}
+	agent := &sdkPermissionFixtureAgent{cancelled: make(chan struct{}, 4)}
 	agentConn := acpsdk.NewAgentSideConnection(agent, agentToClientWriter, clientToAgentReader)
 	agent.conn = agentConn
 	observed := make(chan sdkPermissionContextObservation, 4)
@@ -100,6 +103,7 @@ func newSDKPermissionFixture(t *testing.T, recorder *interactionRecorder) *sdkPe
 		host:       host,
 		clientConn: acpsdk.NewClientSideConnection(client, clientToAgentWriter, agentToClientReader),
 		observed:   observed,
+		cancelled:  agent.cancelled,
 	}
 }
 
@@ -170,6 +174,16 @@ func TestSDKPermissionCancelIsAttemptScopedAcrossNextPrompt(t *testing.T) {
 	case <-firstDone:
 	case <-time.After(time.Second):
 		t.Fatal("prompt cancel did not close the first SDK prompt")
+	}
+
+	// Prompt cancellation returns once session/cancel is written, but the SDK
+	// fixture dispatches notifications asynchronously. Wait for the fake agent
+	// to consume it before admitting the next prompt, or the old notification
+	// can cancel the second SDK context before we exercise the waiter fence.
+	select {
+	case <-fixture.cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("fake agent did not consume the first session/cancel")
 	}
 
 	secondCtx, secondCancel := context.WithCancel(fixture.host.lifecycleContext())

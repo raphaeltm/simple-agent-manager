@@ -94,6 +94,66 @@ async function getObservabilityEvents(
 
 describe('recoverStuckTasks — vertical slice', () => {
   describe('DO-completed D1-active reconciliation', () => {
+    it.each(['in_progress', 'completed', 'delegated'])(
+      'rechecks D1 after probe converges to %s',
+      async (nextStatus) => {
+        await seedBaseData();
+        const taskId = `task-probe-race-${nextStatus}`;
+        await seedTask(taskId, PROJECT_ID, USER_ID, {
+          status: 'delegated',
+          executionStep: 'agent_session',
+          updatedAt: new Date(Date.now() - 120_000).toISOString(),
+        });
+        let probes = 0;
+        const bindings = {
+          ...env,
+          TASK_DO_MISMATCH_GRACE_MS: '1000',
+          TASK_STUCK_DELEGATED_TIMEOUT_MS: '3600000',
+          TASK_RUNNER: {
+            idFromName: (id: string) => env.TASK_RUNNER.idFromName(id),
+            get: () => ({
+              getStatus: async () => {
+                probes += 1;
+                // The candidate was read already; finish the handoff before returning
+                // the DO result, exactly the ordering that caused false warnings.
+                await env.DATABASE.prepare(
+                  'UPDATE tasks SET status = ?, execution_step = ? WHERE id = ?'
+                )
+                  .bind(
+                    nextStatus,
+                    nextStatus === 'delegated' ? 'agent_session' : 'running',
+                    taskId
+                  )
+                  .run();
+                return {
+                  exists: true,
+                  completed: true,
+                  currentStep: 'running',
+                  retryCount: 0,
+                  lastStepAt: Date.now(),
+                };
+              },
+            }),
+          },
+        } as unknown as Env;
+        const result = await recoverStuckTasks(bindings);
+        expect(probes).toBeGreaterThan(0);
+        expect(result.errors).toBe(0);
+        expect((await getTaskStatus(taskId))?.status).toBe(nextStatus);
+        const diagnostics = await env.OBSERVABILITY_DATABASE.prepare(
+          "SELECT context FROM platform_errors WHERE task_id = ? AND message LIKE 'TaskRunner DO reports completed%'"
+        )
+          .bind(taskId)
+          .all<{ context: string }>();
+        expect(diagnostics.results).toHaveLength(nextStatus === 'delegated' ? 1 : 0);
+        if (nextStatus === 'delegated')
+          expect(JSON.parse(diagnostics.results[0]!.context).taskStatus).toBe('delegated');
+        await env.DATABASE.prepare("UPDATE tasks SET status = 'completed' WHERE id = ?")
+          .bind(taskId)
+          .run();
+      }
+    );
+
     it('fails promptly when the task workspace is demonstrably gone', async () => {
       await seedBaseData();
       const taskId = 'task-st-do-mismatch-dead';

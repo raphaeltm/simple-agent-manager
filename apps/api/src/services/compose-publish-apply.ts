@@ -16,9 +16,8 @@
  * including Docker Model Runner `provider:` services — survives.
  *
  * What the transform does, per service:
- *  - `provider:` model services pass through VERBATIM (Model Runner manages
- *    them; they are not normal containers and must not be re-networked or
- *    re-labelled).
+ *  - `provider:` model services keep their provider-specific configuration
+ *    after denied fields are stripped; they are not re-networked or re-labelled.
  *  - `build:` is replaced with the digest-pinned `image:` that the publish
  *    orchestrator already pushed to the project registry (`pushedRef`).
  *  - `ports:` is TRANSFORMED (not stripped): public ports become routes
@@ -504,15 +503,36 @@ export function buildComposePublishApplyPayload(
       continue;
     }
 
-    // Provider (Docker Model Runner) services pass through VERBATIM. The Model
-    // Runner manages them; re-networking or re-labelling breaks the integration.
-    if ('provider' in rawService) {
+    const service: Record<string, unknown> = { ...rawService };
+    const isProvider = 'provider' in service;
+    // Strip denied fields before the provider early return so model services
+    // cannot bypass the shared Compose security policy.
+    for (const deniedField of Object.keys(DENIED_SERVICE_FIELDS)) {
+      if (deniedField === 'build' && !isProvider) continue; // normal services replace build below
+      if (deniedField in service) {
+        const message = DENIED_SERVICE_FIELDS[deniedField];
+        if (message === undefined) {
+          throw new Error(
+            `Internal error: no message configured for denied service field "${deniedField}"`
+          );
+        }
+        warnings.push({
+          service: name,
+          field: deniedField,
+          message,
+        });
+        delete service[deniedField];
+      }
+    }
+
+    // Provider (Docker Model Runner) services retain their provider-specific
+    // configuration. Re-networking or re-labelling breaks the integration.
+    if (isProvider) {
       hasModelProvider = true;
-      outServices[name] = rawService;
+      outServices[name] = service;
       continue;
     }
 
-    const service: Record<string, unknown> = { ...rawService };
     const artifact = artifactByService.get(name);
 
     // Replace build: with the artifact-backed local image ref when available,
@@ -550,25 +570,6 @@ export function buildComposePublishApplyPayload(
     // loopback bindings below; private/internal routes intentionally remain
     // un-published outside the SAM bridge network.
     delete service.ports;
-
-    // Strip every other denied service field (WARN, never error).
-    for (const deniedField of Object.keys(DENIED_SERVICE_FIELDS)) {
-      if (deniedField === 'build') continue; // handled above
-      if (deniedField in service) {
-        const message = DENIED_SERVICE_FIELDS[deniedField];
-        if (message === undefined) {
-          throw new Error(
-            `Internal error: no message configured for denied service field "${deniedField}"`
-          );
-        }
-        warnings.push({
-          service: name,
-          field: deniedField,
-          message,
-        });
-        delete service[deniedField];
-      }
-    }
 
     const rewrittenVolumes = rewriteSafeNamedServiceVolumes(
       service.volumes,

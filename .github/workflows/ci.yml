@@ -687,12 +687,16 @@ jobs:
           SAM_GOVULNCHECK_BIN: ${{ runner.temp }}/go/bin/govulncheck
         run: pnpm quality:govulncheck-diff
 
-  durable-object-workers:
-    name: Durable Object Workers
+  durable-object-worker-shards:
+    name: Durable Object Workers shard (${{ matrix.shard }}/3)
     needs: [changes]
     if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.api == 'true'
-    # The serial workerd suite passed 55/74 files before the former 15-minute
-    # job budget expired; include setup/build and the full suite with bounded headroom.
+    # Keep per-file storage isolation and serial workerd execution within each
+    # runner. Shard the complete suite to bound wall time as the suite grows.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
@@ -715,7 +719,28 @@ jobs:
         run: pnpm build
 
       - name: Run Worker and Durable Object suites
-        run: pnpm --filter @simple-agent-manager/api test:workers
+        run: pnpm --filter @simple-agent-manager/api test:workers --shard=${{ matrix.shard }}/3 --reporter=default --reporter=./tests/workers/timing-reporter.ts
+
+      - name: Upload per-file Workers timings
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: workers-timings-${{ matrix.shard }}
+          path: apps/api/test-results/workers-timing.json
+
+  # Preserve the existing branch-protection check name. Skipped, cancelled or
+  # failed shards must never turn this required check green for API changes.
+  durable-object-workers:
+    name: Durable Object Workers
+    needs: [changes, durable-object-worker-shards]
+    if: always() && (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.api == 'true'
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every Workers shard to pass
+        env:
+          SHARD_RESULT: ${{ needs.durable-object-worker-shards.result }}
+        run: test "$SHARD_RESULT" = success
 
   pulumi-infra:
     name: Pulumi Infrastructure Tests

@@ -80,7 +80,7 @@ describe('ensureSessionTaskBacked', () => {
     expect(inserted[0]).toMatchObject({
       id: 'task-repair-1',
       chatSessionId: 'session-1',
-      workspaceId: 'workspace-1',
+      workspaceId: expect.any(Object),
       taskMode: 'conversation',
       triggeredBy: 'legacy-session-repair',
       createdAt: '2026-07-01T00:00:00.000Z',

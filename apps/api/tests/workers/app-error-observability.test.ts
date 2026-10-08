@@ -1,8 +1,11 @@
 import { env } from 'cloudflare:test';
+import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
+import { createInstrumentedLogger, serializeError } from '../../src/lib/logger';
 import { handleAppError } from '../../src/middleware/app-error-handler';
 import { errors } from '../../src/middleware/error';
 import { persistErrorBatch, queryErrors } from '../../src/services/observability';
@@ -89,6 +92,78 @@ describe('global app.onError observability persistence', () => {
       sessionId: 'session-1',
       projectId: 'project-1',
     });
+  });
+
+  it('persists only an allowlisted cause code for a real Drizzle/D1 failure', async () => {
+    const canary = 'private-parameter-with-no-token-pattern';
+    const pending: Promise<unknown>[] = [];
+    const app = new Hono<{ Bindings: Env }>();
+    app.onError(handleAppError);
+    app.get('/fail', async (c) => {
+      const db = drizzle(c.env.DATABASE, { schema });
+      try {
+        await db.insert(schema.tasks).values({
+          id: crypto.randomUUID(),
+          projectId: 'nonexistent-project',
+          userId: 'nonexistent-user',
+          title: canary,
+          createdBy: 'nonexistent-user',
+        });
+      } catch (error) {
+        createInstrumentedLogger(c.env.OBSERVABILITY_DATABASE, (p) => pending.push(p), c.env).error(
+          'query_failure',
+          serializeError(error)
+        );
+        throw error;
+      }
+      return c.json({ unexpected: true });
+    });
+    const response = await app.fetch(
+      new Request('https://api.test.example.com/fail'),
+      env,
+      executionContext(pending)
+    );
+    expect(response.status).toBe(500);
+    await Promise.all(pending);
+    const rows = await env.OBSERVABILITY_DATABASE.prepare(
+      'SELECT message, stack, context FROM platform_errors'
+    ).all<{ message: string; stack: string | null; context: string }>();
+    expect(rows.results).toHaveLength(2);
+    for (const row of rows.results) {
+      expect(JSON.parse(row.context).causeCode).toMatch(/^SQLITE_CONSTRAINT(?:_FOREIGNKEY)?$/);
+      expect(JSON.stringify(row)).not.toContain(canary);
+      expect(JSON.stringify(row)).not.toContain('nonexistent-project');
+    }
+  });
+
+  it.each([
+    ['D1_ERROR: D1 DB is overloaded. Requests queued for too long.', 'D1_OVERLOADED'],
+    ['D1_ERROR: Network connection lost.', 'D1_NETWORK'],
+    [
+      'D1_ERROR: D1 DB storage operation exceeded timeout which caused object to be reset.',
+      'D1_TIMEOUT',
+    ],
+    ['unknown-private-cause', undefined],
+  ])('stores safe cause classification for %s', async (cause, expectedCode) => {
+    const pending: Promise<unknown>[] = [];
+    const app = errorApp(
+      () => new Error('Failed query: select ?\nparams: private-canary', { cause: new Error(cause) })
+    );
+    const response = await app.fetch(
+      new Request('https://api.example.com/api/workspaces/ws/fail'),
+      env,
+      executionContext(pending)
+    );
+    expect(response.status).toBe(500);
+    await Promise.all(pending);
+    const row = await env.OBSERVABILITY_DATABASE.prepare(
+      'SELECT message, stack, context FROM platform_errors LIMIT 1'
+    ).first<{ message: string; stack: string | null; context: string }>();
+    expect(JSON.parse(row!.context).causeCode).toBe(expectedCode);
+    expect(row!.stack).toBeNull();
+    expect(row!.message).toBe('Failed query: [REDACTED]');
+    expect(JSON.stringify(row)).not.toContain('private');
+    expect(JSON.stringify(row)).not.toContain(cause);
   });
 
   it('redacts secrets and bounds persisted message and stack lengths', async () => {

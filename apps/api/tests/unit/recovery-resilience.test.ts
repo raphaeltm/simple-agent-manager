@@ -10,10 +10,9 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-const stuckTasksSource = readFileSync(
-  resolve(process.cwd(), 'src/scheduled/stuck-tasks.ts'),
-  'utf8'
-);
+const stuckTasksSource = ['stuck-tasks.ts', 'stuck-task-runner-mismatch.ts']
+  .map((file) => readFileSync(resolve(process.cwd(), `src/scheduled/${file}`), 'utf8'))
+  .join('\n');
 // node-cleanup.ts was split into a directory (rule 18). These structural assertions
 // apply to the sweep as a whole, so read every module and concatenate.
 const nodeCleanupSource = [
