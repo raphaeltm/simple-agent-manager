@@ -8,7 +8,7 @@ import {
   recordLifecycleTimings,
 } from '../../services/lifecycle-timings';
 import { nodeStatusTerminatesCallbacks } from '../../services/node-callback-auth';
-import { loadWorkspaceCallbackIdentity,verifyWorkspaceCallbackAuth } from './_helpers';
+import { loadWorkspaceCallbackIdentity, verifyWorkspaceCallbackAuth } from './_helpers';
 
 export const lifecycleTimingsRoutes = new Hono<{ Bindings: Env }>();
 // Callback JWT only. No session-cookie middleware or telemetry persistence.
