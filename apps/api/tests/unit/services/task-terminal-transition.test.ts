@@ -39,6 +39,7 @@ describe('transitionTaskToTerminal', () => {
     sqlite = new Database(':memory:');
     createSchemaTables(sqlite, [
       schema.tasks,
+      schema.sessionSnapshots,
       schema.taskStatusEvents,
       schema.workspaces,
       schema.triggerExecutions,

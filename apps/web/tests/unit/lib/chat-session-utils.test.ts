@@ -392,3 +392,33 @@ describe('isHighPriorityAttention', () => {
     expect(isHighPriorityAttention(state as AttentionState)).toBe(expected);
   });
 });
+
+describe('expired saved workspace', () => {
+  it('overrides stale sleep and attention without diagnosing a failure', () => {
+    const session = makeSession({
+      status: 'sleeping',
+      task: {
+        id: 'task',
+        status: 'cancelled',
+        terminalReason: 'snapshot_expired',
+        errorMessage: null,
+      },
+      attention: {
+        markerId: 'm',
+        kind: 'wake_failed',
+        reason: 'ttl_expired',
+        createdAt: 1,
+        expiresAt: null,
+        options: [],
+      },
+    });
+    expect(getAttentionState(session)).toBe('expired');
+    expect(getSessionState(session)).toBe('terminated');
+    expect(isActiveSession(session)).toBe(false);
+    expect(
+      getAttentionState(
+        makeSession({ status: 'sleeping', task: { id: 'control', status: 'sleeping' } })
+      )
+    ).toBe('sleeping');
+  });
+});

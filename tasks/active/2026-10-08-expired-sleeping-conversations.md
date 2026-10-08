@@ -11,12 +11,12 @@ Snapshot retention ends after seven days but tasks stay sleeping or legacy in_pr
 - Shared terminal transition owns CAS/event/outbox/parent wake; expiry must preserve these and exclude racing wakes.
 
 ## Checklist
-- [ ] Add additive expiry reason representation and API propagation.
-- [ ] Terminalize expired sleeping tasks through purge, including metadata-only degraded expiry, without broadening R2 deletion.
-- [ ] Prevent legacy expiry failures through real sweep path; retain wake fences.
-- [ ] Bounded dry-run-first legacy backfill, including verified false failures since Oct 1; unexpired control.
-- [ ] Expired chat list/header and clear Fork path; readable transcript.
-- [ ] Real purge/sweep regression tests and race/nonexpired controls.
+- [x] Add additive expiry reason representation and API propagation.
+- [x] Terminalize expired sleeping tasks through purge, including metadata-only degraded expiry, without broadening R2 deletion.
+- [x] Prevent legacy expiry failures through real sweep path; retain wake fences.
+- [x] Bounded dry-run-first legacy backfill, including verified false failures since Oct 1; unexpired control.
+- [x] Expired chat list/header and clear Fork path; readable transcript.
+- [x] Real purge/sweep regression tests and race/nonexpired controls.
 - [ ] Desktop/mobile Playwright screenshots inspected and attached to PR.
 - [ ] Lint/typecheck/test/build and local specialist reviews.
 - [ ] Exclusive staging lease, deploy and verify, release.
@@ -28,3 +28,12 @@ Expired saved workspaces end as Expired without failure messaging or silent fres
 
 ## References
 Ideas 01M43NCRFC9VF93RPM355FZAKJ and 01M372H3BSH4PFC67MH6J63WS8; tasks/backlog/2026-09-26-trustworthy-task-status.md; rules 31, 62, 79; reliability-wave-1008.
+
+## Validation evidence (local)
+- Real purge/sweep/terminal suites: initial62 passed; expanded race suite35 passed, migration2 and fallback31 passed. Amended guard assertions and full package reruns pending.
+- Build9packages and typecheck19packages passed; migration safety0violations.
+- Playwright mobile375x667 and desktop1280x800 passed; header/list screenshots reviewed by local UI specialist, neutral label/readable transcript/Fork flow verified.
+- Specialist reviews: Cloudflare/constitution PASS; task completion/test engineer ADDRESSED (stronger terminal reason/race/event assertions); UI/docs ADDRESSED (reason-only equality and mobile list capture).
+- Amended API regression pass:165 tests (real purge/sweep, migration, terminal reconciliation fixtures); web focused78 passed. Isolated Vite mutation probes each fail their intended assertion when expiry reason or wake-claim fence is removed; working source untouched.
+- Production false-failure refresh14:19Z still four confirmed rows plus the excluded unexpired control. Recheck before production deployment.
+- Reviewed screenshots are retained in project library `/engineering/expiry-2026-10-08/`: mobile header `01M4DXTJRN09HE3QT9Q2GPGWAX`, mobile list `01M4DXTN1QF5BEAECW0BSBNNDW`, desktop header `01M4DXTQQKRE9DX2JQJN451284`, desktop list `01M4DXTT8CSSKMA0MZD6B1XPMT`.

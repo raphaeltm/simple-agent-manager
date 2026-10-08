@@ -4,6 +4,7 @@ import type {
   TaskDetailResponse,
   WorkspaceResponse,
 } from '@simple-agent-manager/shared';
+import { isExpiredTask } from '@simple-agent-manager/shared';
 import { Spinner } from '@simple-agent-manager/ui';
 import {
   Bot,
@@ -249,13 +250,15 @@ export function SessionHeader({
             }}
           >
             <span className="w-[6px] h-[6px] rounded-full bg-current" />
-            {sessionState === 'active'
-              ? 'Active'
-              : sessionState === 'idle'
-                ? 'Idle'
-                : sessionState === 'sleeping'
-                  ? 'Sleeping'
-                  : 'Stopped'}
+            {isExpiredTask(taskEmbed)
+              ? 'Expired'
+              : sessionState === 'active'
+                ? 'Active'
+                : sessionState === 'idle'
+                  ? 'Idle'
+                  : sessionState === 'sleeping'
+                    ? 'Sleeping'
+                    : 'Stopped'}
           </span>
 
           {workspace && <WorkspaceProfileBadge workspace={workspace} />}

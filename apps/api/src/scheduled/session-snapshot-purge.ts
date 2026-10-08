@@ -6,7 +6,10 @@
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
-import * as projectDataService from '../services/project-data';
+import {
+  expireDegradedSleepingConversations,
+  expireSleepingConversation,
+} from '../services/session-expiry';
 import { DEFAULT_SESSION_SLEEP_CLAIM_LEASE_MS } from '../services/session-snapshots';
 import { destroyVmAgentContainer } from '../services/vm-agent-container';
 import {
@@ -52,8 +55,9 @@ function emptySessionSnapshotPurgeStats(
  * Sleeping snapshots the seven-day purge retires: complete ones, and those a bounded
  * sleep fallback slept with (`sleep_fallback_json`, `session-sleep-episode.ts`), so a
  * fallback sleep keeps the same wake window and is cleaned up — R2 bundle included —
- * exactly like any other sleep. Other degraded sleeps predate the fallback and are left
- * as they were (idea 01M05HTJHCWXCG5YZJ6TB3Y2AG) rather than terminalized in bulk here.
+ * exactly like any other sleep. Other degraded sleeps receive the same terminal task outcome through the
+ * metadata-only pass; their R2 artifacts remain outside this purge (idea
+ * 01M05HTJHCWXCG5YZJ6TB3Y2AG).
  */
 const PURGEABLE_SLEEPING_SNAPSHOT_SQL = `(status = 'available'
          OR (status = 'degraded' AND sleep_fallback_json IS NOT NULL))`;
@@ -72,6 +76,7 @@ export async function runSessionSnapshotPurge(
   }
 
   const batchSize = sessionSnapshotPurgeBatchSize(env);
+  await expireDegradedSleepingConversations(env, now, batchSize);
   const purgeClaimId = crypto.randomUUID();
   const staleClaimBefore = new Date(
     now.getTime() -
@@ -138,7 +143,15 @@ export async function runSessionSnapshotPurge(
       // Once the seven-day restore window expires the chat becomes terminal,
       // preventing a later follow-up from silently starting without its state.
       if (candidate.project_id) {
-        await projectDataService.stopSession(env, candidate.project_id, candidate.chat_session_id);
+        if (
+          !(await expireSleepingConversation(
+            env,
+            candidate.project_id,
+            candidate.chat_session_id,
+            now
+          ))
+        )
+          continue;
       }
       if (candidate.runtime === 'cf-container' && candidate.node_id) {
         await destroyVmAgentContainer(env, candidate.node_id);

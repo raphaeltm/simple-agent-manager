@@ -283,6 +283,10 @@ keeps running. You can:
 An Instant session always takes this path when its snapshots keep failing, because it can only
 sleep with a complete snapshot.
 
+## Expired saved workspace
+
+After the seven-day sleep retention window, the conversation shows **Expired**. This is a normal end state, not a task failure. Your transcript stays readable. Choose **Fork conversation** to continue with its context in a new session; the expired workspace itself cannot be restored.
+
 ## Wake failed
 
 SAM tried to wake a sleeping chat and could not. The wake may have been for a message you sent, or

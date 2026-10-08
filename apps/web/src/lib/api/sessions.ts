@@ -13,6 +13,7 @@ export interface ChatSessionTaskEmbed {
   placementExplanationJson?: string | null;
   status?: string;
   executionStep?: string | null;
+  terminalReason?: string | null;
   errorMessage?: string | null;
   outputBranch?: string | null;
   outputPrUrl?: string | null;

@@ -3,6 +3,7 @@ import type {
   ToolCallContentItem,
   ToolCallItem,
 } from '@simple-agent-manager/acp-client';
+import { isExpiredTask } from '@simple-agent-manager/shared';
 
 import type { ChatMessageResponse, ChatSessionResponse, SessionStateSnapshot } from '../../lib/api';
 import { maybeJsonRecord } from '../../lib/runtime-validation';
@@ -179,6 +180,7 @@ export function formatCountdown(ms: number): string {
 export type SessionState = 'active' | 'idle' | 'sleeping' | 'terminated';
 
 export function deriveSessionState(session: ChatSessionResponse): SessionState {
+  if (isExpiredTask(session.task)) return 'terminated';
   if (session.status === 'stopped') return 'terminated';
   if (session.status === 'sleeping') return 'sleeping';
   if (session.isIdle || session.agentCompletedAt) return 'idle';

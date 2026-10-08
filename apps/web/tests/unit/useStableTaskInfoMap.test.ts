@@ -74,6 +74,17 @@ describe('useStableTaskInfoMap', () => {
       expect(secondMap.get('task-1')?.title).toBe('V2');
     });
 
+    it('refreshes an already cancelled task when its expiry reason arrives', () => {
+      const { result } = renderHook(() => useStableTaskInfoMap());
+      act(() => result.current.replaceAll([makeTask({ status: 'cancelled' })]));
+      const previous = result.current.taskInfoMap;
+      act(() => result.current.replaceAll([
+        makeTask({ status: 'cancelled', terminalReason: 'snapshot_expired' }),
+      ]));
+      expect(result.current.taskInfoMap).not.toBe(previous);
+      expect(result.current.taskInfoMap.get('task-1')?.terminalReason).toBe('snapshot_expired');
+    });
+
     it('updates map reference when task count changes', () => {
       const { result } = renderHook(() => useStableTaskInfoMap());
       act(() => {

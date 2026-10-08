@@ -1571,6 +1571,10 @@ describe('recoverStuckTasks', () => {
           },
         ],
         [
+          'FROM session_snapshots\n     WHERE project_id = ? AND chat_session_id = ? AND expires_at <= ?',
+          { results: [] },
+        ],
+        [
           'FROM session_snapshots',
           {
             results: [

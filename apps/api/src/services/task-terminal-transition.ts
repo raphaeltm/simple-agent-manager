@@ -68,6 +68,12 @@ export interface TransitionTaskToTerminalOptions {
    * See `terminalErrorMessage`.
    */
   lifecycleOutcome?: boolean;
+  /** Persist a neutral lifecycle reason separately from error diagnostics. */
+  terminalReason?: string;
+  /** Expiry may end a sleeping task only while this expired snapshot still owns it. */
+  expiredSnapshotId?: string;
+  /** Sweep observation time, also used by the atomic expiry fence. */
+  now?: Date;
 }
 
 function changed(result: D1Result<unknown> | undefined): number {
@@ -184,9 +190,13 @@ export async function transitionTaskToTerminal(
   }
   if (task.status === options.status) return 'already_terminal';
   if (['completed', 'failed', 'cancelled'].includes(task.status)) return 'already_terminal';
-  if (!ACTIVE_TERMINALIZABLE_TASK_STATUSES.has(task.status)) return 'not_terminalizable';
+  if (
+    !ACTIVE_TERMINALIZABLE_TASK_STATUSES.has(task.status) &&
+    !(task.status === 'sleeping' && options.status === 'cancelled' && options.expiredSnapshotId)
+  )
+    return 'not_terminalizable';
 
-  const now = new Date().toISOString();
+  const now = (options.now ?? new Date()).toISOString();
   const terminalTransitionId = ulid();
   const lifecycleEventIntentId = ulid();
   const lifecycleEventIntent = await buildTaskLifecycleEventInput({
@@ -214,6 +224,7 @@ export async function transitionTaskToTerminal(
      SET status = ?,
          execution_step = ?,
          error_message = ?,
+         terminal_reason = ?,
          started_at = CASE WHEN ? = 1 THEN COALESCE(started_at, ?) ELSE started_at END,
          completed_at = ?,
          terminal_transition_id = ?,
@@ -221,6 +232,18 @@ export async function transitionTaskToTerminal(
      WHERE id = ?
        AND project_id = ?
        AND status = ?
+       ${
+         options.expiredSnapshotId
+           ? `AND EXISTS (
+         SELECT 1 FROM session_snapshots expiry
+         WHERE expiry.id = ? AND expiry.project_id = tasks.project_id
+           AND expiry.chat_session_id = tasks.chat_session_id
+           AND expiry.expires_at <= ? AND expiry.sleeping_at IS NOT NULL
+           AND expiry.sleep_status IN ('sleeping', 'purging')
+           AND (expiry.recovery_status IS NULL OR expiry.recovery_status != 'waking')
+       )`
+           : ''
+       }
        AND (? IS NULL OR workspace_id = ?)
        AND (? IS NULL OR chat_session_id = ?)
        AND (
@@ -252,6 +275,7 @@ export async function transitionTaskToTerminal(
     options.status,
     options.executionStep ?? null,
     errorMessage,
+    options.terminalReason ?? null,
     options.fillMissingStartedAt === false ? 0 : 1,
     now,
     now,
@@ -260,6 +284,7 @@ export async function transitionTaskToTerminal(
     options.taskId,
     options.projectId,
     task.status,
+    ...(options.expiredSnapshotId ? [options.expiredSnapshotId, now] : []),
     options.expectedWorkspaceId ?? null,
     options.expectedWorkspaceId ?? null,
     options.expectedChatSessionId ?? null,

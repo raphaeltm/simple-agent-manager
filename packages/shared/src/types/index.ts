@@ -444,6 +444,8 @@ export {
   ACP_SESSION_DEFAULTS,
   ACP_SESSION_TERMINAL_STATUSES,
   ACP_SESSION_VALID_TRANSITIONS,
+  isExpiredTask,
+  SNAPSHOT_EXPIRED_REASON,
 } from './session';
 
 // Activity
