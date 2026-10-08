@@ -504,7 +504,7 @@ describe('runNodeCleanupSweep', () => {
       const cfStatement = prepare.mock.results[cfQueryIndex]?.value as {
         bind: ReturnType<typeof vi.fn>;
       };
-      expect(cfStatement.bind.mock.calls[0]?.[2]).toBe(3);
+      expect(cfStatement.bind.mock.calls[0]?.[3]).toBe(3);
       const terminalQuery = String(prepare.mock.calls[cfQueryIndex]?.[0]);
       // Behaviour against real SQL: tests/workers/scheduled-node-cleanup.test.ts.
       expect(terminalQuery).toContain("t.status IN ('completed', 'failed', 'cancelled')");
@@ -554,7 +554,7 @@ describe('node cleanup permanent-failure escape', () => {
             all: vi.fn(async () => {
               if (!sql.includes('SELECT DISTINCT n.id')) return { results: [] };
               const queryTime = args[0] as string;
-              const limit = args[2] as number;
+              const limit = args[3] as number;
               return {
                 results: candidates
                   .filter((candidate) => {

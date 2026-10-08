@@ -15,6 +15,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
+import { emptyResult, resolveCleanupConfig } from '../../src/scheduled/node-cleanup/shared';
+import { sweepTerminalCfContainers } from '../../src/scheduled/node-cleanup/terminal-cf-container-phase';
+import { sweepOrphanedWorkspaces } from '../../src/scheduled/node-cleanup/workspace-phases';
 import { runSessionSleepSweep } from '../../src/scheduled/session-sleep';
 import {
   failedTaskNoticeId,
@@ -30,6 +33,7 @@ import { createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
 const mocks = vi.hoisted(() => ({
   cleanupTaskRun: vi.fn(),
+  stopNodeResources: vi.fn(),
   failSession: vi.fn(),
   stopSession: vi.fn(),
   persistMessage: vi.fn(),
@@ -49,7 +53,13 @@ const mocks = vi.hoisted(() => ({
   cancelVmTaskAdmission: vi.fn(),
 }));
 
+vi.mock('../../src/services/nodes', () => ({
+  stopNodeResources: (...args: unknown[]) => mocks.stopNodeResources(...args),
+  deleteNodeResourcesStrict: vi.fn(),
+}));
+
 vi.mock('../../src/services/node-agent', () => ({
+  getNodeAgentBackgroundRequestTimeoutMs: () => 5000,
   hibernateAgentSessionOnNode: (...args: unknown[]) => mocks.hibernateAgentSessionOnNode(...args),
   stopWorkspaceOnNode: (...args: unknown[]) => mocks.stopWorkspaceOnNode(...args),
 }));
@@ -107,8 +117,8 @@ describe('failed-task work preservation vertical slice', () => {
   ) {
     sqlite
       .prepare(
-        `INSERT INTO nodes (id, user_id, status, node_role, runtime)
-         VALUES ('node-1', 'user-1', 'running', 'workspace', ?)`
+        `INSERT INTO nodes (id, user_id, status, node_role, node_class, runtime)
+         VALUES ('node-1', 'user-1', 'running', 'workspace', 'managed', ?)`
       )
       .run(runtime);
     sqlite
@@ -415,6 +425,64 @@ describe('failed-task work preservation vertical slice', () => {
     });
     expect(claim).toEqual({ status: 'claimed', taskId: 'recovery-task-1' });
   });
+
+  it.each(['vm', 'cf-container'] as const)(
+    'keeps the failed %s workspace owned while capture is paused and the agent reports error',
+    async (runtime) => {
+      seedFailedTask(runtime);
+      await cleanupTerminalTaskResources(env, 'task-1', { status: 'failed' });
+      const captureImpl = mocks.hibernateAgentSessionOnNode.getMockImplementation()!;
+      let resumeCapture!: () => void;
+      let captureStarted!: () => void;
+      const midpoint = new Promise<void>((resolve) => {
+        captureStarted = resolve;
+      });
+      const release = new Promise<void>((resolve) => {
+        resumeCapture = resolve;
+      });
+      mocks.hibernateAgentSessionOnNode.mockImplementationOnce(async (...args: unknown[]) => {
+        captureStarted();
+        await release;
+        return captureImpl(...args);
+      });
+      const sleep = runSessionSleepSweep(env, START);
+      await midpoint;
+      expect(snapshotRow()).toMatchObject({ sleep_status: 'preparing' });
+      // The error activity callback may commit while the VM capture is in flight.
+      sqlite.prepare("UPDATE agent_sessions SET status = 'error' WHERE id = 'agent-1'").run();
+      sqlite.prepare("UPDATE workspaces SET created_at = '2026-09-24T00:00:00.000Z'").run();
+      sqlite
+        .prepare("UPDATE tasks SET updated_at = '2026-09-24T00:00:00.000Z' WHERE id = 'task-1'")
+        .run();
+      const result = emptyResult();
+      if (runtime === 'cf-container') {
+        await sweepTerminalCfContainers(env, START, resolveCleanupConfig(env), result);
+        expect(mocks.stopNodeResources).not.toHaveBeenCalled();
+        expect(snapshotRow()).toMatchObject({ sleep_status: 'preparing' });
+      }
+      await sweepOrphanedWorkspaces(
+        drizzle(env.DATABASE, { schema }),
+        env,
+        START,
+        resolveCleanupConfig(env),
+        result
+      );
+      expect(statusOf('workspaces', 'workspace-1')).toBe('running');
+      expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
+      expect(mocks.stopNodeResources).not.toHaveBeenCalled();
+      resumeCapture();
+      expect(await sleep).toMatchObject({ slept: 1, failed: 0 });
+      expect(snapshotRow()).toMatchObject({
+        sleep_status: 'sleeping',
+        status: 'available',
+        degradation: 'none',
+      });
+      expect(statusOf('workspaces', 'workspace-1')).toBe('sleeping');
+      expect(order.indexOf('final-snapshot')).toBeLessThan(
+        order.indexOf(runtime === 'vm' ? 'stop-workspace' : 'sleep-container')
+      );
+    }
+  );
 
   it('sleeps a failed Instant (cf-container) task through the container sleep path', async () => {
     seedFailedTask('cf-container');

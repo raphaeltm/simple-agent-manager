@@ -199,8 +199,9 @@ func TestHandlePromptDoesNotRetryNonRetryableError(t *testing.T) {
 }
 
 type promptRetryResponse struct {
-	errMessage string
-	stopReason string
+	beforeReply func(*promptRetryFakeAgent)
+	errMessage  string
+	stopReason  string
 }
 
 type promptRetryScript struct {
@@ -238,6 +239,9 @@ func (a *promptRetryFakeAgent) Serve() {
 			a.t.Errorf("unmarshal prompt request: %v", err)
 			return
 		}
+		if req.Method == "session/cancel" || req.Method == "$/cancel_request" || req.Method == "notifications/cancelled" {
+			continue
+		}
 		if req.Method != "session/prompt" {
 			a.t.Errorf("method = %q, want session/prompt", req.Method)
 			return
@@ -253,29 +257,36 @@ func (a *promptRetryFakeAgent) Serve() {
 			response = a.script.responses[index]
 		}
 
-		if response.errMessage != "" {
-			a.writeJSON(map[string]interface{}{
-				"jsonrpc": "2.0",
-				"id":      json.RawMessage(req.ID),
-				"error": map[string]interface{}{
-					"code":    -32603,
-					"message": response.errMessage,
-				},
-			})
-			continue
-		}
-		stopReason := response.stopReason
-		if strings.TrimSpace(stopReason) == "" {
-			stopReason = "end_turn"
-		}
+		go a.reply(req.ID, response)
+	}
+}
+
+func (a *promptRetryFakeAgent) reply(id json.RawMessage, response promptRetryResponse) {
+	if response.beforeReply != nil {
+		response.beforeReply(a)
+	}
+	if response.errMessage != "" {
 		a.writeJSON(map[string]interface{}{
 			"jsonrpc": "2.0",
-			"id":      json.RawMessage(req.ID),
-			"result": map[string]interface{}{
-				"stopReason": stopReason,
+			"id":      id,
+			"error": map[string]interface{}{
+				"code":    -32603,
+				"message": response.errMessage,
 			},
 		})
+		return
 	}
+	stopReason := response.stopReason
+	if strings.TrimSpace(stopReason) == "" {
+		stopReason = "end_turn"
+	}
+	a.writeJSON(map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"result": map[string]interface{}{
+			"stopReason": stopReason,
+		},
+	})
 }
 
 func (a *promptRetryFakeAgent) writeJSON(v interface{}) {

@@ -131,6 +131,14 @@ describe('sleep-preserved task status authority', () => {
       node?: { role: string; runtime: string } | null;
       agentStatus?: string | null;
       snapshot?: Partial<SessionSleepAttemptState> | null;
+      captureClaim?: {
+        at: string;
+        workspace?: string;
+        project?: string;
+        claimId?: string | null;
+        chat?: string;
+        stoppingSince?: string | null;
+      };
     }
 
     function owned(fixture: Fixture): boolean {
@@ -169,12 +177,27 @@ describe('sleep-preserved task status authority', () => {
           .run(fixture.agentStatus ?? 'running', NOW);
       }
       if (fixture.snapshot) seedSnapshot(fixture.snapshot);
+      if (fixture.captureClaim) {
+        const claim = fixture.captureClaim;
+        sqlite
+          .prepare(
+            `UPDATE session_snapshots SET sleep_claim_id = ?, sleep_claimed_at = ?, workspace_id = ?, project_id = ?, chat_session_id = ?, sleep_stopping_since = ?`
+          )
+          .run(
+            claim.claimId === undefined ? 'claim-1' : claim.claimId,
+            claim.at,
+            claim.workspace ?? 'ws-1',
+            claim.project ?? 'project-1',
+            claim.chat ?? 'chat-1',
+            claim.stoppingSince ?? null
+          );
+      }
       const row = sqlite
         .prepare(
           `SELECT ${sleepLifecycleOwnsTerminalTaskWorkspaceSql('t', 'w', MAX_SLEEP_ATTEMPTS)} AS owned
              FROM tasks t JOIN workspaces w ON w.id = t.workspace_id WHERE t.id = 'task-1'`
         )
-        .get() as { owned: number };
+        .get(new Date(Date.parse(NOW) - 30 * 60 * 1000).toISOString()) as { owned: number };
       return row.owned === 1;
     }
 
@@ -231,6 +254,85 @@ describe('sleep-preserved task status authority', () => {
       ['a terminally refused sleep', { snapshot: { sleepStatus: 'terminal_failed' } }],
     ])('releases a failed task with %s to the reapers', (_label, fixture) => {
       expect(owned(fixture)).toBe(false);
+    });
+
+    it.each([
+      ['preparing', 'vm'],
+      ['stopping', 'vm'],
+      ['preparing', 'cf-container'],
+    ])('owns an error session during %s capture on %s', (sleepStatus, runtime) => {
+      expect(
+        owned({
+          agentStatus: 'error',
+          node: { role: 'workspace', runtime },
+          snapshot: { sleepStatus },
+          captureClaim: { at: NOW },
+        })
+      ).toBe(true);
+    });
+
+    it.each([
+      ['stale', { at: '2026-09-25T10:00:00.000Z' }],
+      ['wrong workspace', { at: NOW, workspace: 'other' }],
+      ['wrong project', { at: NOW, project: 'other' }],
+      ['wrong chat', { at: NOW, chat: 'other' }],
+      ['no claim', { at: NOW, claimId: null }],
+    ] as const)('releases an error session with a %s capture', (_label, captureClaim) => {
+      expect(
+        owned({ agentStatus: 'error', snapshot: { sleepStatus: 'preparing' }, captureClaim })
+      ).toBe(false);
+    });
+
+    it.each(['failed', 'terminal_failed', 'scheduled'])(
+      'does not treat %s as a live capture claim',
+      (sleepStatus) => {
+        expect(
+          owned({ agentStatus: 'error', snapshot: { sleepStatus }, captureClaim: { at: NOW } })
+        ).toBe(false);
+      }
+    );
+
+    it('releases an already-slept capture despite a retained claim', () => {
+      expect(
+        owned({
+          agentStatus: 'error',
+          snapshot: { sleepStatus: 'preparing', sleepingAt: NOW },
+          captureClaim: { at: NOW },
+        })
+      ).toBe(false);
+    });
+
+    it.each([
+      [
+        'stale stopping start despite fresh claim',
+        'stopping',
+        NOW,
+        '2026-09-25T10:00:00.000Z',
+        false,
+      ],
+      [
+        'fresh stopping start despite stale claim',
+        'stopping',
+        '2026-09-25T10:00:00.000Z',
+        NOW,
+        true,
+      ],
+      ['stopping claim fallback', 'stopping', NOW, null, true],
+      [
+        'stale preparing claim despite stopping timestamp',
+        'preparing',
+        '2026-09-25T10:00:00.000Z',
+        NOW,
+        false,
+      ],
+    ] as const)('%s', (_label, sleepStatus, at, stoppingSince, expected) => {
+      expect(
+        owned({
+          agentStatus: 'error',
+          snapshot: { sleepStatus },
+          captureClaim: { at, stoppingSince },
+        })
+      ).toBe(expected);
     });
 
     it('keeps a completed task on its chat link alone (pre-existing behaviour)', () => {

@@ -1,61 +1,55 @@
 package server
 
 import (
+	"context"
+	"fmt"
+	"github.com/workspace/vm-agent/internal/agentsessions"
+	"github.com/workspace/vm-agent/internal/config"
+	"io"
 	"testing"
 	"time"
-
-	"github.com/workspace/vm-agent/internal/config"
 )
 
-func TestEffectivePromptTimeout(t *testing.T) {
-	tests := []struct {
-		name     string
-		taskID   string
-		prompt   time.Duration
-		task     time.Duration
-		expected time.Duration
-	}{
-		{
-			name:     "workspace session uses ACPPromptTimeout (0 = no limit)",
-			taskID:   "",
-			prompt:   0,
-			task:     8 * time.Hour,
-			expected: 0,
-		},
-		{
-			name:     "workspace session with custom timeout",
-			taskID:   "",
-			prompt:   2 * time.Hour,
-			task:     6 * time.Hour,
-			expected: 2 * time.Hour,
-		},
-		{
-			name:     "task session uses ACPTaskPromptTimeout",
-			taskID:   "task-123",
-			prompt:   0,
-			task:     8 * time.Hour,
-			expected: 8 * time.Hour,
-		},
-		{
-			name:     "task session with custom task timeout",
-			taskID:   "task-456",
-			prompt:   0,
-			task:     3 * time.Hour,
-			expected: 3 * time.Hour,
-		},
+func TestPromptTimeoutUsesSessionOwnershipNotNodeBootTask(t *testing.T) {
+	s, _ := newMcpTestServer(t)
+	s.config.TaskID = "boot-task"
+	s.config.ProjectID = "boot-project"
+	s.config.WorkspaceID = "boot-workspace"
+	s.acpConfig.PromptTimeout = time.Hour
+	s.sessionTaskCtx = map[string]taskCallbackContext{
+		"other:task": {TaskID: "session-task", ProjectID: "project", WorkspaceID: "other"},
 	}
+	for _, tc := range []struct {
+		workspace, session string
+		want               time.Duration
+	}{
+		{"other", "task", 0},
+		{"boot-workspace", "legacy-task", 0},
+		{"other", "unmanaged", time.Hour},
+	} {
+		host := s.getOrCreateSessionHost(tc.workspace+":"+tc.session, tc.workspace, tc.session,
+			agentsessions.Session{ID: tc.session, WorkspaceID: tc.workspace}, nil, "")
+		if host == nil {
+			t.Fatal("host not created")
+		}
+		t.Cleanup(host.Stop)
+		if got := host.PromptTimeout(); got != tc.want {
+			t.Errorf("%s: timeout %s, want %s", tc.session, got, tc.want)
+		}
+	}
+}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg := &config.Config{
-				TaskID:               tt.taskID,
-				ACPPromptTimeout:     tt.prompt,
-				ACPTaskPromptTimeout: tt.task,
-			}
-			got := effectivePromptTimeout(cfg)
-			if got != tt.expected {
-				t.Errorf("effectivePromptTimeout() = %v, want %v", got, tt.expected)
-			}
-		})
+func TestTaskFailureCallbackRetainsTypedCause(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		want string
+	}{
+		{fmt.Errorf("rpc: %w", context.DeadlineExceeded), "agent_prompt_deadline_exceeded"},
+		{fmt.Errorf("rpc: %w", io.EOF), "agent_crash"},
+	} {
+		body := runTaskCompletionCallback(t, config.TaskModeTask, "error", tc.err)
+		if body["errorMessage"] != tc.want {
+			t.Errorf("cause = %v, want %s", body["errorMessage"], tc.want)
+		}
 	}
 }
