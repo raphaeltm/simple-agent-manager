@@ -11,11 +11,11 @@ Sleeping Instant containers are reaped at the four-hour node ceiling, archive ca
 - standalone_workspace.go ignores BaseBranch; VM bootstrap already distinguishes base and existing/new checkout branches.
 
 ## Checklist
-- [ ] Protect sleeping Instant at sweep selection and destructive claim boundary; preserve VM cleanup.
-- [ ] Directly destroy non-running Instant on archive; include failed archive stopping rows in reconciliation.
-- [ ] Fence runtime-ended writers and make repeated Stop idempotent with strict proof.
-- [ ] Clone BaseBranch, then track existing or create new output branch; preserve default behavior.
-- [ ] Add real SQL lifecycle/order and real git regression tests; prove failures before fixes.
+- [x] Protect sleeping Instant at sweep selection and destructive claim boundary; preserve VM cleanup.
+- [x] Directly destroy non-running Instant on archive; include failed archive stopping rows in reconciliation.
+- [x] Fence runtime-ended writers and make repeated Stop idempotent with strict proof.
+- [x] Clone BaseBranch, then track existing or create new output branch; preserve default behavior.
+- [x] Add real SQL lifecycle/order and real git regression tests; prove failures before fixes.
 - [ ] Run lint/typecheck/tests/build and local specialist reviews.
 - [ ] Coordinate staging lease, deploy container image, verify real sleep/sweep/wake/archive/stop and required VM smoke.
 - [ ] PR/CI/CodeRabbit, merge, production deployment, idea evidence/status, channel completion/unsubscribe.
