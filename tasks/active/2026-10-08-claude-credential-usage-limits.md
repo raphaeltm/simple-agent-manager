@@ -16,7 +16,7 @@ OpenCode. Claude never shows.
 - `credential_limit_windows` (sam-prod D1) has 6 rows: `openai` (codex.primary) and `opencode.*`.
   **Zero `anthropic` rows**, ever (30-day retention; table exists since 2026-09-13).
 - 245 `claude-code` agent sessions carry server attribution (`agent_credential_reference =
-  cc_credentials:…`, kind `oauth-token`, i.e. a Claude Max token), so Claude should have produced rows.
+cc_credentials:…`, kind `oauth-token`, i.e. a Claude Max token), so Claude should have produced rows.
 - Workers logs (last 24h): every `POST /api/projects/:id/acp-sessions/:sid/usage` from a
   `claude-code` session returned **400** with `durationMs: 0` and no handler log; every one from an
   `openai-codex` session returned **204**.
@@ -47,22 +47,22 @@ OpenCode. Claude never shows.
    (claude-agent-acp 0.81.2 + its bundled Claude Code native binary, SDK 0.3.280) against a mock
    Anthropic API (`.tmp/claude-acp/repro`, not committed) shows the normal reading is:
    `usage_update._meta["_claude/rateLimit"] = {status:"allowed", resetsAt:<s>, rateLimitType:"five_hour",
-   isUsingOverage:false, unifiedWindows:{five_hour:{utilization:0.13,resetsAt:<s>},
-   seven_day:{utilization:0.31,resetsAt:<s>}}}`. Top-level `utilization` appears only in warning states
+isUsingOverage:false, unifiedWindows:{five_hour:{utilization:0.13,resetsAt:<s>},
+seven_day:{utilization:0.31,resetsAt:<s>}}}`. Top-level `utilization` appears only in warning states
    (Claude Code `deriveTrackedLimits`). `usageLimitFromClaudeRateLimit`
    (`packages/vm-agent/internal/acp/session_host_usage.go`) reads only the top level, so after fix 1 the
    chip would show one window with "usage unknown" most of the time and never the weekly window.
 
 ## Writers / readers of `credential_limit_windows.credential_reference` (rule 44)
 
-| Path | Role | Change |
-| --- | --- | --- |
-| `services/acp-usage-callback-handler.ts` → `producer.ts` | writer (VM agent usage callbacks) | key via producer |
-| `services/credential-limit-events/headers.ts` → `producer.ts` (AI proxy: `ai-proxy-passthrough.ts`, `ai-proxy-anthropic-support.ts`, `ai-proxy-platform-billing.ts`) | writer | key via producer |
-| `services/credential-limit-events/admissions.ts` (load/update/outbox guard/supersede) | reader/writer of the producer's sanitized key | unchanged — receives the key |
-| `services/project-event-source-outbox.ts` (predecessor guard) | reader of capture key | unchanged — receives the key |
-| `services/credential-limit-events/admissions.ts:purgeExpiredCredentialLimitWindows` | deleter by `updated_at` | unchanged |
-| `services/credential-limit-events/read.ts` (`listProjectCredentialLimits`, `listUserCredentialLimits`) | readers (project route, MCP tool, Settings route) | key the filter; restore real reference/id |
+| Path                                                                                                                                                                 | Role                                              | Change                                    |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- | ----------------------------------------- |
+| `services/acp-usage-callback-handler.ts` → `producer.ts`                                                                                                             | writer (VM agent usage callbacks)                 | key via producer                          |
+| `services/credential-limit-events/headers.ts` → `producer.ts` (AI proxy: `ai-proxy-passthrough.ts`, `ai-proxy-anthropic-support.ts`, `ai-proxy-platform-billing.ts`) | writer                                            | key via producer                          |
+| `services/credential-limit-events/admissions.ts` (load/update/outbox guard/supersede)                                                                                | reader/writer of the producer's sanitized key     | unchanged — receives the key              |
+| `services/project-event-source-outbox.ts` (predecessor guard)                                                                                                        | reader of capture key                             | unchanged — receives the key              |
+| `services/credential-limit-events/admissions.ts:purgeExpiredCredentialLimitWindows`                                                                                  | deleter by `updated_at`                           | unchanged                                 |
+| `services/credential-limit-events/read.ts` (`listProjectCredentialLimits`, `listUserCredentialLimits`)                                                               | readers (project route, MCP tool, Settings route) | key the filter; restore real reference/id |
 
 ## Implementation checklist
 
