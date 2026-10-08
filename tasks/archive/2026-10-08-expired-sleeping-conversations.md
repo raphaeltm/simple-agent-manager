@@ -17,9 +17,9 @@ Snapshot retention ends after seven days but tasks stay sleeping or legacy in_pr
 - [x] Bounded dry-run-first legacy backfill, including verified false failures since Oct 1; unexpired control.
 - [x] Expired chat list/header and clear Fork path; readable transcript.
 - [x] Real purge/sweep regression tests and race/nonexpired controls.
-- [ ] Desktop/mobile Playwright screenshots inspected and attached to PR.
+- [x] Desktop/mobile Playwright screenshots inspected and attached to PR.
 - [x] Lint/typecheck/test/build and local specialist reviews.
-- [ ] Exclusive staging lease, deploy and verify, release.
+- [x] Exclusive staging lease, deploy and verify, release.
 - [ ] PR/CI/CodeRabbit/merge/production deploy and real-row verification.
 - [ ] Append evidence to ideas, complete only after verified deployment; channel MERGED/DONE and unsubscribe.
 
@@ -68,3 +68,11 @@ Both have deleted workspaces, stopped chats, no remaining snapshot, and the spec
 Follow-up local validation: 11 real SQLite migration tests passed, including the full migration chain, both exact corrections, changed-observation/restored-snapshot controls, unrelated unexpired conversations, and idempotent audit events. ESLint and migration safety passed (206 foreign-key relationships, zero violations). Independent completeness review passed. Staging dry run found zero matching production IDs, as expected; deployment remains queued under the shared lease protocol.
 
 Exact migration-predicate dry run matched `[1, 1]` in production and `[0, 0]` in staging. This caught and corrected the second legacy row’s stored `task_mode=task`; the first is `conversation`. Both modes are now fenced independently, with a regression control for changed modes.
+
+## Final verification update — 2026-10-08 23:43Z
+
+Follow-up [#2281](https://github.com/raphaeltm/simple-agent-manager/pull/2281) merged as `2bbe9336f`. Final PR CI37857334982 and main CI37858894058 passed. CodeRabbit trusted request37857283129 returned rate limit; the15-minute observation window completed with no findings. Staging37850306941 passed including smoke; authenticated desktop/mobile Expired transcript/Fork and dashboard/projects/settings checks passed, screenshots reviewed. Lease122 released with no resources created.
+
+Production migration0188 applied. Both review-window failures are corrected; their original timestamps, terminal transition IDs and failure events remain, with exactly one correction event each. All75 tracked conversations retain their per-row transcript counts:255,863messages total,61Expired,13sleeping and one unchanged unrelated failure. The first modern sleeper and unrelated failed/unexpired control remain unchanged. Before/after metadata is retained in project library `/engineering/expiry-2026-10-08/followup/` (before01M4ESMTCNGHSG3EM61AFFK521; after01M4EYDED18SMEGB1J8GQCNRCB).
+
+This update supersedes earlier pending validation statements. Full production workflow37860260750 and final idea/task closure are still pending at this timestamp.
