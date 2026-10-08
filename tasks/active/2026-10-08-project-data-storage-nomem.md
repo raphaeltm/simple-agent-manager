@@ -15,7 +15,7 @@ SAM root ProjectData storage_safety has repeatedly failed with SQLITE_NOMEM sinc
 - [x] Isolate and log each storage safety substep; preserve prior committed markers on failure.
 - [x] Classify SQLITE_NOMEM; retry only explicitly safe idempotent operations.
 - [x] Real SQLite alarm-path tests, bounded-query evidence, discriminating negative controls.
-- [ ] Relevant docs and full quality validation; local specialist review.
+- [x] Relevant docs and full quality validation; local specialist review.
 - [ ] Coordinated staging lease and runtime validation.
 - [ ] PR, CI, CodeRabbit request/wait, merge and production deploy.
 - [ ] Verify root storage_safety completion, no new NOMEM, normal hourly alert dedupe; append evidence and complete idea.
@@ -35,3 +35,6 @@ Idea 01M1XKK208SJV9VJA4BXP2KBHT; task 01M4DV2PE0ARS834TY69DG3KSF. Rules 53, 62, 
 - An initial metadata-read liveness assertion proved non-discriminating because alarm rescheduling also read it; replaced with actual deletion and persisted row absence.
 - Fault uses real SQLite transaction rollback plus synthetic NOMEM. Native allocator exhaustion is not reproduced locally. Raw OR ROLLBACK poisons local workerd bookkeeping and was rejected as a test strategy.
 - No flag override in either GitHub Environment; deployed production cleanup binding=true before changes. Production baseline 13:43Z shows root NOMEM ~once/minute and hourly threshold alerts.
+
+- Full root test run passed21/21 tasks (36m02s): API827files/11615tests; web336files/4023tests. Used one package/worker at a time after unrelated host-load timeouts.
+- Local Cloudflare, constitution, test-engineer, documentation/environment and task-completion reviews PASS/ADDRESSED; deployment acceptance remains pending.
