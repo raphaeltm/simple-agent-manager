@@ -18,7 +18,7 @@ Production task 01M467MSH3527SSD28TKTFHC8W failed after node 01M467ND1CM7J766YCN
 - [x] Precise readiness reasons, wrong-version immediate failure, bounded first-heartbeat timeout.
 - [x] One durable fresh-VM replacement budget; confirmed teardown before replacement; no workspace/agent replay, reused/BYO nodes untouched; crash-boundary tests.
 - [x] Environment/API/operator documentation and unit/integration tests.
-- [ ] Lint, typecheck, tests, build and local specialist reviews; address all findings.
+- [x] Lint, typecheck, tests, build and local specialist reviews; address all findings.
 - [ ] Exclusive staging lease; real new VM, heartbeat/access/TLS checks; <=2 VMs, prompt deletion and release.
 - [ ] PR/CI/CodeRabbit gate, merge, production deploy; idea evidence and completion; channel MERGED/DONE and unsubscribe.
 
@@ -36,3 +36,5 @@ Single-shot Origin CA issuance originated in a34af0662 (#1413); permanent failur
 
 ## Local validation evidence
 Lint13/13, typecheck19/19, build9/9 passed. Focused API71 tests, cloud-init180 tests, deployment forwarding47 tests passed. Recovery/readiness/callback coverage:96.24% lines,88.07% branches. Full root run web4023 tests passed; API run found two expected integration updates (terminal-writer inventory and old generic timeout assertion), both corrected and focused36 tests passed. Full-suite completion still pending; staging is queued behind the shared lease.
+
+Final root rerun passed21/21 tasks; API830files/11653tests passed. All required local validation is green.
