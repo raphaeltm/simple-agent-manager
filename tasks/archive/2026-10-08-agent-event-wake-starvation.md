@@ -14,8 +14,8 @@ Production agent-message events persist and match but do not automatically notif
 - [x] Reproduce blocked-target then newly arriving unrelated-message starvation in real Worker SQLite tests.
 - [x] Keep capacity/lease deferrals target-scoped; ignore pre-upgrade successful global deferrals while retaining real scheduler failure backoff.
 - [x] Verify scheduler selection, alarm due time, blocked-target lease, real error backoff and read/ack behavior.
-- [ ] Run quality checks and independent local specialist reviews.
-- [ ] Stage and verify automatic message notification/read/reply with blocked unrelated work; no interrupt/poll workaround.
+- [x] Run quality checks and independent local specialist reviews.
+- [x] Stage and verify automatic message notification/read/reply with blocked unrelated work; no interrupt/poll workaround.
 - [ ] PR, CI, CodeRabbit wait, merge and production deployment.
 - [ ] Production three-round automatic conversation and disposable-agent cleanup.
 
@@ -30,3 +30,13 @@ API scoped rules 47 (bounded control loops), 53 (scheduler isolation), 67 (share
 - Local Cloudflare/constitution review PASS; test/completion/docs review PASS for implementation, release verification explicitly pending.
 - Task-only direct main push was rejected by required Worker check; carried task commit into feature PR instead, without bypass.
 - Remaining unchecked items are mandatory release gates, not deferred scope.
+
+## Staging verification — 2026-10-08
+- Staging commit `36c5d1be2`; deployment [37733211073](https://github.com/raphaeltm/simple-agent-manager/actions/runs/37733211073), Worker `0c9f6414-f73b-4769-823c-949b599e3a2c`.
+- Two native Codex conversation agents on one bounded cx23. B read event `8c518a6b-9e63-433c-b82a-578f13dd7e95` without acknowledging batch `7084d694-1f9f-443d-931c-a4b943211157`. A second message stayed matched without a batch.
+- B sent a fresh question to idle A: event `aa50df70-dad7-4e37-90f9-d479fec5ef0c` at 05:52:25.992 UTC, automatic delivery at 05:52:28.309. A used `get_event`, verified B's actor metadata, replied `AUTOMATIC_REPLY 12`, and acknowledged batch `1781cbed-12d0-4f43-be95-d4917b08b8ba` at 05:52:40.224.
+- Inspector independently confirmed A's batch acknowledged while B's batch remained unacknowledged and B's subsequent matches remained pending. No recipient polling, manual interrupt, or forced wake was used.
+- Authenticated browser verified dashboard, projects, settings and actual chat. Desktop/mobile screenshots inspected; chat shows automatic SAM notice and successful read/reply/ack. No UI implementation change.
+- First send during Worker rollout failed because the RPC receiver had not yet exposed `sendAgentChannelMessage`; same-idempotency-key retry after publication succeeded. This transient attempt is not counted as delivery success.
+- Full local lint, typecheck, test, build and check:fast passed. Remaining release gates are tracked above and in the PR; archiving implementation evidence does not claim production completion.
+- Cleanup verified: both sessions stopped, both owned workspaces deletion confirmed, owned node/profile deleted, node list empty. Completion reviewer rechecked live inspector/browser evidence: PASS for implementation and staging; release pending.
