@@ -20,8 +20,8 @@ Warm user starts measured p50 82s/p90 185s; reused-node wakes 159s/219s. Workspa
 - [x] Tests for bounded/safe telemetry, compatibility, user/background discrimination and atomic capacity race.
 - [x] Documentation and local specialist review.
 - [x] Lease staging; fresh VM binary, heartbeat/access, start/sleep/wake checks; delete VMs and release.
-- [ ] PR/CI/CodeRabbit, merge, production deploy and first phase measurements.
-- [ ] Append evidence and next-cut proposal to ideas; complete only fully shipped scope.
+- [x] PR/CI/CodeRabbit, merge, production deploy and first phase measurements.
+- [x] Append evidence and next-cut proposal to ideas; complete only fully shipped scope.
 
 ## Acceptance criteria
 
@@ -47,4 +47,14 @@ VM rules 27/54/78; API rule 69; telemetry policy 235ad923; scheduling policy 95c
 - The run exposed a five-minute predecessor-deletion fence. Test attachment cleanup also marked the user pool migration pending; reconciliation changed authority and required replacement of the first node. These confound elapsed wake time and are not a production latency baseline. The existing composable credential-anchor issue was reproduced and appended to idea `01M3D3P0A05ED6EKM1K2QGF1FH`.
 - Both VMs, both workspaces, the snapshot and owned setup resources were deleted with API confirmation and empty D1 results. The borrowed project/profile were retained; original pool policy and all 139 candidate settings were restored and compared successfully.
 - Lease released at 20:47 UTC (channel sequence 111); next queued task received a durable direct handoff. No staging resources remain held.
-- Task-completion review: premerge PASS with no implementation findings. Production deployment, production samples and final idea reports remain pending; do not archive before those finish.
+- Task-completion review: premerge PASS with no implementation findings. The post-production completion below supersedes the premerge pending work.
+
+## Production completion (2026-10-08)
+
+PR #2268 merged as `096afcd8f`; main CI `37845795998` and production deployment `37848333921` passed. Production Worker `e187d44f-1e70-480e-99a0-9c10459fb32d` became active at 21:49:39 UTC. CodeRabbit was requested and rate-limited; the required wait elapsed with no reviews or threads.
+
+First production logs, filtered to `sam-api-prod`, showed one successful wake with node selection 2.074s, provisioning 13.719s, node-agent readiness 185.976s, workspace creation 8.422s, dispatch 3.921s, readiness 52.690s and agent session 56.261s. Node-agent readiness was largest. Nested provision image-prepull was 28.583s; workspace git clone 29.671s; restore agent phase 18.970s. Two sleep verification samples were 20.526/22.203s, teardown 2.597/3.006s. These initial observations are not percentiles or a causal before/after benchmark; nested spans are not additive.
+
+All three source ideas received ship/deploy evidence, measurements and the next-cut proposal: investigate a versioned prebuilt VM image/runtime to reduce new-node readiness, retaining startup verification and atomic reservation. Attribute the unmeasured readiness gap before claiming savings. The separate reused-node deletion fence remains a follow-up. Broader ideas remain open; no next optimization was implemented.
+
+Final task-completion validator: PASS (A research/checklist, B implementation, C verification, E selection, F vertical slice; D UI not applicable). Independent reviewer found no remaining code/test gaps. Final record updated before archival.
