@@ -45,6 +45,7 @@ import { log } from '../lib/logger';
 import { maybeJsonRecord } from '../lib/runtime-validation';
 import { persistError } from '../services/observability';
 import * as projectDataService from '../services/project-data';
+import { expireSleepingConversation } from '../services/session-expiry';
 import {
   sessionRecoveryAttemptDecayMs,
   sessionRecoveryMaxAttempts,
@@ -1153,6 +1154,15 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
   result.candidateCursorErrors = candidateSelection.cursorErrors;
 
   for (const task of candidateSelection.tasks) {
+    if (task.status === 'in_progress' && task.chat_session_id) {
+      try {
+        if (await expireSleepingConversation(env, task.project_id, task.chat_session_id, now))
+          continue;
+      } catch (error) {
+        log.warn('stuck_task.expiry_failed', { taskId: task.id, error: String(error) });
+        continue; // An uncertain expiry must never fall through to a false failure.
+      }
+    }
     const updatedAt = new Date(task.updated_at).getTime();
     const elapsedMs = now.getTime() - updatedAt;
     let isStuck = false;

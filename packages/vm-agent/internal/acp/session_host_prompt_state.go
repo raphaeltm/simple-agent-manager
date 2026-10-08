@@ -18,8 +18,12 @@ func (h *SessionHost) currentSessionState() (SessionHostStatus, string, string) 
 	return h.status, h.agentType, h.statusErr
 }
 
-// promptTimeout returns the configured prompt timeout. 0 means no timeout.
-func (h *SessionHost) promptTimeout() time.Duration {
+// PromptTimeout returns the effective session deadline. Task-managed sessions
+// use control-plane stall classification and the absolute ceiling instead.
+func (h *SessionHost) PromptTimeout() time.Duration {
+	if h.config.TaskManaged {
+		return 0
+	}
 	return h.config.PromptTimeout
 }
 

@@ -30,6 +30,7 @@ describe('D1 retention sweeps', () => {
       schema.deploymentReleases,
       schema.deploymentReleaseEvents,
       schema.sessionSnapshots,
+      schema.tasks,
     ]);
     env = {
       DATABASE: createSqliteD1(sqlite),

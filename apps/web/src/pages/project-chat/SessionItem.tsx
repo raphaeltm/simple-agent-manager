@@ -92,6 +92,9 @@ export function SessionItem({
         className="block w-full text-left bg-transparent border-none cursor-pointer p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--sam-color-focus-ring)]"
       >
         <div className="flex items-center gap-1.5 mb-0.5">
+          {attentionState === 'expired' && (
+            <span className="shrink-0 text-xs text-fg-muted">Expired</span>
+          )}
           {/* Status icon — replaces the old colored dot */}
           <span
             className="shrink-0 flex items-center"

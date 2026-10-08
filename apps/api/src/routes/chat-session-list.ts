@@ -11,13 +11,15 @@
  * `session_summaries` index whenever that index can prove it holds the same
  * answer the DO would give, and from the DO otherwise.
  */
+import { and, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { Context, Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
 import { log } from '../lib/logger';
-import { requireRouteParam } from '../lib/route-helpers';
+import { parsePositiveInt, requireRouteParam } from '../lib/route-helpers';
 import { getUserId } from '../middleware/auth';
 import { requireProjectAccess } from '../middleware/project-auth';
 import * as projectDataService from '../services/project-data';
@@ -56,6 +58,45 @@ function schedulePrimeSessionIndex(c: Context<{ Bindings: Env }>, projectId: str
   }
 }
 
+/** Task outcomes follow the returned sessions, independent of the recent-task page. */
+async function enrichTaskOutcomes(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  projectId: string,
+  sessions: Array<Record<string, unknown>>
+): Promise<Array<Record<string, unknown>>> {
+  const ids = sessions
+    .map((session) => session.id)
+    .filter((id): id is string => typeof id === 'string');
+  const bySession = new Map<
+    string,
+    { id: string; status: string; terminalReason: string | null }
+  >();
+  const chunkSize = D1_MAX_BOUND_PARAMETERS - 1; // project scope uses one bind.
+  for (let offset = 0; offset < ids.length; offset += chunkSize) {
+    const rows = await db
+      .select({
+        id: schema.tasks.id,
+        chatSessionId: schema.tasks.chatSessionId,
+        status: schema.tasks.status,
+        terminalReason: schema.tasks.terminalReason,
+      })
+      .from(schema.tasks)
+      .where(
+        and(
+          eq(schema.tasks.projectId, projectId),
+          inArray(schema.tasks.chatSessionId, ids.slice(offset, offset + chunkSize))
+        )
+      );
+    for (const { chatSessionId, ...task } of rows) {
+      if (chatSessionId) bySession.set(chatSessionId, task);
+    }
+  }
+  return sessions.map((session) => {
+    const task = bySession.get(String(session.id));
+    return task ? { ...session, task } : session;
+  });
+}
+
 /** Register `GET /` (the session list) on the chat router. */
 export function registerChatSessionListRoute(chatRoutes: Hono<{ Bindings: Env }>): void {
   chatRoutes.get('/', async (c) => {
@@ -66,8 +107,8 @@ export function registerChatSessionListRoute(chatRoutes: Hono<{ Bindings: Env }>
     await requireProjectAccess(db, projectId, userId);
 
     const status = c.req.query('status') || null;
-    const limit = Math.min(parseInt(c.req.query('limit') || '20', 10), 100);
-    const offset = parseInt(c.req.query('offset') || '0', 10);
+    const limit = Math.min(parsePositiveInt(c.req.query('limit'), 20), 100);
+    const offset = parsePositiveInt(c.req.query('offset'), 0);
     const scope = getSessionListScope(c.req.query('scope'));
     const createdByUserId = scope === 'my' ? userId : null;
 
@@ -112,7 +153,11 @@ export function registerChatSessionListRoute(chatRoutes: Hono<{ Bindings: Env }>
 
     return c.json({
       ...result,
-      sessions: await enrichSessionsWithCreators(db, result.sessions, userId),
+      sessions: await enrichSessionsWithCreators(
+        db,
+        await enrichTaskOutcomes(db, projectId, result.sessions),
+        userId
+      ),
     });
   });
 }
