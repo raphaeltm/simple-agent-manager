@@ -8,6 +8,7 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { stopNodeResources } from '../../services/nodes';
 import { persistError } from '../../services/observability';
+import { sessionSleepInFlightMaxAgeMs } from '../../services/session-snapshot-sleep-predicate';
 import {
   sessionSleepMaxAttempts,
   sleepLifecycleOwnsTerminalTaskWorkspaceSql,
@@ -52,6 +53,7 @@ export async function sweepTerminalCfContainers(
   )
     .bind(
       now.toISOString(),
+      new Date(now.getTime() - sessionSleepInFlightMaxAgeMs(env)).toISOString(),
       new Date(now.getTime() - config.orphanGracePeriodMs).toISOString(),
       config.cfContainerSweepLimit
     )

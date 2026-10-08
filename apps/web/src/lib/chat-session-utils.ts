@@ -1,7 +1,7 @@
 /**
  * Shared chat session state helpers used by ProjectChat, Chats page, and other components.
  */
-import { classifyFailure } from '@simple-agent-manager/shared';
+import { classifyFailure, isExpiredTask } from '@simple-agent-manager/shared';
 import {
   AlertCircle,
   CheckCircle2,
@@ -29,6 +29,7 @@ function isTaskTerminal(session: ChatSessionListItem): boolean {
 }
 
 export function getSessionState(session: ChatSessionListItem): SessionState {
+  if (isExpiredTask((session as ChatSessionResponse).task)) return 'terminated';
   if (session.status === 'stopped' || session.status === 'failed') return 'terminated';
   // Sleeping remains resumable even when its backing conversation task has
   // completed. The same-chat follow-up is the wake gesture.
@@ -73,6 +74,7 @@ export const STATE_LABELS: Record<SessionState, string> = {
  * Callers should also apply isStaleSession() to remove old inactive sessions.
  */
 export function isActiveSession(session: ChatSessionListItem): boolean {
+  if (isExpiredTask((session as ChatSessionResponse).task)) return false;
   if (session.status === 'stopped' || session.status === 'failed') return false;
   if (session.status === 'sleeping') return true;
   if (isTaskTerminal(session)) return false;
@@ -121,13 +123,15 @@ export type AttentionState =
   | 'sleeping'
   | 'completed'
   | 'failed'
-  | 'stopped';
+  | 'stopped'
+  | 'expired';
 
 /**
  * Derive the attention state for a session.
  * Precedence: attention markers > task terminal state > lifecycle state.
  */
 export function getAttentionState(session: ChatSessionResponse): AttentionState {
+  if (isExpiredTask(session.task)) return 'expired';
   // 1. Durable attention markers take highest precedence
   if (session.attention?.kind === 'needs_input') return 'needs_input';
   if (session.attention?.kind === 'wake_failed') return 'wake_failed';
@@ -191,6 +195,7 @@ export const ATTENTION_ICON: Record<
   sleeping: { icon: Moon, color: 'var(--sam-color-info, #3b82f6)', label: 'Sleeping' },
   completed: { icon: CheckCircle2, color: 'var(--sam-color-fg-muted)', label: 'Completed' },
   failed: { icon: XCircle, color: 'var(--sam-color-danger, #ef4444)', label: 'Failed' },
+  expired: { icon: CirclePause, color: 'var(--sam-color-fg-muted)', label: 'Expired' },
   stopped: { icon: CirclePause, color: 'var(--sam-color-fg-muted)', label: 'Stopped' },
 };
 

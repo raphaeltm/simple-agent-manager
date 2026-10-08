@@ -28,7 +28,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as observabilitySchema from '../../src/db/observability-schema';
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
+import { runSessionSnapshotPurge } from '../../src/scheduled/session-snapshot-purge';
 import { recoverStuckTasks } from '../../src/scheduled/stuck-tasks';
+import { stopSession } from '../../src/services/project-data';
 import { createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
 const { fetchWithTimeoutMock } = vi.hoisted(() => ({ fetchWithTimeoutMock: vi.fn() }));
@@ -55,6 +57,8 @@ vi.mock('../../src/services/project-data', () => ({
   listSessions: vi.fn().mockResolvedValue({ sessions: [], total: 0 }),
   listAcpSessions: vi.fn().mockResolvedValue({ sessions: [] }),
   failSession: vi.fn().mockResolvedValue(undefined),
+  stopSession: vi.fn().mockResolvedValue(true),
+  reconcileTaskWaits: vi.fn().mockResolvedValue(undefined),
   getTaskAcpLivenessSignals: getTaskAcpLivenessSignalsMock,
 }));
 
@@ -507,10 +511,10 @@ describe('runaway-cost ceiling — a sleeping conversation is not runaway comput
 
   /**
    * Day-7 regression: the runtime snapshot expired, but the conversation task
-   * itself is still human-resumable from the chat transcript and durable prompt
-   * delivery. The sweep must not turn that idle conversation into a failure.
+   * ends neutrally; its transcript remains available for a Fork. The sweep
+   * must not turn that ordinary retention outcome into a failure.
    */
-  it('preserves a conversation after its runtime snapshot expires', async () => {
+  it('expires a conversation after its runtime snapshot expires', async () => {
     seedTask();
     seedWorkspace({ status: 'deleted' });
     seedNode();
@@ -518,15 +522,14 @@ describe('runaway-cost ceiling — a sleeping conversation is not runaway comput
 
     const result = await recoverStuckTasks(env());
 
-    expect(taskRow()).toEqual({ status: 'in_progress', error_message: null });
+    expect(taskRow()).toEqual({ status: 'cancelled', error_message: null });
     expect(result.candidatesScanned).toBe(1);
     expect(result.failedInProgress).toBe(0);
   });
 
   /**
-   * Discriminating control for the conversation fallback. A task-mode row with
-   * the same expired snapshot is not a resumable idle conversation, so the real
-   * terminal writer still fires.
+   * Expiry belongs to the saved session, including task-mode rows. Both modes
+   * use the same neutral terminal writer after retention ends.
    */
   it('still terminalizes a task-mode row after its snapshot expires', async () => {
     seedTask({ taskMode: 'task' });
@@ -536,8 +539,8 @@ describe('runaway-cost ceiling — a sleeping conversation is not runaway comput
 
     const result = await recoverStuckTasks(env());
 
-    expect(taskRow().status).toBe('failed');
-    expect(result.failedInProgress).toBe(1);
+    expect(taskRow().status).toBe('cancelled');
+    expect(result.failedInProgress).toBe(0);
   });
 
   /** Cross-project scoping, proven against a real SQL engine (`.claude/rules/28`). */
@@ -823,5 +826,140 @@ describe('liveness and reconciliation branches — the same guard applies', () =
 
     expect(taskRow()).toEqual({ status: 'in_progress', error_message: null });
     expect(result.heartbeatSkipped).toBe(1);
+  });
+});
+
+describe('snapshot expiry is a neutral end state', () => {
+  it.each(['available', 'degraded'])(
+    'expires legacy %s snapshots through the real sweep',
+    async (status) => {
+      seedTask();
+      seedWorkspace();
+      seedSnapshot({
+        status,
+        degradation: status === 'degraded' ? 'transcript-only' : 'none',
+        expiresAt: iso(-HOUR),
+      });
+      const result = await recoverStuckTasks(env());
+      expect(result.failedInProgress).toBe(0);
+      expect(taskRow()).toEqual({ status: 'cancelled', error_message: null });
+      expect(sqlite.prepare('SELECT terminal_reason FROM tasks WHERE id = ?').get(TASK_ID)).toEqual(
+        { terminal_reason: 'snapshot_expired' }
+      );
+      expect(stopSession).toHaveBeenCalled();
+    }
+  );
+
+  it('purges a modern sleeping task before the sweep, keeping an unexpired control', async () => {
+    seedTask();
+    seedWorkspace();
+    seedSnapshot({ expiresAt: iso(-HOUR) });
+    sqlite.prepare("UPDATE tasks SET status = 'sleeping'").run();
+    seedTask({ id: 'control', chatSessionId: 'control-chat', workspaceId: null });
+    sqlite
+      .prepare(
+        `INSERT INTO session_snapshots (id, project_id, chat_session_id, status,
+      sleep_status, sleeping_at, expires_at, runtime, degradation, recovery_attempts) VALUES ('control', ?, 'control-chat',
+      'available', 'sleeping', ?, ?, 'vm', 'none', 0)`
+      )
+      .run(PROJECT_ID, iso(-HOUR), iso(HOUR));
+    const deleteObjects = vi.fn().mockResolvedValue(undefined);
+    const runtime = env({ R2: { delete: deleteObjects }, SESSION_SNAPSHOT_PURGE_ENABLED: 'true' });
+    expect(await runSessionSnapshotPurge(runtime)).toMatchObject({
+      deletedSnapshots: 1,
+      errors: 0,
+    });
+    expect(taskRow()).toEqual({ status: 'cancelled', error_message: null });
+    expect(taskRow('control').status).toBe('in_progress');
+    expect(sqlite.prepare('SELECT terminal_reason FROM tasks WHERE id = ?').get(TASK_ID)).toEqual({ terminal_reason: 'snapshot_expired' });
+    expect(stopSession).toHaveBeenCalledWith(runtime, PROJECT_ID, CHAT_SESSION_ID);
+    expect(
+      sqlite.prepare("SELECT id FROM session_snapshots WHERE id = 'snapshot-1'").get()
+    ).toBeUndefined();
+    expect(deleteObjects).toHaveBeenCalledWith(['home-key', 'manifest-key']);
+    await recoverStuckTasks(runtime);
+    expect(taskRow()).toEqual({ status: 'cancelled', error_message: null });
+    expect(taskRow('control').status).toBe('in_progress');
+    expect(sqlite.prepare('SELECT terminal_reason FROM tasks WHERE id = ?').get(TASK_ID)).toEqual({ terminal_reason: 'snapshot_expired' });
+    expect(stopSession).toHaveBeenCalledWith(runtime, PROJECT_ID, CHAT_SESSION_ID);
+  });
+
+  it('expires legacy degraded metadata without deleting R2 objects', async () => {
+    seedTask();
+    seedSnapshot({ status: 'degraded', degradation: 'transcript-only', expiresAt: iso(-HOUR) });
+    const deleteObjects = vi.fn();
+    const runtime = env({ R2: { delete: deleteObjects }, SESSION_SNAPSHOT_PURGE_ENABLED: 'true' });
+    await runSessionSnapshotPurge(runtime);
+    expect(taskRow()).toEqual({ status: 'cancelled', error_message: null });
+    expect(
+      sqlite.prepare("SELECT status FROM session_snapshots WHERE id = 'snapshot-1'").get()
+    ).toEqual({ status: 'expired' });
+    expect(deleteObjects).not.toHaveBeenCalled();
+  });
+  it('does not purge a wake that claims ownership after candidate discovery', async () => {
+    seedTask();
+    seedSnapshot({ expiresAt: iso(-HOUR) });
+    sqlite.prepare("UPDATE tasks SET status = 'sleeping'").run();
+    const real = createSqliteD1(sqlite);
+    const deleteObjects = vi.fn();
+    const runtime = env({
+      R2: { delete: deleteObjects },
+      SESSION_SNAPSHOT_PURGE_ENABLED: 'true',
+      DATABASE: {
+        ...real,
+        prepare(query: string) {
+          const statement = real.prepare(query);
+          if (!query.includes("SET status = 'expired', sleep_status = 'purging'")) return statement;
+          return {
+            bind(...args: unknown[]) {
+              const bound = statement.bind(...args);
+              return {
+                ...bound,
+                async run() {
+                  // A wake admitted before its TTL owns the row before purge can claim it.
+                  sqlite.prepare("UPDATE session_snapshots SET recovery_status = 'waking'").run();
+                  return bound.run();
+                },
+              };
+            },
+          };
+        },
+      },
+    });
+    expect(await runSessionSnapshotPurge(runtime)).toMatchObject({ deletedSnapshots: 0 });
+    expect(taskRow().status).toBe('sleeping');
+    expect(deleteObjects).not.toHaveBeenCalled();
+    expect(sqlite.prepare('SELECT recovery_status, status, sleep_status, sleep_claimed_at FROM session_snapshots').get()).toEqual({
+      recovery_status: 'waking',
+      status: 'available',
+      sleep_status: 'sleeping',
+      sleep_claimed_at: null,
+    });
+  });
+
+  it('retries a failed session stop before deleting its metadata or artifacts', async () => {
+    seedTask();
+    seedSnapshot({ expiresAt: iso(-HOUR) });
+    sqlite.prepare("UPDATE tasks SET status = 'sleeping'").run();
+    vi.mocked(stopSession).mockRejectedValueOnce(new Error('DO unavailable'));
+    const deleteObjects = vi.fn().mockResolvedValue(undefined);
+    const runtime = env({
+      R2: { delete: deleteObjects },
+      SESSION_SNAPSHOT_PURGE_ENABLED: 'true',
+      SESSION_SLEEP_CLAIM_LEASE_MS: '1',
+    });
+    expect(await runSessionSnapshotPurge(runtime)).toMatchObject({
+      errors: 1,
+      deletedSnapshots: 0,
+    });
+    expect(taskRow()).toEqual({ status: 'cancelled', error_message: null });
+    expect(deleteObjects).not.toHaveBeenCalled();
+    expect(await runSessionSnapshotPurge(runtime, new Date(Date.now() + 10))).toMatchObject({
+      errors: 0,
+      deletedSnapshots: 1,
+    });
+    expect(deleteObjects).toHaveBeenCalledOnce();
+    expect(sqlite.prepare('SELECT count(*) AS n FROM task_status_events WHERE task_id = ?').get(TASK_ID)).toEqual({ n: 1 });
+    expect(sqlite.prepare('SELECT count(*) AS n FROM project_event_source_outbox WHERE subject_id = ?').get(TASK_ID)).toEqual({ n: 1 });
   });
 });

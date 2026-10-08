@@ -1,3 +1,4 @@
+import { isExpiredTask } from '@simple-agent-manager/shared';
 /**
  * Single source of truth for "which tools does this session expose".
  *
@@ -240,7 +241,7 @@ function buildSessionGroup(input: BuildSessionToolActionsInput): SessionToolSpec
   // arrived yet (the detail response populates it, list responses do not).
   const hasTask = !!(taskEmbed?.id ?? session.task?.id ?? session.taskId);
   if (hasTask) {
-    if (hasRetryHandler) {
+    if (hasRetryHandler && !isExpiredTask(taskEmbed ?? session.task)) {
       actions.push({
         id: 'retry',
         label: 'Retry',

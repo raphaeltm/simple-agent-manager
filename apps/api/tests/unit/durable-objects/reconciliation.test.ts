@@ -144,11 +144,11 @@ function createMockD1(
   async function runStatement(query: string, args: unknown[]) {
     runCalls.push({ query, args });
     if (query.includes('UPDATE tasks') && query.includes('execution_step = ?')) {
-      const taskId = args[8] as string;
-      const projectId = args[9] as string;
-      const fromStatus = args[10] as string;
-      const workspaceId = args[11] as string | null;
-      const chatSessionId = args[13] as string | null;
+      const taskId = args[9] as string;
+      const projectId = args[10] as string;
+      const fromStatus = args[11] as string;
+      const workspaceId = args[12] as string | null;
+      const chatSessionId = args[14] as string | null;
       const row = richTaskRow(taskId);
       if (
         row &&
@@ -161,11 +161,11 @@ function createMockD1(
           ...row,
           status: args[0] as string,
           error_message: args[2] as string | null,
-          started_at: (args[3] === 1 ? (row.started_at ?? args[4]) : (row.started_at ?? null)) as
+          started_at: (args[4] === 1 ? (row.started_at ?? args[5]) : (row.started_at ?? null)) as
             string | null,
-          completed_at: args[5] as string,
+          completed_at: args[6] as string,
           execution_step: args[1] as string | null,
-          terminal_transition_id: args[6] as string,
+          terminal_transition_id: args[7] as string,
         };
         return { success: true, meta: { changes: 1 } };
       }

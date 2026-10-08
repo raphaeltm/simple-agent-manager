@@ -29,6 +29,7 @@ function taskInfoEqual(a: TaskInfo, b: TaskInfo): boolean {
     a.title === b.title &&
     a.parentTaskId === b.parentTaskId &&
     a.status === b.status &&
+    a.terminalReason === b.terminalReason &&
     a.blocked === b.blocked &&
     a.triggeredBy === b.triggeredBy &&
     a.dispatchDepth === b.dispatchDepth &&

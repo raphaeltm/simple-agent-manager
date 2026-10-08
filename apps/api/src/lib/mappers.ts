@@ -251,6 +251,7 @@ export function toTaskResponse(
     admissionNextRetryAt: task.admissionNextRetryAt ?? null,
     startedAt: task.startedAt,
     completedAt: task.completedAt,
+    terminalReason: task.terminalReason,
     errorMessage: task.errorMessage,
     outputSummary: task.outputSummary,
     outputBranch: task.outputBranch,

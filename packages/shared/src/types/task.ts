@@ -453,6 +453,7 @@ export interface Task {
   admissionNextRetryAt: string | null;
   startedAt: string | null;
   completedAt: string | null;
+  terminalReason?: string | null;
   errorMessage: string | null;
   outputSummary: string | null;
   outputBranch: string | null;
