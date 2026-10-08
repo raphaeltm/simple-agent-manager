@@ -97,3 +97,48 @@ describe('rendered POSIX certificate bootstrap', () => {
     expect(result.reports).toBe('reported\n');
   });
 });
+
+describe('rendered agent download deadline', () => {
+  it('reports a timed-out binary transfer and exits before chmod or agent startup', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sam-download-test-'));
+    const bin = join(dir, 'bin');
+    mkdirSync(bin);
+    const script = (name: string, content: string) =>
+      writeFileSync(join(bin, name), '#!/bin/sh\n' + content, { mode: 0o755 });
+    script('logger', 'cat >/dev/null');
+    script('chmod', 'touch "$TEST_DIR/continued"');
+    script(
+      'curl',
+      `case "$*" in
+      *boot-failure*) printf 'reported' > "$TEST_DIR/report"; exit 0 ;;
+    esac
+    [ "$1" = --max-time ] && [ "$2" = 7 ] || exit 99
+    exit 28`
+    );
+    const config = YAML.parse(
+      generateCloudInit({
+        nodeId: 'node-test',
+        hostname: 'test',
+        callbackToken: 'CANARY-SECRET',
+        controlPlaneUrl: 'https://api.example.com',
+        jwksUrl: 'https://api.example.com/jwks',
+        agentDownloadTimeoutSeconds: '7',
+      })
+    ) as { runcmd: string[] };
+    const block = config.runcmd.find((entry) => entry.includes('ARCH=$(uname -m)'));
+    if (!block) throw new Error('Agent download block missing');
+    try {
+      const result = spawnSync('/bin/sh', ['-c', block], {
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TEST_DIR: dir },
+        encoding: 'utf8',
+        timeout: 2_000,
+      });
+      expect(result.status).toBe(28);
+      expect(readFileSync(join(dir, 'report'), 'utf8')).toBe('reported');
+      expect(() => readFileSync(join(dir, 'continued'))).toThrow();
+      expect(result.stdout + result.stderr).not.toContain('CANARY-SECRET');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

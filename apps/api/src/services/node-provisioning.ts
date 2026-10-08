@@ -367,6 +367,7 @@ export async function provisionNode(
       controlPlaneUrl: `https://api.${env.BASE_DOMAIN}`,
       jwksUrl: `https://api.${env.BASE_DOMAIN}/.well-known/jwks.json`,
       callbackToken,
+      agentDownloadTimeoutSeconds: env.CLOUD_INIT_AGENT_DOWNLOAD_TIMEOUT_SECONDS,
       certMaxAttempts: env.CLOUD_INIT_CERT_MAX_ATTEMPTS,
       certBaseDelaySeconds: env.CLOUD_INIT_CERT_BASE_DELAY_SECONDS,
       certMaxDelaySeconds: env.CLOUD_INIT_CERT_MAX_DELAY_SECONDS,

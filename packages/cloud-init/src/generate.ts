@@ -60,6 +60,7 @@ export function validateCloudInitVariables(variables: CloudInitVariables): void 
   const errors: string[] = [];
 
   for (const name of [
+    'agentDownloadTimeoutSeconds',
     'certMaxAttempts',
     'certBaseDelaySeconds',
     'certMaxDelaySeconds',
@@ -472,6 +473,8 @@ export interface CloudInitVariables {
   dockerDnsServers?: string;
   /** Node-scoped endpoint used at boot to sign a locally generated Origin CA CSR. */
   originCaCertificateUrl?: string;
+  /** Deadline for the agent binary transfer, including DNS/connect time. */
+  agentDownloadTimeoutSeconds?: string;
   certMaxAttempts?: string;
   certBaseDelaySeconds?: string;
   certMaxDelaySeconds?: string;
@@ -599,6 +602,7 @@ export function generateCloudInit(
     '{{ tls_cert_path }}': variables.originCaCertificateUrl ? '/etc/sam/tls/origin-ca.pem' : '',
     '{{ tls_key_path }}': variables.originCaCertificateUrl ? '/etc/sam/tls/origin-ca-key.pem' : '',
     '{{ origin_ca_certificate_url }}': variables.originCaCertificateUrl ?? '',
+    '{{ agent_download_timeout_seconds }}': variables.agentDownloadTimeoutSeconds ?? '60',
     '{{ cert_max_attempts }}': variables.certMaxAttempts ?? '3',
     '{{ cert_base_delay_seconds }}': variables.certBaseDelaySeconds ?? '2',
     '{{ cert_max_delay_seconds }}': variables.certMaxDelaySeconds ?? '8',

@@ -849,6 +849,7 @@ Generated deployments validate and pass these values through cloud-init to newly
 - `ORIGIN_CA_RETRY_BASE_DELAY_MS` — Initial upstream certificate retry delay (default: 500).
 - `ORIGIN_CA_RETRY_MAX_DELAY_MS` — Cap on upstream certificate exponential backoff (default: 2000).
 - `ORIGIN_CA_REQUEST_TIMEOUT_MS` — Deadline per upstream certificate request, including reading its body (default: 10000).
+- `CLOUD_INIT_AGENT_DOWNLOAD_TIMEOUT_SECONDS` — Agent binary transfer deadline including DNS/connect time (default: 60 seconds); exhausted transfer reports boot failure.
 - `CLOUD_INIT_CERT_MAX_ATTEMPTS` — Maximum cloud-init CSR POST attempts including the first (default: 3).
 - `CLOUD_INIT_CERT_BASE_DELAY_SECONDS` — Initial cloud-init certificate retry delay (default: 2).
 - `CLOUD_INIT_CERT_MAX_DELAY_SECONDS` — Cap on cloud-init certificate exponential backoff (default: 8).

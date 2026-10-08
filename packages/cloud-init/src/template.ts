@@ -67,7 +67,7 @@ runcmd:
     esac
     logger -t sam-boot "Downloading vm-agent for arch=$ARCH"
     curl_output=$(mktemp)
-    if curl -fLo /usr/local/bin/vm-agent "{{ control_plane_url }}/api/agent/download?arch=\${ARCH}{{ vm_agent_release_query }}" >"$curl_output" 2>&1; then
+    if curl --max-time {{ agent_download_timeout_seconds }} -fLo /usr/local/bin/vm-agent "{{ control_plane_url }}/api/agent/download?arch=\${ARCH}{{ vm_agent_release_query }}" >"$curl_output" 2>&1; then
       cat "$curl_output" | logger -t sam-boot
       rm -f "$curl_output"
     else
