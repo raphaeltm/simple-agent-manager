@@ -808,7 +808,7 @@ describe('ProjectChat new chat button', () => {
       errorMessage: 'Agent crashed unexpectedly',
     };
     let next: 'hold' | Error | null = null;
-    let releaseHeld: (() => void) | null = null;
+    const held: Array<(error?: Error) => void> = [];
     mocks.getProjectTask.mockImplementation((_projectId: string, taskId: string) => {
       if (taskId !== 'task-1') {
         return Promise.resolve({
@@ -821,8 +821,8 @@ describe('ProjectChat new chat button', () => {
       const mode = next;
       next = null;
       if (mode === 'hold') {
-        return new Promise((resolve) => {
-          releaseHeld = () => resolve(original);
+        return new Promise((resolve, reject) => {
+          held.push((error) => (error ? reject(error) : resolve(original)));
         });
       }
       if (mode instanceof Error) return Promise.reject(mode);
@@ -835,7 +835,9 @@ describe('ProjectChat new chat button', () => {
       failNextRead: (error: Error) => {
         next = error;
       },
-      releaseHeldRead: () => releaseHeld?.(),
+      /** Settle the `index`-th held read (call order): resolve it, or reject it with `error`. */
+      releaseHeldRead: ({ index = 0, error }: { index?: number; error?: Error } = {}) =>
+        held[index]?.(error),
     };
   }
 
@@ -941,6 +943,63 @@ describe('ProjectChat new chat button', () => {
     expect(textarea).toHaveValue('A different idea');
     expect(screen.queryByText(/Could not load the original prompt/)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
+  });
+
+  it('drops a load failure for a retry the user has already dismissed', async () => {
+    const reads = mockTaskReads();
+    await openSessionWithTask();
+
+    reads.holdNextRead();
+    fireEvent.click(screen.getByLabelText('Retry task'));
+    expect(await screen.findByText('Loading original prompt...')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText('Cancel fork/retry'));
+    const textarea = screen.getByPlaceholderText('Describe what you want the agent to do...');
+    fireEvent.change(textarea, { target: { value: 'A different idea' } });
+
+    await act(async () => {
+      reads.releaseHeldRead({ error: new Error('Task not found') });
+    });
+
+    expect(screen.queryByText(/Could not load the original prompt/)).not.toBeInTheDocument();
+    expect(textarea).toHaveValue('A different idea');
+    expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
+  });
+
+  it('keeps a newer retry of the same session loading until its own prompt arrives', async () => {
+    const reads = mockTaskReads();
+    await openSessionWithTask();
+
+    reads.holdNextRead();
+    fireEvent.click(screen.getByLabelText('Retry task'));
+    expect(await screen.findByText('Loading original prompt...')).toBeInTheDocument();
+
+    // Back to the same session and retry it again while the first load is still out.
+    const readsBeforeReopen = mocks.getProjectTask.mock.calls.length;
+    fireEvent.click(screen.getByText('Fix the login bug'));
+    // Reopening reads the session's task again (provisioning tracker); let that settle first.
+    await waitFor(() => {
+      expect(mocks.getProjectTask.mock.calls.length).toBeGreaterThan(readsBeforeReopen);
+    });
+    reads.holdNextRead();
+    fireEvent.click(screen.getByLabelText('Retry task'));
+    expect(await screen.findByText('Loading original prompt...')).toBeInTheDocument();
+
+    await act(async () => {
+      reads.releaseHeldRead({ index: 0 });
+    });
+    const textarea = screen.getByPlaceholderText('Describe what you want the agent to do...');
+    expect(screen.getByText('Loading original prompt...')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sending...' })).toBeDisabled();
+    expect(textarea).toHaveValue('');
+
+    await act(async () => {
+      reads.releaseHeldRead({ index: 1 });
+    });
+    await waitFor(() => {
+      expect(textarea).toHaveValue('Original task description');
+      expect(screen.queryByText('Loading original prompt...')).not.toBeInTheDocument();
+    });
   });
 
   it('clears pending derived state when New Chat is clicked', async () => {
