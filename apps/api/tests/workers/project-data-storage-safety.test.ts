@@ -2268,17 +2268,24 @@ describe('grouped cleanup cursor progress', () => {
       PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_SESSIONS: '1',
       PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES: '0',
     }, async () => {
-      for (let i = 0; i < 3; i++) {
-        const result = await stub.runGroupedFtsCleanup();
-        expect(result?.sessionsExamined).toBe(1);
-        expect(result?.sessionsCleaned).toBe(0);
-        expect(result?.cursor?.sessionId).toBeTruthy();
-        await runInDurableObject(stub, async (_instance, state) => {
-          state.storage.sql.exec("UPDATE do_meta SET value = '0' WHERE key = 'storageSafetyGroupedFtsCleanupRecheckAt'");
+      await runInDurableObject(stub, async (instance, state) => {
+        // Manual calls represent successive scheduled pages. Prevent the real
+        // timer from consuming another page between these explicit calls.
+        await state.storage.deleteAlarm();
+        const setAlarm = vi.spyOn(state.storage, 'setAlarm').mockResolvedValue();
+        try {
+          for (let i = 0; i < 4; i++) {
+            state.storage.sql.exec("UPDATE do_meta SET value = '0' WHERE key = 'storageSafetyGroupedFtsCleanupRecheckAt'");
+            const result = await instance.runGroupedFtsCleanup();
+            expect(result?.sessionsExamined).toBe(1);
+            expect(result?.sessionsCleaned).toBe(i === 3 ? 1 : 0);
+            if (i < 3) expect(result?.cursor?.sessionId).toBeTruthy();
+          }
+        } finally {
+          setAlarm.mockRestore();
           await state.storage.deleteAlarm();
-        });
-      }
-      expect((await stub.runGroupedFtsCleanup())?.sessionsCleaned).toBe(1);
+        }
+      });
     });
     expect(await runInDurableObject(stub, async (_instance, state) =>
       state.storage.sql.exec('SELECT count(*) n FROM chat_messages').one().n

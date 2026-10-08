@@ -40,3 +40,6 @@ Idea 01M1XKK208SJV9VJA4BXP2KBHT; task 01M4DV2PE0ARS834TY69DG3KSF. Rules 53, 62, 
 - Local Cloudflare, constitution, test-engineer, documentation/environment and task-completion reviews PASS/ADDRESSED; deployment acceptance remains pending.
 
 - Staging run37801950185 succeeded including smoke, SHAd78a2cf73. Worker4b4f7a21-08f5-4ef0-8c5a-a501eb793f73 flag=true; actual storage alarms complete allfive substeps. Authenticated dashboard/projects/settings200/no pageerrors, screenshots reviewed; adminmeasure/groupedcleanup200 belowthreshold. NoVMs/resources created; lease released.
+
+- Full CI Workers run:1395 passed, one cursor test raced a real scheduled alarm between manual calls. Test-only fix pauses timer scheduling around explicit real cleanup calls, preserving four one-session pages and final cleanup assertion; reviewer approved,24/24storage tests rerunPASS, ESLintPASS.
+- After~3h rollout delay, authorized stopgap: set production Environment grouped-cleanup override=false (previously absent), deploy37809363295 exactCI-green main974b3fd2e. Deployed binding verification pending; remove override before fixed-code production verification.
