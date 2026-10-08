@@ -11,9 +11,9 @@ SAM root ProjectData storage_safety has repeatedly failed with SQLITE_NOMEM sinc
 - Real SQLite DO coverage exists in project-data-storage-safety.test.ts.
 
 ## Checklist
-- [ ] Bound session selection and per-session content size inspection; cursor advances over empty/oversized candidates.
-- [ ] Isolate and log each storage safety substep; preserve prior committed markers on failure.
-- [ ] Classify SQLITE_NOMEM; retry only explicitly safe idempotent operations.
+- [x] Bound session selection and per-session content size inspection; cursor advances over empty/oversized candidates.
+- [x] Isolate and log each storage safety substep; preserve prior committed markers on failure.
+- [x] Classify SQLITE_NOMEM; retry only explicitly safe idempotent operations.
 - [ ] Real SQLite alarm-path tests, bounded-query evidence, discriminating negative controls.
 - [ ] Relevant docs and full quality validation; local specialist review.
 - [ ] Coordinated staging lease and runtime validation.
@@ -25,3 +25,13 @@ No whole-table aggregate over grouped content. Failure of one substep does not s
 
 ## References
 Idea 01M1XKK208SJV9VJA4BXP2KBHT; task 01M4DV2PE0ARS834TY69DG3KSF. Rules 53, 62, 70. Channel reliability-wave-1008: staging lease and migration claims required. Ship disabled cleanup stopgap first if real fix exceeds a few hours.
+
+## Validation evidence
+- Root lint, typecheck (19 tasks), and build (9 tasks) pass.
+- Retry unit suites: 30/30 pass. Initial clean SQLite storage suite: 22/22, final expanded suite pending.
+- Negative control: original aggregate reads 131 rows (bound <20), test fails.
+- Negative control: remove sync and session transaction, marker is not committed before fault and first grouped/FTS row is lost, tests fail.
+- Negative control: rethrow substep failure, subsequent eligible activity-event deletion does not occur, both fault-recording variants fail.
+- An initial metadata-read liveness assertion proved non-discriminating because alarm rescheduling also read it; replaced with actual deletion and persisted row absence.
+- Fault uses real SQLite transaction rollback plus synthetic NOMEM. Native allocator exhaustion is not reproduced locally. Raw OR ROLLBACK poisons local workerd bookkeeping and was rejected as a test strategy.
+- No flag override in either GitHub Environment; deployed production cleanup binding=true before changes. Production baseline 13:43Z shows root NOMEM ~once/minute and hourly threshold alerts.
