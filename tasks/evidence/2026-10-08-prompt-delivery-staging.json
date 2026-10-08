@@ -1,0 +1,455 @@
+{
+  "deployment": {
+    "run": 37842526334,
+    "commit": "c542e5dc7",
+    "workerVersion": "c91ecb6a-f29b-47fe-bf32-77aeca58fa03"
+  },
+  "target": {
+    "nodeId": "01M4EN1MB0MY34QE90FVE188FB",
+    "workspaceId": "01M4ENDR9BTKN68TBJ52EKR615",
+    "sessionId": "fbd8d34a-466f-4ffc-b818-51bd28ecaf8c",
+    "offering": "cx23",
+    "vcpu": 2,
+    "memoryMb": 4096,
+    "heartbeatAt": "2026-10-08T21:03:14.053Z",
+    "readyAt": "2026-10-08T21:05:04.037Z"
+  },
+  "deliveryIds": [
+    "01M4ENHGFHGASKKXT64F477EKJ",
+    "01M4ENHGYPT8X03JTYM9G7QQE6",
+    "01M4ENHHD4Y7Q57RGTYEM3Z6Y7"
+  ],
+  "snapshots": [
+    {
+      "at": "2026-10-08T21:08:39.879Z",
+      "activity": "prompting",
+      "deliveries": [
+        {
+          "id": "01M4ENHGFHGASKKXT64F477EKJ",
+          "deliveryState": "delivering",
+          "deliveryAttempts": 1,
+          "nextAttemptAt": 1791493718513,
+          "lastError": null,
+          "acceptedAt": null,
+          "createdAt": 1791493718513,
+          "terminalReason": null
+        },
+        {
+          "id": "01M4ENHGYPT8X03JTYM9G7QQE6",
+          "deliveryState": "queued",
+          "deliveryAttempts": 0,
+          "nextAttemptAt": 1791493718998,
+          "lastError": null,
+          "acceptedAt": null,
+          "createdAt": 1791493718998,
+          "terminalReason": null
+        },
+        {
+          "id": "01M4ENHHD4Y7Q57RGTYEM3Z6Y7",
+          "deliveryState": "queued",
+          "deliveryAttempts": 0,
+          "nextAttemptAt": 1791493719460,
+          "lastError": null,
+          "acceptedAt": null,
+          "createdAt": 1791493719460,
+          "terminalReason": null
+        }
+      ]
+    },
+    {
+      "at": "2026-10-08T21:08:45.184Z",
+      "activity": "prompting",
+      "deliveries": [
+        {
+          "id": "01M4ENHGFHGASKKXT64F477EKJ",
+          "deliveryState": "retry_wait",
+          "deliveryAttempts": 1,
+          "nextAttemptAt": 1791493725425,
+          "lastError": "Target VM is currently processing a prompt",
+          "acceptedAt": null,
+          "createdAt": 1791493718513,
+          "terminalReason": null
+        },
+        {
+          "id": "01M4ENHGYPT8X03JTYM9G7QQE6",
+          "deliveryState": "queued",
+          "deliveryAttempts": 0,
+          "nextAttemptAt": 1791493718998,
+          "lastError": null,
+          "acceptedAt": null,
+          "createdAt": 1791493718998,
+          "terminalReason": null
+        },
+        {
+          "id": "01M4ENHHD4Y7Q57RGTYEM3Z6Y7",
+          "deliveryState": "queued",
+          "deliveryAttempts": 0,
+          "nextAttemptAt": 1791493719460,
+          "lastError": null,
+          "acceptedAt": null,
+          "createdAt": 1791493719460,
+          "terminalReason": null
+        }
+      ]
+    },
+    {
+      "at": "2026-10-08T21:08:50.484Z",
+      "activity": "prompting",
+      "deliveries": [
+        {
+          "id": "01M4ENHGFHGASKKXT64F477EKJ",
+          "deliveryState": "retry_wait",
+          "deliveryAttempts": 2,
+          "nextAttemptAt": 1791493736169,
+          "lastError": "Target VM is currently processing a prompt",
+          "acceptedAt": null,
+          "createdAt": 1791493718513,
+          "terminalReason": null
+        },
+        {
+          "id": "01M4ENHGYPT8X03JTYM9G7QQE6",
+          "deliveryState": "queued",
+          "deliveryAttempts": 0,
+          "nextAttemptAt": 1791493718998,
+          "lastError": null,
+          "acceptedAt": null,
+          "createdAt": 1791493718998,
+          "terminalReason": null
+        },
+        {
+          "id": "01M4ENHHD4Y7Q57RGTYEM3Z6Y7",
+          "deliveryState": "queued",
+          "deliveryAttempts": 0,
+          "nextAttemptAt": 1791493719460,
+          "lastError": null,
+          "acceptedAt": null,
+          "createdAt": 1791493719460,
+          "terminalReason": null
+        }
+      ]
+    },
+    {
+      "at": "2026-10-08T21:09:01.203Z",
+      "activity": "prompting",
+      "deliveries": [
+        {
+          "id": "01M4ENHGFHGASKKXT64F477EKJ",
+          "deliveryState": "retry_wait",
+          "deliveryAttempts": 3,
+          "nextAttemptAt": 1791493756931,
+          "lastError": "Target VM is currently processing a prompt",
+          "acceptedAt": null,
+          "createdAt": 1791493718513,
+          "terminalReason": null
+        },
+        {
+          "id": "01M4ENHGYPT8X03JTYM9G7QQE6",
+          "deliveryState": "queued",
+          "deliveryAttempts": 0,
+          "nextAttemptAt": 1791493718998,
+          "lastError": null,
+          "acceptedAt": null,
+          "createdAt": 1791493718998,
+          "terminalReason": null
+        },
+        {
+          "id": "01M4ENHHD4Y7Q57RGTYEM3Z6Y7",
+          "deliveryState": "queued",
+          "deliveryAttempts": 0,
+          "nextAttemptAt": 1791493719460,
+          "lastError": null,
+          "acceptedAt": null,
+          "createdAt": 1791493719460,
+          "terminalReason": null
+        }
+      ]
+    },
+    {
+      "at": "2026-10-08T21:09:17.142Z",
+      "activity": "prompting",
+      "deliveries": [
+        {
+          "id": "01M4ENHGFHGASKKXT64F477EKJ",
+          "deliveryState": "delivering",
+          "deliveryAttempts": 4,
+          "nextAttemptAt": 1791493756931,
+          "lastError": null,
+          "acceptedAt": null,
+          "createdAt": 1791493718513,
+          "terminalReason": null
+        },
+        {
+          "id": "01M4ENHGYPT8X03JTYM9G7QQE6",
+          "deliveryState": "queued",
+          "deliveryAttempts": 0,
+          "nextAttemptAt": 1791493718998,
+          "lastError": null,
+          "acceptedAt": null,
+          "createdAt": 1791493718998,
+          "terminalReason": null
+        },
+        {
+          "id": "01M4ENHHD4Y7Q57RGTYEM3Z6Y7",
+          "deliveryState": "queued",
+          "deliveryAttempts": 0,
+          "nextAttemptAt": 1791493719460,
+          "lastError": null,
+          "acceptedAt": null,
+          "createdAt": 1791493719460,
+          "terminalReason": null
+        }
+      ]
+    },
+    {
+      "at": "2026-10-08T21:09:22.455Z",
+      "activity": "prompting",
+      "deliveries": [
+        {
+          "id": "01M4ENHGFHGASKKXT64F477EKJ",
+          "deliveryState": "retry_wait",
+          "deliveryAttempts": 4,
+          "nextAttemptAt": 1791493797697,
+          "lastError": "Target VM is currently processing a prompt",
+          "acceptedAt": null,
+          "createdAt": 1791493718513,
+          "terminalReason": null
+        },
+        {
+          "id": "01M4ENHGYPT8X03JTYM9G7QQE6",
+          "deliveryState": "queued",
+          "deliveryAttempts": 0,
+          "nextAttemptAt": 1791493718998,
+          "lastError": null,
+          "acceptedAt": null,
+          "createdAt": 1791493718998,
+          "terminalReason": null
+        },
+        {
+          "id": "01M4ENHHD4Y7Q57RGTYEM3Z6Y7",
+          "deliveryState": "queued",
+          "deliveryAttempts": 0,
+          "nextAttemptAt": 1791493719460,
+          "lastError": null,
+          "acceptedAt": null,
+          "createdAt": 1791493719460,
+          "terminalReason": null
+        }
+      ]
+    },
+    {
+      "at": "2026-10-08T21:10:02.710Z",
+      "activity": "prompting",
+      "deliveries": [
+        {
+          "id": "01M4ENHGFHGASKKXT64F477EKJ",
+          "deliveryState": "retry_wait",
+          "deliveryAttempts": 4,
+          "nextAttemptAt": 1791493878721,
+          "lastError": "Target VM is currently processing a prompt",
+          "acceptedAt": null,
+          "createdAt": 1791493718513,
+          "terminalReason": null
+        },
+        {
+          "id": "01M4ENHGYPT8X03JTYM9G7QQE6",
+          "deliveryState": "queued",
+          "deliveryAttempts": 0,
+          "nextAttemptAt": 1791493718998,
+          "lastError": null,
+          "acceptedAt": null,
+          "createdAt": 1791493718998,
+          "terminalReason": null
+        },
+        {
+          "id": "01M4ENHHD4Y7Q57RGTYEM3Z6Y7",
+          "deliveryState": "queued",
+          "deliveryAttempts": 0,
+          "nextAttemptAt": 1791493719460,
+          "lastError": null,
+          "acceptedAt": null,
+          "createdAt": 1791493719460,
+          "terminalReason": null
+        }
+      ]
+    },
+    {
+      "at": "2026-10-08T21:10:24.128Z",
+      "activity": "prompting",
+      "deliveries": [
+        {
+          "id": "01M4ENHGFHGASKKXT64F477EKJ",
+          "deliveryState": "acked",
+          "deliveryAttempts": 5,
+          "nextAttemptAt": null,
+          "lastError": null,
+          "acceptedAt": 1791493720316,
+          "createdAt": 1791493718513,
+          "terminalReason": null
+        },
+        {
+          "id": "01M4ENHGYPT8X03JTYM9G7QQE6",
+          "deliveryState": "delivering",
+          "deliveryAttempts": 1,
+          "nextAttemptAt": 1791493718998,
+          "lastError": null,
+          "acceptedAt": null,
+          "createdAt": 1791493718998,
+          "terminalReason": null
+        },
+        {
+          "id": "01M4ENHHD4Y7Q57RGTYEM3Z6Y7",
+          "deliveryState": "queued",
+          "deliveryAttempts": 0,
+          "nextAttemptAt": 1791493719460,
+          "lastError": null,
+          "acceptedAt": null,
+          "createdAt": 1791493719460,
+          "terminalReason": null
+        }
+      ]
+    },
+    {
+      "at": "2026-10-08T21:10:29.550Z",
+      "activity": "idle",
+      "deliveries": [
+        {
+          "id": "01M4ENHGFHGASKKXT64F477EKJ",
+          "deliveryState": "acked",
+          "deliveryAttempts": 5,
+          "nextAttemptAt": null,
+          "lastError": null,
+          "acceptedAt": 1791493720316,
+          "createdAt": 1791493718513,
+          "terminalReason": null
+        },
+        {
+          "id": "01M4ENHGYPT8X03JTYM9G7QQE6",
+          "deliveryState": "retry_wait",
+          "deliveryAttempts": 1,
+          "nextAttemptAt": 1791493828981,
+          "lastError": "Target VM is currently processing a prompt",
+          "acceptedAt": null,
+          "createdAt": 1791493718998,
+          "terminalReason": null
+        },
+        {
+          "id": "01M4ENHHD4Y7Q57RGTYEM3Z6Y7",
+          "deliveryState": "queued",
+          "deliveryAttempts": 0,
+          "nextAttemptAt": 1791493719460,
+          "lastError": null,
+          "acceptedAt": null,
+          "createdAt": 1791493719460,
+          "terminalReason": null
+        }
+      ]
+    },
+    {
+      "at": "2026-10-08T21:10:34.855Z",
+      "activity": "prompting",
+      "deliveries": [
+        {
+          "id": "01M4ENHGFHGASKKXT64F477EKJ",
+          "deliveryState": "acked",
+          "deliveryAttempts": 5,
+          "nextAttemptAt": null,
+          "lastError": null,
+          "acceptedAt": 1791493720316,
+          "createdAt": 1791493718513,
+          "terminalReason": null
+        },
+        {
+          "id": "01M4ENHGYPT8X03JTYM9G7QQE6",
+          "deliveryState": "acked",
+          "deliveryAttempts": 2,
+          "nextAttemptAt": null,
+          "lastError": null,
+          "acceptedAt": 1791493824558,
+          "createdAt": 1791493718998,
+          "terminalReason": null
+        },
+        {
+          "id": "01M4ENHHD4Y7Q57RGTYEM3Z6Y7",
+          "deliveryState": "retry_wait",
+          "deliveryAttempts": 1,
+          "nextAttemptAt": 1791493837327,
+          "lastError": "Target VM is currently processing a prompt",
+          "acceptedAt": null,
+          "createdAt": 1791493719460,
+          "terminalReason": null
+        }
+      ]
+    },
+    {
+      "at": "2026-10-08T21:10:40.158Z",
+      "activity": "prompting",
+      "deliveries": [
+        {
+          "id": "01M4ENHGFHGASKKXT64F477EKJ",
+          "deliveryState": "acked",
+          "deliveryAttempts": 5,
+          "nextAttemptAt": null,
+          "lastError": null,
+          "acceptedAt": 1791493720316,
+          "createdAt": 1791493718513,
+          "terminalReason": null
+        },
+        {
+          "id": "01M4ENHGYPT8X03JTYM9G7QQE6",
+          "deliveryState": "acked",
+          "deliveryAttempts": 2,
+          "nextAttemptAt": null,
+          "lastError": null,
+          "acceptedAt": 1791493824558,
+          "createdAt": 1791493718998,
+          "terminalReason": null
+        },
+        {
+          "id": "01M4ENHHD4Y7Q57RGTYEM3Z6Y7",
+          "deliveryState": "acked",
+          "deliveryAttempts": 2,
+          "nextAttemptAt": null,
+          "lastError": null,
+          "acceptedAt": 1791493832214,
+          "createdAt": 1791493719460,
+          "terminalReason": null
+        }
+      ]
+    }
+  ],
+  "transcript": {
+    "markers": [
+      "ACK_RETRY_1008_1",
+      "ACK_RETRY_1008_2",
+      "ACK_RETRY_1008_3"
+    ],
+    "assistantOccurrenceCounts": [
+      1,
+      1,
+      1
+    ],
+    "ordered": true
+  },
+  "browser": {
+    "paths": [
+      "dashboard",
+      "projects",
+      "settings",
+      "chat"
+    ],
+    "pageErrors": [],
+    "horizontalOverflow": false,
+    "screenshotsReviewed": true
+  },
+  "cleanup": {
+    "stopChats": [
+      200,
+      200
+    ],
+    "deleteNode": 200,
+    "nodeRowAbsent": true,
+    "workspaceRowAbsent": true,
+    "activeOwnedNodes": 0,
+    "nodesApi": []
+  }
+}

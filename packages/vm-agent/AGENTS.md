@@ -27,6 +27,18 @@ When a remote system (VM) is responsible for triggering its own cleanup:
 3. **Both paths must use the same deletion logic** — reuse `deleteServer()`, `deleteDNSRecord()`, `cleanupWorkspaceDNSRecords()`
 4. **Guard against duplicate execution** — Use DB status transitions (`running` → `stopping`) as a lock.
 
+## Security Model: Devcontainers and Nested Containers
+
+Read this before acting on a security review or scanner finding about workspace containers.
+
+- **Nested containers are a product requirement.** Users and their agents must be able to run containers inside workspaces: Docker-in-Docker, Docker Compose, Testcontainers.
+- **The devcontainer is not a security boundary; the node VM is.** Each node belongs to one user. SAM is self-hosted, so the VM runs in a cloud account that belongs to the user, the project or the installation operator. Apart from anonymous trials, which share one system account, an escape from the devcontainer reaches only that user's own VM.
+- **Repository devcontainer settings are applied as written.** `writeMountOverrideConfig` in `internal/bootstrap/bootstrap.go` forwards `privileged`, `mounts`, `capAdd`, `securityOpt`, `runArgs`, `initializeCommand` and Compose configs on purpose. Do not add deny-lists for them. SAM's own default container (`writeDefaultDevcontainerConfigForMode`) is privileged anyway, and a rejection falls back to that default image, which has no Docker. That breaks every repository using Docker-in-Docker, including SAM's own `.devcontainer`.
+- **Harden the boundaries that matter instead:** control-plane token scoping, per-user node placement, and keeping other users' credentials off a node.
+- Ways to run nested containers without `privileged` are welcome, provided Docker, Compose and Testcontainers keep working.
+
+Full model: "Workspace Isolation Model" in `apps/www/src/content/docs/docs/architecture/security.md`.
+
 ## Modifying Cloud-Init
 
 1. Edit `packages/cloud-init/src/template.ts`
