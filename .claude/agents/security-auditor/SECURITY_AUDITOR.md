@@ -197,6 +197,6 @@ Code snippet or command output showing the issue
 - Focus on HIGH and CRITICAL findings first
 - Include evidence (code snippets, file paths, line numbers)
 - Be specific about remediation steps
-- Consider the multi-tenant context (user A should never see user B's data)
+- Consider cross-user isolation (user A should never see user B's data)
 - Reference OWASP Top 10 where applicable
 - Check for secrets in git history if relevant

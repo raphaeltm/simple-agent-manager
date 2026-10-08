@@ -1,13 +1,14 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version Change: 1.8.1 → 1.8.2
-Bump Rationale: PATCH - Clarify existing Principle X simplicity and evolutionary design requirements
+Version Change: 1.8.2 → 1.8.3
+Bump Rationale: PATCH - Correct the platform description: SAM is self-hosted, not a multi-tenant SaaS, and each node VM belongs to one user
 
-Modified Principles:
-  - Principle X: Make the smallest complete solution the default; clarify future-proofing and quality boundaries
+Modified Principles: None
 
-Modified Sections: None
+Modified Sections:
+  - Multi-Tenant Architecture Guidelines: opening paragraph now describes self-hosted installations and per-user node VMs, pointing to the Workspace Isolation Model in the public security docs
+
 Added Sections: None
 
 Templates Status:
@@ -540,9 +541,12 @@ Infrastructure changes require testing before production deployment.
 
 ## Multi-Tenant Architecture Guidelines
 
-This platform operates as a multi-tenant SaaS where compute can come from project, user, or
-installation/platform cloud credentials. We manage authentication, orchestration, and workspace
-metadata while the selected provider account retains ownership and billing for the infrastructure.
+SAM is self-hosted software. A person or organization runs each installation for its users, and
+compute can come from project, user, or installation/platform cloud credentials. Every node VM
+belongs to exactly one user and is that user's isolation boundary (see "Workspace Isolation Model"
+in `apps/www/src/content/docs/docs/architecture/security.md`). We manage authentication,
+orchestration, and workspace metadata while the selected provider account retains ownership and
+billing for the infrastructure.
 
 ### Data Ownership Model
 
@@ -940,4 +944,4 @@ and other project documentation, this Constitution takes precedence.
 - Violations should be addressed constructively with reference to specific principles
 - Repeated violations may result in contribution restrictions per Code of Conduct
 
-**Version**: 1.8.2 | **Ratified**: 2026-01-24 | **Last Amended**: 2026-10-07
+**Version**: 1.8.3 | **Ratified**: 2026-01-24 | **Last Amended**: 2026-10-08
