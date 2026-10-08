@@ -401,7 +401,8 @@ function buildWorkspaceAdmissionSql(
            ? AS host_memory_reserve_mb,
            ? AS disk_pressure_threshold_percent,
            ? AS metrics_ttl_ms,
-           ? AS cpu_threshold_percent
+           ? AS cpu_threshold_percent,
+           ? AS allow_busy_build_queue
        ),
        active_reservations AS (
          SELECT
@@ -446,6 +447,7 @@ function buildWorkspaceAdmissionSql(
       policy.diskPressureThresholdPercent,
       policy.metricsTtlMs,
       policy.cpuThresholdPercent,
+      policy.allowBusyBuildQueue ? 1 : 0,
     ],
   };
 }
@@ -475,7 +477,6 @@ function workspaceAdmissionEligibilitySql(): string {
            )
          )`;
 }
-
 
 function validReservationJsonSql(expression: string): string {
   return `(json_valid(${expression})
@@ -558,7 +559,8 @@ function finalMeasuredPressurePredicateSql(): string {
       AND ${validMemoryPercentSql()}
       AND ${validDiskPercentSql()}
       AND ${validCreatingWorkspacesSql()}
-      AND COALESCE(CAST(json_extract(n.metrics_json, '$.creatingWorkspaces') AS INTEGER), 0) = 0
+      AND (policy.allow_busy_build_queue = 1
+        OR COALESCE(CAST(json_extract(n.metrics_json, '$.creatingWorkspaces') AS INTEGER), 0) = 0)
       AND (
         ((CAST(json_extract(n.metrics_json, '$.cpuLoadAvg1') AS REAL) / n.trusted_provider_instance_vcpu_count) * 100)
           < policy.cpu_threshold_percent

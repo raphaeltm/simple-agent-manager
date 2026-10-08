@@ -1,3 +1,4 @@
+import { log } from '../lib/logger';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -165,6 +166,8 @@ export async function sleepWorkspaceSession(
     throw new Error(`Workspace sleep claim unavailable: ${claim.reason}`);
   }
 
+  const sleepPhaseStartedAt = Date.now();
+  let teardownStartedAt: number | null = null;
   let pointOfNoReturn = claim.phase === 'stopping';
   let verified = snapshot;
   let fallback = false;
@@ -209,10 +212,29 @@ export async function sleepWorkspaceSession(
       }
     }
 
+    teardownStartedAt = Date.now();
+    log.info('session_lifecycle.sleep_phase', {
+      workspaceId: workspace.id,
+      phase: 'snapshot_verify',
+      durationMs: teardownStartedAt - sleepPhaseStartedAt,
+      outcome: 'success',
+    });
     verified = await completeSleepTeardown(env, workspace, agentSession, claimId, verified, {
       fallback,
     });
+    log.info('session_lifecycle.sleep_phase', {
+      workspaceId: workspace.id,
+      phase: 'teardown',
+      durationMs: Date.now() - teardownStartedAt,
+      outcome: 'success',
+    });
   } catch (error) {
+    log.info('session_lifecycle.sleep_phase', {
+      workspaceId: workspace.id,
+      phase: teardownStartedAt === null ? 'snapshot_verify' : 'teardown',
+      durationMs: Date.now() - (teardownStartedAt ?? sleepPhaseStartedAt),
+      outcome: 'error',
+    });
     const message = error instanceof Error ? error.message : String(error);
     if (pointOfNoReturn) {
       await deferSessionSnapshotStopping(db, env, workspace.chatSessionId, claimId, message);

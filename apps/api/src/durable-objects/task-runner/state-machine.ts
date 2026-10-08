@@ -1,3 +1,4 @@
+import { recordRunnerPhase } from './phase-timings';
 /**
  * State machine helpers for the TaskRunner DO.
  *
@@ -145,6 +146,7 @@ export async function transitionToInProgress(
           readiness,
         })
       );
+      recordRunnerPhase(state, 'success');
       state.currentStep = 'running';
       state.completed = true;
       await rc.ctx.storage.put('state', state);
@@ -248,6 +250,7 @@ export async function transitionToInProgress(
     }
   }
 
+  recordRunnerPhase(state, 'success');
   state.currentStep = 'running';
   state.completed = true;
   await rc.ctx.storage.put('state', state);

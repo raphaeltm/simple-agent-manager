@@ -333,9 +333,9 @@ describe('reserveWorkspacePlacement', () => {
     const snapshot = capacitySnapshot();
     seedNode();
 
-    await expect(reserveWorkspacePlacement(database, reserveInput(snapshot), admissionPolicy())).resolves.toBe(
-      true
-    );
+    await expect(
+      reserveWorkspacePlacement(database, reserveInput(snapshot), admissionPolicy())
+    ).resolves.toBe(true);
   });
 
   it('persists concrete provider offering and authority metadata on the workspace row', async () => {
@@ -343,9 +343,9 @@ describe('reserveWorkspacePlacement', () => {
     const snapshot = capacitySnapshot();
     seedNode();
 
-    await expect(reserveWorkspacePlacement(database, reserveInput(snapshot), admissionPolicy())).resolves.toBe(
-      true
-    );
+    await expect(
+      reserveWorkspacePlacement(database, reserveInput(snapshot), admissionPolicy())
+    ).resolves.toBe(true);
 
     expect(
       sqlite
@@ -707,6 +707,41 @@ describe('reserveWorkspacePlacement', () => {
         )
       ).resolves.toBe(false);
     }
+  });
+
+  it('admits an exempt user start during a build but atomically rejects excess reservations', async () => {
+    const database = createDb();
+    const snapshot = capacitySnapshot();
+    seedNode();
+    sqlite
+      ?.prepare(`UPDATE nodes SET last_metrics = ?, last_heartbeat_at = ? WHERE id = 'node-1'`)
+      .run(
+        JSON.stringify({
+          version: 1,
+          cpuLoadAvg1: 0.2,
+          memoryPercent: 10,
+          diskPercent: 10,
+          creatingWorkspaces: 1,
+        }),
+        new Date().toISOString()
+      );
+    const input = reserveInput(snapshot);
+    await expect(reserveWorkspacePlacement(database, input, admissionPolicy())).resolves.toBe(
+      false
+    );
+    const policy = admissionPolicy({ allowBusyBuildQueue: true });
+    const reservation = { ...input.resolvedReservation!, cpuMillis: 8000, memoryMb: 8192 };
+    const results = await Promise.all(
+      ['user-a', 'user-b'].map((id) =>
+        reserveWorkspacePlacement(
+          database,
+          { ...input, id, resolvedReservation: reservation },
+          policy
+        )
+      )
+    );
+    expect(results.filter(Boolean)).toHaveLength(1);
+    expect(countWorkspace('user-a') + countWorkspace('user-b')).toBe(1);
   });
 
   it('does not use live memory percentage as a final placement veto', async () => {

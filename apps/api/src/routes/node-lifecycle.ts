@@ -1,3 +1,4 @@
+import { recordLifecycleTimings } from '../services/lifecycle-timings';
 // FILE SIZE EXCEPTION: Pre-existing VM node lifecycle route surface; splitting is tracked separately from eventing reconciliation. See .claude/rules/18-file-size-limits.md
 /**
  * Node lifecycle routes — VM-agent callbacks plus browser token issuance.
@@ -177,6 +178,8 @@ nodeLifecycleRoutes.post('/:id/ready', async (c) => {
     : null;
   const agentVersion =
     typeof readyPayload?.agentVersion === 'string' ? readyPayload.agentVersion : null;
+
+  recordLifecycleTimings('provision', readyPayload?.provisionTimings, { nodeId });
 
   const updatedRows = await db
     .update(schema.nodes)

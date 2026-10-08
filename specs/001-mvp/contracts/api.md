@@ -658,3 +658,7 @@ access and does not enable ACP features.
 Authenticate with the originating project/user/workspace/session MCP bearer token. Current active project `task:write` membership is required. Atomic redemption returns the installed credential as `text/plain` with `Cache-Control: private, no-store`, `Referrer-Policy: no-referrer`, and `X-Content-Type-Options: nosniff`. Only its keyed hash is persisted.
 
 Missing/revoked authentication returns 401; missing project capability returns 403; missing, expired, consumed, incorrectly scoped, disabled-trigger, or revoked claims return 404; MCP rate limiting returns 429. GET/HEAD never redeem. Concurrent redemptions have exactly one winner. Rotation clears pending claims and deletion cascades their removal. `WEBHOOK_CREDENTIAL_CLAIM_TTL_SECONDS` defaults to 600.
+
+### Lifecycle timing callback
+
+- `POST /api/workspaces/:id/lifecycle-timings` — Workspace callback JWT; fixed bounded numeric lifecycle phase summary emitted to structured logs only. See `docs/notes/session-lifecycle-timings.md`.

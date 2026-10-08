@@ -1,3 +1,4 @@
+import { lifecycleTimingsRoutes } from './lifecycle-timings';
 import { Hono } from 'hono';
 
 import type { Env } from '../../env';
@@ -11,6 +12,7 @@ import { runtimeRoutes } from './runtime';
 import { sessionSnapshotRoutes } from './session-snapshots';
 
 const workspacesRoutes = new Hono<{ Bindings: Env }>();
+workspacesRoutes.route('/', lifecycleTimingsRoutes);
 workspacesRoutes.route('/', crudRoutes);
 workspacesRoutes.route('/', localForwardRoutes);
 workspacesRoutes.route('/', lifecycleRoutes);

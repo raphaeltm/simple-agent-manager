@@ -1,3 +1,4 @@
+import { isUserConversationStart } from './user-start-admission';
 /** Workspace creation and VM dispatch steps; readiness and attachment handlers are re-exported below. */
 /**
  * Workspace-related step handlers for the TaskRunner DO.
@@ -185,6 +186,7 @@ async function createAndProvisionWorkspace(
     await rc.ctx.storage.put('state', state);
   }
   const admissionPolicy = resolveWorkspaceAdmissionPolicy(rc.env, state.config.projectScaling);
+  admissionPolicy.allowBusyBuildQueue = await isUserConversationStart(state, rc);
   updatePlacementDiagnostics(state, { queue: {} });
   const placementReserved = await reserveWorkspacePlacement(
     rc.env.DATABASE,
