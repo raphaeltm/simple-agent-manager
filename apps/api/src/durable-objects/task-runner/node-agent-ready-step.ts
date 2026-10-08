@@ -75,12 +75,32 @@ export async function handleNodeAgentReady(
       DEFAULT_FIRST_HEARTBEAT_TIMEOUT_MS
     )
   );
-  const readinessFailure = getNodeAgentReadinessFailure(node, agentReadyStartedAt, rc.getAgentReadyFreshnessSkewMs(), rc.env.VM_AGENT_REQUIRED_VERSION);
-  const reason = !node?.last_heartbeat_at && !node?.agent_ready_at && node?.error_message?.startsWith('Node boot failed: ')
-    ? node.error_message
-    : readinessFailure === 'agent_version_mismatch' ? readinessFailure
-      : !node?.last_heartbeat_at && elapsed > firstHeartbeatTimeout ? 'first_heartbeat_timeout'
-        : elapsed > timeoutMs ? `agent_ready_timeout:${readinessFailure}` : null;
+  const readinessFailure = getNodeAgentReadinessFailure(
+    node,
+    agentReadyStartedAt,
+    rc.getAgentReadyFreshnessSkewMs(),
+    rc.env.VM_AGENT_REQUIRED_VERSION
+  );
+  let reason: string | null = null;
+  if (
+    !node?.last_heartbeat_at &&
+    !node?.agent_ready_at &&
+    node?.error_message?.startsWith('Node boot failed: ')
+  ) {
+    reason = node.error_message;
+  } else if (
+    node?.status === 'error' ||
+    node?.status === 'stopped' ||
+    node?.status === 'destroying'
+  ) {
+    reason = `node_${node.status}`;
+  } else if (readinessFailure === 'agent_version_mismatch') {
+    reason = readinessFailure;
+  } else if (!node?.last_heartbeat_at && elapsed > firstHeartbeatTimeout) {
+    reason = 'first_heartbeat_timeout';
+  } else if (elapsed > timeoutMs) {
+    reason = `agent_ready_timeout:${readinessFailure}`;
+  }
   if (reason) {
     log.warn('task_runner_do.step.node_agent_ready.failed', {
       taskId: state.taskId,
@@ -111,8 +131,11 @@ export async function handleNodeAgentReady(
   }
 
   log.info('task_runner_do.step.node_agent_ready.waiting', {
-    taskId: state.taskId, nodeId: state.stepResults.nodeId, elapsedMs: elapsed,
-    reason: readinessFailure, lastHeartbeatAt: node?.last_heartbeat_at,
+    taskId: state.taskId,
+    nodeId: state.stepResults.nodeId,
+    elapsedMs: elapsed,
+    reason: readinessFailure,
+    lastHeartbeatAt: node?.last_heartbeat_at,
     agentReadyAt: node?.agent_ready_at,
   });
 

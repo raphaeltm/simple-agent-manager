@@ -12,12 +12,12 @@ Production task 01M467MSH3527SSD28TKTFHC8W failed after node 01M467ND1CM7J766YCN
 - Never-heartbeat timeout must accommodate observed historical 154–333 second boots; choose configurable 6 minute default, bounded by overall readiness timeout.
 
 ## Implementation checklist
-- [ ] API transient certificate retries with capped backoff, request deadlines and configurable defaults; permanent 4xx fail immediately.
-- [ ] Cloud-init bounded certificate fetch retry, validate PEM before install, configurable deadlines/backoff; shell/YAML execution tests.
-- [ ] Authenticated best-effort boot failure callback with allowlisted reasons, no secret output, lifecycle fencing.
-- [ ] Precise readiness reasons, wrong-version immediate failure, bounded first-heartbeat timeout.
-- [ ] One durable fresh-VM replacement budget; confirmed teardown before replacement; no workspace/agent replay, reused/BYO nodes untouched; crash-boundary tests.
-- [ ] Environment/API/operator documentation and unit/integration tests.
+- [x] API transient certificate retries with capped backoff, request deadlines and configurable defaults; permanent 4xx fail immediately.
+- [x] Cloud-init bounded certificate fetch retry, validate PEM before install, configurable deadlines/backoff; shell/YAML execution tests.
+- [x] Authenticated best-effort boot failure callback with allowlisted reasons, no secret output, lifecycle fencing.
+- [x] Precise readiness reasons, wrong-version immediate failure, bounded first-heartbeat timeout.
+- [x] One durable fresh-VM replacement budget; confirmed teardown before replacement; no workspace/agent replay, reused/BYO nodes untouched; crash-boundary tests.
+- [x] Environment/API/operator documentation and unit/integration tests.
 - [ ] Lint, typecheck, tests, build and local specialist reviews; address all findings.
 - [ ] Exclusive staging lease; real new VM, heartbeat/access/TLS checks; <=2 VMs, prompt deletion and release.
 - [ ] PR/CI/CodeRabbit gate, merge, production deploy; idea evidence and completion; channel MERGED/DONE and unsubscribe.
@@ -27,3 +27,6 @@ Transient certificate failure recovers without failing task. Exhausted boot fail
 
 ## Rules
 22 infrastructure gate; 27 fresh binary/VM; 34 callback auth; 72 recovery classification; cloud-init POSIX execution/YAML round trips. Coordination reliability-wave-1008 staging lease and migration claim rules.
+
+## Specialist review
+All findings addressed: security reviewer identified pre-workspace warm-claim race; quarantine now applies bounded warm-claim and other-task ownership guards. Completion/test reviewers requested real deletion→replacement integration; added real strict deletion, lease release, provisioning and readiness test with only external providers stubbed. Re-reviews PASS for security, Cloudflare/test engineering, completion, environment, constitution and documentation. Full validation/staging/deploy remain pending.

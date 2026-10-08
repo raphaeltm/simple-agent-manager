@@ -1,7 +1,5 @@
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
-import { nodeBootFailureRoutes } from '../../../src/routes/node-boot-failure';
-import type { Env } from '../../../src/env';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
@@ -10,11 +8,17 @@ import type {
   TaskRunnerContext,
   TaskRunnerState,
 } from '../../../src/durable-objects/task-runner/types';
+import type { Env } from '../../../src/env';
+import { nodeBootFailureRoutes } from '../../../src/routes/node-boot-failure';
 import { deleteNodeResourcesStrict } from '../../../src/services/strict-node-deletion';
 import { releaseVmProvisioningLease } from '../../../src/services/vm-admission-control';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
-vi.mock('../../../src/services/jwt', () => ({ verifyCallbackToken: vi.fn().mockResolvedValue({ workspace: 'node', scope: 'node', type: 'callback' }) }));
+vi.mock('../../../src/services/jwt', () => ({
+  verifyCallbackToken: vi
+    .fn()
+    .mockResolvedValue({ workspace: 'node', scope: 'node', type: 'callback' }),
+}));
 vi.mock('../../../src/services/strict-node-deletion', () => ({
   deleteNodeResourcesStrict: vi.fn(),
 }));
@@ -101,6 +105,46 @@ describe('fresh VM boot recovery', () => {
       auto_provisioned_node_id: null,
     });
   });
+  it('supports disabling replacement while still cleaning the failed VM', async () => {
+    rc.env.TASK_RUNNER_BOOT_MAX_REPLACEMENTS = '0';
+    await expect(handleNodeAgentReady(state, rc)).rejects.toThrow('recovery exhausted');
+    expect(state.bootReplacementCount).toBeUndefined();
+    expect(deleteNodeResourcesStrict).toHaveBeenCalledTimes(1);
+    expect(rc.advanceToStep).not.toHaveBeenCalled();
+  });
+  it('ignores old boot errors after successful startup', async () => {
+    healthy();
+    sqlite.exec("UPDATE nodes SET error_message = 'Node boot failed: origin_ca_bootstrap'");
+    await handleNodeAgentReady(state, rc);
+    expect(state.currentStep).toBe('workspace_creation');
+    expect(deleteNodeResourcesStrict).not.toHaveBeenCalled();
+  });
+  it('fails closed when another workspace already occupies the node', async () => {
+    sqlite.exec(
+      "INSERT INTO workspaces (id, node_id, user_id, name, status) VALUES ('occupied', 'node', 'user', 'Workspace', 'running')"
+    );
+    await expect(handleNodeAgentReady(state, rc)).rejects.toThrow('empty-node proof missing');
+    expect(deleteNodeResourcesStrict).not.toHaveBeenCalled();
+    expect(sqlite.prepare('SELECT status FROM nodes').get()).toEqual({ status: 'running' });
+  });
+  it.each(['warm_claim', 'other_owner'])(
+    'protects a %s before its workspace is inserted',
+    async (kind) => {
+      sqlite
+        .prepare(
+          `INSERT INTO tasks (id, project_id, user_id, title, status, claimed_warm_node_id, claimed_warm_node_at, auto_provisioned_node_id)
+      VALUES ('other', 'project', 'user', 'Other', 'delegated', ?, ?, ?)`
+        )
+        .run(
+          kind === 'warm_claim' ? 'node' : null,
+          new Date().toISOString(),
+          kind === 'other_owner' ? 'node' : null
+        );
+      await expect(handleNodeAgentReady(state, rc)).rejects.toThrow('empty-node proof missing');
+      expect(deleteNodeResourcesStrict).not.toHaveBeenCalled();
+      expect(sqlite.prepare('SELECT status FROM nodes').get()).toEqual({ status: 'running' });
+    }
+  );
   it('does not replace a normal five-minute boot', async () => {
     state.agentReadyStartedAt = Date.now() - 330_000;
     await handleNodeAgentReady(state, rc);
@@ -124,10 +168,15 @@ describe('fresh VM boot recovery', () => {
     state.agentReadyStartedAt = Date.now();
     const app = new Hono<{ Bindings: Env }>();
     app.route('/api/nodes', nodeBootFailureRoutes);
-    const response = await app.request('/api/nodes/node/boot-failure', {
-      method: 'POST', headers: { Authorization: 'Bearer node-token', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reason: 'origin_ca_bootstrap' }),
-    }, rc.env);
+    const response = await app.request(
+      '/api/nodes/node/boot-failure',
+      {
+        method: 'POST',
+        headers: { Authorization: 'Bearer node-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: 'origin_ca_bootstrap' }),
+      },
+      rc.env
+    );
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ accepted: true });
     await handleNodeAgentReady(state, rc);
@@ -144,6 +193,15 @@ describe('fresh VM boot recovery', () => {
     expect(deleteNodeResourcesStrict).toHaveBeenCalledTimes(1);
     expect(rc.advanceToStep).not.toHaveBeenCalled();
     expect(state.stepResults.autoProvisioned).toBe(false);
+  });
+  it('replays an exhausted cleanup verdict after reload without another deletion or allocation', async () => {
+    state.bootReplacementCount = 1;
+    await expect(handleNodeAgentReady(state, rc)).rejects.toThrow('recovery exhausted');
+    state = structuredClone(saved);
+    await expect(handleNodeAgentReady(state, rc)).rejects.toThrow('recovery exhausted');
+    expect(deleteNodeResourcesStrict).toHaveBeenCalledTimes(1);
+    expect(rc.advanceToStep).not.toHaveBeenCalled();
+    expect(state.bootReplacementCount).toBe(1);
   });
   it('retains intent and budget when deletion fails, then resumes from durable state', async () => {
     vi.mocked(deleteNodeResourcesStrict).mockRejectedValueOnce(new Error('provider unavailable'));

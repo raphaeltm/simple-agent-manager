@@ -80,6 +80,29 @@ describe('sync wrangler config', () => {
     );
   });
 
+  it('forwards optional VM boot recovery overrides without requiring defaults as bindings', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    const overrides = {
+      ORIGIN_CA_RETRY_MAX_ATTEMPTS: '4',
+      ORIGIN_CA_RETRY_BASE_DELAY_MS: '100',
+      ORIGIN_CA_RETRY_MAX_DELAY_MS: '500',
+      ORIGIN_CA_REQUEST_TIMEOUT_MS: '5000',
+      CLOUD_INIT_CERT_MAX_ATTEMPTS: '4',
+      CLOUD_INIT_CERT_BASE_DELAY_SECONDS: '1',
+      CLOUD_INIT_CERT_MAX_DELAY_SECONDS: '4',
+      CLOUD_INIT_CERT_REQUEST_TIMEOUT_SECONDS: '30',
+      TASK_RUNNER_FIRST_HEARTBEAT_TIMEOUT_MS: '400000',
+      TASK_RUNNER_BOOT_MAX_REPLACEMENTS: '0',
+    };
+    for (const [key, value] of Object.entries(overrides)) vi.stubEnv(key, value);
+    expect(generateApiWorkerEnv({}, outputs, 'prod', false, false, null).vars).toMatchObject(
+      overrides
+    );
+    for (const key of Object.keys(overrides)) vi.stubEnv(key, '');
+    const withoutOverrides = generateApiWorkerEnv({}, outputs, 'prod', false, false, null).vars;
+    for (const key of Object.keys(overrides)) expect(withoutOverrides).not.toHaveProperty(key);
+  });
+
   it('forwards configurable deployment reservation defaults to the Worker', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
     vi.stubEnv('DEPLOYMENT_DEFAULT_CPU_LIMIT_MILLIS', '400');

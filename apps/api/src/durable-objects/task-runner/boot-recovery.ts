@@ -1,6 +1,10 @@
+import { DEFAULT_NODE_WORKSPACE_IDLE_TIMEOUT_MS } from '@simple-agent-manager/shared';
+
 import { log } from '../../lib/logger';
+import { parseMs } from '../../scheduled/node-cleanup/config';
 import { deleteNodeResourcesStrict } from '../../services/strict-node-deletion';
 import { releaseVmProvisioningLease } from '../../services/vm-admission-control';
+import { boundedWarmPlacementClaimGuardSql } from '../../services/warm-placement-claims';
 import { assertTaskExecutionAuthority } from './task-execution-authority';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
@@ -44,15 +48,31 @@ export async function recoverNodeBoot(
   // Quarantine atomically with the no-workspace and task-ownership guards. A
   // reused/occupied/BYO node is never eligible, even if local state is stale.
   if (!intent.terminated) {
+    const warmClaimCutoff = new Date(
+      Date.now() -
+        parseMs(
+          rc.env.NODE_WORKSPACE_IDLE_TIMEOUT_MS ?? rc.env.NODE_ORPHAN_IDLE_TIMEOUT_MS,
+          DEFAULT_NODE_WORKSPACE_IDLE_TIMEOUT_MS
+        )
+    ).toISOString();
     const quarantined = await rc.env.DATABASE.prepare(
       `UPDATE nodes SET status = 'destroying', health_status = 'stale', updated_at = ?
      WHERE id = ? AND user_id = ? AND node_class = 'managed' AND runtime = 'vm'
        AND node_role = 'workspace'
        AND EXISTS (SELECT 1 FROM tasks WHERE id = ? AND auto_provisioned_node_id = nodes.id)
        AND NOT EXISTS (SELECT 1 FROM workspaces WHERE node_id = nodes.id)
+       AND NOT EXISTS (SELECT 1 FROM tasks other WHERE other.auto_provisioned_node_id = nodes.id AND other.id != ?)
+       ${boundedWarmPlacementClaimGuardSql('nodes.id')}
        AND status IN ('creating', 'running', 'error', 'stopped', 'destroying', 'deleted')`
     )
-      .bind(new Date().toISOString(), intent.nodeId, state.userId, state.taskId)
+      .bind(
+        new Date().toISOString(),
+        intent.nodeId,
+        state.userId,
+        state.taskId,
+        state.taskId,
+        warmClaimCutoff
+      )
       .run();
     if ((quarantined.meta.changes ?? 0) !== 1) {
       throw Object.assign(
