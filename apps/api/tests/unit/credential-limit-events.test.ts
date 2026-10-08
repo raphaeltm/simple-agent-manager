@@ -1450,6 +1450,65 @@ describe('ACP usage callback credential verification', () => {
     expect(projectDataService.admitProjectEvent).not.toHaveBeenCalled();
   });
 
+  it.each([
+    {
+      event: 'acp_usage.invalid_server_credential_generation',
+      serverGeneration: 1.5,
+      callbackGeneration: 1 as number | undefined,
+    },
+    {
+      event: 'acp_usage.missing_credential_generation',
+      serverGeneration: 1,
+      callbackGeneration: undefined,
+    },
+    {
+      event: 'acp_usage.credential_generation_mismatch',
+      serverGeneration: 1,
+      callbackGeneration: 2,
+    },
+  ])(
+    'logs $event for a long credential reference by its key',
+    async ({ event, serverGeneration, callbackGeneration }) => {
+      const { sqlite, env } = createCredentialD1();
+      seedCallback();
+      sqlite
+        .prepare(
+          `UPDATE agent_sessions
+              SET agent_credential_reference = ?, agent_credential_generation = ?
+            WHERE id = ?`
+        )
+        .run(BACKFILLED_LONG_REFERENCE, serverGeneration, 'session-1');
+      const warn = vi.spyOn(log, 'warn');
+      try {
+        await expect(
+          handleAcpUsageCallback(makeContext(env), {
+            projectId: 'project-1',
+            sessionId: 'session-1',
+            body: {
+              nodeId: 'node-1',
+              agentType: 'claude-code',
+              credentialReference: BACKFILLED_LONG_REFERENCE,
+              credentialSource: 'user',
+              ...(callbackGeneration === undefined
+                ? {}
+                : { credentialGeneration: callbackGeneration }),
+              rateLimits: [baseObservation({ windowType: 'claude.five_hour' })],
+            } as never,
+          })
+        ).rejects.toMatchObject({ statusCode: 403 });
+
+        const logged = warn.mock.calls.find(([name]) => name === event);
+        expect(logged?.[1]).toMatchObject({
+          credentialReference: sha256Key(BACKFILLED_LONG_REFERENCE),
+          action: 'rejected',
+        });
+        expect(JSON.stringify(warn.mock.calls)).not.toContain('KgCluaQx9');
+      } finally {
+        warn.mockRestore();
+      }
+    }
+  );
+
   it('rate limits callbacks by verified token identity instead of body node identity', async () => {
     const { env } = createCredentialD1({
       CREDENTIAL_LIMIT_USAGE_CALLBACK_RATE_LIMIT_RPM: '1',
