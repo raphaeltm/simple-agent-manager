@@ -44,3 +44,43 @@ build queue. Automated tasks and snapshot wakes keep build deferral. Both adviso
 selection and final atomic reservation retain CPU, memory, disk, exclusive-node,
 telemetry freshness, tenant and allocation-authority checks. No workspace-count cap
 is introduced.
+
+## First staging observations (2026-10-08)
+
+Candidate `4429d66a4`, deployment `37835747075`, lightweight Claude conversation,
+Hetzner cx23/fsn1 (2 vCPU, 4 GB). One start, one explicit sleep and one successful
+same-session restore were verified through real browser replies and authenticated
+timing callbacks. Both sequential VMs reported agent build `068dede59`.
+
+| Measured span                               | Observed seconds |
+| ------------------------------------------- | ---------------: |
+| First node readiness wait                   |          365.134 |
+| First node image pre-pull                   |           60.134 |
+| First node Docker Model Runner installation |           46.101 |
+| First node Node.js installation             |           41.957 |
+| First workspace readiness wait              |           40.662 |
+| First workspace preparation (nested)        |           36.233 |
+| GitHub CLI setup within preparation         |           15.548 |
+| Sleep snapshot verification                 |           14.091 |
+| Sleep teardown                              |            1.787 |
+| Restore workspace preparation               |           11.326 |
+| Restore HOME / Git                          |    1.338 / 1.904 |
+| Restore agent session                       |           19.876 |
+
+These are individual spans, not percentiles or a clean end-to-end wake benchmark.
+The original wake waited for scheduled predecessor deletion: sleep completed at
+20:28:58 UTC; deletion proof arrived at 20:34:02. Test attachment cleanup also
+invalidated pool migration state. Reconciliation advanced pool authority, so the
+first VM was deleted and recovery used a second fresh VM. That VM's readiness
+wait was 196.403 seconds. The original task/session identity survived; snapshot
+restoration completed at 20:44:44.620 UTC and the browser displayed the wake reply.
+An ensuing idle checkpoint reported WIP degradation; it is a separate capture
+from the successfully restored snapshot.
+
+The next cut to investigate is expediting scheduled predecessor deletion when a
+human wake arrives, while retaining verified runtime deletion and final capacity
+admission. The five-minute deletion fence and cold provisioning dominate these
+observations; HOME transfer does not. Separately measure provisioning variability
+and agent restoration before choosing image preinstallation or workspace reuse.
+No next-cut optimization is implemented here. Production samples remain a separate
+cohort, and these staging numbers must not be presented as a production baseline.
