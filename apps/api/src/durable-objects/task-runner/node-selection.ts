@@ -47,6 +47,7 @@ import {
 import { updatePlacementDiagnostics } from './placement-diagnostics';
 import { taskPlacementStrategy } from './task-placement-strategy';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
+import { isUserConversationStart } from './user-start-admission';
 
 export { verifyNodeAgentHealthy } from './node-agent-health';
 export type { ReusableNodePlacementResult, ReusableNodeSelection } from './node-placement-deferral';
@@ -275,6 +276,7 @@ export async function tryClaimWarmNode(
   // an operator's pool strategy is observable on the warm path too. It used to
   // rank on `vmSize` equality, which made every strategy pick the same host.
   const warmPolicy = resolveWorkspaceAdmissionPolicy(rc.env, state.config.projectScaling);
+  warmPolicy.allowBusyBuildQueue = await isUserConversationStart(state, rc);
   const warmReservation = getTaskReservation(state);
   const warmUsage = await loadActiveWorkspaceReservationUsage(
     rc.env.DATABASE,
@@ -442,6 +444,7 @@ export async function findReusableNodePlacement(
 ): Promise<ReusableNodePlacementResult | null> {
   const scaling = state.config.projectScaling;
   const policy = resolveWorkspaceAdmissionPolicy(rc.env, scaling);
+  policy.allowBusyBuildQueue = await isUserConversationStart(state, rc);
   const requestedReservation = getTaskReservation(state);
 
   const nodes = await rc.env.DATABASE.prepare(
@@ -614,6 +617,7 @@ export async function hasReusableNodeReservationCapacity(
   node: NodePlacementFields
 ): Promise<boolean> {
   const policy = resolveWorkspaceAdmissionPolicy(rc.env, state.config.projectScaling);
+  policy.allowBusyBuildQueue = await isUserConversationStart(state, rc);
   const usage = await loadActiveWorkspaceReservationUsage(rc.env.DATABASE, [node.id]);
   return hasWorkspaceReservationCapacity(
     node,

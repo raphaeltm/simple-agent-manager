@@ -363,14 +363,15 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 	// Resolve devcontainer cache ref (best-effort, only for non-lightweight workspaces).
 	cacheRef := ""
 	if cfg.DevcontainerCacheEnabled && !state.Lightweight && repoHasDevcontainerConfig {
+		reporter.Log("devcontainer_cache", "started", "Preparing devcontainer cache")
 		var cacheErr error
 		cacheRef, cacheErr = prepareDevcontainerCache(ctx, cfg, bootstrap.GitHubToken, state.DevcontainerConfigName)
 		if cacheErr != nil {
+			reporter.Log("devcontainer_cache", "failed", "Devcontainer cache preparation failed")
 			slog.Warn("Cache registry login failed (caching disabled for this build)", "registry", cfg.DevcontainerCacheRegistry, "error", cacheErr)
 			cacheRef = ""
-		}
-		if cacheRef != "" {
-			reporter.Log("devcontainer_cache", "started", "Checking devcontainer cache")
+		} else {
+			reporter.Log("devcontainer_cache", "completed", "Devcontainer cache prepared")
 		}
 	}
 

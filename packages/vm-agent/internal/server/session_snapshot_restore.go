@@ -59,7 +59,9 @@ func (s *Server) prepareFreshSessionAfterDegradedRestore(workspaceID, sessionID 
 	})
 }
 
-func (s *Server) restoreSessionSnapshot(ctx context.Context, runtime *WorkspaceRuntime, sessionID, chatSessionID, agentType, callbackToken string) (map[string]interface{}, error) {
+func (s *Server) restoreSessionSnapshot(ctx context.Context, runtime *WorkspaceRuntime, sessionID, chatSessionID, agentType, callbackToken string) (result map[string]interface{}, resultErr error) {
+	ctx, timings := startLifecycleTimings(ctx, "metadata")
+	defer func() { s.finishLifecycleTimings(timings, "wake", runtime.ID, callbackToken, resultErr) }()
 	restore, err := s.fetchSnapshotRestore(ctx, runtime.ID, chatSessionID, callbackToken)
 	if err != nil {
 		return nil, err
@@ -80,6 +82,7 @@ func (s *Server) restoreSessionSnapshot(ctx context.Context, runtime *WorkspaceR
 	// repository and container first; credential-bearing HOME paths are excluded
 	// from snapshots, so fresh control-plane credential injection remains
 	// authoritative even though the safe HOME archive is applied afterward.
+	nextLifecyclePhase(ctx, "workspace")
 	var provisionErr error
 	if s.config.IsStandaloneMode() {
 		provisionErr = s.prepareStandaloneWorkspaceRuntime(ctx, runtime)
@@ -90,6 +93,7 @@ func (s *Server) restoreSessionSnapshot(ctx context.Context, runtime *WorkspaceR
 		_ = s.reportSnapshotRestoreResult(ctx, runtime.ID, chatSessionID, "fresh_injection_failed", provisionErr.Error(), callbackToken)
 		return nil, provisionErr
 	}
+	nextLifecyclePhase(ctx, "home_restore")
 	var validateRestoredGitState func() error
 	if s.config.IsStandaloneMode() && restore.Download.Home != "" {
 		if err := s.downloadAndExtractSessionStateTar(ctx, restore.Download.Home, callbackToken, idleTimeout, entryThreshold, totalBudget); err != nil {
@@ -97,6 +101,7 @@ func (s *Server) restoreSessionSnapshot(ctx context.Context, runtime *WorkspaceR
 			return nil, err
 		}
 	}
+	nextLifecyclePhase(ctx, "git_restore")
 	if s.config.IsStandaloneMode() && restore.Download.WIP == "" {
 		workDir := standaloneWorkspaceWorkDir(runtime, s.config.WorkspaceDir, s.config.ContainerWorkDir)
 		if err := restoreStandaloneSnapshotGitState(ctx, workDir, gitState); err != nil {
@@ -126,12 +131,14 @@ func (s *Server) restoreSessionSnapshot(ctx context.Context, runtime *WorkspaceR
 		if targetErr != nil {
 			return nil, targetErr
 		}
+		nextLifecyclePhase(ctx, "home_restore")
 		if restore.Download.Home != "" {
 			if err := s.downloadAndExtractContainerHome(ctx, target, restore.Download.Home, callbackToken, idleTimeout, entryThreshold, totalBudget); err != nil {
 				_ = s.reportSnapshotRestoreResult(ctx, runtime.ID, chatSessionID, "home_failed", err.Error(), callbackToken)
 				return nil, err
 			}
 		}
+		nextLifecyclePhase(ctx, "git_restore")
 		gitCommand := func(ctx context.Context, env []string, args ...string) (string, error) {
 			return s.containerGit(ctx, target, env, args...)
 		}
@@ -155,6 +162,7 @@ func (s *Server) restoreSessionSnapshot(ctx context.Context, runtime *WorkspaceR
 		}
 	}
 
+	nextLifecyclePhase(ctx, "agent_restore")
 	acpSessionID, savedAgentType, identityErr := snapshotHarnessResumeIdentity(restore.Manifest, sessionID, agentType)
 	if identityErr != nil {
 		return nil, identityErr
@@ -181,6 +189,7 @@ func (s *Server) restoreSessionSnapshot(ctx context.Context, runtime *WorkspaceR
 	if host.Status() != acp.HostReady {
 		return nil, fmt.Errorf("restored agent failed to become ready: %s", host.Status())
 	}
+	nextLifecyclePhase(ctx, "verify")
 	if err := s.reportRestoredSnapshotIfGitStateMatches(ctx, runtime.ID, chatSessionID, callbackToken, validateRestoredGitState); err != nil {
 		return nil, err
 	}

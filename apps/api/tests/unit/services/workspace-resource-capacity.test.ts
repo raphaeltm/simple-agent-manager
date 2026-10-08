@@ -96,12 +96,12 @@ describe('workspace resource capacity accounting', () => {
     ).toBe(true);
     expect(isResolvedResourceReservation(reservation({ version: 3 }))).toBe(true);
     // Legacy rows may still carry the retired co-tenant cap; it is ignored whatever its value.
-    expect(
-      isResolvedResourceReservation({ ...reservation({ version: 1 }), maxCoTenants: 2 })
-    ).toBe(true);
-    expect(
-      isResolvedResourceReservation({ ...reservation({ version: 3 }), maxCoTenants: 0 })
-    ).toBe(true);
+    expect(isResolvedResourceReservation({ ...reservation({ version: 1 }), maxCoTenants: 2 })).toBe(
+      true
+    );
+    expect(isResolvedResourceReservation({ ...reservation({ version: 3 }), maxCoTenants: 0 })).toBe(
+      true
+    );
     expect(isResolvedResourceReservation(reservation({ version: 4 }))).toBe(false);
     expect(isResolvedResourceReservation({ ...reservation(), cpuMillis: '1000' })).toBe(false);
   });
@@ -214,6 +214,14 @@ describe('workspace resource capacity accounting', () => {
       expect(result.deferrable).toBe(reason === WORKSPACE_BUSY_BUILD_QUEUE_REASON);
       expect(result.reasons).not.toContain('CPU share budget would be exceeded');
       expect(result.reasons).not.toContain('memory budget would be exceeded after host reserve');
+      const interactive = evaluateWorkspaceReservationCapacity(
+        { ...baseNode, lastMetrics: JSON.stringify(metrics) },
+        active,
+        reservation(),
+        policy({ cpuThresholdPercent: 90, allowBusyBuildQueue: true })
+      );
+      expect(interactive.admitted).toBe(reason === WORKSPACE_BUSY_BUILD_QUEUE_REASON);
+      expect(interactive.deferrable).toBe(false);
     }
   });
 
@@ -357,12 +365,7 @@ describe('workspace resource capacity', () => {
       { resolvedReservationJson: JSON.stringify(REQUEST) },
     ]);
     expect(
-      hasWorkspaceReservationCapacity(
-        CX23,
-        occupied,
-        REQUEST,
-        policy({ hostMemoryReserveMb: 0 })
-      )
+      hasWorkspaceReservationCapacity(CX23, occupied, REQUEST, policy({ hostMemoryReserveMb: 0 }))
     ).toBe(false);
     expect(
       hasWorkspaceReservationCapacity(
