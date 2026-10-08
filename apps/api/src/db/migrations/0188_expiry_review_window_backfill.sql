@@ -46,7 +46,7 @@ WHERE id = '01M3VY3XJV909HKR9VZ5HEJX5W'
   AND project_id = '01M3VR21E3B2G18K084X2ZKCTA'
   AND chat_session_id = 'fcac50e1-c625-4ac5-b527-0d81d225087b'
   AND workspace_id = '01M3VY3Z1KBWGXM0768VSXX2KR'
-  AND task_mode = 'conversation' AND status = 'failed' AND terminal_reason IS NULL
+  AND task_mode = 'task' AND status = 'failed' AND terminal_reason IS NULL
   AND updated_at = '2026-10-08T17:20:56.187Z'
   AND completed_at = '2026-10-08T17:20:56.187Z'
   AND terminal_transition_id = '01M4E8GJBV4ZWAWEFZW3DB3CAB'

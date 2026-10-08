@@ -10,6 +10,7 @@ const projectId = '01M3VR21E3B2G18K084X2ZKCTA';
 const cohort = [
   {
     id: '01M3W1QQCPTM787VWRXQZAEGEE',
+    taskMode: 'conversation',
     sessionId: '34d5db22-b744-4cc5-aba9-b68a1c993545',
     workspaceId: '01M3W1QVE9H7MWNDBNVKGZFS0A',
     completedAt: '2026-10-08T15:55:58.440Z',
@@ -21,6 +22,7 @@ const cohort = [
   },
   {
     id: '01M3VY3XJV909HKR9VZ5HEJX5W',
+    taskMode: 'task',
     sessionId: 'fcac50e1-c625-4ac5-b527-0d81d225087b',
     workspaceId: '01M3VY3Z1KBWGXM0768VSXX2KR',
     completedAt: '2026-10-08T17:20:56.187Z',
@@ -51,10 +53,11 @@ function fixture(): DatabaseSync {
       `INSERT INTO tasks
       (id,project_id,user_id,title,status,created_by,task_mode,workspace_id,chat_session_id,
        updated_at,completed_at,error_message,terminal_transition_id)
-      VALUES (?,?,'u','Retained conversation','failed','u','conversation',?,?,?,?,?,?)`
+      VALUES (?,?,'u','Retained conversation','failed','u',?,?,?,?,?,?,?)`
     ).run(
       row.id,
       projectId,
+      row.taskMode,
       row.workspaceId,
       row.sessionId,
       row.completedAt,
@@ -159,6 +162,7 @@ describe('review-window expiry correction migration', () => {
     'updated_at',
     'completed_at',
     'error_message',
+    'task_mode',
     'active',
     'snapshot',
     'session',
@@ -167,7 +171,12 @@ describe('review-window expiry correction migration', () => {
     const db = fixture();
     try {
       for (const row of cohort) {
-        if (change === 'snapshot') addSnapshot(db, row.sessionId);
+        if (change === 'task_mode')
+          db.prepare('UPDATE tasks SET task_mode=? WHERE id=?').run(
+            row.taskMode === 'task' ? 'conversation' : 'task',
+            row.id
+          );
+        else if (change === 'snapshot') addSnapshot(db, row.sessionId);
         else if (change === 'session')
           db.prepare("UPDATE session_summaries SET status='sleeping' WHERE id=?").run(
             row.sessionId
