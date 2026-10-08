@@ -292,10 +292,10 @@ per-slice and per-run admission budgets, and the verified R2 manifest writes.
 - `PROJECT_DATA_MATERIALIZATION_MAX_GROUP_CHARS` — Grouped-row size past which a continuing run starts a new row instead of rewriting the accumulated content (default: `65536`)
 - `PROJECT_DATA_MATERIALIZATION_SWEEP_LIMIT` — Sessions indexed by one chat-search materialization backfill call (default: `50`)
 - `PROJECT_DATA_MATERIALIZATION_SWEEP_SCAN_LIMIT` — Sessions examined by one chat-search materialization backfill call (default: `500`)
-- `PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED` — Production-disabled switch for cleanup of old terminal-session grouped message rows and their external-content FTS entries (default: disabled)
+- `PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED` — Switch for cleanup of old terminal-session grouped message rows and their external-content FTS entries (code fallback: disabled; wrangler.toml ships enabled)
 - `PROJECT_DATA_GROUPED_FTS_CLEANUP_TRIGGER_RATIO` — ProjectData usage ratio that starts grouped/FTS derived-data cleanup when explicitly enabled (default: `0.9`)
 - `PROJECT_DATA_GROUPED_FTS_CLEANUP_TARGET_RATIO` — ProjectData usage ratio below which grouped/FTS cleanup stops (default: `0.85`)
-- `PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_SESSIONS` — Maximum terminal sessions cleaned by one grouped/FTS canary slice (default: `2`)
+- `PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_SESSIONS` — Maximum terminal sessions examined by one grouped/FTS slice (plus one lookahead) (default: `2`)
 - `PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_ROWS` — Maximum grouped message rows deleted by one grouped/FTS canary slice (default: `1000`)
 - `PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_BYTES` — Maximum grouped message content bytes deleted by one grouped/FTS canary slice (default: `4194304`)
 - `PROJECT_DATA_GROUPED_FTS_CLEANUP_MIN_SESSION_AGE_DAYS` — Minimum terminal-session age before grouped/FTS derived rows may be cleaned (default: `7`)
@@ -797,8 +797,8 @@ Generated deployments validate and pass these values through cloud-init to newly
 - `ACP_VIEWER_SEND_BUFFER` — Per-viewer send channel buffer size (default: 256)
 - `ACP_PING_INTERVAL` — WebSocket ping interval for stale connection detection (default: 30s)
 - `ACP_PONG_TIMEOUT` — WebSocket pong deadline after ping (default: 10s)
-- `ACP_PROMPT_TIMEOUT` — Max ACP prompt runtime for workspace sessions; 0 = no timeout (default: 0)
-- `ACP_TASK_PROMPT_TIMEOUT` — Max ACP prompt runtime for task-driven sessions (default: 8h)
+- `ACP_PROMPT_TIMEOUT` — Max ACP prompt runtime for unmanaged workspace sessions; 0 = no timeout (default: 0)
+- Task-managed prompts use control-plane inactivity classification and the absolute ceiling; retired `ACP_TASK_PROMPT_TIMEOUT` is ignored.
 - `ACP_PROMPT_CANCEL_GRACE_PERIOD` — Grace wait for the cancelled prompt to settle before it is finished as `cancelled` and the agent is restarted (default: 5s). Bound to the cancelled prompt; never affects a later prompt
 - `ACP_PROMPT_RETRY_MAX_RETRIES` — Max transient provider prompt retries after the initial attempt (default: 2)
 - `ACP_PROMPT_RETRY_INITIAL_BACKOFF` — Initial backoff before retrying transient provider prompt errors (default: 15s)

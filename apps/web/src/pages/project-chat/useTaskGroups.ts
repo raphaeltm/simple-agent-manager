@@ -13,6 +13,7 @@ export interface TaskInfo {
   title: string;
   parentTaskId: string | null;
   status: TaskStatus;
+  terminalReason?: string | null;
   errorMessage?: string | null;
   executionStep?: TaskExecutionStep | null;
   blocked: boolean;
@@ -35,6 +36,7 @@ export function buildTaskInfoMap(tasks: Task[]): Map<string, TaskInfo> {
       title: t.title,
       parentTaskId: t.parentTaskId,
       status: t.status,
+      terminalReason: t.terminalReason,
       errorMessage: t.errorMessage,
       executionStep: t.executionStep,
       blocked: t.blocked ?? false,

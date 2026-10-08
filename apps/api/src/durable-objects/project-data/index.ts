@@ -2392,12 +2392,14 @@ export class ProjectData extends DurableObject<Env> {
 
   async runGroupedFtsCleanup(): Promise<groupedFtsCleanup.ProjectDataGroupedFtsCleanupResult | null> {
     const config = storageSafety.resolveStorageSafetyConfig(this.env);
+    await this.ctx.storage.sync();
     const result = await groupedFtsCleanup.runProjectDataGroupedFtsCleanup(
       this.sql,
       this.env,
       this.getProjectId(),
       config,
       {
+        transactionSync: (callback) => this.ctx.storage.transactionSync(callback),
         allowStart: true,
         classifyStatus: (databaseSizeBytes) =>
           storageSafety.classifyStorageUsage(databaseSizeBytes, config),
@@ -2460,6 +2462,7 @@ export class ProjectData extends DurableObject<Env> {
   protected runStorageSafetyAlarmLocked(): Promise<storageSafety.ProjectDataStorageAlarmResult> {
     return this.withToolPayloadCleanupLock(() =>
       storageSafety.runProjectDataStorageSafetyAlarm(this.sql, this.env, this.getProjectId(), {
+        sync: () => this.ctx.storage.sync(),
         transactionSync: (callback) => this.ctx.storage.transactionSync(callback),
       })
     );

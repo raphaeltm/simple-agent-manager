@@ -150,7 +150,6 @@ func buildTestConfig(t *testing.T, port int, mockServerURL, workspaceID, bootstr
 		ACPPingInterval:       30 * time.Second,
 		ACPPongTimeout:        10 * time.Second,
 		ACPPromptTimeout:      0, // no timeout for workspace sessions
-		ACPTaskPromptTimeout:  8 * time.Hour,
 
 		// Error reporting
 		ErrorReportFlushInterval: 30 * time.Second,
