@@ -46,3 +46,13 @@ file stays in backlog for the remaining items:
 - Item 5: `CONTEXT_SUMMARY_*` vars in `wrangler.toml` `[vars]`.
 - Item 6: `classifyError` extracted to `src/lib/errors.ts`.
 
+
+## Status (2026-10-08): superseded
+
+The `summarize` and `fork-prepare` routes, `services/session-summarize.ts`, and the
+`RATE_LIMIT_SESSION_SUMMARIZE` limit were removed in
+`tasks/archive/2026-10-08-remove-fork-retry-llm-summarization.md` (branch
+`sam/moment-fork-retry-session-w1b7mr`): the summary never reached the new agent, so Fork now
+pre-fills the session IDs and Retry re-adds the original prompt. Items 1, 3, 4 and 5 no longer
+apply. Item 6 (`classifyError` in `task-title.ts`) now has a single caller and needs no
+extraction.
