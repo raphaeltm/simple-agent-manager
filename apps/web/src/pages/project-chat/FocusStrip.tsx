@@ -43,6 +43,7 @@ function enrichSession(
       errorMessage: taskInfo.errorMessage,
       executionStep: taskInfo.executionStep,
       taskMode: taskInfo.taskMode,
+      ...session.task,
     },
   };
 }

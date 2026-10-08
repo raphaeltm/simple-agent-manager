@@ -129,6 +129,51 @@ describe('GET /api/projects/:projectId/sessions — D1 fast path', () => {
     expect(mocks.listSessions).not.toHaveBeenCalled();
   });
 
+  it.each(['index', 'do'])(
+    'includes the expired outcome for an old session via %s without the recent-task page',
+    async (source) => {
+      addIndexedSession('old-chat');
+      if (source === 'index') setCoverage();
+      else mocks.listSessions.mockResolvedValue({ sessions: [{ id: 'old-chat' }], total: 1 });
+      sqlite
+        .prepare(
+          `INSERT INTO tasks (id, project_id, user_id, title, status, chat_session_id,
+      terminal_reason, created_at) VALUES ('old-task', ?, ?, 'Old saved work', 'cancelled',
+      'old-chat', 'snapshot_expired', '2020-01-01T00:00:00.000Z')`
+        )
+        .run(PROJECT, OWNER);
+      const { status, body } = await listSessions();
+      expect(status).toBe(200);
+      expect((body as { sessions: unknown[] }).sessions).toEqual([
+        expect.objectContaining({
+          id: 'old-chat',
+          task: { id: 'old-task', status: 'cancelled', terminalReason: 'snapshot_expired' },
+        }),
+      ]);
+    }
+  );
+
+  it.each(['-1', '0', 'invalid'])('bounds invalid page limit %s and offset before either backend', async (limit) => {
+    const { status } = await listSessions(`?limit=${limit}&offset=-1`);
+    expect(status).toBe(200);
+    expect(mocks.listSessions).toHaveBeenCalledWith(env, PROJECT, null, 20, 0, null, null);
+  });
+
+  it('does not attach an outcome from another project', async () => {
+    addIndexedSession('scoped-chat');
+    setCoverage();
+    sqlite
+      .prepare(
+        `INSERT INTO tasks (id, project_id, user_id, title, status, chat_session_id,
+      terminal_reason) VALUES ('other-task', 'other-project', ?, 'Other', 'cancelled',
+      'scoped-chat', 'snapshot_expired')`
+      )
+      .run(OWNER);
+    const { status, body } = await listSessions();
+    expect(status).toBe(200);
+    expect((body as { sessions: Array<{ task?: unknown }> }).sessions[0]!.task).toBeUndefined();
+  });
+
   it('falls back to the Durable Object when the project has no coverage row', async () => {
     addIndexedSession('from-d1');
     // No coverage written.

@@ -45,3 +45,8 @@ Final local package runs:826API files/11615tests passed with six old fixture fai
 Load review: new degraded pass and existing artifact purge each use the configured batch cap (default250), aggregate500maximum candidates. Expected initial49production/11staging degraded expiries; indexed lookup plus existing D1/DO terminal machinery per row; no new VM/R2 operations.
 
 Final frozen-tree root validation14:35Z: `pnpm exec turbo run test --concurrency=1` PASS21/21tasks, web4025tests/336files andAPI11621tests/828files. This supersedes earlier in-flight fixture/cache failures.
+
+## Staging and older-conversation list correction
+- First staging deployment37794259672 applied0187. Real cron at15:02Z expired11legacy tasks, exactlyone expiry event each; sixunexpired controls unchanged; all1524transcript messages retained. Degraded snapshot metadata retained with expired status.
+- Found and fixed a completeness gap before PR: sidebar's200recent-task page could omit older expired tasks. Session-list API now includes authoritative task outcomes for returned sessions, scoped byproject and uniquechat ID; D1parameter chunking permits at mosttwoqueries for100sessions. Invalid/nonpositive page limits now normalize before both readers, avoiding SQLite's unlimited negative limit.
+- Real-route tests13PASS across index/DO fallback, project isolation, negative/invalid limits. Revised Playwright2PASS with emptyrecent-task page; fourupdated screenshots reviewed PASS and replaced in retained libraryfiles. All three localdelta reviewers PASS/ADDRESSED. Final staging redeploy pending.

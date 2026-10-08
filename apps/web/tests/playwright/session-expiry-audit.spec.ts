@@ -314,7 +314,8 @@ test('expired transcript, neutral label, and Fork remain usable', async ({ page 
   await setupApiMocks(page, {
     session,
     sessions,
-    tasks: [expiredTask],
+    // An old expired task is absent from the unrelated recent-task page.
+    tasks: [],
     workspace: { status: 'deleted' },
     detailMessages: [
       {
