@@ -14,7 +14,7 @@ SAM root ProjectData storage_safety has repeatedly failed with SQLITE_NOMEM sinc
 - [x] Bound session selection and per-session content size inspection; cursor advances over empty/oversized candidates.
 - [x] Isolate and log each storage safety substep; preserve prior committed markers on failure.
 - [x] Classify SQLITE_NOMEM; retry only explicitly safe idempotent operations.
-- [ ] Real SQLite alarm-path tests, bounded-query evidence, discriminating negative controls.
+- [x] Real SQLite alarm-path tests, bounded-query evidence, discriminating negative controls.
 - [ ] Relevant docs and full quality validation; local specialist review.
 - [ ] Coordinated staging lease and runtime validation.
 - [ ] PR, CI, CodeRabbit request/wait, merge and production deploy.
@@ -28,7 +28,7 @@ Idea 01M1XKK208SJV9VJA4BXP2KBHT; task 01M4DV2PE0ARS834TY69DG3KSF. Rules 53, 62, 
 
 ## Validation evidence
 - Root lint, typecheck (19 tasks), and build (9 tasks) pass.
-- Retry unit suites: 30/30 pass. Initial clean SQLite storage suite: 22/22, final expanded suite pending.
+- Retry unit suites: 30/30 pass. Final expanded SQLite storage-safety + incremental-materialization suites: 45/45 pass.
 - Negative control: original aggregate reads 131 rows (bound <20), test fails.
 - Negative control: remove sync and session transaction, marker is not committed before fault and first grouped/FTS row is lost, tests fail.
 - Negative control: rethrow substep failure, subsequent eligible activity-event deletion does not occur, both fault-recording variants fail.
