@@ -16,7 +16,7 @@ Sleeping Instant containers are reaped at the four-hour node ceiling, archive ca
 - [x] Fence runtime-ended writers and make repeated Stop idempotent with strict proof.
 - [x] Clone BaseBranch, then track existing or create new output branch; preserve default behavior.
 - [x] Add real SQL lifecycle/order and real git regression tests; prove failures before fixes.
-- [ ] Run lint/typecheck/tests/build and local specialist reviews.
+- [x] Run lint/typecheck/tests/build and local specialist reviews.
 - [ ] Coordinate staging lease, deploy container image, verify real sleep/sweep/wake/archive/stop and required VM smoke.
 - [ ] PR/CI/CodeRabbit, merge, production deployment, idea evidence/status, channel completion/unsubscribe.
 
@@ -25,3 +25,6 @@ Sleeping Instant survives past both node lifetime ceilings until retention expir
 
 ## References
 Ideas 01M3KYP55W91YQHV2FN1A2NVBT, 01M4BH36AZV3Q2J8MH43JXY8M6, 01M4AG60D25W5AFX96N2ABA9K8, 01M4B29WPWZSXSVFSKMTEV69T7; queue 01M4DR7MBDD8AAVF1XMC2XYQEX section 9. Coordination reliability-wave-1008. Rules 32, 53, 61, VM rollout rule 54; /do workflow.
+
+## Local verification
+Lint, typecheck, build, full Go, focused Go race, real Workers/D1 lifecycle tests, and all three specialist reviews passed. The bounded root suite completed 20/21 tasks successfully: API had 11,621 passing tests and one stale SQL-string assertion; updated that expectation in 3098cb271 and reran cleanup/lifecycle tests (21 passing). No other failures remained. Web passed all 4,023 tests.
