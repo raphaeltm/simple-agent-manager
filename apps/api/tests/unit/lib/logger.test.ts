@@ -77,10 +77,10 @@ describe('serializeError', () => {
     expect(result.cause).toBe('[REDACTED_ERROR_MESSAGE]');
   });
 
-  test('serializes non-Error cause with token-like values redacted', () => {
+  test('redacts the entire non-Error cause, including unstructured private values', () => {
     const err = new Error('wrapper', { cause: 'string cause Bearer abc.def.ghi' });
     const result = serializeError(err);
-    expect(result.cause).toBe('string cause [REDACTED]');
+    expect(result.cause).toBe('[REDACTED_ERROR_MESSAGE]');
   });
 
   test('serializes non-Error values as string with token-like values redacted', () => {
@@ -164,7 +164,7 @@ describe('credential-token redaction through the logging entry points', () => {
     });
     expect(
       serializeError(new Error('wrapper', { cause: `key ${anthropicApiKey} rejected` })).cause
-    ).toBe('key [REDACTED] rejected');
+    ).toBe('[REDACTED_ERROR_MESSAGE]');
   });
 
   test('the instrumented logger persists error context with credential tokens stripped', async () => {
