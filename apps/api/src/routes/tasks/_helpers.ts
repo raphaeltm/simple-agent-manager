@@ -245,6 +245,7 @@ export async function setTaskStatus(
   }
 
   if (toStatus === 'ready') {
+    nextValues.terminalReason = null;
     nextValues.workspaceId = null;
     nextValues.startedAt = null;
     nextValues.completedAt = null;

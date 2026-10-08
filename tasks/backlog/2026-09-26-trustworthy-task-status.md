@@ -1,5 +1,12 @@
 # Make SAM Task Status Trustworthy
 
+> **Expiry follow-up 2026-10-08:** Raphaël approved a neutral **Expired** end state after the
+> saved workspace's seven-day retention window, with a readable transcript and Fork continuation.
+> The expiry transition, bounded legacy repair, regression tests, and deployment evidence are
+> tracked in [Expired sleeping conversations](../archive/2026-10-08-expired-sleeping-conversations.md).
+> That work uses `cancelled` plus `terminal_reason=snapshot_expired`; it does not add another status enum.
+> Production completion remains gated on live row verification in the linked SAM task/ideas.
+
 > **Reconciliation 2026-10-05:** PR #2230 (`ee80b0ee0`) added the task status `sleeping`. VM
 > sleep teardown now writes it (`apps/api/src/services/session-sleep-teardown.ts:212-229`). The
 > stuck-task sweep selects only `queued`/`delegated`/`in_progress`

@@ -13,6 +13,7 @@ export interface ChatSessionTaskEmbed {
   placementExplanationJson?: string | null;
   status?: string;
   executionStep?: string | null;
+  terminalReason?: string | null;
   errorMessage?: string | null;
   outputBranch?: string | null;
   outputPrUrl?: string | null;
@@ -24,14 +25,9 @@ export interface ChatSessionTaskEmbed {
   agentProfileHint?: string | null;
 }
 
-/**
- * What the list API returns — no task embed.
- *
- * The list endpoint (`GET /api/projects/:id/sessions`) returns sessions from
- * the ProjectData DO, which only stores `taskId`. Task status, execution step,
- * and other task metadata live in D1 and are NOT included in list responses.
- */
+/** Session list item, including authoritative task outcome from D1. */
 export interface ChatSessionListItem {
+  task?: ChatSessionTaskEmbed;
   id: string;
   workspaceId: string | null;
   taskId: string | null;
@@ -83,7 +79,7 @@ export interface ChatSessionListItem {
  * This is the type used by components that need to distinguish completed/failed
  * tasks from stopped sessions. The `task` field is populated either by:
  * - The detail API (`GET /api/projects/:id/sessions/:sessionId`)
- * - Frontend enrichment from `taskInfoMap` (see SessionTreeItem)
+ * - List API outcome, plus frontend hints from `taskInfoMap` (see SessionTreeItem)
  */
 export interface ChatSessionResponse extends ChatSessionListItem {
   task?: ChatSessionTaskEmbed;

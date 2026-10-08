@@ -37,6 +37,7 @@ export interface ChatSessionTaskEmbed {
   placementExplanationJson?: string | null;
   status: TaskStatus;
   executionStep: TaskExecutionStep | null;
+  terminalReason?: string | null;
   errorMessage: string | null;
   outputBranch: string | null;
   outputPrUrl: string | null;
@@ -415,4 +416,13 @@ export interface AcpSessionHeartbeatRequest {
 
 export interface AcpSessionLineageResponse {
   sessions: AcpSession[];
+}
+
+/** A normal retention outcome; never failure diagnostics. */
+export const SNAPSHOT_EXPIRED_REASON = 'snapshot_expired';
+
+export function isExpiredTask(
+  task: { status?: string; terminalReason?: string | null } | null | undefined
+): boolean {
+  return task?.status === 'cancelled' && task.terminalReason === SNAPSHOT_EXPIRED_REASON;
 }
