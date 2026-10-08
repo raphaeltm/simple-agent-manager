@@ -80,28 +80,29 @@ So `fork-prepare` (lineage repair) is redundant for Fork, and `summarize` is pur
 
 ## Implementation Checklist
 
-- [ ] API: delete `routes/chat-fork.ts` (`fork-prepare` + `summarize`) and its mount in `routes/chat.ts`
-- [ ] API: delete `services/session-summarize.ts`
-- [ ] API: remove `rateLimitSessionSummarize`, `SESSION_SUMMARIZE` default, window constant, and narrow
+- [x] API: delete `routes/chat-fork.ts` (`fork-prepare` + `summarize`) and its mount in `routes/chat.ts`
+- [x] API: delete `services/session-summarize.ts`
+- [x] API: remove `rateLimitSessionSummarize`, `SESSION_SUMMARIZE` default, window constant, and narrow
       `AiSpendRateLimitBucket` to `'transcribe'` (`middleware/rate-limit.ts`)
-- [ ] API: remove `CONTEXT_SUMMARY_*` and `RATE_LIMIT_SESSION_SUMMARIZE*` from `env.ts` and `.env.example`
-- [ ] Shared: remove `DEFAULT_CONTEXT_SUMMARY_*` constants + barrel exports; update
-      `ai-model-registry.test.ts`; correct the `contextSummary` doc comment
-- [ ] API: `ensureSessionTaskBacked` links an existing task only when no other task owns the chat
+- [x] API: remove `CONTEXT_SUMMARY_*` and `RATE_LIMIT_SESSION_SUMMARIZE*` from `env.ts` and `.env.example`
+- [x] Shared: remove `DEFAULT_CONTEXT_SUMMARY_*` constants + barrel exports; update
+      `ai-model-registry.test.ts`; correct the `contextSummary` / `parentTaskId` doc comments
+- [x] API: `ensureSessionTaskBacked` links an existing task only when no other task owns the chat
       session (single conditional UPDATE), so Stop/reconciliation never 500 on the unique index
-- [ ] Web: Fork pre-fills template + IDs synchronously; `parentTaskId` from the session; no request,
+- [x] Web: Fork pre-fills template + IDs synchronously; `parentTaskId` from the session; no request,
       no loading, no `contextSummary`
-- [ ] Web: Retry pre-fills the original task description only; no summarize call, no `contextSummary`;
+- [x] Web: Retry pre-fills the original task description only; no summarize call, no `contextSummary`;
       a failed description load clears the loading state and shows an error
-- [ ] Web: rename `summaryLoading` → `promptLoading`; banner text "Loading original prompt..."
-- [ ] Web: remove `prepareForkSession`, `summarizeSession`, their types, and `contextSummary` from the web
+- [x] Web: rename `summaryLoading` → `promptLoading`; banner text "Loading original prompt..."
+- [x] Web: remove `prepareForkSession`, `summarizeSession`, their types, and `contextSummary` from the web
       request types
-- [ ] Tests: API real-SQLite regression for the link conflict (+ owner-path control, discrimination
+- [x] Tests: API real-SQLite regression for the link conflict (+ owner-path control, discrimination
       check); delete summarize/fork route tests; web unit tests for Fork/Retry (no network for Fork, no
       `contextSummary`, lineage sent, Retry error path); Playwright audit updated (mobile + desktop)
-- [ ] Docs: `chat-features.md` (How to Fork, Context Summarization, Fork Limits), `configuration.md`,
-      `architecture/overview.md`, `.claude/skills/api-reference`, `.claude/skills/env-reference`
-- [ ] Archive obsolete `tasks/backlog/2026-03-14-summarize-endpoint-hardening.md` (superseded)
+- [x] Docs: `chat-features.md` (How to Fork, Retrying, Fork Limits), `configuration.md`,
+      `architecture/overview.md`, `recent-product-changes.md` note, `.claude/skills/api-reference`,
+      `.claude/skills/env-reference`
+- [x] Archive obsolete `tasks/backlog/2026-03-14-summarize-endpoint-hardening.md` (superseded)
 - [ ] After deploy: mark idea `01M3NQP9GT534VNEA29ZP6CTM0` completed with PR evidence
 
 ## Acceptance Criteria
@@ -124,3 +125,22 @@ So `fork-prepare` (lineage repair) is redundant for Fork, and `summarize` is pur
 - `apps/web/.claude/rules/17-ui-visual-testing.md`
 - Idea `01M3NQP9GT534VNEA29ZP6CTM0` (Fork banner stuck on "Loading context...")
 - PR #1572 (fork-prepare introduced), PR #2168 (summary rate limit), PR #2230 (recovery tasks)
+
+## Implementation Notes
+
+- Design change from the first plan: `fork-prepare` was removed outright rather than kept for lineage
+  repair. The session list already carries the task ID (0 taskless sessions in production), the Fork
+  button only renders when a task exists, and Retry already used the client-side task ID. So Fork is
+  synchronous and has no failure mode left.
+- `ensureSessionTaskBacked` callers after this change: `routes/chat-stop.ts` (Stop) and
+  `scheduled/session-task-reconciliation.ts`. Per caller: Stop no longer 500s on a recovery-pointer
+  session and stops the session's current task (unchanged otherwise); reconciliation only reaches this
+  branch for sessions whose ProjectData row has a task ID, where it now skips an owned link instead of
+  throwing into its per-row catch.
+- Discrimination evidence: removing the `NOT EXISTS` predicate reproduces production's
+  `UNIQUE constraint failed: tasks.chat_session_id` in exactly the conflict test; using the outer
+  `tasks.chat_session_id` instead of the alias does the same; the owner-path control stays green.
+  Web: dropping the Send gate, never clearing `promptLoading`, or re-adding `contextSummary` each
+  reddened the intended Fork/Retry tests.
+- Playwright: the old audit used pre-rail button labels and could not have been passing; it now uses
+  the rail's `session-tool-fork` / `session-tool-retry` test IDs and dismisses onboarding.
