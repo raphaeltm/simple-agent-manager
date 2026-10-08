@@ -43,3 +43,5 @@ VM rules 27/54; root rules 62/67; /do review and staging gates. Shared channel r
 - Separate mutation checks prove project/workspace/claim/age/status restrictions.
 - Typed context deadline and EOF errors now report stable deadline/agent_crash causes without exposing raw provider error text.
 - Typecheck19 tasks passed. Go ACP/config/server suites passed. Affected API suites77 tests passed plus cleanup SQL fixture suites. Full quality checks in progress.
+
+Review findings addressed: canonical environment reference retired old knob; Instant real reaper midpoint added; chat/sleeping-state and stopping clock/fallback mutation controls all red when removed. Local specialist reviews (Go, Cloudflare, environment, constitution, test, task completion, docs) PASS. Full lint13/13 and build9/9 passed. Full test run capped at two workers after resource-driven import/worker startup timeouts; still running.

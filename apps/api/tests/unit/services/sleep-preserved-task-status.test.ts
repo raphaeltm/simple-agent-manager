@@ -131,7 +131,14 @@ describe('sleep-preserved task status authority', () => {
       node?: { role: string; runtime: string } | null;
       agentStatus?: string | null;
       snapshot?: Partial<SessionSleepAttemptState> | null;
-      captureClaim?: { at: string; workspace?: string; project?: string; claimId?: string | null };
+      captureClaim?: {
+        at: string;
+        workspace?: string;
+        project?: string;
+        claimId?: string | null;
+        chat?: string;
+        stoppingSince?: string | null;
+      };
     }
 
     function owned(fixture: Fixture): boolean {
@@ -174,13 +181,15 @@ describe('sleep-preserved task status authority', () => {
         const claim = fixture.captureClaim;
         sqlite
           .prepare(
-            `UPDATE session_snapshots SET sleep_claim_id = ?, sleep_claimed_at = ?, workspace_id = ?, project_id = ?`
+            `UPDATE session_snapshots SET sleep_claim_id = ?, sleep_claimed_at = ?, workspace_id = ?, project_id = ?, chat_session_id = ?, sleep_stopping_since = ?`
           )
           .run(
             claim.claimId === undefined ? 'claim-1' : claim.claimId,
             claim.at,
             claim.workspace ?? 'ws-1',
-            claim.project ?? 'project-1'
+            claim.project ?? 'project-1',
+            claim.chat ?? 'chat-1',
+            claim.stoppingSince ?? null
           );
       }
       const row = sqlite
@@ -266,6 +275,7 @@ describe('sleep-preserved task status authority', () => {
       ['stale', { at: '2026-09-25T10:00:00.000Z' }],
       ['wrong workspace', { at: NOW, workspace: 'other' }],
       ['wrong project', { at: NOW, project: 'other' }],
+      ['wrong chat', { at: NOW, chat: 'other' }],
       ['no claim', { at: NOW, claimId: null }],
     ] as const)('releases an error session with a %s capture', (_label, captureClaim) => {
       expect(
@@ -281,6 +291,49 @@ describe('sleep-preserved task status authority', () => {
         ).toBe(false);
       }
     );
+
+    it('releases an already-slept capture despite a retained claim', () => {
+      expect(
+        owned({
+          agentStatus: 'error',
+          snapshot: { sleepStatus: 'preparing', sleepingAt: NOW },
+          captureClaim: { at: NOW },
+        })
+      ).toBe(false);
+    });
+
+    it.each([
+      [
+        'stale stopping start despite fresh claim',
+        'stopping',
+        NOW,
+        '2026-09-25T10:00:00.000Z',
+        false,
+      ],
+      [
+        'fresh stopping start despite stale claim',
+        'stopping',
+        '2026-09-25T10:00:00.000Z',
+        NOW,
+        true,
+      ],
+      ['stopping claim fallback', 'stopping', NOW, null, true],
+      [
+        'stale preparing claim despite stopping timestamp',
+        'preparing',
+        '2026-09-25T10:00:00.000Z',
+        NOW,
+        false,
+      ],
+    ] as const)('%s', (_label, sleepStatus, at, stoppingSince, expected) => {
+      expect(
+        owned({
+          agentStatus: 'error',
+          snapshot: { sleepStatus },
+          captureClaim: { at, stoppingSince },
+        })
+      ).toBe(expected);
+    });
 
     it('keeps a completed task on its chat link alone (pre-existing behaviour)', () => {
       expect(
