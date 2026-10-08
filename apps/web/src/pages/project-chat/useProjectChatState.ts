@@ -262,6 +262,12 @@ export function useProjectChatState() {
 
   // Fork & Retry — navigate to new chat screen with pre-filled state
   const [pendingDerived, setPendingDerived] = useState<PendingDerived | null>(null);
+  // Read by Retry's async prompt load: a response for a retry the user has since dismissed,
+  // replaced with a fork, or navigated away from must not touch the composer.
+  const pendingDerivedRef = useRef<PendingDerived | null>(null);
+  useEffect(() => {
+    pendingDerivedRef.current = pendingDerived;
+  }, [pendingDerived]);
 
   // Task/idea title map for session tagging + task info map for grouping
   const [taskTitleMap, setTaskTitleMap] = useState<Map<string, string>>(new Map());
@@ -781,18 +787,19 @@ export function useProjectChatState() {
       setProvisioning(null);
       navigate(`/projects/${projectId}/chat`, { replace: true });
 
+      const isCurrent = () => pendingDerivedRef.current === derived;
       void getProjectTask(projectId, taskId)
-        .then((task) => setMessage(task.description ?? ''))
+        .then((task) => {
+          if (isCurrent()) setMessage(task.description ?? '');
+        })
         .catch((err: unknown) => {
-          setSubmitError(
-            err instanceof Error
-              ? `Could not load the original prompt: ${err.message}`
-              : 'Could not load the original prompt'
-          );
+          if (!isCurrent()) return;
+          const reason = err instanceof Error ? ` (${err.message})` : '';
+          setSubmitError(`Could not load the original prompt${reason}. Type it below to retry.`);
         })
         .finally(() => {
           setPendingDerived((prev) =>
-            prev?.parentSessionId === session.id ? { ...prev, promptLoading: false } : prev
+            prev === derived ? { ...prev, promptLoading: false } : prev
           );
         });
     },

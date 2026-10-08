@@ -341,9 +341,8 @@ test('expired transcript, neutral label, and Fork remain usable', async ({ page 
   });
   await page.getByRole('button', { name: 'Fork conversation', exact: true }).click();
   await expect(page.getByText(/Forking from:/)).toBeVisible();
-  await expect(page.getByPlaceholder('Describe what you want the agent to do...')).toHaveValue(
-    /Parent session ID: chat-session-1/
-  );
+  // No agent is configured in this fixture, so the composer shows its add-an-agent placeholder.
+  await expect(page.getByRole('combobox')).toHaveValue(/Parent session ID: chat-session-1/);
   await page.goto('/projects/proj-agent-1/chat/chat-session-1');
   const openList = page.getByRole('button', { name: 'Open chat list' });
   if (suffix === 'mobile') {

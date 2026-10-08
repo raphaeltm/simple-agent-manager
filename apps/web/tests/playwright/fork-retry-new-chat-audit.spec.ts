@@ -44,14 +44,15 @@ const LONG_BRANCH = 'sam/investigate-why-the-checkout-flow-intermittently-double
 const LONG_DESCRIPTION = `${LONG_TITLE}. Reproduce with https://example.com/very/long/path/that/keeps/going/and/never/breaks/naturally/because-it-is-one-token?with=query&params=everywhere first, then add a regression test that fails before the fix.`;
 const LONG_ERROR =
   'Agent crashed unexpectedly after the workspace ran out of memory while installing dependencies for the third time in a row';
+const SPECIAL_TITLE = `Fix "quotes" & <script>alert('xss')</script> 🚀 ünïcødé — 日本語`;
 
-type Scenario = { long: boolean; failTaskLoad: boolean };
+type Scenario = { long?: boolean; special?: boolean; failTaskLoad?: boolean };
 
-function makeTask({ long }: Scenario) {
+function makeTask({ long, special }: Scenario) {
   return {
     id: 'task-1',
     projectId: 'proj-test-1',
-    title: long ? LONG_TITLE : 'Fix the login bug',
+    title: special ? SPECIAL_TITLE : long ? LONG_TITLE : 'Fix the login bug',
     description: long ? LONG_DESCRIPTION : 'Original task description',
     status: 'failed',
     executionStep: null,
@@ -207,7 +208,7 @@ test.describe('Fork/retry new chat screen audit', () => {
   test('fork fills the composer with the IDs at once and submits lineage without a summary', async ({
     page,
   }) => {
-    const recorded = await setupApiMocks(page, { long: false, failTaskLoad: false });
+    const recorded = await setupApiMocks(page, {});
     await page.goto('/projects/proj-test-1/chat/session-1');
 
     await page.getByTestId('session-tool-fork').first().click();
@@ -237,7 +238,7 @@ test.describe('Fork/retry new chat screen audit', () => {
   });
 
   test('fork with a very long title and branch stays inside the viewport', async ({ page }) => {
-    const recorded = await setupApiMocks(page, { long: true, failTaskLoad: false });
+    const recorded = await setupApiMocks(page, { long: true });
     await page.goto('/projects/proj-test-1/chat/session-1');
 
     await page.getByTestId('session-tool-fork').first().click();
@@ -251,8 +252,36 @@ test.describe('Fork/retry new chat screen audit', () => {
     expect(recorded.summaryRequests).toEqual([]);
   });
 
+  test('fork renders special characters in the title as plain text', async ({ page }) => {
+    const recorded = await setupApiMocks(page, { special: true });
+    const dialogs: string[] = [];
+    page.on('dialog', (dialog) => {
+      dialogs.push(dialog.message());
+      void dialog.dismiss();
+    });
+    await page.goto('/projects/proj-test-1/chat/session-1');
+
+    await page.getByTestId('session-tool-fork').first().click();
+
+    await expect(page.getByText(`Forking from: ${SPECIAL_TITLE}`)).toBeVisible();
+    const textarea = page.getByPlaceholder(COMPOSER_PLACEHOLDER);
+    await expect(textarea).toHaveValue(/Parent session ID: session-1/);
+    expect(await textarea.inputValue()).toContain(`Previous session: "${SPECIAL_TITLE}"`);
+    expect(dialogs).toEqual([]);
+    expect(
+      await page.evaluate(() =>
+        Array.from(document.querySelectorAll('script')).some((script) =>
+          script.textContent?.includes("alert('xss')")
+        )
+      )
+    ).toBe(false);
+    await expectLaidOutCleanly(page);
+    await screenshot(page, 'fork-new-chat-special-chars');
+    expect(recorded.summaryRequests).toEqual([]);
+  });
+
   test('retry re-adds the original prompt with the previous error', async ({ page }) => {
-    const recorded = await setupApiMocks(page, { long: false, failTaskLoad: false });
+    const recorded = await setupApiMocks(page, {});
     await page.goto('/projects/proj-test-1/chat/session-1');
 
     await page.getByTestId('session-tool-retry').first().click();
@@ -278,7 +307,7 @@ test.describe('Fork/retry new chat screen audit', () => {
   });
 
   test('retry with a long prompt and error wraps inside the viewport', async ({ page }) => {
-    await setupApiMocks(page, { long: true, failTaskLoad: false });
+    await setupApiMocks(page, { long: true });
     await page.goto('/projects/proj-test-1/chat/session-1');
 
     await page.getByTestId('session-tool-retry').first().click();
@@ -290,7 +319,7 @@ test.describe('Fork/retry new chat screen audit', () => {
   });
 
   test('retry explains a failed prompt load and leaves Send usable', async ({ page }) => {
-    await setupApiMocks(page, { long: false, failTaskLoad: true });
+    await setupApiMocks(page, { failTaskLoad: true });
     await page.goto('/projects/proj-test-1/chat/session-1');
 
     await page.getByTestId('session-tool-retry').first().click();

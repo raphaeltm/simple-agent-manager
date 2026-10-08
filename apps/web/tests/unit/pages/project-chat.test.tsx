@@ -792,7 +792,55 @@ describe('ProjectChat new chat button', () => {
     expect(payload).not.toHaveProperty('contextSummary');
   });
 
-  it('retries with only the original prompt, holding Send until that prompt has loaded', async () => {
+  /**
+   * `getProjectTask` is read by Retry (the original prompt) and by the provisioning tracker
+   * (the open session's task on load, and a new task's status after submit). The original
+   * task is `failed` with a `startedAt`, so the tracker never starts a provisioning poll that
+   * could take a held read. `holdNextRead` / `failNextRead` apply to the next read of task-1 only.
+   */
+  function mockTaskReads() {
+    const original = {
+      id: 'task-1',
+      description: 'Original task description',
+      status: 'failed',
+      startedAt: '2026-06-11T00:05:00.000Z',
+      executionStep: null,
+      errorMessage: 'Agent crashed unexpectedly',
+    };
+    let next: 'hold' | Error | null = null;
+    let releaseHeld: (() => void) | null = null;
+    mocks.getProjectTask.mockImplementation((_projectId: string, taskId: string) => {
+      if (taskId !== 'task-1') {
+        return Promise.resolve({
+          id: taskId,
+          status: 'queued',
+          executionStep: null,
+          errorMessage: null,
+        });
+      }
+      const mode = next;
+      next = null;
+      if (mode === 'hold') {
+        return new Promise((resolve) => {
+          releaseHeld = () => resolve(original);
+        });
+      }
+      if (mode instanceof Error) return Promise.reject(mode);
+      return Promise.resolve(original);
+    });
+    return {
+      holdNextRead: () => {
+        next = 'hold';
+      },
+      failNextRead: (error: Error) => {
+        next = error;
+      },
+      releaseHeldRead: () => releaseHeld?.(),
+    };
+  }
+
+  /** Open the task-backed session and wait until the provisioning tracker has read its task. */
+  async function openSessionWithTask() {
     mocks.listChatSessions.mockResolvedValue({
       sessions: [SESSION_WITH_TASK],
       total: 1,
@@ -800,35 +848,23 @@ describe('ProjectChat new chat button', () => {
     mocks.listCredentials.mockResolvedValue([
       { id: 'cred-1', provider: 'hetzner', name: 'My Hetzner', createdAt: Date.now() },
     ]);
-    // The provisioning tracker also reads the open session's task, so hold only the request
-    // Retry makes: the first one after the click.
-    const originalPrompt = {
-      hold: false,
-      resolve: (_task: Record<string, unknown>) => {},
-    };
-    mocks.getProjectTask.mockImplementation((_projectId: string, taskId: string) => {
-      if (!originalPrompt.hold) {
-        return Promise.resolve({ id: taskId, status: 'queued', executionStep: null, errorMessage: null });
-      }
-      originalPrompt.hold = false;
-      return new Promise((resolve) => {
-        originalPrompt.resolve = resolve;
-      });
+    renderProjectChat(`/projects/${PROJECT_ID}/chat/${SESSION_WITH_TASK.id}`);
+    await waitFor(() => {
+      expect(mocks.getProjectTask).toHaveBeenCalledWith(PROJECT_ID, 'task-1');
     });
+  }
+
+  it('retries with only the original prompt, holding Send until that prompt has loaded', async () => {
+    const reads = mockTaskReads();
     mocks.submitTask.mockResolvedValue({
       taskId: 'task-retry',
       sessionId: 'session-retry',
       branchName: 'sam/retry',
       status: 'queued',
     });
+    await openSessionWithTask();
 
-    renderProjectChat(`/projects/${PROJECT_ID}/chat/${SESSION_WITH_TASK.id}`);
-
-    await waitFor(() => {
-      expect(screen.getByTestId('message-view')).toHaveTextContent(SESSION_WITH_TASK.id);
-    });
-
-    originalPrompt.hold = true;
+    reads.holdNextRead();
     fireEvent.click(screen.getByLabelText('Retry task'));
 
     await waitFor(() => {
@@ -837,20 +873,12 @@ describe('ProjectChat new chat button', () => {
     expect(screen.getByText('Retrying: Fix the login bug')).toBeInTheDocument();
     expect(screen.getByText('Error: Agent crashed unexpectedly')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Default Profile' })).toBeInTheDocument();
-    expect(originalPrompt.hold).toBe(false);
-    expect(mocks.getProjectTask).toHaveBeenLastCalledWith(PROJECT_ID, 'task-1');
     // Midpoint: the original prompt is still in flight, so Send must stay held.
     expect(screen.getByText('Loading original prompt...')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sending...' })).toBeDisabled();
 
     await act(async () => {
-      originalPrompt.resolve({
-        id: 'task-1',
-        description: 'Original task description',
-        status: 'failed',
-        executionStep: null,
-        errorMessage: 'Agent crashed unexpectedly',
-      });
+      reads.releaseHeldRead();
     });
 
     const textarea = screen.getByPlaceholderText('Describe what you want the agent to do...');
@@ -873,42 +901,45 @@ describe('ProjectChat new chat button', () => {
   });
 
   it('releases Send and says why when the original prompt cannot be loaded', async () => {
-    mocks.listChatSessions.mockResolvedValue({
-      sessions: [SESSION_WITH_TASK],
-      total: 1,
-    });
-    mocks.listCredentials.mockResolvedValue([
-      { id: 'cred-1', provider: 'hetzner', name: 'My Hetzner', createdAt: Date.now() },
-    ]);
-    // Fail only the request Retry makes, not the provisioning tracker's read of the open session.
-    let failNextRead = false;
-    mocks.getProjectTask.mockImplementation((_projectId: string, taskId: string) => {
-      if (!failNextRead) {
-        return Promise.resolve({ id: taskId, status: 'failed', executionStep: null, errorMessage: null });
-      }
-      failNextRead = false;
-      return Promise.reject(new Error('Task not found'));
-    });
+    const reads = mockTaskReads();
+    await openSessionWithTask();
 
-    renderProjectChat(`/projects/${PROJECT_ID}/chat/${SESSION_WITH_TASK.id}`);
-
-    await waitFor(() => {
-      expect(screen.getByTestId('message-view')).toHaveTextContent(SESSION_WITH_TASK.id);
-    });
-
-    failNextRead = true;
+    reads.failNextRead(new Error('Task not found'));
     fireEvent.click(screen.getByLabelText('Retry task'));
 
-    await waitFor(() => {
-      expect(
-        screen.getByText('Could not load the original prompt: Task not found')
-      ).toBeInTheDocument();
-    });
+    expect(
+      await screen.findByText(
+        'Could not load the original prompt (Task not found). Type it below to retry.'
+      )
+    ).toHaveAttribute('role', 'alert');
     expect(screen.queryByText('Loading original prompt...')).not.toBeInTheDocument();
     expect(screen.getByText('Retrying: Fix the login bug')).toBeInTheDocument();
 
     const textarea = screen.getByPlaceholderText('Describe what you want the agent to do...');
     fireEvent.change(textarea, { target: { value: 'Try the smaller fix first' } });
+    expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
+  });
+
+  it('keeps what the user typed when a dismissed retry finishes loading its prompt', async () => {
+    const reads = mockTaskReads();
+    await openSessionWithTask();
+
+    reads.holdNextRead();
+    fireEvent.click(screen.getByLabelText('Retry task'));
+    expect(await screen.findByText('Loading original prompt...')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText('Cancel fork/retry'));
+    expect(screen.queryByText('Retrying: Fix the login bug')).not.toBeInTheDocument();
+    const textarea = screen.getByPlaceholderText('Describe what you want the agent to do...');
+    fireEvent.change(textarea, { target: { value: 'A different idea' } });
+
+    // The stale read now resolves with the original prompt; it must not replace the draft.
+    await act(async () => {
+      reads.releaseHeldRead();
+    });
+
+    expect(textarea).toHaveValue('A different idea');
+    expect(screen.queryByText(/Could not load the original prompt/)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
   });
 
