@@ -97,14 +97,16 @@ export async function twoAgentProject(options: { manualAlarms?: boolean } = {}) 
   const projectId = `p-${id}`;
   const otherProjectId = `p2-${id}`;
   if (options.manualAlarms) {
-    for (const fixtureProjectId of [projectId, otherProjectId]) {
-      await runInDurableObject(projectStub(fixtureProjectId), (instance) => {
-        // These fixtures explicitly drive materialization and inspect pending
-        // batches. An automatic tick would race those assertions and contact
-        // fake VM hosts. Keep real scheduling/storage, but let the test drive materialization.
-        instance.alarm = async () => {};
-      });
-    }
+    await Promise.all(
+      [projectId, otherProjectId].map((fixtureProjectId) =>
+        runInDurableObject(projectStub(fixtureProjectId), (instance) => {
+          // These fixtures explicitly drive materialization and inspect pending
+          // batches. An automatic tick would race those assertions and contact
+          // fake VM hosts. Keep real scheduling/storage, but drive materialization manually.
+          instance.alarm = async () => {};
+        })
+      )
+    );
   }
   await seedUser(ownerId);
   await seedUser(memberId);
