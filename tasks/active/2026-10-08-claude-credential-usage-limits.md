@@ -68,17 +68,20 @@ OpenCode. Claude never shows.
 
 ### API (`apps/api`, `packages/shared`)
 
-- [ ] A1 Shared constant `DEFAULT_CREDENTIAL_LIMIT_REFERENCE_MAX_LENGTH` (callback boundary bound for
-      the echoed reference) with a doc comment naming the backfilled-id cause.
-- [ ] A2 `AcpSessionUsageReportSchema.credentialReference` uses a dedicated schema bounded by A1.
-- [ ] A3 `credentialLimitReferenceKey()` in `credential-limit-events/values.ts`: trimmed reference when
+- [x] A1 Decided against a new length constant: the echoed reference is server-issued and only
+      compared with `agent_sessions.agent_credential_reference`, so any field cap is a proxy that
+      recreates this bug when ids grow (rule 74). The configurable callback body cap
+      (`CREDENTIAL_LIMIT_USAGE_CALLBACK_MAX_BODY_BYTES`) bounds it.
+- [x] A2 `AcpSessionUsageReportSchema.credentialReference` uses `UsageCredentialReferenceSchema`
+      (non-empty string) with a comment naming the backfilled-id cause (b5350f863).
+- [x] A3 `credentialLimitReferenceKey()` in `credential-limit-events/values.ts`: trimmed reference when
       ≤ the 160-byte identifier budget, else `sha256:<hex>` of the reference (collision-free, fits
       event subject ids and outbox guards). Producer `sanitizeObservation` uses it instead of
       truncating.
-- [ ] A4 `read.ts`: `listProjectCredentialLimits` filters by the key and restores the real reference
+- [x] A4 `read.ts`: `listProjectCredentialLimits` filters by the key and restores the real reference
       and credential id for the requested credential; unfiltered and user-level reads restore keys of
       the caller's own `cc_credentials` (one extra D1 read, only when a hashed key is present).
-- [ ] A5 Tests: route-level schema test with a backfill-shaped 238-char reference (proved red pre-fix);
+- [x] A5 Tests: route-level schema test with a backfill-shaped 238-char reference (proved red pre-fix);
       producer test (long reference stored as key, short unchanged, event subject ≤ 160 bytes);
       read-service tests on real SQLite (filter by long ref; user restore; another user's hashed key
       not restored — owner control); workers vertical slice that POSTs the real callback route with a
@@ -86,23 +89,25 @@ OpenCode. Claude never shows.
 
 ### VM agent (`packages/vm-agent`)
 
-- [ ] V1 `usageLimitsFromClaudeRateLimit`: parse `unifiedWindows.five_hour` / `seven_day`
+- [x] V0 Split `session_host_usage.go` (676 lines, rule 18): Claude parsing moved unchanged to
+      `session_host_usage_claude.go` in its own commit (bfaa31063).
+- [x] V1 `usageLimitsFromClaudeRateLimit`: parse `unifiedWindows.five_hour` / `seven_day`
       (fraction → percent, seconds → ms, window minutes from the name); representative window takes
       the top-level status; others are `allowed` while the account is not rejected, else `unknown`;
       a representative window outside `unifiedWindows` (e.g. `seven_day_opus`) is kept as its own
       limit; payloads without `unifiedWindows` behave exactly as before.
-- [ ] V2 Report all parsed windows in one callback (`buildUsageReportRequest`, ≤ 16 observations).
-- [ ] V3 Go tests through the real trigger (`sessionHostClient.SessionUpdate` → reporter → httptest
+- [x] V2 Report all parsed windows in one callback (`buildUsageReportRequest`, ≤ 16 observations).
+- [x] V3 Go tests through the real trigger (`sessionHostClient.SessionUpdate` → reporter → httptest
       control plane) with the exact adapter payload captured in the repro; warning, rejected,
       opus-representative and legacy (no `unifiedWindows`) cases; controls proving existing tests stay
       green.
 
 ### Docs and records
 
-- [ ] D1 `apps/www/src/content/docs/docs/guides/agents.md` "Which credentials report limits": Claude
+- [x] D1 `apps/www/src/content/docs/docs/guides/agents.md` "Which credentials report limits": Claude
       reports the five-hour and weekly limits on every reading, plus weekly Opus/Sonnet when one of
       those is the limiting window.
-- [ ] D2 SAM Idea for the separate hygiene issue: backfilled `cc_credentials` ids embed ciphertext + IV
+- [x] D2 SAM Idea `01M4EST1XWX60JGC7D59PX2BEG` for the separate hygiene issue: backfilled `cc_credentials` ids embed ciphertext + IV
       (`backfill-service.ts:31`); re-keying is a data migration, out of scope here.
 - [ ] D3 After merge + deploy: verify a production Claude session produces `anthropic` rows and the chip
       renders; update idea `01M1RMTYR8FB95H3V031CRYN68`.
@@ -131,3 +136,24 @@ OpenCode. Claude never shows.
   test ever sent a real-length reference through the route schema. New tests enter through the route.
 - Rule 74: the 160 bound was a proxy for "this is an identifier"; the condition the producer needs is
   "fits a project-event subject id". Hashing keys on the condition.
+
+## Implementation notes (2026-10-08)
+
+- Claude utilization is a 0..1 fraction everywhere (Claude Code's own status line renders
+  `round(x*1000)/10`). The VM agent now converts it strictly as a fraction with the same rounding,
+  so an over-limit 1.03 reads 100% (the old `<= 1 → ×100` guess read it as 1%) and float noise
+  (0.13×100 = 13.000000000000002) stays out of reports and the reporter's coalesce key.
+- Discrimination evidence (each revert surgical, then restored):
+  - VM agent: returning only the top-level window → `TestClaudeAdapterUsageUpdateReportsFiveHourAndWeeklyWindows`
+    red ("windows = [claude.five_hour], want 2 windows") plus 6 table cases; the legacy-payload case stays green.
+    Old `<= 1` heuristic → only the over-limit table case red.
+  - API route: old 160-char schema → `accepts the long credential reference…` red (400); window-type bound control green.
+  - Producer: truncation (`boundedIdentifier`) → both new producer tests red; 20 existing green.
+  - Reader: raw-reference filter → session-filter test red; owner filter removed → member-attack test red;
+    Settings restore removed → Settings test red.
+  - Workers vertical slice: old schema → `{"error":"BAD_REQUEST","message":"Invalid usage callback request body"}: expected 400 to be 204`.
+- I/O: the user and unfiltered project reads add one D1 read (`cc_credentials` ids by owner) only
+  when a digest-keyed summary is present; the session-filtered chip read adds none. GET budgets stay
+  well under 8 (rule 60).
+- Turbo 2.11.7 writes an agent-guidance block into `AGENTS.md` on every agent-run turbo command; it
+  is reverted before each commit (unrelated to this task).
