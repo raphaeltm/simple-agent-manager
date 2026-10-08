@@ -20,7 +20,7 @@ This is a self-hosted platform (Simple Agent Manager). Each installation serves 
 - Provides WebSocket-based terminal access to user VMs
 - Generates cloud-init scripts for VM bootstrapping
 
-**Isolation model:** the node VM is the security boundary, not the devcontainer. Nested containers, including privileged Docker-in-Docker, are a product requirement. Never recommend stripping or rejecting repository devcontainer settings (`privileged`, `mounts`, `capAdd`, `securityOpt`, `runArgs`, `initializeCommand`, Compose). Focus on cross-user isolation, control-plane token scoping, per-user node placement and credential scoping. See "Workspace Isolation Model" in `apps/www/src/content/docs/docs/architecture/security.md`.
+**Isolation model:** the node VM is the security boundary, not the devcontainer. Nested containers, including privileged Docker-in-Docker, are a product requirement. Never recommend stripping or rejecting repository devcontainer settings (`privileged`, `mounts`, `capAdd`, `securityOpt`, `runArgs`, `initializeCommand`, Compose). Focus on cross-user isolation, control-plane token scoping, per-user node placement and credential scoping. Anonymous trials are the exception: they share one system account (`TRIAL_ANONYMOUS_USER_ID`) and can share a node, so also check that separate trial visitors cannot reach each other's workspaces, data or credentials. See "Workspace Isolation Model" in `apps/www/src/content/docs/docs/architecture/security.md`.
 
 ## When Invoked
 
