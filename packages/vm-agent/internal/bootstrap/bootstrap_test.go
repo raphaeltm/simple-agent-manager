@@ -1589,6 +1589,78 @@ exit 1
 	}
 }
 
+func TestValidateMergedDevcontainerSecurityRejectsHostAuthority(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		merged map[string]interface{}
+	}{
+		{name: "privileged", merged: map[string]interface{}{"image": "ubuntu", "privileged": true}},
+		{name: "run args", merged: map[string]interface{}{"image": "ubuntu", "runArgs": []interface{}{"--network=host"}}},
+		{name: "cap add", merged: map[string]interface{}{"image": "ubuntu", "capAdd": []interface{}{"SYS_ADMIN"}}},
+		{name: "security opt", merged: map[string]interface{}{"image": "ubuntu", "securityOpt": []interface{}{"seccomp=unconfined"}}},
+		{name: "mounts", merged: map[string]interface{}{"image": "ubuntu", "mounts": []interface{}{"source=/,target=/host,type=bind"}}},
+		{name: "initialize command", merged: map[string]interface{}{"image": "ubuntu", "initializeCommand": "id >/tmp/host-root"}},
+		{name: "initialize commands", merged: map[string]interface{}{"image": "ubuntu", "initializeCommands": []interface{}{"id"}}},
+		{name: "compose", merged: map[string]interface{}{"dockerComposeFile": "docker-compose.yml"}},
+		{name: "build options", merged: map[string]interface{}{"build": map[string]interface{}{"dockerfile": "Dockerfile", "options": []interface{}{"--network=host"}}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if err := validateMergedDevcontainerSecurity(tt.merged); err == nil {
+				t.Fatalf("expected unsafe devcontainer configuration to be rejected: %#v", tt.merged)
+			}
+		})
+	}
+}
+
+func TestValidateMergedDevcontainerSecurityAllowsContainerScopedSettings(t *testing.T) {
+	t.Parallel()
+
+	merged := map[string]interface{}{
+		"image": "mcr.microsoft.com/devcontainers/typescript-node:24-bookworm",
+		"privileged": false,
+		"mounts": []interface{}{},
+		"postCreateCommand": "npm install",
+		"containerEnv": map[string]interface{}{"NODE_ENV": "development"},
+		"features": map[string]interface{}{"ghcr.io/devcontainers/features/go:1": map[string]interface{}{"version": "1.22"}},
+	}
+	if err := validateMergedDevcontainerSecurity(merged); err != nil {
+		t.Fatalf("expected container-scoped settings to be allowed, got: %v", err)
+	}
+}
+
+func TestWriteMountOverrideConfigRejectsUnsafeRepoConfig(t *testing.T) {
+	mockBinDir := t.TempDir()
+	mockDevcontainer := filepath.Join(mockBinDir, "devcontainer")
+	mockScript := `#!/bin/sh
+if [ "$1" = "read-configuration" ]; then
+  echo '{"outcome":"success","mergedConfiguration":{"image":"ubuntu:24.04","privileged":true}}'
+  exit 0
+fi
+exit 1
+`
+	if err := os.WriteFile(mockDevcontainer, []byte(mockScript), 0o755); err != nil {
+		t.Fatalf("failed to write mock devcontainer command: %v", err)
+	}
+	t.Setenv("PATH", mockBinDir+":"+os.Getenv("PATH"))
+
+	cfg := &config.Config{WorkspaceDir: "/workspace/my-repo", Repository: "owner/my-repo"}
+	path, err := writeMountOverrideConfig(context.Background(), cfg, "sam-ws-abc123", "", "", "")
+	if err == nil {
+		if path != "" {
+			_ = os.Remove(path)
+		}
+		t.Fatal("expected unsafe repository devcontainer config to be rejected")
+	}
+	if !strings.Contains(err.Error(), "privileged") {
+		t.Fatalf("expected privileged rejection, got: %v", err)
+	}
+}
+
 func TestWriteMountOverrideConfigRequiresRuntimeSource(t *testing.T) {
 	mockBinDir := t.TempDir()
 	mockDevcontainer := filepath.Join(mockBinDir, "devcontainer")
