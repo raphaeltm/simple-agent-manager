@@ -24,6 +24,7 @@ type Broadcaster interface {
 // Reporter sends structured log entries to the control plane boot-log endpoint.
 // It is safe to call methods on a nil *Reporter — they simply no-op.
 type Reporter struct {
+	phaseObserver   func(step, status string)
 	controlPlaneURL string
 	workspaceID     string
 	callbackToken   string
@@ -72,6 +73,14 @@ func (r *Reporter) SetBroadcaster(b Broadcaster) {
 	r.broadcaster = b
 }
 
+// SetPhaseObserver must be called before logging begins. The observer receives
+// only phase/status labels, never messages or details.
+func (r *Reporter) SetPhaseObserver(observer func(step, status string)) {
+	if r != nil {
+		r.phaseObserver = observer
+	}
+}
+
 // Phase wraps an operation with started/completed (or failed) log entries,
 // measuring wall-clock duration and emitting it in the detail field as
 // "duration_ms=...". The error returned by fn is propagated unchanged.
@@ -106,6 +115,10 @@ func (r *Reporter) Phase(step string, fn func() error) error {
 func (r *Reporter) Log(step, status, message string, detail ...string) {
 	if r == nil {
 		return
+	}
+
+	if r.phaseObserver != nil {
+		r.phaseObserver(step, status)
 	}
 
 	// Broadcast locally first — works even before token redemption.

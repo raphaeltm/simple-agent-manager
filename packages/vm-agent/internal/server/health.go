@@ -89,7 +89,7 @@ func (s *Server) sendNodeReady() {
 	}
 
 	url := strings.TrimRight(s.config.ControlPlaneURL, "/") + "/api/nodes/" + s.config.NodeID + "/ready"
-	body, err := json.Marshal(map[string]string{"agentVersion": sysinfo.Version})
+	body, err := json.Marshal(map[string]interface{}{"agentVersion": sysinfo.Version, "provisionTimings": provisioningTimingSummary(s.eventStore)})
 	if err != nil {
 		slog.Error("Node ready callback payload marshal failed", "error", err)
 		return

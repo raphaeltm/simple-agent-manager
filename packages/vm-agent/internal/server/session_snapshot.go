@@ -211,7 +211,9 @@ func (s *Server) handleHibernateAgentSession(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, result)
 }
 
-func (s *Server) hibernateSessionSnapshot(ctx context.Context, input *sessionSnapshotHandlerInput) (map[string]interface{}, error) {
+func (s *Server) hibernateSessionSnapshot(ctx context.Context, input *sessionSnapshotHandlerInput) (result map[string]interface{}, resultErr error) {
+	ctx, timings := startLifecycleTimings(ctx, "prepare")
+	defer func() { s.finishLifecycleTimings(timings, "sleep", input.runtime.ID, input.callbackToken, resultErr) }()
 	runtime := input.runtime
 	sessionID, chatSessionID := input.sessionID, input.chatSessionID
 	runtimeName, callbackToken := input.runtimeName, input.callbackToken
@@ -287,6 +289,7 @@ func (s *Server) hibernateSessionSnapshot(ctx context.Context, input *sessionSna
 		manifest.Status = "degraded"
 	}
 	manifest.Skipped = boundSnapshotSkippedEntries(manifest.Skipped, snapshotSkippedEntriesBudget(prepare))
+	nextLifecyclePhase(ctx, "complete")
 	err = s.completeSnapshot(ctx, runtime.ID, sessionID, chatSessionID, runtimeName, prepare.Generation, callbackToken, manifest)
 	if err != nil {
 		return nil, &sessionSnapshotCaptureError{generation: prepare.Generation, err: err}

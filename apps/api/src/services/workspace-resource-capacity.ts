@@ -20,6 +20,8 @@ export const RESOURCE_REQUIREMENTS_SOURCE_SQL =
 const D1_BIND_LIMIT = D1_MAX_BOUND_PARAMETERS;
 
 export interface WorkspaceAdmissionPolicy {
+  /** Internal admission hint: human conversation starts need not wait for unrelated builds. */
+  allowBusyBuildQueue?: boolean;
   cpuShareBudgetPercent: number;
   hostMemoryReserveMb: number;
   diskPressureThresholdPercent: number;
@@ -547,7 +549,8 @@ function measuredAdmissionDiagnostic(
   if (metrics.diskPercent >= policy.diskPressureThresholdPercent) {
     return 'disk pressure threshold reached';
   }
-  if (metrics.creatingWorkspaces > 0) return WORKSPACE_BUSY_BUILD_QUEUE_REASON;
+  if (metrics.creatingWorkspaces > 0 && !policy.allowBusyBuildQueue)
+    return WORKSPACE_BUSY_BUILD_QUEUE_REASON;
   return null;
 }
 
