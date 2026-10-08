@@ -390,3 +390,19 @@ CodeRabbit follow-up, merge and production workflow monitoring remain unchecked 
 tracked in [PR #2020](https://github.com/raphaeltm/simple-agent-manager/pull/2020).
 
 - 2026-10-06 final-head run 37509476587: coverage producers and input validation passed, but Sonar security analysis was cancelled at the 15-minute job limit (500/2142 files). Increased the bounded scanner budget to 60 minutes without disabling analyzers or relaxing thresholds. Operational credential review found the standard expiring token inherits admin permissions; the Free plan lacks scoped organization tokens. Requires an analysis-only identity or explicit user exception before merge; previous code-boundary PASS did not establish credential privileges.
+
+## 2026-10-08 PR #2265 continuation
+
+[PR #2265](https://github.com/raphaeltm/simple-agent-manager/pull/2265) carries the
+same implementation tree as draft #2020; its only additional file at intake was an
+accidentally tracked `.do-state.md`, now removed from git and retained locally.
+It is the proposed successor landing PR, not proof that #2020's release gates are
+complete. #2020 remains open and unchanged.
+
+Current repository metadata confirms `SONAR_CI_ENABLED=false` and no `SONAR_TOKEN`.
+The checked historical external-cutover item above records the temporary cutover,
+which was rolled back; it does not describe current configuration. Renewed local
+completion/security review confirms implementation and code boundaries, but final-head
+live scanner execution, imported nonzero coverage, and a green quality gate remain
+blocked on a safe analysis-only credential or explicit user security decision.
+Automatic Analysis success cannot replace that proof. No staging resources were created.
