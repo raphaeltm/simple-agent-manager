@@ -239,6 +239,8 @@ export class TaskRunner extends DurableObject<Env> {
         workspaceDispatchLastError: null,
         workspaceDispatchAckedAt: null,
         lastD1Step: null,
+        // Failure replay belongs to the previous attempt, not this fresh claim.
+        wakeFailureMessage: undefined,
         completed: false,
       };
       await transaction.put('state', state);

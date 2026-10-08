@@ -494,6 +494,44 @@ describe('TaskRunner snapshot restore retry deadline', () => {
     expect(vm.restore).not.toHaveBeenCalled();
   });
 
+  it('evaluates fresh placement after reactivating a previously failed wake', async () => {
+    storedState.config.recoveryAttemptId = 'attempt-1';
+    sqlite.exec("UPDATE session_snapshots SET recovery_attempt_id = 'attempt-1'");
+    vm.restore.mockRejectedValueOnce(
+      Object.assign(new Error('First restore refused'), { permanent: true })
+    );
+    await runAlarm();
+    expect(storedState.wakeFailureMessage).toBe('First restore refused');
+    expect(storedState.completed).toBe(true);
+
+    const runner = new TaskRunner(rc.ctx, env);
+    const input = {
+      taskId: storedState.taskId,
+      projectId: storedState.projectId,
+      userId: storedState.userId,
+      config: { ...storedState.config, preferredNodeId: 'unavailable-next-node' },
+    };
+    // The resumer has accepted a distinct claim on the same stable task/DO.
+    sqlite.exec(`UPDATE tasks SET status = 'queued', workspace_id = NULL WHERE id = 'recovery';
+      UPDATE session_snapshots SET recovery_status = 'waking', recovery_attempt_id = 'attempt-2',
+        recovery_workspace_id = NULL, recovery_failed_at = NULL`);
+    await runner.reactivate({
+      ...input,
+      config: { ...input.config, recoveryAttemptId: 'attempt-2' },
+    });
+    await runAlarm();
+
+    // Real node_selection must evaluate the new placement, not replay restore's
+    // old error before entering the step. No placement handler is mocked.
+    expect(storedState.wakeFailureMessage).toBe('Specified node is not available');
+    expect(storedState.currentStep).toBe('node_selection');
+    expect(sqlite.prepare("SELECT status FROM tasks WHERE id = 'recovery'").pluck().get()).toBe(
+      'sleeping'
+    );
+    expect(snapshot()).toMatchObject({ recovery_status: 'failed' });
+    expect(terminalNotice).not.toHaveBeenCalled();
+  });
+
   it('keeps an accepted restore live across four 524s and restarts, then commits the same conversation', async () => {
     let deadline: number | null | undefined;
     vm.restore.mockImplementation(async () => {

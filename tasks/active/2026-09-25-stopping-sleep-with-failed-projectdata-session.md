@@ -108,3 +108,30 @@ identity/CAS work to one attempt and avoids terminal fanout and repeated deadlin
 Stopping candidates shrink after the existing age ceiling; repair keeps its existing default
 25-row batch and per-row snapshot verification/ProjectData/cleanup calls. No migration or new
 timer, unbounded query, external API, or environment variable was added.
+
+## First staging verification (2026-10-08, lease 92)
+
+Deployment 37826798709 passed including smoke at code 7fe65052c; Cloudflare Worker
+38560c60-7ab4-48c6-a4a0-c42d1b6c156e was verified serving at 100%. CI 37826717410 passed.
+Authenticated Playwright dashboard, projects and settings loaded without page errors.
+One owned cx23 conversation replied `WAKE_PROBE_READY` and handed back idle; normal sleep
+returned 200 with an available, non-degraded snapshot. Its replacement node never reported
+ready and was deleted by readiness cleanup. The real wake failure at 19:21 returned the
+task and ProjectData session to sleeping, retained null completed_at and the exact snapshot
+generation/artifact keys/expiry, and emitted no failed task status event. Playwright showed
+the preserved conversation, Sleeping status and a recoverable wake error.
+
+The automatic next attempt exposed an additional defect before merge: reactivation spread
+the previous attempt's durable wakeFailureMessage into the new attempt, causing immediate
+replay of the old failure. Reactivation now clears it only for a distinct authorized claim.
+A regression drives the real first failure alarm, new-claim reactivation and real next
+node-selection alarm. Before the fix it reports the first restore error; after the fix it
+evaluates the new placement. No placement/failure handler is mocked. All 32 alarm tests pass,
+and the lifecycle/security delta reviewer passed the reset and per-attempt field audit.
+
+Lease 92 was released with result=fail, cleaned=yes. Both owned VMs are deleted (replacement
+termination proof 19:21:07, original delete 200), active owned workspaces are zero, and the
+test chat was stopped. No third VM was created. Final coordinated staging verification of
+the marker reset is pending; do not treat the first deployment as the final staging gate.
+Post-allocation finalizer and parent-hook behavior are covered by local real-alarm SQL tests;
+the live failure occurred before replacement workspace allocation.
