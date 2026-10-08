@@ -1357,6 +1357,61 @@ func hasMergedRuntimeSource(merged map[string]interface{}) bool {
 	return false
 }
 
+func hasUnsafeDevcontainerValue(value interface{}) bool {
+	switch v := value.(type) {
+	case nil:
+		return false
+	case bool:
+		return v
+	case string:
+		return strings.TrimSpace(v) != ""
+	case []interface{}:
+		return len(v) > 0
+	case []string:
+		return len(v) > 0
+	case map[string]interface{}:
+		return len(v) > 0
+	default:
+		return true
+	}
+}
+
+// validateMergedDevcontainerSecurity prevents repository-controlled devcontainer
+// settings from crossing the workspace/container boundary into host Docker
+// authority. vm-agent runs as root and talks to the host daemon, so fields that
+// can grant extra runtime authority or execute commands on the host must never
+// be forwarded from an untrusted repository.
+func validateMergedDevcontainerSecurity(merged map[string]interface{}) error {
+	unsafeKeys := map[string]string{
+		"privileged":        "privileged containers",
+		"runArgs":           "raw Docker run arguments",
+		"capAdd":            "Linux capability additions",
+		"securityOpt":       "Docker security options",
+		"mounts":            "repository-controlled supplementary mounts",
+		"initializeCommand": "host-side initializeCommand",
+		"initializeCommands": "host-side initializeCommands",
+		"dockerComposeFile": "Docker Compose runtime configuration",
+	}
+
+	for key, reason := range unsafeKeys {
+		if value, ok := merged[key]; ok && hasUnsafeDevcontainerValue(value) {
+			return fmt.Errorf("unsafe repository devcontainer configuration: %s is not allowed (%s)", key, reason)
+		}
+	}
+
+	// build.options is passed through to Docker/BuildKit as raw CLI options.
+	// Keep repository builds on the declarative build subset instead.
+	if buildValue, ok := merged["build"]; ok {
+		if build, ok := buildValue.(map[string]interface{}); ok {
+			if options, ok := build["options"]; ok && hasUnsafeDevcontainerValue(options) {
+				return errors.New("unsafe repository devcontainer configuration: build.options is not allowed")
+			}
+		}
+	}
+
+	return nil
+}
+
 func normalizeMergedLifecycleCommands(merged map[string]interface{}) {
 	if len(merged) == 0 {
 		return
@@ -1747,6 +1802,10 @@ func writeMountOverrideConfig(ctx context.Context, cfg *config.Config, volumeNam
 	}
 	if !hasMergedRuntimeSource(readResult.MergedConfiguration) {
 		return "", errors.New("devcontainer read-configuration mergedConfiguration missing image/dockerFile/dockerComposeFile")
+	}
+
+	if err := validateMergedDevcontainerSecurity(readResult.MergedConfiguration); err != nil {
+		return "", err
 	}
 
 	normalizeMergedLifecycleCommands(readResult.MergedConfiguration)
