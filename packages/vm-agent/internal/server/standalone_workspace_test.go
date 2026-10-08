@@ -3,11 +3,13 @@ package server
 import (
 	"context"
 	"errors"
-	"github.com/workspace/vm-agent/internal/config"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/workspace/vm-agent/internal/config"
 )
 
 func TestStandaloneCloneWarnings(t *testing.T) {
@@ -60,10 +62,8 @@ func TestStandaloneCloneBaseAndOutputBranches(t *testing.T) {
 	t.Cleanup(func() { runStandaloneGitCommand = original })
 	// Only replace the transport URL. Every clone/ref/checkout operation runs real git.
 	runStandaloneGitCommand = func(ctx context.Context, dir string, env []string, args ...string) (string, error) {
-		for i, arg := range args {
-			if arg == "https://example.test/repo.git" {
-				args[i] = "file://" + remote
-			}
+		if i := slices.Index(args, "https://example.test/repo.git"); i >= 0 {
+			args[i] = "file://" + remote
 		}
 		return original(ctx, dir, env, args...)
 	}
@@ -101,24 +101,21 @@ func TestStandaloneCheckoutKeepsCredentialsAndRedactsFailure(t *testing.T) {
 	helper := ""
 	checkoutCalled := false
 	runStandaloneGitCommand = func(_ context.Context, _ string, env []string, args ...string) (string, error) {
-		for _, arg := range args {
-			if arg != "checkout" {
-				continue
-			}
-			checkoutCalled = true
-			helper = standaloneCloneCredentialHelperPath(env)
-			if helper == "" || !strings.Contains(strings.Join(args, " "), "credential.helper="+helper) {
-				t.Fatal("partial checkout lost credential helper")
-			}
-			if !envContains(env, "SAM_CLONE_CREDENTIAL_TOKEN="+token) {
-				t.Fatal("checkout lost scoped token")
-			}
-			if _, err := os.Stat(helper); err != nil {
-				t.Fatalf("helper removed before checkout: %v", err)
-			}
-			return "remote rejected " + token, errors.New("checkout rejected")
+		if !slices.Contains(args, "checkout") {
+			return "", nil
 		}
-		return "", nil
+		checkoutCalled = true
+		helper = standaloneCloneCredentialHelperPath(env)
+		if helper == "" || !strings.Contains(strings.Join(args, " "), "credential.helper="+helper) {
+			t.Fatal("partial checkout lost credential helper")
+		}
+		if !envContains(env, "SAM_CLONE_CREDENTIAL_TOKEN="+token) {
+			t.Fatal("checkout lost scoped token")
+		}
+		if _, err := os.Stat(helper); err != nil {
+			t.Fatalf("helper removed before checkout: %v", err)
+		}
+		return "remote rejected " + token, errors.New("checkout rejected")
 	}
 	s := &Server{config: &config.Config{StandaloneCloneFilter: "blob:none"}}
 	runtime := &WorkspaceRuntime{Repository: "https://user:" + token + "@example.test/repo.git", BaseBranch: "main", Branch: "output"}

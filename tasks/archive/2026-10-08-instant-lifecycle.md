@@ -42,3 +42,5 @@ Lint, typecheck, build, full Go, focused Go race, real Workers/D1 lifecycle test
 
 ## Release tracking
 PR https://github.com/raphaeltm/simple-agent-manager/pull/2270. Implementation and staging complete; CI/CodeRabbit/production and idea completion remain gates tracked in PR and SAM task. Do not mark ideas complete before production deployment.
+
+Final review delta: CI37825321086 and Sonar quality gate passed. Sonar nevertheless reported two critical cognitive-complexity findings in the new Go tests. Replaced manual argument-search loops with standard slices helpers, preserving all assertions; independent Go reviewer PASS. Current main merged cleanly; this delta changes no runtime behavior.
