@@ -230,7 +230,8 @@ export function failParentWakeDeliveries(
 
 /** Message-class precedence is protocol semantics, shared by claims and alarm eligibility. */
 function deliveryPrioritySql(alias: string): string {
-  return `CASE ${alias ? `${alias}.` : ''}message_class
+  const prefix = alias ? `${alias}.` : '';
+  return `CASE ${prefix}message_class
     WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4
     WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END`;
 }
