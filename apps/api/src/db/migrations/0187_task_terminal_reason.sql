@@ -1,0 +1,114 @@
+-- Additive: preserve tasks and every FK child; normal expiry is not a failure.
+ALTER TABLE tasks ADD COLUMN terminal_reason TEXT;
+
+-- One-off production cohort, read-only dry run 2026-10-08 13:45Z: 69 rows.
+-- 49 already expired, 20 unexpired. Normalize legacy state only; the runtime
+-- expiry writer owns terminal events/outbox/parent-wake and DO convergence.
+-- Exact IDs bound work; re-check authoritative sleep and runtime state at apply.
+UPDATE tasks SET status = 'sleeping'
+WHERE status = 'in_progress' AND id IN (
+  '01M2Y2ZN5T45GAE8CKE58HCA0K',
+  '01M2Y38EJ5H11G07M9QGBVPTK1',
+  '01M311MXS08HBZ5CVDZ440PTSA',
+  '01M32BFBA2ZXMQWTY70W49VAEP',
+  '01M32NPWSCTE0T99ZCFYVWT1YX',
+  '01M33NZ470YKACN73Z588YTEWD',
+  '01M35GGK0AT1S64V9C24F3P7Q2',
+  '01M35RM84TJTY52S9G1RVH935A',
+  '01M372HW8P36EEFHHSK2QRMKZ7',
+  '01M372J196RQRQ5YBZE8WEK1V0',
+  '01M37H75HP6YXXMZ2K0VX3S22H',
+  '01M383W7A0B69KY6VFDFN7JT53',
+  '01M387Y547X02GA2QHT8D4F3NZ',
+  '01M38BM51SS08DAC6EGAPCXFS2',
+  '01M39ZXWPEK9CNBMCP7P1JXF3N',
+  '01M3A0CGXFE2D0EV95X26MK4KP',
+  '01M3BJ38QGBRNX4P1M7A5B539K',
+  '01M3CHX9QYJ6GHWQEXY532FYSA',
+  '01M3CJ3JYD4ECSH74B1F5J34WF',
+  '01M3CVYMY2VPX69XWFDPE6R3S0',
+  '01M3E4FXGHQ19SAJ0JWB47WRJK',
+  '01M3FB4ZZ7BVDCNK7ZEPWK6V8Z',
+  '01M3G1P46WQ1W3MGT6SFQ4KD61',
+  '01M3G3CP6FK4MB15CPEWCGYYPY',
+  '01M3GEYVND7YV7YKPQPKD2FY0X',
+  '01M3GFNQ72AX50XMBDJYAM1Q81',
+  '01M3HE81X54BN3J5HJQH9RPY5A',
+  '01M3HEBKJKEAKT2ZMSKCCF2Q7D',
+  '01M3J4X76FCDZF16PGGV381HA2',
+  '01M3JA1SCMEKM65JC7KF8GKWP6',
+  '01M3JTG687DAXRZ837J82B53B9',
+  '01M3KMZGCDDFABD5YQH0R48N3X',
+  '01M3KNC46M5KQ7DFA6B6CZEAQA',
+  '01M3KQ8S70QDGJ1QK6SV4R3WQW',
+  '01M3M414EGKZNV4YFK0JERGGX8',
+  '01M3MEHRZAGYD0K2D572445AGD',
+  '01M3NTSE4PAGHVDJPKKZ0AZ2DH',
+  '01M3NV0RXA50FKCGW7SNXFF2CV',
+  '01M3NV25M2H4QWTDZR21J90GTY',
+  '01M3NZ811KVEYD7Q2RGB7XKK2B',
+  '01M3P7CB6HV7A87EKYDJE57SMZ',
+  '01M3PE8G6HRRXVVX6S5D19F7EX',
+  '01M3PE9AXJN7ACJJJ49RE9XNJQ',
+  '01M3PY9SM8W0DHPSJCNRA8HQZW',
+  '01M3QF1XKC7VSKP57MT1JER5ZZ',
+  '01M3QFGDVZJMD2HW9D3DBF9XKG',
+  '01M3QFGHNNWNK0NKNXNWVA6GZB',
+  '01M3REWHQEVNFNB5CC5G5KJ5WX',
+  '01M3V76SV78CXCSZ7XKAKN62YJ',
+  '01M3VQ1F6A7S9VSJRJ1PEK67Y2',
+  '01M3VVPSFFBJBJZB6GF9BWC82Q',
+  '01M3VY3M6QCJ0RW7VAT9FCTEA8',
+  '01M3VY3XJV909HKR9VZ5HEJX5W',
+  '01M3W1QQCPTM787VWRXQZAEGEE',
+  '01M3W42VYD4CSWN6N2P425QEVQ',
+  '01M3W6SZ47H6DAG2QJQHCBZ184',
+  '01M3W9VBE45TC0YJ5F6HJF9CJ8',
+  '01M3X4S1A9JN9TRRGWTWB2Q2D1',
+  '01M3XDKFWX4PK98C9R3G9RJ14N',
+  '01M3XWJYHC1A2N7EFQGVBYAQ88',
+  '01M3YGT6A2DMW2SZ97HRB5862Q',
+  '01M3YHRHK1K6348X0R5KSJCSHR',
+  '01M41SMGD87JS4P4T2HE1NJ19Q',
+  '01M4394VSQVE1XKVCW6DVM50Q3',
+  '01M43GNYF5XP4THK9YHQN7KQD2',
+  '01M43GSRHB8RZYRKM9NKA59A50',
+  '01M43NBRRC13ACQ8CN8KBYJMND',
+  '01M43NEF7CNGJN1AQXYN7PWD61',
+  '01M43NFD55Y8AZJHMZFPQJFAGE'
+)
+AND EXISTS (
+  SELECT 1 FROM session_snapshots s
+  WHERE s.project_id = tasks.project_id AND s.chat_session_id = tasks.chat_session_id
+    AND s.sleep_status = 'sleeping' AND s.sleeping_at < '2026-10-05T00:00:00.000Z'
+    AND (s.recovery_status IS NULL OR s.recovery_status != 'waking')
+)
+AND NOT EXISTS (SELECT 1 FROM workspaces w WHERE w.id = tasks.workspace_id AND w.status != 'deleted');
+
+-- Four independently verified false failures after Oct 1. The session stopped
+-- 2–4 minutes before the sweep failed it, after its seven-day window. Transcript,
+-- completion timestamps, and original failure events remain readable/auditable.
+UPDATE tasks SET status = 'cancelled', terminal_reason = 'snapshot_expired', error_message = NULL
+WHERE id IN (
+  '01M3A01ZD0EY2SCPFFHBAPTXSQ',
+  '01M3BAKXGY39E36NYKDBRTVRD8',
+  '01M3D1CZNXT11ZFN4ENBT88GEJ',
+  '01M3NNVFXJ706QKGM4HKFZMX0D'
+)
+AND status = 'failed' AND task_mode = 'conversation'
+AND completed_at >= '2026-10-01T00:00:00.000Z'
+AND error_message LIKE 'Task runtime is no longer live%workspace_deleted%'
+AND NOT EXISTS (SELECT 1 FROM session_snapshots s WHERE s.chat_session_id = tasks.chat_session_id)
+AND EXISTS (SELECT 1 FROM session_summaries ss
+  WHERE ss.id = tasks.chat_session_id AND ss.project_id = tasks.project_id AND ss.status = 'stopped')
+AND EXISTS (SELECT 1 FROM workspaces w WHERE w.id = tasks.workspace_id AND w.status = 'deleted');
+
+INSERT OR IGNORE INTO task_status_events
+  (id, task_id, from_status, to_status, actor_type, reason, created_at)
+SELECT 'snapshot-expiry-backfill-' || id, id, 'failed', 'cancelled', 'system',
+       'snapshot_expired (corrected legacy retention failure)', strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+FROM tasks
+WHERE id IN (
+  '01M3A01ZD0EY2SCPFFHBAPTXSQ', '01M3BAKXGY39E36NYKDBRTVRD8',
+  '01M3D1CZNXT11ZFN4ENBT88GEJ', '01M3NNVFXJ706QKGM4HKFZMX0D'
+) AND status = 'cancelled' AND terminal_reason = 'snapshot_expired';

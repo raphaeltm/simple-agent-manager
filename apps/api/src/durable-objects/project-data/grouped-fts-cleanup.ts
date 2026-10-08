@@ -1,4 +1,5 @@
 import { createModuleLogger, serializeError } from '../../lib/logger';
+import { isDurableObjectSqliteNoMemError } from '../../services/durable-object-retry';
 import {
   SEARCH_INDEX_STATE_COMPLETE,
   SEARCH_INDEX_STATE_PRUNED,
@@ -64,6 +65,7 @@ type SessionCandidate = {
 };
 
 type CleanupOptions = {
+  transactionSync?: <T>(callback: () => T) => T;
   allowStart?: boolean;
   now?: number;
   nowMs?: () => number;
@@ -148,44 +150,40 @@ function readCandidates(
   now: number
 ): SessionCandidate[] {
   const cutoff = now - config.groupedFtsCleanupMinSessionAgeMs;
-  const rows = sql
-    .exec(
-      `SELECT
-         s.id,
-         COUNT(g.id) AS grouped_rows,
-         COALESCE(SUM(length(CAST(g.content AS BLOB))), 0) AS content_bytes
-       FROM chat_sessions s
-       JOIN chat_messages_grouped g ON g.session_id = s.id
-       WHERE s.status IN ('stopped', 'failed')
-         AND s.updated_at <= ?
-         AND s.materialized_at IS NOT NULL
-         AND COALESCE(s.search_index_state, ?) != ?
-         AND (? IS NULL OR s.id > ?)
-       GROUP BY s.id
-       ORDER BY s.id ASC
-       LIMIT ?`,
-      cutoff,
-      SEARCH_INDEX_STATE_COMPLETE,
-      SEARCH_INDEX_STATE_PRUNED,
-      cursorSessionId,
-      cursorSessionId ?? '',
-      config.groupedFtsCleanupBatchSessions + 1
-    )
-    .raw();
+  // Page session IDs before touching content. LIMIT after GROUP BY still lets
+  // SQLite aggregate the entire joined content table before applying the limit.
+  const sessions = sql.exec<{ id: string }>(
+    `SELECT id FROM chat_sessions
+     WHERE id > ? AND status IN ('stopped', 'failed')
+       AND updated_at <= ? AND materialized_at IS NOT NULL
+       AND COALESCE(search_index_state, ?) != ?
+     ORDER BY id ASC LIMIT ?`,
+    cursorSessionId ?? '',
+    cutoff,
+    SEARCH_INDEX_STATE_COMPLETE,
+    SEARCH_INDEX_STATE_PRUNED,
+    config.groupedFtsCleanupBatchSessions + 1
+  ).toArray();
 
   const candidates: SessionCandidate[] = [];
-  for (const row of rows) {
-    const sessionId = row[0];
-    const groupedRows = Number(row[1]);
-    const contentBytes = Number(row[2]);
-    if (
-      typeof sessionId === 'string' &&
-      Number.isSafeInteger(groupedRows) &&
-      groupedRows > 0 &&
-      Number.isFinite(contentBytes)
-    ) {
-      candidates.push({ sessionId, groupedRows, contentBytes });
+  for (const { id: sessionId } of sessions) {
+    let groupedRows = 0;
+    let contentBytes = 0;
+    // The session index bounds the scan; stream scalar lengths, never content or
+    // a whole-session aggregate. One extra row proves a session exceeds budget.
+    const sizes = sql.exec<{ content_bytes: number }>(
+      `SELECT length(CAST(content AS BLOB)) AS content_bytes
+       FROM chat_messages_grouped WHERE session_id = ? LIMIT ?`,
+      sessionId,
+      config.groupedFtsCleanupBatchRows + 1
+    );
+    for (const row of sizes) {
+      groupedRows++;
+      contentBytes += row.content_bytes;
+      if (contentBytes > config.groupedFtsCleanupBatchBytes) break;
     }
+    // Include empty sessions so their IDs advance the cursor too.
+    candidates.push({ sessionId, groupedRows, contentBytes });
   }
   return candidates;
 }
@@ -227,6 +225,7 @@ function deleteGroupedFtsForSession(
       );
       ftsRowsDeleted++;
     } catch (error) {
+      if (isDurableObjectSqliteNoMemError(error)) throw error;
       log.warn('fts_delete_marker_failed', { sessionId, rowid, ...serializeError(error) });
     }
     sql.exec('DELETE FROM chat_messages_grouped WHERE rowid = ?', rowid);
@@ -360,6 +359,10 @@ export async function runProjectDataGroupedFtsCleanup(
     }
     sessionsExamined++;
     rowsExamined += candidate.groupedRows;
+    if (candidate.groupedRows === 0) {
+      lastProcessedSessionId = candidate.sessionId;
+      continue;
+    }
 
     if (candidate.groupedRows > config.groupedFtsCleanupBatchRows) {
       terminationReason = 'oversized_skip';
@@ -384,7 +387,8 @@ export async function runProjectDataGroupedFtsCleanup(
       break;
     }
 
-    const deleted = deleteGroupedFtsForSession(sql, candidate.sessionId, now);
+    const remove = () => deleteGroupedFtsForSession(sql, candidate.sessionId, now);
+    const deleted = options.transactionSync ? options.transactionSync(remove) : remove();
     groupedRowsDeleted += deleted.groupedRowsDeleted;
     ftsRowsDeleted += deleted.ftsRowsDeleted;
     originalContentBytes += deleted.contentBytes;

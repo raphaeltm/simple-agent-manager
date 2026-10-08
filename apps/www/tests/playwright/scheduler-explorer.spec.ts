@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from './fixtures';
+import { captureScreenshot } from './capture-screenshot';
 
 const path = '/blog/how-sam-scheduler-works/';
 test.beforeEach(async ({ page }) => {
@@ -120,10 +121,13 @@ test('blog discovery and compact 320px layout', async ({ page }, testInfo) => {
     .getByRole('link')
     .filter({ hasText: 'How SAM’s scheduler makes room for your agents' });
   await expect(post).toHaveCount(1);
-  await page.screenshot({
-    animations: 'disabled',
-    path: `.codex/tmp/playwright-screenshots/scheduler-index-${testInfo.project.name.includes('Mobile') ? 'mobile' : 'desktop'}.png`,
-  });
+  await expect(post).toBeVisible();
+  await captureScreenshot(() =>
+    page.screenshot({
+      animations: 'disabled',
+      path: `.codex/tmp/playwright-screenshots/scheduler-index-${testInfo.project.name.includes('Mobile') ? 'mobile' : 'desktop'}.png`,
+    })
+  );
   await post.click();
   await expect(page.locator('scheduler-explorer')).toBeVisible();
   await page.setViewportSize({ width: 320, height: 667 });

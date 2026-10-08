@@ -927,6 +927,8 @@ export const tasks = sqliteTable(
     startedAt: text('started_at'),
     completedAt: text('completed_at'),
     terminalTransitionId: text('terminal_transition_id'),
+    /** Neutral terminal lifecycle reason, independent of failure diagnostics. */
+    terminalReason: text('terminal_reason'),
     errorMessage: text('error_message'),
     outputSummary: text('output_summary'),
     outputBranch: text('output_branch'),

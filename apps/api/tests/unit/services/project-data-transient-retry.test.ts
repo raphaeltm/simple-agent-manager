@@ -224,6 +224,20 @@ describe('ProjectData transient retry wrappers', () => {
     ]);
   });
 
+  it('bounds NOMEM retries for safe reads and recovers after collateral failure', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const read = vi.fn().mockRejectedValueOnce(new Error('out of memory: SQLITE_NOMEM'))
+      .mockResolvedValueOnce({ activity: 'idle' });
+    const stub = { ensureProjectId: vi.fn().mockResolvedValue(undefined), getSessionState: read };
+    await expect(getSessionState(envForStub(stub), 'nomem-project', 'session')).resolves.toEqual({ activity: 'idle' });
+    expect(read).toHaveBeenCalledTimes(2);
+    read.mockReset().mockRejectedValue(new Error('out of memory: SQLITE_NOMEM'));
+    await expect(getSessionState(envForStub(stub, { DO_RETRY_MAX_ATTEMPTS: '8' }), 'nomem-project', 'session'))
+      .rejects.toMatchObject({ statusCode: 503, details: { errorClass: 'sqlite_nomem' } });
+    expect(read).toHaveBeenCalledTimes(3);
+  });
+
   it('keeps the full budget and the raw error for other retryable failures (control)', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const getSessionMock = vi.fn().mockRejectedValue(transientReset());
@@ -244,7 +258,7 @@ describe('ProjectData transient retry wrappers', () => {
   });
 
   it('never repeats a mutation whose outcome a CPU reset or lost connection made ambiguous', async () => {
-    for (const failure of [cpuLimitReset(), connectionLost()]) {
+    for (const failure of [cpuLimitReset(), connectionLost(), new Error('out of memory: SQLITE_NOMEM')]) {
       const linkMock = vi.fn().mockRejectedValue(failure);
       const stub = {
         ensureProjectId: vi.fn().mockResolvedValue(undefined),
