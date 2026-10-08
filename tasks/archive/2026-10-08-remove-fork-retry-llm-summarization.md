@@ -103,21 +103,21 @@ So `fork-prepare` (lineage repair) is redundant for Fork, and `summarize` is pur
       `architecture/overview.md`, `recent-product-changes.md` note, `.claude/skills/api-reference`,
       `.claude/skills/env-reference`
 - [x] Archive obsolete `tasks/backlog/2026-03-14-summarize-endpoint-hardening.md` (superseded)
-- [ ] After deploy: mark idea `01M3NQP9GT534VNEA29ZP6CTM0` completed with PR evidence
+- [ ] After deploy: mark idea `01M3NQP9GT534VNEA29ZP6CTM0` completed with PR evidence (post-merge)
 
 ## Acceptance Criteria
 
-- [ ] Clicking Fork shows the new-chat composer already filled with the template, previous session
+- [x] Clicking Fork shows the new-chat composer already filled with the template, previous session
       label, project ID, session ID and task ID, with Send enabled immediately and no API call
-- [ ] Sending a Fork submits `parentTaskId` (lineage) and no `contextSummary`
-- [ ] Clicking Retry fills the composer with the original task description; submit sends
+- [x] Sending a Fork submits `parentTaskId` (lineage) and no `contextSummary`
+- [x] Clicking Retry fills the composer with the original task description; submit sends
       `parentTaskId` and no `contextSummary`; no summarize call is made
-- [ ] A failed Retry description load does not leave Send disabled and shows an error
-- [ ] No code path calls Workers AI for Fork or Retry; `fork-prepare` and `summarize` routes are gone
-- [ ] `ensureSessionTaskBacked` returns the session's task instead of throwing when another task owns
-      the chat-session link (real SQLite test, proven discriminating)
-- [ ] Docs no longer describe AI context summarization or its env vars
-- [ ] Staging: Fork and Retry exercised end to end in the live app (new chat created, lineage visible)
+- [x] A failed Retry description load does not leave Send disabled and shows an error
+- [x] No code path calls Workers AI for Fork or Retry; `fork-prepare` and `summarize` routes are gone
+- [x] `ensureSessionTaskBacked` returns the session's task instead of throwing when another task owns
+      the chat-session link (real SQLite + workerd tests, proven discriminating)
+- [x] Docs no longer describe AI context summarization or its env vars
+- [x] Staging: Fork and Retry exercised end to end in the live app (new chat created, lineage visible)
 
 ## References
 
@@ -144,3 +144,30 @@ So `fork-prepare` (lineage repair) is redundant for Fork, and `summarize` is pur
   reddened the intended Fork/Retry tests.
 - Playwright: the old audit used pre-rail button labels and could not have been passing; it now uses
   the rail's `session-tool-fork` / `session-tool-retry` test IDs and dismisses onboarding.
+
+## Review Outcomes
+
+- task-completion-validator PASS; doc-sync-validator ADDRESSED (dead `SessionSummaryResponse`, empty
+  env-reference heading — 759f95786); cloudflare-specialist PASS (MEDIUM pre-existing legacy link
+  divergence deferred to idea `01M4ESRJQAB6YPTT3WD61N5Z4D`); ui-ux-specialist ADDRESSED (HIGH stale
+  Retry load overwrote a dismissed/forked composer — identity guard 064042b4e, tests 5a8e86f3a);
+  test-engineer ADDRESSED (CRITICAL session-expiry audit locator, lineage unit tests, audit
+  de-quarantined — 064042b4e).
+
+## Staging Verification (2026-10-08, lease reliability-wave-1008 #139)
+
+- Deploy run 37858128576 SUCCESS at sha 61dcb8725 (branch + main 9aa20be62).
+- `POST …/fork-prepare` and `POST …/summarize` → 404; dashboard, project chat and settings load with
+  0 console errors and 0 failed API requests.
+- Fork (hono project, session `111a1fdb-bf3d-4bdd-8c0b-dbac77f7fa89`, Instant profile): composer
+  filled with label + project/session/task IDs in 141 ms (375x667) / 169 ms (1280x800); the only
+  submit was `POST /sessions/start` with `parentTaskId: 01M46PRPFN6GG3G1S4VAFEXF21` and no
+  `contextSummary`; zero summary requests; new chat `5a4d7235-…` holds only the user message; D1
+  `parent_task_id` correct.
+- Retry: composer filled with the original prompt (153 ms / 404 ms incl. the one GET); submit carried
+  the original prompt + `parentTaskId`, no `contextSummary`; new chat `22b6cdfc-…` holds only that
+  message; D1 lineage correct.
+- Cleanup: both test chats stopped, cf-container workspaces deleted, 0 active nodes, no VMs created.
+- Pre-existing, unrelated: opening the old source session logs a 404 for its long-deleted workspace;
+  stopping an Instant chat mid-launch leaves its task `in_progress` (launch overwrites `cancelled`)
+  — filed as idea `01M4EXYXWE9PCBRC0CGMH1HMR4`.
