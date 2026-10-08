@@ -3,6 +3,13 @@ import * as v from 'valibot';
 
 const UsageIdentifierSchema = v.pipe(v.string(), v.minLength(1), v.maxLength(160));
 const UsageSourceSchema = v.pipe(v.string(), v.minLength(1), v.maxLength(160));
+// The VM agent echoes the server-issued credential reference; the handler only
+// compares it with `agent_sessions.agent_credential_reference`. References embed
+// credential ids, and ids from the 2026-06 composable-credentials backfill grow
+// with the stored secret (238 chars in production), so an identifier-sized cap
+// rejected every report for those credentials. The bounded body read
+// (CREDENTIAL_LIMIT_USAGE_CALLBACK_MAX_BODY_BYTES) is the size limit.
+const UsageCredentialReferenceSchema = v.pipe(v.string(), v.minLength(1));
 
 export const CreateAcpSessionSchema = v.object({
   taskId: v.optional(v.string()),
@@ -67,7 +74,7 @@ export const AcpSessionUsageLimitObservationSchema = v.object({
 export const AcpSessionUsageReportSchema = v.object({
   nodeId: UsageIdentifierSchema,
   agentType: v.optional(UsageIdentifierSchema),
-  credentialReference: v.optional(UsageIdentifierSchema),
+  credentialReference: v.optional(UsageCredentialReferenceSchema),
   credentialSource: v.optional(v.picklist(['user', 'project', 'platform'])),
   credentialGeneration: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))),
   observedAt: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))),

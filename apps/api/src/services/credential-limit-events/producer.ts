@@ -22,6 +22,7 @@ import type {
 } from './types';
 import {
   boundedIdentifier,
+  credentialLimitReferenceKey,
   normalizeCredentialSource,
   normalizeNonNegativeInteger,
   normalizePercent,
@@ -35,14 +36,14 @@ type SanitizedResult =
 
 type RecordSanitizedResult = CredentialLimitObservationResult | { outcome: 'contended' };
 
-function sanitizeObservation(
+async function sanitizeObservation(
   input: CredentialLimitObservation,
   config: CredentialLimitRuntimeConfig,
   serverReceivedAt: number
-): SanitizedResult {
+): Promise<SanitizedResult> {
   const projectId = boundedIdentifier(input.projectId);
   const userId = boundedIdentifier(input.userId);
-  const credentialReference = boundedIdentifier(input.credentialReference);
+  const credentialReference = await credentialLimitReferenceKey(input.credentialReference);
   const credentialSource = normalizeCredentialSource(input.credentialSource);
   const provider = boundedIdentifier(input.provider)?.toLowerCase() ?? null;
   const providerMode = boundedIdentifier(input.providerMode);
@@ -120,7 +121,7 @@ export async function recordCredentialLimitObservation(
   input: CredentialLimitObservation
 ): Promise<CredentialLimitObservationResult> {
   const config = resolveCredentialLimitConfig(env);
-  const sanitized = sanitizeObservation(input, config, Date.now());
+  const sanitized = await sanitizeObservation(input, config, Date.now());
   if (!sanitized.ok) return { outcome: 'ignored', reason: sanitized.reason };
 
   for (let attempt = 0; attempt < config.transitionRecomputeAttempts; attempt += 1) {

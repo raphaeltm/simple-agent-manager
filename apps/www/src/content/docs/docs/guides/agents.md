@@ -141,8 +141,8 @@ and the dialog says how old it is.
 
 Which credentials report limits:
 
-- **Claude Code with a Claude Pro/Max subscription:** whichever of the five-hour, weekly, weekly Opus,
-  and weekly Sonnet limits Claude Code reports.
+- **Claude Code with a Claude Pro/Max subscription:** the five-hour and weekly limits, plus the weekly
+  Opus or Sonnet limit when that one is closest to running out.
 - **Codex with a ChatGPT plan:** the plan's limits — often five-hour and weekly, sometimes weekly
   only.
 - **OpenCode with an OpenCode Go key:** rolling, weekly, and monthly.

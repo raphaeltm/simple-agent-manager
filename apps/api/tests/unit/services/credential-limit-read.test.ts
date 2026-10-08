@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
+import { recordCredentialLimitObservation } from '../../../src/services/credential-limit-events';
 import {
   listProjectCredentialLimits,
   listUserCredentialLimits,
@@ -39,6 +40,7 @@ function setup() {
     schema.credentialLimitWindows,
     schema.agentSessions,
     schema.workspaces,
+    schema.ccCredentials,
   ]);
   const env = { DATABASE: createSqliteD1(sqlite) } as Env;
 
@@ -394,5 +396,185 @@ describe('resolveAgentSessionCredentialReference', () => {
         agentSessionId: 'session-2',
       })
     ).resolves.toBeNull();
+  });
+});
+
+/**
+ * Credential ids created by the 2026-06 composable-credentials backfill embed the
+ * legacy ciphertext (`cred-{ownerId}-{ciphertext}:{iv}`), so their references run
+ * past the 160-byte budget of a project-event subject id. The producer stores
+ * them under a digest key; readers must still find them by the full reference and
+ * hand back the real reference and credential id. Rows are written through the
+ * real producer so no test computes the key itself (.claude/rules/62).
+ */
+describe('credential references longer than the identifier budget', () => {
+  const ownerCredentialId =
+    'cred-4bw1FXkQ7cK2nY8pR3sT6uV9wZ0aB1cD-' +
+    'KgCluaQx9+Ga5+i+JTSMVBxORYB/j3L90fcFFZrC4rik9mbQ2'.repeat(3) +
+    '/msAieB+gfJsvMulc0mQ==:MPQAR5bNpdU+BnN0';
+  const ownerReference = `cc_credentials:${ownerCredentialId}`;
+  const memberCredentialId = `${ownerCredentialId.replace('cred-4bw1', 'cred-9zz9')}-member`;
+  const memberReference = `cc_credentials:${memberCredentialId}`;
+
+  async function recordWindow(
+    env: Env,
+    input: {
+      credentialReference: string;
+      userId: string;
+      credentialSource: 'user' | 'project';
+      windowType: string;
+      utilizationPercent: number;
+    }
+  ) {
+    const now = Date.now();
+    const result = await recordCredentialLimitObservation(env, {
+      projectId: 'project-1',
+      userId: input.userId,
+      credentialReference: input.credentialReference,
+      credentialSource: input.credentialSource,
+      provider: 'anthropic',
+      providerMode: 'direct',
+      windowType: input.windowType,
+      source: 'claude-acp.rate_limit',
+      observedAt: now,
+      status: 'allowed',
+      utilizationPercent: input.utilizationPercent,
+      windowMinutes: input.windowType === 'claude.five_hour' ? 300 : 10_080,
+      resetsAt: now + 3_600_000,
+      agentType: 'claude-code',
+    });
+    // Below the warning threshold no event is due: the window is stored and the
+    // producer reports `ignored: ok` (recorded without an event edge).
+    expect(result).toEqual({ outcome: 'ignored', reason: 'ok' });
+  }
+
+  function storedReferences(sqlite: Database.Database): string[] {
+    return (
+      sqlite
+        .prepare('SELECT DISTINCT credential_reference FROM credential_limit_windows ORDER BY 1')
+        .all() as Array<{ credential_reference: string }>
+    ).map((row) => row.credential_reference);
+  }
+
+  it('finds the session credential stored under its digest and returns the real reference', async () => {
+    expect(new TextEncoder().encode(ownerReference).byteLength).toBeGreaterThan(160);
+    const { sqlite, env } = setup();
+    await recordWindow(env, {
+      credentialReference: ownerReference,
+      userId: 'owner-1',
+      credentialSource: 'user',
+      windowType: 'claude.five_hour',
+      utilizationPercent: 13,
+    });
+    await recordWindow(env, {
+      credentialReference: ownerReference,
+      userId: 'owner-1',
+      credentialSource: 'user',
+      windowType: 'claude.seven_day',
+      utilizationPercent: 31,
+    });
+    await recordWindow(env, {
+      credentialReference: 'cc_credentials:cred-short',
+      userId: 'owner-1',
+      credentialSource: 'user',
+      windowType: 'claude.five_hour',
+      utilizationPercent: 50,
+    });
+
+    // The long reference was stored under a digest that fits an event subject id;
+    // the short one is stored as itself.
+    const stored = storedReferences(sqlite);
+    expect(stored).toContain('cc_credentials:cred-short');
+    const digest = stored.find((reference) => reference !== 'cc_credentials:cred-short');
+    expect(digest).toMatch(/^sha256:[0-9a-f]{64}$/);
+
+    const response = await listProjectCredentialLimits(env, {
+      projectId: 'project-1',
+      userId: 'owner-1',
+      credentialReference: ownerReference,
+    });
+    expect(response.credentials).toHaveLength(1);
+    expect(response.credentials[0]).toMatchObject({
+      credentialReference: ownerReference,
+      credentialId: ownerCredentialId,
+    });
+    expect(
+      response.credentials[0]!.windows.map((window) => [
+        window.windowType,
+        window.utilizationPercent,
+      ])
+    ).toEqual([
+      ['claude.five_hour', 13],
+      ['claude.seven_day', 31],
+    ]);
+  });
+
+  it("restores the caller's own credential id on the Settings view", async () => {
+    const { sqlite, env } = setup();
+    sqlite
+      .prepare('INSERT INTO cc_credentials (id, owner_id) VALUES (?, ?), (?, ?)')
+      .run(ownerCredentialId, 'owner-1', 'cc-cred-01SHORT', 'owner-1');
+    await recordWindow(env, {
+      credentialReference: ownerReference,
+      userId: 'owner-1',
+      credentialSource: 'user',
+      windowType: 'claude.five_hour',
+      utilizationPercent: 13,
+    });
+    await recordWindow(env, {
+      credentialReference: 'cc_credentials:cc-cred-01SHORT',
+      userId: 'owner-1',
+      credentialSource: 'user',
+      windowType: 'codex.primary',
+      utilizationPercent: 65,
+    });
+
+    const response = await listUserCredentialLimits(env, { userId: 'owner-1' });
+    expect(
+      response.credentials.map((credential) => [
+        credential.credentialReference,
+        credential.credentialId,
+      ])
+    ).toEqual(
+      expect.arrayContaining([
+        [ownerReference, ownerCredentialId],
+        ['cc_credentials:cc-cred-01SHORT', 'cc-cred-01SHORT'],
+      ])
+    );
+    expect(response.credentials).toHaveLength(2);
+  });
+
+  it("never restores another member's credential id, while the owner still gets theirs", async () => {
+    const { sqlite, env } = setup();
+    sqlite
+      .prepare('INSERT INTO cc_credentials (id, owner_id) VALUES (?, ?)')
+      .run(memberCredentialId, 'member-2');
+    // A project-shared credential owned by member-2: visible to every member.
+    await recordWindow(env, {
+      credentialReference: memberReference,
+      userId: 'member-2',
+      credentialSource: 'project',
+      windowType: 'claude.five_hour',
+      utilizationPercent: 20,
+    });
+
+    const asOwner = await listProjectCredentialLimits(env, {
+      projectId: 'project-1',
+      userId: 'owner-1',
+    });
+    expect(asOwner.credentials).toHaveLength(1);
+    expect(asOwner.credentials[0]!.credentialId).toBeNull();
+    expect(asOwner.credentials[0]!.credentialReference).toMatch(/^sha256:[0-9a-f]{64}$/);
+
+    // Owner control: the credential's owner sees its real reference and id.
+    const asMember = await listProjectCredentialLimits(env, {
+      projectId: 'project-1',
+      userId: 'member-2',
+    });
+    expect(asMember.credentials).toHaveLength(1);
+    expect(asMember.credentials[0]).toMatchObject({
+      credentialReference: memberReference,
+      credentialId: memberCredentialId,
+    });
   });
 });

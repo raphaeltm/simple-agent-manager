@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -1076,6 +1077,81 @@ describe('credential limit producer allowlists for Codex, OpenCode and per-model
     expect(windowRow(sqlite, 'codex.credits')).toBeUndefined();
     expect(windowRow(sqlite, 'opencode.weekly')).toBeUndefined();
     expect(windowRow(sqlite, 'codex.primary')).toBeUndefined();
+  });
+});
+
+describe('credential limit producer keys references longer than an event subject id', () => {
+  // Shape of a credential id from the 2026-06 composable-credentials backfill,
+  // `cred-{ownerId}-{ciphertext}:{iv}`: production Claude references are 238 chars,
+  // past the 160-byte project-event subject id budget.
+  const longReference =
+    'cc_credentials:cred-4bw1FXkQ7cK2nY8pR3sT6uV9wZ0aB1cD-' +
+    'KgCluaQx9+Ga5+i+JTSMVBxORYB/j3L90fcFFZrC4rik9mbQ2'.repeat(3) +
+    '/msAieB+gfJsvMulc0mQ==:MPQAR5bNpdU+BnN0';
+
+  function storedReferences(sqlite: Database.Database): string[] {
+    return (
+      sqlite
+        .prepare('SELECT credential_reference FROM credential_limit_windows ORDER BY 1')
+        .all() as Array<{ credential_reference: string }>
+    ).map((row) => row.credential_reference);
+  }
+
+  it('admits the event through real ProjectData admission under a SHA-256 key', async () => {
+    const { sqlite, env } = createCredentialD1();
+    const eventStore = createProjectEventStore();
+    try {
+      vi.mocked(projectDataService.admitProjectEvent).mockImplementation(
+        async (_env, projectId, input) =>
+          admitProjectDataEvent(eventStore.sql, eventStore.env, projectId, { projectId, ...input })
+      );
+
+      await expect(
+        recordCredentialLimitObservation(
+          env as never,
+          baseObservation({ credentialReference: longReference })
+        )
+      ).resolves.toMatchObject({
+        outcome: 'event_admitted',
+        transition: 'warning',
+        admissionOutcome: 'created',
+        dispatchOutcome: 'created',
+      });
+
+      const key = `sha256:${createHash('sha256').update(longReference).digest('hex')}`;
+      expect(storedReferences(sqlite)).toEqual([key]);
+      expect(
+        eventStore.sqlite.prepare('SELECT subject_type, subject_id FROM project_events').all()
+      ).toEqual([{ subject_type: 'credential', subject_id: key }]);
+      expect(admissions(sqlite)).toEqual([
+        expect.objectContaining({
+          event_type: CREDENTIAL_LIMIT_EVENT_TYPES.warning,
+          state: 'admitted',
+        }),
+      ]);
+    } finally {
+      eventStore.sqlite.close();
+    }
+  });
+
+  it('keeps a reference that fits the budget as its own key and measures it in bytes', async () => {
+    const { sqlite, env } = createCredentialD1();
+    const exactlyAtBudget = `cc_credentials:${'x'.repeat(145)}`; // 160 bytes
+    const oneByteOver = `cc_credentials:${'x'.repeat(146)}`; // 161 bytes
+    const multiByteOver = `cc_credentials:${'é'.repeat(73)}`; // 88 chars, 161 bytes
+    for (const credentialReference of [exactlyAtBudget, oneByteOver, multiByteOver]) {
+      await expect(
+        recordCredentialLimitObservation(
+          env as never,
+          baseObservation({ credentialReference, utilizationPercent: 10 })
+        )
+      ).resolves.toEqual({ outcome: 'ignored', reason: 'ok' });
+    }
+    const digest = (reference: string) =>
+      `sha256:${createHash('sha256').update(reference).digest('hex')}`;
+    expect(storedReferences(sqlite).sort()).toEqual(
+      [exactlyAtBudget, digest(oneByteOver), digest(multiByteOver)].sort()
+    );
   });
 });
 

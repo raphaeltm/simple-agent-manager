@@ -55,6 +55,72 @@ describe('agent usage callback route', () => {
     expect(handleAcpUsageCallback).not.toHaveBeenCalled();
   });
 
+  // Production 2026-10-08: every Claude callback returned 400 here because the
+  // echoed credential reference (a backfilled `cc_credentials:cred-{owner}-{ciphertext}:{iv}`,
+  // 238 chars) exceeded the 160-char identifier bound. Codex's 49-char reference passed.
+  it('accepts the long credential reference a backfilled credential carries', async () => {
+    const credentialReference =
+      'cc_credentials:cred-4bw1FXkQ7cK2nY8pR3sT6uV9wZ0aB1cD-' +
+      'KgCluaQx9+Ga5+i+JTSMVBxORYB/j3L90fcFFZrC4rik9mbQ2'.repeat(3) +
+      '/msAieB+gfJsvMulc0mQ==:MPQAR5bNpdU+BnN0';
+    const response = await usageRequest(
+      {
+        nodeId: 'node-1',
+        agentType: 'claude-code',
+        credentialReference,
+        credentialSource: 'user',
+        credentialGeneration: 1,
+        observedAt: 1_791_496_287_022,
+        source: 'claude-acp.usage_update',
+        rateLimits: [
+          {
+            windowType: 'claude.five_hour',
+            provider: 'anthropic',
+            source: 'claude-acp.rate_limit',
+            status: 'allowed',
+            utilizationPercent: 13,
+            windowMinutes: 300,
+            resetsAt: 1_791_507_194_000,
+            observedAt: 1_791_496_287_022,
+            freshnessMs: 0,
+          },
+          {
+            windowType: 'claude.seven_day',
+            provider: 'anthropic',
+            source: 'claude-acp.rate_limit',
+            status: 'allowed',
+            utilizationPercent: 31,
+            windowMinutes: 10080,
+            resetsAt: 1_791_841_994_000,
+            observedAt: 1_791_496_287_022,
+            freshnessMs: 0,
+          },
+        ],
+      },
+      { CREDENTIAL_LIMIT_USAGE_CALLBACK_MAX_BODY_BYTES: '4096' }
+    );
+
+    expect(credentialReference.length).toBeGreaterThan(160);
+    expect(response.status).toBe(204);
+    expect(handleAcpUsageCallback).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(handleAcpUsageCallback).mock.calls[0]![1].body.credentialReference).toBe(
+      credentialReference
+    );
+  });
+
+  it('keeps the identifier bound on window types', async () => {
+    const response = await usageRequest(
+      {
+        nodeId: 'node-1',
+        rateLimits: [{ windowType: `claude.${'x'.repeat(160)}`, status: 'allowed' }],
+      },
+      { CREDENTIAL_LIMIT_USAGE_CALLBACK_MAX_BODY_BYTES: '4096' }
+    );
+
+    expect(response.status).toBe(400);
+    expect(handleAcpUsageCallback).not.toHaveBeenCalled();
+  });
+
   it('rejects batches over the callback observation cap', async () => {
     const response = await usageRequest(
       {

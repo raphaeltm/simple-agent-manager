@@ -122,6 +122,33 @@ export async function fingerprint(value: ProjectEventJsonValue): Promise<string>
   return `sha256:${await sha256Hex(stableStringify(value))}`;
 }
 
+const CREDENTIAL_REFERENCE_KEY_PREFIX = 'sha256:';
+
+/**
+ * Key that stands for a credential reference everywhere in the credential-limit
+ * pipeline: window rows, project-event subject ids and source-outbox guards. It
+ * must fit a project-event filter string: ProjectData rejects a longer subject
+ * id, and the outbox requires the window key and the event subject to be one
+ * string. References within that budget are their own key. Longer ones — ids
+ * from the 2026-06 composable-credentials backfill embed the legacy ciphertext —
+ * become a SHA-256 digest that readers recompute from the full reference, so,
+ * unlike truncation, the key cannot collide or differ from what a reader looks up.
+ */
+export async function credentialLimitReferenceKey(
+  value: string | null | undefined
+): Promise<string | null> {
+  if (typeof value !== 'string') return null;
+  const reference = value.trim();
+  if (!reference) return null;
+  if (encoder.encode(reference).byteLength <= FILTER_STRING_MAX_BYTES) return reference;
+  return `${CREDENTIAL_REFERENCE_KEY_PREFIX}${await sha256Hex(reference)}`;
+}
+
+/** True when a stored credential reference is a digest key, not the reference itself. */
+export function isCredentialLimitReferenceDigest(key: string): boolean {
+  return key.startsWith(CREDENTIAL_REFERENCE_KEY_PREFIX);
+}
+
 export function normalizeNumber(value: number | null | undefined): number | null {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null;
   return value;
