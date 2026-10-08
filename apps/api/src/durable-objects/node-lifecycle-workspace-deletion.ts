@@ -707,6 +707,7 @@ export class NodeLifecycleWorkspaceDeletionQueue {
         source: 'api',
         level: 'error',
         message: 'Workspace deletion entered durable operator quarantine',
+        context: { reason, attemptCount: entry.attemptCount ?? 0 },
         workspaceId: entry.workspaceId,
         nodeId: entry.nodeId ?? null,
         userId: entry.userId,

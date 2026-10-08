@@ -1,5 +1,5 @@
 import { DEFAULT_TASK_TITLE_MAX_LENGTH } from '@simple-agent-manager/shared';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -90,7 +90,10 @@ export async function ensureSessionTaskBacked(
       projectId: input.projectId,
       userId,
       chatSessionId: input.sessionId,
-      workspaceId: stringField(session, 'workspaceId'),
+      // Resolve inside the INSERT so deletion cannot race a separate existence check.
+      workspaceId: sql`(SELECT ${schema.workspaces.id} FROM ${schema.workspaces}
+        WHERE ${schema.workspaces.id} = ${stringField(session, 'workspaceId')}
+          AND ${schema.workspaces.projectId} = ${input.projectId})`,
       title: truncateTitle(topic, DEFAULT_TASK_TITLE_MAX_LENGTH) || 'Recovered conversation',
       description: 'Conversation task materialized from a legacy taskless chat session.',
       status,

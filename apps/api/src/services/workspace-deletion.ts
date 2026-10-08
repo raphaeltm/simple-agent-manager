@@ -3,6 +3,7 @@ import { DEFAULT_WORKSPACE_DELETION_DIAGNOSTIC_MAX_LENGTH } from '@simple-agent-
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { deleteWorkspaceOnNode, NodeAgentHttpError } from './node-agent';
+import { stopNodeResources } from './node-resource-lifecycle';
 import type { FinalizeWorkspaceLifecycleClosureResult } from './workspace-lifecycle-finalizer';
 import { finalizeWorkspaceLifecycleClosure } from './workspace-lifecycle-finalizer';
 
@@ -53,9 +54,7 @@ export function workspaceDeletionIdentityLogContext(
 }
 
 export type WorkspaceDeletionProof =
-  | 'vm_agent_confirmed'
-  | 'workspace_never_started'
-  | 'node_runtime_terminated';
+  'vm_agent_confirmed' | 'workspace_never_started' | 'node_runtime_terminated';
 
 export type WorkspaceDeletionMode = 'explicit' | 'automatic';
 
@@ -620,6 +619,28 @@ async function requestWorkspaceDeletion(
     );
     await persistDeletionDiagnostic(env, expected, diagnostic);
     return { status: 'retry', reason: 'runtime_deletion_unconfirmed', diagnostic };
+  }
+
+  if (expected.nodeRuntime === 'cf-container') {
+    const node = await env.DATABASE.prepare('SELECT status FROM nodes WHERE id = ?')
+      .bind(expected.nodeId)
+      .first<{ status: string }>();
+    if (node && node.status !== 'running') {
+      // Proxying to a sleeping container wakes it, but recovery cannot admit the
+      // stopping workspace we just claimed. Destroy through the container DO.
+      await requireDeletionTargetAtBoundary(env, expected);
+      await stopNodeResources(expected.nodeId, expected.userId, env, {
+        expectedRuntime: {
+          userId: expected.nodeUserId ?? expected.userId,
+          runtime: expected.nodeRuntime,
+          providerInstanceId: expected.nodeProviderInstanceId,
+          runtimeIncarnationId: expected.nodeRuntimeIncarnationId,
+        },
+      });
+      const proof = await terminalNodeProof(env.DATABASE, expected);
+      if (!proof) throw new Error('Container termination proof no longer matches archive target');
+      return proof;
+    }
   }
 
   try {

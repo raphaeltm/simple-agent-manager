@@ -2,6 +2,7 @@ import type { Context } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 
 import type { Env } from '../env';
+import { d1CauseCode, isFailedQueryError } from '../lib/d1-error-code';
 import { log, serializeError } from '../lib/logger';
 import { GcpApiError, sanitizeGcpError } from '../services/gcp-errors';
 import { persistError, redactSensitiveData } from '../services/observability';
@@ -58,11 +59,14 @@ function scheduleErrorPersistence(
     if (!c.env.OBSERVABILITY_DATABASE) return;
     const identifiers = requestIdentifiers(c);
     const auth = c.get('auth') as { user?: { id?: string } } | undefined;
+    const causeCode = d1CauseCode(err);
+    const failedQuery = isFailedQueryError(err);
     const safe = redactSensitiveData({
-      message: err.message || 'Unhandled API error',
-      stack: err.stack ?? null,
+      message: failedQuery ? 'Failed query: [REDACTED]' : err.message || 'Unhandled API error',
+      stack: failedQuery ? null : err.stack ?? null,
       context: {
         requestId,
+        ...(causeCode ? { causeCode } : {}),
         path: new URL(c.req.url).pathname,
         method: c.req.method,
         status,

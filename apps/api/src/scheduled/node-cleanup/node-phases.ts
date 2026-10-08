@@ -26,6 +26,7 @@ import {
   LAST_WORKSPACE_ACTIVITY_SQL,
   markNodeCleanupBackoff,
   type NodeCleanupResult,
+  sleepingContainerRetentionGuardSql,
 } from './shared';
 
 /**
@@ -158,6 +159,7 @@ export async function sweepMaxLifetimeNodes(
        )
        AND (n.cleanup_backoff_until IS NULL OR n.cleanup_backoff_until <= ?)
        ${boundedWarmPlacementClaimGuardSql('n.id')}
+       ${sleepingContainerRetentionGuardSql('n')}
        AND n.created_at < ?
      GROUP BY n.id, n.user_id, n.status, n.created_at
      ORDER BY active_ws_count ASC, n.created_at ASC

@@ -49,8 +49,7 @@ describe('DELETE /api/workspaces/:id deletion outcomes — real SQL', () => {
 
   function workspaceStatus(): string | null {
     const row = sqlite.prepare('SELECT status FROM workspaces WHERE id = ?').get(WORKSPACE_ID) as
-      | { status: string }
-      | undefined;
+      { status: string } | undefined;
     return row?.status ?? null;
   }
 
@@ -125,6 +124,27 @@ describe('DELETE /api/workspaces/:id deletion outcomes — real SQL', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     sqlite.close();
+  });
+
+  it('confirms sleeping Instant deletion through the container boundary without waking its agent', async () => {
+    sqlite
+      .prepare("UPDATE nodes SET runtime = 'cf-container', status = 'sleeping' WHERE id = ?")
+      .run(NODE_ID);
+    setWorkspaceStatus('sleeping');
+    const destroyForUser = vi.fn().mockResolvedValue(undefined);
+    env.CF_CONTAINER_ENABLED = 'true';
+    env.VM_AGENT_CONTAINER = {
+      idFromName: (id: string) => id,
+      get: () => ({ destroyForUser }),
+    } as unknown as NonNullable<Env['VM_AGENT_CONTAINER']>;
+
+    const response = await requestDelete();
+
+    expect(response.status).toBe(200);
+    expect(workspaceStatus()).toBeNull();
+    expect(destroyForUser).toHaveBeenCalledOnce();
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(mocks.confirmWorkspaceDeletion).toHaveBeenCalled();
   });
 
   it('returns 409 without changing D1 or calling the VM when the durable claim is fenced', async () => {
@@ -307,28 +327,43 @@ describe('DELETE /api/workspaces/:id deletion outcomes — real SQL', () => {
     expect(mocks.scheduleWorkspaceDeletion).not.toHaveBeenCalled();
   });
 
-  it.each(['error', 'stopping'] as const)('deletes a proof-bearing %s placeholder without VM I/O', async (status) => {
-    sqlite.prepare(`UPDATE workspaces SET node_id = NULL, status = ?,
+  it.each(['error', 'stopping'] as const)(
+    'deletes a proof-bearing %s placeholder without VM I/O',
+    async (status) => {
+      sqlite
+        .prepare(
+          `UPDATE workspaces SET node_id = NULL, status = ?,
       runtime_deletion_confirmed_at = datetime('now'), runtime_deletion_proof = 'workspace_never_started'
-      WHERE id = ?`).run(status, WORKSPACE_ID);
-    const response = await requestDelete();
-    expect(response.status).toBe(200);
-    expect(workspaceStatus()).toBeNull();
-    expect(globalThis.fetch).not.toHaveBeenCalled();
-    expect(mocks.claimWorkspaceDeletionAttempt).not.toHaveBeenCalled();
-    expect(mocks.scheduleWorkspaceDeletion).not.toHaveBeenCalled();
-  });
+      WHERE id = ?`
+        )
+        .run(status, WORKSPACE_ID);
+      const response = await requestDelete();
+      expect(response.status).toBe(200);
+      expect(workspaceStatus()).toBeNull();
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+      expect(mocks.claimWorkspaceDeletionAttempt).not.toHaveBeenCalled();
+      expect(mocks.scheduleWorkspaceDeletion).not.toHaveBeenCalled();
+    }
+  );
 
   it('fences a proof-bearing placeholder whose ownership changes before finalization', async () => {
-    sqlite.prepare("INSERT INTO users (id, email) VALUES ('new-owner', 'new-owner@example.test')").run();
-    sqlite.prepare(`UPDATE workspaces SET node_id = NULL, status = 'error',
+    sqlite
+      .prepare("INSERT INTO users (id, email) VALUES ('new-owner', 'new-owner@example.test')")
+      .run();
+    sqlite
+      .prepare(
+        `UPDATE workspaces SET node_id = NULL, status = 'error',
       runtime_deletion_confirmed_at = datetime('now'), runtime_deletion_proof = 'workspace_never_started'
-      WHERE id = ?`).run(WORKSPACE_ID);
+      WHERE id = ?`
+      )
+      .run(WORKSPACE_ID);
     const prepare = env.DATABASE.prepare.bind(env.DATABASE);
     let snapshots = 0;
     env.DATABASE.prepare = (query: string) => {
       if (query.includes('SELECT w.id AS workspaceId') && ++snapshots === 2) {
-        sqlite.prepare("UPDATE workspaces SET user_id = 'new-owner' WHERE id = ?").run(WORKSPACE_ID);
+        sqlite
+          .prepare("UPDATE workspaces SET user_id = 'new-owner' WHERE id = ?")
+          .run(WORKSPACE_ID);
       }
       return prepare(query);
     };

@@ -84,6 +84,26 @@ describe('buildComposePublishApplyPayload', () => {
     expect(doc.services.chat.labels).toBeUndefined();
   });
 
+  it('strips denied fields from provider services without changing provider configuration', () => {
+    const composeYaml = CREWAI_COMPOSE.replace(
+      '  chat:\n    provider:',
+      '  chat:\n    build: .\n    use_api_socket: true\n    privileged: true\n    provider:'
+    );
+    const result = buildComposePublishApplyPayload(makeSubmission({ composeYaml }), OPTS);
+    const doc = parseYaml(result.composeYaml) as Record<string, any>;
+
+    expect(doc.services.chat).toEqual({
+      provider: { type: 'model', options: { model: 'ai/gemma3:1B-Q4_K_M' } },
+    });
+    expect(result.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ service: 'chat', field: 'use_api_socket' }),
+        expect.objectContaining({ service: 'chat', field: 'privileged' }),
+        expect.objectContaining({ service: 'chat', field: 'build' }),
+      ])
+    );
+  });
+
   it('replaces build: with the submission digest-pinned pushedRef image', () => {
     const result = buildComposePublishApplyPayload(makeSubmission(), OPTS);
     const doc = parseYaml(result.composeYaml) as Record<string, any>;
@@ -278,6 +298,7 @@ describe('buildComposePublishApplyPayload', () => {
     privileged: true
     cap_add:
       - NET_ADMIN
+    use_api_socket: true
     ports:
       - "8000:8000"
 `;
@@ -289,8 +310,10 @@ describe('buildComposePublishApplyPayload', () => {
 
     expect(doc.services.app.privileged).toBeUndefined();
     expect(doc.services.app.cap_add).toBeUndefined();
+    expect(doc.services.app.use_api_socket).toBeUndefined();
     expect(result.warnings.some((w) => w.field === 'privileged')).toBe(true);
     expect(result.warnings.some((w) => w.field === 'cap_add')).toBe(true);
+    expect(result.warnings.some((w) => w.field === 'use_api_socket')).toBe(true);
   });
 
   it('strips denied top-level fields (networks) and replaces with the SAM bridge', () => {

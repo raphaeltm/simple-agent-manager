@@ -61,6 +61,8 @@ export const DENIED_SERVICE_FIELDS: Record<string, string> = {
     'Capability management is not allowed in the Compose subset. Remove the "cap_drop" field.',
   network_mode:
     'Custom network modes (e.g., host networking) are not allowed. All services share one private network.',
+  use_api_socket:
+    'Docker Engine API access is not allowed. Remove the "use_api_socket" field.',
   devices: 'Device access is not allowed. Remove the "devices" field.',
   security_opt: 'Security options are not allowed. Remove the "security_opt" field.',
   sysctls: 'Kernel parameter tuning is not allowed. Remove the "sysctls" field.',

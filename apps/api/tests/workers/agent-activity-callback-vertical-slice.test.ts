@@ -3,8 +3,7 @@
  *
  * These tests keep the callback HTTP route, callback handler, ProjectData
  * service wrapper, and real ProjectData Durable Object in the path. External
- * callback JWT and VM side-effect boundaries are mocked because they are not
- * the behavior under test.
+ * VM HTTP boundary is mocked; callback authentication uses real signed tokens.
  *
  * See: .claude/rules/35-vertical-slice-testing.md
  */
@@ -24,24 +23,6 @@ import {
   seedUser,
   seedWorkspace,
 } from './helpers/seed-d1';
-
-const mocks = vi.hoisted(() => ({
-  nodeAgent: {
-    hibernateAgentSessionOnNode: vi.fn(),
-  },
-  container: {
-    markVmAgentContainerActiveWorkEndedBestEffort: vi.fn(),
-  },
-}));
-
-vi.mock('../../src/services/node-agent', () => ({
-  hibernateAgentSessionOnNode: mocks.nodeAgent.hibernateAgentSessionOnNode,
-}));
-
-vi.mock('../../src/services/vm-agent-container', () => ({
-  markVmAgentContainerActiveWorkEndedBestEffort:
-    mocks.container.markVmAgentContainerActiveWorkEndedBestEffort,
-}));
 
 const testEnv = env as unknown as Env;
 
@@ -68,9 +49,8 @@ type SeededCallbackSession = {
 };
 
 async function createTestApp(): Promise<Hono<{ Bindings: Env }>> {
-  const { agentActivityCallbackRoute } = await import(
-    '../../src/routes/projects/agent-activity-callback'
-  );
+  const { agentActivityCallbackRoute } =
+    await import('../../src/routes/projects/agent-activity-callback');
   const app = new Hono<{ Bindings: Env }>();
   app.route('/api/projects', agentActivityCallbackRoute);
   app.onError((err, c) => {
@@ -167,9 +147,8 @@ async function postActivity(
 
 describe('ACP activity callback vertical slice', () => {
   beforeEach(async () => {
-    const { resetAcpActivityAdmissionForTests } = await import(
-      '../../src/services/acp-activity-admission'
-    );
+    const { resetAcpActivityAdmissionForTests } =
+      await import('../../src/services/acp-activity-admission');
     resetAcpActivityAdmissionForTests();
     vi.clearAllMocks();
 
@@ -179,16 +158,13 @@ describe('ACP activity callback vertical slice', () => {
     };
     mutableEnv.ACP_ACTIVITY_ADMISSION_ENABLED = 'true';
     mutableEnv.ACP_ACTIVITY_COALESCE_WINDOW_MS = '30000';
-
-    mocks.container.markVmAgentContainerActiveWorkEndedBestEffort.mockResolvedValue(undefined);
-    mocks.nodeAgent.hibernateAgentSessionOnNode.mockResolvedValue(undefined);
   });
 
   afterEach(async () => {
-    const { resetAcpActivityAdmissionForTests } = await import(
-      '../../src/services/acp-activity-admission'
-    );
+    const { resetAcpActivityAdmissionForTests } =
+      await import('../../src/services/acp-activity-admission');
     resetAcpActivityAdmissionForTests();
+    vi.unstubAllGlobals();
     vi.clearAllTimers();
     vi.useRealTimers();
 
@@ -198,6 +174,57 @@ describe('ACP activity callback vertical slice', () => {
     };
     delete mutableEnv.ACP_ACTIVITY_ADMISSION_ENABLED;
     delete mutableEnv.ACP_ACTIVITY_COALESCE_WINDOW_MS;
+  });
+
+  it.each([
+    { sleepStatus: 'stopping', sleepingAt: null },
+    { sleepStatus: 'sleeping', sleepingAt: null },
+    { sleepStatus: null, sleepingAt: '2026-10-08T00:00:00.000Z' },
+    { sleepStatus: 'preparing', sleepingAt: null },
+    { sleepStatus: null, sleepingAt: null },
+  ])('admits idle capture according to durable sleep state %j', async (state) => {
+    const vmFetch = vi.fn(async () => Response.json({ accepted: true }));
+    vi.stubGlobal('fetch', vmFetch);
+    const session = await seedCallbackSession(crypto.randomUUID(), {
+      acpSdkSessionId: 'sdk-session',
+    });
+    await env.DATABASE.prepare(
+      `INSERT INTO session_snapshots
+      (id, chat_session_id, workspace_id, node_id, user_id, manifest_r2_key, runtime, status, sleep_status, sleeping_at, created_at, updated_at, expires_at)
+      VALUES (?, ?, ?, ?, ?, 'test/manifest', 'vm', 'pending', ?, ?, datetime('now'), datetime('now'), datetime('now', '+7 days'))`
+    )
+      .bind(
+        crypto.randomUUID(),
+        session.chatSessionId,
+        session.workspaceId,
+        session.nodeId,
+        session.userId,
+        state.sleepStatus,
+        state.sleepingAt
+      )
+      .run();
+    const app = await createTestApp();
+    const response = await postActivity(app, session, { activity: 'idle', nodeId: session.nodeId });
+    expect(response.status).toBe(204);
+    const blocked =
+      state.sleepingAt !== null || ['stopping', 'sleeping'].includes(state.sleepStatus ?? '');
+    expect(vmFetch).toHaveBeenCalledTimes(blocked ? 0 : 1);
+    if (!blocked) {
+      const [url, options] = vmFetch.mock.calls[0] as unknown as [string, RequestInit];
+      expect(String(url)).toContain(
+        `/workspaces/${session.workspaceId}/agent-sessions/sdk-session/hibernate`
+      );
+      expect(JSON.parse(options.body as string)).toMatchObject({
+        background: true,
+        chatSessionId: session.chatSessionId,
+      });
+    }
+    const persisted = await projectDataService.getSessionState(
+      testEnv,
+      session.projectId,
+      session.acpSessionId
+    );
+    expect(persisted?.activity).toBe('idle');
   });
 
   it('coalesces redundant intermediate callbacks before a terminal idle write', async () => {
@@ -221,14 +248,15 @@ describe('ACP activity callback vertical slice', () => {
     });
     expect(first.status).toBe(204);
 
-    expect(await projectDataService.getSessionState(testEnv, session.projectId, session.acpSessionId))
-      .toMatchObject({
-        activity: 'prompting',
-        activityAt: baseTime,
-        promptStartedAt: baseTime,
-        runtimeWorkState: 'active',
-        runtimeWorkCount: 1,
-      });
+    expect(
+      await projectDataService.getSessionState(testEnv, session.projectId, session.acpSessionId)
+    ).toMatchObject({
+      activity: 'prompting',
+      activityAt: baseTime,
+      promptStartedAt: baseTime,
+      runtimeWorkState: 'active',
+      runtimeWorkCount: 1,
+    });
 
     vi.setSystemTime(baseTime + 100);
     const redundant = await postActivity(app, session, {
@@ -244,13 +272,14 @@ describe('ACP activity callback vertical slice', () => {
     });
     expect(redundant.status).toBe(204);
 
-    expect(await projectDataService.getSessionState(testEnv, session.projectId, session.acpSessionId))
-      .toMatchObject({
-        activity: 'prompting',
-        activityAt: baseTime,
-        promptStartedAt: baseTime,
-        runtimeWorkProgressAt: baseTime,
-      });
+    expect(
+      await projectDataService.getSessionState(testEnv, session.projectId, session.acpSessionId)
+    ).toMatchObject({
+      activity: 'prompting',
+      activityAt: baseTime,
+      promptStartedAt: baseTime,
+      runtimeWorkProgressAt: baseTime,
+    });
 
     vi.setSystemTime(baseTime + 200);
     const terminal = await postActivity(app, session, {
@@ -265,13 +294,14 @@ describe('ACP activity callback vertical slice', () => {
     });
     expect(terminal.status).toBe(204);
 
-    expect(await projectDataService.getSessionState(testEnv, session.projectId, session.acpSessionId))
-      .toMatchObject({
-        activity: 'idle',
-        activityAt: baseTime + 200,
-        runtimeWorkState: 'inactive',
-        runtimeWorkCount: 0,
-      });
+    expect(
+      await projectDataService.getSessionState(testEnv, session.projectId, session.acpSessionId)
+    ).toMatchObject({
+      activity: 'idle',
+      activityAt: baseTime + 200,
+      runtimeWorkState: 'inactive',
+      runtimeWorkCount: 0,
+    });
   });
 
   it('does not let a stale callback resurrect activity after terminal idle state', async () => {
@@ -308,12 +338,13 @@ describe('ACP activity callback vertical slice', () => {
     });
     expect(stale.status).toBe(204);
 
-    expect(await projectDataService.getSessionState(testEnv, session.projectId, session.acpSessionId))
-      .toMatchObject({
-        activity: 'idle',
-        activityAt: baseTime,
-        runtimeWorkState: 'inactive',
-        runtimeWorkCount: 0,
-      });
+    expect(
+      await projectDataService.getSessionState(testEnv, session.projectId, session.acpSessionId)
+    ).toMatchObject({
+      activity: 'idle',
+      activityAt: baseTime,
+      runtimeWorkState: 'inactive',
+      runtimeWorkCount: 0,
+    });
   });
 });

@@ -9,7 +9,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
 import { deleteDNSRecord } from './dns';
-import { deleteNodeResourcesStrict } from './strict-node-deletion';
+import { deleteNodeResourcesStrict, type StrictNodeRuntimeIdentity } from './strict-node-deletion';
 import { WORKSPACE_DELETION_DIAGNOSTIC_PREFIX } from './workspace-deletion';
 import { finalizeWorkspaceLifecycleClosure } from './workspace-lifecycle-finalizer';
 
@@ -28,7 +28,12 @@ function managedNodeStopDiagnostic(env: Env): string {
   );
 }
 
-export async function stopNodeResources(nodeId: string, userId: string, env: Env): Promise<void> {
+export async function stopNodeResources(
+  nodeId: string,
+  userId: string,
+  env: Env,
+  options: { expectedRuntime?: StrictNodeRuntimeIdentity } = {}
+): Promise<void> {
   const db = drizzle(env.DATABASE, { schema });
   const now = new Date().toISOString();
 
@@ -41,6 +46,17 @@ export async function stopNodeResources(nodeId: string, userId: string, env: Env
   const node = rows[0];
   if (!node) {
     return;
+  }
+
+  const expected = options.expectedRuntime;
+  if (
+    expected &&
+    (node.userId !== expected.userId ||
+      node.runtime !== expected.runtime ||
+      node.providerInstanceId !== expected.providerInstanceId ||
+      node.runtimeIncarnationId !== expected.runtimeIncarnationId)
+  ) {
+    throw new Error('Managed node changed before teardown could be claimed');
   }
 
   // User-owned (BYO) machines are the user's hardware, never SAM-provisioned infrastructure. "Stop"

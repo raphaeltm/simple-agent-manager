@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -101,6 +102,11 @@ func (s *Server) cloneStandaloneRepository(ctx context.Context, runtime *Workspa
 		branch = "main"
 	}
 
+	cloneBranch := strings.TrimSpace(runtime.BaseBranch)
+	if cloneBranch == "" {
+		cloneBranch = branch
+	}
+
 	// Standalone clones run synchronously inside the control plane's
 	// create-workspace request deadline, so clone cost must stay proportional
 	// to the working tree, not the full history pack. The partial-clone filter
@@ -115,7 +121,7 @@ func (s *Server) cloneStandaloneRepository(ctx context.Context, runtime *Workspa
 	if cloneFilter != "" {
 		args = append(args, "--filter="+cloneFilter)
 	}
-	args = append(args, "--branch", branch, cloneSpec.URL, workDir)
+	args = append(args, "--branch", cloneBranch, cloneSpec.URL, workDir)
 	if helperPath := standaloneCloneCredentialHelperPath(extraEnv); helperPath != "" {
 		args = append([]string{"-c", "credential.helper=" + helperPath}, args...)
 	}
@@ -140,6 +146,41 @@ func (s *Server) cloneStandaloneRepository(ctx context.Context, runtime *Workspa
 
 	if output, err := runStandaloneGitCommand(ctx, "", nil, "-C", workDir, "remote", "set-url", "origin", cloneSpec.URL); err != nil {
 		return fmt.Errorf("failed to sanitize standalone repository origin URL: %w: %s", err, output)
+	}
+	if err := checkoutStandaloneBranch(ctx, workDir, cloneBranch, branch, extraEnv); err != nil {
+		if rmErr := os.RemoveAll(workDir); rmErr != nil {
+			slog.Warn("Failed to clean standalone workspace after checkout failure", "workspace", runtime.ID, "error", rmErr)
+		}
+		return fmt.Errorf("standalone checkout failed: %s", redactStandaloneCloneSecrets(err.Error(), cloneSpec.Token))
+	}
+	return nil
+}
+
+// Preserve an existing output ref; otherwise start the generated branch at the base.
+func checkoutStandaloneBranch(ctx context.Context, workDir, baseBranch, branch string, extraEnv []string) error {
+	// A partial clone may fetch blobs when checking out an existing output branch.
+	// Keep the same scoped credentials until that checkout has finished.
+	run := func(args ...string) (string, error) {
+		if helper := standaloneCloneCredentialHelperPath(extraEnv); helper != "" {
+			args = append([]string{"-c", "credential.helper=" + helper}, args...)
+		}
+		return runStandaloneGitCommand(ctx, workDir, extraEnv, args...)
+	}
+	if branch == baseBranch {
+		return nil
+	}
+	_, err := run("show-ref", "--verify", "--quiet", "refs/remotes/origin/"+branch)
+	args := []string{"checkout", "-b", branch}
+	if err == nil {
+		args = []string{"checkout", "--track", "-b", branch, "origin/" + branch}
+	} else {
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
+			return fmt.Errorf("failed to inspect standalone checkout branch %q: %w", branch, err)
+		}
+	}
+	if output, err := run(args...); err != nil {
+		return fmt.Errorf("failed to check out standalone branch %q: %w: %s", branch, err, output)
 	}
 	return nil
 }

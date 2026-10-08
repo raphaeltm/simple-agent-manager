@@ -4,6 +4,7 @@ import type { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { ulid } from '../lib/ulid';
+import { errors } from '../middleware/error';
 import {
   buildSessionSnapshotR2Key,
   getSessionSnapshotConfig,
@@ -106,7 +107,7 @@ export async function prepareSessionSnapshot(
       current.sleepStatus === 'sleeping' ||
       current.sleepStatus === 'stopping'
     ) {
-      throw new Error('Snapshot capture cannot start after sleep teardown was claimed');
+      throw errors.conflict('Snapshot capture cannot start after sleep teardown was claimed');
     }
     const captureAllowed = and(
       eq(schema.sessionSnapshots.id, snapshotId),
@@ -147,12 +148,12 @@ export async function prepareSessionSnapshot(
         })
         .where(captureAllowed);
       if ((result.meta.changes ?? 0) === 0) {
-        throw new Error(await lostCaptureRaceMessage(db, snapshotId));
+        throw errors.conflict(await lostCaptureRaceMessage(db, snapshotId));
       }
     } else {
       const result = await db.update(schema.sessionSnapshots).set(row).where(captureAllowed);
       if ((result.meta.changes ?? 0) === 0) {
-        throw new Error(await lostCaptureRaceMessage(db, snapshotId));
+        throw errors.conflict(await lostCaptureRaceMessage(db, snapshotId));
       }
     }
     if (current.captureGeneration && current.captureGeneration !== generation) {
