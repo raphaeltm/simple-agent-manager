@@ -44,8 +44,6 @@ const mocks = vi.hoisted(() => ({
   stopChatSession: vi.fn(),
   sleepWorkspace: vi.fn(),
   getProjectTask: vi.fn(),
-  summarizeSession: vi.fn(),
-  prepareForkSession: vi.fn(),
   getTranscribeApiUrl: vi.fn(() => 'https://api.test.com/api/transcribe'),
   closeConversationTask: vi.fn(),
   resolveAttentionAnswer: vi.fn(),
@@ -83,8 +81,6 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   stopChatSession: mocks.stopChatSession,
   sleepWorkspace: mocks.sleepWorkspace,
   getProjectTask: mocks.getProjectTask,
-  summarizeSession: mocks.summarizeSession,
-  prepareForkSession: mocks.prepareForkSession,
   getTranscribeApiUrl: mocks.getTranscribeApiUrl,
   closeConversationTask: mocks.closeConversationTask,
   resolveAttentionAnswer: mocks.resolveAttentionAnswer,
@@ -485,21 +481,6 @@ describe('ProjectChat new chat button', () => {
     mocks.listSkills.mockResolvedValue([]);
     mocks.availableCommands = [];
     mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
-    mocks.prepareForkSession.mockResolvedValue({
-      parentTaskId: 'task-1',
-      parentSessionId: 'session-with-task',
-      parentBranch: 'sam/fix-login-bug',
-      sessionLabel: 'Fix the login bug',
-      summary: 'Summary of previous session',
-      messageCount: 10,
-      repaired: false,
-    });
-    mocks.summarizeSession.mockResolvedValue({
-      summary: 'Summary of previous session',
-      messageCount: 10,
-      filteredCount: 5,
-      method: 'ai',
-    });
     mocks.resolveAttentionAnswer.mockResolvedValue({
       resolved: true,
       alreadyResolved: false,
@@ -752,7 +733,7 @@ describe('ProjectChat new chat button', () => {
     });
   });
 
-  it('forks by returning to the new chat screen with context and editable settings', async () => {
+  it('forks to the new chat screen with the IDs already filled in and nothing to wait for', async () => {
     mocks.listChatSessions.mockResolvedValue({
       sessions: [SESSION_WITH_TASK],
       total: 1,
@@ -781,55 +762,37 @@ describe('ProjectChat new chat button', () => {
 
     fireEvent.click(screen.getByLabelText('Fork session'));
 
-    await waitFor(() => {
-      expect(screen.getByText('What do you want to build?')).toBeInTheDocument();
-    });
+    // Asserted straight after the click, without waitFor: the composer is complete and Send
+    // is live before any request could have returned.
+    expect(screen.getByText('What do you want to build?')).toBeInTheDocument();
     expect(screen.getByText('Forking from: Fix the login bug')).toBeInTheDocument();
     expect(screen.getByText('Branch: sam/fix-login-bug')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Default Profile' })).toBeInTheDocument();
-
-    const textarea = screen.getByPlaceholderText('Describe what you want the agent to do...');
-    expect((textarea as HTMLTextAreaElement).value).toContain('SAM MCP tools');
-
-    await waitFor(() => {
-      expect(mocks.prepareForkSession).toHaveBeenCalledWith(PROJECT_ID, SESSION_WITH_TASK.id);
-      expect((textarea as HTMLTextAreaElement).value).toContain(
-        'Previous session: "Fix the login bug"'
-      );
-      expect((textarea as HTMLTextAreaElement).value).toContain(`Parent project ID: ${PROJECT_ID}`);
-      expect((textarea as HTMLTextAreaElement).value).toContain(
-        `Parent session ID: ${SESSION_WITH_TASK.id}`
-      );
-      expect((textarea as HTMLTextAreaElement).value).toContain('Parent task ID: task-1');
-      expect(screen.queryByText('Loading context...')).not.toBeInTheDocument();
-    });
+    const textarea = screen.getByPlaceholderText(
+      'Describe what you want the agent to do...'
+    ) as HTMLTextAreaElement;
+    expect(textarea.value).toContain('SAM MCP tools');
+    expect(textarea.value).toContain('Previous session: "Fix the login bug"');
+    expect(textarea.value).toContain(`Parent project ID: ${PROJECT_ID}`);
+    expect(textarea.value).toContain(`Parent session ID: ${SESSION_WITH_TASK.id}`);
+    expect(textarea.value).toContain('Parent task ID: task-1');
+    expect(screen.queryByText('Loading original prompt...')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     await waitFor(() => {
-      expect(mocks.submitTask).toHaveBeenCalledWith(
-        PROJECT_ID,
-        expect.objectContaining({
-          parentTaskId: 'task-1',
-          contextSummary: expect.stringContaining('Parent session ID: session-with-task'),
-        })
-      );
-      expect(mocks.submitTask).toHaveBeenCalledWith(
-        PROJECT_ID,
-        expect.objectContaining({
-          contextSummary: expect.stringContaining('Parent task ID: task-1'),
-        })
-      );
-      expect(mocks.submitTask).toHaveBeenCalledWith(
-        PROJECT_ID,
-        expect.objectContaining({
-          contextSummary: expect.stringContaining('Summary of previous session'),
-        })
-      );
+      expect(mocks.submitTask).toHaveBeenCalledTimes(1);
     });
+    const [, payload] = mocks.submitTask.mock.calls[0] as [string, Record<string, unknown>];
+    expect(payload).toMatchObject({
+      parentTaskId: 'task-1',
+      message: expect.stringContaining(`Parent session ID: ${SESSION_WITH_TASK.id}`),
+    });
+    expect(payload).not.toHaveProperty('contextSummary');
   });
 
-  it('retries by returning to the new chat screen with the original task description', async () => {
+  it('retries with only the original prompt, holding Send until that prompt has loaded', async () => {
     mocks.listChatSessions.mockResolvedValue({
       sessions: [SESSION_WITH_TASK],
       total: 1,
@@ -837,12 +800,20 @@ describe('ProjectChat new chat button', () => {
     mocks.listCredentials.mockResolvedValue([
       { id: 'cred-1', provider: 'hetzner', name: 'My Hetzner', createdAt: Date.now() },
     ]);
-    mocks.getProjectTask.mockResolvedValue({
-      id: 'task-1',
-      description: 'Original task description',
-      status: 'failed',
-      executionStep: null,
-      errorMessage: 'Agent crashed unexpectedly',
+    // The provisioning tracker also reads the open session's task, so hold only the request
+    // Retry makes: the first one after the click.
+    const originalPrompt = {
+      hold: false,
+      resolve: (_task: Record<string, unknown>) => {},
+    };
+    mocks.getProjectTask.mockImplementation((_projectId: string, taskId: string) => {
+      if (!originalPrompt.hold) {
+        return Promise.resolve({ id: taskId, status: 'queued', executionStep: null, errorMessage: null });
+      }
+      originalPrompt.hold = false;
+      return new Promise((resolve) => {
+        originalPrompt.resolve = resolve;
+      });
     });
     mocks.submitTask.mockResolvedValue({
       taskId: 'task-retry',
@@ -857,6 +828,7 @@ describe('ProjectChat new chat button', () => {
       expect(screen.getByTestId('message-view')).toHaveTextContent(SESSION_WITH_TASK.id);
     });
 
+    originalPrompt.hold = true;
     fireEvent.click(screen.getByLabelText('Retry task'));
 
     await waitFor(() => {
@@ -865,25 +837,79 @@ describe('ProjectChat new chat button', () => {
     expect(screen.getByText('Retrying: Fix the login bug')).toBeInTheDocument();
     expect(screen.getByText('Error: Agent crashed unexpectedly')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Default Profile' })).toBeInTheDocument();
+    expect(originalPrompt.hold).toBe(false);
+    expect(mocks.getProjectTask).toHaveBeenLastCalledWith(PROJECT_ID, 'task-1');
+    // Midpoint: the original prompt is still in flight, so Send must stay held.
+    expect(screen.getByText('Loading original prompt...')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sending...' })).toBeDisabled();
+
+    await act(async () => {
+      originalPrompt.resolve({
+        id: 'task-1',
+        description: 'Original task description',
+        status: 'failed',
+        executionStep: null,
+        errorMessage: 'Agent crashed unexpectedly',
+      });
+    });
 
     const textarea = screen.getByPlaceholderText('Describe what you want the agent to do...');
     await waitFor(() => {
       expect(textarea).toHaveValue('Original task description');
-      expect(screen.queryByText('Loading context...')).not.toBeInTheDocument();
+      expect(screen.queryByText('Loading original prompt...')).not.toBeInTheDocument();
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     await waitFor(() => {
-      expect(mocks.submitTask).toHaveBeenCalledWith(
-        PROJECT_ID,
-        expect.objectContaining({
-          message: 'Original task description',
-          parentTaskId: 'task-1',
-          contextSummary: expect.stringContaining('Retry Context'),
-        })
-      );
+      expect(mocks.submitTask).toHaveBeenCalledTimes(1);
     });
+    const [, payload] = mocks.submitTask.mock.calls[0] as [string, Record<string, unknown>];
+    expect(payload).toMatchObject({
+      message: 'Original task description',
+      parentTaskId: 'task-1',
+    });
+    expect(payload).not.toHaveProperty('contextSummary');
+  });
+
+  it('releases Send and says why when the original prompt cannot be loaded', async () => {
+    mocks.listChatSessions.mockResolvedValue({
+      sessions: [SESSION_WITH_TASK],
+      total: 1,
+    });
+    mocks.listCredentials.mockResolvedValue([
+      { id: 'cred-1', provider: 'hetzner', name: 'My Hetzner', createdAt: Date.now() },
+    ]);
+    // Fail only the request Retry makes, not the provisioning tracker's read of the open session.
+    let failNextRead = false;
+    mocks.getProjectTask.mockImplementation((_projectId: string, taskId: string) => {
+      if (!failNextRead) {
+        return Promise.resolve({ id: taskId, status: 'failed', executionStep: null, errorMessage: null });
+      }
+      failNextRead = false;
+      return Promise.reject(new Error('Task not found'));
+    });
+
+    renderProjectChat(`/projects/${PROJECT_ID}/chat/${SESSION_WITH_TASK.id}`);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('message-view')).toHaveTextContent(SESSION_WITH_TASK.id);
+    });
+
+    failNextRead = true;
+    fireEvent.click(screen.getByLabelText('Retry task'));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('Could not load the original prompt: Task not found')
+      ).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Loading original prompt...')).not.toBeInTheDocument();
+    expect(screen.getByText('Retrying: Fix the login bug')).toBeInTheDocument();
+
+    const textarea = screen.getByPlaceholderText('Describe what you want the agent to do...');
+    fireEvent.change(textarea, { target: { value: 'Try the smaller fix first' } });
+    expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
   });
 
   it('clears pending derived state when New Chat is clicked', async () => {

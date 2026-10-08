@@ -39,7 +39,7 @@ describe('DerivedSessionBanner', () => {
     vi.clearAllMocks();
   });
 
-  it('renders fork lineage with branch and loading context state', () => {
+  it('renders fork lineage with its branch and nothing loading', () => {
     render(
       <DerivedSessionBanner
         derived={{
@@ -48,8 +48,7 @@ describe('DerivedSessionBanner', () => {
           parentSessionLabel: 'Fix the login bug',
           parentTaskId: 'task-1',
           parentBranch: 'sam/fix-login-bug',
-          contextSummary: '',
-          summaryLoading: true,
+          promptLoading: false,
         }}
         onDismiss={onDismiss}
       />
@@ -57,10 +56,10 @@ describe('DerivedSessionBanner', () => {
 
     expect(screen.getByText('Forking from: Fix the login bug')).toBeTruthy();
     expect(screen.getByText('Branch: sam/fix-login-bug')).toBeTruthy();
-    expect(screen.getByText('Loading context...')).toBeTruthy();
+    expect(screen.queryByText('Loading original prompt...')).toBeNull();
   });
 
-  it('renders retry lineage with the previous error message', () => {
+  it('renders retry lineage with the previous error while the original prompt loads', () => {
     render(
       <DerivedSessionBanner
         derived={{
@@ -69,8 +68,7 @@ describe('DerivedSessionBanner', () => {
           parentSessionLabel: 'Fix the login bug',
           parentTaskId: 'task-1',
           errorMessage: 'Agent crashed unexpectedly',
-          contextSummary: 'Retry context',
-          summaryLoading: false,
+          promptLoading: true,
         }}
         onDismiss={onDismiss}
       />
@@ -78,7 +76,7 @@ describe('DerivedSessionBanner', () => {
 
     expect(screen.getByText('Retrying: Fix the login bug')).toBeTruthy();
     expect(screen.getByText('Error: Agent crashed unexpectedly')).toBeTruthy();
-    expect(screen.queryByText('Loading context...')).toBeNull();
+    expect(screen.getByText('Loading original prompt...')).toBeTruthy();
   });
 
   it('calls onDismiss when the cancel button is clicked', async () => {
@@ -90,8 +88,7 @@ describe('DerivedSessionBanner', () => {
           parentSessionId: 'session-abc12345',
           parentSessionLabel: 'Fix the login bug',
           parentTaskId: 'task-1',
-          contextSummary: '',
-          summaryLoading: false,
+          promptLoading: false,
         }}
         onDismiss={onDismiss}
       />
