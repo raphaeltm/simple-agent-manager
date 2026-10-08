@@ -658,3 +658,7 @@ access and does not enable ACP features.
 Authenticate with the originating project/user/workspace/session MCP bearer token. Current active project `task:write` membership is required. Atomic redemption returns the installed credential as `text/plain` with `Cache-Control: private, no-store`, `Referrer-Policy: no-referrer`, and `X-Content-Type-Options: nosniff`. Only its keyed hash is persisted.
 
 Missing/revoked authentication returns 401; missing project capability returns 403; missing, expired, consumed, incorrectly scoped, disabled-trigger, or revoked claims return 404; MCP rate limiting returns 429. GET/HEAD never redeem. Concurrent redemptions have exactly one winner. Rotation clears pending claims and deletion cascades their removal. `WEBHOOK_CREDENTIAL_CLAIM_TTL_SECONDS` defaults to 600.
+
+### Fresh VM boot failure callback
+
+`POST /api/nodes/:id/boot-failure` accepts `{ "reason": "origin_ca_bootstrap" }` (also `vm_agent_download`) with an explicit node-scoped callback JWT. Only managed VMs before their first heartbeat/ready signal can record a failure. Returns `{ "accepted": true }` when recorded, `{ "accepted": false }` for a delayed report after startup, 403 for wrong scope/identity or unmanaged runtime, and 410 for terminal/missing nodes. Arbitrary diagnostics are not accepted. TaskRunner polls this signal and confirms failed-node deletion before a bounded fresh-VM replacement (default one).

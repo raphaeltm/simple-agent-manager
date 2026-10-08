@@ -113,6 +113,7 @@ import { mcpRoutes } from './routes/mcp';
 import { projectMcpConnectionRoutes, userMcpConnectionRoutes } from './routes/mcp-connections';
 import { missionRoutes } from './routes/missions';
 import { modelCatalogRoutes } from './routes/model-catalog';
+import { nodeBootFailureRoutes } from './routes/node-boot-failure';
 import { nodeLifecycleRoutes } from './routes/node-lifecycle';
 import { nodesRoutes } from './routes/nodes';
 import { notificationRoutes } from './routes/notifications';
@@ -793,6 +794,8 @@ app.route('/api/gitlab', gitlabRoutes);
 // Callback JWT routes — MUST be before session-auth node routes.
 app.route('/api/nodes', deployReleaseCallbackRoute); // Deploy node fetches signed release payload.
 app.route('/api/nodes', deploymentReleaseEventsCallbackRoute); // Deploy node reports apply events.
+// Node boot callbacks authenticate with node JWTs, before session-auth middleware.
+app.route('/api/nodes', nodeBootFailureRoutes);
 app.route('/api/nodes', nodesRoutes);
 app.route('/api/nodes', nodeLifecycleRoutes);
 app.route('/api/workspaces', workspacesRoutes);

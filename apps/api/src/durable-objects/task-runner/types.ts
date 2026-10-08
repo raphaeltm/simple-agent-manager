@@ -162,6 +162,9 @@ export interface TaskRunnerState {
   stepResults: StepResults;
   config: TaskRunConfig;
   retryCount: number;
+  /** Fresh boot replacement budget; independent of per-step transient retries. */
+  bootReplacementCount?: number;
+  bootRecovery?: { nodeId: string; reason: string; replace: boolean; terminated?: boolean } | null;
   workspaceReadyReceived: boolean;
   workspaceReadyStatus: 'running' | 'recovery' | 'error' | null;
   workspaceErrorMessage: string | null;

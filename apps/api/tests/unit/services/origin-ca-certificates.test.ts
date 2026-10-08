@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import {
@@ -20,6 +20,8 @@ function env(overrides?: Partial<Env>): Env {
   return {
     BASE_DOMAIN: 'Example.COM',
     CF_API_TOKEN: 'cf-token-secret',
+    ORIGIN_CA_RETRY_BASE_DELAY_MS: '1',
+    ORIGIN_CA_RETRY_MAX_DELAY_MS: '2',
     ...overrides,
   } as Env;
 }
@@ -109,11 +111,12 @@ describe('origin CA certificate issuance', () => {
   });
 
   it('surfaces a clear error for a non-JSON Cloudflare response body', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response('<html>upstream error</html>', {
-        status: 502,
-        headers: { 'Content-Type': 'text/html' },
-      })
+    const fetchMock = vi.fn().mockImplementation(
+      () =>
+        new Response('<html>upstream error</html>', {
+          status: 502,
+          headers: { 'Content-Type': 'text/html' },
+        })
     );
 
     await expect(issueNodeOriginCertificate(env(), CSR, fetchMock)).rejects.toThrow(
@@ -151,5 +154,70 @@ describe('origin CA certificate issuance', () => {
     await expect(issueNodeOriginCertificate(env(), CSR, fetchMock)).rejects.toThrow(
       'Cloudflare Origin CA certificate issuance failed (200)'
     );
+  });
+});
+
+describe('bounded Origin CA recovery', () => {
+  afterEach(() => vi.useRealTimers());
+  it.each([429, 500, 502, 503])(
+    'retries HTTP %s then succeeds with the same CSR',
+    async (status) => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(new Response('upstream failure', { status }))
+        .mockResolvedValueOnce(Response.json({ success: true, result: { certificate: 'signed' } }));
+      await expect(issueNodeOriginCertificate(env(), CSR, fetchMock)).resolves.toMatchObject({
+        certificate: 'signed\n',
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock.mock.calls[0][1].body).toBe(fetchMock.mock.calls[1][1].body);
+    }
+  );
+  it.each([400, 401, 403])('never retries permanent HTTP %s', async (status) => {
+    const fetchMock = vi.fn().mockImplementation(() => new Response('denied', { status }));
+    await expect(issueNodeOriginCertificate(env(), CSR, fetchMock)).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+  it('caps exponential backoff and attempts', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(() => Promise.reject(new Error('network failure')));
+    const outcome = issueNodeOriginCertificate(
+      env({
+        ORIGIN_CA_RETRY_MAX_ATTEMPTS: '4',
+        ORIGIN_CA_RETRY_BASE_DELAY_MS: '100',
+        ORIGIN_CA_RETRY_MAX_DELAY_MS: '150',
+      }),
+      CSR,
+      fetchMock
+    ).catch((e) => e);
+    await vi.advanceTimersByTimeAsync(99);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(150);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(150);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(await outcome).toBeInstanceOf(Error);
+  });
+  it('aborts hung requests and exhausts its configured budget', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn().mockImplementation(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          init.signal.addEventListener('abort', () => reject(new Error('request aborted')));
+        })
+    );
+    const outcome = issueNodeOriginCertificate(
+      env({ ORIGIN_CA_REQUEST_TIMEOUT_MS: '100', ORIGIN_CA_RETRY_MAX_ATTEMPTS: '2' }),
+      CSR,
+      fetchMock
+    ).catch((e) => e);
+    await vi.runAllTimersAsync();
+    expect(await outcome).toBeInstanceOf(Error);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.every(([, init]) => init.signal.aborted)).toBe(true);
   });
 });

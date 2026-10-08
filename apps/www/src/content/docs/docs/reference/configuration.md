@@ -1724,3 +1724,20 @@ The two refusals are distinguished because they need different responses. `excee
 Whole-session deletion and SQLite/FTS index maintenance still consume writes. `project_data_archive_sql_usage` reports actual cursor writes. `project_data_archive_candidate_migrated.sourceFinalization` reports source rows, before/after bytes, duration, and reclaimed bytes; copy checkpoints retain the last operation, operation ID, ordinal, byte totals, lease epoch, and timing for reset attribution. These invocation timings are diagnostic only: billed Durable Object duration comes from Cloudflare `durableObjectsPeriodicGroups.sum.duration`. Compare aligned daily metrics with these events before raising throughput, and separate one-time repair/backfill from steady-state search. At the default 250,000 estimated writes/day, 30 days admits at most 7.5 million estimated migration writes. Normal application traffic, legacy migrations, operator copy-back and other Workers are outside this pool, so operators must reserve account headroom separately. A zero allowance pauses new compact attempts without breaking reads or completed crash-gap publication. Source deletion is still one whole-session operation, not an interruptible per-row spending limit.
 
 After any compact archive is published, rollback must retain compact readers (disable the writer flag to pause new migrations). Deploying a binary from before compact-reader support would read empty raw SQL tables for those sessions; copy them back and verify root ownership before considering such a downgrade.
+
+### Fresh VM boot recovery
+
+Certificate issuance retries transport failures, HTTP 429 and HTTP 5xx with capped exponential backoff. Cloud-init also retries its certificate fetch and reports a fixed boot-failure reason when bootstrap cannot continue. Tasks replace a failed fresh VM only after its deletion is confirmed, before any workspace execution. The default is one replacement; a second boot failure ends with its specific reason. Wrong agent versions fail immediately, while a VM without any heartbeat gets six minutes by default.
+
+- `ORIGIN_CA_RETRY_MAX_ATTEMPTS` — Maximum upstream certificate attempts including the first; retries transport, 429 and 5xx only (default: 3).
+- `ORIGIN_CA_RETRY_BASE_DELAY_MS` — Initial upstream certificate retry delay (default: 500).
+- `ORIGIN_CA_RETRY_MAX_DELAY_MS` — Cap on upstream certificate exponential backoff (default: 2000).
+- `ORIGIN_CA_REQUEST_TIMEOUT_MS` — Deadline per upstream certificate request, including reading its body (default: 10000).
+- `CLOUD_INIT_CERT_MAX_ATTEMPTS` — Maximum cloud-init CSR POST attempts including the first (default: 3).
+- `CLOUD_INIT_CERT_BASE_DELAY_SECONDS` — Initial cloud-init certificate retry delay (default: 2).
+- `CLOUD_INIT_CERT_MAX_DELAY_SECONDS` — Cap on cloud-init certificate exponential backoff (default: 8).
+- `CLOUD_INIT_CERT_REQUEST_TIMEOUT_SECONDS` — Deadline per cloud-init certificate request and best-effort boot-failure report; must exceed the upstream API retry budget (default: 45).
+- `TASK_RUNNER_FIRST_HEARTBEAT_TIMEOUT_MS` — Fresh VM first-heartbeat deadline, capped by TASK_RUNNER_AGENT_READY_TIMEOUT_MS (default: 360000).
+- `TASK_RUNNER_BOOT_MAX_REPLACEMENTS` — Maximum fresh VM boot replacements per task run; 0 disables replacement; workspace execution is never replayed (default: 1).
+
+Set these optional variables in the GitHub deployment Environment; the deployment pipeline forwards them to the Worker. No new secrets are required. Certificate request and retry budgets should remain below the first-heartbeat deadline.

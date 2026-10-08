@@ -344,14 +344,14 @@ describe('handleNodeProvisioning — timeout', () => {
 // ---------------------------------------------------------------------------
 
 describe('timeout parity — node_agent_ready vs node_provisioning', () => {
-  it('classifies a deleted claimed node before the generic agent-ready timeout', async () => {
+  it('fails a deleted reused node before the generic agent-ready timeout', async () => {
     const state = makeState({
       currentStep: 'node_agent_ready',
       agentReadyStartedAt: Date.now() - 1_000_000,
       stepResults: {
         ...makeState().stepResults,
         nodeId: 'node-deleted-during-readiness',
-        autoProvisioned: true,
+        autoProvisioned: false,
       },
     });
     const rc = makeContext();
@@ -396,7 +396,7 @@ describe('timeout parity — node_agent_ready vs node_provisioning', () => {
       }),
     });
 
-    await expect(handleNodeAgentReady(state, rc)).rejects.toThrow(/Node agent not ready within/);
+    await expect(handleNodeAgentReady(state, rc)).rejects.toThrow(/first_heartbeat_timeout/);
   });
 
   it('handleNodeProvisioning throws after timeout (matching pattern)', async () => {

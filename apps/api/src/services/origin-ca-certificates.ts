@@ -2,6 +2,7 @@ import * as v from 'valibot';
 
 import type { Env } from '../env';
 import { readResponseJson } from '../lib/runtime-validation';
+import { requestOriginCertificate } from './origin-ca-retry';
 
 const CLOUDFLARE_ORIGIN_CA_CERTIFICATES_URL = 'https://api.cloudflare.com/client/v4/certificates';
 const DEFAULT_ORIGIN_CA_CERT_VALIDITY_DAYS = 7;
@@ -58,49 +59,55 @@ export async function issueNodeOriginCertificate(
 
   const hostnames = buildOriginCaHostnames(env.BASE_DOMAIN);
   const requestedValidity = resolveOriginCaValidityDays(env.ORIGIN_CA_CERT_VALIDITY_DAYS);
-  const response = await fetchImpl(CLOUDFLARE_ORIGIN_CA_CERTIFICATES_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${env.CF_API_TOKEN}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      csr: normalizedCsr,
-      hostnames,
-      request_type: 'origin-rsa',
-      requested_validity: requestedValidity,
-    }),
-  });
+  return requestOriginCertificate(
+    env,
+    (signal) =>
+      fetchImpl(CLOUDFLARE_ORIGIN_CA_CERTIFICATES_URL, {
+        signal,
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${env.CF_API_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          csr: normalizedCsr,
+          hostnames,
+          request_type: 'origin-rsa',
+          requested_validity: requestedValidity,
+        }),
+      }),
+    async (response) => {
+      let payload: v.InferOutput<typeof cloudflareOriginCaResponseSchema>;
+      try {
+        payload = await readResponseJson(
+          response,
+          cloudflareOriginCaResponseSchema,
+          'origin-ca.issue_certificate'
+        );
+      } catch {
+        throw new Error(`Cloudflare Origin CA returned non-JSON response (${response.status})`);
+      }
 
-  let payload: v.InferOutput<typeof cloudflareOriginCaResponseSchema>;
-  try {
-    payload = await readResponseJson(
-      response,
-      cloudflareOriginCaResponseSchema,
-      'origin-ca.issue_certificate'
-    );
-  } catch {
-    throw new Error(`Cloudflare Origin CA returned non-JSON response (${response.status})`);
-  }
+      const certificate = payload.result?.certificate;
+      if (!response.ok || !payload.success || !certificate) {
+        const apiMessage = payload.errors
+          ?.map((err) => err.message)
+          .filter(Boolean)
+          .join('; ');
+        throw new Error(
+          `Cloudflare Origin CA certificate issuance failed (${response.status})${apiMessage ? `: ${apiMessage}` : ''}`
+        );
+      }
 
-  const certificate = payload.result?.certificate;
-  if (!response.ok || !payload.success || !certificate) {
-    const apiMessage = payload.errors
-      ?.map((err) => err.message)
-      .filter(Boolean)
-      .join('; ');
-    throw new Error(
-      `Cloudflare Origin CA certificate issuance failed (${response.status})${apiMessage ? `: ${apiMessage}` : ''}`
-    );
-  }
-
-  return {
-    certificate: normalizeCertificate(certificate),
-    certificateId: payload.result?.id,
-    expiresOn: payload.result?.expires_on,
-    hostnames,
-    requestedValidity,
-  };
+      return {
+        certificate: normalizeCertificate(certificate),
+        certificateId: payload.result?.id,
+        expiresOn: payload.result?.expires_on,
+        hostnames,
+        requestedValidity,
+      };
+    }
+  );
 }
 
 export function buildOriginCaHostnames(baseDomain: string): string[] {

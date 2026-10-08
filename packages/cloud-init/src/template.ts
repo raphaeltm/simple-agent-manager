@@ -75,6 +75,10 @@ runcmd:
       cat "$curl_output" | logger -t sam-boot
       rm -f "$curl_output"
       logger -t sam-boot "vm-agent download failed status=$curl_status"
+      curl -sS --max-time {{ cert_request_timeout_seconds }} -o /dev/null -X POST \\
+        -H "Authorization: Bearer {{ callback_token }}" -H "Content-Type: application/json" \\
+        --data '{"reason":"vm_agent_download"}' \\
+        "{{ control_plane_url }}/api/nodes/{{ node_id }}/boot-failure" 2>/dev/null || true
       exit "$curl_status"
     fi
     chmod +x /usr/local/bin/vm-agent
@@ -108,25 +112,35 @@ runcmd:
         fi
       fi
       if [ "$ORIGIN_CA_OK" = true ]; then
-        CURL_EXIT=0
-        HTTP_CODE=$(curl -sS -o "$TLS_CERT_PATH" -w '%{http_code}' -X POST \
-          -H "Authorization: Bearer {{ callback_token }}" \
-          -H "Content-Type: text/plain" \
-          --data-binary "@$TLS_CSR_PATH" \
-          "$ORIGIN_CA_CERTIFICATE_URL" 2>/tmp/origin-ca-curl-err) || {
-          CURL_EXIT=$?
-          HTTP_CODE="000"
-        }
-        CURL_ERR=$(cat /tmp/origin-ca-curl-err 2>/dev/null)
-        rm -f /tmp/origin-ca-curl-err
-        logger -t sam-boot "Origin CA cert request: HTTP=$HTTP_CODE curl_exit=$CURL_EXIT"
-        if [ -n "$CURL_ERR" ]; then
-          logger -t sam-boot "Origin CA curl stderr: $CURL_ERR"
-        fi
-        if [ "$CURL_EXIT" -ne 0 ] || { [ "$HTTP_CODE" != "200" ] && [ "$HTTP_CODE" != "201" ]; }; then
-          logger -t sam-boot "ERROR: Origin CA certificate request failed (HTTP $HTTP_CODE curl_exit=$CURL_EXIT)"
-          ORIGIN_CA_OK=false
-        fi
+        ATTEMPT=1
+        DELAY={{ cert_base_delay_seconds }}
+        ORIGIN_CA_OK=false
+        while [ "$ATTEMPT" -le {{ cert_max_attempts }} ]; do
+          CURL_EXIT=0
+          HTTP_CODE=$(curl -sS --max-time {{ cert_request_timeout_seconds }} -o "$TLS_CERT_PATH" -w '%{http_code}' -X POST \\
+            -H "Authorization: Bearer {{ callback_token }}" \\
+            -H "Content-Type: text/plain" \\
+            --data-binary "@$TLS_CSR_PATH" \\
+            "$ORIGIN_CA_CERTIFICATE_URL" 2>/dev/null) || CURL_EXIT=$?
+          logger -t sam-boot "Origin CA cert request: attempt=$ATTEMPT HTTP=$HTTP_CODE curl_exit=$CURL_EXIT"
+          if [ "$CURL_EXIT" -eq 0 ] && { [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; }; then
+            if openssl x509 -in "$TLS_CERT_PATH" -noout >/dev/null 2>&1; then
+              ORIGIN_CA_OK=true
+              break
+            fi
+            logger -t sam-boot "ERROR: Origin CA response was not a certificate"
+            break
+          fi
+          # Auth/input failures cannot heal through retries. Transport/429/5xx can.
+          if [ "$CURL_EXIT" -eq 0 ]; then
+            case "$HTTP_CODE" in 429|5??) ;; *) break ;; esac
+          fi
+          if [ "$ATTEMPT" -ge {{ cert_max_attempts }} ]; then break; fi
+          if [ "$DELAY" -gt {{ cert_max_delay_seconds }} ]; then DELAY={{ cert_max_delay_seconds }}; fi
+          sleep "$DELAY"
+          DELAY=$((DELAY * 2))
+          ATTEMPT=$((ATTEMPT + 1))
+        done
       fi
       rm -f "$TLS_CSR_PATH"
       if [ "$ORIGIN_CA_OK" = true ] && [ -s "$TLS_CERT_PATH" ]; then
@@ -135,6 +149,10 @@ runcmd:
       else
         logger -t sam-boot "ERROR: Origin CA bootstrap failed — refusing to start vm-agent without TLS"
         rm -f "$TLS_CERT_PATH" "$TLS_KEY_PATH" "$TLS_CSR_PATH"
+        curl -sS --max-time {{ cert_request_timeout_seconds }} -o /dev/null -X POST \\
+          -H "Authorization: Bearer {{ callback_token }}" -H "Content-Type: application/json" \\
+          --data '{"reason":"origin_ca_bootstrap"}' \\
+          "{{ control_plane_url }}/api/nodes/{{ node_id }}/boot-failure" 2>/dev/null || true
         exit 1
       fi
     else

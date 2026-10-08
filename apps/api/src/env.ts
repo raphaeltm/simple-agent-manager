@@ -1193,6 +1193,16 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   WORKSPACE_TOOL_DEPLOY_RUNS_LIMIT?: string; // Max deployment runs to return (default: 5)
   WORKSPACE_TOOL_DIAGNOSTIC_MAX_BYTES?: string; // Max diagnostic data size in bytes (default: 4096)
   // Origin CA certificate issuance for VM-agent TLS
+  ORIGIN_CA_RETRY_MAX_ATTEMPTS?: string;
+  ORIGIN_CA_RETRY_BASE_DELAY_MS?: string;
+  ORIGIN_CA_RETRY_MAX_DELAY_MS?: string;
+  ORIGIN_CA_REQUEST_TIMEOUT_MS?: string;
+  CLOUD_INIT_CERT_MAX_ATTEMPTS?: string;
+  CLOUD_INIT_CERT_BASE_DELAY_SECONDS?: string;
+  CLOUD_INIT_CERT_MAX_DELAY_SECONDS?: string;
+  CLOUD_INIT_CERT_REQUEST_TIMEOUT_SECONDS?: string;
+  TASK_RUNNER_FIRST_HEARTBEAT_TIMEOUT_MS?: string;
+  TASK_RUNNER_BOOT_MAX_REPLACEMENTS?: string;
   ORIGIN_CA_CERT_VALIDITY_DAYS?: string; // Cloudflare-supported validity: 7, 30, 90, 365, 730, 1095, 5475 (default: 7)
   // Legacy Origin CA certificate/key retained only as manual rotation inputs for already-provisioned nodes.
   ORIGIN_CA_CERT?: string;

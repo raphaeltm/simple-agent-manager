@@ -353,3 +353,7 @@ checkpoint, current creator authority, and the original unexpired submission dea
 all reserved identities and immutable intent. Missing/ambiguous receipts are never proof of
 completion or permission to replay. The response includes `recovery.outcome` and
 `execution.retrySubmissionAllowed`; original deadlines cannot be extended by recovery.
+
+### Fresh VM boot failure callback
+
+`POST /api/nodes/:id/boot-failure` accepts `{ "reason": "origin_ca_bootstrap" }` (also `vm_agent_download`) with an explicit node-scoped callback JWT. Only managed VMs before their first heartbeat/ready signal can record a failure. Returns `{ "accepted": true }` when recorded, `{ "accepted": false }` for a delayed report after startup, 403 for wrong scope/identity or unmanaged runtime, and 410 for terminal/missing nodes. Arbitrary diagnostics are not accepted. TaskRunner polls this signal and confirms failed-node deletion before a bounded fresh-VM replacement (default one).

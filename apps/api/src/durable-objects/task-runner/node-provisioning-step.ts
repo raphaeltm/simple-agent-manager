@@ -26,6 +26,7 @@ import {
   renewVmProvisioningLease,
   tryAcquireVmProvisioningLease,
 } from '../../services/vm-admission-control';
+import { recoverNodeBoot } from './boot-recovery';
 import {
   countActiveManagedPoolNodes,
   effectiveCapacityPoolMaxNodes,
@@ -63,6 +64,10 @@ export async function handleNodeProvisioning(
 ): Promise<void> {
   await assertTaskExecutionAuthority(rc.env, state);
   await rc.updateD1ExecutionStep(state.taskId, 'node_provisioning');
+  if (state.bootRecovery) {
+    await recoverNodeBoot(state, rc, state.bootRecovery.reason);
+    return;
+  }
   const requestedSizeBeforeProvisioning: VMSize = state.config.vmSize;
 
   if (
@@ -95,7 +100,7 @@ export async function handleNodeProvisioning(
       .bind(state.stepResults.nodeId)
       .first<{ id: string; status: string; error_message: string | null }>();
 
-    await assertClaimedNodeAvailable(state, rc, node, 'node_provisioning');
+    if (!(await assertClaimedNodeAvailable(state, rc, node, 'node_provisioning'))) return;
 
     // Availability must win over the generic timeout. Otherwise a late poll for
     // a deleted node leaves autoProvisioned=true and failure cleanup may try to

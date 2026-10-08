@@ -1,14 +1,25 @@
 import { log } from '../../lib/logger';
-import { markVmAdmissionNodeReady, renewVmProvisioningLease } from '../../services/vm-admission-control';
+import { parsePositiveInt } from '../../lib/route-helpers';
+import {
+  markVmAdmissionNodeReady,
+  renewVmProvisioningLease,
+} from '../../services/vm-admission-control';
+import { recoverNodeBoot } from './boot-recovery';
 import { assertClaimedNodeAvailable } from './claimed-node-availability';
-import { isNodeAgentReadyForWorkspaceDispatch } from './readiness';
+import { getNodeAgentReadinessFailure } from './readiness';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
+
+const DEFAULT_FIRST_HEARTBEAT_TIMEOUT_MS = 360_000;
 
 export async function handleNodeAgentReady(
   state: TaskRunnerState,
   rc: TaskRunnerContext
 ): Promise<void> {
   await rc.updateD1ExecutionStep(state.taskId, 'node_agent_ready');
+  if (state.bootRecovery) {
+    await recoverNodeBoot(state, rc, state.bootRecovery.reason);
+    return;
+  }
 
   if (!state.stepResults.nodeId) {
     throw new Error('No nodeId in state — cannot check agent readiness');
@@ -39,7 +50,7 @@ export async function handleNodeAgentReady(
   // POST /api/nodes/:id/ready on startup and POST /api/nodes/:id/heartbeat
   // periodically, which update healthStatus and lastHeartbeatAt in D1.
   const node = await rc.env.DATABASE.prepare(
-    `SELECT health_status, last_heartbeat_at, agent_ready_at, agent_version, status FROM nodes WHERE id = ?`
+    `SELECT health_status, last_heartbeat_at, agent_ready_at, agent_version, status, error_message FROM nodes WHERE id = ?`
   )
     .bind(state.stepResults.nodeId)
     .first<{
@@ -48,28 +59,42 @@ export async function handleNodeAgentReady(
       agent_ready_at: string | null;
       agent_version: string | null;
       status: string;
+      error_message: string | null;
     }>();
 
-  await assertClaimedNodeAvailable(state, rc, node, 'node_agent_ready');
+  if (!(await assertClaimedNodeAvailable(state, rc, node, 'node_agent_ready'))) return;
 
   // As in provisioning, classify a missing/deleted node before the timeout so
   // failure cleanup cannot attempt to warm a resource that no longer exists.
   const timeoutMs = rc.getAgentReadyTimeoutMs();
   const elapsed = Date.now() - agentReadyStartedAt;
-  if (elapsed > timeoutMs) {
-    throw Object.assign(new Error(`Node agent not ready within ${timeoutMs}ms`), {
-      permanent: true,
+  const firstHeartbeatTimeout = Math.min(
+    timeoutMs,
+    parsePositiveInt(
+      rc.env.TASK_RUNNER_FIRST_HEARTBEAT_TIMEOUT_MS,
+      DEFAULT_FIRST_HEARTBEAT_TIMEOUT_MS
+    )
+  );
+  const readinessFailure = getNodeAgentReadinessFailure(node, agentReadyStartedAt, rc.getAgentReadyFreshnessSkewMs(), rc.env.VM_AGENT_REQUIRED_VERSION);
+  const reason = !node?.last_heartbeat_at && !node?.agent_ready_at && node?.error_message?.startsWith('Node boot failed: ')
+    ? node.error_message
+    : readinessFailure === 'agent_version_mismatch' ? readinessFailure
+      : !node?.last_heartbeat_at && elapsed > firstHeartbeatTimeout ? 'first_heartbeat_timeout'
+        : elapsed > timeoutMs ? `agent_ready_timeout:${readinessFailure}` : null;
+  if (reason) {
+    log.warn('task_runner_do.step.node_agent_ready.failed', {
+      taskId: state.taskId,
+      nodeId: state.stepResults.nodeId,
+      reason,
+      elapsedMs: elapsed,
+      agentVersion: node?.agent_version,
+      requiredVersion: rc.env.VM_AGENT_REQUIRED_VERSION,
     });
+    await recoverNodeBoot(state, rc, reason);
+    return;
   }
 
-  if (
-    isNodeAgentReadyForWorkspaceDispatch(
-      node,
-      agentReadyStartedAt,
-      rc.getAgentReadyFreshnessSkewMs(),
-      rc.env.VM_AGENT_REQUIRED_VERSION
-    )
-  ) {
+  if (readinessFailure === null) {
     log.info('task_runner_do.step.node_agent_ready', {
       taskId: state.taskId,
       nodeId: state.stepResults.nodeId,
@@ -85,17 +110,11 @@ export async function handleNodeAgentReady(
     return;
   }
 
-  if (node?.health_status === 'healthy' && node.last_heartbeat_at) {
-    log.info('task_runner_do.step.node_agent_ready.stale_heartbeat', {
-      taskId: state.taskId,
-      nodeId: state.stepResults.nodeId,
-      elapsedMs: elapsed,
-      lastHeartbeatAt: node.last_heartbeat_at,
-      agentReadyAt: node.agent_ready_at,
-      agentReadyStartedAt: new Date(agentReadyStartedAt).toISOString(),
-      message: 'Node has heartbeat but no fresh /ready signal for this provisioning cycle',
-    });
-  }
+  log.info('task_runner_do.step.node_agent_ready.waiting', {
+    taskId: state.taskId, nodeId: state.stepResults.nodeId, elapsedMs: elapsed,
+    reason: readinessFailure, lastHeartbeatAt: node?.last_heartbeat_at,
+    agentReadyAt: node?.agent_ready_at,
+  });
 
   // Not ready — schedule another poll
   await rc.ctx.storage.setAlarm(Date.now() + rc.getAgentPollIntervalMs());

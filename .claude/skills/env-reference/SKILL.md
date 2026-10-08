@@ -842,3 +842,16 @@ Generated deployments validate and pass these values through cloud-init to newly
 ### Repeated agent check-ins
 
 `TASK_RECONCILIATION_MAX_CHECKINS` (default `3`) caps automatic check-ins per durable no-progress episode. Human input or a newly completed tool call resets the budget; assistant error/text and system messages do not. A recognized unsupported-model runtime error pauses check-ins before another delivery. At the cap, SAM pauses nudges and asks Clef once using the existing `STALLED_TASK_CLASSIFIER_*` model, timeout, confidence, and transcript limits (without the long-turn age gate). Disabled/unavailable/uncertain classification never grants additional retries. The session/work remains intact; the attention notice explains how to retry.
+
+## Fresh VM boot recovery
+
+- `ORIGIN_CA_RETRY_MAX_ATTEMPTS` — Maximum upstream certificate attempts including the first; retries transport, 429 and 5xx only (default: 3).
+- `ORIGIN_CA_RETRY_BASE_DELAY_MS` — Initial upstream certificate retry delay (default: 500).
+- `ORIGIN_CA_RETRY_MAX_DELAY_MS` — Cap on upstream certificate exponential backoff (default: 2000).
+- `ORIGIN_CA_REQUEST_TIMEOUT_MS` — Deadline per upstream certificate request, including reading its body (default: 10000).
+- `CLOUD_INIT_CERT_MAX_ATTEMPTS` — Maximum cloud-init CSR POST attempts including the first (default: 3).
+- `CLOUD_INIT_CERT_BASE_DELAY_SECONDS` — Initial cloud-init certificate retry delay (default: 2).
+- `CLOUD_INIT_CERT_MAX_DELAY_SECONDS` — Cap on cloud-init certificate exponential backoff (default: 8).
+- `CLOUD_INIT_CERT_REQUEST_TIMEOUT_SECONDS` — Deadline per cloud-init certificate request and best-effort boot-failure report; must exceed the upstream API retry budget (default: 45).
+- `TASK_RUNNER_FIRST_HEARTBEAT_TIMEOUT_MS` — Fresh VM first-heartbeat deadline, capped by TASK_RUNNER_AGENT_READY_TIMEOUT_MS (default: 360000).
+- `TASK_RUNNER_BOOT_MAX_REPLACEMENTS` — Maximum fresh VM boot replacements per task run; 0 disables replacement; workspace execution is never replayed (default: 1).

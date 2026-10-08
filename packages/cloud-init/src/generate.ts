@@ -59,6 +59,21 @@ function isSafeAbsolutePath(value: string): boolean {
 export function validateCloudInitVariables(variables: CloudInitVariables): void {
   const errors: string[] = [];
 
+  for (const name of [
+    'certMaxAttempts',
+    'certBaseDelaySeconds',
+    'certMaxDelaySeconds',
+    'certRequestTimeoutSeconds',
+  ] as const) {
+    const value = variables[name];
+    if (
+      value !== undefined &&
+      (!NUMERIC_RE.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) < 1)
+    ) {
+      errors.push(`${name}: must be a positive integer`);
+    }
+  }
+
   // Required fields
   if (!variables.nodeId || !SAFE_ID_RE.test(variables.nodeId)) {
     errors.push(`nodeId: must match ${SAFE_ID_RE} (got ${JSON.stringify(variables.nodeId)})`);
@@ -457,6 +472,10 @@ export interface CloudInitVariables {
   dockerDnsServers?: string;
   /** Node-scoped endpoint used at boot to sign a locally generated Origin CA CSR. */
   originCaCertificateUrl?: string;
+  certMaxAttempts?: string;
+  certBaseDelaySeconds?: string;
+  certMaxDelaySeconds?: string;
+  certRequestTimeoutSeconds?: string;
   /** VM agent port override (default: 8443 with TLS, 8080 without) */
   vmAgentPort?: string;
   /** Immutable VM-agent release selected by the control-plane deployment. */
@@ -580,6 +599,10 @@ export function generateCloudInit(
     '{{ tls_cert_path }}': variables.originCaCertificateUrl ? '/etc/sam/tls/origin-ca.pem' : '',
     '{{ tls_key_path }}': variables.originCaCertificateUrl ? '/etc/sam/tls/origin-ca-key.pem' : '',
     '{{ origin_ca_certificate_url }}': variables.originCaCertificateUrl ?? '',
+    '{{ cert_max_attempts }}': variables.certMaxAttempts ?? '3',
+    '{{ cert_base_delay_seconds }}': variables.certBaseDelaySeconds ?? '2',
+    '{{ cert_max_delay_seconds }}': variables.certMaxDelaySeconds ?? '8',
+    '{{ cert_request_timeout_seconds }}': variables.certRequestTimeoutSeconds ?? '45',
     '{{ cf_ip_fetch_timeout }}': variables.cfIpFetchTimeout ?? '10',
     '{{ provider }}': variables.provider ?? '',
     '{{ devcontainer_cache_enabled }}': variables.devcontainerCacheEnabled ?? 'false',

@@ -5,6 +5,7 @@
  * the resource is already missing/deleted and must not re-enter the warm pool.
  */
 import { log } from '../../lib/logger';
+import { recoverNodeBoot } from './boot-recovery';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
 export async function assertClaimedNodeAvailable(
@@ -12,13 +13,18 @@ export async function assertClaimedNodeAvailable(
   rc: TaskRunnerContext,
   node: { status: string } | null,
   step: 'node_provisioning' | 'node_agent_ready'
-): Promise<void> {
+): Promise<boolean> {
   if (node && node.status !== 'deleted') {
-    return;
+    return true;
   }
 
   const nodeId = state.stepResults.nodeId;
   const observedStatus = node?.status ?? 'missing';
+
+  if (state.stepResults.autoProvisioned && node?.status === 'deleted') {
+    await recoverNodeBoot(state, rc, `node_deleted_during_${step}`);
+    return false;
+  }
 
   state.stepResults.autoProvisioned = false;
   await rc.ctx.storage.put('state', state);
