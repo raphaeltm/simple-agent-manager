@@ -297,9 +297,10 @@ beforeAll(async () => {
     await env.DATABASE.prepare(
       `INSERT OR IGNORE INTO session_snapshots
          (id, workspace_id, node_id, project_id, user_id, chat_session_id, runtime,
-          status, degradation, manifest_r2_key, manifest_json, expires_at, updated_at)
+          status, degradation, manifest_r2_key, manifest_json, expires_at,
+          sleeping_at, sleep_status, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, 'vm', 'available', 'none', ?, '{}',
-         '2099-01-01T00:00:00.000Z', datetime('now'))`
+         '2099-01-01T00:00:00.000Z', datetime('now'), 'sleeping', datetime('now'))`
     )
       .bind(
         `${workspaceId}-snapshot`,
@@ -333,16 +334,34 @@ beforeAll(async () => {
 
   const projectData = env.PROJECT_DATA.get(env.PROJECT_DATA.idFromName(PROJECT_ID));
   await runInDurableObject(projectData, async (instance) => {
-    instance.ctx.storage.sql.exec(
-      `INSERT OR IGNORE INTO chat_sessions
-         (id, workspace_id, topic, status, message_count, started_at, created_at, updated_at)
-       VALUES (?, ?, 'Route auth validation', 'active', 0, ?, ?, ?)`,
-      SESSION_ID,
-      WORKSPACE_ID,
-      Date.now(),
-      Date.now(),
-      Date.now()
-    );
+    for (const [sessionId, workspaceId, taskId, status] of [
+      [SESSION_ID, WORKSPACE_ID, null, 'active'],
+      [
+        EVICTION_SESSION_ID,
+        EVICTION_WORKSPACE_ID,
+        `${EVICTION_WORKSPACE_ID}-source-task`,
+        'active',
+      ],
+      [
+        `${EVICTION_SESSION_ID}-node`,
+        NODE_EVICTION_WORKSPACE_ID,
+        `${NODE_EVICTION_WORKSPACE_ID}-source-task`,
+        'active',
+      ],
+    ] as const) {
+      instance.ctx.storage.sql.exec(
+        `INSERT OR IGNORE INTO chat_sessions
+           (id, workspace_id, task_id, topic, status, message_count, started_at, created_at, updated_at)
+         VALUES (?, ?, ?, 'Route auth validation', ?, 0, ?, ?, ?)`,
+        sessionId,
+        workspaceId,
+        taskId,
+        status,
+        Date.now(),
+        Date.now(),
+        Date.now()
+      );
+    }
   });
 });
 
