@@ -1258,6 +1258,7 @@ type devcontainerReadConfigurationResult struct {
 	Outcome             string                 `json:"outcome"`
 	Message             string                 `json:"message"`
 	Description         string                 `json:"description"`
+	Configuration       map[string]interface{} `json:"configuration"`
 	MergedConfiguration map[string]interface{} `json:"mergedConfiguration"`
 }
 
@@ -1269,6 +1270,7 @@ func hasReadConfigurationPayloadData(payload *devcontainerReadConfigurationResul
 	return payload.Outcome != "" ||
 		payload.Message != "" ||
 		payload.Description != "" ||
+		len(payload.Configuration) > 0 ||
 		len(payload.MergedConfiguration) > 0
 }
 
@@ -1376,40 +1378,94 @@ func hasUnsafeDevcontainerValue(value interface{}) bool {
 	}
 }
 
-// validateMergedDevcontainerSecurity prevents repository-controlled devcontainer
-// settings from crossing the workspace/container boundary into host Docker
-// authority. vm-agent runs as root and talks to the host daemon, so fields that
-// can grant extra runtime authority or execute commands on the host must never
-// be forwarded from an untrusted repository.
-func validateMergedDevcontainerSecurity(merged map[string]interface{}) error {
+// validateMergedDevcontainerSecurity checks authored host-authority settings and
+// the final merged config. The CLI folds feature metadata into mergedConfiguration,
+// so the official Docker-in-Docker and Go features need narrow inherited allowances.
+func validateMergedDevcontainerSecurity(configuration, merged map[string]interface{}) error {
 	unsafeKeys := map[string]string{
-		"privileged":        "privileged containers",
-		"runArgs":           "raw Docker run arguments",
-		"capAdd":            "Linux capability additions",
-		"securityOpt":       "Docker security options",
-		"mounts":            "repository-controlled supplementary mounts",
-		"initializeCommand": "host-side initializeCommand",
+		"privileged":         "privileged containers",
+		"runArgs":            "raw Docker run arguments",
+		"capAdd":             "Linux capability additions",
+		"securityOpt":        "Docker security options",
+		"mounts":             "repository-controlled supplementary mounts",
+		"initializeCommand":  "host-side initializeCommand",
 		"initializeCommands": "host-side initializeCommands",
-		"dockerComposeFile": "Docker Compose runtime configuration",
+		"dockerComposeFile":  "Docker Compose runtime configuration",
 	}
 
 	for key, reason := range unsafeKeys {
-		if value, ok := merged[key]; ok && hasUnsafeDevcontainerValue(value) {
+		if value, ok := configuration[key]; ok && hasUnsafeDevcontainerValue(value) {
 			return fmt.Errorf("unsafe repository devcontainer configuration: %s is not allowed (%s)", key, reason)
 		}
+	}
+	for _, key := range []string{"runArgs", "initializeCommand", "initializeCommands", "dockerComposeFile"} {
+		if hasUnsafeDevcontainerValue(merged[key]) {
+			return fmt.Errorf("unsafe merged devcontainer configuration: %s is not allowed", key)
+		}
+	}
+
+	features, _ := configuration["features"].(map[string]interface{})
+	_, hasDinD := features["ghcr.io/devcontainers/features/docker-in-docker:4"]
+	_, hasGo := features["ghcr.io/devcontainers/features/go:1"]
+	if hasUnsafeDevcontainerValue(merged["privileged"]) && !hasDinD {
+		return errors.New("unsafe merged devcontainer configuration: privileged requires the Docker-in-Docker feature")
+	}
+	if !allowedMergedStringList(merged["capAdd"], hasGo, "SYS_PTRACE") ||
+		!allowedMergedStringList(merged["securityOpt"], hasGo, "seccomp=unconfined") {
+		return errors.New("unsafe merged devcontainer capability or security option")
+	}
+	if !allowedDinDMounts(merged["mounts"], hasDinD) {
+		return errors.New("unsafe merged devcontainer mounts")
 	}
 
 	// build.options is passed through to Docker/BuildKit as raw CLI options.
 	// Keep repository builds on the declarative build subset instead.
-	if buildValue, ok := merged["build"]; ok {
-		if build, ok := buildValue.(map[string]interface{}); ok {
-			if options, ok := build["options"]; ok && hasUnsafeDevcontainerValue(options) {
-				return errors.New("unsafe repository devcontainer configuration: build.options is not allowed")
+	for _, source := range []map[string]interface{}{configuration, merged} {
+		buildValue, ok := source["build"]
+		if ok {
+			if build, ok := buildValue.(map[string]interface{}); ok {
+				if options, ok := build["options"]; ok && hasUnsafeDevcontainerValue(options) {
+					return errors.New("unsafe repository devcontainer configuration: build.options is not allowed")
+				}
 			}
 		}
 	}
 
 	return nil
+}
+
+func allowedMergedStringList(value interface{}, allow bool, expected string) bool {
+	if !hasUnsafeDevcontainerValue(value) {
+		return true
+	}
+	items, ok := value.([]interface{})
+	return ok && allow && len(items) == 1 && items[0] == expected
+}
+
+func allowedDinDMounts(value interface{}, allow bool) bool {
+	if !hasUnsafeDevcontainerValue(value) {
+		return true
+	}
+	items, ok := value.([]interface{})
+	if !ok || !allow || len(items) != 2 {
+		return false
+	}
+	want := map[string]string{
+		"/var/lib/docker":     "dind-var-lib-docker-${devcontainerId}",
+		"/var/lib/containerd": "dind-var-lib-containerd-${devcontainerId}",
+	}
+	for _, item := range items {
+		mount, ok := item.(map[string]interface{})
+		if !ok || mount["type"] != "volume" {
+			return false
+		}
+		target, ok := mount["target"].(string)
+		if !ok || mount["source"] != want[target] || len(mount) != 3 {
+			return false
+		}
+		delete(want, target)
+	}
+	return len(want) == 0
 }
 
 func normalizeMergedLifecycleCommands(merged map[string]interface{}) {
@@ -1804,7 +1860,10 @@ func writeMountOverrideConfig(ctx context.Context, cfg *config.Config, volumeNam
 		return "", errors.New("devcontainer read-configuration mergedConfiguration missing image/dockerFile/dockerComposeFile")
 	}
 
-	if err := validateMergedDevcontainerSecurity(readResult.MergedConfiguration); err != nil {
+	if len(readResult.Configuration) == 0 {
+		return "", errors.New("devcontainer read-configuration returned empty configuration")
+	}
+	if err := validateMergedDevcontainerSecurity(readResult.Configuration, readResult.MergedConfiguration); err != nil {
 		return "", err
 	}
 

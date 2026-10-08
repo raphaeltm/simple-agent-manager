@@ -1524,6 +1524,7 @@ if [ "$1" = "read-configuration" ]; then
   cat <<'EOF'
 {
   "outcome": "success",
+  "configuration": {"image": "mcr.microsoft.com/devcontainers/typescript-node:24-bookworm"},
   "mergedConfiguration": {
     "name": "Repo Config",
     "image": "mcr.microsoft.com/devcontainers/typescript-node:24-bookworm",
@@ -1610,7 +1611,7 @@ func TestValidateMergedDevcontainerSecurityRejectsHostAuthority(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if err := validateMergedDevcontainerSecurity(tt.merged); err == nil {
+			if err := validateMergedDevcontainerSecurity(tt.merged, tt.merged); err == nil {
 				t.Fatalf("expected unsafe devcontainer configuration to be rejected: %#v", tt.merged)
 			}
 		})
@@ -1621,15 +1622,102 @@ func TestValidateMergedDevcontainerSecurityAllowsContainerScopedSettings(t *test
 	t.Parallel()
 
 	merged := map[string]interface{}{
-		"image": "mcr.microsoft.com/devcontainers/typescript-node:24-bookworm",
-		"privileged": false,
-		"mounts": []interface{}{},
+		"image":             "mcr.microsoft.com/devcontainers/typescript-node:24-bookworm",
+		"privileged":        false,
+		"mounts":            []interface{}{},
 		"postCreateCommand": "npm install",
-		"containerEnv": map[string]interface{}{"NODE_ENV": "development"},
-		"features": map[string]interface{}{"ghcr.io/devcontainers/features/go:1": map[string]interface{}{"version": "1.22"}},
+		"containerEnv":      map[string]interface{}{"NODE_ENV": "development"},
+		"features":          map[string]interface{}{"ghcr.io/devcontainers/features/go:1": map[string]interface{}{"version": "1.22"}},
 	}
-	if err := validateMergedDevcontainerSecurity(merged); err != nil {
+	if err := validateMergedDevcontainerSecurity(merged, merged); err != nil {
 		t.Fatalf("expected container-scoped settings to be allowed, got: %v", err)
+	}
+}
+
+func TestValidateMergedDevcontainerSecurityWithRealSAMReadConfiguration(t *testing.T) {
+	data, err := os.ReadFile("testdata/sam-read-configuration.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result devcontainerReadConfigurationResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateMergedDevcontainerSecurity(result.Configuration, result.MergedConfiguration); err != nil {
+		t.Fatalf("real SAM devcontainer configuration should not enter recovery: %v", err)
+	}
+
+	// A repository-authored override stays forbidden even when a trusted feature
+	// would produce the same merged setting.
+	result.Configuration["privileged"] = true
+	if err := validateMergedDevcontainerSecurity(result.Configuration, result.MergedConfiguration); err == nil {
+		t.Fatal("repository-authored privileged setting was accepted")
+	}
+	delete(result.Configuration, "privileged")
+
+	// Feature metadata cannot smuggle in a host bind mount alongside DinD volumes.
+	result.MergedConfiguration["mounts"] = append(result.MergedConfiguration["mounts"].([]interface{}), map[string]interface{}{
+		"source": "/var/run/docker.sock", "target": "/var/run/docker.sock", "type": "bind",
+	})
+	if err := validateMergedDevcontainerSecurity(result.Configuration, result.MergedConfiguration); err == nil {
+		t.Fatal("feature-provided host Docker socket bind was accepted")
+	}
+}
+
+func TestWriteMountOverrideConfigAcceptsRealSAMReadConfiguration(t *testing.T) {
+	fixture, err := filepath.Abs("testdata/sam-read-configuration.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mockBinDir := t.TempDir()
+	mockDevcontainer := filepath.Join(mockBinDir, "devcontainer")
+	mockScript := fmt.Sprintf("#!/bin/sh\ncat %q\n", fixture)
+	if err := os.WriteFile(mockDevcontainer, []byte(mockScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", mockBinDir+":"+os.Getenv("PATH"))
+
+	cfg := &config.Config{WorkspaceDir: "/workspace/simple-agent-manager", Repository: "raphaeltm/simple-agent-manager"}
+	path, err := writeMountOverrideConfig(context.Background(), cfg, "sam-ws-test", "", "", "")
+	if err != nil {
+		t.Fatalf("SAM devcontainer should not enter recovery: %v", err)
+	}
+	defer os.Remove(path)
+}
+
+func TestValidateMergedDevcontainerSecurityRejectsUnexpectedFeatureAuthority(t *testing.T) {
+	data, err := os.ReadFile("testdata/sam-read-configuration.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name   string
+		mutate func(*devcontainerReadConfigurationResult)
+	}{
+		{"privileged without DinD", func(r *devcontainerReadConfigurationResult) {
+			delete(r.Configuration["features"].(map[string]interface{}), "ghcr.io/devcontainers/features/docker-in-docker:4")
+		}},
+		{"extra capability", func(r *devcontainerReadConfigurationResult) {
+			r.MergedConfiguration["capAdd"] = []interface{}{"SYS_PTRACE", "SYS_ADMIN"}
+		}},
+		{"arbitrary named volume", func(r *devcontainerReadConfigurationResult) {
+			r.MergedConfiguration["mounts"].([]interface{})[0].(map[string]interface{})["source"] = "host-secrets"
+		}},
+		{"feature run args", func(r *devcontainerReadConfigurationResult) {
+			r.MergedConfiguration["runArgs"] = []interface{}{"--pid=host"}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var result devcontainerReadConfigurationResult
+			if err := json.Unmarshal(data, &result); err != nil {
+				t.Fatal(err)
+			}
+			tt.mutate(&result)
+			if err := validateMergedDevcontainerSecurity(result.Configuration, result.MergedConfiguration); err == nil {
+				t.Fatal("unexpected feature authority was accepted")
+			}
+		})
 	}
 }
 
@@ -1638,7 +1726,7 @@ func TestWriteMountOverrideConfigRejectsUnsafeRepoConfig(t *testing.T) {
 	mockDevcontainer := filepath.Join(mockBinDir, "devcontainer")
 	mockScript := `#!/bin/sh
 if [ "$1" = "read-configuration" ]; then
-  echo '{"outcome":"success","mergedConfiguration":{"image":"ubuntu:24.04","privileged":true}}'
+  echo '{"outcome":"success","configuration":{"image":"ubuntu:24.04","privileged":true},"mergedConfiguration":{"image":"ubuntu:24.04","privileged":true}}'
   exit 0
 fi
 exit 1
@@ -2497,7 +2585,7 @@ exit 0
 	mockScript := fmt.Sprintf(`#!/bin/sh
 echo "$@" >> %s
 if [ "$1" = "read-configuration" ]; then
-  echo '{"outcome":"success","mergedConfiguration":{"image":"node:20"}}'
+  echo '{"outcome":"success","configuration":{"image":"node:20"},"mergedConfiguration":{"image":"node:20"}}'
   exit 0
 fi
 if [ "$1" = "up" ]; then
@@ -3424,6 +3512,7 @@ if [ "$1" = "read-configuration" ]; then
   cat <<'EOF'
 {
   "outcome": "success",
+  "configuration": {"image": "mcr.microsoft.com/devcontainers/typescript-node:24-bookworm"},
   "mergedConfiguration": {
     "name": "Repo Config",
     "image": "mcr.microsoft.com/devcontainers/typescript-node:24-bookworm"

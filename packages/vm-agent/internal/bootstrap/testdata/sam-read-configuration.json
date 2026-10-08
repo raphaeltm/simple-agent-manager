@@ -1,0 +1,228 @@
+{
+  "configuration": {
+    "name": "Simple Agent Manager",
+    "image": "mcr.microsoft.com/devcontainers/typescript-node:24-bookworm",
+    "containerEnv": {
+      "CODEX_HOME": "/workspaces/simple-agent-manager/.codex"
+    },
+    "features": {
+      "ghcr.io/devcontainers/features/docker-in-docker:4": {},
+      "ghcr.io/devcontainers/features/github-cli:1": {},
+      "ghcr.io/devcontainers/features/go:1": {
+        "version": "1.26.6",
+        "golangciLintVersion": "2.11.4"
+      }
+    },
+    "forwardPorts": [
+      8787,
+      5173,
+      3001
+    ],
+    "portsAttributes": {
+      "3001": {
+        "label": "CloudCLI",
+        "onAutoForward": "notify"
+      },
+      "5173": {
+        "label": "Web UI",
+        "onAutoForward": "notify"
+      },
+      "8787": {
+        "label": "API",
+        "onAutoForward": "notify"
+      }
+    },
+    "postCreateCommand": "bash .devcontainer/post-create.sh",
+    "postStartCommand": "bash .devcontainer/post-start.sh",
+    "customizations": {
+      "vscode": {
+        "extensions": [
+          "dbaeumer.vscode-eslint",
+          "esbenp.prettier-vscode",
+          "bradlc.vscode-tailwindcss",
+          "golang.go"
+        ],
+        "settings": {
+          "editor.formatOnSave": true,
+          "editor.defaultFormatter": "esbenp.prettier-vscode"
+        }
+      }
+    },
+    "configFilePath": {
+      "$mid": 1,
+      "fsPath": "/workspaces/sam-pr-2274/.devcontainer/devcontainer.json",
+      "path": "/workspaces/sam-pr-2274/.devcontainer/devcontainer.json",
+      "scheme": "vscode-fileHost"
+    }
+  },
+  "mergedConfiguration": {
+    "name": "Simple Agent Manager",
+    "image": "mcr.microsoft.com/devcontainers/typescript-node:24-bookworm",
+    "containerEnv": {
+      "CODEX_HOME": "/workspaces/simple-agent-manager/.codex"
+    },
+    "features": {
+      "ghcr.io/devcontainers/features/docker-in-docker:4": {},
+      "ghcr.io/devcontainers/features/github-cli:1": {},
+      "ghcr.io/devcontainers/features/go:1": {
+        "version": "1.26.6",
+        "golangciLintVersion": "2.11.4"
+      }
+    },
+    "forwardPorts": [
+      8787,
+      5173,
+      3001
+    ],
+    "portsAttributes": {
+      "3001": {
+        "label": "CloudCLI",
+        "onAutoForward": "notify"
+      },
+      "5173": {
+        "label": "Web UI",
+        "onAutoForward": "notify"
+      },
+      "8787": {
+        "label": "API",
+        "onAutoForward": "notify"
+      }
+    },
+    "configFilePath": {
+      "$mid": 1,
+      "fsPath": "/workspaces/sam-pr-2274/.devcontainer/devcontainer.json",
+      "path": "/workspaces/sam-pr-2274/.devcontainer/devcontainer.json",
+      "scheme": "vscode-fileHost"
+    },
+    "init": true,
+    "privileged": true,
+    "capAdd": [
+      "SYS_PTRACE"
+    ],
+    "securityOpt": [
+      "seccomp=unconfined"
+    ],
+    "entrypoints": [
+      "/usr/local/share/docker-init.sh"
+    ],
+    "mounts": [
+      {
+        "source": "dind-var-lib-docker-${devcontainerId}",
+        "target": "/var/lib/docker",
+        "type": "volume"
+      },
+      {
+        "source": "dind-var-lib-containerd-${devcontainerId}",
+        "target": "/var/lib/containerd",
+        "type": "volume"
+      }
+    ],
+    "customizations": {
+      "vscode": [
+        {
+          "settings": {
+            "github.copilot.chat.codeGeneration.instructions": [
+              {
+                "text": "This dev container includes an up-to-date version of Git, built from source as needed, pre-installed and available on the `PATH`."
+              }
+            ]
+          }
+        },
+        {
+          "extensions": [
+            "dbaeumer.vscode-eslint"
+          ],
+          "settings": {
+            "github.copilot.chat.codeGeneration.instructions": [
+              {
+                "text": "This dev container includes `node`, `npm` and `eslint` pre-installed and available on the `PATH` for Node.js and JavaScript development."
+              }
+            ]
+          }
+        },
+        {
+          "extensions": [
+            "dbaeumer.vscode-eslint"
+          ]
+        },
+        {
+          "settings": {
+            "github.copilot.chat.codeGeneration.instructions": [
+              {
+                "text": "This dev container includes an up-to-date version of Git, built from source as needed, pre-installed and available on the `PATH`."
+              }
+            ]
+          }
+        },
+        {
+          "extensions": [
+            "dbaeumer.vscode-eslint"
+          ],
+          "settings": {
+            "github.copilot.chat.codeGeneration.instructions": [
+              {
+                "text": "This dev container includes the TypeScript compiler (`tsc`) pre-installed and available on the `PATH` for TypeScript development."
+              }
+            ]
+          }
+        },
+        {
+          "extensions": [
+            "ms-azuretools.vscode-containers"
+          ],
+          "settings": {
+            "github.copilot.chat.codeGeneration.instructions": [
+              {
+                "text": "This dev container includes the Docker CLI (`docker`) pre-installed and available on the `PATH` for running and managing containers using a dedicated Docker daemon running inside the dev container."
+              }
+            ]
+          }
+        },
+        {
+          "settings": {
+            "github.copilot.chat.codeGeneration.instructions": [
+              {
+                "text": "This dev container includes the GitHub CLI (`gh`), which is pre-installed and available on the `PATH`. IMPORTANT: `gh api -f` does not support object values, use multiple `-f` flags with hierarchical keys and string values instead. When using GitHub actions `actions/upload-artifact` or `actions/download-artifact` use v4 or later."
+              }
+            ]
+          }
+        },
+        {
+          "extensions": [
+            "golang.Go"
+          ],
+          "settings": {
+            "github.copilot.chat.codeGeneration.instructions": [
+              {
+                "text": "This dev container includes Go and common Go utilities pre-installed and available on the `PATH`, along with the Go language extension for Go development."
+              }
+            ]
+          }
+        },
+        {
+          "extensions": [
+            "dbaeumer.vscode-eslint",
+            "esbenp.prettier-vscode",
+            "bradlc.vscode-tailwindcss",
+            "golang.go"
+          ],
+          "settings": {
+            "editor.formatOnSave": true,
+            "editor.defaultFormatter": "esbenp.prettier-vscode"
+          }
+        }
+      ]
+    },
+    "onCreateCommands": [],
+    "updateContentCommands": [],
+    "postCreateCommands": [
+      "bash .devcontainer/post-create.sh"
+    ],
+    "postStartCommands": [
+      "bash .devcontainer/post-start.sh"
+    ],
+    "postAttachCommands": [],
+    "remoteUser": "node",
+    "remoteEnv": {}
+  }
+}
