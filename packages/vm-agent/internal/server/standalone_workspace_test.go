@@ -2,8 +2,11 @@ package server
 
 import (
 	"context"
+	"errors"
 	"github.com/workspace/vm-agent/internal/config"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -88,5 +91,45 @@ func TestStandaloneCloneBaseAndOutputBranches(t *testing.T) {
 				t.Fatalf("default ref = %s", got)
 			}
 		})
+	}
+}
+
+func TestStandaloneCheckoutKeepsCredentialsAndRedactsFailure(t *testing.T) {
+	original := runStandaloneGitCommand
+	t.Cleanup(func() { runStandaloneGitCommand = original })
+	const token = "checkout-secret-canary"
+	helper := ""
+	checkoutCalled := false
+	runStandaloneGitCommand = func(_ context.Context, _ string, env []string, args ...string) (string, error) {
+		for _, arg := range args {
+			if arg != "checkout" {
+				continue
+			}
+			checkoutCalled = true
+			helper = standaloneCloneCredentialHelperPath(env)
+			if helper == "" || !strings.Contains(strings.Join(args, " "), "credential.helper="+helper) {
+				t.Fatal("partial checkout lost credential helper")
+			}
+			if !envContains(env, "SAM_CLONE_CREDENTIAL_TOKEN="+token) {
+				t.Fatal("checkout lost scoped token")
+			}
+			if _, err := os.Stat(helper); err != nil {
+				t.Fatalf("helper removed before checkout: %v", err)
+			}
+			return "remote rejected " + token, errors.New("checkout rejected")
+		}
+		return "", nil
+	}
+	s := &Server{config: &config.Config{StandaloneCloneFilter: "blob:none"}}
+	runtime := &WorkspaceRuntime{Repository: "https://user:" + token + "@example.test/repo.git", BaseBranch: "main", Branch: "output"}
+	err := s.cloneStandaloneRepository(context.Background(), runtime, t.TempDir())
+	if !checkoutCalled || err == nil {
+		t.Fatalf("checkout failure was not exercised: %v", err)
+	}
+	if strings.Contains(err.Error(), token) {
+		t.Fatal("checkout error leaked credential")
+	}
+	if _, err := os.Stat(helper); !os.IsNotExist(err) {
+		t.Fatalf("temporary credential helper remains: %v", err)
 	}
 }
