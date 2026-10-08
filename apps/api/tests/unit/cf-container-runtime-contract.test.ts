@@ -143,7 +143,10 @@ describe('cf-container runtime spike contracts', () => {
     const containerService = read('services/vm-agent-container.ts');
     const nodeAgent = read('services/node-agent.ts');
     const activityCallback = read('routes/projects/agent-activity-callback.ts');
-    const activityCallbackHandler = read('services/acp-activity-callback-handler.ts');
+    const activityCallbackHandler = [
+      read('services/acp-activity-callback-handler.ts'),
+      read('services/acp-activity-idle-snapshot.ts'),
+    ].join('\n');
     const activityCallbackFlush = read('services/acp-activity-callback-flush.ts');
     const acpSessionsRoute = read('routes/projects/acp-sessions.ts');
 

@@ -395,6 +395,7 @@ export async function continueInstantSessionLaunch(
   const vmAgentPort = config.vmAgentPort;
   const controlPlaneUrl = `https://api.${env.BASE_DOMAIN}`;
   const phaseDetail = { nodeId, workspaceId, containerId };
+  log.info('instant_session.cold_start_started', phaseDetail);
   const node = { id: nodeId };
 
   try {

@@ -20,7 +20,7 @@ import { toProjectDataStorageFullError } from './project-data-storage-errors';
 /**
  * How a ProjectData RPC may be retried. `mutation` (the default) retries only failures the object
  * rejected before doing anything (`isTransientDurableObjectError`). `idempotent_read` may also retry
- * a CPU-limit reset or a lost connection, whose outcome is ambiguous — safe only when repeating the
+ * a CPU-limit reset, SQLite NOMEM, or a lost connection, whose outcome is ambiguous — safe only when repeating the
  * call cannot duplicate an effect. Heavy calls must never be marked idempotent_read: a request that
  * itself burned the CPU allowance would reset the object again.
  */
@@ -38,7 +38,7 @@ export class ProjectDataUnavailableError extends AppError {
   constructor(
     projectId: string,
     operation: string,
-    errorClass: 'cpu_limit_reset' | 'connection_lost'
+    errorClass: 'cpu_limit_reset' | 'connection_lost' | 'sqlite_nomem'
   ) {
     super(
       503,
@@ -101,7 +101,7 @@ export async function retryProjectDataRpc<T, S>(input: {
       firstErrorClass ??= errorClass;
       if (!retryable(err)) throw err;
       const attemptBudget =
-        errorClass === 'connection_lost'
+        (errorClass === 'connection_lost' || errorClass === 'sqlite_nomem')
           ? retryConfig.connectionLostMaxAttempts
           : retryConfig.maxAttempts;
       if (attempt >= attemptBudget) {
@@ -112,7 +112,7 @@ export async function retryProjectDataRpc<T, S>(input: {
           attempts: attempt,
           errorClass,
         });
-        if (errorClass === 'cpu_limit_reset' || errorClass === 'connection_lost') {
+        if (errorClass === 'cpu_limit_reset' || errorClass === 'connection_lost' || errorClass === 'sqlite_nomem') {
           throw new ProjectDataUnavailableError(projectId, operation, errorClass);
         }
         throw err;

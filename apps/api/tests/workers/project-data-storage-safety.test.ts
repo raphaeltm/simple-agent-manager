@@ -2097,3 +2097,198 @@ describe('ProjectData storage safety firebreak', () => {
     expect(telemetry?.last_purge_rows).toBe(4);
   });
 });
+
+describe('storage safety NOMEM regression', () => {
+  it('bounds grouped content reads when the actual alarm runs against many eligible sessions', async () => {
+    const projectId = `nomem-bounded-${crypto.randomUUID()}`;
+    await seedProjectGraph(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const limitBytes = await runInDurableObject(stub, async (instance, state) => {
+      for (let i = 0; i < 40; i++) {
+        const sessionId = await instance.createSession(null, `Cleanup candidate ${i}`);
+        await instance.persistMessage(sessionId, 'assistant', `retained transcript ${i}`, null, null);
+        await instance.stopSession(sessionId);
+      }
+      state.storage.sql.exec('UPDATE chat_sessions SET updated_at = ?', Date.now() - 8 * 86400000);
+      state.storage.sql.exec("INSERT OR REPLACE INTO do_meta(key, value) VALUES ('storageSafetyLastMeasuredAt', ?)", String(Date.now()));
+      await state.storage.deleteAlarm();
+      return Math.ceil(state.storage.sql.databaseSize / 0.92);
+    });
+    await withProjectDataStorageEnv({
+      ...EVERY_TICK_RUNS_STORAGE_SAFETY,
+      PROJECT_DATA_STORAGE_LIMIT_BYTES: String(limitBytes),
+      PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED: 'true',
+      PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_SESSIONS: '2',
+      PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_ROWS: '10',
+      PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES: '0',
+      PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED: 'false',
+      PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED: 'false',
+    }, async () => {
+      const result = await runInDurableObject(stub, async (instance, state) => {
+        const cursors: SqlStorageCursor<Record<string, SqlStorageValue>>[] = [];
+        const exec = state.storage.sql.exec.bind(state.storage.sql);
+        const spy = vi.spyOn(state.storage.sql, 'exec').mockImplementation((query, ...bindings) => {
+          const cursor = exec(query, ...bindings);
+          if (/SELECT/i.test(query) && /chat_messages_grouped\b/.test(query)) cursors.push(cursor);
+          return cursor;
+        });
+        try {
+          await instance.alarm();
+        } finally {
+          spy.mockRestore();
+        }
+        const rowsRead = cursors.reduce((sum, cursor) => sum + cursor.rowsRead, 0);
+        return {
+          rowsRead,
+          pruned: exec("SELECT count(*) n FROM chat_sessions WHERE search_index_state = 'grouped_fts_pruned'").one().n,
+          raw: exec('SELECT count(*) n FROM chat_messages').one().n,
+        };
+      });
+      expect(result.pruned).toBe(2);
+      expect(result.raw).toBe(40);
+      // Forty eligible sessions must not cause forty content reads. This fails
+      // for the previous GROUP BY/SUM candidate query despite its LIMIT 3.
+      expect(result.rowsRead).toBeLessThan(20);
+    });
+  });
+
+  it.each([false, true])('commits alert dedupe before a failing SQLite transaction and continues (diagnostic write failure=%s)', async (failRecording) => {
+    const projectId = `nomem-isolation-${crypto.randomUUID()}`;
+    await seedProjectGraph(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const limitBytes = await runInDurableObject(stub, async (instance, state) => {
+      const id = await instance.createSession(null, 'Rollback candidate');
+      await instance.persistMessage(id, 'assistant', 'retained rollback transcript', null, null);
+      await instance.stopSession(id);
+      state.storage.sql.exec('UPDATE chat_sessions SET updated_at = ?', Date.now() - 8 * 86400000);
+      state.storage.sql.exec(
+        "INSERT INTO activity_events(id, event_type, actor_type, session_id, created_at) VALUES ('nomem-event', 'test', 'system', ?, ?)",
+        id, Date.now() - 8 * 86400000
+      );
+      state.storage.sql.exec('CREATE TABLE nomem_rollback_probe (id INTEGER PRIMARY KEY)');
+      state.storage.sql.exec('INSERT INTO nomem_rollback_probe VALUES (1)');
+      await state.storage.deleteAlarm();
+      await state.storage.sync();
+      return Math.ceil(state.storage.sql.databaseSize / 0.92);
+    });
+    await withProjectDataStorageEnv({
+      ...EVERY_TICK_RUNS_STORAGE_SAFETY,
+      PROJECT_DATA_STORAGE_LIMIT_BYTES: String(limitBytes),
+      PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED: 'true',
+      PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED: 'false',
+      PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED: 'true',
+    }, async () => {
+      // The fault stays inside the DO realm; writes really roll back through
+      // transactionSync, while SQLITE_NOMEM allocator failure is synthetic.
+      const result = await stub.runAlarmWithGroupedCleanupFailureForTest('candidate', failRecording);
+      expect(result).toEqual({ injected: true, laterCleanup: true, markerCommitted: true, rolledBack: true });
+      expect(await runInDurableObject(stub, async (_instance, state) =>
+        state.storage.sql.exec("SELECT count(*) n FROM activity_events WHERE id = 'nomem-event'").one().n
+      )).toBe(0);
+      const marker = await runInDurableObject(stub, async (_instance, state) =>
+        state.storage.sql.exec("SELECT value FROM do_meta WHERE key = 'storageSafetyLastAlertAt'").toArray()
+      );
+      expect(marker).toHaveLength(1);
+      const firstAlertAt = marker[0]!.value;
+      // Force another measurement, but retain the dedupe marker: no new alert.
+      await runInDurableObject(stub, async (instance, state) => {
+        state.storage.sql.exec("DELETE FROM do_meta WHERE key = 'storageSafetyLastMeasuredAt'");
+        await instance.alarm();
+      });
+      const after = await runInDurableObject(stub, async (_instance, state) =>
+        state.storage.sql.exec("SELECT value FROM do_meta WHERE key = 'storageSafetyLastAlertAt'").one().value
+      );
+      expect(after).toBe(firstAlertAt);
+    });
+  });
+});
+
+describe('grouped cleanup atomicity', () => {
+  it('rolls back both derived rows and watermarks when the second FTS deletion exhausts memory', async () => {
+    const projectId = `nomem-delete-${crypto.randomUUID()}`;
+    await seedProjectGraph(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const seeded = await runInDurableObject(stub, async (instance, state) => {
+      const id = await instance.createSession(null, 'Atomic cleanup');
+      await instance.persistMessage(id, 'user', 'atomicneedle first', null, null);
+      await instance.persistMessage(id, 'assistant', 'atomicneedle second', null, null);
+      await instance.stopSession(id);
+      state.storage.sql.exec('UPDATE chat_sessions SET updated_at = ?', Date.now() - 8 * 86400000);
+      state.storage.sql.exec('CREATE TABLE nomem_rollback_probe (id INTEGER PRIMARY KEY)');
+      state.storage.sql.exec('INSERT INTO nomem_rollback_probe VALUES (1)');
+      await state.storage.deleteAlarm();
+      return { id, limitBytes: Math.ceil(state.storage.sql.databaseSize / 0.92) };
+    });
+    const snapshot = () => runInDurableObject(stub, async (_instance, state) => ({
+      grouped: state.storage.sql.exec('SELECT * FROM chat_messages_grouped ORDER BY id').toArray(),
+      matches: state.storage.sql.exec("SELECT rowid FROM chat_messages_grouped_fts WHERE chat_messages_grouped_fts MATCH 'atomicneedle' ORDER BY rowid").toArray(),
+      session: state.storage.sql.exec('SELECT materialized_at, materialized_through_created_at, materialized_through_sequence, search_index_state FROM chat_sessions WHERE id = ?', seeded.id).one(),
+    }));
+    const before = await snapshot();
+    expect(before.grouped).toHaveLength(2);
+    expect(before.matches).toHaveLength(2);
+    await withProjectDataStorageEnv({
+      ...EVERY_TICK_RUNS_STORAGE_SAFETY,
+      PROJECT_DATA_STORAGE_LIMIT_BYTES: String(seeded.limitBytes),
+      PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED: 'true',
+      PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED: 'false',
+      PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED: 'false',
+    }, async () => {
+      expect((await stub.runAlarmWithGroupedCleanupFailureForTest('second_delete')).injected).toBe(true);
+    });
+    expect(await snapshot()).toEqual(before);
+  });
+});
+
+describe('grouped cleanup cursor progress', () => {
+  it('advances past multiple pages of empty materialized sessions', async () => {
+    const projectId = `nomem-empty-${crypto.randomUUID()}`;
+    await seedProjectGraph(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const limitBytes = await runInDurableObject(stub, async (instance, state) => {
+      const ids: string[] = [];
+      for (let i = 0; i < 4; i++) {
+        ids.push(await instance.createSession(null, `Cursor candidate ${i}`));
+      }
+      ids.sort();
+      await instance.persistMessage(ids[3]!, 'assistant', 'retained follower', null, null);
+      for (const id of ids) await instance.stopSession(id);
+      const old = Date.now() - 8 * 86400000;
+      state.storage.sql.exec('UPDATE chat_sessions SET updated_at = ?, materialized_at = ?', old, old);
+      await state.storage.deleteAlarm();
+      return Math.ceil(state.storage.sql.databaseSize / 0.92);
+    });
+    await withProjectDataStorageEnv({
+      PROJECT_DATA_STORAGE_LIMIT_BYTES: String(limitBytes),
+      PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED: 'true',
+      PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_SESSIONS: '1',
+      PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES: '0',
+    }, async () => {
+      await runInDurableObject(stub, async (instance, state) => {
+        // Manual calls represent successive scheduled pages. Prevent the real
+        // timer from consuming another page between these explicit calls.
+        await state.storage.deleteAlarm();
+        const setAlarm = vi.spyOn(state.storage, 'setAlarm').mockResolvedValue();
+        try {
+          for (let i = 0; i < 4; i++) {
+            state.storage.sql.exec("UPDATE do_meta SET value = '0' WHERE key = 'storageSafetyGroupedFtsCleanupRecheckAt'");
+            const result = await instance.runGroupedFtsCleanup();
+            expect(result?.sessionsExamined).toBe(1);
+            expect(result?.sessionsCleaned).toBe(i === 3 ? 1 : 0);
+            if (i < 3) expect(result?.cursor?.sessionId).toBeTruthy();
+          }
+        } finally {
+          setAlarm.mockRestore();
+          await state.storage.deleteAlarm();
+        }
+      });
+    });
+    expect(await runInDurableObject(stub, async (_instance, state) =>
+      state.storage.sql.exec('SELECT count(*) n FROM chat_messages').one().n
+    )).toBe(1);
+  });
+});

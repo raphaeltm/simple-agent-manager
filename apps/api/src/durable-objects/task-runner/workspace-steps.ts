@@ -27,6 +27,7 @@ import { computeBackoffMs, getRecoverySourceTaskGuard, isTransientError } from '
 import { persistPlacementDiagnostics, updatePlacementDiagnostics } from './placement-diagnostics';
 import { ensureSessionLinked } from './state-machine';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
+import { isUserConversationStart } from './user-start-admission';
 import { ensureBranchExistsOnRemote } from './workspace-branch';
 import {
   claimWorkspaceAllocationForTask,
@@ -185,6 +186,7 @@ async function createAndProvisionWorkspace(
     await rc.ctx.storage.put('state', state);
   }
   const admissionPolicy = resolveWorkspaceAdmissionPolicy(rc.env, state.config.projectScaling);
+  admissionPolicy.allowBusyBuildQueue = await isUserConversationStart(state, rc);
   updatePlacementDiagnostics(state, { queue: {} });
   const placementReserved = await reserveWorkspacePlacement(
     rc.env.DATABASE,

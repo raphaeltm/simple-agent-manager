@@ -1,3 +1,6 @@
+// Existing compact do_meta diagnostic budget; shared by storage alarm substeps.
+export const STORAGE_SAFETY_ERROR_MAX_LENGTH = 500;
+
 import { isJsonRecord } from '@simple-agent-manager/shared';
 
 export const META_LAST_MEASURED_AT = 'storageSafetyLastMeasuredAt';

@@ -195,6 +195,12 @@ Summary data flows back from DOs to D1 via debounced sync (e.g., `last_activity_
 | **R2**         | `R2`    | VM Agent binaries, private diagnostic artifacts, session snapshots, compose image artifacts, TTS audio cache, ProjectData archived tool payloads |
 | **Workers AI** | `AI`    | Idea title generation, transcription, TTS, context summarization                                                                                 |
 
+### API error diagnostics
+
+The global API error handler persists server failures with a request ID. Snapshot capture attempts that lose a race with sleep teardown or another capture return `409 CONFLICT`, and idle callbacks skip capture once teardown is claimed. These expected conflicts do not create API error rows.
+
+Wrapped D1 query failures retain an allowlisted `context.causeCode`, including recognized SQLite codes and `D1_OVERLOADED`, `D1_NETWORK`, or `D1_TIMEOUT`. Unknown causes do not expose their text. The failed query's SQL, parameters, and stack are omitted from persisted rows. Workspace deletion quarantine rows retain `context.reason` and `context.attemptCount`; raw deletion error payloads remain excluded. TaskRunner mismatch diagnostics re-read the task after the probe so a completed handoff does not warn from an outdated scan result.
+
 ### VM diagnostic incident flow
 
 VM Agent errors and their automatic evidence remain inside one SAM installation. The agent first persists a stable incident ID and error in its local SQLite outbox, then posts the error batch using the node callback JWT. The Worker creates primary-D1 incident metadata before strictly acknowledging the observability-D1 error row. Diagnostic incidents are deduplicated by redacted signature and deployment: the first occurrence owns the incident/artifact rows, while later repeats record occurrence count and last-seen time without creating more R2 objects. The VM registers a bounded redacted manifest/preview, claims a time-bounded D1 upload lease, streams the gzip archive into a deterministic private R2 key, and retries safely after restarts. The same lease prevents scheduled reconciliation or a failed-evidence report from racing a live upload. A scheduled reconciler repairs partial D1/R2 state, fails stale unleased uploads, expires metadata, and deletes retained objects in bounded batches.

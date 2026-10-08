@@ -32,6 +32,7 @@ import {
   signNodeCallbackToken,
   signNodeManagementToken,
 } from '../services/jwt';
+import { recordLifecycleTimings } from '../services/lifecycle-timings';
 import { createWorkspaceOnNode } from '../services/node-agent';
 import {
   NODE_CALLBACK_TERMINAL_STATUSES,
@@ -177,6 +178,8 @@ nodeLifecycleRoutes.post('/:id/ready', async (c) => {
     : null;
   const agentVersion =
     typeof readyPayload?.agentVersion === 'string' ? readyPayload.agentVersion : null;
+
+  recordLifecycleTimings('provision', readyPayload?.provisionTimings, { nodeId });
 
   const updatedRows = await db
     .update(schema.nodes)

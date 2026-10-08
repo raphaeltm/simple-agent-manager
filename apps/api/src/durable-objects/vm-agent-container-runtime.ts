@@ -242,16 +242,30 @@ export async function persistRuntimeEnded(
 ): Promise<void> {
   const now = new Date().toISOString();
   const errorMessage = status === 'stopped' ? null : message;
-  await env.DATABASE.batch([
+  const results = await env.DATABASE.batch([
     env.DATABASE.prepare(
       `UPDATE nodes
        SET status = ?, health_status = 'unhealthy', error_message = ?, updated_at = ?
-       WHERE id = ?`
+       WHERE id = ? AND status NOT IN ('destroying', 'stopped', 'deleted')`
     ).bind(status, errorMessage, now, identity.nodeId),
     env.DATABASE.prepare(
-      `UPDATE workspaces SET status = ?, error_message = ?, updated_at = ? WHERE id = ?`
-    ).bind(status, errorMessage, now, identity.workspaceId),
+      `UPDATE workspaces SET status = ?, error_message = ?, updated_at = ?
+       WHERE id = ? AND node_id = ?
+         AND status NOT IN ('stopping', 'stopped', 'deleted')
+         AND EXISTS (SELECT 1 FROM nodes WHERE id = ? AND status = ?)`
+    ).bind(
+      status,
+      errorMessage,
+      now,
+      identity.workspaceId,
+      identity.nodeId,
+      identity.nodeId,
+      status
+    ),
   ]);
+
+  // Explicit teardown owns finalization once it has claimed the rows.
+  if ((results[1]?.meta.changes ?? 0) === 0) return;
 
   await finalizeWorkspaceLifecycleClosure(env, {
     workspaceIds: [identity.workspaceId],

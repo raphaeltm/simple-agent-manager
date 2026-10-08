@@ -30,6 +30,7 @@ import { ensureSessionRecovery } from '../../src/services/session-recovery';
 import {
   seedAgentSession,
   seedInstallation,
+  seedManagedVmAbsenceProof,
   seedNode,
   seedProject,
   seedTask,
@@ -1224,7 +1225,7 @@ describe('runNodeCleanupSweep — vertical slice', () => {
       expect(await getNodeStatus(nodeId)).toMatchObject({ status: 'deleted' });
     });
 
-    it('preserves a sleeping session and restorable snapshot when cron destroys its stopped node, then provisions recovery', async () => {
+    it('preserves a sleeping session and restorable snapshot when cron destroys its stopped VM node, then attempts recovery', async () => {
       await seedBaseData();
       const nodeId = 'node-nc-stopped-sleeping-session-survival';
       const wsId = 'ws-nc-stopped-sleeping-session-survival';
@@ -1278,17 +1279,11 @@ describe('runNodeCleanupSweep — vertical slice', () => {
         chatSessionId,
         timestamp: oldDate,
       });
-      await env.DATABASE.prepare(`UPDATE nodes SET runtime = 'cf-container' WHERE id = ?`)
-        .bind(nodeId)
-        .run();
+      // VM sleep releases compute; Instant must retain its only in-place wake target.
+      await seedManagedVmAbsenceProof(nodeId, USER_ID);
 
       const testEnv = {
         ...env,
-        CF_CONTAINER_ENABLED: 'true',
-        VM_AGENT_CONTAINER: {
-          idFromName: (id: string) => id,
-          get: () => ({ destroyForUser: vi.fn().mockResolvedValue(undefined) }),
-        },
         NODE_WORKSPACE_IDLE_TIMEOUT_MS: '1000',
       } as unknown as Env;
 
@@ -1319,6 +1314,11 @@ describe('runNodeCleanupSweep — vertical slice', () => {
         sleep_status: 'sleeping',
         manifest_r2_key: expect.any(String),
       });
+
+      // Remove the cleanup-proof credential before checking the no-placement recovery path.
+      await env.DATABASE.prepare('UPDATE platform_credentials SET is_enabled = 0 WHERE id = ?')
+        .bind(`${nodeId}-proof-credential`)
+        .run();
 
       await expect(
         ensureSessionRecovery(testEnv, PROJECT_ID, chatSessionId, {

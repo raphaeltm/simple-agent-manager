@@ -464,22 +464,34 @@ function selectorContext(): TaskRunnerContext {
 
 describe('workspace resource capacity final reservation CAS', () => {
   it.each(['admission-first', 'shutdown-first', 'concurrent'] as const)(
-    'orders workspace admission against stale warm shutdown (%s)', async (ordering) => {
+    'orders workspace admission against stale warm shutdown (%s)',
+    async (ordering) => {
       const nodeId = `node-wrc-shutdown-${ordering}`;
       await makeReadyNode(nodeId);
       const snapshot = await seedCurrentAuthorityForNode({
-        nodeId, userId: USER_ID, projectId: PROJECT_ID, label: `shutdown-${ordering}`,
+        nodeId,
+        userId: USER_ID,
+        projectId: PROJECT_ID,
+        label: `shutdown-${ordering}`,
       });
-      const stub = env.NODE_LIFECYCLE.get(env.NODE_LIFECYCLE.idFromName(nodeId)) as DurableObjectStub<NodeLifecycleTestDouble>;
+      const stub = env.NODE_LIFECYCLE.get(
+        env.NODE_LIFECYCLE.idFromName(nodeId)
+      ) as DurableObjectStub<NodeLifecycleTestDouble>;
       await runInDurableObject(stub, async (instance) => {
         await instance.ctx.storage.put('state', {
-          nodeId, userId: USER_ID, status: 'warm', warmSince: Date.now() - 600_000,
+          nodeId,
+          userId: USER_ID,
+          status: 'warm',
+          warmSince: Date.now() - 600_000,
           claimedByTask: null,
         });
       });
-      const admit = () => reserveWorkspacePlacement(env.DATABASE,
-        placement(`ws-wrc-shutdown-${ordering}`, nodeId, { capacityPlacementSnapshot: snapshot }),
-        admissionPolicy());
+      const admit = () =>
+        reserveWorkspacePlacement(
+          env.DATABASE,
+          placement(`ws-wrc-shutdown-${ordering}`, nodeId, { capacityPlacementSnapshot: snapshot }),
+          admissionPolicy()
+        );
       const shutdown = () => runInDurableObject(stub, async (instance) => instance.alarm());
       let admitted: boolean;
       if (ordering === 'admission-first') {
@@ -493,8 +505,14 @@ describe('workspace resource capacity final reservation CAS', () => {
       } else {
         [admitted] = await Promise.all([admit(), shutdown()]);
       }
-      const node = await env.DATABASE.prepare('SELECT status FROM nodes WHERE id = ?').bind(nodeId).first<{status: string}>();
-      const workspace = await env.DATABASE.prepare('SELECT status FROM workspaces WHERE node_id = ?').bind(nodeId).first<{status: string}>();
+      const node = await env.DATABASE.prepare('SELECT status FROM nodes WHERE id = ?')
+        .bind(nodeId)
+        .first<{ status: string }>();
+      const workspace = await env.DATABASE.prepare(
+        'SELECT status FROM workspaces WHERE node_id = ?'
+      )
+        .bind(nodeId)
+        .first<{ status: string }>();
       expect(node?.status).toBe(admitted ? 'running' : 'stopped');
       expect(workspace).toEqual(admitted ? { status: 'creating' } : null);
     }
@@ -543,6 +561,39 @@ describe('workspace resource capacity final reservation CAS', () => {
       .bind(nodeId)
       .first<{ cpuMillis: number }>();
     expect(total?.cpuMillis).toBeLessThanOrEqual(4000);
+  });
+
+  it('allows user starts during a build while racing for the final resource reservation', async () => {
+    const nodeId = 'node-wrc-user-build';
+    await makeReadyNode(nodeId, USER_ID, 'medium', {
+      lastMetrics: JSON.stringify({
+        cpuLoadAvg1: 0.2,
+        memoryPercent: 10,
+        diskPercent: 10,
+        creatingWorkspaces: 1,
+      }),
+    });
+    const snapshot = await seedCurrentAuthorityForNode({
+      nodeId,
+      userId: USER_ID,
+      projectId: PROJECT_ID,
+      label: 'user-build',
+    });
+    const input = placement('workspace-wrc-background', nodeId, {
+      capacityPlacementSnapshot: snapshot,
+      resolvedReservation: reservation({ cpuMillis: 4000 }),
+    });
+    expect(await reserveWorkspacePlacement(env.DATABASE, input, admissionPolicy())).toBe(false);
+    const outcomes = await Promise.all(
+      ['workspace-wrc-user-a', 'workspace-wrc-user-b'].map((id) =>
+        reserveWorkspacePlacement(
+          env.DATABASE,
+          { ...input, id },
+          admissionPolicy({ allowBusyBuildQueue: true })
+        )
+      )
+    );
+    expect(outcomes.filter(Boolean)).toHaveLength(1);
   });
 
   it('applies host memory reserve and disk pressure as final admission vetoes', async () => {
