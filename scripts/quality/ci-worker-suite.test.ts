@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
@@ -28,18 +29,16 @@ function stepBlock(job: string, stepName: string): string {
 
 function withoutWorkerSuiteStep(workflow: string): string {
   return workflow.replace(
-    /\n {6}- name: Run Worker and Durable Object suites\n {8}run: pnpm --filter @simple-agent-manager\/api test:workers\n/,
+    /\n {6}- name: Run Worker and Durable Object suites\n {8}run: pnpm --filter @simple-agent-manager\/api test:workers[^\n]*\n/,
     '\n'
   );
 }
 
 function expectRequiredWorkerSuiteWiring(workflow: string): void {
-  const job = jobBlock(workflow, 'durable-object-workers');
+  const job = jobBlock(workflow, 'durable-object-worker-shards');
   const step = stepBlock(job, 'Run Worker and Durable Object suites');
 
-  expect(job).toContain(
-    "needs.changes.outputs.api == 'true'"
-  );
+  expect(job).toContain("needs.changes.outputs.api == 'true'");
   expect(job).toContain('needs: [changes]');
   // The job must carry a JOB-level bound — an unbounded required check can hang
   // for the 6h GitHub ceiling, and a step-level `timeout-minutes` does not cap
@@ -55,6 +54,25 @@ function expectRequiredWorkerSuiteWiring(workflow: string): void {
   expect(timeoutMinutes).toBeLessThanOrEqual(30);
   expect(step).toContain('run: pnpm --filter @simple-agent-manager/api test:workers');
   expect(step).not.toContain('continue-on-error');
+  expect(job).toContain('fail-fast: false');
+  expect(job).toContain('shard: [1, 2, 3]');
+  expect(step).toContain('--shard=${{ matrix.shard }}/3');
+  expect(step).toContain('--reporter=./tests/workers/timing-reporter.ts');
+  const gate = jobBlock(workflow, 'durable-object-workers');
+  expect(gate).toContain('name: Durable Object Workers');
+  expect(gate).toContain('needs: [changes, durable-object-worker-shards]');
+  expect(gate).toContain('if: always()');
+  expect(gate).toContain("needs.changes.outputs.api == 'true'");
+  expect(gate).toContain('SHARD_RESULT: ${{ needs.durable-object-worker-shards.result }}');
+  expect(gate).not.toContain('continue-on-error');
+  const command = stepBlock(gate, 'Require every Workers shard to pass').match(/run: (.+)/)?.[1];
+  expect(command).toBeDefined();
+  for (const result of ['success', 'failure', 'cancelled', 'skipped', '']) {
+    const execution = spawnSync('bash', ['-c', command!], {
+      env: { ...process.env, SHARD_RESULT: result },
+    });
+    expect(execution.status === 0, `aggregate status for ${result}`).toBe(result === 'success');
+  }
 }
 
 describe('CI Worker and Durable Object suite wiring', () => {
@@ -75,14 +93,33 @@ describe('CI Worker and Durable Object suite wiring', () => {
   });
 });
 
+describe('Workers shard gate discrimination', () => {
+  it('rejects an aggregate that ignores failed or skipped shards', () => {
+    const weakened = readCiWorkflow().replace('run: test "$SHARD_RESULT" = success', 'run: true');
+    expect(() => expectRequiredWorkerSuiteWiring(weakened)).toThrow();
+  });
+
+  it('rejects an omitted shard and a disabled shard selector', () => {
+    for (const weakened of [
+      readCiWorkflow().replace('shard: [1, 2, 3]', 'shard: [1, 2]'),
+      readCiWorkflow().replace('--shard=${{ matrix.shard }}/3', ''),
+    ])
+      expect(() => expectRequiredWorkerSuiteWiring(weakened)).toThrow();
+  });
+});
+
 describe('CI Playwright visual audit wiring', () => {
   function expectBlockingPlaywrightVisualJob(workflow: string): void {
     const job = jobBlock(workflow, 'playwright-visual');
     const selectionStep = stepBlock(job, 'Select non-quarantined Playwright visual audits');
     const runStep = stepBlock(job, 'Run Playwright visual audit tests');
 
-    expect(job).toContain("if: github.event_name == 'pull_request' && needs.changes.outputs.web-ui == 'true'");
-    expect(selectionStep).toContain('pnpm exec tsx scripts/quality/select-playwright-visual-audits.ts');
+    expect(job).toContain(
+      "if: github.event_name == 'pull_request' && needs.changes.outputs.web-ui == 'true'"
+    );
+    expect(selectionStep).toContain(
+      'pnpm exec tsx scripts/quality/select-playwright-visual-audits.ts'
+    );
     expect(runStep).toContain('xargs npx playwright test');
     expect(runStep).toContain("--project='iPhone 14 (390x844)'");
     expect(runStep).not.toContain('continue-on-error');

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -56,19 +56,31 @@ const orgRepos = {
 
 describe('RepoSelector', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mocks.listRepositories.mockResolvedValue(personalRepos);
   });
 
   it('fetches repos on mount and shows them on focus', async () => {
-    render(
-      <RepoSelector value="" onChange={() => {}} />
+    let resolveRepositories!: (repos: typeof personalRepos) => void;
+    mocks.listRepositories.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveRepositories = resolve;
+      })
     );
+    render(<RepoSelector value="" onChange={() => {}} />);
 
     await waitFor(() => {
       expect(mocks.listRepositories).toHaveBeenCalledWith(undefined);
     });
 
+    expect(screen.getByText('Loading repositories...')).toBeInTheDocument();
+    expect(screen.queryByText('user/personal-repo')).not.toBeInTheDocument();
+    await act(async () => resolveRepositories(personalRepos));
+
+    // A request being issued does not mean React has committed its response.
+    await waitFor(() => {
+      expect(screen.queryByText('Loading repositories...')).not.toBeInTheDocument();
+    });
     fireEvent.focus(screen.getByRole('textbox'));
     expect(await screen.findByText('user/personal-repo')).toBeInTheDocument();
     expect(screen.getByText('user/another-repo')).toBeInTheDocument();
@@ -77,23 +89,23 @@ describe('RepoSelector', () => {
   it('passes installationId to listRepositories when provided', async () => {
     mocks.listRepositories.mockResolvedValue(orgRepos);
 
-    render(
-      <RepoSelector value="" onChange={() => {}} installationId="inst-org" />
-    );
+    render(<RepoSelector value="" onChange={() => {}} installationId="inst-org" />);
 
     await waitFor(() => {
       expect(mocks.listRepositories).toHaveBeenCalledWith('inst-org');
     });
 
+    // A request being issued does not mean React has committed its response.
+    await waitFor(() => {
+      expect(screen.queryByText('Loading repositories...')).not.toBeInTheDocument();
+    });
     fireEvent.focus(screen.getByRole('textbox'));
     expect(await screen.findByText('my-org/org-repo')).toBeInTheDocument();
     expect(screen.getByText('my-org/private-service')).toBeInTheDocument();
   });
 
   it('re-fetches repos when installationId changes', async () => {
-    mocks.listRepositories
-      .mockResolvedValueOnce(personalRepos)
-      .mockResolvedValueOnce(orgRepos);
+    mocks.listRepositories.mockResolvedValueOnce(personalRepos).mockResolvedValueOnce(orgRepos);
 
     const { rerender } = render(
       <RepoSelector value="" onChange={() => {}} installationId="inst-personal" />
@@ -104,14 +116,16 @@ describe('RepoSelector', () => {
     });
 
     // Change installation
-    rerender(
-      <RepoSelector value="" onChange={() => {}} installationId="inst-org" />
-    );
+    rerender(<RepoSelector value="" onChange={() => {}} installationId="inst-org" />);
 
     await waitFor(() => {
       expect(mocks.listRepositories).toHaveBeenCalledWith('inst-org');
     });
 
+    // A request being issued does not mean React has committed its response.
+    await waitFor(() => {
+      expect(screen.queryByText('Loading repositories...')).not.toBeInTheDocument();
+    });
     fireEvent.focus(screen.getByRole('textbox'));
     expect(await screen.findByText('my-org/org-repo')).toBeInTheDocument();
   });
@@ -122,9 +136,7 @@ describe('RepoSelector', () => {
       failedInstallations: ['my-org'],
     });
 
-    render(
-      <RepoSelector value="" onChange={() => {}} />
-    );
+    render(<RepoSelector value="" onChange={() => {}} />);
 
     expect(await screen.findByText(/Could not load repos from: my-org/)).toBeInTheDocument();
   });
@@ -133,18 +145,16 @@ describe('RepoSelector', () => {
     const onRepoSelect = vi.fn();
     const onChange = vi.fn();
 
-    render(
-      <RepoSelector
-        value=""
-        onChange={onChange}
-        onRepoSelect={onRepoSelect}
-      />
-    );
+    render(<RepoSelector value="" onChange={onChange} onRepoSelect={onRepoSelect} />);
 
     await waitFor(() => {
       expect(mocks.listRepositories).toHaveBeenCalled();
     });
 
+    // A request being issued does not mean React has committed its response.
+    await waitFor(() => {
+      expect(screen.queryByText('Loading repositories...')).not.toBeInTheDocument();
+    });
     fireEvent.focus(screen.getByRole('textbox'));
     const option = await screen.findByText('user/personal-repo');
     fireEvent.click(option);
@@ -159,19 +169,19 @@ describe('RepoSelector', () => {
 
   it('filters repos based on typed input', async () => {
     const onChange = vi.fn();
-    const { rerender } = render(
-      <RepoSelector value="" onChange={onChange} />
-    );
+    const { rerender } = render(<RepoSelector value="" onChange={onChange} />);
 
     await waitFor(() => {
       expect(mocks.listRepositories).toHaveBeenCalled();
     });
 
     // Simulate typing "another"
-    rerender(
-      <RepoSelector value="another" onChange={onChange} />
-    );
+    rerender(<RepoSelector value="another" onChange={onChange} />);
 
+    // A request being issued does not mean React has committed its response.
+    await waitFor(() => {
+      expect(screen.queryByText('Loading repositories...')).not.toBeInTheDocument();
+    });
     fireEvent.focus(screen.getByRole('textbox'));
 
     await waitFor(() => {
@@ -181,18 +191,18 @@ describe('RepoSelector', () => {
   });
 
   it('hides dropdown when value is a URL', async () => {
-    const { rerender } = render(
-      <RepoSelector value="" onChange={() => {}} />
-    );
+    const { rerender } = render(<RepoSelector value="" onChange={() => {}} />);
 
     await waitFor(() => {
       expect(mocks.listRepositories).toHaveBeenCalled();
     });
 
-    rerender(
-      <RepoSelector value="https://github.com/user/personal-repo" onChange={() => {}} />
-    );
+    rerender(<RepoSelector value="https://github.com/user/personal-repo" onChange={() => {}} />);
 
+    // A request being issued does not mean React has committed its response.
+    await waitFor(() => {
+      expect(screen.queryByText('Loading repositories...')).not.toBeInTheDocument();
+    });
     fireEvent.focus(screen.getByRole('textbox'));
 
     // Dropdown should not show when value is a URL
