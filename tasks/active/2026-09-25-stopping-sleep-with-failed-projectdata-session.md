@@ -135,3 +135,38 @@ test chat was stopped. No third VM was created. Final coordinated staging verifi
 the marker reset is pending; do not treat the first deployment as the final staging gate.
 Post-allocation finalizer and parent-hook behavior are covered by local real-alarm SQL tests;
 the live failure occurred before replacement workspace allocation.
+
+## Final-candidate staging attempt (2026-10-08, lease 117)
+
+Candidate cc066585d integrates main 33db414e0. Full CI 37845861298 and staging deployment
+37845866548 passed. The earlier manual CI run's single capacity-pool 15-second test timeout
+passed both the focused rerun and this complete CI run. The final integration reviewer passed.
+Authenticated Playwright dashboard, projects and settings returned 200 without page errors;
+the screenshots were reviewed. An owned conversation slept with an available snapshot, woke
+on a ready replacement node, and replied `FINAL_WAKE_RESUMED`. It then slept and restored
+again on the same node. The snapshot-preserving normal path works on the final deployment.
+
+The exact failed-wake then successful-retry staging gate remains pending. A scoped D1 fault
+injection was rejected because the debugging token is read-only (7500); no mutation happened.
+An authenticated direct runtime-delete probe could not reach the node hostname because its
+TLS handshake failed, so that attempt also restored normally. Neither attempt is counted as
+failure-path verification. The local red/green alarm regression and prior live failure remain
+valid, but do not substitute for the final same-runner failure/retry sequence.
+
+A retry of explicit sleep was needed after one snapshot completion-verification error; it
+then succeeded. Earlier in the lease a sleep timeout coincided with node DNS lookup errors.
+These observations were shared with the boot-performance peer and are not attributed to this
+change. No extra infrastructure changes were made.
+
+Both owned cx23 nodes were deleted with 200 responses, GET /api/nodes returned an empty list,
+and the owned chat was stopped with workspaceDeleted=true. Remaining owned workspace history
+is a deleted tombstone with runtime-deletion proof; no owned runtime is active. Lease 117 was
+released result=fail, cleaned=yes, with a direct handoff to the expiry follow-up and a request
+to requeue after it. At most two VMs were used. PR #2276 remains closed until the exact gate.
+
+Next probe must verify authenticated runtime access before starting the sequence. Direct
+origin access should resolve the owned VM IP and trust the official Cloudflare Origin CA;
+do not disable certificate validation or alter shared DNS/pools. Keep the source snapshot
+intact: control-plane workspace DELETE deliberately deletes it, so it is unsuitable for
+failure injection. A direct runtime removal during agent-session restoration can exercise
+normal failure handling, followed by the queued prompt's fresh recovery claim.
