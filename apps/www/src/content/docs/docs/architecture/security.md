@@ -227,6 +227,42 @@ Mermaid lays a diagram out in the live page before it is sanitized, so a remote 
 
 Credential tokens are stripped before text reaches a log line or a stored diagnostic: OpenAI and Anthropic `sk-...` keys (including `sk-proj-...` and `sk-ant-...`), GitHub tokens (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`), and SAM personal access and webhook tokens. Every API redactor takes these token shapes from one definition, `redactCredentialTokens` in `apps/api/src/lib/credential-token-redaction.ts`: structured Worker logs (`apps/api/src/lib/logger.ts`), stored VM agent error reports and debug-agent evidence (`redactSensitiveData`), comment directives delivered to agents, deployment publish and apply events, Report Issue text, and agent sign-in helper diagnostics. `Bearer ...` and `Basic ...` values are matched by each redactor's own rule, because those are also ordinary words and a log line can afford to over-redact where text shown to a user cannot. Redaction is pattern-based and best-effort - a safety net, not a reason to paste secrets anywhere.
 
+## Workspace Isolation Model
+
+SAM's isolation boundary is the **node VM**, not the devcontainer. This is deliberate. Security reviews of SAM, whether by people or by automated scanners, should assess findings against this model.
+
+### Nested containers are a product requirement
+
+Users and their agents must be able to run containers inside a workspace: `docker build`, `docker run`, Docker Compose and Testcontainers. A repository's devcontainer configuration is therefore applied as written, including settings that grant host-level authority on the node:
+
+- `privileged`, which the Docker-in-Docker feature requires
+- `mounts`, `capAdd`, `securityOpt` and `runArgs`
+- `initializeCommand`, which the devcontainer CLI runs on the VM itself
+- Compose-based devcontainers
+
+The VM agent runs as root (`packages/cloud-init/src/template.ts`). It forwards the merged output of `devcontainer read-configuration --include-merged-configuration` without filtering these fields (`writeMountOverrideConfig` in `packages/vm-agent/internal/bootstrap/bootstrap.go`). SAM's own default container, used for lightweight and fallback workspaces, is privileged too (`writeDefaultDevcontainerConfigForMode` in the same file). Filtering repository settings would not harden SAM. It would break every repository that runs containers in its workspace, including SAM's own.
+
+Instant workspaces run in Cloudflare Containers and do not use repository devcontainers, so this section is about VM workspaces.
+
+### One node belongs to one user
+
+- Every node has a required owner (`nodes.user_id` in `apps/api/src/db/schema.ts`).
+- The task runner reuses only the requesting user's own running or warm nodes (`apps/api/src/durable-objects/task-runner/node-selection.ts`). Creating a workspace on a specific node requires owning that node (`getOwnedNode` in `apps/api/src/routes/workspaces/_helpers.ts`).
+- SAM is self-hosted. A person or an organization runs each installation, and nodes live in a cloud account that belongs to the user, the project or the installation operator (see the Cloud Credential Model above). SAM does not mix unrelated customers on shared hosts.
+- Nodes hold no cloud-account credentials. The provider API token stays in the control plane, GCP VMs are created without a service account (`packages/providers/src/gcp.ts`), and cloud-init blocks containers from reaching the cloud metadata endpoint (`packages/cloud-init/src/template.ts`).
+- **Exception: anonymous trials.** Every trial runs under one shared system account (`TRIAL_ANONYMOUS_USER_ID`), and the trial orchestrator can reuse a running trial node for a later trial (`apps/api/src/durable-objects/trial-orchestrator/steps.ts`). The per-user boundary therefore does not separate one trial visitor from another: with trials enabled, a visitor who escapes their container can reach other visitors' workspaces on the same node. Trials stay off unless an operator turns on the `trials:enabled` kill switch (`apps/api/src/services/trial/kill-switch.ts`), and they should stay off until each trial gets its own node.
+
+Outside anonymous trials, escaping a devcontainer reaches only the user's own VM, whether the escape comes from repository configuration, user code or an agent. On that VM it can reach the user's other workspaces on the node and the credentials the node holds for them. Opening a repository in SAM trusts its devcontainer the same way opening it in VS Code Dev Containers or GitHub Codespaces does. That repository's code already runs with the user's credentials inside the workspace.
+
+### Where security review should focus
+
+- **Control-plane authorization.** Node and workspace callback tokens are each scoped to one node or one workspace, and the Worker checks them (see Callback Tokens above).
+- **Placement.** Nothing may place one user's workspace on another user's node. Anonymous trials share one system account, so trials must not share nodes with each other either.
+- **Credential scoping.** A node must never receive another user's credentials or installation-wide secrets.
+- **App deployments.** Deployment nodes run internet-facing apps unattended and can host several environments belonging to the same user. Their Compose subset denies host-authority fields such as `privileged`, `network_mode` and `use_api_socket` (`DENIED_SERVICE_FIELDS` in `packages/shared/src/compose-parser/constants.ts`).
+
+Ways to run nested containers without `privileged`, such as a user-namespaced container runtime, are welcome improvements, provided Docker, Compose and Testcontainers keep working inside workspaces.
+
 ## Security Best Practices
 
 - **Rotate keys quarterly** — regenerate JWT and encryption keys

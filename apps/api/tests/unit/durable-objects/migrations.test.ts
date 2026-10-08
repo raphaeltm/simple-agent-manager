@@ -511,7 +511,7 @@ describe('DO Migrations', () => {
       const log = sql.getExecLog();
       const indexes = log.filter((q) => q.toUpperCase().startsWith('CREATE INDEX'));
 
-      // 19 CREATE INDEX statements total (migration 007 drops session_created
+      // CREATE INDEX statements (migration 007 drops session_created
       // and creates session_seq, but DROP INDEX doesn't count here):
       // chat_sessions: 3 (status, started_at, workspace) + 1 (task_id from 002) + 1 (updated_at from 009)
       // chat_messages: 1 (session_created from 001) + 1 (session_seq from 007)
@@ -563,7 +563,8 @@ describe('DO Migrations', () => {
       // Additive audience/channel/schedule/wake-seek indexes (049–054): 18.
       // Active mailbox capacity index (055): 1.
       // Complete archive-search projection: 1 session seek index (058).
-      expect(indexes).toHaveLength(126);
+      // Active prompt-delivery queue indexes (062): 4.
+      expect(indexes).toHaveLength(130);
       expect(indexes.some((query) => query.includes('idx_archive_raw_chunk_time'))).toBe(true);
     });
   });
