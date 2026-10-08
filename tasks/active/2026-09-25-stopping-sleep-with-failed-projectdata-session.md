@@ -43,3 +43,28 @@ Found by the round 3 review of `sam/preserve-failed-tasks-work-fn8ba7` (idea
 - [ ] The runtime is torn down and the snapshot is not presented as wakeable.
 - [ ] A two-sweep regression test against real SQL, plus a control that a `sleeping`/`stopped`
       ProjectData session still completes as sleeping.
+
+## 2026-10-08 implementation scope
+
+SAM task 01M4DV45S0WXQETVAEPVJY5M2K; idea 01M3MFDMZ5AS0BXPHZWS3CRFED.
+Existing backlog reused in SAM's pre-created isolated output branch.
+
+Research: failTask terminalizes stable owner before failRecoveryLifecycle; cleanup finalizer
+skips snapshot checks for failed/error and scopes the check to the old workspace, although
+wake uses a replacement. ProjectData link rejects failed sessions and unknown errors retry.
+Sleep repair deliberately excludes failed sessions of non-failed tasks; stopping candidate
+selection has no age bound. Recovery budgets decay after clean failures; cooldown is not
+permanent loss of recoverability.
+
+- [ ] Return a recoverable stable wake task to sleeping before terminal hooks; fence attempt ownership.
+- [ ] Preserve authoritative restorable snapshots through replacement cleanup; genuine loss remains visible.
+- [ ] Heal failed ProjectData sessions only under an authorized snapshot wake claim.
+- [ ] Classify status refusal as permanent across RPC error serialization.
+- [ ] Bound stopping selection on immutable stopping age; repair failed non-failed-task sessions to terminal failure with reason and cleanup.
+- [ ] Real alarm → failure → finalizer SQL regression, parent-hook assertion, unrecoverable control, next-wake and status-refusal coverage.
+- [ ] Two-sweep real SQL regression for stopping repair.
+- [ ] Local checks and specialist reviews; coordinated staging lease and live verification.
+- [ ] PR/CI/CodeRabbit/merge/production; idea evidence and channel cleanup.
+
+No migration planned. Shared channel reliability-wave-1008; expiry owns expired end state,
+8h task owns failure-preservation preparing/stopping reaper predicate. Rules 47, 58, 62, 66.
