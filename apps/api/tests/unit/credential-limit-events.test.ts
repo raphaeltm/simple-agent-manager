@@ -11,6 +11,7 @@ import {
   createProjectEventSubscription,
 } from '../../src/durable-objects/project-data/project-events';
 import type { Env as ProjectDataEnv } from '../../src/durable-objects/project-data/types';
+import { log } from '../../src/lib/logger';
 import {
   type AcpUsageCallbackReport,
   handleAcpUsageCallback,
@@ -21,6 +22,7 @@ import {
   extractCredentialLimitObservationsFromHeaders,
   parseOpenAIDurationMs,
   recordCredentialLimitObservation,
+  recordProxyCredentialLimitObservationsFromHeaders,
 } from '../../src/services/credential-limit-events';
 import { purgeExpiredCredentialLimitWindows } from '../../src/services/credential-limit-events/admissions';
 import * as jwtService from '../../src/services/jwt';
@@ -45,6 +47,18 @@ vi.mock('../../src/services/jwt', () => ({
 vi.mock('../../src/services/acp-activity-callback-flush', () => ({
   assertAcpActivityCallbackResourcesActive: vi.fn(async () => undefined),
 }));
+
+// Shape of a credential id from the 2026-06 composable-credentials backfill,
+// `cred-{ownerId}-{ciphertext}:{iv}`: production Claude references are 238 chars,
+// past the 160-byte project-event subject id budget.
+const BACKFILLED_LONG_REFERENCE =
+  'cc_credentials:cred-4bw1FXkQ7cK2nY8pR3sT6uV9wZ0aB1cD-' +
+  'KgCluaQx9+Ga5+i+JTSMVBxORYB/j3L90fcFFZrC4rik9mbQ2'.repeat(3) +
+  '/msAieB+gfJsvMulc0mQ==:MPQAR5bNpdU+BnN0';
+
+function sha256Key(reference: string): string {
+  return `sha256:${createHash('sha256').update(reference).digest('hex')}`;
+}
 
 type TestEnv = {
   DATABASE: D1Database;
@@ -1081,13 +1095,7 @@ describe('credential limit producer allowlists for Codex, OpenCode and per-model
 });
 
 describe('credential limit producer keys references longer than an event subject id', () => {
-  // Shape of a credential id from the 2026-06 composable-credentials backfill,
-  // `cred-{ownerId}-{ciphertext}:{iv}`: production Claude references are 238 chars,
-  // past the 160-byte project-event subject id budget.
-  const longReference =
-    'cc_credentials:cred-4bw1FXkQ7cK2nY8pR3sT6uV9wZ0aB1cD-' +
-    'KgCluaQx9+Ga5+i+JTSMVBxORYB/j3L90fcFFZrC4rik9mbQ2'.repeat(3) +
-    '/msAieB+gfJsvMulc0mQ==:MPQAR5bNpdU+BnN0';
+  const longReference = BACKFILLED_LONG_REFERENCE;
 
   function storedReferences(sqlite: Database.Database): string[] {
     return (
@@ -1118,7 +1126,7 @@ describe('credential limit producer keys references longer than an event subject
         dispatchOutcome: 'created',
       });
 
-      const key = `sha256:${createHash('sha256').update(longReference).digest('hex')}`;
+      const key = sha256Key(longReference);
       expect(storedReferences(sqlite)).toEqual([key]);
       expect(
         eventStore.sqlite.prepare('SELECT subject_type, subject_id FROM project_events').all()
@@ -1134,12 +1142,38 @@ describe('credential limit producer keys references longer than an event subject
     }
   });
 
-  it('keeps a reference that fits the budget as its own key and measures it in bytes', async () => {
+  it('keys the AI-proxy writer the same way as VM-agent callbacks', async () => {
+    // ai-proxy-passthrough.ts attributes proxied calls to `cc_credentials:<id>` too,
+    // so a backfilled credential reaches the producer through this second writer.
     const { sqlite, env } = createCredentialD1();
-    const exactlyAtBudget = `cc_credentials:${'x'.repeat(145)}`; // 160 bytes
-    const oneByteOver = `cc_credentials:${'x'.repeat(146)}`; // 161 bytes
-    const multiByteOver = `cc_credentials:${'é'.repeat(73)}`; // 88 chars, 161 bytes
-    for (const credentialReference of [exactlyAtBudget, oneByteOver, multiByteOver]) {
+    await recordProxyCredentialLimitObservationsFromHeaders(
+      env as never,
+      new Headers({
+        'anthropic-ratelimit-requests-limit': '100',
+        'anthropic-ratelimit-requests-remaining': '90',
+        'anthropic-ratelimit-requests-reset': new Date(110_000).toISOString(),
+      }),
+      {
+        projectId: 'project-1',
+        userId: 'user-1',
+        credentialReference: longReference,
+        credentialSource: 'user',
+        provider: 'anthropic',
+        providerMode: 'proxy-passthrough',
+        source: 'ai-proxy-passthrough.anthropic.messages',
+        observedAt: 100_000,
+      }
+    );
+    expect(storedReferences(sqlite)).toEqual([sha256Key(longReference)]);
+  });
+
+  it('keeps references no longer than a digest key as their own key, measured in bytes', async () => {
+    const { sqlite, env } = createCredentialD1();
+    // A digest key is `sha256:` + 64 hex = 71 bytes, so no key ever exceeds it.
+    const atDigestLength = `cc_credentials:${'x'.repeat(56)}`; // 71 bytes
+    const oneByteOver = `cc_credentials:${'x'.repeat(57)}`; // 72 bytes
+    const multiByteOver = `cc_credentials:${'é'.repeat(29)}`; // 44 chars, 73 bytes
+    for (const credentialReference of [atDigestLength, oneByteOver, multiByteOver]) {
       await expect(
         recordCredentialLimitObservation(
           env as never,
@@ -1147,10 +1181,8 @@ describe('credential limit producer keys references longer than an event subject
         )
       ).resolves.toEqual({ outcome: 'ignored', reason: 'ok' });
     }
-    const digest = (reference: string) =>
-      `sha256:${createHash('sha256').update(reference).digest('hex')}`;
     expect(storedReferences(sqlite).sort()).toEqual(
-      [exactlyAtBudget, digest(oneByteOver), digest(multiByteOver)].sort()
+      [atDigestLength, sha256Key(oneByteOver), sha256Key(multiByteOver)].sort()
     );
   });
 });
@@ -1343,6 +1375,46 @@ describe('ACP usage callback credential verification', () => {
       })
     ).rejects.toMatchObject({ statusCode: 403 });
     expect(projectDataService.admitProjectEvent).not.toHaveBeenCalled();
+  });
+
+  it('logs a mismatched long credential reference by its key, never the raw reference', async () => {
+    const { sqlite, env } = createCredentialD1();
+    seedCallback();
+    sqlite
+      .prepare('UPDATE agent_sessions SET agent_credential_reference = ? WHERE id = ?')
+      .run(BACKFILLED_LONG_REFERENCE, 'session-1');
+    const forgedReference = BACKFILLED_LONG_REFERENCE.replace('MPQAR5bN', 'FORGED00');
+    const warn = vi.spyOn(log, 'warn');
+    try {
+      await expect(
+        handleAcpUsageCallback(makeContext(env), {
+          projectId: 'project-1',
+          sessionId: 'session-1',
+          body: {
+            nodeId: 'node-1',
+            agentType: 'claude-code',
+            credentialReference: forgedReference,
+            credentialSource: 'user',
+            credentialGeneration: 1,
+            rateLimits: [baseObservation({ windowType: 'claude.five_hour' })],
+          } as never,
+        })
+      ).rejects.toMatchObject({ statusCode: 403 });
+
+      const mismatch = warn.mock.calls.find(
+        ([event]) => event === 'acp_usage.credential_reference_mismatch'
+      );
+      expect(mismatch?.[1]).toMatchObject({
+        sessionId: 'session-1',
+        expectedCredentialReference: sha256Key(BACKFILLED_LONG_REFERENCE),
+        receivedCredentialReference: sha256Key(forgedReference),
+        action: 'rejected',
+      });
+      // The ciphertext embedded in backfilled ids never reaches a log line.
+      expect(JSON.stringify(warn.mock.calls)).not.toContain('KgCluaQx9');
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('rejects missing or stale credential generations at the callback boundary', async () => {

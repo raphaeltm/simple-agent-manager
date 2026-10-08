@@ -74,10 +74,12 @@ seven_day:{utilization:0.31,resetsAt:<s>}}}`. Top-level `utilization` appears on
       (`CREDENTIAL_LIMIT_USAGE_CALLBACK_MAX_BODY_BYTES`) bounds it.
 - [x] A2 `AcpSessionUsageReportSchema.credentialReference` uses `UsageCredentialReferenceSchema`
       (non-empty string) with a comment naming the backfilled-id cause (b5350f863).
-- [x] A3 `credentialLimitReferenceKey()` in `credential-limit-events/values.ts`: trimmed reference when
-      ≤ the 160-byte identifier budget, else `sha256:<hex>` of the reference (collision-free, fits
-      event subject ids and outbox guards). Producer `sanitizeObservation` uses it instead of
-      truncating.
+- [x] A3 `credentialLimitReferenceKey()` in `credential-limit-events/values.ts`: the trimmed
+      reference when it is no longer than a digest key (71 bytes), else `sha256:<hex>` of the
+      reference (collision-free; every key fits the window column's 160-char CHECK and any
+      `PROJECT_EVENT_FILTER_MAX_STRING_BYTES` ≥ 71). Producer `sanitizeObservation` uses it instead
+      of truncating. (First cut used the 160-byte default event budget; changed after the
+      constitution review so the key no longer depends on that configurable limit.)
 - [x] A4 `read.ts`: `listProjectCredentialLimits` filters by the key and restores the real reference
       and credential id for the requested credential; unfiltered and user-level reads restore keys of
       the caller's own `cc_credentials` (one extra D1 read, only when a hashed key is present).

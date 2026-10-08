@@ -11,7 +11,6 @@
  * Malformed rows are skipped, not fatal (`.claude/rules/50`).
  */
 import {
-  ccCredentialReference,
   credentialIdFromReference,
   type CredentialLimitCredentialSource,
   type CredentialLimitCredentialSummary,
@@ -27,6 +26,7 @@ import {
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
+import { composableCredentialReference } from '../default-capacity-pool-helpers';
 import { credentialLimitReferenceKey, isCredentialLimitReferenceDigest } from './values';
 
 type WindowReadRow = {
@@ -284,8 +284,9 @@ function restoreCredentialReferences(
 
 /**
  * Restore digest-keyed summaries for the caller's own composable credentials,
- * the only ids long enough to need a digest. Costs one D1 read, and only when a
- * digest key is present. Another member's credential stays a digest with no id.
+ * the only ids long enough to need a digest. Costs one D1 read (bounded like the
+ * window read), and only when a digest key is present. Another member's
+ * credential stays a digest with no id.
  */
 async function restoreOwnCredentialReferences(
   env: Env,
@@ -299,13 +300,15 @@ async function restoreOwnCredentialReferences(
   ) {
     return;
   }
-  const rows = await env.DATABASE.prepare('SELECT id FROM cc_credentials WHERE owner_id = ?')
-    .bind(userId)
+  const rows = await env.DATABASE.prepare(
+    'SELECT id FROM cc_credentials WHERE owner_id = ? ORDER BY id LIMIT ?'
+  )
+    .bind(userId, readMaxRows(env))
     .all<{ id: unknown }>();
   const referencesByKey = new Map<string, string>();
   for (const row of rows.results ?? []) {
     if (typeof row.id !== 'string' || row.id === '') continue;
-    const reference = ccCredentialReference(row.id);
+    const reference = composableCredentialReference(row.id);
     const key = await credentialLimitReferenceKey(reference);
     if (key && key !== reference) referencesByKey.set(key, reference);
   }

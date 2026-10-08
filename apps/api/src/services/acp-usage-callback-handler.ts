@@ -18,6 +18,7 @@ import { type AcpActivityBinding, buildAcpActivityBinding } from './acp-activity
 import { assertAcpActivityCallbackResourcesActive } from './acp-activity-callback-flush';
 import {
   type CredentialLimitObservation,
+  credentialLimitReferenceKey,
   recordCredentialLimitObservations,
 } from './credential-limit-events';
 import { type CallbackTokenPayload, verifyCallbackToken } from './jwt';
@@ -213,10 +214,19 @@ async function loadServerCredentialAttribution(
     .first<AgentSessionCredentialAttributionRow>();
 }
 
-function assertServerAttributionMatchesCallback(
+/**
+ * Rejection logs record credential references by the key the credential-limit
+ * pipeline stores (`credentialLimitReferenceKey`): short references as-is, long
+ * ones as their SHA-256 digest. Backfilled credential ids embed the legacy
+ * ciphertext, which must not reach logs; the key still matches stored windows.
+ */
+async function assertServerAttributionMatchesCallback(
   row: AgentSessionCredentialAttributionRow,
   body: AcpUsageCallbackReport
-): { credentialReference: string; credentialSource: 'user' | 'project' | 'platform' } | null {
+): Promise<{
+  credentialReference: string;
+  credentialSource: 'user' | 'project' | 'platform';
+} | null> {
   const source = credentialSource(row.agent_credential_source);
   if (!row.agent_credential_reference || !source) {
     if (body.credentialReference || body.credentialSource) {
@@ -234,8 +244,10 @@ function assertServerAttributionMatchesCallback(
     log.warn('acp_usage.credential_reference_mismatch', {
       sessionId: row.id,
       workspaceId: row.workspace_id,
-      expectedCredentialReference: row.agent_credential_reference,
-      receivedCredentialReference: body.credentialReference,
+      expectedCredentialReference: await credentialLimitReferenceKey(
+        row.agent_credential_reference
+      ),
+      receivedCredentialReference: await credentialLimitReferenceKey(body.credentialReference),
       action: 'rejected',
     });
     throw errors.forbidden('Credential attribution mismatch');
@@ -267,7 +279,7 @@ function assertServerAttributionMatchesCallback(
     log.warn('acp_usage.invalid_server_credential_generation', {
       sessionId: row.id,
       workspaceId: row.workspace_id,
-      credentialReference: row.agent_credential_reference,
+      credentialReference: await credentialLimitReferenceKey(row.agent_credential_reference),
       action: 'rejected',
     });
     throw errors.forbidden('Credential attribution generation is not server verified');
@@ -281,7 +293,7 @@ function assertServerAttributionMatchesCallback(
     log.warn('acp_usage.missing_credential_generation', {
       sessionId: row.id,
       workspaceId: row.workspace_id,
-      credentialReference: row.agent_credential_reference,
+      credentialReference: await credentialLimitReferenceKey(row.agent_credential_reference),
       action: 'rejected',
     });
     throw errors.forbidden('Credential attribution generation is required');
@@ -290,7 +302,7 @@ function assertServerAttributionMatchesCallback(
     log.warn('acp_usage.credential_generation_mismatch', {
       sessionId: row.id,
       workspaceId: row.workspace_id,
-      credentialReference: row.agent_credential_reference,
+      credentialReference: await credentialLimitReferenceKey(row.agent_credential_reference),
       expectedCredentialGeneration: row.agent_credential_generation,
       receivedCredentialGeneration: callbackCredentialGeneration,
       action: 'rejected',
@@ -405,7 +417,7 @@ export async function handleAcpUsageCallback(
     throw errors.forbidden('Usage callback binding mismatch');
   }
 
-  const serverAttribution = assertServerAttributionMatchesCallback(row, body);
+  const serverAttribution = await assertServerAttributionMatchesCallback(row, body);
   if (!serverAttribution || body.rateLimits.length === 0) {
     log.info('acp_usage.no_supported_credential_limit_observation', {
       projectId,

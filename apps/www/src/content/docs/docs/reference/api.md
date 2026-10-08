@@ -301,7 +301,9 @@ Usage windows visible to the caller inside a project: the caller's own credentia
 and platform-shared ones, never another member's personal credential. Requires `project:read`.
 Optional `agentSessionId` narrows the result to the credential that agent session is attributed to,
 resolved server-side from `agent_sessions`. The MCP tool `get_credential_limits` exposes the same
-view to agents (`scope: "session" | "project"`).
+view to agents (`scope: "session" | "project"`). `credentialId` is filled in for the caller's own
+credentials; a shared credential owned by another member whose reference is longer than 71 bytes
+comes back with a `sha256:` digest as `credentialReference` and `credentialId: null`.
 
 ### `GET /api/providers/catalog`
 

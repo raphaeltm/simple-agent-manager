@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
+import { log } from '../../../src/lib/logger';
 import { agentUsageCallbackRoute } from '../../../src/routes/projects/agent-usage-callback';
 import { handleAcpUsageCallback } from '../../../src/services/acp-usage-callback-handler';
 
@@ -108,17 +109,29 @@ describe('agent usage callback route', () => {
     );
   });
 
-  it('keeps the identifier bound on window types', async () => {
-    const response = await usageRequest(
-      {
-        nodeId: 'node-1',
-        rateLimits: [{ windowType: `claude.${'x'.repeat(160)}`, status: 'allowed' }],
-      },
-      { CREDENTIAL_LIMIT_USAGE_CALLBACK_MAX_BODY_BYTES: '4096' }
-    );
+  it('keeps the identifier bound on window types and logs the failing field, not its value', async () => {
+    const warn = vi.spyOn(log, 'warn');
+    try {
+      const response = await usageRequest(
+        {
+          nodeId: 'node-1',
+          rateLimits: [{ windowType: `claude.${'x'.repeat(160)}`, status: 'allowed' }],
+        },
+        { CREDENTIAL_LIMIT_USAGE_CALLBACK_MAX_BODY_BYTES: '4096' }
+      );
 
-    expect(response.status).toBe(400);
-    expect(handleAcpUsageCallback).not.toHaveBeenCalled();
+      expect(response.status).toBe(400);
+      expect(handleAcpUsageCallback).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith('acp_usage.invalid_callback_body', {
+        projectId: 'project-1',
+        sessionId: 'session-1',
+        invalidFields: ['rateLimits.[].windowType'],
+        action: 'rejected',
+      });
+      expect(JSON.stringify(warn.mock.calls)).not.toContain('xxxxxxxx');
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('rejects batches over the callback observation cap', async () => {

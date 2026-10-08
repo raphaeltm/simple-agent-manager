@@ -62,11 +62,6 @@ export function worstCredentialLimitLevel(
   return worst;
 }
 
-/** The `cc_credentials:<id>` reference for a composable-credential id. */
-export function ccCredentialReference(credentialId: string): string {
-  return `${CC_CREDENTIAL_REFERENCE_PREFIX}${credentialId}`;
-}
-
 /** Extract the composable-credential id from a `cc_credentials:<id>` reference. */
 export function credentialIdFromReference(reference: string): string | null {
   if (!reference.startsWith(CC_CREDENTIAL_REFERENCE_PREFIX)) return null;

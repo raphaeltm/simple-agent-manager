@@ -2,8 +2,13 @@ import { DEFAULT_CREDENTIAL_LIMIT_USAGE_CALLBACK_MAX_BODY_BYTES } from '@simple-
 import { Hono } from 'hono';
 
 import type { Env } from '../../env';
+import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
-import { readRequestJsonWithSchema, RequestBodyTooLargeError } from '../../lib/runtime-validation';
+import {
+  readRequestJsonWithSchema,
+  RequestBodyTooLargeError,
+  RuntimeValidationError,
+} from '../../lib/runtime-validation';
 import { AcpSessionUsageReportSchema } from '../../schemas';
 import {
   type AcpUsageCallbackReport,
@@ -19,6 +24,23 @@ import {
  * server stored for the actual agent session.
  */
 const agentUsageCallbackRoute = new Hono<{ Bindings: Env }>();
+
+/**
+ * Field paths that failed validation, with array indices collapsed so the list
+ * stays bounded by the schema's shape. Never the values or Valibot messages:
+ * both can echo the request body (apps/api/.claude/rules/51).
+ */
+function invalidFieldPaths(error: unknown): string[] {
+  if (!(error instanceof RuntimeValidationError) || !error.issues) return [];
+  const paths = new Set<string>();
+  for (const issue of error.issues) {
+    const keys = (issue.path ?? []).map((item) =>
+      typeof item.key === 'number' ? '[]' : String(item.key)
+    );
+    paths.add(keys.join('.') || '(root)');
+  }
+  return [...paths];
+}
 
 agentUsageCallbackRoute.post('/:id/acp-sessions/:sessionId/usage', async (c) => {
   const maxBodyBytes = parsePositiveInt(
@@ -43,6 +65,14 @@ agentUsageCallbackRoute.post('/:id/acp-sessions/:sessionId/usage', async (c) => 
         413
       );
     }
+    // A rejection here was invisible for weeks while it dropped every Claude
+    // usage report, so record which fields failed.
+    log.warn('acp_usage.invalid_callback_body', {
+      projectId: c.req.param('id'),
+      sessionId: c.req.param('sessionId'),
+      invalidFields: invalidFieldPaths(error),
+      action: 'rejected',
+    });
     return c.json({ error: 'BAD_REQUEST', message: 'Invalid usage callback request body' }, 400);
   }
   return handleAcpUsageCallback(c, {
