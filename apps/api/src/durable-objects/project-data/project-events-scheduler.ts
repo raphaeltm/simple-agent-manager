@@ -18,14 +18,22 @@ export { isProjectEventWakeEnabled } from './project-events-wake-config';
 export function readSchedulerState(sql: SqlStorage, projectId: string): ProjectEventSchedulerState {
   const row = sql
     .exec(
-      `SELECT next_attempt_at, next_retention_at
+      `SELECT next_attempt_at, next_retention_at, materialization_failures
        FROM project_event_wake_scheduler_state
        WHERE project_id = ?`,
       projectId
     )
     .toArray()[0];
   return {
-    nextAttemptAt: typeof row?.next_attempt_at === 'number' ? row.next_attempt_at : null,
+    // Older releases stored a single target's capacity/lease deferral here.
+    // Only actual scheduler failures may hold off the entire project; target
+    // deferrals already live on each subscription's delivery_cooldown_until.
+    nextAttemptAt:
+      typeof row?.materialization_failures === 'number' &&
+      row.materialization_failures > 0 &&
+      typeof row.next_attempt_at === 'number'
+        ? row.next_attempt_at
+        : null,
     nextRetentionAt: typeof row?.next_retention_at === 'number' ? row.next_retention_at : null,
   };
 }
@@ -138,6 +146,8 @@ export function markSchedulerSuccess(
   orphanCursor?: ProjectEventOrphanScanCursor | null
 ): void {
   const materialization = phase === 'materialization';
+  // A successful pass must not delay work subsequently admitted for other chats.
+  const nextCheckpointAt = materialization ? null : nextAt;
   sql.exec(
     `INSERT INTO project_event_wake_scheduler_state
      (project_id, next_attempt_at, next_retention_at, materialization_failures, retention_failures,
@@ -161,17 +171,17 @@ export function markSchedulerSuccess(
        orphan_scan_match_id = CASE WHEN ? THEN ? ELSE project_event_wake_scheduler_state.orphan_scan_match_id END,
        updated_at = ?`,
     projectId,
-    materialization ? nextAt : null,
-    materialization ? null : nextAt,
+    null,
+    nextCheckpointAt,
     materialization ? now : null,
     materialization ? null : now,
     now,
     orphanCursor?.lifecycleAt ?? null,
     orphanCursor?.matchId ?? null,
     materialization ? 1 : 0,
-    nextAt,
+    nextCheckpointAt,
     materialization ? 0 : 1,
-    nextAt,
+    nextCheckpointAt,
     materialization ? 1 : 0,
     materialization ? 0 : 1,
     materialization ? 1 : 0,

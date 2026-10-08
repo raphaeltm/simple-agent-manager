@@ -11,9 +11,9 @@ Production agent-message events persist and match but do not automatically notif
 - Prior staging used a small clean project and verified automatic awake/sleeping delivery but did not introduce unrelated blocked targets. Production smoke checked acceptance only.
 
 ## Checklist
-- [ ] Reproduce blocked-target then newly arriving unrelated-message starvation in real Worker SQLite tests.
-- [ ] Keep capacity/lease deferrals target-scoped; ignore pre-upgrade successful global deferrals while retaining real scheduler failure backoff.
-- [ ] Verify scheduler selection, alarm due time, blocked-target lease, real error backoff and read/ack behavior.
+- [x] Reproduce blocked-target then newly arriving unrelated-message starvation in real Worker SQLite tests.
+- [x] Keep capacity/lease deferrals target-scoped; ignore pre-upgrade successful global deferrals while retaining real scheduler failure backoff.
+- [x] Verify scheduler selection, alarm due time, blocked-target lease, real error backoff and read/ack behavior.
 - [ ] Run quality checks and independent local specialist reviews.
 - [ ] Stage and verify automatic message notification/read/reply with blocked unrelated work; no interrupt/poll workaround.
 - [ ] PR, CI, CodeRabbit wait, merge and production deployment.
@@ -24,3 +24,9 @@ An unacknowledged notification in one chat never holds unrelated eligible chats 
 
 ## References
 API scoped rules 47 (bounded control loops), 53 (scheduler isolation), 67 (shared action predicates), 70 (actual deployed flags). `/do` review/staging/release gates.
+
+## Validation evidence
+- TDD: both new Worker regressions failed on the old scheduler with a 24h deadline. Fixed implementation: focused 72/72 pass.
+- Local Cloudflare/constitution review PASS; test/completion/docs review PASS for implementation, release verification explicitly pending.
+- Task-only direct main push was rejected by required Worker check; carried task commit into feature PR instead, without bypass.
+- Remaining unchecked items are mandatory release gates, not deferred scope.

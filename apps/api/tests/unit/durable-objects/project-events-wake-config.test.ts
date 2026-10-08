@@ -22,7 +22,9 @@ describe('project event wake activation', () => {
   it('schedules pending wake work after explicit activation', () => {
     const env = { PROJECT_EVENT_WAKE_ENABLED: 'true' } as Env;
     const exec = vi.fn().mockReturnValue({
-      toArray: () => [{ next_attempt_at: 200, next_retention_at: null }],
+      toArray: () => [
+        { next_attempt_at: 200, next_retention_at: null, materialization_failures: 1 },
+      ],
     });
     const sql = { exec } as unknown as SqlStorage;
 
