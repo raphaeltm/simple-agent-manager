@@ -45,7 +45,7 @@ import type { SessionState } from './types';
 import { formatCountdown } from './types';
 import { usePublicPortsToggle } from './usePublicPortsToggle';
 
-const SESSION_STATE_LABELS: Record<SessionState, string> = {
+const SESSION_STATE_LABELS: Partial<Record<SessionState, string>> = {
   active: 'Active',
   idle: 'Idle',
   sleeping: 'Sleeping',
@@ -257,7 +257,7 @@ export function SessionHeader({
             }}
           >
             <span className="w-[6px] h-[6px] rounded-full bg-current" />
-            {isExpiredTask(taskEmbed) ? 'Expired' : SESSION_STATE_LABELS[sessionState]}
+            {isExpiredTask(taskEmbed) ? 'Expired' : (SESSION_STATE_LABELS[sessionState] ?? 'Stopped')}
           </span>
 
           {workspace && <WorkspaceProfileBadge workspace={workspace} />}
