@@ -63,8 +63,48 @@ permanent loss of recoverability.
 - [x] Bound stopping selection on immutable stopping age; repair failed non-failed-task sessions to terminal failure with reason and cleanup.
 - [x] Real alarm → failure → finalizer SQL regression, parent-hook assertion, unrecoverable control, next-wake and status-refusal coverage.
 - [x] Two-sweep real SQL regression for stopping repair.
-- [ ] Local checks and specialist reviews; coordinated staging lease and live verification.
+- [x] Local checks and specialist reviews.
+- [ ] Coordinated staging lease and live verification.
 - [ ] PR/CI/CodeRabbit/merge/production; idea evidence and channel cleanup.
 
 No migration planned. Shared channel reliability-wave-1008; expiry owns expired end state,
 8h task owns failure-preservation preparing/stopping reaper predicate. Rules 47, 58, 62, 66.
+
+## Implementation and regression evidence
+
+Recoverable stable wakes now retain a sleeping task without terminal parent notifications.
+The failure marker is durable before the task transition, so interrupted cleanup resumes
+without replaying restoration. ProjectData is returned to sleep under the observed identity;
+the wake claim remains held through runtime cleanup and is released only afterward.
+Failed mirrors heal only under the same snapshot/task/attempt authority, using failed-only SQL.
+Snapshot preservation includes replacement workspace ownership and failed-wake cooldown, bounded
+by snapshot expiry. Genuinely unavailable snapshots still terminalize visibly.
+
+Stopping selection now stops retrying after the existing in-flight ceiling. Lifecycle repair
+records terminal_failed with a reason for failed sessions whose task is not failed, closes
+compute, and removes them from subsequent candidates. Existing sleeping/stopped controls remain.
+
+Local verification: 110 focused alarm/handoff/finalizer/predicate/repair checks and 86 surrounding
+idle-cleanup/sleep/agent-session tests pass. Six isolated mutation checks fail for the intended
+assertion when task preservation, finalizer preservation, failed-mirror healing, cleanup replay,
+stopping age, or failed-session repair is removed. The status-link-refusal regression enters
+through TaskRunner.alarm -> workspace_creation -> actual ProjectData link SQL and asserts
+first-alarm settlement without restoration or terminal parent hooks.
+Full API rerun PASS: 827 files / 11,630 tests; all other root test tasks passed. Root lint,
+typecheck and build passed, with affected API rechecks. File-size, source-contract, runtime-state
+and runtime-boundary checks passed. Coordinated staging/PR/deployment evidence is pending below.
+
+## Incident lesson
+
+The failure was not a failed snapshot: a temporary replacement-runtime failure was incorrectly
+treated as the conversation's terminal outcome, then a second finalizer overwrote the earlier
+sleep transition. Helper-only tests missed this composition and the false parent notification.
+The durable process guard is rule 62's production-entry regression requirement, applied here to
+the real alarm/failure/finalizer path, plus rule 47's two-sweep convergence assertion. No extra
+standing rule is needed; the regression and guard-removal proofs enforce the existing guidance.
+
+Candidate/I/O budget: production wakes are about 5-10/day. Recoverable failure adds bounded
+identity/CAS work to one attempt and avoids terminal fanout and repeated deadline polling.
+Stopping candidates shrink after the existing age ceiling; repair keeps its existing default
+25-row batch and per-row snapshot verification/ProjectData/cleanup calls. No migration or new
+timer, unbounded query, external API, or environment variable was added.
