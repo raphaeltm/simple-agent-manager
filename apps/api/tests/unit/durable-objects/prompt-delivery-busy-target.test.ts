@@ -252,6 +252,35 @@ describe('busy target through the delivery alarm', () => {
     expect(rows()).toEqual([{ id: 'first', delivery_state: 'retry_wait', delivery_attempts: 1 }]);
   });
 
+  it('limits each alarm batch and reaches recipients beyond a full busy batch', async () => {
+    const submit = vi
+      .spyOn(DefaultVmPromptDeliveryAdapter.prototype, 'submit')
+      .mockResolvedValue(busy);
+    const targetCount = config.maxCandidatesPerAlarm + 2;
+    for (let i = 0; i < targetCount; i++) {
+      const target = `recipient-${i}`;
+      sql.exec(
+        `INSERT INTO chat_sessions
+        (id, status, message_count, started_at, created_at, updated_at)
+        VALUES (?, 'active', 0, ?, ?, ?)`,
+        target,
+        Date.now(),
+        Date.now(),
+        Date.now()
+      );
+      await enqueue(`for-${target}`, target);
+    }
+    await tick();
+    expect(submit).toHaveBeenCalledTimes(config.maxCandidatesPerAlarm);
+    expect(due).toBe(Date.now() + config.minAlarmDelayMs);
+    await tick();
+    expect(submit).toHaveBeenCalledTimes(targetCount);
+    expect(
+      new Set(submit.mock.calls.map(([input]) => input.claim.message.targetSessionId)).size
+    ).toBe(targetCount);
+    expect(rows().every((row) => row.delivery_state === 'retry_wait')).toBe(true);
+  });
+
   it('allows higher-priority control to run during informational backoff', async () => {
     const submit = vi
       .spyOn(DefaultVmPromptDeliveryAdapter.prototype, 'submit')
