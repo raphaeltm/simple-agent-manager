@@ -43,3 +43,5 @@ Implementation validated and archived by the explicit `/do` workflow. Delivery g
 Final local package runs:826API files/11615tests passed with six old fixture failures; corrected fixtures passed fresh in165-test affected suite. Web335files/4024tests passed with one newly-added cache test running against a pre-edit cached module; fresh78-test run passed. CI will rerun the final committed tree.
 
 Load review: new degraded pass and existing artifact purge each use the configured batch cap (default250), aggregate500maximum candidates. Expected initial49production/11staging degraded expiries; indexed lookup plus existing D1/DO terminal machinery per row; no new VM/R2 operations.
+
+Final frozen-tree root validation14:35Z: `pnpm exec turbo run test --concurrency=1` PASS21/21tasks, web4025tests/336files andAPI11621tests/828files. This supersedes earlier in-flight fixture/cache failures.
