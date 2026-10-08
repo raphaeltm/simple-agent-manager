@@ -45,6 +45,13 @@ import type { SessionState } from './types';
 import { formatCountdown } from './types';
 import { usePublicPortsToggle } from './usePublicPortsToggle';
 
+const SESSION_STATE_LABELS: Record<SessionState, string> = {
+  active: 'Active',
+  idle: 'Idle',
+  sleeping: 'Sleeping',
+  terminated: 'Stopped',
+};
+
 /**
  * Session header — title, status chips, and an expandable details panel.
  *
@@ -250,15 +257,7 @@ export function SessionHeader({
             }}
           >
             <span className="w-[6px] h-[6px] rounded-full bg-current" />
-            {isExpiredTask(taskEmbed)
-              ? 'Expired'
-              : sessionState === 'active'
-                ? 'Active'
-                : sessionState === 'idle'
-                  ? 'Idle'
-                  : sessionState === 'sleeping'
-                    ? 'Sleeping'
-                    : 'Stopped'}
+            {isExpiredTask(taskEmbed) ? 'Expired' : SESSION_STATE_LABELS[sessionState]}
           </span>
 
           {workspace && <WorkspaceProfileBadge workspace={workspace} />}

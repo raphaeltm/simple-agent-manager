@@ -1,10 +1,10 @@
 import { expect, type Page, type Route, test } from '@playwright/test';
 
 // ---------------------------------------------------------------------------
-// Visual audit for agent info in the SessionHeader expanded panel.
+// Visual audit for expired conversations in the chat header and list.
 //
-// Verifies that agent type, task mode, and profile hint display correctly
-// in the expanded session details without horizontal overflow.
+// Verifies readable transcripts, the Expired label, and the Fork action on
+// desktop and mobile, including tasks absent from the recent-task page.
 // ---------------------------------------------------------------------------
 
 const NOW = Date.now();
