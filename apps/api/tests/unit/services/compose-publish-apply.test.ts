@@ -84,6 +84,25 @@ describe('buildComposePublishApplyPayload', () => {
     expect(doc.services.chat.labels).toBeUndefined();
   });
 
+  it('strips denied fields from provider services without changing provider configuration', () => {
+    const composeYaml = CREWAI_COMPOSE.replace(
+      '  chat:\n    provider:',
+      '  chat:\n    use_api_socket: true\n    privileged: true\n    provider:'
+    );
+    const result = buildComposePublishApplyPayload(makeSubmission({ composeYaml }), OPTS);
+    const doc = parseYaml(result.composeYaml) as Record<string, any>;
+
+    expect(doc.services.chat).toEqual({
+      provider: { type: 'model', options: { model: 'ai/gemma3:1B-Q4_K_M' } },
+    });
+    expect(result.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ service: 'chat', field: 'use_api_socket' }),
+        expect.objectContaining({ service: 'chat', field: 'privileged' }),
+      ])
+    );
+  });
+
   it('replaces build: with the submission digest-pinned pushedRef image', () => {
     const result = buildComposePublishApplyPayload(makeSubmission(), OPTS);
     const doc = parseYaml(result.composeYaml) as Record<string, any>;
