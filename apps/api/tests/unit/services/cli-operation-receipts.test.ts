@@ -121,6 +121,27 @@ describe('CLI operation receipts with real SQLite migration', () => {
 });
 
 describe('receipt namespace and bounds', () => {
+  it.each([
+    ['CLI_RECEIPT_RESPONSE_MAX_BYTES', '0'],
+    ['CLI_RECEIPT_RESPONSE_MAX_BYTES', 'abc'],
+    ['CLI_RECEIPT_RESPONSE_MAX_BYTES', '1.5'],
+    ['CLI_RECEIPT_REQUEST_MAX_BYTES', '0'],
+    ['CLI_RECEIPT_REQUEST_MAX_BYTES', 'abc'],
+    ['CLI_RECEIPT_REQUEST_MAX_BYTES', '1.5'],
+  ] as const)(
+    'rejects invalid server configuration %s=%s before reservation or side effects',
+    async (field, value) => {
+      env[field] = value;
+      const response = await submit();
+      expect(response.status).toBe(500);
+      expect(await response.json()).toMatchObject({ error: 'INTERNAL_ERROR' });
+      expect(effects).toBe(0);
+      expect(db.prepare('SELECT COUNT(*) AS count FROM cli_operation_receipts').get()).toEqual({
+        count: 0,
+      });
+    }
+  );
+
   it('separates actors, projects and operation paths with identical keys', async () => {
     app.post('/projects/:projectId/prompt', cliOperationReceipt, (c) => {
       effects++;

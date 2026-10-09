@@ -29,13 +29,12 @@ export const cliOperationReceipt: MiddlewareHandler<{ Bindings: Env }> = async (
   if (!/^[A-Za-z0-9._:-]{1,128}$/.test(key)) throw errors.badRequest('Invalid Idempotency-Key');
   const projectId = c.req.param('projectId');
   if (!projectId) throw errors.badRequest('projectId is required');
+  const requestLimit = receiptLimit(c.env.CLI_RECEIPT_REQUEST_MAX_BYTES, 256 * 1024);
+  const responseLimit = receiptLimit(c.env.CLI_RECEIPT_RESPONSE_MAX_BYTES, 64 * 1024);
   const userId = getUserId(c);
   const path = new URL(c.req.url).pathname;
   const receiptId = await operationReceiptId(projectId, userId, c.req.method, path, key);
-  const body = await boundedReceiptText(
-    await cloneRawRequest(c.req),
-    receiptLimit(c.env.CLI_RECEIPT_REQUEST_MAX_BYTES, 256 * 1024)
-  );
+  const body = await boundedReceiptText(await cloneRawRequest(c.req), requestLimit);
   if (body === null) throw errors.badRequest('Keyed intent exceeds receipt boundary');
   const intentHash = await digest(body);
   const reservation = await c.env.DATABASE.prepare(
@@ -81,10 +80,7 @@ export const cliOperationReceipt: MiddlewareHandler<{ Bindings: Env }> = async (
   }
   await next();
   if (c.res.status >= 200 && c.res.status < 300) {
-    const response = await boundedReceiptText(
-      c.res.clone(),
-      receiptLimit(c.env.CLI_RECEIPT_RESPONSE_MAX_BYTES, 64 * 1024)
-    );
+    const response = await boundedReceiptText(c.res.clone(), responseLimit);
     if (response === null) return;
     await c.env.DATABASE.prepare(
       "UPDATE cli_operation_receipts SET state = 'completed', response_json = ?, response_status = ? WHERE receipt_id = ? AND state = 'pending'"
@@ -98,7 +94,7 @@ function receiptLimit(raw: string | undefined, fallback: number): number {
   if (raw === undefined) return fallback;
   const value = Number(raw);
   if (!Number.isSafeInteger(value) || value <= 0)
-    throw errors.badRequest('Invalid receipt size configuration');
+    throw errors.internal('Invalid receipt size configuration');
   return value;
 }
 
