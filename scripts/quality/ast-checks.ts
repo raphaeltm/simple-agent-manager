@@ -24,9 +24,10 @@
  *   parameterized-sql       Verifies placeholder count matches parameter count in sql.exec
  */
 
-import { Project, SyntaxKind, Node, CallExpression, SourceFile } from 'ts-morph';
-import { resolve, relative } from 'node:path';
+import { relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { Project, type SourceFile, SyntaxKind } from 'ts-morph';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = resolve(__filename, '..');
@@ -55,6 +56,17 @@ type Rule = {
   check: (ctx: RuleContext) => void;
 };
 
+// Frozen module SQL fragments that may be interpolated into sql.exec() text, mapped to the
+// number of `?` placeholders each one adds. All live in
+// apps/api/src/durable-objects/project-data/project-events-wake-config.ts and are static
+// strings built at module load, so no caller value ever reaches the SQL text. When a
+// fragment's placeholder count changes, update it here or parameterized-sql flags its callers.
+const SAFE_SQL_FRAGMENT_PLACEHOLDERS: ReadonlyMap<string, number> = new Map([
+  ['PROMPT_QUEUE_WAKE_REQUESTED_DELIVERY_SQL', 0],
+  ['PROMPT_QUEUE_WAKE_REQUESTED_DELIVERY_UNALIASED_SQL', 0],
+  ['WAKE_TARGET_HAS_UNDELIVERED_WAKE_SQL', 1],
+]);
+
 // --- Rules ---
 
 const rules: Rule[] = [
@@ -82,16 +94,10 @@ const rules: Rule[] = [
             // Allow safe dynamic clause builders:
             // - whereClause / where: dynamic WHERE from parameterized conditions array
             // - placeholders: IN (?, ?, ?) expansion from .map(() => '?').join(', ')
-            // - PROMPT_QUEUE_WAKE_REQUESTED_DELIVERY(_UNALIASED)_SQL: frozen module
-            //   constants in project-events-wake-config.ts, built at module load
-            //   from a type-checked literal array (identifier-safe values asserted
-            //   at runtime); no caller value ever reaches the SQL text.
-            if (
-              /^(whereClause|where|placeholders|orderClause|groupClause|PROMPT_QUEUE_WAKE_REQUESTED_DELIVERY_SQL|PROMPT_QUEUE_WAKE_REQUESTED_DELIVERY_UNALIASED_SQL)$/.test(
-                exprText
-              )
-            )
+            // - SAFE_SQL_FRAGMENT_PLACEHOLDERS: frozen module constants (see above)
+            if (/^(whereClause|where|placeholders|orderClause|groupClause)$/.test(exprText))
               continue;
+            if (SAFE_SQL_FRAGMENT_PLACEHOLDERS.has(exprText)) continue;
 
             ctx.findings.push({
               rule: 'sql-injection',
@@ -277,7 +283,11 @@ const rules: Rule[] = [
         const sqlText = sqlArg.getText();
 
         // Count ? placeholders (ignore ?? which is a different operator)
-        const placeholders = (sqlText.match(/(?<!\?)\?(?!\?)/g) || []).length;
+        let placeholders = (sqlText.match(/(?<!\?)\?(?!\?)/g) || []).length;
+        // Interpolated safe fragments carry placeholders the literal text does not show.
+        for (const [, name] of sqlText.matchAll(/\$\{(\w+)\}/g)) {
+          placeholders += SAFE_SQL_FRAGMENT_PLACEHOLDERS.get(name) ?? 0;
+        }
         const paramCount = args.length - 1; // First arg is SQL, rest are params
 
         // Skip if any parameter uses spread (...) — count is dynamic
@@ -319,7 +329,9 @@ function parseArgs(): { files?: string[]; ruleName?: string; json: boolean } {
     } else if (args[i] === '--json') {
       json = true;
     } else if (args[i] === '--help') {
-      console.log(`Usage: pnpm tsx scripts/quality/ast-checks.ts [--file path] [--rule name] [--json]`);
+      console.log(
+        `Usage: pnpm tsx scripts/quality/ast-checks.ts [--file path] [--rule name] [--json]`
+      );
       console.log(`\nRules:`);
       for (const r of rules) {
         console.log(`  ${r.name.padEnd(24)} ${r.description}`);
@@ -351,9 +363,7 @@ function main() {
       project.addSourceFileAtPath(f);
     }
   } else {
-    project.addSourceFilesAtPaths([
-      resolve(ROOT, 'apps/api/src/**/*.ts'),
-    ]);
+    project.addSourceFilesAtPaths([resolve(ROOT, 'apps/api/src/**/*.ts')]);
   }
 
   const allFindings: Finding[] = [];
@@ -383,7 +393,9 @@ function main() {
     console.log(JSON.stringify(allFindings, null, 2));
   } else {
     if (allFindings.length === 0) {
-      console.log(`✓ No issues found (${activeRules.length} rules, ${project.getSourceFiles().length} files)`);
+      console.log(
+        `✓ No issues found (${activeRules.length} rules, ${project.getSourceFiles().length} files)`
+      );
     } else {
       const errors = allFindings.filter((f) => f.severity === 'error');
       const warnings = allFindings.filter((f) => f.severity === 'warning');
