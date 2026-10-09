@@ -75,6 +75,7 @@ describe('shared platform operation authorization on real SQLite', () => {
       schema.projects,
       schema.projectMembers,
       schema.tasks,
+      schema.taskStatusEvents,
       schema.agentProfiles,
     ]);
     env = { DATABASE: createSqliteD1(sqlite) } as Env;
@@ -199,6 +200,24 @@ describe('shared platform operation authorization on real SQLite', () => {
     expect(sqlite.prepare('SELECT title FROM tasks WHERE id = ?').get('idea-owner')).toEqual({
       title: 'Updated',
     });
+  });
+
+  it('records an idea status change without inventing a reason', async () => {
+    await samIdeaUpdate.run(ctx(), { projectId, ideaId: 'idea-owner', status: 'ready' });
+    expect(
+      sqlite
+        .prepare('SELECT from_status, to_status, reason FROM task_status_events WHERE task_id = ?')
+        .get('idea-owner')
+    ).toEqual({ from_status: 'draft', to_status: 'ready', reason: null });
+  });
+
+  it('rejects non-finite numeric input before reaching storage', async () => {
+    await expect(samTasksList.run(ctx(), { projectId, limit: Number.NaN })).rejects.toMatchObject({
+      code: 'invalid_input',
+    });
+    await expect(
+      samIdeaCreate.run(ctx(), { projectId, title: 'Bad priority', priority: Infinity })
+    ).rejects.toMatchObject({ code: 'invalid_input' });
   });
 
   it('idea writes reject a mismatched workspace project with an owner path control', async () => {

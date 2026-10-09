@@ -3,7 +3,7 @@ import { sanitizeUserInput } from '../lib/sanitize-user-input';
 import { getSearchQueryLikePatterns, normalizeSearchQuery } from '../lib/search-query-limits';
 import { ulid } from '../lib/ulid';
 import { OperationError } from './errors';
-import { getPlatformOperationLimits } from './limits';
+import { clampOperationNumber, getPlatformOperationLimits } from './limits';
 import type { OperationContext } from './types';
 
 export type IdeasSearchInput = {
@@ -51,9 +51,11 @@ export async function searchIdeas(ctx: OperationContext, input: IdeasSearchInput
         : search
           ? limits.ideaSearchMax
           : limits.ideaListLimit;
-  const limit = Math.min(
-    Math.max(1, Math.round(requestedLimit)),
-    related ? limits.taskSearchMax : search ? limits.ideaSearchMax : limits.ideaListMax
+  const limit = clampOperationNumber(
+    requestedLimit,
+    1,
+    related ? limits.taskSearchMax : search ? limits.ideaSearchMax : limits.ideaListMax,
+    'limit'
   );
   const snippetLength = limits.taskDescriptionSnippetLength;
   if (!search) {
@@ -188,7 +190,7 @@ export async function createIdea(ctx: OperationContext, input: IdeaCreateInput) 
       : null;
   const priority =
     typeof input.priority === 'number'
-      ? Math.min(Math.max(0, Math.round(input.priority)), limits.dispatchMaxPriority)
+      ? clampOperationNumber(input.priority, 0, limits.dispatchMaxPriority, 'priority')
       : 0;
   const ideaId = ulid();
   const now = new Date().toISOString();
@@ -299,7 +301,9 @@ export async function updateIdea(ctx: OperationContext, input: IdeaUpdateInput) 
   }
   if (typeof input.priority === 'number') {
     updates.push('priority = ?');
-    bindValues.push(Math.min(Math.max(0, Math.round(input.priority)), limits.dispatchMaxPriority));
+    bindValues.push(
+      clampOperationNumber(input.priority, 0, limits.dispatchMaxPriority, 'priority')
+    );
   }
   if (updates.length === 0)
     throw new OperationError(
@@ -316,7 +320,7 @@ export async function updateIdea(ctx: OperationContext, input: IdeaUpdateInput) 
     const event = ctx.env.DATABASE.prepare(
       `INSERT INTO task_status_events (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)
        VALUES (?, ?, ?, ?, 'user', ?, ?, ?)`
-    ).bind(ulid(), ideaId, statusTransition.from, statusTransition.to, ctx.actor.userId, now, now);
+    ).bind(ulid(), ideaId, statusTransition.from, statusTransition.to, ctx.actor.userId, null, now);
     await ctx.env.DATABASE.batch([statement, event]);
   } else {
     await statement.run();

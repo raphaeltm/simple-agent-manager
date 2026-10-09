@@ -5,10 +5,9 @@
  *  1. Require auth (session from BetterAuth cookie).
  *  2. Read + verify the HMAC-signed `sam_trial_claim` cookie.
  *  3. Verify the trial record exists, is unclaimed, and is not expired.
- *  4. Atomically re-parent `projects.user_id` from the sentinel anonymous user
- *     to the authenticated user — guarded by a `WHERE user_id = sentinel`
- *     precondition so a double-claim attempt cannot hijack a project that has
- *     already been taken.
+ *  4. Atomically re-parent `projects.user_id`, transfer active owner membership,
+ *     and mark the trial claimed. The sentinel owner precondition prevents a
+ *     double-claim attempt from hijacking an already claimed project.
  *  5. Clear the claim cookie (Max-Age=0).
  *  6. Mark the KV record as `claimed: true` (best-effort).
  */
@@ -118,7 +117,26 @@ claimRoutes.post('/claim', requireAuth(), async (c) => {
          )`
     ).bind(userId, claimedAt, projectId, trialId, claimedAt, projectId, projectId, userId);
 
-    const [projectResult, trialResult] = await c.env.DATABASE.batch([projectReparent, trialClaim]);
+    const ownerMembership = c.env.DATABASE.prepare(
+      `INSERT INTO project_members (project_id, user_id, role, status, created_at, updated_at)
+       SELECT ?, ?, 'owner', 'active', ?, ?
+       WHERE EXISTS (SELECT 1 FROM projects WHERE id = ? AND user_id = ?)
+         AND EXISTS (SELECT 1 FROM trials WHERE id = ? AND claimed_by_user_id = ? AND status = 'claimed')
+       ON CONFLICT (project_id, user_id) DO UPDATE SET role = 'owner', status = 'active', updated_at = excluded.updated_at`
+    ).bind(projectId, userId, updatedAt, updatedAt, projectId, userId, trialId, userId);
+
+    const retireAnonymousMembership = c.env.DATABASE.prepare(
+      `DELETE FROM project_members
+       WHERE project_id = ? AND user_id = ?
+         AND EXISTS (SELECT 1 FROM project_members WHERE project_id = ? AND user_id = ? AND role = 'owner' AND status = 'active')`
+    ).bind(projectId, anonymousUserId, projectId, userId);
+
+    const [projectResult, trialResult] = await c.env.DATABASE.batch([
+      projectReparent,
+      trialClaim,
+      ownerMembership,
+      retireAnonymousMembership,
+    ]);
     projectChanges = getD1Changes(projectResult);
     trialChanges = getD1Changes(trialResult);
   } catch (err) {
@@ -149,14 +167,17 @@ claimRoutes.post('/claim', requireAuth(), async (c) => {
            updated_at = ?
        WHERE id = ?
          AND user_id = ?`
-    ).bind(anonymousUserId, updatedAt, projectId, userId).run().catch((err) => {
-      log.error('trial_claim.reparent_rollback_failed', {
-        trialId,
-        projectId,
-        userId,
-        error: err instanceof Error ? err.message : String(err),
+    )
+      .bind(anonymousUserId, updatedAt, projectId, userId)
+      .run()
+      .catch((err) => {
+        log.error('trial_claim.reparent_rollback_failed', {
+          trialId,
+          projectId,
+          userId,
+          error: err instanceof Error ? err.message : String(err),
+        });
       });
-    });
     throw errors.internal('Trial claim could not be recorded');
   }
 

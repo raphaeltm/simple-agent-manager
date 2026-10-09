@@ -1,5 +1,17 @@
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
+import { OperationError } from './errors';
+
+export function clampOperationNumber(
+  value: number,
+  minimum: number,
+  maximum: number,
+  field: string
+): number {
+  if (!Number.isFinite(value))
+    throw new OperationError('invalid_input', `${field} must be a finite number`);
+  return Math.min(Math.max(minimum, Math.round(value)), maximum);
+}
 
 /** Limits shared by the operations and their workspace adapter. */
 export function getPlatformOperationLimits(env: Env) {

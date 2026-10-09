@@ -8,7 +8,7 @@ import { getSearchQueryLikePatterns, normalizeSearchQuery } from '../lib/search-
 import * as projectDataService from '../services/project-data';
 import { getLatestAssistantMessageForTask } from '../services/task-final-assistant-message';
 import { OperationError } from './errors';
-import { getPlatformOperationLimits } from './limits';
+import { clampOperationNumber, getPlatformOperationLimits } from './limits';
 import type { OperationContext } from './types';
 
 type TaskSearchRow = {
@@ -167,9 +167,11 @@ export async function listTasks(ctx: OperationContext, input: ListTasksInput) {
       : search
         ? limits.taskSearchLimit
         : limits.taskListLimit;
-  const limit = Math.min(
-    Math.max(1, Math.round(requestedLimit)),
-    search ? limits.taskSearchMax : limits.taskListMax
+  const limit = clampOperationNumber(
+    requestedLimit,
+    1,
+    search ? limits.taskSearchMax : limits.taskListMax,
+    'limit'
   );
   const db = drizzle(ctx.env.DATABASE, { schema });
   const conditions: SQL[] = [eq(schema.tasks.projectId, input.projectId)];

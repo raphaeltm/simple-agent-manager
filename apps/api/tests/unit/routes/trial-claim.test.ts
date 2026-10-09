@@ -14,10 +14,13 @@
  *   - 200 happy path — D1 re-parented, KV markTrialClaimed called,
  *     Set-Cookie clears sam_trial_claim
  */
+import Database from 'better-sqlite3';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
+import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 // Auth — always return a user so the claim route runs its own logic.
 vi.mock('../../../src/middleware/auth', () => ({
@@ -78,7 +81,7 @@ function makeEnv(
     trialUpdateChanges?: number;
     batchReject?: Error;
     rollbackChanges?: number;
-  } = {},
+  } = {}
 ): ClaimTestEnv {
   const statements: MockD1Statement[] = [];
   const prepare = vi.fn((sql: string) => ({
@@ -119,11 +122,7 @@ async function postClaim(
 ): Promise<Response> {
   const headers: Record<string, string> = { 'content-type': 'application/json' };
   if (cookie) headers['cookie'] = `sam_trial_claim=${encodeURIComponent(cookie)}`;
-  return app.request(
-    '/api/trial/claim',
-    { method: 'POST', headers, body: '{}' },
-    env
-  );
+  return app.request('/api/trial/claim', { method: 'POST', headers, body: '{}' }, env);
 }
 
 function futurePayload(
@@ -208,14 +207,13 @@ describe('POST /api/trial/claim', () => {
 
   it('returns 400 when cookie projectId disagrees with record projectId', async () => {
     const app = makeApp();
-    const token = await signClaimToken(
-      futurePayload({ projectId: 'proj_cookie' }),
-      SECRET
+    const token = await signClaimToken(futurePayload({ projectId: 'proj_cookie' }), SECRET);
+    readTrialMock.mockResolvedValueOnce(
+      trialRecord({
+        trialId: 'trial_good',
+        projectId: 'proj_record_different',
+      })
     );
-    readTrialMock.mockResolvedValueOnce(trialRecord({
-      trialId: 'trial_good',
-      projectId: 'proj_record_different',
-    }));
     const resp = await postClaim(app, token);
     expect(resp.status).toBe(400);
   });
@@ -255,8 +253,11 @@ describe('POST /api/trial/claim', () => {
 
     expect(resp.status).toBe(500);
     expect(markTrialClaimedMock).not.toHaveBeenCalled();
-    const rollback = env.__statements.find((stmt) =>
-      stmt.sql.includes('UPDATE projects') && stmt.sql.includes('WHERE id = ?') && stmt.binds[0] === 'system_anonymous_trials'
+    const rollback = env.__statements.find(
+      (stmt) =>
+        stmt.sql.includes('UPDATE projects') &&
+        stmt.sql.includes('WHERE id = ?') &&
+        stmt.binds[0] === 'system_anonymous_trials'
     );
     expect(rollback).toBeDefined();
     expect(rollback?.run).toHaveBeenCalledTimes(1);
@@ -300,6 +301,41 @@ describe('POST /api/trial/claim', () => {
     const setCookie = resp.headers.get('Set-Cookie');
     expect(setCookie).toContain('sam_trial_claim=;');
     expect(setCookie).toContain('Max-Age=0');
+  });
+
+  it('transfers active owner membership with a successful trial claim on real SQLite', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createSchemaTables(sqlite, [schema.projects, schema.projectMembers, schema.trials]);
+      sqlite
+        .prepare('INSERT INTO projects (id, user_id) VALUES (?, ?)')
+        .run('proj_good', 'system_anonymous_trials');
+      sqlite
+        .prepare(
+          "INSERT INTO project_members (project_id, user_id, role, status) VALUES (?, ?, 'owner', 'active')"
+        )
+        .run('proj_good', 'system_anonymous_trials');
+      sqlite
+        .prepare('INSERT INTO trials (id, status, expires_at, project_id) VALUES (?, ?, ?, ?)')
+        .run('trial_good', 'ready', Date.now() + 3600_000, 'proj_good');
+      const env = makeEnv({ DATABASE: createSqliteD1(sqlite) });
+      readTrialMock.mockResolvedValueOnce(trialRecord());
+      const token = await signClaimToken(futurePayload(), SECRET);
+
+      const response = await postClaim(makeApp(), token, env);
+
+      expect(response.status).toBe(200);
+      expect(sqlite.prepare('SELECT user_id FROM projects WHERE id = ?').get('proj_good')).toEqual({
+        user_id: 'user_claim_1',
+      });
+      expect(
+        sqlite
+          .prepare('SELECT user_id, role, status FROM project_members WHERE project_id = ?')
+          .all('proj_good')
+      ).toEqual([{ user_id: 'user_claim_1', role: 'owner', status: 'active' }]);
+    } finally {
+      sqlite.close();
+    }
   });
 
   it('still returns 200 when markTrialClaimed fails (best-effort)', async () => {
