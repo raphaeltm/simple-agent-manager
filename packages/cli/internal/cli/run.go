@@ -14,15 +14,33 @@ import (
 )
 
 func Run(ctx context.Context, runtime Runtime) int {
+	for _, arg := range runtime.Args {
+		if arg == "--json" {
+			runtime.Stderr = structuredErrorWriter{runtime.Stderr}
+			break
+		}
+	}
 	parsed, err := parseArgs(runtime.Args)
 	if err != nil {
 		return fail(runtime.Stderr, err)
 	}
 	if len(parsed.Positionals) == 0 || parsed.Bools["help"] || parsed.Bools["h"] {
-		fmt.Fprintln(runtime.Stdout, helpText())
+		fmt.Fprintln(runtime.Stdout, contextualHelp(parsed))
 		return 0
 	}
 
+	if err := validateCommandFlags(parsed); err != nil {
+		return fail(runtime.Stderr, err)
+	}
+	if c, args, ok := findWorkflow(parsed); ok && (parsed.Globals.JSON || len(parsed.Flags) > 0 || len(parsed.Bools) > 0 || len(parsed.Positionals) > 1 && parsed.Positionals[0] != "chat") {
+		return runWorkflow(ctx, runtime, parsed, c, args)
+	}
+	if len(parsed.Positionals) > 1 && (parsed.Positionals[1] == "create" || parsed.Positionals[1] == "update") {
+		return runMetadataMutation(ctx, runtime, parsed, parsed.Positionals[2:])
+	}
+	if parsed.Positionals[0] == "settings" {
+		return runSettingsInspect(ctx, runtime, parsed)
+	}
 	namespace := parsed.Positionals[0]
 	args := parsed.Positionals[1:]
 	switch namespace {
@@ -349,6 +367,25 @@ func runTasks(ctx context.Context, runtime Runtime, parsed parsedArgs, args []st
 	if len(args) == 0 {
 		return fail(runtime.Stderr, errors.New("tasks requires an action"))
 	}
+	if args[0] == "submit" {
+		client, config, err := authenticatedClientWithConfig(ctx, runtime)
+		if err != nil {
+			return fail(runtime.Stderr, err)
+		}
+		id, _, err := resolveProjectRef(ctx, client, parsed, config)
+		if err != nil {
+			return fail(runtime.Stderr, err)
+		}
+		message, err := readCommandInput(runtime, parsed, args[1:], "prompt")
+		if err != nil {
+			return fail(runtime.Stderr, err)
+		}
+		options, err := parseSubmitOptions(parsed)
+		if err != nil {
+			return fail(runtime.Stderr, err)
+		}
+		return submitTaskWithClient(ctx, runtime, parsed, client, id, message, options)
+	}
 	if args[0] != "dispatch" {
 		return fail(runtime.Stderr, fmt.Errorf("unknown tasks action: %s", args[0]))
 	}
@@ -384,6 +421,10 @@ func runChatCommand(ctx context.Context, runtime Runtime, parsed parsedArgs, arg
 		return runChatList(ctx, runtime, parsed)
 	}
 	switch args[0] {
+	case "send", "cancel", "sleep":
+		return runSessionAction(ctx, runtime, parsed, args[0], args[1:])
+	case "export":
+		return runTranscriptExport(ctx, runtime, parsed, args[1:])
 	case "new":
 		return runChatNew(ctx, runtime, parsed, args[1:])
 	default:
@@ -426,6 +467,20 @@ func submitTask(ctx context.Context, runtime Runtime, parsed parsedArgs, project
 }
 
 func submitTaskWithClient(ctx context.Context, runtime Runtime, parsed parsedArgs, client APIClient, projectID string, message string, options TaskSubmitOptions) int {
+	if options.AgentProfile != "" {
+		id, err := resolveNamedResource(ctx, client, projectID, "agent-profiles", options.AgentProfile)
+		if err != nil {
+			return fail(runtime.Stderr, err)
+		}
+		options.AgentProfile = id
+	}
+	if options.Skill != "" {
+		id, err := resolveNamedResource(ctx, client, projectID, "skills", options.Skill)
+		if err != nil {
+			return fail(runtime.Stderr, err)
+		}
+		options.Skill = id
+	}
 	warnDeprecatedVMSize(runtime.Stderr, options)
 	response, err := client.SubmitTask(ctx, projectID, message, options)
 	if err != nil {
@@ -449,6 +504,7 @@ func parseSubmitOptions(parsed parsedArgs) (TaskSubmitOptions, error) {
 		return TaskSubmitOptions{}, err
 	}
 	return TaskSubmitOptions{
+		Skill:          flagValue(parsed.Flags, "skill"),
 		Agent:          flagValue(parsed.Flags, "agent"),
 		AgentProfile:   flagValue(parsed.Flags, "agent-profile", "agent-profile-id"),
 		ContextSummary: flagValue(parsed.Flags, "context-summary"),

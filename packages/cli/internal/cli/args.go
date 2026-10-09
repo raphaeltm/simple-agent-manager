@@ -56,6 +56,15 @@ func (p *argParser) parseNext() error {
 	arg := p.args[p.index]
 	p.index++
 
+	if arg == "--" {
+		p.result.Positionals = append(p.result.Positionals, p.args[p.index:]...)
+		p.index = len(p.args)
+		return nil
+	}
+	if arg == "-h" || arg == "--help" {
+		p.result.Bools["help"] = true
+		return nil
+	}
 	if arg == "--json" {
 		p.result.Globals.JSON = true
 		return nil
@@ -75,7 +84,7 @@ func (p *argParser) parseNext() error {
 }
 
 func (p *argParser) readProjectValue() error {
-	if p.index >= len(p.args) {
+	if p.index >= len(p.args) || strings.HasPrefix(p.args[p.index], "-") {
 		return fmt.Errorf("--project requires a value")
 	}
 	p.result.Globals.Project = p.args[p.index]

@@ -72,6 +72,7 @@ func (c APIClient) SubmitTask(ctx context.Context, projectID string, message str
 	body := map[string]any{"message": message}
 	addIfSet(body, "agentType", options.Agent)
 	addIfSet(body, "agentProfileId", options.AgentProfile)
+	addIfSet(body, "skillId", options.Skill)
 	addIfSet(body, "contextSummary", options.ContextSummary)
 	addIfSet(body, "devcontainerConfigName", options.Devcontainer)
 	addIfSet(body, "nodeId", options.Node)
@@ -247,7 +248,7 @@ func doJSONWithLimit(ctx context.Context, httpClient HTTPDoer, method string, en
 
 	response, err := httpClient.Do(req)
 	if err != nil {
-		return err
+		return APIError{Code: "OUTCOME_UNKNOWN", Message: "Request transport failed; a mutating request may have been accepted. Reconcile before retrying."}
 	}
 	defer response.Body.Close()
 
@@ -336,7 +337,7 @@ func parseAPIError(status int, content []byte) error {
 		Message string `json:"message"`
 	}
 	if err := json.Unmarshal(content, &body); err != nil {
-		body.Message = string(content)
+		body.Message = fmt.Sprintf("SAM API returned a non-JSON error (status %d)", status)
 	}
 	if body.Error == "" {
 		body.Error = "HTTP_ERROR"

@@ -101,8 +101,10 @@ func runStatus(ctx context.Context, runtime Runtime, parsed parsedArgs) int {
 	}
 	projectID, projectName, resolveErr := resolveProjectRef(ctx, client, parsed, config)
 	if resolveErr != nil {
-		// No project configured — fall back to listing all projects
-		return runListProjects(ctx, runtime, parsed)
+		if parsed.Globals.Project == "" && (config == nil || config.ActiveProjectID == "") {
+			return runListProjects(ctx, runtime, parsed)
+		}
+		return fail(runtime.Stderr, resolveErr)
 	}
 	detail, err := client.GetProjectDetail(ctx, projectID)
 	if err != nil {
