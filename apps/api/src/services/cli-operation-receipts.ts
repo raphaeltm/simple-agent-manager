@@ -57,7 +57,7 @@ export const cliOperationReceipt: MiddlewareHandler<{ Bindings: Env }> = async (
         response_json: string | null;
         response_status: number | null;
       }>();
-    if (!receipt || receipt.intent_hash !== intentHash)
+    if (receipt?.intent_hash !== intentHash)
       throw errors.conflict('Idempotency key was used for a different intent');
     if (receipt.state !== 'completed' || receipt.response_json === null) {
       return c.json(

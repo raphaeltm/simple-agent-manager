@@ -824,7 +824,12 @@ jobs:
           cache: 'pnpm'
 
       - name: Install Worker contract fixture dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      # pnpm 9 has no approved-build dependency list in this repository.
+      # Run only these lockfile-pinned native builds required by the fixtures.
+      - name: Build trusted native fixture dependencies
+        run: pnpm --filter @simple-agent-manager/api rebuild better-sqlite3 esbuild
 
       - name: Build Worker contract fixture dependencies
         run: pnpm --filter '@simple-agent-manager/api^...' build

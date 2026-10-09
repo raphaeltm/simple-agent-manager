@@ -29,14 +29,15 @@ function operation(
   query = '',
   body?: SchemaObject
 ): OperationObject {
-  const parameters: NonNullable<OperationObject['parameters']> = [
-    ...path.matchAll(/\{([^}]+)\}/g),
-  ].map((match) => ({
-    name: match[1] ?? '',
-    in: 'path',
-    required: true,
-    schema: { type: 'string' },
-  }));
+  const parameters: NonNullable<OperationObject['parameters']> = path
+    .split('/')
+    .filter((segment) => segment.startsWith('{') && segment.endsWith('}'))
+    .map((segment) => ({
+      name: segment.slice(1, -1),
+      in: 'path',
+      required: true,
+      schema: { type: 'string' },
+    }));
   parameters.push(
     ...query
       .split(' ')
