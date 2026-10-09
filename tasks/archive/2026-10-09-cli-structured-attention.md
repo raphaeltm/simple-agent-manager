@@ -21,7 +21,7 @@ Valid API attention objects caused CLI session listing and viewing to fail with 
 - [x] Reproduce object decoding error before fix, pass tests afterward.
 - [x] Go race/coverage, vet, cross-builds and repository fast checks.
 - [x] Independent local specialist reviews and findings addressed (three reviewers PASS, no findings).
-- [ ] Coordinated staging validation on final candidate.
+- [x] Coordinated staging validation on reviewed code candidate (run 37910686532 PASS).
 - [ ] Green CI, CodeRabbit requested/waited, merge.
 
 ## Acceptance criteria
@@ -39,3 +39,9 @@ Original fixture matrix failed before the fix with object-to-string INVALID_JSON
 ## Delivery
 
 PR #2290. User initially requested draft/no merge; 2026-10-09 follow-up explicitly authorized /do checks and merge. No production configuration changes or manual production deployment.
+
+## Staging evidence
+
+Deploy Staging 37910686532 passed on 44a5a82d2. Authenticated Playwright browser and downloaded public Linux amd64 CLI; embedded revision matched exactly. Smoke account had three populated attention objects. All eight chat list/detail/project/status text and JSON commands passed. Nine messages matched API content, roles and numeric/ISO timestamps; hasMore=false matched the live API. Populated attention decoded and round-tripped. No VMs or test resources provisioned. Private response values stayed in memory; logs contain only counts/revision/booleans.
+
+Implementation acceptance is complete. The final CI/CodeRabbit/merge/automatic-deployment outcomes remain tracked in PR #2290 and local .do-state.md; do not infer merge from this implementation validation record.
