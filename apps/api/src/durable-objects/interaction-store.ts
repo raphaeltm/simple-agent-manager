@@ -1,5 +1,4 @@
 import {
-  ACP_INTERACTION_ATTENTION_SOURCE,
   ACP_INTERACTION_PROTOCOL_VERSION,
   AcpInteractionAnswerDecisionSchema,
   type AcpInteractionRuntimeCompleteUrl,
@@ -23,6 +22,10 @@ import {
 } from '../services/acp-interaction-delivery';
 import { decrypt, encrypt } from '../services/encryption';
 import {
+  projectInteractionAttention,
+  resolveInteractionAttention,
+} from './interaction-store-attention';
+import {
   protectedFormReceiptHash,
   validFormAnswerDecision,
   validFormCreateDetail,
@@ -41,7 +44,6 @@ import {
   nowMs,
   parseSummary,
   pendingInteractionCount,
-  terminalState,
 } from './interaction-store-model';
 import {
   hasUnexpiredInteractionInput,
@@ -54,7 +56,6 @@ import {
   validUrlAnswerDecision,
   validUrlCreateDetail,
 } from './interaction-store-url';
-import type { ProjectData } from './project-data';
 
 const log = createModuleLogger('interaction_store');
 
@@ -560,9 +561,10 @@ export class InteractionStore extends DurableObject<Env> {
       if (job.kind === 'delivery' && deliveries >= config.deliveryBatchSize) continue;
       if (job.kind === 'delivery') deliveries += 1;
       try {
-        if (job.kind === 'projection') await this.projectAttention(job.interaction_id);
+        if (job.kind === 'projection')
+          await projectInteractionAttention(this.sql, this.env, job.interaction_id);
         else if (job.kind === 'projection_resolve')
-          await this.resolveProjectedAttention(job.interaction_id);
+          await resolveInteractionAttention(this.sql, this.env, job.interaction_id);
         else if (job.kind === 'delivery') await this.processDeliveryJob(job.interaction_id, now);
         this.sql.exec(`DELETE FROM outbox WHERE id = ? AND due_at = ?`, job.id, job.due_at);
       } catch (error) {
@@ -726,61 +728,6 @@ export class InteractionStore extends DurableObject<Env> {
     const purgeAt = at + getAcpInteractionConfig(this.env).sensitivePurgeMs;
     this.enqueue(`resolve:${interactionId}`, interactionId, 'projection_resolve', at);
     this.enqueue(`purge:${interactionId}`, interactionId, 'purge', purgeAt);
-  }
-
-  private async projectAttention(interactionId: string): Promise<void> {
-    const row = readInteractionRow(this.sql, interactionId);
-    if (!row || terminalState(row.state) || row.attention_marker_id?.length) return;
-    const stub = this.projectDataStub(row.project_id);
-    const summary = parseSummary(row);
-    const marker = await stub.createAttentionMarker({
-      sessionId: row.chat_session_id,
-      taskId: null,
-      workspaceId: null,
-      kind: 'needs_input',
-      source: ACP_INTERACTION_ATTENTION_SOURCE,
-      reason: 'acp_interaction_pending',
-      metadata: canonicalJson({
-        source: ACP_INTERACTION_ATTENTION_SOURCE,
-        interactionId: row.interaction_id,
-        kind: row.kind,
-        state: row.state,
-        toolCallId: summary.toolCallId,
-      }),
-      expiresAt: null,
-    });
-    this.sql.exec(
-      `UPDATE interactions
-       SET attention_marker_id = ?, attention_projection_state = 'created', updated_at = ?
-       WHERE interaction_id = ?`,
-      marker.id,
-      nowMs(),
-      interactionId
-    );
-  }
-
-  private async resolveProjectedAttention(interactionId: string): Promise<void> {
-    const row = readInteractionRow(this.sql, interactionId);
-    if (!row?.attention_marker_id) return;
-    const stub = this.projectDataStub(row.project_id);
-    await stub.resolveAttentionMarkerById(
-      row.attention_marker_id,
-      'system',
-      `${ACP_INTERACTION_ATTENTION_SOURCE}:${row.state}`
-    );
-    this.sql.exec(
-      `UPDATE interactions
-       SET attention_projection_state = 'resolved', updated_at = ?
-       WHERE interaction_id = ?`,
-      nowMs(),
-      interactionId
-    );
-  }
-
-  private projectDataStub(projectId: string): DurableObjectStub<ProjectData> {
-    return this.env.PROJECT_DATA.get(
-      this.env.PROJECT_DATA.idFromName(projectId)
-    ) as DurableObjectStub<ProjectData>;
   }
 
   private async scheduleNextAlarm(): Promise<void> {
