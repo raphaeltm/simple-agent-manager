@@ -222,6 +222,61 @@ describe('SAM session dispatch_task current project authority', () => {
     }
   );
 
+  it.each(['claude-code', 'openai-codex'])(
+    'retry_subtask preserves a persisted %s agent-type hint through real placement',
+    async (agentType) => {
+      const sqlite = new Database(':memory:');
+      try {
+        const env = await seedRunnableProject(sqlite);
+        const now = new Date().toISOString();
+        sqlite
+          .prepare(
+            `INSERT INTO tasks
+          (id, project_id, user_id, title, description, status, agent_profile_hint, created_at, updated_at)
+          VALUES ('original-task', 'project-1', 'owner-1', 'Original', 'Retry me', 'failed', ?, ?, ?)`
+          )
+          .run(agentType, now, now);
+
+        const result = await retrySubtask({ taskId: 'original-task' }, makeContext(env, 'owner-1'));
+
+        expect(result).toMatchObject({ newTaskId: expect.any(String), status: 'queued' });
+        expect(mocks.startTaskRunnerDO).toHaveBeenCalledWith(
+          env,
+          expect.objectContaining({ agentType })
+        );
+        expect(
+          sqlite.prepare("SELECT agent_profile_hint FROM tasks WHERE id != 'original-task'").get()
+        ).toEqual({ agent_profile_hint: agentType });
+      } finally {
+        sqlite.close();
+      }
+    }
+  );
+
+  it('retry_subtask rejects an unavailable explicit profile before creating replacement work', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      const env = await seedRunnableProject(sqlite);
+      const now = new Date().toISOString();
+      sqlite
+        .prepare(
+          `INSERT INTO tasks
+        (id, project_id, user_id, title, description, status, agent_profile_hint, created_at, updated_at)
+        VALUES ('original-task', 'project-1', 'owner-1', 'Original', 'Retry me', 'failed', 'missing-profile', ?, ?)`
+        )
+        .run(now, now);
+
+      await expect(
+        retrySubtask({ taskId: 'original-task' }, makeContext(env, 'owner-1'))
+      ).rejects.toThrow('Agent profile');
+      expect(sqlite.prepare('SELECT COUNT(*) AS count FROM tasks').get()).toEqual({ count: 1 });
+      expect(mocks.createSession).not.toHaveBeenCalled();
+      expect(mocks.startTaskRunnerDO).not.toHaveBeenCalled();
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it('retry_subtask keeps the original feature coordination channel on the replacement', async () => {
     const sqlite = new Database(':memory:');
     try {

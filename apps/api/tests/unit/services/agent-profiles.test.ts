@@ -654,6 +654,16 @@ describe('Agent Profile Service', () => {
   });
 
   describe('deleteProfile', () => {
+    it('rejects a user-owned global profile without issuing a delete', async () => {
+      const db = createMockDB();
+      db._pushResult([makeProfileRow({ projectId: null })]);
+
+      await expect(
+        agentProfileService.deleteProfile(db, 'project-1', 'profile-1', 'user-1')
+      ).rejects.toThrow('Global profiles must be deleted through their own scope');
+      expect(db.delete).not.toHaveBeenCalled();
+    });
+
     it('deletes an existing profile', async () => {
       const db = createMockDB();
       const existingRow = makeProfileRow({ id: 'profile-1', isBuiltin: 0 });

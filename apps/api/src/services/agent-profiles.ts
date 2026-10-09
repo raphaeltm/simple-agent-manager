@@ -281,8 +281,10 @@ export async function deleteProfile(
   profileId: string,
   userId: string
 ): Promise<void> {
-  // Verify it exists and user has access
-  await getProfile(db, projectId, profileId, userId);
+  // Verify both access and mutation scope before issuing the deletion.
+  const profile = await getProfile(db, projectId, profileId, userId);
+  if (profile.projectId !== projectId)
+    throw errors.badRequest('Global profiles must be deleted through their own scope');
 
   await db
     .delete(schema.agentProfiles)
@@ -297,7 +299,7 @@ export async function deleteProfile(
  *   1. Exact match by ID in project scope
  *   2. Exact match by name in project scope
  *   3. Exact match by name in global scope (user's profiles with project_id = NULL)
- *   4. Fallback to platform defaults
+ *   4. Reject unmatched explicit hints; platform defaults apply only when omitted
  */
 export async function resolveAgentProfile(
   db: Db,
