@@ -36,6 +36,8 @@ func workflowContracts() []workflowContract {
 		readContract("tasks sessions", []string{"tasks", "$0", "sessions"}, 1, ""),
 		readContract("ideas list", []string{"tasks"}, 0, "limit cursor"),
 		readContract("ideas get", []string{"tasks", "$0"}, 1, ""),
+		workflowContract{command: "profiles resolve", method: http.MethodPost, path: []string{"agent-profiles", "resolve"}, args: 1, effect: "read-only"},
+		readContract("skills resolve", []string{"skills", "$0", "resolve"}, 1, "profileId"),
 		readContract("profiles list", []string{"agent-profiles"}, 0, ""),
 		readContract("profiles get", []string{"agent-profiles", "$0"}, 1, ""),
 		readContract("skills list", []string{"skills"}, 0, ""),
@@ -132,7 +134,7 @@ func runWorkflow(ctx context.Context, runtime Runtime, parsed parsedArgs, c work
 			segments[i] = args[int(s[1]-'0')]
 		}
 	}
-	if strings.HasPrefix(c.command, "profiles get") || strings.HasPrefix(c.command, "skills get") {
+	if strings.HasPrefix(c.command, "profiles get") || strings.HasPrefix(c.command, "skills get") || c.command == "skills resolve" {
 		id, e := resolveNamedResource(ctx, client, project, c.path[0], args[0])
 		if e != nil {
 			return fail(runtime.Stderr, e)
@@ -174,8 +176,16 @@ func runWorkflow(ctx context.Context, runtime Runtime, parsed parsedArgs, c work
 		}
 		return writeWorkflow(runtime, parsed, value)
 	}
+	var body map[string]any
+	if c.command == "profiles resolve" {
+		id, e := resolveNamedResource(ctx, client, project, "agent-profiles", args[0])
+		if e != nil {
+			return fail(runtime.Stderr, e)
+		}
+		body = map[string]any{"profileNameOrId": id}
+	}
 	var value any
-	if err := client.request(ctx, c.method, path, nil, &value); err != nil {
+	if err := client.request(ctx, c.method, path, body, &value); err != nil {
 		return fail(runtime.Stderr, err)
 	}
 	return writeWorkflow(runtime, parsed, value)

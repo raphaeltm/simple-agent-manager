@@ -45,6 +45,23 @@ skillRoutes.get('/:skillId', async (c) => {
   return c.json(skill);
 });
 
+skillRoutes.get('/:skillId/resolve', async (c) => {
+  const userId = getUserId(c);
+  const projectId = requireRouteParam(c, 'projectId');
+  const skillId = requireRouteParam(c, 'skillId');
+  const db = drizzle(c.env.DATABASE, { schema });
+  await requireProjectAccess(db, projectId, userId);
+  const resolved = await skillService.resolveSkillProfile(
+    db,
+    projectId,
+    c.req.query('profileId'),
+    skillId,
+    userId,
+    c.env
+  );
+  return c.json(resolved);
+});
+
 skillRoutes.patch('/:skillId', jsonValidator(UpdateSkillSchema), async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');

@@ -71,6 +71,9 @@ func postAuthJSON(ctx context.Context, httpClient HTTPDoer, endpoint string, bod
 
 func (c APIClient) SubmitTask(ctx context.Context, projectID string, message string, options TaskSubmitOptions) (SubmitTaskResponse, error) {
 	body := map[string]any{"message": message}
+	if len(options.Attachments) > 0 {
+		body["attachments"] = options.Attachments
+	}
 	addIfSet(body, "agentType", options.Agent)
 	addIfSet(body, "agentProfileId", options.AgentProfile)
 	addIfSet(body, "skillId", options.Skill)

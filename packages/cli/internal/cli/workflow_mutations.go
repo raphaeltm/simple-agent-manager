@@ -129,7 +129,11 @@ func runMetadataMutation(ctx context.Context, runtime Runtime, p parsedArgs, arg
 	default:
 		return fail(runtime.Stderr, fmt.Errorf("unsupported mutation"))
 	}
-	if len(fields) == 0 {
+	fieldCount := len(fields)
+	if _, ok := fields["expectedUpdatedAt"]; ok {
+		fieldCount--
+	}
+	if fieldCount == 0 {
 		return fail(runtime.Stderr, fmt.Errorf("no approved fields specified"))
 	}
 	if p.Bools["preview"] {

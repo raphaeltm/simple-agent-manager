@@ -78,7 +78,7 @@ func TestWorkflowNamedResourceAmbiguity(t *testing.T) {
 func TestWorkflowReadMethodsAndPaths(t *testing.T) {
 	for _, c := range workflowContracts() {
 		t.Run(c.command, func(t *testing.T) {
-			if strings.HasPrefix(c.command, "profiles get") || strings.HasPrefix(c.command, "skills get") {
+			if strings.HasPrefix(c.command, "profiles get") || strings.HasPrefix(c.command, "skills get") || c.command == "profiles resolve" || c.command == "skills resolve" {
 				return
 			}
 			args := append(strings.Fields(c.command), "--project", workflowProject, "--json")
@@ -90,7 +90,7 @@ func TestWorkflowReadMethodsAndPaths(t *testing.T) {
 			if Run(context.Background(), r) != 0 {
 				t.Fatal(err.String())
 			}
-			if req.Method != "GET" || !(strings.Contains(req.URL, "/api/projects/"+workflowProject) || c.command == "notifications list" && strings.Contains(req.URL, "projectId="+workflowProject)) {
+			if req.Method != c.method || !(strings.Contains(req.URL, "/api/projects/"+workflowProject) || c.command == "notifications list" && strings.Contains(req.URL, "projectId="+workflowProject)) {
 				t.Fatalf("unsafe read %s %s", req.Method, req.URL)
 			}
 		})

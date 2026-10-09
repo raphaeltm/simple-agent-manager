@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -98,6 +99,15 @@ func (p *argParser) parseFlag(arg string) error {
 		return fmt.Errorf("invalid flag %q", arg)
 	}
 	if hasValue {
+		if booleanCommandFlag(name) && name != "exclusive-node" {
+			b, err := strconv.ParseBool(value)
+			if err != nil {
+				return fmt.Errorf("--%s requires true or false", name)
+			}
+			p.result.Bools[name] = b
+			p.result.FlagOccurrences = append(p.result.FlagOccurrences, flagOccurrence{Name: name, Value: value, HasValue: true})
+			return nil
+		}
 		p.result.Flags[name] = value
 		p.result.MultiFlags[name] = append(p.result.MultiFlags[name], value)
 		p.result.FlagOccurrences = append(p.result.FlagOccurrences, flagOccurrence{Name: name, Value: value, HasValue: true})

@@ -131,6 +131,7 @@ type LocalForwardSessionResponse struct {
 
 type TaskSubmitOptions struct {
 	Agent          string
+	Attachments    []map[string]any
 	Skill          string
 	AgentProfile   string
 	ContextSummary string

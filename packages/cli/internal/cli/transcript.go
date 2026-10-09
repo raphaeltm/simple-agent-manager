@@ -99,7 +99,30 @@ func runTranscriptExport(ctx context.Context, runtime Runtime, p parsedArgs, arg
 		}
 		query.Set("before", cursor)
 	}
-	value := map[string]any{"sessionId": args[0], "messages": messages, "complete": true, "snapshotCursor": snapshot, "archivedToolContentHydrated": false}
+	if p.Bools["hydrate-tools"] {
+		for _, row := range messages {
+			message := row.(map[string]any)
+			role, _ := message["role"].(string)
+			if role != "tool" && message["toolMetadata"] == nil {
+				continue
+			}
+			id := message["id"].(string)
+			var tool map[string]any
+			if err = client.request(ctx, http.MethodGet, projectAPIPath(project, "sessions", args[0], "messages", id, "tool-content"), nil, &tool); err != nil {
+				return fail(runtime.Stderr, err)
+			}
+			message["toolContent"] = tool
+			encoded, e := json.Marshal(tool)
+			if e != nil {
+				return fail(runtime.Stderr, e)
+			}
+			exportBytes += int64(len(encoded))
+			if exportBytes > maxBytes {
+				return fail(runtime.Stderr, fmt.Errorf("hydrated export exceeds SAM_CLI_MAX_EXPORT_BYTES"))
+			}
+		}
+	}
+	value := map[string]any{"sessionId": args[0], "messages": messages, "complete": true, "snapshotCursor": snapshot, "archivedToolContentHydrated": p.Bools["hydrate-tools"]}
 	var data []byte
 	if p.Bools["ndjson"] {
 		for _, row := range messages {

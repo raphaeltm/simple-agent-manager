@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -37,6 +38,9 @@ func Run(ctx context.Context, runtime Runtime) int {
 	if err := validateCommandFlags(parsed); err != nil {
 		return fail(runtime.Stderr, err)
 	}
+	if err := validateCommandSyntax(parsed); err != nil {
+		return fail(runtime.Stderr, err)
+	}
 	if c, args, ok := findWorkflow(parsed); ok && (parsed.Globals.JSON || len(parsed.Flags) > 0 || parsed.Bools["all-pages"] || len(parsed.Positionals) > 1 && parsed.Positionals[0] != "chat") {
 		return runWorkflow(ctx, runtime, parsed, c, args)
 	}
@@ -45,6 +49,9 @@ func Run(ctx context.Context, runtime Runtime) int {
 	}
 	if parsed.Positionals[0] == "settings" {
 		return runSettingsInspect(ctx, runtime, parsed)
+	}
+	if len(parsed.Positionals) > 1 && (parsed.Positionals[0] == "library" || parsed.Positionals[0] == "files") && parsed.Positionals[1] == "download" {
+		return runArtifactDownload(ctx, runtime, parsed, parsed.Positionals[2:])
 	}
 	namespace := parsed.Positionals[0]
 	args := parsed.Positionals[1:]
@@ -60,6 +67,9 @@ func Run(ctx context.Context, runtime Runtime) int {
 	case "chat":
 		return runChatCommand(ctx, runtime, parsed, args)
 	case "ideas":
+		if len(args) > 0 && args[0] == "execute" {
+			return runIdeaExecute(ctx, runtime, parsed, args[1:])
+		}
 		return runIdeas(ctx, runtime, parsed)
 	case "library":
 		return runLibrary(ctx, runtime, parsed)
@@ -159,14 +169,23 @@ func runDeviceFlow(ctx context.Context, runtime Runtime, parsed parsedArgs, apiU
 		code.ExpiresIn = 900
 	}
 
-	fmt.Fprintf(runtime.Stdout, "Open this URL to authorize SAM CLI:\n%s\n\nUser code: %s\n", code.VerificationURIComplete, code.UserCode)
-	tryOpenBrowser(ctx, runtime, code.VerificationURIComplete)
+	if parsed.Globals.JSON {
+		data, _ := json.Marshal(map[string]any{"authorizationRequired": true, "verificationUrl": code.VerificationURIComplete, "userCode": code.UserCode})
+		fmt.Fprintln(runtime.Stderr, string(data))
+	} else {
+		fmt.Fprintf(runtime.Stdout, "Open this URL to authorize SAM CLI:\n%s\n\nUser code: %s\n", code.VerificationURIComplete, code.UserCode)
+	}
+	if !parsed.Globals.JSON {
+		tryOpenBrowser(ctx, runtime, code.VerificationURIComplete)
+	}
 
 	response, err := pollDeviceToken(ctx, runtime, apiURL, code)
 	if err != nil {
 		return fail(runtime.Stderr, err)
 	}
-	fmt.Fprintln(runtime.Stdout)
+	if !parsed.Globals.JSON {
+		fmt.Fprintln(runtime.Stdout)
+	}
 	return saveAuthConfig(runtime, parsed, normalizeAPIURL(apiURL), response.SessionCookie, response.User)
 }
 
@@ -184,10 +203,14 @@ func pollDeviceToken(ctx context.Context, runtime Runtime, apiURL string, code D
 		}
 		switch {
 		case apiErr.Status == http.StatusPreconditionRequired || apiErr.Code == "authorization_pending":
-			fmt.Fprint(runtime.Stdout, ".")
+			if !containsJSONFlag(runtime.Args) {
+				fmt.Fprint(runtime.Stdout, ".")
+			}
 		case apiErr.Status == http.StatusTooManyRequests || apiErr.Code == "slow_down":
 			interval += 5 * time.Second
-			fmt.Fprint(runtime.Stdout, ".")
+			if !containsJSONFlag(runtime.Args) {
+				fmt.Fprint(runtime.Stdout, ".")
+			}
 		case apiErr.Status == http.StatusGone || apiErr.Code == "expired_token":
 			return TokenLoginResponse{}, errors.New("code expired. Run `sam auth login` again")
 		default:
@@ -429,6 +452,8 @@ func runChatCommand(ctx context.Context, runtime Runtime, parsed parsedArgs, arg
 		return runChatList(ctx, runtime, parsed)
 	}
 	switch args[0] {
+	case "answer":
+		return runAttentionAnswer(ctx, runtime, parsed, args[1:])
 	case "fork", "retry":
 		return runLineage(ctx, runtime, parsed, args[0], args[1:])
 	case "send", "cancel", "sleep":
@@ -458,7 +483,14 @@ func runRunner(ctx context.Context, runtime Runtime, parsed parsedArgs, args []s
 	switch args[0] {
 	case "doctor":
 		report := RunRunnerDoctor(ctx, runtime.Runner)
-		return writeOrFail(runtime, parsed.Globals.JSON, FormatRunnerDoctor(report), report)
+		code := writeOrFail(runtime, parsed.Globals.JSON, FormatRunnerDoctor(report), report)
+		if code != 0 {
+			return code
+		}
+		if !report.Ready {
+			return 1
+		}
+		return 0
 	case "install":
 		return fail(runtime.Stderr, plannedCommand("sam runner install"))
 	case "register":
@@ -492,6 +524,11 @@ func submitTaskWithClient(ctx context.Context, runtime Runtime, parsed parsedArg
 		}
 		options.Skill = id
 	}
+	refs, uploadErr := attachmentReferences(ctx, runtime, client, projectID, parsed)
+	if uploadErr != nil {
+		return fail(runtime.Stderr, uploadErr)
+	}
+	options.Attachments = refs
 	warnDeprecatedVMSize(runtime.Stderr, options)
 	response, err := client.SubmitTask(ctx, projectID, message, options)
 	if err != nil {
@@ -787,4 +824,13 @@ Task resource flags:
   --vm-size <small|medium|large>
                             Deprecated legacy tier; prefer resource flags
 `
+}
+
+func containsJSONFlag(args []string) bool {
+	for _, a := range args {
+		if a == "--json" {
+			return true
+		}
+	}
+	return false
 }
