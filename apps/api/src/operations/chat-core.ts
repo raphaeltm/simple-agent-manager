@@ -1,6 +1,7 @@
 import { formatMessageCursor, parseMessageCursor } from '@simple-agent-manager/shared';
 
 import { VALID_MESSAGE_ROLES, validateRoles } from '../lib/message-roles';
+import { connectorPendingInteractions } from '../services/connector-agent-answer';
 import { groupTokensIntoMessages } from '../services/message-groups';
 import * as projectDataService from '../services/project-data';
 import { describeRootSearchCoverage } from '../services/project-data-search-coverage';
@@ -113,6 +114,15 @@ export async function readChat(
     sessionId,
     topic: session.topic,
     taskId: session.taskId,
+    ...(connector && session.createdByUserId === ctx.actor.userId
+      ? {
+          pendingInteractions: await connectorPendingInteractions(
+            ctx.env,
+            input.projectId,
+            sessionId
+          ),
+        }
+      : {}),
     messages: result,
     messageCount: result.length,
     hasMore,

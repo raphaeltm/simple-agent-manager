@@ -89,3 +89,11 @@ export function recordInteractionDelivery(
     error
   );
 }
+
+export function getPendingInteractionDetails(
+  env: Env,
+  projectId: string,
+  chatSessionId: string
+): ReturnType<InteractionStore['pendingWithDetails']> {
+  return getInteractionStore(env, projectId, chatSessionId).pendingWithDetails();
+}

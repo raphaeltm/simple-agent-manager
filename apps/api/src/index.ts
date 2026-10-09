@@ -37,12 +37,12 @@ import { createAuth } from './auth';
 import * as schema from './db/schema';
 import type { Env } from './env';
 import { applyCacheHeaders } from './lib/cache-headers';
-import { resolveCredentialedCorsOrigin } from './lib/cors-origin';
 import { withRequestScopedD1Bindings } from './lib/d1-session';
 import { log, serializeError } from './lib/logger';
 import { resolvePagesProxyTarget } from './lib/pages-proxy';
 import { parseWorkspaceSubdomain } from './lib/workspace-subdomain';
 import { analyticsMiddleware } from './middleware/analytics';
+import { apiCors } from './middleware/api-cors';
 import { handleAppError } from './middleware/app-error-handler';
 import { requestLoggingMiddleware } from './middleware/request-logging';
 import { accountMapRoutes } from './routes/account-map';
@@ -691,23 +691,7 @@ app.use('*', requestLoggingMiddleware());
 // Analytics Engine — writes one data point per request (non-blocking, fire-and-forget)
 app.use('*', analyticsMiddleware());
 
-app.use(
-  '*',
-  cors({
-    origin: (origin, c) => {
-      return resolveCredentialedCorsOrigin(origin, c.env?.BASE_DOMAIN);
-    },
-    credentials: true,
-    allowHeaders: [
-      'Content-Type',
-      'Authorization',
-      'x-api-key',
-      'anthropic-version',
-      'anthropic-beta',
-    ],
-    allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  })
-);
+app.use('*', apiCors);
 
 // Health check — public endpoint returns minimal info only
 app.get('/health', (c) => {

@@ -247,7 +247,7 @@ function createStatement(sql: string, results: D1ResultMap) {
       return this;
     },
     first() {
-      if (sql.includes("task_mode = 'conversation' AND triggered_by = 'user'")) {
+      if (sql.includes("task_mode = 'conversation' AND triggered_by IN ('user', 'connector')")) {
         const task = results.task;
         return Promise.resolve(
           task &&
@@ -255,7 +255,7 @@ function createStatement(sql: string, results: D1ResultMap) {
             task.projectId === bound[1] &&
             task.userId === bound[2] &&
             task.taskMode === 'conversation' &&
-            task.triggeredBy === 'user'
+            (task.triggeredBy === 'user' || task.triggeredBy === 'connector')
             ? { id: task.id }
             : null
         );
@@ -1552,6 +1552,18 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
 
   it.each([
     { label: 'first human conversation', triggeredBy: 'user', resume: false, admitted: true },
+    {
+      label: 'first Connector conversation',
+      triggeredBy: 'connector',
+      resume: false,
+      admitted: true,
+    },
+    {
+      label: 'Connector conversation wake',
+      triggeredBy: 'connector',
+      resume: true,
+      admitted: false,
+    },
     { label: 'background conversation', triggeredBy: 'schedule', resume: false, admitted: false },
     { label: 'human conversation wake', triggeredBy: 'user', resume: true, admitted: false },
   ])(

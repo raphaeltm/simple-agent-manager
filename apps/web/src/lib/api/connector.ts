@@ -36,7 +36,7 @@ export const revokeConnectorConnection = (id: string, admin = false) =>
   });
 export const adminConnectorSettings = () =>
   request<{ settings: ConnectorSettings }>('/api/admin/connector/settings');
-export const saveConnectorSettings = (values: Record<string, ConnectorSetting['value']>) =>
+export const saveConnectorSettings = (values: Record<string, ConnectorSetting['value'] | null>) =>
   request<{ settings: ConnectorSettings }>('/api/admin/connector/settings', {
     method: 'PATCH',
     body: JSON.stringify(values),

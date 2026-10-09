@@ -1,5 +1,5 @@
 /**
- * Task Submit Route — Single-action task submission from chat UI.
+ * Shared task submission for REST and Connector callers.
  *
  * POST /api/projects/:projectId/tasks/submit
  *
@@ -25,9 +25,10 @@ import type * as v from 'valibot';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { markRejectedBeforeEffects } from '../lib/operation-effect-boundary';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { ulid } from '../lib/ulid';
-import { errors } from '../middleware/error';
+import { AppError, errors } from '../middleware/error';
 import { requireProjectCapability } from '../middleware/project-auth';
 import { requireRepositoryAccess } from '../routes/projects/_helpers';
 import { type SubmitTaskSchema } from '../schemas';
@@ -161,6 +162,41 @@ export async function submitTask(
   via: string = 'web',
   clientName?: string,
   repositoryAccess?: (project: schema.Project) => Promise<unknown>
+): Promise<SubmitTaskResponse> {
+  let taskEffectsStarted = false;
+  try {
+    return await submitTaskImplementation(
+      env,
+      user,
+      projectId,
+      body,
+      waitUntil,
+      via,
+      clientName,
+      repositoryAccess,
+      () => {
+        taskEffectsStarted = true;
+      }
+    );
+  } catch (error) {
+    // Admission may initialize idempotent placement metadata, but has not created
+    // task/session work. Only a known rejection in this phase proves safe retry.
+    if (!taskEffectsStarted && (via === 'connector' || via === 'pat') && error instanceof AppError)
+      markRejectedBeforeEffects(error);
+    throw error;
+  }
+}
+
+async function submitTaskImplementation(
+  env: Env,
+  user: { id: string; name: string | null; email: string },
+  projectId: string,
+  body: v.InferOutput<typeof SubmitTaskSchema>,
+  waitUntil: (promise: Promise<unknown>) => void,
+  via: string,
+  clientName: string | undefined,
+  repositoryAccess: ((project: schema.Project) => Promise<unknown>) | undefined,
+  beforeTaskEffects: () => void
 ): Promise<SubmitTaskResponse> {
   const userId = user.id;
   const db = drizzle(env.DATABASE, { schema });
@@ -339,30 +375,34 @@ export async function submitTask(
       ? await resolveSkillProfile(db, projectId, body.agentProfileId, body.skillId, userId, env)
       : null;
   const preferredProvider = resolvedProfile?.provider ?? project.defaultProvider;
+  // REST preserves its explicit-Instant-only contract; automatic Connector starts
+  // may use runtime selection, but VM-only fields always request VM placement.
+  const connectorStart = via === 'connector' || via === 'pat';
+  const hasVmOverrides = !!(
+    body.nodeId ||
+    body.vmSize ||
+    body.vmLocation ||
+    body.provider ||
+    body.workspaceProfile === 'full' ||
+    body.devcontainerConfigName ||
+    (taskResourceRequirements && Object.keys(taskResourceRequirements).length > 0)
+  );
   const runtime = await resolveWorkspaceRuntime(db, env, {
     userId,
     projectId,
     provider: preferredProvider && isValidProvider(preferredProvider) ? preferredProvider : null,
-    explicitRuntime:
-      resolvedProfile?.runtime ?? (body.nodeId || body.vmSize || body.provider ? 'vm' : null),
+    explicitRuntime: resolvedProfile?.runtime ?? (hasVmOverrides || !connectorStart ? 'vm' : null),
   });
   if (resolvedProfile?.runtime === 'cf-container' && runtime.runtime !== 'cf-container')
     throw errors.conflict('Instant containers are disabled. Choose a VM profile.');
   if (runtime.runtime === 'cf-container') {
-    if (
-      body.nodeId ||
-      body.vmSize ||
-      body.vmLocation ||
-      body.provider ||
-      body.workspaceProfile === 'full' ||
-      body.devcontainerConfigName ||
-      (taskResourceRequirements && Object.keys(taskResourceRequirements).length > 0)
-    ) {
+    if (hasVmOverrides) {
       throw errors.badRequest(
         'Instant containers cannot use VM resource overrides. Clear the overrides or choose a VM profile.'
       );
     }
     const result = await submitInstantTask({
+      beforeTaskEffects,
       db,
       env: env,
       waitUntil: (promise) => waitUntil(promise),
@@ -539,6 +579,8 @@ export async function submitTask(
   // so the agent receives it. The clean message is persisted in the chat session.
   const { enrichedMessage } = await enrichMessageWithMentions(message, db, projectId, userId, env);
 
+  // Mark before issuing SQL: an insert error may have an uncertain commit outcome.
+  beforeTaskEffects();
   await db.insert(schema.tasks).values({
     id: taskId,
     projectId,

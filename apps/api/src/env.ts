@@ -18,7 +18,11 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   // KV for sessions
   KV: KVNamespace;
   OAUTH_KV: KVNamespace;
+  CONNECTOR_REQUEST_MAX_BYTES?: string;
+  CONNECTOR_CLIENT_NAME_MAX_LENGTH?: string;
+  CONNECTOR_REDIRECT_URI_MAX_COUNT?: string;
   CONNECTOR_LIST_PAGE_SIZE?: string;
+  CONNECTOR_INBOX_SESSION_LIMIT?: string;
   CONNECTOR_OAUTH_REQUEST_MAX_BYTES?: string;
   CONNECTOR_REGISTRATION_PER_IP_PER_HOUR?: string;
   CONNECTOR_REGISTRATION_GLOBAL_PER_HOUR?: string;

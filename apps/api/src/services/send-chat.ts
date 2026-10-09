@@ -14,6 +14,12 @@ import { enrichMessageWithMentions } from '../services/mention-enrichment';
 import * as projectDataService from '../services/project-data';
 import { cancelScheduledSessionSleep } from '../services/session-snapshots';
 
+export function validateSendChatContent(body: v.InferOutput<typeof SendChatMessageSchema>): string {
+  const content = body.content?.trim();
+  if (!content) throw errors.badRequest('content is required');
+  return content;
+}
+
 export async function sendChat(
   env: Env,
   userId: string,
@@ -26,8 +32,7 @@ export async function sendChat(
   await requireProjectCapability(db, projectId, userId, 'task:write');
   await requireSessionCreator(env, projectId, sessionId, userId);
 
-  const content = body.content?.trim();
-  if (!content) throw errors.badRequest('content is required');
+  const content = validateSendChatContent(body);
 
   const { enrichedMessage } = await enrichMessageWithMentions(content, db, projectId, userId, env);
   // A follow-up is an immediate keep-awake gesture. Cancel only an unclaimed

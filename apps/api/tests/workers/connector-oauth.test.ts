@@ -388,6 +388,17 @@ describe('Connector OAuth real Workers/KV conformance', () => {
     );
     expect(patch.status).toBe(200);
     expect((await auth(result.tokens.access_token))?.scopes.has('sam.write')).toBe(false);
+    const reset = await admin.request(
+      '/api/admin/connector/settings',
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ writeEnabled: null }),
+      },
+      bindings
+    );
+    expect(reset.status).toBe(200);
+    expect((await auth(result.tokens.access_token))?.scopes.has('sam.write')).toBe(true);
     expect(
       (
         await admin.request(
@@ -498,6 +509,46 @@ describe('Connector OAuth real Workers/KV conformance', () => {
     expect(concurrent.filter((response) => response.status === 429)).toHaveLength(2);
 
     await bindings.DATABASE.prepare('DELETE FROM connector_oauth_registration_budget').run();
+  });
+  it('keeps refresh grants usable after temporary installation disablement', async () => {
+    const result = await flow(redirectUris[0]!);
+    const body = {
+      grant_type: 'refresh_token',
+      client_id: result.client.client_id,
+      refresh_token: result.tokens.refresh_token,
+      resource: connectorUrl(bindings),
+    };
+    await updateConnectorSettings(bindings, { enabled: false }, userId);
+    const disabled = await result.call('/oauth/token', body, true);
+    expect(await disabled.json()).toMatchObject({ error: 'temporarily_unavailable' });
+    await updateConnectorSettings(bindings, { enabled: true }, userId);
+    const restored = await result.call('/oauth/token', body, true);
+    expect(restored.status).toBe(200);
+  });
+  it('rejects oversized client metadata before issuing a registration', async () => {
+    const oauthServer = await createConnectorAuthorizationServer(bindings);
+    for (const body of [
+      { client_name: 'x'.repeat(201), redirect_uris: [redirectUris[0]] },
+      {
+        client_name: 'Bounded',
+        redirect_uris: Array.from(
+          { length: 11 },
+          (_, n) => `http://localhost:${18000 + n}/callback`
+        ),
+      },
+    ]) {
+      const response = await oauthServer.fetch(
+        new Request(`${issuer}/oauth/register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...body, token_endpoint_auth_method: 'none' }),
+        }),
+        bindings,
+        createExecutionContext()
+      );
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ error: 'invalid_client_metadata' });
+    }
   });
   it('slides refresh expiry beyond the original absolute lifetime', async () => {
     const result = await flow(redirectUris[0]!);

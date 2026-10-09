@@ -6,11 +6,17 @@ import { cors } from 'hono/cors';
 import * as v from 'valibot';
 
 import type { Env } from '../env';
+import { parsePositiveInt } from '../lib/route-helpers';
 import { AppError } from '../middleware/error';
 import { OperationError, operationErrorHttpStatus } from '../operations/errors';
 import { operations } from '../operations/registry';
 import type { Operation, OperationContext } from '../operations/types';
 import { auditConnectorWrite, consumeConnectorBudget } from '../services/connector-execution';
+import {
+  DEFAULT_CONNECTOR_REQUEST_MAX_BYTES,
+  DEFAULT_CONNECTOR_RESPONSE_MAX_BYTES,
+  MIN_CONNECTOR_RESPONSE_MAX_BYTES,
+} from '../services/connector-limits';
 import { authenticateConnectorOAuth } from '../services/connector-oauth';
 import { assertConnectorUserActive, authenticateConnectorPat } from '../services/connector-pat';
 import { getConnectorSettings } from '../services/connector-settings';
@@ -119,7 +125,7 @@ export function createConnectorServer(ctx: OperationContext, writeEnabled: boole
         annotations: {
           title: op.title,
           readOnlyHint: op.kind === 'read',
-          destructiveHint: op.kind === 'destructive' || op.name === 'sam_agent_answer',
+          destructiveHint: op.kind === 'destructive',
           openWorldHint: false,
         },
       },
@@ -139,11 +145,21 @@ export function createConnectorServer(ctx: OperationContext, writeEnabled: boole
             ? `https://app.${ctx.env.BASE_DOMAIN}/projects/${encodeURIComponent(projectId)}`
             : `https://app.${ctx.env.BASE_DOMAIN}`;
           const structuredContent = { data: result, link, untrustedContent: true };
-          const maxBytes = Number(ctx.env.CONNECTOR_RESPONSE_MAX_BYTES ?? 120_000);
+          const response = {
+            content: [{ type: 'text' as const, text: JSON.stringify(structuredContent) }],
+            structuredContent,
+          };
+          const maxBytes = Math.max(
+            MIN_CONNECTOR_RESPONSE_MAX_BYTES,
+            parsePositiveInt(
+              ctx.env.CONNECTOR_RESPONSE_MAX_BYTES,
+              DEFAULT_CONNECTOR_RESPONSE_MAX_BYTES
+            )
+          );
           if (
             !Number.isSafeInteger(maxBytes) ||
             maxBytes <= 0 ||
-            new TextEncoder().encode(JSON.stringify(structuredContent)).length > maxBytes
+            new TextEncoder().encode(JSON.stringify(response)).length > maxBytes
           ) {
             throw new OperationError(
               'unavailable',
@@ -151,12 +167,7 @@ export function createConnectorServer(ctx: OperationContext, writeEnabled: boole
               'Use a smaller page or open the result in SAM. Do not repeat a write with a new requestKey.'
             );
           }
-          return {
-            content: [
-              { type: 'text' as const, text: `${op.title} completed. View in SAM: ${link}` },
-            ],
-            structuredContent,
-          };
+          return response;
         } catch (error) {
           const code =
             error instanceof OperationError
@@ -170,10 +181,26 @@ export function createConnectorServer(ctx: OperationContext, writeEnabled: boole
               : v.isValiError(error)
                 ? 'Check the tool inputs and try again.'
                 : 'SAM could not complete this operation. Check its status in SAM before retrying writes.';
-          return {
+          const failure = {
             isError: true,
             content: [{ type: 'text' as const, text: `${code}: ${message}` }],
           };
+          const maxBytes = Math.max(
+            MIN_CONNECTOR_RESPONSE_MAX_BYTES,
+            parsePositiveInt(
+              ctx.env.CONNECTOR_RESPONSE_MAX_BYTES,
+              DEFAULT_CONNECTOR_RESPONSE_MAX_BYTES
+            )
+          );
+          if (new TextEncoder().encode(JSON.stringify(failure)).length > maxBytes) {
+            failure.content = [
+              {
+                type: 'text',
+                text: 'invalid_input: Error details exceed the response limit. Use smaller inputs and check the result in SAM before retrying writes.',
+              },
+            ];
+          }
+          return failure;
         }
       }
     );
@@ -197,7 +224,12 @@ connectorMcpRoutes.use('*', async (c, next) => {
   c.res.headers.delete('Access-Control-Allow-Credentials');
 });
 connectorMcpRoutes.use('*', async (c, next) =>
-  bodyLimit({ maxSize: Number(c.env.CLI_RECEIPT_REQUEST_MAX_BYTES ?? 256 * 1024) })(c, next)
+  bodyLimit({
+    maxSize: parsePositiveInt(
+      c.env.CONNECTOR_REQUEST_MAX_BYTES,
+      DEFAULT_CONNECTOR_REQUEST_MAX_BYTES
+    ),
+  })(c, next)
 );
 connectorMcpRoutes.onError((error, c) => {
   if (error instanceof OperationError)
@@ -205,7 +237,10 @@ connectorMcpRoutes.onError((error, c) => {
       { error: error.code, message: error.message, hint: error.hint },
       operationErrorHttpStatus(error)
     );
-  if (error instanceof AppError) return c.json(error.toJSON(), error.statusCode as 403);
+  if (error instanceof AppError) {
+    if (error.statusCode === 401 || error.statusCode === 403) return challenge(c.env, 401);
+    return c.json(error.toJSON(), error.statusCode as 400);
+  }
   return c.json(
     { error: 'unavailable', message: 'SAM Connector is temporarily unavailable.' },
     503
@@ -224,8 +259,9 @@ connectorMcpRoutes.all('/', async (c) => {
   if (!bearer || new URL(c.req.url).searchParams.has('access_token')) return challenge(c.env, 401);
   const actor = bearer.startsWith('sam_pat_')
     ? await authenticateConnectorPat(bearer, c.env)
-    : await authenticateConnectorOAuth(c.req.raw, c.env);
-  if (!actor || !(await assertConnectorUserActive(c.env, actor))) return challenge(c.env, 401);
+    : await authenticateConnectorOAuth(c.req.raw, c.env, settings);
+  if (!actor || (actor.via === 'pat' && !(await assertConnectorUserActive(c.env, actor))))
+    return challenge(c.env, 401);
   if (!actor.scopes.has('sam.read')) return challenge(c.env, 403, 'sam.read');
   await consumeConnectorBudget(
     c.env,
@@ -271,6 +307,20 @@ connectorMcpRoutes.all('/', async (c) => {
           } catch (error) {
             if (!(error instanceof OperationError)) throw error;
           }
+          if (!settings.writeEnabled)
+            return c.json({
+              jsonrpc: '2.0',
+              id: 'id' in body ? body.id : null,
+              result: {
+                isError: true,
+                content: [
+                  {
+                    type: 'text',
+                    text: 'Writes are disabled by the administrator. Reconnecting will not enable them.',
+                  },
+                ],
+              },
+            });
           return challenge(c.env, 403, 'sam.write');
         }
       }
@@ -279,6 +329,7 @@ connectorMcpRoutes.all('/', async (c) => {
   const ctx: OperationContext = {
     env: c.env,
     actor,
+    connectorSettings: settings,
     requestId: crypto.randomUUID(),
     execCtx: c.executionCtx as unknown as ExecutionContext,
   };

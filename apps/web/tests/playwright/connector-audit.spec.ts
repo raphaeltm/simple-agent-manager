@@ -175,3 +175,48 @@ test('Connector admin inventories and revoke controls are visible', async ({ pag
   await expect(page.getByRole('dialog')).toBeVisible();
   await screenshot(page, 'connector-admin-revoke', { scopeToProject: true });
 });
+
+test('admin saves only changed settings and resets an individual override', async ({ page }) => {
+  let config = {
+    ...settings,
+    enabled: { value: false, source: 'runtime', updatedAt: '2026-10-09', updatedBy: 'admin' },
+  };
+  const patches: unknown[] = [];
+  await page.route('**/api/admin/connector/settings', async (route) => {
+    if (route.request().method() === 'PATCH') {
+      const patch = route.request().postDataJSON();
+      patches.push(patch);
+      config = Object.fromEntries(
+        Object.entries(config).map(([key, entry]) => [
+          key,
+          Object.hasOwn(patch, key)
+            ? patch[key] === null
+              ? { ...entry, value: true, source: 'environment', updatedAt: null, updatedBy: null }
+              : { ...entry, value: patch[key], source: 'runtime' }
+            : entry,
+        ])
+      ) as typeof config;
+    }
+    await route.fulfill({ json: { settings: config } });
+  });
+  await page.goto('/admin/integrations');
+  const reset = page.getByRole('button', { name: 'Reset Enable Connector to default' });
+  await expect(reset).toBeVisible();
+  await page.getByRole('heading', { name: 'Connector', exact: true }).scrollIntoViewIfNeeded();
+  await assertNoOverflow(page);
+  await screenshot(page, 'connector-admin-reset', { scopeToProject: true });
+  await page.getByRole('switch', { name: 'Allow writes' }).click();
+  await page.getByRole('button', { name: 'Save Connector settings' }).click();
+  await expect(page.getByText('Connector settings saved.')).toBeVisible();
+  expect(patches).toEqual([{ writeEnabled: false }]);
+  await reset.click();
+  await expect(
+    page.getByText('Override removed. The installation default is active.')
+  ).toBeVisible();
+  expect(patches).toEqual([{ writeEnabled: false }, { enabled: null }]);
+  await expect(page.getByRole('switch', { name: 'Enable Connector' })).toBeChecked();
+  await expect(page.getByRole('switch', { name: 'Allow writes' })).not.toBeChecked();
+  await expect(reset).toHaveCount(0);
+  await assertNoOverflow(page);
+  await screenshot(page, 'connector-admin-reset-done', { scopeToProject: true });
+});

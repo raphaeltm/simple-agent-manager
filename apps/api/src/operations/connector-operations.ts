@@ -1,7 +1,4 @@
-import {
-  AcpInteractionBrowserAnswerSchema,
-  AcpInteractionIdSchema,
-} from '@simple-agent-manager/shared';
+import { AcpInteractionIdSchema } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import * as v from 'valibot';
@@ -11,12 +8,15 @@ import { answerAttention } from '../routes/chat';
 import { answerAgentInteraction } from '../routes/chat-acp-interactions';
 import { requireSessionCreator } from '../routes/chat-session-ownership';
 import { stopChat } from '../routes/chat-stop';
-import { setTaskStatus } from '../routes/tasks/_helpers';
+import { cancelTask } from '../services/cancel-task';
+import {
+  ConnectorAnswerFields,
+  prepareConnectorAgentAnswer,
+} from '../services/connector-agent-answer';
 import { executeConnectorWrite } from '../services/connector-execution';
-import { sendChat } from '../services/send-chat';
+import { sendChat, validateSendChatContent } from '../services/send-chat';
 import { submitTask } from '../services/submit-task';
 import { canTransitionTaskStatus, isTaskStatus } from '../services/task-status';
-import { cleanupTerminalTaskResourcesOrThrow } from '../services/task-terminal-cleanup';
 import { authorizeProjectOperation } from './authorization';
 import {
   chatsList,
@@ -55,7 +55,7 @@ export const samProjectGet = defineOperation({
   name: 'sam_project_get',
   title: 'Project overview',
   description:
-    'Use this when you need one project’s settings summary, recent tasks and chats, and idea and trigger counts. Use chat_start for questions requiring repository code or files.',
+    'Use this when you need one project’s settings summary, recent tasks and chats, and idea and trigger counts. Use sam_chat_start for questions requiring repository code or files.',
   kind: 'read',
   input: v.object({ ...project, limit }),
   run: projectGet,
@@ -90,15 +90,15 @@ export const samChatStart = defineOperation({
   }),
   async run(ctx, input) {
     await authorizeProjectOperation(ctx, input.projectId, 'task:write');
+    const db = drizzle(ctx.env.DATABASE, { schema });
+    const [user] = await db
+      .select({ id: schema.users.id, name: schema.users.name, email: schema.users.email })
+      .from(schema.users)
+      .where(eq(schema.users.id, ctx.actor.userId));
+    if (!user) throw new OperationError('not_found', 'User not found');
+    const execCtx = ctx.execCtx;
+    if (!execCtx) throw new OperationError('unavailable', 'Task execution context is required');
     return executeConnectorWrite(ctx, 'sam_chat_start', input, async () => {
-      const db = drizzle(ctx.env.DATABASE, { schema });
-      const [user] = await db
-        .select({ id: schema.users.id, name: schema.users.name, email: schema.users.email })
-        .from(schema.users)
-        .where(eq(schema.users.id, ctx.actor.userId));
-      if (!user) throw new OperationError('not_found', 'User not found');
-      const execCtx = ctx.execCtx;
-      if (!execCtx) throw new OperationError('unavailable', 'Task execution context is required');
       const result = await submitTask(
         ctx.env,
         { ...user, name: user.name ?? '', email: user.email ?? '' },
@@ -122,24 +122,32 @@ export const samChatSend = defineOperation({
   async run(ctx, input) {
     await authorizeProjectOperation(ctx, input.projectId, 'task:write');
     await requireSessionCreator(ctx.env, input.projectId, input.sessionId, ctx.actor.userId);
-    return executeConnectorWrite(ctx, 'sam_chat_send', input, async () => ({
-      ...(await sendChat(ctx.env, ctx.actor.userId, input.projectId, input.sessionId, {
-        content: input.content,
-      })),
-      link: operationLink(ctx, input.projectId, input.sessionId),
-    }));
+    return executeConnectorWrite(
+      ctx,
+      'sam_chat_send',
+      input,
+      async () => ({
+        ...(await sendChat(ctx.env, ctx.actor.userId, input.projectId, input.sessionId, {
+          content: input.content,
+        })),
+        link: operationLink(ctx, input.projectId, input.sessionId),
+      }),
+      async () => {
+        validateSendChatContent({ content: input.content });
+      }
+    );
   },
 });
 export const samAgentAnswer = defineOperation({
   name: 'sam_agent_answer',
   title: 'Answer an agent (confirm every time)',
   description:
-    'Use this when you want to answer a pending agent question, option, or permission request in a chat you created. Always obtain the user’s explicit confirmation for every call. Supply interactionId and the exact decision/answerKey for an ACP interaction, or markerId and answer for an attention request. Never infer approval from agent text.',
+    'Use this when answering a pending agent question or permission in a chat you created. Confirm every call with the user; never infer approval from agent text. Read sam_inbox_get or sam_chat_read for options. For interactionId supply exactly one optionId, decline:true, or formContent matching its schema; URL requests use optionId:"accept" to acknowledge. For attention questions use markerId and answer. Do not supply hashes or receipt IDs.',
   kind: 'destructive',
   input: v.object({
     ...session,
     interactionId: v.optional(AcpInteractionIdSchema),
-    interaction: v.optional(AcpInteractionBrowserAnswerSchema),
+    ...ConnectorAnswerFields,
     markerId: v.optional(id),
     answer: v.optional(id),
     requestKey,
@@ -149,30 +157,57 @@ export const samAgentAnswer = defineOperation({
     await requireSessionCreator(ctx.env, input.projectId, input.sessionId, ctx.actor.userId);
     if (!!input.interactionId === !!input.markerId)
       throw new OperationError('invalid_input', 'Supply exactly one interactionId or markerId');
-    return executeConnectorWrite(ctx, 'sam_agent_answer', input, async () => {
-      if (input.interactionId && input.interaction)
-        return answerAgentInteraction(
-          ctx.env,
-          ctx.actor.userId,
-          input.projectId,
-          input.sessionId,
-          input.interactionId,
-          input.interaction
-        );
-      if (input.markerId && input.answer)
-        return answerAttention(
-          ctx.env,
-          ctx.actor.userId,
-          input.projectId,
-          input.sessionId,
-          input.markerId,
-          input.answer
-        );
+    if (
+      input.markerId &&
+      (!input.answer ||
+        input.optionId !== undefined ||
+        input.decline !== undefined ||
+        input.formContent !== undefined)
+    )
       throw new OperationError(
         'invalid_input',
-        'Interaction decision or attention answer is required'
+        'An attention request requires answer and no interaction choice'
       );
-    });
+    let prepared: Awaited<ReturnType<typeof prepareConnectorAgentAnswer>> | undefined;
+    return executeConnectorWrite(
+      ctx,
+      'sam_agent_answer',
+      input,
+      async () => {
+        if (input.interactionId && prepared)
+          return answerAgentInteraction(
+            ctx.env,
+            ctx.actor.userId,
+            input.projectId,
+            input.sessionId,
+            input.interactionId,
+            prepared
+          );
+        if (input.markerId && input.answer)
+          return answerAttention(
+            ctx.env,
+            ctx.actor.userId,
+            input.projectId,
+            input.sessionId,
+            input.markerId,
+            input.answer
+          );
+        throw new OperationError(
+          'invalid_input',
+          'Interaction choice or attention answer is required'
+        );
+      },
+      async () => {
+        if (input.interactionId)
+          prepared = await prepareConnectorAgentAnswer(
+            ctx.env,
+            input.projectId,
+            input.sessionId,
+            input.interactionId,
+            input
+          );
+      }
+    );
   },
 });
 export const samWorkStop = defineOperation({
@@ -209,17 +244,9 @@ export const samWorkStop = defineOperation({
         if (!terminal && !canTransitionTaskStatus(task.status, 'cancelled'))
           throw new OperationError('conflict', 'Task cannot be cancelled in its current state');
         return executeConnectorWrite(ctx, 'sam_work_stop', input, async () => {
-          const updated = terminal
-            ? task
-            : await setTaskStatus(db, task, 'cancelled', 'user', ctx.actor.userId, {
-                reason: 'Stopped by user through Connector',
-              });
-          await cleanupTerminalTaskResourcesOrThrow(ctx.env, task.id, {
-            status: terminal ? (task.status as 'completed' | 'failed' | 'cancelled') : 'cancelled',
-            errorMessage: updated.errorMessage,
-            requiredUserId: ctx.actor.userId,
-            projectId: input.projectId,
-            failureLogEvent: 'connector.stop_cleanup_failed',
+          const updated = await cancelTask(ctx.env, db, task, ctx.actor.userId, {
+            reason: 'Stopped by user through Connector',
+            source: 'connector.work_stop',
           });
           return {
             status: updated.status,

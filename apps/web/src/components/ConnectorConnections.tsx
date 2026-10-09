@@ -1,64 +1,46 @@
 import { Alert, Button, Spinner } from '@simple-agent-manager/ui';
+import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AppWindow } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 
+import { useQueryScope } from '../hooks/useQueryScope';
 import {
   type ConnectorConnection,
   connectorConnections,
   revokeConnectorConnection,
 } from '../lib/api/connector';
+import { connectorQueryKeys } from '../lib/query-options/connector';
 import { ConfirmDialog } from './ConfirmDialog';
 
 export function connectorDate(value: string | number | null) {
   return value == null ? 'Never' : new Date(value).toLocaleString();
 }
 export function ConnectorConnections({ admin = false }: { admin?: boolean }) {
-  const [connections, setConnections] = useState<ConnectorConnection[]>([]);
-  const [cursor, setCursor] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const inFlight = useRef(false);
-  const [error, setError] = useState<string | null>(null);
+  const scope = useQueryScope();
+  const queryClient = useQueryClient();
+  const key = connectorQueryKeys.connections(scope, admin);
+  const query = useInfiniteQuery({
+    queryKey: key,
+    enabled: Boolean(scope),
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) => connectorConnections(admin, pageParam),
+    getNextPageParam: (page) => page.nextCursor ?? undefined,
+  });
   const [target, setTarget] = useState<ConnectorConnection | null>(null);
-  const [busy, setBusy] = useState(false);
-  const load = useCallback(
-    async (next?: string) => {
-      if (inFlight.current) return;
-      inFlight.current = true;
-      setLoadingMore(!!next);
-      setError(null);
-      try {
-        const result = await connectorConnections(admin, next);
-        setConnections((previous) =>
-          next ? [...previous, ...result.connections] : result.connections
-        );
-        setCursor(result.nextCursor ?? null);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Could not load connected apps');
-      } finally {
-        inFlight.current = false;
-        setLoading(false);
-        setLoadingMore(false);
-      }
-    },
-    [admin]
-  );
-  useEffect(() => {
-    void load();
-  }, [load]);
-  async function revoke() {
-    if (!target) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await revokeConnectorConnection(target.id, admin);
+  const mutation = useMutation({
+    mutationFn: (id: string) => revokeConnectorConnection(id, admin),
+    onSuccess: async () => {
       setTarget(null);
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not revoke connection');
-    } finally {
-      setBusy(false);
-    }
+      await queryClient.invalidateQueries({ queryKey: connectorQueryKeys.all(scope) });
+    },
+  });
+  const connections = query.data?.pages.flatMap((page) => page.connections) ?? [];
+  const loading = query.isPending;
+  const loadingMore = query.isFetchingNextPage;
+  const busy = mutation.isPending;
+  const error = mutation.error?.message ?? query.error?.message;
+  function revoke() {
+    if (target) mutation.mutate(target.id);
   }
   return (
     <section
@@ -90,7 +72,7 @@ export function ConnectorConnections({ admin = false }: { admin?: boolean }) {
               </div>
               <Button
                 variant="secondary"
-                disabled={busy || loadingMore}
+                disabled={busy || query.isFetching}
                 onClick={() => setTarget(c)}
               >
                 Revoke
@@ -98,11 +80,11 @@ export function ConnectorConnections({ admin = false }: { admin?: boolean }) {
             </div>
           ))
       )}
-      {cursor && (
+      {query.hasNextPage && (
         <Button
           variant="secondary"
-          disabled={busy || loadingMore}
-          onClick={() => void load(cursor)}
+          disabled={busy || query.isFetching}
+          onClick={() => void query.fetchNextPage({ cancelRefetch: false })}
         >
           {loadingMore ? 'Loading connections…' : 'Load more connections'}
         </Button>

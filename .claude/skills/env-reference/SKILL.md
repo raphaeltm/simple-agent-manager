@@ -875,6 +875,17 @@ Generated deployments validate and pass these values through cloud-init to newly
 
 Allowed redirect hosts default to `claude.ai`, `chatgpt.com`, and `loopback`. The panel also controls read rate and hourly start limits. Disabling the Connector rejects existing tokens without deleting grants.
 
-Connector response bound: `CONNECTOR_RESPONSE_MAX_BYTES` (default `120000`) caps serialized structured tool results; oversized results return an actionable error.
+Connector response bound: `CONNECTOR_RESPONSE_MAX_BYTES` (default `120000`) has a minimum of256bytes and caps serialized tool results (text plus structured content); oversized results return an actionable error.
 
 OAuth public endpoints additionally use `CONNECTOR_OAUTH_REQUEST_MAX_BYTES` (16384), `CONNECTOR_REGISTRATION_PER_IP_PER_HOUR` (20), `CONNECTOR_REGISTRATION_GLOBAL_PER_HOUR` (100; atomic installation-wide D1 admission), and `CONNECTOR_CLIENT_IDLE_TTL_SECONDS` (7776000, 90 days; at least 60). The per-IP KV limit is auxiliary; the global D1 limit remains safe under parallel requests. Successful token exchanges renew idle dynamic-client expiry. Expired D1 client-index rows are removed during registration and admin client listing; static clients have no idle expiry.
+
+Connector protocol overrides (optional GitHub environment variables are forwarded by both deployment sync steps; omitted values use runtime defaults):
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `CONNECTOR_REQUEST_MAX_BYTES` | 262144 | MCP request body bound |
+| `CONNECTOR_CLIENT_NAME_MAX_LENGTH` | 200 | Dynamic registration name length |
+| `CONNECTOR_REDIRECT_URI_MAX_COUNT` | 10 | Dynamic registration redirect count |
+| `CONNECTOR_INBOX_SESSION_LIMIT` | 5 | Maximum session/interaction-store fanout per inbox page |
+
+`CONNECTOR_REGISTRATION_PER_IP_PER_HOUR` is a shared-egress abuse bound, not a user quota. Operators serving many clients behind vendor/NAT egress should size this and the atomic `CONNECTOR_REGISTRATION_GLOBAL_PER_HOUR` backstop for expected connection volume. All `CONNECTOR_*` environment fallbacks are forwarded into deployed Workers when explicitly configured; Admin settings remain higher-priority overrides.

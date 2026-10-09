@@ -1,14 +1,19 @@
 import { Alert, Button, Input, Spinner } from '@simple-agent-manager/ui';
-import { useEffect, useState } from 'react';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
 
+import { useQueryScope } from '../hooks/useQueryScope';
 import {
-  adminConnectorSettings,
   blockConnectorClient,
   type ConnectorClient,
   connectorClients,
-  type ConnectorSettings,
+  type ConnectorSetting,
   saveConnectorSettings,
 } from '../lib/api/connector';
+import {
+  adminConnectorSettingsQueryOptions,
+  connectorQueryKeys,
+} from '../lib/query-options/connector';
 import { ConnectorConnections, connectorDate } from './ConnectorConnections';
 
 const labels: Record<string, string> = {
@@ -24,72 +29,58 @@ const labels: Record<string, string> = {
   maxStartsPerUserPerDay: 'Starts per user per day',
 };
 export function AdminConnectorPanel() {
-  const [settings, setSettings] = useState<ConnectorSettings | null>(null);
-  const [clientCursor, setClientCursor] = useState<string | null>(null);
-  const [clients, setClients] = useState<ConnectorClient[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const scope = useQueryScope();
+  const queryClient = useQueryClient();
+  const configQuery = useQuery(adminConnectorSettingsQueryOptions(scope));
+  const clientsQuery = useInfiniteQuery({
+    queryKey: connectorQueryKeys.clients(scope),
+    enabled: Boolean(scope),
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) => connectorClients(pageParam),
+    getNextPageParam: (page) => page.nextCursor ?? undefined,
+  });
+  // Only explicitly edited keys become overrides. Background query updates never reset drafts.
+  const [draft, setDraft] = useState<Record<string, ConnectorSetting['value']>>({});
   const [message, setMessage] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    let active = true;
-    void Promise.all([adminConnectorSettings(), connectorClients()])
-      .then(([config, result]) => {
-        if (active) {
-          setSettings(config.settings);
-          setClients(result.clients);
-          setClientCursor(result.nextCursor ?? null);
-        }
-      })
-      .catch((err) => {
-        if (active) setError(err.message);
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-  async function save() {
-    if (!settings) return;
-    setBusy(true);
-    setError(null);
+  const settings = configQuery.data?.settings;
+  const clients = clientsQuery.data?.pages.flatMap((page) => page.clients) ?? [];
+  const patch = useMutation({
+    mutationFn: (values: Record<string, ConnectorSetting['value'] | null>) =>
+      saveConnectorSettings(values),
+    onSuccess: (result, values) => {
+      queryClient.setQueryData(connectorQueryKeys.adminSettings(scope), result);
+      setDraft((previous) =>
+        Object.fromEntries(Object.entries(previous).filter(([key]) => !Object.hasOwn(values, key)))
+      );
+      void queryClient.invalidateQueries({ queryKey: connectorQueryKeys.settings(scope) });
+      setMessage(
+        Object.values(values).some((value) => value === null)
+          ? 'Override removed. The installation default is active.'
+          : 'Connector settings saved.'
+      );
+    },
+  });
+  const blocking = useMutation({
+    mutationFn: (client: ConnectorClient) => blockConnectorClient(client.id, !client.blocked),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: connectorQueryKeys.clients(scope) }),
+  });
+  const busy = patch.isPending || blocking.isPending;
+  const failure = patch.error ?? blocking.error ?? configQuery.error ?? clientsQuery.error;
+  const error =
+    failure instanceof Error ? failure.message : failure ? 'Could not update Connector' : null;
+  const changed = Object.fromEntries(
+    Object.entries(draft).filter(
+      ([key, value]) => JSON.stringify(value) !== JSON.stringify(settings?.[key]?.value)
+    )
+  );
+  function edit(key: string, value: ConnectorSetting['value']) {
+    setDraft((previous) => ({ ...previous, [key]: value }));
     setMessage(null);
-    try {
-      const result = await saveConnectorSettings(
-        Object.fromEntries(Object.entries(settings).map(([key, setting]) => [key, setting.value]))
-      );
-      setSettings(result.settings);
-      setMessage('Connector settings saved.');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not save settings');
-    } finally {
-      setBusy(false);
-    }
   }
-  async function loadMoreClients() {
-    if (!clientCursor) return;
-    setBusy(true);
-    try {
-      const result = await connectorClients(clientCursor);
-      setClients((previous) => [...previous, ...result.clients]);
-      setClientCursor(result.nextCursor ?? null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load clients');
-    } finally {
-      setBusy(false);
-    }
-  }
-  async function block(client: ConnectorClient) {
-    setBusy(true);
-    setError(null);
-    try {
-      await blockConnectorClient(client.id, !client.blocked);
-      setClients((previous) =>
-        previous.map((c) => (c.id === client.id ? { ...c, blocked: !c.blocked } : c))
-      );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not update client');
-    } finally {
-      setBusy(false);
-    }
+  function save() {
+    if (!Object.keys(changed).length) return;
+    setMessage(null);
+    patch.mutate(changed);
   }
   return (
     <section
@@ -115,79 +106,89 @@ export function AdminConnectorPanel() {
           className="space-y-4"
         >
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {Object.entries(settings).map(([key, setting]) => (
-              <div key={key} className="min-w-0 space-y-1">
-                <label className="text-sm font-medium block" htmlFor={`connector-${key}`}>
-                  {labels[key] ?? key}
-                </label>
-                {typeof setting.value === 'boolean' ? (
-                  <Button
-                    id={`connector-${key}`}
-                    type="button"
-                    variant={setting.value ? 'primary' : 'secondary'}
-                    role="switch"
-                    aria-label={labels[key] ?? key}
-                    aria-checked={setting.value}
-                    disabled={busy}
-                    onClick={() =>
-                      setSettings({ ...settings, [key]: { ...setting, value: !setting.value } })
-                    }
-                  >
-                    {setting.value ? 'Enabled' : 'Disabled'}
-                  </Button>
-                ) : key === 'clientRegistration' ? (
-                  <select
-                    id={`connector-${key}`}
-                    className="w-full p-2 rounded border border-border-default bg-bg-primary"
-                    disabled={busy}
-                    value={String(setting.value)}
-                    onChange={(e) =>
-                      setSettings({ ...settings, [key]: { ...setting, value: e.target.value } })
-                    }
-                  >
-                    <option value="open">Open — each user still consents</option>
-                    <option value="allowlist">Allowed redirect hosts only</option>
-                  </select>
-                ) : (
-                  <Input
-                    id={`connector-${key}`}
-                    disabled={busy}
-                    type={typeof setting.value === 'number' ? 'number' : 'text'}
-                    min={typeof setting.value === 'number' ? 1 : undefined}
-                    value={
-                      Array.isArray(setting.value)
-                        ? setting.value.join(', ')
-                        : String(setting.value)
-                    }
-                    onChange={(e) =>
-                      setSettings({
-                        ...settings,
-                        [key]: {
-                          ...setting,
-                          value:
-                            typeof setting.value === 'number'
-                              ? Number(e.target.value)
-                              : Array.isArray(setting.value)
-                                ? e.target.value.split(',').map((v) => v.trim())
-                                : e.target.value,
-                        },
-                      })
-                    }
-                  />
-                )}
-                <p className="text-xs text-fg-muted break-words">
-                  Source: {setting.source}
-                  {setting.updatedAt ? ` · Updated ${connectorDate(setting.updatedAt)}` : ''}
-                  {setting.updatedBy ? ` by ${setting.updatedBy}` : ''}
-                </p>
-              </div>
-            ))}
+            {Object.entries(settings).map(([key, stored]) => {
+              const setting = { ...stored, value: draft[key] ?? stored.value };
+              return (
+                <div key={key} className="min-w-0 space-y-1">
+                  <label className="text-sm font-medium block" htmlFor={`connector-${key}`}>
+                    {labels[key] ?? key}
+                  </label>
+                  {typeof setting.value === 'boolean' ? (
+                    <Button
+                      id={`connector-${key}`}
+                      type="button"
+                      variant={setting.value ? 'primary' : 'secondary'}
+                      role="switch"
+                      aria-label={labels[key] ?? key}
+                      aria-checked={setting.value}
+                      disabled={busy}
+                      onClick={() => edit(key, !setting.value)}
+                    >
+                      {setting.value ? 'Enabled' : 'Disabled'}
+                    </Button>
+                  ) : key === 'clientRegistration' ? (
+                    <select
+                      id={`connector-${key}`}
+                      className="w-full p-2 rounded border border-border-default bg-bg-primary"
+                      disabled={busy}
+                      value={String(setting.value)}
+                      onChange={(e) => edit(key, e.target.value)}
+                    >
+                      <option value="open">Open — each user still consents</option>
+                      <option value="allowlist">Allowed redirect hosts only</option>
+                    </select>
+                  ) : (
+                    <Input
+                      id={`connector-${key}`}
+                      disabled={busy}
+                      type={typeof setting.value === 'number' ? 'number' : 'text'}
+                      min={typeof setting.value === 'number' ? 1 : undefined}
+                      value={
+                        Array.isArray(setting.value)
+                          ? setting.value.join(', ')
+                          : String(setting.value)
+                      }
+                      onChange={(e) =>
+                        edit(
+                          key,
+                          typeof stored.value === 'number'
+                            ? Number(e.target.value)
+                            : Array.isArray(stored.value)
+                              ? e.target.value.split(',').map((value) => value.trim())
+                              : e.target.value
+                        )
+                      }
+                    />
+                  )}
+                  <p className="text-xs text-fg-muted break-words">
+                    Source: {setting.source}
+                    {setting.updatedAt ? ` · Updated ${connectorDate(setting.updatedAt)}` : ''}
+                    {setting.updatedBy ? ` by ${setting.updatedBy}` : ''}
+                  </p>
+                  {stored.source === 'runtime' && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={busy}
+                      onClick={() => {
+                        setMessage(null);
+                        patch.mutate({ [key]: null });
+                      }}
+                      aria-label={`Reset ${labels[key] ?? key} to default`}
+                    >
+                      Reset to default
+                    </Button>
+                  )}
+                </div>
+              );
+            })}
           </div>
           <p className="text-sm text-fg-muted">
             Disabling the Connector rejects existing tokens without deleting them. When changing
-            write access, ChatGPT users must refresh their tool list.
+            write access, ChatGPT users must refresh their tool list. Reset to default removes the
+            selected override and restores the environment value or built-in default.
           </p>
-          <Button type="submit" disabled={busy}>
+          <Button type="submit" disabled={busy || !Object.keys(changed).length}>
             {busy ? 'Saving…' : 'Save Connector settings'}
           </Button>
         </form>
@@ -212,14 +213,18 @@ export function AdminConnectorPanel() {
                   First seen {connectorDate(client.createdAt)}
                 </p>
               </div>
-              <Button variant="secondary" disabled={busy} onClick={() => void block(client)}>
+              <Button variant="secondary" disabled={busy} onClick={() => blocking.mutate(client)}>
                 {client.blocked ? 'Unblock' : 'Block'}
               </Button>
             </div>
           ))
         )}
-        {clientCursor && (
-          <Button variant="secondary" disabled={busy} onClick={() => void loadMoreClients()}>
+        {clientsQuery.hasNextPage && (
+          <Button
+            variant="secondary"
+            disabled={busy || clientsQuery.isFetching}
+            onClick={() => void clientsQuery.fetchNextPage({ cancelRefetch: false })}
+          >
             Load more clients
           </Button>
         )}

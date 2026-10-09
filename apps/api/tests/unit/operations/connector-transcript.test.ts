@@ -8,6 +8,10 @@ import type { OperationContext } from '../../../src/operations/types';
 import * as projectData from '../../../src/services/project-data';
 import { getLatestAssistantMessageForTask } from '../../../src/services/task-final-assistant-message';
 
+vi.mock('../../../src/services/acp-interaction-store', () => ({
+  getPendingInteractionDetails: vi.fn(async () => []),
+}));
+
 vi.mock('../../../src/services/project-data', () => ({
   getMessages: vi.fn(),
   getSession: vi.fn(),
@@ -15,7 +19,7 @@ vi.mock('../../../src/services/project-data', () => ({
 
 let db: Database.Database;
 const env = {} as Env;
-const ctx = { env, actor: { via: 'connector' } } as OperationContext;
+const ctx = { env, actor: { via: 'connector', userId: 'owner' } } as OperationContext;
 function seed(rows: [string, string][]) {
   rows.forEach(([role, content], index) =>
     db
@@ -37,7 +41,11 @@ beforeEach(() => {
     async (_env, _project, session, limit, before, after, roles, compact, order) =>
       getMessages(sql, session, limit, before, after, roles, compact, order)
   );
-  vi.mocked(projectData.getSession).mockResolvedValue({ id: 'chat', topic: 'Test' } as never);
+  vi.mocked(projectData.getSession).mockResolvedValue({
+    id: 'chat',
+    topic: 'Test',
+    createdByUserId: 'owner',
+  } as never);
 });
 afterEach(() => db.close());
 

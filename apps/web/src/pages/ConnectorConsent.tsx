@@ -1,15 +1,14 @@
 import { Alert, Button, Spinner } from '@simple-agent-manager/ui';
-import { useEffect, useState } from 'react';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
 import { useSearchParams } from 'react-router';
 
 import { useAuth } from '../components/AuthProvider';
 import { useLoginProviders } from '../hooks/useLoginProviders';
-import {
-  type ConnectorConsent as Consent,
-  decideConnectorConsent,
-  getConnectorConsent,
-} from '../lib/api/connector';
+import { useQueryScope } from '../hooks/useQueryScope';
+import { decideConnectorConsent, getConnectorConsent } from '../lib/api/connector';
 import { authClient } from '../lib/auth';
+import { connectorQueryKeys } from '../lib/query-options/connector';
 
 const scopeLabels: Record<string, string> = {
   'sam.read': 'See your projects, chats, tasks, and ideas',
@@ -21,44 +20,38 @@ export function ConnectorConsent() {
   const query = params.get('request') ?? '';
   const { isAuthenticated, isLoading } = useAuth();
   const providers = useLoginProviders();
-  const [consent, setConsent] = useState<Consent | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    if (!isAuthenticated || !query) return;
-    let active = true;
-    setConsent(null);
-    setError(null);
-    void getConnectorConsent(query)
-      .then((value) => {
-        if (active) setConsent(value);
-      })
-      .catch((err) => {
-        if (active) setError(err.message);
-      });
-    return () => {
-      active = false;
-    };
-  }, [isAuthenticated, query]);
-  async function decide(approve: boolean) {
-    if (!consent) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const { redirectTo } = await decideConnectorConsent(consent.handle, approve);
-      window.location.assign(redirectTo);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not finish authorization');
-      setBusy(false);
-    }
+  const scope = useQueryScope();
+  // Consent preview creates a bound one-use handle; never refresh it on focus/reconnect.
+  const preview = useQuery({
+    queryKey: connectorQueryKeys.consent(scope, query),
+    queryFn: () => getConnectorConsent(query),
+    enabled: isAuthenticated && Boolean(scope) && Boolean(query),
+    retry: false,
+    staleTime: Infinity,
+    gcTime: 0,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
+  const consent = preview.data;
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [loggingIn, setLoggingIn] = useState(false);
+  const decision = useMutation({
+    mutationFn: ({ handle, approve }: { handle: string; approve: boolean }) =>
+      decideConnectorConsent(handle, approve),
+    onSuccess: ({ redirectTo }) => window.location.assign(redirectTo),
+  });
+  const error = loginError ?? decision.error?.message ?? preview.error?.message;
+  const busy = loggingIn || decision.isPending || decision.isSuccess;
+  function decide(approve: boolean) {
+    if (consent) decision.mutate({ handle: consent.handle, approve });
   }
   async function login(provider: 'github' | 'google' | 'gitlab') {
-    setBusy(true);
+    setLoggingIn(true);
     try {
       await authClient.signIn.social({ provider, callbackURL: window.location.href });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Sign-in failed');
-      setBusy(false);
+      setLoginError(err instanceof Error ? err.message : 'Sign-in failed');
+      setLoggingIn(false);
     }
   }
   return (

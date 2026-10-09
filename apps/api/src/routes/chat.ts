@@ -19,6 +19,7 @@ import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { markRejectedBeforeEffects } from '../lib/operation-effect-boundary';
 import { requireRouteParam } from '../lib/route-helpers';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import { ulid } from '../lib/ulid';
@@ -441,7 +442,7 @@ export async function answerAttention(
   await requireProjectCapability(db, projectId, userId, 'task:write');
   await requireSessionCreator(env, projectId, sessionId, userId);
 
-  if (!answer) throw errors.badRequest('answer is required');
+  if (!answer) throw markRejectedBeforeEffects(errors.badRequest('answer is required'));
 
   const prepared = await projectDataService.prepareAttentionAnswer(
     env,
@@ -451,18 +452,26 @@ export async function answerAttention(
     answer
   );
   if (prepared.status === 'unsupported_source') {
-    throw errors.badRequest('This attention marker must be answered through the interaction route');
+    throw markRejectedBeforeEffects(
+      errors.badRequest('This attention marker must be answered through the interaction route')
+    );
   }
-  if (prepared.status === 'not_found') throw errors.notFound('Attention request');
+  if (prepared.status === 'not_found')
+    throw markRejectedBeforeEffects(errors.notFound('Attention request'));
   if (prepared.status === 'invalid_option') {
-    throw errors.badRequest('answer must match one of the requested options');
+    throw markRejectedBeforeEffects(
+      errors.badRequest('answer must match one of the requested options')
+    );
   }
   if (prepared.status === 'already_resolved') {
-    if (prepared.answer !== answer) throw errors.conflict('Attention request is already resolved');
+    if (prepared.answer !== answer)
+      throw markRejectedBeforeEffects(errors.conflict('Attention request is already resolved'));
     return { resolved: true, alreadyResolved: true, answer };
   }
   if (prepared.status === 'conflicting_answer') {
-    throw errors.conflict('A different answer is already being delivered');
+    throw markRejectedBeforeEffects(
+      errors.conflict('A different answer is already being delivered')
+    );
   }
   if (prepared.status === 'in_flight') {
     return { resolved: false, alreadyResolved: false, inFlight: true, answer };
@@ -480,7 +489,7 @@ export async function answerAttention(
     // Resolution/enrichment failed before the mutating request began, so this
     // claim is definitively safe to retry.
     await projectDataService.releaseAttentionAnswer(env, projectId, sessionId, markerId, answer);
-    throw cause;
+    throw cause instanceof Error ? markRejectedBeforeEffects(cause) : cause;
   }
 
   // Every transport/response error after this boundary is outcome-unknown: the

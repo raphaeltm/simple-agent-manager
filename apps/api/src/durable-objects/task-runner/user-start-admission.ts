@@ -8,7 +8,7 @@ export async function isUserConversationStart(
   if (state.config.taskMode !== 'conversation' || state.config.resumeSnapshotChatSessionId)
     return false;
   const task = await rc.env.DATABASE.prepare(
-    "SELECT id FROM tasks WHERE id = ? AND project_id = ? AND user_id = ? AND task_mode = 'conversation' AND triggered_by = 'user'"
+    "SELECT id FROM tasks WHERE id = ? AND project_id = ? AND user_id = ? AND task_mode = 'conversation' AND triggered_by IN ('user', 'connector')"
   )
     .bind(state.taskId, state.projectId, state.userId)
     .first<{ id: string }>();

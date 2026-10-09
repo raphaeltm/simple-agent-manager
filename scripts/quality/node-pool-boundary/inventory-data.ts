@@ -36,7 +36,7 @@ export const ALLOCATION_WRITER_INVENTORY: readonly AllocationWriterInventoryEntr
   {
     filePath: 'apps/api/src/services/submit-task.ts',
     table: 'tasks',
-    owner: 'submitTask',
+    owner: 'submitTaskImplementation',
     role: 'shared user task submission service',
     canonicalService: 'resolveTaskStartPlacement -> startTaskRunnerDO',
     requiredEvidence: CANONICAL_TASK_START,
@@ -121,7 +121,7 @@ export const ALLOCATION_WRITER_INVENTORY: readonly AllocationWriterInventoryEntr
   {
     filePath: 'apps/api/src/operations/idea-core.ts',
     table: 'tasks',
-    owner: 'createIdea',
+    owner: 'prepareIdeaCreate',
     role: 'shared idea task materialization operation',
     canonicalService: 'explicit idea operation',
   },

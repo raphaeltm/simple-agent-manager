@@ -4,8 +4,9 @@ import * as v from 'valibot';
 
 import * as schema from '../db/schema';
 import type { NotificationService } from '../durable-objects/notification';
+import { parsePositiveInt } from '../lib/route-helpers';
 import { getTrustedApiOrigin } from '../lib/trusted-origins';
-import { getInteractionDetail, snapshotInteractions } from '../services/acp-interaction-store';
+import { connectorPendingInteractions } from '../services/connector-agent-answer';
 import { authorizeProjectOperation } from './authorization';
 import { OperationError } from './errors';
 import { getPlatformOperationLimits } from './limits';
@@ -21,7 +22,7 @@ export function operationLink(ctx: OperationContext, projectId?: string, session
   const base = origin.origin;
   return projectId
     ? `${base}/projects/${encodeURIComponent(projectId)}${sessionId ? `/chat/${encodeURIComponent(sessionId)}` : ''}`
-    : `${base}/notifications`;
+    : base;
 }
 export function operationPageLimit(ctx: OperationContext, requested?: number) {
   const limits = getPlatformOperationLimits(ctx.env);
@@ -199,7 +200,10 @@ export async function inboxGet(ctx: OperationContext, input: { limit?: number; c
   }
   requireReadScope(ctx);
   const db = drizzle(ctx.env.DATABASE, { schema });
-  const limit = operationPageLimit(ctx, input.limit);
+  const limit = Math.min(
+    operationPageLimit(ctx, input.limit),
+    parsePositiveInt(ctx.env.CONNECTOR_INBOX_SESSION_LIMIT, 5)
+  );
   const rows = await db
     .select({
       id: schema.sessionSummaries.id,
@@ -227,26 +231,20 @@ export async function inboxGet(ctx: OperationContext, input: { limit?: number; c
     .limit(limit + 1);
   const pending = await Promise.all(
     rows.slice(0, limit).map(async (row) => {
-      const snapshot = await snapshotInteractions(ctx.env, row.projectId, row.id, null);
+      let attention: unknown = null;
+      if (row.attention) {
+        try {
+          attention = JSON.parse(row.attention);
+        } catch {
+          /* Corrupt legacy row does not hide other requests. */
+        }
+      }
       return {
         projectId: row.projectId,
         sessionId: row.id,
         topic: row.topic,
-        attention: row.attention ? (JSON.parse(row.attention) as unknown) : null,
-        interactions: await Promise.all(
-          snapshot.pending.map(async (interaction) => ({
-            ...interaction,
-            detail:
-              (
-                await getInteractionDetail(
-                  ctx.env,
-                  row.projectId,
-                  row.id,
-                  interaction.interactionId
-                )
-              )?.detail ?? null,
-          }))
-        ),
+        attention,
+        interactions: await connectorPendingInteractions(ctx.env, row.projectId, row.id),
         link: operationLink(ctx, row.projectId, row.id),
       };
     })

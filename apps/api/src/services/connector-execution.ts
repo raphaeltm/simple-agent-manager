@@ -1,4 +1,7 @@
+import { protectedFormReceiptHash } from '../durable-objects/interaction-store-form';
 import type { Env } from '../env';
+import { takeRejectedBeforeEffects } from '../lib/operation-effect-boundary';
+import { getCredentialEncryptionKey } from '../lib/secrets';
 import { AppError } from '../middleware/error';
 import { OperationError } from '../operations/errors';
 import type { OperationContext } from '../operations/types';
@@ -62,10 +65,14 @@ export async function executeConnectorWrite<T>(
   ctx: OperationContext,
   operation: string,
   input: Record<string, unknown>,
-  run: () => Promise<T>
+  run: () => Promise<T>,
+  preflight?: () => Promise<void>
 ): Promise<T> {
-  if (ctx.actor.via !== 'connector' && ctx.actor.via !== 'pat') return run();
-  const settings = await getConnectorSettings(ctx.env);
+  if (ctx.actor.via !== 'connector' && ctx.actor.via !== 'pat') {
+    await preflight?.();
+    return run();
+  }
+  const settings = ctx.connectorSettings ?? (await getConnectorSettings(ctx.env));
   if (!settings.enabled || !settings.writeEnabled || !ctx.actor.scopes.has('sam.write')) {
     throw new OperationError(
       'forbidden',
@@ -76,44 +83,49 @@ export async function executeConnectorWrite<T>(
   const projectId = safeId(input.projectId);
   const key = ctx.idempotencyKey;
   let receiptId: string | undefined;
+  let intentHash: string | undefined;
+  const readReceipt = async (): Promise<{ value: T } | null> => {
+    if (!receiptId) return null;
+    const receipt = await ctx.env.DATABASE.prepare(
+      'SELECT intent_hash,state,response_json FROM cli_operation_receipts WHERE receipt_id=? AND project_id=? AND user_id=?'
+    )
+      .bind(receiptId, projectId, ctx.actor.userId)
+      .first<{ intent_hash: string; state: string; response_json: string | null }>();
+    if (!receipt) return null;
+    if (receipt.intent_hash !== intentHash)
+      throw new OperationError('conflict', 'requestKey already identifies a different request.');
+    if (receipt.state !== 'completed' || receipt.response_json === null)
+      throw new OperationError(
+        'conflict',
+        'Previous outcome is uncertain; do not submit a new start.',
+        `Check work in SAM; receipt ${receiptId}.`
+      );
+    const value: unknown = JSON.parse(receipt.response_json);
+    if (value === null || typeof value !== 'object' || Array.isArray(value))
+      throw new OperationError('unavailable', 'Saved operation receipt is invalid.');
+    return { value: value as T };
+  };
   if (key) {
-    if (!/^[A-Za-z0-9._:-]{1,128}$/.test(key) || !projectId) {
+    if (!/^[A-Za-z0-9._:-]{1,128}$/.test(key) || !projectId)
       throw new OperationError(
         'invalid_input',
         'A requestKey requires a projectId and 1–128 safe characters.'
       );
-    }
     receiptId = await operationReceiptId(projectId, ctx.actor.userId, 'CONNECTOR', operation, key);
-    const intentHash = await hashIntent(input);
-    const reserved = await ctx.env.DATABASE.prepare(
-      `INSERT OR IGNORE INTO cli_operation_receipts
-      (receipt_id, project_id, user_id, intent_hash, state) VALUES (?, ?, ?, ?, 'pending')`
-    )
-      .bind(receiptId, projectId, ctx.actor.userId, intentHash)
-      .run();
-    if (!reserved.meta.changes) {
-      const receipt = await ctx.env.DATABASE.prepare(
-        `SELECT intent_hash, state, response_json FROM cli_operation_receipts
-        WHERE receipt_id = ? AND project_id = ? AND user_id = ?`
-      )
-        .bind(receiptId, projectId, ctx.actor.userId)
-        .first<{ intent_hash: string; state: string; response_json: string | null }>();
-      if (receipt?.intent_hash !== intentHash)
-        throw new OperationError('conflict', 'requestKey already identifies a different request.');
-      if (receipt.state !== 'completed' || receipt.response_json === null) {
-        throw new OperationError(
-          'conflict',
-          'Previous outcome is uncertain; do not submit a new start.',
-          `Check work in SAM; receipt ${receiptId}.`
-        );
-      }
-      const replay: unknown = JSON.parse(receipt.response_json);
-      if (replay === null || typeof replay !== 'object' || Array.isArray(replay)) {
-        throw new OperationError('unavailable', 'Saved operation receipt is invalid.');
-      }
-      return replay as T;
-    }
+    intentHash = await hashIntent(input);
+    // Forms may contain low-entropy secrets; retain only a keyed intent fingerprint.
+    if (operation === 'sam_agent_answer' && input.formContent !== undefined)
+      intentHash = await protectedFormReceiptHash(
+        getCredentialEncryptionKey(ctx.env),
+        String(input.interactionId),
+        intentHash
+      );
+    const previous = await readReceipt();
+    if (previous) return previous.value;
   }
+  // Validation/authority preparation and budgets cannot poison a key: no receipt exists yet.
+  // Once run() begins, unknown outcomes remain reserved; even a 4xx may follow a side effect.
+  await preflight?.();
   await consumeConnectorBudget(
     ctx.env,
     ctx.actor.userId,
@@ -137,7 +149,37 @@ export async function executeConnectorWrite<T>(
       86_400_000
     );
   }
-  const result = await run();
+  if (receiptId) {
+    const reserved = await ctx.env.DATABASE.prepare(
+      "INSERT OR IGNORE INTO cli_operation_receipts (receipt_id,project_id,user_id,intent_hash,state) VALUES (?,?,?,?,'pending')"
+    )
+      .bind(receiptId, projectId, ctx.actor.userId, intentHash)
+      .run();
+    if (!reserved.meta.changes) {
+      const concurrent = await readReceipt();
+      if (concurrent) return concurrent.value;
+      throw new OperationError(
+        'unavailable',
+        'Operation receipt disappeared; inspect work before retrying'
+      );
+    }
+  }
+  let result: T;
+  try {
+    result = await run();
+  } catch (error) {
+    // Only an explicit in-process effect boundary can prove that no task work
+    // started. A plain 4xx/5xx may follow persistence/provisioning and stays pending.
+    const rejectedBeforeEffects = takeRejectedBeforeEffects(error);
+    if (receiptId && rejectedBeforeEffects) {
+      await ctx.env.DATABASE.prepare(
+        "DELETE FROM cli_operation_receipts WHERE receipt_id=? AND project_id=? AND user_id=? AND intent_hash=? AND state='pending'"
+      )
+        .bind(receiptId, projectId, ctx.actor.userId, intentHash)
+        .run();
+    }
+    throw error;
+  }
   if (projectId) {
     const data =
       result !== null && typeof result === 'object' ? (result as Record<string, unknown>) : {};
@@ -188,7 +230,9 @@ const AUDIT_INPUT_FIELDS = new Set([
   'skillId',
   'requestKey',
   'interactionId',
-  'interaction',
+  'optionId',
+  'decline',
+  'formContent',
   'markerId',
   'answer',
 ]);

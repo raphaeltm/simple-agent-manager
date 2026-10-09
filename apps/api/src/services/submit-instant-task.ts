@@ -23,6 +23,7 @@ type Db = ReturnType<typeof drizzle<typeof schema>>;
 /** The task-submit transport must preserve Instant even when it carries files or lineage. */
 export async function submitInstantTask(input: {
   db: Db;
+  beforeTaskEffects?: () => void;
   env: Env;
   waitUntil: (promise: Promise<unknown>) => void;
   project: schema.Project;
@@ -56,6 +57,8 @@ export async function submitInstantTask(input: {
     'opencode';
   const defaults = resolveProjectAgentDefault(project.agentDefaults, agentType);
   const { enrichedMessage } = await enrichMessageWithMentions(message, db, project.id, userId, env);
+  // A rejected insert can still have committed; keep retries reserved from here.
+  input.beforeTaskEffects?.();
   await db.insert(schema.tasks).values({
     triggeredBy: input.triggeredBy ?? 'user',
     connectorClientName:

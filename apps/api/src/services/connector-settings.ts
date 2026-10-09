@@ -54,7 +54,7 @@ export async function getConnectorSettingsConfig(env: Env) {
     ConnectorSettingKey,
     {
       value: ConnectorSettings[ConnectorSettingKey];
-      source: 'runtime' | 'environment';
+      source: 'runtime' | 'environment' | 'default';
       updatedAt: string | null;
       updatedBy: string | null;
     }
@@ -79,9 +79,14 @@ export async function getConnectorSettingsConfig(env: Env) {
         : CONNECTOR_DEFAULTS[key];
     result[key] = {
       value: value as ConnectorSettings[ConnectorSettingKey],
-      source: row && valid ? 'runtime' : 'environment',
-      updatedAt: row?.updated_at ?? null,
-      updatedBy: row?.updated_by ?? null,
+      source:
+        row && valid
+          ? 'runtime'
+          : validateConnectorSetting(key, fallback)
+            ? 'environment'
+            : 'default',
+      updatedAt: row && valid ? row.updated_at : null,
+      updatedBy: row && valid ? row.updated_by : null,
     };
   }
   return result;
@@ -103,15 +108,17 @@ export async function updateConnectorSettings(
     entries.some(
       ([key, value]) =>
         !Object.hasOwn(CONNECTOR_DEFAULTS, key) ||
-        !validateConnectorSetting(key as ConnectorSettingKey, value)
+        (value !== null && !validateConnectorSetting(key as ConnectorSettingKey, value))
     )
   )
     throw errors.badRequest('Invalid Connector setting');
   await env.DATABASE.batch(
     entries.map(([key, value]) =>
-      env.DATABASE.prepare(
-        'INSERT INTO platform_settings (key,value,updated_at,updated_by) VALUES (?,?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at,updated_by=excluded.updated_by'
-      ).bind(`connector.${key}`, JSON.stringify(value), new Date().toISOString(), userId)
+      value === null
+        ? env.DATABASE.prepare('DELETE FROM platform_settings WHERE key=?').bind(`connector.${key}`)
+        : env.DATABASE.prepare(
+            'INSERT INTO platform_settings (key,value,updated_at,updated_by) VALUES (?,?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at,updated_by=excluded.updated_by'
+          ).bind(`connector.${key}`, JSON.stringify(value), new Date().toISOString(), userId)
     )
   );
   return getConnectorSettingsConfig(env);

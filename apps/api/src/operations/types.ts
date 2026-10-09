@@ -3,6 +3,7 @@ import type * as v from 'valibot';
 import type { Env } from '../env';
 import { AppError } from '../middleware/error';
 import { auditConnectorWrite } from '../services/connector-execution';
+import type { ConnectorSettings } from '../services/connector-settings';
 import { OperationError } from './errors';
 
 export type OperationKind = 'read' | 'write' | 'destructive';
@@ -22,6 +23,7 @@ export interface OperationContext {
   actor: Actor;
   requestId: string;
   idempotencyKey?: string;
+  connectorSettings?: ConnectorSettings;
   execCtx?: ExecutionContext;
 }
 

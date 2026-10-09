@@ -1,7 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { act, fireEvent, render as rtlRender, screen, waitFor } from '@testing-library/react';
+import type { ReactElement } from 'react';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
+  userId: 'user-1',
   get: vi.fn(),
   decide: vi.fn(),
   connections: vi.fn(),
@@ -13,7 +16,7 @@ const mocks = vi.hoisted(() => ({
   block: vi.fn(),
 }));
 vi.mock('../../src/components/AuthProvider', () => ({
-  useAuth: () => ({ isAuthenticated: true, isLoading: false }),
+  useAuth: () => ({ user: { id: mocks.userId }, isAuthenticated: true, isLoading: false }),
 }));
 vi.mock('../../src/hooks/useLoginProviders', () => ({
   useLoginProviders: () => ({ github: true }),
@@ -36,6 +39,10 @@ import { AdminConnectorPanel } from '../../src/components/AdminConnectorPanel';
 import { ConnectorConnections } from '../../src/components/ConnectorConnections';
 import { ConnectorConsent } from '../../src/pages/ConnectorConsent';
 import { SettingsApiTokens } from '../../src/pages/SettingsApiTokens';
+let queryClient: QueryClient;
+function render(ui: ReactElement) {
+  return rtlRender(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>);
+}
 const connection = {
   id: 'grant-1',
   clientName: 'Claude',
@@ -46,6 +53,10 @@ const connection = {
 };
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.userId = 'user-1';
+  queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
   mocks.connections.mockResolvedValue({ connections: [] });
   mocks.settings.mockResolvedValue({
     enabled: true,
@@ -111,7 +122,7 @@ describe('Connector consent and access', () => {
     fireEvent.click(more);
     fireEvent.click(more);
     expect(mocks.connections).toHaveBeenCalledTimes(2);
-    expect(screen.getByRole('button', { name: 'Loading connections…' })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: 'Loading connections…' })).toBeDisabled();
     finish({
       connections: [{ ...connection, id: 'grant-2', clientName: 'ChatGPT' }],
       nextCursor: null,
@@ -158,10 +169,11 @@ describe('Connector consent and access', () => {
   it('retains edited admin settings until explicit save and supports blocking a client', async () => {
     const settings = {
       enabled: { value: true, source: 'default', updatedAt: null, updatedBy: null },
+      writeEnabled: { value: true, source: 'environment', updatedAt: null, updatedBy: null },
     };
     mocks.admin.mockResolvedValue({ settings });
     mocks.save.mockResolvedValue({ settings });
-    mocks.clients.mockResolvedValue({
+    const clientList = {
       clients: [
         {
           id: 'client-1',
@@ -171,6 +183,10 @@ describe('Connector consent and access', () => {
           blocked: false,
         },
       ],
+    };
+    mocks.clients.mockResolvedValueOnce(clientList).mockResolvedValue({
+      ...clientList,
+      clients: clientList.clients.map((c) => ({ ...c, blocked: true })),
     });
     mocks.block.mockResolvedValue(undefined);
     render(<AdminConnectorPanel />);
@@ -182,5 +198,53 @@ describe('Connector consent and access', () => {
     expect(await screen.findByRole('button', { name: 'Unblock' })).toBeInTheDocument();
     expect(mocks.block).toHaveBeenCalledWith('client-1', true);
     expect(mocks.admin).toHaveBeenCalledTimes(1);
+  });
+  it('does not overwrite dirty edits on background refresh and resets only the selected override', async () => {
+    const settings = {
+      enabled: { value: true, source: 'runtime', updatedAt: '2026-10-09', updatedBy: 'admin' },
+      writeEnabled: { value: true, source: 'environment', updatedAt: null, updatedBy: null },
+    };
+    mocks.admin.mockResolvedValue({ settings });
+    mocks.clients.mockResolvedValue({ clients: [] });
+    render(<AdminConnectorPanel />);
+    expect(await screen.findByRole('button', { name: 'Save Connector settings' })).toBeDisabled();
+    fireEvent.click(screen.getByLabelText('Allow writes'));
+    await act(async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ['auth', 'user-1', 'connector', 'admin-settings'],
+      });
+    });
+    expect(screen.getByLabelText('Allow writes')).not.toBeChecked();
+    mocks.save.mockResolvedValue({
+      settings: {
+        ...settings,
+        enabled: { value: false, source: 'environment', updatedAt: null, updatedBy: null },
+      },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Reset Enable Connector to default' }));
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledWith({ enabled: null }));
+    expect(
+      await screen.findByText('Override removed. The installation default is active.')
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('Allow writes')).not.toBeChecked();
+    expect(
+      screen.queryByRole('button', { name: 'Reset Enable Connector to default' })
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Save Connector settings' }));
+    await waitFor(() => expect(mocks.save).toHaveBeenLastCalledWith({ writeEnabled: false }));
+  });
+
+  it('does not reuse another account’s cached connections', async () => {
+    mocks.connections
+      .mockResolvedValueOnce({ connections: [connection] })
+      .mockResolvedValueOnce({ connections: [] });
+    const first = render(<ConnectorConnections />);
+    expect(await screen.findByText('Claude')).toBeInTheDocument();
+    first.unmount();
+    mocks.userId = 'user-2';
+    render(<ConnectorConnections />);
+    expect(screen.queryByText('Claude')).not.toBeInTheDocument();
+    expect(await screen.findByText('No connected apps.')).toBeInTheDocument();
+    expect(mocks.connections).toHaveBeenCalledTimes(2);
   });
 });

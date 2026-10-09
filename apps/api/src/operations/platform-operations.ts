@@ -4,7 +4,7 @@ import { executeConnectorWrite } from '../services/connector-execution';
 import { authorizeProjectOperation } from './authorization';
 import { readChat, searchChats } from './chat-core';
 import { requireReadScope } from './connector-read-core';
-import { createIdea, getIdea, searchIdeas, updateIdea } from './idea-core';
+import { getIdea, prepareIdeaCreate, prepareIdeaUpdate, searchIdeas } from './idea-core';
 import { listProfiles, searchKnowledge } from './memory-core';
 import { getTask, listTasks } from './task-core';
 import { defineOperation } from './types';
@@ -137,7 +137,16 @@ export const samIdeaCreate = defineOperation({
   }),
   async run(ctx, input) {
     await authorizeProjectOperation(ctx, input.projectId, 'task:write');
-    return executeConnectorWrite(ctx, 'sam_idea_create', input, () => createIdea(ctx, input));
+    let apply!: ReturnType<typeof prepareIdeaCreate>;
+    return executeConnectorWrite(
+      ctx,
+      'sam_idea_create',
+      input,
+      () => apply(),
+      async () => {
+        apply = prepareIdeaCreate(ctx, input);
+      }
+    );
   },
 });
 
@@ -158,7 +167,16 @@ export const samIdeaUpdate = defineOperation({
   }),
   async run(ctx, input) {
     await authorizeProjectOperation(ctx, input.projectId, 'task:write');
-    return executeConnectorWrite(ctx, 'sam_idea_update', input, () => updateIdea(ctx, input));
+    let apply!: Awaited<ReturnType<typeof prepareIdeaUpdate>>;
+    return executeConnectorWrite(
+      ctx,
+      'sam_idea_update',
+      input,
+      () => apply(),
+      async () => {
+        apply = await prepareIdeaUpdate(ctx, input);
+      }
+    );
   },
 });
 

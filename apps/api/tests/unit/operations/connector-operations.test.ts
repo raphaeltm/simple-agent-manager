@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
+import { markRejectedBeforeEffects } from '../../../src/lib/operation-effect-boundary';
+import { AppError } from '../../../src/middleware/error';
 import {
   samAgentAnswer,
   samChatSend,
@@ -15,13 +17,17 @@ import {
   samProjectsList,
   samWorkStop,
 } from '../../../src/operations/connector-operations';
+import { OperationError } from '../../../src/operations/errors';
 import {
   samChatRead,
+  samIdeaCreate,
   samIdeasSearch,
+  samIdeaUpdate,
   samProfilesList,
   samTasksList,
 } from '../../../src/operations/platform-operations';
 import type { OperationContext } from '../../../src/operations/types';
+import { executeConnectorWrite } from '../../../src/services/connector-execution';
 import * as projectData from '../../../src/services/project-data';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
@@ -34,7 +40,10 @@ const mocks = vi.hoisted(() => ({
   notifications: vi.fn(),
   getSession: vi.fn(),
 }));
-vi.mock('../../../src/services/send-chat', () => ({ sendChat: mocks.send }));
+vi.mock('../../../src/services/send-chat', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/services/send-chat')>()),
+  sendChat: mocks.send,
+}));
 vi.mock('../../../src/services/submit-task', () => ({ submitTask: mocks.submit }));
 vi.mock('../../../src/routes/chat-acp-interactions', () => ({
   answerAgentInteraction: mocks.answer,
@@ -43,7 +52,13 @@ vi.mock('../../../src/routes/chat', () => ({ answerAttention: mocks.answer }));
 vi.mock('../../../src/routes/chat-stop', () => ({ stopChat: mocks.stop }));
 vi.mock('../../../src/services/acp-interaction-store', () => ({
   snapshotInteractions: mocks.snapshot,
+  getPendingInteractionDetails: async (...args: unknown[]) =>
+    (await mocks.snapshot(...args)).pending.map((item: Record<string, unknown>) => ({
+      ...item,
+      detail: { message: 'Allow shell command?', options: [{ id: 'allow', name: 'Allow once' }] },
+    })),
   getInteractionDetail: vi.fn().mockResolvedValue({
+    summary: { kind: 'permission' },
     detail: { message: 'Allow shell command?', options: [{ id: 'allow', name: 'Allow once' }] },
   }),
 }));
@@ -54,6 +69,7 @@ vi.mock('../../../src/services/project-data', () => ({
   getSession: mocks.getSession,
   getMessages: vi.fn().mockResolvedValue({ messages: [], hasMore: false }),
   recordActivityEvent: vi.fn().mockResolvedValue(undefined),
+  admitProjectEvent: vi.fn().mockResolvedValue({ accepted: true }),
 }));
 
 // External runtime boundaries are mocked. Identity, current memberships, queries,
@@ -252,6 +268,33 @@ describe('connector operations current membership and creator authority', () => 
     expect(
       sqlite.prepare("SELECT status,error_message FROM tasks WHERE id='queued-task'").get()
     ).toMatchObject({ status: 'cancelled', error_message: null });
+    expect(projectData.recordActivityEvent).toHaveBeenCalledWith(
+      env,
+      'project',
+      'task.cancelled',
+      'user',
+      'owner',
+      null,
+      null,
+      'queued-task',
+      { title: 'Pending', fromStatus: 'queued', toStatus: 'cancelled' }
+    );
+    expect(projectData.admitProjectEvent).toHaveBeenCalledWith(
+      env,
+      'project',
+      expect.objectContaining({
+        eventType: 'task.cancelled',
+        subject: { type: 'task', id: 'queued-task' },
+      })
+    );
+    const recorded = vi.mocked(projectData.admitProjectEvent).mock.calls.length;
+    await samWorkStop.run(ctx(), { projectId: 'project', taskId: 'queued-task' });
+    expect(projectData.admitProjectEvent).toHaveBeenCalledTimes(recorded);
+    expect(
+      sqlite
+        .prepare("SELECT from_status,to_status FROM task_status_events WHERE task_id='queued-task'")
+        .all()
+    ).toEqual([{ from_status: 'queued', to_status: 'cancelled' }]);
   });
   it('inbox cursor independently advances all sources without repeating exhausted sources', async () => {
     sqlite.exec(
@@ -370,5 +413,114 @@ describe('connector operations current membership and creator authority', () => 
     await expect(
       samChatStart.run(c, { projectId: 'project', message: 'Work' })
     ).rejects.toMatchObject({ code: 'not_found' });
+  });
+  it('leaves idea and chat validation failures retryable without reserving receipts', async () => {
+    const c = { ...ctx(), idempotencyKey: 'pure-validation' };
+    await expect(samIdeaCreate.run(c, { projectId: 'project', title: '   ' })).rejects.toThrow(
+      'title is required'
+    );
+    await expect(
+      samIdeaUpdate.run(c, { projectId: 'project', ideaId: 'missing', content: 'note' })
+    ).rejects.toThrow('Idea not found');
+    await expect(
+      samChatSend.run(c, { projectId: 'project', sessionId: 'chat', content: '   ' })
+    ).rejects.toThrow('content is required');
+    expect(sqlite.prepare('SELECT count(*) AS n FROM cli_operation_receipts').get()).toEqual({
+      n: 0,
+    });
+    expect(mocks.send).not.toHaveBeenCalled();
+    sqlite
+      .prepare(
+        "INSERT INTO tasks (id,project_id,user_id,title,status) VALUES ('missing','project','owner','Idea','completed')"
+      )
+      .run();
+    await expect(
+      samIdeaUpdate.run(c, { projectId: 'project', ideaId: 'missing', status: 'ready' })
+    ).rejects.toThrow('terminal status');
+    sqlite.prepare("UPDATE tasks SET status='draft' WHERE id='missing'").run();
+    await expect(
+      samIdeaUpdate.run(c, { projectId: 'project', ideaId: 'missing', status: 'completed' })
+    ).rejects.toThrow('Invalid status transition');
+    expect(sqlite.prepare('SELECT count(*) AS n FROM cli_operation_receipts').get()).toEqual({
+      n: 0,
+    });
+    const result = await samIdeaUpdate.run(c, {
+      projectId: 'project',
+      ideaId: 'missing',
+      status: 'ready',
+    });
+    expect(result.updated).toBe(true);
+    expect(
+      await samIdeaUpdate.run(c, { projectId: 'project', ideaId: 'missing', status: 'ready' })
+    ).toEqual(result);
+  });
+
+  it('releases a definitively rejected attention receipt and permits the same-key retry', async () => {
+    const c = { ...ctx(), idempotencyKey: 'attention-pre-effect' };
+    const input = {
+      projectId: 'project',
+      sessionId: 'chat',
+      markerId: 'marker',
+      answer: 'Approve',
+    };
+    mocks.answer.mockRejectedValueOnce(
+      markRejectedBeforeEffects(new AppError(400, 'BAD_REQUEST', 'invalid option'))
+    );
+    await expect(samAgentAnswer.run(c, input)).rejects.toThrow('invalid option');
+    expect(sqlite.prepare('SELECT count(*) AS n FROM cli_operation_receipts').get()).toEqual({
+      n: 0,
+    });
+    mocks.answer.mockResolvedValueOnce({ resolved: true });
+    expect(await samAgentAnswer.run(c, input)).toEqual({ resolved: true });
+    expect(await samAgentAnswer.run(c, input)).toEqual({ resolved: true });
+    expect(mocks.answer).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not reserve receipt keys on budget or explicit preflight failure; replay bypasses exhausted budgets', async () => {
+    const c = { ...ctx(), idempotencyKey: 'retryable-preflight' };
+    const run = vi.fn().mockResolvedValue({ ok: true });
+    const input = { projectId: 'project', content: 'same intent' };
+    await expect(
+      executeConnectorWrite(c, 'sam_chat_send', input, run, async () => {
+        throw new OperationError('invalid_input', 'Invalid choice');
+      })
+    ).rejects.toMatchObject({ code: 'invalid_input' });
+    expect(sqlite.prepare('SELECT count(*) AS n FROM cli_operation_receipts').get()).toEqual({
+      n: 0,
+    });
+    env.CONNECTOR_WRITE_RATE_LIMIT_PER_MINUTE = '1';
+    await executeConnectorWrite(ctx(), 'sam_chat_send', input, run);
+    await expect(executeConnectorWrite(c, 'sam_chat_send', input, run)).rejects.toMatchObject({
+      code: 'rate_limited',
+    });
+    expect(sqlite.prepare('SELECT count(*) AS n FROM cli_operation_receipts').get()).toEqual({
+      n: 0,
+    });
+    sqlite.prepare('DELETE FROM connector_rate_limits').run();
+    expect(await executeConnectorWrite(c, 'sam_chat_send', input, run)).toEqual({ ok: true });
+    expect(await executeConnectorWrite(c, 'sam_chat_send', input, run)).toEqual({ ok: true });
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+  it('keeps uncertain failures reserved even when a callback throws4xx after a side effect', async () => {
+    const c = { ...ctx(), idempotencyKey: 'uncertain' };
+    const run = vi
+      .fn()
+      .mockRejectedValue(new OperationError('forbidden', 'Remote denied after local mutation'));
+    const input = { projectId: 'project' };
+    await expect(executeConnectorWrite(c, 'sam_chat_send', input, run)).rejects.toMatchObject({
+      code: 'forbidden',
+    });
+    await expect(executeConnectorWrite(c, 'sam_chat_send', input, run)).rejects.toMatchObject({
+      code: 'conflict',
+    });
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+  it('isolates a corrupt attention row and exposes batched pending choices in inbox', async () => {
+    sqlite.prepare("UPDATE session_summaries SET attention_json='bad-json' WHERE id='chat'").run();
+    const inbox = await samInboxGet.run(ctx(), {});
+    expect(inbox.pending[0]).toMatchObject({
+      attention: null,
+      interactions: [{ answerOptions: [{ id: 'allow', name: 'Allow once' }] }],
+    });
   });
 });

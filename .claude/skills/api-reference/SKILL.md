@@ -367,7 +367,7 @@ completion or permission to replay. The response includes `recovery.outcome` and
 - `GET /api/connector/settings` — public-to-session Connector availability and URL.
 - `GET /api/connector/consent?<OAuth query>` — authenticated consent preview with bound handle; `POST` `{handle, approve}` returns `{redirectTo}`.
 - `GET /api/connector/connections`, `DELETE /api/connector/connections/:id` — own grants and revoke.
-- `GET/PATCH /api/admin/connector/settings` — effective setting values with source/update metadata and runtime overrides.
+- `GET/PATCH /api/admin/connector/settings` — effective setting values with source/update metadata and runtime overrides. PATCH only changed keys; a `null` value removes that key’s override and restores its environment fallback or built-in default.
 - `GET /api/admin/connector/connections`, `DELETE /api/admin/connector/connections/:id` — all grants and admin revoke.
 - `GET /api/admin/connector/clients`, `PATCH /api/admin/connector/clients/:id` `{blocked}` — registered clients and block/unblock.
 

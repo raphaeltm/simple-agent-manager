@@ -10,6 +10,12 @@ import { errors } from '../middleware/error';
 import { getCurrentWindowStart, rateLimit } from '../middleware/rate-limit';
 import { jsonValidator } from '../schemas';
 import {
+  DEFAULT_CONNECTOR_CLIENT_IDLE_TTL_SECONDS,
+  DEFAULT_CONNECTOR_OAUTH_REQUEST_MAX_BYTES,
+  DEFAULT_CONNECTOR_REGISTRATION_GLOBAL_PER_HOUR,
+  DEFAULT_CONNECTOR_REGISTRATION_PER_IP_PER_HOUR,
+} from '../services/connector-limits';
+import {
   createConnectorAuthorizationServer,
   isConnectorClientBlocked,
   isLoopbackHost,
@@ -19,14 +25,20 @@ import { connectorUrl, getConnectorSettings } from '../services/connector-settin
 export const connectorOAuthRoutes = new Hono<{ Bindings: Env }>();
 connectorOAuthRoutes.use('/oauth/*', async (c, next) =>
   bodyLimit({
-    maxSize: parsePositiveInt(c.env.CONNECTOR_OAUTH_REQUEST_MAX_BYTES, 16384),
+    maxSize: parsePositiveInt(
+      c.env.CONNECTOR_OAUTH_REQUEST_MAX_BYTES,
+      DEFAULT_CONNECTOR_OAUTH_REQUEST_MAX_BYTES
+    ),
     onError: (c) =>
       c.json({ error: 'invalid_request', message: 'OAuth request body too large' }, 413),
   })(c, next)
 );
 connectorOAuthRoutes.use('/oauth/register', async (c, next) =>
   rateLimit({
-    limit: parsePositiveInt(c.env.CONNECTOR_REGISTRATION_PER_IP_PER_HOUR, 20),
+    limit: parsePositiveInt(
+      c.env.CONNECTOR_REGISTRATION_PER_IP_PER_HOUR,
+      DEFAULT_CONNECTOR_REGISTRATION_PER_IP_PER_HOUR
+    ),
     keyPrefix: 'connector-dcr',
     useIp: true,
   })(c, next)
@@ -34,7 +46,10 @@ connectorOAuthRoutes.use('/oauth/register', async (c, next) =>
 connectorOAuthRoutes.use('/oauth/register', async (c, next) => {
   const windowSeconds = 3600;
   const windowStart = getCurrentWindowStart(windowSeconds);
-  const limit = parsePositiveInt(c.env.CONNECTOR_REGISTRATION_GLOBAL_PER_HOUR, 100);
+  const limit = parsePositiveInt(
+    c.env.CONNECTOR_REGISTRATION_GLOBAL_PER_HOUR,
+    DEFAULT_CONNECTOR_REGISTRATION_GLOBAL_PER_HOUR
+  );
   const admission = await c.env.DATABASE.prepare(
     `INSERT INTO connector_oauth_registration_budget (id,window_start,used) VALUES (1,?,1)
     ON CONFLICT(id) DO UPDATE SET window_start=excluded.window_start,used=CASE WHEN connector_oauth_registration_budget.window_start=excluded.window_start THEN connector_oauth_registration_budget.used+1 ELSE 1 END
@@ -127,7 +142,12 @@ async function protocol(c: Context<{ Bindings: Env }>) {
         client.client_name ?? 'Unnamed app',
         JSON.stringify(client.redirect_uris.map((uri) => new URL(uri).hostname)),
         new Date().toISOString(),
-        Date.now() + parsePositiveInt(c.env.CONNECTOR_CLIENT_IDLE_TTL_SECONDS, 7776000) * 1000
+        Date.now() +
+          parsePositiveInt(
+            c.env.CONNECTOR_CLIENT_IDLE_TTL_SECONDS,
+            DEFAULT_CONNECTOR_CLIENT_IDLE_TTL_SECONDS
+          ) *
+            1000
       )
       .run();
   }

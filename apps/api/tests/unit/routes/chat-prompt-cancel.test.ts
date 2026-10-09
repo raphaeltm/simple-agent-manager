@@ -2,8 +2,9 @@ import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
+import { takeRejectedBeforeEffects } from '../../../src/lib/operation-effect-boundary';
 import { AppError } from '../../../src/middleware/error';
-import { chatRoutes } from '../../../src/routes/chat';
+import { answerAttention, chatRoutes } from '../../../src/routes/chat';
 import * as projectDataService from '../../../src/services/project-data';
 
 const mocks = vi.hoisted(() => ({
@@ -596,6 +597,51 @@ describe('POST /sessions/:sessionId/attention/:markerId/resolve', () => {
     });
     mocks.enrichMessageWithMentions.mockResolvedValue({ enrichedMessage: 'Approve' });
     mocks.sendPromptToAgentOnNode.mockResolvedValue({ ok: true });
+  });
+
+  it.each([
+    { status: 'invalid_option', options: ['Reject'] },
+    { status: 'unsupported_source', source: 'acp_interaction' },
+    { status: 'not_found' },
+  ] as const)(
+    'marks definitive $status rejection safe for Connector receipt retry',
+    async (result) => {
+      vi.mocked(projectDataService.prepareAttentionAnswer).mockResolvedValue(
+        result as Awaited<ReturnType<typeof projectDataService.prepareAttentionAnswer>>
+      );
+      const error = await answerAttention(
+        { DATABASE: {} } as Env,
+        'user-1',
+        'proj-1',
+        'chat-1',
+        'marker-1',
+        'Approve'
+      ).catch((cause: unknown) => cause);
+      expect(takeRejectedBeforeEffects(error)).toBe(true);
+      expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+    }
+  );
+
+  it('marks released preparation failures but never uncertain dispatch failures retryable', async () => {
+    const env = { DATABASE: {} } as Env;
+    const preparationError = new Error('lookup unavailable');
+    mocks.enrichMessageWithMentions.mockRejectedValueOnce(preparationError);
+    await expect(
+      answerAttention(env, 'user-1', 'proj-1', 'chat-1', 'marker-1', 'Approve')
+    ).rejects.toBe(preparationError);
+    expect(projectDataService.releaseAttentionAnswer).toHaveBeenCalledOnce();
+    expect(takeRejectedBeforeEffects(preparationError)).toBe(true);
+    setupDrizzle({
+      workspace: { id: 'ws-1', nodeId: 'node-1', nodeStatus: 'running' },
+      agentSession: { id: 'agent-sess-1' },
+    });
+    const dispatchError = new AppError(409, 'UNKNOWN', 'dispatch may have succeeded');
+    mocks.sendPromptToAgentOnNode.mockRejectedValueOnce(dispatchError);
+    await expect(
+      answerAttention(env, 'user-1', 'proj-1', 'chat-1', 'marker-1', 'Approve')
+    ).rejects.toBe(dispatchError);
+    expect(takeRejectedBeforeEffects(dispatchError)).toBe(false);
+    expect(projectDataService.releaseAttentionAnswer).toHaveBeenCalledOnce();
   });
 
   it('forwards an allowed answer before finalizing the marker', async () => {

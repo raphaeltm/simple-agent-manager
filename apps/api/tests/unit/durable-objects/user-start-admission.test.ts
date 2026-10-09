@@ -11,6 +11,9 @@ import { createSqliteD1 } from '../../helpers/sqlite-d1';
 describe('human conversation build-queue exemption', () => {
   it.each([
     ['user', 'conversation', false, true],
+    ['connector', 'conversation', false, true],
+    ['connector', 'conversation', true, false],
+    ['connector', 'task', false, false],
     ['agent', 'conversation', false, false],
     ['schedule', 'conversation', false, false],
     ['user', 'task', false, false],

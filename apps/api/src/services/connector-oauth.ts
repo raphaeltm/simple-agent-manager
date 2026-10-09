@@ -3,6 +3,11 @@ import { OAuthAuthorizationServer, OAuthError } from '@cloudflare/workers-oauth-
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
 import type { Actor, OperationScope } from '../operations/types';
+import {
+  DEFAULT_CONNECTOR_CLIENT_IDLE_TTL_SECONDS,
+  DEFAULT_CONNECTOR_CLIENT_NAME_MAX_LENGTH,
+  DEFAULT_CONNECTOR_REDIRECT_URI_MAX_COUNT,
+} from './connector-limits';
 import { type ConnectorSettings, connectorUrl, getConnectorSettings } from './connector-settings';
 import { assertSessionUserApproved } from './signup-approval';
 
@@ -54,8 +59,29 @@ export async function createConnectorAuthorizationServer(
     refreshTokenIdleTTL: config.refreshTokenTtlSeconds,
     scopesSupported: ['sam.read', 'sam.write', 'offline_access'],
     clientIdMetadataDocumentEnabled: false,
-    clientRegistrationTTL: parsePositiveInt(env.CONNECTOR_CLIENT_IDLE_TTL_SECONDS, 7776000),
+    clientRegistrationTTL: parsePositiveInt(
+      env.CONNECTOR_CLIENT_IDLE_TTL_SECONDS,
+      DEFAULT_CONNECTOR_CLIENT_IDLE_TTL_SECONDS
+    ),
     clientRegistrationCallback: ({ clientMetadata }) => {
+      if (
+        (typeof clientMetadata.client_name === 'string' ? clientMetadata.client_name.length : 0) >
+          parsePositiveInt(
+            env.CONNECTOR_CLIENT_NAME_MAX_LENGTH,
+            DEFAULT_CONNECTOR_CLIENT_NAME_MAX_LENGTH
+          ) ||
+        (Array.isArray(clientMetadata.redirect_uris) ? clientMetadata.redirect_uris.length : 0) >
+          parsePositiveInt(
+            env.CONNECTOR_REDIRECT_URI_MAX_COUNT,
+            DEFAULT_CONNECTOR_REDIRECT_URI_MAX_COUNT
+          )
+      )
+        return {
+          code: 'invalid_client_metadata',
+          description: 'Client name or redirect URI count exceeds the registration limit',
+          status: 400,
+        };
+
       if (!config.enabled)
         return {
           code: 'access_denied',
@@ -88,12 +114,12 @@ export async function createConnectorAuthorizationServer(
       )
         .bind(props.connectionId, options.userId)
         .first<{ revoked_at: string | null }>();
-      if (
-        !config.enabled ||
-        !row ||
-        row.revoked_at ||
-        (await isConnectorClientBlocked(env, options.clientId))
-      )
+      if (!config.enabled)
+        throw new OAuthError('temporarily_unavailable', {
+          description:
+            'Connector disabled by the administrator; retain the connection and retry later',
+        });
+      if (!row || row.revoked_at || (await isConnectorClientBlocked(env, options.clientId)))
         throw new OAuthError('invalid_grant', { description: 'Connection is disabled or revoked' });
       const user = await env.DATABASE.prepare('SELECT role,status FROM users WHERE id=?')
         .bind(options.userId)
@@ -150,7 +176,12 @@ export async function createConnectorAuthorizationServer(
         'UPDATE connector_oauth_clients SET expires_at=? WHERE id=? AND expires_at IS NOT NULL'
       )
         .bind(
-          Date.now() + parsePositiveInt(env.CONNECTOR_CLIENT_IDLE_TTL_SECONDS, 7776000) * 1000,
+          Date.now() +
+            parsePositiveInt(
+              env.CONNECTOR_CLIENT_IDLE_TTL_SECONDS,
+              DEFAULT_CONNECTOR_CLIENT_IDLE_TTL_SECONDS
+            ) *
+              1000,
           options.clientId
         )
         .run();
@@ -164,11 +195,12 @@ export async function createConnectorAuthorizationServer(
 }
 export async function authenticateConnectorOAuth(
   request: Request,
-  env: Env
+  env: Env,
+  settings?: ConnectorSettings
 ): Promise<Actor | null> {
   const match = /^Bearer\s+(\S+)$/i.exec(request.headers.get('Authorization') ?? '');
   if (!match?.[1] || match[1].startsWith('sam_pat_')) return null;
-  const config = await getConnectorSettings(env);
+  const config = settings ?? (await getConnectorSettings(env));
   if (!config.enabled) return null;
   const server = await createConnectorAuthorizationServer(env, config);
   const token = await server.validateToken<ConnectorOAuthProps>(connectorUrl(env), match[1], env);
@@ -182,7 +214,7 @@ export async function authenticateConnectorOAuth(
   const user = await env.DATABASE.prepare('SELECT role,status FROM users WHERE id=?')
     .bind(token.userId)
     .first<{ role: string; status: string }>();
-  if (!user) return null;
+  if (!user || user.status === 'system') return null;
   await assertSessionUserApproved(env, user);
   await env.DATABASE.prepare('UPDATE connector_oauth_grants SET last_used_at=? WHERE id=?')
     .bind(new Date().toISOString(), token.props.connectionId)

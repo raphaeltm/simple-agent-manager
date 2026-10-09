@@ -131,6 +131,19 @@ describe('Connector real MCP protocol and PAT authorization', () => {
     expect(JSON.stringify(revoked)).not.toContain('My Project');
     await client.close();
   });
+  it('bounds errors containing oversized caller-controlled values', async () => {
+    const { json } = await rpc('tools/call', {
+      name: 'sam_chat_read',
+      arguments: {
+        projectId: 'mine',
+        sessionId: 'chat',
+        roles: ['x'.repeat(160000)],
+      },
+    });
+    expect(json.result.isError).toBe(true);
+    expect(new TextEncoder().encode(JSON.stringify(json.result)).length).toBeLessThan(120000);
+    expect(JSON.stringify(json.result)).not.toContain('x'.repeat(1000));
+  });
   it('requestKey reaches the shared operation and retry cannot create two ideas', async () => {
     const params = {
       name: 'sam_idea_create',
@@ -139,6 +152,9 @@ describe('Connector real MCP protocol and PAT authorization', () => {
     const first = await rpc('tools/call', params);
     expect(first.json.result.isError).not.toBe(true);
     const second = await rpc('tools/call', params);
+    expect(JSON.parse(first.json.result.content[0].text)).toEqual(
+      first.json.result.structuredContent
+    );
     expect(second.json.result.structuredContent.data.ideaId).toBe(
       first.json.result.structuredContent.data.ideaId
     );
@@ -167,7 +183,7 @@ describe('Connector real MCP protocol and PAT authorization', () => {
   it('PAT revocation and user suspension affect the next request', async () => {
     expect((await rpc('tools/list')).res.status).toBe(200);
     sqlite.exec("UPDATE users SET status='suspended' WHERE id='owner'");
-    expect((await rpc('tools/list')).res.status).toBe(403);
+    expect((await rpc('tools/list')).res.status).toBe(401);
     sqlite.exec(
       "UPDATE users SET status='active' WHERE id='owner'; UPDATE smoke_test_tokens SET revoked_at=1 WHERE id='pat'"
     );
@@ -197,6 +213,14 @@ describe('Connector real MCP protocol and PAT authorization', () => {
     );
     const { json } = await rpc('tools/list');
     expect(json.result.tools).toHaveLength(12);
+    const disabled = await rpc('tools/call', {
+      name: 'sam_idea_create',
+      arguments: { projectId: 'mine', title: 'Not created' },
+    });
+    expect(disabled.res.status).toBe(200);
+    expect(disabled.res.headers.get('www-authenticate')).toBeNull();
+    expect(disabled.json.result).toMatchObject({ isError: true });
+    expect(disabled.json.result.content[0].text).toContain('disabled by the administrator');
     sqlite.exec(`INSERT INTO platform_settings(key,value) VALUES ('connector.enabled','false')`);
     expect((await rpc('tools/list')).res.status).toBe(403);
   });

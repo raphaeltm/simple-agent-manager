@@ -2,6 +2,8 @@
 
 Authoritative design: SAM idea `01M4GJ0W0DS5BTKBM1YW0X5YC8`, project `01KHRJGANBBWGDY1NZ0KVF0D4J`. Implementation child `01M4H0TFBRMW2S5XATMPNZYDXN`. Preserve the idea.
 
+> Current state: corrective code review passes H1–H4/M1–M8; final validation/CI and live rollout gates remain pending. Earlier no-deploy and intermediate check statements below are historical; latest user authorization governs. No OAuth grants without explicit approval OAUTH-STAGING-2294-v1.
+
 ## Constraints and research
 
 Updated user authorization permits staging deployment, end-to-end verification, and production rollout after green checks. Creating or expanding persistent credentials or security-sensitive access requires action-time user approval. Keep all work on `sam/run-repository-skill-implement-nzydxn`; do not push task bookkeeping to main because it triggers deployment. P0 is owned by task `01M4GVCTT82B9BMJM46GMXH0YX`, PR #2293, and its branch is reused, not reimplemented. Profile/runtime metadata confirms MF'in Astra / gpt-6-astra.
@@ -61,3 +63,14 @@ Real staging Codex sessions returned `CONNECTOR_INSTANT_READY`, `CONNECTOR_FOLLO
 Live transcripts exposed last-fragment final messages and overlapping backward cursors. Fixed by grouping adjacent assistant fragments with all-role boundaries retained, selecting the oldest included row for pagination, and disclosing partial/truncated content. SQLite tests traverse tied-timestamp streams exactly once at limits1/3/5. Author304 tests and independent validation275/security13 passed; bounded tool-only-tail behavior documented and tested. Final focused rerun305/305 passed; root typecheck found unsupported Array.findLast and replaced it with an ES-target-compatible reverse/find; typecheck rerun and14 focused regression tests pass.
 
 Both E2E smoke jobs passed after configuring the supported public Docker mirror in that workflow too. Existing routing assertion retained. Full quality-script suite668/668 passed. A complete successful staging deployment is still required; temporary OAuth grants and confirmation-sensitive live tool calls remain pending user approval, and hosted API client testing needs an existing authorized provider path.
+
+
+## Coordinator second review corrections
+
+H1 REST explicit-Instant-only routing preserved with VM override regressions; H2 text content now includes bounded JSON; H3 answer inputs are optionId/decline/formContent with server-generated receipt/hash; H4 pagination already fixed. M2 global exact-path public protocol CORS preserves cookie-authorized consent/settings. M3 metadata shape bounds and named defaults; configurable shared-egress admission documented. M4 changed-only admin settings plus reset-to-env/default, identity-scoped queries. M5 every optional CONNECTOR variable forwarded through both deploy sync steps. M6 one settings snapshot, no duplicate OAuth user check, bounded batched interaction details and row-isolated malformed attention. M7 Connector human-start priority; M8 shared task cancellation lifecycle/activity. M1 requires final safe pre-effect rejection handling without releasing uncertain side-effect receipts.
+
+Independent routing/cancel95 tests, protocol/CORS20, OAuth Workers23, real InteractionStore5, quality669, UI9 and Playwright14 pass. New screenshots reviewed by author and root and published in PR comment6089954793, artifactc11ea8526. Full build passed; remaining full validation and final review pending. No OAuth registrations/grants created: explicit durable approval OAUTH-STAGING-2294-v1 pending. Coordinator suggested hosted API tests optional; authoritative user/spec gate clarification remains pending.
+
+M1 final correction covers task-start pure admission (VM and Instant), shared idea/chat validation, and attention-answer definitive prepare rejection/successful preparation release. A private in-process marker proves safe retry; no status-code-based blanket release. Uncertain insert/dispatch/completion outcomes keep receipts reserved. Independent completion review passes H1–H4/M1–M8,180tests+1skip; security independently validates40+56unit/5realstore cases. Attention correction70tests passes. Source-inventory now names refactored task writers exactly, preserving canonical allocation evidence;83boundary tests pass. Full validation final rerun pending.
+
+Final corrective candidate: full `pnpm test`21/21 workspace tasks pass; `pnpm lint`, `pnpm typecheck`, and `pnpm build` pass. OAuth/InteractionStore Workers28/28, quality669/669 and source-boundary83/83 pass separately. Fresh commit CI and live staging acceptance remain required.

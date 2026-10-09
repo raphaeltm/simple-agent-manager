@@ -395,6 +395,19 @@ export class InteractionStore extends DurableObject<Env> {
     return readInteractionSnapshot(this.sql, this.env, cursor);
   }
 
+  /** One RPC for owner-authorized pending details; pending count is bounded at creation. */
+  async pendingWithDetails(): Promise<
+    Array<AcpInteractionSafeSummary & { detail: Record<string, unknown> | null }>
+  > {
+    const snapshot = this.snapshot(null);
+    return Promise.all(
+      snapshot.pending.map(async (summary) => ({
+        ...summary,
+        detail: (await this.detail(summary.interactionId))?.detail ?? null,
+      }))
+    );
+  }
+
   async detail(interactionId: string): Promise<{
     summary: AcpInteractionSafeSummary;
     detail: Record<string, unknown> | null;

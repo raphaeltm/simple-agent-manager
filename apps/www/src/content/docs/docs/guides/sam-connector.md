@@ -21,6 +21,8 @@ Try “What needs my attention?” or “Start a chat in my project to investiga
 
 Chat results show the newest message groups first. Pagination counts stored streaming rows; follow `nextCursor` for older content. A group split across pages includes `partialBefore` or `mayContinueInNewerPage`, and shortened summaries include `truncated`. Task final-message summaries combine adjacent assistant fragments from a bounded recent window. During a long tool run, that window can contain no assistant text and the summary is `null`; read the chat for older progress.
 
+Agent requests appear in your inbox and in chats you created, including the available permission options or form fields. Confirm each answer before sending it. Connector clients submit an `interactionId` with an `optionId`, `formContent`, or `decline: true`; SAM generates the answer receipt metadata. URL requests use `optionId: "accept"` after confirmation.
+
 ## Command-line clients
 
 Replace the example URL with the URL from Settings → Access:
@@ -42,7 +44,7 @@ codex mcp add sam --url https://api.example.com/connect/mcp --bearer-token-env-v
 
 In **Settings → Access → Connected apps**, choose **Revoke** and confirm. This revokes the app's OAuth grant. Token revocation propagation may take about a minute. Personal API tokens are managed separately in the existing API tokens section.
 
-Administrators use **Admin → Integrations → Connector** to disable the Connector, allow read-only access, control registration hosts and token lifetimes, set rate and start limits, revoke connections, and block registered clients. The Connector is enabled by default, including on self-hosted installations. Disabling it rejects existing tokens without deleting grants. When write access changes, refresh ChatGPT's tool list.
+Administrators use **Admin → Integrations → Connector** to disable the Connector, allow read-only access, control registration hosts and token lifetimes, set rate and start limits, revoke connections, and block registered clients. Save writes only the settings you changed. **Reset to default** removes an individual runtime override and restores its environment fallback or built-in default. The Connector is enabled by default, including on self-hosted installations. Disabling it rejects existing tokens without deleting grants. When write access changes, refresh ChatGPT's tool list.
 
 ## Self-hosted installations
 
@@ -53,3 +55,5 @@ The workspace-injected `sam-mcp` server remains a separate agent interface. Do n
 Connections revoked in Settings or Admin are rejected immediately by SAM's D1 authorization gate; the OAuth provider also deletes their tokens from KV. Refresh tokens rotate on every successful refresh. Reusing a spent refresh token revokes the connection, including access tokens, and requires reconnecting the app. Tokens are stored hashed and their authorization properties encrypted.
 
 Self-host operators can bound public dynamic registration with `CONNECTOR_REGISTRATION_PER_IP_PER_HOUR` (20) and `CONNECTOR_REGISTRATION_GLOBAL_PER_HOUR` (100). The installation-wide limit uses atomic D1 admission. OAuth bodies are limited to `CONNECTOR_OAUTH_REQUEST_MAX_BYTES` (16 KiB). Dynamic clients expire after `CONNECTOR_CLIENT_IDLE_TTL_SECONDS` (90 idle days), renewed on token exchange.
+
+Deployment forwards explicitly configured `CONNECTOR_*` environment variables; Admin overrides take precedence and **Reset to default** removes the override. Registration names are bounded by `CONNECTOR_CLIENT_NAME_MAX_LENGTH` (200 characters) and redirect lists by `CONNECTOR_REDIRECT_URI_MAX_COUNT` (10). Registration IP limits apply to shared vendor/NAT egress, so operators should size the per-IP and atomic global caps for their expected connection volume. MCP requests are bounded by `CONNECTOR_REQUEST_MAX_BYTES` (256 KiB), complete responses including text and structured data by `CONNECTOR_RESPONSE_MAX_BYTES` (120,000 bytes), and inbox session fanout by `CONNECTOR_INBOX_SESSION_LIMIT` (5).

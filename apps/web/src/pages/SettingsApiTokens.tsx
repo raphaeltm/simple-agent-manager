@@ -1,36 +1,26 @@
 import { Alert, Button, Spinner } from '@simple-agent-manager/ui';
-import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
 
 import { ApiTokens } from '../components/ApiTokens';
 import { ConnectorConnections } from '../components/ConnectorConnections';
-import { connectorSettings } from '../lib/api/connector';
+import { useQueryScope } from '../hooks/useQueryScope';
+import { connectorSettingsQueryOptions } from '../lib/query-options/connector';
 
 export function SettingsApiTokens() {
-  const [settings, setSettings] = useState<Awaited<ReturnType<typeof connectorSettings>> | null>(
-    null
-  );
-  const [error, setError] = useState<string | null>(null);
+  const scope = useQueryScope();
+  const query = useQuery(connectorSettingsQueryOptions(scope));
+  const settings = query.data;
+  const [copyError, setCopyError] = useState<string | null>(null);
+  const error = copyError ?? query.error?.message;
   const [copied, setCopied] = useState(false);
-  useEffect(() => {
-    let active = true;
-    void connectorSettings()
-      .then((value) => {
-        if (active) setSettings(value);
-      })
-      .catch((err) => {
-        if (active) setError(err.message);
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
   async function copy() {
     if (!settings) return;
     try {
       await navigator.clipboard.writeText(settings.url);
       setCopied(true);
     } catch {
-      setError('Copy failed. Select the Connector URL and copy it manually.');
+      setCopyError('Copy failed. Select the Connector URL and copy it manually.');
     }
   }
   return (
