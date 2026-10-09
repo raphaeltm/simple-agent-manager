@@ -4,7 +4,7 @@ import { VALID_MESSAGE_ROLES, validateRoles } from '../lib/message-roles';
 import * as projectDataService from '../services/project-data';
 import { describeRootSearchCoverage } from '../services/project-data-search-coverage';
 import { OperationError } from './errors';
-import { getPlatformOperationLimits } from './limits';
+import { clampOperationNumber, getPlatformOperationLimits } from './limits';
 import type { OperationContext } from './types';
 
 export interface TokenRow {
@@ -55,7 +55,7 @@ export async function readChat(
   if (!sessionId) throw new OperationError('invalid_input', 'sessionId is required');
   const limits = getPlatformOperationLimits(ctx.env);
   const requestedLimit = typeof input.limit === 'number' ? input.limit : limits.messageListLimit;
-  const limit = Math.min(Math.max(1, Math.round(requestedLimit)), limits.messageListMax);
+  const limit = clampOperationNumber(requestedLimit, 1, limits.messageListMax, 'limit');
   const roles = rolesOrThrow(
     input.roles ?? (input.includeToolPayloads ? [...VALID_MESSAGE_ROLES] : undefined)
   );
@@ -135,7 +135,7 @@ export async function searchChats(
   const sessionId = typeof input.sessionId === 'string' ? input.sessionId.trim() : null;
   const roles = rolesOrThrow(input.roles);
   const requestedLimit = typeof input.limit === 'number' ? input.limit : limits.messageSearchLimit;
-  const limit = Math.min(Math.max(1, Math.round(requestedLimit)), limits.messageSearchMax);
+  const limit = clampOperationNumber(requestedLimit, 1, limits.messageSearchMax, 'limit');
   const continuation =
     typeof input.continuation === 'string' && input.continuation.length > 0
       ? input.continuation

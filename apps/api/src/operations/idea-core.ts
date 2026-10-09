@@ -5,7 +5,7 @@ import { ulid } from '../lib/ulid';
 import { operationLink } from './connector-read-core';
 import { formatOperationCursor, readOperationCursor } from './cursors';
 import { OperationError } from './errors';
-import { getPlatformOperationLimits } from './limits';
+import { clampOperationNumber, getPlatformOperationLimits } from './limits';
 import type { OperationContext } from './types';
 
 export type IdeasSearchInput = {
@@ -46,14 +46,19 @@ export async function searchIdeas(ctx: OperationContext, input: IdeasSearchInput
   const related = input.related === true;
   const search = related || input.search === true || input.query !== undefined;
   const normalizedQuery = search ? normalizedIdeaQuery(input.query, ctx) : null;
-  const defaultLimit = related
-    ? limits.relatedIdeaSearchLimit
-    : search
-      ? limits.ideaSearchMax
-      : limits.ideaListLimit;
-  const limit = Math.min(
-    Math.max(1, Math.round(input.limit ?? defaultLimit)),
-    related ? limits.taskSearchMax : search ? limits.ideaSearchMax : limits.ideaListMax
+  const requestedLimit =
+    typeof input.limit === 'number'
+      ? input.limit
+      : related
+        ? limits.relatedIdeaSearchLimit
+        : search
+          ? limits.ideaSearchMax
+          : limits.ideaListLimit;
+  const limit = clampOperationNumber(
+    requestedLimit,
+    1,
+    related ? limits.taskSearchMax : search ? limits.ideaSearchMax : limits.ideaListMax,
+    'limit'
   );
   const external = ctx.actor.via !== 'workspace-agent';
   const conditions = [
@@ -198,7 +203,7 @@ export async function createIdea(ctx: OperationContext, input: IdeaCreateInput) 
       : null;
   const priority =
     typeof input.priority === 'number'
-      ? Math.min(Math.max(0, Math.round(input.priority)), limits.dispatchMaxPriority)
+      ? clampOperationNumber(input.priority, 0, limits.dispatchMaxPriority, 'priority')
       : 0;
   const ideaId = ulid();
   const now = new Date().toISOString();
@@ -314,7 +319,9 @@ export async function updateIdea(ctx: OperationContext, input: IdeaUpdateInput) 
   }
   if (typeof input.priority === 'number') {
     updates.push('priority = ?');
-    bindValues.push(Math.min(Math.max(0, Math.round(input.priority)), limits.dispatchMaxPriority));
+    bindValues.push(
+      clampOperationNumber(input.priority, 0, limits.dispatchMaxPriority, 'priority')
+    );
   }
   if (updates.length === 0)
     throw new OperationError(
@@ -331,7 +338,7 @@ export async function updateIdea(ctx: OperationContext, input: IdeaUpdateInput) 
     const event = ctx.env.DATABASE.prepare(
       `INSERT INTO task_status_events (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)
        VALUES (?, ?, ?, ?, 'user', ?, ?, ?)`
-    ).bind(ulid(), ideaId, statusTransition.from, statusTransition.to, ctx.actor.userId, now, now);
+    ).bind(ulid(), ideaId, statusTransition.from, statusTransition.to, ctx.actor.userId, null, now);
     await ctx.env.DATABASE.batch([statement, event]);
   } else {
     await statement.run();
