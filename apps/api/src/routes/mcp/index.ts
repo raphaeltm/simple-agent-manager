@@ -12,6 +12,7 @@ import * as v from 'valibot';
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { runWorkspaceOperation } from '../../operations/workspace-adapter';
 import { formatIssues, JsonRpcEnvelopeSchema } from '../../schemas';
 import {
   authenticateMcpRequest,
@@ -52,17 +53,7 @@ import {
   handleGetProjectEventSubscription,
   handleListProjectEventSubscriptions,
 } from './event-subscription-tools';
-import {
-  handleCreateIdea,
-  handleFindRelatedIdeas,
-  handleGetIdea,
-  handleLinkIdea,
-  handleListIdeas,
-  handleListLinkedIdeas,
-  handleSearchIdeas,
-  handleUnlinkIdea,
-  handleUpdateIdea,
-} from './idea-tools';
+import { handleLinkIdea, handleListLinkedIdeas, handleUnlinkIdea } from './idea-tools';
 import {
   handleClaimIncident,
   handleGetIncident,
@@ -80,7 +71,6 @@ import {
   handleGetRelevantKnowledge,
   handleRelateKnowledge,
   handleRemoveKnowledge,
-  handleSearchKnowledge,
   handleUpdateKnowledge,
 } from './knowledge-tools';
 import {
@@ -134,7 +124,6 @@ import {
   handleCreateAgentProfile,
   handleDeleteAgentProfile,
   handleGetAgentProfile,
-  handleListAgentProfiles,
   handleListProfileEnvVars,
   handleRemoveProfileEnvVar,
   handleUpdateAgentProfile,
@@ -149,9 +138,7 @@ import { handleScheduleTool } from './project-schedule-tools';
 import {
   handleGetArchivedToolPayloads,
   handleGetResourceHistory,
-  handleGetSessionMessages,
   handleListSessions,
-  handleSearchMessages,
   handleUpdateSessionTopic,
 } from './session-tools';
 import {
@@ -161,13 +148,7 @@ import {
   handleListSkills,
   handleUpdateSkill,
 } from './skill-tools';
-import {
-  handleCompleteTask,
-  handleGetTaskDetails,
-  handleListTasks,
-  handleSearchTasks,
-  handleUpdateTaskStatus,
-} from './task-tools';
+import { handleCompleteTask, handleUpdateTaskStatus } from './task-tools';
 import { handleWaitForSubtasks } from './task-wait-tools';
 import {
   handleCreateTrigger,
@@ -424,15 +405,29 @@ mcpRoutes.post('/', async (c) => {
           case 'remove_pending_subtask':
             return c.json(await handleRemovePendingSubtask(requestId, toolArgs, tokenData, c.env));
           case 'list_tasks':
-            return c.json(await handleListTasks(requestId, toolArgs, tokenData, c.env));
+            return c.json(
+              await runWorkspaceOperation('list_tasks', requestId, toolArgs, tokenData, c.env)
+            );
           case 'get_task_details':
-            return c.json(await handleGetTaskDetails(requestId, toolArgs, tokenData, c.env));
+            return c.json(
+              await runWorkspaceOperation('get_task_details', requestId, toolArgs, tokenData, c.env)
+            );
           case 'search_tasks':
-            return c.json(await handleSearchTasks(requestId, toolArgs, tokenData, c.env));
+            return c.json(
+              await runWorkspaceOperation('search_tasks', requestId, toolArgs, tokenData, c.env)
+            );
           case 'list_sessions':
             return c.json(await handleListSessions(requestId, toolArgs, tokenData, c.env));
           case 'get_session_messages':
-            return c.json(await handleGetSessionMessages(requestId, toolArgs, tokenData, c.env));
+            return c.json(
+              await runWorkspaceOperation(
+                'get_session_messages',
+                requestId,
+                toolArgs,
+                tokenData,
+                c.env
+              )
+            );
           case 'get_archived_tool_payloads':
             return c.json(
               await handleGetArchivedToolPayloads(requestId, toolArgs, tokenData, c.env)
@@ -440,7 +435,9 @@ mcpRoutes.post('/', async (c) => {
           case 'get_resource_history':
             return c.json(await handleGetResourceHistory(requestId, toolArgs, tokenData, c.env));
           case 'search_messages':
-            return c.json(await handleSearchMessages(requestId, toolArgs, tokenData, c.env));
+            return c.json(
+              await runWorkspaceOperation('search_messages', requestId, toolArgs, tokenData, c.env)
+            );
           case 'update_session_topic':
             return c.json(await handleUpdateSessionTopic(requestId, toolArgs, tokenData, c.env));
           case 'link_idea':
@@ -450,17 +447,35 @@ mcpRoutes.post('/', async (c) => {
           case 'list_linked_ideas':
             return c.json(await handleListLinkedIdeas(requestId, toolArgs, tokenData, c.env));
           case 'find_related_ideas':
-            return c.json(await handleFindRelatedIdeas(requestId, toolArgs, tokenData, c.env));
+            return c.json(
+              await runWorkspaceOperation(
+                'find_related_ideas',
+                requestId,
+                toolArgs,
+                tokenData,
+                c.env
+              )
+            );
           case 'create_idea':
-            return c.json(await handleCreateIdea(requestId, toolArgs, tokenData, c.env));
+            return c.json(
+              await runWorkspaceOperation('create_idea', requestId, toolArgs, tokenData, c.env)
+            );
           case 'update_idea':
-            return c.json(await handleUpdateIdea(requestId, toolArgs, tokenData, c.env));
+            return c.json(
+              await runWorkspaceOperation('update_idea', requestId, toolArgs, tokenData, c.env)
+            );
           case 'get_idea':
-            return c.json(await handleGetIdea(requestId, toolArgs, tokenData, c.env));
+            return c.json(
+              await runWorkspaceOperation('get_idea', requestId, toolArgs, tokenData, c.env)
+            );
           case 'list_ideas':
-            return c.json(await handleListIdeas(requestId, toolArgs, tokenData, c.env));
+            return c.json(
+              await runWorkspaceOperation('list_ideas', requestId, toolArgs, tokenData, c.env)
+            );
           case 'search_ideas':
-            return c.json(await handleSearchIdeas(requestId, toolArgs, tokenData, c.env));
+            return c.json(
+              await runWorkspaceOperation('search_ideas', requestId, toolArgs, tokenData, c.env)
+            );
           case 'build_and_publish':
             return c.json(await handleBuildAndPublish(requestId, toolArgs, tokenData, c.env));
           case 'get_publish_status':
@@ -548,7 +563,15 @@ mcpRoutes.post('/', async (c) => {
             return c.json(await handleResolveIncident(requestId, toolArgs, tokenData, c.env));
           // ─── Agent profile tools ──────────────────────────────────────
           case 'list_agent_profiles':
-            return c.json(await handleListAgentProfiles(requestId, toolArgs, tokenData, c.env));
+            return c.json(
+              await runWorkspaceOperation(
+                'list_agent_profiles',
+                requestId,
+                toolArgs,
+                tokenData,
+                c.env
+              )
+            );
           case 'get_agent_profile':
             return c.json(await handleGetAgentProfile(requestId, toolArgs, tokenData, c.env));
           case 'create_agent_profile':
@@ -588,7 +611,9 @@ mcpRoutes.post('/', async (c) => {
           case 'get_knowledge':
             return c.json(await handleGetKnowledge(requestId, toolArgs, tokenData, c.env));
           case 'search_knowledge':
-            return c.json(await handleSearchKnowledge(requestId, toolArgs, tokenData, c.env));
+            return c.json(
+              await runWorkspaceOperation('search_knowledge', requestId, toolArgs, tokenData, c.env)
+            );
           case 'get_project_knowledge':
             return c.json(await handleGetProjectKnowledge(requestId, toolArgs, tokenData, c.env));
           case 'get_relevant_knowledge':
