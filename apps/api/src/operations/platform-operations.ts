@@ -1,60 +1,14 @@
 import * as v from 'valibot';
 
-import type { JsonRpcResponse } from '../routes/mcp/_helpers';
-import {
-  handleCreateIdea,
-  handleFindRelatedIdeas,
-  handleGetIdea,
-  handleListIdeas,
-  handleSearchIdeas,
-  handleUpdateIdea,
-} from '../routes/mcp/idea-tools';
-import { handleSearchKnowledge } from '../routes/mcp/knowledge-tools';
-import { handleListAgentProfiles } from '../routes/mcp/profile-tools';
-import { handleGetSessionMessages, handleSearchMessages } from '../routes/mcp/session-tools';
-import { handleGetTaskDetails, handleListTasks, handleSearchTasks } from '../routes/mcp/task-tools';
-import type { McpTokenData } from '../services/mcp-token';
 import { authorizeProjectOperation } from './authorization';
-import { OperationError } from './errors';
-import { defineOperation, type OperationContext } from './types';
+import { readChat, searchChats } from './chat-core';
+import { createIdea, getIdea, searchIdeas, updateIdea } from './idea-core';
+import { listProfiles, searchKnowledge } from './memory-core';
+import { getTask, listTasks } from './task-core';
+import { defineOperation } from './types';
 
 const base = { projectId: v.string() };
 const ideaFields = { ideaId: v.string() };
-
-type Handler = (
-  id: string | number | null,
-  params: Record<string, unknown>,
-  token: McpTokenData,
-  env: OperationContext['env']
-) => Promise<JsonRpcResponse>;
-
-/** Compatibility bridge while the workspace MCP implementation is moved into operation modules. */
-async function runHandler(
-  ctx: OperationContext,
-  projectId: string,
-  params: Record<string, unknown>,
-  handler: Handler
-): Promise<unknown> {
-  const token: McpTokenData = {
-    userId: ctx.actor.userId,
-    projectId,
-    workspaceId: ctx.actor.workspace?.workspaceId ?? '',
-    taskId: ctx.actor.workspace?.taskId ?? '',
-    createdAt: new Date().toISOString(),
-  };
-  const response = await handler(null, params, token, ctx.env);
-  if (response.error) {
-    throw new OperationError(
-      response.error.code === -32602 ? 'invalid_input' : 'unavailable',
-      response.error.message
-    );
-  }
-  const result = response.result as
-    { content?: Array<{ type: string; text?: string }> } | undefined;
-  const text = result?.content?.find((item) => item.type === 'text')?.text;
-  if (!text) throw new OperationError('unavailable', 'Tool returned no result');
-  return JSON.parse(text) as unknown;
-}
 
 export const samTaskGet = defineOperation({
   name: 'sam_task_get',
@@ -64,7 +18,7 @@ export const samTaskGet = defineOperation({
   input: v.object({ ...base, taskId: v.string() }),
   async run(ctx, input) {
     await authorizeProjectOperation(ctx, input.projectId);
-    return runHandler(ctx, input.projectId, { taskId: input.taskId }, handleGetTaskDetails);
+    return getTask(ctx, input.projectId, input.taskId);
   },
 });
 
@@ -83,13 +37,7 @@ export const samTasksList = defineOperation({
   }),
   async run(ctx, input) {
     await authorizeProjectOperation(ctx, input.projectId);
-    const { projectId, search, ...params } = input;
-    return runHandler(
-      ctx,
-      projectId,
-      params,
-      search || input.query !== undefined ? handleSearchTasks : handleListTasks
-    );
+    return listTasks(ctx, input);
   },
 });
 
@@ -106,8 +54,7 @@ export const samChatRead = defineOperation({
   }),
   async run(ctx, input) {
     await authorizeProjectOperation(ctx, input.projectId);
-    const { projectId, ...params } = input;
-    return runHandler(ctx, projectId, params, handleGetSessionMessages);
+    return readChat(ctx, input);
   },
 });
 
@@ -126,8 +73,7 @@ export const samChatsSearch = defineOperation({
   }),
   async run(ctx, input) {
     await authorizeProjectOperation(ctx, input.projectId);
-    const { projectId, ...params } = input;
-    return runHandler(ctx, projectId, params, handleSearchMessages);
+    return searchChats(ctx, input);
   },
 });
 
@@ -146,17 +92,7 @@ export const samIdeasSearch = defineOperation({
   }),
   async run(ctx, input) {
     await authorizeProjectOperation(ctx, input.projectId);
-    const { projectId, related, search, ...params } = input;
-    return runHandler(
-      ctx,
-      projectId,
-      params,
-      related
-        ? handleFindRelatedIdeas
-        : search || input.query !== undefined
-          ? handleSearchIdeas
-          : handleListIdeas
-    );
+    return searchIdeas(ctx, input);
   },
 });
 
@@ -168,7 +104,7 @@ export const samIdeaGet = defineOperation({
   input: v.object({ ...base, ...ideaFields }),
   async run(ctx, input) {
     await authorizeProjectOperation(ctx, input.projectId);
-    return runHandler(ctx, input.projectId, { ideaId: input.ideaId }, handleGetIdea);
+    return getIdea(ctx, input.projectId, input.ideaId);
   },
 });
 
@@ -185,8 +121,7 @@ export const samIdeaCreate = defineOperation({
   }),
   async run(ctx, input) {
     await authorizeProjectOperation(ctx, input.projectId, 'task:write');
-    const { projectId, ...params } = input;
-    return runHandler(ctx, projectId, params, handleCreateIdea);
+    return createIdea(ctx, input);
   },
 });
 
@@ -206,8 +141,7 @@ export const samIdeaUpdate = defineOperation({
   }),
   async run(ctx, input) {
     await authorizeProjectOperation(ctx, input.projectId, 'task:write');
-    const { projectId, ...params } = input;
-    return runHandler(ctx, projectId, params, handleUpdateIdea);
+    return updateIdea(ctx, input);
   },
 });
 
@@ -225,8 +159,7 @@ export const samKnowledgeSearch = defineOperation({
   }),
   async run(ctx, input) {
     await authorizeProjectOperation(ctx, input.projectId);
-    const { projectId, ...params } = input;
-    return runHandler(ctx, projectId, params, handleSearchKnowledge);
+    return searchKnowledge(ctx, input);
   },
 });
 
@@ -238,7 +171,7 @@ export const samProfilesList = defineOperation({
   input: v.object(base),
   async run(ctx, input) {
     await authorizeProjectOperation(ctx, input.projectId);
-    return runHandler(ctx, input.projectId, {}, handleListAgentProfiles);
+    return listProfiles(ctx, input.projectId);
   },
 });
 

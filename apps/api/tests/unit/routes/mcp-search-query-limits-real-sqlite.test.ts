@@ -31,7 +31,13 @@ describe('MCP task-backed search query limits with real SQLite', () => {
 
   beforeEach(() => {
     sqlite = new Database(':memory:');
-    createSchemaTables(sqlite, [schema.tasks]);
+    createSchemaTables(sqlite, [schema.projects, schema.projectMembers, schema.tasks]);
+    sqlite.prepare('INSERT INTO projects (id) VALUES (?)').run(tokenData.projectId);
+    sqlite
+      .prepare(
+        'INSERT INTO project_members (project_id, user_id, role, status) VALUES (?, ?, ?, ?)'
+      )
+      .run(tokenData.projectId, tokenData.userId, 'owner', 'active');
     env = { DATABASE: createSqliteD1(sqlite) } as Env;
 
     const insert = sqlite.prepare(

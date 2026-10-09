@@ -3,13 +3,9 @@
  *
  * Also exports TokenRow and groupTokensIntoMessages for use by tests and other modules.
  */
-import { drizzle } from 'drizzle-orm/d1';
-
-import * as schema from '../../db/schema';
 import type { Env } from '../../env';
-import { requireProjectAccess } from '../../middleware/project-auth';
+import { runWorkspaceOperation } from '../../operations/workspace-adapter';
 import * as projectDataService from '../../services/project-data';
-import { describeRootSearchCoverage } from '../../services/project-data-search-coverage';
 import { getWorkspaceResourceHistory } from '../../services/workspace-resource-history';
 import {
   getMcpLimits,
@@ -20,8 +16,6 @@ import {
   type McpTokenData,
   resolveSessionId,
   sanitizeUserInput,
-  VALID_MESSAGE_ROLES,
-  validateRoles,
 } from './_helpers';
 
 export async function handleListSessions(
@@ -101,69 +95,7 @@ export async function handleGetSessionMessages(
   tokenData: McpTokenData,
   env: Env
 ): Promise<JsonRpcResponse> {
-  const sessionId = typeof params.sessionId === 'string' ? params.sessionId.trim() : '';
-  if (!sessionId) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'sessionId is required');
-  }
-
-  const limits = getMcpLimits(env);
-  const requestedLimit = typeof params.limit === 'number' ? params.limit : limits.messageListLimit;
-  const limit = Math.min(Math.max(1, Math.round(requestedLimit)), limits.messageListMax);
-  const rolesResult = validateRoles(params.roles);
-  if (!rolesResult.valid) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      `Invalid roles: ${rolesResult.invalid.join(', ')}. Valid roles: ${VALID_MESSAGE_ROLES.join(', ')}`
-    );
-  }
-  const roles = rolesResult.roles;
-
-  // Verify session belongs to this project
-  const session = await projectDataService.getSession(env, tokenData.projectId, sessionId);
-  if (!session) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'Session not found in this project');
-  }
-
-  const { messages, hasMore } = await projectDataService.getMessages(
-    env,
-    tokenData.projectId,
-    sessionId,
-    limit,
-    null,
-    null,
-    roles
-  );
-
-  // Each row in chat_messages is a streaming token (chunk). Group consecutive
-  // same-role tokens into logical messages before returning to agents.
-  const tokens = messages.map((m: Record<string, unknown>) => ({
-    id: m.id as string,
-    role: m.role as string,
-    content: m.content as string,
-    createdAt: m.createdAt as number,
-  }));
-  const result = groupTokensIntoMessages(tokens);
-
-  return jsonRpcSuccess(requestId, {
-    content: [
-      {
-        type: 'text',
-        text: JSON.stringify(
-          {
-            sessionId,
-            topic: session.topic,
-            taskId: session.taskId,
-            messages: result,
-            messageCount: result.length,
-            hasMore,
-          },
-          null,
-          2
-        ),
-      },
-    ],
-  });
+  return runWorkspaceOperation('get_session_messages', requestId, params, tokenData, env);
 }
 
 function parseOptionalScope(value: unknown): string | null {
@@ -235,86 +167,7 @@ export async function handleSearchMessages(
   tokenData: McpTokenData,
   env: Env
 ): Promise<JsonRpcResponse> {
-  const query = typeof params.query === 'string' ? params.query.trim() : '';
-  if (!query) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      'query is required and must be a non-empty string'
-    );
-  }
-  if (query.length < 2) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'query must be at least 2 characters');
-  }
-
-  const limits = getMcpLimits(env);
-  const sessionId = typeof params.sessionId === 'string' ? params.sessionId.trim() : null;
-  const rolesResult = validateRoles(params.roles);
-  if (!rolesResult.valid) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      `Invalid roles: ${rolesResult.invalid.join(', ')}. Valid roles: ${VALID_MESSAGE_ROLES.join(', ')}`
-    );
-  }
-  const roles = rolesResult.roles;
-  const requestedLimit = typeof params.limit === 'number' ? params.limit : 10;
-  const limit = Math.min(Math.max(1, Math.round(requestedLimit)), limits.messageSearchMax);
-  const continuation =
-    typeof params.continuation === 'string' && params.continuation.length > 0
-      ? params.continuation
-      : null;
-  if (sessionId && continuation) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      'continuation cannot be combined with sessionId'
-    );
-  }
-
-  await requireProjectAccess(
-    drizzle(env.DATABASE, { schema }),
-    tokenData.projectId,
-    tokenData.userId
-  );
-
-  const search = await projectDataService.searchMessagesWithArchiveMetadata(
-    env,
-    tokenData.projectId,
-    query,
-    sessionId,
-    roles,
-    limit,
-    continuation
-  );
-
-  return jsonRpcSuccess(requestId, {
-    content: [
-      {
-        type: 'text',
-        text: JSON.stringify(
-          {
-            results: search.results.map((r) => ({
-              messageId: r.id,
-              sessionId: r.sessionId,
-              sessionTopic: r.sessionTopic,
-              sessionTaskId: r.sessionTaskId,
-              role: r.role,
-              snippet: r.snippet,
-              createdAt: r.createdAt,
-            })),
-            count: search.results.length,
-            ...search.query,
-            archiveSearch: search.archiveSearch,
-            rootSearch: search.rootSearch,
-            coverageNotes: describeRootSearchCoverage(search.rootSearch),
-          },
-          null,
-          2
-        ),
-      },
-    ],
-  });
+  return runWorkspaceOperation('search_messages', requestId, params, tokenData, env);
 }
 
 function parseOptionalTimestamp(

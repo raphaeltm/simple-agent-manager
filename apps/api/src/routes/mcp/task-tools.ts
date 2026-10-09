@@ -7,23 +7,21 @@
 import {
   DEFAULT_NOTIFICATION_FULL_BODY_LENGTH,
   MAX_NOTIFICATION_BODY_LENGTH,
-  parseCompletionEvidenceJson,
   type TaskTerminalTransitionEvent,
   validateCompletionEvidence,
 } from '@simple-agent-manager/shared';
-import { and, desc, eq, type SQL, sql } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
-import { getSearchQueryLikePatterns, normalizeSearchQuery } from '../../lib/search-query-limits';
 import { ulid } from '../../lib/ulid';
+import { runWorkspaceOperation } from '../../operations/workspace-adapter';
 import * as notificationService from '../../services/notification';
 import * as projectDataService from '../../services/project-data';
 import * as orchestratorService from '../../services/project-orchestrator';
 import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-sync';
-import { getLatestAssistantMessageForTask } from '../../services/task-final-assistant-message';
 import { cleanupTerminalTaskResources } from '../../services/task-terminal-cleanup';
 import {
   createProjectEventTaskTerminalTransitionHook,
@@ -41,88 +39,6 @@ import {
   jsonRpcSuccess,
   type McpTokenData,
 } from './_helpers';
-
-type TaskSearchRow = {
-  id: string;
-  title: string;
-  status: string;
-  priority: number;
-  description: string | null;
-  outputBranch: string | null;
-  outputPrUrl: string | null;
-  outputSummary: string | null;
-  updatedAt: string;
-};
-
-const TASK_DETAIL_RECENT_ASSISTANT_MESSAGE_LIMIT = 5;
-const TASK_DETAIL_MESSAGE_SNIPPET_LENGTH = 2000;
-function truncateSnippet(value: string | null, maxLength: number): string | null {
-  if (!value) return null;
-  return value.slice(0, maxLength) + (value.length > maxLength ? '...' : '');
-}
-
-export type TaskDetailAssistantMessage = {
-  id: string;
-  role: 'assistant';
-  content: string;
-  createdAt: number | string | null;
-};
-
-export async function getRecentAssistantMessagesForTaskDetail(
-  env: Env,
-  projectId: string,
-  sessionId: string | null
-): Promise<TaskDetailAssistantMessage[]> {
-  if (!sessionId) return [];
-
-  try {
-    const { messages } = await projectDataService.getMessages(
-      env,
-      projectId,
-      sessionId,
-      TASK_DETAIL_RECENT_ASSISTANT_MESSAGE_LIMIT,
-      null,
-      null,
-      ['assistant'],
-      false,
-      'desc'
-    );
-
-    return messages
-      .filter((message) => message.role === 'assistant' && typeof message.content === 'string')
-      .map((message) => ({
-        id: String(message.id),
-        role: 'assistant' as const,
-        content:
-          truncateSnippet(message.content as string, TASK_DETAIL_MESSAGE_SNIPPET_LENGTH) ?? '',
-        createdAt:
-          typeof message.createdAt === 'number' || typeof message.createdAt === 'string'
-            ? message.createdAt
-            : null,
-      }));
-  } catch (error) {
-    log.warn('mcp.get_task_details.recent_assistant_messages_failed', {
-      projectId,
-      sessionId,
-      error: String(error),
-    });
-    return [];
-  }
-}
-
-function toTaskSearchResult(task: TaskSearchRow, snippetLength: number) {
-  return {
-    id: task.id,
-    title: task.title,
-    status: task.status,
-    priority: task.priority,
-    descriptionSnippet: truncateSnippet(task.description, snippetLength),
-    outputBranch: task.outputBranch,
-    outputPrUrl: task.outputPrUrl,
-    outputSummary: truncateSnippet(task.outputSummary, snippetLength),
-    updatedAt: task.updatedAt,
-  };
-}
 
 export async function handleUpdateTaskStatus(
   requestId: string | number | null,
@@ -587,58 +503,7 @@ export async function handleListTasks(
   tokenData: McpTokenData,
   env: Env
 ): Promise<JsonRpcResponse> {
-  const limits = getMcpLimits(env);
-  const status = typeof params.status === 'string' ? params.status : undefined;
-  const includeOwn = params.include_own === true;
-  const requestedLimit = typeof params.limit === 'number' ? params.limit : limits.taskListLimit;
-  const limit = Math.min(Math.max(1, Math.round(requestedLimit)), limits.taskListMax);
-
-  const db = drizzle(env.DATABASE, { schema });
-
-  const conditions: SQL[] = [eq(schema.tasks.projectId, tokenData.projectId)];
-
-  if (!includeOwn) {
-    // We can't easily do "not equal" with drizzle's eq helper, so we filter post-query
-  }
-
-  if (status) {
-    conditions.push(eq(schema.tasks.status, status));
-  }
-
-  // Fetch one extra so we can filter out own task without reducing results
-  const fetchLimit = includeOwn ? limit : limit + 1;
-
-  const rows = await db
-    .select({
-      id: schema.tasks.id,
-      title: schema.tasks.title,
-      description: schema.tasks.description,
-      status: schema.tasks.status,
-      priority: schema.tasks.priority,
-      outputBranch: schema.tasks.outputBranch,
-      outputPrUrl: schema.tasks.outputPrUrl,
-      outputSummary: schema.tasks.outputSummary,
-      createdAt: schema.tasks.createdAt,
-      updatedAt: schema.tasks.updatedAt,
-    })
-    .from(schema.tasks)
-    .where(and(...conditions))
-    .orderBy(desc(schema.tasks.updatedAt))
-    .limit(fetchLimit);
-
-  let tasks = includeOwn ? rows : rows.filter((t) => t.id !== tokenData.taskId);
-
-  // Trim to requested limit after filtering
-  tasks = tasks.slice(0, limit);
-
-  const snippetLen = limits.taskDescriptionSnippetLength;
-  const result = tasks.map((task) => toTaskSearchResult(task, snippetLen));
-
-  return jsonRpcSuccess(requestId, {
-    content: [
-      { type: 'text', text: JSON.stringify({ tasks: result, count: result.length }, null, 2) },
-    ],
-  });
+  return runWorkspaceOperation('list_tasks', requestId, params, tokenData, env);
 }
 
 export async function handleGetTaskDetails(
@@ -647,78 +512,7 @@ export async function handleGetTaskDetails(
   tokenData: McpTokenData,
   env: Env
 ): Promise<JsonRpcResponse> {
-  const taskId = typeof params.taskId === 'string' ? params.taskId.trim() : '';
-  if (!taskId) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'taskId is required');
-  }
-
-  const db = drizzle(env.DATABASE, { schema });
-
-  const rows = await db
-    .select({
-      id: schema.tasks.id,
-      title: schema.tasks.title,
-      description: schema.tasks.description,
-      status: schema.tasks.status,
-      priority: schema.tasks.priority,
-      outputBranch: schema.tasks.outputBranch,
-      outputPrUrl: schema.tasks.outputPrUrl,
-      outputSummary: schema.tasks.outputSummary,
-      completionEvidence: schema.tasks.completionEvidence,
-      errorMessage: schema.tasks.errorMessage,
-      chatSessionId: schema.tasks.chatSessionId,
-      createdAt: schema.tasks.createdAt,
-      updatedAt: schema.tasks.updatedAt,
-      startedAt: schema.tasks.startedAt,
-      completedAt: schema.tasks.completedAt,
-    })
-    .from(schema.tasks)
-    .where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.projectId, tokenData.projectId)))
-    .limit(1);
-
-  const task = rows[0];
-  if (!task) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'Task not found in this project');
-  }
-
-  const recentAssistantMessages = await getRecentAssistantMessagesForTaskDetail(
-    env,
-    tokenData.projectId,
-    task.chatSessionId
-  );
-
-  const finalAssistantMessage = await getLatestAssistantMessageForTask(
-    env,
-    tokenData.projectId,
-    task.chatSessionId
-  );
-
-  const taskResult = {
-    id: task.id,
-    title: task.title,
-    description: task.description,
-    status: task.status,
-    priority: task.priority,
-    outputBranch: task.outputBranch,
-    outputPrUrl: task.outputPrUrl,
-    outputSummary: task.outputSummary,
-    completionEvidence: parseCompletionEvidenceJson(task.completionEvidence ?? null),
-    finalAssistantMessage,
-    errorMessage: task.errorMessage,
-    // Instant (cf-container) dispatches create the chat session asynchronously;
-    // dispatch_task points callers here to obtain the sessionId after launch.
-    sessionId: task.chatSessionId,
-    // Additive diagnostic fallback for completed tasks whose summary/evidence is sparse.
-    recentAssistantMessages,
-    createdAt: task.createdAt,
-    updatedAt: task.updatedAt,
-    startedAt: task.startedAt,
-    completedAt: task.completedAt,
-  };
-
-  return jsonRpcSuccess(requestId, {
-    content: [{ type: 'text', text: JSON.stringify(taskResult, null, 2) }],
-  });
+  return runWorkspaceOperation('get_task_details', requestId, params, tokenData, env);
 }
 
 export async function handleSearchTasks(
@@ -727,64 +521,5 @@ export async function handleSearchTasks(
   tokenData: McpTokenData,
   env: Env
 ): Promise<JsonRpcResponse> {
-  const inputQuery = typeof params.query === 'string' ? params.query.trim() : '';
-  if (!inputQuery) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      'query is required and must be a non-empty string'
-    );
-  }
-  if (inputQuery.length < 2) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'query must be at least 2 characters');
-  }
-
-  const limits = getMcpLimits(env);
-  const normalizedQuery = normalizeSearchQuery(inputQuery, env);
-  const query = normalizedQuery.query;
-  const status = typeof params.status === 'string' ? params.status : undefined;
-  const requestedLimit = typeof params.limit === 'number' ? params.limit : 10;
-  const searchLimit = Math.min(Math.max(1, Math.round(requestedLimit)), limits.taskSearchMax);
-
-  const db = drizzle(env.DATABASE, { schema });
-  const conditions: SQL[] = [
-    eq(schema.tasks.projectId, tokenData.projectId),
-    ...getSearchQueryLikePatterns(query).map(
-      (pattern) =>
-        sql<boolean>`(${schema.tasks.title} LIKE ${pattern} ESCAPE '\\' OR ${schema.tasks.description} LIKE ${pattern} ESCAPE '\\')`
-    ),
-  ];
-
-  if (status) {
-    conditions.push(eq(schema.tasks.status, status));
-  }
-
-  const rows = await db
-    .select({
-      id: schema.tasks.id,
-      title: schema.tasks.title,
-      description: schema.tasks.description,
-      status: schema.tasks.status,
-      priority: schema.tasks.priority,
-      outputBranch: schema.tasks.outputBranch,
-      outputPrUrl: schema.tasks.outputPrUrl,
-      outputSummary: schema.tasks.outputSummary,
-      updatedAt: schema.tasks.updatedAt,
-    })
-    .from(schema.tasks)
-    .where(and(...conditions))
-    .orderBy(desc(schema.tasks.updatedAt))
-    .limit(searchLimit);
-
-  const snippetLen = limits.taskDescriptionSnippetLength;
-  const result = rows.map((task) => toTaskSearchResult(task, snippetLen));
-
-  return jsonRpcSuccess(requestId, {
-    content: [
-      {
-        type: 'text',
-        text: JSON.stringify({ tasks: result, count: result.length, ...normalizedQuery }, null, 2),
-      },
-    ],
-  });
+  return runWorkspaceOperation('search_tasks', requestId, params, tokenData, env);
 }

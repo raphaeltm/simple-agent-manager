@@ -119,11 +119,11 @@ export const ALLOCATION_WRITER_INVENTORY: readonly AllocationWriterInventoryEntr
     canonicalService: 'explicit chat-start task adapter',
   },
   {
-    filePath: 'apps/api/src/routes/mcp/idea-tools.ts',
+    filePath: 'apps/api/src/operations/idea-core.ts',
     table: 'tasks',
-    owner: 'handleCreateIdea',
-    role: 'MCP idea task materialization adapter',
-    canonicalService: 'explicit idea adapter',
+    owner: 'createIdea',
+    role: 'shared idea task materialization operation',
+    canonicalService: 'explicit idea operation',
   },
   {
     filePath: 'apps/api/src/durable-objects/sam-session/tools/create-idea.ts',

@@ -14,14 +14,18 @@ The workspace MCP server embeds platform operations in protocol handlers. Shared
 ## Checklist
 
 - [x] Add typed operation contract, errors and registry with Valibot JSON Schema export.
-- [ ] Extract task get/list/search to authorized operations and adapt workspace handlers.
-- [ ] Extract chat read/search to authorized operations and adapt workspace handlers.
-- [ ] Extract idea search/get/create/update to authorized operations and adapt workspace handlers.
-- [ ] Extract knowledge search and profiles list to authorized operations and adapt workspace handlers.
-- [ ] Decouple touched services from `McpTokenData`.
-- [ ] Add real SQLite attack/control tests and guard deletion checks (attack/control tests added; deletion checks pending).
+- [x] Extract task get/list/search to authorized operations and adapt workspace handlers.
+- [x] Extract chat read/search to authorized operations and adapt workspace handlers.
+- [x] Extract idea search/get/create/update to authorized operations and adapt workspace handlers.
+- [x] Extract knowledge search and profiles list to authorized operations and adapt workspace handlers.
+- [x] Check touched services for `McpTokenData` coupling: none of these ten paths uses a service typed with it; only the workspace adapter retains the token type.
+- [x] Add real SQLite attack/control tests and guard deletion checks. All eight deleted guards made their target attack tests fail; restored suite passed.
 - [x] Add representative adapter parity tests; keep existing MCP tests green.
 - [ ] Run normal quality, specialist, staging and PR gates.
+
+## Intended behavior change
+
+The selected workspace tools now check the session user's current active project membership on every read. Idea create/update also require `task:write`, matching REST. Revoked or viewer users can lose tool access that the old project-only filtering allowed.
 
 ## Acceptance criteria
 

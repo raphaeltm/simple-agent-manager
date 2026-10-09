@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
-import { type OperationError } from '../../../src/operations/errors';
+import { OperationError, operationErrorHttpStatus } from '../../../src/operations/errors';
 import {
   samChatRead,
   samChatsSearch,
@@ -16,10 +16,10 @@ import {
   samTaskGet,
   samTasksList,
 } from '../../../src/operations/platform-operations';
+import { operationInputJsonSchema, operations } from '../../../src/operations/registry';
 import type { Actor, OperationContext } from '../../../src/operations/types';
 import { runWorkspaceOperation } from '../../../src/operations/workspace-adapter';
-import { handleGetIdea } from '../../../src/routes/mcp/idea-tools';
-import { handleListTasks } from '../../../src/routes/mcp/task-tools';
+import { handleGetPeerAgentOutput } from '../../../src/routes/mcp/workspace-tools-direct';
 import type { McpTokenData } from '../../../src/services/mcp-token';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
@@ -94,6 +94,21 @@ describe('shared platform operation authorization on real SQLite', () => {
         ownerId,
         'Owner idea',
         'Content',
+        'draft',
+        0,
+        '2026-10-09',
+        '2026-10-09'
+      );
+    sqlite
+      .prepare(
+        'INSERT INTO tasks (id, project_id, user_id, title, description, status, priority, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      )
+      .run(
+        'idea-other',
+        otherProjectId,
+        ownerId,
+        'Other project idea',
+        'Secret',
         'draft',
         0,
         '2026-10-09',
@@ -201,6 +216,82 @@ describe('shared platform operation authorization on real SQLite', () => {
     ).rejects.toMatchObject({ code: 'forbidden' });
   });
 
+  it('resource reads enforce the requested project, with owner controls in both projects', async () => {
+    await expect(samTaskGet.run(ctx(), { projectId, taskId: 'idea-owner' })).resolves.toMatchObject(
+      { id: 'idea-owner' }
+    );
+    await expect(samTaskGet.run(ctx(), { projectId, taskId: 'idea-other' })).rejects.toMatchObject({
+      code: 'not_found',
+    });
+    await expect(
+      samTaskGet.run(ctx(ownerId, otherProjectId), {
+        projectId: otherProjectId,
+        taskId: 'idea-other',
+      })
+    ).resolves.toMatchObject({ id: 'idea-other' });
+
+    await expect(samIdeaGet.run(ctx(), { projectId, ideaId: 'idea-owner' })).resolves.toMatchObject(
+      { ideaId: 'idea-owner' }
+    );
+    await expect(samIdeaGet.run(ctx(), { projectId, ideaId: 'idea-other' })).rejects.toMatchObject({
+      code: 'not_found',
+    });
+    await expect(
+      samIdeaGet.run(ctx(ownerId, otherProjectId), {
+        projectId: otherProjectId,
+        ideaId: 'idea-other',
+      })
+    ).resolves.toMatchObject({ ideaId: 'idea-other' });
+
+    const ownerTasks = await samTasksList.run(ctx(), { projectId, include_own: true });
+    expect(ownerTasks.tasks.map((task) => task.id)).toEqual(['idea-owner']);
+    const otherTasks = await samTasksList.run(ctx(ownerId, otherProjectId), {
+      projectId: otherProjectId,
+      include_own: true,
+    });
+    expect(otherTasks.tasks.map((task) => task.id)).toEqual(['idea-other']);
+  });
+
+  it('workspace adapter rejects an explicit project mismatch with a matching owner control', async () => {
+    const token = {
+      userId: ownerId,
+      projectId,
+      workspaceId: 'workspace-1',
+      taskId: 'current-task',
+    } as McpTokenData;
+    const control = await runWorkspaceOperation(
+      'get_idea',
+      51,
+      { projectId, ideaId: 'idea-owner' },
+      token,
+      env
+    );
+    expect(control.result).toBeDefined();
+    const attack = await runWorkspaceOperation(
+      'get_idea',
+      52,
+      { projectId: otherProjectId, ideaId: 'idea-other' },
+      token,
+      env
+    );
+    expect(attack.error).toMatchObject({
+      code: -32602,
+      message: 'Project does not match workspace token',
+    });
+  });
+
+  it('peer output keeps its workspace response shape while using task get', async () => {
+    const token = { userId: ownerId, projectId, workspaceId: 'workspace-1', taskId: 'current-task' } as McpTokenData;
+    const response = await handleGetPeerAgentOutput(60, { taskId: 'idea-owner' }, token, env);
+    expect(JSON.stringify(response)).toBe(JSON.stringify({
+      jsonrpc: '2.0', id: 60,
+      result: { content: [{ type: 'text', text: JSON.stringify({
+        id: 'idea-owner', title: 'Owner idea', status: 'draft',
+        description: 'Content', summary: null, branch: null,
+      }, null, 2) }] },
+    }));
+  });
+
   it('scope checks pair each rejected path with an owner control', async () => {
     await expect(samTasksList.run(ctx(), { projectId })).resolves.toBeDefined();
     const noRead = ctx();
@@ -224,7 +315,6 @@ describe('shared platform operation authorization on real SQLite', () => {
       workspaceId: 'workspace-1',
       taskId: 'current-task',
     } as McpTokenData;
-    const expectedTasks = await handleListTasks(41, { include_own: true }, token, env);
     const actualTasks = await runWorkspaceOperation(
       'list_tasks',
       41,
@@ -232,9 +322,40 @@ describe('shared platform operation authorization on real SQLite', () => {
       token,
       env
     );
-    expect(JSON.stringify(actualTasks)).toBe(JSON.stringify(expectedTasks));
+    expect(JSON.stringify(actualTasks)).toBe(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 41,
+        result: {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  tasks: [
+                    {
+                      id: 'idea-owner',
+                      title: 'Owner idea',
+                      status: 'draft',
+                      priority: 0,
+                      descriptionSnippet: 'Content',
+                      outputBranch: null,
+                      outputPrUrl: null,
+                      outputSummary: null,
+                      updatedAt: '2026-10-09',
+                    },
+                  ],
+                  count: 1,
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        },
+      })
+    );
 
-    const expectedIdea = await handleGetIdea(42, { ideaId: 'idea-owner' }, token, env);
     const actualIdea = await runWorkspaceOperation(
       'get_idea',
       42,
@@ -242,6 +363,68 @@ describe('shared platform operation authorization on real SQLite', () => {
       token,
       env
     );
-    expect(JSON.stringify(actualIdea)).toBe(JSON.stringify(expectedIdea));
+    expect(JSON.stringify(actualIdea)).toBe(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 42,
+        result: {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  ideaId: 'idea-owner',
+                  title: 'Owner idea',
+                  content: 'Content',
+                  contentLength: 7,
+                  priority: 0,
+                  status: 'draft',
+                  createdAt: '2026-10-09',
+                  updatedAt: '2026-10-09',
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        },
+      })
+    );
+  });
+});
+
+describe('operation registry contract', () => {
+  it('exports ten stable operations and JSON Schema inputs', () => {
+    expect(operations.map((operation) => operation.name)).toEqual([
+      'sam_task_get',
+      'sam_tasks_list',
+      'sam_chat_read',
+      'sam_chats_search',
+      'sam_ideas_search',
+      'sam_idea_get',
+      'sam_idea_create',
+      'sam_idea_update',
+      'sam_knowledge_search',
+      'sam_profiles_list',
+    ]);
+    expect(operationInputJsonSchema(samTaskGet)).toMatchObject({
+      type: 'object',
+      properties: { projectId: { type: 'string' }, taskId: { type: 'string' } },
+      required: ['projectId', 'taskId'],
+    });
+  });
+
+  it('maps typed errors to HTTP statuses', () => {
+    const codes: OperationError['code'][] = [
+      'invalid_input',
+      'not_found',
+      'forbidden',
+      'conflict',
+      'rate_limited',
+      'unavailable',
+    ];
+    expect(codes.map((code) => operationErrorHttpStatus(new OperationError(code, code)))).toEqual([
+      400, 404, 403, 409, 429, 503,
+    ]);
   });
 });

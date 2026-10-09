@@ -7,6 +7,11 @@
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('../../../src/middleware/project-auth', () => ({
+  requireProjectAccess: vi.fn().mockResolvedValue({ id: 'proj-456' }),
+  requireProjectCapability: vi.fn().mockResolvedValue({ id: 'proj-456' }),
+}));
+
 // Mock KV namespace
 const mockKV = {
   put: vi.fn(),
