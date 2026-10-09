@@ -34,6 +34,8 @@ const WORKING_EXECUTION_STEPS = new Set<TaskExecutionStep>([
 ] as const);
 
 export interface AgentActivityTask {
+  triggeredBy?: string | null;
+  connectorClientName?: string | null;
   id: string;
   title: string;
   status: string;
@@ -52,6 +54,8 @@ export interface AgentActivityTask {
 }
 
 interface AgentActivitySqlRow {
+  triggeredBy: string | null;
+  connectorClientName: string | null;
   id: string;
   title: string;
   status: string;
@@ -212,6 +216,8 @@ export async function listAgentActivityTasks(
   const sql = `
     SELECT
       t.id AS id,
+      t.triggered_by AS triggeredBy,
+      t.connector_client_name AS connectorClientName,
       t.title AS title,
       t.status AS status,
       t.execution_step AS executionStep,
@@ -257,6 +263,8 @@ export async function listAgentActivityTasks(
 
   return rows.map((row) => ({
     id: row.id,
+    triggeredBy: row.triggeredBy,
+    connectorClientName: row.connectorClientName,
     title: row.title,
     status: row.status,
     executionStep: row.executionStep,

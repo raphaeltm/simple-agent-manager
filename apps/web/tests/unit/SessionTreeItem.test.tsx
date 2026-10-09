@@ -49,7 +49,7 @@ function renderItem(
     taskInfoMap?: Map<string, TaskInfo>;
     lineageText?: string;
     showOwnership?: boolean;
-  } = {},
+  } = {}
 ) {
   const onSelect = options.onSelect ?? vi.fn();
   const utils = render(
@@ -61,7 +61,7 @@ function renderItem(
       onShowHierarchy={options.onShowHierarchy}
       lineageText={options.lineageText}
       showOwnership={options.showOwnership}
-    />,
+    />
   );
   return { ...utils, onSelect };
 }
@@ -71,6 +71,15 @@ function renderItem(
 // ---------------------------------------------------------------------------
 
 describe('SessionTreeItem — flat rendering', () => {
+  it('attributes Connector chats to the connected app', () => {
+    const task = makeTaskInfo({
+      id: 'task-connector',
+      triggeredBy: 'connector',
+      connectorClientName: 'Claude',
+    });
+    renderItem(makeSession({ taskId: task.id }), { taskInfoMap: new Map([[task.id, task]]) });
+    expect(screen.getByText('via Claude')).toBeInTheDocument();
+  });
   it('renders the session topic', () => {
     renderItem(makeSession({ topic: 'My conversation' }));
     expect(screen.getByText('My conversation')).toBeInTheDocument();
@@ -89,33 +98,39 @@ describe('SessionTreeItem — flat rendering', () => {
   });
 
   it('renders creator ownership labels when multiplayer affordances are active', () => {
-    renderItem(makeSession({
-      createdByUserId: 'user-2',
-      createdBy: {
-        id: 'user-2',
-        name: 'Bob Collaborator',
-        email: 'bob@example.com',
-        image: null,
-        avatarUrl: null,
-      },
-      isMine: false,
-    }), { showOwnership: true });
+    renderItem(
+      makeSession({
+        createdByUserId: 'user-2',
+        createdBy: {
+          id: 'user-2',
+          name: 'Bob Collaborator',
+          email: 'bob@example.com',
+          image: null,
+          avatarUrl: null,
+        },
+        isMine: false,
+      }),
+      { showOwnership: true }
+    );
 
     expect(screen.getByText('Bob Collaborator')).toBeInTheDocument();
   });
 
   it('hides creator ownership labels when multiplayer affordances are inactive', () => {
-    renderItem(makeSession({
-      createdByUserId: 'user-2',
-      createdBy: {
-        id: 'user-2',
-        name: 'Bob Collaborator',
-        email: 'bob@example.com',
-        image: null,
-        avatarUrl: null,
-      },
-      isMine: false,
-    }), { showOwnership: false });
+    renderItem(
+      makeSession({
+        createdByUserId: 'user-2',
+        createdBy: {
+          id: 'user-2',
+          name: 'Bob Collaborator',
+          email: 'bob@example.com',
+          image: null,
+          avatarUrl: null,
+        },
+        isMine: false,
+      }),
+      { showOwnership: false }
+    );
 
     expect(screen.queryByText('Bob Collaborator')).not.toBeInTheDocument();
   });
@@ -165,8 +180,14 @@ describe('getHierarchyRole', () => {
   it('returns "both" for a task that is both parent and MCP child', () => {
     const map = new Map<string, TaskInfo>([
       ['root', makeTaskInfo({ id: 'root', parentTaskId: null })],
-      ['mid', makeTaskInfo({ id: 'mid', parentTaskId: 'root', triggeredBy: 'mcp', dispatchDepth: 1 })],
-      ['leaf', makeTaskInfo({ id: 'leaf', parentTaskId: 'mid', triggeredBy: 'mcp', dispatchDepth: 2 })],
+      [
+        'mid',
+        makeTaskInfo({ id: 'mid', parentTaskId: 'root', triggeredBy: 'mcp', dispatchDepth: 1 }),
+      ],
+      [
+        'leaf',
+        makeTaskInfo({ id: 'leaf', parentTaskId: 'mid', triggeredBy: 'mcp', dispatchDepth: 2 }),
+      ],
     ]);
     expect(getHierarchyRole('mid', map)).toBe('both');
   });
@@ -195,14 +216,19 @@ describe('SessionTreeItem — hierarchy button', () => {
   it('renders role-differentiated hierarchy button for a parent task', () => {
     const taskInfoMap = new Map<string, TaskInfo>([
       ['parent-task', makeTaskInfo({ id: 'parent-task' })],
-      ['child-task', makeTaskInfo({ id: 'child-task', parentTaskId: 'parent-task', triggeredBy: 'mcp', dispatchDepth: 1 })],
+      [
+        'child-task',
+        makeTaskInfo({
+          id: 'child-task',
+          parentTaskId: 'parent-task',
+          triggeredBy: 'mcp',
+          dispatchDepth: 1,
+        }),
+      ],
     ]);
     const onShowHierarchy = vi.fn();
 
-    renderItem(
-      makeSession({ id: 's1', taskId: 'parent-task' }),
-      { taskInfoMap, onShowHierarchy },
-    );
+    renderItem(makeSession({ id: 's1', taskId: 'parent-task' }), { taskInfoMap, onShowHierarchy });
 
     const btn = screen.getByRole('button', { name: 'Has subtasks' });
     expect(btn).toBeInTheDocument();
@@ -212,14 +238,19 @@ describe('SessionTreeItem — hierarchy button', () => {
   it('renders "Subtask" button for a child task', () => {
     const taskInfoMap = new Map<string, TaskInfo>([
       ['parent-task', makeTaskInfo({ id: 'parent-task' })],
-      ['child-task', makeTaskInfo({ id: 'child-task', parentTaskId: 'parent-task', triggeredBy: 'mcp', dispatchDepth: 1 })],
+      [
+        'child-task',
+        makeTaskInfo({
+          id: 'child-task',
+          parentTaskId: 'parent-task',
+          triggeredBy: 'mcp',
+          dispatchDepth: 1,
+        }),
+      ],
     ]);
     const onShowHierarchy = vi.fn();
 
-    renderItem(
-      makeSession({ id: 's1', taskId: 'child-task' }),
-      { taskInfoMap, onShowHierarchy },
-    );
+    renderItem(makeSession({ id: 's1', taskId: 'child-task' }), { taskInfoMap, onShowHierarchy });
 
     expect(screen.getByRole('button', { name: 'Subtask' })).toBeInTheDocument();
   });
@@ -229,13 +260,21 @@ describe('SessionTreeItem — hierarchy button', () => {
     const onShowHierarchy = vi.fn();
     const taskInfoMap = new Map<string, TaskInfo>([
       ['parent-task', makeTaskInfo({ id: 'parent-task' })],
-      ['child-task', makeTaskInfo({ id: 'child-task', parentTaskId: 'parent-task', triggeredBy: 'mcp', dispatchDepth: 1 })],
+      [
+        'child-task',
+        makeTaskInfo({
+          id: 'child-task',
+          parentTaskId: 'parent-task',
+          triggeredBy: 'mcp',
+          dispatchDepth: 1,
+        }),
+      ],
     ]);
 
-    renderItem(
-      makeSession({ id: 'child-session', taskId: 'child-task' }),
-      { taskInfoMap, onShowHierarchy },
-    );
+    renderItem(makeSession({ id: 'child-session', taskId: 'child-task' }), {
+      taskInfoMap,
+      onShowHierarchy,
+    });
 
     await user.click(screen.getByRole('button', { name: 'Subtask' }));
     expect(onShowHierarchy).toHaveBeenCalledWith('child-task');
@@ -244,27 +283,28 @@ describe('SessionTreeItem — hierarchy button', () => {
   it('renders "Has parent & subtasks" button for a mid-chain (both) task', () => {
     const taskInfoMap = new Map<string, TaskInfo>([
       ['root', makeTaskInfo({ id: 'root', parentTaskId: null })],
-      ['mid', makeTaskInfo({ id: 'mid', parentTaskId: 'root', triggeredBy: 'mcp', dispatchDepth: 1 })],
-      ['leaf', makeTaskInfo({ id: 'leaf', parentTaskId: 'mid', triggeredBy: 'mcp', dispatchDepth: 2 })],
+      [
+        'mid',
+        makeTaskInfo({ id: 'mid', parentTaskId: 'root', triggeredBy: 'mcp', dispatchDepth: 1 }),
+      ],
+      [
+        'leaf',
+        makeTaskInfo({ id: 'leaf', parentTaskId: 'mid', triggeredBy: 'mcp', dispatchDepth: 2 }),
+      ],
     ]);
 
-    renderItem(
-      makeSession({ id: 's1', taskId: 'mid' }),
-      { taskInfoMap, onShowHierarchy: vi.fn() },
-    );
+    renderItem(makeSession({ id: 's1', taskId: 'mid' }), { taskInfoMap, onShowHierarchy: vi.fn() });
 
     expect(screen.getByRole('button', { name: 'Has parent & subtasks' })).toBeInTheDocument();
   });
 
   it('does not render hierarchy button for standalone tasks', () => {
-    const taskInfoMap = new Map<string, TaskInfo>([
-      ['solo', makeTaskInfo({ id: 'solo' })],
-    ]);
+    const taskInfoMap = new Map<string, TaskInfo>([['solo', makeTaskInfo({ id: 'solo' })]]);
 
-    renderItem(
-      makeSession({ id: 's1', taskId: 'solo' }),
-      { taskInfoMap, onShowHierarchy: vi.fn() },
-    );
+    renderItem(makeSession({ id: 's1', taskId: 'solo' }), {
+      taskInfoMap,
+      onShowHierarchy: vi.fn(),
+    });
 
     expect(screen.queryByRole('button', { name: /subtask|has subtasks/i })).not.toBeInTheDocument();
   });

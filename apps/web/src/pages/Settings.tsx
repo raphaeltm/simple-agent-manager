@@ -18,7 +18,7 @@ const BASE_TABS = [
   { id: 'usage', label: 'Usage', path: 'usage' },
 ];
 
-const API_TOKENS_TAB = { id: 'api-tokens', label: 'API Tokens', path: 'api-tokens' };
+const API_TOKENS_TAB = { id: 'access', label: 'Access', path: 'access' };
 
 /**
  * Settings shell — Tabs + Outlet for sub-route pages.
@@ -49,12 +49,7 @@ export function Settings() {
 
   return (
     <PageLayout title="Settings" maxWidth="xl">
-      <Breadcrumb
-        segments={[
-          { label: 'Home', path: '/dashboard' },
-          { label: 'Settings' },
-        ]}
-      />
+      <Breadcrumb segments={[{ label: 'Home', path: '/dashboard' }, { label: 'Settings' }]} />
 
       {visibleError && (
         <div className="mt-3">

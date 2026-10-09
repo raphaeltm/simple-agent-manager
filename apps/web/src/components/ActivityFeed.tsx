@@ -12,10 +12,14 @@ interface ActivityFeedProps {
 function getEventIcon(eventType: string): string {
   if (eventType.startsWith('workspace.')) {
     switch (eventType) {
-      case 'workspace.created': return '+';
-      case 'workspace.stopped': return '||';
-      case 'workspace.restarted': return '>';
-      default: return 'W';
+      case 'workspace.created':
+        return '+';
+      case 'workspace.stopped':
+        return '||';
+      case 'workspace.restarted':
+        return '>';
+      default:
+        return 'W';
     }
   }
   if (eventType.startsWith('session.')) {
@@ -23,17 +27,25 @@ function getEventIcon(eventType: string): string {
   }
   if (eventType.startsWith('task.')) {
     switch (eventType) {
-      case 'task.completed': return 'v';
-      case 'task.failed': return 'x';
-      case 'task.in_progress': return '>';
-      default: return 'T';
+      case 'task.completed':
+        return 'v';
+      case 'task.failed':
+        return 'x';
+      case 'task.in_progress':
+        return '>';
+      default:
+        return 'T';
     }
   }
   return '*';
 }
 
 function getEventColor(eventType: string): string {
-  if (eventType.includes('created') || eventType.includes('started') || eventType === 'task.completed') {
+  if (
+    eventType.includes('created') ||
+    eventType.includes('started') ||
+    eventType === 'task.completed'
+  ) {
     return 'var(--sam-color-success, #2ea043)';
   }
   if (eventType.includes('stopped') || eventType === 'task.cancelled') {
@@ -86,6 +98,9 @@ function formatEventDescription(event: ActivityEventResponse): string {
 }
 
 function formatActorLabel(event: ActivityEventResponse): string {
+  const payload = maybeJsonRecord(event.payload);
+  if (payload?.via === 'connector')
+    return `You via ${typeof payload.clientName === 'string' ? payload.clientName : 'Connector'}`;
   if (event.actorType === 'system') return 'System';
   if (event.actorType === 'workspace_callback') return 'Agent';
   if (event.actorType === 'user') return 'You';
@@ -94,11 +109,7 @@ function formatActorLabel(event: ActivityEventResponse): string {
 
 export function ActivityFeed({ events, hasMore, onLoadMore, loading }: ActivityFeedProps) {
   if (events.length === 0 && !loading) {
-    return (
-      <div className="text-fg-muted text-sm p-4 text-center">
-        No activity yet.
-      </div>
-    );
+    return <div className="text-fg-muted text-sm p-4 text-center">No activity yet.</div>;
   }
 
   return (
@@ -107,10 +118,7 @@ export function ActivityFeed({ events, hasMore, onLoadMore, loading }: ActivityF
         {events.map((event) => {
           const color = getEventColor(event.eventType);
           return (
-            <li
-              key={event.id}
-              className="flex gap-3 py-3 px-4 border-b border-border-default"
-            >
+            <li key={event.id} className="flex gap-3 py-3 px-4 border-b border-border-default">
               {/* Icon */}
               <div
                 className="w-7 h-7 rounded-full text-fg-on-accent flex items-center justify-center text-xs font-bold shrink-0 mt-0.5"

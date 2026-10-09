@@ -37,6 +37,7 @@ export const TRIGGERED_BY_VALUES = [
   'github',
   'incident',
   'mcp',
+  'connector',
 ] as const;
 export type TriggeredBy = (typeof TRIGGERED_BY_VALUES)[number];
 

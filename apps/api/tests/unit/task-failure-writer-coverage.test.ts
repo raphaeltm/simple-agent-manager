@@ -15,7 +15,7 @@ describe('task failure writer coverage', () => {
     ['instant MCP dispatch', 'src/routes/mcp/dispatch-instant.ts', 1],
     ['MCP orchestration retry', 'src/routes/mcp/orchestration-tools.ts', 3],
     ['task run', 'src/routes/tasks/run.ts', 2],
-    ['task submit', 'src/routes/tasks/submit.ts', 2],
+    ['task submit', 'src/services/submit-task.ts', 2],
     ['chat start', 'src/routes/chat-start.ts', 1],
   ])('%s routes every pre-run failure through the shared guarded helper', (_name, path, calls) => {
     const text = source(path);

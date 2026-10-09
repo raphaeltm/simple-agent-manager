@@ -32,6 +32,7 @@ function taskInfoEqual(a: TaskInfo, b: TaskInfo): boolean {
     a.terminalReason === b.terminalReason &&
     a.blocked === b.blocked &&
     a.triggeredBy === b.triggeredBy &&
+    a.connectorClientName === b.connectorClientName &&
     a.dispatchDepth === b.dispatchDepth &&
     a.taskMode === b.taskMode
   );

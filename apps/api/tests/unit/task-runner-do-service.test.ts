@@ -17,7 +17,10 @@ const serviceSource = readFileSync(
   resolve(process.cwd(), 'src/services/task-runner-do.ts'),
   'utf8'
 );
-const taskSubmitSource = readFileSync(resolve(process.cwd(), 'src/routes/tasks/submit.ts'), 'utf8');
+const taskSubmitSource = readFileSync(
+  resolve(process.cwd(), 'src/services/submit-task.ts'),
+  'utf8'
+);
 const taskRunsSource = readFileSync(resolve(process.cwd(), 'src/routes/tasks/run.ts'), 'utf8');
 const workspacesSource = [
   readFileSync(resolve(process.cwd(), 'src/routes/workspaces/lifecycle.ts'), 'utf8'),
@@ -396,14 +399,14 @@ describe('task-runner-do service', () => {
 describe('task-submit route uses TaskRunner DO', () => {
   it('imports startTaskRunnerDO (not executeTaskRun)', () => {
     expect(taskSubmitSource).toContain(
-      "import { startTaskRunnerDO } from '../../services/task-runner-do'"
+      "import { startTaskRunnerDO } from '../services/task-runner-do'"
     );
     expect(taskSubmitSource).not.toContain('executeTaskRun');
     expect(taskSubmitSource).not.toContain('initiateTaskRun');
   });
 
   it('calls startTaskRunnerDO instead of waitUntil(executeTaskRun(...))', () => {
-    expect(taskSubmitSource).toContain('await startTaskRunnerDO(c.env,');
+    expect(taskSubmitSource).toContain('await startTaskRunnerDO(env,');
     expect(taskSubmitSource).not.toContain('waitUntil(\n    executeTaskRun');
   });
 
@@ -413,8 +416,8 @@ describe('task-submit route uses TaskRunner DO', () => {
   });
 
   it('passes user identity fields', () => {
-    expect(taskSubmitSource).toContain('userName: auth.user.name');
-    expect(taskSubmitSource).toContain('userEmail: auth.user.email');
+    expect(taskSubmitSource).toContain('userName: user.name');
+    expect(taskSubmitSource).toContain('userEmail: user.email');
     expect(taskSubmitSource).toContain('githubId: userRow?.githubId');
   });
 

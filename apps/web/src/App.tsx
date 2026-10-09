@@ -148,6 +148,7 @@ const ProjectEvents = lazyNamed(() => import('./pages/ProjectEvents'), 'ProjectE
 const SamPrototype = lazyNamed(() => import('./pages/SamPrototype'), 'SamPrototype');
 const Settings = lazyNamed(() => import('./pages/Settings'), 'Settings');
 const SettingsAgents = lazyNamed(() => import('./pages/SettingsAgents'), 'SettingsAgents');
+const ConnectorConsent = lazyNamed(() => import('./pages/ConnectorConsent'), 'ConnectorConsent');
 const SettingsApiTokens = lazyNamed(() => import('./pages/SettingsApiTokens'), 'SettingsApiTokens');
 const SettingsCloudProvider = lazyNamed(
   () => import('./pages/SettingsCloudProvider'),
@@ -263,6 +264,7 @@ export default function App() {
                     <Route path="/try/cap-exceeded" element={page(<TryCapExceeded />)} />
                     <Route path="/try/waitlist/thanks" element={page(<TryWaitlistThanks />)} />
                     <Route path="/try/:trialId" element={page(<TryDiscovery />)} />
+                    <Route path="/oauth/consent" element={page(<ConnectorConsent />)} />
                     <Route path="/device" element={page(<DeviceAuth />)} />
                     <Route path="/setup" element={page(<Setup />)} />
                     {showDevOnlyRoutes && (
@@ -361,7 +363,8 @@ export default function App() {
                         />
                         <Route path="notifications" element={page(<SettingsNotifications />)} />
                         <Route path="usage" element={page(<SettingsComputeUsage />)} />
-                        <Route path="api-tokens" element={page(<SettingsApiTokens />)} />
+                        <Route path="access" element={page(<SettingsApiTokens />)} />
+                        <Route path="api-tokens" element={<Navigate to="../access" replace />} />
                         <Route path="advanced" element={page(<SettingsCredentials />)} />
                         <Route path="credentials" element={<Navigate to="../advanced" replace />} />
                       </Route>

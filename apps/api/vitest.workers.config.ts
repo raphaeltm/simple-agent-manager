@@ -55,7 +55,7 @@ export default defineConfig({
         compatibilityDate: '2024-04-03',
         compatibilityFlags: ['nodejs_compat'],
         d1Databases: ['DATABASE', 'OBSERVABILITY_DATABASE'],
-        kvNamespaces: ['KV'],
+        kvNamespaces: ['KV', 'OAUTH_KV'],
         r2Buckets: ['R2', 'PROJECT_DATA_ARCHIVE_R2'],
         durableObjects: {
           PROJECT_DATA: {

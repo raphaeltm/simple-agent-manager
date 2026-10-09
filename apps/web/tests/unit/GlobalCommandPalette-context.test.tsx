@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { GlobalCommandPalette } from '../../src/components/GlobalCommandPalette';
 import { renderWithQuery } from '../test-utils/query-test-utils';
@@ -117,7 +117,7 @@ function renderPalette(onClose = vi.fn()) {
     ...renderWithQuery(
       <MemoryRouter>
         <GlobalCommandPalette onClose={onClose} />
-      </MemoryRouter>,
+      </MemoryRouter>
     ),
   };
 }
@@ -143,8 +143,7 @@ async function filterAndExecute(query: string) {
   fireEvent.keyDown(input, { key: 'Enter' });
 }
 
-const optionLabels = () =>
-  screen.getAllByRole('option').map((o) => o.textContent);
+const optionLabels = () => screen.getAllByRole('option').map((o) => o.textContent);
 
 describe('GlobalCommandPalette — Context Awareness', () => {
   beforeEach(() => {
@@ -198,9 +197,7 @@ describe('GlobalCommandPalette — Context Awareness', () => {
     });
 
     const groups = screen.getAllByRole('group');
-    const groupLabels = groups.map(
-      (g) => g.querySelector('[id^="gcp-category-"]')?.textContent,
-    );
+    const groupLabels = groups.map((g) => g.querySelector('[id^="gcp-category-"]')?.textContent);
 
     const contextIdx = groupLabels.indexOf('Context');
     const navIdx = groupLabels.indexOf('Navigation');
@@ -323,7 +320,7 @@ describe('GlobalCommandPalette — Context Awareness', () => {
       (o) =>
         o.textContent?.includes('Fix auth bug') ||
         o.textContent?.includes('Code review') ||
-        o.textContent?.includes('Refactor layout'),
+        o.textContent?.includes('Refactor layout')
     );
 
     // p1's chats (Fix auth bug, Code review) should appear before p2's (Refactor layout)
@@ -418,7 +415,7 @@ describe('GlobalCommandPalette — Context Awareness', () => {
     const labels = optionLabels();
     expect(labels.some((l) => l?.includes('Settings: Cloud Provider'))).toBe(true);
     expect(labels.some((l) => l?.includes('Settings: GitHub'))).toBe(true);
-    expect(labels.some((l) => l?.includes('Settings: API Tokens'))).toBe(true);
+    expect(labels.some((l) => l?.includes('Settings: Access'))).toBe(true);
   });
 
   // ── Admin deep-links (superadmin-gated) ──

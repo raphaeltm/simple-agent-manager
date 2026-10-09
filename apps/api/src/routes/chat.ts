@@ -413,18 +413,38 @@ chatRoutes.post('/:sessionId/attention/:markerId/resolve', async (c) => {
   const projectId = requireRouteParam(c, 'projectId');
   const sessionId = requireRouteParam(c, 'sessionId');
   const markerId = requireRouteParam(c, 'markerId');
-  const db = drizzle(c.env.DATABASE, { schema });
-
-  await requireProjectCapability(db, projectId, userId, 'task:write');
-  await requireSessionCreator(c.env, projectId, sessionId, userId);
-
   const { answer } = await parseOptionalBody(c.req.raw, ResolveAttentionAnswerSchema, {
     answer: '',
   });
+  const result = await answerAttention(c.env, userId, projectId, sessionId, markerId, answer);
+  return c.json(result, 'inFlight' in result ? 202 : 200);
+});
+
+chatRoutes.route('/', chatIdeaRoutes);
+
+// Browser-side POST /:sessionId/messages route removed — messages are now
+// persisted exclusively by the VM agent via POST /api/workspaces/:id/messages.
+// See: specs/021-task-chat-architecture (US1 — Agent-Side Chat Persistence).
+
+export { chatRoutes };
+
+export async function answerAttention(
+  env: Env,
+  userId: string,
+  projectId: string,
+  sessionId: string,
+  markerId: string,
+  answer: string
+) {
+  const db = drizzle(env.DATABASE, { schema });
+
+  await requireProjectCapability(db, projectId, userId, 'task:write');
+  await requireSessionCreator(env, projectId, sessionId, userId);
+
   if (!answer) throw errors.badRequest('answer is required');
 
   const prepared = await projectDataService.prepareAttentionAnswer(
-    c.env,
+    env,
     projectId,
     sessionId,
     markerId,
@@ -439,18 +459,18 @@ chatRoutes.post('/:sessionId/attention/:markerId/resolve', async (c) => {
   }
   if (prepared.status === 'already_resolved') {
     if (prepared.answer !== answer) throw errors.conflict('Attention request is already resolved');
-    return c.json({ resolved: true, alreadyResolved: true, answer });
+    return { resolved: true, alreadyResolved: true, answer };
   }
   if (prepared.status === 'conflicting_answer') {
     throw errors.conflict('A different answer is already being delivered');
   }
   if (prepared.status === 'in_flight') {
-    return c.json({ resolved: false, alreadyResolved: false, inFlight: true, answer }, 202);
+    return { resolved: false, alreadyResolved: false, inFlight: true, answer };
   }
 
   let preparedPrompt;
   try {
-    preparedPrompt = await preparePromptForLiveAgent(c.env, db, {
+    preparedPrompt = await preparePromptForLiveAgent(env, db, {
       projectId,
       sessionId,
       userId,
@@ -459,7 +479,7 @@ chatRoutes.post('/:sessionId/attention/:markerId/resolve', async (c) => {
   } catch (cause) {
     // Resolution/enrichment failed before the mutating request began, so this
     // claim is definitively safe to retry.
-    await projectDataService.releaseAttentionAnswer(c.env, projectId, sessionId, markerId, answer);
+    await projectDataService.releaseAttentionAnswer(env, projectId, sessionId, markerId, answer);
     throw cause;
   }
 
@@ -467,15 +487,7 @@ chatRoutes.post('/:sessionId/attention/:markerId/resolve', async (c) => {
   // VM agent dispatches asynchronously before responding. Preserve the claim so
   // an approval is never replayed. The marker ID is also propagated as the
   // stable downstream message ID for persistence-level deduplication.
-  await sendPreparedPromptToLiveAgent(c.env, preparedPrompt, markerId);
-  await projectDataService.completeAttentionAnswer(c.env, projectId, sessionId, markerId, answer);
-  return c.json({ resolved: true, alreadyResolved: false, answer });
-});
-
-chatRoutes.route('/', chatIdeaRoutes);
-
-// Browser-side POST /:sessionId/messages route removed — messages are now
-// persisted exclusively by the VM agent via POST /api/workspaces/:id/messages.
-// See: specs/021-task-chat-architecture (US1 — Agent-Side Chat Persistence).
-
-export { chatRoutes };
+  await sendPreparedPromptToLiveAgent(env, preparedPrompt, markerId);
+  await projectDataService.completeAttentionAnswer(env, projectId, sessionId, markerId, answer);
+  return { resolved: true, alreadyResolved: false, answer };
+}

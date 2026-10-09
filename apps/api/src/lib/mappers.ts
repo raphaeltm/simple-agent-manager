@@ -236,6 +236,7 @@ export function toTaskResponse(
     skillHint: task.skillHint ?? null,
     blocked,
     triggeredBy: task.triggeredBy ?? 'user',
+    connectorClientName: task.connectorClientName ?? null,
     triggerId: task.triggerId ?? null,
     triggerExecutionId: task.triggerExecutionId ?? null,
     requestedVmSize: task.requestedVmSize ?? null,

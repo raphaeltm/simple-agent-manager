@@ -7,12 +7,17 @@ import { log } from '../lib/logger';
 import { getSearchQueryLikePatterns, normalizeSearchQuery } from '../lib/search-query-limits';
 import * as projectDataService from '../services/project-data';
 import { getLatestAssistantMessageForTask } from '../services/task-final-assistant-message';
+import { membershipCondition, operationLink } from './connector-read-core';
+import { formatOperationCursor, readOperationCursor } from './cursors';
 import { OperationError } from './errors';
 import { getPlatformOperationLimits } from './limits';
 import type { OperationContext } from './types';
 
 type TaskSearchRow = {
   id: string;
+  projectId: string;
+  triggeredBy: string | null;
+  connectorClientName: string | null;
   title: string;
   status: string;
   priority: number;
@@ -28,9 +33,16 @@ function truncateSnippet(value: string | null, maxLength: number): string | null
   return value.slice(0, maxLength) + (value.length > maxLength ? '...' : '');
 }
 
-function toTaskSearchResult(task: TaskSearchRow, snippetLength: number) {
+function toTaskSearchResult(task: TaskSearchRow, snippetLength: number, external = false) {
   return {
     id: task.id,
+    ...(external
+      ? {
+          projectId: task.projectId,
+          triggeredBy: task.triggeredBy,
+          connectorClientName: task.connectorClientName,
+        }
+      : {}),
     title: task.title,
     status: task.status,
     priority: task.priority,
@@ -92,6 +104,9 @@ export async function getTask(ctx: OperationContext, projectId: string, taskId: 
   const rows = await db
     .select({
       id: schema.tasks.id,
+      projectId: schema.tasks.projectId,
+      triggeredBy: schema.tasks.triggeredBy,
+      connectorClientName: schema.tasks.connectorClientName,
       title: schema.tasks.title,
       description: schema.tasks.description,
       status: schema.tasks.status,
@@ -124,6 +139,15 @@ export async function getTask(ctx: OperationContext, projectId: string, taskId: 
   );
   return {
     id: task.id,
+    ...(ctx.actor.via !== 'workspace-agent'
+      ? {
+          projectId: task.projectId,
+          triggeredBy: task.triggeredBy,
+          connectorClientName: task.connectorClientName,
+          link: operationLink(ctx, task.projectId, task.chatSessionId ?? undefined),
+          untrustedContent: true,
+        }
+      : {}),
     title: task.title,
     description: task.description,
     status: task.status,
@@ -144,11 +168,12 @@ export async function getTask(ctx: OperationContext, projectId: string, taskId: 
 }
 
 type ListTasksInput = {
-  projectId: string;
+  projectId?: string;
   query?: string;
   search?: boolean;
   status?: string;
   include_own?: boolean;
+  cursor?: string;
   limit?: number;
 };
 
@@ -172,7 +197,11 @@ export async function listTasks(ctx: OperationContext, input: ListTasksInput) {
     search ? limits.taskSearchMax : limits.taskListMax
   );
   const db = drizzle(ctx.env.DATABASE, { schema });
-  const conditions: SQL[] = [eq(schema.tasks.projectId, input.projectId)];
+  const conditions: SQL[] = input.projectId
+    ? [eq(schema.tasks.projectId, input.projectId)]
+    : [membershipCondition(ctx, schema.tasks.projectId)];
+  if (ctx.actor.workspace)
+    conditions.push(eq(schema.tasks.projectId, ctx.actor.workspace.projectId));
   if (search && normalizedQuery) {
     conditions.push(
       ...getSearchQueryLikePatterns(normalizedQuery.query).map(
@@ -182,11 +211,20 @@ export async function listTasks(ctx: OperationContext, input: ListTasksInput) {
     );
   }
   if (input.status) conditions.push(eq(schema.tasks.status, input.status));
+  const cursor = readOperationCursor(input.cursor);
+  if (cursor)
+    conditions.push(
+      sql`(${schema.tasks.updatedAt} < ${cursor.updatedAt} OR (${schema.tasks.updatedAt} = ${cursor.updatedAt} AND ${schema.tasks.id} < ${cursor.id}))`
+    );
+  const external = ctx.actor.via !== 'workspace-agent';
   const includeOwn = input.include_own === true;
-  const fetchLimit = search || includeOwn ? limit : limit + 1;
+  const fetchLimit = external ? limit + 1 : search || includeOwn ? limit : limit + 1;
   const rows = await db
     .select({
       id: schema.tasks.id,
+      projectId: schema.tasks.projectId,
+      triggeredBy: schema.tasks.triggeredBy,
+      connectorClientName: schema.tasks.connectorClientName,
       title: schema.tasks.title,
       description: schema.tasks.description,
       status: schema.tasks.status,
@@ -199,11 +237,22 @@ export async function listTasks(ctx: OperationContext, input: ListTasksInput) {
     })
     .from(schema.tasks)
     .where(and(...conditions))
-    .orderBy(desc(schema.tasks.updatedAt))
+    .orderBy(desc(schema.tasks.updatedAt), desc(schema.tasks.id))
     .limit(fetchLimit);
   const tasks = (
     search || includeOwn ? rows : rows.filter((task) => task.id !== ctx.actor.workspace?.taskId)
   ).slice(0, limit);
-  const result = tasks.map((task) => toTaskSearchResult(task, limits.taskDescriptionSnippetLength));
-  return { tasks: result, count: result.length, ...(normalizedQuery ?? {}) };
+  const result = tasks.map((task) => ({
+    ...toTaskSearchResult(task, limits.taskDescriptionSnippetLength, external),
+    ...(external ? { link: operationLink(ctx, task.projectId) } : {}),
+  }));
+  const last = tasks[tasks.length - 1];
+  return {
+    tasks: result,
+    count: result.length,
+    ...(normalizedQuery ?? {}),
+    ...(external
+      ? { nextCursor: rows.length > limit && last ? formatOperationCursor(last) : null }
+      : {}),
+  };
 }

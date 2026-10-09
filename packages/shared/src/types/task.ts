@@ -198,8 +198,7 @@ const COMPLETION_EVIDENCE_LIMITS = {
 } as const;
 
 type CompletionEvidenceValidationResult =
-  | { ok: true; value: CompletionEvidence }
-  | { ok: false; error: string };
+  { ok: true; value: CompletionEvidence } | { ok: false; error: string };
 
 type OptionalStringValidationResult = { ok: true; value?: string } | { ok: false; error: string };
 
@@ -426,6 +425,7 @@ export interface Task {
   blocked?: boolean;
   /** What created this task: 'user' (manual), 'cron' (scheduled trigger), 'webhook', 'mcp'. */
   triggeredBy: string;
+  connectorClientName?: string | null;
   /** ID of the trigger that created this task, if any. */
   triggerId: string | null;
   /** ID of the specific trigger execution, if any. */
@@ -673,6 +673,8 @@ export type AgentActivityState = (typeof AGENT_ACTIVITY_STATES)[number];
 
 /** An active task enriched with project + session info for the dashboard grid. */
 export interface DashboardTask {
+  triggeredBy?: string | null;
+  connectorClientName?: string | null;
   id: string;
   title: string;
   status: TaskStatus;

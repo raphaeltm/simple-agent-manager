@@ -19,6 +19,7 @@ const outputs: PulumiOutputs = {
   observabilityD1DatabaseId: 'obs-d1-id',
   observabilityD1DatabaseName: 'prefix-observability-prod',
   kvId: 'kv-id',
+  oauthKvId: 'oauth-kv-id',
   kvName: 'prefix-prod-sessions',
   r2Name: 'prefix-prod-assets',
   sessionSnapshotTtlDays: 30,

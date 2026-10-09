@@ -357,3 +357,18 @@ completion or permission to replay. The response includes `recovery.outcome` and
 `POST /api/nodes/:id/boot-failure` accepts `{ "reason": "origin_ca_bootstrap" }` (also `vm_agent_download`) with an explicit node-scoped callback JWT. Only managed VMs before their first heartbeat/ready signal can record a failure. Returns `{ "accepted": true }` when recorded, `{ "accepted": false }` for a delayed report after startup, 401 for invalid/mismatched identity, 403 for wrong scope or unmanaged runtime, and 410 for terminal/missing nodes. Arbitrary diagnostics are not accepted. TaskRunner polls this signal and confirms failed-node deletion before a bounded fresh-VM replacement (default one).
 
 - `POST /api/workspaces/:id/lifecycle-timings` — Workspace callback JWT; fixed bounded numeric lifecycle phase summary emitted to structured logs only. See `docs/notes/session-lifecycle-timings.md`.
+
+## SAM Connector
+
+- `/connect/mcp` — user-level Streamable HTTP MCP, OAuth or PAT bearer authentication; separate from workspace `sam-mcp`.
+- `GET /.well-known/oauth-protected-resource/connect/mcp` — resource metadata.
+- `GET /.well-known/oauth-authorization-server` — authorization-server discovery.
+- `/oauth/authorize`, `/oauth/token`, `/oauth/register`, `/oauth/revoke` — authorization code with PKCE, token exchange/refresh, dynamic registration, revocation.
+- `GET /api/connector/settings` — public-to-session Connector availability and URL.
+- `GET /api/connector/consent?<OAuth query>` — authenticated consent preview with bound handle; `POST` `{handle, approve}` returns `{redirectTo}`.
+- `GET /api/connector/connections`, `DELETE /api/connector/connections/:id` — own grants and revoke.
+- `GET/PATCH /api/admin/connector/settings` — effective setting values with source/update metadata and runtime overrides.
+- `GET /api/admin/connector/connections`, `DELETE /api/admin/connector/connections/:id` — all grants and admin revoke.
+- `GET /api/admin/connector/clients`, `PATCH /api/admin/connector/clients/:id` `{blocked}` — registered clients and block/unblock.
+
+Connector connection/client inventories accept `cursor` and return `nextCursor`. Own connections are enumerated through the OAuth provider's grant listing; the admin view uses the D1 grant index. Settings/Admin revocation and client blocking take effect immediately through D1 gates. Refresh-token reuse revokes the entire connection, enforced by atomic D1 admission after provider validation. OAuth protocol revocation is RFC 7009 at `/oauth/revoke`.

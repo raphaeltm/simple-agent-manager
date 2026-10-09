@@ -5,6 +5,7 @@ import * as schema from '../db/schema';
 import { normalizeSearchQuery } from '../lib/search-query-limits';
 import * as agentProfileService from '../services/agent-profiles';
 import * as projectDataService from '../services/project-data';
+import { operationLink, operationPageLimit } from './connector-read-core';
 import { OperationError } from './errors';
 import { getPlatformOperationLimits } from './limits';
 import type { OperationContext } from './types';
@@ -75,7 +76,11 @@ export async function searchKnowledge(
   }
 }
 
-export async function listProfiles(ctx: OperationContext, projectId: string) {
+export async function listProfiles(
+  ctx: OperationContext,
+  projectId: string,
+  input: { limit?: number; cursor?: string; query?: string } = {}
+) {
   const db = drizzle(ctx.env.DATABASE, { schema });
   let profiles;
   try {
@@ -87,8 +92,24 @@ export async function listProfiles(ctx: OperationContext, projectId: string) {
     }
     throw new OperationError('unavailable', `Failed to list profiles: ${(error as Error).message}`);
   }
+  const external = ctx.actor.via !== 'workspace-agent';
+  const matching = external
+    ? profiles
+        .filter(
+          (profile) =>
+            !input.query ||
+            `${profile.name} ${profile.description ?? ''}`
+              .toLowerCase()
+              .includes(input.query.toLowerCase())
+        )
+        .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+        .filter((profile) => !input.cursor || profile.id > input.cursor)
+    : profiles;
+  const limit = operationPageLimit(ctx, input.limit);
+  const page = external ? matching.slice(0, limit) : matching;
   return {
-    profiles: profiles.map((profile) => ({
+    ...(external ? { nextCursor: matching.length > limit ? (page.at(-1)?.id ?? null) : null } : {}),
+    profiles: page.map((profile) => ({
       id: profile.id,
       name: profile.name,
       description: profile.description,
@@ -96,7 +117,14 @@ export async function listProfiles(ctx: OperationContext, projectId: string) {
       model: profile.model,
       effort: profile.effort,
       isBuiltin: profile.isBuiltin,
+      ...(ctx.actor.via !== 'workspace-agent'
+        ? {
+            runtime: profile.runtime,
+            taskMode: profile.taskMode,
+            link: operationLink(ctx, projectId),
+          }
+        : {}),
     })),
-    count: profiles.length,
+    count: page.length,
   };
 }

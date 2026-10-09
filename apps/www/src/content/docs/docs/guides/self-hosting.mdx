@@ -663,3 +663,9 @@ This page is the canonical troubleshooting reference for self-hosted deployments
 ### Compact conversation archives
 
 Compact SQLite/R2 archive writes are opt-in (`PROJECT_DATA_ARCHIVE_COMPACT_ENABLED=false`). Deployment supplies the existing private archive bucket; no new credentials are required. Before enabling, validate history, search and copy-back on staging and choose a migration allowance with room for normal account usage. Keep archived R2 objects for as long as their conversations exist. See the [format, cost controls and recovery limits](/docs/reference/configuration/#compact-archive-shards).
+
+## AI app Connector
+
+The user-level SAM Connector is enabled by default. Connect Claude, ChatGPT, or a command-line client from **Settings → Access**; manage installation policy in **Admin → Integrations → Connector**. See [Use SAM from Claude and ChatGPT](/docs/guides/sam-connector/).
+
+Each installation has its own OAuth issuer and audience. Pulumi provisions the `OAUTH_KV` namespace and Worker binding. Vendor servers must reach the API host's discovery endpoints, `/oauth/*`, and `/connect/mcp`; Cloudflare Access login walls or WAF challenges on these paths can block connection and refresh. Keep SAM's OAuth authentication enforced when adjusting those network policies. Users also need the web host for sign-in and consent.

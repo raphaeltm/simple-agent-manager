@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ChatSessionResponse } from '../../src/lib/api';
-import { getLineageText, getSessionSourceContext, isRetryOrFork } from '../../src/pages/project-chat/lineageUtils';
+import {
+  getLineageText,
+  getSessionSourceContext,
+  isRetryOrFork,
+} from '../../src/pages/project-chat/lineageUtils';
 import type { TaskInfo } from '../../src/pages/project-chat/useTaskGroups';
 
 // ---------------------------------------------------------------------------
@@ -38,20 +42,20 @@ function makeTaskInfo(overrides: Partial<TaskInfo> = {}): TaskInfo {
 }
 
 function makeRetryFixture(
-  children: Array<{ taskId: string; sessionId: string; startedAt: number }>,
+  children: Array<{ taskId: string; sessionId: string; startedAt: number }>
 ): { tasks: Map<string, TaskInfo>; sessions: ChatSessionResponse[] } {
   return {
     tasks: new Map<string, TaskInfo>([
       ['tP', makeTaskInfo({ id: 'tP', parentTaskId: null, triggeredBy: 'user' })],
-      ...children.map(({ taskId }) => [
-        taskId,
-        makeTaskInfo({ id: taskId, parentTaskId: 'tP', triggeredBy: 'user' }),
-      ] as const),
+      ...children.map(
+        ({ taskId }) =>
+          [taskId, makeTaskInfo({ id: taskId, parentTaskId: 'tP', triggeredBy: 'user' })] as const
+      ),
     ]),
     sessions: [
       makeSession({ id: 'sP', taskId: 'tP', topic: 'Original', startedAt: 1000 }),
       ...children.map(({ sessionId, taskId, startedAt }) =>
-        makeSession({ id: sessionId, taskId, startedAt }),
+        makeSession({ id: sessionId, taskId, startedAt })
       ),
     ],
   };
@@ -62,6 +66,9 @@ function makeRetryFixture(
 // ---------------------------------------------------------------------------
 
 describe('isRetryOrFork — classification logic', () => {
+  it('keeps Connector user work outside the agent child hierarchy even with inherited depth', () => {
+    expect(isRetryOrFork(makeTaskInfo({ triggeredBy: 'connector', dispatchDepth: 2 }))).toBe(true);
+  });
   it('treats triggeredBy=mcp as subtask (not retry/fork)', () => {
     expect(isRetryOrFork(makeTaskInfo({ triggeredBy: 'mcp', dispatchDepth: 1 }))).toBe(false);
   });

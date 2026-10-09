@@ -66,6 +66,7 @@ vi.mock('../../../src/middleware/auth', () => ({
 vi.mock('../../../src/routes/projects/_helpers', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/routes/projects/_helpers')>()),
   requireRepositoryUserAccess: mocks.requireRepositoryUserAccess,
+  requireRepositoryAccess: mocks.requireRepositoryUserAccess,
 }));
 
 vi.mock('../../../src/services/project-data', () => ({
@@ -226,6 +227,93 @@ describe('task submit capacity-pool placement', () => {
       enrichedMessage: 'Run in project pool',
     });
   });
+
+  it.each(['vm', 'cf-container'] as const)(
+    'connector starts %s work through real placement/persistence with replay and provenance',
+    async (runtime) => {
+      const { sqlite, env } = createEnv();
+      try {
+        seedTaskSubmitRows(sqlite);
+        await seedProjectDefaultPool(env);
+        sqlite.exec(
+          readFileSync(
+            join(process.cwd(), 'src/db/migrations/0191_connector_execution.sql'),
+            'utf8'
+          )
+        );
+        sqlite.exec(
+          readFileSync(
+            join(process.cwd(), 'src/db/migrations/0189_cli_operation_receipts.sql'),
+            'utf8'
+          )
+        );
+        env.CF_CONTAINER_ENABLED = 'true';
+        sqlite
+          .prepare(
+            "INSERT INTO agent_profiles (id,project_id,user_id,name,agent_type,model,runtime) VALUES ('connector-profile','project-1','user-1','Connector agent','openai-codex','gpt-6.1-sol',?)"
+          )
+          .run(runtime);
+        mocks.acceptInstantSession.mockResolvedValue({ chatSessionId: 'instant-chat' });
+        mocks.continueInstantSessionLaunch.mockResolvedValue({});
+        const { samChatStart } = await import('../../../src/operations/connector-operations');
+        const { samTaskGet } = await import('../../../src/operations/platform-operations');
+        const context = {
+          env,
+          actor: {
+            userId: 'user-1',
+            via: 'connector' as const,
+            clientName: 'Claude',
+            scopes: new Set<'sam.read' | 'sam.write'>(['sam.read', 'sam.write']),
+          },
+          requestId: 'capability',
+          idempotencyKey: 'connector-capability',
+          execCtx: executionCtx,
+        };
+        const input = {
+          projectId: 'project-1',
+          message: 'Inspect project code; do not merge',
+          agentProfileId: 'connector-profile',
+        };
+        const result = await samChatStart.run(context, input);
+        expect(await samChatStart.run(context, input)).toEqual(result);
+        expect(
+          sqlite
+            .prepare(
+              'SELECT triggered_by,connector_client_name,agent_profile_hint FROM tasks WHERE id=?'
+            )
+            .get(result.taskId)
+        ).toEqual({
+          triggered_by: 'connector',
+          connector_client_name: 'Claude',
+          agent_profile_hint: 'connector-profile',
+        });
+        expect(
+          await samTaskGet.run(context, { projectId: 'project-1', taskId: result.taskId })
+        ).toMatchObject({
+          id: result.taskId,
+          triggeredBy: 'connector',
+          connectorClientName: 'Claude',
+        });
+        expect(
+          runtime === 'vm' ? mocks.startTaskRunnerDO : mocks.acceptInstantSession
+        ).toHaveBeenCalledTimes(1);
+        expect(mocks.recordActivityEvent).toHaveBeenCalledWith(
+          env,
+          'project-1',
+          'task.submitted',
+          'user',
+          'user-1',
+          null,
+          result.sessionId,
+          result.taskId,
+          expect.objectContaining({ via: 'connector', clientName: 'Claude' })
+        );
+        await Promise.all(vi.mocked(executionCtx.waitUntil).mock.calls.map(([promise]) => promise));
+      } finally {
+        sqlite.close();
+      }
+    }
+  );
 
   it.skipIf(!process.env.SAM_CLI_CONTRACT_BINARY)(
     'compiled CLI performs metadata lifecycle and submits through real Worker orchestration',

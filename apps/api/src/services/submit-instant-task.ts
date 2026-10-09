@@ -27,10 +27,12 @@ export async function submitInstantTask(input: {
   waitUntil: (promise: Promise<unknown>) => void;
   project: schema.Project;
   userId: string;
+  triggeredBy?: 'user' | 'connector';
+  connectorClientName?: string;
   taskId: string;
   branchName: string;
   message: string;
-  profile: NonNullable<Awaited<ReturnType<typeof resolveSkillProfile>>>;
+  profile: Awaited<ReturnType<typeof resolveSkillProfile>> | null;
   parentTaskId?: string;
   contextSummary?: string;
   taskMode?: TaskMode;
@@ -42,19 +44,22 @@ export async function submitInstantTask(input: {
 }): Promise<{ taskId: string; sessionId: string; branchName: string; status: 'queued' }> {
   const { db, env, taskId, project, userId, profile, message } = input;
   const now = new Date().toISOString();
-  const taskMode = input.taskMode ?? (profile.taskMode === 'task' ? 'task' : 'conversation');
+  const taskMode = input.taskMode ?? (profile?.taskMode === 'task' ? 'task' : 'conversation');
   const title =
     truncateTitle(message, getTaskTitleConfig(env).maxLength ?? DEFAULT_TASK_TITLE_MAX_LENGTH) ||
     'Instant task';
   const agentType =
     input.agentType ??
-    profile.agentType ??
+    profile?.agentType ??
     project.defaultAgentType ??
     env.DEFAULT_TASK_AGENT_TYPE ??
     'opencode';
   const defaults = resolveProjectAgentDefault(project.agentDefaults, agentType);
   const { enrichedMessage } = await enrichMessageWithMentions(message, db, project.id, userId, env);
   await db.insert(schema.tasks).values({
+    triggeredBy: input.triggeredBy ?? 'user',
+    connectorClientName:
+      input.triggeredBy === 'connector' ? (input.connectorClientName ?? 'Connector') : null,
     id: taskId,
     projectId: project.id,
     userId,
@@ -64,9 +69,9 @@ export async function submitInstantTask(input: {
     executionStep: 'instant_persistence',
     priority: 0,
     parentTaskId: input.parentTaskId ?? null,
-    agentProfileHint: profile.profileId,
-    skillId: profile.skillId,
-    skillHint: profile.skillId,
+    agentProfileHint: profile?.profileId ?? null,
+    skillId: profile?.skillId ?? null,
+    skillHint: profile?.skillId ?? null,
     taskMode,
     outputBranch: input.branchName,
     credentialAttributionUserId: input.credentialAttributionUserId,
@@ -94,19 +99,19 @@ export async function submitInstantTask(input: {
     initialPrompt: buildVisibleInitialPrompt({
       message: enrichedMessage,
       attachments: input.attachments,
-      systemPromptAppend: profile.systemPromptAppend,
+      systemPromptAppend: profile?.systemPromptAppend,
     }),
     displayMessage: message,
     contextSummary: input.contextSummary,
     agentType,
-    agentProfileId: profile.profileId,
-    skillId: profile.skillId,
+    agentProfileId: profile?.profileId,
+    skillId: profile?.skillId ?? null,
     branch: input.branchName,
     attachments: input.attachments,
     overrides: {
-      model: profile.model ?? defaults.model,
-      effort: profile.effort,
-      permissionMode: profile.permissionMode ?? defaults.permissionMode,
+      model: profile?.model ?? defaults.model,
+      effort: profile?.effort,
+      permissionMode: profile?.permissionMode ?? defaults.permissionMode,
     },
   };
   try {

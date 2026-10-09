@@ -9,6 +9,7 @@ function makeValidOutputs(): PulumiOutputs {
     observabilityD1DatabaseId: 'obs-db-456',
     observabilityD1DatabaseName: 'sa379a6-prod-obs',
     kvId: 'kv-789',
+    oauthKvId: 'oauth-kv-789',
     kvName: 'sa379a6-prod-sessions',
     r2Name: 'sa379a6-prod-assets',
     sessionSnapshotTtlDays: 7,

@@ -74,7 +74,7 @@ export const DEFAULT_ACP_INTERACTION_RUNTIME_RESPONSE_MAX_BYTES = 64 * 1024;
 
 export const AcpInteractionIdSchema = v.pipe(v.string(), v.uuid());
 export const AcpInteractionGenerationSchema = v.pipe(v.string(), v.uuid());
-export const AcpInteractionHashSchema = v.pipe(v.string(), v.regex(/^[a-f0-9]{64}$/u));
+export const AcpInteractionHashSchema = v.pipe(v.string(), v.regex(/^[a-f0-9]{64}$/));
 export const AcpInteractionKeySchema = v.pipe(v.string(), v.minLength(1), v.maxLength(128));
 
 export const AcpInteractionKindSchema = v.picklist(ACP_INTERACTION_KIND_VALUES);
@@ -214,7 +214,9 @@ export type AcpInteractionState = v.InferOutput<typeof AcpInteractionStateSchema
 export type AcpInteractionSafeSummary = v.InferOutput<typeof AcpInteractionSafeSummarySchema>;
 export type AcpInteractionRuntimeCreate = v.InferOutput<typeof AcpInteractionRuntimeCreateSchema>;
 export type AcpInteractionRuntimeSettle = v.InferOutput<typeof AcpInteractionRuntimeSettleSchema>;
-export type AcpInteractionRuntimeCompleteUrl = v.InferOutput<typeof AcpInteractionRuntimeCompleteUrlSchema>;
+export type AcpInteractionRuntimeCompleteUrl = v.InferOutput<
+  typeof AcpInteractionRuntimeCompleteUrlSchema
+>;
 export type AcpInteractionAnswerDecision = v.InferOutput<typeof AcpInteractionAnswerDecisionSchema>;
 export type AcpInteractionBrowserAnswer = v.InferOutput<typeof AcpInteractionBrowserAnswerSchema>;
 export type AcpRuntimeAnswerRequest = v.InferOutput<typeof AcpRuntimeAnswerRequestSchema>;

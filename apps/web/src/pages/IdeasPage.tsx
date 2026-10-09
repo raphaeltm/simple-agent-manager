@@ -5,6 +5,7 @@ import { Clock, Lightbulb, MessageSquare, RefreshCw, Search } from 'lucide-react
 import { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 
+import { ConnectorChip } from '../components/ConnectorChip';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useQueryScope } from '../hooks/useQueryScope';
 import { draftIdeasQueryOptions, projectChatSessionsQueryOptions } from '../lib/query-options';
@@ -66,7 +67,10 @@ function IdeaCard({ idea, sessionCount, onClick }: IdeaCardProps) {
           <h3 className="text-sm font-medium text-fg-primary m-0 line-clamp-1 flex-1 min-w-0 break-all sm:break-words">
             {idea.title}
           </h3>
-          {idea.triggeredBy && idea.triggeredBy !== 'user' && (
+          {idea.triggeredBy === 'connector' && (
+            <ConnectorChip clientName={idea.connectorClientName} />
+          )}
+          {idea.triggeredBy && idea.triggeredBy !== 'user' && idea.triggeredBy !== 'connector' && (
             <span
               className="inline-flex items-center gap-0.5 text-[9px] font-semibold px-1.5 py-0 rounded-full whitespace-nowrap shrink-0"
               style={{

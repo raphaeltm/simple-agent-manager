@@ -1,0 +1,5 @@
+/oauth/consent
+  Content-Security-Policy: frame-ancestors 'none'
+  X-Frame-Options: DENY
+  Cache-Control: no-store
+  Referrer-Policy: no-referrer

@@ -12,7 +12,10 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-const taskSubmitSource = readFileSync(resolve(process.cwd(), 'src/routes/tasks/submit.ts'), 'utf8');
+const taskSubmitSource = readFileSync(
+  resolve(process.cwd(), 'src/services/submit-task.ts'),
+  'utf8'
+);
 const taskRunsSource = readFileSync(resolve(process.cwd(), 'src/routes/tasks/run.ts'), 'utf8');
 const taskRunnerDoSource = [
   'index.ts',
@@ -108,7 +111,7 @@ describe('TDF-6 Fix 2: No fallback session IDs', () => {
     // Session creation failure should mark the task as failed (not orphan it)
     expect(taskSubmitSource).toContain('Session creation failed:');
     expect(taskSubmitSource).toContain('markTaskFailedIfNonTerminal(');
-    expect(taskSubmitSource).toContain("from '../../services/task-failure'");
+    expect(taskSubmitSource).toContain("from '../services/task-failure'");
   });
 
   it('session creation uses let with try-catch for error cleanup', () => {

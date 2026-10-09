@@ -44,6 +44,8 @@ export const SessionTreeItem = memo(function SessionTreeItem({
       ...session,
       task: {
         id: taskInfo.id,
+        triggeredBy: taskInfo.triggeredBy,
+        connectorClientName: taskInfo.connectorClientName,
         status: taskInfo.status,
         terminalReason: taskInfo.terminalReason,
         errorMessage: taskInfo.errorMessage,

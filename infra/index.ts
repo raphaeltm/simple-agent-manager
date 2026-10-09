@@ -9,7 +9,13 @@ import {
   observabilityDatabaseId,
   observabilityDatabaseName,
 } from './resources/database';
-import { kvNamespace, kvNamespaceId, kvNamespaceName } from './resources/kv';
+import {
+  kvNamespace,
+  kvNamespaceId,
+  kvNamespaceName,
+  oauthKvNamespace,
+  oauthKvNamespaceId,
+} from './resources/kv';
 import { r2Bucket, r2BucketLifecycle, r2BucketName } from './resources/storage';
 import {
   apiDnsRecord,
@@ -29,6 +35,7 @@ export {
   database,
   observabilityDatabase,
   kvNamespace,
+  oauthKvNamespace,
   r2Bucket,
   r2BucketLifecycle,
   pagesProject,
@@ -46,6 +53,7 @@ export const d1DatabaseName = databaseName;
 export const observabilityD1DatabaseId = observabilityDatabaseId;
 export const observabilityD1DatabaseName = observabilityDatabaseName;
 export const kvId = kvNamespaceId;
+export const oauthKvId = oauthKvNamespaceId;
 export const kvName = kvNamespaceName;
 export const r2Name = r2BucketName;
 export {

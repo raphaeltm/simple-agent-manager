@@ -3,6 +3,8 @@ import { EXECUTION_STEP_LABELS } from '@simple-agent-manager/shared';
 import { Card, StatusBadge } from '@simple-agent-manager/ui';
 import { useNavigate } from 'react-router';
 
+import { ConnectorChip } from './ConnectorChip';
+
 interface ActiveTaskCardProps {
   task: DashboardTask;
 }
@@ -116,6 +118,10 @@ export function ActiveTaskCard({ task }: ActiveTaskCardProps) {
         <div className="sam-type-card-title text-fg-primary overflow-hidden text-ellipsis whitespace-nowrap mb-1">
           {task.title}
         </div>
+
+        {task.triggeredBy === 'connector' && (
+          <ConnectorChip clientName={task.connectorClientName} />
+        )}
 
         {/* Project name */}
         <div className="sam-type-caption text-fg-muted overflow-hidden text-ellipsis whitespace-nowrap mb-2">

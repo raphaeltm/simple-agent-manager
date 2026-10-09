@@ -8,6 +8,8 @@ import { request } from './client';
 
 /** Task embed shape — populated in the detail response, added via enrichment for list items. */
 export interface ChatSessionTaskEmbed {
+  triggeredBy?: string;
+  connectorClientName?: string | null;
   id: string;
   /** Canonical, user-safe saved placement diagnostics, including queued runs. */
   placementExplanationJson?: string | null;

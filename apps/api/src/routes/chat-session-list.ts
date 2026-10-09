@@ -78,6 +78,8 @@ async function enrichTaskOutcomes(
         id: schema.tasks.id,
         chatSessionId: schema.tasks.chatSessionId,
         status: schema.tasks.status,
+        triggeredBy: schema.tasks.triggeredBy,
+        connectorClientName: schema.tasks.connectorClientName,
         terminalReason: schema.tasks.terminalReason,
       })
       .from(schema.tasks)

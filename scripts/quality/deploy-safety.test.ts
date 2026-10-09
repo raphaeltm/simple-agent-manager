@@ -810,6 +810,7 @@ describe('deployment workflow safety wiring', () => {
       observabilityD1DatabaseId: 'obs-123',
       observabilityD1DatabaseName: 'sam-prod-obs',
       kvId: 'kv-123',
+      oauthKvId: 'oauth-kv-123',
       r2Name: 'r2-prod',
       sessionSnapshotTtlDays: 7,
       // Required outputs added by #1750; without them validatePulumiOutputs throws

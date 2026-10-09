@@ -1,6 +1,7 @@
 import { Alert, Spinner } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useState } from 'react';
 
+import { AdminConnectorPanel } from '../components/AdminConnectorPanel';
 import { PlatformIntegrationConfigForm } from '../components/PlatformIntegrationConfigForm';
 import type { PlatformConfigStatus, PlatformIntegrationConfigInput } from '../lib/api';
 import { fetchAdminPlatformConfig, listProjects, updateAdminPlatformConfig } from '../lib/api';
@@ -108,6 +109,7 @@ export function AdminPlatformConfig() {
           feedbackProjects={feedbackProjects}
         />
       )}
+      <AdminConnectorPanel />
     </div>
   );
 }

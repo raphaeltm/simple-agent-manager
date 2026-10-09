@@ -66,7 +66,7 @@ export function getInteractionDetail(
   projectId: string,
   chatSessionId: string,
   interactionId: string
-) {
+): ReturnType<InteractionStore['detail']> {
   return getInteractionStore(env, projectId, chatSessionId).detail(interactionId);
 }
 

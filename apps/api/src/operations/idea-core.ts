@@ -2,15 +2,18 @@ import { log } from '../lib/logger';
 import { sanitizeUserInput } from '../lib/sanitize-user-input';
 import { getSearchQueryLikePatterns, normalizeSearchQuery } from '../lib/search-query-limits';
 import { ulid } from '../lib/ulid';
+import { operationLink } from './connector-read-core';
+import { formatOperationCursor, readOperationCursor } from './cursors';
 import { OperationError } from './errors';
 import { getPlatformOperationLimits } from './limits';
 import type { OperationContext } from './types';
 
 export type IdeasSearchInput = {
-  projectId: string;
+  projectId?: string;
   query?: string;
   search?: boolean;
   related?: boolean;
+  cursor?: string;
   status?: string;
   limit?: number;
 };
@@ -43,117 +46,116 @@ export async function searchIdeas(ctx: OperationContext, input: IdeasSearchInput
   const related = input.related === true;
   const search = related || input.search === true || input.query !== undefined;
   const normalizedQuery = search ? normalizedIdeaQuery(input.query, ctx) : null;
-  const requestedLimit =
-    typeof input.limit === 'number'
-      ? input.limit
-      : related
-        ? limits.relatedIdeaSearchLimit
-        : search
-          ? limits.ideaSearchMax
-          : limits.ideaListLimit;
+  const defaultLimit = related
+    ? limits.relatedIdeaSearchLimit
+    : search
+      ? limits.ideaSearchMax
+      : limits.ideaListLimit;
   const limit = Math.min(
-    Math.max(1, Math.round(requestedLimit)),
+    Math.max(1, Math.round(input.limit ?? defaultLimit)),
     related ? limits.taskSearchMax : search ? limits.ideaSearchMax : limits.ideaListMax
   );
-  const snippetLength = limits.taskDescriptionSnippetLength;
-  if (!search) {
-    const results = await ctx.env.DATABASE.prepare(
-      'SELECT id, title, description, priority, created_at, updated_at FROM tasks WHERE project_id = ? AND status = ? ORDER BY updated_at DESC LIMIT ?'
-    )
-      .bind(input.projectId, 'draft', limit)
-      .all<{
-        id: string;
-        title: string;
-        description: string | null;
-        priority: number;
-        created_at: string;
-        updated_at: string;
-      }>();
-    const ideas = (results.results ?? []).map((idea) => ({
-      ideaId: idea.id,
-      title: idea.title,
-      contentSnippet: idea.description
-        ? idea.description.slice(0, snippetLength) +
-          (idea.description.length > snippetLength ? '...' : '')
-        : null,
-      priority: idea.priority,
-      createdAt: idea.created_at,
-      updatedAt: idea.updated_at,
-    }));
-    return { ideas, count: results.results?.length ?? 0 };
+  const external = ctx.actor.via !== 'workspace-agent';
+  const conditions = [
+    input.projectId
+      ? 'project_id = ?'
+      : "EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = tasks.project_id AND pm.user_id = ? AND pm.status = 'active')",
+  ];
+  const params: (string | number)[] = [input.projectId ?? ctx.actor.userId];
+  if (ctx.actor.workspace) {
+    conditions.push('project_id = ?');
+    params.push(ctx.actor.workspace.projectId);
   }
-  if (!normalizedQuery) throw new OperationError('invalid_input', 'query is required');
-  const patterns = getSearchQueryLikePatterns(normalizedQuery.query);
-  const termConditions = patterns
-    .map(() => String.raw`(title LIKE ? ESCAPE '\' OR description LIKE ? ESCAPE '\')`)
-    .join(' AND ');
-  if (related) {
-    const statusFilter = typeof input.status === 'string' ? input.status.trim() : 'draft';
-    const results = await ctx.env.DATABASE.prepare(
-      `SELECT id, title, description, status, priority, updated_at FROM tasks WHERE project_id = ? AND ${termConditions} AND status = ? ORDER BY updated_at DESC LIMIT ?`
-    )
-      .bind(
-        input.projectId,
-        ...patterns.flatMap((pattern) => [pattern, pattern]),
-        statusFilter,
-        limit
-      )
-      .all<{
-        id: string;
-        title: string;
-        description: string | null;
-        status: string;
-        priority: number;
-        updated_at: string;
-      }>();
-    const ideas = (results.results ?? []).map((idea) => ({
-      taskId: idea.id,
-      title: idea.title,
-      status: idea.status,
-      priority: idea.priority,
-      description: idea.description
-        ? idea.description.slice(0, snippetLength) +
-          (idea.description.length > snippetLength ? '...' : '')
-        : null,
-      updatedAt: idea.updated_at,
-    }));
-    return { ideas, count: results.results?.length ?? 0, ...normalizedQuery };
+  conditions.push('status = ?');
+  params.push(input.status?.trim() || 'draft');
+  if (normalizedQuery)
+    for (const pattern of getSearchQueryLikePatterns(normalizedQuery.query)) {
+      conditions.push(String.raw`(title LIKE ? ESCAPE '\' OR description LIKE ? ESCAPE '\')`);
+      params.push(pattern, pattern);
+    }
+  const cursor = readOperationCursor(input.cursor);
+  if (cursor) {
+    conditions.push('(updated_at < ? OR (updated_at = ? AND id < ?))');
+    params.push(cursor.updatedAt, cursor.updatedAt, cursor.id);
   }
-  const results = await ctx.env.DATABASE.prepare(
-    `SELECT id, title, description, priority, created_at, updated_at FROM tasks WHERE project_id = ? AND status = ? AND ${termConditions} ORDER BY updated_at DESC LIMIT ?`
+  const result = await ctx.env.DATABASE.prepare(
+    `SELECT id, project_id, title, description, status, priority, created_at, updated_at, triggered_by, connector_client_name FROM tasks WHERE ${conditions.join(' AND ')} ORDER BY updated_at DESC, id DESC LIMIT ?`
   )
-    .bind(input.projectId, 'draft', ...patterns.flatMap((pattern) => [pattern, pattern]), limit)
+    .bind(...params, external ? limit + 1 : limit)
     .all<{
       id: string;
+      project_id: string;
       title: string;
       description: string | null;
+      status: string;
       priority: number;
       created_at: string;
       updated_at: string;
+      triggered_by: string | null;
+      connector_client_name: string | null;
     }>();
-  const ideas = (results.results ?? []).map((idea) => ({
-    ideaId: idea.id,
-    title: idea.title,
-    contentSnippet: idea.description
-      ? idea.description.slice(0, snippetLength) +
-        (idea.description.length > snippetLength ? '...' : '')
-      : null,
-    priority: idea.priority,
-    createdAt: idea.created_at,
-    updatedAt: idea.updated_at,
-  }));
-  return { ideas, count: results.results?.length ?? 0, ...normalizedQuery };
+  const rows = (result.results ?? []).slice(0, limit);
+  const ideas = rows.map((idea) => {
+    const snippet = idea.description
+      ? idea.description.slice(0, limits.taskDescriptionSnippetLength) +
+        (idea.description.length > limits.taskDescriptionSnippetLength ? '...' : '')
+      : null;
+    const provenance = external
+      ? {
+          projectId: idea.project_id,
+          triggeredBy: idea.triggered_by,
+          connectorClientName: idea.connector_client_name,
+          link: operationLink(ctx, idea.project_id),
+          untrustedContent: true,
+        }
+      : {};
+    return related
+      ? {
+          taskId: idea.id,
+          title: idea.title,
+          status: idea.status,
+          priority: idea.priority,
+          description: snippet,
+          updatedAt: idea.updated_at,
+          ...provenance,
+        }
+      : {
+          ideaId: idea.id,
+          title: idea.title,
+          contentSnippet: snippet,
+          priority: idea.priority,
+          createdAt: idea.created_at,
+          updatedAt: idea.updated_at,
+          ...provenance,
+        };
+  });
+  const last = rows[rows.length - 1];
+  return {
+    ideas,
+    count: ideas.length,
+    ...(normalizedQuery ?? {}),
+    ...(external
+      ? {
+          nextCursor:
+            (result.results?.length ?? 0) > limit && last
+              ? formatOperationCursor({ id: last.id, updatedAt: last.updated_at })
+              : null,
+        }
+      : {}),
+  };
 }
 
 export async function getIdea(ctx: OperationContext, projectId: string, ideaId: string) {
   const id = typeof ideaId === 'string' ? ideaId.trim() : '';
   if (!id) throw new OperationError('invalid_input', 'ideaId is required');
   const idea = await ctx.env.DATABASE.prepare(
-    'SELECT id, title, description, status, priority, created_at, updated_at FROM tasks WHERE id = ? AND project_id = ?'
+    'SELECT id, triggered_by, connector_client_name, title, description, status, priority, created_at, updated_at FROM tasks WHERE id = ? AND project_id = ?'
   )
     .bind(id, projectId)
     .first<{
       id: string;
+      triggered_by: string | null;
+      connector_client_name: string | null;
       title: string;
       description: string | null;
       status: string;
@@ -164,6 +166,14 @@ export async function getIdea(ctx: OperationContext, projectId: string, ideaId: 
   if (!idea) throw new OperationError('not_found', `Idea not found in this project: ${id}`);
   return {
     ideaId: idea.id,
+    ...(ctx.actor.via !== 'workspace-agent'
+      ? {
+          triggeredBy: idea.triggered_by,
+          connectorClientName: idea.connector_client_name,
+          link: operationLink(ctx, projectId),
+          untrustedContent: true,
+        }
+      : {}),
     title: idea.title,
     content: idea.description,
     contentLength: idea.description?.length ?? 0,
@@ -193,8 +203,8 @@ export async function createIdea(ctx: OperationContext, input: IdeaCreateInput) 
   const ideaId = ulid();
   const now = new Date().toISOString();
   await ctx.env.DATABASE.prepare(
-    `INSERT INTO tasks (id, project_id, user_id, title, description, status, priority, task_mode, dispatch_depth, created_by, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'draft', ?, 'task', 0, ?, ?, ?)`
+    `INSERT INTO tasks (id, project_id, user_id, title, description, status, priority, task_mode, dispatch_depth, created_by, created_at, updated_at, triggered_by, connector_client_name)
+     VALUES (?, ?, ?, ?, ?, 'draft', ?, 'task', 0, ?, ?, ?, ?, ?)`
   )
     .bind(
       ideaId,
@@ -205,7 +215,11 @@ export async function createIdea(ctx: OperationContext, input: IdeaCreateInput) 
       priority,
       ctx.actor.userId,
       now,
-      now
+      now,
+      ctx.actor.via === 'connector' || ctx.actor.via === 'pat' ? 'connector' : 'user',
+      ctx.actor.via === 'connector' || ctx.actor.via === 'pat'
+        ? (ctx.actor.clientName ?? 'Connector')
+        : null
     )
     .run();
   log.info('mcp.create_idea', {
@@ -228,6 +242,7 @@ export async function createIdea(ctx: OperationContext, input: IdeaCreateInput) 
     priority,
     status: 'draft',
     message: 'Idea created. Use link_idea to associate it with the current session.',
+    ...(ctx.actor.via !== 'workspace-agent' ? { link: operationLink(ctx, input.projectId) } : {}),
   };
 }
 
@@ -332,5 +347,10 @@ export async function updateIdea(ctx: OperationContext, input: IdeaUpdateInput) 
       ? { statusTransition: `${statusTransition.from} → ${statusTransition.to}` }
       : {}),
   });
-  return { updated: true, ideaId, updatedFields };
+  return {
+    updated: true,
+    ideaId,
+    updatedFields,
+    ...(ctx.actor.via !== 'workspace-agent' ? { link: operationLink(ctx, input.projectId) } : {}),
+  };
 }

@@ -187,12 +187,31 @@ async function answerInteractionRoute(c: ChatAcpContext): Promise<Response> {
   const sessionId = requiredParam(c.req.param('sessionId'), 'sessionId');
   const interactionId = v.parse(AcpInteractionIdSchema, c.req.param('interactionId'));
   const body = await parseBrowserAnswerBody(c);
-  const db = drizzle(c.env.DATABASE, { schema });
+  return c.json(
+    await answerAgentInteraction(c.env, userId, projectId, sessionId, interactionId, body)
+  );
+}
+
+export function registerChatAcpInteractionRoutes(chatRoutes: Hono<{ Bindings: Env }>): void {
+  chatRoutes.get('/:sessionId/interactions', listInteractionSnapshots);
+  chatRoutes.get('/:sessionId/interactions/:interactionId', readInteractionDetail);
+  chatRoutes.post('/:sessionId/interactions/:interactionId/answer', answerInteractionRoute);
+}
+
+export async function answerAgentInteraction(
+  env: Env,
+  userId: string,
+  projectId: string,
+  sessionId: string,
+  interactionId: string,
+  body: BrowserAnswerBody
+) {
+  const db = drizzle(env.DATABASE, { schema });
 
   await requireProjectCapability(db, projectId, userId, 'task:write');
-  await requireSessionCreator(c.env, projectId, sessionId, userId);
+  await requireSessionCreator(env, projectId, sessionId, userId);
   const answerBodyHash = await interactionDecisionHash(body.decision);
-  const answer = await answerInteraction(c.env, {
+  const answer = await answerInteraction(env, {
     projectId,
     chatSessionId: sessionId,
     interactionId,
@@ -202,7 +221,7 @@ async function answerInteractionRoute(c: ChatAcpContext): Promise<Response> {
   });
   const acceptedAnswer = requireAcceptedAnswer(answer);
   await deliverAcceptedAnswer(
-    c.env,
+    env,
     projectId,
     sessionId,
     interactionId,
@@ -210,11 +229,5 @@ async function answerInteractionRoute(c: ChatAcpContext): Promise<Response> {
     body.decision
   );
 
-  return c.json({ accepted: true, state: acceptedAnswer.summary.state });
-}
-
-export function registerChatAcpInteractionRoutes(chatRoutes: Hono<{ Bindings: Env }>): void {
-  chatRoutes.get('/:sessionId/interactions', listInteractionSnapshots);
-  chatRoutes.get('/:sessionId/interactions/:interactionId', readInteractionDetail);
-  chatRoutes.post('/:sessionId/interactions/:interactionId/answer', answerInteractionRoute);
+  return { accepted: true, state: acceptedAnswer.summary.state };
 }

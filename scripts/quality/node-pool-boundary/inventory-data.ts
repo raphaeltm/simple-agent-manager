@@ -34,10 +34,10 @@ export const ALLOCATION_WRITER_INVENTORY: readonly AllocationWriterInventoryEntr
     ],
   },
   {
-    filePath: 'apps/api/src/routes/tasks/submit.ts',
+    filePath: 'apps/api/src/services/submit-task.ts',
     table: 'tasks',
-    owner: 'post /submit',
-    role: 'user task submit route adapter',
+    owner: 'submitTask',
+    role: 'shared user task submission service',
     canonicalService: 'resolveTaskStartPlacement -> startTaskRunnerDO',
     requiredEvidence: CANONICAL_TASK_START,
   },

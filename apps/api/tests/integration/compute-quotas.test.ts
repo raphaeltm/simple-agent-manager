@@ -34,7 +34,7 @@ describe('compute quota pipeline', () => {
     'utf8'
   );
   const usageRoute = readFileSync(resolve(process.cwd(), 'src/routes/usage.ts'), 'utf8');
-  const submitRoute = readFileSync(resolve(process.cwd(), 'src/routes/tasks/submit.ts'), 'utf8');
+  const submitRoute = readFileSync(resolve(process.cwd(), 'src/services/submit-task.ts'), 'utf8');
   const placementResolver = readFileSync(
     resolve(process.cwd(), 'src/services/placement-resolver.ts'),
     'utf8'

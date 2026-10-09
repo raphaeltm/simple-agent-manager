@@ -315,6 +315,7 @@ export function validatePulumiOutputs(outputs: unknown): asserts outputs is Pulu
     { key: 'observabilityD1DatabaseId', label: 'Observability D1 Database ID' },
     { key: 'observabilityD1DatabaseName', label: 'Observability D1 Database Name' },
     { key: 'kvId', label: 'KV Namespace ID' },
+    { key: 'oauthKvId', label: 'OAuth KV Namespace ID' },
     { key: 'r2Name', label: 'R2 Bucket Name' },
     { key: 'sessionSnapshotTtlDays', label: 'Session Snapshot TTL Days' },
     { key: 'diagnosticIncidentPrefix', label: 'Diagnostic Incident R2 Prefix' },
@@ -1317,7 +1318,10 @@ export function generateApiWorkerEnv(
         migrations_dir: 'src/db/migrations/observability',
       },
     ],
-    kv_namespaces: [{ binding: 'KV', id: outputs.kvId }],
+    kv_namespaces: [
+      { binding: 'KV', id: outputs.kvId },
+      { binding: 'OAUTH_KV', id: outputs.oauthKvId },
+    ],
     r2_buckets: [
       { binding: 'R2', bucket_name: outputs.r2Name },
       { binding: 'PROJECT_DATA_ARCHIVE_R2', bucket_name: outputs.r2Name },

@@ -1,6 +1,9 @@
 import type * as v from 'valibot';
 
 import type { Env } from '../env';
+import { AppError } from '../middleware/error';
+import { auditConnectorWrite } from '../services/connector-execution';
+import { OperationError } from './errors';
 
 export type OperationKind = 'read' | 'write' | 'destructive';
 export type OperationScope = 'sam.read' | 'sam.write';
@@ -36,5 +39,32 @@ export function defineOperation<I, O>(operation: Operation<I, O>): Operation<I, 
   if (!/^[a-z0-9_]{1,64}$/.test(operation.name)) {
     throw new Error(`Invalid operation name: ${operation.name}`);
   }
-  return operation;
+  return {
+    ...operation,
+    async run(ctx, input) {
+      try {
+        return await (operation.kind === 'read'
+          ? operation.run(ctx, input)
+          : auditConnectorWrite(ctx, operation.name, input, () => operation.run(ctx, input)));
+      } catch (error) {
+        if (!(error instanceof AppError)) throw error;
+        const code =
+          error.statusCode === 400 || error.statusCode === 422
+            ? 'invalid_input'
+            : error.statusCode === 401 || error.statusCode === 403
+              ? 'forbidden'
+              : error.statusCode === 404 || error.statusCode === 410
+                ? 'not_found'
+                : error.statusCode === 409
+                  ? 'conflict'
+                  : error.statusCode === 429
+                    ? 'rate_limited'
+                    : 'unavailable';
+        throw new OperationError(
+          code,
+          code === 'unavailable' ? 'Operation is temporarily unavailable' : error.message
+        );
+      }
+    },
+  };
 }

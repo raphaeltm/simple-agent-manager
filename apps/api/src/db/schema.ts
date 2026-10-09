@@ -950,6 +950,7 @@ export const tasks = sqliteTable(
     /** Fixed timestamp for the warm-pool claim. Cleanup may honor this only for a bounded placement window. */
     claimedWarmNodeAt: text('claimed_warm_node_at'),
     /** Source that created this task. 'user' = manual, 'cron'/'webhook'/'mcp' = automated. */
+    connectorClientName: text('connector_client_name'),
     triggeredBy: text('triggered_by').notNull().default('user'),
     /** Soft FK to triggers table (null for user-created tasks). No DB constraint — trigger may be deleted independently. */
     triggerId: text('trigger_id'),

@@ -333,6 +333,32 @@ export async function requireRepositoryUserAccess(
   project: schema.Project,
   userId: string
 ): Promise<schema.GitHubInstallation | undefined> {
+  return verifyRepositoryUserAccess(c.env, db, project, userId, {
+    github: () => requireGitHubUserAccessToken(c, userId),
+    gitlab: () => requireGitLabUserAccessToken(c, userId),
+  });
+}
+
+/** In-process equivalent for an authenticated operation actor, without browser cookies. */
+export async function requireRepositoryAccess(
+  env: Env,
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  project: schema.Project,
+  userId: string
+): Promise<schema.GitHubInstallation | undefined> {
+  return verifyRepositoryUserAccess(env, db, project, userId, {
+    github: () => getGitHubUserAccessTokenForOwner(env, userId, 'connector-task-start'),
+    gitlab: () => requireGitLabUserAccessTokenForOwner(env, userId, 'connector-task-start'),
+  });
+}
+
+async function verifyRepositoryUserAccess(
+  env: Env,
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  project: schema.Project,
+  userId: string,
+  tokens: { github: () => Promise<string | null>; gitlab: () => Promise<string> }
+): Promise<schema.GitHubInstallation | undefined> {
   // Artifacts-backed projects have no external user repository to intersect
   // against — they are out of scope for this gate.
   if (project.repoProvider === 'artifacts') {
@@ -343,8 +369,8 @@ export async function requireRepositoryUserAccess(
     if (!metadata) {
       throw errors.forbidden('GitLab repository metadata is missing');
     }
-    const accessToken = await requireGitLabUserAccessToken(c, userId);
-    const verified = await verifyGitLabProjectAccess(c.env, accessToken, metadata.gitlabProjectId);
+    const accessToken = await tokens.gitlab();
+    const verified = await verifyGitLabProjectAccess(env, accessToken, metadata.gitlabProjectId);
     if (
       verified.host !== metadata.host ||
       verified.gitlabProjectId !== metadata.gitlabProjectId ||
@@ -360,14 +386,15 @@ export async function requireRepositoryUserAccess(
 
   const installation = await requireProjectInstallation(db, project.installationId);
   const externalInstallationId = getExternalInstallationId(installation);
-  const accessToken = await requireGitHubUserAccessToken(c, userId);
+  const accessToken = await tokens.github();
+  if (!accessToken) throw errors.forbidden('GitHub authorization is required');
   const verifiedRepo = await assertRepositoryAccess(
     accessToken,
     externalInstallationId,
     project.repository,
     userId,
     'project-access',
-    c.env
+    env
   );
   if (project.githubRepoId !== null && verifiedRepo.id !== project.githubRepoId) {
     throw errors.forbidden('GitHub repository access has changed; repository ID no longer matches');

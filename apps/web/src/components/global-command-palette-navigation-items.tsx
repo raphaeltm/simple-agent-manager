@@ -83,8 +83,8 @@ export function buildNavigationItems(isSuperadmin: boolean): NavItem[] {
     },
     {
       id: 'nav-settings-api-tokens',
-      label: 'Settings: API Tokens',
-      path: '/settings/api-tokens',
+      label: 'Settings: Access',
+      path: '/settings/access',
       icon: <Key size={14} />,
     },
   ];

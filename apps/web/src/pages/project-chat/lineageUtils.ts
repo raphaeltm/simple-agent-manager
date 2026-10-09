@@ -18,6 +18,7 @@ export interface SessionSourceContext {
  * inserted before the `triggered_by = 'mcp'` fix.
  */
 export function isRetryOrFork(taskInfo: TaskInfo): boolean {
+  if (taskInfo.triggeredBy === 'connector') return true;
   if (taskInfo.triggeredBy === 'mcp') return false;
   if (taskInfo.dispatchDepth > 0) return false;
   return true;
@@ -30,7 +31,7 @@ export function isRetryOrFork(taskInfo: TaskInfo): boolean {
 export function getLineageText(
   taskId: string,
   taskInfoMap: Map<string, TaskInfo>,
-  sessions: ChatSessionListItem[],
+  sessions: ChatSessionListItem[]
 ): string | undefined {
   const info = taskInfoMap.get(taskId);
   if (!info?.parentTaskId) return undefined;
@@ -45,7 +46,7 @@ export function getLineageText(
 export function getSessionSourceContext(
   taskId: string,
   taskInfoMap: Map<string, TaskInfo>,
-  sessions: ChatSessionListItem[],
+  sessions: ChatSessionListItem[]
 ): SessionSourceContext | undefined {
   const info = taskInfoMap.get(taskId);
   if (!info?.parentTaskId) return undefined;
@@ -74,7 +75,7 @@ function buildTaskToSessionMap(sessions: ChatSessionListItem[]): Map<string, Cha
 export function buildLineageText(
   taskInfo: TaskInfo,
   taskInfoMap: Map<string, TaskInfo>,
-  sessionsByTaskId: Map<string, ChatSessionListItem>,
+  sessionsByTaskId: Map<string, ChatSessionListItem>
 ): string {
   if (!taskInfo.parentTaskId) return '';
 

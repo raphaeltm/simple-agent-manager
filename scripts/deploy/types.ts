@@ -354,6 +354,7 @@ export interface PulumiOutputs {
   observabilityD1DatabaseId: string;
   observabilityD1DatabaseName: string;
   kvId: string;
+  oauthKvId: string;
   kvName: string;
   r2Name: string;
   sessionSnapshotTtlDays: number;

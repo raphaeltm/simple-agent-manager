@@ -110,16 +110,14 @@ describe('Workspace profile validation logic', () => {
 
 describe('Workspace profile precedence resolution', () => {
   /**
-   * Mirrors the precedence logic from apps/api/src/routes/tasks/submit.ts:169-171
+   * Mirrors the precedence logic from apps/api/src/services/submit-task.ts:169-171
    * and apps/api/src/routes/tasks/run.ts:161-163
    */
   function resolveWorkspaceProfile(
     explicitProfile: WorkspaceProfile | undefined,
-    projectDefault: WorkspaceProfile | null,
+    projectDefault: WorkspaceProfile | null
   ): WorkspaceProfile {
-    return explicitProfile
-      ?? projectDefault
-      ?? DEFAULT_WORKSPACE_PROFILE;
+    return explicitProfile ?? projectDefault ?? DEFAULT_WORKSPACE_PROFILE;
   }
 
   it('explicit lightweight overrides project default full', () => {

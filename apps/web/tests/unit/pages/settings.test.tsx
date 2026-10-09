@@ -83,8 +83,9 @@ function renderSettings(path = '/settings/cloud-provider') {
           </Route>
         </Routes>
       </MemoryRouter>
-    </ToastProvider>
-  , { wrapper: QueryTestWrapper });
+    </ToastProvider>,
+    { wrapper: QueryTestWrapper }
+  );
 }
 
 describe('Settings shell', () => {
@@ -112,7 +113,7 @@ describe('Settings shell', () => {
     expect(screen.getByRole('tab', { name: 'GitHub' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Connections' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Agents' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'API Tokens' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Access' })).toBeInTheDocument();
   });
 
   it('renders breadcrumb with Home link', async () => {

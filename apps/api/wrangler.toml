@@ -473,6 +473,11 @@ migrations_dir = "src/db/migrations/observability"
 binding = "KV"
 id = "your-kv-namespace-id"
 
+# Separate OAuth grants, hashed tokens and encrypted props
+[[kv_namespaces]]
+binding = "OAUTH_KV"
+id = "your-oauth-kv-namespace-id"
+
 # R2 for VM Agent binaries
 [[r2_buckets]]
 binding = "R2"

@@ -287,7 +287,7 @@ describe('userHasOwnCloudCredentials with targetProvider', () => {
 });
 
 describe('quota enforcement pattern: credential source, not existence', () => {
-  const submitSource = readFileSync(resolve(process.cwd(), 'src/routes/tasks/submit.ts'), 'utf8');
+  const submitSource = readFileSync(resolve(process.cwd(), 'src/services/submit-task.ts'), 'utf8');
   const nodeStepsSource = readFileSync(
     resolve(process.cwd(), 'src/durable-objects/task-runner/node-provisioning-gates.ts'),
     'utf8'

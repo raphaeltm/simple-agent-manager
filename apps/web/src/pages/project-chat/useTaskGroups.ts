@@ -19,6 +19,7 @@ export interface TaskInfo {
   blocked: boolean;
   /** What created this task (user, cron, webhook, mcp). */
   triggeredBy: string;
+  connectorClientName?: string | null;
   /** Dispatch generation (0 = user-created, >0 = agent-dispatched). */
   dispatchDepth: number;
   /** Task execution mode: 'task' (autonomous) or 'conversation' (interactive). */
@@ -41,6 +42,7 @@ export function buildTaskInfoMap(tasks: Task[]): Map<string, TaskInfo> {
       executionStep: t.executionStep,
       blocked: t.blocked ?? false,
       triggeredBy: t.triggeredBy ?? 'user',
+      connectorClientName: t.connectorClientName,
       dispatchDepth: t.dispatchDepth ?? 0,
       taskMode: t.taskMode,
     });

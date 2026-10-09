@@ -1,3 +1,5 @@
+import { formatMessageCursor, parseMessageCursor } from '@simple-agent-manager/shared';
+
 import { VALID_MESSAGE_ROLES, validateRoles } from '../lib/message-roles';
 import * as projectDataService from '../services/project-data';
 import { describeRootSearchCoverage } from '../services/project-data-search-coverage';
@@ -39,14 +41,26 @@ function rolesOrThrow(input: unknown) {
 
 export async function readChat(
   ctx: OperationContext,
-  input: { projectId: string; sessionId: string; limit?: number; roles?: string[] }
+  input: {
+    projectId: string;
+    sessionId: string;
+    limit?: number;
+    roles?: string[];
+    cursor?: string;
+    includeToolPayloads?: boolean;
+    response_format?: 'concise' | 'detailed';
+  }
 ) {
   const sessionId = typeof input.sessionId === 'string' ? input.sessionId.trim() : '';
   if (!sessionId) throw new OperationError('invalid_input', 'sessionId is required');
   const limits = getPlatformOperationLimits(ctx.env);
   const requestedLimit = typeof input.limit === 'number' ? input.limit : limits.messageListLimit;
   const limit = Math.min(Math.max(1, Math.round(requestedLimit)), limits.messageListMax);
-  const roles = rolesOrThrow(input.roles);
+  const roles = rolesOrThrow(
+    input.roles ?? (input.includeToolPayloads ? [...VALID_MESSAGE_ROLES] : undefined)
+  );
+  const before = input.cursor ? parseMessageCursor(input.cursor) : null;
+  if (input.cursor && !before) throw new OperationError('invalid_input', 'Invalid message cursor');
   const session = await projectDataService.getSession(ctx.env, input.projectId, sessionId);
   if (!session) throw new OperationError('not_found', 'Session not found in this project');
   const { messages, hasMore } = await projectDataService.getMessages(
@@ -54,7 +68,7 @@ export async function readChat(
     input.projectId,
     sessionId,
     limit,
-    null,
+    before,
     null,
     roles
   );
@@ -64,8 +78,34 @@ export async function readChat(
     content: message.content as string,
     createdAt: message.createdAt as number,
   }));
-  const result = groupTokensIntoMessages(tokens);
+  const result = groupTokensIntoMessages(tokens).map((message) =>
+    ctx.actor.via !== 'workspace-agent' && input.response_format !== 'detailed'
+      ? {
+          ...message,
+          content: message.content.slice(0, limits.taskDetailMessageSnippetLength),
+          truncated: message.content.length > limits.taskDetailMessageSnippetLength,
+        }
+      : message
+  );
+  const last = messages[messages.length - 1];
   return {
+    ...(ctx.actor.via !== 'workspace-agent'
+      ? {
+          untrustedContent: true,
+          nextCursor:
+            hasMore &&
+            last &&
+            typeof last.createdAt === 'number' &&
+            typeof last.sequence === 'number' &&
+            typeof last.id === 'string'
+              ? formatMessageCursor({
+                  createdAt: last.createdAt,
+                  sequence: last.sequence,
+                  id: last.id,
+                })
+              : null,
+        }
+      : {}),
     sessionId,
     topic: session.topic,
     taskId: session.taskId,

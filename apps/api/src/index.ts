@@ -87,6 +87,9 @@ import { clientErrorsRoutes } from './routes/client-errors';
 import { codexRefreshRoutes } from './routes/codex-refresh';
 import { codexRuntimeRoutes } from './routes/codex-runtime';
 import { ccRoutes } from './routes/composable-credentials';
+import { connectorMcpRoutes } from './routes/connector-mcp';
+import { connectorConsentRoutes, connectorOAuthRoutes } from './routes/connector-oauth';
+import { connectorAdminRoutes, connectorSettingsRoutes } from './routes/connector-settings';
 import { credentialLimitsRoute } from './routes/credential-limits';
 import { credentialsRoutes } from './routes/credentials';
 import { dashboardRoutes } from './routes/dashboard';
@@ -923,6 +926,11 @@ app.use('/mcp/*', async (c, next) => {
 // MCP server endpoint — at /mcp (not /api/mcp) because VM agents use this URL
 // and it uses its own task-scoped Bearer token auth, not session auth.
 app.route('/mcp', mcpRoutes);
+app.route('/', connectorOAuthRoutes);
+app.route('/connect/mcp', connectorMcpRoutes);
+app.route('/api/connector/consent', connectorConsentRoutes);
+app.route('/api/connector', connectorSettingsRoutes);
+app.route('/api/admin/connector', connectorAdminRoutes);
 
 // 404 handler
 app.notFound((c) => {

@@ -246,10 +246,10 @@ describe('DEFAULT_RATE_LIMITS', () => {
 // =============================================================================
 
 describe('task submit — configurable MAX_TASK_MESSAGE_LENGTH', () => {
-  const submitSource = readFileSync(resolve(process.cwd(), 'src/routes/tasks/submit.ts'), 'utf8');
+  const submitSource = readFileSync(resolve(process.cwd(), 'src/services/submit-task.ts'), 'utf8');
 
   it('reads max message length from MAX_TASK_MESSAGE_LENGTH env var', () => {
-    expect(submitSource).toContain('c.env.MAX_TASK_MESSAGE_LENGTH');
+    expect(submitSource).toContain('env.MAX_TASK_MESSAGE_LENGTH');
   });
 
   it('has a DEFAULT_MAX_MESSAGE_LENGTH constant (not hardcoded inline)', () => {
@@ -264,7 +264,7 @@ describe('task submit — configurable MAX_TASK_MESSAGE_LENGTH', () => {
   it('falls back to default when env var is absent', () => {
     // Uses parsePositiveInt helper for safe fallback
     expect(submitSource).toMatch(
-      /parsePositiveInt\(\s*c\.env\.MAX_TASK_MESSAGE_LENGTH,\s*DEFAULT_MAX_MESSAGE_LENGTH\s*\)/
+      /parsePositiveInt\(\s*env\.MAX_TASK_MESSAGE_LENGTH,\s*DEFAULT_MAX_MESSAGE_LENGTH\s*\)/
     );
   });
 

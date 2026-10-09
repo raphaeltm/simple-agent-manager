@@ -212,23 +212,27 @@ export function registerChatStopRoute(chatRoutes: Hono<{ Bindings: Env }>): void
     const userId = getUserId(c);
     const projectId = requireRouteParam(c, 'projectId');
     const sessionId = requireRouteParam(c, 'sessionId');
-    const db = drizzle(c.env.DATABASE, { schema });
-
-    await requireProjectCapability(db, projectId, userId, 'task:write');
-    await requireSessionCreator(c.env, projectId, sessionId, userId);
-
-    const context = { projectId, sessionId, userId };
-    const backingTask = await ensureSessionTaskBacked(db, c.env, {
-      projectId,
-      sessionId,
-      fallbackUserId: userId,
-    });
-    // Signal the agent BEFORE teardown — once the workspace row is gone there is
-    // nothing left to resolve a node from.
-    await signalAgentStopBestEffort(c.env, db, context);
-    await stopTaskBackedSession(c.env, db, backingTask.id, context);
-    await chatPersistence.stopChatSession(c.env, projectId, sessionId);
-
-    return c.json({ status: 'stopped', workspaceDeleted: true });
+    return c.json(await stopChat(c.env, userId, projectId, sessionId));
   });
+}
+
+export async function stopChat(env: Env, userId: string, projectId: string, sessionId: string) {
+  const db = drizzle(env.DATABASE, { schema });
+
+  await requireProjectCapability(db, projectId, userId, 'task:write');
+  await requireSessionCreator(env, projectId, sessionId, userId);
+
+  const context = { projectId, sessionId, userId };
+  const backingTask = await ensureSessionTaskBacked(db, env, {
+    projectId,
+    sessionId,
+    fallbackUserId: userId,
+  });
+  // Signal the agent BEFORE teardown — once the workspace row is gone there is
+  // nothing left to resolve a node from.
+  await signalAgentStopBestEffort(env, db, context);
+  await stopTaskBackedSession(env, db, backingTask.id, context);
+  await chatPersistence.stopChatSession(env, projectId, sessionId);
+
+  return { status: 'stopped', workspaceDeleted: true };
 }

@@ -1,6 +1,7 @@
 import { AlertCircle, ListTodo, MessageSquare, User2 } from 'lucide-react';
 import type { ReactNode } from 'react';
 
+import { ConnectorChip } from '../../components/ConnectorChip';
 import type { ChatSessionResponse } from '../../lib/api';
 import {
   ATTENTION_ICON,
@@ -120,6 +121,9 @@ export function SessionItem({
             {session.topic ? stripMarkdown(session.topic) : `Chat ${session.id.slice(0, 8)}`}
           </span>
           {badge}
+          {session.task?.triggeredBy === 'connector' && (
+            <ConnectorChip clientName={session.task.connectorClientName} />
+          )}
           {blockedBadge && (
             <span
               className="px-1 rounded-full text-danger-fg bg-danger-tint"

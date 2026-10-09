@@ -351,7 +351,7 @@ describe('Project default provider — mapper', () => {
 });
 
 describe('Project default provider — task submit', () => {
-  const submit = apiSrc('routes/tasks/submit.ts');
+  const submit = apiSrc('services/submit-task.ts');
   const placementResolver = apiSrc('services/placement-field-resolution.ts');
 
   it('reads provider from body and project default with fallback', () => {

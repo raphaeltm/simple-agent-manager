@@ -506,7 +506,7 @@ describe('operation registry contract', () => {
     expect(platform.taskDetailRecentMessageLimit).toBe(7);
     expect(platform.messageSearchLimit).toBe(11);
   });
-  it('exports ten stable operations and JSON Schema inputs', () => {
+  it('exports eighteen stable operations and JSON Schema inputs', () => {
     expect(operations.map((operation) => operation.name)).toEqual([
       'sam_task_get',
       'sam_tasks_list',
@@ -518,6 +518,14 @@ describe('operation registry contract', () => {
       'sam_idea_update',
       'sam_knowledge_search',
       'sam_profiles_list',
+      'sam_projects_list',
+      'sam_inbox_get',
+      'sam_project_get',
+      'sam_chats_list',
+      'sam_chat_start',
+      'sam_chat_send',
+      'sam_agent_answer',
+      'sam_work_stop',
     ]);
     expect(operationInputJsonSchema(samTaskGet)).toMatchObject({
       type: 'object',
