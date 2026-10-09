@@ -127,7 +127,8 @@ SAM investigation task `01M4GHKAEHXX9MG467QPMJ6EMY`, root cause also on idea
 Driver: an Instant Claude Code chat A in staging project Potato subscribes to two agent channels X
 and Y (`existing_session_prompt`), then ends its turn; chat B publishes to X, then Y.
 
-- Before, on unfixed `main` (deploy run 37946788940): chat A `0c8276c4-e4d9-47b2-b1e5-4df6b541741b`.
+- Before, without the fix (deploy run 37946788940 of PR #2291's branch, since merged to `main`):
+  chat A `0c8276c4-e4d9-47b2-b1e5-4df6b541741b`.
   X's wake (batch `478f9aa8-e9f6-45bf-9584-ad8ccfbec833`) was delivered at 15:55:53Z. Y's event
   matched but produced no wake through 16:03:58Z (8.5 min). Bug reproduced.
 - After, on branch head `2a6faf1f0` (deploy run 37956391403): chat A
