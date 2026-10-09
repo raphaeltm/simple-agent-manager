@@ -40,9 +40,128 @@ func readCommandInput(runtime Runtime, p parsedArgs, args []string, kind string)
 	return direct, nil
 }
 
+type metadataMutation struct {
+	path, method, cloneSource string
+	fields                    map[string]any
+}
+
+func metadataFields(p parsedArgs) (map[string]any, error) {
+	fields := map[string]any{}
+	for _, name := range []string{"name", "description", "title", "priority"} {
+		v, ok := p.Flags[name]
+		if !ok {
+			continue
+		}
+		if name != "priority" {
+			fields[name] = v
+			continue
+		}
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return nil, fmt.Errorf("priority requires an integer")
+		}
+		fields[name] = n
+	}
+	return fields, nil
+}
+
+func prepareMetadataMutation(ctx context.Context, client APIClient, p parsedArgs, project string, args []string) (metadataMutation, error) {
+	fields, err := metadataFields(p)
+	m := metadataMutation{path: projectAPIPath(project), method: http.MethodPatch, fields: fields}
+	if err != nil {
+		return m, err
+	}
+	switch p.Positionals[0] {
+	case "settings":
+		m.path = projectAPIPath(project, "cli", "settings")
+		if len(args) > 0 {
+			return m, fmt.Errorf("settings update takes no resource ID")
+		}
+	case "tasks", "ideas":
+		m.path = projectAPIPath(project, "tasks")
+		if p.Positionals[1] == "create" {
+			m.method = http.MethodPost
+			break
+		}
+		if len(args) != 1 {
+			return m, fmt.Errorf("update requires a full task ID")
+		}
+		m.path = projectAPIPath(project, "tasks", args[0])
+	case "profiles", "skills":
+		return prepareNamedMetadata(ctx, client, p, project, args, m)
+	default:
+		return m, fmt.Errorf("unsupported mutation")
+	}
+	return m, nil
+}
+
+func prepareNamedMetadata(ctx context.Context, client APIClient, p parsedArgs, project string, args []string, m metadataMutation) (metadataMutation, error) {
+	family, action := p.Positionals[0], p.Positionals[1]
+	apiFamily := "agent-profiles"
+	if family == "skills" {
+		apiFamily = "skills"
+	}
+	m.path = projectAPIPath(project, "cli", family)
+	if action == "create" {
+		m.method = http.MethodPost
+		return m, nil
+	}
+	if len(args) != 1 {
+		return m, fmt.Errorf("update/clone requires one name or ID")
+	}
+	id, err := resolveNamedResource(ctx, client, project, apiFamily, args[0])
+	if err != nil {
+		return m, err
+	}
+	var current map[string]any
+	if err = client.request(ctx, http.MethodGet, projectAPIPath(project, apiFamily, id), nil, &current); err != nil {
+		return m, err
+	}
+	if action == "clone" {
+		return prepareMetadataClone(p, id, current, m)
+	}
+	if current["projectId"] != project {
+		return m, fmt.Errorf("shared/global resources cannot be updated through project commands")
+	}
+	m.path = projectAPIPath(project, "cli", family, id)
+	version, _ := current["updatedAt"].(string)
+	if v := p.Flags["expected-updated-at"]; v != "" {
+		version = v
+	}
+	if version == "" {
+		return m, fmt.Errorf("resource version unavailable")
+	}
+	m.fields["expectedUpdatedAt"] = version
+	return m, nil
+}
+
+func prepareMetadataClone(p parsedArgs, id string, current map[string]any, m metadataMutation) (metadataMutation, error) {
+	if p.Flags["name"] == "" {
+		return m, fmt.Errorf("clone requires --name for a new project resource")
+	}
+	if _, ok := m.fields["description"]; !ok {
+		if v, exists := current["description"]; exists {
+			m.fields["description"] = v
+		}
+	}
+	m.method, m.cloneSource = http.MethodPost, id
+	return m, nil
+}
+
+func pinSettingsVersion(ctx context.Context, client APIClient, project string, fields map[string]any) error {
+	var current map[string]any
+	if err := client.request(ctx, http.MethodGet, projectAPIPath(project), nil, &current); err != nil {
+		return err
+	}
+	version, _ := current["updatedAt"].(string)
+	if version == "" {
+		return fmt.Errorf("project version unavailable")
+	}
+	fields["expectedUpdatedAt"] = version
+	return nil
+}
+
 func runMetadataMutation(ctx context.Context, runtime Runtime, p parsedArgs, args []string) int {
-	family := p.Positionals[0]
-	action := p.Positionals[1]
 	client, config, err := authenticatedClientWithConfig(ctx, runtime)
 	if err != nil {
 		return fail(runtime.Stderr, err)
@@ -51,120 +170,74 @@ func runMetadataMutation(ctx context.Context, runtime Runtime, p parsedArgs, arg
 	if err != nil {
 		return fail(runtime.Stderr, err)
 	}
-	fields := map[string]any{}
-	for _, name := range []string{"name", "description", "title", "priority"} {
-		if v, ok := p.Flags[name]; ok {
-			if name == "priority" {
-				n, e := strconv.Atoi(v)
-				if e != nil {
-					return fail(runtime.Stderr, fmt.Errorf("priority requires an integer"))
-				}
-				fields[name] = n
-			} else {
-				fields[name] = v
-			}
-		}
+	m, err := prepareMetadataMutation(ctx, client, p, project, args)
+	if err != nil {
+		return fail(runtime.Stderr, err)
 	}
-	path := projectAPIPath(project)
-	method := http.MethodPatch
-	var cloneSource string
-	switch family {
-	case "settings":
-		path = projectAPIPath(project, "cli", "settings")
-		if len(args) > 0 {
-			return fail(runtime.Stderr, fmt.Errorf("settings update takes no resource ID"))
-		}
-	case "tasks", "ideas":
-		path = projectAPIPath(project, "tasks")
-		if action == "create" {
-			method = http.MethodPost
-		} else {
-			if len(args) != 1 {
-				return fail(runtime.Stderr, fmt.Errorf("update requires a full task ID"))
-			}
-			path = projectAPIPath(project, "tasks", args[0])
-		}
-	case "profiles", "skills":
-		apiFamily := "agent-profiles"
-		if family == "skills" {
-			apiFamily = "skills"
-		}
-		path = projectAPIPath(project, "cli", family)
-		if action == "create" {
-			method = http.MethodPost
-		} else {
-			if len(args) != 1 {
-				return fail(runtime.Stderr, fmt.Errorf("update/clone requires one name or ID"))
-			}
-			id, e := resolveNamedResource(ctx, client, project, apiFamily, args[0])
-			if e != nil {
-				return fail(runtime.Stderr, e)
-			}
-			var current map[string]any
-			if e = client.request(ctx, http.MethodGet, projectAPIPath(project, apiFamily, id), nil, &current); e != nil {
-				return fail(runtime.Stderr, e)
-			}
-			if action == "clone" {
-				if p.Flags["name"] == "" {
-					return fail(runtime.Stderr, fmt.Errorf("clone requires --name for a new project resource"))
-				}
-				if _, ok := fields["description"]; !ok {
-					if v, exists := current["description"]; exists {
-						fields["description"] = v
-					}
-				}
-				method = http.MethodPost
-				cloneSource = id
-				break
-			}
-			if current["projectId"] != project {
-				return fail(runtime.Stderr, fmt.Errorf("shared/global resources cannot be updated through project commands"))
-			}
-			path = projectAPIPath(project, "cli", family, id)
-			version, _ := current["updatedAt"].(string)
-			if v := p.Flags["expected-updated-at"]; v != "" {
-				version = v
-			}
-			if version == "" {
-				return fail(runtime.Stderr, fmt.Errorf("resource version unavailable"))
-			}
-			fields["expectedUpdatedAt"] = version
-		}
-	default:
-		return fail(runtime.Stderr, fmt.Errorf("unsupported mutation"))
-	}
-	fieldCount := len(fields)
-	if _, ok := fields["expectedUpdatedAt"]; ok {
+	fieldCount := len(m.fields)
+	if _, ok := m.fields["expectedUpdatedAt"]; ok {
 		fieldCount--
 	}
 	if fieldCount == 0 {
 		return fail(runtime.Stderr, fmt.Errorf("no approved fields specified"))
 	}
 	if p.Bools["preview"] {
-		return writeWorkflow(runtime, p, map[string]any{"preview": true, "method": method, "path": path, "fields": fields})
+		return writeWorkflow(runtime, p, map[string]any{"preview": true, "method": m.method, "path": m.path, "fields": m.fields})
 	}
-	if family == "settings" {
-		var current map[string]any
-		if err = client.request(ctx, http.MethodGet, projectAPIPath(project), nil, &current); err != nil {
+	if p.Positionals[0] == "settings" {
+		if err = pinSettingsVersion(ctx, client, project, m.fields); err != nil {
 			return fail(runtime.Stderr, err)
 		}
-		version, _ := current["updatedAt"].(string)
-		if version == "" {
-			return fail(runtime.Stderr, fmt.Errorf("project version unavailable"))
-		}
-		fields["expectedUpdatedAt"] = version
 	}
-
 	client.idempotencyKey = p.Flags["idempotency-key"]
 	var value any
-	if err = client.request(ctx, method, path, fields, &value); err != nil {
+	if err = client.request(ctx, m.method, m.path, m.fields, &value); err != nil {
 		return fail(runtime.Stderr, err)
 	}
-	if cloneSource != "" {
-		return writeWorkflow(runtime, p, map[string]any{"created": value, "sourceId": cloneSource, "configurationCopied": false, "copiedFields": []string{"description"}})
+	if m.cloneSource != "" {
+		return writeWorkflow(runtime, p, map[string]any{"created": value, "sourceId": m.cloneSource, "configurationCopied": false, "copiedFields": []string{"description"}})
 	}
 	return writeWorkflow(runtime, p, value)
 }
+
+func selectedMetadata(source map[string]any, keys ...string) map[string]any {
+	metadata := map[string]any{}
+	for _, key := range keys {
+		if value, exists := source[key]; exists {
+			metadata[key] = value
+		}
+	}
+	return metadata
+}
+
+func maskedRuntimeAssets(assets map[string]any) map[string]any {
+	masked := map[string]any{}
+	for _, kind := range []string{"envVars", "files"} {
+		var rows []any
+		for _, row := range anyRows(assets[kind]) {
+			source, ok := row.(map[string]any)
+			if !ok {
+				continue
+			}
+			metadata := selectedMetadata(source, "key", "path", "isSecret", "hasValue", "createdAt", "updatedAt")
+			metadata["value"] = "REDACTED"
+			rows = append(rows, metadata)
+		}
+		masked[kind] = rows
+	}
+	return masked
+}
+
+func safeAgentDefaults(defaults map[string]any) map[string]any {
+	filtered := map[string]any{}
+	for agent, raw := range defaults {
+		if config, ok := raw.(map[string]any); ok {
+			filtered[agent] = selectedMetadata(config, "model", "permissionMode")
+		}
+	}
+	return filtered
+}
+
 func runSettingsInspect(ctx context.Context, runtime Runtime, p parsedArgs) int {
 	client, config, err := authenticatedClientWithConfig(ctx, runtime)
 	if err != nil {
@@ -178,52 +251,17 @@ func runSettingsInspect(ctx context.Context, runtime Runtime, p parsedArgs) int 
 	if err = client.request(ctx, http.MethodGet, projectAPIPath(project), nil, &value); err != nil {
 		return fail(runtime.Stderr, err)
 	}
-	safe := map[string]any{}
-	for _, k := range []string{"id", "name", "description", "repository", "defaultBranch", "status", "summary", "defaultAgentProfileId"} {
-		if v, ok := value[k]; ok {
-			safe[k] = v
-		}
-	}
+	safe := selectedMetadata(value, "id", "name", "description", "repository", "defaultBranch", "status", "summary", "defaultAgentProfileId")
 	safe["runtimeValues"] = "redacted"
 	var assets map[string]any
-	if readErr := client.request(ctx, http.MethodGet, projectAPIPath(project, "runtime-config"), nil, &assets); readErr != nil {
+	if client.request(ctx, http.MethodGet, projectAPIPath(project, "runtime-config"), nil, &assets) != nil {
 		safe["runtimeConfig"] = map[string]any{"available": false}
 	} else {
-		masked := map[string]any{}
-		for _, kind := range []string{"envVars", "files"} {
-			var rows []any
-			for _, row := range anyRows(assets[kind]) {
-				source, ok := row.(map[string]any)
-				if !ok {
-					continue
-				}
-				metadata := map[string]any{"value": "REDACTED"}
-				for _, key := range []string{"key", "path", "isSecret", "hasValue", "createdAt", "updatedAt"} {
-					if v, exists := source[key]; exists {
-						metadata[key] = v
-					}
-				}
-				rows = append(rows, metadata)
-			}
-			masked[kind] = rows
-		}
-		safe["runtimeConfig"] = masked
+		safe["runtimeConfig"] = maskedRuntimeAssets(assets)
 	}
 	safe["resolutionOrder"] = []string{"explicit task", "skill/profile", "project agent defaults", "user agent settings", "platform defaults"}
 	if defaults, ok := value["agentDefaults"].(map[string]any); ok {
-		filtered := map[string]any{}
-		for agent, raw := range defaults {
-			if config, ok := raw.(map[string]any); ok {
-				entry := map[string]any{}
-				for _, key := range []string{"model", "permissionMode"} {
-					if v, exists := config[key]; exists {
-						entry[key] = v
-					}
-				}
-				filtered[agent] = entry
-			}
-		}
-		safe["agentDefaults"] = filtered
+		safe["agentDefaults"] = safeAgentDefaults(defaults)
 	}
 	return writeWorkflow(runtime, p, safe)
 }
