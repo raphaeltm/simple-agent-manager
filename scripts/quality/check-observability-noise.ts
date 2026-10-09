@@ -334,7 +334,7 @@ export function formatReport(findings: Finding[]): string {
 // Main
 // =============================================================================
 
-async function checkD1Noise(config: ReturnType<typeof getConfig>): Promise<Finding[]> {
+export async function checkD1Noise(config: ReturnType<typeof getConfig>): Promise<Finding[]> {
   const { cfToken, cfAccountId, observabilityDbId, lookbackHours, threshold } = config;
 
   if (!observabilityDbId) {
@@ -348,7 +348,7 @@ async function checkD1Noise(config: ReturnType<typeof getConfig>): Promise<Findi
   // Check 1: Repeated errors grouped by message
   console.log('  Querying D1 for repeated errors...');
   try {
-    const repeatedSql = `SELECT message, COUNT(*) as cnt FROM platform_errors WHERE timestamp >= ${sinceMs} GROUP BY message HAVING cnt >= ${threshold} ORDER BY cnt DESC LIMIT 20`;
+    const repeatedSql = `SELECT message, COUNT(*) as cnt FROM platform_errors WHERE timestamp >= ${sinceMs} AND level = 'error' GROUP BY message HAVING cnt >= ${threshold} ORDER BY cnt DESC LIMIT 20`;
     const repeatedResp = await queryD1(cfToken, cfAccountId, observabilityDbId, repeatedSql);
     if (repeatedResp.success && repeatedResp.result?.[0]?.results) {
       findings.push(...analyzeRepeatedErrors(repeatedResp.result[0].results, threshold));

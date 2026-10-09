@@ -1,9 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { DatabaseSync } from 'node:sqlite';
+
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   analyzeRepeatedErrors,
   analyzeSeverityMismatches,
   buildSuccessPatternClause,
+  checkD1Noise,
   formatReport,
   SUCCESS_PATTERNS,
 } from './check-observability-noise';
@@ -51,9 +54,7 @@ describe('check-observability-noise', () => {
     });
 
     it('detects ingest-401 pattern', () => {
-      const rows = [
-        { message: 'POST /api/admin/observability/logs/ingest returned 401', cnt: 50 },
-      ];
+      const rows = [{ message: 'POST /api/admin/observability/logs/ingest returned 401', cnt: 50 }];
       const findings = analyzeRepeatedErrors(rows, 10);
       expect(findings).toHaveLength(1);
       expect(findings[0].category).toBe('ingest-401');
@@ -95,8 +96,18 @@ describe('check-observability-noise', () => {
 
     it('groups findings by severity', () => {
       const findings = [
-        { category: 'ingest-401' as const, severity: 'high' as const, message: 'ingest 401', count: 50 },
-        { category: 'severity-mismatch' as const, severity: 'medium' as const, message: 'started ok', count: 12 },
+        {
+          category: 'ingest-401' as const,
+          severity: 'high' as const,
+          message: 'ingest 401',
+          count: 50,
+        },
+        {
+          category: 'severity-mismatch' as const,
+          severity: 'medium' as const,
+          message: 'started ok',
+          count: 12,
+        },
       ];
       const report = formatReport(findings);
       expect(report).toContain('HIGH SEVERITY');
@@ -106,4 +117,41 @@ describe('check-observability-noise', () => {
       expect(report).toContain('Total findings: 2');
     });
   });
+});
+
+it('reports repeated errors without treating routine informational lifecycle logs as errors', async () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec('CREATE TABLE platform_errors (message TEXT, level TEXT, timestamp INTEGER)');
+  const insert = db.prepare('INSERT INTO platform_errors VALUES (?, ?, ?)');
+  for (let i = 0; i < 12; i++) {
+    insert.run('ACP Prompt started', 'info', Date.now());
+    insert.run('Real synthetic failure', 'error', Date.now());
+  }
+  vi.stubGlobal('fetch', async (_url: unknown, init: RequestInit) => {
+    const sql = JSON.parse(String(init.body)).sql;
+    return new Response(
+      JSON.stringify({ success: true, result: [{ results: db.prepare(sql).all() }] })
+    );
+  });
+  try {
+    const findings = await checkD1Noise({
+      cfToken: 'synthetic',
+      cfAccountId: 'fixture',
+      observabilityDbId: 'fixture',
+      lookbackHours: 24,
+      threshold: 10,
+      telemetryTimeframeSec: 86400,
+    });
+    expect(findings).toEqual([
+      {
+        category: 'repeated-error',
+        severity: 'medium',
+        message: 'Real synthetic failure',
+        count: 12,
+      },
+    ]);
+  } finally {
+    vi.unstubAllGlobals();
+    db.close();
+  }
 });
