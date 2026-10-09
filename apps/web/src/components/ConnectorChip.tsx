@@ -2,7 +2,7 @@
 export function ConnectorChip({ clientName }: { clientName?: string | null }) {
   return (
     <span
-      className="inline-block max-w-full truncate rounded bg-accent-tint px-1.5 py-0.5 text-xs text-fg-secondary"
+      className="inline-block max-w-[40%] shrink-0 truncate rounded bg-accent-tint px-1.5 py-0.5 text-xs text-fg-secondary"
       title={`Created via ${clientName || 'Connector'}`}
     >
       via {clientName || 'Connector'}

@@ -65,6 +65,7 @@ vi.mock(
   'cloudflare:workers',
   () => ({
     DurableObject: MockDurableObject,
+    WorkerEntrypoint: class {},
   }),
   { virtual: true }
 );

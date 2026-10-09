@@ -713,3 +713,31 @@ test.describe('Touch Target Size - Bounding Box', () => {
     expect(box!.height).toBeGreaterThanOrEqual(44);
   });
 });
+
+test('Connector provenance in ideas and active task cards', async ({ page }) => {
+  const connectorClientName = 'Claude Research 🧪 & planning '.repeat(9);
+  const tasks = NORMAL_TASKS.map((task) => ({
+    ...task,
+    triggeredBy: 'connector',
+    connectorClientName,
+  }));
+  const dashboardTasks = MOCK_DASHBOARD_TASKS.map((task) => ({
+    ...task,
+    triggeredBy: 'connector',
+    connectorClientName,
+  }));
+  await setupApiMocks(page, { tasks, dashboardTasks });
+  await page.goto('/projects/proj-test-1/ideas');
+  await expect(page.getByTitle(`Created via ${connectorClientName}`).first()).toBeVisible();
+  await assertNoOverflow(page);
+  expect(
+    await page
+      .getByRole('heading', { name: 'Implement user authentication' })
+      .evaluate((el) => el.getBoundingClientRect().width)
+  ).toBeGreaterThan(50);
+  await takeScreenshot(page, 'connector-ideas-provenance');
+  await page.goto('/dashboard');
+  await expect(page.getByTitle(`Created via ${connectorClientName}`).first()).toBeVisible();
+  await assertNoOverflow(page);
+  await takeScreenshot(page, 'connector-dashboard-provenance');
+});

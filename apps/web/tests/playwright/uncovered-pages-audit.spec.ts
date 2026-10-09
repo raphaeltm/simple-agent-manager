@@ -370,3 +370,23 @@ test.describe('Uncovered pages sweep', () => {
     await visit(page, `/projects/${PROJECT_ID}/settings/runtime`, 'sweep-settings-runtime');
   });
 });
+
+test('Connector activity provenance wraps long external app names', async ({ page }) => {
+  await setupMocks(page);
+  const clientName = 'Claude Research 🧪 & planning '.repeat(9);
+  await page.route('**/api/projects/*/activity*', (route) =>
+    route.fulfill({
+      json: {
+        events: activityEvents.map((event) => ({
+          ...event,
+          payload: { ...event.payload, via: 'connector', clientName },
+        })),
+        hasMore: false,
+      },
+    })
+  );
+  await page.goto(`/projects/${PROJECT_ID}/activity`);
+  await expect(page.getByText(`You via ${clientName}`, { exact: true }).first()).toBeVisible();
+  await assertNoOverflow(page);
+  await screenshot(page, 'connector-activity-provenance', { scopeToProject: true });
+});

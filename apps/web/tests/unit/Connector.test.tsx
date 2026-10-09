@@ -96,6 +96,29 @@ describe('Connector consent and access', () => {
     expect(screen.getByText('claude.ai')).toBeInTheDocument();
     expect(mocks.get).toHaveBeenCalledTimes(1);
   });
+  it('admits only one pending load-more request', async () => {
+    let finish!: (value: { connections: (typeof connection)[]; nextCursor: null }) => void;
+    mocks.connections
+      .mockResolvedValueOnce({ connections: [connection], nextCursor: 'page-2' })
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          })
+      );
+    render(<ConnectorConnections />);
+    const more = await screen.findByRole('button', { name: 'Load more connections' });
+    fireEvent.click(more);
+    fireEvent.click(more);
+    expect(mocks.connections).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole('button', { name: 'Loading connections…' })).toBeDisabled();
+    finish({
+      connections: [{ ...connection, id: 'grant-2', clientName: 'ChatGPT' }],
+      nextCursor: null,
+    });
+    expect(await screen.findByText('ChatGPT')).toBeInTheDocument();
+    expect(screen.getAllByText('Claude')).toHaveLength(1);
+  });
   it('requires confirmation before revoking and refreshes the list after success', async () => {
     mocks.connections
       .mockResolvedValueOnce({ connections: [connection] })

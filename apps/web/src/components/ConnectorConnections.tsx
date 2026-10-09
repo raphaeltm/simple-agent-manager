@@ -1,6 +1,6 @@
 import { Alert, Button, Spinner } from '@simple-agent-manager/ui';
 import { AppWindow } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   type ConnectorConnection,
@@ -16,11 +16,17 @@ export function ConnectorConnections({ admin = false }: { admin?: boolean }) {
   const [connections, setConnections] = useState<ConnectorConnection[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const inFlight = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [target, setTarget] = useState<ConnectorConnection | null>(null);
   const [busy, setBusy] = useState(false);
   const load = useCallback(
     async (next?: string) => {
+      if (inFlight.current) return;
+      inFlight.current = true;
+      setLoadingMore(!!next);
+      setError(null);
       try {
         const result = await connectorConnections(admin, next);
         setConnections((previous) =>
@@ -30,7 +36,9 @@ export function ConnectorConnections({ admin = false }: { admin?: boolean }) {
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Could not load connected apps');
       } finally {
+        inFlight.current = false;
         setLoading(false);
+        setLoadingMore(false);
       }
     },
     [admin]
@@ -80,15 +88,23 @@ export function ConnectorConnections({ admin = false }: { admin?: boolean }) {
                   Connected {connectorDate(c.createdAt)} · Last used {connectorDate(c.lastUsedAt)}
                 </p>
               </div>
-              <Button variant="secondary" onClick={() => setTarget(c)}>
+              <Button
+                variant="secondary"
+                disabled={busy || loadingMore}
+                onClick={() => setTarget(c)}
+              >
                 Revoke
               </Button>
             </div>
           ))
       )}
       {cursor && (
-        <Button variant="secondary" disabled={busy} onClick={() => void load(cursor)}>
-          Load more connections
+        <Button
+          variant="secondary"
+          disabled={busy || loadingMore}
+          onClick={() => void load(cursor)}
+        >
+          {loadingMore ? 'Loading connections…' : 'Load more connections'}
         </Button>
       )}
       <ConfirmDialog

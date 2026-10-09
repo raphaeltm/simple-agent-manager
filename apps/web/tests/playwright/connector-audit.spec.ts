@@ -164,3 +164,14 @@ test('consent errors are readable without an approval action', async ({ page }) 
   await assertNoOverflow(page);
   await screenshot(page, 'connector-consent-error', { scopeToProject: true });
 });
+
+test('Connector admin inventories and revoke controls are visible', async ({ page }) => {
+  await page.goto('/admin/integrations');
+  await page.getByRole('heading', { name: 'Seen clients' }).scrollIntoViewIfNeeded();
+  await expect(page.getByRole('button', { name: 'Block', exact: true })).toBeVisible();
+  await assertNoOverflow(page);
+  await screenshot(page, 'connector-admin-inventories', { scopeToProject: true });
+  await page.getByRole('button', { name: 'Revoke', exact: true }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await screenshot(page, 'connector-admin-revoke', { scopeToProject: true });
+});

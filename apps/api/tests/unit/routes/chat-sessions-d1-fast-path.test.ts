@@ -147,17 +147,26 @@ describe('GET /api/projects/:projectId/sessions — D1 fast path', () => {
       expect((body as { sessions: unknown[] }).sessions).toEqual([
         expect.objectContaining({
           id: 'old-chat',
-          task: { id: 'old-task', status: 'cancelled', terminalReason: 'snapshot_expired' },
+          task: {
+            id: 'old-task',
+            status: 'cancelled',
+            terminalReason: 'snapshot_expired',
+            triggeredBy: null,
+            connectorClientName: null,
+          },
         }),
       ]);
     }
   );
 
-  it.each(['-1', '0', 'invalid'])('bounds invalid page limit %s and offset before either backend', async (limit) => {
-    const { status } = await listSessions(`?limit=${limit}&offset=-1`);
-    expect(status).toBe(200);
-    expect(mocks.listSessions).toHaveBeenCalledWith(env, PROJECT, null, 20, 0, null, null);
-  });
+  it.each(['-1', '0', 'invalid'])(
+    'bounds invalid page limit %s and offset before either backend',
+    async (limit) => {
+      const { status } = await listSessions(`?limit=${limit}&offset=-1`);
+      expect(status).toBe(200);
+      expect(mocks.listSessions).toHaveBeenCalledWith(env, PROJECT, null, 20, 0, null, null);
+    }
+  );
 
   it('does not attach an outcome from another project', async () => {
     addIndexedSession('scoped-chat');

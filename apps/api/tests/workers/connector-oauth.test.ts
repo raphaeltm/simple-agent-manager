@@ -622,17 +622,6 @@ describe('Connector OAuth real Workers/KV conformance', () => {
           : text
       );
     };
-    const { samChatStart } = await import('../../src/operations/connector-operations');
-    const originalRun = samChatStart.run;
-    let startError: unknown;
-    const instrument = vi.spyOn(samChatStart, 'run').mockImplementation(async (...args) => {
-      try {
-        return await originalRun(...args);
-      } catch (error) {
-        startError = error;
-        throw error;
-      }
-    });
     const started = await invoke('sam_chat_start', {
       projectId,
       message: 'Inspect the project and report findings',
@@ -640,11 +629,7 @@ describe('Connector OAuth real Workers/KV conformance', () => {
     });
     expect(started.status).toBe(200);
     const startedBody = await decode(started);
-    instrument.mockRestore();
-    expect(
-      startedBody,
-      startError instanceof Error ? startError.stack : JSON.stringify(startedBody)
-    ).toMatchObject({
+    expect(startedBody, JSON.stringify(startedBody)).toMatchObject({
       result: {
         structuredContent: { data: { taskId: expect.any(String), sessionId: expect.any(String) } },
       },

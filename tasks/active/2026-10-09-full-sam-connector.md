@@ -10,7 +10,7 @@ Existing operations are in `apps/api/src/operations`. PAT HMAC authentication is
 
 ## Implementation and acceptance
 
-- [ ] Reuse P0 foundation and incorporate final P0 fixes.
+- [x] Reuse P0 foundation and incorporate final P0 fixes.
 - [x] All 18 catalog operations, membership/capability/session ownership checks inside operations, shared dispatch preserving VM/Instant/quotas/profile/skill selection.
 - [x] Official SDK stateless endpoint, legacy and modern protocol support, stable schemas/annotations, structured output/deep links/untrusted text.
 - [x] PAT and OAuth bearer authentication, current user status gates, audience binding, scope challenges.
@@ -18,9 +18,13 @@ Existing operations are in `apps/api/src/operations`. PAT HMAC authentication is
 - [x] OAuth discovery/DCR/PKCE/consent/token refresh rotation/revocation and configurable settings; OAUTH_KV provisioning.
 - [x] Mobile/desktop consent, Settings Access and Connected apps, Admin Integrations Connector controls, provenance labels.
 - [x] Public guide, self-hosting/env/API references.
-- [ ] SQLite attack/control tests and guard mutation checks; real MCP client tests; OAuth conformance and full capability flow.
+- [x] SQLite attack/control tests and guard mutation checks; real MCP client tests; OAuth conformance and full capability flow.
 - [ ] Lint/typecheck/tests/build, mobile/desktop Playwright screenshots reviewed.
-- [ ] Independent specialist reviews, all findings addressed.
+- [x] Independent specialist reviews, all findings addressed.
 - [ ] PR required checks green, CodeRabbit requested and any feedback resolved, ready for review.
 
 Scope follows the fully specified and approved P0–P2 Connector. The specification author confirmed P3 toolsets and P4 /sam belong to later roadmaps. Do not claim them implemented without specification and implementation evidence. Staging deployment is prohibited by the current request; document exactly which verification remains unperformed.
+
+## Review and PR evidence
+
+PR: https://github.com/raphaeltm/simple-agent-manager/pull/2294 (no merge/deploy). Independent security/constitution/Cloudflare/docs/completion and test/env/UI reviewers PASS. Final local desktop/mobile Playwright18/18; screenshot evidence published in PR comment6087971171. Review fixed DCR admission, atomic OAuth replay handling, audit allowlists, pagination request races and long-client badge clipping. Full lint/typecheck/build passed; final full-suite rerun and CI remain pending. P0 owner merged #2293; integrate current main without merging this PR.

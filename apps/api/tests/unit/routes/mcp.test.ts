@@ -267,6 +267,9 @@ function createStatefulTaskD1(task: StatefulTaskRow) {
             return [
               [
                 task.id,
+                task.project_id,
+                'user',
+                null,
                 task.title,
                 task.description,
                 task.status,
@@ -1368,6 +1371,9 @@ describe('MCP Routes', () => {
       mockD1Results(mockD1._stmt, [
         {
           id: 'task-other',
+          project_id: 'proj-456',
+          triggered_by: 'user',
+          connector_client_name: null,
           title: 'Another task',
           description: 'Full description here',
           status: 'completed',
@@ -1407,6 +1413,9 @@ describe('MCP Routes', () => {
       mockD1Results(mockD1._stmt, [
         {
           id: 'task-with-session',
+          project_id: 'proj-456',
+          triggered_by: 'user',
+          connector_client_name: null,
           title: 'Sparse completed task',
           description: 'Review the codebase',
           status: 'completed',
@@ -1480,6 +1489,9 @@ describe('MCP Routes', () => {
       mockD1Results(mockD1._stmt, [
         {
           id: 'task-session-read-fails',
+          project_id: 'proj-456',
+          triggered_by: 'user',
+          connector_client_name: null,
           title: 'Task with inaccessible session diagnostics',
           description: 'Do important work',
           status: 'completed',
@@ -1518,6 +1530,9 @@ describe('MCP Routes', () => {
       mockD1Results(mockD1._stmt, [
         {
           id: 'task-no-session',
+          project_id: 'proj-456',
+          triggered_by: 'user',
+          connector_client_name: null,
           title: 'Task without chat',
           description: 'Manual task',
           status: 'completed',
@@ -6421,6 +6436,9 @@ describe('MCP Routes', () => {
       mockD1Results(mockD1._stmt, [
         {
           id: 'task-peer',
+          projectId: 'proj-456',
+          triggeredBy: 'user',
+          connectorClientName: null,
           title: 'Auth refactor',
           description: 'Refactored the auth module',
           status: 'completed',

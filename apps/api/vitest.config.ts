@@ -12,6 +12,8 @@ export default defineConfig({
     },
   },
   test: {
+    // Transform this Workers-only dependency so its runtime import uses the test alias.
+    server: { deps: { inline: ['@cloudflare/workers-oauth-provider'] } },
     globals: true,
     include: ['tests/**/*.test.ts'],
     exclude: ['tests/workers/**'],

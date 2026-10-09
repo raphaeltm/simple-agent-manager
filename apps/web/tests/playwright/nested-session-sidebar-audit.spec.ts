@@ -376,3 +376,30 @@ test.describe('Nested session sidebar — Desktop', () => {
     await verifyOlderHierarchyFlow(page, 'nested-sidebar-stale-hierarchy-desktop');
   });
 });
+
+test('Connector provenance in session sidebar remains user-initiated', async ({ page }) => {
+  await page.addInitScript(() =>
+    localStorage.setItem('sam-onboarding-wizard-dismissed-user-test-1', 'true')
+  );
+  const connectorClientName = 'Claude Research 🧪 & planning '.repeat(9);
+  const tasks = NORMAL_TASKS.map((task) => ({
+    ...task,
+    parentTaskId: null,
+    triggeredBy: 'connector',
+    connectorClientName,
+  }));
+  const sessions = NORMAL_SESSIONS.map((session, i) => ({ ...session, task: tasks[i] }));
+  await setupApiMocks(page, { tasks, sessions });
+  await page.goto('/projects/proj-1');
+  await expect(page.getByRole('button', { name: 'Project settings' })).toBeVisible();
+  await openMobileSidebar(page);
+  await expect(page.getByTitle(`Created via ${connectorClientName}`).first()).toBeVisible();
+  await assertNoOverflow(page);
+  expect(
+    await page
+      .getByText('Implement authentication', { exact: true })
+      .first()
+      .evaluate((el) => el.getBoundingClientRect().width)
+  ).toBeGreaterThan(50);
+  await screenshot(page, `connector-session-provenance-${page.viewportSize()?.width}`);
+});
