@@ -1,0 +1,158 @@
+// Audit observations against revision 5199e5771. Run only in a disposable CLI copy.
+// These assert observed limitations, not desired behavior. All data is synthetic.
+package cli
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"strings"
+	"testing"
+)
+
+func TestAuditChatPaginationFlagsIgnored(t *testing.T) {
+	for _, jsonMode := range []bool{false, true} {
+		args := []string{"chat", "session_fixture", "--project=01KHRJGANBBWGDY1NZ0KVF0D4J", "--limit=1", "--before=123"}
+		if jsonMode {
+			args = append(args, "--json")
+		}
+		calls := 0
+		doer := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			calls++
+			if r.Method != "GET" || r.URL.RawQuery != "" {
+				t.Fatal("unexpected paging request")
+			}
+			return jsonResponse(`{"session":{"id":"session_fixture"},"messages":[{"id":"message_fixture","role":"assistant","content":"Synthetic page","createdAt":123,"sequence":7,"origin":"system","toolMetadata":{"content":[]}}],"hasMore":true}`, 200), nil
+		})
+		runtime, out, errout := testRuntime(t, args, doer, nil)
+		if Run(context.Background(), runtime) != 0 || calls != 1 {
+			t.Fatalf("unexpected result: %s", errout.String())
+		}
+		if jsonMode {
+			var got map[string]any
+			if json.Unmarshal(out.Bytes(), &got) != nil {
+				t.Fatal("invalid JSON")
+			}
+			if got["hasMore"] != true {
+				t.Fatal("expected hasMore")
+			}
+			m := got["messages"].([]any)[0].(map[string]any)
+			for _, key := range []string{"sequence", "origin", "toolMetadata"} {
+				if _, ok := m[key]; ok {
+					t.Fatalf("unexpected retained %s", key)
+				}
+			}
+		} else if strings.Contains(out.String()+errout.String(), "hasMore") || strings.Contains(out.String()+errout.String(), "more messages") {
+			t.Fatal("unexpected truncation warning")
+		}
+	}
+}
+
+func TestAuditJSONFieldLoss(t *testing.T) {
+	cases := []struct {
+		name   string
+		args   []string
+		body   string
+		absent []string
+	}{
+		{"projects", []string{"projects"}, `{"projects":[],"nextCursor":"next_fixture"}`, []string{"nextCursor"}},
+		{"sessions", []string{"chat"}, `{"sessions":[],"total":21}`, []string{"total"}},
+		{"ideas", []string{"ideas"}, `{"tasks":[{"id":"idea_fixture","description":"Synthetic description"}],"nextCursor":"next_fixture"}`, []string{"nextCursor", "description"}},
+		{"profile", []string{"profiles"}, `{"items":[{"id":"profile_fixture","name":"Fixture","model":"fixture-model","effort":"high","runtime":"vm","projectId":null,"permissionMode":"default"}]}`, []string{"model", "effort", "runtime", "projectId", "permissionMode"}},
+		{"activity", []string{"activity"}, `{"events":[],"hasMore":true}`, []string{"hasMore"}},
+		{"notification", []string{"notifications"}, `{"notifications":[{"id":"notification_fixture","body":"Synthetic body","projectId":"project_fixture","actionUrl":"/fixture"}]}`, []string{"body", "projectId", "actionUrl"}},
+		{"project", []string{"project"}, `{"id":"project_fixture","summary":{"activeWorkspaceCount":3},"defaultAgentType":"openai-codex"}`, []string{"summary", "defaultAgentType"}},
+		{"task", []string{"task", "status", "task_fixture"}, `{"id":"task_fixture","description":"Synthetic description","chatSessionId":"session_fixture","blocked":true,"dependencies":[]}`, []string{"description", "chatSessionId", "blocked", "dependencies"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			args := append(c.args, "--project=01KHRJGANBBWGDY1NZ0KVF0D4J", "--json")
+			doer, _ := captureJSONRequest(t, c.body, http.StatusOK)
+			runtime, out, errout := testRuntime(t, args, doer, nil)
+			if Run(context.Background(), runtime) != 0 {
+				t.Fatalf("failed: %s", errout.String())
+			}
+			var got map[string]any
+			if json.Unmarshal(out.Bytes(), &got) != nil {
+				t.Fatal("invalid JSON")
+			}
+			rendered := out.String()
+			for _, key := range c.absent {
+				if strings.Contains(rendered, `"`+key+`"`) {
+					t.Fatalf("unexpected retained %s", key)
+				}
+			}
+		})
+	}
+}
+
+func TestAuditUnknownMutationFlagsIgnored(t *testing.T) {
+	doer, captured := captureJSONRequest(t, `{"taskId":"task_fixture","sessionId":"session_fixture","status":"queued"}`, 202)
+	args := []string{"chat", "new", "--prompt=synthetic task", "--project=01KHRJGANBBWGDY1NZ0KVF0D4J", "--agent-profile=Sol", "--skill=fixture-skill", "--dry-run"}
+	runtime, _, errout := testRuntime(t, args, doer, nil)
+	if Run(context.Background(), runtime) != 0 {
+		t.Fatalf("failed: %s", errout.String())
+	}
+	if captured.Method != "POST" || captured.JSON["agentProfileId"] != "Sol" {
+		t.Fatal("unexpected submission")
+	}
+	if _, ok := captured.JSON["skillId"]; ok {
+		t.Fatal("unexpected skill forwarded")
+	}
+}
+
+func TestAuditStatusInvalidProjectFallsBack(t *testing.T) {
+	doer, _ := captureJSONRequest(t, `{"projects":[{"id":"project_fixture","name":"Fixture"}]}`, 200)
+	runtime, out, errout := testRuntime(t, []string{"status", "--project=does-not-exist", "--json"}, doer, nil)
+	if Run(context.Background(), runtime) != 0 || !strings.Contains(out.String(), `"projects"`) {
+		t.Fatalf("unexpected result: %s", errout.String())
+	}
+}
+
+func TestAuditLegacyProjectNameIsLiteral(t *testing.T) {
+	doer, captured := captureJSONRequest(t, `{"id":"task_fixture","status":"completed"}`, 200)
+	runtime, _, errout := testRuntime(t, []string{"task", "status", "task_fixture", "--project=SAM"}, doer, nil)
+	if Run(context.Background(), runtime) != 0 || !strings.Contains(captured.URL, "/projects/SAM/tasks/") {
+		t.Fatalf("unexpected result: %s", errout.String())
+	}
+}
+
+func TestAuditLegacyTaskIgnoresActiveProject(t *testing.T) {
+	env := tempConfigEnv(t)
+	setActiveProjectConfig(t, env, "project_fixture", "Fixture")
+	runtime, _, _ := testRuntime(t, []string{"task", "status", "task_fixture"}, noRequestDoer(t), env.values)
+	if Run(context.Background(), runtime) != 1 {
+		t.Fatal("expected missing task ID error after project positional consumption")
+	}
+}
+
+func TestAuditSubcommandWordsIgnored(t *testing.T) {
+	doer, captured := captureJSONRequest(t, `{"items":[]}`, 200)
+	runtime, _, errout := testRuntime(t, []string{"profiles", "create", "--name=Fixture", "--project=01KHRJGANBBWGDY1NZ0KVF0D4J"}, doer, nil)
+	if Run(context.Background(), runtime) != 0 || captured.Method != "GET" {
+		t.Fatalf("unexpected result: %s", errout.String())
+	}
+}
+
+func TestAuditHelpConsumesFollowingPositional(t *testing.T) {
+	runtime, out, _ := testRuntime(t, []string{"--help", "chat"}, noRequestDoer(t), nil)
+	if Run(context.Background(), runtime) != 0 || !strings.Contains(out.String(), "SAM CLI") {
+		t.Fatal("expected root help")
+	}
+	parsed, err := parseArgs([]string{"chat", "--help", "session_fixture"})
+	if err != nil || parsed.Bools["help"] || parsed.Flags["help"] != "session_fixture" {
+		t.Fatal("unexpected parser behavior")
+	}
+}
+
+func TestAuditJSONErrorIsPlainTextAndCanEchoServerBody(t *testing.T) {
+	canary := "SYNTHETIC_SECRET_CANARY"
+	doer, _ := captureJSONRequest(t, "failure "+canary, 500)
+	runtime, out, errout := testRuntime(t, []string{"projects", "--json"}, doer, nil)
+	if Run(context.Background(), runtime) != 1 || out.Len() != 0 || !strings.Contains(errout.String(), canary) {
+		t.Fatal("unexpected error behavior")
+	}
+	if json.Valid(errout.Bytes()) {
+		t.Fatal("unexpected structured error")
+	}
+}

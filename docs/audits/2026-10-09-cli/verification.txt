@@ -1,0 +1,40 @@
+go version go1.26.6 linux/amd64
+	github.com/workspace/sam-cli/cmd/sam		coverage: 0.0% of statements
+ok  	github.com/workspace/sam-cli/internal/cli	1.510s	coverage: 83.1% of statements
+total:									(statements)			82.9%
+=== RUN   TestAuditChatPaginationFlagsIgnored
+--- PASS: TestAuditChatPaginationFlagsIgnored (0.00s)
+=== RUN   TestAuditJSONFieldLoss
+=== RUN   TestAuditJSONFieldLoss/projects
+=== RUN   TestAuditJSONFieldLoss/sessions
+=== RUN   TestAuditJSONFieldLoss/ideas
+=== RUN   TestAuditJSONFieldLoss/profile
+=== RUN   TestAuditJSONFieldLoss/activity
+=== RUN   TestAuditJSONFieldLoss/notification
+=== RUN   TestAuditJSONFieldLoss/project
+=== RUN   TestAuditJSONFieldLoss/task
+--- PASS: TestAuditJSONFieldLoss (0.01s)
+    --- PASS: TestAuditJSONFieldLoss/projects (0.00s)
+    --- PASS: TestAuditJSONFieldLoss/sessions (0.00s)
+    --- PASS: TestAuditJSONFieldLoss/ideas (0.00s)
+    --- PASS: TestAuditJSONFieldLoss/profile (0.00s)
+    --- PASS: TestAuditJSONFieldLoss/activity (0.00s)
+    --- PASS: TestAuditJSONFieldLoss/notification (0.00s)
+    --- PASS: TestAuditJSONFieldLoss/project (0.00s)
+    --- PASS: TestAuditJSONFieldLoss/task (0.00s)
+=== RUN   TestAuditUnknownMutationFlagsIgnored
+--- PASS: TestAuditUnknownMutationFlagsIgnored (0.00s)
+=== RUN   TestAuditStatusInvalidProjectFallsBack
+--- PASS: TestAuditStatusInvalidProjectFallsBack (0.00s)
+=== RUN   TestAuditLegacyProjectNameIsLiteral
+--- PASS: TestAuditLegacyProjectNameIsLiteral (0.00s)
+=== RUN   TestAuditLegacyTaskIgnoresActiveProject
+--- PASS: TestAuditLegacyTaskIgnoresActiveProject (0.00s)
+=== RUN   TestAuditSubcommandWordsIgnored
+--- PASS: TestAuditSubcommandWordsIgnored (0.00s)
+=== RUN   TestAuditHelpConsumesFollowingPositional
+--- PASS: TestAuditHelpConsumesFollowingPositional (0.00s)
+=== RUN   TestAuditJSONErrorIsPlainTextAndCanEchoServerBody
+--- PASS: TestAuditJSONErrorIsPlainTextAndCanEchoServerBody (0.00s)
+PASS
+ok  	github.com/workspace/sam-cli/internal/cli	1.052s
