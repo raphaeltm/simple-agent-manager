@@ -279,6 +279,81 @@ describe('event wake target occupancy', () => {
     });
   });
 
+  it('frees the chat when the agent acknowledges its queued wake', async () => {
+    const f = await twoAgentProject();
+    await withAgentMessageChannels(async () => {
+      await subscribeToHeadCommit(f);
+      okBody<ChannelReceipt>(
+        await f.b.tool('send_durable_message', {
+          targetTaskId: f.a.taskId,
+          message: 'ack me early',
+          messageClass: 'deliver',
+        })
+      );
+      await withQuietAlarms(f, async () => {
+        const t0 = Date.now();
+        expect(await materialize(f, t0)).toMatchObject({ status: 'materialized' });
+        const messageWake = await onlyWake(f, f.a.sessionId);
+        await admitCheckRunCompleted(f, 'e2e');
+        expect(await wakeDueAt(f, t0 + 1_000)).toBeNull();
+
+        okBody(await f.a.tool('ack_event_delivery', { deliveryId: messageWake.id }));
+        expect(await onlyWake(f, f.a.sessionId)).toMatchObject({ state: 'acked' });
+        expect(await wakeDueAt(f, t0 + 2_000)).toBe(t0 + 3_000);
+      });
+    });
+  });
+
+  it('frees the chat when the subscription holding its queued wake is cancelled', async () => {
+    const f = await twoAgentProject();
+    await withAgentMessageChannels(async () => {
+      const ciSubscriptionId = await subscribeToHeadCommit(f);
+      const pr = okBody<{ subscription: { id: string } }>(
+        await f.a.tool('create_project_event_subscription', {
+          idempotencyKey: 'pr-209',
+          filter: { version: 1, source: 'github', subjectType: 'pull_request', subjectId: '209' },
+          requestedDelivery: 'existing_session_prompt',
+        })
+      );
+      await withQuietAlarms(f, async () => {
+        const now = Date.now();
+        await svc.admitProjectEvent(testEnv, f.projectId, {
+          source: 'github',
+          eventType: 'pull_request_review.submitted',
+          subject: { type: 'pull_request', id: '209' },
+          severity: 'info',
+          deliveryKey: `delivery:review-${crypto.randomUUID()}`,
+          payloadFingerprint: 'sha256:review',
+          metadata: { state: 'approved' },
+          display: { title: 'Review submitted', summary: 'Approved' },
+          occurredAt: now,
+          receivedAt: now,
+        });
+        const t0 = Date.now();
+        expect(await materialize(f, t0)).toMatchObject({ status: 'materialized' });
+        expect(await onlyWake(f, f.a.sessionId)).toMatchObject({
+          subscription_id: pr.subscription.id,
+          state: 'pending',
+        });
+        await admitCheckRunCompleted(f, 'e2e');
+        expect(await wakeDueAt(f, t0 + 1_000)).toBeNull();
+
+        okBody(
+          await f.a.tool('cancel_project_event_subscription', {
+            subscriptionId: pr.subscription.id,
+          })
+        );
+        expect(await onlyWake(f, f.a.sessionId)).toMatchObject({ state: 'cancelled' });
+        expect(await wakeDueAt(f, t0 + 2_000)).toBe(t0 + 3_000);
+        expect(await materialize(f, t0 + 3_000)).toMatchObject({ status: 'materialized' });
+        expect(await wakeBatches(f, f.a.sessionId)).toEqual([
+          expect.objectContaining({ subscription_id: pr.subscription.id, state: 'cancelled' }),
+          expect.objectContaining({ subscription_id: ciSubscriptionId, state: 'pending' }),
+        ]);
+      });
+    });
+  });
+
   it('labels events read through pull as not injected rather than unsupported', async () => {
     const f = await twoAgentProject();
     await withAgentMessageChannels(async () => {
