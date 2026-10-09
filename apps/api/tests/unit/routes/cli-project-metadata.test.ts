@@ -40,7 +40,7 @@ beforeEach(() => {
   auth.capability.mockReset().mockResolvedValue({});
   db = new Database(':memory:');
   db.exec(
-    "CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT, description TEXT, updated_at TEXT); CREATE TABLE users(id TEXT PRIMARY KEY); CREATE TABLE agent_profiles(id TEXT PRIMARY KEY, project_id TEXT, name TEXT, description TEXT, updated_at TEXT); CREATE TABLE skills(id TEXT PRIMARY KEY, project_id TEXT, name TEXT, description TEXT, updated_at TEXT); INSERT INTO projects VALUES('project','original',NULL,'old'); INSERT INTO users VALUES('user'); INSERT INTO agent_profiles VALUES('profile','project','Sol',NULL,'old');"
+    "CREATE TABLE projects (id TEXT PRIMARY KEY, user_id TEXT, name TEXT, normalized_name TEXT, description TEXT, updated_at TEXT); CREATE UNIQUE INDEX project_names ON projects(user_id, normalized_name); CREATE TABLE users(id TEXT PRIMARY KEY); CREATE TABLE agent_profiles(id TEXT PRIMARY KEY, project_id TEXT, name TEXT, description TEXT, updated_at TEXT); CREATE TABLE skills(id TEXT PRIMARY KEY, project_id TEXT, name TEXT, description TEXT, updated_at TEXT); INSERT INTO projects VALUES('project','user','original','original',NULL,'old'); INSERT INTO users VALUES('user'); INSERT INTO agent_profiles VALUES('profile','project','Sol',NULL,'old');"
   );
   db.exec(
     readFileSync(
@@ -122,4 +122,52 @@ it('does not edit builtin skill metadata', async () => {
   auth.builtin = true;
   const response = await patch('skills/skill', { name: 'changed', expectedUpdatedAt: 'old' });
   expect(response.status).toBe(400);
+});
+
+describe('project rename identity', () => {
+  it('stores the same normalized identity as ordinary project updates', async () => {
+    const response = await patch('settings', { name: '  New   NAME  ', expectedUpdatedAt: 'old' });
+    expect(response.status).toBe(200);
+    expect(
+      db.prepare('SELECT name, normalized_name FROM projects WHERE id = ?').get('project')
+    ).toEqual({ name: 'New   NAME', normalized_name: 'new name' });
+  });
+  it('rejects another project owner name ignoring case and repeated whitespace', async () => {
+    db.prepare('INSERT INTO projects VALUES (?, ?, ?, ?, ?, ?)').run(
+      'other',
+      'user',
+      'Existing Name',
+      'existing name',
+      null,
+      'old'
+    );
+    expect(
+      (await patch('settings', { name: '  EXISTING   name ', expectedUpdatedAt: 'old' })).status
+    ).toBe(409);
+    expect(
+      db
+        .prepare('SELECT name, normalized_name, updated_at FROM projects WHERE id = ?')
+        .get('project')
+    ).toEqual({ name: 'original', normalized_name: 'original', updated_at: 'old' });
+  });
+  it('permits another owner to use the same name and preserves normalization on description-only edits', async () => {
+    db.prepare('INSERT INTO projects VALUES (?, ?, ?, ?, ?, ?)').run(
+      'other',
+      'different-owner',
+      'Shared',
+      'shared',
+      null,
+      'old'
+    );
+    expect(
+      (await patch('settings', { description: 'metadata only', expectedUpdatedAt: 'old' })).status
+    ).toBe(200);
+    const current = db
+      .prepare('SELECT normalized_name, updated_at FROM projects WHERE id = ?')
+      .get('project') as { normalized_name: string; updated_at: string };
+    expect(current.normalized_name).toBe('original');
+    expect(
+      (await patch('settings', { name: 'Shared', expectedUpdatedAt: current.updated_at })).status
+    ).toBe(200);
+  });
 });

@@ -12,6 +12,7 @@ import { jsonValidator } from '../schemas/_validator';
 import { createProfile, getProfile } from '../services/agent-profiles';
 import { cliOperationReceipt } from '../services/cli-operation-receipts';
 import { createSkill, getSkill } from '../services/skills';
+import { normalizeProjectName } from './projects/_helpers';
 
 // Deliberately separate from the full UI configuration schemas. Mixed benign /
 // sensitive payloads are rejected at the server boundary, including nested keys.
@@ -123,8 +124,17 @@ cliProjectMetadataRoutes.patch(
     const fields: string[] = ['updated_at = ?'];
     const values: (string | null)[] = [nextMetadataTimestamp(body.expectedUpdatedAt)];
     if (body.name !== undefined) {
-      fields.push('name = ?');
-      values.push(body.name);
+      const normalizedName = normalizeProjectName(body.name);
+      const duplicate = await c.env.DATABASE.prepare(
+        `SELECT id FROM projects
+         WHERE user_id = (SELECT user_id FROM projects WHERE id = ?)
+           AND normalized_name = ? AND id != ?`
+      )
+        .bind(projectId, normalizedName, projectId)
+        .first();
+      if (duplicate) throw errors.conflict('Project name must be unique per user');
+      fields.push('name = ?', 'normalized_name = ?');
+      values.push(body.name, normalizedName);
     }
     if (body.description !== undefined) {
       fields.push('description = ?');

@@ -98,7 +98,10 @@ func validateTranscriptIDs(rows []any, seen map[string]bool) error {
 		if !ok {
 			return fmt.Errorf("invalid transcript message")
 		}
-		id, _ := m["id"].(string)
+		id, ok := m["id"].(string)
+		if !ok || strings.TrimSpace(id) == "" {
+			return fmt.Errorf("transcript row missing ID")
+		}
 		if seen[id] {
 			return fmt.Errorf("duplicate transcript message; snapshot incomplete")
 		}
