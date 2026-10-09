@@ -35,9 +35,8 @@ func runTaskWait(ctx context.Context, runtime Runtime, p parsedArgs, args []stri
 	for {
 		var value map[string]any
 		if err = client.request(ctx, http.MethodGet, projectAPIPath(project, "tasks", args[0]), nil, &value); err != nil {
-			if ctx.Err() == context.DeadlineExceeded {
-				_ = writeWorkflow(runtime, p, map[string]any{"outcome": "wait_timeout", "completed": false})
-				return 3
+			if ctx.Err() != nil {
+				return writeWaitInterruption(runtime, p, value, ctx.Err())
 			}
 			return fail(runtime.Stderr, err)
 		}
@@ -51,8 +50,18 @@ func runTaskWait(ctx context.Context, runtime Runtime, p parsedArgs, args []stri
 			return 4
 		}
 		if err = sleepContext(ctx, interval); err != nil {
-			_ = writeWorkflow(runtime, p, map[string]any{"task": value, "outcome": "wait_timeout", "completed": false})
-			return 3
+			return writeWaitInterruption(runtime, p, value, ctx.Err())
 		}
 	}
+}
+
+func writeWaitInterruption(runtime Runtime, p parsedArgs, task map[string]any, reason error) int {
+	outcome, code := "wait_timeout", 3
+	if reason == context.Canceled {
+		outcome, code = "wait_cancelled", 130
+	}
+	if result := writeWorkflow(runtime, p, map[string]any{"task": task, "outcome": outcome, "completed": false}); result != 0 {
+		return result
+	}
+	return code
 }

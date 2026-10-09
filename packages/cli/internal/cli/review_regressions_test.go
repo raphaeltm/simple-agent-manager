@@ -72,3 +72,16 @@ func TestLegacyTaskStatusPreservesCompleteJSON(t *testing.T) {
 		t.Fatalf("code=%d out=%s err=%s", code, out.String(), stderr.String())
 	}
 }
+
+func TestWaitCallerCancellationDoesNotClaimTimeoutOrCancelTask(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	h := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		cancel()
+		<-req.Context().Done()
+		return nil, req.Context().Err()
+	})
+	r, out, stderr := testRuntime(t, []string{"tasks", "wait", "task", "--project", workflowProject, "--json"}, h, nil)
+	if code := Run(ctx, r); code != 130 || !strings.Contains(out.String(), "wait_cancelled") || strings.Contains(out.String(), "wait_timeout") || stderr.Len() != 0 {
+		t.Fatalf("code=%d out=%s err=%s", code, out.String(), stderr.String())
+	}
+}

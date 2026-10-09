@@ -96,3 +96,7 @@ Routine metadata commands accept `--preview`. Profile/skill updates require a cu
 CLI capability is separate from assistant permission. A command being present does not authorize an assistant to execute it. Consequential settings, credentials, access/permissions, billing, spending limits, default profile changes, runtime files/MCP configuration, automation creation/pause, deployment/traffic changes, destructive deletion and permission/auth answers remain outside this rollout. There is no raw settings patch command or `--yes` authority bypass.
 
 Errors exit nonzero and `--json` emits a JSON error on stderr with stable error code and HTTP status when available. Successful JSON uses stdout. Device-login instructions/progress do not mix with its stdout JSON result. Unknown flags, duplicate flags and invalid command arity fail before HTTP. Read commands do not implicitly send messages or start work. `runner doctor` exits nonzero when required checks fail; planned runner/harness commands still fail honestly.
+
+An interrupted `tasks wait` returns exit `130` with `outcome: "wait_cancelled"`;
+its overall deadline returns exit `3` with `outcome: "wait_timeout"`. Neither
+outcome cancels the underlying task.
