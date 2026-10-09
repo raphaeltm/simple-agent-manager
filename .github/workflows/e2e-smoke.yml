@@ -10,7 +10,6 @@ on:
       - 'packages/task-runner/**'
       - 'scripts/e2e/**'
       - 'scripts/deploy/configure-docker-mirror.mjs'
-      - '.github/workflows/e2e-smoke.yml'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
