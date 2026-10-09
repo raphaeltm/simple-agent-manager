@@ -719,7 +719,9 @@ jobs:
         run: pnpm build
 
       - name: Run Worker and Durable Object suites
-        run: pnpm --filter @simple-agent-manager/api test:workers --shard=${{ matrix.shard }}/3 --reporter=default --reporter=./tests/workers/timing-reporter.ts
+        env:
+          WORKERS_SHARD: ${{ matrix.shard }}
+        run: pnpm --filter @simple-agent-manager/api test:workers --shard="${WORKERS_SHARD}/3" --reporter=default --reporter=./tests/workers/timing-reporter.ts
 
       - name: Upload per-file Workers timings
         if: always()
