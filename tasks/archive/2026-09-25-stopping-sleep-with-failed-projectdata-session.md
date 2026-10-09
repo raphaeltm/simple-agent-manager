@@ -215,3 +215,34 @@ only the SQL attempt predicate makes that assertion fail. A one-shot detach D1
 outage proves durable cleanup retry without replaying restore or terminal hooks.
 The final-delta reviewer passed these changes. All 36 alarm tests and 54 surrounding
 state-machine/handoff/recovery tests pass; API typecheck and changed-file ESLint pass.
+
+## Final staging verification PASS (2026-10-09, lease 150)
+
+Final source b486cd6e3 integrates main 195f9f7ca. CI 37866742430 and staging
+37866738403 succeeded. Worker 051df90d-d628-436b-b665-40e5a03f0d84 served 100%.
+Independent integration review and 42 alarm/task-repair checks passed. Authenticated
+dashboard/projects/settings returned 200 with no page errors; screenshots reviewed.
+
+Owned task 01M4F2G92XFY3GZD32TEP9GXQ6 / chat
+8020bb88-14c2-472a-94a6-917fddc149e9 replied FINAL_READY, then slept with an
+available snapshot at 00:57:37.081. The owner API stopped the replacement runtime
+at 01:09:41.535 while attempt 01M4F2YZB0CSFDCNWC0QQR8B58 was waking. The runtime
+was automatically deleted before the real restore deadline. At 01:30:35, failure
+settled with task/chat sleeping, null completion/end timestamps, identical snapshot
+generation/artifact keys/hashes/expiry, and zero failed task-status events. The
+failed replacement stayed deleted and relinquished its chat binding.
+
+Automatic attempt 01M4F4H7XT036GCG9JR15EV98J reused the same task and second VM,
+allocated successor 01M4F4HBQRVKX7QWCNTR68XMXK, and restored at 01:32:10. The
+browser showed the new FINAL_RESUMED assistant reply and no page errors. The
+independent completion reviewer checked the saved failure/success and browser
+artifacts: A/B/C/E/F PASS, D N/A; the exact live failure-to-retry gap is closed.
+
+At most two cx23 VMs were used. At 01:33 the chat stop returned 200 and both node
+deletions returned 200. GET /api/nodes returned []; the query for all three owned
+workspaces returned []. Lease150 released PASS/cleaned=yes (channel153), with a
+direct handoff to VM-boot. No shared pool/profile/project configuration was changed.
+
+Release follow-through remains pending: reopen PR2276, final PR checks and trusted
+CodeRabbit request/wait, merge, production deployment, then source idea completion
+and channel/task completion. The implementation and staging gates are complete.
