@@ -219,8 +219,8 @@ func TestDoJSONCapsOversizedErrorResponseBodyRead(t *testing.T) {
 	if apiErr.Code != "HTTP_ERROR" {
 		t.Fatalf("code = %q", apiErr.Code)
 	}
-	if len(apiErr.Message) != int(defaultMaxAPIResponseBodyBytes) {
-		t.Fatalf("message length = %d, want %d", len(apiErr.Message), defaultMaxAPIResponseBodyBytes)
+	if apiErr.Message != "SAM API returned a non-JSON error (status 500)" {
+		t.Fatalf("unsanitized error: %q", apiErr.Message)
 	}
 }
 

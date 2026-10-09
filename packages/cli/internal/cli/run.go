@@ -32,10 +32,10 @@ func Run(ctx context.Context, runtime Runtime) int {
 	if err := validateCommandFlags(parsed); err != nil {
 		return fail(runtime.Stderr, err)
 	}
-	if c, args, ok := findWorkflow(parsed); ok && (parsed.Globals.JSON || len(parsed.Flags) > 0 || len(parsed.Bools) > 0 || len(parsed.Positionals) > 1 && parsed.Positionals[0] != "chat") {
+	if c, args, ok := findWorkflow(parsed); ok && (parsed.Globals.JSON || len(parsed.Flags) > 0 || parsed.Bools["all-pages"] || len(parsed.Positionals) > 1 && parsed.Positionals[0] != "chat") {
 		return runWorkflow(ctx, runtime, parsed, c, args)
 	}
-	if len(parsed.Positionals) > 1 && (parsed.Positionals[1] == "create" || parsed.Positionals[1] == "update") {
+	if len(parsed.Positionals) > 1 && (parsed.Positionals[0] == "tasks" || parsed.Positionals[0] == "ideas" || parsed.Positionals[0] == "profiles" || parsed.Positionals[0] == "skills" || parsed.Positionals[0] == "settings") && (parsed.Positionals[1] == "create" || parsed.Positionals[1] == "update") {
 		return runMetadataMutation(ctx, runtime, parsed, parsed.Positionals[2:])
 	}
 	if parsed.Positionals[0] == "settings" {
@@ -467,6 +467,7 @@ func submitTask(ctx context.Context, runtime Runtime, parsed parsedArgs, project
 }
 
 func submitTaskWithClient(ctx context.Context, runtime Runtime, parsed parsedArgs, client APIClient, projectID string, message string, options TaskSubmitOptions) int {
+	client.idempotencyKey = parsed.Flags["idempotency-key"]
 	if options.AgentProfile != "" {
 		id, err := resolveNamedResource(ctx, client, projectID, "agent-profiles", options.AgentProfile)
 		if err != nil {

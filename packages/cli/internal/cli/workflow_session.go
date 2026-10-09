@@ -50,6 +50,7 @@ func runSessionAction(ctx context.Context, runtime Runtime, p parsedArgs, action
 		}
 		path = apiWorkspacesPath + workspace + "/sleep"
 	}
+	client.idempotencyKey = p.Flags["idempotency-key"]
 	var value any
 	if err = client.request(ctx, http.MethodPost, path, body, &value); err != nil {
 		return fail(runtime.Stderr, err)

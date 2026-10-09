@@ -27,6 +27,7 @@ func readContract(command string, path []string, args int, query string) workflo
 
 func workflowContracts() []workflowContract {
 	return []workflowContract{
+		readContract("tasks receipt", []string{"operation-receipts"}, 0, "key operation sessionId"),
 		readContract("tasks list", []string{"tasks"}, 0, "status minPriority sort limit cursor"),
 		readContract("tasks get", []string{"tasks", "$0"}, 1, ""),
 		readContract("tasks events", []string{"tasks", "$0", "events"}, 1, "limit cursor"),
@@ -44,7 +45,7 @@ func workflowContracts() []workflowContract {
 		readContract("chat state", []string{"sessions", "$0", "state"}, 1, ""),
 		readContract("chat interactions", []string{"sessions", "$0", "interactions"}, 1, ""),
 		readContract("chat interaction", []string{"sessions", "$0", "interactions", "$1"}, 2, ""),
-		readContract("comments list", []string{"comments"}, 0, "limit cursor status sessionId"),
+		readContract("comments list", []string{"comments"}, 0, "limit status"),
 		readContract("comments session", []string{"sessions", "$0", "comments"}, 1, "limit cursor"),
 		readContract("files branches", []string{"repo", "branches"}, 0, ""),
 		readContract("files tree", []string{"repo", "tree"}, 0, "ref path"),
@@ -69,8 +70,8 @@ func workflowContracts() []workflowContract {
 		readContract("events history", []string{"event-channels", "$0", "history"}, 1, "limit cursor"),
 		readContract("schedules list", []string{"schedules"}, 0, "limit cursor"),
 		readContract("schedules get", []string{"schedules", "$0"}, 1, ""),
-		readContract("watches list", []string{"watches"}, 0, "limit cursor"),
-		readContract("watches get", []string{"watches", "$0"}, 1, ""),
+		readContract("watches list", []string{"standing-watches"}, 0, "limit cursor"),
+		readContract("watches get", []string{"standing-watches", "$0"}, 1, ""),
 		readContract("deployments list", []string{"environments"}, 0, ""),
 		readContract("deployments get", []string{"environments", "$0"}, 1, ""),
 	}

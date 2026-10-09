@@ -193,6 +193,8 @@ export async function updateSkill(
   body: UpdateSkillRequest
 ): Promise<AgentSkill> {
   const skill = await getSkill(db, projectId, skillId, userId);
+  if (skill.projectId !== projectId)
+    throw errors.badRequest('Global skills must be edited through their own scope');
   if (skill.isBuiltin) throw errors.forbidden('Builtin skills cannot be modified');
   if (body.agentType && !isValidAgentType(body.agentType)) {
     throw errors.badRequest(`Invalid agent type: ${body.agentType}`);
@@ -249,6 +251,8 @@ export async function deleteSkill(
   userId: string
 ): Promise<void> {
   const skill = await getSkill(db, projectId, skillId, userId);
+  if (skill.projectId !== projectId)
+    throw errors.badRequest('Global skills must be edited through their own scope');
   if (skill.isBuiltin) throw errors.forbidden('Builtin skills cannot be deleted');
   await db
     .delete(schema.skills)

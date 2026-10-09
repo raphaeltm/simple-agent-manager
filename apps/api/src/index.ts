@@ -1,3 +1,4 @@
+import { cliOperationReceiptRoutes } from './routes/cli-operation-receipts';
 import { projectScheduleRoutes } from './routes/project-schedules';
 import { projectStandingWatchRoutes } from './routes/project-standing-watches';
 // Re-export Durable Object classes for Cloudflare Workers runtime
@@ -835,6 +836,7 @@ app.route('/api/projects', workspaceEvictionCallbackRoute); // Must be before pr
 app.route('/api/projects', workspaceResourceHistoryCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', projectsRoutes);
 app.route('/api/projects/:projectId/tasks', tasksRoutes);
+app.route('/api/projects/:projectId/operation-receipts', cliOperationReceiptRoutes);
 app.route('/api/projects/:projectId/sessions', chatStartRoutes);
 app.route('/api/projects/:projectId/sessions', chatRoutes);
 app.route('/api/projects/:projectId/comments', projectCommentRoutes);

@@ -37,7 +37,7 @@ func TestParseArgsReportsMalformedFlags(t *testing.T) {
 		args []string
 	}{
 		{name: "missing project value", args: []string{"--project"}},
-		{name: "empty flag name", args: []string{"--"}},
+		{name: "empty flag name", args: []string{"--=value"}},
 	}
 
 	for _, tt := range tests {

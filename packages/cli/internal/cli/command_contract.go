@@ -28,7 +28,7 @@ func commandFlags(p parsedArgs) []string {
 	case "task", "tasks":
 		return strings.Fields(submitFlagNames + " title description priority status limit cursor interval timeout")
 	case "project", "settings":
-		return strings.Fields("name description")
+		return strings.Fields("name description preview")
 	case "profiles", "skills":
 		return strings.Fields("name description source preview expected-updated-at")
 	case "workspace":

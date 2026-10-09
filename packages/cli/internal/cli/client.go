@@ -16,8 +16,9 @@ const apiWorkspacesPath = "/api/workspaces/"
 const defaultMaxAPIResponseBodyBytes int64 = 1 << 20
 
 type APIClient struct {
-	config CLIConfig
-	http   HTTPDoer
+	config         CLIConfig
+	idempotencyKey string
+	http           HTTPDoer
 }
 
 type APIError struct {
@@ -218,7 +219,11 @@ func projectAPIPath(projectID string, segments ...string) string {
 }
 
 func (c APIClient) request(ctx context.Context, method string, path string, body map[string]any, out any) error {
-	return doJSONWithLimit(ctx, c.http, method, c.config.APIURL+path, c.config.SessionCookie, body, out, c.config.maxAPIResponseBytes())
+	httpClient := c.http
+	if c.idempotencyKey != "" {
+		httpClient = keyedHTTPDoer{httpClient, c.idempotencyKey}
+	}
+	return doJSONWithLimit(ctx, httpClient, method, c.config.APIURL+path, c.config.SessionCookie, body, out, c.config.maxAPIResponseBytes())
 }
 
 func doJSON(ctx context.Context, httpClient HTTPDoer, method string, endpoint string, cookie string, body map[string]any, out any) error {
@@ -336,8 +341,10 @@ func parseAPIError(status int, content []byte) error {
 		Error   string `json:"error"`
 		Message string `json:"message"`
 	}
-	if err := json.Unmarshal(content, &body); err != nil {
-		body.Message = fmt.Sprintf("SAM API returned a non-JSON error (status %d)", status)
+	if len(content) > 0 {
+		if err := json.Unmarshal(content, &body); err != nil {
+			body.Message = fmt.Sprintf("SAM API returned a non-JSON error (status %d)", status)
+		}
 	}
 	if body.Error == "" {
 		body.Error = "HTTP_ERROR"
@@ -352,4 +359,14 @@ func addIfSet(body map[string]any, key string, value string) {
 	if value != "" {
 		body[key] = value
 	}
+}
+
+type keyedHTTPDoer struct {
+	next HTTPDoer
+	key  string
+}
+
+func (d keyedHTTPDoer) Do(req *http.Request) (*http.Response, error) {
+	req.Header.Set("Idempotency-Key", d.key)
+	return d.next.Do(req)
 }

@@ -30,6 +30,7 @@ import { getAuth, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireProjectCapability } from '../../middleware/project-auth';
 import { jsonValidator, SubmitTaskSchema } from '../../schemas';
+import { cliOperationReceipt } from '../../services/cli-operation-receipts';
 import { validateAttachments } from '../../services/attachment-upload';
 import { generateBranchName } from '../../services/branch-name';
 import { capacityPlacementSnapshotDbValues } from '../../services/capacity-placement-snapshot';
@@ -157,6 +158,17 @@ submitRoutes.post(
   requireAuth(),
   requireApproved(),
   jsonValidator(SubmitTaskSchema),
+  async (c, next) => {
+    const projectId = c.req.param('projectId');
+    if (!projectId) throw errors.badRequest('projectId is required');
+    await requireProjectCapability(
+      drizzle(c.env.DATABASE, { schema }),
+      projectId,
+      getAuth(c).user.id,
+      'task:write'
+    );
+    return cliOperationReceipt(c, next);
+  },
   async (c) => {
     const auth = getAuth(c);
     const userId = auth.user.id;

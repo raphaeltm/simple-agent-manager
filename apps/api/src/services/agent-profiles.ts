@@ -225,6 +225,8 @@ export async function updateProfile(
 ): Promise<AgentProfile> {
   // Verify profile exists and user has access
   const profile = await getProfile(db, projectId, profileId, userId);
+  if (profile.projectId !== projectId)
+    throw errors.badRequest('Global profiles must be edited through their own scope');
 
   if (body.agentType && !isValidAgentType(body.agentType)) {
     throw errors.badRequest(`Invalid agent type: ${body.agentType}`);
@@ -404,29 +406,5 @@ export async function resolveAgentProfile(
     return rowToResolved(byNameGlobal[0]);
   }
 
-  // No matching profile found — return defaults with the hint as agent type if valid
-  const agentType = isValidAgentType(profileNameOrId)
-    ? profileNameOrId
-    : env.DEFAULT_TASK_AGENT_TYPE || 'opencode';
-
-  return {
-    profileId: null,
-    profileName: null,
-    agentType,
-    model: null,
-    effort: DEFAULT_AGENT_EFFORT,
-    permissionMode: null,
-    systemPromptAppend: null,
-    maxTurns: null,
-    timeoutMinutes: null,
-    vmSizeOverride: null,
-    resourceRequirementsJson: null,
-    provider: null,
-    vmLocation: null,
-    workspaceProfile: null,
-    runtime: null,
-    devcontainerConfigName: null,
-    taskMode: null,
-    githubCliPolicy: null,
-  };
+  throw errors.notFound('Agent profile');
 }
