@@ -79,6 +79,7 @@ func runMetadataMutation(ctx context.Context, runtime Runtime, p parsedArgs, arg
 	method := http.MethodPatch
 	switch family {
 	case "settings":
+		path = projectAPIPath(project, "cli", "settings")
 		if len(args) > 0 {
 			return fail(runtime.Stderr, fmt.Errorf("settings update takes no resource ID"))
 		}
@@ -97,7 +98,7 @@ func runMetadataMutation(ctx context.Context, runtime Runtime, p parsedArgs, arg
 		if family == "skills" {
 			apiFamily = "skills"
 		}
-		path = projectAPIPath(project, apiFamily)
+		path = projectAPIPath(project, "cli", family)
 		if action == "create" {
 			method = http.MethodPost
 		} else {
@@ -115,10 +116,15 @@ func runMetadataMutation(ctx context.Context, runtime Runtime, p parsedArgs, arg
 			if current["projectId"] != project {
 				return fail(runtime.Stderr, fmt.Errorf("shared/global resources cannot be updated through project commands"))
 			}
-			path = projectAPIPath(project, apiFamily, id)
-			if family == "profiles" {
-				method = http.MethodPut
+			path = projectAPIPath(project, "cli", family, id)
+			version, _ := current["updatedAt"].(string)
+			if v := p.Flags["expected-updated-at"]; v != "" {
+				version = v
 			}
+			if version == "" {
+				return fail(runtime.Stderr, fmt.Errorf("resource version unavailable"))
+			}
+			fields["expectedUpdatedAt"] = version
 		}
 	default:
 		return fail(runtime.Stderr, fmt.Errorf("unsupported mutation"))
@@ -129,6 +135,19 @@ func runMetadataMutation(ctx context.Context, runtime Runtime, p parsedArgs, arg
 	if p.Bools["preview"] {
 		return writeWorkflow(runtime, p, map[string]any{"preview": true, "method": method, "path": path, "fields": fields})
 	}
+	if family == "settings" {
+		var current map[string]any
+		if err = client.request(ctx, http.MethodGet, projectAPIPath(project), nil, &current); err != nil {
+			return fail(runtime.Stderr, err)
+		}
+		version, _ := current["updatedAt"].(string)
+		if version == "" {
+			return fail(runtime.Stderr, fmt.Errorf("project version unavailable"))
+		}
+		fields["expectedUpdatedAt"] = version
+	}
+
+	client.idempotencyKey = p.Flags["idempotency-key"]
 	var value any
 	if err = client.request(ctx, method, path, fields, &value); err != nil {
 		return fail(runtime.Stderr, err)

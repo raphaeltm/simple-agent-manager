@@ -20,6 +20,11 @@ func Run(ctx context.Context, runtime Runtime) int {
 			break
 		}
 	}
+	secured, secureErr := secureRuntime(runtime)
+	if secureErr != nil {
+		return fail(runtime.Stderr, secureErr)
+	}
+	runtime = secured
 	parsed, err := parseArgs(runtime.Args)
 	if err != nil {
 		return fail(runtime.Stderr, err)
@@ -367,6 +372,9 @@ func runTasks(ctx context.Context, runtime Runtime, parsed parsedArgs, args []st
 	if len(args) == 0 {
 		return fail(runtime.Stderr, errors.New("tasks requires an action"))
 	}
+	if args[0] == "wait" {
+		return runTaskWait(ctx, runtime, parsed, args[1:])
+	}
 	if args[0] == "submit" {
 		client, config, err := authenticatedClientWithConfig(ctx, runtime)
 		if err != nil {
@@ -421,6 +429,8 @@ func runChatCommand(ctx context.Context, runtime Runtime, parsed parsedArgs, arg
 		return runChatList(ctx, runtime, parsed)
 	}
 	switch args[0] {
+	case "fork", "retry":
+		return runLineage(ctx, runtime, parsed, args[0], args[1:])
 	case "send", "cancel", "sleep":
 		return runSessionAction(ctx, runtime, parsed, args[0], args[1:])
 	case "export":
@@ -710,6 +720,24 @@ func writeOrFail(runtime Runtime, jsonMode bool, text string, value any) int {
 }
 
 func fail(stderr io.Writer, err error) int {
+	if w, ok := stderr.(redactingWriter); ok {
+		message := err.Error()
+		for _, secret := range w.secrets {
+			if len(secret) >= 4 {
+				message = strings.ReplaceAll(message, secret, "REDACTED")
+			}
+		}
+		var apiErr APIError
+		if errors.As(err, &apiErr) {
+			apiErr.Message = message
+			return fail(w.destination, apiErr)
+		}
+		return fail(w.destination, errors.New(message))
+	}
+	if w, ok := stderr.(structuredErrorWriter); ok {
+		w.writeError(err)
+		return 1
+	}
 	fmt.Fprintln(stderr, err.Error())
 	return 1
 }

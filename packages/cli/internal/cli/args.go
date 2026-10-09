@@ -117,6 +117,11 @@ func (p *argParser) parseFlag(arg string) error {
 		p.result.FlagOccurrences = append(p.result.FlagOccurrences, flagOccurrence{Name: name})
 		return nil
 	}
+	if booleanCommandFlag(name) {
+		p.result.Bools[name] = true
+		p.result.FlagOccurrences = append(p.result.FlagOccurrences, flagOccurrence{Name: name})
+		return nil
+	}
 	if p.index < len(p.args) && !strings.HasPrefix(p.args[p.index], "--") {
 		v := p.args[p.index]
 		p.result.Flags[name] = v

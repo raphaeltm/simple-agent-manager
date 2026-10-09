@@ -142,7 +142,23 @@ func (c APIClient) ListProjects(ctx context.Context) (ProjectListResponse, error
 
 func (c APIClient) GetProjectDetail(ctx context.Context, projectID string) (ProjectDetail, error) {
 	var response ProjectDetail
-	err := c.request(ctx, http.MethodGet, projectAPIPath(projectID), nil, &response)
+	var raw map[string]json.RawMessage
+	err := c.request(ctx, http.MethodGet, projectAPIPath(projectID), nil, &raw)
+	if err == nil {
+		b, _ := json.Marshal(raw)
+		err = json.Unmarshal(b, &response)
+		if summary, ok := raw["summary"]; ok {
+			var counts struct {
+				ActiveSessionCount   int `json:"activeSessionCount"`
+				ActiveWorkspaceCount int `json:"activeWorkspaceCount"`
+			}
+			if e := json.Unmarshal(summary, &counts); e != nil {
+				return response, e
+			}
+			response.ActiveSessionCount = counts.ActiveSessionCount
+			response.ActiveWorkspaceCount = counts.ActiveWorkspaceCount
+		}
+	}
 	return response, err
 }
 
@@ -369,4 +385,29 @@ type keyedHTTPDoer struct {
 func (d keyedHTTPDoer) Do(req *http.Request) (*http.Response, error) {
 	req.Header.Set("Idempotency-Key", d.key)
 	return d.next.Do(req)
+}
+
+func (c APIClient) ListAllProjects(ctx context.Context) (ProjectListResponse, error) {
+	var result ProjectListResponse
+	cursor := ""
+	seen := map[string]bool{}
+	for {
+		var page ProjectListResponse
+		path := "/api/projects"
+		if cursor != "" {
+			path += "?" + url.Values{"cursor": {cursor}}.Encode()
+		}
+		if err := c.request(ctx, http.MethodGet, path, nil, &page); err != nil {
+			return result, err
+		}
+		result.Projects = append(result.Projects, page.Projects...)
+		if page.NextCursor == nil || *page.NextCursor == "" {
+			return result, nil
+		}
+		cursor = *page.NextCursor
+		if seen[cursor] || len(page.Projects) == 0 {
+			return result, fmt.Errorf("project pagination made no progress")
+		}
+		seen[cursor] = true
+	}
 }

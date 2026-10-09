@@ -90,7 +90,7 @@ func TestWorkflowReadMethodsAndPaths(t *testing.T) {
 			if Run(context.Background(), r) != 0 {
 				t.Fatal(err.String())
 			}
-			if req.Method != "GET" || !strings.Contains(req.URL, "/api/projects/"+workflowProject) {
+			if req.Method != "GET" || !(strings.Contains(req.URL, "/api/projects/"+workflowProject) || c.command == "notifications list" && strings.Contains(req.URL, "projectId="+workflowProject)) {
 				t.Fatalf("unsafe read %s %s", req.Method, req.URL)
 			}
 		})

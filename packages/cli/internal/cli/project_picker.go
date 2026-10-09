@@ -12,7 +12,7 @@ import (
 // PickProject displays an interactive numbered list and returns the selected project.
 // Uses simple line-based input (no raw terminal mode) to stay dependency-free.
 func PickProject(ctx context.Context, client APIClient, stdin io.Reader, stdout io.Writer) (Project, error) {
-	projects, err := client.ListProjects(ctx)
+	projects, err := client.ListAllProjects(ctx)
 	if err != nil {
 		return Project{}, fmt.Errorf("failed to list projects: %w", err)
 	}

@@ -3,6 +3,8 @@ package cli
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 )
@@ -16,6 +18,24 @@ func runListProjects(ctx context.Context, runtime Runtime, parsed parsedArgs) in
 	client, err := authenticatedClient(ctx, runtime)
 	if err != nil {
 		return fail(runtime.Stderr, err)
+	}
+	if parsed.Globals.JSON || len(parsed.Flags) > 0 || parsed.Bools["all-pages"] {
+		query := url.Values{}
+		for _, key := range []string{"limit", "cursor"} {
+			if v := parsed.Flags[key]; v != "" {
+				query.Set(key, v)
+			}
+		}
+		var value any
+		if parsed.Bools["all-pages"] {
+			value, err = drainPages(ctx, client, "/api/projects", query, pagingContract{items: "projects", continuation: "nextCursor", parameter: "cursor"})
+		} else {
+			err = client.request(ctx, http.MethodGet, "/api/projects?"+query.Encode(), nil, &value)
+		}
+		if err != nil {
+			return fail(runtime.Stderr, err)
+		}
+		return writeWorkflow(runtime, parsed, value)
 	}
 	response, err := client.ListProjects(ctx)
 	if err != nil {
@@ -357,11 +377,16 @@ func runContext(ctx context.Context, runtime Runtime, parsed parsedArgs) int {
 }
 
 func runNotifications(ctx context.Context, runtime Runtime, parsed parsedArgs) int {
-	client, err := authenticatedClient(ctx, runtime)
+	client, config, err := authenticatedClientWithConfig(ctx, runtime)
 	if err != nil {
 		return fail(runtime.Stderr, err)
 	}
-	response, err := client.ListNotifications(ctx)
+	project, _, err := resolveProjectRef(ctx, client, parsed, config)
+	if err != nil {
+		return fail(runtime.Stderr, err)
+	}
+	var response NotificationListResponse
+	err = client.request(ctx, http.MethodGet, "/api/notifications?"+url.Values{"projectId": {project}}.Encode(), nil, &response)
 	if err != nil {
 		return fail(runtime.Stderr, err)
 	}

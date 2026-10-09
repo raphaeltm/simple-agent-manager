@@ -360,7 +360,7 @@ export function getMessages(
   compact: boolean = false,
   order: 'asc' | 'desc' = 'desc',
   compactOptions?: CompactMessageOptions
-): { messages: Record<string, unknown>[]; hasMore: boolean } {
+): { messages: Record<string, unknown>[]; hasMore: boolean; skippedMessages?: number } {
   let query =
     'SELECT id, session_id, role, content, tool_metadata, created_at, sequence, origin FROM chat_messages WHERE session_id = ?';
   const params: (string | number)[] = [sessionId];
@@ -384,7 +384,10 @@ export function getMessages(
 }
 
 function parseListedMessage(
-  row: Record<string, unknown>, sessionId: string, compact: boolean, compactOptions?: CompactMessageOptions
+  row: Record<string, unknown>,
+  sessionId: string,
+  compact: boolean,
+  compactOptions?: CompactMessageOptions
 ): Record<string, unknown> | null {
   try {
     return compact ? parseChatMessageRowCompact(row, compactOptions) : parseChatMessageRow(row);
@@ -401,9 +404,13 @@ function parseListedMessage(
 }
 
 export function formatMessageRows(
-  rows: Record<string, unknown>[], sessionId: string, limit: number,
-  compact: boolean, order: 'asc' | 'desc', compactOptions?: CompactMessageOptions
-): { messages: Record<string, unknown>[]; hasMore: boolean } {
+  rows: Record<string, unknown>[],
+  sessionId: string,
+  limit: number,
+  compact: boolean,
+  order: 'asc' | 'desc',
+  compactOptions?: CompactMessageOptions
+): { messages: Record<string, unknown>[]; hasMore: boolean; skippedMessages?: number } {
   let hasMore = rows.length > limit;
   const candidateRows = hasMore ? rows.slice(0, limit) : rows;
 
@@ -457,6 +464,7 @@ export function formatMessageRows(
   return {
     messages,
     hasMore,
+    ...(skipped > 0 ? { skippedMessages: skipped } : {}),
   };
 }
 

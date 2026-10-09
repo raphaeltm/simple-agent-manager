@@ -277,13 +277,13 @@ func TestContextShowsTable(t *testing.T) {
 
 func TestNotificationsShowsTable(t *testing.T) {
 	doer, captured := captureJSONRequest(t, `{"notifications":[{"id":"notif_1","type":"task_complete","title":"Task done","readAt":null,"createdAt":"2026-05-30T00:00:00Z"}],"unreadCount":1,"nextCursor":null}`, http.StatusOK)
-	runtime, stdout, stderr := testRuntime(t, []string{"notifications"}, doer, nil)
+	runtime, stdout, stderr := testRuntime(t, []string{"notifications", "--project", workflowProject}, doer, nil)
 
 	code := Run(context.Background(), runtime)
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s", code, stderr.String())
 	}
-	if captured.URL != "https://api.example.com/api/notifications" {
+	if captured.URL != "https://api.example.com/api/notifications?projectId="+workflowProject {
 		t.Fatalf("path = %s", captured.URL)
 	}
 	if !strings.Contains(stdout.String(), "Task done") || !strings.Contains(stdout.String(), "no") {
@@ -385,7 +385,7 @@ func TestMultilineValuesStayOnSingleTableRows(t *testing.T) {
 	}{
 		{
 			name:     "notifications",
-			args:     []string{"notifications"},
+			args:     []string{"notifications", "--project", workflowProject},
 			response: `{"notifications":[{"id":"notif_1","type":"needs_input","title":"First line\nsecond line","createdAt":"2026-05-30T00:00:00Z"}],"unreadCount":1,"nextCursor":null}`,
 			want:     "First line second line",
 		},
@@ -464,7 +464,7 @@ func TestFixedCommandsJSONOutputUsesCurrentContracts(t *testing.T) {
 		},
 		{
 			name:     "notifications",
-			args:     []string{"notifications", "--json"},
+			args:     []string{"notifications", "--project", workflowProject, "--json"},
 			response: `{"notifications":[{"id":"notif_1","type":"task_complete","title":"Task done","createdAt":"2026-05-30T00:00:00Z"}],"unreadCount":1,"nextCursor":null}`,
 			assert: func(t *testing.T, value map[string]any) {
 				assertArrayField(t, value, "notifications")

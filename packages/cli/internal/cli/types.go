@@ -166,7 +166,8 @@ type Project struct {
 
 // ProjectListResponse wraps a list of projects.
 type ProjectListResponse struct {
-	Projects []Project `json:"projects"`
+	Projects   []Project `json:"projects"`
+	NextCursor *string   `json:"nextCursor"`
 }
 
 // ProjectDetail contains full project information.

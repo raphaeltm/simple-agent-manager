@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -12,7 +13,10 @@ const submitFlagNames = "prompt prompt-file prompt-stdin agent agent-profile age
 func commandFlags(p parsedArgs) []string {
 	c, _, ok := findWorkflow(p)
 	if ok {
-		return append(append([]string(nil), c.query...), "recursive", "all", "all-pages")
+		if c.command == "library list" {
+			c.query = append(c.query, "recursive", "all")
+		}
+		return append(append([]string(nil), c.query...), "all-pages")
 	}
 	if len(p.Positionals) == 0 {
 		return nil
@@ -24,13 +28,25 @@ func commandFlags(p parsedArgs) []string {
 		if len(p.Positionals) > 1 && p.Positionals[1] == "new" {
 			return strings.Fields(submitFlagNames)
 		}
+		if len(p.Positionals) > 1 && (p.Positionals[1] == "fork" || p.Positionals[1] == "retry") {
+			return strings.Fields(submitFlagNames + " launch")
+		}
 		return strings.Fields("limit before after offset scope status compact order roles all-pages output ndjson hydrate-tools content content-file content-stdin idempotency-key answer")
 	case "task", "tasks":
 		return strings.Fields(submitFlagNames + " title description priority status limit cursor interval timeout")
-	case "project", "settings":
-		return strings.Fields("name description preview")
+	case "settings":
+		if len(p.Positionals) > 1 && p.Positionals[1] == "update" {
+			return strings.Fields("name description preview")
+		}
+		return nil
+	case "project":
+		return nil
 	case "profiles", "skills":
 		return strings.Fields("name description source preview expected-updated-at")
+	case "ideas":
+		return strings.Fields("title description priority preview")
+	case "projects":
+		return strings.Fields("limit cursor all-pages")
 	case "workspace":
 		return strings.Fields("port local-port local-host")
 	case "library":
@@ -56,7 +72,7 @@ func validateCommandFlags(p parsedArgs) error {
 }
 func booleanCommandFlag(n string) bool {
 	switch n {
-	case "recursive", "all", "all-pages", "prompt-stdin", "content-stdin", "session-cookie-stdin", "exclusive-node", "preview", "ndjson", "hydrate-tools":
+	case "recursive", "all", "all-pages", "prompt-stdin", "content-stdin", "session-cookie-stdin", "exclusive-node", "preview", "ndjson", "hydrate-tools", "launch":
 		return true
 	}
 	return false
@@ -100,4 +116,18 @@ func (w structuredErrorWriter) Write(p []byte) (int, error) {
 		return 0, err
 	}
 	return len(p), nil
+}
+
+func (w structuredErrorWriter) writeError(err error) {
+	value := map[string]any{"error": "CLI_ERROR", "message": err.Error()}
+	var apiErr APIError
+	if errors.As(err, &apiErr) {
+		value["error"] = apiErr.Code
+		value["status"] = apiErr.Status
+		value["message"] = apiErr.Message
+	}
+	b, e := json.Marshal(value)
+	if e == nil {
+		_, _ = w.destination.Write(append(b, '\n'))
+	}
 }

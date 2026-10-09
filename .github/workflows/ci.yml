@@ -68,6 +68,8 @@ jobs:
               - 'scripts/deploy/prepare-codex-runtime-artifact.sh'
             cli:
               - 'packages/cli/**'
+              - 'apps/api/src/**'
+              - 'packages/shared/src/**'
               - 'sonar-project.properties'
               - '.claude/rules/36-cli-quality.md'
             devcontainer:

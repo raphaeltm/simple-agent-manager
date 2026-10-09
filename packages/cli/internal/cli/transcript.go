@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -24,6 +25,15 @@ func runTranscriptExport(ctx context.Context, runtime Runtime, p parsedArgs, arg
 	if err != nil {
 		return fail(runtime.Stderr, err)
 	}
+	maxBytes := int64(64 << 20)
+	if v := runtime.Env.Getenv("SAM_CLI_MAX_EXPORT_BYTES"); v != "" {
+		n, e := strconv.ParseInt(v, 10, 64)
+		if e != nil || n <= 0 {
+			return fail(runtime.Stderr, fmt.Errorf("SAM_CLI_MAX_EXPORT_BYTES must be a positive integer"))
+		}
+		maxBytes = n
+	}
+	var exportBytes int64
 	limit := p.Flags["limit"]
 	if limit == "" {
 		limit = "100"
@@ -37,6 +47,9 @@ func runTranscriptExport(ctx context.Context, runtime Runtime, p parsedArgs, arg
 		err = client.request(ctx, http.MethodGet, projectAPIPath(project, "sessions", args[0], "messages")+"?"+query.Encode(), nil, &page)
 		if err != nil {
 			return fail(runtime.Stderr, err)
+		}
+		if skipped, ok := page["skippedMessages"].(float64); ok && skipped > 0 {
+			return fail(runtime.Stderr, fmt.Errorf("API skipped invalid transcript messages; snapshot incomplete"))
 		}
 		rows, ok := page["messages"].([]any)
 		if !ok {
@@ -71,6 +84,14 @@ func runTranscriptExport(ctx context.Context, runtime Runtime, p parsedArgs, arg
 				return fail(runtime.Stderr, fmt.Errorf("duplicate transcript message; snapshot incomplete"))
 			}
 			seen[id] = true
+		}
+		encoded, e := json.Marshal(rows)
+		if e != nil {
+			return fail(runtime.Stderr, e)
+		}
+		exportBytes += int64(len(encoded))
+		if exportBytes > maxBytes {
+			return fail(runtime.Stderr, fmt.Errorf("transcript export exceeds SAM_CLI_MAX_EXPORT_BYTES; use explicit pages"))
 		}
 		messages = append(rows, messages...)
 		if page["hasMore"] != true {

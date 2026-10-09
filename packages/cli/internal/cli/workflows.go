@@ -27,6 +27,8 @@ func readContract(command string, path []string, args int, query string) workflo
 
 func workflowContracts() []workflowContract {
 	return []workflowContract{
+		readContract("project get", nil, 0, ""),
+		readContract("notifications list", nil, 0, "limit cursor filter type sessionId"),
 		readContract("tasks receipt", []string{"operation-receipts"}, 0, "key operation sessionId"),
 		readContract("tasks list", []string{"tasks"}, 0, "status minPriority sort limit cursor"),
 		readContract("tasks get", []string{"tasks", "$0"}, 1, ""),
@@ -83,6 +85,9 @@ func findWorkflow(parsed parsedArgs) (workflowContract, []string, bool) {
 		return workflowContract{}, nil, false
 	}
 	action := "list"
+	if p[0] == "project" {
+		action = "get"
+	}
 	start := 1
 	if len(p) > 1 {
 		action = p[1]
@@ -146,7 +151,15 @@ func runWorkflow(ctx context.Context, runtime Runtime, parsed parsedArgs, c work
 	if parsed.Bools["recursive"] || parsed.Bools["all"] {
 		query.Set("recursive", "true")
 	}
+	if c.command == "tasks list" && (query.Get("cursor") != "" || parsed.Bools["all-pages"]) && query.Get("sort") != "" && query.Get("sort") != "createdAtDesc" {
+		return fail(runtime.Stderr, fmt.Errorf("cursor paging with non-created sort is unsupported by the API"))
+	}
 	path := projectAPIPath(project, segments...)
+	if c.command == "notifications list" {
+		path = "/api/notifications"
+		query.Set("projectId", project)
+	}
+	basePath := path
 	if len(query) > 0 {
 		path += "?" + query.Encode()
 	}
@@ -155,7 +168,7 @@ func runWorkflow(ctx context.Context, runtime Runtime, parsed parsedArgs, c work
 		if !ok {
 			return fail(runtime.Stderr, fmt.Errorf("--all-pages is unsupported for %s; use its explicit cursor controls", c.command))
 		}
-		value, err := drainPages(ctx, client, projectAPIPath(project, segments...), query, paging)
+		value, err := drainPages(ctx, client, basePath, query, paging)
 		if err != nil {
 			return fail(runtime.Stderr, err)
 		}

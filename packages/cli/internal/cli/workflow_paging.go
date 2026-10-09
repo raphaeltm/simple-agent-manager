@@ -15,6 +15,8 @@ type pagingContract struct {
 
 func pagingFor(command string) (pagingContract, bool) {
 	switch command {
+	case "notifications list":
+		return pagingContract{items: "notifications", continuation: "nextCursor", parameter: "cursor"}, true
 	case "tasks list", "ideas list":
 		return pagingContract{items: "tasks", continuation: "nextCursor", parameter: "cursor"}, true
 	case "library list":

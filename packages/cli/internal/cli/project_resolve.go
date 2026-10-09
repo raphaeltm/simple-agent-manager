@@ -26,7 +26,7 @@ func ResolveProject(ctx context.Context, client APIClient, ref string, config *C
 		return ref, "", nil
 	}
 
-	projects, err := client.ListProjects(ctx)
+	projects, err := client.ListAllProjects(ctx)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to list projects: %w", err)
 	}
